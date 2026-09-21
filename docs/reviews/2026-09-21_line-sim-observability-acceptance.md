@@ -163,3 +163,22 @@ line_sim` (и `inspector` у прототипа), иначе трассы дву
 
 Fable (`reviewer`, синхронно): итерация 1 — CHANGES_REQUESTED (блокер: K10/L5 прятались за N/A при живых
 регистрах `camera_service`; I4 закрывается офлайн; мёртвая диагностика E1), итерация 2 — **APPROVED**.
+
+## Дополнение: перепрогон после Task 1.5/1.6 (2026-09-21, коммит `7148aa97`)
+
+Тот же зонд, те же условия (без флага SHM, env-каталог логов).
+
+| Прогон | Строк | PASS | FAIL | PARTIAL | NOT_REACHED | UNVERIFIED | N/A |
+|---|---|---|---|---|---|---|---|
+| `--app line_sim` до (1.4, после ревью) | 52 | 35 | 3 | 5 | 6 | 1 | 2 |
+| `--app line_sim` после 1.5/1.6 | 52 | 37 | 2 | 4 | 6 | 1 | 2 |
+| прототип без аргументов после | 51 | 41 | 1 | 3 | 5 | 1 | — |
+
+- **S6** PARTIAL → PASS: `gate_active=True; resolved keys=['cycle_duration_ms','effective_hz','fps','latency_ms','shm']`.
+- **R10** FAIL → PASS: `success=True; записей=2` из кольца `camera`.
+- **R7** остаётся PARTIAL (`snapshot count=8`, `history count=0 за 12.1 с`), **K5** — NOT_REACHED (0 дельт за 12 с до ручки).
+  Корень не в гейте: `_publish_telemetry_to_tree` выходит без `_state_proxy` (`process_heartbeat.py:1355-1357`),
+  у `GenericProcess` прокси нет. Подтверждено ревьюером прогоном (без прокси `merges=[]`, с прокси —
+  `state.fps=25.0`). Перенесено в приёмку Task 2.0.
+- **T1** FAIL без изменений — уровни плагинов сима не публикуются вовсе (Task 5.1), не дефект гейта.
+- Прототип: вердикты по 44 разобранным id совпали с baseline, счётчики тоже.

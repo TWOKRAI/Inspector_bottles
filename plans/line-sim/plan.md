@@ -115,7 +115,7 @@ boundary и grep-контракт заведены в Task 1.1. Общая ба�
 телеметрии у прототипа живёт в `multiprocess_prototype/backend/orchestrator_hooks.py:84-95`,
 observability-watcher — в `multiprocess_prototype/orchestrator.py`; делает ли то же
 `app_module` для generic-приложения — **проверено прогоном Task 1.4 (2026-09-21): нет** —
-`gate_active=False`, `resolved keys=[]` (строки S6/R7/K5), carve-out — Task 1.5. Зонд
+`gate_active=False`, `resolved keys=[]` (строки S6/R7/K5), carve-out — Task 1.5 (закрыта 2026-09-21: гейт активен, S6 PASS; R7/K5 ждут `ctx.state_proxy` — Task 2.0). Зонд
 приёмки параметризован (`--app prototype|line_sim`), отчёт —
 [`2026-09-21_line-sim-observability-acceptance.md`](../../docs/reviews/2026-09-21_line-sim-observability-acceptance.md).
 
@@ -491,10 +491,15 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   publisher-гейта из `multiprocess_prototype/backend/orchestrator_hooks.py:84-95` в `app_module`
   по образцу 1.0/2.0, **и** секция `telemetry:` в `apps/line_sim/system.yaml` (у сима её нет —
   ревью Task 1.4); приёмка — S6/R7/K5 зонда `--app line_sim` зелёные, прототип 51/51 без
-  изменений [PENDING] (зависит от 1.4) — **Module contract:** impl-only
+  изменений [DONE 2026-09-21: S6 PASS (`gate_active=True`, resolved fps/latency_ms); прототип — 51 строка,
+  41/1/3/5/1 = baseline. **R7/K5 остались красными не из-за гейта** — push уровней в дерево выходит рано
+  без `_state_proxy` (`process_heartbeat.py:1355-1357`), у `GenericProcess` его нет → перенесены в
+  приёмку Task 2.0; критерий 1.5 опирался на неполную модель «гейт = достаточно». Коммиты: RED `29d0c6b7`,
+  реализация `7148aa97`, ревью `bd2a87d3`] (зависит от 1.4) — **Module contract:** impl-only
 - Task 1.6 (новая, из прогона 1.4): синк `flight_ring` в конфиге сима (сейчас объявлен только
   в `inspection_full.yaml` прототипа) + зонд пишет `reason` отказа `sink.tail` в observed; приёмка —
-  R10 зелёная [PENDING] (зависит от 1.4) — **Module contract:** impl-only
+  R10 зелёная [DONE 2026-09-21: R10 PASS, 2 записи из кольца `camera`; `reason` в observed офлайн не
+  пиннится — шва в `family_reading` нет] (зависит от 1.4) — **Module contract:** impl-only
 
 ### Phase 2: Общий мир — лента и один энкодер (ред. 2, 2026-09-21)
 
@@ -502,7 +507,8 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 
 - Task 2.0: `ctx.state_proxy` у фреймворкового `GenericProcess` — carve-out из прототипного
   `GenericProcessApp` [PENDING] (зависит от 1.0; детальная спека — `manager` перед
-  стартом) — **Module contract:** impl-only
+  стартом; **приёмка включает строки R7 и K5 зонда `--app line_sim`** — перенесены из 1.5,
+  гейт уже активен, не хватает только push'а уровней через прокси) — **Module contract:** impl-only
 - Task 2.1: Модель ленты `BeltDrive`: команда ПЧ → скорость → энкодер; контракт-тест карты
   регистров ПЧ [PENDING] — **Module contract:** new-lite
 - Task 2.2: Энкодер в общем мире: `robot` публикует, `SceneSourcePlugin` в процессе
