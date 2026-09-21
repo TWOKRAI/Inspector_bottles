@@ -48,7 +48,7 @@ from Services.robot_comm.core.registers import FACTOR_MM
 
 # Module-level import НОВОГО модуля — форма RED: ModuleNotFoundError на collection для
 # ВСЕГО файла (см. докстринг).
-from Plugins.sim.scene_source.plugin import SceneSourcePlugin  # noqa: E402
+from Plugins.sim.scene_source.plugin import SPRITE_BGR, SceneSourcePlugin  # noqa: E402
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -128,10 +128,17 @@ def _frame_of(plugin: SceneSourcePlugin) -> np.ndarray:
 
 
 def _sprite_centroid_x(frame: np.ndarray, reference: np.ndarray) -> float:
-    """Взвешенный центр масс столбцов, отличающихся от кадра-эталона."""
-    diff = np.any(frame != reference, axis=2)
-    weights = diff.sum(axis=0).astype(float)
-    assert weights.sum() > 0, "кадр не отличается от эталона нигде — спрайт не найден/не сместился"
+    """Центр масс столбцов пикселей цвета спрайта (контракт ``SPRITE_BGR``).
+
+    Арбитраж ведущего 2026-09-22: прежний дифф против эталона на spawn давал два
+    пятна («ушёл отсюда» + «пришёл сюда») для любого спрайта, видимого на spawn, и
+    центр масс ложился между ними (98 px при формуле 144). ``reference`` оставлен в
+    сигнатуре, чтобы не трогать вызовы; ассерты и литералы тестов не менялись.
+    """
+    del reference
+    mask = np.all(np.abs(frame.astype(int) - np.array(SPRITE_BGR)) <= 40, axis=2)
+    weights = mask.sum(axis=0).astype(float)
+    assert weights.sum() > 0, "спрайт цвета SPRITE_BGR в кадре не найден"
     return float(np.average(np.arange(frame.shape[1]), weights=weights))
 
 
