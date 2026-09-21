@@ -8,7 +8,8 @@
 вовсе не создавался, потом создавался, но источник ему ничего не слал.
 
 **Что этот файл сторожит НА САМОМ ДЕЛЕ (уточнено ревью 2026-09-21):** провод
-``camera.camera_service.frame → mjpeg.mjpeg_sink.frame``, адресацию
+``camera.scene_source.frame → mjpeg.mjpeg_sink.frame`` (источник camera_service
+переведён на scene_source ревью Task 2.2 — см. ниже), адресацию
 ``chain_targets: [mjpeg]`` и то, что объявленное в ``pipeline.yaml`` доезжает до
 конфига процессов. Проверено инъекциями: удаление блока ``wires`` → 3 красных,
 подмена ``chain_targets`` на ``[camera]`` (петля) → 2 красных.

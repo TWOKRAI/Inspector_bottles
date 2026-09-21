@@ -186,3 +186,36 @@ def test_on_write_counts_only_writes() -> None:
     assert counter_records2[-1][2] == 1, f"вторая дельта должна быть 1 (не 2): {counter_records2!r}"
 
     plugin.shutdown(ctx)
+
+
+# --------------------------------------------------------------------------- #
+# (e) Паблишер уровней работает БЕЗ state_proxy (ревью Task 2.2, находка №2)  #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_publish_once_reports_metrics_without_state_proxy() -> None:
+    """RED до ревью: ``_publish_once`` возвращалась ДО ``ctx.publish_metric``,
+    если ``ctx.state_proxy is None`` — на процессе без Task 2.0 (мир не влит)
+    уровни ``encoder``/``belt_mm_s``/``writes_seen`` молчали НАВСЕГДА, хотя
+    наблюдать за ними можно и без общего мира. Публикация уровней и запись в
+    мир — РАЗНЫЕ дороги: без мира падает только вторая (``ctx.state_proxy.set``
+    просто не вызывается, без исключения)."""
+    port = _free_port()
+    plugin, ctx, _services = _make_plugin(port)
+    assert ctx.state_proxy is None, "MockProcessServices по умолчанию не даёт state_proxy — тот самый случай"
+    plugin.start(ctx)
+    try:
+        assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+
+        published: list[tuple[str, object]] = []
+        ctx.publish_metric = lambda name, value: published.append((name, value))  # noqa: E731
+
+        plugin._publish_once()
+
+        names = [name for name, _ in published]
+        assert names == ["encoder", "belt_mm_s", "writes_seen"], (
+            f"без state_proxy паблишер обязан отдать все три уровня, получено: {published!r}"
+        )
+    finally:
+        plugin.shutdown(ctx)

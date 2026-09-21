@@ -62,8 +62,6 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 
-from Services.robot_comm.core.registers import FACTOR_MM
-
 #: Дефолты конфига (Task 1.1 плана line-sim, §Task 1.1 pipeline.yaml).
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 5021
@@ -109,14 +107,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._state = "configured"
         self._reason = ""
 
-        # Паблишер энкодера в общий мир (Task 2.2): последний опубликованный
-        # энкодер/момент — для вычисления mm_s ПРОИЗВОДНОЙ между тиками
-        # публикации, без обращения к приватным полям RobotSimCore/BeltDrive
-        # (Services/robot_comm вне области этой задачи, Task 2.1b его владеет).
-        self._last_pub_encoder: int | None = None
-        self._last_pub_t: float | None = None
-
-        # Task 2.0 не влит → ctx.state_proxy is None: плагин живёт, мир недоступен.
+        # Task 2.0 не влит → ctx.state_proxy is None: запись в общий мир
+        # пропускается (см. _publish_once), но паблишер уровней работает всегда.
         ctx.declare_metric("encoder")
         ctx.declare_metric("belt_mm_s")
         ctx.declare_metric("writes_seen")
@@ -124,15 +116,23 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         ctx.log_info(f"sim_robot_host: конфиг принят, {self._host}:{self._port}, unit_id={self._unit_id}")
 
     def start(self, ctx: PluginContext) -> None:
-        """RUNNING: поднять сервер, если ``auto_start``, и паблишер мира."""
+        """RUNNING: поднять сервер, если ``auto_start``, и паблишер уровней/мира.
+
+        Паблишер стартует ВСЕГДА (ревью Task 2.2, находка №2): без
+        ``state_proxy`` (Task 2.0 не влита) уровни ``encoder``/``belt_mm_s``/
+        ``writes_seen`` всё равно обязаны течь — молчали они раньше только
+        потому, что ``_publish_once`` возвращалась до вызова
+        ``ctx.publish_metric``, путая «мира нет» с «наблюдать нечего». В
+        общий мир (``ctx.state_proxy.set``) запись пропускается — это делает
+        сама :meth:`_publish_once`.
+        """
         if self._auto_start:
             self._start_server(ctx)
 
         if ctx.state_proxy is None:
-            ctx.log_info("sim_robot_host: ctx.state_proxy is None — мир недоступен, паблишер не запущен")
-        else:
-            cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
-            ctx.worker_manager.create_worker("sim_robot_world_publisher", self._publish_loop, cfg, auto_start=True)
+            ctx.log_info("sim_robot_host: ctx.state_proxy is None — мир недоступен, метрики публикуются без world.set")
+        cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
+        ctx.worker_manager.create_worker("sim_robot_world_publisher", self._publish_loop, cfg, auto_start=True)
 
     def shutdown(self, ctx: PluginContext) -> None:
         """STOPPED: дожать счётчик, остановить сервер симметрично ``start()``."""
@@ -251,32 +251,29 @@ class SimRobotHostPlugin(ProcessModulePlugin):
                 self._ctx.health.report_error(exc, context="sim_robot_host.publish")
 
     def _publish_once(self) -> None:
-        """Один тик: снять энкодер сервера, положить в мир, отдать уровни.
+        """Один тик: снять энкодер+скорость сервера, отдать уровни, и (если мир
+        есть) положить те же числа в общий мир.
 
-        ``mm_s`` — производная энкодера МЕЖДУ ДВУМЯ ТИКАМИ ПУБЛИКАЦИИ, а не
-        чтение внутреннего состояния ``BeltDrive``: ``RobotSimCore``/``BeltDrive``
-        не выставляют публичного ``mm_s``-аксессора (``core.encoder`` — да,
-        ``core._belt`` — приватное поле чужого модуля, Task 2.1b его владеет и
-        трогать его отсюда не входит в область этой задачи). Побочный эффект —
-        то же самое число: пока лента едет с постоянной скоростью, средняя
-        скорость за интервал публикации равна мгновенной; на пульсе смены
-        команды ПЧ (не чаще, чем раз в ``publish_ms``) один тик даёт смешанное
-        среднее — не проверено отдельным тестом, см. отчёт разработчика.
+        ``mm_s`` — ТОЧНАЯ команда ПЧ (``RobotSimCore.belt_mm_s`` ->
+        ``BeltDrive.mm_s``, добавлено ревью Task 2.2), не производная энкодера
+        между двумя тиками публикации: старая производная давала смешанное
+        среднее на пульсе смены команды, а не мгновенную скорость (находка
+        ревью №1).
+
+        Публикация уровней и запись в мир — РАЗНЫЕ дороги (находка ревью №2):
+        без ``ctx.state_proxy`` (Task 2.0 не влита) пропускается ТОЛЬКО
+        ``ctx.state_proxy.set`` — уровни ``encoder``/``belt_mm_s``/
+        ``writes_seen`` публикуются всегда, пока сервер поднят.
         """
-        if self._server is None or self._ctx.state_proxy is None:
+        if self._server is None:
             return
 
-        encoder = self._server.core.encoder
-        now = time.monotonic()
-        mm_s = 0.0
-        if self._last_pub_t is not None and self._last_pub_encoder is not None:
-            dt = now - self._last_pub_t
-            if dt > 0:
-                mm_s = (encoder - self._last_pub_encoder) * FACTOR_MM / dt
-        self._last_pub_encoder = encoder
-        self._last_pub_t = now
+        core = self._server.core
+        encoder = core.encoder
+        mm_s = core.belt_mm_s
 
-        self._ctx.state_proxy.set("sim.belt.encoder", {"value": encoder, "mm_s": mm_s, "t": now})
+        if self._ctx.state_proxy is not None:
+            self._ctx.state_proxy.set("sim.belt.encoder", {"value": encoder, "mm_s": mm_s, "t": time.monotonic()})
 
         with self._lock:
             writes_seen = self._writes_seen

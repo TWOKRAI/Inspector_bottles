@@ -83,10 +83,15 @@ def test_scene_up_before_robot_multiple_produce_no_exception() -> None:
 
 
 def test_creation_then_partial_leaf_update_preserves_untouched_fields() -> None:
-    """Дельта создания кладёт {value, mm_s, t}; следующая полистовая дельта
-    обновляет ТОЛЬКО value/t (как реальный паблишер — mm_s мог не измениться
-    и Diff не сгенерировал бы для него дельту в TreeStore). mm_s из создания
-    не должен пропасть из накопителя."""
+    """Дельта-целиком кладёт {value, mm_s, t}; следующая полистовая дельта
+    обновляет ТОЛЬКО value/t. Исправлено ревью Task 2.2: полистовая форма НЕ
+    приходит от повторного вызова живого паблишера (``state_proxy.set()``
+    шлёт словарь целиком КАЖДЫЙ раз — см. докстринг ``plugin.py``); в реальном
+    процессе она приходит от РЕПЛЕЯ начального состояния при (пере)подписке
+    (``_replay_initial_state``). Тест бьёт по самому объединению в
+    ``_on_deltas`` независимо от того, кто прислал полистовую форму: mm_s из
+    дельты-целиком не должен пропасть из накопителя после частичного
+    полистового апдейта."""
     plugin, ctx, sp = _make_plugin()
     t0 = time.monotonic()
     sp.emit(
@@ -102,7 +107,9 @@ def test_creation_then_partial_leaf_update_preserves_untouched_fields() -> None:
     with plugin._lock:
         assert plugin._world.get("mm_s") == 50.0
 
-    # Полистовая дельта только по value/t (mm_s не изменился — TreeStore не шлёт по нему дельту).
+    # Полистовая дельта только по value/t — синтетическая имитация формы РЕПЛЕЯ
+    # подписки (``_replay_initial_state``), НЕ повторного вызова паблишера
+    # (тот шлёт словарь целиком каждый раз, см. докстринг ``plugin.py``).
     sp.emit(
         [
             Delta(path="sim.belt.encoder.value", old_value=0, new_value=100, source="robot"),
