@@ -86,8 +86,9 @@ class GenericProcess(ProcessModule):
             # только log_warning()/log_error(). При logger=self КАЖДАЯ запись
             # StateProxy исчезала (измерено: 0 строк на 60 живых лог-файлах).
             # Порядок безопасен: _init_custom_managers — шаг 6 initialize(), а
-            # logger_manager присваивается на шаге 3 (_init_managers) — см. тест
-            # test_state_proxy_logger_wiring.py.
+            # logger_manager присваивается на шаге 3 (_init_managers) — пины:
+            # test_generic_process_state_proxy.py::test_logger_slot_is_logger_manager_not_process,
+            # test_logger_slot_wiring_order.py.
             self._state_proxy = StateProxy(
                 process_name=self.name,
                 router=self.router_manager,

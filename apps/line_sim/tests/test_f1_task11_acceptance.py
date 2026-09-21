@@ -141,7 +141,13 @@ def _modbus_record_count(errors_text: str, overview: dict) -> tuple[int, int]:
     bounds = list(zip(starts, starts[1:] + [len(errors_text)]))
     from_log = sum(1 for a, b in bounds if pattern.search(errors_text[a:b]))
     anomalies = overview.get("anomalies") if isinstance(overview, dict) else None
-    from_anomalies = sum(1 for a in anomalies if pattern.search(str(a))) if isinstance(anomalies, list) else 0
+    from_anomalies = 0
+    for a in anomalies if isinstance(anomalies, list) else []:
+        if pattern.search(str(a)):
+            # health_errors — одна подсказка на процесс, число записей внутри (errors=N):
+            # дубль в плоскости здоровья виден только по N (ревью Task 2.0, инъекция A).
+            m = re.search(r"errors=(\d+)", str(a))
+            from_anomalies += int(m.group(1)) if m else 1
     return from_log, from_anomalies
 
 
