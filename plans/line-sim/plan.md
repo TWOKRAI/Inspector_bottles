@@ -506,11 +506,11 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 Файл: [`phase-2-belt-truth.md`](phase-2-belt-truth.md) — переписан под автономную форму.
 
 - Task 2.0: `ctx.state_proxy` у фреймворкового `GenericProcess` — carve-out из прототипного
-  `GenericProcessApp` [PENDING] (зависит от 1.0; детальная спека — `manager` перед
+  `GenericProcessApp` [DONE 2026-09-21: ADR-PM-049, R7/K5 PASS, сим 40/2/2/5, прототип 42/1/2/5/1 — R1 от окружения; инъекции I1-I6 6/6; ревью APPROVED] (зависит от 1.0; детальная спека — `manager` перед
   стартом; **приёмка включает строки R7 и K5 зонда `--app line_sim`** — перенесены из 1.5,
   гейт уже активен, не хватает только push'а уровней через прокси) — **Module contract:** impl-only
 - Task 2.1: Модель ленты `BeltDrive`: команда ПЧ → скорость → энкодер; контракт-тест карты
-  регистров ПЧ [PENDING] — **Module contract:** new-lite
+  регистров ПЧ [DONE 2026-09-21: robot_comm 141 passed; инъекции 8/8 + 2 фикса ревью; литерал тестера 692→6922; CLI без `--belt-mm-s` = старое поведение] — **Module contract:** new-lite
 - Task 2.2: Энкодер в общем мире: `robot` публикует, `SceneSourcePlugin` в процессе
   `camera` рисует по нему спрайт [PENDING] (зависит от 1.2, 2.0, 2.1) — **Module
   contract:** new-lite
