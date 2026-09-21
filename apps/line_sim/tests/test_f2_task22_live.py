@@ -420,6 +420,10 @@ def test_introspect_telemetry_levels(line_sim_live_backend) -> None:
     assert isinstance(writer, dict), f"levels.state.plugins.sim_robot_host отсутствует/не dict: {res!r}"
     assert "belt_mm_s" in writer, f"нет belt_mm_s в levels писателя sim_robot_host: {writer!r}"
     assert "encoder" in writer, f"нет encoder в levels писателя sim_robot_host: {writer!r}"
+    # На ходу до первой команды ПЧ — лента по умолчанию (enc_rate=7 за тик 0.01 с):
+    # 7 × 0.144473 / 0.01 = 101.1311 мм/с. Без этой строки публикация «всегда 0»
+    # проходила живой тест зелёной (инъекция L2 ведущего, 2026-09-22).
+    assert writer["belt_mm_s"] == pytest.approx(101.1311, abs=0.5), f"belt_mm_s на ходу: {writer!r}"
 
     robot, vfd = _make_vfd_client()
     try:
