@@ -503,6 +503,8 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 
 ### Phase 2: Общий мир — лента и один энкодер (ред. 2, 2026-09-21)
 
+**Фаза 2 ЗАКРЫТА 2026-09-22** — задачи 2.0, 2.1, 2.1b, 2.2.
+
 Файл: [`phase-2-belt-truth.md`](phase-2-belt-truth.md) — переписан под автономную форму.
 
 - Task 2.0: `ctx.state_proxy` у фреймворкового `GenericProcess` — carve-out из прототипного
@@ -512,7 +514,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 - Task 2.1: Модель ленты `BeltDrive`: команда ПЧ → скорость → энкодер; контракт-тест карты
   регистров ПЧ [DONE 2026-09-21: robot_comm 141 passed; инъекции 8/8 + 2 фикса ревью; литерал тестера 692→6922; CLI без `--belt-mm-s` = старое поведение] — **Module contract:** new-lite
 - Task 2.2: Энкодер в общем мире: `robot` публикует, `SceneSourcePlugin` в процессе
-  `camera` рисует по нему спрайт [PENDING] (зависит от 1.2, 2.0, 2.1) — **Module
+  `camera` рисует по нему спрайт [DONE 2026-09-22: живьём 5/5 (стоп ПЧ по Modbus морозит энкодер и спрайт, пуск возобновляет; belt_mm_s 101.1 → 0.0); инъекции K1–K6 + L1–L3, две дыры закрыты сторожами; ревью 2 итерации] (зависит от 1.2, 2.0, 2.1) — **Module
   contract:** new-lite
 
 ### Phase 3: Движок объектов — слои, буквы-диски, дефекты
