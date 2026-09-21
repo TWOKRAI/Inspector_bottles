@@ -396,3 +396,369 @@ Task 2.0», :222-224) — строкой в отчёт, не правкой.
 прогоны не рассчитан, и это сказано явно.
 **Dependencies:** Task 1.2 (`mjpeg_sink`), Task 2.0, Task 2.1.
 **Module contract:** new-lite (`Plugins/sim/scene_source/plugin.py`).
+
+---
+
+### Task 2.3 — Пульт ленты: одна командная поверхность, три клиента (новая, 2026-09-22)
+
+**Решение владельца (2026-09-22):** веб-страница сима делается СЕЙЧАС, до Ф3; лентой управляют три
+клиента — веб-страница, `backend_ctl` и прототип. Фаза 2 открыта заново ради этой задачи.
+Пересечение с Ф6.1 ред. 3 («пульт командами через `backend_ctl`, GUI не пишется»): 2.3 закрывает
+ленточную часть 6.1 и **отменяет** для ленты пункт «GUI не пишется» (решение владельца новее);
+ручки потока/брака/паузы остаются за 6.1.
+
+Задача режется на две (REDS > 10 в одной): **2.3a** — командная поверхность в `robot`,
+**2.3b** — процесс `pult` с веб-страницей. 2.3b зависит от 2.3a.
+
+#### Разведка (2026-09-22, qex недоступен — Ollama лежит; всё ниже сверено `grep`/чтением на `eb5995d2`)
+
+1. **Команда плагина другому процессу с ответом.** `PluginContext` отдаёт `ctx.router_manager`
+   (`multiprocess_framework/modules/process_module/plugins/base.py:103`) и `ctx.send_message`
+   (`:139`). `ctx.io.send_command` (`process_module/io/process_io.py:58-73`) — fire-and-forget,
+   возвращает `bool`, ответа не даёт. Синхронный запрос-ответ — `RouterManager.request(msg,
+   timeout)` (`router_module/core/router_manager.py:1015`); с приёмного потока бросает
+   `RouterReentrantRequestError` (`:56`, проверка `_assert_not_receive_thread` в теле `request`),
+   до первого приёмного цикла возвращает `{"success": False, "error": "timeout", "reason":
+   "no_receive_pump"}`. Неблокирующий вариант — `request_async(msg, on_response, timeout)` (`:1106`).
+   **Готовый образец плагина-клиента:** `Plugins/hub/device_hub/client.py` — `DeviceHubClient(ctx,
+   target_process=..., default_timeout=...)`: `build_command_message` + `router.request` +
+   нормализация ответа PM-обёртки `{"success", "data": {"result"}}` → `{"status": "ok"|"error", ...}`
+   (`:17-44`, `:73-120`). Контракт потока в его докстринге: только из worker-потока, не из
+   приёмного цикла. Потоки `ThreadingHTTPServer` — не приёмный цикл, значит `request` из
+   HTTP-обработчика законен.
+2. **Регистрация и имена команд.** `ProcessModulePlugin.commands = {"<имя>": "<метод>"}`;
+   `_auto_register_commands` (`plugins/base.py:1585-1611`) регистрирует имя **дословно** в
+   `CommandManager` процесса (`ctx.command_manager.register_command(cmd_name, method)`), без
+   префикса процесса или плагина. Живой образец: `"sim_robot.status": "cmd_status"`
+   (`Plugins/sim/robot_host/plugin.py:84-86`). `backend_ctl` адресует пару «процесс + имя»:
+   `drv.send_command("robot", "sim_robot.status")` (`backend_ctl/driver.py:657-667`; вызов в
+   `apps/line_sim/tests/test_f1_task11_acceptance.py:307`, ответ разворачивается `_result` —
+   `res["result"]`, `:78-82`). MCP-инструмент — `mcp__backend-ctl__send_command` с теми же
+   `target`/`command`/`args`. Каталог команд виден без исходников через `introspect_handlers("robot")`.
+3. **HTTP-сервер в плагине — прецедент есть.** `Plugins/sim/mjpeg_sink/plugin.py`: конструктор
+   `ThreadingHTTPServer((host, port), handler_cls)` в `try/except OSError` — занятый порт ловится
+   синхронно, потому что stdlib биндит в конструкторе (`:240-259`, докстринг `:17-31`);
+   `serve_forever` в daemon-потоке (`:252`); обработчик — фабрика класса с замыканием на плагин
+   (`_build_handler`, `:98-140`), `log_message` заглушён (`:107`); `shutdown()` → `server.shutdown()`
+   (`:179-190`), открытые потоковые соединения переживают `shutdown` до дисконнекта (`:55-64`).
+   Повторяем форму один в один.
+4. **Потокобезопасность записи `core.regs`.** Сегодня регистры пишут и читают **без замка**:
+   `pymodbus` пишет в живой список со своего event-loop-потока (хук `binder` зовётся ДО применения
+   записи, `Services/robot_comm/server/sim_robot.py:66-89`), тикер `sim-robot-motion` читает и
+   мутирует тот же список (`:158-182`); докстринг модуля опирается на GIL (`:12-14`). Порядок
+   держит протокол mailbox, а не замок: данные пишутся раньше, `VFD_FLAG` (0x1204) — последним
+   (`Services/vfd_comm/core/client.py:66-91`), тикер применяет команду только при `FLAG == 1` и
+   сам его гасит (`sim_core.py:342-370`). Запись плагина `core.write(addr, values)`
+   (`sim_core.py:197-200`, поэлементно по возрастанию адреса) с тем же порядком «данные, потом
+   флаг» — ровно та же дорога. Две оговорки, которых у Modbus-пути нет: (а) `attach()`
+   (`sim_core.py:185-191`) копирует буфер и ПОТОМ подменяет ссылку — запись плагина между этими
+   двумя строками теряется (окно — только первый запрос первого Modbus-клиента); (б)
+   `BeltDrive` читает и пишет `_mm_s` из тикера, а новая `set_calibration` будет звать его с потока
+   команды — гонка «прочитал прошлую команду / тикер применил новую / записал пересчёт по
+   старой», нужен замок внутри `BeltDrive` (см. DESIGN 2.3a).
+
+**Ещё два факта разведки, влияющих на дизайн:**
+- Прототип зовёт `VfdClient.poll()` — это пульс `VFD_FLAG` **без** данных (`client.py:108-118`), а
+  сим на каждом пульсе заново применяет то, что лежит в `CMD_RUN/DIR/FREQ` (`sim_core.py:351-356`).
+  Значит опрос прототипа команду пульта не затирает — затирает только его явная команда
+  (`run`/`stop`/`set_freq`). `stop()` прототипа пишет **только** `cmd_run=0`, `set_freq` — только
+  `cmd_freq`: mailbox — общий набор регистров, команды частичные.
+- Дефолтная калибровка `101.1311` мм/с — не константа, а `BeltDrive.from_enc_rate(7, 0.01)`:
+  `7 × FACTOR_MM(0.144473) / 0.01` (`belt.py:88`, `registers.py:35`). До первой команды ПЧ лента
+  в «сыром» режиме едет на этой скорости, а зеркало ПЧ (0x1210…) — нули.
+
+---
+
+### Task 2.3a — Командная поверхность ленты в процессе `robot`
+
+- **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
+- **CHAIN:** `tester`(RED по приёмке, worktree на коммите до реализации) -> `developer`(GREEN + hazard-тесты) -> ведущий(инъекции) -> `reviewer`
+- **Module contract:** public-api-change (`Services/robot_comm/server/belt.py`, `sim_core.py` —
+  новые публичные члены; плагин — новые команды)
+
+**TASK.** Процесс `robot` получает пять команд ленты; все, кроме `calibrate` и `status`, пишут
+mailbox ПЧ в ядро тем же путём, что Modbus-запись инспектора, и применяются на ближайшем тике.
+
+**DESIGN.**
+1. `BeltDrive` (`Services/robot_comm/server/belt.py`):
+   - `command()` запоминает последнюю команду в `self._last = (run, freq_hz_clamped, reverse)`.
+   - Новое `set_calibration(mm_s_at_max_freq: float) -> None`: `ValueError` при `< 0`, NaN, inf.
+     Под `self._lock` (новый `threading.Lock`, его же берёт `command()`): записать калибровку;
+     если лента в «сыром» режиме (`_raw_rate is not None`) — выйти из него так, будто пришла
+     команда `run=True, freq=freq_max_hz, reverse=False` (лента едет дальше, на новой скорости);
+     иначе пересчитать `_mm_s` из `_last`. Порядок присваиваний: сначала `_mm_s`, потом
+     `_raw_rate = None` — `advance()` без замка читает по одному атрибуту.
+   - Свойства только для чтения: `mm_s_at_max_freq`, `freq_max_hz`, `state -> dict {run, freq_hz,
+     reverse}`; в «сыром» режиме `state` = `{run: True, freq_hz: freq_max_hz, reverse: False}`.
+   - `advance()` замок НЕ берёт (горячий путь тикера, одно чтение `_mm_s`).
+2. `RobotSimCore` (`sim_core.py`): публичное свойство `belt -> BeltDrive` и метод
+   `command_vfd(*, run: bool | None = None, freq_hz: float | None = None, reverse: bool | None = None)`:
+   пишет только переданные поля (`CMD_RUN` 0x1200, `CMD_DIR` 0x1201, `CMD_FREQ` 0x1202 =
+   `round(freq_hz * _VFD_FREQ_SCALE)`) через `self.write`, затем ОТДЕЛЬНЫМ последним вызовом
+   `self.write(_REG_VFD_FLAG, [1])`. Частичность — как у `VfdClient`: `stop` пишет только RUN.
+   Адреса не дублировать в плагине — плагин знает только `command_vfd`.
+3. `SimRobotHostPlugin` (`Plugins/sim/robot_host/plugin.py`), новые команды в `commands`:
+   | Команда | args | Что пишет | Ответ |
+   |---|---|---|---|
+   | `belt.run` | `freq_hz: float` (обяз.), `reverse: bool = False` | `command_vfd(run=True, freq_hz, reverse)`; снимает jog | статус |
+   | `belt.stop` | — | `command_vfd(run=False)`; снимает jog | статус |
+   | `belt.jog` | `direction: +1\|-1` (обяз.), `freq_hz: float = jog_freq_hz` | `command_vfd(run=True, freq_hz, reverse=direction<0)`; продлевает дедлайн `now + jog_timeout_ms` | статус |
+   | `belt.calibrate` | `mm_s_at_max_freq: float` (обяз.) | `core.belt.set_calibration(...)`; mailbox не трогает | статус |
+   | `belt.status` | — | ничего | статус |
+   Статус: `{ok: True, run, freq_hz, reverse, mm_s, encoder, jogging, mm_s_at_max_freq}`;
+   `run/freq_hz/reverse` — из `core.belt.state` (ЭФФЕКТИВНОЕ состояние, кто бы ни писал mailbox),
+   `mm_s` — `core.belt_mm_s`, `encoder` — `core.encoder`. Команда пишет mailbox и возвращает
+   статус сразу — он может ещё не отражать команду (применение на следующем тике, ≤ ~12 мс);
+   клиенты опрашивают `belt.status`. Ошибки — `{ok: False, error: "<код>: <текст>"}`, без
+   исключения наружу: `bad_args` (нет поля, не число, `freq_hz ∉ [0, freq_max_hz]`, `direction ∉
+   {1, -1}`, калибровка `< 0`/NaN), `server_not_running` (`self._server is None`).
+   Валидация частоты — как `VfdClient._validate_freq` (`client.py:140-145`): вне диапазона —
+   отказ, не клэмп.
+4. Dead-man jog. Поля плагина `_jog_deadline: float | None`, `_jog_regs: tuple` (что записал
+   jog) под `self._lock`. Проверка — в `_publish_loop` на каждом тике (`publish_ms`, 50 мс), НЕ
+   отдельным потоком: если `_jog_deadline` прошёл → `command_vfd(run=False)` **только если**
+   mailbox всё ещё равен `_jog_regs` (`core.read(0x1200, 3)`; адрес — через константу ядра,
+   экспортируй кортеж `VFD_CMD_ADDR` рядом с `command_vfd` или метод `vfd_mailbox()`); иначе
+   jog считается перебитым другим писателем — снять флаг jog, ленту НЕ трогать. `belt.run`/
+   `belt.stop` снимают jog безусловно. Конфиг: `jog_timeout_ms` (дефолт 500), `jog_freq_hz`
+   (дефолт 10.0).
+5. Начальная калибровка: параметр плагина `belt_mm_s_at_max_freq` в `apps/line_sim/pipeline.yaml`
+   (`101.1311` — равен сегодняшнему дефолту, поведение стенда не меняется). В `_start_server`
+   после создания сервера: если ключ задан — `server.core.belt.set_calibration(v)` **и** стартовая
+   команда `command_vfd(run=True, freq_hz=freq_max_hz, reverse=False)` через mailbox (решение
+   ведущего 2026-09-22): лента едет с первого тика, как сегодня, но зеркало ПЧ, `belt.status` и
+   скорость согласованы с самого старта — «run=True при нулевом зеркале» не бывает. Нет ключа —
+   «сырой» режим как сегодня. Живой тест: сразу после старта `belt.status` = run/50 Гц/101.13 и
+   зеркало ПЧ (`0x1210…`) показывает тот же run.
+6. **Арбитраж.** Один mailbox, два мастера (Modbus-клиент прототипа и команды `belt.*`) — побеждает
+   последний записавший, как у реального ПЧ с двумя мастерами. Замков и приоритетов не вводим.
+   `belt.status` всегда показывает эффективное состояние ленты, а не последнюю команду
+   конкретного клиента.
+
+**FILES.**
+1. `Services/robot_comm/server/belt.py`
+2. `Services/robot_comm/server/sim_core.py`
+3. `Services/robot_comm/tests/test_belt_drive.py` (автор: hazard-тесты замка и порядка)
+4. `Plugins/sim/robot_host/plugin.py`
+5. НОВЫЙ `Plugins/sim/robot_host/tests/test_belt_commands.py`
+6. `Plugins/sim/robot_host/README.md` (+ `STATUS.md` одной строкой — седьмой файл, docs)
+7. `apps/line_sim/pipeline.yaml` (ключи `belt_mm_s_at_max_freq`, `jog_timeout_ms`, `jog_freq_hz`)
+
+**REDS** (слепые, из приёмки; `tester` пишет их в worktree на `eb5995d2`-или-позже, до реализации;
+плагин в тестах — через `configure/start` с фейковым `ctx` и настоящим `RobotSimCore`, либо
+`SimRobotServer` на свободном порту):
+1. `Services/robot_comm/tests/test_belt_calibration.py::test_set_calibration_rescales_running_belt` —
+   `command(True, 25)`, затем `set_calibration(200.0)` → `mm_s == 100.0`.
+2. `…::test_set_calibration_leaves_raw_mode_at_max_freq` — `from_enc_rate(7, 0.01)`,
+   `set_calibration(200.0)` → `mm_s == 200.0`, `state == {run: True, freq_hz: 50.0, reverse: False}`.
+3. `…::test_set_calibration_rejects_negative_and_nan` — `-1.0` и `float("nan")` → `ValueError`,
+   калибровка прежняя.
+4. `Plugins/sim/robot_host/tests/test_belt_commands.py::test_run_25hz_default_calibration` —
+   `belt.run {freq_hz: 25}` + один `core.tick()` → `belt.status.mm_s == pytest.approx(50.5656, abs=0.5)`,
+   `run is True`, `freq_hz == 25.0`.
+5. `…::test_command_goes_through_mailbox` — после `belt.run {freq_hz: 25, reverse: true}` и ДО тика:
+   `core.read(0x1200, 3) == [1, 1, 2500]`, `core.read(0x1204, 1) == [1]`; после тика `0x1204 == 0`,
+   зеркало `0x1210 == 1`, `0x1211 == 2500`.
+6. `…::test_stop_writes_only_run` — `belt.run {freq_hz: 30}`, тик, `belt.stop`, тик → `mm_s == 0.0`,
+   `core.read(0x1202, 1) == [3000]` (частота не тронута).
+7. `…::test_calibrate_200_then_run_50` — `belt.calibrate {mm_s_at_max_freq: 200}`, `belt.run
+   {freq_hz: 50}`, тик → `mm_s == 200.0`, `mm_s_at_max_freq == 200.0`.
+8. `…::test_jog_without_refresh_stops_in_window` — `belt.jog {direction: -1, freq_hz: 10}` при
+   `jog_timeout_ms=500`, реальный паблишер (`publish_ms=50`) и реальный тикер: `mm_s < 0` сразу
+   после тика; остановка (`mm_s == 0.0`) наступает в окне `[0.5, 1.0]` с от команды; с
+   подкачкой `belt.jog` каждые 200 мс лента едет ≥ 1.5 с.
+9. `…::test_modbus_write_overrides_jog` — `belt.jog {direction: 1}`, затем прямая запись
+   `core.write(0x1200, [1, 0, 4000]); core.write(0x1204, [1])` (как Modbus-мастер), ждать 1.0 с →
+   лента едет, `mm_s == pytest.approx(80.905, abs=0.5)`, `jogging is False`.
+10. `…::test_bad_args_and_no_server` — `belt.run {freq_hz: 60}` → `ok False`, `error` начинается с
+    `bad_args`; `belt.jog {direction: 0}` → `bad_args`; сервер не поднят (`auto_start: false`) →
+    `belt.status` → `server_not_running`.
+
+**ACCEPTANCE** (живой стенд `apps/line_sim`, `backend_ctl` на 8766):
+- [ ] `send_command("robot", "belt.run", {"freq_hz": 25})` → через ≥ 0.2 с `send_command("robot",
+      "belt.status")["result"]["mm_s"]` = **50.57 ± 0.5**; `state_get("sim.belt.encoder")` растёт;
+      `introspect_telemetry("robot")` → уровень `belt_mm_s` ≈ 50.57.
+- [ ] `belt.calibrate {mm_s_at_max_freq: 200}` → `belt.run {freq_hz: 50}` → `mm_s == 200.0`;
+      `belt.calibrate {101.1311}` возвращает стенд в исходное.
+- [ ] `belt.jog {direction: 1}` один раз, без подкачки → `mm_s == 0.0` спустя **0.5–1.0 с**
+      (два снятия `belt.status`: на 0.3 с ещё едет, на 1.2 с стоит).
+- [ ] Путь прототипа: `belt.run {25}`, затем «стоп» боевым `VfdClient.stop()` (`gd20_bridge`,
+      `127.0.0.1:5021`) → `belt.status`: `run False`, `mm_s 0.0`. Затем `VfdClient.poll()` не
+      запускает ленту (частота 25 Гц лежит, `run` 0).
+- [ ] `introspect_handlers("robot")` перечисляет все пять `belt.*` и прежний `sim_robot.status`.
+- [ ] Регресс: `Services/robot_comm/tests` и `Plugins/sim/robot_host/tests` зелёные; стенд без
+      команд ведёт себя как до задачи (лента 101.13 мм/с с момента старта).
+
+**Hazard-тесты автора (в `test_belt_drive.py` / hazard-файл плагина):**
+- гонка `set_calibration` ↔ `command` из двух потоков (10⁴ итераций): итоговый `mm_s` равен
+  пересчёту по последней применённой команде — без замка тест обязан падать хотя бы иногда;
+  если не ловится стабильно — принудить переключение (`sys.setswitchinterval(1e-6)`) и сказать это;
+- `advance()` не берёт замок (замер: в тике нет `acquire` — проверять эффектом: тикер не встаёт,
+  пока другой поток держит замок `BeltDrive` 0.2 с);
+- порядок «данные → флаг»: подменить `core.write` шпионом по адресам И проверить эффект — тикер,
+  прерывающий `command_vfd` между записями (ручной `tick()` после первой записи), не применяет
+  полкоманды: `FLAG` ещё 0;
+- тест, который может зависнуть (ожидание остановки jog), — вызов в daemon-потоке с `join`-дедлайном.
+
+**Break-injection (ведущий; ожидание записано ДО прогона):**
+| # | Инъекция | Должны упасть |
+|---|---|---|
+| A1 | `command_vfd` пишет FLAG первым | 5, hazard «порядок» |
+| A2 | `set_calibration` не пересчитывает `_mm_s` | 1, 2, 7 |
+| A3 | убрать замок в `BeltDrive` | hazard гонки (с оговоркой о стабильности) |
+| A4 | watchdog jog выключен | 8 |
+| A5 | watchdog стопит без сравнения mailbox | 9 |
+| A6 | `belt.stop` пишет `run=0, freq=0` | 6 |
+| A7 | клэмп вместо отказа `freq_hz > 50` | 10 |
+| A8 | статус из последней команды плагина, а не из `belt.state` | 9, приёмка «путь прототипа» |
+| A9 | `advance()` берёт замок | hazard «тикер не встаёт» |
+
+**OUT OF SCOPE:** рампа разгона/торможения; ручка `freq_max_hz`; учёт «кто последний писал»
+(поле `source` в статусе — если понадобится оператору, отдельная строка); перенос `BeltDrive` в
+`Services/line_sim` (ponytail-метка в `belt.py` остаётся); закрытие окна `attach()`.
+
+**TRAPS.**
+- Команды исполняются на потоке диспетчера команд процесса `robot` — ни `sleep`, ни
+  `router.request` внутри `cmd_belt_*` (последнее — `RouterReentrantRequestError`, если это
+  приёмный поток; автор проверяет, какой поток, и пишет в README числом/именем).
+- `freq_hz` в регистре — `round(freq × 100)` в `uint16`; 50 Гц = 5000, переполнения нет, но
+  отрицательная частота до валидации дала бы `& 0xFFFF` мусор — валидация раньше записи.
+- `_publish_once` возвращается рано при `self._server is None` — watchdog jog ставить ДО этой
+  проверки не нужно (без сервера нет и ленты), но и после неё jog-состояние не должно зависнуть:
+  `belt.status` при `server_not_running` отдаёт ошибку, а не `jogging: True`.
+- Два потока пишут `_jog_deadline` (команда и паблишер) — под `self._lock`.
+
+**HANDOFF IN:** Task 2.1/2.1b/2.2 закрыты; стенд живёт на 8766/5021/8091.
+
+---
+
+### Task 2.3b — Веб-пульт ленты: процесс `pult`, страница на 127.0.0.1:8092
+
+- **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
+- **CHAIN:** `tester`(RED по приёмке, worktree на коммите 2.3a) -> `developer`(GREEN) -> ведущий(инъекции, живой стенд) -> `reviewer`
+- **Module contract:** new-lite (`Plugins/sim/pult_web/plugin.py`)
+- **Зависит от:** 2.3a.
+
+**TASK.** Новый процесс `pult` в `apps/line_sim` с side-effect плагином `PultWebPlugin`: stdlib
+`http.server`, страница с MJPEG-картинкой и ручками ленты. Каждая ручка — те же команды `belt.*`
+процессу `robot` по IPC фреймворка; своей логики ленты у пульта нет.
+
+**DESIGN.**
+1. Форма сервера — копия `MjpegSinkPlugin` (`Plugins/sim/mjpeg_sink/plugin.py:98-265`):
+   `ThreadingHTTPServer` в `try/except OSError` → `_fail` + `ctx.health.report_error`, процесс
+   живёт; `serve_forever` в daemon-потоке; `shutdown()` симметрично. Конфиг: `host` 127.0.0.1,
+   `port` 8092, `mjpeg_url` `http://127.0.0.1:8091/`, `robot_process` `robot`, `timeout_s` 1.0.
+2. IPC — `Plugins.hub.device_hub.client.DeviceHubClient(ctx, target_process=robot_process,
+   default_timeout=timeout_s)`, вызов `client.request("belt.run", {...})` из потока
+   HTTP-обработчика (не приёмный поток — законно, разведка п.1). Новый клиент не писать. Первым
+   делом автор снимает **живой** ответ `robot` на `belt.status` через `DeviceHubClient` и
+   пиннит форму в тесте: нормализация `_normalize_response` возвращает сырой dict, если в нём
+   есть ключ `status` (`client.py:28-29`) — у ответа `belt.*` такого ключа быть не должно.
+3. HTTP API (JSON, `Content-Type: application/json`):
+   | Метод, путь | Тело | Команда |
+   |---|---|---|
+   | `GET /` | — | страница |
+   | `GET /api/status` | — | `belt.status` |
+   | `POST /api/run` | `{freq_hz, reverse}` | `belt.run` |
+   | `POST /api/stop` | `{}` | `belt.stop` |
+   | `POST /api/jog` | `{direction, freq_hz?}` | `belt.jog` |
+   | `POST /api/calibrate` | `{mm_s_at_max_freq}` | `belt.calibrate` |
+   Ответ — результат команды как есть. Кривой JSON тела → 400 `{ok: false, error: "bad_json"}`;
+   неизвестный путь → 404; ответ `robot` не пришёл (`status == "error"` от клиента) → 504
+   `{ok: false, error: "<сообщение клиента>"}`. Тело не больше 4 КБ (`Content-Length` > 4096 → 413).
+4. Страница — одна строка-константа в `plugin.py` (без шаблонизатора и без файла): `<img
+   src=mjpeg_url>`, ползунок частоты 0–50 Гц (шаг 0.5) + поле, кнопки «Пуск»/«Стоп», переключатель
+   направления, две кнопки jog (◀ / ▶), поле калибровки + «Применить», живые `encoder`, `mm_s`,
+   `run`, `freq_hz`, `reverse`, `jogging`, `mm_s_at_max_freq`. Jog: `pointerdown` → `POST /api/jog`
+   сразу и каждые 200 мс; `pointerup`, `pointercancel`, `pointerleave`, `blur` окна,
+   `visibilitychange` → остановить таймер и `POST /api/stop`. Живые значения — опрос
+   `GET /api/status` каждые 250 мс (одна дорога; подписка на `sim.belt.**` не нужна — статус уже
+   несёт энкодер и скорость). Нет ответа → надпись «robot не отвечает», ручки не блокируются.
+5. Процесс `pult` в `apps/line_sim/pipeline.yaml` по форме `mjpeg` (GenericProcess, один плагин);
+   `wires` не нужны (портов данных нет). Прототип не меняется: он рулит лентой своим мостом ПЧ
+   (`multiprocess_prototype/recipes/letter_robot_sim.yaml`), арбитраж — DESIGN 2.3a п.6.
+
+**FILES.**
+1. НОВЫЙ `Plugins/sim/pult_web/plugin.py` (+ пустой `__init__.py`)
+2. НОВЫЙ `Plugins/sim/pult_web/README.md`
+3. НОВЫЙ `Plugins/sim/pult_web/STATUS.md`
+4. НОВЫЙ `Plugins/sim/pult_web/tests/test_pult_web.py` (+ пустой `tests/__init__.py`)
+5. `apps/line_sim/pipeline.yaml` — процесс `pult`
+6. `apps/line_sim/README.md` — порт 8092, три клиента ленты, арбитраж
+
+**REDS** (слепые; HTTP проверяется настоящим `urllib` против поднятого плагина на свободном порту,
+`robot` подменён фейковым `DeviceHubClient`-двойником, который записывает вызовы и отвечает
+заданным dict; плюс один тест с настоящими объектами — см. ниже):
+1. `Plugins/sim/pult_web/tests/test_pult_web.py::test_index_has_controls_and_mjpeg` — `GET /` → 200,
+   `text/html`, в теле `src="http://127.0.0.1:8091/"`, `id` ползунка, кнопок пуск/стоп/jog и поля калибровки.
+2. `…::test_run_forwards_same_command` — `POST /api/run {"freq_hz": 25, "reverse": true}` → двойник
+   получил ровно `("belt.run", {"freq_hz": 25, "reverse": True})`, HTTP 200, тело = ответ двойника.
+3. `…::test_jog_stop_calibrate_status_map` — `/api/jog`, `/api/stop`, `/api/calibrate`, `GET
+   /api/status` → команды `belt.jog`, `belt.stop`, `belt.calibrate`, `belt.status` с телами как пришли.
+4. `…::test_bad_json_400_unknown_404_oversize_413` — три отказа, двойник не вызван ни разу.
+5. `…::test_robot_timeout_504` — двойник отвечает `{"status": "error", "message": "timeout"}` → 504,
+   `ok false`.
+6. `…::test_port_busy_degrades_not_crashes` — порт занят заранее → `start()` без исключения,
+   состояние `error`, `health.report_error` вызван один раз.
+7. `…::test_page_jog_is_dead_man` — в тексте страницы есть обработчики `pointerup`, `pointercancel`,
+   `blur` и `visibilitychange`, каждый ведёт к `/api/stop`, и интервал подкачки 200 мс (проверка
+   текста — слабая, см. «Открыто»).
+8. `apps/line_sim/tests/test_f2_task23_live.py::test_pult_drives_belt_end_to_end` — живой стенд
+   во временных портах (форма фикстуры — `apps/line_sim/tests/test_f2_task22_live.py`): `POST
+   /api/run {25}` → `backend_ctl send_command("robot","belt.status")` `mm_s` 50.57 ± 0.5;
+   `POST /api/stop` → 0.0. Это тест «настоящие объекты», не двойник.
+
+**ACCEPTANCE** (живой стенд + браузер владельца):
+- [ ] `http://127.0.0.1:8092/` открывается, картинка из 8091 идёт, энкодер на странице растёт.
+- [ ] Ползунок 25 Гц + «Пуск» → на странице `mm_s` 50.57 ± 0.5; тот же `belt.status` через
+      `backend_ctl` показывает то же.
+- [ ] Удержание ▶ 2 с → лента едет всё время удержания; отпускание → `mm_s == 0.0` за ≤ 0.3 с
+      (явный `stop`); закрытие вкладки при зажатой кнопке → стоп за 0.5–1.0 с (dead-man 2.3a).
+- [ ] Калибровка 200 → «Пуск» 50 Гц → `mm_s` 200.0.
+- [ ] Прототип подал «стоп» своим мостом → страница за ≤ 0.5 с показывает `run false`, `mm_s 0.0`.
+- [ ] Процесс `robot` остановлен (`backend_ctl`) → страница показывает «robot не отвечает», процесс
+      `pult` жив, в `errors.log` `pult` нет трассы на каждый опрос (ошибка IPC — `throttle` у клиента).
+- [ ] `Plugins/sim/pult_web` не импортирует `Plugins.sim.robot_host` и `multiprocess_prototype`;
+      `sentrux check .` зелёный.
+
+**Hazard-тесты автора:**
+- параллельные запросы (`ThreadingHTTPServer`, 20 одновременных `POST /api/jog`) — каждый дошёл
+  двойнику ровно один раз, сервер отвечает;
+- `shutdown()` при открытом MJPEG-соединении в браузере не висит (join с дедлайном);
+- медленный `robot` (двойник спит 2 с при `timeout_s` 1.0) не блокирует `GET /` соседнего клиента.
+
+**Break-injection (ведущий):**
+| # | Инъекция | Должны упасть |
+|---|---|---|
+| B1 | `/api/run` зовёт `belt.jog` | 2 |
+| B2 | убрать `pointerup`→stop со страницы | 7 |
+| B3 | 504 заменить на 200 с телом ошибки | 5 |
+| B4 | `ThreadingHTTPServer` без `try/except OSError` | 6 |
+| B5 | не проверять `Content-Length` | 4 |
+| B6 | пульт шлёт в процесс `camera` | 8 (живой) |
+
+**OUT OF SCOPE:** авторизация и доступ не с `127.0.0.1`; ручки потока/брака/паузы (Ф6.1, после
+Ф3); журнал обмена (Ф6.2); WebSocket/SSE вместо опроса; подписка на дерево `sim.belt.**` в пульте;
+стили сверх читаемости.
+
+**TRAPS.**
+- `DeviceHubClient.request` при отказе IPC зовёт `health.report_error(..., throttle=30.0)` — на
+  опросе каждые 250 мс без `throttle` было бы 4 трассы в секунду; проверить, что throttle доходит.
+- `request` до первого приёмного цикла процесса `pult` отдаёт `no_receive_pump` через грейс — первые
+  запросы страницы сразу после старта могут получить 504; это не баг, но в README.
+- `do_POST` читает ровно `Content-Length` байт, не `rfile.read()` до EOF (зависнет на keep-alive).
+
+---
+
+**Открыто по 2.3 (manager, 2026-09-22):**
+- На каком потоке исполняются команды `CommandManager` процесса `robot` — не сверено (дошёл до
+  `_auto_register_commands`, не до диспетчера); DESIGN держится правила «в обработчике не блокировать»
+  при любом ответе, но README 2.3a должен назвать поток.
+- Форма ответа `router.request` для прямой команды процессу (`result` сверху или `data.result`) не
+  снята живьём — `DeviceHubClient` покрывает обе формы по коду; первый шаг 2.3b — живой снимок.
+- RED 7 в 2.3b проверяет текст страницы, а не поведение браузера; настоящая проверка dead-man
+  страницы — ручная приёмка владельцем (удержание/закрытие вкладки) или Playwright, которого в
+  `enabled.yaml` может не быть.
+- Окно гонки `attach()` (запись плагина до первого Modbus-клиента теряется в момент подключения)
+  не закрывается: вероятность — одно окно в жизни процесса; симптом — команда пульта «не
+  сработала» в миг подключения прототипа, лечится повтором.
