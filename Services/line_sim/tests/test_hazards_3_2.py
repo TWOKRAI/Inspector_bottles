@@ -304,3 +304,15 @@ def test_angle_range_lo_gt_hi_rejected():
 
     with pytest.raises(ValidationError, match="angle_range_deg"):
         ScenePreset.from_dict({"catalog_dir": "x", "angle_range_deg": [30.0, 10.0]})
+
+
+def test_rgb_extra_layer_image_rejected_with_clear_text(tmp_path):
+    """[lead 3.2, break-injection M4] без проверки RGB-картинка доп. слоя падала на невнятном
+    cv2.error из cvtColor; отказ обязан назвать файл и сказать про альфа-канал."""
+    _write_fixture_catalog(tmp_path / "catalog", {"red": (200, 30, 30)})
+    rgb = np.zeros((8, 8, 3), dtype=np.uint8)
+    imwrite_unicode(tmp_path / "flat.png", rgb)
+    extra = {"name": "label", "mode": "static", "sprite_source": "flat.png"}
+    preset = ScenePreset.from_yaml(_write_preset_yaml(tmp_path, "catalog", layers=[extra]))
+    with pytest.raises(ValueError, match=r"flat\.png.*(RGBA|альфа)"):
+        ObjectFactory(preset)
