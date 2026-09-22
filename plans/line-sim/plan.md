@@ -535,8 +535,10 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 - Task 3.3a (новая 2026-09-23): Шаг спавна по ленте — режимы ровного и случайного шага
   [PENDING] (решение владельца по демо-кадрам) — `phase-3-object-engine.md`
 - Task 3.4 (ред. 2): Движок подключён к `SceneSourcePlugin.produce()` — в симе, не в
-  прототипе; паспорта остаются в симе [PENDING] (зависит от 2.2, 3.2, 3.3) — **Module
-  contract:** impl-only
+  прототипе; паспорта остаются в симе [DONE 2026-09-23, merge `015c61f3`] (зависит от 2.2,
+  3.2, 3.3) — **Module contract:** impl-only. Критерий «прототип увидел объекты» перенесён
+  в Ф4 (диагноз в `phase-3-object-engine.md`); живой стенд лида: сцена рисуется движком,
+  `sim.objects` наполняется, шаг `spawn_encoder` ≈ 890 ед. между соседями
 - Task 3.5 (новая): Робот забрал — объект исчез: сопоставление задания с объектом
   [PENDING] (зависит от 3.3, 1.1) — **Module contract:** new-lite
 
