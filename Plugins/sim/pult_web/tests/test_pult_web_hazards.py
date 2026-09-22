@@ -454,3 +454,35 @@ def test_non_json_content_type_rejected_415(pult) -> None:
     assert status == 415, f"text/plain POST -> {status}, тело: {raw[:200]!r}"
     assert json.loads(raw) == {"ok": False, "error": "unsupported_media_type"}
     assert client.calls[n_before:] == [], "двойник не должен был получить ни одного вызова при 415"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+@pytest.mark.parametrize("running", [True, False], ids=["belt_running", "belt_stopped"])
+def test_page_freq_change_applies_only_while_belt_runs(pult, running) -> None:
+    """Владелец, 2026-09-23 («гц не регулируются, а шаг регулируется»): смена частоты
+    на ЕДУЩЕЙ ленте должна доходить до неё сама, без кнопки «Пуск».
+
+    До правки `freqSlider.oninput` только переписывал число в соседнем поле, а
+    `belt.run` уходил исключительно по клику «Пуск» — пульт показывал одно (поле «20»),
+    а лента ехала на другом (живой стенд: статус `freq_hz=40`, `mm_s=240`). Джог при
+    этом читал поле в момент нажатия, отчего «шаг» работал, а частота нет.
+
+    Вторая половина параметризации — обратная сторона: на СТОЯЩЕЙ ленте та же смена
+    частоты не должна её запускать (иначе ползунок становится скрытой кнопкой «Пуск»).
+    """
+    _plugin, _ctx, client, port = pult
+    client.status_reply = {"status": "ok", "run": running, "encoder": 1, "mm_s": 0.0,
+                           "freq_hz": 40.0, "reverse": False, "jogging": False,
+                           "mm_s_at_max_freq": 300.0}
+    try:
+        n_before = len(client.calls)
+        _run_page_js(port, "freq_change")
+        runs = [c for c in client.calls[n_before:] if c[0] == "belt.run"]
+    finally:
+        client.status_reply = None
+
+    if running:
+        assert len(runs) == 1, f"смена частоты на едущей ленте не дошла до belt.run: {runs!r}"
+        assert runs[0][1].get("freq_hz") == 15.0, f"до ленты уехала не новая частота: {runs[0][1]!r}"
+    else:
+        assert runs == [], f"смена частоты на СТОЯЩЕЙ ленте запустила её: {runs!r}"

@@ -22,6 +22,10 @@ function makeEl(id) {
     },
     fire(t) {
       (this.h[t] || []).forEach((f) => f({ type: t }));
+      // Страница вешает часть обработчиков свойством (`el.onchange = ...`), а не
+      // addEventListener — без этой ветки сценарий «сменили частоту» молча ничего
+      // не звал бы и тест был бы вакуумным.
+      if (typeof this["on" + t] === "function") this["on" + t]({ type: t });
     },
   };
 }
@@ -86,6 +90,14 @@ async function run() {
     await sleep(900);
     el("jogFwd").fire("pointerup");
     await sleep(900); // jog, висящий до ~1150 мс, возвращается, затем уходит stop
+  } else if (scenario === "freq_change") {
+    // Кнопку «Пуск» НЕ нажимаем: проверяем ровно то, что смена частоты сама доходит
+    // до ленты, пока она едет (владелец 2026-09-23: «гц не регулируются»).
+    // Ждём хотя бы один цикл опроса статуса — из него страница узнаёт, едет ли лента.
+    await sleep(400);
+    el("freqNum").value = "15";
+    el("freq").fire("change");
+    await sleep(300);
   } else if (scenario === "status_error") {
     await sleep(400); // >= один цикл опроса (250 мс)
     process.stdout.write(JSON.stringify({ statusText: el("status").textContent }));

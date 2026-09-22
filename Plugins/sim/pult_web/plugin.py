@@ -145,15 +145,29 @@ function getStatus() {{
 
 var freqSlider = document.getElementById("freq");
 var freqNum = document.getElementById("freqNum");
-freqSlider.oninput = function () {{ freqNum.value = freqSlider.value; }};
-freqNum.oninput = function () {{ freqSlider.value = freqNum.value; }};
 
-document.getElementById("btnRun").onclick = function () {{
+// `beltRunning` ведётся опросом статуса: пока лента ЕДЕТ, смена частоты или реверса
+// применяется сразу, без «Пуска». До этой правки ползунок только переписывал число в
+// поле, а на ленту оно уходило исключительно по кнопке, и пульт показывал одно
+// (поле «20»), а лента ехала на другом (статус freq_hz=40, mm_s=240) — владелец,
+// 2026-09-23: «гц не регулируются, а шаг регулируется» (джог читал поле в момент
+// нажатия, поэтому у него это работало).
+var beltRunning = false;
+function sendRun() {{
   post("/api/run", {{
     freq_hz: parseFloat(freqNum.value),
     reverse: document.getElementById("reverse").checked,
   }});
-}};
+}}
+function applyIfRunning() {{ if (beltRunning) sendRun(); }}
+
+freqSlider.oninput = function () {{ freqNum.value = freqSlider.value; }};
+freqNum.oninput = function () {{ freqSlider.value = freqNum.value; }};
+freqSlider.onchange = applyIfRunning;   // change, не input: не слать запрос на каждый пиксель перетаскивания
+freqNum.onchange = applyIfRunning;
+document.getElementById("reverse").onchange = applyIfRunning;
+
+document.getElementById("btnRun").onclick = sendRun;
 document.getElementById("btnStop").onclick = function () {{ post("/api/stop", {{}}); }};
 document.getElementById("btnCalib").onclick = function () {{
   post("/api/calibrate", {{mm_s_at_max_freq: parseFloat(document.getElementById("calib").value)}});
@@ -202,11 +216,20 @@ document.addEventListener("visibilitychange", function () {{
 function pollStatus() {{
   getStatus().then(function (s) {{
     if (s && s.ok !== false) {{
+      beltRunning = (s.run === true);
+      // Поле калибровки до этой правки было зашито в HTML (101.1311) и врало о текущем
+      // значении: симулятор ехал с mm_s_at_max_freq=300. Подтягиваем из статуса, но НЕ
+      // перебиваем поле, пока в нём стоит курсор — иначе опрос затрёт набираемое число.
+      var calib = document.getElementById("calib");
+      if (document.activeElement !== calib && s.mm_s_at_max_freq !== undefined) {{
+        calib.value = s.mm_s_at_max_freq;
+      }}
       document.getElementById("status").textContent =
         "encoder=" + s.encoder + "  mm_s=" + s.mm_s + "  run=" + s.run +
         "  freq_hz=" + s.freq_hz + "  reverse=" + s.reverse +
         "  jogging=" + s.jogging + "  mm_s_at_max_freq=" + s.mm_s_at_max_freq;
     }} else {{
+      beltRunning = false;
       document.getElementById("status").textContent = "robot не отвечает";
     }}
   }}).catch(function () {{
