@@ -2,7 +2,8 @@
 
 Публичный API (numpy/opencv/pydantic/yaml, без torch и PySide6):
     ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ObjectSpawner,
-    ScenePreset, SceneCompositor (Protocol), encoder_to_offset_mm, FACTOR_MM, BELT_UX, BELT_UY
+    ScenePreset, SceneCompositor, SceneCompositorProtocol, encoder_to_offset_mm, FACTOR_MM,
+    BELT_UX, BELT_UY
 """
 
 from Services.line_sim.core import (
@@ -12,10 +13,11 @@ from Services.line_sim.core import (
     LayeredObject,
     ObjectFactory,
     ObjectSpawner,
+    SceneCompositor,
     ScenePreset,
     encoder_to_offset_mm,
 )
-from Services.line_sim.interfaces import LayerAugment, LayerSpec, ObjectPassport, SceneCompositor
+from Services.line_sim.interfaces import LayerAugment, LayerSpec, ObjectPassport, SceneCompositorProtocol
 
 __all__ = [
     "BELT_UX",
@@ -28,6 +30,7 @@ __all__ = [
     "ObjectPassport",
     "ObjectSpawner",
     "SceneCompositor",
+    "SceneCompositorProtocol",
     "ScenePreset",
     "encoder_to_offset_mm",
 ]

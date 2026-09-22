@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""``SceneSourcePlugin`` — источник кадров сцены симулятора (Task 2.2 line-sim).
+"""``SceneSourcePlugin`` — источник кадров сцены симулятора (Task 2.2 → Task 3.4 line-sim).
 
-Source-плагин (форма — ``Plugins/sources/synthetic_frame_source``): фон + один
-тестовый спрайт-заглушка, положение которого следует за энкодером ленты из
-общего мира (``sim.belt.*`` в дереве ``StateStore``, Task 2.1/2.1b). Реальные
-объекты, спавн/деспавн и слои — Ф3.
+Source-плагин (форма — ``Plugins/sources/synthetic_frame_source``): фон + реальные
+объекты движка ``Services.line_sim`` (Task 3.4), положение которых следует за энкодером
+ленты из общего мира (``sim.belt.*`` в дереве ``StateStore``, Task 2.1/2.1b).
 
 **Чтение мира — подпиской, не ``get()`` (Решение ведущего, план line-sim,
 Task 2.2).** ``StateProxy.get()`` без предварительной подписки на путь ВСЕГДА
@@ -15,11 +14,11 @@ Task 2.2).** ``StateProxy.get()`` без предварительной подп
 обоснование, что у ``TelemetrySinkPlugin.start``: подписка регистрируется ДО
 того, как у процесса вообще есть приёмный поток, синхронный раундтрип ждать
 некому), а колбэк только кладёт последнее значение в поле плагина под
-``Lock`` — ни одного IPC на кадр.
+``Lock`` — ни одного IPC на кадр. **Не тронуто Task 3.4** — вся эта машинерия
+(``_on_deltas``, обе формы дельт, предупреждение о протухании) осталась как есть,
+Task 3.4 меняет только то, ЧТО рисуется в кадре и куда деваются паспорта.
 
-**Обе формы дельт паблишера — исправлено ревью Task 2.2 (прежняя редакция
-ошибочно приписывала полистовые дельты ``TreeStore._merge_recursive`` на
-существующем узле — это не так).** Живой ``SimRobotHostPlugin._publish_once``
+**Обе формы дельт паблишера.** Живой ``SimRobotHostPlugin._publish_once``
 зовёт ``state_proxy.set()`` на КАЖДОМ тике публикации, и КАЖДЫЙ такой
 ``set()`` шлёт дельту ЦЕЛИКОМ по пути ``sim.belt.encoder`` (``new_value`` —
 весь словарь ``{value, mm_s, t}``), а не только первый раз. Полистовые дельты
@@ -27,55 +26,38 @@ Task 2.2).** ``StateProxy.get()`` без предварительной подп
 источника — из РЕПЛЕЯ начального состояния при (пере)подписке:
 ``state_store_manager.py`` (``_replay_initial_state``, ~строка 430) отдаёт уже
 существующее поддерево новому подписчику полистово, с источником
-``src="__replay__"``. Поэтому :meth:`_on_deltas` в реальном процессе видит
-СМЕСЬ: не более одной полистовой пачки при (пере)подписке (replay уже
-существовавшего состояния) и дальше только дельты-словари целиком (живая
-публикация) — не «первая целиком, остальные полистово», как утверждала
-прежняя редакция. :meth:`_on_deltas` обрабатывает обе формы одним и тем же
+``src="__replay__"``. :meth:`_on_deltas` обрабатывает обе формы одним и тем же
 кодом независимо от их происхождения.
 
-**Протухшее значение — предупреждение, не экстраполяция.** Позиция спрайта
-всегда берётся из ПОСЛЕДНЕЙ ДОСТАВЛЕННОЙ дельты (нет отдельного пути
-«время идёт — двигай спрайт по времени»), поэтому «заморозка» между двумя
+**Протухшее значение — предупреждение, не экстраполяция.** Позиция объектов
+всегда считается из ПОСЛЕДНЕЙ ДОСТАВЛЕННОЙ дельты (нет отдельного пути
+«время идёт — двигай сцену по времени»), поэтому «заморозка» между двумя
 кадрами на неизменном мире — не отдельный код, а прямое следствие того, что
 между ними не пришло новой дельты. Единственный НАБЛЮДАЕМЫЙ эффект протухания
 в этой версии — предупреждение через ``ctx.log_warning`` (де-дублировано по
 ``t``, чтобы не заспамить лог на неизменном протухшем значении).
 
-**Спрайт — квадрат 32×32, лента бесконечна (решение ведущего 2026-09-21, по
-живому расследованию задачи 2.2, ЗАМЕНЯЕТ прежнюю схему «один столбец,
-задний край»).** Прежняя схема (столбец, невидимый в spawn) была подогнана
-под diff-метод измерения тестера и ломалась в живом стенде: при
-``px_per_mm=1.0`` и скорости ленты ~100 мм/с спрайт пересекал кадр (640 px)
-за ~6 с и УПИРАЛСЯ В ЗАЖИМ у правого края — к моменту живого замера MJPEG он
-был уже дольше приклеен там, чем идёт сам замер, отсюда «спрайт не
-сдвинулся» на живом тесте. Новая схема: ``x_px`` — ЦЕНТР квадрата (как
-позиция объекта на ленте), ``x_left = ((x_px + S/2) % (width + S)) - S`` при
-``S = SPRITE_SIZE_PX`` — бесконечная лента без зажима: на ``x_px ∈ [-S/2,
-width + S/2)`` центр квадрата стоит ровно в ``x_px``; квадрат выезжает справа и
-через один период снова въезжает слева (решение ведущего 2026-09-22: позиция
-объекта — его центр, левый край давал сдвиг на S/2 против формулы приёмки).
-Цвет спрайта — контрактная константа :data:`SPRITE_BGR`
-(BGR), задокументирована в README и экспортирована из этого модуля для
-цвето-масочного измерения (живой тест меряет по цвету, не по общему диффу
-кадра — тот метод путал «спрайт переместился» с «фон изменился рядом»).
-
-**Смена схемы ломает точное числовое совпадение офлайн-приёмки тестера**
-(``test_scene_source_acceptance.py::test_sprite_moves_with_encoder`` — она
-мерит диффом ПРОТИВ ЭТАЛОНА и ожидает центр масс, буквально равный
-``(encoder-spawn)*FACTOR_MM*px_per_mm``). С квадратом 32×32 центр масс
-диффа — центр квадрата, а не его левый край, и при координатах теста
-(1000/2000 отсчётов) отличие от прежней формулы больше допуска ±2px. Не
-правил этот файл тестера (запрещено брифом) — расхождение зафиксировано в
-отчёте разработчика, решение — ведущего.
+**Task 3.4 — реальный движок вместо заглушки-спрайта.** ``configure()`` строит
+``ScenePreset``/``ObjectFactory``/``ObjectSpawner``/``SceneCompositor`` из
+``Services.line_sim`` (см. ``Services/line_sim/README.md``); ``rng =
+np.random.default_rng(seed)`` живёт здесь (единственный producer — этот плагин,
+у него часы и rng, ``SceneCompositor.render()`` их не трогает). Если движок
+собрать не удалось (каталог классов из ``preset_path`` не существует или пресет
+без конфигурации не может выбрать класс) — плагин НЕ падает: логирует ошибку
+ОДИН раз в ``configure()`` и до конца жизни процесса отдаёт кадры одного фона.
+Паспорта объектов публикуются в общий мир (``sim.objects``) ТОЛЬКО когда меняется
+МНОЖЕСТВО активных ``object_id`` (спавн/деспавн) — позиция в мир не пишется,
+её считает потребитель из энкодера и ``passport.spawn_encoder`` (LS-009).
 """
 
 from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import cv2
 import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -85,7 +67,7 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
-from Services.robot_comm.core.registers import FACTOR_MM
+from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -97,35 +79,49 @@ _DEFAULT_SPAWN_ENCODER = 0
 _DEFAULT_PX_PER_MM = 1.0
 _DEFAULT_STALE_MS = 500
 _DEFAULT_SEED = 0
+_DEFAULT_SPAWN_INTERVAL_S = (2.0, 4.0)
+_DEFAULT_DEFECT_PROBABILITY = 0.0
+_DEFAULT_CAMERA_ID = 0
 
 #: Путь мира (Task 2.1/2.1b, паблишер — ``Plugins.sim.robot_host``).
 _ENCODER_PATH = "sim.belt.encoder"
 _WORLD_PATTERN = "sim.belt.**"
 
-#: Цвет спрайта — контрактная константа (BGR), экспортируется из модуля:
-#: живой тест детектирует спрайт цветовой маской, не общим диффом кадра.
-#: Красный канал, заведомо отличим от серого фона (R=G=B) при любом ``seed``.
-SPRITE_BGR = (0, 0, 255)
+#: Путь мира для паспортов активных объектов (Task 3.4) — этот плагин пишет,
+#: он же единственный писатель.
+_OBJECTS_PATH = "sim.objects"
 
-#: Сторона квадрата-спрайта, px. Вертикально центрирован в кадре.
-_SPRITE_SIZE_PX = 32
+#: Фон сцены — концептуально BGR (тот же параметр, что принимает `SceneCompositor`).
+_BACKGROUND_BGR = (60, 60, 60)
+
+#: Не чаще раза в секунду — иначе падающая фабрика заливает лог на каждый кадр.
+_FACTORY_ERROR_LOG_INTERVAL_S = 1.0
 
 #: Максимальное значение счётчика кадров (rollover, как у остальных источников сима).
 _FRAME_ID_MODULO = 100_000
+
+#: Корень репозитория, вычисленный от расположения ЭТОГО файла
+#: (Plugins/sim/scene_source/plugin.py -> parents[3]) — фикс ревью P5: относительный
+#: `preset_path` раньше резолвился против CWD процесса (только `ScenePreset.from_yaml`
+#: резолвит от каталога YAML, а плагин строит `ScenePreset(catalog_dir=...)` напрямую),
+#: поэтому один и тот же конфиг давал движок то готовым, то insensitive к фону в
+#: зависимости от того, откуда запущен процесс (repro: cwd=repo root -> движок готов;
+#: cwd=apps/line_sim -> недоступен).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @register_plugin(
     "scene_source",
     category="source",
-    description="Источник кадров сцены сима: фон + тестовый спрайт по энкодеру ленты",
+    description="Источник кадров сцены сима: движок line_sim (объекты на ленте) по энкодеру",
 )
 class SceneSourcePlugin(ProcessModulePlugin):
-    """Фон + один спрайт, следующий за энкодером общего мира.
+    """Фон + объекты движка line_sim, следующие за энкодером общего мира.
 
     Lifecycle:
-        configure() -- параметры кадра/сцены, разбор конфига
+        configure() -- параметры кадра/сцены, сборка движка (или fallback на фон)
         start()     -- подписка на мир (``sim.belt.**``, sync=False)
-        produce()   -- вернуть кадр с текущим положением спрайта
+        produce()   -- tick() спавнера + render() компоновщика -> кадр BGR
     """
 
     name = "scene_source"
@@ -138,51 +134,74 @@ class SceneSourcePlugin(ProcessModulePlugin):
     commands: dict = {}
 
     def configure(self, ctx: PluginContext) -> None:
-        """READY: разобрать конфиг, завести фон и накопитель мира."""
+        """READY: разобрать конфиг, собрать движок сцены (или fallback на фон)."""
         self._ctx = ctx
         cfg = ctx.config
         self._width: int = cfg.get("resolution_width", _DEFAULT_WIDTH)
         self._height: int = cfg.get("resolution_height", _DEFAULT_HEIGHT)
         self._spawn_encoder: int = cfg.get("spawn_encoder", _DEFAULT_SPAWN_ENCODER)
-        self._px_per_mm: float = cfg.get("px_per_mm", _DEFAULT_PX_PER_MM)
         self._stale_ms: float = cfg.get("stale_ms", _DEFAULT_STALE_MS)
+        self._camera_id = cfg.get("camera_id", _DEFAULT_CAMERA_ID)
 
-        # seed стенда (план line-sim, Task 2.2): в этой версии определяет только
-        # оттенок фона (детерминированно, без cv2/random) — ponytail: реальные
-        # текстуры/раскладка сцены отложены до Ф3, здесь параметр только
-        # «подключён», а не заглушка без эффекта.
+        px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
+        belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
+        interval_cfg = cfg.get("spawn_interval_s", _DEFAULT_SPAWN_INTERVAL_S)
+        spawn_interval_s = (float(interval_cfg[0]), float(interval_cfg[1]))
+        scene_length_mm = float(cfg.get("scene_length_mm", (self._width / max(px_per_mm, 1e-9)) * 2.0))
+        defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
+        preset_path = self._resolve_preset_path(cfg.get("preset_path"))
         seed = int(cfg.get("seed", _DEFAULT_SEED))
-        base_gray = 64 + (seed % 128)
-        self._base_frame = np.full((self._height, self._width, 3), base_gray, dtype=np.uint8)
 
+        self._rng = np.random.default_rng(seed)
         self._lock = threading.Lock()
         self._world: dict[str, Any] = {}
         self._last_warned_t: float | None = None
+        self._last_factory_error_t: float | None = None
+        self._last_object_ids: frozenset[str] = frozenset()
         self._frame_count = 0
 
+        self._spawner: ObjectSpawner | None = None
+        self._compositor: SceneCompositor | None = None
+        try:
+            preset = ScenePreset(catalog_dir=preset_path, defect_probability=defect_probability)
+            factory = ObjectFactory(preset)
+            self._spawner = ObjectSpawner(factory, interval_s=spawn_interval_s, scene_length_mm=scene_length_mm)
+            self._compositor = SceneCompositor(
+                self._spawner, px_per_mm=px_per_mm, belt_y_px=belt_y_px, background_bgr=_BACKGROUND_BGR
+            )
+        except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()
+            ctx.log_error(
+                f"scene_source: движок сцены недоступен (preset_path={preset_path!r}): {exc!r} — "
+                "кадры будут только фоном"
+            )
+
         ctx.log_info(
-            f"scene_source: {self._width}x{self._height}, spawn_encoder={self._spawn_encoder}, "
-            f"px_per_mm={self._px_per_mm}, stale_ms={self._stale_ms}"
+            f"scene_source: {self._width}x{self._height}, px_per_mm={px_per_mm}, belt_y_px={belt_y_px}, "
+            f"spawn_interval_s={spawn_interval_s}, preset_path={preset_path!r}, "
+            f"движок={'готов' if self._compositor is not None else 'недоступен (fallback на фон)'}"
         )
 
+    @staticmethod
+    def _resolve_preset_path(preset_path: str | None) -> str | None:
+        """Относительный `preset_path` — от КОРНЯ РЕПОЗИТОРИЯ (`_REPO_ROOT`), не от CWD
+        процесса (фикс ревью P5). `None` и уже абсолютный путь возвращаются как есть."""
+        if preset_path is None or Path(preset_path).is_absolute():
+            return preset_path
+        return str((_REPO_ROOT / preset_path).resolve())
+
     def start(self, ctx: PluginContext) -> None:
-        """RUNNING: подписаться на мир. Без ``state_proxy`` — спрайт живёт в spawn."""
+        """RUNNING: подписаться на мир. Без ``state_proxy`` — энкодер остаётся в spawn."""
         if ctx.state_proxy is None:
-            ctx.log_warning("scene_source: ctx.state_proxy is None — мир недоступен, спрайт остаётся в spawn")
+            ctx.log_warning("scene_source: ctx.state_proxy is None — мир недоступен, энкодер остаётся в spawn")
             return
         ctx.state_proxy.subscribe(_WORLD_PATTERN, self._on_deltas, exclude_self=True, sync=False)
 
     # ------------------------------------------------------------------ #
-    # Подписка на мир
+    # Подписка на мир (не тронуто Task 3.4 — см. докстринг модуля)
     # ------------------------------------------------------------------ #
 
     def _on_deltas(self, deltas: list["Delta"]) -> None:
-        """Колбэк подписки: только копим последнее значение, без I/O.
-
-        Обе формы дельт паблишера (см. докстринг модуля) сводятся к одному и
-        тому же результату — ``self._world`` держит ЛИСТЬЯ (``value``/``mm_s``/
-        ``t``), как и накопитель ``TelemetrySinkPlugin._cache_put``.
-        """
+        """Колбэк подписки: только копим последнее значение, без I/O."""
         with self._lock:
             for d in deltas:
                 if d.new_value is MISSING:
@@ -195,29 +214,32 @@ class SceneSourcePlugin(ProcessModulePlugin):
                     self._world[leaf] = d.new_value
 
     # ------------------------------------------------------------------ #
-    # Рендер
+    # Рендер (Task 3.4 — движок line_sim вместо заглушки-спрайта)
     # ------------------------------------------------------------------ #
 
     def produce(self) -> list[dict]:
-        """Вернуть один кадр сцены с текущим положением спрайта."""
-        with self._lock:
-            snapshot = dict(self._world)
+        """Вернуть один кадр сцены: tick() спавнера + render() компоновщика, либо фон."""
+        now_encoder = self._read_world_encoder()
 
-        value = snapshot.get("value", self._spawn_encoder)
-        t = snapshot.get("t")
-        if t is not None:
-            age_ms = (time.monotonic() - t) * 1000.0
-            if age_ms > self._stale_ms:
-                self._warn_stale(t, age_ms)
+        if self._spawner is not None and self._compositor is not None:
+            try:
+                self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)
+            except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл
+                self._warn_factory_error(exc)
+            frame_rgb, _passports_in_view = self._compositor.render(
+                now_encoder, camera_rect=(0.0, 0.0, float(self._width), float(self._height))
+            )
+            self._sync_world_objects()
+        else:
+            frame_rgb = self._background_only_frame()
 
-        x_px = (value - self._spawn_encoder) * FACTOR_MM * self._px_per_mm
-        frame = self._base_frame.copy()
-        self._draw_sprite(frame, x_px)
+        frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
 
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
         return [
             {
-                "frame": frame,
+                "frame": frame_bgr,
+                "camera_id": self._camera_id,
                 "seq_id": self._frame_count,
                 "frame_id": self._frame_count,
                 "timestamp": time.monotonic(),
@@ -228,23 +250,59 @@ class SceneSourcePlugin(ProcessModulePlugin):
             }
         ]
 
-    def _draw_sprite(self, frame: np.ndarray, x_px: float) -> None:
-        """Нарисовать квадрат :data:`SPRITE_BGR` — бесконечная лента, без зажима.
+    def _read_world_encoder(self) -> float:
+        """Снимок текущего значения энкодера из мира + предупреждение о протухании."""
+        with self._lock:
+            snapshot = dict(self._world)
 
-        ``x_px`` — центр квадрата по модулю периода ``width + SPRITE_SIZE_PX``
-        (см. докстринг модуля): на ``x_px=0`` видна правая половина квадрата,
-        дальше едет слева направо, выезжает за правый край и через один
-        период снова въезжает слева — ленте конца нет.
-        """
-        period = self._width + _SPRITE_SIZE_PX
-        x_left = ((x_px + _SPRITE_SIZE_PX / 2) % period) - _SPRITE_SIZE_PX
-        x_start = max(0, int(round(x_left)))
-        x_end = min(self._width, int(round(x_left)) + _SPRITE_SIZE_PX)
-        if x_end <= x_start:
+        value = snapshot.get("value", self._spawn_encoder)
+        t = snapshot.get("t")
+        if t is not None:
+            age_ms = (time.monotonic() - t) * 1000.0
+            if age_ms > self._stale_ms:
+                self._warn_stale(t, age_ms)
+        return float(value)
+
+    def _background_only_frame(self) -> np.ndarray:
+        """Кадр одного фона В RGB (не BGR!) — движок недоступен, см. `configure()`.
+
+        Фикс ревью P5: `produce()` прогоняет ОБЕ ветки через один и тот же
+        `cv2.COLOR_RGB2BGR` (как для кадра компоновщика), поэтому этот массив обязан
+        быть RGB, а не BGR — иначе конвертация переставляет каналы ВТОРОЙ раз и
+        fallback-кадр выходит с противоположным порядком каналов относительно
+        `_BACKGROUND_BGR` (repro: `_BACKGROUND_BGR=(200,10,30)` → движок даёт
+        `[200,10,30]`, fallback без этого фикса давал `[30,10,200]`; на дефолтном
+        сером `(60,60,60)` разница незаметна, отсюда и не была поймана раньше).
+        Тот же приём переворота каналов, что `SceneCompositor.render()` — см. его
+        докстринг."""
+        frame = np.empty((self._height, self._width, 3), dtype=np.uint8)
+        b, g, r = _BACKGROUND_BGR
+        frame[:, :, 0], frame[:, :, 1], frame[:, :, 2] = r, g, b
+        return frame
+
+    def _sync_world_objects(self) -> None:
+        """Опубликовать `sim.objects` ТОЛЬКО когда меняется множество активных id
+        (спавн/деспавн) — не на каждый кадр (LS-009). Позиция в мир не пишется."""
+        assert self._spawner is not None  # вызывается только когда движок собран
+        current = {obj.passport.object_id: obj.passport for obj in self._spawner.active_objects()}
+        current_ids = frozenset(current)
+        if current_ids == self._last_object_ids:
             return
-        y_start = max(0, (self._height - _SPRITE_SIZE_PX) // 2)
-        y_end = min(self._height, y_start + _SPRITE_SIZE_PX)
-        frame[y_start:y_end, x_start:x_end] = SPRITE_BGR
+        self._last_object_ids = current_ids
+        if self._ctx.state_proxy is not None:
+            self._ctx.state_proxy.set(_OBJECTS_PATH, {oid: passport.to_dict() for oid, passport in current.items()})
+
+    def _warn_factory_error(self, exc: Exception) -> None:
+        """`spawner.tick()` упал (обычно — сбой фабрики) — кадр отдаётся с прежней сценой,
+        предупреждение де-дублировано (не чаще раза в секунду, `_FACTORY_ERROR_LOG_INTERVAL_S`)."""
+        now = time.monotonic()
+        if (
+            self._last_factory_error_t is not None
+            and (now - self._last_factory_error_t) < _FACTORY_ERROR_LOG_INTERVAL_S
+        ):
+            return
+        self._last_factory_error_t = now
+        self._ctx.log_error(f"scene_source: spawner.tick() упал: {exc!r} — кадр отдаётся с прежней сценой")
 
     def _warn_stale(self, t: float, age_ms: float) -> None:
         """Предупредить о протухшем значении мира — не чаще одного раза на ``t``."""
@@ -253,5 +311,5 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._last_warned_t = t
         self._ctx.log_warning(
             f"scene_source: значение мира устарело на {age_ms:.0f} мс (> stale_ms={self._stale_ms}) — "
-            f"позиция спрайта не экстраполируется"
+            f"позиция объектов не экстраполируется"
         )

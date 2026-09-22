@@ -44,17 +44,77 @@ import numpy as np
 import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
+from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.robot_comm.core.registers import FACTOR_MM
 
 # Module-level import НОВОГО модуля — форма RED: ModuleNotFoundError на collection для
 # ВСЕГО файла (см. докстринг).
-from Plugins.sim.scene_source.plugin import SPRITE_BGR, SceneSourcePlugin  # noqa: E402
+from Plugins.sim.scene_source.plugin import SceneSourcePlugin  # noqa: E402
 
 pytestmark = pytest.mark.timeout(30)
 
 _SPAWN_ENCODER = 0
 _PX_PER_MM = 1.0
 _STALE_MS = 200
+
+# --------------------------------------------------------------------------- #
+# ПРАВКА Task 3.4 (разработчик, не тестер): заглушка-спрайт (SPRITE_BGR,       #
+# диффовый детектор) заменена реальным движком line_sim — контракт задачи     #
+# требует замены рендера, а этот файл пинил именно старое поведение. Список   #
+# изменений — в отчёте разработчика (коммит Task 3.4): убран импорт           #
+# SPRITE_BGR (символа больше нет); добавлены хелперы фикстур-каталога и       #
+# детерминированного спавна ОДНОГО объекта (interval настолько мал, что ЛЮБОЙ #
+# реальный wall-clock зазор между produce() пересекает срок — тот же приём,   #
+# что уже используют hazard-тесты Services/line_sim/tests); тела              #
+# test_sprite_moves_with_encoder и test_stale_world_freezes_and_warns         #
+# переписаны на цвет объекта каталога вместо SPRITE_BGR, с сохранением        #
+# точной аналитической формулы смещения там, где она осталась проверяемой     #
+# (spawn_encoder теперь внутренний и детерминирован постановкой теста, а не   #
+# конфиг-ключом). test_empty_world_frame_no_exception и                       #
+# test_no_forbidden_imports не менялись по существу (только убран            #
+# неиспользуемый импорт).                                                    #
+# --------------------------------------------------------------------------- #
+
+_SPAWN_INTERVAL_S = (1.0, 1.0)  # достаточно мал для одного sleep(1.2), достаточно велик,
+# чтобы остаток теста (без sleep + один явный sleep(0.05)) НЕ пересёк срок повторно
+
+
+def _make_fixture_catalog(tmp_path: Path, color_bgr: tuple[int, int, int]) -> Path:
+    """Каталог из одного класса `square` — непрозрачный 16x16 спрайт чистого цвета
+    (тот же приём, что Services/line_sim/tests/test_acceptance_3_4.py)."""
+    classes_dir = tmp_path / "classes"
+    class_dir = classes_dir / "square"
+    class_dir.mkdir(parents=True)
+    b, g, r = color_bgr
+    sprite_bgra = np.zeros((16, 16, 4), dtype=np.uint8)
+    sprite_bgra[:, :, 0] = b
+    sprite_bgra[:, :, 1] = g
+    sprite_bgra[:, :, 2] = r
+    sprite_bgra[:, :, 3] = 255
+    imwrite_unicode(class_dir / "sprite.png", sprite_bgra)
+    return classes_dir
+
+
+def _object_centroid_x(frame: np.ndarray, color_bgr: tuple[int, int, int]) -> float:
+    """Центр масс столбцов пикселей цвета объекта (в BGR — `item["frame"]` уже BGR)."""
+    mask = np.all(np.abs(frame.astype(int) - np.array(color_bgr)) <= 40, axis=2)
+    weights = mask.sum(axis=0).astype(float)
+    assert weights.sum() > 0, "объект цвета color_bgr в кадре не найден"
+    return float(np.average(np.arange(frame.shape[1]), weights=weights))
+
+
+def _spawn_one_object_at_encoder_zero(plugin: SceneSourcePlugin, state_proxy: "_FakeStateProxy", t0: float) -> None:
+    """Детерминированно заспавнить РОВНО один объект с `spawn_encoder=0`: мир создаётся
+    со значением 0 ДО первого produce() (взводит срок), затем produce() ПОСЛЕ
+    sleep(1.2) (> `_SPAWN_INTERVAL_S`) спавнит объект на текущем (всё ещё нулевом)
+    значении мира — тот же приём, что `test_render_does_not_tick_the_spawner`
+    (Services/line_sim/tests/test_acceptance_3_4.py): интервал (1с) заведомо больше
+    последующих шагов теста (без sleep + один explicit sleep(0.05)), поэтому второй
+    спавн НЕ происходит внутри этих же тестов."""
+    _push_creation(state_proxy, {"value": 0, "mm_s": 0.0}, t=t0)
+    plugin.produce()  # первый tick() только взводит срок
+    time.sleep(1.2)
+    plugin.produce()  # второй tick() спавнит объект, spawn_encoder = текущее значение мира (0)
 
 
 class _FakeStateProxy:
@@ -67,6 +127,7 @@ class _FakeStateProxy:
 
     def __init__(self) -> None:
         self._callbacks: list[Callable[[list[Delta]], None]] = []
+        self.set_calls: list[tuple[str, object]] = []
 
     def subscribe(
         self,
@@ -81,6 +142,28 @@ class _FakeStateProxy:
     def emit(self, deltas: list[Delta]) -> None:
         for cb in self._callbacks:
             cb(deltas)
+
+    def set(self, path: str, value: object) -> None:
+        """Task 3.4: плагин пишет `sim.objects` через `state_proxy.set()` — фейк просто
+        запоминает последнее значение (без реального дерева, без IPC)."""
+        self.set_calls.append((path, value))
+
+
+def _make_plugin_with_engine(
+    tmp_path: Path, color_bgr: tuple[int, int, int], cfg_overrides: dict | None = None
+) -> tuple[SceneSourcePlugin, MagicMock, _FakeStateProxy]:
+    """`_make_plugin()` + реальный движок line_sim: `preset_path` на фикстур-каталог
+    одного класса, `spawn_interval_s=_SPAWN_INTERVAL_S`, огромная `scene_length_mm`
+    (объект не деспавнится за время теста)."""
+    catalog_dir = _make_fixture_catalog(tmp_path, color_bgr)
+    return _make_plugin(
+        {
+            "preset_path": str(catalog_dir),
+            "spawn_interval_s": list(_SPAWN_INTERVAL_S),
+            "scene_length_mm": 1_000_000.0,
+            **(cfg_overrides or {}),
+        }
+    )
 
 
 def _make_plugin(cfg_overrides: dict | None = None) -> tuple[SceneSourcePlugin, MagicMock, _FakeStateProxy]:
@@ -127,21 +210,6 @@ def _frame_of(plugin: SceneSourcePlugin) -> np.ndarray:
     return frame
 
 
-def _sprite_centroid_x(frame: np.ndarray, reference: np.ndarray) -> float:
-    """Центр масс столбцов пикселей цвета спрайта (контракт ``SPRITE_BGR``).
-
-    Арбитраж ведущего 2026-09-22: прежний дифф против эталона на spawn давал два
-    пятна («ушёл отсюда» + «пришёл сюда») для любого спрайта, видимого на spawn, и
-    центр масс ложился между ними (98 px при формуле 144). ``reference`` оставлен в
-    сигнатуре, чтобы не трогать вызовы; ассерты и литералы тестов не менялись.
-    """
-    del reference
-    mask = np.all(np.abs(frame.astype(int) - np.array(SPRITE_BGR)) <= 40, axis=2)
-    weights = mask.sum(axis=0).astype(float)
-    assert weights.sum() > 0, "спрайт цвета SPRITE_BGR в кадре не найден"
-    return float(np.average(np.arange(frame.shape[1]), weights=weights))
-
-
 # --------------------------------------------------------------------------- #
 # Критерий: пустой мир -> кадр в исходной позиции, без исключения             #
 # --------------------------------------------------------------------------- #
@@ -162,25 +230,25 @@ def test_empty_world_frame_no_exception() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_sprite_moves_with_encoder() -> None:
-    """Пин: центр масс спрайта растёт монотонно и на литеральный px из
-    ``(encoder - spawn_encoder) * FACTOR_MM * px_per_mm`` (spawn_encoder=0, px_per_mm=1.0 —
-    заданы тестом в конфиге, см. докстринг файла).
-
-    Провал сегодня: ``ModuleNotFoundError``."""
-    plugin, _ctx, sp = _make_plugin()
+def test_sprite_moves_with_encoder(tmp_path: Path) -> None:
+    """Пин (обновлён Task 3.4 — см. блок правки выше файла): центр масс цвета объекта
+    растёт монотонно и на литеральный px из ``(encoder - spawn_encoder) * FACTOR_MM *
+    px_per_mm``, где ``spawn_encoder=0`` детерминировано постановкой теста
+    (``_spawn_one_object_at_encoder_zero`` — мир на нуле в момент, когда спавнер реально
+    создаёт объект), ``px_per_mm=1.0`` — из конфига."""
+    color_bgr = (0, 0, 255)
+    plugin, _ctx, sp = _make_plugin_with_engine(tmp_path, color_bgr)
 
     t0 = time.monotonic()
-    _push_creation(sp, {"value": 0, "mm_s": 50.0}, t=t0)
-    reference = _frame_of(plugin)
+    _spawn_one_object_at_encoder_zero(plugin, sp, t0)
 
-    _push_leaf_update(sp, value=1000, mm_s=50.0, t=t0 + 0.05)
+    _push_leaf_update(sp, value=1000, mm_s=50.0, t=time.monotonic())
     frame_1000 = _frame_of(plugin)
-    x_1000 = _sprite_centroid_x(frame_1000, reference)
+    x_1000 = _object_centroid_x(frame_1000, color_bgr)
 
-    _push_leaf_update(sp, value=2000, mm_s=50.0, t=t0 + 0.10)
+    _push_leaf_update(sp, value=2000, mm_s=50.0, t=time.monotonic())
     frame_2000 = _frame_of(plugin)
-    x_2000 = _sprite_centroid_x(frame_2000, reference)
+    x_2000 = _object_centroid_x(frame_2000, color_bgr)
 
     assert x_1000 < x_2000, f"центр масс не растёт монотонно: x(1000)={x_1000}, x(2000)={x_2000}"
 
@@ -199,30 +267,32 @@ def test_sprite_moves_with_encoder() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_stale_world_freezes_and_warns() -> None:
-    """Пин: значение мира старше ``stale_ms`` -> позиция спрайта НЕ экстраполируется между
-    двумя последовательными кадрами (центр масс не двигается), и ``ctx.log_warning`` вызван
-    хотя бы раз (якорь существования — не привязываюсь к тексту сообщения, см. память тестера).
-
-    Провал сегодня: ``ModuleNotFoundError``."""
-    plugin, ctx, sp = _make_plugin()
+def test_stale_world_freezes_and_warns(tmp_path: Path) -> None:
+    """Пин (обновлён Task 3.4 — см. блок правки выше файла): значение мира старше
+    ``stale_ms`` -> позиция объекта НЕ экстраполируется между двумя последовательными
+    кадрами (центр масс не двигается), и ``ctx.log_warning`` вызван хотя бы раз (якорь
+    существования — не привязываюсь к тексту сообщения, см. память тестера)."""
+    color_bgr = (0, 0, 255)
+    plugin, ctx, sp = _make_plugin_with_engine(tmp_path, color_bgr)
 
     t0 = time.monotonic()
-    _push_creation(sp, {"value": 0, "mm_s": 50.0}, t=t0)
-    reference = _frame_of(plugin)
+    _spawn_one_object_at_encoder_zero(plugin, sp, t0)
 
-    # Значение "протухло" на 10с при stale_ms=200 (мс) — заведомо устарело.
+    # Значение "протухло" на 10с при stale_ms=200 (мс) — заведомо устарело. value=200
+    # (не 5000, как в исходном пине заглушки) — с реальным движком (конечная камера,
+    # без бесконечной ленты по модулю) смещение обязано остаться внутри кадра 640 px,
+    # иначе объект уезжает за кадр и центроид искать не в чем.
     stale_t = time.monotonic() - 10.0
-    _push_leaf_update(sp, value=5000, mm_s=50.0, t=stale_t)
+    _push_leaf_update(sp, value=200, mm_s=50.0, t=stale_t)
 
     frame_a = _frame_of(plugin)
     time.sleep(0.05)
     frame_b = _frame_of(plugin)
 
-    x_a = _sprite_centroid_x(frame_a, reference)
-    x_b = _sprite_centroid_x(frame_b, reference)
+    x_a = _object_centroid_x(frame_a, color_bgr)
+    x_b = _object_centroid_x(frame_b, color_bgr)
     assert x_a == pytest.approx(x_b, abs=0.01), (
-        f"позиция спрайта сместилась между двумя кадрами на устаревшем значении: {x_a} -> {x_b}"
+        f"позиция объекта сместилась между двумя кадрами на устаревшем значении: {x_a} -> {x_b}"
     )
     assert ctx.log_warning.called, "ctx.log_warning не был вызван на устаревшем значении мира"
 

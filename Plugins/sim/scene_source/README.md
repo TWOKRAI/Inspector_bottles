@@ -1,14 +1,19 @@
 # Plugins/sim/scene_source — источник кадров сцены сима
 
-Task 2.2 плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/line-sim/phase-2-belt-truth.md).
+Task 2.2 плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/line-sim/phase-2-belt-truth.md),
+подключение реального движка — Task 3.4 плана [`plans/line-sim/phase-3-object-engine.md`](../../../plans/line-sim/phase-3-object-engine.md).
 
 ## Назначение
 
 Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](../../sources/synthetic_frame_source/README.md)):
-фон + **один** тестовый спрайт-заглушка, положение которого следует за
-энкодером ленты из общего мира (`sim.belt.*`, публикует
-[`Plugins/sim/robot_host`](../robot_host/README.md)). Реальные объекты, слои,
-спавн/деспавн — Ф3.
+фон + объекты движка [`Services.line_sim`](../../../Services/line_sim/README.md)
+(`ObjectSpawner` + `SceneCompositor`), положение которых следует за энкодером
+ленты из общего мира (`sim.belt.*`, публикует
+[`Plugins/sim/robot_host`](../robot_host/README.md)). **Заглушка-спрайт Task 2.2
+(`_draw_sprite`, `SPRITE_BGR`, бесконечная лента по модулю) удалена Task 3.4** —
+камера теперь конечная (`camera_rect` фиксирован конфигом ширины/высоты кадра),
+объект, уехавший за край, просто не рисуется, деспавн — по `scene_length_mm`
+(Task 3.3), а не по модулю периода кадра.
 
 ## Чтение мира — подпиской, не `get()`
 
@@ -28,35 +33,56 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 | Ключ | Дефолт | Смысл |
 |---|---|---|
 | `resolution_width` / `resolution_height` | `640` / `480` | размер кадра |
-| `spawn_encoder` | `0` | точка отсчёта для смещения (`x_px = (encoder - spawn_encoder) * FACTOR_MM * px_per_mm`) |
+| `spawn_encoder` | `0` | значение энкодера, предполагаемое ДО первой дельты из мира |
 | `px_per_mm` | `1.0` | масштаб мм → px |
+| `belt_y_px` | `resolution_height / 2` | вертикальная линия ленты в кадре |
+| `spawn_interval_s` | `[2.0, 4.0]` | диапазон интервала спавна объектов (`ObjectSpawner`, Task 3.3) |
+| `scene_length_mm` | `(resolution_width / px_per_mm) * 2` | длина видимой зоны — за ней объект деспавнится |
+| `defect_probability` | `0.0` | вероятность дефект-слоя `"damaged"` (Task 3.2) |
+| `preset_path` | нет (движок недоступен) | путь к каталогу классов (`Services.dataset_gen.core.catalog.SpriteCatalog`) |
 | `stale_ms` | `500` | порог протухания значения мира (мс) |
-| `seed` | `0` | оттенок фона (детерминированно) — задел на Ф3, сегодня только цвет |
+| `seed` | `0` | seed `np.random.default_rng` движка (класс/угол/дефект объектов) |
+| `camera_id` | `0` | попадает в `item["camera_id"]` (форма как у боевых источников) |
 
-## Положение спрайта (решение ведущего 2026-09-21 — лента бесконечна)
+**`preset_path` относительный — резолвится от КОРНЯ РЕПОЗИТОРИЯ, не от CWD процесса**
+(фикс ревью Task 3.4, P5): `Path(__file__).resolve().parents[3]` от `plugin.py`. Раньше
+`ScenePreset(catalog_dir=preset_path)` строился напрямую (резолюцию относительных путей
+умеет только `ScenePreset.from_yaml`, не голый конструктор), поэтому один и тот же
+`pipeline.yaml` давал движок то готовым, то fallback-на-фон — в зависимости от того,
+из какого каталога запущен процесс. `data/` — gitignored: на свежем клоне репозитория
+демо-каталог нужно сгенерировать явно (`python -m Services.line_sim.tools.make_demo_catalog
+--out data/line_sim/demo_catalog`), иначе `preset_path` не существует и движок падает в
+fallback (см. ниже).
 
-Спрайт — квадрат `32×32` px, вертикально центрированный, цвет — контрактная
-константа `SPRITE_BGR = (0, 0, 255)` (BGR), **экспортируется из `plugin.py`**:
-живой тест находит спрайт цветовой маской, не общим диффом кадра.
+## Рендер (Task 3.4 — движок `Services.line_sim`)
 
-`x_px` — центр квадрата: `x_left = ((x_px + 16) % (width + 32)) - 32` — БЕЗ зажима, лента
-бесконечна: на `x_px=0` видна правая половина квадрата, дальше едет слева направо, выезжает за правый край и через один
-период снова въезжает слева.
+`configure()` собирает `ScenePreset(catalog_dir=preset_path, defect_probability=...)` →
+`ObjectFactory` → `ObjectSpawner(interval_s=spawn_interval_s, scene_length_mm=...)` →
+`SceneCompositor(spawner, px_per_mm, belt_y_px)`. `produce()`: `spawner.tick(now_encoder=
+<из мира>, now_wall_s=time.monotonic(), rng=self._rng)` (исключение фабрики ловится, лог
+де-дублирован — не чаще раза в секунду, кадр отдаётся с прежней сценой) → `compositor.
+render(...)` → `cv2.cvtColor(RGB2BGR)` → `item["frame"]`. `rng = np.random.default_rng(seed)`
+живёт в плагине — единственный producer, у него часы и rng (`SceneCompositor.render()` их
+не трогает, LS-009).
 
-**Заменяет прежнюю схему** («один столбец, задний край, зажат у правого
-края») — та была подогнана под diff-метод офлайн-приёмки тестера и ломалась
-вживую: при `px_per_mm=1.0` и скорости ленты ~100 мм/с спрайт пересекал
-кадр (640 px) за ~6 с и приклеивался к зажиму у правого края — к моменту
-живого MJPEG-замера он был там уже дольше, чем идёт сам замер («спрайт не
-сдвинулся», разобрано в отчёте разработчика `docs/reviews/2026-09-21_task-2.2-developer.md`).
+**Fallback на фон, если движок собрать не удалось** (`preset_path` не задан, каталог не
+существует, пресет невалиден) — `configure()` ловит исключение сборки, логирует ОДИН раз
+через `ctx.log_error` и оставляет `self._compositor = None`; `produce()` в этом случае
+отдаёт кадр одного фона без исключений — до конца жизни процесса, без движка.
 
-**Ломает точное числовое совпадение офлайн-теста тестера**
-(`test_scene_source_acceptance.py::test_sprite_moves_with_encoder`, диф
-против эталона ожидает центр масс = буквально `(encoder-spawn)*FACTOR_MM*px_per_mm`
-— с квадратом 32×32 центр масс сдвинут на пол-ширины квадрата от формулы,
-вне допуска ±2px). Файл тестера не правился (запрет брифа) — красный тест
-это ОЖИДАЕМОЕ расхождение схем, зафиксированное решением ведущего, не
-дефект. Остальные 3 теста acceptance-файла и все 4 hazard-теста — зелёные.
+**`sim.objects` в общем мире** — паспорта активных объектов, публикуются ТОЛЬКО при смене
+МНОЖЕСТВА активных `object_id` (спавн/деспавн), не на каждый кадр:
+`ctx.state_proxy.set("sim.objects", {object_id: passport.to_dict(), ...})`. Позиция объекта
+в мир не пишется — вычисляется потребителем из `sim.belt.encoder` и `passport.spawn_encoder`
+(`Services.line_sim.core.belt.encoder_to_offset_mm`).
+
+**Заменяет заглушку Task 2.2** (квадрат `32×32`, константа `SPRITE_BGR`, бесконечная лента
+по модулю `((x_px + 16) % (width + 32)) - 32`) — снята целиком вместе с `_draw_sprite`.
+Камера теперь конечная: объект, уехавший за `camera_rect` (фиксирован размером кадра),
+просто не рисуется; деспавн — по `scene_length_mm` (Task 3.3), не по периоду кадра.
+`test_scene_source_hazards.py::test_sprite_wraps_past_right_edge_instead_of_parking`
+(пинил именно бесконечную ленту заглушки) снят вместе с поведением — тест автора, не
+независимого тестера, см. блок правки в файле.
 
 ## Протухшее значение
 
@@ -73,7 +99,8 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 `multiprocess_prototype` (принцип 5 видения line-sim: модели не знают друг
 друга) — проверено `tests/test_scene_source_acceptance.py::test_no_forbidden_imports`.
 
-## Out of scope (Task 2.2)
+## Out of scope
 
-Несколько объектов, спавн/деспавн, реальные спрайты, слои (Ф3); переполнение
+Фотометрия (Ф4.3), fps/размер/цвет кадра (Ф4.1), ROI (Ф4.2) — `camera_rect` сейчас
+фиксированный конфиг размера кадра; робот забрал объект (Task 3.5); переполнение
 32-бит энкодера — см. [`apps/line_sim/README.md`](../../../apps/line_sim/README.md).

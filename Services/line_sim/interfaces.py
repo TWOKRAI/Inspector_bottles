@@ -107,9 +107,49 @@ class ObjectPassport:
     spawn_encoder: float
     layer_params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Сериализация на границе (Dict at Boundary, Task 3.4): только JSON-совместимые
+        типы — numpy-скаляры внутри `layer_params` приводятся к нативным `float`/`bool`/`int`
+        через `.item()`, остальное копируется как есть."""
+        return {
+            "object_id": self.object_id,
+            "class_name": self.class_name,
+            "angle_deg": float(self.angle_deg),
+            "defect": self.defect,
+            "spawn_encoder": float(self.spawn_encoder),
+            "layer_params": _json_safe(self.layer_params),
+        }
 
-class SceneCompositor(Protocol):
-    """Контракт сцены «лента с объектами» (реализация — Task 3.4).
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ObjectPassport:
+        """Обратное к `to_dict()`. Post: `from_dict(p.to_dict()) == p`."""
+        return cls(
+            object_id=data["object_id"],
+            class_name=data["class_name"],
+            angle_deg=float(data["angle_deg"]),
+            defect=data["defect"],
+            spawn_encoder=float(data["spawn_encoder"]),
+            layer_params=dict(data.get("layer_params") or {}),
+        )
+
+
+def _json_safe(value: Any) -> Any:
+    """Рекурсивно привести numpy-скаляры (`np.float32`/`np.bool_`/…) к нативным типам
+    через `.item()` — контейнеры (`dict`/`list`) обходятся, остальное не трогается."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+class SceneCompositorProtocol(Protocol):
+    """Контракт сцены «лента с объектами». Реализация — `Services.line_sim.core.
+    scene_compositor.SceneCompositor` (Task 3.4); имя Protocol переименовано из
+    `SceneCompositor` в `SceneCompositorProtocol` при подключении конкретного класса
+    (LS-009), чтобы оба символа сосуществовали в публичном API без коллизии имён.
 
     Координаты `camera_rect` и единицы уточняет Task 3.4; здесь фиксирована форма.
     """
