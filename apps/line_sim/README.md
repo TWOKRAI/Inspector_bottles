@@ -21,12 +21,28 @@ FW_SHM_OWNER_INCARNATION=1 BACKEND_CTL=1 BACKEND_CTL_PORT=8766 \
 > Это дефект фреймворка, а не сима; задача записана в `docs/claude/OPEN_QUESTIONS.md`
 > («SHM-кольца на POSIX…»). Из рецепта флаг не задаётся — только env при запуске.
 
-Поднимает три процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
+Поднимает четыре процесса: `robot`, держащий `SimRobotServer` (Modbus TCP,
 `127.0.0.1:5021`) и публикующий энкодер ленты в общий мир (см. ниже);
 `camera` со `SceneSourcePlugin` (Task 2.2), который рисует тестовый спрайт по
-энкодеру и по `chain_targets` отдаёт кадры процессу `mjpeg`; и `mjpeg` с
-`MjpegSinkPlugin`, раздающим последний кадр по HTTP MJPEG на `127.0.0.1:8091`.
-Остановка — SIGINT (Ctrl+C) или `backend_ctl` `system_command shutdown`.
+энкодеру и по `chain_targets` отдаёт кадры процессу `mjpeg`; `mjpeg` с
+`MjpegSinkPlugin`, раздающим последний кадр по HTTP MJPEG на `127.0.0.1:8091`;
+и `pult` с `PultWebPlugin` (Task 2.3b) — веб-страница на `127.0.0.1:8092` с
+картинкой из `mjpeg` и ручками ленты. Остановка — SIGINT (Ctrl+C) или
+`backend_ctl` `system_command shutdown`.
+
+## Три клиента одной командной поверхности ленты (Task 2.3)
+
+Лентой `robot` (команды `belt.run`/`belt.stop`/`belt.jog`/`belt.calibrate`/
+`belt.status`, Task 2.3a) управляют **три независимых клиента**: веб-страница
+пульта (`pult`, Task 2.3b, эта задача), `backend_ctl`/MCP-инструменты и
+прототип через свой Modbus-мост ПЧ (`multiprocess_prototype/recipes/letter_robot_sim.yaml`).
+Арбитраж — как у реального ПЧ с двумя мастерами: один mailbox, побеждает
+последний записавший, замков и приоритетов нет (см. DESIGN 2.3a п.6,
+[`Plugins/sim/robot_host/README.md`](../../Plugins/sim/robot_host/README.md)).
+Пульт не хранит состояние ленты сам — каждая ручка форвардит команду `robot`
+и опрашивает `belt.status`, поэтому вопрос «кто последний записал» решается
+на стороне `robot`, не пульта. Подробности пульта —
+[`Plugins/sim/pult_web/README.md`](../../Plugins/sim/pult_web/README.md).
 
 ## Общий мир (Task 2.2)
 
@@ -57,6 +73,7 @@ FW_SHM_OWNER_INCARNATION=1 BACKEND_CTL=1 BACKEND_CTL_PORT=8766 \
 | `8766` | `backend_ctl` | сим (`apps/line_sim`) |
 | `5021` | Modbus TCP | сим-робот (`SimRobotHostPlugin`) |
 | `8091` | MJPEG | сим-камера (`MjpegSinkPlugin`, процесс `camera`, Task 1.2) |
+| `8092` | HTTP (веб-пульт) | пульт ленты (`PultWebPlugin`, процесс `pult`, Task 2.3b) |
 
 ## Как направить прототип на сим
 

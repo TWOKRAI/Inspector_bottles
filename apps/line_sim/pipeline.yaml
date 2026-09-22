@@ -83,6 +83,23 @@ processes:
         host: 127.0.0.1
         port: 8091
 
+  # Task 2.3b: веб-пульт ленты — третий клиент командной поверхности belt.*
+  # (владелец, backend_ctl, прототип — см. apps/line_sim/README.md). Портов
+  # данных нет (side-effect плагин), поэтому wires не заводим — форма как у
+  # `robot`/`mjpeg`, но без входа в chain_targets.
+  - process_name: pult
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sim.pult_web.plugin.PultWebPlugin
+        plugin_name: pult_web
+        category: control
+        host: 127.0.0.1
+        port: 8092
+        mjpeg_url: http://127.0.0.1:8091/
+        robot_process: robot
+        timeout_s: 1.0
+
 # Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).
 # `type: memory` обязателен — без него под тем же именем поднимется ФАЙЛОВЫЙ
 # приёмник без tail(). Ось `channels` скоупа замещающая: console/system_file
