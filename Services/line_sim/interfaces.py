@@ -22,7 +22,8 @@ LayerMode = Literal["static", "augmented", "defect"]
 RangeF = tuple[float, float]
 
 # Источник спрайта: сырой RGBA-массив, callable без аргументов (зовётся один раз
-# на объект) или строка-идентификатор (форма на dict-границе; загрузка по id — Task 3.2).
+# на объект) или строка-идентификатор (форма на dict-границе; загрузку по id делает
+# `ObjectFactory`, Services.line_sim.core.factory).
 SpriteSource = str | np.ndarray | Callable[[], np.ndarray]
 
 AUGMENT_FIELDS: tuple[str, ...] = ("offset_x_px", "offset_y_px", "angle_deg", "scale", "hue_shift_deg")

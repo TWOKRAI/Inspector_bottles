@@ -1,15 +1,20 @@
 """Автор-хазард-тесты Task 3.2 — ObjectFactory + catalog_bridge + defect-слой.
 
 Что может сломаться именно в ЭТОМ механизме (не общий acceptance):
-    - force_defect_next() — флаг потребляется безусловно в начале make(), даже если
-      make() дальше падает (пин выбора: "следующий вызов", не "следующий успешный").
+    - force_defect_next() — флаг читается в начале make(), но гасится ТОЛЬКО после
+      успешной постройки LayeredObject: транзитная ошибка каталога не должна съедать
+      нажатие оператора (ревью 2026-09-22, репродукция флаки-каталога).
     - фабрика не мутирует спрайты каталога (общая ссылка `catalog._sprites` живёт
       между вызовами make() — порча одного объекта испортила бы все следующие).
     - дефект-заплатка строится под РЕАЛЬНЫЙ размер базового спрайта, включая
       неквадратный (h != w) — иначе occlusion уехал бы за канву или дал неверную
       долю площади.
+    - дефект-заплатка замаскирована альфой базового спрайта — на круглом диске не
+      красит прозрачные углы квадратного холста (ревью 2026-09-22).
     - относительный catalog_dir в YAML резолвится от каталога ФАЙЛА, а не от текущего
       cwd процесса — иначе `from_yaml` работал бы только при запуске из одного места.
+    - имена "base"/"damaged" зарезервированы за ObjectFactory — пресет с catalog_dir
+      отклоняет их на границе, а не даёт make() падать глубже (ревью 2026-09-22).
 """
 
 from __future__ import annotations
@@ -50,27 +55,40 @@ def _write_preset_yaml(tmp_path: Path, catalog_dir_name: str, **kwargs) -> Path:
 
 
 # --------------------------------------------------------------------------
-# force_defect_next() — одноразовость флага под исключением
+# force_defect_next() — выживает транзитную ошибку каталога
 # --------------------------------------------------------------------------
 
 
-def test_force_defect_flag_consumed_even_if_make_raises(tmp_path):
-    """Пин выбора: флаг потребляется В НАЧАЛЕ make(), безусловно — если каталог не
-    задан (make() гарантированно падает ValueError), флаг всё равно потрачен, и
-    следующий make() на факторе с каталогом брак уже не форсирует."""
-    layer_sprite = tmp_path / "layer.png"
-    rgba = np.zeros((8, 8, 4), dtype=np.uint8)
-    rgba[:, :, 3] = 255
-    imwrite_unicode(layer_sprite, cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
+def test_force_defect_survives_transient_catalog_failure(tmp_path):
+    """Ревью 2026-09-22: оператор жмёт «выпусти брак сейчас», первый make() падает по
+    транзитной причине (каталог/диск моргнул) — флаг НЕ должен сгорать впустую.
+    Наблюдаем только публичный API (passport.defect), без обращения к приватному полю."""
+    _write_fixture_catalog(tmp_path / "catalog", CLASS_COLORS)
+    preset = ScenePreset.from_yaml(_write_preset_yaml(tmp_path, "catalog"))
+    factory = ObjectFactory(preset)
 
-    preset = ScenePreset.from_dict(
-        {"catalog_dir": None, "layers": [{"name": "l", "mode": "static", "sprite_source": str(layer_sprite)}]}
-    )
-    factory = ObjectFactory(preset)  # catalog_dir=None -> _catalog is None, layers загрузились нормально
+    original_get_sprite = factory._catalog.get_sprite
+    calls = {"n": 0}
+
+    def flaky_get_sprite(class_index, rng):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("transient disk hiccup")
+        return original_get_sprite(class_index, rng)
+
+    factory._catalog.get_sprite = flaky_get_sprite  # monkeypatch каталога, не приватного поля фабрики
+
     factory.force_defect_next()
-    with pytest.raises(ValueError):
-        factory.make(object_id="x", spawn_encoder=0.0, rng=np.random.default_rng(0))
-    assert factory._force_defect_pending is False  # флаг уже израсходован, не "восстановился"
+    with pytest.raises(OSError):
+        factory.make(object_id="fail", spawn_encoder=0.0, rng=np.random.default_rng(0))
+
+    # Флаг пережил транзитный сбой — следующий УСПЕШНЫЙ make() всё равно получает брак.
+    ok = factory.make(object_id="ok", spawn_encoder=0.0, rng=np.random.default_rng(1))
+    assert ok.passport.defect == "damaged"
+
+    # А следующий за ним — уже нет (флаг одноразовый, не залип).
+    after = factory.make(object_id="after", spawn_encoder=1.0, rng=np.random.default_rng(2))
+    assert after.passport.defect is None
 
 
 # --------------------------------------------------------------------------
@@ -157,6 +175,62 @@ def test_relative_catalog_dir_resolved_from_yaml_dir_not_cwd(tmp_path, monkeypat
 
 
 # --------------------------------------------------------------------------
+# Зарезервированные имена слоёв "base"/"damaged"
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("reserved_name", ["base", "damaged"])
+def test_reserved_layer_name_rejected_with_catalog(tmp_path, reserved_name):
+    """Ревью 2026-09-22: раньше пресет+фабрика собирались ОК, а падал только make() на
+    дубликате имени слоя — ошибка должна быть на границе пресета, с понятным текстом."""
+    from pydantic import ValidationError
+
+    _write_fixture_catalog(tmp_path / "catalog", CLASS_COLORS)
+    layer_sprite = tmp_path / "layer.png"
+    rgba = np.zeros((8, 8, 4), dtype=np.uint8)
+    rgba[:, :, 3] = 255
+    imwrite_unicode(layer_sprite, cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
+
+    with pytest.raises(ValidationError, match=reserved_name):
+        ScenePreset.from_dict(
+            {
+                "catalog_dir": str(tmp_path / "catalog"),
+                "layers": [{"name": reserved_name, "mode": "static", "sprite_source": str(layer_sprite)}],
+            }
+        )
+
+
+def test_reserved_layer_name_allowed_without_catalog():
+    """Без catalog_dir (layers-only пресет) имя "base" остаётся легальным — коллизии нет,
+    ObjectFactory в эту ветку не заходит (test_acceptance_3_1.py уже использует "base" так)."""
+    preset = ScenePreset.from_dict(
+        {"catalog_dir": None, "layers": [{"name": "base", "mode": "static", "sprite_source": "fixture://x"}]}
+    )
+    assert preset.layers[0].name == "base"
+
+
+# --------------------------------------------------------------------------
+# Дефект-заплатка замаскирована альфой базы (круглый диск)
+# --------------------------------------------------------------------------
+
+
+def test_defect_blob_masked_by_base_alpha_round_disk(tmp_path):
+    """Ревью 2026-09-22: круглый диск на квадратном холсте (alpha=0 в углах) — заплатка
+    не красит прозрачные углы, даже если прямоугольник occlusion геометрически туда лезет."""
+    size = 64
+    base = np.zeros((size, size, 4), dtype=np.uint8)
+    base[:, :, :3] = 180
+    mask = np.zeros((size, size), dtype=np.uint8)
+    cv2.circle(mask, (size // 2, size // 2), int(0.7 * size / 2), 255, -1)  # диск, не квадрат
+    base[:, :, 3] = mask
+
+    blob = ObjectFactory._build_defect_blob(base)
+    blob_opaque = blob[:, :, 3] > 0
+    outside_base = base[:, :, 3] == 0
+    assert int(np.count_nonzero(blob_opaque & outside_base)) == 0  # ни одного пикселя мимо базы
+
+
+# --------------------------------------------------------------------------
 # [lead 3.2, break-injection K4/K10] — свойства, которые выживали под инъекцией
 # --------------------------------------------------------------------------
 
@@ -164,10 +238,18 @@ def test_relative_catalog_dir_resolved_from_yaml_dir_not_cwd(tmp_path, monkeypat
 def test_defect_last_with_augmented_extra_layer(tmp_path):
     """LS-006/LS-007: defect-слой стоит ПОСЛЕ слоёв пресета. Без доп. слоя порядок не наблюдаем
     (K4 выживал); с augmented-слоем перестановка сдвигает его rng-подпоток, и «defect=None
-    побитово равен объекту без defect-слоя» ломается. Порядок трат rng в make() — контракт seed:
-    класс → угол → эталон → LayeredObject."""
+    побитово равен объекту без defect-слоя» ломается.
+
+    Эталон — draw-order-free: класс/угол берутся из ГОТОВОГО паспорта объекта фабрики (не
+    повторным розыгрышем в предполагаемом порядке трат rng — порядок трат make() НЕ часть
+    контракта seed, см. LS-007), а рендер строится СВЕЖИМ `np.random.default_rng(seed)` —
+    `Generator.spawn()` даёт независимые подпотоки вне зависимости от того, что было прочитано
+    из родителя раньше (проверено вручную: `rng.spawn(2)[1]` не меняется от лишних draw()
+    перед spawn()), поэтому эталон валиден без знания внутреннего порядка вызовов factory.make().
+    Свойство, которое реально проверяется — «damaged» последним в списке слоёв: если временно
+    переставить его перед `label` в `factory.py`, этот тест краснеет (проверено вручную и
+    отменено — production-код не меняется этим тестом)."""
     from Services.line_sim import LayerAugment, LayeredObject, LayerSpec, ObjectPassport
-    from Services.line_sim.core.catalog_bridge import load_catalog
 
     _write_fixture_catalog(tmp_path / "catalog", {"red": (200, 30, 30), "green": (30, 200, 30)})
     label = np.zeros((10, 10, 4), dtype=np.uint8)
@@ -181,16 +263,20 @@ def test_defect_last_with_augmented_extra_layer(tmp_path):
     }
     preset = ScenePreset.from_yaml(_write_preset_yaml(tmp_path, "catalog", layers=[extra], defect_probability=0.0))
     factory = ObjectFactory(preset)
+
+    from Services.line_sim.core.catalog_bridge import load_catalog
+
     catalog = load_catalog(tmp_path / "catalog")
 
     for seed in range(5):
         obj = factory.make(object_id="o", spawn_encoder=0.0, rng=np.random.default_rng(seed))
         assert obj.passport.defect is None
 
-        rng = np.random.default_rng(seed)
-        idx = int(rng.integers(2))
-        angle = float(rng.uniform(0.0, 360.0))
-        base = catalog.get_sprite(idx, rng)
+        # База — эталон УЖЕ ИЗВЕСТНОГО класса объекта (из паспорта), не повторный розыгрыш
+        # индекса классом фабрики; фикстура даёт по одному эталону на класс, alpha=255 везде.
+        class_index = catalog.class_names.index(obj.passport.class_name)
+        base = catalog.sprites(class_index)[0]
+
         layers = [
             LayerSpec(name="base", mode="static", sprite_source=base),
             LayerSpec(
@@ -201,10 +287,13 @@ def test_defect_last_with_augmented_extra_layer(tmp_path):
             ),
         ]
         passport = ObjectPassport(
-            object_id="o", class_name=obj.passport.class_name, angle_deg=angle, defect=None, spawn_encoder=0.0
+            object_id="o",
+            class_name=obj.passport.class_name,
+            angle_deg=obj.passport.angle_deg,
+            defect=None,
+            spawn_encoder=0.0,
         )
-        expected = LayeredObject(passport, layers, rng)
-        assert obj.passport.angle_deg == angle
+        expected = LayeredObject(passport, layers, np.random.default_rng(seed))
         assert obj.passport.layer_params["label"] == expected.passport.layer_params["label"]
         assert np.array_equal(obj.render(), expected.render())
 

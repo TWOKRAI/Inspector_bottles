@@ -16,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from Services.line_sim.interfaces import LayerSpec
 
+# Имена слоёв, которые ObjectFactory ставит сама (база и дефект) — пресет их занимать
+# не может, иначе make() падает на дубликате имени слоя (LayeredObject это уже проверяет,
+# но ошибка должна быть на границе пресета, с понятным текстом, а не в недрах фабрики).
+_RESERVED_LAYER_NAMES = frozenset({"base", "damaged"})
+
 
 class ScenePreset(BaseModel):
     """Пресет сцены: каталог классов и/или дополнительные слои объекта.
@@ -56,6 +61,17 @@ class ScenePreset(BaseModel):
     def _catalog_or_layers(self) -> ScenePreset:
         if self.catalog_dir is None and not self.layers:
             raise ValueError("пресет без catalog_dir и без layers: нечего рисовать — нужен хотя бы один источник")
+        # Зарезервированные имена мешают только вместе с catalog_dir: ObjectFactory сама
+        # добавляет слои "base"/"damaged" вокруг layers пресета (LS-007), и только тогда
+        # имя коллидирует — до 3.2 слой "base" был легальным именем в layers-only пресете
+        # (test_acceptance_3_1.py), это не трогаем.
+        if self.catalog_dir is not None:
+            reserved_used = sorted({layer.name for layer in self.layers if layer.name in _RESERVED_LAYER_NAMES})
+            if reserved_used:
+                raise ValueError(
+                    f"слои {reserved_used}: имена зарезервированы ObjectFactory (база и дефект-слой "
+                    f"ставятся под именами {sorted(_RESERVED_LAYER_NAMES)}) — переименуйте слои пресета"
+                )
         return self
 
     @classmethod

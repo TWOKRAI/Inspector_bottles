@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
 import numpy as np
 
-from Services.dataset_gen.core.catalog import SpriteCatalog
+from Services.dataset_gen.core.catalog import SpriteCatalog, imread_unicode
 from Services.dataset_gen.core.config import CatalogConfig
 
 
@@ -28,9 +29,11 @@ def load_catalog(classes_dir: str | Path) -> SpriteCatalog:
 
 
 def load_image_rgba(path: str | Path) -> np.ndarray:
-    """Загрузить одиночное RGBA-изображение доп. слоя пресета.
-
-    Переиспользует `SpriteCatalog._load_sprite` (Windows-safe non-ASCII, BGRA->RGBA,
-    проверка альфа-канала) — то же соглашение, что у эталонов классов, не переписывается.
+    """Загрузить одиночное RGBA-изображение доп. слоя пресета — то же соглашение, что
+    у эталонов класса (Windows-safe non-ASCII через `imread_unicode`, BGRA -> RGBA,
+    обязательный альфа-канал), но через ПУБЛИЧНУЮ функцию каталога, не приватный метод.
     """
-    return SpriteCatalog._load_sprite(Path(path))  # noqa: SLF001 — намеренное переиспользование
+    img = imread_unicode(path, cv2.IMREAD_UNCHANGED)
+    if img.ndim != 3 or img.shape[2] != 4:
+        raise ValueError(f"Изображение слоя {path}: нужен альфа-канал (RGBA), получено shape={img.shape}")
+    return cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)

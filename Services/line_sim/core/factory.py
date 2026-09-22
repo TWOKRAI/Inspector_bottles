@@ -59,12 +59,13 @@ class ObjectFactory:
     def make(self, object_id: str, spawn_encoder: float, rng: np.random.Generator) -> LayeredObject:
         """Собрать объект: класс и угол — из `rng`, слои — база + пресет + дефект (последним).
 
-        `force_defect_next()` потребляется ровно здесь, безусловно, в самом начале —
-        "следующий вызов", а не "следующий успешный вызов": если `LayeredObject` ниже
-        поднимет исключение, флаг всё равно уже израсходован (пин см. test_hazards_3_2.py).
+        `force_defect_next()` ТОЛЬКО читается здесь (`forced`), а гасится лишь ПОСЛЕ того,
+        как `LayeredObject` успешно построен — транзитная ошибка (например каталог на сетевом
+        диске моргнул на одном вызове) не должна съедать нажатие оператора: следующий успешный
+        `make()` обязан получить дефект, а не "он как будто сработал и пропал" (пин ревью,
+        см. test_hazards_3_2.py — репродукция флаки-каталога).
         """
         forced = self._force_defect_pending
-        self._force_defect_pending = False
 
         if self._catalog is None:
             raise ValueError(
@@ -93,15 +94,20 @@ class ObjectFactory:
             defect=_DEFECT_LAYER_NAME if forced else None,
             spawn_encoder=spawn_encoder,
         )
-        return LayeredObject(passport=passport, layers=layers, rng=rng)
+        obj = LayeredObject(passport=passport, layers=layers, rng=rng)
+        self._force_defect_pending = False  # гасим ТОЛЬКО после успеха — см. докстринг выше
+        return obj
 
     @staticmethod
     def _build_defect_blob(base_rgba: np.ndarray) -> np.ndarray:
         """RGBA-заплатка размера базового спрайта — непрозрачный тёмно-серый прямоугольник
-        (~35% меньшей стороны, смещён к верхнему левому углу), альфа=255 внутри, иначе 0.
+        (~35% меньшей стороны, смещён к верхнему левому углу), альфа=255 внутри, иначе 0 —
+        И дополнительно замаскированная альфой базового спрайта (`np.minimum`), так что пятно
+        никогда не красит область ЗА пределами объекта (круглый диск, а не квадратный спрайт
+        с прозрачными углами — без маски occlusion рисовал бы "грязь в воздухе").
 
         Строит НОВЫЙ массив (`np.zeros`) — `base_rgba` (спрайт каталога) не мутируется,
-        только читается ради `.shape`.
+        только читается ради `.shape` и альфы.
         """
         h, w = base_rgba.shape[:2]
         side = min(h, w)
@@ -117,5 +123,6 @@ class ObjectFactory:
         x1, y1 = min(w, x + size), min(h, y + size)
         alpha = np.zeros((h, w), dtype=np.uint8)
         alpha[y0:y1, x0:x1] = 255
+        alpha = np.minimum(alpha, base_rgba[:, :, 3])  # не красить мимо непрозрачной части базы
 
         return np.dstack([np.clip(rgb, 0, 255).astype(np.uint8), alpha])
