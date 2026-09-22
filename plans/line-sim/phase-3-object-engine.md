@@ -3,7 +3,23 @@
 Часть плана [`plan.md`](plan.md). Реализует «Объект — группа слоёв, а не картинка» из
 vision.md: движок объект-агностичен с первого дня, v1 наполняет его ТОЛЬКО контентом
 буквы-диска (бутылки — Deferred). Переиспользует низкоуровневые функции
-`Services/dataset_gen` напрямую (импорт, не форк) — см. Decisions log в `plan.md`.
+`Services/dataset_gen` напрямую (импорт, не форк) — см. [`decisions.md`](decisions.md).
+
+> **Дополнено 2026-09-22** (решения владельца: редактор слоёв мышью и числами, HTML + Qt —
+> [`phase-7-object-editor.md`](phase-7-object-editor.md); симулятор — headless-сервис, кадры потоком —
+> [`phase-1-vertical-slice.md`](phase-1-vertical-slice.md)). Что меняется в Ф3:
+> 1. **`LayerSpec` получает трансформ слоя** (`offset_xy_mm`, `scale`, `angle_offset_deg`) и
+>    диапазоны аугментации — дёшево сейчас, дорого после Ф4–Ф5; редактор Ф7 только пишет эти поля.
+> 2. **Одна конвенция координат** фиксируется здесь и проверяется тестом: угол **CCW** как в
+>    `dataset_gen.core.compose.rotate_expand`, центр поворота — центр слоя, масштаб равномерный,
+>    размеры в **мм** (пиксели — через `px_per_mm` только на рендере сцены). Qt (CW, Y вниз) и
+>    Fabric.js (CW) конвертируют у себя; иначе «повернул +10° в редакторе — поехало −10°».
+> 3. **Объект рендерится один раз при спавне** (слои, поворот, дефект, аугментация) и кэшируется
+>    как RGBA; кадр — только `composite` кэша по новой позиции. Это критерий приёмки 3.3/3.4, а не
+>    пожелание — иначе нагрузка, которой владелец опасался, приходит сама.
+> 4. **Task 3.4 перенацелена**: не `LineSimCameraPlugin.produce()` внутри прототипа (форма отменена
+>    08-31), а `LineSimScenePlugin` в процессе `scene` дерева симулятора (Task 1.2) → поток кадров.
+> 5. **Бюджет времени кадра — число**, не прилагательное: `render()` при 5 объектах ≤ 1/fps (3.4).
 
 ---
 
@@ -27,12 +43,19 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
 НЕСКОЛЬКО объектов на непрерывно движущуюся ленту — генуинно новая логика (не
 натягивать `DatasetEngine.generate_sample()` на многообъектную роль).
 
-**Files (новый пакет — module-contract new-full):**
+#### Files (Task 3.1, новый пакет — module-contract new-full)
+
 - `Services/line_sim/__init__.py` — публичный реэкспорт
 - `Services/line_sim/interfaces.py` — Protocol: `SceneCompositor` (`spawn`,
   `render_frame`, `despawn_stale`), `ObjectPassport` (dataclass: `object_id`,
   `class_name`, `angle_deg`, `defect: str | None`, `spawn_encoder`), `LayerSpec`
-  (dataclass: `mode: Literal["static","augmented","defect"]`, `sprite_source`, ...)
+  (dataclass: `mode: Literal["static","augmented","defect"]`, `sprite_source`,
+  **трансформ слоя** — `offset_xy_mm: tuple[float, float] = (0, 0)`, `scale: float = 1.0`,
+  `angle_offset_deg: float = 0.0`; z-order = порядок в списке; **диапазоны аугментации** для
+  `mode="augmented"` — `offset_jitter_mm`, `scale_range`, `angle_jitter_deg`, `hue_shift`
+  как `(lo, hi)`), `ObjectTemplate` (список `LayerSpec` + `size_mm` объекта + паспортные
+  правила; `to_dict`/`from_dict` + YAML round-trip через `ruamel.yaml` — с сохранением
+  комментариев, потому что редактор Ф7 будет писать в тот же файл, что правит человек)
 - `Services/line_sim/core/__init__.py`
 - `Services/line_sim/core/belt.py` — геометрия: `encoder_to_offset_mm(enc_now,
   spawn_enc) -> float` (реэкспорт `FACTOR_MM`/`BELT_UX`/`BELT_UY` из
@@ -46,7 +69,8 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
 - `Services/line_sim/tests/__init__.py`, `tests/test_belt.py`,
   `tests/test_layered_object.py`, `tests/test_preset.py`
 
-**Steps:**
+#### Steps (Task 3.1)
+
 1. Загрузить и применить skill `module-contract` (new-full) — README + Protocol +
    Pre/Post в докстрингах + contract-тесты, как требует STRICT-канон проекта для
    новых модулей.
@@ -61,19 +85,37 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
    (Lua/прошивка, `SimJournal`, здесь) — импортировать константы, не переопределять.
 4. `core/layered_object.py`: `LayeredObject.render()` — для каждого слоя в порядке
    (base → augmented-варианты → defect-вариант, если активен): взять RGBA-спрайт
-   (источник — `sprite_source`, реализация загрузки — Task 3.2), повернуть
-   (`dataset_gen.core.compose.rotate_expand`), обрезать (`crop_to_alpha`),
-   скомпоновать поверх предыдущего слоя (`composite`, БЕЗ фона — фон кладёт
-   `SceneCompositor`). Pre/Post в докстрингах: Pre — все слои одного паспорта имеют
-   согласованный `angle_deg`; Post — итоговый RGBA не пуст (alpha есть хотя бы у
-   одного пикселя).
-5. Contract-тесты (независимый `tester` пишет по acceptance criteria ниже, БЕЗ
+   (источник — `sprite_source`, реализация загрузки — Task 3.2), применить трансформ слоя
+   (`scale` → `fit_longest_side`/resize; угол объекта + `angle_offset_deg` →
+   `dataset_gen.core.compose.rotate_expand`; `offset_xy_mm` → смещение центра слоя
+   относительно центра объекта), обрезать (`crop_to_alpha`), скомпоновать поверх
+   предыдущего слоя (`composite`, БЕЗ фона — фон кладёт `SceneCompositor`). Pre/Post в
+   докстрингах: Pre — все слои одного паспорта имеют согласованный `angle_deg`; Post —
+   итоговый RGBA не пуст (alpha есть хотя бы у одного пикселя). **Конвенция координат —
+   в докстринге `LayerSpec`** (см. шапку фазы) и одним абзацем в `README.md` со ссылкой на
+   `compose.py`.
+5. `ObjectTemplate.to_yaml/from_yaml` — round-trip через `ruamel.yaml` (уже в зависимостях);
+   `render()` для `mode="augmented"` берёт значения из диапазонов через `rng` (как
+   `_uniform_val` в `dataset_gen`), для `static` — детерминированно.
+6. Contract-тесты (независимый `tester` пишет по acceptance criteria ниже, БЕЗ
    доступа к Steps выше и к реализации).
 
-**Acceptance criteria:**
-- [ ] `from Services.line_sim import ObjectPassport, LayerSpec, LayeredObject,
+#### Acceptance criteria (Task 3.1)
+
+- [ ] `from Services.line_sim import ObjectPassport, LayerSpec, ObjectTemplate, LayeredObject,
       ScenePreset` — импортируется без ошибок, без обязательного `torch`/`PySide6`
-      (только numpy/opencv/pydantic — как у `dataset_gen`).
+      (только numpy/opencv/pydantic/ruamel — как у `dataset_gen`).
+- [ ] **Трансформ слоя применяется:** объект из ДВУХ одинаковых слоёв, у второго
+      `offset_xy_mm=(10, 0)` — центр масс альфы второго слоя правее первого (bbox по альфе
+      различаются по X); `scale=0.5` у слоя — его bbox по альфе вдвое меньше (±1 px), чем при
+      `scale=1.0`; `angle_offset_deg=90` при `angle_deg=0` даёт тот же результат, что
+      `angle_offset_deg=0` при `angle_deg=90` (углы складываются).
+- [ ] **Конвенция направления поворота — литералом:** несимметричный спрайт (метка справа от
+      центра) при `angle_deg=+90` даёт метку **сверху** (CCW, ось Y вниз как в OpenCV) — тест
+      сравнивает с ожидаемой позицией пикселя, а не с выводом `rotate_expand` (иначе тест
+      согласится с любым ответом).
+- [ ] `ObjectTemplate.from_yaml(to_yaml(t))` даёт равный объект; YAML с комментарием сохраняет
+      комментарий после round-trip (байт-в-байт для файла из фикстуры).
 - [ ] `encoder_to_offset_mm(enc_now=1000, spawn_enc=1000) == 0.0`;
       `encoder_to_offset_mm(enc_now=1000 + N, spawn_enc=1000) == N * FACTOR_MM`
       (значение `FACTOR_MM` берётся из `Services.robot_comm.core.registers.
@@ -94,6 +136,8 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
 - [ ] `Services/line_sim/README.md` присутствует и описывает публичный контракт
       (символы из `interfaces.py`); `STATUS.md` и `DECISIONS.md` присутствуют
       (project rule #2).
+
+#### Границы (Task 3.1)
 
 **Out of scope:** реальный каталог `real_letters_disk` (Task 3.2), спавн-луп/поток
 объектов во времени (Task 3.3), подключение к `LineSimCameraPlugin` (Task 3.4),
@@ -206,8 +250,16 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
    потенциально с высокой частотой (до fps камеры) — убедиться, что список активных
    объектов не мутируется во время итерации (типичная ловушка `list` vs `deque`/копия
    при рендере).
+5. **Рендер один раз при спавне (2026-09-22):** в момент спавна `ObjectSpawner` вызывает
+   `LayeredObject.render(rng)` ОДИН раз и хранит результат (RGBA + паспорт) в активном
+   объекте; `SceneCompositor` (3.4) читает кэш, не рендерит заново. Пересчёт — только при
+   явном `invalidate()` (горячее применение шаблона из редактора Ф7.4 — на СЛЕДУЮЩИЙ спавн,
+   текущие объекты не перерисовываются).
 
 **Acceptance criteria:**
+- [ ] **Рендер объекта не повторяется по кадрам:** спай на `LayeredObject.render` (или счётчик
+      вызовов в стабе слоя) — после спавна одного объекта и 100 вызовов `active_objects()` /
+      рендеров сцены число вызовов `render` == 1.
 - [ ] С `interval_s=[0.5, 0.5]` (фиксированный интервал для детерминизма теста) и
       `now_wall_s`, продвигаемым вручную на 2.5с шагами по 0.5с — после 5 шагов
       создано РОВНО 5 объектов (не 4, не 6 — граница по включению/исключению
@@ -239,21 +291,29 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
 
 ---
 
-### Task 3.4 — Подключить движок к `LineSimCameraPlugin.produce()`
+### Task 3.4 — Подключить движок к `LineSimScenePlugin.produce()` в дереве симулятора
+
+> **Перенацелена 2026-09-22:** прежний адресат — `LineSimCameraPlugin` внутри прототипа — отменён
+> формой 08-31. Теперь движок подключается к `LineSimScenePlugin` процесса `scene` дерева
+> симулятора (Task 1.2); кадр уходит и в дерево (дисплей `scene` — для Пульта), и в
+> `FrameStreamServer` (для `capture` инспектора). `sim_truth` остаётся полем item внутри дерева
+> симулятора — по потоку в инспектор оно **не** едет (инспектор не знает о симуляторе); Ф5.2
+> сверяет правду с вердиктом на стороне симулятора/Пульта.
 
 **Level:** Middle (Sonnet)
 **Assignee:** developer
-**Goal:** заглушка из Task 1.1/2.2 заменена на реальный рендер: `produce()` вызывает
-`SceneCompositor.render()` (объединяет `ObjectSpawner` + `LayeredObject` + фон),
-возвращает кадр с реальными объектами, и прикрепляет паспорта объектов, попавших в
-кадр, как sidecar-метаданные на item (задел для Ф5).
+**Goal:** заглушка из Task 1.2 заменена на реальный рендер: `produce()` вызывает
+`SceneCompositor.render()` (объединяет `ObjectSpawner` + кэшированные RGBA объектов + фон),
+возвращает кадр с реальными объектами, публикует его в поток и прикрепляет паспорта объектов,
+попавших в кадр, как sidecar-метаданные на item (задел для Ф5). Время кадра — измерено.
 
 **Files:**
-- `Plugins/sources/line_sim_camera/plugin.py` — заменить placeholder-рендер
+- `Plugins/sources/line_sim_scene/plugin.py` — заменить placeholder-рендер (Task 1.2)
 - `Services/line_sim/core/scene_compositor.py` — `SceneCompositor` (реализация
-  Protocol из 3.1: держит `ObjectSpawner`, фон-заглушку/будущий фон-фото, вызывает
-  `LayeredObject.render()` для каждого активного объекта, компонует через
-  `dataset_gen.core.compose.composite`)
+  Protocol из 3.1: держит `ObjectSpawner`, фон-заглушку/будущий фон-фото, берёт **кэш**
+  `LayeredObject` из спавнера (3.3, Step 5 — не вызывает `render()` покадрово), компонует
+  через `dataset_gen.core.compose.composite`)
+- `Services/line_sim/tests/test_scene_compositor.py`, `test_scene_perf.py`
 
 **Steps:**
 1. `SceneCompositor.render(now_encoder, camera_rect) -> (frame_rgb, passports_in_view)`
@@ -262,16 +322,19 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
    ленты (v1, вид сверху — одна полоса); скомпоновать через `composite()` поверх
    фона (v1 — сплошной цвет/простая текстура, фото реальной ленты — не блокирует эту
    задачу, может быть отдельным follow-up); вернуть также список паспортов объектов,
-   чей bbox пересекается с `camera_rect`.
-2. В `LineSimCameraPlugin.produce()`: вызвать `render()`, положить `frame_rgb`
+   чей bbox пересекается с `camera_rect`. Размер спрайта — `size_mm × px_per_mm`
+   (объект на картинке совпадает с тем, куда робот поедет по `FACTOR_MM`).
+2. В `LineSimScenePlugin.produce()`: вызвать `render()`, положить `frame_rgb`
    (конвертировать в BGR — конвенция прототипа, см. комментарий в рецепте про
-   `color_convert`) в `item["frame"]`; положить `passports_in_view` в
-   `item["sim_truth"]` (новое имя поля — зафиксировать здесь как контракт, Ф5.2
-   будет его читать) как `list[dict]` (паспорт через `to_dict()`/`asdict`, Dict at
-   Boundary).
+   `color_convert`) в `item["frame"]`; `publish()` в `FrameStreamServer`; положить
+   `passports_in_view` в `item["sim_truth"]` (новое имя поля — зафиксировать здесь как
+   контракт, Ф5.2 будет его читать) как `list[dict]` (паспорт через `to_dict()`/`asdict`,
+   Dict at Boundary).
 3. Убедиться, что `sim_truth` — ЧИСТО ДОПОЛНИТЕЛЬНОЕ поле item (Dict at Boundary,
-   project rule #1) — не заменяет ни одно существующее поле, которое ждёт
-   `color_convert`/`roi_crop` и далее по цепочке.
+   project rule #1) и что по потоку кадров оно не уходит (поток несёт только пиксели +
+   `X-Timestamp`/`X-Seq`).
+4. Замер: `render()` при 0 / 1 / 5 / 20 активных объектах на кадре 1440×1080 — p50/p95 мс
+   из 300 вызовов; таблица в `DECISIONS.md` модуля. Число — критерий ниже.
 
 **Acceptance criteria:**
 - [ ] С хотя бы одним активным объектом (форсировать спавн в тесте), кадр из
@@ -283,16 +346,24 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
       попадает в `sim_truth` этого кадра.
 - [ ] Существующие обязательные поля item (`frame`, `camera_id`, `seq_id`,
       `frame_id`, `timestamp`, `width`, `height`, `channels`, `dtype`) присутствуют
-      без изменений формы (регрессия к контракту Task 1.1 не допускается).
-- [ ] Полный прогон `python multiprocess_prototype/run.py hikvision_letter_robot`
-      (`sim.enabled: true`) 30 секунд — дисплей `line_sim` показывает движущиеся
-      диски с буквами (визуальная проверка через
-      `mcp__backend-ctl__introspect_registers`/скриншот дисплея, если доступно, либо
-      описание проверяющего с числом уникальных объектов, увиденных за прогон, > 0).
+      без изменений формы (регрессия к контракту Task 1.2 не допускается).
+- [ ] **Бюджет кадра:** `render()` при 5 активных объектах на 1440×1080 — p95 ≤ 1/fps
+      конфига (при 25 fps — ≤ 40 мс) на машине разработки; число p50/p95 для 0/1/5/20
+      объектов записано в `DECISIONS.md`. Спай на `LayeredObject.render` за 300 кадров при 5
+      объектах — ≤ 5 вызовов (по одному на спавн, не на кадр).
+- [ ] Размер объекта на кадре: диск `size_mm=40` при `px_per_mm=5` даёт bbox по альфе
+      200 ± 2 px.
+- [ ] Полный прогон: симулятор (`multiprocess_line_sim/run.py line_sim`) + инспектор на
+      рецепте-с-адресами (Task 1.2) 30 секунд — дисплей `main` инспектора показывает
+      движущиеся диски с буквами, дисплей `scene` симулятора — то же (проверка через
+      `backend_ctl` счётчики кадров обоих деревьев + число уникальных `object_id` в
+      `sim_truth` за прогон > 0, снятое `send_command scene get_status`).
 
 **Out of scope:** фотометрия (Ф4.3), настройки fps/размер/цвет (Ф4.1), ROI (Ф4.2) —
-`camera_rect` здесь фиксированный конфиг, не live-управляемый.
+`camera_rect` здесь фиксированный конфиг, не live-управляемый; передача `sim_truth`
+инспектору (не будет никогда — см. шапку задачи).
 **Edge cases:** `ObjectSpawner` пуст (0 активных объектов) — `produce()` возвращает
-валидный кадр (просто фон, без исключений).
-**Dependencies:** Task 1.1 (плагин-заглушка), Task 3.2, Task 3.3.
+валидный кадр (просто фон, без исключений); `px_per_mm` не задан — ошибка конфига, не
+дефолт «1».
+**Dependencies:** Task 1.2 (`LineSimScenePlugin`-заглушка, поток), Task 3.2, Task 3.3.
 **Module contract:** impl-only.

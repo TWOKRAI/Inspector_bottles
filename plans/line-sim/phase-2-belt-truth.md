@@ -3,7 +3,7 @@
 Часть плана [`plan.md`](plan.md). Реализует владельческое решение: «робот — отдельным
 процессом; общая с линией — только правда о ленте (один энкодер) через канал».
 Канал — `StateProxy` (`multiprocess_framework/modules/state_store_module`), НЕ второе
-Modbus-соединение line→robot (см. Decisions log в `plan.md`).
+Modbus-соединение line→robot (см. [`decisions.md`](decisions.md)).
 
 ---
 
