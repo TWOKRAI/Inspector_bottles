@@ -193,6 +193,26 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
       объекта при `defect_probability=0.0`, даёт объекту `passport.defect` не
       `None` — форсированный брак работает независимо от вероятности.
 
+**Уточнено лидом 2026-09-22 перед тестером (контракт, против которого пишутся тесты):**
+- `ScenePreset` — только конфиг, картинок не читает (Dict at Boundary). Новые поля:
+  `catalog_dir: str | None` (путь к каталогу классов в формате `SpriteCatalog`, относительный —
+  от каталога YAML-файла, как у `dataset_gen`), `angle_range_deg: tuple[float, float] = (0.0, 360.0)`,
+  `defect_probability: float = 0.0` (0..1, вне — ошибка валидации), `layers` — **дополнительные**
+  слои поверх базы, по умолчанию `[]`. Пресет без каталога и без слоёв — ошибка валидации
+  (`min_length=1` снимается). Round-trip `from_dict(to_dict())` сохраняется.
+- `ObjectFactory` (`from Services.line_sim import ObjectFactory`): `ObjectFactory(preset)` грузит
+  каталог через `catalog_bridge` (ошибки каталога — от `SpriteCatalog`, не переписываются);
+  `num_classes: int`, `class_names: list[str]`; `make(object_id, spawn_encoder, rng) -> LayeredObject`
+  — класс и угол из `rng`, база = спрайт класса (`mode="static"`, имя `"base"`), затем слои пресета,
+  **последним** — defect-слой `"damaged"` с `defect_probability` пресета; `force_defect_next()` —
+  следующий `make()` (ровно один) получает `passport.defect == "damaged"` независимо от вероятности.
+- Критерий 1 читать так: `ObjectFactory(ScenePreset.from_yaml(".../letters_disk.yaml")).num_classes >= 1`.
+  Реальных эталонов на машине нет (`data/dataset_gen/ru_letters_real/sprites` отсутствует, 2026-09-22) —
+  тест реального пресета **skip с причиной**, тот же критерий проверяется на каталоге-фикстуре,
+  который тест создаёт в `tmp_path` (PNG через `imwrite_unicode`, 2–3 класса + граница «один класс»).
+- Критерий 2 («`defect=None` побитово равен объекту без defect-слоя»): сравнивать объект фабрики
+  с `defect_probability=0` и объект из тех же слоёв без defect-слоя при том же seed.
+
 **Out of scope:** несколько типов дефектов одновременно (v1 — один тип, «расширить
 позже» тривиально по контракту `LayerSpec`, но не строить впрок); UI кнопки (Ф6).
 **Edge cases:** каталог с ровно одним классом (граничный случай `SpriteCatalog`,
