@@ -69,11 +69,23 @@ class _FakeDeviceHubClient:
         #: ``True`` — belt.status отвечает как отказавший robot (страница должна
         #: показать «robot не отвечает», ревью п.1).
         self.status_error: bool = False
+        #: Задержка только для ``belt.jog`` и счётчик одновременных jog-форвардов
+        #: (страж порядка jog→stop и ``jogInFlight``, инъекции ведущего I6/I7).
+        self.jog_sleep_s: float = 0.0
+        self.jog_inflight = 0
+        self.jog_inflight_max = 0
         self._lock = threading.Lock()
 
     def request(self, command: str, args: dict | None = None, timeout: float | None = None) -> dict:
         if self.sleep_s:
             time.sleep(self.sleep_s)
+        if command == "belt.jog" and self.jog_sleep_s:
+            with self._lock:
+                self.jog_inflight += 1
+                self.jog_inflight_max = max(self.jog_inflight_max, self.jog_inflight)
+            time.sleep(self.jog_sleep_s)
+            with self._lock:
+                self.jog_inflight -= 1
         args = dict(args or {})
         with self._lock:
             self.calls.append((command, args))
@@ -337,6 +349,29 @@ def test_page_no_orphan_jog_interval_after_multitouch(pult) -> None:
     stop_calls = [c for c in scenario_calls if c[0] == "belt.stop"]
     assert len(jog_calls) == 1, f"ожидали ровно один belt.jog (второй палец игнорируется, п.3): {jog_calls!r}"
     assert len(stop_calls) == 1, f"ожидали ровно один belt.stop (второй pointerup — no-op, п.2): {stop_calls!r}"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_page_slow_jog_serialized_and_stop_arrives_last(pult) -> None:
+    """Страж ведущего (инъекции I6/I7 после ревью п.4): медленный ``robot`` на ``belt.jog``.
+
+    Двойник держит каждый ``belt.jog`` 0.35 с, кнопку держат 0.9 с при тике 200 мс.
+    С починкой: тик пропускается, пока предыдущий ``/api/jog`` в пути
+    (``jogInFlight``) — одновременных jog-форвардов ровно 1; ``/api/stop`` уходит
+    только после возврата последнего jog (``jogPending``) — в журнале двойника
+    ``belt.stop`` стоит ПОСЛЕ всех ``belt.jog``. Без ``jogInFlight`` тик на 200 мс
+    накладывается на jog, висящий до 350 мс (max=2); без ``jogPending`` стоп
+    на 900 мс обгоняет jog, стартовавший на 800 мс и висящий до 1150 мс.
+    """
+    _plugin, _ctx, client, port = pult
+    client.jog_sleep_s = 0.35
+    n_before = len(client.calls)
+    _run_page_js(port, "slow_jog_hold")
+    names = [c[0] for c in client.calls[n_before:] if c[0] in ("belt.jog", "belt.stop")]
+    assert client.jog_inflight_max == 1, f"jog-форварды наложились: max={client.jog_inflight_max}, {names!r}"
+    assert names and names[-1] == "belt.stop" and names.count("belt.stop") == 1, (
+        f"stop должен прийти один и последним: {names!r}"
+    )
 
 
 @pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")

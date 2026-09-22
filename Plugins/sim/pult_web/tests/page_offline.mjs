@@ -81,6 +81,11 @@ async function run() {
     el("jogRev").fire("pointerup");
     el("jogFwd").fire("pointerup");
     await sleep(1000); // достаточно для минимум 4 тиков осиротевшего таймера, если он есть
+  } else if (scenario === "slow_jog_hold") {
+    el("jogFwd").fire("pointerdown");
+    await sleep(900);
+    el("jogFwd").fire("pointerup");
+    await sleep(900); // jog, висящий до ~1150 мс, возвращается, затем уходит stop
   } else if (scenario === "status_error") {
     await sleep(400); // >= один цикл опроса (250 мс)
     process.stdout.write(JSON.stringify({ statusText: el("status").textContent }));
