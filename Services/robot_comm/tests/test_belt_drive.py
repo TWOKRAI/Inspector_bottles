@@ -360,5 +360,118 @@ def test_belt_mm_s_property_reads_exact_commanded_speed() -> None:
     assert core.belt_mm_s == 0.0
 
 
+# --------------------------------------------------------------------------- #
+# Task 2.3a — hazard-тесты замка (set_calibration/command) и порядка          #
+# (command_vfd: данные -> флаг последним)                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_set_calibration_races_with_command() -> None:
+    """Hazard (Task 2.3a): ``command()`` не может вклиниться в середину ``set_calibration()``.
+
+    Детерминированная форма (ведущий, 2026-09-22): прежние 10**4 итераций с
+    ``sys.setswitchinterval`` оставались зелёными и БЕЗ замка (инъекция A3) — окно
+    гонки под GIL практически не открывалось, тест ничего не доказывал.
+
+    Здесь окно открывается принудительно: ``set_calibration(200)`` читает ``_last``
+    (распаковка — внутри критической секции) и на этом месте ждёт, пока второй поток
+    пытается выполнить ``command(run, 25 Гц)``. С замком ``command`` ждёт и применяется
+    ПОСЛЕ калибровки: 25/50 × 200 = 100.0. Без замка ``command`` проходит в окно, а
+    калибровка затем пишет скорость по устаревшей команде 10 Гц: 10/50 × 200 = 40.0.
+    """
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=10.0, reverse=False)
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _PausingLast(tuple):
+        def __iter__(self):
+            entered.set()
+            release.wait(timeout=2.0)
+            return super().__iter__()
+
+    belt._last = _PausingLast(belt._last)
+
+    calib_t = threading.Thread(target=lambda: belt.set_calibration(200.0), daemon=True)
+    calib_t.start()
+    assert entered.wait(timeout=2.0), "set_calibration не дошла до чтения последней команды"
+    cmd_t = threading.Thread(target=lambda: belt.command(run=True, freq_hz=25.0, reverse=False), daemon=True)
+    cmd_t.start()
+    cmd_t.join(timeout=0.2)  # с замком — ещё ждёт; без замка — уже выполнилась в окне
+    release.set()
+    for t in (calib_t, cmd_t):
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "поток завис — дедлок под замком BeltDrive"
+
+    assert belt.mm_s == pytest.approx(100.0), (
+        f"mm_s={belt.mm_s}: команда 25 Гц вклинилась в калибровку и была перетёрта (ожидали 100.0)"
+    )
+
+
+def test_advance_does_not_block_on_lock() -> None:
+    """Hazard (Task 2.3a): ``advance()`` — горячий путь тикера — НЕ берёт
+    ``self._lock`` (докстринг класса + DESIGN п.1). Эффект: пока другой
+    поток держит замок 0.2с, ``advance()`` из главного потока не блокируется
+    и завершается почти мгновенно (порядок миллисекунд, не 0.2с). Инъекция
+    A9 (``advance()`` берёт замок) обязана провалить этот тест."""
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=25.0)
+
+    holder_ready = threading.Event()
+    release = threading.Event()
+
+    def hold_lock() -> None:
+        with belt._lock:
+            holder_ready.set()
+            release.wait(timeout=2.0)
+
+    holder = threading.Thread(target=hold_lock, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=2.0), "поток-держатель не взял замок за 2с"
+
+    start = time.monotonic()
+    belt.advance(0.01)
+    elapsed = time.monotonic() - start
+
+    release.set()
+    holder.join(timeout=2.0)
+    assert not holder.is_alive()
+
+    assert elapsed < 0.05, f"advance() ждал замок {elapsed:.3f}с — похоже, что он его берёт"
+
+
+def test_command_vfd_writes_flag_last() -> None:
+    """Hazard (Task 2.3a): ``RobotSimCore.command_vfd`` пишет данные
+    (RUN/DIR/FREQ), ЗАТЕМ VFD_FLAG ОТДЕЛЬНЫМ последним вызовом ``self.write``
+    (DESIGN п.2). Шпион на ``core.write`` "вклинивает" ручной ``core.tick()``
+    между записью данных и записью флага — если порядок соблюдён, тикер
+    видит FLAG=0 и не применяет полу-записанную команду (докстринг
+    ``_handle_vfd``: ``if self.regs[_REG_VFD_FLAG] != 1: return``). Инъекция
+    A1 (флаг первым) обязана провалить этот тест: FLAG оказался бы уже 1 до
+    завершения записи данных."""
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+
+    real_write = core.write
+    addresses: list[int] = []
+
+    def spying_write(address: int, values: list[int]) -> None:
+        addresses.append(address)
+        real_write(address, values)
+        if address != 0x1204:
+            core.tick()  # "тикер" вклинивается между записью данных и флага
+            assert core.read(0x1204, 1) == [0], "FLAG уже стоит ДО завершения записи данных — нарушен порядок"
+
+    core.write = spying_write  # type: ignore[method-assign]
+    try:
+        core.command_vfd(run=True, freq_hz=25.0, reverse=True)
+    finally:
+        core.write = real_write  # type: ignore[method-assign]
+
+    assert addresses[-1] == 0x1204, f"FLAG должен писаться последним отдельным вызовом: {addresses}"
+    assert addresses[:-1] == [0x1200, 0x1201, 0x1202], f"порядок записи данных нарушен: {addresses}"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

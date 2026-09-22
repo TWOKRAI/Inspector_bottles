@@ -45,6 +45,17 @@ processes:
         port: 5021
         unit_id: 2
         auto_start: true
+        # Task 2.3a: калибровка ленты 101.1311 мм/с на макс. частоте — равна
+        # сегодняшнему дефолту "сырого" режима (BeltDrive.from_enc_rate),
+        # поведение стенда не меняется; решение ведущего 2026-09-22 — на
+        # старте ЕЩЁ и командуется run=True/freq_max через mailbox, чтобы
+        # зеркало ПЧ/belt.status были согласованы с первого тика.
+        belt_mm_s_at_max_freq: 101.1311
+        # Dead-man jog (belt.jog): без подкачки останавливается сам через
+        # jog_timeout_ms; jog_freq_hz — частота по умолчанию, если клиент её
+        # не передал явно.
+        jog_timeout_ms: 500
+        jog_freq_hz: 10.0
 
   - process_name: camera
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess

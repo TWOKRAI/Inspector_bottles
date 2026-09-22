@@ -1,8 +1,9 @@
 # Plugins/sim/robot_host — STATUS
 
-**Состояние: сделано (Task 1.1 плана line-sim, вертикальный срез).**
+**Состояние: сделано, ревью Task 2.3a итерация 1 закрыта.**
 
-**Обновлено:** 2026-09-20 — Task 1.1, ветка `feat/line-sim`.
+**Обновлено:** 2026-09-22 — ревью Task 2.3a (замок сторожа jog, боевой
+dead-man путь, строгие типы аргументов), ветка `feat/line-sim-2.3a-commands`.
 
 | Что | Состояние |
 |---|---|
@@ -11,7 +12,9 @@
 | Занятый порт | есть: свой пробный сокет, синхронно, до обращения к `SimRobotServer` |
 | Метрика `sim_robot.writes` | есть: дельта из `cmd_status`/`shutdown`, не с потока `pymodbus` |
 | Паблишер мира (Task 2.2) | есть: воркер `sim_robot_world_publisher`, `sim.belt.encoder` каждые `publish_ms`, уровни `encoder`/`belt_mm_s`/`writes_seen` |
-| Тесты | `tests/test_hazards.py` — 4 авторских (a-d); `tests/test_acceptance_time_wait.py` — 4 независимого tester (TIME_WAIT / занятый порт, Task 1.3); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task11_acceptance.py`, `test_f2_task22_live.py` (вне этого пакета) |
+| Тесты | `tests/test_hazards.py` — 11 авторских (a-d, e, 6 ревью Task 2.3a, 1 страж п.2 от ведущего); `tests/test_acceptance_time_wait.py` — 4 независимого tester (TIME_WAIT / занятый порт, Task 1.3); приёмочные независимого тестера — `apps/line_sim/tests/test_f1_task11_acceptance.py`, `test_f2_task22_live.py` (вне этого пакета) |
+| Команды ленты `belt.*` (Task 2.3a) | есть: `run`/`stop`/`jog`(dead-man `jog_timeout_ms`)/`calibrate`/`status`, mailbox через `RobotSimCore.command_vfd`; 7/7 REDS `tests/test_belt_commands.py` зелёные (RED 8 открытый вопрос закрыт коммитом `7acf6d9b` — интерпретация «трогается сразу» = за тик, не синхронно) |
+| Ревью Task 2.3a, итерация 1 | закрыто: сторож jog под ОДНИМ `self._lock` на весь путь (была гонка, воспроизведена стохастически 3/20000 и детерминированно), боевой dead-man через реальный `_publish_loop` (не только опортунистический `belt.status`), сторож зовётся и на паузе, строгие типы `reverse`/`direction`, `_jog_regs` считается из аргументов (не читается обратно из mailbox) |
 
 ## Долг / открытые вопросы
 
@@ -22,3 +25,7 @@
 - Нет собственного теста на межпроцессный `record_metric` под реальной
   нагрузкой pymodbus-потока — только на синтетический вызов `_on_write`
   напрямую (реальный сетевой клиент гоняется приёмочным тестом Ф1, не здесь).
+- Остаточное окно внешнего Modbus-мастера: поток pymodbus пишет mailbox без
+  замка плагина; запись, попавшая между чтением mailbox сторожем и его стопом,
+  будет перетёрта стопом («побеждает последний записавший»). Не воспроизводилось
+  (ревью 2.3a, итерация 2).
