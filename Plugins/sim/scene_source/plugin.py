@@ -171,6 +171,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._rng = np.random.default_rng(seed)
         self._lock = threading.Lock()
         self._world: dict[str, Any] = {}
+        self._world_ready = False  # review Task 3.3a, находка 4 — см. produce()/_on_deltas()
         self._last_warned_t: float | None = None
         self._last_factory_error_t: float | None = None
         self._last_object_ids: frozenset[str] = frozenset()
@@ -217,7 +218,14 @@ class SceneSourcePlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _on_deltas(self, deltas: list["Delta"]) -> None:
-        """Колбэк подписки: только копим последнее значение, без I/O."""
+        """Колбэк подписки: только копим последнее значение, без I/O.
+
+        `_world_ready` (review Task 3.3a, находка 4) взводится, когда в `self._world`
+        появляется реальный ключ `value` — ЛЮБОЙ из двух форм дельты (целиком словарём по
+        `_ENCODER_PATH` или полистово по `_ENCODER_PATH + ".value"`). Не путать с «энкодер
+        не сдвинулся» (тот вариант уже отвергнут в Task 3.3 — ломает законный паттерн
+        «энкодер держат константой»): здесь речь про «мира ещё не было ВООБЩЕ», не про
+        застой уже пришедшего значения."""
         with self._lock:
             for d in deltas:
                 if d.new_value is MISSING:
@@ -228,20 +236,33 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 elif d.path.startswith(_ENCODER_PATH + "."):
                     leaf = d.path[len(_ENCODER_PATH) + 1 :]
                     self._world[leaf] = d.new_value
+            if "value" in self._world:
+                self._world_ready = True
 
     # ------------------------------------------------------------------ #
     # Рендер (Task 3.4 — движок line_sim вместо заглушки-спрайта)
     # ------------------------------------------------------------------ #
 
     def produce(self) -> list[dict]:
-        """Вернуть один кадр сцены: tick() спавнера + render() компоновщика, либо фон."""
+        """Вернуть один кадр сцены: tick() спавнера + render() компоновщика, либо фон.
+
+        Спавнер НЕ тикает, пока мира ещё не было (`_world_ready is False`) — review Task
+        3.3a, находка 4: без этой проверки первые кадры (до первой дельты от `robot_host`)
+        тикают на `spawn_encoder` из конфига (обычно `0`) и порождают призрачный объект на
+        `spawn_encoder=0`, который потом либо никогда не деспавнится (если реальный энкодер
+        стартует далеко от 0), либо путает счёт `spacing_mm`. Это НЕ вариант «не спавнить,
+        пока энкодер не сдвинулся» (тот отвергнут в Task 3.3 — ломает тесты, держащие
+        энкодер константой намеренно): здесь проверяется факт «была хотя бы одна дельта»,
+        не движение уже пришедшего значения. Рендер компоновщика продолжает работать всегда
+        (активных объектов ещё нет — кадр останется фоном, независимо от `now_encoder`)."""
         now_encoder = self._read_world_encoder()
 
         if self._spawner is not None and self._compositor is not None:
-            try:
-                self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)
-            except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл
-                self._warn_factory_error(exc)
+            if self._world_ready:
+                try:
+                    self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)
+                except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл
+                    self._warn_factory_error(exc)
             frame_rgb, _passports_in_view = self._compositor.render(
                 now_encoder, camera_rect=(0.0, 0.0, float(self._width), float(self._height))
             )

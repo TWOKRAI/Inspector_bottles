@@ -106,11 +106,21 @@ class ObjectSpawner:
         паттерн «энкодер держат константой, чтобы изолировать таймер», см. LS-008).
         Потолок ограничивает память, но НЕ трогает существующие объекты и не бросает
         исключение.
+
+        Деспавн держит НИЖНЮЮ границу симметрично верхней (review Task 3.3a, находка 1,
+        LS-010-ревью): объект снимается и когда `traveled_mm > scene_length_mm` (уехал
+        вперёд — как раньше), И когда `traveled_mm < -scene_length_mm` (разрыв счётчика —
+        энкодер обнулился/скакнул назад больше чем на длину сцены, например рестарт
+        робота: 106016 -> 0 при `scene_length_mm=1200` даёт около -15319 мм). Обычный
+        реверс/джог ленты (`-scene_length_mm <= traveled_mm < 0`) объект НЕ снимает — лента
+        умеет идти назад (чекбокс на пульте), и это законное движение, не разрыв.
         """
         self._active = [
             obj
             for obj in self._active
-            if encoder_to_offset_mm(now_encoder, obj.passport.spawn_encoder) <= self._scene_length_mm
+            if -self._scene_length_mm
+            <= encoder_to_offset_mm(now_encoder, obj.passport.spawn_encoder)
+            <= self._scene_length_mm
         ]
 
         if self._interval_s is not None:
@@ -164,7 +174,23 @@ class ObjectSpawner:
         тот же приём, что fix F1 у `_tick_interval`: постоянно падающая фабрика роняет
         исключение раз в ШАГ (не на каждом тике, пока лента едет), а не на каждом тике.
         Потолок `max_active` проверяется раньше и порог не трогает (симметрично F2).
+
+        Разрыв счётчика (review Task 3.3a, находка 1, LS-010-ревью):
+        `traveled_mm < -scene_length_mm` относительно `_last_spawn_encoder` — счётчик
+        потерял опору (обнуление/скачок больше длины сцены назад), а не обычный реверс.
+        В этом случае точка отсчёта переустанавливается на `now_encoder` СРАЗУ, независимо
+        от паузы (иначе следующий реальный спавн ждал бы весь пройденный до разрыва путь
+        заново — замер ревью: сцена стояла пустой около 161 с). Обычный реверс/джог
+        (`-scene_length_mm <= traveled_mm < 0`) НИЧЕГО не переустанавливает — просто не
+        достигает порога `_next_spacing_mm` (тот всегда положителен), новый спавн наступает,
+        когда лента снова пройдёт вперёд.
         """
+        if self._last_spawn_encoder is not None:
+            traveled_mm = encoder_to_offset_mm(now_encoder, self._last_spawn_encoder)
+            if traveled_mm < -self._scene_length_mm:
+                self._last_spawn_encoder = now_encoder
+                return
+
         if self._paused:
             return
 

@@ -239,6 +239,89 @@ def test_permanent_factory_failure_in_spacing_mode_raises_once_per_window(tmp_pa
     assert spawner.active_objects() == []
 
 
+def test_spacing_threshold_is_inclusive_equal_traveled_spawns(tmp_path):
+    """[review Task 3.3a] Порог `>=` включительный: `traveled_mm == spacing` РОВНО (не
+    приближённо — та же формула `N * FACTOR_MM`, что и порог) обязан дать спавн. Инъекция
+    `>=` -> `>` обязана убить этот тест (проверено вручную, см. отчёт)."""
+    factory = _make_factory(tmp_path)
+    n_ticks = 500
+    spacing = n_ticks * FACTOR_MM
+    spawner = ObjectSpawner(factory, spacing_mm=(spacing, spacing), scene_length_mm=1e9)
+    rng = np.random.default_rng(211)
+
+    spawner.tick(now_encoder=1000.0, now_wall_s=0.0, rng=rng)  # первый спавн сразу
+    assert len(spawner.active_objects()) == 1
+
+    exact_encoder = 1000.0 + n_ticks  # traveled_mm == spacing РОВНО, та же арифметика
+    spawner.tick(now_encoder=exact_encoder, now_wall_s=0.0, rng=rng)
+    assert len(spawner.active_objects()) == 2, "порог включительный (>=), а не строгий (>)"
+
+
+def test_encoder_discontinuity_clears_active_objects_and_rebinds_spacing_baseline(tmp_path):
+    """[review Task 3.3a, находка 1] Разрыв счётчика (рестарт робота — большой скачок
+    НАЗАД, много больше `scene_length_mm`) снимает ВСЕ активные объекты на СЛЕДУЮЩЕМ тике
+    и переустанавливает точку отсчёта `spacing_mm`, а не оставляет сцену пустой навсегда
+    (замер ревью без фикса: ~161 с пустой сцены, потому что порог считался от старой,
+    ушедшей далеко точки). Прыжок с 52496 на 0 при `scene_length_mm=500` даёт около
+    -7585 мм — много меньше -500, это разрыв, не реверс."""
+    factory = _make_factory(tmp_path)
+    spacing = 60.0
+    scene_length_mm = 500.0
+    spawner = ObjectSpawner(factory, spacing_mm=(spacing, spacing), scene_length_mm=scene_length_mm)
+    rng = np.random.default_rng(212)
+
+    # 7 спавнов, каждый следующий -- прыжком точно на нужный encoder (не итерацией по
+    # мелким тикам, порог считается независимо от размера шага между вызовами tick()).
+    encoders = [50000.0]
+    ticks_per_spacing = math.ceil(spacing / FACTOR_MM)
+    for _ in range(6):
+        encoders.append(encoders[-1] + ticks_per_spacing)
+    for enc in encoders:
+        spawner.tick(now_encoder=enc, now_wall_s=0.0, rng=rng)
+    assert len(spawner.active_objects()) == 7
+
+    last_encoder = encoders[-1]
+    gap_mm = encoder_to_offset_mm(0.0, last_encoder)
+    assert gap_mm < -scene_length_mm, "фикстура должна воспроизводить именно РАЗРЫВ"
+
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # обнуление энкодера
+    assert spawner.active_objects() == [], "разрыв обязан снять все объекты на этом тике"
+
+    # переустановленная точка отсчёта -- новый объект появляется через spacing_mm ПУТИ ОТ 0,
+    # а не от старой ушедшей точки (иначе потребовался бы весь пройденный до разрыва путь).
+    next_encoder = math.ceil(spacing / FACTOR_MM)
+    spawner.tick(now_encoder=float(next_encoder), now_wall_s=0.0, rng=rng)
+    active = spawner.active_objects()
+    assert len(active) == 1
+    assert active[0].passport.spawn_encoder == float(next_encoder)
+
+
+def test_reverse_within_scene_length_keeps_active_objects_unchanged(tmp_path):
+    """[review Task 3.3a, находка 1] Обычный реверс/джог ленты (лента умеет идти назад,
+    чекбокс на пульте) на величину МЕНЬШЕ `scene_length_mm` — не разрыв: состав активных
+    объектов не меняется, новый спавн не наступает (порог не достигнут, идём назад)."""
+    factory = _make_factory(tmp_path)
+    scene_length_mm = 1200.0
+    spawner = ObjectSpawner(factory, spacing_mm=(60.0, 60.0), scene_length_mm=scene_length_mm)
+    rng = np.random.default_rng(213)
+
+    spawner.tick(now_encoder=100000.0, now_wall_s=0.0, rng=rng)  # первый спавн сразу
+    before = spawner.active_objects()
+    assert len(before) == 1
+    before_id = before[0].passport.object_id
+
+    reverse_ticks = math.ceil(200.0 / FACTOR_MM)  # реверс ~200 мм, меньше scene_length_mm
+    reversed_encoder = 100000.0 - reverse_ticks
+    gap_mm = encoder_to_offset_mm(reversed_encoder, 100000.0)
+    assert -scene_length_mm <= gap_mm < 0.0, "фикстура должна воспроизводить именно реверс, не разрыв"
+
+    spawner.tick(now_encoder=reversed_encoder, now_wall_s=0.0, rng=rng)
+    after = spawner.active_objects()
+    assert len(after) == 1
+    assert after[0].passport.object_id == before_id, "реверс не снимает и не пересоздаёт объект"
+    assert after[0].passport.spawn_encoder == 100000.0
+
+
 def test_spacing_ceiling_does_not_move_threshold_and_resumes_after_despawn(tmp_path):
     """Аналог review fix F2 (LS-008): потолок `max_active` не трогает порог `spacing_mm` —
     как только деспавн освобождает место, спавн на давно просроченном пороге срабатывает
