@@ -229,6 +229,12 @@ def test_modbus_write_overrides_jog(running_plugin) -> None:
     status = _call(plugin, "belt.status")
     assert status["mm_s"] == pytest.approx(80.905, abs=0.5)
     assert status["jogging"] is False
+    # Эффект, а не снимок в том же вызове (ведущий, 2026-09-22, инъекция A5): стоп
+    # сторожа применился бы только следующим тиком, и статус выше его ещё не видит.
+    # Mailbox остаётся записью Modbus-мастера, лента едет и через 0.1 с.
+    time.sleep(0.1)
+    assert core.read(0x1200, 3) == [1, 0, 4000], "сторож jog перетёр команду Modbus-мастера"
+    assert _call(plugin, "belt.status")["mm_s"] == pytest.approx(80.905, abs=0.5)
 
 
 def test_bad_args_and_no_server(running_plugin) -> None:
