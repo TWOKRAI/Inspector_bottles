@@ -36,13 +36,22 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 | `spawn_encoder` | `0` | значение энкодера, предполагаемое ДО первой дельты из мира |
 | `px_per_mm` | `1.0` | масштаб мм → px |
 | `belt_y_px` | `resolution_height / 2` | вертикальная линия ленты в кадре |
-| `spawn_interval_s` | `[2.0, 4.0]` | диапазон интервала спавна объектов (`ObjectSpawner`, Task 3.3) |
+| `spawn_interval_s` | `[2.0, 4.0]`, если не задан ни один из двух | диапазон интервала спавна по времени (`ObjectSpawner(interval_s=...)`, Task 3.3) |
+| `spawn_spacing_mm` | нет | диапазон шага спавна по пути ленты, мм (`ObjectSpawner(spacing_mm=...)`, Task 3.3a) |
 | `scene_length_mm` | `(resolution_width / px_per_mm) * 2` | длина видимой зоны — за ней объект деспавнится |
 | `defect_probability` | `0.0` | вероятность дефект-слоя `"damaged"` (Task 3.2) |
 | `preset_path` | нет (движок недоступен) | путь к каталогу классов (`Services.dataset_gen.core.catalog.SpriteCatalog`) |
 | `stale_ms` | `500` | порог протухания значения мира (мс) |
 | `seed` | `0` | seed `np.random.default_rng` движка (класс/угол/дефект объектов) |
 | `camera_id` | `0` | попадает в `item["camera_id"]` (форма как у боевых источников) |
+
+**Ровно один из `spawn_interval_s`/`spawn_spacing_mm`** (Task 3.3a): оба заданы в конфиге
+стенда — `ValueError` в `configure()`, НЕ проглатываемый общим `try/except` вокруг сборки
+движка (это ошибка конфигурации, а не сбой сборки, который допустимо проглотить и упасть
+на фон). Если не задан ни один — плагин МОЛЧА берёт таймерный режим `spawn_interval_s=
+[2.0, 4.0]` — тот самый режим, из-за которого объекты копились в одной точке на стоящей
+ленте (репродукция на живом стенде 2026-09-23, план Task 3.3a); это существующее
+поведение по умолчанию, не изменённое этой задачей, — здесь честно названо, а не спрятано.
 
 **`preset_path` относительный — резолвится от КОРНЯ РЕПОЗИТОРИЯ, не от CWD процесса**
 (фикс ревью Task 3.4, P5): `Path(__file__).resolve().parents[3]` от `plugin.py`. Раньше
@@ -57,13 +66,16 @@ fallback (см. ниже).
 ## Рендер (Task 3.4 — движок `Services.line_sim`)
 
 `configure()` собирает `ScenePreset(catalog_dir=preset_path, defect_probability=...)` →
-`ObjectFactory` → `ObjectSpawner(interval_s=spawn_interval_s, scene_length_mm=...)` →
-`SceneCompositor(spawner, px_per_mm, belt_y_px)`. `produce()`: `spawner.tick(now_encoder=
-<из мира>, now_wall_s=time.monotonic(), rng=self._rng)` (исключение фабрики ловится, лог
-де-дублирован — не чаще раза в секунду, кадр отдаётся с прежней сценой) → `compositor.
-render(...)` → `cv2.cvtColor(RGB2BGR)` → `item["frame"]`. `rng = np.random.default_rng(seed)`
-живёт в плагине — единственный producer, у него часы и rng (`SceneCompositor.render()` их
-не трогает, LS-009).
+`ObjectFactory` → `ObjectSpawner(scene_length_mm=..., **spawner_kwargs)` (`spawner_kwargs` —
+`interval_s=...` ИЛИ `spacing_mm=...`, Task 3.3a) → `SceneCompositor(spawner, px_per_mm,
+belt_y_px)`. `produce()`: `spawner.tick(now_encoder=<из мира>, now_wall_s=time.monotonic(),
+rng=self._rng)`, НО ТОЛЬКО когда `_world_ready` (пришла хотя бы одна дельта — review Task
+3.3a, находка 4: без этого гейта первые кадры тикали бы на конфигурационном
+`spawn_encoder` вместо реального, порождая призрачный объект на `spawn_encoder=0`);
+исключение фабрики ловится, лог де-дублирован — не чаще раза в секунду, кадр отдаётся с
+прежней сценой → `compositor.render(...)` → `cv2.cvtColor(RGB2BGR)` → `item["frame"]`.
+`rng = np.random.default_rng(seed)` живёт в плагине — единственный producer, у него часы и
+rng (`SceneCompositor.render()` их не трогает, LS-009).
 
 **Fallback на фон, если движок собрать не удалось** (`preset_path` не задан, каталог не
 существует, пресет невалиден) — `configure()` ловит исключение сборки, логирует ОДИН раз

@@ -1,6 +1,6 @@
 # line_sim — статус
 
-**Состояние:** Task 3.1 + 3.1a + 3.2 + 3.3 + 3.4 (план `plans/line-sim/phase-3-object-engine.md`).
+**Состояние:** Task 3.1 + 3.1a + 3.2 + 3.3 + 3.3a + 3.4 (план `plans/line-sim/phase-3-object-engine.md`).
 
 | Часть | Статус |
 |---|---|
@@ -12,8 +12,8 @@
 | `ObjectPassport.to_dict()`/`from_dict()` | готово (Task 3.4, Dict at Boundary) |
 | `ObjectFactory` + `catalog_bridge` — класс/угол из rng, дефект-слой `"damaged"`, `force_defect_next()` | готово |
 | Пресет `letters_disk.yaml` | готово (ссылается на каталог dataset_gen, картинок не копирует) |
-| `ObjectSpawner` — спавн по интервалу, деспавн, пауза, форс-хук брака на паузе | готово |
-| Подключение к `SceneSourcePlugin` (`Plugins/sim/scene_source`) | готово (Task 3.4) |
+| `ObjectSpawner` — спавн по интервалу ИЛИ по шагу ленты в мм, деспавн, пауза, форс-хук брака | готово (Task 3.3, режим `spacing_mm` — Task 3.3a, LS-010) |
+| Подключение к `SceneSourcePlugin` (`Plugins/sim/scene_source`) | готово (Task 3.4; `spawn_spacing_mm` — Task 3.3a) |
 
 **Известное ограничение (2026-09-22):** эталоны дисков-букв реально не сняты на этой машине —
 `data/dataset_gen/ru_letters_real/sprites` отсутствует. `tools/cut_real_disks.py` готовит их из
@@ -24,4 +24,6 @@
 
 Тесты: `Services/line_sim/tests/` — `test_acceptance_3_1.py`/`test_acceptance_3_2.py`/
 `test_acceptance_3_3.py`/`test_acceptance_3_4.py` (независимый tester), `test_hazards_3_1.py`/
-`test_hazards_3_2.py`/`test_hazards_3_3.py`/`test_hazards_3_4.py` (автор).
+`test_hazards_3_2.py`/`test_hazards_3_3.py`/`test_hazards_3_4.py` (автор), `test_spawner.py`
+(автор, режим `spacing_mm` — Task 3.3a, независимого тестера на этой задаче намеренно нет,
+см. LS-010).
