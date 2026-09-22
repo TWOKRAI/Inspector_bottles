@@ -530,7 +530,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   [`phase-3a-layer-contract.md`](phase-3a-layer-contract.md)
 - Task 3.2: Контент пресета `real_letters_disk` + дефект-слой [DONE 2026-09-22, merge `cee65d78`] (зависит от
   3.1) — **Module contract:** extends-contract (ревью 3.1)
-- Task 3.3: Поток спавна объектов на ленте, `seed` [PENDING] (зависит от 3.1, 2.2) —
+- Task 3.3: Поток спавна объектов на ленте, `seed` [DONE 2026-09-23, merge `9eb7aa48`] (зависит от 3.1, 2.2) —
   **Module contract:** impl-only
 - Task 3.4 (ред. 2): Движок подключён к `SceneSourcePlugin.produce()` — в симе, не в
   прототипе; паспорта остаются в симе [PENDING] (зависит от 2.2, 3.2, 3.3) — **Module
