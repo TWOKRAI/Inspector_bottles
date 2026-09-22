@@ -4,6 +4,7 @@ from Services.line_sim.core.belt import BELT_UX, BELT_UY, FACTOR_MM, encoder_to_
 from Services.line_sim.core.factory import ObjectFactory
 from Services.line_sim.core.layered_object import LayeredObject
 from Services.line_sim.core.preset import ScenePreset
+from Services.line_sim.core.spawner import ObjectSpawner
 
 __all__ = [
     "BELT_UX",
@@ -11,6 +12,7 @@ __all__ = [
     "FACTOR_MM",
     "LayeredObject",
     "ObjectFactory",
+    "ObjectSpawner",
     "ScenePreset",
     "encoder_to_offset_mm",
 ]
