@@ -105,6 +105,11 @@ class LayeredObject:
         sprites = [_load_sprite(layer) for layer in layers]
 
         # 2. Принудительный дефект из входного паспорта: имена defect-слоёв через запятую.
+        names = [layer.name for layer in layers]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            why = "layer_params и defect адресуют слой по имени"
+            raise ValueError(f"LayeredObject '{passport.object_id}': имена слоёв повторяются {dupes} — {why}")
         defect_names = {layer.name for layer in layers if layer.mode == "defect"}
         forced = [n.strip() for n in (passport.defect or "").split(",") if n.strip()]
         unknown = [n for n in forced if n not in defect_names]

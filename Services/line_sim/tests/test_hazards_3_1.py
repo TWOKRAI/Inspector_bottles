@@ -244,3 +244,16 @@ def test_forcing_a_defect_does_not_shift_following_layer_sampling():
         a = LayeredObject(forced, [dmg, label], np.random.default_rng(seed))
         b = LayeredObject(_passport(), [dmg, label], np.random.default_rng(seed))
         assert a.passport.layer_params["l"] == b.passport.layer_params["l"]
+
+
+def test_duplicate_layer_names_rejected():
+    """[lead 3.1, ревью 2] layer_params и принудительный defect адресуют слой по имени — дубль неоднозначен."""
+    a = LayerSpec(name="x", mode="static", sprite_source=_marker(0))
+    b = LayerSpec(name="x", mode="static", sprite_source=_marker(1))
+    with pytest.raises(ValueError, match=r"\['x'\]"):
+        LayeredObject(_passport(), [a, b], np.random.default_rng(0))
+    from Services.line_sim import ScenePreset
+
+    layer = {"name": "x", "mode": "static", "sprite_source": "id"}
+    with pytest.raises(ValidationError, match=r"\['x'\]"):
+        ScenePreset.from_dict({"layers": [layer, dict(layer)]})

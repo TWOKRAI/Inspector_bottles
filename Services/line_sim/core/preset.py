@@ -33,6 +33,10 @@ class ScenePreset(BaseModel):
         for layer in layers:
             if not isinstance(layer.sprite_source, str):
                 raise ValueError(f"слой '{layer.name}': в пресете sprite_source должен быть строкой-id")
+        names = [layer.name for layer in layers]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise ValueError(f"имена слоёв повторяются: {dupes}")
         return layers
 
     @classmethod
