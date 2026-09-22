@@ -69,12 +69,21 @@ OSError`), уходит в `self._state = "error"` + `ctx.health.report_error(..
 ## Ответ `robot` не пришёл
 
 `GET /api/status` опрашивается страницей каждые 250 мс. Если `robot` не
-ответил (таймаут IPC, процесс не поднят) — `DeviceHubClient.request` сама
-кормит `ctx.health.report_error(..., throttle=30.0)` (см. докстринг
-`Plugins/hub/device_hub/client.py`), поэтому опрос каждые 250 мс НЕ пишет в
-`errors.log` на каждый тик. Страница в этом случае показывает «robot не
-отвечает» и **не блокирует ручки** — ручки остаются активными (DESIGN п.4
-плана).
+ответил (нет маршрута/процесс не поднят, таймаут IPC) — `router.request()`
+возвращает `{"success": False, ...}` КАК СЛОВАРЬ, исключение не бросает;
+ветка `except Exception` в `DeviceHubClient.request` на этом пути
+недостижима — воспроизведено: 20 опросов подряд без `robot` дали
+`DeviceHubClient health.report_error calls: 0`. Спам гасит **голосовое окно
+самого роутера**: `RouterManager._do_send` на «адресат не найден» зовёт
+`_report_send_error("no_route", ...)` → `self.report_error(...,
+context="router.send_error:no_route")` (`ObservableMixin.report_error` +
+`windowed_voice`, окно — политика процесса
+`observability.voices.default_window_sec`) — тот же прогон показал `router
+report_error calls: 20 {'router.send_error:no_route'}`, то есть вызван на
+каждый опрос, а фактическую запись в `errors.log` глушит окно ВНУТРИ
+`report_error`, не число вызовов. Страница в этом случае показывает «robot
+не отвечает» и **не блокирует ручки** — ручки остаются активными (DESIGN
+п.4 плана).
 
 **Открыто (см. план, «Открыто по 2.3»):** до первого приёмного цикла
 процесса `pult` `router.request` отдаёт `no_receive_pump` — первые запросы

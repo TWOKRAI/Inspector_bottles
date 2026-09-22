@@ -2,7 +2,7 @@
 
 **Состояние: сделано (Task 2.3b плана line-sim, оффлайн-часть).**
 
-**Обновлено:** 2026-09-22 — Task 2.3b, ветка `feat/line-sim-2.3b-pult`.
+**Обновлено:** 2026-09-22 — Task 2.3b, ревью итерация 1, ветка `feat/line-sim-2.3b-pult`.
 
 | Что | Состояние |
 |---|---|
@@ -11,9 +11,15 @@
 | bad_json/404/413 | есть: три отказа ДО обращения к `robot`, `robot` не вызывается ни разу |
 | `status: "error"` от `robot` → 504 | есть |
 | Accept-backlog 20 конкурентных запросов | есть: `request_queue_size = 32` (дефолт stdlib 5 ронял часть соединений на TCP-уровне, замерено) |
-| `shutdown()` при живом сервере | есть: `join(timeout=5.0)`, не виснет (hazard-тест с daemon-потоком + join-дедлайном) |
+| `shutdown()` при живом сервере, даже с реальным медленным запросом | есть: `join(timeout=5.0)`, не виснет (hazard-тест с daemon-потоком + join-дедлайном, реально висящий двойник 3 с) |
 | Медленный `robot` не блокирует соседний `GET /` | есть: `ThreadingHTTPServer` — поток на соединение |
-| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_pult_web_hazards.py` — 3 авторских (конкурентный jog, shutdown, медленный robot) |
+| Localhost-страж (`Host` не 127.0.0.1/localhost:port) | есть: 403 на `GET`/`POST`, DNS-rebinding отбит |
+| Content-Type-страж на `POST` (не `application/json`) | есть: 415 до чтения тела, двойник не вызван |
+| Страница: `pollStatus` на отказ (`ok: false`/не-2xx) | есть: «robot не отвечает», не `undefined`-поля |
+| Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
+| Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
+| Страница: порядок jog→stop | есть: `jogStop` дожидается промиса последнего `/api/jog` |
+| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_pult_web_hazards.py` — 8 авторских (конкурентный jog, shutdown с реальным медленным запросом, медленный robot, 3× JS страницы через `node`/`page_offline.mjs`, localhost-страж, content-type-страж) |
 
 ## Долг / открытые вопросы
 

@@ -137,7 +137,9 @@ function post(path, body) {{
   }}).then(function (r) {{ return r.json(); }});
 }}
 function getStatus() {{
-  return fetch("/api/status").then(function (r) {{ return r.json(); }});
+  return fetch("/api/status").then(function (r) {{
+    return r.ok ? r.json() : Promise.reject(new Error("http " + r.status));
+  }});
 }}
 
 var freqSlider = document.getElementById("freq");
@@ -158,20 +160,30 @@ document.getElementById("btnCalib").onclick = function () {{
 
 // Dead-man jog: pointerdown шлёт сразу и каждые 200 мс; любое из событий
 // отпускания/потери фокуса/скрытия вкладки останавливает таймер и шлёт stop.
+// jogPending — промис последнего форварда /api/jog: jogStop дожидается его
+// перед /api/stop, чтобы стоп не обогнал в пути к robot чуть более ранний
+// jog (ревью Task 2.3b, п.4). jogInFlight пропускает тик таймера, пока
+// предыдущий /api/jog ещё не вернулся, — очередь форвардов не копится.
 var jogTimer = null;
+var jogInFlight = false;
+var jogPending = Promise.resolve();
 function jogSend(direction) {{
-  post("/api/jog", {{direction: direction, freq_hz: parseFloat(freqNum.value)}});
+  if (jogInFlight) return;
+  jogInFlight = true;
+  jogPending = post("/api/jog", {{direction: direction, freq_hz: parseFloat(freqNum.value)}})
+    .catch(function () {{}})
+    .then(function () {{ jogInFlight = false; }});
 }}
 function jogStart(direction) {{
+  if (jogTimer !== null) return;
   jogSend(direction);
   jogTimer = setInterval(function () {{ jogSend(direction); }}, 200);
 }}
 function jogStop() {{
-  if (jogTimer !== null) {{
-    clearInterval(jogTimer);
-    jogTimer = null;
-  }}
-  post("/api/stop", {{}});
+  if (jogTimer === null) return;
+  clearInterval(jogTimer);
+  jogTimer = null;
+  jogPending.then(function () {{ return post("/api/stop", {{}}); }});
 }}
 [["jogFwd", 1], ["jogRev", -1]].forEach(function (pair) {{
   var el = document.getElementById(pair[0]);
@@ -188,7 +200,7 @@ document.addEventListener("visibilitychange", function () {{
 
 function pollStatus() {{
   getStatus().then(function (s) {{
-    if (s && s.status !== "error") {{
+    if (s && s.ok !== false) {{
       document.getElementById("status").textContent =
         "encoder=" + s.encoder + "  mm_s=" + s.mm_s + "  run=" + s.run +
         "  freq_hz=" + s.freq_hz + "  reverse=" + s.reverse +
@@ -237,6 +249,12 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - сигнатура stdlib
             """Подавить дефолтный access-лог в stderr (не наш log-разъём)."""
 
+        def _host_allowed(self) -> bool:
+            """127.0.0.1/localhost на порту сервера — иначе чужой Host (DNS rebinding, ревью п.5)."""
+            host_header = self.headers.get("Host", "")
+            port = self.server.server_address[1]
+            return host_header in (f"127.0.0.1:{port}", f"localhost:{port}")
+
         def _reply_json(self, status: int, payload: dict) -> None:
             body = json.dumps(payload).encode("utf-8")
             try:
@@ -284,6 +302,9 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             return args, None
 
         def do_GET(self) -> None:  # noqa: N802 - имя метода задано stdlib
+            if not self._host_allowed():
+                self._reply_json(403, {"ok": False, "error": "forbidden_host"})
+                return
             if self.path == "/":
                 try:
                     self.send_response(200)
@@ -300,9 +321,16 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             self._reply_json(404, {"ok": False, "error": "not_found"})
 
         def do_POST(self) -> None:  # noqa: N802 - имя метода задано stdlib
+            if not self._host_allowed():
+                self._reply_json(403, {"ok": False, "error": "forbidden_host"})
+                return
             command = _COMMAND_BY_PATH.get(self.path)
             if command is None:
                 self._reply_json(404, {"ok": False, "error": "not_found"})
+                return
+            content_type = self.headers.get("Content-Type", "")
+            if not content_type.startswith("application/json"):
+                self._reply_json(415, {"ok": False, "error": "unsupported_media_type"})
                 return
             args, error = self._read_command_body()
             if error is not None:
