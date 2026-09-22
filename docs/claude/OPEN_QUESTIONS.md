@@ -1084,3 +1084,20 @@ use`, порт никто не слушает, прототип получает
 `Plugins/sim/robot_host/plugin.py:154-158`, `_probe_port_free` биндит без `SO_REUSEADDR` (macOS
 2×MSL ≈ 30 с); какой сокет падает (проба или pymodbus) — не подтверждено. Для пункта 3 стенда
 («рестарт robot → связь восстанавливается») даст красный по ложной причине.
+
+## Три красных фронтенд-теста и красный watcher на `main` (2026-09-22, merge line-sim + gui-service 1.1)
+
+Детерминированно красные на `main` до и после merge `feat/line-sim` (проверено worktree на `0c373dc5`):
+- `multiprocess_prototype/frontend/widgets/tabs/observability/tests/test_empty_hint_and_lag.py::TestOnARealStore` — 2 теста («вкладка пуста на реальном сторе»);
+- `multiprocess_prototype/frontend/widgets/tabs/processes/tests/test_system_dashboard.py::TestRefresh::test_refresh_pulls_ring_history_into_series`;
+- `multiprocess_framework/modules/config_module/tests/test_watcher.py::test_foreign_file_in_the_same_directory_is_ignored` — «чужой файл разбудил watcher: 1» (macOS; на Windows не проверялось).
+Причина не искалась. gui-service 1.4 сравнивается с baseline 2470/0/3, а не с «всё зелёное».
+
+Отдельно: страж `tests/test_module_tiers.py::test_no_test_dir_is_invisible_to_every_runner` обходит
+gitignored-каталоги (`.claude/_backups/`, `_archive/`) и краснеет на машине, где они лежат. В git их нет —
+страж должен их пропускать (например, фильтр `git check-ignore`).
+
+## fps дисплея для gui-service 1.4 — нечем мерить без железа (2026-09-22)
+
+Ни один синтетический рецепт (`g1_perf_probe`, `dualcam_synth`) не объявляет процесс `gui`, а рецепты
+с `gui` требуют камеру. Нужен рецепт «синтетика → gui» или стенд с вебкамерой — решение 1.4 или владельца.
