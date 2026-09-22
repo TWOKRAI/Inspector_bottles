@@ -225,3 +225,30 @@ def test_pult_web_api_status_exposes_encoder_via_real_client():
         assert payload.get("encoder") == encoder_value
     finally:
         plugin.shutdown(ctx)
+
+
+# --------------------------------------------------------------------------- #
+# Добавлено ведущим по ревью фикса (итерация 1, находка 1): ветки отказа      #
+# ``reason`` и ``error`` внутри result. ``success`` — из настоящего           #
+# ``_result_is_success``, как в ``RouterManager._dispatch_command``.         #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        # Отказ самого фреймворка: нет обработчика команды (CommandManager).
+        ({"status": "error", "reason": "No handler for key 'belt.status'"}, "No handler for key 'belt.status'"),
+        # Отказ relay без status, только success/error внутри result.
+        ({"success": False, "error": "process.relay: нет"}, "process.relay: нет"),
+    ],
+    ids=["reason", "inner_error"],
+)
+def test_failure_text_from_result_reason_or_error(result, expected):
+    from multiprocess_framework.modules.router_module.core.router_manager import _result_is_success
+
+    envelope = _reply_envelope(result, success=_result_is_success(result))
+    resp = _client_with_response(envelope).request("belt.status", {})
+
+    assert resp["status"] == "error"
+    assert resp["message"] == expected
