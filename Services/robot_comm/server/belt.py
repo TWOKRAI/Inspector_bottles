@@ -20,13 +20,13 @@ robot_main` — та же команда, что и на боевом стенд
 
 from __future__ import annotations
 
-import logging
 import math
 import threading
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.robot_comm.core.registers import FACTOR_MM
 
-_logger = logging.getLogger(__name__)
+_logger = get_std_logger(__name__)
 
 
 class BeltDrive:

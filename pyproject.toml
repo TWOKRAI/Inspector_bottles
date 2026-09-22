@@ -197,6 +197,9 @@ testpaths = [
     # test_services_and_plugins_test_dirs_are_collected. Цена — ~48 с.
     "Services",
     "Plugins",
+    # merge line-sim (2026-09-22): второе приложение на run_app. Живые тесты стенда
+    # сами уходят в skip без стенда; цена в гейте — ~40 с (23 passed / 6 skipped).
+    "apps/line_sim/tests",
     # Тесты инструментов из scripts/ вне testpaths молча не гоняются — как уже
     # было с тремя каталогами. Срез графа в гейте: он дешёвый (мини-граф, <1с).
     "scripts/graph_slice/tests",
