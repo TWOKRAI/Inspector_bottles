@@ -77,6 +77,13 @@ _DEFAULT_PUBLISH_MS = 50
 _DEFAULT_JOG_TIMEOUT_MS = 500
 _DEFAULT_JOG_FREQ_HZ = 10.0
 
+#: Масштаб частоты ПЧ в mailbox — 0.01 Гц/LSB (см. gd20_bridge.yaml
+#: cmd_freq.scale; тот же множитель приватно продублирован в
+#: ``Services/robot_comm/server/sim_core.py`` как ``_VFD_FREQ_SCALE``).
+#: Нужен здесь, чтобы cmd_belt_jog считал ``_jog_regs`` ИЗ АРГУМЕНТОВ
+#: команды, а не читал их обратно из mailbox (ревью Task 2.3a, п.2).
+_VFD_CMD_FREQ_SCALE = 100.0
+
 
 @register_plugin("sim_robot_host", category="io", description="Хост Modbus TCP-симулятора робота (SimRobotServer)")
 class SimRobotHostPlugin(ProcessModulePlugin):
@@ -265,50 +272,69 @@ class SimRobotHostPlugin(ProcessModulePlugin):
     def _publish_loop(self, stop_event: Any, pause_event: Any) -> None:
         """Тик паблишера: ``publish_ms`` (форма — ``TelemetrySinkPlugin._sample_loop``).
 
+        Сторож jog (:meth:`_check_jog_watchdog`) зовётся КАЖДУЮ итерацию,
+        включая паузу (ревью Task 2.3a, п.6): на паузе никто не опрашивает
+        ``belt.status`` — единственный другой путь к сторожу (см.
+        ``README.md``) — и без этого вызова dead-man jog не сработал бы,
+        пока процесс стоит на паузе. ``_publish_once`` — по-прежнему только
+        вне паузы.
+
         Ошибка одного тика (например, сервер ещё не поднят) не должна убивать
         воркер — иначе публикация мира молча умирает навсегда.
         """
         interval_s = self._publish_ms / 1000.0
         while not stop_event.is_set():
-            if pause_event.is_set():
-                time.sleep(0.1)
-                continue
-            time.sleep(interval_s)
+            paused = pause_event.is_set()
+            time.sleep(0.1 if paused else interval_s)
             try:
                 self._check_jog_watchdog()
-                self._publish_once()
+                if not paused:
+                    self._publish_once()
             except Exception as exc:  # noqa: BLE001 — тик не должен убить воркер
                 self._ctx.health.report_error(exc, context="sim_robot_host.publish")
 
     def _check_jog_watchdog(self) -> None:
-        """Dead-man jog (Task 2.3a): без сервера ленты нет — рано выходим ДО
-        каких-либо проверок. Иначе — если дедлайн настал, стопим ленту, но
-        ТОЛЬКО если mailbox всё ещё равен тому, что записал jog (``_jog_regs``,
-        читается через ``VFD_CMD_ADDR`` — тот же адрес, что и приёмка); если
-        mailbox уже переписан другим мастером (боевой ``VfdClient`` или
-        `belt.run`/`belt.stop` — те чистят jog сами, см. :meth:`_clear_jog`),
-        jog считается перебитым: флаг снимается, лента не трогается.
+        """Dead-man jog (Task 2.3a, ревью — находка «гонка сторожа jog»): без
+        сервера ленты нет — рано выходим ДО каких-либо проверок (сам
+        ``self._server`` под замком не мутируется, трогать его безопасно и
+        без ``self._lock``). Иначе — ВЕСЬ путь ниже (дедлайн, чтение mailbox,
+        сравнение, ``command_vfd``) идёт ПОД ОДНИМ ``self._lock`` — тем же
+        замком и тем же неразрывным куском, что ``cmd_belt_run``/
+        ``cmd_belt_stop``/``cmd_belt_jog`` держат вокруг своего
+        ``command_vfd`` (см. их докстринги). Без единого замка на весь путь
+        ``belt.run`` из другого потока мог записать mailbox МЕЖДУ чтением
+        сторожа и его стопом — сторож гасил уже НОВУЮ команду, а не свой jog
+        (найдено ревью; воспроизведено детерминированно в
+        ``tests/test_hazards.py``, стохастически — 3/20000 без форсинга до
+        фикса). Компромисс безопасен: ``core.read``/``core.command_vfd``
+        только мутируют список регистров в памяти, IPC внутри замка не
+        зовём (TRAPS ведущего).
 
-        Повторная проверка ``self._jog_deadline == deadline`` перед очисткой —
-        на случай, если КОМАНДА (другой поток) успела поставить НОВЫЙ jog,
-        пока этот тик читал mailbox без удержания ``self._lock``.
+        Если дедлайн настал, стопим ленту, но ТОЛЬКО если mailbox всё ещё
+        равен тому, что записал jog (``_jog_regs``, читается через
+        ``VFD_CMD_ADDR`` — тот же адрес, что и приёмка); если mailbox уже
+        переписан другим мастером (боевой ``VfdClient`` или
+        ``belt.run``/``belt.stop`` — те чистят jog сами под тем же замком,
+        см. :meth:`_clear_jog_locked`), jog считается перебитым: флаг
+        снимается, лента не трогается. Отдельной повторной проверки
+        ``self._jog_deadline == deadline`` перед очисткой больше не нужно —
+        под одним замком новый jog не может вклиниться между чтением и
+        очисткой.
         """
         if self._server is None:
             return
+        core = self._server.core
         with self._lock:
             deadline = self._jog_deadline
             regs = self._jog_regs
-        if deadline is None or time.monotonic() < deadline:
-            return
-        core = self._server.core
-        current = tuple(core.read(VFD_CMD_ADDR, 3))
-        if current == regs:
-            core.command_vfd(run=False)
-        with self._lock:
-            if self._jog_deadline == deadline:
-                self._jog_deadline = None
-                self._jog_regs = None
-                self._jogging = False
+            if deadline is None or time.monotonic() < deadline:
+                return
+            current = tuple(core.read(VFD_CMD_ADDR, 3))
+            if current == regs:
+                core.command_vfd(run=False)
+            self._jog_deadline = None
+            self._jog_regs = None
+            self._jogging = False
 
     def _publish_once(self) -> None:
         """Один тик: снять энкодер+скорость сервера, отдать уровни, и (если мир
@@ -386,12 +412,14 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             return self._bad_args(f"freq_hz={freq_hz} вне диапазона [0, {freq_max_hz}]")
         return None
 
-    def _clear_jog(self) -> None:
-        """Снять jog безусловно (``belt.run``/``belt.stop`` — п.3 DESIGN)."""
-        with self._lock:
-            self._jog_deadline = None
-            self._jog_regs = None
-            self._jogging = False
+    def _clear_jog_locked(self) -> None:
+        """Снять jog безусловно. Вызывать ТОЛЬКО под ``self._lock`` — так его
+        зовут ``cmd_belt_run``/``cmd_belt_stop`` одним куском со своим
+        ``command_vfd`` (ревью Task 2.3a, п.1: до этого замок здесь был
+        отдельный и короткий, а ``command_vfd`` шёл уже без него)."""
+        self._jog_deadline = None
+        self._jog_regs = None
+        self._jogging = False
 
     def _belt_status(self) -> dict:
         # Watchdog проверяется здесь ТОЖЕ (не только на тике паблишера) —
@@ -418,7 +446,15 @@ class SimRobotHostPlugin(ProcessModulePlugin):
 
     def cmd_belt_run(self, data: dict | None = None) -> dict:
         """``belt.run{freq_hz, reverse=False}`` — команда ПЧ через mailbox,
-        снимает jog безусловно."""
+        снимает jog безусловно.
+
+        ``reverse`` обязан быть НАСТОЯЩИМ ``bool`` (ревью Task 2.3a, п.5):
+        ``bool("false")`` в Python — ``True``, старый ``bool(data.get(...))``
+        принимал за истину любую непустую строку.
+
+        Снятие jog + ``command_vfd`` — ПОД ``self._lock`` одним куском (ревью,
+        п.1): сериализовано со сторожем, см. докстринг
+        :meth:`_check_jog_watchdog`. Замок короткий, IPC внутри не зовём."""
         if self._server is None:
             return self._no_server()
         data = data or {}
@@ -426,39 +462,59 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         err = self._validate_freq(freq_hz)
         if err is not None:
             return err
-        reverse = bool(data.get("reverse", False))
-        self._clear_jog()
-        self._server.core.command_vfd(run=True, freq_hz=float(freq_hz), reverse=reverse)
+        reverse = data.get("reverse", False)
+        if not isinstance(reverse, bool):
+            return self._bad_args("reverse должен быть bool")
+        with self._lock:
+            self._clear_jog_locked()
+            self._server.core.command_vfd(run=True, freq_hz=float(freq_hz), reverse=reverse)
         return self._belt_status()
 
     def cmd_belt_stop(self, data: dict | None = None) -> dict:
-        """``belt.stop`` — пишет ТОЛЬКО RUN=0 (CMD_FREQ не трогается), снимает jog."""
+        """``belt.stop`` — пишет ТОЛЬКО RUN=0 (CMD_FREQ не трогается), снимает
+        jog под тем же замком, что ``cmd_belt_run`` (см. его докстринг)."""
         if self._server is None:
             return self._no_server()
-        self._clear_jog()
-        self._server.core.command_vfd(run=False)
+        with self._lock:
+            self._clear_jog_locked()
+            self._server.core.command_vfd(run=False)
         return self._belt_status()
 
     def cmd_belt_jog(self, data: dict | None = None) -> dict:
         """``belt.jog{direction: +-1, freq_hz?}`` — dead-man: без подкачки в
         течение ``jog_timeout_ms`` watchdog (:meth:`_check_jog_watchdog`,
-        тикает в ``_publish_loop``) сам остановит ленту, если mailbox к тому
-        моменту не переписан другим мастером."""
+        тикает в ``_publish_loop`` и опортунистически в ``_belt_status``) сам
+        остановит ленту, если mailbox к тому моменту не переписан другим
+        мастером.
+
+        ``direction`` обязан быть НАСТОЯЩИМ ``int`` ``+-1`` (ревью Task 2.3a,
+        п.5): ``bool`` — подкласс ``int``, ``True in (1, -1)`` истинно, старая
+        проверка принимала ``direction=True`` за ``+1``.
+
+        ``_jog_regs`` считается ИЗ АРГУМЕНТОВ команды (``run=1``, ``dir``,
+        ``round(freq_hz*100)``), а НЕ читается обратно из mailbox (ревью,
+        п.2): Modbus-запись другого мастера, попавшая в окно между записью и
+        обратным чтением, была бы принята за СВОЙ же jog и потом остановлена
+        сторожем как чужая — обратное чтение убрано целиком.
+
+        Запись mailbox + установка дедлайна — ПОД ``self._lock`` одним куском,
+        как у ``cmd_belt_run``/``cmd_belt_stop`` (см. докстринг
+        :meth:`_check_jog_watchdog`)."""
         if self._server is None:
             return self._no_server()
         data = data or {}
         direction = data.get("direction")
-        if direction not in (1, -1):
+        if not isinstance(direction, int) or isinstance(direction, bool) or direction not in (1, -1):
             return self._bad_args("direction должен быть +1 или -1")
         freq_hz = data.get("freq_hz", self._jog_freq_hz)
         err = self._validate_freq(freq_hz)
         if err is not None:
             return err
-        core = self._server.core
+        freq_hz_f = float(freq_hz)
         reverse = direction < 0
-        core.command_vfd(run=True, freq_hz=float(freq_hz), reverse=reverse)
-        regs = tuple(core.read(VFD_CMD_ADDR, 3))
+        regs = (1, 1 if reverse else 0, round(freq_hz_f * _VFD_CMD_FREQ_SCALE))
         with self._lock:
+            self._server.core.command_vfd(run=True, freq_hz=freq_hz_f, reverse=reverse)
             self._jog_regs = regs
             self._jog_deadline = time.monotonic() + self._jog_timeout_ms / 1000.0
             self._jogging = True

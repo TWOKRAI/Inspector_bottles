@@ -229,6 +229,11 @@ def test_modbus_write_overrides_jog(running_plugin) -> None:
     status = _call(plugin, "belt.status")
     assert status["mm_s"] == pytest.approx(80.905, abs=0.5)
     assert status["jogging"] is False
+    # Ревью Task 2.3a, инъекция A8 (не поймана предыдущей версией теста):
+    # эффективное состояние ленты должно отражать Modbus-мастера, а не jog.
+    assert status["run"] is True
+    assert status["freq_hz"] == 40.0
+    assert status["reverse"] is False
     # Эффект, а не снимок в том же вызове (ведущий, 2026-09-22, инъекция A5): стоп
     # сторожа применился бы только следующим тиком, и статус выше его ещё не видит.
     # Mailbox остаётся записью Modbus-мастера, лента едет и через 0.1 с.
