@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from Services.line_sim import LayeredObject, LayerSpec, ObjectPassport
+from Services.line_sim import LayerAugment, LayeredObject, LayerSpec, ObjectPassport
 
 
 def _passport(object_id: str = "h", angle_deg: float = 0.0) -> ObjectPassport:
@@ -130,3 +130,117 @@ def test_fully_transparent_object_rejected():
     empty = np.zeros((5, 5, 4), dtype=np.uint8)
     with pytest.raises(ValueError, match="прозрачен"):
         LayeredObject(_passport(), [LayerSpec(name="e", mode="static", sprite_source=empty)], np.random.default_rng(0))
+
+
+# --- ревью, итерация 1 --------------------------------------------------------
+
+
+def _solid(h: int, w: int) -> np.ndarray:
+    s = np.zeros((h, w, 4), dtype=np.uint8)
+    s[:, :, 0] = 200
+    s[:, :, 3] = 255
+    return s
+
+
+def test_forced_defect_from_passport_draws_without_roll():
+    passport = ObjectPassport(object_id="f", class_name="c", angle_deg=0.0, defect="dmg", spawn_encoder=0.0)
+    layers = [
+        LayerSpec(name="b", mode="static", sprite_source=_marker(0)),
+        LayerSpec(name="dmg", mode="defect", sprite_source=_marker(2), offset_px=(8.0, 0.0), defect_probability=0.0),
+    ]
+    obj = LayeredObject(passport, layers, np.random.default_rng(0))
+    assert obj.passport.defect == "dmg"
+    assert obj.passport.layer_params["dmg"] == {"active": True}
+    assert int(np.count_nonzero(obj.render()[:, :, 2] > 150)) == 9
+
+
+def test_forced_defect_unknown_name_raises():
+    passport = ObjectPassport(object_id="u", class_name="c", angle_deg=0.0, defect="nope", spawn_encoder=0.0)
+    layers = [LayerSpec(name="dmg", mode="defect", sprite_source=_marker(2), defect_probability=1.0)]
+    with pytest.raises(ValueError, match="nope"):
+        LayeredObject(passport, layers, np.random.default_rng(0))
+
+
+@pytest.mark.parametrize(("h", "w", "area"), [(5, 5, 25), (20, 50, 1000)])
+@pytest.mark.parametrize("angle", [0.0, 90.0, 180.0, 270.0, -90.0])
+def test_quarter_rotation_keeps_every_pixel_opaque(h, w, area, angle):
+    """Кратные 90° — без среза края и без размытия: вся площадь остаётся alpha=255."""
+    sprite = _solid(h, w)
+    rng = np.random.default_rng
+    obj_rot = LayeredObject(
+        _passport(angle_deg=angle), [LayerSpec(name="a", mode="static", sprite_source=sprite)], rng(0)
+    )
+    layer_rot = LayeredObject(
+        _passport(), [LayerSpec(name="a", mode="static", sprite_source=sprite, angle_deg=angle)], rng(0)
+    )
+    for frame in (obj_rot.render(), layer_rot.render()):
+        assert int(np.count_nonzero(frame[:, :, 3] == 255)) == area
+        assert int(np.count_nonzero(frame[:, :, 3])) == area
+
+
+@pytest.mark.parametrize(("angle", "expected"), [(90.0, (0.0, -10.0)), (180.0, (-10.0, 0.0)), (270.0, (0.0, 10.0))])
+def test_quarter_rotation_centre_residual_is_half_pixel(angle, expected):
+    """Остаток 0.5 px — целочисленная постановка нечётного спрайта на чётную канву (см. LS-005)."""
+    layer = LayerSpec(name="m", mode="static", sprite_source=_marker(2), offset_px=(10.0, 0.0))
+    frame = LayeredObject(_passport(angle_deg=angle), [layer], np.random.default_rng(0)).render()
+    h, w = frame.shape[:2]
+    ys, xs = np.nonzero(frame[:, :, 3])
+    assert xs.mean() + 0.5 - w / 2.0 == pytest.approx(expected[0], abs=0.6)
+    assert ys.mean() + 0.5 - h / 2.0 == pytest.approx(expected[1], abs=0.6)
+
+
+def test_bad_sprite_in_inactive_defect_layer_raises_deterministically():
+    rgb = np.zeros((5, 5, 3), dtype=np.uint8)
+    layers = [
+        LayerSpec(name="b", mode="static", sprite_source=_marker(0)),
+        LayerSpec(name="bad", mode="defect", sprite_source=rgb, defect_probability=0.0),
+    ]
+    for seed in range(5):
+        with pytest.raises(ValueError, match="bad"):
+            LayeredObject(_passport(), layers, np.random.default_rng(seed))
+
+
+def test_provider_of_inactive_defect_layer_called_once():
+    calls = []
+
+    def provider() -> np.ndarray:
+        calls.append(1)
+        return _marker(2)
+
+    layers = [
+        LayerSpec(name="b", mode="static", sprite_source=_marker(0)),
+        LayerSpec(name="d", mode="defect", sprite_source=provider, defect_probability=0.0),
+    ]
+    LayeredObject(_passport(), layers, np.random.default_rng(0))
+    assert len(calls) == 1
+
+
+def test_trailing_defect_roll_does_not_shift_earlier_layer_sampling():
+    """Своя подпоследовательность rng на слой: defect-слой в конце не меняет выборку этикетки."""
+    base = LayerSpec(name="b", mode="static", sprite_source=_marker(0))
+    label = LayerSpec(
+        name="l",
+        mode="augmented",
+        sprite_source=_marker(2),
+        offset_px=(6.0, 0.0),
+        augment=LayerAugment(angle_deg=(-30.0, 30.0)),
+    )
+    dmg = LayerSpec(name="d", mode="defect", sprite_source=_marker(1), defect_probability=0.0)
+    for seed in range(5):
+        a = LayeredObject(_passport(), [base, label, dmg], np.random.default_rng(seed))
+        b = LayeredObject(_passport(), [base, label], np.random.default_rng(seed))
+        assert a.passport.layer_params["l"] == b.passport.layer_params["l"]
+        assert np.array_equal(a.render(), b.render())
+
+
+def test_forcing_a_defect_does_not_shift_following_layer_sampling():
+    """Принудительный дефект пропускает розыгрыш; на общем rng это сдвинуло бы выборку этикетки."""
+    dmg = LayerSpec(name="d", mode="defect", sprite_source=_marker(1), defect_probability=1.0)
+    label = LayerSpec(
+        name="l", mode="augmented", sprite_source=_marker(2), augment=LayerAugment(angle_deg=(-30.0, 30.0))
+    )
+    forced = ObjectPassport(object_id="f", class_name="c", angle_deg=0.0, defect="d", spawn_encoder=0.0)
+    for seed in range(5):
+        a = LayeredObject(forced, [dmg, label], np.random.default_rng(seed))
+        b = LayeredObject(_passport(), [dmg, label], np.random.default_rng(seed))
+        assert a.passport.layer_params["l"] == b.passport.layer_params["l"]

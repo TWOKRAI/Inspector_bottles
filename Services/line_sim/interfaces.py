@@ -108,9 +108,9 @@ class ObjectPassport:
 
 
 class SceneCompositor(Protocol):
-    """Контракт сцены «лента с объектами» (реализация — Task 3.3).
+    """Контракт сцены «лента с объектами» (реализация — Task 3.4).
 
-    Координаты `camera_rect` и единицы уточняет Task 3.3; здесь фиксирована форма.
+    Координаты `camera_rect` и единицы уточняет Task 3.4; здесь фиксирована форма.
     """
 
     def spawn(self, obj: Any, spawn_encoder: float) -> None:

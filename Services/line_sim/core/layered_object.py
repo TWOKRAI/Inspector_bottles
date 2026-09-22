@@ -40,6 +40,21 @@ def _load_sprite(layer: LayerSpec) -> np.ndarray:
     return sprite
 
 
+def _rotate(sprite: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Поворот CCW (ось Y вниз).
+
+    Кратные 90° — `np.rot90` (без интерполяции): `rotate_expand` на 90/180/270 из-за
+    sin≈1e-16 в матрице даёт холст на 1 px больше и полупиксельный сдвиг — край
+    срезается или размывается (замер: 5x5 на 180° — 36 пикселей альфы, из них 16
+    непрозрачных, вместо 25). Прочие углы — `rotate_expand` с прозрачной рамкой 1 px,
+    чтобы край не срезался.
+    """
+    quarter = angle_deg / 90.0
+    if quarter == round(quarter):
+        return np.ascontiguousarray(np.rot90(sprite, k=int(round(quarter)) % 4))
+    return rotate_expand(np.pad(sprite, ((1, 1), (1, 1), (0, 0))), angle_deg)
+
+
 def _hue_shift(sprite: np.ndarray, deg: float) -> np.ndarray:
     """Сдвиг тона по RGB-каналам через HSV (OpenCV: H = градусы/2); альфа не трогается."""
     hsv = cv2.cvtColor(np.ascontiguousarray(sprite[:, :, :3]), cv2.COLOR_RGB2HSV)
@@ -72,7 +87,11 @@ class LayeredObject:
     Post:
       - `render()` возвращает один и тот же read-only RGBA-массив, альфа не пуста
       - `passport.layer_params` содержит выбранные значения; `passport.defect` —
-        имена сработавших defect-слоёв через запятую или None
+        имена активных defect-слоёв через запятую или None
+      - входной `passport.defect` (имена через запятую) принудительно включает эти
+        defect-слои без розыгрыша; неизвестное имя — ValueError
+      - слой i берёт случайность из `rng.spawn(len(layers))[i]`: порядок слоёв —
+        часть контракта seed, розыгрыш одного слоя не сдвигает другие
       - входной `passport` не мутируется (у объекта своя копия)
     """
 
@@ -80,35 +99,49 @@ class LayeredObject:
         if not layers:
             raise ValueError(f"LayeredObject '{passport.object_id}': пустой список слоёв — нечего рисовать")
 
-        # 1. Вся случайность — здесь, в порядке слоёв (детерминизм по seed).
+        # 1. Все спрайты загружаются и проверяются ДО любого розыгрыша: битый спрайт
+        #    невыпавшего defect-слоя падает детерминированно, провайдер зовётся ровно раз.
+        sprites = [_load_sprite(layer) for layer in layers]
+
+        # 2. Принудительный дефект из входного паспорта: имена defect-слоёв через запятую.
+        defect_names = {layer.name for layer in layers if layer.mode == "defect"}
+        forced = [n.strip() for n in (passport.defect or "").split(",") if n.strip()]
+        unknown = [n for n in forced if n not in defect_names]
+        if unknown:
+            raise ValueError(
+                f"LayeredObject '{passport.object_id}': defect={unknown} — нет таких defect-слоёв "
+                f"(есть: {sorted(defect_names)})"
+            )
+
+        # 3. Своя подпоследовательность rng на каждый слой (по индексу): розыгрыш одного
+        #    слоя не сдвигает выборку следующих. Порядок слоёв — часть контракта seed.
+        subs = rng.spawn(len(layers))
         placed: list[tuple[np.ndarray, float, float]] = []
         params: dict[str, dict] = {}
-        rolled: list[str] = []
-        for layer in layers:
+        active_defects: list[str] = []
+        for layer, sprite, sub in zip(layers, sprites, subs, strict=True):
             dx = dy = dang = dhue = 0.0
             mul = 1.0
             if layer.mode == "defect":
-                active = bool(rng.random() < layer.defect_probability)
+                active = layer.name in forced or bool(sub.random() < layer.defect_probability)
                 params[layer.name] = {"active": active}
                 if not active:
                     continue
-                rolled.append(layer.name)
-            elif layer.mode == "augmented":
-                aug = layer.augment
-                sampled = {f: float(rng.uniform(*getattr(aug, f))) for f in AUGMENT_FIELDS} if aug else {}
-                if sampled:
-                    params[layer.name] = sampled
-                    dx, dy = sampled["offset_x_px"], sampled["offset_y_px"]
-                    dang, mul, dhue = sampled["angle_deg"], sampled["scale"], sampled["hue_shift_deg"]
+                active_defects.append(layer.name)
+            elif layer.mode == "augmented" and layer.augment is not None:
+                sampled = {f: float(sub.uniform(*getattr(layer.augment, f))) for f in AUGMENT_FIELDS}
+                params[layer.name] = sampled
+                dx, dy = sampled["offset_x_px"], sampled["offset_y_px"]
+                dang, mul, dhue = sampled["angle_deg"], sampled["scale"], sampled["hue_shift_deg"]
             placed.append(
                 (
-                    self._transform(_load_sprite(layer), layer.scale * mul, layer.angle_deg + dang, dhue),
+                    self._transform(sprite, layer.scale * mul, layer.angle_deg + dang, dhue),
                     layer.offset_px[0] + dx,
                     layer.offset_px[1] + dy,
                 )
             )
 
-        self.passport = replace(passport, layer_params=params, defect=",".join(rolled) or None)
+        self.passport = replace(passport, layer_params=params, defect=",".join(active_defects) or None)
         self._rgba = self._compose(placed, passport.angle_deg)
         if not np.any(self._rgba[:, :, 3]):
             raise ValueError(f"LayeredObject '{passport.object_id}': итоговый RGBA полностью прозрачен")
@@ -122,7 +155,7 @@ class LayeredObject:
             size = (max(1, round(w * scale)), max(1, round(h * scale)))
             sprite = cv2.resize(sprite, size, interpolation=cv2.INTER_LINEAR)
         if angle_deg != 0.0:
-            sprite = rotate_expand(sprite, angle_deg)
+            sprite = _rotate(sprite, angle_deg)
         if hue_deg != 0.0:
             sprite = _hue_shift(sprite, hue_deg)
         return sprite
@@ -145,7 +178,7 @@ class LayeredObject:
         rgb = np.where(a[:, :, None] > 0, canvas_pm.astype(np.float32) * 255.0 / np.maximum(a, 1.0)[:, :, None], 0.0)
         rgba = np.dstack([np.clip(rgb + 0.5, 0, 255).astype(np.uint8), canvas_a])
         if angle_deg != 0.0:
-            rgba = rotate_expand(rgba, angle_deg)
+            rgba = _rotate(rgba, angle_deg)
         return rgba
 
     def render(self) -> np.ndarray:
