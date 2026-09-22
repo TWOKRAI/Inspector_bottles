@@ -169,7 +169,30 @@ Launch the **tester** agent (Sonnet) in `MODE: regression` (pass it through the 
   - **Web / GUI** → bring up the app, Playwright `navigate` + `screenshot` of the main screen (web) or qt-mcp `qt_screenshot` (GUI); check there's no fatal in the startup logs.
   - **Skip** if the project has no entrypoint or it's library-only → `uv run python -c "import <pkg>"` is enough. Note in the status "live-smoke: skipped (library-only)".
   - **Gate:** smoke FAIL → **STOP before step 4**: don't review a broken app — developer/teamlead fixes startup (the same 2-iterations→escalation loop as for a regression FAIL).
-- If PASS (suite + live-smoke) → step 4 (review)
+- **Mutation probe on the diff (callable gate, python)** — break-injection covers the properties someone
+  thought to claim; this covers the ones nobody did. It mutates only the source files changed since
+  `main` and runs only the Task's tests against each mutant:
+  `uv run --with mutmut python scripts/mutation_gate.py --tests <the Task's test files>`
+  (`--base` / `--source` when they are not `main` / `src`; add `--no-sync` after `uv run` where a sync must
+  not touch the env — e.g. a hand-installed CUDA torch).
+  - `VERDICT: PASS` (exit 0) → every mutant killed (`Killed: N of N`), or no `.py` changed under the source root.
+  - `VERDICT: REVIEW` (exit 1) → survivors listed with their diffs, plus the mutants **never judged**
+    (`no tests` / `timeout`: the Task's tests do not reach that function — a changed file whose tests were
+    not passed shows up here, not as a PASS). Each one is either **killed by a new
+    test** (tester) or **named equivalent in the report with a reason** (a changed log string is, a changed
+    boundary is not). Survivors are not a BLOCK on their own — the unexplained ones are. The list goes to
+    the reviewer in step 4.
+  - `VERDICT: BLOCK` (exit 1) → mutmut refused: it runs the tests from a copy under `mutants/` that holds
+    only source + tests, so pass test files that need nothing else; it also stops when no selected test
+    reaches any mutant. A symlinked `setup.cfg` / `mutants/` blocks too. A `setup.cfg` or
+    `[tool.mutmut]` already in the project also blocks — the gate writes and removes its own config.
+  - `VERDICT: SKIP` (exit 0) → no `fork` on this platform (Windows: run under WSL). Say "mutation probe:
+    skipped (no fork)" in the status; break-injection in step 4 then carries the whole load.
+  - It **adds to** break-injection, never replaces it: a mutant is a one-token change, a reverted guarantee
+    is not. Measured on the seed itself (2026-09-21, one 142-line module, 129 mutants, 7.5 s): 23 survivors,
+    among them the CRLF/LF branch no test pinned. On a 17k-file multiprocess project the same gate took 18 s
+    for one module (24 of 24 killed) — the cost is the Task's tests × mutants, not the repo size.
+- If PASS (suite + live-smoke; mutation survivors killed or explained) → step 4 (review)
 - If FAIL:
   - **Iteration 1 (FAIL)**: launch **debugger** (Sonnet) with the failing test and the stack → either debugger fixes it in scope, or it gives a diagnosis → `developer`/`teamlead` applies the fix → tester retries regression
   - **Iteration 2 (repeat FAIL)**: debugger + developer again → tester retry

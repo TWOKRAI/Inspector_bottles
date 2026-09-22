@@ -105,6 +105,7 @@ on the team whenever you expect escalations.
 |---|---|---|
 | Contract complete (S2) | script | `s2_gate.py`; an unusual docstring → `ai-judge` |
 | RED confirmed (S3) | script | `red_gate.py` |
+| Mutation probe on the diff (S5) | script | `mutation_gate.py`; survivors are killed by a test or named equivalent — adds to break-injection |
 | Task closed (live team) | hook | `TaskCompleted`: ruff + pytest; 2 blocks → pass with a warning |
 | Went idle with uncommitted work | hook | `TeammateIdle` in the worktree |
 | Task review | `reviewer` | reproduction + break-injection; 2 iterations → `teamlead` |

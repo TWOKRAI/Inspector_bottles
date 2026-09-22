@@ -99,6 +99,7 @@ milvus-docker/volumes/
 
 # Pytest
 .pytest_cache/
+mutants/
 .coverage
 
 # Type checker caches (mypy исторический, перешли на pyright; pyright_cache на всякий)
