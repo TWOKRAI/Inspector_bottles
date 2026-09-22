@@ -366,6 +366,11 @@ def test_camera_alone_serves_frames(tmp_path: Path) -> None:
     )
     (tmp_path / "pipeline.yaml").write_text(yaml.safe_dump(pipeline_raw, allow_unicode=True), encoding="utf-8")
 
+    _camera_proc = next(p for p in pipeline_raw["processes"] if p["process_name"] == "camera")
+    _scene_cfg = next(pl for pl in _camera_proc["plugins"] if pl["plugin_name"] == "scene_source")
+    pipeline_raw_height = _scene_cfg["resolution_height"]
+    pipeline_raw_width = _scene_cfg["resolution_width"]
+
     app_raw = yaml.safe_load(_APP_YAML.read_text(encoding="utf-8"))
     app_raw["discovery"]["plugin_paths"] = [str((_APP_DIR / "../../Plugins/sim").resolve())]
     app_raw["discovery"]["service_paths"] = []
@@ -389,14 +394,26 @@ def test_camera_alone_serves_frames(tmp_path: Path) -> None:
         harness.start()
 
         frame = _capture_frame_http(_MJPEG_URL)
-        assert frame.shape == (480, 640, 3), f"неожиданный размер кадра: {frame.shape}"
+        # Литералы = resolution_height/width из apps/line_sim/pipeline.yaml. Сверяем с
+        # конфигом отдельной проверкой, чтобы тест не «соглашался с любым ответом»:
+        # размер кадра и конфиг стенда должны совпасть ОБА с числами ниже.
+        assert (pipeline_raw_height, pipeline_raw_width) == (180, 640), (
+            f"pipeline.yaml сменил размер кадра ({pipeline_raw_height}x{pipeline_raw_width}) — "
+            "поправь литералы в этом тесте осознанно, а не подгонкой"
+        )
+        assert frame.shape == (180, 640, 3), f"неожиданный размер кадра: {frame.shape}"
 
-        # spawn: x_px=0 -> x_left=((0+16)%672)-32=-16 -> видна ТОЛЬКО правая половина
-        # квадрата, колонки [0,16) -> центр масс (0+15)/2=7.5 (см. докстринг
-        # SceneSourcePlugin._draw_sprite — та же формула бесконечной ленты).
-        centre = _sprite_centroid_x_by_color(frame)
-        assert centre == pytest.approx(7.5, abs=2.0), (
-            f"спрайт не в spawn (энкодер растить некому без robot): центр={centre}, ожидали ~7.5"
+        # Без robot общий мир пуст, значит энкодера НЕТ вовсе — а не «энкодер стоит».
+        # Гейт `_world_ready` (ревью Task 3.3a, находка 4) обязан в этом случае не дать
+        # спавнеру тикнуть: объект на выдуманном spawn_encoder=0 раньше рождался и уезжал
+        # в sim.objects. Проверяем наблюдаемое следствие: кадр — чистый фон, без объектов.
+        uniq = np.unique(frame.reshape(-1, 3), axis=0)
+        assert len(uniq) == 1, (
+            f"без robot на кадре есть что-то кроме фона ({len(uniq)} различных цветов) — "
+            "спавнер тикнул до появления мира (объект-призрак)"
+        )
+        assert tuple(int(v) for v in uniq[0]) == _BACKGROUND_BGR, (
+            f"цвет фона на кадре {tuple(int(v) for v in uniq[0])} != _BACKGROUND_BGR={_BACKGROUND_BGR}"
         )
 
         errors_path = log_dir / "errors.log"
