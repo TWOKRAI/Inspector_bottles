@@ -1,6 +1,9 @@
 """Hazard-тесты автора для `ObjectSpawner` (Task 3.3) — ловушки самого механизма:
-копия `active_objects()`, устойчивость к исключению `factory.make()` внутри `tick()`,
-джиттер интервала в границах, деспавн по СОБСТВЕННОМУ `spawn_encoder` объекта.
+копия `active_objects()`, устойчивость к исключению `factory.make()` внутри `tick()`
+(частота интервала, не кадра — review fix F1), деспавн по СОБСТВЕННОМУ `spawn_encoder`
+объекта, потолок активного списка вместо энкодерного правила (review fix F2, замена
+отвергнутой версии — LS-008), делегат `force_defect_next()` через спавнер (review fix
+F3), джиттер интервала в границах.
 
 Не переиспользует и не расширяет `test_acceptance_3_3.py` (независимые acceptance-тесты
 тестера) — своя фикстура-фабрика (тот же паттерн из `test_acceptance_3_2.py`).
@@ -62,54 +65,160 @@ def test_active_objects_copy_survives_mutation_and_later_despawn(tmp_path):
     assert spawner.active_objects() == []
 
 
-def test_tick_survives_factory_make_exception_no_lost_deadline_no_double_spawn(tmp_path, monkeypatch):
-    """`factory.make()` падает на одном тике — `tick()` не портит состояние: срок не
-    теряется (следующий тик на просроченном сроке повторяет попытку РОВНО один раз,
-    не два) и спавнер остаётся рабочим (следующий успешный `make()` спавнит нормально)."""
+def test_permanent_factory_failure_raises_at_interval_frequency_not_tick_frequency(tmp_path, monkeypatch):
+    """[review fix F1] Постоянный сбой `factory.make()` — исключение прилетает НА ЧАСТОТЕ
+    ИНТЕРВАЛА (срок сдвигается независимо от успеха), а не на частоте каждого кадра
+    продюсера — репродукция ревью: 286 исключений за 300 тиков на 30 fps до фикса.
+    Тики идут вдвое чаще интервала (шаг 0.25с при интервале 0.5с — обе величины кратны
+    степени двойки, сумма float точна): 12 тиков после взвода, из них должно упасть
+    исключение РОВНО на 6 — каждый второй, не на всех двенадцати."""
+    factory = _make_factory(tmp_path)
+    calls = {"n": 0}
+
+    def _always_fails(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError("постоянный сбой каталога")
+
+    spawner = ObjectSpawner(factory, interval_s=(0.5, 0.5), scene_length_mm=1_000_000.0)
+    rng = np.random.default_rng(105)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # взвод срока = 0.5
+
+    monkeypatch.setattr(factory, "make", _always_fails)
+
+    exceptions = 0
+    for i in range(1, 13):  # 12 тиков по 0.25с = 3.0с, интервал 0.5с -> 6 срабатываний
+        now_wall_s = i * 0.25
+        try:
+            spawner.tick(now_encoder=0.0, now_wall_s=now_wall_s, rng=rng)
+        except RuntimeError:
+            exceptions += 1
+
+    assert exceptions == 6  # НЕ 12 (частота кадра) -- частота интервала
+    assert calls["n"] == 6
+    assert spawner.active_objects() == []  # make() всегда падает -- ни один объект не выжил
+
+
+def test_transient_factory_failure_loses_at_most_one_object_and_keeps_forced_defect(tmp_path, monkeypatch):
+    """[review fix F1] Один транзитный сбой `factory.make()` — окно теряется НАВСЕГДА
+    (срок уже сдвинут авансом, повторной попытки в ТОМ ЖЕ окне нет), но следующее окно
+    спавнит нормально; форс-брак, взведённый ДО сбоя, не теряется — достаётся следующему
+    УСПЕШНОМУ объекту (LS-007: фабрика гасит флаг только после успешной сборки)."""
     factory = _make_factory(tmp_path)
     spawner = ObjectSpawner(factory, interval_s=(0.5, 0.5), scene_length_mm=1_000_000.0)
-    rng = np.random.default_rng(102)
+    rng = np.random.default_rng(106)
 
     spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # взвод срока = 0.5
+    factory.force_defect_next()
 
     real_make = factory.make
     calls = {"n": 0}
 
-    def _flaky_make(*args, **kwargs):
+    def _fail_once(*args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("транзитный сбой каталога")
         return real_make(*args, **kwargs)
 
-    monkeypatch.setattr(factory, "make", _flaky_make)
+    monkeypatch.setattr(factory, "make", _fail_once)
 
     with pytest.raises(RuntimeError, match="транзитный сбой"):
-        spawner.tick(now_encoder=0.0, now_wall_s=0.5, rng=rng)
-    assert spawner.active_objects() == []  # ничего не добавлено при сбое
+        spawner.tick(now_encoder=0.0, now_wall_s=0.5, rng=rng)  # окно #1 -- теряется
+    assert spawner.active_objects() == []
 
-    # следующий тик на ТОМ ЖЕ (не потерянном) сроке — ровно ОДИН успешный спавн, не два
-    spawner.tick(now_encoder=0.0, now_wall_s=0.6, rng=rng)
-    assert len(spawner.active_objects()) == 1
-    assert calls["n"] == 2  # ровно одна повторная попытка, не бесконечный ретрай в одном tick()
+    spawner.tick(now_encoder=0.0, now_wall_s=1.0, rng=rng)  # окно #2 -- успех
+    active = spawner.active_objects()
+    assert len(active) == 1
+    assert active[0].passport.defect == "damaged"  # форс не потерян -- достался этому объекту
+    assert calls["n"] == 2  # окно #1 не ретраилось внутри себя
+
+
+def test_active_list_ceiling_blocks_new_spawns_then_resumes_after_despawn(tmp_path):
+    """[review fix F2, замена отвергнутой энкодерной версии — LS-008] Потолок
+    `max_active` не завязан на энкодер: держать энкодер константой между тиками —
+    законный способ изолировать таймер (так делают test_acceptance_3_3.py и лидовский
+    N4-тест), и версия «блокировать повтор энкодера навсегда» их ломала. `max_active=3`,
+    энкодер заморожен на 0.0 — 50 тиков по 0.5с (25с симулированного времени) держат
+    РОВНО 3 активных объекта, без исключений; как только деспавн освобождает место (лента
+    уехала мимо `scene_length_mm`), спавн на уже просроченном сроке продолжается —
+    потолок не «залипает»."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory, interval_s=(0.5, 0.5), scene_length_mm=100.0, max_active=3)
+    rng = np.random.default_rng(107)
+
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # взвод срока = 0.5
+
+    now_wall = 0.0
+    for _ in range(50):  # 50 тиков по 0.5с = 25с; энкодер заморожен на 0.0
+        now_wall += 0.5
+        spawner.tick(now_encoder=0.0, now_wall_s=now_wall, rng=rng)
+    active = spawner.active_objects()
+    assert len(active) == 3  # потолок держит РОВНО 3, не 50, без единого исключения
+    first_ids = {o.passport.object_id for o in active}
+
+    # лента проезжает мимо длины сцены -- деспавн освобождает все 3 места, и на том же
+    # просроченном сроке (не сдвигался все 25с простоя) спавн происходит сразу же
+    now_wall += 0.5
+    spawner.tick(now_encoder=700.0, now_wall_s=now_wall, rng=rng)
+    active = spawner.active_objects()
+    assert len(active) == 1  # все три старых уехали, один новый занял освободившееся место
+    assert active[0].passport.object_id not in first_ids
+
+    # и дальше спавнер снова работает штатно на следующем окне -- потолок не «залипает»
+    now_wall += 0.5
+    spawner.tick(now_encoder=701.0, now_wall_s=now_wall, rng=rng)
+    assert len(spawner.active_objects()) == 2
+
+
+def test_spawner_force_defect_next_delegate_marks_next_object_while_paused(tmp_path):
+    """[review fix F3] Вызов ЧЕРЕЗ СПАВНЕР (`spawner.force_defect_next()`, не
+    `factory.force_defect_next()` напрямую) — делегат реально подключён: удаление метода
+    у `ObjectSpawner` не должно оставлять сьют зелёным (ревью нашло именно это — этот
+    хазард закрывает дыру, которую acceptance-тесты тестера не закрывали, так как они
+    зовут `factory.force_defect_next()` напрямую)."""
+    factory = _make_factory(tmp_path, defect_probability=0.0)
+    spawner = ObjectSpawner(factory, interval_s=(0.5, 0.5), scene_length_mm=1_000_000.0)
+    rng = np.random.default_rng(108)
+
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # взвод срока = 0.5
+    spawner.set_paused(True)
+    spawner.force_defect_next()  # ЧЕРЕЗ СПАВНЕР, не через factory
+    spawner.tick(now_encoder=0.0, now_wall_s=5.0, rng=rng)  # пауза -- спавна нет
+    assert spawner.active_objects() == []
+
+    spawner.set_paused(False)
+    spawner.tick(now_encoder=1.0, now_wall_s=5.5, rng=rng)  # первый реальный спавн
+    first = spawner.active_objects()
+    assert len(first) == 1
+    assert first[0].passport.defect == "damaged"
+
+    spawner.tick(now_encoder=2.0, now_wall_s=6.0, rng=rng)  # следующий обычный спавн
+    second = spawner.active_objects()
+    assert len(second) == 2
+    newcomer = next(o for o in second if o.passport.object_id != first[0].passport.object_id)
+    assert newcomer.passport.defect is None
 
 
 def test_interval_jitter_stays_within_bounds_over_200_spawns(tmp_path):
     """Джиттер `rng.uniform(lo, hi)` с lo != hi — каждый интервал между последовательными
-    спавнами лежит строго в [lo, hi] (реальный `np.random.default_rng`, не мок)."""
+    спавнами лежит строго в [lo, hi] (реальный `np.random.default_rng`, не мок). Энкодер
+    двигается вместе с временем (fix F2 блокирует повторный спавн на замороженном
+    энкодере) — джиттер здесь единственный предмет теста, движение ленты не мешает ему."""
     lo, hi = 0.2, 0.8
     factory = _make_factory(tmp_path)
-    spawner = ObjectSpawner(factory, interval_s=(lo, hi), scene_length_mm=1_000_000.0)
+    spawner = ObjectSpawner(factory, interval_s=(lo, hi), scene_length_mm=1_000_000_000.0)
     rng = np.random.default_rng(103)
 
     now_wall = 0.0
-    spawner.tick(now_encoder=0.0, now_wall_s=now_wall, rng=rng)  # взвод
+    now_encoder = 0.0
+    spawner.tick(now_encoder=now_encoder, now_wall_s=now_wall, rng=rng)  # взвод
 
     spawn_times: list[float] = []
     step = 0.01  # мельче нижней границы интервала — не пропустим момент спавна
     prev_count = 0
     while len(spawn_times) < 200:
         now_wall += step
-        spawner.tick(now_encoder=0.0, now_wall_s=now_wall, rng=rng)
+        now_encoder += 1.0  # лента едет -- каждый тик энкодер строго больше предыдущего
+        spawner.tick(now_encoder=now_encoder, now_wall_s=now_wall, rng=rng)
         count = len(spawner.active_objects())
         if count > prev_count:
             spawn_times.append(now_wall)
