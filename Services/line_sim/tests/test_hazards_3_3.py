@@ -294,3 +294,36 @@ def test_long_gap_does_not_leave_a_backlog_of_deadlines(tmp_path):
 
     spawner.tick(now_encoder=0.0, now_wall_s=10.5, rng=rng)
     assert len(spawner.active_objects()) == 2
+
+
+def test_ceiling_does_not_move_the_deadline(tmp_path):
+    """[lead 3.3, break-injection O4] «упёрлись в потолок — срок не трогаем» выживало: тест
+    потолка проверял только число активных. Здесь важно, что после освобождения места объект
+    появляется на БЛИЖАЙШЕМ тике (срок давно просрочен), а не через полный интервал."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory=factory, interval_s=(0.5, 0.5), scene_length_mm=100.0, max_active=1)
+    rng = np.random.default_rng(0)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.5, rng=rng)
+    assert len(spawner.active_objects()) == 1
+
+    # Потолок упёрт: пять тиков подряд, все просрочены — ни одного нового объекта.
+    for step in (1.0, 1.5, 2.0, 2.5, 3.0):
+        spawner.tick(now_encoder=0.0, now_wall_s=step, rng=rng)
+    assert len(spawner.active_objects()) == 1
+
+    # Освобождаем место (объект уехал за сцену) и тикаем РОВНО один раз, не дожидаясь
+    # нового интервала: срок просрочен с 1.0, значит объект обязан появиться сразу.
+    far = 1000.0
+    spawner.tick(now_encoder=far, now_wall_s=3.01, rng=rng)
+    active = spawner.active_objects()
+    assert len(active) == 1, "срок остался просроченным — спавн сразу после освобождения места"
+    assert active[0].passport.spawn_encoder == far
+
+
+def test_constructor_rejects_nonpositive_max_active(tmp_path):
+    """[lead 3.3, break-injection O5] проверка потолка не была закреплена ничем."""
+    factory = _make_factory(tmp_path)
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="max_active"):
+            ObjectSpawner(factory=factory, interval_s=(0.5, 0.5), scene_length_mm=100.0, max_active=bad)
