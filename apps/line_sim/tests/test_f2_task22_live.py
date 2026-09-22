@@ -35,7 +35,7 @@ import numpy as np
 import pytest
 
 from backend_ctl.harness import BackendHarness
-from Plugins.sim.scene_source.plugin import SPRITE_BGR
+from Plugins.sim.scene_source.plugin import _BACKGROUND_BGR
 from Services.robot_comm.core.client import RobotClient
 from Services.robot_comm.core.config import RobotConfig
 from Services.vfd_comm.core.client import VfdClient
@@ -151,28 +151,30 @@ def _make_vfd_client() -> tuple[RobotClient, VfdClient]:
     return robot, VfdClient(transport=robot)
 
 
-#: Допуск канала для цветовой маски спрайта (JPEG — с потерями, точное
-#: совпадение байт-в-байт с SPRITE_BGR не гарантировано).
+#: Допуск канала для маски «не фон» (JPEG — с потерями, фон в кадре не ровно
+#: ``_BACKGROUND_BGR``).
 _SPRITE_COLOR_TOL = 40
 
 
 def _sprite_centroid_x_by_color(frame: np.ndarray, tol: int = _SPRITE_COLOR_TOL) -> float:
-    """Центр масс столбцов кадра, где цвет близок к ``SPRITE_BGR`` (±tol/канал).
+    """Центр масс столбцов кадра по пикселям, отличным от фона сцены (±tol/канал).
 
-    Решение ведущего 2026-09-21 (взамен общего диффа против эталона): диф
-    против кадра-эталона путал «спрайт сдвинулся» с «фон рядом чуть другой»
-    (JPEG-артефакты, шум кодека) и не различал спрайт от произвольных прочих
-    изменений кадра. Цветовая маска бьёт точно по контрактному цвету спрайта.
+    Решение ведущего 2026-09-21 (взамен общего диффа против эталона): дифф
+    против кадра-эталона путал «объект сдвинулся» с «фон рядом чуть другой»
+    (JPEG-артефакты, шум кодека). Правка 2026-09-23 (Task 3.4): цвет спрайта-заглушки
+    (`SPRITE_BGR`) исчез вместе с заглушкой — маска берёт всё, что не фон, то есть
+    объекты каталога любого цвета.
     """
-    b, g, r = SPRITE_BGR
+    b, g, r = _BACKGROUND_BGR
     frame_i = frame.astype(np.int16)
-    mask = (
+    background = (
         (np.abs(frame_i[:, :, 0] - b) <= tol)
         & (np.abs(frame_i[:, :, 1] - g) <= tol)
         & (np.abs(frame_i[:, :, 2] - r) <= tol)
     )
+    mask = ~background
     weights = mask.sum(axis=0).astype(float)
-    assert weights.sum() > 0, f"спрайт цвета SPRITE_BGR={SPRITE_BGR} не найден в кадре (±{tol}/канал)"
+    assert weights.sum() > 0, f"объектов не видно: весь кадр — фон {_BACKGROUND_BGR} (±{tol}/канал)"
     return float(np.average(np.arange(frame.shape[1]), weights=weights))
 
 
@@ -275,7 +277,7 @@ def test_vfd_stop_freezes_and_start_resumes(line_sim_live_backend) -> None:
 
 
 def test_mjpeg_sprite_follows_belt(line_sim_live_backend) -> None:
-    """Пин: центр масс спрайта (по цвету ``SPRITE_BGR``) в кадрах
+    """Пин: центр масс объектов сцены (маска «не фон») в кадрах
     ``http://127.0.0.1:8091/`` смещается, пока лента едет, и неподвижен (±1px),
     пока лента стоит (после команды ПЧ «стоп»).
 

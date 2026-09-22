@@ -70,7 +70,19 @@ processes:
         category: source
         seed: 0
         spawn_encoder: 0
-        px_per_mm: 1.0
+        # Task 3.4: движок сцены вместо спрайта-заглушки. Каталог дисков-букв —
+        # демо (`python -m Services.line_sim.tools.make_demo_catalog --out data/line_sim/demo_catalog`),
+        # пока нет реальных эталонов из `cut_real_disks`. Путь абсолютный или от корня репозитория.
+        preset_path: data/line_sim/demo_catalog
+        px_per_mm: 0.6            # 640 px кадра = ~1070 мм ленты
+        belt_y_px: 90             # линия ленты по центру кадра 640x180
+        resolution_width: 640
+        resolution_height: 180
+        # Шаг между объектами: 1.6 с при ~90 мм/с ленты = ~144 мм между центрами
+        # при диске 90 мм (зазор ~54 мм). Числа стенда — Ф4; режим шага в мм — Task 3.3a.
+        spawn_interval_s: [1.6, 1.6]
+        scene_length_mm: 1200
+        defect_probability: 0.25
         stale_ms: 500
 
   - process_name: mjpeg
