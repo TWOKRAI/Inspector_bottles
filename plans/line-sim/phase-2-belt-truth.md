@@ -634,7 +634,7 @@ mailbox ПЧ в ядро тем же путём, что Modbus-запись ин
 
 ### Task 2.3b — Веб-пульт ленты: процесс `pult`, страница на 127.0.0.1:8092
 
-- **Статус:** [IN PROGRESS] 2026-09-22 (слито 5fb68b45) — пульт на 8092, 17/17 офлайн, живые 29/29, B6 RED; ревью 2 итерации; инъекции I1–I8. **Открыт живой дефект:** `/api/status` пульта отдаёт голое `{"status":"ok"}` — поля ответа robot теряются по пути `DeviceHubClient`/router (живой тест читает статус через backend_ctl и этого не видел); у investigator · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
+- **Статус:** [DONE] 2026-09-22 (слито 5fb68b45) — пульт на 8092, 17/17 офлайн, живые 29/29, B6 RED; ревью 2 итерации; инъекции I1–I8. Живой дефект «статус пульта без полей» — корень в `DeviceHubClient._normalize_response` (искал `data.result`, конверт `reply_to_request` несёт `result` сверху; задевал и калибровку camera_robot): исправлен, приёмка тестера 8/8, инъекции N1–N7, ревью; вживую `/api/status` отдаёт растущий `encoder`, jog назад −20.2 мм/с, dead-man останавливает · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
 - **CHAIN:** `tester`(RED по приёмке, worktree на коммите 2.3a) -> `developer`(GREEN) -> ведущий(инъекции, живой стенд) -> `reviewer`
 - **Module contract:** new-lite (`Plugins/sim/pult_web/plugin.py`)
 - **Зависит от:** 2.3a.
