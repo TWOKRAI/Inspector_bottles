@@ -178,15 +178,37 @@ def _sprite_centroid_x_by_color(frame: np.ndarray, tol: int = _SPRITE_COLOR_TOL)
     return float(np.average(np.arange(frame.shape[1]), weights=weights))
 
 
-def _circular_delta(a: float, b: float, period: float) -> float:
-    """Кратчайшее знаковое расстояние ``b - a`` по кругу длиной ``period``.
+def _not_background_column_profile(frame: np.ndarray, tol: int = _SPRITE_COLOR_TOL) -> np.ndarray:
+    """Профиль «не фон» по столбцам — то же условие маски, что у
+    :func:`_sprite_centroid_x_by_color`, но без взвешенного среднего (само среднее
+    и есть уязвимость P5, см. :func:`_profile_shift_px`)."""
+    b, g, r = _BACKGROUND_BGR
+    frame_i = frame.astype(np.int16)
+    background = (
+        (np.abs(frame_i[:, :, 0] - b) <= tol)
+        & (np.abs(frame_i[:, :, 1] - g) <= tol)
+        & (np.abs(frame_i[:, :, 2] - r) <= tol)
+    )
+    return (~background).sum(axis=0).astype(float)
 
-    Лента бесконечна (Task 2.2, решение ведущего): спрайт выезжает за правый
-    край и въезжает слева — без этой обёртки переход через край читался бы
-    как огромный скачок назад, а не как продолжение движения вперёд.
+
+def _profile_shift_px(profile_a: np.ndarray, profile_b: np.ndarray) -> float:
+    """Сдвиг (px) профиля ``profile_b`` относительно ``profile_a`` — пик 1-D
+    кросс-корреляции ``np.correlate(a - mean, b - mean, mode="full")``.
+
+    Фикс ревью P5: центр масс по цвету — среднее координат столбцов «не фон»,
+    и при НЕСКОЛЬКИХ одинаковых объектах на ленте (реальный движок Task 3.4, не
+    один спрайт-заглушка Task 2.2) это среднее инвариантно к сдвигу на период
+    между объектами — сцена «едет», а центр масс стоит на месте (замер ревью:
+    320.8 -> 317.3 px за 3с при пороге ``> 1.0``, движущаяся лента читалась как
+    стоящая, и наоборот). Кросс-корреляция профилей ловит РЕАЛЬНЫЙ сдвиг паттерна,
+    а не среднее координат.
     """
-    d = (b - a + period / 2.0) % period - period / 2.0
-    return d
+    a0 = profile_a - profile_a.mean()
+    b0 = profile_b - profile_b.mean()
+    corr = np.correlate(a0, b0, mode="full")
+    lag = int(np.argmax(corr)) - (len(b0) - 1)
+    return float(lag)
 
 
 def _capture_frame_http(url: str, timeout_s: float = 5.0) -> np.ndarray:
@@ -277,39 +299,33 @@ def test_vfd_stop_freezes_and_start_resumes(line_sim_live_backend) -> None:
 
 
 def test_mjpeg_sprite_follows_belt(line_sim_live_backend) -> None:
-    """Пин: центр масс объектов сцены (маска «не фон») в кадрах
-    ``http://127.0.0.1:8091/`` смещается, пока лента едет, и неподвижен (±1px),
-    пока лента стоит (после команды ПЧ «стоп»).
+    """Пин (фикс ревью P5, заменяет центр масс — см. :func:`_profile_shift_px`): паттерн
+    объектов сцены в кадрах ``http://127.0.0.1:8091/`` сдвигается больше чем на 2 px,
+    пока лента едет, и не больше чем на 1 px, пока лента стоит (после команды ПЧ «стоп»).
 
-    Измерение — решение ведущего 2026-09-21 (замена ``cv2.VideoCapture``/общего
-    диффа против эталона): каждый кадр читается свежим HTTP-соединением
-    (:func:`_capture_frame_http`), позиция — цветовая маска (:func:`_sprite_centroid_x_by_color`),
-    сравнение позиций — по кругу (:func:`_circular_delta`), т.к. лента
-    бесконечна и спрайт может пересечь правый край кадра между двумя снятиями.
-    """
+    Измерение — каждый кадр читается свежим HTTP-соединением (:func:`_capture_frame_http`,
+    решение ведущего 2026-09-21), сдвиг — 1-D кросс-корреляция профиля «не фон» по столбцам
+    (:func:`_profile_shift_px`), НЕ центр масс: с несколькими одинаковыми объектами (Task 3.4)
+    центр масс инвариантен к сдвигу на период между ними и тест был вакуумным (не ловил ни
+    едущую, ни стоящую ленту — см. докстринг :func:`_profile_shift_px`)."""
     _harness, drv = line_sim_live_backend
     robot, vfd = _make_vfd_client()
     try:
         moving_a = _capture_frame_http(_MJPEG_URL)
-        width = moving_a.shape[1]
         time.sleep(0.3)
         moving_b = _capture_frame_http(_MJPEG_URL)
-        x_a = _sprite_centroid_x_by_color(moving_a)
-        x_b = _sprite_centroid_x_by_color(moving_b)
-        delta = _circular_delta(x_a, x_b, width)
-        assert abs(delta) > 1.0, f"спрайт не сдвинулся, пока лента едет: x={x_a} -> {x_b} (Δ={delta})"
+        lag = _profile_shift_px(_not_background_column_profile(moving_a), _not_background_column_profile(moving_b))
+        assert abs(lag) > 2.0, f"паттерн объектов не сдвинулся, пока лента едет (лаг корреляции={lag})"
 
         assert vfd.stop() is True
         time.sleep(0.5)
         stopped_a = _capture_frame_http(_MJPEG_URL)
         time.sleep(1.0)
         stopped_b = _capture_frame_http(_MJPEG_URL)
-        x_stop_a = _sprite_centroid_x_by_color(stopped_a)
-        x_stop_b = _sprite_centroid_x_by_color(stopped_b)
-        stop_delta = _circular_delta(x_stop_a, x_stop_b, width)
-        assert abs(stop_delta) <= 1.0, (
-            f"спрайт продолжил ехать после stop(): x={x_stop_a} -> {x_stop_b} (Δ={stop_delta})"
+        stop_lag = _profile_shift_px(
+            _not_background_column_profile(stopped_a), _not_background_column_profile(stopped_b)
         )
+        assert abs(stop_lag) <= 1.0, f"паттерн объектов продолжил ехать после stop() (лаг корреляции={stop_lag})"
     finally:
         robot.disconnect()
 
@@ -344,9 +360,7 @@ def test_camera_alone_serves_frames(tmp_path: Path) -> None:
     pipeline_raw = yaml.safe_load((_APP_YAML.parent / "pipeline.yaml").read_text(encoding="utf-8"))
     # pult (Task 2.3b) — клиент robot: без него опрос belt.status пишет no_route в
     # errors.log, а случай про камеру, не про пульт, — вырезается вместе с robot.
-    pipeline_raw["processes"] = [
-        p for p in pipeline_raw["processes"] if p["process_name"] not in ("robot", "pult")
-    ]
+    pipeline_raw["processes"] = [p for p in pipeline_raw["processes"] if p["process_name"] not in ("robot", "pult")]
     assert {p["process_name"] for p in pipeline_raw["processes"]} == {"camera", "mjpeg"}, (
         f"фильтр процессов robot/pult промахнулся: {pipeline_raw['processes']!r}"
     )

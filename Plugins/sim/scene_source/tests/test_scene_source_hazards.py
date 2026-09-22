@@ -353,14 +353,44 @@ def test_sim_objects_published_only_on_membership_change(tmp_path) -> None:
 
 def test_item_has_no_sim_truth_and_all_required_keys(tmp_path) -> None:
     """`item` не содержит `sim_truth` (принцип «паспорта едут в мир, не на кадре»,
-    ред. 2 плана) и несёт весь набор ключей, что и до Task 3.4 (item keys unchanged,
-    DESIGN п.4) — `camera_id` в этом item НЕ было и до Task 3.4 (`produce()` этого
-    плагина такого ключа никогда не возвращал), проверяем ТОЛЬКО ключи, реально
-    присутствующие."""
+    ред. 2 плана) и несёт весь набор ключей из acceptance-критерия 4 плана, включая
+    `camera_id` (фикс ревью P4 — раньше отсутствовал, тест был написан вокруг
+    пропуска вместо того, чтобы его закрыть)."""
     plugin, _ctx, sp = _make_plugin_with_engine(tmp_path)
     _push_encoder(sp, 0)
     item = plugin.produce()[0]
 
     assert "sim_truth" not in item
-    for key in ("frame", "seq_id", "frame_id", "timestamp", "width", "height", "channels", "dtype"):
+    for key in ("frame", "camera_id", "seq_id", "frame_id", "timestamp", "width", "height", "channels", "dtype"):
         assert key in item, f"обязательный ключ {key!r} отсутствует в item: {sorted(item)}"
+
+
+# --------------------------------------------------------------------------- #
+# (j) Фикс ревью P5: fallback-ветка (без preset_path) должна отдавать кадр в  #
+# ТОМ ЖЕ порядке каналов, что движок, и логировать ошибку сборки РОВНО один   #
+# раз (не на каждый produce())                                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_fallback_branch_logs_once_and_frame_matches_background_bgr(monkeypatch) -> None:
+    """Repro ревью: цвет фона несимметричен по каналам (`(200, 10, 30)` вместо
+    дефолтного серого `(60, 60, 60)`, который маскировал баг) — до фикса
+    `_background_only_frame()` строила BGR и `produce()` переставляла каналы ЕЩЁ
+    РАЗ через `cv2.COLOR_RGB2BGR`, отдавая `[30, 10, 200]` вместо `[200, 10, 30]`.
+    Плюс: `configure()` без `preset_path` логирует ОДИН error, дальнейшие 5
+    `produce()` кадры не роняют и лог не повторяют."""
+    import Plugins.sim.scene_source.plugin as plugin_module
+
+    monkeypatch.setattr(plugin_module, "_BACKGROUND_BGR", (200, 10, 30))
+    plugin, ctx, _sp = _make_plugin()  # без preset_path в cfg -> движок недоступен
+    assert ctx.log_error.call_count == 1, (
+        f"configure() без preset_path должен логировать ровно 1 error: {ctx.log_error.call_args_list}"
+    )
+
+    for _ in range(5):
+        item = plugin.produce()[0]
+        assert isinstance(item["frame"], np.ndarray)
+        assert tuple(int(v) for v in item["frame"][0, 0]) == (200, 10, 30), (
+            f"item['frame'][0,0]={tuple(int(v) for v in item['frame'][0, 0])} != _BACKGROUND_BGR=(200,10,30)"
+        )
+    assert ctx.log_error.call_count == 1, "fallback-ветка не должна логировать ошибку повторно на каждый produce()"

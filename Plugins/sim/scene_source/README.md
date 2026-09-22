@@ -42,6 +42,17 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 | `preset_path` | нет (движок недоступен) | путь к каталогу классов (`Services.dataset_gen.core.catalog.SpriteCatalog`) |
 | `stale_ms` | `500` | порог протухания значения мира (мс) |
 | `seed` | `0` | seed `np.random.default_rng` движка (класс/угол/дефект объектов) |
+| `camera_id` | `0` | попадает в `item["camera_id"]` (форма как у боевых источников) |
+
+**`preset_path` относительный — резолвится от КОРНЯ РЕПОЗИТОРИЯ, не от CWD процесса**
+(фикс ревью Task 3.4, P5): `Path(__file__).resolve().parents[3]` от `plugin.py`. Раньше
+`ScenePreset(catalog_dir=preset_path)` строился напрямую (резолюцию относительных путей
+умеет только `ScenePreset.from_yaml`, не голый конструктор), поэтому один и тот же
+`pipeline.yaml` давал движок то готовым, то fallback-на-фон — в зависимости от того,
+из какого каталога запущен процесс. `data/` — gitignored: на свежем клоне репозитория
+демо-каталог нужно сгенерировать явно (`python -m Services.line_sim.tools.make_demo_catalog
+--out data/line_sim/demo_catalog`), иначе `preset_path` не существует и движок падает в
+fallback (см. ниже).
 
 ## Рендер (Task 3.4 — движок `Services.line_sim`)
 

@@ -5,6 +5,14 @@
 RGBA), иначе движок сцены откатывается к пустому фону.
 
     python -m Services.line_sim.tools.make_demo_catalog --out data/line_sim/demo_catalog
+
+**`--size-px` — ПИКСЕЛИ эталона, не миллиметры (фикс ревью Task 3.4, P4).**
+Формула: `size_px = diameter_mm * px_per_mm` — эталон катaлога это, что рисует
+`SceneCompositor` 1:1 (без масштабирования слоя), поэтому диаметр диска на экране
+равен `size_px` пикселей, а не `size_px` миллиметров ленты. Дефолт `66` — под стенд
+`apps/line_sim/pipeline.yaml` (`disk_radius_mm: 55.0` рецепта прототипа => диаметр
+110 мм, `px_per_mm: 0.6` => `110 * 0.6 = 66` px). Смена `px_per_mm` в конфиге стенда
+требует пересчитать `--size-px` по той же формуле и перегенерировать каталог.
 """
 
 from __future__ import annotations
@@ -36,7 +44,12 @@ def make_disc(letter: str, color_rgb: tuple[int, int, int], size_px: int) -> np.
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, help="каталог классов (создаётся)")
-    parser.add_argument("--size-px", type=int, default=90, help="диаметр диска в пикселях эталона")
+    parser.add_argument(
+        "--size-px",
+        type=int,
+        default=66,
+        help="диаметр диска в ПИКСЕЛЯХ эталона (size_px = diameter_mm * px_per_mm — см. докстринг модуля)",
+    )
     args = parser.parse_args()
 
     out = Path(args.out)

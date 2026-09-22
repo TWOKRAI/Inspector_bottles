@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import cv2
@@ -80,6 +81,7 @@ _DEFAULT_STALE_MS = 500
 _DEFAULT_SEED = 0
 _DEFAULT_SPAWN_INTERVAL_S = (2.0, 4.0)
 _DEFAULT_DEFECT_PROBABILITY = 0.0
+_DEFAULT_CAMERA_ID = 0
 
 #: Путь мира (Task 2.1/2.1b, паблишер — ``Plugins.sim.robot_host``).
 _ENCODER_PATH = "sim.belt.encoder"
@@ -97,6 +99,15 @@ _FACTORY_ERROR_LOG_INTERVAL_S = 1.0
 
 #: Максимальное значение счётчика кадров (rollover, как у остальных источников сима).
 _FRAME_ID_MODULO = 100_000
+
+#: Корень репозитория, вычисленный от расположения ЭТОГО файла
+#: (Plugins/sim/scene_source/plugin.py -> parents[3]) — фикс ревью P5: относительный
+#: `preset_path` раньше резолвился против CWD процесса (только `ScenePreset.from_yaml`
+#: резолвит от каталога YAML, а плагин строит `ScenePreset(catalog_dir=...)` напрямую),
+#: поэтому один и тот же конфиг давал движок то готовым, то insensitive к фону в
+#: зависимости от того, откуда запущен процесс (repro: cwd=repo root -> движок готов;
+#: cwd=apps/line_sim -> недоступен).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @register_plugin(
@@ -130,6 +141,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._height: int = cfg.get("resolution_height", _DEFAULT_HEIGHT)
         self._spawn_encoder: int = cfg.get("spawn_encoder", _DEFAULT_SPAWN_ENCODER)
         self._stale_ms: float = cfg.get("stale_ms", _DEFAULT_STALE_MS)
+        self._camera_id = cfg.get("camera_id", _DEFAULT_CAMERA_ID)
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
         belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
@@ -137,7 +149,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         spawn_interval_s = (float(interval_cfg[0]), float(interval_cfg[1]))
         scene_length_mm = float(cfg.get("scene_length_mm", (self._width / max(px_per_mm, 1e-9)) * 2.0))
         defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
-        preset_path = cfg.get("preset_path")
+        preset_path = self._resolve_preset_path(cfg.get("preset_path"))
         seed = int(cfg.get("seed", _DEFAULT_SEED))
 
         self._rng = np.random.default_rng(seed)
@@ -168,6 +180,14 @@ class SceneSourcePlugin(ProcessModulePlugin):
             f"spawn_interval_s={spawn_interval_s}, preset_path={preset_path!r}, "
             f"движок={'готов' if self._compositor is not None else 'недоступен (fallback на фон)'}"
         )
+
+    @staticmethod
+    def _resolve_preset_path(preset_path: str | None) -> str | None:
+        """Относительный `preset_path` — от КОРНЯ РЕПОЗИТОРИЯ (`_REPO_ROOT`), не от CWD
+        процесса (фикс ревью P5). `None` и уже абсолютный путь возвращаются как есть."""
+        if preset_path is None or Path(preset_path).is_absolute():
+            return preset_path
+        return str((_REPO_ROOT / preset_path).resolve())
 
     def start(self, ctx: PluginContext) -> None:
         """RUNNING: подписаться на мир. Без ``state_proxy`` — энкодер остаётся в spawn."""
@@ -219,6 +239,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         return [
             {
                 "frame": frame_bgr,
+                "camera_id": self._camera_id,
                 "seq_id": self._frame_count,
                 "frame_id": self._frame_count,
                 "timestamp": time.monotonic(),
@@ -243,9 +264,20 @@ class SceneSourcePlugin(ProcessModulePlugin):
         return float(value)
 
     def _background_only_frame(self) -> np.ndarray:
-        """Кадр одного фона (BGR) — движок недоступен, см. `configure()`."""
+        """Кадр одного фона В RGB (не BGR!) — движок недоступен, см. `configure()`.
+
+        Фикс ревью P5: `produce()` прогоняет ОБЕ ветки через один и тот же
+        `cv2.COLOR_RGB2BGR` (как для кадра компоновщика), поэтому этот массив обязан
+        быть RGB, а не BGR — иначе конвертация переставляет каналы ВТОРОЙ раз и
+        fallback-кадр выходит с противоположным порядком каналов относительно
+        `_BACKGROUND_BGR` (repro: `_BACKGROUND_BGR=(200,10,30)` → движок даёт
+        `[200,10,30]`, fallback без этого фикса давал `[30,10,200]`; на дефолтном
+        сером `(60,60,60)` разница незаметна, отсюда и не была поймана раньше).
+        Тот же приём переворота каналов, что `SceneCompositor.render()` — см. его
+        докстринг."""
         frame = np.empty((self._height, self._width, 3), dtype=np.uint8)
-        frame[:, :, 0], frame[:, :, 1], frame[:, :, 2] = _BACKGROUND_BGR
+        b, g, r = _BACKGROUND_BGR
+        frame[:, :, 0], frame[:, :, 1], frame[:, :, 2] = r, g, b
         return frame
 
     def _sync_world_objects(self) -> None:
