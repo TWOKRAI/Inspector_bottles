@@ -154,3 +154,64 @@ def test_relative_catalog_dir_resolved_from_yaml_dir_not_cwd(tmp_path, monkeypat
     assert Path(preset.catalog_dir) == (presets_dir / "catalog").resolve()
     factory = ObjectFactory(preset)
     assert factory.num_classes == 2
+
+
+# --------------------------------------------------------------------------
+# [lead 3.2, break-injection K4/K10] — свойства, которые выживали под инъекцией
+# --------------------------------------------------------------------------
+
+
+def test_defect_last_with_augmented_extra_layer(tmp_path):
+    """LS-006/LS-007: defect-слой стоит ПОСЛЕ слоёв пресета. Без доп. слоя порядок не наблюдаем
+    (K4 выживал); с augmented-слоем перестановка сдвигает его rng-подпоток, и «defect=None
+    побитово равен объекту без defect-слоя» ломается. Порядок трат rng в make() — контракт seed:
+    класс → угол → эталон → LayeredObject."""
+    from Services.line_sim import LayerAugment, LayeredObject, LayerSpec, ObjectPassport
+    from Services.line_sim.core.catalog_bridge import load_catalog
+
+    _write_fixture_catalog(tmp_path / "catalog", {"red": (200, 30, 30), "green": (30, 200, 30)})
+    label = np.zeros((10, 10, 4), dtype=np.uint8)
+    label[2:8, 2:8] = (20, 20, 220, 255)
+    imwrite_unicode(tmp_path / "label.png", cv2.cvtColor(label, cv2.COLOR_RGBA2BGRA))
+    extra = {
+        "name": "label",
+        "mode": "augmented",
+        "sprite_source": "label.png",
+        "augment": {"offset_x_px": [-8.0, 8.0], "angle_deg": [-40.0, 40.0]},
+    }
+    preset = ScenePreset.from_yaml(_write_preset_yaml(tmp_path, "catalog", layers=[extra], defect_probability=0.0))
+    factory = ObjectFactory(preset)
+    catalog = load_catalog(tmp_path / "catalog")
+
+    for seed in range(5):
+        obj = factory.make(object_id="o", spawn_encoder=0.0, rng=np.random.default_rng(seed))
+        assert obj.passport.defect is None
+
+        rng = np.random.default_rng(seed)
+        idx = int(rng.integers(2))
+        angle = float(rng.uniform(0.0, 360.0))
+        base = catalog.get_sprite(idx, rng)
+        layers = [
+            LayerSpec(name="base", mode="static", sprite_source=base),
+            LayerSpec(
+                name="label",
+                mode="augmented",
+                sprite_source=label,
+                augment=LayerAugment(offset_x_px=(-8.0, 8.0), angle_deg=(-40.0, 40.0)),
+            ),
+        ]
+        passport = ObjectPassport(
+            object_id="o", class_name=obj.passport.class_name, angle_deg=angle, defect=None, spawn_encoder=0.0
+        )
+        expected = LayeredObject(passport, layers, rng)
+        assert obj.passport.angle_deg == angle
+        assert obj.passport.layer_params["label"] == expected.passport.layer_params["label"]
+        assert np.array_equal(obj.render(), expected.render())
+
+
+def test_angle_range_lo_gt_hi_rejected():
+    """K10 выживал: angle_range_deg с lo > hi — ошибка валидации с именем поля."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="angle_range_deg"):
+        ScenePreset.from_dict({"catalog_dir": "x", "angle_range_deg": [30.0, 10.0]})
