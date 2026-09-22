@@ -541,6 +541,8 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   `sim.objects` наполняется, шаг `spawn_encoder` ≈ 890 ед. между соседями
 - Task 3.5 (новая): Робот забрал — объект исчез: сопоставление задания с объектом
   [PENDING] (зависит от 3.3, 1.1) — **Module contract:** new-lite
+- Task 3.6 (новая 2026-09-23): Фон-текстура ленты — бесшовный луп из фото, едет с энкодером
+  [PENDING] (решение владельца; зависит от 3.4) — `phase-3-object-engine.md`
 
 ### Phase 4: Виртуальная камера
 
