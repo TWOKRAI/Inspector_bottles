@@ -173,3 +173,21 @@ def test_offset_formula_uses_shared_factor_mm(tmp_path):
     assert len(passports) == 1
     cx_i = int(round(expected_cx))
     assert tuple(int(v) for v in frame[75, cx_i]) == (255, 0, 0)
+
+
+def test_background_bgr_parameter_is_bgr_not_rgb(tmp_path):
+    """[lead 3.4, break-injection P5] порядок каналов фона не был закреплён: все фикстуры
+    брали серый (60,60,60), и перестановка r/b выживала. Литерал: параметр назван BGR, кадр
+    компоновщика — RGB, значит в кадре каналы идут в обратном порядке; после cv2.COLOR_RGB2BGR
+    в плагине наружу выходит ровно то, что передали."""
+    spawner = _make_spawner(tmp_path, "cls", (0, 0, 255))
+    compositor = SceneCompositor(spawner=spawner, px_per_mm=1.0, belt_y_px=25.0, background_bgr=(200, 10, 20))
+    frame, passports = compositor.render(now_encoder=0.0, camera_rect=(0.0, 0.0, 40.0, 50.0))
+
+    assert passports == []
+    assert tuple(int(v) for v in frame[0, 0]) == (20, 10, 200), "кадр RGB — обратный порядок к BGR-параметру"
+
+    import cv2
+
+    out_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    assert tuple(int(v) for v in out_bgr[0, 0]) == (200, 10, 20), "наружу выходит переданный BGR"
