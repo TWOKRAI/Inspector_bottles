@@ -37,13 +37,13 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 ## Секции
 
 ### Feedback
-_(empty)_
+- [Новый план — среди соседей](feedback_a_new_plan_must_be_placed_among_its_neighbours.md) — таблица владения + обратные ссылки в чужие планы
 
 ### User
 _(empty)_
 
 ### Project
-_(empty)_
+- [Порядок 2026-09-22: merge line-sim → Ф3/Ф5 → Пульт](project_work_order_2026_09_22_line_sim_then_pult.md) — утверждён владельцем; ветка = правда
 
 ### Reference
 _(empty)_

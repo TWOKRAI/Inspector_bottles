@@ -259,6 +259,19 @@ codemod. Вынесены сюда, потому что каждая трога�
 **Goal:** у трети из 298 файлов должен быть домен-назначение ДО окна, иначе им негде жить.
 **Приёмка:** поимённый список «остаётся в GUI-пакете / переезжает в домен X»; `graph/` (0 % Qt),
 MVP-половины компонентов, `bridge/`, `TabSpec`, `register_binding` размещены явно.
+**Связка с [`gui-service`](../2026-09-22_gui-service/plan.md) и [`line-sim`](../line-sim/plan.md) (2026-09-22):**
+gui-service добавляет файлы, не переносит, и помечает их доменом для этого списка заранее:
+`router_module/channels/socket_client.py`, `frontend_module/bridge/remote_*.py` — **Qt-free** (критерий приёмки
+`grep PySide6` → 0) → ядро; `multiprocess_prototype/frontend/pult/`, `bridge_process.py` — Qt/прототип → уходят с
+Блоком В frontend-constructor. Wire-клиент сокета из `backend_ctl/transport.py` уезжает во фреймворк уже в
+gui-service 1.2 — это ранняя часть Q8 (`backend_ctl → tooling/`), остальной пакет едет как решено здесь.
+`apps/line_sim/` (line-sim 1.1, **уже есть на ветке `feat/line-sim`** — сверено 2026-09-22; первая запись называла
+несуществующий `multiprocess_line_sim/`) — второй composition root для 5.1 и **производящая задача для мерила
+«второе приложение»** (ревью ред. 2: «не имело производящей задачи»). Заодно к 4.6: 1.0/1.5/2.0 line-sim уже
+вынесли из прототипа в `app_module`/`process_module` `StateBootstrap`, гейт телеметрии и `ctx.state_proxy` (ADR-PM-049) —
+это carve-out'ы по тесту слоя, снять с таблицы 4.6 при старте. Если окно Ф3 откроется во время gui-service
+Ф1–Ф3 — тот план ставится на паузу, не сливается поверх codemod.
+
 **Связка с [`frontend-constructor`](../frontend-constructor/plan.md) (2026-08-18):** список сверяется с его T0.5 (пограничный набор, июль) и с инвентарём T3.0; **владелец списка — этот план**, frontend-constructor его потребляет и по нему переписывает колонку «Куда (fw)» своей Ф3. Прототипная сторона разреза (промоушен из `multiprocess_prototype/frontend/`, `GuiBootstrap`, `minimal_gui`) — там, не здесь; фреймворковая (Р-4, 3.4, 5.1) — здесь.
 
 ## Ф2в — Форма рецепта: топология отдельно от параметров (идея владельца 2026-08-18)
