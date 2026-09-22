@@ -11,8 +11,8 @@
 
 ```python
 from Services.line_sim import (
-    ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ScenePreset,
-    SceneCompositor, encoder_to_offset_mm, FACTOR_MM, BELT_UX, BELT_UY,
+    ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ObjectSpawner,
+    ScenePreset, SceneCompositor, encoder_to_offset_mm, FACTOR_MM, BELT_UX, BELT_UY,
 )
 ```
 
@@ -25,6 +25,7 @@ from Services.line_sim import (
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
+| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, interval_s, scene_length_mm)`: `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3 |
 | `encoder_to_offset_mm` | `core/belt.py` | `(enc_now - spawn_enc) * FACTOR_MM`; константы — из `Services.robot_comm.core.registers` |
 
 ## Выборка и рендер — один раз
@@ -107,3 +108,38 @@ test_force_defect_survives_transient_catalog_failure`).
 
 Пресет без `catalog_dir` (только `layers`) даёт `num_classes == 0`, `class_names == []`; его
 `make()` поднимает `ValueError` с понятным текстом — выбрать класс не из чего.
+
+## ObjectSpawner (Task 3.3)
+
+`ObjectSpawner(factory, interval_s, scene_length_mm)` (`ValueError` в конструкторе при
+`lo > hi`, `lo <= 0` или `scene_length_mm <= 0`, с именем параметра в тексте) владеет часами
+спавна и списком активных объектов; единственная точка входа — `tick(now_encoder, now_wall_s,
+rng)` (keyword-only).
+
+Порядок внутри `tick()`: (1) деспавн на КАЖДОМ тике — объект снимается, когда
+`encoder_to_offset_mm(now_encoder, passport.spawn_encoder) > scene_length_mm` (строго больше;
+равно — ещё на сцене), считается по СОБСТВЕННОМУ `spawn_encoder` объекта, не по общему счёту
+спавнера; (2) первый `tick()` только взводит срок (`now_wall_s + rng.uniform(*interval_s)`) и
+не создаёт объект; (3) на паузе (`set_paused(True)`) — только `return`, новый объект не
+создаётся, но деспавн (шаг 1) уже отработал; (4) когда `now_wall_s >= срок` — РОВНО один
+`factory.make(object_id, spawn_encoder=now_encoder, rng=rng)`, новый срок = `now_wall_s
+(текущего тика) + новый interval` — пропущенные интервалы НЕ догоняются.
+
+`object_id` — `f"obj-{n}"`, счётчик инкрементируется только ПОСЛЕ успешного `make()`: если
+`factory.make()` бросает исключение, `tick()` его пробрасывает наружу, но ничего не портит —
+объект не добавлен, срок спавна не сдвинут (сдвигается только вместе с успешным append), так
+следующий `tick()` на том же просроченном сроке повторит попытку, а не потеряет её и не создаст
+сразу два объекта (пин — `tests/test_hazards_3_3.py::
+test_tick_survives_factory_make_exception_no_lost_deadline_no_double_spawn`).
+
+`active_objects() -> list[LayeredObject]` — КОПИЯ списка (`list(self._active)`): мутация
+результата спавнер не трогает.
+
+Форс-хук брака «выпусти брак сейчас» — `spawner.force_defect_next()`, тонкий делегат
+`factory.force_defect_next()` (Task 3.2). На паузе объект НЕ создаётся — флаг помечает
+СЛЕДУЮЩИЙ реальный спавн (после снятия паузы); брак не теряется, потому что фабрика гасит флаг
+только после успешной сборки (LS-006/LS-007). Выбран этот вариант (не «спавнить немедленно,
+игнорируя паузу») — оператор не получает объект на остановленном потоке (LS-008).
+
+Единственный producer — поток-продюсер кадров (Task 3.4); `ObjectSpawner` НЕ потокобезопасен
+намеренно (лока нет) — второй одновременный вызывающий на одном инстансе не предусмотрен.

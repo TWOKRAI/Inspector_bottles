@@ -1,6 +1,6 @@
 # line_sim — статус
 
-**Состояние:** Task 3.1 + 3.1a + 3.2 (план `plans/line-sim/phase-3-object-engine.md`).
+**Состояние:** Task 3.1 + 3.1a + 3.2 + 3.3 (план `plans/line-sim/phase-3-object-engine.md`).
 
 | Часть | Статус |
 |---|---|
@@ -11,6 +11,7 @@
 | `SceneCompositor` | только Protocol — реализация Task 3.4 |
 | `ObjectFactory` + `catalog_bridge` — класс/угол из rng, дефект-слой `"damaged"`, `force_defect_next()` | готово |
 | Пресет `letters_disk.yaml` | готово (ссылается на каталог dataset_gen, картинок не копирует) |
+| `ObjectSpawner` — спавн по интервалу, деспавн, пауза, форс-хук брака на паузе | готово |
 | Подключение к `SceneSourcePlugin` | Task 3.4 |
 
 **Известное ограничение (2026-09-22):** эталоны дисков-букв реально не сняты на этой машине —
@@ -20,5 +21,6 @@
 (тот же критерий проверен на каталоге-фикстуре в `tmp_path`); `ObjectFactory` и `letters_disk.yaml`
 работают с любым каталогом формата `SpriteCatalog`, не только с этим конкретным.
 
-Тесты: `Services/line_sim/tests/` — `test_acceptance_3_1.py`/`test_acceptance_3_2.py` (независимый
-tester), `test_hazards_3_1.py`/`test_hazards_3_2.py` (автор).
+Тесты: `Services/line_sim/tests/` — `test_acceptance_3_1.py`/`test_acceptance_3_2.py`/
+`test_acceptance_3_3.py` (независимый tester), `test_hazards_3_1.py`/`test_hazards_3_2.py`/
+`test_hazards_3_3.py` (автор).

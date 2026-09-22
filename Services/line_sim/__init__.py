@@ -1,8 +1,8 @@
 """line_sim — объект-агностичный движок сцены «лента с объектами».
 
 Публичный API (numpy/opencv/pydantic/yaml, без torch и PySide6):
-    ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ScenePreset,
-    SceneCompositor (Protocol), encoder_to_offset_mm, FACTOR_MM, BELT_UX, BELT_UY
+    ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ObjectSpawner,
+    ScenePreset, SceneCompositor (Protocol), encoder_to_offset_mm, FACTOR_MM, BELT_UX, BELT_UY
 """
 
 from Services.line_sim.core import (
@@ -11,6 +11,7 @@ from Services.line_sim.core import (
     FACTOR_MM,
     LayeredObject,
     ObjectFactory,
+    ObjectSpawner,
     ScenePreset,
     encoder_to_offset_mm,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "LayeredObject",
     "ObjectFactory",
     "ObjectPassport",
+    "ObjectSpawner",
     "SceneCompositor",
     "ScenePreset",
     "encoder_to_offset_mm",
