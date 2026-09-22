@@ -17,6 +17,7 @@ import yaml
 
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import ObjectFactory, ObjectSpawner, ScenePreset
+from Services.line_sim.core.belt import FACTOR_MM, encoder_to_offset_mm
 
 
 def _make_factory(tmp_path: Path, defect_probability: float = 0.0) -> ObjectFactory:
@@ -141,3 +142,46 @@ def test_despawn_uses_each_objects_own_spawn_encoder(tmp_path):
     remaining = spawner.active_objects()
     assert len(remaining) == 1
     assert remaining[0].passport.spawn_encoder == 500.0
+
+
+def test_object_exactly_at_scene_end_is_still_active(tmp_path):
+    """[lead 3.3, break-injection N1] граница «строго больше» не была закреплена: тест
+    приёмки брал значения около границы, и замена `<=` на `<` выживала. Здесь смещение
+    РОВНО равно длине сцены — объект обязан остаться на сцене."""
+    factory = _make_factory(tmp_path)
+    ticks = 700
+    scene_len = ticks * FACTOR_MM  # точное равенство достижимо: спавн на энкодере 0
+    spawner = ObjectSpawner(factory=factory, interval_s=(0.5, 0.5), scene_length_mm=scene_len)
+    rng = np.random.default_rng(0)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.5, rng=rng)
+    assert len(spawner.active_objects()) == 1
+    assert spawner.active_objects()[0].passport.spawn_encoder == 0.0
+
+    spawner.set_paused(True)
+    spawner.tick(now_encoder=float(ticks), now_wall_s=1.0, rng=rng)
+    assert encoder_to_offset_mm(float(ticks), 0.0) == scene_len
+    assert len(spawner.active_objects()) == 1, "смещение РОВНО в край сцены — объект ещё на сцене"
+
+    spawner.tick(now_encoder=float(ticks + 1), now_wall_s=1.5, rng=rng)
+    assert spawner.active_objects() == []
+
+
+def test_long_gap_does_not_leave_a_backlog_of_deadlines(tmp_path):
+    """[lead 3.3, break-injection N4] «не догоняем пропущенные интервалы» проверялось только
+    по числу объектов в тике после паузы: `deadline += interval` выживало. Здесь важно, что
+    ПОСЛЕ спавна на просроченном сроке следующий объект ждёт полный интервал от текущего
+    времени, а не выпадает пачкой на ближайших тиках."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory=factory, interval_s=(0.5, 0.5), scene_length_mm=10_000.0)
+    rng = np.random.default_rng(0)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)
+    spawner.tick(now_encoder=0.0, now_wall_s=10.0, rng=rng)
+    assert len(spawner.active_objects()) == 1
+
+    for step in (10.05, 10.1, 10.2, 10.3, 10.4):
+        spawner.tick(now_encoder=0.0, now_wall_s=step, rng=rng)
+    assert len(spawner.active_objects()) == 1, "долг по пропущенным интервалам не копится"
+
+    spawner.tick(now_encoder=0.0, now_wall_s=10.5, rng=rng)
+    assert len(spawner.active_objects()) == 2
