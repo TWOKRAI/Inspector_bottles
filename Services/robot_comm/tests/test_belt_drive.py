@@ -1,0 +1,477 @@
+"""Тесты автора (hazard) для Task 2.1 (line-sim, Ф2): `BeltDrive` + интеграция в
+`RobotSimCore`.
+
+Дополняют независимую приёмку тестера (`test_belt_acceptance.py`) ловушками
+механизма, которые она не покрывает (см. бриф Task 2.1 + ревью, итерация 1):
+
+1. Единственный писатель скорости — `tick()`: `write()` сам по себе не должен
+   трогать `belt.command()` — реакция только внутри `tick()` (`_handle_vfd`),
+   синхронно, без фонового потока/sleep. Иначе гонка между потоком Modbus-
+   сервера (пишет mailbox) и Motion-тикером (`sim_robot.py:_ticker`,
+   отдельный поток) была бы реальной, а не только «применяется по пульсу».
+2. Дробный остаток копится корректно и на НЕРАВНОМЕРНОМ `dt` — приёмка
+   тестера бьёт `advance()` только фиксированным шагом 0.01 с.
+3. Ненулевая команда ПЧ через полный путь `RobotSimCore` (не только
+   `BeltDrive` напрямую) — приёмка тестера проверяет `_handle_vfd` только на
+   freq=0 (что не отличает «команда применилась» от «лента просто встала»),
+   это явно названная тестером дыра (см. `test_belt_acceptance.py` шапка).
+4. `reverse` через полный путь `RobotSimCore` (ревью, п.1) — до этого файла
+   ни один тест не писал `0x1201=1` (cmd_dir), инъекция `reverse=False` в
+   `_handle_vfd` оставляла бы всё зелёным.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+
+import pytest
+
+from Services.robot_comm import ROBOT_AVAILABLE
+from Services.robot_comm.core.registers import FACTOR_MM
+from Services.robot_comm.server.belt import BeltDrive
+from Services.robot_comm.server.sim_core import RobotSimCore
+
+_N_TICKS = 1000
+
+
+def test_write_alone_does_not_move_belt() -> None:
+    """Pre/Post: единственный писатель скорости — tick(). `write()` сам по себе
+    не должен применять команду ПЧ к belt — до вызова tick() энкодер и
+    скорость ленты не меняются, даже если VFD_FLAG уже выставлен."""
+    core = RobotSimCore(enc_rate=7)
+    core.tick()
+    baseline = core.encoder
+
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])
+    core.write(0x1202, [2500])  # 25.00 Гц (raw*100)
+    core.write(0x1204, [1])  # flag — команда «в почтовом ящике», но НЕ применена
+
+    # Прямой вызов write() не должен был сдвинуть энкодер и не должен был
+    # тронуть belt — реакция строго внутри tick()/_handle_vfd.
+    assert core.encoder == baseline
+    # "Сырой" режим from_enc_rate ещё активен (ни одной command() не было),
+    # но mm_s УЖЕ сообщает реальную скорость (ревью Task 2.1, п.2): 7*0.144473/0.01
+    assert core._belt.mm_s == pytest.approx(101.1311, abs=1e-3)
+
+
+def test_advance_accumulates_over_uneven_dt() -> None:
+    """Pre/Post: остаток копится корректно и при РАЗНОМ dt между вызовами —
+    приёмка тестера проверяет только фиксированный шаг 0.01 с."""
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=25.0)  # mm_s = 50.0
+
+    dts = [0.02, 0.005, 0.005, 0.03, 0.01] * 200  # сумма за цикл = 0.07с * 200 = 14с
+    total_time = sum(dts)
+    total = sum(belt.advance(dt) for dt in dts)
+
+    expected = 50.0 * total_time / FACTOR_MM  # 50 мм/с * 14с / FACTOR_MM
+    assert total == pytest.approx(expected, abs=1)
+
+
+def test_nonzero_vfd_command_moves_belt_through_core() -> None:
+    """Pre/Post: закрывает дыру тестера — команда ПЧ с НЕНУЛЕВОЙ частотой через
+    полный путь RobotSimCore (mailbox -> _handle_vfd -> belt.command ->
+    tick() -> encoder), не только прямой BeltDrive.
+
+    25 Гц из 50 (freq_max_hz по умолчанию у BeltDrive) -> 3461±1 отсчёт за
+    1000 тиков по 0.01с (тот же литерал, что в приёмке тестера для прямого
+    BeltDrive — здесь тот же результат должен получаться и через регистры).
+    """
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+    baseline = core.encoder
+
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [2500])  # 25.00 Гц (raw*100, scale=100 из gd20_bridge.yaml)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    total = 0
+    for _ in range(_N_TICKS):
+        before = core.encoder
+        core.tick()
+        total += core.encoder - before
+    assert total == pytest.approx(3461, abs=1)
+    assert core.encoder - baseline == total
+
+
+def test_reverse_vfd_command_moves_belt_negative_through_core() -> None:
+    """Pre/Post: закрывает дыру ревью Task 2.1, п.1 — `reverse` через полный путь
+    RobotSimCore (не только прямой BeltDrive). Инъекция `reverse=False` в
+    `sim_core.py:_handle_vfd` (игнорировать `cmd_dir`) оставляла бы все прежние
+    тесты зелёными — ни один из них не писал `0x1201` в 1.
+
+    Та же команда, что в `test_nonzero_vfd_command_moves_belt_through_core`
+    (25 Гц), но `cmd_dir=1` (назад) -> тот же по модулю итог, с минусом.
+    """
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+    baseline = core.encoder
+
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [1])  # cmd_dir = 1 -> reverse
+    core.write(0x1202, [2500])  # 25.00 Гц (raw*100)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    total = 0
+    for _ in range(_N_TICKS):
+        before = core.encoder
+        core.tick()
+        total += core.encoder - before
+    assert total == pytest.approx(-3461, abs=1)
+    assert total < 0
+    assert core.encoder - baseline == total
+
+
+def test_tick_dt_equivalence() -> None:
+    """Pre/Post: Task 2.1b — `tick(dt_s)` принимает измеренный dt явным
+    параметром; путь по времени не зависит от того, каким шагом его
+    накопили. 500 тиков по 0.02с и 1000 тиков по 0.01с (та же команда ПЧ
+    25 Гц, что и в `test_nonzero_vfd_command_moves_belt_through_core`) дают
+    один и тот же итог — 3461±1, тот же литерал, что при неявном
+    `TICK_INTERVAL_S`."""
+
+    def _run(n_ticks: int, dt: float) -> int:
+        core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+        core.tick()
+        baseline = core.encoder
+
+        core.write(0x1200, [1])  # cmd_run = 1
+        core.write(0x1201, [0])  # вперёд
+        core.write(0x1202, [2500])  # 25.00 Гц (raw*100)
+        core.write(0x1204, [1])  # flag — маркер последним
+
+        for _ in range(n_ticks):
+            core.tick(dt)
+        return core.encoder - baseline
+
+    total_02 = _run(500, 0.02)
+    total_01 = _run(1000, 0.01)
+    assert total_02 == pytest.approx(3461, abs=1)
+    assert total_01 == pytest.approx(3461, abs=1)
+    assert total_02 == pytest.approx(total_01, abs=1)
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_live_ticker_speed_is_wall_clock() -> None:
+    """Pre/Post: Task 2.1b — живой `SimRobotServer._ticker` меряет реальный dt
+    (`time.perf_counter()`, ревью: точнее `monotonic()` на Windows/Python
+    3.12), а не считает такт всегда за `TICK_INTERVAL_S`. Лента 100 мм/с
+    (freq_max=50 Гц) с командой ПЧ на полную частоту (50 Гц) за ≥2.0с ПО
+    ЧАСАМ должна дать 100 мм/с / FACTOR_MM = 692.2 отсчёта/с (±3% — реальная
+    ОС-планировка тикера, не считаем себя точнее). До этой задачи было
+    заметно медленнее (реальный период тикера дороже TICK_INTERVAL_S)."""
+    from Services.robot_comm.server.sim_robot import SimRobotServer
+
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [5000])  # 50.00 Гц — полная скорость (freq_max=50)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    server = SimRobotServer(core=core)
+    ticker = threading.Thread(target=server._ticker, name="test-ticker", daemon=True)
+    ticker.start()
+    try:
+        start_encoder = core.encoder
+        t0 = time.monotonic()
+        time.sleep(2.0)
+        elapsed = time.monotonic() - t0
+        counts = core.encoder - start_encoder
+    finally:
+        server._stop.set()
+        ticker.join(timeout=2.0)
+        assert not ticker.is_alive(), "тикер не остановился — join завис бы дальше"
+
+    rate = counts / elapsed
+    assert rate == pytest.approx(692.2, rel=0.03)
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_dt_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre/Post: Task 2.1b — потолок `_MAX_TICK_DT_S=0.1` не даёт паузе
+    процесса превратиться в прыжок ленты: `time.perf_counter()` внутри
+    ТИКЕРНОГО потока один раз «скачет» на +5с (симуляция паузы планировщика),
+    применённый к ядру `dt` должен быть зажат до 0.1с — приращение энкодера
+    в ЭТОМ тике <=69.2±1 отсчёта (0.1с * 692.2 отсч/с при 100 мм/с), а не
+    ~3461 (5с * 692.2).
+
+    Ревью, итерация 1: подмена ГЛОБАЛЬНОГО `time.perf_counter()` по
+    присваиванию ловила и другие потоки (второй `SimRobotServer` в том же
+    процессе увидел бы тот же скачок — 5/5 репродукций у ревьюера). Инъекция
+    гейтится по `threading.current_thread() is ticker` — триггерит только
+    ЭТОТ тикер; после срабатывания смещение НЕИЗМЕННО (часы не идут назад —
+    `real_now() + 5.0` монотонно растёт вместе с `real_now()`), а не
+    возвращается к «сырому» времени на следующем вызове (что было бы
+    скачком часов НАЗАД относительно уже выданного +5с значения)."""
+    from Services.robot_comm.server import sim_robot
+
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [5000])  # 50.00 Гц — полная скорость (100 мм/с)
+    core.write(0x1204, [1])  # flag — маркер последним
+
+    server = sim_robot.SimRobotServer(core=core)
+    ticker = threading.Thread(target=server._ticker, name="test-ticker-ceiling", daemon=True)
+
+    real_perf_counter = sim_robot.time.perf_counter
+    real_tick = core.tick
+    calls_from_ticker = {"n": 0}
+    offset_applied = threading.Event()
+    captured: dict[str, float] = {}
+    jumped = threading.Event()
+
+    def fake_perf_counter() -> float:
+        now = real_perf_counter()
+        if not offset_applied.is_set() and threading.current_thread() is ticker:
+            calls_from_ticker["n"] += 1
+            if calls_from_ticker["n"] >= 2:  # 1-й вызов — baseline `last` до цикла
+                offset_applied.set()
+        return now + 5.0 if offset_applied.is_set() else now
+
+    def spying_tick(dt: float | None = None) -> None:
+        if offset_applied.is_set() and "dt" not in captured:
+            before = core.encoder
+            real_tick(dt)
+            captured["dt"] = dt if dt is not None else -1.0
+            captured["moved"] = core.encoder - before
+            jumped.set()
+        else:
+            real_tick(dt)
+
+    monkeypatch.setattr(sim_robot.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(core, "tick", spying_tick)
+
+    ticker.start()
+    try:
+        assert jumped.wait(timeout=2.0), "тикер не применил скачок часов за 2с"
+    finally:
+        server._stop.set()
+        ticker.join(timeout=2.0)
+        assert not ticker.is_alive(), "тикер не остановился — join завис бы дальше"
+
+    assert captured["dt"] == pytest.approx(0.1, abs=1e-6)
+    assert captured["moved"] == pytest.approx(69.2, abs=1)
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_live_ticker_default_belt_follows_wall_clock() -> None:
+    """Pre/Post: ревью Task 2.1b, п.1 — «сырой» режим (`BeltDrive.from_enc_rate`,
+    дефолт `RobotSimCore` без явной команды ПЧ) тоже обязан идти по РЕАЛЬНОМУ
+    dt, не только "обычный" режим после `command()`. Ревьюер замерил живой
+    тикер с дефолтным belt: 590.8 отсч/с вместо заявленных 7/0.01с=700 —
+    `advance()` в сыром режиме был глух к `dt_s` (`return self._raw_rate`
+    безусловно), несмотря на то, что `mm_s` уже сообщал верную скорость
+    (101.1 мм/с). После фикса (`advance` считает `raw_rate*dt_s/raw_tick_s`
+    через тот же remainder) — 700 отсч/с ±3% по часам."""
+    from Services.robot_comm.server.sim_robot import SimRobotServer
+
+    core = RobotSimCore(enc_rate=7)  # belt=None -> from_enc_rate(7, TICK_INTERVAL_S), БЕЗ команды ПЧ
+    server = SimRobotServer(core=core)
+    ticker = threading.Thread(target=server._ticker, name="test-ticker-raw", daemon=True)
+    ticker.start()
+    try:
+        start_encoder = core.encoder
+        t0 = time.monotonic()
+        time.sleep(2.0)
+        elapsed = time.monotonic() - t0
+        counts = core.encoder - start_encoder
+    finally:
+        server._stop.set()
+        ticker.join(timeout=2.0)
+        assert not ticker.is_alive(), "тикер не остановился — join завис бы дальше"
+
+    rate = counts / elapsed
+    assert rate == pytest.approx(700.0, rel=0.03)
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_live_ticker_no_jump_on_first_vfd_command() -> None:
+    """Pre/Post: ревью Task 2.1b, п.1 — докстринг `from_enc_rate` обещает, что
+    наблюдатель видит РЕАЛЬНУЮ скорость ленты и до первой команды ПЧ; это
+    должно быть верно не только для свойства `mm_s`, но и для фактического
+    пройденного пути по часам. Первая живая команда ПЧ (50 Гц — freq_max по
+    умолчанию у `from_enc_rate`) с ТОЙ ЖЕ `mm_s_at_max_freq=101.1311`, что
+    уже стояла в сыром режиме, не должна дать скачок скорости — разница
+    между «до» и «после» < 3% (до фикса раздела #1 разница была ~18.4%:
+    сырой режим ехал медленнее реальной скорости, обычный — точно по ней)."""
+    from Services.robot_comm.server.belt import BeltDrive as _BeltDrive
+    from Services.robot_comm.server.sim_robot import SimRobotServer
+
+    belt = _BeltDrive.from_enc_rate(7, 0.01)
+    assert belt.mm_s == pytest.approx(101.1311, abs=1e-3)  # тот же литерал, что в test_write_alone_does_not_move_belt
+
+    core = RobotSimCore(enc_rate=7, belt=belt)
+    server = SimRobotServer(core=core)
+    ticker = threading.Thread(target=server._ticker, name="test-ticker-nojump", daemon=True)
+    ticker.start()
+    try:
+        before_start = core.encoder
+        t0 = time.monotonic()
+        time.sleep(1.0)
+        before_elapsed = time.monotonic() - t0
+        before_counts = core.encoder - before_start
+
+        # Первая живая команда ПЧ (mailbox — см. test_nonzero_vfd_command_moves_belt_through_core):
+        # 50 Гц = freq_max по умолчанию у from_enc_rate -> та же mm_s_at_max_freq=101.1311.
+        core.write(0x1200, [1])  # cmd_run = 1
+        core.write(0x1201, [0])  # вперёд
+        core.write(0x1202, [5000])  # 50.00 Гц (raw*100)
+        core.write(0x1204, [1])  # flag — маркер последним
+
+        after_start = core.encoder
+        t1 = time.monotonic()
+        time.sleep(1.0)
+        after_elapsed = time.monotonic() - t1
+        after_counts = core.encoder - after_start
+    finally:
+        server._stop.set()
+        ticker.join(timeout=2.0)
+        assert not ticker.is_alive(), "тикер не остановился — join завис бы дальше"
+
+    rate_before = before_counts / before_elapsed
+    rate_after = after_counts / after_elapsed
+    assert rate_after == pytest.approx(rate_before, rel=0.03)
+
+
+def test_belt_mm_s_property_reads_exact_commanded_speed() -> None:
+    """Pre/Post: ревью Task 2.2 line-sim — ``RobotSimCore.belt_mm_s`` читает
+    ТОЧНУЮ команду ПЧ (``BeltDrive.mm_s``), а не производную энкодера между
+    внешними тиками публикации (та даёт смешанное среднее на пульсе смены
+    команды — находка ревью №1). 20 Гц из ``freq_max_hz=50`` при
+    ``mm_s_at_max_freq=100`` -> (20/50)*100 = 40.0 мм/с; после «стоп»
+    (``cmd_run=0``) -> 0.0."""
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+
+    core.write(0x1200, [1])  # cmd_run = 1
+    core.write(0x1201, [0])  # вперёд
+    core.write(0x1202, [2000])  # 20.00 Гц (raw*100)
+    core.write(0x1204, [1])  # flag — маркер последним
+    core.tick()
+    assert core.belt_mm_s == pytest.approx(40.0)
+
+    core.write(0x1200, [0])  # cmd_run = 0 -> stop
+    core.write(0x1204, [1])
+    core.tick()
+    assert core.belt_mm_s == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Task 2.3a — hazard-тесты замка (set_calibration/command) и порядка          #
+# (command_vfd: данные -> флаг последним)                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_set_calibration_races_with_command() -> None:
+    """Hazard (Task 2.3a): ``command()`` не может вклиниться в середину ``set_calibration()``.
+
+    Детерминированная форма (ведущий, 2026-09-22): прежние 10**4 итераций с
+    ``sys.setswitchinterval`` оставались зелёными и БЕЗ замка (инъекция A3) — окно
+    гонки под GIL практически не открывалось, тест ничего не доказывал.
+
+    Здесь окно открывается принудительно: ``set_calibration(200)`` читает ``_last``
+    (распаковка — внутри критической секции) и на этом месте ждёт, пока второй поток
+    пытается выполнить ``command(run, 25 Гц)``. С замком ``command`` ждёт и применяется
+    ПОСЛЕ калибровки: 25/50 × 200 = 100.0. Без замка ``command`` проходит в окно, а
+    калибровка затем пишет скорость по устаревшей команде 10 Гц: 10/50 × 200 = 40.0.
+    """
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=10.0, reverse=False)
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _PausingLast(tuple):
+        def __iter__(self):
+            entered.set()
+            release.wait(timeout=2.0)
+            return super().__iter__()
+
+    belt._last = _PausingLast(belt._last)
+
+    calib_t = threading.Thread(target=lambda: belt.set_calibration(200.0), daemon=True)
+    calib_t.start()
+    assert entered.wait(timeout=2.0), "set_calibration не дошла до чтения последней команды"
+    cmd_t = threading.Thread(target=lambda: belt.command(run=True, freq_hz=25.0, reverse=False), daemon=True)
+    cmd_t.start()
+    cmd_t.join(timeout=0.2)  # с замком — ещё ждёт; без замка — уже выполнилась в окне
+    release.set()
+    for t in (calib_t, cmd_t):
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "поток завис — дедлок под замком BeltDrive"
+
+    assert belt.mm_s == pytest.approx(100.0), (
+        f"mm_s={belt.mm_s}: команда 25 Гц вклинилась в калибровку и была перетёрта (ожидали 100.0)"
+    )
+
+
+def test_advance_does_not_block_on_lock() -> None:
+    """Hazard (Task 2.3a): ``advance()`` — горячий путь тикера — НЕ берёт
+    ``self._lock`` (докстринг класса + DESIGN п.1). Эффект: пока другой
+    поток держит замок 0.2с, ``advance()`` из главного потока не блокируется
+    и завершается почти мгновенно (порядок миллисекунд, не 0.2с). Инъекция
+    A9 (``advance()`` берёт замок) обязана провалить этот тест."""
+    belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
+    belt.command(run=True, freq_hz=25.0)
+
+    holder_ready = threading.Event()
+    release = threading.Event()
+
+    def hold_lock() -> None:
+        with belt._lock:
+            holder_ready.set()
+            release.wait(timeout=2.0)
+
+    holder = threading.Thread(target=hold_lock, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=2.0), "поток-держатель не взял замок за 2с"
+
+    start = time.monotonic()
+    belt.advance(0.01)
+    elapsed = time.monotonic() - start
+
+    release.set()
+    holder.join(timeout=2.0)
+    assert not holder.is_alive()
+
+    assert elapsed < 0.05, f"advance() ждал замок {elapsed:.3f}с — похоже, что он его берёт"
+
+
+def test_command_vfd_writes_flag_last() -> None:
+    """Hazard (Task 2.3a): ``RobotSimCore.command_vfd`` пишет данные
+    (RUN/DIR/FREQ), ЗАТЕМ VFD_FLAG ОТДЕЛЬНЫМ последним вызовом ``self.write``
+    (DESIGN п.2). Шпион на ``core.write`` "вклинивает" ручной ``core.tick()``
+    между записью данных и записью флага — если порядок соблюдён, тикер
+    видит FLAG=0 и не применяет полу-записанную команду (докстринг
+    ``_handle_vfd``: ``if self.regs[_REG_VFD_FLAG] != 1: return``). Инъекция
+    A1 (флаг первым) обязана провалить этот тест: FLAG оказался бы уже 1 до
+    завершения записи данных."""
+    core = RobotSimCore(enc_rate=7, belt=BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0))
+    core.tick()
+
+    real_write = core.write
+    addresses: list[int] = []
+
+    def spying_write(address: int, values: list[int]) -> None:
+        addresses.append(address)
+        real_write(address, values)
+        if address != 0x1204:
+            core.tick()  # "тикер" вклинивается между записью данных и флага
+            assert core.read(0x1204, 1) == [0], "FLAG уже стоит ДО завершения записи данных — нарушен порядок"
+
+    core.write = spying_write  # type: ignore[method-assign]
+    try:
+        core.command_vfd(run=True, freq_hz=25.0, reverse=True)
+    finally:
+        core.write = real_write  # type: ignore[method-assign]
+
+    assert addresses[-1] == 0x1204, f"FLAG должен писаться последним отдельным вызовом: {addresses}"
+    assert addresses[:-1] == [0x1200, 0x1201, 0x1202], f"порядок записи данных нарушен: {addresses}"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-q"]))

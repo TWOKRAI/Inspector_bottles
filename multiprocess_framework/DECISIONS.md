@@ -2529,7 +2529,7 @@
 | `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…003 (Singleton ServiceRegistry через `__new__` + Lock, ..., `ServiceRegistry` хранит классы, не экземпляры) |
 | `display_module` | [`modules/display_module/DECISIONS.md`](modules/display_module/DECISIONS.md) | Services & Lifecycle | ADR-DM-001…004 (DisplayEntry generic: без vision-полей, ..., `reload` = только метаданные, render-поля игнорируются) |
 | `event_module` | [`modules/event_module/DECISIONS.md`](modules/event_module/DECISIONS.md) | Messaging |  |
-| `app_module` | [`modules/app_module/DECISIONS.md`](modules/app_module/DECISIONS.md) | Composition / App | ADR-APP-001…006 (app_module как верхний композиционный ярус (не 4-й корень), ..., `GenericProcessManagerApp` + двухсортные хук-точки (Ф5.12)) |
+| `app_module` | [`modules/app_module/DECISIONS.md`](modules/app_module/DECISIONS.md) | Composition / App | ADR-APP-001…007 (app_module как верхний композиционный ярус (не 4-й корень), ..., дефолтный `state_bootstrap` — топология процессов, а не пустой dict (Ф1 Task 1.0)) |
 <!-- ADR-INDEX:END -->
 
 ---

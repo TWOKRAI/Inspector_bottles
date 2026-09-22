@@ -1,0 +1,34 @@
+# apps/line_sim — главный конфиг (манифест) второго приложения (Task 1.1 плана
+# line-sim). Форма — examples/minimal_app/app.yaml один в один. Пути — от
+# этого каталога.
+
+name: Line Sim
+version: 1
+
+# App-специфика pass-through (framework не читает).
+extras: {}
+
+pipeline: pipeline.yaml
+system: system.yaml
+
+# Авто-скан НУЖЕН, вопреки решению Task 1.1 (комментарий обновлён, Task 1.2;
+# путь camera_service снят ревью Task 2.2 — Task 2.2 перевела camera с
+# camera_service/simulator на scene_source, который живёт внутри Plugins/sim,
+# второй путь скана стал мёртвым: grep по apps/line_sim ничего из
+# Plugins/sources/camera_service больше не использует).
+# Причина: валидация блюпринта берёт inputs/outputs плагина из PluginRegistry, а не
+# из plugin_class-пути в pipeline.yaml — без скана реестр плагин не импортирует,
+# порты выглядят пустыми, и цепочка падает BlueprintError'ом (поймано разработчиком
+# Task 1.2b регрессией test_f1_task11, на тот момент — с camera_service).
+#
+# Путь перечислен ПОШТУЧНО, а не корнем Plugins/. Замер ведущего 2026-09-21:
+# корень — 55 плагинов за 0.33 с, и платит каждый дочерний процесс. Широкий скан
+# вдобавок втащил бы в сим весь словарь прототипа (processing/*, render/*,
+# calibration/*) вопреки границе из Plugins/sim/__init__.py: плагины сима —
+# словарь повторного использования, не Inspector-специфика. Появится второй
+# путь скана — добавить строкой сюда, это дешевле неявного сцепления.
+discovery:
+  plugin_paths:
+    - "../../Plugins/sim"
+  service_paths: []
+  auto_discover: true

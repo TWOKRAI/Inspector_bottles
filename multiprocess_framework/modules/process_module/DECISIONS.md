@@ -3849,3 +3849,61 @@ callback входного потока `ConsoleInput-{name}` (`console_manager.p
 (критерии «свип молчит», «повтор молчит», «таймер не в числе подавленных») и 7 зелёных на
 критерии «авторские дороги продолжают голосить» — последнее и есть контроль достижимости, без
 которого ноль в первых трёх ничего бы не значил.
+
+---
+
+### ADR-PM-049 — `StateProxy` заводит фреймворковый `GenericProcess`, а не прототипный `GenericProcessApp` (2026-09-21, line-sim Task 2.0, вердикт CTO)
+
+**Статус:** принято. **Отменяет** примечание к `GenericProcessApp` в
+`plans/2026-07-06_constructor-master/app-template-idea.md` §3.1 («только `app_module`,
+иначе новое runtime-ребро process→state_store») и пункт 4 «Открытых вопросов» §7 того же
+файла («РЕШЕНО: строго `app_module`»). Сам файл не правится — отмена живёт здесь.
+Связано: ADR-APP-006 (`GenericProcessManagerApp._setup_state_store` — серверная половина,
+store поднимается только при непустом посеве), ADR-APP-007 (дефолтный посев
+`{"processes": {...}}` у generic-дороги — store есть у любого generic-приложения).
+
+**Контекст.** Клиент дерева состояния в процессе создавал только прототипный
+`GenericProcessApp`. У generic-приложений (`apps/line_sim`, `examples/minimal_app`), чей
+`process_class` — голый `GenericProcess`, `ctx.state_proxy` был `None`, а heartbeat молчал о
+`processes.<p>.health`/`state` (оба пути гейтятся `getattr(self._services, "_state_proxy", None)`).
+Механизм был заперт в прототипе; по правилу «запертое выделяется, не копируется» он переезжает.
+
+**Решение.**
+- `GenericProcess._init_custom_managers()` (шаг 6 `initialize()`) создаёт `StateProxy(process_name,
+  router=router_manager, server_target="ProcessManager", logger=self.logger_manager)`, зовёт
+  `initialize()` и регистрирует `state.changed` — **до** `super()._init_custom_managers()`
+  (оркестратор кладёт `_state_proxy` в `PluginContext` внутри super-вызова) и до старта
+  message_processor (шаг 7).
+- Прокси из конструктора (`state_proxy=...`) имеет приоритет: свой не создаётся, обработчик
+  регистрирует шаг 10 `_init_state_proxy`. Свой прокси в `self.state_proxy` **не** кладётся —
+  иначе шаг 10 регистрирует второй раз, а дубликат в `ExactMatchStrategy` проигрывает молча.
+- Нет `router_manager` → прокси нет. Флага «выключить прокси» нет (YAGNI).
+- `GenericProcess.shutdown()`: `proxy.shutdown()` (шлёт `state.unsubscribe_all`) до базового
+  shutdown, пока роутер жив.
+- `GenericProcessApp` — пустой подкласс, исторический адрес ~116 ссылок `process_class` в YAML.
+
+**Почему довод отменяемого решения устарел.** Runtime-рёбра `process_module → state_store_module`
+уже есть (`managers/telemetry_reload.py:28`, `configs/observation_policy.py:80`), обратного ребра
+нет — цикла не возникает. Вариант `app_module` требовал бы нового класса-процесса и правки
+`process_class` в YAML обоих generic-приложений.
+
+**Store-less режим (зафиксирован как ТЕКУЩЕЕ поведение, не норма).** Приложение с явным
+`state_bootstrap → {}` store не получает (ADR-APP-006), но прокси у процессов есть: `set`/merge
+heartbeat уходят в PM без обработчика (fire-and-forget), `get` вне приёмного потока досиживает
+таймаут и отдаёт default, процесс живёт. Пиновка — `test_generic_process_state_proxy.py::
+test_storeless_mode_get_returns_default_and_process_lives`.
+
+**Контракт реентерабельности.** Синхронный `get`/`subscribe(sync=True)` из message-handler на
+приёмном потоке роутера бросает `RouterReentrantRequestError` — это контракт, не глотать. Кэш
+держит dict-значение листьями, поэтому `get` узла-поддерева всегда идёт в IPC; фоновый поток,
+который приёмный поток *ждёт* через `join`, тоже зависает до таймаута (ответ разбирает тот же
+приёмный поток) — измерено на фикстуре Task 2.0.
+
+**Отвергнуто.** `app_module` как дом класса (см. выше); опция конфигурации для отключения прокси
+(ни одному приложению не нужна).
+
+**Сторожа.** Независимая приёмка тестера (`test_generic_process_state_proxy_acceptance.py`,
+`apps/line_sim/tests/test_state_proxy_live.py`) + hazard-тесты автора
+(`test_generic_process_state_proxy.py`: порядок относительно шага 7, одна регистрация по счёту
+вызовов dispatcher'а, приоритет конструкторного прокси, слот логгера, порядок останова,
+`router_manager is None`, store-less режим).

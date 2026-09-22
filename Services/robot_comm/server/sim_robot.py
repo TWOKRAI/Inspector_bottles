@@ -18,13 +18,16 @@ Graceful degradation: модуль импортируется без pymodbus; �
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
+import traceback
+from typing import Callable
 
 from Services.modbus.sdk.errors import ModbusNotAvailableError
 
 from Services.robot_comm.core.registers import REG_SPACE_SIZE, ROBOT_UNIT_ID
-from Services.robot_comm.server.sim_core import RobotSimCore
+from Services.robot_comm.server.sim_core import TICK_INTERVAL_S, RobotSimCore
 
 try:  # pragma: no cover - наличие pymodbus зависит от окружения
     from pymodbus.server import ServerStop, StartTcpServer
@@ -41,22 +44,48 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5021  # не 5020 — там тестовый slave Services/modbus
-TICK_INTERVAL_S = 0.01  # период Motion-цикла симулятора
+# TICK_INTERVAL_S — реэкспорт из sim_core.py (ревью Task 2.1, п.3: раньше
+# дублировалось здесь отдельной константой; sim_core.py — источник истины,
+# этот модуль и так импортирует RobotSimCore из него).
+#: Сколько раз печатать сбой наблюдателя обмена, прежде чем замолчать (не спамить в цикле).
+_OBSERVER_ERROR_LIMIT = 3
+# ponytail: потолок измеренного dt тикера — пауза процесса (GC, swap, отладчик)
+# не должна превращаться в прыжок ленты на всю длительность паузы; апгрейд —
+# докатка суб-шагами, если когда-нибудь понадобится плавность вместо просто
+# «не проскочить».
+_MAX_TICK_DT_S = 0.1
 
 
-def _make_register_binder(core: RobotSimCore, bound_event: threading.Event):
+def _make_register_binder(
+    core: RobotSimCore,
+    bound_event: threading.Event,
+    on_write: Callable[[int, int, list[int] | None], None] | None = None,
+):
     """action-хук SimDevice: захватить живой список регистров сервера.
 
-    Вызывается сервером на КАЖДЫЙ доступ (до применения операции). Единственная
-    задача — на первом вызове отдать ядру живое хранилище; дальше no-op.
+    Вызывается сервером на КАЖДЫЙ доступ (до применения операции). Задачи две:
+    на первом вызове отдать ядру живое хранилище, и — если задан ``on_write`` —
+    отдать наблюдателю сырой доступ (``values=None`` для чтений). Хук зовётся ДО
+    применения операции, поэтому в ``values`` лежат ЕЩЁ НЕ записанные значения:
+    именно они и нужны монитору (в ``registers`` пока старое).
     pymodbus валидирует ``action=`` как async-ФУНКЦИЮ (инстанс с async
     ``__call__`` не проходит) — поэтому замыкание, а не класс.
     """
+    observer_errors = 0
 
-    async def binder(_fc, _start, _addr, _count, registers, _values):
+    async def binder(fc, _start, addr, _count, registers, values):
+        nonlocal observer_errors
         if not bound_event.is_set():
             core.attach(registers)
             bound_event.set()
+        if on_write is not None:
+            try:
+                on_write(int(fc), int(addr), None if values is None else [int(v) for v in values])
+            except Exception:  # наблюдатель не имеет права ронять симулятор...
+                observer_errors += 1
+                if observer_errors <= _OBSERVER_ERROR_LIMIT:  # ...но и молчать не должен
+                    print(f"sim_robot: сбой наблюдателя обмена #{observer_errors}:", file=sys.stderr)
+                    traceback.print_exc()
         return None  # продолжить штатную обработку
 
     return binder
@@ -69,6 +98,8 @@ class SimRobotServer:
         host/port/unit_id: адрес слушателя и Modbus id робота.
         core:          Внешнее ядро (настроенные тайминги) или дефолтное.
         tick_interval: Период Motion-цикла, сек.
+        on_write:      Наблюдатель обмена ``(func_code, address, values|None)``;
+                       ``None`` у values = чтение. Для монитора (см. sim_journal).
     """
 
     def __init__(
@@ -79,12 +110,14 @@ class SimRobotServer:
         *,
         core: RobotSimCore | None = None,
         tick_interval: float = TICK_INTERVAL_S,
+        on_write: Callable[[int, int, list[int] | None], None] | None = None,
     ) -> None:
         if not MODBUS_AVAILABLE:
             raise ModbusNotAvailableError("pymodbus не установлен — установите extra: pip install '.[modbus]'")
         self.host, self.port, self.unit_id = host, port, unit_id
         self.core = core if core is not None else RobotSimCore()
         self._tick_interval = tick_interval
+        self._on_write = on_write
         self._bound = threading.Event()
         self._stop = threading.Event()
         self._server_thread: threading.Thread | None = None
@@ -118,34 +151,94 @@ class SimRobotServer:
         device = SimDevice(
             id=self.unit_id,
             simdata=[block],
-            action=_make_register_binder(self.core, self._bound),
+            action=_make_register_binder(self.core, self._bound, self._on_write),
         )
         StartTcpServer(context=device, address=(self.host, self.port))
 
     def _ticker(self) -> None:
         """Motion-цикл: тикать ядро. До привязки хранилища ядро тикает свой буфер,
-        состояние переносится в живой список при attach (первый запрос клиента)."""
+        состояние переносится в живой список при attach (первый запрос клиента).
+
+        Скорость ленты идёт по РЕАЛЬНОМУ времени (Task 2.1b, line-sim Ф2):
+        `time.sleep(interval)` не гарантирует ровно `interval` — ОС планирует
+        поток позже (замерено на macOS, 2026-09-21: 11.6-12.0 мс без нагрузки,
+        ~20 мс при соседнем потоке, держащем GIL — не абсолютная величина,
+        конкретный запуск), из-за чего лента при фиксированном
+        dt=TICK_INTERVAL_S ехала медленнее команды. Первый тик — по
+        `TICK_INTERVAL_S` (не с чего измерять интервал); дальше `dt` —
+        фактически прошедшее с прошлого тика время (`time.perf_counter()` —
+        точнее `monotonic()` на Windows/Python 3.12, где у `monotonic()`
+        гранулярность ~15.6мс), зажатое `_MAX_TICK_DT_S`: пауза процесса
+        (GC, отладчик, свап) не должна прыжком доехать ленту на всю свою
+        длительность.
+        """
+        last = time.perf_counter()
+        self.core.tick(TICK_INTERVAL_S)
         while not self._stop.is_set():
-            self.core.tick()
             time.sleep(self._tick_interval)
+            now = time.perf_counter()
+            dt = min(now - last, _MAX_TICK_DT_S)
+            last = now
+            self.core.tick(dt)
 
 
-def run_sim_robot(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, unit_id: int = ROBOT_UNIT_ID) -> None:
-    """Блокирующий запуск симулятора (CLI). Ctrl+C — выход."""
-    # CLI: verbose-лог событий в консоль (зеркало print() прошивки).
-    # flush=True — события видны вживую (без block-буферизации stdout при перенаправлении).
-    core = RobotSimCore(on_event=lambda m: print(m, flush=True))
-    server = SimRobotServer(host, port, unit_id, core=core)
+def run_sim_robot(
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    unit_id: int = ROBOT_UNIT_ID,
+    *,
+    core_kwargs: dict | None = None,
+    gui: bool = False,
+) -> None:
+    """Блокирующий запуск симулятора (CLI). Ctrl+C — выход.
+
+    Args:
+        core_kwargs: Параметры ``RobotSimCore`` (тайминги, скорость ленты).
+        gui:         Поднять окно-монитор обмена (две колонки + счёт дублей).
+                     Требует PySide6; журнал слушает и записи с провода, и
+                     события ядра.
+    """
+    journal = None
+    sinks = [lambda m: print(m, flush=True)]  # verbose-лог в консоль (зеркало print() прошивки)
+    if gui:
+        from Services.robot_comm.server.sim_journal import SimJournal
+
+        journal = SimJournal()
+        sinks.append(journal.on_event)
+
+    def emit(message: str) -> None:
+        for sink in sinks:
+            sink(message)
+
+    # flush=True в консольном sink — события видны вживую (без block-буферизации
+    # stdout при перенаправлении в файл).
+    core = RobotSimCore(on_event=emit, **(core_kwargs or {}))
+    server = SimRobotServer(host, port, unit_id, core=core, on_write=journal.on_write if journal else None)
     print(
         f"sim_robot слушает {host}:{port} (unit {unit_id}); карта universal3 "
         f"(CVT + DRAW + MANUAL + RETURN + TOOLCHANGE + зеркало ПЧ). Ctrl+C — выход.",
         flush=True,
     )
-    server._ticker_thread = threading.Thread(target=server._ticker, name="sim-robot-motion", daemon=True)
-    server._ticker_thread.start()
+    server.start()
     try:
-        server._serve()  # блокирует текущий поток
+        if journal is not None:
+            _run_monitor_window(journal)
+        else:
+            while True:
+                time.sleep(0.5)
     except KeyboardInterrupt:  # pragma: no cover - ручная остановка
         print("\nОстановлено.", flush=True)
     finally:
-        server._stop.set()
+        server.stop()
+
+
+def _run_monitor_window(journal) -> None:  # pragma: no cover - требует GUI
+    """Показать окно-монитор; блокирует до его закрытия (Qt держит главный поток)."""
+    from PySide6.QtWidgets import QApplication
+
+    from Services.robot_comm.server.sim_monitor import SimMonitorWindow
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SimMonitorWindow(journal)
+    window.show()
+    app.exec()

@@ -65,6 +65,17 @@ from Services.robot_comm.core.registers import (
     SERVO_ON,
     XY_SCALE,
 )
+from Services.robot_comm.server.belt import BeltDrive
+
+# Период Motion-цикла — единственный источник истины (ревью Task 2.1, п.3:
+# раньше дублировался в sim_robot.py; sim_robot.py уже импортирует
+# RobotSimCore из этого модуля на уровне модуля, поэтому обратного импорта
+# `sim_robot.TICK_INTERVAL_S -> sim_core` здесь нет и не может возникнуть цикл).
+TICK_INTERVAL_S = 0.01
+
+# Масштаб регистра частоты ПЧ (см. Services/vfd_comm/protocols/gd20_bridge.yaml
+# cmd_freq.scale) — 0.01 Гц на LSB, т.е. RAW*100.
+_VFD_FREQ_SCALE = 100.0
 
 # Mailbox ПЧ — сторона РОБОТА (Lua-мост). Клиентская карта живёт в vfd_comm;
 # здесь адреса продублированы осознанно: sim эмулирует Lua-скрипт, а не клиента.
@@ -74,6 +85,12 @@ _REG_VFD_CMD_FREQ = 0x1202
 _REG_VFD_CMD_RESET = 0x1203
 _REG_VFD_FLAG = 0x1204
 _REG_VFD_ST_BASE = 0x1210  # RUN, OUT_FREQ, CURRENT, DCBUS, FAULT, STATUSW, HB, COMM_ERR
+
+#: Начало блока команды ПЧ в mailbox (RUN, DIR, FREQ — 3 регистра подряд,
+#: тот же порядок, что читает watchdog jog в ``SimRobotHostPlugin``, Task
+#: 2.3a). Публичный алиас ``_REG_VFD_CMD_RUN`` — потребители вне этого
+#: модуля (плагин) не должны дублировать адрес 0x1200 у себя.
+VFD_CMD_ADDR = _REG_VFD_CMD_RUN
 
 # Индексы телеметрии (блок 0x1130)
 _TLM_X, _TLM_Y, _TLM_Z, _TLM_RZ, _TLM_MOVING, _TLM_SPD = 0, 1, 2, 3, 4, 5
@@ -100,7 +117,9 @@ class RobotSimCore:
         job_ticks:    Тиков исполнения задания (после принятия, до free->1).
         draw_ticks:   Тиков прохода рисования (busy 1->0).
         manual_ticks: Тиков ручного хода (man_busy 1->0).
-        enc_rate:     Прирост энкодера за тик.
+        enc_rate:     Прирост энкодера за тик БЕЗ команды ПЧ (см. belt).
+        belt:         Модель ленты (Task 2.1). None -> BeltDrive.from_enc_rate(enc_rate, ...) —
+                      старое поведение воспроизводится побитово, пока не пришла команда ПЧ.
         on_event:     Callback для событий (print-зеркало прошивки). None = молча.
     """
 
@@ -115,6 +134,7 @@ class RobotSimCore:
         toolchange_ticks: int = 3,
         manual_ticks: int = 2,
         enc_rate: int = 7,
+        belt: BeltDrive | None = None,
         on_event: Callable[[str], None] | None = None,
     ) -> None:
         self._word_order = word_order
@@ -124,8 +144,10 @@ class RobotSimCore:
         self._return_ticks = return_ticks
         self._toolchange_ticks = toolchange_ticks
         self._manual_ticks = manual_ticks
-        self._enc_rate = enc_rate
         self._on_event = on_event
+        # Лента — отдельная модель (Task 2.1, line-sim Ф2): без явной инъекции
+        # воспроизводит старое поведение enc_rate побитово (см. BeltDrive.from_enc_rate).
+        self._belt = belt if belt is not None else BeltDrive.from_enc_rate(enc_rate, TICK_INTERVAL_S)
 
         self.regs: list[int] = [0] * REG_SPACE_SIZE
         self._encoder = 0
@@ -183,22 +205,64 @@ class RobotSimCore:
         for i, v in enumerate(values):
             self.regs[address + i] = int(v) & 0xFFFF
 
+    def command_vfd(
+        self,
+        *,
+        run: bool | None = None,
+        freq_hz: float | None = None,
+        reverse: bool | None = None,
+    ) -> None:
+        """Записать частичную команду ПЧ в mailbox — тем же путём (``self.write``),
+        что и Modbus-запись инспектора (Task 2.3a, ``SimRobotHostPlugin``):
+        оба мастера пишут один и тот же mailbox, побеждает последний
+        записавший (см. ``belt.py`` DESIGN п.6, план line-sim Ф2 §Task 2.3a).
+
+        Post: пишутся ТОЛЬКО переданные поля (партиальность — как у
+        ``VfdClient``: ``stop()`` пишет только ``cmd_run``), затем VFD_FLAG —
+        ОТДЕЛЬНЫМ, последним вызовом ``self.write``. Применяется на ближайшем
+        ``tick()`` (:meth:`_handle_vfd`), не немедленно — тот же контракт,
+        что у прямой Modbus-записи.
+        """
+        if run is not None:
+            self.write(_REG_VFD_CMD_RUN, [1 if run else 0])
+        if reverse is not None:
+            self.write(_REG_VFD_CMD_DIR, [1 if reverse else 0])
+        if freq_hz is not None:
+            self.write(_REG_VFD_CMD_FREQ, [round(freq_hz * _VFD_FREQ_SCALE)])
+        self.write(_REG_VFD_FLAG, [1])
+
     # ------------------------------------------------------------------ #
     # «Motion-цикл» — один тик
     # ------------------------------------------------------------------ #
 
-    def tick(self) -> None:
-        """Одна итерация цикла робота: энкодер, поллинг флагов, таймеры."""
-        self._encoder += self._enc_rate
-        self._write_encoder()
+    def tick(self, dt_s: float | None = None) -> None:
+        """Одна итерация цикла робота: энкодер, поллинг флагов, таймеры.
+
+        Args:
+            dt_s: Реальный интервал с прошлого тика (Task 2.1b, line-sim Ф2:
+                  измеряет вызывающая сторона — `SimRobotServer._ticker`).
+                  ``None`` -> `TICK_INTERVAL_S` (старое поведение, все прямые
+                  вызовы/тесты без аргумента не меняются). Влияет только на
+                  ленту (`self._belt.advance`) — счётчики шагов остальных
+                  обработчиков (job/draw/manual/…) по-прежнему считаются
+                  тиками, не временем.
+        """
+        dt = dt_s if dt_s is not None else TICK_INTERVAL_S
         if self.regs[REG_FREE] == 1:
-            # heartbeat телеметрии живёт ТОЛЬКО в idle (как в Lua)
+            # heartbeat телеметрии живёт ТОЛЬКО в idle (как в Lua) — читает
+            # REG_FREE ДО обработчиков этого тика (как раньше).
             self.regs[REG_TLM_BASE + _TLM_HB] = (self.regs[REG_TLM_BASE + _TLM_HB] + 1) % 32767
 
         self._handle_stop_servo()
         self._handle_job()
         self._handle_config()
         self._handle_vfd()
+        # Энкодер — ПОСЛЕ _handle_vfd: пульс VFD_FLAG применяет команду к belt
+        # (_handle_vfd -> belt.command) и приращение ЭТОГО ЖЕ тика уже должно
+        # идти по новой скорости — таково ограничение прошивки, «скорость
+        # меняется только в момент пульса», а не с задержкой в один тик.
+        self._encoder += self._belt.advance(dt)
+        self._write_encoder()
         self._handle_draw()
         self._handle_return()
         self._handle_toolchange()
@@ -318,6 +382,10 @@ class RobotSimCore:
         run = self.regs[_REG_VFD_CMD_RUN] == 1
         reverse = self.regs[_REG_VFD_CMD_DIR] == 1
         freq = self.regs[_REG_VFD_CMD_FREQ]
+        # RAW*100 -> Гц (см. gd20_bridge.yaml cmd_freq.scale) — скорость ленты
+        # меняется ТОЛЬКО здесь, по пульсу VFD_FLAG (ограничение прошивки,
+        # разгон/торможение по рампе вне области задачи, см. belt.py).
+        self._belt.command(run=run, freq_hz=freq / _VFD_FREQ_SCALE, reverse=reverse)
         if self.regs[_REG_VFD_CMD_RESET] == 1:
             self.regs[_REG_VFD_CMD_RESET] = 0
         st = _REG_VFD_ST_BASE
@@ -484,6 +552,29 @@ class RobotSimCore:
     def encoder(self) -> int:
         """Текущее значение энкодера (для assert'ов в тестах)."""
         return self._encoder
+
+    @property
+    def belt(self) -> BeltDrive:
+        """Модель ленты — публичный доступ для команд ``belt.*`` (Task 2.3a,
+        ``SimRobotHostPlugin``): ``belt.calibrate``/``belt.status`` читают
+        ``state``/``mm_s_at_max_freq`` отсюда напрямую. ``belt_mm_s``/
+        ``encoder`` остаются отдельными аксессорами горячего пути публикации
+        (Task 2.2) — не заменяются этим свойством."""
+        return self._belt
+
+    @property
+    def belt_mm_s(self) -> float:
+        """Точная текущая скорость ленты, мм/с (см. ``BeltDrive.mm_s``).
+
+        Единственный публичный аксессор скорости (ревью Task 2.2 line-sim):
+        раньше потребители снаружи модуля (``Plugins.sim.robot_host``) не
+        имели доступа к ``self._belt`` и считали ``mm_s`` производной энкодера
+        между своими собственными тиками публикации — на пульсе смены команды
+        ПЧ такая производная даёт смешанное среднее за интервал, а не точную
+        мгновенную скорость. Эта дыра не входила в область Task 2.1/2.1b
+        (`sim_core.py` тогда не трогали снаружи), закрывается здесь.
+        """
+        return self._belt.mm_s
 
     @property
     def job_ecap(self) -> list[int]:

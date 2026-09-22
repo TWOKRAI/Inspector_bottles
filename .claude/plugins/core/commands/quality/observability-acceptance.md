@@ -19,6 +19,25 @@ description: Приёмка наблюдаемости глазами потре
 PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m backend_ctl.probes.probe_observability_consumer_acceptance
 ```
 
+**Флаги (Task 1.4 плана line-sim).** Без аргументов — прежнее поведение: прототип, порт 8765.
+
+| Флаг | Значения | Дефолт |
+|---|---|---|
+| `--app` | `prototype` (рецепт `inspection_full`) · `line_sim` (`apps/line_sim/app.yaml` через `app_module.build_app`) | `prototype` |
+| `--port` | порт `backend_ctl`; проверка «порт занят → `[abort]`, ничего не убиваю» смотрит именно его | prototype `8765`, line_sim `8766` |
+| `--log-dir` | каталог логов прогона (перепривязывает `MULTIPROCESS_LOG_DIR` / `INSPECTOR_LOG_DIR`) | `logs_live/<дата>_qa-acceptance_<ts>/` |
+
+```bash
+# второе приложение — тот же чек-лист, другой адрес (порты сима: 8766, Modbus 5021, MJPEG 8091 — свободны)
+PYTHONIOENCODING=utf-8 .venv/bin/python -m backend_ctl.probes.probe_observability_consumer_acceptance --app line_sim
+```
+
+Имена процессов строк чек-листа идут через **роли** профиля (`camera`, `neighbor`, `fault`, `ring`,
+`inspector`), состав процессов сима читается из `apps/line_sim/pipeline.yaml`. Роль, которой у
+приложения нет (у сима — `inspector`: строки R9, K10, K11, L5), даёт вердикт **`N/A`** с причиной в
+«наблюдал», а не пропуск. Только у `line_sim` есть строка **T1**: уровень плагина приложения
+(`ctx.publish_metric`) читается `introspect_telemetry → levels.state.plugins`.
+
 Длительность ~135–155 с стенда. Артефакты: `logs_live/<дата>_qa-acceptance_<ts>/` —
 `acceptance_results.md` (таблица), `acceptance_results.json`, `observability.db`, журналы процессов.
 
@@ -31,7 +50,7 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m backend_ctl.probes.probe_obse
 
 **Как читать вердикты:** `PASS` только при непустом «наблюдал»; `NOT_REACHED` с причиной —
 не поломка (топология без писателя чисел, правило «не мутировать общее дерево», функция в работе
-у другой полосы); `UNVERIFIED` — задокументировано, не гонялось. Колонка «приёмник» говорит,
+у другой полосы); `UNVERIFIED` — задокументировано, не гонялось; `N/A` — роли строки у приложения нет, причина словами. Колонка «приёмник» говорит,
 кто принял данные вердикта: если это наш драйвер, а не файл/SQLite/внешний коллектор,
 вердикт проверяет и оснастку — урок otel Ф2.
 

@@ -112,6 +112,68 @@ def default_blueprint_loader(manifest: "AppManifest") -> dict[str, Any]:
     return blueprint
 
 
+def default_state_bootstrap(blueprint: dict[str, Any]) -> dict[str, Any]:
+    """Дефолтный build-time хук: blueprint dict → начальное state-дерево (ТОЛЬКО топология).
+
+    Generic-приложение получает наблюдаемость процессов, не написав ни строки Python:
+    без посева ``initial_state`` пуст → ``GenericProcessManagerApp._setup_state_store``
+    не создаёт ``StateStoreManager`` → команда ``state.get_subtree`` вообще не
+    зарегистрирована (диспетчер отвечает ``No handler for key 'state.get_subtree'``),
+    и ``system_overview`` рапортует пустую топологию.
+
+    Форма ветки ``processes`` — подмножество прикладной
+    (``multiprocess_prototype/backend/state/bootstrap.py::_build_process_entry``):
+    ``{"config": {"plugins", "chain_targets", "priority"}, "state": {"status", "pid",
+    "fps", "error"}}``. Прикладные ветки (``system``/``wires``/``services``/
+    ``displays``/``recipes``/``plugins``) сюда НЕ переезжают: они читают реестры
+    прототипа (DisplaysConfig, каталог рецептов), которых у framework нет.
+
+    ``fps``/``pid``/``error`` сеются ``None``, а не нулём: ``None`` во всей системе
+    означает «показания нет», а ноль — измеренный ноль. Ровно эта разница уже стоила
+    прототипу семи ложных аномалий ``fps_zero_while_running`` (см. комментарий в
+    прикладном ``_build_process_entry``).
+
+    ``status`` сеется ``"stopped"``, хотя потребитель ждёт ``running``: статус
+    обновляет сам ``ProcessManager`` после спавна — посев лишь создаёт лист.
+
+    Пустой blueprint (нет процессов) → ``{"processes": {}}``, а НЕ ``{}``. Непустой
+    dict проходит гейт ``_setup_state_store`` (``if not initial_state and not
+    throttle_rules``), значит store создаётся всегда и команда ``state.get_subtree``
+    отвечает «поддерево пусто» вместо отказа «обработчика нет». Это разные диагнозы:
+    приложение без процессов — законная конфигурация, а «нет обработчика» читается
+    как поломка. Решение пришпилено
+    ``tests/test_state_bootstrap_hazards.py::test_empty_blueprint_decision_is_pinned``.
+
+    Только plain dict/list/str/int/None: результат едет в дочерние процессы через
+    ``spawn`` (``_pickle_sanity`` стоит на дороге в ``_build_generic``).
+    """
+    processes: dict[str, Any] = {}
+    for proc in blueprint.get("processes") or []:
+        if not isinstance(proc, dict):
+            continue
+        name = proc.get("process_name") or ""
+        if not name:
+            # Запись без имени адресовать нечем — ключ дерева был бы пустой строкой.
+            continue
+        processes[name] = {
+            "config": {
+                "plugins": list(proc.get("plugins") or []),
+                "chain_targets": list(proc.get("chain_targets") or []),
+                # `or "normal"`, а не `get(..., "normal")`: YAML-редактор пишет
+                # явный `priority:` пустым скаляром → None (та же идиома, что у
+                # прикладного бутстрапа).
+                "priority": proc.get("priority") or "normal",
+            },
+            "state": {
+                "status": "stopped",
+                "pid": None,
+                "fps": None,
+                "error": None,
+            },
+        }
+    return {"processes": processes}
+
+
 def assemble_proc_dicts(
     blueprint: dict[str, Any],
     *,
@@ -119,6 +181,7 @@ def assemble_proc_dicts(
     log_dir: str | None = None,
     app_config_path: str = "",
     recipe_path: str = "",
+    telemetry_section: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Universal-шов сборки: blueprint dict → ``{name: proc_dict}`` (E3/5.3, framework-only).
 
@@ -149,10 +212,19 @@ def assemble_proc_dicts(
     молчании — системный temp (``log_paths.default_log_base_directory``). Явное
     значение работает как прежде.
 
+    ``telemetry_section`` (Task 1.5 плана line-sim) — глобальный дефолт секции
+    ``telemetry.publish``: carve-out ``BlueprintAssembler._resolve_telemetry``
+    прототипа. Без него publisher-гейт (``ProcessHeartbeat``) у generic-приложения
+    не строился вовсе — зонд приёмки видел ``gate_active=False``. Per-process
+    override (``processes[].telemetry``) мержится поверх глубоко; сырой override
+    кладётся отдельно в ``telemetry_override`` (его читает ``config.reload``).
+    Не задано нигде → ключа ``telemetry`` нет; явный ``{}`` — «включить с
+    дефолтами», в «не задано» не схлопывается.
+
     Raises:
         BlueprintError: ``SystemBlueprint.check`` вернул ошибки.
     """
-    from multiprocess_framework.modules.data_schema_module import process
+    from multiprocess_framework.modules.data_schema_module import deep_merge, process
     from multiprocess_framework.modules.data_schema_module.core.helpers import merge_with_defaults
     from multiprocess_framework.modules.process_manager_module.launcher.schema import (
         DEFAULT_PROCESS_SCHEMA,
@@ -171,6 +243,7 @@ def assemble_proc_dicts(
 
     app_layer = observability_section or {}
     topology = SystemBlueprint.model_validate(blueprint)
+    telemetry_overrides = {p.process_name: p.telemetry for p in topology.processes if p.telemetry is not None}
     topology.infer_missing_collectors()
 
     errors = topology.check()
@@ -203,6 +276,11 @@ def assemble_proc_dicts(
             proc_dict["config"]["observability_config_path"] = str(app_config_path)
         if recipe_path:
             proc_dict["config"][RECIPE_PATH_CONFIG_KEY] = str(recipe_path)
+        override = telemetry_overrides.get(name)
+        if telemetry_section is not None or override is not None:
+            proc_dict["config"]["telemetry"] = {"publish": deep_merge(telemetry_section or {}, override or {})}
+        if override is not None:
+            proc_dict["config"]["telemetry_override"] = override
         proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
         result[name] = proc_dict
     return result
@@ -269,22 +347,31 @@ class SystemBuilder:
         obs_section, obs_source = self._resolve_app_observability(manifest, spec)
         recipe_path = str(manifest.pipeline) if manifest.pipeline else ""
 
+        # Task 1.5: гейт телеметрии из того же system.yaml. Передаётся только
+        # заданным — билдер приложения, написанный до 1.5, остаётся совместим.
+        telemetry_kw: dict[str, Any] = {}
+        telemetry_section = self._resolve_app_telemetry(manifest)
+        if telemetry_section is not None:
+            telemetry_kw["telemetry_section"] = telemetry_section
+
         builder: ProcDictsBuilder = spec.proc_dicts_builder or assemble_proc_dicts
         proc_dicts = builder(
             blueprint,
             observability_section=obs_section,
             app_config_path=obs_source,
             recipe_path=recipe_path,
+            **telemetry_kw,
         )
         _pickle_sanity(proc_dicts, hook_name="proc_dicts_builder")
 
         # Build-time хуки: результат (dict) уйдёт в orchestrator_config → пиклится
         # через spawn → потребляется GenericProcessManagerApp child-side.
-        initial_state: dict[str, Any] = {}
-        if spec.state_bootstrap is not None:
-            bootstrap: StateBootstrap = spec.state_bootstrap
-            initial_state = bootstrap(blueprint)
-            _pickle_sanity(initial_state, hook_name="state_bootstrap")
+        # Ф1 Task 1.0: дефолт — топологический посев (:func:`default_state_bootstrap`),
+        # а не пустой dict. Явный хук приложения выигрывает у дефолта целиком (не
+        # мержится): приложение, заявившее своё дерево, получает ровно своё.
+        bootstrap: StateBootstrap = spec.state_bootstrap or default_state_bootstrap
+        initial_state: dict[str, Any] = bootstrap(blueprint)
+        _pickle_sanity(initial_state, hook_name="state_bootstrap")
 
         from multiprocess_framework.modules.process_module.configs.observability_layers import (
             orchestrator_observability_config,
@@ -350,6 +437,33 @@ class SystemBuilder:
         raw = _load_yaml_or_json(manifest.system)
         section = raw.get("observability") if isinstance(raw, dict) else None
         return (dict(section) if isinstance(section, dict) else {}), str(manifest.system)
+
+    @staticmethod
+    def _resolve_app_telemetry(manifest: "AppManifest") -> dict[str, Any] | None:
+        """Секция ``telemetry.publish`` файла ``manifest.system`` (Task 1.5) или ``None``.
+
+        ``None`` — секции нет: гейт не строится, все метрики публикуются каждый
+        тик (поведение до 1.5). Нечитаемый файл роняет сборку — та же политика,
+        что у :meth:`_resolve_app_observability`.
+
+        Невалидная секция тоже роняет сборку (ревью 1.5): иначе процесс молча
+        выключал бы гейт с одной DEBUG-строкой, а прототип на том же файле падает
+        при загрузке ``SystemConfig``. Отдаётся сырой dict, не ``model_dump``:
+        дефолты не материализуются и per-process override мержится поверх дельты.
+        """
+        if manifest.system is None:
+            return None
+        raw = _load_yaml_or_json(manifest.system)
+        telemetry = raw.get("telemetry") if isinstance(raw, dict) else None
+        publish = telemetry.get("publish") if isinstance(telemetry, dict) else None
+        if publish is None:
+            return None  # не-dict (``publish: fast``) идёт в валидацию и роняет сборку
+        from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+            TelemetryPublishConfig,
+        )
+
+        TelemetryPublishConfig.from_dict(publish)  # ValidationError → сборка падает
+        return dict(publish)
 
     def _print_banner(
         self,

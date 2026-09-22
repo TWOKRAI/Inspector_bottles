@@ -1,0 +1,121 @@
+# apps/line_sim — pipeline (три процесса).
+#
+# `robot` держит SimRobotHostPlugin — Modbus TCP-симулятор робота на
+# 127.0.0.1:5021 (порт зафиксирован планом line-sim §Ф1, "Порты стенда").
+#
+# === ДВЕРЬ КАДРОВ (Task 1.2, форма выбрана арбитражем CTO 2026-09-21) ===
+#
+# `camera` (источник) → IPC → `mjpeg` (сток, HTTP MJPEG на 127.0.0.1:8091).
+# Прототип читает этот адрес как источник camera_0 в
+# multiprocess_prototype/recipes/letter_robot_sim.yaml.
+#
+# ПОЧЕМУ ДВА ПРОЦЕССА, а не один (прежняя шапка утверждала обратное и была
+# НЕВЕРНА — «кадр остаётся внутри процесса»). У источника внутрипроцессной
+# цепочки не бывает: `SourceProducer` делает
+# `produce() → FrameShmMiddleware.strip_and_write() → IPC send в chain_targets`
+# (`process_module/generic/source_producer.py`, докстринг) и НЕ передаёт items
+# соседнему плагину своего процесса. Линейные цепочки внутри процесса
+# (боевой `vision`: color_convert → roi_crop → hsv_mask → morphology) состоят из
+# processing-плагинов, которые получают item по IPC и крутятся в воркере
+# `message_processor`. Поэтому форма здесь — один в один боевая
+# (`camera_0 → vision`, hikvision_letter_robot.yaml:124-128, 403-406).
+#
+# ОТВЕРГНУТО: `chain_targets: [camera]` (отправка самому себе). Кадры доходят, и
+# критерий приёмки при этом ЗЕЛЁНЫЙ — но это петля: `PipelineExecutor._send_results`
+# шлёт каждый item после цепочки в `chain_targets` без исключения для sink, сток
+# pass-through возвращает item в свою же очередь. Замер CTO: раздача в 3,2 раза
+# быстрее источника (каждый кадр кодируется ~3 раза), в stderr процесса
+# `RouterSendError … delivery_failed … targets=['camera']`, через 20 с не гаснет.
+#
+# `wires:` ОБЯЗАТЕЛЕН: без провода валидатор блюпринта не пускает сборку
+# (`BlueprintError: Вход 'mjpeg.mjpeg_sink.frame' (image/bgr) не подключен`).
+
+name: line_sim
+description: "Симулятор линии: robot — SimRobotServer (Modbus TCP), camera → mjpeg — MJPEG-дверь кадров (:8091)"
+
+processes:
+  - process_name: robot
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sim.robot_host.plugin.SimRobotHostPlugin
+        plugin_name: sim_robot_host
+        category: io
+        host: 127.0.0.1
+        port: 5021
+        unit_id: 2
+        auto_start: true
+        # Task 2.3a: калибровка ленты 101.1311 мм/с на макс. частоте — равна
+        # сегодняшнему дефолту "сырого" режима (BeltDrive.from_enc_rate),
+        # поведение стенда не меняется; решение ведущего 2026-09-22 — на
+        # старте ЕЩЁ и командуется run=True/freq_max через mailbox, чтобы
+        # зеркало ПЧ/belt.status были согласованы с первого тика.
+        belt_mm_s_at_max_freq: 101.1311
+        # Dead-man jog (belt.jog): без подкачки останавливается сам через
+        # jog_timeout_ms; jog_freq_hz — частота по умолчанию, если клиент её
+        # не передал явно.
+        jog_timeout_ms: 500
+        jog_freq_hz: 10.0
+
+  - process_name: camera
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    chain_targets:
+      - mjpeg
+    plugins:
+      # Task 2.2: заменяет заглушку camera_service/simulator — фон + тестовый
+      # спрайт, следующий за энкодером ленты из общего мира (sim.belt.*).
+      - plugin_class: Plugins.sim.scene_source.plugin.SceneSourcePlugin
+        plugin_name: scene_source
+        category: source
+        seed: 0
+        spawn_encoder: 0
+        px_per_mm: 1.0
+        stale_ms: 500
+
+  - process_name: mjpeg
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sim.mjpeg_sink.plugin.MjpegSinkPlugin
+        plugin_name: mjpeg_sink
+        category: sink
+        host: 127.0.0.1
+        port: 8091
+
+  # Task 2.3b: веб-пульт ленты — третий клиент командной поверхности belt.*
+  # (владелец, backend_ctl, прототип — см. apps/line_sim/README.md). Портов
+  # данных нет (side-effect плагин), поэтому wires не заводим — форма как у
+  # `robot`/`mjpeg`, но без входа в chain_targets.
+  - process_name: pult
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sim.pult_web.plugin.PultWebPlugin
+        plugin_name: pult_web
+        category: control
+        host: 127.0.0.1
+        port: 8092
+        mjpeg_url: http://127.0.0.1:8091/
+        robot_process: robot
+        timeout_s: 1.0
+
+# Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).
+# `type: memory` обязателен — без него под тем же именем поднимется ФАЙЛОВЫЙ
+# приёмник без tail(). Ось `channels` скоупа замещающая: console/system_file
+# перечислены рядом с кольцом, иначе пропал бы system.log процесса.
+observability:
+  processes:
+    camera:
+      channels:
+        flight_ring:
+          type: memory
+          capacity: 500
+      scopes:
+        SYSTEM:
+          channels: [console, system_file, flight_ring]
+
+wires:
+  - source: camera.scene_source.frame
+    target: mjpeg.mjpeg_sink.frame
+    description: кадр сцены сима (спрайт по энкодеру ленты) → MJPEG-раздача (дверь кадров для прототипа)

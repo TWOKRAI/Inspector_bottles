@@ -92,3 +92,56 @@ def test_toolchange_over_tcp(bot: RobotClient) -> None:
     bot.set_mode("toolchange")
     assert bot.do_toolchange(2) is True
     assert bot.tool_current() == 2
+
+
+# --------------------------------------------------------------------------- #
+# Журнал обмена на РЕАЛЬНОЙ проводке (не на фейке хука)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def journal_sim():
+    """Отдельный сервер с подключённым журналом (свой порт — не мешает module-фикстуре)."""
+    from Services.robot_comm.server.sim_journal import SimJournal
+    from Services.robot_comm.server.sim_robot import SimRobotServer
+
+    journal = SimJournal()
+    server = SimRobotServer("127.0.0.1", _free_port(), on_write=journal.on_write)
+    server.start()
+    time.sleep(0.5)
+    yield server, journal
+    server.stop()
+
+
+def test_journal_sees_real_traffic_and_flags_a_repeat(journal_sim) -> None:
+    """Хук наблюдателя работает на живом pymodbus, а не только в юнит-тесте.
+
+    Юнит-тесты журнала зовут ``on_write`` сами — они проверяют арифметику, но не
+    то, что сигнатура ``action=`` совпала с тем, чем её реально зовёт pymodbus
+    (и что чтения приходят с ``values=None``). Здесь — настоящий клиент, сокет,
+    сервер; повтор той же детали должен быть опознан сквозь всю проводку.
+    """
+    from Services.robot_comm.core.registers import FACTOR_MM
+
+    server, journal = journal_sim
+    client = RobotClient(RobotConfig(host=server.host, port=server.port))
+    assert client.connect()
+    try:
+        assert _wait(client.is_free)
+        enc1 = client.read_encoder()
+        assert client.send_job(300.0, -210.0, enc1)
+        assert _wait(client.is_free)
+
+        # Та же деталь на следующем кадре: координата уехала ровно на проезд ленты.
+        enc2 = client.read_encoder()
+        assert client.send_job(300.0, -210.0 + (enc2 - enc1) * FACTOR_MM, enc2)
+        assert _wait(lambda: journal.counters()["jobs"] == 2)
+    finally:
+        client.disconnect()
+
+    counters = journal.counters()
+    assert counters["dups"] == 1, counters
+    assert counters["reads"] > 0, "чтения (values=None) до наблюдателя не доходят"
+    texts = [e.text for e in journal.drain()]
+    assert any("job_x = 300.0" in t for t in texts), texts[:20]
+    assert any("ДУБЛЬ" in t for t in texts), texts[:20]

@@ -30,6 +30,11 @@ MODE_TOOLCHANGE = 4  # смена инструмента (возврат тек�
 XY_SCALE = 10  # 0.1 мм на LSB
 XY_LIMIT_MM = 3276.7  # предел s16 при scale=10
 
+# Геометрия трекинга ленты — константы прошивки (Lua: FACTOR_MM, UX, UY).
+# trav = (enc_now - job_enc) * FACTOR_MM; px = job_x + UX*trav; py = job_y + UY*trav.
+FACTOR_MM = 0.144473  # мм на счёт энкодера конвейера
+BELT_UX, BELT_UY = 0.0, 1.0  # единичный вектор хода ленты в системе робота
+
 # Стоп-режимы (REG_STOP): семантика из Lua
 STOP_HOME_CONTINUE = 1  # домой, остаться в цикле
 STOP_HOME_EXIT = 2  # домой, выход, серво OFF

@@ -5,8 +5,8 @@
 поток до получения ответа (дедлок в приёмном цикле).
 
 Паттерн: build_command_message + router_manager.request (Р9).
-Нормализация ответа: PM-формат {"success": ..., "data": {"result": ...}}
-→ {"status": "ok"|"error", ...}.
+Нормализация ответа: конверт reply_to_request {"success": ..., "result": ...}
+→ {"status": "ok"|"error", **поля результата} (см. ``_normalize_response``).
 """
 
 from __future__ import annotations
@@ -15,13 +15,18 @@ from typing import Any
 
 
 def _normalize_response(raw: dict) -> dict:
-    """Привести ответ PM/router к формату {"status": "ok"|"error", ...}.
+    """Привести ответ router к формату {"status": "ok"|"error", ...}.
 
-    router_manager.request возвращает:
-        {"success": True,  "data": {"result": <plugin_result>}} — успех
-        {"success": False, "error": "timeout"}                  — таймаут
-        {"success": False, "error": "..."}                      — ошибка
-    Плагин возвращает {"status": "ok", ...} или {"status": "error", ...}.
+    Живой конверт ``RouterManager.reply_to_request`` кладёт результат
+    обработчика на ВЕРХНИЙ уровень::
+
+        {"success": True,  "result": <результат плагина>, ...}  — успех
+        {"success": False, "result": {"status": "error", "message": ...}}
+        {"success": False, "error": "timeout"}                   — отказ транспорта
+
+    Форма ``{"data": {"result": ...}}`` — наследие, оставлена запасной веткой.
+    До 2026-09-22 искали только её, и все поля ответа терялись (пульт line-sim
+    получал голое ``{"status": "ok"}``, воспроизведено вживую).
     """
     if not isinstance(raw, dict):
         return {"status": "error", "message": "некорректный ответ"}
@@ -30,19 +35,26 @@ def _normalize_response(raw: dict) -> dict:
     if "status" in raw:
         return raw
 
-    success = raw.get("success", False)
-    if not success:
-        error = raw.get("error", "неизвестная ошибка")
-        return {"status": "error", "message": str(error)}
+    if "result" in raw:
+        result = raw["result"]
+    else:
+        data = raw.get("data", {})
+        result = data.get("result", data) if isinstance(data, dict) else data
 
-    # Вытащить result из PM-обёртки
-    data = raw.get("data", {})
-    if isinstance(data, dict):
-        result = data.get("result", data)
-        if isinstance(result, dict) and "status" in result:
-            return result
-        return {"status": "ok", **result} if isinstance(result, dict) else {"status": "ok", "result": result}
-    return {"status": "ok", "data": data}
+    if not raw.get("success", False):
+        detail = result if isinstance(result, dict) else {}
+        message = (
+            raw.get("error")
+            or detail.get("message")
+            or detail.get("reason")
+            or detail.get("error")
+            or "неизвестная ошибка"
+        )
+        return {"status": "error", "message": str(message)}
+
+    if isinstance(result, dict):
+        return result if "status" in result else {"status": "ok", **result}
+    return {"status": "ok", "result": result}
 
 
 class DeviceHubClient:

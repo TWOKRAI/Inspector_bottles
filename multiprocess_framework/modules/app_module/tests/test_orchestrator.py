@@ -238,10 +238,19 @@ class TestBuildGenericHookWiring:
         assert launcher._orchestrator_config["state_throttle_rules"] == {"a.*": {"interval_ms": 50}}
 
     def test_no_build_time_hooks_minimal_config(self, tmp_path: Path) -> None:
-        """Без хуков (minimal_app) — пустой initial_state, без throttle."""
+        """Без хуков — посев дефолтной топологии (пустой blueprint), без throttle.
+
+        Контракт сменён 2026-09-20 (ADR-APP-007, Ф1 Task 1.0): раньше здесь стояло
+        ``cfg["initial_state"] == {}`` и StateStore не поднимался. Теперь дефолт
+        ``default_state_bootstrap`` сеет ``{"processes": {}}`` даже на blueprint'е без
+        процессов — непустой dict проходит гейт ``_setup_state_store``, и store есть
+        всегда. Не «чинить» обратно на ``{}``: пустой посев вернул бы отказ
+        ``No handler for key 'state.get_subtree'`` вместо ответа «поддерево пусто».
+        Троттл-правил по-прежнему нет — этот хук дефолта не получил.
+        """
         launcher = build_app(_spec_with_hooks(tmp_path))
         cfg = launcher._orchestrator_config
-        assert cfg["initial_state"] == {}
+        assert cfg["initial_state"] == {"processes": {}}
         assert "state_throttle_rules" not in cfg
         # Task 5.13: ключи наблюдаемости оркестратора хуками не управляются —
         # они выводятся из манифеста. Здесь манифест не называет `system:`,

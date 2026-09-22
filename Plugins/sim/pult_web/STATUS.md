@@ -1,0 +1,47 @@
+# Plugins/sim/pult_web — STATUS
+
+**Состояние: сделано (Task 2.3b плана line-sim, оффлайн-часть).**
+
+**Обновлено:** 2026-09-22 — Task 2.3b, ревью итерация 1, ветка `feat/line-sim-2.3b-pult`.
+
+| Что | Состояние |
+|---|---|
+| `plugin.py` — `PultWebPlugin` | есть: `configure`/`start`/`shutdown`, HTTP API (`GET /`, `GET /api/status`, `POST /api/run|stop|jog|calibrate`), форвард через `DeviceHubClient` |
+| Занятый порт | есть: `_PultHTTPServer.__init__` биндит синхронно, `OSError` → `report_error`, `state="error"`, процесс живёт |
+| bad_json/404/413 | есть: три отказа ДО обращения к `robot`, `robot` не вызывается ни разу |
+| `status: "error"` от `robot` → 504 | есть |
+| Accept-backlog 20 конкурентных запросов | есть: `request_queue_size = 32` (дефолт stdlib 5 ронял часть соединений на TCP-уровне, замерено) |
+| `shutdown()` при живом сервере, даже с реальным медленным запросом | есть: `join(timeout=5.0)`, не виснет (hazard-тест с daemon-потоком + join-дедлайном, реально висящий двойник 3 с) |
+| Медленный `robot` не блокирует соседний `GET /` | есть: `ThreadingHTTPServer` — поток на соединение |
+| Localhost-страж (`Host` не 127.0.0.1/localhost:port) | есть: 403 на `GET`/`POST`, DNS-rebinding отбит |
+| Content-Type-страж на `POST` (не `application/json`) | есть: 415 до чтения тела, двойник не вызван |
+| Страница: `pollStatus` на отказ (`ok: false`/не-2xx) | есть: «robot не отвечает», не `undefined`-поля |
+| Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
+| Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
+| Страница: порядок jog→stop | есть: `jogStop` дожидается промиса последнего `/api/jog` |
+| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_pult_web_hazards.py` — 10 авторских (конкурентный jog, shutdown с реальным медленным запросом, медленный robot, 5× JS страницы через `node`/`page_offline.mjs`: jogStop no-op, мультитач, порядок jog→stop при медленном robot, «robot не отвечает» на 504 и на 200+`ok:false`; localhost-страж, content-type-страж) |
+
+## Долг / открытые вопросы
+
+- **Страница проверяется через `node:vm`, не браузером** — семантика
+  pointer-событий на тач-экране и порядок `blur`/`visibilitychange` при
+  закрытии вкладки не проверены; без `node` JS-тесты пропускаются (`skipif`).
+- **Медленный robot (> ~400 мс на команду) — лента дёргается при удержании
+  jog** (подкачка реже `jog_timeout_ms`); сбой в безопасную сторону. Лечится
+  досылкой пропущенного тика сразу после ответа — не делали (ревью 2.3b,
+  итерация 2, наблюдение A).
+- **`no_receive_pump` в первые мгновения после старта процесса `pult`** —
+  `router.request` до первого приёмного цикла отдаёт эту ошибку, первые
+  запросы страницы могут получить 504. Задокументировано в README, не
+  устраняется (грейс сам проходит).
+- **`shutdown()` не закрывает уже открытые клиентские соединения** — то же
+  известное ограничение, что у `mjpeg_sink` (см. его `STATUS.md`); поток
+  конкретного соединения — daemon, процесс не блокирует.
+- **Живая приёмка — ведущим, 2026-09-22:** `apps/line_sim/tests` 29/29 при
+  `LINE_SIM_LIVE=1`, инъекция B6 (пульт адресует `camera`) → RED (504).
+- **Форма ответа `router.request` снята живьём:** `{success, result}` на
+  верхнем уровне (конверт `reply_to_request`). Старый `_normalize_response`
+  её НЕ разбирал — `/api/status` отдавал голое `{"status": "ok"}`, поля
+  терялись. Исправлено в `DeviceHubClient` (коммит «fix(device_hub): …
+  result с верхнего уровня»), тест с настоящим клиентом —
+  `Plugins/hub/device_hub/tests/test_reply_envelope_acceptance.py`.

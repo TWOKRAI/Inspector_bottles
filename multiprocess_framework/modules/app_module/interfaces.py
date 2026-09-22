@@ -58,6 +58,10 @@ class ProcDictsBuilder(Protocol):
     нужна, пишет билдер ровно как раньше — но если оно их игнорирует **молча**,
     его процессы останутся без L1. Именно поэтому они в контракте, а не
     передаются украдкой одной лишь дефолтной реализации.
+
+    **Task 1.5 (line-sim):** ``telemetry_section`` — глобальный дефолт секции
+    ``telemetry.publish``. Сборщик передаёт его, ТОЛЬКО когда секция задана:
+    билдер, написанный до 1.5, на приложении без телеметрии не ломается.
     """
 
     def __call__(
@@ -68,6 +72,7 @@ class ProcDictsBuilder(Protocol):
         log_dir: str = "logs",
         app_config_path: str = "",
         recipe_path: str = "",
+        telemetry_section: Dict[str, Any] | None = None,
     ) -> Dict[str, Dict[str, Any]]: ...
 
 

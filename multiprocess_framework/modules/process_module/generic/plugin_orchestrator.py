@@ -56,7 +56,7 @@ class PluginOrchestrator:
             io=self._io,
         )
 
-        # StateProxy (устанавливается подклассами, например GenericProcessApp)
+        # StateProxy (заводит GenericProcess._init_custom_managers, ADR-PM-049)
         state_proxy = getattr(self._services, "_state_proxy", None)
         if state_proxy is not None:
             base_ctx.state_proxy = state_proxy

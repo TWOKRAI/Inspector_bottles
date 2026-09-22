@@ -25,6 +25,7 @@ from .builder import (
     SystemBuilder,
     assemble_proc_dicts,
     default_blueprint_loader,
+    default_state_bootstrap,
 )
 from .discovery import DiscoveryResult, ServiceManifest, discover, discover_services
 from .entry import build_app, run_app
@@ -59,6 +60,7 @@ __all__ = [
     "SystemBuilder",
     "assemble_proc_dicts",
     "default_blueprint_loader",
+    "default_state_bootstrap",
     "BlueprintError",
     "GENERIC_ORCHESTRATOR_CLASS_PATH",
     # env
