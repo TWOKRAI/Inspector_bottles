@@ -27,6 +27,7 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | `ml_inference` | foundation | Инференс НС (кадр→классы): data-driven sidecar + pluggable backend (ONNX осн., torch опц.); processing-плагин `ml_inference` + widget `model_picker` | — |
 | `dataset_gen` | ready | Универсальный генератор синтетического датасета (cut-and-paste): классификация + угол поворота, авто-детектор симметрии (none/180/full), экспорт на диск / torch Dataset на лету; пресет «русские буквы на дисках» | — |
 | `ml_train` | ready | Универсальное обучение и выбор моделей: MobileNetV3 (torchvision) / MobileNetV4 + `timm/<имя>` (timm), классы + угол; AMP/EMA/mixup/warmup+cosine; RunRegistry; ONNX-экспорт + sidecar → ml_inference | — |
+| `line_sim` | foundation | Движок сцены симулятора линии: объект из слоёв (static/augmented/defect), выборка и рендер один раз при создании, пресет сцены (Pydantic, YAML round-trip), геометрия ленты от энкодера. Спавн, композитор кадра и каталог — Ф3.2–3.4 | LS-001..006 |
 
 ## Правила слоя
 

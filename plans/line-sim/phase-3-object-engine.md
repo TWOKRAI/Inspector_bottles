@@ -25,6 +25,8 @@ vision.md: движок объект-агностичен с первого дн
 
 ### Task 3.1 — Каркас `Services/line_sim`: слои, объект-паспорт, геометрия ленты
 
+> **[DONE 2026-09-22]** merge `384ca8e9`. Тестер (22 RED, `b4f73210`) → teamlead → инъекции лида (21) → ревью 2 итерации. Отступления от спеки, принятые ревью: `render()` без аргументов (выборка при создании), канва без `crop_to_alpha` (центр объекта = центр массива, потолок 0.5–0.9 px, LS-005), кратные 90° через `np.rot90`, rng-подпоток на слой по индексу (LS-006), входной `passport.defect` включает названный defect-слой. Отчёты: `docs/reviews/2026-09-22_task-3.1-{tester,teamlead}.md`.
+
 **Level:** Senior+ (Opus, extended thinking)
 **Assignee:** teamlead
 **Goal:** новый Services-модуль с публичным контрактом (`interfaces.py`) для
@@ -133,6 +135,8 @@ Task 3.2–3.4 и Ф4–Ф5 будут наполнять и потреблят�
 ---
 
 ### Task 3.2 — Контент пресета `real_letters_disk` + дефект-слой
+
+> **Правило от 3.1 (LS-006):** defect-слои стоят **в конце** списка слоёв — rng-подпоток привязан к индексу слоя, и только так «`defect=None` побитово равен объекту без defect-слоя» выполняется (ревью: 50/50 при defect последним, 0/50 в середине). Тестер 3.2 строит объекты именно так.
 
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
@@ -279,7 +283,7 @@ contract-тесты. `min_length=1` у `layers` пересмотреть под 
 
 **Files:**
 - `Plugins/sim/scene_source/plugin.py` — заменить рендер-заглушку; `rng =
-  random.Random(seed)` из конфига стенда передаётся в `ObjectSpawner.tick()`
+  np.random.default_rng(seed)` из конфига стенда (не `random.Random`: `LayeredObject` зовёт `rng.spawn`, ревью 3.1) передаётся в `ObjectSpawner.tick()`
 - `Services/line_sim/core/scene_compositor.py` — `SceneCompositor` (реализация Protocol из
   3.1: держит `ObjectSpawner` и фон, зовёт `LayeredObject.render()` для активных объектов,
   компонует через `dataset_gen.core.compose.composite`)

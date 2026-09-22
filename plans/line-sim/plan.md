@@ -524,12 +524,12 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 3.4 переписана, 3.5 новая.
 
 - Task 3.1: Каркас `Services/line_sim` — слои, объект-паспорт, геометрия ленты
-  [PENDING] — **Module contract:** new-full
+  [DONE 2026-09-22, merge `384ca8e9`] — **Module contract:** new-full
 - Task 3.1a (ред. 3, часть 3.1): Контракт слоя — трансформ, диапазоны аугментации, выборка
-  один раз на объект, round-trip пресета [PENDING] —
+  один раз на объект, round-trip пресета [DONE 2026-09-22, вместе с 3.1; 51 тест, ревью 2 итерации] —
   [`phase-3a-layer-contract.md`](phase-3a-layer-contract.md)
 - Task 3.2: Контент пресета `real_letters_disk` + дефект-слой [PENDING] (зависит от
-  3.1) — **Module contract:** impl-only
+  3.1) — **Module contract:** extends-contract (ревью 3.1)
 - Task 3.3: Поток спавна объектов на ленте, `seed` [PENDING] (зависит от 3.1, 2.2) —
   **Module contract:** impl-only
 - Task 3.4 (ред. 2): Движок подключён к `SceneSourcePlugin.produce()` — в симе, не в
