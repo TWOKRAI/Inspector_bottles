@@ -148,8 +148,10 @@ def _marker_vector(rgba: np.ndarray) -> tuple[float, float]:
     return bx - ax, by - ay
 
 
-def _anchor_layer() -> LayerSpec:
-    return LayerSpec(name="anchor", mode="static", sprite_source=_marker_sprite(0))
+def _anchor_layer(offset_px: tuple[float, float] = (0.0, 0.0)) -> LayerSpec:
+    # [teamlead 3.1] offset_px добавлен: в тестах сдвига маркер с offset (0,0) лёг бы
+    # ровно на якорь и закрыл его целиком — якорь выносится вверх, разность векторов не меняется.
+    return LayerSpec(name="anchor", mode="static", sprite_source=_marker_sprite(0), offset_px=offset_px)
 
 
 def _minimal_preset_dict() -> dict:
@@ -205,9 +207,19 @@ def _three_mode_preset_dict() -> dict:
 
 
 def test_import_has_no_heavy_optional_deps():
-    """AC: импорт без обязательного torch/PySide6 (только numpy/opencv/pydantic)."""
-    assert "torch" not in sys.modules
-    assert "PySide6" not in sys.modules
+    """AC: импорт без обязательного torch/PySide6 (только numpy/opencv/pydantic).
+
+    [teamlead 3.1] проверка вынесена в чистый подпроцесс: в процессе pytest PySide6
+    уже загружен плагином pytest-qt (qt_api = pyside6) до сбора тестов — in-process
+    проверка красна при любой реализации.
+    """
+    import subprocess
+
+    code = "import sys, Services.line_sim; print('torch' in sys.modules, 'PySide6' in sys.modules)"
+    root = Path(__file__).resolve().parents[3]
+    out = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ["False", "False"]
 
 
 def test_module_docs_present():
@@ -307,7 +319,7 @@ def test_offset_px_shifts_centroid_20px_right():
     obj_origin = LayeredObject(
         passport=_passport(object_id="off0"),
         layers=[
-            _anchor_layer(),
+            _anchor_layer(offset_px=(0.0, -10.0)),
             LayerSpec(name="moved", mode="static", sprite_source=_marker_sprite(2), offset_px=(0.0, 0.0)),
         ],
         rng=np.random.default_rng(1),
@@ -315,7 +327,7 @@ def test_offset_px_shifts_centroid_20px_right():
     obj_shifted = LayeredObject(
         passport=_passport(object_id="off20"),
         layers=[
-            _anchor_layer(),
+            _anchor_layer(offset_px=(0.0, -10.0)),
             LayerSpec(name="moved", mode="static", sprite_source=_marker_sprite(2), offset_px=(20.0, 0.0)),
         ],
         rng=np.random.default_rng(1),
@@ -340,12 +352,12 @@ def test_augment_offset_x_range_point_shifts_centroid_10px():
 
     obj_zero = LayeredObject(
         passport=_passport(object_id="augoff0"),
-        layers=[_anchor_layer(), moved((0.0, 0.0))],
+        layers=[_anchor_layer(offset_px=(0.0, -10.0)), moved((0.0, 0.0))],
         rng=np.random.default_rng(4),
     )
     obj_ten = LayeredObject(
         passport=_passport(object_id="augoff10"),
-        layers=[_anchor_layer(), moved((10.0, 10.0))],
+        layers=[_anchor_layer(offset_px=(0.0, -10.0)), moved((10.0, 10.0))],
         rng=np.random.default_rng(4),
     )
     dx0, dy0 = _marker_vector(obj_zero.render())
