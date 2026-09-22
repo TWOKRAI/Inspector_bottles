@@ -41,9 +41,10 @@ Task 2.3b плана ``plans/line-sim/phase-2-belt-truth.md``. Форма сер
 Страница — один строковый constant (``_PAGE_TEMPLATE``, ``str.format`` с
 ``mjpeg_url`` — не templating-движок и не файл, ровно DESIGN п.4). Опрос
 ``GET /api/status`` раз в 250 мс, dead-man jog на стороне браузера
-(``pointerdown`` → сразу + каждые 200 мс; ``pointerup``/``pointercancel``/
-``pointerleave``/окно ``blur``/``visibilitychange`` → снять таймер и
-``POST /api/stop``) — независимая, более быстрая копия dead-man'а самого
+(``pointerdown`` → сразу + каждые 200 мс, тик пропускается, пока прошлый
+``/api/jog`` в пути; ``pointerup``/``pointercancel``/``pointerleave``/окно
+``blur``/``visibilitychange`` → снять таймер и ``POST /api/stop`` — только при
+активном jog и только после возврата последнего ``/api/jog``) — независимая, более быстрая копия dead-man'а самого
 ``robot`` (Task 2.3a, 500 мс по умолчанию): двойная защита, а не замена.
 """
 

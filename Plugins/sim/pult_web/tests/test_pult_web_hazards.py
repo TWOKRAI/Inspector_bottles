@@ -66,9 +66,9 @@ class _FakeDeviceHubClient:
         self.default_timeout = default_timeout
         self.calls: list[tuple[str, dict]] = []
         self.sleep_s: float = 0.0
-        #: ``True`` — belt.status отвечает как отказавший robot (страница должна
-        #: показать «robot не отвечает», ревью п.1).
-        self.status_error: bool = False
+        #: Не ``None`` — belt.status отвечает этим словарём (отказ robot; страница
+        #: должна показать «robot не отвечает», ревью п.1 и итерация 2 п.1).
+        self.status_reply: dict | None = None
         #: Задержка только для ``belt.jog`` и счётчик одновременных jog-форвардов
         #: (страж порядка jog→stop и ``jogInFlight``, инъекции ведущего I6/I7).
         self.jog_sleep_s: float = 0.0
@@ -89,8 +89,8 @@ class _FakeDeviceHubClient:
         args = dict(args or {})
         with self._lock:
             self.calls.append((command, args))
-        if command == "belt.status" and self.status_error:
-            return {"status": "error", "message": "timeout"}
+        if command == "belt.status" and self.status_reply is not None:
+            return dict(self.status_reply)
         return {"status": "ok", "echo": args}
 
 
@@ -375,7 +375,19 @@ def test_page_slow_jog_serialized_and_stop_arrives_last(pult) -> None:
 
 
 @pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
-def test_page_shows_offline_when_status_errors(pult) -> None:
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # IPC-отказ: пульт отвечает 504, страницу держит ``r.ok`` в getStatus.
+        {"status": "error", "message": "timeout"},
+        # robot жив, но Modbus-сервер не поднялся (порт 5021 занят): настоящий
+        # ``_normalize_response`` даёт ИМЕННО эту форму, пульт отвечает 200 —
+        # страницу держит только ``s.ok !== false`` (ревью 2.3b, итерация 2, п.1).
+        {"status": "ok", "ok": False, "error": "server_not_running"},
+    ],
+    ids=["ipc_504", "http200_ok_false"],
+)
+def test_page_shows_offline_when_status_errors(pult, reply) -> None:
     """Ревью п.1: ``pollStatus`` должен показывать «robot не отвечает» на отказ, не ``undefined``.
 
     До правки: проверка ``s.status !== "error"`` — у ответа ``belt.*`` ключа
@@ -384,11 +396,11 @@ def test_page_shows_offline_when_status_errors(pult) -> None:
     даже когда ``robot`` реально отказал (504, ``{ok: false, ...}``).
     """
     _plugin, _ctx, client, port = pult
-    client.status_error = True
+    client.status_reply = reply
     try:
         out = _run_page_js(port, "status_error")
     finally:
-        client.status_error = False
+        client.status_reply = None
     assert out.get("statusText") == "robot не отвечает", f"страница напечатала: {out!r}"
 
 
