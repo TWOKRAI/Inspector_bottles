@@ -429,3 +429,34 @@ def test_belt_jog_rejects_bool_direction() -> None:
 
     assert result["ok"] is False
     assert result["error"].startswith("bad_args"), result
+
+
+def test_jog_regs_from_arguments_not_read_back() -> None:
+    """Ревью Task 2.3a, п.2 (тест дописан ведущим 2026-09-22 — у пункта не было стража,
+    откат «читать регистры jog обратно из mailbox» оставлял набор зелёным).
+
+    Запись Modbus-мастера (прототипа) попадает в mailbox сразу после записи jog. Если
+    jog считает свои регистры обратным чтением, он присвоит себе чужую команду
+    [1, 0, 4000], и сторож по истечении дедлайна остановит её. Верно: jog помнит то,
+    что записал сам, [1, 1, 1000]; mailbox с ним не совпадает — сторож ленту не трогает,
+    лента едет на 40 Гц прототипа: 40/50 × 101.1311 = 80.905 мм/с."""
+    plugin, core = _make_bare_plugin(jog_timeout_ms=100)
+    original = core.command_vfd
+    injected = []
+
+    def command_vfd_then_modbus_master(**kw):
+        original(**kw)
+        if kw.get("run") is True and not injected:
+            injected.append(True)
+            core.write(0x1200, [1, 0, 4000])
+            core.write(0x1204, [1])
+
+    core.command_vfd = command_vfd_then_modbus_master
+    assert plugin.cmd_belt_jog({"direction": -1, "freq_hz": 10})["ok"] is True
+    core.command_vfd = original
+    core.tick()
+    time.sleep(0.2)  # дедлайн jog (100 мс) истёк
+    plugin._check_jog_watchdog()
+    core.tick()
+    assert core.read(0x1200, 3) == [1, 0, 4000], "сторож перетёр команду Modbus-мастера"
+    assert core.belt_mm_s == pytest.approx(80.905, abs=0.5)
