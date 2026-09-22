@@ -532,6 +532,8 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   3.1) — **Module contract:** extends-contract (ревью 3.1)
 - Task 3.3: Поток спавна объектов на ленте, `seed` [DONE 2026-09-23, merge `9eb7aa48`] (зависит от 3.1, 2.2) —
   **Module contract:** impl-only
+- Task 3.3a (новая 2026-09-23): Шаг спавна по ленте — режимы ровного и случайного шага
+  [PENDING] (решение владельца по демо-кадрам) — `phase-3-object-engine.md`
 - Task 3.4 (ред. 2): Движок подключён к `SceneSourcePlugin.produce()` — в симе, не в
   прототипе; паспорта остаются в симе [PENDING] (зависит от 2.2, 3.2, 3.3) — **Module
   contract:** impl-only
