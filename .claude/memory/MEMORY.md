@@ -44,6 +44,7 @@ _(empty)_
 
 ### Project
 - [Порядок 2026-09-22: merge line-sim → Ф3/Ф5 → Пульт](project_work_order_2026_09_22_line_sim_then_pult.md) — утверждён владельцем; ветка = правда
+- [Железо владельца и роли машин](project_hardware_roles_2026_09_23.md) — RTX 3050 4 ГБ = симулятор, Orin NX 16 = линия
 
 ### Reference
 _(empty)_
