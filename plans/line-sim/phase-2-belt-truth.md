@@ -471,7 +471,7 @@ Task 2.0», :222-224) — строкой в отчёт, не правкой.
 
 ### Task 2.3a — Командная поверхность ленты в процессе `robot`
 
-- **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
+- **Статус:** [DONE] 2026-09-22 (слито b51a6a71) — `belt.run/stop/jog/calibrate/status`, dead-man jog под одним замком (гонка 3/20000 → 0/120000); ревью 2 итерации; инъекции A1–A5 · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
 - **CHAIN:** `tester`(RED по приёмке, worktree на коммите до реализации) -> `developer`(GREEN + hazard-тесты) -> ведущий(инъекции) -> `reviewer`
 - **Module contract:** public-api-change (`Services/robot_comm/server/belt.py`, `sim_core.py` —
   новые публичные члены; плагин — новые команды)
@@ -634,7 +634,7 @@ mailbox ПЧ в ядро тем же путём, что Modbus-запись ин
 
 ### Task 2.3b — Веб-пульт ленты: процесс `pult`, страница на 127.0.0.1:8092
 
-- **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
+- **Статус:** [IN PROGRESS] 2026-09-22 (слито 5fb68b45) — пульт на 8092, 17/17 офлайн, живые 29/29, B6 RED; ревью 2 итерации; инъекции I1–I8. **Открыт живой дефект:** `/api/status` пульта отдаёт голое `{"status":"ok"}` — поля ответа robot теряются по пути `DeviceHubClient`/router (живой тест читает статус через backend_ctl и этого не видел); у investigator · **Level:** Middle+ · **Assignee:** developer (Sonnet, extended)
 - **CHAIN:** `tester`(RED по приёмке, worktree на коммите 2.3a) -> `developer`(GREEN) -> ведущий(инъекции, живой стенд) -> `reviewer`
 - **Module contract:** new-lite (`Plugins/sim/pult_web/plugin.py`)
 - **Зависит от:** 2.3a.
