@@ -497,7 +497,9 @@ def test_defect_prob_bounds():
 
 def test_layered_object_empty_layers_raises_value_error():
     """Edge case: пустой список слоёв в LayeredObject — ValueError с понятным текстом."""
-    with pytest.raises(ValueError):
+    # [lead 3.1, break-injection I13] без match тест зеленел и при снятой проверке:
+    # max() от пустой последовательности тоже бросает ValueError — но без «понятного текста».
+    with pytest.raises(ValueError, match=r"(?i)сло[её]в|layers"):
         LayeredObject(passport=_passport(object_id="empty"), layers=[], rng=np.random.default_rng(0))
 
 
@@ -506,7 +508,9 @@ def test_layer_without_alpha_raises_explicit_error():
     загрузке, не тихий крэш глубже по стеку. Тип исключения план не называет —
     проверяем сам факт явного отказа где-то в конструировании/рендере."""
     rgb_only = np.zeros((9, 9, 3), dtype=np.uint8)
-    with pytest.raises(Exception):
+    # [lead 3.1, break-injection I12] без match тест зеленел и при снятой проверке —
+    # ошибка приходила из недр компоновки. Явный отказ обязан назвать слой.
+    with pytest.raises(Exception, match="no_alpha"):
         layer = LayerSpec(name="no_alpha", mode="static", sprite_source=rgb_only)
         obj = LayeredObject(passport=_passport(object_id="no_alpha"), layers=[layer], rng=np.random.default_rng(0))
         obj.render()
