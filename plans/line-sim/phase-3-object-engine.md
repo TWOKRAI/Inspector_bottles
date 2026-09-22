@@ -361,6 +361,34 @@ contract-тесты. `min_length=1` у `layers` пересмотреть под 
 - [ ] Живой стенд двух приложений, 30 с: счётчик срабатываний `line_filter` в прототипе
       (`letter_robot_sim`) **> 0** — в Task 1.2 на пустой заглушке он был 0.
 
+**Уточнено лидом 2026-09-23 перед тестером (контракт):**
+- `ObjectPassport.to_dict() -> dict` / `ObjectPassport.from_dict(d)` — все поля, включая
+  `layer_params`; round-trip равен исходному паспорту; на границе только JSON-совместимые типы
+  (float/str/None/dict), numpy-скаляры приводятся к float.
+- `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60, 60, 60))`
+  (`from Services.line_sim import SceneCompositor`), реализует Protocol из 3.1:
+  `render(now_encoder, camera_rect) -> tuple[np.ndarray, list[ObjectPassport]]`, где
+  `camera_rect = (x_px, y_px, w_px, h_px)`. Кадр — **RGB** `uint8` формы `(h_px, w_px, 3)`;
+  в BGR переводит плагин. Центр объекта: `x = encoder_to_offset_mm(now_encoder,
+  spawn_encoder) * px_per_mm - x_px`, `y = belt_y_px - y_px`; объект рисуется альфа-композицией
+  (`LayeredObject.render()`), обрезается краем кадра. Пустой спавнер → кадр одного фона, без
+  исключений. Второй элемент — паспорта объектов, чей bbox пересекается с `camera_rect`
+  (частично видимый — считается видимым), в порядке спавна.
+- `SceneCompositor` **не** зовёт `spawner.tick()` — тик делает плагин (у него часы и rng).
+- Плагин `Plugins/sim/scene_source`: `configure` берёт `seed`, `px_per_mm`, `belt_y_px`,
+  `spawn_interval_s`, `scene_length_mm`, `defect_probability`, `preset_path` (каталог классов)
+  из регистров; `rng = np.random.default_rng(seed)` живёт в плагине. `produce()`:
+  `spawner.tick(...)` → `compositor.render(...)` → BGR → `item["frame"]`; набор полей item не
+  меняется, ключа `sim_truth` нет.
+- **Исключение из `tick()`** (падающая фабрика, ревью 3.3) плагин ловит: кадр отдаётся с прежней
+  сценой, ошибка — через `ctx.log_error`, де-дублированно (не чаще раза в секунду).
+- `sim.objects` в общем мире пишется **только при изменении состава** (спавн/деспавн), не на
+  каждый кадр: `ctx.state_proxy.set("sim.objects", {object_id: passport.to_dict()})`. Позиция в
+  мир не пишется — считается из энкодера и `spawn_encoder`.
+- Детерминизм: один `seed` и одна последовательность значений энкодера → одинаковая
+  последовательность паспортов; тест сравнивает два прогона офлайн (плагин с фиктивным
+  `PluginContext`), живой стенд — этап лида.
+
 **Out of scope:** фотометрия (Ф4.3), fps/размер/цвет (Ф4.1), ROI (Ф4.2) — `camera_rect`
 здесь фиксированный конфиг.
 **Edge cases:** спавнер пуст → валидный кадр с одним фоном, без исключений.
