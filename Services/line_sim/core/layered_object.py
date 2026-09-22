@@ -28,7 +28,8 @@ def _load_sprite(layer: LayerSpec) -> np.ndarray:
     if isinstance(source, str):
         raise TypeError(
             f"слой '{layer.name}': sprite_source='{source}' — строка-идентификатор; "
-            "загрузка спрайта по id — Task 3.2, сюда нужен RGBA-массив или callable"
+            "загрузка спрайта по id — Task 3.2, делает ObjectFactory "
+            "(Services.line_sim.core.factory), сюда нужен RGBA-массив или callable"
         )
     sprite = source() if callable(source) else source
     sprite = np.asarray(sprite)
@@ -84,7 +85,7 @@ class LayeredObject:
     """Объект = паспорт + слои; RGBA компонуется один раз при создании.
 
     Pre:
-      - `layers` не пуст; спрайты — RGBA uint8 (строковые id — Task 3.2)
+      - `layers` не пуст; спрайты — RGBA uint8 (строковые id грузит `ObjectFactory`)
     Post:
       - `render()` возвращает один и тот же read-only RGBA-массив, альфа не пуста
       - `passport.layer_params` содержит выбранные значения; `passport.defect` —
