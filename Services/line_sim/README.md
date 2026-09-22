@@ -11,7 +11,7 @@
 
 ```python
 from Services.line_sim import (
-    ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ScenePreset,
+    ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ScenePreset,
     SceneCompositor, encoder_to_offset_mm, FACTOR_MM, BELT_UX, BELT_UY,
 )
 ```
@@ -23,7 +23,8 @@ from Services.line_sim import (
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params` |
 | `SceneCompositor` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` — реализация в Task 3.4 |
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
-| `ScenePreset` | `core/preset.py` | Pydantic-конфиг `{"layers": [...]}`: `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
+| `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
+| `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
 | `encoder_to_offset_mm` | `core/belt.py` | `(enc_now - spawn_enc) * FACTOR_MM`; константы — из `Services.robot_comm.core.registers` |
 
 ## Выборка и рендер — один раз
@@ -52,7 +53,49 @@ Callable-провайдер `sprite_source` вызывается ровно од
 
 ## Пресет
 
-На dict/YAML-границе `sprite_source` — строка-идентификатор (загрузка по id — Task 3.2);
-`LayeredObject` строковый источник пока отвергает с `TypeError`. Ошибки валидации — pydantic
-`ValidationError` с именем слоя и поля (`слой 'x': augment.angle_deg: lo=30.0 > hi=-30.0`).
+На dict/YAML-границе `sprite_source` — строка-идентификатор; `ScenePreset` картинок сам не
+читает (Dict at Boundary) — загрузку по id делает `ObjectFactory` (LS-007). `LayeredObject`
+строковый источник отвергает с `TypeError` — до фабрики в него попадают только RGBA-массивы.
+Ошибки валидации — pydantic `ValidationError` с именем слоя и поля
+(`слой 'x': augment.angle_deg: lo=30.0 > hi=-30.0`).
 YAML пишется `yaml.safe_dump` — комментарии не сохраняются (ruamel — с редактором Ф7).
+
+Новые поля (Task 3.2): `catalog_dir: str | None` — путь к каталогу классов в формате
+`Services.dataset_gen.core.catalog.SpriteCatalog`; `angle_range_deg: tuple[float, float] =
+(0.0, 360.0)`; `defect_probability: float = 0.0` (`[0, 1]`); `layers: list[LayerSpec] = []` —
+ДОПОЛНИТЕЛЬНЫЕ слои поверх базы каталога (не путать с 3.1, где `layers` был единственным
+источником). Пресет без `catalog_dir` И без `layers` — `ValidationError` (нечего рисовать).
+`from_yaml` резолвит относительные `catalog_dir` и `layers[*].sprite_source` от каталога
+файла — тот же паттерн, что `GeneratorConfig.from_dict(..., base_dir)` в `dataset_gen`; id-строки
+со схемой (`"fixture://..."`, `"://"` в значении) НЕ трогаются — это не файловый путь.
+`from_dict` резолюцию не делает (нет base_dir, от которого мерить).
+
+## ObjectFactory (Task 3.2)
+
+`ObjectFactory(preset)` — единственное место, которое знает про `SpriteCatalog`
+(`core/catalog_bridge.py`, тонкая обёртка над `dataset_gen.core.catalog`): если задан
+`catalog_dir`, каталог грузится СРАЗУ в конструкторе (eager — `num_classes` доступен
+немедленно), ошибки каталога — как есть от `SpriteCatalog`, не переписываются. Доп. слои
+пресета резолвятся туда же (id → RGBA) один раз при конструкции.
+
+`make(object_id, spawn_encoder, rng) -> LayeredObject`: класс — `rng.integers(num_classes)`,
+угол — `rng.uniform(*angle_range_deg)`, оба потребляют `rng` ДО того, как он передаётся в
+`LayeredObject` (значит `rng` должен быть один и тот же на серию вызовов, иначе класс/угол
+не варьируются между объектами). Слои объекта: `base` (`mode="static"`, спрайт класса) →
+слои пресета (резолвленные) → **`damaged`** (`mode="defect"`) — дефект строго последним,
+как того требует LS-006 (иначе `defect=None` не будет побитово равен объекту без дефект-слоя).
+
+`damaged` — occlusion-пятно (`dataset_gen.core.augment.apply_occlusion`): тёмно-серый
+прямоугольник ~35% меньшей стороны базового спрайта, смещённый к верхнему левому углу,
+альфа=255 внутри/0 снаружи — новый массив под размер КОНКРЕТНОГО базового спрайта на КАЖДЫЙ
+`make()` (катанного каталожного спрайта не касается, только читает `.shape`).
+
+`force_defect_next()` — одноразовый флаг: следующий `make()` получает `passport.defect ==
+"damaged"` через существующий механизм `LayeredObject` (принудительный дефект по имени из
+паспорта, LS-006), независимо от `defect_probability`. Флаг потребляется В НАЧАЛЕ `make()`,
+безусловно — даже если дальше `make()` падает (например каталог не задан), флаг всё равно
+израсходован; "следующий" значит "следующий вызов", не "следующий успешный вызов"
+(пин выбора — `tests/test_hazards_3_2.py`).
+
+Пресет без `catalog_dir` (только `layers`) даёт `num_classes == 0`, `class_names == []`; его
+`make()` поднимает `ValueError` с понятным текстом — выбрать класс не из чего.
