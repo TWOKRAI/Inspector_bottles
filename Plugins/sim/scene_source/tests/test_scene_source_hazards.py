@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Тесты автора (hazard) — Task 2.2 плана line-sim, ``SceneSourcePlugin``.
+"""Тесты автора (hazard) — Task 2.2 + Task 3.4 плана line-sim, ``SceneSourcePlugin``.
 
 Про что acceptance-тесты тестера НЕ проверяют, а механизм ломается ровно тут:
 гонка старта процессов (сцена поднялась раньше робота), обе формы дельт в
@@ -7,6 +7,12 @@
 протухшем значении (не спам на каждый кадр) и конкурентность колбэка подписки
 против ``produce()`` (два разных потока пишут/читают ``self._world`` под
 одним ``Lock``).
+
+**Правка Task 3.4:** ``SPRITE_BGR`` (константа заглушки) убран из импорта — символа
+больше нет, заглушка заменена движком ``line_sim``. Ниже добавлен блок hazard-тестов
+Task 3.4: воспроизводимость паспортов по seed+последовательности энкодера, падающая
+фабрика не роняет кадровый цикл (де-дублированный лог), ``sim.objects`` пишется
+только при смене состава, item без ``sim_truth`` с полным набором ключей.
 """
 
 from __future__ import annotations
@@ -14,13 +20,16 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Callable
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
-from Plugins.sim.scene_source.plugin import SPRITE_BGR, SceneSourcePlugin
+from Services.dataset_gen.core.catalog import imwrite_unicode
+from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -30,6 +39,7 @@ class _FakeStateProxy:
 
     def __init__(self) -> None:
         self._callbacks: list[Callable[[list[Delta]], None]] = []
+        self.set_calls: list[tuple[str, object]] = []
 
     def subscribe(self, pattern, callback, exclude_self=True, sync=True):
         self._callbacks.append(callback)
@@ -38,6 +48,9 @@ class _FakeStateProxy:
     def emit(self, deltas: list[Delta]) -> None:
         for cb in self._callbacks:
             cb(deltas)
+
+    def set(self, path: str, value: object) -> None:
+        self.set_calls.append((path, value))
 
 
 def _make_plugin(cfg_overrides: dict | None = None):
@@ -205,33 +218,149 @@ def test_callback_vs_produce_concurrency_no_exception() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# (e) Бесконечная лента — спрайт за правым краем въезжает слева, не паркуется  #
+# (e) УДАЛЕНО Task 3.4: test_sprite_wraps_past_right_edge_instead_of_parking —  #
+# пинило "бесконечную ленту по модулю" заглушки-спрайта (_draw_sprite,         #
+# SPRITE_BGR), которой в движке line_sim больше нет: SceneCompositor рисует    #
+# на КОНЕЧНОЙ camera_rect, объект, уехавший за край, просто не попадает в      #
+# кадр (проверено test_acceptance_3_4.py::test_object_outside_camera_rect_    #
+# absent), а деспавн — по scene_length_mm (Task 3.3), а не по модулю периода   #
+# кадра. Тест автора (не тестера) — снят вместе со стёртым поведением, не      #
+# формально "не трогать" (то правило — про независимого тестера). Ниже —      #
+# hazard-тесты автора Task 3.4 (движок в плагине).                            #
 # --------------------------------------------------------------------------- #
 
 
-def test_sprite_wraps_past_right_edge_instead_of_parking() -> None:
-    """Живой дефект первого захода Task 2.2: спрайт упирался в правый край за ~6 с и
-    стоял там, пока лента ехала. Энкодер 5122 при px_per_mm=1.0 → x_px ≈ 740 (> 640):
-    период 640 + 32 = 672, центр = ((740 + 16) % 672) − 16 = 68 px от левого края.
-    Сторож инъекции «зажим у края вместо модуля» (K2 матрицы ведущего, 2026-09-22 —
-    без этого теста она проходила зелёной)."""
-    import numpy as np
+def _make_fixture_catalog(tmp_path: Path, color_bgr: tuple[int, int, int]) -> Path:
+    classes_dir = tmp_path / f"classes_{uuid.uuid4().hex}"
+    class_dir = classes_dir / "square"
+    class_dir.mkdir(parents=True)
+    b, g, r = color_bgr
+    sprite_bgra = np.zeros((16, 16, 4), dtype=np.uint8)
+    sprite_bgra[:, :, 0] = b
+    sprite_bgra[:, :, 1] = g
+    sprite_bgra[:, :, 2] = r
+    sprite_bgra[:, :, 3] = 255
+    imwrite_unicode(class_dir / "sprite.png", sprite_bgra)
+    return classes_dir
 
-    plugin, _ctx, sp = _make_plugin({"stale_ms": 10_000})
+
+def _make_plugin_with_engine(tmp_path: Path, cfg_overrides: dict | None = None):
+    catalog_dir = _make_fixture_catalog(tmp_path, (0, 0, 255))
+    return _make_plugin(
+        {
+            "preset_path": str(catalog_dir),
+            "spawn_interval_s": [0.01, 0.01],
+            "scene_length_mm": 1_000_000.0,
+            **(cfg_overrides or {}),
+        }
+    )
+
+
+def _push_encoder(sp: _FakeStateProxy, value: int, t: float | None = None) -> None:
     sp.emit(
         [
             Delta(
                 path="sim.belt.encoder",
                 old_value=object(),
-                new_value={"value": 5122, "mm_s": 100.0, "t": time.monotonic()},
+                new_value={"value": value, "mm_s": 0.0, "t": time.monotonic() if t is None else t},
                 source="robot",
             )
         ]
     )
-    frame = plugin.produce()[0]["frame"]
-    mask = np.all(np.abs(frame.astype(int) - np.array(SPRITE_BGR)) <= 40, axis=2)
-    cols = np.flatnonzero(mask.any(axis=0))
-    assert cols.size > 0, "спрайт исчез из кадра вместо переноса на левый край"
-    centre = float(cols.mean())
-    assert centre == pytest.approx(68.0, abs=2.0), f"центр спрайта {centre} — ожидали 68 после переноса"
-    assert cols.max() < 640 - 32, "спрайт припаркован у правого края — лента не бесконечна"
+
+
+# --------------------------------------------------------------------------- #
+# (f) Воспроизводимость: тот же seed + та же последовательность энкодера ->   #
+#     та же последовательность паспортов; другой seed -> другая              #
+# --------------------------------------------------------------------------- #
+
+
+def test_same_seed_and_encoder_sequence_gives_identical_passport_sequence(tmp_path) -> None:
+    def _run(seed: int) -> list[tuple[str, float, str | None]]:
+        plugin, _ctx, sp = _make_plugin_with_engine(tmp_path, {"seed": seed})
+        _push_encoder(sp, 0)
+        passports: list[tuple[str, float, str | None]] = []
+        for i in range(8):
+            plugin.produce()
+            time.sleep(0.02)  # безопасно больше interval_s=0.01 -> спавн почти каждый вызов
+            _push_encoder(sp, (i + 1) * 100)
+            for obj in plugin._spawner.active_objects():
+                p = obj.passport
+                passports.append((p.class_name, p.angle_deg, p.defect))
+        return passports
+
+    run_a = _run(seed=0)
+    run_b = _run(seed=0)
+    run_c = _run(seed=1)
+
+    assert run_a, "setup sanity: хотя бы один объект должен был заспавниться"
+    assert run_a == run_b, "одинаковый seed + одинаковая последовательность энкодера дали разные паспорта"
+    assert run_a != run_c, "разный seed дал ТУ ЖЕ последовательность паспортов — rng не влияет на выбор"
+
+
+# --------------------------------------------------------------------------- #
+# (g) Падающая фабрика не роняет кадровый цикл; лог де-дублирован (<= 1/с)    #
+# --------------------------------------------------------------------------- #
+
+
+def test_always_raising_factory_keeps_frames_coming_and_logs_at_most_once_per_second(tmp_path, monkeypatch) -> None:
+    plugin, ctx, sp = _make_plugin_with_engine(tmp_path, {"spawn_interval_s": [1e-6, 1e-6]})
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("каталог моргнул")
+
+    monkeypatch.setattr(plugin._spawner._factory, "make", _boom)
+    _push_encoder(sp, 0)
+
+    for _ in range(10):
+        items = plugin.produce()
+        assert isinstance(items, list) and items and isinstance(items[0]["frame"], np.ndarray)
+
+    assert ctx.log_error.call_count <= 1, (
+        f"падающая фабрика залила лог: {ctx.log_error.call_count} вызовов log_error за 10 кадров без sleep"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# (h) sim.objects пишется ТОЛЬКО при смене состава активных id                #
+# --------------------------------------------------------------------------- #
+
+
+def test_sim_objects_published_only_on_membership_change(tmp_path) -> None:
+    plugin, _ctx, sp = _make_plugin_with_engine(tmp_path, {"spawn_interval_s": [1.0, 1.0]})
+    t0 = time.monotonic()
+    _push_encoder(sp, 0, t=t0)
+
+    plugin.produce()  # tick #1 — только взводит срок, объект не создан, set() не зовётся
+    assert sp.set_calls == []
+
+    time.sleep(1.2)
+    plugin.produce()  # tick #2 — спавнит ровно один объект -> состав ИЗМЕНИЛСЯ -> ровно один set()
+    assert len(sp.set_calls) == 1
+    path, payload = sp.set_calls[0]
+    assert path == "sim.objects"
+    assert len(payload) == 1
+
+    for _ in range(5):
+        plugin.produce()  # interval=1с, эти вызовы быстрые -> состав не меняется -> set() не зовётся
+    assert len(sp.set_calls) == 1, f"sim.objects переписан без смены состава: {len(sp.set_calls)} вызовов set()"
+
+
+# --------------------------------------------------------------------------- #
+# (i) item без sim_truth, все обязательные ключи на месте (с движком)         #
+# --------------------------------------------------------------------------- #
+
+
+def test_item_has_no_sim_truth_and_all_required_keys(tmp_path) -> None:
+    """`item` не содержит `sim_truth` (принцип «паспорта едут в мир, не на кадре»,
+    ред. 2 плана) и несёт весь набор ключей, что и до Task 3.4 (item keys unchanged,
+    DESIGN п.4) — `camera_id` в этом item НЕ было и до Task 3.4 (`produce()` этого
+    плагина такого ключа никогда не возвращал), проверяем ТОЛЬКО ключи, реально
+    присутствующие."""
+    plugin, _ctx, sp = _make_plugin_with_engine(tmp_path)
+    _push_encoder(sp, 0)
+    item = plugin.produce()[0]
+
+    assert "sim_truth" not in item
+    for key in ("frame", "seq_id", "frame_id", "timestamp", "width", "height", "channels", "dtype"):
+        assert key in item, f"обязательный ключ {key!r} отсутствует в item: {sorted(item)}"

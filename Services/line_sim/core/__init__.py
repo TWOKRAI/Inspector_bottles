@@ -1,9 +1,11 @@
-"""Ядро line_sim: геометрия ленты, объект из слоёв, пресет сцены, фабрика объектов."""
+"""Ядро line_sim: геометрия ленты, объект из слоёв, пресет сцены, фабрика объектов,
+сцена (спавнер + фон)."""
 
 from Services.line_sim.core.belt import BELT_UX, BELT_UY, FACTOR_MM, encoder_to_offset_mm
 from Services.line_sim.core.factory import ObjectFactory
 from Services.line_sim.core.layered_object import LayeredObject
 from Services.line_sim.core.preset import ScenePreset
+from Services.line_sim.core.scene_compositor import SceneCompositor
 from Services.line_sim.core.spawner import ObjectSpawner
 
 __all__ = [
@@ -13,6 +15,7 @@ __all__ = [
     "LayeredObject",
     "ObjectFactory",
     "ObjectSpawner",
+    "SceneCompositor",
     "ScenePreset",
     "encoder_to_offset_mm",
 ]
