@@ -184,13 +184,16 @@ def test_jog_without_refresh_stops_in_window() -> None:
     _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
     assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
     try:
+        t0 = time.monotonic()  # окно dead-man [0.5, 1.0] с отсчитывается от команды
         status = _call(plugin, "belt.jog", {"direction": -1, "freq_hz": 10})
         assert status["ok"] is True
 
-        mm_s_after_command = _call(plugin, "belt.status")["mm_s"]
-        assert mm_s_after_command < 0, f"лента должна тронуться сразу: mm_s={mm_s_after_command!r}"
+        # Арбитраж ведущего 2026-09-22: команда пишет mailbox, применяет её следующий тик
+        # тикера (≤ ~12 мс) — «сразу» значит «за один-два тика», а не синхронно в том же
+        # вызове (так и сказано в спеке 2.3a). Ждём с дедлайном 0.2 с.
+        moving = _wait_until(lambda: _call(plugin, "belt.status")["mm_s"] < 0, timeout=0.2, interval=0.005)
+        assert moving, f"лента не тронулась за 0.2 с: {_call(plugin, 'belt.status')!r}"
 
-        t0 = time.monotonic()
         stopped = _wait_until(lambda: _call(plugin, "belt.status")["mm_s"] == 0.0, timeout=1.2, interval=0.05)
         elapsed = time.monotonic() - t0
         assert stopped, "лента не остановилась сама (dead-man watchdog не сработал)"
