@@ -46,13 +46,14 @@ def _rotate(sprite: np.ndarray, angle_deg: float) -> np.ndarray:
     Кратные 90° — `np.rot90` (без интерполяции): `rotate_expand` на 90/180/270 из-за
     sin≈1e-16 в матрице даёт холст на 1 px больше и полупиксельный сдвиг — край
     срезается или размывается (замер: 5x5 на 180° — 36 пикселей альфы, из них 16
-    непрозрачных, вместо 25). Прочие углы — `rotate_expand` с прозрачной рамкой 1 px,
-    чтобы край не срезался.
+    непрозрачных, вместо 25). Прочие углы — `rotate_expand` как есть: замер лида
+    (37/45/10° на 5x5, 20x50, 64x64) — площадь альфы в пределах ±2 px от исходной, рамка
+    ничего не меняла и снята.
     """
     quarter = angle_deg / 90.0
     if quarter == round(quarter):
         return np.ascontiguousarray(np.rot90(sprite, k=int(round(quarter)) % 4))
-    return rotate_expand(np.pad(sprite, ((1, 1), (1, 1), (0, 0))), angle_deg)
+    return rotate_expand(sprite, angle_deg)
 
 
 def _hue_shift(sprite: np.ndarray, deg: float) -> np.ndarray:
