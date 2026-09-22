@@ -528,7 +528,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 - Task 3.1a (ред. 3, часть 3.1): Контракт слоя — трансформ, диапазоны аугментации, выборка
   один раз на объект, round-trip пресета [DONE 2026-09-22, вместе с 3.1; 51 тест, ревью 2 итерации] —
   [`phase-3a-layer-contract.md`](phase-3a-layer-contract.md)
-- Task 3.2: Контент пресета `real_letters_disk` + дефект-слой [PENDING] (зависит от
+- Task 3.2: Контент пресета `real_letters_disk` + дефект-слой [DONE 2026-09-22, merge `cee65d78`] (зависит от
   3.1) — **Module contract:** extends-contract (ревью 3.1)
 - Task 3.3: Поток спавна объектов на ленте, `seed` [PENDING] (зависит от 3.1, 2.2) —
   **Module contract:** impl-only
