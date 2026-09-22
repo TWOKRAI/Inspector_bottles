@@ -394,3 +394,34 @@ def test_fallback_branch_logs_once_and_frame_matches_background_bgr(monkeypatch)
             f"item['frame'][0,0]={tuple(int(v) for v in item['frame'][0, 0])} != _BACKGROUND_BGR=(200,10,30)"
         )
     assert ctx.log_error.call_count == 1, "fallback-ветка не должна логировать ошибку повторно на каждый produce()"
+
+
+# --------------------------------------------------------------------------- #
+# (k) Закрытие инъекций лида Q3/Q4 (Task 3.4): обе правки ревью пережили      #
+# поломку кода на всём наборе тестов — свойства были заявлены в README и      #
+# докстрингах, но не закреплены ни одним тестом                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_camera_id_comes_from_config_not_hardcoded_default(tmp_path) -> None:
+    """Инъекция Q3: `self._camera_id = _DEFAULT_CAMERA_ID` (конфиг проигнорирован)
+    не уронила ни одного теста — проверка ключа `camera_id` в item требовала лишь
+    НАЛИЧИЯ ключа, а дефолт 0 совпадал с ожиданием. Стенд с двумя камерами получил
+    бы оба потока под `camera_id=0` и молча склеил их."""
+    plugin, _ctx, sp = _make_plugin_with_engine(tmp_path, cfg_overrides={"camera_id": 7})
+    _push_encoder(sp, 0)
+    assert plugin.produce()[0]["camera_id"] == 7
+
+
+def test_relative_preset_path_resolves_from_repo_root_not_cwd(tmp_path, monkeypatch) -> None:
+    """Инъекция Q4: `return preset_path` (резолюция от корня репо убрана) не уронила
+    ничего — все тесты движка передают АБСОЛЮТНЫЙ `tmp_path`, а живой стенд ловил
+    ровно этот баг: относительный `preset_path` из `pipeline.yaml` резолвился против
+    CWD процесса, и движок молча уходил в fallback на фон."""
+    from Plugins.sim.scene_source.plugin import _REPO_ROOT
+
+    expected = str((_REPO_ROOT / "data/line_sim/demo_catalog").resolve())
+    monkeypatch.chdir(tmp_path)
+    assert SceneSourcePlugin._resolve_preset_path("data/line_sim/demo_catalog") == expected
+    assert SceneSourcePlugin._resolve_preset_path(None) is None
+    assert SceneSourcePlugin._resolve_preset_path(str(tmp_path)) == str(tmp_path)
