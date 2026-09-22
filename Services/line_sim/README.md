@@ -27,7 +27,7 @@ from Services.line_sim import (
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
-| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, interval_s, scene_length_mm)`: `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3 |
+| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200)` — ровно один из `interval_s`/`spacing_mm` (Task 3.3a, LS-010): `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3 |
 | `encoder_to_offset_mm` | `core/belt.py` | `(enc_now - spawn_enc) * FACTOR_MM`; константы — из `Services.robot_comm.core.registers` |
 
 ## Выборка и рендер — один раз
@@ -116,12 +116,32 @@ test_force_defect_survives_transient_catalog_failure`).
 Пресет без `catalog_dir` (только `layers`) даёт `num_classes == 0`, `class_names == []`; его
 `make()` поднимает `ValueError` с понятным текстом — выбрать класс не из чего.
 
-## ObjectSpawner (Task 3.3, ревью 2026-09-22)
+## ObjectSpawner (Task 3.3, ревью 2026-09-22; Task 3.3a, LS-010)
 
-`ObjectSpawner(factory, interval_s, scene_length_mm, max_active=200)` (`ValueError` в
-конструкторе при `lo > hi`, `lo <= 0`, `scene_length_mm <= 0` или `max_active <= 0`, с именем
-параметра в тексте) владеет часами спавна и списком активных объектов; единственная точка
-входа — `tick(now_encoder, now_wall_s, rng)` (keyword-only).
+`ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200)` —
+РОВНО один из `interval_s`/`spacing_mm` (иначе `ValueError` с обоими именами в тексте; тот же
+`ValueError` при `lo > hi`, `lo <= 0` любого из двух, `scene_length_mm <= 0` или
+`max_active <= 0`, с именем параметра в тексте) владеет часами спавна и списком активных
+объектов; единственная точка входа — `tick(now_encoder, now_wall_s, rng)` (keyword-only).
+
+### Два режима отсчёта следующего спавна (Task 3.3a)
+
+- `interval_s = (lo, hi)` — по настенному времени (исходный режим Task 3.3, описан ниже).
+- `spacing_mm = (lo, hi)` — по пути ленты: следующий объект появляется, когда
+  `encoder_to_offset_mm(now_encoder, last_spawn_encoder) >= выбранный шаг` (та же функция, что
+  использует деспавн — не отдельная формула). Шаг — `rng.uniform(lo, hi)`, выбирается заново при
+  каждом спавне и хранится до следующего; `lo == hi` даёт ровный шаг, `lo < hi` — джиттер (и тогда
+  возможны редкие наложения объектов, если выпавший шаг меньше размера объекта — это
+  **разрешённое** поведение режима «как в жизни», не дефект). Первый объект создаётся на первом
+  же `tick()` без ожидания — лента уже едет. На стоящей ленте (`now_encoder` не растёт) новые
+  объекты не появляются сами собой — ради этого режим и введён: `interval_s` на стоящей ленте
+  продолжает спавнить объекты в одну точку (репродукция на живом стенде 2026-09-23: три объекта
+  с одинаковым `spawn_encoder=106016.0` после `vfd.stop()`). `max_active` — общая страховка для
+  обоих режимов (см. ниже); в `spacing_mm` порог обновляется ДО вызова `factory.make()` тем же
+  приёмом, что fix F1 у `interval_s` — постоянно падающая фабрика роняет исключение раз в ШАГ, не
+  на каждом тике едущей ленты.
+
+### Режим interval_s (Task 3.3, ревью 2026-09-22)
 
 Порядок внутри `tick()`: (1) деспавн на КАЖДОМ тике — объект снимается, когда
 `encoder_to_offset_mm(now_encoder, passport.spawn_encoder) > scene_length_mm` (строго больше;
@@ -142,7 +162,9 @@ interval` — пропущенные интервалы НЕ догоняютс�
 этого окна, не больше; форс-брак, взведённый до сбоя, не теряется — фабрика гасит флаг только
 после успешной сборки (LS-006/LS-007).
 
-`max_active` (ревью fix F2, LS-008) — потолок активного списка, НЕ энкодерное правило: при
+### max_active — потолок для обоих режимов (ревью fix F2, LS-008)
+
+`max_active` — потолок активного списка, НЕ энкодерное правило: при
 `len(active_objects()) >= max_active` спавн пропускается (срок НЕ трогается — сработает, как
 только появится место), без исключения и без потери существующих объектов. Деспавн зависит
 ТОЛЬКО от энкодера — у остановленной ленты нет своего выхода из накопления, поэтому потолок
@@ -159,6 +181,8 @@ interval` — пропущенные интервалы НЕ догоняютс�
 СЛЕДУЮЩИЙ реальный спавн (после снятия паузы); брак не теряется, потому что фабрика гасит флаг
 только после успешной сборки (LS-006/LS-007). Выбран этот вариант (не «спавнить немедленно,
 игнорируя паузу») — оператор не получает объект на остановленном потоке (LS-008).
+
+## ObjectSpawner — известные ограничения и потокобезопасность
 
 **Известные не-гарантии (называем стоимость, не только выгоду; ни одна не «невозможна» —
 у каждой есть репродукция или прямое следствие из механизма):**

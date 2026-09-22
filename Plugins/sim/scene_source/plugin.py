@@ -145,8 +145,24 @@ class SceneSourcePlugin(ProcessModulePlugin):
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
         belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
-        interval_cfg = cfg.get("spawn_interval_s", _DEFAULT_SPAWN_INTERVAL_S)
-        spawn_interval_s = (float(interval_cfg[0]), float(interval_cfg[1]))
+
+        # Task 3.3a: два режима шага спавна — ровно один задан в конфиге. Оба заданы ->
+        # ValueError, НЕ пойманный ниже try/except (это ошибка конфигурации стенда, а не
+        # сбой сборки движка, который допустимо проглотить и упасть на фон).
+        interval_cfg = cfg.get("spawn_interval_s")
+        spacing_cfg = cfg.get("spawn_spacing_mm")
+        if interval_cfg is not None and spacing_cfg is not None:
+            raise ValueError(
+                "scene_source: заданы оба spawn_interval_s и spawn_spacing_mm — "
+                "ровно один из них должен быть в конфиге стенда"
+            )
+        spawner_kwargs: dict[str, tuple[float, float]]
+        if spacing_cfg is not None:
+            spawner_kwargs = {"spacing_mm": (float(spacing_cfg[0]), float(spacing_cfg[1]))}
+        else:
+            interval_cfg = interval_cfg if interval_cfg is not None else _DEFAULT_SPAWN_INTERVAL_S
+            spawner_kwargs = {"interval_s": (float(interval_cfg[0]), float(interval_cfg[1]))}
+
         scene_length_mm = float(cfg.get("scene_length_mm", (self._width / max(px_per_mm, 1e-9)) * 2.0))
         defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
         preset_path = self._resolve_preset_path(cfg.get("preset_path"))
@@ -165,7 +181,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         try:
             preset = ScenePreset(catalog_dir=preset_path, defect_probability=defect_probability)
             factory = ObjectFactory(preset)
-            self._spawner = ObjectSpawner(factory, interval_s=spawn_interval_s, scene_length_mm=scene_length_mm)
+            self._spawner = ObjectSpawner(factory, scene_length_mm=scene_length_mm, **spawner_kwargs)
             self._compositor = SceneCompositor(
                 self._spawner, px_per_mm=px_per_mm, belt_y_px=belt_y_px, background_bgr=_BACKGROUND_BGR
             )
@@ -177,7 +193,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
 
         ctx.log_info(
             f"scene_source: {self._width}x{self._height}, px_per_mm={px_per_mm}, belt_y_px={belt_y_px}, "
-            f"spawn_interval_s={spawn_interval_s}, preset_path={preset_path!r}, "
+            f"spawner_kwargs={spawner_kwargs}, preset_path={preset_path!r}, "
             f"движок={'готов' if self._compositor is not None else 'недоступен (fallback на фон)'}"
         )
 
