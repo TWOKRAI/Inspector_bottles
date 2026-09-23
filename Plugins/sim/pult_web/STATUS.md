@@ -8,7 +8,7 @@
 |---|---|
 | `plugin.py` — `PultWebPlugin` | есть: `configure`/`start`/`shutdown`, HTTP API (`GET /`, `GET /api/status`, `POST /api/run|stop|jog|calibrate`), форвард через `DeviceHubClient` |
 | `GET /api/journal` / `POST /api/journal/reset` (Task 5.1) | есть: форвард `sim_robot.journal`/`sim_robot.journal_reset` как есть; страница — блок «Задания от прототипа», опрос 1 с, без логики подсчёта; 2/2 REDS `tests/test_pult_journal_routes.py` зелёные |
-| `GET /api/truth` / `POST /api/truth/reset` (Task 5.3a) | есть: второй `DeviceHubClient(target_process=scene_process)`, форвард `truth.status`/`truth.reset` как есть; страница — блок «Правда сцены», опрос 1 с; 11/11 REDS `tests/test_acceptance_5_3a.py` зелёные |
+| `GET /api/truth` / `POST /api/truth/reset` (Task 5.3a) | есть: второй `DeviceHubClient(target_process=scene_process)`, форвард `truth.status`/`truth.reset` как есть; страница — блок «Правда сцены», опрос 1 с; `tests/test_acceptance_5_3a.py` зелёный целиком |
 | Занятый порт | есть: `_PultHTTPServer.__init__` биндит синхронно, `OSError` → `report_error`, `state="error"`, процесс живёт |
 | bad_json/404/413 | есть: три отказа ДО обращения к `robot`, `robot` не вызывается ни разу |
 | `status: "error"` от `robot` → 504 | есть |
@@ -21,7 +21,7 @@
 | Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
 | Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
 | Страница: порядок jog→stop | есть: `jogStop` дожидается промиса последнего `/api/jog` |
-| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_acceptance_5_3a.py` — 11 слепых приёмочных (§1 маршруты + §2 страница, Task 5.3a, в worktree на коммите 6f94201f); `tests/test_pult_web_hazards.py` — 14 авторских (12 из 2.3b/5.1 + 2 новых Task 5.3a: медленная правда не блокирует status/journal, конкурентный сброс+опрос правды доходит ровно N раз каждый) |
+| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_acceptance_5_3a.py` — 11 слепых приёмочных (§1 маршруты + §2 страница, Task 5.3a, в worktree на коммите 6f94201f) + тесты лида после break-injection и ревью (повторный опрос после сброса, 200 со `status` не `ok`, переход ok → отказ, разметка раздела, отрицательный `Content-Length`); `tests/test_pult_web_hazards.py` — 14 авторских (12 из 2.3b/5.1 + 2 новых Task 5.3a: медленная правда не блокирует status/journal, конкурентный сброс+опрос правды доходит ровно N раз каждый) |
 
 ## Долг / открытые вопросы
 

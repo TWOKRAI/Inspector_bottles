@@ -540,3 +540,91 @@ def test_page_truth_non_ok_status_with_200_is_unavailable(start_pult) -> None:
     assert out.get("truthText") == "правда недоступна", (
         f"ответ 200 со status != ok, страница показала: {out.get('truthText')!r}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Лид, после ревью 5.3a (итерация 1): находки 1–4.
+# --------------------------------------------------------------------------- #
+
+
+def test_page_markup_has_truth_section_after_journal(start_pult) -> None:
+    """Находка 1: ``page_offline.mjs`` создаёт элемент под любой id, поэтому удалённую
+    разметку раздела не ловил ни один тест страницы. Проверяем отданный HTML."""
+    _plugin, _ctx, port = start_pult()
+    status, body, _headers = _http(port, "GET", "/")
+    html = body.decode("utf-8")
+    assert status == 200
+    assert "<h2>Правда сцены</h2>" in html
+    assert '<div id="truth">' in html
+    assert '<button id="btnTruthReset">Сброс правды</button>' in html
+    assert html.index("Задания от прототипа") < html.index("Правда сцены"), "раздел правды должен идти после журнала"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+@pytest.mark.parametrize(
+    "later_response",
+    [{"status": "error", "message": "scene_down"}, {"status": "busy"}],
+    ids=["504", "200_not_ok"],
+)
+def test_page_truth_goes_unavailable_after_counters(start_pult, later_response: dict) -> None:
+    """Находка 2: тесты «правда недоступна» проходили на пустом начальном тексте
+    харнесса. Здесь первый опрос (0 мс) отдаёт счётчики, второй (1000 мс) — отказ,
+    чтение на 1200 мс: старые счётчики на экране оставаться не должны."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    original_request = scene_client.request
+    polls = [0]
+
+    def request(command: str, args: dict | None = None, timeout: float | None = None) -> dict:
+        if command == "truth.status":
+            polls[0] += 1
+            first = polls[0] == 1
+            scene_client.responses["truth.status"] = (
+                {"status": "ok", "counters": dict(_COUNTERS_FULL)} if first else dict(later_response)
+            )
+        return original_request(command, args, timeout)
+
+    scene_client.request = request  # type: ignore[method-assign]
+
+    out = _run_page_js(port, "truth_line")
+
+    assert polls[0] >= 2, f"страница опросила правду {polls[0]} раз, переход не проверен"
+    assert out.get("truthText") == "правда недоступна", (
+        f"после отказа сцены на экране осталось: {out.get('truthText')!r}"
+    )
+
+
+def test_negative_content_length_is_400_and_never_reaches_scene(start_pult) -> None:
+    """Находка 3: ``Content-Length: -1`` раньше давал ``rfile.read(-1)`` — чтение до EOF
+    в обход 413. Сокет сырой: urllib отрицательный CL не пошлёт."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    body = b"{" + b'"a": 1, ' * 25_000 + b'"b": 2}'
+    with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+        sock.sendall(
+            b"POST /api/truth/reset HTTP/1.1\r\n"
+            + f"Host: 127.0.0.1:{port}\r\n".encode()
+            + b"Content-Type: application/json\r\nContent-Length: -1\r\nConnection: close\r\n\r\n"
+            + body
+        )
+        sock.shutdown(socket.SHUT_WR)
+        reply = b""
+        while chunk := sock.recv(65536):
+            reply += chunk
+    head, _, payload = reply.partition(b"\r\n\r\n")
+    assert head.split(b"\r\n")[0].split(b" ")[1] == b"400", head
+    assert json.loads(payload) == {"ok": False, "error": "bad_length"}
+    assert [c for c in scene_client.calls if c[0] == "truth.reset"] == []
+
+
+def test_scene_error_without_message_is_labelled_scene(start_pult) -> None:
+    """Находка 4: отказ сцены без ``message`` подписывался как ``robot_error``."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["truth.status"] = {"status": "error"}
+    status, body, _headers = _http(port, "GET", "/api/truth")
+    assert status == 504
+    assert json.loads(body) == {"ok": False, "error": "scene_error"}
