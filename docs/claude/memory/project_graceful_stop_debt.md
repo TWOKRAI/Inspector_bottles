@@ -1,21 +1,37 @@
 ---
 name: project_graceful_stop_debt
-description: Graceful-stop 5с-хан­г при switch/shutdown — что НЕ причина (исключено), где копать дальше
+description: PM 5 s stop hang (L-2) — real cause is interpreter exit waiting on mp.Queue feeders; two sources, one fixed (EventManager), one open (writer outlives reader); what is refuted and what was rejected
 metadata:
   type: project
+  last-verified: 2026-09-23
 ---
 
-При switch рецепта / shutdown все старые процессы дают `Process 'X' did not stop in 5.0s, terminating...` (`process_registry.py:184`, parent `process.join(timeout=5.0)` истекает). Функционально не блокирует (terminate добивает), но это +5с на switch и грубое завершение. Владелец: «graceful-stop воркеров обязательно как надо».
+**Symptom:** `spawner: ProcessManager did not stop in 5.0s, terminating...` on system stop; PM killed.
 
-**Исключённые гипотезы (НЕ тратить время повторно, 2026-06-07):**
-- ❌ `mp.Queue` feeder-thread atexit-join → `cancel_join_thread()` на очередях в `run_process_function` finally. **Проверено e2e: не помогло.** Дочерние логи показывают, что ребёнок НЕ доходит до finally за 5с (cancel-сообщение не появилось, процесс был terminated). Хан­г РАНЬШЕ atexit.
-- ❌ AsyncSender (router) — он не worker_manager-воркер, стопается в `router_manager.shutdown` ПОСЛЕ `stop_all_workers`, на 5с-join не влияет (sentinel `bbdc8a41` корректен, но не про это).
-- ❌ `data_receiver` вечный put (`bdcbab96`) — реальный баг, починен, но не ТОТ блокер.
+**Real mechanism (dump-verified 2026-09-23, faulthandler + `sample`):** all children and the PM finish
+teardown in ~0.6 s; then CPython's `multiprocessing.util._exit_function → _finalize_join` waits for the
+feeder thread of an `mp.Queue` the process wrote to, blocked in `send_bytes` on a full pipe nobody drains.
+No EPIPE ever comes: every process that received the queue keeps its read end open.
 
-**ПРИЧИНА ПОДТВЕРЖДЕНА (HIGH, 2026-06-16, investigator):** воркер-источник застревает в БЛОКИРУЮЩЕМ `produce()`. `SourceProducer.run_loop` (`source_producer.py:80`) проверяет `stop_event` только в начале итерации, НЕ внутри `produce()`. Блокеры: Hikvision `capture_frame(timeout_ms=1000)` (`Services/hikvision_camera/core/camera.py:284` `MV_CC_GetImageBuffer`) и `cv2.VideoCapture.read()` (`Plugins/sources/capture/plugin.py:151`). → `stop_all_workers` join висит до дедлайна → `terminate()`, finally/`plugin.shutdown()` не отрабатывает (камера не освобождается). Совпало с прежней гипотезой «cv2.read/put».
+**Two sources:**
+1. `EventManager._event_queue` — an `mp.Queue` with no reader (only `wait_for_event`, unused outside tests).
+   FIXED: process-local bounded `queue.Queue(1000)`, ADR-SRM-015 (`plans/lifecycle-graceful-stop.md` Task 1.1).
+2. Writer outlives reader at stop: all processes stop in parallel; `renderer` still sends a frame into
+   `gui/data` after `gui` exited; the message does not fit the pipe. OPEN — Task 1.2 of the same plan.
+   The live stop is still 5.5 s in 4 of 5 runs until it lands.
 
-**Фикс-направление (без костылей):** прерываемый `produce()` — короткий таймаут камеры + проверка `stop_event` в цикле (Hikvision `capture_frame(timeout_ms=100)` с повтором; cv2 `grab()`+`retrieve()` вместо `read()`); гарантированный `plugin.shutdown()` при превышении дедлайна стопа воркеров; guard в `BatchBuffer.stop()` (`batch_buffer.py:99/200`: не звать `_flush_fn` если `_stop_event.is_set()`) — устраняет `ValueError: I/O operation on closed file` (безобидный шум teardown).
+**Refuted (do not re-chase):** the June hypothesis "source worker blocks in `produce()`" — workers stop in
+10–50 ms today, and the PM (which has no `produce()`) is the one that hangs. `BatchBuffer` no longer exists.
 
-**ВАЖНО:** это ОТДЕЛЬНАЯ проблема от тихой потери параметров после switch — см. [[project_switch_routing_stale]] (стейл-PSR GUI возникает и при ЧИСТОМ стопе). Чинить обе.
+**Rejected fix:** generic release of feeders at exit (`cancel_join_thread` / `Finalize.cancel` / private
+`_finalizer_registry`) under a short budget. It truncates a message mid-write to a slow LIVE reader
+(15/100 delivered, the reader hangs forever in `os.read`). A writer cannot tell a dead reader from a slow one
+by wall time — any release must be keyed on an explicit "reader gone" signal.
 
-Связано: [[project_recipe_hotswap]], [[feedback_fix_framework_forward]], [[project_switch_routing_stale]].
+**Why orphans survive (L-5, separate):** `ProcessTreeGuard` group kill is a no-op on the normal path, the
+spawner and PM budgets are both 5.0 s, and `BackendHarness` snapshots the subtree before children exist. An
+orphan keeps the caller's stdout open, so wrapper scripts look "hung > 300 s".
+
+**How to apply:** when a stop takes ~5 s, dump Python stacks at stop+2.5 s (SIGUSR1 + faulthandler via a
+`sitecustomize` on PYTHONPATH) and look for `_finalize_join`; find which queue's feeder is stuck and who
+should be reading it. Related: [[project_switch_routing_stale]], [[feedback_fix_framework_forward]].
