@@ -673,3 +673,97 @@ test_mjpeg_sprite_follows_belt` под `LINE_SIM_LIVE=1` сейчас **пада
 **Out of scope:** счётчики и отчёт (Task 5.2); визуализация захвата.
 **Dependencies:** Task 3.3, Task 1.1.
 **Module contract:** new-lite (`Services/line_sim/core/matching.py`).
+
+#### Контракт лида 3.5 (2026-09-23, до тестера)
+
+Разведка шага 1 — в decisions log `plan.md` (запись 2026-09-23). Ниже — то, что пишут тестер
+(RED до реализации) и исполнитель. Числа — литералы контракта, не подбираются из кода.
+
+**1. Ядро робота — `Services/robot_comm/server/sim_core.py`.**
+- `RobotSimCore(..., on_job_done: Callable[[dict], None] | None = None)`; `None` — поведение
+  побитово как раньше.
+- Вызов — в момент **завершения** задания (тот же тик, где `REG_FREE -> 1` и событие
+  `"[CVT]  выполнено"`), ровно один раз на задание. STOP во время задания отменяет его —
+  события нет.
+- Полезная нагрузка — dict: `{"index": int, "x_mm": float, "y_mm": float, "ecap": int, "t": float}`.
+  `index` — счётчик ПРИНЯТЫХ ядром заданий, с 1; `x_mm/y_mm` — координаты забора (`JOB_X/JOB_Y`
+  / `XY_SCALE`, знаковые), не укладки; `ecap` — 32-битный E_capture задания; `t` — `time.monotonic()`.
+- **Правка дефекта:** `ecap` собирается из ПАРЫ слов `REG_JOB_ECAP`, `REG_JOB_ECAP+1` с учётом
+  `word_order` — тот же декодер, что у `SimJournal._decode_dw` (`decode_int32`). Литерал:
+  `word_order="little"`, задание с E_capture `106016` → `event["ecap"] == 106016` (до правки
+  было бы `40480`); то же для `word_order="big"`.
+- Исключение из колбэка ядро не ловит — защита на стороне хоста (п.5).
+
+**2. Чистая функция — НОВЫЙ `Services/line_sim/core/matching.py` (new-lite).**
+```python
+@dataclass(frozen=True)
+class BeltGeometry:            # координаты робота для точки сцены «путь 0 вдоль ленты, центр полосы»
+    origin_x_mm: float = 0.0
+    origin_y_mm: float = 0.0   # + to_dict()/from_dict(); направление ленты НЕ поле — BELT_UX/BELT_UY
+
+@dataclass(frozen=True)
+class JobDone:                 # событие п.1 на границе; to_dict()/from_dict(), from_dict(e.to_dict()) == e
+    index: int; x_mm: float; y_mm: float; ecap: int; t: float
+
+@dataclass(frozen=True)
+class MatchResult:
+    outcome: Literal["matched", "dup", "no_object"]
+    object_id: str | None      # None только при no_object
+    residual_mm: float | None  # минимальная невязка среди кандидатов; None — кандидатов нет вовсе
+
+def object_robot_xy(spawn_encoder: float, ecap: float, geometry: BeltGeometry) -> tuple[float, float]
+    # off = encoder_to_offset_mm(ecap, spawn_encoder); (origin_x + BELT_UX*off, origin_y + BELT_UY*off)
+
+def match_job(active: Iterable[ObjectPassport], job: JobDone, geometry: BeltGeometry, *,
+              removed: Iterable[ObjectPassport] = (), match_radius_mm: float = 5.0) -> MatchResult
+```
+- Кандидаты — `active` ∪ `removed`; победитель — минимальная невязка до `(job.x_mm, job.y_mm)`
+  от `object_robot_xy(p.spawn_encoder, job.ecap, geometry)`. Невязка `< match_radius_mm`
+  (строго): победитель из `active` → `matched`, из `removed` → `dup`; иначе `no_object`
+  с `object_id=None`. Ничья active/removed при равной невязке → `matched`.
+- `match_radius_mm <= 0` → `ValueError` с именем параметра.
+- Литералы приёмки: тождественная геометрия, `spawn_encoder=0`, `ecap=1000`, задание
+  `(0.0, 144.473)` → `matched`, `residual_mm < 0.5`; то же со сдвигом `+20` мм по X → `no_object`.
+  Геометрия `origin=(100.0, -50.0)`, те же объект и `ecap` → объект в `(100.0, 94.473)`.
+  Тот же паспорт только в `removed` → `dup` с его `object_id`. Два активных объекта в 3 и
+  4 мм от точки → `matched` с ближним.
+
+**3. Спавнер — `Services/line_sim/core/spawner.py` (extends-contract).**
+`ObjectSpawner.remove(object_id: str) -> ObjectPassport | None` — снимает объект из активных,
+возвращает его паспорт; неизвестный id → `None`, без исключения. Счёт шага спавна
+(`_last_spawn_encoder`, срок таймера, нумерация `obj-N`) не трогает.
+
+**4. Плагин сцены — `Plugins/sim/scene_source/plugin.py`.**
+- Конфиг: `geometry: {origin_x_mm, origin_y_mm}` (дефолт `0.0, 0.0`), `match_radius_mm` (5.0),
+  `dup_window_s` (10.0 — тот же дефолт, что у `SimJournal`).
+- Команды: `"scene.job_done"` — аргументы = `JobDone.to_dict()`; только ставит задание в
+  очередь и отвечает `{"status": "ok"}`; кривые аргументы → `{"status": "error", "message": ...}`,
+  без исключения. `"scene.status"` → `{"status": "ok", "active": int, "recent": [...]}`, где
+  `recent` — последние ≤ 32 исхода `{"index", "outcome", "object_id", "residual_mm"}`, старые
+  первыми.
+- **Потоки:** команда исполняется в потоке команд, `produce()` — в воркере. Спавнер меняет
+  ТОЛЬКО `produce()`: в начале кадра, ДО `spawner.tick()`, очередь разбирается целиком —
+  чистка снятых старше `dup_window_s` (часы сцены, момент снятия) → `match_job` → при
+  `matched` `spawner.remove(...)` и запись в снятые → исход в `recent` + одна строка
+  `log_info`. `sim.objects` обновится тем же `_sync_world_objects()` (множество id изменилось).
+- Движок не собран (`_spawner is None`) → задание получает исход `no_object`.
+- **Известный предел:** объект, уехавший за `scene_length_mm` раньше события «выполнено»,
+  даст `no_object`. `scene_length_mm` стенда обязан покрывать зону робота.
+
+**5. Хост робота — `Plugins/sim/robot_host/plugin.py`.**
+- Конфиг `scene_process` (дефолт `"camera"`).
+- `_start_server` создаёт `RobotSimCore(on_job_done=self._on_job_done)` и передаёт его
+  `SimRobotServer(..., core=core)`; калибровка ленты и стартовая команда ПЧ — как раньше.
+- `_on_job_done(event)` исполняется в потоке тикера сервера; шлёт
+  `DeviceHubClient(ctx, target_process=scene_process).send_fire_and_forget("scene.job_done", event)`.
+  **Никогда не бросает:** исключение или `False` → `ctx.health.report_error(..., throttle=30.0)`.
+- `Plugins/sim/scene_source` и `Plugins/sim/robot_host` друг друга не импортируют (grep).
+
+**6. `apps/line_sim/pipeline.yaml`:** `scene_source` получает `geometry: {origin_x_mm: 0.0,
+origin_y_mm: 0.0}`, `sim_robot_host` — `scene_process: camera`.
+
+**Кто что пишет.** Тестер (worktree на коммите этого контракта): приёмка пп.1–5 без живого
+стенда (ядро + события, чистая функция, `remove`, команды плагина сцены на фейковом ctx,
+колбэк хоста с подменой `DeviceHubClient`). Автор: hazard-тесты шага 5 спеки + команда из
+чужого потока во время `produce()`. Живой критерий «объекта нет ни в `sim.objects`, ни в
+кадре за `job_ms + 1 с`» — стенд лида.
