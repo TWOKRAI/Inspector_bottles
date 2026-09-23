@@ -38,6 +38,11 @@ from .backend_ctl_endpoint import (
 from .observability_broker import POINT_COMMANDS
 from .topology_manager import TopologyManager
 
+#: 4.4 (ревью, R4): ленивое создание брокера зовут два read-потока канала
+#: (наблюдатель ответа и закрытие сессии) — без лока «проверь-и-создай» даёт два
+#: брокера, и память закрытых сессий одного не видна другому.
+_BROKER_INIT_LOCK = threading.Lock()
+
 
 def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
     """Унифицировать вызов из Dispatcher(data_dict) и прямой(kwargs)."""
@@ -2773,7 +2778,12 @@ class ProcessManagerProcess(ProcessModule):
         тем же ``subscribe_observability_tail``, что и любой процесс.
         """
         broker = getattr(self, "_observability_broker", None)
-        if broker is None:
+        if broker is not None:
+            return broker
+        with _BROKER_INIT_LOCK:
+            broker = getattr(self, "_observability_broker", None)
+            if broker is not None:
+                return broker
             from .observability_broker import ObservabilitySubscriptionBroker
 
             broker = ObservabilitySubscriptionBroker(

@@ -258,15 +258,18 @@ class ObservabilitySubscriptionBroker:
 
         - подписка → намерение по ключу ``(target, command, subscriber)``, payload
           хранится как пришёл (его и доиграет :meth:`replay`);
-        - парное снятие с ``subscriber`` → снять этот ключ. Без ``subscriber`` — как
-          читает снятие процесс: ``log.tail`` берёт адрес из ``tap``
-          (``log_tail::<адрес>``), а без обоих процесс отказывает — реестр не
+        - парное снятие с ``subscriber`` → снять этот ключ. ``log.tail`` — как читает
+          снятие процесс: ``tap`` побеждает ``subscriber``; ``log_tail::<адрес>`` →
+          этот адрес, tap другой формы или нет ни того ни другого → реестр не
           трогается; ``observability.tail`` без адреса у процесса снимает ВСЕХ
           (teardown-форма) — снимаются все намерения этой команды у цели;
         - ``ui.tap.*`` — один тап на процесс: снятие чистит все ui.tap-намерения
           цели, новая подписка вытесняет прежнего держателя;
         - подписка адреса уже закрытой сессии (``<sender>.<sid>``) не запоминается:
           ``forget_session`` мог отработать раньше, чем read-поток дописал ответ.
+          Живая сессия с ПОВТОРНО использованным sid тоже будет проигнорирована:
+          для backend_ctl недостижимо (uuid на соединение), но ``_bind_session``
+          канала принимает sid клиента как есть, а не выдаёт его сам.
 
         Returns:
             True — реестр изменён (или подписка обновлена); False — команда не
@@ -292,11 +295,14 @@ class ObservabilitySubscriptionBroker:
         sub_cmd = _POINT_UNSUBSCRIBE.get(cmd)
         if sub_cmd is None:
             return False
-        if cmd == "log.tail.unsubscribe" and not subscriber:
+        if cmd == "log.tail.unsubscribe":
+            # Приоритет как у процесса (builtin_commands, _cmd_log_tail_unsubscribe):
+            # явный tap побеждает subscriber. Tap чужой формы адресу не сопоставить.
             tap = str(body.get("tap") or "").strip()
-            subscriber = tap[len(_LOG_TAP_PREFIX) :] if tap.startswith(_LOG_TAP_PREFIX) else ""
+            if tap:
+                subscriber = tap[len(_LOG_TAP_PREFIX) :] if tap.startswith(_LOG_TAP_PREFIX) else ""
             if not subscriber:
-                return False  # процесс отказал («subscriber или tap обязателен») — чужое не трогать
+                return False  # процесс отказал бы или снял не наш tap — чужое не трогать
         with self._lock:
             whole = sub_cmd in _SINGLE_HOLDER_COMMANDS or not subscriber
             doomed = [k for k in self._points if k[0] == name and k[1] == sub_cmd and (whole or k[2] == subscriber)]

@@ -80,11 +80,17 @@ def _rst(drv: BackendDriver) -> None:
     s.close()
 
 
-def pair_restart() -> bool:
+def pair_restart():
     a, b = _driver(), _driver()
     ca, cb = _Counter(a), _Counter(b)
     print(f"R  A tail: {a.observability_tail(TARGET, level='DEBUG', timeout=20.0).get('success')}")
+    tb = time.time()
     print(f"R  B tail: {b.observability_tail(TARGET, level='DEBUG', timeout=20.0).get('success')}")
+    time.sleep(WINDOW_S)
+    # Чувствительность B==0: пока B подписан, он обязан что-то получать, иначе ноль
+    # после рестарта доказывался бы тишиной цели, а не снятым намерением.
+    nb_before = cb.since(tb)
+    print(f"R  B records while subscribed in {WINDOW_S:.0f}s: {nb_before}")
     print(f"R  B untail: {b.observability_untail(TARGET, timeout=20.0).get('success')}")
     restart = a.process_restart_verified(TARGET, wait=60.0)
     print(
@@ -97,6 +103,9 @@ def pair_restart() -> bool:
     a.observability_untail(TARGET, timeout=20.0)
     a.close()
     b.close()
+    if nb_before == 0:
+        print("R  INCONCLUSIVE: B ничего не получал и до снятия — B==0 ничего не доказывает")
+        return None
     return bool(restart.get("restarted")) and na > 0 and nb == 0
 
 
@@ -105,23 +114,32 @@ def pair_rst() -> bool:
     esub = e._subscriber
     foreign = f"probe44.foreign.{int(time.time())}"
     print(f"S  E tail (own address {esub}): {e.observability_tail(TARGET, level='DEBUG', timeout=20.0).get('success')}")
-    ctl = e.observability_tail(TARGET, subscriber=foreign, level="DEBUG", timeout=20.0)
-    print(f"S  control tail (foreign address {foreign}): {ctl.get('success')}")
-    time.sleep(1.5)
-    _rst(e)
-    time.sleep(3.0)
-    q = _driver()
+    own: dict = {}
+    ctl_sensor: dict = {}
+    q = None
     try:
+        ctl = e.observability_tail(TARGET, subscriber=foreign, level="DEBUG", timeout=20.0)
+        print(f"S  control tail (foreign address {foreign}): {ctl.get('success')}")
+        time.sleep(1.5)
+        _rst(e)
+        time.sleep(3.0)
+        q = _driver()
         own = _leaf(q.send_command(TARGET, "observability.tail.unsubscribe", {"subscriber": esub}, timeout=15.0))
+        # Датчик контроля — это же и уборка контроля.
         ctl_sensor = _leaf(
             q.send_command(TARGET, "observability.tail.unsubscribe", {"subscriber": foreign}, timeout=15.0)
         )
     finally:
-        q.close()
+        if not ctl_sensor:  # датчик не дошёл — снять контроль всё равно, чтобы не оставить сироту
+            try:
+                q = q or _driver()
+                q.send_command(TARGET, "observability.tail.unsubscribe", {"subscriber": foreign}, timeout=15.0)
+            except Exception as exc:  # noqa: BLE001 — уборка зонда
+                print(f"S  cleanup of control failed: {exc}")
+        if q is not None:
+            q.close()
     print(f"S  sensor own address after RST: success={own.get('success')} (ожидаем False — снято сервером)")
-    print(
-        f"S  sensor control after RST: success={ctl_sensor.get('success')} (ожидаем True — чужой адрес жив)"
-    )
+    print(f"S  sensor control after RST: success={ctl_sensor.get('success')} (ожидаем True — чужой адрес жив)")
     return own.get("success") is False and ctl_sensor.get("success") is True
 
 
@@ -129,8 +147,9 @@ def main() -> int:
     print(f"probe 4.4: port={PORT} target={TARGET}")
     r = pair_restart()
     s = pair_rst()
-    print(f"VERDICT R(restart)={'PASS' if r else 'FAIL'} S(rst)={'PASS' if s else 'FAIL'}")
-    return 0 if (r and s) else 1
+    r_word = "INCONCLUSIVE" if r is None else ("PASS" if r else "FAIL")
+    print(f"VERDICT R(restart)={r_word} S(rst)={'PASS' if s else 'FAIL'}")
+    return 0 if (r is True and s) else 1
 
 
 if __name__ == "__main__":

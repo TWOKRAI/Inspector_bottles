@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -312,3 +313,77 @@ def test_subscribe_answer_after_session_closed_is_not_recorded():
     )
 
     assert broker.snapshot()["points"] == []
+
+
+# ---------------------------------------------------------------------------
+# Ревью 4.4, итерация 2
+# ---------------------------------------------------------------------------
+
+
+def _pm_without_broker() -> ProcessManagerProcess:
+    """PM, у которого брокер ещё НЕ создан (живьём — до первой подписки системы)."""
+    pm = ProcessManagerProcess.__new__(ProcessManagerProcess)
+    pm._log_error = lambda _m: None
+    pm._log_info = lambda _m: None
+    pm._send_child_command = lambda t, c, d: True
+    pm._broadcast_command = lambda c, d: 0
+    return pm
+
+
+def test_session_closed_before_broker_exists_late_subscribe_not_recorded():
+    """Сессия закрылась, когда брокера ещё не было; запоздалый успешный ответ подписки — не сирота."""
+    pm = _pm_without_broker()
+
+    pm._forget_closed_session("s9")
+    pm._note_point_request(
+        {"command": "log.tail.subscribe", "targets": ["pult"], "data": {"subscriber": "backend_ctl.s9"}},
+        "s9",
+        {"success": True},
+    )
+
+    assert pm._observability_broker_obj().snapshot()["points"] == []
+
+
+def test_log_untail_tap_wins_over_subscriber_like_the_process():
+    """{subscriber: F, tap: log_tail::G}: процесс снимает tap G — реестр снимает G, F остаётся."""
+    broker = _plain_broker()
+    broker.note_point("pult", "log.tail.subscribe", {"subscriber": "backend_ctl.F"})
+    broker.note_point("pult", "log.tail.subscribe", {"subscriber": "backend_ctl.G"})
+
+    broker.note_point("pult", "log.tail.unsubscribe", {"subscriber": "backend_ctl.F", "tap": "log_tail::backend_ctl.G"})
+
+    assert [p["subscriber"] for p in broker.snapshot()["points"]] == ["backend_ctl.F"]
+
+
+def test_log_untail_foreign_tap_form_leaves_registry_untouched():
+    """tap чужой формы процесс снимет как есть — сопоставить его адресу нельзя, реестр не трогается."""
+    broker = _plain_broker()
+    broker.note_point("pult", "log.tail.subscribe", {"subscriber": "backend_ctl.F"})
+
+    assert broker.note_point("pult", "log.tail.unsubscribe", {"subscriber": "backend_ctl.F", "tap": "other"}) is False
+
+    assert [p["subscriber"] for p in broker.snapshot()["points"]] == ["backend_ctl.F"]
+
+
+def test_concurrent_first_broker_access_builds_one_broker(monkeypatch):
+    """Два read-потока впервые зовут фабрику брокера — брокер один (иначе память сессий раздваивается)."""
+    orig_init = ObservabilitySubscriptionBroker.__init__
+
+    def slow_init(self, *a, **k):
+        time.sleep(0.05)  # расширить окно «проверь-и-создай»
+        orig_init(self, *a, **k)
+
+    monkeypatch.setattr(ObservabilitySubscriptionBroker, "__init__", slow_init)
+    pm = _pm_without_broker()
+    got: list = []
+    threads = [
+        threading.Thread(target=lambda: got.append(pm._observability_broker_obj()), daemon=True) for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(_DEADLINE_S)
+
+    assert not any(t.is_alive() for t in threads)
+    assert len({id(b) for b in got}) == 1
+    assert pm._observability_broker is got[0]
