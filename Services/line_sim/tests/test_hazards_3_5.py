@@ -141,3 +141,17 @@ def test_remove_does_not_disturb_interval_deadline(tmp_path):
 
     spawner.tick(now_encoder=0.0, now_wall_s=10.0, rng=rng)
     assert len(spawner.active_objects()) == 1
+
+
+def test_residual_exactly_at_radius_is_no_object():
+    """Лид, после break-injection I5: граница радиуса строгая (`<`, контракт §2).
+    Замена на `<=` проходила весь набор зелёным."""
+    from Services.line_sim.core.matching import BeltGeometry, JobDone, match_job
+    from Services.line_sim.interfaces import ObjectPassport
+
+    obj = ObjectPassport(object_id="obj-1", class_name="A", angle_deg=0.0, defect=None, spawn_encoder=0.0)
+    at_radius = JobDone(index=1, x_mm=5.0, y_mm=0.0, ecap=0, t=0.0)
+    inside = JobDone(index=2, x_mm=4.99, y_mm=0.0, ecap=0, t=0.0)
+
+    assert match_job([obj], at_radius, BeltGeometry()).outcome == "no_object"
+    assert match_job([obj], inside, BeltGeometry()).outcome == "matched"
