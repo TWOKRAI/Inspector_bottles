@@ -243,3 +243,14 @@ def run_process_function(
                     process_instance.stop()
             except Exception as e:
                 log.error(f"Error during cleanup: {e}")
+        # L-2 Task 1.2 (ADR-SRM-016): отпустить feeder'ы очередей, чей читатель ушёл
+        # навсегда (системный стоп), иначе выход интерпретатора ждёт их вечно.
+        if shared_resources is not None:
+            try:
+                sys_evt = system_stop_event or getattr(shared_resources, "_system_stop_event", None)
+                res = shared_resources.queue_registry.release_queues_at_exit(
+                    process_name, system_stop=sys_evt is not None and sys_evt.is_set()
+                )
+                log.info(f"queues released to gone readers: {res['released']}, buffered dropped: {res['dropped']}")
+            except Exception as e:  # noqa: BLE001 — хук выхода не роняет выход
+                log.error(f"Queue release at exit failed: {e}")

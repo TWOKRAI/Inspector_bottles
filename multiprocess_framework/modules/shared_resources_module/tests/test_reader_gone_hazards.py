@@ -1,0 +1,278 @@
+# -*- coding: utf-8 -*-
+"""Авторские hazard-тесты механизма «читатель ушёл навсегда» (ADR-SRM-016, L-2 Task 1.2).
+
+Что может сломаться именно в ЭТОМ механизме (метка едет с очередью, владелец взводит
+её на системном стопе, писатель на выходе отпускает feeder только маркированных):
+
+  H1. Индивидуальный стоп/рестарт взвёл метку → писатель, выходящий позже, отпустит
+      кадр посреди записи в очередь, которую уже читает новое воплощение (очереди
+      рестарт переиспользует). Пин: стоп по своему ``stop_event`` метку НЕ ставит.
+  H2. Метка не пережила spawn-pickle (``__getstate__`` потерял Event) → сосед видит
+      свою копию без метки, писатель ждёт вечно. Пин: метка видна через границу
+      процесса в обе стороны.
+  H3. Гонка: читатель вышел ПОСЛЕ первого взгляда писателя → разовая проверка
+      промахнётся, и писатель повиснет. Пин: писатель выходит вскоре после метки,
+      взведённой уже во время его ожидания (здесь же замер задержки реакции).
+  H4. Отпуск по таймеру (запрещён ADR-SRM-015) → медленный живой читатель получает
+      обрезанный кадр. Пин: без метки feeder ждётся, читатель, пришедший через 1.5 с,
+      получает всё целиком.
+  H5. Хук вызван дважды → двойной счёт потерь или повторный close/cancel. Пин: второй
+      вызов — (0, 0) и возвращается сразу.
+  H6. Голая ``mp.Queue`` (не из реестра) задета хуком → поведение очередей вне
+      реестра изменилось молча. Пин: хук её не закрывает и не отпускает.
+
+Любой блокирующий вызов — в дочернем процессе или daemon-потоке с дедлайном join:
+зависание обязано стать падением, а не таймаутом всего прогона.
+"""
+
+from __future__ import annotations
+
+import multiprocessing
+import threading
+import time
+
+from multiprocess_framework.modules.process_manager_module.runner.process_runner import (
+    run_process_function,
+)
+from multiprocess_framework.modules.shared_resources_module.queues.core.manager import QueueRegistry
+from multiprocess_framework.modules.shared_resources_module.queues.core.reader_gone import (
+    ReaderGoneQueue,
+    release_feeders_at_exit,
+)
+
+BIG = b"x" * (1024 * 1024)  # заведомо больше OS pipe buffer
+
+
+# ---------------------------------------------------------------------------
+# Top-level цели дочерних процессов (spawn пиклит по dotted-пути).
+# ---------------------------------------------------------------------------
+
+
+class _IdleOwner:
+    """Владелец очереди, ничего не делает, ждёт стопа через lifecycle runner'а."""
+
+    def __init__(self, name, shared_resources, config) -> None:
+        self.name = name
+
+    def initialize(self) -> bool:
+        return True
+
+    def run(self) -> None:
+        pass
+
+    def should_stop(self) -> bool:
+        return False
+
+    def stop(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+
+def _child_report_mark(q, out) -> None:
+    out.put(q.is_reader_gone())
+
+
+def _child_set_mark(q) -> None:
+    q.mark_reader_gone()
+
+
+def _child_put_big_then_exit_hook(q, extra_small: int, done) -> None:
+    """Писатель-сосед: кладёт 1 MiB (+N маленьких), затем выходной хук как у runner'а
+    на системном стопе (очередь чужая — метку он не ставит, только ждёт/отпускает)."""
+    q.put(("big", BIG))
+    for i in range(extra_small):
+        q.put(("small", i))
+    time.sleep(0.2)  # feeder упирается в полный pipe
+    released, dropped = release_feeders_at_exit([], [q], system_stop=True)
+    done.put((released, dropped, time.monotonic()))
+
+
+def _run_child(target, args, deadline: float):
+    ctx = multiprocessing.get_context("spawn")
+    p = ctx.Process(target=target, args=args)
+    p.start()
+    return p
+
+
+def _kill(p) -> None:
+    if p.is_alive():
+        p.kill()
+        p.join(3.0)
+
+
+def _in_thread(fn, deadline: float):
+    box: dict = {}
+
+    def body():
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — переносим в тест
+            box["error"] = exc
+
+    t = threading.Thread(target=body, daemon=True)
+    t.start()
+    t.join(deadline)
+    assert not t.is_alive(), f"вызов завис дольше {deadline}s"
+    assert "error" not in box, box.get("error")
+    return box["result"]
+
+
+def _new_queue() -> ReaderGoneQueue:
+    q = QueueRegistry().create_queues({"data": {}})["data"]
+    assert isinstance(q, ReaderGoneQueue)
+    return q
+
+
+def _drop(q) -> None:
+    try:
+        q.cancel_join_thread()
+        q.close()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# H1 — индивидуальный стоп НЕ ставит метку; системный — ставит.
+# ---------------------------------------------------------------------------
+
+
+class TestH1IndividualStopDoesNotMark:
+    def _run_owner(self, set_system: bool) -> bool:
+        ctx = multiprocessing.get_context("spawn")
+        q = _new_queue()
+        own_stop, system_stop = ctx.Event(), ctx.Event()
+        bundle = {"queues": {"data": q}, "config": {}, "custom": {}}
+        p = ctx.Process(
+            target=run_process_function, args=(f"{__name__}._IdleOwner", "Owner", own_stop, bundle, system_stop)
+        )
+        try:
+            p.start()
+            time.sleep(0.3)
+            (system_stop if set_system else own_stop).set()
+            p.join(5.0)
+            assert not p.is_alive(), "владелец не вышел за 5s"
+            return q.is_reader_gone()
+        finally:
+            _kill(p)
+            _drop(q)
+
+    def test_individual_stop_leaves_queue_unmarked(self) -> None:
+        assert self._run_owner(set_system=False) is False
+
+    def test_system_stop_marks_own_queue(self) -> None:
+        assert self._run_owner(set_system=True) is True
+
+
+# ---------------------------------------------------------------------------
+# H2 — метка переживает spawn-pickle в обе стороны.
+# ---------------------------------------------------------------------------
+
+
+class TestH2MarkSurvivesSpawnPickle:
+    def test_parent_mark_visible_in_child(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        q, out = _new_queue(), ctx.Queue()
+        q.mark_reader_gone()
+        p = _run_child(_child_report_mark, (q, out), 5.0)
+        try:
+            assert out.get(timeout=5.0) is True
+        finally:
+            _kill(p)
+            _drop(q)
+
+    def test_child_mark_visible_in_parent(self) -> None:
+        q = _new_queue()
+        assert q.is_reader_gone() is False
+        p = _run_child(_child_set_mark, (q,), 5.0)
+        try:
+            p.join(5.0)
+            assert q.is_reader_gone() is True
+        finally:
+            _kill(p)
+            _drop(q)
+
+
+# ---------------------------------------------------------------------------
+# H3 — метка появилась ПОСЛЕ первого взгляда писателя (гонка) + задержка реакции.
+# ---------------------------------------------------------------------------
+
+
+class TestH3MarkAfterWriterLooked:
+    def test_writer_exits_soon_after_late_mark(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        q, done = _new_queue(), ctx.Queue()
+        p = _run_child(_child_put_big_then_exit_hook, (q, 0, done), 10.0)
+        try:
+            time.sleep(2.0)  # писатель уже в хуке ≥1 с: смотрит на немаркированную очередь
+            assert p.is_alive(), "писатель вышел без метки — значит отпустил по таймеру"
+            marked_at = time.monotonic()
+            q.mark_reader_gone()
+            p.join(2.0)
+            assert not p.is_alive(), "писатель не заметил позднюю метку за 2s"
+            released, dropped, finished_at = done.get(timeout=2.0)
+            latency = finished_at - marked_at
+            assert (released, dropped) == (1, 1)
+            assert latency < 0.5, f"реакция на метку {latency:.3f}s"
+        finally:
+            _kill(p)
+            _drop(q)
+
+
+# ---------------------------------------------------------------------------
+# H4 — без метки медленный живой читатель получает всё целиком (нет таймера).
+# ---------------------------------------------------------------------------
+
+
+class TestH4UnmarkedSlowReaderGetsEverything:
+    def test_slow_reader_after_1_5s_gets_all(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        q, done = _new_queue(), ctx.Queue()
+        p = _run_child(_child_put_big_then_exit_hook, (q, 5, done), 10.0)
+        try:
+            time.sleep(1.5)
+            assert p.is_alive(), "писатель вышел без читателя и без метки — отпуск по таймеру"
+            got = _in_thread(lambda: [q.get(timeout=5.0) for _ in range(6)], 10.0)
+            assert got[0] == ("big", BIG)
+            assert got[1:] == [("small", i) for i in range(5)]
+            p.join(5.0)
+            assert not p.is_alive(), "писатель не вышел после слива"
+            assert done.get(timeout=2.0)[:2] == (0, 0)
+        finally:
+            _kill(p)
+            _drop(q)
+
+
+# ---------------------------------------------------------------------------
+# H5 — повторный вызов хука; H6 — голая mp.Queue не задета.
+# ---------------------------------------------------------------------------
+
+
+class TestH5H6HookIdempotentAndPlainQueueUntouched:
+    def test_second_call_is_noop(self) -> None:
+        q = _new_queue()
+        try:
+            q.put(BIG)
+            q.put(b"tail")
+            time.sleep(0.2)
+            q.mark_reader_gone()
+            first = _in_thread(lambda: release_feeders_at_exit([], [q], system_stop=False), 3.0)
+            second = _in_thread(lambda: release_feeders_at_exit([q], [q, q], system_stop=True), 3.0)
+            assert first == (1, 2)  # застрявший BIG + tail в буфере
+            assert second == (0, 0)
+        finally:
+            _drop(q)
+
+    def test_plain_mp_queue_is_not_touched(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        q = ctx.Queue()
+        try:
+            q.put(BIG)
+            time.sleep(0.2)
+            res = _in_thread(lambda: release_feeders_at_exit([q], [q], system_stop=True), 3.0)
+            assert res == (0, 0)
+            assert q._closed is False and q._joincancelled is False
+            assert _in_thread(lambda: q.get(timeout=5.0), 10.0) == BIG
+        finally:
+            _drop(q)

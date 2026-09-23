@@ -158,6 +158,14 @@ ResourceType.QUEUE | EVENT | SHARED_MEMORY
 
 ---
 
+### Выход процесса и ушедшие читатели (ADR-SRM-016)
+
+Очереди из `QueueRegistry.create_queues` — `ReaderGoneQueue`: несут межпроцессную метку «читатель
+ушёл навсегда». Владелец взводит её на выходе только при системном стопе; писатель на выходе
+отпускает feeder'ы маркированных очередей (иначе `_finalize_join` ждал бы вечно) и ждёт слива
+остальных — без таймера. Итог — строка `queues released to gone readers: N, buffered dropped: M`
+и счётчики `released_to_gone_readers` / `dropped_at_exit` в `get_stats()`.
+
 ## Тесты
 
 ```bash
