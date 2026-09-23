@@ -47,6 +47,9 @@ def _resize_keep_alpha(sprite: np.ndarray, diameter_px: int, *, src_path: Path) 
     """
     if sprite.ndim != 3 or sprite.shape[2] != 4:
         raise SystemExit(f"make_letter_catalog: эталон без альфа-канала (нужен RGBA): {src_path}")
+    if sprite.shape[0] != sprite.shape[1]:
+        # Неквадратный эталон при ресайзе в квадрат сплющился бы в эллипс (ревью 5.3b п.5).
+        raise SystemExit(f"make_letter_catalog: эталон не квадратный {sprite.shape[1]}x{sprite.shape[0]}: {src_path}")
     size = sprite.shape[0]
     interp = cv2.INTER_AREA if diameter_px < size else cv2.INTER_CUBIC
     return cv2.resize(sprite, (diameter_px, diameter_px), interpolation=interp)
@@ -57,6 +60,12 @@ def build_catalog(src: Path, letters: str, diameter_px: int, out: Path) -> None:
     ресайз до `diameter_px`, запись в `out/<буква>/<то же имя файла>`; `meta.yaml`
     копируется, если есть. Нет папки буквы источника -> `SystemExit`, называющий букву
     (§4.2.4 контракта)."""
+    # Сборка поверх каталога с другими буквами молча смешала бы наборы: движок сцены
+    # берёт классы из ВСЕХ папок каталога (ревью 5.3b п.5).
+    if out.is_dir():
+        foreign = sorted(p.name for p in out.iterdir() if p.is_dir() and p.name not in letters)
+        if foreign:
+            raise SystemExit(f"make_letter_catalog: в {out} уже есть буквы не из --letters: {', '.join(foreign)}")
     for letter in letters:
         letter_src = src / letter
         if not letter_src.is_dir():
@@ -65,7 +74,10 @@ def build_catalog(src: Path, letters: str, diameter_px: int, out: Path) -> None:
         letter_out.mkdir(parents=True, exist_ok=True)
         png_paths = sorted(letter_src.glob("*.png"))
         for png_path in png_paths:
-            sprite = imread_unicode(png_path, cv2.IMREAD_UNCHANGED)
+            try:
+                sprite = imread_unicode(png_path, cv2.IMREAD_UNCHANGED)
+            except (ValueError, cv2.error) as exc:
+                raise SystemExit(f"make_letter_catalog: не читается эталон {png_path}: {exc}") from exc
             resized = _resize_keep_alpha(sprite, diameter_px, src_path=png_path)
             imwrite_unicode(letter_out / png_path.name, resized)
         meta_src = letter_src / _META_FILENAME

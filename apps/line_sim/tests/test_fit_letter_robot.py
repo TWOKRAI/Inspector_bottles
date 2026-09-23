@@ -166,6 +166,9 @@ def test_sim_disc_centre_maps_to_same_robot_xy_as_prototype():
     """
     roi = _recipe_roi_crop_config()
     lin = _recipe_pixel_to_robot_config()
+    # Ревью 5.3b п.1 (правка лида): считаем так же, как PixelToRobotPlugin.process() —
+    # линейный режим, центр + roi_offset, нормировка по lin_src_*, а не по размеру ROI.
+    assert lin["use_linear"] is True, "рецепт ушёл с линейной калибровки — сверка ниже неприменима"
     tl = (lin["lin_tl_x"], lin["lin_tl_y"])
     tr = (lin["lin_tr_x"], lin["lin_tr_y"])
     br = (lin["lin_br_x"], lin["lin_br_y"])
@@ -181,13 +184,14 @@ def test_sim_disc_centre_maps_to_same_robot_xy_as_prototype():
     # §4.2.1/§4.2.2: ключи, которых сегодня ещё нет в pipeline.yaml — дефолты те же,
     # что документирует контракт для belt_direction=+1 (поведение до Task 4.2.2).
     belt_direction = int(scene_cfg.get("belt_direction", 1))
-    entry_x_px = float(scene_cfg.get("entry_x_px", 0.0))
+    # Точку входа выводим так же, как SceneSourcePlugin.configure() (ключа в конфиге нет, ревью 5.3b п.2).
+    entry_x_px = 0.0 if belt_direction == 1 else float(resolution_width)
 
     diameter_px = 300  # §4.1: диаметр диска сима (окно circle_detector 90..230, середина ~150)
     sprite = _make_disc_sprite(diameter_px)
 
     # >= 3 точки, разнесённые по ROI (мм от точки спавна вдоль ленты).
-    offsets_mm = [30.0, 55.0, 80.0]
+    offsets_mm = [55.0, 95.0, 135.0]  # внутри ROI (off 48..146 мм при этой геометрии)
     max_delta_mm = 0.5
 
     for off_mm in offsets_mm:
@@ -212,7 +216,16 @@ def test_sim_disc_centre_maps_to_same_robot_xy_as_prototype():
         centre_x_px, centre_y_px = _find_marker_centroid(frame)
         x_roi = centre_x_px - float(roi["x"])
         y_roi = centre_y_px - float(roi["y"])
-        proto_x_mm, proto_y_mm = bilinear_px_to_mm(x_roi, y_roi, roi["width"], roi["height"], tl, tr, br, bl)
+        proto_x_mm, proto_y_mm = bilinear_px_to_mm(
+            x_roi + float(lin["roi_offset_x"]),
+            y_roi + float(lin["roi_offset_y"]),
+            lin["lin_src_width"],
+            lin["lin_src_height"],
+            tl,
+            tr,
+            br,
+            bl,
+        )
 
         sim_x_mm, sim_y_mm = object_robot_xy(spawn_encoder=0.0, ecap=encoder, geometry=geometry)
 

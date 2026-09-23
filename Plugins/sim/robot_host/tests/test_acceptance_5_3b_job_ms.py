@@ -167,3 +167,16 @@ def test_bool_job_ms_is_rejected():
     assert status["state"] == "error", f"job_ms=True принят как число: state={status['state']!r}"
     if plugin._server is not None:
         plugin.shutdown(ctx)
+
+
+@pytest.mark.parametrize("bad_job_ms", [float("nan"), float("inf")], ids=["nan", "inf"])
+def test_non_finite_job_ms_is_rejected(bad_job_ms):
+    """Ревью 5.3b п.4 (лид): `.nan`/`.inf` из YAML роняли configure() на round()."""
+    port = _free_port()
+    plugin, ctx = _make_plugin(port, job_ms=bad_job_ms)
+
+    _run_with_deadline(lambda: plugin._start_server(ctx))
+
+    assert plugin.cmd_status()["state"] == "error", f"job_ms={bad_job_ms!r} принят"
+    if plugin._server is not None:
+        plugin.shutdown(ctx)

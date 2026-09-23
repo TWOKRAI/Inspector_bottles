@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import os
 import socket
+import math
 import threading
 import time
 from collections import deque
@@ -159,7 +160,12 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._job_ticks: int | None = None
         self._job_ms_error: ValueError | None = None
         if job_ms_cfg is not None:
-            if not isinstance(job_ms_cfg, (int, float)) or isinstance(job_ms_cfg, bool) or job_ms_cfg <= 0:
+            if (
+                not isinstance(job_ms_cfg, (int, float))
+                or isinstance(job_ms_cfg, bool)
+                or not math.isfinite(job_ms_cfg)  # .nan / .inf из YAML (ревью 5.3b п.4)
+                or job_ms_cfg <= 0
+            ):
                 self._job_ms_error = ValueError(
                     f"sim_robot_host: job_ms должен быть числом > 0, получено {job_ms_cfg!r}"
                 )

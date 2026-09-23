@@ -481,3 +481,43 @@ def test_relative_preset_path_resolves_from_repo_root_not_cwd(tmp_path, monkeypa
     assert SceneSourcePlugin._resolve_preset_path("data/line_sim/demo_catalog") == expected
     assert SceneSourcePlugin._resolve_preset_path(None) is None
     assert SceneSourcePlugin._resolve_preset_path(str(tmp_path)) == str(tmp_path)
+
+
+@pytest.mark.parametrize("bad", ["abc", 1.5, True], ids=["str", "float", "bool"])
+def test_bad_belt_direction_falls_back_not_crash(tmp_path, bad) -> None:
+    """Ревью 5.3b п.3 (лид): `int(cfg["belt_direction"])` стоял вне try — «abc» ронял
+    configure(), а 1.5 и True молча превращались в 1. Теперь любое не-±1 откатывает
+    сборку движка на фон с записью в лог, как прочие сбои сборки."""
+    plugin, ctx, _sp = _make_plugin_with_engine(tmp_path, {"belt_direction": bad})
+    assert ctx.log_error.called, f"belt_direction={bad!r}: сбой сборки движка не записан в лог"
+    assert "belt_direction" in " ".join(str(c) for c in ctx.log_error.call_args_list)
+
+
+def test_belt_direction_minus_one_entry_is_exactly_frame_width(tmp_path) -> None:
+    """Ревью 5.3b, инъекция K10 (лид): точку входа сдвинули на 40 px — прежний тест
+    проводки (`cx > 350`) и сторож дрейфа (выводит вход сам, без плагина) выжили.
+    Здесь центр диска после пути `off` мм обязан стоять ровно в
+    `resolution_width − off·px_per_mm` (±1 px) — как в формуле контракта §4.1."""
+    from Services.line_sim.core.belt import encoder_to_offset_mm
+
+    width, px_per_mm = 400, 1.0
+    plugin, _ctx, sp = _make_plugin_with_engine(
+        tmp_path,
+        {
+            "resolution_width": width,
+            "resolution_height": 200,
+            "px_per_mm": px_per_mm,
+            "belt_y_px": 100.0,
+            "belt_direction": -1,
+            "spawn_interval_s": None,
+            "spawn_spacing_mm": [1000.0, 1000.0],
+        },
+    )
+    _push_encoder(sp, 0)
+    plugin.produce()
+    _push_encoder(sp, 500)
+    frame = plugin.produce()[0]["frame"]
+    xs = np.nonzero(frame[:, :, 2] > 150)[1]  # маркер спрайта — канал R после BGR
+    assert xs.size > 0, "объект не найден в кадре"
+    expected = width - encoder_to_offset_mm(500, 0) * px_per_mm
+    assert abs(float(xs.mean()) - expected) <= 1.0, f"центр {xs.mean():.2f}, ожидался {expected:.2f}"

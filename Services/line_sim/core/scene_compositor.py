@@ -63,7 +63,8 @@ class SceneCompositor:
         belt_direction: int = 1,
         entry_x_px: float = 0.0,
     ) -> None:
-        if belt_direction not in (1, -1):
+        # bool — подкласс int (True == 1), дробное 1.0 тоже равно 1: оба отклоняются (ревью 5.3b п.3).
+        if isinstance(belt_direction, bool) or not isinstance(belt_direction, int) or belt_direction not in (1, -1):
             raise ValueError(f"belt_direction: ожидалось ±1, получено {belt_direction!r}")
         self._spawner = spawner
         self._px_per_mm = px_per_mm

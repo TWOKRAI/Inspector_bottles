@@ -186,7 +186,9 @@ class SceneSourcePlugin(ProcessModulePlugin):
         # рецепта), а лента везёт в +Y. Валидация (не ±1) уходит в тот же путь, что и
         # прочие сбои сборки движка (see try/except ниже — SceneCompositor кидает
         # ValueError, сборка откатывается на фон).
-        belt_direction = int(cfg.get("belt_direction", 1))
+        # Без int(): «abc», 1.5, True должны дойти до SceneCompositor внутри try ниже и
+        # откатить сборку на фон с записью в лог, а не уронить configure() (ревью 5.3b п.3).
+        belt_direction = cfg.get("belt_direction", 1)
         entry_x_px = 0.0 if belt_direction == 1 else float(self._width)
 
         # Task 3.3a: два режима шага спавна — ровно один задан в конфиге. Оба заданы ->

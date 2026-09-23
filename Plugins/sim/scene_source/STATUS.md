@@ -12,7 +12,7 @@
 | Тесты Task 3.6 | `tests/test_scene_source_task_3_6.py` (tester) — нечитаемая текстура: 1 `log_error`, объекты живы; порядок каналов BGR; `tests/test_scene_source_hazards_3_6.py` (автор) — путь от корня репо при чужом CWD, битый файл |
 | Задания робота (Task 3.5b) | есть: команды `scene.job_done`/`scene.status`, конфиг `geometry`/`match_radius_mm`/`dup_window_s`, разбор очереди в начале `produce()` (`match_job` → `spawner.remove`); `tests/test_scene_source_task_3_5.py` (tester) — 7/7; `tests/test_scene_source_hazards_3_5.py` (автор) — 3/3 (200 заданий из 4 потоков во время `produce()`, `ecap` далеко впереди мира, два задания на объект в одном разборе) |
 | Границы | `tests/test_scene_source_acceptance.py::test_no_forbidden_imports` — 0 запрещённых импортов |
-| Направление ленты / точка входа (Task 5.3b) | есть: конфиг `belt_direction`/`entry_x_px` → `SceneCompositor`; `tests/test_scene_source_hazards.py::test_belt_direction_minus_one_object_moves_toward_smaller_x` (автор, WIRING реальным плагином+движком) |
+| Направление ленты / точка входа (Task 5.3b) | есть: конфиг `belt_direction` → `SceneCompositor` (точку входа `entry_x_px` плагин выводит сам из `resolution_width`; неверное направление → откат на фон с записью в лог); `tests/test_scene_source_hazards.py::test_belt_direction_minus_one_object_moves_toward_smaller_x` (автор, WIRING реальным плагином+движком) |
 
 ## Долг / открытые вопросы
 

@@ -111,7 +111,7 @@ writes_seen, state}`. Подробности механизма — [`Plugins/si
 `apps/line_sim/pipeline.yaml` (`scene_source`) подогнан под калибровку боевого
 `hikvision_letter_robot.yaml` (`plans/line-sim/phase-5-contract-5.3.md` §4.1) — кадр
 `1440×1080`, `px_per_mm: 8.163265` (800 px ROI = 98 мм вдоль ленты), `belt_direction: -1`
-(`+x` кадра калибровки = `-Y` робота, а лента везёт в `+Y`), `entry_x_px: 1440.0`,
+(`+x` кадра калибровки = `-Y` робота, а лента везёт в `+Y`), точка входа — правый край кадра (плагин выводит её из `resolution_width`, ключа нет),
 `geometry: {origin_x_mm: 458.2, origin_y_mm: -428.265}`, диск каталога — 300 px (окно
 `circle_detector` рецепта 90..230 px радиуса). Согласованность геометрии с
 `Plugins.processing.pixel_to_robot.geometry.bilinear_px_to_mm` прототипа сторожит
@@ -128,6 +128,12 @@ python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites --let
 
 `data/` не в git — каталог собирается локально из готовых спрайтов (`manual_sprites/{А,К,Р,Х}`
 в соседнем checkout, см. `Services/line_sim/README.md` → «Инструмент `make_letter_catalog.py`»).
+
+Каталог держит ровно буквы из `--letters`: движок сцены берёт классы из всех папок каталога.
+Поэтому сборка в `--out`, где уже лежат другие буквы, отказывает с их перечнем; для другого слова
+соберите каталог в новую папку или уберите старую. Неквадратный или нечитаемый эталон тоже
+даёт отказ с именем файла. Сменить набор букв на живом стенде — пересобрать каталог и
+перезапустить сим (каталог читается при старте).
 
 ## Out of scope (Task 1.2/2.2)
 
