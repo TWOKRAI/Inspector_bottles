@@ -149,3 +149,21 @@ def test_bad_job_ms_fails_plugin_not_process(bad_job_ms):
     assert isinstance(plugin.cmd_status(), dict)
     if plugin._server is not None:
         plugin.shutdown(ctx)
+
+
+# --------------------------------------------------------------------------- #
+# Лид, после break-injection 5.3b: инъекция J9 («bool принимается как число»)
+# выживала. YAML `job_ms: true` — это `True`, а `True` — подкласс `int` (== 1).
+# --------------------------------------------------------------------------- #
+
+
+def test_bool_job_ms_is_rejected():
+    port = _free_port()
+    plugin, ctx = _make_plugin(port, job_ms=True)
+
+    _run_with_deadline(lambda: plugin._start_server(ctx))
+
+    status = plugin.cmd_status()
+    assert status["state"] == "error", f"job_ms=True принят как число: state={status['state']!r}"
+    if plugin._server is not None:
+        plugin.shutdown(ctx)

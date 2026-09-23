@@ -136,6 +136,11 @@ blueprint:
             camera_type: stream
             stream_url: http://127.0.0.1:8091/
             auto_start: true
+            # Task 5.3b: разрешение кадра рецепта (HikvisionCameraPlugin боевого
+            # варианта) — сим-сток должен отдавать те же 1440x1080, иначе ROI
+            # рецепта (x=246 y=297 w=800 h=481) не помещается в кадр после ресайза.
+            resolution_width: 1440
+            resolution_height: 1080
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high

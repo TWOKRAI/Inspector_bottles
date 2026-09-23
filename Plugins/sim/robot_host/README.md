@@ -23,6 +23,7 @@ TCP-сервер (симулятор робота линии) в процесс�
 | `jog_timeout_ms` | `500` | Task 2.3a: dead-man `belt.jog` — таймаут без подкачки |
 | `jog_freq_hz` | `10.0` | Task 2.3a: частота `belt.jog` по умолчанию, если клиент её не передал |
 | `scene_process` | `camera` | Task 3.5: процесс сцены, куда уходит событие «задание выполнено» |
+| `job_ms` | нет (`RobotSimCore` дефолт `job_ticks=2`) | Task 5.3b: длительность задания в мс — `job_ticks = max(1, round(job_ms / (TICK_INTERVAL_S*1000)))`, `TICK_INTERVAL_S` из `Services.robot_comm.server.sim_core`. Разбор — в `configure()`, отказ (не число > 0, `bool` не считается числом) наблюдается на попытке поднять сервер (`_start_server` → `_fail`, `state="error"`), процесс живёт |
 
 ## Команда
 

@@ -6,6 +6,15 @@
 `cy = belt_y_px - y_px`. Кадр — RGB uint8 `(h_px, w_px, 3)`; в BGR переводит вызывающий
 (плагин), НЕ этот класс (LS-009).
 
+**Направление ленты и точка входа (контракт лида 5.3b, §4.2.1).** `belt_direction`
+(±1, дефолт `1`) и `entry_x_px` (дефолт `0.0`) обобщают формулу центра:
+`cx = entry_x_px + belt_direction * offset_mm * px_per_mm - x_px`. Дефолты дают
+байт-в-байт прежнее поведение (`entry_x_px=0`, `belt_direction=1` — формула
+вырождается в исходную). Сдвиг фонового тайла по X использует тот же
+`belt_direction` (тот же знак, что у объектов — иначе фон и диски «расходятся» при
+развороте ленты). `belt_direction` вне `{-1, 1}` — `ValueError`, называющий
+переданное значение.
+
 `render()` НЕ зовёт `spawner.tick()` — тик (часы + rng) принадлежит вызывающему.
 
 **Фон-текстура (Task 3.6).** `background_tile` — необязательный RGB uint8 тайл; если
@@ -51,12 +60,18 @@ class SceneCompositor:
         belt_y_px: float,
         background_bgr: tuple[int, int, int] = (60, 60, 60),
         background_tile: np.ndarray | None = None,
+        belt_direction: int = 1,
+        entry_x_px: float = 0.0,
     ) -> None:
+        if belt_direction not in (1, -1):
+            raise ValueError(f"belt_direction: ожидалось ±1, получено {belt_direction!r}")
         self._spawner = spawner
         self._px_per_mm = px_per_mm
         self._belt_y_px = belt_y_px
         self._background_bgr = background_bgr
         self._background_tile = None if background_tile is None else _validate_background_tile(background_tile)
+        self._belt_direction = belt_direction
+        self._entry_x_px = entry_x_px
 
     def render(
         self, now_encoder: float, camera_rect: tuple[float, float, float, float]
@@ -79,7 +94,7 @@ class SceneCompositor:
             # докстринг модуля) — начало отсчёта тайла (spawn_enc=0.0) фиксировано, не
             # завязано на конкретный объект.
             shift_px = int(round(float(encoder_to_offset_mm(now_encoder, 0.0) * self._px_per_mm)))
-            cols = (np.arange(w) + int(round(x_px)) - shift_px) % tw
+            cols = (np.arange(w) + int(round(x_px)) - self._belt_direction * shift_px) % tw
             top = int(round(self._belt_y_px - th / 2))
             rows = np.arange(h) + int(round(y_px)) - top
             valid = (rows >= 0) & (rows < th)
@@ -89,7 +104,7 @@ class SceneCompositor:
         for obj in self._spawner.active_objects():
             sprite = obj.render()
             offset_mm = encoder_to_offset_mm(now_encoder, obj.passport.spawn_encoder)
-            cx = offset_mm * self._px_per_mm - x_px
+            cx = self._entry_x_px + self._belt_direction * offset_mm * self._px_per_mm - x_px
             cy = self._belt_y_px - y_px
             sh, sw = sprite.shape[:2]
             if not _bbox_intersects(cx, cy, sw, sh, w, h):

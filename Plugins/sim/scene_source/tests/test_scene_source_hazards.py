@@ -351,6 +351,62 @@ def test_sim_objects_published_only_on_membership_change(tmp_path) -> None:
 # --------------------------------------------------------------------------- #
 
 
+# --------------------------------------------------------------------------- #
+# (j) Task 5.3b §4.2.2 — направление ленты (WIRING, реальный плагин+движок)    #
+# --------------------------------------------------------------------------- #
+
+
+def test_belt_direction_minus_one_object_moves_toward_smaller_x(tmp_path) -> None:
+    """WIRING (§4.2.2, без фейкового харнесса спавнера/компоновщика) — Task 5.3b.
+
+    ``SceneSourcePlugin``, собранный из блока конфигурации (``belt_direction=-1``,
+    зеркало ``apps/line_sim/pipeline.yaml``), даёт компоновщик, где объект входит у
+    ПРАВОГО края кадра (``x ~ resolution_width``) и с ростом энкодера едет к
+    МЕНЬШЕМУ ``x`` — наблюдение через рендер кадра, не через приватные атрибуты.
+
+    Guard: `entry_x_px = 0.0 if belt_direction == 1 else float(self._width)` в
+    `configure()` — замени условие на постоянный `0.0` -> тест красный (объект
+    стартует у x=0 и растёт вместо убывает)."""
+    plugin, _ctx, sp = _make_plugin_with_engine(
+        tmp_path,
+        {
+            "resolution_width": 400,
+            "resolution_height": 200,
+            "belt_y_px": 100.0,
+            "belt_direction": -1,
+            # spacing-режим: первый объект создаётся на первом же tick() (докстринг
+            # spawner.py) — interval_s этого не гарантирует (первый tick только
+            # взводит срок, объект не спавнится). spawn_interval_s обнулён явно,
+            # иначе дефолт _make_plugin_with_engine (interval_s=[0.01,0.01]) и
+            # spawn_spacing_mm оказались бы заданы оба разом -> ValueError.
+            "spawn_interval_s": None,
+            "spawn_spacing_mm": [1000.0, 1000.0],  # один объект на весь тест
+        },
+    )
+    _push_encoder(sp, 0)
+    frame1 = plugin.produce()[0]["frame"]
+
+    def _find_cx(frame: np.ndarray) -> float:
+        # Ловушка BGR/RGB: SceneCompositor.render() отдаёт RGB (R высокий в канале 0,
+        # см. _make_fixture_catalog color_bgr=(0,0,255) -> BGRA2RGBA при чтении из
+        # каталога даёт R=255 в канале 0), НО SceneSourcePlugin.produce() конвертирует
+        # в BGR ПЕРЕД возвратом (`frame_bgr = cv2.cvtColor(frame_rgb, COLOR_RGB2BGR)`,
+        # см. plugin.py) — R уезжает в канал 2. Этот тест читает кадр ИМЕННО из
+        # produce(), поэтому маркер ищется в канале 2, не 0.
+        mask = frame[:, :, 2] > 150  # маркер спрайта (см. _make_fixture_catalog) — канал R после BGR
+        xs = np.nonzero(mask)[1]
+        assert xs.size > 0, "объект не найден в кадре"
+        return float(xs.mean())
+
+    cx1 = _find_cx(frame1)
+    assert cx1 > 350, f"belt_direction=-1: объект должен входить у ПРАВОГО края (x~400), получено cx={cx1}"
+
+    _push_encoder(sp, 500)
+    frame2 = plugin.produce()[0]["frame"]
+    cx2 = _find_cx(frame2)
+    assert cx2 < cx1, f"belt_direction=-1: с ростом энкодера cx должен убывать, но {cx1} -> {cx2}"
+
+
 def test_item_has_no_sim_truth_and_all_required_keys(tmp_path) -> None:
     """`item` не содержит `sim_truth` (принцип «паспорта едут в мир, не на кадре»,
     ред. 2 плана) и несёт весь набор ключей из acceptance-критерия 4 плана, включая

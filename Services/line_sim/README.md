@@ -23,7 +23,7 @@ from Services.line_sim import (
 | `LayerAugment` | `interfaces.py` | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params`; `to_dict()`/`from_dict()` — Dict at Boundary (Task 3.4) |
 | `SceneCompositorProtocol` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` (переименован из `SceneCompositor` при подключении конкретного класса, LS-009) |
-| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), background_tile=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; фон-тайл — Task 3.6 |
+| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), background_tile=None, belt_direction=1, entry_x_px=0.0)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; фон-тайл — Task 3.6; `belt_direction`/`entry_x_px` — Task 5.3b |
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
@@ -210,12 +210,20 @@ interval` — пропущенные интервалы НЕ догоняютс�
 переставляет каналы при заливке фона, так что после конвертации плагином `RGB → BGR` итоговый
 `item["frame"]` содержит именно эти байты в этом порядке.
 
-Центр объекта: `cx = encoder_to_offset_mm(now_encoder, passport.spawn_encoder) * px_per_mm -
-x_px`, `cy = belt_y_px - y_px`; рисуется альфа-композицией (`dataset_gen.core.compose.
-composite`, тот же примитив, что `LayeredObject`). Возвращаются паспорта объектов, чей bbox
-пересекается с `camera_rect` (частично видимый — считается видимым, отрисовывается только
-видимая часть); порядок — спавна (`spawner.active_objects()`). bbox, касающийся края РОВНО
-(нулевая полоса пересечения), — невидим (строгие неравенства, решение автора).
+Центр объекта: `cx = entry_x_px + belt_direction * encoder_to_offset_mm(now_encoder,
+passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px - y_px`; рисуется альфа-композицией
+(`dataset_gen.core.compose.composite`, тот же примитив, что `LayeredObject`). Возвращаются
+паспорта объектов, чей bbox пересекается с `camera_rect` (частично видимый — считается видимым,
+отрисовывается только видимая часть); порядок — спавна (`spawner.active_objects()`). bbox,
+касающийся края РОВНО (нулевая полоса пересечения), — невидим (строгие неравенства, решение
+автора).
+
+**Направление ленты и точка входа (Task 5.3b, контракт §4.2.1).** `belt_direction: int = 1`
+(только `±1`, иначе `ValueError`) и `entry_x_px: float = 0.0` — обобщение формулы центра под
+сим-рецепт `hikvision_letter_robot.yaml`, где `+x` кадра калибровки = `-Y` робота, а лента везёт
+в `+Y` (без разворота диск и лента «расходятся» — до ~8 мм при радиусе сопоставления 5 мм).
+Дефолты дают байт-в-байт прежнее поведение. Сдвиг фонового тайла по X использует тот же знак
+`belt_direction`, что и объекты (иначе фон и диски визуально расходятся при развороте ленты).
 
 `render()` **не** зовёт `spawner.tick()` — тик (часы, `rng`) принадлежит вызывающему
 (плагину): один producer, одни часы. Пустой спавнер → кадр одного фона, без исключений.
@@ -243,6 +251,21 @@ composite`, тот же примитив, что `LayeredObject`). Возвра�
 в системе координат робота (`object_robot_xy`, `BeltGeometry`). Победитель из `active` ->
 `matched`, из `removed` (уже снятых) -> `dup`, иначе `no_object`. Используется плагином
 `Plugins/sim/scene_source` (часть B) вместе с `ObjectSpawner.remove()`.
+
+### Инструмент `tools/make_letter_catalog.py` — готовые эталоны → каталог букв (Task 5.3b)
+
+```bash
+python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites --letters АКРХ \
+    --diameter-px 300 --out data/line_sim/letter_catalog
+```
+
+В отличие от `make_demo_catalog.py` (латиница, `cv2.putText`), источник здесь — уже
+нарисованные RGBA-эталоны (`<src>/<буква>/*.png`), инструмент только ресайзит их до
+`--diameter-px` (`cv2.INTER_AREA`/`INTER_CUBIC`, альфа сохраняется) и раскладывает в форму
+каталога `SpriteCatalog`. `--diameter-px` — диаметр диска НА ЭКРАНЕ, дефолт `300` px выведен из
+окна `circle_detector` боевого рецепта (`90..230` px радиуса, середина ≈150), не из миллиметров
+диска. Эталон без альфа-канала или отсутствующая папка буквы источника → `SystemExit`, называющий
+файл/букву. Пути — через `imread_unicode`/`imwrite_unicode` (кириллица в путях).
 
 ### Инструмент `tools/make_seamless_texture.py` — фото → бесшовный тайл
 
