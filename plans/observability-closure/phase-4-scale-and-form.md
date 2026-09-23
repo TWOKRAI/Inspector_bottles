@@ -255,6 +255,62 @@ otel-export 3.4 и любую приёмку точечного хвоста.
 
 **Out of scope:** протокол `ObservabilityReadback` (4.3), новые счётчики очередей роутера.
 
+> **Вердикт CTO 2026-09-23 по эскалации разведки 4.3b** (`investigator` → `cto`), и он **заменяет
+> критерии выше**.
+> - **Q1 — (B).** Форвардер зовёт синхронный `router.send()` и разбирает его возврат. Сегодня
+>   `_push` отвечает `success` безусловно: 500 `success` при 500 `delivery_failed`.
+> - **Q2 — (b).** Хук `on_evict` для очереди observability в `_deliver_by_targets`
+>   (`router_manager.py:767-770`, по образцу `_on_frame_evicted`). Он даёт счётчик
+>   `observability_evicted_records.<S>` в `_stats` роутера, в записях, с жертвой по имени.
+>   Relay-конверт хаба (`data.ticket.data.records`) разворачивается. Это **4-й файл**, и он
+>   снимает оговорку «новые счётчики очередей роутера — вне объёма».
+>
+> Вытеснение считает тот, КТО положил, а не владелец потерянного сообщения. Доля «вытеснение /
+> Full» на mp.Queue зависит от тайминга: 3627 Full : 0 evict при читающем потребителе, 1744 evict
+> : ~250 Full без него. Поэтому без хука тождество рвётся ровно под штормом. Комментарий
+> `manager.py:317` «Full — редкая гонка» на macOS ложен.
+>
+> Цена (B), замер in-process на macOS: `send()` median 13.3 мкс / p99 37 против 2.3 мкс у
+> `send_async`. Петли Б-6 нет: 2000 ERROR подряд в полную очередь → чужих строк 0,
+> `tap_reentrant_suppressed` 0.
+>
+> **Не измерено, мерить на приёмке:** на хабе зависший сокет-клиент (`settimeout(0.5)`,
+> `socket_channel.py:277`) будет держать поток эмиттера до 0.5 с на запись. Сегодня этот стоп
+> душит воркер `AsyncSender`. Проверка: клиент подключён и не читает → латентность ≤ 0.5 с, клиент
+> снят.
+>
+> **Критерии 4.3b (литералы):**
+> - [ ] `introspect.observability.forwarders: {<subscriber>: {sent, messages, dropped,
+>   send_failed, wired_at}}`.
+>   - Счёт в записях, кроме `messages` (пуши) и `wired_at` (epoch привязки; при rewire счётчики
+>     обнуляются).
+>   - Исход по возврату `send()`: `sent` — `status=="success"`, `dropped` — `"dropped"`,
+>     `send_failed` — `"error"` или исключение.
+>   - Инвариант: `sent+dropped+send_failed == предложено записей`.
+> - [ ] `introspect.router_stats.observability_evicted_records.<S>` — записи, вытесненные из
+>   очереди S этим процессом.
+> - [ ] Живая пара:
+>   - подписчик жив → `sent` растёт, `dropped==send_failed==0`,
+>     `messages == queue_senders[<S>_observability][<P>].put`;
+>   - потребитель S остановлен → растут `send_failed` и/или `observability_evicted_records.<S>`,
+>     `sent` не растёт;
+>   - подписчик снят → `send_failed` растёт, `errors` роутера не растёт.
+> - [ ] Замер стопа хаба на заклинившем сокет-клиенте (условие вердикта).
+> - [ ] Инъекции, каждая даёт красный:
+>   - счётчик не инкрементируется;
+>   - `dropped` засчитан как `sent`;
+>   - `send()` подменён на `send_async` → `send_failed` 0 при мёртвом подписчике;
+>   - хук не передан → вытесненных записей 0 при переполнении;
+>   - relay-конверт посчитан как 0.
+>
+> **Остаток фазы 4 (не 4.3b):** сброс в `AsyncSender` (`_sender.py:143`) пишет WARNING без мьюта
+> для observability-груза, отправленного через `send_async`. Это возможный вход петли Б-6. Не
+> воспроизведено.
+>
+> **Для otel 3.4:** `Σ_P forwarders[S].sent(P) = received(S) + Σ_P
+> observability_evicted_records.S(P)`. Для подписчика-сокета второй хоп на хабе виден только
+> `observability_delivery_failed` роутера хаба; это ограничение назвать в 3.4 явно.
+
 ### Task 4.4 — Точечные подписки переживают рестарт и креш клиента (M5, CTL-F3) — **[x] ЗАКРЫТА 2026-09-23** (`61eac106` RED → `93780a82` → `a05a21ca` → `70df3305` → `8df3ab5b`)
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework, tests (backend_ctl)
 **Files:** `process_manager_module/process/observability_broker.py:250-300`, `process_manager_module/process/process_manager_process.py:2780-2820`,
