@@ -350,8 +350,9 @@ class SceneSourcePlugin(ProcessModulePlugin):
             if self._world_ready:
                 # Task 5.2 (контракт лида §2): снимок id ДО тика (после _drain_jobs — объекты,
                 # снятые заданием в этом же кадре, уже не в active_objects()) и ПОСЛЕ — разница
-                # даёт on_spawn/on_despawn для TruthLedger. Считается и при сбое factory.tick()
-                # (before == after в этом случае — diff пустой, вреда нет).
+                # даёт on_spawn/on_despawn для TruthLedger. Считается и когда tick() бросил: деспавн
+                # в tick() идёт ДО factory.make(), так что в кадре со сбоем фабрики объект мог уже
+                # уйти со сцены — пропусти здесь diff, и он навсегда останется «на ленте» (ревью 5.2).
                 before_ids = {obj.passport.object_id for obj in self._spawner.active_objects()}
                 try:
                     self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)

@@ -147,7 +147,7 @@ rng (`SceneCompositor.render()` их не трогает, LS-009).
 (`MatchResult("no_object", ...)` — растёт только `false_alarm`).
 
 Команды: `truth.status` -> `{"status": "ok", "counters": {...}}` (полный набор ключей —
-`Services/line_sim/README.md` → «TruthLedger»); `truth.reset` -> `{"status": "ok"}`, счётчики
+докстринг `Services/line_sim/core/truth.py` и контракт `plans/line-sim/phase-5-contract-5.2.md` §1); `truth.reset` -> `{"status": "ok"}`, счётчики
 в ноль, объекты под учётом остаются.
 
 Пять уровней (`truth_caught`, `truth_dup_jobs`, `truth_missed`, `truth_false_alarm`,

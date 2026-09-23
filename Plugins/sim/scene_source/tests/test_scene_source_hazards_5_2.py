@@ -123,53 +123,44 @@ def _job_for_object(index: int, spawn_encoder: float, ecap: float, t: float = 0.
 # --------------------------------------------------------------------------- #
 
 
-def test_reset_concurrent_with_produce_stays_consistent(tmp_path):
-    """`truth.reset` (командный поток) во время непрерывного `produce()` (поток-продюсер) --
-    оба лока (`_truth_lock`, отдельный от `_lock` мира) должны держать счётчики
-    консистентными и НЕ бросать. Поток не может повиснуть -- daemon-потоки + join с
-    дедлайном (STRICT-канон: hang хуже отсутствующего теста)."""
-    plugin, _ctx, sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [1.0, 5.0], "scene_length_mm": 50.0})
-    errors: list[BaseException] = []
-    stop = threading.Event()
+def test_reset_waits_for_truth_lock():
+    """`truth.reset` (командный поток) обязан ждать `_truth_lock`, которым продюсер защищает
+    многошаговые правки ledger (`on_match` меняет `caught` и `caught_ok` двумя шагами; сброс
+    между ними оставил бы `caught 0, caught_ok 1` навсегда).
 
-    def produce_loop() -> None:
-        try:
-            encoder = 0.0
-            for i in range(300):
-                encoder += 20.0
-                _push_encoder(sp, encoder)
-                plugin.produce()
-                active = plugin._spawner.active_objects()
-                if active:
-                    obj = active[0]
-                    job = _job_for_object(index=i, spawn_encoder=obj.passport.spawn_encoder, ecap=encoder)
-                    _call(plugin, "scene.job_done", job)
-        except BaseException as exc:  # noqa: BLE001 -- пробросить в главный поток для assert
-            errors.append(exc)
-        finally:
-            stop.set()
+    Ревью 5.2: прежний тест (300 кадров против крутящегося reset) проверял инвариант на
+    обнулённом состоянии — `0 == 0 + 0`, и сброс без лока (инъекция I10) проходил. Здесь проба
+    детерминированная: лок держит тест, сброс не должен завершиться, пока лок не отпущен.
+    Поток — daemon с дедлайном join."""
+    plugin, _ctx, _sp = _make_plugin()
+    done = threading.Event()
+    with plugin._truth_lock:
+        t = threading.Thread(target=lambda: (_call(plugin, "truth.reset"), done.set()), daemon=True)
+        t.start()
+        finished_under_lock = done.wait(0.2)
+    t.join(2.0)
+    assert not finished_under_lock, "truth.reset завершился, пока _truth_lock был занят"
+    assert done.is_set(), "truth.reset не завершился после освобождения лока"
 
-    def reset_loop() -> None:
-        try:
-            while not stop.is_set():
-                _call(plugin, "truth.reset")
-        except BaseException as exc:  # noqa: BLE001
-            errors.append(exc)
 
-    t_produce = threading.Thread(target=produce_loop, daemon=True)
-    t_reset = threading.Thread(target=reset_loop, daemon=True)
-    t_produce.start()
-    t_reset.start()
-    t_produce.join(timeout=30.0)
-    t_reset.join(timeout=30.0)
+def test_despawn_in_frame_where_factory_fails_is_missed(tmp_path):
+    """Ревью 5.2: деспавн в `tick()` идёт до `factory.make()`. Объект уходит со сцены в кадре,
+    где фабрика бросает исключение → он обязан стать `missed`, а не остаться «на ленте»."""
+    plugin, _ctx, sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [1.0, 1.0], "scene_length_mm": 50.0})
+    _push_encoder(sp, 0)
+    plugin.produce()
+    assert _call(plugin, "truth.status")["counters"]["on_belt"] == 1  # предусловие: один объект
 
-    assert not t_produce.is_alive(), "produce_loop не завершился за 30с -- подозрение на deadlock"
-    assert not t_reset.is_alive(), "reset_loop не завершился за 30с -- подозрение на deadlock"
-    assert not errors, f"исключения в потоках: {errors!r}"
+    def boom(*_a, **_k):
+        raise RuntimeError("фабрика упала")
+
+    plugin._spawner._factory.make = boom  # внутренность: единственный способ уронить tick()
+    _push_encoder(sp, 60.0 / FACTOR_MM + 1)  # объект проехал > 50 мм сцены
+    plugin.produce()
 
     counters = _call(plugin, "truth.status")["counters"]
-    assert counters["caught"] == counters["caught_ok"] + counters["caught_defect"]
-    assert counters["missed"] == counters["missed_ok"] + counters["missed_defect"]
+    assert counters["missed"] == 1
+    assert counters["on_belt"] == 0
 
 
 # --------------------------------------------------------------------------- #

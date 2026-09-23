@@ -167,7 +167,6 @@ def test_caught_dup_false_alarm_via_job_done(tmp_path):
     active = plugin._spawner.active_objects()  # ponytail: тот же приём чтения фикстуры движка,
     # что test_scene_source_task_3_5.py -- иного публичного способа узнать spawn_encoder нет
     assert len(active) == 1, "фикстура должна заспавнить ровно один объект"
-    oid = active[0].passport.object_id
     spawn_encoder = active[0].passport.spawn_encoder
 
     job1 = _job_for_object(index=1, spawn_encoder=spawn_encoder, ecap=2000)
@@ -241,7 +240,6 @@ def test_job_and_leave_same_frame_is_caught(tmp_path):
     plugin.produce()  # спавн: spawn_encoder=0
     active = plugin._spawner.active_objects()
     assert len(active) == 1
-    oid = active[0].passport.object_id
     spawn_encoder = active[0].passport.spawn_encoder
 
     # Задание ставится СЕЙЧАС (мир ещё на encoder=0, объект активен) -- геометрия задания

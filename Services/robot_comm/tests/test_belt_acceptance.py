@@ -64,7 +64,7 @@ def test_half_freq_sum_is_3461() -> None:
 
     belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
     belt.command(run=True, freq_hz=25.0)
-    total = sum(belt.advance(0.01) for _ in range(_N_TICKS))
+    total = sum(belt.advance(TICK_INTERVAL_S) for _ in range(_N_TICKS))
     assert total == pytest.approx(3461, abs=1)
 
 
@@ -74,7 +74,7 @@ def test_stopped_belt_advances_zero() -> None:
 
     belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
     belt.command(run=False, freq_hz=25.0)
-    total = sum(belt.advance(0.01) for _ in range(_N_TICKS))
+    total = sum(belt.advance(TICK_INTERVAL_S) for _ in range(_N_TICKS))
     assert total == 0
 
 
@@ -88,7 +88,7 @@ def test_low_speed_not_floored() -> None:
 
     belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
     belt.command(run=True, freq_hz=0.5)
-    total = sum(belt.advance(0.01) for _ in range(_N_TICKS))
+    total = sum(belt.advance(TICK_INTERVAL_S) for _ in range(_N_TICKS))
     assert total == pytest.approx(69, abs=1)
     assert total != _N_TICKS  # не эквивалент полной скорости
 
@@ -99,7 +99,7 @@ def test_reverse_is_negative() -> None:
 
     belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=50.0)
     belt.command(run=True, freq_hz=25.0, reverse=True)
-    total = sum(belt.advance(0.01) for _ in range(_N_TICKS))
+    total = sum(belt.advance(TICK_INTERVAL_S) for _ in range(_N_TICKS))
     assert total == pytest.approx(-3461, abs=1)
     assert total < 0
 
@@ -126,7 +126,7 @@ def test_zero_freq_max_no_exception(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         belt = BeltDrive(mm_s_at_max_freq=100.0, freq_max_hz=0.0)
         belt.command(run=True, freq_hz=25.0)
-        total = sum(belt.advance(0.01) for _ in range(10))
+        total = sum(belt.advance(TICK_INTERVAL_S) for _ in range(10))
 
     assert total == 0
     assert any(r.levelno >= logging.WARNING for r in caplog.records)
