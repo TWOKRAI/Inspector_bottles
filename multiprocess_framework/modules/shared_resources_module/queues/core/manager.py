@@ -18,6 +18,7 @@ from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 from ...qos import qos_for
 from ...state.process_data import ProcessDataKeys
+from .reader_gone import ReaderGoneQueue, release_feeders_at_exit
 
 try:
     from multiprocessing.queues import Empty
@@ -125,6 +126,11 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # иначе «≤1 запись на окно» и «сколько на самом деле» станут одним
             # числом, и темп потери будет не восстановить.
             "queue_full_events": 0,
+            # L-2 Task 1.2 (ADR-SRM-016): итог выходного хука — сколько очередей
+            # отпущено ушедшим навсегда читателям и сколько сообщений было в буфере
+            # feeder'а (уже записанное в pipe и ≤1 в полёте теряются без счёта).
+            "released_to_gone_readers": 0,
+            "buffered_dropped_at_exit": 0,
         }
         # Ф1.4: ЧЕТЫРЁХ собственных окон здесь больше нет
         # (`_system_evict_*`, `_data_evict_*`, `_queue_missing_*`,
@@ -195,12 +201,27 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         try:
             for queue_type, cfg in queue_config.items():
                 maxsize = cfg.get("maxsize", 0) if isinstance(cfg, dict) else 0
-                queues[queue_type] = Queue(maxsize=maxsize)
+                # ADR-SRM-016: очередь несёт метку «читатель ушёл навсегда».
+                queues[queue_type] = ReaderGoneQueue(maxsize=maxsize)
                 self._stats["created"] += 1
         except Exception as e:
             _loss_logger.error("create_queues() failed: %r", e)
             self._stats["errors"] += 1
         return queues
+
+    def release_queues_at_exit(self, owner_process_name: str, system_stop: bool) -> Dict[str, int]:
+        """Выходной хук процесса (ADR-SRM-016), зовётся runner'ом после ``shutdown()``.
+
+        На системном стопе взводит метку «читатель ушёл» на СВОИХ очередях, затем
+        отпускает feeder'ы очередей (своих и соседских) с взведённой меткой и ждёт
+        слива остальных. Индивидуальный стоп (``system_stop=False``) метку не взводит —
+        очереди переиспользует рестарт."""
+        own = list(self.get_process_queues(owner_process_name).values())
+        known = [q for name in self.get_registered_processes() for q in self.get_process_queues(name).values()]
+        released, buffered_dropped = release_feeders_at_exit(own, known, system_stop)
+        self._stats["released_to_gone_readers"] += released
+        self._stats["buffered_dropped_at_exit"] += buffered_dropped
+        return {"released": released, "buffered_dropped": buffered_dropped}
 
     def register_process_queues(
         self,
