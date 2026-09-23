@@ -16,9 +16,10 @@ dead-man путь, строгие типы аргументов), ветка `fe
 | Команды ленты `belt.*` (Task 2.3a) | есть: `run`/`stop`/`jog`(dead-man `jog_timeout_ms`)/`calibrate`/`status`, mailbox через `RobotSimCore.command_vfd`; 7/7 REDS `tests/test_belt_commands.py` зелёные (RED 8 открытый вопрос закрыт коммитом `7acf6d9b` — интерпретация «трогается сразу» = за тик, не синхронно) |
 | Событие «задание выполнено» (Task 3.5b) | есть: `RobotSimCore(on_job_done=...)` → `scene.job_done` в `scene_process` (fire-and-forget, сбой → `report_error` с throttle 30 с, не бросает); `tests/test_job_done_forward.py` (tester) — 5/5 |
 | Ревью Task 2.3a, итерация 1 | закрыто: сторож jog под ОДНИМ `self._lock` на весь путь (была гонка, воспроизведена стохастически 3/20000 и детерминированно), боевой dead-man через реальный `_publish_loop` (не только опортунистический `belt.status`), сторож зовётся и на паузе, строгие типы `reverse`/`direction`, `_jog_regs` считается из аргументов (не читается обратно из mailbox) |
-| Журнал заданий `sim_robot.journal`/`sim_robot.journal_reset` (Task 5.1) | есть: `SimJournal` заводится в `_start_server` ДО сервера, `_on_write` форвардит КАЖДЫЙ доступ (чтения тоже), уровни `jobs_seen`/`dups_seen`/`dups_same_capture`/`dups_tracked`/`repeats_frozen_xy`/`jobs_done` на такте паблишера, `sim_robot.status.journal` — снимок счётчиков; 4/4 REDS `tests/test_journal_commands.py` зелёные |
+| Журнал заданий `sim_robot.journal`/`sim_robot.journal_reset` (Task 5.1) | есть: `SimJournal` заводится в `_start_server` ДО сервера, `_on_write` форвардит КАЖДЫЙ доступ (чтения тоже), уровни `jobs_seen`/`dups_seen`/`dups_same_capture`/`dups_tracked`/`jobs_done` на такте паблишера, `sim_robot.status.journal` — снимок счётчиков; 4/4 REDS `tests/test_journal_commands.py` зелёные |
+| Причина «те же X/Y» ушла из журнала (Task 5.1b) | `repeats_frozen_xy` не заводится и не публикуется robot_host — переехала в `TruthLedger.false_alarm_frozen_xy` на стороне сцены; 2/2 REDS `tests/test_acceptance_5_1b.py` зелёные |
 
-Причины повтора (`dups_same_capture`/`dups_tracked`/`repeats_frozen_xy`) — счётная логика в `Services/robot_comm/server/sim_journal.py` (см. его README), не здесь; 4/4 REDS `Services/robot_comm/tests/test_sim_journal_causes.py` зелёные.
+Причины повтора (`dups_same_capture`/`dups_tracked`) — счётная логика в `Services/robot_comm/server/sim_journal.py` (см. его README), не здесь; 4/4 REDS `Services/robot_comm/tests/test_sim_journal_causes.py` зелёные.
 
 ## Долг / открытые вопросы
 

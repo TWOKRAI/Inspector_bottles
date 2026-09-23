@@ -16,7 +16,7 @@
 * ``out`` — события ядра симулятора (``RobotSimCore.on_event``): приём задания,
             завершение, стоп, серво — зеркало ``print()`` прошивки.
 
-ТРИ ПРИЧИНЫ ПОВТОРА (не одно число «дубли» — контракт §1). Наивное «те же X/Y» не
+ДВЕ ПРИЧИНЫ ПОВТОРА (не одно число «дубли» — контракт §1). Наивное «те же X/Y» не
 годится: лента едет, и та же деталь на следующем кадре снята уже в другой точке.
 Инвариант трекинга (из Lua ``cvt_universal_full.lua``:
 ``trav = (enc_now - job_enc) * FACTOR_MM``, ``px = job_x + UX*trav``,
@@ -33,18 +33,23 @@
 * ``dups_tracked`` — ``ecap`` разный: та же деталь снята на другом кадре, а
   прототип её не отсеял (дубль КАДРА/детекции).
 
-Отдельно, вне ``dups``: если координаты совпадают («вырожденная» невязка), а
-энкодер РАЗНЫЙ, это НЕ дубль по трекингу (инвариант трекинга не подтверждён — при
-разных энкодерах ожидалось бы смещение) — ``repeats_frozen_xy``: те же X/Y с новым
-энкодером, типичный симптом повторного кадра или энкодера, прочитанного в момент
-постановки задания в очередь, а не в момент съёмки.
+Третья причина 5.1 — «те же X/Y с новым энкодером» (была ``repeats_frozen_xy``) —
+УШЛА ОТСЮДА в задаче 5.1b (Контракт лида, ``plans/line-sim/phase-5-contract-5.1b.md``).
+Она сравнивала задание с заданием на проводе робота, а на линии с триггером разные
+диски снимаются в одной точке кадра — тройка ``(x, y, ecap)`` у них совпадала с
+повтором кадра, и категория ложно срабатывала на честных, РАЗНЫХ деталях (замер:
+8 разных дисков у триггера → 7 ложных «повторов»). Внутри журнала робота эти случаи
+не различить ничем — только сцена знает, куда реально приехал объект. Причина
+переехала в ``TruthLedger.false_alarm_frozen_xy``
+(``Services/line_sim/core/truth.py``), где она считается ТОЛЬКО среди ``no_object``
+(ложных тревог), а не среди всех заданий.
 
 Известный предел — зона неразличимости (ревью 3.5/5.1, замер): когда проезд ленты
 между заданиями меньше радиуса, ``|Δenc| * FACTOR_MM < dup_radius_mm`` (при 5 мм это
 меньше ~35 отсчётов; на 101 мм/с — меньше ~50 мс между постановками), «та же деталь на
 другом кадре» и «те же X/Y с новым энкодером» геометрически совпадают, и проверка
-трекинга, идущая первой, относит пару к ``dups_tracked``. Замер: ``(10, 20, e=1000)`` и
-``(10, 20, e=1020)`` → ``dups_tracked=1, repeats_frozen_xy=0``. Частный случай — СТОЯЩАЯ
+трекинга относит пару к ``dups_tracked``. Замер: ``(10, 20, e=1000)`` и
+``(10, 20, e=1020)`` → ``dups_tracked=1``. Частный случай — СТОЯЩАЯ
 лента (``Δenc = 0``): два честных кадра одной детали дадут ``dups_same_capture``.
 Причину читать вместе со скоростью ленты и интервалом между заданиями; отличить повтор
 кадра от честного второго кадра внутри этой зоны может только сторона прототипа
@@ -186,10 +191,10 @@ class SimJournal:
         self.jobs_done = 0
         self.reads_seen = 0
         # Причины повтора (Контракт лида 5.1, §1): dups_seen == dups_same_capture
-        # + dups_tracked всегда — repeats_frozen_xy в dups_seen НЕ входит.
+        # + dups_tracked всегда. Третья причина 5.1 («те же X/Y с новым энкодером»,
+        # repeats_frozen_xy) УШЛА отсюда в 5.1b — см. _register_job.
         self.dups_same_capture = 0
         self.dups_tracked = 0
-        self.repeats_frozen_xy = 0
 
     # ------------------------------------------------------------------ #
     # Вход: записи с провода
@@ -240,13 +245,16 @@ class SimJournal:
     def _register_job(self, now: float) -> None:
         """Зафиксировать задание и определить причину повтора (вызывать под локом).
 
-        Три исхода (Контракт лида 5.1, §1), проверяются по очереди:
+        Два исхода (Контракт лида 5.1b, §1), проверяются по очереди:
         1. дубль по трекингу (:meth:`_find_origin`) — делится по энкодеру на
            ``dups_same_capture`` (та же съёмка) / ``dups_tracked`` (тот же
            кадр, другая съёмка);
-        2. иначе — те же X/Y с ДРУГИМ энкодером (:meth:`_find_frozen_xy`) —
-           ``repeats_frozen_xy``, в ``dups_seen`` не входит;
-        3. иначе — обычное новое задание.
+        2. иначе — обычное новое задание. Категория «те же X/Y с ДРУГИМ
+           энкодером» (``repeats_frozen_xy``) отсюда УШЛА — на линии с
+           триггером она ложно срабатывала на разных деталях в одной точке
+           кадра; правильная сторона для этой причины — сцена, которая знает
+           реальные координаты объектов (``TruthLedger.false_alarm_frozen_xy``,
+           ``Services/line_sim/core/truth.py``).
         """
         x_mm = decode_int16(self._shadow.get(REG_JOB_X, 0)) / XY_SCALE
         y_mm = decode_int16(self._shadow.get(REG_JOB_Y, 0)) / XY_SCALE
@@ -255,7 +263,6 @@ class SimJournal:
         job = JobRecord(t=now, x_mm=x_mm, y_mm=y_mm, ecap=ecap, index=self.jobs_seen)
 
         match = self._find_origin(job)
-        frozen = self._find_frozen_xy(job) if match is None else None
         self._recent_jobs.append(job)
 
         if match is not None:
@@ -275,19 +282,6 @@ class SimJournal:
                     f"(невязка {residual:.1f} мм, Δenc={job.ecap - prev.ecap:+d}, "
                     f"Δt={job.t - prev.t:.2f} с)",
                     "dup",
-                )
-            )
-            return
-
-        if frozen is not None:
-            self.repeats_frozen_xy += 1
-            self._pending.append(
-                JournalEntry(
-                    now,
-                    "in",
-                    f"── ПОВТОР #{job.index}: те же X/Y, что #{frozen.index}, "
-                    f"энкодер другой (Δenc={job.ecap - frozen.ecap:+d})",
-                    "repeat",
                 )
             )
             return
@@ -325,25 +319,6 @@ class SimJournal:
         dy = (job.y_mm - prev.y_mm) - BELT_UY * trav
         return math.hypot(dx, dy)
 
-    def _find_frozen_xy(self, job: JobRecord) -> JobRecord | None:
-        """Среди недавних — та же точка (X/Y), но ДРУГОЙ энкодер (вызывать под локом).
-
-        Зовётся, только когда :meth:`_find_origin` уже проверил инвариант
-        трекинга для этой пары и он НЕ подтвердился — здесь плоское расстояние
-        БЕЗ поправки на проезд ленты: та же точка при разных энкодерах —
-        симптом повторного кадра или энкодера, замороженного на момент
-        постановки задания в очередь (Контракт лида 5.1, §1), а не проезда
-        детали дальше по ленте.
-        """
-        best: tuple[JobRecord, float] | None = None
-        for prev in self._recent_jobs:
-            if prev.ecap == job.ecap:
-                continue
-            residual = math.hypot(job.x_mm - prev.x_mm, job.y_mm - prev.y_mm)
-            if residual < self._dup_radius_mm and (best is None or residual < best[1]):
-                best = (prev, residual)
-        return best[0] if best is not None else None
-
     # ------------------------------------------------------------------ #
     # Выход: события ядра
     # ------------------------------------------------------------------ #
@@ -372,9 +347,10 @@ class SimJournal:
         """Снимок счётчиков для шапки монитора.
 
         ``jobs``/``dups``/``done``/``reads`` — прежние ключи без изменений
-        (их читает ``SimMonitorWindow``); три новых — причины повтора
+        (их читает ``SimMonitorWindow``); два новых — причины повтора
         (Контракт лида 5.1, §1). Инвариант: ``dups == dups_same_capture +
-        dups_tracked``.
+        dups_tracked``. Ключа ``repeats_frozen_xy`` больше нет (5.1b, §1) —
+        та причина считается на стороне сцены (``TruthLedger``).
         """
         with self._lock:
             return {
@@ -384,7 +360,6 @@ class SimJournal:
                 "reads": self.reads_seen,
                 "dups_same_capture": self.dups_same_capture,
                 "dups_tracked": self.dups_tracked,
-                "repeats_frozen_xy": self.repeats_frozen_xy,
             }
 
     def reset(self) -> None:
@@ -393,4 +368,4 @@ class SimJournal:
             self._pending.clear()
             self._recent_jobs.clear()
             self.jobs_seen = self.dups_seen = self.jobs_done = self.reads_seen = 0
-            self.dups_same_capture = self.dups_tracked = self.repeats_frozen_xy = 0
+            self.dups_same_capture = self.dups_tracked = 0

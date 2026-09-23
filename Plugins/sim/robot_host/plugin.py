@@ -166,12 +166,13 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         ctx.declare_metric("encoder")
         ctx.declare_metric("belt_mm_s")
         ctx.declare_metric("writes_seen")
-        # Уровни журнала заданий (Контракт лида 5.1, §2).
+        # Уровни журнала заданий (Контракт лида 5.1, §2). ``repeats_frozen_xy`` ушёл
+        # отсюда в 5.1b — причина «те же X/Y» теперь считается TruthLedger'ом на
+        # стороне сцены (Services/line_sim/core/truth.py), не журналом робота.
         ctx.declare_metric("jobs_seen")
         ctx.declare_metric("dups_seen")
         ctx.declare_metric("dups_same_capture")
         ctx.declare_metric("dups_tracked")
-        ctx.declare_metric("repeats_frozen_xy")
         ctx.declare_metric("jobs_done")
 
         ctx.log_info(f"sim_robot_host: конфиг принят, {self._host}:{self._port}, unit_id={self._unit_id}")
@@ -451,7 +452,6 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._ctx.publish_metric("dups_seen", counters["dups"])
         self._ctx.publish_metric("dups_same_capture", counters["dups_same_capture"])
         self._ctx.publish_metric("dups_tracked", counters["dups_tracked"])
-        self._ctx.publish_metric("repeats_frozen_xy", counters["repeats_frozen_xy"])
         self._ctx.publish_metric("jobs_done", counters["done"])
 
         with self._lock:

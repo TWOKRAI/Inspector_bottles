@@ -261,7 +261,6 @@ function pollJournal() {{
         "принято " + c.jobs +
         " · повтор той же детали " + c.dups +
         " (та же съёмка " + c.dups_same_capture + " / новый кадр " + c.dups_tracked + ")" +
-        " · те же X/Y с новым энкодером " + c.repeats_frozen_xy +
         " · выполнено " + c.done;
     }} else {{
       document.getElementById("journal").textContent = "журнал недоступен";

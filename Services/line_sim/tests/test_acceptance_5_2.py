@@ -25,7 +25,11 @@ from Services.line_sim.interfaces import ObjectPassport
 
 pytestmark = pytest.mark.timeout(30)
 
-#: Полный набор ключей counters() -- §1 контракта, дословно.
+#: Полный набор ключей counters() -- §1 контракта 5.2 + §2 контракта 5.1b, дословно.
+#: `false_alarm_frozen_xy` добавлен задачей 5.1b (не было в 5.2) -- не переписано
+#: молча: этот тест не входил в список 5.1b §"Кто что пишет", но ломается прямым
+#: следствием обязательного изменения §2 (новый ключ counters()), поэтому правка
+#: минимальна -- один ключ в множестве, остальное не тронуто.
 _EXPECTED_COUNTER_KEYS = {
     "caught",
     "caught_defect",
@@ -35,6 +39,7 @@ _EXPECTED_COUNTER_KEYS = {
     "missed_ok",
     "dup_jobs",
     "false_alarm",
+    "false_alarm_frozen_xy",
     "untracked_jobs",
     "on_belt",
     "pick_error_mean_mm",

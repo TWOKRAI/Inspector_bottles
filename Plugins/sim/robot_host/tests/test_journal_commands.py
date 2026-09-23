@@ -53,6 +53,7 @@ _FORBIDDEN_PORTS = {5021, 8765, 8766, 8091, 8092}  # живой стенд вл�
 _FC_WRITE_SINGLE = 6
 _FC_WRITE_MULTI = 16
 
+# Переписано 5.1b: ключ repeats_frozen_xy ушёл из SimJournal.counters() целиком.
 _ZERO_COUNTERS = {
     "jobs": 0,
     "dups": 0,
@@ -60,7 +61,6 @@ _ZERO_COUNTERS = {
     "reads": 0,
     "dups_same_capture": 0,
     "dups_tracked": 0,
-    "repeats_frozen_xy": 0,
 }
 
 
@@ -231,5 +231,7 @@ def test_journal_levels_published_on_tick(running_plugin) -> None:
     assert levels.get("dups_seen") == 1, published
     assert levels.get("dups_same_capture") == 1, published
     assert levels.get("dups_tracked") == 0, published
-    assert levels.get("repeats_frozen_xy") == 0, published
+    # Переписано 5.1b (§3 контракта): robot_host больше не заводит/публикует этот
+    # уровень — причина «те же X/Y» переехала в TruthLedger на стороне сцены.
+    assert "repeats_frozen_xy" not in levels, published
     assert levels.get("jobs_done") == 0, published
