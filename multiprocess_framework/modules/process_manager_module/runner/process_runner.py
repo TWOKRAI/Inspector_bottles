@@ -12,9 +12,26 @@ from typing import Any, Dict, Optional, Union
 
 from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
 
+from multiprocess_framework.modules.shared_resources_module.queues.core.exit_release import release_queues_at_exit
+
 from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
+
+
+def _release_queues_at_exit(shared_resources, log: StdLoggerFacade) -> None:
+    """Отпустить очереди процесса перед выходом интерпретатора; одна строка лога."""
+    if shared_resources is None:
+        return
+    try:
+        registry = shared_resources.process_state_registry
+        queues = [q for pd in registry.get_all_process_data().values() for q in pd.queues.values()]
+        start = time.monotonic()
+        drained, abandoned = release_queues_at_exit(queues)
+        line = f"queues at exit: {drained} дожато, {abandoned} брошено за {time.monotonic() - start:.2f} с"
+        (log.warning if abandoned else log.info)(line)
+    except Exception as e:  # noqa: BLE001 — выход не должен падать
+        log.error(f"queues at exit: отпуск не удался: {e}")
 
 
 def _run_lifecycle(
@@ -243,3 +260,6 @@ def run_process_function(
                     process_instance.stop()
             except Exception as e:
                 log.error(f"Error during cleanup: {e}")
+        # Task 1.1 / ADR-SRM-015: строго ПОСЛЕ shutdown() (порядок teardown не
+        # меняется) — иначе выход CPython ждёт feeder очереди к мёртвому читателю.
+        _release_queues_at_exit(shared_resources, log)
