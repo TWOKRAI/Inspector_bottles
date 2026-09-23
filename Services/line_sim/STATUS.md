@@ -15,6 +15,7 @@
 | `ObjectSpawner` — спавн по интервалу ИЛИ по шагу ленты в мм, деспавн, пауза, форс-хук брака | готово (Task 3.3, режим `spacing_mm` — Task 3.3a, LS-010) |
 | Подключение к `SceneSourcePlugin` (`Plugins/sim/scene_source`) | готово (Task 3.4; `spawn_spacing_mm` — Task 3.3a) |
 | Фон-тайл в `SceneCompositor` (`background_tile`) + `tools/make_seamless_texture.py` | готово (Task 3.6, LS-011); на реальном фото ленты ещё не прогонялся — ждёт снимка владельца |
+| `core/matching.py` (`match_job`/`object_robot_xy`, `BeltGeometry`/`JobDone`/`MatchResult`) + `ObjectSpawner.remove()` | готово (Task 3.5a, LS-012) — job↔object matching для плагина сцены (часть B) |
 
 **Известное ограничение (2026-09-22):** эталоны дисков-букв реально не сняты на этой машине —
 `data/dataset_gen/ru_letters_real/sprites` отсутствует. `tools/cut_real_disks.py` готовит их из

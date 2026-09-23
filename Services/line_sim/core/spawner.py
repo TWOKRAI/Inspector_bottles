@@ -21,6 +21,7 @@ import numpy as np
 from Services.line_sim.core.belt import encoder_to_offset_mm
 from Services.line_sim.core.factory import ObjectFactory
 from Services.line_sim.core.layered_object import LayeredObject
+from Services.line_sim.interfaces import ObjectPassport
 
 
 class ObjectSpawner:
@@ -50,7 +51,10 @@ class ObjectSpawner:
     пропущенные интервалы не догоняются — следующий срок считается от `now_wall_s`
     текущего тика, не от просроченного срока. В режиме `spacing_mm` первый объект
     создаётся на первом же `tick()` (ждать нечего — лента уже едет), следующий шаг
-    выбирается заново при каждом спавне и хранится до следующего.
+    выбирается заново при каждом спавне и хранится до следующего. `remove()` (Task
+    3.5, job↔object matching) снимает объект из активных, но НЕ трогает счёт шага
+    спавна (`_last_spawn_encoder`/`_next_spacing_mm`), срок таймера (`_deadline`) и
+    нумерацию (`_next_id_n`) — снятие чужеродно расписанию будущего спавна.
     """
 
     def __init__(
@@ -212,6 +216,19 @@ class ObjectSpawner:
     def active_objects(self) -> list[LayeredObject]:
         """Копия списка активных объектов — мутация результата не трогает спавнер."""
         return list(self._active)
+
+    def remove(self, object_id: str) -> ObjectPassport | None:
+        """Снять объект из активных по `object_id` (Task 3.5, job↔object matching) —
+        плагин сцены вызывает это, когда `match_job` находит совпадение с заданием
+        робота. Неизвестный `object_id` -> `None`, без исключения (кривой/устаревший
+        id — обычный случай гонки job/деспавна, не повод падать).
+
+        Post: см. Post докстринга класса — расписание будущего спавна не меняется.
+        """
+        for i, obj in enumerate(self._active):
+            if obj.passport.object_id == object_id:
+                return self._active.pop(i).passport
+        return None
 
     def set_paused(self, paused: bool) -> None:
         self._paused = paused

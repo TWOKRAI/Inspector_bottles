@@ -21,8 +21,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import Callable
 
+from Services.modbus.sdk.datatypes import decode_int32
 from Services.robot_comm.core.registers import (
     REG_CFG_BASE,
     REG_CFG_FLAG,
@@ -121,6 +123,11 @@ class RobotSimCore:
         belt:         Модель ленты (Task 2.1). None -> BeltDrive.from_enc_rate(enc_rate, ...) —
                       старое поведение воспроизводится побитово, пока не пришла команда ПЧ.
         on_event:     Callback для событий (print-зеркало прошивки). None = молча.
+        on_job_done:  Callback события «задание выполнено» (Task 3.5, line-sim) — ровно один
+                      вызов на задание, в момент REG_FREE 0->1 (см. `_handle_job`); STOP во
+                      время задания отменяет вызов. None = не вызывается (побитовая
+                      обратная совместимость). Исключение из колбэка ядро НЕ ловит —
+                      защита на стороне хоста (`Plugins.sim.robot_host`).
     """
 
     def __init__(
@@ -136,6 +143,7 @@ class RobotSimCore:
         enc_rate: int = 7,
         belt: BeltDrive | None = None,
         on_event: Callable[[str], None] | None = None,
+        on_job_done: Callable[[dict], None] | None = None,
     ) -> None:
         self._word_order = word_order
         self._accept_ticks = accept_ticks
@@ -145,6 +153,7 @@ class RobotSimCore:
         self._toolchange_ticks = toolchange_ticks
         self._manual_ticks = manual_ticks
         self._on_event = on_event
+        self._on_job_done = on_job_done
         # Лента — отдельная модель (Task 2.1, line-sim Ф2): без явной инъекции
         # воспроизводит старое поведение enc_rate побитово (см. BeltDrive.from_enc_rate).
         self._belt = belt if belt is not None else BeltDrive.from_enc_rate(enc_rate, TICK_INTERVAL_S)
@@ -161,6 +170,8 @@ class RobotSimCore:
         self._job_x: float = 0.0
         self._job_y: float = 0.0
         self._job_ecap: int = 0
+        # Счётчик ПРИНЯТЫХ ядром заданий (Task 3.5, on_job_done payload["index"]) — с 1.
+        self._job_index: int = 0
         self._job_has_place: bool = False
         self._job_place_x: float = 0.0
         self._job_place_y: float = 0.0
@@ -299,7 +310,10 @@ class RobotSimCore:
             # Запомнить координаты для события
             self._job_x = _s16(self.regs[REG_JOB_X])
             self._job_y = _s16(self.regs[REG_JOB_Y])
-            self._job_ecap = self.regs[REG_JOB_ECAP]
+            # Правка дефекта (Task 3.5): E_capture — 32-битное значение из ДВУХ слов
+            # REG_JOB_ECAP/+1, тот же декодер, что SimJournal._decode_dw. Раньше читалось
+            # одно слово — старшая половина терялась (106016 -> 40480).
+            self._job_ecap = decode_int32([self.regs[REG_JOB_ECAP], self.regs[REG_JOB_ECAP + 1]], self._word_order)
             self._job_has_place = self.regs[REG_PLACE_FLAG] == 1
             if self._job_has_place:
                 self._job_place_x = _s16(self.regs[REG_PLACE_X])
@@ -314,6 +328,7 @@ class RobotSimCore:
                 self.regs[REG_JOB_FLAG] = 0  # принял
                 self._accept_countdown = None
                 self._job_countdown = self._job_ticks
+                self._job_index += 1
                 # Событие: задание принято (зеркало момента FLAG->0 в Lua)
                 if self._job_has_place:
                     self._emit(
@@ -345,6 +360,16 @@ class RobotSimCore:
                 self.regs[REG_FREE] = 1
                 self._job_countdown = None
                 self._emit("[CVT]  выполнено -> робот свободен")
+                if self._on_job_done is not None:
+                    self._on_job_done(
+                        {
+                            "index": self._job_index,
+                            "x_mm": self._job_x,
+                            "y_mm": self._job_y,
+                            "ecap": self._job_ecap,
+                            "t": time.monotonic(),
+                        }
+                    )
 
     def _handle_config(self) -> None:
         if self.regs[REG_CFG_FLAG] == 1:
