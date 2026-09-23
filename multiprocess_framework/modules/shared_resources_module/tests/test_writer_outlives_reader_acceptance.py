@@ -40,6 +40,8 @@ from multiprocess_framework.modules.process_manager_module.runner.process_runner
     run_process_function,
 )
 
+from .. import QueueRegistry
+
 # ---------------------------------------------------------------------------
 # Top-level классы дочерних процессов (spawn пиклит цель по dotted-пути).
 # ---------------------------------------------------------------------------
@@ -166,6 +168,42 @@ class _SendOneHundredMessagesThenWaitForStop:
         pass
 
 
+class _ReadsOneMessageAndReportsToResults:
+    """Новая ИНКАРНАЦИЯ читателя на ТОЙ ЖЕ очереди (модель ``restart_reuse_queues``,
+    ``process_manager_process.py`` ~L3561: рестарт по умолчанию переиспользует
+    очереди прежней инкарнации). Читает ОДНО сообщение из своей 'data' и
+    репортит длину payload'а в 'results', затем выходит СРАЗУ (без stop_event —
+    ``should_stop()`` истинен, как только чтение завершилось)."""
+
+    def __init__(self, name: str, shared_resources: Any, config: dict) -> None:
+        self.name = name
+        self.shared_resources = shared_resources
+        self._done = False
+
+    def initialize(self) -> bool:
+        return True
+
+    def run(self) -> None:
+        psr = self.shared_resources.process_state_registry
+        data_q = psr.get_queue(self.name, "data")
+        results_q = psr.get_queue(self.name, "results")
+        try:
+            payload = data_q.get(timeout=8.0)
+            results_q.put(("ok", len(payload)))
+        except Exception as exc:  # noqa: BLE001 — переносим в тест через results
+            results_q.put(("error", repr(exc)))
+        self._done = True
+
+    def should_stop(self) -> bool:
+        return self._done
+
+    def stop(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+
 def _class_path(cls) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"
 
@@ -206,11 +244,17 @@ def _read_n(queue, n: int, result_box: dict, timeout_per_item: float = 10.0) -> 
 
 
 class TestWriterExitsFastWhenReaderExitedBeforePut:
+    """Правка контракта 2026-09-24 (эскалация teamlead, вариант A): «читатель мёртв
+    навсегда» = СИСТЕМНЫЙ стоп (``system_stop_event``), не индивидуальный —
+    индивидуальный неотличим от ``restart_process`` (см. новый guard-тест 5).
+    Очередь — продовым путём реестра (``QueueRegistry.create_queues``), не голый
+    ``ctx.Queue()``. ОДИН ``system_stop_event`` на оба процесса — как в проде,
+    где стоп гасит все дочерние процессы параллельно."""
+
     def test_writer_exits_fast_when_reader_exited_before_put(self) -> None:
         ctx = multiprocessing.get_context("spawn")
-        q = ctx.Queue()
-        reader_stop = ctx.Event()
-        writer_stop = ctx.Event()
+        q = QueueRegistry().create_queues({"data": {}})["data"]
+        system_stop = ctx.Event()
 
         reader_bundle = {"queues": {"data": q}, "config": {}, "custom": {}}
         writer_bundle = {
@@ -222,30 +266,33 @@ class TestWriterExitsFastWhenReaderExitedBeforePut:
 
         reader = ctx.Process(
             target=run_process_function,
-            args=(_class_path(_ReaderDoesNotRead), "Reader", reader_stop, reader_bundle, None),
+            args=(_class_path(_ReaderDoesNotRead), "Reader", None, reader_bundle, system_stop),
         )
         writer = ctx.Process(
             target=run_process_function,
             args=(
                 _class_path(_SendOneBigMessageThenWaitForStop),
                 "Writer",
-                writer_stop,
-                writer_bundle,
                 None,
+                writer_bundle,
+                system_stop,
             ),
         )
         try:
             reader.start()
-            reader_stop.set()  # читатель мёртв НАВСЕГДА, ещё до put
+            system_stop.set()  # системный стоп ДО put — читатель мёртв НАВСЕГДА
             reader.join(timeout=5.0)
             assert not reader.is_alive(), "reader не вышел сам за 5.0s — тест не смог подготовить сценарий"
 
+            # system_stop уже взведён: writer.run() шлёт сообщение, лайфсайкл сразу
+            # после run() видит систему стопнутой и переходит к выходу.
+            start = time.monotonic()
             writer.start()
-            time.sleep(0.2)  # дать run() отправить сообщение до взвода stop
-            writer_stop.set()
-            elapsed, alive = _join_bounded(writer, timeout=2.0)
+            writer.join(timeout=2.0)
+            elapsed = time.monotonic() - start
+            alive = writer.is_alive()
 
-            assert not alive, f"writer не вышел за 2.0s после своего stop_event; elapsed={elapsed:.3f}s"
+            assert not alive, f"writer не вышел за 2.0s; elapsed={elapsed:.3f}s"
             assert elapsed < 2.0, f"writer вышел за {elapsed:.3f}s (>= 2.0s) — не уложился в дедлайн"
         finally:
             _cleanup(reader, writer)
@@ -262,11 +309,14 @@ class TestWriterExitsFastWhenReaderExitedBeforePut:
 
 
 class TestWriterExitsFastWhenReaderExitsAfterPut:
+    """Правка контракта 2026-09-24 (см. класс выше) — здесь ОДИН системный стоп
+    взводится ПОСЛЕ put, когда читатель ещё жив: оба процесса гасятся «параллельно»,
+    как в проде на ``system_stop_event``."""
+
     def test_writer_exits_fast_when_reader_exits_after_put(self) -> None:
         ctx = multiprocessing.get_context("spawn")
-        q = ctx.Queue()
-        reader_stop = ctx.Event()
-        writer_stop = ctx.Event()
+        q = QueueRegistry().create_queues({"data": {}})["data"]
+        system_stop = ctx.Event()
 
         reader_bundle = {"queues": {"data": q}, "config": {}, "custom": {}}
         writer_bundle = {
@@ -278,31 +328,33 @@ class TestWriterExitsFastWhenReaderExitsAfterPut:
 
         reader = ctx.Process(
             target=run_process_function,
-            args=(_class_path(_ReaderDoesNotRead), "Reader", reader_stop, reader_bundle, None),
+            args=(_class_path(_ReaderDoesNotRead), "Reader", None, reader_bundle, system_stop),
         )
         writer = ctx.Process(
             target=run_process_function,
             args=(
                 _class_path(_SendOneBigMessageThenWaitForStop),
                 "Writer",
-                writer_stop,
-                writer_bundle,
                 None,
+                writer_bundle,
+                system_stop,
             ),
         )
         try:
             reader.start()
             writer.start()
-            time.sleep(0.2)  # writer.run() успевает отправить 1 MiB
+            time.sleep(0.2)  # writer.run() успевает отправить 1 MiB, reader жив и не читает
 
-            reader_stop.set()  # reader жив был при put, теперь уходит — НЕ читая
+            start = time.monotonic()
+            system_stop.set()  # ОДИН системный стоп — оба процесса гасятся параллельно
             reader.join(timeout=5.0)
             assert not reader.is_alive(), "reader не вышел сам за 5.0s — тест не смог подготовить сценарий"
 
-            writer_stop.set()
-            elapsed, alive = _join_bounded(writer, timeout=2.0)
+            writer.join(timeout=2.0)
+            elapsed = time.monotonic() - start
+            alive = writer.is_alive()
 
-            assert not alive, f"writer не вышел за 2.0s после своего stop_event; elapsed={elapsed:.3f}s"
+            assert not alive, f"writer не вышел за 2.0s после системного стопа; elapsed={elapsed:.3f}s"
             assert elapsed < 2.0, f"writer вышел за {elapsed:.3f}s (>= 2.0s) — не уложился в дедлайн"
         finally:
             _cleanup(reader, writer)
@@ -325,7 +377,7 @@ class TestSlowLiveReaderGetsWholeBigMessage:
 
     def test_slow_reader_gets_whole_big_message_and_writer_exits(self) -> None:
         ctx = multiprocessing.get_context("spawn")
-        q = ctx.Queue()
+        q = QueueRegistry().create_queues({"data": {}})["data"]  # продовый путь создания очереди
         writer_stop = ctx.Event()
 
         writer_bundle = {
@@ -389,7 +441,7 @@ class TestSlowLiveReaderGetsAll100AfterWriterExit:
 
     def test_slow_reader_gets_all_100_messages_after_normal_exit(self) -> None:
         ctx = multiprocessing.get_context("spawn")
-        q = ctx.Queue()
+        q = QueueRegistry().create_queues({"data": {}})["data"]  # продовый путь создания очереди
         writer_stop = ctx.Event()
 
         writer_bundle = {
@@ -436,5 +488,91 @@ class TestSlowLiveReaderGetsAll100AfterWriterExit:
             try:
                 q.close()
                 q.cancel_join_thread()
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# (5) НОВЫЙ guard, добавлен правкой контракта 2026-09-24 (эскалация teamlead,
+# вариант A): ИНДИВИДУАЛЬНЫЙ stop читателя — это НЕ «читатель мёртв навсегда».
+# ---------------------------------------------------------------------------
+
+
+class TestIndividualStopReaderThenQueueReusedByNewIncarnationGetsMessageIntact:
+    """restart_reuse_queues (``process_manager_process.py`` ~L3561) по умолчанию
+    отдаёт ТУ ЖЕ очередь новой инкарнации процесса. Если бы писатель освобождался
+    по одному лишь индивидуальному stop_event читателя (не по системному), в трубу
+    новой инкарнации попал бы недописанный кадр старой. Guard: читатель уходит по
+    СВОЕМУ stop_event (``system_stop_event`` не взводится вовсе), очередь
+    переиспользуется новой инкарнацией и та получает сообщение писателя ЦЕЛИКОМ.
+    Обязан быть GREEN и сейчас, и после фикса Task 1.2 — это пин на то, что
+    индивидуальный стоп НЕ входит в «читатель мёртв навсегда»."""
+
+    def test_new_reader_incarnation_on_reused_queue_gets_message_intact(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        q = QueueRegistry().create_queues({"data": {}})["data"]
+        results_q = ctx.Queue()  # служебный канал теста — не часть проверяемой топологии
+        reader1_stop = ctx.Event()
+        writer_stop = ctx.Event()
+
+        reader1_bundle = {"queues": {"data": q}, "config": {}, "custom": {}}
+        writer_bundle = {
+            "queues": {},
+            "config": {},
+            "custom": {},
+            "routing_map": {"Reader": {"data": q}},
+        }
+        reader2_bundle = {"queues": {"data": q, "results": results_q}, "config": {}, "custom": {}}
+
+        reader1 = ctx.Process(
+            target=run_process_function,
+            args=(_class_path(_ReaderDoesNotRead), "Reader", reader1_stop, reader1_bundle, None),
+        )
+        writer = ctx.Process(
+            target=run_process_function,
+            args=(
+                _class_path(_SendOneBigMessageThenWaitForStop),
+                "Writer",
+                writer_stop,
+                writer_bundle,
+                None,
+            ),
+        )
+        reader2 = None
+        try:
+            reader1.start()
+            writer.start()
+            time.sleep(0.2)  # writer.run() успевает отправить 1 MiB
+
+            reader1_stop.set()  # ИНДИВИДУАЛЬНЫЙ стоп — system_stop_event не трогаем вовсе
+            reader1.join(timeout=5.0)
+            assert not reader1.is_alive(), "reader1 не вышел сам за 5.0s — тест не смог подготовить сценарий"
+
+            # "restart с reuse" — новая инкарнация процесса "Reader" на ТОЙ ЖЕ очереди.
+            reader2 = ctx.Process(
+                target=run_process_function,
+                args=(_class_path(_ReadsOneMessageAndReportsToResults), "Reader", None, reader2_bundle, None),
+            )
+            reader2.start()
+
+            result_box: dict = {}
+            reader_thread = threading.Thread(target=_read_n, args=(results_q, 1, result_box, 8.0), daemon=True)
+            reader_thread.start()
+            reader_thread.join(timeout=8.0)
+            assert not reader_thread.is_alive(), "новая инкарнация не отчиталась за 8.0s"
+            assert "error" not in result_box, f"чтение результата упало: {result_box.get('error')}"
+            got = result_box.get("result")
+            assert got == [("ok", 1024 * 1024)], f"новая инкарнация получила: {got}"
+
+            writer_stop.set()
+            elapsed, alive = _join_bounded(writer, timeout=8.0)
+            assert not alive, f"writer не вышел после того, как новая инкарнация прочитала; elapsed={elapsed:.3f}s"
+        finally:
+            _cleanup(reader1, writer, reader2)
+            try:
+                q.close()
+                q.cancel_join_thread()
+                results_q.close()
+                results_q.cancel_join_thread()
             except Exception:
                 pass
