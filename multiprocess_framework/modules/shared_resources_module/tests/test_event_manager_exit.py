@@ -22,6 +22,8 @@ import threading
 import time
 from queue import Empty
 
+import pytest
+
 from multiprocess_framework.modules.process_manager_module.runner.process_runner import (
     run_process_function,
 )
@@ -65,23 +67,45 @@ class TestChildExitsDespiteUndrainedQueue:
         assert elapsed < 2.0, f"выход занял {elapsed:.3f}s (>= 2.0s) — не уложился в дедлайн"
 
 
+@pytest.fixture
+def em():
+    """EventManager в процессе pytest; teardown вычитывает очередь.
+
+    Страж от зависания всего набора при регрессии: если очередь снова станет
+    ``multiprocessing.Queue`` (инъекция J1, 2026-09-23), непрочитанные события
+    держат feeder, и pytest виснет на СВОЁМ выходе вместо того, чтобы упасть.
+    """
+    manager = EventManager()
+    manager.initialize()
+    yield manager
+    queue = manager.get_event_queue()
+    while queue is not None:
+        try:
+            queue.get(timeout=0.2)
+        except Empty:
+            break
+
+
+def test_event_queue_capacity_is_1000() -> None:
+    """Литерал отдельно от кода: тесты (b) выводят ожидаемое из константы."""
+    assert EVENT_QUEUE_MAXSIZE == 1000
+
+
 class TestBoundedDropOldest:
     """Property (b): переполнение вытесняет старейшее, считает dropped."""
 
-    def test_overflow_drops_oldest_keeps_newest_and_counts_dropped(self) -> None:
-        em = EventManager()
-        em.initialize()
+    def test_overflow_drops_oldest_keeps_newest_and_counts_dropped(self, em) -> None:
         n = EVENT_QUEUE_MAXSIZE + 10
         for i in range(n):
             em.emit_event(EventType.CONFIG_UPDATED, seq=i)
 
-        assert em._event_queue.qsize() == EVENT_QUEUE_MAXSIZE
+        assert em.get_event_queue().qsize() == EVENT_QUEUE_MAXSIZE
         assert em.get_stats()["events"]["dropped"] == 10
 
         seqs = []
         while True:
             try:
-                seqs.append(em._event_queue.get_nowait()["seq"])
+                seqs.append(em.get_event_queue().get_nowait()["seq"])
             except Empty:
                 break
         assert len(seqs) == EVENT_QUEUE_MAXSIZE
@@ -92,9 +116,7 @@ class TestBoundedDropOldest:
 class TestWaitForEventRequeuesNonMatching:
     """Property (c): wait_for_event находит совпадение, остальное возвращает в очередь."""
 
-    def test_wait_for_event_returns_match_and_requeues_others(self) -> None:
-        em = EventManager()
-        em.initialize()
+    def test_wait_for_event_returns_match_and_requeues_others(self, em) -> None:
         em.emit_event(EventType.QUEUE_ADDED, seq=1)
         em.emit_event(EventType.PROCESS_REGISTERED, seq=2)
         em.emit_event(EventType.QUEUE_ADDED, seq=3)
@@ -107,7 +129,7 @@ class TestWaitForEventRequeuesNonMatching:
         remaining = []
         while True:
             try:
-                remaining.append(em._event_queue.get_nowait()["seq"])
+                remaining.append(em.get_event_queue().get_nowait()["seq"])
             except Empty:
                 break
         assert sorted(remaining) == [1, 3]
