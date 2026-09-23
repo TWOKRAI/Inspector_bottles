@@ -31,6 +31,16 @@
 достаточно; более сильная гарантия потребовала бы правки ``Services/robot_comm``,
 которая вне области задачи.
 
+**Ручка длительности задания (Task 5.3b, ``job_ms``).** Конфиг ``job_ms`` (мс) даёт
+``job_ticks = max(1, round(job_ms / (TICK_INTERVAL_S*1000)))`` — тиков исполнения
+задания ``RobotSimCore`` (``TICK_INTERVAL_S`` — единственный источник истины,
+``Services.robot_comm.server.sim_core``). Ключа нет — ядро строится без
+``job_ticks``, дефолт ``RobotSimCore`` (2) не меняется. Разбор и валидация —
+в :meth:`configure` (число > 0, ``bool`` не считается числом); отказ — той же
+дорогой, что порт занят (:meth:`_fail`, ``state == "error"``), но наблюдается
+только на попытке поднять сервер (:meth:`_start_server`), не на самом
+``configure()``.
+
 **Счёт записей — под ``Lock``, публикация метрики — с чужого потока не зовётся.**
 ``on_write`` вызывается ``pymodbus``-сервером на ЕГО СОБСТВЕННОМ потоке
 (``sim_robot.py:69`` — корутина ``binder`` исполняется event-loop'ом сервера, не
@@ -50,6 +60,7 @@ from __future__ import annotations
 
 import os
 import socket
+import math
 import threading
 import time
 from collections import deque
@@ -63,7 +74,7 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 from Plugins.hub.device_hub.client import DeviceHubClient
-from Services.robot_comm.server.sim_core import VFD_CMD_ADDR, RobotSimCore
+from Services.robot_comm.server.sim_core import TICK_INTERVAL_S, VFD_CMD_ADDR, RobotSimCore
 from Services.robot_comm.server.sim_journal import SimJournal
 
 #: Теги строк журнала, попадающих в ``recent`` команды ``sim_robot.journal``
@@ -140,6 +151,27 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._jog_freq_hz: float = cfg.get("jog_freq_hz", _DEFAULT_JOG_FREQ_HZ)
         self._belt_mm_s_at_max_freq: float | None = cfg.get("belt_mm_s_at_max_freq")
 
+        # Task 5.3b (контракт лида §4.2.3): ручка длительности задания. Разбор — здесь
+        # (вместе с остальным конфигом), но наблюдаемый отказ (`_fail`, state="error")
+        # откладывается до `_start_server()` — так его видит тест (job_ms проверяется
+        # ПОСЛЕ configure(), при попытке поднять сервер), а сам процесс configure() не
+        # падает на кривом значении.
+        job_ms_cfg = cfg.get("job_ms")
+        self._job_ticks: int | None = None
+        self._job_ms_error: ValueError | None = None
+        if job_ms_cfg is not None:
+            if (
+                not isinstance(job_ms_cfg, (int, float))
+                or isinstance(job_ms_cfg, bool)
+                or not math.isfinite(job_ms_cfg)  # .nan / .inf из YAML (ревью 5.3b п.4)
+                or job_ms_cfg <= 0
+            ):
+                self._job_ms_error = ValueError(
+                    f"sim_robot_host: job_ms должен быть числом > 0, получено {job_ms_cfg!r}"
+                )
+            else:
+                self._job_ticks = max(1, round(float(job_ms_cfg) / (TICK_INTERVAL_S * 1000.0)))
+
         self._server: Any = None
         self._lock = threading.Lock()
         self._writes_seen = 0
@@ -214,6 +246,13 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         if self._server is not None:
             return
 
+        if self._job_ms_error is not None:
+            # Task 5.3b §4.2.3: конфиг разобран в configure(), отказ наблюдается здесь
+            # (процесс жив, sim_robot.status отвечает "error") — до пробы порта, чтобы
+            # не занимать сеть под заведомо неверный конфиг.
+            self._fail(ctx, self._job_ms_error)
+            return
+
         try:
             self._probe_port_free()
         except OSError as exc:
@@ -229,10 +268,13 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             from Services.modbus.sdk.errors import ModbusNotAvailableError
             from Services.robot_comm.server.sim_robot import SimRobotServer
 
-            core = RobotSimCore(
-                on_job_done=self._on_job_done,
-                on_event=self._journal.on_event,
-            )
+            core_kwargs: dict[str, Any] = {
+                "on_job_done": self._on_job_done,
+                "on_event": self._journal.on_event,
+            }
+            if self._job_ticks is not None:
+                core_kwargs["job_ticks"] = self._job_ticks
+            core = RobotSimCore(**core_kwargs)
             server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
             server.start()
         except (ModbusNotAvailableError, ImportError, OSError) as exc:  # noqa: BLE001 — деградация, не отказ

@@ -180,6 +180,16 @@ class SceneSourcePlugin(ProcessModulePlugin):
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
         belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
+        # Task 5.3b (контракт лида §4.2.2): направление ленты в кадре + точка входа
+        # объекта (off=0). belt_direction=-1 -> объект входит с правого края кадра
+        # (entry_x_px = resolution_width), т.к. +x кадра = -Y робота (калибровка
+        # рецепта), а лента везёт в +Y. Валидация (не ±1) уходит в тот же путь, что и
+        # прочие сбои сборки движка (see try/except ниже — SceneCompositor кидает
+        # ValueError, сборка откатывается на фон).
+        # Без int(): «abc», 1.5, True должны дойти до SceneCompositor внутри try ниже и
+        # откатить сборку на фон с записью в лог, а не уронить configure() (ревью 5.3b п.3).
+        belt_direction = cfg.get("belt_direction", 1)
+        entry_x_px = 0.0 if belt_direction == 1 else float(self._width)
 
         # Task 3.3a: два режима шага спавна — ровно один задан в конфиге. Оба заданы ->
         # ValueError, НЕ пойманный ниже try/except (это ошибка конфигурации стенда, а не
@@ -250,6 +260,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 belt_y_px=belt_y_px,
                 background_bgr=_BACKGROUND_BGR,
                 background_tile=background_tile,
+                belt_direction=belt_direction,
+                entry_x_px=entry_x_px,
             )
         except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()
             ctx.log_error(

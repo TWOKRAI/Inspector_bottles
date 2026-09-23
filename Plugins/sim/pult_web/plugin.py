@@ -388,7 +388,8 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             if not isinstance(result, dict):
                 result = {"status": "error", "message": "bad_response"}
             if result.get("status") == "error":
-                self._reply_json(504, {"ok": False, "error": result.get("message", "robot_error")})
+                fallback = "robot_error" if client is pult._client else "scene_error"
+                self._reply_json(504, {"ok": False, "error": result.get("message", fallback)})
                 return
             self._reply_json(200, result)
 
@@ -396,14 +397,18 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             """Прочитать РОВНО ``Content-Length`` байт (не до EOF, см. докстринг модуля).
 
             Возвращает ``(args, None)`` при успехе либо ``(None, (status, payload))``
-            для одного из трёх отказов ДО вызова ``robot`` (DESIGN п.3): 413 —
-            размер, до чтения тела; 400 ``bad_json`` — кривой JSON/не dict.
+            для одного из отказов ДО вызова команды (DESIGN п.3): 413 — размер, до
+            чтения тела; 400 ``bad_length`` — отрицательный ``Content-Length`` (иначе
+            ``rfile.read(-1)`` читал бы до EOF в обход 413, ревью 5.3a п.3);
+            400 ``bad_json`` — кривой JSON/не dict.
             """
             length_header = self.headers.get("Content-Length")
             try:
                 length = int(length_header) if length_header is not None else 0
             except ValueError:
                 length = 0
+            if length < 0:
+                return None, (400, {"ok": False, "error": "bad_length"})
             if length > _MAX_BODY_BYTES:
                 return None, (413, {"ok": False, "error": "too_large"})
             raw = self.rfile.read(length) if length else b""
@@ -470,7 +475,10 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
 
 @register_plugin("pult_web", category="control", description="Веб-пульт ленты — страница + JSON API на 8092")
 class PultWebPlugin(ProcessModulePlugin):
-    """Side-effect плагин: HTTP-страница + JSON API, форвардящий ``belt.*`` в ``robot``."""
+    """Side-effect плагин: HTTP-страница + JSON API.
+
+    ``belt.*``/``sim_robot.*`` уходят в ``robot``, ``truth.*`` — в процесс сцены.
+    """
 
     name = "pult_web"
     category = "control"

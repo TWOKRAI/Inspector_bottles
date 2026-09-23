@@ -38,16 +38,18 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `GET /api/truth` | — | `truth.status` → процесс `scene_process` | результат команды как есть (Task 5.3a) |
 | `POST /api/truth/reset` | `{}` | `truth.reset` → процесс `scene_process` | результат команды как есть (Task 5.3a) |
 
-Путь **не валидирует** поля тела — форвардит их в `robot` как есть, валидация
-(`bad_args` и т.п.) целиком на стороне Task 2.3a. Отказы ДО обращения к
-`robot`: чужой `Host` (не `127.0.0.1:<port>`/`localhost:<port>`, в том числе
+Путь **не валидирует** поля тела — форвардит их адресату как есть (`robot` или,
+для `truth.*`, процессу сцены), валидация (`bad_args` и т.п.) целиком на
+стороне адресата. Отказы ДО обращения к адресату: чужой `Host` (не `127.0.0.1:<port>`/`localhost:<port>`, в том числе
 без порта, `[::1]` и HTTP/1.0 без `Host`) → `403 {ok: false, error:
 "forbidden_host"}` на `GET` и `POST` (защита от DNS rebinding); неизвестный путь
 → `404`; `POST` с `Content-Type` не `application/json…` (в том числе без него,
 как у голого `curl -X POST`) → `415 {ok: false, error: "unsupported_media_type"}`;
-кривой JSON тела → `400 {ok: false, error: "bad_json"}`; тело > 4 КБ
-(`Content-Length`, до чтения) → `413`. Ответ `robot` со `status: "error"` →
-`504 {ok: false, error: <message клиента>}`. Ответ `robot` с `ok: false` при
+кривой JSON тела → `400 {ok: false, error: "bad_json"}`; отрицательный
+`Content-Length` → `400 {ok: false, error: "bad_length"}`; тело > 4 КБ
+(`Content-Length`, до чтения) → `413`. Ответ адресата со `status: "error"` →
+`504 {ok: false, error: <message клиента>}`, без `message` — `robot_error` или
+`scene_error` по адресату. Ответ `robot` с `ok: false` при
 `status: "ok"` (например, `server_not_running`) уходит как есть с кодом 200 —
 страница различает его по `ok`.
 
@@ -148,7 +150,8 @@ dead-man'а при удержании (ревью 2.3b, итерация 2, на
 годных D) · лишних заданий E · ложных тревог F (повтор кадра G) · на ленте H ·
 ошибка захвата ср X.XX / макс Y.YY мм». `pick_error_mean_mm`/`pick_error_max_mm`
 через `toFixed(2)`, а при `null` — символ «—». Процесс сцены не отвечает
-(504 либо сбой запроса) → «правда недоступна»; журнал и статус ленты от этого
+(504, сбой запроса или ответ 200 со `status` не `ok`) → «правда недоступна»,
+в том числе если до этого показывались счётчики; журнал и статус ленты от этого
 не зависят (раздельные опросы, раздельные клиенты `DeviceHubClient`). Кнопка
 «Сброс правды» → `POST /api/truth/reset`, сразу повторный опрос.
 
