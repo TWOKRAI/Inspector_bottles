@@ -12,8 +12,8 @@
   архитектуры» — кто чем владеет, что этот план берёт, что отдаёт, где границы. Коротко: продолжает
   [`frontend-constructor`](../frontend-constructor/plan.md) (Ф2 дала headless-first и `frontend/run.py`;
   Ф4 `GuiBootstrap`/`GuiHostRuntime` — разъём, в который Пульт вставляет вторую реализацию рантайма),
-  зависит от [`backend-ctl-review-remediation`](../backend-ctl-review-remediation.md) Ф3 (транспорт
-  `SocketChannel`), не переносит файлы, чтобы не упереться в окно codemod
+  забрал из [`backend-ctl-review-remediation`](../backend-ctl-review-remediation.md) Ф3 (транспорт
+  `SocketChannel`) в Task 1.3a (решение владельца 2026-09-24), не переносит файлы, чтобы не упереться в окно codemod
   [`framework-architecture-rework`](../framework-architecture-rework/plan.md) (Р-4/2б.2/3.4/5.1), и
   является потребителем для [`line-sim`](../line-sim/plan.md) Ф6/Ф7.
 
@@ -132,6 +132,10 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
   2026-08-12** (`8fae4034`, ADR-PMM-026): дефолт `session_isolation` ON, вариант «одна дверь» отвергнут
   там же. Пульт + dev-драйвер одновременно — уже штатно. Из Ф3 remediation Пульту нужна только 3.1
   (HOL) — и к приёмке 1.4 (дисплеи не должны замирать на долгой команде), не к старту 1.2.
+- **2026-09-24 (решение владельца):** remediation 3.1 (HOL) и 3.3 (`sendall`, max-line, байт-кап) переносятся
+  сюда как **Task 1.3a**, обязательная до старта 1.4. Remediation Ф3 после этого пуста. Причина — Пульт
+  становится вторым долгоживущим клиентом двери, и ждать чужой план, не стартовавший с июля, значит
+  получить «дисплеи замирают» на приёмке 1.4.
 - **2026-09-22 (планирование):** третье воплощение `gui`-слота — **мост** (`BridgeGuiProcess`):
   принимает data-трафик как headless, но не выбрасывает, а публикует дескрипторы кадров подписчикам
   сокета и (Ф2) отдаёт поток. **Rejected:** отдельный процесс-«экспортёр» рядом с `gui` — второй
@@ -188,9 +192,10 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 Файл: [`phase-1-one-machine.md`](phase-1-one-machine.md)
 
 - Task 1.1: Инвентарь разъёмов GUI ↔ дерево — числа, baseline fps и сьюты [DONE 2026-09-22, `a20e673f`; fps не снят] — **Module contract:** none (отчёт)
-- Task 1.2: Сокетный транспорт для GUI: клиент во фреймворк, `RemoteCommandSender`/`RemoteStateProxy`, fence-штамп как у встроенного GUI [PENDING] (зависит от 1.1; remediation 3.2 «второй клиент» **уже закрыта** `8fae4034`; 3.1 HOL — к приёмке 1.4, не к старту; 3.3 `sendall` — не блокер) — **Module contract:** impl-only + new-lite (`socket_client.py`)
+- Task 1.2: Сокетный транспорт для GUI: клиент во фреймворк, `RemoteCommandSender`/`RemoteStateProxy`, fence-штамп как у встроенного GUI [PENDING] (зависит от 1.1; remediation 3.2 «второй клиент» **уже закрыта** `8fae4034`; 3.1 HOL и 3.3 `sendall` — Task 1.3a, не к старту 1.2) — **Module contract:** impl-only + new-lite (`socket_client.py`)
 - Task 1.3: Кадры между деревьями на одной машине: `BridgeGuiProcess` + `RemoteFrameSource` (SHM по имени) [PENDING] (зависит от 1.2) — **Module contract:** new-lite
-- Task 1.4: Автономный Пульт: хост `apps/pult/` + `GuiAppSpec` инспектора по имени — те же вкладки, без дерева; отказоустойчивость в обе стороны [PENDING] (зависит от 1.2, 1.3; предпосылка — frontend-constructor **T4.1–T4.4**, ред. 2: не «если не сделана», а обязательно до 1.4) — **Module contract:** new-full
+- Task 1.3a: Серверный транспорт `SocketChannel`: без head-of-line, медленный клиент не держит запись (из remediation 3.1 + 3.3, решение владельца 2026-09-24) [PENDING] (зависимостей нет — параллельно 1.2/1.3; обязательна до 1.4) — **Module contract:** impl-only
+- Task 1.4: Автономный Пульт: хост `apps/pult/` + `GuiAppSpec` инспектора по имени — те же вкладки, без дерева; отказоустойчивость в обе стороны [PENDING] (зависит от 1.2, 1.3, 1.3a; предпосылка — frontend-constructor **T4.1–T4.4**, ред. 2: не «если не сделана», а обязательно до 1.4) — **Module contract:** new-full
 
 ### Phase 1b — Рецепт и auth принадлежат бэкенду: GUI без диска (ред. 2, 2026-09-23)
 
@@ -217,7 +222,7 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 - Task 3.2: Вкладка «Симулятор»: Пульт подключён к дереву line-sim (`apps/line_sim`, 8766 — **есть**, line-sim 1.1/1.3); точка посадки line-sim Ф6/Ф7.3 [PENDING] (зависит от 3.1) — **Module contract:** impl-only
 - Task 3.3: Один режим GUI: слот `gui` в дереве = мост, `frontend/run.py` = бэкенд + Пульт на localhost, Qt-`GuiProcess` → LEGACY; решение по числам 1.4 [PENDING] (зависит от 1.4, 1b.3, 3.2) — **Module contract:** impl-only
 
-**Порядок фаз (ред. 2, 2026-09-23):** T4.1–T4.4 (frontend-constructor) ∥ 1.2 → 1.3 → 1.4 → 1b.3; 1b.1/1b.2 — параллельно Ф1; → Ф3 (+3.3) → 1b.4 → Ф2.
+**Порядок фаз (ред. 2, 2026-09-23):** T4.1–T4.4 (frontend-constructor) ∥ 1.2 → 1.3 → 1.4, 1.3a ∥ 1.2/1.3 и до 1.4 → 1b.3; 1b.1/1b.2 — параллельно Ф1; → Ф3 (+3.3) → 1b.4 → Ф2.
 
 **Порядок фаз для максимальной пользы (2026-09-22, ред. 1):** Ф1 → **Ф3** → Ф2. Одна машина с инспектором и
 симулятором даёт всю ценность Пульта (два бэкенда рядом, посадка Qt-частей line-sim); сеть и токен (Ф2) —
@@ -239,10 +244,9 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
   план ставится на паузу (правило «один активный план на полосу»), не сливается поверх codemod.
 - **Один стенд.** Live-задачи (1.4, 2.x, 3.x) и live-задачи line-sim не идут одновременно на одном
   бэкенде; с двумя бэкендами — по порту.
-- **Зависимость от чужих планов, не стартовавших:** `backend-ctl-review-remediation` 3.1 HOL (к приёмке
-  1.4; 3.2 уже сделана `8fae4034`) и frontend-constructor T4.2 (перед 1.4). Оба — в прототипе/фреймворке
-  без переноса файлов, окна не требуют; если владелец их не запускает — их объём добавляется к 1.4 явно,
-  а не «само получится».
+- **Зависимость от чужих планов, не стартовавших:** frontend-constructor T4.2 (перед 1.4) — в прототипе/
+  фреймворке без переноса файлов, окна не требует; если владелец её не запускает — её объём добавляется к
+  1.4 явно, а не «само получится». Транспорт двери (бывшая remediation 3.1/3.3) — уже свой, Task 1.3a.
 - **План писался против устаревшего `main` (найдено 2026-09-22):** ветка `feat/line-sim` на 112 коммитов
   впереди, и то, от чего этот план «зависел» (дверь кадров, дерево симулятора), там уже сделано иначе,
   чем здесь предполагалось. Ссылки исправлены; **до approve — merge `feat/line-sim` в `main`**, иначе
