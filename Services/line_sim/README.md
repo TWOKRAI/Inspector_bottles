@@ -23,7 +23,7 @@ from Services.line_sim import (
 | `LayerAugment` | `interfaces.py` | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params`; `to_dict()`/`from_dict()` — Dict at Boundary (Task 3.4) |
 | `SceneCompositorProtocol` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` (переименован из `SceneCompositor` при подключении конкретного класса, LS-009) |
-| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60))`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)` |
+| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), background_tile=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; фон-тайл — Task 3.6 |
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
@@ -221,3 +221,42 @@ composite`, тот же примитив, что `LayeredObject`). Возвра�
 (плагину): один producer, одни часы. Пустой спавнер → кадр одного фона, без исключений.
 Объекты рисуются в порядке спавна — при перекрытии более поздний перекрывает более ранний
 (z-order = порядок списка, без отдельного сортировочного ключа).
+
+### Фон-текстура (Task 3.6, LS-011)
+
+`SceneCompositor(..., background_tile=None)` — необязательный тайл фона, RGB `uint8`
+`(th, tw, 3)`; иное — `ValueError` в конструкторе. Компоновщик хранит копию и файлов не читает
+(файл читает плагин, ключ `background_texture`).
+
+- По X тайл прокручивается на `shift_px = round(encoder_to_offset_mm(now_encoder, 0) *
+  px_per_mm)`: столбец кадра `u` показывает столбец тайла `(u + round(x_px) - shift_px) mod tw`.
+  Формула и `px_per_mm` те же, что у объектов, поэтому объект стоит на одном месте рисунка ленты
+  при любом ходе энкодера, в том числе назад. Тайл не растягивается: уже кадра — повторяется.
+- По Y тайл кладётся по центру линии ленты: верх `round(belt_y_px - th/2)`, строки вне полосы
+  закрашиваются `background_bgr`.
+- `background_tile=None` — кадр байт в байт как в 3.4.
+
+### Инструмент `tools/make_seamless_texture.py` — фото → бесшовный тайл
+
+```bash
+python -m Services.line_sim.tools.make_seamless_texture фото.jpg --out data/line_sim/belt_tile.png \
+    --scene-px-per-mm 0.6 --pitch-mm <шаг звена, мм>
+# или вместо --pitch-mm: --photo-width-mm <сколько мм ленты по всей ширине фото>
+```
+
+Лента на фото идёт горизонтально, снято строго сверху (поворот и перспектива — забота
+фотографа). Масштаб применяется **до** склейки. `--pitch-mm`: период рисунка ищется на
+исходнике, коэффициент `S·M / период`; периода нет — выход с кодом 1 и советом взять
+`--photo-width-mm`. Без масштаба тайл остаётся в пикселях фото (с предупреждением).
+
+Два пути склейки, выбранный печатается:
+- **период** — период ищется автокорреляцией профиля столбцов, ширина тайла выбирается из
+  `[W/2, W − P]` там, где рисунок лучше всего повторяет своё начало. Обрезка «целым числом
+  периодов» не годится: период звена в пикселях сцены нецелый (25.4 мм × 0.6 = 15.24 px), и
+  шов копил бы сдвиг фазы. Тайл принимается, только если шов не хуже самого резкого перехода
+  внутри;
+- **зеркало** — `[фото | фото отражённое]`, шов ровно 0 по построению; кросс-фейда нет.
+
+Вывод — токены `method= period_px= seam_diff= inner_diff= scale= size=` и строка для конфига
+стенда `background_texture: <out>`. Числа проверять глазами: на реальном фото автокорреляция
+может найти двойной шаг звена вместо одинарного (проверено только на синтетике).

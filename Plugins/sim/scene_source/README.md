@@ -44,6 +44,7 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 | `stale_ms` | `500` | порог протухания значения мира (мс) |
 | `seed` | `0` | seed `np.random.default_rng` движка (класс/угол/дефект объектов) |
 | `camera_id` | `0` | попадает в `item["camera_id"]` (форма как у боевых источников) |
+| `background_texture` | нет (сплошной фон) | путь к картинке фона (Task 3.6): относительный — от корня репозитория, как `preset_path`. Тайл прокручивается с энкодером (`Services/line_sim/README.md` → «Фон-текстура»). Нечитаемый файл — один `log_error` в `configure()`, движок работает на сплошном фоне. Тайл из фото — `python -m Services.line_sim.tools.make_seamless_texture` |
 
 **Ровно один из `spawn_interval_s`/`spawn_spacing_mm`** (Task 3.3a): оба заданы в конфиге
 стенда — `ValueError` в `configure()`, НЕ проглатываемый общим `try/except` вокруг сборки

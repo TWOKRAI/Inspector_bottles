@@ -91,6 +91,12 @@ processes:
         # spawn_interval_s: [1.6, 1.6]  # старый режим (таймер) — второй режим, см. Task 3.3a
         spawn_spacing_mm: [164.0, 164.0]
         scene_length_mm: 1200
+        # Task 3.6: фон — любая картинка, прокручивается с энкодером (сплошной серый, пока ключ
+        # закомментирован). Тайл из фото ленты сверху:
+        #   python -m Services.line_sim.tools.make_seamless_texture фото.jpg \
+        #       --out data/line_sim/belt_tile.png --scene-px-per-mm 0.6 --pitch-mm <шаг звена, мм>
+        # --scene-px-per-mm обязан совпадать с px_per_mm выше. Путь от корня репозитория.
+        # background_texture: data/line_sim/belt_tile.png
         defect_probability: 0.25
         stale_ms: 500
 
