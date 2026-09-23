@@ -1,0 +1,82 @@
+# Контракт лида 5.2 — правда на проводе (ред. 3, 2026-09-23, до тестера)
+
+Часть [`phase-5-ground-truth.md`](phase-5-ground-truth.md), Task 5.2. Определения и критерии
+приёмки — там; здесь форма реализации и литералы.
+
+**Зачем владельцу.** Журнал 5.1 смотрит со стороны робота (задание ↔ задание) и не знает, что
+было на ленте. Сим знает: какие объекты появились, какие сняты, какие уехали. Отсюда
+«поймал / пропустил / лишнее задание / ложная тревога / ошибка захвата» — без участия прототипа.
+Это же основа варианта (3) для `repeats_frozen_xy` (решение владельца открыто, см. отчёт стенда 5.1).
+
+**Разведка (лид).** Сопоставление уже есть (Task 3.5): `SceneSourcePlugin._drain_jobs` зовёт
+`match_job` и снимает найденный объект через `spawner.remove`. Спавн и уход со сцены происходят
+молча внутри `ObjectSpawner.tick()`: событий нет, и возвращает он `None`. `_drain_jobs` идёт в
+`produce()` ДО `tick()`.
+
+## 1. `Services/line_sim/core/truth.py` (new-lite) — `TruthLedger`
+
+Чистый класс без IPC, без лока (лок у владельца-плагина), без часов.
+
+- `on_spawn(passport: ObjectPassport)`: объект берётся под учёт, признак брака —
+  `passport.defect is not None`. Повторный `on_spawn` того же `object_id` ничего не делает.
+- `on_match(result: MatchResult)` (тип из `Services/line_sim/core/matching.py`):
+  - `matched`, объект под учётом → `caught += 1` (+ `caught_defect` или `caught_ok`), невязка
+    идёт в `pick_error`, объект с учёта снимается (исход решён);
+  - `matched`, объект НЕ под учётом (появился раньше, чем ledger) → `untracked_jobs += 1`, больше
+    ничего;
+  - `dup` → `dup_jobs += 1`;
+  - `no_object` → `false_alarm += 1`.
+- `on_despawn(object_id)`: объект под учётом → `missed += 1` (+ `missed_defect` или `missed_ok`),
+  с учёта снимается. Неизвестный или уже пойманный id → ничего.
+- `counters() -> dict` (новый словарь, плоский):
+  `caught, caught_defect, caught_ok, missed, missed_defect, missed_ok, dup_jobs, false_alarm,
+  untracked_jobs, on_belt, pick_error_mean_mm, pick_error_max_mm`. `on_belt` — число объектов под
+  учётом с ещё не решённым исходом. `pick_error_*` — `None`, пока не было ни одного `matched`
+  под учётом.
+- `reset()`: все счётчики и `pick_error` в ноль (`None`); объекты под учётом **остаются**, их
+  исход ещё не решён, после сброса они засчитаются как обычно.
+- Инварианты: `caught == caught_defect + caught_ok`, `missed == missed_defect + missed_ok`;
+  исход объекта решается не больше одного раза (пойман и пропущен одновременно не бывает).
+  Память: только объекты с нерешённым исходом, сверху ограничена `max_active` спавнера.
+
+**Литералы** (паспорта: A и C без брака, B с `defect="damaged"`):
+`on_spawn(A, B, C)`; `on_match(matched A, 0.5 мм)`; `on_match(matched B, 1.5 мм)`;
+`on_match(dup B)`; `on_match(no_object, None)`; `on_despawn(A)`; `on_despawn(C)` →
+`caught 2 (ok 1, defect 1), dup_jobs 1, missed 1 (ok 1, defect 0), false_alarm 1,
+untracked_jobs 0, on_belt 0, pick_error_mean_mm 1.0, pick_error_max_mm 1.5`.
+`on_match(matched "obj-99")` без спавна → `untracked_jobs 1`, `caught 0`.
+`reset()` при `on_belt 1`, затем `on_despawn` того объекта → `missed 1`.
+
+## 2. `Plugins/sim/scene_source/plugin.py`
+
+- `TruthLedger` создаётся в `configure`, охраняется **своим** локом (`_truth_lock`, не `_lock` мира).
+- `_drain_jobs`: каждый исход → `ledger.on_match(result)`, включая ветку «движок не собран»
+  (`MatchResult("no_object", None, None)`).
+- `produce()`, вокруг `spawner.tick()`: множество id до тика (после `_drain_jobs`) и после;
+  новые → `on_spawn(passport)`, исчезнувшие → `on_despawn(id)`. Порядок «сначала задания,
+  потом тик» сохраняется: задание на объект, уходящий со сцены в этом же кадре, засчитывается
+  как пойманный, не как пропущенный.
+- Уровни (ADR-PM-038; `declare_metric` в `configure`): `truth_caught`, `truth_dup_jobs`,
+  `truth_missed`, `truth_false_alarm`, `truth_on_belt`. Публикация из `produce()` **не чаще
+  раза в `truth_publish_s`** (конфиг, дефолт 1.0 с): `publish_metric` просит звать на своём
+  такте, а не на кадре.
+- Команды: `truth.status` → `{"status": "ok", "counters": {...counters()}}`; `truth.reset` →
+  `ledger.reset()`, `{"status": "ok"}`. Движок не собран — команды работают (растёт только
+  `false_alarm`).
+- В дерево мира (`sim.*`) счётчики не пишутся.
+
+**Вне задачи:** пульт и вывод наружу (Task 5.3); `repeats_frozen_xy` (решение владельца);
+класс и угол (Task 5.5); ни одного файла в `multiprocess_prototype/` и боевых рецептах.
+
+## Кто что пишет
+
+- **Тестер** (worktree на коммите этого контракта, до реализации): §1 полностью, по литералам;
+  §2 на фейковом ctx — `truth.status`/`truth.reset`, путь `scene.job_done` → `produce()` →
+  счётчики, уход объекта со сцены → `missed`, уровни в `publish_metric` и их прореживание.
+- **Автор** (hazard): `truth.reset` из командного потока во время `produce()`; порядок «задание
+  и уход со сцены в одном кадре»; `max_active` — объект, не созданный из-за потолка, не
+  считается ни пойманным, ни пропущенным.
+- **Лид** (стенд, после слияния): `dup_jobs` против `SimJournal.dups` на одном живом прогоне;
+  плотный поток, 200 объектов, задания из правды → неверных сопоставлений 0 (число — в
+  `plan.md`, риск «плотный поток»); `introspect_telemetry` 8766 → `levels` писателя
+  `scene_source` = `truth.status`.

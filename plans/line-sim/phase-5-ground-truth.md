@@ -232,6 +232,8 @@ MJPEG — метаданные на них не едут, а узел сверк
 **Dependencies:** Task 3.5.
 **Module contract:** new-lite (`Services/line_sim/core/truth.py`).
 
+**Контракт лида (ред. 3, 2026-09-23):** [`phase-5-contract-5.2.md`](phase-5-contract-5.2.md).
+
 ---
 
 ### Task 5.3 — Счётчики наружу + сквозной прогон обоих инвариантов
