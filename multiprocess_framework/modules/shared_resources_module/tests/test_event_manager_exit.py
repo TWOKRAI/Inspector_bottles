@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Тесты Task 1.1 итерация 2 (`plans/lifecycle-graceful-stop.md`): реальный корень
-5s-зависания на стопе — процесс-локальная `_event_queue` в EventManager
+"""Тесты Task 1.1 итерация 2 (`plans/lifecycle-graceful-stop.md`): один из источников
+5s-зависания на стопе (второй — Task 1.2) — процесс-локальная `_event_queue` в EventManager
 (`events/core/manager.py`), которую пишет только `emit_event`, а читает только
 `wait_for_event` (вне тестов никто не зовёт). Раньше это была `multiprocessing.Queue`
 без единого читателя в другом процессе — pipe набивался, `Queue._finalize_join` на
@@ -20,7 +20,7 @@ from __future__ import annotations
 import multiprocessing
 import threading
 import time
-from queue import Empty
+from queue import Empty, Queue
 
 import pytest
 
@@ -111,6 +111,44 @@ class TestBoundedDropOldest:
         assert len(seqs) == EVENT_QUEUE_MAXSIZE
         assert seqs[0] == 10  # 0..9 вытеснены (10 dropped)
         assert seqs[-1] == n - 1  # новейшее сохранено
+
+
+class _RaceInjectingQueue(Queue):
+    """``queue.Queue``, где между ``get_nowait()`` и следующим ``put_nowait()``
+    чужой эмиттер успевает занять только что освобождённый слот — детерминированная
+    имитация гонки конкурентных эмиттеров (ревью it.2, finding 3, ``race.py``)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._inject_once = False
+
+    def get_nowait(self):
+        item = super().get_nowait()
+        if self._inject_once:
+            self._inject_once = False
+            super().put_nowait("foreign-intruder")
+        return item
+
+
+class TestDroppedCounterUnderRace:
+    """Ревью it.2, finding 3: между `get_nowait` A и повторным `put_nowait` A слот
+    забирает конкурентный эмиттер B → теряются ДВА события (старейшее + A), а
+    старый счётчик считал только 1 (один инкремент на внешний ``except Full``).
+    Фикс считает каждую реальную потерю отдельно: успешный `get_nowait` (старейшее
+    вытеснено) и внутренний `except Full` (текущее событие не влезло)."""
+
+    def test_dropped_counts_both_losses_when_concurrent_emitter_wins_freed_slot(self, em) -> None:
+        queue = _RaceInjectingQueue(maxsize=EVENT_QUEUE_MAXSIZE)
+        em._event_queue = queue  # подмена внутренней очереди ради детерминированной гонки
+
+        for i in range(EVENT_QUEUE_MAXSIZE):
+            em.emit_event(EventType.CONFIG_UPDATED, seq=i)
+
+        queue._inject_once = True
+        em.emit_event(EventType.CONFIG_UPDATED, seq="race")  # переполнение → вытеснение с гонкой
+
+        # 2 = старейшее (вытеснено get_nowait) + "race" (put_nowait упал на чужом элементе).
+        assert em.get_stats()["events"]["dropped"] == 2
 
 
 class TestWaitForEventRequeuesNonMatching:

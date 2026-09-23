@@ -8,7 +8,7 @@ EventManager — менеджер системных событий.
 единственный читатель, ``wait_for_event``, живёт в том же процессе, что и писатель
 (``emit_event``); межпроцессной доставки очередь никогда не делала (ADR-SRM-015,
 пересмотр). Bounded (``EVENT_QUEUE_MAXSIZE``): при переполнении старейшее событие
-вытесняется новым, счётчик — в ``get_stats()["dropped"]``.
+вытесняется новым, счётчик — в ``get_stats()["events"]["dropped"]``.
 
 Pickle: _event_queue, _subscribers, _new_event_event исключаются.
 После unpickle они равны None/{}. reinitialize() пересоздаёт их.
@@ -25,7 +25,7 @@ from ..interfaces import IEventManager
 from ...mixins import ManagerStatsMixin
 
 # Ёмкость процесс-локальной очереди событий (ADR-SRM-015). При переполнении
-# emit_event вытесняет старейшее событие новым и считает это в get_stats()["dropped"].
+# emit_event вытесняет старейшее событие новым и считает это в get_stats()["events"]["dropped"].
 EVENT_QUEUE_MAXSIZE = 1000
 
 
@@ -212,7 +212,13 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
     # =========================================================================
 
     def _put_dropping_oldest(self, q: Queue, item: Dict[str, Any]) -> None:
-        """put_nowait без блокировки; очередь полна → вытеснить старейшее и посчитать."""
+        """put_nowait без блокировки; очередь полна → вытеснить старейшее и посчитать.
+
+        Считает то, что реально потеряно (ревью it.2, finding 3): при конкурентных
+        эмиттерах слот, освобождённый ``get_nowait``, может забрать другой поток
+        раньше повторного ``put_nowait`` — тогда теряются ОБА события (старейшее и
+        текущее), не одно. Эмиттеры никогда не блокируются.
+        """
         try:
             q.put_nowait(item)
         except Full:
@@ -220,11 +226,12 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
                 q.get_nowait()
             except Empty:
                 pass
+            else:
+                self._stats["dropped"] += 1
             try:
                 q.put_nowait(item)
             except Full:
-                pass
-            self._stats["dropped"] += 1
+                self._stats["dropped"] += 1
 
     def _notify_subscribers(self, event_type: EventType, event_data: Dict[str, Any]) -> None:
         for callback in self._subscribers.get(event_type, []):
