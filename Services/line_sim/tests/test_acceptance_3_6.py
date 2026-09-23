@@ -323,7 +323,10 @@ def test_tool_scale_by_pitch(tmp_path, capsys):
 
     assert code == 0
     assert out.exists()
-    match = re.search(r"period_px=(\d+)", stdout_text)
+    # Правка лида 2026-09-23: только отдельный токен. Прежний r"period_px=(\d+)" находил число
+    # внутри note= («период найден (period_px=121)…») — инструмент давал method=mirror, а тест
+    # был зелёным с самого начала.
+    match = re.search(r"(?:^|\s)period_px=(\d+)", stdout_text)
     assert match is not None, f"нет токена period_px в выводе: {stdout_text!r}"
     assert abs(int(match.group(1)) - expected_period_px) <= 1
 

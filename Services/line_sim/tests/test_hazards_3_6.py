@@ -83,15 +83,21 @@ def _recompute_inner_and_seam(tile: np.ndarray) -> tuple[float, float]:
 # --------------------------------------------------------------------------------------
 
 
-def test_h1_background_follows_object_at_nonzero_encoder_and_stand_px_per_mm(tmp_path):
+@pytest.mark.parametrize("px_per_mm", [0.6, 3.7, 12.5])
+def test_h1_background_follows_object_at_nonzero_encoder_and_stand_px_per_mm(tmp_path, px_per_mm):
     """H1: тестерский набор гоняет всё на `px_per_mm=1.0` и объекте со `spawn_encoder=0.0`
     — там множитель `px_per_mm` неотличим от 1 и совпадает со сдвигом фона по
     совпадению. Здесь `px_per_mm=0.6` (реальное значение стенда, `make_demo_catalog.py`)
     и объект заспавнен на НЕНУЛЕВОМ энкодере: если реализация забыла умножить сдвиг фона
     на `px_per_mm` (использует голый `encoder_to_offset_mm(now_encoder, 0.0)` без
     множителя), координата тайла под центром объекта поедет с ростом энкодера вместо
-    того, чтобы стоять на месте — именно то, из-за чего задача существует («по льду»)."""
-    px_per_mm = 0.6
+    того, чтобы стоять на месте — именно то, из-за чего задача существует («по льду»).
+
+    Параметризация (ревью 2026-09-23): при одном `px_per_mm=0.6` сдвиг `round(offset_mm) *
+    px_per_mm` (округление ДО умножения) уводил объект по рисунку лишь на 1 px — в допуске, и
+    все тесты оставались зелёными (ревьюер на широком проходе: 3 px при 3.7, 13 px при 12.5).
+    Break-injection лида: на трёх точках этого теста дефект ловит только 12.5 — при 3.7 уход
+    здесь укладывается в допуск 1 px; 3.7 оставлен как промежуточный масштаб."""
     tw, th = 200, 60
     tile = np.zeros((th, tw, 3), dtype=np.uint8)
     for u in range(tw):
@@ -109,7 +115,9 @@ def test_h1_background_follows_object_at_nonzero_encoder_and_stand_px_per_mm(tmp
     read_row = 75
 
     columns: list[int] = []
-    for now_encoder in (700.0, 1200.0, 2100.0):
+    # Ход энкодера подобран под масштаб, чтобы центр объекта оставался в кадре 400 px.
+    span = 350.0 / (px_per_mm * FACTOR_MM)
+    for now_encoder in (spawn_encoder, spawn_encoder + 0.37 * span, spawn_encoder + 0.81 * span):
         cx = encoder_to_offset_mm(now_encoder, obj.passport.spawn_encoder) * px_per_mm
         u = int(round(cx))
         frame, _passports = compositor.render(now_encoder=now_encoder, camera_rect=(0.0, 0.0, 400.0, 200.0))
@@ -421,3 +429,23 @@ def test_h13_tile_not_narrower_than_half_photo():
 
     assert result.method == "period", result.note
     assert result.tile.shape[1] >= (width + 1) // 2  # 75
+
+
+def test_h14_pitch_mode_prints_source_period_and_links(tmp_path, capsys):
+    """H14 (ревью 2026-09-23): при `--pitch-mm` `period_px` после масштаба равен `S·M` по
+    построению и гармонику не покажет — двойной/половинный шаг звена виден только по периоду на
+    исходнике и числу звеньев на фото. Пила 16 px × 3.5 периода: `source_period_px=16`,
+    `links_in_photo=3.50`, и путь «период», а не зеркало."""
+    from Services.line_sim.tools import make_seamless_texture as tool
+
+    image = np.zeros((8, 56, 3), dtype=np.uint8)
+    for x in range(56):
+        image[:, x, :] = int(255 * (x % 16) / 16)
+    src, out = tmp_path / "saw.png", tmp_path / "tile.png"
+    imwrite_unicode(src, image)
+
+    assert tool.main([str(src), "--out", str(out), "--pitch-mm", "60", "--scene-px-per-mm", "2"]) == 0
+    text = capsys.readouterr().out
+    assert " source_period_px=16 " in text
+    assert " links_in_photo=3.50" in text
+    assert "method=period " in text, text

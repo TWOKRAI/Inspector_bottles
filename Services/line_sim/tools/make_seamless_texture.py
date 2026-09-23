@@ -3,9 +3,10 @@
 прокручиваемый тайл фона для `SceneCompositor` (Task 3.6).
 
 Два пути. (1) Периодический: период вдоль X ищется автокорреляцией профиля столбцов
-(среднее по строкам и каналам); кадр обрезается по целому числу периодов — это точный
-шов, работает на модульной ленте со звеньями. Принимается, только если шов (разница
-последнего и первого столбца) не хуже внутренней разницы между соседними столбцами —
+(среднее по строкам и каналам); ширина тайла — там, где рисунок лучше всего повторяет своё
+начало (не целое число найденных периодов: в пикселях сцены период звена нецелый).
+Принимается, только если шов (разница последнего и первого столбца) не хуже внутренней
+разницы между соседними столбцами —
 иначе выбор периода дал бы более грубый скачок на стыке, чем внутри тайла. (2) Зеркало:
 `[image | image[:, ::-1]]` — стыкует буквально одинаковые столбцы, шов = 0 всегда;
 кросс-фейда нет (на зеркальной склейке он ничего не чинит, только размывает). Выбранный
@@ -34,6 +35,12 @@ _MIN_LAG = 4
 #: Порог нормированной автокорреляции для признания локального максимума периодом.
 _AC_THRESHOLD = 0.5
 
+#: Столбцы у левого края, с которых тайл НЕ начинается: край ресайза (INTER_LINEAR повторяет
+#: крайний пиксель) и край объектива не повторяют рисунок. Замер: пила ×7.5 — первые 4 столбца
+#: профиля нули; тайл от края давал шов 135 против 32 внутри, с отступа 8 — шов 1.93.
+# ponytail: фиксированный отступ; подбирать по фото — когда реальный снимок покажет, что мало.
+_EDGE_MARGIN = 8
+
 
 @dataclass(frozen=True)
 class SeamlessResult:
@@ -61,7 +68,7 @@ def find_period(image: np.ndarray) -> int | None:
     плоский профиль (нулевая дисперсия) или отсутствие такого максимума — `None`.
     """
     width = image.shape[1]
-    profile = image.astype(float).mean(axis=(0, 2))
+    profile = image.mean(axis=(0, 2), dtype=np.float64)  # без копии всего фото во float64
     profile = profile - profile.mean()
     if not np.any(profile):
         return None
@@ -99,9 +106,11 @@ def _seam_and_inner(tile: np.ndarray) -> tuple[float, float]:
     return inner_diff, seam_diff
 
 
-def _best_crop_width(image: np.ndarray, period: int) -> int:
-    """Ширина обрезки `c` из `[W/2, W - period]`, при которой столбцы `c..c+period` лучше всего
-    повторяют столбцы `0..period` (по профилю яркости столбцов).
+def _best_crop(image: np.ndarray, period: int) -> tuple[int, int]:
+    """`(start, c)`: тайл — столбцы `start..start+c`, где `start` — отступ от края
+    (`_EDGE_MARGIN`, меньше — если фото узкое), а ширина `c` из `[W/2, W - period - start]`
+    выбрана так, что столбцы `start+c..start+c+period` лучше всего повторяют `start..start+period`
+    (по профилю яркости столбцов).
 
     Период звена в пикселях сцены почти никогда не целый (25.4 мм × 0.6 px/мм = 15.24 px), а
     `find_period` отдаёт целое: обрезка «целым числом найденных периодов» копит сдвиг фазы на
@@ -109,12 +118,16 @@ def _best_crop_width(image: np.ndarray, period: int) -> int:
     ближе всего к целому пикселю. Не уже половины фото — чтобы фактура повторялась реже.
     """
     width = image.shape[1]
-    profile = image.astype(float).mean(axis=(0, 2))
-    head = profile[:period]
-    # find_period отдаёт period <= W // 2, поэтому диапазон не пуст.
+    profile = image.mean(axis=(0, 2), dtype=np.float64)
     lo = max(period, (width + 1) // 2)
-    scores = {c: float(np.mean(np.abs(profile[c : c + period] - head))) for c in range(lo, width - period + 1)}
-    return min(scores, key=scores.__getitem__)
+    # find_period отдаёт period <= W // 2, поэтому width - period >= lo и start >= 0.
+    start = min(_EDGE_MARGIN, width - period - lo)
+    head = profile[start : start + period]
+    scores = {
+        c: float(np.mean(np.abs(profile[start + c : start + c + period] - head)))
+        for c in range(lo, width - period - start + 1)
+    }
+    return start, min(scores, key=scores.__getitem__)
 
 
 def make_seamless_tile(image: np.ndarray) -> SeamlessResult:
@@ -123,12 +136,13 @@ def make_seamless_tile(image: np.ndarray) -> SeamlessResult:
     period = find_period(image)
     note = ""
     if period is not None:
-        candidate = image[:, : _best_crop_width(image, period)].copy()
+        start, crop_w = _best_crop(image, period)
+        candidate = image[:, start : start + crop_w].copy()
         inner_diff, seam_diff = _seam_and_inner(candidate)
         if seam_diff <= inner_diff:
             return SeamlessResult(candidate, "period", period, seam_diff, inner_diff)
         note = (
-            f"период найден (period_px={period}), но шов ({seam_diff:.2f}) хуже "
+            f"период найден ({period} px), но шов ({seam_diff:.2f}) хуже "
             f"внутренней разницы тайла ({inner_diff:.2f}) — откат на зеркальную склейку"
         )
     else:
@@ -179,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     height, width = image.shape[:2]
 
     scale = 1.0
+    source = ""
     if args.scene_px_per_mm is not None:
         s = args.scene_px_per_mm
         if args.photo_width_mm is not None:
@@ -193,6 +208,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 1
             scale = s * args.pitch_mm / period0
+            # period_px после масштаба равен S·M по построению и гармонику не покажет: ошибку
+            # «нашёлся двойной/половинный шаг звена» видно только по числу звеньев на фото.
+            source = f" source_period_px={period0} links_in_photo={width / period0:.2f}"
     else:
         print("масштаб не задан — тайл в пикселях фото", file=sys.stderr)
 
@@ -210,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     reason = f" note={result.note}" if result.note else ""
     print(
         f"method={result.method} period_px={period_token} seam_diff={result.seam_diff:.4f} "
-        f"inner_diff={result.inner_diff:.4f} scale={scale:.4f} size={tile_w}x{tile_h}{reason}"
+        f"inner_diff={result.inner_diff:.4f} scale={scale:.4f} size={tile_w}x{tile_h}{source}{reason}"
     )
     print(f"background_texture: {args.out}")
     return 0
