@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+import Plugins.sim.robot_host.plugin as robot_plugin_module
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import (
     MockProcessServices,
@@ -469,3 +470,46 @@ def test_jog_regs_from_arguments_not_read_back() -> None:
     core.tick()
     assert core.read(0x1200, 3) == [1, 0, 4000], "сторож перетёр команду Modbus-мастера"
     assert core.belt_mm_s == pytest.approx(80.905, abs=0.5)
+
+
+# --------------------------------------------------------------------------- #
+# (e) Task 5.3b §4.2.3 — job_ms маленький настолько, что round() даёт 0 тиков #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен")
+def test_job_ms_rounding_to_zero_still_yields_minimum_one_tick() -> None:
+    """§4.2.3: `job_ticks = max(1, round(job_ms / (TICK_INTERVAL_S*1000)))` — без
+    нижней границы `max(1, ...)` маленький `job_ms` (round() -> 0) дал бы
+    `job_ticks=0`, и `RobotSimCore` никогда не освобождал бы робота (см.
+    `_handle_job`: `elif self._job_countdown is not None: ... if self._job_countdown
+    <= 0` — с `job_ticks=0` ветка "принял" и ветка "выполнено" стали бы одним тиком,
+    но 0 — не валидный countdown семантически, гарантия контракта — МИНИМУМ один тик).
+
+    Guard: `max(1, round(...))` в `configure()` — убери `max(1, ...)` (голый
+    `round(...)`) -> этот тест красный (`job_ticks=0` вместо 1)."""
+    port = _free_port()
+    real_cls = robot_plugin_module.RobotSimCore
+    calls: list[int | None] = []
+
+    class _Spy:
+        def __new__(cls, *args, **kwargs):
+            calls.append(kwargs.get("job_ticks"))
+            return real_cls(*args, **kwargs)
+
+    services = MockProcessServices(name="robot", stats_manager=MockStatsManager())
+    cfg = {"host": "127.0.0.1", "port": port, "unit_id": 2, "auto_start": True, "job_ms": 1}
+    ctx = PluginContext(services=services, config=cfg)
+    plugin = SimRobotHostPlugin()
+    plugin.configure(ctx)
+
+    original_cls = robot_plugin_module.RobotSimCore
+    robot_plugin_module.RobotSimCore = _Spy
+    try:
+        plugin._start_server(ctx)
+        assert plugin.cmd_status()["state"] == "running", "сервер не поднялся"
+        assert calls, "RobotSimCore ни разу не сконструирован"
+        assert calls[-1] == 1, f"job_ms=1 (round(1/10)=0) должен дать job_ticks=1 (нижняя граница), получено {calls}"
+    finally:
+        robot_plugin_module.RobotSimCore = original_cls
+        plugin.shutdown(ctx)

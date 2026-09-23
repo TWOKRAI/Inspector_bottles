@@ -45,6 +45,8 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 | `seed` | `0` | seed `np.random.default_rng` движка (класс/угол/дефект объектов) |
 | `camera_id` | `0` | попадает в `item["camera_id"]` (форма как у боевых источников) |
 | `background_texture` | нет (сплошной фон) | путь к картинке фона (Task 3.6): относительный — от корня репозитория, как `preset_path`. Тайл прокручивается с энкодером (`Services/line_sim/README.md` → «Фон-текстура»). Нечитаемый файл — один `log_error` в `configure()`, движок работает на сплошном фоне. Тайл из фото — `python -m Services.line_sim.tools.make_seamless_texture` |
+| `belt_direction` | `1` | Task 5.3b: направление ленты в кадре (`±1`, иначе движок не собирается — тот же путь отказа, что и прочие сбои сборки). `-1` — сим под боевой рецепт `hikvision_letter_robot.yaml` (`+x` кадра калибровки = `-Y` робота) |
+| `entry_x_px` | `0.0` при `belt_direction=1`, `resolution_width` при `-1` | Task 5.3b: точка входа объекта в кадр (`off=0`) — выводится из `belt_direction`, отдельным ключом в конфиге не задаётся |
 
 **Ровно один из `spawn_interval_s`/`spawn_spacing_mm`** (Task 3.3a): оба заданы в конфиге
 стенда — `ValueError` в `configure()`, НЕ проглатываемый общим `try/except` вокруг сборки

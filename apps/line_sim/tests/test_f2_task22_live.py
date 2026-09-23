@@ -397,11 +397,13 @@ def test_camera_alone_serves_frames(tmp_path: Path) -> None:
         # Литералы = resolution_height/width из apps/line_sim/pipeline.yaml. Сверяем с
         # конфигом отдельной проверкой, чтобы тест не «соглашался с любым ответом»:
         # размер кадра и конфиг стенда должны совпасть ОБА с числами ниже.
-        assert (pipeline_raw_height, pipeline_raw_width) == (180, 640), (
+        # Task 5.3b: сим подогнан под кадр боевого рецепта (1440x1080) — литералы
+        # правятся осознанно (сам тест просил это в старом комментарии), не подгонкой.
+        assert (pipeline_raw_height, pipeline_raw_width) == (1080, 1440), (
             f"pipeline.yaml сменил размер кадра ({pipeline_raw_height}x{pipeline_raw_width}) — "
             "поправь литералы в этом тесте осознанно, а не подгонкой"
         )
-        assert frame.shape == (180, 640, 3), f"неожиданный размер кадра: {frame.shape}"
+        assert frame.shape == (1080, 1440, 3), f"неожиданный размер кадра: {frame.shape}"
 
         # Без robot общий мир пуст, значит энкодера НЕТ вовсе — а не «энкодер стоит».
         # Гейт `_world_ready` (ревью Task 3.3a, находка 4) обязан в этом случае не дать

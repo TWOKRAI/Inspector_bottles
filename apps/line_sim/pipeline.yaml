@@ -58,6 +58,9 @@ processes:
         jog_freq_hz: 10.0
         # Task 3.5: куда уходит событие «задание выполнено» (scene.job_done) — процесс сцены.
         scene_process: camera
+        # Task 5.3b (контракт §4.3): длительность задания робота — job_ticks =
+        # round(job_ms / (TICK_INTERVAL_S*1000)) = round(1000/10) = 100.
+        job_ms: 1000
 
   - process_name: camera
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
@@ -72,37 +75,56 @@ processes:
         category: source
         seed: 0
         spawn_encoder: 0
-        # Task 3.4: движок сцены вместо спрайта-заглушки. Каталог дисков-букв —
-        # демо (`python -m Services.line_sim.tools.make_demo_catalog --out data/line_sim/demo_catalog`),
-        # пока нет реальных эталонов из `cut_real_disks`. Путь абсолютный или от корня репозитория.
-        preset_path: data/line_sim/demo_catalog
-        px_per_mm: 0.6            # 640 px кадра = ~1070 мм ленты
-        belt_y_px: 90             # линия ленты по центру кадра 640x180
-        resolution_width: 640
-        resolution_height: 180
+        # Task 5.3b (контракт лида §4.1/§4.3): сим подогнан под боевой рецепт
+        # hikvision_letter_robot.yaml — калибровка pixel_to_robot (use_linear,
+        # 800 px ROI = 98 мм) это ИСТИНА, а не disk_radius_mm word_layout (тот
+        # задаёт шаг слотов укладки, к кадру отношения не имеет). Каталог букв —
+        # кириллические эталоны, инструмент:
+        #   python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites \
+        #       --letters АКРХ --diameter-px 300 --out data/line_sim/letter_catalog
+        preset_path: data/line_sim/letter_catalog
+        # 800 px ROI = 98 мм ленты вдоль хода (калибровка рецепта, u = x_roi/800).
+        px_per_mm: 8.163265
+        # Центр ROI по вертикали (v=0.5): roi.y + roi.height/2 = 297 + 481/2 = 537.5.
+        belt_y_px: 537.5
+        # Кадр камеры рецепта (HikvisionCameraPlugin) — прототип ресайзит любой
+        # входной кадр под это разрешение, поэтому сим обязан отдавать его же.
+        resolution_width: 1440
+        resolution_height: 1080
+        # +x кадра = -Y робота (калибровка рецепта), а лента везёт в +Y — без
+        # разворота диски "едут по льду" относительно ленты (контракт §3, п.3).
+        belt_direction: -1
+        # Точка входа (off=0) — правый край кадра при belt_direction=-1 (плагин
+        # выводит то же самое из resolution_width; явный литерал здесь — для
+        # инструментов/тестов, читающих конфиг сима без запуска плагина).
+        entry_x_px: 1440.0
         # Шаг между объектами: тот же шаг, что раньше давал таймер 1.6 с при ~102.5 мм/с
-        # ленты (1.6 * 102.5 ≈ 164 мм между центрами); диск — 110 мм (рецепт прототипа
-        # disk_radius_mm: 55.0 * 2), зазор ~54 мм.
-        # Фикс ревью Task 3.4 (P4): диск демо-каталога был 90 ПИКСЕЛЕЙ при px_per_mm=0.6,
-        # то есть ~150 мм на экране — расходилось с рецептом прототипа (110 мм); демо-каталог
-        # теперь генерируется с --size-px 66 (= 110 мм * 0.6 px/мм), см. make_demo_catalog.py.
+        # ленты (1.6 * 102.5 ≈ 164 мм между центрами).
         # Task 3.3a: шаг теперь в мм ленты, не в секундах — таймерный режим на стоящей
         # ленте продолжал спавнить объекты в одну точку (репродукция на живом стенде
         # 2026-09-23: три объекта с одинаковым spawn_encoder=106016.0). Числа стенда
         # под внешний вид — Ф4.
         # spawn_interval_s: [1.6, 1.6]  # старый режим (таймер) — второй режим, см. Task 3.3a
         spawn_spacing_mm: [164.0, 164.0]
-        scene_length_mm: 1200
+        # Кадр — 176 мм (1440/8.163265); остальное — зона робота после кадра, при
+        # job_ms 1000 (контракт §4.3).
+        scene_length_mm: 600
         # Task 3.6: фон — любая картинка, прокручивается с энкодером (сплошной серый, пока ключ
         # закомментирован). Тайл из фото ленты сверху:
         #   python -m Services.line_sim.tools.make_seamless_texture фото.jpg \
-        #       --out data/line_sim/belt_tile.png --scene-px-per-mm 0.6 --pitch-mm <шаг звена, мм>
+        #       --out data/line_sim/belt_tile.png --scene-px-per-mm 8.163265 --pitch-mm <шаг звена, мм>
         # --scene-px-per-mm обязан совпадать с px_per_mm выше. Путь от корня репозитория.
         # background_texture: data/line_sim/belt_tile.png
         defect_probability: 0.25
         stale_ms: 500
-        # Task 3.5: точка сцены «путь 0, центр полосы» в координатах робота — калибровка сим-варианта (decisions log 2026-09-23).
-        geometry: {origin_x_mm: 0.0, origin_y_mm: 0.0}
+        # Меньше половины шага 164 мм (контракт §4.3) — отставание тракта зрения
+        # (нет e_capture, см. §3 контракта) покажет pick_error, а не no_object.
+        match_radius_mm: 60
+        # Task 3.5: точка сцены «путь 0, центр полосы» в координатах робота —
+        # origin_x_mm = 497.4 - 78.4*0.5 = 458.2 (v=0.5, центр ROI по вертикали);
+        # origin_y_mm = -428.265 (при entry x=1440: Y = -282 - 98*(1194/800) = -428.265,
+        # дальше растёт линейно с off — см. Task 5.3b, контракт §4.1).
+        geometry: {origin_x_mm: 458.2, origin_y_mm: -428.265}
 
   - process_name: mjpeg
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
