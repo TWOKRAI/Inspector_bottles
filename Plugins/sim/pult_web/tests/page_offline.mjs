@@ -101,6 +101,22 @@ async function run() {
   } else if (scenario === "status_error") {
     await sleep(400); // >= один цикл опроса (250 мс)
     process.stdout.write(JSON.stringify({ statusText: el("status").textContent }));
+  } else if (scenario === "truth_line") {
+    // Приёмка 5.3a §2: опрос /api/truth раз в 1000 мс, читаем отданный текст #truth.
+    await sleep(1200); // >= один цикл опроса правды (1000 мс)
+    process.stdout.write(JSON.stringify({ truthText: el("truth").textContent }));
+  } else if (scenario === "truth_unavailable") {
+    // §2 «Независимость разделов»: правда недоступна, журнал — как раньше.
+    await sleep(1200);
+    process.stdout.write(
+      JSON.stringify({ truthText: el("truth").textContent, journalText: el("journal").textContent })
+    );
+  } else if (scenario === "truth_reset") {
+    // §2: кнопка btnTruthReset -> POST /api/truth/reset, сразу повторный опрос.
+    await sleep(1200); // дождаться первого опроса, чтобы кнопка не читала пустой раздел
+    el("btnTruthReset").fire("click");
+    await sleep(300); // время на POST + повторный GET /api/truth
+    process.stdout.write(JSON.stringify({ truthText: el("truth").textContent }));
   }
   process.exit(0);
 }
