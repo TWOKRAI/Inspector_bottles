@@ -8,6 +8,7 @@ from Services.line_sim.core.matching import BeltGeometry, JobDone, MatchResult, 
 from Services.line_sim.core.preset import ScenePreset
 from Services.line_sim.core.scene_compositor import SceneCompositor
 from Services.line_sim.core.spawner import ObjectSpawner
+from Services.line_sim.core.truth import TruthLedger
 
 __all__ = [
     "BELT_UX",
@@ -21,6 +22,7 @@ __all__ = [
     "ObjectSpawner",
     "SceneCompositor",
     "ScenePreset",
+    "TruthLedger",
     "encoder_to_offset_mm",
     "match_job",
     "object_robot_xy",

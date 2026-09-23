@@ -16,6 +16,7 @@
 | Подключение к `SceneSourcePlugin` (`Plugins/sim/scene_source`) | готово (Task 3.4; `spawn_spacing_mm` — Task 3.3a) |
 | Фон-тайл в `SceneCompositor` (`background_tile`) + `tools/make_seamless_texture.py` | готово (Task 3.6, LS-011); на реальном фото ленты ещё не прогонялся — ждёт снимка владельца |
 | `core/matching.py` (`match_job`/`object_robot_xy`, `BeltGeometry`/`JobDone`/`MatchResult`) + `ObjectSpawner.remove()` | готово (Task 3.5a, LS-012) — job↔object matching для плагина сцены (часть B) |
+| `core/truth.py` (`TruthLedger`) — поймал/пропустил/дубль/ложная тревога/ошибка захвата | готово (Task 5.2); подключение к `Plugins/sim/scene_source` — команды `truth.status`/`truth.reset`, уровни `truth_*` (ADR-PM-038, прореживание `truth_publish_s`) |
 
 **Известное ограничение (2026-09-22):** эталоны дисков-букв реально не сняты на этой машине —
 `data/dataset_gen/ru_letters_real/sprites` отсутствует. `tools/cut_real_disks.py` готовит их из
@@ -25,7 +26,9 @@
 работают с любым каталогом формата `SpriteCatalog`, не только с этим конкретным.
 
 Тесты: `Services/line_sim/tests/` — `test_acceptance_3_1.py`/`test_acceptance_3_2.py`/
-`test_acceptance_3_3.py`/`test_acceptance_3_4.py`/`test_acceptance_3_6.py` (независимый tester), `test_hazards_3_1.py`/
-`test_hazards_3_2.py`/`test_hazards_3_3.py`/`test_hazards_3_4.py`/`test_hazards_3_6.py` (автор), `test_spawner.py`
+`test_acceptance_3_3.py`/`test_acceptance_3_4.py`/`test_acceptance_3_6.py`/`test_acceptance_5_2.py`
+(независимый tester), `test_hazards_3_1.py`/
+`test_hazards_3_2.py`/`test_hazards_3_3.py`/`test_hazards_3_4.py`/`test_hazards_3_6.py`/`test_hazards_5_2.py`
+(автор), `test_spawner.py`
 (автор, режим `spacing_mm` — Task 3.3a, независимого тестера на этой задаче намеренно нет,
 см. LS-010).
