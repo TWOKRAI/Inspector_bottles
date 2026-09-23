@@ -25,7 +25,32 @@ TCP-сервер (симулятор робота линии) в процесс�
 
 ## Команда
 
-`sim_robot.status` → `{running, host, port, unit_id, writes_seen, state, world}`.
+`sim_robot.status` → `{running, host, port, unit_id, writes_seen, state, world, journal}`,
+где `journal` — снимок `SimJournal.counters()` (`{}`, если сервер не поднят).
+
+## Журнал заданий (line-sim Ф5.1)
+
+`_start_server` заводит `SimJournal()` ДО поднятия `SimRobotServer` и передаёт
+ей оба колбэка ядра: `on_write` каждого доступа (чтения тоже — журнал сам
+считает их отдельно) форвардится из `_on_write`, `RobotSimCore(on_event=...)`
+получает `journal.on_event`. Мотив (владелец, 2026-09-23): на живой линии
+робот забирал одну деталь трижды — журнал отвечает, СКОЛЬКО заданий пришло от
+прототипа и ПОЧЕМУ повтор, а не только факт дубля. Подробности причин
+(`dups_same_capture`/`dups_tracked`/`repeats_frozen_xy`) — README
+`Services/robot_comm/server`.
+
+| Команда | Ответ |
+|---|---|
+| `sim_robot.journal` | `{status: "ok", counters: {...SimJournal.counters()}, recent: [≤50 {t, side, text, tag}, старые первыми]}`; без сервера — `{status: "error", message: ...}` |
+| `sim_robot.journal_reset` | `SimJournal.reset()` + очистка `recent` → `{status: "ok"}`; без сервера — `{status: "error", ...}` |
+
+`recent` наполняется ТОЛЬКО тактом паблишера (`_publish_once` → `journal.drain()`,
+только строки с тегами `job`/`dup`/`repeat`/`done` — служебные `""`/`"flag"`
+отбрасываются). `drain()` разрушающий: тик паблишера — единственный владелец,
+`_on_write` в журнал только пишет, никогда не читает и не чистит. Уровни на том
+же такте: `jobs_seen`, `dups_seen`, `dups_same_capture`, `dups_tracked`,
+`repeats_frozen_xy`, `jobs_done` (`ctx.publish_metric`, объявлены в `configure`
+через `declare_metric`).
 
 ## Команды ленты (Task 2.3a)
 
