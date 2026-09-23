@@ -471,9 +471,16 @@ def test_page_freq_change_applies_only_while_belt_runs(pult, running) -> None:
     частоты не должна её запускать (иначе ползунок становится скрытой кнопкой «Пуск»).
     """
     _plugin, _ctx, client, port = pult
-    client.status_reply = {"status": "ok", "run": running, "encoder": 1, "mm_s": 0.0,
-                           "freq_hz": 40.0, "reverse": False, "jogging": False,
-                           "mm_s_at_max_freq": 300.0}
+    client.status_reply = {
+        "status": "ok",
+        "run": running,
+        "encoder": 1,
+        "mm_s": 0.0,
+        "freq_hz": 40.0,
+        "reverse": False,
+        "jogging": False,
+        "mm_s_at_max_freq": 300.0,
+    }
     try:
         n_before = len(client.calls)
         _run_page_js(port, "freq_change")
@@ -486,3 +493,158 @@ def test_page_freq_change_applies_only_while_belt_runs(pult, running) -> None:
         assert runs[0][1].get("freq_hz") == 15.0, f"до ленты уехала не новая частота: {runs[0][1]!r}"
     else:
         assert runs == [], f"смена частоты на СТОЯЩЕЙ ленте запустила её: {runs!r}"
+
+
+# --------------------------------------------------------------------------- #
+# 6 — Task 5.3a: правда висит до таймаута, соседей не блокирует               #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def pult_two_clients(monkeypatch: pytest.MonkeyPatch):
+    """Плагин с ДВУМЯ фейковыми клиентами — как ``start_pult`` в ``test_acceptance_5_3a.py``.
+
+    ``pult`` (выше) даёт доступ только к ``plugin._client`` — этого хватало, пока клиент
+    был один. Task 5.3a заводит второй (``plugin._scene_client``, ``target_process=
+    "camera"``), поэтому обоим hazard-тестам этого раздела нужны оба объекта напрямую —
+    берём их с самого плагина, а не гадаем через ``instances[-1]`` (та же ловушка,
+    что сломала ``test_pult_web.py``/``test_pult_journal_routes.py``, см. отчёт).
+    """
+    monkeypatch.setattr("Plugins.sim.pult_web.plugin.DeviceHubClient", _FakeDeviceHubClient)
+
+    port = _free_port()
+    stats = MockStatsManager()
+    services = MockProcessServices(name="pult", stats_manager=stats)
+    ctx = PluginContext(
+        services=services,
+        config={
+            "host": "127.0.0.1",
+            "port": port,
+            "mjpeg_url": _MJPEG_URL,
+            "robot_process": "robot",
+            "scene_process": "camera",
+            "timeout_s": 1.0,
+        },
+    )
+    plugin = PultWebPlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    robot_client = plugin._client
+    scene_client = plugin._scene_client
+    try:
+        yield plugin, ctx, robot_client, scene_client, port
+    finally:
+        plugin.shutdown(ctx)
+
+
+def test_slow_truth_status_does_not_block_journal_and_status(pult_two_clients) -> None:
+    """Свойство: ``GET /api/truth``, зависший в процессе сцены, не держит соседние ручки.
+
+    Двойник сцены спит ``~timeout_s`` внутри ``client.request()`` (тот же вызов из потока
+    HTTP-обработчика, что у ``robot`` в ``test_slow_robot_does_not_block_other_client_get_index``
+    выше) — GET /api/status и GET /api/journal идут в ДРУГОЙ клиент (``robot``) и должны
+    ответить далеко быстрее таймаута, пока медленный запрос ещё в пути.
+
+    Guard: ``ThreadingHTTPServer`` — поток на TCP-соединение (``_PultHTTPServer``, докстринг
+    модуля). КРАСНЫЙ, если сервер обслуживал бы соединения последовательно (например, если
+    бы ``_PultHTTPServer`` унаследовал не ``ThreadingHTTPServer``, а обычный
+    ``HTTPServer``/``socketserver.TCPServer`` без ``ThreadingMixIn``) — тогда медленный сокет
+    сцены держал бы accept-цикл, и status/journal ждали бы ~timeout_s вместо миллисекунд.
+    Медленный вызов — в daemon-потоке с join-дедлайном (правило проекта про тесты, которые
+    могут зависнуть): без него баг в форме зависшего accept превратил бы этот тест в вечный
+    hang вместо красного assert.
+    """
+    _plugin, _ctx, _robot_client, scene_client, port = pult_two_clients
+    scene_client.sleep_s = 1.0  # ~timeout_s конфига пульта (1.0); robot — дефолтный эхо-ответ двойника
+
+    slow_result: dict[str, Any] = {}
+    slow_done = threading.Event()
+
+    def _slow_truth() -> None:
+        try:
+            status, _raw = _http(port, "GET", "/api/truth", timeout=10.0)
+            slow_result["status"] = status
+        except Exception as exc:  # noqa: BLE001 - соединение может оборваться, это не провал теста
+            slow_result["error"] = repr(exc)
+        finally:
+            slow_done.set()
+
+    slow_thread = threading.Thread(target=_slow_truth, daemon=True)
+    slow_thread.start()
+    time.sleep(0.2)  # дать медленному /api/truth занять свой поток обработчика
+
+    t0 = time.monotonic()
+    status_status, _raw1 = _http(port, "GET", "/api/status", timeout=5.0)
+    elapsed_status = time.monotonic() - t0
+    t0 = time.monotonic()
+    status_journal, _raw2 = _http(port, "GET", "/api/journal", timeout=5.0)
+    elapsed_journal = time.monotonic() - t0
+
+    assert status_status == 200, f"GET /api/status отказал рядом с висящей правдой: {status_status}"
+    assert status_journal == 200, f"GET /api/journal отказал рядом с висящей правдой: {status_journal}"
+    assert elapsed_status < 0.5, f"GET /api/status ждал медленную правду ({elapsed_status:.2f} с)"
+    assert elapsed_journal < 0.5, f"GET /api/journal ждал медленную правду ({elapsed_journal:.2f} с)"
+
+    slow_thread.join(timeout=10.0)
+    assert not slow_thread.is_alive(), "GET /api/truth не завершился за 10 с — подозрение на зависание"
+    assert slow_done.wait(timeout=10.0), "медленный /api/truth не завершился сам по себе"
+    assert slow_result.get("status") == 200, f"медленный /api/truth не вернул 200: {slow_result!r}"
+
+
+# --------------------------------------------------------------------------- #
+# 7 — Task 5.3a: сброс правды и опрос конкурентно — сброс доходит один раз    #
+# --------------------------------------------------------------------------- #
+
+
+def test_concurrent_truth_reset_and_poll_each_reset_reaches_scene_once(pult_two_clients) -> None:
+    """Свойство: ``POST /api/truth/reset`` рядом с параллельным опросом ``GET /api/truth`` —
+    оба отвечают валидно, а КАЖДЫЙ сброс доходит до двойника сцены РОВНО один раз.
+
+    Форма — та же массовая проверка, что у ``test_concurrent_jog_forwards_each_exactly_once``
+    (раздел 1 этого файла): N параллельных ``POST /api/truth/reset`` вперемешку с N параллельными
+    ``GET /api/truth`` на ОДИН и тот же ``scene_client`` — гонки почти негде взяться
+    (``ThreadingHTTPServer`` — поток на соединение, форвард каждого запроса — отдельный вызов
+    ``client.request``, общего изменяемого состояния между запросами в ``_dispatch``/``do_POST``
+    нет), но тест это ИЗМЕРЯЕТ, а не полагается на рассуждение.
+
+    Guard: ``do_POST`` выбирает клиент ПО ПУТИ на каждый запрос (``_SCENE_COMMAND_BY_PATH`` →
+    ``pult._scene_client``), а не берёт общий на оба маршрута. Проверено инъекцией: замена
+    ``client = pult._scene_client`` на ``client = pult._client`` в ветке ``_SCENE_COMMAND_BY_PATH``
+    (``do_POST``, plugin.py) даёт КРАСНЫЙ этого теста — `assert 0 == 10, получили []`
+    (все 10 ``truth.reset`` ушли не в тот двойник, см. отчёт разработчика). Дополнительно —
+    массовая конкурентная форма (10 сбросов вперемешку с 10 опросами на один и тот же
+    ``scene_client``) отдельно проверяет, что этот верный per-request выбор не ломается под
+    конкуренцией (``ThreadingHTTPServer`` — поток на соединение, общего изменяемого состояния
+    между запросами в ``_dispatch``/``do_POST`` нет).
+    """
+    _plugin, _ctx, _robot_client, scene_client, port = pult_two_clients
+    # Дефолтный эхо-ответ двойника ({"status": "ok", "echo": args}) достаточен — оба маршрута
+    # интересует счёт вызовов, не тело ответа.
+
+    n = 10
+    reset_results: list[int] = [-1] * n
+    poll_results: list[int] = [-1] * n
+
+    def _do_reset(i: int) -> None:
+        status, _raw = _http(port, "POST", "/api/truth/reset", {}, timeout=10.0)
+        reset_results[i] = status
+
+    def _do_poll(i: int) -> None:
+        status, _raw = _http(port, "GET", "/api/truth", timeout=10.0)
+        poll_results[i] = status
+
+    threads = [threading.Thread(target=_do_reset, args=(i,)) for i in range(n)]
+    threads += [threading.Thread(target=_do_poll, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15.0)
+        assert not t.is_alive(), "поток truth-запроса не завершился за 15 с (подозрение на зависание)"
+
+    assert all(s == 200 for s in reset_results), f"не все сбросы вернули 200: {reset_results!r}"
+    assert all(s == 200 for s in poll_results), f"не все опросы вернули 200: {poll_results!r}"
+
+    reset_calls = [c for c in scene_client.calls if c[0] == "truth.reset"]
+    status_calls = [c for c in scene_client.calls if c[0] == "truth.status"]
+    assert len(reset_calls) == n, f"ожидали ровно {n} truth.reset, получили {len(reset_calls)}: {reset_calls!r}"
+    assert len(status_calls) == n, f"ожидали ровно {n} truth.status, получили {len(status_calls)}: {status_calls!r}"

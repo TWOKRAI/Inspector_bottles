@@ -129,6 +129,8 @@ processes:
         port: 8092
         mjpeg_url: http://127.0.0.1:8091/
         robot_process: robot
+        # Task 5.3a: правда сцены — второй DeviceHubClient, только truth.* (в robot не идёт).
+        scene_process: camera
         timeout_s: 1.0
 
 # Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).

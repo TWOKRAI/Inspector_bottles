@@ -103,7 +103,8 @@ def pult(monkeypatch: pytest.MonkeyPatch):
     plugin.configure(ctx)
     plugin.start(ctx)
     assert _FakeDeviceHubClient.instances, "плагин не создал DeviceHubClient через ожидаемый шов"
-    client = _FakeDeviceHubClient.instances[-1]
+    # С 5.3a плагин строит второго клиента (процесс сцены) — берём клиента robot по адресату.
+    client = next(c for c in _FakeDeviceHubClient.instances if c.target_process == "robot")
     try:
         yield plugin, ctx, services, client, port
     finally:

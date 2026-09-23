@@ -19,8 +19,9 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `host` | `127.0.0.1` | адрес HTTP-сервера пульта. Только loopback: localhost-страж пропускает запросы лишь с `Host: 127.0.0.1:<port>` или `localhost:<port>`, при другом адресе сервер поднимется, но ответит 403 на всё |
 | `port` | `8092` | порт пульта |
 | `mjpeg_url` | `http://127.0.0.1:8091/` | адрес двери кадров (`<img src=...>` на странице) |
-| `robot_process` | `robot` | имя процесса-адресата `DeviceHubClient` |
-| `timeout_s` | `1.0` | таймаут `DeviceHubClient.request` на каждую ручку |
+| `robot_process` | `robot` | имя процесса-адресата `DeviceHubClient` для `belt.*`/`sim_robot.*` |
+| `scene_process` | `camera` | имя процесса-адресата ВТОРОГО `DeviceHubClient` (Task 5.3a) для `truth.*` — отдельный клиент, не `robot_process` |
+| `timeout_s` | `1.0` | таймаут `DeviceHubClient.request` на каждую ручку (оба клиента) |
 
 ## HTTP API
 
@@ -34,6 +35,8 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `POST /api/calibrate` | `{mm_s_at_max_freq}` | `belt.calibrate` | результат команды как есть |
 | `GET /api/journal` | — | `sim_robot.journal` | результат команды как есть |
 | `POST /api/journal/reset` | `{}` | `sim_robot.journal_reset` | результат команды как есть |
+| `GET /api/truth` | — | `truth.status` → процесс `scene_process` | результат команды как есть (Task 5.3a) |
+| `POST /api/truth/reset` | `{}` | `truth.reset` → процесс `scene_process` | результат команды как есть (Task 5.3a) |
 
 Путь **не валидирует** поля тела — форвардит их в `robot` как есть, валидация
 (`bad_args` и т.п.) целиком на стороне Task 2.3a. Отказы ДО обращения к
@@ -137,6 +140,17 @@ dead-man'а при удержании (ревью 2.3b, итерация 2, на
 новым энкодером C» убран в 5.1b — причина ушла из `SimJournal` на сторону
 сцены (`TruthLedger`, показ на пульте — Task 5.3, не здесь). Кнопка «Сброс
 счётчиков» → `POST /api/journal/reset`.
+
+**Блок «Правда сцены» (Task 5.3a).** Опрос `GET /api/truth` раз в 1000 мс, без
+логики подсчёта на пульте — все счётчики считает `TruthLedger` на стороне
+процесса `scene_process` (по умолчанию `camera`), пульт только показывает
+`counters` как есть: «поймано N (брак A / годных B) · пропущено M (брак C /
+годных D) · лишних заданий E · ложных тревог F (повтор кадра G) · на ленте H ·
+ошибка захвата ср X.XX / макс Y.YY мм». `pick_error_mean_mm`/`pick_error_max_mm`
+через `toFixed(2)`, а при `null` — символ «—». Процесс сцены не отвечает
+(504 либо сбой запроса) → «правда недоступна»; журнал и статус ленты от этого
+не зависят (раздельные опросы, раздельные клиенты `DeviceHubClient`). Кнопка
+«Сброс правды» → `POST /api/truth/reset`, сразу повторный опрос.
 
 ## Границы
 
