@@ -61,12 +61,19 @@ from multiprocess_framework.modules.process_module.plugins import (
     ThreadConfig,
     register_plugin,
 )
-from Services.robot_comm.server.sim_core import VFD_CMD_ADDR
+from Plugins.hub.device_hub.client import DeviceHubClient
+from Services.robot_comm.server.sim_core import VFD_CMD_ADDR, RobotSimCore
 
 #: Дефолты конфига (Task 1.1 плана line-sim, §Task 1.1 pipeline.yaml).
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 5021
 _DEFAULT_UNIT_ID = 2
+
+#: Task 3.5: процесс сцены, куда уходит событие «задание выполнено» (``scene.job_done``).
+_DEFAULT_SCENE_PROCESS = "camera"
+
+#: Троттл отчёта о сбое пересылки события (как у ``DeviceHubClient.request``).
+_JOB_DONE_ERROR_THROTTLE_S = 30.0
 
 #: Период публикации энкодера в общий мир (Task 2.2 плана line-sim, §Task 2.2).
 _DEFAULT_PUBLISH_MS = 50
@@ -114,6 +121,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._host: str = cfg.get("host", _DEFAULT_HOST)
         self._port: int = cfg.get("port", _DEFAULT_PORT)
         self._unit_id: int = cfg.get("unit_id", _DEFAULT_UNIT_ID)
+        self._scene_process: str = cfg.get("scene_process", _DEFAULT_SCENE_PROCESS)
         self._auto_start: bool = cfg.get("auto_start", True)
         self._publish_ms: int = cfg.get("publish_ms", _DEFAULT_PUBLISH_MS)
         # Task 2.3a: командная поверхность ленты.
@@ -191,7 +199,10 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             from Services.modbus.sdk.errors import ModbusNotAvailableError
             from Services.robot_comm.server.sim_robot import SimRobotServer
 
-            server = SimRobotServer(self._host, self._port, self._unit_id, on_write=self._on_write)
+            core = RobotSimCore(
+                on_job_done=self._on_job_done,
+            )
+            server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
             server.start()
         except (ModbusNotAvailableError, ImportError, OSError) as exc:  # noqa: BLE001 — деградация, не отказ
             self._fail(ctx, exc)
@@ -208,6 +219,25 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             server.core.belt.set_calibration(self._belt_mm_s_at_max_freq)
             server.core.command_vfd(run=True, freq_hz=server.core.belt.freq_max_hz, reverse=False)
         ctx.log_info(f"sim_robot_host: SimRobotServer поднят на {self._host}:{self._port}")
+
+    def _on_job_done(self, event: dict) -> None:
+        """Task 3.5: переслать событие «задание выполнено» в процесс сцены.
+
+        Исполняется в потоке тикера ``SimRobotServer`` — поэтому только
+        fire-and-forget (неблокирующая постановка в очередь) и НИКОГДА не бросает:
+        исключение из колбэка ядро не ловит, оно уронило бы тикер робота.
+        Сбой или ``False`` (не поставлено в очередь) -> ``ctx.health.report_error``
+        с троттлом."""
+        try:
+            client = DeviceHubClient(self._ctx, target_process=self._scene_process)
+            if not client.send_fire_and_forget("scene.job_done", event):
+                self._ctx.health.report_error(
+                    RuntimeError("scene.job_done не поставлен в очередь"),
+                    context="sim_robot_host.job_done",
+                    throttle=_JOB_DONE_ERROR_THROTTLE_S,
+                )
+        except Exception as exc:  # noqa: BLE001 — колбэк тикера не должен бросать
+            self._ctx.health.report_error(exc, context="sim_robot_host.job_done", throttle=_JOB_DONE_ERROR_THROTTLE_S)
 
     def _probe_port_free(self) -> None:
         """Синхронно проверить, что порт свободен, ДО обращения к pymodbus.

@@ -22,10 +22,23 @@ TCP-сервер (симулятор робота линии) в процесс�
 | `belt_mm_s_at_max_freq` | нет (сырой режим) | Task 2.3a: калибровка ленты на старте (см. §Команды ленты) |
 | `jog_timeout_ms` | `500` | Task 2.3a: dead-man `belt.jog` — таймаут без подкачки |
 | `jog_freq_hz` | `10.0` | Task 2.3a: частота `belt.jog` по умолчанию, если клиент её не передал |
+| `scene_process` | `camera` | Task 3.5: процесс сцены, куда уходит событие «задание выполнено» |
 
 ## Команда
 
 `sim_robot.status` → `{running, host, port, unit_id, writes_seen, state, world}`.
+
+## Событие «задание выполнено» (Task 3.5)
+
+`_start_server` строит `RobotSimCore(on_job_done=self._on_job_done)` и отдаёт его
+`SimRobotServer(..., core=core)`. Ядро зовёт колбэк в потоке тикера сервера ровно
+один раз на завершённое задание с `{index, x_mm, y_mm, ecap, t}`; плагин пересылает
+его `DeviceHubClient(ctx, target_process=scene_process).send_fire_and_forget(
+"scene.job_done", event)` — неблокирующая постановка в очередь, ответа не ждёт.
+Колбэк **не бросает**: исключение клиента или `False` (не поставлено в очередь) →
+`ctx.health.report_error(..., context="sim_robot_host.job_done", throttle=30.0)`,
+тикер робота живёт дальше. Плагин сцены этот модуль не импортирует — только имя
+процесса в конфиге.
 
 ## Команды ленты (Task 2.3a)
 

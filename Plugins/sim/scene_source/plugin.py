@@ -61,6 +61,7 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 
 from __future__ import annotations
 
+import collections
 import threading
 import time
 from pathlib import Path
@@ -78,6 +79,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from Services.dataset_gen.core.catalog import imread_unicode
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
+from Services.line_sim.core import BeltGeometry, JobDone, match_job
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -92,6 +94,11 @@ _DEFAULT_SEED = 0
 _DEFAULT_SPAWN_INTERVAL_S = (2.0, 4.0)
 _DEFAULT_DEFECT_PROBABILITY = 0.0
 _DEFAULT_CAMERA_ID = 0
+
+#: Task 3.5 (контракт лида §4): сопоставление «задание выполнено» ↔ объект сцены.
+_DEFAULT_MATCH_RADIUS_MM = 5.0
+_DEFAULT_DUP_WINDOW_S = 10.0  # тот же дефолт, что у SimJournal
+_RECENT_MAXLEN = 32
 
 #: Путь мира (Task 2.1/2.1b, паблишер — ``Plugins.sim.robot_host``).
 _ENCODER_PATH = "sim.belt.encoder"
@@ -141,7 +148,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
     outputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр сцены сима"),
     ]
-    commands: dict = {}
+    commands: dict = {
+        "scene.job_done": "cmd_job_done",
+        "scene.status": "cmd_status",
+    }
 
     def configure(self, ctx: PluginContext) -> None:
         """READY: разобрать конфиг, собрать движок сцены (или fallback на фон)."""
@@ -186,6 +196,18 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._last_factory_error_t: float | None = None
         self._last_object_ids: frozenset[str] = frozenset()
         self._frame_count = 0
+
+        # Task 3.5: задания робота. `_jobs` — ЕДИНСТВЕННАЯ передача между потоком команд
+        # (append) и воркером produce() (popleft); оба атомарны в CPython. Спавнер меняет
+        # только produce(). `_removed` — снятые объекты (момент снятия, паспорт) для исхода
+        # `dup`; `_recent` читает поток команд — пишется и копируется под `self._lock`.
+        geometry_cfg = cfg.get("geometry") or {"origin_x_mm": 0.0, "origin_y_mm": 0.0}
+        self._geometry = BeltGeometry.from_dict(geometry_cfg)
+        self._match_radius_mm = float(cfg.get("match_radius_mm", _DEFAULT_MATCH_RADIUS_MM))
+        self._dup_window_s = float(cfg.get("dup_window_s", _DEFAULT_DUP_WINDOW_S))
+        self._jobs: collections.deque[JobDone] = collections.deque()
+        self._removed: collections.deque[tuple[float, Any]] = collections.deque()
+        self._recent: collections.deque[dict] = collections.deque(maxlen=_RECENT_MAXLEN)
 
         # Task 3.6: фон-текстура строится ДО try-блока сборки движка — нечитаемый файл
         # не должен ронять движок целиком (он остаётся живым на сплошном фоне).
@@ -300,6 +322,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         энкодер константой намеренно): здесь проверяется факт «была хотя бы одна дельта»,
         не движение уже пришедшего значения. Рендер компоновщика продолжает работать всегда
         (активных объектов ещё нет — кадр останется фоном, независимо от `now_encoder`)."""
+        self._drain_jobs()
         now_encoder = self._read_world_encoder()
 
         if self._spawner is not None and self._compositor is not None:
@@ -331,6 +354,68 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 "dtype": "uint8",
             }
         ]
+
+    # ------------------------------------------------------------------ #
+    # Задания робота (Task 3.5 — контракт лида §4)
+    # ------------------------------------------------------------------ #
+
+    def cmd_job_done(self, data: dict | None = None) -> dict:
+        """`scene.job_done` (поток команд): только поставить задание в очередь.
+
+        Спавнер отсюда НЕ трогается — разбор в начале следующего `produce()`."""
+        try:
+            job = JobDone.from_dict(data or {})
+        except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ, не исключение
+            return {"status": "error", "message": f"scene.job_done: кривые аргументы {data!r}: {exc!r}"}
+        self._jobs.append(job)
+        return {"status": "ok"}
+
+    def cmd_status(self, data: dict | None = None) -> dict:
+        """`scene.status` (поток команд): число активных объектов + последние исходы.
+
+        `active_objects()` — копия списка (`list(...)`, одна C-операция под GIL), спавнер
+        отсюда не мутируется."""
+        active = len(self._spawner.active_objects()) if self._spawner is not None else 0
+        with self._lock:
+            recent = list(self._recent)
+        return {"status": "ok", "active": active, "recent": recent}
+
+    def _drain_jobs(self) -> None:
+        """Разобрать очередь заданий целиком (воркер produce(), ДО `spawner.tick()`).
+
+        Не зависит от `_world_ready`: задание разбирается и до прихода мира. Движок не
+        собран -> каждое задание получает `no_object`."""
+        if not self._jobs:
+            return
+        now = time.monotonic()
+        while self._removed and now - self._removed[0][0] > self._dup_window_s:
+            self._removed.popleft()
+
+        while self._jobs:
+            job = self._jobs.popleft()
+            if self._spawner is None:
+                outcome, object_id, residual_mm = "no_object", None, None
+            else:
+                result = match_job(
+                    [obj.passport for obj in self._spawner.active_objects()],
+                    job,
+                    self._geometry,
+                    removed=[passport for _t, passport in self._removed],
+                    match_radius_mm=self._match_radius_mm,
+                )
+                outcome, object_id, residual_mm = result.outcome, result.object_id, result.residual_mm
+                if outcome == "matched" and object_id is not None:
+                    passport = self._spawner.remove(object_id)
+                    if passport is not None:
+                        self._removed.append((now, passport))
+            entry = {"index": job.index, "outcome": outcome, "object_id": object_id, "residual_mm": residual_mm}
+            with self._lock:
+                self._recent.append(entry)
+            residual_desc = "—" if residual_mm is None else f"{residual_mm:.2f} мм"
+            self._ctx.log_info(
+                f"scene_source: задание #{job.index} ({job.x_mm:.1f}, {job.y_mm:.1f}) мм, "
+                f"ecap={job.ecap} -> {outcome}, объект={object_id}, невязка={residual_desc}"
+            )
 
     def _read_world_encoder(self) -> float:
         """Снимок текущего значения энкодера из мира + предупреждение о протухании."""
