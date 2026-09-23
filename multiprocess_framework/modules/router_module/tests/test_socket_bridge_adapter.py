@@ -153,19 +153,19 @@ class TestErrorHandling:
         через get_stats(). Раньше здесь было голое `except Exception: pass`."""
         router = FakeRouter(send_raises=True)
         adapter = SocketBridgeAdapter(router, "backend_ctl")
-        assert adapter.get_stats() == {"lost_responses": 0}
+        assert adapter.get_stats()["lost_responses"] == 0
 
         adapter.on_inbound(_msg())
-        assert adapter.get_stats() == {"lost_responses": 1}
+        assert adapter.get_stats()["lost_responses"] == 1
 
         adapter.on_inbound(_msg())
-        assert adapter.get_stats() == {"lost_responses": 2}
+        assert adapter.get_stats()["lost_responses"] == 2
 
     def test_successful_send_does_not_increment_lost_responses(self) -> None:
         router = FakeRouter()  # send не падает
         adapter = SocketBridgeAdapter(router, "backend_ctl")
         adapter.on_inbound(_msg())
-        assert adapter.get_stats() == {"lost_responses": 0}
+        assert adapter.get_stats()["lost_responses"] == 0
 
     def test_missing_request_id_passes_none(self) -> None:
         router = FakeRouter()

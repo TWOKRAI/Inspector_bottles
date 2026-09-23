@@ -192,7 +192,11 @@ class TestBrokerMechanics:
     def test_replay_without_intents_sends_nothing(self):
         """Пустой реестр не платит ни одной отправкой на каждом старте процесса."""
         t = _Transport()
-        assert _broker(t).replay(target="camera_0") == {"subscribers": [], "reached": 0}
+        # 4.4: ответ расширен ключом "points" (приёмка тестера) — литералы прежние.
+        result = _broker(t).replay(target="camera_0")
+        assert result["subscribers"] == []
+        assert result["reached"] == 0
+        assert result["points"]["replayed"] == []
         assert t.sent == []
 
     def test_forget_subscriber_drops_intent_of_a_process_taken_off_topology(self):
