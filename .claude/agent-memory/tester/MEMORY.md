@@ -22,3 +22,4 @@
 - [Cyrillic numeral-word substring collision](feedback_cyrillic_numeral_word_substring_collision.md) — "восемь" contains "семь"; use \b word-boundary regex, not bare `in`, when scanning RU numeral-words
 - [_wired harness misses introspect.*](feedback_wired_harness_missing_introspect_commands.md) — only _register_observability_commands(); need _register_introspect_commands() too, bc not returned so copy the body
 - [config.reload inline rejects unknown observability keys](feedback_config_reload_inline_rejects_unknown_observability_keys.md) — session door only: clean success=False + "did you mean", not silent extra=ignore drop
+- [import-guard needs AST, not substring](feedback_import_guard_substring_vs_ast.md) — a docstring naming the other module fails a text-grep guard with zero real import
