@@ -147,6 +147,12 @@ handoff `53a1c564`): она снимает числа останова (`otel fl
   добьёт застрявшего ребёнка; (3) `BackendHarness` снимает поддерево сразу после `start()` — только PM,
   без детей (`harness.py:385-386`). Сирота держит унаследованный stdout вызывающего — отсюда «зависания»
   обёрток > 300 с. Строка в `QUEUE.md`, отдельный план.
+  **Дополнено приёмкой CTO 2026-09-24** ([`docs/reviews/2026-09-24_lifecycle-graceful-stop-cto.md`](../docs/reviews/2026-09-24_lifecycle-graceful-stop-cto.md),
+  ACCEPT_WITH_DEBT), в тот же план, **до gui-service 1.3a**, цена S: (4) `system.shutdown` обязан взводить
+  `system_stop_event` (решение CTO по контракту; живьём 5.83 с и `terminate` renderer'а в 1 из 3); (5) метку
+  «читатель ушёл» ставит PM после join/terminate/kill ребёнка без рестарта (репро: убитый читатель → хук висит
+  > 3 с, внешняя метка → мгновенно); (6) строка итога — только при `buffered_dropped > 0` (сегодня шумит у PM
+  каждый стоп при нулевой потере).
 
 - **Равные вложенные бюджеты.** Spawner ждёт PM `stop_timeout=5.0` (`spawner.py:37`), PM ждёт
   детей `shutdown_timeout=5.0` (`process_manager_process.py:3413`). Законный останов ребёнка
