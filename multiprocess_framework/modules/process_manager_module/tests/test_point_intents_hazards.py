@@ -160,7 +160,7 @@ def test_note_point_request_ignores_failed_result_and_multi_target():
         return {"command": "log.tail.subscribe", "targets": targets, "data": {"subscriber": "gui.s1"}}
 
     pm._note_point_request(msg(["worker_1"]), "s1", {"success": True, "result": {"success": False, "reason": "x"}})
-    pm._note_point_request(msg(["worker_1"]), "s1", {"success": False, "error": "timeout"})
+    pm._note_point_request(msg(["worker_1"]), "s1", {"success": False, "error": "No handler for key"})
     pm._note_point_request(msg(["worker_1", "worker_2"]), "s1", {"success": True})
     pm._note_point_request({**msg(["worker_1"]), "command": "state.subscribe"}, "s1", {"success": True})
     assert broker.snapshot()["points"] == []
@@ -206,3 +206,96 @@ def test_point_only_registry_still_replays_on_instance_started():
     pm._replay_observability_when_ready("worker_1")
 
     assert scheduled == ["worker_1"]
+
+
+# ---------------------------------------------------------------------------
+# Ревью 4.4, итерация 1
+# ---------------------------------------------------------------------------
+
+
+def _plain_broker(send_to=lambda t, c, d: True) -> ObservabilitySubscriptionBroker:
+    return ObservabilitySubscriptionBroker(broadcast=lambda c, d: 0, send_to=send_to)
+
+
+def test_refused_log_untail_without_address_keeps_foreign_intents():
+    """log.tail.unsubscribe {} процесс отклоняет («subscriber или tap обязателен») — чужие намерения живы."""
+    broker = _plain_broker()
+    broker.note_point("pult", "log.tail.subscribe", {"subscriber": "backend_ctl.F"})
+
+    assert broker.note_point("pult", "log.tail.unsubscribe", {}) is False
+
+    assert [p["subscriber"] for p in broker.snapshot()["points"]] == ["backend_ctl.F"]
+
+
+def test_log_untail_by_tap_removes_exactly_one():
+    """Снятие по ``tap`` (log_tail::<адрес>) снимает ровно этот адрес."""
+    broker = _plain_broker()
+    broker.note_point("pult", "log.tail.subscribe", {"subscriber": "backend_ctl.A"})
+    broker.note_point("pult", "log.tail.subscribe", {"subscriber": "backend_ctl.B"})
+
+    assert broker.note_point("pult", "log.tail.unsubscribe", {"tap": "log_tail::backend_ctl.A"}) is True
+
+    assert [p["subscriber"] for p in broker.snapshot()["points"]] == ["backend_ctl.B"]
+
+
+def test_observability_untail_without_address_still_clears_all_at_target():
+    """observability.tail без адреса процесс снимает ВСЕХ (teardown) — реестр зеркалит это."""
+    broker = _plain_broker()
+    broker.note_point("pult", "observability.tail.subscribe", {"subscriber": "backend_ctl.A"})
+    broker.note_point("pult", "observability.tail.subscribe", {"subscriber": "backend_ctl.B"})
+    broker.note_point("cam", "observability.tail.subscribe", {"subscriber": "backend_ctl.A"})
+
+    assert broker.note_point("pult", "observability.tail.unsubscribe", {}) is True
+
+    assert [(p["target"], p["subscriber"]) for p in broker.snapshot()["points"]] == [("cam", "backend_ctl.A")]
+
+
+def test_timeout_subscribe_is_recorded_other_failures_are_not():
+    """Тайм-аут подписки записывается (ребёнок мог подписаться), прочий явный отказ — нет."""
+    broker = _plain_broker()
+    pm = _bare_pm(broker)
+    sub = {"command": "log.tail.subscribe", "targets": ["worker_1"], "data": {"subscriber": "gui.s1"}}
+
+    pm._note_point_request(sub, "s1", {"success": False, "error": "No handler for key"})
+    assert broker.snapshot()["points"] == []
+
+    pm._note_point_request(sub, "s1", {"success": False, "error": "timeout", "correlation_id": "c1"})
+    assert [p["subscriber"] for p in broker.snapshot()["points"]] == ["gui.s1"]
+
+
+def test_unsubscribe_landing_mid_replay_does_not_resurrect():
+    """Гонка (a): снятие s2 приходит, пока replay отправляет s1, — s2 не доигрывается."""
+    sent: list = []
+
+    def send_to(target, command, data):
+        sent.append(data.get("subscriber"))
+        if len(sent) == 1:
+            ok, errors = _run_with_deadline(
+                lambda: broker.note_point("worker_1", "log.tail.unsubscribe", {"subscriber": "backend_ctl.s2"})
+            )
+            assert ok and errors == []
+        return True
+
+    broker = _plain_broker(send_to)
+    broker.note_point("worker_1", "log.tail.subscribe", {"subscriber": "backend_ctl.s1"})
+    broker.note_point("worker_1", "log.tail.subscribe", {"subscriber": "backend_ctl.s2"})
+
+    result = broker.replay(target="worker_1")
+
+    assert sent == ["backend_ctl.s1"]
+    assert [r["subscriber"] for r in result["points"]["replayed"]] == ["backend_ctl.s1"]
+
+
+def test_subscribe_answer_after_session_closed_is_not_recorded():
+    """Гонка (b): сокет закрыт (forget_session) раньше, чем read-поток дописал успешную подписку."""
+    broker = _plain_broker()
+    pm = _bare_pm(broker)
+
+    pm._forget_closed_session("s9")
+    pm._note_point_request(
+        {"command": "log.tail.subscribe", "targets": ["pult"], "data": {"subscriber": "backend_ctl.s9"}},
+        "s9",
+        {"success": True, "result": {"success": True}},
+    )
+
+    assert broker.snapshot()["points"] == []

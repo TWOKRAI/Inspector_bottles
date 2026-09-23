@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: Команды процесса, в которые разворачивается намерение подписчика.
@@ -57,6 +58,13 @@ _POINT_UNSUBSCRIBE: Dict[str, str] = {unsub: sub for sub, unsub in POINT_COMMAND
 #: ui.tap — один тап на процесс (``cmd_unsubscribe`` снимает его целиком, payload
 #: не читает; новый subscribe переставляет подписчика). Реестр зеркалит это.
 _SINGLE_HOLDER_COMMANDS = frozenset({"ui.tap.subscribe"})
+#: log.tail снимается по имени tap'а; у подписки имя детерминировано
+#: (``builtin_commands._log_tap_name``): ``log_tail::<subscriber>``.
+_LOG_TAP_PREFIX = "log_tail::"
+#: Сколько последних закрытых сессий помнить (гонка «сокет закрылся раньше, чем
+#: read-поток дописал подписку»). Сессия уникальна на соединение, поэтому
+#: хвост из 256 покрывает окно гонки с большим запасом.
+_CLOSED_SESSIONS_KEPT = 256
 
 #: Буквальный отказ процесса на подписку самого на себя
 #: (``process_module.py``, ``subscribe_observability_tail``). При replay это
@@ -107,6 +115,7 @@ class ObservabilitySubscriptionBroker:
         # forget_session), читает replay из message_processor/монитора.
         self._points: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._point_replay_failed = 0
+        self._closed_sessions: deque = deque(maxlen=_CLOSED_SESSIONS_KEPT)
 
     # ------------------------------------------------------------------
     # Намерения
@@ -214,6 +223,7 @@ class ObservabilitySubscriptionBroker:
             return []
         suffix = f".{sid}"
         with self._lock:
+            self._closed_sessions.append(sid)
             doomed = [name for name in self._subscribers if name.endswith(suffix)]
             for name in doomed:
                 self._subscribers.pop(name, None)
@@ -248,10 +258,15 @@ class ObservabilitySubscriptionBroker:
 
         - подписка → намерение по ключу ``(target, command, subscriber)``, payload
           хранится как пришёл (его и доиграет :meth:`replay`);
-        - парное снятие с ``subscriber`` → снять этот ключ; без ``subscriber`` →
-          снять все намерения этой команды у ``target`` (так снятие читает процесс);
+        - парное снятие с ``subscriber`` → снять этот ключ. Без ``subscriber`` — как
+          читает снятие процесс: ``log.tail`` берёт адрес из ``tap``
+          (``log_tail::<адрес>``), а без обоих процесс отказывает — реестр не
+          трогается; ``observability.tail`` без адреса у процесса снимает ВСЕХ
+          (teardown-форма) — снимаются все намерения этой команды у цели;
         - ``ui.tap.*`` — один тап на процесс: снятие чистит все ui.tap-намерения
-          цели, новая подписка вытесняет прежнего держателя.
+          цели, новая подписка вытесняет прежнего держателя;
+        - подписка адреса уже закрытой сессии (``<sender>.<sid>``) не запоминается:
+          ``forget_session`` мог отработать раньше, чем read-поток дописал ответ.
 
         Returns:
             True — реестр изменён (или подписка обновлена); False — команда не
@@ -267,6 +282,8 @@ class ObservabilitySubscriptionBroker:
             if not subscriber:
                 return False  # процесс отказал бы; запоминать нечего
             with self._lock:
+                if any(subscriber.endswith(f".{sid}") for sid in self._closed_sessions):
+                    return False  # сессия уже закрыта — намерение было бы сиротой
                 if cmd in _SINGLE_HOLDER_COMMANDS:
                     for key in [k for k in self._points if k[0] == name and k[1] == cmd]:
                         self._points.pop(key, None)
@@ -275,6 +292,11 @@ class ObservabilitySubscriptionBroker:
         sub_cmd = _POINT_UNSUBSCRIBE.get(cmd)
         if sub_cmd is None:
             return False
+        if cmd == "log.tail.unsubscribe" and not subscriber:
+            tap = str(body.get("tap") or "").strip()
+            subscriber = tap[len(_LOG_TAP_PREFIX) :] if tap.startswith(_LOG_TAP_PREFIX) else ""
+            if not subscriber:
+                return False  # процесс отказал («subscriber или tap обязателен») — чужое не трогать
         with self._lock:
             whole = sub_cmd in _SINGLE_HOLDER_COMMANDS or not subscriber
             doomed = [k for k in self._points if k[0] == name and k[1] == sub_cmd and (whole or k[2] == subscriber)]
@@ -308,12 +330,21 @@ class ObservabilitySubscriptionBroker:
         сбоем раздачи — показать провал ровно там, где восстановление верно.
         """
         with self._lock:
-            items = sorted((k, dict(v)) for k, v in self._points.items() if k[0] == target)
+            keys = sorted(k for k in self._points if k[0] == target)
         out: Dict[str, List[dict]] = {"replayed": [], "skipped": [], "failed": []}
-        for (tgt, command, subscriber), payload in items:
+        for key in keys:
+            tgt, command, subscriber = key
             row: Dict[str, Any] = {"target": tgt, "command": command, "subscriber": subscriber}
             if subscriber == tgt:
                 out["skipped"].append({**row, "reason": REASON_LOOP})
+                continue
+            # Перепроверка прямо перед отправкой: снятие, пришедшее, пока replay
+            # шёл по снимку, не должно воскресить форвардер. Окно между этой
+            # проверкой и send_to остаётся (отправка вне лока) — оно узкое, не нулевое.
+            with self._lock:
+                payload = self._points.get(key)
+                payload = dict(payload) if payload is not None else None
+            if payload is None:
                 continue
             try:
                 delivered = bool(self._send_to(tgt, command, payload))

@@ -2793,7 +2793,9 @@ class ProcessManagerProcess(ProcessModule):
         Зовётся из read-потока сокета ПОСЛЕ ответа ребёнка: только правка словаря
         брокера, ничего блокирующего. Отказ ребёнка на ПОДПИСКУ (``success: False``
         на любом уровне конверта — тот же спуск по ``result``, что ``_leaf_result``
-        драйвера) не запоминается. СНЯТИЕ учитывается при любом ответе: клиент
+        драйвера) не запоминается — кроме тайм-аута (``error == "timeout"``): ребёнок
+        мог подписку уже поставить, лишний replay идемпотентен, а ``forget_session``
+        снимет её с закрытием сессии. СНЯТИЕ учитывается при любом ответе: клиент
         подписку больше не хочет, и намерение, оставленное из-за отказа/тайм-аута,
         воскресло бы у следующей инкарнации. Многоадресное сообщение не учитывается
         (точечное = одна цель).
@@ -2812,6 +2814,8 @@ class ProcessManagerProcess(ProcessModule):
                 if not isinstance(node, dict):
                     break
                 if node.get("success") is False:
+                    if node.get("error") == "timeout":
+                        break  # пере-запись дешевле потерянной подписки
                     return
                 node = node.get("result")
             self._observability_broker_obj().note_point(str(targets[0]), command, dict(msg.get("data") or {}))
@@ -2846,7 +2850,9 @@ class ProcessManagerProcess(ProcessModule):
         backend_ctl (GUI через свою очередь) — наблюдатель их не видит.
         """
         for plane, forget in (
-            ("observability", getattr(getattr(self, "_observability_broker", None), "forget_session", None)),
+            # 4.4: брокер строится и здесь (не getattr) — он помнит закрытые сессии,
+            # чтобы запоздавший ответ на подписку этой сессии не записал сироту.
+            ("observability", lambda sid: self._observability_broker_obj().forget_session(sid)),
             ("state", getattr(getattr(self, "_state_store_manager", None), "forget_session", None)),
         ):
             if forget is None:
