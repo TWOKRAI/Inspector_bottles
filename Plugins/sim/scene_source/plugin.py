@@ -79,7 +79,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from Services.dataset_gen.core.catalog import imread_unicode
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
-from Services.line_sim.core import BeltGeometry, JobDone, match_job
+from Services.line_sim.core import BeltGeometry, JobDone, MatchResult, TruthLedger, match_job
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -99,6 +99,16 @@ _DEFAULT_CAMERA_ID = 0
 _DEFAULT_MATCH_RADIUS_MM = 5.0
 _DEFAULT_DUP_WINDOW_S = 10.0  # тот же дефолт, что у SimJournal
 _RECENT_MAXLEN = 32
+
+#: Task 5.2 (контракт лида §2): правда на проводе — TruthLedger + пять уровней.
+_DEFAULT_TRUTH_PUBLISH_S = 1.0
+_TRUTH_LEVELS: tuple[str, ...] = (
+    "truth_caught",
+    "truth_dup_jobs",
+    "truth_missed",
+    "truth_false_alarm",
+    "truth_on_belt",
+)
 
 #: Путь мира (Task 2.1/2.1b, паблишер — ``Plugins.sim.robot_host``).
 _ENCODER_PATH = "sim.belt.encoder"
@@ -151,6 +161,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
     commands: dict = {
         "scene.job_done": "cmd_job_done",
         "scene.status": "cmd_status",
+        "truth.status": "cmd_truth_status",
+        "truth.reset": "cmd_truth_reset",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -208,6 +220,15 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._jobs: collections.deque[JobDone] = collections.deque()
         self._removed: collections.deque[tuple[float, Any]] = collections.deque()
         self._recent: collections.deque[dict] = collections.deque(maxlen=_RECENT_MAXLEN)
+
+        # Task 5.2 (контракт лида §2): правда на проводе — свой лок (НЕ self._lock мира),
+        # чтобы truth.status/truth.reset из потока команд не ждали лок мира и наоборот.
+        self._truth = TruthLedger()
+        self._truth_lock = threading.Lock()
+        self._truth_publish_s = float(cfg.get("truth_publish_s", _DEFAULT_TRUTH_PUBLISH_S))
+        self._truth_last_pub: float | None = None
+        for level_name in _TRUTH_LEVELS:
+            ctx.declare_metric(level_name)
 
         # Task 3.6: фон-текстура строится ДО try-блока сборки движка — нечитаемый файл
         # не должен ронять движок целиком (он остаётся живым на сплошном фоне).
@@ -327,10 +348,17 @@ class SceneSourcePlugin(ProcessModulePlugin):
 
         if self._spawner is not None and self._compositor is not None:
             if self._world_ready:
+                # Task 5.2 (контракт лида §2): снимок id ДО тика (после _drain_jobs — объекты,
+                # снятые заданием в этом же кадре, уже не в active_objects()) и ПОСЛЕ — разница
+                # даёт on_spawn/on_despawn для TruthLedger. Считается и при сбое factory.tick()
+                # (before == after в этом случае — diff пустой, вреда нет).
+                before_ids = {obj.passport.object_id for obj in self._spawner.active_objects()}
                 try:
                     self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)
                 except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл
                     self._warn_factory_error(exc)
+                after_passports = {obj.passport.object_id: obj.passport for obj in self._spawner.active_objects()}
+                self._update_truth_belt(before_ids, after_passports)
             frame_rgb, _passports_in_view = self._compositor.render(
                 now_encoder, camera_rect=(0.0, 0.0, float(self._width), float(self._height))
             )
@@ -339,6 +367,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
             frame_rgb = self._background_only_frame()
 
         frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+        self._publish_truth_metrics()
 
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
         return [
@@ -380,6 +409,19 @@ class SceneSourcePlugin(ProcessModulePlugin):
             recent = list(self._recent)
         return {"status": "ok", "active": active, "recent": recent}
 
+    def cmd_truth_status(self, data: dict | None = None) -> dict:
+        """`truth.status` (поток команд): снимок счётчиков `TruthLedger` — §2 контракта."""
+        with self._truth_lock:
+            counters = self._truth.counters()
+        return {"status": "ok", "counters": counters}
+
+    def cmd_truth_reset(self, data: dict | None = None) -> dict:
+        """`truth.reset` (поток команд): `ledger.reset()` — объекты под учётом остаются,
+        см. `TruthLedger.reset()` (§2 контракта)."""
+        with self._truth_lock:
+            self._truth.reset()
+        return {"status": "ok"}
+
     def _drain_jobs(self) -> None:
         """Разобрать очередь заданий целиком (воркер produce(), ДО `spawner.tick()`).
 
@@ -394,7 +436,9 @@ class SceneSourcePlugin(ProcessModulePlugin):
         while self._jobs:
             job = self._jobs.popleft()
             if self._spawner is None:
-                outcome, object_id, residual_mm = "no_object", None, None
+                # Task 5.2 (контракт лида §2): движок не собран -> каждое задание получает
+                # no_object на проводе И в TruthLedger (растёт только false_alarm).
+                result = MatchResult(outcome="no_object", object_id=None, residual_mm=None)
             else:
                 result = match_job(
                     [obj.passport for obj in self._spawner.active_objects()],
@@ -403,11 +447,13 @@ class SceneSourcePlugin(ProcessModulePlugin):
                     removed=[passport for _t, passport in self._removed],
                     match_radius_mm=self._match_radius_mm,
                 )
-                outcome, object_id, residual_mm = result.outcome, result.object_id, result.residual_mm
-                if outcome == "matched" and object_id is not None:
-                    passport = self._spawner.remove(object_id)
+                if result.outcome == "matched" and result.object_id is not None:
+                    passport = self._spawner.remove(result.object_id)
                     if passport is not None:
                         self._removed.append((now, passport))
+            outcome, object_id, residual_mm = result.outcome, result.object_id, result.residual_mm
+            with self._truth_lock:
+                self._truth.on_match(result)
             entry = {"index": job.index, "outcome": outcome, "object_id": object_id, "residual_mm": residual_mm}
             with self._lock:
                 self._recent.append(entry)
@@ -458,6 +504,40 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._last_object_ids = current_ids
         if self._ctx.state_proxy is not None:
             self._ctx.state_proxy.set(_OBJECTS_PATH, {oid: passport.to_dict() for oid, passport in current.items()})
+
+    def _update_truth_belt(self, before_ids: set[str], after: dict[str, Any]) -> None:
+        """Task 5.2 (контракт лида §2): id, появившиеся между снимком до и после
+        `spawner.tick()`, -> `ledger.on_spawn(passport)`; id, исчезнувшие -> `ledger.
+        on_despawn(id)`. Объект, снятый заданием в ЭТОМ ЖЕ кадре (`_drain_jobs` идёт до
+        `tick()`), уже отсутствует и в `before_ids` — diff его не видит, поэтому такой
+        объект не попадает в `on_despawn` дважды (он уже решён через `on_match`)."""
+        after_ids = set(after)
+        new_ids = after_ids - before_ids
+        gone_ids = before_ids - after_ids
+        if not new_ids and not gone_ids:
+            return
+        with self._truth_lock:
+            for object_id in new_ids:
+                self._truth.on_spawn(after[object_id])
+            for object_id in gone_ids:
+                self._truth.on_despawn(object_id)
+
+    def _publish_truth_metrics(self) -> None:
+        """Task 5.2 (контракт лида §2): пять уровней `truth_*` на своём такте, не чаще
+        раза в `truth_publish_s` (``publish_metric`` просит звать на своём такте, а не на
+        кадре — см. ``multiprocess_framework/modules/process_module/plugins/base.py``).
+        Первый `produce()` публикует (``_truth_last_pub is None``)."""
+        now = time.monotonic()
+        if self._truth_last_pub is not None and (now - self._truth_last_pub) < self._truth_publish_s:
+            return
+        self._truth_last_pub = now
+        with self._truth_lock:
+            counters = self._truth.counters()
+        self._ctx.publish_metric("truth_caught", counters["caught"])
+        self._ctx.publish_metric("truth_dup_jobs", counters["dup_jobs"])
+        self._ctx.publish_metric("truth_missed", counters["missed"])
+        self._ctx.publish_metric("truth_false_alarm", counters["false_alarm"])
+        self._ctx.publish_metric("truth_on_belt", counters["on_belt"])
 
     def _warn_factory_error(self, exc: Exception) -> None:
         """`spawner.tick()` упал (обычно — сбой фабрики) — кадр отдаётся с прежней сценой,

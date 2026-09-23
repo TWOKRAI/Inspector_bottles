@@ -137,6 +137,24 @@ rng (`SceneCompositor.render()` их не трогает, LS-009).
 де-дублированный по значению `t` (не спамит на каждый кадр одним и тем же
 протухшим значением).
 
+## Правда на проводе (Task 5.2)
+
+`TruthLedger` (`Services.line_sim.core.truth`) считает исходы сам, без участия прототипа —
+своим локом `_truth_lock` (НЕ `_lock` мира): `on_spawn`/`on_despawn` кормятся из diff
+множества `active_objects()` до/после `spawner.tick()` в `produce()` (после `_drain_jobs` —
+поэтому объект, снятый заданием в этом же кадре, засчитывается как `caught`, не `missed`);
+`on_match` кормится из каждого исхода `_drain_jobs`, включая ветку «движок не собран»
+(`MatchResult("no_object", ...)` — растёт только `false_alarm`).
+
+Команды: `truth.status` -> `{"status": "ok", "counters": {...}}` (полный набор ключей —
+`Services/line_sim/README.md` → «TruthLedger»); `truth.reset` -> `{"status": "ok"}`, счётчики
+в ноль, объекты под учётом остаются.
+
+Пять уровней (`truth_caught`, `truth_dup_jobs`, `truth_missed`, `truth_false_alarm`,
+`truth_on_belt`, ADR-PM-038) публикуются из `produce()` не чаще раза в `truth_publish_s`
+(конфиг, дефолт `1.0` с) — первый `produce()` публикует всегда. В дерево мира (`sim.*`)
+счётчики НЕ пишутся — это порт наблюдений, не состояние для других устройств.
+
 ## Границы
 
 `Plugins/sim/scene_source` не импортирует `Plugins.sim.robot_host` ни
