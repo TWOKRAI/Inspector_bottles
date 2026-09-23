@@ -236,6 +236,14 @@ composite`, тот же примитив, что `LayeredObject`). Возвра�
   закрашиваются `background_bgr`.
 - `background_tile=None` — кадр байт в байт как в 3.4.
 
+## `core/matching.py` — job↔object matching (Task 3.5a, LS-012)
+
+`match_job(active, job, geometry, *, removed=(), match_radius_mm=5.0)` сопоставляет
+событие `RobotSimCore.on_job_done` (`JobDone`) с ближайшим объектом сцены по невязке XY
+в системе координат робота (`object_robot_xy`, `BeltGeometry`). Победитель из `active` ->
+`matched`, из `removed` (уже снятых) -> `dup`, иначе `no_object`. Используется плагином
+`Plugins/sim/scene_source` (часть B) вместе с `ObjectSpawner.remove()`.
+
 ### Инструмент `tools/make_seamless_texture.py` — фото → бесшовный тайл
 
 ```bash
