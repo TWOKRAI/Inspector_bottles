@@ -377,3 +377,47 @@ def test_h7_cli_arg_validation_and_aperiodic_pitch(tmp_path):
     code = tool.main([str(src), "--out", str(out_pitch), "--pitch-mm", "10", "--scene-px-per-mm", "1.0"])
     assert code == 1
     assert not out_pitch.exists()
+
+
+def test_h12_non_integer_period_keeps_period_path():
+    """H12 (лид, живой стенд 2026-09-23): период звена в пикселях сцены почти никогда не целый —
+    25.4 мм × 0.6 px/мм = 15.24 px. Автокорреляция находит целые 15, и обрезка «целым числом
+    найденных периодов» (10 × 15 = 150 px) копит сдвиг фазы на шве 10 × 0.24 = 2.4 px: шов хуже
+    внутреннего перехода, инструмент откатывался в зеркало. На синтетическом «фото ленты» со
+    стенда так и было (`period_px=15`, шов 33.83 > внутри 31.76 → mirror). Второе лицо того же
+    дефекта — в этой фикстуре: шум поднимает `inner_diff` (это МАКСИМУМ внутренних шагов), и
+    наивная обрезка 150 px проходит проверку шва (37.3 ≤ 39.25) с рывком фазы 2.4 px на шве —
+    проверка шва его не видит. Поэтому тест ловит сдвиг фазы ширины тайла, а не шов."""
+    true_period = 15.24  # 25.4 мм * 0.6 px/мм — литерал, не из кода
+    width, height = 156, 40
+    x = np.arange(width)
+    hinge = 70.0 + 35.0 * (np.cos(2 * np.pi * x / true_period) > 0.85)
+    rng = np.random.default_rng(3)
+    plane = np.clip(hinge[None, :] + rng.normal(0, 6, (height, width)), 0, 255).astype(np.uint8)
+    image = np.repeat(plane[:, :, None], 3, axis=2)
+
+    result = make_seamless_tile(image)
+
+    assert result.method == "period", result.note
+    inner_diff, seam_diff = _recompute_inner_and_seam(result.tile)
+    assert seam_diff <= inner_diff
+    tile_w = result.tile.shape[1]
+    phase_err = abs(tile_w - round(tile_w / true_period) * true_period)
+    assert phase_err <= 0.5, f"ширина тайла {tile_w} не кратна истинному периоду: сдвиг фазы {phase_err:.2f} px"
+
+
+def test_h13_tile_not_narrower_than_half_photo():
+    """H13 (лид): при нескольких точных повторах тайл берётся не уже половины фото — иначе фактура
+    ленты (пятна, износ) повторяется в кадре через каждые пару звеньев. Фикстура без шума с
+    периодом ровно 61/3 px: рисунок точно повторяется через 61 px, а в окне одного периода
+    бинарный рисунок совпадает и на других ширинах (замер: без границы выбирается 41, с ней —
+    102 = 5 × 20.33, сдвиг 0.33 px). Проверяется само свойство «не уже половины», не ширина."""
+    width, height = 150, 20
+    x = np.arange(width)
+    hinge = 70.0 + 35.0 * (np.cos(2 * np.pi * x / (61 / 3)) > 0.85)
+    image = np.repeat(np.repeat(hinge[None, :], height, axis=0)[:, :, None], 3, axis=2).astype(np.uint8)
+
+    result = make_seamless_tile(image)
+
+    assert result.method == "period", result.note
+    assert result.tile.shape[1] >= (width + 1) // 2  # 75

@@ -99,25 +99,38 @@ def _seam_and_inner(tile: np.ndarray) -> tuple[float, float]:
     return inner_diff, seam_diff
 
 
+def _best_crop_width(image: np.ndarray, period: int) -> int:
+    """Ширина обрезки `c` из `[W/2, W - period]`, при которой столбцы `c..c+period` лучше всего
+    повторяют столбцы `0..period` (по профилю яркости столбцов).
+
+    Период звена в пикселях сцены почти никогда не целый (25.4 мм × 0.6 px/мм = 15.24 px), а
+    `find_period` отдаёт целое: обрезка «целым числом найденных периодов» копит сдвиг фазы на
+    шве (10 × 0.24 = 2.4 px). Лучшее самосовпадение выбирает то число звеньев, где их длина
+    ближе всего к целому пикселю. Не уже половины фото — чтобы фактура повторялась реже.
+    """
+    width = image.shape[1]
+    profile = image.astype(float).mean(axis=(0, 2))
+    head = profile[:period]
+    # find_period отдаёт period <= W // 2, поэтому диапазон не пуст.
+    lo = max(period, (width + 1) // 2)
+    scores = {c: float(np.mean(np.abs(profile[c : c + period] - head))) for c in range(lo, width - period + 1)}
+    return min(scores, key=scores.__getitem__)
+
+
 def make_seamless_tile(image: np.ndarray) -> SeamlessResult:
     """Собрать бесшовный тайл: период — если он есть и его шов не хуже внутреннего,
     иначе зеркало."""
     period = find_period(image)
     note = ""
     if period is not None:
-        width = image.shape[1]
-        crop_w = (width // period) * period
-        if crop_w >= period:
-            candidate = image[:, :crop_w].copy()
-            inner_diff, seam_diff = _seam_and_inner(candidate)
-            if seam_diff <= inner_diff:
-                return SeamlessResult(candidate, "period", period, seam_diff, inner_diff)
-            note = (
-                f"период найден (period_px={period}), но шов ({seam_diff:.2f}) хуже "
-                f"внутренней разницы тайла ({inner_diff:.2f}) — откат на зеркальную склейку"
-            )
-        else:
-            note = f"период найден (period_px={period}), но фото короче одного периода — откат на зеркало"
+        candidate = image[:, : _best_crop_width(image, period)].copy()
+        inner_diff, seam_diff = _seam_and_inner(candidate)
+        if seam_diff <= inner_diff:
+            return SeamlessResult(candidate, "period", period, seam_diff, inner_diff)
+        note = (
+            f"период найден (period_px={period}), но шов ({seam_diff:.2f}) хуже "
+            f"внутренней разницы тайла ({inner_diff:.2f}) — откат на зеркальную склейку"
+        )
     else:
         note = "период не найден автокорреляцией — зеркальная склейка"
 
