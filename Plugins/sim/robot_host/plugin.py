@@ -147,7 +147,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         # ДО сервера, чтобы on_write/on_event сервера сразу видели живой объект.
         self._journal: SimJournal | None = None
         # Кольцо строк для команды sim_robot.journal — наполняется ТОЛЬКО тиком
-        # паблишера (_publish_once), drain() журнала разрушающий (см. TRAPS).
+        # паблишера (_publish_once), drain() журнала разрушающий — забирает один владелец.
         self._journal_recent: deque[dict[str, Any]] = deque(maxlen=_JOURNAL_RECENT_MAXLEN)
         # Dead-man jog (под self._lock — пишут и команда, и паблишер):
         # _jog_regs — что jog записал в mailbox (RUN, DIR, FREQ), _jog_deadline —
@@ -219,7 +219,11 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             self._fail(ctx, exc)
             return
 
-        self._journal = SimJournal()
+        with self._lock:
+            # Рестарт сервера — новый журнал; строки прошлого запуска в recent остаться
+            # не должны (ревью 3.5/5.1, minor 2: было counters.jobs=0 при recent=[job, dup]).
+            self._journal = SimJournal()
+            self._journal_recent.clear()
         try:
             from Services.modbus.sdk.errors import ModbusNotAvailableError
             from Services.robot_comm.server.sim_robot import SimRobotServer
@@ -252,7 +256,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         Исполняется в потоке тикера ``SimRobotServer`` — поэтому только
         fire-and-forget (неблокирующая постановка в очередь) и НИКОГДА не бросает:
         исключение из колбэка ядро не ловит, оно уронило бы тикер робота.
-        Сбой или ``False`` (не поставлено в очередь) -> ``ctx.health.report_error``
+        Исключение или ``False`` (нет роутера/``send_async``) -> ``ctx.health.report_error``
         с троттлом."""
         try:
             client = DeviceHubClient(self._ctx, target_process=self._scene_process)
@@ -303,7 +307,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         ``self._journal.on_write`` — журнал сам считает чтения отдельным
         счётчиком (Контракт лида 5.1, §2); ``SimJournal.on_write`` дешёвый
         (свой ``Lock``, без IPC) — публикация метрик сюда НЕ переносится
-        (TRAPS ведущего: этот метод зовётся с потока ``pymodbus``).
+        (этот метод зовётся с потока ``pymodbus``).
         ``values is None`` — чтение, не считаем в ``_writes_seen``. Иначе —
         запись, инкремент под локом; публикация в plane stats отложена до
         :meth:`_sync_writes_metric`.
@@ -435,8 +439,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
     def _publish_journal_once(self) -> None:
         """Уровни журнала + перенос новых строк в ``_journal_recent`` (Контракт §2).
 
-        ``journal.drain()`` разрушающий (см. TRAPS ведущего в докстринге
-        ``sim_journal.py``) — забирает его строго ОДИН владелец, тик
+        ``journal.drain()`` разрушающий (``SimJournal.drain``: «журнал очищается»)
+        — забирает его строго ОДИН владелец, тик
         паблишера; сам приём (``_on_write``) в журнал только пишет, никогда
         не читает и не чистит.
         """
@@ -493,8 +497,11 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         """``sim_robot.journal_reset`` → обнулить счётчики журнала и очистить ``recent``."""
         if self._server is None or self._journal is None:
             return {"status": "error", "message": "server_not_running"}
-        self._journal.reset()
+        # Сброс и очистка — под ОДНИМ self._lock, как drain в такте публикации (ревью 3.5/5.1,
+        # minor 1): иначе тик между ними переносил строку задания в recent, а clear её стирал.
+        # Порядок замков тот же, что у drain: self._lock -> SimJournal._lock.
         with self._lock:
+            self._journal.reset()
             self._journal_recent.clear()
         return {"status": "ok"}
 

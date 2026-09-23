@@ -95,3 +95,24 @@ def test_journal_counts_job_and_done_through_real_core(monkeypatch):
 
     counters = plugin.cmd_journal({})["counters"]
     assert (counters["jobs"], counters["done"], counters["reads"], counters["dups"]) == (1, 1, 1, 0)
+
+
+def test_restart_starts_with_empty_recent(monkeypatch):
+    """Ревью 3.5/5.1, minor 2: рестарт сервера создаёт новый журнал — строки прошлого
+    запуска не должны оставаться в `recent` при нулевых счётчиках."""
+    monkeypatch.setattr(sim_robot_module, "SimRobotServer", _FakeServer)
+    ctx = MagicMock()
+    ctx.config = {"host": "127.0.0.1", "port": 0, "unit_id": 2, "auto_start": False}
+    plugin = SimRobotHostPlugin()
+    plugin.configure(ctx)
+    monkeypatch.setattr(plugin, "_probe_port_free", lambda: None)
+    plugin._start_server(ctx)
+    for addr, values in ((REG_JOB_X, [125]), (REG_JOB_Y, [200]), (REG_JOB_FLAG, [1])):
+        plugin._on_write(16, addr, values)
+    plugin._publish_journal_once()
+    assert [e["tag"] for e in plugin.cmd_journal({})["recent"]] == ["job"]
+
+    plugin._server = None  # сервер остановлен
+    plugin._start_server(ctx)
+    journal = plugin.cmd_journal({})
+    assert journal["counters"]["jobs"] == 0 and journal["recent"] == []
