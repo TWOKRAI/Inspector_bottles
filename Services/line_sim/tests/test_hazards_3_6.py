@@ -281,6 +281,60 @@ def test_h6_periodic_pattern_with_vignetting_falls_back_to_mirror():
 # --------------------------------------------------------------------------------------
 
 
+def test_h10_camera_rect_x_offset_shifts_tile_columns(tmp_path):
+    """H10: `x_px` (первая компонента `camera_rect`) обязана входить в формулу сдвига
+    тайла (`cols = (arange(w) + round(x_px) - shift_px) % tw`). Ни один тест тестера
+    и ни один из H1-H7 не задаёт для фона `camera_rect` с `x_px != 0` — все камеры
+    выше начинались от `(0.0, ...)`. Инъекция `cols = (np.arange(w) - shift_px) % tw`
+    (x_px молча выпал из формулы) осталась бы зелёной на всём прежнем наборе.
+    Найдено break-injection'ом лида (2026-09-23)."""
+    tw, th = 100, 30
+    tile = np.zeros((th, tw, 3), dtype=np.uint8)
+    for u in range(tw):
+        tile[:, u, 0] = u  # tw=100 < 256 -> прямое кодирование индекса столбца
+
+    spawner = _make_spawner(tmp_path, color_bgr=(0, 0, 255))  # пустой спавнер
+    belt_y_px = 20.0
+    compositor = SceneCompositor(
+        spawner, px_per_mm=1.0, belt_y_px=belt_y_px, background_bgr=(60, 60, 60), background_tile=tile
+    )
+    # top = round(20 - 15) = 5 -> полоса [5, 35); read_row=10 -> row_in_tile=5, внутри полосы
+    read_row = 10
+
+    for x_px in (7.0, 12.4):  # целое ненулевое и нецелое значение
+        w, h = 60, 40
+        frame, passports = compositor.render(now_encoder=0.0, camera_rect=(x_px, 0.0, float(w), float(h)))
+        assert passports == []
+        shift_px = 0  # now_encoder=0.0 -> encoder_to_offset_mm(0, 0) == 0
+        for u in (0, 1, w - 1):
+            expected_col = (u + round(x_px) - shift_px) % tw
+            assert frame[read_row, u, 0] == expected_col, f"x_px={x_px}, u={u}: столбец тайла не учитывает x_px"
+
+
+def test_h11_background_tile_stored_as_copy_not_reference(tmp_path):
+    """H11: конструктор обязан хранить КОПИЮ `background_tile`, не ссылку на массив
+    вызывающего — иначе мутация массива после создания `SceneCompositor` (например,
+    вызывающий переиспользует буфер для следующего кадра) незаметно меняет уже
+    построенную сцену. Инъекция `return tile.copy()` -> `return tile` в
+    `_validate_background_tile` осталась бы зелёной на всём прежнем наборе (ни один
+    тест не мутирует исходный массив после конструктора). Найдено break-injection'ом
+    лида (2026-09-23)."""
+    tw, th = 10, 10
+    tile = np.full((th, tw, 3), fill_value=50, dtype=np.uint8)
+
+    spawner = _make_spawner(tmp_path, color_bgr=(0, 0, 255))  # пустой спавнер
+    compositor = SceneCompositor(
+        spawner, px_per_mm=1.0, belt_y_px=5.0, background_bgr=(60, 60, 60), background_tile=tile
+    )
+
+    tile[:, :, :] = 200  # мутация массива вызывающего ПОСЛЕ конструктора
+
+    frame, passports = compositor.render(now_encoder=0.0, camera_rect=(0.0, 0.0, 10.0, 10.0))
+    assert passports == []
+    # top = round(5 - 10/2) = 0 -> вся полоса покрывает весь кадр (h=10)
+    assert np.all(frame == 50), "мутация исходного массива после конструктора протекла в рендер"
+
+
 def test_h7_cli_arg_validation_and_aperiodic_pitch(tmp_path):
     """H7: три пути неверного/невозможного вызова CLI не должны молча создавать файл
     или тихо использовать масштаб 1.0 по умолчанию — оба масштабных ключа сразу

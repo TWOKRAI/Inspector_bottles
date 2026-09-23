@@ -61,18 +61,44 @@ def _make_catalog(tmp_path: Path) -> Path:
 
 def test_h8_relative_background_texture_resolved_from_repo_root_not_cwd(tmp_path, monkeypatch):
     """H8: относительный `background_texture` резолвится от КОРНЯ РЕПОЗИТОРИЯ, не от
-    CWD процесса. CWD намеренно меняется на `tmp_path` ДО `configure()` — наивная
-    реализация (`Path(rel).resolve()` без похода к `_REPO_ROOT`) читала бы файл из
-    `tmp_path/<rel>` (которого там нет), получила бы `log_error` и откатилась бы на
-    сплошной фон, хотя по контракту фон обязан быть текстурой. Тестерский файл этого
-    не ловит: там CWD уже совпадает с корнем репозитория."""
+    CWD процесса. CWD намеренно меняется ДО `configure()` — наивная реализация
+    (резолвинг относительно CWD, без похода к `_REPO_ROOT`) читала бы файл в неверном
+    месте, получила бы `log_error` и откатилась бы на сплошной фон, хотя по контракту
+    фон обязан быть текстурой. Тестерский файл этого не ловит: там CWD уже совпадает с
+    корнем репозитория.
+
+    **Найдено break-injection'ом лида (2026-09-23):** первая версия этого теста
+    делала `monkeypatch.chdir(tmp_path)`, где `tmp_path` (обычно глубина ~5, например
+    `/private/tmp/pytest-of-.../pytest-N/test_x0`) МЕЛЬЧЕ `_REPO_ROOT` (глубина ~7).
+    `os.path.relpath(texture, _REPO_ROOT)` даёт путь с `len(_REPO_ROOT.parts)` штук
+    `..` — при резолвинге от МЕЛКОГО CWD эти `..` уходят выше `/` и POSIX-семантика
+    "подъём выше корня остаётся в корне" (`Path("/", "..").resolve() == Path("/")`)
+    склеивает результат обратно с абсолютным путём: наивное CWD-резолвление СЛУЧАЙНО
+    попадает в тот же файл, что и правильное резолвление от `_REPO_ROOT`. Инъекция
+    лида (`resolved = self._resolve_preset_path(...)` → `resolved = texture_path`,
+    то есть буквально CWD-резолвление вместо резолвления от корня) оставляла тест
+    ЗЕЛЁНЫМ. Исправление — CWD теперь ГЛУБЖЕ `_REPO_ROOT` (`deep`, ниже), так что `..`
+    из относительного пути НЕ достают до `/` и наивное резолвление промахивается мимо
+    файла. Плюс самопроверка-precondition: если совпадение всё же произойдёт (другая
+    ОС/окружение), тест падает громко, а не тихо становится бесполезным."""
     catalog_dir = _make_catalog(tmp_path)
     texture_bgr = np.full((48, 48, 3), fill_value=(77, 88, 99), dtype=np.uint8)
     texture_path = tmp_path / "h8_texture.png"
     imwrite_unicode(texture_path, texture_bgr)
     relative_path = os.path.relpath(texture_path, _REPO_ROOT)
 
-    monkeypatch.chdir(tmp_path)
+    # CWD должен быть ГЛУБЖЕ _REPO_ROOT (с запасом +2), иначе `..` из relative_path
+    # достанут до "/" и наивное CWD-резолвление случайно попадёт в тот же файл.
+    deep = tmp_path.joinpath(*(["d"] * (len(_REPO_ROOT.parts) + 2)))
+    deep.mkdir(parents=True)
+    monkeypatch.chdir(deep)
+
+    naive_resolved = (Path.cwd() / relative_path).resolve()
+    assert not naive_resolved.exists(), (
+        "тест стал вырожденным: наивное CWD-резолвление случайно тоже указывает на "
+        "существующий файл — увеличьте глубину `deep` (не может отличить правильную "
+        "реализацию от резолвления по CWD)"
+    )
 
     ctx = MagicMock()
     ctx.state_proxy = _FakeStateProxy()
