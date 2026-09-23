@@ -34,7 +34,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections import deque
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: Команды процесса, в которые разворачивается намерение подписчика.
 SUBSCRIBE_COMMAND = "observability.tail.subscribe"
@@ -44,6 +45,31 @@ UNSUBSCRIBE_COMMAND = "observability.tail.unsubscribe"
 #: потребовало переподписки: команда, старт инкарнации или снятие подписчика.
 REASON_COMMAND = "command"
 REASON_INSTANCE = "instance.started"
+
+#: 4.4: ТОЧЕЧНЫЕ подписки (клиент подписался адресно у одного процесса) — команда
+#: подписки → парная команда снятия. Брокер узнаёт о них из ответа на запрос
+#: driver'а (наблюдатель ``on_request`` канала), а не из своих команд.
+POINT_COMMANDS: Dict[str, str] = {
+    "log.tail.subscribe": "log.tail.unsubscribe",
+    "observability.tail.subscribe": "observability.tail.unsubscribe",
+    "ui.tap.subscribe": "ui.tap.unsubscribe",
+}
+_POINT_UNSUBSCRIBE: Dict[str, str] = {unsub: sub for sub, unsub in POINT_COMMANDS.items()}
+#: ui.tap — один тап на процесс (``cmd_unsubscribe`` снимает его целиком, payload
+#: не читает; новый subscribe переставляет подписчика). Реестр зеркалит это.
+_SINGLE_HOLDER_COMMANDS = frozenset({"ui.tap.subscribe"})
+#: log.tail снимается по имени tap'а; у подписки имя детерминировано
+#: (``builtin_commands._log_tap_name``): ``log_tail::<subscriber>``.
+_LOG_TAP_PREFIX = "log_tail::"
+#: Сколько последних закрытых сессий помнить (гонка «сокет закрылся раньше, чем
+#: read-поток дописал подписку»). Сессия уникальна на соединение, поэтому
+#: хвост из 256 покрывает окно гонки с большим запасом.
+_CLOSED_SESSIONS_KEPT = 256
+
+#: Буквальный отказ процесса на подписку самого на себя
+#: (``process_module.py``, ``subscribe_observability_tail``). При replay это
+#: штатный ответ, а не сбой раздачи — поэтому ``skipped``, не ``failed``.
+REASON_LOOP = "подписка процесса на собственный хвост — петля (записи ушли бы в свою же очередь)"
 
 
 class ObservabilitySubscriptionBroker:
@@ -84,6 +110,12 @@ class ObservabilitySubscriptionBroker:
         # инкарнации (её зовут и из монитора через process.restart).
         self._lock = threading.RLock()
         self._subscribers: Dict[str, Dict[str, Any]] = {}
+        # 4.4: точечные намерения — (target, команда подписки, подписчик) → payload
+        # как пришёл от клиента. Тот же лок: пишет read-поток сокета (note_point,
+        # forget_session), читает replay из message_processor/монитора.
+        self._points: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        self._point_replay_failed = 0
+        self._closed_sessions: deque = deque(maxlen=_CLOSED_SESSIONS_KEPT)
 
     # ------------------------------------------------------------------
     # Намерения
@@ -191,18 +223,151 @@ class ObservabilitySubscriptionBroker:
             return []
         suffix = f".{sid}"
         with self._lock:
+            self._closed_sessions.append(sid)
             doomed = [name for name in self._subscribers if name.endswith(suffix)]
             for name in doomed:
                 self._subscribers.pop(name, None)
+            doomed_points = [key for key in self._points if key[2].endswith(suffix)]
+            for key in doomed_points:
+                self._points.pop(key, None)
         # Снять форвардеры мёртвого адреса на детях (симметрично forget_subscriber
         # и unsubscribe_all). Рассылка ВНЕ лока: forget_session зовут из read-потока
         # канала, а fan-out — fire-and-forget (broadcast не ждёт ответа ребёнка),
         # поэтому канал не блокируется.
         for name in doomed:
             self._fan_out(name, UNSUBSCRIBE_COMMAND, reason=REASON_COMMAND)
+        # 4.4: точечные — адресно тому процессу, у которого их брали, тоже вне лока.
+        for target, command, subscriber in doomed_points:
+            self._send_point_unsubscribe(target, command, subscriber)
+        for _t, _c, subscriber in doomed_points:
+            if subscriber not in doomed:
+                doomed.append(subscriber)
         if doomed and self._log_info:
             self._log_info(f"[observability] брокер: намерения {doomed} сняты — соединение сессии '{sid}' закрыто")
         return doomed
+
+    # ------------------------------------------------------------------
+    # Точечные намерения (4.4)
+    # ------------------------------------------------------------------
+
+    def note_point(self, target: str, command: str, payload: Optional[dict]) -> bool:
+        """Запомнить/снять точечную подписку, взятую клиентом адресно у ``target``.
+
+        Зовётся ПОСЛЕ того, как процесс принял команду (наблюдатель ``on_request``
+        канала), поэтому здесь только правка словаря — ничего не отправляется.
+
+        - подписка → намерение по ключу ``(target, command, subscriber)``, payload
+          хранится как пришёл (его и доиграет :meth:`replay`);
+        - парное снятие с ``subscriber`` → снять этот ключ. ``log.tail`` — как читает
+          снятие процесс: ``tap`` побеждает ``subscriber``; ``log_tail::<адрес>`` →
+          этот адрес, tap другой формы или нет ни того ни другого → реестр не
+          трогается; ``observability.tail`` без адреса у процесса снимает ВСЕХ
+          (teardown-форма) — снимаются все намерения этой команды у цели;
+        - ``ui.tap.*`` — один тап на процесс: снятие чистит все ui.tap-намерения
+          цели, новая подписка вытесняет прежнего держателя;
+        - подписка адреса уже закрытой сессии (``<sender>.<sid>``) не запоминается:
+          ``forget_session`` мог отработать раньше, чем read-поток дописал ответ.
+          Живая сессия с ПОВТОРНО использованным sid тоже будет проигнорирована:
+          для backend_ctl недостижимо (uuid на соединение), но ``_bind_session``
+          канала принимает sid клиента как есть, а не выдаёт его сам.
+
+        Returns:
+            True — реестр изменён (или подписка обновлена); False — команда не
+            точечная, у подписки нет адреса, либо снимать было нечего.
+        """
+        name = str(target or "").strip()
+        cmd = str(command or "")
+        body = dict(payload or {})
+        subscriber = str(body.get("subscriber") or "").strip()
+        if not name:
+            return False
+        if cmd in POINT_COMMANDS:
+            if not subscriber:
+                return False  # процесс отказал бы; запоминать нечего
+            with self._lock:
+                if any(subscriber.endswith(f".{sid}") for sid in self._closed_sessions):
+                    return False  # сессия уже закрыта — намерение было бы сиротой
+                if cmd in _SINGLE_HOLDER_COMMANDS:
+                    for key in [k for k in self._points if k[0] == name and k[1] == cmd]:
+                        self._points.pop(key, None)
+                self._points[(name, cmd, subscriber)] = body
+            return True
+        sub_cmd = _POINT_UNSUBSCRIBE.get(cmd)
+        if sub_cmd is None:
+            return False
+        if cmd == "log.tail.unsubscribe":
+            # Приоритет как у процесса (builtin_commands, _cmd_log_tail_unsubscribe):
+            # явный tap побеждает subscriber. Tap чужой формы адресу не сопоставить.
+            tap = str(body.get("tap") or "").strip()
+            if tap:
+                subscriber = tap[len(_LOG_TAP_PREFIX) :] if tap.startswith(_LOG_TAP_PREFIX) else ""
+            if not subscriber:
+                return False  # процесс отказал бы или снял не наш tap — чужое не трогать
+        with self._lock:
+            whole = sub_cmd in _SINGLE_HOLDER_COMMANDS or not subscriber
+            doomed = [k for k in self._points if k[0] == name and k[1] == sub_cmd and (whole or k[2] == subscriber)]
+            for key in doomed:
+                self._points.pop(key, None)
+        return bool(doomed)
+
+    def has_intents(self) -> bool:
+        """Есть ли что доигрывать свежей инкарнации: оптовые ИЛИ точечные намерения."""
+        with self._lock:
+            return bool(self._subscribers) or bool(self._points)
+
+    def _send_point_unsubscribe(self, target: str, command: str, subscriber: str) -> None:
+        """Снять точечную подписку мёртвого адреса у процесса (fire-and-forget, вне лока)."""
+        unsub = POINT_COMMANDS[command]
+        # ui.tap.unsubscribe payload не читает; log/observability снимают по адресу.
+        payload: Dict[str, Any] = {} if command in _SINGLE_HOLDER_COMMANDS else {"subscriber": subscriber}
+        try:
+            self._send_to(target, unsub, payload)
+        except Exception as exc:  # noqa: BLE001 — уборка не роняет read-поток канала
+            if self._log_error:
+                self._log_error(
+                    f"[observability] брокер: снятие '{unsub}' для '{subscriber}' у '{target}' не ушло: {exc}"
+                )
+
+    def _replay_points(self, target: str) -> Dict[str, List[dict]]:
+        """Доиграть точечные намерения ОДНОЙ цели. Payload — дословно, без маркера ``scope``.
+
+        Петля (``subscriber == target``) не отправляется и в ``failed`` не идёт:
+        процесс ответил бы штатным отказом :data:`REASON_LOOP`, и считать его
+        сбоем раздачи — показать провал ровно там, где восстановление верно.
+        """
+        with self._lock:
+            keys = sorted(k for k in self._points if k[0] == target)
+        out: Dict[str, List[dict]] = {"replayed": [], "skipped": [], "failed": []}
+        for key in keys:
+            tgt, command, subscriber = key
+            row: Dict[str, Any] = {"target": tgt, "command": command, "subscriber": subscriber}
+            if subscriber == tgt:
+                out["skipped"].append({**row, "reason": REASON_LOOP})
+                continue
+            # Перепроверка прямо перед отправкой: снятие, пришедшее, пока replay
+            # шёл по снимку, не должно воскресить форвардер. Окно между этой
+            # проверкой и send_to остаётся (отправка вне лока) — оно узкое, не нулевое.
+            with self._lock:
+                payload = self._points.get(key)
+                payload = dict(payload) if payload is not None else None
+            if payload is None:
+                continue
+            try:
+                delivered = bool(self._send_to(tgt, command, payload))
+                error = None if delivered else "send_to вернул False"
+            except Exception as exc:  # noqa: BLE001 — раздача не роняет старт процесса
+                error = str(exc)
+            if error is None:
+                out["replayed"].append(row)
+                continue
+            out["failed"].append({**row, "error": error})
+            with self._lock:
+                self._point_replay_failed += 1
+            if self._log_error:
+                self._log_error(
+                    f"[observability] брокер: точечная '{command}' для '{subscriber}' у '{tgt}' не доиграна: {error}"
+                )
+        return out
 
     # ------------------------------------------------------------------
     # Раздача
@@ -218,18 +383,21 @@ class ObservabilitySubscriptionBroker:
         """
         with self._lock:
             names = sorted(self._subscribers)
-        if not names:
-            return {"subscribers": [], "reached": 0}
         reached = 0
         for name in names:
             res = self._fan_out(name, SUBSCRIBE_COMMAND, target=target, reason=reason)
             reached += int(res.get("reached", 0))
-        if self._log_info:
+        # 4.4: точечные — только адресно (они принадлежат одной цели), никогда веером.
+        points: Dict[str, List[dict]] = (
+            self._replay_points(target) if target is not None else {"replayed": [], "skipped": [], "failed": []}
+        )
+        if (names or any(points.values())) and self._log_info:
             self._log_info(
                 f"[observability] брокер: подписки доиграны ({reason}, target={target!r}): "
-                f"подписчики={names}, охват={reached}"
+                f"подписчики={names}, охват={reached}, точечные: доиграно={len(points['replayed'])} "
+                f"петля={len(points['skipped'])} сбой={len(points['failed'])}"
             )
-        return {"subscribers": names, "reached": reached}
+        return {"subscribers": names, "reached": reached, "points": points}
 
     def _fan_out(
         self,
@@ -359,7 +527,12 @@ class ObservabilitySubscriptionBroker:
         """
         with self._lock:
             entries: List[dict] = [dict(v) for _k, v in sorted(self._subscribers.items())]
-        return {"subscribers": entries, "count": len(entries)}
+            points = [
+                {"target": t, "command": c, "subscriber": sub, "payload": dict(p)}
+                for (t, c, sub), p in sorted(self._points.items())
+            ]
+            failed = self._point_replay_failed
+        return {"subscribers": entries, "count": len(entries), "points": points, "point_replay_failed": failed}
 
     def subscriber_names(self) -> List[str]:
         """Адреса действующих намерений (для тестов и логов)."""

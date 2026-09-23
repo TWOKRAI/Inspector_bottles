@@ -19,7 +19,7 @@ system-цикле хоста (другой поток) → дедлок-конт
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from ..._fallback import FallbackLogger
 
@@ -36,6 +36,11 @@ class SocketBridgeAdapter:
         router: RouterManager хоста (нужны методы request() и send()).
         channel_name: имя SocketChannel (адрес для channel=-маршрутизации ответа).
         default_timeout: таймаут request(), если в сообщении нет поля "timeout".
+        on_request: наблюдатель ``(msg, sid, result)`` — зовётся ПОСЛЕ
+            router.request, до отправки ответа (4.4). Адаптер о командах не знает:
+            что из запроса запомнить, решает хост. Исключение наблюдателя гасится
+            и считается в ``get_stats()["observer_errors"]`` — ответ driver'у
+            уходит всё равно.
     """
 
     def __init__(
@@ -44,6 +49,7 @@ class SocketBridgeAdapter:
         channel_name: str,
         default_timeout: float = 5.0,
         session_isolation: bool = False,
+        on_request: Optional[Callable[[Dict[str, Any], Optional[str], Any], None]] = None,
     ) -> None:
         self._router = router
         self._channel_name = channel_name
@@ -56,6 +62,8 @@ class SocketBridgeAdapter:
         # повторял уже применённую команду (register_snapshot/record_start — двойное
         # применение). Публичный счётчик — get_stats().
         self._lost_responses = 0
+        self._on_request = on_request
+        self._observer_errors = 0
 
     def on_inbound(self, msg: Dict[str, Any]) -> None:
         """Обработать входящее сообщение от driver'а и отправить ответ.
@@ -87,6 +95,21 @@ class SocketBridgeAdapter:
         except Exception as exc:  # noqa: BLE001 — граница: любая ошибка → error-ответ driver'у
             result = {"success": False, "error": str(exc)}
 
+        if self._on_request is not None:
+            # msg уже без "session" (снят выше) — sid идёт отдельным аргументом.
+            try:
+                self._on_request(msg, sid, result)
+            except Exception as exc:  # noqa: BLE001 — наблюдатель не важнее ответа
+                self._observer_errors += 1
+                _logger.error(
+                    "SocketBridgeAdapter.on_inbound: наблюдатель on_request упал "
+                    "(request_id=%s, channel=%s): %s [всего: %d]",
+                    corr,
+                    self._channel_name,
+                    exc,
+                    self._observer_errors,
+                )
+
         # Ответ driver'у через router (channel=-маршрутизация → SocketChannel.send).
         # Адаптер сокет напрямую НЕ трогает.
         response: Dict[str, Any] = {
@@ -114,5 +137,5 @@ class SocketBridgeAdapter:
             )
 
     def get_stats(self) -> Dict[str, Any]:
-        """A-4: наблюдаемость потерянных ответов (router.send(response) упал)."""
-        return {"lost_responses": self._lost_responses}
+        """A-4: потерянные ответы (router.send упал); 4.4: упавшие наблюдатели on_request."""
+        return {"lost_responses": self._lost_responses, "observer_errors": self._observer_errors}

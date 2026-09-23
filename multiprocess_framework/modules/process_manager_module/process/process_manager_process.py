@@ -35,7 +35,14 @@ from .backend_ctl_endpoint import (
     setup_backend_ctl_channel,
     teardown_backend_ctl_channel,
 )
+from .observability_broker import POINT_COMMANDS
 from .topology_manager import TopologyManager
+
+#: 4.4 (ревью, R4): ленивое создание брокера зовут два read-потока канала
+#: (наблюдатель ответа и закрытие сессии) — без лока «проверь-и-создай» МОЖЕТ дать
+#: два брокера (показано тестом только с замедленным на 50 мс ``__init__``), и память
+#: закрытых сессий одного не видна другому.
+_BROKER_INIT_LOCK = threading.Lock()
 
 
 def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
@@ -281,6 +288,10 @@ class ProcessManagerProcess(ProcessModule):
                 # никто, а шов инкарнации иначе воскрешал бы мёртвую подписку на
                 # каждом свежем процессе.
                 on_session_closed=self._forget_closed_session,
+                # 4.4: точечные подписки клиента (log.tail / адресный observability.tail /
+                # ui.tap) берутся у ребёнка напрямую, мимо брокера. Наблюдатель ответа
+                # запоминает их, чтобы шов инкарнации доиграл, а закрытие сессии снял.
+                on_request=self._note_point_request,
             )
 
             # Ф3.2: boot-барьер — дождаться self-reported ready стартованных детей
@@ -1648,7 +1659,9 @@ class ProcessManagerProcess(ProcessModule):
         5.11-R4 развёл рассылки switch'а. Своей копии ожидания здесь больше нет.
         """
         broker = getattr(self, "_observability_broker", None)
-        if broker is None or not broker.subscriber_names():
+        # 4.4: has_intents, а не subscriber_names — реестр из одних точечных
+        # намерений тоже обязан доиграться свежей инкарнации.
+        if broker is None or not broker.has_intents():
             # Намерений нет — ни потока, ни раздачи: платить за них на КАЖДОМ
             # старте процесса не за что.
             return
@@ -2766,7 +2779,12 @@ class ProcessManagerProcess(ProcessModule):
         тем же ``subscribe_observability_tail``, что и любой процесс.
         """
         broker = getattr(self, "_observability_broker", None)
-        if broker is None:
+        if broker is not None:
+            return broker
+        with _BROKER_INIT_LOCK:
+            broker = getattr(self, "_observability_broker", None)
+            if broker is not None:
+                return broker
             from .observability_broker import ObservabilitySubscriptionBroker
 
             broker = ObservabilitySubscriptionBroker(
@@ -2779,6 +2797,41 @@ class ProcessManagerProcess(ProcessModule):
             )
             self._observability_broker = broker
         return broker
+
+    def _note_point_request(self, msg: dict, sid, result) -> None:
+        """Наблюдатель запросов driver'а (4.4): запомнить точечную подписку/снятие.
+
+        Зовётся из read-потока сокета ПОСЛЕ ответа ребёнка: только правка словаря
+        брокера, ничего блокирующего. Отказ ребёнка на ПОДПИСКУ (``success: False``
+        на любом уровне конверта — тот же спуск по ``result``, что ``_leaf_result``
+        драйвера) не запоминается — кроме тайм-аута (``error == "timeout"``): ребёнок
+        мог подписку уже поставить, лишний replay идемпотентен, а ``forget_session``
+        снимет её с закрытием сессии. СНЯТИЕ учитывается при любом ответе: клиент
+        подписку больше не хочет, и намерение, оставленное из-за отказа/тайм-аута,
+        воскресло бы у следующей инкарнации. Многоадресное сообщение не учитывается
+        (точечное = одна цель).
+        """
+        try:
+            command = msg.get("command")
+            if command not in POINT_COMMANDS and command not in POINT_COMMANDS.values():
+                return
+            targets = msg.get("targets")
+            if isinstance(targets, str):
+                targets = [targets]
+            if not isinstance(targets, (list, tuple)) or len(targets) != 1:
+                return
+            node = result if command in POINT_COMMANDS else None
+            for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+                if not isinstance(node, dict):
+                    break
+                if node.get("success") is False:
+                    if node.get("error") == "timeout":
+                        break  # пере-запись дешевле потерянной подписки
+                    return
+                node = node.get("result")
+            self._observability_broker_obj().note_point(str(targets[0]), command, dict(msg.get("data") or {}))
+        except Exception as exc:  # noqa: BLE001 — наблюдатель не роняет канал
+            self._log_error(f"[observability] точечный запрос сессии '{sid}' не учтён: {exc}")
 
     def _forget_closed_session(self, session_id: str) -> None:
         """Снять подписки ВСЕХ плоскостей у адресов закрытой сессии (сигнал SocketChannel).
@@ -2798,14 +2851,19 @@ class ProcessManagerProcess(ProcessModule):
         Плоскости чистятся НЕЗАВИСИМО: падение одной уборки не имеет права отменить
         соседнюю (иначе ремонт одной плоскости молча вернул бы призрака в другой).
 
-        Residual (назван, не закрыт): подписки, взятые клиентом НАПРЯМУЮ у ребёнка
-        (``log.tail.subscribe``, прицельный ``observability.tail.subscribe``,
-        ``ui.tap.subscribe``), оркестратору неизвестны — реестра таких адресов у
-        него нет, и суффиксную уборку ему не по чему сделать. При аварийной смерти
-        клиента они остаются; штатное закрытие драйвера их снимает само.
+        Прежний residual закрыт задачей 4.4: подписки, взятые клиентом НАПРЯМУЮ у
+        ребёнка (``log.tail.subscribe``, прицельный ``observability.tail.subscribe``,
+        ``ui.tap.subscribe``), теперь попадают в точечный реестр брокера через
+        :meth:`_note_point_request`, и ``forget_session`` снимает их адресно тем же
+        сигналом. Тесты: ``test_point_intents_acceptance.py::
+        test_forget_session_drops_only_that_session_points_and_sends_unsubscribe``,
+        ``test_point_intents_hazards.py``. Не покрыты: подписки, взятые МИМО канала
+        backend_ctl (GUI через свою очередь) — наблюдатель их не видит.
         """
         for plane, forget in (
-            ("observability", getattr(getattr(self, "_observability_broker", None), "forget_session", None)),
+            # 4.4: брокер строится и здесь (не getattr) — он помнит закрытые сессии,
+            # чтобы запоздавший ответ на подписку этой сессии не записал сироту.
+            ("observability", lambda sid: self._observability_broker_obj().forget_session(sid)),
             ("state", getattr(getattr(self, "_state_store_manager", None), "forget_session", None)),
         ):
             if forget is None:

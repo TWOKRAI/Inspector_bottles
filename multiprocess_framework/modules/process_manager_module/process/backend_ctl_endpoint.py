@@ -91,6 +91,7 @@ def setup_backend_ctl_channel(
     log_info: Optional[Any] = None,
     log_error: Optional[Any] = None,
     on_session_closed: Optional[Any] = None,
+    on_request: Optional[Any] = None,
 ) -> Optional[SocketChannel]:
     """Поднять SocketChannel и зарегистрировать в router (если гейт открыт).
 
@@ -101,6 +102,9 @@ def setup_backend_ctl_channel(
         env: источник переменных окружения (для тестов); None → os.environ.
         on_session_closed: колбэк(session_id) при разрыве соединения — держателю
             подписок нужен сигнал о смерти внешнего подписчика по факту (5.11-R1).
+        on_request: наблюдатель ``(msg, sid, result)`` запроса driver'а — уходит в
+            ``SocketBridgeAdapter`` (4.4: оркестратор запоминает точечные подписки,
+            чтобы доиграть их свежей инкарнации).
         config: секция `backend_ctl` из system.yaml (`enabled`/`port`/`host`).
         log_info/log_error: опц. колбэки логирования.
 
@@ -120,7 +124,12 @@ def setup_backend_ctl_channel(
     resolved_host = host if host is not None else ((config or {}).get("host") or "127.0.0.1")
     session_isolation = _resolve_session_isolation(source, config)
 
-    adapter = SocketBridgeAdapter(router_manager, BACKEND_CTL_CHANNEL, session_isolation=session_isolation)
+    adapter = SocketBridgeAdapter(
+        router_manager,
+        BACKEND_CTL_CHANNEL,
+        session_isolation=session_isolation,
+        on_request=on_request,
+    )
     channel = SocketChannel(
         BACKEND_CTL_CHANNEL,
         host=resolved_host,
