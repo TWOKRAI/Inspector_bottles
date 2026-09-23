@@ -259,6 +259,11 @@ codemod. Вынесены сюда, потому что каждая трога�
 **Goal:** у трети из 298 файлов должен быть домен-назначение ДО окна, иначе им негде жить.
 **Приёмка:** поимённый список «остаётся в GUI-пакете / переезжает в домен X»; `graph/` (0 % Qt),
 MVP-половины компонентов, `bridge/`, `TabSpec`, `register_binding` размещены явно.
+**gui-service ред. 2 (2026-09-23):** к списку 2б.2 добавляются `frontend_module/bootstrap/{remote_runtime,pack_loader,runtime}.py`
+(Qt-free → ядро) и `frontend_module/bootstrap/` с `GuiBootstrap` (Qt → пакет `frontend`); `multiprocess_prototype/frontend/pult/`
+**не появится** — хост Пульта `apps/pult/` (третий composition root для 5.1 рядом с `apps/line_sim`). Новый сервис
+рецептов — `modules/recipe/service*` (Qt-free, домен рецептов). См. [`architecture.md`](../2026-09-22_gui-service/architecture.md).
+
 **Связка с [`gui-service`](../2026-09-22_gui-service/plan.md) и [`line-sim`](../line-sim/plan.md) (2026-09-22):**
 gui-service добавляет файлы, не переносит, и помечает их доменом для этого списка заранее:
 `router_module/channels/socket_client.py`, `frontend_module/bridge/remote_*.py` — **Qt-free** (критерий приёмки

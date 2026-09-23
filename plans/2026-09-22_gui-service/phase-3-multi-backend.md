@@ -24,14 +24,14 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 `main_window.py` прототипа как есть и **не** выделяет шелл сам (это работа T4.6, её нельзя сделать дважды).
 
 **Files:**
-- `multiprocess_prototype/frontend/pult/connections.py` — `BackendConnection` (Pydantic), `ConnectionStore`
+- `apps/pult/connections.py` — `BackendConnection` (Pydantic), `ConnectionStore`
   (YAML через `ruamel.yaml`, путь по умолчанию `INSPECTOR_CONFIG_DIR/pult.yaml`)
-- `multiprocess_prototype/frontend/pult/bootstrap.py` — N сессий: на каждое подключение свой
+- `apps/pult/bootstrap.py` — N сессий: на каждое подключение свой
   `SocketClient` + `Remote*` + `AppServices`; ошибки одной сессии не выбрасываются в другие
-- `multiprocess_prototype/frontend/pult/workspace.py` — верхнеуровневый `QMainWindow` с
+- `apps/pult/workspace.py` — верхнеуровневый `QMainWindow` с
   `QDockWidget` на бэкенд; меню «Подключения» (добавить/удалить/подключить/отключить); индикатор
   состояния на каждой вкладке
-- `multiprocess_prototype/frontend/pult/tests/test_connections.py`, `test_workspace.py` (pytest-qt на
+- `apps/pult/tests/test_connections.py`, `test_workspace.py` (pytest-qt на
   двух in-process `SocketChannel(port=0)`)
 
 **Steps:**
@@ -67,7 +67,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 **Edge cases:** ноль подключений — Пульт открывается с пустым рабочим пространством и меню
 «Подключения», не падает; подключение с тем же именем дважды — валидация.
 **Dependencies:** Task 1.4.
-**Module contract:** impl-only (`frontend/pult` уже new-full из 1.4; здесь наполняется).
+**Module contract:** impl-only (`apps/pult` уже new-full из 1.4; здесь наполняется).
 
 ---
 
@@ -83,12 +83,20 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 уже есть и остаётся) и Ф7.3 (Qt-редактор объектов) — они добавляют вкладки внутрь этого подключения,
 не меняя Пульт.
 
+> **Ред. 2 (2026-09-23), сборка из сервисов:** подключение симулятора получает пакеты
+> `framework-generic` (процессы, дисплеи, наблюдаемость, регистры — из кита фреймворка, строятся по
+> `capabilities`, без прикладного кода) + `apps/line_sim/gui_spec.py` (`APP_SPEC` симулятора: в 3.2
+> пустой или с одной вкладкой, Ф6/Ф7.3 line-sim наполняют его). Вкладки инспектора (рецепты, pipeline)
+> к симулятору **не подключаются** — пакет выбирается по `app_id`. Если «штатная» вкладка оказалась
+> прикладной (ждёт структуру рецепта прототипа), она уезжает из generic в пакет инспектора — это
+> находка для T3.0 frontend-constructor.
+
 **Контекст:** если штатные вкладки требуют правок под «второе приложение» — это находка для
 конструктора (`QUEUE` P-2: «второе приложение чужими руками»), не для этого плана: записать, не
 чинить здесь, кроме тривиального.
 
 **Files:**
-- `multiprocess_prototype/frontend/pult/README.md` — раздел «Два бэкенда: инспектор + симулятор»,
+- `apps/pult/README.md` — раздел «Два бэкенда: инспектор + симулятор»,
   пример `pult.yaml`
 - Правки кода — только по находкам (каждая названа в PR); ожидаемый объём — 0
 - НОВЫЙ `docs/reviews/2026-XX-XX_pult-two-backends.md` — отчёт приёмки с скриншотом/числами
@@ -113,7 +121,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
       `introspect_router_stats` симулятора).
 - [ ] Таблица вкладок для подключения «Симулятор» заполнена для ВСЕХ штатных вкладок; у каждой
       неработающей названа причина и заведена строка находки (в отчёт), а не «TODO».
-- [ ] Ни одного файла с условием вида `if backend_name == "line_sim"` в `frontend/pult` (grep → 0):
+- [ ] Ни одного файла с условием вида `if backend_name == "line_sim"` в `apps/pult` (grep → 0):
       Пульт не знает, что второе подключение — симулятор.
 - [ ] `docs/reviews/…_pult-two-backends.md` с числами и разделом «что не проверено».
 
@@ -123,4 +131,36 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 инспектор в «отключён»; оба на одном порту по ошибке конфига — валидация `ConnectionStore`
 (дубликат `host:port`) с понятным текстом.
 **Dependencies:** Task 3.1; `apps/line_sim` в `main` (merge `feat/line-sim` — line-sim 1.1/1.3 уже закрыты).
+**Module contract:** impl-only.
+
+---
+
+### Task 3.3 — Один режим GUI: интерфейс не живёт в дереве процессов (ред. 2, 2026-09-23)
+
+**Level:** Senior (Opus)
+**Assignee:** teamlead
+**Goal:** после доказанного паритета остаётся одна боевая сборка GUI — Пульт. Слот `gui` в дереве —
+только мост (`BridgeGuiProcess`) или headless. `frontend/run.py` = «бэкенд + Пульт на localhost»
+одной командой. Qt-воплощение `GuiProcess` уходит в LEGACY по правилу «freeze, не kill».
+Обоснование — [`architecture.md`](architecture.md) → «Целевое состояние».
+
+**Условие входа (гейт, не формальность):** числа приёмки 1.4 зелёные — fps Пульта на localhost
+≥ 0.8 × baseline встроенного GUI, наборы вкладок равны, 1b.3 закрыта (обе сборки на одних портах).
+Если гейт красный — задача закрывается записью причины в DECISIONS, встроенный режим остаётся.
+
+**Files:**
+- `multiprocess_prototype/frontend/presentation.yaml` — `gui` → `BridgeGuiProcess`.
+- `multiprocess_prototype/frontend/run.py` — запуск бэкенда и Пульта; закрытие окна Пульта **не**
+  гасит бэкенд (отдельная команда «остановить систему» в Пульте).
+- `multiprocess_prototype/frontend/process.py` — маркер `LEGACY (frozen <дата>)`, тесты под маркером.
+- README/STATUS прототипа: режимы запуска.
+
+**Acceptance criteria:**
+- [ ] `frontend/run.py` поднимает бэкенд и Пульт; `system_overview` показывает `gui` классом
+      `BridgeGuiProcess`; в процессах дерева нет `PySide6` в `sys.modules` (проверка через
+      `backend_ctl`/интроспекцию).
+- [ ] Закрытие Пульта → бэкенд жив, счётчики растут; повторный запуск Пульта подключается.
+- [ ] pytest-qt наборы из 1.1 — passed ≥ baseline за вычетом LEGACY-маркера, 0 failed.
+
+**Dependencies:** 1.4, 1b.3, 3.2.
 **Module contract:** impl-only.

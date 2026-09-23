@@ -225,23 +225,28 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 
 ---
 
-### Task 1.4 — Автономный Пульт: те же вкладки, без дерева
+### Task 1.4 — Автономный Пульт: хост `apps/pult/` + пакет вкладок по имени, без дерева
+
+> **Ред. 2 (2026-09-23), решения владельца «Пульт — отдельный сервис», «разбивать на сервисы и из них
+> собирать».** Хост уходит из `multiprocess_prototype/frontend/pult/` в `apps/pult/` и **не импортирует
+> прототип** (правило `apps/* ↛ multiprocess_prototype/*`, `.sentrux/rules.toml:128`, без исключения).
+> Вкладки инспектора приходят как `GuiAppSpec`, загруженный по имени из конфига хоста. Обоснование —
+> [`architecture.md`](architecture.md).
 
 **Level:** Senior+ (Opus, extended thinking)
 **Assignee:** teamlead
-**Goal:** `python -m multiprocess_prototype.frontend.pult --connect 127.0.0.1:8765` поднимает
-главное окно с тем же набором вкладок, что `frontend/run.py`, собранное через `AppServices` на
-`Remote*`-реализациях (1.2, 1.3), **без** `SystemLauncher`/`ProcessManager` в этом процессе.
-Отказоустойчивость в обе стороны доказана числами.
+**Goal:** `python -m apps.pult --connect 127.0.0.1:8765` поднимает главное окно с тем же набором
+вкладок, что `frontend/run.py`: `GuiBootstrap` (фреймворк) + `RemoteGuiRuntime` (фреймворк) +
+`GuiAppSpec` инспектора, выбранный по `capabilities.app_id`. `SystemLauncher`/`ProcessManager` в этом
+процессе нет, хост прототип не импортирует. Отказоустойчивость в обе стороны доказана числами.
 
-**Связь с frontend-constructor Ф4 (обязательная, 2026-09-22):** composition root GUI сегодня —
-`run_gui` (~749 строк) с инъекцией `process._*`. frontend-constructor T4.2 разбирает его на стадии
-(`identity→theme→runtime→state→tabs→window→timers→show`) с характеризацией boot-порядка, T4.4 вводит
-`GuiHostRuntime` вместо `process._*`. **Пульт не строит второй composition root:** `bootstrap.py` — те же
-стадии с `RemoteGuiRuntime` (сокет + `RemoteFrameSource`) на месте in-process рантайма. T4.2/T4.4 живут
-в прототипе, файлы не переносят и окна codemod не требуют; если к старту 1.4 они не сделаны — 1.4
-делает их первым шагом (объём T4.2 входит в оценку 1.4, и это записывается в PR). Вторая реализация
-рантайма — то самое «мерило второго потребителя», которого у `GuiHostRuntime` иначе нет.
+**Предпосылка — frontend-constructor T4.1–T4.4 (обязательна, ред. 2):** T4.1 — дизайн-док
+`GuiAppSpec`/стадий (ревью владельца); T4.2 — разборка `run_gui` (~749 строк) на стадии
+`identity→theme→runtime→state→tabs→window→timers→show` с характеризацией boot-порядка; T4.3 —
+`GuiBootstrap` **новым файлом** в `frontend_module/bootstrap/`; T4.4 — `GuiHostRuntime` вместо
+`process._*`, встроенный GUI переходит на `InProcessRuntime`. Все четыре — новые файлы или правки на
+месте, окно codemod им не нужно; статусы — в frontend-constructor. **Второго composition root нет**:
+у Пульта только своя реализация рантайма.
 
 **Контекст:** это и есть «GUI как сервис» — момент истины плана. Всё, что Task 1.1 назвал in-tree
 допущением и что не покрыли 1.2/1.3, всплывёт здесь. Правило задачи: виджеты **не правятся** ради
@@ -249,15 +254,20 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 обеих сборок) или дать ему адаптер.
 
 **Files:**
-- НОВЫЙ `multiprocess_prototype/frontend/pult/__init__.py`, `__main__.py` (CLI: `--connect
-  host:port`, `--token` — задел для 2.2, `--log-dir`)
-- НОВЫЙ `multiprocess_prototype/frontend/pult/bootstrap.py` — стадии T4.2 с `RemoteGuiRuntime`
-  (сборка `AppServices` на `Remote*`); реконнект-контроллер; индикатор состояния соединения в статус-баре
-- НОВЫЙ `multiprocess_prototype/frontend/pult/remote_runtime.py` — `RemoteGuiRuntime`: реализация
-  `GuiHostRuntime` (T4.4) поверх `SocketClient`/`RemoteFrameSource`
-- НОВЫЙ `multiprocess_prototype/frontend/pult/README.md`, `STATUS.md`, `DECISIONS.md`
-- НОВЫЙ `multiprocess_prototype/frontend/pult/tests/` — pytest-qt: сборка окна на фейковом сокетном
-  хосте (in-process `SocketChannel`), реконнект
+- НОВЫЙ `apps/pult/__init__.py`, `__main__.py` (CLI: `--connect host:port` (повторяемый — задел для 3.1),
+  `--token` — задел для 2.2, `--log-dir`), `config.yaml` (`gui_packs: {<app_id>: "<модуль>:APP_SPEC"}`),
+  `README.md`, `STATUS.md`, `DECISIONS.md`, `tests/`
+- НОВЫЙ `multiprocess_framework/modules/frontend_module/bootstrap/remote_runtime.py` — `RemoteGuiRuntime`:
+  реализация `GuiHostRuntime` поверх `SocketClient` и `Remote*` из 1.2/1.3; реконнект-контроллер; статус
+  соединения для статус-бара шелла. **Qt-free**
+- НОВЫЙ `multiprocess_framework/modules/frontend_module/bootstrap/pack_loader.py` — загрузка `GuiAppSpec` по
+  строке `модуль:атрибут`, проверка `protocol_version` из `capabilities`, внятная ошибка при несовпадении
+- `multiprocess_prototype/frontend/app_spec.py` — `APP_SPEC` инспектора (появляется в T4.3); сборка
+  `AppServices` из `runtime`, а не из `process`
+- Поля `app_id` и `protocol_version` в `capabilities` на хосте (если их там нет — одно место в
+  `backend_ctl_endpoint`)
+- Тесты: `apps/pult/tests/` — pytest-qt: сборка окна на фейковом сокетном хосте (in-process
+  `SocketChannel`), реконнект; `frontend_module/tests/test_pack_loader.py`
 - Правки виджетов — только по находкам, каждая названа в PR-описании
 
 **Steps:**
@@ -290,11 +300,16 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 - [ ] `frontend/run.py` — регрессии нет: pytest-qt наборы из Task 1.1 дают passed ≥ baseline,
       0 failed.
 - [ ] `README.md` Пульта описывает CLI и то, чего Пульт **не** умеет в v1 (сеть, токен, N бэкендов).
+- [ ] **Граница хоста:** `sentrux check .` зелёный (правило `apps/* ↛ multiprocess_prototype/*` действует
+      на `apps/pult` без исключения); `grep -rn "multiprocess_prototype" apps/pult --include=*.py` → 0 вне
+      строк конфига.
+- [ ] **Совместимость:** бэкенд с другим `protocol_version` → Пульт показывает обе версии и не рисует
+      вкладки (тест на фейковом хосте); неизвестный `app_id` → «нет пакета для приложения <id>».
 
 **Out of scope:** сеть/токен (Ф2), несколько бэкендов (Ф3), вкладка «Подключение» с формой (3.1 —
 здесь только `--connect` из CLI).
 **Edge cases:** бэкенд без `BACKEND_CTL=1` — Пульт называет причину («дверь закрыта: поднимите бэкенд
 с BACKEND_CTL=1»), не «connection refused» голышом; бэкенд с включённым loan-протоколом — дисплеи
 не работают, остальные вкладки работают, статус-бар называет причину.
-**Dependencies:** Task 1.2, Task 1.3; frontend-constructor T4.2 (+T4.4) — либо сделаны, либо входят сюда.
-**Module contract:** new-full (`frontend/pult` — README + `interfaces.py`/Protocol сборки + тесты).
+**Dependencies:** Task 1.2, Task 1.3; frontend-constructor T4.1–T4.4 (обязательно до старта, ред. 2).
+**Module contract:** new-full (`apps/pult` — README + тесты; контракт `GuiAppSpec` — в `frontend_module/bootstrap/interfaces.py`).
