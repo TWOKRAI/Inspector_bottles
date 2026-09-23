@@ -490,8 +490,10 @@ feeder в `connection._send`.
 из процесса-писателя их не видно (ревью итерации 1: формула «буфер + 1» давала 1 при 0 потерянных
 и 1 при 5). Видно: строка WARNING на stderr процесса через `emergency_log` (не через `LoggerManager` —
 к моменту хука он уже остановлен, и запись через вид терялась, 0 из 7 процессов живьём)
-`<процесс>: queues released to gone readers: N, buffered dropped: M` — только при N > 0; счётчики
-`get_stats()["queues"]["released_to_gone_readers" / "buffered_dropped_at_exit"]`.
+`<процесс>: queues released to gone readers: N, buffered dropped: M` — только при N > 0. Счётчики
+`get_stats()["queues"]["released_to_gone_readers" / "buffered_dropped_at_exit"]` снаружи НЕ видны:
+процесс выходит сразу после хука, плоскости наблюдаемости погашены ещё в `shutdown()` — они только
+для тестов и кода внутри процесса (ревью итерации 2).
 
 **Границы.**
 - Очереди вне реестра метки не имеют и ведут себя как раньше: fallback-очереди

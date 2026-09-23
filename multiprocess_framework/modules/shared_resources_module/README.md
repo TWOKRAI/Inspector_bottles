@@ -164,8 +164,9 @@ ResourceType.QUEUE | EVENT | SHARED_MEMORY
 ушёл навсегда». Владелец взводит её на выходе только при системном стопе; писатель на выходе
 отпускает feeder'ы маркированных очередей (иначе `_finalize_join` ждал бы вечно) и ждёт слива
 остальных — без таймера. Итог — WARNING на stderr (`emergency_log`, только при N > 0)
-`<процесс>: queues released to gone readers: N, buffered dropped: M` и счётчики
-`released_to_gone_readers` / `buffered_dropped_at_exit` в `get_stats()`. M — только остаток буфера
+`<процесс>: queues released to gone readers: N, buffered dropped: M`; счётчики
+`released_to_gone_readers` / `buffered_dropped_at_exit` в `get_stats()` — только внутри процесса и для
+тестов (снаружи после выхода их не прочитать). M — только остаток буфера
 feeder'а: уже записанное в pipe и ≤1 сообщение в полёте теряются без счёта.
 
 ## Тесты
