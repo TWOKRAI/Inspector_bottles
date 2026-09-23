@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from multiprocess_framework.modules.process_manager_module.process.observability_broker import (
     ObservabilitySubscriptionBroker,
 )
@@ -169,7 +171,18 @@ def test_note_point_request_ignores_failed_result_and_multi_target():
     assert [(p["target"], p["subscriber"]) for p in broker.snapshot()["points"]] == [("worker_1", "gui.s1")]
 
 
-def test_refused_unsubscribe_still_drops_the_intent():
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"success": False, "error": "timeout"},
+        # Отказ БЕЗ тайм-аута обязателен отдельным случаем: тайм-аут у подписки
+        # проходит той же веткой, что успех, и один тайм-аутный случай не отличал
+        # «снятие учитывается при любом ответе» от «снятие гейтится ответом»
+        # (инъекция I9 ведущего 2026-09-23 давала 0 красных).
+        {"success": False, "reason": "форвардера нет"},
+    ],
+)
+def test_refused_unsubscribe_still_drops_the_intent(answer):
     """Снятие с отказом/тайм-аутом ребёнка всё равно снимает намерение — иначе оно воскреснет."""
     broker = ObservabilitySubscriptionBroker(broadcast=lambda c, d: 0, send_to=lambda t, c, d: True)
     pm = _bare_pm(broker)
@@ -178,7 +191,7 @@ def test_refused_unsubscribe_still_drops_the_intent():
 
     pm._note_point_request(sub, "s1", {"success": True})
     assert len(broker.snapshot()["points"]) == 1
-    pm._note_point_request(unsub, "s1", {"success": False, "error": "timeout"})
+    pm._note_point_request(unsub, "s1", answer)
 
     assert broker.snapshot()["points"] == []
 
