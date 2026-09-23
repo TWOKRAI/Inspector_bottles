@@ -18,6 +18,11 @@
       получает всё целиком.
   H5. Хук вызван дважды → двойной счёт потерь или повторный close/cancel. Пин: второй
       вызов — (0, 0) и возвращается сразу.
+  H7. Счёт потерь выдаёт не то число (ревью: «буфер + 1» давал 1 при 0 и 1 при 5
+      потерянных). Пин: N сообщений в буфере feeder'а → ровно N, литералом.
+  H8. Строка итога на выходе не доходит ни до одного приёмника (ревью: писалась через
+      уже остановленный LoggerManager). Пин: stderr настоящей пары spawn-процессов
+      содержит литеральную строку с числами.
   H6. Голая ``mp.Queue`` (не из реестра) задета хуком → поведение очередей вне
       реестра изменилось молча. Пин: хук её не закрывает и не отпускает.
 
@@ -28,6 +33,9 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
+import subprocess
+import sys
 import threading
 import time
 
@@ -213,7 +221,7 @@ class TestH3MarkAfterWriterLooked:
             assert not p.is_alive(), "писатель не заметил позднюю метку за 2s"
             released, dropped, finished_at = done.get(timeout=2.0)
             latency = finished_at - marked_at
-            assert (released, dropped) == (1, 1)
+            assert (released, dropped) == (1, 0)  # BIG уже снят feeder'ом — в буфере пусто
             assert latency < 0.5, f"реакция на метку {latency:.3f}s"
         finally:
             _kill(p)
@@ -259,7 +267,7 @@ class TestH5H6HookIdempotentAndPlainQueueUntouched:
             q.mark_reader_gone()
             first = _in_thread(lambda: release_feeders_at_exit([], [q], system_stop=False), 3.0)
             second = _in_thread(lambda: release_feeders_at_exit([q], [q, q], system_stop=True), 3.0)
-            assert first == (1, 2)  # застрявший BIG + tail в буфере
+            assert first == (1, 1)  # BIG застрял в send (не считается), tail — в буфере
             assert second == (0, 0)
         finally:
             _drop(q)
@@ -276,3 +284,78 @@ class TestH5H6HookIdempotentAndPlainQueueUntouched:
             assert _in_thread(lambda: q.get(timeout=5.0), 10.0) == BIG
         finally:
             _drop(q)
+
+
+# ---------------------------------------------------------------------------
+# H7 — буферизованные сообщения считаются ровно; H8 — строка итога доходит до stderr.
+# ---------------------------------------------------------------------------
+
+
+class TestH7BufferedCountIsExact:
+    def test_n_buffered_items_give_n(self) -> None:
+        q = _new_queue()
+        try:
+            q.put(BIG)  # feeder снимет его и застрянет в send на полном pipe
+            for i in range(5):
+                q.put(i)
+            time.sleep(0.3)
+            q.mark_reader_gone()
+            assert _in_thread(lambda: release_feeders_at_exit([], [q], system_stop=False), 3.0) == (1, 5)
+        finally:
+            _drop(q)
+
+
+class _SendBigPlusThree:
+    """Писатель для H8: 1 MiB + 3 маленьких соседу 'Reader' продовым путём."""
+
+    def __init__(self, name, shared_resources, config) -> None:
+        self.shared_resources = shared_resources
+
+    def initialize(self) -> bool:
+        return True
+
+    def run(self) -> None:
+        reg = self.shared_resources.queue_registry
+        reg.send_to_queue("Reader", "data", BIG)
+        for i in range(3):
+            reg.send_to_queue("Reader", "data", i)
+
+    def should_stop(self) -> bool:
+        return False
+
+    def stop(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+
+_H8_SCRIPT = f"""
+import multiprocessing, time
+from multiprocess_framework.modules.process_manager_module.runner.process_runner import run_process_function
+from multiprocess_framework.modules.shared_resources_module.queues.core.manager import QueueRegistry
+ctx = multiprocessing.get_context("spawn")
+q = QueueRegistry().create_queues({{"data": {{}}}})["data"]
+stop = ctx.Event()
+r = ctx.Process(target=run_process_function, args=("{__name__}._IdleOwner", "Reader", None,
+    {{"queues": {{"data": q}}, "config": {{}}, "custom": {{}}}}, stop))
+w = ctx.Process(target=run_process_function, args=("{__name__}._SendBigPlusThree", "Writer", None,
+    {{"queues": {{}}, "config": {{}}, "custom": {{}}, "routing_map": {{"Reader": {{"data": q}}}}}}, stop))
+r.start(); w.start(); time.sleep(1.5); stop.set()
+r.join(10); w.join(10)
+print("EXITCODES", r.exitcode, w.exitcode, flush=True)
+q.cancel_join_thread()
+"""
+
+
+class TestH8ExitLineReachesStderr:
+    def test_real_pair_prints_literal_line(self) -> None:
+        env = dict(os.environ, PYTHONPATH=os.getcwd())
+        proc = subprocess.run(
+            [sys.executable, "-c", _H8_SCRIPT], capture_output=True, text=True, timeout=40, env=env
+        )
+        assert "EXITCODES 0 0" in proc.stdout, (proc.stdout, proc.stderr[-2000:])
+        lines = [ln for ln in proc.stderr.splitlines() if "queues released to gone readers" in ln]
+        # Писатель: 1 очередь отпущена, 3 маленьких остались в буфере (BIG застрял в send).
+        # Читатель отпускать нечего — молчит.
+        assert lines == ["Writer: queues released to gone readers: 1, buffered dropped: 3"], proc.stderr[-2000:]

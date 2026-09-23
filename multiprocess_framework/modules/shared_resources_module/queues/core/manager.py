@@ -127,9 +127,10 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # числом, и темп потери будет не восстановить.
             "queue_full_events": 0,
             # L-2 Task 1.2 (ADR-SRM-016): итог выходного хука — сколько очередей
-            # отпущено ушедшим навсегда читателям и сколько сообщений при этом потеряно.
+            # отпущено ушедшим навсегда читателям и сколько сообщений было в буфере
+            # feeder'а (уже записанное в pipe и ≤1 в полёте теряются без счёта).
             "released_to_gone_readers": 0,
-            "dropped_at_exit": 0,
+            "buffered_dropped_at_exit": 0,
         }
         # Ф1.4: ЧЕТЫРЁХ собственных окон здесь больше нет
         # (`_system_evict_*`, `_data_evict_*`, `_queue_missing_*`,
@@ -217,10 +218,10 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         очереди переиспользует рестарт."""
         own = list(self.get_process_queues(owner_process_name).values())
         known = [q for name in self.get_registered_processes() for q in self.get_process_queues(name).values()]
-        released, dropped = release_feeders_at_exit(own, known, system_stop)
+        released, buffered_dropped = release_feeders_at_exit(own, known, system_stop)
         self._stats["released_to_gone_readers"] += released
-        self._stats["dropped_at_exit"] += dropped
-        return {"released": released, "dropped": dropped}
+        self._stats["buffered_dropped_at_exit"] += buffered_dropped
+        return {"released": released, "buffered_dropped": buffered_dropped}
 
     def register_process_queues(
         self,

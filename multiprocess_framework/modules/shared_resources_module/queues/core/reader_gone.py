@@ -18,7 +18,8 @@ OS pipe, а сосед (читатель) уже вышел. EPIPE не прих
   * Писатель на выходе закрывает свои очереди с живым feeder'ом и ждёт, пока буфер
     не сольётся ИЛИ не появится метка. Таймера нет: немаркированная очередь ждётся
     так же, как ждал бы ``_finalize_join`` (медленный живой читатель получает всё —
-    ревью Task 1.1 отвергло wall-clock отпуск, ADR-SRM-015).
+    ревью Task 1.1 отвергло wall-clock отпуск, ADR-SRM-015). Ожидание идёт в хуке, то есть
+    ДО ``util._exit_function`` — раньше, чем ждал бы ``_finalize_join``, но так же без срока.
 """
 
 from __future__ import annotations
@@ -58,11 +59,13 @@ class ReaderGoneQueue(_MpQueue):
         return self._reader_gone.is_set()
 
 
-def _undelivered(q: ReaderGoneQueue) -> int:
-    """Сколько сообщений не дойдёт: ещё в буфере feeder'а + одно застрявшее в send."""
+def _buffered(q: ReaderGoneQueue) -> int:
+    """Сколько сообщений ещё лежит в буфере feeder'а (не дошли до pipe).
+
+    Это НЕ полное число потерь: то, что уже в pipe, и не больше одного сообщения,
+    застрявшего в ``send``, теряются без счёта — отсюда их не видно."""
     with q._notempty:  # feeder снимает элементы из буфера под этим же условием
-        buffered = sum(1 for item in q._buffer if item is not _sentinel)
-    return buffered + 1
+        return sum(1 for item in q._buffer if item is not _sentinel)
 
 
 def release_feeders_at_exit(
@@ -71,7 +74,10 @@ def release_feeders_at_exit(
     system_stop: bool,
     poll_interval_s: float = POLL_INTERVAL_S,
 ) -> Tuple[int, int]:
-    """Выходной хук процесса. Возвращает ``(отпущено очередей, потеряно сообщений)``.
+    """Выходной хук процесса. Возвращает ``(отпущено очередей, сообщений из буфера feeder'а)``.
+
+    Второе число — только то, что ещё лежало в буфере feeder'а отпущенных очередей.
+    Уже записанное в pipe и не больше одного сообщения в полёте теряются без счёта.
 
     ``own_queues`` — очереди, которыми процесс владеет (читает их он); ``all_queues`` —
     все очереди, известные процессу (свои + соседи из routing_map). Очереди не
@@ -101,14 +107,14 @@ def release_feeders_at_exit(
         q.close()
         pending.append(q)
 
-    released = dropped = 0
+    released = buffered_dropped = 0
     while pending:
         still: List[ReaderGoneQueue] = []
         for q in pending:
             if not q._thread.is_alive():
                 continue  # буфер слит — доставлено
             if q.is_reader_gone():
-                dropped += _undelivered(q)
+                buffered_dropped += _buffered(q)
                 q.cancel_join_thread()
                 q._released_at_exit = True
                 released += 1
@@ -117,4 +123,4 @@ def release_feeders_at_exit(
         pending = still
         if pending:
             time.sleep(poll_interval_s)
-    return released, dropped
+    return released, buffered_dropped

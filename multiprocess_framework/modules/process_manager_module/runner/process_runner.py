@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Union
 
 from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
 
+from ..._fallback import emergency_log
 from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
@@ -251,6 +252,17 @@ def run_process_function(
                 res = shared_resources.queue_registry.release_queues_at_exit(
                     process_name, system_stop=sys_evt is not None and sys_evt.is_set()
                 )
-                log.info(f"queues released to gone readers: {res['released']}, buffered dropped: {res['dropped']}")
+                # Аварийный выход, а не ``log``: к этому моменту LoggerManager процесса уже
+                # остановлен, и запись через вид не доходила ни до одного приёмника (ревью
+                # Task 1.2). Тихо, если отпускать было нечего — не +1 строка на процесс.
+                if res["released"]:
+                    emergency_log(
+                        __name__,
+                        "warning",
+                        "%s: queues released to gone readers: %d, buffered dropped: %d",
+                        process_name,
+                        res["released"],
+                        res["buffered_dropped"],
+                    )
             except Exception as e:  # noqa: BLE001 — хук выхода не роняет выход
-                log.error(f"Queue release at exit failed: {e}")
+                emergency_log(__name__, "error", "%s: queue release at exit failed: %r", process_name, e)

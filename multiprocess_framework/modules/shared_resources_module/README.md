@@ -163,8 +163,10 @@ ResourceType.QUEUE | EVENT | SHARED_MEMORY
 Очереди из `QueueRegistry.create_queues` — `ReaderGoneQueue`: несут межпроцессную метку «читатель
 ушёл навсегда». Владелец взводит её на выходе только при системном стопе; писатель на выходе
 отпускает feeder'ы маркированных очередей (иначе `_finalize_join` ждал бы вечно) и ждёт слива
-остальных — без таймера. Итог — строка `queues released to gone readers: N, buffered dropped: M`
-и счётчики `released_to_gone_readers` / `dropped_at_exit` в `get_stats()`.
+остальных — без таймера. Итог — WARNING на stderr (`emergency_log`, только при N > 0)
+`<процесс>: queues released to gone readers: N, buffered dropped: M` и счётчики
+`released_to_gone_readers` / `buffered_dropped_at_exit` в `get_stats()`. M — только остаток буфера
+feeder'а: уже записанное в pipe и ≤1 сообщение в полёте теряются без счёта.
 
 ## Тесты
 
