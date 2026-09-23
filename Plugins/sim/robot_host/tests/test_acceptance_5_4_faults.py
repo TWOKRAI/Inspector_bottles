@@ -464,6 +464,10 @@ def test_bad_args_and_no_server() -> None:
         f"fault.drop без сервера должен отдать server_not_running: {no_server_resp!r}"
     )
 
+    # Лид, 2026-09-24: auto_start=False значит «сервер не поднимается вовсе», start() его
+    # не поднимет (тот же контракт в test_belt_commands.py / test_journal_commands.py) —
+    # вторая половина идёт на отдельном плагине с auto_start=True.
+    plugin, ctx, _services = _make_plugin(port)
     _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
     assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
     try:
