@@ -130,7 +130,7 @@ python3 scripts/plans_ledger.py close <plan>      # archive-on-done (git mv + с
 | [transport-single-policy](transport-single-policy.md) | продолжение | — | 0/9 | DRAFT | 2026-09-20 |
 | [truth-holes-closure](truth-holes-closure.md) | — | — | 13/15 | ACTIVE | 2026-09-20 |
 | [word-layout](word-layout.md) | feat/word-layout | — | 0/0 | DRAFT | 2026-09-20 |
-| [gui-service](2026-09-22_gui-service/plan.md) | feat/gui-service | — | 0/0 | DRAFT | 2026-09-22 |
+| [gui-service](2026-09-22_gui-service/plan.md) | feat/gui-service | — | 0/0 | APPROVED ред. 2 | 2026-09-22 |
 
 ## Архив
 
