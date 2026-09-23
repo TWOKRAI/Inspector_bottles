@@ -25,17 +25,6 @@
 
 ## Долг / открытые вопросы
 
-- **Task 5.3a сломала 5 тестов вне своих `FILES`** (`tests/test_pult_web.py` —
-  3, `tests/test_pult_journal_routes.py` — 2): их фикстуры берут
-  `_FakeDeviceHubClient.instances[-1]`, полагая, что плагин создаёт РОВНО один
-  `DeviceHubClient`. Второй клиент (`_scene_client`, Task 5.3a) теперь
-  создаётся ВТОРЫМ в `configure()` — `instances[-1]` стал сценой, а не
-  `robot`. `tests/test_acceptance_5_3a.py` эту ловушку обошёл заранее
-  (`_client_for(target_process)`, см. его докстринг). Разработчик не правил
-  два сломанных файла — они вне списка `FILES` задачи; чинит либо ведущий,
-  либо отдельная задача (перевести обе фикстуры на выбор по
-  `target_process`, как в `test_acceptance_5_3a.py`).
-
 - **Страница проверяется через `node:vm`, не браузером** — семантика
   pointer-событий на тач-экране и порядок `blur`/`visibilitychange` при
   закрытии вкладки не проверены; без `node` JS-тесты пропускаются (`skipif`).
