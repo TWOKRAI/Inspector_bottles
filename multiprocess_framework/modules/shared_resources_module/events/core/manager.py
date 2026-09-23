@@ -4,19 +4,29 @@ EventManager — менеджер системных событий.
 Использует EventType из types/ (не определяет сам).
 Поддерживает reinitialize() для восстановления после unpickle (ADR-020).
 
+Очередь событий — процесс-локальная (``queue.Queue``, не ``multiprocessing.Queue``):
+единственный читатель, ``wait_for_event``, живёт в том же процессе, что и писатель
+(``emit_event``); межпроцессной доставки очередь никогда не делала (ADR-SRM-015,
+пересмотр). Bounded (``EVENT_QUEUE_MAXSIZE``): при переполнении старейшее событие
+вытесняется новым, счётчик — в ``get_stats()["dropped"]``.
+
 Pickle: _event_queue, _subscribers, _new_event_event исключаются.
 После unpickle они равны None/{}. reinitialize() пересоздаёт их.
 """
 
 import time
-from queue import Empty
+from queue import Empty, Full, Queue
 from typing import Any, Callable, Dict, List, Optional
-from multiprocessing import Event, Queue
+from multiprocessing import Event
 
 from ....base_manager import BaseManager, ObservableMixin
 from ...types import EventType
 from ..interfaces import IEventManager
 from ...mixins import ManagerStatsMixin
+
+# Ёмкость процесс-локальной очереди событий (ADR-SRM-015). При переполнении
+# emit_event вытесняет старейшее событие новым и считает это в get_stats()["dropped"].
+EVENT_QUEUE_MAXSIZE = 1000
 
 
 class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixin):
@@ -56,7 +66,7 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
         self._new_event_event: Optional[Event] = None
         self._subscribers: Dict[EventType, List[Callable]] = {}
 
-        self._stats = {"emitted": 0, "subscribed": 0, "notified": 0, "errors": 0}
+        self._stats = {"emitted": 0, "subscribed": 0, "notified": 0, "errors": 0, "dropped": 0}
 
     # =========================================================================
     # Жизненный цикл
@@ -91,7 +101,7 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
         Подписки пустые — каждый процесс подписывается заново.
         """
         try:
-            self._event_queue = Queue()
+            self._event_queue = Queue(maxsize=EVENT_QUEUE_MAXSIZE)
             self._new_event_event = Event()
             self._subscribers = {}
             self.is_initialized = True
@@ -101,7 +111,7 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
             return False
 
     def _init_event_resources(self) -> None:
-        self._event_queue = Queue()
+        self._event_queue = Queue(maxsize=EVENT_QUEUE_MAXSIZE)
         self._new_event_event = Event()
 
     # =========================================================================
@@ -128,20 +138,22 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
                 try:
                     ch = getattr(self._router_manager, "get_channel", None)
                     if ch and ch("system_events"):
-                        self._router_manager.send({
-                            "type": "system_event",
-                            "command": "system_event",
-                            "channel": "system_events",
-                            "sender": "EventManager",
-                            "content": event_data,
-                            "targets": ["ProcessManager"],
-                        })
+                        self._router_manager.send(
+                            {
+                                "type": "system_event",
+                                "command": "system_event",
+                                "channel": "system_events",
+                                "sender": "EventManager",
+                                "content": event_data,
+                                "targets": ["ProcessManager"],
+                            }
+                        )
                 except Exception as e:
                     self._log_error(f"Failed to send event via router: {e}")
                     self._stats["errors"] += 1
 
             if self._event_queue is not None:
-                self._event_queue.put(event_data)
+                self._put_dropping_oldest(self._event_queue, event_data)
                 if self._new_event_event is not None:
                     self._new_event_event.set()
 
@@ -185,9 +197,7 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
                 if remaining <= 0:
                     return None
                 try:
-                    event_data = self._event_queue.get(
-                        timeout=min(remaining, 0.5)
-                    )
+                    event_data = self._event_queue.get(timeout=min(remaining, 0.5))
                 except Empty:
                     continue
                 if event_type is None or event_data.get("event_type") == event_type.value:
@@ -195,11 +205,26 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
                 deferred.append(event_data)
         finally:
             for evt in deferred:
-                self._event_queue.put(evt)
+                self._put_dropping_oldest(self._event_queue, evt)
 
     # =========================================================================
     # Вспомогательное
     # =========================================================================
+
+    def _put_dropping_oldest(self, q: Queue, item: Dict[str, Any]) -> None:
+        """put_nowait без блокировки; очередь полна → вытеснить старейшее и посчитать."""
+        try:
+            q.put_nowait(item)
+        except Full:
+            try:
+                q.get_nowait()
+            except Empty:
+                pass
+            try:
+                q.put_nowait(item)
+            except Full:
+                pass
+            self._stats["dropped"] += 1
 
     def _notify_subscribers(self, event_type: EventType, event_data: Dict[str, Any]) -> None:
         for callback in self._subscribers.get(event_type, []):
@@ -238,11 +263,24 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         _EXCLUDE = (
-            "log_debug", "log_info", "log_warning", "log_error", "log_critical",
-            "record_metric", "increment", "record_timing", "gauge",
-            "track_error", "record_error",
-            "_call_manager", "_registry", "_plugin_registry", "_proxy_created",
-            "_event_queue", "_subscribers", "_new_event_event",
+            "log_debug",
+            "log_info",
+            "log_warning",
+            "log_error",
+            "log_critical",
+            "record_metric",
+            "increment",
+            "record_timing",
+            "gauge",
+            "track_error",
+            "record_error",
+            "_call_manager",
+            "_registry",
+            "_plugin_registry",
+            "_proxy_created",
+            "_event_queue",
+            "_subscribers",
+            "_new_event_event",
             "_router_manager",
         )
         for key in _EXCLUDE:
