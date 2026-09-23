@@ -35,9 +35,11 @@ _MIN_LAG = 4
 #: Порог нормированной автокорреляции для признания локального максимума периодом.
 _AC_THRESHOLD = 0.5
 
-#: Столбцы у левого края, с которых тайл НЕ начинается: край ресайза (INTER_LINEAR повторяет
+#: Насколько далеко от левого края может начинаться тайл: край ресайза (INTER_LINEAR повторяет
 #: крайний пиксель) и край объектива не повторяют рисунок. Замер: пила ×7.5 — первые 4 столбца
-#: профиля нули; тайл от края давал шов 135 против 32 внутри, с отступа 8 — шов 1.93.
+#: профиля нули; тайл от края давал шов 135 против 32 внутри, с отступа 8 — шов 1.93. Отступ
+#: подбирается вместе с шириной (0.._EDGE_MARGIN): на коротком фото обязательный отступ съедал
+#: нужную ширину (ревью, H15).
 # ponytail: фиксированный отступ; подбирать по фото — когда реальный снимок покажет, что мало.
 _EDGE_MARGIN = 8
 
@@ -107,10 +109,10 @@ def _seam_and_inner(tile: np.ndarray) -> tuple[float, float]:
 
 
 def _best_crop(image: np.ndarray, period: int) -> tuple[int, int]:
-    """`(start, c)`: тайл — столбцы `start..start+c`, где `start` — отступ от края
-    (`_EDGE_MARGIN`, меньше — если фото узкое), а ширина `c` из `[W/2, W - period - start]`
-    выбрана так, что столбцы `start+c..start+c+period` лучше всего повторяют `start..start+period`
-    (по профилю яркости столбцов).
+    """`(start, c)`: тайл — столбцы `start..start+c`. Отступ от края `start` из `[0, _EDGE_MARGIN]`,
+    ширина `c` из `[W/2, W - period - start]`: столбцы `start+c..start+c+period` должны лучше
+    всего повторять `start..start+period` (по профилю яркости столбцов). Ширина выбирается по
+    среднему совпадению над всеми допустимыми стартами, старт — лучший для этой ширины.
 
     Период звена в пикселях сцены почти никогда не целый (25.4 мм × 0.6 px/мм = 15.24 px), а
     `find_period` отдаёт целое: обрезка «целым числом найденных периодов» копит сдвиг фазы на
@@ -120,14 +122,17 @@ def _best_crop(image: np.ndarray, period: int) -> tuple[int, int]:
     width = image.shape[1]
     profile = image.mean(axis=(0, 2), dtype=np.float64)
     lo = max(period, (width + 1) // 2)
-    # find_period отдаёт period <= W // 2, поэтому width - period >= lo и start >= 0.
-    start = min(_EDGE_MARGIN, width - period - lo)
-    head = profile[start : start + period]
-    scores = {
-        c: float(np.mean(np.abs(profile[start + c : start + c + period] - head)))
-        for c in range(lo, width - period - start + 1)
-    }
-    return start, min(scores, key=scores.__getitem__)
+    # find_period отдаёт period <= W // 2, поэтому width - period >= lo: start = 0 допустим всегда.
+    by_width: dict[int, list[tuple[float, int]]] = {}
+    for start in range(min(_EDGE_MARGIN, width - period - lo) + 1):
+        head = profile[start : start + period]
+        for c in range(lo, width - period - start + 1):
+            diff = float(np.mean(np.abs(profile[start + c : start + c + period] - head)))
+            by_width.setdefault(c, []).append((diff, start))
+    # Ширина — по среднему над стартами: шум окна гасится, а искажённый край прибавляет всем
+    # ширинам одно и то же. Старт — лучший для выбранной ширины (уводит от искажённого края).
+    best_c = min(by_width, key=lambda c: sum(d for d, _ in by_width[c]) / len(by_width[c]))
+    return min(by_width[best_c])[1], best_c
 
 
 def make_seamless_tile(image: np.ndarray) -> SeamlessResult:

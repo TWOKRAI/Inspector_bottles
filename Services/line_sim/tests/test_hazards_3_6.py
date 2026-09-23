@@ -449,3 +449,22 @@ def test_h14_pitch_mode_prints_source_period_and_links(tmp_path, capsys):
     assert " source_period_px=16 " in text
     assert " links_in_photo=3.50" in text
     assert "method=period " in text, text
+
+
+def test_h15_short_photo_margin_does_not_force_bad_width():
+    """H15 (ревью 2026-09-23, итерация 2): на коротком фото отступ от края съедал допустимые
+    ширины — при W = 51, P ≈ 15.1 и отступе 8 ширина ограничена 28 px (1.85 звена, сдвиг фазы
+    2.2 px), хотя 30 px (2 звена, сдвиг 0.2) помещается от самого края. Начало тайла и ширина
+    ищутся совместно, отступ — не обязанность, а разрешение."""
+    true_period = 15.1  # 2 × 15.1 = 30.2 — два звена почти целые, литерал
+    width, height = 51, 20
+    x = np.arange(width)
+    hinge = 70.0 + 35.0 * (np.cos(2 * np.pi * x / true_period) > 0.85)
+    image = np.repeat(np.repeat(hinge[None, :], height, axis=0)[:, :, None], 3, axis=2).astype(np.uint8)
+
+    result = make_seamless_tile(image)
+
+    assert result.method == "period", result.note
+    tile_w = result.tile.shape[1]
+    phase_err = abs(tile_w - round(tile_w / true_period) * true_period)
+    assert phase_err <= 0.5, f"ширина {tile_w}: сдвиг фазы {phase_err:.2f} px"
