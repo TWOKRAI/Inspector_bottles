@@ -484,3 +484,59 @@ def test_page_truth_reset_posts_then_repolls(start_pult) -> None:
         f"после сброса и повторного опроса ожидали {_EXPECTED_TRUTH_LINE_FULL!r}, "
         f"страница показала {out.get('truthText')!r}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Лид, после break-injection 5.3a: два пробела, которые не ловил ни один тест.
+# --------------------------------------------------------------------------- #
+
+_COUNTERS_ZERO = {key: 0 for key in _COUNTERS_FULL} | {"pick_error_mean_mm": None, "pick_error_max_mm": None}
+_EXPECTED_TRUTH_LINE_ZERO = (
+    "поймано 0 (брак 0 / годных 0) · пропущено 0 (брак 0 / годных 0) · "
+    "лишних заданий 0 · ложных тревог 0 (повтор кадра 0) · на ленте 0 · "
+    "ошибка захвата ср — / макс — мм"
+)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_page_truth_reset_repolls_before_next_interval(start_pult) -> None:
+    """Инъекция I8 (сброс без ``.then(pollTruth)``) выживала: двойник отдавал те же
+    счётчики до и после сброса. Здесь ``truth.reset`` обнуляет ответ ``truth.status``.
+    Сценарий ``truth_reset`` кликает на 1200 мс и читает на 1500 мс, а плановый опрос
+    идёт на 1000 и 2000 мс, так что нули за это окно может показать только повторный
+    опрос сразу после сброса."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["truth.status"] = {"status": "ok", "counters": dict(_COUNTERS_FULL)}
+    original_request = scene_client.request
+
+    def request(command: str, args: dict | None = None, timeout: float | None = None) -> dict:
+        if command == "truth.reset":
+            scene_client.responses["truth.status"] = {"status": "ok", "counters": dict(_COUNTERS_ZERO)}
+        return original_request(command, args, timeout)
+
+    scene_client.request = request  # type: ignore[method-assign]
+
+    out = _run_page_js(port, "truth_reset")
+
+    assert out.get("truthText") == _EXPECTED_TRUTH_LINE_ZERO, (
+        f"после сброса страница не перечитала правду до планового опроса: {out.get('truthText')!r}"
+    )
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_page_truth_non_ok_status_with_200_is_unavailable(start_pult) -> None:
+    """Инъекция I6b (ветка ``else`` не пишет «правда недоступна») выживала. Ответ без
+    ``status: "error"`` пульт отдаёт с кодом 200 (§1), и страница обязана сама отличить
+    не-``ok`` от счётчиков (§2)."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["truth.status"] = {"status": "busy"}
+
+    out = _run_page_js(port, "truth_line")
+
+    assert out.get("truthText") == "правда недоступна", (
+        f"ответ 200 со status != ok, страница показала: {out.get('truthText')!r}"
+    )
