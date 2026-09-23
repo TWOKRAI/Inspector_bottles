@@ -98,7 +98,9 @@ class TruthLedger(object):
         self._pick_error_max_mm: float | None = None
 
         #: Недавние задания (§2 контракта 5.1b) — окно по job.t, чистится на каждом
-        #: on_match с job слева (протухшие первыми).
+        #: on_match с job по всей очереди: job.t может прийти не по порядку (ручной
+        #: scene.job_done, робот на другой машине, её перезапуск), старые записи тогда
+        #: не в голове (ревью 5.1b, п.1).
         self._frozen_window_s = frozen_window_s
         self._frozen_radius_mm = frozen_radius_mm
         self._recent_jobs: deque[JobDone] = deque()
@@ -125,13 +127,14 @@ class TruthLedger(object):
 
         ``job`` — опционален (обратная совместимость с 5.2): без него частота
         frozen-xy не считается, недавние задания не запоминаются. С ``job`` —
-        протухшие (``job.t - entry.t > frozen_window_s``) записи чистятся слева
-        ПЕРЕД проверкой исхода, и сам ``job`` кладётся в недавние ПОСЛЕ неё,
-        независимо от исхода.
+        протухшие (``job.t - entry.t > frozen_window_s``) записи чистятся по всей
+        очереди ПЕРЕД проверкой исхода, и сам ``job`` кладётся в недавние ПОСЛЕ неё,
+        независимо от исхода. Записи «из будущего» (``entry.t > job.t``) не
+        чистятся, но и не сравниваются, если дальше окна (``_is_frozen_xy``).
         """
         if job is not None:
-            while self._recent_jobs and job.t - self._recent_jobs[0].t > self._frozen_window_s:
-                self._recent_jobs.popleft()
+            window = self._frozen_window_s
+            self._recent_jobs = deque(e for e in self._recent_jobs if job.t - e.t <= window)
 
         if result.outcome == "matched":
             object_id = result.object_id
@@ -160,12 +163,12 @@ class TruthLedger(object):
             self._recent_jobs.append(job)
 
     def _is_frozen_xy(self, job: JobDone) -> bool:
-        """Среди недавних (уже прорежены окном) — та же точка (X/Y), но ДРУГОЙ
+        """Среди недавних в пределах ``|Δt| <= frozen_window_s`` — та же точка (X/Y), но ДРУГОЙ
         ``ecap`` (§2 контракта 5.1b). Плоское расстояние, БЕЗ поправки на проезд
         ленты — это НЕ невязка трекинга ``match_job``, а симптом повторного кадра
         или энкодера, замороженного на момент постановки задания в очередь."""
         for entry in self._recent_jobs:
-            if entry.ecap == job.ecap:
+            if entry.ecap == job.ecap or abs(job.t - entry.t) > self._frozen_window_s:
                 continue
             if math.hypot(job.x_mm - entry.x_mm, job.y_mm - entry.y_mm) < self._frozen_radius_mm:
                 return True

@@ -68,7 +68,7 @@ from Services.robot_comm.server.sim_journal import SimJournal
 
 #: Теги строк журнала, попадающих в ``recent`` команды ``sim_robot.journal``
 #: (Контракт лида 5.1, §2) — служебные теги ``""``/``"flag"`` туда не идут.
-_JOURNAL_RECENT_TAGS = {"job", "dup", "repeat", "done"}
+_JOURNAL_RECENT_TAGS = {"job", "dup", "done"}
 
 #: Ёмкость кольца недавних строк журнала, отдаваемых командой ``sim_robot.journal``.
 _JOURNAL_RECENT_MAXLEN = 50

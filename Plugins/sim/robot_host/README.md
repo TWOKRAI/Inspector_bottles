@@ -48,7 +48,7 @@ false_alarm_frozen_xy` (`Services/line_sim/core/truth.py`).
 | `sim_robot.journal_reset` | `SimJournal.reset()` + очистка `recent` → `{status: "ok"}`; без сервера — `{status: "error", ...}` |
 
 `recent` наполняется ТОЛЬКО тактом паблишера (`_publish_once` → `journal.drain()`,
-только строки с тегами `job`/`dup`/`repeat`/`done` — служебные `""`/`"flag"`
+только строки с тегами `job`/`dup`/`done` — служебные `""`/`"flag"`
 отбрасываются). `drain()` разрушающий: тик паблишера — единственный владелец,
 `_on_write` в журнал только пишет, никогда не читает и не чистит. Уровни на том
 же такте: `jobs_seen`, `dups_seen`, `dups_same_capture`, `dups_tracked`,
