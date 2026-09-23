@@ -79,6 +79,7 @@ _COMMAND_BY_PATH = {
     "/api/stop": "belt.stop",
     "/api/jog": "belt.jog",
     "/api/calibrate": "belt.calibrate",
+    "/api/journal/reset": "sim_robot.journal_reset",
 }
 
 #: Страница пульта — Русские подписи, dead-man на jog-кнопках, опрос статуса.
@@ -128,6 +129,12 @@ button {{ font-size: 1.2em; padding: 4px 12px; }}
 </div>
 
 <div class="row" id="status">robot не отвечает</div>
+
+<h2>Задания от прототипа</h2>
+<div class="row">
+  <div id="journal">журнал недоступен</div>
+  <button id="btnJournalReset">Сброс счётчиков</button>
+</div>
 
 <script>
 function post(path, body) {{
@@ -238,6 +245,36 @@ function pollStatus() {{
 }}
 setInterval(pollStatus, 250);
 pollStatus();
+
+// Журнал заданий (Ф5.1) — только показ, никакой логики подсчёта на пульте:
+// счётчики и причины повтора считает SimJournal на стороне robot.
+function getJournal() {{
+  return fetch("/api/journal").then(function (r) {{
+    return r.ok ? r.json() : Promise.reject(new Error("http " + r.status));
+  }});
+}}
+function pollJournal() {{
+  getJournal().then(function (j) {{
+    if (j && j.status === "ok") {{
+      var c = j.counters;
+      document.getElementById("journal").textContent =
+        "принято " + c.jobs +
+        " · повтор той же детали " + c.dups +
+        " (та же съёмка " + c.dups_same_capture + " / новый кадр " + c.dups_tracked + ")" +
+        " · те же X/Y с новым энкодером " + c.repeats_frozen_xy +
+        " · выполнено " + c.done;
+    }} else {{
+      document.getElementById("journal").textContent = "журнал недоступен";
+    }}
+  }}).catch(function () {{
+    document.getElementById("journal").textContent = "журнал недоступен";
+  }});
+}}
+document.getElementById("btnJournalReset").onclick = function () {{
+  post("/api/journal/reset", {{}}).then(pollJournal);
+}};
+setInterval(pollJournal, 1000);
+pollJournal();
 </script>
 </body>
 </html>
@@ -341,6 +378,9 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 return
             if self.path == "/api/status":
                 self._dispatch("belt.status", {})
+                return
+            if self.path == "/api/journal":
+                self._dispatch("sim_robot.journal", {})
                 return
             self._reply_json(404, {"ok": False, "error": "not_found"})
 

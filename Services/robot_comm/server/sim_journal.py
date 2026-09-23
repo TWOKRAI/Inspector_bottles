@@ -1,7 +1,10 @@
 """Журнал обмена симулятора: что ПРИНЯЛ от ПК ↔ что ОТДАЛ робот.
 
-Зачем: увидеть глазами, сколько заданий инспектор шлёт на ОДНУ физическую деталь.
-Классический дефект тракта — задание на каждый кадр с детекцией: очередь драйвера
+Зачем: увидеть глазами, сколько заданий инспектор шлёт на ОДНУ физическую деталь —
+и, что важнее, ПОЧЕМУ приходит повтор (Контракт лида 5.1, ред. 3, 2026-09-23:
+владелец увидел на живой линии, что робот забирал одну деталь трижды, и не мог
+сказать, дублируются кадры, команды, или виноват сам робот). Классический дефект
+тракта — задание на каждый кадр с детекцией: очередь драйвера
 (`Services/device_hub/drivers/robot_driver.py`) — обычная FIFO без дедупа, поэтому
 три кадра = три подхода робота подряд, каждый со сдвигом на полный цикл предыдущего
 («робот видит три объекта, да ещё и с задержкой»).
@@ -13,16 +16,32 @@
 * ``out`` — события ядра симулятора (``RobotSimCore.on_event``): приём задания,
             завершение, стоп, серво — зеркало ``print()`` прошивки.
 
-ДЕТЕКТОР ДУБЛЕЙ. Наивное «те же X/Y» не годится: лента едет, и та же деталь на
-следующем кадре снята уже в другой точке. Инвариант трекинга (из Lua
-``cvt_universal_full.lua``: ``trav = (enc_now - job_enc) * FACTOR_MM``,
-``px = job_x + UX*trav``, ``py = job_y + UY*trav``) даёт правильную проверку:
-два задания указывают на ОДНУ деталь, если разница координат объясняется
-проездом ленты за разницу энкодеров::
+ТРИ ПРИЧИНЫ ПОВТОРА (не одно число «дубли» — контракт §1). Наивное «те же X/Y» не
+годится: лента едет, и та же деталь на следующем кадре снята уже в другой точке.
+Инвариант трекинга (из Lua ``cvt_universal_full.lua``:
+``trav = (enc_now - job_enc) * FACTOR_MM``, ``px = job_x + UX*trav``,
+``py = job_y + UY*trav``) даёт правильную проверку: два задания указывают на ОДНУ
+деталь, если разница координат объясняется проездом ленты за разницу энкодеров::
 
     невязка = |(Δx, Δy) - (UX, UY) * Δenc * FACTOR_MM|   < dup_radius_mm
 
-При равных энкодерах это вырождается в обычное расстояние между точками.
+При равных энкодерах это вырождается в обычное расстояние между точками. Когда
+невязка мала (дубль по трекингу), причина расщепляется по энкодеру:
+
+* ``dups_same_capture`` — ``ecap`` совпал с прообразом: одна и та же съёмка
+  отправлена роботу дважды (дубль КОМАНДЫ, не кадра).
+* ``dups_tracked`` — ``ecap`` разный: та же деталь снята на другом кадре, а
+  прототип её не отсеял (дубль КАДРА/детекции).
+
+Отдельно, вне ``dups``: если координаты совпадают («вырожденная» невязка), а
+энкодер РАЗНЫЙ, это НЕ дубль по трекингу (инвариант трекинга не подтверждён — при
+разных энкодерах ожидалось бы смещение) — ``repeats_frozen_xy``: те же X/Y с новым
+энкодером, типичный симптом повторного кадра или энкодера, прочитанного в момент
+постановки задания в очередь, а не в момент съёмки.
+
+Известный предел: на СТОЯЩЕЙ ленте (``Δenc = 0`` между двумя честными кадрами
+одной детали) эти два кадра дадут ``dups_same_capture`` — причину читать вместе со
+скоростью ленты.
 
 Потокобезопасно: ``on_write`` зовётся из потока сервера, ``on_event`` — из
 ticker-потока, ``drain`` — из потока GUI.
@@ -66,7 +85,7 @@ class JournalEntry:
         t:    Момент по монотонным часам, сек.
         side: ``"in"`` (ПК → робот) или ``"out"`` (робот → ПК).
         text: Готовая строка для показа.
-        tag:  Класс события: ``""`` | ``"job"`` | ``"dup"`` | ``"flag"`` | ``"done"``.
+        tag:  Класс события: ``""`` | ``"job"`` | ``"dup"`` | ``"repeat"`` | ``"flag"`` | ``"done"``.
     """
 
     t: float
@@ -159,6 +178,11 @@ class SimJournal:
         self.dups_seen = 0
         self.jobs_done = 0
         self.reads_seen = 0
+        # Причины повтора (Контракт лида 5.1, §1): dups_seen == dups_same_capture
+        # + dups_tracked всегда — repeats_frozen_xy в dups_seen НЕ входит.
+        self.dups_same_capture = 0
+        self.dups_tracked = 0
+        self.repeats_frozen_xy = 0
 
     # ------------------------------------------------------------------ #
     # Вход: записи с провода
@@ -207,7 +231,16 @@ class SimJournal:
         return decode_int32(words, self._word_order)  # type: ignore[arg-type]
 
     def _register_job(self, now: float) -> None:
-        """Зафиксировать задание и сверить его с недавними (вызывать под локом)."""
+        """Зафиксировать задание и определить причину повтора (вызывать под локом).
+
+        Три исхода (Контракт лида 5.1, §1), проверяются по очереди:
+        1. дубль по трекингу (:meth:`_find_origin`) — делится по энкодеру на
+           ``dups_same_capture`` (та же съёмка) / ``dups_tracked`` (тот же
+           кадр, другая съёмка);
+        2. иначе — те же X/Y с ДРУГИМ энкодером (:meth:`_find_frozen_xy`) —
+           ``repeats_frozen_xy``, в ``dups_seen`` не входит;
+        3. иначе — обычное новое задание.
+        """
         x_mm = decode_int16(self._shadow.get(REG_JOB_X, 0)) / XY_SCALE
         y_mm = decode_int16(self._shadow.get(REG_JOB_Y, 0)) / XY_SCALE
         ecap = self._decode_dw(REG_JOB_ECAP)
@@ -215,24 +248,45 @@ class SimJournal:
         job = JobRecord(t=now, x_mm=x_mm, y_mm=y_mm, ecap=ecap, index=self.jobs_seen)
 
         match = self._find_origin(job)
+        frozen = self._find_frozen_xy(job) if match is None else None
         self._recent_jobs.append(job)
-        if match is None:
+
+        if match is not None:
+            prev, residual = match
+            self.dups_seen += 1
+            if job.ecap == prev.ecap:
+                self.dups_same_capture += 1
+                cause = "та же съёмка отправлена дважды"
+            else:
+                self.dups_tracked += 1
+                cause = "та же деталь снята на другом кадре"
             self._pending.append(
-                JournalEntry(now, "in", f"── ЗАДАНИЕ #{job.index}: pick({x_mm:.1f}, {y_mm:.1f}) e={ecap}", "job")
+                JournalEntry(
+                    now,
+                    "in",
+                    f"── ДУБЛЬ #{job.index}: та же деталь, что #{prev.index} — {cause} "
+                    f"(невязка {residual:.1f} мм, Δenc={job.ecap - prev.ecap:+d}, "
+                    f"Δt={job.t - prev.t:.2f} с)",
+                    "dup",
+                )
             )
             return
 
-        prev, residual = match
-        self.dups_seen += 1
-        self._pending.append(
-            JournalEntry(
-                now,
-                "in",
-                f"── ДУБЛЬ #{job.index}: та же деталь, что #{prev.index} "
-                f"(невязка {residual:.1f} мм, Δenc={job.ecap - prev.ecap:+d}, "
-                f"Δt={job.t - prev.t:.2f} с)",
-                "dup",
+        if frozen is not None:
+            self.repeats_frozen_xy += 1
+            self._pending.append(
+                JournalEntry(
+                    now,
+                    "in",
+                    f"── ПОВТОР #{job.index}: те же X/Y, что #{frozen.index}, "
+                    f"энкодер другой (Δenc={job.ecap - frozen.ecap:+d})",
+                    "repeat",
+                )
             )
+            return
+
+        self._pending.append(
+            JournalEntry(now, "in", f"── ЗАДАНИЕ #{job.index}: pick({x_mm:.1f}, {y_mm:.1f}) e={ecap}", "job")
         )
 
     def _find_origin(self, job: JobRecord) -> tuple[JobRecord, float] | None:
@@ -264,6 +318,25 @@ class SimJournal:
         dy = (job.y_mm - prev.y_mm) - BELT_UY * trav
         return math.hypot(dx, dy)
 
+    def _find_frozen_xy(self, job: JobRecord) -> JobRecord | None:
+        """Среди недавних — та же точка (X/Y), но ДРУГОЙ энкодер (вызывать под локом).
+
+        Зовётся, только когда :meth:`_find_origin` уже проверил инвариант
+        трекинга для этой пары и он НЕ подтвердился — здесь плоское расстояние
+        БЕЗ поправки на проезд ленты: та же точка при разных энкодерах —
+        симптом повторного кадра или энкодера, замороженного на момент
+        постановки задания в очередь (Контракт лида 5.1, §1), а не проезда
+        детали дальше по ленте.
+        """
+        best: tuple[JobRecord, float] | None = None
+        for prev in self._recent_jobs:
+            if prev.ecap == job.ecap:
+                continue
+            residual = math.hypot(job.x_mm - prev.x_mm, job.y_mm - prev.y_mm)
+            if residual < self._dup_radius_mm and (best is None or residual < best[1]):
+                best = (prev, residual)
+        return best[0] if best is not None else None
+
     # ------------------------------------------------------------------ #
     # Выход: события ядра
     # ------------------------------------------------------------------ #
@@ -289,18 +362,28 @@ class SimJournal:
         return out
 
     def counters(self) -> dict[str, int]:
-        """Снимок счётчиков для шапки монитора."""
+        """Снимок счётчиков для шапки монитора.
+
+        ``jobs``/``dups``/``done``/``reads`` — прежние ключи без изменений
+        (их читает ``SimMonitorWindow``); три новых — причины повтора
+        (Контракт лида 5.1, §1). Инвариант: ``dups == dups_same_capture +
+        dups_tracked``.
+        """
         with self._lock:
             return {
                 "jobs": self.jobs_seen,
                 "dups": self.dups_seen,
                 "done": self.jobs_done,
                 "reads": self.reads_seen,
+                "dups_same_capture": self.dups_same_capture,
+                "dups_tracked": self.dups_tracked,
+                "repeats_frozen_xy": self.repeats_frozen_xy,
             }
 
     def reset(self) -> None:
-        """Сбросить строки, счётчики и память о последнем задании."""
+        """Сбросить строки, счётчики (старые и новые) и память о последнем задании."""
         with self._lock:
             self._pending.clear()
             self._recent_jobs.clear()
             self.jobs_seen = self.dups_seen = self.jobs_done = self.reads_seen = 0
+            self.dups_same_capture = self.dups_tracked = self.repeats_frozen_xy = 0

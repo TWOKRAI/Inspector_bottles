@@ -52,6 +52,7 @@ import os
 import socket
 import threading
 import time
+from collections import deque
 from typing import Any
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -63,6 +64,14 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from Plugins.hub.device_hub.client import DeviceHubClient
 from Services.robot_comm.server.sim_core import VFD_CMD_ADDR, RobotSimCore
+from Services.robot_comm.server.sim_journal import SimJournal
+
+#: Теги строк журнала, попадающих в ``recent`` команды ``sim_robot.journal``
+#: (Контракт лида 5.1, §2) — служебные теги ``""``/``"flag"`` туда не идут.
+_JOURNAL_RECENT_TAGS = {"job", "dup", "repeat", "done"}
+
+#: Ёмкость кольца недавних строк журнала, отдаваемых командой ``sim_robot.journal``.
+_JOURNAL_RECENT_MAXLEN = 50
 
 #: Дефолты конфига (Task 1.1 плана line-sim, §Task 1.1 pipeline.yaml).
 _DEFAULT_HOST = "127.0.0.1"
@@ -112,6 +121,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         "belt.jog": "cmd_belt_jog",
         "belt.calibrate": "cmd_belt_calibrate",
         "belt.status": "cmd_belt_status",
+        "sim_robot.journal": "cmd_journal",
+        "sim_robot.journal_reset": "cmd_journal_reset",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -132,6 +143,12 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._server: Any = None
         self._lock = threading.Lock()
         self._writes_seen = 0
+        # Журнал заданий (Контракт лида 5.1, §2) — заводится в _start_server,
+        # ДО сервера, чтобы on_write/on_event сервера сразу видели живой объект.
+        self._journal: SimJournal | None = None
+        # Кольцо строк для команды sim_robot.journal — наполняется ТОЛЬКО тиком
+        # паблишера (_publish_once), drain() журнала разрушающий (см. TRAPS).
+        self._journal_recent: deque[dict[str, Any]] = deque(maxlen=_JOURNAL_RECENT_MAXLEN)
         # Dead-man jog (под self._lock — пишут и команда, и паблишер):
         # _jog_regs — что jog записал в mailbox (RUN, DIR, FREQ), _jog_deadline —
         # когда watchdog должен проверить, не перебит ли jog другим писателем.
@@ -149,6 +166,13 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         ctx.declare_metric("encoder")
         ctx.declare_metric("belt_mm_s")
         ctx.declare_metric("writes_seen")
+        # Уровни журнала заданий (Контракт лида 5.1, §2).
+        ctx.declare_metric("jobs_seen")
+        ctx.declare_metric("dups_seen")
+        ctx.declare_metric("dups_same_capture")
+        ctx.declare_metric("dups_tracked")
+        ctx.declare_metric("repeats_frozen_xy")
+        ctx.declare_metric("jobs_done")
 
         ctx.log_info(f"sim_robot_host: конфиг принят, {self._host}:{self._port}, unit_id={self._unit_id}")
 
@@ -195,12 +219,14 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             self._fail(ctx, exc)
             return
 
+        self._journal = SimJournal()
         try:
             from Services.modbus.sdk.errors import ModbusNotAvailableError
             from Services.robot_comm.server.sim_robot import SimRobotServer
 
             core = RobotSimCore(
                 on_job_done=self._on_job_done,
+                on_event=self._journal.on_event,
             )
             server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
             server.start()
@@ -273,9 +299,17 @@ class SimRobotHostPlugin(ProcessModulePlugin):
     def _on_write(self, fc: int, addr: int, values: list[int] | None) -> None:
         """Наблюдатель обмена ``SimRobotServer`` (чужой поток — см. докстринг модуля).
 
-        ``values is None`` — чтение, не считаем. Иначе — запись, инкремент под
-        локом; публикация в plane stats отложена до :meth:`_sync_writes_metric`.
+        Каждый доступ (чтения ТОЖЕ, ``values is None``) форвардится в
+        ``self._journal.on_write`` — журнал сам считает чтения отдельным
+        счётчиком (Контракт лида 5.1, §2); ``SimJournal.on_write`` дешёвый
+        (свой ``Lock``, без IPC) — публикация метрик сюда НЕ переносится
+        (TRAPS ведущего: этот метод зовётся с потока ``pymodbus``).
+        ``values is None`` — чтение, не считаем в ``_writes_seen``. Иначе —
+        запись, инкремент под локом; публикация в plane stats отложена до
+        :meth:`_sync_writes_metric`.
         """
+        if self._journal is not None:
+            self._journal.on_write(fc, addr, values)
         if values is None:
             return
         with self._lock:
@@ -396,13 +430,39 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._ctx.publish_metric("encoder", encoder)
         self._ctx.publish_metric("belt_mm_s", mm_s)
         self._ctx.publish_metric("writes_seen", writes_seen)
+        self._publish_journal_once()
+
+    def _publish_journal_once(self) -> None:
+        """Уровни журнала + перенос новых строк в ``_journal_recent`` (Контракт §2).
+
+        ``journal.drain()`` разрушающий (см. TRAPS ведущего в докстринге
+        ``sim_journal.py``) — забирает его строго ОДИН владелец, тик
+        паблишера; сам приём (``_on_write``) в журнал только пишет, никогда
+        не читает и не чистит.
+        """
+        if self._journal is None:
+            return
+        counters = self._journal.counters()
+        self._ctx.publish_metric("jobs_seen", counters["jobs"])
+        self._ctx.publish_metric("dups_seen", counters["dups"])
+        self._ctx.publish_metric("dups_same_capture", counters["dups_same_capture"])
+        self._ctx.publish_metric("dups_tracked", counters["dups_tracked"])
+        self._ctx.publish_metric("repeats_frozen_xy", counters["repeats_frozen_xy"])
+        self._ctx.publish_metric("jobs_done", counters["done"])
+
+        with self._lock:
+            for entry in self._journal.drain():
+                if entry.tag in _JOURNAL_RECENT_TAGS:
+                    self._journal_recent.append(
+                        {"t": entry.t, "side": entry.side, "text": entry.text, "tag": entry.tag}
+                    )
 
     # ------------------------------------------------------------------ #
     # Команды
     # ------------------------------------------------------------------ #
 
     def cmd_status(self, data: dict | None = None) -> dict:
-        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state/world."""
+        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state/world/journal."""
         self._sync_writes_metric()
         with self._lock:
             writes_seen = self._writes_seen
@@ -414,7 +474,29 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             "writes_seen": writes_seen,
             "state": self._state,
             "world": "unavailable" if self._ctx.state_proxy is None else "ok",
+            "journal": self._journal.counters() if self._journal is not None else {},
         }
+
+    # ------------------------------------------------------------------ #
+    # Журнал заданий (Контракт лида 5.1, §2)
+    # ------------------------------------------------------------------ #
+
+    def cmd_journal(self, data: dict | None = None) -> dict:
+        """``sim_robot.journal`` → ``{counters, recent}``; без сервера — ошибка."""
+        if self._server is None or self._journal is None:
+            return {"status": "error", "message": "server_not_running"}
+        with self._lock:
+            recent = list(self._journal_recent)
+        return {"status": "ok", "counters": self._journal.counters(), "recent": recent}
+
+    def cmd_journal_reset(self, data: dict | None = None) -> dict:
+        """``sim_robot.journal_reset`` → обнулить счётчики журнала и очистить ``recent``."""
+        if self._server is None or self._journal is None:
+            return {"status": "error", "message": "server_not_running"}
+        self._journal.reset()
+        with self._lock:
+            self._journal_recent.clear()
+        return {"status": "ok"}
 
     # ------------------------------------------------------------------ #
     # Команды ленты (Task 2.3a) — исполняются на потоке диспетчера команд

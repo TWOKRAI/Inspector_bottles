@@ -237,9 +237,17 @@ def test_publish_once_reports_metrics_without_state_proxy() -> None:
         plugin._publish_once()
 
         names = [name for name, _ in published]
-        assert names == ["encoder", "belt_mm_s", "writes_seen"], (
-            f"без state_proxy паблишер обязан отдать все три уровня, получено: {published!r}"
-        )
+        assert names == [
+            "encoder",
+            "belt_mm_s",
+            "writes_seen",
+            "jobs_seen",
+            "dups_seen",
+            "dups_same_capture",
+            "dups_tracked",
+            "repeats_frozen_xy",
+            "jobs_done",
+        ], f"без state_proxy паблишер обязан отдать все уровни (включая журнал Ф5.1), получено: {published!r}"
     finally:
         plugin.shutdown(ctx)
 

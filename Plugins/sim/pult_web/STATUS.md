@@ -7,6 +7,7 @@
 | Что | Состояние |
 |---|---|
 | `plugin.py` — `PultWebPlugin` | есть: `configure`/`start`/`shutdown`, HTTP API (`GET /`, `GET /api/status`, `POST /api/run|stop|jog|calibrate`), форвард через `DeviceHubClient` |
+| `GET /api/journal` / `POST /api/journal/reset` (Task 5.1) | есть: форвард `sim_robot.journal`/`sim_robot.journal_reset` как есть; страница — блок «Задания от прототипа», опрос 1 с, без логики подсчёта; 2/2 REDS `tests/test_pult_journal_routes.py` зелёные |
 | Занятый порт | есть: `_PultHTTPServer.__init__` биндит синхронно, `OSError` → `report_error`, `state="error"`, процесс живёт |
 | bad_json/404/413 | есть: три отказа ДО обращения к `robot`, `robot` не вызывается ни разу |
 | `status: "error"` от `robot` → 504 | есть |

@@ -189,7 +189,15 @@ def test_reset_clears_counters_and_duplicate_memory() -> None:
     journal.reset()
     _send_job(journal, x_mm=300.0, y_mm=-210.0, ecap=100_000)
 
-    assert journal.counters() == {"jobs": 1, "dups": 0, "done": 0, "reads": 0}
+    assert journal.counters() == {
+        "jobs": 1,
+        "dups": 0,
+        "done": 0,
+        "reads": 0,
+        "dups_same_capture": 0,
+        "dups_tracked": 0,
+        "repeats_frozen_xy": 0,
+    }
 
 
 @pytest.mark.parametrize("word_order", ["little", "big"])

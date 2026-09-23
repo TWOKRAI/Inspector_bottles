@@ -62,3 +62,36 @@ def test_job_completed_by_real_core_reaches_scene(monkeypatch):
     target, command, args = _Client.sent[0]
     assert (target, command) == ("camera", "scene.job_done")
     assert args["ecap"] == 106016 and args["x_mm"] == 12.5 and args["y_mm"] == -3.0
+
+
+def test_journal_counts_job_and_done_through_real_core(monkeypatch):
+    """Лид, 5.1: задание, пришедшее через хук сервера (`_on_write`) и выполненное
+    НАСТОЯЩИМ ядром из `_start_server`, видно в `sim_robot.journal` как jobs=1, done=1.
+    Тесты тестера держат jobs_done только нулём — проводка `on_event` ядра не прибита."""
+    _Client.sent = []
+    monkeypatch.setattr(sim_robot_module, "SimRobotServer", _FakeServer)
+    monkeypatch.setattr(robot_plugin_module, "DeviceHubClient", _Client)
+
+    ctx = MagicMock()
+    ctx.config = {"host": "127.0.0.1", "port": 0, "unit_id": 2, "auto_start": False}
+    plugin = SimRobotHostPlugin()
+    plugin.configure(ctx)
+    monkeypatch.setattr(plugin, "_probe_port_free", lambda: None)
+    plugin._start_server(ctx)
+    core = plugin._server.core
+
+    # Сервер pymodbus зовёт хук ДО записи в регистры — повторяем его порядок.
+    for addr, values in (
+        (REG_JOB_X, [125]),
+        (REG_JOB_Y, [65506]),
+        (REG_JOB_ECAP, encode_int32(106016, word_order="little")),
+        (REG_JOB_FLAG, [1]),
+    ):
+        plugin._on_write(16, addr, values)
+        core.write(addr, values)
+    plugin._on_write(3, REG_JOB_X, None)  # одно чтение
+    for _ in range(3):
+        core.tick()
+
+    counters = plugin.cmd_journal({})["counters"]
+    assert (counters["jobs"], counters["done"], counters["reads"], counters["dups"]) == (1, 1, 1, 0)
