@@ -185,6 +185,13 @@ class RobotSimCore:
         self.regs[REG_TLM_BASE + _TLM_SPD] = 50
         self.regs[REG_TLM_BASE + _TLM_SERVO] = 1
         self._write_encoder()
+        #: Task 5.4 (``fault.vfd_code``): публичный int — код неисправности ПЧ,
+        #: попадает в зеркало (0x1214, ``st + 4`` в :meth:`_handle_vfd`) только на
+        #: СЛЕДУЮЩЕМ пульсе VFD_FLAG (как прошивка — зеркало вообще обновляется
+        #: только по пульсу, см. докстринг :meth:`_handle_vfd`), не сразу по
+        #: присвоению. 0 — нет неисправности (дефолт). Валидирует вызывающий
+        #: (``Plugins.sim.robot_host``), само ядро принимает любой int.
+        self.vfd_fault_code: int = 0
 
     # ------------------------------------------------------------------ #
     # События (зеркало print() прошивки)
@@ -418,7 +425,7 @@ class RobotSimCore:
         self.regs[st + 1] = freq if run else 0
         self.regs[st + 2] = _SIM_CURRENT_RAW if run else 0
         self.regs[st + 3] = _SIM_DCBUS_RAW
-        self.regs[st + 4] = 0  # fault
+        self.regs[st + 4] = self.vfd_fault_code  # fault (Task 5.4: fault.vfd_code, на пульсе)
         self.regs[st + 5] = (2 if reverse else 1) if run else 3
         self.regs[st + 6] = (self.regs[st + 6] + 1) % 32767  # heartbeat моста
         self.regs[_REG_VFD_FLAG] = 0

@@ -18,6 +18,8 @@ Graceful degradation: модуль импортируется без pymodbus; �
 
 from __future__ import annotations
 
+import asyncio
+import socket
 import sys
 import threading
 import time
@@ -55,21 +57,41 @@ _OBSERVER_ERROR_LIMIT = 3
 # «не проскочить».
 _MAX_TICK_DT_S = 0.1
 
+# Task 5.4 (fault.drop): сколько ждать, пока свежий слушатель НАЧНЁТ принимать TCP-
+# соединения, прежде чем start_listener() вернёт управление. Значение специально
+# МЕНЬШЕ внешнего join-бюджета fault.clear/shutdown (<=1с, см. Plugins/sim/robot_host/
+# plugin.py) — если бинд аномально завис, start_listener() обязан сдаться и поднять
+# исключение ДО того, как внешний join истечёт молча (иначе гонка: fault.clear()
+# закрывает listener ДО того, как pymodbus успел выставить active_server внутри
+# своего потока — см. TRAPS брифа Task 5.4).
+_LISTENER_READY_TIMEOUT_S = 0.5
+
 
 def _make_register_binder(
     core: RobotSimCore,
     bound_event: threading.Event,
     on_write: Callable[[int, int, list[int] | None], None] | None = None,
+    delay_source: Callable[[], float] | None = None,
 ):
     """action-хук SimDevice: захватить живой список регистров сервера.
 
-    Вызывается сервером на КАЖДЫЙ доступ (до применения операции). Задачи две:
-    на первом вызове отдать ядру живое хранилище, и — если задан ``on_write`` —
-    отдать наблюдателю сырой доступ (``values=None`` для чтений). Хук зовётся ДО
-    применения операции, поэтому в ``values`` лежат ЕЩЁ НЕ записанные значения:
-    именно они и нужны монитору (в ``registers`` пока старое).
+    Вызывается сервером на КАЖДЫЙ доступ (до применения операции). Задачи три:
+    на первом вызове отдать ядру живое хранилище, если задан ``on_write`` —
+    отдать наблюдателю сырой доступ (``values=None`` для чтений), и если задан
+    ``delay_source`` (Task 5.4, ``fault.delay_ms``) — задержать ОТВЕТ на
+    ``delay_source()`` секунд. Хук зовётся ДО применения операции, поэтому в
+    ``values`` лежат ЕЩЁ НЕ записанные значения: именно они и нужны монитору
+    (в ``registers`` пока старое).
     pymodbus валидирует ``action=`` как async-ФУНКЦИЮ (инстанс с async
     ``__call__`` не проходит) — поэтому замыкание, а не класс.
+
+    ``await asyncio.sleep(delay)`` (не ``time.sleep``!) — pymodbus 3.15 ждёт
+    хук через ``await`` (``pymodbus/simulator/simruntime.py:60-62``), поэтому
+    неблокирующий sleep держит ответ ЭТОМУ клиенту, не мешая event loop'у
+    сервера обслуживать другие соединения параллельно (DESIGN п.2 брифа
+    Task 5.4). Задержка идёт ПОСЛЕДНЕЙ, перед ``return`` — она моделирует
+    медленный ОТВЕТ, а не медленное наблюдение (счёт ``on_write``/``attach``
+    не должен тормозиться ею).
     """
     observer_errors = 0
 
@@ -86,6 +108,10 @@ def _make_register_binder(
                 if observer_errors <= _OBSERVER_ERROR_LIMIT:  # ...но и молчать не должен
                     print(f"sim_robot: сбой наблюдателя обмена #{observer_errors}:", file=sys.stderr)
                     traceback.print_exc()
+        if delay_source is not None:
+            delay = delay_source()
+            if delay > 0:
+                await asyncio.sleep(delay)
         return None  # продолжить штатную обработку
 
     return binder
@@ -118,6 +144,10 @@ class SimRobotServer:
         self.core = core if core is not None else RobotSimCore()
         self._tick_interval = tick_interval
         self._on_write = on_write
+        #: Task 5.4 (``fault.delay_ms``) — сек. задержки ответа на КАЖДЫЙ Modbus-доступ,
+        #: читается ``_make_register_binder`` на каждый вызов (``lambda: self.delay_ms/1000``
+        #: в :meth:`_serve`) — смена значения НЕ требует рестарта слушателя.
+        self.delay_ms: int = 0
         self._bound = threading.Event()
         self._stop = threading.Event()
         self._server_thread: threading.Thread | None = None
@@ -126,23 +156,68 @@ class SimRobotServer:
     # ------------------------------------------------------------------ #
 
     def start(self) -> None:
-        """Поднять сервер и Motion-ticker в фоновых потоках."""
-        self._server_thread = threading.Thread(target=self._serve, name="sim-robot-server", daemon=True)
+        """Поднять Motion-ticker и слушателя в фоновых потоках."""
         self._ticker_thread = threading.Thread(target=self._ticker, name="sim-robot-motion", daemon=True)
-        self._server_thread.start()
         self._ticker_thread.start()
+        self.start_listener()
 
     def stop(self) -> None:
-        """Остановить ticker и сервер."""
+        """Остановить ticker и слушателя (симметрично ``start()``)."""
         self._stop.set()
         if self._ticker_thread is not None:
             self._ticker_thread.join(timeout=2.0)
+        self.stop_listener()
+
+    # ------------------------------------------------------------------ #
+    # Task 5.4: слушатель отдельно от тикера — fault.drop рвёт ТОЛЬКО связь,
+    # робот (тикер/ядро) продолжает жить. См. докстринг модуля и брифа Task 5.4.
+    # ------------------------------------------------------------------ #
+
+    def stop_listener(self) -> None:
+        """Остановить ТОЛЬКО TCP-слушателя. Тикер не трогаем — ``fault.drop`` это
+        обрыв СВЯЗИ, не перезагрузка робота. Безопасно звать, когда слушатель уже
+        не поднят (``ServerStop()`` бросает ``RuntimeError`` «not running» —
+        глотаем, как и раньше в ``stop()``)."""
         try:
             ServerStop()
-        except Exception:  # pragma: no cover - сервер мог не подняться
+        except Exception:  # pragma: no cover - сервер мог не подняться / уже остановлен
             pass
         if self._server_thread is not None:
             self._server_thread.join(timeout=2.0)
+            self._server_thread = None
+
+    def start_listener(self, *, ready_timeout: float = _LISTENER_READY_TIMEOUT_S) -> None:
+        """Поднять слушателя заново (порт освобождён ``stop_listener()``).
+
+        ``self._bound`` сбрасывается — новый ``SimDevice`` получит свежий пустой
+        список регистров, и ПЕРВЫЙ же запрос клиента заново вызовет
+        ``core.attach(...)``, который скопирует ЖИВОЕ состояние ядра (тикер её
+        не останавливал) в этот новый список — так состояние переживает drop.
+
+        Ждём (не дольше ``ready_timeout``), пока порт начнёт принимать TCP —
+        иначе вызывающий (например ``fault.clear``/``shutdown``), позвав
+        ``stop_listener()`` сразу следом, рисковал бы застать pymodbus ДО того,
+        как тот выставил ``active_server`` внутри своего потока — ``ServerStop()``
+        бросила бы «not running», листенер остался бы висеть в фоне (TRAPS
+        брифа Task 5.4). Ожидание — обычный TCP-коннект+закрытие, Modbus PDU не
+        шлём, поэтому пробное подключение НЕ триггерит ``core.attach``.
+        """
+        self._bound.clear()
+        self._server_thread = threading.Thread(target=self._serve, name="sim-robot-server", daemon=True)
+        self._server_thread.start()
+        deadline = time.monotonic() + ready_timeout
+        while time.monotonic() < deadline:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                probe.settimeout(max(0.05, deadline - time.monotonic()))
+                probe.connect((self.host, self.port))
+            except OSError:
+                time.sleep(0.02)
+                continue
+            finally:
+                probe.close()
+            return
+        raise RuntimeError(f"sim_robot: слушатель не поднялся на {self.host}:{self.port} за {ready_timeout}с")
 
     # ------------------------------------------------------------------ #
 
@@ -151,7 +226,9 @@ class SimRobotServer:
         device = SimDevice(
             id=self.unit_id,
             simdata=[block],
-            action=_make_register_binder(self.core, self._bound, self._on_write),
+            action=_make_register_binder(
+                self.core, self._bound, self._on_write, delay_source=lambda: self.delay_ms / 1000.0
+            ),
         )
         StartTcpServer(context=device, address=(self.host, self.port))
 

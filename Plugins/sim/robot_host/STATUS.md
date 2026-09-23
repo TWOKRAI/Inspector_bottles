@@ -22,7 +22,19 @@ dead-man путь, строгие типы аргументов), ветка `fe
 
 Причины повтора (`dups_same_capture`/`dups_tracked`) — счётная логика в `Services/robot_comm/server/sim_journal.py` (см. его README), не здесь; 4/4 REDS `Services/robot_comm/tests/test_sim_journal_causes.py` зелёные.
 
+| Ручки неисправностей `fault.*` (Task 5.4) | есть: `fault.drop`/`fault.delay_ms`/`fault.vfd_code`/`fault.clear`, `sim_robot.status.faults`; `SimRobotServer.stop_listener()`/`start_listener()` разводят слушателя и тикер (drop — обрыв связи, не перезагрузка); 8/9 REDS `tests/test_acceptance_5_4_faults.py` зелёные (1 открытый вопрос — см. ниже); 4/4 авторских `tests/test_faults_hazards.py` (shutdown посреди drop, drop сам уходит из faults, два drop подряд, shutdown сразу за clear) |
+
 ## Долг / открытые вопросы
+
+- `tests/test_acceptance_5_4_faults.py::test_bad_args_and_no_server` красный: вторая половина
+  теста конструирует плагин с `auto_start=False`, потом зовёт `plugin.start(ctx)` и ждёт
+  `plugin._state == "running"` — но `start()` (код вне области Task 5.4, существовал ДО задачи)
+  запускает `_start_server()` ТОЛЬКО если `self._auto_start` истинно (см. `plugin.py`, `start()`).
+  С `auto_start=False` сервер НЕ поднимается никаким вызовом `start()` — так же ведут себя
+  все остальные тесты пакета с `auto_start=False` (`test_belt_commands.py:258-264`,
+  `test_journal_commands.py:190`) — ни один из них не пытается затем поднять сервер через
+  `start()`. Не правил тест (запрещено брифом) и не менял поведение `auto_start` (вне
+  FILES/DESIGN Task 5.4) — эскалировано лиду.
 
 - Task 3.5b: пересылка события проверена на подменённом `DeviceHubClient` и смоуком с
   реальным `SimRobotServer` + реальным клиентом на мок-роутере; межпроцессная доставка
