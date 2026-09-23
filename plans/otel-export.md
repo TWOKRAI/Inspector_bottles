@@ -13,6 +13,7 @@
 > **База ветки: `feat/observability-closure` = `9d9cb8e1`** (2026-09-05, closure Task 3.2 контракт). Порядок слияния: otel → closure → `main`.
 > Работа идёт в worktree `.claude/worktrees/otel-f0`: общее дерево занято соседней живой сессией (closure Ф3).
 > Границы захода: **Ф0 и Ф1 — сейчас**; Ф2–Ф4 — чередуя со стендами closure; Task 2.4 — строго после closure Task 3.3.
+> **Ред. 2026-09-23 — сверка по коду:** открыты 2.4 (замер gzip), 2.5, Ф3 (3.1 наполовину: фрагмент есть, валидатор `${ENV_VAR}` и readback заголовков — нет), Ф4. Решение владельца: **closure 4.4 → closure 4.3b → хвост otel без запасных путей**; closure 4.3 для otel ничего не даёт (вердикт CTO, `plans/observability-closure/verdict-task-4-3-cto.md`).
 > Состояние closure на 2026-09-07 по коммитам: Ф3 урезана вердиктом CTO с 9 задач до **6** (3.4, 3.6, 3.7 сняты целиком), закрыто **5 из 6** (3.0, 3.1, 3.2, 3.3, 3.5; остаток 3.8), Ф4–Ф5 не начаты. Полная карта пересечений по задачам — §«Пересечения с observability-closure».
 
 ---
@@ -1105,6 +1106,17 @@ SDK. Две двери: читать логгер или снимать исхо
 1. у **источников**: `queue_observability_evicted` (`heartbeat/telemetry.py:251`, `router_manager.py:1775`) и счётчик канала форвардера `observability_forward::otel_export::batch` — из readback `introspect.observability`; **после closure 4.3 — по протоколу `ObservabilityReadback.counters()`**, до него — ключи по факту с пометкой «до 4.3»; ёмкость источника брать **эффективную** (после closure 4.1 она из политики `observability.hub.capacity`, не литерал);
 2. у **экспортёра** (числовая плоскость, `history_query(metric=...)`): `received`, `skipped_numbers`, `dropped_overflow`, `export_failed`, `exported`;
 3. у **коллектора**: число записей в `otel_records.json`.
+> **Поправка 2026-09-23 (вердикт CTO по эскалации closure 4.3).** Шаг 1 выше опирался на ложную
+> посылку, а именно на «счётчик канала форвардера `observability_forward::otel_export::batch` из
+> readback; после closure 4.3 — по `counters()`». Факты:
+> - у `RecordForwardChannel` счётчиков нет вообще;
+> - в снимке `tools/otel_stand/samples/1f40ce0d/` таких ключей тоже нет;
+> - `counters()` из 4.3 — протокол внутри процесса, а не форма на проводе.
+>
+> Эти счётчики заводит **closure Task 4.3b** (секция `forwarders` в `introspect.observability`).
+> Решение владельца от 2026-09-23 — порядок `closure 4.4 → 4.3b → хвост otel`. Значит, 3.4 читает
+> участок «источник → экспортёр» из `forwarders` после 4.3b, а не через урезанную форму.
+
 **Acceptance criteria:**
 - [ ] Тождество сходится на живом прогоне 5 минут; расхождение — либо найденная потеря без счётчика (находка), либо ошибка модели (записать).
 - [ ] Все числа читаются агентом через MCP (`introspect_telemetry`, `history_query`, `introspect_observability(full)`) без драйвера из скрипта.

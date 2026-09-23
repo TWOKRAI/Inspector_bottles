@@ -15,6 +15,13 @@
 > приложение»**, а не «есть ли это в списке». Прежний порядок (по зависимостям и пересечению
 > файлов) записан ниже как исторический.
 
+> **Ред. 2026-09-23, решение владельца — `4.4 → 4.3b → хвост otel-export`, затем волна 3.**
+> Утром владелец выбрал «сначала 4.3 → 4.4», исходя из посылки ведущего, что otel 3.4 читает
+> счётчики форвардера через `counters()` из 4.3. Вердикт CTO 2026-09-23 (с воспроизведением)
+> посылку опроверг: у `RecordForwardChannel` нет ни одного счётчика, `counters()` — in-process
+> протокол, а не форма на проводе. **4.3 не даёт otel ничего**; 2.5(б) закрывает `4.4`, тождество
+> потерь 3.4 — новая `4.3b`. Порядок пересобран тем же днём, `4.3` остаётся в волне 3.
+
 ### Волны по приоритету
 
 **Волна 1 — «диагностика не врёт». Обязательна ДО старта `line-sim`.**
@@ -209,6 +216,44 @@ N аудита + версии одним ответом) экономит зах
 - [ ] `getattr(` по менеджерам в `observability_reload.py`/`observability_wiring.py` — 0 (AST-страж с литералом); `LoggerCore.get_stats` ключи = базе (`channel_count`).
 - [ ] `_cmd_config_reload` ≤ 80 строк; стадии `validate → layer → apply → verify → audit → reply` — отдельные функции с тестом порядка (инъекция перестановки → красный).
 - [ ] Контракт-оракул команд зелен; `flare` живьём возвращает бандл ≤ 200 КБ с `fw_version`.
+
+> **Вердикт CTO 2026-09-23** ([`verdict-task-4-3-cto.md`](./verdict-task-4-3-cto.md)) заменяет
+> критерии 2–3. Что меняется:
+> - стадий **пять**, audit — не стадия: мутации слоёв и `rebuild` пишут себя сами;
+> - протокол охватывает четыре плоскости, счётчики форвардера вынесены в **4.3b**;
+> - `flare` делается на стороне драйвера, `provenance` — по флагу, потолок ≤ 12 КБ на процесс;
+> - порядок частей: A протокол → B стадии → C распил → D flare.
+>
+> Критерий 1 — AST-страж: `getattr` на получателях `{logger, error, stats, observation, manager,
+> mgr, *_manager}`; на 60c1fe6c таких вызовов **19**, должно стать **0**. Поиск по слоту
+> `getattr(svc, "x_manager", None)` не считается.
+
+### Task 4.3b — Счётчики форвардера хвоста видны в readback (вердикт CTO 2026-09-23, Q2)
+**Level:** Middle+ · **Assignee:** developer · **Layer:** framework
+**Зачем:** без этих счётчиков потери на участке «источник → подписчик» (форвардер
+`observability_forward::<subscriber>::batch`) не измеряются вообще. Это блокирует тождество потерь
+otel-export 3.4 и любую приёмку точечного хвоста.
+
+**Факт на 60c1fe6c:**
+- у `RecordForwardChannel` (`channel_routing_module/observability/record_forward_channel.py:50-122`)
+  нет ни одного счётчика;
+- канал создаётся в замыкании `observability_wiring.py:279-283`, результат `push_batch`
+  выбрасывается;
+- секции `forwarders` в `introspect.observability` нет.
+
+**Files (≈3):** `record_forward_channel.py`, `observability_wiring.py` (реестр форвардеров
+`process_module._observability_forwarders`), секция `forwarders` в `introspect.observability`.
+
+**Acceptance criteria:**
+- [ ] `introspect.observability` отдаёт `forwarders: {<subscriber>: {sent, dropped, send_failed}}`.
+  Имена ключей фиксируются литералом в `CONNECTORS.md`.
+- [ ] Пара на живом стенде: подписчик жив → `sent` растёт, `dropped == 0`; роутер отвечает
+  `dropped` → растёт `dropped`, а не `sent`. Сегодня `_emit_to_taps` засчитывает dropped как
+  принятый.
+- [ ] Инъекции: «счётчик не инкрементируется» и «dropped считается как sent» — каждая даёт
+  красный.
+
+**Out of scope:** протокол `ObservabilityReadback` (4.3), новые счётчики очередей роутера.
 
 ### Task 4.4 — Точечные подписки переживают рестарт и креш клиента (M5, CTL-F3)
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework, tests (backend_ctl)
