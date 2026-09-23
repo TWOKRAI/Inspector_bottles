@@ -117,6 +117,9 @@ def pult(monkeypatch: pytest.MonkeyPatch):
 
 def test_get_api_journal_forwards_sim_robot_journal(pult) -> None:
     _plugin, _ctx, _services, client, port = pult
+    # Переписано 5.1b: ключ repeats_frozen_xy ушёл из SimJournal.counters() (пульт
+    # форвардит тело как есть — сама эта фикстура не проверяет счётную логику
+    # журнала, но держим её в форме, которую реально может отдать robot).
     fake_response = {
         "status": "ok",
         "counters": {
@@ -126,7 +129,6 @@ def test_get_api_journal_forwards_sim_robot_journal(pult) -> None:
             "reads": 40,
             "dups_same_capture": 1,
             "dups_tracked": 0,
-            "repeats_frozen_xy": 0,
         },
         "recent": [],
     }

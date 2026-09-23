@@ -137,23 +137,29 @@ rng (`SceneCompositor.render()` их не трогает, LS-009).
 де-дублированный по значению `t` (не спамит на каждый кадр одним и тем же
 протухшим значением).
 
-## Правда на проводе (Task 5.2)
+## Правда на проводе (Task 5.2 + 5.1b)
 
 `TruthLedger` (`Services.line_sim.core.truth`) считает исходы сам, без участия прототипа —
 своим локом `_truth_lock` (НЕ `_lock` мира): `on_spawn`/`on_despawn` кормятся из diff
 множества `active_objects()` до/после `spawner.tick()` в `produce()` (после `_drain_jobs` —
 поэтому объект, снятый заданием в этом же кадре, засчитывается как `caught`, не `missed`);
-`on_match` кормится из каждого исхода `_drain_jobs`, включая ветку «движок не собран»
-(`MatchResult("no_object", ...)` — растёт только `false_alarm`).
+`on_match` кормится из каждого исхода `_drain_jobs` вместе с самим `job` (Task 5.1b, §3 —
+в ОБЕИХ ветках, включая «движок не собран», `MatchResult("no_object", ...)` — растёт
+`false_alarm`, а если рядом с этой же точкой недавно было задание с ДРУГИМ `ecap` — ещё и
+`false_alarm_frozen_xy`, причина «те же X/Y с новым энкодером», переехавшая сюда из
+`SimJournal` — на проводе робота она ложно срабатывала на разных дисках у триггера).
 
 Команды: `truth.status` -> `{"status": "ok", "counters": {...}}` (полный набор ключей —
-докстринг `Services/line_sim/core/truth.py` и контракт `plans/line-sim/phase-5-contract-5.2.md` §1); `truth.reset` -> `{"status": "ok"}`, счётчики
-в ноль, объекты под учётом остаются.
+докстринг `Services/line_sim/core/truth.py` и контракты `plans/line-sim/phase-5-contract-5.2.md` §1,
+`plans/line-sim/phase-5-contract-5.1b.md` §2); `truth.reset` -> `{"status": "ok"}`, счётчики
+в ноль (включая `false_alarm_frozen_xy`), объекты под учётом остаются, память недавних
+заданий (frozen-xy) очищается.
 
-Пять уровней (`truth_caught`, `truth_dup_jobs`, `truth_missed`, `truth_false_alarm`,
-`truth_on_belt`, ADR-PM-038) публикуются из `produce()` не чаще раза в `truth_publish_s`
-(конфиг, дефолт `1.0` с) — первый `produce()` публикует всегда. В дерево мира (`sim.*`)
-счётчики НЕ пишутся — это порт наблюдений, не состояние для других устройств.
+Шесть уровней (`truth_caught`, `truth_dup_jobs`, `truth_missed`, `truth_false_alarm`,
+`truth_false_alarm_frozen_xy`, `truth_on_belt`, ADR-PM-038) публикуются из `produce()` не
+чаще раза в `truth_publish_s` (конфиг, дефолт `1.0` с) — первый `produce()` публикует
+всегда. В дерево мира (`sim.*`) счётчики НЕ пишутся — это порт наблюдений, не состояние
+для других устройств.
 
 ## Границы
 

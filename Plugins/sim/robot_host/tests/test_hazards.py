@@ -236,6 +236,8 @@ def test_publish_once_reports_metrics_without_state_proxy() -> None:
 
         plugin._publish_once()
 
+        # Переписано 5.1b (§3 контракта): repeats_frozen_xy ушёл из списка уровней
+        # robot_host — причина «те же X/Y» теперь считается TruthLedger на сцене.
         names = [name for name, _ in published]
         assert names == [
             "encoder",
@@ -245,7 +247,6 @@ def test_publish_once_reports_metrics_without_state_proxy() -> None:
             "dups_seen",
             "dups_same_capture",
             "dups_tracked",
-            "repeats_frozen_xy",
             "jobs_done",
         ], f"без state_proxy паблишер обязан отдать все уровни (включая журнал Ф5.1), получено: {published!r}"
     finally:

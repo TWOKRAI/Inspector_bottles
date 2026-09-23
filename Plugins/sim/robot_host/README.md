@@ -37,8 +37,10 @@ TCP-сервер (симулятор робота линии) в процесс�
 получает `journal.on_event`. Мотив (владелец, 2026-09-23): на живой линии
 робот забирал одну деталь трижды — журнал отвечает, СКОЛЬКО заданий пришло от
 прототипа и ПОЧЕМУ повтор, а не только факт дубля. Подробности причин
-(`dups_same_capture`/`dups_tracked`/`repeats_frozen_xy`) — README
-`Services/robot_comm/server`.
+(`dups_same_capture`/`dups_tracked`) — README `Services/robot_comm/server`.
+Третья причина 5.1 (`repeats_frozen_xy`, «те же X/Y с новым энкодером») ушла
+из журнала в задаче 5.1b — считается на стороне сцены, `TruthLedger.
+false_alarm_frozen_xy` (`Services/line_sim/core/truth.py`).
 
 | Команда | Ответ |
 |---|---|
@@ -50,8 +52,8 @@ TCP-сервер (симулятор робота линии) в процесс�
 отбрасываются). `drain()` разрушающий: тик паблишера — единственный владелец,
 `_on_write` в журнал только пишет, никогда не читает и не чистит. Уровни на том
 же такте: `jobs_seen`, `dups_seen`, `dups_same_capture`, `dups_tracked`,
-`repeats_frozen_xy`, `jobs_done` (`ctx.publish_metric`, объявлены в `configure`
-через `declare_metric`).
+`jobs_done` (`ctx.publish_metric`, объявлены в `configure` через
+`declare_metric`). `repeats_frozen_xy` ушёл из этого списка в 5.1b.
 
 ## Событие «задание выполнено» (Task 3.5)
 

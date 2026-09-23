@@ -189,6 +189,7 @@ def test_reset_clears_counters_and_duplicate_memory() -> None:
     journal.reset()
     _send_job(journal, x_mm=300.0, y_mm=-210.0, ecap=100_000)
 
+    # Переписано 5.1b: ключ repeats_frozen_xy ушёл из SimJournal целиком.
     assert journal.counters() == {
         "jobs": 1,
         "dups": 0,
@@ -196,7 +197,6 @@ def test_reset_clears_counters_and_duplicate_memory() -> None:
         "reads": 0,
         "dups_same_capture": 0,
         "dups_tracked": 0,
-        "repeats_frozen_xy": 0,
     }
 
 

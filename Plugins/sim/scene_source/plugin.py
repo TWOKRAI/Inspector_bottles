@@ -100,13 +100,16 @@ _DEFAULT_MATCH_RADIUS_MM = 5.0
 _DEFAULT_DUP_WINDOW_S = 10.0  # тот же дефолт, что у SimJournal
 _RECENT_MAXLEN = 32
 
-#: Task 5.2 (контракт лида §2): правда на проводе — TruthLedger + пять уровней.
+#: Task 5.2 (контракт лида §2) + 5.1b (§3): правда на проводе — TruthLedger + шесть
+#: уровней (пятый исходный + ``truth_false_alarm_frozen_xy`` — причина «те же X/Y с
+#: новым энкодером», переехавшая сюда из SimJournal, Контракт лида 5.1b §2).
 _DEFAULT_TRUTH_PUBLISH_S = 1.0
 _TRUTH_LEVELS: tuple[str, ...] = (
     "truth_caught",
     "truth_dup_jobs",
     "truth_missed",
     "truth_false_alarm",
+    "truth_false_alarm_frozen_xy",
     "truth_on_belt",
 )
 
@@ -454,7 +457,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
                         self._removed.append((now, passport))
             outcome, object_id, residual_mm = result.outcome, result.object_id, result.residual_mm
             with self._truth_lock:
-                self._truth.on_match(result)
+                # Task 5.1b (контракт лида §3): job идёт в TruthLedger в ОБЕИХ ветках
+                # (движок собран/не собран) — причина «те же X/Y» считается по job.t
+                # независимо от того, нашёлся ли кандидат в match_job.
+                self._truth.on_match(result, job)
             entry = {"index": job.index, "outcome": outcome, "object_id": object_id, "residual_mm": residual_mm}
             with self._lock:
                 self._recent.append(entry)
@@ -524,10 +530,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 self._truth.on_despawn(object_id)
 
     def _publish_truth_metrics(self) -> None:
-        """Task 5.2 (контракт лида §2): пять уровней `truth_*` на своём такте, не чаще
-        раза в `truth_publish_s` (``publish_metric`` просит звать на своём такте, а не на
-        кадре — см. ``multiprocess_framework/modules/process_module/plugins/base.py``).
-        Первый `produce()` публикует (``_truth_last_pub is None``)."""
+        """Task 5.2 (контракт лида §2) + 5.1b (§3): шесть уровней `truth_*` на своём
+        такте, не чаще раза в `truth_publish_s` (``publish_metric`` просит звать на
+        своём такте, а не на кадре — см. ``multiprocess_framework/modules/
+        process_module/plugins/base.py``). Первый `produce()` публикует
+        (``_truth_last_pub is None``)."""
         now = time.monotonic()
         if self._truth_last_pub is not None and (now - self._truth_last_pub) < self._truth_publish_s:
             return
@@ -538,6 +545,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._ctx.publish_metric("truth_dup_jobs", counters["dup_jobs"])
         self._ctx.publish_metric("truth_missed", counters["missed"])
         self._ctx.publish_metric("truth_false_alarm", counters["false_alarm"])
+        self._ctx.publish_metric("truth_false_alarm_frozen_xy", counters["false_alarm_frozen_xy"])
         self._ctx.publish_metric("truth_on_belt", counters["on_belt"])
 
     def _warn_factory_error(self, exc: Exception) -> None:
