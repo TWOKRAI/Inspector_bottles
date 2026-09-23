@@ -48,6 +48,15 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 Паспорта объектов публикуются в общий мир (``sim.objects``) ТОЛЬКО когда меняется
 МНОЖЕСТВО активных ``object_id`` (спавн/деспавн) — позиция в мир не пишется,
 её считает потребитель из энкодера и ``passport.spawn_encoder`` (LS-009).
+
+**Task 3.6 — фон-текстура ленты.** Ключ конфига ``background_texture`` (путь,
+относительный — от корня репозитория, тем же ``_resolve_preset_path``, что и
+``preset_path``) читается через ``imread_unicode``/BGR->RGB и передаётся в
+``SceneCompositor`` как ``background_tile``. Файл не читается (нет файла, битые байты)
+— ровно один ``ctx.log_error`` в ``configure()``, движок остаётся живым на сплошном
+фоне (``background_bgr``); из ``produce()`` по этой причине ошибок нет. Ветка «движок
+недоступен» (``_background_only_frame``) текстуру не использует — это отдельный,
+более редкий отказ (каталог классов недоступен), out of scope для 3.6.
 """
 
 from __future__ import annotations
@@ -67,6 +76,7 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
+from Services.dataset_gen.core.catalog import imread_unicode
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
 
 if TYPE_CHECKING:
@@ -177,6 +187,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._last_object_ids: frozenset[str] = frozenset()
         self._frame_count = 0
 
+        # Task 3.6: фон-текстура строится ДО try-блока сборки движка — нечитаемый файл
+        # не должен ронять движок целиком (он остаётся живым на сплошном фоне).
+        background_texture = cfg.get("background_texture")
+        background_tile = self._load_background_tile(ctx, background_texture)
+
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
         try:
@@ -184,7 +199,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
             factory = ObjectFactory(preset)
             self._spawner = ObjectSpawner(factory, scene_length_mm=scene_length_mm, **spawner_kwargs)
             self._compositor = SceneCompositor(
-                self._spawner, px_per_mm=px_per_mm, belt_y_px=belt_y_px, background_bgr=_BACKGROUND_BGR
+                self._spawner,
+                px_per_mm=px_per_mm,
+                belt_y_px=belt_y_px,
+                background_bgr=_BACKGROUND_BGR,
+                background_tile=background_tile,
             )
         except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()
             ctx.log_error(
@@ -192,9 +211,15 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 "кадры будут только фоном"
             )
 
+        if background_tile is not None:
+            tile_h, tile_w = background_tile.shape[:2]
+            background_desc = f"текстура ({background_texture}, {tile_w}x{tile_h})"
+        else:
+            background_desc = f"цвет {_BACKGROUND_BGR}"
+
         ctx.log_info(
             f"scene_source: {self._width}x{self._height}, px_per_mm={px_per_mm}, belt_y_px={belt_y_px}, "
-            f"spawner_kwargs={spawner_kwargs}, preset_path={preset_path!r}, "
+            f"spawner_kwargs={spawner_kwargs}, preset_path={preset_path!r}, фон={background_desc}, "
             f"движок={'готов' if self._compositor is not None else 'недоступен (fallback на фон)'}"
         )
 
@@ -205,6 +230,26 @@ class SceneSourcePlugin(ProcessModulePlugin):
         if preset_path is None or Path(preset_path).is_absolute():
             return preset_path
         return str((_REPO_ROOT / preset_path).resolve())
+
+    def _load_background_tile(self, ctx: PluginContext, texture_path: str | None) -> np.ndarray | None:
+        """Загрузить фон-текстуру (Task 3.6): `None` -> `None`; путь резолвится от
+        корня репозитория тем же `_resolve_preset_path`, что и `preset_path`. ЛЮБАЯ
+        причина нечитаемости (нет файла — `OSError` из `np.fromfile`, битые байты —
+        `ValueError` из `imread_unicode`) даёт ровно один `ctx.log_error` и откат на
+        `None` (сплошной фон) — этот метод НЕ внутри try/except сборки движка, сбой
+        текстуры не должен глушить остальную сборку."""
+        if texture_path is None:
+            return None
+        resolved = self._resolve_preset_path(texture_path)
+        try:
+            bgr = imread_unicode(resolved, cv2.IMREAD_COLOR)
+            return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — откат на цвет, не падение
+            ctx.log_error(
+                f"scene_source: фон-текстура недоступна (background_texture={resolved!r}): {exc!r} — "
+                "используется сплошной фон"
+            )
+            return None
 
     def start(self, ctx: PluginContext) -> None:
         """RUNNING: подписаться на мир. Без ``state_proxy`` — энкодер остаётся в spawn."""

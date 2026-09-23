@@ -7,6 +7,15 @@
 (плагин), НЕ этот класс (LS-009).
 
 `render()` НЕ зовёт `spawner.tick()` — тик (часы + rng) принадлежит вызывающему.
+
+**Фон-текстура (Task 3.6).** `background_tile` — необязательный RGB uint8 тайл; если
+задан, фон сцены — этот тайл, прокрученный по X на `encoder_to_offset_mm(now_encoder,
+0.0) * px_per_mm` (та же формула и тот же `px_per_mm`, что у объектов — это единственный
+инвариант, ради которого задача существует: разойдись формулы, диски поедут «по льду»
+относительно ленты). Тайл не растягивается под кадр — уже кадра значит повторение
+(циклический индекс по модулю ширины тайла). По Y тайл кладётся симметрично относительно
+`belt_y_px`; строки выше/ниже полосы тайла закрашиваются `background_bgr`, как и раньше.
+`background_tile=None` — поведение байт в байт как до Task 3.6 (сплошная заливка).
 """
 
 from __future__ import annotations
@@ -24,11 +33,14 @@ class SceneCompositor:
 
     Pre: `px_per_mm > 0`... — не проверяется явно (числовой параметр камеры, не
     пользовательский конфиг с валидацией на границе; проверка — Task 3.4/Ф4, если
-    понадобится).
+    понадобится). `background_tile`, если задан, — RGB uint8 `(th, tw, 3)`,
+    `th >= 1`, `tw >= 1` — иное бросает `ValueError` в конструкторе, называя
+    проблемное свойство тайла (форма/dtype/каналы).
     Post: `render()` не мутирует `spawner` (не зовёт `tick()`/`active_objects()` кроме
     чтения); пустой спавнер даёт кадр одного фона, без исключений; возвращённые паспорта —
     объекты, чей bbox пересекается с `camera_rect` (частично видимый считается видимым),
-    в порядке спавна (порядок `spawner.active_objects()`).
+    в порядке спавна (порядок `spawner.active_objects()`). `background_tile=None` —
+    рендер идентичен байт в байт версии до Task 3.6.
     """
 
     def __init__(
@@ -37,11 +49,13 @@ class SceneCompositor:
         px_per_mm: float,
         belt_y_px: float,
         background_bgr: tuple[int, int, int] = (60, 60, 60),
+        background_tile: np.ndarray | None = None,
     ) -> None:
         self._spawner = spawner
         self._px_per_mm = px_per_mm
         self._belt_y_px = belt_y_px
         self._background_bgr = background_bgr
+        self._background_tile = None if background_tile is None else _validate_background_tile(background_tile)
 
     def render(
         self, now_encoder: float, camera_rect: tuple[float, float, float, float]
@@ -57,6 +71,19 @@ class SceneCompositor:
         frame[:, :, 1] = g
         frame[:, :, 2] = b
 
+        if self._background_tile is not None:
+            tile = self._background_tile
+            th, tw = tile.shape[:2]
+            # Тот же px_per_mm и тот же encoder_to_offset_mm, что у объектов (см.
+            # докстринг модуля) — начало отсчёта тайла (spawn_enc=0.0) фиксировано, не
+            # завязано на конкретный объект.
+            shift_px = int(round(float(encoder_to_offset_mm(now_encoder, 0.0) * self._px_per_mm)))
+            cols = (np.arange(w) + int(round(x_px)) - shift_px) % tw
+            top = int(round(self._belt_y_px - th / 2))
+            rows = np.arange(h) + int(round(y_px)) - top
+            valid = (rows >= 0) & (rows < th)
+            frame[valid] = tile[rows[valid]][:, cols]
+
         passports: list[ObjectPassport] = []
         for obj in self._spawner.active_objects():
             sprite = obj.render()
@@ -69,6 +96,27 @@ class SceneCompositor:
             frame = composite(frame, sprite, (cx, cy))
             passports.append(obj.passport)
         return frame, passports
+
+
+def _validate_background_tile(tile: np.ndarray) -> np.ndarray:
+    """Проверить `background_tile` (Task 3.6) и вернуть его копию.
+
+    Post: RGB uint8 `(th, tw, 3)`, `th >= 1`, `tw >= 1` — иное `ValueError`,
+    называющий конкретное проблемное свойство (форма/dtype/каналы/ширина/высота).
+    """
+    if not isinstance(tile, np.ndarray):
+        raise ValueError(f"background_tile: ожидался np.ndarray, получено {type(tile)!r}")
+    if tile.dtype != np.uint8:
+        raise ValueError(f"background_tile: ожидался dtype=uint8, получено dtype={tile.dtype}")
+    if tile.ndim != 3:
+        raise ValueError(f"background_tile: ожидался ndim=3 (H, W, 3), получено ndim={tile.ndim}")
+    if tile.shape[2] != 3:
+        raise ValueError(f"background_tile: ожидалось 3 канала (RGB), получено shape[2]={tile.shape[2]}")
+    if tile.shape[0] < 1:
+        raise ValueError(f"background_tile: высота (shape[0]) должна быть >= 1, получено {tile.shape[0]}")
+    if tile.shape[1] < 1:
+        raise ValueError(f"background_tile: ширина (shape[1]) должна быть >= 1, получено {tile.shape[1]}")
+    return tile.copy()
 
 
 def _bbox_intersects(cx: float, cy: float, sw: int, sh: int, w: int, h: int) -> bool:
