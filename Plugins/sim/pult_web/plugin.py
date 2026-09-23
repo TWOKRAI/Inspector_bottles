@@ -38,6 +38,12 @@ Task 2.3b плана ``plans/line-sim/phase-2-belt-truth.md``. Форма сер
 аргумента ждал бы EOF, которого на keep-alive-подобном соединении браузера
 может не быть — зависание вместо ответа (TRAPS плана).
 
+**Task 5.3a — «правда сцены».** Второй ``DeviceHubClient`` (``target_process=
+scene_process``, дефолт ``"camera"``) — ``GET /api/truth`` → ``truth.status``,
+``POST /api/truth/reset`` → ``truth.reset``, оба ТОЛЬКО в процесс сцены;
+``belt.*``/``sim_robot.*`` по-прежнему в ``robot``. Ответ — то же правило, что
+у ``/api/journal`` (dict без ``status: "error"`` → 200 как есть, иначе 504).
+
 Страница — один строковый constant (``_PAGE_TEMPLATE``, ``str.format`` с
 ``mjpeg_url`` — не templating-движок и не файл, ровно DESIGN п.4). Опрос
 ``GET /api/status`` раз в 250 мс, dead-man jog на стороне браузера
@@ -67,6 +73,7 @@ _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8092
 _DEFAULT_MJPEG_URL = "http://127.0.0.1:8091/"
 _DEFAULT_ROBOT_PROCESS = "robot"
+_DEFAULT_SCENE_PROCESS = "camera"
 _DEFAULT_TIMEOUT_S = 1.0
 
 #: Тело запроса больше этого — 413, ДО чтения (DESIGN п.3 плана).
@@ -80,6 +87,14 @@ _COMMAND_BY_PATH = {
     "/api/jog": "belt.jog",
     "/api/calibrate": "belt.calibrate",
     "/api/journal/reset": "sim_robot.journal_reset",
+}
+
+#: Путь -> команда ``truth.*`` (Task 5.3a, §1) — адресат ТОЛЬКО процесс сцены,
+#: не ``robot``. Отдельная карта, чтобы ``do_POST`` мог выбрать правильный
+#: клиент (``pult._scene_client``, а не ``pult._client``) по тому, в какой из
+#: двух карт нашёлся путь.
+_SCENE_COMMAND_BY_PATH = {
+    "/api/truth/reset": "truth.reset",
 }
 
 #: Страница пульта — Русские подписи, dead-man на jog-кнопках, опрос статуса.
@@ -134,6 +149,12 @@ button {{ font-size: 1.2em; padding: 4px 12px; }}
 <div class="row">
   <div id="journal">журнал недоступен</div>
   <button id="btnJournalReset">Сброс счётчиков</button>
+</div>
+
+<h2>Правда сцены</h2>
+<div class="row">
+  <div id="truth">правда недоступна</div>
+  <button id="btnTruthReset">Сброс правды</button>
 </div>
 
 <script>
@@ -274,6 +295,40 @@ document.getElementById("btnJournalReset").onclick = function () {{
 }};
 setInterval(pollJournal, 1000);
 pollJournal();
+
+// Правда сцены (Ф5.3a) — только показ, никакой логики подсчёта на пульте:
+// счётчики считает TruthLedger на стороне camera, пульт показывает counters как есть.
+function fmtErr(v) {{
+  return (v === null || v === undefined) ? "—" : v.toFixed(2);
+}}
+function getTruth() {{
+  return fetch("/api/truth").then(function (r) {{
+    return r.ok ? r.json() : Promise.reject(new Error("http " + r.status));
+  }});
+}}
+function pollTruth() {{
+  getTruth().then(function (t) {{
+    if (t && t.status === "ok") {{
+      var c = t.counters;
+      document.getElementById("truth").textContent =
+        "поймано " + c.caught + " (брак " + c.caught_defect + " / годных " + c.caught_ok + ")" +
+        " · пропущено " + c.missed + " (брак " + c.missed_defect + " / годных " + c.missed_ok + ")" +
+        " · лишних заданий " + c.dup_jobs +
+        " · ложных тревог " + c.false_alarm + " (повтор кадра " + c.false_alarm_frozen_xy + ")" +
+        " · на ленте " + c.on_belt +
+        " · ошибка захвата ср " + fmtErr(c.pick_error_mean_mm) + " / макс " + fmtErr(c.pick_error_max_mm) + " мм";
+    }} else {{
+      document.getElementById("truth").textContent = "правда недоступна";
+    }}
+  }}).catch(function () {{
+    document.getElementById("truth").textContent = "правда недоступна";
+  }});
+}}
+document.getElementById("btnTruthReset").onclick = function () {{
+  post("/api/truth/reset", {{}}).then(pollTruth);
+}};
+setInterval(pollTruth, 1000);
+pollTruth();
 </script>
 </body>
 </html>
@@ -300,9 +355,10 @@ class _PultHTTPServer(http.server.ThreadingHTTPServer):
 def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHandler]:
     """Фабрика класса-обработчика, замкнутого на плагин (см. докстринг ``mjpeg_sink``).
 
-    Обработчик обращается только к ``pult._client``/``pult._page_bytes`` через
-    замыкание — доступа к ``PluginContext`` у него нет, звать ``ctx.log_*``/
-    ``record_metric`` с чужого потока незачем (тот же довод, что у ``mjpeg_sink``).
+    Обработчик обращается только к ``pult._client``/``pult._scene_client``/
+    ``pult._page_bytes`` через замыкание — доступа к ``PluginContext`` у него
+    нет, звать ``ctx.log_*``/``record_metric`` с чужого потока незачем (тот же
+    довод, что у ``mjpeg_sink``).
     """
 
     class _PultHandler(http.server.BaseHTTPRequestHandler):
@@ -326,9 +382,9 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
 
-        def _dispatch(self, command: str, args: dict) -> None:
-            """Форвард команды в ``robot`` и ответ клиенту как есть (DESIGN п.3)."""
-            result = pult._client.request(command, args, timeout=pult._timeout_s)
+        def _dispatch(self, command: str, args: dict, client: DeviceHubClient) -> None:
+            """Форвард команды выбранному клиенту (``robot`` или сцена) и ответ как есть (DESIGN п.3)."""
+            result = client.request(command, args, timeout=pult._timeout_s)
             if not isinstance(result, dict):
                 result = {"status": "error", "message": "bad_response"}
             if result.get("status") == "error":
@@ -376,10 +432,13 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                     return
                 return
             if self.path == "/api/status":
-                self._dispatch("belt.status", {})
+                self._dispatch("belt.status", {}, pult._client)
                 return
             if self.path == "/api/journal":
-                self._dispatch("sim_robot.journal", {})
+                self._dispatch("sim_robot.journal", {}, pult._client)
+                return
+            if self.path == "/api/truth":
+                self._dispatch("truth.status", {}, pult._scene_client)
                 return
             self._reply_json(404, {"ok": False, "error": "not_found"})
 
@@ -388,6 +447,10 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 self._reply_json(403, {"ok": False, "error": "forbidden_host"})
                 return
             command = _COMMAND_BY_PATH.get(self.path)
+            client = pult._client
+            if command is None:
+                command = _SCENE_COMMAND_BY_PATH.get(self.path)
+                client = pult._scene_client
             if command is None:
                 self._reply_json(404, {"ok": False, "error": "not_found"})
                 return
@@ -400,7 +463,7 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 status, payload = error
                 self._reply_json(status, payload)
                 return
-            self._dispatch(command, args)
+            self._dispatch(command, args, client)
 
     return _PultHandler
 
@@ -424,9 +487,11 @@ class PultWebPlugin(ProcessModulePlugin):
         self._port: int = cfg.get("port", _DEFAULT_PORT)
         self._mjpeg_url: str = cfg.get("mjpeg_url", _DEFAULT_MJPEG_URL)
         self._robot_process: str = cfg.get("robot_process", _DEFAULT_ROBOT_PROCESS)
+        self._scene_process: str = cfg.get("scene_process", _DEFAULT_SCENE_PROCESS)
         self._timeout_s: float = float(cfg.get("timeout_s", _DEFAULT_TIMEOUT_S))
 
         self._client = DeviceHubClient(ctx, target_process=self._robot_process, default_timeout=self._timeout_s)
+        self._scene_client = DeviceHubClient(ctx, target_process=self._scene_process, default_timeout=self._timeout_s)
         self._page_bytes = _PAGE_TEMPLATE.format(mjpeg_url=self._mjpeg_url).encode("utf-8")
 
         self._server: http.server.ThreadingHTTPServer | None = None
@@ -436,7 +501,7 @@ class PultWebPlugin(ProcessModulePlugin):
 
         ctx.log_info(
             f"pult_web: конфиг принят, {self._host}:{self._port}, robot={self._robot_process}, "
-            f"mjpeg_url={self._mjpeg_url}"
+            f"scene={self._scene_process}, mjpeg_url={self._mjpeg_url}"
         )
 
     def start(self, ctx: PluginContext) -> None:

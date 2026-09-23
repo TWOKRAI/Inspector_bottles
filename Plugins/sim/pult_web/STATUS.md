@@ -1,13 +1,14 @@
 # Plugins/sim/pult_web — STATUS
 
-**Состояние: сделано (Task 2.3b плана line-sim, оффлайн-часть).**
+**Состояние: сделано (Task 5.3a плана line-sim — правда сцены на пульте).**
 
-**Обновлено:** 2026-09-22 — Task 2.3b, ревью итерация 1, ветка `feat/line-sim-2.3b-pult`.
+**Обновлено:** 2026-09-23 — Task 5.3a, ветка `feat/line-sim-5.3a`.
 
 | Что | Состояние |
 |---|---|
 | `plugin.py` — `PultWebPlugin` | есть: `configure`/`start`/`shutdown`, HTTP API (`GET /`, `GET /api/status`, `POST /api/run|stop|jog|calibrate`), форвард через `DeviceHubClient` |
 | `GET /api/journal` / `POST /api/journal/reset` (Task 5.1) | есть: форвард `sim_robot.journal`/`sim_robot.journal_reset` как есть; страница — блок «Задания от прототипа», опрос 1 с, без логики подсчёта; 2/2 REDS `tests/test_pult_journal_routes.py` зелёные |
+| `GET /api/truth` / `POST /api/truth/reset` (Task 5.3a) | есть: второй `DeviceHubClient(target_process=scene_process)`, форвард `truth.status`/`truth.reset` как есть; страница — блок «Правда сцены», опрос 1 с; 11/11 REDS `tests/test_acceptance_5_3a.py` зелёные |
 | Занятый порт | есть: `_PultHTTPServer.__init__` биндит синхронно, `OSError` → `report_error`, `state="error"`, процесс живёт |
 | bad_json/404/413 | есть: три отказа ДО обращения к `robot`, `robot` не вызывается ни разу |
 | `status: "error"` от `robot` → 504 | есть |
@@ -20,9 +21,20 @@
 | Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
 | Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
 | Страница: порядок jog→stop | есть: `jogStop` дожидается промиса последнего `/api/jog` |
-| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_pult_web_hazards.py` — 10 авторских (конкурентный jog, shutdown с реальным медленным запросом, медленный robot, 5× JS страницы через `node`/`page_offline.mjs`: jogStop no-op, мультитач, порядок jog→stop при медленном robot, «robot не отвечает» на 504 и на 200+`ok:false`; localhost-страж, content-type-страж) |
+| Тесты | `tests/test_pult_web.py` — 7 слепых приёмочных независимого тестера (в worktree на коммите 2.3a); `tests/test_acceptance_5_3a.py` — 11 слепых приёмочных (§1 маршруты + §2 страница, Task 5.3a, в worktree на коммите 6f94201f); `tests/test_pult_web_hazards.py` — 14 авторских (12 из 2.3b/5.1 + 2 новых Task 5.3a: медленная правда не блокирует status/journal, конкурентный сброс+опрос правды доходит ровно N раз каждый) |
 
 ## Долг / открытые вопросы
+
+- **Task 5.3a сломала 5 тестов вне своих `FILES`** (`tests/test_pult_web.py` —
+  3, `tests/test_pult_journal_routes.py` — 2): их фикстуры берут
+  `_FakeDeviceHubClient.instances[-1]`, полагая, что плагин создаёт РОВНО один
+  `DeviceHubClient`. Второй клиент (`_scene_client`, Task 5.3a) теперь
+  создаётся ВТОРЫМ в `configure()` — `instances[-1]` стал сценой, а не
+  `robot`. `tests/test_acceptance_5_3a.py` эту ловушку обошёл заранее
+  (`_client_for(target_process)`, см. его докстринг). Разработчик не правил
+  два сломанных файла — они вне списка `FILES` задачи; чинит либо ведущий,
+  либо отдельная задача (перевести обе фикстуры на выбор по
+  `target_process`, как в `test_acceptance_5_3a.py`).
 
 - **Страница проверяется через `node:vm`, не браузером** — семантика
   pointer-событий на тач-экране и порядок `blur`/`visibilitychange` при
