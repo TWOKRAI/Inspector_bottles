@@ -169,3 +169,5 @@ handoff `53a1c564`): она снимает числа останова (`otel fl
 4. Живой стенд — ведущий, свободный порт, числа.
 5. `reviewer` — синхронно.
 6. Закрытие: строки L-1/L-2 в `QUEUE.md`, память `project_graceful_stop_debt` переписана.
+
+> **2026-09-24 — продолжение:** долги 4–6 и L-5 (1)–(3) взяты планом [`lifecycle-stop-ownership`](lifecycle-stop-ownership.md) (Ф1, до gui-service 1.3a); корень L-6 — в `transport-single-policy`.

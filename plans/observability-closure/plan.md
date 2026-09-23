@@ -357,3 +357,5 @@ ObservabilityReadback (протокол, 4 менеджера) ──► introsp
 ## §12. Чего в плане сознательно нет
 
 Экспорт OTLP/`/metrics` (этап 7, своя ветка); группировка ошибок (9.1); fd-перехват stderr (9.2, цена названа); адресация чисел по тегам (Р-2б); слияние модулей; рендер GUI сверх qt-smoke; трассировка (спаны) за пределами существующего `frame_trace`-стока.
+
+> **Обратная ссылка 2026-09-24 (`lifecycle-stop-ownership`):** план правит `process_manager_process.py` (`_cmd_system_shutdown`) и `process_registry.py::stop_many` — те же файлы, что closure 4.3b и далее. Мержить маленькими коммитами, перед мержем — `git log main..<соседа>`. Долг 4.8 «останов стенда через terminate» на пути `harness.stop()` закрыт L-2 (`1d37dd24`); путь `system.shutdown` — Task 1.1 того плана.

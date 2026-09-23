@@ -256,3 +256,5 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 - **Тестовый канон (STRICT, `.claude/CLAUDE.md`):** независимый `tester` на КАЖДОЙ задаче, синхронно,
   в worktree на пред-коммите, только по acceptance criteria; break-injection по каждому свойству;
   `reviewer` синхронно после каждой задачи; на 2.2 — `reviewer` в режиме security обязателен.
+
+> **Обратная ссылка 2026-09-24 (`lifecycle-stop-ownership`):** кнопка «стоп» Пульта пойдёт через `system.shutdown`, а этот путь сегодня метку «читатель ушёл» не ставит (живьём 5.83 с и `terminate` renderer'а в 1 из 3). Ф1 того плана (Task 1.1) — предусловие Task 1.3a здесь.
