@@ -56,6 +56,8 @@ processes:
         # не передал явно.
         jog_timeout_ms: 500
         jog_freq_hz: 10.0
+        # Task 3.5: куда уходит событие «задание выполнено» (scene.job_done) — процесс сцены.
+        scene_process: camera
 
   - process_name: camera
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
@@ -99,6 +101,8 @@ processes:
         # background_texture: data/line_sim/belt_tile.png
         defect_probability: 0.25
         stale_ms: 500
+        # Task 3.5: точка сцены «путь 0, центр полосы» в координатах робота — калибровка сим-варианта (decisions log 2026-09-23).
+        geometry: {origin_x_mm: 0.0, origin_y_mm: 0.0}
 
   - process_name: mjpeg
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
