@@ -129,6 +129,7 @@ def test_subscribe_receives_delta_list() -> None:
     try:
         client = SocketClient(host.host, host.port, sender="gui")
         client.connect()
+        client.request({"type": "command", "command": "ping", "sender": "gui"}, timeout=2.0)  # хост принял сокет
         proxy = RemoteStateProxy(client, dispatch=lambda fn: fn())
         received: list = []
         proxy.subscribe("a.*", received.append, sync=False)
@@ -161,6 +162,7 @@ def test_subscription_survives_reconnect() -> None:
 
         client.close()
         client.connect()
+        client.request({"type": "command", "command": "ping", "sender": "gui"}, timeout=2.0)  # хост принял сокет
         proxy.on_reconnected()
 
         delta = Delta("a.c", old_value=None, new_value=2, source="host").to_dict()
@@ -184,6 +186,7 @@ def test_callback_runs_via_dispatcher_not_reader_thread() -> None:
     try:
         client = SocketClient(host.host, host.port, sender="gui")
         client.connect()
+        client.request({"type": "command", "command": "ping", "sender": "gui"}, timeout=2.0)  # хост принял сокет
 
         jobs: Queue = Queue()
         dispatch_threads: list = []

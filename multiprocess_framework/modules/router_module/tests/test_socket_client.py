@@ -136,8 +136,9 @@ def test_request_roundtrip_under_one_second() -> None:
     try:
         client = SocketClient(host.host, host.port, sender="gui")
         client.connect()
+        ping = {"type": "command", "command": "ping", "sender": "gui"}
         t0 = time.monotonic()
-        resp = _call_with_deadline(lambda: client.request({"type": "command", "command": "ping", "sender": "gui"}), timeout=5.0)
+        resp = _call_with_deadline(lambda: client.request(ping), timeout=5.0)
         elapsed = time.monotonic() - t0
         assert elapsed < 1.0, f"roundtrip {elapsed:.3f}с — дольше секунды"
         assert resp["success"] is True
@@ -173,6 +174,7 @@ def test_push_without_request_id_reaches_listener() -> None:
         client = SocketClient(host.host, host.port, sender="gui")
         client.add_push_listener(received.append)
         client.connect()
+        client.request({"type": "command", "command": "ping", "sender": "gui"}, timeout=2.0)  # хост принял сокет
 
         host.push({"command": "state.changed", "note": "без request_id — это push"})
 
