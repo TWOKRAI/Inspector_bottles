@@ -213,3 +213,36 @@ def test_resubscribe_keeps_exclude_self() -> None:
         assert resub == {"mine.*": [], "theirs.*": [new]}
     finally:
         host.close()
+
+
+def test_failed_refresh_after_success_drops_old_stamp() -> None:
+    """F1: успешный refresh, затем неудачный — следующее исходящее уходит БЕЗ _fence,
+    старая пара (inc=3, epoch=7) не штампуется."""
+    ok = {"value": True}
+
+    def _responder(msg: Dict[str, Any]) -> Dict[str, Any]:
+        if msg.get("command") == "supervision.status" and ok["value"]:
+            result: Dict[str, Any] = {
+                "success": True,
+                "result": {"epoch": 7, "processes": {"pult": {"incarnation": 3}}},
+            }
+        elif msg.get("command") == "supervision.status":
+            result = {"success": False, "error": "supervisor down"}
+        else:
+            result = {"success": True, "result": {}}
+        return {"type": "response", "request_id": msg["request_id"], "result": result}
+
+    host = _FakeHost(responder=_responder)
+    try:
+        client = _client(host)
+        sender = RemoteCommandSender(client, name="pult")
+        sender.refresh_fence()
+        client.send_nowait({"type": "command", "command": "first"})
+        assert _last(host, "first").get("_fence") == {"sender": "pult", "inc": 3, "epoch": 7}
+
+        ok["value"] = False
+        sender.refresh_fence()
+        client.send_nowait({"type": "command", "command": "second"})
+        assert "_fence" not in _last(host, "second"), "старая пара пережила неудачный refresh (F1)"
+    finally:
+        host.close()

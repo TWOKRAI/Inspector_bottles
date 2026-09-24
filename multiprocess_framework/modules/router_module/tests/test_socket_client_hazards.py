@@ -206,3 +206,42 @@ def test_push_listener_exception_does_not_kill_reader() -> None:
         assert client._reader is not None and client._reader.is_alive()
     finally:
         host.close()
+
+
+def test_out_of_order_replies_reach_their_own_requests() -> None:
+    """I2: два request в ожидании одновременно, хост отвечает НЕ по порядку — каждый
+    получает свой ответ (матчинг по request_id, а не «первый ожидающий»)."""
+    held: Dict[str, Any] = {}
+    host: _FakeHost
+
+    def _reply(msg: Dict[str, Any]) -> Dict[str, Any]:
+        return {"request_id": msg["request_id"], "result": {"success": True, "result": {"tag": msg["tag"]}}}
+
+    def _responder(msg: Dict[str, Any]) -> None:
+        if "first" not in held:
+            held["first"] = msg  # держим первый ответ, пока не придёт второй запрос
+            return None
+        host.push(_reply(msg))  # сначала — второму
+        host.push(_reply(held["first"]))  # потом — первому
+        return None
+
+    host = _FakeHost(responder=_responder)
+    try:
+        client = _connected(host)
+        results: Dict[str, Any] = {}
+
+        def _call(tag: str) -> None:
+            results[tag] = client.request({"command": "echo", "tag": tag}, timeout=3.0)
+
+        ta = threading.Thread(target=_call, args=("A",), daemon=True)
+        ta.start()
+        assert _wait(lambda: len(host.received) == 1), "первый запрос не дошёл"
+        tb = threading.Thread(target=_call, args=("B",), daemon=True)
+        tb.start()
+        ta.join(5.0)
+        tb.join(5.0)
+        assert not ta.is_alive() and not tb.is_alive(), "зависание вместо ответа"
+        assert results["A"] == {"success": True, "result": {"tag": "A"}}
+        assert results["B"] == {"success": True, "result": {"tag": "B"}}
+    finally:
+        host.close()
