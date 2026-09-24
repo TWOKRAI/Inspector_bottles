@@ -37,6 +37,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 ## Секции
 
 ### Feedback
+- [Сигнал «отпусти соседа» — в момент факта](feedback_unblocking_signal_at_the_moment_of_fact.md) — метка после всей эскалации: 13 тестов зелёные, живьём 5.7 с как до правки
 - [Новый план — среди соседей](feedback_a_new_plan_must_be_placed_among_its_neighbours.md) — таблица владения + обратные ссылки в чужие планы
 
 ### User
