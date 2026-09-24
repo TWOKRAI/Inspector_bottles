@@ -18,9 +18,24 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, List, Optional
 
+from multiprocess_framework.modules.frontend_module.bridge.remote_frame_source import (
+    FRAMES_PUSH,
+    FRAMES_STATS,
+    FRAMES_SUBSCRIBE,
+    FRAMES_UNSUBSCRIBE,
+    build_frame_descriptor,
+)
 from multiprocess_prototype.frontend.headless_process import HeadlessGuiProcess
+
+
+def _merge_args(data: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Аргументы команды: data-словарь (generic command-путь) + kwargs (как у ui.tap)."""
+    args = dict(data) if isinstance(data, dict) else {}
+    args.update(kwargs or {})
+    return args
 
 
 class FrameBridge:
@@ -47,7 +62,16 @@ class FrameBridge:
         Post: подписчиков нет; ``bseq`` = 0; ``sent_total`` = 0; ``errors`` = 0;
               ни одного вызова ``router``.
         """
-        raise NotImplementedError
+        self._router = router
+        self._name = name
+        self._seqlock = bool(seqlock)
+        self._owner_incarnation = bool(owner_incarnation)
+        self._loan_protocol = bool(loan_protocol)
+        self._lock = threading.Lock()
+        self._subs: Dict[str, Dict[str, Any]] = {}
+        self._bseq = 0
+        self._sent_total = 0
+        self._errors = 0
 
     def cmd_subscribe(self, data: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
         """``frames.subscribe {"subscriber": str, "senders": list[str] | None}``.
@@ -63,7 +87,25 @@ class FrameBridge:
               ``senders`` (``None`` либо ключ отсутствует — все отправители). Повторный
               вызов с тем же адресом заменяет фильтр, счётчик ``sent`` адреса сохраняется.
         """
-        raise NotImplementedError
+        if self._loan_protocol:
+            return {
+                "success": False,
+                "reason": "FW_SHM_LOAN_PROTOCOL включён: мост кадров не возвращает заём слота "
+                "(поток кадров под этим флагом — Task 2.1)",
+            }
+        args = _merge_args(data, kwargs)
+        subscriber = str(args.get("subscriber") or "").strip()
+        if not subscriber:
+            return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
+        senders = args.get("senders")
+        if senders is not None:
+            if not isinstance(senders, (list, tuple)) or not all(isinstance(x, str) for x in senders):
+                return {"success": False, "reason": f"senders — список строк либо None, получено {senders!r}"}
+            senders = set(senders)
+        with self._lock:
+            prev = self._subs.get(subscriber)
+            self._subs[subscriber] = {"senders": senders, "sent": prev["sent"] if prev else 0}
+        return {"success": True, "seqlock": self._seqlock, "owner_incarnation": self._owner_incarnation}
 
     def cmd_unsubscribe(self, data: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
         """``frames.unsubscribe {"subscriber": str}``.
@@ -74,7 +116,12 @@ class FrameBridge:
               эту команду при смерти сессии, подписка к тому моменту может быть снята.
               Пустой ``subscriber`` — ``{"success": False, "reason": str}``.
         """
-        raise NotImplementedError
+        subscriber = str(_merge_args(data, kwargs).get("subscriber") or "").strip()
+        if not subscriber:
+            return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
+        with self._lock:
+            removed = self._subs.pop(subscriber, None) is not None
+        return {"success": True, "subscriber": subscriber, "removed": removed}
 
     def cmd_stats(self, data: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
         """``frames.stats``.
@@ -85,7 +132,14 @@ class FrameBridge:
               ``unsubscribe``; ``errors`` — исключения ``send_async``; ``bseq`` — номер
               последнего построенного дескриптора (0 — ни одного).
         """
-        raise NotImplementedError
+        with self._lock:
+            return {
+                "success": True,
+                "sent": {addr: sub["sent"] for addr, sub in self._subs.items()},
+                "sent_total": self._sent_total,
+                "errors": self._errors,
+                "bseq": self._bseq,
+            }
 
     def on_drained(self, msgs: List[Dict[str, Any]]) -> None:
         """Разослать дескрипторы кадров из вычерпанной пачки.
@@ -104,7 +158,39 @@ class FrameBridge:
               ``errors += 1``, остальным подписчикам отправка продолжается, наружу не
               пробрасывается. Сообщение без кадра (нет ``shm_actual_name``) — пропускается.
         """
-        raise NotImplementedError
+        for msg in msgs:
+            if not isinstance(msg, dict):
+                continue
+            sender = msg.get("sender")
+            # Рассылка одного кадра — под lock: unsubscribe, вернувшийся на потоке
+            # message_processor, гарантирует «ни одного push'а после». send_async — постановка
+            # в очередь, не сеть; держать lock на ней дёшево.
+            with self._lock:
+                if not self._subs:
+                    return  # без подписчиков — как headless, ноль работы
+                targets = [a for a, sub in self._subs.items() if sub["senders"] is None or sender in sub["senders"]]
+                if not targets:
+                    continue
+                descriptor = build_frame_descriptor(sender, msg.get("data"), self._bseq + 1)
+                if descriptor is None:
+                    continue
+                self._bseq += 1
+                for addr in targets:
+                    message = {
+                        "type": "event",
+                        "targets": [addr],
+                        "queue_type": "observability",
+                        "command": FRAMES_PUSH,
+                        "sender": self._name,
+                        "data": descriptor,
+                    }
+                    try:
+                        self._router.send_async(message, priority="normal")
+                    except Exception:  # noqa: BLE001 — один отказ не рвёт рассылку остальным
+                        self._errors += 1
+                        continue
+                    self._subs[addr]["sent"] += 1
+                    self._sent_total += 1
 
 
 class BridgeGuiProcess(HeadlessGuiProcess):
@@ -120,11 +206,36 @@ class BridgeGuiProcess(HeadlessGuiProcess):
         в ``command_manager`` зарегистрированы ``frames.subscribe`` /
         ``frames.unsubscribe`` / ``frames.stats``; затем — дренаж базового класса.
         """
-        raise NotImplementedError
+        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
+
+        self.frame_bridge = FrameBridge(
+            self.router_manager,
+            self.name,
+            seqlock=is_enabled("FW_SHM_SEQLOCK"),
+            owner_incarnation=is_enabled("FW_SHM_OWNER_INCARNATION"),
+            loan_protocol=is_enabled("FW_SHM_LOAN_PROTOCOL"),
+        )
+        cm = self.command_manager
+        if cm is None:
+            self._log_error(
+                f"BridgeGuiProcess '{self.name}': нет command_manager — команды frames.* не зарегистрированы",
+                module="frame_bridge",
+            )
+        else:
+            specs = (
+                (FRAMES_SUBSCRIBE, self.frame_bridge.cmd_subscribe, "Подписать адрес на дескрипторы кадров gui"),
+                (FRAMES_UNSUBSCRIBE, self.frame_bridge.cmd_unsubscribe, "Снять подписку на дескрипторы кадров"),
+                (FRAMES_STATS, self.frame_bridge.cmd_stats, "Счётчики моста кадров по адресам"),
+            )
+            for command, handler, desc in specs:
+                cm.register_command(command, handler, metadata={"description": desc}, tags=["system"])
+        super()._init_application_threads()
 
     def _on_drained(self, msgs: list) -> None:
         """Post: ``self.frame_bridge.on_drained(msgs)``."""
-        raise NotImplementedError
+        bridge = getattr(self, "frame_bridge", None)
+        if bridge is not None:
+            bridge.on_drained(msgs)
 
 
 __all__ = ["BridgeGuiProcess", "FrameBridge"]

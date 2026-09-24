@@ -9,6 +9,7 @@ zero-copy + G.5.c re-check) за фасад модуля памяти БЕЗ с�
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any, Dict, Optional
 
@@ -45,7 +46,6 @@ class ShmFrameReader:
         track: bool = True,
     ) -> None:
         self._cache_enabled = bool(cache_enabled)
-        # gui-service 1.3: поведение (unregister после открытия) — стадия GREEN.
         self._track = bool(track)
         self._zero_copy = bool(zero_copy)
         self._cap = max(1, int(cap))
@@ -96,11 +96,42 @@ class ShmFrameReader:
             return self._read_cached(shm_actual_name, seqlock, copy, view_meta, _shm_mod)
 
         # Без кэша сегмент закрывается сразу → view повис бы: копия обязательна.
-        shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
+        shm = self._open(shm_actual_name, _shm_mod)
         try:
-            return read_single_frame(shm.buf, verify_seqlock=seqlock, copy=True)
+            return self._read_noting_generation(shm.buf, seqlock, True, view_meta)
         finally:
             shm.close()
+
+    def _open(self, shm_actual_name: str, shm_mod: Any) -> Any:
+        """Открыть сегмент по имени; при ``track=False`` — сразу снять его с учёта
+        ``resource_tracker`` этого процесса (иначе на выходе tracker удалит ЧУЖОЙ сегмент).
+        Регистрация в 3.12 бывает только на POSIX — там и снимаем."""
+        shm = shm_mod.SharedMemory(name=shm_actual_name, create=False)
+        if not self._track and os.name == "posix":
+            from multiprocessing import resource_tracker
+
+            resource_tracker.unregister(shm._name, "shared_memory")
+        return shm
+
+    @staticmethod
+    def _read_noting_generation(
+        buf: Any, seqlock: bool, copy: bool, view_meta: Optional[Dict[str, Any]]
+    ) -> Optional[Any]:
+        """Копия кадра; при ``copy=True`` и ``view_meta`` — поколение прочитанного кадра
+        в ``view_meta["_shm_generation"]`` (gui-service 1.3, дедуп у внешнего читателя).
+
+        Поколение известно, только если оно чётное и одинаково до и после чтения (писатель
+        между ними не начинал запись — поколение монотонно); иначе ``-1`` («не знаю»).
+        Без seqlock поколения нет — ``-1``."""
+        if not (copy and view_meta is not None):
+            return read_single_frame(buf, verify_seqlock=seqlock, copy=copy)
+        gen_before = read_generation(buf) if seqlock else -1
+        frame = read_single_frame(buf, verify_seqlock=seqlock, copy=copy)
+        gen = -1
+        if seqlock and gen_before % 2 == 0 and read_generation(buf) == gen_before:
+            gen = gen_before
+        view_meta["_shm_generation"] = gen
+        return frame
 
     def _read_cached(
         self,
@@ -117,7 +148,7 @@ class ShmFrameReader:
         lock → сериализован с чтением."""
         with self._lock:
             shm = self._open_cached_locked(shm_actual_name, shm_mod)
-            frame = read_single_frame(shm.buf, verify_seqlock=seqlock, copy=copy)
+            frame = self._read_noting_generation(shm.buf, seqlock, copy, view_meta)
             if frame is not None and not copy and view_meta is not None:
                 # Мета для G.5.c: поколение на момент чтения (сверка ПОСЛЕ использования
                 # view). Без seqlock поколения нет → -1 (re-check неактивен).
@@ -133,7 +164,7 @@ class ShmFrameReader:
         if shm is not None:
             self._cache[shm_actual_name] = shm  # move-to-end (LRU)
             return shm
-        shm = shm_mod.SharedMemory(name=shm_actual_name, create=False)
+        shm = self._open(shm_actual_name, shm_mod)
         self._cache[shm_actual_name] = shm
         # Ф7 G.5 ревью-фикс 1: эвикция с close() — ТОЛЬКО без zero-copy. Под zero-copy
         # view живёт ПОСЛЕ чтения (до конца обработки) и re-check читает его на другом

@@ -36,7 +36,12 @@ Push хоста подписчику
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Optional
+import logging
+import threading
+import time
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
+
+from multiprocess_framework.modules.shared_resources_module.memory.reader import ShmFrameReader
 
 if TYPE_CHECKING:
     import numpy as np
@@ -55,6 +60,18 @@ FRAMES_STATS: str = "frames.stats"
 DESCRIPTOR_KEYS: tuple = ("sender", "name", "idx", "seqlock", "bseq", "ts")
 #: Потолок размера дескриптора: ``len(json.dumps(descriptor).encode()) <= 300``.
 DESCRIPTOR_MAX_BYTES: int = 300
+
+#: Имя потока копирования (виден в дампах потоков Пульта).
+COPY_THREAD_NAME: str = "remote-frame-copy"
+
+_STAT_KEYS = ("received", "delivered", "dup", "torn", "missing", "errors", "superseded")
+#: LRU-кэп handle'ов при owner_incarnation: по слоту на кадр кольца, с запасом.
+_HANDLE_CAP = 32
+_IDLE_WAIT_SEC = 0.5
+_CLOSE_JOIN_SEC = 2.0
+_RESUBSCRIBE_TIMEOUT = 5.0
+
+_log = logging.getLogger(__name__)
 
 #: Маршалинг колбэка: принимает нуль-арную функцию и исполняет её там, где решит
 #: владелец (Qt main thread через сигнал; в тестах — ``lambda fn: fn()``).
@@ -95,7 +112,25 @@ def build_frame_descriptor(sender: Any, data: Any, bseq: int) -> Optional[Dict[s
           ``len(json.dumps(result).encode()) <= DESCRIPTOR_MAX_BYTES``.
           Не бросает: любой неподходящий вход — ``None``.
     """
-    raise NotImplementedError
+    if not isinstance(sender, str) or not sender or not isinstance(data, dict):
+        return None
+    name = data.get("shm_actual_name")
+    if not isinstance(name, str) or not name:
+        return None
+    try:
+        raw_idx = data.get("shm_index")
+        idx = None if raw_idx is None else int(raw_idx)
+        seq = int(bseq)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "sender": sender,
+        "name": name,
+        "idx": idx,
+        "seqlock": bool(data.get("shm_seqlock", False)),
+        "bseq": seq,
+        "ts": time.time(),
+    }
 
 
 class RemoteFrameSource:
@@ -133,7 +168,9 @@ class RemoteFrameSource:
     * ``errors``    — всё прочее: дескриптор без нужных ключей, иное исключение чтения,
       ``None`` без ``seqlock``, исключение самого ``dispatch``;
     * ``superseded`` — дескрипторов, вытесненных из ящика новым дескриптором того же
-      ``sender`` до того, как поток копирования их забрал (latest-wins).
+      ``sender`` до того, как поток копирования их забрал (latest-wins); сюда же —
+      выброшенные из ящика или из обработки снятием подписки, повторным ``subscribe``
+      или ``on_reconnected`` (иначе они навсегда остались бы вне инварианта).
 
     Инвариант (в любой момент, снимок :attr:`stats`):
     ``received == delivered + dup + torn + missing + errors + superseded + in_flight``,
@@ -159,7 +196,28 @@ class RemoteFrameSource:
               потока, ни одного открытого сегмента; все счётчики :attr:`stats` = 0;
               подписки нет.
         """
-        raise NotImplementedError
+        self._client = client
+        self._dispatch = dispatch
+        self._target = target
+        self._log = logger if logger is not None else _log
+        # Одна Condition на всё разделяемое: ящик, счётчики, подписку. Reader-поток клиента
+        # держит её только на запись в ящик; SHM и dispatch — всегда ВНЕ неё.
+        self._cond = threading.Condition()
+        self._mailbox: Dict[str, Dict[str, Any]] = {}
+        self._stats: Dict[str, int] = dict.fromkeys(_STAT_KEYS, 0)
+        self._active = False
+        self._senders: Optional[List[str]] = None
+        self._on_frame: Optional[OnFrame] = None
+        # Эпоха подписки: subscribe/unsubscribe/on_reconnected её сдвигают — кадр,
+        # прочитанный в старой эпохе, до dispatch не доходит.
+        self._epoch = 0
+        # sender → (bseq, имя слота, поколение) последнего доставленного кадра (дедуп).
+        self._last: Dict[str, tuple] = {}
+        self._reader: Optional[ShmFrameReader] = None
+        self._reader_cached: Optional[bool] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop = False
+        client.add_push_listener(self._on_push)
 
     def subscribe(
         self,
@@ -193,7 +251,23 @@ class RemoteFrameSource:
               не подключён); подписка после этого НЕ активна.
               Исключение разрыва клиента (``client._lost_exc``) пробрасывается как есть.
         """
-        raise NotImplementedError
+        address = self._client.subscriber_address
+        if address is None:
+            raise RemoteFrameSourceError("RemoteFrameSource.subscribe: клиент не подключён")
+        senders_list = None if senders is None else [str(s) for s in senders]
+        try:
+            reply = self._request_subscribe(address, senders_list, timeout)
+        except BaseException:
+            self._deactivate()
+            raise
+        with self._cond:
+            self._senders = senders_list
+            self._on_frame = on_frame
+            self._begin_epoch_locked()
+            self._ensure_reader_locked(bool(reply.get("owner_incarnation")))
+            self._active = True
+            self._ensure_thread_locked()
+        return reply
 
     def unsubscribe(self, timeout: float = 5.0) -> None:
         """Снять подписку. Не бросает.
@@ -205,7 +279,23 @@ class RemoteFrameSource:
               строка лога, не исключение). Без активной подписки — ни одного сетевого
               вызова. Счётчики не сбрасываются. Идемпотентен.
         """
-        raise NotImplementedError
+        address = self._client.subscriber_address
+        if not self._deactivate():
+            return
+        message = {
+            "type": "command",
+            "sender": address,
+            "targets": [self._target],
+            "command": FRAMES_UNSUBSCRIBE,
+            "data": {"subscriber": address},
+        }
+        try:
+            reply = _unwrap(self._client.request(message, timeout=timeout))
+        except Exception as exc:  # noqa: BLE001 — контракт: не бросает
+            self._warn(f"RemoteFrameSource.unsubscribe: хост не ответил: {exc!r}")
+            return
+        if not isinstance(reply, dict) or reply.get("success") is not True:
+            self._warn(f"RemoteFrameSource.unsubscribe: хост отказал: {reply!r}")
 
     def on_reconnected(self) -> None:
         """Восстановить подписку после ``client.connect()`` с новым ``session``.
@@ -223,7 +313,27 @@ class RemoteFrameSource:
         Raises: :class:`RemoteFrameSourceError` — хост отказал (подписка после этого не
               активна); исключение разрыва клиента пробрасывается.
         """
-        raise NotImplementedError
+        with self._cond:
+            if not self._active:
+                return
+            senders_list = self._senders
+            # Хост мог перезапуститься: bseq начинается заново, сегменты пересозданы.
+            self._begin_epoch_locked()
+            self._last.clear()
+            reader, self._reader, self._reader_cached = self._reader, None, None
+        if reader is not None:
+            reader.close()
+        address = self._client.subscriber_address
+        if address is None:
+            self._deactivate()
+            raise RemoteFrameSourceError("RemoteFrameSource.on_reconnected: клиент не подключён")
+        try:
+            reply = self._request_subscribe(address, senders_list, _RESUBSCRIBE_TIMEOUT)
+        except BaseException:
+            self._deactivate()
+            raise
+        with self._cond:
+            self._ensure_reader_locked(bool(reply.get("owner_incarnation")))
 
     def close(self) -> None:
         """Освободить ресурсы. Не бросает, идемпотентен.
@@ -232,14 +342,155 @@ class RemoteFrameSource:
               ≤ 2 с); все handle'ы SHM закрыты (сегменты хоста НЕ удалены); последующие
               push'и игнорируются. Клиент НЕ закрывается — им владеет вызывающий.
         """
-        raise NotImplementedError
+        try:
+            self.unsubscribe()
+        except Exception as exc:  # noqa: BLE001 — контракт: не бросает
+            self._warn(f"RemoteFrameSource.close: unsubscribe упал: {exc!r}")
+        with self._cond:
+            self._stop = True
+            self._cond.notify_all()
+            thread, reader = self._thread, self._reader
+            self._thread, self._reader, self._reader_cached = None, None, None
+        if thread is not None and thread is not threading.current_thread():
+            # Дедлайн: колбэк, исполняемый dispatch'ем прямо на потоке копирования, может
+            # спать сколько угодно — close() его не ждёт дольше.
+            thread.join(_CLOSE_JOIN_SEC)
+        if reader is not None:
+            reader.close()
 
     @property
     def stats(self) -> Dict[str, int]:
         """Снимок счётчиков: dict ровно с ключами ``received``, ``delivered``, ``dup``,
         ``torn``, ``missing``, ``errors``, ``superseded`` (int ≥ 0, монотонны). Новый dict на каждый вызов.
         """
-        raise NotImplementedError
+        with self._cond:
+            return dict(self._stats)
+
+    # ------------------------------------------------------------------ внутреннее
+
+    def _warn(self, text: str) -> None:
+        try:
+            self._log.warning(text)
+        except Exception:  # noqa: BLE001 — лог не должен ронять поток копирования
+            pass
+
+    def _request_subscribe(self, address: str, senders_list: Optional[List[str]], timeout: float) -> Dict[str, Any]:
+        message = {
+            "type": "command",
+            "sender": address,
+            "targets": [self._target],
+            "command": FRAMES_SUBSCRIBE,
+            "data": {"subscriber": address, "senders": senders_list},
+        }
+        reply = _unwrap(self._client.request(message, timeout=timeout))
+        if not isinstance(reply, dict) or reply.get("success") is not True:
+            reason = reply.get("reason") or reply.get("error") if isinstance(reply, dict) else None
+            raise RemoteFrameSourceError(f"frames.subscribe отклонён хостом '{self._target}': {reason or reply!r}")
+        return reply
+
+    def _begin_epoch_locked(self) -> None:
+        """Новая эпоха: всё, что лежит в ящике, выброшено (superseded — инвариант)."""
+        self._epoch += 1
+        self._stats["superseded"] += len(self._mailbox)
+        self._mailbox.clear()
+
+    def _deactivate(self) -> bool:
+        """Снять подписку локально; ``True`` — она была активна."""
+        with self._cond:
+            was_active = self._active
+            self._active = False
+            self._begin_epoch_locked()
+            return was_active
+
+    def _ensure_reader_locked(self, cached: bool) -> None:
+        # Кэш handle'ов — только при owner_incarnation (иначе realloc под тем же именем
+        # оставил бы нас на старом сегменте). track=False: сегмент хоста не наш.
+        if self._reader is not None and self._reader_cached == cached:
+            return
+        old = self._reader
+        self._reader = ShmFrameReader(cache_enabled=cached, zero_copy=False, cap=_HANDLE_CAP, track=False)
+        self._reader_cached = cached
+        if old is not None:
+            old.close()
+
+    def _ensure_thread_locked(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop = False
+        self._thread = threading.Thread(target=self._copy_loop, name=COPY_THREAD_NAME, daemon=True)
+        self._thread.start()
+
+    def _on_push(self, msg: Dict[str, Any]) -> None:
+        """Reader-поток клиента: только ящик (O(1) под lock), ни SHM, ни колбэка."""
+        if msg.get("command") != FRAMES_PUSH:
+            return
+        with self._cond:
+            if not self._active:
+                return
+            self._stats["received"] += 1
+            descriptor = msg.get("data")
+            sender = descriptor.get("sender") if isinstance(descriptor, dict) else None
+            if not isinstance(sender, str) or not sender:
+                self._stats["errors"] += 1
+                return
+            if sender in self._mailbox:
+                self._stats["superseded"] += 1
+                del self._mailbox[sender]  # в конец — очередь sender'ов по свежести
+            self._mailbox[sender] = descriptor
+            self._cond.notify()
+
+    def _copy_loop(self) -> None:
+        while True:
+            with self._cond:
+                while not self._stop and not self._mailbox:
+                    self._cond.wait(_IDLE_WAIT_SEC)
+                if self._stop:
+                    return
+                sender = next(iter(self._mailbox))
+                descriptor = self._mailbox.pop(sender)
+                epoch, on_frame, reader = self._epoch, self._on_frame, self._reader
+            try:
+                outcome = self._process(sender, descriptor, epoch, on_frame, reader)
+            except Exception as exc:  # noqa: BLE001 — поток копирования не умирает
+                self._warn(f"RemoteFrameSource: сбой обработки кадра '{sender}': {exc!r}")
+                outcome = "errors"
+            with self._cond:
+                self._stats[outcome] += 1
+
+    def _process(self, sender: str, descriptor: Dict[str, Any], epoch: int, on_frame: Any, reader: Any) -> str:
+        """Один дескриптор → имя счётчика, в который он попал."""
+        name = descriptor.get("name")
+        bseq = descriptor.get("bseq")
+        seqlock = bool(descriptor.get("seqlock"))
+        if not isinstance(name, str) or not name or not isinstance(bseq, int) or on_frame is None or reader is None:
+            return "errors"
+        last = self._last.get(sender)
+        if last is not None and last[0] == bseq:
+            return "dup"
+        meta: Dict[str, Any] = {}
+        try:
+            frame = reader.read_frame(name, seqlock=seqlock, copy=True, view_meta=meta)
+        except FileNotFoundError:
+            self._warn(f"RemoteFrameSource: слота '{name}' нет (sender={sender}, bseq={bseq})")
+            return "missing"
+        if frame is None:
+            return "torn" if seqlock else "errors"
+        gen = int(meta.get("_shm_generation", -1)) if seqlock else -1
+        if gen >= 0 and last is not None and last[1] == name and last[2] == gen:
+            return "dup"
+        with self._cond:
+            if epoch != self._epoch:
+                return "superseded"  # подписку сняли/заменили, пока копировали
+            self._last[sender] = (bseq, name, gen)
+        self._dispatch(lambda: on_frame(sender, frame, bseq))
+        return "delivered"
+
+
+def _unwrap(reply: Any) -> Any:
+    """Ответ обработчика из конверта ``request``: ``{"success", "result": {...}}`` → ``result``."""
+    while isinstance(reply, dict) and "seqlock" not in reply and isinstance(reply.get("result"), dict):
+        reply = reply["result"]
+    return reply
 
 
 __all__ = [
