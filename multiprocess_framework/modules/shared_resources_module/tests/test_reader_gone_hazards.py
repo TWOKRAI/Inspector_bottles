@@ -25,7 +25,14 @@
       LoggerManager) этот тест НЕ закрепляет: в тестовом ребёнке LoggerManager нет,
       и ``log.warning`` тоже уходит в stderr — инъекция ревью итерации 2 оставила H8
       зелёным. Канал доказан только живым прогоном ведущего 2026-09-24 (33 строки в
-      stderr за 10 циклов ``inspection_full``); пин с настоящим LoggerManager — открытый вопрос.
+      stderr за 10 циклов ``inspection_full``). Вопрос закрыт Task 1.3 (lifecycle-stop-ownership):
+      после Ф6.8 ``LoggerManager.shutdown()`` снимает себя с ``_instance``, и вид ``log`` тоже
+      падает в stdlib — каналы неразличимы по выходу. Свойство «строка доходит при настоящем
+      остановленном менеджере» пинит ``test_exit_loss_line_acceptance.py::test_a4_*`` (красный,
+      только если сломать И выбор канала, И снятие менеджера).
+  H9. Потеря «в полёте» при ПУСТОМ буфере (один кадр застрял в send) видна в stderr: строка
+      итога печатается по ``released``, а не по ``buffered_dropped`` (Task 1.3). Инъекция «печатать
+      только при buffered_dropped > 0» оставляла все остальные тесты зелёными.
   H6. Голая ``mp.Queue`` (не из реестра) задета хуком → поведение очередей вне
       реестра изменилось молча. Пин: хук её не закрывает и не отпускает.
 
@@ -354,11 +361,27 @@ q.cancel_join_thread()
 class TestH8ExitLineReachesStderr:
     def test_real_pair_prints_literal_line(self) -> None:
         env = dict(os.environ, PYTHONPATH=os.getcwd())
-        proc = subprocess.run(
-            [sys.executable, "-c", _H8_SCRIPT], capture_output=True, text=True, timeout=40, env=env
-        )
+        proc = subprocess.run([sys.executable, "-c", _H8_SCRIPT], capture_output=True, text=True, timeout=40, env=env)
         assert "EXITCODES 0 0" in proc.stdout, (proc.stdout, proc.stderr[-2000:])
         lines = [ln for ln in proc.stderr.splitlines() if "queues released to gone readers" in ln]
         # Писатель: 1 очередь отпущена, 3 маленьких остались в буфере (BIG застрял в send).
         # Читатель отпускать нечего — молчит.
         assert lines == ["Writer: queues released to gone readers: 1, buffered dropped: 3"], proc.stderr[-2000:]
+
+
+class _SendBigOnly(_SendBigPlusThree):
+    """Писатель для H9: один 1 MiB — застрянет в send, буфер feeder'а пуст."""
+
+    def run(self) -> None:
+        self.shared_resources.queue_registry.send_to_queue("Reader", "data", BIG)
+
+
+class TestH9InFlightLossWithEmptyBufferIsPrinted:
+    def test_single_stuck_frame_prints_line_with_zero_buffered(self) -> None:
+        env = dict(os.environ, PYTHONPATH=os.getcwd())
+        script = _H8_SCRIPT.replace("._SendBigPlusThree", "._SendBigOnly")
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=40, env=env)
+        assert "EXITCODES 0 0" in proc.stdout, (proc.stdout, proc.stderr[-2000:])
+        lines = [ln for ln in proc.stderr.splitlines() if "queues released to gone readers" in ln]
+        # «buffered dropped: 0» здесь — не ложная тревога: кадр в полёте потерян без счёта.
+        assert lines == ["Writer: queues released to gone readers: 1, buffered dropped: 0"], proc.stderr[-2000:]
