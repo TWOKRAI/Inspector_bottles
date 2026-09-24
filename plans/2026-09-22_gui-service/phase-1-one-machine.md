@@ -79,7 +79,7 @@ baseline только по тестам; это не провал задачи.
 **Мидлварь — уточнено по `backend_ctl/AGENTS.md` («Чего драйвером проверить нельзя»), 2026-09-22:**
 receive-мидлварь **дочернего** процесса на сокетном пути отрабатывает штатно — обхода нет, чинить
 нечего. Два настоящих разрыва: (1) `make_fence_stamp_middleware` висит только в дочерних
-`ProcessModule` (`process_module.py:654`), встроенный `GuiProcess` — дочерний и штампует `_fence`;
+`ProcessModule` (подключение — `builtin_commands.py:3980-4006`), встроенный `GuiProcess` — дочерний и штампует `_fence`;
 Пульт — внешний и не штампует, фильтр пропускает его легаси-веткой (`token.py:124-126`) — после
 рестарта бэкенда устаревшие команды Пульта не отсекутся как stale; (2) у хаба (ProcessManager)
 receive-мидлвари нет **ни для кого** — не цель этого плана (см. G1b в `context.md`).
@@ -95,7 +95,7 @@ receive-мидлвари нет **ни для кого** — не цель эт�
   (домен для rework 2б.2 — ядро)
 - `backend_ctl/transport.py` — реэкспорт из фреймворка, поведение и публичные имена без изменений
 - НОВЫЙ `multiprocess_framework/modules/frontend_module/bridge/remote_command_sender.py` —
-  `RemoteCommandSender` (тот же Protocol, что `CommandSender`); штамп `_fence` из `capabilities`
+  `RemoteCommandSender` (тот же Protocol, что `CommandSender`); штамп `_fence` из `supervision.status`
   тем же кодом, что `make_fence_stamp_middleware` (импорт, не копия). **Qt-free**
 - НОВЫЙ `multiprocess_framework/modules/frontend_module/bridge/remote_state_proxy.py` —
   `RemoteStateProxy` (`set/get/subscribe` через `state.*` сообщения протокола). **Qt-free**
@@ -108,12 +108,14 @@ receive-мидлвари нет **ни для кого** — не цель эт�
    Прогнать `pytest backend_ctl -q` — число не меньше baseline, 0 failed.
 2. `RemoteCommandSender`: реализовать интерфейс `CommandSender` (какой именно Protocol — по отчёту 1.1),
    сообщения строить билдерами протокола (не руками). Ответы — по `request_id`. Fence: при
-   подключении взять текущий эпох/токен из `capabilities` (если его там нет — это находка: добавить
-   в `capabilities` на хосте, одно поле) и штамповать каждое исходящее сообщение той же функцией,
+   каждом подключении взять `inc`/`epoch` из `supervision.status` (`capabilities_extra` отдаёт только
+   контракт, `process_manager_process.py:513-525`; хост не правится) и штамповать каждое исходящее сообщение той же функцией,
    что дочерние процессы.
 3. `RemoteStateProxy`: `get` — запрос; `subscribe(pattern, cb)` — durable-подписка (восстанавливается
    после реконнекта); `set` — запрос с подтверждением. Троттлинг — как на хосте, клиент ничего не
-   троттлит сам.
+   троттлит сам. Реконнекта с восстановлением подписок в `_TransportMixin` нет (он в
+   `DriverSession`, `mcp_driver_session.py:385-514`) — для GUI это новая логика; session меняется на
+   каждом connect, адрес подписчика нужно переподписать.
 4. Автор пишет hazard-тесты: (а) реконнект в момент ожидания ответа — `request` получает понятную
    ошибку, не висит; (б) подписки восстановлены после реконнекта — событие после реконнекта доходит;
    (в) push-колбэк вызывается не в потоке чтения сокета, а через переданный диспетчер (для Qt —
@@ -124,12 +126,16 @@ receive-мидлвари нет **ни для кого** — не цель эт�
 - [ ] `pytest backend_ctl -q` — passed ≥ baseline из Step 1, 0 failed; `from backend_ctl.transport
       import <прежние имена>` работает.
 - [ ] In-process тест: `SocketChannel(port=0)` + `RouterManager` + процесс-стаб с командой `ping`;
-      `RemoteCommandSender.send("ping")` → ответ `{"status":"ok"}` за < 1 с.
-- [ ] **Fence-паритет:** сообщение от `RemoteCommandSender` несёт `_fence` того же вида, что
-      сообщение встроенного `GuiProcess` (сравнение структуры штампа); дочерний процесс-стаб с
-      включённым fence-фильтром принимает команду Пульта с актуальным эпохом и **отвергает** команду
-      с устаревшим (парный тест, счётчик отказов фильтра +1).
-- [ ] `RemoteStateProxy.subscribe("a.*", cb)`; хост делает `set("a.b", 1)` → `cb` вызван с `("a.b", 1)`
+      `RemoteCommandSender.request_command(...)` для `ping` (стаб регистрирует её сам) → конверт
+      `{"success": True, "result": ...}` за < 1 с.
+- [ ] **Fence-паритет (структура):** сообщение `RemoteCommandSender` на проводе (до хоста) несёт
+      `_fence={sender, inc, epoch}` той же формы, что штамп `GuiProcess` (`make_fence_stamp_middleware` —
+      импорт, не копия); `inc`/`epoch` берутся из `supervision.status` после каждого connect (hazard (г)).
+      Отказ stale для внешнего отправителя — вне задачи: у ребёнка нет PSR-записи Пульта (fail-open,
+      `token.py:134-136`), а PM при relay перештамповывает `_fence` своим именем (`router_manager.py:544`);
+      строка «fence внешних клиентов» — в G1b `context.md`. *(Сужено 2026-09-24: вердикт cto + подпись
+      владельца; прежний текст требовал отказа stale у ребёнка — недостижимо без G1b.)*
+- [ ] `RemoteStateProxy.subscribe("a.*", cb)`; хост делает `set("a.b", 1)` → `cb` вызван со списком `Delta`, где есть `a.b = 1`
       за < 1 с; после разрыва и восстановления соединения `set("a.c", 2)` → `cb` вызван снова (подписка
       пережила реконнект).
 - [ ] Разрыв соединения во время `request(...)` → исключение/ошибка за ≤ таймаут, не зависание

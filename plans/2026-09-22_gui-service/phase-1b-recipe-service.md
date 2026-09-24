@@ -39,11 +39,15 @@
 
 **Контекст:** рецептный код раздвоен: фреймворковая крыша `modules/recipe` (`manager.py`,
 `recipe_engine.py`, `yaml_io.py`, ADR-RCP-001) и прикладной `multiprocess_prototype/recipes/manager.py`
-с миграциями формата инспектора. Сервис — это **обобщённая поверхность команд во фреймворке**, а
-формат инспектора — хук приложения. Второго менеджера не появляется. Где живут обработчики: в
-отдельном процессе дерева или на ProcessManager. Решает Step 1 по критерию: у хаба нет
-receive-мидлвари ни для кого (G1b в `context.md`), значит команды на хаб не проходят ни fence, ни
-будущую проверку прав. Рекомендация — **не хаб**.
+с миграциями формата инспектора (уточнено разведкой 2026-09-24: это шим-реэкспорт, логика — в
+`recipes/migrations/`, `backend/launch.py:79` `unwrap_recipe`, `recipes/save.py`). Сервис — это **обобщённая поверхность команд во фреймворке**, а
+формат инспектора — хук приложения. Второго менеджера не появляется. Где живут обработчики: **на хабе** (`ProcessManagerProcessApp`, проводка через
+`orchestrator_hooks`), сервис — `modules/recipe/service.py` (вердикт cto 2026-09-24). Прежний критерий
+«у хаба нет receive-мидлвари» снят: мидлварь у PM есть (`builtin_commands.py:3931`), её обходит
+сокетный канал (`router_manager.py:1509-1514`) для ВСЕХ команд хаба, включая `topology.apply` — судья на
+хабе (G1b) нужен 1b.4 независимо от места `recipe.*`; хаб уже владеет фактом «активный рецепт»
+(`_retarget_recipe_address`). Вне хаба `activate` пришлось бы делать асинхронным
+(`RouterReentrantRequestError`, deferred-reply нет) и заводить второго владельца истины.
 
 **Files:**
 - НОВЫЙ `multiprocess_framework/modules/recipe/service.py` (или `service/`, по Step 1): обработчики
@@ -52,7 +56,8 @@ receive-мидлвари ни для кого (G1b в `context.md`), значи�
   «владелец рецепта — бэкенд, ревизия».
 - `multiprocess_prototype/backend/…`: подключение сервиса в дерево инспектора, хук формата
   (миграции v1→v2, `unwrap_recipe`, `save_editor_topology_to_recipe`).
-- Перенос записи `app.yaml` (`ManifestStore.set_pipeline`) из GUI под `recipe.activate`.
+- Запись `app.yaml` (`ManifestStore.set_pipeline`) появляется под `recipe.activate` (второй писатель тем же
+  `ManifestStore`, flock + `os.replace`); GUI-писатель `_persist_active_recipe` снимается в 1b.3.
 - Тесты: `modules/recipe/tests/test_service.py`, характеризация старта бэкенда с рецептом.
 
 **Steps:**
@@ -62,9 +67,13 @@ receive-мидлвари ни для кого (G1b в `context.md`), значи�
 2. Командная поверхность. `recipe.get` возвращает `{name, rev, body}`; `recipe.save` принимает
    `{name, base_rev, body}` → `{rev}` или ошибку `conflict` с текущим `rev`. Валидация авторитетна на
    бэкенде: ошибки возвращаются списком `{path, message}`, а не исключением.
-3. `recipe.activate(name)` = запись «последнего активного» (сегодня делает GUI
-   `_persist_active_recipe`) + применение топологии тем же путём, что сегодня `apply_topology`. Второго
-   пути применения не появляется.
+3. `recipe.activate(name)` — обработчик PM: `hook.normalize` → `hook.validate` →
+   `self._cmd_topology_apply(topology_dict=hook.to_topology(body), recipe_path=<абс. путь>)` → при success
+   `ManifestStore.set_pipeline` → **синхронный** ответ `{success, name, apply: <ответ topology.apply>}`.
+   Персист после success — порядок GUI сегодня (`presenter.py:481`). Второго пути применения нет.
+   В DECISIONS: `rev` — непрозрачная строка (сегодня sha256 байтов файла), клиент сравнивает на
+   равенство; любой писатель мимо `recipe.save` (сегодня `save_layout`, `recipe_store.py:111`)
+   инвалидирует `rev` редактора — желаемое поведение, автосохранение позиций решается в 1b.3.
 4. Автор пишет hazard-тесты: (а) два `save` с одним `base_rev` — ровно один успешен, второй получает
    `conflict`; (б) `save` невалидного рецепта не меняет файл на диске (побайтно); (в) падение посреди
    записи не оставляет полуфайл (атомарная замена); (г) `activate` несуществующего — ошибка с именем,

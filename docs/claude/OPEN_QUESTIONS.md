@@ -1168,3 +1168,12 @@ LoggerManager). Канал доказан только живым прогоно
 опасно: диск уже уехал, и `e_capture`/энкодер решают, можно ли его ещё догнать. (2) Какую причину
 должен вернуть хаб: «устройство не подключено» против пустой строки? Это дефект инспектора, не сима.
 Воспроизведение: `fault.drop` в `Plugins/sim/robot_host` (ветка `feat/line-sim-5.4`).
+
+## GUI-switch рецепта шлёт `topology.apply` без `recipe_path` — L2 может смотреть на старый рецепт (2026-09-24, gui-service 1b.1)
+
+Выведено чтением (cto), живьём не воспроизведено. `process_manager_proxy.py:94` шлёт только
+`{"topology_dict"}` → `_retarget_recipe_address("")` → `_active_recipe_from_manifest()`
+(`app_module/orchestrator.py:285`), а GUI пишет манифест только после успеха (`presenter.py:481`).
+Итог: L2-watcher и `recipe_path` ассемблера новых детей — СТАРЫЙ рецепт. Проверка: после GUI-switch
+снять `introspect_observability.recipe_source`. Фикс — одна строка в прокси, hotfix вне 1b.1/1b.3
+(`recipe.activate` из 1b.1 передаёт `recipe_path` явно).
