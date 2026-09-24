@@ -1,9 +1,10 @@
 # Рецепт bridge_synth — стенд моста кадров (gui-service Task 1.3, L1–L6).
 #
 # Тракт: synthetic_source[synthetic_frame_source] → gui (chain_targets).
-# `gui` объявлен headless (как в остальных рецептах); класс моста подставляет overlay:
+# `gui` объявлен headless (как в остальных рецептах); класс моста подставляет overlay
+# (путь overlay'я — относительно каталога манифеста multiprocess_prototype/, не корня репо):
 #   BACKEND_CTL=1 BACKEND_CTL_PORT=88xx \
-#   INSPECTOR_PRESENTATION=multiprocess_prototype/frontend/presentation_bridge.yaml \
+#   INSPECTOR_PRESENTATION=frontend/presentation_bridge.yaml \
 #     python multiprocess_prototype/run.py bridge_synth
 # Без overlay'я — обычный headless-дренаж (дескрипторы не строятся).
 # НЕ прод-рецепт: только для живого стенда моста.

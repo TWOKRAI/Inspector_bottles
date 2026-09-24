@@ -37,7 +37,12 @@ I4. Разрыв соединения (EOF/OSError в reader) → :attr:`connect
     :meth:`request_async` получают колбэк ``{"success": False, "error": "connection lost"}``
     РОВНО ОДИН РАЗ. Намеренный :meth:`close` — не разрыв: ``connection_lost`` ``False``.
 I5. ``session`` — новый на каждый :meth:`connect`; адрес push-получателя
-    :attr:`subscriber_address` = ``f"{sender}.{session}"`` меняется вместе с ним.
+    :attr:`subscriber_address` = ``f"{door}.{session}"`` меняется вместе с ним.
+    Префикс — имя канала-ДВЕРИ хаба (``SocketChannel``), а не ``sender``: хаб доставляет
+    push по ``_address`` только если его голова равна имени канала
+    (``socket_channel.py`` ``_resolve_session``: ``addr[0] == self._name``), иначе push
+    уходит мимо молча. Живой стенд 1.3: клиент с ``sender="pult"`` подписался, мост
+    отправил 492 дескриптора, клиент получил 0.
     Всё, что зарегистрировано на хосте под старым адресом (state-подписки), после
     реконнекта этому клиенту больше не доставляется — перерегистрация на стороне
     потребителя (``RemoteStateProxy.on_reconnected``).
@@ -169,15 +174,19 @@ class SocketClient:
         port: int,
         *,
         sender: str,
+        door: str = "backend_ctl",
         reply_to: str | None = None,
         default_timeout: float = 5.0,
         on_push: PushHandler | None = None,
     ) -> None:
         """Сконфигурировать клиент; соединения НЕ открывает.
 
-        Pre:  ``port`` в 0..65535; ``default_timeout > 0``; ``sender`` — непустое
-              имя канала хоста, к которому подключаемся (префикс адреса push-получателя,
-              см. I5 — хост разрешает ``<канал>.<session>`` в сокет только при совпадении).
+        Pre:  ``port`` в 0..65535; ``default_timeout > 0``; ``sender`` — непустая
+              идентичность клиента в сообщениях и логах (на адрес push'ей НЕ влияет).
+              ``door`` — имя канала-двери хаба (``SocketChannel``), к которому подключаемся;
+              префикс :attr:`subscriber_address` (I5 — хост разрешает ``<канал>.<session>``
+              в сокет только при совпадении). Дефолт — дверь ``backend_ctl`` хаба
+              ``ProcessManager``.
               ``reply_to`` — адресат ответа НА ХОСТЕ; ``None`` (дефолт) = поле не
               ставится, его подставляет мост хоста своим именем (``SocketBridgeAdapter``
               ``setdefault``). Явное имя, не совпадающее с именем хоста, уводит ответ
@@ -188,6 +197,7 @@ class SocketClient:
         self._host = host
         self._port = port
         self._sender = sender
+        self._door = door
         self._reply_to = reply_to
         self._default_timeout = default_timeout
         self._on_push = on_push
@@ -221,7 +231,10 @@ class SocketClient:
         sock = socket.create_connection((self._host, self._port), timeout=timeout)
         sock.settimeout(_READ_POLL_SEC)
         self._session = uuid.uuid4().hex[:12]
-        self._subscriber = f"{self._sender}.{self._session}"
+        # Наследник-шим (``backend_ctl.BackendDriver``) заводит поля сам, без __init__ базы:
+        # у него дверь = sender (``backend_ctl``), поэтому без ``_door`` берём ``_sender``.
+        door = getattr(self, "_door", self._sender)
+        self._subscriber = f"{door}.{self._session}"
         # Свежее соединение — прошлая смерть больше не актуальна.
         self._conn_lost = False
         self._sock = sock
@@ -470,7 +483,7 @@ class SocketClient:
 
     @property
     def subscriber_address(self) -> Optional[str]:
-        """``f"{sender}.{session}"`` — адрес push-получателя этого соединения (I5);
+        """``f"{door}.{session}"`` — адрес push-получателя этого соединения (I5);
         ``None`` до первого ``connect``."""
         return None if self._session is None else self._subscriber
 
