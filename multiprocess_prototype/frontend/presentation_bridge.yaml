@@ -5,8 +5,8 @@
 # data-трафик как headless и сообщает подписчикам (Пульт, ``RemoteFrameSource``), в каком
 # слоте SHM лежит кадр. Протокол — frontend_module/bridge/remote_frame_source.py.
 #
-# Как включить:
-#   INSPECTOR_PRESENTATION=multiprocess_prototype/frontend/presentation_bridge.yaml \
+# Как включить (путь overlay'я — относительно multiprocess_prototype/):
+#   INSPECTOR_PRESENTATION=frontend/presentation_bridge.yaml \
 #     python multiprocess_prototype/run.py <recipe>
 # headless-флаг основного входа (INSPECTOR_HEADLESS=1 / --headless) ПЕРЕБИВАЕТ overlay.
 
