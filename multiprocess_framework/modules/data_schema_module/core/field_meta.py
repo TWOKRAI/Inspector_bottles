@@ -309,3 +309,14 @@ class FieldMeta:
             "ui_order": self.ui_order,
             "ui_hidden": self.ui_hidden,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "FieldMeta":
+        """Восстановить FieldMeta из ``to_dict()`` (Task 1b.2a, dict-кодек IPC-границы).
+
+        Фильтрует ``d`` по параметрам ``__init__`` (= ``__slots__``) — лишние/неизвестные
+        ключи молча игнорируются. ``description_i18n``/``info_i18n`` в ``to_dict()`` не
+        попадают (см. docstring выше) — после round-trip они возвращаются к дефолту {}.
+        """
+        kwargs = {k: v for k, v in d.items() if k in cls.__slots__}
+        return cls(**kwargs)
