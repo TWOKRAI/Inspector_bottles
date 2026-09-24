@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Union
 
 from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
 
+from ..._fallback import emergency_log
 from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
@@ -243,3 +244,25 @@ def run_process_function(
                     process_instance.stop()
             except Exception as e:
                 log.error(f"Error during cleanup: {e}")
+        # L-2 Task 1.2 (ADR-SRM-016): отпустить feeder'ы очередей, чей читатель ушёл
+        # навсегда (системный стоп), иначе выход интерпретатора ждёт их вечно.
+        if shared_resources is not None:
+            try:
+                sys_evt = system_stop_event or getattr(shared_resources, "_system_stop_event", None)
+                res = shared_resources.queue_registry.release_queues_at_exit(
+                    process_name, system_stop=sys_evt is not None and sys_evt.is_set()
+                )
+                # Аварийный выход, а не ``log``: к этому моменту LoggerManager процесса уже
+                # остановлен, и запись через вид не доходила ни до одного приёмника (ревью
+                # Task 1.2). Тихо, если отпускать было нечего — не +1 строка на процесс.
+                if res["released"]:
+                    emergency_log(
+                        __name__,
+                        "warning",
+                        "%s: queues released to gone readers: %d, buffered dropped: %d",
+                        process_name,
+                        res["released"],
+                        res["buffered_dropped"],
+                    )
+            except Exception as e:  # noqa: BLE001 — хук выхода не роняет выход
+                emergency_log(__name__, "error", "%s: queue release at exit failed: %r", process_name, e)

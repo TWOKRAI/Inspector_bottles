@@ -4,9 +4,9 @@ description: "Owner-approved work order (2026-09-22) — merge feat/line-sim at 
 metadata: 
   node_type: memory
   type: project
-  last-verified: 2026-09-22
+  last-verified: 2026-09-24
   originSessionId: feb3ecc5-c27a-407d-b327-22e44d808322
-  modified: 2026-09-22T14:06:41.886Z
+  modified: 2026-09-23T21:36:24.440Z
 ---
 
 **Order approved by the owner on 2026-09-22** (replaces nothing — it slots gui-service into the
@@ -26,6 +26,13 @@ metadata:
 3. **line-sim Ф7.1 + 7.2 (HTML editor) after 3.1/3.3.** Deferred until there is a real need or the
    numbers exist: gui-service Ф2 (network + token), line-sim Qt parts (Ф6 in the Pult, Ф7.3),
    line-sim Ф4 camera knobs.
+
+**Progress, verified by git 2026-09-24:** step 0 done (`feat/line-sim` fully in `main`, 0 ahead);
+step 1 Ф3 done (3.1–3.6 incl. 3.3a/3.4), Ф5 5.1–5.3 done (5.1b, 5.3a/b too) — left: **5.4** fault
+knobs (5.5 DEFERRED). gui-service rev. 2 APPROVED 2026-09-23, 1.1 done (`a20e673f`), next 1.2 / 1b.1,
+SocketChannel moved into its Task 1.3a (2026-09-24). `feat/observability-closure` also fully in `main`
+(4.4); its 4.3b and the otel tail run as two parallel sessions (handoff 2026-09-23). The plan-file
+header of `plans/line-sim/plan.md` still says "идёт Ф1" — stale, trust the per-task [DONE] marks.
 
 **Why:** two sessions worked the same day without seeing each other — one ran a team on
 `feat/line-sim` (ред. 3, real code), the other rewrote `plans/line-sim/*` in main's working tree
