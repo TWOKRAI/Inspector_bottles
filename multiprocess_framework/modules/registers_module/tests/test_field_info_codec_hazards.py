@@ -266,34 +266,69 @@ class _RegNoPydantic:
     """Регистр БЕЗ pydantic-модели (искалеченный плагин) — model_fields нет вовсе."""
 
 
+def _reg_unsortable_dict_keys_class() -> type:
+    """dict-default с несравнимыми ключами (ревью 2) — {1: "a", "b": 2}.
+
+    json.dumps(..., sort_keys=False) сериализует такой dict без проблем (ключи не
+    сравниваются), а json.dumps(..., sort_keys=True) падает TypeError на сравнении
+    int/str внутри sorted(dict.items()) — проходит проверку в старом режиме и валит
+    ВЕСЬ payload на rev (тот же sort_keys=True), если проверка записи не зеркалит rev.
+    """
+    from typing import Annotated
+
+    from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+
+    class _RegUnsortableDictKeys(SchemaBase):
+        m: Annotated[dict, FieldMeta("m")] = {1: "a", "b": 2}
+
+    return _RegUnsortableDictKeys
+
+
 @pytest.mark.parametrize(
     "bad_register_cls_factory,expected_plugins_count,expected_failed_names,label",
     [
         (_reg_literal_enum_class, 3, (), "literal_enum_choice"),
         (_reg_examples_path_class, 3, (), "fieldmeta_examples_path"),
         (lambda: _RegNoPydantic, 2, ("bad_one",), "register_without_pydantic"),
+        (_reg_unsortable_dict_keys_class, 2, ("bad_one",), "unsortable_dict_keys"),
     ],
 )
 def test_catalog_plugins_one_bad_plugin_does_not_kill_the_whole_catalog(
     bad_register_cls_factory, expected_plugins_count, expected_failed_names, label
 ) -> None:
-    """Ни один из трёх плохих плагинов лида (ревью 1) не должен ронять catalog.plugins целиком.
+    """Ни один из четырёх плохих плагинов лида (ревью 1 + ревью 2) не должен ронять catalog.plugins целиком.
 
-    ДО фикса: КАЖДЫЙ из трёх видов (Literal[Enum...] в choices, FieldMeta(examples=
-    [Path(...)]), регистр без pydantic-модели) ронял ``_cmd_catalog_plugins`` целиком —
-    TypeError/AttributeError долетал до вызывающего, 0 плагинов вместо N+1. Подтверждено
-    отдельно прогоном репро-скрипта против ``git show HEAD:<path>``-версий двух файлов
-    (см. отчёт разработчика) — RED до фикса воспроизведён буквально, не гипотетически.
+    ДО фикса ревью 1: КАЖДЫЙ из первых трёх видов (Literal[Enum...] в choices,
+    FieldMeta(examples=[Path(...)]), регистр без pydantic-модели) ронял
+    ``_cmd_catalog_plugins`` целиком — TypeError/AttributeError долетал до вызывающего,
+    0 плагинов вместо N+1. Подтверждено отдельно прогоном репро-скрипта против
+    ``git show HEAD:<path>``-версий двух файлов (см. отчёт разработчика) — RED до фикса
+    воспроизведён буквально, не гипотетически.
 
-    ПОСЛЕ фикса — по факту наблюдаемого поведения, а не по одной формуле на все три вида
-    (см. Test authorship rule — литерал, не гипотеза): ``_json_safe`` внутри
+    ПОСЛЕ фикса ревью 1 — по факту наблюдаемого поведения, а не по одной формуле на все
+    три вида (см. Test authorship rule — литерал, не гипотеза): ``_json_safe`` внутри
     ``FieldInfo.to_dict()`` ЧИНИТ Literal-Enum choices и FieldMeta.examples[Path] на
     месте (Enum -> str(...), Path -> str(...)) — эти два вида плагинов после фикса
     СТАНОВЯТСЯ рабочими (3 плагина, 0 записей failed_catalog), а не изолируются.
     Регистр без pydantic-модели — единственный вид, который структурно невосстановим
     (``extract_fields`` падает на ``model_fields`` РАНЬШЕ любой JSON-сериализации) —
-    только он уходит в ``failed_catalog`` (2 плагина, 1 запись). Общее для всех трёх:
-    catalog.plugins больше не падает целиком, ``json.dumps(payload)`` всегда успешен.
+    только он уходит в ``failed_catalog`` (2 плагина, 1 запись).
+
+    ЧЕТВЁРТЫЙ вид (ревью 2, найден при чтении фикса ревью 1): dict-default с несравнимыми
+    ключами (``{1: "a", "b": 2}``) — per-entry проверка в ``_cmd_catalog_plugins`` звала
+    ``json.dumps(plugin_entry, ensure_ascii=False)`` БЕЗ ``sort_keys=True``, а rev ниже —
+    С ``sort_keys=True``. Такой dict проходит проверку в режиме без сортировки (json не
+    сравнивает ключи), но валит ОБЩИЙ ``json.dumps(payload, sort_keys=True)`` на rev —
+    т.е. катастрофа целиком, а не изоляция этой ОДНОЙ записи. Подтверждено RED против
+    ТЕКУЩЕГО (не HEAD, актуального) кода до этого фикса: ``TypeError: '<' not supported
+    between instances of 'str' and 'int'``. Фикс: per-entry проверка теперь зовёт
+    ``json.dumps(plugin_entry, sort_keys=True, ensure_ascii=False)`` — тот же режим, что
+    у rev, поэтому несравнимые ключи ловятся НА ЭТОЙ записи и уходят в failed_catalog
+    (2 плагина, 1 запись) — как и регистр без pydantic-модели.
+
+    Общее для всех четырёх: catalog.plugins больше не падает целиком, итоговый
+    ``json.dumps(payload)`` (с ``sort_keys=True`` — тот же режим, что использует rev)
+    всегда успешен.
     """
     from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
 

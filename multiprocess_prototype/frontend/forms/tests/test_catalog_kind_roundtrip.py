@@ -60,7 +60,15 @@ def test_resolve_kind_stable_across_json_roundtrip_for_all_register_fields() -> 
                 if kind_before != kind_after:
                     mismatches.append(f"{fi.plugin_name}.{fi.field_name}: {kind_before!r} -> {kind_after!r}")
 
-        assert checked > 0, "ни одного register-поля не найдено (Plugins+Services) — фикстура сломана"
+        # Литерал, не "> 0" (ревью 2): "> 0" остаётся зелёным, даже если discover()
+        # потеряет Services/ целиком (62 плагина -> меньше, но всё ещё > 0) — пин
+        # РОВНО числа делает такую потерю видимой падением теста, а не тишиной.
+        # Переустановить при изменении регистров Plugins/Services (новое/удалённое поле).
+        assert checked == 417, (
+            f"ожидали 417 register-полей (Plugins+Services), получили {checked} — "
+            f"либо discover() что-то потерял (напр. Services/), либо регистры менялись "
+            f"(тогда пере-пин числа осознанно)"
+        )
         assert not mismatches, f"{len(mismatches)}/{checked} расхождений kind после round-trip: {mismatches}"
     finally:
         PluginRegistry.restore(snapshot)

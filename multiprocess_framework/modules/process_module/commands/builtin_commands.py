@@ -972,7 +972,12 @@ class BuiltinCommands:
                 # Валидировать JSON-safety ДО добавления — сеть поверх FieldInfo.to_dict()
                 # (на случай значения, которое не покрыл _json_safe: ни isinstance-ветка,
                 # ни str() не гарантированы для абсолютно любого объекта).
-                json.dumps(plugin_entry, ensure_ascii=False)
+                # sort_keys=True — ОБЯЗАТЕЛЬНО, тот же режим, что у rev ниже (ревью 2):
+                # dict с несравнимыми ключами (напр. {1: "a", "b": 2}) сериализуется без
+                # sort_keys, но валится с TypeError на sort_keys=True — если проверка
+                # использует другой режим, чем rev, плохая запись проходит ЭТУ проверку
+                # и роняет ОБЩИЙ json.dumps(payload, sort_keys=True) на rev целиком.
+                json.dumps(plugin_entry, sort_keys=True, ensure_ascii=False)
             except Exception as exc:  # noqa: BLE001 — один плохой плагин не должен ронять каталог целиком
                 failed_catalog[entry.name] = f"{type(exc).__name__}: {exc}"
                 continue
