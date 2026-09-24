@@ -11,8 +11,10 @@
   * потолок in-flight — это backpressure одного соединения, а не общего канала:
     девятый запрос на A ждёт, B отвечает сразу;
   * oversize-строка, пришедшая многими recv-чанками, не копится в буфере;
-  * ``_drop_clients`` зовут одновременно read-поток и обработчик (сбой send) —
-    ``on_session_closed`` обязан прозвучать ровно один раз.
+  * снятие с учёта (``_unregister_clients``) гоняется из нескольких потоков —
+    каждая сессия достаётся ровно одному вызову (отсюда ровно одно оповещение);
+  * сбой записи (медленный читатель) закрывает сессию тем же порядком, что выход
+    read-loop, а второй отправитель к зависшему сокету не ждёт ещё раз.
 
 Каждый блокирующий вызов — в daemon-потоке с join-дедлайном: зависший тест хуже
 упавшего.
@@ -217,10 +219,9 @@ def test_oversize_line_in_many_chunks_is_not_buffered() -> None:
         ch.close()
 
 
-def test_concurrent_drop_fires_session_closed_once() -> None:
-    """read-поток и обработчик (сбой send) дропают одно соединение одновременно."""
-    closed: List[str] = []
-    ch = SocketChannel("hz5", port=0, on_session_closed=closed.append)
+def test_concurrent_unregister_hands_session_to_exactly_one_call() -> None:
+    """Снятие с учёта из 8 потоков сразу: сессия достаётся ровно одному вызову."""
+    ch = SocketChannel("hz5", port=0)
     assert ch.start() is True
     try:
         c = _connect(ch, 1)
@@ -229,20 +230,23 @@ def test_concurrent_drop_fires_session_closed_once() -> None:
         with ch._clients_lock:
             server_sock = ch._clients[0]
         barrier = threading.Barrier(8)
+        got: List[str] = []
+        got_lock = threading.Lock()
 
-        def _drop() -> None:
+        def _unregister() -> None:
             barrier.wait(2.0)
-            ch._drop_clients([server_sock])
+            sids = ch._unregister_clients([server_sock])
+            with got_lock:
+                got.extend(sids)
 
-        threads = [threading.Thread(target=_drop, daemon=True) for _ in range(8)]
+        threads = [threading.Thread(target=_unregister, daemon=True) for _ in range(8)]
         for t in threads:
             t.start()
         for t in threads:
             t.join(3.0)
             assert not t.is_alive()
-        assert _wait(lambda: ch.get_info()["clients"] == 0)
-        time.sleep(0.1)  # дать read-потоку выйти и позвать свой _drop_clients
-        assert closed == ["s9"], f"on_session_closed прозвучал {len(closed)} раз: {closed!r}"
+        assert got == ["s9"], f"сессия досталась {len(got)} вызовам: {got!r}"
+        assert ch.get_info()["clients"] == 0
         c.close()
     finally:
         ch.close()
@@ -301,4 +305,88 @@ def test_session_closed_fires_after_last_handler_of_the_session() -> None:
         assert order == ["handler_done", "closed:s7"], f"неверный порядок: {order!r}"
     finally:
         release.set()
+        ch.close()
+
+
+def _stuck_client(ch: SocketChannel, n_expected: int) -> socket.socket:
+    """Клиент, который не читает: маленький приёмный буфер, recv не зовётся никогда."""
+    c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    c.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    c.connect((ch.host, ch.port))
+    assert _wait(lambda: ch.get_info()["clients"] >= n_expected), "сервер не принял соединение"
+    return c
+
+
+def test_session_closed_after_handler_on_write_failure_path() -> None:
+    """Сбой записи (медленный читатель) не закрывает сессию раньше её обработчика.
+
+    Путь, которым отбрасывается медленный клиент: sendall упирается в таймаут. Снятие
+    сессии обязано идти тем же порядком, что на выходе read-loop, — после handler_done.
+    """
+    release = threading.Event()
+    order: List[str] = []
+    ch = SocketChannel(
+        "hz8",
+        port=0,
+        on_inbound=lambda msg: (release.wait(3.0), order.append("handler_done")),
+        on_session_closed=lambda sid: order.append(f"closed:{sid}"),
+        session_isolation=True,
+        log_warning=lambda _m: None,
+    )
+    assert ch.start() is True
+    try:
+        c = _stuck_client(ch, 1)
+        c.sendall(b'{"session":"s8"}\n')
+        assert _wait(lambda: ch.get_info()["sessions"] == 1)
+        payload = "x" * 262144
+
+        def _push_until_error() -> None:
+            for _ in range(200):
+                if ch.send({"session": "s8", "payload": payload})["status"] == "error":
+                    return
+
+        _run_with_deadline(_push_until_error, deadline=5.0)
+        time.sleep(0.3)
+        assert order == [], f"сессия закрыта сбоем записи при живом обработчике: {order!r}"
+        release.set()
+        assert _wait(lambda: len(order) == 2, timeout=3.0), f"порядок не завершился: {order!r}"
+        assert order == ["handler_done", "closed:s8"], f"неверный порядок: {order!r}"
+        c.close()
+    finally:
+        release.set()
+        ch.close()
+
+
+def test_second_sender_to_stuck_socket_does_not_wait_again() -> None:
+    """Два отправителя к одному зависшему сокету: второй не сидит свои 0.5 с, EBADF нет."""
+    warnings: List[str] = []
+    ch = SocketChannel("hz9", port=0, log_warning=warnings.append)
+    assert ch.start() is True
+    try:
+        c = _stuck_client(ch, 1)
+        payload = "x" * (4 * 1024 * 1024)
+        ends: Dict[str, float] = {}
+        barrier = threading.Barrier(2)
+
+        def _sender(tag: str) -> None:
+            barrier.wait(2.0)
+            if tag == "second":
+                time.sleep(0.05)  # первый гарантированно внутри sendall
+            ch.send({"type": "event", "payload": payload})
+            ends[tag] = time.monotonic()
+
+        threads = [threading.Thread(target=_sender, args=(t,), daemon=True) for t in ("first", "second")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(3.0)
+            assert not t.is_alive(), "отправитель завис"
+        gap = ends["second"] - ends["first"]
+        assert gap < 0.2, f"второй отправитель ждал ещё {gap:.3f}с после таймаута первого"
+        time.sleep(0.2)
+        ebadf = [w for w in warnings if "Bad file descriptor" in w]
+        assert ebadf == [], f"запись в закрытый сокет: {ebadf!r}"
+        assert len(warnings) == 1, f"ожидался один WARNING на отброс клиента: {warnings!r}"
+        c.close()
+    finally:
         ch.close()

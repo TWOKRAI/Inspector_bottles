@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import socket
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from .base_channel import MessageChannel
 
@@ -98,8 +98,14 @@ class SocketChannel(MessageChannel):
         self._sessions: Dict[str, socket.socket] = {}
         self._clients_lock = threading.Lock()
         self._write_lock = threading.Lock()
+        # Сокеты, на которых запись упала (ревью 1.3a): помечены и shutdown'нуты под
+        # _write_lock, но С УЧЁТА НЕ СНЯТЫ — снятие только на выходе read-loop, после
+        # обработчиков сессии. Отправители их пропускают: второго sendall нет.
+        self._dead: Set[socket.socket] = set()
 
-        # Счётчики для get_info (наблюдаемость).
+        # Счётчики для get_info (наблюдаемость). Пишутся из нескольких потоков
+        # (read-потоки соединений, обработчики) — под своим локом.
+        self._stats_lock = threading.Lock()
         self._rx = 0
         self._tx = 0
 
@@ -196,10 +202,11 @@ class SocketChannel(MessageChannel):
 
         Медленный клиент (не читает, буфер ядра полон): ``sendall`` упирается в
         таймаут сокета 0.5 с (``settimeout`` в accept-loop — это ТОТАЛЬНЫЙ таймаут
-        sendall), ловится как OSError → WARNING + клиент отброшен. Остальные
-        отправители стоят на ``_write_lock`` не дольше этих 0.5 с и ровно один раз:
-        после отброса медленного в списке нет. Замер тестера 1.3a: отброс через
-        ~0.505 с. Посокетные локи сознательно не заведены (YAGNI).
+        sendall), ловится как OSError → один WARNING, сокет помечен мёртвым и
+        ``shutdown`` (под ``_write_lock``). Следующие отправители его пропускают,
+        поэтому запись стоит не дольше одного таймаута сокета на медленного клиента.
+        С учёта соединение снимает только выход его read-loop (``shutdown`` будит
+        recv), после обработчиков сессии. Посокетные локи не заведены (YAGNI).
 
         Returns:
             {"status": "success"|"error", "channel": name, ...}.
@@ -225,21 +232,15 @@ class SocketChannel(MessageChannel):
         if not clients:
             return {"status": "error", "reason": "no clients connected", "channel": self._name}
 
-        dead: List[socket.socket] = []
         sent = 0
         with self._write_lock:
             for c in clients:
-                try:
-                    c.sendall(line)
+                if self._write_locked(c, line, "client"):
                     sent += 1
-                except OSError as exc:
-                    self._log_warning(f"[SocketChannel:{self._name}] send to client failed: {exc}")
-                    dead.append(c)
-        if dead:
-            self._drop_clients(dead)
         if sent == 0:
             return {"status": "error", "reason": "all clients dead", "channel": self._name}
-        self._tx += sent
+        with self._stats_lock:
+            self._tx += sent
         return {"status": "success", "channel": self._name, "clients": sent}
 
     def _resolve_session(self, message: Dict[str, Any]) -> Optional[str]:
@@ -259,21 +260,41 @@ class SocketChannel(MessageChannel):
 
         Неизвестный sid → error, **НЕ** fallback в broadcast (иначе изоляция
         дырявая на гонке disconnect: пуш мёртвой сессии протёк бы всем). Мёртвый
-        сокет → drop + error (тот же путь, что broadcast при сбое sendall).
+        сокет → пометка + error (тот же путь, что broadcast при сбое sendall).
         """
         with self._clients_lock:
             sock = self._sessions.get(sid)
         if sock is None:
             return {"status": "error", "reason": "session not connected", "channel": self._name, "session": sid}
-        try:
-            with self._write_lock:
-                sock.sendall(line)
-        except OSError as exc:
-            self._log_warning(f"[SocketChannel:{self._name}] send to session {sid} failed: {exc}")
-            self._drop_clients([sock])
+        with self._write_lock:
+            ok = self._write_locked(sock, line, f"session {sid}")
+        if not ok:
             return {"status": "error", "reason": "session dead", "channel": self._name, "session": sid}
-        self._tx += 1
+        with self._stats_lock:
+            self._tx += 1
         return {"status": "success", "channel": self._name, "clients": 1, "session": sid}
+
+    def _write_locked(self, sock: socket.socket, line: bytes, target: str) -> bool:
+        """Записать строку в сокет. Только под ``_write_lock``. Returns: записано ли.
+
+        Мёртвый (помечен) или уже закрытый сокет пропускается молча — ни второго
+        ожидания таймаута, ни EBADF. Сбой записи: один WARNING, пометка, ``shutdown``
+        (read-loop этого соединения получит EOF и снимет его с учёта сам). Больше
+        ничего — ни снятия сессии, ни оповещения отсюда (ревью 1.3a, ADR-RTR-012).
+        """
+        if sock in self._dead or sock.fileno() == -1:
+            return False
+        try:
+            sock.sendall(line)
+            return True
+        except OSError as exc:
+            self._log_warning(f"[SocketChannel:{self._name}] send to {target} failed: {exc} — сокет помечен мёртвым")
+            self._dead.add(sock)
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            return False
 
     # ---- IMessageChannel: получение ----
 
@@ -414,7 +435,8 @@ class SocketChannel(MessageChannel):
         if not isinstance(msg, dict):
             self._log_warning(f"[SocketChannel:{self._name}] non-dict message skipped")
             return True  # строка потеряна, соединение живо
-        self._rx += 1
+        with self._stats_lock:
+            self._rx += 1
         # Привязка session→сокет ведётся ВСЕГДА, а не только при session_isolation.
         # У неё две роли, и это разные вопросы: «кому адресовать» (изоляция, гейт
         # остаётся в send()) и «жив ли ещё этот адрес» (время жизни подписчика).
@@ -478,16 +500,11 @@ class SocketChannel(MessageChannel):
                 f"[SocketChannel:{self._name}] session {sid} уже за другим соединением — привязка отклонена"
             )
 
-    def _drop_clients(self, clients: List[socket.socket]) -> None:
-        """Убрать мёртвые соединения из списка и закрыть их.
-
-        Заодно снимает session-маппинг — **единственная точка unbind**: все пути
-        смерти сокета (read-loop exit, dead-on-send, close) сходятся сюда.
-        """
-        self._finish_drop(clients, self._unregister_clients(clients))
-
     def _unregister_clients(self, clients: List[socket.socket]) -> List[str]:
         """Первая половина drop: снять сокеты и их session-маппинг с учёта (под локом).
+
+        **Единственная точка unbind** — зовёт её только выход read-loop соединения
+        (сбой записи лишь помечает сокет, см. ``_write_locked``).
 
         Returns: сессии, снятые ЭТИМ вызовом — каждая попадает ровно в один вызов,
         поэтому on_session_closed звучит ровно один раз при любых гонках drop'ов.
@@ -516,11 +533,15 @@ class SocketChannel(MessageChannel):
                 self._on_session_closed(sid)
             except Exception as exc:  # noqa: BLE001 — обработчик не роняет канал
                 self._log_error(f"[SocketChannel:{self._name}] on_session_closed({sid}) упал: {exc}")
-        for c in clients:
-            try:
-                c.close()
-            except OSError:
-                pass
+        # Закрытие — под _write_lock: отправитель со старым снимком списка увидит
+        # закрытый сокет (fileno == -1) уже под тем же локом и пропустит его.
+        with self._write_lock:
+            for c in clients:
+                try:
+                    c.close()
+                except OSError:
+                    pass
+                self._dead.discard(c)
 
     # ---- Мониторинг ----
 
@@ -528,6 +549,8 @@ class SocketChannel(MessageChannel):
         with self._clients_lock:
             clients = len(self._clients)
             sessions = len(self._sessions)
+        with self._stats_lock:
+            rx, tx = self._rx, self._tx
         return {
             "name": self._name,
             "type": self.channel_type,
@@ -538,6 +561,6 @@ class SocketChannel(MessageChannel):
             "clients": clients,
             "sessions": sessions,
             "session_isolation": self._session_isolation,
-            "rx": self._rx,
-            "tx": self._tx,
+            "rx": rx,
+            "tx": tx,
         }
