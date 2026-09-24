@@ -227,17 +227,21 @@ class ProcessSpawner:
             self._logger.info("System stopped")
 
     def _snapshot_descendants(self) -> list:
-        """Снимок всего поддерева текущего процесса (psutil.Process, recursive).
+        """Снимок поддерева ОРКЕСТРАТОРА: сам PM + рекурсивно его потомки (psutil.Process).
 
-        Снимается ДО остановки PM, пока PPID-цепочка цела. Best-effort: при любой
-        ошибке (нет psutil/доступа) возвращает пустой список.
+        Корень — PM, НЕ процесс-хозяин launcher'а: у хозяина бывают чужие дети
+        (resource_tracker, второй стенд в том же pytest, любой subprocess), а guard
+        добивает живых членов снимка всегда (ADR-PMM-031). Снимается ДО остановки PM,
+        пока PPID-цепочка цела. PM уже нет → пусто (остаток добивает killpg группы).
+        Best-effort: при любой ошибке (нет psutil/доступа) — пустой список.
         """
+        if self._process is None or self._process.pid is None:
+            return []
         try:
-            import os
-
             import psutil
 
-            return psutil.Process(os.getpid()).children(recursive=True)
+            pm = psutil.Process(self._process.pid)
+            return [pm] + pm.children(recursive=True)
         except Exception:  # noqa: BLE001 — снимок не критичен
             return []
 

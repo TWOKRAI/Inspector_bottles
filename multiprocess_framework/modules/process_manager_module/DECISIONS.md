@@ -1310,6 +1310,12 @@ Switch и rollback этого класса НЕ имеют: планировщи
    группой launcher'а» стоит ПОСЛЕ обеих веток. `kill_tree` после сработавшего примитива ВСЕГДА добивает живых
    членов снимка (`_sweep_snapshot`, `psutil.Process.is_running()` сверяет create_time) — член, вышедший из
    группы своим `setsid`, примитивом не задет.
+   **Корень снимка — PM, а не процесс-хозяин launcher'а** (`spawner._snapshot_descendants` =
+   `[PM] + PM.children(recursive=True)`; PM уже нет → пусто). psutil-fallback `_kill_via_psutil` берёт только
+   снимок, без `children()` хозяина. Первая версия правки брала всех потомков хозяина, и безусловный добой
+   убивал на каждом штатном стопе чужих детей хозяина (ревью лида: посторонний `sleep 60` → RC=-9,
+   resource_tracker убит и пересоздан, 15 трассировок `KeyError: '/mp-…'`). Тот же дефект сидел в старом
+   fallback-пути, где он срабатывал только при отказе примитива.
 2. **Бюджеты по построению.** Окна `_stop_many` названы константами `TERMINATE_GRACE_S = 1.0`,
    `KILL_CONFIRM_S = 1.0` (`core/process_registry.py`, поведение не менялось). Spawner:
    - кладёт свой graceful-бюджет в конфиг PM как `shutdown_timeout`, если `orchestrator_config` не задал его явно;

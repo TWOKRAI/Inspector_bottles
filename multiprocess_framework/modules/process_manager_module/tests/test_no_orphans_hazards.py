@@ -212,3 +212,87 @@ def test_guard_on_normal_path_does_not_sleep_when_group_empty():
     t0 = time.monotonic()
     guard.kill_tree([])
     assert time.monotonic() - t0 < 0.3
+
+
+# ---------------------------------------------------------------------------
+# Снимок — поддерево PM, а не всё хозяйство процесса-хозяина (блокер ревью лида).
+# ---------------------------------------------------------------------------
+
+
+def _bystander() -> subprocess.Popen:
+    """Чужой ребёнок процесса-хозяина (как resource_tracker или второй стенд)."""
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+
+
+def _stop_launcher_with(child_class_path: str) -> subprocess.Popen:
+    from ..launcher.system_launcher import SystemLauncher
+    from ._no_orphans_helpers import cleanup_procs, snapshot_children
+
+    bystander = _bystander()
+    launcher = SystemLauncher(config={"c": {"class": child_class_path}}, stop_timeout=5.0)
+    snap: list = []
+    try:
+        launcher.start()
+        assert launcher.wait_until_ready(20.0), "PM не стал ready — окружение сломано"
+        pm = launcher._spawner.get_process()
+        snap = snapshot_children(pm.pid)
+        launcher.stop()
+        time.sleep(0.3)
+        return bystander
+    finally:
+        cleanup_procs(snap)
+
+
+@posix_only
+@pytest.mark.timeout(60)
+def test_normal_stop_leaves_host_bystander_alive():
+    """Сторожит: корень снимка в ``_snapshot_descendants`` — PM, не ``os.getpid()``.
+
+    С корнем в хозяине ``_sweep_snapshot`` SIGKILL'ил бы чужого ребёнка на КАЖДОМ
+    штатном стопе (замер лида: RC=-9, resource_tracker убит и пересоздан).
+    """
+    from ._no_orphans_helpers import QUICK_CHILD_CLASS_PATH
+
+    bystander = None
+    try:
+        bystander = _stop_launcher_with(QUICK_CHILD_CLASS_PATH)
+        assert bystander.poll() is None, f"чужой ребёнок хозяина убит штатным стопом: rc={bystander.returncode}"
+    finally:
+        if bystander is not None and bystander.poll() is None:
+            bystander.kill()
+            bystander.wait(timeout=5)
+
+
+@posix_only
+@pytest.mark.timeout(60)
+def test_hung_child_stop_leaves_host_bystander_alive():
+    """Сторожит то же на пути эскалации (зависший ребёнок, guard бьёт группу)."""
+    from ._no_orphans_helpers import HUNG_CHILD_CLASS_PATH
+
+    bystander = None
+    try:
+        bystander = _stop_launcher_with(HUNG_CHILD_CLASS_PATH)
+        assert bystander.poll() is None, f"чужой ребёнок хозяина убит стопом: rc={bystander.returncode}"
+    finally:
+        if bystander is not None and bystander.poll() is None:
+            bystander.kill()
+            bystander.wait(timeout=5)
+
+
+@posix_only
+@pytest.mark.timeout(30)
+def test_psutil_fallback_does_not_touch_host_children():
+    """Сторожит: ``_kill_via_psutil`` берёт ТОЛЬКО снимок, без ``children()`` хозяина.
+
+    Путь срабатывает, когда примитив ОС отказал; штатные сценарии его не проходят,
+    поэтому — прямой вызов с пустым снимком.
+    """
+    bystander = _bystander()
+    try:
+        ProcessTreeGuard()._kill_via_psutil([])
+        time.sleep(0.3)
+        assert bystander.poll() is None, f"psutil-fallback убил чужого ребёнка хозяина: rc={bystander.returncode}"
+    finally:
+        if bystander.poll() is None:
+            bystander.kill()
+            bystander.wait(timeout=5)

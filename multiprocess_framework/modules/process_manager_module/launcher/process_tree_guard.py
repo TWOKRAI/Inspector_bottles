@@ -307,10 +307,12 @@ class ProcessTreeGuard:
         try:
             import psutil
 
-            current = psutil.Process(os.getpid())
+            # Только снимок (поддерево PM). Детей процесса-хозяина НЕ добавлять: среди
+            # них чужие (resource_tracker, второй стенд) — ADR-PMM-031.
+            me = psutil.Process(os.getpid()).pid
             by_pid: dict[int, "psutil.Process"] = {}
-            for proc in list(fallback_procs or []) + current.children(recursive=True):
-                if proc.pid != current.pid:
+            for proc in list(fallback_procs or []):
+                if proc.pid != me:
                     by_pid[proc.pid] = proc
             children = list(by_pid.values())
             if not children:
