@@ -13,15 +13,22 @@ push, только если голова адреса совпадает с им
 Манифест — временная копия (как ``test_recipe_service_live.py``): боевой
 ``multiprocess_prototype/app.yaml`` не пишется (путь ``build_launcher``, не ``main()``).
 Свой порт из диапазона 8880-8899 (ловушка «двух бэкендов», ``backend_ctl/AGENTS.md``).
+
+Читатель — в ОТДЕЛЬНОМ процессе (``python -c``), как настоящий Пульт. В одном дереве с
+бэкендом ``RemoteFrameSource`` (``track=False``) снимал бы сегменты продюсера с учёта
+ОБЩЕГО ``resource_tracker`` — на остановке бэкенда трекер печатал
+``KeyError: '/output_frames_N'`` (ревью 1.3, m4). Поэтому же тест проверяет stderr
+прогона: ни одной такой строки.
 """
 
 from __future__ import annotations
 
-import threading
-import time
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
 import yaml
 
@@ -56,64 +63,76 @@ def _launcher(manifest: Path):
     return build_launcher(load_manifest(manifest), None, include_presentation=True)
 
 
-@pytest.fixture(scope="module")
-def bridge_backend(tmp_path_factory: pytest.TempPathFactory, monkeypatch_module):
-    repo_dir = Path(__file__).resolve().parents[2] / "multiprocess_prototype"
-    # env-overlay презентации перебил бы наш манифест — снимаем на время модуля.
-    monkeypatch_module.delenv("INSPECTOR_PRESENTATION", raising=False)
-    monkeypatch_module.delenv("INSPECTOR_HEADLESS", raising=False)
-    manifest = _write_temp_manifest(repo_dir, tmp_path_factory.mktemp("frame_bridge_live"))
-    harness = BackendHarness(port=_PORT, launcher_factory=lambda: _launcher(manifest))
-    drv = harness.start()
-    try:
-        yield drv
-    finally:
-        harness.stop()
+_READER_SCRIPT = r"""
+import json, sys, threading, time
+from multiprocess_framework.modules.frontend_module.bridge.remote_frame_source import RemoteFrameSource
+from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient
+
+port, want, window = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
+frames, enough = [], threading.Event()
+
+def on_frame(sender, frame, bseq):
+    frames.append([sender, list(frame.shape), str(frame.dtype), bseq])
+    if len(frames) >= want:
+        enough.set()
+
+client = SocketClient("127.0.0.1", port, sender="pult")  # sender != имя двери хаба
+client.connect(timeout=5.0)
+source = RemoteFrameSource(client, dispatch=lambda fn: fn())
+reply = source.subscribe(None, on_frame, timeout=8.0)
+t0 = time.monotonic()
+enough.wait(window)
+elapsed = time.monotonic() - t0
+stats = source.stats
+source.close()
+client.close()
+print("RESULT " + json.dumps({"reply": reply, "n": len(frames), "first": frames[:1], "elapsed": elapsed,
+                              "stats": stats, "address": client.subscriber_address}))
+"""
 
 
-@pytest.fixture(scope="module")
-def monkeypatch_module():
-    mp = pytest.MonkeyPatch()
-    try:
-        yield mp
-    finally:
-        mp.undo()
+def _run_reader(repo_root: Path) -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(repo_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    proc = subprocess.run(
+        [sys.executable, "-c", _READER_SCRIPT, str(_PORT), str(_WANT_FRAMES), str(_WINDOW_SEC)],
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT ")]
+    assert proc.returncode == 0 and lines, f"читатель упал rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+    return json.loads(lines[-1][len("RESULT ") :])
 
 
 @pytest.mark.harness_smoke
-def test_external_client_receives_frames_through_the_bridge(bridge_backend) -> None:
-    from multiprocess_framework.modules.frontend_module.bridge.remote_frame_source import RemoteFrameSource
-    from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient
+def test_external_client_receives_frames_through_the_bridge(tmp_path: Path, capfd, monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    # env-overlay презентации перебил бы наш манифест.
+    monkeypatch.delenv("INSPECTOR_PRESENTATION", raising=False)
+    monkeypatch.delenv("INSPECTOR_HEADLESS", raising=False)
+    manifest = _write_temp_manifest(repo_root / "multiprocess_prototype", tmp_path)
 
-    # Предусловие стенда: gui поднят именно мостом, иначе дальше проверять нечего.
-    stats = bridge_backend.send_command("gui", "frames.stats", {}, timeout=8.0)
-    assert (stats.get("result") or stats).get("success") is True, f"gui не мост (нет frames.stats): {stats}"
-
-    frames: list = []
-    got_enough = threading.Event()
-
-    def _on_frame(sender: str, frame: np.ndarray, bseq: int) -> None:
-        frames.append((sender, frame.shape, frame.dtype, bseq))
-        if len(frames) >= _WANT_FRAMES:
-            got_enough.set()
-
-    client = SocketClient("127.0.0.1", _PORT, sender="pult")  # sender ≠ имя двери хаба
-    client.connect(timeout=5.0)
-    source = RemoteFrameSource(client, dispatch=lambda fn: fn())
+    harness = BackendHarness(port=_PORT, launcher_factory=lambda: _launcher(manifest))
+    drv = harness.start()
     try:
-        reply = source.subscribe(None, _on_frame, timeout=8.0)
-        assert reply.get("success") is True, reply
-        t0 = time.monotonic()
-        got_enough.wait(_WINDOW_SEC)
-        elapsed = time.monotonic() - t0
-        assert len(frames) >= _WANT_FRAMES, (
-            f"за {elapsed:.1f}с пришло {len(frames)} кадров (< {_WANT_FRAMES}); "
-            f"stats клиента={source.stats}, адрес={client.subscriber_address}"
-        )
-        sender, shape, dtype, _ = frames[0]
-        assert sender == "synthetic_source"
-        assert shape == (480, 640, 3)
-        assert dtype == np.uint8
+        # Предусловие стенда: gui поднят именно мостом, иначе дальше проверять нечего.
+        stats = drv.send_command("gui", "frames.stats", {}, timeout=8.0)
+        assert (stats.get("result") or stats).get("success") is True, f"gui не мост (нет frames.stats): {stats}"
+        result = _run_reader(repo_root)
     finally:
-        source.close()
-        client.close()
+        harness.stop()
+
+    assert result["reply"].get("success") is True, result
+    assert result["n"] >= _WANT_FRAMES, f"за {result['elapsed']:.1f}с пришло {result['n']} кадров: {result}"
+    sender, shape, dtype, _ = result["first"][0]
+    assert sender == "synthetic_source"
+    assert shape == [480, 640, 3]
+    assert dtype == "uint8"
+
+    # m4: остановка бэкенда без KeyError трекера (читатель вне дерева не трогает его учёт).
+    captured = capfd.readouterr()
+    leaked = [ln for ln in (captured.err + captured.out).splitlines() if "KeyError" in ln]
+    assert leaked == [], f"resource_tracker бэкенда потерял регистрации продюсера: {leaked}"

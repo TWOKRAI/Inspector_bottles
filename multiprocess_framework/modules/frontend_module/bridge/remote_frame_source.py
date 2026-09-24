@@ -69,6 +69,9 @@ _STAT_KEYS = ("received", "delivered", "dup", "torn", "missing", "errors", "supe
 _HANDLE_CAP = 32
 _IDLE_WAIT_SEC = 0.5
 _CLOSE_JOIN_SEC = 2.0
+#: Сколько close() ждёт ответа хоста на frames.unsubscribe. Долго ждать незачем: при
+#: закрытии сессии брокер хаба снимает подписку сам (POINT_COMMANDS).
+_CLOSE_UNSUBSCRIBE_TIMEOUT = 0.5
 _RESUBSCRIBE_TIMEOUT = 5.0
 
 _log = logging.getLogger(__name__)
@@ -216,7 +219,10 @@ class RemoteFrameSource:
         self._reader: Optional[ShmFrameReader] = None
         self._reader_cached: Optional[bool] = None
         self._thread: Optional[threading.Thread] = None
-        self._stop = False
+        # Стоп — у КАЖДОГО потока свой (поколение): close(), не дождавшийся потока
+        # (колбэк спит на нём), и следующий subscribe() не должны оживить старый поток
+        # общим флагом — иначе копируют двое.
+        self._thread_stop: Optional[threading.Event] = None
         client.add_push_listener(self._on_push)
 
     def subscribe(
@@ -338,16 +344,23 @@ class RemoteFrameSource:
     def close(self) -> None:
         """Освободить ресурсы. Не бросает, идемпотентен.
 
-        Post: ``unsubscribe()`` выполнен; поток копирования остановлен (join с дедлайном
-              ≤ 2 с); все handle'ы SHM закрыты (сегменты хоста НЕ удалены); последующие
-              push'и игнорируются. Клиент НЕ закрывается — им владеет вызывающий.
+        Post: подписка снята локально; хосту отправлен ``frames.unsubscribe`` с ожиданием
+              ответа ≤ 0.5 с (молчащий хост не держит закрытие — подписку мёртвой сессии
+              снимает брокер хаба); поток копирования получил стоп и ожидается ≤ 2 с —
+              итого ``close()`` возвращается не позже ~2.5 с. Поток, не дождавшийся
+              (колбэк исполняется на нём через синхронный ``dispatch``), завершится сам
+              после возврата колбэка и НЕ продолжит копировать, даже если следом вызван
+              ``subscribe()``. Все handle'ы SHM закрыты (сегменты хоста НЕ удалены);
+              последующие push'и игнорируются. Клиент НЕ закрывается — им владеет вызывающий.
         """
         try:
-            self.unsubscribe()
+            self.unsubscribe(timeout=_CLOSE_UNSUBSCRIBE_TIMEOUT)
         except Exception as exc:  # noqa: BLE001 — контракт: не бросает
             self._warn(f"RemoteFrameSource.close: unsubscribe упал: {exc!r}")
         with self._cond:
-            self._stop = True
+            if self._thread_stop is not None:
+                self._thread_stop.set()
+            self._thread_stop = None
             self._cond.notify_all()
             thread, reader = self._thread, self._reader
             self._thread, self._reader, self._reader_cached = None, None, None
@@ -416,8 +429,9 @@ class RemoteFrameSource:
     def _ensure_thread_locked(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
-        self._stop = False
-        self._thread = threading.Thread(target=self._copy_loop, name=COPY_THREAD_NAME, daemon=True)
+        stop = threading.Event()
+        self._thread_stop = stop
+        self._thread = threading.Thread(target=self._copy_loop, args=(stop,), name=COPY_THREAD_NAME, daemon=True)
         self._thread.start()
 
     def _on_push(self, msg: Dict[str, Any]) -> None:
@@ -439,12 +453,12 @@ class RemoteFrameSource:
             self._mailbox[sender] = descriptor
             self._cond.notify()
 
-    def _copy_loop(self) -> None:
+    def _copy_loop(self, stop: threading.Event) -> None:
         while True:
             with self._cond:
-                while not self._stop and not self._mailbox:
+                while not stop.is_set() and not self._mailbox:
                     self._cond.wait(_IDLE_WAIT_SEC)
-                if self._stop:
+                if stop.is_set():
                     return
                 sender = next(iter(self._mailbox))
                 descriptor = self._mailbox.pop(sender)

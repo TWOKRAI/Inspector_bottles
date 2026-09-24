@@ -309,3 +309,76 @@ def test_f_unsubscribe_sends_frames_unsubscribe_to_host() -> None:
         client.close()
         router.shutdown()
         sock_ch.close()
+
+
+# --------------------------------------------------------------------------- ревью: m1, m3
+
+
+def test_m1_close_on_silent_host_returns_fast() -> None:
+    """(m1) Хост принял подписку и замолчал → ``close()`` ≤ 1.5 с, а не таймаут request (5 с).
+
+    Отписку при закрытии всё равно подбирает брокер по закрытию сессии — ждать хоста
+    долго незачем. Инъекция: вернуть в ``close`` полный таймаут ``unsubscribe()`` → красный."""
+    router, sock_ch = _make_host(
+        {
+            "frames.subscribe": lambda m: {"success": True, "seqlock": False, "owner_incarnation": False},
+            "frames.unsubscribe": lambda m: time.sleep(2.5) or {"success": True},
+        }
+    )
+    client = SocketClient("127.0.0.1", sock_ch.port, sender="backend_ctl")
+    try:
+        client.connect()
+        source = RemoteFrameSource(client, dispatch=lambda fn: fn())
+        sub = _in_thread(lambda: source.subscribe(None, lambda s, a, b: None, timeout=3.0), deadline=4.0)
+        assert not sub["alive"] and "exc" not in sub, sub
+
+        box = _in_thread(source.close, deadline=6.0)
+        assert not box["alive"], "close() завис"
+        assert box["elapsed"] <= 1.5, f"close() на молчащем хосте занял {box['elapsed']:.2f}с"
+    finally:
+        time.sleep(2.6)  # дать хосту дописать заторможенный ответ до shutdown
+        client.close()
+        router.shutdown()
+        sock_ch.close()
+
+
+def test_m3_subscribe_after_timed_out_close_leaves_one_copy_thread() -> None:
+    """(m3) ``close()`` не дождался потока (колбэк спит 3 с), затем ``subscribe()`` →
+    после возврата старого колбэка жив ровно ОДИН поток копирования.
+
+    Инъекция: общий флаг остановки вместо поколения потока (новый subscribe сбрасывает
+    его в False — старый поток оживает) → два потока → красный."""
+    from multiprocess_framework.modules.frontend_module.bridge.remote_frame_source import COPY_THREAD_NAME
+
+    def _copy_threads() -> set:
+        return {t.ident for t in threading.enumerate() if t.name == COPY_THREAD_NAME and t.is_alive()}
+
+    before = _copy_threads()
+    shm = _segment()
+    client = _StubClient({"success": True, "seqlock": False, "owner_incarnation": False})
+    entered = threading.Event()
+    returned = threading.Event()
+
+    def _sleepy(sender: str, frame: np.ndarray, bseq: int) -> None:
+        entered.set()
+        time.sleep(3.0)
+        returned.set()
+
+    source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
+    try:
+        source.subscribe(None, _sleepy)
+        client.push({"sender": "camA", "name": shm.name, "idx": 0, "seqlock": False, "bseq": 1, "ts": 0.0})
+        assert entered.wait(3.0), "колбэк не вызван"
+
+        box = _in_thread(source.close, deadline=4.0)
+        assert not box["alive"], "close() завис"
+
+        source.subscribe(None, lambda s, a, b: None)
+        assert returned.wait(5.0), "старый колбэк не вернулся"
+        time.sleep(0.8)  # > _IDLE_WAIT_SEC: старому потоку хватает времени увидеть свой стоп
+        alive = _copy_threads() - before
+        assert len(alive) == 1, f"живых потоков копирования {len(alive)}, ожидался 1"
+    finally:
+        _in_thread(source.close, deadline=4.0)
+        shm.close()
+        shm.unlink()

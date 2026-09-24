@@ -20,7 +20,6 @@ GREEN, а не то, что сейчас реально исполняется. 
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import threading
@@ -47,9 +46,6 @@ from multiprocess_framework.modules.router_module.core.router_manager import Rou
 from multiprocess_framework.modules.shared_resources_module.memory.format.buffer import (
     calculate_buffer_size,
     pack_images,
-)
-from multiprocess_framework.modules.shared_resources_module.memory.reader.shm_frame_reader import (
-    ShmFrameReader,
 )
 
 # --------------------------------------------------------------------------- харнесс хоста
