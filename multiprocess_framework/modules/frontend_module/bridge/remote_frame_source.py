@@ -131,10 +131,16 @@ class RemoteFrameSource:
     * ``missing``   — слотов, которых нет (``FileNotFoundError`` при открытии по имени);
       не исключение наружу — счётчик и строка лога, следующий дескриптор обрабатывается;
     * ``errors``    — всё прочее: дескриптор без нужных ключей, иное исключение чтения,
-      ``None`` без ``seqlock``, исключение самого ``dispatch``.
+      ``None`` без ``seqlock``, исключение самого ``dispatch``;
+    * ``superseded`` — дескрипторов, вытесненных из ящика новым дескриптором того же
+      ``sender`` до того, как поток копирования их забрал (latest-wins).
 
-    Вытеснённые из ящика дескрипторы отдельным счётчиком не ведутся:
-    ``received - (delivered + dup + torn + missing + errors)`` = вытеснённые + ещё в ящике.
+    Инвариант (в любой момент, снимок :attr:`stats`):
+    ``received == delivered + dup + torn + missing + errors + superseded + in_flight``,
+    где ``in_flight`` — дескрипторы, принятые, но ещё не отнесённые ни к одному счётчику
+    (лежат в ящике или обрабатываются потоком копирования), не больше одного в ящике на
+    ``sender`` плюс один в обработке. В покое (писатель остановлен, поток копирования
+    всё разобрал) ``in_flight == 0``.
     """
 
     def __init__(
@@ -231,7 +237,7 @@ class RemoteFrameSource:
     @property
     def stats(self) -> Dict[str, int]:
         """Снимок счётчиков: dict ровно с ключами ``received``, ``delivered``, ``dup``,
-        ``torn``, ``missing``, ``errors`` (int ≥ 0, монотонны). Новый dict на каждый вызов.
+        ``torn``, ``missing``, ``errors``, ``superseded`` (int ≥ 0, монотонны). Новый dict на каждый вызов.
         """
         raise NotImplementedError
 
