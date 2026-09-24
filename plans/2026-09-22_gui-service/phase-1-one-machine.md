@@ -190,6 +190,34 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 слот может быть переиспользован под ним. В v1 Пульт отказывается от SHM при включённом флаге
 (читает из `capabilities`) — и **измеряет** торн-кадры, а не обещает их отсутствие.
 
+**Уточнено по DESIGN 2026-09-24 (решения лида, отчёт `docs/reviews/2026-09-24_gui-1.3-design.md`; где
+расходится с текстом ниже — действует этот блок):**
+1. **Блокер, которого не было в плане (воспроизведён лидом):** внешний процесс, открывший сегмент
+   `SharedMemory(name=..., create=False)`, на выходе **удаляет живой сегмент бэкенда** через свой
+   `resource_tracker` (Python 3.12; `track=False` появился только в 3.13). Зонд: без `unregister` —
+   `segment UNLINKED`, с `resource_tracker.unregister(...)` — `segment alive`. Лечение в задаче:
+   kwarg `track: bool = True` у `ShmFrameReader` (`shm_frame_reader.py`), `RemoteFrameSource` создаёт его с
+   `track=False`. Acceptance ниже дополнен.
+2. **Attach по имени уже вынесен:** мидлварь делегирует в `ShmFrameReader.read_frame` (Protocol `FrameReader`).
+   `frame_shm_middleware.py` в 1.3 **не правится**; `RemoteFrameSource` переиспользует `ShmFrameReader`.
+3. **`display_id` и `seq` в конверте нет** (GUI вычисляет дисплей из `sender` по рецепту,
+   `recipe_displays.py:124`). Решение: мост фильтрует по **`senders`**, отображение `sender → дисплей` —
+   на стороне Пульта той же функцией `resolve_display_id` по рецепту из `recipe.get` (1b.1), это 1.4.
+   `seq` — собственный монотонный `bseq` моста. shape/dtype в дескрипторе не нужны: они в заголовке слота.
+4. **`capabilities.flags` не существует**, а добавить его — правка `process_manager_process.py` (чужой файл).
+   Флаги (`seqlock`, `owner_incarnation`, отказ при `FW_SHM_LOAN_PROTOCOL`) отдаёт ответ `frames.subscribe`.
+5. **Протокол подписки** — по пути ui_tap (`RouterPushChannel` → relay хаба → `SocketChannel`), новых билдеров
+   нет. Уборка мёртвых сессий и replay после рестарта `gui` — одна строка
+   `"frames.subscribe": "frames.unsubscribe"` в `POINT_COMMANDS` (`observability_broker.py`).
+   `backend_ctl/subscriptions.py` фреймворку недоступен (слой) — реконнект через
+   `RemoteFrameSource.on_reconnected()`, как `RemoteStateProxy`.
+6. **Torn-кадры детектируются только при `FW_SHM_SEQLOCK=1`** (по умолчанию выкл.) — стенд гонять дважды.
+   Без seqlock — число расхождений углов на 1000 кадров, без порога.
+7. **Follow-up, не в 1.3:** «кадр новее дескриптора» (слот перезаписан, пока дескриптор шёл — целый, но
+   чужой кадр; лечится generation в конверте на пути записи); дескрипторы делят observability-очередь хаба
+   (maxsize 256, с потерями) — потери видны разницей `sent` моста и `received` Пульта; tool `frames_*` в
+   `backend_ctl`.
+
 **Files:**
 - НОВЫЙ `multiprocess_prototype/frontend/bridge_process.py` — `BridgeGuiProcess` (рядом с
   `headless_process.py`, тот же контракт процесса)
@@ -227,7 +255,7 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
       синтетическим источником: `introspect_plugins`/`system_overview` показывают процесс `gui`
       классом `BridgeGuiProcess`; без подписчиков счётчик `received` роутера у `gui` растёт (дренаж
       работает как у headless).
-- [ ] Внешний скрипт (вне дерева) через `RemoteFrameSource.subscribe(["main"], cb)` получает за 10 с
+- [ ] Внешний скрипт (вне дерева) через `RemoteFrameSource.subscribe(senders=None, cb)` получает за 10 с
       ≥ 0.8 × fps продюсера (fps — из `introspect_router_stats`, не из конфига), кадры формы
       `(h, w, 3)` `uint8`.
 - [ ] Кадры **побитово** равны продюсерским: продюсер стампует счётчик в углах; у ≥ 99.9 % принятых
@@ -238,6 +266,11 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
       отправленных дескрипторов замирает), продюсер не замечает.
 - [ ] `frontend/run.py` (воплощение с Qt) и `--headless` работают как прежде — снапшот-тесты
       топологии зелёные, число из 1.1.
+
+- [ ] **Внешний читатель не удаляет сегменты бэкенда:** подпроцесс читает кадр через `RemoteFrameSource` и
+      выходит → сегмент продюсера открывается по имени, второй читатель продолжает получать кадры
+      (до правки — RED, воспроизведено лидом 2026-09-24).
+- [ ] Смерть клиента (kill -9) → `frames.stats` для его адреса замирает за ≤ 1 с (уборка брокером).
 
 **Out of scope:** кадры по сети (2.1); выбор транспорта в Пульте (2.1); loan-протокол для внешнего
 читателя (после v1 — либо мост держит собственное кольцо-копию, либо леджер учится внешним читателям).
