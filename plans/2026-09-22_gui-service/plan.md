@@ -208,7 +208,7 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 
 Файл: [`phase-1b-recipe-service.md`](phase-1b-recipe-service.md)
 
-- Task 1b.1: Сервис рецептов на бэкенде: `recipe.*` с ревизией, запись `app.yaml` уходит из GUI [PENDING] (зависимостей нет — параллельно Ф1) — **Module contract:** new-lite
+- Task 1b.1: Сервис рецептов на бэкенде: `recipe.*` с ревизией, запись `app.yaml` уходит из GUI [DONE 2026-09-24, merge `5a5d65cc`] (зависимостей нет — параллельно Ф1) — **Module contract:** new-lite
 - Task 1b.2: Каталоги плагинов/дисплеев/сервисов от бэкенда; код `Plugins/` не грузится в GUI [PENDING] (параллельно Ф1) — **Module contract:** impl-only
 - Task 1b.3: Пакет вкладок инспектора на удалённых портах; запрет `frontend ↛ backend/recipes` [PENDING] (зависит от 1b.1, 1b.2, 1.4) — **Module contract:** impl-only
 - Task 1b.4: Auth на бэкенде: сессия оператора, проверка команд у владельца [PENDING] (зависит от 1.2; до Ф2) — **Module contract:** impl-only

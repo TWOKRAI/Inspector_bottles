@@ -95,6 +95,21 @@
 **Dependencies:** нет (бэкенд; может идти параллельно Ф1).
 **Module contract:** new-lite (`recipe/service` — докстринг-контракт Pre/Post на каждую команду).
 
+**Итог (2026-09-24, DONE, merge `5a5d65cc` в `feat/gui-service`):** хаб регистрирует `recipe.*` через
+`ProcessManagerProcessApp._register_builtin_commands` (`process_manager_process.py` не тронут), ADR-RCP-007.
+Unit 167 passed; live 2 passed (порты 8887/8889); break-injection лида — 9 свойств + имя/симлинк, все
+убиты своими тестами; ревью — 2 итерации, APPROVE_WITH_NOTES. Неверная модель тестера: ждал плоский ответ
+вместо конверта `result` (исправлено отдельным коммитом `718cf38e`).
+- Найдено ревью и закрыто: имя `D:evil` уводило запись на другой диск Windows (белый список + вложенность);
+  `activate` через `unwrap_recipe` терял `devices:` у 8 из 18 рецептов (вживую: без `protected` устройства
+  пропадали) — `to_topology` отдаёт полное тело.
+- **Долги:** (1) `recipe.save` через PyYAML теряет комментарии (655 строк на 18 рецептах) — **предусловие
+  1b.3**: запись с сохранением комментариев (ruamel, как `recipe_store.py:98`); (2) имена-устройства Windows
+  (`NUL`, `CON` без двоеточия) проходят белый список, на Windows не проверено; (3) повторный `activate` за
+  < debounce → `apply_failed` с `apply.debounced=true` — Пульту смотреть вложенный флаг; (4) harness по
+  умолчанию не передаёт `manifest_path` — без `launcher_factory` `recipe.*` в harness нет (прод-дорога
+  `main --headless` отвечает, проверено ревью).
+
 ---
 
 ### Task 1b.2 — Каталоги от бэкенда: плагины, дисплеи, сервисы
