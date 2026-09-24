@@ -30,6 +30,15 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .base_channel import MessageChannel
 
+# ponytail: потолок 8 одновременных on_inbound на одно соединение; сверх него read-loop
+# ждёт свободный слот (backpressure на сокет, TCP-окно отдаёт её клиенту). Поднять,
+# если единственное мультиплексное соединение Пульта упрётся в него под нагрузкой.
+_MAX_INFLIGHT_PER_CONNECTION = 8
+
+# Сколько ждать слот за одну попытку: между попытками read-loop проверяет _running,
+# чтобы close() не упирался в поток, застрявший на полном семафоре.
+_INFLIGHT_ACQUIRE_POLL_SEC = 0.1
+
 
 class SocketChannel(MessageChannel):
     """Серверный TCP-эндпоинт как IMessageChannel.
@@ -48,6 +57,9 @@ class SocketChannel(MessageChannel):
             session, умирает вместе с сокетом, и держатель подписок должен узнать
             об этом от того, кто видел разрыв. Без такого сигнала мёртвые намерения
             копятся линейно по реконнектам (5.11-R1).
+        max_line_bytes: потолок одной входящей строки (без ``\n``). Длиннее —
+            строка отбрасывается целиком (WARNING один раз на строку), соединение
+            живо, буфер не растёт выше потолка + одного recv-чанка (ADR-RTR-012).
     """
 
     def __init__(
@@ -60,9 +72,11 @@ class SocketChannel(MessageChannel):
         log_error: Optional[Callable[[str], None]] = None,
         session_isolation: bool = False,
         on_session_closed: Optional[Callable[[str], None]] = None,
+        max_line_bytes: int = 1_048_576,
     ) -> None:
         super().__init__(log_warning=log_warning, log_error=log_error)
         self._on_session_closed = on_session_closed
+        self._max_line_bytes = max_line_bytes
         self._name = name
         self._host = host
         self._port = port
@@ -176,7 +190,16 @@ class SocketChannel(MessageChannel):
     def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Сериализовать dict в newline-JSON и отправить всем клиентам (под Lock).
 
-        Зовётся ТОЛЬКО router'ом через _resolve_channels(channel=name).
+        Зовётся ТОЛЬКО router'ом через _resolve_channels(channel=name) — и, после
+        ADR-RTR-012, из нескольких потоков-обработчиков одновременно; запись
+        сериализует общий ``_write_lock``.
+
+        Медленный клиент (не читает, буфер ядра полон): ``sendall`` упирается в
+        таймаут сокета 0.5 с (``settimeout`` в accept-loop — это ТОТАЛЬНЫЙ таймаут
+        sendall), ловится как OSError → WARNING + клиент отброшен. Остальные
+        отправители стоят на ``_write_lock`` не дольше этих 0.5 с и ровно один раз:
+        после отброса медленного в списке нет. Замер тестера 1.3a: отброс через
+        ~0.505 с. Посокетные локи сознательно не заведены (YAGNI).
 
         Returns:
             {"status": "success"|"error", "channel": name, ...}.
@@ -290,8 +313,19 @@ class SocketChannel(MessageChannel):
         """Читать newline-JSON из соединения, парсить и передавать в on_inbound.
 
         Битая строка → лог+skip, не падаем. Закрытие соединения → выход.
+
+        Разбор и привязка сессии — синхронно здесь, вызов on_inbound — в отдельном
+        daemon-потоке (ADR-RTR-012): медленный обработчик одной строки не держит
+        следующие строки того же соединения (head-of-line). Одновременно в работе
+        не больше ``_MAX_INFLIGHT_PER_CONNECTION`` обработчиков на соединение.
+
+        Строка длиннее ``max_line_bytes`` отбрасывается: если перевода строки в
+        буфере нет, а он уже больше потолка — режим сброса до ближайшего ``\n``
+        (байты не копим). WARNING — один раз на строку.
         """
         buf = b""
+        discarding = False
+        inflight = threading.BoundedSemaphore(_MAX_INFLIGHT_PER_CONNECTION)
         while self._running:
             try:
                 chunk = client.recv(4096)
@@ -301,29 +335,63 @@ class SocketChannel(MessageChannel):
                 break
             if not chunk:
                 break  # peer закрыл соединение
+            if discarding:
+                nl = chunk.find(b"\n")
+                if nl < 0:
+                    continue  # хвост oversize-строки — мимо буфера
+                chunk = chunk[nl + 1 :]
+                discarding = False
             buf += chunk
-            while b"\n" in buf:
-                raw, buf = buf.split(b"\n", 1)
+            while True:
+                nl = buf.find(b"\n")
+                if nl < 0:
+                    break
+                raw, buf = buf[:nl], buf[nl + 1 :]
+                if len(raw) > self._max_line_bytes:
+                    self._warn_oversize(len(raw))
+                    continue
                 if not raw.strip():
                     continue
-                self._handle_line(raw, client)
+                if not self._handle_line(raw, client, inflight):
+                    break  # канал закрыт, пока ждали слот
+            if len(buf) > self._max_line_bytes:
+                self._warn_oversize(len(buf))
+                buf = b""
+                discarding = True
         self._drop_clients([client])
 
-    def _handle_line(self, raw: bytes, client: socket.socket) -> None:
-        """Распарсить одну строку wire и вызвать on_inbound (изоляция ошибок).
+    def _warn_oversize(self, seen: int) -> None:
+        self._log_warning(
+            f"[SocketChannel:{self._name}] строка длиннее max_line_bytes={self._max_line_bytes} "
+            f"(видно {seen} байт) — отброшена, соединение живо"
+        )
+
+    def _handle_line(
+        self,
+        raw: bytes,
+        client: socket.socket,
+        inflight: Optional[threading.BoundedSemaphore] = None,
+    ) -> bool:
+        """Распарсить одну строку wire и передать её в on_inbound (изоляция ошибок).
 
         При session-isolation ПЕРЕД on_inbound привязывает session→сокет: peek поля
         ``session`` (адаптер снимет его позже своим pop). Bind — единственная точка;
-        self-heal на реконнекте (первое же сообщение переустановит маппинг).
+        self-heal на реконнекте (первое же сообщение переустановит маппинг). Bind
+        делается ЗДЕСЬ, в read-потоке, до передачи сообщения обработчику: ответ
+        обработчика адресуется по уже установленной привязке.
+
+        ``inflight`` задан (read-loop) → on_inbound уходит в daemon-поток под этим
+        семафором; ``None`` → вызов инлайн. Returns: False, если канал закрылся,
+        пока ждали свободный слот (сообщение не передано), иначе True.
         """
         try:
             msg = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             self._log_warning(f"[SocketChannel:{self._name}] bad line skipped: {exc}")
-            return
+            return True  # строка потеряна, соединение живо
         if not isinstance(msg, dict):
             self._log_warning(f"[SocketChannel:{self._name}] non-dict message skipped")
-            return
+            return True  # строка потеряна, соединение живо
         self._rx += 1
         # Привязка session→сокет ведётся ВСЕГДА, а не только при session_isolation.
         # У неё две роли, и это разные вопросы: «кому адресовать» (изоляция, гейт
@@ -336,11 +404,38 @@ class SocketChannel(MessageChannel):
         if sid:
             self._bind_session(str(sid), client)
         if self._on_inbound is None:
-            return
+            return True
+        if inflight is None:
+            self._deliver(msg, None)
+            return True
+        # Backpressure: слот ждём порциями, между ними — проверка _running, чтобы
+        # close() не оставлял read-поток висеть на полном семафоре.
+        while not inflight.acquire(timeout=_INFLIGHT_ACQUIRE_POLL_SEC):
+            if not self._running:
+                return False
+        # Daemon-потоки, НЕ ThreadPoolExecutor: воркеры executor'а не-daemon, и выход
+        # интерпретатора ждал бы обработчик, застрявший в router.request(timeout=60).
         try:
-            self._on_inbound(msg)
-        except Exception as exc:  # noqa: BLE001 — граница: ошибка обработки не должна ронять read-loop
+            threading.Thread(
+                target=self._deliver,
+                args=(msg, inflight),
+                name=f"socket-ch-inbound-{self._name}",
+                daemon=True,
+            ).start()
+        except RuntimeError as exc:  # нет ресурса на поток — слот вернуть, строку потерять громко
+            inflight.release()
+            self._log_error(f"[SocketChannel:{self._name}] on_inbound thread start failed: {exc}")
+        return True
+
+    def _deliver(self, msg: Dict[str, Any], inflight: Optional[threading.BoundedSemaphore]) -> None:
+        """Вызвать on_inbound с изоляцией ошибок; слот семафора вернуть всегда."""
+        try:
+            self._on_inbound(msg)  # type: ignore[misc]  # None отсечён в _handle_line
+        except Exception as exc:  # noqa: BLE001 — граница: ошибка обработки не должна ронять канал
             self._log_error(f"[SocketChannel:{self._name}] on_inbound error: {exc}")
+        finally:
+            if inflight is not None:
+                inflight.release()
 
     def _bind_session(self, sid: str, client: socket.socket) -> None:
         """Привязать session→сокет (D.1). Идемпотентно для того же сокета (ревью #7:
