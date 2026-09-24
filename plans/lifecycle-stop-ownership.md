@@ -1,7 +1,7 @@
 # lifecycle-stop-ownership — остановкой и сиротами владеет PM (L-5 + долги приёмки L-2)
 
 - **Slug:** `lifecycle-stop-ownership` · **Ветка:** `fix/lifecycle-stop-ownership` (создать при старте Ф1) · **Дата:** 2026-09-24
-- **Статус:** DRAFT — ждёт одобрения владельца
+- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1 DONE
 - **Полоса:** B (фреймворк). **Срок-якорь:** Ф1 закрыть **до gui-service Task 1.3a** (у Пульта появится кнопка
   «стоп» по сокету — сегодня она идёт незащищённым путём, см. Task 1.1).
 - **Слой:** framework (`process_manager_module`, `shared_resources_module`), `backend_ctl` (harness)
@@ -47,17 +47,33 @@
 
 ## Ф1 — PM владеет остановкой (цена S–M, до gui-service 1.3a)
 
-### Task 1.1 — `system.shutdown` = системный стоп
+### Task 1.1 — `system.shutdown` = системный стоп ✅ DONE 2026-09-24
 
 **Level:** Middle · **Assignee:** developer · **Layer:** framework
 **Факт:** `process_manager_process.py:639 _cmd_system_shutdown` взводит только `self.stop_event`. Живьём (CTO,
 8853–8855): 5.83 / 1.39 / 1.28 с, в первом `Process 'renderer' did not stop in 5.0s, terminating...` при PM exitcode 0.
 **Acceptance:**
-- [ ] Живьём, `inspection_full`, свободный порт, `BackendDriver.system_command({"cmd": "system.shutdown"})`:
+- [x] Живьём, `inspection_full`, свободный порт, `BackendDriver.system_command({"cmd": "system.shutdown"})`:
   выход дерева < 2.0 с в **10 из 10**, строк `did not stop in` — 0 (и у спавнера, и у PM), PM exitcode 0.
-- [ ] Хук выхода у детей идёт с `system_stop=True` (строка итога или счётчик — наблюдаемо, не по чтению кода).
-- [ ] Break-injection ведущего: без правки — возврат к ≥ 5.0 с хотя бы в 1 из 10.
-- [ ] Строка в ADR-SRM-016 «Границы» про `system.shutdown` снята со ссылкой на эту задачу.
+- [x] Хук выхода у детей идёт с `system_stop=True` (строка итога или счётчик — наблюдаемо, не по чтению кода).
+- [x] Break-injection ведущего: без правки — возврат к ≥ 5.0 с хотя бы в 1 из 10.
+- [x] Строка в ADR-SRM-016 «Границы» про `system.shutdown` снята со ссылкой на эту задачу.
+
+**Итог Task 1.1 (замеры, `backend_ctl/tests/test_system_shutdown_live.py`, порты 8860–8869):**
+- До правки: 5 из 10 командных остановов 5.72–5.78 с (`terminate`), не 1 из 3, как в оценке CTO. После: 0.70–0.77 с
+  в 10 из 10 (редкий медленный режим до 1.77 с — см. риск ниже), `did not stop in` — 0, PM exitcode 0.
+- Наблюдаемое для «хук в системном режиме» (выбор тестера, найден диффом живых логов): строка
+  `Stop signal received (system-wide)` в `messages.log` каждого ребёнка. Маркер ⇒ `system_stop=True` (событие не
+  сбрасывается), обратное не следует; флак возможен только ложно-красный.
+- **Найдено по ходу, закрыто в той же задаче — потеря ответа.** Взвод общего события ускорил остановку PM, и
+  `PM.shutdown()`, закрывавший сокет backend_ctl первым шагом, терял ответ на `system.shutdown` в 1 из 10 (до правки
+  0 из 10). Сокет перенесён на место после `stop_all`: 0 потерь из 40. Цена перестановки: `close()` канала ждал
+  поток accept до его таймаута 0.5 с (0.05–0.45 с, замер) и теперь стоял последовательно — путь `harness.stop()`
+  подрос с ~1.45 до ~1.75 с. Таймаут accept в `SocketChannel` снижен до 0.05 с → `harness.stop()` вернулся к
+  0.53–1.58 с. Инъекции И1–И4 — `docs/reviews/2026-09-24_task-1.1-review.md`.
+- **Риск (не чинили):** медленный режим остановки ~+1.0 с — это `storage`, чей `shutdown` занимает ~1 с (замер по
+  логам прогона). Худшее значение за день — 1.77 с при пороге 2.0 с. Если тесты `harness_smoke` начнут краснеть на
+  пороге — смотреть сначала `storage`, не этот путь.
 
 ### Task 1.2 — метку за остановленного/убитого ребёнка ставит PM
 
@@ -87,6 +103,10 @@ feeder выходит по sentinel после `close()` (`reader_gone.py:112-11
   закрывает открытый вопрос ревью L-2.
 
 ### Task 1.4 — сирот нет: страховка дерева, вложенные бюджеты, harness видит детей (L-5)
+
+> **Входной факт от сессии line-sim-5.4 (2026-09-24):** их прототип останавливали SIGINT'ом на главный pid; из трёх
+> таких остановок минимум две оставили детей с PPID 1 (4 процесса жили ~8.5 ч). Путь SIGINT — третий путь стопа
+> помимо `harness.stop()` и `system.shutdown`; Task 1.1 его не трогала. Проверить в 1.4/1.5 и его.
 
 **Level:** Senior · **Assignee:** teamlead · **Layer:** framework + backend_ctl
 **Факт (investigator 2026-09-23, три звена):** (1) `ProcessTreeGuard._terminate_posix_group` на штатном пути — no-op:
@@ -176,6 +196,17 @@ PM (`store flush` M > 0); отпуск по метке срабатывает н
 Корень L-6 (крупные грузы через pipe) — `transport-single-policy`; прерываемые `cv2.read()` / Hikvision; порядок останова.
 
 ## Открыто до старта
+
+- **Из ревью Task 1.1 it.2 (2026-09-24), не воспроизведено:** сокет backend_ctl теперь живёт во время `stop_all`, и
+  `process.restart`/`process.start`, присланные после `system.shutdown`, выполняются (замер ревьюера: renderer
+  стартует заново, ответ теряется, PM выходит за 1.28–1.40 с без замедления, живых в группе PM после выхода — 0).
+  Экспозиция не новая — IPC-диспетчер команд и раньше гасился после `stop_all`. Остаточный риск: процесс,
+  созданный после снимка имён в `stop_all`, переживёт PM → домен Task 1.2/1.4 (PM отклоняет start/restart после
+  взвода системного события).
+- **Из ревью Task 1.1 it.2, настоящий баг вне плана:** `multiprocess_prototype/backend/launch.py:669`
+  `os.environ.setdefault("INSPECTOR_LOG_DIR")` в процессе harness — первый `BackendHarness` фиксирует env, PM
+  последующих запусков в том же процессе пишет логи в каталог первого (в прогонах run_1..9 нет `ProcessManager/`).
+  Тестами не ловится. Владелец — harness/backend_ctl.
 
 - `SHM fallback failed: No such file or directory: '/output_frames_0'` — в каждом прогоне стенда 2026-09-24 у
   `renderer`/`processor`/`inspector`. Похоже на откат отрисованного кадра в pickle (одна из причин 745 КБ в `gui/data`),

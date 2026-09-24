@@ -119,6 +119,20 @@ class TestInterface:
     def test_double_start_returns_false(self, channel: SocketChannel) -> None:
         assert channel.start() is False
 
+    def test_close_is_fast(self) -> None:
+        """close() не ждёт полный таймаут accept: он стоит на пути стопа PM (Task 1.1
+        lifecycle-stop-ownership). При таймауте 0.5 с close() через 0.3 с после старта
+        ждал ~0.2 с; порог 0.15 с — худший из трёх замеров."""
+        worst = 0.0
+        for _ in range(3):
+            ch = SocketChannel("backend_ctl", port=0)
+            assert ch.start() is True
+            time.sleep(0.3)
+            t0 = time.monotonic()
+            ch.close()
+            worst = max(worst, time.monotonic() - t0)
+        assert worst < 0.15, f"close() занял {worst:.3f}s"
+
 
 # --- INBOUND ---
 
