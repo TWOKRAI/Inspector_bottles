@@ -21,8 +21,10 @@ topology_dict»), применение топологии и запись «по
   Коды: ``not_found``, ``conflict``, ``invalid``, ``bad_request``,
   ``io_error``, ``apply_failed``, ``active`` (только ``recipe.delete``).
 * ``name`` — slug без расширения; файл рецепта — ``<recipes_dir>/<name>.yaml``.
-  Pre: ``name`` — непустая ``str`` без ``/``, ``\\`` и ``..``; иначе
-  ``bad_request`` (защита от path traversal), файловая система не трогается.
+  Pre: ``name`` — ``str`` по белому списку ``\\w[\\w.\\- ]*`` (Unicode-буквы, цифры,
+  ``_``, далее ещё ``.``, ``-``, пробел; без ведущей точки, ``:``, ``/``, ``\\``), и
+  файл обязан лежать прямо в ``recipes_dir``; иначе ``bad_request`` (защита от
+  path traversal, включая диск Windows ``D:x``), файловая система не трогается.
 * ``rev`` — НЕПРОЗРАЧНАЯ строка. Сегодня это ``sha256(байты файла).hexdigest()``,
   но клиент обязан только сравнивать на равенство. ``rev`` считается от
   ТЕКУЩИХ байтов на диске, а не от счётчика в памяти: ручная правка файла и
@@ -34,7 +36,9 @@ topology_dict»), применение топологии и запись «по
     Pre: —.
     Post: ``{"success": True, "names": [str], "active": str | None}``;
     ``set(names)`` == множество stem-ов ``<recipes_dir>/*.yaml`` (без рекурсии),
-    ``names`` отсортирован; ``active`` — от ``read_active()``.
+    ``names`` отсортирован; ``active`` — от ``read_active()``. Файлы, чьё имя
+    не проходит белый список ``name``, в ``names`` не попадают (``list`` и
+    ``get`` согласованы: всё, что перечислено, открывается).
     Ошибка чтения каталога → ``io_error``.
 
 ``recipe.get`` — ``{"name"}``
@@ -89,8 +93,10 @@ topology_dict»), применение топологии и запись «по
     с ``current_rev``; ``name == read_active()`` → ``active`` (удалять активный
     нельзя), файл цел; ``OSError`` → ``io_error``.
 
-Вне контракта: сохранение комментариев YAML при ``save`` (best effort, не
-гарантия); рецепт-папка ADR-RCP-006 (сегодня единица — один файл); права на
+Комментарии YAML при ``save`` ТЕРЯЮТСЯ: файл пишется ``yaml.safe_dump``
+нормализованного тела, комментарии и стиль исходника не сохраняются
+(comment-preserving запись — предусловие Task 1b.3). Вне контракта: рецепт-папка
+ADR-RCP-006 (сегодня единица — один файл); права на
 команды (Task 1b.4); история глубже одной ревизии.
 """
 
@@ -98,6 +104,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import tempfile
 import threading
 from collections.abc import Callable
@@ -121,6 +128,7 @@ ERROR_CODES: frozenset[str] = frozenset(
 )
 
 _SUFFIX = ".yaml"
+_NAME_RE = re.compile(r"\w[\w.\- ]*")
 
 
 @runtime_checkable
@@ -149,7 +157,12 @@ class RecipeFormatHook(Protocol):
         ...
 
     def to_topology(self, body: dict) -> dict:
-        """Нормализованное валидное тело → ``topology_dict`` для ``topology.apply``."""
+        """Нормализованное валидное тело → тело, которое принимает ``topology.apply`` хоста.
+
+        Не обязательно развёрнутая топология: если хост разворачивает рецепт сам
+        (хаб Inspector извлекает ``devices:`` из сырого тела рецепта, S-25), хук
+        отдаёт тело целиком — развёртка здесь срезала бы то, что хост читает.
+        """
         ...
 
 
@@ -235,9 +248,14 @@ class RecipeService:
 
     def _path(self, args: dict[str, Any]) -> tuple[str, Path]:
         name = args.get("name")
-        if not isinstance(name, str) or not name or "/" in name or "\\" in name or ".." in name:
+        # Белый список: буквы/цифры/_ (Unicode), затем ещё . - и пробел. Нет ведущей
+        # точки, ``:`` (диск Windows: ``D:evil`` уходит с каталога), ``/``, ``\\``.
+        if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
             raise _Reply("bad_request", f"недопустимое имя рецепта: {name!r}")
-        return name, self._dir / f"{name}{_SUFFIX}"
+        path = self._dir / f"{name}{_SUFFIX}"
+        if path.resolve().parent != self._dir:  # вторая линия: симлинки и то, что белый список пропустил
+            raise _Reply("bad_request", f"имя рецепта уводит из каталога: {name!r}")
+        return name, path
 
     @staticmethod
     def _read_bytes(path: Path) -> bytes | None:
@@ -270,7 +288,9 @@ class RecipeService:
     @_guarded
     def list(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.list`` — см. модульный докстринг."""
-        names = sorted(p.stem for p in self._dir.iterdir() if p.is_file() and p.suffix == _SUFFIX)
+        names = sorted(
+            p.stem for p in self._dir.iterdir() if p.is_file() and p.suffix == _SUFFIX and _NAME_RE.fullmatch(p.stem)
+        )
         return {"success": True, "names": names, "active": self._read_active()}
 
     @_guarded

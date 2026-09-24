@@ -8,8 +8,10 @@
   ``canonicalize_gui_positions``. Сырая топология (``processes:`` сверху) — как есть.
 * ``validate`` — ``validate_recipe_blueprint`` (тот же gate, что у Save в GUI),
   исключения переведены в ``[{"path", "message"}]``.
-* ``to_topology`` — ``unwrap_recipe`` (``backend/launch.py``), та же функция,
-  что разворачивает рецепт на boot.
+* ``to_topology`` — ПОЛНОЕ нормализованное тело, как его шлёт GUI в
+  ``topology.apply``: хаб разворачивает рецепт сам (``orchestrator_hooks``) и
+  берёт ``devices:`` из сырого тела (S-25). Развёртка здесь (``unwrap_recipe``)
+  срезала бы ``devices:`` — найдено ревью 1b.1.
 
 Qt-free: хук живёт на хабе.
 """
@@ -21,7 +23,6 @@ from typing import Any
 
 from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 
-from multiprocess_prototype.backend.launch import unwrap_recipe
 from multiprocess_prototype.recipes.migrations.canonicalize_gui_positions import canonicalize_gui_positions
 from multiprocess_prototype.recipes.migrations.format_v1_to_v2 import is_v1_recipe, migrate_v1_to_v2
 from multiprocess_prototype.recipes.save import RecipeValidationError, validate_recipe_blueprint
@@ -68,4 +69,4 @@ class InspectorRecipeFormatHook:
         return []
 
     def to_topology(self, body: dict) -> dict:
-        return unwrap_recipe(body)
+        return copy.deepcopy(body)

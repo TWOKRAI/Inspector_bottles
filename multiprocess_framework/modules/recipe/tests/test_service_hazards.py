@@ -81,6 +81,51 @@ def test_handler_never_raises_when_hook_raises(tmp_path: Path) -> None:
     assert "hook broke" in res["message"]
 
 
+# --- имя рецепта (ревью 1b.1: BLOCKER) --------------------------------------
+
+
+@pytest.mark.parametrize("name", ["D:evil", ".hidden", "a/b", "a\\b", "", " lead", "..", "../x"])
+def test_bad_names_rejected_on_every_command(tmp_path: Path, name: str) -> None:
+    svc = make(tmp_path)
+    for cmd, args in [
+        (svc.get, {"name": name}),
+        (svc.save, {"name": name, "base_rev": None, "body": {"x": 1}}),
+        (svc.delete, {"name": name}),
+        (svc.activate, {"name": name}),
+        (svc.validate, {"name": name}),
+    ]:
+        assert cmd(args)["error"] == "bad_request", (cmd.__name__, name)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_symlink_out_of_dir_rejected(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "real.yaml").write_text("x: 1\n", encoding="utf-8")
+    recipes = tmp_path / "recipes"
+    recipes.mkdir()
+    (recipes / "link.yaml").symlink_to(outside / "real.yaml")
+    assert make(recipes).get({"name": "link"})["error"] == "bad_request"
+
+
+@pytest.mark.parametrize("name", ["v1..2", "рецепт_1", "my recipe-2.b"])
+def test_good_names_roundtrip_and_list_get_agree(tmp_path: Path, name: str) -> None:
+    svc = make(tmp_path)
+    assert svc.save({"name": name, "base_rev": None, "body": {"x": 1}})["success"] is True
+    assert (tmp_path / f"{name}.yaml").is_file()
+    assert svc.list({})["names"] == [name]
+    assert svc.get({"name": name})["success"] is True
+
+
+def test_list_hides_names_get_would_refuse(tmp_path: Path) -> None:
+    (tmp_path / ".hidden.yaml").write_text("x: 1\n", encoding="utf-8")
+    write(tmp_path, "ok")
+    svc = make(tmp_path)
+    names = svc.list({})["names"]
+    assert names == ["ok"]
+    assert all(svc.get({"name": n})["success"] for n in names)
+
+
 # --- recipe.delete ----------------------------------------------------------
 
 
