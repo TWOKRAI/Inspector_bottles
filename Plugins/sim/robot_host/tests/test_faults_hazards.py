@@ -214,6 +214,10 @@ def test_two_consecutive_drops_both_work_state_survives(running_plugin) -> None:
                 break
             time.sleep(0.1)
         assert reconnected, f"listener не восстановился после drop({seconds})"
+        # Лид: порт уже принимает, а drop ещё числится (окно README) — следующий
+        # drop ждёт faults == [], иначе busy (1 из 15 изолированных прогонов).
+        while time.monotonic() < deadline and _call(plugin, "sim_robot.status")["faults"]:
+            time.sleep(0.05)
 
     client2 = ModbusTcpClient(host=_HOST, port=port, timeout=3)
     ok2 = _run_with_deadline(client2.connect, timeout=3.0, label="connect2")
@@ -411,3 +415,112 @@ def test_vfd_code_command_alone_does_not_write_register(running_plugin) -> None:
     finally:
         client.close()
         _call(plugin, "fault.clear")
+
+
+# --------------------------------------------------------------------------- #
+# Лид, 2026-09-24: пробелы, найденные break-injection раунда 2 (J3-J6)        #
+# --------------------------------------------------------------------------- #
+
+
+def test_start_listener_returns_only_when_port_accepts(running_plugin, monkeypatch) -> None:
+    """J3: ``start_listener()`` возвращается, когда порт УЖЕ принимает коннект.
+
+    Сквозной тест «shutdown сразу за clear» ловит утечку слушателя 3 из 5 раз (гонка),
+    в полном прогоне файла — ни разу. Без ожидания готовности исход тоже решает
+    планировщик: новый поток иногда успевает сделать bind раньше коннекта (замер лида:
+    обычно отказ через 0.5–1.4 мс, но не всегда). Поэтому bind замедлен подменой
+    ``_serve`` на 0.2 с — меньше ``_LISTENER_READY_TIMEOUT_S`` (0.5 с): с ожиданием
+    коннект проходит, без него отказан всегда. Коннект — в том же потоке сразу за
+    возвратом, без обёрток."""
+    from pymodbus.server.base import ModbusBaseServer
+
+    plugin, _ctx, port = running_plugin
+    server = plugin._server
+    # Исходный слушатель фикстуры — ТОЧНО поднят, иначе под поломкой утекает он сам
+    # (stop_listener до active_server) и коннект попадает в него — тест зеленел 3/5.
+    deadline = time.monotonic() + 3.0
+    while not (ModbusBaseServer.active_server is not None and _try_connect(_HOST, port, timeout=0.2)):
+        assert time.monotonic() < deadline, "слушатель фикстуры не поднялся за 3 с"
+        time.sleep(0.05)
+    real_serve = server._serve
+
+    def slow_serve() -> None:
+        time.sleep(0.2)
+        real_serve()
+
+    monkeypatch.setattr(server, "_serve", slow_serve)
+
+    def restart_then_connect() -> bool:
+        server.stop_listener()
+        server.start_listener()
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            return True
+        except OSError:
+            return False
+
+    ok = _run_with_deadline(restart_then_connect, timeout=6.0, label="restart_then_connect")
+    assert ok, "start_listener вернулся до того, как порт принял коннект"
+
+
+def test_drop_restore_retries_after_listener_failure(running_plugin, monkeypatch) -> None:
+    """J4: сбой ``start_listener`` при восстановлении — повтор, а не мёртвый слушатель
+    при ``state == running``; сбой виден в плоскости ошибок (context drop_restore)."""
+    plugin, ctx, port = running_plugin
+    server = plugin._server
+    real_start = server.start_listener
+    calls = {"n": 0}
+
+    def flaky_start(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("инъекция: слушатель не поднялся")
+        return real_start(*a, **kw)
+
+    reported: list[str] = []
+    real_report = ctx.health.report_error
+    monkeypatch.setattr(server, "start_listener", flaky_start)
+    monkeypatch.setattr(
+        ctx.health,
+        "report_error",
+        lambda exc, context="", **kw: (reported.append(context), real_report(exc, context=context, **kw)),
+    )
+    assert _call(plugin, "fault.drop", {"seconds": 0.3})["ok"] is True
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and _call(plugin, "sim_robot.status")["faults"]:
+        time.sleep(0.1)
+    assert _call(plugin, "sim_robot.status")["faults"] == [], "drop не завершился после повтора"
+    assert calls["n"] == 2, f"ожидался ровно один повтор start_listener, вызовов: {calls['n']}"
+    assert "sim_robot_host.drop_restore" in reported, f"сбой не отчитан: {reported!r}"
+    assert _try_connect("127.0.0.1", port, timeout=1.0), "после повтора слушатель не принимает"
+
+
+def test_shutdown_clears_faults() -> None:
+    """J5: после ``shutdown`` статус не показывает отказы прошлой жизни сервера."""
+    port = _free_port()
+    plugin, ctx, _services = _make_plugin(port)
+    _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+    assert _call(plugin, "fault.delay_ms", {"ms": 50})["ok"] is True
+    assert _call(plugin, "fault.vfd_code", {"code": 7})["ok"] is True
+    _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
+    assert _call(plugin, "sim_robot.status")["faults"] == []
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("fault.drop", {"seconds": 3601}),
+        ("fault.drop", {"seconds": 10**400}),
+        ("fault.drop", {"seconds": float("nan")}),
+        ("fault.delay_ms", {"ms": 0.4}),
+        ("fault.delay_ms", {"ms": 10**400}),
+        ("fault.delay_ms", {"ms": float("inf")}),
+    ],
+)
+def test_fault_args_bounds(running_plugin, name, data) -> None:
+    """J6: верхняя граница ``seconds`` (3600), переполнение, nan/inf, ``ms`` < 1 после
+    округления — ``bad_args``, не исключение и не молча принятое значение."""
+    plugin, _ctx, _port = running_plugin
+    resp = _call(plugin, name, data)
+    assert resp["ok"] is False and resp["error"].startswith("bad_args"), f"{name}{data}: {resp!r}"
+    assert _call(plugin, "sim_robot.status")["faults"] == []
