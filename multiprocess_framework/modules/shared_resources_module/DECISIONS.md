@@ -504,6 +504,7 @@ feeder в `connection._send`.
   уже `queue.Queue`, `router_module/channels/queue_channel.py` — тоже `queue.Queue`.
 - Читатель, убитый SIGKILL, метку не ставит (finally не выполняется) — писатель ждёт как раньше.
   Метку за мёртвого ребёнка мог бы ставить PM — долг, не сделано.
+  Сделано: PM ставит метку после подтверждённой смерти (кроме рестарта) и снимает при рождении — ADR-PMM-030.
 - ~~Путь команды `system.shutdown` взводит только `self.stop_event` PM~~ — снято Task 1.1
   [`plans/lifecycle-stop-ownership.md`](../../../plans/lifecycle-stop-ownership.md): `_cmd_system_shutdown`
   взводит общий `system_stop_event`, хук детей идёт с `system_stop=True`. Замер: до — 1.49 / 5.72 с

@@ -11,10 +11,16 @@ OS pipe, а сосед (читатель) уже вышел. EPIPE не прих
   * :class:`ReaderGoneQueue` — ``multiprocessing.queues.Queue`` с межпроцессным
     ``Event``-меткой, которая едет ВМЕСТЕ с очередью через spawn-pickle (bundle,
     routing_map) — никакой новой проводки.
-  * Владелец очереди (процесс, в чьём bundle ``queues`` она лежит) взводит метку при
-    выходе ТОЛЬКО на системном стопе. Индивидуальный стоп/рестарт метку НЕ взводит:
-    ``restart_process`` по умолчанию переиспользует те же очереди, и отпущенный
-    посреди записи кадр испортил бы поток новому воплощению.
+  * Кто взводит метку (ADR-PMM-030):
+      - владелец очереди (процесс, в чьём bundle ``queues`` она лежит) при своём выходе
+        на системном стопе — быстрый путь, писатели узнают о нём до смерти читателя;
+      - PM (``ProcessRegistry.stop_one``/``stop_many``) после ПОДТВЕРЖДЁННОЙ смерти
+        ребёнка, если очереди не будут переиспользованы. Так покрыт читатель, убитый
+        terminate/kill: его собственный хук не отработал. Рестарт метку НЕ взводит —
+        ``restart_process`` переиспользует те же очереди, и отпущенный посреди записи
+        кадр испортил бы поток новому воплощению;
+      - PM снимает метку при рождении (``create_and_register``) — новое воплощение на
+        переиспользованных очередях есть живой читатель, в его bundle та же ``Event``.
   * Писатель на выходе закрывает свои очереди с живым feeder'ом и ждёт, пока буфер
     не сольётся ИЛИ не появится метка. Таймера нет: немаркированная очередь ждётся
     так же, как ждал бы ``_finalize_join`` (медленный живой читатель получает всё —
@@ -55,8 +61,27 @@ class ReaderGoneQueue(_MpQueue):
     def mark_reader_gone(self) -> None:
         self._reader_gone.set()
 
+    def clear_reader_gone(self) -> None:
+        self._reader_gone.clear()
+
     def is_reader_gone(self) -> bool:
         return self._reader_gone.is_set()
+
+
+def set_reader_gone(queues: Iterable[object], gone: bool) -> int:
+    """Взвести (``gone=True``) или снять метку на каждой :class:`ReaderGoneQueue` из ``queues``.
+
+    Прочие объекты (обычные ``mp.Queue``, мусор) пропускаются. Возвращает, сколько
+    очередей тронуто."""
+    count = 0
+    for q in queues:
+        if isinstance(q, ReaderGoneQueue):
+            if gone:
+                q.mark_reader_gone()
+            else:
+                q.clear_reader_gone()
+            count += 1
+    return count
 
 
 def _buffered(q: ReaderGoneQueue) -> int:

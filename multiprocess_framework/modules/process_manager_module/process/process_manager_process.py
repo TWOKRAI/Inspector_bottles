@@ -3513,6 +3513,8 @@ class ProcessManagerProcess(ProcessModule):
         создания — иначе остаётся «призрак» (конфиг без Process-объекта),
         который попадает в ``_topology_current_names`` и в stop-фазу switch.
         """
+        if self._spawn_refused_after_system_stop("create_process", name):
+            return None
         process = self._process_registry.create_and_register(name, class_path, config, priority)
         if process:
             merged = copy.deepcopy(config) if config else {}
@@ -3521,8 +3523,19 @@ class ProcessManagerProcess(ProcessModule):
             self._priority.register_priority(name, priority)
         return process
 
+    def _spawn_refused_after_system_stop(self, what: str, name: str | None) -> bool:
+        """ADR-PMM-030: после системного стопа PM не порождает детей — рождение сняло бы
+        метку «читатель ушёл», поставленную на пути к выходу, и писатели зависли бы снова."""
+        ev = getattr(self, "_system_stop_event", None)
+        if ev is None or not ev.is_set():
+            return False
+        self._log_warning(f"{what}({name or '*'}): отказ — системный стоп уже взведён")
+        return True
+
     def start_process(self, process_name: str | None = None) -> bool:
         """Запустить процесс или все."""
+        if self._spawn_refused_after_system_stop("start_process", process_name):
+            return False
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)
             if not process:
@@ -3556,9 +3569,12 @@ class ProcessManagerProcess(ProcessModule):
             self._publish_process_identity(process.name)
         return True
 
-    def stop_process(self, process_name: str | None = None) -> bool:
+    def stop_process(self, process_name: str | None = None, *, mark_reader_gone: bool = True) -> bool:
         """
         Остановить один процесс (per-process stop_event) или все.
+
+        ``mark_reader_gone`` (ADR-PMM-030) — пробрасывается в реестр: подтверждённо мёртвым
+        ставится метка «читатель ушёл». ``restart_process`` передаёт ``False``.
         """
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)
@@ -3567,9 +3583,9 @@ class ProcessManagerProcess(ProcessModule):
             if not process.is_alive():
                 return True
             stop_timeout = float(self.get_config("stop_process_timeout") or 5.0)
-            return self._process_registry.stop_one(process_name, stop_timeout)
+            return self._process_registry.stop_one(process_name, stop_timeout, mark_reader_gone=mark_reader_gone)
         shutdown_timeout = float(self.get_config("shutdown_timeout") or 5.0)
-        self._process_registry.stop_all(timeout=shutdown_timeout)
+        self._process_registry.stop_all(timeout=shutdown_timeout, mark_reader_gone=mark_reader_gone)
         return True
 
     def restart_process(self, process_name: str) -> bool:
@@ -3582,11 +3598,14 @@ class ProcessManagerProcess(ProcessModule):
         всё же сменилась (reuse выключен) — соседям поднимается incarnation.
         В конце — bump epoch + broadcast refresh (декларативная сверка снимка).
         """
+        if self._spawn_refused_after_system_stop("restart_process", process_name):
+            return False
         config = self._process_configs.get(process_name)
         if not config:
             self._log_error(f"No saved config for '{process_name}'")
             return False
-        if not self.stop_process(process_name):
+        # ADR-PMM-030: метку НЕ ставить — очереди переиспользуются новым воплощением.
+        if not self.stop_process(process_name, mark_reader_gone=False):
             return False
         self._process_registry.remove_process(process_name)
 
