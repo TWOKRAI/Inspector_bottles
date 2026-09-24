@@ -125,8 +125,10 @@ class SocketChannel(MessageChannel):
             # При port=0 ОС выбирает свободный порт — фиксируем фактический.
             self._port = self._server_sock.getsockname()[1]
             self._server_sock.listen(5)
-            # Таймаут на accept, чтобы поток мог завершиться по флагу _running.
-            self._server_sock.settimeout(0.5)
+            # Таймаут на accept, чтобы поток мог завершиться по флагу _running. close() ждёт
+            # поток до этого таймаута (закрытие сокета accept() не будит): при 0.5 с стоило
+            # 0.05–0.45 с на каждом стопе PM (Task 1.1 lifecycle-stop-ownership).
+            self._server_sock.settimeout(0.05)
             self._bound = True
         except OSError as exc:
             self._log_error(f"[SocketChannel:{self._name}] bind/listen failed: {exc}")
