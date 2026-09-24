@@ -157,7 +157,14 @@ def test_pm_completes_own_escalation_before_spawner_would_intervene():
 
 
 @pytest.mark.timeout(60)
-def test_outer_wait_survives_past_inner_escalation_budget_6_5s():
+def test_outer_wait_survives_past_old_outer_budget_5_5s():
+    # Поправка модели (ведущий, 2026-09-24): исходная проба на 6.5с исходила из потолка
+    # 7.0с, но окно kill в _stop_many закрывается сразу по подтверждению смерти, и PM с
+    # зависшим (SIGTERM-игнорирующим) ребёнком сам выходит примерно за 6.0–6.3с (замер
+    # teamlead: PM_DEAD_AT=6.31s EXITCODE=0). 5.5с лежит между старым внешним join 5.0с
+    # (spawner тогда уже слал PM terminate) и собственным выходом PM — различает до/после.
+    # Потолок «внешний > 7.0с» при неподтверждаемом kill живьём не воспроизвести — его
+    # пинят hazard-тесты формулы outer_stop_budget.
     launcher = SystemLauncher(config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
     snap = []
     pm_process = None
@@ -169,14 +176,14 @@ def test_outer_wait_survives_past_inner_escalation_budget_6_5s():
 
         t = threading.Thread(target=launcher.stop, daemon=True)
         t.start()
-        time.sleep(6.5)
-        alive_at_6_5 = pm_process.is_alive()
+        time.sleep(5.5)
+        alive_at_5_5 = pm_process.is_alive()
         t.join(timeout=15.0)
-        assert not t.is_alive(), "launcher.stop() не завершился за 15с после отметки 6.5с — подвисание"
+        assert not t.is_alive(), "launcher.stop() не завершился за 15с после отметки 5.5с — подвисание"
 
-        assert alive_at_6_5, (
-            "PM мёртв уже к отметке t=6.5с (строго между внешним таймаутом spawner'а 5.0с и "
-            "внутренним бюджетом PM 7.0с) — значит внешний spawner прервал PM ДО того, как тот "
+        assert alive_at_5_5, (
+            "PM мёртв уже к отметке t=5.5с (после старого внешнего join 5.0с, до собственного "
+            "выхода PM ~6.0с) — значит внешний spawner прервал PM ДО того, как тот "
             "закончил собственную эскалацию по зависшему ребёнку"
         )
     finally:
@@ -203,7 +210,9 @@ def _main():
     proc = spawner.get_process()
     time.sleep(2.0)  # дать PM's initialize() заспавнить зависшего ребёнка
     children = snapshot_children(proc.pid)
-    print(children[0].pid if children else -1, flush=True)
+    # pid + create_time: личность ребёнка фиксируется, пока он жив (поправка ведущего —
+    # после выхода подпроцесса psutil.Process(pid) у мёртвого ребёнка бросает NoSuchProcess).
+    print(f"{children[0].pid} {children[0].create_time()}" if children else "-1 0", flush=True)
 
     done = threading.Event()
     _orig_stop = spawner.stop
@@ -237,7 +246,9 @@ def _run_sigint_main_blocking(env, script_path, result):
     result["proc"] = proc
     try:
         line = proc.stdout.readline()
-        result["hung_pid"] = int(line.strip())
+        pid_s, ctime_s = line.split()
+        result["hung_pid"] = int(pid_s)
+        result["hung_ctime"] = float(ctime_s)
     except Exception as exc:  # noqa: BLE001
         result["read_error"] = exc
         return
@@ -282,15 +293,19 @@ def test_sigint_to_main_pid_leaves_no_orphan(tmp_path):
 
         import psutil
 
-        member = psutil.Process(hung_pid)
-
         if t.is_alive():
             proc = result.get("proc")
             if proc is not None:
                 proc.kill()
             pytest.fail("подпроцесс не завершился за 25с после SIGINT — подвисание вместо падения")
 
-        survivors = wait_until_gone([member], deadline_s=3.0)
+        try:
+            member = psutil.Process(hung_pid)
+            if abs(member.create_time() - result["hung_ctime"]) > 0.01:
+                member = None  # pid переиспользован чужим процессом — наш ребёнок ушёл
+        except psutil.NoSuchProcess:
+            member = None  # ребёнок уже мёртв — цель достигнута
+        survivors = [] if member is None else wait_until_gone([member], deadline_s=3.0)
         assert survivors == [], f"зависший ребёнок pid={hung_pid} пережил SIGINT главному pid лаунчера: {survivors}"
     finally:
         if member is not None:
