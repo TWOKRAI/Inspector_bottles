@@ -74,36 +74,96 @@ def test_tuple3int_default_survives_json_as_list_and_returns_as_tuple() -> None:
     assert isinstance(restored.default, tuple)
 
 
-def test_rev_stable_across_two_calls_and_changes_on_field_default_change() -> None:
-    """rev = sha256(payload без rev) — детерминирован, чувствителен к любой правке поля.
+def _hazard_plugin(name: str, register_cls: type) -> type:
+    """Собрать минимальный ProcessModulePlugin-класс с заданным register_class.
 
-    Опасность механизма: sha256 payload'а формируется из dict с рекурсивной
-    сериализацией FieldInfo — недетерминированный порядок ключей (без sort_keys) или
-    забытое поле в payload сделал бы rev либо нестабильным между вызовами, либо слепым
-    к реальным изменениям каталога.
+    ``type()``, а не class-тело: нужны РАЗНЫЕ объекты-классы между вызовами
+    ``_build_real_payload`` (PluginRegistry.register() бросает ValueError на
+    перерегистрацию того же имени ДРУГИМ классом без предварительного clear()).
     """
+    from multiprocess_framework.modules.process_module.plugins.base import ProcessModulePlugin
 
-    def _payload(default_a: int) -> dict:
-        fields = [
-            FieldInfo(
-                plugin_name="p", field_name="a", field_type=int, default=default_a, meta=None, category="c"
-            ).to_dict(),
-            FieldInfo(plugin_name="p", field_name="b", field_type=str, default="x", meta=None, category="c").to_dict(),
-        ]
-        return {"success": True, "plugins": [{"name": "p", "register": {"fields": fields}}], "failed_imports": {}}
+    return type(
+        f"_HazardPlugin_{name}",
+        (ProcessModulePlugin,),
+        {
+            "name": name,
+            "category": "processing",
+            "commands": {},
+            "register_class": register_cls,
+            "configure": lambda self, ctx: None,
+        },
+    )
 
-    def _rev(payload: dict) -> str:
-        import hashlib
 
-        return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+def _build_real_payload(plugins: list[tuple[str, type]]) -> dict:
+    """Зарегистрировать плагины и вызвать РЕАЛЬНЫЙ _cmd_catalog_plugins (не копию формулы).
 
-    payload_1 = _payload(default_a=1)
-    rev_1a = _rev(payload_1)
-    rev_1b = _rev(_payload(default_a=1))
-    assert rev_1a == rev_1b, "два вызова с одинаковыми данными дали разный rev"
+    Находка break-injection лида (I9, ``rev = uuid4().hex``): предыдущая версия этого
+    теста пересчитывала sha256 своей собственной копией формулы и ни разу не звала
+    хендлер — инъекция в хендлер оставалась GREEN. Здесь — только реальный
+    ``BuiltinCommands._cmd_catalog_plugins``.
+    """
+    from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
+    from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
+    from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 
-    rev_2 = _rev(_payload(default_a=2))
-    assert rev_2 != rev_1a, "изменение одного default не изменило rev"
+    PluginRegistry.clear()
+    for name, register_cls in plugins:
+        PluginRegistry.register(name, _hazard_plugin(name, register_cls), category="processing")
+
+    services = MockProcessServices(name="hazard_rev_test")
+    cm = BuiltinCommands(services)
+    return cm._cmd_catalog_plugins()
+
+
+def test_rev_stable_across_two_calls_and_changes_on_field_default_change() -> None:
+    """rev РЕАЛЬНОГО хендлера — не зависит от порядка регистрации, чувствителен к default.
+
+    Опасность механизма: rev строится как sha256(json.dumps(payload, sort_keys=True))
+    из PluginRegistry.list() СОРТИРОВАННОГО по имени в хендлере — если сортировка списка
+    ИЛИ ``sort_keys=True`` пропадёт, rev станет зависеть от порядка РЕГИСТРАЦИИ плагинов
+    (PluginRegistry — обычный dict, сохраняет insertion order), хотя семантическое
+    содержимое каталога не менялось. Поэтому здесь варьируется именно порядок
+    регистрации (alpha,beta vs beta,alpha) — не порядок ключей внутри одного dict,
+    который у ``FieldInfo.to_dict()`` всегда фиксирован построением, а порядок ЭЛЕМЕНТОВ
+    списка ``plugins``, который зависит от PluginRegistry и от того, сортирует ли его
+    хендлер перед сериализацией.
+    """
+    from typing import Annotated
+
+    from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+    from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
+
+    class _RegAlphaLow(SchemaBase):
+        threshold: Annotated[int, FieldMeta("Порог")] = 1
+
+    class _RegAlphaHigh(SchemaBase):
+        threshold: Annotated[int, FieldMeta("Порог")] = 2
+
+    class _RegBeta(SchemaBase):
+        level: Annotated[int, FieldMeta("Уровень")] = 5
+
+    # snapshot()/restore() (не clear()) — _build_real_payload делает PluginRegistry.clear()
+    # внутри, а простой clear() без восстановления калечит соседние тесты этого файла:
+    # app_discover() после clear() НЕ переоткрывает уже импортированные Plugins/-модули
+    # (декоратор @register_plugin выполняется один раз при первом import, повторный import
+    # из sys.modules — no-op), поэтому test_all_62_plugins_... следом получил бы 0 плагинов.
+    snapshot = PluginRegistry.snapshot()
+    try:
+        payload_ab = _build_real_payload([("hazard_alpha", _RegAlphaLow), ("hazard_beta", _RegBeta)])
+        payload_ba = _build_real_payload([("hazard_beta", _RegBeta), ("hazard_alpha", _RegAlphaLow)])
+        assert payload_ab["rev"] == payload_ba["rev"], (
+            "rev реального хендлера зависит от ПОРЯДКА РЕГИСТРАЦИИ плагинов "
+            "при неизменном семантическом содержимом каталога"
+        )
+
+        payload_changed = _build_real_payload([("hazard_alpha", _RegAlphaHigh), ("hazard_beta", _RegBeta)])
+        assert payload_changed["rev"] != payload_ab["rev"], (
+            "изменение default одного register-поля НЕ изменило rev реального хендлера"
+        )
+    finally:
+        PluginRegistry.restore(snapshot)
 
 
 def test_all_62_plugins_catalog_payload_is_json_serializable() -> None:
