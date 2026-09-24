@@ -65,8 +65,12 @@ def test_client_oversize_line_dropped_connection_alive() -> None:
             assert pushes[0]["command"] == "small.push"
 
             # Соединение живо: обычный request() после oversize по-прежнему проходит.
-            res = _call_with_deadline(lambda: client.request({"command": "ping"}, timeout=2.0), timeout=3.0)
-            assert res == {"pong": True}
+            res = _call_with_deadline(
+                lambda: client.request({"type": "command", "command": "ping", "sender": "drv-oversize"}, timeout=2.0),
+                timeout=3.0,
+            )
+            assert res["success"] is True
+            assert res["result"] == {"pong": True}
         finally:
             client.close()
     finally:
@@ -85,7 +89,10 @@ def test_client_request_with_dropped_oversize_reply_ends_by_timeout() -> None:
         client.connect()
         try:
             t0 = time.monotonic()
-            res = _call_with_deadline(lambda: client.request({"command": "big"}, timeout=1.5), timeout=4.0)
+            res = _call_with_deadline(
+                lambda: client.request({"type": "command", "command": "big", "sender": "drv-timeout"}, timeout=1.5),
+                timeout=4.0,
+            )
             elapsed = time.monotonic() - t0
             assert res.get("success") is False
             assert res.get("error") == "timeout", f"ожидал явный клиентский timeout, получено: {res!r}"
