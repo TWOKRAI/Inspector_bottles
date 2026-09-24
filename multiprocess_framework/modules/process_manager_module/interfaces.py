@@ -288,7 +288,7 @@ class IProcessRegistry(ABC):
         ...
 
     @abstractmethod
-    def stop_all(self, timeout: float) -> Dict[str, bool]:
+    def stop_all(self, timeout: float, *, mark_reader_gone: bool = True) -> Dict[str, bool]:
         """
         Остановка всех процессов с ПОДТВЕРЖДЕНИЕМ смерти (Ж-4, RS-3).
 
@@ -297,6 +297,8 @@ class IProcessRegistry(ABC):
 
         Args:
             timeout: общий дедлайн graceful-остановки (секунды).
+            mark_reader_gone: подтверждённо мёртвым ставить метку «читатель ушёл»
+                на их очередях (ADR-PMM-030).
 
         Returns:
             Карта ``{name: stopped}`` — ``True`` смерть подтверждена, ``False``
@@ -306,12 +308,14 @@ class IProcessRegistry(ABC):
         ...
 
     @abstractmethod
-    def stop_one(self, name: str, timeout: float = 5.0) -> bool:
+    def stop_one(self, name: str, timeout: float = 5.0, *, mark_reader_gone: bool = True) -> bool:
         """Остановить один процесс («ensure stopped», только его stop_event).
 
         Идемпотентно: нет в реестре / не жив → True. Иначе эскалация
         stop_event → terminate → kill; True только по ФАКТУ смерти
-        (``not is_alive()`` после финального join).
+        (``not is_alive()`` после финального join). ``mark_reader_gone`` — метка
+        «читатель ушёл» на очередях подтверждённо мёртвого (ADR-PMM-030); рестарт
+        передаёт ``False``.
         """
         ...
 

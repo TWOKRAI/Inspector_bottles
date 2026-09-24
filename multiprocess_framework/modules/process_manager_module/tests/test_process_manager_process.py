@@ -250,7 +250,7 @@ class TestProcessManagerProcessStopProcess:
 
             pmp.stop_process("TestProcess")
 
-            mock_registry.stop_one.assert_called_once_with("TestProcess", 0.1)
+            mock_registry.stop_one.assert_called_once_with("TestProcess", 0.1, mark_reader_gone=True)
 
     def test_stop_process_unknown_returns_true(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
