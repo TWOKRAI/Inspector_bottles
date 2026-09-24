@@ -524,3 +524,110 @@ def test_fault_args_bounds(running_plugin, name, data) -> None:
     resp = _call(plugin, name, data)
     assert resp["ok"] is False and resp["error"].startswith("bad_args"), f"{name}{data}: {resp!r}"
     assert _call(plugin, "sim_robot.status")["faults"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Эскалация 5.4 (teamlead): сервер владеет СВОИМ pymodbus-объектом            #
+# --------------------------------------------------------------------------- #
+
+
+def _listener_threads() -> list[threading.Thread]:
+    return [t for t in threading.enumerate() if t.name == "sim-robot-server" and t.is_alive()]
+
+
+def test_ready_timeout_leaves_no_orphan_listener(monkeypatch) -> None:
+    """Находка 1 ревью итерации 2: ``start_listener`` сдался по ``ready_timeout``, а
+    его поток жил дальше, делал bind позже и переживал ``shutdown`` — два потока
+    ``sim-robot-server`` и порт, принимающий коннект через 1 с после останова.
+
+    ``_serve`` замедлен на 0.8 с при бюджете готовности восстановления 0.5 с: каждая
+    попытка восстановления после ``fault.drop`` проваливается по таймауту. После
+    ``shutdown`` не должно остаться ни слушателя, ни его потока."""
+    port = _free_port()
+    plugin, ctx, _services = _make_plugin(port)
+    _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+    try:
+        assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+        server = plugin._server
+        real_serve = server._serve
+
+        def slow_serve() -> None:
+            time.sleep(0.8)
+            real_serve()
+
+        monkeypatch.setattr(server, "_serve", slow_serve)
+        reported: list[str] = []
+        real_report = ctx.health.report_error
+        monkeypatch.setattr(
+            ctx.health,
+            "report_error",
+            lambda exc, context="", **kw: (reported.append(context), real_report(exc, context=context, **kw)),
+        )
+        assert _call(plugin, "fault.drop", {"seconds": 0.2})["ok"] is True
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if "sim_robot_host.drop_restore" in reported or not _call(plugin, "sim_robot.status")["faults"]:
+                break
+            time.sleep(0.05)
+    finally:
+        _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=6.0, label="shutdown")
+    time.sleep(1.0)
+    assert not _try_connect(_HOST, port, timeout=0.3), "порт принимает коннект через 1 с после shutdown"
+    assert _listener_threads() == [], f"осиротевшие потоки слушателя: {_listener_threads()!r}"
+
+
+def test_start_listener_raises_when_port_taken_by_foreign(running_plugin) -> None:
+    """R5 ревью: порт занят ЧУЖИМ слушателем — наш bind проваливается, поток умирает,
+    а TCP-проба готовности соединялась с чужим и ``start_listener`` возвращал «OK».
+    Готовность — это НАШ сервер слушает, а не «кто-то на порту отвечает»."""
+    plugin, _ctx, port = running_plugin
+    server = plugin._server
+    _run_with_deadline(server.stop_listener, timeout=5.0, label="stop_listener")
+    foreign = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        foreign.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        foreign.bind((_HOST, port))
+        foreign.listen(1)
+        with pytest.raises(RuntimeError):
+            _run_with_deadline(server.start_listener, timeout=0.5 + 1.0, label="start_listener_foreign")
+    finally:
+        foreign.close()
+    _run_with_deadline(server.start_listener, timeout=5.0, label="start_listener_free")
+    assert _try_connect(_HOST, port, timeout=1.0), "после освобождения порта слушатель не принимает"
+
+
+def test_stop_during_listen_closes_late_socket(monkeypatch) -> None:
+    """Белый ящик окна ``listen()``: остановка приходит, пока pymodbus ждёт
+    ``create_server``. ``close()`` pymodbus выставляет ``is_closing`` ПОСЛЕ того, как
+    ``listen()`` его сбросил, сокет появляется уже после, и повторный ``shutdown()``
+    становится no-op — слушатель оставался открытым без потока (ловилось
+    ``test_ready_timeout_leaves_no_orphan_listener`` примерно 1 раз из 6).
+    ``create_server`` задержан на 0.3 с, чтобы окно было детерминированным."""
+    import asyncio
+
+    from Services.robot_comm.server import sim_robot
+
+    real_cls = sim_robot.ModbusTcpServer
+
+    class SlowListen(real_cls):  # type: ignore[misc, valid-type]
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            super().__init__(*a, **kw)
+            real_create = self.call_create
+
+            async def slow_create():
+                await asyncio.sleep(0.3)
+                return await real_create()
+
+            self.call_create = slow_create
+
+    monkeypatch.setattr(sim_robot, "ModbusTcpServer", SlowListen)
+    port = _free_port()
+    server = sim_robot.SimRobotServer(_HOST, port, _UNIT_ID)
+    try:
+        with pytest.raises(RuntimeError):
+            _run_with_deadline(lambda: server.start_listener(ready_timeout=0.1), timeout=4.0, label="start_listener")
+        time.sleep(0.5)
+        assert not _try_connect(_HOST, port, timeout=0.3), "сокет, созданный после остановки, остался открыт"
+        assert _listener_threads() == [], f"осиротевшие потоки слушателя: {_listener_threads()!r}"
+    finally:
+        _run_with_deadline(server.stop, timeout=5.0, label="stop")

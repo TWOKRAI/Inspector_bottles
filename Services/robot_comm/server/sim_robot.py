@@ -19,7 +19,6 @@ Graceful degradation: модуль импортируется без pymodbus; �
 from __future__ import annotations
 
 import asyncio
-import socket
 import sys
 import threading
 import time
@@ -32,7 +31,7 @@ from Services.robot_comm.core.registers import REG_SPACE_SIZE, ROBOT_UNIT_ID
 from Services.robot_comm.server.sim_core import TICK_INTERVAL_S, RobotSimCore
 
 try:  # pragma: no cover - наличие pymodbus зависит от окружения
-    from pymodbus.server import ServerStop, StartTcpServer
+    from pymodbus.server import ModbusTcpServer
     from pymodbus.simulator import DataType, SimData, SimDevice
 
     MODBUS_AVAILABLE = True
@@ -40,8 +39,7 @@ except ImportError:  # pragma: no cover
     DataType = None  # type: ignore
     SimData = None  # type: ignore
     SimDevice = None  # type: ignore
-    ServerStop = None  # type: ignore
-    StartTcpServer = None  # type: ignore
+    ModbusTcpServer = None  # type: ignore
     MODBUS_AVAILABLE = False
 
 DEFAULT_HOST = "127.0.0.1"
@@ -57,14 +55,15 @@ _OBSERVER_ERROR_LIMIT = 3
 # «не проскочить».
 _MAX_TICK_DT_S = 0.1
 
-# Task 5.4 (fault.drop): сколько ждать, пока свежий слушатель НАЧНЁТ принимать TCP-
-# соединения, прежде чем start_listener() вернёт управление. Значение специально
-# МЕНЬШЕ внешнего join-бюджета fault.clear/shutdown (<=1с, см. Plugins/sim/robot_host/
-# plugin.py) — если бинд аномально завис, start_listener() обязан сдаться и поднять
-# исключение ДО того, как внешний join истечёт молча (иначе гонка: fault.clear()
-# закрывает listener ДО того, как pymodbus успел выставить active_server внутри
-# своего потока — см. TRAPS брифа Task 5.4).
+# Task 5.4 (fault.drop): сколько ждать, пока НАШ pymodbus-сервер начнёт слушать,
+# прежде чем start_listener() сдастся. Значение специально МЕНЬШЕ внешнего
+# join-бюджета fault.clear/shutdown (<=1с, см. Plugins/sim/robot_host/plugin.py):
+# аномально медленный bind должен закончиться исключением (и остановкой СВОЕГО
+# потока), а не молча истёкшим join снаружи.
 _LISTENER_READY_TIMEOUT_S = 0.5
+#: Бюджет stop_listener(): дождаться публикации сервера (окно подъёма), погасить его
+#: и дождаться потока. Граница, а не ожидаемое время (обычно — миллисекунды).
+_LISTENER_STOP_TIMEOUT_S = 2.0
 
 
 def _make_register_binder(
@@ -94,7 +93,7 @@ def _make_register_binder(
     Фикс-раунд ревью (R1, MAJOR) — задержка идёт ПЕРВОЙ, до attach/on_write,
     НЕ последней. Повтор бага: биндер ``await``-ит ``asyncio.sleep`` ПОСЛЕ
     ``on_write`` (счёт журнала уже произошёл), потом ``fault.drop`` рвёт
-    соединение ``ServerStop()`` — pymodbus отменяет (``CancelledError``)
+    соединение остановкой сервера — pymodbus отменяет (``CancelledError``)
     зависшую в ``sleep`` корутину биндера ПОСЛЕ того, как ``on_write`` уже
     отработал, но САМА запись в регистры (pymodbus применяет её уже ПОСЛЕ
     возврата из ``action``) так и не случилась — клиент, не получив ответ,
@@ -165,6 +164,14 @@ class SimRobotServer:
         self._bound = threading.Event()
         self._stop = threading.Event()
         self._server_thread: threading.Thread | None = None
+        #: Эскалация 5.4: НАШ pymodbus-сервер (публикует поток :meth:`_serve`). Готовность
+        #: и остановка смотрят только на него, не на процесс-глобальный
+        #: ``ModbusBaseServer.active_server``/``ServerStop()``.
+        self._mb_server: ModbusTcpServer | None = None
+        self._serve_error: BaseException | None = None
+        #: Порождение потока слушателя и снятие его в stop_listener() — под одним
+        #: замком, иначе stop() мог бы разминуться с параллельным start_listener().
+        self._listener_lock = threading.Lock()
         self._ticker_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------ #
@@ -195,15 +202,12 @@ class SimRobotServer:
     def stop_listener(self) -> None:
         """Остановить ТОЛЬКО TCP-слушателя. Тикер не трогаем — ``fault.drop`` это
         обрыв СВЯЗИ, не перезагрузка робота. Безопасно звать, когда слушатель уже
-        не поднят (``ServerStop()`` бросает ``RuntimeError`` «not running» —
-        глотаем, как и раньше в ``stop()``)."""
-        try:
-            ServerStop()
-        except Exception:  # pragma: no cover - сервер мог не подняться / уже остановлен
-            pass
-        if self._server_thread is not None:
-            self._server_thread.join(timeout=2.0)
+        не поднят (no-op)."""
+        with self._listener_lock:
+            thread = self._server_thread
             self._server_thread = None
+        if thread is not None:
+            self._stop_thread(thread)
 
     def start_listener(self, *, ready_timeout: float = _LISTENER_READY_TIMEOUT_S) -> None:
         """Поднять слушателя заново (порт освобождён ``stop_listener()``).
@@ -213,38 +217,65 @@ class SimRobotServer:
         ``core.attach(...)``, который скопирует ЖИВОЕ состояние ядра (тикер её
         не останавливал) в этот новый список — так состояние переживает drop.
 
-        Ждём (не дольше ``ready_timeout``), пока порт начнёт принимать TCP —
-        иначе вызывающий (например ``fault.clear``/``shutdown``), позвав
-        ``stop_listener()`` сразу следом, рисковал бы застать pymodbus ДО того,
-        как тот выставил ``active_server`` внутри своего потока — ``ServerStop()``
-        бросила бы «not running», листенер остался бы висеть в фоне (TRAPS
-        брифа Task 5.4). Ожидание — обычный TCP-коннект+закрытие, Modbus PDU не
-        шлём, поэтому пробное подключение НЕ триггерит ``core.attach``.
+        Готовность — НАШ сервер слушает (``transport`` выставлен после ``listen()``),
+        а не «на порту кто-то отвечает»: TCP-проба соединялась с чужим слушателем,
+        пока наш поток был уже мёртв (R5 ревью). Поток умер (bind провалился) —
+        ``RuntimeError``. Не дождались за ``ready_timeout`` — сначала останавливаем
+        и ждём СВОЙ поток, потом ``RuntimeError``: иначе он делал bind позже и
+        переживал ``shutdown`` (находка 1 ревью итерации 2). После ``stop()`` —
+        ``RuntimeError`` без подъёма (не воскрешать слушателя остановленного сервера).
         """
-        self._bound.clear()
-        server_thread = threading.Thread(target=self._serve, name="sim-robot-server", daemon=True)
-        self._server_thread = server_thread
-        server_thread.start()
+        with self._listener_lock:
+            if self._stop.is_set():
+                raise RuntimeError("sim_robot: сервер остановлен, слушатель не поднимается")
+            self._bound.clear()
+            self._mb_server = None
+            self._serve_error = None
+            server_thread = threading.Thread(target=self._serve, name="sim-robot-server", daemon=True)
+            self._server_thread = server_thread
+            server_thread.start()
         deadline = time.monotonic() + ready_timeout
         while time.monotonic() < deadline:
-            # Фикс-раунд ревью (K2) — если НАШ поток уже умер (bind провалился,
-            # исключение внутри _serve/StartTcpServer), успешный TCP-коннект
-            # ниже мог бы быть к ЧУЖОМУ листенеру, случайно занявшему тот же
-            # порт (например соседний тестовый процесс) — это НЕ наш сервер,
-            # объявлять готовность на основании такого коннекта нельзя.
+            mb = self._mb_server
+            if mb is not None and mb.transport is not None:
+                return
             if not server_thread.is_alive():
-                raise RuntimeError(f"sim_robot: поток слушателя умер во время подъёма на {self.host}:{self.port}")
-            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                probe.settimeout(max(0.05, deadline - time.monotonic()))
-                probe.connect((self.host, self.port))
-            except OSError:
-                time.sleep(0.02)
-                continue
-            finally:
-                probe.close()
-            return
+                self._forget(server_thread)
+                raise RuntimeError(
+                    f"sim_robot: поток слушателя умер при подъёме на {self.host}:{self.port}: {self._serve_error!r}"
+                )
+            time.sleep(0.005)
+        self._forget(server_thread)
+        self._stop_thread(server_thread)
         raise RuntimeError(f"sim_robot: слушатель не поднялся на {self.host}:{self.port} за {ready_timeout}с")
+
+    def _forget(self, thread: threading.Thread) -> None:
+        with self._listener_lock:
+            if self._server_thread is thread:
+                self._server_thread = None
+
+    def _stop_thread(self, thread: threading.Thread) -> None:
+        """Погасить сервер потока ``thread`` и дождаться потока (всё — в пределах
+        ``_LISTENER_STOP_TIMEOUT_S``). Остановка в окне подъёма (поток жив, сервер ещё
+        не опубликован) сначала ждёт публикации или смерти потока — иначе поток
+        сделал бы bind ПОСЛЕ остановки. Сервер опубликован до ``listen()`` — если
+        ``shutdown`` успел раньше bind, сокет закроет ``finally`` в :meth:`_serve_async`."""
+        deadline = time.monotonic() + _LISTENER_STOP_TIMEOUT_S
+        while self._mb_server is None and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        mb = self._mb_server
+        if mb is not None:
+            coro = mb.shutdown()
+            try:
+                future = asyncio.run_coroutine_threadsafe(coro, mb.loop)
+            except RuntimeError:  # цикл уже закрыт — поток завершился сам
+                coro.close()
+            else:
+                try:
+                    future.result(timeout=max(0.05, deadline - time.monotonic()))
+                except Exception:  # noqa: BLE001 - поток мог закрыть цикл раньше, чем отработал shutdown
+                    pass
+        thread.join(timeout=max(0.05, deadline - time.monotonic()))
 
     # ------------------------------------------------------------------ #
 
@@ -257,7 +288,27 @@ class SimRobotServer:
                 self.core, self._bound, self._on_write, delay_source=lambda: self.delay_ms / 1000.0
             ),
         )
-        StartTcpServer(context=device, address=(self.host, self.port))
+        try:
+            asyncio.run(self._serve_async(device))
+        except Exception as exc:  # noqa: BLE001 - причина уходит в RuntimeError start_listener()
+            self._serve_error = exc
+
+    async def _serve_async(self, device) -> None:
+        # Конструктор pymodbus требует работающий цикл (asyncio.get_running_loop()).
+        server = ModbusTcpServer(context=device, address=(self.host, self.port))
+        self._mb_server = server
+        try:
+            await server.serve_forever()
+        finally:
+            # shutdown() мог прийти во время listen() (пока ждём create_server): его close()
+            # выставляет is_closing ПОСЛЕ того, как listen() сбросил флаг, сокет создаётся
+            # уже потом, serve_forever возвращается сразу, а повторный shutdown() — no-op
+            # из-за is_closing. Поэтому транспорт закрываем явно; на штатном пути он уже None.
+            # Воспроизведение: test_faults_hazards.py::test_stop_during_listen_closes_late_socket.
+            await server.shutdown()
+            if server.transport is not None:
+                server.transport.close()
+                server.transport = None
 
     def _ticker(self) -> None:
         """Motion-цикл: тикать ядро. До привязки хранилища ядро тикает свой буфер,
