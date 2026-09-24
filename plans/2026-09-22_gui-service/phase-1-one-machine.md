@@ -280,6 +280,30 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 **Dependencies:** Task 1.2 (подписки по сокету).
 **Module contract:** new-lite (`BridgeGuiProcess`, `RemoteFrameSource` — докстринги-контракты, Pre/Post).
 
+**Итог (2026-09-24, DONE, merge `0c29aadc` в `feat/gui-service` + `b84fa462`):** `BridgeGuiProcess` +
+`frames.subscribe/unsubscribe/stats`, `RemoteFrameSource` (Qt-free), `ShmFrameReader(track=False)`,
+строка в `POINT_COMMANDS`, `SocketClient(door=...)`. Слепой тестер 16 RED → зелёные (неверная модель в
+харнессе: `SocketChannel("gui")` вместо `"backend_ctl"`, исправлено лидом `0f73b55a`). Break-injection лида —
+15 свойств + дверь + фиксы ревью; три пробела (seqlock-проверка, эпоха после копии, unsubscribe на хост)
+закрыты авторскими тестами. Живой стенд (синтетика 29,9 fps): L2 28,4 fps; L3 1005 кадров / 0 torn под
+seqlock; L4 отказ называет флаг; L5 kill -9 → адрес снят ≤ 0,25 с; L6 выход внешнего читателя не удаляет
+сегмент. Ревью — APPROVE_WITH_NOTES, m1/m3/m4/m5 закрыты (`61337e18`). Сводный прогон: `backend_ctl`
+786/53/0, live 1 passed, прототип frontend 345, `sentrux` зелёный; фреймворк 10043 passed / 6 failed —
+все 6 не наши после `b84fa462` (4 падают и на чистом main `02d1db2c`: watcher, declarations_leak,
+emergency_log-инвентарь от `process_runner.py` lifecycle, `reader_gone` — подпроцесс без `PYTHONPATH`).
+- **Найдено стендом, не unit-тестами:** push уходил только на адрес `<имя SocketChannel>.<session>`
+  (`socket_channel.py:230`), а `subscriber_address` строился от `sender` — клиент `pult` получал 0 кадров
+  при 492 отправленных. Касалось и `RemoteStateProxy` 1.2. Исправлено `door=` (дефолт `backend_ctl`),
+  страж — живой тест `backend_ctl/tests/test_frame_bridge_live.py` (`-m harness_smoke`).
+- **Регресс, пойманный сводным прогоном:** голый `logging.getLogger` в `socket_client.py` (из 1.2) и
+  `remote_frame_source.py` — страж `test_std_logger_guard`; исправлено `b84fa462`.
+- **Долги:** (1) m2 — push между «хост принял subscribe» и локальной активацией не считается нигде
+  (0–1 кадр на подписку; разность `sent − received` на него врёт); (2) «кадр новее дескриптора» —
+  generation в конверте на пути записи; (3) дескрипторы делят observability-очередь хаба (maxsize 256, с
+  потерями); `sent` моста — постановки в `AsyncSender`, не записи в сокет; (4) после `door` провенанс
+  state видит всех внешних клиентов как `backend_ctl.<sid>` — имя клиента пропало (к 1.4); (5) tool
+  `frames_*` в `backend_ctl` не сделан; (6) `import` через пакет `frontend_module` грузит PySide6 (Р-4).
+
 ---
 
 ### Task 1.3a — Серверный транспорт `SocketChannel`: без head-of-line, медленный клиент не держит запись
