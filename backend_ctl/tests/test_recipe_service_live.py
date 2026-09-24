@@ -107,13 +107,13 @@ def test_list_get_conflict_activate_restart(recipe_backend) -> None:
     # --- recipe.list: множество имён совпадает с ls recipes/*.yaml -----------
     list_res = drv.send_command("ProcessManager", "recipe.list", {}, timeout=8.0)
     assert list_res.get("success") is True, f"recipe.list не success: {list_res}"
-    assert sorted(list_res.get("names") or []) == expected_names, list_res
+    assert sorted((list_res.get("result") or {}).get("names") or []) == expected_names, list_res
 
     # --- recipe.get -> rev и тело ---------------------------------------------
     get_res = drv.send_command("ProcessManager", "recipe.get", {"name": a_name}, timeout=8.0)
     assert get_res.get("success") is True, f"recipe.get не success: {get_res}"
-    assert isinstance(get_res.get("rev"), str) and get_res["rev"], get_res
-    assert isinstance(get_res.get("body"), dict), get_res
+    assert isinstance((get_res.get("result") or {}).get("rev"), str) and get_res["result"]["rev"], get_res
+    assert isinstance((get_res.get("result") or {}).get("body"), dict), get_res
 
     # --- recipe.save с заведомо устаревшим base_rev -> conflict, файл цел ----
     recipe_path = tmp_recipes / f"{a_name}.yaml"
@@ -127,11 +127,11 @@ def test_list_get_conflict_activate_restart(recipe_backend) -> None:
         timeout=8.0,
     )
     assert save_res.get("success") is False, f"recipe.save с заведомо неверным base_rev должен отказать: {save_res}"
-    assert save_res.get("error") == "conflict", save_res
+    assert (save_res.get("result") or {}).get("error") == "conflict", save_res
     assert recipe_path.read_bytes() == original_bytes
     assert hashlib.sha256(recipe_path.read_bytes()).hexdigest() == original_sha
 
     # --- recipe.activate меняет топологию, видимую в get_status --------------
     activate_res = drv.send_command("ProcessManager", "recipe.activate", {"name": a_name}, timeout=8.0)
     assert activate_res.get("success") is True, f"recipe.activate не success: {activate_res}"
-    assert isinstance(activate_res.get("apply"), dict), activate_res
+    assert isinstance((activate_res.get("result") or {}).get("apply"), dict), activate_res
