@@ -324,3 +324,39 @@ def test_request_in_conn_lost_window_raises_immediately() -> None:
         assert client._pending == {}
     finally:
         host.close()
+
+
+# ------------------------------------------------ адрес push-получателя = имя ДВЕРИ хаба (1.3)
+
+
+def _listening_socket() -> socket.socket:
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(4)
+    return srv
+
+
+def test_subscriber_address_prefix_is_the_door_not_the_sender() -> None:
+    """Хаб (``SocketChannel._resolve_session``) доставляет push по ``_address``, только если
+    его голова совпадает с ИМЕНЕМ канала-двери. Клиент со своим ``sender`` («pult») обязан
+    всё равно называть адрес по двери, иначе хаб молча отправляет push'и мимо
+    (живой стенд 1.3: мост отправил 492 дескриптора, клиент получил 0)."""
+    srv = _listening_socket()
+    client = SocketClient("127.0.0.1", srv.getsockname()[1], sender="pult")
+    try:
+        client.connect(timeout=2.0)
+        assert client.subscriber_address == f"backend_ctl.{client.session}"
+    finally:
+        client.close()
+        srv.close()
+
+
+def test_explicit_door_is_honoured() -> None:
+    srv = _listening_socket()
+    client = SocketClient("127.0.0.1", srv.getsockname()[1], sender="pult", door="gui_door")
+    try:
+        client.connect(timeout=2.0)
+        assert client.subscriber_address == f"gui_door.{client.session}"
+    finally:
+        client.close()
+        srv.close()

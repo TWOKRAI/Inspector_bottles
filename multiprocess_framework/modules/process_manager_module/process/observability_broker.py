@@ -53,6 +53,8 @@ POINT_COMMANDS: Dict[str, str] = {
     "log.tail.subscribe": "log.tail.unsubscribe",
     "observability.tail.subscribe": "observability.tail.unsubscribe",
     "ui.tap.subscribe": "ui.tap.unsubscribe",
+    # gui-service 1.3: мост кадров — подписка по адресу сессии, снимается по нему же.
+    "frames.subscribe": "frames.unsubscribe",
 }
 _POINT_UNSUBSCRIBE: Dict[str, str] = {unsub: sub for sub, unsub in POINT_COMMANDS.items()}
 #: ui.tap — один тап на процесс (``cmd_unsubscribe`` снимает его целиком, payload

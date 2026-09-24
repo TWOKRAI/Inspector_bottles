@@ -95,11 +95,24 @@ class HeadlessGuiProcess(ProcessModule):
                 time.sleep(0.05)
                 continue
             try:
-                self.router_manager.receive(
+                msgs = self.router_manager.receive(
                     timeout=_POLL_TIMEOUT,
                     channel_types=["data"],
                     return_messages=False,
                 )
+                if msgs:
+                    self._on_drained(msgs)
             except Exception as exc:  # noqa: BLE001 — дренаж обязан пережить одиночный сбой
                 self._track_error(exc, context={"loop": DRAIN_WORKER})
                 time.sleep(_POLL_TIMEOUT)
+
+    def _on_drained(self, msgs: list) -> None:
+        """Точка расширения: вычерпанная пачка data-сообщений (gui-service 1.3).
+
+        Pre: ``msgs`` — непустой список dict'ов (``receive(return_messages=False)``),
+        уже прошедших receive-middleware роутера; зовётся на потоке ``data_drain``.
+        Post: базовое воплощение ничего не делает — сообщения выбрасываются, как и
+        прежде. Наследник (``BridgeGuiProcess``) переопределяет, чтобы не копировать
+        цикл дренажа. Исключение отсюда ловит ``_drain_loop`` и уводит в
+        ``_track_error`` — дренаж не останавливается.
+        """
