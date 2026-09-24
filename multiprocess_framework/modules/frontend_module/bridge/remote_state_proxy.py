@@ -31,7 +31,7 @@ S3. Push других команд (не ``state.changed``) прокси игн�
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from multiprocess_framework.modules.router_module.channels.socket_client import (
     ResponseCallback,
@@ -108,6 +108,16 @@ class RemoteStateProxy(GuiStateProxy):
             manager_name=f"RemoteStateProxy:{client._sender}",
             logger=logger,
         )
+        # exclude_self каждой подписки: при переподписке после реконнекта он обязан
+        # сохраниться (база хранит только pattern).
+        self._sub_exclude_self: Dict[str, bool] = {}
+        # После реконнекта: (pattern, exclude_self) → серверный sub_id НОВОГО соединения
+        # (None — хост не вернул id). Пусто до первого on_reconnected: тогда sub_id
+        # подписки и есть серверный (база), перевод не нужен.
+        self._resubscribed: Dict[Tuple[str, bool], Optional[str]] = {}
+        # sub_id → что слать хосту в state.unsubscribe вместо него (None — не слать);
+        # заполняется на время вызова unsubscribe (см. _send).
+        self._unsub_translate: Dict[str, Optional[str]] = {}
         client.add_push_listener(self._on_push)
 
     def _marshal_deltas(self, deltas: list) -> None:
@@ -119,6 +129,48 @@ class RemoteStateProxy(GuiStateProxy):
         if msg.get("command") == "state.changed":
             self.on_state_changed(msg)
 
+    def subscribe(self, pattern: str, callback: Callable, exclude_self: bool = True, sync: bool = True) -> str:
+        sub_id = super().subscribe(pattern, callback, exclude_self=exclude_self, sync=sync)
+        self._sub_exclude_self[sub_id] = exclude_self
+        return sub_id
+
+    def unsubscribe(self, sub_id: str) -> None:
+        """После реконнекта серверная подписка — одна на (pattern, exclude_self), со
+        своим sub_id нового соединения: отписка шлёт ЕГО и только когда снимается
+        последняя локальная подписка этой пары. До реконнекта — поведение базы."""
+        exclude_self = self._sub_exclude_self.pop(sub_id, True)
+        pattern = self._sub_patterns.get(sub_id)
+        key = (pattern, exclude_self)
+        if pattern is None or key not in self._resubscribed or sub_id in self._covered_sub_ids:
+            super().unsubscribe(sub_id)
+            return
+        siblings = [
+            other
+            for other, other_pattern in self._sub_patterns.items()
+            if other != sub_id
+            and other_pattern == pattern
+            and other not in self._covered_sub_ids
+            and self._sub_exclude_self.get(other, True) == exclude_self
+        ]
+        self._unsub_translate[sub_id] = None if siblings else self._resubscribed[key]
+        if not siblings:
+            del self._resubscribed[key]
+        try:
+            super().unsubscribe(sub_id)
+        finally:
+            self._unsub_translate.pop(sub_id, None)
+
+    def _send(self, msg: dict) -> None:
+        if msg.get("command") == "state.unsubscribe":
+            data = msg.get("data") or {}
+            sub_id = data.get("sub_id")
+            if sub_id in self._unsub_translate:
+                server_id = self._unsub_translate[sub_id]
+                if server_id is None:
+                    return  # серверная подписка ещё нужна другим (или id неизвестен)
+                msg = {**msg, "data": {**data, "sub_id": server_id}}
+        super()._send(msg)
+
     def on_reconnected(self) -> None:
         """Восстановить подписки после ``client.connect()`` с новым ``session``.
 
@@ -128,9 +180,11 @@ class RemoteStateProxy(GuiStateProxy):
         Pre:  клиент подключён заново (``client.subscriber_address`` — новый адрес);
               вызов не с reader-потока клиента.
         Post: ``process_name == client.subscriber_address`` (S1);
-              для КАЖДОГО уникального активного паттерна (``_sub_patterns``) хосту отправлен
-              ``state.subscribe`` под новым адресом — локальные ``sub_id`` и колбэки НЕ
-              меняются (подписчики ничего не перерегистрируют);
+              для КАЖДОЙ уникальной пары (паттерн, ``exclude_self``) непокрытых подписок
+              хосту отправлен ``state.subscribe`` под новым адресом — локальные ``sub_id``
+              и колбэки НЕ меняются (подписчики ничего не перерегистрируют); серверный
+              ``sub_id`` ответа запоминается — ``unsubscribe`` шлёт хосту его, и только
+              когда снимается последняя локальная подписка этой пары;
               база revision сброшена и запущен ресинк по этим паттернам (хост мог
               перезапуститься — старая revision у него не валидна; изменения, случившиеся
               за время разрыва, приходят снимком);
@@ -147,14 +201,30 @@ class RemoteStateProxy(GuiStateProxy):
         patterns = list(dict.fromkeys(self._sub_patterns.values()))
         if not patterns:
             return
-        for pattern in patterns:
+        # Серверные подписки — на каждую уникальную пару (pattern, exclude_self) среди
+        # НЕпокрытых sub_id: покрытые (coverage-check) серверной подписки не имели и не
+        # получают, их дельты едут потоком покрывающей.
+        keys = list(
+            dict.fromkeys(
+                (pattern, self._sub_exclude_self.get(sub_id, True))
+                for sub_id, pattern in self._sub_patterns.items()
+                if sub_id not in self._covered_sub_ids
+            )
+        )
+        self._resubscribed = {}
+        for pattern, exclude_self in keys:
             msg = {
                 "type": "command",
                 "sender": name,
                 "targets": [self._server_target],
                 "command": "state.subscribe",
-                "data": {"pattern": pattern, "subscriber": name, "exclude_sources": [name]},
+                "data": {
+                    "pattern": pattern,
+                    "subscriber": name,
+                    "exclude_sources": [name] if exclude_self else [],
+                },
             }
+            self._resubscribed[(pattern, exclude_self)] = None
             try:
                 envelope = self._client.request(msg, timeout=self._SYNC_REQUEST_TIMEOUT)
             except self._client._lost_exc:
@@ -162,8 +232,11 @@ class RemoteStateProxy(GuiStateProxy):
             except Exception as exc:  # noqa: BLE001 — отказ одного паттерна не рвёт остальные
                 self._log_error(f"RemoteStateProxy.on_reconnected: '{pattern}' не переподписан: {exc}")
                 continue
-            if self._unwrap_envelope(envelope) is None:
+            response = self._unwrap_envelope(envelope)
+            if response is None or response.get("status") != "ok":
                 self._log_error(f"RemoteStateProxy.on_reconnected: хост отказал '{pattern}': {envelope}")
+                continue
+            self._resubscribed[(pattern, exclude_self)] = response.get("sub_id") or None
         # Хост мог перезапуститься: старая база revision у него не валидна, а изменения
         # за время разрыва приходят снимком.
         self._last_revision = None

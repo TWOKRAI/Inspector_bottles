@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List
 
 from multiprocess_framework.modules.frontend_module.bridge.remote_command_sender import (
@@ -141,5 +142,74 @@ def test_other_push_commands_are_ignored_by_proxy() -> None:
         )
         assert _wait(lambda: len(got) == 1)
         assert [d.path for d in got[0]] == ["a.c"]
+    finally:
+        host.close()
+
+
+def _counting_subscribe_host() -> _FakeHost:
+    """Хост, выдающий на каждый state.subscribe новый серверный sub_id: srv-1, srv-2, ..."""
+    counter = {"n": 0}
+
+    def _responder(msg: Dict[str, Any]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"status": "ok"}
+        if msg.get("command") == "state.subscribe":
+            counter["n"] += 1
+            result["sub_id"] = f"srv-{counter['n']}"
+        return {"type": "response", "request_id": msg["request_id"], "result": {"success": True, "result": result}}
+
+    return _FakeHost(responder=_responder)
+
+
+def _unsubs(host: _FakeHost, since: int) -> List[str]:
+    return [m["data"]["sub_id"] for m in host.received[since:] if m.get("command") == "state.unsubscribe"]
+
+
+def test_unsubscribe_after_reconnect_sends_new_server_sub_id() -> None:
+    """После реконнекта unsubscribe шлёт sub_id НОВОГО соединения, и только за последнюю
+    локальную подписку пары (pattern, exclude_self) — до неё серверная ещё нужна."""
+    host = _counting_subscribe_host()
+    try:
+        client = _client(host)
+        proxy = RemoteStateProxy(client, dispatch=lambda fn: fn())
+        first = proxy.subscribe("a.*", lambda d: None, sync=True)  # серверный srv-1
+        second = proxy.subscribe("a.*", lambda d: None, sync=True)  # srv-2
+        assert (first, second) == ("srv-1", "srv-2")
+
+        client.close()
+        client.connect()
+        proxy.on_reconnected()  # одна подписка на пару ("a.*", True) → srv-3
+        _wait(lambda: len(host.received) >= 3)
+
+        mark = len(host.received)
+        proxy.unsubscribe(first)
+        proxy.unsubscribe(second)
+        assert _wait(lambda: _unsubs(host, mark)), "state.unsubscribe не дошёл"
+        time.sleep(0.1)
+        assert _unsubs(host, mark) == ["srv-3"], "ушёл старый id или отписка до последней подписки"
+    finally:
+        host.close()
+
+
+def test_resubscribe_keeps_exclude_self() -> None:
+    """exclude_self каждой подписки сохраняется при переподписке после реконнекта."""
+    host = _counting_subscribe_host()
+    try:
+        client = _client(host)
+        proxy = RemoteStateProxy(client, dispatch=lambda fn: fn())
+        proxy.subscribe("mine.*", lambda d: None, exclude_self=False, sync=False)
+        proxy.subscribe("theirs.*", lambda d: None, exclude_self=True, sync=False)
+
+        client.close()
+        client.connect()
+        new = client.subscriber_address
+        mark = len(host.received)
+        proxy.on_reconnected()
+
+        resub = {
+            m["data"]["pattern"]: m["data"]["exclude_sources"]
+            for m in host.received[mark:]
+            if m.get("command") == "state.subscribe"
+        }
+        assert resub == {"mine.*": [], "theirs.*": [new]}
     finally:
         host.close()
