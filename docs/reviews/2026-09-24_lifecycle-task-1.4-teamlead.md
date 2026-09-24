@@ -59,3 +59,30 @@
 - Окно переиспользования pid (pgid пустой группы) не измерял.
 - Живой стенд `inspection_full` не поднимал — это этап лида.
 - Windows не проверялся (sweep после Job Object — добавочный, путь Job не менялся).
+
+## Итерация 2 (после решений лида)
+
+### Блокер лида: снимок брал всех потомков процесса-хозяина
+
+`spawner._snapshot_descendants` был `Process(os.getpid()).children(recursive=True)`, а `_sweep_snapshot` из первого коммита добивал его безусловно, поэтому штатный стоп убивал чужих детей хозяина. Исправлено: корень снимка — PM (`[PM] + PM.children(recursive=True)`, если PM уже нет — пусто); `_kill_via_psutil` берёт только снимок, без `children()` хозяина (тот же дефект был в старом fallback-пути). Скрипт лида `bystander.py` после правки, 3 прогона: `STOP=0.62s / 0.22s / 0.61s`, `BYSTANDER_ALIVE=True`, 0 трассировок `KeyError: '/mp-'`. `_subtree` в harness строит снимок от PM (`psutil.Process(orchestrator_pid)` + потомки), killpg бьёт только группу PM, так что host-wide шаблона в harness нет.
+
+### Break-injection (предсказания записаны до прогона, все совпали; прогон на обоих hazard-файлах, 23 теста)
+
+| Инъекция | Упало |
+|---|---|
+| J1 harness: убрать `_kill_orchestrator_group` | `test_group_member_absent_from_snapshots_dies_via_killpg` |
+| J2 harness: убрать досъём после готовности | `test_setsid_child_dies_via_post_readiness_snapshot` |
+| J3 harness: убрать досъём в `stop()` | `test_late_setsid_grandchild_dies_via_stop_refresh` |
+| J4 harness: `_union` теряет ранний снимок | `test_setsid_child_dies_via_post_readiness_snapshot`, `test_union_keeps_early_entries_first_and_drops_duplicates` |
+| J5 harness: убрать защиту своей группы | `test_group_sweep_never_targets_own_group` |
+| J6 spawner: снимок от хозяина | `test_normal_stop_leaves_host_bystander_alive`, `test_hung_child_stop_leaves_host_bystander_alive` |
+| J7 guard: fallback добавляет детей хозяина | `test_psutil_fallback_does_not_touch_host_children` |
+
+Радиус после итерации 2: `2 failed, 122 passed, 3 skipped in 82.10s`. Красные — те же два теста тестера, их правит лид.
+
+### Что по-прежнему не сторожится
+
+- Ветку `ProcessLookupError` в `_kill_orchestrator_group` и `killpg` на уже пустой группе не проверяет ни один тест.
+- Сценарии T1/T3 в harness держатся на паузе 2.5 с: внук должен родиться после досъёма по готовности. Если это не так, срабатывает предусловие («сценарий вакуумен»), а не ложная зелень.
+- Что в T2 ребёнка нет в раннем снимке (сразу после `launcher.start()`), проверено только косвенно: J2 его покрасил.
+- Окно переиспользования pid не измерялось; Windows не проверялся.
