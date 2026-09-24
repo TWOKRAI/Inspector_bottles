@@ -291,7 +291,9 @@ class RecipeService:
     def list(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.list`` — см. модульный докстринг."""
         names = sorted(
-            p.stem for p in self._dir.iterdir() if p.is_file() and p.suffix == _SUFFIX and _NAME_RE.fullmatch(p.stem)
+            p.stem
+            for p in self._dir.iterdir()
+            if p.is_file() and p.suffix == _SUFFIX and _NAME_RE.fullmatch(p.stem) and p.resolve().parent == self._dir
         )
         return {"success": True, "names": names, "active": self._read_active()}
 

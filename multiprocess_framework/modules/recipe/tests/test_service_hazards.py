@@ -126,6 +126,17 @@ def test_list_hides_names_get_would_refuse(tmp_path: Path) -> None:
     assert all(svc.get({"name": n})["success"] for n in names)
 
 
+
+def test_list_hides_symlink_leading_out_of_dir(tmp_path: Path) -> None:
+    outside = tmp_path.with_name(tmp_path.name + "_outside")
+    outside.mkdir()
+    (outside / "shared.yaml").write_text("x: 1\n", encoding="utf-8")
+    (tmp_path / "shared.yaml").symlink_to(outside / "shared.yaml")
+    write(tmp_path, "ok")
+    svc = make(tmp_path)
+    assert svc.list({})["names"] == ["ok"]
+    assert svc.get({"name": "shared"})["error"] == "bad_request"
+
 # --- recipe.delete ----------------------------------------------------------
 
 
