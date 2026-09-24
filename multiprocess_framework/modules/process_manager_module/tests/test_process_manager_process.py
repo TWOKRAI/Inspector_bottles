@@ -9,6 +9,7 @@
 - Регистрацию встроенных команд
 """
 
+import pytest
 from unittest.mock import MagicMock, patch
 from multiprocessing import Event
 
@@ -104,6 +105,109 @@ class TestProcessManagerProcessShutdownOrder:
         assert "monitor" in call_order and "registry" in call_order
         assert call_order.index("monitor") < call_order.index("registry")
         mock_super_shutdown.assert_called_once()
+
+    def test_backend_ctl_socket_accepts_while_children_stop(self) -> None:
+        """Сокет backend_ctl жив, пока PM останавливает детей, и закрыт после shutdown().
+
+        Ответ на ``system.shutdown`` уходит через этот сокет, а на системном стопе PM видит
+        событие за <=0.1 с; закрытие сокета первым шагом shutdown теряло ответ в ~1 из 10
+        живых прогонов (Task 1.1 lifecycle-stop-ownership). Наблюдаемое — TCP-connect на
+        настоящий порт, а не шпион на ``close()``.
+        """
+        import socket
+
+        from ..process.backend_ctl_endpoint import setup_backend_ctl_channel
+
+        class _Router:
+            def __init__(self) -> None:
+                self.channels: dict = {}
+
+            def register_channel(self, channel) -> bool:
+                self.channels[channel.name] = channel
+                return True
+
+            def unregister_channel(self, name) -> bool:
+                return self.channels.pop(name, None) is not None
+
+        def _connectable(port: int) -> bool:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                    return True
+            except OSError:
+                return False
+
+        router = _Router()
+        channel = setup_backend_ctl_channel(router, env={}, config={"enabled": True, "port": 0})
+        assert channel is not None
+        port = channel.port
+        seen_during_stop_all: list = []
+
+        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+            pmp.name = "ProcessManager"
+            pmp.shared_resources = None
+            pmp.config = {}
+            pmp.config_handler = None
+            pmp._process_monitor = MagicMock()
+            pmp._process_registry = MagicMock()
+            pmp._process_registry.stop_all.side_effect = lambda *a, **kw: seen_during_stop_all.append(
+                _connectable(port)
+            )
+            pmp._console_manager = None
+            pmp._backend_ctl_channel = channel
+            pmp.router_manager = router
+            try:
+                with patch.object(ProcessModule, "shutdown", return_value=True):
+                    pmp.shutdown()
+            finally:
+                channel.close()
+
+        assert seen_during_stop_all == [True]
+        assert _connectable(port) is False
+        assert pmp._backend_ctl_channel is None
+
+    def test_backend_ctl_socket_closed_even_if_stop_all_raises(self) -> None:
+        """Исключение в stop_all не оставляет сокет backend_ctl открытым до выхода (ревью it.2)."""
+        import socket
+
+        from ..process.backend_ctl_endpoint import setup_backend_ctl_channel
+
+        class _Router:
+            def register_channel(self, channel) -> bool:
+                return True
+
+            def unregister_channel(self, name) -> bool:
+                return True
+
+        channel = setup_backend_ctl_channel(_Router(), env={}, config={"enabled": True, "port": 0})
+        assert channel is not None
+        port = channel.port
+
+        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+            pmp.name = "ProcessManager"
+            pmp.shared_resources = None
+            pmp.config = {}
+            pmp.config_handler = None
+            pmp._process_monitor = MagicMock()
+            pmp._process_registry = MagicMock()
+            pmp._process_registry.stop_all.side_effect = RuntimeError("boom")
+            pmp._console_manager = None
+            pmp._backend_ctl_channel = channel
+            pmp.router_manager = _Router()
+            try:
+                with patch.object(ProcessModule, "shutdown", return_value=True):
+                    with pytest.raises(RuntimeError):
+                        pmp.shutdown()
+            finally:
+                channel_open = True
+                try:
+                    socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                except OSError:
+                    channel_open = False
+                channel.close()
+
+        assert channel_open is False
 
     def test_shutdown_without_console_does_not_raise(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
@@ -237,6 +341,24 @@ class TestProcessManagerProcessBuiltinCommands:
             pmp.shared_resources = None
             pmp.config = {}
             pmp.stop_event = Event()
+            pmp._system_stop_event = Event()
+            pmp._log_info = MagicMock()
+
+            result = pmp._cmd_system_shutdown()
+            assert result["success"] is True
+            assert pmp.stop_event.is_set()
+            # Task 1.1 lifecycle-stop-ownership: команда == системный стоп.
+            assert pmp._system_stop_event.is_set()
+
+    def test_cmd_system_shutdown_without_system_event_still_stops_pm(self) -> None:
+        """PM без shared_resources (``_system_stop_event is None``) — команда не падает и гасит PM."""
+        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+            pmp.name = "ProcessManager"
+            pmp.shared_resources = None
+            pmp.config = {}
+            pmp.stop_event = Event()
+            pmp._system_stop_event = None
             pmp._log_info = MagicMock()
 
             result = pmp._cmd_system_shutdown()

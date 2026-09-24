@@ -86,7 +86,8 @@ def test_line_sim_profile_literals(probe):
     p = probe.profile_for("line_sim")
     assert p.port == 8766
     # Литерал, не производная от pipeline.yaml: сверка чтения yaml с реальностью.
-    assert set(p.expected_procs) == {"ProcessManager", "robot", "camera", "mjpeg"}
+    # pult — веб-пульт ленты, line-sim Task 2.3b (8929a73d).
+    assert set(p.expected_procs) == {"ProcessManager", "robot", "camera", "mjpeg", "pult"}
     assert p.roles["inspector"] is None
     assert p.na_reason.get("inspector")
     live_roles = {k: v for k, v in p.roles.items() if v is not None}
