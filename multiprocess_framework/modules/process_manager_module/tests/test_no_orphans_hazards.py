@@ -296,3 +296,58 @@ def test_psutil_fallback_does_not_touch_host_children():
         if bystander.poll() is None:
             bystander.kill()
             bystander.wait(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Звено 1 без подпорки снимком (добавлено ведущим по итогам инъекции I1).
+# ---------------------------------------------------------------------------
+
+_LATE_MEMBER_SLEEP = "import time; time.sleep(60)"
+_LATE_LEADER_SCRIPT = (
+    "import subprocess, sys, time;"
+    "p = subprocess.Popen([sys.executable, '-c', " + repr(_LATE_MEMBER_SLEEP) + "]);"
+    "print(p.pid, flush=True);"
+    "time.sleep(0.3);"
+    "sys.exit(0)"
+)
+
+
+@posix_only
+@pytest.mark.timeout(30)
+def test_guard_killpg_reaches_member_absent_from_snapshot_after_leader_reaped():
+    """Сторожит: ``pgid = self._pm_pid`` в ветке ProcessLookupError ``_terminate_posix_group``.
+
+    Инъекция I1 ведущего (откат этой строки на ``return True``) оставила зелёными все
+    тесты свойства: A3 передаёт члена группы в снимке, и его добивает ``_sweep_snapshot``.
+    Здесь снимок ПУСТ — как у ребёнка, рождённого после снимка в ``spawner.stop()``, или
+    внука воркера — и убить члена может только killpg по группе собранного лидера.
+    """
+    import psutil
+
+    leader = subprocess.Popen(
+        [sys.executable, "-c", _LATE_LEADER_SCRIPT],
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    member = None
+    try:
+        member = psutil.Process(int(leader.stdout.readline().strip()))
+        assert member.is_running(), "член группы не поднялся — окружение сломано, не целевой баг"
+        leader.wait(timeout=5)  # лидер собран: getpgid(leader.pid) → ProcessLookupError
+
+        guard = ProcessTreeGuard()
+        guard.adopt(leader.pid)
+        guard.kill_tree([])  # снимок пуст — sweep не поможет
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and member.is_running():
+            time.sleep(0.05)
+        assert not member.is_running(), (
+            f"член группы pid={member.pid} вне снимка пережил kill_tree() после сбора лидера"
+        )
+    finally:
+        if member is not None:
+            kill_and_reap(member.pid)
+        if leader.poll() is None:
+            kill_and_reap(leader.pid)
