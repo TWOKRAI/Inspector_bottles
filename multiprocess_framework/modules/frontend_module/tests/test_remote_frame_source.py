@@ -107,7 +107,7 @@ def _make_command_host(commands: Dict[str, Callable[[Dict[str, Any]], Dict[str, 
     router.start_listening(poll_interval=0.01)
 
     adapter = SocketBridgeAdapter(router, "backend_ctl")
-    sock_ch = SocketChannel("gui", host="127.0.0.1", port=0, on_inbound=adapter.on_inbound)
+    sock_ch = SocketChannel("backend_ctl", host="127.0.0.1", port=0, on_inbound=adapter.on_inbound)
     assert sock_ch.start() is True
     router.register_channel(sock_ch)
 
