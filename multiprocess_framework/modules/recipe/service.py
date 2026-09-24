@@ -96,9 +96,15 @@ topology_dict»), применение топологии и запись «по
 
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+import yaml
 
 # Имена команд — ровно как их регистрирует хаб в CommandManager.
 COMMANDS: tuple[str, ...] = (
@@ -113,6 +119,8 @@ COMMANDS: tuple[str, ...] = (
 ERROR_CODES: frozenset[str] = frozenset(
     {"not_found", "conflict", "invalid", "bad_request", "io_error", "apply_failed", "active"}
 )
+
+_SUFFIX = ".yaml"
 
 
 @runtime_checkable
@@ -145,6 +153,38 @@ class RecipeFormatHook(Protocol):
         ...
 
 
+class _Reply(Exception):
+    """Внутренний короткий выход: готовый ответ-ошибка. Наружу не уходит."""
+
+    def __init__(self, error: str, message: str, **extra: Any) -> None:
+        super().__init__(message)
+        self.reply: dict[str, Any] = {"success": False, "error": error, "message": message, **extra}
+
+
+def _args(data: dict[str, Any] | None, kwargs: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(data) if isinstance(data, dict) else {}
+    merged.update(kwargs)
+    return merged
+
+
+def _guarded(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Обработчик не бросает наружу: ``_Reply`` → его ответ, прочее → ``io_error``."""
+
+    def wrapper(self: RecipeService, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return fn(self, _args(data, kwargs))
+        except _Reply as r:
+            return r.reply
+        except OSError as exc:
+            return {"success": False, "error": "io_error", "message": str(exc)}
+        except Exception as exc:  # noqa: BLE001 — контракт: наружу только ответ
+            return {"success": False, "error": "io_error", "message": f"{type(exc).__name__}: {exc}"}
+
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
 class RecipeService:
     """Обработчики ``recipe.*`` над каталогом рецептов.
 
@@ -171,7 +211,13 @@ class RecipeService:
         persist_active: Callable[[Path], object],
         read_active: Callable[[], str | None],
     ) -> None:
-        raise NotImplementedError
+        self._dir = Path(recipes_dir).resolve()
+        self._hook = hook
+        self._apply_topology = apply_topology
+        self._persist_active = persist_active
+        self._read_active = read_active
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
 
     def handlers(self) -> dict[str, Callable[..., dict[str, Any]]]:
         """``{имя команды: обработчик}`` для регистрации в CommandManager.
@@ -179,33 +225,152 @@ class RecipeService:
         Post: ключи == ``COMMANDS``; обработчик принимает ``data=None, **kwargs``
         (соглашение хаба ``_merge_cmd_args``).
         """
-        raise NotImplementedError
+        return {cmd: getattr(self, cmd.split(".", 1)[1]) for cmd in COMMANDS}
 
-    def list(self, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    # --- помощники --------------------------------------------------------
+
+    def _lock(self, name: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(name, threading.Lock())
+
+    def _path(self, args: dict[str, Any]) -> tuple[str, Path]:
+        name = args.get("name")
+        if not isinstance(name, str) or not name or "/" in name or "\\" in name or ".." in name:
+            raise _Reply("bad_request", f"недопустимое имя рецепта: {name!r}")
+        return name, self._dir / f"{name}{_SUFFIX}"
+
+    @staticmethod
+    def _read_bytes(path: Path) -> bytes | None:
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            return None
+
+    def _parse(self, raw: bytes) -> dict:
+        try:
+            doc = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:
+            raise _Reply("invalid", "файл рецепта не разбирается как YAML", errors=[{"path": "", "message": str(exc)}])
+        if not isinstance(doc, dict):
+            raise _Reply(
+                "invalid",
+                "файл рецепта — не YAML-mapping",
+                errors=[{"path": "", "message": f"ожидался mapping, получено {type(doc).__name__}"}],
+            )
+        return self._hook.normalize(doc)
+
+    def _load(self, name: str, path: Path) -> tuple[bytes, dict]:
+        raw = self._read_bytes(path)
+        if raw is None:
+            raise _Reply("not_found", f"рецепт {name!r} не найден")
+        return raw, self._parse(raw)
+
+    # --- команды ----------------------------------------------------------
+
+    @_guarded
+    def list(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.list`` — см. модульный докстринг."""
-        raise NotImplementedError
+        names = sorted(p.stem for p in self._dir.iterdir() if p.is_file() and p.suffix == _SUFFIX)
+        return {"success": True, "names": names, "active": self._read_active()}
 
-    def get(self, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    @_guarded
+    def get(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.get`` — см. модульный докстринг."""
-        raise NotImplementedError
+        name, path = self._path(args)
+        raw, body = self._load(name, path)
+        return {"success": True, "name": name, "rev": compute_rev(raw), "body": body}
 
-    def save(self, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    @_guarded
+    def save(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.save`` — см. модульный докстринг."""
-        raise NotImplementedError
+        name, path = self._path(args)
+        body = args.get("body")
+        if not isinstance(body, dict) or "base_rev" not in args:
+            raise _Reply("bad_request", "нужны body: dict и ключ base_rev")
+        base_rev = args["base_rev"]
+        normalized = self._hook.normalize(body)
+        errors = self._hook.validate(normalized)
+        if errors:
+            raise _Reply("invalid", "рецепт не прошёл валидацию", errors=errors)
+        try:
+            new_bytes = yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True).encode("utf-8")
+        except yaml.YAMLError as exc:
+            raise _Reply("bad_request", f"body не сериализуется в YAML: {exc}")
 
-    def validate(self, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        with self._lock(name):
+            current = self._read_bytes(path)
+            current_rev = None if current is None else compute_rev(current)
+            if base_rev != current_rev:
+                raise _Reply("conflict", "рецепт изменён с момента чтения", current_rev=current_rev)
+            _atomic_write(path, new_bytes)
+        return {"success": True, "name": name, "rev": compute_rev(new_bytes)}
+
+    @_guarded
+    def validate(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.validate`` — см. модульный докстринг."""
-        raise NotImplementedError
+        if ("body" in args) == ("name" in args):
+            raise _Reply("bad_request", "нужно ровно одно из: body, name")
+        if "body" in args:
+            if not isinstance(args["body"], dict):
+                raise _Reply("bad_request", "body должен быть dict")
+            body = self._hook.normalize(args["body"])
+        else:
+            name, path = self._path(args)
+            _, body = self._load(name, path)
+        errors = self._hook.validate(body)
+        return {"success": True, "valid": not errors, "errors": errors}
 
-    def activate(self, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    @_guarded
+    def activate(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.activate`` — см. модульный докстринг."""
-        raise NotImplementedError
+        name, path = self._path(args)
+        with self._lock(name):
+            _, body = self._load(name, path)
+        errors = self._hook.validate(body)
+        if errors:
+            raise _Reply("invalid", "рецепт не прошёл валидацию", errors=errors)
+        apply = self._apply_topology({"topology_dict": self._hook.to_topology(body), "recipe_path": str(path)})
+        if not isinstance(apply, dict) or apply.get("success") is not True:
+            raise _Reply("apply_failed", "topology.apply отказал", apply=apply)
+        try:
+            self._persist_active(path)
+        except Exception as exc:  # noqa: BLE001 — топология применена, манифест нет
+            raise _Reply("io_error", f"топология применена, манифест не записан: {exc}", apply=apply)
+        return {"success": True, "name": name, "apply": apply}
 
-    def delete(self, data: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    @_guarded
+    def delete(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.delete`` — см. модульный докстринг."""
-        raise NotImplementedError
+        name, path = self._path(args)
+        with self._lock(name):
+            current = self._read_bytes(path)
+            if current is None:
+                raise _Reply("not_found", f"рецепт {name!r} не найден")
+            if "base_rev" in args and args["base_rev"] != compute_rev(current):
+                raise _Reply("conflict", "рецепт изменён с момента чтения", current_rev=compute_rev(current))
+            if name == self._read_active():
+                raise _Reply("active", f"рецепт {name!r} активен — удалять нельзя")
+            path.unlink()
+        return {"success": True, "name": name}
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """tmp в том же каталоге + ``os.replace``; при сбое tmp убирается, старый файл цел."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def compute_rev(raw: bytes) -> str:
     """Ревизия байтов файла (непрозрачна для клиента; сегодня sha256 hex)."""
-    raise NotImplementedError
+    return hashlib.sha256(raw).hexdigest()

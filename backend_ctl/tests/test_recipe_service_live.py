@@ -23,10 +23,39 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from backend_ctl.harness import BackendHarness
 
 _PORT = 8887  # уникальный порт этого модуля (диапазон 8880-8899, DESIGN Task 1b.1)
+
+# Стартовый рецепт временного манифеста: синтетический, без железа (как дефолт harness).
+BOOT_RECIPE = "region_pipeline"
+
+
+def write_temp_manifest(src_manifest: Path, tmp_root: Path) -> Path:
+    """Копия ``app.yaml`` в ``tmp_root``: ``recipes``/``pipeline`` — относительно копии,
+    прочие пути (system/base/styles) — абсолютные на репозиторий (их не копируем)."""
+    raw = yaml.safe_load(src_manifest.read_text(encoding="utf-8"))
+    repo_dir = src_manifest.parent
+    raw["system"] = str(repo_dir / raw["system"])
+    raw["base"] = [str(repo_dir / b) for b in raw.get("base") or []]
+    if isinstance(raw.get("styles"), dict) and raw["styles"].get("dir"):
+        raw["styles"]["dir"] = str(repo_dir / raw["styles"]["dir"])
+    raw.pop("presentation", None)
+    raw["recipes"] = "recipes"
+    raw["pipeline"] = f"recipes/{BOOT_RECIPE}.yaml"
+    out = tmp_root / "app.yaml"
+    out.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return out
+
+
+def manifest_launcher(manifest: Path):
+    """Headless-launcher из манифеста — та же дорога, что ``main`` (``SystemBuilder.from_manifest``)."""
+    from multiprocess_prototype.backend.config.manifest import load_manifest
+    from multiprocess_prototype.main import build_launcher
+
+    return build_launcher(load_manifest(manifest), None, include_presentation=False)
 
 
 @pytest.fixture(scope="module")
@@ -48,9 +77,12 @@ def recipe_backend(tmp_path_factory: pytest.TempPathFactory):
     tmp_root = tmp_path_factory.mktemp("recipe_live")
     tmp_recipes = tmp_root / "recipes"
     shutil.copytree(src_recipes, tmp_recipes)
-    shutil.copy2(src_manifest, tmp_root / "app.yaml")
+    tmp_manifest = write_temp_manifest(src_manifest, tmp_root)
 
-    harness = BackendHarness(with_base=True, port=_PORT)
+    # GREEN (Task 1b.1): бэкенд грузится из ВРЕМЕННОГО манифеста (launcher_factory,
+    # Ф5.13) — хаб берёт recipes_dir и «активный» из него, recipe.activate пишет
+    # pipeline во временный app.yaml, боевой не трогается.
+    harness = BackendHarness(port=_PORT, launcher_factory=lambda: manifest_launcher(tmp_manifest))
     drv = harness.start()
     try:
         yield drv, tmp_recipes
