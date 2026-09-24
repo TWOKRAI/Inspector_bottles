@@ -1,0 +1,633 @@
+# -*- coding: utf-8 -*-
+"""Авторские hazard-тесты Task 5.4 — ручки неисправностей (fault.*).
+
+Харнесс скопирован с ``test_acceptance_5_4_faults.py`` (``_make_plugin``/``_call``/
+``_free_port``/``_run_with_deadline``) — тот же приём: ``MockProcessServices`` +
+реальный ``PluginContext`` + реальный ``SimRobotServer`` на свободном порту.
+
+Каждый тест целит РОВНО ту опасность конкретного устройства, которую называет
+DESIGN п.6 брифа задачи (гонка останова/рестарта слушателя вокруг
+``fault.drop``/``fault.clear``/``shutdown``) — не повтор приёмки тестера.
+"""
+
+from __future__ import annotations
+
+import socket
+import threading
+import time
+from typing import Any
+
+import pytest
+
+from multiprocess_framework.modules.process_module.plugins.base import PluginContext
+from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
+from Plugins.sim.robot_host.plugin import SimRobotHostPlugin
+from Services.robot_comm import ROBOT_AVAILABLE
+from Services.robot_comm.core.registers import REG_PLACE_X
+
+pytestmark = [
+    pytest.mark.timeout(30),
+    pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен"),
+]
+
+_HOST = "127.0.0.1"
+_UNIT_ID = 2
+_FORBIDDEN_PORTS = {5021, 8765, 8766, 8091, 8092}  # живой стенд владельца — не трогать
+
+
+# --------------------------------------------------------------------------- #
+# Харнесс (копия test_acceptance_5_4_faults.py)                               #
+# --------------------------------------------------------------------------- #
+
+
+def _free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((_HOST, 0))
+        port = s.getsockname()[1]
+    finally:
+        s.close()
+    assert port not in _FORBIDDEN_PORTS, f"порту {port} не повезло совпасть со стендом, перегенерировать"
+    return port
+
+
+def _make_plugin(port: int, **extra_cfg: Any) -> tuple[SimRobotHostPlugin, PluginContext, MockProcessServices]:
+    services = MockProcessServices(name="robot")
+    cfg = {"host": _HOST, "port": port, "unit_id": _UNIT_ID, "auto_start": True}
+    cfg.update(extra_cfg)
+    ctx = PluginContext(services=services, config=cfg)
+    plugin = SimRobotHostPlugin()
+    plugin.configure(ctx)
+    return plugin, ctx, services
+
+
+def _call(plugin: SimRobotHostPlugin, name: str, data: dict | None = None) -> dict:
+    method_name = plugin.commands[name]
+    method = getattr(plugin, method_name)
+    return method(data)
+
+
+def _run_with_deadline(fn, *, timeout: float, label: str):
+    """Потенциально блокирующий вызов — в daemon-потоке с join-дедлайном
+    (project-rules: зависание хуже отсутствующего теста)."""
+    result: dict = {}
+    error: dict = {}
+
+    def _target() -> None:
+        try:
+            result["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001
+            error["exc"] = exc
+
+    thread = threading.Thread(target=_target, name=f"deadline-{label}", daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    if thread.is_alive():
+        raise AssertionError(f"{label} не вернулась за {timeout} с — похоже на зависание")
+    if "exc" in error:
+        raise error["exc"]
+    return result.get("value")
+
+
+def _try_connect(host: str, port: int, timeout: float = 1.0) -> bool:
+    def _attempt() -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
+    return bool(_run_with_deadline(_attempt, timeout=timeout + 1.0, label="tcp-connect"))
+
+
+@pytest.fixture
+def running_plugin():
+    port = _free_port()
+    plugin, ctx, services = _make_plugin(port)
+    _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+    assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+    try:
+        yield plugin, ctx, port
+    finally:
+        _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
+
+
+# --------------------------------------------------------------------------- #
+# (a) shutdown во время активного drop — слушатель не должен воскреснуть      #
+# --------------------------------------------------------------------------- #
+
+
+def test_shutdown_during_drop_does_not_resurrect_listener() -> None:
+    """Гонка DESIGN п.4/6d: ``shutdown()`` посреди ``fault.drop{seconds:5}``.
+
+    Если бы ``shutdown()`` звал ``self._server.stop()`` НЕ дождавшись отмены
+    фонового потока :meth:`_run_drop`, тот мог бы позвать ``start_listener()``
+    ПОСЛЕ того, как порт уже закрыт ``stop_listener()`` изнутри ``server.stop()``
+    — слушатель воскрес бы за спиной у остановленного процесса. Порт должен
+    остаться закрытым и после дедлайна ``seconds``, и поток drop — мёртв."""
+    port = _free_port()
+    plugin, ctx, _services = _make_plugin(port)
+    _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+    assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+
+    t_cmd = time.monotonic()
+    resp = _call(plugin, "fault.drop", {"seconds": 5})
+    assert resp["ok"] is True
+
+    _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
+
+    drop_thread = plugin._drop_thread
+    if drop_thread is not None:
+        assert not drop_thread.is_alive(), "поток fault.drop должен быть мёртв после shutdown()"
+
+    # Ждём дольше исходного seconds=5 (с запасом на дедлайн команды) — порт
+    # обязан оставаться закрытым, а не "открыться сам" по истечении seconds.
+    while time.monotonic() - t_cmd < 5.5:
+        assert not _try_connect(_HOST, port, timeout=0.3), (
+            "listener воскрес после shutdown() — гонка stop_listener()/start_listener()"
+        )
+        time.sleep(0.2)
+
+
+# --------------------------------------------------------------------------- #
+# (b) drop сам исчезает из status["faults"] без явного fault.clear            #
+# --------------------------------------------------------------------------- #
+
+
+def test_drop_disappears_from_status_without_clear(running_plugin) -> None:
+    """DESIGN §status: ``drop`` числится в ``faults`` РОВНО пока жив поток
+    :meth:`_run_drop` (не по таймеру/сроку, снятому вручную) — как только
+    ``start_listener()`` восстановил связь и поток завершился, запись обязана
+    пропасть САМА, без вызова ``fault.clear``."""
+    plugin, _ctx, _port = running_plugin
+
+    resp = _call(plugin, "fault.drop", {"seconds": 1})
+    assert resp["ok"] is True
+
+    status = _call(plugin, "sim_robot.status")
+    assert any(f["kind"] == "drop" for f in status["faults"]), "drop должен быть в faults сразу после команды"
+
+    deadline = time.monotonic() + 3.0
+    disappeared = False
+    while time.monotonic() < deadline:
+        status = _call(plugin, "sim_robot.status")
+        if not any(f["kind"] == "drop" for f in status["faults"]):
+            disappeared = True
+            break
+        time.sleep(0.1)
+    assert disappeared, f"drop не пропал из faults сам за 3с (seconds=1): {status['faults']!r}"
+    # ...и без единого вызова fault.clear в этом тесте.
+
+
+# --------------------------------------------------------------------------- #
+# (c) два drop подряд (второй — после завершения первого) оба работают        #
+# --------------------------------------------------------------------------- #
+
+
+def test_two_consecutive_drops_both_work_state_survives(running_plugin) -> None:
+    """DESIGN п.1: НЕ «второй drop поверх первого» (это критерий приёмки —
+    busy), а два ПОСЛЕДОВАТЕЛЬНЫХ drop — состояние (REG_PLACE_X) обязано
+    пережить ОБА рестарта слушателя подряд, не только один."""
+    from pymodbus.client import ModbusTcpClient
+
+    plugin, _ctx, port = running_plugin
+
+    client = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+    ok = _run_with_deadline(client.connect, timeout=3.0, label="connect")
+    assert ok, "client.connect() вернул False"
+    try:
+        _run_with_deadline(
+            lambda: client.write_register(REG_PLACE_X, 1234, device_id=_UNIT_ID), timeout=3.0, label="write"
+        )
+    finally:
+        client.close()
+
+    for seconds in (1, 1):
+        resp = _call(plugin, "fault.drop", {"seconds": seconds})
+        assert resp["ok"] is True, f"drop({seconds}) должен пройти: {resp!r}"
+
+        deadline = time.monotonic() + 4.0
+        reconnected = False
+        while time.monotonic() < deadline:
+            if _try_connect(_HOST, port, timeout=0.4):
+                reconnected = True
+                break
+            time.sleep(0.1)
+        assert reconnected, f"listener не восстановился после drop({seconds})"
+        # Лид: порт уже принимает, а drop ещё числится (окно README) — следующий
+        # drop ждёт faults == [], иначе busy (1 из 15 изолированных прогонов).
+        while time.monotonic() < deadline and _call(plugin, "sim_robot.status")["faults"]:
+            time.sleep(0.05)
+
+    client2 = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+    ok2 = _run_with_deadline(client2.connect, timeout=3.0, label="connect2")
+    assert ok2, "второй client.connect() вернул False"
+    try:
+        rr = _run_with_deadline(
+            lambda: client2.read_holding_registers(REG_PLACE_X, count=1, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="read",
+        )
+    finally:
+        client2.close()
+    assert rr is not None and not rr.isError(), f"чтение после двух drop подряд провалилось: {rr!r}"
+    assert list(rr.registers) == [1234], f"REG_PLACE_X не пережил ДВА drop подряд: {rr.registers!r}"
+
+
+# --------------------------------------------------------------------------- #
+# (d) shutdown сразу после fault.clear (листенер только что рестартовал)      #
+# --------------------------------------------------------------------------- #
+
+
+def test_shutdown_right_after_clear_leaves_port_free() -> None:
+    """TRAPS брифа Task 5.4: ``pymodbus.ModbusBaseServer.active_server``
+    выставляется ВНУТРИ потока сервера — ``ServerStop()`` до этого момента
+    бросает «not running» и НЕ останавливает реально запущенный listener.
+    ``fault.clear`` только что позвал ``start_listener()`` (см.
+    :meth:`SimRobotServer.start_listener` — ждёт готовности, но не бесконечно);
+    ``shutdown()`` СРАЗУ следом не должен оставить порт открытым.
+
+    Фикс-раунд ревью (K5) — старая версия (одна итерация, проверка СРАЗУ после
+    shutdown, чем занят одноразовый ``running_plugin``) не ловила свою же
+    гонку: воскресший листенер биндится с ЗАДЕРЖКОЙ (новый поток должен
+    успеть дойти до ``bind()``/``listen()`` уже ПОСЛЕ того, как
+    ``server.stop()`` вернул управление), поэтому коннект СРАЗУ после
+    shutdown() мог пройти отказом чисто по времени, даже когда гонка
+    реально произошла и порт откроется чуть позже. Перебор (5 итераций,
+    свежий плагин+порт на каждой — переиспользованный ``running_plugin``
+    маскировал бы вторую гонку состоянием первой) + ОДНА проверка через
+    1.0с (не цикл — цикл с ранним успешным отказом опять маскирует позднее
+    открытие) ловит запаздывающий бинд. Сам факт того, что тест ловит СВОЙ
+    хазард, а не просто "зелёный по умолчанию", проверен вручную (см.
+    докстринг развёртывания в отчёте ревью): временный ``return`` перед
+    циклом готовности в ``start_listener()`` красит этот тест."""
+    for _ in range(5):
+        port = _free_port()
+        plugin, ctx, _services = _make_plugin(port)
+        _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+        assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+
+        drop_resp = _call(plugin, "fault.drop", {"seconds": 1})
+        assert drop_resp["ok"] is True
+        clear_resp = _call(plugin, "fault.clear")
+        assert clear_resp["ok"] is True
+
+        _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
+
+        time.sleep(1.0)
+        assert not _try_connect(_HOST, port, timeout=0.3), (
+            "порт всё ещё принимает соединения через 1.0с после shutdown() сразу за fault.clear()"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# (R1, MAJOR) — задержка ПЕРВОЙ в биндере: обрыв во время delay_ms не должен  #
+# ложно засчитаться журналом как отдельное задание                            #
+# --------------------------------------------------------------------------- #
+
+
+def test_delay_then_drop_does_not_double_count_journal(running_plugin) -> None:
+    """Повтор репро ревьюера: ``fault.delay_ms{ms:1500}``, запись
+    ``write_registers(REG_JOB_FLAG, [1,100,200,0,5,0])`` (полный кадр задания —
+    JOB_FLAG, X, Y, ECAP(2 слова), PLACE_FLAG), 0.3с внутрь этой ЕЩЁ висящей
+    (задержанной) записи — ``fault.drop{seconds:0.3}`` рвёт соединение.
+    Клиент не получил ответ -> переподключается ПОСЛЕ восстановления и шлёт
+    ТУ ЖЕ запись повторно (эмулируем клиентский retry — в тесте просто вторая
+    запись тем же кадром). Журнал обязан увидеть РОВНО ОДНО успешное задание
+    (jobs=1, dups=0), а не два (jobs=2, dups=1) — старый порядок (delay ПОСЛЕ
+    attach/on_write) считал ``on_write`` ДО того, как pymodbus успевал
+    применить саму запись, а обрыв соединения отменял зависшую в sleep
+    корутину уже ПОСЛЕ этого фиктивного счёта. Тест обязан УМЕРЕТЬ при старом
+    порядке (delay последней) — проверено вручную (см. отчёт ревью)."""
+    from pymodbus.client import ModbusTcpClient
+
+    from Services.robot_comm.core.registers import REG_JOB_FLAG
+
+    plugin, _ctx, port = running_plugin
+
+    delay_resp = _call(plugin, "fault.delay_ms", {"ms": 1500})
+    assert delay_resp["ok"] is True
+
+    job_frame = [1, 100, 200, 0, 5, 0]  # JOB_FLAG,X,Y,ECAP_HI,ECAP_LO,PLACE_FLAG
+
+    write_error: dict[str, BaseException] = {}
+
+    def _write_delayed() -> None:
+        client = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+        try:
+            ok = client.connect()
+            if not ok:
+                write_error["exc"] = RuntimeError("connect() вернул False")
+                return
+            client.write_registers(REG_JOB_FLAG, job_frame, device_id=_UNIT_ID)
+        except Exception as exc:  # noqa: BLE001 — обрыв соединения, тип не гарантирован
+            write_error["exc"] = exc
+        finally:
+            client.close()
+
+    writer_thread = threading.Thread(target=_write_delayed, name="delayed-write", daemon=True)
+    writer_thread.start()
+
+    time.sleep(0.3)  # запись всё ещё висит внутри asyncio.sleep(1.5) биндера
+    drop_resp = _call(plugin, "fault.drop", {"seconds": 0.3})
+    assert drop_resp["ok"] is True
+
+    writer_thread.join(timeout=5.0)
+    assert not writer_thread.is_alive(), "поток отложенной записи не завершился за 5с — похоже на зависание"
+
+    clear_resp = _call(plugin, "fault.clear")
+    assert clear_resp["ok"] is True
+
+    deadline = time.monotonic() + 5.0
+    reconnected = False
+    while time.monotonic() < deadline:
+        if _try_connect(_HOST, port, timeout=0.5):
+            reconnected = True
+            break
+        time.sleep(0.1)
+    assert reconnected, "listener не восстановился после drop"
+
+    # Клиентский retry — ТА ЖЕ запись тем же кадром после восстановления связи.
+    client2 = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+    ok2 = _run_with_deadline(client2.connect, timeout=3.0, label="connect2")
+    assert ok2, "client2.connect() вернул False"
+    try:
+        rr = _run_with_deadline(
+            lambda: client2.write_registers(REG_JOB_FLAG, job_frame, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="retry-write",
+        )
+        assert rr is not None and not rr.isError(), f"повторная запись провалилась: {rr!r}"
+    finally:
+        client2.close()
+
+    time.sleep(0.5)  # дать журналу такт паблишера/приёма
+    status = _call(plugin, "sim_robot.journal")
+    assert status["status"] == "ok", status
+    counters = status["counters"]
+    assert counters["jobs"] == 1, f"ложный лишний job из прерванной задержанной записи: {counters!r}"
+    assert counters["dups"] == 0, f"ложный dup из прерванной задержанной записи: {counters!r}"
+
+
+# --------------------------------------------------------------------------- #
+# (K4) — fault.vfd_code не пишет 0x1214 сразу, только на пульсе               #
+# --------------------------------------------------------------------------- #
+
+
+def test_vfd_code_command_alone_does_not_write_register(running_plugin) -> None:
+    """DESIGN п.3, буквально: команда ``fault.vfd_code{code:7}`` БЕЗ пульса
+    VFD_FLAG не должна тронуть 0x1214 вообще — если плагин по ошибке пишет
+    регистр сразу (мимо ``RobotSimCore._handle_vfd``), этот тест обязан
+    умереть на первом чтении (0 ожидается, не 7)."""
+    from pymodbus.client import ModbusTcpClient
+
+    plugin, _ctx, port = running_plugin
+    _REG_VFD_FAULT = 0x1214
+
+    resp = _call(plugin, "fault.vfd_code", {"code": 7})
+    assert resp["ok"] is True
+
+    client = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+    ok = _run_with_deadline(client.connect, timeout=3.0, label="connect")
+    assert ok, "client.connect() вернул False"
+    try:
+        regs_before = _run_with_deadline(
+            lambda: client.read_holding_registers(_REG_VFD_FAULT, count=1, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="read-before-pulse",
+        )
+        assert regs_before is not None and not regs_before.isError(), f"чтение провалилось: {regs_before!r}"
+        assert list(regs_before.registers) == [0], (
+            f"0x1214 не должен получить код ДО пульса VFD_FLAG: {regs_before.registers!r}"
+        )
+
+        belt_resp = _call(plugin, "belt.run", {"freq_hz": 10.0})  # пульс VFD_FLAG
+        assert belt_resp["ok"] is True
+        time.sleep(0.1)
+
+        regs_after = _run_with_deadline(
+            lambda: client.read_holding_registers(_REG_VFD_FAULT, count=1, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="read-after-pulse",
+        )
+        assert regs_after is not None and not regs_after.isError(), f"чтение провалилось: {regs_after!r}"
+        assert list(regs_after.registers) == [7], f"0x1214 должен стать 7 ПОСЛЕ пульса: {regs_after.registers!r}"
+    finally:
+        client.close()
+        _call(plugin, "fault.clear")
+
+
+# --------------------------------------------------------------------------- #
+# Лид, 2026-09-24: пробелы, найденные break-injection раунда 2 (J3-J6)        #
+# --------------------------------------------------------------------------- #
+
+
+def test_start_listener_returns_only_when_port_accepts(running_plugin, monkeypatch) -> None:
+    """J3: ``start_listener()`` возвращается, когда порт УЖЕ принимает коннект.
+
+    Сквозной тест «shutdown сразу за clear» ловит утечку слушателя 3 из 5 раз (гонка),
+    в полном прогоне файла — ни разу. Без ожидания готовности исход тоже решает
+    планировщик: новый поток иногда успевает сделать bind раньше коннекта (замер лида:
+    обычно отказ через 0.5–1.4 мс, но не всегда). Поэтому bind замедлен подменой
+    ``_serve`` на 0.2 с — меньше ``_LISTENER_READY_TIMEOUT_S`` (0.5 с): с ожиданием
+    коннект проходит, без него отказан всегда. Коннект — в том же потоке сразу за
+    возвратом, без обёрток."""
+    from pymodbus.server.base import ModbusBaseServer
+
+    plugin, _ctx, port = running_plugin
+    server = plugin._server
+    # Исходный слушатель фикстуры — ТОЧНО поднят, иначе под поломкой утекает он сам
+    # (stop_listener до active_server) и коннект попадает в него — тест зеленел 3/5.
+    deadline = time.monotonic() + 3.0
+    while not (ModbusBaseServer.active_server is not None and _try_connect(_HOST, port, timeout=0.2)):
+        assert time.monotonic() < deadline, "слушатель фикстуры не поднялся за 3 с"
+        time.sleep(0.05)
+    real_serve = server._serve
+
+    def slow_serve() -> None:
+        time.sleep(0.2)
+        real_serve()
+
+    monkeypatch.setattr(server, "_serve", slow_serve)
+
+    def restart_then_connect() -> bool:
+        server.stop_listener()
+        server.start_listener()
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            return True
+        except OSError:
+            return False
+
+    ok = _run_with_deadline(restart_then_connect, timeout=6.0, label="restart_then_connect")
+    assert ok, "start_listener вернулся до того, как порт принял коннект"
+
+
+def test_drop_restore_retries_after_listener_failure(running_plugin, monkeypatch) -> None:
+    """J4: сбой ``start_listener`` при восстановлении — повтор, а не мёртвый слушатель
+    при ``state == running``; сбой виден в плоскости ошибок (context drop_restore)."""
+    plugin, ctx, port = running_plugin
+    server = plugin._server
+    real_start = server.start_listener
+    calls = {"n": 0}
+
+    def flaky_start(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("инъекция: слушатель не поднялся")
+        return real_start(*a, **kw)
+
+    reported: list[str] = []
+    real_report = ctx.health.report_error
+    monkeypatch.setattr(server, "start_listener", flaky_start)
+    monkeypatch.setattr(
+        ctx.health,
+        "report_error",
+        lambda exc, context="", **kw: (reported.append(context), real_report(exc, context=context, **kw)),
+    )
+    assert _call(plugin, "fault.drop", {"seconds": 0.3})["ok"] is True
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and _call(plugin, "sim_robot.status")["faults"]:
+        time.sleep(0.1)
+    assert _call(plugin, "sim_robot.status")["faults"] == [], "drop не завершился после повтора"
+    assert calls["n"] == 2, f"ожидался ровно один повтор start_listener, вызовов: {calls['n']}"
+    assert "sim_robot_host.drop_restore" in reported, f"сбой не отчитан: {reported!r}"
+    assert _try_connect("127.0.0.1", port, timeout=1.0), "после повтора слушатель не принимает"
+
+
+def test_shutdown_clears_faults() -> None:
+    """J5: после ``shutdown`` статус не показывает отказы прошлой жизни сервера."""
+    port = _free_port()
+    plugin, ctx, _services = _make_plugin(port)
+    _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+    assert _call(plugin, "fault.delay_ms", {"ms": 50})["ok"] is True
+    assert _call(plugin, "fault.vfd_code", {"code": 7})["ok"] is True
+    _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
+    assert _call(plugin, "sim_robot.status")["faults"] == []
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("fault.drop", {"seconds": 3601}),
+        ("fault.drop", {"seconds": 10**400}),
+        ("fault.drop", {"seconds": float("nan")}),
+        ("fault.delay_ms", {"ms": 0.4}),
+        ("fault.delay_ms", {"ms": 10**400}),
+        ("fault.delay_ms", {"ms": float("inf")}),
+    ],
+)
+def test_fault_args_bounds(running_plugin, name, data) -> None:
+    """J6: верхняя граница ``seconds`` (3600), переполнение, nan/inf, ``ms`` < 1 после
+    округления — ``bad_args``, не исключение и не молча принятое значение."""
+    plugin, _ctx, _port = running_plugin
+    resp = _call(plugin, name, data)
+    assert resp["ok"] is False and resp["error"].startswith("bad_args"), f"{name}{data}: {resp!r}"
+    assert _call(plugin, "sim_robot.status")["faults"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Эскалация 5.4 (teamlead): сервер владеет СВОИМ pymodbus-объектом            #
+# --------------------------------------------------------------------------- #
+
+
+def _listener_threads() -> list[threading.Thread]:
+    return [t for t in threading.enumerate() if t.name == "sim-robot-server" and t.is_alive()]
+
+
+def test_ready_timeout_leaves_no_orphan_listener(monkeypatch) -> None:
+    """Находка 1 ревью итерации 2: ``start_listener`` сдался по ``ready_timeout``, а
+    его поток жил дальше, делал bind позже и переживал ``shutdown`` — два потока
+    ``sim-robot-server`` и порт, принимающий коннект через 1 с после останова.
+
+    ``_serve`` замедлен на 0.8 с при бюджете готовности восстановления 0.5 с: каждая
+    попытка восстановления после ``fault.drop`` проваливается по таймауту. После
+    ``shutdown`` не должно остаться ни слушателя, ни его потока."""
+    port = _free_port()
+    plugin, ctx, _services = _make_plugin(port)
+    _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+    try:
+        assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+        server = plugin._server
+        real_serve = server._serve
+
+        def slow_serve() -> None:
+            time.sleep(0.8)
+            real_serve()
+
+        monkeypatch.setattr(server, "_serve", slow_serve)
+        reported: list[str] = []
+        real_report = ctx.health.report_error
+        monkeypatch.setattr(
+            ctx.health,
+            "report_error",
+            lambda exc, context="", **kw: (reported.append(context), real_report(exc, context=context, **kw)),
+        )
+        assert _call(plugin, "fault.drop", {"seconds": 0.2})["ok"] is True
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if "sim_robot_host.drop_restore" in reported or not _call(plugin, "sim_robot.status")["faults"]:
+                break
+            time.sleep(0.05)
+    finally:
+        _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=6.0, label="shutdown")
+    time.sleep(1.0)
+    assert not _try_connect(_HOST, port, timeout=0.3), "порт принимает коннект через 1 с после shutdown"
+    assert _listener_threads() == [], f"осиротевшие потоки слушателя: {_listener_threads()!r}"
+
+
+def test_start_listener_raises_when_port_taken_by_foreign(running_plugin) -> None:
+    """R5 ревью: порт занят ЧУЖИМ слушателем — наш bind проваливается, поток умирает,
+    а TCP-проба готовности соединялась с чужим и ``start_listener`` возвращал «OK».
+    Готовность — это НАШ сервер слушает, а не «кто-то на порту отвечает»."""
+    plugin, _ctx, port = running_plugin
+    server = plugin._server
+    _run_with_deadline(server.stop_listener, timeout=5.0, label="stop_listener")
+    foreign = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        foreign.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        foreign.bind((_HOST, port))
+        foreign.listen(1)
+        with pytest.raises(RuntimeError):
+            _run_with_deadline(server.start_listener, timeout=0.5 + 1.0, label="start_listener_foreign")
+    finally:
+        foreign.close()
+    _run_with_deadline(server.start_listener, timeout=5.0, label="start_listener_free")
+    assert _try_connect(_HOST, port, timeout=1.0), "после освобождения порта слушатель не принимает"
+
+
+def test_stop_during_listen_closes_late_socket(monkeypatch) -> None:
+    """Белый ящик окна ``listen()``: остановка приходит, пока pymodbus ждёт
+    ``create_server``. ``close()`` pymodbus выставляет ``is_closing`` ПОСЛЕ того, как
+    ``listen()`` его сбросил, сокет появляется уже после, и повторный ``shutdown()``
+    становится no-op — слушатель оставался открытым без потока (ловилось
+    ``test_ready_timeout_leaves_no_orphan_listener`` примерно 1 раз из 6).
+    ``create_server`` задержан на 0.3 с, чтобы окно было детерминированным."""
+    import asyncio
+
+    from Services.robot_comm.server import sim_robot
+
+    real_cls = sim_robot.ModbusTcpServer
+
+    class SlowListen(real_cls):  # type: ignore[misc, valid-type]
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            super().__init__(*a, **kw)
+            real_create = self.call_create
+
+            async def slow_create():
+                await asyncio.sleep(0.3)
+                return await real_create()
+
+            self.call_create = slow_create
+
+    monkeypatch.setattr(sim_robot, "ModbusTcpServer", SlowListen)
+    port = _free_port()
+    server = sim_robot.SimRobotServer(_HOST, port, _UNIT_ID)
+    try:
+        with pytest.raises(RuntimeError):
+            _run_with_deadline(lambda: server.start_listener(ready_timeout=0.1), timeout=4.0, label="start_listener")
+        time.sleep(0.5)
+        assert not _try_connect(_HOST, port, timeout=0.3), "сокет, созданный после остановки, остался открыт"
+        assert _listener_threads() == [], f"осиротевшие потоки слушателя: {_listener_threads()!r}"
+    finally:
+        _run_with_deadline(server.stop, timeout=5.0, label="stop")

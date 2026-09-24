@@ -17,19 +17,12 @@
 вызовом (ADR-PM-030). Процесс при этом поднимается: `start()` не пробрасывает
 исключение наружу.
 
-**Порт занят — обнаруживается СВОИМ пробным bind'ом, а не исключением
-``SimRobotServer``.** ``SimRobotServer.start()`` не блокирует до подтверждения
-бинда: он запускает ``pymodbus`` (``StartTcpServer``) в фоновом daemon-потоке
-(``sim_robot.py:121-126``) и возвращается немедленно, а ошибка ``bind()`` при
-занятом порту случится ВНУТРИ этого потока — синхронный ``try/except`` вокруг
-``.start()`` её никогда не поймает (поток просто тихо умирает). Поэтому
-:meth:`_start_server` сперва сам биндит и сразу закрывает пробный сокет на том же
-``host``/``port`` — если ОС отказала (``OSError``, порт занят), это ловится здесь,
-синхронно, ДО обращения к ``pymodbus``. Окно гонки между пробным закрытием и
-реальным биндом сервера теоретически есть, но для одиночного процесса-симулятора
-на выделенном порту (5021, out of scope — гонка с параллельным конкурентом) этого
-достаточно; более сильная гарантия потребовала бы правки ``Services/robot_comm``,
-которая вне области задачи.
+**Порт занят — ловится дважды.** Сначала свой пробный bind в :meth:`_start_server`
+(синхронно, до обращения к ``pymodbus``, ``OSError`` → :meth:`_fail`). Затем, с Task 5.4,
+``SimRobotServer.start()`` сам ждёт, пока СВОЙ ``ModbusTcpServer`` начнёт слушать (до 5 с),
+и бросает ``RuntimeError``, если поток слушателя умер на bind или не успел, — это тоже
+уходит в :meth:`_fail` (``state == "error"``). Пробный bind остаётся ради внятной причины
+в отчёте, а не ради гарантии.
 
 **Ручка длительности задания (Task 5.3b, ``job_ms``).** Конфиг ``job_ms`` (мс) даёт
 ``job_ticks = max(1, round(job_ms / (TICK_INTERVAL_S*1000)))`` — тиков исполнения
@@ -134,6 +127,10 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         "belt.status": "cmd_belt_status",
         "sim_robot.journal": "cmd_journal",
         "sim_robot.journal_reset": "cmd_journal_reset",
+        "fault.drop": "cmd_fault_drop",
+        "fault.delay_ms": "cmd_fault_delay_ms",
+        "fault.vfd_code": "cmd_fault_vfd_code",
+        "fault.clear": "cmd_fault_clear",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -193,6 +190,23 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._state = "configured"
         self._reason = ""
 
+        # Task 5.4 (fault.*) — состояние под self._lock (заведён выше), как jog-поля.
+        # drop: фоновый daemon-поток на один активный fault.drop; второй поверх первого
+        # -> busy, не отменяет первый (DESIGN п.6 брифа).
+        self._drop_thread: threading.Thread | None = None
+        self._drop_cancel: threading.Event | None = None
+        self._drop_seconds: float | None = None
+        # delay_ms=0 — неотличим от "не задан" (валидация требует >0), отдельного
+        # bool не нужно. vfd_fault_code=0 — ЗАВЕДЁННОЕ значение (валидация допускает
+        # code=0), поэтому активность держит отдельный явный флаг.
+        self._delay_ms = 0
+        self._vfd_fault_active = False
+        self._vfd_fault_code = 0
+        # Фикс-раунд ревью (R5): отдельный от cancel Event — сигнал «процесс
+        # останавливается», проверяется retry-циклом восстановления в _run_drop,
+        # чтобы не долбиться в start_listener() вечно после shutdown().
+        self._shutdown_event = threading.Event()
+
         # Task 2.0 не влит → ctx.state_proxy is None: запись в общий мир
         # пропускается (см. _publish_once), но паблишер уровней работает всегда.
         ctx.declare_metric("encoder")
@@ -229,8 +243,27 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         ctx.worker_manager.create_worker("sim_robot_world_publisher", self._publish_loop, cfg, auto_start=True)
 
     def shutdown(self, ctx: PluginContext) -> None:
-        """STOPPED: дожать счётчик, остановить сервер симметрично ``start()``."""
+        """STOPPED: дожать счётчик, остановить сервер симметрично ``start()``.
+
+        Task 5.4 DESIGN п.4: сначала взвести ``self._shutdown_event`` (будит
+        retry-цикл восстановления в :meth:`_run_drop`, если он сейчас крутится),
+        потом отменить+дождаться (bounded) незавершённый ``fault.drop`` — ИНАЧЕ
+        его фоновый поток мог бы позвать ``start_listener()`` ПОСЛЕ того, как
+        ``self._server.stop()`` уже закрыл порт, воскресив слушателя за спиной у
+        остановленного процесса. Фикс-раунд ревью (R8): следом зануляем
+        delay/vfd-код — и в полях плагина, и в живом ``server``/``core`` (пока
+        сервер ещё жив) — ``sim_robot.status`` после останова обязан показывать
+        ``faults: []``, а не последнее боевое значение."""
         self._sync_writes_metric()
+        self._shutdown_event.set()
+        self._cancel_drop(timeout=1.0)
+        with self._lock:
+            self._delay_ms = 0
+            self._vfd_fault_active = False
+            self._vfd_fault_code = 0
+            if self._server is not None:
+                self._server.delay_ms = 0
+                self._server.core.vfd_fault_code = 0
         if self._server is not None:
             self._server.stop()
             self._server = None
@@ -277,7 +310,10 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             core = RobotSimCore(**core_kwargs)
             server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
             server.start()
-        except (ModbusNotAvailableError, ImportError, OSError) as exc:  # noqa: BLE001 — деградация, не отказ
+        except (ModbusNotAvailableError, ImportError, OSError, RuntimeError) as exc:  # noqa: BLE001 — деградация
+            # RuntimeError — Task 5.4: SimRobotServer.start_listener() может бросить её,
+            # если слушатель аномально не поднялся за _LISTENER_READY_TIMEOUT_S (см. его
+            # докстринг); та же дорога деградации, что и занятый порт.
             self._fail(ctx, exc)
             return
 
@@ -508,7 +544,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def cmd_status(self, data: dict | None = None) -> dict:
-        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state/world/journal."""
+        """``sim_robot.status`` → running/host/port/unit_id/writes_seen/state/world/journal/faults."""
         self._sync_writes_metric()
         with self._lock:
             writes_seen = self._writes_seen
@@ -521,6 +557,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             "state": self._state,
             "world": "unavailable" if self._ctx.state_proxy is None else "ok",
             "journal": self._journal.counters() if self._journal is not None else {},
+            "faults": self._collect_faults(),
         }
 
     # ------------------------------------------------------------------ #
@@ -703,3 +740,223 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         if self._server is None:
             return self._no_server()
         return self._belt_status()
+
+    # ------------------------------------------------------------------ #
+    # Ручки неисправностей (Task 5.4, план line-sim §Task 5.4) — исполняются
+    # на потоке диспетчера команд, НЕ блокируют его (``fault.drop`` уводит
+    # ``stop_listener()``/``sleep``/``start_listener()`` в отдельный daemon-поток,
+    # ``fault.delay_ms`` только выставляет число, читаемое биндером сервера).
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _validate_seconds(value: Any) -> dict | None:
+        """``None`` если ``seconds`` — конечное число в (0, 3600] (фикс-раунд
+        ревью R2: верхняя граница — иначе ``fault.drop`` без ``fault.clear``
+        мог бы держать порт закрытым практически бесконечно), иначе
+        ``_bad_args``. ``bool`` — не число (``isinstance(True, int)`` истинно
+        в Python). ``math.isfinite`` на int вне диапазона float (``10**400``)
+        бросает ``OverflowError`` при неявной конвертации — ловим её как
+        обычный ``bad_args``, не даём 500-й ошибке дойти до диспетчера (R4)."""
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return SimRobotHostPlugin._bad_args("seconds обязателен и должен быть числом")
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            return SimRobotHostPlugin._bad_args("seconds вне диапазона (переполнение)")
+        if not finite or not (0 < value <= 3600):
+            return SimRobotHostPlugin._bad_args(f"seconds={value!r} должен быть числом в (0, 3600]")
+        return None
+
+    @staticmethod
+    def _validate_ms(value: Any) -> tuple[dict | None, int]:
+        """``(None, ms)`` — ``ms`` УЖЕ округлён (``round(value)``, фикс-раунд
+        ревью R3: клиент присылает доли миллисекунды, округляем сами, а не
+        отказываем) и проверен в [1, 10000]; иначе ``(bad_args, 0)``. Тот же
+        капкан ``bool``/``OverflowError`` (``10**400``), что у
+        :meth:`_validate_seconds`."""
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return SimRobotHostPlugin._bad_args("ms обязателен и должен быть числом"), 0
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            return SimRobotHostPlugin._bad_args("ms вне диапазона (переполнение)"), 0
+        if not finite:
+            return SimRobotHostPlugin._bad_args("ms должен быть конечным числом"), 0
+        ms = round(value)
+        if not (1 <= ms <= 10000):
+            return SimRobotHostPlugin._bad_args(f"ms={value!r} после округления вне диапазона [1, 10000]"), 0
+        return None, ms
+
+    @staticmethod
+    def _validate_vfd_code(value: Any) -> dict | None:
+        """``None`` если ``value`` — настоящий ``int`` в 0..65535, иначе ``_bad_args``.
+        Чистый int-путь (без ``math.isfinite``) — сравнение ``int`` с ``int``
+        не конвертирует в float, ``10**400`` не бросает ``OverflowError`` тут,
+        просто не проходит диапазон."""
+        if not isinstance(value, int) or isinstance(value, bool):
+            return SimRobotHostPlugin._bad_args("code обязателен и должен быть int")
+        if not (0 <= value <= 65535):
+            return SimRobotHostPlugin._bad_args(f"code={value} вне диапазона [0, 65535]")
+        return None
+
+    def _collect_faults(self) -> list[dict[str, Any]]:
+        """Снимок активных faults для ``sim_robot.status`` (DESIGN п.4).
+
+        ``drop`` активен, пока жив фоновый поток :meth:`_run_drop` — он сам
+        завершается, когда ``start_listener()`` восстановил связь (или пришёл
+        ``shutdown``), поэтому запись исчезает БЕЗ явного ``fault.clear``
+        (брифа Task 5.4, hazard b). Пока поток занят retry-циклом
+        восстановления (R5 — сеть аномально не поднимается), запись остаётся:
+        честно — связь правда ещё не работает."""
+        faults: list[dict[str, Any]] = []
+        with self._lock:
+            drop_thread = self._drop_thread
+            drop_seconds = self._drop_seconds
+            delay_ms = self._delay_ms
+            vfd_active = self._vfd_fault_active
+            vfd_code = self._vfd_fault_code
+        if drop_thread is not None and drop_thread.is_alive():
+            faults.append({"kind": "drop", "seconds": drop_seconds})
+        if delay_ms > 0:
+            faults.append({"kind": "delay_ms", "ms": delay_ms})
+        if vfd_active:
+            faults.append({"kind": "vfd_code", "code": vfd_code})
+        return faults
+
+    def _run_drop(self, server: Any, seconds: float, cancel: threading.Event) -> None:
+        """Тело фонового потока одного ``fault.drop`` (потоку принадлежат ``server``/
+        ``cancel``, захвачены аргументами, не через ``self`` — переживает любое
+        параллельное присвоение ``self._server``/``self._drop_*``, хоть сегодня
+        диспетчер команд однопоточен и это не наблюдалось).
+
+        ``cancel.wait(seconds)`` — спит ``seconds`` ИЛИ до ``fault.clear``/
+        ``shutdown`` (:meth:`_cancel_drop`), что раньше. Дальше —
+        retry-цикл восстановления (фикс-раунд ревью R5): ``start_listener()``
+        аномально не поднялся (``RuntimeError``, см. её докстринг про
+        ``_LISTENER_READY_TIMEOUT_S``) -> отчёт в health с троттлом 30с и
+        пауза 0.5с ПЕРЕД следующей попыткой, пока не получится или пока не
+        взведён ``self._shutdown_event`` (``shutdown()``, НЕ ``cancel`` —
+        обычный ``fault.clear``/новый ``fault.drop`` не должен обрывать
+        retry чужого зависшего восстановления). ponytail: без backoff —
+        фиксированные 0.5с между попытками, апгрейд на экспоненциальный —
+        если частый неуспех станет реальной проблемой (сегодня непроверено,
+        это защитный путь для аномалии). ``finally`` — состояние чистится
+        ВСЕГДА (даже выход по shutdown без успешного restart), застрявший
+        поток не должен вечно числиться "активным drop" в :meth:`_collect_faults`
+        дольше, чем реально жив."""
+        try:
+            server.stop_listener()
+            cancel.wait(seconds)
+            while not self._shutdown_event.is_set():
+                try:
+                    server.start_listener()
+                except RuntimeError as exc:
+                    self._ctx.health.report_error(exc, context="sim_robot_host.drop_restore", throttle=30.0)
+                    self._shutdown_event.wait(0.5)
+                    continue
+                break
+        finally:
+            with self._lock:
+                if self._drop_cancel is cancel:
+                    self._drop_cancel = None
+                    self._drop_seconds = None
+                    self._drop_thread = None
+
+    def _cancel_drop(self, *, timeout: float) -> None:
+        """Отменить незавершённый ``fault.drop`` (если есть) и дождаться его
+        потока не дольше ``timeout`` с (DESIGN п.4: ``fault.clear``/``shutdown``
+        — оба <=1с, зависание хуже отсутствующей отмены). No-op, если drop не
+        шёл — ``cancel``/``thread`` тогда ``None``."""
+        with self._lock:
+            cancel = self._drop_cancel
+            thread = self._drop_thread
+        if cancel is not None:
+            cancel.set()
+        if thread is not None:
+            thread.join(timeout=timeout)
+
+    def cmd_fault_drop(self, data: dict | None = None) -> dict:
+        """``fault.drop{seconds}`` — оборвать TCP-слушателя на ``seconds`` (DESIGN
+        п.1): связь рвётся, ядро/тикер/лента продолжают жить (это коммуникационный
+        обрыв, не перезагрузка робота). Возвращается немедленно — работу уводит
+        :meth:`_run_drop` в daemon-потоке. Второй ``fault.drop`` поверх ещё не
+        завершённого первого -> ``busy``, первый не отменяется и не сбрасывается."""
+        with self._lock:
+            server = self._server
+        if server is None:
+            return self._no_server()
+        data = data or {}
+        err = self._validate_seconds(data.get("seconds"))
+        if err is not None:
+            return err
+        seconds = float(data["seconds"])
+        with self._lock:
+            if self._drop_thread is not None and self._drop_thread.is_alive():
+                return {"ok": False, "error": "busy: drop in progress"}
+            cancel = threading.Event()
+            self._drop_cancel = cancel
+            self._drop_seconds = seconds
+            thread = threading.Thread(
+                target=self._run_drop,
+                args=(server, seconds, cancel),
+                name="sim-robot-fault-drop",
+                daemon=True,
+            )
+            self._drop_thread = thread
+            thread.start()
+        # ВНЕ self._lock — _collect_faults() берёт его сам (Lock не реентерабелен,
+        # держать его здесь было бы дедлоком).
+        return {"ok": True, "faults": self._collect_faults()}
+
+    def cmd_fault_delay_ms(self, data: dict | None = None) -> dict:
+        """``fault.delay_ms{ms}`` — задержать ОТВЕТ на КАЖДЫЙ Modbus-доступ на
+        ``ms`` (DESIGN п.2): читает биндер сервера через ``asyncio.sleep``, не
+        блокирует event loop — конкурентные клиенты не сериализуются."""
+        with self._lock:
+            server = self._server
+        if server is None:
+            return self._no_server()
+        data = data or {}
+        err, ms = self._validate_ms(data.get("ms"))
+        if err is not None:
+            return err
+        with self._lock:
+            self._delay_ms = ms
+            server.delay_ms = ms
+        return {"ok": True, "faults": self._collect_faults()}
+
+    def cmd_fault_vfd_code(self, data: dict | None = None) -> dict:
+        """``fault.vfd_code{code}`` — выставить код неисправности ПЧ (DESIGN п.3):
+        применяется ядром (``RobotSimCore.vfd_fault_code``) в зеркало 0x1214 на
+        СЛЕДУЮЩЕМ пульсе VFD_FLAG, не сразу по этому вызову."""
+        with self._lock:
+            server = self._server
+        if server is None:
+            return self._no_server()
+        data = data or {}
+        err = self._validate_vfd_code(data.get("code"))
+        if err is not None:
+            return err
+        code = int(data["code"])
+        with self._lock:
+            self._vfd_fault_active = True
+            self._vfd_fault_code = code
+            server.core.vfd_fault_code = code
+        return {"ok": True, "faults": self._collect_faults()}
+
+    def cmd_fault_clear(self, data: dict | None = None) -> dict:
+        """``fault.clear`` — снять все активные faults: отменить+дождаться
+        (bounded, <=1с) незавершённый ``fault.drop``, занулить ``delay_ms`` и
+        код ПЧ ядра. Возвращает опустевший список faults (DESIGN п.4)."""
+        with self._lock:
+            server = self._server
+        if server is None:
+            return self._no_server()
+        self._cancel_drop(timeout=1.0)
+        with self._lock:
+            self._delay_ms = 0
+            self._vfd_fault_active = False
+            self._vfd_fault_code = 0
+            server.delay_ms = 0
+            server.core.vfd_fault_code = 0
+        return {"ok": True, "faults": self._collect_faults()}

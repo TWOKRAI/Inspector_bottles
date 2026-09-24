@@ -22,7 +22,16 @@ dead-man путь, строгие типы аргументов), ветка `fe
 
 Причины повтора (`dups_same_capture`/`dups_tracked`) — счётная логика в `Services/robot_comm/server/sim_journal.py` (см. его README), не здесь; 4/4 REDS `Services/robot_comm/tests/test_sim_journal_causes.py` зелёные.
 
+| Ручки неисправностей `fault.*` (Task 5.4) | есть: `fault.drop`/`fault.delay_ms`/`fault.vfd_code`/`fault.clear`, `sim_robot.status.faults`; `SimRobotServer.stop_listener()`/`start_listener()` разводят слушателя и тикер (drop — обрыв связи, не перезагрузка); задержка биндера ПЕРВОЙ строкой (не после attach/on_write) — обрыв во время delay_ms не даёт ложный dup в журнале (фикс-раунд ревью); retry-цикл восстановления `fault.drop` при аномально медленном bind; 9/9 REDS `tests/test_acceptance_5_4_faults.py` зелёные (после `27a5aec8`); `tests/test_faults_hazards.py` — 18 прогонов: 6 авторских (shutdown посреди drop, drop сам уходит из faults, два drop подряд, shutdown сразу за clear x5, ложный dup при drop поверх delay_ms, vfd_code не пишет регистр без пульса), 4 лида из break-injection раунда 2 (`82834c12`: J3 готовность, J4 retry восстановления, J5 faults после shutdown, J6 границы аргументов — 6 параметров), 3 эскалации teamlead (нет осиротевшего слушателя после таймаута готовности; `RuntimeError` при порте, занятом чужим; остановка в окне `listen()` не оставляет открытый сокет). Слушатель — свой объект `ModbusTcpServer`, без `ServerStop`/`active_server` |
+
 ## Долг / открытые вопросы
+
+- Живой стенд владельца, 2026-09-24: 100 объектов, один drop 3 с в середине —
+  `dup_jobs 0 / dups 0 / missed 68`; пять drop синхронно с заданием — `0 / 0 / 74`,
+  `jobs_dropped` инспектора 3 ([docs/claude/OPEN_QUESTIONS.md](../../../docs/claude/OPEN_QUESTIONS.md)).
+- `cmd_fault_*` читают `server = self._server` один раз под `self._lock` (фикс-раунд ревью
+  R7); `belt.*` — тот же самый паттерн двойного/устаревшего чтения `self._server` там был и
+  раньше (вне области Task 5.4), не тронут — известный долг на будущую задачу.
 
 - Task 3.5b: пересылка события проверена на подменённом `DeviceHubClient` и смоуком с
   реальным `SimRobotServer` + реальным клиентом на мок-роутере; межпроцессная доставка
