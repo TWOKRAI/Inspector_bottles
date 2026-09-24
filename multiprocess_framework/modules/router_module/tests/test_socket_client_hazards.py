@@ -1,0 +1,208 @@
+# -*- coding: utf-8 -*-
+"""Авторские hazard-тесты ``SocketClient`` (Task 1.2 GREEN, gui-service).
+
+Что может сломаться именно в этом механизме, как он устроен:
+
+* async-слоты живут в том же реестре ``_pending``, что и синхронные; их вынимают
+  ТРИ стороны (ответ в ``_dispatch``, таймаут в ``_expire_slots``, ``close``/разрыв).
+  Колбэк обязан позваться РОВНО один раз — даже если две стороны сходятся;
+* ``send_nowait`` после разрыва должен поднять исключение, а не «молча записать» в
+  мёртвый сокет (иначе GUI шлёт команды в пустоту без сигнала владельцу соединения);
+* push-слушатель исполняется на reader-потоке — его исключение не должно убить поток
+  (иначе после первого кривого слушателя клиент глохнет навсегда, без ошибки).
+
+Хост — минимальный TCP-сервер на 127.0.0.1:0 (не RouterManager): тестам нужна
+точная власть над тем, отвечать ли, когда рвать и что пушить.
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+import pytest
+
+from ..channels.socket_client import SocketClient, SocketConnectionLost
+
+
+class _FakeHost:
+    """TCP-сервер: пишет входящие в ``received``, отвечает ``responder(msg)`` (None — молчит)."""
+
+    def __init__(self, responder: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None) -> None:
+        self._srv = socket.create_server(("127.0.0.1", 0))
+        self.port = self._srv.getsockname()[1]
+        self.responder = responder
+        self.received: List[Dict[str, Any]] = []
+        self.conns: List[socket.socket] = []
+        self.accepted = threading.Event()
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            self.conns.append(conn)
+            self.accepted.set()
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn: socket.socket) -> None:
+        buf = b""
+        while True:
+            try:
+                chunk = conn.recv(4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buf += chunk
+            while b"\n" in buf:
+                raw, buf = buf.split(b"\n", 1)
+                msg = json.loads(raw)
+                self.received.append(msg)
+                reply = self.responder(msg) if self.responder else None
+                if reply is not None:
+                    self.send(conn, reply)
+
+    @staticmethod
+    def send(conn: socket.socket, msg: Dict[str, Any]) -> None:
+        conn.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+
+    def push(self, msg: Dict[str, Any]) -> None:
+        self.send(self.conns[-1], msg)
+
+    def drop(self) -> None:
+        for c in self.conns:
+            try:
+                c.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            c.close()
+
+    def close(self) -> None:
+        self.drop()
+        self._srv.close()
+
+
+def _wait(predicate: Callable[[], bool], timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _connected(host: _FakeHost) -> SocketClient:
+    client = SocketClient("127.0.0.1", host.port, sender="gui")
+    client.connect()
+    assert host.accepted.wait(2.0), "сервер не принял соединение"
+    return client
+
+
+def test_close_fires_each_async_callback_exactly_once() -> None:
+    """close(): каждый ожидающий request_async получает ОДИН колбэк с ошибкой."""
+    host = _FakeHost()  # молчит — ответы не придут
+    try:
+        client = _connected(host)
+        calls: Dict[str, List[Dict[str, Any]]] = {"a": [], "b": []}
+        client.request_async({"command": "x"}, calls["a"].append, timeout=30.0)
+        client.request_async({"command": "y"}, calls["b"].append, timeout=30.0)
+        client.close()
+        client.close()  # идемпотентность: второй close не зовёт колбэки повторно
+        time.sleep(0.7)  # > периода опроса reader'а: таймаут-ветка не должна добавить вызов
+        for key in ("a", "b"):
+            assert len(calls[key]) == 1, f"{key}: колбэк позван {len(calls[key])} раз"
+            assert calls[key][0]["success"] is False
+            assert calls[key][0]["error"] == "connection closed"
+        assert client.connection_lost is False, "намеренный close — не разрыв (I4)"
+    finally:
+        host.close()
+
+
+def test_conn_lost_fires_async_callback_once_with_connection_lost() -> None:
+    """Разрыв со стороны хоста: async-колбэк — ровно один, error == 'connection lost'."""
+    host = _FakeHost()
+    try:
+        client = _connected(host)
+        got: List[Dict[str, Any]] = []
+        client.request_async({"command": "x"}, got.append, timeout=30.0)
+        host.drop()
+        assert _wait(lambda: client.connection_lost), "разрыв не зафиксирован"
+        client.close()  # close после разрыва не должен позвать колбэк ещё раз
+        assert [m["error"] for m in got] == ["connection lost"]
+    finally:
+        host.close()
+
+
+def test_async_timeout_once_and_late_reply_quarantined() -> None:
+    """Таймаут async → один колбэк 'timeout'; поздний ответ — в карантин, не в push."""
+    host = _FakeHost()
+    try:
+        client = _connected(host)
+        got: List[Dict[str, Any]] = []
+        pushes: List[Dict[str, Any]] = []
+        client.add_push_listener(pushes.append)
+        cid = client.request_async({"command": "x"}, got.append, timeout=0.2)
+        assert _wait(lambda: got, timeout=1.5), "таймаут async не сработал за timeout + опрос"
+        host.push({"request_id": cid, "result": {"success": True}})
+        time.sleep(0.3)
+        assert [m["error"] for m in got] == ["timeout"]
+        assert pushes == [], "поздний ответ всплыл push-событием (нарушение I3)"
+        assert client.late_replies == 1
+    finally:
+        host.close()
+
+
+def test_send_nowait_on_lost_connection_raises() -> None:
+    """send_nowait после разрыва — SocketConnectionLost, а не тихая запись в пустоту."""
+    host = _FakeHost()
+    try:
+        client = _connected(host)
+        host.drop()
+        assert _wait(lambda: client.connection_lost), "разрыв не зафиксирован"
+        with pytest.raises(SocketConnectionLost):
+            client.send_nowait({"command": "noop"})
+    finally:
+        host.close()
+
+
+def test_send_nowait_reply_is_quarantined_not_push() -> None:
+    """Ответ хоста на send_nowait не всплывает push'ем и не считается поздним (I3)."""
+    host = _FakeHost(responder=lambda m: {"request_id": m["request_id"], "result": {"success": True}})
+    try:
+        client = _connected(host)
+        pushes: List[Dict[str, Any]] = []
+        client.add_push_listener(pushes.append)
+        client.send_nowait({"command": "noop"})
+        assert _wait(lambda: len(host.received) == 1)
+        time.sleep(0.2)
+        assert pushes == []
+        assert client.late_replies == 0
+    finally:
+        host.close()
+
+
+def test_push_listener_exception_does_not_kill_reader() -> None:
+    """Исключение слушателя: следующий слушатель получает push, reader жив для следующего."""
+    host = _FakeHost()
+    try:
+        client = _connected(host)
+
+        def _boom(msg: Dict[str, Any]) -> None:
+            raise RuntimeError("кривой слушатель")
+
+        got: List[Dict[str, Any]] = []
+        client.add_push_listener(_boom)
+        client.add_push_listener(got.append)
+        host.push({"command": "one"})
+        host.push({"command": "two"})
+        assert _wait(lambda: len(got) == 2), f"дошло {got}"
+        assert [m["command"] for m in got] == ["one", "two"]
+        assert client._reader is not None and client._reader.is_alive()
+    finally:
+        host.close()

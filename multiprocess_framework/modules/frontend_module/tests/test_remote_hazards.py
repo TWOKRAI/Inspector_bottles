@@ -1,0 +1,145 @@
+# -*- coding: utf-8 -*-
+"""Авторские hazard-тесты ``RemoteCommandSender`` / ``RemoteStateProxy`` (Task 1.2 GREEN).
+
+* Fence: внешний Пульт хосту не известен (его не запускал супервизор) — штамп всё
+  равно обязан стоять, с ``inc=0`` и эпохой хоста (решение лида): без него Пульт теряет
+  паритет структуры с встроенным GUI. Неудачный refresh — без штампа (F1).
+* Реконнект меняет ``session`` → адрес push-получателя. Подписки, зарегистрированные
+  на хосте под СТАРЫМ адресом, новому сокету не доставляются: ``on_reconnected`` обязан
+  переподписать каждый уникальный паттерн ПОД НОВЫМ адресом, иначе виджеты молча
+  замирают после первого же обрыва.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from multiprocess_framework.modules.frontend_module.bridge.remote_command_sender import (
+    RemoteCommandSender,
+)
+from multiprocess_framework.modules.frontend_module.bridge.remote_state_proxy import RemoteStateProxy
+from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient
+from multiprocess_framework.modules.state_store_module.core.delta import Delta
+from multiprocess_framework.modules.router_module.tests.test_socket_client_hazards import (
+    _FakeHost,
+    _wait,
+)
+
+
+def _reply(result: Dict[str, Any]):
+    def _responder(msg: Dict[str, Any]) -> Dict[str, Any]:
+        return {"type": "response", "request_id": msg["request_id"], "result": {"success": True, "result": result}}
+
+    return _responder
+
+
+def _client(host: _FakeHost) -> SocketClient:
+    client = SocketClient("127.0.0.1", host.port, sender="gui")
+    client.connect()
+    assert host.accepted.wait(2.0)
+    return client
+
+
+def _last(host: _FakeHost, command: str) -> Dict[str, Any]:
+    assert _wait(lambda: any(m.get("command") == command for m in host.received)), f"{command} не дошёл"
+    return [m for m in host.received if m.get("command") == command][-1]
+
+
+def test_unknown_sender_is_stamped_with_inc_zero_and_host_epoch() -> None:
+    """Хост не знает имя Пульта → штамп {sender, inc: 0, epoch: <эпоха хоста>}."""
+    host = _FakeHost(responder=_reply({"epoch": 9, "processes": {"camera_0": {"incarnation": 4}}}))
+    try:
+        client = _client(host)
+        sender = RemoteCommandSender(client, name="pult")
+        sender.refresh_fence()
+        client.send_nowait({"type": "command", "command": "noop"})
+        assert _last(host, "noop").get("_fence") == {"sender": "pult", "inc": 0, "epoch": 9}
+    finally:
+        host.close()
+
+
+def test_failed_refresh_sends_no_stamp() -> None:
+    """Отказ supervision.status → (None, None): сообщение уходит без _fence (F1, явно)."""
+    host = _FakeHost(
+        responder=lambda m: {
+            "type": "response",
+            "request_id": m["request_id"],
+            "result": {"success": False, "error": "x"},
+        }
+    )
+    try:
+        client = _client(host)
+        sender = RemoteCommandSender(client, name="pult")
+        sender.refresh_fence()
+        client.send_nowait({"type": "command", "command": "noop"})
+        assert "_fence" not in _last(host, "noop")
+    finally:
+        host.close()
+
+
+def test_on_reconnected_resubscribes_every_pattern_at_new_address() -> None:
+    """После реконнекта: state.subscribe на КАЖДЫЙ уникальный паттерн под новым адресом."""
+    host = _FakeHost(responder=_reply({"sub_id": "srv", "snapshot": {}}))
+    try:
+        client = _client(host)
+        proxy = RemoteStateProxy(client, dispatch=lambda fn: fn())
+        proxy.subscribe("a.*", lambda d: None, sync=False)
+        proxy.subscribe("b.*", lambda d: None, sync=False)
+        proxy.subscribe("a.*", lambda d: None, sync=False)  # дубль паттерна
+        old = client.subscriber_address
+
+        client.close()
+        client.connect()
+        new = client.subscriber_address
+        assert new != old
+        before = len(host.received)
+        proxy.on_reconnected()
+
+        resub = [m for m in host.received[before:] if m.get("command") == "state.subscribe"]
+        assert sorted(m["data"]["pattern"] for m in resub) == ["a.*", "b.*"]
+        assert all(m["data"]["subscriber"] == new and m["sender"] == new for m in resub)
+        assert proxy.process_name == new
+    finally:
+        host.close()
+
+
+def test_on_reconnected_without_subscriptions_sends_nothing() -> None:
+    """Без активных подписок — только смена имени, ни одного сетевого вызова."""
+    host = _FakeHost(responder=_reply({}))
+    try:
+        client = _client(host)
+        proxy = RemoteStateProxy(client, dispatch=lambda fn: fn())
+        client.close()
+        client.connect()
+        before = len(host.received)
+        proxy.on_reconnected()
+        assert proxy.process_name == client.subscriber_address
+        assert host.received[before:] == []
+    finally:
+        host.close()
+
+
+def test_other_push_commands_are_ignored_by_proxy() -> None:
+    """S3: push не-state.changed прокси не трогает (клиент делят несколько потребителей)."""
+    host = _FakeHost()
+    try:
+        client = _client(host)
+        got: List[Any] = []
+        proxy = RemoteStateProxy(client, dispatch=lambda fn: fn())
+        proxy.subscribe("a.*", got.append, sync=False)
+        host.push(
+            {
+                "command": "telemetry.snapshot",
+                "data": {"deltas": [Delta("a.b", old_value=None, new_value=1, source="host").to_dict()]},
+            }
+        )
+        host.push(
+            {
+                "command": "state.changed",
+                "data": {"deltas": [Delta("a.c", old_value=None, new_value=2, source="host").to_dict()]},
+            }
+        )
+        assert _wait(lambda: len(got) == 1)
+        assert [d.path for d in got[0]] == ["a.c"]
+    finally:
+        host.close()
