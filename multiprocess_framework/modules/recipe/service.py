@@ -128,7 +128,9 @@ ERROR_CODES: frozenset[str] = frozenset(
 )
 
 _SUFFIX = ".yaml"
-_NAME_RE = re.compile(r"\w[\w.\- ]*")
+# Начало и конец — \w: Windows отбрасывает хвостовые пробелы/точки, и "a " с "a" были бы одним файлом
+# под двумя разными локами.
+_NAME_RE = re.compile(r"\w(?:[\w.\- ]*\w)?")
 
 
 @runtime_checkable

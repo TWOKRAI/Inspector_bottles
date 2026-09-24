@@ -84,7 +84,7 @@ def test_handler_never_raises_when_hook_raises(tmp_path: Path) -> None:
 # --- имя рецепта (ревью 1b.1: BLOCKER) --------------------------------------
 
 
-@pytest.mark.parametrize("name", ["D:evil", ".hidden", "a/b", "a\\b", "", " lead", "..", "../x"])
+@pytest.mark.parametrize("name", ["D:evil", ".hidden", "a/b", "a\\b", "", " lead", "..", "../x", "trail ", "trail."])
 def test_bad_names_rejected_on_every_command(tmp_path: Path, name: str) -> None:
     svc = make(tmp_path)
     for cmd, args in [
