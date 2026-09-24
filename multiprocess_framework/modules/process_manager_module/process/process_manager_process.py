@@ -640,8 +640,16 @@ class ProcessManagerProcess(ProcessModule):
         """Запустить завершение системы.
 
         Параметр data принимается но не используется — команда не требует аргументов.
+
+        Команда == системный стоп (Task 1.1 lifecycle-stop-ownership): взводит ОБЩИЙ
+        ``system_stop_event`` — тот же путь, что закрытие окна GUI и ``harness.stop()``.
+        Дети гаснут параллельно, их хук выхода идёт с ``system_stop=True`` и ставит метки
+        «читатель ушёл» (ADR-SRM-016). Без этого PM останавливал детей по одному, и
+        хук на выходе ждал feeder'ы очередей до terminate спавнера (5.8 с).
         """
         self._log_info("System shutdown requested via command")
+        if self._system_stop_event is not None:
+            self._system_stop_event.set()
         self.stop_event.set()
         return {"success": True, "message": "Shutdown initiated"}
 
@@ -3459,31 +3467,37 @@ class ProcessManagerProcess(ProcessModule):
             3. ConsoleManager
             4. super().shutdown() (WorkerManager, RouterManager и т.д.)
         """
-        # backend-control endpoint (PID-specific остановка, без глобального kill).
-        # getattr: shutdown может вызываться на частично сконструированном PM (тесты/ошибки init).
-        teardown_backend_ctl_channel(
-            getattr(self, "_backend_ctl_channel", None),
-            getattr(self, "router_manager", None),
-        )
-        self._backend_ctl_channel = None
-
-        self._process_monitor.stop()
-        shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
-        # Ж-4 (RS-3): shutdown ОБЯЗАН подтвердить смерть ВСЕХ детей. stop_all теперь
-        # возвращает карту {name: stopped} (confirmed-death путь). Выживших — громко.
-        stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
-        if isinstance(stop_results, dict):
-            survivors = sorted(n for n, ok in stop_results.items() if not ok)
-            if survivors:
-                self._log_error(
-                    f"shutdown: дети ВЫЖИЛИ после остановки: {survivors} — смерть не подтверждена "
-                    f"(ручное вмешательство/утечка процессов)"
-                )
-        if self._console_manager is not None:
-            if hasattr(self._console_manager, "close_all"):
-                self._console_manager.close_all()
-            elif hasattr(self._console_manager, "shutdown"):
-                self._console_manager.shutdown()
+        try:
+            self._process_monitor.stop()
+            shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
+            # Ж-4 (RS-3): shutdown ОБЯЗАН подтвердить смерть ВСЕХ детей. stop_all теперь
+            # возвращает карту {name: stopped} (confirmed-death путь). Выживших — громко.
+            stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
+            if isinstance(stop_results, dict):
+                survivors = sorted(n for n, ok in stop_results.items() if not ok)
+                if survivors:
+                    self._log_error(
+                        f"shutdown: дети ВЫЖИЛИ после остановки: {survivors} — смерть не подтверждена "
+                        f"(ручное вмешательство/утечка процессов)"
+                    )
+            if self._console_manager is not None:
+                if hasattr(self._console_manager, "close_all"):
+                    self._console_manager.close_all()
+                elif hasattr(self._console_manager, "shutdown"):
+                    self._console_manager.shutdown()
+        finally:
+            # backend-control endpoint (PID-specific остановка, без глобального kill) — ПОСЛЕ
+            # остановки детей: ответ на ``system.shutdown`` уходит через этот сокет, а на
+            # системном стопе PM видит событие за <=0.1 с. Закрытие первым шагом теряло ответ
+            # в ~1 из 10 (Task 1.1 lifecycle-stop-ownership). Цена: во время stop_all сокет
+            # ещё принимает команды (монитор авто-рестарта к этому моменту уже остановлен).
+            # finally: исключение монитора/stop_all/console не оставляет сокет жить до выхода.
+            # getattr: shutdown может вызываться на частично сконструированном PM (тесты/ошибки init).
+            teardown_backend_ctl_channel(
+                getattr(self, "_backend_ctl_channel", None),
+                getattr(self, "router_manager", None),
+            )
+            self._backend_ctl_channel = None
         return super().shutdown()
 
     def create_process(

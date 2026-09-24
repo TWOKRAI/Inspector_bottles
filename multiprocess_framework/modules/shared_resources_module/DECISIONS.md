@@ -504,9 +504,11 @@ feeder в `connection._send`.
   уже `queue.Queue`, `router_module/channels/queue_channel.py` — тоже `queue.Queue`.
 - Читатель, убитый SIGKILL, метку не ставит (finally не выполняется) — писатель ждёт как раньше.
   Метку за мёртвого ребёнка мог бы ставить PM — долг, не сделано.
-- Путь команды `system.shutdown` (`process_manager_process.py`, `_cmd_system_shutdown`) взводит
-  только `self.stop_event` PM, без `system_stop_event`: хук на нём идёт с `system_stop=False`, метки
-  не ставятся, отпускать нечего. Один живой прогон не завис (1.389 с), но защиты там нет — долг.
+- ~~Путь команды `system.shutdown` взводит только `self.stop_event` PM~~ — снято Task 1.1
+  [`plans/lifecycle-stop-ownership.md`](../../../plans/lifecycle-stop-ownership.md): `_cmd_system_shutdown`
+  взводит общий `system_stop_event`, хук детей идёт с `system_stop=True`. Замер: до — 1.49 / 5.72 с
+  (`did not stop in` у renderer), после — 0.68–0.71 с в 10 из 10
+  (`backend_ctl/tests/test_system_shutdown_live.py`).
 - Немаркированная очередь с мёртвым читателем (индивидуальный стоп, затем системный стоп писателя)
   по-прежнему держит выход писателя — поведение до правки, не регресс.
 

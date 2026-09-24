@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -23,6 +24,19 @@ from backend_ctl.harness import BackendHarness, build_headless_launcher
 
 #: Корень репозитория: файл — backend_ctl/tests/<файл>.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _no_log_dir_env(monkeypatch) -> None:
+    """Env сильнее аргумента ``log_dir`` (``resolve_log_dir_root``: env → yaml → дефолт) и
+    снимается ОДИН раз при импорте ``launch`` (``_ENV_LOG_DIR_OVERRIDE``). В совместном прогоне
+    env уже выставлен к импорту — session-фикстурой ``multiprocess_framework/modules/conftest.py``
+    или зондом ``probe_observability_consumer_acceptance`` — и тесты судили бы его, а не аргумент."""
+    from multiprocess_prototype.backend import launch
+
+    monkeypatch.setattr(launch, "_ENV_LOG_DIR_OVERRIDE", None)
+    monkeypatch.delenv("MULTIPROCESS_LOG_DIR", raising=False)
+    monkeypatch.delenv("INSPECTOR_LOG_DIR", raising=False)
 
 
 def _logger_dirs(launcher: Any) -> Dict[str, str]:
@@ -57,9 +71,11 @@ class TestBuilderHonoursTheGivenDirectory:
         blob = repr(launcher._processes)
 
         assert "prototype_2" not in blob, "в собранной конфигурации остался каталог из yaml"
-        assert str(_REPO_ROOT) not in blob.replace(str(tmp_path), ""), (
-            "в собранной конфигурации остался путь внутри репозитория"
-        )
+        # Читаемые yaml конфигурации (``observability_config_path``/``_recipe_path``) живут в
+        # репозитории законно; судим пути, куда можно писать.
+        repo_paths = re.findall(re.escape(str(_REPO_ROOT)) + r"[^'\"]*", blob.replace(str(tmp_path), ""))
+        writable = [p for p in repo_paths if not p.endswith(".yaml")]
+        assert not writable, f"в собранной конфигурации остался путь внутри репозитория: {writable}"
 
     def test_without_the_argument_the_yaml_value_still_acts(self) -> None:
         """Граница правки: дефолт НЕ менялся.
