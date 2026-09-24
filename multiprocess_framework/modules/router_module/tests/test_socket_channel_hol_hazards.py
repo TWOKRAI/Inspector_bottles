@@ -108,7 +108,8 @@ def test_worker_outliving_its_connection_does_not_write_and_ends() -> None:
         assert results[0]["status"] == "error", f"ответ ушёл в закрытое соединение: {results[0]!r}"
         assert results[0]["reason"] == "session not connected"
         assert ch.get_info()["tx"] == tx_before
-        assert closed_sessions == ["s1"]
+        # Оповещение — после возврата обработчика (порядок закрытия), не мгновенно.
+        assert _wait(lambda: closed_sessions == ["s1"]), f"on_session_closed: {closed_sessions!r}"
     finally:
         release.set()
         ch.close()
@@ -244,4 +245,60 @@ def test_concurrent_drop_fires_session_closed_once() -> None:
         assert closed == ["s9"], f"on_session_closed прозвучал {len(closed)} раз: {closed!r}"
         c.close()
     finally:
+        ch.close()
+
+
+def test_session_bound_before_handler_on_first_line() -> None:
+    """Самая первая строка соединения несёт session: обработчик сразу отвечает адресно.
+
+    Привязка обязана случиться в read-потоке ДО передачи сообщения обработчику —
+    иначе ответ первой же команды уходит в «session not connected».
+    """
+    results: List[Dict[str, Any]] = []
+
+    def on_inbound(msg: Dict[str, Any]) -> None:
+        results.append(ch.send({"type": "response", "session": msg["session"], "request_id": "r1"}))
+
+    ch = SocketChannel("hz6", port=0, on_inbound=on_inbound, session_isolation=True)
+    assert ch.start() is True
+    try:
+        c = _connect(ch, 1)
+        c.sendall(b'{"session":"first","request_id":"r1"}\n')
+        line = _recv_line(c, timeout=1.0)
+        assert b'"r1"' in line, f"ответ на первую строку не дошёл: {line!r}, send → {results!r}"
+        c.close()
+    finally:
+        ch.close()
+
+
+def test_session_closed_fires_after_last_handler_of_the_session() -> None:
+    """Порядок: on_session_closed — только ПОСЛЕ возврата последнего обработчика сессии.
+
+    Иначе наблюдатель обработчика (note_point) отработает после forget_session и
+    оставит намерение подписки мёртвой сессии (класс Н3-1).
+    """
+    release = threading.Event()
+    order: List[str] = []
+
+    def on_inbound(msg: Dict[str, Any]) -> None:
+        release.wait(3.0)
+        order.append("handler_done")
+
+    ch = SocketChannel(
+        "hz7", port=0, on_inbound=on_inbound, on_session_closed=lambda sid: order.append(f"closed:{sid}")
+    )
+    assert ch.start() is True
+    try:
+        c = _connect(ch, 1)
+        c.sendall(b'{"session":"s7"}\n')
+        assert _wait(lambda: ch.get_info()["sessions"] == 1)
+        c.close()
+        time.sleep(0.3)  # read-поток давно увидел EOF
+        assert order == [], f"сессия закрыта при живом обработчике: {order!r}"
+        release.set()
+        assert _wait(lambda: len(order) == 2), f"порядок не завершился: {order!r}"
+        time.sleep(0.1)
+        assert order == ["handler_done", "closed:s7"], f"неверный порядок: {order!r}"
+    finally:
+        release.set()
         ch.close()

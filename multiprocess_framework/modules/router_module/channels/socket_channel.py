@@ -358,7 +358,29 @@ class SocketChannel(MessageChannel):
                 self._warn_oversize(len(buf))
                 buf = b""
                 discarding = True
-        self._drop_clients([client])
+        # Порядок закрытия (ADR-RTR-012, дополнение): соединение снимается с учёта
+        # СРАЗУ (новые ответы ему — «session not connected», без записи), а
+        # on_session_closed звучит только ПОСЛЕ последнего обработчика этой сессии —
+        # как было, пока обработчики шли в read-потоке. Иначе наблюдатель обработчика
+        # (note_point) отработал бы после forget_session: призрачное намерение (Н3-1).
+        closed_sessions = self._unregister_clients([client])
+        self._await_handlers(inflight)
+        self._finish_drop([client], closed_sessions)
+
+    def _await_handlers(self, inflight: threading.BoundedSemaphore) -> None:
+        """Дождаться всех обработчиков соединения: забрать все слоты семафора.
+
+        Абсолютного дедлайна нет: обработчик ограничен таймаутом своего запроса —
+        ровно так же, как ограничен был read-поток, пока звал их инлайн. Ждёт только
+        daemon-поток мёртвого соединения. Сдаётся лишь при close() канала
+        (``_running`` = False), чтобы остановка не висела.
+        """
+        taken = 0
+        while taken < _MAX_INFLIGHT_PER_CONNECTION:
+            if inflight.acquire(timeout=_INFLIGHT_ACQUIRE_POLL_SEC):
+                taken += 1
+            elif not self._running:
+                return
 
     def _warn_oversize(self, seen: int) -> None:
         self._log_warning(
@@ -462,6 +484,14 @@ class SocketChannel(MessageChannel):
         Заодно снимает session-маппинг — **единственная точка unbind**: все пути
         смерти сокета (read-loop exit, dead-on-send, close) сходятся сюда.
         """
+        self._finish_drop(clients, self._unregister_clients(clients))
+
+    def _unregister_clients(self, clients: List[socket.socket]) -> List[str]:
+        """Первая половина drop: снять сокеты и их session-маппинг с учёта (под локом).
+
+        Returns: сессии, снятые ЭТИМ вызовом — каждая попадает ровно в один вызов,
+        поэтому on_session_closed звучит ровно один раз при любых гонках drop'ов.
+        """
         drop_ids = {id(c) for c in clients}
         closed_sessions: List[str] = []
         with self._clients_lock:
@@ -472,6 +502,10 @@ class SocketChannel(MessageChannel):
                 for sid in [s for s, sock in self._sessions.items() if id(sock) in drop_ids]:
                     del self._sessions[sid]
                     closed_sessions.append(sid)
+        return closed_sessions
+
+    def _finish_drop(self, clients: List[socket.socket], closed_sessions: List[str]) -> None:
+        """Вторая половина drop: оповестить о закрытых сессиях и закрыть сокеты."""
         # Оповещение — ВНЕ лока: обработчик может пойти в чужие структуры (реестр
         # подписок), и держать на этом лок соединений значило бы связать две
         # блокировки в порядке, о котором вторая сторона не знает.

@@ -297,6 +297,30 @@ release за lock-free refcount пула.
 получил `max_bytes_per_ring` (16 МиБ на кольцо) с вытеснением тем же видимым путём, что
 по maxlen.
 
+**Дополнение (2026-09-24, находки инъекций лида).**
+
+- *Инвариант порядка: «сессия закрыта ПОСЛЕ последнего обработчика этой сессии».* Пока
+  обработчики шли в read-потоке, `on_session_closed` (→ `_forget_closed_session` →
+  `broker.forget_session`) звучал строго после них, включая наблюдателя `on_request`
+  (`_note_point_request` → `broker.note_point`). После выноса в потоки обработчик мог
+  оставаться в работе, когда read-loop уже вышел: `note_point` после `forget_session` —
+  призрачное намерение подписки мёртвой сессии (класс Н3-1). Воспроизведено до правки:
+  `test_session_closed_fires_after_last_handler_of_the_session` — `['closed:s7']` при живом
+  обработчике. Правка: на выходе read-loop соединение СРАЗУ снимается с учёта
+  (`_unregister_clients` — ответы ему дальше «session not connected», без записи), затем
+  read-поток забирает все `_MAX_INFLIGHT_PER_CONNECTION` слотов (тот же опрос), и только
+  потом `_finish_drop` зовёт `on_session_closed` и закрывает сокет. `_drop_clients` разрезан
+  на две половины; каждая сессия попадает ровно в один вызов снятия — оповещение ровно одно.
+- *Почему без дедлайна.* Обработчик ограничен таймаутом своего запроса — ровно тем же, чем
+  был ограничен read-поток, пока звал его инлайн. Ждёт только daemon-поток мёртвого
+  соединения; при `close()` канала (`_running` = False) ожидание сдаётся сразу, остановка
+  не висит (`test_close_with_full_semaphore_returns_and_read_thread_exits`).
+- *J5: «привязка до передачи» не имела теста.* Отложенный на 50 мс `_bind_session` оставлял
+  все 49 тестов зелёными. Добавлен `test_session_bound_before_handler_on_first_line`: первая
+  строка соединения несёт session, обработчик сразу отвечает адресно — под J5 красный.
+- Счётчики `SocketBridgeAdapter` (`_lost_responses`, `_observer_errors`) теперь пишутся из
+  нескольких потоков — под одним `threading.Lock` (инкремент и чтение в `get_stats`).
+
 **Reversible:** yes (вернуть инлайн-вызов в `_handle_line`; kwargs потолков — с дефолтами).
 **Refs:** plans/2026-09-22_gui-service/phase-1-one-machine.md (Task 1.3a), ADR-RTR-008,
 `tests/test_socket_channel_hol_acceptance.py`, `tests/test_socket_client_max_line_acceptance.py`.
