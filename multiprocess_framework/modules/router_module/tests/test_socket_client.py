@@ -137,7 +137,7 @@ def test_request_roundtrip_under_one_second() -> None:
         client = SocketClient(host.host, host.port, sender="gui")
         client.connect()
         t0 = time.monotonic()
-        resp = _call_with_deadline(lambda: client.request({"command": "ping"}), timeout=5.0)
+        resp = _call_with_deadline(lambda: client.request({"type": "command", "command": "ping", "sender": "gui"}), timeout=5.0)
         elapsed = time.monotonic() - t0
         assert elapsed < 1.0, f"roundtrip {elapsed:.3f}с — дольше секунды"
         assert resp["success"] is True
