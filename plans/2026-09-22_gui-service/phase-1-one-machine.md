@@ -152,6 +152,25 @@ HOL/`sendall`/границы кадров (Task 1.3a), второй клиент
 не к старту, а к старту 1.4 (см. «Транспортные болезни» выше); remediation 3.2 сделана.
 **Module contract:** impl-only (`frontend_module`) + new-lite (`socket_client.py` с докстрингом-контрактом).
 
+**Итог (2026-09-24, DONE, merge `ef581997` в `feat/gui-service`):** `SocketClient` во фреймворке
+(`router_module/channels/socket_client.py`), `backend_ctl.transport` — шим с прежними именами;
+`RemoteCommandSender` (наследует `CommandSender`) и `RemoteStateProxy` (наследует `GuiStateProxy`) в
+`frontend_module/bridge/`. Сводный прогон: 1573 passed / 1 skipped, `backend_ctl` 786 passed / 52 skipped /
+0 failed, `sentrux check .` зелёный. Break-injection лида — 13 поломок, все убиты; тест тестера
+`test_subscription_survives_reconnect` пуст как страж (фейк-хост доставляет и без переподписки) —
+свойство держат авторские тесты, живой прогон подтвердил, что переподписка нужна. Ревью — 2 итерации,
+APPROVE_WITH_NOTES; закрыты гонка `conn_lost`, fence до `refresh`, F2 (штамп сообщений без `sender`).
+- **Отклонения, принятые сознательно:** (1) `RemoteStateProxy.set` — fire-and-forget, как у встроенного
+  прокси, а не «запрос с подтверждением» из Step 3; (2) `state.*` не штампуются `_fence` (F2 штампует
+  только команды своего имени и без `sender`); (3) форма ошибок `RemoteCommandSender` отличается от
+  `CommandSender` — выравнивание решает 1.4, когда вкладки встанут на `RemoteGuiRuntime`.
+- **Не наблюдалось вживую:** смена `inc`/`epoch` после рестарта бэкенда — свежий бэкенд отдаёт 0/0,
+  перештамповка проверена только unit-тестами.
+- **Стык с конструктором (Р-4 rework):** `remote_*` лежат в `frontend_module/bridge/` и сами Qt-free, но
+  `frontend_module/__init__.py` импортирует `components`/`widgets` — импорт через пакет поднимает PySide6.
+  При расщеплении `frontend_module` (rework Р-4, ступень 3.4) `remote_command_sender.py` и
+  `remote_state_proxy.py` относятся к **Qt-free ядру**, не к Qt-пакету. Для 1.4 не блокер (Пульт — Qt).
+
 ---
 
 ### Task 1.3 — Кадры между деревьями на одной машине: мост + SHM по имени

@@ -199,7 +199,7 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 Файл: [`phase-1-one-machine.md`](phase-1-one-machine.md)
 
 - Task 1.1: Инвентарь разъёмов GUI ↔ дерево — числа, baseline fps и сьюты [DONE 2026-09-22, `a20e673f`; fps не снят] — **Module contract:** none (отчёт)
-- Task 1.2: Сокетный транспорт для GUI: клиент во фреймворк, `RemoteCommandSender`/`RemoteStateProxy`, fence-штамп как у встроенного GUI [PENDING] (зависит от 1.1; remediation 3.2 «второй клиент» **уже закрыта** `8fae4034`; 3.1 HOL и 3.3 `sendall` — Task 1.3a, не к старту 1.2) — **Module contract:** impl-only + new-lite (`socket_client.py`)
+- Task 1.2: Сокетный транспорт для GUI: клиент во фреймворк, `RemoteCommandSender`/`RemoteStateProxy`, fence-штамп как у встроенного GUI [DONE 2026-09-24, merge ef581997] (зависит от 1.1; remediation 3.2 «второй клиент» **уже закрыта** `8fae4034`; 3.1 HOL и 3.3 `sendall` — Task 1.3a, не к старту 1.2) — **Module contract:** impl-only + new-lite (`socket_client.py`)
 - Task 1.3: Кадры между деревьями на одной машине: `BridgeGuiProcess` + `RemoteFrameSource` (SHM по имени) [PENDING] (зависит от 1.2) — **Module contract:** new-lite
 - Task 1.3a: Серверный транспорт `SocketChannel`: без head-of-line, медленный клиент не держит запись (из remediation 3.1 + 3.3, решение владельца 2026-09-24) [PENDING] (зависимостей нет — параллельно 1.2/1.3; обязательна до 1.4) — **Module contract:** impl-only
 - Task 1.4: Автономный Пульт: хост `apps/pult/` + `GuiAppSpec` инспектора по имени — те же вкладки, без дерева; отказоустойчивость в обе стороны [PENDING] (зависит от 1.2, 1.3, 1.3a; предпосылка — frontend-constructor **T4.1–T4.4**, ред. 2: не «если не сделана», а обязательно до 1.4) — **Module contract:** new-full
