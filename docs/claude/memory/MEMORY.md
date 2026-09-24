@@ -72,7 +72,7 @@
 - [Число без разброса по повторам — наблюдение, не замер](feedback_a_number_without_spread_across_repeats_is_an_observation.md) — три прогона одного кода: 118.7, 48.8, 0.5 мкс; контроль ловит неверную ПРИЧИНУ, повтор ловит ОТСУТСТВИЕ эффекта
 - [Тест не доказан без красного](feedback_prove_test_red_without_fix.md) — инъекция на КАЖДОЕ свойство, предсказание до прогона · [молчащий детектор](feedback_silent_detector_proves_nothing.md) · [Коммит ПЕРЕД инъекциями](feedback_inject_only_after_the_work_is_committed.md) — `git checkout` в харнессе съел незакоммиченное
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без вход→выход = совет · [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки · [Фраза шире команды, которую цитирует](feedback_the_sentence_is_wider_than_the_command_it_quotes.md) — прогон настоящий, `--include=*.py` во фразе стал `**`
-- [Сигнал «отпусти соседа» — в момент факта](feedback_unblocking_signal_at_the_moment_of_fact.md) — метка после всей эскалации: 13 тестов зелёные, живьём 5.7 с как до правки
+- [Сигнал «отпусти соседа» — в момент факта](feedback_unblocking_signal_at_the_moment_of_fact.md) — 13 тестов зелёные, живой стоп как до правки
 - [Стенд с вердиктом — тоже оснастка](feedback_a_stand_with_a_verdict_is_also_a_harness.md) — приёмником был наш `http.server`, отвечавший 200 на любой путь; настоящий otelcol дал 404, 102 теста из 214 пинили форму, не доставившую ничего
 
 ## Активные проекты и долги
