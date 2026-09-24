@@ -23,6 +23,16 @@ class ShmFrameReader:
         zero_copy: отдавать VIEW в слот вместо копии (требует cache_enabled — гейтит
             транспорт; под zero-copy эвикция с close() ОТКЛЮЧЕНА, иначе view повис бы).
         cap: LRU-кэп кэша handles (эвикция самого старого при переполнении, если не zero-copy).
+        track: оставлять открытый сегмент под учётом ``multiprocessing.resource_tracker``
+            этого процесса (дефолт ``True`` — прежнее поведение). ``False`` — для читателя ВНЕ
+            дерева процессов бэкенда (Пульт, gui-service 1.3): сразу после открытия сегмент
+            снимается с учёта (``resource_tracker.unregister``), иначе tracker внешнего
+            процесса на его выходе делает ``unlink`` ЖИВОГО сегмента бэкенда (Python 3.12, где
+            у ``SharedMemory`` ещё нет ``track=``; воспроизведено лидом 2026-09-24:
+            без unregister — ``segment UNLINKED``, с ним — ``segment alive``).
+            Post: при ``track=False`` ни один сегмент, открытый этим читателем, не удаляется
+            при выходе процесса-читателя; ``close()`` по-прежнему только закрывает handle.
+            Внутри дерева бэкенда оставлять ``True`` (дети делят tracker родителя).
     """
 
     def __init__(
@@ -32,8 +42,11 @@ class ShmFrameReader:
         zero_copy: bool,
         cap: int,
         log: Optional[Any] = None,
+        track: bool = True,
     ) -> None:
         self._cache_enabled = bool(cache_enabled)
+        # gui-service 1.3: поведение (unregister после открытия) — стадия GREEN.
+        self._track = bool(track)
         self._zero_copy = bool(zero_copy)
         self._cap = max(1, int(cap))
         # dict сохраняет порядок вставки → FIFO ~ LRU для стабильного потока имён.
