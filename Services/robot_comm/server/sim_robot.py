@@ -89,14 +89,32 @@ def _make_register_binder(
     хук через ``await`` (``pymodbus/simulator/simruntime.py:60-62``), поэтому
     неблокирующий sleep держит ответ ЭТОМУ клиенту, не мешая event loop'у
     сервера обслуживать другие соединения параллельно (DESIGN п.2 брифа
-    Task 5.4). Задержка идёт ПОСЛЕДНЕЙ, перед ``return`` — она моделирует
-    медленный ОТВЕТ, а не медленное наблюдение (счёт ``on_write``/``attach``
-    не должен тормозиться ею).
+    Task 5.4).
+
+    Фикс-раунд ревью (R1, MAJOR) — задержка идёт ПЕРВОЙ, до attach/on_write,
+    НЕ последней. Повтор бага: биндер ``await``-ит ``asyncio.sleep`` ПОСЛЕ
+    ``on_write`` (счёт журнала уже произошёл), потом ``fault.drop`` рвёт
+    соединение ``ServerStop()`` — pymodbus отменяет (``CancelledError``)
+    зависшую в ``sleep`` корутину биндера ПОСЛЕ того, как ``on_write`` уже
+    отработал, но САМА запись в регистры (pymodbus применяет её уже ПОСЛЕ
+    возврата из ``action``) так и не случилась — клиент, не получив ответ,
+    переподключается и шлёт ЭТУ ЖЕ команду повторно, журнал видит ДВЕ записи
+    на одно логическое задание (ложный dup: воспроизведено ревьюером —
+    ``delay_ms=1500``, запись JOB_FLAG, ``fault.drop`` через 0.3с внутрь
+    задержки, повтор записи после восстановления -> было
+    ``{'jobs': 2, 'dups': 1}`` вместо ``{'jobs': 1, 'dups': 0}``). Задержка
+    ПЕРВОЙ чинит это: отменённая на полпути корутина не успевает дойти ни до
+    ``attach``, ни до ``on_write`` — при обрыве ни один наблюдатель не видит
+    "недошедшую" попытку, её видит только УСПЕШНЫЙ повтор.
     """
     observer_errors = 0
 
     async def binder(fc, _start, addr, _count, registers, values):
         nonlocal observer_errors
+        if delay_source is not None:
+            delay = delay_source()
+            if delay > 0:
+                await asyncio.sleep(delay)
         if not bound_event.is_set():
             core.attach(registers)
             bound_event.set()
@@ -108,10 +126,6 @@ def _make_register_binder(
                 if observer_errors <= _OBSERVER_ERROR_LIMIT:  # ...но и молчать не должен
                     print(f"sim_robot: сбой наблюдателя обмена #{observer_errors}:", file=sys.stderr)
                     traceback.print_exc()
-        if delay_source is not None:
-            delay = delay_source()
-            if delay > 0:
-                await asyncio.sleep(delay)
         return None  # продолжить штатную обработку
 
     return binder
@@ -156,10 +170,15 @@ class SimRobotServer:
     # ------------------------------------------------------------------ #
 
     def start(self) -> None:
-        """Поднять Motion-ticker и слушателя в фоновых потоках."""
+        """Поднять Motion-ticker и слушателя в фоновых потоках.
+
+        Фикс-раунд ревью (K3) — ``ready_timeout=5.0`` (не дефолтные 0.5с
+        ``start_listener()``): обычный подъём процесса не должен зависеть от
+        того же тесного бюджета, что рассчитан на fault.drop-восстановление
+        (см. ``_LISTENER_READY_TIMEOUT_S``)."""
         self._ticker_thread = threading.Thread(target=self._ticker, name="sim-robot-motion", daemon=True)
         self._ticker_thread.start()
-        self.start_listener()
+        self.start_listener(ready_timeout=5.0)
 
     def stop(self) -> None:
         """Остановить ticker и слушателя (симметрично ``start()``)."""
@@ -203,10 +222,18 @@ class SimRobotServer:
         шлём, поэтому пробное подключение НЕ триггерит ``core.attach``.
         """
         self._bound.clear()
-        self._server_thread = threading.Thread(target=self._serve, name="sim-robot-server", daemon=True)
-        self._server_thread.start()
+        server_thread = threading.Thread(target=self._serve, name="sim-robot-server", daemon=True)
+        self._server_thread = server_thread
+        server_thread.start()
         deadline = time.monotonic() + ready_timeout
         while time.monotonic() < deadline:
+            # Фикс-раунд ревью (K2) — если НАШ поток уже умер (bind провалился,
+            # исключение внутри _serve/StartTcpServer), успешный TCP-коннект
+            # ниже мог бы быть к ЧУЖОМУ листенеру, случайно занявшему тот же
+            # порт (например соседний тестовый процесс) — это НЕ наш сервер,
+            # объявлять готовность на основании такого коннекта нельзя.
+            if not server_thread.is_alive():
+                raise RuntimeError(f"sim_robot: поток слушателя умер во время подъёма на {self.host}:{self.port}")
             probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 probe.settimeout(max(0.05, deadline - time.monotonic()))

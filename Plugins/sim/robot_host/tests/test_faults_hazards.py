@@ -235,25 +235,179 @@ def test_two_consecutive_drops_both_work_state_survives(running_plugin) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_shutdown_right_after_clear_leaves_port_free(running_plugin) -> None:
+def test_shutdown_right_after_clear_leaves_port_free() -> None:
     """TRAPS брифа Task 5.4: ``pymodbus.ModbusBaseServer.active_server``
     выставляется ВНУТРИ потока сервера — ``ServerStop()`` до этого момента
     бросает «not running» и НЕ останавливает реально запущенный listener.
     ``fault.clear`` только что позвал ``start_listener()`` (см.
     :meth:`SimRobotServer.start_listener` — ждёт готовности, но не бесконечно);
-    ``shutdown()`` СРАЗУ следом не должен оставить порт открытым."""
-    plugin, ctx, port = running_plugin
+    ``shutdown()`` СРАЗУ следом не должен оставить порт открытым.
 
-    drop_resp = _call(plugin, "fault.drop", {"seconds": 5})
+    Фикс-раунд ревью (K5) — старая версия (одна итерация, проверка СРАЗУ после
+    shutdown, чем занят одноразовый ``running_plugin``) не ловила свою же
+    гонку: воскресший листенер биндится с ЗАДЕРЖКОЙ (новый поток должен
+    успеть дойти до ``bind()``/``listen()`` уже ПОСЛЕ того, как
+    ``server.stop()`` вернул управление), поэтому коннект СРАЗУ после
+    shutdown() мог пройти отказом чисто по времени, даже когда гонка
+    реально произошла и порт откроется чуть позже. Перебор (5 итераций,
+    свежий плагин+порт на каждой — переиспользованный ``running_plugin``
+    маскировал бы вторую гонку состоянием первой) + ОДНА проверка через
+    1.0с (не цикл — цикл с ранним успешным отказом опять маскирует позднее
+    открытие) ловит запаздывающий бинд. Сам факт того, что тест ловит СВОЙ
+    хазард, а не просто "зелёный по умолчанию", проверен вручную (см.
+    докстринг развёртывания в отчёте ревью): временный ``return`` перед
+    циклом готовности в ``start_listener()`` красит этот тест."""
+    for _ in range(5):
+        port = _free_port()
+        plugin, ctx, _services = _make_plugin(port)
+        _run_with_deadline(lambda: plugin.start(ctx), timeout=5.0, label="start")
+        assert plugin._state == "running", f"сервер не поднялся: {plugin._reason!r}"
+
+        drop_resp = _call(plugin, "fault.drop", {"seconds": 1})
+        assert drop_resp["ok"] is True
+        clear_resp = _call(plugin, "fault.clear")
+        assert clear_resp["ok"] is True
+
+        _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
+
+        time.sleep(1.0)
+        assert not _try_connect(_HOST, port, timeout=0.3), (
+            "порт всё ещё принимает соединения через 1.0с после shutdown() сразу за fault.clear()"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# (R1, MAJOR) — задержка ПЕРВОЙ в биндере: обрыв во время delay_ms не должен  #
+# ложно засчитаться журналом как отдельное задание                            #
+# --------------------------------------------------------------------------- #
+
+
+def test_delay_then_drop_does_not_double_count_journal(running_plugin) -> None:
+    """Повтор репро ревьюера: ``fault.delay_ms{ms:1500}``, запись
+    ``write_registers(REG_JOB_FLAG, [1,100,200,0,5,0])`` (полный кадр задания —
+    JOB_FLAG, X, Y, ECAP(2 слова), PLACE_FLAG), 0.3с внутрь этой ЕЩЁ висящей
+    (задержанной) записи — ``fault.drop{seconds:0.3}`` рвёт соединение.
+    Клиент не получил ответ -> переподключается ПОСЛЕ восстановления и шлёт
+    ТУ ЖЕ запись повторно (эмулируем клиентский retry — в тесте просто вторая
+    запись тем же кадром). Журнал обязан увидеть РОВНО ОДНО успешное задание
+    (jobs=1, dups=0), а не два (jobs=2, dups=1) — старый порядок (delay ПОСЛЕ
+    attach/on_write) считал ``on_write`` ДО того, как pymodbus успевал
+    применить саму запись, а обрыв соединения отменял зависшую в sleep
+    корутину уже ПОСЛЕ этого фиктивного счёта. Тест обязан УМЕРЕТЬ при старом
+    порядке (delay последней) — проверено вручную (см. отчёт ревью)."""
+    from pymodbus.client import ModbusTcpClient
+
+    from Services.robot_comm.core.registers import REG_JOB_FLAG
+
+    plugin, _ctx, port = running_plugin
+
+    delay_resp = _call(plugin, "fault.delay_ms", {"ms": 1500})
+    assert delay_resp["ok"] is True
+
+    job_frame = [1, 100, 200, 0, 5, 0]  # JOB_FLAG,X,Y,ECAP_HI,ECAP_LO,PLACE_FLAG
+
+    write_error: dict[str, BaseException] = {}
+
+    def _write_delayed() -> None:
+        client = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+        try:
+            ok = client.connect()
+            if not ok:
+                write_error["exc"] = RuntimeError("connect() вернул False")
+                return
+            client.write_registers(REG_JOB_FLAG, job_frame, device_id=_UNIT_ID)
+        except Exception as exc:  # noqa: BLE001 — обрыв соединения, тип не гарантирован
+            write_error["exc"] = exc
+        finally:
+            client.close()
+
+    writer_thread = threading.Thread(target=_write_delayed, name="delayed-write", daemon=True)
+    writer_thread.start()
+
+    time.sleep(0.3)  # запись всё ещё висит внутри asyncio.sleep(1.5) биндера
+    drop_resp = _call(plugin, "fault.drop", {"seconds": 0.3})
     assert drop_resp["ok"] is True
+
+    writer_thread.join(timeout=5.0)
+    assert not writer_thread.is_alive(), "поток отложенной записи не завершился за 5с — похоже на зависание"
+
     clear_resp = _call(plugin, "fault.clear")
     assert clear_resp["ok"] is True
 
-    _run_with_deadline(lambda: plugin.shutdown(ctx), timeout=5.0, label="shutdown")
-
-    deadline = time.monotonic() + 2.0
+    deadline = time.monotonic() + 5.0
+    reconnected = False
     while time.monotonic() < deadline:
-        assert not _try_connect(_HOST, port, timeout=0.3), (
-            "порт всё ещё принимает соединения после shutdown() сразу за fault.clear()"
+        if _try_connect(_HOST, port, timeout=0.5):
+            reconnected = True
+            break
+        time.sleep(0.1)
+    assert reconnected, "listener не восстановился после drop"
+
+    # Клиентский retry — ТА ЖЕ запись тем же кадром после восстановления связи.
+    client2 = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+    ok2 = _run_with_deadline(client2.connect, timeout=3.0, label="connect2")
+    assert ok2, "client2.connect() вернул False"
+    try:
+        rr = _run_with_deadline(
+            lambda: client2.write_registers(REG_JOB_FLAG, job_frame, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="retry-write",
         )
-        time.sleep(0.2)
+        assert rr is not None and not rr.isError(), f"повторная запись провалилась: {rr!r}"
+    finally:
+        client2.close()
+
+    time.sleep(0.5)  # дать журналу такт паблишера/приёма
+    status = _call(plugin, "sim_robot.journal")
+    assert status["status"] == "ok", status
+    counters = status["counters"]
+    assert counters["jobs"] == 1, f"ложный лишний job из прерванной задержанной записи: {counters!r}"
+    assert counters["dups"] == 0, f"ложный dup из прерванной задержанной записи: {counters!r}"
+
+
+# --------------------------------------------------------------------------- #
+# (K4) — fault.vfd_code не пишет 0x1214 сразу, только на пульсе               #
+# --------------------------------------------------------------------------- #
+
+
+def test_vfd_code_command_alone_does_not_write_register(running_plugin) -> None:
+    """DESIGN п.3, буквально: команда ``fault.vfd_code{code:7}`` БЕЗ пульса
+    VFD_FLAG не должна тронуть 0x1214 вообще — если плагин по ошибке пишет
+    регистр сразу (мимо ``RobotSimCore._handle_vfd``), этот тест обязан
+    умереть на первом чтении (0 ожидается, не 7)."""
+    from pymodbus.client import ModbusTcpClient
+
+    plugin, _ctx, port = running_plugin
+    _REG_VFD_FAULT = 0x1214
+
+    resp = _call(plugin, "fault.vfd_code", {"code": 7})
+    assert resp["ok"] is True
+
+    client = ModbusTcpClient(host=_HOST, port=port, timeout=3)
+    ok = _run_with_deadline(client.connect, timeout=3.0, label="connect")
+    assert ok, "client.connect() вернул False"
+    try:
+        regs_before = _run_with_deadline(
+            lambda: client.read_holding_registers(_REG_VFD_FAULT, count=1, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="read-before-pulse",
+        )
+        assert regs_before is not None and not regs_before.isError(), f"чтение провалилось: {regs_before!r}"
+        assert list(regs_before.registers) == [0], (
+            f"0x1214 не должен получить код ДО пульса VFD_FLAG: {regs_before.registers!r}"
+        )
+
+        belt_resp = _call(plugin, "belt.run", {"freq_hz": 10.0})  # пульс VFD_FLAG
+        assert belt_resp["ok"] is True
+        time.sleep(0.1)
+
+        regs_after = _run_with_deadline(
+            lambda: client.read_holding_registers(_REG_VFD_FAULT, count=1, device_id=_UNIT_ID),
+            timeout=3.0,
+            label="read-after-pulse",
+        )
+        assert regs_after is not None and not regs_after.isError(), f"чтение провалилось: {regs_after!r}"
+        assert list(regs_after.registers) == [7], f"0x1214 должен стать 7 ПОСЛЕ пульса: {regs_after.registers!r}"
+    finally:
+        client.close()
+        _call(plugin, "fault.clear")
