@@ -106,7 +106,7 @@ class MockProcessRegistry:
     def remove_process(self, name: str) -> None:
         self._processes.pop(name, None)
 
-    def stop_one(self, name: str, timeout: float = 5.0) -> bool:
+    def stop_one(self, name: str, timeout: float = 5.0, *, mark_reader_gone: bool = True) -> bool:
         # Контракт «ensure stopped» (Task 1.1): нет в реестре → уже остановлен → True
         proc = self._processes.get(name)
         if proc is None:
@@ -114,7 +114,7 @@ class MockProcessRegistry:
         proc._alive = False
         return True
 
-    def stop_many(self, names: list[str], timeout: float = 5.0) -> dict[str, bool]:
+    def stop_many(self, names: list[str], timeout: float = 5.0, *, mark_reader_gone: bool = True) -> dict[str, bool]:
         """Параллельная остановка (мок: синхронно помечает остановленными)."""
         results: dict[str, bool] = {}
         for name in names:
