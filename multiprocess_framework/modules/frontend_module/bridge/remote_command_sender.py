@@ -16,9 +16,11 @@ Qt-free.
 Fence (паритет СТРУКТУРЫ со штампом дочернего процесса, вердикт cto 2026-09-24)
 -------------------------------------------------------------------------------
 Штамп ставит импортированная ``make_fence_stamp_middleware(name, provider)`` — не копия.
-Она регистрируется в клиенте через ``client.add_send_middleware`` и потому штампует ВСЁ
-исходящее этого соединения (как process-level middleware встроенного GUI — включая
-``state.*``). Форма на проводе: ``_fence = {"sender": name, "inc": int, "epoch": int|None}``.
+Она регистрируется в клиенте через ``client.add_send_middleware`` и штампует только
+исходящие с ``sender == name`` — команды этого отправителя (F2). ``state.*`` прокси
+(``sender`` — адрес соединения) не штампуются: хост перештамповывает ``_fence`` у всего
+трафика, входящего через сокет, своим (ревью 1.2, проверено вживую).
+Форма на проводе: ``_fence = {"sender": name, "inc": int, "epoch": int|None}``.
 Отказ stale-команд внешнего отправителя этим НЕ обеспечивается (у детей нет PSR-записи
 внешнего клиента → легаси-проход) — вне задачи, G1b.
 
@@ -35,8 +37,11 @@ Fence (паритет СТРУКТУРЫ со штампом дочернего 
 ----------
 F1. После :meth:`refresh_fence` ни одно исходящее не несёт inc/epoch, прочитанные до него:
     неудачный refresh сбрасывает fence в ``(None, None)`` (не штамповать), а не оставляет старый.
-F2. Один клиент — одна fence-идентичность: второй ``RemoteCommandSender`` на том же клиенте
-    добавит второй middleware, и на проводе останется штамп последнего зарегистрированного.
+    Пара привязана к ``client.session``, на котором её прочли: после ``connect()`` (новый
+    session) провайдер отдаёт ``(None, None)``, пока не пройдёт следующий refresh.
+F2. Несколько ``RemoteCommandSender`` на одном клиенте не перетирают штампы друг друга:
+    каждый middleware штампует только сообщения со своим ``sender`` (и сообщения без
+    ``sender`` — у них владельца нет, остаётся штамп последнего зарегистрированного).
 """
 
 from __future__ import annotations
@@ -92,6 +97,15 @@ class RemoteCommandSender(CommandSender):
     Всё публичное (``send_command``, ``send_field_command``, ``send_action_command``,
     ``flush``, ``send_system_command``, ``request_command``, ``request_system_command``)
     унаследовано: сигнатуры и возвращаемые значения — как у ``CommandSender``.
+    Форма ошибок ОТЛИЧАЕТСЯ от ``CommandSender`` поверх очередей (решение — Task 1.4):
+      * разрыв соединения — исключение ``client._lost_exc`` (``SocketConnectionLost``), а не
+        error-dict: встроенный GUI такого исключения не видит никогда;
+      * таймаут/не подключён/намеренный ``close`` — error-dict клиента
+        ``{"success": False, "error": "timeout"|"not connected"|"connection closed",
+        "request_id": ...}`` (у ``RouterManager.request`` ключ ``correlation_id``);
+      * отказ на хосте — конверт хоста как есть (``{"success": False, "error": ...}``);
+      * ``send_command``/``send_system_command`` при разрыве поднимают ``_lost_exc``, при
+        отсутствии соединения — ``ConnectionError`` (``send_nowait``); на очередях — тихо.
     ``request_*`` возвращают конверт ``RouterManager.request`` хоста
     (``{"success": ..., "result"|"error": ...}``) и БЛОКИРУЮТ — не с Qt main thread и
     не с reader-потока клиента (там — guard error-dict, см. ``SocketClient.request``).
@@ -116,14 +130,28 @@ class RemoteCommandSender(CommandSender):
         self._client = client
         self._name = name
         self._fixed_fence = fence
-        self._fence_state: Tuple[Optional[int], Optional[int]] = (None, None)
+        # (session, inc, epoch): пара действительна только на соединении, где её прочли.
+        self._fence_state: Tuple[Optional[str], Optional[int], Optional[int]] = (None, None, None)
         provider: FenceProvider = fence if fence is not None else self._current_fence
-        client.add_send_middleware(make_fence_stamp_middleware(name, provider))
+        stamp = make_fence_stamp_middleware(name, provider)
+
+        def _stamp_own(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            # F2: чужой sender (второй отправитель, state.* прокси) — не наш штамп.
+            # Сообщение БЕЗ sender (сырой send_nowait владельца клиента) штампуется —
+            # так его пинит приёмочный тест F1; с двумя отправителями на таком
+            # сообщении останется штамп последнего зарегистрированного.
+            sender = msg.get("sender")
+            return stamp(msg) if sender is None or sender == name else msg
+
+        client.add_send_middleware(_stamp_own)
 
     def _current_fence(self) -> Tuple[Optional[int], Optional[int]]:
         # Кортеж подменяется целиком (одно присваивание) — читатель на любом потоке
         # видит либо старую, либо новую пару, но не смесь.
-        return self._fence_state
+        session, inc, epoch = self._fence_state
+        if session is None or session != self._client.session:
+            return None, None  # пара прочитана на другом соединении (или не прочитана)
+        return inc, epoch
 
     def refresh_fence(self) -> None:
         """Перечитать inc/epoch из ``supervision.status`` хоста (блокирующий request).
@@ -142,7 +170,9 @@ class RemoteCommandSender(CommandSender):
         if self._fixed_fence is not None:
             return
         # F1: сбросить ДО запроса — пока ответа нет, старая пара уже не штампуется.
-        self._fence_state = (None, None)
+        self._fence_state = (None, None, None)
+        # Сессия — ДО запроса: ответ относится к соединению, на котором ушёл запрос.
+        session = self._client.session
         msg = build_command_message(_HOST_PROCESS, "supervision.status", {}, sender=self._name)
         try:
             envelope = self._client.request(msg, timeout=_REFRESH_TIMEOUT)
@@ -155,7 +185,7 @@ class RemoteCommandSender(CommandSender):
         if state is None:
             _logger.warning("RemoteCommandSender.refresh_fence: нет inc/epoch в ответе: %r", envelope)
             return
-        self._fence_state = state
+        self._fence_state = (session, *state)
 
     def _parse_status(self, envelope: Any) -> Optional[Tuple[int, Optional[int]]]:
         """Конверт ``{"success", "result": {"epoch", "processes"}}`` → ``(inc, epoch)`` | None."""

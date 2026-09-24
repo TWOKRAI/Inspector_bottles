@@ -304,8 +304,14 @@ class SocketClient:
             message.setdefault("reply_to", self._reply_to)
 
         pending = _Pending()
+        # Проверка разрыва и вставка слота — под ОДНИМ локом с _mark_conn_lost: иначе
+        # reader, отметивший обрыв между проверкой выше и вставкой, уже не разбудит слот.
         with self._pending_lock:
-            self._pending[cid] = pending
+            lost = self._conn_lost
+            if not lost:
+                self._pending[cid] = pending
+        if lost:
+            raise self._lost_exc(self._conn_lost_message(request_id=cid))
         try:
             wait = timeout if timeout is not None else self._default_timeout
             # Бюджет ожидания — СЕРВЕРУ, чуть меньше своего: иначе сервер отвечает
@@ -362,12 +368,16 @@ class SocketClient:
             message.setdefault("reply_to", self._reply_to)
         message.setdefault("timeout", max(0.5, timeout - _SERVER_MARGIN_SEC))
 
-        if self._conn_lost:
+        pending = _Pending(callback=on_response, deadline=time.monotonic() + timeout)
+        # Проверка разрыва и вставка — под одним локом с _mark_conn_lost (см. request):
+        # слот, вставленный после ухода reader'а, не вынул бы уже никто.
+        with self._pending_lock:
+            lost = self._conn_lost
+            if not lost:
+                self._pending[cid] = pending
+        if lost:
             _fire(on_response, {"success": False, "error": "connection lost", "request_id": cid})
             return cid
-        pending = _Pending(callback=on_response, deadline=time.monotonic() + timeout)
-        with self._pending_lock:
-            self._pending[cid] = pending
         try:
             sent = self._send_raw(message)
             error = None if sent else "dropped"
@@ -402,8 +412,13 @@ class SocketClient:
         if self._reply_to:
             message.setdefault("reply_to", self._reply_to)
         # Карантин ДО записи: ответ хоста может прийти раньше, чем вернётся sendall.
+        # Проверка разрыва — под тем же локом, что вставка (см. request).
         with self._pending_lock:
-            self._pending[cid] = _Pending(deadline=time.monotonic() + _TIMED_OUT_TTL_SEC, nowait=True)
+            lost = self._conn_lost
+            if not lost:
+                self._pending[cid] = _Pending(deadline=time.monotonic() + _TIMED_OUT_TTL_SEC, nowait=True)
+        if lost:
+            raise self._lost_exc(self._conn_lost_message(request_id=cid))
         try:
             sent = self._send_raw(message)
         except BaseException:
@@ -591,9 +606,12 @@ class SocketClient:
         их снимает ``finally`` в :meth:`request` (владелец). Async- и nowait-слоты
         вынимаются здесь — у них нет владельца, который снял бы их сам.
         """
-        self._conn_lost = True
         self._conn_lost_reason = reason
         with self._pending_lock:
+            # Флаг — под локом реестра: вставка слота (request/request_async/send_nowait)
+            # проверяет его под тем же локом, так что слот либо попадает в этот снимок,
+            # либо видит флаг и не вставляется.
+            self._conn_lost = True
             sync_slots = [p for p in self._pending.values() if p.callback is None and not p.nowait]
             orphan = [(cid, p) for cid, p in self._pending.items() if p.callback is not None or p.nowait]
             for cid, _ in orphan:

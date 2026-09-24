@@ -246,3 +246,52 @@ def test_failed_refresh_after_success_drops_old_stamp() -> None:
         assert "_fence" not in _last(host, "second"), "старая пара пережила неудачный refresh (F1)"
     finally:
         host.close()
+
+
+def _status_host(epoch: Dict[str, int]) -> _FakeHost:
+    def _responder(msg: Dict[str, Any]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        if msg.get("command") == "supervision.status":
+            v = epoch["v"]
+            result = {"epoch": v, "processes": {"pult": {"incarnation": v}, "pult2": {"incarnation": 10 + v}}}
+        return {"type": "response", "request_id": msg["request_id"], "result": {"success": True, "result": result}}
+
+    return _FakeHost(responder=_responder)
+
+
+def test_fence_is_bound_to_session_until_refresh() -> None:
+    """Ревью [b]: после connect() (новый session) старая пара не штампуется, пока не
+    пройдёт refresh_fence на новом соединении."""
+    epoch = {"v": 1}
+    host = _status_host(epoch)
+    try:
+        client = _client(host)
+        sender = RemoteCommandSender(client, name="pult")
+        sender.refresh_fence()
+        client.close()
+        epoch["v"] = 2
+        client.connect()
+        sender.send_command("ProcessManager", "before.refresh", {})
+        assert "_fence" not in _last(host, "before.refresh"), "стейл-пара прошлого соединения"
+        sender.refresh_fence()
+        sender.send_command("ProcessManager", "after.refresh", {})
+        assert _last(host, "after.refresh").get("_fence") == {"sender": "pult", "inc": 2, "epoch": 2}
+    finally:
+        host.close()
+
+
+def test_two_senders_on_one_client_keep_own_stamps() -> None:
+    """Ревью [c] / F2: у каждого отправителя на проводе — свой штамп."""
+    host = _status_host({"v": 1})
+    try:
+        client = _client(host)
+        s1 = RemoteCommandSender(client, name="pult")
+        s2 = RemoteCommandSender(client, name="pult2")
+        s1.refresh_fence()
+        s2.refresh_fence()
+        s1.send_command("ProcessManager", "from.pult", {})
+        s2.send_command("ProcessManager", "from.pult2", {})
+        assert _last(host, "from.pult").get("_fence") == {"sender": "pult", "inc": 1, "epoch": 1}
+        assert _last(host, "from.pult2").get("_fence") == {"sender": "pult2", "inc": 11, "epoch": 1}
+    finally:
+        host.close()

@@ -64,9 +64,12 @@ class _FakeHost:
                 raw, buf = buf.split(b"\n", 1)
                 msg = json.loads(raw)
                 self.received.append(msg)
-                reply = self.responder(msg) if self.responder else None
-                if reply is not None:
-                    self.send(conn, reply)
+                try:
+                    reply = self.responder(msg) if self.responder else None
+                    if reply is not None:
+                        self.send(conn, reply)
+                except OSError:
+                    return  # клиент уже закрыл сокет (BrokenPipe) — фейку не падать
 
     @staticmethod
     def send(conn: socket.socket, msg: Dict[str, Any]) -> None:
@@ -243,5 +246,81 @@ def test_out_of_order_replies_reach_their_own_requests() -> None:
         assert not ta.is_alive() and not tb.is_alive(), "зависание вместо ответа"
         assert results["A"] == {"success": True, "result": {"tag": "A"}}
         assert results["B"] == {"success": True, "result": {"tag": "B"}}
+    finally:
+        host.close()
+
+
+class _DropInsideLockWindow:
+    """Подмена ``_pending_lock``: при ПЕРВОМ входе из потока-вызывающего рвёт соединение
+    со стороны хоста и ждёт, пока reader отметит обрыв и завершится — детерминированно
+    попадает в окно «проверка _conn_lost → вставка слота» (ревью 1.2, кейс [a])."""
+
+    def __init__(self, client: SocketClient, host: _FakeHost) -> None:
+        self._real = client._pending_lock
+        self._client = client
+        self._host = host
+        self.caller: Optional[threading.Thread] = None
+        self.fired = False
+
+    def __enter__(self) -> Any:
+        if threading.current_thread() is self.caller and not self.fired:
+            self.fired = True
+            reader = self._client._reader
+            self._host.drop()
+            assert reader is not None
+            reader.join(3.0)
+        return self._real.__enter__()
+
+    def __exit__(self, *exc: Any) -> Any:
+        return self._real.__exit__(*exc)
+
+
+def _run_in_window(client: SocketClient, host: _FakeHost, fn: Callable[[], Any]) -> Dict[str, Any]:
+    gate = _DropInsideLockWindow(client, host)
+    client._pending_lock = gate  # type: ignore[assignment]
+    box: Dict[str, Any] = {}
+
+    def _run() -> None:
+        t0 = time.monotonic()
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — в вызывающий поток ниже
+            box["exc"] = exc
+        box["elapsed"] = time.monotonic() - t0
+
+    t = threading.Thread(target=_run, daemon=True)
+    gate.caller = t
+    t.start()
+    t.join(5.0)
+    assert not t.is_alive(), "вызов завис"
+    assert gate.fired, "окно не сработало — тест ничего не проверил"
+    assert not client._reader or not client._reader.is_alive(), "reader ещё жив — окно не то"
+    return box
+
+
+def test_request_async_in_conn_lost_window_gets_callback() -> None:
+    """Обрыв между проверкой _conn_lost и вставкой слота: колбэк 'connection lost'
+    приходит сразу, слот-сирота не остаётся (reader уже вышел — будить его некому)."""
+    host = _FakeHost()
+    try:
+        client = _connected(host)
+        got: List[Dict[str, Any]] = []
+        _run_in_window(client, host, lambda: client.request_async({"command": "x"}, got.append, timeout=1.0))
+        assert _wait(lambda: got, timeout=0.5), "колбэк не пришёл — слот осиротел"
+        assert [m["error"] for m in got] == ["connection lost"]
+        assert client._pending == {}
+    finally:
+        host.close()
+
+
+def test_request_in_conn_lost_window_raises_immediately() -> None:
+    """То же окно для блокирующего request: исключение разрыва сразу, а не таймаут."""
+    host = _FakeHost()
+    try:
+        client = _connected(host)
+        box = _run_in_window(client, host, lambda: client.request({"command": "x"}, timeout=3.0))
+        assert isinstance(box.get("exc"), SocketConnectionLost), f"получено {box}"
+        assert box["elapsed"] < 1.0
+        assert client._pending == {}
     finally:
         host.close()
