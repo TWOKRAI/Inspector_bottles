@@ -84,6 +84,35 @@ migrated = run_chain("recipe.config_snapshot", data, from_version=1, to_version=
 источником шагов (декоратор прозрачен, декорированная функция инжектируется как
 `migration_fn` без изменений).
 
+## Командная поверхность `recipe.*` (Task 1b.1, ADR-RCP-007)
+
+`service.RecipeService` — обработчики команд хаба; контракт целиком — в докстринге
+`service.py`. Хостинг — ProcessManager прототипа (`multiprocess_prototype/orchestrator.py`,
+`_register_builtin_commands`); формат рецепта Inspector —
+`multiprocess_prototype/backend/recipe_format_hook.py`.
+
+| Команда | Аргументы | Успех (`result` конверта) | Ошибки |
+|---|---|---|---|
+| `recipe.list` | — | `names`, `active` | `io_error` |
+| `recipe.get` | `name` | `name`, `rev`, `body` | `not_found`, `invalid`, `bad_request` |
+| `recipe.save` | `name`, `base_rev` (`None` = создать), `body` | `name`, `rev` | `conflict` (+`current_rev`), `invalid`, `bad_request`, `io_error` |
+| `recipe.validate` | `body` XOR `name` | `valid`, `errors` | `bad_request`, `not_found` |
+| `recipe.activate` | `name` | `name`, `apply` | `not_found`, `invalid`, `apply_failed` (+`apply`), `io_error` (+`apply`) |
+| `recipe.delete` | `name`, `base_rev`? | `name` | `not_found`, `conflict`, `active`, `io_error` |
+
+* `rev` — непрозрачная строка (сегодня sha256 байтов файла), считается от ТЕКУЩИХ
+  байтов: правка мимо `recipe.save` рвёт ревизию редактора → `conflict`.
+* Запись — tmp в том же каталоге + `os.replace`; CAS под локом на имя (в пределах хаба).
+* `recipe.activate` синхронная: `normalize → validate → topology.apply(recipe_path=абс.
+  путь) → ManifestStore.set_pipeline("recipes/<slug>.yaml")`; манифест пишется только
+  после успешного apply.
+* Живой ответ приходит в конверте: полезная нагрузка — в `reply["result"]`,
+  `reply["success"]` выводится из неё.
+* Команды регистрируются, только если в конфиге хаба есть `manifest_path` и в
+  манифесте задан `recipes:` (иначе — «unknown command»). Харнесс по умолчанию
+  (`build_headless_launcher`) манифеста не передаёт — для `recipe.*` нужен
+  `launcher_factory` с манифестом (см. `backend_ctl/tests/test_recipe_service_live.py`).
+
 ## Boundaries
 
 - **НЕ знает доменных схем**: ветви (`cameras`/`robot`/…) и миграции инжектируются.
