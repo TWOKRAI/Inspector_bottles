@@ -88,6 +88,11 @@ class ProcessTreeGuard:
         # Fallback: примитив ОС не сработал → portable psutil-обход.
         if not killed:
             self._kill_via_psutil(fallback_procs)
+        else:
+            # Примитив ОС сработал — всё равно добить ещё живых членов снимка.
+            # Потомок, вышедший из группы (свой setsid) или из job, примитивом
+            # не задет; снимок — его единственный след (Task 1.4, ADR-PMM-031).
+            self._sweep_snapshot(fallback_procs)
 
     def close(self) -> None:
         """Закрыть хэндл job (Windows). KILL_ON_JOB_CLOSE добьёт остатки дерева."""
@@ -240,9 +245,19 @@ class ProcessTreeGuard:
             import signal
             import time
 
-            pgid = os.getpgid(self._pm_pid)
-            # Защита: если setsid в PM не сработал, pgid совпадёт с группой launcher —
-            # killpg убил бы и нас. В этом случае отдаём управление psutil-fallback.
+            try:
+                pgid = os.getpgid(self._pm_pid)
+            except ProcessLookupError:
+                # Штатный путь: spawner уже дождался и собрал PM, лидера нет — но
+                # группа живёт, пока в ней есть члены (зависший воркер). PM сделал
+                # setsid(), поэтому pgid == pm_pid; идём в killpg по нему.
+                # Остаточный риск: если группа УЖЕ пуста, pid мог быть переиспользован
+                # новым лидером чужой сессии, и killpg попадёт в неё. Пока группа не
+                # пуста, POSIX не отдаёт её pgid новому процессу (pid занят как pgid).
+                # Окно — между опустением группы и этим вызовом; ноль при непустой.
+                pgid = self._pm_pid
+            # Защита: если setsid в PM не сработал, pgid совпадёт с группой
+            # launcher — killpg убил бы и нас. Отдаём управление psutil-fallback.
             if pgid == os.getpgrp():
                 self._warn("POSIX: оркестратор в группе launcher (setsid не сработал) → fallback на psutil")
                 return False
@@ -261,6 +276,28 @@ class ProcessTreeGuard:
         except Exception as e:  # noqa: BLE001
             self._warn(f"killpg error: {e} → fallback на psutil")
             return False
+
+    def _sweep_snapshot(self, fallback_procs: Optional[list]) -> None:
+        """Добить SIGKILL'ом ещё живых членов снимка (только их, не всех детей).
+
+        ``is_running()`` у psutil сверяет время создания — переиспользованный pid
+        чужого процесса отсюда не убивается.
+        """
+        if not fallback_procs:
+            return
+        try:
+            import psutil
+        except Exception:  # noqa: BLE001
+            return
+        me = os.getpid()
+        for proc in fallback_procs:
+            try:
+                if proc.pid != me and proc.is_running():
+                    proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            except Exception as e:  # noqa: BLE001
+                self._warn(f"sweep snapshot error: {e}")
 
     # ------------------------------------------------------------------ #
     #  Portable fallback: psutil рекурсивно                                #

@@ -16,6 +16,12 @@ from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
 
 # Шаг опроса смерти в stop_many (итерация 2 Task 1.2): задержка реакции, не бюджет.
 STOP_POLL_S = 0.05
+# Окна эскалации ``_stop_many`` после общего graceful-дедлайна (ADR-PMM-031).
+# Внутренний бюджет остановки PM = shutdown_timeout + TERMINATE_GRACE_S + KILL_CONFIRM_S;
+# spawner выводит из них свой внешний join — меняешь окно здесь, внешний бюджет
+# растёт вместе с ним, а не расходится молча.
+TERMINATE_GRACE_S = 1.0  # после terminate() стрэгглеров — ждать выхода
+KILL_CONFIRM_S = 1.0  # после kill() — ждать подтверждения смерти
 
 
 class ProcessRegistry:
@@ -421,7 +427,7 @@ class ProcessRegistry:
                 if self.logger:
                     self.logger._log_warning(f"Error terminating '{process.name}': {e}")
         if pending:
-            wait_until(time.monotonic() + 1.0)
+            wait_until(time.monotonic() + TERMINATE_GRACE_S)
 
         # (d) Kill оставшихся + финальный срок (подтверждение смерти)
         for process in list(pending.values()):
@@ -433,7 +439,7 @@ class ProcessRegistry:
                 if self.logger:
                     self.logger._log_error(f"Error killing '{process.name}': {e}")
         if pending:
-            wait_until(time.monotonic() + 1.0)
+            wait_until(time.monotonic() + KILL_CONFIRM_S)
 
         # (e) Выжившие — по ФАКТУ, без метки: они всё ещё читают
         for name in pending:

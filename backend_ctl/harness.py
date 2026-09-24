@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
 import threading
 import time
 from pathlib import Path
@@ -152,6 +153,44 @@ def _subtree(orchestrator_pid: Optional[int]) -> list:
         return []
 
 
+def _union(first: list, second: list) -> list:
+    """Объединение снимков без дублей; ранние элементы идут первыми (Task 1.4).
+
+    Сравнение psutil.Process — по (pid, create_time): переиспользованный pid чужого
+    процесса не сливается с нашим старым элементом.
+    """
+    out = list(first)
+    for p in second:
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def _kill_orchestrator_group(orchestrator_pid: Optional[int], *, log: Callable[[str], None]) -> None:
+    """POSIX: SIGKILL группе оркестратора (pgid == pid PM после его ``setsid()``).
+
+    Ловит потомков, которых нет ни в одном снимке: PM убит извне, его дети ушли к
+    PID 1 (цепочка PPID порвана), но остались в его группе (Task 1.4). ``killpg``, а
+    не перебор ``psutil.process_iter`` по ``getpgid``: один syscall против обхода всей
+    таблицы процессов, а риск у обоих один и тот же — остаточное окно переиспользования
+    pid, если группа уже пуста и pid достался лидеру чужой новой сессии. Пока группа
+    не пуста, её pgid ядро новому процессу не отдаёт.
+    """
+    if orchestrator_pid is None or sys.platform == "win32":
+        return
+    try:
+        # Защита: если PM не сделал setsid, его pid не pgid; но если вдруг совпал с
+        # нашей группой — killpg положил бы и pytest.
+        if orchestrator_pid == os.getpgrp():
+            return
+        os.killpg(orchestrator_pid, signal.SIGKILL)
+        log(f"[harness] killpg({orchestrator_pid}, SIGKILL): добиты остатки группы PM")
+    except ProcessLookupError:
+        pass  # группа пуста — цель достигнута
+    except Exception as exc:  # noqa: BLE001 — teardown обязан пережить любую ошибку
+        log(f"[harness] killpg({orchestrator_pid}) не удался: {exc!r}")
+
+
 def _force_kill_tree(
     orchestrator_pid: Optional[int],
     snapshot: list,
@@ -198,6 +237,8 @@ def _force_kill_tree(
                     pass
         except Exception:  # noqa: BLE001
             pass
+    # Последним — вся группа PM (POSIX): члены вне снимков, в т.ч. после внешнего kill PM.
+    _kill_orchestrator_group(orchestrator_pid, log=log)
     if killed:
         log(f"[harness] принудительно снято процессов дерева PM: {sorted(killed)}")
     return killed
@@ -387,6 +428,10 @@ class BackendHarness:
             if not self._launcher.wait_until_ready(self._ready_timeout):
                 self._log(f"[harness] система не готова за {self._ready_timeout}s — останавливаю")
                 raise RuntimeError("headless-бэкенд не поднялся (wait_until_ready timeout)")
+            # Task 1.4: ранний снимок видит только PM — дети рождаются в его initialize().
+            # После готовности досняли и ОБЪЕДИНИЛИ (ранний не выбрасываем: он страхует
+            # самый ранний путь отказа выше).
+            self._descendants = _union(self._descendants, _subtree(self._orch_pid))
 
             # Readiness-проба вместо фиксированных sleep (Task 0.4): опрашиваем PM, пока не
             # ответит успехом. Дедлайн = прежний warmup + запас 3с. connect тоже ретраим —
@@ -438,7 +483,9 @@ class BackendHarness:
             # без цели.
             if self._orch_pid is None:
                 self._orch_pid = self._orchestrator_pid()
-                self._descendants = _subtree(self._orch_pid)
+            # Task 1.4: досъём перед shutdown, пока PM, возможно, ещё жив — ловит детей,
+            # перезапущенных после готовности. Объединение, не замена.
+            self._descendants = _union(self._descendants, _subtree(self._orch_pid))
             _shutdown_with_watchdog(
                 self._launcher,
                 self._teardown_timeout,
