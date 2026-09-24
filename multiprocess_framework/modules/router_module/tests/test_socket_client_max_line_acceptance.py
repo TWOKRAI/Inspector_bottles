@@ -54,6 +54,14 @@ def test_client_oversize_line_dropped_connection_alive() -> None:
         )
         client.connect()
         try:
+            # Синхронизация: round trip гарантирует, что хост уже зарегистрировал
+            # соединение — иначе push уходит в пустоту и pushes == [] вакуумно
+            # (гонка accept, тот же класс, что 2561bd61).
+            sync = _call_with_deadline(
+                lambda: client.request({"type": "command", "command": "ping", "sender": "drv-oversize"}, timeout=2.0),
+                timeout=3.0,
+            )
+            assert sync["success"] is True, f"синхронизирующий ping не прошёл: {sync!r}"
             # Оверсайз push (> 4096 байт) — должен быть дропнут молча для listener'а.
             host.push({"type": "event", "command": "big.push", "data": {"payload": "x" * 8192}})
             time.sleep(0.3)
