@@ -168,3 +168,144 @@ def test_b_close_during_in_flight_callback_returns_by_deadline() -> None:
         assert box["elapsed"] < 2.5, f"close() занял {box['elapsed']:.2f}с"
     finally:
         stand.close()
+
+
+# --------------------------------------------------------------------------- (d)–(f): break-injection лида
+
+
+class _StubClient:
+    """Минимальный клиент без сокета: push'и вызываются тестом напрямую."""
+
+    def __init__(self, reply: Dict[str, Any]) -> None:
+        self.subscriber_address = "pult.stub"
+        self.requests: list = []
+        self._reply = reply
+        self._listeners: list = []
+
+    def add_push_listener(self, fn: Callable[[Dict[str, Any]], None]) -> None:
+        self._listeners.append(fn)
+
+    def request(self, message: Dict[str, Any], timeout: float = 5.0) -> Dict[str, Any]:
+        self.requests.append(message)
+        return dict(self._reply)
+
+    def push(self, descriptor: Dict[str, Any]) -> None:
+        for fn in self._listeners:
+            fn({"type": "event", "command": "frames.frame", "data": descriptor})
+
+
+def _wait(predicate: Callable[[], bool], timeout: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def test_d_odd_generation_is_torn_not_delivered() -> None:
+    """(d) Слот с НЕЧЁТНЫМ поколением (писатель посреди записи) при ``seqlock=True`` →
+    колбэк не зовётся, ``torn == 1``. Детерминированно, без гонки писателя.
+
+    Инъекция: ``verify_seqlock=seqlock`` → ``False`` в ``_read_noting_generation`` →
+    кадр читается как целый и доставляется → красный."""
+    import struct
+
+    frame = np.full((48, 64, 3), 5, dtype=np.uint8)
+    size = calculate_buffer_size(1, frame.shape, frame.dtype, seqlock=True)
+    shm = shared_memory.SharedMemory(name=f"t13d{uuid.uuid4().hex[:8]}", create=True, size=size)
+    source = None
+    try:
+        pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=True)
+        gen = struct.unpack_from("<I", shm.buf, 0)[0]
+        struct.pack_into("<I", shm.buf, 0, gen | 1)  # запись «в процессе»
+
+        client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": False})
+        delivered: list = []
+        source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
+        source.subscribe(None, lambda s, a, b: delivered.append(b))
+        client.push({"sender": "camA", "name": shm.name, "idx": 0, "seqlock": True, "bseq": 1, "ts": 0.0})
+
+        assert _wait(lambda: source.stats["torn"] + source.stats["delivered"] + source.stats["errors"] >= 1)
+        assert delivered == [], "кадр с нечётным поколением доставлен как целый"
+        assert source.stats["torn"] == 1, source.stats
+    finally:
+        if source is not None:
+            _in_thread(source.close, deadline=4.0)
+        shm.close()
+        shm.unlink()
+
+
+def test_e_unsubscribe_during_in_flight_copy_drops_the_frame() -> None:
+    """(e) ``unsubscribe`` вернулся, пока поток копирования внутри ``read_frame`` →
+    прочитанный ПОСЛЕ этого кадр не доставляется и считается ``superseded``.
+
+    Инъекция: проверка эпохи перед dispatch (``if epoch != self._epoch``) → ``if False`` →
+    кадр доставлен после отписки → красный."""
+    client = _StubClient({"success": True, "seqlock": False, "owner_incarnation": False})
+    delivered: list = []
+    source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
+    source.subscribe(None, lambda s, a, b: delivered.append(b))
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BlockingReader:
+        def read_frame(self, name: str, seqlock: bool = False, **kw: Any) -> np.ndarray:
+            entered.set()
+            release.wait(5.0)
+            return np.zeros((2, 2, 3), dtype=np.uint8)
+
+        def close(self) -> None:
+            pass
+
+    source._reader = _BlockingReader()  # белый ящик: держим копию «в полёте»
+    try:
+        client.push({"sender": "camA", "name": "slot", "idx": 0, "seqlock": False, "bseq": 1, "ts": 0.0})
+        assert entered.wait(3.0), "поток копирования не дошёл до read_frame"
+
+        box = _in_thread(source.unsubscribe, deadline=3.0)
+        assert not box["alive"] and "exc" not in box, box
+
+        release.set()
+        assert _wait(lambda: source.stats["superseded"] + source.stats["delivered"] >= 1), source.stats
+        assert delivered == [], "кадр, дочитанный после unsubscribe, доставлен"
+        assert source.stats["superseded"] == 1, source.stats
+        assert source.stats["delivered"] == 0, source.stats
+    finally:
+        release.set()
+        _in_thread(source.close, deadline=4.0)
+
+
+def test_f_unsubscribe_sends_frames_unsubscribe_to_host() -> None:
+    """(f) ``unsubscribe()`` доставляет хосту ``frames.unsubscribe {"subscriber": <адрес>}``
+    (реальный SocketChannel-хост, канал ``backend_ctl``) — к моменту возврата.
+
+    Инъекция: ``unsubscribe`` возвращается сразу после локального снятия, до request →
+    хост ничего не получил → красный."""
+    seen: list = []
+    router, sock_ch = _make_host(
+        {
+            "frames.subscribe": lambda m: {"success": True, "seqlock": False, "owner_incarnation": False},
+            "frames.unsubscribe": lambda m: seen.append(m.get("data")) or {"success": True, "removed": True},
+        }
+    )
+    client = SocketClient("127.0.0.1", sock_ch.port, sender="backend_ctl")
+    source = None
+    try:
+        client.connect()
+        address = client.subscriber_address
+        source = RemoteFrameSource(client, dispatch=lambda fn: fn())
+        sub = _in_thread(lambda: source.subscribe(None, lambda s, a, b: None, timeout=3.0), deadline=4.0)
+        assert not sub["alive"] and "exc" not in sub, sub
+
+        box = _in_thread(lambda: source.unsubscribe(timeout=3.0), deadline=4.0)
+        assert not box["alive"] and "exc" not in box, box
+        # Транспорт хоста дописывает в data свой correlation_id — сверяем адрес, не весь dict.
+        assert [d.get("subscriber") for d in seen] == [address], f"хост не получил frames.unsubscribe: {seen}"
+    finally:
+        if source is not None:
+            _in_thread(source.close, deadline=4.0)
+        client.close()
+        router.shutdown()
+        sock_ch.close()
