@@ -36,11 +36,11 @@ Push хоста подписчику
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_framework.modules.shared_resources_module.memory.reader import ShmFrameReader
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ _CLOSE_JOIN_SEC = 2.0
 _CLOSE_UNSUBSCRIBE_TIMEOUT = 0.5
 _RESUBSCRIBE_TIMEOUT = 5.0
 
-_log = logging.getLogger(__name__)
+_log = get_std_logger(__name__)
 
 #: Маршалинг колбэка: принимает нуль-арную функцию и исполняет её там, где решит
 #: владелец (Qt main thread через сигнал; в тестах — ``lambda fn: fn()``).

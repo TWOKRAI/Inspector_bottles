@@ -76,14 +76,15 @@ Push-слушатели и send-middleware переживают ``close()``/``co
 from __future__ import annotations
 
 import json
-import logging
 import socket
 import threading
 import time
 import uuid
 from typing import Any, Callable, Dict, Optional
 
-_log = logging.getLogger(__name__)
+from multiprocess_framework.modules.logger_module import get_std_logger
+
+_log = get_std_logger(__name__)
 
 PushHandler = Callable[[Dict[str, Any]], None]
 SendMiddleware = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
