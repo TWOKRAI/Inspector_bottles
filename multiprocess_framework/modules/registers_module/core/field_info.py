@@ -24,6 +24,11 @@ from ...data_schema_module import FieldMeta
 
 _UNION_REPRS = ("typing.Union", "<class 'types.UnionType'>")
 
+try:
+    from pydantic_core import PydanticUndefined as _PYDANTIC_UNDEFINED  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover — pydantic всегда установлен в проекте
+    _PYDANTIC_UNDEFINED = object()
+
 
 def _unwrap_optional(field_type: Any) -> tuple[Any, bool]:
     """Снять Optional[X] -> (X, True). Иначе -> (field_type, False)."""
@@ -64,12 +69,27 @@ def _type_tag(t: Any) -> str:
     return "unsupported"
 
 
-def _safe_default(value: Any) -> Any:
-    """default -> JSON-safe значение (никогда не бросает)."""
+def _json_safe(value: Any) -> Any:
+    """Рекурсивно привести значение к JSON-safe виду (никогда не бросает, ревью 1).
+
+    Используется для ``default``, ``choices`` (Literal-плагин с Enum-значениями —
+    ``Literal[Color.RED]`` в choices попадал как объект Enum, не JSON-сериализуемый)
+    и для КАЖДОГО значения ``meta`` (``FieldMeta(examples=[Path(...)])`` — список внутри
+    dict-а метаданных, а не сам ``default``, поэтому старый ``_safe_default`` его не видел).
+
+    ``PydanticUndefined`` -> ``None`` (было: строка ``'PydanticUndefined'`` через общий
+    ``str(value)``-фоллбэк — ``Field(default_factory=list)`` оставляет ``default`` этим
+    сентинелом до первого построения экземпляра; на границе это «значения нет», а не
+    буквальная строка).
+    """
+    if value is _PYDANTIC_UNDEFINED:
+        return None
     if isinstance(value, Path):
         return str(value)
-    if isinstance(value, tuple):
-        return list(value)
+    if isinstance(value, (tuple, list)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
     try:
         json.dumps(value)
         return value
@@ -134,22 +154,25 @@ class FieldInfo:
         """Сериализовать в dict для IPC-границы (Task 1b.2a).
 
         ``choices`` добавляется ТОЛЬКО когда ``type == "literal"`` (закрытый тег-набор
-        см. модульный docstring). Default всегда JSON-safe (``_safe_default``) —
-        Path/tuple конвертируются, неизвестные типы падают в ``str(default)``.
+        см. модульный docstring). ``default``/``choices``/КАЖДОЕ значение ``meta`` —
+        через ``_json_safe`` (ревью 1): Path/tuple/list/dict конвертируются рекурсивно,
+        ``PydanticUndefined`` -> ``None``, неизвестные типы (например Enum в
+        ``Literal[Color.RED]``) падают в ``str(value)``, никогда не бросают.
         """
         unwrapped, optional = _unwrap_optional(self.field_type)
         tag = _type_tag(unwrapped)
+        meta_dict = self.meta.to_dict() if self.meta is not None else None
         d: dict[str, Any] = {
             "plugin_name": self.plugin_name,
             "field_name": self.field_name,
             "type": tag,
             "optional": optional,
-            "default": _safe_default(self.default),
-            "meta": self.meta.to_dict() if self.meta is not None else None,
+            "default": _json_safe(self.default),
+            "meta": _json_safe(meta_dict) if meta_dict is not None else None,
             "category": self.category,
         }
         if tag == "literal":
-            d["choices"] = list(get_args(unwrapped))
+            d["choices"] = _json_safe(list(get_args(unwrapped)))
         return d
 
     @classmethod

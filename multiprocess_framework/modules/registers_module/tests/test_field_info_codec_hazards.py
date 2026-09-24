@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Literal, Optional
 
+import pytest
+
 from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo
 
 
@@ -194,5 +196,130 @@ def test_all_62_plugins_catalog_payload_is_json_serializable() -> None:
 
     payload = {"success": True, "plugins": plugins, "failed_imports": {}}
     # Ключевая проверка: БЕЗ default=str — если хоть одно значение не JSON-safe, здесь TypeError.
+    dumped = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    assert json.loads(dumped) == payload
+
+
+def test_pydantic_undefined_default_goes_as_none_not_the_literal_string() -> None:
+    """default=PydanticUndefined -> None, НЕ строка 'PydanticUndefined' (ревью 1, minor).
+
+    Опасность механизма: до фикса общий try/except в _safe_default ловил TypeError на
+    json.dumps(PydanticUndefined) и падал в str(value) — тот же путь, что и для любого
+    непонятного объекта, поэтому граница получала буквальную строку 'PydanticUndefined'
+    вместо «значения нет». Воспроизводится РЕАЛЬНЫМ pydantic-сентинелом
+    (Field(default_factory=list) оставляет field_info.default этим сентинелом), а не
+    моком.
+    """
+    from pydantic import BaseModel, Field
+
+    class _WithFactory(BaseModel):
+        items: list[int] = Field(default_factory=list)
+
+    field_info = _WithFactory.model_fields["items"]
+    assert field_info.default is not None  # сентинел, не сам default_factory() результат
+
+    fi = FieldInfo(
+        plugin_name="p", field_name="items", field_type=list, default=field_info.default, meta=None, category="c"
+    )
+    d = fi.to_dict()
+    assert d["default"] is None, f"default должен стать None, а не {d['default']!r}"
+
+
+def _reg_good_class() -> type:
+    from typing import Annotated
+
+    from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+
+    class _RegGood(SchemaBase):
+        threshold: Annotated[int, FieldMeta("Порог")] = 1
+
+    return _RegGood
+
+
+def _reg_literal_enum_class() -> type:
+    import enum
+    from typing import Annotated
+
+    from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+
+    class _Color(enum.Enum):
+        RED = "red"
+
+    class _RegLiteralEnum(SchemaBase):
+        mode: Annotated[Literal[_Color.RED], FieldMeta("mode")] = _Color.RED
+
+    return _RegLiteralEnum
+
+
+def _reg_examples_path_class() -> type:
+    from typing import Annotated
+
+    from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+
+    class _RegExamplesPath(SchemaBase):
+        p: Annotated[str, FieldMeta("p", examples=[Path("/tmp/x")])] = "x"
+
+    return _RegExamplesPath
+
+
+class _RegNoPydantic:
+    """Регистр БЕЗ pydantic-модели (искалеченный плагин) — model_fields нет вовсе."""
+
+
+@pytest.mark.parametrize(
+    "bad_register_cls_factory,expected_plugins_count,expected_failed_names,label",
+    [
+        (_reg_literal_enum_class, 3, (), "literal_enum_choice"),
+        (_reg_examples_path_class, 3, (), "fieldmeta_examples_path"),
+        (lambda: _RegNoPydantic, 2, ("bad_one",), "register_without_pydantic"),
+    ],
+)
+def test_catalog_plugins_one_bad_plugin_does_not_kill_the_whole_catalog(
+    bad_register_cls_factory, expected_plugins_count, expected_failed_names, label
+) -> None:
+    """Ни один из трёх плохих плагинов лида (ревью 1) не должен ронять catalog.plugins целиком.
+
+    ДО фикса: КАЖДЫЙ из трёх видов (Literal[Enum...] в choices, FieldMeta(examples=
+    [Path(...)]), регистр без pydantic-модели) ронял ``_cmd_catalog_plugins`` целиком —
+    TypeError/AttributeError долетал до вызывающего, 0 плагинов вместо N+1. Подтверждено
+    отдельно прогоном репро-скрипта против ``git show HEAD:<path>``-версий двух файлов
+    (см. отчёт разработчика) — RED до фикса воспроизведён буквально, не гипотетически.
+
+    ПОСЛЕ фикса — по факту наблюдаемого поведения, а не по одной формуле на все три вида
+    (см. Test authorship rule — литерал, не гипотеза): ``_json_safe`` внутри
+    ``FieldInfo.to_dict()`` ЧИНИТ Literal-Enum choices и FieldMeta.examples[Path] на
+    месте (Enum -> str(...), Path -> str(...)) — эти два вида плагинов после фикса
+    СТАНОВЯТСЯ рабочими (3 плагина, 0 записей failed_catalog), а не изолируются.
+    Регистр без pydantic-модели — единственный вид, который структурно невосстановим
+    (``extract_fields`` падает на ``model_fields`` РАНЬШЕ любой JSON-сериализации) —
+    только он уходит в ``failed_catalog`` (2 плагина, 1 запись). Общее для всех трёх:
+    catalog.plugins больше не падает целиком, ``json.dumps(payload)`` всегда успешен.
+    """
+    from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
+
+    bad_cls = bad_register_cls_factory()
+    snapshot = PluginRegistry.snapshot()
+    try:
+        payload = _build_real_payload(
+            [
+                ("good_one", _reg_good_class()),
+                ("good_two", _reg_good_class()),
+                ("bad_one", bad_cls),
+            ]
+        )
+    finally:
+        PluginRegistry.restore(snapshot)
+
+    assert payload["success"] is True, f"{label}: catalog.plugins упал целиком: {payload!r}"
+    plugin_names = {p["name"] for p in payload["plugins"]}
+    assert len(payload["plugins"]) == expected_plugins_count, (
+        f"{label}: ожидали {expected_plugins_count} плагинов в plugins, получили "
+        f"{len(payload['plugins'])} ({sorted(plugin_names)})"
+    )
+    assert set(payload["failed_catalog"]) == set(expected_failed_names), (
+        f"{label}: ожидали failed_catalog={set(expected_failed_names)}, получили {set(payload['failed_catalog'])}"
+    )
+    # json.dumps(payload) уже выполнен внутри _cmd_catalog_plugins (rev) — переповтор здесь
+    # проверяет payload КАК ОН ЕСТЬ в тесте, а не то, что хендлер успел сделать сам с собой.
     dumped = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     assert json.loads(dumped) == payload
