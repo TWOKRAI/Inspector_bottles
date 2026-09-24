@@ -78,6 +78,11 @@ def release_feeders_at_exit(
 
     Второе число — только то, что ещё лежало в буфере feeder'а отпущенных очередей.
     Уже записанное в pipe и не больше одного сообщения в полёте теряются без счёта.
+    Отпущенная очередь — та, чей feeder жив через poll после ``close()``, то есть держит
+    сообщение в ``send`` или перед ним: «отпущено N, в буфере 0» значит до N потерь в полёте.
+    Строка итога сигналит о ЗАСТРЯВШЕМ feeder'е, а не считает потери: если у маркированной
+    очереди feeder успел за poll слить буфер в pipe ушедшего читателя (до одного буфера pipe
+    мелких сообщений), они потеряны, а очередь не считается отпущенной — строки нет (ревью 1.3).
 
     ``own_queues`` — очереди, которыми процесс владеет (читает их он); ``all_queues`` —
     все очереди, известные процессу (свои + соседи из routing_map). Очереди не
@@ -109,10 +114,22 @@ def release_feeders_at_exit(
 
     released = buffered_dropped = 0
     while pending:
+        # Пауза ДО первой проверки (Task 1.3 lifecycle-stop-ownership): сразу после
+        # close() feeder жив, даже когда весь буфер уже в pipe, — он ещё не дошёл до
+        # sentinel. Проверка метки без паузы считала такую очередь отпущенной, и
+        # строка итога печаталась без застрявшего feeder'а (у PM — на каждом стопе). Отпущенной
+        # считается только очередь, чей feeder жив через poll после close(): он
+        # застрял в send, то есть сообщение в полёте потеряно, даже при пустом буфере.
+        # Замер 2026-09-24, 10 стопов inspection_full: строк 26 → 5; стек feeder'а в момент
+        # отпуска у всех 8 из 8 — ``_send`` (os.write в полный pipe) или ``wacquire`` за
+        # таким писателем, то есть оставшиеся строки — настоящие потери, не ложные.
+        # ponytail: один poll (20 мс) — если под нагрузкой feeder не успеет дойти до
+        # sentinel, ложная строка вернётся; тогда ждать дольше именно при пустом буфере.
+        time.sleep(poll_interval_s)
         still: List[ReaderGoneQueue] = []
         for q in pending:
             if not q._thread.is_alive():
-                continue  # буфер слит — доставлено
+                continue  # буфер слит в pipe; у маркированной очереди — в pipe ушедшего читателя, без счёта
             if q.is_reader_gone():
                 buffered_dropped += _buffered(q)
                 q.cancel_join_thread()
@@ -121,6 +138,4 @@ def release_feeders_at_exit(
                 continue
             still.append(q)
         pending = still
-        if pending:
-            time.sleep(poll_interval_s)
     return released, buffered_dropped
