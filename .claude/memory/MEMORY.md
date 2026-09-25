@@ -43,6 +43,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Страховка маскирует основную правку](feedback_safety_net_masks_primary_fix.md) — ломать основное при живой страховке
 - [Общий откат синглтона ломает импорт-состояние](feedback_global_rollback_breaks_import_time_state.md) — мерить против main
 - [Радиус слияния мимо контракт- и живых тестов](feedback_merge_radius_skips_live_and_contract_tests.md) — без --backend-live живые в skipped
+- [Инъекции — только по закоммиченному коду](feedback_injection_scripts_on_committed_code.md) — checkout съел фикс; zsh не бьёт $VAR
 
 ### User
 _(empty)_
