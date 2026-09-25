@@ -51,9 +51,13 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
+    # snapshot/restore, а не clear() в ноль: регистрации при импорте модулей плагинов
+    # второй раз не случаются, и опустошённый реестр ломал соседние тесты (2026-09-25).
+    saved = PluginRegistry.snapshot()
     PluginRegistry.clear()
     yield
     PluginRegistry.clear()
+    PluginRegistry.restore(saved)
 
 
 @pytest.fixture(autouse=True)
