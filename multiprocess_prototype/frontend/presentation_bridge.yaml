@@ -1,0 +1,20 @@
+# presentation_bridge.yaml — ПРЕЗЕНТАЦИОННЫЙ OVERLAY «мост кадров» (gui-service Task 1.3).
+#
+# Та же механика, что у presentation.yaml (патч класса процесса ``gui`` поверх слитой
+# топологии; процессов не добавляет), но воплощение другое: окна нет, ``gui`` дренирует
+# data-трафик как headless и сообщает подписчикам (Пульт, ``RemoteFrameSource``), в каком
+# слоте SHM лежит кадр. Протокол — frontend_module/bridge/remote_frame_source.py.
+#
+# Как включить (путь overlay'я — относительно multiprocess_prototype/):
+#   INSPECTOR_PRESENTATION=frontend/presentation_bridge.yaml \
+#     python multiprocess_prototype/run.py <recipe>
+# headless-флаг основного входа (INSPECTOR_HEADLESS=1 / --headless) ПЕРЕБИВАЕТ overlay.
+
+name: presentation_bridge
+description: "Презентационный overlay: gui получает класс моста кадров (без Qt)"
+
+processes:
+  - process_name: gui
+    process_class: multiprocess_prototype.frontend.bridge_process.BridgeGuiProcess
+
+wires: []

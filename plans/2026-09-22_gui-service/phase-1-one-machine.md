@@ -79,7 +79,7 @@ baseline только по тестам; это не провал задачи.
 **Мидлварь — уточнено по `backend_ctl/AGENTS.md` («Чего драйвером проверить нельзя»), 2026-09-22:**
 receive-мидлварь **дочернего** процесса на сокетном пути отрабатывает штатно — обхода нет, чинить
 нечего. Два настоящих разрыва: (1) `make_fence_stamp_middleware` висит только в дочерних
-`ProcessModule` (`process_module.py:654`), встроенный `GuiProcess` — дочерний и штампует `_fence`;
+`ProcessModule` (подключение — `builtin_commands.py:3980-4006`), встроенный `GuiProcess` — дочерний и штампует `_fence`;
 Пульт — внешний и не штампует, фильтр пропускает его легаси-веткой (`token.py:124-126`) — после
 рестарта бэкенда устаревшие команды Пульта не отсекутся как stale; (2) у хаба (ProcessManager)
 receive-мидлвари нет **ни для кого** — не цель этого плана (см. G1b в `context.md`).
@@ -95,7 +95,7 @@ receive-мидлвари нет **ни для кого** — не цель эт�
   (домен для rework 2б.2 — ядро)
 - `backend_ctl/transport.py` — реэкспорт из фреймворка, поведение и публичные имена без изменений
 - НОВЫЙ `multiprocess_framework/modules/frontend_module/bridge/remote_command_sender.py` —
-  `RemoteCommandSender` (тот же Protocol, что `CommandSender`); штамп `_fence` из `capabilities`
+  `RemoteCommandSender` (тот же Protocol, что `CommandSender`); штамп `_fence` из `supervision.status`
   тем же кодом, что `make_fence_stamp_middleware` (импорт, не копия). **Qt-free**
 - НОВЫЙ `multiprocess_framework/modules/frontend_module/bridge/remote_state_proxy.py` —
   `RemoteStateProxy` (`set/get/subscribe` через `state.*` сообщения протокола). **Qt-free**
@@ -108,12 +108,14 @@ receive-мидлвари нет **ни для кого** — не цель эт�
    Прогнать `pytest backend_ctl -q` — число не меньше baseline, 0 failed.
 2. `RemoteCommandSender`: реализовать интерфейс `CommandSender` (какой именно Protocol — по отчёту 1.1),
    сообщения строить билдерами протокола (не руками). Ответы — по `request_id`. Fence: при
-   подключении взять текущий эпох/токен из `capabilities` (если его там нет — это находка: добавить
-   в `capabilities` на хосте, одно поле) и штамповать каждое исходящее сообщение той же функцией,
+   каждом подключении взять `inc`/`epoch` из `supervision.status` (`capabilities_extra` отдаёт только
+   контракт, `process_manager_process.py:513-525`; хост не правится) и штамповать каждое исходящее сообщение той же функцией,
    что дочерние процессы.
 3. `RemoteStateProxy`: `get` — запрос; `subscribe(pattern, cb)` — durable-подписка (восстанавливается
    после реконнекта); `set` — запрос с подтверждением. Троттлинг — как на хосте, клиент ничего не
-   троттлит сам.
+   троттлит сам. Реконнекта с восстановлением подписок в `_TransportMixin` нет (он в
+   `DriverSession`, `mcp_driver_session.py:385-514`) — для GUI это новая логика; session меняется на
+   каждом connect, адрес подписчика нужно переподписать.
 4. Автор пишет hazard-тесты: (а) реконнект в момент ожидания ответа — `request` получает понятную
    ошибку, не висит; (б) подписки восстановлены после реконнекта — событие после реконнекта доходит;
    (в) push-колбэк вызывается не в потоке чтения сокета, а через переданный диспетчер (для Qt —
@@ -124,12 +126,16 @@ receive-мидлвари нет **ни для кого** — не цель эт�
 - [ ] `pytest backend_ctl -q` — passed ≥ baseline из Step 1, 0 failed; `from backend_ctl.transport
       import <прежние имена>` работает.
 - [ ] In-process тест: `SocketChannel(port=0)` + `RouterManager` + процесс-стаб с командой `ping`;
-      `RemoteCommandSender.send("ping")` → ответ `{"status":"ok"}` за < 1 с.
-- [ ] **Fence-паритет:** сообщение от `RemoteCommandSender` несёт `_fence` того же вида, что
-      сообщение встроенного `GuiProcess` (сравнение структуры штампа); дочерний процесс-стаб с
-      включённым fence-фильтром принимает команду Пульта с актуальным эпохом и **отвергает** команду
-      с устаревшим (парный тест, счётчик отказов фильтра +1).
-- [ ] `RemoteStateProxy.subscribe("a.*", cb)`; хост делает `set("a.b", 1)` → `cb` вызван с `("a.b", 1)`
+      `RemoteCommandSender.request_command(...)` для `ping` (стаб регистрирует её сам) → конверт
+      `{"success": True, "result": ...}` за < 1 с.
+- [ ] **Fence-паритет (структура):** сообщение `RemoteCommandSender` на проводе (до хоста) несёт
+      `_fence={sender, inc, epoch}` той же формы, что штамп `GuiProcess` (`make_fence_stamp_middleware` —
+      импорт, не копия); `inc`/`epoch` берутся из `supervision.status` после каждого connect (hazard (г)).
+      Отказ stale для внешнего отправителя — вне задачи: у ребёнка нет PSR-записи Пульта (fail-open,
+      `token.py:134-136`), а PM при relay перештамповывает `_fence` своим именем (`router_manager.py:544`);
+      строка «fence внешних клиентов» — в G1b `context.md`. *(Сужено 2026-09-24: вердикт cto + подпись
+      владельца; прежний текст требовал отказа stale у ребёнка — недостижимо без G1b.)*
+- [ ] `RemoteStateProxy.subscribe("a.*", cb)`; хост делает `set("a.b", 1)` → `cb` вызван со списком `Delta`, где есть `a.b = 1`
       за < 1 с; после разрыва и восстановления соединения `set("a.c", 2)` → `cb` вызван снова (подписка
       пережила реконнект).
 - [ ] Разрыв соединения во время `request(...)` → исключение/ошибка за ≤ таймаут, не зависание
@@ -145,6 +151,25 @@ HOL/`sendall`/границы кадров (Task 1.3a), второй клиент
 **Dependencies:** Task 1.1 (список разъёмов и Protocol'ов, которые реализуем). Task 1.3a (HOL) —
 не к старту, а к старту 1.4 (см. «Транспортные болезни» выше); remediation 3.2 сделана.
 **Module contract:** impl-only (`frontend_module`) + new-lite (`socket_client.py` с докстрингом-контрактом).
+
+**Итог (2026-09-24, DONE, merge `ef581997` в `feat/gui-service`):** `SocketClient` во фреймворке
+(`router_module/channels/socket_client.py`), `backend_ctl.transport` — шим с прежними именами;
+`RemoteCommandSender` (наследует `CommandSender`) и `RemoteStateProxy` (наследует `GuiStateProxy`) в
+`frontend_module/bridge/`. Сводный прогон: 1573 passed / 1 skipped, `backend_ctl` 786 passed / 52 skipped /
+0 failed, `sentrux check .` зелёный. Break-injection лида — 13 поломок, все убиты; тест тестера
+`test_subscription_survives_reconnect` пуст как страж (фейк-хост доставляет и без переподписки) —
+свойство держат авторские тесты, живой прогон подтвердил, что переподписка нужна. Ревью — 2 итерации,
+APPROVE_WITH_NOTES; закрыты гонка `conn_lost`, fence до `refresh`, F2 (штамп сообщений без `sender`).
+- **Отклонения, принятые сознательно:** (1) `RemoteStateProxy.set` — fire-and-forget, как у встроенного
+  прокси, а не «запрос с подтверждением» из Step 3; (2) `state.*` не штампуются `_fence` (F2 штампует
+  только команды своего имени и без `sender`); (3) форма ошибок `RemoteCommandSender` отличается от
+  `CommandSender` — выравнивание решает 1.4, когда вкладки встанут на `RemoteGuiRuntime`.
+- **Не наблюдалось вживую:** смена `inc`/`epoch` после рестарта бэкенда — свежий бэкенд отдаёт 0/0,
+  перештамповка проверена только unit-тестами.
+- **Стык с конструктором (Р-4 rework):** `remote_*` лежат в `frontend_module/bridge/` и сами Qt-free, но
+  `frontend_module/__init__.py` импортирует `components`/`widgets` — импорт через пакет поднимает PySide6.
+  При расщеплении `frontend_module` (rework Р-4, ступень 3.4) `remote_command_sender.py` и
+  `remote_state_proxy.py` относятся к **Qt-free ядру**, не к Qt-пакету. Для 1.4 не блокер (Пульт — Qt).
 
 ---
 
@@ -164,6 +189,34 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 клиент, не копировать. Ограничение честно: читатель вне loan-леджера; под `FW_SHM_LOAN_PROTOCOL=1`
 слот может быть переиспользован под ним. В v1 Пульт отказывается от SHM при включённом флаге
 (читает из `capabilities`) — и **измеряет** торн-кадры, а не обещает их отсутствие.
+
+**Уточнено по DESIGN 2026-09-24 (решения лида, отчёт `docs/reviews/2026-09-24_gui-1.3-design.md`; где
+расходится с текстом ниже — действует этот блок):**
+1. **Блокер, которого не было в плане (воспроизведён лидом):** внешний процесс, открывший сегмент
+   `SharedMemory(name=..., create=False)`, на выходе **удаляет живой сегмент бэкенда** через свой
+   `resource_tracker` (Python 3.12; `track=False` появился только в 3.13). Зонд: без `unregister` —
+   `segment UNLINKED`, с `resource_tracker.unregister(...)` — `segment alive`. Лечение в задаче:
+   kwarg `track: bool = True` у `ShmFrameReader` (`shm_frame_reader.py`), `RemoteFrameSource` создаёт его с
+   `track=False`. Acceptance ниже дополнен.
+2. **Attach по имени уже вынесен:** мидлварь делегирует в `ShmFrameReader.read_frame` (Protocol `FrameReader`).
+   `frame_shm_middleware.py` в 1.3 **не правится**; `RemoteFrameSource` переиспользует `ShmFrameReader`.
+3. **`display_id` и `seq` в конверте нет** (GUI вычисляет дисплей из `sender` по рецепту,
+   `recipe_displays.py:124`). Решение: мост фильтрует по **`senders`**, отображение `sender → дисплей` —
+   на стороне Пульта той же функцией `resolve_display_id` по рецепту из `recipe.get` (1b.1), это 1.4.
+   `seq` — собственный монотонный `bseq` моста. shape/dtype в дескрипторе не нужны: они в заголовке слота.
+4. **`capabilities.flags` не существует**, а добавить его — правка `process_manager_process.py` (чужой файл).
+   Флаги (`seqlock`, `owner_incarnation`, отказ при `FW_SHM_LOAN_PROTOCOL`) отдаёт ответ `frames.subscribe`.
+5. **Протокол подписки** — по пути ui_tap (`RouterPushChannel` → relay хаба → `SocketChannel`), новых билдеров
+   нет. Уборка мёртвых сессий и replay после рестарта `gui` — одна строка
+   `"frames.subscribe": "frames.unsubscribe"` в `POINT_COMMANDS` (`observability_broker.py`).
+   `backend_ctl/subscriptions.py` фреймворку недоступен (слой) — реконнект через
+   `RemoteFrameSource.on_reconnected()`, как `RemoteStateProxy`.
+6. **Torn-кадры детектируются только при `FW_SHM_SEQLOCK=1`** (по умолчанию выкл.) — стенд гонять дважды.
+   Без seqlock — число расхождений углов на 1000 кадров, без порога.
+7. **Follow-up, не в 1.3:** «кадр новее дескриптора» (слот перезаписан, пока дескриптор шёл — целый, но
+   чужой кадр; лечится generation в конверте на пути записи); дескрипторы делят observability-очередь хаба
+   (maxsize 256, с потерями) — потери видны разницей `sent` моста и `received` Пульта; tool `frames_*` в
+   `backend_ctl`.
 
 **Files:**
 - НОВЫЙ `multiprocess_prototype/frontend/bridge_process.py` — `BridgeGuiProcess` (рядом с
@@ -202,7 +255,7 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
       синтетическим источником: `introspect_plugins`/`system_overview` показывают процесс `gui`
       классом `BridgeGuiProcess`; без подписчиков счётчик `received` роутера у `gui` растёт (дренаж
       работает как у headless).
-- [ ] Внешний скрипт (вне дерева) через `RemoteFrameSource.subscribe(["main"], cb)` получает за 10 с
+- [ ] Внешний скрипт (вне дерева) через `RemoteFrameSource.subscribe(senders=None, cb)` получает за 10 с
       ≥ 0.8 × fps продюсера (fps — из `introspect_router_stats`, не из конфига), кадры формы
       `(h, w, 3)` `uint8`.
 - [ ] Кадры **побитово** равны продюсерским: продюсер стампует счётчик в углах; у ≥ 99.9 % принятых
@@ -214,6 +267,11 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 - [ ] `frontend/run.py` (воплощение с Qt) и `--headless` работают как прежде — снапшот-тесты
       топологии зелёные, число из 1.1.
 
+- [ ] **Внешний читатель не удаляет сегменты бэкенда:** подпроцесс читает кадр через `RemoteFrameSource` и
+      выходит → сегмент продюсера открывается по имени, второй читатель продолжает получать кадры
+      (до правки — RED, воспроизведено лидом 2026-09-24).
+- [ ] Смерть клиента (kill -9) → `frames.stats` для его адреса замирает за ≤ 1 с (уборка брокером).
+
 **Out of scope:** кадры по сети (2.1); выбор транспорта в Пульте (2.1); loan-протокол для внешнего
 читателя (после v1 — либо мост держит собственное кольцо-копию, либо леджер учится внешним читателям).
 **Edge cases:** сегмент с именем из дескриптора уже не существует (бэкенд перезапустил процесс) —
@@ -221,6 +279,30 @@ SharedMemory по `shm_actual_name`»), значит путь кода есть 
 `shm_actual_name` (один продюсер — два дисплея) — дескрипторы различаются `display_id`.
 **Dependencies:** Task 1.2 (подписки по сокету).
 **Module contract:** new-lite (`BridgeGuiProcess`, `RemoteFrameSource` — докстринги-контракты, Pre/Post).
+
+**Итог (2026-09-24, DONE, merge `0c29aadc` в `feat/gui-service` + `b84fa462`):** `BridgeGuiProcess` +
+`frames.subscribe/unsubscribe/stats`, `RemoteFrameSource` (Qt-free), `ShmFrameReader(track=False)`,
+строка в `POINT_COMMANDS`, `SocketClient(door=...)`. Слепой тестер 16 RED → зелёные (неверная модель в
+харнессе: `SocketChannel("gui")` вместо `"backend_ctl"`, исправлено лидом `0f73b55a`). Break-injection лида —
+15 свойств + дверь + фиксы ревью; три пробела (seqlock-проверка, эпоха после копии, unsubscribe на хост)
+закрыты авторскими тестами. Живой стенд (синтетика 29,9 fps): L2 28,4 fps; L3 1005 кадров / 0 torn под
+seqlock; L4 отказ называет флаг; L5 kill -9 → адрес снят ≤ 0,25 с; L6 выход внешнего читателя не удаляет
+сегмент. Ревью — APPROVE_WITH_NOTES, m1/m3/m4/m5 закрыты (`61337e18`). Сводный прогон: `backend_ctl`
+786/53/0, live 1 passed, прототип frontend 345, `sentrux` зелёный; фреймворк 10043 passed / 6 failed —
+все 6 не наши после `b84fa462` (4 падают и на чистом main `02d1db2c`: watcher, declarations_leak,
+emergency_log-инвентарь от `process_runner.py` lifecycle, `reader_gone` — подпроцесс без `PYTHONPATH`).
+- **Найдено стендом, не unit-тестами:** push уходил только на адрес `<имя SocketChannel>.<session>`
+  (`socket_channel.py:230`), а `subscriber_address` строился от `sender` — клиент `pult` получал 0 кадров
+  при 492 отправленных. Касалось и `RemoteStateProxy` 1.2. Исправлено `door=` (дефолт `backend_ctl`),
+  страж — живой тест `backend_ctl/tests/test_frame_bridge_live.py` (`-m harness_smoke`).
+- **Регресс, пойманный сводным прогоном:** голый `logging.getLogger` в `socket_client.py` (из 1.2) и
+  `remote_frame_source.py` — страж `test_std_logger_guard`; исправлено `b84fa462`.
+- **Долги:** (1) m2 — push между «хост принял subscribe» и локальной активацией не считается нигде
+  (0–1 кадр на подписку; разность `sent − received` на него врёт); (2) «кадр новее дескриптора» —
+  generation в конверте на пути записи; (3) дескрипторы делят observability-очередь хаба (maxsize 256, с
+  потерями); `sent` моста — постановки в `AsyncSender`, не записи в сокет; (4) после `door` провенанс
+  state видит всех внешних клиентов как `backend_ctl.<sid>` — имя клиента пропало (к 1.4); (5) tool
+  `frames_*` в `backend_ctl` не сделан; (6) `import` через пакет `frontend_module` грузит PySide6 (Р-4).
 
 ---
 

@@ -39,6 +39,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 ### Feedback
 - [Сигнал «отпусти соседа» — в момент факта](feedback_unblocking_signal_at_the_moment_of_fact.md) — 13 тестов зелёные, живой стоп как до правки
 - [Новый план — среди соседей](feedback_a_new_plan_must_be_placed_among_its_neighbours.md) — таблица владения + обратные ссылки в чужие планы
+- [Имена отчётов — с префиксом плана](feedback_review_file_names_need_plan_prefix.md) — task-1.2-* заняты параллельным планом
 
 ### User
 _(empty)_

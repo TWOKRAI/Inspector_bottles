@@ -163,6 +163,13 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 - **2026-09-23 (планирование):** черновик, undo и `ProjectHolder` остаются в GUI, сохранение идёт с
   оптимистичной ревизией (`base_rev` → `conflict`). **Rejected:** блокировка рецепта на время
   редактирования — повисает при падении Пульта, а падение Пульта не должно трогать бэкенд (цель плана).
+- **2026-09-24 (cto + владелец):** Task 1.2 AC3 сужен до паритета структуры `_fence`; отказ stale для
+  внешнего отправителя — в G1b (у детей нет PSR-записи Пульта, PM перештамповывает `_fence` на relay).
+  Подпись владельца. AC2/AC4 поправлены под код (`request_command`, `list[Delta]`).
+- **2026-09-24 (cto, FYI владельцу):** Task 1b.1 — `recipe.*` **на хабе**, `activate` синхронный.
+  Рекомендация «не хаб» стояла на неверной посылке (мидлварь у PM есть, сокет обходит её у всех команд
+  хаба). **Rejected:** процесс `recipes` в `base.yaml` (+375 строк golden каждому рецепту, решение
+  08-23) и плагин в `devices` (async activate + второй владелец «активного рецепта»).
 
 ## Открытые вопросы
 
@@ -192,8 +199,8 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 Файл: [`phase-1-one-machine.md`](phase-1-one-machine.md)
 
 - Task 1.1: Инвентарь разъёмов GUI ↔ дерево — числа, baseline fps и сьюты [DONE 2026-09-22, `a20e673f`; fps не снят] — **Module contract:** none (отчёт)
-- Task 1.2: Сокетный транспорт для GUI: клиент во фреймворк, `RemoteCommandSender`/`RemoteStateProxy`, fence-штамп как у встроенного GUI [PENDING] (зависит от 1.1; remediation 3.2 «второй клиент» **уже закрыта** `8fae4034`; 3.1 HOL и 3.3 `sendall` — Task 1.3a, не к старту 1.2) — **Module contract:** impl-only + new-lite (`socket_client.py`)
-- Task 1.3: Кадры между деревьями на одной машине: `BridgeGuiProcess` + `RemoteFrameSource` (SHM по имени) [PENDING] (зависит от 1.2) — **Module contract:** new-lite
+- Task 1.2: Сокетный транспорт для GUI: клиент во фреймворк, `RemoteCommandSender`/`RemoteStateProxy`, fence-штамп как у встроенного GUI [DONE 2026-09-24, merge ef581997] (зависит от 1.1; remediation 3.2 «второй клиент» **уже закрыта** `8fae4034`; 3.1 HOL и 3.3 `sendall` — Task 1.3a, не к старту 1.2) — **Module contract:** impl-only + new-lite (`socket_client.py`)
+- Task 1.3: Кадры между деревьями на одной машине: `BridgeGuiProcess` + `RemoteFrameSource` (SHM по имени) [DONE 2026-09-24, merge 0c29aadc] (зависит от 1.2) — **Module contract:** new-lite
 - Task 1.3a: Серверный транспорт `SocketChannel`: без head-of-line, медленный клиент не держит запись (из remediation 3.1 + 3.3, решение владельца 2026-09-24) [PENDING] (зависимостей нет — параллельно 1.2/1.3; обязательна до 1.4) — **Module contract:** impl-only
 - Task 1.4: Автономный Пульт: хост `apps/pult/` + `GuiAppSpec` инспектора по имени — те же вкладки, без дерева; отказоустойчивость в обе стороны [PENDING] (зависит от 1.2, 1.3, 1.3a; предпосылка — frontend-constructor **T4.1–T4.4**, ред. 2: не «если не сделана», а обязательно до 1.4) — **Module contract:** new-full
 
@@ -201,8 +208,11 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 
 Файл: [`phase-1b-recipe-service.md`](phase-1b-recipe-service.md)
 
-- Task 1b.1: Сервис рецептов на бэкенде: `recipe.*` с ревизией, запись `app.yaml` уходит из GUI [PENDING] (зависимостей нет — параллельно Ф1) — **Module contract:** new-lite
-- Task 1b.2: Каталоги плагинов/дисплеев/сервисов от бэкенда; код `Plugins/` не грузится в GUI [PENDING] (параллельно Ф1) — **Module contract:** impl-only
+- Task 1b.1: Сервис рецептов на бэкенде: `recipe.*` с ревизией, запись `app.yaml` уходит из GUI [DONE 2026-09-24, merge `5a5d65cc`] (зависимостей нет — параллельно Ф1) — **Module contract:** new-lite
+- Task 1b.2: **РАЗДЕЛЕНА 2026-09-24 вердиктом cto** (разведка: код `Plugins.*` в GUI держат не каталоги, а `RegistersManager.from_registry`, `CommandCatalog`, `StartupChecker`, `PluginManager` — `frontend/app.py:173-186,290,407`; 200 модулей `Plugins.*` + 139 `Services.*` после discover):
+  - Task 1b.2a: `catalog.plugins` на хабе + dict-кодек `FieldInfo` + `RemotePluginCatalog` / `RegistersManager.from_catalog` / `CommandCatalog.from_catalog`; AC1 паритет, форма без `Plugins.*`/`Services.*`, каталог сразу после boot (реестр PM на boot пуст — `orchestrator_hooks.py:65-78`) [IN PROGRESS] (параллельно Ф1) — **Module contract:** impl-only + new-lite (`remote_plugin_catalog.py`)
+  - Task 1b.2b: сборка GUI без `PluginRegistry` (`app.py:173-186,290,407` уходят; `PluginManager` → `plugins.rescan` на хабе); AC2 расширен: ни `Plugins.*`, ни `Services.*` [PENDING] (зависит от 1b.2a; Senior; **один писатель `app.py` с T4.2–T4.4 frontend-constructor — строгая очередь**) — песочница остаётся локальным dev-исключением встроенной сборки до 3.3 (**решение владельца 2026-09-24:** Q-F2=C «навсегда» → «до 3.3»; в Пульте вкладка честно пишет «недоступно»; в 3.3 по числам — `sandbox.run` на бэкенде или снять)
+- Task 1b.5 (предложена cto, **принята владельцем 2026-09-24**; [PENDING]): хост жизненного цикла сервисов на бэкенде — `service.list/start/stop/status` + удалённый `ServiceManager`; сегодня `service_catalog.py:159,167` поднимает `auth`, `hikvision_camera`, `robot_comm`… в процессе GUI. Цена: +1 процесс `services` в `base.yaml`, красные снапшоты `SystemBuilder`. После 1b.2a, до 1b.4; Ф2 без неё не стартует
 - Task 1b.3: Пакет вкладок инспектора на удалённых портах; запрет `frontend ↛ backend/recipes` [PENDING] (зависит от 1b.1, 1b.2, 1.4) — **Module contract:** impl-only
 - Task 1b.4: Auth на бэкенде: сессия оператора, проверка команд у владельца [PENDING] (зависит от 1.2; до Ф2) — **Module contract:** impl-only
 

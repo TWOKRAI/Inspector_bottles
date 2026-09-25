@@ -8,6 +8,16 @@
 `nested_blueprint_data`) + generic comment-preserving writer (`yaml_io`) сведены в
 один framework-модуль. Доменные пути и миграции инжектируются (ADR-RCP-001/003/005).
 
+## gui-service Task 1b.1 — сервис `recipe.*` на хабе (2026-09-24)
+
+`service.py` реализован по ADR-RCP-007 (list/get/save/validate/activate/delete, rev =
+sha256, CAS под локом на имя, атомарная запись). Подключён на хабе прототипа
+(`orchestrator.py`), формат — `backend/recipe_format_hook.py`. Тесты: acceptance
+тестера (`tests/test_service.py`, 10), авторские hazards (`tests/test_service_hazards.py`),
+live (`backend_ctl/tests/test_recipe_service_live.py`, `..._restart_live.py`).
+Открыто: лок имени — внутрипроцессный (два хаба на один каталог не сериализуются);
+комментарии YAML при `recipe.save` не сохраняются (PyYAML dump, вне контракта).
+
 ## Оценки (0-10)
 
 | Критерий | Оценка | Комментарий |
