@@ -207,8 +207,14 @@ def _main():
     spawner = ProcessSpawner(processes_config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
     spawner.launch_orchestrator()
     proc = spawner.get_process()
-    time.sleep(2.0)  # дать PM's initialize() заспавнить зависшего ребёнка
+    # Опрос вместо фиксированной паузы (поправка ведущего 2026-09-25): на медленном старте
+    # 2.0 с не хватало, тест падал на «-1» и в finally SIGKILL'ил лаунчер посреди стопа —
+    # сирота от самого теста, а не от пути SIGINT (подозрение по сбою 2026-09-25).
+    deadline = time.monotonic() + 20.0
     children = snapshot_children(proc.pid)
+    while not children and time.monotonic() < deadline:
+        time.sleep(0.1)
+        children = snapshot_children(proc.pid)
     # pid + create_time: личность ребёнка фиксируется, пока он жив (поправка ведущего —
     # после выхода подпроцесса psutil.Process(pid) у мёртвого ребёнка бросает NoSuchProcess).
     print(f"{children[0].pid} {children[0].create_time()}" if children else "-1 0", flush=True)
