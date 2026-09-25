@@ -145,12 +145,13 @@ UNREGISTERED ──> READY ──> RUNNING ──> STOPPED
 
 Ошибки: неизвестное имя — `{success: False, error: "unknown_service", name}`; сбой `cls()`/`start()`/
 `stop()` или `False` от них — `{success: False, error: "start_failed"|"stop_failed", message, name,
-lifecycle: "error"}`. `start`/`stop` идемпотентны. `lifecycle` — строки `ServiceLifecycle`.
+lifecycle: "error"}`; `stop`/`restart` при старте в полёте — сразу `{success: False, error:
+"start_in_progress", name, lifecycle: <текущий>}` (клиент: `DomainError`). `start`/`stop` идемпотентны. `lifecycle` — строки `ServiceLifecycle`.
 
 Pre/Post: `start` — Pre: имя в реестре; Post: `cls()` вызван не более одного раза на жизнь хоста при
 успехе, lifecycle `running` либо `error` (сразу или позже, из потока). `stop` — Post: lifecycle
-`stopped` либо `error`; не пересекается с идущим `start()` того же сервиса (замок сервиса) — и
-поэтому ждёт его (см. «Открыто» в ADR-SVC-004).
+`stopped` либо `error`, либо отказ `start_in_progress` без ожидания, если старт этого сервиса в
+полёте; с идущим `start()` того же сервиса не пересекается (ADR-SVC-004).
 
 ## Зависимости
 

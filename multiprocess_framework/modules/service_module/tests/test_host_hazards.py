@@ -205,13 +205,14 @@ def test_stop_never_started_is_success_without_instance() -> None:
 # ------------------------------------------------------------------
 
 
-def test_stop_during_inflight_start_never_interleaves() -> None:
+def test_stop_during_inflight_start_answers_start_in_progress_without_waiting() -> None:
+    """stop во время старта в полёте — сразу start_in_progress, не ждёт замок; после старта stop обычный."""
     events: list[str] = []
 
     class _Logged:
         def start(self, config: dict) -> bool:
             events.append("start_begin")
-            time.sleep(0.3)
+            time.sleep(5.0)
             events.append("start_end")
             return True
 
@@ -227,8 +228,16 @@ def test_stop_during_inflight_start_never_interleaves() -> None:
 
     pending, _ = _in_thread(handlers["service.start"], {"name": "logged"})
     assert pending.get("pending") is True
-    stopped, _ = _in_thread(handlers["service.stop"], {"name": "logged"})
 
+    refused, elapsed = _in_thread(handlers["service.stop"], {"name": "logged"}, deadline=2.0)
+    assert refused == {"success": False, "error": "start_in_progress", "name": "logged", "lifecycle": "ready"}
+    assert elapsed < 0.5, f"stop ждал {elapsed:.3f}с при старте в полёте"
+    restart, _ = _in_thread(handlers["service.restart"], {"name": "logged"}, deadline=2.0)
+    assert restart["error"] == "start_in_progress"
+    assert events == ["start_begin"]  # stop() не вызван, не вклинился в start()
+
+    assert _wait_for(lambda: ServiceRegistry().get("logged").lifecycle == ServiceLifecycle.RUNNING, deadline=7.0)
+    stopped, _ = _in_thread(handlers["service.stop"], {"name": "logged"})
     assert stopped == {"success": True, "name": "logged", "lifecycle": "stopped"}
     assert events == ["start_begin", "start_end", "stop"]
 

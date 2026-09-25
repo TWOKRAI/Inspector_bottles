@@ -13,6 +13,8 @@ ADR-SVC-004), и отдаёт пять обработчиков ``handler(args: 
 Неизвестное имя на любой ручке с ``name``: ``{"success": False, "error": "unknown_service", "name"}``.
 Сбой ``cls()``/``start()``/``stop()``: ``{"success": False, "error": "start_failed"|"stop_failed",
 "message", "name", "lifecycle": "error"}``.
+``stop``/``restart`` при старте в полёте — сразу ``{"success": False, "error": "start_in_progress",
+"name", "lifecycle": <текущий>}``, без ожидания замка сервиса (ADR-SVC-004).
 
 Ответы ПЛОСКИЕ: конверт ``{"success", "result": <плоский>}`` добавляет сторона запроса
 (CommandManager/IPC), не хост.
@@ -148,7 +150,13 @@ class ServiceHost:
         entry, name, err = self._entry(args)
         if entry is None:
             return err
-        # Синхронно: при старте в полёте ждёт его конца на замке сервиса (см. ADR-SVC-004).
+        # Старт в полёте — отказ сразу: ожидание замка держало бы весь командный путь хаба
+        # (ADR-SVC-004). Остаточное окно: start, пришедший ПОСЛЕ этой проверки и успевший
+        # взять замок раньше stop, stop всё же подождёт.
+        with self._guard:
+            in_flight = name in self._jobs
+        if in_flight:
+            return {"success": False, "error": "start_in_progress", "name": name, "lifecycle": entry.lifecycle.value}
         with self._lock_for(name):
             if entry.lifecycle == ServiceLifecycle.STOPPED:
                 return _ok(name, entry)
