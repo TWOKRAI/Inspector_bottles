@@ -228,3 +228,99 @@ def test_no_parent_pid_means_not_armed():
         if proc.is_alive():
             kill_and_reap(proc.pid)
         proc.join(timeout=5.0)
+
+
+# ---------------------------------------------------------------------------
+# Смерть НАСТОЯЩЕГО родителя, пока ребёнок внутри initialize() (инъекция лида I6).
+# Сторож стоит первой инструкцией run_process_function именно ради этого случая;
+# дети-хелперы инициализируются мгновенно, и перенос сторожа к _run_lifecycle
+# не ловил ни один тест. Эмуляция getppid здесь не годится — нужен реальный SIGKILL.
+# ---------------------------------------------------------------------------
+
+SLOW_INIT_CHILD_CLASS_PATH = f"{__name__}.SlowInitChild"
+_MARKER_ENV = "PD_SLOW_INIT_MARKER"
+
+
+class SlowInitChild:
+    """initialize() блокирует ~10 с и не реагирует ни на события, ни на SIGTERM."""
+
+    def __init__(self, name: str, shared_resources: Any, config: Any) -> None:
+        self.name = name
+
+    def initialize(self) -> bool:
+        import signal
+
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        with open(os.environ[_MARKER_ENV], "w") as f:  # «я внутри initialize()»
+            f.write(str(os.getpid()))
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+        return True
+
+    def run(self) -> None:
+        while True:
+            time.sleep(3600)
+
+    def should_stop(self) -> bool:
+        return False
+
+    def stop(self) -> None:  # pragma: no cover
+        pass
+
+    def shutdown(self) -> None:  # pragma: no cover
+        pass
+
+
+_SLOW_HOST_CODE = f"""
+import json, time
+from multiprocess_framework.modules.process_manager_module.core.process_registry import ProcessRegistry
+reg = ProcessRegistry(logger=None)
+p = reg.create_and_register("slow", {SLOW_INIT_CHILD_CLASS_PATH!r}, {{}}, "normal")
+p.start()
+print(json.dumps({{"child": p.pid}}), flush=True)
+time.sleep(600)
+"""
+
+
+@pytest.mark.timeout(40)
+def test_parent_sigkill_during_child_initialize(tmp_path):
+    """SIGKILL родителя, пока ребёнок в initialize() → ребёнок исчез за 2.0 с."""
+    import json
+    import signal
+
+    import psutil
+
+    from ._no_orphans_helpers import wait_until_gone
+
+    marker = tmp_path / "in_init"
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [os.getcwd(), env.get("PYTHONPATH", "")]))
+    env[_MARKER_ENV] = str(marker)
+    host = subprocess.Popen(
+        [sys.executable, "-c", _SLOW_HOST_CODE], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env
+    )
+    child_pid: Optional[int] = None
+    try:
+        got: dict = {}
+        reader = threading.Thread(target=lambda: got.update(json.loads(host.stdout.readline() or "{}")), daemon=True)
+        reader.start()
+        reader.join(timeout=20.0)
+        child_pid = got.get("child")
+        assert child_pid, "хост не сообщил pid ребёнка за 20с — окружение сломано"
+        t_end = time.monotonic() + 20.0
+        while not marker.exists() and time.monotonic() < t_end:
+            time.sleep(0.02)
+        assert marker.exists(), "ребёнок не вошёл в initialize() за 20с — окружение сломано"
+        child = psutil.Process(child_pid)
+
+        os.kill(host.pid, signal.SIGKILL)
+        host.wait(timeout=5.0)
+
+        survivors = wait_until_gone([child], deadline_s=2.0)
+        assert survivors == [], f"ребёнок pid={child_pid} пережил SIGKILL родителя во время initialize() > 2.0с"
+    finally:
+        if host.poll() is None:
+            host.kill()
+            host.wait(timeout=5.0)
+        kill_and_reap(child_pid)
