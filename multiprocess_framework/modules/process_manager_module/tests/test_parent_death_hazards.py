@@ -51,8 +51,11 @@ class _Exited(Exception):
     pass
 
 
-def _run_watch_in_thread(parent_pid: int, monkeypatch, deadline_s: float = 3.0):
-    """Запустить _watch_parent в daemon-потоке с подменённым os._exit (бросает _Exited)."""
+def _run_watch_in_thread(parent_pid: int, monkeypatch, deadline_s: float = 3.0, zero_grace: bool = True):
+    """Запустить _watch_parent в daemon-потоке с подменённым os._exit (бросает _Exited).
+
+    zero_grace=False — константа grace НЕ подменяется (тест меряет, что ветка её не ждёт).
+    """
     exits: List[int] = []
     order: List[str] = []
     stop_evt, sys_evt = threading.Event(), threading.Event()
@@ -74,7 +77,8 @@ def _run_watch_in_thread(parent_pid: int, monkeypatch, deadline_s: float = 3.0):
         raise _Exited()
 
     monkeypatch.setattr(pr.os, "_exit", _fake_exit)
-    monkeypatch.setattr(pr, "_PARENT_DEATH_GRACE_S", 0.0)
+    if zero_grace:
+        monkeypatch.setattr(pr, "_PARENT_DEATH_GRACE_S", 0.0)
 
     def _body() -> None:
         try:
@@ -105,10 +109,19 @@ def test_not_direct_child_is_not_armed(monkeypatch):
 
 
 def test_parent_dead_before_watcher_start_exits(monkeypatch):
-    """Родитель умер ДО старта сторожа (getppid уже init) → выход с кодом сторожа."""
-    t, exits, order, stop_evt, sys_evt = _run_watch_in_thread(_dead_pid(), monkeypatch, deadline_s=3.0)
+    """Родитель умер ДО старта сторожа (getppid уже init) → выход с кодом сторожа БЕЗ grace.
+
+    Решение лида (C3): ребёнок ещё ничего не сделал, grace 1.5с здесь только съедает бюджет 2.0с.
+    """
+    dead = _dead_pid()
+    t0 = time.monotonic()
+    t, exits, order, stop_evt, sys_evt = _run_watch_in_thread(dead, monkeypatch, deadline_s=3.0, zero_grace=False)
+    elapsed = time.monotonic() - t0
     assert not t.is_alive(), "сторож не вышел за 3с при заранее мёртвом родителе"
     assert exits == [75], f"ожидался os._exit(75), получено {exits}"
+    # Литерал 0.5: grace 1.5 в этой ветке дал бы >= 1.5.
+    assert elapsed < 0.5, f"ветка «умер до старта» ждала {elapsed:.2f}с — grace не снят"
+    assert stop_evt.is_set() and sys_evt.is_set(), f"события не взведены до выхода: {order}"
     assert pr._PARENT_DEATH_EXIT_CODE == 75
 
 

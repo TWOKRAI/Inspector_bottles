@@ -34,8 +34,9 @@ def _on_parent_death(
     stop_event: Optional[Event],
     system_stop_event: Optional[Event],
     process_name: str,
+    grace_s: float,
 ) -> None:
-    """Родитель умер: взвести стоп, дать штатному lifecycle grace, затем добить.
+    """Родитель умер: взвести стоп, дать штатному lifecycle ``grace_s``, затем добить.
 
     Лог — только emergency_log: LoggerManager мог умереть вместе с родителем.
     ``os._exit`` не выполняет ``finally``, поэтому всё, что должно случиться, — до него.
@@ -46,7 +47,7 @@ def _on_parent_death(
         "%s: родитель pid=%s умер — взвожу stop_event/system_stop_event, принудительный выход через %.1fс",
         process_name,
         parent_pid,
-        _PARENT_DEATH_GRACE_S,
+        grace_s,
     )
     # Каждое событие — в своём try: Manager-прокси/семафор родителя может быть уже битым.
     # system_stop_event — общий путь стопа: гаснут и соседи, их PM всё равно мёртв.
@@ -58,7 +59,8 @@ def _on_parent_death(
         except Exception:  # noqa: BLE001 — лучшее, что можем; дальше всё равно os._exit
             pass
     # Кооперативный ребёнок выйдет сам за это время (lifecycle → stop() → release_queues_at_exit).
-    time.sleep(_PARENT_DEATH_GRACE_S)
+    if grace_s > 0:
+        time.sleep(grace_s)
     os._exit(_PARENT_DEATH_EXIT_CODE)
 
 
@@ -76,8 +78,9 @@ def _watch_parent(
         try:
             os.kill(parent_pid, 0)
         except ProcessLookupError:
-            # Классическая гонка: родитель умер ДО старта сторожа.
-            _on_parent_death(parent_pid, stop_event, system_stop_event, process_name)
+            # Классическая гонка: родитель умер ДО старта сторожа. grace=0: сторож — первая
+            # инструкция run_process_function, ребёнок ещё ничего не сделал, беречь нечего.
+            _on_parent_death(parent_pid, stop_event, system_stop_event, process_name, 0.0)
             return
         except Exception:  # noqa: BLE001 — EPERM и т.п.: процесс существует → не наш прямой родитель
             pass
@@ -96,7 +99,7 @@ def _watch_parent(
     while True:
         time.sleep(_PARENT_POLL_S)
         if os.getppid() != parent_pid:
-            _on_parent_death(parent_pid, stop_event, system_stop_event, process_name)
+            _on_parent_death(parent_pid, stop_event, system_stop_event, process_name, _PARENT_DEATH_GRACE_S)
             return
 
 
