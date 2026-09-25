@@ -4,6 +4,7 @@ ProcessRegistry — реестр процессов ОС + lifecycle + созд�
 Per-process stop_event: остановка одного процесса не трогает остальные.
 """
 
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -211,6 +212,9 @@ class ProcessRegistry:
                 target=run_process_function,
                 # system_stop_event — отдельным аргументом (inheritance), НЕ в bundle custom.
                 args=(class_path, name, stop_event, bundle, self._system_stop_event),
+                # ADR-PMM-032: единственная точка, взводящая сторожа смерти родителя.
+                # os.getpid() здесь — pid PM (Process() создаётся в нём при любом потоке).
+                kwargs={"parent_pid": os.getpid()},
                 name=name,
             )
             if self.logger:
