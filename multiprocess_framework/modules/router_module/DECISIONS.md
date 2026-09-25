@@ -260,7 +260,8 @@ release за lock-free refcount пула.
 1. **Разбор и привязка сессии остаются синхронными в read-потоке**, в поток уходит только
    вызов `on_inbound`. `_bind_session` обязан отработать ДО передачи сообщения: ответ
    обработчика адресуется по уже установленной привязке (D.1), а разрыв соединения снимает её
-   через единственную точку `_drop_clients` — `on_session_closed` звучит ровно один раз.
+   через единственную точку — выход read-loop (`_unregister_clients` → `_await_handlers` →
+   `_finish_drop`, дополнение 2) — `on_session_closed` звучит ровно один раз.
 2. **Один daemon-`threading.Thread` на сообщение** под `threading.BoundedSemaphore` на
    соединение, `_MAX_INFLIGHT_PER_CONNECTION = 8`. Сверх потолка read-loop ждёт слот
    (`acquire(timeout=0.1)` в цикле с проверкой `_running`) — backpressure на сокет, TCP-окно
@@ -293,7 +294,7 @@ release за lock-free refcount пула.
 `tests/test_socket_channel_hol_hazards.py` (обработчик переживает соединение — записи нет;
 `close()` при полном семафоре < 1 с и read-поток выходит; 9-й запрос ждёт, соседнее
 соединение отвечает < 0.5 с; oversize 2 МиБ чанками — пик аллокаций < 256 КиБ; конкурентный
-`_drop_clients` — `on_session_closed` один раз). Смежное в `backend_ctl`: `EventHub`
+`_unregister_clients` — `on_session_closed` один раз; до дополнения 2 — `_drop_clients`). Смежное в `backend_ctl`: `EventHub`
 получил `max_bytes_per_ring` (16 МиБ на кольцо) с вытеснением тем же видимым путём, что
 по maxlen.
 
