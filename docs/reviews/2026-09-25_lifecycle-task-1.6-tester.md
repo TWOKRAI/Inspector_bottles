@@ -167,7 +167,7 @@ assert 0 == 1
 
 ## Коммит
 
-`64f9c022` — `test(framework): [RED] lifecycle 1.6 — приёмка сводки стопа`
+`f721778c` — `test(framework): [RED] lifecycle 1.6 — приёмка сводки стопа`
 
 Boundary: задача 1.6-tester закрыта. Дальше — `/dev:implement Task 1.6` (developer) в
 своём worktree `.claude/worktrees/lso-1.6-dev`, branch `fix/lifecycle-1.6`; при переносе
