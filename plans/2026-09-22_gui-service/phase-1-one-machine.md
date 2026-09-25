@@ -355,6 +355,55 @@ emergency_log-инвентарь от `process_runner.py` lifecycle, `reader_gon
 
 ---
 
+### Task 1.3b — Ответ самому себе разрешается синхронно: `system.shutdown` не теряет ответ
+
+**Level:** Middle+ (Sonnet, `developer`) — одна правка в роутере по готовому вердикту
+**Goal:** ответ на `request()`, адресованный самому процессу, разрешает ожидание на потоке обработчика, до выхода из
+`_dispatch_command`, без собственной system-очереди. Тогда `system.shutdown` (и любой самозапрос, чей обработчик гасит
+процесс) не теряет ответ, если раннер успел погасить `message_processor` раньше разбора очереди.
+
+**Разбор (investigator 2026-09-25, `OPEN_QUESTIONS.md`, запись про `(system-wide)`):** `_cmd_system_shutdown`
+(`process_manager_process.py:650-654`) взводит события на потоке `message_processor`; ответ адресован самому PM
+(`socket_bridge_adapter.py:93-95`, `reply_to=<хост>`) и уходит `send()` в его system-очередь
+(`router_manager.py:1241-1277`); pending разрешается только в `receive()` (`router_manager.py:1427`). Раннер PM
+опрашивает стоп раз в 100 мс (`process_runner.py:34-45`); проснулся в первые ~10 мс → `stop_all_workers()` гасит
+поток до разбора → адаптер двери висит в `request(timeout=9.5)` → через ~1,1 с EOF. BASE `02d1db2c` 3/100,
+HEAD `c9ae9b06` 5/100; инъекция `sleep(0.15)` после взвода событий → 5/5 потерь.
+
+**Вердикт cto 2026-09-25:** место — `RouterManager.reply_to_request`: если адресат ответа — сам этот роутер
+(`process.name or router_id`) и pending ещё ждёт, разрешить его сразу (`_resolve_pending`) и не класть ответ в
+очередь; иначе — прежний `send()` (чужой адресат, «опоздавшая почта» после снятия pending). **Не в `send()`**: там
+едут события и broadcast. Проверено cto на стенде: инъекция 5/5 → 0/5; натурально 20/20, медиана dt 19 → 10 мс;
+`router_module/tests` 478 passed. **Отвергнуто:** порядок гашения в `ProcessModule.stop()` (это lifecycle Ф3 Task 3.1,
+«остановка как протокол» — фаза, не хотфикс); ожидание в двери (ответ не появится, стоп +9,5 с).
+
+**Files:**
+- `multiprocess_framework/modules/router_module/core/router_manager.py` — `reply_to_request`.
+- `multiprocess_framework/modules/router_module/DECISIONS.md` — ADR-RTR-013 (+ `python -m scripts.sync`).
+- `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py` — только комментарий
+  в `finally` `shutdown()` (~3488: «закрытие первым шагом теряло ответ ~1 из 10, Task 1.1» — причина была не дверь).
+- Тесты: `router_module/tests/test_self_reply_*`; живой `backend_ctl/tests/test_system_shutdown_live.py` (не менять).
+- **Не трогать:** `process_runner.py`, `run_process_function`, `spawner.py` (lifecycle Task 1.5 параллельно),
+  порядок `ProcessModule.stop()`.
+
+**Acceptance criteria:**
+- [ ] Unit: роутер с `process.name = X`; `request()` к `targets=[X]` из daemon-потока с дедлайном; обработчик отвечает
+      `reply_to_request` в единственном вызове `receive()` — pending разрешён без второго `receive()`, ответ несёт
+      `success`/`result`. Без правки — красный по дедлайну, не зависание.
+- [ ] Unit: ответ чужому адресату — `_resolve_pending` не зовётся, `send()` зовётся; опоздавший ответ (pending снят) —
+      прежний `send()`.
+- [ ] `request_async` к себе — колбэк ровно один раз.
+- [ ] Живьём: инъекция `sleep(0.15)` после взвода событий в `_cmd_system_shutdown` — 0/5 потерь (было 5/5);
+      `test_system_shutdown_live.py` ×6 без `BackendUnavailable`.
+- [ ] `router_module/tests` зелёные целиком (было 478).
+
+**Out of scope:** порядок стопа процессов; счётчики `sent_ok`/`received` на самоответе (не растут — записать в ADR);
+Linux/Orin.
+**Dependencies:** нет; с lifecycle Task 1.5 файлов не делит — сливается независимо.
+**Module contract:** impl-only.
+
+---
+
 ### Task 1.4 — Автономный Пульт: хост `apps/pult/` + пакет вкладок по имени, без дерева
 
 > **Ред. 2 (2026-09-23), решения владельца «Пульт — отдельный сервис», «разбивать на сервисы и из них

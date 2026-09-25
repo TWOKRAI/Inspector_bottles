@@ -20,9 +20,10 @@
 | register_service | registry.py | Готов | Декоратор регистрации класса в singleton при импорте |
 | DiscoveryResult | scanner.py | Готов | dataclass: loaded, failed, total |
 | discover | scanner.py | Готов | Рекурсивный поиск service.py через importlib |
+| ServiceHost | host.py | Готов (gui-service 1b.5, ADR-SVC-004) | Команды service.* : плоские ответы, start в потоке + pending, замок на сервис, ленивый discover |
 | ServiceStateAdapter | service_state_adapter.py | Готов (Task 3.5, c3b6c89) | Двусторонняя sync Registry ↔ state.services.* |
 
-**Тестов:** 91 (53 framework: 26 registry + 15 scanner + 12 adapter; 25 prototype tabs/services + 13 lifecycle presenter)
+**Тестов (прогон 2026-09-25):** `service_module/tests` — 60 (26 registry + 15 scanner + 7 host_acceptance + 12 host_hazards); prototype `tabs/services/tests` — 43 (24 services_tab + 15 staleness + 4 cross_tab); `adapters/tests/test_remote_service_manager_acceptance.py` — 2. Тесты `ServiceStateAdapter` в этот пересчёт не входили.
 
 ---
 
@@ -34,6 +35,7 @@
 | | ServiceLifecycle (StrEnum) | Готов |
 | **registry.py** | ServiceRegistry singleton + @register_service | Готов |
 | **scanner.py** | discover(*dirs) → DiscoveryResult | Готов |
+| **host.py** | ServiceHost на хабе (`orchestrator.py`), клиент `RemoteServiceManager` | Готов (1b.5); stop во время старта в полёте — отказ `start_in_progress` (ADR-SVC-004) |
 | **Services/webcam_camera/service.py** | @register_service добавлен | Готов |
 | **Services/sql/service.py** | @register_service | Готов |
 | **Services/hikvision_camera/service.py** | @register_service | Готов |
