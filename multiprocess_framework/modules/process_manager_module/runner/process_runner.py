@@ -210,6 +210,7 @@ def run_process_function(
     system_stop_event: Optional[Event] = None,
     new_session: bool = False,
     parent_pid: Optional[int] = None,
+    exit_report: Optional[Any] = None,
 ):
     """
     Top-level функция для запуска процесса внутри OS-процесса.
@@ -220,6 +221,11 @@ def run_process_function(
     parent_pid: pid ProcessManager'а (ставит только ``ProcessRegistry._create_process``).
         Не None → POSIX-сторож смерти родителя (ADR-PMM-032): ребёнок не переживает PM.
         None → не сторожим (сам PM от spawner'а, SRM-режим тестов).
+
+    exit_report: слот разделяемой памяти (ADR-PMM-033, Task 1.6) — [reported, released,
+        buffered_dropped]; пишется в ``finally`` итогом ``release_queues_at_exit``, PM
+        читает его в ``shutdown()`` через ``ProcessRegistry.exit_report(name)``. None —
+        не сторожим (SRM-mode тестов, процесс без ``_create_process``).
 
     new_session: POSIX — сделать setsid() (стать лидером новой сессии/группы),
         чтобы ВСЕ потомки этого процесса попали в одну process group. Тогда
@@ -367,6 +373,17 @@ def run_process_function(
                 res = shared_resources.queue_registry.release_queues_at_exit(
                     process_name, system_stop=sys_evt is not None and sys_evt.is_set()
                 )
+                # Task 1.6 (ADR-PMM-033): итог — в слот PM. Свой try/except: сбой записи
+                # слота вторичен к самому отпуску очередей и не должен маскировать/дублировать
+                # emergency_log ниже. ``reported`` — ПОСЛЕДНИМ: ребёнок, убитый посреди записи
+                # (kill между строками), обязан читаться PM как «не знаю», а не как ложный ноль.
+                if exit_report is not None:
+                    try:
+                        exit_report[1] = res["released"]
+                        exit_report[2] = res["buffered_dropped"]
+                        exit_report[0] = 1
+                    except Exception:  # noqa: BLE001 — слот вторичен к самому отпуску очередей
+                        pass
                 # Аварийный выход, а не ``log``: к этому моменту LoggerManager процесса уже
                 # остановлен, и запись через вид не доходила ни до одного приёмника (ревью
                 # Task 1.2). Тихо, если отпускать было нечего — не +1 строка на процесс.
@@ -381,3 +398,12 @@ def run_process_function(
                     )
             except Exception as e:  # noqa: BLE001 — хук выхода не роняет выход
                 emergency_log(__name__, "error", "%s: queue release at exit failed: %r", process_name, e)
+        elif exit_report is not None:
+            # shared_resources нет (SRM-mode без bundle) — отпускать нечего, но хук ДОШЁЛ,
+            # и PM обязан видеть это как «знаем: 0/0», а не как «умер до finally».
+            try:
+                exit_report[1] = 0
+                exit_report[2] = 0
+                exit_report[0] = 1
+            except Exception:  # noqa: BLE001 — слот вторичен
+                pass

@@ -8,7 +8,7 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from multiprocessing import Event, Process
+from multiprocessing import Event, Process, RawArray
 
 from .bundle_contract import build_bundle
 from ..runner import run_process_function
@@ -49,6 +49,10 @@ class ProcessRegistry:
         # успешного initialize() → барьер PM видит готовность НЕМЕДЛЕННО, не
         # message-loop'ом (дедлок message_processor исключён). См. DECISIONS.md.
         self._ready_events: Dict[str, Event] = {}
+        # Task 1.6 (ADR-PMM-033): слот разделяемой памяти на ВОПЛОЩЕНИЕ — итог хука
+        # выхода ребёнка (release_queues_at_exit) для PM. Свежий на каждый (пере)спавн,
+        # как и ready_event: старый инстанс не может подложить отчёт новому.
+        self._exit_reports: Dict[str, Any] = {}
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
         self._system_stop_event: Optional[Event] = system_stop_event
@@ -78,6 +82,9 @@ class ProcessRegistry:
         # создаст СВЕЖИЙ event (новый объект, а не .clear() — у старого ребёнка
         # могла остаться ссылка на прежний).
         self._ready_events.pop(name, None)
+        # Task 1.6: снять ссылку на слот отчёта выхода — тем же доводом, что у ready_event:
+        # свежий слот на каждый спавн, а не переживший .clear() старый.
+        self._exit_reports.pop(name, None)
 
     def _set_reader_gone(self, name: str, gone: bool) -> None:
         """ADR-PMM-030: взвести/снять метку «читатель ушёл» на очередях ``name``.
@@ -111,6 +118,25 @@ class ProcessRegistry:
         читают ``is_set()`` для раннего выхода без ожидания settle-window.
         """
         return self._ready_events.get(name)
+
+    def exit_report(self, name: str) -> Dict[str, Any]:
+        """Task 1.6 (ADR-PMM-033): итог хука выхода ребёнка ``name`` — слот разделяемой памяти.
+
+        Слот — [reported(0/1), released, buffered_dropped]; ``runner`` пишет ``reported``
+        ПОСЛЕДНИМ (см. ``run_process_function``), поэтому ребёнок, умерший посреди записи,
+        читается как «не знаю», а не как ложные нулевые числа. Нет слота (имя не создавалось
+        через ``_create_process``) или ``reported`` не выставлен — то же «не знаю».
+        Никогда не бросает: зовётся из ``PM.shutdown()``, где отказ недопустим.
+        """
+        slot = self._exit_reports.get(name)
+        if slot is None:
+            return {"released": 0, "buffered_dropped": 0, "reported": False}
+        try:
+            if not int(slot[0]):
+                return {"released": 0, "buffered_dropped": 0, "reported": False}
+            return {"released": int(slot[1]), "buffered_dropped": int(slot[2]), "reported": True}
+        except Exception:  # noqa: BLE001 — отчёт вторичен к самой остановке
+            return {"released": 0, "buffered_dropped": 0, "reported": False}
 
     def _create_process(
         self,
@@ -208,13 +234,21 @@ class ProcessRegistry:
                 routing_meta=routing_meta,
             )
 
+            # Task 1.6 (ADR-PMM-033): слот отчёта выхода — свежий на ВОПЛОЩЕНИЕ, как и
+            # ready_event/stop_event выше. RawArray, не Value: три поля одним блоком,
+            # без отдельного lock — пишет ровно один процесс (runner этого ребёнка),
+            # читает PM уже ПОСЛЕ подтверждённой смерти (гонки записи нет).
+            exit_report_slot = RawArray("q", 3)
+            self._exit_reports[name] = exit_report_slot
+
             process = Process(
                 target=run_process_function,
                 # system_stop_event — отдельным аргументом (inheritance), НЕ в bundle custom.
                 args=(class_path, name, stop_event, bundle, self._system_stop_event),
                 # ADR-PMM-032: единственная точка, взводящая сторожа смерти родителя.
                 # os.getpid() здесь — pid PM (Process() создаётся в нём при любом потоке).
-                kwargs={"parent_pid": os.getpid()},
+                # ADR-PMM-033: exit_report — тем же путём (inheritance), что и parent_pid.
+                kwargs={"parent_pid": os.getpid(), "exit_report": exit_report_slot},
                 name=name,
             )
             if self.logger:
@@ -260,6 +294,7 @@ class ProcessRegistry:
         else:
             self._stop_events.pop(name, None)
             self._ready_events.pop(name, None)
+            self._exit_reports.pop(name, None)
         return process
 
     def start_all(self) -> None:

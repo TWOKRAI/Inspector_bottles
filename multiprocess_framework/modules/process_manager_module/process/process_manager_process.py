@@ -3459,6 +3459,43 @@ class ProcessManagerProcess(ProcessModule):
             placed.update(wave)
         return waves, False
 
+    def _publish_stop_summary(self, stop_results: dict[str, bool]) -> None:
+        """Task 1.6 (ADR-PMM-033): ОДНА запись сводки стопа в стор наблюдаемости.
+
+        Собирает ``ProcessRegistry.exit_report(name)`` по каждому имени из ``stop_results``
+        (этот ``stop_all`` остановил именно их) и публикует ОДНИМ логом — WARNING при
+        `released>0`/`buffered_dropped>0`/`reported=False` у кого-либо, иначе INFO.
+
+        Зовётся из ``shutdown()`` ДО ``super().shutdown()``/закрытия backend_ctl-канала:
+        логгер PM (и его tap в стор) ещё жив только на этом отрезке. Обёрнуто целиком —
+        публикация сводки НЕ имеет права сорвать сам shutdown.
+
+        ``extra["context"]["stop_summary"]``, не ``extra["stop_summary"]`` (поправка
+        контракта 2026-09-25 по эскалации developer): ``ObservableMixin``/стор кладут
+        структурные kwargs ЛЮБОЙ записи PM в ``extra.context`` — это не решение этой
+        задачи, а существующее устройство ``StoreTapChannel`` (см. ADR-PMM-033).
+        """
+        try:
+            summary = {name: self._process_registry.exit_report(name) for name in stop_results}
+            bad_names = sorted(
+                name
+                for name, entry in summary.items()
+                if entry.get("released", 0) > 0
+                or entry.get("buffered_dropped", 0) > 0
+                or entry.get("reported") is False
+            )
+            total_released = sum(entry.get("released", 0) for entry in summary.values())
+            total_dropped = sum(entry.get("buffered_dropped", 0) for entry in summary.values())
+            msg = f"stop summary: released={total_released}, buffered_dropped={total_dropped}, children={len(summary)}"
+            if bad_names:
+                msg += f", not reported/lost: {bad_names}"
+            if bad_names:
+                self._log_warning(msg, stop_summary=summary)
+            else:
+                self._log_info(msg, stop_summary=summary)
+        except Exception as e:  # noqa: BLE001 — публикация сводки не имеет права сорвать shutdown
+            self._log_error(f"shutdown: публикация сводки стопа упала: {e}")
+
     def shutdown(self) -> bool:
         """
         Завершение с явным порядком:
@@ -3480,6 +3517,7 @@ class ProcessManagerProcess(ProcessModule):
                         f"shutdown: дети ВЫЖИЛИ после остановки: {survivors} — смерть не подтверждена "
                         f"(ручное вмешательство/утечка процессов)"
                     )
+                self._publish_stop_summary(stop_results)
             if self._console_manager is not None:
                 if hasattr(self._console_manager, "close_all"):
                     self._console_manager.close_all()

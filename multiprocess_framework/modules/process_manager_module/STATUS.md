@@ -25,6 +25,10 @@
 - [x] Этап 7: Unit-тесты написаны и проходят (8 файлов)
 - [x] Этап 8: README и interfaces.py готовы (ISystemLauncher, IProcessManagerProcess, IProcessRegistry)
 
+## Обновление 2026-09-25 (Task 1.6 плана `lifecycle-stop-ownership`, ADR-PMM-033)
+
+- Слот `_exit_reports`/`exit_report()` в `ProcessRegistry` + запись из `process_runner.py` — механизм подтверждён живым стендом; публикация `PM.shutdown()` → стор наблюдаемости **BLOCKED**: `ProcessModule.stop()` закрывает store-tap (`_flush_observability()`) ДО вызова `shutdown()`, см. ADR-PMM-033 «Найденный по ходу блокер».
+
 ## Обновление 2026-08-16 (Task 3.4 плана `telemetry-stage6`, ADR-PMM-028)
 
 - **Адресная runtime-правка телеметрии переживает respawn своего адресата** — разворот прежнего
