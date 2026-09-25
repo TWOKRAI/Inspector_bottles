@@ -1446,7 +1446,8 @@ boot ребёнка, `kill -9` PM под `BackendHarness`.
 
 ## ADR-PMM-033: Итог хука выхода — слот разделяемой памяти; сводка стопа — лог PM (Task 1.6, 2026-09-25)
 
-**Статус:** принято (механизм), приёмка REDS **BLOCKED** — см. «Найденный по ходу блокер» ниже
+**Статус:** принято — механизм слота (пункты 1-3) и публикация сводки (пункт 4, включая порядок
+жизненного цикла ниже) реализованы, все 3 живых REDS зелёные
 **Дата:** 2026-09-25
 **Refs:** [plans/lifecycle-stop-ownership.md](../../../plans/lifecycle-stop-ownership.md) (Task 1.6)
 
@@ -1498,29 +1499,33 @@ boot ребёнка, `kill -9` PM под `BackendHarness`.
 механизм; заводить второй такой маркер под `stop_summary` — правка `channel_routing_module` ради одной
 записи, чужой модуль, вне `FILES` этой задачи. `store_tap.py`/`record_display.py` НЕ трогались.
 
-### Найденный по ходу блокер (2026-09-25, разработчик) — REDS не проходят на живом стенде
+### Порядок жизненного цикла — хук `_before_observability_teardown` (2026-09-25, продолжение)
 
-Три живых REDS-теста (`backend_ctl/tests/test_stop_summary_live.py`) на этой ветке — **красные**, хотя
-механизм слота (пункты 1-3 выше) подтверждён и корректен (проверено stderr-строками живого прогона:
-`processor: queues released to gone readers: 1, buffered dropped: 38` совпадает с числами, которые
-`exit_report("processor")` отдаёт PM). Причина — **не** контракт записи (он поправлен), а **порядок
-вызовов жизненного цикла**: `ProcessModule.stop()` (`process_module/core/process_module.py:1169-1176`)
-останавливает воркеров, затем зовёт `self._flush_observability()` — который **снимает и ЗАКРЫВАЕТ
-store-tap** (`unwire_observability_store`, `self._observability_store = None`) — и ТОЛЬКО ПОСЛЕ этого
-зовёт `self.shutdown()` (диспетчеризуется в `ProcessManagerProcess.shutdown()`, наше переопределение, где
-и живёт `_publish_stop_summary`). Эмпирически подтверждено (`print` диагностика, снята перед коммитом):
-`self._observability_store is None` уже в момент вызова `_publish_stop_summary` — **оба** раза (`shutdown()`
-зовётся дважды: изнутри `ProcessModule.stop()`, и повторно из `finally` `run_process_function`, поскольку
-PM запускается той же `run_process_function`, что и дети — `spawner.py:120`). Лог-вызов при этом НЕ падает
-(логгер жив, строка видна в stderr/консоли), но `_emit_to_taps` не находит ни одного tap'а на `logger`
-после `unwire`, и запись НЕ доезжает до `observability.db` — независимо от формы `extra`.
+Механизм слота (пункты 1-3 выше) был подтверждён живым стендом, но публикация (пункт 4) изначально не
+доезжала до `observability.db` — **не** из-за контракта записи (он поправлен выше), а из-за **порядка
+вызовов**: `ProcessModule.stop()` останавливает воркеров, затем зовёт `self._flush_observability()`,
+который **снимает и ЗАКРЫВАЕТ store-tap** (`self._observability_store = None`), и только ПОСЛЕ этого —
+`self.shutdown()` (где и жила `_publish_stop_summary`). Эмпирически подтверждено (диагностическая печать,
+снята перед коммитом): `self._observability_store is None` уже в момент вызова `_publish_stop_summary`.
 
-Вывод: посылка брифа «Публикация — логом PM в `shutdown()`... логгер PM ещё жив и пишет в стор» —
-опровергнута для СТОРА конкретно (логгер жив, стор-tap — нет); это тот же класс ошибки, что и с формой
-`extra` — контракт задачи описывал желаемое поведение, а не измеренное. Решение о том, ГДЕ теперь звать
-`_publish_stop_summary` (до `_flush_observability()` в `stop()` — требует либо переопределения `stop()` в
-PM, либо переноса `stop_all()` детей раньше по времени, оба варианта трогают порядок, который Task
-1.1-1.5 намеренно тюнили под тайминги) — эскалировано `teamlead`, не решено разработчиком в одиночку.
+**Решение (лид, эскалация закрыта в тот же день):**
+
+1. `ProcessModule.stop()` получил no-op хук-шаблон `_before_observability_teardown()`, вызываемый МЕЖДУ
+   остановкой воркеров и `_flush_observability()` — единственная точка, где store-tap ещё жив, а воркеры
+   уже остановлены. Любой другой процесс, не переопределяющий хук, ведёт себя бит-в-бит как раньше.
+2. `ProcessManagerProcess` переопределяет хук методом `_stop_children_once()` — извлечённым из старого
+   тела `shutdown()` блоком (`ProcessMonitor.stop` → `ProcessRegistry.stop_all` → лог о выживших →
+   `_publish_stop_summary`). `shutdown()` тоже зовёт `_stop_children_once()` — это покрывает прямые
+   вызовы `shutdown()` без `stop()` (например, runner'овский `finally` на ошибке до `stop()`).
+3. Флаг `self._children_stopped` (инициализирован `False` в `__init__`, читается через `getattr(self,
+   "_children_stopped", False)` — `shutdown()` может выполняться на частично сконструированном PM) делает
+   метод идемпотентным: PM запускается той же `run_process_function`, что и дети (`spawner.py:120`), и
+   `shutdown()` зовётся дважды — из `ProcessModule.stop()` (через хук) и повторно из `finally`
+   `run_process_function`. Второй вызов теперь no-op для уже остановленных детей вместо повторного
+   `stop_all` по мёртвым процессам.
+
+Результат: `stop_all` и публикация сводки выполняются РОВНО один раз за жизнь PM, пока store-tap ещё жив.
+Три живых REDS (`backend_ctl/tests/test_stop_summary_live.py`) — зелёные.
 
 ### Отвергнуто
 
@@ -1536,3 +1541,8 @@ PM, либо переноса `stop_all()` детей раньше по врем
 - Слот на воплощение переживает `stop_process`/`restart` штатно (снимается только при `remove_process`/
   провале спавна) — но `exit_report()` читает его лишь в момент `shutdown()`, поэтому промежуточные
   чтения вне этого пути не планировались и не проверялись.
+- Побочный эффект переноса `stop_all()`+логов в хук `_before_observability_teardown`: существующий
+  `self._log_error("shutdown: дети ВЫЖИЛИ...")` (Ж-4/RS-3, старше этой задачи) и логи `stop_many` теперь
+  ТОЖЕ доезжают до `observability.db` на пути `ProcessModule.stop()` — раньше store-tap был закрыт к
+  моменту их вызова, как и для `_publish_stop_summary`. Заявлено по чтению кода (тот же путь до store-tap,
+  тот же порядок), НЕ измерено живым репро с выжившим ребёнком — вне задачи 1.6.

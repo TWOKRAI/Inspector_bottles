@@ -271,3 +271,91 @@ PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
   задачи, но релевантная находка для teamlead).
 - Диагностический скрипт `/tmp/stopsummary_diag/*.py` — временный, не в репозитории, но команда для
   воспроизведения (см. выше «репродукция» Части 1 и «DIAG» здесь) достаточна для повтора кем угодно.
+
+---
+
+## Часть 3 — ordering fix (2026-09-25, второй разработчик, тот же день)
+
+**Роль:** developer · **Ветка:** fix/lifecycle-1.6, HEAD принят на `10d90590`, DESIGN дал лид
+(хук в `ProcessModule.stop`, `_stop_children_once` в PM, run-once флаг) — реализация буквально по нему.
+
+### Реализовано (FILES 1-3, 4-5 продолжение)
+
+1. `process_module.py:1172-1201` — `stop()` зовёт новый no-op хук `_before_observability_teardown()`
+   МЕЖДУ `worker_manager.stop_all_workers()` и `_flush_observability()`. Другие процессы (не
+   переопределяющие хук) ведут себя бит-в-бит как раньше — проверено полным радиусом `process_module/tests`.
+2. `process_manager_process.py` — `__init__` получил `self._children_stopped = False`; старый инлайн-блок
+   `shutdown()` (`ProcessMonitor.stop` → `stop_all` → лог о выживших → `_publish_stop_summary`) вынесен в
+   `_stop_children_once()`, guard — `getattr(self, "_children_stopped", False)` (комментарий про частично
+   сконструированный PM — по образцу существующего в `finally` `shutdown()`). PM переопределяет хук вызовом
+   `_stop_children_once()`; `shutdown()` тоже зовёт `_stop_children_once()` (покрывает прямой вызов
+   `shutdown()` без `stop()`, TRAPS брифа №1). `_publish_stop_summary` docstring поправлен — зовётся из
+   `_stop_children_once()`, не буквально из `shutdown()`.
+3. `test_stop_summary_hazards.py` — 2 новых hazard-теста автора: (e) минимальный PM-стенд (`__new__` +
+   фейк-registry на границе `stop_all`/`exit_report`, `ProcessModule.shutdown` заглушен) — хук + повторный
+   `shutdown()` → `stop_all` и лог сводки РОВНО по одному разу; (f) объект с РЕАЛЬНЫМИ bound-методами
+   `ProcessModule.stop`/`_flush_observability` (без наследования, только нужные атрибуты) — доказывает,
+   что хук видит `_observability_store is not None` ДО его закрытия внутри самого `stop()`.
+4. `DECISIONS.md` (ADR-PMM-033) — статус «BLOCKED» снят, раздел «Найденный по ходу блокер» заменён
+   решением (хук/`_stop_children_once`/флаг); «Последствия» дополнены побочным эффектом: `self._log_error`
+   про выживших детей и логи `stop_many` теперь тоже доезжают до стора тем же путём — заявлено ПО ЧТЕНИЮ
+   кода, не измерено живым репро с выжившим ребёнком (вне области Task 1.6). `python -m scripts.sync`
+   прогнан — верхнеуровневый `DECISIONS.md` не изменился (заголовок ADR тот же, менялось содержимое).
+5. `STATUS.md` — строка Task 1.6 переписана: BLOCKED снят, все 3 живых REDS зелёные.
+
+### TESTS (команды и итог, дословно)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_stop_summary_live.py --backend-live -q --tb=short
+```
+→ `3 passed in 22.90s`
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py -q --tb=short
+```
+→ `19 passed in 2.12s` (17 прежних/закреплённых + 2 новых hazard e/f)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests -q --tb=line
+```
+→ `998 passed, 1 skipped in 120.36s` (радиус модуля, было 996 — +2 новых hazard, регрессий нет)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_module/tests -q --tb=line
+```
+→ `3003 passed, 1 xfailed in 30.94s` (радиус чист; два `PytestUnhandledThreadExceptionWarning` — из
+существующих diag-thread тестов `test_process_hooks_acceptance.py`, не связаны с этой правкой)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_system_shutdown_live.py --backend-live -q --tb=short
+```
+→ `2 passed in 80.61s` — Task 1.1 регрессия чиста, известный флейк `test_system_shutdown_children_exit_hook_in_system_stop_mode` в этом прогоне зелёный (не гонялся повторно).
+
+```
+PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
+```
+→ `Ошибок нет! Предупреждений нет!` (после правок DECISIONS.md/STATUS.md, включая раздел 6)
+
+### Что я интерпретировал, а не буквально следовал
+
+- Тест (e) не зовёт настоящий `ProcessModule.stop()` целиком (это потребовало бы полной обвязки
+  observability/worker_manager, вне области PM-файла) — зовёт `_before_observability_teardown()` напрямую
+  (то, что `stop()` буквально вызывает между остановкой воркеров и дренажом) + `shutdown()`. Ordering-
+  свойство «хук работает, пока стор жив» проверяет отдельно тест (f) на реальном `ProcessModule.stop`.
+- В (e) `ProcessModule.shutdown` заглушен `patch.object` — граница теста: код PM (`_stop_children_once`,
+  `_publish_stop_summary`), не полный teardown `ProcessModule` (вне FILES/OUT OF SCOPE).
+
+### Что я оставляю открытым / ненадёжным
+
+- Побочный эффект (лог о выживших детях и `stop_many`-логи теперь тоже доезжают до стора) — заявлен по
+  чтению кода в ADR, НЕ измерен живым репро с реально выжившим ребёнком. Кандидат на отдельную проверку.
+- Живой стенд Task 1.1 прогнан один раз (2 passed за 80.61 с) — известный флейк не переиспытывался
+  повторно (бриф просил репортировать результат, не гонять до отказа).
+- Тесты (e)/(f) — юнит-уровень на минимальных стендах (стенд `_ObservabilityOrderProbe` собирает bound-
+  методы напрямую с класса `ProcessModule`, без наследования) — не полноценный live-прогон; live-доказательство
+  уже даёт `test_stop_summary_live.py` (3 зелёных).
+- Не проверял влияние правки на `restart_process`/`stop_process(None)` — по OUT OF SCOPE брифа и по чтению
+  кода эти пути не проходят через `_stop_children_once`/хук (они публикацию сводки не делают, ADR-PMM-033
+  «Последствия»), но отдельного живого репро не делал.
+
+Boundary: task closed. /compact (focus: files + tests + plan path).

@@ -27,7 +27,7 @@
 
 ## Обновление 2026-09-25 (Task 1.6 плана `lifecycle-stop-ownership`, ADR-PMM-033)
 
-- Слот `_exit_reports`/`exit_report()` в `ProcessRegistry` + запись из `process_runner.py` — механизм подтверждён живым стендом; публикация `PM.shutdown()` → стор наблюдаемости **BLOCKED**: `ProcessModule.stop()` закрывает store-tap (`_flush_observability()`) ДО вызова `shutdown()`, см. ADR-PMM-033 «Найденный по ходу блокер».
+- Слот `_exit_reports`/`exit_report()` в `ProcessRegistry` + запись из `process_runner.py` — механизм подтверждён живым стендом; публикация `PM.shutdown()` → стор наблюдаемости — сделана: хук `ProcessModule._before_observability_teardown()` + `PM._stop_children_once()` останавливают детей и публикуют сводку ДО закрытия store-tap, см. ADR-PMM-033. Все 3 живых REDS (`backend_ctl/tests/test_stop_summary_live.py`) зелёные.
 
 ## Обновление 2026-08-16 (Task 3.4 плана `telemetry-stage6`, ADR-PMM-028)
 

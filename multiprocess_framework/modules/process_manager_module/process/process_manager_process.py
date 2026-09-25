@@ -134,6 +134,12 @@ class ProcessManagerProcess(ProcessModule):
         # Queue, а сырой mp.Event на Windows-spawn пиклится только через inheritance).
         self._system_stop_event = self.shared_resources.get_system_stop_event() if self.shared_resources else None
 
+        # Task 1.6 (ADR-PMM-033): PM запускается через тот же раннер, что и дети,
+        # поэтому shutdown() зовётся дважды (из stop() и повторно из finally
+        # run_process_function) — флаг делает остановку детей+публикацию сводки
+        # выполняемой ровно один раз за жизнь PM.
+        self._children_stopped = False
+
         queue_registry = self._resolve_queue_registry()
 
         platform_adapter = get_platform_adapter()
@@ -3466,9 +3472,10 @@ class ProcessManagerProcess(ProcessModule):
         (этот ``stop_all`` остановил именно их) и публикует ОДНИМ логом — WARNING при
         `released>0`/`buffered_dropped>0`/`reported=False` у кого-либо, иначе INFO.
 
-        Зовётся из ``shutdown()`` ДО ``super().shutdown()``/закрытия backend_ctl-канала:
-        логгер PM (и его tap в стор) ещё жив только на этом отрезке. Обёрнуто целиком —
-        публикация сводки НЕ имеет права сорвать сам shutdown.
+        Зовётся из ``_stop_children_once()`` (Task 1.6: через хук ``_before_observability_teardown``
+        из ``ProcessModule.stop()``, либо напрямую из ``shutdown()`` — см. докстринг обоих) ДО того,
+        как ``_flush_observability()`` снимет store-tap: логгер PM (и его tap в стор) ещё жив только
+        на этом отрезке. Обёрнуто целиком — публикация сводки НЕ имеет права сорвать сам shutdown.
 
         ``extra["context"]["stop_summary"]``, не ``extra["stop_summary"]`` (поправка
         контракта 2026-09-25 по эскалации developer): ``ObservableMixin``/стор кладут
@@ -3496,28 +3503,50 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as e:  # noqa: BLE001 — публикация сводки не имеет права сорвать shutdown
             self._log_error(f"shutdown: публикация сводки стопа упала: {e}")
 
+    def _before_observability_teardown(self) -> None:
+        """Task 1.6 (ADR-PMM-033): хук ``ProcessModule.stop()`` — вызывается ПОСЛЕ остановки
+        воркеров PM, но ДО ``_flush_observability()`` (закрытие store-tap). Здесь и только здесь
+        гарантированно ещё жив store-tap для пути ``stop()`` (обычный graceful teardown)."""
+        self._stop_children_once()
+
+    def _stop_children_once(self) -> None:
+        """Task 1.6 (ADR-PMM-033): остановка детей + публикация сводки — РОВНО один раз за
+        жизнь PM (флаг ``_children_stopped``, инициализирован в ``__init__``, читается через
+        ``getattr`` — см. комментарий ниже про частично сконструированный PM).
+
+        Зовётся из двух мест: ``ProcessModule.stop()`` (через хук ``_before_observability_teardown``,
+        store-tap ещё жив — сводка долетает) и ``shutdown()`` напрямую (путь без ``stop()``, например
+        runner'овский finally на ошибке). Флаг делает второй вызов no-op'ом для уже остановленных детей.
+        """
+        # getattr: shutdown/этот метод может вызываться на частично сконструированном PM.
+        if getattr(self, "_children_stopped", False):
+            return
+        self._children_stopped = True
+        self._process_monitor.stop()
+        shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
+        # Ж-4 (RS-3): shutdown ОБЯЗАН подтвердить смерть ВСЕХ детей. stop_all теперь
+        # возвращает карту {name: stopped} (confirmed-death путь). Выживших — громко.
+        stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
+        if isinstance(stop_results, dict):
+            survivors = sorted(n for n, ok in stop_results.items() if not ok)
+            if survivors:
+                self._log_error(
+                    f"shutdown: дети ВЫЖИЛИ после остановки: {survivors} — смерть не подтверждена "
+                    f"(ручное вмешательство/утечка процессов)"
+                )
+            self._publish_stop_summary(stop_results)
+
     def shutdown(self) -> bool:
         """
         Завершение с явным порядком:
-            1. ProcessMonitor
-            2. ProcessRegistry.stop_all (дочерние процессы)
-            3. ConsoleManager
-            4. super().shutdown() (WorkerManager, RouterManager и т.д.)
+            1. _stop_children_once() — ProcessMonitor.stop + ProcessRegistry.stop_all +
+               публикация сводки стопа (Task 1.6: уже могло отработать раньше через
+               ``_before_observability_teardown`` на пути ``ProcessModule.stop()`` — тогда no-op)
+            2. ConsoleManager
+            3. super().shutdown() (WorkerManager, RouterManager и т.д.)
         """
         try:
-            self._process_monitor.stop()
-            shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
-            # Ж-4 (RS-3): shutdown ОБЯЗАН подтвердить смерть ВСЕХ детей. stop_all теперь
-            # возвращает карту {name: stopped} (confirmed-death путь). Выживших — громко.
-            stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
-            if isinstance(stop_results, dict):
-                survivors = sorted(n for n, ok in stop_results.items() if not ok)
-                if survivors:
-                    self._log_error(
-                        f"shutdown: дети ВЫЖИЛИ после остановки: {survivors} — смерть не подтверждена "
-                        f"(ручное вмешательство/утечка процессов)"
-                    )
-                self._publish_stop_summary(stop_results)
+            self._stop_children_once()
             if self._console_manager is not None:
                 if hasattr(self._console_manager, "close_all"):
                     self._console_manager.close_all()
