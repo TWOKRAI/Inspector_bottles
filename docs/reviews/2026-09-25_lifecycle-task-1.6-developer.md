@@ -359,3 +359,100 @@ PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
   «Последствия»), но отдельного живого репро не делал.
 
 Boundary: task closed. /compact (focus: files + tests + plan path).
+
+## Часть 4 — ревью it.1 (REQUEST_CHANGES), два фикса + два честных исправления (2026-09-26, третий разработчик)
+
+**Ревью:** `docs/reviews/2026-09-26_lifecycle-task-1.6-review.md`, major-находка — хук в `stop()` зовётся
+БЕЗ `try`, а флаг `_children_stopped` ставится ДО `stop_all`: исключение в хуке (или переопределении
+наследника) отменяло и финальный `_flush_observability()`, и шанс runner'а повторить `stop_all` из
+`finally`. Репро ведущего: `stop() raised`, `store still wired = True`, `stop_all calls total = 1` — на
+`main` (без бага) `store still wired = False`, `stop_all calls total = 2`.
+
+**Правки:**
+1. `process_module.py` `stop()`: вызов `self._before_observability_teardown()` обёрнут в
+   `try/except Exception` — ошибка логируется через `self._log_error` (сам лог тоже в своём `try`) и НЕ
+   мешает дойти до `_flush_observability()`/`shutdown()`. Комментарий: хук — точка расширения, та же
+   причина, по которой `_flush_observability()` сама глушит исключения.
+2. `process_manager_process.py` `_stop_children_once()`: `self._children_stopped = True` переставлен
+   ПОСЛЕ успешного возврата `stop_all` (была строка сразу после guard'а в начале метода). При исключении
+   `ProcessMonitor.stop()`/`stop_all` флаг остаётся `False` → метод выходит исключением → runner'овский
+   повторный `shutdown()` реально повторяет `stop_all` вместо no-op. Публикация сводки — по-прежнему
+   только ПОСЛЕ успешного `stop_all`, поэтому повтор публикует её ровно один раз (первая попытка до
+   публикации не дошла).
+3. Новый hazard-тест `test_raising_stop_all_flushes_and_retries_on_shutdown` в
+   `test_stop_summary_hazards.py` (фейк-регистр: первый `stop_all` бросает `RuntimeError`, второй —
+   успешен). **RED-then-GREEN проверен вручную**: временно откатил обе правки (1) и (2), прогнал ТОЛЬКО
+   новый тест — упал с `RuntimeError: boom: stop_all упал (инъекция теста)`, исключение из
+   `_before_observability_teardown()` пробивало `pm.stop()` насквозь (тот самый баг из ревью); вернул
+   правки — весь файл `test_stop_summary_hazards.py` зелёный, 7/7.
+4. Два честных исправления, minor-находки ревью:
+   - тест `test_reported_written_after_numbers_gates_reading` переименован в
+     `test_unreported_slot_reads_as_unknown`, докстринг честно говорит: тест собирает слот вручную,
+     раннер не зовётся, проверяется ТОЛЬКО чтение (`exit_report` игнорирует числа, пока `reported` не
+     выставлен) — порядок ЗАПИСИ («reported последним», ради read-during-kill-между-строками) этим или
+     любым другим тестом файла НЕ закреплён.
+   - `process_runner.py` (~L401) и ADR-PMM-033 (п.2): комментарий/текст «SRM-mode без bundle» был неверен
+     — `shared_resources` в SRM-режиме НЕ бывает `None` (`process_runner.py:273`,
+     `shared_resources = shared_resources_or_bundle or SharedResourcesManager()`). Ветка `elif exit_report
+     is not None` реально бьёт, когда класс процесса не загрузился (`_load_process_class` вернул `None`)
+     либо сборка `shared_resources` из bundle-словаря бросила — в обоих случаях очереди физически не
+     поднимались, поэтому `[1, 0, 0]` честен.
+5. ADR-PMM-033 дополнительно (заметки ревью, не блокирующие): «свежий слот» держится подтверждённой
+   смертью старого воплощения ДО `remove_process`, а не новизной объекта (`RawArray` память
+   переиспользуется кучей `multiprocessing` — измерение ревьюера: тот же адрес после `del`); задокументирован
+   не воспроизведённый побочный эффект — `GenericProcessManagerApp.shutdown` (watcher'ы, `SSM.shutdown`)
+   теперь идёт ПОСЛЕ `stop_all`, на `main` шёл ДО (вне `FILES`/`OUT OF SCOPE` этой задачи, только
+   зафиксировано). `python -m scripts.sync` прогнан — глобальный `DECISIONS.md` не изменился (диффа нет,
+   коммитить нечего).
+
+**Проверено:**
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py -q --tb=short
+```
+→ до фикса (обе правки временно откачены): новый тест — `1 failed` (RuntimeError пробивает `stop()`
+насквозь). После фикса: `7 passed`.
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_stop_summary_live.py --backend-live -q --tb=short
+```
+→ `3 passed in 21.55s`.
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests multiprocess_framework/modules/process_module/tests -q --tb=short
+```
+→ `4002 passed, 1 skipped, 1 xfailed in 147.57s` (радиус чист, без новых падений).
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py -q --tb=short
+```
+→ `13 passed` — пинутый инвентарь `emergency_log` не задет (новых вызовов не добавлено).
+
+```
+PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
+```
+→ `Ошибок нет! Предупреждений нет!`
+
+### Что я интерпретировал, а не буквально следовал
+
+- Дизайн п.3 описывал сценарий как «после `pm.stop()`» + «после `pm.shutdown()`» раздельно; фактически
+  `ProcessModule.stop()` САМ зовёт `self.shutdown()` последней строкой — поэтому весь ретрай (2 вызова
+  `stop_all`, 1 публикация) уже происходит ВНУТРИ одного `pm.stop()`. Явный повторный `pm.shutdown()` в
+  тесте (имитация runner'овского `finally`) после этого закономерно no-op — проверяет идемпотентность
+  (третьего `stop_all`/второй сводки быть не должно), а не отдельный «первый ретрай». Оставил оба вызова
+  в тесте, оба со своими ассертами — это честнее, чем подгонять докстринг под одно скрытое допущение.
+- Первая версия ассерта считала все `_log_info`+`_log_warning` вызовы как «сводку» — упала (2 вместо 1),
+  потому что `ProcessModule.stop()` сам логирует `"Process 'X' stopping"` через `_log_info`. Заменил на
+  прямой спай (`MagicMock(wraps=...)`) поверх `pm._publish_stop_summary` — считает публикации отдельно от
+  lifecycle-логов, точнее замысла брифа.
+
+### Что я оставляю открытым / ненадёжным
+
+- Побочный эффект `GenericProcessManagerApp.shutdown` после `stop_all` (см. ADR, п.5 выше) — заявлен по
+  чтению кода, НЕ измерен живым репро; `GenericProcessManagerApp` вне `FILES` этой задачи.
+- `DECISIONS.md` модуля — 215 КБ при бюджете doc-size-guard'а 32 КБ (хук предупредил на каждой правке).
+  Предсуществующий разрыв (файл рос до меня), не в `FILES`/`OUT OF SCOPE` этой задачи — не делил.
+- Полный тестовый радиус (`process_manager_module`+`process_module`, 4002 теста) прогнан один раз; не
+  гонял повторно на флейки (кроме уже известного из Части 2/3 `test_system_shutdown_children_exit_hook_in_system_stop_mode`,
+  который в этом прогоне не участвовал — не live-тест).
+- Live-тест Task 1.1 (`test_system_shutdown_live.py`) в этой итерации НЕ перепрогонялся — из брифа не
+  требовался (ACCEPTANCE называет только `test_stop_summary_live.py`); полагаюсь на зелёный прогон Части 3.
