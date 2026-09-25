@@ -3528,11 +3528,11 @@ class ProcessManagerProcess(ProcessModule):
         stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
         # Task 1.6 (ревью it.1): флаг — ПОСЛЕ успешного возврата stop_all, не до. Если
         # ProcessMonitor.stop()/stop_all бросят, метод выйдет исключением раньше этой
-        # строки, флаг останется False — второй вызов (runner'овский finally после
-        # ProcessModule.stop()) повторит stop_all вместо того, чтобы молча счесть детей
-        # остановленными. Сводка публикуется только ПОСЛЕ успешного stop_all — повтор
-        # после падения публикует её ровно один раз (первая попытка до публикации не
-        # дошла).
+        # строки, флаг останется False — следующий вызов (сначала self.shutdown() в конце
+        # ProcessModule.stop(), затем finally раннера) повторит stop_all вместо того, чтобы
+        # молча счесть детей остановленными. Сводка публикуется один раз, но на этом пути
+        # повтор идёт уже после _flush_observability(): store-tap снят, в стор она не
+        # попадает (ревью it.2) — только на штатном пути.
         self._children_stopped = True
         if isinstance(stop_results, dict):
             survivors = sorted(n for n, ok in stop_results.items() if not ok)

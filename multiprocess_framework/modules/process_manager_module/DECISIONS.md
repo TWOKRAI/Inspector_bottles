@@ -1543,19 +1543,23 @@ boot ребёнка, `kill -9` PM под `BackendHarness`.
 `try`, а флаг `_children_stopped` ставился ДО работы `stop_all` — исключение из `stop_all` (или
 `ProcessMonitor.stop()`) внутри хука отменяло и финальный дренаж/закрытие store-tap (`_flush_observability`
 после хука в `stop()` не выполнялся), и саму возможность повторить `stop_all` из runner'овского `finally`
-(флаг уже `True` → второй вызов — no-op). Репро ведущего: `stop_all` бросает `RuntimeError` →
+(флаг уже `True` → второй вызов — no-op). Репро ревьюера: `stop_all` бросает `RuntimeError` →
 `stop() raised`, `store still wired = True`, `stop_all calls total = 1`; на `main` — `store still wired =
 False`, `stop_all calls total = 2`. Исправлено двумя изолированными правками:
 - вызов хука в `ProcessModule.stop()` обёрнут в `try/except Exception` — ошибка логируется
   (`self._log_error`, сам лог тоже в своём `try`) и не мешает дойти до `_flush_observability()`/`shutdown()`;
 - `self._children_stopped = True` в `_stop_children_once()` переставлен ПОСЛЕ успешного возврата
-  `stop_all` — при исключении флаг остаётся `False`, и повторный вызов (runner'овский `finally` после
-  `ProcessModule.stop()`) реально повторяет `stop_all`, публикуя сводку ровно один раз (первая попытка до
-  публикации не дошла — упала раньше). Hazard-тест на этот сценарий —
+  `stop_all` — при исключении флаг остаётся `False`, и следующий вызов реально повторяет `stop_all`.
+  Первый повторщик — собственный `self.shutdown()` в конце `ProcessModule.stop()`, второй — `finally`
+  раннера (при постоянном сбое попыток до трёх; на main было две). Сводка публикуется один раз — первая
+  попытка до публикации не дошла. Hazard-тест на этот сценарий —
   `test_raising_stop_all_flushes_and_retries_on_shutdown`.
 
-Результат: `stop_all` и публикация сводки выполняются РОВНО один раз за жизнь PM, пока store-tap ещё жив —
-включая случай, когда первая попытка `stop_all` упала.
+Результат: на штатном пути `stop_all` и публикация сводки выполняются один раз, пока store-tap ещё жив.
+На пути сбоя (первый `stop_all` бросил) повтор идёт из `shutdown()` уже ПОСЛЕ `_flush_observability()`:
+сводка публикуется один раз, но store-tap снят, и в `observability.db` она **не попадает** (ревью it.2,
+`probe_it2.py once`: `stop_all calls=2`, `publish calls=1`, `store_alive_at_publish=[False]`). Принято как
+есть: путь сбоя `stop_all` сам по себе аварийный, его голос — `_log_error` хука.
 Три живых REDS (`backend_ctl/tests/test_stop_summary_live.py`) — зелёные.
 
 ### Отвергнуто

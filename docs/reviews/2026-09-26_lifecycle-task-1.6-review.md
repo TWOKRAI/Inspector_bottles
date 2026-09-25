@@ -42,3 +42,31 @@
 
 Настоящий Qt `GuiProcess` (harness поднимает `HeadlessGuiProcess`, qt-mcp не подключён); Windows/spawn; стоп PM без
 системного события; матрица инъекций ведущего не повторялась.
+
+---
+
+# Итерация 2 — APPROVE_WITH_NOTES (HEAD 8604e916, фикс 11c2e1cd)
+
+Записано ведущим по отчёту ревьюера.
+
+**Находки it.1:** (1) major закрыта — `probe_raise.py` на HEAD: `store still wired = False`, `stop_all calls total = 3`,
+`_children_stopped = False` (a19dc68d: `True / 1`; main: `False / 2`). (2) закрыта — тест переименован в
+`test_unreported_slot_reads_as_unknown`, ADR «порядок записи не закреплён». (3) закрыта — комментарий раннера и ADR
+описывают ветку верно.
+
+**Прогоны:** `test_system_shutdown_live.py --backend-live` 2 passed / 78.88 с (флейк зелёный);
+`test_stop_summary_live.py --backend-live` 3 passed; hazard 7 passed; ruff чисто.
+
+**Новая находка (minor, текст, обязательна до merge):** ADR и комментарий `process_manager_process.py:3530-3533`
+утверждали «ровно один раз, пока store-tap жив — включая упавшую первую попытку». Вход: `stop_all` бросает на 1-м
+вызове, проходит на 2-м (`probe_it2.py once`) → `stop_all calls=2`, `publish calls=1`, `store_alive_at_publish=[False]`:
+повтор идёт из `shutdown()` в конце `stop()` после `_flush_observability()`, сводка в стор не попадает; `finally`
+раннера — третий вызов, не второй. **Исправлено ведущим** (текст ADR и комментария, кода нет).
+
+**Заметки:** постоянный сбой `stop_all` — 3 попытки против 2 на main (+1 `shutdown_timeout` в худшем случае);
+бросающий `_process_monitor.stop()` → `stop_all calls=0` и на ветке, и на main (не новый дефект, follow-up); двойной
+публикации нет; частично сконструированный PM — как на base; разовый сбой `stop()` теперь возвращается штатно (на main
+бросал, раннер писал «Process failed») — улучшение; в коммите «7→8 passed» вместо фактических 6→7 — косметика.
+
+**Не проверено:** матрица инъекций ведущего (I8–I11); доезд сводки на пути повтора до файлового лога PM; порядок
+«подтверждённая смерть → `remove_process`» — чтением; Qt `GuiProcess`, Windows/spawn.
