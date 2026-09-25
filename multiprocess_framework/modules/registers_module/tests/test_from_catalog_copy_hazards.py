@@ -22,6 +22,11 @@
    ``create_model`` их легко потерять (передать только тип, забыть ``Annotated``) —
    тогда dispatch к бэкенду (``send_callback``) молча перестанет срабатывать для
    полей с ``routing={"process_targets": [...]}``.
+5. ``validate()`` (FieldMeta.min/max/access_level) и pydantic ``validate_assignment``
+   (тип/Literal на setattr) — ДВЕ РАЗНЫЕ проверки на РАЗНЫХ этапах. below-min (3)
+   проверяет только первую; если копия построена без ``validate_assignment=True``,
+   ЛЮБОЕ поле без FieldMeta.min/max (Literal, произвольный int/str) тихо принимает
+   мусор — это отдельная дыра, закрытая тестом (e).
 
 Только локальные ``SchemaBase``-классы (без импорта ``Plugins.*``/``Services.*`` —
 Правило 9 CLAUDE.md, framework не знает о prototype/plugins) — payload собирается
@@ -30,7 +35,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 from multiprocess_framework.modules.registers_module.core.field_info import extract_fields
@@ -47,6 +52,13 @@ class _Routed(SchemaBase):
     """Регистр с полем, у которого есть dispatch-цель (hazard d)."""
 
     gain: Annotated[int, FieldMeta("Gain", min=0, max=100, routing={"process_targets": ["proc_a"]})] = 5
+
+
+class _Typed(SchemaBase):
+    """Поля БЕЗ FieldMeta (или без min/max) — validate() их не проверяет вообще (hazard e)."""
+
+    mode: Literal["a", "b"] = "a"
+    count: int = 1
 
 
 def _fields_payload(cls: type, plugin_name: str) -> list[dict[str, Any]]:
@@ -174,3 +186,44 @@ def test_routing_survives_into_copy_and_reaches_send_callback() -> None:
     assert calls == [("control_proc_a", "routed", "gain", 42)], (
         f"send_callback вызван не так, как ожидалось (routing.process_targets потерян?): {calls}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (e) копия отвергает неверный Literal и неверный тип НА ЭТАПЕ setattr —
+#     below-min (тест c) эту защиту не проверяет
+# ---------------------------------------------------------------------------
+
+
+def test_copy_rejects_wrong_literal_and_wrong_type_on_assignment() -> None:
+    """Post: setattr-валидация (не validate()) отклоняет неверный Literal/тип.
+
+    Найдено break-injection лида (I4: копия построена на SchemaBase-подклассе с
+    ``model_config`` вида ``validate_assignment=False``) — тест (c)
+    (``test_copy_rejects_below_min_and_keeps_old_value``) остаётся зелёным под этим
+    брейком, потому что ``below_min`` ловится РАНЬШЕ setattr — в
+    ``RegistersManager.validate_field_value`` -> ``FieldMeta.validate_value``,
+    которая проверяет ТОЛЬКО access_level и числовой диапазон [min, max]. У полей
+    БЕЗ FieldMeta (``count: int``) или с FieldMeta без min/max эта проверка вообще
+    не участвует: ``isinstance(value, (int, float))`` не проходит ни для строки
+    "zzz" (Literal-поле), ни для строки "abc" (int-поле) — ``validate_value``
+    возвращает ``(True, None)`` для ЛЮБОГО значения. Единственная защита от
+    неверного Literal/типа — pydantic ``validate_assignment=True`` на ``setattr``,
+    ИМЕННО её проверяет этот тест (в отличие от below-min, который проверяет более
+    раннюю, отдельную ветку — числовой диапазон).
+    """
+    fields = _fields_payload(_Typed, "typed")
+    payload = {
+        "success": True,
+        "rev": "0" * 64,
+        "plugins": [_plugin_entry("typed", fields)],
+        "failed_imports": {},
+    }
+    rm = RegistersManager.from_catalog(payload)
+
+    ok_literal, err_literal = rm.set_field_value("typed", "mode", "zzz")
+    assert ok_literal is False, f"копия молча приняла невалидный Literal: err={err_literal!r}"
+    assert rm.get_register("typed").mode == "a", "значение mode изменилось несмотря на отказ"
+
+    ok_type, err_type = rm.set_field_value("typed", "count", "abc")
+    assert ok_type is False, f"копия молча приняла строку вместо int: err={err_type!r}"
+    assert rm.get_register("typed").count == 1, "значение count изменилось несмотря на отказ"
