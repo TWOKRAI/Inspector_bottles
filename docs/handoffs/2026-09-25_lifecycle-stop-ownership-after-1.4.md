@@ -36,8 +36,9 @@ Acceptance в плане: `kill -9` PM на живом `inspection_full` → д�
 
 ## Соседи и порты
 
-- gui-service (`inspector-bottles-05`) на момент записи гонял 5 живых тестов на c9ae9b06 в портах 8860–8910 —
-  результат `system_shutdown_live` не пришёл; если там `BackendUnavailable` — стык их 1.3a (SocketChannel) и моей 1.1.
+- gui-service (`inspector-bottles-05`) прогнал живые тесты на c9ae9b06: все 6 passed; `system_shutdown_live` ×5 —
+  1 потерянный ответ из 60 (`BackendUnavailable`). **Разбор потери ответа взял gui-service** (investigator) — не дублировать;
+  запись в `OPEN_QUESTIONS.md` дополнена их числами.
   Мои живые прогоны — 8900–9799; у соседа 7900–7999.
 - Worktree: `.claude/worktrees/lso-1.4-dev`, `lso-1.4-tester` (незакоммиченный handoff тестера), `lso-hotfix` —
   не удалены, ждут решения владельца.
