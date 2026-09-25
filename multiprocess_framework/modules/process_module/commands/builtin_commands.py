@@ -275,6 +275,7 @@ class BuiltinCommands:
         self._register_worker_crud_commands()
         self._register_wire_commands()
         self._register_introspect_commands()
+        self._register_catalog_commands()
         self._register_observability_commands()
         self._register_health_commands()
         self._register_relay_commands()
@@ -689,11 +690,6 @@ class BuiltinCommands:
                 "Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover)",
             ),
             (
-                "catalog.plugins",
-                self._cmd_catalog_plugins,
-                "Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода",
-            ),
-            (
                 "introspect.telemetry",
                 self._cmd_introspect_telemetry,
                 "Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)",
@@ -709,6 +705,21 @@ class BuiltinCommands:
         self._services._log_debug(
             "Встроенные команды introspect.* зарегистрированы",
             module="lifecycle",
+        )
+
+    def _register_catalog_commands(self) -> None:
+        """Зарегистрировать catalog.plugins — каталог для удалённого GUI (gui-service 1b.2a).
+
+        Отдельно от introspect.*: словарь диагностики держится литералом на 10
+        имён (statistics_module A6), а каталог — контракт GUI, не диагностика.
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        name = "catalog.plugins"
+        desc = "Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода"
+        cm.register_command(
+            name, self._typed(name, self._cmd_catalog_plugins), metadata={"description": desc}, tags=["system"]
         )
 
     def _cmd_introspect_handlers(self, data=None, **kwargs) -> dict:

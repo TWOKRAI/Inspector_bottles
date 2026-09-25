@@ -148,7 +148,7 @@ def test_rev_stable_across_two_calls_and_changes_on_field_default_change() -> No
 
     # snapshot()/restore() (не clear()) — _build_real_payload делает PluginRegistry.clear()
     # внутри, а простой clear() без восстановления калечит соседние тесты этого файла:
-    # app_discover() после clear() НЕ переоткрывает уже импортированные Plugins/-модули
+    # PluginRegistry.discover() после clear() НЕ переоткрывает уже импортированные Plugins/-модули
     # (декоратор @register_plugin выполняется один раз при первом import, повторный import
     # из sys.modules — no-op), поэтому test_all_62_plugins_... следом получил бы 0 плагинов.
     snapshot = PluginRegistry.snapshot()
@@ -177,12 +177,11 @@ def test_all_62_plugins_catalog_payload_is_json_serializable() -> None:
     payload'а целиком упадёт TypeError на хаб-стороне — граница IPC не терпит
     ни одного non-JSON-safe значения.
     """
-    from multiprocess_framework.modules.app_module import discover as app_discover
     from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
     from multiprocess_framework.modules.registers_module.core.field_info import extract_fields
 
     plugins_dir = Path(__file__).resolve().parents[4] / "Plugins"
-    app_discover(plugin_paths=[str(plugins_dir)], service_paths=[])
+    PluginRegistry.discover(str(plugins_dir))
     entries = PluginRegistry.list()
     assert entries, "локальный discover(Plugins/) не нашёл ни одного плагина — фикстура сломана"
 

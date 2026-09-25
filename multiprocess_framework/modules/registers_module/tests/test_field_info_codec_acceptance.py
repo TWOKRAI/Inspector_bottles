@@ -39,12 +39,11 @@ def _discovered_field_infos() -> list[FieldInfo]:
     Framework-safe: только динамический ``PluginRegistry.discover(<str path>)`` —
     никакого статического ``import multiprocess_prototype``/``import Plugins``.
     """
-    from multiprocess_framework.modules.app_module import discover as app_discover
     from multiprocess_framework.modules.process_module.plugins.registry import (
         PluginRegistry,
     )
 
-    app_discover(plugin_paths=[str(_plugins_dir())], service_paths=[])
+    PluginRegistry.discover(str(_plugins_dir()))
 
     infos: list[FieldInfo] = []
     for entry in PluginRegistry.list():
