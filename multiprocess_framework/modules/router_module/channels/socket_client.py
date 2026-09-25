@@ -168,6 +168,8 @@ class SocketClient:
     _on_push: Optional[PushHandler] = None
     _push_listeners: tuple = ()
     _send_middleware: tuple = ()
+    # Потолок входящей строки: классовый дефолт нужен шиму драйвера (без __init__).
+    _max_line_bytes: int = 16_777_216
 
     def __init__(
         self,
@@ -179,6 +181,7 @@ class SocketClient:
         reply_to: str | None = None,
         default_timeout: float = 5.0,
         on_push: PushHandler | None = None,
+        max_line_bytes: int = 16_777_216,
     ) -> None:
         """Сконфигурировать клиент; соединения НЕ открывает.
 
@@ -192,6 +195,9 @@ class SocketClient:
               ставится, его подставляет мост хоста своим именем (``SocketBridgeAdapter``
               ``setdefault``). Явное имя, не совпадающее с именем хоста, уводит ответ
               мимо ожидающего на хосте ``request()`` — тот досиживает до таймаута.
+              ``max_line_bytes`` — потолок одной входящей строки; длиннее — строка
+              отбрасывается (WARNING), соединение живо, ``request()``, чей ответ
+              отброшен, заканчивается своим таймаутом (ADR-RTR-012).
         Post: ``connection_lost is False``; ``session is None``; ``late_replies == 0``;
               ``on_push`` (если задан) — первый push-обработчик.
         """
@@ -202,6 +208,7 @@ class SocketClient:
         self._reply_to = reply_to
         self._default_timeout = default_timeout
         self._on_push = on_push
+        self._max_line_bytes = max_line_bytes
         self._push_listeners = ()
         self._send_middleware = ()
         self._session: Optional[str] = None
@@ -582,7 +589,14 @@ class SocketClient:
                 _fire(p.callback, {"success": False, "error": "timeout", "request_id": cid})
 
     def _read_loop(self) -> None:
+        """Читать newline-JSON; строки длиннее ``_max_line_bytes`` отбрасываются.
+
+        Нет ``\n``, а буфер уже больше потолка → режим сброса до ближайшего ``\n``
+        (байты не копим), WARNING один раз на строку. Соединение НЕ объявляется
+        потерянным: ожидающий этого ответа ``request()`` закончится своим таймаутом.
+        """
         buf = b""
+        discarding = False
         while self._running:
             # Локальная ссылка под _write_lock: close() из другого потока обнуляет _sock.
             with self._write_lock:
@@ -605,12 +619,36 @@ class SocketClient:
                     _log.warning("%s: сервер закрыл соединение", self._reader_thread_name)
                     self._mark_conn_lost("сервер закрыл соединение")
                 break
+            if discarding:
+                nl = chunk.find(b"\n")
+                if nl < 0:
+                    chunk = b""  # хвост oversize-строки — мимо буфера
+                else:
+                    chunk = chunk[nl + 1 :]
+                    discarding = False
             buf += chunk
-            while b"\n" in buf:
-                raw, buf = buf.split(b"\n", 1)
-                if raw.strip():
+            while True:
+                nl = buf.find(b"\n")
+                if nl < 0:
+                    break
+                raw, buf = buf[:nl], buf[nl + 1 :]
+                if len(raw) > self._max_line_bytes:
+                    self._warn_oversize(len(raw))
+                elif raw.strip():
                     self._dispatch(raw)
+            if len(buf) > self._max_line_bytes:
+                self._warn_oversize(len(buf))
+                buf = b""
+                discarding = True
             self._expire_slots()
+
+    def _warn_oversize(self, seen: int) -> None:
+        _log.warning(
+            "%s: строка длиннее max_line_bytes=%d (видно %d байт) — отброшена, соединение живо",
+            self._reader_thread_name,
+            self._max_line_bytes,
+            seen,
+        )
 
     def _mark_conn_lost(self, reason: str) -> None:
         """Объявить соединение мёртвым и разбудить всех ожидающих (I4).

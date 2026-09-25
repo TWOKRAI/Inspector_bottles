@@ -336,7 +336,7 @@ class TestSessionIsolation:
         _register_session(iso_channel, a, "sid-a", 1)
         assert iso_channel.get_info()["sessions"] == 1
         a.close()
-        assert _wait(lambda: iso_channel.get_info()["sessions"] == 0)  # unbind в _drop_clients
+        assert _wait(lambda: iso_channel.get_info()["sessions"] == 0)  # unbind в _unregister_clients на выходе read-loop
         res = iso_channel.send({"type": "response", "session": "sid-a", "result": {}})
         assert res["status"] == "error"
         assert res["reason"] == "session not connected"

@@ -19,6 +19,7 @@ system-цикле хоста (другой поток) → дедлок-конт
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Dict, Optional
 
 from ..._fallback import FallbackLogger
@@ -61,6 +62,9 @@ class SocketBridgeAdapter:
         # Раньше терялось молча — MCP-инструменты висели до таймаута, пользователь
         # повторял уже применённую команду (register_snapshot/record_start — двойное
         # применение). Публичный счётчик — get_stats().
+        # Счётчики инкрементятся из нескольких потоков-обработчиков SocketChannel
+        # (ADR-RTR-012) — один лок на оба счётчика, инкремент и чтение под ним.
+        self._stats_lock = threading.Lock()
         self._lost_responses = 0
         self._on_request = on_request
         self._observer_errors = 0
@@ -100,14 +104,16 @@ class SocketBridgeAdapter:
             try:
                 self._on_request(msg, sid, result)
             except Exception as exc:  # noqa: BLE001 — наблюдатель не важнее ответа
-                self._observer_errors += 1
+                with self._stats_lock:
+                    self._observer_errors += 1
+                    total = self._observer_errors
                 _logger.error(
                     "SocketBridgeAdapter.on_inbound: наблюдатель on_request упал "
                     "(request_id=%s, channel=%s): %s [всего: %d]",
                     corr,
                     self._channel_name,
                     exc,
-                    self._observer_errors,
+                    total,
                 )
 
         # Ответ driver'у через router (channel=-маршрутизация → SocketChannel.send).
@@ -126,16 +132,19 @@ class SocketBridgeAdapter:
         except Exception as exc:  # noqa: BLE001 — не роняем read-loop, если ответ не ушёл (best-effort)
             # A-4: раньше здесь было голое `pass` — потеря ответа проходила без следа.
             # Не re-raise (симметрично прежнему best-effort), но видимо: счётчик + лог.
-            self._lost_responses += 1
+            with self._stats_lock:
+                self._lost_responses += 1
+                lost = self._lost_responses
             _logger.error(
                 "SocketBridgeAdapter.on_inbound: ответ driver'у не отправлен "
                 "(request_id=%s, channel=%s): %s [потеряно всего: %d]",
                 corr,
                 self._channel_name,
                 exc,
-                self._lost_responses,
+                lost,
             )
 
     def get_stats(self) -> Dict[str, Any]:
         """A-4: потерянные ответы (router.send упал); 4.4: упавшие наблюдатели on_request."""
-        return {"lost_responses": self._lost_responses, "observer_errors": self._observer_errors}
+        with self._stats_lock:
+            return {"lost_responses": self._lost_responses, "observer_errors": self._observer_errors}

@@ -52,6 +52,7 @@ reader-потоке (колбэк не роняет reader) — контракт
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -214,6 +215,14 @@ def _classify_observability(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, An
     return [(plane, {**msg, "data": {**base_data, "records": group}}) for plane, group in groups.items()]
 
 
+def _estimate_bytes(msg: Dict[str, Any]) -> int:
+    """Оценка веса записи в кольце: длина JSON-представления (символы ≈ байты)."""
+    try:
+        return len(json.dumps(msg, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):  # цикл ссылок и т.п. — грубая оценка лучше нуля
+        return len(repr(msg))
+
+
 class EventHub:
     """Курсорные плоскости событий: недеструктивное повторяемое чтение с видимой потерей.
 
@@ -227,8 +236,15 @@ class EventHub:
         *,
         alive: Optional[Callable[[], bool]] = None,
         clock: Callable[[], float] = time.monotonic,
+        max_bytes_per_ring: int = 16_777_216,
     ) -> None:
         self._cv = threading.Condition()
+        # Потолок байт на КАЖДОЕ кольцо (arrival и каждая плоскость) поверх maxlen
+        # (Task 1.3a gui-service): тысяча многомегабайтных push'ей при одном maxlen
+        # держала бы гигабайты. Оценка записи — длина json.dumps сообщения (одна на
+        # emit, вне лока); вытеснение по байтам идёт тем же видимым путём, что по
+        # maxlen (dropped по плотному seq + голос эпизода).
+        self._max_bytes_per_ring = max_bytes_per_ring
         # Предикат «соединение ещё живо» — сохранён как часть контракта hub'а
         # (будущие блокирующие читатели поверх ``_cv``); legacy-``drain`` (единственный
         # потребитель) удалён в F.1.
@@ -255,6 +271,10 @@ class EventHub:
         self._gseq = 0  # плотный глобальный seq (arrival)
         self._rings: Dict[str, Deque[Tuple[int, Dict[str, Any]]]] = {p: deque(maxlen=maxlen) for p in PLANES}
         self._pseq: Dict[str, int] = dict.fromkeys(PLANES, 0)  # плотные per-plane seq
+        # Байтовая бухгалтерия колец: размеры записей параллельно кольцу (тот же
+        # maxlen — вытесняются синхронно) и нарастающая сумма. Только под self._cv.
+        self._sizes: Dict[str, Deque[int]] = {k: deque(maxlen=maxlen) for k in (ALL_PLANE, *PLANES)}
+        self._bytes: Dict[str, int] = dict.fromkeys((ALL_PLANE, *PLANES), 0)
 
         self._subscribers: List[EventCallback] = []
         self._event_errors = 0  # счётчик исключений колбэков (диагностика)
@@ -280,20 +300,20 @@ class EventHub:
         проблем, ради которого колбэки уже вынесены наружу.
         """
         now = self._clock()
+        # Оценка размера — ОДНА на emit и вне лока: сериализация большого push'а
+        # не должна держать читателей page(). Плоскостные view (дельты telemetry)
+        # платят ту же цену, что сообщение целиком — оценка сверху, не снизу.
+        size = _estimate_bytes(msg)
         with self._cv:
             self._gseq += 1
-            arrival_was_full = len(self._arrival) == self._arrival.maxlen
-            self._arrival.append((self._gseq, msg))
             evictions: List[Tuple[str, int]] = []
-            if arrival_was_full:
+            if self._push_locked(ALL_PLANE, self._arrival, (self._gseq, msg), size):
                 evictions.append((ALL_PLANE, self._gseq - len(self._arrival)))
 
             for plane, view in _classify(msg):
                 self._pseq[plane] += 1
                 ring = self._rings[plane]
-                ring_was_full = len(ring) == ring.maxlen
-                ring.append((self._pseq[plane], view))
-                if ring_was_full:
+                if self._push_locked(plane, ring, (self._pseq[plane], view), size):
                     evictions.append((plane, self._pseq[plane] - len(ring)))
 
             # Эпизоды считаются НЕЗАВИСИМО для каждого кольца (arrival и каждая
@@ -365,6 +385,34 @@ class EventHub:
                 # только reader-поток» больше не гарантия (симметрия с _late_replies).
                 with self._cv:
                     self._event_errors += 1
+
+    def _push_locked(
+        self, key: str, ring: Deque[Tuple[int, Dict[str, Any]]], entry: Tuple[int, Dict[str, Any]], size: int
+    ) -> int:
+        """Добавить запись в кольцо и вытеснить слева по maxlen И по байтам.
+
+        Returns: сколько записей вытеснено (0 — вытеснения не было). Только под
+        ``self._cv``. Вытеснение — всегда с левого края, поэтому seq в кольце
+        остаётся плотным и ``dropped``/``evicted`` (seq − size) верны без
+        отдельных счётчиков. Запись крупнее потолка вытесняет и саму себя:
+        кольцо пустеет, потеря видна читателю через ``dropped``.
+        """
+        if ring.maxlen == 0:
+            return 1  # кольцо нулевой ёмкости: запись вытеснена сразу, байтов не копим
+        sizes = self._sizes[key]
+        evicted = 0
+        if len(ring) == ring.maxlen:
+            # deque(maxlen) сам выкинет левый элемент на append — снять его байты.
+            self._bytes[key] -= sizes[0]
+            evicted += 1
+        ring.append(entry)
+        sizes.append(size)
+        self._bytes[key] += size
+        while ring and self._bytes[key] > self._max_bytes_per_ring:
+            ring.popleft()
+            self._bytes[key] -= sizes.popleft()
+            evicted += 1
+        return evicted
 
     def wake(self) -> None:
         """Разбудить ожидающих в drain(timeout): новых событий не будет (close())."""
