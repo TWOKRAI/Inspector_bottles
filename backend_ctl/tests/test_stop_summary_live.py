@@ -194,7 +194,7 @@ def test_stop_summary_numbers_match_stderr_lines(capfd, monkeypatch, tmp_path) -
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX-only: os.kill(SIGKILL) на реальный pid ребёнка")
-def test_killed_child_is_reported_false_and_warning(monkeypatch, tmp_path) -> None:
+def test_killed_child_is_reported_false_and_warning(capfd, monkeypatch, tmp_path) -> None:
     """Убитый до стопа ребёнок -> reported=false, released/buffered_dropped=0, severity WARNING.
 
     Детерминизм убийства: ``FW_AUTORESTART=0`` (env, откат авто-рестарта — см.
@@ -207,7 +207,9 @@ def test_killed_child_is_reported_false_and_warning(monkeypatch, tmp_path) -> No
     log_dir = tmp_path / "run_kill"
     monkeypatch.setenv("MULTIPROCESS_LOG_DIR", str(log_dir))
     harness = BackendHarness(recipe=_RECIPE, port=_PORT_BASE + 2, warmup=1.0, log_dir=log_dir)
+    combined = ""
     try:
+        capfd.readouterr()  # слить хвост предыдущего теста в этом же pytest-процессе
         drv = harness.start()
         time.sleep(2.0)
         reply = drv.system_command({"cmd": "supervision.status", "process": "renderer"}, timeout=5.0)
@@ -220,6 +222,8 @@ def test_killed_child_is_reported_false_and_warning(monkeypatch, tmp_path) -> No
         time.sleep(1.0)
     finally:
         harness.stop()
+        captured = capfd.readouterr()
+        combined = captured.out + captured.err
 
     store = ObservabilityStore(str(log_dir / "observability.db"))
     try:
@@ -238,3 +242,22 @@ def test_killed_child_is_reported_false_and_warning(monkeypatch, tmp_path) -> No
     assert str(record["severity"]).upper() == "WARNING", (
         f"severity={record['severity']!r}, ожидалось WARNING (renderer.reported=false)"
     )
+
+    # Добор ведущего 2026-09-25 (инъекция I6): сверка чисел со stderr в
+    # test_stop_summary_numbers_match_stderr_lines вероятностная — на обычном стопе
+    # потери бывают не всегда (перестановка released/buffered_dropped поймана 1 из 3).
+    # Убитый читатель даёт потерю устойчиво (замер: processor 1/38 в 2 из 2 прогонов),
+    # поэтому здесь сверка не пустая: сначала — что потеря вообще была.
+    stderr_numbers: Dict[str, tuple] = {}
+    for m in _STDERR_LINE_RE.finditer(combined):
+        stderr_numbers[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+    assert any(n[0] > 0 for n in stderr_numbers.values()), (
+        f"убитый renderer не дал ни одной строки потерь в stderr — сверка чисел была бы пустой; "
+        f"сводка: {summary!r}"
+    )
+    for name in _CHILDREN:
+        expected = stderr_numbers.get(name, (0, 0))
+        entry = summary.get(name) or {}
+        assert (entry.get("released"), entry.get("buffered_dropped")) == expected, (
+            f"{name}: сводка {entry!r} расходится со stderr {expected!r}"
+        )
