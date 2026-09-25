@@ -150,6 +150,97 @@ Unit 167 passed; live 2 passed (порты 8887/8889); break-injection лида 
 
 ---
 
+### Task 1b.5 — Сервисы на хабе: `service.*` и удалённый `ServiceManager`
+
+**Level:** Senior (Opus)
+**Assignee:** teamlead
+**Goal:** жизненным циклом сервисов (`Services/*`: `auth`, `modbus`, `sql`, …) владеет бэкенд. Список, запуск,
+остановка, рестарт и статус идут командами хаба. У GUI появляется `RemoteServiceManager` — реализация того же
+Protocol `ServiceManager` поверх команд, без импорта `Services.*`. Без этого Пульт на другой машине (Ф2) либо
+импортирует `Services.*` к себе (нарушение AC2 1b.2b), либо запускает сервис не на той машине.
+
+**Что по коду сейчас (разведка 2026-09-25, HEAD `31ddc570`) — поправка к формулировке строки плана 24.09:**
+- На старте GUI сервисы **не запускаются**. `app.py:212-227` импортирует 9 `Services/*/service.py` сканером
+  `service_module.scanner.discover` и регистрирует их в статусе READY. Запуск идёт только кликом во вкладке
+  «Сервисы» (`presenter.py:61-97` → `ServiceManagerFromRegistry.start` → `entry.cls()` + `instance.start({})`,
+  `adapters/catalogs/service_catalog.py:159,167`), синхронно в Qt-потоке, конфиг всегда `{}`.
+- Кнопки есть у `auth`, `modbus`, `sql`. Остальные узлы скрыты (`_sections.py:375-376`).
+- `auth`, `sql`, `hikvision_camera` на `start` только ставят статус. Реальный ввод-вывод есть лишь у `modbus`:
+  `ModbusDevice.connect()`, по умолчанию `timeout_sec=3.0`, `retries=3` — то есть **до ~9 с блокировки**.
+- В GUI `ServiceManager` зовёт только `ServicesPresenter` — 6 методов Protocol
+  (`domain/protocols/service_catalog.py:34`): `list_services`, `resolve`, `start`, `stop`, `restart`,
+  `get_lifecycle`. Прямого доступа к экземплярам сервисов нет.
+- Импорт всех 9 модулей сервисов — 0,42 с, без `torch`/`cv2`/`ultralytics` (замер `-X importtime`).
+- Команд `service.*` и процесса `services` в дереве нет. Настоящий auth GUI (`AuthManager`, `app.py:560-603`)
+  идёт мимо `ServiceManager` — это 1b.4, не 1b.5.
+
+**Решение владельца 2026-09-25:** хост — **хаб** (`ProcessManagerProcessApp`, как `recipe.*` в 1b.1), а не
+отдельный процесс `services`. Нового процесса в `base.yaml` нет, golden-снапшоты `SystemBuilder` не меняются.
+Цена, которую закрывает эта задача: блокирующий `connect` modbus не должен держать командный путь хаба.
+Вынести в процесс позже можно без смены команд.
+
+**Files:**
+- НОВЫЙ `multiprocess_framework/modules/service_module/host.py` (new-lite): `ServiceHost` — обработчики
+  `service.list / status / start / stop / restart` поверх `ServiceRegistry`, кэш экземпляров, **Qt-free**,
+  dict на границе, без импорта `Services.*` и `multiprocess_prototype`. Логика берётся из
+  `ServiceManagerFromRegistry`, второй копии не заводится: локальный адаптер либо делегирует хосту, либо
+  остаётся как есть до 1b.3 — решение в Step 1.
+- `multiprocess_prototype/orchestrator.py`: регистрация `service.*` в `_register_builtin_commands` рядом с
+  `recipe.*`; пути — `discovery.service_paths` из `backend/config/system.yaml`.
+- НОВЫЙ `multiprocess_prototype/adapters/catalogs/remote_service_manager.py`: `RemoteServiceManager(request)` по
+  образцу `remote_plugin_catalog.py` (1b.2a); ошибки — `DomainError`, как у локального адаптера.
+- `multiprocess_framework/modules/service_module/{README,STATUS,DECISIONS}.md`: контракт команд, ADR «хост
+  сервисов — хаб, почему не процесс».
+- Тесты: `service_module/tests/test_host.py`, контракт `RemoteServiceManager` против Protocol
+  (`domain/tests/test_fakes_contract.py`-образец), живой `backend_ctl/tests/test_service_host_live.py`
+  (порт — из свободных, **не** 8860–8910 и не 9800+ без согласования).
+- **Не трогать:** `frontend/app.py` (очередь одного писателя с T4.2–T4.4), `process_runner.py`, `spawner.py`,
+  `process_manager_process.py` (lifecycle Task 1.5 идёт параллельно).
+
+**Steps:**
+1. Разведать и записать в DECISIONS до кода: как хаб исполняет обработчики команд (в каком потоке, блокирует
+   ли долгий обработчик следующие команды того же и другого клиента); когда делать discover — на старте хаба
+   или лениво на первом `service.*` (замер влияния на время старта); судьба `ServiceManagerFromRegistry`.
+2. Командная поверхность. `service.list` → `[{name, display_name, lifecycle, metadata}]`;
+   `service.status(name)` → `{name, lifecycle, detail}` (`detail` — `get_status()` экземпляра или `{}`);
+   `service.start/stop/restart(name)` → `{name, lifecycle}`. Неизвестное имя →
+   `{success: false, error: "unknown_service", name}`. `start`/`stop` идемпотентны, как требует Protocol.
+   `lifecycle` — строки `ServiceLifecycle`. Конфиг `start` остаётся `{}` (паритет с GUI сегодня; долг).
+3. Хаб не блокируется долгим `start`. Механизм выбирает исполнитель по итогам Step 1 (отдельный поток на
+   запуск с потолком ожидания, отложенный ответ или иное). Требование — в AC, а не в способе.
+4. `RemoteServiceManager`: 6 методов Protocol поверх `request(command, args)`; `resolve` и `list_services` — по
+   `service.list`, `get_lifecycle` — по `service.status`. В `app.py` не подключается (это 1b.2b/1b.3).
+5. Автор пишет hazard-тесты: (а) два одновременных `start` одного сервиса → один экземпляр (`cls()` вызван
+   один раз); (б) исключение в `start` сервиса → `lifecycle=ERROR`, хаб жив, следующая команда отвечает;
+   (в) `stop` незапущенного — не ошибка; (г) долгий `start` не задерживает `introspect.status` другого клиента.
+
+**Acceptance criteria:**
+- [ ] Через `backend_ctl send_command ProcessManager` (не через GUI): `service.list` → множество имён совпадает
+      с именами, которые находит `service_module.scanner.discover(Services/)` локально (сравнение множествами).
+- [ ] `service.start auth` → `lifecycle == "running"`; `service.status auth` показывает то же;
+      `service.stop auth` → `"stopped"`; повторный `stop` → успех без ошибки.
+- [ ] `service.start` неизвестного имени → `error == "unknown_service"` с именем, хаб отвечает на следующую
+      команду.
+- [ ] Пока `service.start` висит на вводе-выводе (сервис-заглушка со `start`, спящим 5 с), `introspect.status`
+      к `ProcessManager` от второго клиента отвечает быстрее 0,5 с.
+- [ ] Число процессов дерева не изменилось, `test_build_characterization.py` зелёный **без**
+      `UPDATE_BUILD_SNAPSHOTS`.
+- [ ] `RemoteServiceManager` проходит тот же контракт Protocol, что `FakeServiceManager`; ни `host.py`, ни
+      `remote_service_manager.py` не импортируют `Services.*`, `PySide6`, а `host.py` — ещё и
+      `multiprocess_prototype` (`grep` → 0); `sentrux check .` зелёный.
+
+**Out of scope:** перевод вкладки «Сервисы» на `RemoteServiceManager` (1b.3); `rescan` и правка путей сервисов
+из GUI (`presenter.py:114-197`, пишет `user_overrides.yaml`) — во вкладке Пульта «недоступно» до отдельного
+решения; конфиг сервиса при `start` (сегодня `{}`); права на команды (1b.4); статусы в дереве стейта
+`services.*` (`ServiceStateAdapter`) — отдельно, когда появится потребитель.
+**Edge cases:** модуль сервиса падает на импорте — `service.list` отдаёт остальные, упавший виден (как
+изоляция сбоя по плагину в 1b.2a), хаб жив; рестарт хаба — экземпляры теряются, `lifecycle` снова READY
+(ожидаемо, записать в DECISIONS).
+**Dependencies:** 1b.2a (DONE) — образец удалённого адаптера и кодека; до 1b.4.
+**Module contract:** new-lite (`service_module/host.py` — докстринг-контракт Pre/Post на каждую команду).
+
+---
+
 ### Task 1b.3 — Пакет вкладок инспектора на удалённых портах; GUI без диска
 
 **Level:** Senior (Opus)
