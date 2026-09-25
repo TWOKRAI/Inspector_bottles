@@ -26,9 +26,8 @@
 
 ## Открыто / ненадёжно
 
-- **Красный на main, не наш:** `process_module/tests/test_f4_task411_voice_at_apply_stage.py::test_emergency_log_inventory_is_pinned_by_file`
-  (+ каскад `modules/tests/test_declarations_leak_order_independence.py`) — сторож lifecycle 1.5 в `process_runner.py`;
-  сообщено сессии lifecycle (4a, Task 1.6).
+- ~~Красный инвентарь `emergency_log` от сторожа lifecycle 1.5~~ — закрыт сессией 4a (`ae328398`, +2 с доводом); каскад
+  `test_declarations_leak_order_independence` снова зелёный.
 - `config_module/tests/test_watcher.py::test_foreign_file_in_the_same_directory_is_ignored` — красный и до наших
   слияний, похоже на ФС macOS, не разобран.
 - `test_build_matches_snapshot` краснеет в общем прогоне после других тестов (протечка `MULTIPROCESS_LOG_DIR`) —
