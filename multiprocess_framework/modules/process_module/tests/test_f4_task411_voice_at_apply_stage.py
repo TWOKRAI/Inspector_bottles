@@ -546,6 +546,15 @@ class TestNoEmergencyLogInOperatorFacingPositions:
         # Звучит РАЗ НА КЛЮЧ, не на попытку — сторож в
         # test_f4_task413_slot_debited_on_delivery.py::test_criterion4b.
         "multiprocess_framework/modules/logger_module/core/windowed_voice.py": 1,
+        # +2 к инвентарю 2026-09-25 (внесены L-2 Task 1.2, aebfdcb7; сторож не был
+        # обновлён тогда — поймал радиус gui-service после слияния). Чем являются:
+        # строка итога хука выхода ``release_queues_at_exit`` и её ошибка в
+        # ``run_process_function.finally`` — ПОСЛЕ ``process_instance.shutdown()``,
+        # то есть LoggerManager процесса уже остановлен и у вида нет ни одного
+        # приёмника (ревью L-2 Task 1.2, ADR-SRM-016). Самоотчёт процесса, у
+        # которого плоскости голоса уже нет, — та же законная позиция. Оператору
+        # итог стопа должен доезжать иначе: сводкой PM в стор (lifecycle Task 1.6).
+        "multiprocess_framework/modules/process_manager_module/runner/process_runner.py": 2,
         "multiprocess_framework/modules/process_manager_module/launcher/system_launcher.py": 4,
         "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py": 4,
         "multiprocess_framework/modules/logger_module/core/process_hooks.py": 3,
