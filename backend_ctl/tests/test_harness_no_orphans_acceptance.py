@@ -122,7 +122,10 @@ def _free_port() -> int:
 
 def _make_harness() -> BackendHarness:
     port = _free_port()
-    factory = lambda: SystemLauncher(config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
+
+    def factory() -> SystemLauncher:
+        return SystemLauncher(config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
+
     return BackendHarness(launcher_factory=factory, port=port, ready_timeout=20.0, teardown_timeout=10.0)
 
 

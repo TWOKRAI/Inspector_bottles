@@ -23,7 +23,6 @@ import pytest
 from ._no_orphans_helpers import (
     HUNG_CHILD_CLASS_PATH,
     QUICK_CHILD_CLASS_PATH,
-    alive_pids,
     cleanup_procs,
     kill_and_reap,
     snapshot_children,
