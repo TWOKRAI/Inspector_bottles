@@ -40,5 +40,8 @@ Acceptance в плане: `kill -9` PM на живом `inspection_full` → д�
   1 потерянный ответ из 60 (`BackendUnavailable`). **Разбор потери ответа взял gui-service** (investigator) — не дублировать;
   запись в `OPEN_QUESTIONS.md` дополнена их числами.
   Мои живые прогоны — 8900–9799; у соседа 7900–7999.
+- **Бронь портов: 8860–8910 занят gui-service на время разбора system.shutdown** (десятки живых прогонов,
+  `system_shutdown_live` зашит на 8860+). Перед живыми прогонами Task 1.5 спросить сессию gui-service;
+  свои стенды — с 9800 и выше.
 - Worktree: `.claude/worktrees/lso-1.4-dev`, `lso-1.4-tester` (незакоммиченный handoff тестера), `lso-hotfix` —
   не удалены, ждут решения владельца.
