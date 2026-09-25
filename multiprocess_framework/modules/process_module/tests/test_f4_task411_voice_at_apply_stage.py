@@ -554,7 +554,13 @@ class TestNoEmergencyLogInOperatorFacingPositions:
         # приёмника (ревью L-2 Task 1.2, ADR-SRM-016). Самоотчёт процесса, у
         # которого плоскости голоса уже нет, — та же законная позиция. Оператору
         # итог стопа должен доезжать иначе: сводкой PM в стор (lifecycle Task 1.6).
-        "multiprocess_framework/modules/process_manager_module/runner/process_runner.py": 2,
+        # +2 ещё 2026-09-25 (сторож смерти родителя, lifecycle Task 1.5, ADR-PMM-032;
+        # сторож не был обновлён — поймал сосед gui-service). ``_on_parent_death`` —
+        # PM уже мёртв, процесс через grace уходит в ``os._exit`` мимо ``finally``,
+        # плоскость голоса гасить некому и ждать её нельзя; ``_watch_parent`` при
+        # ``getppid() != parent_pid`` — первая строка ``run_process_function``, ДО
+        # ``get_std_logger``: вида ещё нет. Обе — самоотчёт без плоскости голоса.
+        "multiprocess_framework/modules/process_manager_module/runner/process_runner.py": 4,
         "multiprocess_framework/modules/process_manager_module/launcher/system_launcher.py": 4,
         "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py": 4,
         "multiprocess_framework/modules/logger_module/core/process_hooks.py": 3,
