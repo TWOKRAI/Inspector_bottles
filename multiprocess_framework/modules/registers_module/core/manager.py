@@ -293,6 +293,41 @@ class RegistersManager(BaseManager, ObservableMixin):
 
         return cls(registers=registers, plugin_categories=categories, **kwargs)
 
+    @classmethod
+    def from_catalog(cls, catalog_result: Dict[str, Any], **kwargs: Any) -> "RegistersManager":
+        """Построить из ``catalog.plugins``-payload (Task 1b.2a) — БЕЗ plugin-кода.
+
+        В отличие от ``from_registry`` (сканирует реальный ``PluginRegistry`` в
+        процессе, инстанцирует register-классы), здесь регистры не инстанцируются
+        вовсе — на GUI-стороне нет доступа к классу плагина (Dict at Boundary,
+        Правило 1 CLAUDE.md). ``get_fields()`` работает через заранее наполненный
+        кэш (``FieldInfo.from_dict`` на каждое поле каталога) — тот же публичный
+        метод, что и live-режим, formsSection не видит разницы.
+
+        Args:
+            catalog_result: payload команды ``catalog.plugins`` (см.
+                ``process_module/commands/builtin_commands.py::_cmd_catalog_plugins``) —
+                ``{"plugins": [{"name", "category", "register": {"fields": [...]} | None, ...}]}``.
+            **kwargs: доп. аргументы __init__ (connection_map, send_callback, ...).
+
+        Returns:
+            RegistersManager без register-инстансов, с готовым ``get_fields()``-кэшем.
+        """
+        categories: Dict[str, str] = {}
+        fields_by_plugin: Dict[str, List[FieldInfo]] = {}
+
+        for entry in catalog_result.get("plugins") or []:
+            name = entry.get("name")
+            if not name:
+                continue
+            categories[name] = entry.get("category", "")
+            register = entry.get("register") or {}
+            fields_by_plugin[name] = [FieldInfo.from_dict(d) for d in register.get("fields") or []]
+
+        manager = cls(plugin_categories=categories, **kwargs)
+        manager._fields_cache.update(fields_by_plugin)
+        return manager
+
     def get_fields(self, plugin_name: str) -> List[FieldInfo]:
         """Список FieldInfo для GUI-генерации виджетов.
 

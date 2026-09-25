@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import builtins
+import hashlib
+import json
 import os
 import threading
 import warnings
@@ -687,6 +689,11 @@ class BuiltinCommands:
                 "Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover)",
             ),
             (
+                "catalog.plugins",
+                self._cmd_catalog_plugins,
+                "Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода",
+            ),
+            (
                 "introspect.telemetry",
                 self._cmd_introspect_telemetry,
                 "Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)",
@@ -903,6 +910,89 @@ class BuiltinCommands:
             "count": len(plugins),
             "failed_imports": dict(sorted(failed.items())),
         }
+
+    def _cmd_catalog_plugins(self, data=None, **kwargs) -> dict:
+        """Каталог плагинов для GUI-стороны (Task 1b.2a) — форма регистра БЕЗ plugin-кода.
+
+        Отвечает на «как GUI строит формы параметров, не импортируя Plugins/Services»:
+        каждая запись несёт ``register.fields`` — список dict-ов ``FieldInfo.to_dict()``
+        (см. ``registers_module/core/field_info.py``), из которых прототип восстанавливает
+        поля через ``FieldInfo.from_dict()`` (``RegistersManager.from_catalog``). Тот же
+        каталог, что и ``introspect.plugins`` (persistent per-process singleton
+        PluginRegistry), но payload-форма — под GUI-потребителя, а не под диагностику;
+        ``introspect.plugins`` не тронут (contract-тест на него — байт-в-байт).
+
+        ``rev`` — sha256 payload'а без самого ``rev`` (sort_keys, ensure_ascii=False):
+        стабилен между вызовами при неизменном каталоге, меняется при любой правке поля.
+
+        Изоляция по плагину (ревью 1, находка лида): один плохой плагин (регистр без
+        pydantic-модели — ``AttributeError`` на ``model_fields``, или любое иное
+        исключение при сборке записи) раньше ронял ``json.dumps(payload)`` целиком —
+        каталог не возвращал НИ ОДНОГО плагина вместо N-1 рабочих. Каждая запись
+        строится в своём ``try/except``; провалившийся плагин уходит в
+        ``failed_catalog`` (``{name: "ExcType: сообщение"}``), остальные — как обычно.
+        ``FieldInfo.to_dict()`` дополнительно сам JSON-safe по ``default``/``choices``/
+        ``meta`` (см. ``field_info.py::_json_safe``) — этот try/except остаётся сеткой
+        безопасности для того, что JSON-safety поля не покрывает (сломанный класс).
+        """
+        from ...registers_module.core.field_info import extract_fields
+        from ..plugins.registry import PluginRegistry
+
+        entries = sorted(PluginRegistry.list(), key=lambda e: e.name)
+
+        plugins: list = []
+        failed_catalog: dict[str, str] = {}
+        for entry in entries:
+            try:
+                register: dict | None = None
+                if entry.register_classes:
+                    fields = [
+                        fi.to_dict() for fi in extract_fields(entry.name, entry.register_classes[0], entry.category)
+                    ]
+                    register = {"fields": fields}
+                plugin_entry = {
+                    "name": entry.name,
+                    "category": entry.category,
+                    "description": entry.description,
+                    "class_path": entry.class_path,
+                    "version": entry.version,
+                    "api_version": entry.api_version,
+                    "requires": list(entry.requires),
+                    "inputs": [
+                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "shape": p.shape}
+                        for p in entry.inputs
+                    ],
+                    "outputs": [
+                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "shape": p.shape}
+                        for p in entry.outputs
+                    ],
+                    "commands": list(getattr(entry.plugin_class, "commands", {}) or {}),
+                    "register": register,
+                }
+                # Валидировать JSON-safety ДО добавления — сеть поверх FieldInfo.to_dict()
+                # (на случай значения, которое не покрыл _json_safe: ни isinstance-ветка,
+                # ни str() не гарантированы для абсолютно любого объекта).
+                # sort_keys=True — ОБЯЗАТЕЛЬНО, тот же режим, что у rev ниже (ревью 2):
+                # dict с несравнимыми ключами (напр. {1: "a", "b": 2}) сериализуется без
+                # sort_keys, но валится с TypeError на sort_keys=True — если проверка
+                # использует другой режим, чем rev, плохая запись проходит ЭТУ проверку
+                # и роняет ОБЩИЙ json.dumps(payload, sort_keys=True) на rev целиком.
+                json.dumps(plugin_entry, sort_keys=True, ensure_ascii=False)
+            except Exception as exc:  # noqa: BLE001 — один плохой плагин не должен ронять каталог целиком
+                failed_catalog[entry.name] = f"{type(exc).__name__}: {exc}"
+                continue
+            plugins.append(plugin_entry)
+
+        failed = PluginRegistry.failed_imports()
+        payload = {
+            "success": True,
+            "plugins": plugins,
+            "failed_imports": dict(sorted(failed.items())),
+            "failed_catalog": dict(sorted(failed_catalog.items())),
+        }
+        rev = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        payload["rev"] = rev
+        return payload
 
     def _cmd_introspect_router_stats(self, data=None, **kwargs) -> dict:
         """Счётчики router'а процесса: отвечает «дошло/ушло/дропнулось ли сообщение».

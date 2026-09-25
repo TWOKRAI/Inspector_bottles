@@ -148,6 +148,70 @@ class CommandCatalog:
         return cls(entries)
 
     @classmethod
+    def from_catalog(
+        cls,
+        catalog_result: dict[str, Any],
+        connection_map: IConnectionMap,
+    ) -> CommandCatalog:
+        """Построить каталог из ``catalog.plugins``-payload (Task 1b.2a) — БЕЗ plugin-кода.
+
+        В отличие от ``from_registry_and_map`` (сканирует ``plugin_class.commands`` и
+        ``register_classes.model_fields`` напрямую), источник здесь — уже сериализованный
+        payload хаб-команды ``catalog.plugins``:
+
+        - ``commands`` — identity-маппинг ``{name: name}``: wire несёт только СПИСОК
+          имён команд (``entry.plugin_class.commands`` — это dict "публичное имя ->
+          метод плагина", метод НЕ пересекает границу вместе с классом), поэтому dict-
+          инвариант резолва (``"set_field" in pc.commands``) остаётся рабочим, а точное
+          значение (метод) не нужно ни одному вызывающему в этом каталоге;
+        - ``register_fields``/``field_routing`` — из ``register.fields`` (FieldInfo-
+          словари): ``field_name`` + ``meta.routing.process_targets`` (routing уже dict
+          после ``FieldMeta.to_dict()``, тот же путь, что и у ``from_registry_and_map``).
+        """
+        entries: dict[str, PluginCommands] = {}
+
+        for entry in catalog_result.get("plugins") or []:
+            name = entry.get("name")
+            if not name:
+                continue
+            process_name = connection_map.get_process(name)
+            if process_name is None:
+                # Плагин есть в каталоге, но не в topology — пропускаем (как в from_registry_and_map)
+                continue
+
+            commands: dict[str, str] = {n: n for n in entry.get("commands") or []}
+
+            register = entry.get("register") or {}
+            register_fields: list[str] = []
+            field_routing: dict[str, tuple[str, ...]] = {}
+            for f in register.get("fields") or []:
+                field_name = f.get("field_name")
+                if not field_name:
+                    continue
+                register_fields.append(field_name)
+                meta = f.get("meta") or {}
+                routing = meta.get("routing") if isinstance(meta, dict) else None
+                if isinstance(routing, dict):
+                    targets = routing.get("process_targets")
+                    if targets:
+                        field_routing[field_name] = tuple(targets)
+
+            has_register = bool(register_fields)
+            if has_register and "set_config" not in commands:
+                commands["set_config"] = "cmd_set_config"
+
+            entries[name] = PluginCommands(
+                plugin_name=name,
+                process_name=process_name,
+                category=entry.get("category", ""),
+                commands=commands,
+                register_fields=register_fields,
+                field_routing=field_routing,
+            )
+
+        return cls(entries)
+
+    @classmethod
     def from_topology(
         cls,
         registry: IPluginRegistry,
