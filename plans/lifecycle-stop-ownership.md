@@ -1,7 +1,7 @@
 # lifecycle-stop-ownership — остановкой и сиротами владеет PM (L-5 + долги приёмки L-2)
 
 - **Slug:** `lifecycle-stop-ownership` · **Ветка:** `fix/lifecycle-stop-ownership` (создать при старте Ф1) · **Дата:** 2026-09-24
-- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен)
+- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 IN PROGRESS с 2026-09-25
 - **Полоса:** B (фреймворк). **Срок-якорь:** Ф1 закрыть **до gui-service Task 1.3a** (у Пульта появится кнопка
   «стоп» по сокету — сегодня она идёт незащищённым путём, см. Task 1.1).
 - **Слой:** framework (`process_manager_module`, `shared_resources_module`), `backend_ctl` (harness)
@@ -237,7 +237,7 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
   (`test_system_stop_mid_restart_refuses_the_spawn`), на main не сверено. Не защищены: ребёнок, держащий GIL (его
   добивает страховка 1.4), Windows.
 
-### Task 1.6 — Потери видны снаружи, а не только в stderr умирающего процесса
+### Task 1.6 — Потери видны снаружи, а не только в stderr умирающего процесса — IN PROGRESS 2026-09-25
 
 **Level:** Middle+ · **Assignee:** developer · **Layer:** framework
 **Факт:** строка итога хука (`emergency_log`) видна только в stderr; счётчики `get_stats()` после выхода никто не
@@ -248,6 +248,23 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 - [ ] После стопа `inspection_full` в `observability.db` (или ответе backend_ctl по завершённой сессии) есть запись сводки
   стопа с `released`/`buffered_dropped` по каждому процессу; числа совпадают со строками stderr.
 - [ ] Break-injection: без публикации — записи нет.
+
+**Контракт записи (ведущий, 2026-09-25, до кода — то, что видит тестер):**
+- Ровно одна запись на `PM.shutdown()`: `process='ProcessManager'`, `message` начинается с `stop summary:`;
+  в `extra` ключ `stop_summary` → `{имя_ребёнка: {"released": int, "buffered_dropped": int, "reported": bool}}`
+  по каждому ребёнку, остановленному этим `stop_all`.
+- `reported=false` — ребёнок не дошёл до хука выхода (убит `kill`/`terminate`, упал до `finally`); тогда
+  `released`/`buffered_dropped` = 0 и это «не знаем», а не «потерь нет».
+- Числа ребёнка равны числам его stderr-строки `queues released to gone readers: N, buffered dropped: M`;
+  нет строки → `released=0, buffered_dropped=0` при `reported=true`.
+- Severity: `WARNING`, если у кого-то `released>0`, `buffered_dropped>0` или `reported=false`; иначе `INFO`
+  (дефолтный порог истории INFO — запись есть и при «потерь нет»).
+
+**Направление реализации (ведущий):** транспорт ребёнок → PM — слот в разделяемой памяти на воплощение
+(создаёт `ProcessRegistry._create_process` рядом с `parent_pid`, едет аргументом `Process`), runner пишет итог
+`release_queues_at_exit` в слот последним действием хука, PM читает после подтверждённой смерти в `stop_all`.
+Отвергнуто «последнее сообщение в очередь PM»: `put` на выходе заводит feeder — тот самый источник зависаний L-2.
+Публикация — логом PM в `shutdown()` между `stop_all` и `super().shutdown()` (логгер PM ещё жив и пишет в стор).
 
 **Исполнение Ф1:** тестер в worktree до кода (1.1+1.3 — один заход; 1.2 и 1.4 — свои) → developer/teamlead →
 инъекции ведущего → стенд → reviewer синхронно. Порядок: 1.1 → 1.3 → 1.2 → 1.4 → 1.5 → 1.6 (1.1 и 1.3 дешёвые и снимают шум для замеров; до gui-service 1.3a обязательны 1.1 и 1.2, остальное — желательно).
