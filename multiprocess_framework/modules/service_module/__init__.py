@@ -8,8 +8,10 @@
     - register_service  — декоратор для автоматической регистрации класса
     - discover          — сканирование директорий и авторегистрация сервисов
     - DiscoveryResult   — результат сканирования (loaded / failed / total)
+    - ServiceHost       — хост lifecycle за плоскими командами service.* (Task 1b.5)
 """
 
+from multiprocess_framework.modules.service_module.host import ServiceHost
 from multiprocess_framework.modules.service_module.interfaces import (
     IService,
     ServiceLifecycle,
@@ -27,6 +29,7 @@ from multiprocess_framework.modules.service_module.scanner import (
 __all__ = [
     "DiscoveryResult",
     "IService",
+    "ServiceHost",
     "ServiceEntry",
     "ServiceLifecycle",
     "ServiceRegistry",

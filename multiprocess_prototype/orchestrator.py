@@ -14,6 +14,8 @@ Generic-часть (StateStore из build-time хуков, observability-watcher
 Task 1b.1 (ADR-RCP-007): хаб хостит сервис рецептов ``recipe.*`` —
 :meth:`ProcessManagerProcessApp._register_builtin_commands` дорегистрирует
 обработчики ``RecipeService`` поверх встроенных команд PM.
+
+Task 1b.5 (ADR-SVC-004): там же — хост сервисов ``service.*`` (``ServiceHost``).
 """
 
 from __future__ import annotations
@@ -50,7 +52,7 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
         return apply_topology_with_display_reload(self, blueprint, super().apply_topology)
 
     def _register_builtin_commands(self) -> None:
-        """Встроенные команды PM + сервис рецептов ``recipe.*`` (Task 1b.1).
+        """Встроенные команды PM + хост сервисов ``service.*`` (1b.5) + сервис рецептов ``recipe.*`` (1b.1).
 
         Сервис нужен манифест: из него каталог рецептов (``recipes:``) и
         «последний активный» (``pipeline:``). Нет манифеста или ``recipes:`` —
@@ -60,6 +62,7 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
         super()._register_builtin_commands()
         if not self.command_manager:
             return
+        self._register_service_commands()
         manifest_path = str(self.get_config("manifest_path") or "")
         if not manifest_path:
             self._log_warning("[recipe] manifest_path не задан — recipe.* не зарегистрированы")
@@ -79,6 +82,44 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
                 metadata={"description": f"Сервис рецептов (ADR-RCP-007): {cmd_name}"},
                 tags=["system"],
             )
+
+    def _register_service_commands(self) -> None:
+        """Хост сервисов ``service.*`` (Task 1b.5, ADR-SVC-004) — рядом с ``recipe.*``.
+
+        Discovery ленивая (первый ``service.*``-вызов), пути — ``discovery.service_paths``
+        system-конфига, резолв как в ``frontend/app.py`` (относительные — от корня проекта).
+        """
+        from multiprocess_framework.modules.service_module import ServiceHost
+
+        config_error = None
+        try:
+            paths = resolve_service_paths(str(self.get_config("manifest_path") or ""))
+        except Exception as exc:  # noqa: BLE001 — сервисы не должны ронять хаб
+            config_error = f"{type(exc).__name__}: {exc}"
+            self._log_error(f"[service] пути сервисов не прочитаны: {exc} — service.* с пустым каталогом")
+            paths = []
+        host = ServiceHost(service_paths=paths, config_error=config_error)
+        for cmd_name, handler in host.handlers().items():
+            self.command_manager.register_command(
+                cmd_name,
+                handler,
+                metadata={"description": f"Хост сервисов (ADR-SVC-004): {cmd_name}"},
+                tags=["system"],
+            )
+
+
+def resolve_service_paths(manifest_path: str) -> list[Path]:
+    """``discovery.service_paths`` system-конфига манифеста; ``[]`` при ``auto_discover: false``."""
+    from multiprocess_framework.modules.app_module import ManifestStore
+
+    from multiprocess_prototype.backend.config.schemas import load_system_config
+    from multiprocess_prototype.main import PROJECT_ROOT
+
+    system = ManifestStore(manifest_path).load().system if manifest_path else None
+    discovery = load_system_config(system).discovery
+    if not discovery.auto_discover:
+        return []
+    return [Path(p) if Path(p).is_absolute() else PROJECT_ROOT / p for p in discovery.service_paths]
 
 
 def build_recipe_service(pm, manifest_path: Path):
