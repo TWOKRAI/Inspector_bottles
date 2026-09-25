@@ -130,7 +130,7 @@ UNREGISTERED ──> READY ──> RUNNING ──> STOPPED
 
 ## Команды `service.*` (ServiceHost, Task 1b.5, ADR-SVC-004)
 
-`ServiceHost(registry=None, start_wait_sec=0.2, service_paths=None).handlers()` — пять обработчиков
+`ServiceHost(registry=None, start_wait_sec=0.2, service_paths=None, config_error=None).handlers()` — пять обработчиков
 `handler(args: dict) -> dict`. Ответы ПЛОСКИЕ; конверт `{"success", "result": <плоский>}` добавляет
 сторона запроса (на хабе — CommandManager/IPC). В прототипе хост зарегистрирован на хабе
 (`multiprocess_prototype/orchestrator.py`), клиент — `RemoteServiceManager`.
@@ -152,6 +152,11 @@ Pre/Post: `start` — Pre: имя в реестре; Post: `cls()` вызван 
 успехе, lifecycle `running` либо `error` (сразу или позже, из потока). `stop` — Post: lifecycle
 `stopped` либо `error`, либо отказ `start_in_progress` без ожидания, если старт этого сервиса в
 полёте; с идущим `start()` того же сервиса не пересекается (ADR-SVC-004).
+
+Правило потоков для сервисов: `start()` исполняется в рабочем потоке хоста, `stop()`/`get_status()` — в
+потоке, который вызвал обработчик команды. Сервис не должен держать ресурсы, привязанные к потоку
+(соединение sqlite и т.п.), между `start()` и `stop()` — либо открывает их лениво на каждый вызов.
+`config_error` (сбой чтения конфига у вызывающего) виден в `service.list["failed"]["<config>"]`.
 
 ## Зависимости
 

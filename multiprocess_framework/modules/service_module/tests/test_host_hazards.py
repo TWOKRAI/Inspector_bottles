@@ -334,3 +334,52 @@ def test_no_service_paths_means_no_discover(monkeypatch) -> None:
     monkeypatch.setattr(scanner_module, "discover", lambda *d: pytest.fail("discover без service_paths"))
     reply = ServiceHost().handlers()["service.list"]({})
     assert reply == {"success": True, "services": [], "failed": {}}
+
+
+# ------------------------------------------------------------------
+# ревью 1b.5: сбой запуска потока старта; ошибка конфига вызывающего видна в списке
+# ------------------------------------------------------------------
+
+
+def test_thread_start_failure_does_not_leave_job_in_flight(monkeypatch) -> None:
+    class _Ok:
+        def start(self, config: dict) -> bool:
+            return True
+
+        def stop(self) -> bool:
+            return True
+
+        def get_status(self) -> dict:
+            return {}
+
+    _register("ok", _Ok)
+    handlers = ServiceHost().handlers()
+
+    def _no_threads(self) -> None:
+        raise RuntimeError("can't start new thread")
+
+    # Хелпер _in_thread сам использует потоки — пока патч активен, зовём напрямую
+    # (без потока хендлер не блокируется: ждать нечего).
+    monkeypatch.setattr(threading.Thread, "start", _no_threads)
+    failed = handlers["service.start"]({"name": "ok"})
+    monkeypatch.undo()
+
+    assert failed["success"] is False
+    assert failed["error"] == "start_failed"
+    assert "can't start new thread" in failed["message"]
+    assert failed["lifecycle"] == "ready"
+
+    stop, _ = _in_thread(handlers["service.stop"], {"name": "ok"})
+    assert stop.get("error") != "start_in_progress", stop
+    started, _ = _in_thread(handlers["service.start"], {"name": "ok"})
+    assert started == {"success": True, "name": "ok", "lifecycle": "running"}
+
+
+def test_config_error_is_reported_in_list_and_kept_after_discover(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        scanner_module, "discover", lambda *d: DiscoveryResult(failed=[("broken/service.py", "ImportError: x")])
+    )
+    handlers = ServiceHost(service_paths=[tmp_path], config_error="ValidationError: bad yaml").handlers()
+    reply, _ = _in_thread(handlers["service.list"], {})
+    assert reply["success"] is True
+    assert reply["failed"] == {"<config>": "ValidationError: bad yaml", "broken/service.py": "ImportError: x"}

@@ -91,12 +91,15 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
         """
         from multiprocess_framework.modules.service_module import ServiceHost
 
+        config_error = None
         try:
             paths = resolve_service_paths(str(self.get_config("manifest_path") or ""))
         except Exception as exc:  # noqa: BLE001 — сервисы не должны ронять хаб
+            config_error = f"{type(exc).__name__}: {exc}"
             self._log_error(f"[service] пути сервисов не прочитаны: {exc} — service.* с пустым каталогом")
             paths = []
-        for cmd_name, handler in ServiceHost(service_paths=paths).handlers().items():
+        host = ServiceHost(service_paths=paths, config_error=config_error)
+        for cmd_name, handler in host.handlers().items():
             self.command_manager.register_command(
                 cmd_name,
                 handler,

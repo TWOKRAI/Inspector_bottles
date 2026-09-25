@@ -64,6 +64,7 @@ class ServiceHost:
         registry: ServiceRegistry | None = None,
         start_wait_sec: float | None = 0.2,
         service_paths: Sequence[str | Path] | None = None,
+        config_error: str | None = None,
     ) -> None:
         self._registry = registry if registry is not None else ServiceRegistry()
         self._start_wait_sec = start_wait_sec
@@ -74,7 +75,8 @@ class ServiceHost:
         self._jobs: dict[str, _StartJob] = {}
         self._discover_lock = threading.Lock()
         self._discovered = self._service_paths is None
-        self._failed: dict[str, str] = {}
+        # Сбой чтения конфига у вызывающего (пути сервисов) виден клиенту в service.list["failed"].
+        self._failed: dict[str, str] = {"<config>": config_error} if config_error else {}
 
     # ------------------------------------------------------------------
     # Публичное
@@ -137,9 +139,14 @@ class ServiceHost:
                     return _ok(name, entry)
                 job = _StartJob()
                 self._jobs[name] = job
-                threading.Thread(
-                    target=self._run_start, args=(name, entry, job), name=f"service-start-{name}", daemon=True
-                ).start()
+                try:
+                    threading.Thread(
+                        target=self._run_start, args=(name, entry, job), name=f"service-start-{name}", daemon=True
+                    ).start()
+                except Exception as exc:  # noqa: BLE001 — нет потока: иначе job навсегда «в полёте»
+                    self._jobs.pop(name, None)
+                    reply = _fail("start_failed", name, f"Service '{name}' start thread failed: {exc}")
+                    return {**reply, "lifecycle": entry.lifecycle.value}
         if not job.done.wait(self._start_wait_sec):
             return {**_ok(name, entry), "pending": True}
         if job.error is not None:
@@ -243,9 +250,9 @@ class ServiceHost:
 
             try:
                 result = discover(*[Path(p) for p in self._service_paths or []])
-                self._failed = dict(result.failed)
+                self._failed.update(result.failed)
             except Exception as exc:  # noqa: BLE001 — список обязан ответить
-                self._failed = {"<discover>": f"{type(exc).__name__}: {exc}"}
+                self._failed["<discover>"] = f"{type(exc).__name__}: {exc}"
             self._discovered = True
 
 
