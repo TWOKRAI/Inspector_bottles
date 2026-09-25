@@ -2,7 +2,7 @@
 
 - **Slug:** line-sim
 - **Дата:** 2026-08-13
-- **Статус:** IN PROGRESS — Ф0 закрыта, идёт Ф1 · **ред. 3 от 2026-09-21**
+- **Статус:** IN PROGRESS — Ф0–Ф3 закрыты, Ф5 5.1–5.4 закрыты (5.5 DEFERRED); открыты Ф4 (отложена), Ф6 · **ред. 3 от 2026-09-21** (шапка сверена по git 2026-09-24)
 - **Ветка:** feat/line-sim (worktree `.claude/worktrees/line-sim`, от main)
 
 ## Контекст
@@ -587,7 +587,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   ошибка захвата ср 10.3 мм (нет `e_capture`, OPEN_QUESTIONS)] ([контракт](phase-5-contract-5.3.md)) (зависит от
   5.1, 5.2) — **Module contract:** impl-only
 - Task 5.4 (новая): Ручки отказов робота — задержка и обрыв ответа; инвариант дублей под
-  отказом [PENDING] (зависит от 5.1) — **Module contract:** impl-only
+  отказом [DONE 2026-09-24, merge `0eb5f03f`] (зависит от 5.1) — **Module contract:** impl-only
 - Task 5.5 (новая): Внешний наблюдатель — сверка класса и угла через два `backend_ctl`
   [DEFERRED до ответа на открытый вопрос 1] — **Module contract:** new-lite
 
