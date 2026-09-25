@@ -251,8 +251,10 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 
 **Контракт записи (ведущий, 2026-09-25, до кода — то, что видит тестер):**
 - Ровно одна запись на `PM.shutdown()`: `process='ProcessManager'`, `message` начинается с `stop summary:`;
-  в `extra` ключ `stop_summary` → `{имя_ребёнка: {"released": int, "buffered_dropped": int, "reported": bool}}`
+  в `extra["context"]` ключ `stop_summary` → `{имя_ребёнка: {"released": int, "buffered_dropped": int, "reported": bool}}`
   по каждому ребёнку, остановленному этим `stop_all`.
+  *(Поправлено ведущим 2026-09-25 по эскалации developer: стор кладёт структурные kwargs лога в
+  `extra.context` — так у всех записей PM; исходное «ключ в `extra`» было неточно, стор не трогаем.)*
 - `reported=false` — ребёнок не дошёл до хука выхода (убит `kill`/`terminate`, упал до `finally`); тогда
   `released`/`buffered_dropped` = 0 и это «не знаем», а не «потерь нет».
 - Числа ребёнка равны числам его stderr-строки `queues released to gone readers: N, buffered dropped: M`;

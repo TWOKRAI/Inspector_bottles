@@ -9,7 +9,7 @@
 Контракт (буквально):
   - Ровно одна запись на ``PM.shutdown()``: ``process='ProcessManager'``,
     ``message`` начинается с ``stop summary:``.
-  - ``extra`` (JSON) несёт ключ ``stop_summary`` -> ``{имя_ребёнка: {"released": int,
+  - ``extra["context"]`` (JSON) несёт ключ ``stop_summary`` -> ``{имя_ребёнка: {"released": int,
     "buffered_dropped": int, "reported": bool}}`` по каждому ребёнку, остановленному
     этим ``stop_all`` — все 6 детей ``inspection_full``.
   - ``reported=false`` — ребёнок не дошёл до хука выхода (kill/terminate, упал до
@@ -70,6 +70,17 @@ def _stop_summary_records(store: ObservabilityStore) -> List[Dict[str, Any]]:
     ]
 
 
+def _stop_summary_of(record: Dict[str, Any]) -> Any:
+    """``extra["context"]["stop_summary"]`` записи (None, если пути нет).
+
+    Правка контракта ведущим 2026-09-25: стор кладёт структурные kwargs лог-записи
+    в ``extra["context"]`` (так у всех записей PM: ``proc_name``/``pid``/``recipe``),
+    исходная буква контракта «ключ в ``extra``» была неточна — эскалация developer.
+    """
+    context = (record.get("extra") or {}).get("context") or {}
+    return context.get("stop_summary")
+
+
 def _expected_severity(summary: Dict[str, Dict[str, Any]]) -> str:
     """Правило severity буквально по брифу — независимая реализация, не вызов кода под тестом."""
     any_bad = any(
@@ -110,9 +121,8 @@ def test_normal_stop_writes_one_stop_summary_record(monkeypatch, tmp_path) -> No
     record = matches[0]
     assert record["message"].startswith("stop summary:"), record["message"]
 
-    extra = record.get("extra") or {}
-    assert "stop_summary" in extra, f"extra без ключа 'stop_summary': {extra!r}"
-    summary = extra["stop_summary"]
+    summary = _stop_summary_of(record)
+    assert summary is not None, f"extra.context без ключа 'stop_summary': {record.get('extra')!r}"
     assert isinstance(summary, dict), f"stop_summary не dict: {summary!r}"
     assert set(summary.keys()) == set(_CHILDREN), (
         f"stop_summary покрывает не всех 6 детей inspection_full: "
@@ -161,7 +171,7 @@ def test_stop_summary_numbers_match_stderr_lines(capfd, monkeypatch, tmp_path) -
         store.close()
 
     assert len(matches) == 1, f"ожидалась РОВНО одна запись сводки стопа, найдено {len(matches)}: {matches!r}"
-    summary = (matches[0].get("extra") or {}).get("stop_summary")
+    summary = _stop_summary_of(matches[0])
     assert isinstance(summary, dict), f"stop_summary отсутствует/не dict: {matches[0]!r}"
 
     stderr_numbers: Dict[str, tuple] = {}
@@ -219,7 +229,7 @@ def test_killed_child_is_reported_false_and_warning(monkeypatch, tmp_path) -> No
 
     assert len(matches) == 1, f"ожидалась РОВНО одна запись сводки стопа, найдено {len(matches)}: {matches!r}"
     record = matches[0]
-    summary = (record.get("extra") or {}).get("stop_summary") or {}
+    summary = _stop_summary_of(record) or {}
     renderer_entry = summary.get("renderer")
     assert renderer_entry == {"released": 0, "buffered_dropped": 0, "reported": False}, (
         f"renderer: ожидалась ровно {{'released': 0, 'buffered_dropped': 0, 'reported': False}} "
