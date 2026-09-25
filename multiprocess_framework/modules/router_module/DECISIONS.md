@@ -369,11 +369,17 @@ correlation-id ещё ждёт, `_resolve_pending` вызывается сраз
 ответ) — прежний `send()`. `send()` не меняется: через него едут события и broadcast.
 
 **Следствия.**
-- Самоответ минует recv-middleware и счётчики `sent_ok`/`received` — они на нём не растут.
+- Самоответ минует весь транспорт: send- и recv-middleware (fence-штамп, трасса `router_messages`), счётчики
+  `sent_ok`/`sent_attempted`/`sent_via_targets`/`received`, учёт отправителя в менеджере очередей; в ответе нет
+  `_receive_info`/`_source_channel`/`_fence` (ревью 1.3b, живой стенд: остаются только type/command/sender/
+  targets/queue_type/request_id/success/result). Потребителей этих ключей у `*.response` грепом не найдено.
+- Ожидающий получает тот же объект `result`, что вернул обработчик (раньше — копию через очередь); мутация
+  результата после ответа видна ожидающему. В проде ответ зовётся после обработчика — не блокер.
 - Колбэк `request_async` к себе выполняется внутри `reply_to_request` (на кадр глубже, тот же поток); исключение
   колбэка изолирует `_invoke_pending_callback` (hazard-тест `test_raising_async_callback_does_not_break_the_handler`).
-- Условие `reply_target == sender_name` тестами не охраняется (инъекция без него — 0 красных): оно защищает случай,
-  когда ответ перенаправлен другому адресату (`reply_to`), а pending с тем же id есть здесь.
+- Условие `reply_target == sender_name` охраняет явный `reply_to` на другого адресата при своём pending с тем же id
+  (`test_reply_to_other_does_not_resolve_own_pending_with_same_cid`); `sender_name` — это `process.name`, а у хаба
+  `router_id` другой (`router_ProcessManager`), ветку держит `test_self_reply_resolves_when_router_id_differs_from_process_name`.
 
 **Отвергнуто.** Порядок гашения в `ProcessModule.stop()` (`message_processor` последним + дренаж) — меняет стоп всех
 процессов, это lifecycle Ф3 «остановка как протокол». Ожидание в двери перед закрытием — ответ так и не появится,

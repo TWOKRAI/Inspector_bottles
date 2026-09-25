@@ -1252,6 +1252,10 @@ class RouterManager(ChannelRoutingManager):
         нынешний GUI-трафик). Адресат: ``data.reply_to`` / ``reply_to`` /
         ``sender`` входящего билета. Ответ едет control-plane (system-очередь
         приёмника, ``queue_type="system"``), где крутится его message_processor.
+
+        Исключение — ответ самому себе (адресат == ``process.name or router_id``) при
+        ещё ждущем pending: он разрешается сразу, мимо очереди и middleware, возврат
+        ``{"status": "success", "resolved_locally": True}`` (ADR-RTR-013).
         """
         cid = self._extract_correlation_id(request_msg)
         if not cid:

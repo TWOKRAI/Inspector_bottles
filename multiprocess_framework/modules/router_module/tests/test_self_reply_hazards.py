@@ -17,11 +17,15 @@
 from __future__ import annotations
 
 import threading
+from queue import Queue
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import pytest
 
-from .test_self_reply_acceptance import _make_self_router, _wait_until
+from ..channels.queue_channel import QueueChannel
+from ..core.router_manager import RouterManager
+from .test_self_reply_acceptance import _LoopbackQueueRegistry, _make_self_router, _wait_until
 
 
 @pytest.mark.timeout(15)
@@ -99,3 +103,70 @@ def test_raising_async_callback_does_not_break_the_handler():
         router.shutdown()
 
     assert calls == [1], f"колбэк вызван {len(calls)} раз, ожидался ровно один"
+
+
+@pytest.mark.timeout(15)
+def test_self_reply_resolves_when_router_id_differs_from_process_name():
+    """Прод-форма хаба: ``router_id='router_X'``, ``process.name='X'``, дверь ставит ``reply_to='X'``.
+
+    Найдено ревью 1.3b: стенд приёмки без процесса проверял только запасную ветку ``router_id``;
+    сравнение только с ``router_id`` оставляло все тесты зелёными, а в проде возвращало потерю.
+    """
+    q: Queue = Queue()
+    qr = _LoopbackQueueRegistry("X", q)
+    router = RouterManager(manager_name="router_X", queue_registry=qr, process=SimpleNamespace(name="X"))
+    router.register_channel(QueueChannel("X_system", q))
+    router.initialize()
+    router.register_message_handler("self.echo", lambda m: router.reply_to_request(m, {"v": 1}))
+    out: Dict[str, Any] = {}
+
+    def _requester() -> None:
+        out["r"] = router.request(
+            {"type": "command", "command": "self.echo", "targets": ["X"], "sender": "drv", "reply_to": "X"},
+            timeout=1.0,
+        )
+
+    t = threading.Thread(target=_requester, daemon=True)
+    try:
+        t.start()
+        assert _wait_until(lambda: qr.tickets("self.echo"), deadline_sec=2.0), "запрос не дошёл до очереди"
+        router.receive(timeout=0.0, channel_types=["system"])  # ровно один такт
+        t.join(timeout=0.3)
+        resolved = not t.is_alive()
+    finally:
+        t.join(timeout=2.0)
+        router.shutdown()
+    assert resolved, "самоответ по ветке process.name не разрешён за один receive()"
+    assert out["r"].get("result") == {"v": 1}
+
+
+@pytest.mark.timeout(15)
+def test_reply_to_other_does_not_resolve_own_pending_with_same_cid():
+    """Явный ``reply_to`` на другого адресата не разрешает свой pending с тем же id.
+
+    Найдено ревью 1.3b: без условия ``reply_target == sender_name`` ответ, адресованный
+    ``elsewhere``, доставался своему ожидающему, а ``elsewhere`` не получал ничего.
+    """
+    router, qr, _q = _make_self_router("hub")
+    router.register_message_handler("self.cmd", lambda m: router.reply_to_request(m, {"for": "elsewhere"}))
+    calls: list = []
+    try:
+        router.request_async(
+            {
+                "type": "command",
+                "command": "self.cmd",
+                "targets": ["hub"],
+                "sender": "drv",
+                "reply_to": "elsewhere",
+                "request_id": "cid-X",
+            },
+            on_response=calls.append,
+            timeout=5.0,
+        )
+        assert _wait_until(lambda: qr.tickets("self.cmd"), deadline_sec=2.0), "запрос не дошёл до очереди"
+        router.receive(timeout=0.0, channel_types=["system"])
+        other = qr.queue_for("elsewhere")
+        assert calls == [], f"свой pending разрешён ответом для 'elsewhere': {calls!r}"
+        assert other.qsize() == 1 and other.get_nowait()["request_id"] == "cid-X"
+    finally:
+        router.shutdown()
