@@ -2,7 +2,7 @@
 """ServiceHost — хост жизненного цикла сервисов за командами ``service.*`` (Task 1b.5).
 
 Хост живёт там, где его зарегистрировали (в прототипе — хаб ``ProcessManager``,
-ADR-SVC-002), и отдаёт пять обработчиков ``handler(args: dict) -> dict``:
+ADR-SVC-004), и отдаёт пять обработчиков ``handler(args: dict) -> dict``:
 
     service.list     -> {"success", "services": [{"name","display_name","lifecycle","metadata"}], "failed"}
     service.status   -> {"success", "name", "lifecycle", "detail"}
@@ -148,7 +148,7 @@ class ServiceHost:
         entry, name, err = self._entry(args)
         if entry is None:
             return err
-        # Синхронно: при старте в полёте ждёт его конца на замке сервиса (см. ADR-SVC-002).
+        # Синхронно: при старте в полёте ждёт его конца на замке сервиса (см. ADR-SVC-004).
         with self._lock_for(name):
             if entry.lifecycle == ServiceLifecycle.STOPPED:
                 return _ok(name, entry)

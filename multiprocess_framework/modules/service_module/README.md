@@ -16,6 +16,7 @@ service_module/
 ├── interfaces.py      # IService Protocol + ServiceLifecycle enum
 ├── registry.py        # ServiceRegistry singleton + ServiceEntry + @register_service
 ├── scanner.py         # discover(*dirs) + DiscoveryResult
+├── host.py            # ServiceHost — lifecycle за командами service.* (1b.5)
 ├── README.md
 ├── STATUS.md
 ├── DECISIONS.md
@@ -127,6 +128,30 @@ UNREGISTERED ──> READY ──> RUNNING ──> STOPPED
 
 `ServiceRegistry` **не вызывает** `start()/stop()` самостоятельно — только хранит метаданные и класс. Переходы lifecycle выполняет application-слой (например `ServicesPresenter.start_service()`).
 
+## Команды `service.*` (ServiceHost, Task 1b.5, ADR-SVC-004)
+
+`ServiceHost(registry=None, start_wait_sec=0.2, service_paths=None).handlers()` — пять обработчиков
+`handler(args: dict) -> dict`. Ответы ПЛОСКИЕ; конверт `{"success", "result": <плоский>}` добавляет
+сторона запроса (на хабе — CommandManager/IPC). В прототипе хост зарегистрирован на хабе
+(`multiprocess_prototype/orchestrator.py`), клиент — `RemoteServiceManager`.
+
+| Команда | Аргументы | Ответ |
+|---------|-----------|-------|
+| `service.list` | — | `{success, services: [{name, display_name, lifecycle, metadata}], failed: {путь: причина}}` |
+| `service.status` | `name` | `{success, name, lifecycle, detail}` — `detail` = `get_status()` экземпляра, `{}` без экземпляра, `{"pending": True}` пока старт в полёте |
+| `service.start` | `name` | `{success, name, lifecycle}`; не успел за `start_wait_sec` — `+ pending: True` |
+| `service.stop` | `name` | `{success, name, lifecycle}`; незапущенный — `stopped` без вызова `stop()` |
+| `service.restart` | `name` | `stop`, затем `start` (ответ `start`) |
+
+Ошибки: неизвестное имя — `{success: False, error: "unknown_service", name}`; сбой `cls()`/`start()`/
+`stop()` или `False` от них — `{success: False, error: "start_failed"|"stop_failed", message, name,
+lifecycle: "error"}`. `start`/`stop` идемпотентны. `lifecycle` — строки `ServiceLifecycle`.
+
+Pre/Post: `start` — Pre: имя в реестре; Post: `cls()` вызван не более одного раза на жизнь хоста при
+успехе, lifecycle `running` либо `error` (сразу или позже, из потока). `stop` — Post: lifecycle
+`stopped` либо `error`; не пересекается с идущим `start()` того же сервиса (замок сервиса) — и
+поэтому ждёт его (см. «Открыто» в ADR-SVC-004).
+
 ## Зависимости
 
 - **Зависит от:** только `stdlib` (`threading`, `dataclasses`, `importlib`, `pathlib`)
@@ -135,7 +160,7 @@ UNREGISTERED ──> READY ──> RUNNING ──> STOPPED
 
 ## Ограничения
 
-- **Не управляет lifecycle** — реестр не вызывает `start()/stop()` сам; это ответственность application-слоя (например, `ServicesPresenter` в Phase 3).
+- **Реестр не управляет lifecycle** — `ServiceRegistry` не вызывает `start()/stop()` сам; это делает `ServiceHost` (1b.5) или application-слой (`ServicesPresenter`).
 - **Хранит классы, не экземпляры** — `ServiceEntry.cls` ссылается на класс. Инстанцирование при `start()` выполняет вызывающий. Разные вызывающие могут передавать разные параметры конструктора.
 - **Нет hot-reload** — после регистрации класс остаётся в реестре до перезапуска процесса (в отличие от `PluginRegistry`). `clear()` предназначен только для изоляции тестов.
 - **Нет интеграции с StateStore / GUI** — синхронизацию состояния обеспечивает `ServiceStateAdapter` в `multiprocess_prototype/` (не часть этого модуля).

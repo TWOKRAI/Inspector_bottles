@@ -15,7 +15,7 @@ Task 1b.1 (ADR-RCP-007): хаб хостит сервис рецептов ``rec
 :meth:`ProcessManagerProcessApp._register_builtin_commands` дорегистрирует
 обработчики ``RecipeService`` поверх встроенных команд PM.
 
-Task 1b.5 (ADR-SVC-002): там же — хост сервисов ``service.*`` (``ServiceHost``).
+Task 1b.5 (ADR-SVC-004): там же — хост сервисов ``service.*`` (``ServiceHost``).
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
             )
 
     def _register_service_commands(self) -> None:
-        """Хост сервисов ``service.*`` (Task 1b.5, ADR-SVC-002) — рядом с ``recipe.*``.
+        """Хост сервисов ``service.*`` (Task 1b.5, ADR-SVC-004) — рядом с ``recipe.*``.
 
         Discovery ленивая (первый ``service.*``-вызов), пути — ``discovery.service_paths``
         system-конфига, резолв как в ``frontend/app.py`` (относительные — от корня проекта).
@@ -100,7 +100,7 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
             self.command_manager.register_command(
                 cmd_name,
                 handler,
-                metadata={"description": f"Хост сервисов (ADR-SVC-002): {cmd_name}"},
+                metadata={"description": f"Хост сервисов (ADR-SVC-004): {cmd_name}"},
                 tags=["system"],
             )
 
