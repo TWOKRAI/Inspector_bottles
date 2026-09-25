@@ -1274,6 +1274,13 @@ class RouterManager(ChannelRoutingManager):
             "success": success,
             "result": result,
         }
+        # Ответ самому себе (ADR-RTR-013): pending разрешается здесь, на потоке обработчика,
+        # а не через собственную system-очередь. Иначе обработчик, гасящий процесс
+        # (system.shutdown), терял ответ: раннер успевал остановить message_processor
+        # раньше, чем receive() разбирал очередь. Pending уже снят (опоздавший ответ)
+        # или адресат чужой — прежний send().
+        if reply_target == sender_name and self._resolve_pending(cid, response):
+            return {"status": "success", "resolved_locally": True}
         return self.send(response)
 
     def _dispatch_command(self, processed: Dict[str, Any]) -> None:

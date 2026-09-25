@@ -1,0 +1,101 @@
+# -*- coding: utf-8 -*-
+"""Hazard-тесты автора Task 1.3b (ADR-RTR-013): синхронный самоответ в ``reply_to_request``.
+
+Что может сломаться именно в этом механизме:
+
+1. Сценарий ``system.shutdown``: обработчик сам гасит приёмный цикл сразу после ответа —
+   больше ни одного ``receive()`` не будет. До фикса ответ лежал в собственной очереди и
+   ждал такта, которого нет; ожидающий ``request()`` висел до таймаута.
+2. Колбэк ``request_async`` к себе теперь зовётся ВНУТРИ ``reply_to_request`` на потоке
+   обработчика (раньше — внутри ``receive()``). Колбэк, бросивший исключение, не имеет
+   права уронить ни ``reply_to_request``, ни диспетчеризацию обработчика.
+
+Стенд — помощники приёмочного файла тестера (петлевой queue_registry), чтобы оба набора
+били в один и тот же транспорт.
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any, Dict
+
+import pytest
+
+from .test_self_reply_acceptance import _make_self_router, _wait_until
+
+
+@pytest.mark.timeout(15)
+def test_handler_stopping_the_loop_still_delivers_its_reply():
+    """Приёмный цикл останавливается внутри обработчика — ответ всё равно доходит."""
+    router, qr, _q = _make_self_router("self_stop")
+    stop = threading.Event()
+    result: Dict[str, Any] = {}
+
+    def _handler(msg: dict) -> None:
+        router.reply_to_request(msg, {"stopping": True})
+        stop.set()  # как _cmd_system_shutdown: после ответа процесс гасит свой цикл
+
+    router.register_message_handler("self.shutdown", _handler)
+
+    def _loop() -> None:
+        while not stop.is_set():
+            router.receive(timeout=0.0, channel_types=["system"])
+            stop.wait(0.005)
+
+    def _requester() -> None:
+        result["r"] = router.request(
+            {"type": "command", "command": "self.shutdown", "targets": ["self_stop"], "sender": "self_stop"},
+            timeout=2.0,
+        )
+
+    req = threading.Thread(target=_requester, daemon=True)
+    loop = threading.Thread(target=_loop, daemon=True)
+    try:
+        req.start()
+        assert _wait_until(lambda: qr.tickets("self.shutdown"), deadline_sec=2.0), "запрос не дошёл до очереди"
+        loop.start()
+        loop.join(timeout=2.0)
+        assert not loop.is_alive(), "обработчик не остановил цикл — стенд не воспроизвёл сценарий"
+        req.join(timeout=0.5)  # после остановки цикла receive() больше нет
+        delivered = not req.is_alive()
+    finally:
+        stop.set()
+        req.join(timeout=3.0)
+        router.shutdown()
+
+    assert delivered, "ответ не дошёл после остановки приёмного цикла — сценарий потери ответа system.shutdown"
+    assert result["r"].get("success") is True
+    assert result["r"].get("result") == {"stopping": True}
+
+
+@pytest.mark.timeout(15)
+def test_raising_async_callback_does_not_break_the_handler():
+    """Колбэк самоответа бросает — ``reply_to_request`` и остаток обработчика живы."""
+    router, qr, _q = _make_self_router("self_cb")
+    calls: list = []
+    after_reply = threading.Event()
+
+    def _on_response(_resp: dict) -> None:
+        calls.append(1)
+        raise RuntimeError("колбэк упал")
+
+    def _handler(msg: dict) -> None:
+        router.reply_to_request(msg, {"x": 1})
+        after_reply.set()  # строка после ответа обязана выполниться
+
+    router.register_message_handler("self.cb", _handler)
+    try:
+        cid = router.request_async(
+            {"type": "command", "command": "self.cb", "targets": ["self_cb"], "sender": "self_cb"},
+            on_response=_on_response,
+            timeout=2.0,
+        )
+        assert cid
+        assert _wait_until(lambda: qr.tickets("self.cb"), deadline_sec=2.0), "запрос не дошёл до очереди"
+        router.receive(timeout=0.0, channel_types=["system"])
+        assert after_reply.wait(1.0), "исключение колбэка прервало обработчик после reply_to_request"
+        router.receive(timeout=0.0, channel_types=["system"])  # лишний такт: второго вызова быть не должно
+    finally:
+        router.shutdown()
+
+    assert calls == [1], f"колбэк вызван {len(calls)} раз, ожидался ровно один"
