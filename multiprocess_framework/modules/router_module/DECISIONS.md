@@ -350,3 +350,35 @@ release за lock-free refcount пула.
 **Reversible:** yes (вернуть инлайн-вызов в `_handle_line`; kwargs потолков — с дефолтами).
 **Refs:** plans/2026-09-22_gui-service/phase-1-one-machine.md (Task 1.3a), ADR-RTR-008,
 `tests/test_socket_channel_hol_acceptance.py`, `tests/test_socket_client_max_line_acceptance.py`.
+
+## ADR-RTR-013: ответ самому себе разрешает pending в `reply_to_request`, не через свою очередь
+
+**Статус:** accepted (2026-09-25, ветка fix/gui-service-1.3b, Task 1.3b плана gui-service; место — вердикт cto)
+
+**Контекст.** `request()` процесса к самому себе (дверь `backend_ctl` ставит `reply_to=<хост>`) получал ответ так:
+обработчик → `reply_to_request` → `send()` в СОБСТВЕННУЮ system-очередь → следующий `receive()` того же
+`message_processor` → `_resolve_pending`. Обработчик `system.shutdown` взводит стоп-события; раннер PM опрашивает их
+раз в 100 мс и, проснувшись в первые ~10 мс, гасит `message_processor` раньше этого `receive()`. Ответ оставался в
+очереди, адаптер двери ждал до таймаута, клиент получал EOF. Замер investigator (скрипт-стенд): BASE `02d1db2c`
+3/100, HEAD `c9ae9b06` 5/100; трасса 80 прогонов — все 7 потерь со стопом раннера через 1,0–9,8 мс после
+обработчика; инъекция `sleep(0.15)` после взвода событий — 5/5 потерь.
+
+**Решение.** В `reply_to_request`: если адресат ответа — этот роутер (`process.name or router_id`) и pending с этим
+correlation-id ещё ждёт, `_resolve_pending` вызывается сразу, на потоке обработчика, и ответ в очередь не кладётся
+(возврат `{"status": "success", "resolved_locally": True}`). Чужой адресат или уже снятый pending (опоздавший
+ответ) — прежний `send()`. `send()` не меняется: через него едут события и broadcast.
+
+**Следствия.**
+- Самоответ минует recv-middleware и счётчики `sent_ok`/`received` — они на нём не растут.
+- Колбэк `request_async` к себе выполняется внутри `reply_to_request` (на кадр глубже, тот же поток); исключение
+  колбэка изолирует `_invoke_pending_callback` (hazard-тест `test_raising_async_callback_does_not_break_the_handler`).
+- Условие `reply_target == sender_name` тестами не охраняется (инъекция без него — 0 красных): оно защищает случай,
+  когда ответ перенаправлен другому адресату (`reply_to`), а pending с тем же id есть здесь.
+
+**Отвергнуто.** Порядок гашения в `ProcessModule.stop()` (`message_processor` последним + дренаж) — меняет стоп всех
+процессов, это lifecycle Ф3 «остановка как протокол». Ожидание в двери перед закрытием — ответ так и не появится,
+стоп +9,5 с.
+
+**Reversible:** yes (снять два оператора в `reply_to_request`).
+**Refs:** plans/2026-09-22_gui-service/phase-1-one-machine.md (Task 1.3b), `docs/claude/OPEN_QUESTIONS.md` (запись
+про `(system-wide)`), `tests/test_self_reply_acceptance.py`, `tests/test_self_reply_hazards.py`.

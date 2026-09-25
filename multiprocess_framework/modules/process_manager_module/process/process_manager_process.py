@@ -3489,7 +3489,9 @@ class ProcessManagerProcess(ProcessModule):
             # backend-control endpoint (PID-specific остановка, без глобального kill) — ПОСЛЕ
             # остановки детей: ответ на ``system.shutdown`` уходит через этот сокет, а на
             # системном стопе PM видит событие за <=0.1 с. Закрытие первым шагом теряло ответ
-            # в ~1 из 10 (Task 1.1 lifecycle-stop-ownership). Цена: во время stop_all сокет
+            # в ~1 из 10 (Task 1.1 lifecycle-stop-ownership). Оставшиеся потери 3–5 из 100 были
+            # не от двери: самоответ ждал в своей очереди, а message_processor уже гасился —
+            # закрыто в RouterManager.reply_to_request (ADR-RTR-013). Цена: во время stop_all сокет
             # ещё принимает команды (монитор авто-рестарта к этому моменту уже остановлен).
             # finally: исключение монитора/stop_all/console не оставляет сокет жить до выхода.
             # getattr: shutdown может вызываться на частично сконструированном PM (тесты/ошибки init).
