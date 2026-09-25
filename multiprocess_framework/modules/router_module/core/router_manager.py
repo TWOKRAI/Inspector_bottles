@@ -1252,6 +1252,10 @@ class RouterManager(ChannelRoutingManager):
         нынешний GUI-трафик). Адресат: ``data.reply_to`` / ``reply_to`` /
         ``sender`` входящего билета. Ответ едет control-plane (system-очередь
         приёмника, ``queue_type="system"``), где крутится его message_processor.
+
+        Исключение — ответ самому себе (адресат == ``process.name or router_id``) при
+        ещё ждущем pending: он разрешается сразу, мимо очереди и middleware, возврат
+        ``{"status": "success", "resolved_locally": True}`` (ADR-RTR-013).
         """
         cid = self._extract_correlation_id(request_msg)
         if not cid:
@@ -1274,6 +1278,13 @@ class RouterManager(ChannelRoutingManager):
             "success": success,
             "result": result,
         }
+        # Ответ самому себе (ADR-RTR-013): pending разрешается здесь, на потоке обработчика,
+        # а не через собственную system-очередь. Иначе обработчик, гасящий процесс
+        # (system.shutdown), терял ответ: раннер успевал остановить message_processor
+        # раньше, чем receive() разбирал очередь. Pending уже снят (опоздавший ответ)
+        # или адресат чужой — прежний send().
+        if reply_target == sender_name and self._resolve_pending(cid, response):
+            return {"status": "success", "resolved_locally": True}
         return self.send(response)
 
     def _dispatch_command(self, processed: Dict[str, Any]) -> None:
