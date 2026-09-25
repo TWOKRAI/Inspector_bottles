@@ -23,15 +23,17 @@ from ..process.process_manager_process import ProcessManagerProcess
 from ..runner.process_runner import run_process_function
 
 
-def test_reported_written_after_numbers_gates_reading() -> None:
+def test_unreported_slot_reads_as_unknown() -> None:
     """(a) Слот с числами, но ``reported=0`` — читается как «не знаем» с нулями.
 
-    Порядок записи в runner (``released``/``buffered_dropped`` — затем
-    ``reported`` последним) существует ровно для того, чтобы ребёнок, убитый
-    ПОСЕРЕДИНЕ записи (между строками), читался PM как «неизвестно», а не как
-    ложные частичные числа. Тест пинит эту гарантию на СТОРОНЕ ЧТЕНИЯ:
+    ВАЖНО (ревью Task 1.6, it.1): этот тест проверяет ТОЛЬКО ЧТЕНИЕ —
     ``exit_report`` обязан игнорировать released/buffered_dropped, пока
-    reported не выставлен.
+    reported не выставлен. Порядок ЗАПИСИ в runner (released/buffered_dropped
+    — затем reported последним, «чтобы ребёнок, убитый ПОСЕРЕДИНЕ записи между
+    строками читался как неизвестно») этим тестом НЕ закреплён — слот здесь
+    собирается вручную, раннер не зовётся. Видимо такой порядок только при
+    kill РОВНО между тремя `int`-присваиваниями в runner'е (`process_runner.py`
+    finally) — сценарий не воспроизведён ни одним тестом в этом файле.
     """
     registry = ProcessRegistry()
     slot = RawArray("q", 3)
@@ -241,3 +243,85 @@ def test_stop_calls_hook_before_store_teardown() -> None:
     )
     assert probe._observability_store is None, "после stop() _flush_observability обязан снять стор"
     assert probe.shutdown_called is True, "stop() всё ещё обязан дойти до shutdown() в конце"
+
+
+class _RaisingThenOkRegistry:
+    """Фейк ``ProcessRegistry`` для теста (g): первый ``stop_all`` бросает, второй — успешен."""
+
+    def __init__(self) -> None:
+        self.stop_all_calls = 0
+
+    def stop_all(self, timeout: float = 5.0) -> dict[str, bool]:
+        self.stop_all_calls += 1
+        if self.stop_all_calls == 1:
+            raise RuntimeError("boom: stop_all упал (инъекция теста)")
+        return {"child": True}
+
+    def exit_report(self, name: str) -> dict:
+        return {"released": 0, "buffered_dropped": 0, "reported": True}
+
+
+def _make_raising_pm() -> ProcessManagerProcess:
+    """PM-стенд для (g): реальные ``ProcessModule.stop``/``_flush_observability`` (унаследованы,
+    не переопределены) + реальные ``ProcessManagerProcess._before_observability_teardown``/
+    ``_stop_children_once``/``shutdown`` — тот же набор observability-атрибутов, что у
+    ``_ObservabilityOrderProbe`` (f), плюс регистр (e), который на этот раз бросает."""
+    with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+        pm = ProcessManagerProcess.__new__(ProcessManagerProcess)
+    pm.name = "ProcessManagerRaiseProbe"
+    pm.worker_manager = None
+    pm._stop_requested = False
+    pm._observability_hub = None
+    pm._observability_drain = None
+    pm._observability_store = MagicMock(name="store_tap_sentinel")
+    pm._observability_forwarders = {}
+    pm._observability_store_taps = []
+    pm._observability_tail_intents = {}
+    pm.stats_manager = None
+    pm._children_stopped = False
+    pm._process_monitor = MagicMock()
+    pm._process_registry = _RaisingThenOkRegistry()
+    pm._console_manager = None
+    pm._log_info = MagicMock()
+    pm._log_warning = MagicMock()
+    pm._log_error = MagicMock()
+    pm.get_config = lambda key, default=None: {"shutdown_timeout": 1.0}.get(key, default)
+    pm.update_process_state = lambda **_kwargs: None
+    return pm
+
+
+def test_raising_stop_all_flushes_and_retries_on_shutdown() -> None:
+    """(g) ``stop_all`` бросает на ПЕРВОМ вызове (внутри хука, вызванного из реального
+    ``ProcessModule.stop()``) -> `stop()` не падает, финальный дренаж/unwire стора всё равно
+    происходит (ревью Task 1.6, it.1, major-находка: до правки исключение в хуке отменяло
+    и flush, и повторную остановку детей). Флаг ``_children_stopped`` не взводится до
+    успешного возврата ``stop_all`` — поэтому внутренний ``self.shutdown()`` в конце
+    ``stop()`` (тот же путь, что и раннер'овский повторный вызов из ``finally``) РЕТРАИТ
+    ``stop_all`` и на этот раз публикует сводку. Явный повторный ``pm.shutdown()`` после —
+    имитация раннера — обязан остаться no-op'ом: третьего ``stop_all`` и второй сводки быть
+    не должно.
+    """
+    pm = _make_raising_pm()
+    # Спай ПОВЕРХ реального метода (не подмена!) — считает публикации сводки отдельно от
+    # обычных lifecycle-логов ("Process 'X' stopping" и т.п.), которые тоже идут через
+    # _log_info и иначе занижали бы точность счётчика.
+    real_publish = pm._publish_stop_summary
+    pm._publish_stop_summary = MagicMock(wraps=real_publish)
+
+    with patch.object(ProcessModule, "shutdown", return_value=True):
+        pm.stop()  # реальный ProcessModule.stop(): хук падает внутри, изолирован try/except
+
+        assert pm._observability_store is None, "stop() обязан снять store-tap несмотря на сбой в хуке"
+        assert pm._process_registry.stop_all_calls == 2, (
+            "первая попытка stop_all упала, внутренний self.shutdown() в конце stop() обязан повторить"
+        )
+        assert pm._children_stopped is True, "флаг взводится только после УСПЕШНОГО возврата stop_all"
+        assert pm._publish_stop_summary.call_count == 1, (
+            "сводка стопа обязана уйти РОВНО один раз — только после успешного stop_all"
+        )
+        assert pm._log_error.call_count == 1, "сбой хука обязан быть залогирован, а не проглочен молча"
+
+        pm.shutdown()  # повторный вызов из runner'овского finally (тот же PM, тот же процесс)
+
+    assert pm._process_registry.stop_all_calls == 2, "повторный shutdown() при уже взведённом флаге — no-op"
+    assert pm._publish_stop_summary.call_count == 1, "повторный shutdown() не имеет права удвоить сводку"

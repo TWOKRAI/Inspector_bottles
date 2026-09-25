@@ -399,8 +399,11 @@ def run_process_function(
             except Exception as e:  # noqa: BLE001 — хук выхода не роняет выход
                 emergency_log(__name__, "error", "%s: queue release at exit failed: %r", process_name, e)
         elif exit_report is not None:
-            # shared_resources нет (SRM-mode без bundle) — отпускать нечего, но хук ДОШЁЛ,
-            # и PM обязан видеть это как «знаем: 0/0», а не как «умер до finally».
+            # shared_resources остался None: класс процесса не загрузился (`_load_process_class`
+            # вернул None, ранний return выше) либо сборка bundle из словаря бросила исключение
+            # (ревью Task 1.6, it.1: SRM-режим сюда НЕ приводит — `shared_resources` там всегда
+            # не-None, строка 273 выше). Отпускать нечего — очереди не поднимались, — но хук
+            # ДОШЁЛ, и PM обязан видеть это как «знаем: 0/0», а не как «умер до finally».
             try:
                 exit_report[1] = 0
                 exit_report[2] = 0

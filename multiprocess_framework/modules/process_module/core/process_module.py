@@ -1181,8 +1181,17 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         # Task 1.6 (ADR-PMM-033): хук-заглушка для наследника, которому нужно
         # писать в стор ПОСЛЕ остановки своих воркеров, но ДО закрытия store-tap
-        # ниже (PM гасит детей и публикует сводку стопа здесь).
-        self._before_observability_teardown()
+        # ниже (PM гасит детей и публикует сводку стопа здесь). Хук — точка
+        # расширения: исключение в переопределении наследника не имеет права
+        # отменить финальный слив/закрытие стора ниже — та же причина, по которой
+        # `_flush_observability()` сама глушит исключения (ревью Task 1.6, it.1).
+        try:
+            self._before_observability_teardown()
+        except Exception as e:  # noqa: BLE001 — хук не имеет права сорвать stop()
+            try:
+                self._log_error(f"_before_observability_teardown упал: {e}", module="lifecycle")
+            except Exception:  # noqa: BLE001 — сам лог тоже не имеет права сорвать stop()
+                pass
 
         # Ф5.16 (c): финальный дренаж hub'а на graceful-teardown — воркеры уже
         # остановлены, новых эмиссий нет. SIGKILL этот путь обходит (потому
