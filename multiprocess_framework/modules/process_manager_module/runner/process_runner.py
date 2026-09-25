@@ -5,6 +5,7 @@ Connection bundle: только picklable (queues, config, custom).
 """
 
 import os
+import threading
 import time
 import traceback
 from multiprocessing import Event
@@ -16,6 +17,108 @@ from ..._fallback import emergency_log
 from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
+
+
+# ADR-PMM-032: сторож смерти родителя (ProcessManager'а). Бюджет приёмки — 2.0с от
+# гибели родителя до исчезновения ребёнка: опрос 0.25 + grace 1.5 = 1.75 < 2.0
+# (остаток 0.25с — на os._exit и реап ядром).
+_PARENT_POLL_S = 0.25
+_PARENT_DEATH_GRACE_S = 1.5
+# Код выхода принудительной ветки: отличим от 0 (штатный стоп), 1 (исключение)
+# и -N (убит сигналом) — по нему видно, что ребёнка добил сторож, а не lifecycle.
+_PARENT_DEATH_EXIT_CODE = 75
+
+
+def _on_parent_death(
+    parent_pid: int,
+    stop_event: Optional[Event],
+    system_stop_event: Optional[Event],
+    process_name: str,
+) -> None:
+    """Родитель умер: взвести стоп, дать штатному lifecycle grace, затем добить.
+
+    Лог — только emergency_log: LoggerManager мог умереть вместе с родителем.
+    ``os._exit`` не выполняет ``finally``, поэтому всё, что должно случиться, — до него.
+    """
+    emergency_log(
+        __name__,
+        "warning",
+        "%s: родитель pid=%s умер — взвожу stop_event/system_stop_event, принудительный выход через %.1fс",
+        process_name,
+        parent_pid,
+        _PARENT_DEATH_GRACE_S,
+    )
+    # Каждое событие — в своём try: Manager-прокси/семафор родителя может быть уже битым.
+    # system_stop_event — общий путь стопа: гаснут и соседи, их PM всё равно мёртв.
+    for evt in (stop_event, system_stop_event):
+        if evt is None:
+            continue
+        try:
+            evt.set()
+        except Exception:  # noqa: BLE001 — лучшее, что можем; дальше всё равно os._exit
+            pass
+    # Кооперативный ребёнок выйдет сам за это время (lifecycle → stop() → release_queues_at_exit).
+    time.sleep(_PARENT_DEATH_GRACE_S)
+    os._exit(_PARENT_DEATH_EXIT_CODE)
+
+
+def _watch_parent(
+    parent_pid: int,
+    stop_event: Optional[Event],
+    system_stop_event: Optional[Event],
+    process_name: str,
+) -> None:
+    """Тело daemon-потока: опрос ``os.getppid()`` до смены родителя (ADR-PMM-032).
+
+    Смерть родителя на POSIX = переродительство к init/subreaper → getppid меняется.
+    """
+    if os.getppid() != parent_pid:
+        try:
+            os.kill(parent_pid, 0)
+        except ProcessLookupError:
+            # Классическая гонка: родитель умер ДО старта сторожа.
+            _on_parent_death(parent_pid, stop_event, system_stop_event, process_name)
+            return
+        except Exception:  # noqa: BLE001 — EPERM и т.п.: процесс существует → не наш прямой родитель
+            pass
+        # ponytail: родитель жив, но не наш прямой родитель (напр. будущий start method
+        # forkserver — родителем будет сервер). Не взводимся — без ложных срабатываний;
+        # потолок: при forkserver защиты нет. Апгрейд — передавать pid сервера/сторожить по pidfd.
+        emergency_log(
+            __name__,
+            "warning",
+            "%s: getppid()=%s != parent_pid=%s при живом parent_pid — сторож смерти родителя НЕ взведён",
+            process_name,
+            os.getppid(),
+            parent_pid,
+        )
+        return
+    while True:
+        time.sleep(_PARENT_POLL_S)
+        if os.getppid() != parent_pid:
+            _on_parent_death(parent_pid, stop_event, system_stop_event, process_name)
+            return
+
+
+def _start_parent_watcher(
+    parent_pid: Optional[int],
+    stop_event: Optional[Event],
+    system_stop_event: Optional[Event],
+    process_name: str,
+) -> Optional[threading.Thread]:
+    """Взвести сторожа, если PM передал свой pid. None → не сторожим (SRM-режим, сам PM)."""
+    # ponytail: Windows — no-op: getppid там не меняется при смерти родителя. Потолок:
+    # на Windows ребёнок переживает PM (дерево держит Job Object launcher'а, не PM).
+    if parent_pid is None or os.name == "nt":
+        return None
+    t = threading.Thread(
+        target=_watch_parent,
+        args=(parent_pid, stop_event, system_stop_event, process_name),
+        name=f"parent-watch-{process_name}",
+        daemon=True,
+    )
+    t.start()
+    return t
 
 
 def _run_lifecycle(
@@ -103,6 +206,7 @@ def run_process_function(
     shared_resources_or_bundle: Optional[Union[SharedResourcesManager, Dict[str, Any]]] = None,
     system_stop_event: Optional[Event] = None,
     new_session: bool = False,
+    parent_pid: Optional[int] = None,
 ):
     """
     Top-level функция для запуска процесса внутри OS-процесса.
@@ -110,12 +214,20 @@ def run_process_function(
     Bundle mode: dict → SharedResourcesManager создаётся внутри процесса.
     SRM mode: готовый SharedResourcesManager (тесты).
 
+    parent_pid: pid ProcessManager'а (ставит только ``ProcessRegistry._create_process``).
+        Не None → POSIX-сторож смерти родителя (ADR-PMM-032): ребёнок не переживает PM.
+        None → не сторожим (сам PM от spawner'а, SRM-режим тестов).
+
     new_session: POSIX — сделать setsid() (стать лидером новой сессии/группы),
         чтобы ВСЕ потомки этого процесса попали в одну process group. Тогда
         launcher гасит дерево через killpg(pgid), не трогая себя
         (см. ProcessTreeGuard). Ставится только для оркестратора. Windows — no-op
         (там дерево держит Job Object).
     """
+    # ADR-PMM-032: сторож — САМОЕ первое, до setsid/register_self/загрузки класса:
+    # смерть PM во время boot ребёнка тоже покрыта.
+    _start_parent_watcher(parent_pid, stop_event, system_stop_event, process_name)
+
     # 2.2: именованный вид вместо собственного _ProcessLogger. Имя процесса
     # остаётся полем источника записи, а не только текстом сообщения (Ф2.1).
     log = get_std_logger(process_name)

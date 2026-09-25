@@ -183,3 +183,12 @@
 | 2026-03-13 | Этапы 3-8: interfaces.py, error_module, graceful shutdown, CommandManager, тесты, документация | 8 |
 | 2026-03-30 | Добавлены docs/examples/proc_dict_canonical_examples.py; ссылка в CONFIG_CONTRACT.md и docs/README.md | 8 |
 | 2026-08-31 | Task 1.2: журнал лаунчера в `launcher/`, отказ уборки SHM громкий + счётчик (ADR-PMM-029) | — |
+
+## Сторож смерти родителя (2026-09-25, Task 1.5, ADR-PMM-032)
+
+- Ребёнок PM больше не остаётся сиротой после SIGKILL PM: POSIX-поток опрашивает `getppid()` (0.25 с),
+  на смерти родителя взводит `stop_event`/`system_stop_event`, ждёт 1.5 с и делает `os._exit(75)`.
+  Взводит единственная точка — `ProcessRegistry._create_process` (`parent_pid=os.getpid()`).
+- Замеры macOS: быстрый ребёнок 0.28–0.31 с, зависший 1.66–1.67 с, смерть PM на boot ребёнка 1.89–1.90 с
+  (запас до 2.0 с ≈ 0.1 с). Тесты: `test_parent_death_acceptance.py` (тестер), `test_parent_death_hazards.py` (автор).
+- Открыто: Linux не проверен; сам PM не сторожится; ребёнок, держащий GIL, не спасается.

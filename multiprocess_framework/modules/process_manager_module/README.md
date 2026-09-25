@@ -500,6 +500,14 @@ config = {
 
 ---
 
+### Смерть PM: ребёнок не переживает родителя (ADR-PMM-032)
+
+Каждый ребёнок, созданный `ProcessRegistry._create_process`, получает `parent_pid` = pid PM. На POSIX
+`run_process_function` первым делом поднимает daemon-поток, который раз в 0.25 с сверяет `os.getppid()`
+с `parent_pid`. Родитель сменился (PM убит, ребёнка усыновил init) → взводятся `stop_event` и
+`system_stop_event`, штатному lifecycle даётся 1.5 с, затем `os._exit(75)`. Сам PM (его запускает spawner
+без `parent_pid`) и SRM-режим тестов не сторожатся; Windows — no-op; forkserver не взводится.
+
 ## CommandManager — встроенные команды
 
 `ProcessManagerProcess` регистрирует встроенные команды при инициализации:
