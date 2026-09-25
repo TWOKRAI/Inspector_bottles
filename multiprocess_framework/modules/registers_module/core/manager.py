@@ -16,13 +16,44 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
+from typing import Annotated, Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
+
+from pydantic import create_model
 
 from ...base_manager import BaseManager, ObservableMixin
-from ...data_schema_module import RegistersContainer
+from ...data_schema_module import RegistersContainer, SchemaBase
 
 from .dispatch import resolve_dispatch_targets
 from .field_info import FieldInfo, extract_fields
+
+
+def _build_register_copy(name: str, fields: List[FieldInfo]) -> Any:
+    """Собрать editable-копию регистра из ``FieldInfo`` (Task 1b.2b-pre).
+
+    ``pydantic.create_model`` с ``__base__=SchemaBase`` — та же ``model_config``
+    (``validate_assignment=True``), что у "родного" регистра из ``from_registry``:
+    ``setattr`` на копии проверяет тип/``Literal``/``FieldMeta.min``/``max`` точно
+    так же, как на живом инстансе плагина (измерено лидом на реальных полях —
+    см. ADR-RM-007). Не переносится: class-level python-валидаторы
+    (``field_validator``/``model_validator``) и class attribute ``register_dispatch``
+    — их несёт только исходный класс плагина, а не набор ``FieldInfo``.
+
+    Поднимает исключение наружу (например при недопустимом для pydantic имени поля,
+    вроде ``"model_config"`` или ведущего ``_``) — вызывающий код (``from_catalog``)
+    ловит его и изолирует поломку одного плагина от остальных.
+    """
+    model = create_model(
+        name,
+        __base__=SchemaBase,
+        **{
+            fi.field_name: (
+                Annotated[fi.field_type, fi.meta] if fi.meta is not None else fi.field_type,
+                fi.default,
+            )
+            for fi in fields
+        },
+    )
+    return model()
 
 
 # ---------------------------------------------------------------------------
@@ -295,14 +326,24 @@ class RegistersManager(BaseManager, ObservableMixin):
 
     @classmethod
     def from_catalog(cls, catalog_result: Dict[str, Any], **kwargs: Any) -> "RegistersManager":
-        """Построить из ``catalog.plugins``-payload (Task 1b.2a) — БЕЗ plugin-кода.
+        """Построить из ``catalog.plugins``-payload (Task 1b.2a/1b.2b-pre) — БЕЗ plugin-кода.
 
         В отличие от ``from_registry`` (сканирует реальный ``PluginRegistry`` в
-        процессе, инстанцирует register-классы), здесь регистры не инстанцируются
-        вовсе — на GUI-стороне нет доступа к классу плагина (Dict at Boundary,
-        Правило 1 CLAUDE.md). ``get_fields()`` работает через заранее наполненный
-        кэш (``FieldInfo.from_dict`` на каждое поле каталога) — тот же публичный
+        процессе, инстанцирует РЕАЛЬНЫЕ register-классы плагинов), здесь на
+        GUI-стороне нет доступа к классу плагина (Dict at Boundary, Правило 1
+        CLAUDE.md) — вместо него для каждого плагина с полями строится СИНТЕТИЧЕСКАЯ
+        копия регистра (``pydantic.create_model`` над уже декодированными
+        ``FieldInfo``, см. ``_build_register_copy``) — тот же ``SchemaBase`` с тем же
+        ``validate_assignment=True``, что и у оригинала: ``set_field_value``/
+        ``validate`` работают по-настоящему, правки не теряются молча (см.
+        ADR-RM-007 в ``registers_module/DECISIONS.md`` — что НЕ переносится).
+        ``get_fields()`` по-прежнему работает через заранее наполненный кэш
+        (``FieldInfo.from_dict`` на каждое поле каталога) — тот же публичный
         метод, что и live-режим, formsSection не видит разницы.
+
+        Поломка одной записи каталога (несовместимое имя поля, ``register=None`` и
+        т.п.) НЕ роняет всю сборку — плагин остаётся без инстанса (как раньше),
+        ошибка идёт в лог, остальные плагины редактируемы.
 
         Args:
             catalog_result: payload команды ``catalog.plugins`` (см.
@@ -311,7 +352,8 @@ class RegistersManager(BaseManager, ObservableMixin):
             **kwargs: доп. аргументы __init__ (connection_map, send_callback, ...).
 
         Returns:
-            RegistersManager без register-инстансов, с готовым ``get_fields()``-кэшем.
+            RegistersManager с копиями регистров там, где сборка удалась, и готовым
+            ``get_fields()``-кэшем для всех плагинов из каталога.
         """
         categories: Dict[str, str] = {}
         fields_by_plugin: Dict[str, List[FieldInfo]] = {}
@@ -326,6 +368,17 @@ class RegistersManager(BaseManager, ObservableMixin):
 
         manager = cls(plugin_categories=categories, **kwargs)
         manager._fields_cache.update(fields_by_plugin)
+
+        for name, fields in fields_by_plugin.items():
+            if not fields:
+                continue
+            try:
+                instance = _build_register_copy(name, fields)
+            except Exception as exc:  # noqa: BLE001 — изоляция per-plugin, см. докстринг выше
+                manager._log_warning(f"from_catalog: не удалось построить копию регистра '{name}': {exc!r}")
+                continue
+            manager.set_register(name, instance)
+
         return manager
 
     def get_fields(self, plugin_name: str) -> List[FieldInfo]:

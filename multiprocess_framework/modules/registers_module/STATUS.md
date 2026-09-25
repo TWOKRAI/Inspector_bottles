@@ -30,6 +30,7 @@
 
 | Дата | Что сделано | Этап |
 |------|-------------|------|
+| 2026-09-25 | `from_catalog` строит editable-копии регистров (`create_model` над `FieldInfo`), ADR-RM-007 | 8 |
 | 2026-04-10 | План registers_module_improvement: тесты, README, `IRegistersManager`, ADR-RM-005, STATUS 8/8 | 8 |
 | 2026-04-10 | План #17: композиция `RegistersContainer`, `core/dispatch.py`, логирование, тесты, DECISIONS | 5 |
 | 2026-03-25 | Пустой **`process_targets`** в **`FieldMeta.routing`** → не слать **`register_update`** | — |

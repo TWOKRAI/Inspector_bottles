@@ -104,3 +104,62 @@
 - ADR-SS-001 (IRouter Protocol — модуль не зависит от конкретных интеграций)
 - ADR-SS-011 (доменно-нейтральный PersistenceManager)
 - CONSTRUCTOR_BLUEPRINT §4, паттерн 8
+
+---
+
+## ADR-RM-007: Копия регистра из описания каталога
+
+- **Дата:** 2026-09-25
+- **Статус:** принято
+
+### Контекст
+
+Task 1b.2a дал `RegistersManager.from_catalog()` (payload команды `catalog.plugins`,
+Dict at Boundary — GUI-процесс не импортирует класс плагина). До этой задачи метод
+заполнял только `_fields_cache` для `get_fields()` — ни одного экземпляра регистра
+не создавалось. Значит `set_value`/`validate`/`set_field_value`/`register_names()`/
+`get_register()`/`model_dump_all()` у catalog-менеджера были пустыми или `False`:
+форма из каталога отображалась, но правка пользователя нигде не оседала — молча.
+
+### Решение
+
+Для каждой записи каталога с непустыми `register.fields` строим СИНТЕТИЧЕСКУЮ копию
+регистра: `pydantic.create_model(name, __base__=SchemaBase, **{field_name: (Annotated[
+field_type, meta] if meta else field_type, default)})()` — над уже декодированными
+`FieldInfo` (тот же кодек `FieldInfo.to_dict()`/`from_dict()`, что даёт `get_fields()`).
+
+`SchemaBase` несёт `validate_assignment=True` — та же проверка типа/`Literal`/
+`FieldMeta.min`/`max` при `setattr`, что и на живом инстансе плагина. Измерено лидом
+эмпирически на реальных полях: копия и оригинал совпадают на невалидном `Literal`,
+`str`→`int`, значении ниже `min`.
+
+Изоляция per-plugin: если `create_model`/инстанцирование одного плагина падает —
+ошибка ловится, идёт в лог (`_log_warning`), `_fields_cache` этого плагина не
+трогается (GUI по-прежнему видит форму, просто нередактируемую), остальные плагины
+не затрагиваются. `from_catalog` никогда не бросает наружу из-за одной записи.
+
+### Ограничения (то, что НЕ переносится в копию)
+
+- **Class-level python-валидаторы** (`field_validator`/`model_validator` на классе
+  плагина) — копия строится из `FieldInfo` (имя/тип/дефолт/`FieldMeta`), а не из
+  исходного класса, поэтому кастомные Python-валидаторы физически недоступны на
+  границе (Dict at Boundary — класс плагина не пересекает процесс).
+- **Class attribute `register_dispatch`** (`RegisterDispatchMeta` на классе) — та же
+  причина: атрибут класса, не поле модели, `FieldInfo` его не переносит.
+- `validate()`/`RegistersManager.validate_field_value()` проверяет ТОЛЬКО
+  `FieldMeta` (`access_level`, числовой диапазон `[min, max]`) — на РЕАЛЬНОМ
+  `from_registry`-регистре тоже, это не регрессия копии (см. модульный докстринг
+  `test_catalog_registers_editing_acceptance.py`, AC4). Полная проверка (типы,
+  `Literal`-принадлежность через pydantic) происходит на `setattr`
+  (`validate_assignment=True`) — одинаково на копии и оригинале.
+- **Финальный судья — бэкенд.** Копия существует только на GUI-стороне для
+  немедленной обратной связи форме; фактическая запись регистра процесса идёт через
+  `send_callback`/`register_update` и там же валидируется ещё раз (`cmd_set_config`,
+  `validate_assignment` реального класса плагина). Совпадение копии и оригинала не
+  гарантирует байт-в-байт совпадение на всех кастомных Python-валидаторах — см. пункт
+  выше.
+
+### Связанные решения
+
+- ADR-RM-005 (N/A этапов 1–6, протокол `IRegistersManager`)
+- Task 1b.2a (`FieldInfo.to_dict()`/`from_dict()` — dict-кодек через границу)
