@@ -8,9 +8,12 @@
 строит настоящий класс плагина):
 
 1. Одна запись каталога с полем, недопустимым для ``create_model`` (пример,
-   измеренный эмпирически: имя поля из "защищённого namespace" ``model_*`` —
-   ``pydantic`` бросает ``ValueError`` на ``create_model``, а не на записи значения) —
-   не должна ронять сборку остальных плагинов ("сосед-калека").
+   измеренный эмпирически: ИМЕННО ``model_dump``/``model_validate`` из "защищённого
+   namespace" ``model_*`` бросают ``ValueError`` на ``create_model`` — конфликт с
+   методом ``BaseModel``, а не на записи значения; прочие имена вида ``model_*``
+   собираются с ``UserWarning``, без исключения — ведущий ``_`` вообще не раскалывает
+   ничего: pydantic молча не создаёт поле, а каталог такое имя и не может произвести,
+   см. ADR-RM-007) — не должна ронять сборку остальных плагинов ("сосед-калека").
 2. ``create_model`` строит НОВЫЙ класс на каждый вызов ``from_catalog`` — если бы
    классы кэшировались по имени плагина между менеджерами, два менеджера от одного
    payload делили бы состояние через общий class-level default (mutable default
@@ -27,6 +30,14 @@
    проверяет только первую; если копия построена без ``validate_assignment=True``,
    ЛЮБОЕ поле без FieldMeta.min/max (Literal, произвольный int/str) тихо принимает
    мусор — это отдельная дыра, закрытая тестом (e).
+6. Отказ сборки копии (hazard 1) должен быть ВИДЕН, а не только не ронять сборку.
+   ``RegistersManager._log_warning`` в отсутствие слота ``logger`` (типичный вызов
+   ``from_catalog`` без ``logger=``, см. ``app.py``) молча проглатывает запись —
+   форма из каталога видна, но пуста, и ``set_field_value`` отвечает «Регистр не
+   найден» без единой строки лога (та же немая точка, что чинили Ф5/Ф6.х в
+   ``stats_manager._note_observation_bypass``). Найдено ревью 2026-09-25, закрыто
+   вторым каналом голоса (``get_std_logger``) — тест (f) проверяет НАБЛЮДАЕМЫЙ вывод
+   (перехваченную запись лога), а не факт вызова метода по имени.
 
 Только локальные ``SchemaBase``-классы (без импорта ``Plugins.*``/``Services.*`` —
 Правило 9 CLAUDE.md, framework не знает о prototype/plugins) — payload собирается
@@ -35,7 +46,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any, Literal
+
+import pytest
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 from multiprocess_framework.modules.registers_module.core.field_info import extract_fields
@@ -77,9 +91,10 @@ def _plugin_entry(name: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
 def test_poisoned_entry_does_not_break_neighbor() -> None:
     """Post: from_catalog не падает на поле, недопустимом для create_model; сосед редактируем."""
     good_fields = _fields_payload(_Good, "good")
-    # Измерено эмпирически: имя из защищённого pydantic-namespace "model_*" бросает
-    # ValueError на create_model (а не на записи значения) — это и есть "невалидное
-    # для create_model поле" из DESIGN, без домысливания.
+    # Измерено эмпирически: ИМЕННО "model_dump" (не любое имя из "model_*") бросает
+    # ValueError на create_model — конфликт с методом BaseModel.model_dump (а не на
+    # записи значения). Прочие имена вида "model_*" собираются с UserWarning, без
+    # исключения — см. модульный докстринг, пункт 1.
     bad_fields = [
         {
             "plugin_name": "bad",
@@ -227,3 +242,61 @@ def test_copy_rejects_wrong_literal_and_wrong_type_on_assignment() -> None:
     ok_type, err_type = rm.set_field_value("typed", "count", "abc")
     assert ok_type is False, f"копия молча приняла строку вместо int: err={err_type!r}"
     assert rm.get_register("typed").count == 1, "значение count изменилось несмотря на отказ"
+
+
+# ---------------------------------------------------------------------------
+# (f) отказ сборки копии виден в логе, даже когда logger= не передан
+# ---------------------------------------------------------------------------
+
+
+def test_build_failure_is_observable_without_logger_passed(caplog: pytest.LogCaptureFixture) -> None:
+    """Post: без ``logger=`` отказ сборки копии всё равно попадает в перехваченный лог.
+
+    MAJOR-находка ревью 2026-09-25: ``RegistersManager._log_warning`` уходит в
+    ``ObservableMixin._call_manager("logger", ...)``, у которого ТРИ тихих допуска
+    (слота нет / менеджер ``None`` / слот выключен) — при ``RegistersManager.
+    from_catalog(payload)`` БЕЗ ``logger=`` (типичный вызов, ``app.py`` строит
+    catalog-менеджер именно так) запись молча проглатывается: форма видна, но
+    пуста, а ``set_field_value`` отвечает «Регистр не найден» без единой строки
+    лога — тот же класс дефекта, что чинили Ф5/Ф6.х в
+    ``stats_manager._note_observation_bypass`` (``get_std_logger`` вместо
+    ``_log_warning`` ИЛИ рядом с ним, когда голос обязан звучать независимо от
+    того, поднят ли LoggerManager процесса).
+
+    Проверяется НАБЛЮДАЕМЫЙ ВЫВОД (перехваченная запись лога с именем поломанного
+    плагина в тексте), а не факт вызова ``get_std_logger`` по имени метода — спай на
+    имя метода пережил бы рефакторинг на другой канал доставки и остался бы зелёным
+    при реально немом логе (см. project-rules про спай на имени API).
+    """
+    bad_fields = [
+        {
+            "plugin_name": "bad_visible",
+            "field_name": "model_dump",
+            "type": "int",
+            "optional": False,
+            "default": 0,
+            "meta": None,
+            "category": "test",
+        }
+    ]
+    payload = {
+        "success": True,
+        "rev": "0" * 64,
+        "plugins": [_plugin_entry("bad_visible", bad_fields)],
+        "failed_imports": {},
+    }
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="multiprocess_framework.modules.registers_module.core.manager",
+    ):
+        rm = RegistersManager.from_catalog(payload)  # БЕЗ logger= — ровно случай из app.py
+
+    assert rm.get_register("bad_visible") is None  # сборка действительно не удалась
+
+    said = [r.getMessage() for r in caplog.records if "bad_visible" in r.getMessage()]
+    assert said, (
+        "отказ сборки копии НЕ виден в логе без logger= — тот же немой контрол, что был "
+        "у stats_manager до Ф5/Ф6.х (get_std_logger должен звучать независимо от "
+        "_log_warning)"
+    )

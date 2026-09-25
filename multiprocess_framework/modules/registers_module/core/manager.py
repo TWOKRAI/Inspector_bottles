@@ -22,6 +22,7 @@ from pydantic import create_model
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...data_schema_module import RegistersContainer, SchemaBase
+from ...logger_module import get_std_logger
 
 from .dispatch import resolve_dispatch_targets
 from .field_info import FieldInfo, extract_fields
@@ -32,15 +33,32 @@ def _build_register_copy(name: str, fields: List[FieldInfo]) -> Any:
 
     ``pydantic.create_model`` с ``__base__=SchemaBase`` — та же ``model_config``
     (``validate_assignment=True``), что у "родного" регистра из ``from_registry``:
-    ``setattr`` на копии проверяет тип/``Literal``/``FieldMeta.min``/``max`` точно
-    так же, как на живом инстансе плагина (измерено лидом на реальных полях —
-    см. ADR-RM-007). Не переносится: class-level python-валидаторы
-    (``field_validator``/``model_validator``) и class attribute ``register_dispatch``
-    — их несёт только исходный класс плагина, а не набор ``FieldInfo``.
+    ``setattr`` на копии проверяет ТИП и ``Literal``-принадлежность так же, как на
+    живом инстансе плагина (измерено лидом на реальных полях — см. ADR-RM-007).
 
-    Поднимает исключение наружу (например при недопустимом для pydantic имени поля,
-    вроде ``"model_config"`` или ведущего ``_``) — вызывающий код (``from_catalog``)
-    ловит его и изолирует поломку одного плагина от остальных.
+    Не переносится (см. ADR-RM-007 «Ограничения» — полный список с находками ревью):
+
+    - **параметризованные ``list``/``dict``** — кодек ``FieldInfo.to_dict()``/
+      ``from_dict()`` вырождает ``list[int]``/``dict[str, str]`` и т.п. в голый
+      ``list``/``dict`` (закрытый набор тегов типа, см. ``field_info.py``), поэтому
+      копия ПРИНИМАЕТ то, что реальный класс отклоняет (измерено ревью: 10 полей
+      в 7 регистрах, например ``blob_detector.contour_color_bgr = ['x']`` —
+      ``real=False``, ``copy=True``). Это ограничение кодека, а не этой функции —
+      чинить в Task 1b.2d.
+    - **class-level python-валидаторы** (``field_validator``/``model_validator``)
+      и class attribute ``register_dispatch`` — их несёт только исходный класс
+      плагина, а не набор ``FieldInfo``.
+
+    Поднимает исключение наружу при недопустимом для pydantic имени поля (например
+    из защищённого namespace ``model_*`` — ``pydantic`` бросает ``ValueError`` на
+    ``model_dump``/``model_validate``; другие ``model_*``-имена собираются с
+    UserWarning, не исключением) — вызывающий код (``from_catalog``) ловит его и
+    изолирует поломку одного плагина от остальных. Ведущий ``_`` в имени поля НЕ
+    бросает исключение (pydantic трактует такое имя как приватный атрибут и молча
+    не создаёт поле) — но каталог физически не может произвести такое имя: оно
+    приходит из ``model_fields`` реального класса плагина (``field_info.py::
+    extract_fields``), а pydantic сам не допускает поля с ведущим ``_`` в
+    исходном классе.
     """
     model = create_model(
         name,
@@ -343,7 +361,16 @@ class RegistersManager(BaseManager, ObservableMixin):
 
         Поломка одной записи каталога (несовместимое имя поля, ``register=None`` и
         т.п.) НЕ роняет всю сборку — плагин остаётся без инстанса (как раньше),
-        ошибка идёт в лог, остальные плагины редактируемы.
+        ошибка идёт в лог, остальные плагины редактируемы. Голос об отказе идёт
+        ДВУМЯ каналами — ``manager._log_warning`` (уйдёт в LoggerManager процесса,
+        если он поднят) И ``get_std_logger`` напрямую (см. except-ветку ниже):
+        ``from_catalog`` — типичная точка построения БЕЗ ``logger=`` (пример:
+        ``app.py`` строит catalog-менеджер без этого аргумента), а
+        ``_log_warning`` в отсутствие слота ``logger`` молча проглатывает запись
+        (``ObservableMixin._call_manager`` — три тихих допуска). Тот же класс
+        дефекта, что чинили Ф5/Ф6.х в ``stats_manager._note_observation_bypass``:
+        счётчик/кэш живы, контроль немой — форма из каталога видна, но пуста, а
+        ``set_field_value`` отвечает «Регистр не найден» без единой строки лога.
 
         Args:
             catalog_result: payload команды ``catalog.plugins`` (см.
@@ -375,7 +402,13 @@ class RegistersManager(BaseManager, ObservableMixin):
             try:
                 instance = _build_register_copy(name, fields)
             except Exception as exc:  # noqa: BLE001 — изоляция per-plugin, см. докстринг выше
-                manager._log_warning(f"from_catalog: не удалось построить копию регистра '{name}': {exc!r}")
+                warning_msg = f"from_catalog: не удалось построить копию регистра '{name}': {exc!r}"
+                # ДВА канала (см. докстринг from_catalog): _log_warning — штатный
+                # путь через LoggerManager процесса, get_std_logger — гарантия
+                # видимости, когда менеджер построен БЕЗ logger= (типичный вызов
+                # from_catalog на GUI-стороне) и _log_warning молча проглочен.
+                manager._log_warning(warning_msg)
+                get_std_logger(__name__).warning(warning_msg)
                 continue
             manager.set_register(name, instance)
 
