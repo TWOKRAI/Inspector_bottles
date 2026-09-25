@@ -31,10 +31,9 @@
    ЛЮБОЕ поле без FieldMeta.min/max (Literal, произвольный int/str) тихо принимает
    мусор — это отдельная дыра, закрытая тестом (e).
 6. Отказ сборки копии (hazard 1) должен быть ВИДЕН, а не только не ронять сборку.
-   ``RegistersManager._log_warning`` в отсутствие слота ``logger`` (типичный вызов
-   ``from_catalog`` без ``logger=``, см. ``app.py``) молча проглатывает запись —
-   форма из каталога видна, но пуста, и ``set_field_value`` отвечает «Регистр не
-   найден» без единой строки лога (та же немая точка, что чинили Ф5/Ф6.х в
+   ``RegistersManager._log_warning`` в отсутствие слота ``logger`` (вызов
+   ``from_catalog`` без ``logger=``) молча проглатывает запись — форма поля видна,
+   но правка отвечает «Регистр не найден» без единой строки лога (та же немая точка, что чинили Ф5/Ф6.х в
    ``stats_manager._note_observation_bypass``). Найдено ревью 2026-09-25, закрыто
    вторым каналом голоса (``get_std_logger``) — тест (f) проверяет НАБЛЮДАЕМЫЙ вывод
    (перехваченную запись лога), а не факт вызова метода по имени.
@@ -255,9 +254,8 @@ def test_build_failure_is_observable_without_logger_passed(caplog: pytest.LogCap
     MAJOR-находка ревью 2026-09-25: ``RegistersManager._log_warning`` уходит в
     ``ObservableMixin._call_manager("logger", ...)``, у которого ТРИ тихих допуска
     (слота нет / менеджер ``None`` / слот выключен) — при ``RegistersManager.
-    from_catalog(payload)`` БЕЗ ``logger=`` (типичный вызов, ``app.py`` строит
-    catalog-менеджер именно так) запись молча проглатывается: форма видна, но
-    пуста, а ``set_field_value`` отвечает «Регистр не найден» без единой строки
+    from_catalog(payload)`` БЕЗ ``logger=`` запись молча проглатывается: форма поля
+    видна, а ``set_field_value`` отвечает «Регистр не найден» без единой строки
     лога — тот же класс дефекта, что чинили Ф5/Ф6.х в
     ``stats_manager._note_observation_bypass`` (``get_std_logger`` вместо
     ``_log_warning`` ИЛИ рядом с ним, когда голос обязан звучать независимо от
@@ -290,7 +288,7 @@ def test_build_failure_is_observable_without_logger_passed(caplog: pytest.LogCap
         logging.WARNING,
         logger="multiprocess_framework.modules.registers_module.core.manager",
     ):
-        rm = RegistersManager.from_catalog(payload)  # БЕЗ logger= — ровно случай из app.py
+        rm = RegistersManager.from_catalog(payload)  # БЕЗ logger=
 
     assert rm.get_register("bad_visible") is None  # сборка действительно не удалась
 
@@ -300,3 +298,29 @@ def test_build_failure_is_observable_without_logger_passed(caplog: pytest.LogCap
         "у stats_manager до Ф5/Ф6.х (get_std_logger должен звучать независимо от "
         "_log_warning)"
     )
+
+
+def test_undecodable_entry_does_not_break_neighbor(caplog: pytest.LogCaptureFixture) -> None:
+    """(g) Описание, которое не разбирает ``FieldInfo.from_dict``, теряет только себя.
+
+    Ревью итерации 2: разбор описания шёл вне ``try`` — поле без ``type`` давало
+    ``KeyError`` из ``from_catalog``, и вместе с ним терялся здоровый сосед. Два вида
+    порчи: поле без ключа ``type`` и поле-строка вместо словаря.
+    """
+    healthy = extract_fields("healthy", _Typed)
+    payload = {
+        "plugins": [
+            _plugin_entry("no_type", [{"plugin_name": "no_type", "field_name": "x", "default": 0}]),
+            _plugin_entry("str_field", ["not-a-dict"]),
+            _plugin_entry("healthy", [f.to_dict() for f in healthy]),
+        ]
+    }
+
+    with caplog.at_level(logging.WARNING):
+        rm = RegistersManager.from_catalog(payload)
+
+    assert rm.get_register("no_type") is None
+    assert rm.get_register("str_field") is None
+    assert rm.set_field_value("healthy", "count", 5) == (True, None)
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "no_type" in said and "str_field" in said

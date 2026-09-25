@@ -55,7 +55,7 @@ def _build_register_copy(name: str, fields: List[FieldInfo]) -> Any:
     UserWarning, не исключением) — вызывающий код (``from_catalog``) ловит его и
     изолирует поломку одного плагина от остальных. Ведущий ``_`` в имени поля НЕ
     бросает исключение (pydantic трактует такое имя как приватный атрибут и молча
-    не создаёт поле) — но каталог физически не может произвести такое имя: оно
+    не создаёт поле) — но команда ``catalog.plugins`` такое имя не выдаёт: оно
     приходит из ``model_fields`` реального класса плагина (``field_info.py::
     extract_fields``), а pydantic сам не допускает поля с ведущим ``_`` в
     исходном классе.
@@ -359,18 +359,13 @@ class RegistersManager(BaseManager, ObservableMixin):
         (``FieldInfo.from_dict`` на каждое поле каталога) — тот же публичный
         метод, что и live-режим, formsSection не видит разницы.
 
-        Поломка одной записи каталога (несовместимое имя поля, ``register=None`` и
-        т.п.) НЕ роняет всю сборку — плагин остаётся без инстанса (как раньше),
-        ошибка идёт в лог, остальные плагины редактируемы. Голос об отказе идёт
-        ДВУМЯ каналами — ``manager._log_warning`` (уйдёт в LoggerManager процесса,
-        если он поднят) И ``get_std_logger`` напрямую (см. except-ветку ниже):
-        ``from_catalog`` — типичная точка построения БЕЗ ``logger=`` (пример:
-        ``app.py`` строит catalog-менеджер без этого аргумента), а
-        ``_log_warning`` в отсутствие слота ``logger`` молча проглатывает запись
-        (``ObservableMixin._call_manager`` — три тихих допуска). Тот же класс
-        дефекта, что чинили Ф5/Ф6.х в ``stats_manager._note_observation_bypass``:
-        счётчик/кэш живы, контроль немой — форма из каталога видна, но пуста, а
-        ``set_field_value`` отвечает «Регистр не найден» без единой строки лога.
+        Поломка одной записи каталога (описание поля не разбирается ``FieldInfo.from_dict``,
+        имя поля отвергает ``create_model`` и т.п.) не роняет сборку и не задевает соседей:
+        запись без разбора пропускается целиком, запись без копии остаётся с формой
+        (``get_fields``), но без инстанса. Каждый отказ пишется одной строкой через
+        ``get_std_logger`` — он работает и без ``logger=`` (фасад сам выбирает LoggerManager
+        процесса или stdlib), а ``_log_warning`` без слота ``logger`` запись теряет. Иначе
+        правка такого поля отвечала бы «Регистр не найден» без единой строки лога.
 
         Args:
             catalog_result: payload команды ``catalog.plugins`` (см.
@@ -384,14 +379,18 @@ class RegistersManager(BaseManager, ObservableMixin):
         """
         categories: Dict[str, str] = {}
         fields_by_plugin: Dict[str, List[FieldInfo]] = {}
+        failures: List[str] = []
 
         for entry in catalog_result.get("plugins") or []:
             name = entry.get("name")
             if not name:
                 continue
             categories[name] = entry.get("category", "")
-            register = entry.get("register") or {}
-            fields_by_plugin[name] = [FieldInfo.from_dict(d) for d in register.get("fields") or []]
+            try:
+                register = entry.get("register") or {}
+                fields_by_plugin[name] = [FieldInfo.from_dict(d) for d in register.get("fields") or []]
+            except Exception as exc:  # noqa: BLE001 — изоляция per-plugin
+                failures.append(f"from_catalog: не удалось разобрать описание регистра '{name}': {exc!r}")
 
         manager = cls(plugin_categories=categories, **kwargs)
         manager._fields_cache.update(fields_by_plugin)
@@ -401,17 +400,13 @@ class RegistersManager(BaseManager, ObservableMixin):
                 continue
             try:
                 instance = _build_register_copy(name, fields)
-            except Exception as exc:  # noqa: BLE001 — изоляция per-plugin, см. докстринг выше
-                warning_msg = f"from_catalog: не удалось построить копию регистра '{name}': {exc!r}"
-                # ДВА канала (см. докстринг from_catalog): _log_warning — штатный
-                # путь через LoggerManager процесса, get_std_logger — гарантия
-                # видимости, когда менеджер построен БЕЗ logger= (типичный вызов
-                # from_catalog на GUI-стороне) и _log_warning молча проглочен.
-                manager._log_warning(warning_msg)
-                get_std_logger(__name__).warning(warning_msg)
+            except Exception as exc:  # noqa: BLE001 — изоляция per-plugin
+                failures.append(f"from_catalog: не удалось построить копию регистра '{name}': {exc!r}")
                 continue
             manager.set_register(name, instance)
 
+        for msg in failures:
+            get_std_logger(__name__).warning(msg)
         return manager
 
     def get_fields(self, plugin_name: str) -> List[FieldInfo]:
