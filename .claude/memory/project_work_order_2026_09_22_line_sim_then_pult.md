@@ -27,9 +27,7 @@ metadata:
    numbers exist: gui-service Ф2 (network + token), line-sim Qt parts (Ф6 in the Pult, Ф7.3),
    line-sim Ф4 camera knobs.
 
-**2026-09-26 update:** the live order now lives in the `plans/QUEUE.md` block "▶ ТЕКУЩИЙ ПОРЯДОК" (lanes И / Д / Ф); line-sim 5.4 is DONE; two new plans `gui-constructor` and `dataset-annotation` (CTO: ACCEPT WITH CONDITIONS, awaiting owner approve); `apps/pult` renamed `apps/gui_client`. Trust the QUEUE block over this entry. See [[gui-constructor-layers-2026-09-26]].
-
-**Progress 2026-09-24** (superseded by the QUEUE block): steps 0–1 done, gui-service 1.1+ under way.
+**2026-09-26, second update (owner):** QUEUE.md split into `plans/queue/` — the ONLY order is `plans/queue/ORDER.md` (defects/backlog/decisions/history are separate files; `plans/QUEUE.md` is a pointer stub kept for 83 inbound links). Priority re-set by the owner, measure = practical value: **robot-protocol-v2 first, simulator layers (line-sim-layer-editor) second**, interface only where it is on their path, one framework task between product tasks, dataset in pauses. line-sim Ф3 and Ф5 are fully merged. Trust ORDER.md over everything below.
 
 **Why:** two sessions worked the same day without seeing each other — one ran a team on
 `feat/line-sim` (ред. 3, real code), the other rewrote `plans/line-sim/*` in main's working tree
