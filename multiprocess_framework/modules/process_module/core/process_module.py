@@ -1179,12 +1179,34 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if self.worker_manager:
             self.worker_manager.stop_all_workers()
 
+        # Task 1.6 (ADR-PMM-033): хук-заглушка для наследника, которому нужно
+        # писать в стор ПОСЛЕ остановки своих воркеров, но ДО закрытия store-tap
+        # ниже (PM гасит детей и публикует сводку стопа здесь). Хук — точка
+        # расширения: исключение в переопределении наследника не имеет права
+        # отменить финальный слив/закрытие стора ниже — та же причина, по которой
+        # `_flush_observability()` сама глушит исключения (ревью Task 1.6, it.1).
+        try:
+            self._before_observability_teardown()
+        except Exception as e:  # noqa: BLE001 — хук не имеет права сорвать stop()
+            try:
+                self._log_error(f"_before_observability_teardown упал: {e}", module="lifecycle")
+            except Exception:  # noqa: BLE001 — сам лог тоже не имеет права сорвать stop()
+                pass
+
         # Ф5.16 (c): финальный дренаж hub'а на graceful-teardown — воркеры уже
         # остановлены, новых эмиссий нет. SIGKILL этот путь обходит (потому
         # error/critical идут write-through, а не в буфер).
         self._flush_observability()
 
         self.shutdown()
+
+    def _before_observability_teardown(self) -> None:
+        """Task 1.6 (ADR-PMM-033): хук-заглушка, не-op по умолчанию.
+
+        Наследник переопределяет, когда ему нужно писать в стор наблюдаемости
+        ПОСЛЕ остановки своих воркеров, но ДО того, как ``_flush_observability()``
+        снимет store-tap ниже по ``stop()`` — иначе запись физически не долетит.
+        """
 
     def _flush_observability(self) -> None:
         """Ф5.16 (c): последний слив log/stats-буфера hub'а перед остановкой (в

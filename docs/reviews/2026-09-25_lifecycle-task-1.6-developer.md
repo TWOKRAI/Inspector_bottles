@@ -1,0 +1,458 @@
+# Task 1.6 (lifecycle-stop-ownership) — отчёт разработчика: BLOCKED до кода
+
+**Дата:** 2026-09-25 · **Роль:** developer · **Ветка:** fix/lifecycle-1.6 (worktree `lso-1.6-dev`)
+**Статус:** BLOCKED на пункте контракта «`extra["stop_summary"]` — TOP-LEVEL ключ `extra`» —
+файлов реализации НЕ трогал (ни строки правки в `process_registry.py` /
+`process_runner.py` / `process_manager_process.py`), только чтение + один
+эмпирический скрипт против реального `StoreTapChannel`/`ObservabilityStore`.
+
+## Что произошло
+
+Пункт 3 DESIGN («PM publication») требовал буквально:
+
+> The record must land in the store with `extra["stop_summary"]` as a
+> TOP-LEVEL key of `extra` — verify with the live test; if the logger nests
+> kwargs (e.g. under `extra["context"]`), find the existing way other PM
+> records put structured fields top-level and use it; do NOT change the store
+> or logger modules — stop and report if impossible.
+
+Прежде чем писать `_cmd`/`shutdown()`-правку, проверил эмпирически (не по
+чтению кода), долетает ли `stop_summary=summary` из `self._log_warning(msg,
+stop_summary=summary)` до `extra["stop_summary"]` в сторе, как того требует
+REDS-тест `test_normal_stop_writes_one_stop_summary_record` (assert
+`"stop_summary" in extra` на объекте верхнего уровня).
+
+## Репродукция (input → observed output)
+
+Скрипт напрямую бьёт по `StoreTapChannel.write()` — тому же приёмнику, на
+котором в проде стоит `_log_warning`/`_log_info` (маршрут:
+`ObservableMixin._log_warning` → `LoggerManager.warning(message, module=...,
+**extra)` → `LoggerCore.log()` → `LogRecord(extra=self._build_context(extra))`
+→ `.to_dict()["extra"] == {"stop_summary": {...}}` — ЭТО уже проверено чтением
+`logger_core.py:1552` и `_build_context`, extra на этом шаге ПЛОСКИЙ, без
+обёртки). Дальше — путь стора, который и решает исход:
+
+```python
+import time
+from multiprocess_framework.modules.channel_routing_module.observability.observability_store import ObservabilityStore
+from multiprocess_framework.modules.channel_routing_module.observability.store_tap import StoreTapChannel
+
+store = ObservabilityStore(":memory:")
+tap = StoreTapChannel(store, process="ProcessManager")
+
+record_dict = {
+    "timestamp": time.time(),
+    "level": "WARNING",
+    "scope": "system",
+    "message": "stop summary: 1 issue",
+    "module": "ProcessManager",
+    "extra": {"stop_summary": {"gui": {"released": 0, "buffered_dropped": 0, "reported": False}}},
+}
+res = tap.write(record_dict)
+tap.flush(5.0)
+for r in store.list_records(limit=10):
+    print(r)
+```
+
+Вывод (дословно):
+
+```
+write result: {'status': 'success', 'channel': 'observability_store_tap.queue', 'dropped': 0}
+{'id': 1, 'kind': 'log', 'process': 'ProcessManager', 'module': 'ProcessManager', 'ts': 1790367068.688416,
+ 'severity': 'warning', 'severity_number': 13, 'metric': None, 'message': 'stop summary: 1 issue',
+ 'extra': {'context': {'stop_summary': {'gui': {'released': 0, 'buffered_dropped': 0, 'reported': False}}}}}
+```
+
+Реальный результат — `extra["context"]["stop_summary"]`, НЕ `extra["stop_summary"]`.
+Тестовое утверждение `assert "stop_summary" in extra` (буквально ключ первого
+уровня) с этим красное детерминированно, а не по гонке/окружению.
+
+## Причина (по коду, сверено построчно)
+
+- `LoggerCore.log()` кладёт в `LogRecord.extra` ПЛОСКИЙ словарь kwargs
+  (`extra=self._build_context(extra)`, `logger_core.py:1552`) — `stop_summary`
+  здесь уже верхнего уровня.
+- `StoreTapChannel.write()` (`store_tap.py:219-229`) заворачивает ВЕСЬ этот
+  словарь в один ключ: `rec["context"] = record_dict.get("extra", {})`. Это
+  структурное свойство тапа, не побочный эффект логгера.
+- `hub_record_to_display()` (`record_display.py:335-337`, ветка `kind == log`,
+  т.е. любой `_log_info`/`_log_warning`) строит финальный `extra` правилом
+  «конверта»: `{k: v for k, v in record.items() if k not in _ENVELOPE_KEYS}`.
+  `_ENVELOPE_KEYS` (`record_display.py:40`) НЕ включает `"context"` — значит
+  `"context"` остаётся единственным ключом второго уровня, и всё, что
+  вызывающий передал через `**kwargs`, живёт внутри него.
+- Единственный прецедент «поднять поле на верхний уровень `extra`» —
+  `ORIGIN_FIELD` (`store_tap.py:237`, `rec[ORIGIN_FIELD] = origin`): это
+  ЖЁСТКО зашитое имя `"origin"` внутри самого `store_tap.py`, не общий
+  механизм. Других мест, где PM (или любой другой процесс) кладёт
+  структурное поле кwargs верхним уровнем `extra` минуя эту обёртку, в
+  `process_manager_module`/`channel_routing_module` не нашёл (грепы
+  `extra\[` по `backend_ctl/tests` и `process_manager_module` — единственное
+  совпадение вне этого плана, `test_observability_broker.py:421`, относится к
+  ДРУГОЙ структуре — ответу команды `observability_introspect_extra()`, не к
+  колонке `extra` стора).
+
+## Почему это тупик в рамках FILES
+
+`store_tap.py` и `record_display.py` — часть `channel_routing_module`, не
+входят в список FILES задачи 1.6, и DESIGN прямо запрещает их трогать
+(«do NOT change the store or logger modules»). Добавить туда generic-механизм
+(второе имя-маркер вроде `ORIGIN_FIELD`, но для `stop_summary`, или снять
+обёртку `"context"` вовсе) — решение вне зоны этой задачи и вне роли
+developer (меняет контракт хранения для ВСЕХ потребителей `extra`, не только
+Task 1.6).
+
+## Что НЕ пробовал (честно, по правилу openness)
+
+- Не проверял, можно ли добраться до `ObservabilityStore` напрямую из PM в
+  обход `_log_warning`/тапа — по чтению кода такой ссылки у PM нет (стор
+  живёт только за тапом логгера), а заводить её — тоже правка вне FILES
+  (потребовала бы новой проводки в `process_manager_process.py` уровня
+  архитектурного решения, не «числа»).
+- Не проверял альтернативу «переименовать сообщение так, чтобы
+  `_STDERR_LINE_RE`/парсер читал числа из текста `message`, а не из `extra`»
+  — это противоречит контракту буквально («`extra` несёт ключ `stop_summary`»)
+  и всё равно означало бы редактировать тестовый файл, что запрещено.
+
+## Запрос к лиду (ESCALATION -> teamlead)
+
+```
+ESCALATION -> teamlead
+Question: extra["stop_summary"] обязан быть TOP-LEVEL ключом extra (буквально по
+  контракту и REDS), но реальный store_tap.py заворачивает ВСЕ kwargs логгера в
+  extra["context"] без исключений (кроме зашитого "origin"). Как реализовывать
+  публикацию сводки — (a) добавить в store_tap.py второй промоут-маркер по
+  образцу ORIGIN_FIELD (правка вне FILES, вне роли developer), или (b) переписать
+  REDS-тест на extra["context"]["stop_summary"] (то же самое, чем реально кладёт
+  ЛЮБОЙ структурный kwarg у ЛЮБОГО PM-лога сегодня)?
+Tried: эмпирическая репродукция через StoreTapChannel.write() напрямую (см. выше,
+  вывод дословный) + чтение store_tap.py/record_display.py/logger_core.py построчно.
+Blocked on: решение о том, чей это контракт — тестера (буква брифа) или стора
+  (реальное поведение) — я не вправе поменять ни то, ни другое сам.
+Files: multiprocess_framework/modules/channel_routing_module/observability/store_tap.py,
+  .../record_display.py (оба вне FILES этой задачи), backend_ctl/tests/test_stop_summary_live.py
+  (тестерский, править запрещено).
+```
+
+## Что осталось нетронутым
+
+Ни один файл из FILES (1-6) не редактировался. Рабочее дерево чистое кроме
+этого отчёта.
+
+## Что я оставляю открытым / ненадёжным в своей работе
+
+- Не запускал сами REDS-тесты (`--backend-live`) — реализации нет, гонять их
+  до правки бессмысленно (они уже RED по построению задачи).
+- Эмпирическая проверка сделана на `StoreTapChannel` напрямую, не через
+  полный `LoggerManager`/`ObservableMixin` стек — но путь `LoggerCore.log()`
+  → `LogRecord.extra` проверен чтением (`_build_context` не оборачивает,
+  кladёт плоско), так что разрыв между «через логгер» и «напрямую в тап» не
+  должен менять вывод; не доказано живым стендом с полным PM.
+- Не проверял, обсуждали ли этот же разрыв авторы Task 1.2/1.3 (их записи в
+  сторе — тоже `_log_warning`/`_log_error` без kwargs, поэтому у них `extra`
+  пуст и разрыв не проявлялся — не нашёл в плане явного упоминания этого
+  случая до сих пор).
+
+---
+
+## Часть 2 — после решения лида (option b), реализация и НОВЫЙ блокер (2026-09-25, тот же день)
+
+Лид подтвердил репродукцию из Части 1, поправил контракт и REDS-тест (коммит `377e796b`:
+`_stop_summary_of()` читает `extra["context"]["stop_summary"]`) и дал зелёный свет продолжать
+реализацию по DESIGN 1-3 буквально.
+
+### Реализовано (FILES 1-3, 5-6)
+
+1. `process_registry.py` — слот `multiprocessing.RawArray('q', 3)` на ВОПЛОЩЕНИЕ (`_create_process`,
+   рядом с `parent_pid`), словарь `self._exit_reports`, попы в `remove_process`/провале спавна,
+   `exit_report(name) -> dict` (никогда не бросает).
+2. `process_runner.py` — kwarg `exit_report`; запись в `finally` СРАЗУ после успешного
+   `release_queues_at_exit`, `reported` — ПОСЛЕДНИМ; `shared_resources is None` → `[1,0,0]`; release
+   бросил → слот не трогается; запись — в своём `try/except`, новых `emergency_log` не добавлено.
+3. `process_manager_process.py` — `_publish_stop_summary()`, зовётся из `shutdown()` между `stop_all`
+   и `super().shutdown()`; ОДНА запись, `msg` начинается с `"stop summary:"`, WARNING/INFO по правилу
+   брифа, обёрнуто в `try/except`.
+5. `DECISIONS.md` — ADR-PMM-033 (полный контекст/решение/контракт/отвергнутое/последствия +
+   раздел «Найденный по ходу блокер», см. ниже); `python -m scripts.sync` прогнан,
+   `multiprocess_framework/DECISIONS.md` перегенерирован и закоммичен.
+6. `STATUS.md` — одна строка про Task 1.6 с явной пометкой BLOCKED.
+
+### Механизм слота (пункты 1-2) — подтверждён живым стендом
+
+Прямая диагностика (`/tmp/stopsummary_diag/diag.py`, не коммитился — временный скрипт):
+`processor: queues released to gone readers: 1, buffered dropped: 38` (stderr) в точности совпадает
+с тем, что видит PM через `exit_report("processor")` — механизм слота работает корректно.
+`test_stop_summary_hazards.py` (4 теста, все PASSED): reported-после-чисел, release-бросает-не-трогает-
+слот, пересозданный процесс получает свежий слот без утечки, неизвестное имя не бросает.
+
+### НОВЫЙ блокер (не тот же, что в Части 1) — сводка не доезжает до стора ни в каком виде
+
+Живой прогон трёх REDS (`--backend-live`) — **3 failed** (см. «TESTS» ниже, команда и хвост вывода).
+Причина — **не** контракт `extra`, а порядок жизненного цикла: `ProcessModule.stop()`
+(`process_module/core/process_module.py:1169-1176`) вызывает `self._flush_observability()`
+(снимает/ЗАКРЫВАЕТ store-tap, `self._observability_store = None`) **ДО** `self.shutdown()` — то есть
+ДО того, как вообще начинает выполняться `ProcessManagerProcess.shutdown()` (моё переопределение,
+где живёт `_publish_stop_summary`).
+
+Подтверждено эмпирически: временная диагностическая строка внутри `_publish_stop_summary` (снята перед
+коммитом) печатала `self._observability_store` прямо перед вызовом `_log_warning`/`_log_info` —
+результат **оба раза** (`shutdown()` вызывается дважды: изнутри `ProcessModule.stop()`, и повторно
+из `finally` `run_process_function`, потому что PM стартует ЧЕРЕЗ ТОТ ЖЕ раннер, что и дети —
+`spawner.py:120`):
+```
+DIAG stop_summary delivered=None store=None
+DIAG stop_summary delivered=None store=None
+```
+Лог-вызов НЕ падает и НЕ исключение — строка видна в stderr/консоли живого прогона дословно
+(`2026-09-25 23:17:11,551 [WARNING] [ProcessManager] ProcessManager: stop summary: released=1,
+buffered_dropped=38, children=6, not reported/lost: ['processor', 'renderer']`), но `_emit_to_taps`
+не находит ни одного tap'а на `logger_manager` после `unwire_observability_store`, и запись НЕ
+доезжает до `observability.db` — независимо от формы `extra`.
+
+Это опровергает вторую посылку брифа: «Публикация — логом PM в `shutdown()`… логгер PM ещё жив и
+пишет в стор» — логгер жив (stderr/console работают), но **стор-tap конкретно** уже закрыт.
+
+**Решение о том, ГДЕ звать `_publish_stop_summary`, чтобы попасть ДО `_flush_observability()`, не
+принято мной единолично** — оба очевидных варианта (переопределить `stop()` в PM, чтобы звать
+`stop_all()`+публикацию РАНЬШЕ `super().stop()`; либо перенести `_process_registry.stop_all()` из
+`shutdown()` в более раннюю точку) трогают порядок, который Task 1.1-1.5 намеренно тюнили под живые
+тайминги (5.83→0.7-1.7с и т.д.) — TRAPS брифа прямо запрещает трогать тайминг `stop_many/stop_all`.
+Записал как ESCALATION -> teamlead и как раздел ADR-PMM-033.
+
+### ESCALATION -> teamlead (вторая, в том же дне)
+
+```
+ESCALATION -> teamlead
+Question: ProcessModule.stop() закрывает store-tap (_flush_observability) ДО вызова shutdown() —
+  ЛЮБОЙ self._log_warning/_log_info внутри ProcessManagerProcess.shutdown() (включая мою публикацию
+  сводки, но ТАКЖЕ существующий self._log_error("shutdown: дети ВЫЖИЛИ...") — Ж-4/RS-3, не новый код)
+  физически не может попасть в observability.db. Где по-хорошему звать публикацию сводки, чтобы
+  успеть ДО этого закрытия, не трогая тайминг stop_many/stop_all (TRAPS брифа)?
+Tried: диагностическая печать self._observability_store перед _log_warning (None оба раза);
+  чтение process_module.py:1169-1230 (stop() -> stop_all_workers -> _flush_observability -> shutdown()).
+Blocked on: решение по перестройке порядка stop()/shutdown() для PM — вне полномочий developer,
+  затрагивает тайминги Task 1.1-1.5.
+Files: multiprocess_framework/modules/process_module/core/process_module.py (вне FILES этой задачи,
+  общий для ВСЕХ процессов, не только PM), process_manager_process.py (в FILES, но решение не в нём).
+```
+
+### TESTS (команды и итог)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_stop_summary_live.py --backend-live -q --tb=short
+```
+→ `3 failed in 23.26s` — все три: `assert len(matches) == 1` находит 0 записей (кроме первого теста,
+где severity-логика тоже не добралась бы до проверки — запись сводки отсутствует в сторе целиком).
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py -q --tb=short
+```
+→ `17 passed in 2.81s` (4 новых hazard + 13 закреплённых за инвентарём emergency_log — не выросло).
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests -q --tb=line -x
+```
+→ `996 passed, 1 skipped in 120.89s` — радиус модуля чист, регрессий от правки не внесено.
+
+```
+PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
+```
+→ `Ошибок нет! Предупреждений нет!` (включая раздел 6, синхронизация ADR).
+
+### Что я оставляю открытым / ненадёжным (Часть 2)
+
+- Реализация файлов 1-3 закоммичена НЕ ЗЕЛЁНОЙ по REDS — сознательно, по указанию бюджетной политики
+  «коммить то, что работает»: слот-механизм (файлы 1-2) работает и проверен, файл 3 реализован буквально
+  по DESIGN и корректен САМ ПО СЕБЕ (сообщение, severity, порядок вызова), но не может достичь цели
+  (стор) без правки ВНЕ FILES/вне зоны developer.
+- Не проверял, ломает ли тот же разрыв (`_flush_observability` до `shutdown()`) уже СУЩЕСТВУЮЩИЙ
+  `self._log_error("shutdown: дети ВЫЖИЛИ...")` (строка появилась до Task 1.6, Ж-4/RS-3) — по чтению
+  кода это тот же путь и та же судьба, но живого репро с выжившим ребёнком не делал (вне сути этой
+  задачи, но релевантная находка для teamlead).
+- Диагностический скрипт `/tmp/stopsummary_diag/*.py` — временный, не в репозитории, но команда для
+  воспроизведения (см. выше «репродукция» Части 1 и «DIAG» здесь) достаточна для повтора кем угодно.
+
+---
+
+## Часть 3 — ordering fix (2026-09-25, второй разработчик, тот же день)
+
+**Роль:** developer · **Ветка:** fix/lifecycle-1.6, HEAD принят на `10d90590`, DESIGN дал лид
+(хук в `ProcessModule.stop`, `_stop_children_once` в PM, run-once флаг) — реализация буквально по нему.
+
+### Реализовано (FILES 1-3, 4-5 продолжение)
+
+1. `process_module.py:1172-1201` — `stop()` зовёт новый no-op хук `_before_observability_teardown()`
+   МЕЖДУ `worker_manager.stop_all_workers()` и `_flush_observability()`. Другие процессы (не
+   переопределяющие хук) ведут себя бит-в-бит как раньше — проверено полным радиусом `process_module/tests`.
+2. `process_manager_process.py` — `__init__` получил `self._children_stopped = False`; старый инлайн-блок
+   `shutdown()` (`ProcessMonitor.stop` → `stop_all` → лог о выживших → `_publish_stop_summary`) вынесен в
+   `_stop_children_once()`, guard — `getattr(self, "_children_stopped", False)` (комментарий про частично
+   сконструированный PM — по образцу существующего в `finally` `shutdown()`). PM переопределяет хук вызовом
+   `_stop_children_once()`; `shutdown()` тоже зовёт `_stop_children_once()` (покрывает прямой вызов
+   `shutdown()` без `stop()`, TRAPS брифа №1). `_publish_stop_summary` docstring поправлен — зовётся из
+   `_stop_children_once()`, не буквально из `shutdown()`.
+3. `test_stop_summary_hazards.py` — 2 новых hazard-теста автора: (e) минимальный PM-стенд (`__new__` +
+   фейк-registry на границе `stop_all`/`exit_report`, `ProcessModule.shutdown` заглушен) — хук + повторный
+   `shutdown()` → `stop_all` и лог сводки РОВНО по одному разу; (f) объект с РЕАЛЬНЫМИ bound-методами
+   `ProcessModule.stop`/`_flush_observability` (без наследования, только нужные атрибуты) — доказывает,
+   что хук видит `_observability_store is not None` ДО его закрытия внутри самого `stop()`.
+4. `DECISIONS.md` (ADR-PMM-033) — статус «BLOCKED» снят, раздел «Найденный по ходу блокер» заменён
+   решением (хук/`_stop_children_once`/флаг); «Последствия» дополнены побочным эффектом: `self._log_error`
+   про выживших детей и логи `stop_many` теперь тоже доезжают до стора тем же путём — заявлено ПО ЧТЕНИЮ
+   кода, не измерено живым репро с выжившим ребёнком (вне области Task 1.6). `python -m scripts.sync`
+   прогнан — верхнеуровневый `DECISIONS.md` не изменился (заголовок ADR тот же, менялось содержимое).
+5. `STATUS.md` — строка Task 1.6 переписана: BLOCKED снят, все 3 живых REDS зелёные.
+
+### TESTS (команды и итог, дословно)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_stop_summary_live.py --backend-live -q --tb=short
+```
+→ `3 passed in 22.90s`
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py -q --tb=short
+```
+→ `19 passed in 2.12s` (17 прежних/закреплённых + 2 новых hazard e/f)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests -q --tb=line
+```
+→ `998 passed, 1 skipped in 120.36s` (радиус модуля, было 996 — +2 новых hazard, регрессий нет)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_module/tests -q --tb=line
+```
+→ `3003 passed, 1 xfailed in 30.94s` (радиус чист; два `PytestUnhandledThreadExceptionWarning` — из
+существующих diag-thread тестов `test_process_hooks_acceptance.py`, не связаны с этой правкой)
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_system_shutdown_live.py --backend-live -q --tb=short
+```
+→ `2 passed in 80.61s` — Task 1.1 регрессия чиста, известный флейк `test_system_shutdown_children_exit_hook_in_system_stop_mode` в этом прогоне зелёный (не гонялся повторно).
+
+```
+PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
+```
+→ `Ошибок нет! Предупреждений нет!` (после правок DECISIONS.md/STATUS.md, включая раздел 6)
+
+### Что я интерпретировал, а не буквально следовал
+
+- Тест (e) не зовёт настоящий `ProcessModule.stop()` целиком (это потребовало бы полной обвязки
+  observability/worker_manager, вне области PM-файла) — зовёт `_before_observability_teardown()` напрямую
+  (то, что `stop()` буквально вызывает между остановкой воркеров и дренажом) + `shutdown()`. Ordering-
+  свойство «хук работает, пока стор жив» проверяет отдельно тест (f) на реальном `ProcessModule.stop`.
+- В (e) `ProcessModule.shutdown` заглушен `patch.object` — граница теста: код PM (`_stop_children_once`,
+  `_publish_stop_summary`), не полный teardown `ProcessModule` (вне FILES/OUT OF SCOPE).
+
+### Что я оставляю открытым / ненадёжным
+
+- Побочный эффект (лог о выживших детях и `stop_many`-логи теперь тоже доезжают до стора) — заявлен по
+  чтению кода в ADR, НЕ измерен живым репро с реально выжившим ребёнком. Кандидат на отдельную проверку.
+- Живой стенд Task 1.1 прогнан один раз (2 passed за 80.61 с) — известный флейк не переиспытывался
+  повторно (бриф просил репортировать результат, не гонять до отказа).
+- Тесты (e)/(f) — юнит-уровень на минимальных стендах (стенд `_ObservabilityOrderProbe` собирает bound-
+  методы напрямую с класса `ProcessModule`, без наследования) — не полноценный live-прогон; live-доказательство
+  уже даёт `test_stop_summary_live.py` (3 зелёных).
+- Не проверял влияние правки на `restart_process`/`stop_process(None)` — по OUT OF SCOPE брифа и по чтению
+  кода эти пути не проходят через `_stop_children_once`/хук (они публикацию сводки не делают, ADR-PMM-033
+  «Последствия»), но отдельного живого репро не делал.
+
+Boundary: task closed. /compact (focus: files + tests + plan path).
+
+## Часть 4 — ревью it.1 (REQUEST_CHANGES), два фикса + два честных исправления (2026-09-26, третий разработчик)
+
+**Ревью:** `docs/reviews/2026-09-26_lifecycle-task-1.6-review.md`, major-находка — хук в `stop()` зовётся
+БЕЗ `try`, а флаг `_children_stopped` ставится ДО `stop_all`: исключение в хуке (или переопределении
+наследника) отменяло и финальный `_flush_observability()`, и шанс runner'а повторить `stop_all` из
+`finally`. Репро ведущего: `stop() raised`, `store still wired = True`, `stop_all calls total = 1` — на
+`main` (без бага) `store still wired = False`, `stop_all calls total = 2`.
+
+**Правки:**
+1. `process_module.py` `stop()`: вызов `self._before_observability_teardown()` обёрнут в
+   `try/except Exception` — ошибка логируется через `self._log_error` (сам лог тоже в своём `try`) и НЕ
+   мешает дойти до `_flush_observability()`/`shutdown()`. Комментарий: хук — точка расширения, та же
+   причина, по которой `_flush_observability()` сама глушит исключения.
+2. `process_manager_process.py` `_stop_children_once()`: `self._children_stopped = True` переставлен
+   ПОСЛЕ успешного возврата `stop_all` (была строка сразу после guard'а в начале метода). При исключении
+   `ProcessMonitor.stop()`/`stop_all` флаг остаётся `False` → метод выходит исключением → runner'овский
+   повторный `shutdown()` реально повторяет `stop_all` вместо no-op. Публикация сводки — по-прежнему
+   только ПОСЛЕ успешного `stop_all`, поэтому повтор публикует её ровно один раз (первая попытка до
+   публикации не дошла).
+3. Новый hazard-тест `test_raising_stop_all_flushes_and_retries_on_shutdown` в
+   `test_stop_summary_hazards.py` (фейк-регистр: первый `stop_all` бросает `RuntimeError`, второй —
+   успешен). **RED-then-GREEN проверен вручную**: временно откатил обе правки (1) и (2), прогнал ТОЛЬКО
+   новый тест — упал с `RuntimeError: boom: stop_all упал (инъекция теста)`, исключение из
+   `_before_observability_teardown()` пробивало `pm.stop()` насквозь (тот самый баг из ревью); вернул
+   правки — весь файл `test_stop_summary_hazards.py` зелёный, 7/7.
+4. Два честных исправления, minor-находки ревью:
+   - тест `test_reported_written_after_numbers_gates_reading` переименован в
+     `test_unreported_slot_reads_as_unknown`, докстринг честно говорит: тест собирает слот вручную,
+     раннер не зовётся, проверяется ТОЛЬКО чтение (`exit_report` игнорирует числа, пока `reported` не
+     выставлен) — порядок ЗАПИСИ («reported последним», ради read-during-kill-между-строками) этим или
+     любым другим тестом файла НЕ закреплён.
+   - `process_runner.py` (~L401) и ADR-PMM-033 (п.2): комментарий/текст «SRM-mode без bundle» был неверен
+     — `shared_resources` в SRM-режиме НЕ бывает `None` (`process_runner.py:273`,
+     `shared_resources = shared_resources_or_bundle or SharedResourcesManager()`). Ветка `elif exit_report
+     is not None` реально бьёт, когда класс процесса не загрузился (`_load_process_class` вернул `None`)
+     либо сборка `shared_resources` из bundle-словаря бросила — в обоих случаях очереди физически не
+     поднимались, поэтому `[1, 0, 0]` честен.
+5. ADR-PMM-033 дополнительно (заметки ревью, не блокирующие): «свежий слот» держится подтверждённой
+   смертью старого воплощения ДО `remove_process`, а не новизной объекта (`RawArray` память
+   переиспользуется кучей `multiprocessing` — измерение ревьюера: тот же адрес после `del`); задокументирован
+   не воспроизведённый побочный эффект — `GenericProcessManagerApp.shutdown` (watcher'ы, `SSM.shutdown`)
+   теперь идёт ПОСЛЕ `stop_all`, на `main` шёл ДО (вне `FILES`/`OUT OF SCOPE` этой задачи, только
+   зафиксировано). `python -m scripts.sync` прогнан — глобальный `DECISIONS.md` не изменился (диффа нет,
+   коммитить нечего).
+
+**Проверено:**
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py -q --tb=short
+```
+→ до фикса (обе правки временно откачены): новый тест — `1 failed` (RuntimeError пробивает `stop()`
+насквозь). После фикса: `7 passed`.
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest backend_ctl/tests/test_stop_summary_live.py --backend-live -q --tb=short
+```
+→ `3 passed in 21.55s`.
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_manager_module/tests multiprocess_framework/modules/process_module/tests -q --tb=short
+```
+→ `4002 passed, 1 skipped, 1 xfailed in 147.57s` (радиус чист, без новых падений).
+
+```
+PYTHONPATH=$PWD .venv/bin/python -m pytest multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py -q --tb=short
+```
+→ `13 passed` — пинутый инвентарь `emergency_log` не задет (новых вызовов не добавлено).
+
+```
+PYTHONPATH=$PWD .venv/bin/python scripts/validate.py
+```
+→ `Ошибок нет! Предупреждений нет!`
+
+### Что я интерпретировал, а не буквально следовал
+
+- Дизайн п.3 описывал сценарий как «после `pm.stop()`» + «после `pm.shutdown()`» раздельно; фактически
+  `ProcessModule.stop()` САМ зовёт `self.shutdown()` последней строкой — поэтому весь ретрай (2 вызова
+  `stop_all`, 1 публикация) уже происходит ВНУТРИ одного `pm.stop()`. Явный повторный `pm.shutdown()` в
+  тесте (имитация runner'овского `finally`) после этого закономерно no-op — проверяет идемпотентность
+  (третьего `stop_all`/второй сводки быть не должно), а не отдельный «первый ретрай». Оставил оба вызова
+  в тесте, оба со своими ассертами — это честнее, чем подгонять докстринг под одно скрытое допущение.
+- Первая версия ассерта считала все `_log_info`+`_log_warning` вызовы как «сводку» — упала (2 вместо 1),
+  потому что `ProcessModule.stop()` сам логирует `"Process 'X' stopping"` через `_log_info`. Заменил на
+  прямой спай (`MagicMock(wraps=...)`) поверх `pm._publish_stop_summary` — считает публикации отдельно от
+  lifecycle-логов, точнее замысла брифа.
+
+### Что я оставляю открытым / ненадёжным
+
+- Побочный эффект `GenericProcessManagerApp.shutdown` после `stop_all` (см. ADR, п.5 выше) — заявлен по
+  чтению кода, НЕ измерен живым репро; `GenericProcessManagerApp` вне `FILES` этой задачи.
+- `DECISIONS.md` модуля — 215 КБ при бюджете doc-size-guard'а 32 КБ (хук предупредил на каждой правке).
+  Предсуществующий разрыв (файл рос до меня), не в `FILES`/`OUT OF SCOPE` этой задачи — не делил.
+- Полный тестовый радиус (`process_manager_module`+`process_module`, 4002 теста) прогнан один раз; не
+  гонял повторно на флейки (кроме уже известного из Части 2/3 `test_system_shutdown_children_exit_hook_in_system_stop_mode`,
+  который в этом прогоне не участвовал — не live-тест).
+- Live-тест Task 1.1 (`test_system_shutdown_live.py`) в этой итерации НЕ перепрогонялся — из брифа не
+  требовался (ACCEPTANCE называет только `test_stop_summary_live.py`); полагаюсь на зелёный прогон Части 3.

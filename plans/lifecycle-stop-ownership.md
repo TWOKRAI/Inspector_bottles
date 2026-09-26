@@ -1,7 +1,7 @@
 # lifecycle-stop-ownership — остановкой и сиротами владеет PM (L-5 + долги приёмки L-2)
 
 - **Slug:** `lifecycle-stop-ownership` · **Ветка:** `fix/lifecycle-stop-ownership` (создать при старте Ф1) · **Дата:** 2026-09-24
-- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 IN PROGRESS с 2026-09-25
+- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 DONE 2026-09-26. **Ф1 принята CTO 2026-09-26 — ACCEPT WITH CONDITIONS** ([отчёт](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)); Ф2 ждёт L-6 и условий ниже
 - **Полоса:** B (фреймворк). **Срок-якорь:** Ф1 закрыть **до gui-service Task 1.3a** (у Пульта появится кнопка
   «стоп» по сокету — сегодня она идёт незащищённым путём, см. Task 1.1).
 - **Слой:** framework (`process_manager_module`, `shared_resources_module`), `backend_ctl` (harness)
@@ -237,7 +237,7 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
   (`test_system_stop_mid_restart_refuses_the_spawn`), на main не сверено. Не защищены: ребёнок, держащий GIL (его
   добивает страховка 1.4), Windows.
 
-### Task 1.6 — Потери видны снаружи, а не только в stderr умирающего процесса — IN PROGRESS 2026-09-25
+### Task 1.6 — Потери видны снаружи, а не только в stderr умирающего процесса ✅ DONE 2026-09-26
 
 **Level:** Middle+ · **Assignee:** developer · **Layer:** framework
 **Факт:** строка итога хука (`emergency_log`) видна только в stderr; счётчики `get_stats()` после выхода никто не
@@ -245,14 +245,39 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 **Направление:** итог отпуска каждого ребёнка доезжает до PM (последним сообщением до гашения плоскостей или через
 метку/счётчик в разделяемой памяти рядом с меткой очереди), PM публикует сводку стопа одной записью в стор.
 **Acceptance:**
-- [ ] После стопа `inspection_full` в `observability.db` (или ответе backend_ctl по завершённой сессии) есть запись сводки
+- [x] После стопа `inspection_full` в `observability.db` (или ответе backend_ctl по завершённой сессии) есть запись сводки
   стопа с `released`/`buffered_dropped` по каждому процессу; числа совпадают со строками stderr.
-- [ ] Break-injection: без публикации — записи нет.
+- [x] Break-injection: без публикации — записи нет.
+
+**Итог (2026-09-26, ветка `fix/lifecycle-1.6`, ADR-PMM-033):**
+- Механизм: слот `RawArray('q',3)` на воплощение (`ProcessRegistry._create_process` → kwarg `exit_report`), runner пишет
+  итог `release_queues_at_exit` (`reported` последним), PM после `stop_all` пишет одну запись `stop summary:`,
+  `stop_summary` — в `extra.context`. Чтобы запись успела до снятия store-tap, в `ProcessModule.stop()` добавлен хук
+  `_before_observability_teardown()` (между `stop_all_workers` и `_flush_observability`, изолирован `try`); PM гасит
+  в нём детей (`_stop_children_once`, флаг после успешного `stop_all`). Посылка брифа «логгер PM в `shutdown()` ещё
+  пишет в стор» оказалась ложной — поймал developer живьём.
+- Тесты: тестер 3 живых RED→GREEN; автор 7 hazard; радиус process_manager + process_module + registers 4091 passed.
+- Инъекции ведущего (12 патчей, предсказания до прогона): все свойства убиваемы, кроме порядка записи `reported`
+  (видно только при смерти посреди трёх присваиваний — не закреплён, записано в ADR). Две находки матрицы:
+  перестановка `released`/`buffered_dropped` ловилась 1 из 3 (на обычном стопе потерь бывает 0) → ведущий добавил сверку
+  со stderr в сценарий убитого читателя (устойчивая потеря processor 1/38), стало 3 из 3; H(c) держится двумя
+  страховками — снятие одной не роняет тест, обеих — роняет.
+- Стенд: время стопа main 1.40–1.53 с / ветка 1.44–1.50 с (5 циклов); логи остановки детей PM теперь доезжают до стора
+  (в прежнем `logs/observability.db` — 0 строк `Stopping all processes`). `test_system_shutdown_live` флейк
+  `children_exit_hook` 1 из 9 на ветке — как до 1.6.
+- Ревью: it.1 REQUEST_CHANGES (исключение в хуке срывало слив наблюдаемости и повтор `stop_all`), it.2
+  APPROVE_WITH_NOTES — `docs/reviews/2026-09-26_lifecycle-task-1.6-review.md`.
+- **Долги:** на пути сбоя `stop_all` сводка публикуется после снятия store-tap и в стор не попадает (принято, ADR);
+  бросающий `_process_monitor.stop()` → детей никто не гасит (не новый, и на main); `GenericProcessManagerApp.shutdown`
+  (watcher'ы, SSM) теперь после `stop_all` — не воспроизведено как дефект; Qt `GuiProcess` и Windows/spawn не проверены;
+  `process_manager_module/DECISIONS.md` 215 КБ при бюджете 32 КБ, этот план 44 КБ — делить.
 
 **Контракт записи (ведущий, 2026-09-25, до кода — то, что видит тестер):**
 - Ровно одна запись на `PM.shutdown()`: `process='ProcessManager'`, `message` начинается с `stop summary:`;
-  в `extra` ключ `stop_summary` → `{имя_ребёнка: {"released": int, "buffered_dropped": int, "reported": bool}}`
+  в `extra["context"]` ключ `stop_summary` → `{имя_ребёнка: {"released": int, "buffered_dropped": int, "reported": bool}}`
   по каждому ребёнку, остановленному этим `stop_all`.
+  *(Поправлено ведущим 2026-09-25 по эскалации developer: стор кладёт структурные kwargs лога в
+  `extra.context` — так у всех записей PM; исходное «ключ в `extra`» было неточно, стор не трогаем.)*
 - `reported=false` — ребёнок не дошёл до хука выхода (убит `kill`/`terminate`, упал до `finally`); тогда
   `released`/`buffered_dropped` = 0 и это «не знаем», а не «потерь нет».
 - Числа ребёнка равны числам его stderr-строки `queues released to gone readers: N, buffered dropped: M`;
@@ -268,6 +293,23 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 
 **Исполнение Ф1:** тестер в worktree до кода (1.1+1.3 — один заход; 1.2 и 1.4 — свои) → developer/teamlead →
 инъекции ведущего → стенд → reviewer синхронно. Порядок: 1.1 → 1.3 → 1.2 → 1.4 → 1.5 → 1.6 (1.1 и 1.3 дешёвые и снимают шум для замеров; до gui-service 1.3a обязательны 1.1 и 1.2, остальное — желательно).
+
+**Приёмка Ф1 (CTO, 2026-09-26):** merge gate 1.6 — ACCEPT_WITH_DEBT, Ф1 — ACCEPT WITH CONDITIONS
+([`docs/reviews/2026-09-26_lifecycle-phase-1-cto.md`](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)).
+Хук `_before_observability_teardown` принят как заглушка фазы, не паттерн: второго хука не заводить — следующая
+потребность в порядке стопа запускает Task 3.1 (именованные фазы `stop()`), которая обязана сохранить два инварианта:
+запись в стор от останавливающегося процесса — до `_flush_observability`; `shutdown()` без `stop()` идемпотентен по детям.
+
+**Условия до старта Ф2 (CTO):**
+- [ ] D1 — Linux/Orin проверка Task 1.5 на целевой машине (числа Ф2 на платформе с непроверенным сторожем бессмысленны).
+- [ ] Юнит-тест правила severity `_publish_stop_summary` (литерал WARNING при любом `reported=false`) — в CI сегодня
+  severity не защищена ничем (инъекция D CTO: 0 красных), живые тесты CI не гоняет.
+- [ ] `--backend-live` (stop_summary 3 + system_shutdown 2 + exit_loss) — вручную перед Ф2 или в CI.
+- [ ] Флейк `children_exit_hook_in_system_stop_mode` (1/9) — починить или квантовать до «20 циклов» Ф2.
+
+**Долги со сроком «до старта Task 3.1»:** указатель ADR-PM-045 → ADR-PMM-033 в `process_module/DECISIONS.md` (хук живёт
+там, решение — в чужом модуле); формулировка ADR-PMM-033 п.4 — в сводку попадают все имена `os_processes`, включая
+остановленных ранее одиночно (замер CTO S4: `processor` после `process.stop` — `reported=true`).
 
 ## Ф2 — перемерить после L-6 и решить судьбу ReaderGoneQueue
 

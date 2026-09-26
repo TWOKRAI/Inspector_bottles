@@ -1443,3 +1443,146 @@ boot ребёнка, `kill -9` PM под `BackendHarness`.
 - **`multiprocessing.parent_process()` / sentinel родителя:** под fork это та же труба —
   `popen_fork.py` отдаёт ребёнку `child_r` как `parent_sentinel`, а `parent_w` держит PM (строки 65–78,
   CPython 3.12), — с теми же двумя дефектами.
+
+## ADR-PMM-033: Итог хука выхода — слот разделяемой памяти; сводка стопа — лог PM (Task 1.6, 2026-09-25)
+
+**Статус:** принято — механизм слота (пункты 1-3) и публикация сводки (пункт 4, включая порядок
+жизненного цикла ниже) реализованы, все 3 живых REDS зелёные. Ревью it.1 (2026-09-26): хук изолирован
+исключением, флаг переставлен на после `stop_all` — см. правку в конце раздела «Порядок жизненного цикла».
+**Дата:** 2026-09-25 (правки ревью it.1 — 2026-09-26)
+**Refs:** [plans/lifecycle-stop-ownership.md](../../../plans/lifecycle-stop-ownership.md) (Task 1.6)
+
+### Контекст
+
+Строка итога хука выхода (`emergency_log`, ADR-SRM-016/Task 1.2) видна только в stderr умирающего
+ребёнка; счётчики `get_stats()` после выхода процесса никто не читает (ревью L-2 it.2). Потеря при
+останове не попадает ни в стор наблюдаемости, ни в ответ `backend_ctl`.
+
+### Решение (транспорт ребёнок → PM)
+
+1. **Слот разделяемой памяти на ВОПЛОЩЕНИЕ.** `ProcessRegistry._create_process` создаёт
+   `multiprocessing.RawArray('q', 3)` = `[reported(0/1), released, buffered_dropped]`, кладёт в новый
+   словарь `self._exit_reports[name]` (рядом с `_ready_events`) и передаёт ребёнку аргументом
+   `kwargs={"parent_pid": ..., "exit_report": slot}` (inheritance при spawn — та же дорога, что у
+   `parent_pid`, ADR-PMM-032). Свежий слот на КАЖДЫЙ (пере)спавн — `create_and_register` не переиспользует
+   старый объект, `remove_process`/провал спавна снимают ссылку (`.pop(name, None)`) тем же доводом, что
+   у `_ready_events`: отчёт старого воплощения не имеет права утечь в новое. **Уточнение (ревью Task 1.6,
+   it.1):** «свежий» держится подтверждённой смертью старого воплощения ДО `remove_process`, а не
+   новизной объекта — `RawArray` переиспользуется кучей `multiprocessing` (измерено ревьюером: `del a; b
+   = RawArray('q', 3)` → тот же адрес). Порядок «сначала подтверждённая смерть, потом `remove_process`»
+   — то, что реально не даёт отчёту утечь.
+2. **Runner пишет в слот последним действием хука** (`process_runner.py`, `finally`, сразу после
+   успешного `release_queues_at_exit`): `exit_report[1]=released; exit_report[2]=buffered_dropped;
+   exit_report[0]=1` — **`reported` (индекс 0) — ПОСЛЕДНИМ**. Замысел: ребёнок, убитый посреди этой
+   записи (между строками), обязан читаться как «не знаю», а не как ложные частичные числа —
+   **порядок ЗАПИСИ этим сценарием (kill ровно между тремя `int`-присваиваниями) НИ ОДНИМ тестом не
+   закреплён и не воспроизведён** (поправка ревью Task 1.6, it.1, 2026-09-26: исходная формулировка
+   ошибочно приписывала это `test_unreported_slot_reads_as_unknown`, переименован из
+   `test_reported_written_after_numbers_gates_reading` — тест собирает слот вручную и раннер не
+   зовёт, проверяет ТОЛЬКО чтение — `exit_report` обязан игнорировать released/buffered_dropped, пока
+   reported не выставлен). `release_queues_at_exit` бросил → слот НЕ трогается, `reported` остаётся 0
+   (`test_release_raising_leaves_slot_unreported`). `shared_resources is None` → хук всё равно дошёл:
+   пишем `[1, 0, 0]` — «знаем: отпускать было нечего», не «умер до finally». **Поправка ревью Task 1.6,
+   it.1:** это НЕ «SRM-режим без bundle» (SRM-режим `shared_resources` не бывает `None` —
+   `process_runner.py:273`, `shared_resources = shared_resources_or_bundle or SharedResourcesManager()`).
+   Ветка бьёт, когда класс процесса не загрузился (`_load_process_class` вернул `None`, ранний
+   `return` до присвоения `shared_resources`) либо сборка `shared_resources` из словаря-bundle бросила
+   исключение — в обоих случаях очереди физически не поднимались, поэтому `[1, 0, 0]` честен. Запись слота
+   — в СВОЁМ `try/except`, глушит молча: сбой слота вторичен к самому отпуску очередей и не должен
+   маскировать/дублировать существующий `emergency_log`. Новых вызовов `emergency_log` НЕ добавлено
+   (пинутый инвентарь — 13 тестов, не 14).
+3. **Чтение — `ProcessRegistry.exit_report(name) -> dict`.** Нет слота (имя не создавалось через
+   `_create_process`) или `reported==0` → `{"released": 0, "buffered_dropped": 0, "reported": False}`.
+   Никогда не бросает.
+4. **Публикация — ОДИН лог PM** (`ProcessManagerProcess._publish_stop_summary`, зовётся из `shutdown()`
+   между `stop_all` и `super().shutdown()`): собирает `exit_report(name)` по всем именам, которые ОСТАНОВИЛ
+   именно этот `stop_all`, и пишет ОДНУ запись `self._log_warning(msg, stop_summary=summary)` /
+   `self._log_info(...)` — WARNING, если у кого-то `released>0`/`buffered_dropped>0`/`reported=False`,
+   иначе INFO. `msg` начинается литерально с `"stop summary:"`. Обёрнуто целиком в `try/except` —
+   публикация не имеет права сорвать сам shutdown.
+
+### Контракт записи в сторе — `extra["context"]["stop_summary"]`, НЕ `extra["stop_summary"]`
+
+Исходная буква контракта («ключ `stop_summary` в `extra`») была неточна — поправлена ведущим 2026-09-25 по
+эскалации developer. Эмпирическая репродукция (`StoreTapChannel.write()` напрямую,
+`docs/reviews/2026-09-25_lifecycle-task-1.6-developer.md`): **любой** структурный `kwarg`, переданный
+`_log_warning`/`_log_info` ЛЮБОЙ записи PM, `StoreTapChannel.write()` кладёт целиком под один ключ
+`rec["context"]` (`store_tap.py:229`), а `hub_record_to_display()` (ветка `kind == "log"`,
+`record_display.py:335-337`) правилом конверта включает `"context"` как обычный НЕвложенный ключ
+итогового `extra` — потому что `"context"` не входит в `_ENVELOPE_KEYS`. Единственный прецедент
+«поле верхнего уровня `extra`» — жёстко зашитое имя `ORIGIN_FIELD="origin"` (`store_tap.py:237`), не общий
+механизм; заводить второй такой маркер под `stop_summary` — правка `channel_routing_module` ради одной
+записи, чужой модуль, вне `FILES` этой задачи. `store_tap.py`/`record_display.py` НЕ трогались.
+
+### Порядок жизненного цикла — хук `_before_observability_teardown` (2026-09-25, продолжение)
+
+Механизм слота (пункты 1-3 выше) был подтверждён живым стендом, но публикация (пункт 4) изначально не
+доезжала до `observability.db` — **не** из-за контракта записи (он поправлен выше), а из-за **порядка
+вызовов**: `ProcessModule.stop()` останавливает воркеров, затем зовёт `self._flush_observability()`,
+который **снимает и ЗАКРЫВАЕТ store-tap** (`self._observability_store = None`), и только ПОСЛЕ этого —
+`self.shutdown()` (где и жила `_publish_stop_summary`). Эмпирически подтверждено (диагностическая печать,
+снята перед коммитом): `self._observability_store is None` уже в момент вызова `_publish_stop_summary`.
+
+**Решение (лид, эскалация закрыта в тот же день):**
+
+1. `ProcessModule.stop()` получил no-op хук-шаблон `_before_observability_teardown()`, вызываемый МЕЖДУ
+   остановкой воркеров и `_flush_observability()` — единственная точка, где store-tap ещё жив, а воркеры
+   уже остановлены. Любой другой процесс, не переопределяющий хук, ведёт себя бит-в-бит как раньше.
+2. `ProcessManagerProcess` переопределяет хук методом `_stop_children_once()` — извлечённым из старого
+   тела `shutdown()` блоком (`ProcessMonitor.stop` → `ProcessRegistry.stop_all` → лог о выживших →
+   `_publish_stop_summary`). `shutdown()` тоже зовёт `_stop_children_once()` — это покрывает прямые
+   вызовы `shutdown()` без `stop()` (например, runner'овский `finally` на ошибке до `stop()`).
+3. Флаг `self._children_stopped` (инициализирован `False` в `__init__`, читается через `getattr(self,
+   "_children_stopped", False)` — `shutdown()` может выполняться на частично сконструированном PM) делает
+   метод идемпотентным: PM запускается той же `run_process_function`, что и дети (`spawner.py:120`), и
+   `shutdown()` зовётся дважды — из `ProcessModule.stop()` (через хук) и повторно из `finally`
+   `run_process_function`. Второй вызов теперь no-op для уже остановленных детей вместо повторного
+   `stop_all` по мёртвым процессам.
+
+**Правка ревью Task 1.6, it.1 (2026-09-26, major-находка):** до этой правки хук зовётся из `stop()` БЕЗ
+`try`, а флаг `_children_stopped` ставился ДО работы `stop_all` — исключение из `stop_all` (или
+`ProcessMonitor.stop()`) внутри хука отменяло и финальный дренаж/закрытие store-tap (`_flush_observability`
+после хука в `stop()` не выполнялся), и саму возможность повторить `stop_all` из runner'овского `finally`
+(флаг уже `True` → второй вызов — no-op). Репро ревьюера: `stop_all` бросает `RuntimeError` →
+`stop() raised`, `store still wired = True`, `stop_all calls total = 1`; на `main` — `store still wired =
+False`, `stop_all calls total = 2`. Исправлено двумя изолированными правками:
+- вызов хука в `ProcessModule.stop()` обёрнут в `try/except Exception` — ошибка логируется
+  (`self._log_error`, сам лог тоже в своём `try`) и не мешает дойти до `_flush_observability()`/`shutdown()`;
+- `self._children_stopped = True` в `_stop_children_once()` переставлен ПОСЛЕ успешного возврата
+  `stop_all` — при исключении флаг остаётся `False`, и следующий вызов реально повторяет `stop_all`.
+  Первый повторщик — собственный `self.shutdown()` в конце `ProcessModule.stop()`, второй — `finally`
+  раннера (при постоянном сбое попыток до трёх; на main было две). Сводка публикуется один раз — первая
+  попытка до публикации не дошла. Hazard-тест на этот сценарий —
+  `test_raising_stop_all_flushes_and_retries_on_shutdown`.
+
+Результат: на штатном пути `stop_all` и публикация сводки выполняются один раз, пока store-tap ещё жив.
+На пути сбоя (первый `stop_all` бросил) повтор идёт из `shutdown()` уже ПОСЛЕ `_flush_observability()`:
+сводка публикуется один раз, но store-tap снят, и в `observability.db` она **не попадает** (ревью it.2,
+`probe_it2.py once`: `stop_all calls=2`, `publish calls=1`, `store_alive_at_publish=[False]`). Принято как
+есть: путь сбоя `stop_all` сам по себе аварийный, его голос — `_log_error` хука.
+Три живых REDS (`backend_ctl/tests/test_stop_summary_live.py`) — зелёные.
+
+### Отвергнуто
+
+- **«Последнее сообщение в очередь PM».** `put()` на выходе заводит feeder-поток — тот самый источник
+  зависаний L-2 (ADR-SRM-016), ради устранения которого сделан весь план `lifecycle-stop-ownership`.
+- **Второй промоут-ключ в `store_tap.py` по образцу `ORIGIN_FIELD`** — см. «Контракт записи» выше.
+
+### Последствия
+
+- `reported=false` значит «не знаем», а не «потерь нет» — читающий сводку обязан различать эти два случая.
+- `restart_process` и `stop_process(None)` (одиночная остановка вне `shutdown()`) публикацию сводки НЕ
+  делают — она живёт только в `PM.shutdown()`, по дизайну (вне области этой задачи расширять).
+- Слот на воплощение переживает `stop_process`/`restart` штатно (снимается только при `remove_process`/
+  провале спавна) — но `exit_report()` читает его лишь в момент `shutdown()`, поэтому промежуточные
+  чтения вне этого пути не планировались и не проверялись.
+- Побочный эффект переноса `stop_all()`+логов в хук `_before_observability_teardown`: существующий
+  `self._log_error("shutdown: дети ВЫЖИЛИ...")` (Ж-4/RS-3, старше этой задачи) и логи `stop_many` теперь
+  ТОЖЕ доезжают до `observability.db` на пути `ProcessModule.stop()` — раньше store-tap был закрыт к
+  моменту их вызова, как и для `_publish_stop_summary`. Заявлено по чтению кода (тот же путь до store-tap,
+  тот же порядок), НЕ измерено живым репро с выжившим ребёнком — вне задачи 1.6.
+- **Ещё один побочный эффект того же переноса (найдено ревью Task 1.6, it.1, не воспроизведено, вне
+  `FILES`/`OUT OF SCOPE` этой задачи — только зафиксировано):** `GenericProcessManagerApp.shutdown`
+  (останов watcher'ов, `SSM.shutdown`) теперь выполняется ПОСЛЕ `stop_all` — на `main` он шёл ДО. В окне
+  между стартом `stop_all` и остановкой watcher'ов последний ещё жив и теоретически может разослать
+  `reconfigure` уже умирающим детям. Не измерено живым репро.
