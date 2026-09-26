@@ -783,6 +783,11 @@ def _motion_suite(p: Probe, rep: Report) -> None:
         f" через глобал — {'да' if shared[1] == token else 'НЕТ'}"
     )
     rep.data["move_20mm"] = {"vals": res.vals, "wall_s": round(res.wall_s, 3), "err": res.text}
+    timer_seen = (p.read(CTRL + 8) or [0])[0]
+    rep.data["timer_in_mirror"] = timer_seen not in (0, 32767)
+    rep.note(
+        f"TimerRead из Mirror во время хода: {'работает' if rep.data['timer_in_mirror'] else 'НЕТ'} ({timer_seen})"
+    )
     go_back(p, start)
 
     # 2. стоп: обычный и «быстрый» (DecL на максимум из Mirror перед MotionStop, RL 1-51)
@@ -858,7 +863,26 @@ def _motion_suite(p: Probe, rep: Report) -> None:
     )
     go_back(p, start)
 
-    # 6. 4-я ось: поворот RZ на +5° и обратно — каким способом задаётся ось
+    # 6. непрерывный jog: едет до MotionStop; Motion сам остановит по времени и оболочке
+    start = p.live_fresh()
+    res = p.run(35, [1, 15, 600], timeout=15, text=True)
+    _check_ok(res, "непрерывный jog")
+    v = res.vals + [0] * 4
+    rep.data["jog_cont"] = {
+        "status": STATUS_TEXT.get(res.status),
+        "started": v[0] == 1,
+        "dx_mm": s16(v[1]) / 10,
+        "dy_mm": s16(v[2]) / 10,
+        "drz_deg": s16(v[3]) / 10,
+        "text": res.text,
+    }
+    rep.note(
+        f"ContinueCartesianJOG X+ 15 мм/с × 0.6 с: {STATUS_TEXT.get(res.status)}, прошёл {s16(v[1]) / 10} мм"
+        f" (ожидание ≈ 9 мм плюс торможение); {res.text or ''}"
+    )
+    go_back(p, start)
+
+    # 7. 4-я ось: поворот RZ на +5° и обратно — каким способом задаётся ось
     rot: dict[str, Any] = {}
     for label, test, args in (
         ("SetGlobalPoint", 33, []),

@@ -368,3 +368,23 @@ def test_rotation_refused_when_point_not_written():
     finally:
         p.close()
         run.stop()
+
+
+def test_continuous_jog_and_timer_in_mirror(motion):
+    jog = motion.data["jog_cont"]
+    assert jog["started"] is True and jog["text"] == "остановлено: время"
+    assert 7.0 < jog["dx_mm"] < 12.0 and jog["dy_mm"] == 0.0  # 15 мм/с × 0.6 с ≈ 9 мм
+    assert motion.data["timer_in_mirror"] is True
+
+
+def test_continuous_jog_limits(env, motion):
+    p = env[1]
+    assert p.run(29).ok
+    cases = (
+        ([1, 25, 500], "скорость 1..20 мм/с, время 50..1000 мс"),
+        ([1, 10, 2000], "скорость 1..20 мм/с, время 50..1000 мс"),
+        ([3, 10, 500], "направление 1 (X+) или 2 (X-)"),
+    )
+    for args, text in cases:
+        res = p.run(35, args, text=True)
+        assert res.status == 5 and res.text == text

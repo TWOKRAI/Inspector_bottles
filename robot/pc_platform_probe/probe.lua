@@ -46,11 +46,12 @@
 --    0x1440..0x144F    LIVE: +0 HB_MOTION +1 HB_MIRROR +2 MOVING +3..6 X/Y/Z/RZ ×0.1
 --                      +7 HAND +8/+9 ENC [lo,hi] +10 MIRROR_ERR +11 LAST_TEST
 --                      +12 VFD_BOOT_STOP (1 ПЧ подтвердил / 2 нет ответа) +13 POSE_OK
---    0x1450..0x1457    CTRL: +0 STOP_REQ (изменение → MotionStop) +1 OVR_REQ (изменение → Override)
+--    0x1450..0x1458    CTRL: +0 STOP_REQ (изменение → MotionStop) +1 OVR_REQ (изменение → Override)
 --                      +2 MIRROR_POSE (1 = Mirror публикует позу во время хода)
 --                      +3 STOP_SEEN_TICK +4 OVR_RESULT (1 ок / 2 ошибка / 3 выше лимита)
 --                      +5 SHARED_LOCAL +6 SHARED_GLOBAL (что видит Mirror)
 --                      +7 FAST_STOP (1 = перед MotionStop DecL(25000) — максимум по RL 2-8; совет RL 1-51)
+--                      +8 MIRROR_TIMER (младшие 16 бит TimerRead() из Mirror во время хода; 0xFFFF — нет)
 --    0x1460..0x151F    SCRATCH: область тестов атомарности и длины блоков
 --
 --  32-битные числа — двумя регистрами [lo, hi]. Все записи — знаковыми словами (как v1).
@@ -732,6 +733,41 @@ TESTS[34] = function(seq)                      -- ROT_WRITEPOINT(name): RZ че�
   return rotate_test(seq, function(_, r) WritePoint(PT_NAME, name, r) end)
 end
 
+TESTS[35] = function(seq)                      -- JOG_CONT(dir, spd мм/с, мс): ContinueCartesianJOG (RL 1-52)
+  -- Не блокирующая команда: робот едет, пока его не остановит MotionStop. Motion сам следит за
+  -- временем (TimerRead) и оболочкой каждые 10 мс; ход ограничен 20 мм/с × 1 с.
+  if type(ContinueCartesianJOG) ~= "function" then return ST_NOFUNC, {}, "ContinueCartesianJOG " .. type(ContinueCartesianJOG) end
+  if type(TimerOn) ~= "function" or type(TimerRead) ~= "function" then return ST_NOFUNC, {}, "нужен TimerOn/TimerRead" end
+  local dir, spd, ms = arg(0), arg(1), arg(2)
+  local name = (dir == 1) and "X+" or ((dir == 2) and "X-" or nil)
+  if not name then return ST_REFUSED, {}, "направление 1 (X+) или 2 (X-)" end
+  if spd < 1 or spd > 20 or ms < 50 or ms > 1000 then return ST_REFUSED, {}, "скорость 1..20 мм/с, время 50..1000 мс" end
+  local p = pose()
+  local why = guard(p, p and p.x or 0, p and p.y or 0, p and p.z or 0, 5)
+  if why then return ST_REFUSED, {}, why end
+  begin_move(seq % 30000 + 1)
+  TimerOn()
+  local ok, err = pcall(ContinueCartesianJOG, name, spd)
+  local reason, left_ok = "время", true
+  if ok then
+    while true do
+      DELAY(0.01)
+      local c = pose()
+      if not c then reason = "поза не читается"; break end
+      if abs(c.x - anchor.x) > ENVELOPE or abs(c.y - anchor.y) > ENVELOPE then reason = "оболочка"; break end
+      if TimerRead() >= ms then break end
+      if PB_stop_seen then reason = "стоп с ПК"; break end
+    end
+    MotionStop()
+    DELAY(0.3)                                    -- дать доехать торможению
+  end
+  end_move()
+  local f = pose() or p
+  if not ok then left_ok = false end
+  return ST_OK, {ok and 1 or 0, s16(f.x - p.x), s16(f.y - p.y), s16(f.r - p.r)},
+         (left_ok and "" or tostring(err)) .. (ok and ("остановлено: " .. reason) or "")
+end
+
 -- =====================  ЦИКЛ ПРОБЫ  ================================
 local function publish_live()
   hb_motion = (hb_motion + 1) % 32768
@@ -796,6 +832,10 @@ function Mirror()
     if not PB_moving then return end
     wr(B.CTRL + 5, shared_local)
     wr(B.CTRL + 6, PB_shared_global)
+    if type(TimerRead) == "function" then
+      local okt, tv = pcall(TimerRead)
+      wr(B.CTRL + 8, (okt and type(tv) == "number") and (math.floor(tv) % 32768) or 32767)
+    end
     if rd(B.CTRL + 2) == 1 then
       local p = pose()
       if p then MultiWriteModbus(B.LIVE + 3, 4, "W", {s16(p.x), s16(p.y), s16(p.z), s16(p.r)}) end
@@ -848,7 +888,7 @@ SetGlobalPoint(82, "GL_AXTEST", bp.x / 10, bp.y / 10, bp.z / 10, bp.r / 10, hand
 for i = 1, POOL_N do
   SetGlobalPoint(POOL_BASE + i, "GL_PB" .. i, bp.x / 10, bp.y / 10, bp.z / 10, bp.r / 10, hand, 0, 0, POSTURE)
 end
-for a = B.CMD_FLAG, B.CTRL + 7 do wr(a, 0) end
+for a = B.CMD_FLAG, B.CTRL + 8 do wr(a, 0) end
 wr(B.LIVE + 12, vfd_stopped and 1 or 2)
 print("probe: готова, поза при старте " .. (boot_pose and "прочитана" or "НЕ прочитана (движение запрещено)") ..
       ", ждёт команд pc_probe.py (канал 0x1400)")

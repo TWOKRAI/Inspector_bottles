@@ -84,6 +84,7 @@ class FakeRobot:
         self.writes: list[tuple[str, int]] = []  # журнал записей Lua: ("W"|"M", адрес)
         self.t0 = time.monotonic()
         self.timer0 = time.monotonic()
+        self.jog_v = None  # (ось, мм/с) непрерывного jog; позу двигает DELAY
 
     # ---- Modbus (сторона Lua) ----
     def read(self, addr, typ):
@@ -189,6 +190,23 @@ class FakeRobot:
 
     def motion_stop(self):
         self.stop = True
+        self.jog_v = None
+
+    def continue_jog(self, direction, spd=100):
+        axis, sign = direction[0], (1 if direction.endswith("+") else -1)
+        self.jog_v = (axis, sign * float(spd))
+
+    def delay(self, s):
+        """DELAY: во время непрерывного jog поза едет по времени (команда не блокирующая, RL 1-52)."""
+        end = time.monotonic() + float(s)
+        while True:
+            dt = min(0.005, end - time.monotonic())
+            if dt <= 0:
+                return
+            time.sleep(dt)
+            if self.jog_v is not None:
+                axis, v = self.jog_v
+                self.pose[axis] += v * dt
 
     def set_override(self, v):
         self.override = max(1, int(v))
@@ -219,7 +237,7 @@ class FakeRobot:
         stubs = {
             "ReadModbus": self.read, "WriteModbus": self.write,
             "MultiReadModbus": self.multi_read, "MultiWriteModbus": self.multi_write,
-            "DELAY": lambda s: time.sleep(float(s)),
+            "DELAY": self.delay, "ContinueCartesianJOG": self.continue_jog,
             "SetGlobalPoint": self.set_global_point, "WritePoint": self.write_point,
             "ReadPoint": self.read_point, "SetLocalPoint": self.set_local_point,
             "TimerOn": self.timer_on, "TimerRead": self.timer_read, "RSmasterRead": self.rsmaster_read,
