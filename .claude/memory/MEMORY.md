@@ -56,7 +56,7 @@ _(empty)_
 - [GUI-конструктор: слои и эталоны](project_gui_constructor_layers_2026_09_26.md) — fw=конструктор, прототип тонкий, minimal_gui, 09-26
 
 ### Reference
-_(empty)_
+- [Мануалы Delta RL/CVT и факты из них](reference_delta_rl_manual.md) — ось «RZ», 0x3000 retained, TimerRead, Lua≥5.2
 
 ---
 
