@@ -56,7 +56,8 @@ data/datasets/<name>/            # <name> ~ ^[a-z0-9_-]{1,40}$, корень —
   `Plugins/hub/device_hub/plugin.py:86-100`; `SQLManager` создаётся в `start()` (после fork, `fork_safe`, как
   `Plugins/io/database/README.md` «Хранилище»); регистры: `root_dir` (дефолт `data/datasets`), `default_dataset`
   (`default`).
-- `multiprocess_prototype/backend/topology/base.yaml` — процесс `dataset`, `protected: true`, по образцу `devices`.
+- `multiprocess_prototype/backend/topology/dataset.yaml` — фрагмент с процессом `dataset` (`protected: true`, по образцу
+  `devices`) и строка в `base:` манифеста `multiprocess_prototype/app.yaml`; `base.yaml` не трогать (`base.yaml:31-36`).
 - Compare-and-swap: `UPDATE labels SET … , rev = rev + 1 WHERE image_id = :id AND rev = :base_rev`; rowcount 0 →
   `{"success": False, "error": "conflict", "rev": <текущая>}`. Для нового снимка строка `labels` создаётся с
   `rev=0, status=unlabeled` в той же транзакции, что `images`.
@@ -66,12 +67,12 @@ data/datasets/<name>/            # <name> ~ ^[a-z0-9_-]{1,40}$, корень —
 - Не трогать: `frontend/**`, хаб (`orchestrator_hooks.py`), `Services/sql/**`.
 
 **FILES (≤ 6 писателю):** 1) `Services/dataset/store.py` 2) `Services/dataset/schema.py` 3) `Services/dataset/export_yolo.py`
-4) `Services/dataset/plugin/plugin.py` (+ `registers.py`) 5) `multiprocess_prototype/backend/topology/base.yaml`
-6) `Services/dataset/{README,STATUS,DECISIONS}.md` + `interfaces.py`. Тесты — `Services/dataset/tests/`. Снапшоты
-`multiprocess_prototype/backend/tests/snapshots/*.build.json` (2 файла) обновляются регенерацией, не руками.
+4) `Services/dataset/plugin/plugin.py` (+ `registers.py`) 5) `multiprocess_prototype/backend/topology/dataset.yaml` + `app.yaml`
+6) `Services/dataset/{README,STATUS,DECISIONS}.md` + `interfaces.py`. Тесты — `Services/dataset/tests/`. Golden-снимки
+`multiprocess_prototype/backend/tests/snapshots/*.build.json` не должны меняться — `base.yaml` не трогается.
 
 **Acceptance criteria:**
-- [ ] `BackendHarness` на рецепте из `recipes/` + `base.yaml`: `send_command("dataset", "dataset_add_path",
+- [ ] `BackendHarness` на рецепте из `recipes/` с фрагментом `dataset.yaml` в манифесте: `send_command("dataset", "dataset_add_path",
       {"path": <tmp с 3 PNG>})` → `{"success": True, "added": 3, "duplicates": 0}`; повтор той же команды →
       `{"added": 0, "duplicates": 3}`; файлов в `images/` — ровно 3 (`find … -type f | wc -l` = 3).
 - [ ] `dataset_list {"offset": 0, "limit": 50}` → `total == 3`, у каждого `id` из 64 hex, `status == "unlabeled"`,
@@ -210,7 +211,7 @@ data/datasets/<name>/            # <name> ~ ^[a-z0-9_-]{1,40}$, корень —
 **Handoff:** `tester`(RED) → `developer`(GREEN) → `reviewer`
 
 **Goal:** импорт тысяч снимков не держит команду и не молчит: шаблон «команда старт → прогресс в состоянии →
-отмена» (`constructor-layers.md:171`), одинаковый для импорта, экспорта (4.4) и подсказок (5.2).
+отмена» (`constructor-layers.md:173`), одинаковый для импорта, экспорта (4.4) и подсказок (5.2).
 
 **DESIGN:**
 - `dataset_import {path, mode, dataset?}` → сразу `{"success": True, "job_id"}`; одна задача на датасет —

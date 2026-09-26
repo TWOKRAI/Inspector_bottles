@@ -24,7 +24,9 @@ acceptance criteria этого файла (запрещены: diff, файлы 
 ### Task 1.0 — Правила слоёв для пакетов виджетов и эталонов (условие CTO 3)
 
 - **Статус:** [PENDING] · **Level:** Middle · **Assignee:** developer
-- **Handoff:** developer (REDS: проба-нарушение до правки правил) → reviewer
+- **Handoff:** tester (RED, worktree на пред-коммите: пишет грепный контракт-тест и пробы-нарушения по acceptance ниже) →
+  developer (правила `rules.toml`, `Services/STATUS.md`) → reviewer. Канон не пропускается: контракт-тест — код, и
+  его пишет не автор правил.
 - **Goal:** до первой строки кода конструктора границы, в которые он ляжет, стоят и **ловят** нарушение.
 - **Design:** `design-shell-layout.md` §4 «Правила слоёв». Синтаксис sentrux — буквальные префиксы, исключений нет,
   поэтому `Services ↛ Qt кроме gui/` — контракт-тестом грепом, `examples ↛ Services/Plugins` — `[[boundaries]]`.
@@ -58,7 +60,8 @@ acceptance criteria этого файла (запрещены: diff, файлы 
   **Module contract:** n/a (тесты + отчёт).
 - **Files:** 1. НОВЫЙ `multiprocess_prototype/frontend/tests/characterization/test_boot_order.py`;
   2. НОВЫЙ `…/characterization/test_ui_restart_listeners.py`; 3. НОВЫЙ `…/characterization/conftest.py` (фейковый
-  процесс/шина); 4. НОВЫЙ `plans/gui-constructor/inventory-f1.md` — таблицы: Qt-сигнальные потребители шины,
+  процесс/шина); 4. НОВЫЙ `plans/gui-constructor/inventory-f1.md` — таблицы: замер времени сегодняшнего `create_tabs`
+  (`app.py:871`) и применения дисплеев (якорь литералов Task 1.5), Qt-сигнальные потребители шины,
   подписчики `_frame_cb`, поля `RuntimeDeps`, которые реально читают вкладки (число и список), baseline сьют.
 - **Acceptance:**
   - [ ] Тест порядка: список событий шины (`set_state_callback`, 3× `add_state_listener` в порядке 351/436/458,
@@ -69,6 +72,8 @@ acceptance criteria этого файла (запрещены: diff, файлы 
   - [ ] Модалки: `StartupBlockingDialog`/`LoginDialog` стоят после шагов 1–4 шины и до окна — ассерт по порядку.
   - [ ] `inventory-f1.md` отвечает на три вопроса числом со ссылкой на команду: сколько потребителей подписаны на
         Qt-сигналы шины и какие; сколько дисплеев за одним `_frame_cb`; сколько из 38 полей `RuntimeDeps` читают вкладки.
+  - [ ] Якорь для Task 1.5: время `create_tabs` (`app.py:871`) и применения дисплеев на текущем `app.py` — медиана
+        из 5 запусков offscreen, мс, команда и вывод в `inventory-f1.md`.
   - [ ] Baseline сьют переснят: `multiprocess_prototype/frontend` и `frontend_module` offscreen — passed/failed числом.
 - **Break-injection (лид):** переставить `app.py:436` и `app.py:458` → предсказание: падает только тест порядка;
   добавить `remove_state_listener` в выход воплощения → тест утечки падает (он фиксирует текущее).
@@ -177,12 +182,15 @@ acceptance criteria этого файла (запрещены: diff, файлы 
         верхняя жива; пятой → снята.
   - [ ] **Неблокирующая подписка:** фейковый верхний источник отвечает через 2 с → `frames.subscribe` возвращается
         в GUI-поток ≤ 50 мс (тест в daemon-потоке с дедлайном; зависание = провал, не таймаут сьюты).
+  - [ ] Применение раскладки с 5 дисплеями не держит GUI-поток дольше 200 мс подряд — литерал временный: сверяется с
+        якорем Task 1.1 (`inventory-f1.md`, время `create_tabs`); при расхождении литерал правится отдельной записью.
   - [ ] Медленный потребитель (колбэк спит 100 мс) не снижает число кадров у быстрого соседа ниже 0.8 × потока.
   - [ ] Sunset: `grep -rn "legacy_deps" multiprocess_prototype --include='*.py'` вне `tests/` = **1**; второй
         `WidgetSpec(legacy=True)` → ошибка загрузки пакета с именами обоих.
-  - [ ] `ctx.files.fetch({"provider": "p", "name": "n", "id": "x", "variant": "full"}, on_done)` возвращается
-        сразу; `on_done` получает `ok=False` с текстом «канал файлов не реализован для подключения local» (форма `ref` —
-        общая с планом `dataset-annotation`, `design-connection-context.md` §3.4).
+  - [ ] `ctx.files.fetch({"provider": "p", "name": "n", "id": "x", "variant": "full"}, on_done)` возвращает `Cancel`
+        сразу; `on_done` в GUI-потоке получает `FileResult(ok=False, data=None, mime=None,
+        error="files channel not implemented")`; `variant` вне `{"thumb", "full"}` → ошибка с допустимыми значениями
+        (форма — общий текст `design-connection-context.md` §3.4 / dataset-annotation Task 2.1).
   - [ ] `grep -l PySide6 frontend_module/bootstrap/{context,frame_hub}.py` → пусто.
 - **Break-injection (лид):** `FrameHub` делает верхнюю подписку на каждого подписчика → предсказание: падает тест
   веера (5 ≠ 1); верхняя подписка в GUI-потоке → падает тест 50 мс; убрать ограничение `legacy=True` одним

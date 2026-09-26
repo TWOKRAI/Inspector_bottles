@@ -57,7 +57,8 @@ class GuiHostRuntime(Protocol):
 ```
 
 Сырьё Protocol — **53 обращения** `app.py` к приватным атрибутам `process` (T4.1 §4.1: 47 через точку — перепроверено
-`grep -c "process\._"` = 47 — и 6 строкой в `getattr`/`setattr`), 14 атрибутов. `_stall_dump_fp` (ссылка от GC) держит
+`grep -c "process\._"` = 47 — и 6 строкой в `getattr`/`setattr`; `grep -cE "getattr\(process|setattr\(process"` = **5** строк,
+в строке 1125 их два — ревью CTO плана 2026-09-26), 14 атрибутов. `_stall_dump_fp` (ссылка от GC) держит
 `BootContext`; `_window` (пишется, читателей 0) удаляется.
 
 **Флаги рестарта и `should_stop` — у процесса, а не у подключения.** При N подключениях «перезапустить интерфейс»
@@ -102,7 +103,7 @@ class WidgetContext(Protocol):          # Qt-free по импортам, fronten
     state: StateChannel                 # subscribe(glob, cb) -> Handle; get(path)
     commands: CommandChannel            # request(target, command, data, timeout) -> Reply; send(...)
     frames: FrameChannel                # subscribe(source, cb) -> Handle — неблокирующий
-    files: FileChannel                  # fetch(ref, on_done) -> Handle — неблокирующий; зарезервирован (§3.4)
+    files: FileChannel                  # fetch(ref, on_done) -> Cancel — неблокирующий; заглушка до dataset-annotation 2.1 (§3.4)
     ui_bus: UiBus                       # publish(event, payload); subscribe(event, cb) -> Handle
     connection_state: ConnectionView    # текущее + подписка
     legacy_deps: object                 # ТОЛЬКО inspector.classic (§3.6)
@@ -141,29 +142,15 @@ class WidgetContext(Protocol):          # Qt-free по импортам, fronten
 **Приёмка (литералы, в Task 1.5 и 2.4):** 5 виджетов на один источник → 1 верхняя подписка (in-process — счётчик на
 фейковой шине; remote — `introspect_router_stats`/счётчик подписчиков на хосте = 1 на клиента); `subscribe` при
 верхнем источнике, отвечающем через 2 с, возвращается в GUI-поток **≤ 50 мс**; применение раскладки с 5 дисплеями
-не держит GUI-поток дольше 200 мс подряд (сторож модалок / stall-dump).
+не держит GUI-поток дольше 200 мс подряд (сторож модалок / stall-dump). **50 мс / 200 мс — временные:** якорь —
+замер Task 1.1 (сегодняшнее время `create_tabs`, `app.py:871`, и применения дисплеев); Task 1.5 ссылается на это
+число и при расхождении правит литерал 200 мс записью. «≤ 50 мс при верхнем ответе через 2 с» остаётся как есть.
 
 ### 3.4 Файлы по id — зарезервировано
 
-Четвёртый канал — не состояние и не живые кадры: снимки датасета, спрайты слоёв. **Форма согласована с планом
-[`dataset-annotation`](../dataset-annotation/) (2026-09-26):**
+Четвёртый канал — не состояние и не живые кадры: снимки датасета, спрайты слоёв.
 
-```python
-ctx.files.fetch(ref: dict, on_done: Callable[[FileResult], None]) -> Handle
-# ref = {"provider": "<процесс-владелец>", "name": "<коллекция>", "id": "<id>", "variant": "thumbnail" | "full"}
-# FileResult: ok, data (bytes), mime, error — колбэк в GUI-потоке
-```
-
-Неблокирующий, как кадры (§3.3); на уровне подключения — `ctx.files` виджета = канал его подключения (та же пара
-виджет–подключение). Транспорт выбрал и **реализует план разметки** (его Task 2.1): HTTP (stdlib
-`ThreadingHTTPServer`) внутри процесса-владельца на бэкенде, `127.0.0.1` на эфемерном порту, адрес публикуется в дереве
-состояния, fail-closed вне loopback; клиент — во фреймворке рядом с `frontend_module/bridge/remote_frame_source.py`;
-сервер остаётся в `Services/dataset`, пока не появится второй провайдер (спрайты слоёв редактора `sim.*`) — тогда
-промоушен сервера по правилу двух потребителей. Отвергнуто там же: base64 в ответах команд, SHM (не переживает сеть).
-
-**В этом плане — только член контракта:** Protocol `FileChannel` + заглушка, которая сразу вызывает `on_done` с
-`ok=False, error="канал файлов не реализован для подключения <имя>"` (Task 1.5). Если редактор слоёв доберётся до
-спрайтов раньше разметки — он потребитель готового клиента, а не второй реализатор.
+**Канал файлов (согласовано 2026-09-26; одинаковый текст в `gui-constructor/design-connection-context.md` §3.4 и `dataset-annotation/phase-2-annotation-widget.md` Task 2.1).** Ссылка: `ref = {provider, name, id, variant}`, `variant ∈ {"thumb", "full"}`. Два слоя: (1) `RemoteFileSource.fetch(ref) -> tuple[bytes | None, str | None]` — во фреймворке (`frontend_module/bridge/remote_file_source.py`), без Qt, вызывается в потоке пула; (2) `FileChannel.fetch(ref, on_done) -> Cancel` — член контекста виджета `ctx.files`, неблокирующий; `on_done(FileResult(ok, data, mime, error))` вызывается в GUI-потоке; `Cancel` — вызываемое без аргументов. Подключение виджета — поле `ctx.connection: str`, каналы лежат прямо на `ctx`; метода `ctx.connection(name)` нет (это `BootContext`). Заглушка gui-constructor 1.5 возвращает `FileResult(ok=False, data=None, mime=None, error="files channel not implemented")`; реализацию делает dataset-annotation 2.1. Qt-обёртка `qt_files.py` адаптера `AnnotationPorts` уходит вместе с адаптером в sunset 2.5b.
 
 ### 3.5 Шина интерфейса (канал «контекст интерфейса»)
 
@@ -172,7 +159,7 @@ ctx.files.fetch(ref: dict, on_done: Callable[[FileResult], None]) -> Handle
 Публикация необъявленного события — ошибка (в dev — исключение, в проде — лог + счётчик). Шина — в процессе
 клиента, общая для всех подключений; payload — `dict` (Dict at Boundary и здесь, чтобы события можно было писать
 в запись сессии). Прямая ссылка виджета на виджет запрещена. Реализация — Task 3.2, когда приходит второй пакет
-(`sim.*`): до этого `QtEventBus` прототипа живёт как есть (`constructor-layers.md:103`).
+(`sim.*`): до этого `QtEventBus` прототипа живёт как есть (`constructor-layers.md:105`).
 
 ### 3.6 Легаси-дверь `ctx.legacy_deps` и её закат (находки CTO g, 9)
 
@@ -223,7 +210,7 @@ gui-service 1.4 (класс его), мерило — контракт-набо�
 
 - Qt-free-ность `bus` — зависит от инвентаря сигнальных потребителей (Task 1.1). Если шина — Qt-тип, Protocol
   теряет член, и контракт-набор надо переписать; риск назван, не снят.
-- Числа §3.3 (50 мс, 200 мс) — мои, выбраны под «не блокирует», не замерены на стенде. Веер живьём не мерился
+- Числа §3.3 (50 мс, 200 мс) — мои, временные до замера Task 1.1, не замерены на стенде. Веер живьём не мерился
   ни CTO, ни мной (qt-mcp не подключался, стенд не поднимался).
 - Слияние подписок состояния по счётчику ссылок (§3.1) — предположение, что `GuiStateBindings` его допускает; не
   проверено чтением `GuiStateBindings`.

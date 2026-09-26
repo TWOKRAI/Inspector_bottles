@@ -17,14 +17,14 @@
 | Сокет | входящая строка сервера ≤ 1 048 576 Б, клиента ≤ 16 777 216 Б; JSON-строки | `socket_channel.py:75`, `socket_client.py:184` |
 | Крупные грузы по pipe | известный дефект L-6: 0.3–1.2 МБ через pipe 64 КБ | [`transport-single-policy.md`](../transport-single-policy.md) Ф4 |
 | Хранение | вердикт: embedded-first, SQLite через `Services/sql` + файлы; `insert_many` построчный, неатомарный | [`storage-stack-embedded-first.md`](../storage-stack-embedded-first.md), [`2026-06-05_sql-insert-many-atomic.md`](../2026-06-05_sql-insert-many-atomic.md) |
-| Всегда живой процесс-хозяин команд | `base.yaml`: процесс `devices` с `DeviceHubPlugin`, публикует `devices.state.*` | `multiprocess_prototype/backend/topology/base.yaml` |
+| Всегда живой процесс-хозяин команд | образец — `base.yaml`: процесс `devices` с `DeviceHubPlugin`; сам `dataset` — подключаемый фрагмент (`observability_sink.yaml`), не `base.yaml` (`base.yaml:31-36`) | `multiprocess_prototype/backend/topology/base.yaml` |
 | HTTP-сервер в плагине | прецедент: `Plugins/sim/mjpeg_sink` на stdlib `http.server` | `Plugins/sim/mjpeg_sink/plugin.py:72` |
 
 ## Зависимости
 
 | Сосед | Что нужно этому плану | Какие задачи ждут | Что может начаться раньше |
 |---|---|---|---|
-| [`plans/gui-constructor/`](../gui-constructor/) (пишется параллельно) | Ф1 даёт контекст виджета на подключение (`ctx.connection(name)`, `design-connection-context.md` §3); **канал файлов в контракте резервирует он, реализует этот план** (Task 2.1) | только 2.5b | всё остальное: Ф1, 2.1–2.5a, Ф3, Ф4 |
+| [`plans/gui-constructor/`](../gui-constructor/) (пишется параллельно) | Ф1 даёт контекст виджета на подключение (поле `ctx.connection: str`, каналы на `ctx`; `design-connection-context.md` §3); **канал файлов в контракте резервирует он, реализует этот план** (Task 2.1) | только 2.5b | всё остальное: Ф1, 2.1–2.5a, Ф3, Ф4 |
 | [`2026-09-22_gui-service`](../2026-09-22_gui-service/plan.md) | Ф2 (сеть: токен 2.2, поток кадров 2.1) — для разметки с другой машины | разметка по сети (вне объёма) | всё: на одной машине (встроенный GUI или `apps/gui_client` на localhost) работает целиком |
 | gui-service 1b.2c | вердикт бэкенда на правку поля доходит до формы | ничего напрямую: ошибки команд датасета виджеты показывают сами | — |
 | [`transport-single-policy`](../transport-single-policy.md) Ф4 (L-6) | не нужен — картинки идут HTTP, не pipe; ответы команд ограничены по размеру (Task 1.2, литерал) | — | — |

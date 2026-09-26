@@ -23,54 +23,64 @@
 
 ---
 
-### Task 2.1 — Канал «файлы по id»: клиент во фреймворке + `AnnotationPorts` + правило слоёв
+### Task 2.1 — Канал «файлы по id»: клиент во фреймворке + `AnnotationPorts`
 
-**Level:** Senior · **Assignee:** teamlead · **Module contract:** new-lite (`frontend_module/bridge/remote_file_source.py`) · **Layer:** framework + services + infra
+**Level:** Senior · **Assignee:** teamlead · **Module contract:** new-lite (`frontend_module/bridge/remote_file_source.py`) · **Layer:** framework + services
 **Handoff:** `tester`(RED) → `teamlead`(GREEN) → `reviewer`
 
-**Goal:** четвёртый канал контекста виджета (`constructor-layers.md:169`) реализован: клиент получает байты по ссылке
-`{provider, name, id, variant}`, не блокируя вызывающий поток.
+**Goal:** четвёртый канал контекста виджета (`constructor-layers.md:171`) реализован: виджет получает байты по ссылке
+`{provider, name, id, variant}`, не блокируя GUI-поток.
 
-**DESIGN:**
-- `multiprocess_framework/modules/frontend_module/bridge/remote_file_source.py` — рядом с `remote_frame_source.py`.
-  **Qt-free**: `RemoteFileSource(endpoint_resolver)`, `fetch(ref, on_done: Callable[[bytes | None, str | None],
-  None]) -> Cancel`; пул потоков stdlib (`ThreadPoolExecutor`, `max_workers=4`), `urllib.request`, таймаут 5 с.
-  Колбэк зовётся в потоке пула — перенос в UI-поток делает Qt-обёртка пакета, не фреймворк.
-- `endpoint_resolver` — функция «провайдер → {host, port}», в пакете датасета берёт `dataset.files.endpoint` из
-  подписки на состояние. Предметных слов в классе фреймворка нет (провайдер — строка).
-- LRU-кэш **только для `thumb`**, потолок по байтам (дефолт 64 МБ, аргумент конструктора); `full` не кэшируется.
-- Повторный `fetch` той же ссылки в полёте — один HTTP-запрос, два колбэка.
-- `Services/dataset/gui/ports.py` — `AnnotationPorts` (Protocol): `request(command, args, on_reply)`,
-  `files: RemoteFileSource`-подобный, `subscribe_state(glob, on_delta) -> Unsubscribe`. Формы вызовов — те же, что у
-  контекста виджета в `plans/gui-constructor/` (сверить имена с его `design-connection-context.md`, когда он выйдет;
-  расхождение имён — правка здесь, не там).
+**Канал файлов (согласовано 2026-09-26; одинаковый текст в `gui-constructor/design-connection-context.md` §3.4 и `dataset-annotation/phase-2-annotation-widget.md` Task 2.1).** Ссылка: `ref = {provider, name, id, variant}`, `variant ∈ {"thumb", "full"}`. Два слоя: (1) `RemoteFileSource.fetch(ref) -> tuple[bytes | None, str | None]` — во фреймворке (`frontend_module/bridge/remote_file_source.py`), без Qt, вызывается в потоке пула; (2) `FileChannel.fetch(ref, on_done) -> Cancel` — член контекста виджета `ctx.files`, неблокирующий; `on_done(FileResult(ok, data, mime, error))` вызывается в GUI-потоке; `Cancel` — вызываемое без аргументов. Подключение виджета — поле `ctx.connection: str`, каналы лежат прямо на `ctx`; метода `ctx.connection(name)` нет (это `BootContext`). Заглушка gui-constructor 1.5 возвращает `FileResult(ok=False, data=None, mime=None, error="files channel not implemented")`; реализацию делает dataset-annotation 2.1. Qt-обёртка `qt_files.py` адаптера `AnnotationPorts` уходит вместе с адаптером в sunset 2.5b.
+
+**DESIGN (поверх абзаца выше, не вместо него):**
+- Слой 1 — `RemoteFileSource(endpoint_resolver)`: один синхронный `urllib.request`-запрос, таймаут 5 с; второй
+  элемент кортежа — текст ошибки (`"connection_refused"`, `"not_found"`, `"timeout"`, …), при успехе `None`.
+  `endpoint_resolver` — функция «провайдер → {host, port}»; предметных слов в классе нет (провайдер — строка).
+- Слой 2 — реализация `FileChannel`: пул потоков stdlib (`ThreadPoolExecutor`, `max_workers=4`) зовёт слой 1,
+  результат переносится в GUI-поток; LRU-кэш **только для `"thumb"`**, потолок по байтам (дефолт 64 МБ); `"full"`
+  не кэшируется; повторный `fetch` той же ссылки в полёте — один HTTP-запрос, все `on_done`; `Cancel()` после
+  прихода данных — no-op, до — `on_done` не вызывается. `mime` — по сигнатуре байтов (JPEG/PNG), кортеж слоя 1 его не
+  несёт. Место класса: там, где gui-constructor 1.5 держит заглушку `FileChannel` (реализация заменяет заглушку);
+  если 1.5 ещё не слит — класс живёт в `Services/dataset/gui/qt_files.py` и переезжает в 2.5b.
+- `endpoint_resolver` пакета датасета читает `dataset.files.endpoint` через `ctx.state` (подписка).
+- `Services/dataset/gui/ports.py` — `AnnotationPorts` (Protocol) — **структурное подмножество `WidgetContext`**
+  (`design-connection-context.md` §3), имена один в один: `connection: str`; `state` —
+  `subscribe(glob, cb) -> Handle`, `get(path)`; `commands` — `request(target, command, data, timeout) -> Reply(ok,
+  data, error)` через `RequestRunner`, результат колбэком (§3.2); `files` — `fetch(ref, on_done) -> Cancel`.
+  Настоящий `WidgetContext` удовлетворяет `AnnotationPorts` без адаптера — это проверяется тестом, как только
+  Protocol контекста слит (до того — тестом на фейковом контексте с теми же именами).
 - Правило `Services ↛ Qt` кроме `*/gui/*` (условие 3 ревью CTO) **владеет gui-constructor Task 1.0** — грепным
-  контракт-тестом `Services/tests/test_no_qt_outside_gui.py`, не строкой sentrux (пути sentrux — буквальные префиксы,
-  исключений нет). Здесь — только проверка, что тест есть и зелёный; `grep PySide6 .sentrux/rules.toml` не годится:
-  он находит старые правила про adapters/domain (сверка лида 2026-09-26).
+  контракт-тестом `Services/tests/test_no_qt_outside_gui.py`, не строкой sentrux (в синтаксисе sentrux исключений
+  нет). Здесь — только проверка, что тест есть и краснеет на пробе.
 
 **FILES:** 1) `multiprocess_framework/modules/frontend_module/bridge/remote_file_source.py` 2) `…/frontend_module/bridge/README.md`
-3) `Services/dataset/gui/__init__.py` + `ports.py` 4) `Services/dataset/gui/qt_files.py` (обёртка: сигнал в UI-поток)
-5) `.sentrux/rules.toml` 6) `multiprocess_framework/modules/frontend_module/STATUS.md`.
+3) файл реализации `FileChannel` (место заглушки gui-constructor 1.5) **или** `Services/dataset/gui/qt_files.py`, если
+1.5 не слит 4) `Services/dataset/gui/__init__.py` + `ports.py` 5) `multiprocess_framework/modules/frontend_module/STATUS.md`
+6) тесты.
 
 **Acceptance criteria:**
-- [ ] Против живого `files_server` Task 1.3 (in-process, `port=0`): `fetch(full)` → байты побайтно равны файлу.
-- [ ] Сервер с искусственной задержкой 2 с: `fetch` возвращается < 5 мс (литерал), колбэк приходит после задержки;
-      pytest-qt: за время ожидания UI-цикл обрабатывает событие таймера (`qtbot.waitUntil` на счётчик, ≥ 10 тиков
-      по 50 мс).
-- [ ] 10 одновременных `fetch` одной ссылки `thumb` → на сервере 1 запрос (счётчик запросов сервера), 10 колбэков.
-- [ ] Недоступный сервер → колбэк `(None, "connection_refused")` ≤ 6 с, исключение наружу не летит.
-- [ ] Кэш: 100 миниатюр по 1 МБ при потолке 64 МБ → суммарный размер кэша ≤ 64 МБ, повторный `fetch` недавней —
-      без HTTP.
+- [ ] Против живого `files_server` Task 1.3 (in-process, `port=0`): `RemoteFileSource.fetch({… "variant": "full"})`
+      → `(байты, None)`, байты побайтно равны файлу.
+- [ ] Сервер с искусственной задержкой 2 с: `FileChannel.fetch` возвращается < 5 мс (литерал); `on_done` приходит
+      после задержки **в GUI-потоке** (`QThread.currentThread() is app.thread()` внутри колбэка); pytest-qt: за время
+      ожидания UI-цикл обрабатывает таймер (≥ 10 тиков по 50 мс).
+- [ ] 10 одновременных `fetch` одной ссылки `"thumb"` → на сервере 1 запрос (счётчик сервера), 10 `on_done`.
+- [ ] `Cancel()` до ответа → `on_done` не вызван за 3 с.
+- [ ] Недоступный сервер → `on_done(FileResult(ok=False, data=None, mime=None, error="connection_refused"))` ≤ 6 с,
+      исключение наружу не летит.
+- [ ] Кэш: 100 миниатюр по 1 МБ при потолке 64 МБ → кэш ≤ 64 МБ; повторный `fetch` недавней — без HTTP.
 - [ ] `grep -rn "dataset" multiprocess_framework/modules/frontend_module/bridge/remote_file_source.py` → 0;
-      `sentrux check .` зелёный; тест-нарушитель (временный `import PySide6` в `Services/dataset/store.py`) даёт
-      красный `test_no_qt_outside_gui.py` (gui-constructor 1.0), а в `Services/dataset/gui/` — зелёный.
+      `sentrux check .` зелёный.
+- [ ] `Services/tests/test_no_qt_outside_gui.py` (gui-constructor 1.0) существует; проба — временный
+      `import PySide6` в `Services/dataset/store.py` → тест красный; тот же импорт в `Services/dataset/gui/` → зелёный.
 
-**Инъекции:** `fetch` синхронный внутри → тест «< 5 мс» и тест тиков; убрать слияние запросов в полёте → тест «1
-запрос»; кэш без потолка → тест 64 МБ; удалить исключение `*/gui/*` → `sentrux check` красный на пакете.
+**Инъекции:** `fetch` слоя 2 синхронный → тест «< 5 мс» и тест тиков; `on_done` из потока пула без переноса → тест
+«в GUI-потоке»; убрать слияние запросов в полёте → тест «1 запрос»; `Cancel` не снимает колбэк → тест отмены; кэш
+без потолка → тест 64 МБ.
 
 **Out of scope:** токен/TLS (gui-service 2.2); загрузка на сервер; кэш на диске клиента.
-**Dependencies:** 1.3.
+**Dependencies:** 1.3; место класса слоя 2 — от статуса gui-constructor 1.5 (см. DESIGN).
 
 ---
 
@@ -187,23 +197,33 @@
 ### Task 2.5 — Встраивание: адаптер сейчас, `WidgetSpec` после конструктора
 
 **Level:** Middle · **Assignee:** developer · **Module contract:** impl-only · **Layer:** prototype + services
-**Handoff:** `developer`(REDS в брифе) → `reviewer`
+**Handoff:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+
+**Канон (не пропускается).** Механизма в задаче нет — это проводка, — но независимый `tester` всё равно идёт первым,
+в worktree на пред-коммите, по приёмке ниже (правило «тестер на каждой задаче», `.claude/CLAUDE.md`, решение
+владельца 2026-08-13). Его ценность здесь — тест «на настоящих объектах» (адаптер собран из реальных портов, не из
+фейков) и sunset-тест 2.5b, которые автор проводки склонен написать под свою модель. Инъекции лида: адаптер отдаёт
+фейковые `files` → тест на живом бэкенде красный; оставить `dataset_section.py` в 2.5b → sunset-тест красный.
 
 **2.5a — секция в текущем GUI.** Один файл `multiprocess_prototype/frontend/widgets/tabs/services/neural/dataset_section.py`
-собирает `AnnotationPorts` из того, что есть сегодня (отправитель команд, подписка на состояние, `RemoteFileSource`),
-и регистрирует секцию «Разметка датасета» в `neural/__init__.py`. `frontend/app.py` **не трогать** (очередь одного
-писателя с gui-service 1b.2b и T4.2–T4.4). Приёмка: в собранном GUI на живом бэкенде — импорт через `backend_ctl`,
-разметка трёх снимков в секции, `dataset_get` через `backend_ctl` видит рамки; скриншот offscreen в отчёт.
-`grep -rn "AnnotationPorts(" multiprocess_prototype` → ровно 1 файл.
+с функцией `build_annotation_ports(...)` собирает объект, удовлетворяющий `AnnotationPorts` (поля `connection`,
+`state`, `commands`, `files` — имена `WidgetContext`), из того, что есть сегодня (отправитель команд, подписка на
+состояние, `FileChannel` из Task 2.1 через `qt_files.py`), и регистрирует секцию «Разметка датасета» в
+`neural/__init__.py`. `frontend/app.py` **не трогать** (очередь одного писателя с gui-service 1b.2b и T4.2–T4.4).
+Приёмка: в собранном GUI на живом бэкенде — импорт через `backend_ctl`, разметка трёх снимков в секции, `dataset_get`
+через `backend_ctl` видит рамки; скриншот offscreen в отчёт. `grep -rln "build_annotation_ports(" multiprocess_prototype
+--include='*.py'` без `tests/` → ровно 1 файл.
 
 **2.5b — после gui-constructor Ф1.** `Services/dataset/gui/widgets.py` объявляет `WidgetSpec` (`dataset.browser`,
-`dataset.workbench`, `dataset.stats` после 4.1), фабрика строит порты из контекста виджета на подключение
-(`ctx.connection(name)`). `dataset_section.py` удаляется; sunset-тест: `grep -rn "dataset_section"
-multiprocess_prototype` → 0 и `grep -rn "AnnotationPorts(" multiprocess_prototype` → 0. Поведение приёмки 2.5a
-повторяется в `apps/gui_client` на localhost (если gui-service 1.4 к тому времени сделан — иначе только встроенный GUI,
-и это сказать).
+`dataset.workbench`, `dataset.stats` после 4.1); фабрика передаёт пакету сам `ctx` (он удовлетворяет `AnnotationPorts`;
+подключение — поле `ctx.connection: str`). Удаляются `dataset_section.py` и `Services/dataset/gui/qt_files.py`
+(sunset по согласованному абзацу канала файлов, Task 2.1); реализация `FileChannel` к этому моменту — на месте
+заглушки gui-constructor 1.5. Sunset-тест: `grep -rn "dataset_section\|build_annotation_ports" multiprocess_prototype`
+→ 0 и `test -e Services/dataset/gui/qt_files.py` → ложь. Поведение приёмки 2.5a повторяется в `apps/gui_client` на
+localhost (если gui-service 1.4 к тому времени сделан — иначе только встроенный GUI, и это сказать).
 
 **FILES (2.5a):** 1) `…/neural/dataset_section.py` 2) `…/neural/__init__.py` 3) `…/neural/tests/test_dataset_section.py`.
-**FILES (2.5b):** 1) `Services/dataset/gui/widgets.py` 2) удаление `dataset_section.py` 3) `…/neural/__init__.py` 4) тест.
-**Dependencies:** 2.5a — 2.4; 2.5b — `plans/gui-constructor/` Ф1 (контекст виджета на подключение, канал файлов
-зарезервирован).
+**FILES (2.5b):** 1) `Services/dataset/gui/widgets.py` 2) удаление `dataset_section.py` 3) удаление
+`Services/dataset/gui/qt_files.py` 4) `…/neural/__init__.py` 5) тест.
+**Dependencies:** 2.5a — 2.4; 2.5b — `plans/gui-constructor/` Ф1 (контекст виджета, реализация `FileChannel` на месте
+заглушки 1.5).

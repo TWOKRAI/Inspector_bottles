@@ -9,7 +9,8 @@
 **Где мы.** line-sim: Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED) — числа P-1 есть. gui-service: Ф1 1.1–1.3b и 1b.1, 1b.2a,
 1b.2b-pre, 1b.5 закрыты; 1.4 ждёт конструктор. lifecycle-stop-ownership: Ф1 закрыта (CTO — с условиями), Ф2 ждёт L-6.
 Решение владельца 2026-09-26 о конструкторе GUI — [`frontend-constructor/constructor-layers.md`](frontend-constructor/constructor-layers.md),
-ревью CTO — ACCEPT WITH CONDITIONS. Два новых плана: [`gui-constructor`](gui-constructor/plan.md) и
+ревью CTO — ACCEPT WITH CONDITIONS. Два новых плана (ревью CTO обоих — ACCEPT WITH CONDITIONS,
+[отчёт](../docs/reviews/2026-09-26_gui-constructor-dataset-plans-cto.md)): [`gui-constructor`](gui-constructor/plan.md) и
 [`dataset-annotation`](dataset-annotation/plan.md) (оба DRAFT, ждут ревью и approve владельца).
 
 **Правила порядка.** Кодом — не больше двух полос одновременно (И и Д); полоса Ф — по одной задаче между ними.
@@ -31,13 +32,16 @@ gui-constructor 1.2 → gui-service 1b.2b строго по очереди. Ка
    │   И5  gui-constructor Ф3 ∥ gui-service 3.1/3.2 ∥ line-sim-layer-editor: второй бэкенд, шина, пакет sim.*
    │       (сюда же line-sim Ф6: пульт ленты и журнал обмена — виджетами пакета)
    │   И6  gui-constructor Ф4 Пульт: 4.1 KnobAddress (можно раньше, без зависимостей) → 4.2 → 4.3 → 4.4
+   │       Заполнители: 2.3 и 4.1 (Middle, без зависимостей) — в паузах цепочки Senior+ 1.2 → 1.5 → 2.1 → 2.2
    │
    ├─ ПОЛОСА Д — датасет (главное для владельца в ML: удобный инструмент; обучение — облако, вне планов)
-   │   Д1  dataset Ф1: 1.1 вертикальный срез (DatasetStore + процесс dataset) → 1.2 классы/статусы
+   │   Д1  dataset Ф1: 1.1 вертикальный срез (DatasetStore + фрагмент topology/dataset.yaml) → 1.2 классы/статусы
    │       → 1.3 файлы по id (сервер HTTP) → 1.4 долгие задачи: импорт, дедуп       ← можно СЕЙЧАС, без GUI
-   │   Д2  dataset Ф2: 2.1 клиент файлов (после gui-constructor 1.0) → 2.2 модель → 2.3 браузер → 2.4 холст
-   │       → 2.5a секция через адаптер; 2.5b WidgetSpec — после gui-constructor Ф1
-   │   Д3  dataset Ф4: 4.1 статистика, 4.3 сплит (после 1.2) → 4.4 экспорт YOLO/zip для облака → 4.2 проверка
+   │       ∥ разведка Step 1 задачи 3.1 (investigator, только чтение): её ответы задают поля схемы 1.1
+   │   Д2  dataset 4.3 сплит + 4.4 экспорт YOLO/zip и обратный импорт — бэкенд, без Qt и стенда:
+   │       петля «импорт → zip в облако → перенос Orin ↔ ПК» раньше холста (ревью CTO 2026-09-26)
+   │   Д3  dataset Ф2: 2.1 клиент файлов (после gui-constructor 1.0) → 2.2 модель → 2.3 браузер → 2.4 холст
+   │       → 2.5a секция через адаптер; 2.5b WidgetSpec — после gui-constructor Ф1; затем 4.1 статистика, 4.2 проверка
    │   Д4  dataset Ф3 сбор с линии: 3.1 dataset_capture (живой стенд 8765 — не параллельно со стендом И)
    │       → 3.2 «В датасет»;  Д5 Ф5 подсказки — опционально
    │

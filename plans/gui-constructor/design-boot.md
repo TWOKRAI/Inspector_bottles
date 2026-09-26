@@ -25,7 +25,7 @@
 | Р-F: hot-reload в `GuiBootstrap`, клиент вне дерева получает его бесплатно | сохраняется; зона чистки — список (находка CTO 10) | §5 |
 | «Один рантайм на процесс» (`BootContext.runtime`) | **развёрнуто ревью CTO (находка 1):** реестр подключений с первого дня | `design-connection-context.md` §1 |
 
-Р-A, Р-B, Р-C, Р-D, Р-F владелец **не оспорил, но явно не утверждал** (`constructor-layers.md:104`). План исходит из них;
+Р-A, Р-B, Р-C, Р-D, Р-F владелец **не оспорил, но явно не утверждал** (`constructor-layers.md:106`). План исходит из них;
 подтверждение — открытый вопрос в [`plan.md`](plan.md), до старта Task 1.3.
 
 ---
@@ -196,7 +196,7 @@ Break-injection: переставить `436` и `458` — тест обязан
 | Разборка `run_gui` тихо меняет порядок | Task 1.1: снимок §3.2 до и после — равенство списков; инъекция «переставить 436/458» роняет тест |
 | Утечка слушателей при рестарте UI | Task 1.1 фиксирует текущее; Task 1.4 — «после рестарта столько же, сколько после старта» |
 | Сложность мигрирует в спеку | Task 1.4: `wc -l app_spec.py` ≤ 300; `grep -c "lambda" app_spec.py` = 0; `run_gui` удалён |
-| Приватные атрибуты остаются | Task 1.3: `grep -c "process\._" multiprocess_prototype/frontend/app.py` = 0 (сегодня 47); `grep -cE "getattr\(process\|setattr\(process"` = 0 (T4.1: 6) |
+| Приватные атрибуты остаются | Task 1.3: `grep -c "process\._" multiprocess_prototype/frontend/app.py` = 0 (сегодня 47); `grep -cE "getattr\(process\|setattr\(process"` = 0 (сегодня **5** строк; T4.1 считал 6 обращений — в строке 1125 их два) |
 | Реестр на одну реализацию подогнан под «один рантайм» | Task 1.3: контракт-набор параметризован **двумя** подключениями одного типа (два фейковых процесса); `RemoteGuiRuntime` подключается к тому же набору в gui-service 1.4 |
 | Qt протекает в ядро | `grep -l PySide6 frontend_module/bootstrap/{interfaces,runtime,runtime_inprocess,connections,pack_loader,context}.py` → пусто. Импорт-проверка `assert "PySide6" not in sys.modules` сегодня упала бы у всех (`frontend_module/__init__.py` тянет `components`/`widgets`, T4.1 §7) — в приёмку не ставить до расщепления Р-4 |
 | Hot-reload умер | qt-smoke: «Перезапустить интерфейс» дважды → окно и виджеты на месте, число слушателей стабильно |
