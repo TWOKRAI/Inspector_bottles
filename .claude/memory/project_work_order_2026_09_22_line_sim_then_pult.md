@@ -4,7 +4,7 @@ description: "Owner-approved work order (2026-09-22) — merge feat/line-sim at 
 metadata: 
   node_type: memory
   type: project
-  last-verified: 2026-09-24
+  last-verified: 2026-09-26
   originSessionId: feb3ecc5-c27a-407d-b327-22e44d808322
   modified: 2026-09-23T21:36:24.440Z
 ---
@@ -26,6 +26,8 @@ metadata:
 3. **line-sim Ф7.1 + 7.2 (HTML editor) after 3.1/3.3.** Deferred until there is a real need or the
    numbers exist: gui-service Ф2 (network + token), line-sim Qt parts (Ф6 in the Pult, Ф7.3),
    line-sim Ф4 camera knobs.
+
+**2026-09-26 update:** the live order now lives in the `plans/QUEUE.md` block "▶ ТЕКУЩИЙ ПОРЯДОК" (lanes И / Д / Ф); line-sim 5.4 is DONE; two new plans `gui-constructor` and `dataset-annotation` (CTO: ACCEPT WITH CONDITIONS, awaiting owner approve); `apps/pult` renamed `apps/gui_client`. Trust the QUEUE block over this entry. See [[gui-constructor-layers-2026-09-26]].
 
 **Progress, verified by git 2026-09-24:** step 0 done (`feat/line-sim` fully in `main`, 0 ahead);
 step 1 Ф3 done (3.1–3.6 incl. 3.3a/3.4), Ф5 5.1–5.3 done (5.1b, 5.3a/b too) — left: **5.4** fault
