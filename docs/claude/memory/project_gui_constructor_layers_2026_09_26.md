@@ -36,5 +36,11 @@ description, never a reference to another widget; one address scheme shared with
 only pipeline `local` controls stay in the recipe. `apps/pult` is renamed `apps/gui_client` (framework shell
 + connection config); "Пульт" now means only the knob widget. CTO review 2026-09-26: ACCEPT WITH CONDITIONS
 (`docs/reviews/2026-09-26_gui-constructor-layers-cto.md`) — runtime registry for N connections already in
-T4.3–T4.4, frame fan-out, shell path outside Gen-1 `windows/`, `Services/<x>/gui/` subpackage rule. Related:
+T4.3–T4.4, frame fan-out, shell path outside Gen-1 `windows/`, `Services/<x>/gui/` subpackage rule. Next consumers (owner, 2026-09-26): the line_sim GUI moves into the app as a tab with a layer editor
+(overturns the "standalone window" decision in `plans/line-sim-layer-editor.md`; pack `sim.*` in
+`Services/line_sim/gui/`, layers owned by the sim backend); plus an annotation + training tab (backend
+dataset service in YOLO format, annotation widget, "to dataset" from inspection results, training as a
+backend job — today the GUI launches it via QProcess from local disk, `ml_train_section.py:3-7`). They add
+to the widget context: N connections, a fourth channel for files by id, commit-with-revision for canvases,
+and a documented long-job pattern. Related:
 [[gui-services-composition-2026-09-23]], [[work-order-2026-09-22-line-sim-then-pult]].
