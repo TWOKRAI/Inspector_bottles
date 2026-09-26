@@ -8,6 +8,12 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 
 ### Task 3.1 — Модель подключений: `BackendConnection`, вкладка/окно на бэкенд, отстыковка
 
+> **Ред. 2026-09-26 (ревью CTO находка 3):** докинг, раскладка (`saveState`), отстыковка и замок — **оболочка
+> фреймворка** ([`gui-constructor`](../gui-constructor/plan.md) Task 2.1, N подключений в оболочке — Task 3.1 там). Здесь остаётся только клиент:
+> `apps/gui_client/connections.py` (`BackendConnection`, `ConnectionStore`, `token_env`) и сессии — N `RemoteGuiRuntime`
+> в `ConnectionRegistry`. Файл `workspace.py` не создаётся; критерии про вкладки/окна/отстыковку проверяются в
+> gui-constructor 3.1, здесь — подключения, изоляция команд и стейта, round-trip конфига, отсутствие токена.
+
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
 **Goal:** Пульт хранит список подключений (`pult.yaml`: имя, host, port, токен-ссылка, предпочтение
@@ -16,7 +22,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 бэкенда не трогает другие.
 
 **Контекст:** «вкладка на бэкенд или окно на бэкенд — раскладка одних и тех же виджетов, не
-архитектура» (plan.md). Qt даёт это нативно: `QDockWidget.setFloating(True)` либо reparent виджета
+архитектура» (plan.md). *Абзац ниже — ред. 2, история; решение 2026-09-26 — в плашке выше.* Qt даёт это нативно: `QDockWidget.setFloating(True)` либо reparent виджета
 в новый `QMainWindow`. Выбрать одно (рекомендация — `QDockWidget`: floating/attach из коробки,
 запоминание раскладки через `saveState/restoreState`), обосновать в DECISIONS Пульта. Ничего своего
 для drag-and-drop окон не писать. Шелл на бэкенд — `GuiHostWindow` frontend-constructor T4.6 (генерик
@@ -24,14 +30,14 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 `main_window.py` прототипа как есть и **не** выделяет шелл сам (это работа T4.6, её нельзя сделать дважды).
 
 **Files:**
-- `apps/pult/connections.py` — `BackendConnection` (Pydantic), `ConnectionStore`
+- `apps/gui_client/connections.py` — `BackendConnection` (Pydantic), `ConnectionStore`
   (YAML через `ruamel.yaml`, путь по умолчанию `INSPECTOR_CONFIG_DIR/pult.yaml`)
-- `apps/pult/bootstrap.py` — N сессий: на каждое подключение свой
+- `apps/gui_client/bootstrap.py` — N сессий: на каждое подключение свой
   `SocketClient` + `Remote*` + `AppServices`; ошибки одной сессии не выбрасываются в другие
-- `apps/pult/workspace.py` — верхнеуровневый `QMainWindow` с
+- `apps/gui_client/workspace.py` — верхнеуровневый `QMainWindow` с
   `QDockWidget` на бэкенд; меню «Подключения» (добавить/удалить/подключить/отключить); индикатор
   состояния на каждой вкладке
-- `apps/pult/tests/test_connections.py`, `test_workspace.py` (pytest-qt на
+- `apps/gui_client/tests/test_connections.py`, `test_workspace.py` (pytest-qt на
   двух in-process `SocketChannel(port=0)`)
 
 **Steps:**
@@ -67,7 +73,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 **Edge cases:** ноль подключений — Пульт открывается с пустым рабочим пространством и меню
 «Подключения», не падает; подключение с тем же именем дважды — валидация.
 **Dependencies:** Task 1.4.
-**Module contract:** impl-only (`apps/pult` уже new-full из 1.4; здесь наполняется).
+**Module contract:** impl-only (`apps/gui_client` уже new-full из 1.4; здесь наполняется).
 
 ---
 
@@ -85,7 +91,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 
 > **Ред. 2 (2026-09-23), сборка из сервисов:** подключение симулятора получает пакеты
 > `framework-generic` (процессы, дисплеи, наблюдаемость, регистры — из кита фреймворка, строятся по
-> `capabilities`, без прикладного кода) + `apps/line_sim/gui_spec.py` (`APP_SPEC` симулятора: в 3.2
+> `capabilities`, без прикладного кода) + пакет `sim.*` из `Services/line_sim/gui/` (ред. 2026-09-26; `APP_SPEC` симулятора — gui-constructor 3.3: в 3.2
 > пустой или с одной вкладкой, Ф6/Ф7.3 line-sim наполняют его). Вкладки инспектора (рецепты, pipeline)
 > к симулятору **не подключаются** — пакет выбирается по `app_id`. Если «штатная» вкладка оказалась
 > прикладной (ждёт структуру рецепта прототипа), она уезжает из generic в пакет инспектора — это
@@ -96,7 +102,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
 чинить здесь, кроме тривиального.
 
 **Files:**
-- `apps/pult/README.md` — раздел «Два бэкенда: инспектор + симулятор»,
+- `apps/gui_client/README.md` — раздел «Два бэкенда: инспектор + симулятор»,
   пример `pult.yaml`
 - Правки кода — только по находкам (каждая названа в PR); ожидаемый объём — 0
 - НОВЫЙ `docs/reviews/2026-XX-XX_pult-two-backends.md` — отчёт приёмки с скриншотом/числами
@@ -121,7 +127,7 @@ line-sim Ф6 (пульт симулятора) и Ф7.3 (Qt-редактор о�
       `introspect_router_stats` симулятора).
 - [ ] Таблица вкладок для подключения «Симулятор» заполнена для ВСЕХ штатных вкладок; у каждой
       неработающей названа причина и заведена строка находки (в отчёт), а не «TODO».
-- [ ] Ни одного файла с условием вида `if backend_name == "line_sim"` в `apps/pult` (grep → 0):
+- [ ] Ни одного файла с условием вида `if backend_name == "line_sim"` в `apps/gui_client` (grep → 0):
       Пульт не знает, что второе подключение — симулятор.
 - [ ] `docs/reviews/…_pult-two-backends.md` с числами и разделом «что не проверено».
 

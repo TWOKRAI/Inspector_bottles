@@ -12,6 +12,10 @@
 > (gui-service 3.2). См. [`frontend-constructor/constructor-layers.md`](frontend-constructor/constructor-layers.md)
 > → «Следующие потребители». Контракт слоёв (`line-sim/phase-3a-layer-contract.md`) остаётся в силе; раздел
 > «Решения» ниже требует редакции.
+>
+> **Редакция решений — 2026-09-26** (синхронизация с [`gui-constructor`](gui-constructor/plan.md), Ф3): редактор — вкладка
+> пакета `sim.*` в `Services/line_sim/gui/`, слои хранит бэкенд симулятора, правка — командами с ревизией. Состав фичи
+> (цели, задачи 1.1–1.3, 2.1, критерии) не меняется; меняются место кода и путь сохранения.
 
 ## Контекст
 
@@ -44,21 +48,28 @@
 - Рисование и ретушь спрайтов, вырезание из фото (это `cut_real_disks`).
 - Редактирование сцены: лента, фон, камера, ROI, поток — это пульт (`line-sim` Ф6).
 - Фотометрия (блик, размытие, гамма) — свойство сцены, Ф4.3, не слоя.
-- Встраивание во вкладку прототипа: редактор — автономный инструмент (см. решения).
+- Встраивание во вкладку **прототипа** (пакет `inspector.*`): редактор — вкладка пакета `sim.*`, прототип о нём не знает (см. решения).
 - Визуальные «призраки» границ диапазона на канве — сетка образцов закрывает ту же
   потребность дешевле; добавлять, если сетки окажется мало.
 
 ## Решения
 
-- **Автономное окно, не вкладка прототипа.** Запуск:
-  `python -m Services.line_sim.tools.layer_editor [preset.yaml]`. Прецедент —
-  `Services/robot_comm/server/sim_monitor.py` (PySide6-окно внутри сервиса, флаг `--gui`).
-  Решение владельца 2026-08-31 — симулятор самостоятелен, прототип о нём не знает;
-  вкладка в прототипе это нарушила бы. Процессов стенда редактору не нужно, поэтому он
-  **не ждёт** `GuiBootstrap` для generic-приложений, на котором стоит Task 6.3.
-- **PySide6 только внутри `tools/layer_editor/`.** Критерий Task 3.1 «`from
-  Services.line_sim import …` без PySide6» остаётся в силе: пакет `tools` не
-  реэкспортируется из `Services/line_sim/__init__.py`.
+- ~~**Автономное окно, не вкладка прототипа.**~~ **Пересмотрено владельцем 2026-09-26:** редактор — **вкладка
+  пакета `sim.*`** конструктора интерфейса (виджеты `sim.layers` — список, `sim.layer_props` — свойства,
+  `sim.layer_canvas` — канва), работает на подключении к бэкенду `line_sim` одинаково во встроенном GUI и в
+  `apps/gui_client` ([`gui-constructor`](gui-constructor/plan.md) Task 3.3–3.4). Прототип о симуляторе по-прежнему не
+  знает: пакет `sim.*` не входит в пакет инспектора. Отсюда зависимость: редактор **ждёт** оболочку и второе
+  подключение (gui-constructor Ф2, 3.1), а не стартует раньше GUI-загрузки. Исторический прецедент автономного окна —
+  `Services/robot_comm/server/sim_monitor.py`.
+- **Слои хранит бэкенд симулятора, редактор правит их командами.** Бэкенд-часть (процесс дерева `apps/line_sim`)
+  отдаёт пресет (`ScenePreset.to_dict()`) с ревизией и принимает `commit{preset, base_rev}` → `{ok, rev}` /
+  `conflict` — шаблон `recipe.*` (gui-service 1b.1) и помощник gui-constructor Task 3.4. Превью рендерит бэкенд тем
+  же `LayeredObject` и отдаёт кадром/ответом команды — «что видно, то поедет» сохраняется. Добавление нового PNG
+  требует канала файлов по id — он зарезервирован в контракте контекста; кто реализует первым (разметка или этот
+  редактор) — решается при постановке Task 1.2. Имена команд — при постановке, по соседству с `belt.*`.
+- **PySide6 только внутри `Services/line_sim/gui/`.** Критерий Task 3.1 «`from
+  Services.line_sim import …` без PySide6» остаётся в силе: подпакет `gui` не
+  реэкспортируется из `Services/line_sim/__init__.py` (контракт-тест gui-constructor Task 1.0).
 - **Канва своя, не из прототипа.** Единственная `QGraphicsView`-канва проекта —
   `multiprocess_prototype/frontend/widgets/tabs/pipeline/graph/graph_view.py`; импорт
   `Services → prototype` запрещён правилом слоёв (`.sentrux/rules.toml`). Вынос канвы во
@@ -106,9 +117,9 @@
 **Level:** Middle+ · **Assignee:** developer
 **Goal:** рабочий редактор без мыши на канве — уже полезный: всё, что умел исторический
 стенд, но слои берутся из пресета, а не из кода.
-**Files:** `Services/line_sim/tools/__init__.py`,
-`tools/layer_editor/{__init__,__main__,window,layer_list,layer_panel,preview}.py`,
-`tools/layer_editor/README.md`, `Services/line_sim/tests/test_layer_editor.py` (pytest-qt).
+**Files:** ~~`Services/line_sim/tools/layer_editor/…`~~ → **2026-09-26:** `Services/line_sim/gui/layer_editor/{__init__,layer_list,layer_panel,preview}.py`
+(виджеты пакета `sim.*`), команды слоёв в бэкенд-части `line_sim`, `Services/line_sim/tests/test_layer_editor.py` (pytest-qt).
+Открыть/сохранить из шага 4 ниже — командами бэкенда с ревизией, не `from_yaml`/`to_yaml` на диске клиента.
 **Steps:**
 1. `layer_list`: добавить PNG (не-RGBA — отказ с текстом, правило Task 3.1), удалить,
    порядок вверх/вниз, видимость, режим `static` / `augmented` / `defect`.
@@ -138,8 +149,8 @@
 
 **Level:** Middle+ · **Assignee:** developer
 **Goal:** то самое «как в Paint»: слой берётся мышью и ставится на место.
-**Files:** `tools/layer_editor/canvas.py` (`LayerCanvasView(QGraphicsView)`,
-`LayerItem(QGraphicsPixmapItem)`), правка `window.py`, тесты в `test_layer_editor.py`.
+**Files:** `gui/layer_editor/canvas.py` (путь ред. 2026-09-26; `LayerCanvasView(QGraphicsView)`,
+`LayerItem(QGraphicsPixmapItem)`), правка виджетов пакета (бывш. `window.py`), тесты в `test_layer_editor.py`.
 **Steps:**
 1. Клик выбирает верхний слой, под курсором у которого альфа > 0 (не по bbox — иначе
    тара перехватывает клики по этикетке); выбор синхронен со списком слоёв.

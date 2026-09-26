@@ -263,6 +263,7 @@ MVP-половины компонентов, `bridge/`, `TabSpec`, `register_bin
 (Qt-free → ядро) и `frontend_module/bootstrap/` с `GuiBootstrap` (Qt → пакет `frontend`); `multiprocess_prototype/frontend/pult/`
 **не появится** — хост Пульта `apps/pult/` (третий composition root для 5.1 рядом с `apps/line_sim`). Новый сервис
 рецептов — `modules/recipe/service*` (Qt-free, домен рецептов). См. [`architecture.md`](../2026-09-22_gui-service/architecture.md).
+**gui-constructor (2026-09-26, ревью CTO находка 4):** к списку 2б.2 добавляются файлы плана [`gui-constructor`](../gui-constructor/plan.md) — Qt-free → ядро: `frontend_module/bootstrap/{interfaces,connections,runtime_inprocess,context,frame_hub,revisioned_draft}.py`, `frontend_module/host/{layout_model,ui_bus}.py`, `frontend_module/knobs/{address,spec}.py`; Qt → пакет `frontend`: `frontend_module/host/{window,layout,lock,fw_pack}.py`, `frontend_module/knobs/pult_widget.py`, `bootstrap/envelope_bus.py`. Оболочка (`GuiHostWindow`) живёт в `host/`, **не** в Gen-1 `windows/`, который удаляет ступень 3.0. Хост Пульта `apps/pult/` переименован в `apps/gui_client/` (владелец 2026-09-26). Раскладка — [`design-shell-layout.md`](../gui-constructor/design-shell-layout.md) §7.
 
 **Связка с [`gui-service`](../2026-09-22_gui-service/plan.md) и [`line-sim`](../line-sim/plan.md) (2026-09-22):**
 gui-service добавляет файлы, не переносит, и помечает их доменом для этого списка заранее:

@@ -21,7 +21,7 @@
 Интерфейс — хост, в который вставлены GUI-вклады:
 
 ```
-apps/pult/                    хост: CLI, конфиг подключений, ~сотня строк
+apps/gui_client/                    хост: CLI, конфиг подключений, ~сотня строк
   = GuiBootstrap (fw) + RemoteGuiRuntime (fw) + N × GuiAppSpec, загруженных ПО ИМЕНИ из конфига
 
 встроенный GUI (слот D8)      = GuiBootstrap (fw) + InProcessRuntime (fw) + 1 × GuiAppSpec
@@ -34,9 +34,10 @@ apps/pult/                    хост: CLI, конфиг подключений
   `GuiAppSpec`. Механизм обнаружения (entry points) не заводим: явный список, пока приложений два.
 - Пакет, который загружается, выбирается по `capabilities` бэкенда (идентификатор приложения +
   версия протокола). При несовпадении версии Пульт показывает причину и не рисует вкладки.
-- Пакет вкладок приложения живёт **при приложении** (инспектор — в прототипе, симулятор — в
-  `Services/line_sim` или `apps/line_sim`) и импортирует только кит фреймворка и Qt-free контракт
-  своего приложения. Запрет «фронт ↛ бэкенд прототипа» ставит Task 1b.3.
+- Пакет виджетов живёт **при своём владельце** (ред. 2026-09-26, ревью CTO находка 5): инспекция — в прототипе,
+  срез сервиса — в подпакете **`Services/<x>/gui/`** (симулятор — `Services/line_sim/gui/`), корень сервиса его не
+  импортирует и остаётся без Qt ([`gui-constructor`](../gui-constructor/plan.md) Task 1.0). Импортирует только кит фреймворка и Qt-free контракт
+  своего сервиса. Запрет «фронт ↛ бэкенд прототипа» ставит Task 1b.3.
 
 **Что сегодня «толстый клиент» и куда уходит** (разъём S9 аудита 1.1 + `AppServices`):
 
@@ -48,7 +49,7 @@ apps/pult/                    хост: CLI, конфиг подключений
 | кадры | мост + SHM по имени / поток | 1.3, 2.1 |
 | `Services.auth`, `users.yaml` (32 импорта, все во фронте) | сервис auth на бэкенде; сессия оператора, проверка команд у владельца | 1b.4 |
 
-**Что это меняет в фазах:** Task 1.4 кладёт хост в `apps/pult/`, а не в
+**Что это меняет в фазах:** Task 1.4 кладёт хост в `apps/gui_client/`, а не в
 `multiprocess_prototype/frontend/pult/`. Исключение из правила QUEUE §5 («универсальный код в
 прототипе по записи») **снимается**: универсальный хост в прототип не попадает. Прототип отдаёт
 только свой `GuiAppSpec`. Добавлена фаза 1b. Ф2 без неё не стартует. Добавлена Task 3.3 «один режим GUI».
@@ -60,10 +61,10 @@ apps/pult/                    хост: CLI, конфиг подключений
 | Клиент двери | `multiprocess_framework/modules/router_module/channels/socket_client.py` | нет | `RemoteGuiRuntime`, `backend_ctl` (реэкспорт) |
 | `Remote*`-реализации (`CommandSender`, `StateProxy`, `FrameSource`) | `frontend_module/bridge/remote_*.py` | нет | `RemoteGuiRuntime` |
 | `GuiHostRuntime` (Protocol) + `InProcessRuntime` + `RemoteGuiRuntime` | `frontend_module/bootstrap/runtime*.py` | нет | `GuiBootstrap` |
-| `GuiBootstrap`, `GuiAppSpec` (контракт пакета) | `frontend_module/bootstrap/` | да | хосты: `apps/pult`, встроенный `GuiProcess` |
-| Хост Пульта | `apps/pult/` (`__main__.py`, `config.yaml`, README/STATUS/DECISIONS, tests) | да | никто — composition root |
+| `GuiBootstrap`, `GuiAppSpec` (контракт пакета) | `frontend_module/bootstrap/` | да | хосты: `apps/gui_client`, встроенный `GuiProcess` |
+| Хост Пульта | `apps/gui_client/` (`__main__.py`, `config.yaml`, README/STATUS/DECISIONS, tests) | да | никто — composition root |
 | Пакет вкладок инспектора | `multiprocess_prototype/frontend/app_spec.py` (`APP_SPEC`) | да | по имени из конфига хоста |
-| Пакет вкладок симулятора | `apps/line_sim/gui_spec.py` (появится в 3.2) | да | по имени из конфига хоста |
+| Пакет виджетов симулятора (`sim.*`) | `Services/line_sim/gui/` (ред. 2026-09-26; появится в gui-constructor 3.3) | да | по имени из конфига хоста |
 | Сервис рецептов (бэкенд) | `multiprocess_framework/modules/recipe/service*` + хук формата в `multiprocess_prototype/backend/` | нет | дерево инспектора |
 | Сервис auth (бэкенд) | `Services/auth` — код тот же, меняется хост (Task 1b.4) | нет | дерево инспектора |
 
@@ -133,5 +134,8 @@ fps больше допуска, встроенный режим остаётс�
 Поэтому **T4.1 (дизайн-док `GuiAppSpec`/стадий), T4.2 (разборка на стадии с характеризацией
 boot-порядка), T4.3 (`GuiBootstrap` новым файлом во фреймворке), T4.4 (`GuiHostRuntime` вместо
 `process._*`)** выполняются до Task 1.4 как её предпосылка. Все четыре — новые файлы или правки на
-месте, окно codemod им не нужно. Ф3 (промоушен кита), T4.5–T4.6 и Ф5–Ф6 остаются в Блоке В.
+месте, окно codemod им не нужно. Ф3 (промоушен кита) и Ф6 остаются в Блоке В.
+
+> **2026-09-26:** T4.1–T4.6 и Ф5 frontend-constructor перенесены в план [`gui-constructor`](../gui-constructor/plan.md) (реестр подключений, контекст
+> виджета, оболочка `frontend_module/host/`, `examples/minimal_gui`). Предпосылка 1.4 — его Ф1 и Task 2.1–2.2; статусы — там.
 Владелец этих задач — frontend-constructor, статусы ведутся там.

@@ -6,6 +6,10 @@
   сервис», «разбивать на сервисы и из них собирать» — раздел «Сборка из сервисов», фаза 1b). Task 1.1
   сделана (`a20e673f`). После approve открыты 1.2 и 1b.1.
 - **Ветка:** feat/gui-service (создать при старте Ф1; worktree по правилам `/dev:team`)
+- **Терминология (2026-09-26):** в этом плане «Пульт» исторически значит **клиента GUI вне дерева** — теперь `apps/gui_client`
+  (оболочка фреймворка + конфиг подключений). С 2026-09-26 слово «Пульт» — только виджет ручек (зародыш —
+  `Services/control_panel`), см. [`constructor-layers.md`](../frontend-constructor/constructor-layers.md) → «Пульт». Не путать с
+  `pult_web` / процессом `pult` в `apps/line_sim` (веб-пульт ленты).
 - **Полоса очереди:** A, под-полоса «интерфейс» (`QUEUE.md` §5: «ML-сервис / интерфейс —
   параллельная под-полоса без стенда»). НЕ фреймворк-полоса B и НЕ frontend-constructor Блок В.
 - **Связи с другими планами:** [`context.md`](context.md) → «Место среди планов фронта и
@@ -82,7 +86,7 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 
 ## Цели
 
-- `python -m apps.pult --connect 127.0.0.1:8765` поднимает тот же набор вкладок, что
+- `python -m apps.gui_client --connect 127.0.0.1:8765` поднимает тот же набор вкладок, что
   `frontend/run.py`, **без** `SystemLauncher` в этом процессе и без импорта `multiprocess_prototype`
   хостом; дисплеи идут с той же частотой (baseline и допуск — Task 1.4).
 - Ни одна сборка GUI не читает и не пишет `recipes/`/`app.yaml` с диска: рецепт принадлежит
@@ -149,10 +153,10 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 - **2026-09-23 (владелец):** рецепт принадлежит бэкенду, фронтенд лишь помогает его
   редактировать. Пульт — отдельный сервис. Система разбивается на сервисы, и приложения собираются
   из них. Следствия — раздел «Сборка из сервисов» и фаза 1b.
-- **2026-09-23 (планирование, по коду):** хост Пульта — `apps/pult/`. Вкладки приложений
+- **2026-09-23 (планирование, по коду):** хост Пульта — `apps/gui_client/`. Вкладки приложений
   подключаются как `GuiAppSpec` по имени из конфига. **Rejected:** (1) `multiprocess_prototype/frontend/pult/`
   по записи (ред. 1) — универсальный хост оседает в прототипе и уезжает только с Блоком В, которого
-  ждёт окно codemod; (2) `apps/pult` с исключением из правила `apps ↛ prototype` — статическая
+  ждёт окно codemod; (2) `apps/gui_client` с исключением из правила `apps ↛ prototype` — статическая
   зависимость хоста от одного приложения, второе приложение (симулятор) пришлось бы тоже импортировать;
   (3) entry points — механизм обнаружения ради двух приложений, явный список короче.
 - **2026-09-23 (владелец: «делай как архитектурно лучше всего и правильно»):** auth — на бэкенде
@@ -173,8 +177,10 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 
 - **2026-09-26 (владелец):** `apps/pult` переименовывается в **`apps/gui_client`** — оболочка фреймворка + конфиг
   подключений. «Пульт» — теперь только виджет ручек (зародыш — `Services/control_panel`), см.
-  [`constructor-layers.md`](../frontend-constructor/constructor-layers.md) → «Пульт». Замена 22 вхождений `apps/pult`
-  в документах плана — вместе с редакцией T4.1 и синхронизацией соседей (ревью CTO 2026-09-26, условие 2).
+  [`constructor-layers.md`](../frontend-constructor/constructor-layers.md) → «Пульт». Замена `apps/pult` → `apps/gui_client`
+  в документах плана **выполнена 2026-09-26** вместе с планом [`gui-constructor`](../gui-constructor/plan.md) (25 вхождений `apps/pult` + 2 `apps.pult`;
+  эта запись — единственное место со старым именем). Там же: предпосылка 1.4 — фазы gui-constructor вместо T4.1–T4.4,
+  докинг Task 3.1 — у оболочки фреймворка, место пакета сервиса — `Services/<x>/gui/`.
 
 ## Открытые вопросы
 
@@ -208,7 +214,7 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 - Task 1.3: Кадры между деревьями на одной машине: `BridgeGuiProcess` + `RemoteFrameSource` (SHM по имени) [DONE 2026-09-24, merge 0c29aadc] (зависит от 1.2) — **Module contract:** new-lite
 - Task 1.3a: Серверный транспорт `SocketChannel`: без head-of-line, медленный клиент не держит запись (из remediation 3.1 + 3.3, решение владельца 2026-09-24) [DONE 2026-09-25, merge 4cb0e6df; приёмка docs/reviews/2026-09-25_gui-1.3a-lead.md; открыто: «призрак подписки у дочернего процесса» живьём целиком не прогонялся, замеры только macOS] (зависимостей нет — параллельно 1.2/1.3; обязательна до 1.4) — **Module contract:** impl-only
 - Task 1.3b: Ответ самому себе разрешается синхронно в `RouterManager.reply_to_request` — `system.shutdown` не теряет ответ (разбор investigator + вердикт cto 2026-09-25; потери 3–5/100 и до 1.3a) [DONE 2026-09-25, merge ea17a4e7; приёмка docs/reviews/2026-09-25_gui-1.3b-lead.md; инъекция 5/5 → 0/5, живой system_shutdown_live ×6 = 60/60] (зависимостей нет; с lifecycle 1.5 файлов не делит) — **Module contract:** impl-only
-- Task 1.4: Автономный Пульт: хост `apps/pult/` + `GuiAppSpec` инспектора по имени — те же вкладки, без дерева; отказоустойчивость в обе стороны [PENDING] (зависит от 1.2, 1.3, 1.3a; предпосылка — frontend-constructor **T4.1–T4.4**, ред. 2: не «если не сделана», а обязательно до 1.4) — **Module contract:** new-full
+- Task 1.4: Автономный Пульт: хост `apps/gui_client/` + `GuiAppSpec` инспектора по имени — те же вкладки, без дерева; отказоустойчивость в обе стороны [PENDING] (зависит от 1.2, 1.3, 1.3a; предпосылка — [`gui-constructor`](../gui-constructor/plan.md) **Ф1 + Task 2.1–2.2** (стадии, реестр подключений, контекст виджета, оболочка, `inspector.classic`; ред. 2026-09-26 вместо frontend-constructor T4.1–T4.4) — обязательно до 1.4) — **Module contract:** new-full
 
 ### Phase 1b — Рецепт и auth принадлежат бэкенду: GUI без диска (ред. 2, 2026-09-23)
 
@@ -220,7 +226,7 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
   - Task 1b.2b-pre: `RegistersManager.from_catalog` строит копии регистров из описания (ADR-RM-007) — правка формы из каталога больше не теряется молча [DONE 2026-09-26; приёмка docs/reviews/2026-09-25_gui-1b2b-pre-lead.md; открыто: копия мягче оригинала на list/dict и питоновских валидаторах → 1b.2d; вердикт бэкенда до формы → 1b.2c] — **Module contract:** impl-only
   - Task 1b.2c: вердикт бэкенда на правку поля доходит до формы (откат + текст ошибки) [PENDING] (после 1b.2b-pre; до 1b.3; решение владельца 2026-09-25 «сначала фронт, потом бэкенд»)
   - Task 1b.2d: все правила регистра — описанием: кодек `FieldInfo` несёт тип элементов `list`/`dict` (10 полей), валидаторы `line_filter` и `otel_export` (унаследованы из `Services`) → `FieldMeta`; контракт-тест по классам, не грепом (детали — phase-1b) [PENDING] (после 1b.2b-pre; ∥ 1b.2c)
-  - Task 1b.2b: сборка GUI без `PluginRegistry` (`app.py:173-186,290,407` уходят; `PluginManager` → `plugins.rescan` на хабе); AC2 расширен: ни `Plugins.*`, ни `Services.*` [PENDING] (зависит от 1b.2a; Senior; **один писатель `app.py` с T4.2–T4.4 frontend-constructor — строгая очередь**) — песочница остаётся локальным dev-исключением встроенной сборки до 3.3 (**решение владельца 2026-09-24:** Q-F2=C «навсегда» → «до 3.3»; в Пульте вкладка честно пишет «недоступно»; в 3.3 по числам — `sandbox.run` на бэкенде или снять)
+  - Task 1b.2b: сборка GUI без `PluginRegistry` (`app.py:173-186,290,407` уходят; `PluginManager` → `plugins.rescan` на хабе); AC2 расширен: ни `Plugins.*`, ни `Services.*` [PENDING] (зависит от 1b.2a; Senior; **один писатель `app.py` с gui-constructor 1.2–1.5 (бывш. T4.2–T4.4) — строгая очередь**) — песочница остаётся локальным dev-исключением встроенной сборки до 3.3 (**решение владельца 2026-09-24:** Q-F2=C «навсегда» → «до 3.3»; в Пульте вкладка честно пишет «недоступно»; в 3.3 по числам — `sandbox.run` на бэкенде или снять)
 - Task 1b.5: Сервисы на хабе: `service.list/status/start/stop/restart` + `RemoteServiceManager` (предложена cto, принята владельцем 2026-09-24; **хост — хаб, как `recipe.*`, решение владельца 2026-09-25** — не процесс `services`: разведка показала, что сервисы запускаются кликом, а не на старте GUI, реальный ввод-вывод только у `modbus`) [DONE 2026-09-25, merge 52f5e6c3; приёмка docs/reviews/2026-09-25_gui-1b.5-lead.md; открыто: GUI на RemoteServiceManager не переведён (1b.3), приёмка тестера не ловит блокирующий start, 9-с connect modbus живьём не проверен] (после 1b.2a, до 1b.4; Ф2 без неё не стартует) — **Module contract:** new-lite (`service_module/host.py`)
 - Task 1b.3: Пакет вкладок инспектора на удалённых портах; запрет `frontend ↛ backend/recipes` [PENDING] (зависит от 1b.1, 1b.2, 1.4) — **Module contract:** impl-only
 - Task 1b.4: Auth на бэкенде: сессия оператора, проверка команд у владельца [PENDING] (зависит от 1.2; до Ф2) — **Module contract:** impl-only
@@ -237,11 +243,11 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 
 Файл: [`phase-3-multi-backend.md`](phase-3-multi-backend.md)
 
-- Task 3.1: Модель подключений: `BackendConnection`, вкладка/окно на бэкенд, отстыковка вкладки в окно [PENDING] (зависит от 1.4) — **Module contract:** impl-only
+- Task 3.1: Подключения клиента: `BackendConnection`, `ConnectionStore`, N `RemoteGuiRuntime` в реестр; **докинг, раскладка и отстыковка — оболочка фреймворка** ([`gui-constructor`](../gui-constructor/plan.md) 2.1, 3.1; ред. 2026-09-26) [PENDING] (зависит от 1.4) — **Module contract:** impl-only
 - Task 3.2: Вкладка «Симулятор»: Пульт подключён к дереву line-sim (`apps/line_sim`, 8766 — **есть**, line-sim 1.1/1.3); точка посадки line-sim Ф6/Ф7.3 [PENDING] (зависит от 3.1) — **Module contract:** impl-only
 - Task 3.3: Один режим GUI: слот `gui` в дереве = мост, `frontend/run.py` = бэкенд + Пульт на localhost, Qt-`GuiProcess` → LEGACY; решение по числам 1.4 [PENDING] (зависит от 1.4, 1b.3, 3.2) — **Module contract:** impl-only
 
-**Порядок фаз (ред. 2, 2026-09-23):** T4.1–T4.4 (frontend-constructor) ∥ 1.2 → 1.3 → 1.4, 1.3a ∥ 1.2/1.3 и до 1.4 → 1b.3; 1b.1/1b.2 — параллельно Ф1; → Ф3 (+3.3) → 1b.4 → Ф2.
+**Порядок фаз (ред. 2, 2026-09-23; предпосылка обновлена 2026-09-26):** gui-constructor Ф1 + 2.1–2.2 (бывш. T4.1–T4.4) ∥ 1.2 → 1.3 → 1.4, 1.3a ∥ 1.2/1.3 и до 1.4 → 1b.3; 1b.1/1b.2 — параллельно Ф1; → Ф3 (+3.3) → 1b.4 → Ф2.
 
 **Порядок фаз для максимальной пользы (2026-09-22, ред. 1):** Ф1 → **Ф3** → Ф2. Одна машина с инспектором и
 симулятором даёт всю ценность Пульта (два бэкенда рядом, посадка Qt-частей line-sim); сеть и токен (Ф2) —

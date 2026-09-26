@@ -1,5 +1,7 @@
 # T4.1 — дизайн `GuiBootstrap` / `GuiAppSpec` / `GuiHostRuntime`
 
+> **2026-09-26 — ЗАМЕНЁН** [`plans/gui-constructor/design-*.md`](../gui-constructor/plan.md): [`design-boot.md`](../gui-constructor/design-boot.md), [`design-connection-context.md`](../gui-constructor/design-connection-context.md), [`design-shell-layout.md`](../gui-constructor/design-shell-layout.md) — редакция под решение владельца и ревью CTO (реестр подключений, контекст виджета, оболочка в `frontend_module/host/`). Тело ниже — история; решения по нему не принимать.
+
 > **Статус: ЧЕРНОВИК (2026-09-24), ждёт ревью владельца.** Решения Р-A…Р-F (раздел 1) не утверждены — рекомендации автора, не принятые решения. Код T4.2–T4.4 не начинается до утверждения.
 >
 > **2026-09-26 — направление изменено владельцем:** см. [`constructor-layers.md`](constructor-layers.md). Единица — виджет, окна у оболочки: **Р-E развёрнут**, `GuiAppSpec` = каталог виджетов + раскладка, `GuiHostWindow` — к gui-service 1.4. Документ ниже требует редакции под эту запись.

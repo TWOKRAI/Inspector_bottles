@@ -404,22 +404,22 @@ Linux/Orin.
 
 ---
 
-### Task 1.4 — Автономный Пульт: хост `apps/pult/` + пакет вкладок по имени, без дерева
+### Task 1.4 — Автономный Пульт: хост `apps/gui_client/` + пакет вкладок по имени, без дерева
 
 > **Ред. 2 (2026-09-23), решения владельца «Пульт — отдельный сервис», «разбивать на сервисы и из них
-> собирать».** Хост уходит из `multiprocess_prototype/frontend/pult/` в `apps/pult/` и **не импортирует
+> собирать».** Хост уходит из `multiprocess_prototype/frontend/pult/` в `apps/gui_client/` и **не импортирует
 > прототип** (правило `apps/* ↛ multiprocess_prototype/*`, `.sentrux/rules.toml:128`, без исключения).
 > Вкладки инспектора приходят как `GuiAppSpec`, загруженный по имени из конфига хоста. Обоснование —
 > [`architecture.md`](architecture.md).
 
 **Level:** Senior+ (Opus, extended thinking)
 **Assignee:** teamlead
-**Goal:** `python -m apps.pult --connect 127.0.0.1:8765` поднимает главное окно с тем же набором
+**Goal:** `python -m apps.gui_client --connect 127.0.0.1:8765` поднимает главное окно с тем же набором
 вкладок, что `frontend/run.py`: `GuiBootstrap` (фреймворк) + `RemoteGuiRuntime` (фреймворк) +
 `GuiAppSpec` инспектора, выбранный по `capabilities.app_id`. `SystemLauncher`/`ProcessManager` в этом
 процессе нет, хост прототип не импортирует. Отказоустойчивость в обе стороны доказана числами.
 
-**Предпосылка — frontend-constructor T4.1–T4.4 (обязательна, ред. 2):** T4.1 — дизайн-док
+**Предпосылка — ред. 2026-09-26:** [`gui-constructor`](../gui-constructor/plan.md) Ф1 (стадии, `ConnectionRegistry`, `GuiBootstrap`, `pack_loader`, `WidgetContext`) и Task 2.1–2.2 (оболочка, `inspector.classic`); `apps/gui_client` = оболочка фреймворка + конфиг подключений. Текст ниже — ред. 2, история. **Была предпосылка frontend-constructor T4.1–T4.4 (обязательна, ред. 2):** T4.1 — дизайн-док
 `GuiAppSpec`/стадий (ревью владельца); T4.2 — разборка `run_gui` (~749 строк) на стадии
 `identity→theme→runtime→state→tabs→window→timers→show` с характеризацией boot-порядка; T4.3 —
 `GuiBootstrap` **новым файлом** в `frontend_module/bootstrap/`; T4.4 — `GuiHostRuntime` вместо
@@ -433,19 +433,19 @@ Linux/Orin.
 обеих сборок) или дать ему адаптер.
 
 **Files:**
-- НОВЫЙ `apps/pult/__init__.py`, `__main__.py` (CLI: `--connect host:port` (повторяемый — задел для 3.1),
+- НОВЫЙ `apps/gui_client/__init__.py`, `__main__.py` (CLI: `--connect host:port` (повторяемый — задел для 3.1),
   `--token` — задел для 2.2, `--log-dir`), `config.yaml` (`gui_packs: {<app_id>: "<модуль>:APP_SPEC"}`),
   `README.md`, `STATUS.md`, `DECISIONS.md`, `tests/`
 - НОВЫЙ `multiprocess_framework/modules/frontend_module/bootstrap/remote_runtime.py` — `RemoteGuiRuntime`:
   реализация `GuiHostRuntime` поверх `SocketClient` и `Remote*` из 1.2/1.3; реконнект-контроллер; статус
   соединения для статус-бара шелла. **Qt-free**
-- НОВЫЙ `multiprocess_framework/modules/frontend_module/bootstrap/pack_loader.py` — загрузка `GuiAppSpec` по
+- ~~НОВЫЙ `…/bootstrap/pack_loader.py`~~ — **ред. 2026-09-26: делает gui-constructor Task 1.4** (пакет по строке грузит и встроенный GUI); здесь — только использование. Бывшая строка: `multiprocess_framework/modules/frontend_module/bootstrap/pack_loader.py` — загрузка `GuiAppSpec` по
   строке `модуль:атрибут`, проверка `protocol_version` из `capabilities`, внятная ошибка при несовпадении
 - `multiprocess_prototype/frontend/app_spec.py` — `APP_SPEC` инспектора (появляется в T4.3); сборка
   `AppServices` из `runtime`, а не из `process`
 - Поля `app_id` и `protocol_version` в `capabilities` на хосте (если их там нет — одно место в
   `backend_ctl_endpoint`)
-- Тесты: `apps/pult/tests/` — pytest-qt: сборка окна на фейковом сокетном хосте (in-process
+- Тесты: `apps/gui_client/tests/` — pytest-qt: сборка окна на фейковом сокетном хосте (in-process
   `SocketChannel`), реконнект; `frontend_module/tests/test_pack_loader.py`
 - Правки виджетов — только по находкам, каждая названа в PR-описании
 
@@ -480,7 +480,7 @@ Linux/Orin.
       0 failed.
 - [ ] `README.md` Пульта описывает CLI и то, чего Пульт **не** умеет в v1 (сеть, токен, N бэкендов).
 - [ ] **Граница хоста:** `sentrux check .` зелёный (правило `apps/* ↛ multiprocess_prototype/*` действует
-      на `apps/pult` без исключения); `grep -rn "multiprocess_prototype" apps/pult --include=*.py` → 0 вне
+      на `apps/gui_client` без исключения); `grep -rn "multiprocess_prototype" apps/gui_client --include=*.py` → 0 вне
       строк конфига.
 - [ ] **Совместимость:** бэкенд с другим `protocol_version` → Пульт показывает обе версии и не рисует
       вкладки (тест на фейковом хосте); неизвестный `app_id` → «нет пакета для приложения <id>».
@@ -490,5 +490,5 @@ Linux/Orin.
 **Edge cases:** бэкенд без `BACKEND_CTL=1` — Пульт называет причину («дверь закрыта: поднимите бэкенд
 с BACKEND_CTL=1»), не «connection refused» голышом; бэкенд с включённым loan-протоколом — дисплеи
 не работают, остальные вкладки работают, статус-бар называет причину.
-**Dependencies:** Task 1.2, Task 1.3, Task 1.3a; frontend-constructor T4.1–T4.4 (обязательно до старта, ред. 2).
-**Module contract:** new-full (`apps/pult` — README + тесты; контракт `GuiAppSpec` — в `frontend_module/bootstrap/interfaces.py`).
+**Dependencies:** Task 1.2, Task 1.3, Task 1.3a; [`gui-constructor`](../gui-constructor/plan.md) Ф1 + Task 2.1–2.2 (обязательно до старта; ред. 2026-09-26 вместо frontend-constructor T4.1–T4.4). Framework-side приёмка — gui-constructor Task 2.4 (`examples/minimal_gui`).
+**Module contract:** new-full (`apps/gui_client` — README + тесты; контракт `GuiAppSpec` — в `frontend_module/bootstrap/interfaces.py`).

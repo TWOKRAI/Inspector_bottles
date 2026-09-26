@@ -230,7 +230,7 @@ Protocol `ServiceManager` поверх команд, без импорта `Serv
 - Тесты: `service_module/tests/test_host.py`, контракт `RemoteServiceManager` против Protocol
   (`domain/tests/test_fakes_contract.py`-образец), живой `backend_ctl/tests/test_service_host_live.py`
   (порт — из свободных, **не** 8860–8910 и не 9800+ без согласования).
-- **Не трогать:** `frontend/app.py` (очередь одного писателя с T4.2–T4.4), `process_runner.py`, `spawner.py`,
+- **Не трогать:** `frontend/app.py` (очередь одного писателя с gui-constructor 1.2–1.5, бывш. T4.2–T4.4), `process_runner.py`, `spawner.py`,
   `process_manager_process.py` (lifecycle Task 1.5 идёт параллельно).
 
 **Steps:**

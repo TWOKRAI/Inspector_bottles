@@ -4,7 +4,8 @@
 - **Ф0 ✅** реконсиляция планов/доков (T0.1–T0.5) — `5307a2c2`, 2026-07-18
 - **Ф1 ✅** гигиена `frontend_module` (T1.1–T1.5, фасад-флип Gen-1→Gen-2) — 5 коммитов, 2026-07-18
 - **Ф2 ✅** граница фронт/бэк, headless-default + точка входа фронта (T2.1/T2.2/T2.3/T2.4/T2.6) — `d6faaa80`, 2026-07-19. T2.5 опционален, пропущен. **Live headless-гейт T2.1 сознательно ОТЛОЖЕН** (параллельно шла live-система Phase B — совместный подъём даёт PID/SHM-коллизию).
-- **Ф3+ (Блок В) — НЕ начаты.** Блокер: **окно codemod Ф3 плана [framework-architecture-rework](../framework-architecture-rework/plan.md)** — freeze-окно, кодовые фазы не параллелятся с ним. (Прежний блокер `framework-layer-grouping` Фаза 3 — **замещён** этим планом 2026-08-17; это то же самое окно.)
+- **Ф4 и Ф5 — ПЕРЕНЕСЕНЫ 2026-09-26 в план [`gui-constructor`](../gui-constructor/plan.md)** (решение владельца [`constructor-layers.md`](constructor-layers.md) + ревью CTO): T4.2–T4.5 → gui-constructor Ф1, **T4.6 `GuiHostWindow` вынут из Блока В** → gui-constructor Task 2.1 (путь `frontend_module/host/`, не Gen-1 `windows/`), Ф5 `minimal_gui` → Task 2.4. Окна codemod эти задачи не ждут. Статусы ведутся там.
+- **Ф3, Ф6–Ф8 (Блок В) — НЕ начаты.** Блокер: **окно codemod Ф3 плана [framework-architecture-rework](../framework-architecture-rework/plan.md)** — freeze-окно, кодовые фазы не параллелятся с ним. (Прежний блокер `framework-layer-grouping` Фаза 3 — **замещён** этим планом 2026-08-17; это то же самое окно.)
 
 **2026-09-26 — решение владельца о слоях и форме конструктора:** [`constructor-layers.md`](constructor-layers.md).
 Фреймворк = конструктор (оболочка, подключения, контракт виджета, раскладка), `Services` = прикладные срезы с пакетами
@@ -12,7 +13,7 @@
 Р-E дизайна T4.1 развёрнут: окна у оболочки, единица — виджет.
 
 **Сверка под rework 2026-08-18 (docs-only, чисел не пересчитывали — они устареют после merge телеметрии):**
-- **Разделение владения разрезом `frontend`.** Фреймворковая сторона — у rework: Р-4 (расщепить `frontend_module`: Qt-free ядро → `framework`, Qt-часть → свой пакет), Task 2б.2 (поимённый список разреза 298 файлов — это T0.5 этого плана, переснятый на месяц позже; **владелец списка — rework, этот план его потребляет**), ступень 3.4 окна (само расщепление), 5.1 (пакет `frontend` в workspace). Прототипная сторона остаётся здесь: Ф3 промоушен из `multiprocess_prototype/frontend/`, Ф4 `GuiBootstrap`, Ф5 `minimal_gui`, Ф6 enforcement.
+- **Разделение владения разрезом `frontend`.** Фреймворковая сторона — у rework: Р-4 (расщепить `frontend_module`: Qt-free ядро → `framework`, Qt-часть → свой пакет), Task 2б.2 (поимённый список разреза 298 файлов — это T0.5 этого плана, переснятый на месяц позже; **владелец списка — rework, этот план его потребляет**), ступень 3.4 окна (само расщепление), 5.1 (пакет `frontend` в workspace). Прототипная сторона остаётся здесь: Ф3 промоушен из `multiprocess_prototype/frontend/`, Ф6 enforcement (Ф4 `GuiBootstrap` и Ф5 `minimal_gui` — с 2026-09-26 в [`gui-constructor`](../gui-constructor/plan.md)).
 - **Связка с [`gui-service`](../2026-09-22_gui-service/plan.md) (2026-09-22, решение владельца «GUI — отдельный
   сервис»).** Пульт — GUI вне дерева процессов, подключается к N бэкендам через `SocketChannel`. Он **не строит второй
   composition root**: его `bootstrap.py` — стадии T4.2 с `RemoteGuiRuntime` как второй реализацией `GuiHostRuntime`
@@ -102,8 +103,8 @@ Diff вычитан поштучно — **дрейф оказался из ДВ
 
 **Блок В — ПОСЛЕ группировки** (пути `application/frontend/*`):
 6. **Ф3** — промоушены отдельными PR в порядке: T3.0 инвентарь-свип → T3.3 glob_match+GuiStateBindings (свой узкий Protocol) → T3.4 qt_event_bus/wheel_guard/prefs → T3.5 реализации-примитивы ×6 + dialogs-helper → T3.6 forms-движок (T3.6b опц.) → T3.7 FrameworkRuntime → **T3.1 DataReceiverBridge + T3.2 RequestRunner в конце** (после/с оглядкой на G.2) → T3.8 удаление 13 шимов. Гейт после каждого PR: сьюты + hot-reload qt-smoke + свип остатков.
-7. **Ф4** — T4.1 дизайн-док (ревью владельца) → T4.2 механическая разборка + характеризация boot-порядка → T4.3 GuiBootstrap+GuiAppSpec → T4.4 GuiHostRuntime вместо `process._*` → T4.5 колбэки/таймеры → T4.6 GuiHostWindow. Полное трёхуровневое ревью (рисковое вскрытие). Здесь закрывается гейт В3 «вкладка одним TabSpec».
-8. **Ф5** — T5.1 examples/minimal_gui (3 вкладки, вкл. tree-nav MVP) + туториал → T5.2 CI gui-smoke. Приёмка В3 — не резать.
+7. **Ф4 — ПЕРЕНЕСЕНА в [`gui-constructor`](../gui-constructor/plan.md) (2026-09-26), T4.6 — не в Блоке В.** Историческая запись: T4.1 дизайн-док (ревью владельца) → T4.2 механическая разборка + характеризация boot-порядка → T4.3 GuiBootstrap+GuiAppSpec → T4.4 GuiHostRuntime вместо `process._*` → T4.5 колбэки/таймеры → T4.6 GuiHostWindow. Полное трёхуровневое ревью (рисковое вскрытие). Здесь закрывается гейт В3 «вкладка одним TabSpec».
+8. **Ф5 — ПЕРЕНЕСЕНА в [`gui-constructor`](../gui-constructor/plan.md) Task 2.4 (2026-09-26).** Историческая запись: T5.1 examples/minimal_gui (3 вкладки, вкл. tree-nav MVP) + туториал → T5.2 CI gui-smoke. Приёмка В3 — не резать.
 9. **Ф6** — T6.1 import-linter public-interface → T6.2 добивка deep-импортов → T6.3 sentrux → T6.4 BLUEPRINT/ADR/STATUS.
 
 **Блок Г — опциональные волны (режутся в любой точке, но без них «дублирование» ~5.5/10):**
@@ -192,6 +193,8 @@ Diff вычитан поштучно — **дрейф оказался из ДВ
 
 ## Ф4 — Composition root → GuiBootstrap во фреймворке (~3-4 дня; рисковое вскрытие → полное ревью)
 
+> **2026-09-26 — ПЕРЕНЕСЕНА в [`gui-constructor`](../gui-constructor/plan.md):** T4.1 → `design-*.md` там; T4.2 → Task 1.1–1.2; T4.3 → 1.4; T4.4 → 1.3 (с реестром подключений); T4.5 → 1.2; T4.6 → 2.1 (вне Блока В, путь `frontend_module/host/`). Гейт В3 — «виджет одним `WidgetSpec`», доказывается gui-constructor 2.4. Таблица ниже — история.
+
 | # | Задача | Acceptance |
 |---|--------|------------|
 | T4.1 | Дизайн-док `gui-bootstrap-design.md`: `GuiAppSpec` (identity, theme, tabs, subscriptions, telemetry-suffixes, hooks), стадии `identity→theme→runtime→state→tabs→window→timers→show`, `GuiHostRuntime` (легализация приватных атрибутов), контракт hot-reload (purge только app-namespace; DX-регресс из Ф3 описан явно); дизайн `GuiHostWindow` (T4.6) | ревью владельца до кода. **[ЧЕРНОВИК 2026-09-24, `6e01d199`]** — [`gui-bootstrap-design.md`](gui-bootstrap-design.md) написан, **ждёт решений владельца Р-A…Р-F** (раздел 1 дока); кода нет до утверждения |
@@ -204,6 +207,8 @@ Diff вычитан поштучно — **дрейф оказался из ДВ
 **Гейт В3 здесь:** тест «вкладка добавляется одним TabSpec без правки framework».
 
 ## Ф5 — examples/minimal_gui (~1.5-2 дня; приёмка В3 — НЕ резать)
+
+> **2026-09-26 — ПЕРЕНЕСЕНА в [`gui-constructor`](../gui-constructor/plan.md) Task 2.4** в новой форме (оболочка + раскладка + пакет, headless CI против `minimal_app` по сокету). Текст ниже — история.
 
 - **T5.1** `examples/minimal_gui/`: `run.py`, presentation-overlay поверх minimal_app, `app_spec.py` с **3 вкладками**: schema-форма поверх регистра minimal_app + панель TelemetryViewModel + **одна нетривиальная вкладка на MVP-базе с tree-nav** (`BaseTreeNavTab`+`TreeNavTabPresenter`+`SectionSpec`) — доказательство, что кит держит не только плоские формы (правка ревью). README-туториал «интерфейс за 30 минут» с рубрикой шагов (проверочный шаг: 4-я вкладка одним TabSpec).
 - **T5.2** CI job `gui-smoke` (по образцу examples-smoke): `QT_QPA_PLATFORM=offscreen`, boot, вкладки построены, чистое закрытие.
