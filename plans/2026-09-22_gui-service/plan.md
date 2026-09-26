@@ -171,6 +171,11 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
   хаба). **Rejected:** процесс `recipes` в `base.yaml` (+375 строк golden каждому рецепту, решение
   08-23) и плагин в `devices` (async activate + второй владелец «активного рецепта»).
 
+- **2026-09-26 (владелец):** `apps/pult` переименовывается в **`apps/gui_client`** — оболочка фреймворка + конфиг
+  подключений. «Пульт» — теперь только виджет ручек (зародыш — `Services/control_panel`), см.
+  [`constructor-layers.md`](../frontend-constructor/constructor-layers.md) → «Пульт». Замена 22 вхождений `apps/pult`
+  в документах плана — вместе с редакцией T4.1 и синхронизацией соседей (ревью CTO 2026-09-26, условие 2).
+
 ## Открытые вопросы
 
 - **Сколько in-tree допущений в `frontend_module`/`multiprocess_prototype/frontend`** — не

@@ -28,7 +28,13 @@ and has 0 consumers — so mechanisms enter the framework only when two consumer
 **How to apply:** when adding GUI code, ask which layer it belongs to; nothing domain-specific in
 `frontend_module`; widgets reach the outside only through the widget context (state glob / command
 with reply / frames / ui bus), never reference another widget. `minimal_gui` building without the
-prototype is the measurable debt counter. Open, not decided: where the Pult program lives (owner said
-`Services`, recommendation = runnable shell in the framework + `apps/pult` as config); the name "Пульт"
-is taken three times (`Services/control_panel`, `apps/pult`, `Plugins/sim/pult_web`). Related:
+prototype is the measurable debt counter. Pult (owner, 2026-09-26): a scalable widget that gathers knobs from different areas into one place
+so nobody runs between tabs; the same knobs are reachable headless via `backend_ctl` for devs and agents.
+Seed = `Services/control_panel` (`ControlSpec` sources param/monitor/action/local). A knob is an address +
+description, never a reference to another widget; one address scheme shared with `backend_ctl`
+(`process/register/field`, `process/command`, state path). Human knob sets live in the workplace layout;
+only pipeline `local` controls stay in the recipe. `apps/pult` is renamed `apps/gui_client` (framework shell
++ connection config); "Пульт" now means only the knob widget. CTO review 2026-09-26: ACCEPT WITH CONDITIONS
+(`docs/reviews/2026-09-26_gui-constructor-layers-cto.md`) — runtime registry for N connections already in
+T4.3–T4.4, frame fan-out, shell path outside Gen-1 `windows/`, `Services/<x>/gui/` subpackage rule. Related:
 [[gui-services-composition-2026-09-23]], [[work-order-2026-09-22-line-sim-then-pult]].
