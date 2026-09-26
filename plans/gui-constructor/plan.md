@@ -1,5 +1,7 @@
 # Plan: Конструктор интерфейса — оболочка, подключения, виджет как единица (gui-constructor)
 
+> **2026-09-27, потребитель:** [`robot-protocol-v2`](../robot-protocol-v2/plan.md) ред. 2 кладёт GUI робота пакетом `robot.*` в `Services/robot_comm/gui/` (Ф6 v2) и зависит от Task 1.0 (правило `Services/<x>/gui/`) и 1.5 (контекст виджета). Ручки Пульта робота — по адресам `devices/robot_*`.
+
 - **Slug:** gui-constructor
 - **Дата:** 2026-09-26
 - **Статус:** DRAFT — ждёт ревью (`reviewer` MODE: plan) и approve владельца

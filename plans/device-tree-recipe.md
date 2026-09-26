@@ -1,5 +1,7 @@
 # План: device-tree-recipe — колонка устройств в сервисах (master-detail) + рецепт как источник истины
 
+> **2026-09-27, связь с [`robot-protocol-v2`](robot-protocol-v2/plan.md) ред. 2:** данные робота v2 (параметры, точки, СК, программы) живут в `data/robot/<device_id>/` (`RobotDataStore`, T5.2), а не в `devices.yaml`, — от решения О-7 об этом файле не зависят. Реестр устройств остаётся источником `protocol` (выбор драйвера v1/v2).
+
 **Slug:** `device-tree-recipe` • **Ветка:** `feat/robot-vfd-services` (продолжение device-hub)
 **Refs в коммитах:** `Refs: plans/device-tree-recipe.md`
 **Исполнитель:** Opus. **Предыдущий план:** `plans/device-hub.md` (Фазы 0–5 + 2 раунда фиксов ревью DONE).

@@ -1,5 +1,7 @@
 # План: поза укладки x/y/z/r в CVT-задании робота (доворот)
 
+> **2026-09-27, связь с [`robot-protocol-v2`](robot-protocol-v2/plan.md) ред. 2:** по мануалу RL (стр. 5-9..5-10) пункт 4-й оси в `WritePoint` — `"RZ"`, а P2 пишет `"R"` (`robot/main_actual.lua:501,511`) — поворот укладки, скорее всего, не работает. Проба `robot/pc_platform_probe` (тест 34) это подтвердит; правка v1 — одной строкой в T0.3 плана v2. P3 делается на v2: `CVT_JOB` с флагами pick_z/place.
+
 **Slug:** `robot-place-pose`
 **Статус:** P1 (Python протокол) + P2 (Lua укладка) DONE — 116 тестов robot_comm/driver зелёные
 (parity yaml↔карта + place wire/lifecycle/PC-конверсия), ruff чист. Lua-исходник правлен в репо —
