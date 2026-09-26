@@ -1,7 +1,7 @@
 # lifecycle-stop-ownership — остановкой и сиротами владеет PM (L-5 + долги приёмки L-2)
 
 - **Slug:** `lifecycle-stop-ownership` · **Ветка:** `fix/lifecycle-stop-ownership` (создать при старте Ф1) · **Дата:** 2026-09-24
-- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 DONE 2026-09-26 (ревью APPROVE_WITH_NOTES), ждёт merge gate CTO и приёмки Ф1
+- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 DONE 2026-09-26. **Ф1 принята CTO 2026-09-26 — ACCEPT WITH CONDITIONS** ([отчёт](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)); Ф2 ждёт L-6 и условий ниже
 - **Полоса:** B (фреймворк). **Срок-якорь:** Ф1 закрыть **до gui-service Task 1.3a** (у Пульта появится кнопка
   «стоп» по сокету — сегодня она идёт незащищённым путём, см. Task 1.1).
 - **Слой:** framework (`process_manager_module`, `shared_resources_module`), `backend_ctl` (harness)
@@ -293,6 +293,23 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 
 **Исполнение Ф1:** тестер в worktree до кода (1.1+1.3 — один заход; 1.2 и 1.4 — свои) → developer/teamlead →
 инъекции ведущего → стенд → reviewer синхронно. Порядок: 1.1 → 1.3 → 1.2 → 1.4 → 1.5 → 1.6 (1.1 и 1.3 дешёвые и снимают шум для замеров; до gui-service 1.3a обязательны 1.1 и 1.2, остальное — желательно).
+
+**Приёмка Ф1 (CTO, 2026-09-26):** merge gate 1.6 — ACCEPT_WITH_DEBT, Ф1 — ACCEPT WITH CONDITIONS
+([`docs/reviews/2026-09-26_lifecycle-phase-1-cto.md`](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)).
+Хук `_before_observability_teardown` принят как заглушка фазы, не паттерн: второго хука не заводить — следующая
+потребность в порядке стопа запускает Task 3.1 (именованные фазы `stop()`), которая обязана сохранить два инварианта:
+запись в стор от останавливающегося процесса — до `_flush_observability`; `shutdown()` без `stop()` идемпотентен по детям.
+
+**Условия до старта Ф2 (CTO):**
+- [ ] D1 — Linux/Orin проверка Task 1.5 на целевой машине (числа Ф2 на платформе с непроверенным сторожем бессмысленны).
+- [ ] Юнит-тест правила severity `_publish_stop_summary` (литерал WARNING при любом `reported=false`) — в CI сегодня
+  severity не защищена ничем (инъекция D CTO: 0 красных), живые тесты CI не гоняет.
+- [ ] `--backend-live` (stop_summary 3 + system_shutdown 2 + exit_loss) — вручную перед Ф2 или в CI.
+- [ ] Флейк `children_exit_hook_in_system_stop_mode` (1/9) — починить или квантовать до «20 циклов» Ф2.
+
+**Долги со сроком «до старта Task 3.1»:** указатель ADR-PM-045 → ADR-PMM-033 в `process_module/DECISIONS.md` (хук живёт
+там, решение — в чужом модуле); формулировка ADR-PMM-033 п.4 — в сводку попадают все имена `os_processes`, включая
+остановленных ранее одиночно (замер CTO S4: `processor` после `process.stop` — `reported=true`).
 
 ## Ф2 — перемерить после L-6 и решить судьбу ReaderGoneQueue
 
