@@ -78,15 +78,20 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
   не пересчитывает — `TLM_HAND` после ЛЮБОГО обрыва (не только DONE) отражает
   физическое состояние руки, чиня устаревший `TLM_HAND = P_HAND` только на
   DONE (находка ревью T2.J №3).
-- Приём JOINT/HOME: ``j_end = ik(target, P_HAND)``; если не `None` — J4 берёт
-  ближайший оборот (`j4 + 360k`) к текущему `_joints[3]` в пределах предела
-  модели; любой сустав `j_end` вне `model.joint_limits`, или ни один оборот J4
-  не влезает — `NAK E_RANGE [R_OUT_OF_ZONE]` В ОДНОМ месте (⚑ GATE-1: реальная
-  прошивка может вместо этого NAK'ать позже, ACK + `E_MOTION_FAULT` при
-  фактическом `MovP`). Фолбэк `ik -> None` (недосягаемость модели по радиусу)
-  остаётся ACK + декартов путь — предел сустава НЕ путается с этим фолбэком
-  (`j_end is not None` — предпосылка всей ветки предела). `_start_move`
-  переиспользует уже посчитанный `j_end`, не пересчитывает.
+- **Одна правда TLM_RZ = fk(_joints)[3] = J1+J2+J4** (вердикт cto по эскалации
+  ревью T2.J2, `docs/reviews/2026-09-27_robot-v2-task-T2.J2-cto.md`): правило
+  «J4 — ближайший оборот» ОТОЗВАНО — несовместимо с «TLM_RZ = цель дословно»
+  (давало скачок TLM_RZ на 717.6°/тик и `fk(joints)[3] != TLM_RZ` после DONE).
+  Приём JOINT/HOME: ``j_end = ik(target, P_HAND)``; J4 — СЫРОЙ (`rz - J1 - J2`,
+  без перемотки ±360) везде, включая `_continuity_joints` (LINE/JOG). Если
+  `j_end` не `None` — ВСЕ суставы (включая J4 сырой) проверяются одним циклом
+  на `model.joint_limits`; любой вне предела — `NAK E_RANGE [R_OUT_OF_ZONE]`
+  В ОДНОМ месте (⚑ GATE-1 JRC: реальный оборот сустава контроллер хранит
+  отдельно от RZ — сырое правило не проверено на прошивке). Фолбэк `ik -> None`
+  (недосягаемость модели по радиусу) остаётся ACK + декартов путь — предел
+  сустава НЕ путается с этим фолбэком (`j_end is not None` — предпосылка всей
+  ветки предела). `_start_move` переиспользует уже посчитанный `j_end`, не
+  пересчитывает.
 - Длительность (Q3): ``duration = max(T_cart, max_j |Δj_j| / v_j)``,
   ``v_j = joint_speed_j × P_SPD_J/100 × spd_pct/100`` (``_op_ptp_move``/``_op_home``
   по-прежнему считают декартову скорость от `P_SPD_L`, независимо). Декартов пол
@@ -94,9 +99,12 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
   оси одновременно, реальный JOINT обычно быстрее LINE). Длительность выражается
   эквивалентной длиной ``path_len_eq = duration × speed``, чтобы продвижение за
   тик оставалось `min(speed*dt, MAX_STEP_MM)` тем же кодом, что и раньше.
-  ЖЁСТКИЙ ПОТОЛОК (решение ведущего 2026-09-27): декартово смещение XYZ (не RZ,
-  см. эскалацию к cto ниже) за один тик ограничено `MAX_STEP_MM` И В СУСТАВНОМ
-  ходе, ВКЛЮЧАЯ ФИНАЛЬНЫЙ — если `fk` кандидатной доли тика (включая долю,
+  ЖЁСТКИЙ ПОТОЛОК (решение ведущего 2026-09-27): декартово смещение XYZ (не RZ —
+  RZ = J1+J2+J4 лерпится линейно вместе с суставами и потолком не ограничен
+  отдельно, но при сыром J4 без перемотки остаётся монотонным прямым лерпом
+  старт->цель, см. правило одной правды выше) за один тик ограничено
+  `MAX_STEP_MM` И В СУСТАВНОМ ходе, ВКЛЮЧАЯ ФИНАЛЬНЫЙ — если `fk` кандидатной
+  доли тика (включая долю,
   ограниченную `path_len`) уносит TCP дальше `MAX_STEP_MM` от предыдущей позы
   (нелинейность fk у вытянутой руки), доля тика урезается (`_joint_tick_capped`,
   несколько итераций деления пополам); ревью T2.J2 нашло, что до этого исправления
@@ -104,18 +112,18 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
   ⚑ БЛОКЕР 1). Позу ставит РОВНО в `target`, а `_joints` — в `j_end`, ТОЛЬКО
   тик, который реально дотянул до `path_len` без урезания; иначе ход продолжается
   на следующем тике честным капнутым шагом.
-- LINE/JOG: после каждой записи позы `_joints = ik(pos, TLM_HAND)` с J4 —
-  ближайшим оборотом к прежнему состоянию (состояние следует, не отдельная
-  правда). Пределы суставов при LINE не проверяются — открыто, вне охвата
-  T2.J2 (см. отчёт).
+- LINE/JOG: после каждой записи позы `_joints = ik(pos, TLM_HAND)` КАК ЕСТЬ,
+  БЕЗ поправок J4 (та же одна правда). Пределы суставов при LINE не
+  проверяются — открыто, вне охвата T2.J2 (см. отчёт).
+- Промежуточные проверки зоны ПОСРЕДИ хода (клэмп у вытянутой руки при
+  округлении x/y, `_clamp_pose_to_zone`; потолок шага, `cart_dist` в
+  `_joint_tick_capped`) смотрят ТОЛЬКО XY (`_check_point_xy`) — вердикт cto по
+  RZ: зона RZ проверяется только на КОМАНДНОЙ цели (`_check_motion`), иначе
+  узкая зона RZ ложно уводила бы в клэмп посреди хода.
 
-Эскалация к cto (ревью T2.J2, находки 3/5, НЕ РЕШЕНО): `TLM_RZ` не ограничен
-жёстким потолком шага (потолок мерит только XYZ, см. выше) — при `J4` = ближайший
-оборот к цели RZ может отличаться от значения, требуемого прошивкой, на кратное
-360°, и промежуточный `TLM_RZ` посреди хода может выйти за пределы одного оборота
-на десятки-сотни градусов за тик. Вопрос, какое значение TLM_RZ правильное
-(цель дословно или `fk(суставов)` с кратным 360°) и как тогда его ограничивать —
-у cto, не решён этим кодом; ничего в реализации ниже этого не обещает.
+⚑ GATE-1 JRC (вердикт cto): правило контроллера для оборота сустава (сырой J4
+как в sim, или прошивка перематывает сама) не проверено на реальной прошивке —
+мануал RL не называет диапазон `RobotRZ()`.
 
 Убрано T2.J2: устаревший `TLM_HAND = P_HAND` только на DONE (теперь TLM_HAND
 следует состоянию на каждой записи позы), мёртвый ключ `"start"` в `_active`
@@ -148,8 +156,8 @@ TLM_ACTIVITY_FAULT = 5
 TICK_INTERVAL_S = 0.01
 #: жёсткий потолок декартова смещения XYZ позы за один тик, мм (contract
 #: §"Motion model"; LINE/JOG_STEP — тот же потолок и на RZ, суставный ход
-#: T2.J2 — только на XYZ, RZ не ограничен здесь, см. эскалацию к cto в
-#: докстринге модуля).
+#: T2.J2 — только на XYZ; RZ там = J1+J2+J4, лерпится вместе с суставами,
+#: см. docstring модуля «одна правда TLM_RZ»).
 MAX_STEP_MM = 100 / 3
 
 # Опкоды, не реализованные ни в T2.1, ни в T2.2 (out of scope по контракту) -> NAK E_INTERNAL
@@ -389,58 +397,22 @@ class RobotSimCoreV2:
             elif j2 > 0.0:
                 self.regs[REG["TLM_HAND"]] = 0
 
-    @staticmethod
-    def _nearest_j4_turn(raw_j4: float, reference: float, limit: tuple[float, float] | None) -> float | None:
-        """Оборот `raw_j4 + 360k`, ближайший к `reference` — с пределом `limit` или
-        без него (решение ведущего 2026-09-27, правило cto §Q2: «ближайший К ТЕКУЩЕМУ»
-        — это состояние сустава ДО хода, не сырое `raw_j4` само по себе; исходный
-        RED-литерал тестера `175.0` закреплял ошибочную модель «ближайший к сырому» —
-        поправлено спекой `8755d803`, `raw=535` при `reference` (HOME J4) `=-6.13` даёт
-        `-185.0`, не `175.0`). Одна реализация на оба использования:
-        - JOINT/HOME-приём (`_resolve_joint_target`): `limit` задан — `None`, если ни
-          один оборот не влезает (свойство 5 приёмки, `limit=(-165,165) -> None`).
-        - непрерывность LINE/JOG (`_continuity_joints`, свойство 9): `limit=None` —
-          предел сустава при LINE не проверяется (вне охвата T2.J2), просто ближайший
-          к прежнему состоянию.
-        `limit=None` — прямая формула (ближайшее целое k); иначе полный перебор
-        конечного набора k (`(hi-lo)/360 + 1` кандидатов), не эвristика.
-        """
-        if limit is None:
-            return raw_j4 + 360.0 * round((reference - raw_j4) / 360.0)
-        lo, hi = limit
-        k_min = math.ceil((lo - raw_j4) / 360.0)
-        k_max = math.floor((hi - raw_j4) / 360.0)
-        if k_min > k_max:
-            return None
-        best_k = min(range(k_min, k_max + 1), key=lambda k: abs(raw_j4 + 360.0 * k - reference))
-        return raw_j4 + 360.0 * best_k
-
     def _resolve_joint_target(
         self, j_end: tuple[float, ...]
     ) -> tuple[tuple[int, int, int, list[int]] | None, tuple[float, ...] | None]:
-        """T2.J2 §Q2: J4 сначала берёт ближайший оборот в пределах предела J4 (если
-        предел есть), затем ВСЕ суставы (включая уже разрешённый J4) проверяются на
-        `model.joint_limits`. Возвращает (NAK-кортеж или `None`, разрешённый `j_end`
-        или `None`) — одна ветка на весь предел суставов (⚑ GATE-1, docstring модуля).
-        """
-        limits = self.model.joint_limits
-        resolved = list(j_end)
-        j4_limit = limits[3] if len(limits) > 3 else None
-        if j4_limit is not None:
-            # Состояние ДО хода — текущий J4; недостижимо (нет состояния) -> сырой j_end[3]
-            # как эталон (вырожденный случай, тем же кодом).
-            reference = self._joints[3] if self._joints is not None else j_end[3]
-            turn = self._nearest_j4_turn(j_end[3], reference, j4_limit)
-            if turn is None:
-                return (NAK, ERR["E_RANGE"], 1, [REASON["R_OUT_OF_ZONE"]]), None
-            resolved[3] = turn
-        for value, limit in zip(resolved, limits):
+        """T2.J2 §Q2 — вердикт cto по RZ (`docs/reviews/2026-09-27_robot-v2-task-T2.J2-cto.md`):
+        правило «J4 — ближайший оборот» ОТОЗВАНО (несовместимо с «TLM_RZ = цель», давало
+        скачок TLM_RZ на 717.6°/тик и `fk(joints)[3] != TLM_RZ` после DONE). J4 — СЫРОЙ
+        (`ik` как есть, без перемотки ±360), проверяется в ОДНОМ цикле наравне с
+        J1/J2/Z на `model.joint_limits` — вне предела (включая J4) -> `NAK E_RANGE
+        [R_OUT_OF_ZONE]` (⚑ GATE-1, docstring модуля)."""
+        for value, limit in zip(j_end, self.model.joint_limits):
             if limit is None:
                 continue
             lo, hi = limit
             if not (lo <= value <= hi):
                 return (NAK, ERR["E_RANGE"], 1, [REASON["R_OUT_OF_ZONE"]]), None
-        return None, tuple(resolved)
+        return None, j_end
 
     def _workspace(self) -> Workspace:
         """Собрать geometry.Workspace из текущих эффективных P_WS_* параметров."""
@@ -668,15 +640,10 @@ class RobotSimCoreV2:
 
     def _continuity_joints(self, pos: tuple[float, float, float, float]) -> tuple[float, ...] | None:
         """LINE/JOG (свойство 9 приёмки T2.J2): суставы следуют состоянию —
-        `ik(pos, TLM_HAND)`, J4 берёт оборот, ближайший к ПРЕЖНЕМУ состоянию
-        (`_nearest_j4_turn` с `limit=None` — предел суставов при LINE не проверяется,
-        вне охвата T2.J2, см. docstring модуля)."""
-        joints = self.model.ik(pos, self.regs[REG["TLM_HAND"]])
-        if joints is None:
-            return None
-        if self._joints is not None:
-            joints = (*joints[:3], self._nearest_j4_turn(joints[3], self._joints[3], None))
-        return joints
+        `ik(pos, TLM_HAND)` КАК ЕСТЬ, без поправок J4 (вердикт cto по RZ: правило
+        «ближайший оборот» отозвано — J4 сырой везде, TLM_RZ = fk(_joints)[3] без
+        mod 360, см. docstring модуля)."""
+        return self.model.ik(pos, self.regs[REG["TLM_HAND"]])
 
     def _joint_tick_capped(
         self,
@@ -711,7 +678,11 @@ class RobotSimCoreV2:
             # принять долю тика, чей клэмпнутый (записываемый) шаг сам превышает
             # потолок (решение ведущего 2026-09-27, найдено этим же прогоном).
             rounded = tuple(round(v * 10) / 10.0 for v in fk_pos)
-            a_r = rounded[:3] if self.model.check_point(ws, rounded) == 0 else self._clamp_pose_to_zone(fk_pos)[:3]
+            a_r = (
+                rounded[:3]
+                if self._check_point_xy(ws, rounded[0], rounded[1]) == 0
+                else self._clamp_pose_to_zone(fk_pos)[:3]
+            )
             b_r = tuple(round(v * 10) / 10.0 for v in prev_pos[:3])
             return math.sqrt(sum((a - b) ** 2 for a, b in zip(a_r, b_r)))
 
@@ -741,23 +712,33 @@ class RobotSimCoreV2:
                 hi = mid
         return lo, lo_joints, lo_pos
 
+    def _check_point_xy(self, ws: Workspace, x: float, y: float) -> int:
+        """T2.J2, вердикт cto по RZ (§2 «Зона RZ — только на командной цели»):
+        промежуточные проверки зоны посреди суставного хода (клэмп у вытянутой
+        руки, потолок шага) смотрят ТОЛЬКО XY (кольцо `r`, угловой сектор, XY-бокс)
+        — не Z/RZ. `geometry.py` не меняем: зовём `check_point` с z/rz, ЗАВЕДОМО
+        внутри зоны (`ws.z_min` — граница включительна, `0.0` — типичный диапазон
+        `[-360,360]` его всегда содержит), чтобы они не участвовали в решении."""
+        return self.model.check_point(ws, (x, y, ws.z_min, 0.0))
+
     def _clamp_pose_to_zone(self, pos: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
         """Решение ведущего 2026-09-27 (свойство 1 приёмки T2.J2, `r=600.028` >
         `r_max=600.0`): у вытянутой руки (r у ГРАНИЦЫ круга `l1+l2`) независимое
         округление x/y до 0.1 мм (регистровое разрешение) может УВЕЛИЧИТЬ r настолько,
         что округлённая поза покидает зону — тот же класс, что ревью T2.2 для JOG_CONT
         (`_progress_jog`, проверка округлённой позы перед записью). Если округление к
-        БЛИЖАЙШЕМУ выводит из зоны — округлить x/y К НУЛЮ (`math.trunc`): |x|,|y| только
-        уменьшаются, r только уменьшается. Если и так вне зоны — вернуть round-к-ближайшему
-        как есть (честно недорешено, см. отчёт «Итерация 2»)."""
+        БЛИЖАЙШЕМУ выводит из зоны (по XY — `_check_point_xy`, вердикт cto по RZ) —
+        округлить x/y К НУЛЮ (`math.trunc`): |x|,|y| только уменьшаются, r только
+        уменьшается. Если и так вне зоны — вернуть round-к-ближайшему как есть
+        (честно недорешено, см. отчёт «Итерация 2»)."""
         ws = self._workspace()
         rounded = tuple(round(v * 10) / 10.0 for v in pos)
-        if self.model.check_point(ws, rounded) == 0:
+        if self._check_point_xy(ws, rounded[0], rounded[1]) == 0:
             return rounded
         x, y, z, rz = pos
         trunc_xy = (math.trunc(x * 10) / 10.0, math.trunc(y * 10) / 10.0)
         candidate = (trunc_xy[0], trunc_xy[1], rounded[2], rounded[3])
-        if self.model.check_point(ws, candidate) == 0:
+        if self._check_point_xy(ws, candidate[0], candidate[1]) == 0:
             return candidate
         return rounded
 
@@ -794,7 +775,7 @@ class RobotSimCoreV2:
             # разные float-выражения одной величины, ULP-шум на них за ~1400
             # тиков `test_duration_follows_slowest_joint` даёт расхождение в
             # 2 тика (найдено этим прогоном, решение — не трогать общий путь).
-            elif self.model.check_point(self._workspace(), tuple(round(v * 10) / 10.0 for v in new_pos)) != 0:
+            elif self._check_point_xy(self._workspace(), *[round(v * 10) / 10.0 for v in new_pos[:2]]) != 0:
                 new_pos = self._clamp_pose_to_zone(new_pos)
         else:
             new_pos = self._cartesian_step(pos, target, active["speed"], dt)

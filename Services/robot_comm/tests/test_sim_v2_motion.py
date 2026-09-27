@@ -528,7 +528,12 @@ def test_zone_rz_min_boundary(rz_eng, label):
     [(360.1, "reject rz>rz_max"), (360.0, "accept rz=rz_max")],
 )
 def test_zone_rz_max_boundary(rz_eng, label):
-    core = fresh_core()
+    # T2.J2 (расширение FILES ведущим, вердикт cto по RZ): J4 = rz-J1-J2 сырой,
+    # без перемотки. У (300,0) при дефолтной руке J1+J2 = -68.7 (отрицательная
+    # сумма) — J4 при rz=360 = 428.7, за дефолтным пределом J4 ±360. Свойство
+    # теста — граница зоны RZ (P_WS_RZ_MAX), не предел сустава — модель БЕЗ
+    # предела J4 изолирует именно её (точку/ассерты не менял).
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     res = cmd(core, 2, OP["PTP_MOVE"], mm(300.0), mm(0.0), mm(-75.0), mm(rz_eng), KIND["JOINT"], 100)
     if rz_eng > 360.0:

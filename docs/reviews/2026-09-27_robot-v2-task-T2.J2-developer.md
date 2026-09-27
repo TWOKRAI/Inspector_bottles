@@ -235,3 +235,36 @@ STATUS: DONE. `Services/robot_comm/tests`: **796 passed, 5 skipped, 2 xpassed, 0
 все три эскалированы к cto по решению ведущего, документированы в докстринге, не решены.
 
 Коммит — отдельный, теми же trailers, `Refs: plans/robot-protocol-v2/plan.md`.
+
+## Итерация 4 (вердикт cto по RZ, `docs/reviews/2026-09-27_robot-v2-task-T2.J2-cto.md`)
+
+STATUS: DONE. `Services/robot_comm/tests`: **799 passed, 5 skipped, 2 xpassed, 0 failed**.
+Ruff чист. `test_sim_v2_joint_state.py` не трогал (RED тестов 3/3 теперь зелёные на моём коде).
+`test_belt_drive::test_live_ticker_no_jump_on_first_vfd_command` — прогнан отдельно, зелёный
+(2.04с), флак не воспроизвёлся.
+
+1. **Одна правда TLM_RZ = fk(_joints)[3].** `_nearest_j4_turn` и `reference` удалены целиком
+   (были в `_resolve_joint_target` и `_continuity_joints`). `_resolve_joint_target` — один цикл
+   по `model.joint_limits` над `j_end` КАК ЕСТЬ (J4 сырой, без перемотки) — короче раза в 3.
+   `_continuity_joints` = `self.model.ik(pos, TLM_HAND)` без поправок.
+2. **Промежуточные проверки зоны — только XY.** Новый `_check_point_xy(ws, x, y)` — зовёт
+   `check_point` с `z=ws.z_min, rz=0.0` (заведомо в зоне), изолируя r/сектор/XY-бокс.
+   Применён в `_clamp_pose_to_zone` (обе проверки) и в двух местах, на которые указал
+   ведущий: `cart_dist` внутри `_joint_tick_capped` и elif-ветка `_progress_move`.
+   `geometry.py` не трогал — собрал через существующий `check_point`.
+3. **`ScaraModel.joint_speed` = `(450.0, 720.0, 1100.0, 2500.0)`** (J1/J2/Z/J4), заглушка
+   класса SCARA, ⚑ GATE-1. Полный набор зелёный без изменения счёта тиков фикстур T2.2/T2.J.
+4. **Докстринги.** Абзац «Эскалация к cto» снят, заменён описанием решённого правила («одна
+   правда TLM_RZ», J4 сырой везде) + одна фраза «⚑ GATE-1 JRC» (правило контроллера не
+   проверено). `MAX_STEP_MM` и блок про потолок переписаны под факт: XYZ-потолок, RZ
+   лерпится вместе с суставами (монотонно, т.к. J4 больше не перематывается).
+5. **`test_zone_rz_max_boundary[360.0-accept]`** переведён на `fresh_core(model=_NO_JOINT_LIMITS)`
+   (уже существующая с итерации 2 константа — модель без пределов суставов вовсе, накрывает
+   «без предела J4»); точка/ассерты не менял. Других падений от правила RZ не нашёл — весь
+   `test_sim_v2_motion*.py` зелёный без дополнительных правок.
+6. Мои 2 hazard-теста итерации 2 (`test_nearest_j4_turn_*`) ссылались на удалённый метод —
+   заменены на `test_resolve_joint_target_keeps_j4_raw_no_turn` и
+   `test_resolve_joint_target_j4_limit_none_accepts_any_raw` (та же зона ответственности —
+   валидация `_resolve_joint_target`, под новую сигнатуру без `reference`).
+
+Коммит — отдельный, теми же trailers, `Refs: plans/robot-protocol-v2/plan.md`.

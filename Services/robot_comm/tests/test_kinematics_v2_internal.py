@@ -367,36 +367,33 @@ def test_joint_speed_validation_rejects_non_positive() -> None:
         ScaraModel(joint_speed=(1.0, math.nan, 1.0, 1.0))  # NaN
 
 
-def test_nearest_j4_turn_picks_candidate_closest_to_reference() -> None:
-    """`RobotSimCoreV2._nearest_j4_turn(raw, reference, limit)` (T2.J2 §Q2, решение
-    ведущего 2026-09-27 поверх правила cto): выбирает `raw + 360k`, БЛИЖАЙШИЙ К
-    REFERENCE (состоянию сустава ДО хода), не к сырому `raw` — независимо
-    подтверждено спекой тестера `8755d803`: `raw=535, reference=-6.13 (J4 в HOME) ->
-    -185.0` (расстояние 178.87), не `175.0` (расстояние 181.13), хотя оба кандидата
-    в пределе ±360. Полный перебор конечного набора k, не эвристика."""
-    assert RobotSimCoreV2._nearest_j4_turn(535.0, -6.13, (-360.0, 360.0)) == pytest.approx(-185.0)
-    # raw уже ближайший к reference -> k=0 (сам raw).
-    assert RobotSimCoreV2._nearest_j4_turn(170.0, 170.0, (-360.0, 360.0)) == pytest.approx(170.0)
-    # Предел шире одного оборота (720°) — несколько валидных k, ближайший к reference выбран.
-    assert RobotSimCoreV2._nearest_j4_turn(-900.0, -900.0, (-1080.0, 1080.0)) == pytest.approx(-900.0)
-    # limit=None (непрерывность LINE/JOG, `_continuity_joints`) — та же формула без
-    # перебора k, БЕЗ предела; тот же ответ -185.0, здесь -185 и так ближайший из
-    # ВСЕХ оборотов, предел ни один кандидат не отсекал.
-    assert RobotSimCoreV2._nearest_j4_turn(535.0, -6.13, None) == pytest.approx(-185.0)
-    # Явный случай, где предел ИЗМЕНИЛ бы ответ, а без предела он не участвует:
-    # raw=10, reference=370 (>1 оборот) -> без предела ближайший оборот 370.0 (k=1).
-    assert RobotSimCoreV2._nearest_j4_turn(10.0, 370.0, None) == pytest.approx(370.0)
+def test_resolve_joint_target_keeps_j4_raw_no_turn() -> None:
+    """`RobotSimCoreV2._resolve_joint_target` (T2.J2 §Q2, вердикт cto по RZ,
+    `docs/reviews/2026-09-27_robot-v2-task-T2.J2-cto.md`): правило «J4 — ближайший
+    оборот» ОТОЗВАНО — J4 остаётся СЫРЫМ (`rz - J1 - J2`, без перемотки ±360)
+    везде. `j_end` внутри пределов -> возвращается КАК ЕСТЬ, J4 не трогается,
+    даже когда он вне (-180,180] (бывший смысл «оборота»)."""
+    core = RobotSimCoreV2(fw_build=1)
+    j_end = (10.0, 0.0, 0.0, 535.0)  # J4=535 сырой, в пределе по умолчанию ±360? нет — 535>360.
+    nak, resolved = core._resolve_joint_target(j_end)
+    assert nak is not None, "535 вне дефолтного предела J4 ±360 -> NAK, без перемотки на 175.0"
+    assert resolved is None
+
+    j_end_in = (10.0, 0.0, 0.0, 300.0)  # в пределе ±360, сырой -> ACK без изменений.
+    nak_ok, resolved_ok = core._resolve_joint_target(j_end_in)
+    assert nak_ok is None
+    assert resolved_ok == j_end_in, "j_end обязан вернуться БЕЗ изменений (J4 сырой, не оборот)"
 
 
-def test_nearest_j4_turn_none_when_no_candidate_fits() -> None:
-    """Ни один `raw + 360k` не попадает в узкий предел -> `None` (свойство 5,
-    половина NAK приёмки: `raw=535, reference=-6.13, limit=(-165,165)` — кандидаты
-    175.0/-185.0, оба вне). Слом: любой единственный кандидат без учёта предела
-    вернул бы что-то вместо `None`."""
-    assert RobotSimCoreV2._nearest_j4_turn(535.0, -6.13, (-165.0, 165.0)) is None
-    # Предел уже шире одного оборота, но всё равно уже 720° раздельными кусками
-    # так, что ни один центр 360k-сетки не попадает — вырожденный, но валидный ввод.
-    assert RobotSimCoreV2._nearest_j4_turn(100.0, 100.0, (150.0, 160.0)) is None
+def test_resolve_joint_target_j4_limit_none_accepts_any_raw() -> None:
+    """Предел J4 = `None` -> сырой J4 любой величины проходит (свойство 5c приёмки
+    тестера) — единый цикл по `joint_limits`, J4 не выделен особо."""
+    model = make_model({"type": "scara", "joint_limits": [[-132.0, 132.0], [-150.0, 150.0], None, None]})
+    core = RobotSimCoreV2(model=model)
+    j_end = (10.0, 0.0, 0.0, 5341.0)
+    nak, resolved = core._resolve_joint_target(j_end)
+    assert nak is None
+    assert resolved == j_end
 
 
 def test_resolve_joint_target_checks_every_joint_not_only_j4() -> None:
