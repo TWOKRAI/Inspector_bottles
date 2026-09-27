@@ -347,3 +347,24 @@ def test_hand_flip_passes_stretched_arm():
     # с жёстким потолком шага ложатся по сетке, которая его перешагивает (замер: 590.2 при reach 600).
     # Инъекция, которую держит тест (конец пути без перекладки руки), даёт r не больше хорды — ~408 мм.
     assert r_max_seen >= reach - 50.0, (r_max_seen, reach)
+
+
+def test_registered_pose_stays_in_zone_at_stretched_arm():
+    """Поза в регистрах не выходит за r_max, когда суставный путь проходит вытянутую руку (T2.J2).
+
+    Сторож ведущего 2026-09-27: у вытянутой руки fk даёт r = l1 + l2 = 600 = P_WS_R_MAX по умолчанию,
+    округление x/y до 0.1 мм выносило позу на 600.03 — от неё ПК отверг бы следующую команду.
+    Инъекция «снять клэмп позы к зоне в _progress_move» не валила ни один тест: поза (574.1, -174.4)
+    на этом ходе (смена руки на 10%) выходила наружу молча.
+    """
+    from Services.robot_comm.programs.geometry import check_point
+    from Services.robot_comm.tests.test_sim_v2_joint_path import cmd, servo_on, track_pose_until_done
+
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], 0)["status"] == ACK
+    assert cmd(core, 3, OP["PTP_MOVE"], 4000, 0, -400, 0, KIND["JOINT"], 10)["status"] == ACK
+    samples = track_pose_until_done(core, max_ticks=2000)
+    ws = core._workspace()  # дефолтные P_WS_*: r_max = 600
+    outside = [p for p in samples if check_point(ws, *p) != 0]
+    assert outside == [], outside[:3]
