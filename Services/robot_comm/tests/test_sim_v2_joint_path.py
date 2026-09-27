@@ -180,9 +180,19 @@ DEFAULT_WS = Workspace(
     y_max=600.0,
 )
 
-# Сценарий пересечения сектора из брифинга (дословно) — старт/цель в мм.
-CROSS_START = (-250.0, 350.0, -75.0, 0.0)
-CROSS_TARGET = (-450.0, -150.0, -75.0, 0.0)
+# Сценарий пересечения сектора — старт/цель в мм. T2.J2 (см. отчёт developer):
+# оригинальные точки брифинга T2.J ((-250,350)->(-450,-150), рука по умолчанию 1)
+# при дефолтных пределах T2.J2 (J1 ±132) дают J1(-250,350,hand=1)=165.3° — сама
+# ПРИЁМКА в CROSS_START теперь NAK, сценарий несовместим с новым дефолтом.
+# Новые точки (независимо пересчитаны через ScaraModel() ДО правки): J1(hand=1)
+# при CROSS_START=-98.0°, при CROSS_TARGET=+97.96° — оба с запасом внутри ±132;
+# прямая хорда всё равно покидает зону (15/101 точек сетки, R_OUT_OF_ZONE у
+# кольца r_min возле начала координат — тот же механизм, что доказывает
+# test_home_uses_joint_path, не угловой сектор впрямую), суставный путь — нет,
+# максимальное отклонение от хорды ≈764мм (сохраняет дух брифинга: прямая режет
+# угол, суставный путь его облетает).
+CROSS_START = (-320.2, -326.6, -75.0, 0.0)
+CROSS_TARGET = (-30.8, 596.5, -75.0, 0.0)
 
 
 def _assert_straight_chord_leaves_zone(p0: tuple[float, ...], p1: tuple[float, ...]) -> None:
@@ -269,10 +279,21 @@ def test_joint_path_is_curved_not_chord():
     )
 
 
+# T2.J2 (см. отчёт developer): отдельная точка старта для HOME-теста, НЕ
+# CROSS_START — прямая CROSS_START->HOME (default hand=1) больше не покидает
+# зону под новыми пределами (проверено независимо: 0 нарушений на сетке 101
+# точки), а точка с достаточно большим |J1| для реального пересечения via
+# hand=1 сама превысила бы предел ±132. Под hand=0 (PARAM_SET ниже) точка
+# (-11.9, 169.6) даёт J1=36.2°/J2=148.46° — оба внутри дефолтных пределов
+# (±132/±150), а прямая к HOME всё равно нырает у оси (7/101 точек, R_OUT_OF_ZONE).
+HOME_START = (-11.9, 169.6, -75.0, 0.0)
+
+
 def test_home_uses_joint_path():
-    """HOME из (-250,350) обязан идти по суставам, не по прямой в Cartesian: прямая
-    (доказано ниже независимым оракулом) ныряет ближе r_min (=100мм) к оси J1 —
-    суставный путь остаётся в зоне на каждом тике."""
+    """HOME обязан идти по суставам, не по прямой в Cartesian: прямая (доказано
+    ниже независимым оракулом) ныряет ближе r_min (=100мм) к оси J1 — суставный
+    путь остаётся в зоне на каждом тике. Рука явно установлена в 0 (см. докстринг
+    `HOME_START`) — под пределами T2.J2 сценарий несовместим с рукой по умолчанию."""
     # ЮНИТ-БАГ тестера (найден разработчиком T2.J): home_target() отдаёт СЫРЫЕ ×10
     # регистровые значения (как аргументы команд), а не инженерные мм/град — здесь
     # нужна eng-поза для сравнения с pose_eng(); тот же /10.0, что и в соседних
@@ -280,14 +301,16 @@ def test_home_uses_joint_path():
     # конверсии assert ниже сравнивал 300.0 (реальная поза) с 3000.0±0.1 — не
     # дефект симулятора, чистая ошибка масштаба в тесте.
     home = tuple(v / 10.0 for v in home_target())
-    _assert_straight_chord_leaves_zone(CROSS_START, home)
+    _assert_straight_chord_leaves_zone(HOME_START, home)
 
     core = fresh_core()
     servo_on(core, 1)
-    move_to_via_joint(core, 2, mm(CROSS_START[0]), mm(CROSS_START[1]), mm(CROSS_START[2]), mm(CROSS_START[3]))
-    assert pose_eng(core) == pytest.approx(CROSS_START, abs=0.1)
+    res_hand = cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(0))
+    assert res_hand["status"] == ACK, res_hand
+    move_to_via_joint(core, 3, mm(HOME_START[0]), mm(HOME_START[1]), mm(HOME_START[2]), mm(HOME_START[3]))
+    assert pose_eng(core) == pytest.approx(HOME_START, abs=0.1)
 
-    res = cmd(core, 3, OP["HOME"], 100)
+    res = cmd(core, 4, OP["HOME"], 100)
     assert res["status"] == ACK, res
     samples = [pose_eng(core)]
     samples += track_pose_until_done(core)

@@ -48,28 +48,62 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
 модели, а не по прямой в Cartesian — прямая может срезать угол через запретный
 сектор ``P_WS_ANG_*``, которого у настоящей руки нет (репродукция бага —
 отчёт тестера T2.J: старт/цель по разные стороны сектора, прямая хорда его
-пересекает, суставный путь — нет). Суставы старта/цели считаются ОДИН раз при
-старте хода (``ik(start, TLM_HAND)`` -> ``ik(target, P_HAND)``), дальше —
-линейная интерполяция суставов по накопленному пройденному расстоянию
-(``travelled``/``path_len``, посчитанному один раз от старта); тайминг не
-меняется (тот же ``path_len``/``speed``, ``MAX_STEP_MM``, ``TICK_INTERVAL_S``,
-что у Cartesian-хода). Поза тика = ``self.model.fk(суставы)``, ФИНАЛЬНЫЙ тик
-всегда ставит позу РОВНО в цель без FK (не даёт накопиться float-дрейфу).
-Фолбэк на прямую в Cartesian — ДВА независимых случая: (1) если ``ik`` вернул
-``None`` для старта или цели (точка вне досягаемости модели) — ход ЦЕЛИКОМ
-остаётся на прежней прямой; (2) если ``fk`` вернул ``None`` ПОСРЕДИ пути
-(суставы, полученные интерполяцией ДОСТИЖИМЫХ концов, сами оказались
-недостижимы для модели между ними) — на декартов шаг падает только ЭТОТ тик,
-не весь ход (не пересчитывает путь заранее). **Промежуточные точки суставного
-пути НЕ проверяются на попадание в зону** — и прошивка, и симулятор проверяют
-только цель хода при приёме команды (``_check_motion``); суставный путь
-избегает сектора не потому, что кто-то его проверяет по дороге, а потому что
-он физически повторяет траекторию настоящей руки. Найдено тестером T2.J:
-смена конфигурации локтя (``hand``) во время хода, пересекающего сектор, сама
-может дать суставный путь, недостижимый на части траектории (вытянутая рука,
-``J2≈0``) — физическое свойство геометрии, не дефект симулятора, вне охвата
-этой задачи. ``LINE`` и ``JOG_STEP``/``JOG_CONT`` остаются прямой в Cartesian
-без изменений.
+пересекает, суставный путь — нет). Фолбэк на прямую в Cartesian — ДВА
+независимых случая: (1) если ``ik`` вернул ``None`` для старта или цели (точка
+вне досягаемости модели) — ход ЦЕЛИКОМ остаётся на прежней прямой; (2) если
+``fk`` вернул ``None`` ПОСРЕДИ пути (суставы, полученные интерполяцией
+ДОСТИЖИМЫХ концов, сами оказались недостижимы для модели между ними) — на
+декартов шаг падает только ЭТОТ тик, не весь ход (не пересчитывает путь
+заранее). **Промежуточные точки суставного пути НЕ проверяются на попадание в
+зону** — и прошивка, и симулятор проверяют только цель хода при приёме
+команды (``_check_motion``); суставный путь избегает сектора не потому, что
+кто-то его проверяет по дороге, а потому что он физически повторяет
+траекторию настоящей руки. ``LINE`` и ``JOG_STEP``/``JOG_CONT`` остаются
+прямой в Cartesian без изменений.
+
+Реализовано в T2.J2 (эскалация ревью T2.J к cto, см. `docs/reviews/2026-09-27_robot-v2-task-T2.J-cto.md`,
+«Решения» и «Свойства приёмки T2.J2»): суставы — состояние симулятора, не
+пересчёт `ik(позы, TLM_HAND)` по требованию:
+
+- ``self._joints`` заводится при (пере)загрузке позы (``_boot``/``attach``, т.е.
+  и рестарт с ``regs=old.regs``) через ``_set_pose_and_joints`` — единственное
+  место, которое пишет позу + `_joints` + `TLM_HAND` вместе. `TLM_HAND` следует
+  знаку `J2` состояния (`J2<0` -> 1, `J2>0` -> 0, `J2==0` — не меняется) —
+  ⚑ GATE-1, правило SCARA-специфичное (6-осевая рука потребует метод модели,
+  не заводится здесь заранее). ``joints()`` теперь читает ``self._joints``, а
+  не пересчитывает — `TLM_HAND` после ЛЮБОГО обрыва (не только DONE) отражает
+  физическое состояние руки, чиня устаревший `TLM_HAND = P_HAND` только на
+  DONE (находка ревью T2.J №3).
+- Приём JOINT/HOME: ``j_end = ik(target, P_HAND)``; если не `None` — J4 берёт
+  ближайший оборот (`j4 + 360k`) к текущему `_joints[3]` в пределах предела
+  модели; любой сустав `j_end` вне `model.joint_limits`, или ни один оборот J4
+  не влезает — `NAK E_RANGE [R_OUT_OF_ZONE]` В ОДНОМ месте (⚑ GATE-1: реальная
+  прошивка может вместо этого NAK'ать позже, ACK + `E_MOTION_FAULT` при
+  фактическом `MovP`). Фолбэк `ik -> None` (недосягаемость модели по радиусу)
+  остаётся ACK + декартов путь — предел сустава НЕ путается с этим фолбэком
+  (`j_end is not None` — предпосылка всей ветки предела). `_start_move`
+  переиспользует уже посчитанный `j_end`, не пересчитывает.
+- Длительность (Q3): ``duration = max(T_cart, max_j |Δj_j| / v_j)``,
+  ``v_j = joint_speed_j × P_SPD_J/100 × spd_pct/100`` (``_op_ptp_move``/``_op_home``
+  по-прежнему считают декартову скорость от `P_SPD_L`, независимо). Декартов пол
+  T2.2 — совместимость КОНТРАКТА, не физика (мануал RL 1.1.1: `MovP` двигает все
+  оси одновременно, реальный JOINT обычно быстрее LINE). Длительность выражается
+  эквивалентной длиной ``path_len_eq = duration × speed``, чтобы продвижение за
+  тик оставалось `min(speed*dt, MAX_STEP_MM)` тем же кодом, что и раньше.
+  ЖЁСТКИЙ ПОТОЛОК (решение ведущего 2026-09-27): декартово смещение позы за
+  один тик ограничено `MAX_STEP_MM` И В СУСТАВНОМ ходе — если `fk` кандидатной
+  доли тика уносит TCP дальше `MAX_STEP_MM` от предыдущей позы (нелинейность fk
+  у вытянутой руки), доля тика урезается (несколько итераций деления пополам).
+  Финальный тик ставит позу РОВНО в цель и `_joints = j_end` точно (не даёт
+  накопиться float-дрейфу).
+- LINE/JOG: после каждой записи позы `_joints = ik(pos, TLM_HAND)` с J4 —
+  ближайшим оборотом к прежнему состоянию (состояние следует, не отдельная
+  правда). Пределы суставов при LINE не проверяются — открыто, вне охвата
+  T2.J2 (см. отчёт).
+
+Убрано T2.J2: устаревший `TLM_HAND = P_HAND` только на DONE (теперь TLM_HAND
+следует состоянию на каждой записи позы), мёртвый ключ `"start"` в `_active`
+(дублировал `"pos"` при заводе хода).
 """
 
 from __future__ import annotations
@@ -176,6 +210,9 @@ class RobotSimCoreV2:
         """
         regs[: len(self.regs)] = self.regs
         self.regs = regs
+        # T2.J2: суставы — состояние, заводится при (пере)загрузке позы (см. `_boot`).
+        ik = getattr(self.model, "ik", None)
+        self._joints = ik(self._read_pose_eng(), self.regs[REG["TLM_HAND"]]) if ik else None
 
     def read(self, address: int, count: int = 1) -> list[int]:
         """Прочитать блок регистров."""
@@ -222,13 +259,22 @@ class RobotSimCoreV2:
         # Рестарт посреди хода: команды больше нет, MOVING=1 остался бы навсегда (ревью T2.1).
         self.regs[REG["TLM_MOVING"]] = 0
         self.regs[REG["TLM_SERVO"]] = 1
-        self.regs[REG["TLM_X"]] = self._encode(self._values[PARAM_ID["P_HOME_X"]], True)
-        self.regs[REG["TLM_Y"]] = self._encode(self._values[PARAM_ID["P_HOME_Y"]], True)
-        self.regs[REG["TLM_Z"]] = self._encode(self._values[PARAM_ID["P_HOME_Z"]], True)
-        self.regs[REG["TLM_RZ"]] = self._encode(self._values[PARAM_ID["P_HOME_RZ"]], True)
         self.regs[REG["TLM_DO_MASK"]] = 0
         # T2.2: свежий дом — рука в дефолтной конфигурации (contract §"Motion model").
         self.regs[REG["TLM_HAND"]] = self._values[PARAM_ID["P_HAND"]]
+        home_pose = (
+            to_eng("P_HOME_X", self._values[PARAM_ID["P_HOME_X"]]),
+            to_eng("P_HOME_Y", self._values[PARAM_ID["P_HOME_Y"]]),
+            to_eng("P_HOME_Z", self._values[PARAM_ID["P_HOME_Z"]]),
+            to_eng("P_HOME_RZ", self._values[PARAM_ID["P_HOME_RZ"]]),
+        )
+        # T2.J2: суставы — состояние, заводится при (пере)загрузке позы (docstring
+        # модуля). `getattr` — некоторые тестовые фейк-модели (test_kinematics_v2*)
+        # реализуют только check_point/check_segment (уже так до T2.J2, вне FILES
+        # этой задачи) — отсутствие `ik` не должно ронять `_boot()`, `joints()`
+        # уже документирован как допускающий `None`.
+        ik = getattr(self.model, "ik", None)
+        self._set_pose_and_joints(home_pose, ik(home_pose, self.regs[REG["TLM_HAND"]]) if ik else None)
 
         # Идемпотентность после рестарта программы: последний ответ
         # восстанавливается из уже записанных регистров, чтобы повтор seq
@@ -300,13 +346,90 @@ class RobotSimCoreV2:
         self.regs[REG["TLM_Z"]] = self._encode(round(z * 10), True)
         self.regs[REG["TLM_RZ"]] = self._encode(round(rz * 10), True)
 
+    def _set_pose_and_joints(
+        self, pos: tuple[float, float, float, float] | list[float], joints: tuple[float, ...] | None
+    ) -> None:
+        """T2.J2: единственное место, пишущее позу + `self._joints` (состояние) +
+        `TLM_HAND` вместе — `joints()` больше не пересчитывает `ik` по требованию.
+
+        `joints`, если не `None`, ДОЛЖНЫ уже соответствовать `pos` (посчитаны
+        вызывающим — `ik` при загрузке/LINE/JOG, lerp суставного хода) — не
+        пересчитываются здесь заново, иначе состояние теряет точность лерпа
+        (докстринг `joints()`/свойство 4 приёмки T2.J2).
+
+        `TLM_HAND` выводится из знака `joints[1]` (J2, SCARA-правило, ⚑ GATE-1 —
+        6-осевая рука потребует метод модели, не заводится здесь заранее):
+        `J2 < 0` -> 1 (левая), `J2 > 0` -> 0 (правая), `J2 == 0` (вытянутая рука,
+        конфигурация локтя не определена знаком) — регистр НЕ трогается.
+        """
+        self._write_pose(pos)
+        self._joints = joints
+        if joints is not None:
+            j2 = joints[1]
+            if j2 < 0.0:
+                self.regs[REG["TLM_HAND"]] = 1
+            elif j2 > 0.0:
+                self.regs[REG["TLM_HAND"]] = 0
+
+    @staticmethod
+    def _nearest_j4_turn(raw_j4: float, limit: tuple[float, float]) -> float | None:
+        """Ближайший к `raw_j4` оборот `raw_j4 + 360k`, попадающий в `limit` — или
+        `None`, если ни один не влезает (T2.J2 §Q2, свойство 5 приёмки: независимо
+        подтверждено тестером на `raw=535, limit=(-360,360) -> 175.0`,
+        `limit=(-165,165) -> None`). Кандидатов конечно много (`(hi-lo)/360 + 1`) —
+        полный перебор, не эвристика."""
+        lo, hi = limit
+        k_min = math.ceil((lo - raw_j4) / 360.0)
+        k_max = math.floor((hi - raw_j4) / 360.0)
+        if k_min > k_max:
+            return None
+        best_k = min(range(k_min, k_max + 1), key=abs)
+        return raw_j4 + 360.0 * best_k
+
+    @staticmethod
+    def _nearest_j4_to(raw_j4: float, reference: float) -> float:
+        """Оборот `raw_j4 + 360k`, ближайший к `reference` — БЕЗ предела (в отличие
+        от `_nearest_j4_turn`): используется только для непрерывности отображения
+        `_joints[3]` на LINE/JOG (свойство 9), где предел сустава не проверяется
+        (вне охвата T2.J2, см. docstring модуля)."""
+        return raw_j4 + 360.0 * round((reference - raw_j4) / 360.0)
+
+    def _resolve_joint_target(
+        self, j_end: tuple[float, ...]
+    ) -> tuple[tuple[int, int, int, list[int]] | None, tuple[float, ...] | None]:
+        """T2.J2 §Q2: J4 сначала берёт ближайший оборот в пределах предела J4 (если
+        предел есть), затем ВСЕ суставы (включая уже разрешённый J4) проверяются на
+        `model.joint_limits`. Возвращает (NAK-кортеж или `None`, разрешённый `j_end`
+        или `None`) — одна ветка на весь предел суставов (⚑ GATE-1, docstring модуля).
+        """
+        limits = self.model.joint_limits
+        resolved = list(j_end)
+        j4_limit = limits[3] if len(limits) > 3 else None
+        if j4_limit is not None:
+            turn = self._nearest_j4_turn(j_end[3], j4_limit)
+            if turn is None:
+                return (NAK, ERR["E_RANGE"], 1, [REASON["R_OUT_OF_ZONE"]]), None
+            resolved[3] = turn
+        for value, limit in zip(resolved, limits):
+            if limit is None:
+                continue
+            lo, hi = limit
+            if not (lo <= value <= hi):
+                return (NAK, ERR["E_RANGE"], 1, [REASON["R_OUT_OF_ZONE"]]), None
+        return None, tuple(resolved)
+
     def _workspace(self) -> Workspace:
         """Собрать geometry.Workspace из текущих эффективных P_WS_* параметров."""
         eng = {name: to_eng(name, self._values[PARAM_ID[name]]) for name in _WS_PARAM_NAMES}
         return Workspace.from_params(eng)
 
     def joints(self) -> tuple[float, ...] | None:
-        """Суставы текущей позы (T2.K) — `self.model.ik` от TLM_X/Y/Z/RZ и TLM_HAND.
+        """Суставы — СОСТОЯНИЕ симулятора (T2.J2), не пересчёт `ik(позы, TLM_HAND)`
+        по требованию: `self._joints`, заводится/продвигается в `_boot`/`attach`/
+        `_progress_move`/`_progress_jog` через `_set_pose_and_joints` — единственное
+        место записи. Отличие от T2.K важно посреди хода/после обрыва: `ik` от
+        ОКРУГЛЁННОЙ до 0.1мм позы отличается от точного состояния лерпа на
+        0.01-0.03° (свойство 4 приёмки T2.J2) — состояние возвращает точное значение.
 
         Для окна-вида (T2.V): рисовать звенья руки, а не только точку TCP.
 
@@ -322,30 +445,42 @@ class RobotSimCoreV2:
         обработать `None` сам (рисовать только TCP-точку без цепи звеньев) —
         `model.chain_points(core.joints())` упадёт `TypeError` на `None`.
         """
-        return self.model.ik(self._read_pose_eng(), self.regs[REG["TLM_HAND"]])
+        return self._joints
 
     def _check_motion(
         self, target: tuple[float, float, float, float], line: bool
-    ) -> tuple[int, int, int, list[int]] | None:
+    ) -> tuple[tuple[int, int, int, list[int]] | None, tuple[float, ...] | None]:
         """Общая проверка цели хода (после проверки формата аргумента в обработчике).
 
-        Порядок из контракта: E_NO_SERVO -> точка в зоне -> (LINE) рука -> (LINE) отрезок.
-        Возвращает готовый NAK-кортеж или None, если цель допустима.
+        Порядок из контракта: E_NO_SERVO -> точка в зоне -> (JOINT/HOME) предел
+        суставов (T2.J2 §Q2, ⚑ GATE-1) -> (LINE) рука -> (LINE) отрезок. Возвращает
+        `(NAK-кортеж или None, j_end или None)` — `j_end` уже разрешённый (J4 —
+        ближайший оборот), чтобы `_start_move` не пересчитывал `ik` заново.
+        Предел суставов пропускается, если `ik(target, P_HAND)` вернул `None`
+        (недосягаемость модели по радиусу) — это фолбэк T2.J на прямую в Cartesian,
+        предел суставов с ним НЕ путается (свойство 2 приёмки T2.J2).
         """
         if self.regs[REG["TLM_SERVO"]] == 0:
-            return NAK, ERR["E_NO_SERVO"], 0, []
+            return (NAK, ERR["E_NO_SERVO"], 0, []), None
         ws = self._workspace()
         reason = self.model.check_point(ws, target)
         if reason != 0:
-            return NAK, ERR["E_RANGE"], 1, [reason]
+            return (NAK, ERR["E_RANGE"], 1, [reason]), None
+        j_end = None
+        if not line:
+            j_end = self.model.ik(target, self._values[PARAM_ID["P_HAND"]])
+            if j_end is not None:
+                nak, j_end = self._resolve_joint_target(j_end)
+                if nak is not None:
+                    return nak, None
         if line:
             if self.regs[REG["TLM_HAND"]] != self._values[PARAM_ID["P_HAND"]]:
-                return NAK, ERR["E_RANGE"], 1, [REASON["R_HAND"]]
+                return (NAK, ERR["E_RANGE"], 1, [REASON["R_HAND"]]), None
             cur = self._read_pose_eng()
             reason = self.model.check_segment(ws, cur, target)
             if reason != 0:
-                return NAK, ERR["E_RANGE"], 1, [reason]
-        return None
+                return (NAK, ERR["E_RANGE"], 1, [reason]), None
+        return None, j_end
 
     def _start_move(
         self,
@@ -355,9 +490,15 @@ class RobotSimCoreV2:
         *,
         joint: bool,
         activity: int,
+        j_end: tuple[float, ...] | None = None,
     ) -> None:
-        """Завести активный ход. JOINT (T2.J): суставы старта/цели и ``path_len``
-        считаются здесь ОДИН раз — не на каждом тике (см. ``_progress_move``)."""
+        """Завести активный ход. JOINT/HOME (T2.J2 §Q2/Q3): `j_start` — ТЕКУЩЕЕ
+        состояние (``self._joints``), не пересчёт ``ik(start_pose)``; `j_end` уже
+        разрешён вызывающим (`_check_motion` -> `_resolve_joint_target`) — предел +
+        J4-оборот, не пересчитывается здесь. Длительность = max(декартова,
+        суставная) (§Q3), выражена эквивалентной длиной `path_len`, чтобы
+        продвижение за тик оставалось `min(speed*dt, MAX_STEP_MM)` тем же кодом,
+        что у Cartesian-хода (см. ``_progress_move``)."""
         start_pose = self._read_pose_eng()
         self._active = {
             "type": "move",
@@ -368,16 +509,26 @@ class RobotSimCoreV2:
             "joint": joint,
         }
         if joint:
-            j_start = self.model.ik(start_pose, self.regs[REG["TLM_HAND"]])
-            j_end = self.model.ik(target, self._values[PARAM_ID["P_HAND"]])
+            j_start = self._joints
             delta = tuple(t - p for t, p in zip(target, start_pose))
             xyz_dist = math.sqrt(delta[0] ** 2 + delta[1] ** 2 + delta[2] ** 2)
+            path_len = max(xyz_dist, abs(delta[3]))
+            if j_start is not None and j_end is not None and speed > 0:
+                spd_l = self._values[PARAM_ID["P_SPD_L"]]
+                pct_frac = speed / spd_l if spd_l > 0 else 0.0
+                spd_j_frac = self._values[PARAM_ID["P_SPD_J"]] / 100.0
+                joint_time = 0.0
+                for j0, j1, v_max in zip(j_start, j_end, self.model.joint_speed):
+                    v = v_max * spd_j_frac * pct_frac
+                    if v > 0:
+                        joint_time = max(joint_time, abs(j1 - j0) / v)
+                duration = max(path_len / speed, joint_time)
+                path_len = duration * speed
             self._active.update(
                 {
                     "j_start": j_start,
                     "j_end": j_end,
-                    "start": start_pose,
-                    "path_len": max(xyz_dist, abs(delta[3])),
+                    "path_len": path_len,
                     "travelled": 0.0,
                 }
             )
@@ -440,7 +591,11 @@ class RobotSimCoreV2:
             self.regs[REG["TLM_STOP_ACK"]] = pending
 
     def _finish_done(self, active: dict) -> None:
-        """Штатное завершение (не ошибка): ACTIVITY/MOVING, [HAND если JOINT], DONE_SEQ последним (И5)."""
+        """Штатное завершение (не ошибка): ACTIVITY/MOVING, DONE_SEQ последним (И5).
+
+        T2.J2: `TLM_HAND` больше не выставляется здесь принудительно в `P_HAND` —
+        он уже следует состоянию на каждой записи позы (`_set_pose_and_joints`,
+        находка ревью T2.J №3, свойство 3 приёмки T2.J2)."""
         self.regs[REG["TLM_ACTIVITY"]] = TLM_ACTIVITY_IDLE
         self.regs[REG["TLM_MOVING"]] = 0
         self._active = None
@@ -487,37 +642,96 @@ class RobotSimCoreV2:
         frac = step / path_len
         return tuple(p + frac * d for p, d in zip(pos, delta))
 
+    def _continuity_joints(self, pos: tuple[float, float, float, float]) -> tuple[float, ...] | None:
+        """LINE/JOG (свойство 9 приёмки T2.J2): суставы следуют состоянию —
+        `ik(pos, TLM_HAND)`, J4 берёт оборот, ближайший к ПРЕЖНЕМУ состоянию
+        (`_nearest_j4_to`, БЕЗ предела — предел суставов при LINE не проверяется,
+        вне охвата T2.J2, см. docstring модуля)."""
+        joints = self.model.ik(pos, self.regs[REG["TLM_HAND"]])
+        if joints is None:
+            return None
+        if self._joints is not None:
+            joints = (*joints[:3], self._nearest_j4_to(joints[3], self._joints[3]))
+        return joints
+
+    def _joint_tick_capped(
+        self,
+        active: dict,
+        prev_pos: tuple[float, float, float, float],
+        candidate_travelled: float,
+        dt: float,
+    ) -> tuple[float, tuple[float, ...] | None, tuple[float, float, float, float]]:
+        """⚑ HARD CAP (решение ведущего 2026-09-27): декартово смещение позы за
+        один тик <= MAX_STEP_MM И в суставном ходе — если `fk` кандидатной доли
+        тика даёт больший шаг (нелинейность `fk` у вытянутой руки), доля тика
+        урезается бисекцией. Возвращает (новый ``travelled``, суставы или `None`,
+        поза)."""
+
+        def pose_at(travelled: float) -> tuple[tuple[float, ...], tuple[float, float, float, float] | None]:
+            frac = travelled / active["path_len"]
+            joints = tuple(j0 + frac * (j1 - j0) for j0, j1 in zip(active["j_start"], active["j_end"]))
+            return joints, self.model.fk(joints)
+
+        def cart_dist(fk_pos: tuple[float, float, float, float]) -> float:
+            # Округление до регистрового разрешения (0.1 мм, как `_write_pose`) —
+            # тест меряет шаг МЕЖДУ ЗАПИСАННЫМИ (округлёнными) позами, не между
+            # точными внутренними float; без округления здесь бисекция сходится к
+            # потолку по точным координатам и пропускает через округление лишние
+            # ~0.05-0.1мм на каждой оси (найдено break-injection ведущего).
+            a_r = tuple(round(v * 10) / 10.0 for v in fk_pos[:3])
+            b_r = tuple(round(v * 10) / 10.0 for v in prev_pos[:3])
+            return math.sqrt(sum((a - b) ** 2 for a, b in zip(a_r, b_r)))
+
+        joints, fk_pos = pose_at(candidate_travelled)
+        if fk_pos is None:
+            # ponytail: суставы из lerp двух ДОСТИЖИМЫХ концов сами вне модели —
+            # фолбэк на декартов шаг ТОЛЬКО для этого тика, travelled не
+            # продвигаем (следующий тик пробует ту же долю снова, T2.J design).
+            fallback = self._cartesian_step(prev_pos, active["target"], active["speed"], dt)
+            return active["travelled"], None, fallback
+        if cart_dist(fk_pos) <= MAX_STEP_MM + 1e-9:
+            return candidate_travelled, joints, fk_pos
+        lo = active["travelled"]
+        lo_joints, lo_fk = pose_at(lo)
+        lo_pos = lo_fk if lo_fk is not None else prev_pos
+        hi = candidate_travelled
+        for _ in range(30):
+            mid = (lo + hi) / 2.0
+            mid_joints, mid_pos = pose_at(mid)
+            if mid_pos is not None and cart_dist(mid_pos) <= MAX_STEP_MM + 1e-9:
+                lo, lo_joints, lo_pos = mid, mid_joints, mid_pos
+            else:
+                hi = mid
+        return lo, lo_joints, lo_pos
+
     def _progress_move(self, dt: float) -> None:
-        """Ход (PTP_MOVE/HOME/JOG_STEP): JOINT/HOME (T2.J) — по суставам модели через
-        ``self._active["j_start"/"j_end"/"path_len"/"travelled"]`` (см. ``_start_move``);
+        """Ход (PTP_MOVE/HOME/JOG_STEP): JOINT/HOME (T2.J/T2.J2) — по суставам модели
+        через ``self._active["j_start"/"j_end"/"path_len"/"travelled"]`` (см.
+        ``_start_move``), с жёстким потолком декартова шага (``_joint_tick_capped``);
         иначе (LINE/JOG_STEP, или ``ik`` не достал старт/цель) — прямая в Cartesian.
+        Суставы состояния обновляются на КАЖДОМ тике через `_set_pose_and_joints`
+        (T2.J2 §Q2) — не только на JOINT.
         """
         active = self._active
         pos = active["pos"]
         target = active["target"]
         if active.get("j_start") is not None and active.get("j_end") is not None:
-            active["travelled"] += min(active["speed"] * dt, MAX_STEP_MM)
-            if active["travelled"] >= active["path_len"]:
-                new_pos = target  # ровно цель, без fk — не даёт накопиться float-дрейфу
+            step_eq = min(active["speed"] * dt, MAX_STEP_MM)
+            candidate_travelled = active["travelled"] + step_eq
+            if candidate_travelled >= active["path_len"]:
+                # ровно цель, суставы = j_end точно — не даёт накопиться float-дрейфу.
+                new_pos = target
+                new_joints = active["j_end"]
+                active["travelled"] = active["path_len"]
             else:
-                frac = active["travelled"] / active["path_len"]
-                joints = tuple(j0 + frac * (j1 - j0) for j0, j1 in zip(active["j_start"], active["j_end"]))
-                fk_pos = self.model.fk(joints)
-                if fk_pos is None:
-                    # ponytail: суставы из lerp двух ДОСТИЖИМЫХ концов сами вне модели —
-                    # фолбэк на декартов шаг только для ЭТОГО тика (путь не пересчитывается
-                    # заранее целиком); апгрейд — проверять достижимость вдоль пути на старте.
-                    new_pos = self._cartesian_step(pos, target, active["speed"], dt)
-                else:
-                    new_pos = fk_pos
+                new_travelled, new_joints, new_pos = self._joint_tick_capped(active, pos, candidate_travelled, dt)
+                active["travelled"] = new_travelled
         else:
             new_pos = self._cartesian_step(pos, target, active["speed"], dt)
+            new_joints = self._continuity_joints(new_pos)
         active["pos"] = new_pos
-        self._write_pose(new_pos)
+        self._set_pose_and_joints(new_pos, new_joints)
         if new_pos == target:
-            if active["joint"]:
-                # JOINT довёл руку до P_HAND физически — и при DONE, и при отложенном SOFT (ревью T2.2).
-                self.regs[REG["TLM_HAND"]] = self._values[PARAM_ID["P_HAND"]]
             if self._pending_soft is not None:
                 self._abort(ERR["E_ABORTED"], active["seq"])  # эхо отложенного SOFT пишет _abort
             else:
@@ -547,7 +761,8 @@ class RobotSimCoreV2:
             self._finish_done(active)
             return
         active["pos"] = pos
-        self._write_pose(pos)
+        pos_t = (pos[0], pos[1], pos[2], pos[3])
+        self._set_pose_and_joints(pos_t, self._continuity_joints(pos_t))
 
     # --- mailbox ---
 
@@ -676,12 +891,12 @@ class RobotSimCoreV2:
             self._decode(rz, True) / 10.0,
         )
         line = kind == KIND["LINE"]
-        nak = self._check_motion(target, line)
+        nak, j_end = self._check_motion(target, line)
         if nak is not None:
             return nak
         pct = spd_pct if spd_pct != 0 else self._values[PARAM_ID["P_SPD_DEFAULT"]]
         speed = self._values[PARAM_ID["P_SPD_L"]] * pct / 100.0
-        self._start_move(seq, target, speed, joint=not line, activity=TLM_ACTIVITY_PTP)
+        self._start_move(seq, target, speed, joint=not line, activity=TLM_ACTIVITY_PTP, j_end=j_end)
         return ACK, 0, 0, []
 
     def _op_home(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
@@ -694,12 +909,12 @@ class RobotSimCoreV2:
             to_eng("P_HOME_Z", self._values[PARAM_ID["P_HOME_Z"]]),
             to_eng("P_HOME_RZ", self._values[PARAM_ID["P_HOME_RZ"]]),
         )
-        nak = self._check_motion(target, line=False)
+        nak, j_end = self._check_motion(target, line=False)
         if nak is not None:
             return nak
         pct = spd_pct if spd_pct != 0 else self._values[PARAM_ID["P_SPD_DEFAULT"]]
         speed = self._values[PARAM_ID["P_SPD_L"]] * pct / 100.0
-        self._start_move(seq, target, speed, joint=True, activity=TLM_ACTIVITY_PTP)
+        self._start_move(seq, target, speed, joint=True, activity=TLM_ACTIVITY_PTP, j_end=j_end)
         return ACK, 0, 0, []
 
     def _op_jog_step(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
@@ -716,7 +931,7 @@ class RobotSimCoreV2:
         cur_raw = [self._decode(self.regs[REG[n]], True) for n in ("TLM_X", "TLM_Y", "TLM_Z", "TLM_RZ")]
         deltas = [self._decode(v, True) for v in (dx, dy, dz, drz)]
         target = tuple((c + d) / 10.0 for c, d in zip(cur_raw, deltas))
-        nak = self._check_motion(target, line=True)
+        nak, _j_end = self._check_motion(target, line=True)
         if nak is not None:
             return nak
         pct = spd_pct if spd_pct != 0 else self._values[PARAM_ID["P_SPD_JOG"]]

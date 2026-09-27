@@ -301,3 +301,86 @@ def test_ik_j1_wrapped_to_controller_range() -> None:
                 j = model.ik((r * math.cos(a), r * math.sin(a), 0.0, 0.0), hand)
                 assert j is not None
                 assert -180.0 < j[0] <= 180.0, (r, ang, hand, j)
+
+
+# =========================================================================== #
+# T2.J2 — валидация joint_limits/joint_speed и хелперы оборота J4 (автор)
+# =========================================================================== #
+
+
+def test_joint_limits_validation_rejects_bad_ranges() -> None:
+    """`ScaraModel.__post_init__` (T2.J2 §Q1): `joint_limits` — длина по числу
+    суставов, каждый элемент `None` или пара конечных `lo < hi`. Автор проверяет
+    ЭТУ конкретную реализацию точечно (не через `make_model`, ту часть уже держит
+    свойство 8 приёмки тестера) — сама валидация датакласса, до Dict-at-Boundary."""
+    with pytest.raises(ValueError):
+        ScaraModel(joint_limits=((-10.0, 10.0), None, None))  # длина 3, не 4
+    with pytest.raises(ValueError):
+        ScaraModel(joint_limits=((10.0, -10.0), None, None, None))  # lo >= hi
+    with pytest.raises(ValueError):
+        ScaraModel(joint_limits=((5.0, 5.0), None, None, None))  # lo == hi, не lo < hi
+    with pytest.raises(ValueError):
+        ScaraModel(joint_limits=((math.inf, 10.0), None, None, None))  # не конечное
+    with pytest.raises(ValueError):
+        ScaraModel(joint_limits=((-10.0,), None, None, None))  # не пара (lo, hi)
+    # Валидный случай не падает (регрессионный якорь границы lo < hi строго).
+    ScaraModel(joint_limits=((-10.0, 10.0), None, None, None))
+
+
+def test_joint_speed_validation_rejects_non_positive() -> None:
+    """`ScaraModel.__post_init__`: `joint_speed` — длина по числу суставов, каждый
+    элемент конечное число > 0 (скорость <= 0 или NaN/inf сделала бы `_start_move`
+    делить на неположительное/NaN молча, T2.J2 §Q3)."""
+    with pytest.raises(ValueError):
+        ScaraModel(joint_speed=(1.0, 1.0, 1.0))  # длина 3, не 4
+    with pytest.raises(ValueError):
+        ScaraModel(joint_speed=(1.0, 0.0, 1.0, 1.0))  # 0 — не > 0
+    with pytest.raises(ValueError):
+        ScaraModel(joint_speed=(1.0, -5.0, 1.0, 1.0))  # отрицательная
+    with pytest.raises(ValueError):
+        ScaraModel(joint_speed=(1.0, math.nan, 1.0, 1.0))  # NaN
+
+
+def test_nearest_j4_turn_picks_candidate_closest_to_raw() -> None:
+    """`RobotSimCoreV2._nearest_j4_turn` (T2.J2 §Q2): выбирает `raw + 360k`,
+    БЛИЖАЙШИЙ К RAW (не к произвольному состоянию) — независимо подтверждено
+    приёмкой тестера (`raw=535, limit=(-360,360) -> 175.0`, не `-185.0`, хотя оба
+    кандидата попадают в предел; -185 ближе к нулю, но 175 ближе к 535 самому).
+    Полный перебор конечного набора k, не эвристика по единственному округлению."""
+    assert RobotSimCoreV2._nearest_j4_turn(535.0, (-360.0, 360.0)) == pytest.approx(175.0)
+    # raw уже внутри предела -> k=0 (сам raw), даже если другой оборот был бы ближе к нулю.
+    assert RobotSimCoreV2._nearest_j4_turn(170.0, (-360.0, 360.0)) == pytest.approx(170.0)
+    # Предел шире одного оборота (720°) — несколько валидных k, ближайший к raw выбран.
+    assert RobotSimCoreV2._nearest_j4_turn(-900.0, (-1080.0, 1080.0)) == pytest.approx(-900.0)
+
+
+def test_nearest_j4_turn_none_when_no_candidate_fits() -> None:
+    """Ни один `raw + 360k` не попадает в узкий предел -> `None` (свойство 5,
+    половина NAK приёмки: `raw=535, limit=(-165,165)` — кандидаты 175.0/-185.0,
+    оба вне). Слом: любой единственный кандидат без учёта предела вернул бы
+    что-то вместо `None`."""
+    assert RobotSimCoreV2._nearest_j4_turn(535.0, (-165.0, 165.0)) is None
+    # Предел уже шире одного оборота, но всё равно уже 720° раздельными кусками
+    # так, что ни один центр 360k-сетки не попадает — вырожденный, но валидный ввод.
+    assert RobotSimCoreV2._nearest_j4_turn(100.0, (150.0, 160.0)) is None
+
+
+def test_resolve_joint_target_checks_every_joint_not_only_j4() -> None:
+    """`RobotSimCoreV2._resolve_joint_target` (T2.J2 §Q2): J4 разрешается оборотом
+    первым, но НАК всё равно приходит и когда за пределом другой сустав (J1) —
+    без этого проверка J4-оборота могла бы молча одобрить весь `j_end`, если код
+    по ошибке проверял бы только J4 после его резолва."""
+    core = RobotSimCoreV2(fw_build=1)
+    lo_hi = core.model.joint_limits
+    assert lo_hi[0] is not None and lo_hi[0][1] < 140.0, "предпосылка: J1 ограничен < 140° в дефолте"
+    # J1 = 140 (за дефолтным пределом ±132), J4 = 10 (внутри предела, не требует оборота).
+    j_end = (140.0, 0.0, 0.0, 10.0)
+    nak, resolved = core._resolve_joint_target(j_end)
+    assert resolved is None
+    assert nak is not None
+    assert nak[1] == ERR["E_RANGE"]
+    assert nak[3] == [REASON["R_OUT_OF_ZONE"]]
+    # Контрольный валидный j_end (все суставы внутри) не должен NAK'аться (регрессионный якорь).
+    nak_ok, resolved_ok = core._resolve_joint_target((10.0, 0.0, 0.0, 10.0))
+    assert nak_ok is None
+    assert resolved_ok == (10.0, 0.0, 0.0, 10.0)

@@ -109,9 +109,12 @@ def chord_perp_dist_xy(x0: float, y0: float, x1: float, y1: float, x: float, y: 
     return math.hypot(x - px, y - py)
 
 
-# Тот же сценарий пересечения сектора, что у тестера (боевые дефолты).
-CROSS_START = (-250.0, 350.0, -75.0, 0.0)
-CROSS_TARGET = (-450.0, -150.0, -75.0, 0.0)
+# Тот же сценарий пересечения сектора, что у тестера (боевые дефолты) — T2.J2
+# сменил точки (см. test_sim_v2_joint_path.py, докстринг CROSS_START/CROSS_TARGET
+# и отчёт developer): оригинал брифинга T2.J давал J1(hand=1)=165.3° при
+# дефолтном пределе ±132 — сама приёмка в CROSS_START стала NAK.
+CROSS_START = (-320.2, -326.6, -75.0, 0.0)
+CROSS_TARGET = (-30.8, 596.5, -75.0, 0.0)
 
 
 # =========================================================================== #
@@ -234,6 +237,12 @@ class _FkFlakyModel:
         self.kind = self._real.kind
         self.axes = self._real.axes
         self.joint_names = self._real.joint_names
+        # T2.J2: ik() отдаёт не-None j_end для целей этого файла -> _check_motion
+        # доходит до предела суставов -> нужны joint_limits/joint_speed (real
+        # ScaraModel — тот же паттерн, что дефолт: пределы не мешают, скорость
+        # заведомо огромна, декартов пол доминирует, как и раньше T2.J2).
+        self.joint_limits = self._real.joint_limits
+        self.joint_speed = self._real.joint_speed
 
     def fk(self, joints):
         return None
