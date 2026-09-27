@@ -169,7 +169,9 @@ def test_relative_catalog_dir_resolved_from_yaml_dir_not_cwd(tmp_path, monkeypat
     assert os.getcwd() == str(elsewhere)
 
     preset = ScenePreset.from_yaml(preset_path)  # путь абсолютный, cwd тут ни при чём
-    assert Path(preset.catalog_dir) == (presets_dir / "catalog").resolve()
+    # Редактор слоёв 1.0: строка хранится как записана, резолв — от каталога файла.
+    assert preset.catalog_dir == "catalog"
+    assert Path(preset.resolve_path(preset.catalog_dir)) == (presets_dir / "catalog").resolve()
     factory = ObjectFactory(preset)
     assert factory.num_classes == 2
 

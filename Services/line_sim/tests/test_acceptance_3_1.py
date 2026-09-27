@@ -582,8 +582,12 @@ def test_preset_dict_round_trip():
 
 def test_preset_yaml_round_trip(tmp_path):
     """AC (доп. 2026-09-22): from_yaml(to_yaml(p)) == p через файл во временном
-    каталоге."""
+    каталоге.
+
+    Редактор слоёв 1.0 (2026-09-27): `from_yaml` ставит `base_dir` = каталог файла, у пресета
+    из dict он `None` — содержимое сравнивается при равном `base_dir`."""
     preset = ScenePreset.from_dict(_three_mode_preset_dict())
     yaml_path = tmp_path / "preset.yaml"
     preset.to_yaml(yaml_path)
-    assert ScenePreset.from_yaml(yaml_path) == preset
+    expected = preset.model_copy(update={"base_dir": str(tmp_path.resolve())})
+    assert ScenePreset.from_yaml(yaml_path) == expected

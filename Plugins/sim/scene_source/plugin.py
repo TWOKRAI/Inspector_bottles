@@ -62,6 +62,7 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 from __future__ import annotations
 
 import collections
+import os
 import threading
 import time
 from pathlib import Path
@@ -69,7 +70,10 @@ from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
+import yaml
 
+from multiprocess_framework.modules.recipe.service import compute_rev
+from multiprocess_framework.modules.recipe.yaml_io import update_yaml_preserving
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     Port,
@@ -78,8 +82,18 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from Services.dataset_gen.core.catalog import imread_unicode
-from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
-from Services.line_sim.core import BeltGeometry, JobDone, MatchResult, TruthLedger, match_job
+from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, confine_preset_paths
+from Services.line_sim.core import (
+    REPO_ROOT,
+    BeltGeometry,
+    JobDone,
+    MatchResult,
+    TruthLedger,
+    apply_defect_override,
+    load_scene_preset,
+    match_job,
+    resolve_repo_path,
+)
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -92,7 +106,6 @@ _DEFAULT_PX_PER_MM = 1.0
 _DEFAULT_STALE_MS = 500
 _DEFAULT_SEED = 0
 _DEFAULT_SPAWN_INTERVAL_S = (2.0, 4.0)
-_DEFAULT_DEFECT_PROBABILITY = 0.0
 _DEFAULT_CAMERA_ID = 0
 
 #: Task 3.5 (контракт лида §4): сопоставление «задание выполнено» ↔ объект сцены.
@@ -127,17 +140,15 @@ _BACKGROUND_BGR = (60, 60, 60)
 #: Не чаще раза в секунду — иначе падающая фабрика заливает лог на каждый кадр.
 _FACTORY_ERROR_LOG_INTERVAL_S = 1.0
 
+_ENGINE_DOWN_MESSAGE = "движок не запущен — применится после перезапуска"
+_MISSING_KEY = object()
+
 #: Максимальное значение счётчика кадров (rollover, как у остальных источников сима).
 _FRAME_ID_MODULO = 100_000
 
-#: Корень репозитория, вычисленный от расположения ЭТОГО файла
-#: (Plugins/sim/scene_source/plugin.py -> parents[3]) — фикс ревью P5: относительный
-#: `preset_path` раньше резолвился против CWD процесса (только `ScenePreset.from_yaml`
-#: резолвит от каталога YAML, а плагин строит `ScenePreset(catalog_dir=...)` напрямую),
-#: поэтому один и тот же конфиг давал движок то готовым, то insensitive к фону в
-#: зависимости от того, откуда запущен процесс (repro: cwd=repo root -> движок готов;
-#: cwd=apps/line_sim -> недоступен).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+#: Корень репозитория — `Services.line_sim.core.REPO_ROOT` (правило резолвинга путей конфига
+#: общее с `Plugins.sim.layer_preview`); имя оставлено — его импортируют тесты.
+_REPO_ROOT = REPO_ROOT
 
 
 @register_plugin(
@@ -166,6 +177,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
         "scene.status": "cmd_status",
         "truth.status": "cmd_truth_status",
         "truth.reset": "cmd_truth_reset",
+        "preset.get": "cmd_preset_get",
+        "preset.commit": "cmd_preset_commit",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -209,7 +222,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
             spawner_kwargs = {"interval_s": (float(interval_cfg[0]), float(interval_cfg[1]))}
 
         scene_length_mm = float(cfg.get("scene_length_mm", (self._width / max(px_per_mm, 1e-9)) * 2.0))
-        defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
         preset_path = self._resolve_preset_path(cfg.get("preset_path"))
         seed = int(cfg.get("seed", _DEFAULT_SEED))
 
@@ -248,10 +260,26 @@ class SceneSourcePlugin(ProcessModulePlugin):
         background_texture = cfg.get("background_texture")
         background_tile = self._load_background_tile(ctx, background_texture)
 
+        # Task 1.2a: команды пресета. Свой лок (НЕ self._lock мира, НЕ self._truth_lock) —
+        # сериализует только commit'ы между собой (сравнение rev + запись файла).
+        # `_pending_factory` — единственная передача «новая фабрика» из потока команд в воркер
+        # produce(): deque(maxlen=1) — append (затирает не применённую) и popleft атомарны в
+        # CPython, тот же приём, что `_jobs` (голое поле «прочитал-обнулил» теряло бы commit,
+        # пришедший между чтением и обнулением в воркере).
+        self._preset_path: str | None = (
+            preset_path if preset_path is not None and preset_path.lower().endswith((".yaml", ".yml")) else None
+        )
+        self._defect_override: float | None = float(cfg["defect_probability"]) if "defect_probability" in cfg else None
+        self._preset_lock = threading.Lock()
+        self._pending_factory: collections.deque[ObjectFactory] = collections.deque(maxlen=1)
+        self._preset: ScenePreset | None = None
+        self._live_factory: ObjectFactory | None = None
+
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
         try:
-            preset = ScenePreset(catalog_dir=preset_path, defect_probability=defect_probability)
+            preset = load_scene_preset(preset_path, self._defect_override)
+            self._preset = preset
             factory = ObjectFactory(preset)
             self._spawner = ObjectSpawner(factory, scene_length_mm=scene_length_mm, **spawner_kwargs)
             self._compositor = SceneCompositor(
@@ -263,6 +291,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 belt_direction=belt_direction,
                 entry_x_px=entry_x_px,
             )
+            self._live_factory = factory
         except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()
             ctx.log_error(
                 f"scene_source: движок сцены недоступен (preset_path={preset_path!r}): {exc!r} — "
@@ -283,11 +312,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
 
     @staticmethod
     def _resolve_preset_path(preset_path: str | None) -> str | None:
-        """Относительный `preset_path` — от КОРНЯ РЕПОЗИТОРИЯ (`_REPO_ROOT`), не от CWD
-        процесса (фикс ревью P5). `None` и уже абсолютный путь возвращаются как есть."""
-        if preset_path is None or Path(preset_path).is_absolute():
-            return preset_path
-        return str((_REPO_ROOT / preset_path).resolve())
+        """Тонкий делегат `Services.line_sim.core.resolve_repo_path` (тесты зовут это имя)."""
+        return resolve_repo_path(preset_path)
 
     def _load_background_tile(self, ctx: PluginContext, texture_path: str | None) -> np.ndarray | None:
         """Загрузить фон-текстуру (Task 3.6): `None` -> `None`; путь резолвится от
@@ -359,6 +385,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         не движение уже пришедшего значения. Рендер компоновщика продолжает работать всегда
         (активных объектов ещё нет — кадр останется фоном, независимо от `now_encoder`)."""
         self._drain_jobs()
+        self._apply_pending_factory()
         now_encoder = self._read_world_encoder()
 
         if self._spawner is not None and self._compositor is not None:
@@ -437,6 +464,162 @@ class SceneSourcePlugin(ProcessModulePlugin):
         with self._truth_lock:
             self._truth.reset()
         return {"status": "ok"}
+
+    # ------------------------------------------------------------------ #
+    # Команды пресета (Task 1.2a — план line-sim-layer-editor, «Устройство»)
+    # ------------------------------------------------------------------ #
+
+    def cmd_preset_get(self, data: dict | None = None) -> dict:
+        """`preset.get` (поток команд): пресет, `rev` (sha256 байт файла), путь, классы, `engine`.
+
+        Плагин из `.yaml` — пресет читается С ДИСКА (не из памяти и без override конфига
+        стенда: редактор правит файл). `rev` читается ПЕРВЫМ, пресет — после: если файл
+        сменил кто-то мимо команды между двумя чтениями, клиент получит старый `rev` и его
+        commit честно упадёт в `conflict`, а не перезапишет чужую правку. Плагин из
+        каталога — `rev`/`path` `None`, пресет — тот, что в памяти. `class_names` — живой
+        фабрики (пусто, если движок недоступен). `engine` — собрался ли движок в `configure()`:
+        `False` -> commit пишет файл, но применится только после перезапуска (ревью S2)."""
+        class_names = list(self._live_factory.class_names) if self._live_factory is not None else []
+        engine = self._spawner is not None
+        if self._preset_path is None:
+            preset = self._preset.to_dict() if self._preset is not None else None
+            return {
+                "status": "ok",
+                "preset": preset,
+                "rev": None,
+                "path": None,
+                "class_names": class_names,
+                "engine": engine,
+            }
+        try:
+            with self._preset_lock:
+                rev = self._file_rev()
+                preset_dict = ScenePreset.from_yaml(self._preset_path).to_dict()
+        except OSError as exc:
+            return {"status": "error", "code": "io_error", "message": f"preset.get: {exc}"}
+        except Exception as exc:  # noqa: BLE001 — битый файл на диске -> ответ, не исключение
+            return {"status": "error", "code": "invalid", "message": f"preset.get: {exc}"}
+        return {
+            "status": "ok",
+            "preset": preset_dict,
+            "rev": rev,
+            "path": self._preset_path,
+            "class_names": class_names,
+            "engine": engine,
+        }
+
+    def cmd_preset_commit(self, data: dict | None = None) -> dict:
+        """`preset.commit` (поток команд): проверить, записать изменившиеся ключи, отдать фабрику воркеру.
+
+        `data = {"preset": dict, "base_rev": str}`. `base_dir` клиента отбрасывается —
+        относительные пути резолвятся от каталога файла пресета; КАЖДЫЙ путь картинки
+        клиента после `resolve()` обязан лежать в корне репозитория или в каталоге файла
+        пресета — иначе `invalid` с одним и тем же текстом ДО любого чтения (ревью S3).
+        Валидация (ограда путей, `ScenePreset`, сборка `ObjectFactory` с тем же правилом
+        override, что в `configure()`) — ВНЕ лока; под `_preset_lock` — сверка `rev`,
+        проверка записи (`os.access`, файл 0444 -> `io_error`), запись и передача фабрики.
+
+        Пишутся только top-level ключи, чьё значение отличается от файла (сравнение
+        нормализованных dict `ScenePreset.to_dict()` — дефолты не считаются правкой), через
+        `recipe.yaml_io.update_yaml_preserving` (атомарно, комментарии нетронутых ключей
+        живы; внутри заменённого ключа — теряются). Ничего не изменилось —
+        `{"status": "ok", "rev": <текущий>, "changed": False}` без записи и без подмены.
+        Движок не собрался в `configure()` — файл всё равно пишется, `applied: False`
+        (ревью S2). Проигравший гонку `rev` фабрику не оставляет — `conflict` до передачи.
+        В файл пишется пресет клиента, НЕ вариант с override конфига стенда."""
+        if self._preset_path is None:
+            return self._bad_request("preset.commit: плагин собран не из .yaml-пресета — писать некуда")
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("preset"), dict)
+            or not isinstance(data.get("base_rev"), str)
+        ):
+            return self._bad_request("preset.commit: ожидается {'preset': dict, 'base_rev': str}")
+        try:
+            preset = self._preset_from_client(data["preset"])
+            factory = ObjectFactory(apply_defect_override(preset, self._defect_override))
+        except Exception as exc:  # noqa: BLE001 — любой сбой проверки -> invalid с текстом
+            return {"status": "error", "code": "invalid", "message": str(exc)}
+        new_dict = preset.to_dict()
+        new_dict.pop("base_dir", None)
+
+        path = Path(self._preset_path)
+        engine = self._spawner is not None
+        with self._preset_lock:
+            try:
+                raw = path.read_bytes()
+            except OSError as exc:
+                return {"status": "error", "code": "io_error", "message": f"preset.commit: {exc}"}
+            current_rev = compute_rev(raw)
+            if current_rev != data["base_rev"]:
+                return {"status": "error", "code": "conflict", "current_rev": current_rev}
+            on_disk = self._normalized_file_dict(raw, path)
+            changed = {key: value for key, value in new_dict.items() if on_disk.get(key, _MISSING_KEY) != value}
+            if not changed:
+                return {"status": "ok", "rev": current_rev, "changed": False}
+            if not os.access(path, os.W_OK):
+                return {
+                    "status": "error",
+                    "code": "io_error",
+                    "message": f"preset.commit: файл только для чтения: {path}",
+                }
+            try:
+                update_yaml_preserving(path, changed)
+                new_rev = self._file_rev()
+            except OSError as exc:
+                return {"status": "error", "code": "io_error", "message": f"preset.commit: {exc}"}
+            if engine:
+                self._pending_factory.append(factory)  # затирает ещё не применённую — в силе последняя
+        result = {"status": "ok", "rev": new_rev, "changed": True, "applied": engine}
+        if not engine:
+            result["message"] = _ENGINE_DOWN_MESSAGE
+        return result
+
+    def _apply_pending_factory(self) -> None:
+        """Воркер produce(): применить фабрику последнего commit'а (если есть) ДО `tick()`."""
+        if self._spawner is None:
+            return
+        try:
+            factory = self._pending_factory.popleft()
+        except IndexError:
+            return
+        self._spawner.set_factory(factory)
+        self._live_factory = factory
+
+    def _preset_from_client(self, preset_dict: dict) -> ScenePreset:
+        """`ScenePreset` из dict клиента с ПРИНУДИТЕЛЬНЫМ `base_dir` (каталог файла пресета, у
+        плагина из каталога — корень репозитория) и оградой путей (ревью S3): каждый путь
+        картинки (`catalog_dir`, `sprite_source` кроме `class://`) после `resolve()` — внутри
+        `_REPO_ROOT` или каталога файла пресета. Проверка — ДО любого чтения картинок
+        (`ObjectFactory` зовётся после), текст отказа один (`OUTSIDE_ROOTS_MESSAGE`) — нет
+        оракула «файл существует»; сама ограда — `Services.line_sim.confine_preset_paths`, общая
+        с `Plugins.sim.layer_preview`. Пресет из файла конфига сюда не идёт — ему доверяем."""
+        preset_dir = Path(self._preset_path).parent.resolve() if self._preset_path is not None else None
+        preset = ScenePreset.from_dict({**preset_dict, "base_dir": str(preset_dir or _REPO_ROOT)})
+        confine_preset_paths(preset, [_REPO_ROOT] if preset_dir is None else [_REPO_ROOT, preset_dir])
+        return preset
+
+    @staticmethod
+    def _normalized_file_dict(raw: bytes, path: Path) -> dict:
+        """Пресет файла в форме `to_dict()` без `base_dir` — база сравнения «что изменилось».
+        Файл не разбирается в пресет — `{}`: тогда пишутся все ключи клиента."""
+        try:
+            data = yaml.safe_load(raw.decode("utf-8"))
+            normalized = ScenePreset.from_dict({**data, "base_dir": str(path.parent.resolve())}).to_dict()
+        except Exception:  # noqa: BLE001 — битый файл на диске — сравнивать не с чем
+            return {}
+        normalized.pop("base_dir", None)
+        return normalized
+
+    def _file_rev(self) -> str:
+        """`rev` ТЕКУЩИХ байт файла пресета (`recipe.service.compute_rev`) — читается каждый раз,
+        не кэшируется: запись мимо команды тоже меняет rev и даёт `conflict`."""
+        assert self._preset_path is not None
+        return compute_rev(Path(self._preset_path).read_bytes())
+
+    @staticmethod
+    def _bad_request(message: str) -> dict:
+        return {"status": "error", "code": "bad_request", "message": message}
 
     def _drain_jobs(self) -> None:
         """Разобрать очередь заданий целиком (воркер produce(), ДО `spawner.tick()`).

@@ -15,7 +15,7 @@ import numpy as np
 from Services.dataset_gen.core.augment import apply_occlusion
 from Services.line_sim.core.catalog_bridge import load_catalog, load_image_rgba
 from Services.line_sim.core.layered_object import LayeredObject
-from Services.line_sim.core.preset import ScenePreset
+from Services.line_sim.core.preset import CLASS_SPRITE_SOURCE, ScenePreset
 from Services.line_sim.interfaces import LayerSpec, ObjectPassport
 
 _DEFECT_LAYER_NAME = "damaged"
@@ -29,17 +29,33 @@ class ObjectFactory:
     с вероятностью пресета или форсированно через `force_defect_next()`.
 
     Pre: `preset.catalog_dir` задан ИЛИ `preset.layers` непуст (проверено `ScenePreset`).
-    Post: `num_classes` >= 1, если каталог загружен, иначе 0 и `make()` поднимает
-    `ValueError` (пресет без каталога не может выбрать класс).
+    Post: `num_classes` >= 1, если каталог загружен, иначе 0. Пресет без `catalog_dir`
+    (только `layers`, Task 1.1b) — `make()` строит объект из одних слоёв пресета,
+    без класса (`passport.class_name == ""`); слой `class://` в таком пресете запрещён
+    отдельно (`ScenePreset`), так что выбирать в `make()` нечего.
     """
 
     def __init__(self, preset: ScenePreset) -> None:
         self._preset = preset
-        self._catalog = load_catalog(preset.catalog_dir) if preset.catalog_dir is not None else None
+        self._catalog = (
+            load_catalog(preset.resolve_path(preset.catalog_dir)) if preset.catalog_dir is not None else None
+        )
         # Доп. слои пресета резолвятся один раз здесь (id -> RGBA); каждый make() их
         # переиспользует как есть — LayeredObject их только читает, не мутирует.
+        # preset.resolve_path() — относительные строки от preset.base_dir (Task 1.0, LS-013),
+        # абсолютные и id-схемы (fixture://...) пропускает без изменений.
+        # Слой class:// (Task 1.1b, блок A) — не картинка, а маркер: спрайт неизвестен до
+        # make() (нужен разыгранный класс), поэтому картинка НЕ грузится — сам LayerSpec
+        # остаётся как есть, make() подставляет base_sprite на каждый вызов.
+        # preset.layers — sprite_source всегда строка-id (ScenePreset._sprite_ids_only), флаг
+        # считаем ДО замены на RGBA ниже: после неё sprite_source — ndarray, и "==" с
+        # CLASS_SPRITE_SOURCE (строкой) на ndarray даёт поэлементный массив, не bool.
+        self._has_class_layer = any(layer.sprite_source == CLASS_SPRITE_SOURCE for layer in preset.layers)
         self._extra_layers: list[LayerSpec] = [
-            layer.model_copy(update={"sprite_source": load_image_rgba(layer.sprite_source)}) for layer in preset.layers
+            layer
+            if layer.sprite_source == CLASS_SPRITE_SOURCE
+            else layer.model_copy(update={"sprite_source": load_image_rgba(preset.resolve_path(layer.sprite_source))})
+            for layer in preset.layers
         ]
         self._force_defect_pending = False
 
@@ -50,6 +66,12 @@ class ObjectFactory:
     @property
     def class_names(self) -> list[str]:
         return self._catalog.class_names if self._catalog is not None else []
+
+    @property
+    def force_defect_pending(self) -> bool:
+        """Взведён ли одноразовый флаг `force_defect_next()` (ещё не погашен успешным `make()`).
+        Только чтение — нужен `ObjectSpawner.set_factory()`, чтобы перенести нажатие на новую фабрику."""
+        return self._force_defect_pending
 
     def force_defect_next(self) -> None:
         """Ровно следующий `make()` получит `passport.defect == "damaged"`,
@@ -68,24 +90,45 @@ class ObjectFactory:
         forced = self._force_defect_pending
 
         if self._catalog is None:
-            raise ValueError(
-                "ObjectFactory.make(): пресет без catalog_dir (только layers) не может "
-                "выбрать класс — нужен каталог спрайтов (задайте catalog_dir в пресете)"
-            )
+            # Пресет без catalog_dir (только layers — гарантировано ScenePreset._catalog_or_layers,
+            # там же отдельно запрещён слой class:// без catalog_dir, так что self._extra_layers
+            # здесь всегда обычные загруженные RGBA-слои, без class-маркера) — класса нет.
+            class_name = ""
+            angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
+            bottom_layers = list(self._extra_layers)
+        else:
+            class_index = int(rng.integers(self.num_classes))
+            class_name = self._catalog.entry(class_index).name
+            angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
+            base_sprite = self._catalog.get_sprite(class_index, rng)
 
-        class_index = int(rng.integers(self.num_classes))
-        class_name = self._catalog.entry(class_index).name
-        angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
-        base_sprite = self._catalog.get_sprite(class_index, rng)
+            if self._has_class_layer:
+                # Слой class:// (ровно один — проверено ScenePreset) заменяется разыгранным
+                # base_sprite на месте, сохраняя позицию в списке слоёв пресета (порядок слоёв —
+                # часть контракта seed, LS-006) — "base"-слой отдельно не добавляется.
+                bottom_layers = [
+                    layer.model_copy(update={"sprite_source": base_sprite})
+                    if isinstance(layer.sprite_source, str) and layer.sprite_source == CLASS_SPRITE_SOURCE
+                    else layer
+                    for layer in self._extra_layers
+                ]
+            else:
+                bottom_layers = [
+                    LayerSpec(name="base", mode="static", sprite_source=base_sprite),
+                    *self._extra_layers,
+                ]
 
-        base_layer = LayerSpec(name="base", mode="static", sprite_source=base_sprite)
+        # ponytail: блоб дефекта строится из спрайта НИЖНЕГО слоя (bottom_layers[0]) как есть —
+        # его собственные offset/scale/angle игнорируются (как и раньше для "base"); апгрейд —
+        # компоновать блоб в объектных координатах, если нижний слой получит трансформ.
+        bottom_sprite = bottom_layers[0].sprite_source
         damaged_layer = LayerSpec(
             name=_DEFECT_LAYER_NAME,
             mode="defect",
-            sprite_source=self._build_defect_blob(base_sprite),
+            sprite_source=self._build_defect_blob(bottom_sprite),
             defect_probability=self._preset.defect_probability,
         )
-        layers = [base_layer, *self._extra_layers, damaged_layer]
+        layers = [*bottom_layers, damaged_layer]
 
         passport = ObjectPassport(
             object_id=object_id,
