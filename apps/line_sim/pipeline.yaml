@@ -153,6 +153,21 @@ processes:
         scene_process: camera
         timeout_s: 1.0
 
+  # line-sim-layer-editor, ревью 1.2a S1: превью пресета слоёв (`preset.preview`) — свой
+  # процесс, чтобы рендер сетки (~87 мс на реальном пресете) не держал поток команд `camera`
+  # (там же дельты энкодера и scene.job_done). Портов нет (side-effect, как `pult`).
+  # preset_path и defect_probability ДЕРЖАТЬ РАВНЫМИ значениям scene_source в `camera` выше —
+  # превью показывает тот же пресет, что едет на ленте.
+  - process_name: layers
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: Plugins.sim.layer_preview.plugin.LayerPreviewPlugin
+        plugin_name: layer_preview
+        category: control
+        preset_path: data/line_sim/letter_catalog
+        defect_probability: 0.25
+
 # Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).
 # `type: memory` обязателен — без него под тем же именем поднимется ФАЙЛОВЫЙ
 # приёмник без tail(). Ось `channels` скоупа замещающая: console/system_file

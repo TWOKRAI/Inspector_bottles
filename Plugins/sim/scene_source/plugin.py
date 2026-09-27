@@ -61,9 +61,7 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 
 from __future__ import annotations
 
-import base64
 import collections
-import json
 import os
 import threading
 import time
@@ -84,7 +82,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from Services.dataset_gen.core.catalog import imread_unicode
-from Services.line_sim import CLASS_SPRITE_SOURCE, ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
+from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, confine_preset_paths
 from Services.line_sim.core import BeltGeometry, JobDone, MatchResult, TruthLedger, match_job
 
 if TYPE_CHECKING:
@@ -133,19 +131,6 @@ _BACKGROUND_BGR = (60, 60, 60)
 #: Не чаще раза в секунду — иначе падающая фабрика заливает лог на каждый кадр.
 _FACTORY_ERROR_LOG_INTERVAL_S = 1.0
 
-#: Task 1.2a: пределы `preset.preview` (план line-sim-layer-editor, «Устройство»).
-_PREVIEW_MAX_SEEDS = 16
-_PREVIEW_DEFAULT_TILE_PX = 160
-_PREVIEW_MIN_TILE_PX = 16
-_PREVIEW_MAX_TILE_PX = 256
-_PREVIEW_BG_RGB = (90, 90, 90)
-#: Ревью 1.2a S1: бюджет превью в пикселях тайлов — `len(seeds) * tile_px**2` не больше
-#: дефолтной сетки 8x160 (дефолты легальны, 16 сидов — только при tile_px <= 113).
-_PREVIEW_PIXEL_BUDGET = 8 * 160**2
-
-#: Ревью 1.2a S3: ОДНО сообщение на любой путь клиента вне разрешённых корней —
-#: не зависит от того, существует ли файл (нет оракула существования).
-_OUTSIDE_ROOTS_MESSAGE = "preset: путь изображения вне разрешённых каталогов (корень репозитория, каталог пресета)"
 _ENGINE_DOWN_MESSAGE = "движок не запущен — применится после перезапуска"
 _MISSING_KEY = object()
 
@@ -190,7 +175,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
         "truth.reset": "cmd_truth_reset",
         "preset.get": "cmd_preset_get",
         "preset.commit": "cmd_preset_commit",
-        "preset.preview": "cmd_preset_preview",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -286,9 +270,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._pending_factory: collections.deque[ObjectFactory] = collections.deque(maxlen=1)
         self._preset: ScenePreset | None = None
         self._live_factory: ObjectFactory | None = None
-        # Ревью 1.2a S1: одна запись (канонический JSON пресета, фабрика превью) — только
-        # поток команд её читает и пишет; замена кортежа целиком.
-        self._preview_cache: tuple[str, ObjectFactory] | None = None
 
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
@@ -360,7 +341,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
     @staticmethod
     def _apply_defect_override(preset: ScenePreset, override: float | None) -> ScenePreset:
         """Единое правило «явный `defect_probability` конфига стенда перекрывает файл» —
-        общее для `configure()` (`_build_preset`) и `preset.commit`/`preset.preview` (Task 1.2a).
+        общее для `configure()` (`_build_preset`) и `preset.commit` (Task 1.2a) и `Plugins.sim.layer_preview` (превью).
         Через `from_dict`, чтобы отработали валидаторы frozen-модели; `None` — без изменений."""
         if override is None:
             return preset
@@ -626,69 +607,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
             result["message"] = _ENGINE_DOWN_MESSAGE
         return result
 
-    def cmd_preset_preview(self, data: dict | None = None) -> dict:
-        """`preset.preview` (поток команд): сетка объектов пресета по сидам -> PNG (base64).
-
-        `preset` (dict, опц.; то же правило `base_dir` и та же ограда путей, что у commit; нет —
-        текущий пресет файла), `seeds` (list[int] >= 0, 1..16, дефолт 1..8), `tile_px` (16..256,
-        дефолт 160), и `len(seeds) * tile_px**2 <= 8 * 160**2` (ревью S1) — иначе `bad_request`.
-        Фабрика превью СВОЯ (кэш на одну запись по каноническому JSON пресета — повторное
-        превью того же пресета не перечитывает картинки) — живая не трогается (её форс-брак не
-        гасится), спавнер, `self._rng`, файл и `rev` — тоже. Объект — `make(f"preview-{seed}",
-        0.0, default_rng(seed))`, вписан в квадрат `tile_px` на сером (90,90,90) с сохранением
-        пропорций, тайлы — в одну строку. Override `defect_probability` конфига стенда
-        применяется, как у живой ленты."""
-        data = data if data is not None else {}
-        if not isinstance(data, dict):
-            return self._bad_request("preset.preview: ожидается dict")
-        seeds = data.get("seeds", list(range(1, 9)))
-        if (
-            not isinstance(seeds, list)
-            or not 1 <= len(seeds) <= _PREVIEW_MAX_SEEDS
-            or not all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in seeds)
-        ):
-            return self._bad_request(f"preset.preview: seeds — список 1..{_PREVIEW_MAX_SEEDS} целых >= 0")
-        tile_px = data.get("tile_px", _PREVIEW_DEFAULT_TILE_PX)
-        if (
-            not isinstance(tile_px, int)
-            or isinstance(tile_px, bool)
-            or not _PREVIEW_MIN_TILE_PX <= tile_px <= _PREVIEW_MAX_TILE_PX
-        ):
-            return self._bad_request(f"preset.preview: tile_px — целое {_PREVIEW_MIN_TILE_PX}..{_PREVIEW_MAX_TILE_PX}")
-        if len(seeds) * tile_px**2 > _PREVIEW_PIXEL_BUDGET:
-            return self._bad_request(
-                f"preset.preview: len(seeds) * tile_px**2 = {len(seeds) * tile_px**2} > {_PREVIEW_PIXEL_BUDGET} "
-                "(бюджет 8 тайлов по 160 px) — меньше сидов или мельче tile_px"
-            )
-        preset_dict = data.get("preset")
-        if preset_dict is not None and not isinstance(preset_dict, dict):
-            return self._bad_request("preset.preview: preset — dict или отсутствует")
-        try:
-            if preset_dict is not None:
-                preset = self._apply_defect_override(self._preset_from_client(preset_dict), self._defect_override)
-            elif self._preset_path is not None:
-                preset = self._apply_defect_override(ScenePreset.from_yaml(self._preset_path), self._defect_override)
-            elif self._preset is not None:
-                preset = self._preset
-            else:
-                raise ValueError("пресета нет: движок не собран, preset в запросе не передан")
-            factory = self._preview_factory(preset)
-            tiles_rgb: list[np.ndarray] = []
-            tiles: list[dict] = []
-            for seed in seeds:
-                obj = factory.make(f"preview-{seed}", 0.0, np.random.default_rng(seed))
-                tiles_rgb.append(self._fit_tile(obj.render(), tile_px))
-                passport = obj.passport.to_dict()
-                tiles.append(
-                    {"seed": seed, "class_name": passport["class_name"], "layer_params": passport["layer_params"]}
-                )
-            ok, png = cv2.imencode(".png", cv2.cvtColor(np.hstack(tiles_rgb), cv2.COLOR_RGB2BGR))
-            if not ok:
-                raise ValueError("cv2.imencode(.png) вернул False")
-        except Exception as exc:  # noqa: BLE001 — любой сбой сборки превью -> invalid с текстом
-            return {"status": "error", "code": "invalid", "message": str(exc)}
-        return {"status": "ok", "png_b64": base64.b64encode(png.tobytes()).decode("ascii"), "tiles": tiles}
-
     def _apply_pending_factory(self) -> None:
         """Воркер produce(): применить фабрику последнего commit'а (если есть) ДО `tick()`."""
         if self._spawner is None:
@@ -705,33 +623,13 @@ class SceneSourcePlugin(ProcessModulePlugin):
         плагина из каталога — корень репозитория) и оградой путей (ревью S3): каждый путь
         картинки (`catalog_dir`, `sprite_source` кроме `class://`) после `resolve()` — внутри
         `_REPO_ROOT` или каталога файла пресета. Проверка — ДО любого чтения картинок
-        (`ObjectFactory` зовётся после), текст отказа один (`_OUTSIDE_ROOTS_MESSAGE`) — нет
-        оракула «файл существует». Пресет из файла конфига сюда не идёт — ему доверяем."""
+        (`ObjectFactory` зовётся после), текст отказа один (`OUTSIDE_ROOTS_MESSAGE`) — нет
+        оракула «файл существует»; сама ограда — `Services.line_sim.confine_preset_paths`, общая
+        с `Plugins.sim.layer_preview`. Пресет из файла конфига сюда не идёт — ему доверяем."""
         preset_dir = Path(self._preset_path).parent.resolve() if self._preset_path is not None else None
         preset = ScenePreset.from_dict({**preset_dict, "base_dir": str(preset_dir or _REPO_ROOT)})
-        roots = [_REPO_ROOT] if preset_dir is None else [_REPO_ROOT, preset_dir]
-        values = [preset.catalog_dir] if preset.catalog_dir is not None else []
-        values += [layer.sprite_source for layer in preset.layers if layer.sprite_source != CLASS_SPRITE_SOURCE]
-        for value in values:
-            try:
-                resolved = Path(preset.resolve_path(value)).resolve()
-            except (OSError, RuntimeError):  # петля симлинков и т.п. — тот же отказ, без подробностей
-                raise ValueError(_OUTSIDE_ROOTS_MESSAGE) from None
-            if not any(resolved.is_relative_to(root) for root in roots):
-                raise ValueError(_OUTSIDE_ROOTS_MESSAGE)
+        confine_preset_paths(preset, [_REPO_ROOT] if preset_dir is None else [_REPO_ROOT, preset_dir])
         return preset
-
-    def _preview_factory(self, preset: ScenePreset) -> ObjectFactory:
-        """Фабрика превью из кэша на одну запись (ключ — канонический JSON пресета, включая
-        `base_dir`). Картинки на диске кэш не версирует: подмена `disk.png` на месте видна
-        превью только после смены пресета (как и живой ленте — ревью N5)."""
-        key = json.dumps(preset.to_dict(), sort_keys=True, ensure_ascii=False)
-        cached = self._preview_cache
-        if cached is not None and cached[0] == key:
-            return cached[1]
-        factory = ObjectFactory(preset)
-        self._preview_cache = (key, factory)
-        return factory
 
     @staticmethod
     def _normalized_file_dict(raw: bytes, path: Path) -> dict:
@@ -750,23 +648,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
         не кэшируется: запись мимо команды тоже меняет rev и даёт `conflict`."""
         assert self._preset_path is not None
         return compute_rev(Path(self._preset_path).read_bytes())
-
-    @staticmethod
-    def _fit_tile(rgba: np.ndarray, tile_px: int) -> np.ndarray:
-        """RGBA объекта -> RGB-квадрат `tile_px` на сером: пропорции сохранены (INTER_AREA),
-        объект по центру, наложение по альфе."""
-        tile = np.full((tile_px, tile_px, 3), _PREVIEW_BG_RGB, dtype=np.uint8)
-        h, w = rgba.shape[:2]
-        if h == 0 or w == 0:
-            return tile
-        scale = tile_px / max(h, w)
-        new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
-        small = cv2.resize(rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        alpha = small[:, :, 3:4].astype(np.float32) / 255.0
-        y0, x0 = (tile_px - new_h) // 2, (tile_px - new_w) // 2
-        region = tile[y0 : y0 + new_h, x0 : x0 + new_w].astype(np.float32)
-        tile[y0 : y0 + new_h, x0 : x0 + new_w] = (small[:, :, :3] * alpha + region * (1.0 - alpha)).astype(np.uint8)
-        return tile
 
     @staticmethod
     def _bad_request(message: str) -> dict:

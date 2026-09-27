@@ -9,7 +9,7 @@
   которого нет в файле;
 - невыпущенный форс-брак старой фабрики теряется при подмене;
 - сбой записи оставляет полфайла или мусорный tmp рядом с пресетом;
-- preview трогает живое: гасит форс-брак живой фабрики или тянет `self._rng` плагина;
+- (preview — теперь `Plugins.sim.layer_preview`, свой процесс; его hazard-тесты там);
 - `base_dir` из запроса клиента решает, откуда читать картинки.
 
 Своя фикстура (не импорт из `test_acceptance_1_2a_preset_commands.py` тестера): пресет
@@ -293,29 +293,6 @@ def test_commit_keeps_file_mode(tmp_path):
     assert preset_path.stat().st_mode & 0o777 == 0o644, "commit сменил права файла пресета (tmp создаётся 0600)"
 
 
-def test_preview_does_not_consume_forced_defect_or_rng(tmp_path):
-    preset_path = _make_fixture(tmp_path)
-    plugin_a, sp_a = _new_plugin(preset_path)
-    plugin_b, sp_b = _new_plugin(preset_path)
-    plugin_a._spawner.force_defect_next()
-    plugin_b._spawner.force_defect_next()
-
-    res = _cmd(plugin_a, "preset.preview", {"seeds": [1, 2, 3, 4, 5, 6, 7, 8]})
-    assert res["status"] == "ok", res
-    assert plugin_a._spawner._factory.force_defect_pending is True, "preview погасил форс-брак живой фабрики"
-
-    encoder = 0.0
-    for step in range(12):
-        encoder += _ENC_STEP
-        sp_a.emit_encoder(encoder)
-        sp_b.emit_encoder(encoder)
-        fa = plugin_a.produce()[0]["frame"]
-        fb = plugin_b.produce()[0]["frame"]
-        assert np.array_equal(fa, fb), f"preview сдвинул кадры относительно близнеца на шаге {step}"
-    first_a = plugin_a._spawner.active_objects()[0]
-    assert first_a.passport.defect == "damaged"
-
-
 def test_client_base_dir_is_ignored(tmp_path):
     preset_path = _make_fixture(tmp_path)
     plugin, _sp = _new_plugin(preset_path)
@@ -325,8 +302,6 @@ def test_client_base_dir_is_ignored(tmp_path):
     preset_dict = {**_with_color(got["preset"], [255, 0, 0]), "base_dir": str(elsewhere)}
     assert preset_dict["layers"][0]["sprite_source"] == "disk.png", "фикстура обязана держать относительный путь"
 
-    preview = _cmd(plugin, "preset.preview", {"preset": preset_dict, "seeds": [1]})
-    assert preview["status"] == "ok", preview
     res = _cmd(plugin, "preset.commit", {"preset": preset_dict, "base_rev": got["rev"]})
     assert res["status"] == "ok", res
     assert res["rev"] == _rev(preset_path)
@@ -336,7 +311,7 @@ def test_client_base_dir_is_ignored(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Ревью 1.2a it.1 -> it.2: S1 (бюджет превью + кэш), S2 (commit без движка),
+# Ревью 1.2a it.1 -> it.2: S2 (commit без движка),
 # S3 (пути клиента — только в корне репозитория или каталоге пресета), S4 (запись
 # только изменившихся ключей, комментарии), N3 (файл 0444).
 # --------------------------------------------------------------------------- #
@@ -415,27 +390,21 @@ def test_client_path_outside_repo_rejected_without_existence_oracle(tmp_path):
     }
     messages = set()
     for label, preset_dict in variants.items():
-        for name, payload in (
-            ("preset.preview", {"preset": preset_dict, "seeds": [1]}),
-            ("preset.commit", {"preset": preset_dict, "base_rev": got["rev"]}),
-        ):
-            res = _cmd(plugin, name, payload)
-            assert res["status"] == "error" and res["code"] == "invalid", (label, name, res)
-            messages.add(res["message"])
+        res = _cmd(plugin, "preset.commit", {"preset": preset_dict, "base_rev": got["rev"]})
+        assert res["status"] == "error" and res["code"] == "invalid", (label, res)
+        messages.add(res["message"])
     assert len(messages) == 1, f"сообщение зависит от существования файла: {messages}"
     assert str(existing.parent) not in next(iter(messages))
     assert preset_path.read_bytes() == before
 
-    # Корень репозитория — разрешён: несуществующий путь под ним проходит ограду и
-    # падает уже на чтении (другое сообщение), т.е. ограда не режет репозиторий.
+    # Корень репозитория — разрешён: несуществующий путь под ним проходит ограду и падает
+    # уже на чтении (другое сообщение); каталог файла пресета — см. test_client_base_dir_is_ignored.
     from Plugins.sim.scene_source.plugin import _REPO_ROOT
 
     in_repo = with_sprite(str(_REPO_ROOT / f"no-such-{uuid.uuid4().hex}.png"))
-    res = _cmd(plugin, "preset.preview", {"preset": in_repo, "seeds": [1]})
+    res = _cmd(plugin, "preset.commit", {"preset": in_repo, "base_rev": got["rev"]})
     assert res["status"] == "error" and res["message"] not in messages, res
-    # Каталог файла пресета — разрешён (фикстура в tmp_path вне репозитория).
-    ok = _cmd(plugin, "preset.preview", {"preset": got["preset"], "seeds": [1]})
-    assert ok["status"] == "ok", ok
+    assert preset_path.read_bytes() == before
 
 
 def test_commit_without_engine_writes_file_applied_false(tmp_path):
@@ -467,43 +436,6 @@ def test_commit_without_engine_writes_file_applied_false(tmp_path):
     broken["layers"][0]["sprite_source"] = "still-missing.png"
     bad = _cmd(plugin, "preset.commit", {"preset": broken, "base_rev": res["rev"]})
     assert bad["status"] == "error" and bad["code"] == "invalid", "без движка commit обязан валидировать"
-
-
-def test_preview_pixel_budget_bad_request(tmp_path):
-    preset_path = _make_fixture(tmp_path)
-    plugin, _sp = _new_plugin(preset_path)
-    cases = [
-        ({}, "ok"),
-        ({"seeds": list(range(8)), "tile_px": 160}, "ok"),
-        ({"seeds": list(range(16)), "tile_px": 113}, "ok"),  # 16*113^2 = 204304 <= 8*160^2
-        ({"seeds": list(range(16)), "tile_px": 114}, "bad_request"),  # 207936
-        ({"seeds": list(range(16)), "tile_px": 160}, "bad_request"),
-        ({"seeds": list(range(9)), "tile_px": 160}, "bad_request"),
-        ({"seeds": list(range(17)), "tile_px": 16}, "bad_request"),  # P7: сидов > 16
-        ({"seeds": [1], "tile_px": 257}, "bad_request"),  # P7: тайл > 256
-    ]
-    for data, expected in cases:
-        res = _cmd(plugin, "preset.preview", data)
-        got = res["status"] if res["status"] == "ok" else res["code"]
-        assert got == expected, (data, res)
-
-
-def test_preview_cache_follows_file_after_commit(tmp_path):
-    """Кэш фабрики превью (по каноническому JSON пресета) не отдаёт старую после commit."""
-    preset_path = _make_fixture(tmp_path)
-    plugin, _sp = _new_plugin(preset_path)
-    first = _cmd(plugin, "preset.preview", {"seeds": [1]})
-    second = _cmd(plugin, "preset.preview", {"seeds": [1]})
-    assert first["png_b64"] == second["png_b64"]
-    got = _cmd(plugin, "preset.get", {})
-    assert (
-        _cmd(plugin, "preset.commit", {"preset": _with_color(got["preset"], [255, 0, 0]), "base_rev": got["rev"]})[
-            "status"
-        ]
-        == "ok"
-    )
-    third = _cmd(plugin, "preset.preview", {"seeds": [1]})
-    assert third["status"] == "ok" and third["png_b64"] != first["png_b64"], "превью файла из устаревшего кэша"
 
 
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX-права, не root")

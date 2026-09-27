@@ -1,0 +1,334 @@
+# -*- coding: utf-8 -*-
+"""Тесты `LayerPreviewPlugin` — `preset.preview` в своём процессе `layers` (ревью 1.2a S1).
+
+Перенесено из приёмки тестера 1.2a, хост превью сменился — ревью S1:
+`test_p6_*` / `test_p7_*` — из `Plugins/sim/scene_source/tests/test_acceptance_1_2a_preset_commands.py`
+(каждое утверждение сохранено; P6 «превью не влияет на кадры сцены» теперь означает: кадры
+`SceneSourcePlugin` побитово те же при любом числе превью на `LayerPreviewPlugin` с тем же файлом).
+Hazard-тесты автора (бюджет пикселей, ограда путей S3, кэш/смена файла, форс-брак) — из
+`test_scene_source_hazards_1_2a.py`.
+
+Команды вызываются через карту `plugin.commands`, как у тестера.
+"""
+
+from __future__ import annotations
+
+import base64
+import copy
+import uuid
+from pathlib import Path
+from typing import Callable
+from unittest.mock import MagicMock
+
+import cv2
+import numpy as np
+import pytest
+
+from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
+from Plugins.sim.scene_source.plugin import SceneSourcePlugin
+from Services.dataset_gen.core.catalog import imwrite_unicode
+from Services.line_sim import CLASS_SPRITE_SOURCE, LayerSpec, ScenePreset
+
+pytestmark = pytest.mark.timeout(30)
+
+FRAME_W = 64
+FRAME_H = 64
+
+
+class _FakeStateProxy:
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[[list[Delta]], None]] = []
+
+    def subscribe(self, pattern, callback, exclude_self=True, sync=True):
+        self._callbacks.append(callback)
+        return str(uuid.uuid4())
+
+    def emit(self, deltas: list[Delta]) -> None:
+        for cb in self._callbacks:
+            cb(deltas)
+
+    def set(self, path: str, value: object) -> None:
+        pass
+
+
+def _emit_encoder(state_proxy: _FakeStateProxy, value: float, t: float) -> None:
+    state_proxy.emit(
+        [Delta(path="sim.belt.encoder", old_value=MISSING, new_value={"value": value, "t": t}, source="robot")]
+    )
+
+
+def _make_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """Фикстура тестера 1.2a без изменений: `cat/<A|B>/0.png` + `disk.png` + `preset.yaml`."""
+    catalog_dir = tmp_path / "cat"
+    for cls in ("A", "B"):
+        class_dir = catalog_dir / cls
+        class_dir.mkdir(parents=True)
+        sprite = np.zeros((30, 30, 4), dtype=np.uint8)
+        sprite[:, :, :3] = 128
+        sprite[:, :, 3] = 255
+        imwrite_unicode(class_dir / "0.png", cv2.cvtColor(sprite, cv2.COLOR_RGBA2BGRA))
+
+    disk_path = tmp_path / "disk.png"
+    disk = np.zeros((60, 60, 4), dtype=np.uint8)
+    disk[:, :, :3] = 255
+    disk[:, :, 3] = 255
+    imwrite_unicode(disk_path, cv2.cvtColor(disk, cv2.COLOR_RGBA2BGRA))
+
+    preset = ScenePreset(
+        catalog_dir=str(catalog_dir),
+        angle_range_deg=(0.0, 0.0),
+        defect_probability=0.0,
+        layers=[
+            LayerSpec(name="disk", mode="static", sprite_source=str(disk_path), color_rgb=(255, 255, 255)),
+            LayerSpec(name="letter", mode="static", sprite_source=CLASS_SPRITE_SOURCE, color_rgb=(0, 0, 0)),
+        ],
+    )
+    preset_path = tmp_path / "preset.yaml"
+    preset.to_yaml(preset_path)
+    return preset_path, catalog_dir
+
+
+def _new_scene(preset_path_cfg: Path) -> tuple[SceneSourcePlugin, _FakeStateProxy]:
+    state_proxy = _FakeStateProxy()
+    ctx = MagicMock()
+    ctx.state_proxy = state_proxy
+    ctx.config = {
+        "resolution_width": FRAME_W,
+        "resolution_height": FRAME_H,
+        "px_per_mm": 1.0,
+        "belt_y_px": FRAME_H / 2,
+        "spawn_interval_s": [0.01, 0.02],
+        "scene_length_mm": 1_000_000.0,
+        "preset_path": str(preset_path_cfg),
+        "seed": 0,
+    }
+    plugin = SceneSourcePlugin()
+    plugin.configure(ctx)
+    assert plugin._compositor is not None, f"движок не собрался (фикстура): {ctx.log_error.call_args_list}"
+    plugin.start(ctx)
+    return plugin, state_proxy
+
+
+def _new_preview(preset_path_cfg: Path | str | None, **extra):
+    from Plugins.sim.layer_preview.plugin import LayerPreviewPlugin
+
+    ctx = MagicMock()
+    ctx.config = {"preset_path": None if preset_path_cfg is None else str(preset_path_cfg), **extra}
+    plugin = LayerPreviewPlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    return plugin
+
+
+def _call_command(plugin, name: str, data: dict) -> dict:
+    commands = getattr(plugin, "commands", None)
+    assert commands is not None and name in commands, f"команда '{name}' отсутствует в plugin.commands ({commands!r})"
+    method = getattr(plugin, commands[name], None)
+    assert method is not None, f"plugin.commands['{name}'] указывает на несуществующий метод"
+    return method(dict(data))
+
+
+def _decode(result: dict) -> np.ndarray:
+    img = cv2.imdecode(np.frombuffer(base64.b64decode(result["png_b64"]), dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert img is not None and img.size > 0
+    return img
+
+
+# --- P6 (перенесено из приёмки тестера) ---
+
+
+def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
+    preset_path, _catalog_dir = _make_fixture(tmp_path)
+    plugin_a, sp_a = _new_scene(preset_path)
+    plugin_b, sp_b = _new_scene(preset_path)
+    preview = _new_preview(preset_path)
+
+    def _step(enc: float, t: float) -> tuple[np.ndarray, np.ndarray]:
+        _emit_encoder(sp_a, enc, t)
+        _emit_encoder(sp_b, enc, t)
+        return plugin_a.produce()[0]["frame"], plugin_b.produce()[0]["frame"]
+
+    for i, enc in enumerate((0.0, 5.0, 10.0)):
+        fa, fb = _step(enc, float(i))
+        assert np.array_equal(fa, fb), f"два одинаковых инстанса разошлись ДО preview на шаге {i}"
+
+    for _ in range(3):  # любое число превью
+        result = _call_command(preview, "preset.preview", {"seeds": [1, 2, 3, 4]})
+        assert result["status"] == "ok", result
+
+        png_bytes = base64.b64decode(result["png_b64"])
+        img = cv2.imdecode(np.frombuffer(png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert img is not None and img.size > 0, "png_b64 должен декодироваться в валидное изображение"
+
+        tiles = result["tiles"]
+        assert [t["seed"] for t in tiles] == [1, 2, 3, 4], f"порядок tiles должен совпадать с порядком seeds: {tiles}"
+        for tile in tiles:
+            assert "class_name" in tile and "layer_params" in tile, tile
+
+    for i, enc in enumerate((15.0, 20.0, 25.0), start=3):
+        fa, fb = _step(enc, float(i))
+        assert np.array_equal(fa, fb), f"preview повлиял на последующие кадры (побитовое расхождение) на шаге {i}"
+
+
+# --- P7 (перенесено из приёмки тестера) ---
+
+
+def test_p7_preview_unsaved_preset_and_limits(tmp_path: Path) -> None:
+    preset_path, _catalog_dir = _make_fixture(tmp_path)
+    plugin = _new_preview(preset_path)
+
+    before_bytes = preset_path.read_bytes()
+
+    unsaved = ScenePreset.from_yaml(preset_path).to_dict()
+    unsaved["layers"][0]["color_rgb"] = [255, 0, 0]
+    result_unsaved = _call_command(plugin, "preset.preview", {"preset": unsaved, "seeds": [1]})
+    assert result_unsaved["status"] == "ok", result_unsaved
+    assert preset_path.read_bytes() == before_bytes, "preview с несохранённым preset не должен трогать файл"
+
+    result_seeds = _call_command(plugin, "preset.preview", {"seeds": list(range(17))})
+    assert result_seeds["status"] == "error" and result_seeds.get("code") == "bad_request", result_seeds
+
+    result_tile = _call_command(plugin, "preset.preview", {"seeds": [1], "tile_px": 257})
+    assert result_tile["status"] == "error" and result_tile.get("code") == "bad_request", result_tile
+
+    assert preset_path.read_bytes() == before_bytes, "bad_request preview не должен трогать файл"
+
+
+# --- Hazard-тесты автора (перенесены из test_scene_source_hazards_1_2a.py) ---
+
+
+def test_preview_pixel_budget_bad_request(tmp_path: Path) -> None:
+    preset_path, _ = _make_fixture(tmp_path)
+    plugin = _new_preview(preset_path)
+    cases = [
+        ({}, "ok"),
+        ({"seeds": list(range(8)), "tile_px": 160}, "ok"),
+        ({"seeds": list(range(16)), "tile_px": 113}, "ok"),  # 16*113^2 = 204304 <= 8*160^2
+        ({"seeds": list(range(16)), "tile_px": 114}, "bad_request"),  # 207936
+        ({"seeds": list(range(16)), "tile_px": 160}, "bad_request"),
+        ({"seeds": list(range(9)), "tile_px": 160}, "bad_request"),
+        ({"seeds": list(range(17)), "tile_px": 16}, "bad_request"),  # P7: сидов > 16
+        ({"seeds": [1], "tile_px": 257}, "bad_request"),  # P7: тайл > 256
+        ({"seeds": [-1]}, "bad_request"),
+        ({"seeds": [True]}, "bad_request"),
+        ({"seeds": [1], "tile_px": 15}, "bad_request"),
+    ]
+    for data, expected in cases:
+        res = _call_command(plugin, "preset.preview", data)
+        got = res["status"] if res["status"] == "ok" else res["code"]
+        assert got == expected, (data, res)
+    # Пределы проверяются ДО пресета: кривой preset + кривые seeds -> bad_request, не invalid.
+    res = _call_command(plugin, "preset.preview", {"preset": {"layers": "x"}, "seeds": list(range(17))})
+    assert res["code"] == "bad_request", res
+
+
+def _outside_png(tmp_path: Path) -> Path:
+    outside = tmp_path.parent / f"outside-{uuid.uuid4().hex}"
+    outside.mkdir()
+    img = np.full((10, 10, 4), 200, dtype=np.uint8)
+    imwrite_unicode(outside / "x.png", cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA))
+    return outside / "x.png"
+
+
+def test_client_path_outside_roots_rejected_without_existence_oracle(tmp_path: Path) -> None:
+    preset_path, _ = _make_fixture(tmp_path)
+    plugin = _new_preview(preset_path)
+    base = ScenePreset.from_yaml(preset_path).to_dict()
+    existing = _outside_png(tmp_path)
+    missing = existing.parent / "nope.png"
+
+    def with_sprite(src: str) -> dict:
+        d = copy.deepcopy(base)
+        d["layers"][0]["sprite_source"] = src
+        return d
+
+    variants = {
+        "abs-existing": with_sprite(str(existing)),
+        "abs-missing": with_sprite(str(missing)),
+        "rel-existing": with_sprite(f"../{existing.parent.name}/x.png"),
+        "rel-missing": with_sprite(f"../{existing.parent.name}/nope.png"),
+        "catalog-existing": {**base, "catalog_dir": str(existing.parent)},
+        "catalog-missing": {**base, "catalog_dir": str(existing.parent / "nodir")},
+    }
+    messages = set()
+    for label, preset_dict in variants.items():
+        res = _call_command(plugin, "preset.preview", {"preset": preset_dict, "seeds": [1]})
+        assert res["status"] == "error" and res["code"] == "invalid", (label, res)
+        messages.add(res["message"])
+    assert len(messages) == 1, f"сообщение зависит от существования файла: {messages}"
+    assert str(existing.parent) not in next(iter(messages))
+
+    # base_dir клиента отбрасывается: "x.png" ищется в каталоге файла пресета, а не рядом
+    # с существующим outside/x.png — ответ invalid о ненайденном файле в tmp_path.
+    res = _call_command(
+        plugin, "preset.preview", {"preset": {**with_sprite("x.png"), "base_dir": str(existing.parent)}, "seeds": [1]}
+    )
+    assert res["status"] == "error" and res["code"] == "invalid", res
+    assert str(existing.parent) not in res["message"], res
+
+    from Plugins.sim.scene_source.plugin import _REPO_ROOT
+
+    in_repo = with_sprite(str(_REPO_ROOT / f"no-such-{uuid.uuid4().hex}.png"))
+    res = _call_command(plugin, "preset.preview", {"preset": in_repo, "seeds": [1]})
+    assert res["status"] == "error" and res["message"] not in messages, "корень репозитория обязан быть разрешён"
+    ok = _call_command(plugin, "preset.preview", {"preset": base, "seeds": [1]})
+    assert ok["status"] == "ok", "каталог файла пресета обязан быть разрешён"
+
+
+def test_preview_reflects_commit_through_scene_source_without_restart(tmp_path: Path) -> None:
+    preset_path, _ = _make_fixture(tmp_path)
+    scene, _sp = _new_scene(preset_path)
+    preview = _new_preview(preset_path)
+    first = _call_command(preview, "preset.preview", {"seeds": [1]})
+    second = _call_command(preview, "preset.preview", {"seeds": [1]})
+    assert first["status"] == "ok" and first["png_b64"] == second["png_b64"]
+
+    got = _call_command(scene, "preset.get", {})
+    red = copy.deepcopy(got["preset"])
+    red["layers"][0]["color_rgb"] = [255, 0, 0]
+    assert _call_command(scene, "preset.commit", {"preset": red, "base_rev": got["rev"]})["status"] == "ok"
+
+    third = _call_command(preview, "preset.preview", {"seeds": [1]})
+    assert third["status"] == "ok" and third["png_b64"] != first["png_b64"], "превью не увидело commit без рестарта"
+    img = _decode(third)
+    red_px = int(((img[..., 2] > 200) & (img[..., 1] < 60) & (img[..., 0] < 60)).sum())
+    assert red_px > 0, "в превью после commit нет красного диска"
+
+
+def test_preview_applies_stand_defect_override(tmp_path: Path) -> None:
+    preset_path, _ = _make_fixture(tmp_path)
+    forced = _new_preview(preset_path, defect_probability=1.0)
+    plain = _new_preview(preset_path)
+    res_forced = _call_command(forced, "preset.preview", {"seeds": [1, 2]})
+    res_plain = _call_command(plain, "preset.preview", {"seeds": [1, 2]})
+    assert all(t["layer_params"]["damaged"]["active"] for t in res_forced["tiles"]), res_forced["tiles"]
+    assert not any(t["layer_params"]["damaged"]["active"] for t in res_plain["tiles"]), res_plain["tiles"]
+
+
+def test_preview_catalog_mode_like_the_stand(tmp_path: Path) -> None:
+    """Стенд (`apps/line_sim/pipeline.yaml`) держит `preset_path` = каталог классов, не .yaml."""
+    _preset_path, catalog_dir = _make_fixture(tmp_path)
+    plugin = _new_preview(catalog_dir)
+    res = _call_command(plugin, "preset.preview", {"seeds": [1, 2]})
+    assert res["status"] == "ok", res
+    assert {t["class_name"] for t in res["tiles"]} <= {"A", "B"}
+    # Клиентский пресет у каталожного хоста: разрешён только корень репозитория.
+    client = {"catalog_dir": str(catalog_dir)}
+    res = _call_command(plugin, "preset.preview", {"preset": client, "seeds": [1]})
+    assert res["status"] == "error" and res["code"] == "invalid", res
+
+
+def test_preview_without_preset_is_invalid_not_crash() -> None:
+    plugin = _new_preview(None)
+    res = _call_command(plugin, "preset.preview", {})
+    assert res["status"] == "error" and res["code"] == "invalid", res
+    res = plugin.cmd_preset_preview("not a dict")  # type: ignore[arg-type]
+    assert res["status"] == "error" and res["code"] == "bad_request", res
+
+
+def test_plugin_is_side_effect_control_without_ports() -> None:
+    from Plugins.sim.layer_preview.plugin import LayerPreviewPlugin
+
+    assert LayerPreviewPlugin.category == "control"
+    assert LayerPreviewPlugin.inputs == [] and LayerPreviewPlugin.outputs == []
+    assert LayerPreviewPlugin.commands == {"preset.preview": "cmd_preset_preview"}

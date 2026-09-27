@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Приёмочные тесты Task 1.2a (независимый тестер, ДО реализации) — команды пресета
-`scene_source`: `preset.get` / `preset.commit` / `preset.preview`, горячая подмена на
-живой ленте. Источник контракта — `plans/line-sim-layer-editor.md`, раздел «Устройство»
+`scene_source`: `preset.get` / `preset.commit`, горячая подмена на живой ленте.
+P6/P7 (`preset.preview`) перенесены в `Plugins/sim/layer_preview/tests/test_layer_preview.py` —
+хост превью сменился (ревью 1.2a S1), утверждения сохранены.
+Источник контракта — `plans/line-sim-layer-editor.md`, раздел «Устройство»
 и критерии P1-P8 Task 1.2a; спецификация не смотрела в реализацию (её ещё нет).
 
 Плагин собирается через фейковый `ctx` (паттерн — `test_scene_source_hazards_1_1b.py`,
@@ -16,7 +18,6 @@
 
 from __future__ import annotations
 
-import base64
 import copy
 import hashlib
 import threading
@@ -338,68 +339,6 @@ def test_p5_hot_swap_recolors_new_objects_without_restart(tmp_path: Path) -> Non
             break
         time.sleep(0.01)
     assert found_red_after, f"новый объект с красным диском не появился за {cap} кадров после commit (без рестарта)"
-
-
-# --- P6 ---
-
-
-def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
-    preset_path, _catalog_dir = _make_fixture(tmp_path)
-    plugin_a, _ctx_a, sp_a = _new_plugin(preset_path)
-    plugin_b, _ctx_b, sp_b = _new_plugin(preset_path)
-
-    def _step(enc: float, t: float) -> tuple[np.ndarray, np.ndarray]:
-        _emit_encoder(sp_a, enc, t)
-        _emit_encoder(sp_b, enc, t)
-        frame_a = plugin_a.produce()[0]["frame"]
-        frame_b = plugin_b.produce()[0]["frame"]
-        return frame_a, frame_b
-
-    for i, enc in enumerate((0.0, 5.0, 10.0)):
-        fa, fb = _step(enc, float(i))
-        assert np.array_equal(fa, fb), f"два одинаковых инстанса разошлись ДО preview на шаге {i}"
-
-    result = _call_command(plugin_a, "preset.preview", {"seeds": [1, 2, 3, 4]})
-    assert result["status"] == "ok", result
-
-    png_bytes = base64.b64decode(result["png_b64"])
-    arr = np.frombuffer(png_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    assert img is not None and img.size > 0, "png_b64 должен декодироваться в валидное изображение"
-
-    tiles = result["tiles"]
-    assert [t["seed"] for t in tiles] == [1, 2, 3, 4], f"порядок tiles должен совпадать с порядком seeds: {tiles}"
-    for tile in tiles:
-        assert "class_name" in tile and "layer_params" in tile, tile
-
-    for i, enc in enumerate((15.0, 20.0, 25.0), start=3):
-        fa, fb = _step(enc, float(i))
-        assert np.array_equal(fa, fb), f"preview повлиял на последующие кадры (побитовое расхождение) на шаге {i}"
-
-
-# --- P7 ---
-
-
-def test_p7_preview_unsaved_preset_and_limits(tmp_path: Path) -> None:
-    preset_path, _catalog_dir = _make_fixture(tmp_path)
-    plugin, _ctx, _sp = _new_plugin(preset_path)
-
-    before_bytes = preset_path.read_bytes()
-
-    unsaved = ScenePreset.from_yaml(preset_path).to_dict()
-    unsaved["layers"][0]["color_rgb"] = [255, 0, 0]
-    result_unsaved = _call_command(plugin, "preset.preview", {"preset": unsaved, "seeds": [1]})
-    assert result_unsaved["status"] == "ok", result_unsaved
-    assert preset_path.read_bytes() == before_bytes, "preview с несохранённым preset не должен трогать файл"
-
-    too_many_seeds = list(range(17))
-    result_seeds = _call_command(plugin, "preset.preview", {"seeds": too_many_seeds})
-    assert result_seeds["status"] == "error" and result_seeds.get("code") == "bad_request", result_seeds
-
-    result_tile = _call_command(plugin, "preset.preview", {"seeds": [1], "tile_px": 257})
-    assert result_tile["status"] == "error" and result_tile.get("code") == "bad_request", result_tile
-
-    assert preset_path.read_bytes() == before_bytes, "bad_request preview не должен трогать файл"
 
 
 # --- P8 ---
