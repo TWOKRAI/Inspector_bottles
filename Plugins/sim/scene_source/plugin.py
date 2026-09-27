@@ -306,7 +306,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         defect_probability=...)`, дефолт `_DEFAULT_DEFECT_PROBABILITY`, если ключа
         нет в конфиге.
         """
-        if preset_path is not None and preset_path.endswith((".yaml", ".yml")):
+        if preset_path is not None and preset_path.lower().endswith((".yaml", ".yml")):
             preset = ScenePreset.from_yaml(preset_path)
             if "defect_probability" in cfg:
                 preset = ScenePreset.from_dict(

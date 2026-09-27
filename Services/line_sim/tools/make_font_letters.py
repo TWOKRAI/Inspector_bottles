@@ -37,8 +37,8 @@ from PIL import Image, ImageDraw, ImageFont
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim.tools.make_letter_catalog import DEFAULT_DIAMETER_PX
 
-#: Кодпоинт, заведомо не занятый ни одним реальным шрифтом (Unicode noncharacter,
-#: последний в плоскости 16) — эталон «глифа точно нет» для сравнения масок.
+#: Кодпоинт, заведомо не занятый реальными шрифтами (private use, категория `Co`, плоскость 16;
+#: ревью 1.1b: это не noncharacter — тот U+10FFFF) — эталон «глифа точно нет» для сравнения масок.
 _MISSING_PROBE_CH = "\U0010fffd"
 
 #: Во сколько раз канва пробного/финального рендера больше `size_px` — запас, чтобы
@@ -51,7 +51,10 @@ _DEFAULT_LETTER_FRAC = 0.6
 def _render_mask(font_path: Path, ch: str, font_size_pt: int, canvas_px: int) -> np.ndarray:
     """Один символ `ch`, отрисованный шрифтом `font_path` размера `font_size_pt` в
     центр квадратной канвы `canvas_px` x `canvas_px` -> маска "L" (0..255)."""
-    font = ImageFont.truetype(str(font_path), font_size_pt)
+    try:
+        font = ImageFont.truetype(str(font_path), font_size_pt)
+    except OSError as exc:  # битмап-шрифт, битый файл (ревью 1.1b, NIT-6)
+        raise SystemExit(f"make_font_letters: шрифт {font_path.name} не открывается как масштабируемый: {exc}") from exc
     img = Image.new("L", (canvas_px, canvas_px), 0)
     draw = ImageDraw.Draw(img)
     draw.text((canvas_px / 2, canvas_px / 2), ch, font=font, fill=255, anchor="mm")
@@ -126,6 +129,12 @@ def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: floa
     final_bbox = _alpha_bbox(final_mask)
     assert final_bbox is not None, f"перерендер {font_path.name}/{letter!r} дал пустую маску при size={final_font_size}"
     fy0, fy1, fx0, fx1 = final_bbox
+    width = fx1 - fx0 + 1
+    if width > size_px:  # масштаб по высоте; широкая буква молча обрезалась бы по бокам (ревью 1.1b)
+        raise SystemExit(
+            f"make_font_letters: шрифт {font_path.name}, буква {letter!r}: ширина {width} px > size_px {size_px} "
+            "— уменьшите --letter-frac"
+        )
     center_rc = ((fy0 + fy1) / 2.0, (fx0 + fx1) / 2.0)
     mask = _center_crop(final_mask, center_rc, size_px)
 
@@ -144,17 +153,17 @@ def build_font_letters(
     """Собрать каталог `out/<буква>/<стем файла шрифта>.png` для каждой пары буква x
     шрифт. Возвращает список записанных файлов (порядок: буквы `letters`, внутри —
     порядок `fonts`)."""
-    written: list[Path] = []
-    for letter in letters:
-        letter_dir = out / letter
-        letter_dir.mkdir(parents=True, exist_ok=True)
-        for font_path in fonts:
-            font_path = Path(font_path)
-            rgba = _render_letter(font_path, letter, size_px, letter_frac)
-            dest = letter_dir / f"{font_path.stem}.png"
-            imwrite_unicode(dest, cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
-            written.append(dest)
-    return written
+    # Сначала все рендеры, потом запись: ошибка на любой паре не оставляет пустых папок
+    # классов, которые каталог молча принял бы (ревью 1.1b, NIT-3).
+    rendered = [
+        (out / letter / f"{Path(font_path).stem}.png", _render_letter(Path(font_path), letter, size_px, letter_frac))
+        for letter in letters
+        for font_path in fonts
+    ]
+    for dest, rgba in rendered:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        imwrite_unicode(dest, cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
+    return [dest for dest, _ in rendered]
 
 
 def build_disk(size_px: int) -> np.ndarray:

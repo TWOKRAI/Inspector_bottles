@@ -55,3 +55,33 @@ def test_defect_blob_covers_disk_not_only_letter(tmp_path: Path) -> None:
     letter_box[20:40, 20:40] = True  # буква 20×20 по центру канвы 60×60
     assert changed.any()
     assert (changed & ~letter_box).any(), "пятно не вышло за букву — построено не по нижнему слою"
+
+
+def test_font_tool_rejects_letter_wider_than_canvas_and_writes_nothing(tmp_path: Path) -> None:
+    """Ревью 1.1b, SHOULD-1 + NIT-3: DejaVuSans «Ж» (ширина/высота ≈ 1.42) при `letter_frac=0.8` шире
+    квадрата `size_px` — выход с ошибкой (шрифт, буква в тексте), и НИ ОДНОГО файла/папки в `out`
+    (иначе каталог молча принял бы пустой класс). При `letter_frac=0.6` та же буква проходит."""
+    import subprocess
+    import sys
+
+    import matplotlib
+
+    font = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSans.ttf"
+    root = Path(__file__).resolve().parents[3]
+
+    def run(frac: str, out: Path) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-m", "Services.line_sim.tools.make_font_letters", "--letters", "ИЖ",
+             "--font", str(font), "--size-px", "100", "--letter-frac", frac, "--out", str(out)],
+            capture_output=True, text=True, timeout=60, cwd=root,
+            env={"PYTHONPATH": str(root), "PATH": "/usr/bin:/bin"},
+        )
+
+    bad = run("0.8", tmp_path / "bad")
+    assert bad.returncode != 0
+    assert "DejaVuSans" in bad.stderr + bad.stdout and "Ж" in bad.stderr + bad.stdout
+    assert not (tmp_path / "bad").exists() or not any((tmp_path / "bad").iterdir())
+
+    ok = run("0.6", tmp_path / "ok")
+    assert ok.returncode == 0, ok.stderr
+    assert (tmp_path / "ok" / "Ж" / "DejaVuSans.png").is_file()
