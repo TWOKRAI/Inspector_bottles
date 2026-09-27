@@ -142,11 +142,16 @@ class ZScale(QWidget):
                 self._paint_row(painter, z, "#ff5c57")
             for name, z in self._marks.items():
                 self._paint_row(painter, z, "#8be9fd", label=name)
-            self._paint_row(painter, self._z, "#5af78e", label="Z")
+            # Подпись текущего Z — ПОД линией (отметки подписаны над своей): при Z,
+            # равном отметке (на старте Z = home), подписи иначе легли бы одна на
+            # другую (живой снимок T2.W).
+            self._paint_row(painter, self._z, "#5af78e", label="Z", below=True)
         finally:
             painter.end()
 
-    def _paint_row(self, painter: QPainter, z: float, color: str, label: str | None = None) -> None:
+    def _paint_row(
+        self, painter: QPainter, z: float, color: str, label: str | None = None, below: bool = False
+    ) -> None:
         y = self.z_to_widget_y(z)
         pen = QPen(QColor(color))
         pen.setWidth(3)
@@ -154,7 +159,7 @@ class ZScale(QWidget):
         painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
         if label:
             painter.setPen(QPen(QColor(_TEXT_COLOR)))
-            painter.drawText(QPointF(12, y - 4), f"{label} {z:.1f}")
+            painter.drawText(QPointF(12, y + 14 if below else y - 4), f"{label} {z:.1f}")
 
 
 class TimeTape(QWidget):
