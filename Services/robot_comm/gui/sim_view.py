@@ -33,6 +33,8 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, KIND, OP, REASON_TEXT, REG, STOP_LEVEL
+from Services.robot_comm.gui._common import _REFRESH_MS, _decode_reg
+from Services.robot_comm.gui.z_view import TimeTape, ZScale
 from Services.robot_comm.server.sim_core_v2 import (
     RobotSimCoreV2,
     TLM_ACTIVITY_FAULT,
@@ -41,8 +43,6 @@ from Services.robot_comm.server.sim_core_v2 import (
     TLM_ACTIVITY_PTP,
 )
 
-#: период таймера перерисовки, мс (contract T2.V: "~33 мс").
-_REFRESH_MS = 33
 #: длина шлейфа TCP, точек.
 _TRAIL_LEN = 200
 #: отступ от края виджета до кольца зоны, px.
@@ -53,9 +53,11 @@ _ZONE_MARGIN = 1.1
 _RZ_POINTER_LEN_PX = 30.0
 #: отступ начала стрелки от TCP, px — совпадает с длиной плеча креста (см.
 #: `_paint_tool`), чтобы стрелка не перекрашивала пиксели кольца+креста
-#: маркера TCP поверх них (иначе ломает T2.V `test_grab_pixel_at_tool_position_
-#: matches_marker_color` и `test_unreachable_pose_no_chains_and_warning`,
-#: которые проверяют ТОЧНЫЙ цвет пикселя ровно в TCP).
+#: маркера TCP поверх них. Проверено запуском с gap=0.0 (ревью T2.W, F7):
+#: КРАСНЫМИ становятся ОБА теста, проверяющих точный цвет пикселя ровно в
+#: TCP — `test_grab_pixel_at_tool_position_matches_marker_color`
+#: (`test_sim_view_internal.py`) и `test_unreachable_pose_no_chains_and_warning`
+#: (`test_sim_view.py`), каждый и в изоляции, и вместе.
 _RZ_POINTER_GAP_PX = 9.0
 #: цвет стрелки поворота инструмента (T2.W, contract §1).
 _RZ_POINTER_COLOR = "#ffb86c"
@@ -70,12 +72,6 @@ _ACTIVITY_NAMES = {
 #: ACK/NAK не входят в сгенерированный контракт (protocol-spec §4) -> литерал,
 #: как в sim_core_v2 (тот же символ, отдельно — модуль ядра не публикует его).
 _NAK = 2
-
-
-def _decode_reg(raw: int) -> float:
-    """u16-регистр позы (×10, two's complement) -> инженерное значение (мм/°)."""
-    signed = raw - 65536 if raw >= 0x8000 else raw
-    return signed / 10.0
 
 
 def _encode_mm(eng: float) -> int:
@@ -246,6 +242,19 @@ class SimView(QWidget):
         """Остановить таймер перерисовки при закрытии (переиспользование вида в T2.3 --view)."""
         self._timer.stop()
         super().closeEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (переопределение Qt)
+        """Остановить таймер при скрытии виджета (F4, ревью T2.W): Qt доставляет
+        ``closeEvent`` только окну верхнего уровня — встроенный в него виджет
+        (``build_window``) продолжал бы тикать после ``window.close()``, если
+        полагаться только на него."""
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802 (переопределение Qt)
+        """Возобновить таймер при повторном показе (пара к ``hideEvent``)."""
+        self._timer.start(_REFRESH_MS)
+        super().showEvent(event)
 
     def _paint_zone(self, painter: QPainter) -> None:
         ws = self.core._workspace()  # ponytail: см. _paint_transform
@@ -427,12 +436,6 @@ def build_window(core: RobotSimCoreV2) -> QWidget:
     """Собрать отладочное окно над ``core``: кнопки, ``SimView`` + ``ZScale`` в ряд,
     ``TimeTape`` снизу. Отдельно от ``main()`` — чтобы состав окна проверялся
     тестом без event loop (сторож инъекции I11, T2.W)."""
-    # Локальный импорт — z_view.py импортирует _REFRESH_MS/_decode_reg ИЗ
-    # этого модуля; импорт на уровне модуля здесь дал бы цикл при запуске
-    # `python -m Services.robot_comm.gui.sim_view` (sim_view ещё не
-    # доопределён к моменту, когда его же импортировал бы z_view).
-    from Services.robot_comm.gui.z_view import TimeTape, ZScale
-
     driver = DemoDriver(core)
     view = SimView(core)
     view.clicked.connect(driver.goto)

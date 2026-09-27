@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import math
 
 import pytest
@@ -20,8 +19,9 @@ pytest.importorskip("PySide6", reason="окно-вид требует PySide6")
 
 from PySide6.QtGui import QCloseEvent
 
-from Services.robot_comm.core.protocol_v2 import REG
-from Services.robot_comm.gui.sim_view import SimView
+from Services.robot_comm.core.params_v2 import PARAM_ID
+from Services.robot_comm.core.protocol_v2 import KIND, OP, REG
+from Services.robot_comm.gui.sim_view import SimView, build_window
 from Services.robot_comm.gui.z_view import TimeTape, ZScale
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
@@ -43,6 +43,36 @@ def fresh_core(**kw) -> RobotSimCoreV2:
     return RobotSimCoreV2(fw_build=7, **kw)
 
 
+def mm_arg(eng: float) -> int:
+    """Инженерное значение (мм/°) -> сырой аргумент команды ×10, округление до целого."""
+    return round(eng * 10)
+
+
+def cmd(core: RobotSimCoreV2, seq: int, opcode: int, *args: int) -> dict:
+    """Мейлбокс-хелпер, паттерн скопирован из test_z_view.py (та же директория)."""
+    core.write(REG["CMD_SEQ"], [seq & 0xFFFF])
+    core.write(REG["CMD_OPCODE"], [opcode])
+    core.write(REG["CMD_ARGC"], [len(args)])
+    if args:
+        core.write(REG["CMD_ARGS"], [a & 0xFFFF for a in args])
+    core.write(REG["CMD_FLAG"], [1])  # CMD_FLAG — последним (TRAPS)
+    core.tick()
+    return {
+        "status": core.read(REG["RES_STATUS"], 1)[0],
+        "errno": core.read(REG["RES_ERRNO"], 1)[0],
+    }
+
+
+def run_until_idle(core: RobotSimCoreV2, max_ticks: int = 3000) -> None:
+    """Тикает, пока активная команда не завершится (TLM_MOVING == 0). Ограничено
+    потолком тиков — висящий тест хуже отсутствующего (project-rules)."""
+    for _ in range(max_ticks):
+        core.tick()
+        if core.regs[REG["TLM_MOVING"]] == 0:
+            return
+    pytest.fail(f"ход не завершился за {max_ticks} тиков")
+
+
 class FakeClock:
     """Инжектируемые часы — тик по требованию, время можно двигать и назад."""
 
@@ -61,35 +91,95 @@ def _close(pixel, target, tol: int = _TOL) -> bool:
     return all(abs(c - t) <= tol for c, t in zip(channels, target))
 
 
-def _degenerate_workspace(core: RobotSimCoreV2):
-    """Копия реальной Workspace с вырожденными Z/RZ-диапазонами (z_min==z_max,
-    rz_min==rz_max) — как при плохом PARAM_SET (min записан выше max)."""
-    ws = core._workspace()
-    return dataclasses.replace(ws, z_min=-50.0, z_max=-50.0, rz_min=10.0, rz_max=10.0)
+# Раньше здесь стоял test_degenerate_span_does_not_raise_in_zscale_and_tape,
+# создававший вырожденный домен монки-патчем ``core._workspace()``. После F5
+# (ревью T2.W) ZScale/TimeTape вообще не вызывают ``core._workspace()`` —
+# границы зоны идут через зеркало PMIR (``_param_eng``), так что тот
+# монки-патч больше не достигает кода под тестом (пинил путь, которого нет).
+# Удалён, а не обновлён: та же гарантия (не падать на вырожденном/почти
+# вырожденном домене) теперь покрыта РЕАЛЬНЫМ PARAM_SET —
+# test_z_outside_zone_gets_distinct_row_from_bound (Z вне зоны) и
+# test_inverted_zone_bounds_get_distinct_rows_and_no_raise (инверсия
+# z_min/z_max) ниже.
 
 
-def test_degenerate_span_does_not_raise_in_zscale_and_tape(qtbot):
-    """P_WS_Z_MIN == P_WS_Z_MAX (и RZ) не должно ронять ни ZScale, ни TimeTape
-    на refresh()/grab()/z_to_widget_y() — запасной размах в ``_span_or_fallback``
-    обязан покрыть деление на ноль."""
+def test_window_close_stops_all_three_timers(qtbot):
+    """F4, ревью T2.W: Qt доставляет ``closeEvent`` только окну верхнего
+    уровня — без ``hideEvent`` каждый из трёх виджетов, встроенных
+    ``build_window()`` в общее окно, продолжал бы тикать после
+    ``window.close()`` (живой снимок ведущего: лента набрала 1 -> 17 выборок
+    за 0.5 с после закрытия). Реальные объекты через ``build_window()`` +
+    ``show()``/``close()``, ``closeEvent`` не вызывается напрямую."""
+    core = RobotSimCoreV2()
+    window = build_window(core)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    window.close()
+
+    view = window.findChildren(SimView)[0]
+    zscale = window.findChildren(ZScale)[0]
+    tape = window.findChildren(TimeTape)[0]
+
+    assert not view._timer.isActive(), "таймер SimView тикает после закрытия окна"
+    assert not zscale._timer.isActive(), "таймер ZScale тикает после закрытия окна"
+    assert not tape._timer.isActive(), "таймер TimeTape тикает после закрытия окна"
+
+
+def test_z_outside_zone_gets_distinct_row_from_bound(qtbot):
+    """F1, ревью T2.W: Z вне зоны (после ACKed хода на Z=-130, PARAM_SET сузил
+    z_min до -120, выше текущего Z) получает строку, отличную от границы
+    z_min — без домена по факту (min/max над границами + текущим Z + метками,
+    не голые границы) значение вне зоны зажалось бы на край и слилось со
+    строкой границы в один пиксель."""
     core = fresh_core()
-    bad_ws = _degenerate_workspace(core)
-    core._workspace = lambda: bad_ws  # ponytail: монки-патч приватного метода, тест внутренний
+    r = cmd(core, 1, OP["PTP_MOVE"], mm_arg(300.0), mm_arg(-210.0), mm_arg(-130.0), mm_arg(-100.0), KIND["JOINT"], 0)
+    assert r["status"] == 1, r  # ACK
+    run_until_idle(core)
 
     scale = ZScale(core)
     qtbot.addWidget(scale)
     scale.resize(120, 300)
     scale.refresh()
+    assert scale.z_value() == pytest.approx(-130.0, abs=0.05)  # предпосылка
+
+    r = cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_WS_Z_MIN"], -1200 & 0xFFFF)  # eng -120.0, выше Z=-130
+    assert r["status"] == 1, r  # ACK
+
+    scale.refresh()
     scale.grab()  # не должно поднять исключение
+
+    z_row = round(scale.z_to_widget_y(scale.z_value()))
+    bound_row = round(scale.z_to_widget_y(scale.z_limits()[0]))
+    assert z_row != bound_row, "Z вне зоны слился со строкой границы z_min"
+
+
+def test_inverted_zone_bounds_get_distinct_rows_and_no_raise(qtbot):
+    """F1, ревью T2.W: P_WS_Z_MIN выставлен ВЫШЕ P_WS_Z_MAX (инверсия,
+    ошибочный PARAM_SET, ничем не проверяется на границе параметра) —
+    refresh()/grab() не должны поднимать исключение, а строки двух границ
+    остаются разными (домен строится через min/max по значениям, не по
+    декларированному порядку min < max)."""
+    core = fresh_core()
+    scale = ZScale(core)
+    qtbot.addWidget(scale)
+    scale.resize(120, 300)
+    scale.refresh()
+
+    r = cmd(core, 1, OP["PARAM_SET"], PARAM_ID["P_WS_Z_MIN"], 100)  # eng +10.0, выше z_max=0.0
+    assert r["status"] == 1, r  # ACK
+
+    scale.refresh()
+    scale.grab()  # не должно поднять исключение
+
+    z_min, z_max = scale.z_limits()
+    assert z_min > z_max  # предпосылка: зона инвертирована
+    row_min = round(scale.z_to_widget_y(z_min))
+    row_max = round(scale.z_to_widget_y(z_max))
+    assert row_min != row_max, "границы инвертированной зоны слились в одну строку"
+
     y = scale.z_to_widget_y(scale.z_value())
     assert math.isfinite(y)
-
-    tape = TimeTape(core, clock=FakeClock())
-    qtbot.addWidget(tape)
-    tape.resize(300, 150)
-    tape.refresh()
-    tape.refresh()  # нужно >= 2 выборки, чтобы отрисовка кривой реально исполнилась
-    tape.grab()  # не должно поднять исключение
 
 
 def test_z_outside_limits_clamped_into_image(qtbot):

@@ -28,7 +28,6 @@ plans/robot-protocol-v2/tasks.md «Окно-вид симулятора v2»), �
 
 from __future__ import annotations
 
-import math
 import os
 import subprocess
 import sys
@@ -184,8 +183,11 @@ def test_zscale_pixels_current_and_bound(qtbot):
 
 
 def test_zscale_redraws_after_param_set_z_min(qtbot):
-    """PARAM_SET P_WS_Z_MIN -> после refresh() z_limits()[0] новый,
-    z_to_widget_y той же отметки изменился, в новой строке — цвет границы."""
+    """PARAM_SET P_WS_Z_MIN -> после refresh() z_limits()[0] новый и домен
+    развёртки (F1, ревью T2.W: min/max по границам + текущему Z + отметкам,
+    не голые границы) сузился -> та же точка -40.0 (текущий Z в момент
+    старта, боевой дефолт) рисуется в ДРУГОЙ строке, цветом текущего Z; строка
+    новой границы z_min — по-прежнему цветом границы."""
     core = fresh_core()
     scale = ZScale(core)
     qtbot.addWidget(scale)
@@ -193,10 +195,6 @@ def test_zscale_redraws_after_param_set_z_min(qtbot):
     scale.refresh()
 
     old_min, _old_max = scale.z_limits()
-    # Ведущий, 2026-09-27: шкала развёрнута по [z_min, z_max] — сама граница
-    # всегда у нижнего края; при смене z_min сдвигается НЕИЗМЕННЫЙ z (текущий
-    # -40.0), а не строка границы. Первая редакция требовала сдвига строки
-    # z_min — это противоречило «z_min снизу» спецификации (отчёт ведущего T2.W).
     old_row = round(scale.z_to_widget_y(-40.0))
 
     r = cmd(core, 1, OP["PARAM_SET"], PARAM_ID["P_WS_Z_MIN"], -1200)  # eng -120.0 мм
@@ -204,14 +202,17 @@ def test_zscale_redraws_after_param_set_z_min(qtbot):
 
     scale.refresh()
     new_min, _new_max = scale.z_limits()
-    new_row = round(scale.z_to_widget_y(new_min))
+    new_row = round(scale.z_to_widget_y(-40.0))
 
     assert new_min == pytest.approx(-120.0, abs=0.05)
     assert new_min != pytest.approx(old_min, abs=0.05)
     assert new_row != old_row
 
     img = scale.grab().toImage()
-    assert _close(img.pixelColor(4, new_row), _BOUND_RGB), "граница не перерисована на новой строке"
+    assert _close(img.pixelColor(4, new_row), _CURRENT_RGB), "текущий Z не перерисован на новой строке"
+
+    bound_row = round(scale.z_to_widget_y(new_min))
+    assert _close(img.pixelColor(4, bound_row), _BOUND_RGB), "граница не перерисована на новой строке"
 
 
 def test_zscale_mark_moves_after_param_set_pick_z(qtbot):
@@ -313,14 +314,43 @@ def test_tape_window_drops_old_samples(qtbot):
 # --------------------------------------------------------------------------- #
 
 
+class _RecordingRegs(list):
+    """Список регистров, фиксирующий каждую запись (``__setitem__``) — снимок
+    ДО/ПОСЛЕ (``list(core.regs) == list(core.regs)``) не различает «не
+    записали» от «записали и откатили в исходное значение»; список-шпион
+    ловит сам ФАКТ записи, а не только итоговое состояние."""
+
+    def __init__(self, initial):
+        super().__init__(initial)
+        self.writes: list[object] = []
+
+    def __setitem__(self, index, value):
+        self.writes.append(index)
+        super().__setitem__(index, value)
+
+
 def test_widgets_never_write_registers(qtbot):
-    """SimView (со стрелкой RZ), ZScale и TimeTape — read-only: несколько
-    refresh()/grab() посреди активного хода не меняют НИ ОДНОГО регистра core."""
+    """SimView (со стрелкой RZ), ZScale и TimeTape — read-only: конструктор +
+    refresh() + grab() каждого из трёх виджетов не порождают НИ ОДНОЙ записи
+    в регистры core — ни через ``core.write()``, ни напрямую в ``core.regs``
+    (снимок сделан ДО создания виджетов, список-шпион ставится ДО них же).
+    Ядро не тикает между виджетами (contract: только refresh()/grab() под
+    наблюдением, тик core — не часть read-only контракта виджетов)."""
     core = fresh_core()
     driver = DemoDriver(core)
     driver.goto(200.0, 50.0)
     for _ in range(5):
         core.tick()
+
+    core.regs = _RecordingRegs(core.regs)
+    write_calls: list[tuple[int, list[int]]] = []
+    original_write = core.write
+
+    def _recording_write(address: int, values: list[int]) -> None:
+        write_calls.append((address, list(values)))
+        original_write(address, values)
+
+    core.write = _recording_write
 
     view = SimView(core)
     zscale = ZScale(core)
@@ -332,13 +362,12 @@ def test_widgets_never_write_registers(qtbot):
     zscale.resize(120, 300)
     tape.resize(300, 150)
 
-    before = list(core.regs)
     for widget in (view, zscale, tape):
         widget.refresh()
         widget.grab()  # форсирует paintEvent синхронно, без show()/event loop
-    after = list(core.regs)
 
-    assert after == before
+    assert write_calls == [], f"core.write() вызван виджетом: {write_calls}"
+    assert core.regs.writes == [], f"прямая запись в core.regs по индексам: {core.regs.writes}"
 
 
 # --------------------------------------------------------------------------- #
