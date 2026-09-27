@@ -82,7 +82,7 @@ processes:
         # кириллические эталоны, инструмент:
         #   python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites \
         #       --letters АКРХ --diameter-px 300 --out data/line_sim/letter_catalog
-        preset_path: data/line_sim/letter_catalog
+        preset_path: data/line_sim/letter_catalog_rep
         # 800 px ROI = 98 мм ленты вдоль хода (калибровка рецепта, u = x_roi/800).
         px_per_mm: 8.163265
         # Центр ROI по вертикали (v=0.5): roi.y + roi.height/2 = 297 + 481/2 = 537.5.
