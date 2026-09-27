@@ -1,9 +1,12 @@
 ---
 name: injection-scripts-on-committed-code
-description: Break-injection scripts that restore files with `git checkout` must run on committed code, and multi-path variables must run under bash — both traps hit on gui-service 1.3b/1b.5 (2026-09-25)
+description: "Break-injection scripts that restore files with `git checkout` must run on committed code, and multi-path variables must run under bash — both traps hit on gui-service 1.3b/1b.5 (2026-09-25)"
 metadata:
+  node_type: memory
   type: feedback
-  last-verified: 2026-09-25
+  last-verified: 2026-09-27
+  originSessionId: 59c9cbad-07d6-46c5-850e-0b76582ec758
+  modified: 2026-09-27T14:47:31.394Z
 ---
 
 Commit the fix before running a break-injection script whose restore step is `git checkout -- <file>`.
@@ -15,7 +18,15 @@ apply). Recovered only because a stray `cp` backup existed. Separately, zsh does
 instead of failing loudly.
 
 **How to apply:**
-- Commit (or WIP-commit) first; then every injection restores from git safely.
+- Commit first; then every injection restores from git safely. A WIP commit must carry a valid Conventional
+  subject + `Why:`/`Layer:` — the commit-msg hook rejects `wip-...`, and a following `git reset --soft HEAD~1`
+  then drops the REAL previous commit (robot-protocol-v2 T2.V, 2026-09-27: developer's commit silently unwound,
+  recovered by `git reset --soft <sha>`). Never chain `commit && ... ; reset HEAD~1` without checking the commit
+  exit code; prefer restoring from an in-memory copy of the file instead of a WIP commit.
 - Run injection loops via `bash -c '...'` (or arrays), and treat an empty result line as a broken harness,
   never as "0 red".
+- Run the injected pytest with `PYTHONDONTWRITEBYTECODE=1` and delete the module's `.pyc` after the
+  restore. robot-protocol-v2 T2.1 (2026-09-27): an injection that MOVES a line keeps the file size, the
+  restore lands in the same second, so Python's mtime+size check reused the injected `.pyc` — the correct
+  code then failed its own test and looked like a real regression.
 - Related: [[merge-radius-skips-live-and-contract-tests]].

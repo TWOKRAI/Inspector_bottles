@@ -23,3 +23,4 @@
 - [_wired harness misses introspect.*](feedback_wired_harness_missing_introspect_commands.md) — only _register_observability_commands(); need _register_introspect_commands() too, bc not returned so copy the body
 - [config.reload inline rejects unknown observability keys](feedback_config_reload_inline_rejects_unknown_observability_keys.md) — session door only: clean success=False + "did you mean", not silent extra=ignore drop
 - [import-guard needs AST, not substring](feedback_import_guard_substring_vs_ast.md) — a docstring naming the other module fails a text-grep guard with zero real import
+- [angle boundary rounds outward at raw precision](feedback_angle_boundary_rounds_outward_at_raw_precision.md) — recompute atan2 from ROUNDED raw ints, not the float formula, before pinning accept/reject

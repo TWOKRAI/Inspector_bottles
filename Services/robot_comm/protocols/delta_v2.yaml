@@ -1,0 +1,663 @@
+# Протокол робота Delta v2 (Delta SCARA ASD-MS, DRAStudio/Lua, редакция 2)
+# Источник: plans/robot-protocol-v2/protocol-spec.md (§3 карта, §5 опкоды, §6 errno/причины,
+#           §7.1 сценарий, §8 стоп) и plans/robot-protocol-v2/params.md (§11.3 словарь параметров).
+# ЕДИНСТВЕННЫЙ источник карты — кодоген (T1.1) делает из него Python/Lua/RobotParamsV2.
+# Расхождение YAML и этих документов — дефект (см. "Статус: контракт" в protocol-spec.md).
+#
+# word_order: little — порядок слов для DW-регистров (TLM_ENC).
+# Mailbox ПЧ 0x1200..0x121F СЮДА НЕ ВХОДИТ: заморожен как в v1, владелец — Services/vfd_comm
+# (protocol-spec.md §3.5, §10).
+#
+# gate1: true — значения, зависящие от пробы GATE-1 (robot/pc_platform_probe/), снимается T0.3.
+name: delta_v2
+kind: robot
+description: "Робот Delta SCARA v2 — mailbox CMD/RES, параметры-словарь, сценарий (Lua-протокол, ред. 2)"
+word_order: little
+
+registers:
+  # ─────────────────── CMD — mailbox, ПК -> робот (§3.1, 0x1000..0x100F) ───────────────────
+  cmd_flag:
+    type: reg
+    address: 0x1000
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Флаг команды"
+    hint: "ПК пишет 1 последним, отдельным FC6; прошивка сбрасывает в 0 при приёме"
+
+  cmd_seq:
+    type: reg
+    address: 0x1001
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Номер команды (seq)"
+    hint: "1..65535, 0 запрещён; ПК увеличивает на каждую команду"
+
+  cmd_opcode:
+    type: reg
+    address: 0x1002
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Код команды"
+    hint: "Опкод из таблицы §5"
+
+  cmd_argc:
+    type: reg
+    address: 0x1003
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Число аргументов"
+    hint: "Не совпало с таблицей опкодов -> NAK E_BAD_ARGC"
+
+  cmd_args:
+    type: block
+    address: 0x1004
+    count: 12
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Аргументы команды"
+    hint: "CMD_ARG0..ARG11 (0x1004..0x100F); ARG0 чётный -> DW-аргументы на чётных слотах"
+
+  # ─────────────────────── RES — ответ, робот -> ПК (§3.2, 0x1010..0x101F) ───────────────────
+  res_seq:
+    type: reg
+    address: 0x1010
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Эхо seq"
+    hint: "Прошивка пишет последним — маркер готовности ответа"
+
+  res_status:
+    type: reg
+    address: 0x1011
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Статус ответа"
+    hint: "1 ACK, 2 NAK"
+
+  res_errno:
+    type: reg
+    address: 0x1012
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Код ошибки"
+    hint: "Код при NAK (§6), 0 при ACK"
+
+  res_rvalc:
+    type: reg
+    address: 0x1013
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Число возвратов"
+    hint: "Число заполненных RES_RVAL0..7"
+
+  res_rvals:
+    type: block
+    address: 0x1014
+    count: 8
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Возвращаемые значения"
+    hint: "RES_RVAL0..7 (0x1014..0x101B); 0x101C..0x101F — резерв, не входит в карту"
+
+  # ─────────────────────── Безопасность — вне mailbox (§3.3, 0x1020..0x1022) ─────────────────
+  hb_pc:
+    type: reg
+    address: 0x1020
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Heartbeat ПК"
+    hint: "ПК увеличивает с периодом <= P_WDG_TIMEOUT_MS / 4 (§9)"
+
+  stop_req:
+    type: reg
+    address: 0x1021
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Запрос стопа"
+    hint: "seq*4 + level, пишет ПК одним FC6 (§8)"
+
+  jog_lease:
+    type: reg
+    address: 0x1022
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Поводок jog"
+    hint: "ПК увеличивает с периодом <= P_JOG_LEASE_MS / 3, пока оператор держит кнопку JOG_CONT"
+
+  # ─────────────────── TLM — телеметрия, только чтение, один FC3 (§3.4, 0x1040..0x105F) ──────
+  tlm_proto_ver:
+    type: reg
+    address: 0x1040
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Версия протокола"
+    hint: "0x0200; probe до любых записей"
+
+  tlm_fw_build:
+    type: reg
+    address: 0x1041
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Сборка прошивки"
+    hint: "CRC16 исходников прошивки (сборщик)"
+
+  tlm_hb_robot:
+    type: reg
+    address: 0x1042
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Heartbeat робота"
+    hint: "+1 на каждый цикл Motion"
+
+  tlm_activity:
+    type: reg
+    address: 0x1043
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Текущая активность"
+    hint: "0 IDLE / 1 PTP / 2 JOG / 3 CVT / 4 SCENARIO / 5 FAULT"
+
+  tlm_x:
+    type: reg
+    address: 0x1044
+    access: r
+    unit: "мм"
+    scale: 10
+    signed: true
+    label: "Поза X"
+    hint: "×0.1 мм; во время хода пишет Mirror, в простое — Motion"
+
+  tlm_y:
+    type: reg
+    address: 0x1045
+    access: r
+    unit: "мм"
+    scale: 10
+    signed: true
+    label: "Поза Y"
+    hint: "×0.1 мм; во время хода пишет Mirror, в простое — Motion"
+
+  tlm_z:
+    type: reg
+    address: 0x1046
+    access: r
+    unit: "мм"
+    scale: 10
+    signed: true
+    label: "Поза Z"
+    hint: "×0.1 мм; во время хода пишет Mirror, в простое — Motion"
+
+  tlm_rz:
+    type: reg
+    address: 0x1047
+    access: r
+    unit: "°"
+    scale: 10
+    signed: true
+    label: "Поза RZ"
+    hint: "×0.1°; во время хода пишет Mirror, в простое — Motion"
+
+  tlm_moving:
+    type: reg
+    address: 0x1048
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "В движении"
+    hint: "1 — в движении"
+
+  tlm_servo:
+    type: reg
+    address: 0x1049
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Серво"
+    hint: "1 — серво ON"
+
+  tlm_spd_pct:
+    type: reg
+    address: 0x104A
+    access: r
+    unit: "%"
+    scale: 1
+    signed: false
+    label: "Текущий override"
+    hint: "Текущий Override, %"
+
+  tlm_do_mask:
+    type: reg
+    address: 0x104B
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Маска DO"
+    hint: "Теневая маска DO1..DO16, которые писала прошивка (бит 0 = DO1)"
+
+  tlm_enc:
+    type: dw
+    address: 0x104C
+    access: r
+    unit: ""
+    scale: 1
+    signed: true
+    label: "Энкодер ленты"
+    hint: "TLM_ENC, DW на чётном адресе (0x104C..0x104D); лента ходит в обе стороны — знаковое"
+
+  tlm_belt_mms:
+    type: reg
+    address: 0x104E
+    access: r
+    unit: "мм/с"
+    scale: 1
+    signed: true
+    label: "Скорость ленты"
+    hint: "s16, скорость ленты"
+
+  tlm_wdg_state:
+    type: reg
+    address: 0x104F
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Состояние сторожевого таймера"
+    hint: "0 выкл / 1 взведён / 2 сработал / 3 взведён по оценочным часам"
+
+  tlm_ack_seq:
+    type: reg
+    address: 0x1050
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Последняя принятая команда"
+    hint: "seq последней принятой команды"
+
+  tlm_done_seq:
+    type: reg
+    address: 0x1051
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Последняя завершённая команда"
+    hint: "seq последней успешно завершённой длинной команды"
+
+  tlm_err_seq:
+    type: reg
+    address: 0x1052
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Команда, прерванная ошибкой"
+    hint: "seq команды, прерванной асинхронной ошибкой (0 — ошибка не привязана к команде)"
+
+  tlm_errno_last:
+    type: reg
+    address: 0x1053
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Последний errno"
+    hint: "Защёлка до CLEAR_ERR"
+
+  tlm_err_evt:
+    type: reg
+    address: 0x1054
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Счётчик событий ошибки"
+    hint: "+1 на каждое асинхронное событие ошибки — ПК реагирует на его изменение"
+
+  tlm_err_count:
+    type: reg
+    address: 0x1055
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Счётчик всех ошибок"
+    hint: "Диагностический счётчик всех пойманных ошибок, включая pcall в Mirror"
+
+  tlm_sc_id:
+    type: reg
+    address: 0x1056
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Метка сценария"
+    hint: "Метка активного/последнего сценария (от ПК, непрозрачна)"
+
+  tlm_sc_total:
+    type: reg
+    address: 0x1057
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Точек в сценарии"
+    hint: "Число точек в текущем сценарии"
+
+  tlm_sc_index:
+    type: reg
+    address: 0x1058
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Пройдено точек"
+    hint: "Пишется только на EXACT-точках"
+
+  tlm_sc_done_n:
+    type: reg
+    address: 0x1059
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Итог сценария"
+    hint: "Итог исполнения сценария"
+
+  tlm_miss_count:
+    type: reg
+    address: 0x105A
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Промахи CVT"
+    hint: "Число промахов CVT"
+
+  tlm_hand:
+    type: reg
+    address: 0x105B
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Конфигурация руки"
+    hint: "Как её возвращает RobotHand()"
+
+  tlm_stop_ack:
+    type: reg
+    address: 0x105C
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Эхо стопа"
+    hint: "Эхо последнего обработанного STOP_REQ"
+
+  tlm_cfg_epoch:
+    type: reg
+    address: 0x105D
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Эпоха конфигурации"
+    hint: "Эхо P_CONFIG_EPOCH; после старта — метка из зеркала, 0 если зеркало отвергнуто (params §11.4)"
+
+  tlm_cfg_pending:
+    type: reg
+    address: 0x105E
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Есть неприменённые параметры"
+    hint: "1 — есть принятые параметры класса reinit, ждущие PARAM_APPLY"
+    # 0x105F — резерв, не входит в карту
+
+  # ─────────────────── PMIR — зеркало параметров (§3.5, 0x3000..0x3082) ─────────────────
+  pmir:
+    type: block
+    address: 0x3000
+    count: 128
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Зеркало параметров"
+    gate1: true
+    hint: "Адрес = 0x3000 + id, сохраняется при выключении (RL 12-2, gate1); запасной вариант — 0x1300 + id"
+
+  pmir_magic:
+    type: reg
+    address: 0x3080
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Магическое число зеркала"
+    hint: "0x5632; вместе с PMIR_CRC/PMIR_DICT определяет, брать ли зеркало при старте"
+
+  pmir_crc:
+    type: reg
+    address: 0x3081
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "CRC зеркала"
+    hint: "CRC16 значений зеркала параметров"
+
+  pmir_dict:
+    type: reg
+    address: 0x3082
+    access: r
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Отпечаток словаря"
+    hint: "CRC16 списка id/min/max/default текущей сборки — генерирует кодоген"
+
+  # ─────────────────── SC — буфер сценария (§3.5/§7.1, 0x1400..0x1549) ─────────────────
+  sc_buf:
+    type: block
+    address: 0x1400
+    count: 330
+    access: rw
+    unit: ""
+    scale: 1
+    signed: false
+    label: "Буфер сценария"
+    hint: "SC_CAP=55 записей * SC_STRIDE=6 слов = 330; ПК пишет блоками FC16 по ≤ WRITE_CHUNK=30"
+
+constants:
+  PROTO_VER: 0x0200
+  CMD_BASE: 0x1000
+  RES_BASE: 0x1010
+  SAFETY_BASE: 0x1020
+  TLM_BASE: 0x1040
+  SC_BASE: 0x1400
+  PMIR_BASE: 0x3000
+  PMIR_FALLBACK_BASE: 0x1300
+  VFD_BASE: 0x1200
+  SC_STRIDE: 6
+  SC_CAP: 55
+  WRITE_CHUNK: 30
+  READ_MAX: 125
+  W_MIN: -32767
+  W_MAX: 32767
+  PMIR_MAGIC_VALUE: 0x5632
+  gate1_constants: ["PMIR_BASE", "SC_CAP"]
+
+# args.type: s16 / u16 / raw (знак — по словарю параметров) / dw_lo+dw_hi (DW на чётном слоте ARG).
+# result: instant — итог в ответе; rvals — итог в RES_RVAL*; done_seq — длинная, итог TLM_DONE_SEQ / TLM_ERR_EVT.
+opcodes:
+  PING: {code: 0x01, argc: 0, busy: allow, args: [], result: rvals, info: "rvals = [PROTO_VER, FW_BUILD]"}
+  CLEAR_ERR: {code: 0x02, argc: 0, busy: allow, args: [], result: instant, info: "сброс ERRNO_LAST/ERR_SEQ; FAULT -> IDLE"}
+  PTP_MOVE: {code: 0x10, argc: 6, busy: deny, args: [{name: x, type: s16}, {name: y, type: s16}, {name: z, type: s16}, {name: rz, type: s16}, {name: kind, type: u16}, {name: spd_pct, type: u16}], result: done_seq, info: "x, y, z, rz (s16 ×0.1), kind (0 LINE / 2 JOINT), spd_pct (0 -> P_SPD_DEFAULT); итог DONE_SEQ"}
+  HOME: {code: 0x11, argc: 1, busy: deny, args: [{name: spd_pct, type: u16}], result: done_seq, info: "spd_pct (0 -> P_SPD_DEFAULT); JOINT в P_HOME_*; итог DONE_SEQ"}
+  JOG_STEP: {code: 0x12, argc: 5, busy: deny, args: [{name: dx, type: s16}, {name: dy, type: s16}, {name: dz, type: s16}, {name: drz, type: s16}, {name: spd_pct, type: u16}], result: done_seq, info: "dx, dy, dz, drz (s16 ×0.1, относительно текущей позы), spd_pct (0 -> P_SPD_JOG); длина <= P_JOG_MAX; итог DONE_SEQ"}
+  JOG_CONT: {code: 0x13, argc: 2, busy: deny, args: [{name: direction, type: u16}, {name: speed, type: u16}], result: done_seq, info: "направление (1 X+/2 X-/3 Y+/4 Y-/5 Z+/6 Z-/7 RZ+/8 RZ-), скорость <= P_JOG_CONT_MAX; едет, пока растёт JOG_LEASE; итог DONE_SEQ"}
+  CVT_JOB: {code: 0x20, argc: 10, busy: deny, args: [{name: ecap_lo, type: dw_lo}, {name: ecap_hi, type: dw_hi}, {name: pick_x, type: s16}, {name: pick_y, type: s16}, {name: pick_z, type: s16}, {name: flags, type: u16}, {name: place_x, type: s16}, {name: place_y, type: s16}, {name: place_z, type: s16}, {name: place_rz, type: s16}], result: done_seq, info: "ecap_lo, ecap_hi (DW на ARG0/1), pick_x, pick_y, pick_z, flags, place_x, place_y, place_z, place_rz; итог DONE_SEQ; промах -> async E_ZONE_TRIP"}
+  SC_RUN: {code: 0x30, argc: 3, busy: deny, args: [{name: count, type: u16}, {name: sc_id, type: u16}, {name: offset, type: u16}], result: done_seq, info: "count (1..SC_CAP), sc_id, offset; итог DONE_SEQ + TLM_SC_DONE_N"}
+  SERVO: {code: 0x41, argc: 1, busy: deny, args: [{name: "on", type: u16}], result: instant, info: "0 off / 1 on; мгновенно"}
+  DO_SET: {code: 0x42, argc: 2, busy: deny, args: [{name: channel, type: u16}, {name: value, type: u16}], result: instant, info: "канал 1..16, значение 0/1; мгновенно; TLM_DO_MASK"}
+  PARAM_SET: {code: 0x50, argc: 2, busy: by_class, args: [{name: id, type: u16}, {name: value, type: raw}], result: instant, info: "id, value (сырое; знак — по словарю); мгновенно; зеркало"}
+  PARAM_GET: {code: 0x51, argc: 1, busy: allow, args: [{name: id, type: u16}], result: rvals, info: "id; rval0 = value"}
+  PARAM_APPLY: {code: 0x52, argc: 0, busy: deny, args: [], result: instant, info: "переинициализация подсистем с reinit-параметрами; TLM_CFG_PENDING = 0"}
+
+errno:
+  E_OK: {code: 0, kind: none, text: "ОК"}
+  E_BAD_OPCODE: {code: 1, kind: sync, text: "Неизвестная команда"}
+  E_BAD_ARGC: {code: 2, kind: sync, text: "Неверное число аргументов"}
+  E_RANGE: {code: 3, kind: sync, text: "Значение или цель вне допустимого диапазона (rval0 — причина)"}
+  E_BUSY: {code: 4, kind: sync, text: "Робот занят другой командой"}
+  E_BAD_PARAM: {code: 5, kind: sync, text: "Неизвестный параметр"}
+  E_NO_SERVO: {code: 6, kind: sync, text: "Серво выключено — движение невозможно"}
+  E_SC_COUNT: {code: 7, kind: sync, text: "Недопустимое число точек или смещение в буфере"}
+  E_SC_RECORD: {code: 8, kind: sync, text: "Ошибка в точке сценария (rval0 — индекс, rval1 — причина)"}
+  E_BUF_SHORT: {code: 9, kind: sync, text: "Буфер сценария прочитан не полностью"}
+  E_WDG_TIMEOUT: {code: 10, kind: async, text: "Пропала связь с ПК — лента и движение остановлены"}
+  E_MOTION_FAULT: {code: 11, kind: async, text: "Контроллер движения в ошибке"}
+  E_ZONE_TRIP: {code: 12, kind: async, text: "Объект вышел из рабочей зоны ленты"}
+  E_ABORTED: {code: 13, kind: async, text: "Движение прервано стопом"}
+  E_INTERNAL: {code: 14, kind: both, text: "Внутренняя ошибка прошивки"}
+  E_CFG_PENDING: {code: 15, kind: sync, text: "Параметры приняты, но не применены — выполните «Применить»"}
+  E_VFD_LINK: {code: 16, kind: async, text: "ПЧ не отвечает по RS-485"}
+
+reasons:
+  R_KIND: {code: 1, text: "KIND"}
+  R_ACTION: {code: 2, text: "ACTION"}
+  R_APARAM: {code: 3, text: "APARAM"}
+  R_OUT_OF_ZONE: {code: 4, text: "точка вне зоны"}
+  R_DEAD_ZONE: {code: 5, text: "отрезок LINE проходит через мёртвую зону у оси J1"}
+  R_LAST_PASS: {code: 6, text: "последняя точка LINE_PASS"}
+  R_HAND: {code: 7, text: "чужая конфигурация руки"}
+  R_JOG_TOO_LONG: {code: 8, text: "JOG длиннее P_JOG_MAX"}
+
+scenario:
+  stride: 6
+  record: [x, y, z, rz, op, aparam]
+  kinds: {LINE: 0, LINE_PASS: 1, JOINT: 2}
+  actions: {NONE: 0, DO_ON: 1, DO_OFF: 2, DELAY_MS: 3, SPEED_PCT: 4, ACCEL: 5, ACCUR: 6}
+
+stop_levels: {SOFT: 1, HARD: 2, HALT: 3}
+
+# ─────────────────────────── §11.3: словарь параметров (params.md) ───────────────────────────
+# Координаты/длины — ×0.1 мм (scale: 10, unit: мм), углы — ×0.1° (scale: 10, unit: °).
+# "зона"/"—" в params.md → полный диапазон слова W (±32767, RL 12-2).
+groups:
+  0: {name: motion, label: "Движение"}
+  1: {name: points, label: "Точки"}
+  2: {name: cvt, label: "Конвейер (CVT)"}
+  3: {name: workspace, label: "Рабочая зона"}
+  4: {name: vfd, label: "ПЧ"}
+  6: {name: system, label: "Система"}
+
+params:
+  # --- motion (group 0) ---
+  P_SPD_DEFAULT: {id: 0, label: "Override по умолчанию", unit: "%", scale: 1, signed: false, min: 1, max: 100, default: 80, group: 0, apply: live, info: ""}
+  P_SPD_JOG: {id: 1, label: "Override для JOG", unit: "%", scale: 1, signed: false, min: 1, max: 100, default: 30, group: 0, apply: live, info: ""}
+  P_SPD_L: {id: 2, label: "SpdL", unit: "мм/с", scale: 1, signed: false, min: 10, max: 3000, default: 1500, group: 0, apply: idle, info: ""}
+  P_ACC_L: {id: 3, label: "AccL/DecL", unit: "мм/с²", scale: 1, signed: false, min: 100, max: 50000, default: 25000, group: 0, apply: idle, info: "⚠ max вне слова W (±32767, RL 12-2) и выше предела DecL 25000 (RL 2-8) — вопрос GATE-0"}
+  P_SPD_J: {id: 4, label: "SpdJ", unit: "%", scale: 1, signed: false, min: 1, max: 100, default: 70, group: 0, apply: idle, info: ""}
+  P_ACC_J: {id: 5, label: "AccJ/DecJ", unit: "%", scale: 1, signed: false, min: 1, max: 100, default: 100, group: 0, apply: idle, info: ""}
+  P_OVERLAP: {id: 6, label: "SetOverlapDistance для LINE_PASS", unit: "мм", scale: 10, signed: false, min: 1, max: 100, default: 5, group: 0, apply: idle, info: ""}
+  P_ACCUR_DEFAULT: {id: 7, label: "Accur: 0 ROUGH / 1 HIGH", unit: "", scale: 1, signed: false, min: 0, max: 1, default: 0, group: 0, apply: idle, info: ""}
+  P_JOG_MAX: {id: 8, label: "Максимум одного JOG-шага", unit: "мм", scale: 10, signed: false, min: 1, max: 5000, default: 2000, group: 0, apply: idle, info: ""}
+  P_HAND: {id: 9, label: "Рука точек прошивки: 0 правая / 1 левая (RL 5-3)", unit: "", scale: 1, signed: false, min: 0, max: 1, default: 1, group: 0, apply: idle, gate1: true, info: "1 — как v1"}
+  P_JOG_CONT_MAX: {id: 10, label: "Предел скорости непрерывного jog", unit: "мм/с", scale: 1, signed: false, min: 1, max: 250, default: 50, group: 0, apply: live, info: "для осей RZ+/RZ− — °/с"}
+  P_JOG_LEASE_MS: {id: 11, label: "Поводок jog: JOG_LEASE не менялся дольше — стоп", unit: "мс", scale: 1, signed: false, min: 300, max: 2000, default: 300, group: 0, apply: live, info: "ПК пишет поводок не реже раза в треть срока"}
+  P_DEC_STOP: {id: 12, label: "Замедление стопа HARD", unit: "мм/с²", scale: 1, signed: false, min: 1000, max: 25000, default: 25000, group: 0, apply: idle, info: "25000 — максимум DecL, RL 2-8"}
+
+  # --- points (group 1) — "зона" -> полный знаковый диапазон слова W ---
+  P_HOME_X: {id: 16, label: "Дом X", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 3000, group: 1, apply: idle, info: ""}
+  P_HOME_Y: {id: 17, label: "Дом Y", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -2100, group: 1, apply: idle, info: ""}
+  P_HOME_Z: {id: 18, label: "Дом Z", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -400, group: 1, apply: idle, info: ""}
+  P_HOME_RZ: {id: 19, label: "Дом RZ", unit: "°", scale: 10, signed: true, min: -32767, max: 32767, default: -1000, group: 1, apply: idle, info: ""}
+  P_PLACE_X: {id: 20, label: "Укладка по умолчанию X", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 4500, group: 1, apply: idle, info: ""}
+  P_PLACE_Y: {id: 21, label: "Укладка по умолчанию Y", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -3000, group: 1, apply: idle, info: ""}
+  P_PLACE_Z: {id: 22, label: "Укладка по умолчанию Z", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -900, group: 1, apply: idle, info: ""}
+  P_PLACE_RZ: {id: 23, label: "Укладка по умолчанию RZ", unit: "°", scale: 10, signed: true, min: -32767, max: 32767, default: -1000, group: 1, apply: idle, info: ""}
+  P_PICK_Z: {id: 24, label: "Глубина забора по умолчанию", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -1000, group: 1, apply: idle, info: ""}
+  P_PICK_RZ: {id: 25, label: "Угол при заборе", unit: "°", scale: 10, signed: true, min: -32767, max: 32767, default: -1000, group: 1, apply: idle, info: ""}
+
+  # --- cvt (group 2) ---
+  P_GRIP_MS: {id: 32, label: "Дожим захвата/отпускания", unit: "мс", scale: 1, signed: false, min: 0, max: 5000, default: 400, group: 2, apply: idle, info: ""}
+  P_ZONE_MIN: {id: 33, label: "Кольцо зоны забора, внутр.", unit: "мм", scale: 10, signed: false, min: 0, max: 32767, default: 1200, group: 2, apply: idle, info: ""}
+  P_ZONE_MAX: {id: 34, label: "Кольцо зоны забора, внеш.", unit: "мм", scale: 10, signed: false, min: 0, max: 32767, default: 5000, group: 2, apply: idle, info: ""}
+  P_BELT_FACTOR: {id: 35, label: "Ход ленты на импульс энкодера", unit: "мм/имп ×1e-5", scale: 1, signed: false, min: 1, max: 65535, default: 14447, group: 2, apply: reinit, info: "⚠ противоречит диапазону слова W (±32767, RL 12-2) — вопрос GATE-0"}
+  P_BELT_DIR: {id: 36, label: "Направление ленты: +X / +Y / -X / -Y", unit: "", scale: 1, signed: false, min: 0, max: 3, default: 1, group: 2, apply: reinit, info: ""}
+  P_TRIG_X: {id: 37, label: "Линия срабатывания робота X", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 3346, group: 2, apply: reinit, info: ""}
+  P_TRIG_Y: {id: 38, label: "Линия срабатывания робота Y", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -3811, group: 2, apply: reinit, info: ""}
+  P_ZONE_END_X: {id: 39, label: "Линия конца зоны X", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 3346, group: 2, apply: reinit, info: ""}
+  P_ZONE_END_Y: {id: 40, label: "Линия конца зоны Y", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -2000, group: 2, apply: reinit, info: ""}
+  P_NG_RADIUS: {id: 41, label: "NGZoneRadius", unit: "мм", scale: 10, signed: false, min: 0, max: 32767, default: 200, group: 2, apply: reinit, info: "единицы сверить на GATE-1"}
+  P_DO_GRIP_CH: {id: 42, label: "DO захвата для CVT_JOB", unit: "канал", scale: 1, signed: false, min: 1, max: 16, default: 1, group: 2, apply: idle, info: ""}
+
+  # --- workspace (group 3) ---
+  P_WS_R_MIN: {id: 48, label: "Внутренний радиус (мёртвая зона J1)", unit: "мм", scale: 10, signed: false, min: 0, max: 32767, default: 1000, group: 3, apply: idle, gate1: true, info: "⚠ по паспорту модели, GATE-1"}
+  P_WS_R_MAX: {id: 49, label: "Досягаемость", unit: "мм", scale: 10, signed: false, min: 0, max: 32767, default: 6000, group: 3, apply: idle, gate1: true, info: "⚠ по паспорту модели, GATE-1"}
+  P_WS_Z_MIN: {id: 50, label: "Мин. Z рабочей зоны", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -1500, group: 3, apply: idle, gate1: true, info: "⚠ по паспорту модели, GATE-1"}
+  P_WS_Z_MAX: {id: 51, label: "Макс. Z рабочей зоны", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 0, group: 3, apply: idle, gate1: true, info: "⚠ по паспорту модели, GATE-1"}
+  P_WS_RZ_MIN: {id: 52, label: "Мин. RZ рабочей зоны", unit: "°", scale: 10, signed: true, min: -32767, max: 32767, default: -3600, group: 3, apply: idle, gate1: true, info: "⚠ по паспорту модели, GATE-1"}
+  P_WS_RZ_MAX: {id: 53, label: "Макс. RZ рабочей зоны", unit: "°", scale: 10, signed: true, min: -32767, max: 32767, default: 3600, group: 3, apply: idle, gate1: true, info: "⚠ по паспорту модели, GATE-1"}
+  P_WS_BOX_EN: {id: 54, label: "Включить прямоугольник-ограждение", unit: "", scale: 1, signed: false, min: 0, max: 1, default: 0, group: 3, apply: idle, info: ""}
+  P_WS_X_MIN: {id: 55, label: "Ограждение, X мин.", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -6000, group: 3, apply: idle, info: ""}
+  P_WS_X_MAX: {id: 56, label: "Ограждение, X макс.", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 6000, group: 3, apply: idle, info: ""}
+  P_WS_Y_MIN: {id: 57, label: "Ограждение, Y мин.", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: -6000, group: 3, apply: idle, info: ""}
+  P_WS_Y_MAX: {id: 58, label: "Ограждение, Y макс.", unit: "мм", scale: 10, signed: true, min: -32767, max: 32767, default: 6000, group: 3, apply: idle, info: ""}
+  P_WS_ANG_MIN: {id: 59, label: "Мин. угла сектора atan2(y, x)", unit: "°", scale: 10, signed: true, min: -1800, max: 1800, default: -1650, group: 3, apply: idle, gate1: true, info: "заглушка до модели с шильдика (plan §9 вопрос 1), ⚑ GATE-1"}
+  P_WS_ANG_MAX: {id: 60, label: "Макс. угла сектора atan2(y, x)", unit: "°", scale: 10, signed: true, min: -1800, max: 1800, default: 1650, group: 3, apply: idle, gate1: true, info: "заглушка до модели с шильдика (plan §9 вопрос 1), ⚑ GATE-1"}
+
+  # --- vfd (group 4) ---
+  P_VFD_PROFILE: {id: 64, label: "Профиль ПЧ: 0 = INVT GD20", unit: "", scale: 1, signed: false, min: 0, max: 0, default: 0, group: 4, apply: reinit, info: ""}
+  P_VFD_SLAVE: {id: 65, label: "Адрес slave ПЧ", unit: "адрес", scale: 1, signed: false, min: 1, max: 247, default: 1, group: 4, apply: reinit, info: ""}
+  P_VFD_BAUD: {id: 66, label: "Скорость порта ПЧ", unit: "код", scale: 1, signed: false, min: 0, max: 32767, default: 2, group: 4, apply: reinit, info: "как SCM_FreePort"}
+  P_VFD_FRAME: {id: 67, label: "Формат кадра ПЧ", unit: "код", scale: 1, signed: false, min: 0, max: 32767, default: 13, group: 4, apply: reinit, info: "как SCM_FreePort; v1: 0xD"}
+  P_VFD_MODE: {id: 68, label: "Режим порта ПЧ", unit: "код", scale: 1, signed: false, min: 0, max: 32767, default: 17, group: 4, apply: reinit, info: "как SCM_FreePort; v1: 0x11"}
+  P_VFD_POLL_MS: {id: 69, label: "Период опроса статуса ПЧ", unit: "мс", scale: 1, signed: false, min: 50, max: 5000, default: 300, group: 4, apply: live, info: ""}
+  P_VFD_RX_TRIES: {id: 70, label: "Попыток приёма по 5 мс", unit: "раз", scale: 1, signed: false, min: 1, max: 50, default: 8, group: 4, apply: idle, info: ""}
+  P_VFD_LINK_FAILS: {id: 71, label: "Сколько неответов подряд = обрыв", unit: "раз", scale: 1, signed: false, min: 1, max: 100, default: 5, group: 4, apply: idle, info: ""}
+
+  # --- system (group 6) ---
+  P_WDG_TIMEOUT_MS: {id: 96, label: "Таймаут сторожевого таймера, 0 — выключен", unit: "мс", scale: 1, signed: false, min: 0, max: 60000, default: 3000, group: 6, apply: live, info: "⚠ max вне слова W (±32767, RL 12-2) — вопрос GATE-0"}
+  P_TLM_EVERY: {id: 97, label: "Частота публикации телеметрии в простое", unit: "циклов", scale: 1, signed: false, min: 1, max: 100, default: 5, group: 6, apply: live, info: ""}
+  P_CONFIG_EPOCH: {id: 98, label: "Метка конфигурации ПК (§11.4)", unit: "", scale: 1, signed: false, min: 0, max: 65535, default: 0, group: 6, apply: live, info: "⚠ противоречит диапазону слова W (±32767, RL 12-2) — вопрос GATE-0"}
