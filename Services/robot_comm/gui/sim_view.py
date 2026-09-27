@@ -49,6 +49,16 @@ _TRAIL_LEN = 200
 _MARGIN_PX = 20.0
 #: запас масштаба вокруг r_max, чтобы кольцо не касалось края виджета.
 _ZONE_MARGIN = 1.1
+#: длина стрелки поворота инструмента (T2.W), px — расстояние от TCP до конца.
+_RZ_POINTER_LEN_PX = 30.0
+#: отступ начала стрелки от TCP, px — совпадает с длиной плеча креста (см.
+#: `_paint_tool`), чтобы стрелка не перекрашивала пиксели кольца+креста
+#: маркера TCP поверх них (иначе ломает T2.V `test_grab_pixel_at_tool_position_
+#: matches_marker_color` и `test_unreachable_pose_no_chains_and_warning`,
+#: которые проверяют ТОЧНЫЙ цвет пикселя ровно в TCP).
+_RZ_POINTER_GAP_PX = 9.0
+#: цвет стрелки поворота инструмента (T2.W, contract §1).
+_RZ_POINTER_COLOR = "#ffb86c"
 
 _ACTIVITY_NAMES = {
     TLM_ACTIVITY_IDLE: "IDLE",
@@ -306,6 +316,28 @@ class SimView(QWidget):
         painter.drawEllipse(p, 6, 6)
         painter.drawLine(QPointF(p.x() - 9, p.y()), QPointF(p.x() + 9, p.y()))
         painter.drawLine(QPointF(p.x(), p.y() - 9), QPointF(p.x(), p.y() + 9))
+        self._paint_rz_pointer(painter, p)
+
+    def _paint_rz_pointer(self, painter: QPainter, p: QPointF) -> None:
+        """Стрелка направления инструмента по ``TLM_RZ`` (T2.W): отрезок от TCP,
+        угол — RZ (0° = робот +X = экран вправо, рост RZ = против часовой на
+        экране, т.к. робот +Y = экран вверх, отсюда экранный вектор
+        ``(cos, -sin)``). Рисуется ВСЕГДА, даже при ``joints() is None`` — RZ
+        ось позы протокола, от модели не зависит (contract §1)."""
+        rz = _decode_reg(self.core.read(REG["TLM_RZ"], 1)[0])
+        rad = math.radians(rz)
+        dx, dy = math.cos(rad), -math.sin(rad)
+        start = QPointF(p.x() + _RZ_POINTER_GAP_PX * dx, p.y() + _RZ_POINTER_GAP_PX * dy)
+        end = QPointF(p.x() + _RZ_POINTER_LEN_PX * dx, p.y() + _RZ_POINTER_LEN_PX * dy)
+        pen = QPen(QColor(_RZ_POINTER_COLOR))
+        pen.setWidth(3)
+        painter.setPen(pen)
+        # Без сглаживания: пиксельные проверки (тестер T2.W, A1) сэмплируют
+        # точную математическую точку на линии — AA даёт частичное покрытие
+        # и заваливает допуск ±8/канал на 1-2 единицы на диагональных углах.
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.drawLine(start, end)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
     def _paint_target(self, painter: QPainter) -> None:
         active = self.core._active  # ponytail: см. _paint_transform
@@ -392,12 +424,22 @@ class DemoDriver:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Запуск демо-окна: ``python -m Services.robot_comm.gui.sim_view``.
+    """Запуск отладочного окна: ``python -m Services.robot_comm.gui.sim_view``.
+
+    Собирает три read-only вида (T2.W): ``SimView`` (вид сверху + стрелка
+    RZ), ``ZScale`` (шкала Z справа), ``TimeTape`` (лента Z(t)/RZ(t) снизу).
+    Это ОТЛАДОЧНОЕ окно (владелец, 2026-09-27), не продуктовый GUI — см.
+    ``z_view.py``.
 
     ``--quit-after SECONDS`` — смоук-режим: окно закрывается само через
     заданное время (``QTimer.singleShot`` -> ``app.quit()``), без человека за
     экраном. Команда для проверки без дисплея — в README.
     """
+    # Локальный импорт — z_view.py импортирует _REFRESH_MS/_decode_reg ИЗ
+    # этого модуля; импорт на уровне модуля здесь дал бы цикл при запуске
+    # `python -m Services.robot_comm.gui.sim_view` (sim_view ещё не
+    # доопределён к моменту, когда его же импортировал бы z_view).
+    from Services.robot_comm.gui.z_view import TimeTape, ZScale
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quit-after", type=float, default=None, metavar="SECONDS")
@@ -408,6 +450,10 @@ def main(argv: list[str] | None = None) -> None:
     driver = DemoDriver(core)
     view = SimView(core)
     view.clicked.connect(driver.goto)
+    zscale = ZScale(core)
+    zscale.setFixedWidth(110)
+    tape = TimeTape(core)
+    tape.setFixedHeight(150)
 
     window = QWidget()
     window.setWindowTitle("Симулятор робота v2 — вид сверху")
@@ -430,10 +476,15 @@ def main(argv: list[str] | None = None) -> None:
     toolbar.addWidget(btn_stop)
     toolbar.addStretch(1)
 
+    sim_row = QHBoxLayout()
+    sim_row.addWidget(view, 1)
+    sim_row.addWidget(zscale)
+
     layout = QVBoxLayout(window)
     layout.addLayout(toolbar)
-    layout.addWidget(view)
-    window.resize(700, 700)
+    layout.addLayout(sim_row)
+    layout.addWidget(tape)
+    window.resize(820, 860)
 
     last = time.monotonic()
 
