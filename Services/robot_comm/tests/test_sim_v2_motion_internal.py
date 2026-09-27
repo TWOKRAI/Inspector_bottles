@@ -15,11 +15,17 @@ import pytest
 
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
 from Services.robot_comm.core.protocol_v2 import KIND, OP, REG, REG_COUNT, STOP_LEVEL
+from Services.robot_comm.kinematics import make_model
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
 ACK = 1
 NAK = 2
 FW_BUILD = 7
+
+# T2.J2 (расширение FILES ведущим 2026-09-27): эти два теста проверяют зону P_WS
+# (округление позы у края сектора/кольца, ревью T2.2 №2/№3), не пределы суставов
+# модели — точки у границы естественно дают |J1| за дефолтным пределом ScaraModel.
+_NO_JOINT_LIMITS = make_model({"type": "scara", "joint_limits": [None, None, None, None]})
 
 
 def u16(value: int) -> int:
@@ -329,7 +335,7 @@ def test_joint_arrival_with_pending_soft_still_updates_hand():
 def test_jog_cont_zone_edge_leaves_registered_pose_inside_zone():
     # Ревью №2: от (-290, 100) вниз по Y к краю сектора 165°; округление до 0.1 мм выводило
     # позу в регистрах наружу (165.001°), и следующий ход от неё отвергался.
-    core = fresh_core()
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     assert cmd(core, 2, OP["PTP_MOVE"], mm(-290.0), mm(100.0), mm(-40.0), 0, KIND["JOINT"], 100)["status"] == ACK
     run_until_activity_zero(core)
@@ -352,7 +358,7 @@ def test_jog_cont_zone_edge_leaves_registered_pose_inside_zone():
 
 def test_jog_step_target_on_inclusive_boundary_is_accepted():
     # Ревью №3: 128.2 + (-28.2) во float = 99.99999999999999 < r_min 100 -> ложный NAK.
-    core = fresh_core()
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     assert cmd(core, 2, OP["PTP_MOVE"], mm(128.2), 0, mm(-40.0), 0, KIND["JOINT"], 100)["status"] == ACK
     run_until_activity_zero(core)

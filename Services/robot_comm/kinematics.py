@@ -70,6 +70,12 @@ class RobotModel(typing.Protocol):
     kind: str
     axes: tuple[str, ...]
     joint_names: tuple[str, ...]
+    #: предел каждого сустава (°/мм) или `None` (не ограничен моделью), выровнен с
+    #: `joint_names` (T2.J2 — заглушка до GATE-1, физика контроллера, не `P_*`).
+    joint_limits: tuple[tuple[float, float] | None, ...]
+    #: скорость каждого сустава (°/с или мм/с) при 100% — T2.J2 §Q3, выровнена с
+    #: `joint_names`.
+    joint_speed: tuple[float, ...]
 
     def fk(self, joints: Joints) -> Pose | None: ...
 
@@ -94,6 +100,19 @@ class ScaraModel:
     # реальные значения — с шильдика робота, plan §9 q1.
     l1: float = 325.0
     l2: float = 275.0
+    # ponytail: диапазоны J1/J2 — заглушка из памяти о паспорте DRS40L, НЕ сверено
+    # (cto-вердикт T2.J2 «Q1»); GATE-1 — реальный замер с шильдика/DRAStudio.
+    # J4 ±360 уже боевое значение (params.md:33, P_SPD_J-масштаб суставов). Z
+    # моделью не ограничивается — правда о Z остаётся у P_WS_Z_MIN/MAX (И6).
+    joint_limits: tuple[tuple[float, float] | None, ...] = ((-132.0, 132.0), (-150.0, 150.0), None, (-360.0, 360.0))
+    # ponytail: скорости J1/J2/Z/J4 (°/с, °/с, мм/с, °/с при 100%) — порядок
+    # величины класса SCARA, НЕ паспорт DRS40L (⚑ GATE-1, вердикт cto T2.J2).
+    # Замена заглушки 1e9 (которая держала суставный член Q3 мёртвым и давала
+    # телепорт локтя при коротких сменах руки, cto-вердикт «смена (400,100)
+    # -> (410,100): 1 тик, J2 +91 -> -91»): весь набор Services/robot_comm/tests
+    # зелёный, счёт тиков фикстур T2.2/T2.J не изменился (декартов пол Q3
+    # по-прежнему доминирует на них — числа выбраны с запасом).
+    joint_speed: tuple[float, ...] = (450.0, 720.0, 1100.0, 2500.0)
 
     kind: typing.ClassVar[str] = "scara"
     axes: typing.ClassVar[tuple[str, ...]] = ("X", "Y", "Z", "RZ")
@@ -101,11 +120,41 @@ class ScaraModel:
 
     def __post_init__(self) -> None:
         """Dict at Boundary (`make_model` собирает `ScaraModel` из словаря spec) —
-        длины звеньев валидируются здесь, а не молча дают `ZeroDivisionError`/
-        `TypeError` в `fk`/`ik` при первом использовании."""
+        длины звеньев/пределы/скорости валидируются здесь, а не молча дают
+        `ZeroDivisionError`/`TypeError`/тихо неверный NAK в `fk`/`ik`/`_check_motion`
+        при первом использовании."""
         for name, value in (("l1", self.l1), ("l2", self.l2)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} должен быть конечным числом > 0, получено {value!r}")
+        if len(self.joint_limits) != len(self.joint_names):
+            raise ValueError(
+                f"joint_limits должен иметь длину {len(self.joint_names)} (по числу суставов), "
+                f"получено {len(self.joint_limits)}"
+            )
+        for name, limit in zip(self.joint_names, self.joint_limits):
+            if limit is None:
+                continue
+            if len(limit) != 2:
+                raise ValueError(f"joint_limits[{name}] должен быть парой (lo, hi) или None, получено {limit!r}")
+            lo, hi = limit
+            if (
+                isinstance(lo, bool)
+                or isinstance(hi, bool)
+                or not isinstance(lo, (int, float))
+                or not isinstance(hi, (int, float))
+                or not math.isfinite(lo)
+                or not math.isfinite(hi)
+                or not lo < hi
+            ):
+                raise ValueError(f"joint_limits[{name}]=({lo!r}, {hi!r}) должен быть конечной парой lo < hi")
+        if len(self.joint_speed) != len(self.joint_names):
+            raise ValueError(
+                f"joint_speed должен иметь длину {len(self.joint_names)} (по числу суставов), "
+                f"получено {len(self.joint_speed)}"
+            )
+        for name, speed in zip(self.joint_names, self.joint_speed):
+            if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed <= 0:
+                raise ValueError(f"joint_speed[{name}]={speed!r} должен быть конечным числом > 0")
 
     def fk(self, joints: Joints) -> Pose:
         """Прямая кинематика: суставы -> поза. RZ = J1 + J2 + J4 (contract §"Motion model").
@@ -218,4 +267,10 @@ def make_model(spec: dict) -> RobotModel:
     unknown = sorted(set(kwargs) - allowed)
     if unknown:
         raise ValueError(f"неизвестные параметры модели {unknown} для типа {kind!r}; допустимые: {sorted(allowed)}")
+    # Dict at Boundary: spec приходит как JSON-списки (list/None), датаклассу нужны
+    # хешируемые tuple — конвертация здесь, а не тихая утечка list в contract T2.J2.
+    if "joint_limits" in kwargs:
+        kwargs["joint_limits"] = tuple(None if lim is None else tuple(lim) for lim in kwargs["joint_limits"])
+    if "joint_speed" in kwargs:
+        kwargs["joint_speed"] = tuple(kwargs["joint_speed"])
     return cls(**kwargs)
