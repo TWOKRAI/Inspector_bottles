@@ -296,6 +296,18 @@ def test_widget_to_robot_orientation_plus_y_is_up(qtbot):
     assert y > 0
 
 
+def test_widget_to_robot_orientation_plus_x_is_right(qtbot):
+    """Точка ПРАВЕЕ центра экрана -> положительный X робота (ревью T2.V, итерация 2: зеркало по X выживало)."""
+    core = fresh_core()
+    view = SimView(core)
+    qtbot.addWidget(view)
+    view.resize(300, 300)
+
+    cx, cy = view.width() / 2.0, view.height() / 2.0
+    x, _y = view.widget_to_robot(QPointF(cx + 50.0, cy))
+    assert x > 0
+
+
 def test_paint_scale_re_reads_workspace_after_param_set(qtbot):
     """`PARAM_SET P_WS_R_MAX` на меньшее значение через mailbox + tick +
     refresh -> масштаб отрисовки (`_paint_transform()[2]`) меняется — зона
