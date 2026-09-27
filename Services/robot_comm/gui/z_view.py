@@ -45,6 +45,9 @@ _Y_MARGIN_PX = 8.0
 _FALLBACK_SPAN = 1.0
 
 _TEXT_COLOR = "#c8c8c8"
+#: шаг между базовыми линиями подписей и верхняя граница базовой линии, px.
+_LABEL_STEP_PX = 14.0
+_LABEL_TOP_PX = 14.0
 
 
 def _param_eng(core: RobotSimCoreV2, name: str) -> float:
@@ -182,36 +185,46 @@ class ZScale(QWidget):
         painter = QPainter(self)
         try:
             painter.fillRect(self.rect(), QColor("#1b1b1b"))
-            # Порядок: границы -> отметки -> текущий Z (текущий рисуется поверх).
+            # Порядок линий: границы -> отметки -> текущий Z (текущий рисуется поверх).
             for z in self._limits:
-                self._paint_row(painter, z, "#ff5c57")
-            for name, z in self._marks.items():
-                self._paint_row(painter, z, "#8be9fd", label=name)
-            # Подпись текущего Z — ПОД линией (отметки подписаны над своей): при Z,
-            # равном отметке (на старте Z = home), подписи иначе легли бы одна на
-            # другую (живой снимок T2.W).
-            self._paint_row(painter, self._z, "#5af78e", label="Z", below=True)
+                self._paint_line(painter, z, "#ff5c57")
+            for z in self._marks.values():
+                self._paint_line(painter, z, "#8be9fd")
+            self._paint_line(painter, self._z, "#5af78e")
+            # Подписи отметок — над своей линией, подпись Z — под своей; затем все
+            # раздвигаются (живой снимок и ревью T2.W: Z = home на старте, отметка
+            # на краю домена — подписи ложились одна на другую или за край).
+            labels = [(self.z_to_widget_y(z) - 4, f"{name} {z:.1f}") for name, z in self._marks.items()]
+            labels.append((self.z_to_widget_y(self._z) + 14, f"Z {self._z:.1f}"))
+            labels.sort()
+            painter.setPen(QPen(QColor(_TEXT_COLOR)))
+            for baseline, (_, text) in zip(_spread([b for b, _ in labels], self.height()), labels):
+                painter.drawText(QPointF(12, baseline), text)
         finally:
             painter.end()
 
-    def _paint_row(
-        self, painter: QPainter, z: float, color: str, label: str | None = None, below: bool = False
-    ) -> None:
+    def _paint_line(self, painter: QPainter, z: float, color: str) -> None:
         y = self.z_to_widget_y(z)
         pen = QPen(QColor(color))
         pen.setWidth(3)
         painter.setPen(pen)
         painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
-        if label:
-            painter.setPen(QPen(QColor(_TEXT_COLOR)))
-            # Сторона подписи — предпочтительная, но у края домена она перекидывается
-            # на другую, иначе обрезалась бы краем виджета (ревью T2.W, итерации 1–2:
-            # Z на z_min — снизу, отметка на z_max — сверху).
-            if below and y + 14 > self.height() - 2:
-                below = False
-            elif not below and y - 16 < 0:
-                below = True
-            painter.drawText(QPointF(12, y + 14 if below else y - 4), f"{label} {z:.1f}")
+
+
+def _spread(baselines: list[float], height: float) -> list[float]:
+    """Базовые линии подписей (по возрастанию) -> раздвинутые на ``_LABEL_STEP_PX``
+    и уложенные в ``[_LABEL_TOP_PX, height - 3]``. Прямой проход раздвигает вниз,
+    обратный — поджимает к нижнему краю; порядок подписей сохраняется. Если подписей
+    больше, чем строк в виджете, верхние всё равно наложатся — у виджета минимум
+    100 px, подписей четыре."""
+    out = list(baselines)
+    for i in range(len(out)):
+        low = _LABEL_TOP_PX if i == 0 else out[i - 1] + _LABEL_STEP_PX
+        out[i] = max(out[i], low)
+    for i in range(len(out) - 1, -1, -1):
+        high = height - 3 if i == len(out) - 1 else out[i + 1] - _LABEL_STEP_PX
+        out[i] = max(min(out[i], high), _LABEL_TOP_PX)
+    return out
 
 
 class TimeTape(QWidget):

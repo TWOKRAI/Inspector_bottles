@@ -253,3 +253,37 @@ def test_zscale_mark_label_flips_below_at_top(qtbot):
     scale.refresh()
     y = round(scale.z_to_widget_y(0.0))
     assert _text_in_rows(scale.grab().toImage(), range(y + 3, y + 16))
+
+
+@pytest.mark.parametrize(
+    ("param", "raw", "z"),
+    [("P_HOME_Z", 0, 0.0), ("P_PICK_Z", -1500, -150.0)],
+    ids=["home=z_max=Z", "pick=z_min=Z"],
+)
+def test_zscale_labels_never_overlap_at_edges(qtbot, monkeypatch, param, raw, z):
+    """Экспресс-ревью teamlead (итерация 3), Н1/Н1б: Z стоит на отметке у края
+    домена — подписи «Z» и отметки не ложатся на одну базовую линию и не выходят
+    за виджет. Наблюдаемое — вызовы drawText на границе Qt: базовые линии всех
+    подписей различаются минимум на 14 px и лежат внутри высоты виджета."""
+    from PySide6.QtGui import QPainter
+
+    core = RobotSimCoreV2()
+    _param_set(core, 1, param, raw)
+    _move(core, 2, 300.0, -210.0, z, -100.0)
+    scale = ZScale(core)
+    qtbot.addWidget(scale)
+    scale.resize(120, 300)
+    scale.refresh()
+    calls = []
+    original = QPainter.drawText
+
+    def spy(self, *args):
+        calls.append(args[0].y())
+        return original(self, *args)
+
+    monkeypatch.setattr(QPainter, "drawText", spy)
+    scale.grab()
+    baselines = sorted(calls)
+    assert len(baselines) == 4, baselines  # три отметки + Z
+    assert all(b - a >= 14 for a, b in zip(baselines, baselines[1:])), baselines
+    assert baselines[0] >= 12 and baselines[-1] <= 300 - 2, baselines
