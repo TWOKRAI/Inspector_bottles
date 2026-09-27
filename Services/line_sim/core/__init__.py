@@ -6,6 +6,13 @@ from Services.line_sim.core.factory import ObjectFactory
 from Services.line_sim.core.layered_object import LayeredObject
 from Services.line_sim.core.matching import BeltGeometry, JobDone, MatchResult, match_job, object_robot_xy
 from Services.line_sim.core.preset import ScenePreset
+from Services.line_sim.core.preview import (
+    OUTSIDE_ROOTS_MESSAGE,
+    PreviewLimitError,
+    confine_preset_paths,
+    render_preview_grid,
+    validate_preview_request,
+)
 from Services.line_sim.core.scene_compositor import SceneCompositor
 from Services.line_sim.core.spawner import ObjectSpawner
 from Services.line_sim.core.truth import TruthLedger
@@ -18,12 +25,17 @@ __all__ = [
     "JobDone",
     "LayeredObject",
     "MatchResult",
+    "OUTSIDE_ROOTS_MESSAGE",
     "ObjectFactory",
     "ObjectSpawner",
+    "PreviewLimitError",
     "SceneCompositor",
     "ScenePreset",
     "TruthLedger",
+    "confine_preset_paths",
     "encoder_to_offset_mm",
     "match_job",
     "object_robot_xy",
+    "render_preview_grid",
+    "validate_preview_request",
 ]
