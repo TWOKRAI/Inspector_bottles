@@ -67,7 +67,7 @@ class Workspace:
 
     @classmethod
     def from_params(cls, values: Mapping[str, float]) -> "Workspace":
-        """Строит Workspace из карты параметров `P_WS_*` (регистры контроллера)."""
+        """Строит Workspace из карты `P_WS_*` в мм и °; из сырых ×0.1 — через `params_v2.to_eng`."""
         return cls(
             r_min=float(values["P_WS_R_MIN"]),
             r_max=float(values["P_WS_R_MAX"]),
@@ -120,6 +120,8 @@ def check_segment(ws: Workspace, x0: float, y0: float, x1: float, y1: float) -> 
     проверяет попадание в сектор `[ang_min, ang_max]`. Валидность самих
     концов отрезка здесь не проверяется — это забота вызывающего кода.
     """
+    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+        return REASON["R_OUT_OF_ZONE"]  # NaN/inf не должны молча становиться «разрешено» или исключением
     dx = x1 - x0
     dy = y1 - y0
     len2 = dx * dx + dy * dy
@@ -163,22 +165,25 @@ class Frame:
 
         `ex` — нормированное направление origin -> on_x, `ez` — нормаль плоскости
         (origin, on_x, in_plane), `ey = ez × ex`. `yaw` — угол `ex` в base-фрейме
-        (градусы). Бросает `ValueError`, если on_x ближе 1 мм к origin, или
-        in_plane ближе 1 мм к прямой оси X (три точки почти коллинеарны —
-        плоскость не определена).
+        (градусы). Ось Z всегда смотрит вверх (инструмент SCARA вертикален): третья точка задаёт
+        только плоскость, сторона (+Y или −Y) не важна. Бросает `ValueError`, если on_x ближе 1 мм
+        к origin, in_plane ближе 1 мм к прямой оси X (плоскость не определена) или координаты
+        не конечны.
         """
         on_x_vec = _sub(on_x, origin)
         on_x_len = _norm(on_x_vec)
-        if on_x_len < 1.0:
+        if not on_x_len >= 1.0:  # «not >=» ловит и NaN
             raise ValueError("on_x слишком близко к origin (< 1 мм) — ось X не определена")
         ex = _scale(on_x_vec, 1.0 / on_x_len)
 
         in_plane_vec = _sub(in_plane, origin)
         ez_raw = _cross(ex, in_plane_vec)
         ez_len = _norm(ez_raw)
-        if ez_len < 1.0:
+        if not ez_len >= 1.0:
             raise ValueError("in_plane слишком близко к оси X (< 1 мм) — плоскость не определена")
         ez = _scale(ez_raw, 1.0 / ez_len)
+        if ez[2] < 0:  # третья точка со стороны −Y: разворачиваем нормаль, иначе «над листом» ушло бы под лист
+            ez = _scale(ez, -1.0)
 
         ey = _cross(ez, ex)
 
