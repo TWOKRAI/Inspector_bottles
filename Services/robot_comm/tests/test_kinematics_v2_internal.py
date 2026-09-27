@@ -280,3 +280,24 @@ def test_make_model_validates_link_lengths_and_unknown_keys():
         make_model({"type": "scara", "L1": 325.0})  # опечатка в ключе
     with pytest.raises(ValueError, match="l1"):
         make_model({"type": "scara", "l1": "325"})
+
+
+def test_ik_j1_wrapped_to_controller_range() -> None:
+    """J1 из `ik` лежит в (-180, 180] — так суставы репортует контроллер (ревью T2.K, итерация 2).
+
+    Литерал: точка (-300, 50) левой рукой без обёртки давала J1 = 222.25°, с обёрткой −137.7535°.
+    Граница: −180 заворачивается в +180 (полуинтервал открыт снизу).
+    """
+    from Services.robot_comm.kinematics import _wrap_deg
+
+    model = ScaraModel()
+    assert model.ik((-300.0, 50.0, 0.0, 0.0), 1)[0] == pytest.approx(-137.7535, abs=1e-4)
+    assert _wrap_deg(-180.0) == 180.0
+    assert _wrap_deg(180.0) == 180.0
+    for r in (60.0, 200.0, 400.0, 599.0):
+        for ang in range(-179, 181, 7):
+            a = math.radians(ang)
+            for hand in (0, 1):
+                j = model.ik((r * math.cos(a), r * math.sin(a), 0.0, 0.0), hand)
+                assert j is not None
+                assert -180.0 < j[0] <= 180.0, (r, ang, hand, j)
