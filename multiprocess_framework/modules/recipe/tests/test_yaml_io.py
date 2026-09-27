@@ -304,3 +304,33 @@ def test_update_yaml_preserving_keeps_comments_through_atomic_path(tmp_path):
     for comment in ("# заголовок файла", "# имя", "# комментарий перед version"):
         assert comment in text
     assert "version: 4" in text
+
+
+def test_update_yaml_preserving_writes_through_symlink(tmp_path):
+    """Ревью 1.2a it.2, F1: симлинк остаётся симлинком, обновляется его цель (как прежний open("w"))."""
+    target = tmp_path / "real.yaml"
+    target.write_text(_COMMENTED, encoding="utf-8")
+    link = tmp_path / "link.yaml"
+    link.symlink_to(target)
+    update_yaml_preserving(link, {"version": 4})
+    assert link.is_symlink()
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == 4
+
+
+def test_update_yaml_preserving_read_only_file_raises_and_keeps_bytes(tmp_path):
+    """Ревью 1.2a it.2, F1: файл 0444 — PermissionError, байты те же (атомарная замена
+    иначе перезаписала бы его молча — прав на каталог ей достаточно)."""
+    import os
+
+    import pytest
+
+    path = tmp_path / "r.yaml"
+    path.write_text(_COMMENTED, encoding="utf-8")
+    before = path.read_bytes()
+    os.chmod(path, 0o444)
+    try:
+        with pytest.raises(PermissionError):
+            update_yaml_preserving(path, {"version": 4})
+        assert path.read_bytes() == before
+    finally:
+        os.chmod(path, 0o644)

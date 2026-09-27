@@ -101,6 +101,13 @@ def _dump_atomic(yaml, data: Any, path: Path) -> None:
     copymode на tmp внутри ``_atomic_write`` (service.py)."""
     from .service import _atomic_write
 
+    # Прежний open("w") писал СКВОЗЬ симлинк и падал PermissionError на файле 0444 — сохраняем оба
+    # свойства для всех вызывающих (ревью 1.2a it.2, F1). ponytail: жёсткая ссылка атомарной заменой
+    # рвётся, каталог 0555 теперь не даёт записать (нужен tmp рядом) — ADR-RCP-008; таких файлов 0.
+    path = Path(os.path.realpath(path))
+    if path.exists() and not os.access(path, os.W_OK):
+        raise PermissionError(f"файл только для чтения: {path}")
+
     buf = io.StringIO()
     yaml.dump(data, buf)
     raw = buf.getvalue().encode("utf-8")
