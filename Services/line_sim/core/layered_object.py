@@ -67,6 +67,20 @@ def _hue_shift(sprite: np.ndarray, deg: float) -> np.ndarray:
     return out
 
 
+def _hue_shift_color(color_rgb: tuple[int, int, int], hue_deg: float) -> tuple[int, int, int]:
+    """Заливка слоя `color_rgb`, прогнанная через тот же `_hue_shift`, что и спрайт
+    (на 1x1 RGBA-пикселе) — для `layer_params`, где нужно именно применённое значение,
+    а не исходный `LayerSpec.color_rgb`. `hue_deg == 0.0` — короткий путь без округления
+    HSV-конверсией (нужен static-слою: заливка без вариации должна быть значением как есть)."""
+    if hue_deg == 0.0:
+        return color_rgb
+    pixel = np.zeros((1, 1, 4), dtype=np.uint8)
+    pixel[0, 0, 0:3] = color_rgb
+    pixel[0, 0, 3] = 255
+    shifted = _hue_shift(pixel, hue_deg)
+    return (int(shifted[0, 0, 0]), int(shifted[0, 0, 1]), int(shifted[0, 0, 2]))
+
+
 def _over(canvas_pm: np.ndarray, canvas_a: np.ndarray, sprite: np.ndarray, center_xy: tuple[float, float]):
     """Альфа-«over» спрайта на прозрачную канву через `compose.composite`.
 
@@ -132,6 +146,8 @@ class LayeredObject:
             if layer.mode == "defect":
                 active = layer.name in forced or bool(sub.random() < layer.defect_probability)
                 params[layer.name] = {"active": active}
+                if layer.color_rgb is not None:
+                    params[layer.name]["color_rgb"] = list(_hue_shift_color(layer.color_rgb, dhue))
                 if not active:
                     continue
                 active_defects.append(layer.name)
@@ -140,9 +156,13 @@ class LayeredObject:
                 params[layer.name] = sampled
                 dx, dy = sampled["offset_x_px"], sampled["offset_y_px"]
                 dang, mul, dhue = sampled["angle_deg"], sampled["scale"], sampled["hue_shift_deg"]
+                if layer.color_rgb is not None:
+                    params[layer.name]["color_rgb"] = list(_hue_shift_color(layer.color_rgb, dhue))
+            elif layer.color_rgb is not None:
+                params[layer.name] = {"color_rgb": list(_hue_shift_color(layer.color_rgb, dhue))}
             placed.append(
                 (
-                    self._transform(sprite, layer.scale * mul, layer.angle_deg + dang, dhue),
+                    self._transform(sprite, layer.scale * mul, layer.angle_deg + dang, dhue, layer.color_rgb),
                     layer.offset_px[0] + dx,
                     layer.offset_px[1] + dy,
                 )
@@ -155,8 +175,18 @@ class LayeredObject:
         self._rgba.flags.writeable = False  # кэш не портится через возвращённую ссылку
 
     @staticmethod
-    def _transform(sprite: np.ndarray, scale: float, angle_deg: float, hue_deg: float) -> np.ndarray:
-        """Спрайт слоя → scale → rotate_expand (CCW) → сдвиг тона."""
+    def _transform(
+        sprite: np.ndarray,
+        scale: float,
+        angle_deg: float,
+        hue_deg: float,
+        color_rgb: tuple[int, int, int] | None = None,
+    ) -> np.ndarray:
+        """Спрайт слоя → заливка цветом (RGB := color_rgb, альфа не трогается) → scale →
+        rotate_expand (CCW) → сдвиг тона."""
+        if color_rgb is not None:
+            sprite = sprite.copy()
+            sprite[:, :, 0], sprite[:, :, 1], sprite[:, :, 2] = color_rgb
         if scale != 1.0:
             h, w = sprite.shape[:2]
             size = (max(1, round(w * scale)), max(1, round(h * scale)))

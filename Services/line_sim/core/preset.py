@@ -22,6 +22,12 @@ from Services.line_sim.interfaces import LayerSpec
 # но ошибка должна быть на границе пресета, с понятным текстом, а не в недрах фабрики).
 _RESERVED_LAYER_NAMES = frozenset({"base", "damaged"})
 
+# Слой класса (Task 1.1b, блок A): sprite_source-маркер — вместо картинки-файла слой
+# получает разыгранный ObjectFactory спрайт класса (то, что раньше всегда было "base").
+# "://" делает строку opaque id для ScenePreset._sprite_ids_only/resolve_path (см. модуль
+# preset._looks_like_relative_path) — резолюция путей её не трогает.
+CLASS_SPRITE_SOURCE = "class://"
+
 
 class ScenePreset(BaseModel):
     """Пресет сцены: каталог классов и/или дополнительные слои объекта.
@@ -85,6 +91,18 @@ class ScenePreset(BaseModel):
                     f"слои {reserved_used}: имена зарезервированы ObjectFactory (база и дефект-слой "
                     f"ставятся под именами {sorted(_RESERVED_LAYER_NAMES)}) — переименуйте слои пресета"
                 )
+        # Слой class:// (Task 1.1b, блок A): не более одного на пресет, требует catalog_dir
+        # (спрайт для подстановки берётся из каталога классов) и несовместим с mode="defect"
+        # (дефект — occlusion-пятно поверх спрайта, а не сам спрайт класса).
+        class_layers = [layer for layer in self.layers if layer.sprite_source == CLASS_SPRITE_SOURCE]
+        if len(class_layers) > 1:
+            names = sorted(layer.name for layer in class_layers)
+            raise ValueError(f"слои {names}: не более одного слоя sprite_source='class://' в пресете")
+        for layer in class_layers:
+            if self.catalog_dir is None:
+                raise ValueError(f"слой '{layer.name}': sprite_source='class://' требует catalog_dir")
+            if layer.mode == "defect":
+                raise ValueError(f"слой '{layer.name}': sprite_source='class://' несовместим с mode='defect'")
         return self
 
     @classmethod

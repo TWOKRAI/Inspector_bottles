@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 LayerMode = Literal["static", "augmented", "defect"]
 RangeF = tuple[float, float]
@@ -52,14 +52,16 @@ class LayerSpec(BaseModel):
     варьируется по `augment` (выборка один раз при создании объекта);
     `defect` — рисуется с вероятностью `defect_probability`.
 
-    Трансформ: `offset_px` — от центра объекта до центра холста спрайта;
-    `angle_deg` — поворот слоя относительно объекта, CCW, ось Y вниз
-    (конвенция `rotate_expand`, см. докстринг модуля); `scale` — множитель.
+    Трансформ применяется в порядке: заливка цветом (`color_rgb`, RGB спрайта := цвет,
+    альфа не трогается) -> `scale` -> поворот (`angle_deg`, CCW, ось Y вниз, конвенция
+    `rotate_expand`, см. докстринг модуля) -> сдвиг тона (`augment.hue_shift_deg`).
+    `offset_px` — от центра объекта до центра холста спрайта.
 
     Pre:
       - `augment` задан только при `mode == "augmented"`
       - в каждом диапазоне `augment` lo <= hi; scale > 0 (и нижняя граница диапазона scale)
       - `defect_probability` в [0, 1]
+      - `color_rgb`, если задан — тройка `int` в диапазоне [0, 255]
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
@@ -72,6 +74,25 @@ class LayerSpec(BaseModel):
     scale: float = Field(default=1.0, gt=0.0)
     augment: LayerAugment | None = None
     defect_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    color_rgb: tuple[int, int, int] | None = None
+
+    @field_validator("color_rgb", mode="before")
+    @classmethod
+    def _check_color_rgb(cls, value: Any, info: ValidationInfo) -> Any:
+        """До типовой проверки pydantic: длина тройки и диапазон каналов — с именем слоя
+        в тексте ошибки (стандартная ошибка pydantic на `tuple[int, int, int]` для
+        значения неверной длины имя слоя не несёт)."""
+        if value is None:
+            return None
+        name = info.data.get("name", "?")
+        try:
+            r, g, b = value
+        except (TypeError, ValueError):
+            raise ValueError(f"слой '{name}': color_rgb должен быть тройкой (r, g, b), получено {value!r}") from None
+        for channel, v in zip("rgb", (r, g, b), strict=True):
+            if not isinstance(v, int) or isinstance(v, bool) or not (0 <= v <= 255):
+                raise ValueError(f"слой '{name}': color_rgb.{channel}={v!r} — должен быть int в диапазоне [0, 255]")
+        return (r, g, b)
 
     @model_validator(mode="after")
     def _check_augment(self) -> LayerSpec:
@@ -97,7 +118,9 @@ class ObjectPassport:
 
     `layer_params` — фактически выбранные при создании объекта значения:
     ключ — имя слоя; для `augmented` — пять полей `LayerAugment` (числа),
-    для `defect` — `{"active": bool}`. Заполняет `LayeredObject`.
+    для `defect` — `{"active": bool}`. Слой с `color_rgb` добавляет ключ
+    `"color_rgb": [r, g, b]` (после сдвига тона слоя, если он был) — у `static`-слоя
+    с заливкой это единственный ключ записи. Заполняет `LayeredObject`.
     """
 
     object_id: str
