@@ -28,7 +28,8 @@ class ScenePreset(BaseModel):
 
     Pre (from_dict): хотя бы одно из `catalog_dir`/`layers` задано (иначе нечего
     рисовать); в `layers` `sprite_source` — строка-id; `angle_range_deg`: lo <= hi.
-    Post: `from_dict(p.to_dict()) == p`, `from_yaml(to_yaml(p)) == p`.
+    Post: `from_dict(p.to_dict()) == p`; `from_yaml(to_yaml(p, f))` равен `p` с `base_dir` = каталог `f`
+    (содержимое то же, относительные пути пересчитаны от нового места).
 
     `base_dir` (Task 1.0, LS-013) — каталог, от которого резолвятся относительные
     `catalog_dir`/`layers[*].sprite_source` (`resolve_path()`); `None` — резолвить
