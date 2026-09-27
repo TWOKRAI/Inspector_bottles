@@ -423,30 +423,16 @@ class DemoDriver:
         core.write(REG["CMD_FLAG"], [1])  # последним (TRAPS, тот же порядок что и у mailbox-хелперов тестов)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Запуск отладочного окна: ``python -m Services.robot_comm.gui.sim_view``.
-
-    Собирает три read-only вида (T2.W): ``SimView`` (вид сверху + стрелка
-    RZ), ``ZScale`` (шкала Z справа), ``TimeTape`` (лента Z(t)/RZ(t) снизу).
-    Это ОТЛАДОЧНОЕ окно (владелец, 2026-09-27), не продуктовый GUI — см.
-    ``z_view.py``.
-
-    ``--quit-after SECONDS`` — смоук-режим: окно закрывается само через
-    заданное время (``QTimer.singleShot`` -> ``app.quit()``), без человека за
-    экраном. Команда для проверки без дисплея — в README.
-    """
+def build_window(core: RobotSimCoreV2) -> QWidget:
+    """Собрать отладочное окно над ``core``: кнопки, ``SimView`` + ``ZScale`` в ряд,
+    ``TimeTape`` снизу. Отдельно от ``main()`` — чтобы состав окна проверялся
+    тестом без event loop (сторож инъекции I11, T2.W)."""
     # Локальный импорт — z_view.py импортирует _REFRESH_MS/_decode_reg ИЗ
     # этого модуля; импорт на уровне модуля здесь дал бы цикл при запуске
     # `python -m Services.robot_comm.gui.sim_view` (sim_view ещё не
     # доопределён к моменту, когда его же импортировал бы z_view).
     from Services.robot_comm.gui.z_view import TimeTape, ZScale
 
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--quit-after", type=float, default=None, metavar="SECONDS")
-    args = parser.parse_args(argv)
-
-    app = QApplication(sys.argv)
-    core = RobotSimCoreV2()
     driver = DemoDriver(core)
     view = SimView(core)
     view.clicked.connect(driver.goto)
@@ -485,6 +471,29 @@ def main(argv: list[str] | None = None) -> None:
     layout.addLayout(sim_row)
     layout.addWidget(tape)
     window.resize(820, 860)
+    window._driver = driver  # водитель живёт, пока живёт окно
+    return window
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Запуск отладочного окна: ``python -m Services.robot_comm.gui.sim_view``.
+
+    Собирает три read-only вида (T2.W): ``SimView`` (вид сверху + стрелка
+    RZ), ``ZScale`` (шкала Z справа), ``TimeTape`` (лента Z(t)/RZ(t) снизу).
+    Это ОТЛАДОЧНОЕ окно (владелец, 2026-09-27), не продуктовый GUI — см.
+    ``z_view.py``.
+
+    ``--quit-after SECONDS`` — смоук-режим: окно закрывается само через
+    заданное время (``QTimer.singleShot`` -> ``app.quit()``), без человека за
+    экраном. Команда для проверки без дисплея — в README.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--quit-after", type=float, default=None, metavar="SECONDS")
+    args = parser.parse_args(argv)
+
+    app = QApplication(sys.argv)
+    core = RobotSimCoreV2()
+    window = build_window(core)
 
     last = time.monotonic()
 
