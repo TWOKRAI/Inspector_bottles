@@ -233,6 +233,21 @@ class ObjectSpawner:
     def set_paused(self, paused: bool) -> None:
         self._paused = paused
 
+    def set_factory(self, factory: ObjectFactory) -> None:
+        """Горячая подмена фабрики (Task 1.2a, `preset.commit`): СЛЕДУЮЩИЕ спавны строит
+        `factory`, объекты, уже активные, не трогаются (у них свой закэшированный рендер).
+        Расписание спавна (срок/шаг/нумерация) не меняется.
+
+        Невыпущенный форс-брак старой фабрики переносится на новую (`force_defect_next()`),
+        иначе нажатие оператора, пришедшееся между commit и следующим спавном, пропало бы.
+
+        Pre: вызывается из того же потока, что и `tick()` (воркер кадров) — так делает
+        плагин `scene_source`; лока нет (см. докстринг модуля: один producer).
+        """
+        if self._factory.force_defect_pending:
+            factory.force_defect_next()
+        self._factory = factory
+
     def force_defect_next(self) -> None:
         """Тонкий делегат `ObjectFactory.force_defect_next()` — см. докстринг класса."""
         self._factory.force_defect_next()

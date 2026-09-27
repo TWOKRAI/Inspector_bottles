@@ -67,6 +67,12 @@ class ObjectFactory:
     def class_names(self) -> list[str]:
         return self._catalog.class_names if self._catalog is not None else []
 
+    @property
+    def force_defect_pending(self) -> bool:
+        """Взведён ли одноразовый флаг `force_defect_next()` (ещё не погашен успешным `make()`).
+        Только чтение — нужен `ObjectSpawner.set_factory()`, чтобы перенести нажатие на новую фабрику."""
+        return self._force_defect_pending
+
     def force_defect_next(self) -> None:
         """Ровно следующий `make()` получит `passport.defect == "damaged"`,
         независимо от `defect_probability`. Флаг одноразовый (см. `make()`)."""
