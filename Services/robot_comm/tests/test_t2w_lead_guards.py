@@ -138,6 +138,10 @@ def test_tape_rz_outside_zone_not_flattened(qtbot):
     core.write(REG["CMD_FLAG"], [1])
     core.tick()
     assert core.read(REG["RES_STATUS"], 1)[0] == ACK
+    # RZ вне зоны ДО конструктора: он сам снимает первую выборку, и при RZ = -100
+    # (внутри зоны) кривая набирала бы высоту даже с прижатием к краю — первая
+    # редакция сторожа поэтому пережила инъекцию J5.
+    core.regs[REG["TLM_RZ"]] = 600
     now = [0.0]
     tape = TimeTape(core, clock=lambda: now[0])
     qtbot.addWidget(tape)
