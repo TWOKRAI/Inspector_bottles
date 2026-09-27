@@ -83,7 +83,7 @@ YAML → кодоген; ответ пишется всегда. Подробн�
 | 0x105A | TLM_MISS_COUNT | u16 | промахи CVT | Motion |
 | 0x105B | TLM_HAND | u16 | конфигурация руки, как её возвращает `RobotHand()` | поза* |
 | 0x105C | TLM_STOP_ACK | u16 | эхо последнего обработанного `STOP_REQ` | Motion |
-| 0x105D | TLM_CFG_EPOCH | u16 | эхо `P_CONFIG_EPOCH`; 0 после старта программы | Motion |
+| 0x105D | TLM_CFG_EPOCH | u16 | эхо `P_CONFIG_EPOCH`; после старта — метка из зеркала, 0 если зеркало отвергнуто (params.md §11.4) | Motion |
 | 0x105E | TLM_CFG_PENDING | u16 | 1 — есть принятые параметры класса `reinit`, ждущие `PARAM_APPLY` | Motion |
 | 0x105F | — | | резерв | |
 

@@ -176,7 +176,7 @@ def _lua_assign(name: str, value: object) -> str:
 # ─────────────────────────── CRC16/MODBUS (DICT_FINGERPRINT) ───────────────────────────
 
 
-def _crc16_modbus(data: bytes) -> int:
+def crc16_modbus(data: bytes) -> int:
     """CRC16/MODBUS: poly 0xA001 (reflected), init 0xFFFF."""
     crc = 0xFFFF
     for byte in data:
@@ -201,7 +201,7 @@ def _dict_fingerprint(params_yaml: dict) -> int:
             if not -32768 <= value <= 0xFFFF:
                 raise ValueError(f"{name}: значение {value} не помещается в 16 бит — нужен широкий параметр")
             words += struct.pack("<H", value & 0xFFFF)
-    return _crc16_modbus(bytes(words)) & 0x7FFF
+    return crc16_modbus(bytes(words)) & 0x7FFF
 
 
 def _field_name(param_name: str) -> str:

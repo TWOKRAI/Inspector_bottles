@@ -439,7 +439,7 @@ registers:
     scale: 1
     signed: false
     label: "Эпоха конфигурации"
-    hint: "Эхо P_CONFIG_EPOCH; 0 после старта программы"
+    hint: "Эхо P_CONFIG_EPOCH; после старта — метка из зеркала, 0 если зеркало отвергнуто (params §11.4)"
 
   tlm_cfg_pending:
     type: reg
