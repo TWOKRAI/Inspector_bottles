@@ -196,3 +196,42 @@ STATUS: DONE_WITH_CONCERNS. `test_sim_v2_joint_state.py`: **10/10 passed**. По
    должен стать жёстким, эти 2 файла тоже нужно поправить (расширить их FILES).
 
 Коммит этой итерации — отдельный, тем же trailers, `Refs: plans/robot-protocol-v2/plan.md`.
+
+## Итерация 3 (правки по `docs/reviews/2026-09-27_robot-v2-task-T2.J2-review.md`)
+
+STATUS: DONE. `Services/robot_comm/tests`: **796 passed, 5 skipped, 2 xpassed, 0 failed**
+(с новыми тестами включительно). Ruff чист. `test_sim_v2_joint_state.py` не трогал,
+свойство 5 не трогал.
+
+1. **Блокер 1 — финальный тик обходит потолок.** `_progress_move`: финальный тик теперь
+   тоже идёт через `_joint_tick_capped` с кандидатом `min(travelled+step_eq, path_len)`.
+   Снэп в `target`/`j_end` ТОЧНО — только когда бисекция реально дотянула до `path_len`
+   без урезания (`new_travelled >= path_len - 1e-9`); иначе ход честно продолжается
+   следующим тиком. Проверил репро ревьюера вручную: шаг 145.2мм → максимум 33.32мм
+   (потолок 33.33), DONE за 10 тиков вместо 1. Добавил 2 теста в
+   `test_sim_v2_joint_path_internal.py`: `test_final_tick_respects_step_cap_after_hand_flip`
+   (ровно сценарий ревьюера, каждый тик ≤ MAX_STEP_MM+1e-6, DONE с `max_ticks`) и
+   `test_short_chord_hand_flip_stays_under_step_cap` ((400,100)→(410,100) со сменой
+   руки — держит потолок; заодно отмечено в докстринге, что телепорт СУСТАВОВ при
+   коротких ходах — следствие `joint_speed=1e9`, из списка «не трогать» ведущего).
+2. **Докстринги** (`:47-62`, `:86-105`, `MAX_STEP_MM`) переписаны: сектор больше не
+   объясняется «путь повторяет руку» (опровергнуто инъекцией) — прямо сказано, что
+   защищают пределы суставов, без них модель проходит сектор. Потолок — явно «включая
+   финальный тик» и явно «XYZ, не RZ» с указателем на эскалацию к cto (RZ не обещан
+   нигде). Добавлен абзац «Эскалация к cto» о TLM_RZ/J4-без-предела — только факты,
+   без обещаний решения.
+3. **Major 4 — `fk→None` стирало состояние.** `_joint_tick_capped`: при `fk_pos is None`
+   возвращает не `None`, а `pose_at(active["travelled"])[0]` — lerp ПРИ ТЕКУЩЕМ
+   (непродвинутом) travelled. Тест `test_fk_none_mid_path_keeps_joint_state_not_none`
+   (подставная модель `fk=None` при `30<J1<40`, реплика репродукции ревьюера):
+   `joints()` не `None` после HARD-стопа, следующий JOINT заметно отклоняется от
+   хорды (суставный путь, не прямая).
+4. **Minor 6.** `ik`/`joint_limits`/`joint_speed` дописаны (делегируют в реальную
+   ScaraModel) в `_AlwaysOutOfZoneModel` (`test_kinematics_v2.py`, `test_kinematics_v2_internal.py`)
+   и `_DeadZoneOnSegmentModel` (`test_kinematics_v2_internal.py`). `getattr(self.model,
+   "ik", None)` убран из `_boot`/`attach` — `ik` теперь безусловный вызов.
+
+Не трогал: TLM_RZ на DONE, правило J4 при пределе `None`, дефолтный `joint_speed` —
+все три эскалированы к cto по решению ведущего, документированы в докстринге, не решены.
+
+Коммит — отдельный, теми же trailers, `Refs: plans/robot-protocol-v2/plan.md`.

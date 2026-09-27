@@ -255,8 +255,25 @@ def test_sim_default_model_is_scara():
 
 
 class _AlwaysOutOfZoneModel:
-    """Duck-typed подставная модель — только check_point нужен: JOINT и HOME в _check_motion
-    не вызывают check_segment (только LINE), см. sim_core_v2._check_motion."""
+    """Duck-typed подставная модель — только check_point запрещает всё нарочно; `ik`/
+    `joint_limits`/`joint_speed` делегированы реальной ScaraModel (T2.J2, минорная 6
+    ревью: `_boot()` безусловно зовёт `self.model.ik` при загрузке домашней позы —
+    без этого конструктор `RobotSimCoreV2(model=...)` падает `AttributeError` ДО
+    первой команды, JOINT/HOME здесь не доходят до предела суставов вовсе, т.к.
+    `check_point` NAK'ает раньше в `_check_motion`)."""
+
+    def __init__(self) -> None:
+        from Services.robot_comm.kinematics import ScaraModel
+
+        self._real = ScaraModel()
+        self.kind = self._real.kind
+        self.axes = self._real.axes
+        self.joint_names = self._real.joint_names
+        self.joint_limits = self._real.joint_limits
+        self.joint_speed = self._real.joint_speed
+
+    def ik(self, pose, hand):
+        return self._real.ik(pose, hand)
 
     def check_point(self, ws, pose):
         return REASON["R_OUT_OF_ZONE"]

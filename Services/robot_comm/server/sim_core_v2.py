@@ -56,10 +56,14 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
 декартов шаг падает только ЭТОТ тик, не весь ход (не пересчитывает путь
 заранее). **Промежуточные точки суставного пути НЕ проверяются на попадание в
 зону** — и прошивка, и симулятор проверяют только цель хода при приёме
-команды (``_check_motion``); суставный путь избегает сектора не потому, что
-кто-то его проверяет по дороге, а потому что он физически повторяет
-траекторию настоящей руки. ``LINE`` и ``JOG_STEP``/``JOG_CONT`` остаются
-прямой в Cartesian без изменений.
+команды (``_check_motion``). Сектор избегается не потому, что суставный путь
+"физически повторяет траекторию настоящей руки" (опровергнуто ревью T2.J2:
+модель БЕЗ пределов суставов проходит через сектор — инъекция ведущего дала
+угол TCP до ±170°, 392 случайных хода без нарушения были на модели С пределами)
+— а потому, что пределы суставов (T2.J2, ниже) физически не пускают руку в
+конфигурации, чей TCP лежал бы в запретном секторе; без пределов (модель без
+`joint_limits`) сектор не защищён вообще. ``LINE`` и ``JOG_STEP``/``JOG_CONT``
+остаются прямой в Cartesian без изменений.
 
 Реализовано в T2.J2 (эскалация ревью T2.J к cto, см. `docs/reviews/2026-09-27_robot-v2-task-T2.J-cto.md`,
 «Решения» и «Свойства приёмки T2.J2»): суставы — состояние симулятора, не
@@ -90,16 +94,28 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
   оси одновременно, реальный JOINT обычно быстрее LINE). Длительность выражается
   эквивалентной длиной ``path_len_eq = duration × speed``, чтобы продвижение за
   тик оставалось `min(speed*dt, MAX_STEP_MM)` тем же кодом, что и раньше.
-  ЖЁСТКИЙ ПОТОЛОК (решение ведущего 2026-09-27): декартово смещение позы за
-  один тик ограничено `MAX_STEP_MM` И В СУСТАВНОМ ходе — если `fk` кандидатной
-  доли тика уносит TCP дальше `MAX_STEP_MM` от предыдущей позы (нелинейность fk
-  у вытянутой руки), доля тика урезается (несколько итераций деления пополам).
-  Финальный тик ставит позу РОВНО в цель и `_joints = j_end` точно (не даёт
-  накопиться float-дрейфу).
+  ЖЁСТКИЙ ПОТОЛОК (решение ведущего 2026-09-27): декартово смещение XYZ (не RZ,
+  см. эскалацию к cto ниже) за один тик ограничено `MAX_STEP_MM` И В СУСТАВНОМ
+  ходе, ВКЛЮЧАЯ ФИНАЛЬНЫЙ — если `fk` кандидатной доли тика (включая долю,
+  ограниченную `path_len`) уносит TCP дальше `MAX_STEP_MM` от предыдущей позы
+  (нелинейность fk у вытянутой руки), доля тика урезается (`_joint_tick_capped`,
+  несколько итераций деления пополам); ревью T2.J2 нашло, что до этого исправления
+  финальный тик прыгал в цель В ОБХОД потолка (шаг до 145.2мм при смене руки,
+  ⚑ БЛОКЕР 1). Позу ставит РОВНО в `target`, а `_joints` — в `j_end`, ТОЛЬКО
+  тик, который реально дотянул до `path_len` без урезания; иначе ход продолжается
+  на следующем тике честным капнутым шагом.
 - LINE/JOG: после каждой записи позы `_joints = ik(pos, TLM_HAND)` с J4 —
   ближайшим оборотом к прежнему состоянию (состояние следует, не отдельная
   правда). Пределы суставов при LINE не проверяются — открыто, вне охвата
   T2.J2 (см. отчёт).
+
+Эскалация к cto (ревью T2.J2, находки 3/5, НЕ РЕШЕНО): `TLM_RZ` не ограничен
+жёстким потолком шага (потолок мерит только XYZ, см. выше) — при `J4` = ближайший
+оборот к цели RZ может отличаться от значения, требуемого прошивкой, на кратное
+360°, и промежуточный `TLM_RZ` посреди хода может выйти за пределы одного оборота
+на десятки-сотни градусов за тик. Вопрос, какое значение TLM_RZ правильное
+(цель дословно или `fk(суставов)` с кратным 360°) и как тогда его ограничивать —
+у cto, не решён этим кодом; ничего в реализации ниже этого не обещает.
 
 Убрано T2.J2: устаревший `TLM_HAND = P_HAND` только на DONE (теперь TLM_HAND
 следует состоянию на каждой записи позы), мёртвый ключ `"start"` в `_active`
@@ -130,7 +146,10 @@ TLM_ACTIVITY_FAULT = 5
 
 #: dt по умолчанию, когда tick() вызван без аргумента (contract §"Motion model").
 TICK_INTERVAL_S = 0.01
-#: жёсткий потолок смещения позы за один тик (мм или °, contract §"Motion model").
+#: жёсткий потолок декартова смещения XYZ позы за один тик, мм (contract
+#: §"Motion model"; LINE/JOG_STEP — тот же потолок и на RZ, суставный ход
+#: T2.J2 — только на XYZ, RZ не ограничен здесь, см. эскалацию к cto в
+#: докстринге модуля).
 MAX_STEP_MM = 100 / 3
 
 # Опкоды, не реализованные ни в T2.1, ни в T2.2 (out of scope по контракту) -> NAK E_INTERNAL
@@ -211,8 +230,9 @@ class RobotSimCoreV2:
         regs[: len(self.regs)] = self.regs
         self.regs = regs
         # T2.J2: суставы — состояние, заводится при (пере)загрузке позы (см. `_boot`).
-        ik = getattr(self.model, "ik", None)
-        self._joints = ik(self._read_pose_eng(), self.regs[REG["TLM_HAND"]]) if ik else None
+        # `ik` — часть контракта `RobotModel` (Protocol), не опциональна (минорная 6
+        # ревью T2.J2 — подставные модели теста дополнены `ik`, не код защитой здесь).
+        self._joints = self.model.ik(self._read_pose_eng(), self.regs[REG["TLM_HAND"]])
 
     def read(self, address: int, count: int = 1) -> list[int]:
         """Прочитать блок регистров."""
@@ -269,12 +289,10 @@ class RobotSimCoreV2:
             to_eng("P_HOME_RZ", self._values[PARAM_ID["P_HOME_RZ"]]),
         )
         # T2.J2: суставы — состояние, заводится при (пере)загрузке позы (docstring
-        # модуля). `getattr` — некоторые тестовые фейк-модели (test_kinematics_v2*)
-        # реализуют только check_point/check_segment (уже так до T2.J2, вне FILES
-        # этой задачи) — отсутствие `ik` не должно ронять `_boot()`, `joints()`
-        # уже документирован как допускающий `None`.
-        ik = getattr(self.model, "ik", None)
-        self._set_pose_and_joints(home_pose, ik(home_pose, self.regs[REG["TLM_HAND"]]) if ik else None)
+        # модуля). `ik` — часть контракта `RobotModel` (Protocol), не опциональна
+        # (минорная 6 ревью T2.J2 — подставные модели теста дополнены `ik`, не
+        # код защитой здесь).
+        self._set_pose_and_joints(home_pose, self.model.ik(home_pose, self.regs[REG["TLM_HAND"]]))
 
         # Идемпотентность после рестарта программы: последний ответ
         # восстанавливается из уже записанных регистров, чтобы повтор seq
@@ -702,8 +720,12 @@ class RobotSimCoreV2:
             # ponytail: суставы из lerp двух ДОСТИЖИМЫХ концов сами вне модели —
             # фолбэк на декартов шаг ТОЛЬКО для этого тика, travelled не
             # продвигаем (следующий тик пробует ту же долю снова, T2.J design).
+            # Major 4 ревью T2.J2: состояние НЕ стирается в None — держим lerp
+            # суставов ПРИ ТЕКУЩЕМ (не продвинутом) travelled, иначе следующий
+            # JOINT стартует без состояния и падает на прямую в Cartesian.
             fallback = self._cartesian_step(prev_pos, active["target"], active["speed"], dt)
-            return active["travelled"], None, fallback
+            current_joints, _ = pose_at(active["travelled"])
+            return active["travelled"], current_joints, fallback
         if cart_dist(fk_pos) <= MAX_STEP_MM + 1e-9:
             return candidate_travelled, joints, fk_pos
         lo = active["travelled"]
@@ -751,26 +773,29 @@ class RobotSimCoreV2:
         pos = active["pos"]
         target = active["target"]
         if active.get("j_start") is not None and active.get("j_end") is not None:
+            # ⚑ БЛОКЕР 1 ревью T2.J2: финальный тик ТОЖЕ идёт через `_joint_tick_capped`
+            # (кандидат зажат `path_len`) — раньше `candidate_travelled >= path_len`
+            # прыгал сразу в `target` в обход потолка (найден шаг 145.2мм при смене
+            # руки, MAX_STEP_MM=33.3). Снэп в `target`/`j_end` ТОЧНО — только когда
+            # бисекция реально дотянула до `path_len` без урезания; иначе ход
+            # продолжается на следующем тике с честного капнутого `new_pos`.
             step_eq = min(active["speed"] * dt, MAX_STEP_MM)
-            candidate_travelled = active["travelled"] + step_eq
-            if candidate_travelled >= active["path_len"]:
-                # ровно цель, суставы = j_end точно — не даёт накопиться float-дрейфу.
+            candidate_travelled = min(active["travelled"] + step_eq, active["path_len"])
+            new_travelled, new_joints, new_pos = self._joint_tick_capped(active, pos, candidate_travelled, dt)
+            active["travelled"] = new_travelled
+            if new_travelled >= active["path_len"] - 1e-9:
                 new_pos = target
                 new_joints = active["j_end"]
-                active["travelled"] = active["path_len"]
-            else:
-                new_travelled, new_joints, new_pos = self._joint_tick_capped(active, pos, candidate_travelled, dt)
-                active["travelled"] = new_travelled
-                # Клэмп зоны трогает позу ТОЛЬКО когда обычное округление её из зоны
-                # выводит (свойство 1 приёмки T2.J2, r=600.028>r_max) — иначе не
-                # трогать new_pos вовсе: `_clamp_pose_to_zone` в быстром пути
-                # математически то же значение, что вернул бы `_write_pose`, но
-                # предвычисленное округление здесь и повторное округление там —
-                # разные float-выражения одной величины, ULP-шум на них за ~1400
-                # тиков `test_duration_follows_slowest_joint` даёт расхождение в
-                # 2 тика (найдено этим прогоном, решение — не трогать общий путь).
-                if self.model.check_point(self._workspace(), tuple(round(v * 10) / 10.0 for v in new_pos)) != 0:
-                    new_pos = self._clamp_pose_to_zone(new_pos)
+            # Клэмп зоны трогает позу ТОЛЬКО когда обычное округление её из зоны
+            # выводит (свойство 1 приёмки T2.J2, r=600.028>r_max) — иначе не
+            # трогать new_pos вовсе: `_clamp_pose_to_zone` в быстром пути
+            # математически то же значение, что вернул бы `_write_pose`, но
+            # предвычисленное округление здесь и повторное округление там —
+            # разные float-выражения одной величины, ULP-шум на них за ~1400
+            # тиков `test_duration_follows_slowest_joint` даёт расхождение в
+            # 2 тика (найдено этим прогоном, решение — не трогать общий путь).
+            elif self.model.check_point(self._workspace(), tuple(round(v * 10) / 10.0 for v in new_pos)) != 0:
+                new_pos = self._clamp_pose_to_zone(new_pos)
         else:
             new_pos = self._cartesian_step(pos, target, active["speed"], dt)
             new_joints = self._continuity_joints(new_pos)

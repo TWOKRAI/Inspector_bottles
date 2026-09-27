@@ -114,7 +114,19 @@ class _AlwaysOutOfZoneModel:
     (`_op_jog_cont` не делает zone-check — только servo/hand/скорость), но самый первый
     тик прогресса хода (`_progress_jog`) обязан спросить модель ПЕРЕД тем, как сдвинуть
     позу. Раз модель запрещает всё — ход обрывается на первом же тике, поза не съезжает
-    ни на шаг от домашней."""
+    ни на шаг от домашней. `ik`/`joint_limits`/`joint_speed` делегированы реальной
+    ScaraModel (T2.J2, минорная 6 ревью — `_boot()` безусловно зовёт `self.model.ik`)."""
+
+    def __init__(self) -> None:
+        self._real = ScaraModel()
+        self.kind = self._real.kind
+        self.axes = self._real.axes
+        self.joint_names = self._real.joint_names
+        self.joint_limits = self._real.joint_limits
+        self.joint_speed = self._real.joint_speed
+
+    def ik(self, pose, hand):
+        return self._real.ik(pose, hand)
 
     def check_point(self, ws, pose):
         return REASON["R_OUT_OF_ZONE"]
@@ -157,7 +169,21 @@ class _DeadZoneOnSegmentModel:
     """check_point разрешает всё (0), check_segment — всегда R_DEAD_ZONE. Закрепляет,
     что `_check_motion` для LINE зовёт `self.model.check_segment`, а не напрямую
     `geometry.check_segment` (ревью T2.K находка 3: второе непроверенное место помимо
-    JOG_CONT, которое закрыл test_jog_cont_zone_check_goes_through_model)."""
+    JOG_CONT, которое закрыл test_jog_cont_zone_check_goes_through_model). `ik`/
+    `joint_limits`/`joint_speed` делегированы реальной ScaraModel (T2.J2, минорная 6
+    ревью — `_boot()` безусловно зовёт `self.model.ik`; тест шлёт LINE, предел
+    суставов не проверяется, но объект обязан быть валидным duck-type ещё до этого)."""
+
+    def __init__(self) -> None:
+        self._real = ScaraModel()
+        self.kind = self._real.kind
+        self.axes = self._real.axes
+        self.joint_names = self._real.joint_names
+        self.joint_limits = self._real.joint_limits
+        self.joint_speed = self._real.joint_speed
+
+    def ik(self, pose, hand):
+        return self._real.ik(pose, hand)
 
     def check_point(self, ws, pose):
         return 0

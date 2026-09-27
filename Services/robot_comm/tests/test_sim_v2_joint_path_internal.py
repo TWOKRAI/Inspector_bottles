@@ -368,3 +368,187 @@ def test_registered_pose_stays_in_zone_at_stretched_arm():
     ws = core._workspace()  # дефолтные P_WS_*: r_max = 600
     outside = [p for p in samples if check_point(ws, *p) != 0]
     assert outside == [], outside[:3]
+
+
+# =========================================================================== #
+# Блокер 1 ревью T2.J2 — финальный тик тоже держит жёсткий потолок шага
+# =========================================================================== #
+
+
+def test_final_tick_respects_step_cap_after_hand_flip():
+    """Ревьюер: P_HAND=0 JOINT (400,100), затем P_HAND=1 JOINT (400,140) — финальный
+    тик прыгал в `target` в обход `_joint_tick_capped` (найден шаг 145.2мм при
+    MAX_STEP_MM=33.3, `candidate_travelled >= path_len` шёл прямо на `target`/`j_end`).
+    Каждый тик (включая финальный) обязан быть <= MAX_STEP_MM + 1e-6, ход обязан
+    дойти до DONE за конечное число тиков."""
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(0))["status"] == ACK
+    assert cmd(core, 3, OP["PTP_MOVE"], mm(400.0), mm(100.0), mm(-75.0), mm(0.0), KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+
+    assert cmd(core, 4, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(1))["status"] == ACK
+    res = cmd(core, 5, OP["PTP_MOVE"], mm(400.0), mm(140.0), mm(-75.0), mm(0.0), KIND["JOINT"], 100)
+    assert res["status"] == ACK, res
+
+    prev = pose_eng(core)
+    max_ticks = 500
+    for i in range(max_ticks):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            break
+        core.tick(TICK_S)
+        cur = pose_eng(core)
+        step = math.hypot(cur[0] - prev[0], cur[1] - prev[1])
+        assert step <= 100 / 3 + 1e-6, f"тик {i}: шаг {step:.3f}мм больше MAX_STEP_MM"
+        prev = cur
+    else:
+        pytest.fail(f"ход не завершился за {max_ticks} тиков")
+    assert core.read(REG["TLM_ACTIVITY"], 1)[0] == 0
+    assert pose_eng(core) == pytest.approx((400.0, 140.0, -75.0, 0.0), abs=0.1)
+
+
+def test_short_chord_hand_flip_stays_under_step_cap():
+    """Пара из брифа ревьюера: (400,100)->(410,100) со сменой руки — короткая хорда
+    (10мм), проверяет ИМЕННО потолок шага (уже держит), не реализм `joint_speed`
+    (тот факт, что вся суставная перекладка укладывается в 1 тик при дефолтном
+    `joint_speed=1e9`, — решение ведущего 2026-09-27 «не трогать до cto», здесь не
+    проверяется)."""
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(0))["status"] == ACK
+    assert cmd(core, 3, OP["PTP_MOVE"], mm(400.0), mm(100.0), mm(-75.0), mm(0.0), KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+
+    assert cmd(core, 4, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(1))["status"] == ACK
+    prev = pose_eng(core)
+    res = cmd(core, 5, OP["PTP_MOVE"], mm(410.0), mm(100.0), mm(-75.0), mm(0.0), KIND["JOINT"], 100)
+    assert res["status"] == ACK, res
+    cur = pose_eng(core)
+    step = math.hypot(cur[0] - prev[0], cur[1] - prev[1])
+    assert step <= 100 / 3 + 1e-6, f"шаг {step:.3f}мм больше MAX_STEP_MM"
+    for i in range(500):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            break
+        prev = cur
+        core.tick(TICK_S)
+        cur = pose_eng(core)
+        step = math.hypot(cur[0] - prev[0], cur[1] - prev[1])
+        assert step <= 100 / 3 + 1e-6, f"тик {i}: шаг {step:.3f}мм больше MAX_STEP_MM"
+    else:
+        pytest.fail("ход не завершился за 500 тиков")
+    assert pose_eng(core) == pytest.approx((410.0, 100.0, -75.0, 0.0), abs=0.1)
+
+
+# =========================================================================== #
+# Major 4 ревью T2.J2 — fk->None посреди пути не стирает состояние в None
+# =========================================================================== #
+
+
+class _FkFlakyRangeModel:
+    """Делегирует всё в реальную ScaraModel, кроме `fk` — `None` только при `30<J1<40`
+    (реплика репродукции ревьюера: узкая полоса недостижимости ПОСРЕДИ иначе тотальной
+    `fk`, не всегда, как у `_FkFlakyModel`)."""
+
+    def __init__(self) -> None:
+        self._real = ScaraModel()
+        self.kind = self._real.kind
+        self.axes = self._real.axes
+        self.joint_names = self._real.joint_names
+        self.joint_limits = self._real.joint_limits
+        self.joint_speed = self._real.joint_speed
+
+    def fk(self, joints):
+        if 30.0 < joints[0] < 40.0:
+            return None
+        return self._real.fk(joints)
+
+    def ik(self, pose, hand):
+        return self._real.ik(pose, hand)
+
+    def chain_points(self, joints):
+        return self._real.chain_points(joints)
+
+    def check_point(self, ws, pose):
+        return self._real.check_point(ws, pose)
+
+    def check_segment(self, ws, p0, p1):
+        return self._real.check_segment(ws, p0, p1)
+
+
+def test_fk_none_mid_path_keeps_joint_state_not_none():
+    """Major 4 ревью T2.J2: `fk -> None` ПОСРЕДИ пути (суставы из lerp двух ДОСТИЖИМЫХ
+    концов сами не имеют `fk`) раньше стирал `self._joints` в `None` — после HARD-стопа
+    `joints()` возвращал `None`, следующий JOINT стартовал БЕЗ состояния и шёл по прямой
+    в Cartesian (не по суставам). Исправление: держать lerp суставов ПРИ ТЕКУЩЕМ (не
+    продвинутом) `travelled`, а не стирать в `None`."""
+    model = _FkFlakyRangeModel()
+    core = RobotSimCoreV2(model=model)
+    servo_on(core, 1)
+
+    # Стартовая поза с J1=0 (вне полосы 30-40) — доехать туда обычным JOINT от HOME.
+    start_j = (0.0, -90.0, -40.0, 0.0)
+    start_pose = model.fk(start_j)
+    assert (
+        cmd(
+            core,
+            2,
+            OP["PTP_MOVE"],
+            mm(start_pose[0]),
+            mm(start_pose[1]),
+            mm(start_pose[2]),
+            mm(start_pose[3]),
+            KIND["JOINT"],
+            100,
+        )["status"]
+        == ACK
+    )
+    run_until_activity_zero(core)
+
+    # Ход J1: 0 -> 60, пересекает полосу 30-40, где fk возвращает None.
+    target_j = (60.0, -90.0, -40.0, 0.0)
+    target_pose = model.fk(target_j)
+    res = cmd(
+        core,
+        3,
+        OP["PTP_MOVE"],
+        mm(target_pose[0]),
+        mm(target_pose[1]),
+        mm(target_pose[2]),
+        mm(target_pose[3]),
+        KIND["JOINT"],
+        100,
+    )
+    assert res["status"] == ACK, res
+
+    for _ in range(5):
+        assert core.read(REG["TLM_ACTIVITY"], 1)[0] != 0, "предпосылка: ход ещё не завершился"
+        core.tick(TICK_S)
+
+    core.write(REG["STOP_REQ"], [STOP_LEVEL["HARD"]])
+    core.tick(TICK_S)
+    assert core.read(REG["TLM_ACTIVITY"], 1)[0] == 0
+    joints = core.joints()
+    assert joints is not None, "состояние не должно стираться в None при fk->None посреди пути"
+
+    # Следующий JOINT идёт по суставам (заметно отклоняется от хорды к цели), а не
+    # по прямой в Cartesian (что было бы, если бы j_start = None после обрыва).
+    frozen = pose_eng(core)
+    far_j = (frozen_j1 := joints[0] + 40.0, joints[1], joints[2], joints[3])
+    far_pose = model.fk(far_j)
+    res2 = cmd(
+        core, 4, OP["PTP_MOVE"], mm(far_pose[0]), mm(far_pose[1]), mm(far_pose[2]), mm(far_pose[3]), KIND["JOINT"], 100
+    )
+    assert res2["status"] == ACK, res2
+    samples = [pose_eng(core)]
+    for _ in range(500):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            break
+        core.tick(TICK_S)
+        samples.append(pose_eng(core))
+    else:
+        pytest.fail("ход не завершился за 500 тиков")
+    max_dev = max(chord_perp_dist_xy(frozen[0], frozen[1], far_pose[0], far_pose[1], x, y) for x, y, _z, _rz in samples)
+    assert max_dev > 5.0, (
+        f"путь после стопа обязан идти по суставам (заметное отклонение от хорды), получено {max_dev:.3f}мм "
+        f"(J1 старта {frozen_j1:.1f})"
+    )
