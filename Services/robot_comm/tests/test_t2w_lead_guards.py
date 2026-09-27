@@ -11,6 +11,7 @@ import pytest
 
 pytest.importorskip("PySide6", reason="окно-вид требует PySide6")
 
+from Services.robot_comm.core.params_v2 import PARAM_ID
 from Services.robot_comm.core.protocol_v2 import KIND, OP, REG
 from Services.robot_comm.gui.sim_view import SimView, build_window
 from Services.robot_comm.gui.z_view import TimeTape, ZScale
@@ -99,3 +100,52 @@ def test_build_window_composes_three_views(qtbot):
     window = build_window(RobotSimCoreV2())
     qtbot.addWidget(window)
     assert [len(window.findChildren(cls)) for cls in (SimView, ZScale, TimeTape)] == [1, 1, 1]
+
+
+class _RegistersOnly:
+    """Источник данных без ядра: только ``read`` и ``regs`` — как у будущего
+    клиента настоящего робота. Любое обращение к ``_workspace``/``_values``
+    даст AttributeError."""
+
+    def __init__(self, core: RobotSimCoreV2) -> None:
+        self.read = core.read
+        self.regs = core.regs
+
+
+def test_z_views_read_registers_only(qtbot):
+    """J4 (ревью 1, F5): ZScale и TimeTape работают поверх одних регистров
+    (TLM_* + PMIR), без приватного состояния ядра."""
+    source = _RegistersOnly(RobotSimCoreV2())
+    scale = ZScale(source)
+    tape = TimeTape(source, clock=lambda: 0.0)
+    for widget in (scale, tape):
+        qtbot.addWidget(widget)
+        widget.refresh()
+        widget.grab()
+    assert scale.z_limits() == pytest.approx((-150.0, 0.0), abs=0.05)
+    assert scale.marks() == pytest.approx({"pick": -100.0, "place": -90.0, "home": -40.0}, abs=0.05)
+
+
+def test_tape_rz_outside_zone_not_flattened(qtbot):
+    """J5 (ревью 1, F1): RZ вне зоны не прижимается к краю ленты. Зона RZ
+    сужена до [-360, 0], выборки RZ = 60 и 120 (регистр пишет тест, не вид):
+    кривая RZ обязана занимать заметную высоту, а не лечь в одну строку."""
+    core = RobotSimCoreV2()
+    core.write(REG["CMD_SEQ"], [1])
+    core.write(REG["CMD_OPCODE"], [OP["PARAM_SET"]])
+    core.write(REG["CMD_ARGC"], [2])
+    core.write(REG["CMD_ARGS"], [PARAM_ID["P_WS_RZ_MAX"], 0])
+    core.write(REG["CMD_FLAG"], [1])
+    core.tick()
+    assert core.read(REG["RES_STATUS"], 1)[0] == ACK
+    now = [0.0]
+    tape = TimeTape(core, clock=lambda: now[0])
+    qtbot.addWidget(tape)
+    tape.resize(300, 150)
+    for rz in (60.0, 120.0):
+        core.regs[REG["TLM_RZ"]] = round(rz * 10) & 0xFFFF
+        now[0] += 1.0
+        tape.refresh()
+    img = tape.grab().toImage()
+    rows = {y for y in range(img.height()) for x in range(img.width()) if _close(img.pixelColor(x, y), _POINTER_RGB)}
+    assert rows and max(rows) - min(rows) > 10, sorted(rows)
