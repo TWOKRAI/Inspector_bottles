@@ -34,6 +34,11 @@ HALT, ``inject_motion_fault()`` (``FAULT``, ``TLM_ACTIVITY=5``) с gating
 мост ПЧ/лента, сценарии, TCP-сервер ``--protocol v2`` (T2.3); ``on_event``
 (T2.4). v1-симулятор (``sim_core.py``) не используется и не импортируется —
 новый протокол живёт в отдельном адресном пространстве.
+
+Реализовано в T2.K: проверка зоны идёт через ``self.model`` (``RobotModel``,
+`kinematics.py`, по умолчанию ``ScaraModel``) — не напрямую через
+``geometry.check_point``/``check_segment``, чтобы смена типа робота не
+требовала правок ядра симулятора.
 """
 
 from __future__ import annotations
@@ -44,7 +49,8 @@ import math
 from Services.robot_comm.codegen import crc16_modbus
 from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, KIND, OP, OP_SPEC, REASON, REG, REG_COUNT, STOP_LEVEL
-from Services.robot_comm.programs.geometry import Workspace, check_point, check_segment
+from Services.robot_comm.kinematics import RobotModel, ScaraModel
+from Services.robot_comm.programs.geometry import Workspace
 
 # ACK/NAK не входят в сгенерированный контракт (protocol-spec §4) -> литералы.
 ACK = 1
@@ -105,9 +111,13 @@ REG_SPACE_SIZE_V2 = max(addr + REG_COUNT.get(name, 1) for name, addr in REG.item
 class RobotSimCoreV2:
     """Конечный автомат симулятора Delta v2 над массивом регистров ``self.regs``."""
 
-    def __init__(self, regs: list[int] | None = None, *, fw_build: int = 0) -> None:
+    def __init__(self, regs: list[int] | None = None, *, fw_build: int = 0, model: RobotModel | None = None) -> None:
         self.regs: list[int] = [0] * REG_SPACE_SIZE_V2 if regs is None else regs
         self._fw_build = fw_build
+        # T2.K: тип робота сменный (RobotModel) — по умолчанию SCARA; должен быть
+        # выставлен ДО _boot(), т.к. _boot ничего с моделью не делает, но зона (T2.2)
+        # проверяется через self.model начиная с первого PTP_MOVE/HOME/JOG.
+        self.model: RobotModel = model if model is not None else ScaraModel()
         self._op_by_code = {code: name for name, code in OP.items()}
         # Эффективные значения параметров — per-instance (И8: несколько роботов
         # не должны делить состояние через модульные глобалы).
@@ -264,6 +274,15 @@ class RobotSimCoreV2:
         eng = {name: to_eng(name, self._values[PARAM_ID[name]]) for name in _WS_PARAM_NAMES}
         return Workspace.from_params(eng)
 
+    def joints(self) -> tuple[float, ...] | None:
+        """Суставы текущей позы (T2.K) — `self.model.ik` от TLM_X/Y/Z/RZ и TLM_HAND.
+
+        Для окна-вида (T2.V): рисовать звенья руки, а не только точку TCP.
+        `None`, если текущая поза вне досягаемости активной модели (не должно
+        происходить для позы, уже прошедшей проверку зоны при ходе).
+        """
+        return self.model.ik(self._read_pose_eng(), self.regs[REG["TLM_HAND"]])
+
     def _check_motion(
         self, target: tuple[float, float, float, float], line: bool
     ) -> tuple[int, int, int, list[int]] | None:
@@ -275,14 +294,14 @@ class RobotSimCoreV2:
         if self.regs[REG["TLM_SERVO"]] == 0:
             return NAK, ERR["E_NO_SERVO"], 0, []
         ws = self._workspace()
-        reason = check_point(ws, *target)
+        reason = self.model.check_point(ws, target)
         if reason != 0:
             return NAK, ERR["E_RANGE"], 1, [reason]
         if line:
             if self.regs[REG["TLM_HAND"]] != self._values[PARAM_ID["P_HAND"]]:
                 return NAK, ERR["E_RANGE"], 1, [REASON["R_HAND"]]
             cur = self._read_pose_eng()
-            reason = check_segment(ws, cur[0], cur[1], target[0], target[1])
+            reason = self.model.check_segment(ws, cur, target)
             if reason != 0:
                 return NAK, ERR["E_RANGE"], 1, [reason]
         return None
@@ -436,7 +455,7 @@ class RobotSimCoreV2:
         pos[active["axis"]] += active["sign"] * min(active["speed"] * dt, MAX_STEP_MM)
         # Проверяется поза, какой её увидит ПК (округление до 0.1): от неё стартует следующая
         # команда; float-поза внутри при округлённой снаружи блокировала бы любой LINE (ревью T2.2).
-        reason = check_point(self._workspace(), *(round(v * 10) / 10 for v in pos))
+        reason = self.model.check_point(self._workspace(), tuple(round(v * 10) / 10 for v in pos))
         if reason != 0:
             self._finish_done(active)
             return
