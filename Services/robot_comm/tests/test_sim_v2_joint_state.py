@@ -447,14 +447,27 @@ def test_rz_single_truth_during_and_after_joint_move():
     core = fresh_core()
     servo_on(core, 1)
     target = (mm(_J4_TARGET_XY[0]), mm(_J4_TARGET_XY[1]), mm(0.0), mm(-76.0))
+    model = ScaraModel()
+
+    def assert_rz_truth_now() -> None:
+        # ACK-тик `cmd()` уже сделал шаг хода — проверка до первого `tick()` цикла.
+        rz = s16(core.read(REG["TLM_RZ"], 1)[0])
+        assert rz == round(model.fk(core.joints())[3] * 10), (rz, core.joints())
+
     res = cmd(core, 2, OP["PTP_MOVE"], *target, KIND["JOINT"], 100)
     assert res["status"] == ACK, res
+    assert_rz_truth_now()
     _run_checking_single_rz_truth(core)
     assert core.joints()[3] == pytest.approx(175.0, abs=0.05)
     assert s16(core.read(REG["TLM_RZ"], 1)[0]) == -760
-    res_line = cmd(core, 3, OP["PTP_MOVE"], target[0] + 100, target[1], target[2], target[3], KIND["LINE"], 100)
+    # Minor итерации 2 ревью T2.J2: LINE +10 мм завершался внутри ACK-тика, цикл ниже делал 0 итераций.
+    # LINE -100 мм по Y (r 222, вне мёртвой зоны) — ход на несколько тиков.
+    res_line = cmd(core, 3, OP["PTP_MOVE"], target[0], target[1] - 1000, target[2], target[3], KIND["LINE"], 100)
     assert res_line["status"] == ACK, res_line
+    assert_rz_truth_now()
+    assert core.read(REG["TLM_ACTIVITY"], 1)[0] != 0, "предпосылка: LINE не завершился в ACK-тике"
     _run_checking_single_rz_truth(core)
+    assert pose_eng(core)[:2] == pytest.approx((-157.1, -157.9), abs=0.05)
 
 
 def test_rz_raw_j4_beyond_limit_is_nak():

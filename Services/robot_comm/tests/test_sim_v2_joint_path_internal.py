@@ -370,6 +370,43 @@ def test_registered_pose_stays_in_zone_at_stretched_arm():
     assert outside == [], outside[:3]
 
 
+@pytest.mark.parametrize(
+    ("param", "raw", "target_rz"),
+    [("P_WS_RZ_MIN", 100, 200), ("P_WS_RZ_MAX", -100, -200)],
+    ids=["rz_min_10", "rz_max_minus_10"],
+)
+def test_registered_pose_stays_in_zone_at_stretched_arm_with_narrow_rz(param, raw, target_rz):
+    """Блокер итерации 2 ревью T2.J2: XY-проверка зоны посреди хода не должна зависеть от RZ.
+
+    `_check_point_xy` подставлял `rz=0.0`; при зоне RZ, не содержащей 0 (`P_WS_RZ_MIN=10°`
+    или `P_WS_RZ_MAX=-10°`), любая XY-проверка отвергала точку -> клэмп к зоне бессилен ->
+    в регистре оставалась поза (573.7, -175.8), r = 600.031 > r_max (замер ревьюера на 6627daa1).
+    Цель хода (rz 20 / -20) в зоне — принимается штатно.
+
+    Проверка посреди хода — XY+Z, НЕ RZ (вердикт cto по RZ, §2 «зона RZ — только на командной
+    цели»): старт HOME rz = -100 лежит вне суженной зоны `[10, 360]`, lerp RZ -100 -> 20 честно
+    проходит вне неё; полная зона (с RZ) — только у финальной позы.
+    """
+    import dataclasses
+
+    from Services.robot_comm.programs.geometry import check_point
+    from Services.robot_comm.tests.test_sim_v2_joint_path import track_pose_until_done
+
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID[param], raw)["status"] == ACK
+    assert cmd(core, 3, OP["PARAM_SET"], PARAM_ID["P_HAND"], 0)["status"] == ACK
+    assert cmd(core, 4, OP["PTP_MOVE"], 4000, 0, -400, target_rz, KIND["JOINT"], 10)["status"] == ACK
+    samples = track_pose_until_done(core, max_ticks=2000)
+    ws = core._workspace()
+    assert (ws.rz_min, ws.rz_max) != (-360.0, 360.0), "предпосылка: узкая зона RZ применилась"
+    assert samples[-1] == pytest.approx((400.0, 0.0, -40.0, target_rz / 10), abs=0.05)
+    assert check_point(ws, *samples[-1]) == 0, samples[-1]
+    ws_xyz = dataclasses.replace(ws, rz_min=-math.inf, rz_max=math.inf)
+    outside = [p for p in samples if check_point(ws_xyz, *p) != 0]
+    assert outside == [], (len(outside), outside[:3])
+
+
 # =========================================================================== #
 # Блокер 1 ревью T2.J2 — финальный тик тоже держит жёсткий потолок шага
 # =========================================================================== #
@@ -552,6 +589,42 @@ def test_fk_none_mid_path_keeps_joint_state_not_none():
         f"путь после стопа обязан идти по суставам (заметное отклонение от хорды), получено {max_dev:.3f}мм "
         f"(J1 старта {frozen_j1:.1f})"
     )
+
+
+class _FkNoneUpToTargetModel(_FkFlakyRangeModel):
+    """`fk` -> `None` при `30<J1<80` — полоса накрывает ЦЕЛЬ хода (J1=60): войдя в неё,
+    ход до конца идёт декартовым фолбэком и доходит до `target` им, а не суставами
+    (репродукция ревьюера итерации 2)."""
+
+    def fk(self, joints):
+        if 30.0 < joints[0] < 80.0:
+            return None
+        return self._real.fk(joints)
+
+
+def test_cartesian_fallback_reaching_target_sets_joint_state_to_j_end():
+    """Minor итерации 2 ревью T2.J2 (одна правда): фолбэк `fk -> None` посреди JOINT, дошедший
+    до `target`, оставлял `_joints` = lerp при замороженном `travelled` (J1 = 28.63 вместо
+    цели) -> `fk(joints()) != поза` после DONE. Исправление: фолбэк в цели -> `_joints = j_end`."""
+    model = _FkNoneUpToTargetModel()
+    core = RobotSimCoreV2(model=model)
+    servo_on(core, 1)
+    real_fk = model._real.fk
+    start_pose = real_fk((0.0, -90.0, -40.0, 0.0))
+    assert cmd(core, 2, OP["PTP_MOVE"], *[mm(v) for v in start_pose], KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+
+    target_j = (60.0, -90.0, -40.0, 0.0)
+    target_pose = real_fk(target_j)
+    assert cmd(core, 3, OP["PTP_MOVE"], *[mm(v) for v in target_pose], KIND["JOINT"], 100)["status"] == ACK
+    ticks = run_until_activity_zero(core, max_ticks=500)
+    assert ticks > 3, "предпосылка: ход не мгновенный — фолбэк реально работал несколько тиков"
+    assert core.read(REG["TLM_DONE_SEQ"], 1)[0] == 3
+    assert pose_eng(core) == pytest.approx(tuple(round(v, 1) for v in target_pose), abs=0.051)
+
+    joints = core.joints()
+    assert joints == pytest.approx(target_j, abs=0.1), joints
+    assert real_fk(joints)[:3] == pytest.approx(pose_eng(core)[:3], abs=0.1)
 
 
 def test_explicit_large_dt_bounds_joint_progress_on_short_hand_flip():
