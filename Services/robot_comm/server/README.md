@@ -6,14 +6,17 @@ Modbus-TCP slave с поведением `cvt_universal_full.lua` — для р�
 ## sim v2 (ядро)
 
 `sim_core_v2.py` — ядро симулятора протокола Delta v2 (`RobotSimCoreV2`,
-T2.1, `plans/robot-protocol-v2`): mailbox (`CMD_*`/`RES_*`, идемпотентность
+T2.1+T2.2, `plans/robot-protocol-v2`): mailbox (`CMD_*`/`RES_*`, идемпотентность
 по `seq`, включая рестарт программы), зеркало параметров (`PMIR` + CRC16/MODBUS,
 валидация magic/fingerprint/CRC при загрузке, откат битых слотов поштучно) и
-плоскость `STOP_REQ` (HARD/HALT обрывают активную команду). Реализованы
-`PING`/`CLEAR_ERR`/`SERVO`/`DO_SET`/`PARAM_SET`/`PARAM_GET`/`PARAM_APPLY` и
-placeholder `PTP_MOVE` (без интерполяции и зоны). T2.2 добавит реальное
-движение (интерполяция, зона, `E_NO_SERVO`); T2.3 — `HB_PC`/`JOG_LEASE`/
-watchdog/мост ПЧ/CVT/сценарии и сам TCP-сервер `--protocol v2`.
+плоскость `STOP_REQ` (SOFT/HARD/HALT, SOFT посреди хода — pending до прибытия).
+Реализованы `PING`/`CLEAR_ERR`/`SERVO`/`DO_SET`/`PARAM_SET`/`PARAM_GET`/
+`PARAM_APPLY`, настоящее движение `PTP_MOVE`/`HOME`/`JOG_STEP` (линейная
+интерполяция в Cartesian, включая JOINT — упрощение симулятора) и `JOG_CONT`
+(поводок `JOG_LEASE`, остановка на краю зоны), проверка рабочей зоны SCARA
+через `programs/geometry.py` (`Workspace`/`check_point`/`check_segment`),
+`E_NO_SERVO`, `inject_motion_fault()` (`FAULT`, gating опкодов). T2.3 добавит
+`HB_PC`-watchdog/мост ПЧ/CVT/сценарии и сам TCP-сервер `--protocol v2`.
 
 Ниже описанный `SimRobotServer`/`RobotSimCore` (без суффикса `V2`) — это
 **всё ещё только v1**: сервер этого файла новый протокол не поднимает, ядра

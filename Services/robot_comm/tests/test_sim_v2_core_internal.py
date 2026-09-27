@@ -73,7 +73,8 @@ def test_stop_req_processed_before_mailbox_in_same_tick():
         core.read(REG["TLM_Z"], 1)[0],
         core.read(REG["TLM_RZ"], 1)[0],
     )
-    assert cmd(core, 2, OP["PTP_MOVE"], x, y, z, rz, 2, 50)["status"] == ACK
+    # +100 мм по X: с T2.2 ход в ту же позу завершается на ACK-тике, а нужна команда в полёте.
+    assert cmd(core, 2, OP["PTP_MOVE"], x + 1000, y, z, rz, 2, 50)["status"] == ACK
     assert core.read(REG["TLM_ACTIVITY"], 1)[0] != 0
 
     # HARD-стоп и новая команда SERVO в ОДНОМ тике (без промежуточного tick()).

@@ -687,8 +687,9 @@ def test_ptp_move_completes_within_500_ticks_at_target_pose():
 
 
 def test_unimplemented_opcodes_are_internal_error():
+    # HOME/JOG_STEP/JOG_CONT реализованы в T2.2 (test_sim_v2_motion.py); здесь — только T2.3.
     core = fresh_core()
-    for name, argc in (("HOME", 1), ("JOG_STEP", 5), ("JOG_CONT", 2), ("CVT_JOB", 10), ("SC_RUN", 3)):
+    for name, argc in (("CVT_JOB", 10), ("SC_RUN", 3)):
         res = cmd(core, 1, OP[name], *([0] * argc))
         assert res["status"] == NAK, name
         assert res["errno"] == ERR["E_INTERNAL"], name
