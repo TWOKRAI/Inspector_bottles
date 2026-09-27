@@ -8,6 +8,7 @@ LS-007) — каталог классов грузит `ObjectFactory`, здес
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,16 @@ class ScenePreset(BaseModel):
     Pre (from_dict): хотя бы одно из `catalog_dir`/`layers` задано (иначе нечего
     рисовать); в `layers` `sprite_source` — строка-id; `angle_range_deg`: lo <= hi.
     Post: `from_dict(p.to_dict()) == p`, `from_yaml(to_yaml(p)) == p`.
+
+    `base_dir` (Task 1.0, LS-013) — каталог, от которого резолвятся относительные
+    `catalog_dir`/`layers[*].sprite_source` (`resolve_path()`); `None` — резолвить
+    от текущего рабочего каталога процесса (поведение `ScenePreset(catalog_dir=...)`
+    без файла-источника, не меняется). Путь сам по себе НЕ резолвится и не
+    переписывается нигде, кроме `resolve_path()` — на dict-границе и в YAML он
+    остаётся ровно той строкой, что была задана (переносимость между машинами).
+    `base_dir` — настоящее поле модели (едет через `to_dict`/`from_dict`, участвует
+    в равенстве), но НЕ попадает в `to_yaml()` — там его заменяет каталог целевого
+    файла.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -36,6 +47,7 @@ class ScenePreset(BaseModel):
     angle_range_deg: tuple[float, float] = (0.0, 360.0)
     defect_probability: float = Field(default=0.0, ge=0.0, le=1.0)
     layers: list[LayerSpec] = Field(default_factory=list)
+    base_dir: str | None = None
 
     @field_validator("angle_range_deg")
     @classmethod
@@ -78,53 +90,88 @@ class ScenePreset(BaseModel):
     def from_dict(cls, data: dict[str, Any]) -> ScenePreset:
         """Создать пресет из dict; ошибки — pydantic.ValidationError с именем слоя и поля.
 
-        Относительные пути (catalog_dir, sprite_source доп. слоёв) НЕ резолвятся здесь —
-        это делает только `from_yaml` (нет базового каталога, от которого мерить)."""
+        Пути (`catalog_dir`, `sprite_source` доп. слоёв) хранятся КАК ЕСТЬ — резолюцию
+        делает только `resolve_path()`, и только в момент чтения (`ObjectFactory`),
+        от `base_dir`, если тот присутствует в `data`. Здесь ничего не резолвится и не
+        переписывается — dict остаётся переносимым между машинами."""
         return cls.model_validate(data)
 
     def to_dict(self) -> dict[str, Any]:
-        """Сериализация на границе (кортежи → списки)."""
+        """Сериализация на границе (кортежи → списки); `base_dir` едет как обычное поле —
+        нужен другому процессу на той же машине и для `from_dict(p.to_dict()) == p`."""
         return self.model_dump(mode="json")
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ScenePreset:
         """Загрузить пресет из YAML-файла.
 
-        Относительные `catalog_dir` и `sprite_source` доп. слоёв резолвятся от каталога
-        файла — тот же паттерн, что `GeneratorConfig.from_dict(..., base_dir)`
-        (`Services.dataset_gen.core.config`)."""
+        Строки путей (`catalog_dir`, `sprite_source` доп. слоёв) НЕ переписываются —
+        вместо этого `base_dir` пресета ставится в каталог файла (перекрывая любой
+        `base_dir`, случайно оставшийся в самом YAML: место файла — источник истины).
+        Резолюция происходит лениво, в `resolve_path()`, когда `ObjectFactory`
+        действительно читает изображение — так пресет переживает перенос каталога
+        на другую машину без потери исходных относительных строк."""
         p = Path(path)
         data = yaml.safe_load(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError(f"Пресет {p}: ожидался YAML-словарь, получено {type(data).__name__}")
-        return cls.from_dict(_resolve_relative_paths(data, base_dir=p.parent))
+        return cls.from_dict({**data, "base_dir": str(p.parent.resolve())})
+
+    def resolve_path(self, value: str) -> str:
+        """Строка-id или абсолютный путь -> без изменений; относительный путь ->
+        абсолютный от `base_dir` (или без изменений, если `base_dir` не задан —
+        тогда действует CWD процесса, как раньше у `ScenePreset(catalog_dir=...)`
+        без файла-источника)."""
+        if not _looks_like_relative_path(value):
+            return value
+        if self.base_dir is None:
+            return value
+        return str(Path(self.base_dir) / value)
 
     def to_yaml(self, path: str | Path) -> None:
-        """Записать пресет в YAML (комментарии не сохраняются — ruamel придёт с редактором Ф7)."""
-        text = yaml.safe_dump(self.to_dict(), allow_unicode=True, sort_keys=False)
+        """Записать пресет в YAML (комментарии не сохраняются — ruamel придёт с редактором Ф7).
+
+        `base_dir` в файл не пишется (это не часть переносимой конфигурации — при
+        следующей загрузке его снова поставит `from_yaml`). Относительные
+        `catalog_dir`/`layers[*].sprite_source` пересчитываются от каталога ЦЕЛЕВОГО
+        файла (`os.path.relpath`), если у пресета есть свой `base_dir` и он отличается
+        от каталога цели, — иначе строки остаются как есть. Абсолютные пути и id-схемы
+        (`fixture://...`) не трогаются никогда."""
+        data = self.to_dict()
+        data.pop("base_dir", None)
+
+        if self.base_dir is not None:
+            base_dir = Path(self.base_dir)
+            target_dir = Path(path).parent.resolve()
+            if base_dir.resolve() != target_dir:
+                data["catalog_dir"] = self._rebase_value(data.get("catalog_dir"), base_dir, target_dir)
+                layers = data.get("layers")
+                if isinstance(layers, list):
+                    data["layers"] = [
+                        {**layer, "sprite_source": self._rebase_value(layer.get("sprite_source"), base_dir, target_dir)}
+                        if isinstance(layer, dict)
+                        else layer
+                        for layer in layers
+                    ]
+
+        text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
         Path(path).write_text(text, encoding="utf-8")
 
+    @staticmethod
+    def _rebase_value(value: Any, base_dir: Path, target_dir: Path) -> Any:
+        """Одна строка пути `to_yaml()` -> пересчитана от `target_dir` вместо `base_dir`.
 
-def _resolve_relative_paths(data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
-    """Относительные `catalog_dir`/`layers[*].sprite_source` -> абсолютные строки от base_dir."""
-    resolved = dict(data)
-
-    catalog_dir = resolved.get("catalog_dir")
-    if isinstance(catalog_dir, str) and _looks_like_relative_path(catalog_dir):
-        resolved["catalog_dir"] = str((base_dir / catalog_dir).resolve())
-
-    layers = resolved.get("layers")
-    if isinstance(layers, list):
-        resolved_layers = []
-        for layer in layers:
-            if isinstance(layer, dict):
-                source = layer.get("sprite_source")
-                if isinstance(source, str) and _looks_like_relative_path(source):
-                    layer = {**layer, "sprite_source": str((base_dir / source).resolve())}
-            resolved_layers.append(layer)
-        resolved["layers"] = resolved_layers
-
-    return resolved
+        Не строка / не похоже на файловый путь (id-схема, абсолютный путь, None) ->
+        без изменений. `os.path.relpath` падает `ValueError` на разных дисках Windows —
+        # ponytail: тогда откатываемся на абсолютный путь как потолок; апгрейд —
+        # pathlib.PureWindowsPath, если реально понадобится кросс-дисковый save-as.
+        """
+        if not isinstance(value, str) or not _looks_like_relative_path(value):
+            return value
+        try:
+            return os.path.relpath(base_dir / value, target_dir)
+        except ValueError:
+            return str((base_dir / value).resolve())
 
 
 def _looks_like_relative_path(value: str) -> bool:

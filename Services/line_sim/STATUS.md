@@ -1,6 +1,8 @@
 # line_sim — статус
 
-**Состояние:** Task 3.1 + 3.1a + 3.2 + 3.3 + 3.3a + 3.4 + 3.6 (план `plans/line-sim/phase-3-object-engine.md`).
+**Состояние:** Task 3.1 + 3.1a + 3.2 + 3.3 + 3.3a + 3.4 + 3.6 (план `plans/line-sim/phase-3-object-engine.md`)
++ Task 1.0 плана `plans/line-sim-layer-editor.md` (переносимые пути пресета: `base_dir`
+вместо абсолютизации строк, LS-013).
 
 | Часть | Статус |
 |---|---|

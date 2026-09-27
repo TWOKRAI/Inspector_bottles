@@ -35,11 +35,16 @@ class ObjectFactory:
 
     def __init__(self, preset: ScenePreset) -> None:
         self._preset = preset
-        self._catalog = load_catalog(preset.catalog_dir) if preset.catalog_dir is not None else None
+        self._catalog = (
+            load_catalog(preset.resolve_path(preset.catalog_dir)) if preset.catalog_dir is not None else None
+        )
         # Доп. слои пресета резолвятся один раз здесь (id -> RGBA); каждый make() их
         # переиспользует как есть — LayeredObject их только читает, не мутирует.
+        # preset.resolve_path() — относительные строки от preset.base_dir (Task 1.0, LS-013),
+        # абсолютные и id-схемы (fixture://...) пропускает без изменений.
         self._extra_layers: list[LayerSpec] = [
-            layer.model_copy(update={"sprite_source": load_image_rgba(layer.sprite_source)}) for layer in preset.layers
+            layer.model_copy(update={"sprite_source": load_image_rgba(preset.resolve_path(layer.sprite_source))})
+            for layer in preset.layers
         ]
         self._force_defect_pending = False
 
