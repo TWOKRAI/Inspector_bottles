@@ -171,8 +171,8 @@ rng (`SceneCompositor.render()` их не трогает, LS-009).
 
 | Команда | Вход | Ответ |
 |---|---|---|
-| `preset.get` | — | `{status: ok, preset, rev, path, class_names}`; `rev` — `sha256` байтов файла, непрозрачная строка |
-| `preset.commit` | `{preset: dict, base_rev: str}` | `{status: ok, rev}` или ошибка `invalid` / `conflict` (+ `current_rev`) / `bad_request` / `io_error` |
+| `preset.get` | — | `{status: ok, preset, rev, path, class_names, engine}`; `rev` — `sha256` байтов файла, непрозрачная строка |
+| `preset.commit` | `{preset: dict, base_rev: str}` | `{status: ok, rev, changed, applied?, message?}` или ошибка `invalid` / `conflict` (+ `current_rev`) / `bad_request` / `io_error` |
 
 - **`rev` читается из байтов файла каждый раз:** правка файла мимо команды даёт `conflict`, чужая работа не
   перезаписывается. Из двух `commit` с одним `base_rev` успешен ровно один (сверка и запись под одним замком).
@@ -182,7 +182,7 @@ rng (`SceneCompositor.render()` их не трогает, LS-009).
   возвращаются `chmod` после замены — короткое окно с 0600. Пресет-симлинк `os.replace` заменит обычным файлом.
 - **Горячая подмена:** готовая фабрика передаётся воркеру через `deque(maxlen=1)` (в силе последняя), `produce()`
   в начале кадра зовёт `ObjectSpawner.set_factory`. Объекты уже на ленте не меняются, новым пресетом рисуются
-  новые; ждущее «выпусти брак» переносится на новую фабрику. Движок не собрался при `configure` → `commit` = `invalid`.
+  новые; ждущее «выпусти брак» переносится на новую фабрику. Движок не собрался при `configure` → файл пишется, `applied: false` (подмены нет до рестарта).
 - **Превью здесь нет** — оно в своём процессе `layers` (`Plugins/sim/layer_preview`): ~88 мс на 8×160 держали
   поток команд `camera`, и `scene.job_done` робота ждал столько же (ревью 1.2a, S1).
 - **Без изменений — без записи:** совпадает с файлом → `{ok, rev, changed: false}`, `rev` тот же. Пишутся только

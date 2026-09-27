@@ -1,4 +1,4 @@
-# apps/line_sim — pipeline (три процесса).
+# apps/line_sim — pipeline (robot, camera, mjpeg, pult, layers).
 #
 # `robot` держит SimRobotHostPlugin — Modbus TCP-симулятор робота на
 # 127.0.0.1:5021 (порт зафиксирован планом line-sim §Ф1, "Порты стенда").
