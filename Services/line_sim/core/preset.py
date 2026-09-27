@@ -170,7 +170,10 @@ class ScenePreset(BaseModel):
         if not isinstance(value, str) or not _looks_like_relative_path(value):
             return value
         try:
-            return os.path.relpath(base_dir / value, target_dir)
+            # В YAML всегда прямые слэши: Windows-relpath даёт `..\\A\\sprites`, а Mac/Orin
+            # читают такую строку как одно имя файла (замер ntpath.relpath, 2026-09-27).
+            # ponytail: обратный слэш в имени файла на POSIX теряется — такие имена не ожидаются.
+            return os.path.relpath(base_dir / value, target_dir).replace("\\", "/")
         except ValueError:
             return str((base_dir / value).resolve())
 

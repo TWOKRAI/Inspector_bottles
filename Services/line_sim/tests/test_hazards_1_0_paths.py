@@ -245,3 +245,22 @@ def test_rebase_falls_back_to_absolute_when_relpath_raises(monkeypatch: pytest.M
     data = yaml.safe_load(q.read_text(encoding="utf-8"))
     assert Path(data["catalog_dir"]).is_absolute()
     assert data["catalog_dir"] == str((a / "sprites").resolve())
+
+
+def test_save_as_on_windows_writes_forward_slashes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Пресет, сохранённый «как» на Windows, должен открываться на Mac/Orin: Windows-relpath
+    даёт обратные слэши (`..\\A\\sprites`), POSIX читает такую строку как одно имя файла.
+    Имитация: `os.path.relpath` подменён на `ntpath.relpath` над Windows-строками."""
+    import ntpath
+
+    a_dir, b_dir = tmp_path / "A", tmp_path / "B"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    preset = ScenePreset.from_dict({"catalog_dir": "sprites", "base_dir": str(a_dir)})
+    monkeypatch.setattr(
+        "Services.line_sim.core.preset.os.path.relpath",
+        lambda _path, _start: ntpath.relpath(r"C:\proj\A\sprites", r"C:\proj\B"),
+    )
+    preset.to_yaml(b_dir / "q.yaml")
+    written = yaml.safe_load((b_dir / "q.yaml").read_text(encoding="utf-8"))
+    assert written["catalog_dir"] == "../A/sprites"
