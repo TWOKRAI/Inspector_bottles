@@ -30,13 +30,15 @@ from __future__ import annotations
 
 import math
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from Services.robot_comm.programs import geometry
 from Services.robot_comm.programs.geometry import check_point, check_segment
 
 Pose = tuple[float, float, float, float]
 Joints = tuple[float, ...]
+#: одна ломаная (полилиния) точек звеньев одной кинематической цепи.
+Chain = list[tuple[float, float, float]]
 
 #: допуск на границе досягаемости (float-шум сложения квадратов длин звеньев).
 _REACH_TOL = 1e-9
@@ -46,18 +48,34 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
+def _wrap_deg(angle: float) -> float:
+    """Оборачивает угол (градусы) в `(-180, 180]` — диапазон, в котором реальный
+    контроллер репортует суставы. `fmod` — не `%`: даёт знак результата "как у
+    делимого", формула ниже компенсирует это явным сдвигом на 180°/360°."""
+    wrapped = math.fmod(angle - 180.0, 360.0)
+    if wrapped <= 0.0:
+        wrapped += 360.0
+    return wrapped - 180.0
+
+
 class RobotModel(typing.Protocol):
-    """Контракт кинематической модели робота — единственная точка замены типа руки."""
+    """Контракт кинематической модели робота — единственная точка замены типа руки.
+
+    `hand` — код конфигурации руки, СВОЙ у каждой модели (SCARA: 0 правая / 1
+    левая; 6-осевая рука: битовая маска плечо/локоть/кисть; дельта Клавеля код
+    не использует). Значение вне допустимого множества модели -> `ValueError`
+    у конкретной реализации (не тихая подстановка "как будто 0").
+    """
 
     kind: str
     axes: tuple[str, ...]
     joint_names: tuple[str, ...]
 
-    def fk(self, joints: Joints) -> Pose: ...
+    def fk(self, joints: Joints) -> Pose | None: ...
 
     def ik(self, pose: Pose, hand: int) -> Joints | None: ...
 
-    def chain_points(self, joints: Joints) -> list[tuple[float, float, float]]: ...
+    def chain_points(self, joints: Joints) -> list[Chain]: ...
 
     def check_point(self, ws: geometry.Workspace, pose: Pose) -> int: ...
 
@@ -81,8 +99,22 @@ class ScaraModel:
     axes: typing.ClassVar[tuple[str, ...]] = ("X", "Y", "Z", "RZ")
     joint_names: typing.ClassVar[tuple[str, ...]] = ("J1", "J2", "Z", "J4")
 
+    def __post_init__(self) -> None:
+        """Dict at Boundary (`make_model` собирает `ScaraModel` из словаря spec) —
+        длины звеньев валидируются здесь, а не молча дают `ZeroDivisionError`/
+        `TypeError` в `fk`/`ik` при первом использовании."""
+        for name, value in (("l1", self.l1), ("l2", self.l2)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} должен быть конечным числом > 0, получено {value!r}")
+
     def fk(self, joints: Joints) -> Pose:
-        """Прямая кинематика: суставы -> поза. RZ = J1 + J2 + J4 (contract §"Motion model")."""
+        """Прямая кинематика: суставы -> поза. RZ = J1 + J2 + J4 (contract §"Motion model").
+
+        Для SCARA (последовательная цепь из 2 звеньев) FK тотальна — любой
+        набор суставов даёт позу, `None` никогда не возвращается (в отличие
+        от общего контракта `RobotModel.fk`, где дельта-FK может не иметь
+        решения для части троек углов).
+        """
         j1, j2, z, j4 = joints
         j1r = math.radians(j1)
         j2r = math.radians(j2)
@@ -98,7 +130,24 @@ class ScaraModel:
         (``J2 = -acos(c2)``). `c2` зажимается в `[-1, 1]` ПОСЛЕ проверки
         досягаемости — на границе (`r == l1+l2`) float-сумма квадратов может
         дать `c2` чуть больше 1, `acos` без зажима упал бы `ValueError`.
+        `hand` — код конфигурации SCARA, ровно `{0, 1}`; любое другое
+        значение -> `ValueError` (молчаливая подстановка "как правая" —
+        источник необнаружимой ошибки в проводке).
+
+        `J1` нормализуется в `(-180, 180]` (`_wrap_deg`) — так репортует
+        реальный контроллер. `J4 = RZ - J1 - J2` считается ПОСЛЕ этой
+        нормализации, от уже обёрнутого `J1` — поэтому `fk(ik(pose))`
+        возвращает RZ побитово точным входному (не по модулю 360°), какой бы
+        оборот ни потребовался `J1`. `J4` сознательно НЕ оборачивается тем же
+        способом: пост-hoc обёртка `J4` сдвинула бы сумму `J1+J2+J4` в `fk` на
+        кратное 360° и сломала бы эту точность (воспроизведено на приёмочной
+        сетке T2.K: 28/238 случаев дают `|J4| > 180`, обёртка изменила бы
+        `fk(...)  [3]` на `RZ ± 360·k`). Если реальному контроллеру нужен J4
+        в одном обороте — оборачивать только для отображения, не для
+        обратной подстановки в `fk`.
         """
+        if hand not in (0, 1):
+            raise ValueError(f"hand должен быть 0 (правая) или 1 (левая) для SCARA, получено {hand!r}")
         x, y, z, rz = pose
         if not all(math.isfinite(v) for v in pose):
             return None
@@ -113,11 +162,20 @@ class ScaraModel:
             j2 = -j2
         j2r = math.radians(j2)
         j1 = math.degrees(math.atan2(y, x) - math.atan2(self.l2 * math.sin(j2r), self.l1 + self.l2 * math.cos(j2r)))
+        j1 = _wrap_deg(j1)
         j4 = rz - j1 - j2
         return (j1, j2, z, j4)
 
-    def chain_points(self, joints: Joints) -> list[tuple[float, float, float]]:
-        """Точки звеньев для отрисовки: база (ось J1) -> локоть -> инструмент.
+    def chain_points(self, joints: Joints) -> list[Chain]:
+        """Точки звеньев для отрисовки: одна ломаная (SCARA — последовательная
+        цепь) база (ось J1) -> локоть -> инструмент.
+
+        Возвращает список ломаных (`list[Chain]`), а НЕ плоский список точек:
+        общий контракт `RobotModel.chain_points` должен различать одну
+        последовательную цепь (SCARA/6-осевая — одна ломаная) от нескольких
+        параллельных (дельта Клавеля — три ломаные база_i->локоть_i->платформа_i);
+        плоский список неотличим от третьего варианта и рисовал бы фантомные
+        звенья между цепями. SCARA — всегда `[[base, elbow, tool]]`, одна цепь.
 
         Z всех трёх точек — Z позы (SCARA поднимает/опускает инструмент по
         вертикали, звенья остаются в горизонтальной плоскости текущего Z).
@@ -128,7 +186,7 @@ class ScaraModel:
         elbow = (self.l1 * math.cos(j1r), self.l1 * math.sin(j1r), z)
         x, y, _z, _rz = self.fk(joints)
         tool = (x, y, z)
-        return [base, elbow, tool]
+        return [[base, elbow, tool]]
 
     def check_point(self, ws: geometry.Workspace, pose: Pose) -> int:
         """Делегирует в `geometry.check_point` — вторая правда о зоне не заводится (И6)."""
@@ -143,11 +201,21 @@ _MODELS: dict[str, type] = {"scara": ScaraModel}
 
 
 def make_model(spec: dict) -> RobotModel:
-    """Строит модель робота из словаря спецификации (`{"type": "scara", "l1"?, "l2"?}`)."""
+    """Строит модель робота из словаря спецификации (`{"type": "scara", "l1"?, "l2"?}`).
+
+    Dict at Boundary: неизвестный `type` или неизвестный ключ параметра ->
+    `ValueError` с именем проблемного значения/ключа — НЕ `TypeError` из
+    конструктора датакласса (тот не называет источник, если spec пришёл
+    снаружи процесса десериализованным из JSON/YAML).
+    """
     kind = spec.get("type")
     cls = _MODELS.get(kind)
     if cls is None:
         known = ", ".join(sorted(_MODELS))
         raise ValueError(f"неизвестный тип робота {kind!r}; известные: {known}")
     kwargs = {k: v for k, v in spec.items() if k != "type"}
+    allowed = {f.name for f in fields(cls)}
+    unknown = sorted(set(kwargs) - allowed)
+    if unknown:
+        raise ValueError(f"неизвестные параметры модели {unknown} для типа {kind!r}; допустимые: {sorted(allowed)}")
     return cls(**kwargs)

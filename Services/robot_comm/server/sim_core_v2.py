@@ -37,8 +37,13 @@ HALT, ``inject_motion_fault()`` (``FAULT``, ``TLM_ACTIVITY=5``) с gating
 
 Реализовано в T2.K: проверка зоны идёт через ``self.model`` (``RobotModel``,
 `kinematics.py`, по умолчанию ``ScaraModel``) — не напрямую через
-``geometry.check_point``/``check_segment``, чтобы смена типа робота не
-требовала правок ядра симулятора.
+``geometry.check_point``/``check_segment``, чтобы кинематика (FK/IK, точки
+звеньев) и делегирование в зону не требовали правок ядра при смене типа
+робота. Шов ýже, чем «смена типа не требует правок ядра» (ревью T2.K,
+находка 6): набор параметров зоны (``geometry.Workspace`` из ``_WS_PARAM_NAMES``)
+и проверка ``R_HAND`` (``TLM_HAND != P_HAND``, ``_check_motion``/``_op_jog_cont``)
+специфичны прошивке SCARA/Delta v2 и меняются вместе с протоколом для другого
+типа робота — ядро их не выносит в модель.
 """
 
 from __future__ import annotations
@@ -114,9 +119,9 @@ class RobotSimCoreV2:
     def __init__(self, regs: list[int] | None = None, *, fw_build: int = 0, model: RobotModel | None = None) -> None:
         self.regs: list[int] = [0] * REG_SPACE_SIZE_V2 if regs is None else regs
         self._fw_build = fw_build
-        # T2.K: тип робота сменный (RobotModel) — по умолчанию SCARA; должен быть
-        # выставлен ДО _boot(), т.к. _boot ничего с моделью не делает, но зона (T2.2)
-        # проверяется через self.model начиная с первого PTP_MOVE/HOME/JOG.
+        # T2.K: тип робота сменный (RobotModel) — по умолчанию SCARA. Порядок
+        # относительно _boot() не важен (_boot модель не читает), но модель нужна
+        # уже с первой команды хода — выставляется до неё, а не лениво.
         self.model: RobotModel = model if model is not None else ScaraModel()
         self._op_by_code = {code: name for name, code in OP.items()}
         # Эффективные значения параметров — per-instance (И8: несколько роботов
@@ -278,8 +283,18 @@ class RobotSimCoreV2:
         """Суставы текущей позы (T2.K) — `self.model.ik` от TLM_X/Y/Z/RZ и TLM_HAND.
 
         Для окна-вида (T2.V): рисовать звенья руки, а не только точку TCP.
-        `None`, если текущая поза вне досягаемости активной модели (не должно
-        происходить для позы, уже прошедшей проверку зоны при ходе).
+
+        `None` — ДОСТИЖИМОЕ поведение (ревью T2.K, находка 1), не аномалия:
+        зона прошивки (`P_WS_*`, правда прошивки, проверяется `_check_motion`)
+        и досягаемость модели (`|l1-l2| .. l1+l2` у `ScaraModel`) — две
+        НЕЗАВИСИМЫЕ границы. Точка, прошедшая проверку зоны при ходе, может
+        лежать вне досягаемости модели, если `P_WS_R_MAX > l1+l2` или
+        `P_WS_R_MIN < |l1-l2|` (штатно — если длины звеньев с шильдика короче,
+        чем дефолтная `P_WS_R_MAX=600` уже настроенной зоны). Воспроизведение:
+        `P_WS_R_MAX=700` (шире дефолтной досягаемости 600), `PTP_MOVE JOINT`
+        на `(650, 0)` -> `ACK`, `joints()` -> `None`. Вызывающий (T2.V) обязан
+        обработать `None` сам (рисовать только TCP-точку без цепи звеньев) —
+        `model.chain_points(core.joints())` упадёт `TypeError` на `None`.
         """
         return self.model.ik(self._read_pose_eng(), self.regs[REG["TLM_HAND"]])
 

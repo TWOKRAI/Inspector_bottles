@@ -156,10 +156,18 @@ def test_fully_stretched_boundary():
 
 
 def test_chain_points_base_elbow_tool():
-    """chain_points начинается в (0,0,·), плечо на расстоянии l1 от оси, конец — XY позы fk (бриф T2.K)."""
+    """chain_points начинается в (0,0,·), плечо на расстоянии l1 от оси, конец — XY позы fk (бриф T2.K).
+
+    Контракт скорректирован ревью T2.K (2026-09-27, решение ведущего): `chain_points`
+    возвращает `list[Chain]` — список ломаных, одна на кинематическую цепь (дельта даст
+    три), а не плоский список точек (для SCARA, последовательной цепи, ровно ОДНА
+    ломаная). Индексация `[0]` — единственная правка этого теста ревью T2.K, остальные
+    проверки не тронуты."""
     model = _make_scara()
     joints = (30.0, 45.0, -75.0, 10.0)  # J1,J2,Z,J4 — произвольная несингулярная поза
-    points = model.chain_points(joints)
+    chains = model.chain_points(joints)
+    assert len(chains) == 1, chains  # SCARA — одна последовательная цепь
+    points = chains[0]
     assert len(points) == 3, points
     base, elbow, tool = points
     assert base[0] == pytest.approx(0.0, abs=TOL)
@@ -224,7 +232,9 @@ def test_make_model_known_and_unknown():
     stretched = model.fk((0.0, 0.0, 0.0, 0.0))  # J1=J2=0 -> вытянута вдоль X на l1+l2
     assert stretched[0] == pytest.approx(550.0, abs=TOL)
     assert stretched[1] == pytest.approx(0.0, abs=TOL)
-    elbow = model.chain_points((0.0, 0.0, 0.0, 0.0))[1]
+    elbow = model.chain_points((0.0, 0.0, 0.0, 0.0))[0][
+        1
+    ]  # [0] — правка ревью T2.K (см. test_chain_points_base_elbow_tool)
     assert math.hypot(elbow[0], elbow[1]) == pytest.approx(300.0, abs=TOL)
 
     with pytest.raises(ValueError, match="scara"):
