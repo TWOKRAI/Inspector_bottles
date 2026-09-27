@@ -29,7 +29,7 @@ import pytest
 
 pytest.importorskip("PySide6", reason="окно-вид требует PySide6")
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPoint, QPointF, Qt
 
 from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, REASON, REASON_TEXT, REG, STOP_LEVEL
 from Services.robot_comm.gui.sim_view import DemoDriver, SimView
@@ -219,9 +219,10 @@ def test_demo_driver_goto_keeps_current_z_and_rz():
 
 def test_status_shows_nak_reason_then_clears_on_ack(qtbot):
     """Клик в запретный сектор J1 (дефолт P_WS_ANG_MIN/MAX = ±165°, r=580 в
-    кольце [100,600]) -> NAK E_RANGE/R_OUT_OF_ZONE -> статус называет причину;
-    следующий ДОПУСТИМЫЙ goto (ACK) эту строку убирает — виден только
-    последний ответ, не история."""
+    кольце [100,600]) -> NAK E_RANGE/R_OUT_OF_ZONE -> статус называет причину
+    человеко-понятным текстом (REASON_TEXT, ревью T2.V находка 6 — не
+    протокольный ERR_TEXT с хвостовой скобкой); следующий ДОПУСТИМЫЙ goto
+    (ACK) эту строку убирает — виден только последний ответ, не история."""
     core = fresh_core()
     view = SimView(core)
     # SimView заводит QTimer в __init__ — нужен живой QApplication (тот же паттерн, что и везде в файле).
@@ -232,8 +233,8 @@ def test_status_shows_nak_reason_then_clears_on_ack(qtbot):
     core.tick()
     view.refresh()
     status = view.status_text()
-    assert ERR_TEXT[ERR["E_RANGE"]] in status
-    assert REASON_TEXT[REASON["R_OUT_OF_ZONE"]] in status
+    assert f"отказ: {REASON_TEXT[REASON['R_OUT_OF_ZONE']]}" in status
+    assert ERR_TEXT[ERR["E_RANGE"]] not in status  # протокольный текст с скобкой больше не показан
 
     driver.goto(200.0, 100.0)  # допустимая точка -> ACK
     core.tick()
@@ -241,10 +242,114 @@ def test_status_shows_nak_reason_then_clears_on_ack(qtbot):
     assert "отказ" not in view.status_text()
 
 
-def test_trail_not_flushed_by_idle_refreshes():
-    """В простое след не вытесняется повторами: 500 refresh() без движения — одна точка, не 200 одинаковых."""
+def test_trail_not_flushed_by_idle_refreshes(qtbot):
+    """В простое след не вытесняется повторами: 500 refresh() без движения — одна точка, не 200 одинаковых.
+
+    ``qtbot`` обязателен (ревью T2.V находка 2): без него `SimView.__init__`
+    заводит `QTimer` без живого `QApplication` — тест зелёный только пока в
+    процессе уже есть другой тест с `qtbot` раньше по порядку, одиночный
+    запуск падает `Fatal Python error: Aborted` на sim_view.py:9x.
+    """
     core = fresh_core()
     view = SimView(core)
+    qtbot.addWidget(view)
     for _ in range(500):
         view.refresh()
     assert len(view._trail) == 1
+
+
+# --------------------------------------------------------------------------- #
+# картинку и ориентацию держат тесты, не только числа (ревью T2.V находка 3)
+# --------------------------------------------------------------------------- #
+
+
+def test_grab_pixel_at_tool_position_matches_marker_color(qtbot):
+    """`_paint_tool` кладёт маркер TCP (кольцо+крест, цвет #5af78e) ровно в
+    `_to_widget(_tool_xy())` — пиксель на растровом `grab()` подтверждает,
+    что это не только числа `scene_chains()`/`status_text()`, а то, что реально
+    попадает на экран (ревью: R2 «paintEvent красит только фон» это ловит)."""
+    core = fresh_core()
+    view = SimView(core)
+    qtbot.addWidget(view)
+    view.resize(300, 300)
+    view.refresh()
+
+    pixmap = view.grab()
+    img = pixmap.toImage()
+    p = view._to_widget(*view._tool_xy())
+    color = img.pixelColor(round(p.x()), round(p.y()))
+    assert (color.red(), color.green(), color.blue()) == (0x5A, 0xF7, 0x8E)
+
+
+def test_widget_to_robot_orientation_plus_y_is_up(qtbot):
+    """Точка НАД центром экрана (меньший px.y) -> положительный Y робота —
+    буквальная проверка ориентации «+Y вверх», не только round-trip обратности
+    (ревью: R1 «зеркалить Y в обеих трансформациях» это НЕ ловит — round-trip
+    остаётся самосогласованным при зеркалировании, а этот тест ловит)."""
+    core = fresh_core()
+    view = SimView(core)
+    qtbot.addWidget(view)
+    view.resize(300, 300)
+
+    cx, cy = view.width() / 2.0, view.height() / 2.0
+    _x, y = view.widget_to_robot(QPointF(cx, cy - 50.0))
+    assert y > 0
+
+
+def test_paint_scale_re_reads_workspace_after_param_set(qtbot):
+    """`PARAM_SET P_WS_R_MAX` на меньшее значение через mailbox + tick +
+    refresh -> масштаб отрисовки (`_paint_transform()[2]`) меняется — зона
+    читается заново на каждый вызов, а не кэшируется в `__init__` (TRAPS в
+    докстринге `_paint_transform`; ревью: R3 «закэшировать зону» это ловит)."""
+    from Services.robot_comm.core.params_v2 import PARAM_ID
+    from Services.robot_comm.core.protocol_v2 import OP as _OP
+
+    core = fresh_core()
+    view = SimView(core)
+    qtbot.addWidget(view)
+    view.resize(300, 300)
+    view.refresh()
+    _cx, _cy, scale_before = view._paint_transform()
+
+    core.write(REG["CMD_SEQ"], [1])
+    core.write(REG["CMD_OPCODE"], [_OP["PARAM_SET"]])
+    core.write(REG["CMD_ARGC"], [2])
+    core.write(REG["CMD_ARGS"], [PARAM_ID["P_WS_R_MAX"], 2000])  # 200.0 мм, меньше дефолта 600
+    core.write(REG["CMD_FLAG"], [1])
+    core.tick()
+    view.refresh()
+
+    _cx, _cy, scale_after = view._paint_transform()
+    assert scale_after != pytest.approx(scale_before)
+    assert scale_after > scale_before  # меньше r_max -> та же ширина виджета вмещает крупнее
+
+
+def test_mouse_press_does_not_write_registers(qtbot):
+    """Снимок `core.regs` до/после клика — идентичен (ревью: R4 «mousePressEvent
+    пишет регистр» это ловит; `test_click_maps_to_robot_and_moves` в слепом
+    файле подменяет `widget_to_robot` и не видит запись САМОГО обработчика)."""
+    core = fresh_core()
+    view = SimView(core)
+    qtbot.addWidget(view)
+    view.resize(300, 300)
+    view.show()
+    qtbot.waitExposed(view)
+
+    before = list(core.regs)
+    qtbot.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(150, 150))
+    after = list(core.regs)
+    assert after == before
+
+
+# --------------------------------------------------------------------------- #
+# closeEvent останавливает таймер (ревью T2.V, открытый пункт — нужен T2.3 --view)
+# --------------------------------------------------------------------------- #
+
+
+def test_close_stops_refresh_timer(qtbot):
+    core = fresh_core()
+    view = SimView(core)
+    qtbot.addWidget(view)
+    assert view._timer.isActive()
+    view.close()
+    assert not view._timer.isActive()

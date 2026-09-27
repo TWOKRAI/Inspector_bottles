@@ -22,12 +22,13 @@
 
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 import time
 from collections import deque
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
@@ -141,7 +142,7 @@ class SimView(QWidget):
             f"рука: {hand}   активность: {activity}   серво: {servo}",
         ]
         if errno:
-            lines.append(f"ошибка: {ERR_TEXT.get(errno, '?')}")
+            lines.append(f"последняя ошибка: {ERR_TEXT.get(errno, '?')}")
         if core.joints() is None:
             lines.append("поза недостижима для модели")
         nak_line = self._nak_line()
@@ -150,24 +151,28 @@ class SimView(QWidget):
         return "\n".join(lines)
 
     def _nak_line(self) -> str | None:
-        """«отказ: <текст>» по ПОСЛЕДНЕМУ ответу mailbox, если он NAK.
+        """«отказ: <причина>» по ПОСЛЕДНЕМУ ответу mailbox, если он NAK.
 
-        Иначе оператор кликает в запретный сектор, ядро отвечает ACK-ом
-        прошивки на приём команды... нет — NAK-ом, но окно молчит: робот не
-        поехал, и почему — не видно нигде на экране. Показывает только
-        последний ответ (ACK следующей командой эту строку убирает — так же,
-        как сам mailbox хранит только последний RES_*, не историю).
+        Без этой строки клик в запретный сектор не двигает робота и ничего не
+        объясняет: ядро отвечает NAK, окно молчит. Показывает только последний
+        ответ (следующий ACK убирает строку — так же, как сам mailbox хранит
+        только последний RES_*, не историю).
+
+        Приоритет текста — R_* причина (человеко-понятная: «точка вне зоны»),
+        а не протокольный ERR_TEXT («Значение или цель вне допустимого
+        диапазона (rval0 — причина)») — тот и так избыточен рядом с причиной,
+        и хвостовая скобка «(rval0 — причина)» оператору не нужна.
         """
         core = self.core
-        core.read(REG["RES_SEQ"], 1)  # часть блока последнего ответа — читается для полноты снимка
         if core.read(REG["RES_STATUS"], 1)[0] != _NAK:
             return None
         res_errno = core.read(REG["RES_ERRNO"], 1)[0]
-        text = f"отказ: {ERR_TEXT.get(res_errno, '?')}"
         if res_errno == ERR["E_RANGE"] and core.read(REG["RES_RVALC"], 1)[0] >= 1:
-            rval0 = core.read(REG["RES_RVALS"], 1)[0]
-            text += f" — {REASON_TEXT.get(rval0, '?')}"
-        return text
+            reason = REASON_TEXT.get(core.read(REG["RES_RVALS"], 1)[0])
+            if reason is not None:
+                return f"отказ: {reason}"
+        text = ERR_TEXT.get(res_errno, "?").split(" (", 1)[0]  # без протокольной скобки "(rval0 — причина)"
+        return f"отказ: {text}"
 
     # ------------------------------------------------------------------ #
     # Пиксели <-> мм робота (+X вправо, +Y вверх)
@@ -221,10 +226,16 @@ class SimView(QWidget):
             self._paint_zone(painter)
             self._paint_trail(painter)
             self._paint_chains(painter)
+            self._paint_tool(painter)
             self._paint_target(painter)
             self._paint_status(painter)
         finally:
             painter.end()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (переопределение Qt)
+        """Остановить таймер перерисовки при закрытии (переиспользование вида в T2.3 --view)."""
+        self._timer.stop()
+        super().closeEvent(event)
 
     def _paint_zone(self, painter: QPainter) -> None:
         ws = self.core._workspace()  # ponytail: см. _paint_transform
@@ -281,6 +292,21 @@ class SimView(QWidget):
             for p in points:
                 painter.drawEllipse(p, 4, 4)
 
+    def _paint_tool(self, painter: QPainter) -> None:
+        """Маркер TCP (кольцо + крест) по `_tool_xy()` — рисуется ВСЕГДА, даже
+        когда `scene_chains()` пуст (`joints() is None`, ревью T2.V находка 1):
+        робот не должен пропадать с экрана только потому, что модель не может
+        построить цепь звеньев для текущей позы — телеметрия TLM_X/Y живая."""
+        x, y = self._tool_xy()
+        p = self._to_widget(x, y)
+        pen = QPen(QColor("#5af78e"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(p, 6, 6)
+        painter.drawLine(QPointF(p.x() - 9, p.y()), QPointF(p.x() + 9, p.y()))
+        painter.drawLine(QPointF(p.x(), p.y() - 9), QPointF(p.x(), p.y() + 9))
+
     def _paint_target(self, painter: QPainter) -> None:
         active = self.core._active  # ponytail: см. _paint_transform
         if not active or "target" not in active:
@@ -295,7 +321,14 @@ class SimView(QWidget):
 
     def _paint_status(self, painter: QPainter) -> None:
         painter.setPen(QPen(QColor("#c8c8c8")))
-        painter.drawText(QRectF(8, 8, self.width() - 16, 80), Qt.TextFlag.TextWordWrap, self._status)
+        text_width = max(self.width() - 16, 1)
+        # Высота — из реальных метрик шрифта при переносе по ширине виджета,
+        # не константа: строка «отказ» на узком окне длиннее, чем помещалось
+        # бы в фиксированные 80 px (ревью T2.V, находка 7).
+        bounds = painter.fontMetrics().boundingRect(
+            QRect(0, 0, text_width, 10_000), Qt.TextFlag.TextWordWrap, self._status
+        )
+        painter.drawText(QRectF(8, 8, text_width, bounds.height()), Qt.TextFlag.TextWordWrap, self._status)
 
 
 class DemoDriver:
@@ -358,8 +391,18 @@ class DemoDriver:
         core.write(REG["CMD_FLAG"], [1])  # последним (TRAPS, тот же порядок что и у mailbox-хелперов тестов)
 
 
-def main() -> None:
-    """Запуск демо-окна: ``python -m Services.robot_comm.gui.sim_view``."""
+def main(argv: list[str] | None = None) -> None:
+    """Запуск демо-окна: ``python -m Services.robot_comm.gui.sim_view``.
+
+    ``--quit-after SECONDS`` — смоук-режим: окно закрывается само через
+    заданное время (``QTimer.singleShot`` -> ``app.quit()``), без человека за
+    экраном. Команда для проверки без дисплея — в README.
+    """
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--quit-after", type=float, default=None, metavar="SECONDS")
+    args = parser.parse_args(argv)
+
     app = QApplication(sys.argv)
     core = RobotSimCoreV2()
     driver = DemoDriver(core)
@@ -372,14 +415,11 @@ def main() -> None:
     btn_home = QPushButton("Домой")
     btn_home.clicked.connect(driver.home)
 
-    servo_state = {"on": True}
-
-    def _toggle_servo() -> None:
-        servo_state["on"] = not servo_state["on"]
-        driver.servo(servo_state["on"])
-
     btn_servo = QPushButton("Серво")
-    btn_servo.clicked.connect(_toggle_servo)
+    # Без локальной копии состояния (ревью T2.V, находка 4): NAK по busy
+    # (робот в ходе) не должен рассинхронизировать кнопку с TLM_SERVO —
+    # следующее нажатие читает регистр заново и просто инвертирует его.
+    btn_servo.clicked.connect(lambda: driver.servo(core.read(REG["TLM_SERVO"], 1)[0] == 0))
 
     btn_stop = QPushButton("Стоп")
     btn_stop.clicked.connect(driver.stop)
@@ -407,6 +447,9 @@ def main() -> None:
     sim_timer = QTimer()
     sim_timer.timeout.connect(_tick)
     sim_timer.start(10)
+
+    if args.quit_after is not None:
+        QTimer.singleShot(round(args.quit_after * 1000), app.quit)
 
     window.show()
     sys.exit(app.exec())

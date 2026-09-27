@@ -238,10 +238,15 @@ def test_unreachable_pose_no_chains_and_warning(qtbot):
 
     view = SimView(core)
     qtbot.addWidget(view)
+    view.resize(300, 300)  # ревью T2.V находка 1: маркер TCP должен остаться на экране даже без цепи
     view.refresh()
 
     assert view.scene_chains() == []
     assert "недостижима" in view.status_text()
+
+    tool_px = view._to_widget(*view._tool_xy())  # ревью T2.V находка 1: TCP рисуется даже без цепи
+    pixel = view.grab().toImage().pixelColor(round(tool_px.x()), round(tool_px.y()))
+    assert (pixel.red(), pixel.green(), pixel.blue()) == (0x5A, 0xF7, 0x8E)
 
 
 def test_status_text_shows_error_text_after_nak_or_fault(qtbot):

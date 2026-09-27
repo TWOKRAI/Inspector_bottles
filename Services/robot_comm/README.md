@@ -101,13 +101,19 @@ TCP, статус) + `DemoDriver` — единственный писатель 
 mailbox-паттерн, что и в тестах). Запуск:
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view   # offscreen — для CI/смоук без дисплея
-python -m Services.robot_comm.gui.sim_view                              # обычный запуск с окном
+python -m Services.robot_comm.gui.sim_view    # обычный запуск с окном
 ```
 
 Клик по виду — `DemoDriver.goto(x, y)`; кнопки «Домой»/«Серво»/«Стоп».
 Заглушка (не путать с настоящей геометрией): длины звеньев SCARA в
 `kinematics.py` (`l1`/`l2`) — с шильдика робота, ещё не подставлены.
+
+Смоук без дисплея (`--quit-after` закрывает окно само через N секунд —
+`QTimer.singleShot` -> `app.quit()`, живой человек не нужен):
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-after 2
+```
 
 ## Тесты
 
