@@ -49,7 +49,7 @@ from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
 from Services.robot_comm.core.protocol_v2 import KIND, OP, REG, REG_COUNT
 from Services.robot_comm.kinematics import ScaraModel
 from Services.robot_comm.programs.geometry import Workspace, check_point
-from Services.robot_comm.server.sim_core_v2 import REG_SPACE_SIZE_V2, RobotSimCoreV2
+from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
 ACK = 1
 NAK = 2

@@ -42,8 +42,16 @@ from Services.robot_comm.programs.geometry import Workspace, check_point
 
 # модуль импортируется целиком (безопасно — существует с T2.1); новые для
 # T2.2 имена (TICK_INTERVAL_S, MAX_STEP_MM) читаются лениво внутри тестов
+from Services.robot_comm.kinematics import make_model
 from Services.robot_comm.server import sim_core_v2
 from Services.robot_comm.server.sim_core_v2 import REG_SPACE_SIZE_V2, RobotSimCoreV2
+
+# T2.J2 (расширение FILES ведущим 2026-09-27): эти тесты проверяют зону P_WS
+# (рабочую зону прошивки), а не пределы суставов модели — точки специально взяты
+# у границы кольца/сектора, где |J1| естественно превышает дефолтный предел ±132
+# ScaraModel (заглушка GATE-1, plans/robot-protocol-v2 §9 q1). Модель без пределов
+# суставов изолирует «эта проверка идёт через зону, а не через новый предел».
+_NO_JOINT_LIMITS = make_model({"type": "scara", "joint_limits": [None, None, None, None]})
 
 # ACK/NAK контракт называет числом (как в T2.1-контракте) -> литерал, не импорт
 ACK = 1
@@ -439,7 +447,7 @@ def test_ptp_joint_target_zone_matches_geometry_oracle():
 def test_zone_r_min_boundary(x_eng, y_eng, label):
     # r = sqrt(x²+y²) = |x| (y=0); r_min=100мм default. z=-75 (в [-150,0]),
     # rz=0 (в [-360,360]) — нейтральны, изолируют проверку r.
-    core = fresh_core()
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     res = cmd(core, 2, OP["PTP_MOVE"], mm(x_eng), mm(y_eng), mm(-75.0), mm(0.0), KIND["JOINT"], 100)
     if x_eng < 100.0:
@@ -556,7 +564,7 @@ def test_zone_angle_sector_min_boundary():
 def test_zone_angle_sector_max_boundary():
     # зеркально предыдущему по Y: angle=+164.5°(accept) raw=(-2891,802);
     # angle=+165.5°(reject) raw=(-2904,751).
-    core = fresh_core()
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     res_reject = cmd(core, 2, OP["PTP_MOVE"], -2904, 751, mm(-75.0), mm(0.0), KIND["JOINT"], 100)
     assert res_reject["status"] == NAK
@@ -684,7 +692,7 @@ def test_dead_zone_segment_line_rejected():
     # ближайшая к (0,0) точка отрезка на t=0.5: (13.07,0), расстояние
     # 13.07мм < r_min=100мм -> R_DEAD_ZONE (посчитано geometry-формулой
     # проекции на отрезок, воспроизведено вручную при составлении теста).
-    core = fresh_core()
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     move_to_via_joint(core, 2, 131, -1494, mm(-75.0), mm(0.0))
     assert core.read(REG["TLM_HAND"], 1)[0] == PARAMS[PARAM_ID["P_HAND"]]["default"]
@@ -696,7 +704,7 @@ def test_dead_zone_segment_line_rejected():
 
 
 def test_dead_zone_segment_joint_accepted_same_endpoints():
-    core = fresh_core()
+    core = fresh_core(model=_NO_JOINT_LIMITS)
     servo_on(core, 1)
     move_to_via_joint(core, 2, 131, -1494, mm(-75.0), mm(0.0))
 

@@ -372,27 +372,30 @@ class RobotSimCoreV2:
                 self.regs[REG["TLM_HAND"]] = 0
 
     @staticmethod
-    def _nearest_j4_turn(raw_j4: float, limit: tuple[float, float]) -> float | None:
-        """Ближайший к `raw_j4` оборот `raw_j4 + 360k`, попадающий в `limit` — или
-        `None`, если ни один не влезает (T2.J2 §Q2, свойство 5 приёмки: независимо
-        подтверждено тестером на `raw=535, limit=(-360,360) -> 175.0`,
-        `limit=(-165,165) -> None`). Кандидатов конечно много (`(hi-lo)/360 + 1`) —
-        полный перебор, не эвристика."""
+    def _nearest_j4_turn(raw_j4: float, reference: float, limit: tuple[float, float] | None) -> float | None:
+        """Оборот `raw_j4 + 360k`, ближайший к `reference` — с пределом `limit` или
+        без него (решение ведущего 2026-09-27, правило cto §Q2: «ближайший К ТЕКУЩЕМУ»
+        — это состояние сустава ДО хода, не сырое `raw_j4` само по себе; исходный
+        RED-литерал тестера `175.0` закреплял ошибочную модель «ближайший к сырому» —
+        поправлено спекой `8755d803`, `raw=535` при `reference` (HOME J4) `=-6.13` даёт
+        `-185.0`, не `175.0`). Одна реализация на оба использования:
+        - JOINT/HOME-приём (`_resolve_joint_target`): `limit` задан — `None`, если ни
+          один оборот не влезает (свойство 5 приёмки, `limit=(-165,165) -> None`).
+        - непрерывность LINE/JOG (`_continuity_joints`, свойство 9): `limit=None` —
+          предел сустава при LINE не проверяется (вне охвата T2.J2), просто ближайший
+          к прежнему состоянию.
+        `limit=None` — прямая формула (ближайшее целое k); иначе полный перебор
+        конечного набора k (`(hi-lo)/360 + 1` кандидатов), не эвristика.
+        """
+        if limit is None:
+            return raw_j4 + 360.0 * round((reference - raw_j4) / 360.0)
         lo, hi = limit
         k_min = math.ceil((lo - raw_j4) / 360.0)
         k_max = math.floor((hi - raw_j4) / 360.0)
         if k_min > k_max:
             return None
-        best_k = min(range(k_min, k_max + 1), key=abs)
+        best_k = min(range(k_min, k_max + 1), key=lambda k: abs(raw_j4 + 360.0 * k - reference))
         return raw_j4 + 360.0 * best_k
-
-    @staticmethod
-    def _nearest_j4_to(raw_j4: float, reference: float) -> float:
-        """Оборот `raw_j4 + 360k`, ближайший к `reference` — БЕЗ предела (в отличие
-        от `_nearest_j4_turn`): используется только для непрерывности отображения
-        `_joints[3]` на LINE/JOG (свойство 9), где предел сустава не проверяется
-        (вне охвата T2.J2, см. docstring модуля)."""
-        return raw_j4 + 360.0 * round((reference - raw_j4) / 360.0)
 
     def _resolve_joint_target(
         self, j_end: tuple[float, ...]
@@ -406,7 +409,10 @@ class RobotSimCoreV2:
         resolved = list(j_end)
         j4_limit = limits[3] if len(limits) > 3 else None
         if j4_limit is not None:
-            turn = self._nearest_j4_turn(j_end[3], j4_limit)
+            # Состояние ДО хода — текущий J4; недостижимо (нет состояния) -> сырой j_end[3]
+            # как эталон (вырожденный случай, тем же кодом).
+            reference = self._joints[3] if self._joints is not None else j_end[3]
+            turn = self._nearest_j4_turn(j_end[3], reference, j4_limit)
             if turn is None:
                 return (NAK, ERR["E_RANGE"], 1, [REASON["R_OUT_OF_ZONE"]]), None
             resolved[3] = turn
@@ -645,13 +651,13 @@ class RobotSimCoreV2:
     def _continuity_joints(self, pos: tuple[float, float, float, float]) -> tuple[float, ...] | None:
         """LINE/JOG (свойство 9 приёмки T2.J2): суставы следуют состоянию —
         `ik(pos, TLM_HAND)`, J4 берёт оборот, ближайший к ПРЕЖНЕМУ состоянию
-        (`_nearest_j4_to`, БЕЗ предела — предел суставов при LINE не проверяется,
+        (`_nearest_j4_turn` с `limit=None` — предел суставов при LINE не проверяется,
         вне охвата T2.J2, см. docstring модуля)."""
         joints = self.model.ik(pos, self.regs[REG["TLM_HAND"]])
         if joints is None:
             return None
         if self._joints is not None:
-            joints = (*joints[:3], self._nearest_j4_to(joints[3], self._joints[3]))
+            joints = (*joints[:3], self._nearest_j4_turn(joints[3], self._joints[3], None))
         return joints
 
     def _joint_tick_capped(
@@ -672,13 +678,22 @@ class RobotSimCoreV2:
             joints = tuple(j0 + frac * (j1 - j0) for j0, j1 in zip(active["j_start"], active["j_end"]))
             return joints, self.model.fk(joints)
 
+        ws = self._workspace()
+
         def cart_dist(fk_pos: tuple[float, float, float, float]) -> float:
             # Округление до регистрового разрешения (0.1 мм, как `_write_pose`) —
             # тест меряет шаг МЕЖДУ ЗАПИСАННЫМИ (округлёнными) позами, не между
             # точными внутренними float; без округления здесь бисекция сходится к
             # потолку по точным координатам и пропускает через округление лишние
-            # ~0.05-0.1мм на каждой оси (найдено break-injection ведущего).
-            a_r = tuple(round(v * 10) / 10.0 for v in fk_pos[:3])
+            # ~0.05-0.1мм на каждой оси (найдено прогоном свойства 1 приёмки
+            # T2.J2 тестера, `test_seam_target_other_hand_moves_within_step_cap`,
+            # developer, ДО какой-либо инъекции ведущего). Если обычное округление
+            # выводит из зоны (та же точка у границы r=l1+l2) — бисекция меряет
+            # расстояние ДО клэмп-кандидата (`_clamp_pose_to_zone`), иначе она может
+            # принять долю тика, чей клэмпнутый (записываемый) шаг сам превышает
+            # потолок (решение ведущего 2026-09-27, найдено этим же прогоном).
+            rounded = tuple(round(v * 10) / 10.0 for v in fk_pos)
+            a_r = rounded[:3] if self.model.check_point(ws, rounded) == 0 else self._clamp_pose_to_zone(fk_pos)[:3]
             b_r = tuple(round(v * 10) / 10.0 for v in prev_pos[:3])
             return math.sqrt(sum((a - b) ** 2 for a, b in zip(a_r, b_r)))
 
@@ -704,6 +719,26 @@ class RobotSimCoreV2:
                 hi = mid
         return lo, lo_joints, lo_pos
 
+    def _clamp_pose_to_zone(self, pos: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+        """Решение ведущего 2026-09-27 (свойство 1 приёмки T2.J2, `r=600.028` >
+        `r_max=600.0`): у вытянутой руки (r у ГРАНИЦЫ круга `l1+l2`) независимое
+        округление x/y до 0.1 мм (регистровое разрешение) может УВЕЛИЧИТЬ r настолько,
+        что округлённая поза покидает зону — тот же класс, что ревью T2.2 для JOG_CONT
+        (`_progress_jog`, проверка округлённой позы перед записью). Если округление к
+        БЛИЖАЙШЕМУ выводит из зоны — округлить x/y К НУЛЮ (`math.trunc`): |x|,|y| только
+        уменьшаются, r только уменьшается. Если и так вне зоны — вернуть round-к-ближайшему
+        как есть (честно недорешено, см. отчёт «Итерация 2»)."""
+        ws = self._workspace()
+        rounded = tuple(round(v * 10) / 10.0 for v in pos)
+        if self.model.check_point(ws, rounded) == 0:
+            return rounded
+        x, y, z, rz = pos
+        trunc_xy = (math.trunc(x * 10) / 10.0, math.trunc(y * 10) / 10.0)
+        candidate = (trunc_xy[0], trunc_xy[1], rounded[2], rounded[3])
+        if self.model.check_point(ws, candidate) == 0:
+            return candidate
+        return rounded
+
     def _progress_move(self, dt: float) -> None:
         """Ход (PTP_MOVE/HOME/JOG_STEP): JOINT/HOME (T2.J/T2.J2) — по суставам модели
         через ``self._active["j_start"/"j_end"/"path_len"/"travelled"]`` (см.
@@ -726,6 +761,16 @@ class RobotSimCoreV2:
             else:
                 new_travelled, new_joints, new_pos = self._joint_tick_capped(active, pos, candidate_travelled, dt)
                 active["travelled"] = new_travelled
+                # Клэмп зоны трогает позу ТОЛЬКО когда обычное округление её из зоны
+                # выводит (свойство 1 приёмки T2.J2, r=600.028>r_max) — иначе не
+                # трогать new_pos вовсе: `_clamp_pose_to_zone` в быстром пути
+                # математически то же значение, что вернул бы `_write_pose`, но
+                # предвычисленное округление здесь и повторное округление там —
+                # разные float-выражения одной величины, ULP-шум на них за ~1400
+                # тиков `test_duration_follows_slowest_joint` даёт расхождение в
+                # 2 тика (найдено этим прогоном, решение — не трогать общий путь).
+                if self.model.check_point(self._workspace(), tuple(round(v * 10) / 10.0 for v in new_pos)) != 0:
+                    new_pos = self._clamp_pose_to_zone(new_pos)
         else:
             new_pos = self._cartesian_step(pos, target, active["speed"], dt)
             new_joints = self._continuity_joints(new_pos)
