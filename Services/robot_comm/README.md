@@ -94,6 +94,21 @@ echo, энкодер, зеркало ПЧ с heartbeat, draw busy/prog).
 кольцо/сектор SCARA) и правило `R_HAND` — часть прошивки Delta v2, а не
 модели, и для другого типа робота переезжают вместе с протоколом.
 
+## Окно-вид симулятора v2 (`gui/sim_view.py`, T2.V)
+
+Read-only вид сверху над `RobotSimCoreV2` (зона, цепи звеньев модели, шлейф
+TCP, статус) + `DemoDriver` — единственный писатель мимо окна (тот же
+mailbox-паттерн, что и в тестах). Запуск:
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view   # offscreen — для CI/смоук без дисплея
+python -m Services.robot_comm.gui.sim_view                              # обычный запуск с окном
+```
+
+Клик по виду — `DemoDriver.goto(x, y)`; кнопки «Домой»/«Серво»/«Стоп».
+Заглушка (не путать с настоящей геометрией): длины звеньев SCARA в
+`kinematics.py` (`l1`/`l2`) — с шильдика робота, ещё не подставлены.
+
 ## Тесты
 
 ```bash
