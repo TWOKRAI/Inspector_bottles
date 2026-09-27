@@ -18,17 +18,16 @@
 
 Реализовано в T2.2 (protocol-spec §3.4, §4, §5, §6, §7.3, §8; params.md
 §11.3): настоящая интерполяция ``PTP_MOVE``/``HOME``/``JOG_STEP`` (линейно в
-Cartesian, включая JOINT — упрощение симулятора, реальная прошивка
-интерполирует JOINT в суставах), ``JOG_CONT`` с поводком (``JOG_LEASE``) и
-остановкой на краю зоны, проверка рабочей зоны через уже принятую
-``programs/geometry.py`` (``Workspace``/``check_point``/``check_segment`` —
-переиспользуются, не копируются), ``E_NO_SERVO`` для всех опкодов движения,
-плоскость стопа с уровнями SOFT (pending для хода, abort now для jog) / HARD /
-HALT, ``inject_motion_fault()`` (``FAULT``, ``TLM_ACTIVITY=5``) с gating
-(только ``PING``/``CLEAR_ERR``/``PARAM_GET``/``PARAM_SET``/``SERVO``
-разрешены). Упрощения симулятора: замедление стопа HARD (``P_DEC_STOP``) не
-моделируется — поза замирает на тике обработки; JOINT-ход интерполируется в
-декартовых координатах, а не по суставам.
+Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по суставам модели,
+см. T2.J ниже), ``JOG_CONT`` с поводком (``JOG_LEASE``) и остановкой на краю
+зоны, проверка рабочей зоны через уже принятую ``programs/geometry.py``
+(``Workspace``/``check_point``/``check_segment`` — переиспользуются, не
+копируются), ``E_NO_SERVO`` для всех опкодов движения, плоскость стопа с
+уровнями SOFT (pending для хода, abort now для jog) / HARD / HALT,
+``inject_motion_fault()`` (``FAULT``, ``TLM_ACTIVITY=5``) с gating (только
+``PING``/``CLEAR_ERR``/``PARAM_GET``/``PARAM_SET``/``SERVO`` разрешены).
+Упрощение симулятора: замедление стопа HARD (``P_DEC_STOP``) не моделируется —
+поза замирает на тике обработки.
 
 Отложено: ``CVT_JOB``/``SC_RUN`` (NAK ``E_INTERNAL``), ``HB_PC``/watchdog,
 мост ПЧ/лента, сценарии, TCP-сервер ``--protocol v2`` (T2.3); ``on_event``
@@ -44,6 +43,33 @@ HALT, ``inject_motion_fault()`` (``FAULT``, ``TLM_ACTIVITY=5``) с gating
 и проверка ``R_HAND`` (``TLM_HAND != P_HAND``, ``_check_motion``/``_op_jog_cont``)
 специфичны прошивке SCARA/Delta v2 и меняются вместе с протоколом для другого
 типа робота — ядро их не выносит в модель.
+
+Реализовано в T2.J: ``PTP_MOVE JOINT`` и ``HOME`` интерполируются по суставам
+модели, а не по прямой в Cartesian — прямая может срезать угол через запретный
+сектор ``P_WS_ANG_*``, которого у настоящей руки нет (репродукция бага —
+отчёт тестера T2.J: старт/цель по разные стороны сектора, прямая хорда его
+пересекает, суставный путь — нет). Суставы старта/цели считаются ОДИН раз при
+старте хода (``ik(start, TLM_HAND)`` -> ``ik(target, P_HAND)``), дальше —
+линейная интерполяция суставов по накопленному пройденному расстоянию
+(``travelled``/``path_len``, посчитанному один раз от старта); тайминг не
+меняется (тот же ``path_len``/``speed``, ``MAX_STEP_MM``, ``TICK_INTERVAL_S``,
+что у Cartesian-хода). Поза тика = ``self.model.fk(суставы)``, ФИНАЛЬНЫЙ тик
+всегда ставит позу РОВНО в цель без FK (не даёт накопиться float-дрейфу).
+Фолбэк на прямую в Cartesian — ДВА независимых случая: (1) если ``ik`` вернул
+``None`` для старта или цели (точка вне досягаемости модели) — ход ЦЕЛИКОМ
+остаётся на прежней прямой; (2) если ``fk`` вернул ``None`` ПОСРЕДИ пути
+(суставы, полученные интерполяцией ДОСТИЖИМЫХ концов, сами оказались
+недостижимы для модели между ними) — на декартов шаг падает только ЭТОТ тик,
+не весь ход (не пересчитывает путь заранее). **Промежуточные точки суставного
+пути НЕ проверяются на попадание в зону** — и прошивка, и симулятор проверяют
+только цель хода при приёме команды (``_check_motion``); суставный путь
+избегает сектора не потому, что кто-то его проверяет по дороге, а потому что
+он физически повторяет траекторию настоящей руки. Найдено тестером T2.J:
+смена конфигурации локтя (``hand``) во время хода, пересекающего сектор, сама
+может дать суставный путь, недостижимый на части траектории (вытянутая рука,
+``J2≈0``) — физическое свойство геометрии, не дефект симулятора, вне охвата
+этой задачи. ``LINE`` и ``JOG_STEP``/``JOG_CONT`` остаются прямой в Cartesian
+без изменений.
 """
 
 from __future__ import annotations
@@ -330,14 +356,31 @@ class RobotSimCoreV2:
         joint: bool,
         activity: int,
     ) -> None:
+        """Завести активный ход. JOINT (T2.J): суставы старта/цели и ``path_len``
+        считаются здесь ОДИН раз — не на каждом тике (см. ``_progress_move``)."""
+        start_pose = self._read_pose_eng()
         self._active = {
             "type": "move",
             "seq": seq,
-            "pos": self._read_pose_eng(),
+            "pos": start_pose,
             "target": target,
             "speed": speed,
             "joint": joint,
         }
+        if joint:
+            j_start = self.model.ik(start_pose, self.regs[REG["TLM_HAND"]])
+            j_end = self.model.ik(target, self._values[PARAM_ID["P_HAND"]])
+            delta = tuple(t - p for t, p in zip(target, start_pose))
+            xyz_dist = math.sqrt(delta[0] ** 2 + delta[1] ** 2 + delta[2] ** 2)
+            self._active.update(
+                {
+                    "j_start": j_start,
+                    "j_end": j_end,
+                    "start": start_pose,
+                    "path_len": max(xyz_dist, abs(delta[3])),
+                    "travelled": 0.0,
+                }
+            )
         self.regs[REG["TLM_ACTIVITY"]] = activity
         self.regs[REG["TLM_MOVING"]] = 1
 
@@ -422,24 +465,53 @@ class RobotSimCoreV2:
         else:
             self._progress_move(dt)
 
-    def _progress_move(self, dt: float) -> None:
-        """Ход (PTP_MOVE/HOME/JOG_STEP): шаг min(v*dt, MAX_STEP_MM) вдоль прямой к цели.
+    def _cartesian_step(
+        self,
+        pos: tuple[float, float, float, float],
+        target: tuple[float, float, float, float],
+        speed: float,
+        dt: float,
+    ) -> tuple[float, float, float, float]:
+        """Шаг min(v*dt, MAX_STEP_MM) вдоль прямой pos->target (LINE/JOG_STEP путь,
+        и однотиковый фолбэк JOINT-хода при ``ik``/``fk`` -> ``None``, T2.J).
 
         Путь = max(XYZ-дистанция, |ΔRZ|); пересчёт от текущей позы на каждом тике
-        математически эквивалентен накоплению от старта (прямая линия) — см. отчёт.
+        математически эквивалентен накоплению от старта (прямая линия) — см. отчёт T2.2.
+        """
+        delta = tuple(t - p for t, p in zip(target, pos))
+        xyz_dist = math.sqrt(delta[0] ** 2 + delta[1] ** 2 + delta[2] ** 2)
+        path_len = max(xyz_dist, abs(delta[3]))
+        step = min(speed * dt, MAX_STEP_MM)
+        if step >= path_len:
+            return target
+        frac = step / path_len
+        return tuple(p + frac * d for p, d in zip(pos, delta))
+
+    def _progress_move(self, dt: float) -> None:
+        """Ход (PTP_MOVE/HOME/JOG_STEP): JOINT/HOME (T2.J) — по суставам модели через
+        ``self._active["j_start"/"j_end"/"path_len"/"travelled"]`` (см. ``_start_move``);
+        иначе (LINE/JOG_STEP, или ``ik`` не достал старт/цель) — прямая в Cartesian.
         """
         active = self._active
         pos = active["pos"]
         target = active["target"]
-        delta = tuple(t - p for t, p in zip(target, pos))
-        xyz_dist = math.sqrt(delta[0] ** 2 + delta[1] ** 2 + delta[2] ** 2)
-        path_len = max(xyz_dist, abs(delta[3]))
-        step = min(active["speed"] * dt, MAX_STEP_MM)
-        if step >= path_len:
-            new_pos = target
+        if active.get("j_start") is not None and active.get("j_end") is not None:
+            active["travelled"] += min(active["speed"] * dt, MAX_STEP_MM)
+            if active["travelled"] >= active["path_len"]:
+                new_pos = target  # ровно цель, без fk — не даёт накопиться float-дрейфу
+            else:
+                frac = active["travelled"] / active["path_len"]
+                joints = tuple(j0 + frac * (j1 - j0) for j0, j1 in zip(active["j_start"], active["j_end"]))
+                fk_pos = self.model.fk(joints)
+                if fk_pos is None:
+                    # ponytail: суставы из lerp двух ДОСТИЖИМЫХ концов сами вне модели —
+                    # фолбэк на декартов шаг только для ЭТОГО тика (путь не пересчитывается
+                    # заранее целиком); апгрейд — проверять достижимость вдоль пути на старте.
+                    new_pos = self._cartesian_step(pos, target, active["speed"], dt)
+                else:
+                    new_pos = fk_pos
         else:
-            frac = step / path_len
-            new_pos = tuple(p + frac * d for p, d in zip(pos, delta))
+            new_pos = self._cartesian_step(pos, target, active["speed"], dt)
         active["pos"] = new_pos
         self._write_pose(new_pos)
         if new_pos == target:

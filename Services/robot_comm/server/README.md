@@ -11,12 +11,19 @@ T2.1+T2.2, `plans/robot-protocol-v2`): mailbox (`CMD_*`/`RES_*`, идемпот�
 валидация magic/fingerprint/CRC при загрузке, откат битых слотов поштучно) и
 плоскость `STOP_REQ` (SOFT/HARD/HALT, SOFT посреди хода — pending до прибытия).
 Реализованы `PING`/`CLEAR_ERR`/`SERVO`/`DO_SET`/`PARAM_SET`/`PARAM_GET`/
-`PARAM_APPLY`, настоящее движение `PTP_MOVE`/`HOME`/`JOG_STEP` (линейная
-интерполяция в Cartesian, включая JOINT — упрощение симулятора) и `JOG_CONT`
+`PARAM_APPLY`, настоящее движение `PTP_MOVE`/`HOME`/`JOG_STEP` и `JOG_CONT`
 (поводок `JOG_LEASE`, остановка на краю зоны), проверка рабочей зоны SCARA
 через `programs/geometry.py` (`Workspace`/`check_point`/`check_segment`),
 `E_NO_SERVO`, `inject_motion_fault()` (`FAULT`, gating опкодов). T2.3 добавит
 `HB_PC`-watchdog/мост ПЧ/CVT/сценарии и сам TCP-сервер `--protocol v2`.
+
+**JOINT/HOME по суставам (T2.J).** `PTP_MOVE JOINT` и `HOME` интерполируются
+по суставам модели (`self.model.ik`/`fk`), не по прямой в Cartesian — прямая
+может срезать угол через запретный сектор `P_WS_ANG_*`. Фолбэк на прямую:
+если `ik` не достал старт/цель — весь ход; если `fk` не достал точку посреди
+пути — только этот тик. Промежуточные точки суставного пути НЕ проверяются
+на попадание в зону (проверяется только цель при приёме команды) — подробности
+в докстринге `RobotSimCoreV2`. `LINE`/`JOG_STEP`/`JOG_CONT` — по-прежнему прямая.
 
 Ниже описанный `SimRobotServer`/`RobotSimCore` (без суффикса `V2`) — это
 **всё ещё только v1**: сервер этого файла новый протокол не поднимает, ядра
