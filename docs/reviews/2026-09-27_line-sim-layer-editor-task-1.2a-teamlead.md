@@ -137,3 +137,12 @@ RED: 9 тестов `test_layer_preview.py` падали `ModuleNotFoundError` �
 - Живой стенд с процессом `layers` не поднимал: маршрутизация `preset.preview` в процесс `layers` проверена только по конфигу.
 - `layer_preview` импортирует `Plugins.sim.scene_source.plugin` ради статик-методов, из-за этого в процессе `layers` регистрируется и `scene_source`.
 - Цена одного превью не изменилась (~88 мс). Она ушла с потока сцены, но поток команд `layers` занят столько же.
+
+## Итерация 2c — правила конфига в Services, живой прогон
+
+Коммит `f638e281`. В `Services/line_sim/core/preset.py` вынесены `REPO_ROOT`, `resolve_repo_path`, `load_scene_preset` и `apply_defect_override`. Теперь `layer_preview` импортирует только `Services.line_sim.core`. Тест в подпроцессе проверяет, что после импорта плагина в `sys.modules` нет `Plugins.sim.scene_source`; на HEAD он был красным (`['Plugins.sim.scene_source', 'Plugins.sim.scene_source.plugin']`). У `scene_source` `_resolve_preset_path` остался тонким делегатом, потому что его зовут тесты.
+Радиус `Services/line_sim/tests Plugins/sim multiprocess_framework/modules/recipe/tests apps/line_sim`: 658 passed, 7 skipped.
+Живой прогон: флага `--backend-live` в этом pytest нет, живые тесты включаются переменной `LINE_SIM_LIVE=1`.
+- Первый прогон: 1 failed, 31 passed. Упал `test_mjpeg_sprite_follows_belt` (лаг корреляции -1439.0): в worktree нет `data/line_sim/letter_catalog` (gitignored), и движок сцены работает только фоном.
+- Второй прогон с временной ссылкой `data/line_sim` на каталог главного дерева: 32 passed за 61 с, стенд из 5 процессов вместе с `layers`. Ссылку удалил сразу после прогона.
+Открыто: `preset.preview` через живой стенд в процесс `layers` не вызывал, маршрут проверен только тем, что процесс поднимается.
