@@ -3,7 +3,7 @@ name: injection-scripts-on-committed-code
 description: Break-injection scripts that restore files with `git checkout` must run on committed code, and multi-path variables must run under bash — both traps hit on gui-service 1.3b/1b.5 (2026-09-25)
 metadata:
   type: feedback
-  last-verified: 2026-09-25
+  last-verified: 2026-09-27
 ---
 
 Commit the fix before running a break-injection script whose restore step is `git checkout -- <file>`.
@@ -18,4 +18,8 @@ instead of failing loudly.
 - Commit (or WIP-commit) first; then every injection restores from git safely.
 - Run injection loops via `bash -c '...'` (or arrays), and treat an empty result line as a broken harness,
   never as "0 red".
+- Run the injected pytest with `PYTHONDONTWRITEBYTECODE=1` and delete the module's `.pyc` after the
+  restore. robot-protocol-v2 T2.1 (2026-09-27): an injection that MOVES a line keeps the file size, the
+  restore lands in the same second, so Python's mtime+size check reused the injected `.pyc` — the correct
+  code then failed its own test and looked like a real regression.
 - Related: [[merge-radius-skips-live-and-contract-tests]].
