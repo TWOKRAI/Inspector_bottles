@@ -373,13 +373,17 @@ def test_hand_after_stop_mid_flip_follows_joints():
     model = ScaraModel()
     recon = model.ik(pose_eng(core), core.read(REG["TLM_HAND"], 1)[0])
     assert recon is not None
-    assert recon == pytest.approx(joints, abs=1e-6), "ik(pose, TLM_HAND) обязан совпадать с joints() после фикса"
+    # Решение ведущего 2026-09-27: допуск 0.05°, не 1e-6 из свойства 3 cto — поза в регистрах
+    # округлена до 0.1 мм, ik от неё отходит от состояния на 0.008-0.027° (то же расхождение, на
+    # котором стоит свойство 4). Проверяется ветка руки: ik другой руки ушёл бы на десятки градусов.
+    assert recon == pytest.approx(joints, abs=0.05), "ik(pose, TLM_HAND) обязан совпадать с joints() после фикса"
 
     # Следующий LINE к той же цели при P_HAND=1 (уже установлен) -> ACK, не R_HAND
     # (сегодня TLM_HAND читается устаревшим 0 -> NAK errno 3 rvals [R_HAND], репро B).
     line_target = (mm(100.0), mm(450.0), mm(0.0), mm(0.0))
     res_line = cmd(core, 6, OP["PTP_MOVE"], *line_target, KIND["LINE"], 100)
     assert res_line["status"] == ACK, f"TLM_HAND устарел -> R_HAND NAK (репро B), ожидается ACK: {res_line}"
+    run_until_activity_zero(core)  # ведущий 2026-09-27: PARAM_SET во время хода — E_BUSY (errno 4)
 
     # Следующий JOINT при P_HAND=0 стартует без резкого скачка позы за один тик
     # (j_start обязан браться от актуального состояния/TLM_HAND, не от устаревшего).
@@ -417,7 +421,11 @@ def test_hand_after_stop_mid_flip_follows_joints():
 # -185, тоже вне).
 _J4_TARGET_XY = (-157.10254199148986, -57.880361948674704)
 _J4_RZ_TARGET = 284.0
-_J4_NEAREST_TURN = 175.0
+# Решение ведущего 2026-09-27 (правило cto Q2: оборот, ближайший к ТЕКУЩЕМУ J4, а не к
+# сырому): ход из HOME, P_HAND=1 по умолчанию, J4 в HOME = -6.130 (ik ScaraModel, T2.K).
+# Кандидаты в ±360: 175.0 (|Δ|=181.13) и -185.0 (|Δ|=178.87) -> -185.0. Прежний литерал
+# 175.0 закреплял правило «ближайший к сырому 535» — ошибочную модель тестера.
+_J4_NEAREST_TURN = -185.0
 
 
 def test_j4_takes_nearest_turn_within_limits():
@@ -430,7 +438,7 @@ def test_j4_takes_nearest_turn_within_limits():
     servo_on(core, 1)
     target = (mm(_J4_TARGET_XY[0]), mm(_J4_TARGET_XY[1]), mm(0.0), mm(_J4_RZ_TARGET))
     res = cmd(core, 2, OP["PTP_MOVE"], *target, KIND["JOINT"], 100)
-    assert res["status"] == ACK, f"сырой J4=535 вне +-360, но оборот 175.0 внутри -> ожидается ACK: {res}"
+    assert res["status"] == ACK, f"сырой J4=535 вне +-360, но оборот внутри есть -> ожидается ACK: {res}"
     run_until_activity_zero(core)
     joints = core.joints()
     assert joints is not None
