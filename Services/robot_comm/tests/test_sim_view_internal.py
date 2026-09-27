@@ -31,7 +31,7 @@ pytest.importorskip("PySide6", reason="окно-вид требует PySide6")
 
 from PySide6.QtCore import QPointF
 
-from Services.robot_comm.core.protocol_v2 import REG, STOP_LEVEL
+from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, REASON, REASON_TEXT, REG, STOP_LEVEL
 from Services.robot_comm.gui.sim_view import DemoDriver, SimView
 from Services.robot_comm.server.sim_core_v2 import REG_SPACE_SIZE_V2, RobotSimCoreV2
 
@@ -210,6 +210,35 @@ def test_demo_driver_goto_keeps_current_z_and_rz():
     x, y, z, rz = core._read_pose_eng()
     assert (x, y) == (200.0, 100.0)
     assert (z, rz) == (z0, rz0) == (-40.0, -100.0)
+
+
+# --------------------------------------------------------------------------- #
+# статус показывает отказ последней команды с причиной (живой снимок лида)
+# --------------------------------------------------------------------------- #
+
+
+def test_status_shows_nak_reason_then_clears_on_ack(qtbot):
+    """Клик в запретный сектор J1 (дефолт P_WS_ANG_MIN/MAX = ±165°, r=580 в
+    кольце [100,600]) -> NAK E_RANGE/R_OUT_OF_ZONE -> статус называет причину;
+    следующий ДОПУСТИМЫЙ goto (ACK) эту строку убирает — виден только
+    последний ответ, не история."""
+    core = fresh_core()
+    view = SimView(core)
+    # SimView заводит QTimer в __init__ — нужен живой QApplication (тот же паттерн, что и везде в файле).
+    qtbot.addWidget(view)
+    driver = DemoDriver(core)
+
+    driver.goto(-580.0, 0.0)  # angle=180° вне [-165, 165] -> NAK E_RANGE, rval0=R_OUT_OF_ZONE
+    core.tick()
+    view.refresh()
+    status = view.status_text()
+    assert ERR_TEXT[ERR["E_RANGE"]] in status
+    assert REASON_TEXT[REASON["R_OUT_OF_ZONE"]] in status
+
+    driver.goto(200.0, 100.0)  # допустимая точка -> ACK
+    core.tick()
+    view.refresh()
+    assert "отказ" not in view.status_text()
 
 
 def test_trail_not_flushed_by_idle_refreshes():

@@ -31,7 +31,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
-from Services.robot_comm.core.protocol_v2 import ERR_TEXT, KIND, OP, REG, STOP_LEVEL
+from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, KIND, OP, REASON_TEXT, REG, STOP_LEVEL
 from Services.robot_comm.server.sim_core_v2 import (
     RobotSimCoreV2,
     TLM_ACTIVITY_FAULT,
@@ -55,6 +55,10 @@ _ACTIVITY_NAMES = {
     TLM_ACTIVITY_JOG: "JOG",
     TLM_ACTIVITY_FAULT: "FAULT",
 }
+
+#: ACK/NAK не входят в сгенерированный контракт (protocol-spec §4) -> литерал,
+#: как в sim_core_v2 (тот же символ, отдельно — модуль ядра не публикует его).
+_NAK = 2
 
 
 def _decode_reg(raw: int) -> float:
@@ -140,7 +144,30 @@ class SimView(QWidget):
             lines.append(f"ошибка: {ERR_TEXT.get(errno, '?')}")
         if core.joints() is None:
             lines.append("поза недостижима для модели")
+        nak_line = self._nak_line()
+        if nak_line is not None:
+            lines.append(nak_line)
         return "\n".join(lines)
+
+    def _nak_line(self) -> str | None:
+        """«отказ: <текст>» по ПОСЛЕДНЕМУ ответу mailbox, если он NAK.
+
+        Иначе оператор кликает в запретный сектор, ядро отвечает ACK-ом
+        прошивки на приём команды... нет — NAK-ом, но окно молчит: робот не
+        поехал, и почему — не видно нигде на экране. Показывает только
+        последний ответ (ACK следующей командой эту строку убирает — так же,
+        как сам mailbox хранит только последний RES_*, не историю).
+        """
+        core = self.core
+        core.read(REG["RES_SEQ"], 1)  # часть блока последнего ответа — читается для полноты снимка
+        if core.read(REG["RES_STATUS"], 1)[0] != _NAK:
+            return None
+        res_errno = core.read(REG["RES_ERRNO"], 1)[0]
+        text = f"отказ: {ERR_TEXT.get(res_errno, '?')}"
+        if res_errno == ERR["E_RANGE"] and core.read(REG["RES_RVALC"], 1)[0] >= 1:
+            rval0 = core.read(REG["RES_RVALS"], 1)[0]
+            text += f" — {REASON_TEXT.get(rval0, '?')}"
+        return text
 
     # ------------------------------------------------------------------ #
     # Пиксели <-> мм робота (+X вправо, +Y вверх)
