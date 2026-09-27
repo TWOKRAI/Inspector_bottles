@@ -96,11 +96,11 @@ def _close(pixel, target, tol: int = _TOL) -> bool:
 # (ревью T2.W) ZScale/TimeTape вообще не вызывают ``core._workspace()`` —
 # границы зоны идут через зеркало PMIR (``_param_eng``), так что тот
 # монки-патч больше не достигает кода под тестом (пинил путь, которого нет).
-# Удалён, а не обновлён: та же гарантия (не падать на вырожденном/почти
-# вырожденном домене) теперь покрыта РЕАЛЬНЫМ PARAM_SET —
-# test_z_outside_zone_gets_distinct_row_from_bound (Z вне зоны) и
-# test_inverted_zone_bounds_get_distinct_rows_and_no_raise (инверсия
-# z_min/z_max) ниже.
+# Удалён, а не обновлён. Гарантию «не падать на вырожденном домене» держит
+# сторож ведущего test_t2w_lead_guards.py::test_degenerate_domain_via_param_set_does_not_raise
+# (реальные PARAM_SET, все значения равны). Два теста ниже ловят слияние строк,
+# а не деление на ноль — ревью T2.W итерация 2 показало, что они зелёные при
+# выключенном запасе `_widen_domain`.
 
 
 def test_window_close_stops_all_three_timers(qtbot):

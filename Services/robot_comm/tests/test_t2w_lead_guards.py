@@ -153,3 +153,103 @@ def test_tape_rz_outside_zone_not_flattened(qtbot):
     img = tape.grab().toImage()
     rows = {y for y in range(img.height()) for x in range(img.width()) if _close(img.pixelColor(x, y), _POINTER_RGB)}
     assert rows and max(rows) - min(rows) > 10, sorted(rows)
+
+
+# --------------------------------------------------------------------------- #
+# Сторожа по ревью T2.W, итерация 2 (находки 1–4)
+# --------------------------------------------------------------------------- #
+
+_TEXT_RGB = (0xC8, 0xC8, 0xC8)
+
+
+def _param_set(core: RobotSimCoreV2, seq: int, name: str, raw: int) -> None:
+    core.write(REG["CMD_SEQ"], [seq])
+    core.write(REG["CMD_OPCODE"], [OP["PARAM_SET"]])
+    core.write(REG["CMD_ARGC"], [2])
+    core.write(REG["CMD_ARGS"], [PARAM_ID[name], raw & 0xFFFF])
+    core.write(REG["CMD_FLAG"], [1])
+    core.tick()
+    assert core.read(REG["RES_STATUS"], 1)[0] == ACK, name
+
+
+def _text_in_rows(img, rows) -> bool:
+    return any(
+        all(abs(c - t) <= 40 for c, t in zip((p.red(), p.green(), p.blue()), _TEXT_RGB))
+        for y in rows
+        if 0 <= y < img.height()
+        for p in (img.pixelColor(x, y) for x in range(12, min(img.width(), 100)))
+    )
+
+
+def test_degenerate_domain_via_param_set_does_not_raise(qtbot):
+    """Ревью 2, находка 1: запас `_widen_domain` — единственное, что отделяет
+    вырожденный домен от ZeroDivisionError в paintEvent. Все значения равны
+    через обычные PARAM_SET (оба ACK) — refresh и grab не падают."""
+    core = RobotSimCoreV2()
+    for seq, (name, raw) in enumerate(
+        [("P_WS_RZ_MIN", -1000), ("P_WS_RZ_MAX", -1000), ("P_WS_Z_MAX", -400), ("P_WS_Z_MIN", -400),
+         ("P_PICK_Z", -400), ("P_PLACE_Z", -400)],
+        start=1,
+    ):
+        _param_set(core, seq, name, raw)
+    now = [0.0]
+    scale = ZScale(core)
+    tape = TimeTape(core, clock=lambda: now[0])
+    for widget in (scale, tape):
+        qtbot.addWidget(widget)
+        widget.resize(120, 200)
+    now[0] = 1.0
+    for widget in (scale, tape):
+        widget.refresh()
+        widget.grab()  # до правки ревью: ZeroDivisionError в paintEvent
+
+
+def test_timers_restart_after_hide_show(qtbot):
+    """Ревью 2, находка 2: окно свернули и развернули — виды снова обновляются."""
+    core = RobotSimCoreV2()
+    widgets = [SimView(core), ZScale(core), TimeTape(core)]
+    for w in widgets:
+        qtbot.addWidget(w)
+        w.show()
+        w.hide()
+    assert [w._timer.isActive() for w in widgets] == [False, False, False]  # предпосылка
+    for w in widgets:
+        w.show()
+    assert [w._timer.isActive() for w in widgets] == [True, True, True]
+
+
+def test_zscale_mark_outside_zone_gets_own_row(qtbot):
+    """Ревью 2, находка 3а: отметка вне зоны не сливается с границей."""
+    core = RobotSimCoreV2()
+    _param_set(core, 1, "P_PICK_Z", -2000)  # -200 мм, ниже z_min = -150
+    scale = ZScale(core)
+    qtbot.addWidget(scale)
+    scale.resize(120, 300)
+    scale.refresh()
+    assert round(scale.z_to_widget_y(-200.0)) != round(scale.z_to_widget_y(-150.0))
+
+
+def test_zscale_current_label_flips_above_at_bottom(qtbot):
+    """Ревью 2, находка 3б: Z на нижнем краю домена — подпись «Z» над линией,
+    а не под ней за краем виджета."""
+    core = RobotSimCoreV2()
+    _move(core, 1, 300.0, -210.0, -150.0, -100.0)
+    scale = ZScale(core)
+    qtbot.addWidget(scale)
+    scale.resize(120, 300)
+    scale.refresh()
+    y = round(scale.z_to_widget_y(-150.0))
+    assert _text_in_rows(scale.grab().toImage(), range(y - 16, y - 2))
+
+
+def test_zscale_mark_label_flips_below_at_top(qtbot):
+    """Ревью 2, находка 4: отметка на верхнем краю (P_HOME_Z = z_max = 0) —
+    подпись под линией, а не обрезана верхним краем."""
+    core = RobotSimCoreV2()
+    _param_set(core, 1, "P_HOME_Z", 0)
+    scale = ZScale(core)
+    qtbot.addWidget(scale)
+    scale.resize(120, 300)
+    scale.refresh()
+    y = round(scale.z_to_widget_y(0.0))
+    assert _text_in_rows(scale.grab().toImage(), range(y + 3, y + 16))

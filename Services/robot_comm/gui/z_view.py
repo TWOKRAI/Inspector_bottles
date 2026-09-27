@@ -189,12 +189,8 @@ class ZScale(QWidget):
                 self._paint_row(painter, z, "#8be9fd", label=name)
             # Подпись текущего Z — ПОД линией (отметки подписаны над своей): при Z,
             # равном отметке (на старте Z = home), подписи иначе легли бы одна на
-            # другую (живой снимок T2.W). Если подпись под линией вылезла бы за
-            # нижний край виджета — сверху (contract §2 "не левее x=12, столбец
-            # x=4 свободен от подписей" про горизонталь, это про вертикаль).
-            y = self.z_to_widget_y(self._z)
-            below = not (y + 14 > self.height() - 2)
-            self._paint_row(painter, self._z, "#5af78e", label="Z", below=below)
+            # другую (живой снимок T2.W).
+            self._paint_row(painter, self._z, "#5af78e", label="Z", below=True)
         finally:
             painter.end()
 
@@ -208,6 +204,13 @@ class ZScale(QWidget):
         painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
         if label:
             painter.setPen(QPen(QColor(_TEXT_COLOR)))
+            # Сторона подписи — предпочтительная, но у края домена она перекидывается
+            # на другую, иначе обрезалась бы краем виджета (ревью T2.W, итерации 1–2:
+            # Z на z_min — снизу, отметка на z_max — сверху).
+            if below and y + 14 > self.height() - 2:
+                below = False
+            elif not below and y - 16 < 0:
+                below = True
             painter.drawText(QPointF(12, y + 14 if below else y - 4), f"{label} {z:.1f}")
 
 
