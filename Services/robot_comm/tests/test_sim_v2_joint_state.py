@@ -28,10 +28,10 @@ import math
 import pytest
 
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
-from Services.robot_comm.core.protocol_v2 import ERR, KIND, OP, REASON, REG, REG_COUNT, STOP_LEVEL
+from Services.robot_comm.core.protocol_v2 import ERR, KIND, OP, REASON, REG, REG_COUNT
 from Services.robot_comm.kinematics import ScaraModel, make_model
 from Services.robot_comm.programs.geometry import Workspace, check_point
-from Services.robot_comm.server.sim_core_v2 import REG_SPACE_SIZE_V2, RobotSimCoreV2
+from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
 ACK = 1
 NAK = 2
@@ -251,15 +251,11 @@ def test_seam_target_other_hand_moves_within_step_cap():
         core.tick(TICK_S)
         cur = pose_eng(core)
         step = math.sqrt(sum((c - p) ** 2 for c, p in zip(cur[:3], prev[:3])))
-        # Допуск шире MAX_STEP_MM: капается ШАГ В СУСТАВНОМ ПРОСТРАНСТВЕ
-        # (`travelled`), а не декартов XYZ-шаг тика напрямую — рядом с
-        # вытянутой рукой fk нелинеен, декартов шаг тика может превышать
-        # MAX_STEP_MM на несколько мм при капе суставного шага (измерено:
-        # до ~33.6мм на этом сценарии). Проверяет ГРУБЫЙ разгон (степ,
-        # близкий к оставшемуся пути целиком), не точный потолок.
-        assert step <= MAX_STEP * 2, (
-            f"шаг {step:.3f}мм намного больше MAX_STEP_MM={MAX_STEP:.3f} — похоже на разгон без потолка"
-        )
+        # Решение ведущего 2026-09-27: MAX_STEP_MM — жёсткий потолок ДЕКАРТОВА
+        # смещения позы за тик (контракт §"Motion model", свойство 1 cto) и в
+        # суставном ходе тоже. На b4cbbcf3 у вытянутой руки fk нелинеен и шаг
+        # доходил до ~33.6 мм — реализация T2.J2 обязана урезать долю тика.
+        assert step <= MAX_STEP + 1e-6, f"шаг {step:.3f}мм больше MAX_STEP_MM={MAX_STEP:.3f}"
         samples.append(cur)
         prev = cur
     else:
@@ -310,7 +306,27 @@ def _hand_flip_scenario():
     return core
 
 
-_JOINTS_AT_TICK20 = (64.15531513623831, -19.329875414942137, 0.0, -44.82543972129618)
+# Концы суставного отрезка хода смены руки (ik старта при hand 0 и цели при hand 1).
+_FLIP_J_START = (-27.69602073833238, 93.60841295864459, 0.0, -65.91239222031221)
+_FLIP_J_END = (113.44189168789188, -79.93151547316329, 0.0, -33.510376214728595)
+
+
+def _lerp_fraction(joints, tol):
+    """Решение ведущего 2026-09-27: «joints() — состояние» проверяется тем, что суставы
+    лежат РОВНО на отрезке lerp j_start -> j_end (одна доля для всех осей), а не
+    литералом тика 20 — тот зависит от темпа хода (допущение A2 тестера), который
+    T2.J2 меняет урезанием доли тика по MAX_STEP_MM. ik от округлённой до 0.1 мм
+    позы уходит с отрезка на 0.008-0.027° — больше допуска 1e-3.
+    Возвращает долю. Концы — литералы ik ScaraModel() (T2.K), выписанные 2026-09-27.
+    """
+    fracs = [(j - a) / (b - a) for j, a, b in zip(joints, _FLIP_J_START, _FLIP_J_END) if abs(b - a) > 1.0]
+    for i, (j, a, b) in enumerate(zip(joints, _FLIP_J_START, _FLIP_J_END)):
+        expected = a + fracs[0] * (b - a)
+        assert j == pytest.approx(expected, abs=tol), (
+            f"сустав {i}: {j} не на отрезке lerp при доле {fracs[0]:.6f} (ожидалось {expected}) — {joints}"
+        )
+    assert 0.0 < fracs[0] < 1.0, f"доля {fracs[0]} вне хода"
+    return fracs[0]
 
 
 def test_joints_is_state_not_ik_of_pose_mid_flip():
@@ -328,9 +344,7 @@ def test_joints_is_state_not_ik_of_pose_mid_flip():
     joints = core.joints()
     assert joints is not None
     assert joints[1] < 0, "J2 обязан быть уже отрицательным (рука физически 'левая') до завершения хода"
-    assert joints == pytest.approx(_JOINTS_AT_TICK20, abs=1e-3), (
-        f"joints() обязан быть состоянием лерпа (полная точность), получено {joints}, ожидалось ~{_JOINTS_AT_TICK20}"
-    )
+    _lerp_fraction(joints, tol=1e-3)
 
 
 def test_hand_after_stop_mid_flip_follows_joints():
@@ -353,7 +367,7 @@ def test_hand_after_stop_mid_flip_follows_joints():
     joints = core.joints()
     assert joints is not None
     assert joints[1] < 0, "J2 обязан быть отрицательным на момент стопа (рука уже физически 'левая')"
-    assert joints == pytest.approx(_JOINTS_AT_TICK20, abs=0.05)
+    _lerp_fraction(joints, tol=1e-3)
     assert core.read(REG["TLM_HAND"], 1)[0] == 1, "TLM_HAND обязан следовать состоянию (знак J2), не ждать DONE"
 
     model = ScaraModel()
@@ -386,7 +400,7 @@ def test_hand_after_stop_mid_flip_follows_joints():
     assert res_joint["status"] == ACK, res_joint
     pos_after = pose_eng(core)
     jump = math.sqrt(sum((a - b) ** 2 for a, b in zip(pos_after[:3], pos_before[:3])))
-    assert jump <= MAX_STEP + 1.0, f"первый тик JOINT не должен прыгать: {jump:.2f}мм"
+    assert jump <= MAX_STEP + 1e-6, f"первый тик JOINT не должен прыгать: {jump:.2f}мм"
 
 
 # =========================================================================== #
@@ -520,13 +534,9 @@ def test_explicit_large_dt_capped_in_joint_move():
     assert core.read(REG["TLM_ACTIVITY"], 1)[0] != 0, "огромный dt не должен завершать ход за один тик"
     pos_after_big = pose_eng(core)
     step = math.sqrt(sum((a - b) ** 2 for a, b in zip(pos_after_big[:3], pos_after_ack[:3])))
-    # Допуск шире MAX_STEP_MM (см. комментарий в test_seam_target_other_hand_moves_within_step_cap:
-    # декартов XYZ-шаг тика при капе суставного пути слегка превышает MAX_STEP_MM
-    # из-за нелинейности fk); ход целиком 150мм, поэтому "разгон без потолка"
-    # отличим с большим запасом от честного капа.
-    assert step <= MAX_STEP * 2, (
-        f"шаг за явный тик(1.0) намного больше MAX_STEP_MM={MAX_STEP:.3f}, получено {step:.3f} — похоже на разгон без потолка"
-    )
+    # Жёсткий потолок декартова шага и в суставном ходе (решение ведущего 2026-09-27,
+    # см. test_seam_target_other_hand_moves_within_step_cap); на b4cbbcf3 — 34.97 мм.
+    assert step <= MAX_STEP + 1e-6, f"шаг за явный тик(1.0) больше MAX_STEP_MM={MAX_STEP:.3f}: {step:.3f}"
 
 
 # =========================================================================== #
@@ -622,7 +632,7 @@ def test_line_keeps_joint_state_in_sync():
     assert res_j["status"] == ACK, res_j
     pos_after = pose_eng(core)
     jump = math.sqrt(sum((a - b) ** 2 for a, b in zip(pos_after[:3], pos_before[:3])))
-    assert jump <= MAX_STEP + 1.0
+    assert jump <= MAX_STEP + 1e-6
 
     # Рестарт посреди хода: новый core с теми же regs обязан вернуть joints(),
     # согласованные с ik(текущей позы, текущего TLM_HAND) — не дефолт/None.
