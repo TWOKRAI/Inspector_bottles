@@ -28,8 +28,8 @@ class ScenePreset(BaseModel):
 
     Pre (from_dict): хотя бы одно из `catalog_dir`/`layers` задано (иначе нечего
     рисовать); в `layers` `sprite_source` — строка-id; `angle_range_deg`: lo <= hi.
-    Post: `from_dict(p.to_dict()) == p`; `from_yaml(to_yaml(p, f))` равен `p` с `base_dir` = каталог `f`
-    (содержимое то же, относительные пути пересчитаны от нового места).
+    Post: `from_dict(p.to_dict()) == p`; `from_yaml(to_yaml(p, f))` с `f` в каталоге `p.base_dir` равен `p`;
+    при `f` в другом каталоге равенства нет (пути пересчитаны), но грузятся те же картинки.
 
     `base_dir` (Task 1.0, LS-013) — каталог, от которого резолвятся относительные
     `catalog_dir`/`layers[*].sprite_source` (`resolve_path()`); `None` — резолвить
@@ -142,7 +142,8 @@ class ScenePreset(BaseModel):
         data.pop("base_dir", None)
 
         if self.base_dir is not None:
-            base_dir = Path(self.base_dir)
+            # resolve(): иначе relpath от симлинка (/tmp -> /private/tmp) даёт ../../../../tmp/... (ревью 1.0)
+            base_dir = Path(self.base_dir).resolve()
             target_dir = Path(path).parent.resolve()
             if base_dir.resolve() != target_dir:
                 data["catalog_dir"] = self._rebase_value(data.get("catalog_dir"), base_dir, target_dir)

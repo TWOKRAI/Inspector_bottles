@@ -264,3 +264,30 @@ def test_save_as_on_windows_writes_forward_slashes(monkeypatch: pytest.MonkeyPat
     preset.to_yaml(b_dir / "q.yaml")
     written = yaml.safe_load((b_dir / "q.yaml").read_text(encoding="utf-8"))
     assert written["catalog_dir"] == "../A/sprites"
+
+
+def test_save_as_from_symlinked_base_dir_writes_short_relative_path(tmp_path: Path) -> None:
+    """Ревью 1.0, SHOULD-1: `base_dir` через симлинк (как /tmp -> /private/tmp на macOS),
+    цель — в реальном каталоге. Путь в YAML обязан быть `../A/sprites`, а не обходом через
+    корень файловой системы, который ломается при переносе папки."""
+    real = tmp_path / "real"
+    (real / "A").mkdir(parents=True)
+    (real / "B").mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    preset = ScenePreset.from_dict({"catalog_dir": "sprites", "base_dir": str(alias / "A")})
+    preset.to_yaml(real / "B" / "q.yaml")
+    written = yaml.safe_load((real / "B" / "q.yaml").read_text(encoding="utf-8"))
+    assert written["catalog_dir"] == "../A/sprites"
+
+
+def test_from_yaml_by_relative_path_survives_chdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ревью 1.0, SHOULD-2: `from_yaml("A/p.yaml")` относительным путём, затем смена
+    текущего каталога — фабрика всё равно находит картинки (base_dir зафиксирован абсолютным)."""
+    _build_catalog(tmp_path / "A")
+    monkeypatch.chdir(tmp_path)
+    preset = ScenePreset.from_yaml("A/p.yaml")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert ObjectFactory(preset).num_classes == 2
