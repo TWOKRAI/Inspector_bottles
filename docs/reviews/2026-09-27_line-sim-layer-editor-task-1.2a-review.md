@@ -108,3 +108,105 @@ max 192.2 мс (5 прогонов). Из второго потока (толь�
 - Пороги S1 (сколько мс превью допустимо на живой ленте) — решение лида/владельца; я дал числа, не норму.
 - Эксплуатация S3 зависит от маршрутов 1.2h, которых ещё нет.
 - Free-threaded CPython (3.13t) не проверял: атомарность `deque.append/popleft` держу на GIL.
+
+---
+
+## Итерация 2 (2026-09-27)
+
+**Вердикт: APPROVED с условием.** S1–S4, N2, N3 закрыты воспроизведением. Новое: F1 (SHOULD, фреймворк) — закрыть до
+слияния ветки отдельным коммитом; остальное — NIT/D.
+
+- Скоуп: `git diff 30197303..8245de31 -- Services/line_sim Plugins/sim multiprocess_framework/modules/recipe apps/line_sim`
+  (22 файла, +1317/−325).
+- Радиус: `pytest Services/line_sim/tests Plugins/sim multiprocess_framework/modules/recipe/tests apps/line_sim -q` →
+  `659 passed, 7 skipped in 133.46s`. Прототипные вызывающие `yaml_io` (`multiprocess_prototype/recipes/tests`,
+  `adapters/tests/test_recipe_store.py`, `test_catalogs.py`, `test_integration_assembly.py`,
+  `frontend/.../pipeline/tests/test_save_recipe.py`, `frontend/.../recipes/tests`, `domain/tests/test_commands_apply.py`) →
+  `303 passed, 9 skipped`. `ruff check -q` на изменённых `.py` — чисто.
+- Инъекции L1–L7 лида не повторял. Скретч — фикстуры it.1 (Arial 300 px), но картинки перенесены В каталог пресета:
+  ограда S3 (правильно) отвергает `../letters_font` вне корня репозитория — см. N7.
+
+### Закрытие находок it.1
+
+| # | Вход | Наблюдение it.2 | Итог |
+|---|---|---|---|
+| S1 | `SceneSourcePlugin.commands` | `preset.commit, preset.get, scene.job_done, scene.status, truth.reset, truth.status`; `LayerPreviewPlugin.commands` = `preset.preview` | закрыто |
+| S1 | `layer_preview`, `{}` (8×160) | cold 146.9 мс, warm медиана 87.9 мс, JSON 79 242 Б | — |
+| S1 | 16×160 / 16×256 / 9×160 / 16×114 | `bad_request` `len(seeds) * tile_px**2 = … > 204800`, 0.0 мс | бюджет работает |
+| S1 | 16×113 | ok, 167.8 мс, JSON 100 292 Б | максимум JSON — не дефолт |
+| S1 | спрайты 1200 px, `{}` | ok, warm медиана 1 269 мс | бюджет ограничивает тайл, не `make()` — N8 |
+| S1 живой | 10× `camera scene.status` в покое и 10× на фоне непрерывных `layers preset.preview` | медиана 12.4 → 12.6 мс, max 21.8 → 16.1 мс | поток `camera` свободен |
+| S2 | опечатка `typo_disk.png`, commit исправленного | `get.engine: False`; commit → `{ok, changed: True, applied: False, message: 'движок не запущен — применится после перезапуска'}`; файл переписан, опечатки нет, `_pending_factory` пуст | закрыто |
+| S3 | `sprite_source` = абс. путь вне, `../../outside/…`, `/etc/hosts`, `/nonexistent/x.png`; `catalog_dir=/etc`; симлинк в каталоге пресета → наружу | commit и preview: `invalid`, один текст `preset: путь изображения вне разрешённых каталогов (…)`; путь внутри каталога — ok | закрыто, оракула нет |
+| S4 | `get` → `commit` без правок | `{ok, rev, changed: False}`, байты и `mtime_ns` те же, фабрика не отдана | закрыто |
+| S4 | правка только `defect_probability` | diff файла — одна строка `0.0 → 0.5`, `#`-строк 38 → 38 | закрыто |
+| S4 | правка `layers[0].color_rgb` | `#`-строк 38 → 23 (комментарии внутри `layers` уходят — задокументировано) | как заявлено |
+| N2 | `os.replace` → `os._exit(9)` | остался `.letters_layered.yaml.113rh6ny.tmp` (0600), `glob("*.yaml")` его не видит | закрыто |
+| N3 | 0444 + правка | `{error, io_error, 'preset.commit: файл только для чтения: …'}`, файл цел | закрыто |
+
+### Живой стенд
+
+`BackendHarness(build_app(apps/line_sim/app.yaml), port=8766)`; каталог — временный симлинк `data/line_sim/letter_catalog` →
+главное дерево (удалён после прогона; порты 8766/5021/8091/8092 после стопа свободны; `errors.log`/`warnings.log`/
+`critical.log` — 0 строк). Старт 1.6 с, стоп 1.1 с, 5 процессов.
+
+- `layers preset.preview {}` через роутер: ok, 132 мс холодный / 80 мс, PNG 160×1280, 8 тайлов (`Г, О, Х`); ответ с
+  конвертом — 119 917 Б JSON. 16×113: ok, 147 мс, 136 916 Б. 16×160: `bad_request`, 9 мс. Ответы 120–137 КБ прошли без ошибок.
+- `camera preset.get` → `ok, path: None, engine: True`, `catalog_dir` — разрешённый путь ГЛАВНОГО дерева; тот же пресет в
+  `layers preset.preview` → `invalid` (вне корня worktree) — N7.
+
+### Новые находки
+
+**F1 (SHOULD, architecture, фреймворк) — `update_yaml_preserving` / `update_blueprint_metadata_preserving` сменили
+контракт для всех вызывающих.** Одинаковые входы, `957ee7ec^` против HEAD:
+
+| Вход | old | new |
+|---|---|---|
+| файл — симлинк на `real/r.yaml`, `{a: 2}` | ссылка жива, цель `a: 2` | ссылка заменена обычным файлом `a: 2`, цель осталась `a: 1` |
+| файл 0444 | `PermissionError` | записан молча, mode 0444 |
+| жёсткая ссылка `h.yaml` | обе `a: 2` | `r.yaml a: 2`, `h.yaml a: 1`, `nlink=1` |
+| каталог 0555, файл 0644 | записан | `PermissionError` (mkstemp) |
+| новый файл, umask 022 / 077 | 0644 / 0600 | 0644 / 0600 — без изменений |
+| значение без представления | файл обнулён `''` | файл цел `'a: 1\n'` — улучшение |
+
+Вызывающие: `RecipeStore` (3 места), миграции `displays_to_recipe` / `drop_display_name`, дефолтный `_yaml_updater`
+`RecipeManager`, `scene_source`. Жертв сегодня нет: в `multiprocess_prototype`, `apps`, `data`, `Services` главного
+дерева 0 YAML-симлинков, 0 read-only, 0 с `nlink>1` (`find`). Защиту 0444 `scene_source` вернул себе (`os.access`),
+остальные вызывающие её потеряли; в `recipe/README.md` / `DECISIONS.md` смены нет, симлинк упомянут только в README
+`scene_source`. Исправить в `_dump_atomic`: `path = Path(os.path.realpath(path))` до записи (пишем цель, ссылка жива) и
+`os.access(path, os.W_OK)` → `PermissionError` (старый контракт; проверка в `scene_source` станет дублем). Hard link и
+ro-каталог — строка в докстринге. Два теста в `recipe/tests/test_yaml_io.py` (симлинк, 0444), строка в
+`recipe/DECISIONS.md`.
+
+**Условие APPROVED:** F1 закрыть до слияния ветки отдельным коммитом — латентно (0 жертв), 1.2a им не блокируется. Если
+лид считает иначе — это CHANGES REQUESTED, третья итерация → teamlead.
+
+### NIT / D
+
+- **N7 — ограда отвергает пути самого файла, если картинки вне корня репозитория через `../` или симлинк наружу.**
+  Вход: пресет вне репо с `catalog_dir: ../letters_font`, `get` → `commit` без правок → `invalid` (первый прогон скретча
+  it.2). Живой: worktree + симлинк `data/line_sim/letter_catalog` → `get.preset` → `preview` → `invalid`. Главное дерево
+  не затронуто (`data/line_sim` — обычный каталог). Строка в `Services/line_sim/presets/README.md`: «картинки — в корне
+  репозитория или каталоге пресета; симлинки разрешаются по цели».
+- **N8 — бюджет ограничивает тайл, не цену рендера:** 1200-px спрайты — 1.27 с на превью (теперь на `layers`, камеру не
+  держит). «~88 мс» в README `layer_preview` — для Arial 300 px; дописать зависимость от размера спрайтов.
+- **N9 — `apps/line_sim/pipeline.yaml`:** шапка «три процесса» и `description` устарели (процессов 5). Блок `layers`
+  верный: `category: control`, без `chain_targets` / `wires` / `observability` — как `pult`; живьём поднялся, логи ошибок
+  пусты. Дубль `preset_path` / `defect_probability` дешевле всего снять YAML-якорем (`preset_path: &scene_preset …` в
+  `camera`, `preset_path: *scene_preset` в `layers`; так же `defect_probability`) — `yaml.safe_load` его разворачивает
+  (проверено); `test_camera_alone_serves_frames` делает `safe_load` → `safe_dump`, якорь развернётся — безвредно.
+- **N10 — tmp после kill не убирает никто** (`.…tmp` скрыт, но копится). Не чинить сейчас.
+- **D3 — README `scene_source` противоречит себе:** «Движок не собрался при `configure` → `commit` = `invalid`» (пункт
+  «Горячая подмена») против «файл пишется, `applied: false`» ниже; таблица команд без `engine` в `get` и без `changed` /
+  `applied` / `message` в `commit`.
+- **D4 (D2 it.1 закрыт наполовину) — размер ответа (L-6) в README `layer_preview` не записан; DONE-блок плана
+  (`plans/line-sim-layer-editor.md:242`) всё ещё «≈ 12 КБ, ≈ 12 мс».** Реальные: ответ плагина 79 КБ / с конвертом роутера
+  120 КБ, 88 мс; максимум 100 / 137 КБ (16×113).
+
+### Что не проверено (it.2)
+
+- Инъекции L1–L7 не повторял; у F1 нет теста — инжектировать нечего.
+- Живьём — каталожный пресет, не `.yaml`: `preset.commit` через роутер и перечитывание файла `layers` после commit вживую
+  не вызывал (только фейковый ctx).
+- Влияние 1.3-секундного превью (крупные спрайты) на heartbeat/supervision процесса `layers` не мерил.
+- Проверка 0444 через `os.access` не видит immutable-флаг (`chflags uchg`) и ACL — не проверял.
