@@ -129,8 +129,8 @@ def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: floa
     final_bbox = _alpha_bbox(final_mask)
     assert final_bbox is not None, f"перерендер {font_path.name}/{letter!r} дал пустую маску при size={final_font_size}"
     fy0, fy1, fx0, fx1 = final_bbox
-    width = fx1 - fx0 + 1
-    if width > size_px:  # масштаб по высоте; широкая буква молча обрезалась бы по бокам (ревью 1.1b)
+    width = max(fx1 - fx0 + 1, fy1 - fy0 + 1)  # и высота: --letter-frac > 1 (ревью 1.1b it.2, NIT-7)
+    if width >= size_px:  # масштаб по высоте; широкая буква молча обрезалась бы по бокам (ревью 1.1b)
         raise SystemExit(
             f"make_font_letters: шрифт {font_path.name}, буква {letter!r}: ширина {width} px > size_px {size_px} "
             "— уменьшите --letter-frac"
