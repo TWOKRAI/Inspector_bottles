@@ -209,7 +209,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
             spawner_kwargs = {"interval_s": (float(interval_cfg[0]), float(interval_cfg[1]))}
 
         scene_length_mm = float(cfg.get("scene_length_mm", (self._width / max(px_per_mm, 1e-9)) * 2.0))
-        defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
         preset_path = self._resolve_preset_path(cfg.get("preset_path"))
         seed = int(cfg.get("seed", _DEFAULT_SEED))
 
@@ -251,7 +250,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
         try:
-            preset = ScenePreset(catalog_dir=preset_path, defect_probability=defect_probability)
+            preset = self._build_preset(preset_path, cfg)
             factory = ObjectFactory(preset)
             self._spawner = ObjectSpawner(factory, scene_length_mm=scene_length_mm, **spawner_kwargs)
             self._compositor = SceneCompositor(
@@ -288,6 +287,34 @@ class SceneSourcePlugin(ProcessModulePlugin):
         if preset_path is None or Path(preset_path).is_absolute():
             return preset_path
         return str((_REPO_ROOT / preset_path).resolve())
+
+    @staticmethod
+    def _build_preset(preset_path: str | None, cfg: dict[str, Any]) -> ScenePreset:
+        """Собрать `ScenePreset` из уже РЕЗОЛВЛЕННОГО `preset_path` (см. `_resolve_preset_path`).
+
+        `preset_path`, оканчивающийся `.yaml`/`.yml` (Task 1.1b, блок D2) — файл пресета
+        слоёв: `ScenePreset.from_yaml` сам резолвит СВОИ относительные пути (`catalog_dir`,
+        `layers[*].sprite_source`) от каталога файла (`base_dir`) — независимо от того,
+        что `preset_path` сюда уже пришёл абсолютным. Явный `defect_probability` в
+        конфиге стенда переопределяет значение файла — через
+        `from_dict({**p.to_dict(), "defect_probability": ...})`, чтобы отработали
+        валидаторы пресета (frozen-модель, поле не подменяется напрямую); ключа в
+        конфиге нет — значение файла остаётся как есть.
+
+        Иначе (нет пресета, каталог классов `SpriteCatalog`, произвольный путь без
+        расширения `.yaml`/`.yml`) — прежняя семантика: `ScenePreset(catalog_dir=...,
+        defect_probability=...)`, дефолт `_DEFAULT_DEFECT_PROBABILITY`, если ключа
+        нет в конфиге.
+        """
+        if preset_path is not None and preset_path.endswith((".yaml", ".yml")):
+            preset = ScenePreset.from_yaml(preset_path)
+            if "defect_probability" in cfg:
+                preset = ScenePreset.from_dict(
+                    {**preset.to_dict(), "defect_probability": float(cfg["defect_probability"])}
+                )
+            return preset
+        defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
+        return ScenePreset(catalog_dir=preset_path, defect_probability=defect_probability)
 
     def _load_background_tile(self, ctx: PluginContext, texture_path: str | None) -> np.ndarray | None:
         """Загрузить фон-текстуру (Task 3.6): `None` -> `None`; путь резолвится от

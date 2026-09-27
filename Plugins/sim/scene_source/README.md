@@ -40,7 +40,7 @@ Source-плагин (форма — [`Plugins/sources/synthetic_frame_source`](.
 | `spawn_spacing_mm` | нет | диапазон шага спавна по пути ленты, мм (`ObjectSpawner(spacing_mm=...)`, Task 3.3a) |
 | `scene_length_mm` | `(resolution_width / px_per_mm) * 2` | длина видимой зоны — за ней объект деспавнится |
 | `defect_probability` | `0.0` | вероятность дефект-слоя `"damaged"` (Task 3.2) |
-| `preset_path` | нет (движок недоступен) | путь к каталогу классов (`Services.dataset_gen.core.catalog.SpriteCatalog`) |
+| `preset_path` | нет (движок недоступен) | путь к каталогу классов (`Services.dataset_gen.core.catalog.SpriteCatalog`) ИЛИ (Task 1.1b, блок D2) к файлу пресета слоёв `.yaml`/`.yml` (`ScenePreset.from_yaml`, например `Services/line_sim/presets/letters_layered.yaml`) — по расширению пути. Файл-пресет резолвит СВОИ относительные пути (`catalog_dir`, `layers[*].sprite_source`) от своего каталога; конфиг-ключ `defect_probability` явно заданный в стенде переопределяет значение файла (через `ScenePreset.from_dict`, валидаторы отрабатывают), не заданный — оставляет значение файла как есть |
 | `stale_ms` | `500` | порог протухания значения мира (мс) |
 | `seed` | `0` | seed `np.random.default_rng` движка (класс/угол/дефект объектов) |
 | `camera_id` | `0` | попадает в `item["camera_id"]` (форма как у боевых источников) |
