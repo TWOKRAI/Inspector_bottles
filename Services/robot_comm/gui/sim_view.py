@@ -98,7 +98,9 @@ class SimView(QWidget):
         """Пересчитать цепи/статус/шлейф из ``core`` и запросить перерисовку."""
         self._chains = self._compute_chains()
         self._status = self._compute_status()
-        self._trail.append(self._tool_xy())
+        xy = self._tool_xy()
+        if not self._trail or self._trail[-1] != xy:  # в простое след не вытесняется повторами одной точки
+            self._trail.append(xy)
         self.update()
 
     def scene_chains(self) -> list[list[tuple[float, float]]]:
@@ -209,6 +211,13 @@ class SimView(QWidget):
             top_left = self._to_widget(-r, r)
             bottom_right = self._to_widget(r, -r)
             painter.drawEllipse(QRectF(top_left, bottom_right))
+        span = ws.ang_max - ws.ang_min
+        if span < 360.0:  # запретный сектор J1 — полупрозрачным клином, чтобы запрет был виден сразу
+            top_left = self._to_widget(-ws.r_max, ws.r_max)
+            bottom_right = self._to_widget(ws.r_max, -ws.r_max)
+            painter.setBrush(QColor(200, 60, 60, 50))
+            painter.drawPie(QRectF(top_left, bottom_right), round(ws.ang_max * 16), round((360.0 - span) * 16))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
         for angle in (ws.ang_min, ws.ang_max):
             rad = math.radians(angle)
             end = self._to_widget(ws.r_max * math.cos(rad), ws.r_max * math.sin(rad))

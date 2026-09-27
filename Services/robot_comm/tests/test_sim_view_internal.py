@@ -138,7 +138,8 @@ def test_demo_driver_seq_never_repeats_stale_res_seq_after_boot():
     """core создан с УЖЕ непустым RES_SEQ (симуляция рестарта программы) —
     первая же команда DemoDriver.goto() не должна писать CMD_SEQ, равный
     этому старому RES_SEQ (иначе core счёл бы её повтором и не исполнил)."""
-    stale_seq = 42
+    # 1, а не произвольное число: водитель, начавший счёт с 0 вместо RES_SEQ, напишет именно 1 (инъекция ведущего).
+    stale_seq = 1
     regs = [0] * REG_SPACE_SIZE_V2
     regs[REG["RES_SEQ"]] = stale_seq
     core = RobotSimCoreV2(regs=regs, fw_build=FW_BUILD)
@@ -194,3 +195,27 @@ def test_demo_driver_stop_value_differs_from_stale_register_content():
     driver = DemoDriver(core)
     driver.stop()
     assert core.read(REG["STOP_REQ"], 1)[0] != STOP_LEVEL["HARD"]
+
+
+def test_demo_driver_goto_keeps_current_z_and_rz():
+    """Клик двигает только XY: Z и RZ цели — текущие (инъекция ведущего: Z=0 в goto оставляла всё зелёным)."""
+    core = fresh_core()
+    z0, rz0 = core._read_pose_eng()[2:]
+    driver = DemoDriver(core)
+    driver.goto(200.0, 100.0)
+    for _ in range(2000):
+        core.tick(0.01)
+        if core.read(REG["TLM_MOVING"], 1)[0] == 0 and core.read(REG["TLM_DONE_SEQ"], 1)[0] != 0:
+            break
+    x, y, z, rz = core._read_pose_eng()
+    assert (x, y) == (200.0, 100.0)
+    assert (z, rz) == (z0, rz0) == (-40.0, -100.0)
+
+
+def test_trail_not_flushed_by_idle_refreshes():
+    """В простое след не вытесняется повторами: 500 refresh() без движения — одна точка, не 200 одинаковых."""
+    core = fresh_core()
+    view = SimView(core)
+    for _ in range(500):
+        view.refresh()
+    assert len(view._trail) == 1
