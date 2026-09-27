@@ -266,3 +266,34 @@ def test_restart_mid_jog_leaves_moving_and_activity_zero():
     restarted.tick()
     assert restarted.read(REG["TLM_X"], 1)[0] == x_before
     assert restarted.read(REG["TLM_ACTIVITY"], 1)[0] == 0
+
+
+def test_fault_during_soft_pending_does_not_leak_stop_into_next_move():
+    """Опасность (найдена ведущим T2.2 запуском): отложенный SOFT пережил обрыв команды аварией.
+
+    Без сброса ожидающего SOFT при любом обрыве следующий, уже новый ход доезжал до
+    цели и заканчивался E_ABORTED вместо DONE, а эхо SOFT приходило только тогда.
+    Воспроизведение до правки: DONE_SEQ=0, ERR_SEQ=3, ERRNO=13, STOP_ACK=5 после хода seq 3.
+    """
+    core = fresh_core()
+    servo_on(core, 1)
+    _start_long_ptp(core, 2)
+    core.tick()
+    soft = 4 * 1 + STOP_LEVEL["SOFT"]  # seq стопа 1, уровень SOFT -> 5
+    core.write(REG["STOP_REQ"], [soft])
+    core.tick()
+    assert core.read(REG["TLM_STOP_ACK"], 1)[0] == 0  # SOFT ещё ждёт конца хода
+
+    core.inject_motion_fault()
+    # команда закончилась аварией -> ожидавший SOFT считается обработанным
+    assert core.read(REG["TLM_STOP_ACK"], 1)[0] == 5
+    assert cmd(core, 3, OP["CLEAR_ERR"])["status"] == ACK
+    evt_before = core.read(REG["TLM_ERR_EVT"], 1)[0]
+
+    hx, hy, hz, hrz = home_target()
+    assert cmd(core, 4, OP["PTP_MOVE"], hx + mm(50.0), hy, hz, hrz, KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+
+    assert core.read(REG["TLM_DONE_SEQ"], 1)[0] == 4
+    assert core.read(REG["TLM_ERR_EVT"], 1)[0] == evt_before  # ни одного лишнего события
+    assert core.read(REG["TLM_STOP_ACK"], 1)[0] == 5

@@ -343,13 +343,20 @@ class RobotSimCoreV2:
         self.regs[REG["TLM_STOP_ACK"]] = value
 
     def _abort(self, errno: int, seq: int, *, fault: bool = False) -> None:
-        """Оборвать активную команду: поза замирает (не трогается здесь), одно событие ERR_EVT (И5)."""
+        """Оборвать активную команду: поза замирает (не трогается здесь), одно событие ERR_EVT (И5).
+
+        Ожидающий SOFT снимается при ЛЮБОМ обрыве и получает эхо в STOP_ACK после
+        события: команды, которую он ждал, больше нет (иначе он «съел» бы следующий ход).
+        """
+        pending, self._pending_soft = self._pending_soft, None
         self.regs[REG["TLM_ACTIVITY"]] = TLM_ACTIVITY_FAULT if fault else TLM_ACTIVITY_IDLE
         self.regs[REG["TLM_MOVING"]] = 0
         self.regs[REG["TLM_ERR_SEQ"]] = seq
         self.regs[REG["TLM_ERRNO_LAST"]] = errno
         self.regs[REG["TLM_ERR_EVT"]] = (self.regs[REG["TLM_ERR_EVT"]] + 1) & 0xFFFF
         self._active = None
+        if pending is not None:
+            self.regs[REG["TLM_STOP_ACK"]] = pending
 
     def _finish_done(self, active: dict) -> None:
         """Штатное завершение (не ошибка): ACTIVITY/MOVING, [HAND если JOINT], DONE_SEQ последним (И5)."""
@@ -401,10 +408,7 @@ class RobotSimCoreV2:
         self._write_pose(new_pos)
         if new_pos == target:
             if self._pending_soft is not None:
-                pending = self._pending_soft
-                self._pending_soft = None
-                self._abort(ERR["E_ABORTED"], active["seq"])
-                self.regs[REG["TLM_STOP_ACK"]] = pending
+                self._abort(ERR["E_ABORTED"], active["seq"])  # эхо отложенного SOFT пишет _abort
             else:
                 self._finish_done(active)
 
