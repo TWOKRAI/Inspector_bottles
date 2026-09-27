@@ -1,4 +1,4 @@
-# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (5169ff20)
+# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (95dbf367)
 # не править руками; python -m Services.robot_comm.codegen
 
 REG = {
@@ -243,7 +243,7 @@ OP_SPEC = {
         'busy': 'deny',
         'args': [
             {
-                'name': True,
+                'name': 'on',
                 'type': 'u16',
             },
         ],

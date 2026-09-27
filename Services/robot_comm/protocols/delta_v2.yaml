@@ -537,7 +537,7 @@ opcodes:
   JOG_CONT: {code: 0x13, argc: 2, busy: deny, args: [{name: direction, type: u16}, {name: speed, type: u16}], result: done_seq, info: "направление (1 X+/2 X-/3 Y+/4 Y-/5 Z+/6 Z-/7 RZ+/8 RZ-), скорость <= P_JOG_CONT_MAX; едет, пока растёт JOG_LEASE; итог DONE_SEQ"}
   CVT_JOB: {code: 0x20, argc: 10, busy: deny, args: [{name: ecap_lo, type: dw_lo}, {name: ecap_hi, type: dw_hi}, {name: pick_x, type: s16}, {name: pick_y, type: s16}, {name: pick_z, type: s16}, {name: flags, type: u16}, {name: place_x, type: s16}, {name: place_y, type: s16}, {name: place_z, type: s16}, {name: place_rz, type: s16}], result: done_seq, info: "ecap_lo, ecap_hi (DW на ARG0/1), pick_x, pick_y, pick_z, flags, place_x, place_y, place_z, place_rz; итог DONE_SEQ; промах -> async E_ZONE_TRIP"}
   SC_RUN: {code: 0x30, argc: 3, busy: deny, args: [{name: count, type: u16}, {name: sc_id, type: u16}, {name: offset, type: u16}], result: done_seq, info: "count (1..SC_CAP), sc_id, offset; итог DONE_SEQ + TLM_SC_DONE_N"}
-  SERVO: {code: 0x41, argc: 1, busy: deny, args: [{name: on, type: u16}], result: instant, info: "0 off / 1 on; мгновенно"}
+  SERVO: {code: 0x41, argc: 1, busy: deny, args: [{name: "on", type: u16}], result: instant, info: "0 off / 1 on; мгновенно"}
   DO_SET: {code: 0x42, argc: 2, busy: deny, args: [{name: channel, type: u16}, {name: value, type: u16}], result: instant, info: "канал 1..16, значение 0/1; мгновенно; TLM_DO_MASK"}
   PARAM_SET: {code: 0x50, argc: 2, busy: by_class, args: [{name: id, type: u16}, {name: value, type: raw}], result: instant, info: "id, value (сырое; знак — по словарю); мгновенно; зеркало"}
   PARAM_GET: {code: 0x51, argc: 1, busy: allow, args: [{name: id, type: u16}], result: rvals, info: "id; rval0 = value"}
