@@ -115,8 +115,8 @@
 **014** GUI — пакет `robot.*` сервиса, данные в `RobotDataStore`, несколько роботов. Каждый: контекст,
 решение, последствия, отвергнутые альтернативы (из plan.md §10 и changes-rev2.md). RC-011/012 явно фиксируют
 отмену RC-006 в части «без пинг-понга» (владелец тогда просил «не сломай рисование»: пинг-понг v2 режет только
-на EXACT-точках, где робот и так стоит). `scripts.sync` не индексирует `Services/*/DECISIONS.md` — ссылки в
-`multiprocess_framework/DECISIONS.md` добавить руками; затем `python scripts/validate.py`.
+на EXACT-точках, где робот и так стоит). `scripts.sync` не индексирует `Services/*/DECISIONS.md` — ADR сервиса перечисляются в колонке ADR
+`Services/STATUS.md`; затем `python scripts/validate.py`.
 
 ### T0.3 — Отчёт пробы → контракт (ведущий + tech-writer, Layer: docs)
 
