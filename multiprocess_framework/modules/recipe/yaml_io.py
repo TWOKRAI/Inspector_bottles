@@ -9,6 +9,9 @@ Generic comment-preserving writer модуля `recipe` (C3, ADR-RCP-005). Ра�
   - рецепты (``recipes/*.yaml``) — заголовок-док + per-node комментарии;
   - главный конфиг ``app.yaml`` — persist активного pipeline без потери комментариев.
 
+Запись атомарна (буфер -> ``service._atomic_write``: tmp + fsync + ``os.replace``),
+права файла сохраняются — см. ``_dump_atomic``.
+
 Контракт ``update_yaml_preserving``: обновляет ТОЛЬКО указанные top-level ключи
 существующего файла, не трогая остальное (комментарии, порядок, заголовок).
 Замена значения ключа сохраняет комментарий, привязанный к самому ключу; теряются
@@ -26,6 +29,9 @@ ruamel импортируется лениво (внутри функции): м
 
 from __future__ import annotations
 
+import io
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -78,8 +84,37 @@ def update_yaml_preserving(path: str | Path, updates: dict[str, Any]) -> None:
         data[key] = value
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        yaml.dump(data, f)
+    _dump_atomic(yaml, data, path)
+
+
+def _dump_atomic(yaml, data: Any, path: Path) -> None:
+    """Сериализовать в буфер и записать через ``service._atomic_write`` (tmp в том же
+    каталоге + fsync + ``os.replace``; при сбое tmp убирается, старый файл цел).
+
+    Сбой сериализации (ruamel не представил значение) случается ДО открытия файла —
+    файл не тронут вовсе. Права файла сохраняются: ``mkstemp`` создаёт tmp с 0600,
+    поэтому после замены mode исходного файла возвращается ``chmod``. Нового файла нет —
+    сначала ``touch`` (mode по umask процесса, как прежний ``open("w")``), при сбое он
+    удаляется.
+    ponytail: chmod ПОСЛЕ ``os.replace`` — между заменой и chmod файл виден с 0600
+    (читатель-другой пользователь получит EACCES на микросекунды); убрать окно —
+    copymode на tmp внутри ``_atomic_write`` (service.py)."""
+    from .service import _atomic_write
+
+    buf = io.StringIO()
+    yaml.dump(data, buf)
+    raw = buf.getvalue().encode("utf-8")
+    created = not path.exists()
+    if created:
+        path.touch()
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        _atomic_write(path, raw)
+        os.chmod(path, mode)
+    except BaseException:
+        if created:
+            path.unlink(missing_ok=True)
+        raise
 
 
 def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dict[str, Any]) -> None:
@@ -121,5 +156,4 @@ def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dic
     for key, value in metadata_updates.items():
         meta[key] = value
 
-    with path.open("w", encoding="utf-8") as f:
-        yaml.dump(doc, f)
+    _dump_atomic(yaml, doc, path)

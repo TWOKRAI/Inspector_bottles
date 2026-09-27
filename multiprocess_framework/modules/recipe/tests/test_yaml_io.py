@@ -209,3 +209,98 @@ def test_update_yaml_preserving_keeps_legacy_top_level_gui_positions(tmp_path):
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     # Фактическое поведение: top-level дубль на диске ОСТАЛСЯ (writer не удаляет).
     assert data["gui_positions"] == {"stale.node": [1.0, 2.0]}
+
+
+# ---------------------------------------------------------------------------
+# Атомарность записи (line-sim-layer-editor, Task 1.2a, ревью it.1): запись идёт
+# через service._atomic_write — сбой посреди записи оставляет старый файл и не
+# оставляет tmp рядом; права файла не меняются; комментарии нетронутых ключей живы.
+# ---------------------------------------------------------------------------
+
+_COMMENTED = textwrap.dedent(
+    """\
+    # заголовок файла
+    name: demo  # имя
+    # комментарий перед version
+    version: 3
+    """
+)
+
+
+def test_update_yaml_preserving_is_atomic_on_failure(tmp_path, monkeypatch):
+    """Сбой ПОСЛЕ записи байт во tmp (fsync / replace): файл побайтно прежний, в каталоге
+    только он сам. Прежняя запись ``open("w")`` усекала файл до сериализации — здесь было бы
+    пусто/полфайла или (при сбое replace) прежний файл, но без гарантии на fsync-сбое."""
+    import os
+
+    path = tmp_path / "r.yaml"
+    path.write_text(_COMMENTED, encoding="utf-8")
+    before = path.read_bytes()
+
+    for target in ("fsync", "replace"):
+
+        def boom(*_a, _t=target, **_k):
+            raise OSError(f"injected {_t}")
+
+        with monkeypatch.context() as m:
+            m.setattr(os, target, boom)
+            try:
+                update_yaml_preserving(path, {"version": 4})
+            except OSError as exc:
+                assert f"injected {target}" in str(exc)
+            else:
+                raise AssertionError(f"сбой {target} не дошёл до вызывающего")
+        assert path.read_bytes() == before, target
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["r.yaml"], target
+
+
+def test_update_yaml_preserving_serialization_failure_leaves_file_untouched(tmp_path):
+    """Непредставимое значение (ruamel RepresenterError) — до открытия файла: файл цел."""
+    path = tmp_path / "r.yaml"
+    path.write_text(_COMMENTED, encoding="utf-8")
+    before = path.read_bytes()
+    try:
+        update_yaml_preserving(path, {"version": object()})
+    except Exception:  # noqa: BLE001 — тип ошибки ruamel не контракт; контракт — файл цел
+        pass
+    else:
+        raise AssertionError("object() неожиданно сериализовался")
+    assert path.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["r.yaml"]
+
+
+def test_update_yaml_preserving_keeps_file_mode(tmp_path):
+    """mkstemp создаёт tmp с 0600 — после записи mode файла прежний (0644 и 0640)."""
+    import os
+    import stat
+
+    path = tmp_path / "r.yaml"
+    for mode in (0o644, 0o640):
+        path.write_text(_COMMENTED, encoding="utf-8")
+        os.chmod(path, mode)
+        update_yaml_preserving(path, {"version": 4})
+        assert stat.S_IMODE(path.stat().st_mode) == mode
+        assert yaml.safe_load(path.read_text(encoding="utf-8"))["version"] == 4
+
+
+def test_update_yaml_preserving_new_file_mode_follows_umask(tmp_path):
+    """Новый файл — mode как у обычного ``open("w")`` (0666 & ~umask), не 0600 от mkstemp."""
+    import stat
+
+    probe = tmp_path / "probe"
+    probe.write_text("x", encoding="utf-8")
+    expected = stat.S_IMODE(probe.stat().st_mode)
+    path = tmp_path / "new.yaml"
+    update_yaml_preserving(path, {"name": "n"})
+    assert stat.S_IMODE(path.stat().st_mode) == expected
+
+
+def test_update_yaml_preserving_keeps_comments_through_atomic_path(tmp_path):
+    """Комментарии нетронутых ключей переживают атомарную запись (буфер -> tmp -> replace)."""
+    path = tmp_path / "r.yaml"
+    path.write_text(_COMMENTED, encoding="utf-8")
+    update_yaml_preserving(path, {"version": 4})
+    text = path.read_text(encoding="utf-8")
+    for comment in ("# заголовок файла", "# имя", "# комментарий перед version"):
+        assert comment in text
+    assert "version: 4" in text
