@@ -552,3 +552,29 @@ def test_fk_none_mid_path_keeps_joint_state_not_none():
         f"путь после стопа обязан идти по суставам (заметное отклонение от хорды), получено {max_dev:.3f}мм "
         f"(J1 старта {frozen_j1:.1f})"
     )
+
+
+def test_explicit_large_dt_bounds_joint_progress_on_short_hand_flip():
+    """Потолок доли пути за тик (min(speed*dt, MAX_STEP_MM)) держит СУСТАВЫ, а не только TCP (T2.J2).
+
+    Сторож ведущего 2026-09-27: при смене руки на хорде 10 мм локоть проходит вытянутую руку, TCP почти стоит —
+    декартов потолок шага суставы не ограничивает. Инъекция «снять MAX_STEP_MM в суставной ветке» не валила ни
+    один тест: tick(1.0) проворачивал J2 почти целиком. Расчёт: ΔJ2 ≈ 182°, v_J2 = 720 × 0.7 -> 0.361 с,
+    эквивалентная длина ≈ 541 мм, доля за тик ≤ 33.3/541 ≈ 6% -> ΔJ2 ≈ 11°; порог 20°.
+    """
+    from Services.robot_comm.tests.test_sim_v2_joint_path import cmd, servo_on, u16
+
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(0))["status"] == ACK
+    assert cmd(core, 3, OP["PTP_MOVE"], 4000, 1000, 0, 0, KIND["JOINT"], 100)["status"] == ACK
+    for _ in range(2000):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            break
+        core.tick(0.01)
+    assert cmd(core, 4, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(1))["status"] == ACK
+    assert cmd(core, 5, OP["PTP_MOVE"], 4100, 1000, 0, 0, KIND["JOINT"], 100)["status"] == ACK
+    j2_before = core.joints()[1]
+    core.tick(1.0)
+    assert core.read(REG["TLM_ACTIVITY"], 1)[0] != 0, "tick(1.0) не должен завершать смену руки"
+    assert abs(core.joints()[1] - j2_before) <= 20.0, (j2_before, core.joints())
