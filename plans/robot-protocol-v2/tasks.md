@@ -129,7 +129,7 @@ protocol-spec, params.md, firmware-architecture; каждое расхожден
 
 **Создать:** `Services/robot_comm/codegen.py`; генераты `core/protocol_v2.py`, `core/params_v2.py`;
 `tests/test_codegen_v2.py`.
-**Сделать:** YAML → (а) `protocol_v2.py`: `REG`, `OP`, `ERR`, `REASON`, `CONSTANTS`, `SCENARIO`; (б)
+**Сделать:** YAML → (а) `protocol_v2.py`: `REG`, `OP`, `ERR`, `REASON`, `CONSTANTS`, `KIND`, `ACT`, `SC_RECORD`; (б)
 `params_v2.py`: `PARAMS` (id → мета) и `RobotParamsV2(SchemaBase)` — поле на параметр с `FieldMeta(label,
 unit, min, max, info)` и группой, значения в инженерных единицах (scale применён); (в) `lua_block()` — таблицы
 `REG/OP/ERR/PDEF/KIND/ACT` между маркерами `-- ===== BEGIN/END GENERATED (delta_v2.yaml <sha8>) =====`.

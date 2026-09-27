@@ -914,7 +914,7 @@ GROUPS = {
     },
 }
 
-DICT_FINGERPRINT = 55848
+DICT_FINGERPRINT = 23080
 
 def to_eng(name: str, raw: float) -> float:
     """Сырое значение параметра -> инженерные единицы (raw / scale)."""
@@ -1025,6 +1025,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='motion',
             ui_order=6,
+            round_k=1,
         ),
     ]
 
@@ -1053,6 +1054,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='motion',
             ui_order=8,
+            round_k=1,
         ),
     ]
 
@@ -1123,6 +1125,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=16,
+            round_k=1,
         ),
     ]
 
@@ -1137,6 +1140,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=17,
+            round_k=1,
         ),
     ]
 
@@ -1151,6 +1155,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=18,
+            round_k=1,
         ),
     ]
 
@@ -1165,6 +1170,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=19,
+            round_k=1,
         ),
     ]
 
@@ -1179,6 +1185,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=20,
+            round_k=1,
         ),
     ]
 
@@ -1193,6 +1200,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=21,
+            round_k=1,
         ),
     ]
 
@@ -1207,6 +1215,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=22,
+            round_k=1,
         ),
     ]
 
@@ -1221,6 +1230,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=23,
+            round_k=1,
         ),
     ]
 
@@ -1235,6 +1245,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=24,
+            round_k=1,
         ),
     ]
 
@@ -1249,6 +1260,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='points',
             ui_order=25,
+            round_k=1,
         ),
     ]
 
@@ -1277,6 +1289,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='cvt',
             ui_order=33,
+            round_k=1,
         ),
     ]
 
@@ -1291,6 +1304,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='cvt',
             ui_order=34,
+            round_k=1,
         ),
     ]
 
@@ -1333,6 +1347,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='cvt',
             ui_order=37,
+            round_k=1,
         ),
     ]
 
@@ -1347,6 +1362,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='cvt',
             ui_order=38,
+            round_k=1,
         ),
     ]
 
@@ -1361,6 +1377,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='cvt',
             ui_order=39,
+            round_k=1,
         ),
     ]
 
@@ -1375,6 +1392,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='cvt',
             ui_order=40,
+            round_k=1,
         ),
     ]
 
@@ -1389,6 +1407,7 @@ class RobotParamsV2(SchemaBase):
             info='единицы сверить на GATE-1',
             ui_group='cvt',
             ui_order=41,
+            round_k=1,
         ),
     ]
 
@@ -1417,6 +1436,7 @@ class RobotParamsV2(SchemaBase):
             info='⚠ по паспорту модели, GATE-1',
             ui_group='workspace',
             ui_order=48,
+            round_k=1,
         ),
     ]
 
@@ -1431,6 +1451,7 @@ class RobotParamsV2(SchemaBase):
             info='⚠ по паспорту модели, GATE-1',
             ui_group='workspace',
             ui_order=49,
+            round_k=1,
         ),
     ]
 
@@ -1445,6 +1466,7 @@ class RobotParamsV2(SchemaBase):
             info='⚠ по паспорту модели, GATE-1',
             ui_group='workspace',
             ui_order=50,
+            round_k=1,
         ),
     ]
 
@@ -1459,6 +1481,7 @@ class RobotParamsV2(SchemaBase):
             info='⚠ по паспорту модели, GATE-1',
             ui_group='workspace',
             ui_order=51,
+            round_k=1,
         ),
     ]
 
@@ -1473,6 +1496,7 @@ class RobotParamsV2(SchemaBase):
             info='⚠ по паспорту модели, GATE-1',
             ui_group='workspace',
             ui_order=52,
+            round_k=1,
         ),
     ]
 
@@ -1487,6 +1511,7 @@ class RobotParamsV2(SchemaBase):
             info='⚠ по паспорту модели, GATE-1',
             ui_group='workspace',
             ui_order=53,
+            round_k=1,
         ),
     ]
 
@@ -1515,6 +1540,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='workspace',
             ui_order=55,
+            round_k=1,
         ),
     ]
 
@@ -1529,6 +1555,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='workspace',
             ui_order=56,
+            round_k=1,
         ),
     ]
 
@@ -1543,6 +1570,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='workspace',
             ui_order=57,
+            round_k=1,
         ),
     ]
 
@@ -1557,6 +1585,7 @@ class RobotParamsV2(SchemaBase):
             info='',
             ui_group='workspace',
             ui_order=58,
+            round_k=1,
         ),
     ]
 
@@ -1571,6 +1600,7 @@ class RobotParamsV2(SchemaBase):
             info='заглушка до модели с шильдика (plan §9 вопрос 1), ⚑ GATE-1',
             ui_group='workspace',
             ui_order=59,
+            round_k=1,
         ),
     ]
 
@@ -1585,6 +1615,7 @@ class RobotParamsV2(SchemaBase):
             info='заглушка до модели с шильдика (plan §9 вопрос 1), ⚑ GATE-1',
             ui_group='workspace',
             ui_order=60,
+            round_k=1,
         ),
     ]
 

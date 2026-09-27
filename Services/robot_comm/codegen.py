@@ -190,12 +190,18 @@ def _crc16_modbus(data: bytes) -> int:
 
 
 def _dict_fingerprint(params_yaml: dict) -> int:
-    """CRC16/MODBUS по id/min/max/default (u16 LE) всех параметров, сорт. по id."""
+    """CRC16/MODBUS по id/min/max/default (u16 LE) всех параметров, сорт. по id, свёрнутый до 15 бит.
+
+    15 бит — чтобы отпечаток записывался из Lua как слово W (±32767, RL 12-2) без знакового перехода.
+    Значение вне 16 бит — ошибка словаря, а не повод молча обрезать: иначе смена такого предела не меняла бы отпечаток.
+    """
     words = bytearray()
-    for _name, meta in sorted(params_yaml.items(), key=lambda kv: kv[1]["id"]):
+    for name, meta in sorted(params_yaml.items(), key=lambda kv: kv[1]["id"]):
         for value in (meta["id"], meta["min"], meta["max"], meta["default"]):
+            if not -32768 <= value <= 0xFFFF:
+                raise ValueError(f"{name}: значение {value} не помещается в 16 бит — нужен широкий параметр")
             words += struct.pack("<H", value & 0xFFFF)
-    return _crc16_modbus(bytes(words))
+    return _crc16_modbus(bytes(words)) & 0x7FFF
 
 
 def _field_name(param_name: str) -> str:
@@ -215,8 +221,8 @@ def _load_yaml(root: Path) -> dict:
 
 
 def yaml_sha8(root: Path) -> str:
-    """Первые 8 hex sha256(bytes(delta_v2.yaml))."""
-    data = _yaml_path(root).read_bytes()
+    """Первые 8 hex sha256(bytes(delta_v2.yaml)), переводы строк приведены к LF (checkout на Windows)."""
+    data = _yaml_path(root).read_bytes().replace(b"\r\n", b"\n")
     return hashlib.sha256(data).hexdigest()[:8]
 
 
@@ -381,6 +387,8 @@ def _render_params_class(doc: dict) -> str:
         lines.append(f"            info={_render_scalar(meta['info'])},")
         lines.append(f"            ui_group={_render_scalar(group_name)},")
         lines.append(f"            ui_order={meta['id']},")
+        if scale != 1:
+            lines.append("            round_k=1,")
         lines.append("        ),")
         lines.append("    ]")
         lines.append("")
@@ -508,6 +516,9 @@ def lua_block(root: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     root = Path.cwd()
+    if not _yaml_path(root).is_file():
+        print(f"нет {_YAML_REL} — запускайте из корня репозитория", file=sys.stderr)
+        return 2
     if "--check" in args:
         stale = check(root)
         for path in stale:

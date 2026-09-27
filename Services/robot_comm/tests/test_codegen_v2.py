@@ -218,7 +218,9 @@ def test_scale_round_trip_at_bounds(name, meta, field_name):
 def test_dict_fingerprint_matches_independent_crc():
     from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT
 
-    assert DICT_FINGERPRINT == _expected_dict_fingerprint()
+    # ведущий: отпечаток свёрнут до 15 бит (слово W робота), см. ревью T1.1
+    assert DICT_FINGERPRINT == _expected_dict_fingerprint() & 0x7FFF
+    assert DICT_FINGERPRINT <= 32767
 
 
 # ─────────────────────────── lua_block ───────────────────────────
