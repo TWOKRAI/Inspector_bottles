@@ -333,3 +333,191 @@ def test_client_base_dir_is_ignored(tmp_path):
     written = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
     assert written["layers"][0]["sprite_source"] == "disk.png" and written["catalog_dir"] == "cat"
     assert "base_dir" not in written
+
+
+# --------------------------------------------------------------------------- #
+# Ревью 1.2a it.1 -> it.2: S1 (бюджет превью + кэш), S2 (commit без движка),
+# S3 (пути клиента — только в корне репозитория или каталоге пресета), S4 (запись
+# только изменившихся ключей, комментарии), N3 (файл 0444).
+# --------------------------------------------------------------------------- #
+
+_HEADER = "# заголовок пресета — см. README\n"
+_ANGLE_COMMENT = "# угол — комментарий нетронутого ключа\n"
+
+
+def _add_comments(preset_path: Path) -> None:
+    text = preset_path.read_text(encoding="utf-8")
+    assert "angle_range_deg:" in text
+    text = text.replace("angle_range_deg:", _ANGLE_COMMENT + "angle_range_deg:", 1)
+    preset_path.write_text(_HEADER + text, encoding="utf-8")
+
+
+def _outside_png(tmp_path: Path) -> Path:
+    """Существующий валидный RGBA-png ВНЕ корня репозитория и ВНЕ каталога пресета (tmp_path)."""
+    outside = tmp_path.parent / f"outside-{uuid.uuid4().hex}"
+    outside.mkdir()
+    img = np.full((10, 10, 4), 200, dtype=np.uint8)
+    imwrite_unicode(outside / "x.png", cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA))
+    return outside / "x.png"
+
+
+def test_commit_unchanged_preset_does_not_write_or_change_rev(tmp_path):
+    preset_path = _make_fixture(tmp_path)
+    _add_comments(preset_path)
+    plugin, _sp = _new_plugin(preset_path)
+    before = preset_path.read_bytes()
+    got = _cmd(plugin, "preset.get", {})
+    res = _cmd(plugin, "preset.commit", {"preset": got["preset"], "base_rev": got["rev"]})
+    assert res == {"status": "ok", "rev": got["rev"], "changed": False}, res
+    assert preset_path.read_bytes() == before
+    assert len(plugin._pending_factory) == 0, "commit без изменений подменил фабрику"
+
+
+def test_commit_keeps_top_level_comments_of_untouched_keys(tmp_path):
+    preset_path = _make_fixture(tmp_path)
+    _add_comments(preset_path)
+    plugin, _sp = _new_plugin(preset_path)
+    got = _cmd(plugin, "preset.get", {})
+    new_preset = _with_color(got["preset"], [255, 0, 0])
+    res = _cmd(plugin, "preset.commit", {"preset": new_preset, "base_rev": got["rev"]})
+    assert res["status"] == "ok" and res["changed"] is True and res["applied"] is True, res
+    assert res["rev"] == _rev(preset_path)
+    text = preset_path.read_text(encoding="utf-8")
+    assert text.startswith(_HEADER), text[:200]
+    assert _ANGLE_COMMENT in text, text
+    assert yaml.safe_load(text)["angle_range_deg"] == [0.0, 0.0]
+    again = _cmd(plugin, "preset.get", {})
+    assert again["preset"] == new_preset
+    assert again["engine"] is True
+
+
+def test_client_path_outside_repo_rejected_without_existence_oracle(tmp_path):
+    preset_path = _make_fixture(tmp_path)
+    plugin, _sp = _new_plugin(preset_path)
+    got = _cmd(plugin, "preset.get", {})
+    before = preset_path.read_bytes()
+    existing = _outside_png(tmp_path)
+    missing = existing.parent / "nope.png"
+    assert existing.exists() and not missing.exists()
+
+    def with_sprite(src: str) -> dict:
+        d = copy.deepcopy(got["preset"])
+        d["layers"][0]["sprite_source"] = src
+        return d
+
+    variants = {
+        "abs-existing": with_sprite(str(existing)),
+        "abs-missing": with_sprite(str(missing)),
+        "rel-existing": with_sprite(f"../{existing.parent.name}/x.png"),
+        "rel-missing": with_sprite(f"../{existing.parent.name}/nope.png"),
+        "catalog-existing": {**got["preset"], "catalog_dir": str(existing.parent)},
+        "catalog-missing": {**got["preset"], "catalog_dir": str(existing.parent / "nodir")},
+    }
+    messages = set()
+    for label, preset_dict in variants.items():
+        for name, payload in (
+            ("preset.preview", {"preset": preset_dict, "seeds": [1]}),
+            ("preset.commit", {"preset": preset_dict, "base_rev": got["rev"]}),
+        ):
+            res = _cmd(plugin, name, payload)
+            assert res["status"] == "error" and res["code"] == "invalid", (label, name, res)
+            messages.add(res["message"])
+    assert len(messages) == 1, f"сообщение зависит от существования файла: {messages}"
+    assert str(existing.parent) not in next(iter(messages))
+    assert preset_path.read_bytes() == before
+
+    # Корень репозитория — разрешён: несуществующий путь под ним проходит ограду и
+    # падает уже на чтении (другое сообщение), т.е. ограда не режет репозиторий.
+    from Plugins.sim.scene_source.plugin import _REPO_ROOT
+
+    in_repo = with_sprite(str(_REPO_ROOT / f"no-such-{uuid.uuid4().hex}.png"))
+    res = _cmd(plugin, "preset.preview", {"preset": in_repo, "seeds": [1]})
+    assert res["status"] == "error" and res["message"] not in messages, res
+    # Каталог файла пресета — разрешён (фикстура в tmp_path вне репозитория).
+    ok = _cmd(plugin, "preset.preview", {"preset": got["preset"], "seeds": [1]})
+    assert ok["status"] == "ok", ok
+
+
+def test_commit_without_engine_writes_file_applied_false(tmp_path):
+    preset_path = _make_fixture(tmp_path)
+    (tmp_path / "disk.png").rename(tmp_path / "disk2.png")  # опечатка в файле -> движок не собрался
+    sp = _FakeStateProxy()
+    ctx = MagicMock()
+    ctx.state_proxy = sp
+    ctx.config = {"resolution_width": FRAME, "resolution_height": FRAME, "preset_path": str(preset_path), "seed": 3}
+    plugin = SceneSourcePlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    assert plugin._spawner is None, "фикстура: движок должен был не собраться"
+
+    got = _cmd(plugin, "preset.get", {})
+    assert got["status"] == "ok" and got["engine"] is False, got
+    fixed = copy.deepcopy(got["preset"])
+    fixed["layers"][0]["sprite_source"] = "disk2.png"
+    res = _cmd(plugin, "preset.commit", {"preset": fixed, "base_rev": got["rev"]})
+    assert res["status"] == "ok" and res["applied"] is False, res
+    assert res["message"] == "движок не запущен — применится после перезапуска"
+    assert res["rev"] == _rev(preset_path) != got["rev"]
+    assert yaml.safe_load(preset_path.read_text(encoding="utf-8"))["layers"][0]["sprite_source"] == "disk2.png"
+    assert len(plugin._pending_factory) == 0
+    frame = plugin.produce()[0]["frame"]
+    assert frame.shape == (FRAME, FRAME, 3)
+
+    broken = copy.deepcopy(fixed)
+    broken["layers"][0]["sprite_source"] = "still-missing.png"
+    bad = _cmd(plugin, "preset.commit", {"preset": broken, "base_rev": res["rev"]})
+    assert bad["status"] == "error" and bad["code"] == "invalid", "без движка commit обязан валидировать"
+
+
+def test_preview_pixel_budget_bad_request(tmp_path):
+    preset_path = _make_fixture(tmp_path)
+    plugin, _sp = _new_plugin(preset_path)
+    cases = [
+        ({}, "ok"),
+        ({"seeds": list(range(8)), "tile_px": 160}, "ok"),
+        ({"seeds": list(range(16)), "tile_px": 113}, "ok"),  # 16*113^2 = 204304 <= 8*160^2
+        ({"seeds": list(range(16)), "tile_px": 114}, "bad_request"),  # 207936
+        ({"seeds": list(range(16)), "tile_px": 160}, "bad_request"),
+        ({"seeds": list(range(9)), "tile_px": 160}, "bad_request"),
+        ({"seeds": list(range(17)), "tile_px": 16}, "bad_request"),  # P7: сидов > 16
+        ({"seeds": [1], "tile_px": 257}, "bad_request"),  # P7: тайл > 256
+    ]
+    for data, expected in cases:
+        res = _cmd(plugin, "preset.preview", data)
+        got = res["status"] if res["status"] == "ok" else res["code"]
+        assert got == expected, (data, res)
+
+
+def test_preview_cache_follows_file_after_commit(tmp_path):
+    """Кэш фабрики превью (по каноническому JSON пресета) не отдаёт старую после commit."""
+    preset_path = _make_fixture(tmp_path)
+    plugin, _sp = _new_plugin(preset_path)
+    first = _cmd(plugin, "preset.preview", {"seeds": [1]})
+    second = _cmd(plugin, "preset.preview", {"seeds": [1]})
+    assert first["png_b64"] == second["png_b64"]
+    got = _cmd(plugin, "preset.get", {})
+    assert (
+        _cmd(plugin, "preset.commit", {"preset": _with_color(got["preset"], [255, 0, 0]), "base_rev": got["rev"]})[
+            "status"
+        ]
+        == "ok"
+    )
+    third = _cmd(plugin, "preset.preview", {"seeds": [1]})
+    assert third["status"] == "ok" and third["png_b64"] != first["png_b64"], "превью файла из устаревшего кэша"
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX-права, не root")
+def test_commit_read_only_file_io_error(tmp_path):
+    preset_path = _make_fixture(tmp_path)
+    plugin, _sp = _new_plugin(preset_path)
+    got = _cmd(plugin, "preset.get", {})
+    before = preset_path.read_bytes()
+    os.chmod(preset_path, 0o444)
+    try:
+        res = _cmd(plugin, "preset.commit", {"preset": _with_color(got["preset"], [255, 0, 0]), "base_rev": got["rev"]})
+        mode = preset_path.stat().st_mode & 0o777
+    finally:
+        os.chmod(preset_path, 0o644)
+    assert res["status"] == "error" and res["code"] == "io_error", res
+    assert preset_path.read_bytes() == before and mode == 0o444
+    assert len(plugin._pending_factory) == 0
