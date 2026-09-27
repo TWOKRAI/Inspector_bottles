@@ -408,58 +408,93 @@ def test_hand_after_stop_mid_flip_follows_joints():
 
 
 # =========================================================================== #
-# Свойство 5 — J4 берёт ближайший оборот в пределах, иначе NAK
+# Свойство 5 — одна правда RZ: TLM_RZ = J1 + J2 + J4, J4 сырой (вердикт cto по T2.J2)
 # =========================================================================== #
 
-
-# Общая точка обеих половин свойства 5 (независимо пересчитана тестером через
-# ScaraModel() ДО написания теста): j1=-102, j2=-149 (hand=1, оба сустава внутри
-# дефолтных пределов ±132/±150) -> x=-157.103, y=-57.880 (r=167.43, ang=-159.77,
-# внутри зоны). rz_target=284.0 -> сырой J4 = rz - (j1+j2) = 284-(-251) = 535.0
-# (вне ±360). Ближайший оборот 535-360=175.0 (внутри дефолтного предела J4 ±360,
-# вне узкого ±165 — нет другого k с |remainder|<=165, следующий кандидат 535-720=
-# -185, тоже вне).
+# Вердикт cto 2026-09-27 (`docs/reviews/2026-09-27_robot-v2-task-T2.J2-cto.md`) отозвал правило «J4 —
+# ближайший оборот»: оно давало скачок TLM_RZ на 717.6° за тик и fk(joints)[3] != TLM_RZ после DONE.
+# Точка: j1 = -102, j2 = -149 при hand 1 (ScaraModel, T2.K) -> x = -157.103, y = -57.880.
+# rz = -76  -> J4 = -76 - (-102) - (-149) = 175.0 (внутри ±360);
+# rz = 284  -> J4 = 535.0 (вне ±360 -> NAK при дефолтном пределе, ACK при пределе J4 None).
 _J4_TARGET_XY = (-157.10254199148986, -57.880361948674704)
 _J4_RZ_TARGET = 284.0
-# Решение ведущего 2026-09-27 (правило cto Q2: оборот, ближайший к ТЕКУЩЕМУ J4, а не к
-# сырому): ход из HOME, P_HAND=1 по умолчанию, J4 в HOME = -6.130 (ik ScaraModel, T2.K).
-# Кандидаты в ±360: 175.0 (|Δ|=181.13) и -185.0 (|Δ|=178.87) -> -185.0. Прежний литерал
-# 175.0 закреплял правило «ближайший к сырому 535» — ошибочную модель тестера.
-_J4_NEAREST_TURN = -185.0
 
 
-def test_j4_takes_nearest_turn_within_limits():
-    """Свойство 5, половина ACK: «Таргет, чей сырой rz-J1-J2 вне ±360, но оборот
-    внутри есть -> ACK, joints()[3] = этот оборот, TLM_RZ при DONE = цель точно...
-    Слом: сырой J4.» Дефолтный предел J4 (±360, params.md:33) достаточен для
-    оборота 175.0.
-    """
+def _run_checking_single_rz_truth(core, max_ticks: int = 2000) -> None:
+    """Тикает до DONE; на каждом тике TLM_RZ == fk(joints())[3] (в разрешении регистра), шаг RZ ≤ потолка,
+    записанная поза в зоне."""
+    model = ScaraModel()
+    ws = core._workspace()
+    prev_rz = s16(core.read(REG["TLM_RZ"], 1)[0])
+    for _ in range(max_ticks):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            return
+        core.tick(TICK_S)
+        joints = core.joints()
+        assert joints is not None
+        rz = s16(core.read(REG["TLM_RZ"], 1)[0])
+        assert rz == round(model.fk(joints)[3] * 10), (rz, joints)
+        assert abs(rz - prev_rz) / 10.0 <= MAX_STEP + 1e-6, f"скачок RZ {prev_rz} -> {rz}"
+        assert check_point(ws, *pose_eng(core)) == 0, pose_eng(core)
+        prev_rz = rz
+    pytest.fail(f"ход не завершился за {max_ticks} тиков")
+
+
+def test_rz_single_truth_during_and_after_joint_move():
+    """Свойство 5: HOME, P_HAND=1, JOINT (-157.1, -57.9, 0, -76) -> ACK; каждый тик TLM_RZ == fk(joints())[3],
+    |ΔRZ| ≤ MAX_STEP, поза в зоне; DONE: joints()[3] = 175.0, TLM_RZ = -760 (raw); после LINE равенство держится.
+    Слом: перемотка J4 ±360 (ближайший оборот) -> скачок 357.6°, fk != RZ, тики вне зоны."""
     core = fresh_core()
+    servo_on(core, 1)
+    target = (mm(_J4_TARGET_XY[0]), mm(_J4_TARGET_XY[1]), mm(0.0), mm(-76.0))
+    res = cmd(core, 2, OP["PTP_MOVE"], *target, KIND["JOINT"], 100)
+    assert res["status"] == ACK, res
+    _run_checking_single_rz_truth(core)
+    assert core.joints()[3] == pytest.approx(175.0, abs=0.05)
+    assert s16(core.read(REG["TLM_RZ"], 1)[0]) == -760
+    res_line = cmd(core, 3, OP["PTP_MOVE"], target[0] + 100, target[1], target[2], target[3], KIND["LINE"], 100)
+    assert res_line["status"] == ACK, res_line
+    _run_checking_single_rz_truth(core)
+
+
+def test_rz_raw_j4_beyond_limit_is_nak():
+    """Свойство 5b: та же XY, rz = 284 (сырой J4 = 535 вне ±360) -> NAK E_RANGE [R_OUT_OF_ZONE], поза не пишется.
+    Слом: перемотка J4 на -185 -> ACK."""
+    core = fresh_core()
+    servo_on(core, 1)
+    x0 = core.read(REG["TLM_X"], 1)[0]
+    target = (mm(_J4_TARGET_XY[0]), mm(_J4_TARGET_XY[1]), mm(0.0), mm(_J4_RZ_TARGET))
+    res = cmd(core, 2, OP["PTP_MOVE"], *target, KIND["JOINT"], 100)
+    assert res["status"] == NAK, res
+    assert res["errno"] == ERR["E_RANGE"]
+    assert res["rvalc"] == 1 and res["rvals"] == [REASON["R_OUT_OF_ZONE"]]
+    assert core.read(REG["TLM_X"], 1)[0] == x0
+
+
+def test_j4_limit_none_keeps_raw_turn():
+    """Свойство 5c: предел J4 None, rz = 284 -> ACK, J4 = 535.0 (сырой, без перемотки), TLM_RZ == fk(joints())[3]
+    на каждом тике, DONE TLM_RZ = 2840. Слом: любая перемотка J4."""
+    model = make_model({"type": "scara", "joint_limits": [[-132.0, 132.0], [-150.0, 150.0], None, None]})
+    core = fresh_core(model=model)
     servo_on(core, 1)
     target = (mm(_J4_TARGET_XY[0]), mm(_J4_TARGET_XY[1]), mm(0.0), mm(_J4_RZ_TARGET))
     res = cmd(core, 2, OP["PTP_MOVE"], *target, KIND["JOINT"], 100)
-    assert res["status"] == ACK, f"сырой J4=535 вне +-360, но оборот внутри есть -> ожидается ACK: {res}"
-    run_until_activity_zero(core)
-    joints = core.joints()
-    assert joints is not None
-    assert joints[3] == pytest.approx(_J4_NEAREST_TURN, abs=0.5), (
-        f"joints()[3] обязан быть ближайшим оборотом {_J4_NEAREST_TURN}, не сырым 535.0: {joints}"
-    )
-    assert s16(core.read(REG["TLM_RZ"], 1)[0]) == mm(_J4_RZ_TARGET), "TLM_RZ при DONE обязан быть точной целью"
+    assert res["status"] == ACK, res
+    _run_checking_single_rz_truth(core)
+    assert core.joints()[3] == pytest.approx(535.0, abs=0.05)
+    assert s16(core.read(REG["TLM_RZ"], 1)[0]) == 2840
 
 
 def test_j4_no_turn_within_limits_is_nak():
-    """Свойство 5, половина NAK: та же геометрия, но у модели узкий предел J4
-    (±165 вместо дефолтных ±360) — ни один оборот (175.0 и -185.0) не влезает ->
-    NAK E_RANGE R_OUT_OF_ZONE, поза не пишется.
-    """
+    """Свойство 5b для предела модели: узкий предел J4 ±165, сырой J4 = 535 -> NAK E_RANGE R_OUT_OF_ZONE,
+    поза не пишется. Слом: предел J4 не проверяется."""
     model = _FastJointModel(joint_limits=(None, None, None, (-165.0, 165.0)))
     core = fresh_core(model=model)
     servo_on(core, 1)
     x0 = core.read(REG["TLM_X"], 1)[0]
     target = (mm(_J4_TARGET_XY[0]), mm(_J4_TARGET_XY[1]), mm(0.0), mm(_J4_RZ_TARGET))
     res = cmd(core, 2, OP["PTP_MOVE"], *target, KIND["JOINT"], 100)
-    assert res["status"] == NAK, f"ни 175.0, ни -185.0 не влезают в узкий предел J4 +-165 -> ожидается NAK: {res}"
+    assert res["status"] == NAK, f"сырой J4 535 вне предела ±165 -> ожидается NAK: {res}"
     assert res["errno"] == ERR["E_RANGE"]
     assert res["rvalc"] == 1 and res["rvals"] == [REASON["R_OUT_OF_ZONE"]]
     assert core.read(REG["TLM_X"], 1)[0] == x0
@@ -658,3 +693,26 @@ def test_line_keeps_joint_state_in_sync():
     assert restarted.joints() == pytest.approx(expected_after_restart, abs=1e-6), (
         "joints() после рестарта (regs=old.regs) обязан быть согласован с ik(текущей позы, TLM_HAND), не дефолтом"
     )
+
+
+def test_short_hand_flip_takes_joint_time():
+    """Свойство 6 (дополнение, вердикт cto по T2.J2): дефолтная модель, P_HAND=0 JOINT (400,100) -> DONE,
+    затем P_HAND=1 JOINT (410,100): хорда 10 мм, но J2 проходит +91 -> -91 — ход не короче 30 тиков, каждый
+    шаг XYZ ≤ потолка. Слом: joint_speed = 1e9 (суставный член мёртв) -> 1 тик, локоть «телепортирует»."""
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(0))["status"] == ACK
+    assert cmd(core, 3, OP["PTP_MOVE"], mm(400.0), mm(100.0), mm(0.0), mm(0.0), KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+    assert cmd(core, 4, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(1))["status"] == ACK
+    assert cmd(core, 5, OP["PTP_MOVE"], mm(410.0), mm(100.0), mm(0.0), mm(0.0), KIND["JOINT"], 100)["status"] == ACK
+    prev = pose_eng(core)
+    ticks = 0
+    while core.read(REG["TLM_ACTIVITY"], 1)[0] != 0:
+        assert ticks < 5000, "ход не завершился"
+        core.tick(TICK_S)
+        ticks += 1
+        cur = pose_eng(core)
+        assert math.dist(cur[:3], prev[:3]) <= MAX_STEP + 1e-6, (prev, cur)
+        prev = cur
+    assert ticks >= 30, f"смена руки на хорде 10 мм за {ticks} тиков — суставный член длительности не работает"
