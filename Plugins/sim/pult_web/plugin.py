@@ -109,6 +109,8 @@ body {{ font-family: sans-serif; margin: 16px; }}
 .row {{ margin: 8px 0; }}
 button {{ font-size: 1.2em; padding: 4px 12px; }}
 #status {{ font-family: monospace; white-space: pre; }}
+#wire {{ font-family: monospace; font-size: 0.9em; white-space: pre; max-height: 360px;
+        overflow-y: auto; border: 1px solid #888; padding: 4px; }}
 </style>
 </head>
 <body>
@@ -150,6 +152,9 @@ button {{ font-size: 1.2em; padding: 4px 12px; }}
   <div id="journal">журнал недоступен</div>
   <button id="btnJournalReset">Сброс счётчиков</button>
 </div>
+
+<h2>Что дошло до робота</h2>
+<div class="row" id="wire">пока ничего</div>
 
 <h2>Правда сцены</h2>
 <div class="row">
@@ -283,12 +288,27 @@ function pollJournal() {{
         " · повтор той же детали " + c.dups +
         " (та же съёмка " + c.dups_same_capture + " / новый кадр " + c.dups_tracked + ")" +
         " · выполнено " + c.done;
+      renderWire(j.wire || []);
     }} else {{
-      document.getElementById("journal").textContent = "журнал недоступен";
+      journalUnavailable();
     }}
-  }}).catch(function () {{
-    document.getElementById("journal").textContent = "журнал недоступен";
-  }});
+  }}).catch(journalUnavailable);
+}}
+function journalUnavailable() {{
+  document.getElementById("journal").textContent = "журнал недоступен";
+  document.getElementById("wire").textContent = "журнал недоступен";
+}}
+// Лента обмена: ◀ записи от ПК (имена регистров из карты), ▶ события робота.
+// Свежие сверху; время — секунды назад от самой свежей строки (часы журнала монотонные).
+function renderWire(rows) {{
+  if (!rows.length) {{ document.getElementById("wire").textContent = "пока ничего"; return; }}
+  var last = rows[rows.length - 1].t, lines = [];
+  for (var i = rows.length - 1; i >= 0; i--) {{
+    var r = rows[i];
+    var dir = r.side === "in" ? "◀ " : "▶ ";
+    lines.push("-" + (last - r.t).toFixed(2) + " с  " + dir + r.text + (r.n > 1 ? "  ×" + r.n : ""));
+  }}
+  document.getElementById("wire").textContent = lines.join("\\n");
 }}
 document.getElementById("btnJournalReset").onclick = function () {{
   post("/api/journal/reset", {{}}).then(pollJournal);

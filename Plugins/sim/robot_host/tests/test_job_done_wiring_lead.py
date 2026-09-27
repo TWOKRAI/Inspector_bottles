@@ -115,4 +115,4 @@ def test_restart_starts_with_empty_recent(monkeypatch):
     plugin._server = None  # сервер остановлен
     plugin._start_server(ctx)
     journal = plugin.cmd_journal({})
-    assert journal["counters"]["jobs"] == 0 and journal["recent"] == []
+    assert journal["counters"]["jobs"] == 0 and journal["recent"] == [] and journal["wire"] == []

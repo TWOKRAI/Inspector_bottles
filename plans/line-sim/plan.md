@@ -600,8 +600,9 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 
 - Task 6.1: Пульт командами — скорость / поток / брак / пауза / «выпусти брак» как команды
   и регистры плагинов сима через `backend_ctl` 8766 [PENDING] (зависит от 2.2, 3.3)
-- Task 6.2: Журнал обмена — готовое окно `SimMonitorWindow` при процессе `robot`
-  [PENDING] (зависит от 5.1)
+- Task 6.2: Журнал обмена — [DONE 2026-09-27] **не окном `SimMonitorWindow`, а блоком
+  «Что дошло до робота» на веб-пульте** (`pult_web`, поле `wire` у `sim_robot.journal`):
+  владелец 2026-09-27 — «один симулятор», графика робота на странице сима
 - Task 6.3: Собственное Qt-окно стенда и ROI мышью [DEFERRED — после GUI-загрузки
   generic-приложений (`GuiBootstrap`/`minimal_gui`)]
 

@@ -8,6 +8,7 @@
 |---|---|
 | `plugin.py` — `PultWebPlugin` | есть: `configure`/`start`/`shutdown`, HTTP API (`GET /`, `GET /api/status`, `POST /api/run|stop|jog|calibrate`), форвард через `DeviceHubClient` |
 | `GET /api/journal` / `POST /api/journal/reset` (Task 5.1) | есть: форвард `sim_robot.journal`/`sim_robot.journal_reset` как есть; страница — блок «Задания от прототипа», опрос 1 с, без логики подсчёта; 2/2 REDS `tests/test_pult_journal_routes.py` зелёные |
+| Блок «Что дошло до робота» (line-sim Task 6.2) | есть: поле `wire` ответа журнала, свежие сверху, «×N», журнал недоступен → «журнал недоступен»; `tests/test_pult_wire.py` — 3 авторских, `tests/test_acceptance_wire.py` — независимого тестера |
 | `GET /api/truth` / `POST /api/truth/reset` (Task 5.3a) | есть: второй `DeviceHubClient(target_process=scene_process)`, форвард `truth.status`/`truth.reset` как есть; страница — блок «Правда сцены», опрос 1 с; `tests/test_acceptance_5_3a.py` зелёный целиком |
 | Занятый порт | есть: `_PultHTTPServer.__init__` биндит синхронно, `OSError` → `report_error`, `state="error"`, процесс живёт |
 | bad_json/404/413 | есть: три отказа ДО обращения к `robot`, `robot` не вызывается ни разу |

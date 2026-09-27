@@ -117,6 +117,10 @@ async function run() {
     el("btnTruthReset").fire("click");
     await sleep(300); // время на POST + повторный GET /api/truth
     process.stdout.write(JSON.stringify({ truthText: el("truth").textContent }));
+  } else if (scenario === "wire" || scenario === "wire_acc") { // wire_acc — имя из приёмки тестера 6.2
+    // Раздел «Что дошло до робота»: опрос /api/journal раз в 1000 мс, читаем #wire.
+    await sleep(1200);
+    process.stdout.write(JSON.stringify({ wireText: el("wire").textContent }));
   }
   process.exit(0);
 }

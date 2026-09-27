@@ -45,8 +45,8 @@ false_alarm_frozen_xy` (`Services/line_sim/core/truth.py`).
 
 | Команда | Ответ |
 |---|---|
-| `sim_robot.journal` | `{status: "ok", counters: {...SimJournal.counters()}, recent: [≤50 {t, side, text, tag}, старые первыми]}`; без сервера — `{status: "error", message: ...}` |
-| `sim_robot.journal_reset` | `SimJournal.reset()` + очистка `recent` → `{status: "ok"}`; без сервера — `{status: "error", ...}` |
+| `sim_robot.journal` | `{status: "ok", counters: {...SimJournal.counters()}, recent: [≤50 {t, side, text, tag}, старые первыми], wire: [≤200 {t, side, text, tag, n}, старые первыми]}`; без сервера — `{status: "error", message: ...}` |
+| `sim_robot.journal_reset` | `SimJournal.reset()` + очистка `recent` и `wire` → `{status: "ok"}`; без сервера — `{status: "error", ...}` |
 
 `recent` наполняется ТОЛЬКО тактом паблишера (`_publish_once` → `journal.drain()`,
 только строки с тегами `job`/`dup`/`done` — служебные `""`/`"flag"`
@@ -55,6 +55,14 @@ false_alarm_frozen_xy` (`Services/line_sim/core/truth.py`).
 же такте: `jobs_seen`, `dups_seen`, `dups_same_capture`, `dups_tracked`,
 `jobs_done` (`ctx.publish_metric`, объявлены в `configure` через
 `declare_metric`). `repeats_frozen_xy` ушёл из этого списка в 5.1b.
+
+`wire` (line-sim Task 6.2) — на том же такте ВСЕ строки журнала без фильтра тегов: каждая
+запись с провода с именем регистра из карты (`""`, `"flag"`), события робота (`side: "out"`),
+строки заданий. Повтор той же строки подряд (тот же `side` и `text`) склеивается: `n += 1`,
+`t` — время последней; иначе keepalive моста ПЧ прототипа (`W 0x1204 = 1` каждые 0.5 с,
+замер стенда 2026-09-27) вытесняет из кольца всё остальное. Отдаётся копией; чистится на
+старте сервера и в `journal_reset`. Строки теряются, только если паблишер отстаёт настолько,
+что переполняется `SimJournal._pending` (maxlen 4000).
 
 ## Событие «задание выполнено» (Task 3.5)
 

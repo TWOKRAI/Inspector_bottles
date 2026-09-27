@@ -77,6 +77,10 @@ _JOURNAL_RECENT_TAGS = {"job", "dup", "done"}
 #: Ёмкость кольца недавних строк журнала, отдаваемых командой ``sim_robot.journal``.
 _JOURNAL_RECENT_MAXLEN = 50
 
+#: Ёмкость кольца ``wire`` — ВСЕ строки журнала (записи с провода с именами регистров
+#: и события робота, без фильтра по тегу) для показа «что дошло до робота» на пульте.
+_JOURNAL_WIRE_MAXLEN = 200
+
 #: Дефолты конфига (Task 1.1 плана line-sim, §Task 1.1 pipeline.yaml).
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 5021
@@ -178,6 +182,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         # Кольцо строк для команды sim_robot.journal — наполняется ТОЛЬКО тиком
         # паблишера (_publish_once), drain() журнала разрушающий — забирает один владелец.
         self._journal_recent: deque[dict[str, Any]] = deque(maxlen=_JOURNAL_RECENT_MAXLEN)
+        # Все строки журнала без фильтра тегов — тот же владелец и тот же замок, что у recent.
+        self._journal_wire: deque[dict[str, Any]] = deque(maxlen=_JOURNAL_WIRE_MAXLEN)
         # Dead-man jog (под self._lock — пишут и команда, и паблишер):
         # _jog_regs — что jog записал в mailbox (RUN, DIR, FREQ), _jog_deadline —
         # когда watchdog должен проверить, не перебит ли jog другим писателем.
@@ -297,6 +303,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             # не должны (ревью 3.5/5.1, minor 2: было counters.jobs=0 при recent=[job, dup]).
             self._journal = SimJournal()
             self._journal_recent.clear()
+            self._journal_wire.clear()
         try:
             from Services.modbus.sdk.errors import ModbusNotAvailableError
             from Services.robot_comm.server.sim_robot import SimRobotServer
@@ -534,10 +541,17 @@ class SimRobotHostPlugin(ProcessModulePlugin):
 
         with self._lock:
             for entry in self._journal.drain():
+                row = {"t": entry.t, "side": entry.side, "text": entry.text, "tag": entry.tag}
                 if entry.tag in _JOURNAL_RECENT_TAGS:
-                    self._journal_recent.append(
-                        {"t": entry.t, "side": entry.side, "text": entry.text, "tag": entry.tag}
-                    )
+                    self._journal_recent.append(dict(row))
+                # Повтор той же строки подряд (keepalive моста ПЧ: «W 0x1204 = 1» каждые 0.5 с)
+                # склеивается счётчиком n — иначе он вытесняет из кольца всё остальное.
+                last = self._journal_wire[-1] if self._journal_wire else None
+                if last is not None and last["side"] == row["side"] and last["text"] == row["text"]:
+                    last["n"] += 1
+                    last["t"] = row["t"]
+                else:
+                    self._journal_wire.append({**row, "n": 1})
 
     # ------------------------------------------------------------------ #
     # Команды
@@ -565,15 +579,21 @@ class SimRobotHostPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def cmd_journal(self, data: dict | None = None) -> dict:
-        """``sim_robot.journal`` → ``{counters, recent}``; без сервера — ошибка."""
+        """``sim_robot.journal`` → ``{counters, recent, wire}``; без сервера — ошибка.
+
+        ``wire`` — все строки журнала (старые первыми, ≤ ``_JOURNAL_WIRE_MAXLEN``) для
+        показа «что дошло до робота», повторы подряд склеены в ``n``; ``recent`` —
+        только задания (Контракт 5.1 §2).
+        """
         if self._server is None or self._journal is None:
             return {"status": "error", "message": "server_not_running"}
         with self._lock:
             recent = list(self._journal_recent)
-        return {"status": "ok", "counters": self._journal.counters(), "recent": recent}
+            wire = [dict(row) for row in self._journal_wire]
+        return {"status": "ok", "counters": self._journal.counters(), "recent": recent, "wire": wire}
 
     def cmd_journal_reset(self, data: dict | None = None) -> dict:
-        """``sim_robot.journal_reset`` → обнулить счётчики журнала и очистить ``recent``."""
+        """``sim_robot.journal_reset`` → обнулить счётчики журнала и очистить ``recent`` и ``wire``."""
         if self._server is None or self._journal is None:
             return {"status": "error", "message": "server_not_running"}
         # Сброс и очистка — под ОДНИМ self._lock, как drain в такте публикации (ревью 3.5/5.1,
@@ -582,6 +602,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         with self._lock:
             self._journal.reset()
             self._journal_recent.clear()
+            self._journal_wire.clear()
         return {"status": "ok"}
 
     # ------------------------------------------------------------------ #
