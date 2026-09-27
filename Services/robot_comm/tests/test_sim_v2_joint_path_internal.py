@@ -307,3 +307,31 @@ def test_restart_mid_joint_leaves_no_half_built_active_move():
     # Свежий core после рестарта принимает новую команду без падения на "полупостроенном" _active.
     res2 = cmd(restarted, 3, OP["SERVO"], 1)
     assert res2["status"] == ACK, res2
+
+
+def test_hand_flip_passes_stretched_arm():
+    """Смена руки посреди JOINT физически проводит руку через вытянутое положение (J2 = 0, r = l1 + l2).
+
+    Инъекция ведущего: конец пути решался с рукой TLM_HAND вместо P_HAND — поза цели та же, все тесты
+    оставались зелёными, а путь руки (и её вид в окне) — без перекладки. Этот тест держит путь, не только цель.
+    """
+    from Services.robot_comm.tests.test_sim_v2_joint_path import (
+        cmd,
+        fresh_core,
+        home_target,
+        servo_on,
+        track_pose_until_done,
+        u16,
+    )
+
+    core = fresh_core()
+    servo_on(core, 1)
+    new_hand = 1 - PARAMS[PARAM_ID["P_HAND"]]["default"]
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], u16(new_hand))["status"] == ACK
+    hx, hy, hz, hrz = home_target()
+    assert cmd(core, 3, OP["PTP_MOVE"], hx + 500, hy, hz, hrz, KIND["JOINT"], 100)["status"] == ACK
+    samples = track_pose_until_done(core)
+    model = ScaraModel()
+    reach = model.l1 + model.l2
+    r_max_seen = max(math.hypot(x, y) for (x, y, _z, _rz) in samples)
+    assert r_max_seen >= reach - 5.0, (r_max_seen, reach)
