@@ -360,9 +360,11 @@ def test_camera_alone_serves_frames(tmp_path: Path) -> None:
     pipeline_raw = yaml.safe_load((_APP_YAML.parent / "pipeline.yaml").read_text(encoding="utf-8"))
     # pult (Task 2.3b) — клиент robot: без него опрос belt.status пишет no_route в
     # errors.log, а случай про камеру, не про пульт, — вырезается вместе с robot.
-    pipeline_raw["processes"] = [p for p in pipeline_raw["processes"] if p["process_name"] not in ("robot", "pult")]
+    # layers (превью пресета слоёв, ревью 1.2a S1) — к камере отношения не имеет, вырезается так же.
+    excluded = ("robot", "pult", "layers")
+    pipeline_raw["processes"] = [p for p in pipeline_raw["processes"] if p["process_name"] not in excluded]
     assert {p["process_name"] for p in pipeline_raw["processes"]} == {"camera", "mjpeg"}, (
-        f"фильтр процессов robot/pult промахнулся: {pipeline_raw['processes']!r}"
+        f"фильтр процессов robot/pult/layers промахнулся: {pipeline_raw['processes']!r}"
     )
     (tmp_path / "pipeline.yaml").write_text(yaml.safe_dump(pipeline_raw, allow_unicode=True), encoding="utf-8")
 

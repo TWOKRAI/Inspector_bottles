@@ -204,3 +204,41 @@ def _looks_like_relative_path(value: str) -> bool:
     для callable-подмены в тесте, резолвить его нельзя). `"://"` — маркер схемы id;
     у обычных путей (в т.ч. с `../`) его не бывает."""
     return "://" not in value and not Path(value).is_absolute()
+
+
+#: Корень репозитория от расположения ЭТОГО файла (Services/line_sim/core/preset.py -> parents[3]).
+#: Относительные пути конфига стенда (`preset_path`, `background_texture`) резолвятся от него,
+#: а не от CWD процесса (фикс ревью P5 плагина `scene_source`).
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: Вероятность брака каталожного пресета (не `.yaml`), если конфиг стенда её не задал.
+DEFAULT_DEFECT_PROBABILITY = 0.0
+
+
+def resolve_repo_path(path: str | None) -> str | None:
+    """Относительный путь конфига — от `REPO_ROOT` (resolve); `None` и абсолютный — как есть."""
+    if path is None or Path(path).is_absolute():
+        return path
+    return str((REPO_ROOT / path).resolve())
+
+
+def apply_defect_override(preset: ScenePreset, override: float | None) -> ScenePreset:
+    """Явный `defect_probability` конфига стенда перекрывает пресет; `None` — без изменений.
+    Через `from_dict`, чтобы отработали валидаторы frozen-модели."""
+    if override is None:
+        return preset
+    return ScenePreset.from_dict({**preset.to_dict(), "defect_probability": override})
+
+
+def load_scene_preset(preset_path: str | None, defect_probability: float | None) -> ScenePreset:
+    """Пресет сцены по УЖЕ резолвленному `preset_path` конфига стенда (см. `resolve_repo_path`).
+
+    `.yaml`/`.yml` — файл пресета слоёв (`ScenePreset.from_yaml`, свои относительные пути — от
+    каталога файла) + `apply_defect_override(defect_probability)`: `None` — значение файла.
+    Иначе (нет пути, каталог классов, путь без расширения) — `ScenePreset(catalog_dir=...,
+    defect_probability=...)` с `DEFAULT_DEFECT_PROBABILITY`, если `defect_probability is None`.
+    """
+    if preset_path is not None and preset_path.lower().endswith((".yaml", ".yml")):
+        return apply_defect_override(ScenePreset.from_yaml(preset_path), defect_probability)
+    probability = DEFAULT_DEFECT_PROBABILITY if defect_probability is None else float(defect_probability)
+    return ScenePreset(catalog_dir=preset_path, defect_probability=probability)

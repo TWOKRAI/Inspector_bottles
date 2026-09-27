@@ -266,9 +266,9 @@ def test_client_path_outside_roots_rejected_without_existence_oracle(tmp_path: P
     assert res["status"] == "error" and res["code"] == "invalid", res
     assert str(existing.parent) not in res["message"], res
 
-    from Plugins.sim.scene_source.plugin import _REPO_ROOT
+    from Services.line_sim.core import REPO_ROOT
 
-    in_repo = with_sprite(str(_REPO_ROOT / f"no-such-{uuid.uuid4().hex}.png"))
+    in_repo = with_sprite(str(REPO_ROOT / f"no-such-{uuid.uuid4().hex}.png"))
     res = _call_command(plugin, "preset.preview", {"preset": in_repo, "seeds": [1]})
     assert res["status"] == "error" and res["message"] not in messages, "корень репозитория обязан быть разрешён"
     ok = _call_command(plugin, "preset.preview", {"preset": base, "seeds": [1]})
@@ -332,3 +332,27 @@ def test_plugin_is_side_effect_control_without_ports() -> None:
     assert LayerPreviewPlugin.category == "control"
     assert LayerPreviewPlugin.inputs == [] and LayerPreviewPlugin.outputs == []
     assert LayerPreviewPlugin.commands == {"preset.preview": "cmd_preset_preview"}
+
+
+def test_layer_preview_does_not_import_scene_source() -> None:
+    """Плагин превью не тянет плагин сцены (связь plugin -> plugin и лишняя регистрация
+    `scene_source` в процессе `layers`) — проверка в чистом интерпретаторе."""
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[4]
+    code = (
+        "import sys; import Plugins.sim.layer_preview.plugin as m; "
+        "assert m.LayerPreviewPlugin.name == 'layer_preview'; "
+        "bad = sorted(k for k in sys.modules if k.startswith('Plugins.sim.scene_source')); "
+        "print(bad); raise SystemExit(1 if bad else 0)"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        env={**__import__("os").environ, "PYTHONPATH": str(repo_root)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr[-2000:]!r}"

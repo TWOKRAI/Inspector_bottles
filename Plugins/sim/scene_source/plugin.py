@@ -83,7 +83,17 @@ from multiprocess_framework.modules.process_module.plugins import (
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from Services.dataset_gen.core.catalog import imread_unicode
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, confine_preset_paths
-from Services.line_sim.core import BeltGeometry, JobDone, MatchResult, TruthLedger, match_job
+from Services.line_sim.core import (
+    REPO_ROOT,
+    BeltGeometry,
+    JobDone,
+    MatchResult,
+    TruthLedger,
+    apply_defect_override,
+    load_scene_preset,
+    match_job,
+    resolve_repo_path,
+)
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -96,7 +106,6 @@ _DEFAULT_PX_PER_MM = 1.0
 _DEFAULT_STALE_MS = 500
 _DEFAULT_SEED = 0
 _DEFAULT_SPAWN_INTERVAL_S = (2.0, 4.0)
-_DEFAULT_DEFECT_PROBABILITY = 0.0
 _DEFAULT_CAMERA_ID = 0
 
 #: Task 3.5 (контракт лида §4): сопоставление «задание выполнено» ↔ объект сцены.
@@ -137,14 +146,9 @@ _MISSING_KEY = object()
 #: Максимальное значение счётчика кадров (rollover, как у остальных источников сима).
 _FRAME_ID_MODULO = 100_000
 
-#: Корень репозитория, вычисленный от расположения ЭТОГО файла
-#: (Plugins/sim/scene_source/plugin.py -> parents[3]) — фикс ревью P5: относительный
-#: `preset_path` раньше резолвился против CWD процесса (только `ScenePreset.from_yaml`
-#: резолвит от каталога YAML, а плагин строит `ScenePreset(catalog_dir=...)` напрямую),
-#: поэтому один и тот же конфиг давал движок то готовым, то insensitive к фону в
-#: зависимости от того, откуда запущен процесс (repro: cwd=repo root -> движок готов;
-#: cwd=apps/line_sim -> недоступен).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+#: Корень репозитория — `Services.line_sim.core.REPO_ROOT` (правило резолвинга путей конфига
+#: общее с `Plugins.sim.layer_preview`); имя оставлено — его импортируют тесты.
+_REPO_ROOT = REPO_ROOT
 
 
 @register_plugin(
@@ -274,7 +278,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
         try:
-            preset = self._build_preset(preset_path, cfg)
+            preset = load_scene_preset(preset_path, self._defect_override)
             self._preset = preset
             factory = ObjectFactory(preset)
             self._spawner = ObjectSpawner(factory, scene_length_mm=scene_length_mm, **spawner_kwargs)
@@ -308,44 +312,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
 
     @staticmethod
     def _resolve_preset_path(preset_path: str | None) -> str | None:
-        """Относительный `preset_path` — от КОРНЯ РЕПОЗИТОРИЯ (`_REPO_ROOT`), не от CWD
-        процесса (фикс ревью P5). `None` и уже абсолютный путь возвращаются как есть."""
-        if preset_path is None or Path(preset_path).is_absolute():
-            return preset_path
-        return str((_REPO_ROOT / preset_path).resolve())
-
-    @staticmethod
-    def _build_preset(preset_path: str | None, cfg: dict[str, Any]) -> ScenePreset:
-        """Собрать `ScenePreset` из уже РЕЗОЛВЛЕННОГО `preset_path` (см. `_resolve_preset_path`).
-
-        `preset_path`, оканчивающийся `.yaml`/`.yml` (Task 1.1b, блок D2) — файл пресета
-        слоёв: `ScenePreset.from_yaml` сам резолвит СВОИ относительные пути (`catalog_dir`,
-        `layers[*].sprite_source`) от каталога файла (`base_dir`) — независимо от того,
-        что `preset_path` сюда уже пришёл абсолютным. Явный `defect_probability` в
-        конфиге стенда переопределяет значение файла — через
-        `from_dict({**p.to_dict(), "defect_probability": ...})`, чтобы отработали
-        валидаторы пресета (frozen-модель, поле не подменяется напрямую); ключа в
-        конфиге нет — значение файла остаётся как есть.
-
-        Иначе (нет пресета, каталог классов `SpriteCatalog`, произвольный путь без
-        расширения `.yaml`/`.yml`) — прежняя семантика: `ScenePreset(catalog_dir=...,
-        defect_probability=...)`, дефолт `_DEFAULT_DEFECT_PROBABILITY`, если ключа
-        нет в конфиге.
-        """
-        if preset_path is not None and preset_path.lower().endswith((".yaml", ".yml")):
-            override = float(cfg["defect_probability"]) if "defect_probability" in cfg else None
-            return SceneSourcePlugin._apply_defect_override(ScenePreset.from_yaml(preset_path), override)
-        defect_probability = float(cfg.get("defect_probability", _DEFAULT_DEFECT_PROBABILITY))
-        return ScenePreset(catalog_dir=preset_path, defect_probability=defect_probability)
-
-    @staticmethod
-    def _apply_defect_override(preset: ScenePreset, override: float | None) -> ScenePreset:
-        """Единое правило «явный `defect_probability` конфига стенда перекрывает файл» —
-        общее для `configure()` (`_build_preset`) и `preset.commit` (Task 1.2a) и `Plugins.sim.layer_preview` (превью).
-        Через `from_dict`, чтобы отработали валидаторы frozen-модели; `None` — без изменений."""
-        if override is None:
-            return preset
-        return ScenePreset.from_dict({**preset.to_dict(), "defect_probability": override})
+        """Тонкий делегат `Services.line_sim.core.resolve_repo_path` (тесты зовут это имя)."""
+        return resolve_repo_path(preset_path)
 
     def _load_background_tile(self, ctx: PluginContext, texture_path: str | None) -> np.ndarray | None:
         """Загрузить фон-текстуру (Task 3.6): `None` -> `None`; путь резолвится от
@@ -569,7 +537,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
             return self._bad_request("preset.commit: ожидается {'preset': dict, 'base_rev': str}")
         try:
             preset = self._preset_from_client(data["preset"])
-            factory = ObjectFactory(self._apply_defect_override(preset, self._defect_override))
+            factory = ObjectFactory(apply_defect_override(preset, self._defect_override))
         except Exception as exc:  # noqa: BLE001 — любой сбой проверки -> invalid с текстом
             return {"status": "error", "code": "invalid", "message": str(exc)}
         new_dict = preset.to_dict()
