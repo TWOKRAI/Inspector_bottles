@@ -343,4 +343,7 @@ def test_hand_flip_passes_stretched_arm():
     model = ScaraModel()
     reach = model.l1 + model.l2
     r_max_seen = max(math.hypot(x, y) for (x, y, _z, _rz) in samples)
-    assert r_max_seen >= reach - 5.0, (r_max_seen, reach)
+    # Ведущий 2026-09-27 (T2.J2): порог reach-50, а не reach-5. Пик r у вытянутой руки узкий, а тики
+    # с жёстким потолком шага ложатся по сетке, которая его перешагивает (замер: 590.2 при reach 600).
+    # Инъекция, которую держит тест (конец пути без перекладки руки), даёт r не больше хорды — ~408 мм.
+    assert r_max_seen >= reach - 50.0, (r_max_seen, reach)
