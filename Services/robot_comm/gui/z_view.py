@@ -72,24 +72,6 @@ def _value_to_x(t: float, now: float, window_s: float, width: float) -> float:
     return max(0.0, min(1.0, frac)) * width
 
 
-def _expand_domain(current: tuple[float, float] | None, lo: float, hi: float) -> tuple[float, float]:
-    """Домен пиксельной развёртки — РАСШИРЯЕТСЯ по всем виденным (lo, hi), но
-    никогда не сужается.
-
-    Если развёртку держать РАВНОЙ текущим (z_min, z_max) (самоссылочно), то
-    сама граница z_min всегда попадает в frac=0 (нижний край) по построению —
-    ``z_to_widget_y(z_min)`` не может сдвинуться при изменении z_min, это
-    тавтология. Контракт T2.W (A4) требует обратного: после ``PARAM_SET
-    P_WS_Z_MIN`` пиксель границы должен сместиться. Расширяющийся домен даёт
-    и то, и другое: пока зона не выходит за уже виденные пределы — граница
-    рисуется как обычная отметка на неподвижном фоне (двигается вместе со
-    значением), а расширение зоны раздвигает и сам фон.
-    """
-    if current is None:
-        return (lo, hi)
-    return (min(current[0], lo), max(current[1], hi))
-
-
 class ZScale(QWidget):
     """Read-only вертикальная шкала ``TLM_Z`` поверх ``core``.
 
@@ -103,7 +85,6 @@ class ZScale(QWidget):
         self.core = core
         self._z = 0.0
         self._limits: tuple[float, float] = (0.0, 1.0)
-        self._z_domain: tuple[float, float] | None = None
         self._marks: dict[str, float] = {}
         self.setMinimumSize(80, 100)
         self._timer = QTimer(self)
@@ -118,7 +99,6 @@ class ZScale(QWidget):
         # ponytail: core._workspace() — приватный метод ядра, см. sim_view._paint_transform.
         ws = core._workspace()
         self._limits = (ws.z_min, ws.z_max)
-        self._z_domain = _expand_domain(self._z_domain, ws.z_min, ws.z_max)
         # ponytail: core._values — публичного геттера параметра по имени нет,
         # а добавлять его в core вне зоны этого таска (core v2 out of scope).
         self._marks = {
@@ -143,10 +123,9 @@ class ZScale(QWidget):
     def z_to_widget_y(self, z: float) -> float:
         """Z (мм) -> y (px): z_max сверху, z_min снизу, строго убывает по z.
 
-        Развёртка — по ``_z_domain`` (расширяющийся, см. ``_expand_domain``),
-        не по мгновенным ``_limits`` — иначе сама граница z_min не могла бы
-        сдвинуться при её изменении (contract A4)."""
-        lo, hi = self._z_domain if self._z_domain is not None else (0.0, 1.0)
+        Развёртка — по текущим границам зоны: сами границы всегда у краёв,
+        при смене ``P_WS_Z_MIN`` сдвигается всё остальное (текущий Z, отметки)."""
+        lo, hi = self._limits
         return _value_to_y(z, lo, hi, max(self.height(), 1))
 
     def closeEvent(self, event) -> None:  # noqa: N802 (переопределение Qt)

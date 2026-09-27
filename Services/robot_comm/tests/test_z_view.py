@@ -193,7 +193,11 @@ def test_zscale_redraws_after_param_set_z_min(qtbot):
     scale.refresh()
 
     old_min, _old_max = scale.z_limits()
-    old_row = round(scale.z_to_widget_y(old_min))
+    # Ведущий, 2026-09-27: шкала развёрнута по [z_min, z_max] — сама граница
+    # всегда у нижнего края; при смене z_min сдвигается НЕИЗМЕННЫЙ z (текущий
+    # -40.0), а не строка границы. Первая редакция требовала сдвига строки
+    # z_min — это противоречило «z_min снизу» спецификации (отчёт ведущего T2.W).
+    old_row = round(scale.z_to_widget_y(-40.0))
 
     r = cmd(core, 1, OP["PARAM_SET"], PARAM_ID["P_WS_Z_MIN"], -1200)  # eng -120.0 мм
     assert r["status"] == ACK, r
