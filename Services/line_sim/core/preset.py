@@ -35,8 +35,8 @@ class ScenePreset(BaseModel):
     `catalog_dir`/`layers[*].sprite_source` (`resolve_path()`); `None` — резолвить
     от текущего рабочего каталога процесса (поведение `ScenePreset(catalog_dir=...)`
     без файла-источника, не меняется). Путь сам по себе НЕ резолвится и не
-    переписывается нигде, кроме `resolve_path()` — на dict-границе и в YAML он
-    остаётся ровно той строкой, что была задана (переносимость между машинами).
+    переписывается нигде, кроме `resolve_path()` (резолв) и `to_yaml()` в другой каталог
+    (пересчёт относительного пути от нового места). Между машинами переносим YAML.
     `base_dir` — настоящее поле модели (едет через `to_dict`/`from_dict`, участвует
     в равенстве), но НЕ попадает в `to_yaml()` — там его заменяет каталог целевого
     файла.
@@ -94,7 +94,8 @@ class ScenePreset(BaseModel):
         Пути (`catalog_dir`, `sprite_source` доп. слоёв) хранятся КАК ЕСТЬ — резолюцию
         делает только `resolve_path()`, и только в момент чтения (`ObjectFactory`),
         от `base_dir`, если тот присутствует в `data`. Здесь ничего не резолвится и не
-        переписывается — dict остаётся переносимым между машинами."""
+        переписывается. dict с `base_dir` годится для процесса на ЭТОЙ машине, между
+        машинами переносится YAML (`to_yaml`)."""
         return cls.model_validate(data)
 
     def to_dict(self) -> dict[str, Any]:
@@ -145,7 +146,7 @@ class ScenePreset(BaseModel):
             # resolve(): иначе relpath от симлинка (/tmp -> /private/tmp) даёт ../../../../tmp/... (ревью 1.0)
             base_dir = Path(self.base_dir).resolve()
             target_dir = Path(path).parent.resolve()
-            if base_dir.resolve() != target_dir:
+            if base_dir != target_dir:
                 data["catalog_dir"] = self._rebase_value(data.get("catalog_dir"), base_dir, target_dir)
                 layers = data.get("layers")
                 if isinstance(layers, list):
