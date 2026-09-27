@@ -314,6 +314,8 @@ class RobotSimCoreV2:
     def tick(self, dt_s: float | None = None) -> None:
         """Один тик: heartbeat -> плоскость STOP_REQ -> mailbox -> прогресс команды."""
         dt = TICK_INTERVAL_S if dt_s is None else dt_s
+        if not (math.isfinite(dt) and dt > 0):
+            dt = 0.0  # NaN/inf/отрицательный dt (скачок часов у вызывающего) — время не прошло (ревью T2.2)
         self._time_s += dt
         self.regs[REG["TLM_HB_ROBOT"]] = (self.regs[REG["TLM_HB_ROBOT"]] + 1) & 0xFFFF
         self._handle_stop()
@@ -327,6 +329,8 @@ class RobotSimCoreV2:
         if value == self._last_stop:
             return
         self._last_stop = value
+        # Уровень 0 в §8 не определён: регистр изменился — значит, намерение остановиться; такой
+        # стоп обрывает команду как HARD (без серво и ПЧ) — безопасная сторона (решение ревью T2.2).
         level = value % 4
         # HALT гасит серво и шлёт стоп ПЧ ДО записи ERR_EVT (И5) — в простое тоже (contract §"Stop plane").
         if level == STOP_LEVEL["HALT"]:
@@ -362,8 +366,6 @@ class RobotSimCoreV2:
         """Штатное завершение (не ошибка): ACTIVITY/MOVING, [HAND если JOINT], DONE_SEQ последним (И5)."""
         self.regs[REG["TLM_ACTIVITY"]] = TLM_ACTIVITY_IDLE
         self.regs[REG["TLM_MOVING"]] = 0
-        if active.get("joint"):
-            self.regs[REG["TLM_HAND"]] = self._values[PARAM_ID["P_HAND"]]
         self._active = None
         self.regs[REG["TLM_DONE_SEQ"]] = active["seq"]
 
@@ -407,6 +409,9 @@ class RobotSimCoreV2:
         active["pos"] = new_pos
         self._write_pose(new_pos)
         if new_pos == target:
+            if active["joint"]:
+                # JOINT довёл руку до P_HAND физически — и при DONE, и при отложенном SOFT (ревью T2.2).
+                self.regs[REG["TLM_HAND"]] = self._values[PARAM_ID["P_HAND"]]
             if self._pending_soft is not None:
                 self._abort(ERR["E_ABORTED"], active["seq"])  # эхо отложенного SOFT пишет _abort
             else:
@@ -428,8 +433,10 @@ class RobotSimCoreV2:
             self._finish_done(active)
             return
         pos = list(active["pos"])
-        pos[active["axis"]] += active["sign"] * active["speed"] * dt
-        reason = check_point(self._workspace(), pos[0], pos[1], pos[2], pos[3])
+        pos[active["axis"]] += active["sign"] * min(active["speed"] * dt, MAX_STEP_MM)
+        # Проверяется поза, какой её увидит ПК (округление до 0.1): от неё стартует следующая
+        # команда; float-поза внутри при округлённой снаружи блокировала бы любой LINE (ревью T2.2).
+        reason = check_point(self._workspace(), *(round(v * 10) / 10 for v in pos))
         if reason != 0:
             self._finish_done(active)
             return
@@ -596,12 +603,13 @@ class RobotSimCoreV2:
         dx_e = self._decode(dx, True) / 10.0
         dy_e = self._decode(dy, True) / 10.0
         dz_e = self._decode(dz, True) / 10.0
-        drz_e = self._decode(drz, True) / 10.0
         jog_max = to_eng("P_JOG_MAX", self._values[PARAM_ID["P_JOG_MAX"]])
         if math.sqrt(dx_e**2 + dy_e**2 + dz_e**2) > jog_max:
             return NAK, ERR["E_RANGE"], 1, [REASON["R_JOG_TOO_LONG"]]
-        cur = self._read_pose_eng()
-        target = (cur[0] + dx_e, cur[1] + dy_e, cur[2] + dz_e, cur[3] + drz_e)
+        # Цель — в сырых ×0.1: float-сумма 128.2 + (-28.2) даёт 99.99999999999999 < r_min (ревью T2.2).
+        cur_raw = [self._decode(self.regs[REG[n]], True) for n in ("TLM_X", "TLM_Y", "TLM_Z", "TLM_RZ")]
+        deltas = [self._decode(v, True) for v in (dx, dy, dz, drz)]
+        target = tuple((c + d) / 10.0 for c, d in zip(cur_raw, deltas))
         nak = self._check_motion(target, line=True)
         if nak is not None:
             return nak

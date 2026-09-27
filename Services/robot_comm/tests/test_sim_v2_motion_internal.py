@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
@@ -297,3 +299,109 @@ def test_fault_during_soft_pending_does_not_leak_stop_into_next_move():
     assert core.read(REG["TLM_DONE_SEQ"], 1)[0] == 4
     assert core.read(REG["TLM_ERR_EVT"], 1)[0] == evt_before  # ни одного лишнего события
     assert core.read(REG["TLM_STOP_ACK"], 1)[0] == 5
+
+
+# --------------------------------------------------------------------------- #
+# Находки ревью T2.2 (воспроизведения ревьюера -> тесты ведущего)
+# --------------------------------------------------------------------------- #
+
+
+def _s16(raw: int) -> int:
+    return raw - 65536 if raw >= 0x8000 else raw
+
+
+def _reg_pose_mm(core) -> tuple[float, float, float, float]:
+    return tuple(_s16(core.read(REG[n], 1)[0]) / 10.0 for n in ("TLM_X", "TLM_Y", "TLM_Z", "TLM_RZ"))
+
+
+def test_joint_arrival_with_pending_soft_still_updates_hand():
+    # Ревью №1: рука физически сменилась в конце JOINT, даже если команда закончилась E_ABORTED.
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_HAND"], 0)["status"] == ACK
+    assert cmd(core, 3, OP["PTP_MOVE"], mm(400.0), 0, mm(-40.0), 0, KIND["JOINT"], 10)["status"] == ACK
+    core.write(REG["STOP_REQ"], [4 * 1 + STOP_LEVEL["SOFT"]])
+    run_until_activity_zero(core)
+    assert core.read(REG["TLM_ERRNO_LAST"], 1)[0] == 13  # E_ABORTED
+    assert core.read(REG["TLM_HAND"], 1)[0] == 0
+
+
+def test_jog_cont_zone_edge_leaves_registered_pose_inside_zone():
+    # Ревью №2: от (-290, 100) вниз по Y к краю сектора 165°; округление до 0.1 мм выводило
+    # позу в регистрах наружу (165.001°), и следующий ход от неё отвергался.
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PTP_MOVE"], mm(-290.0), mm(100.0), mm(-40.0), 0, KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+    assert cmd(core, 3, OP["JOG_CONT"], 4, 1)["status"] == ACK  # Y-, 1 мм/с
+    lease = 0
+    for _ in range(5000):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            break
+        lease += 1
+        core.write(REG["JOG_LEASE"], [lease & 0xFFFF])
+        core.tick()  # dt 0.01 -> шаг 0.01 мм: именно здесь float-поза и регистр расходятся
+    else:
+        pytest.fail("JOG_CONT не встал на краю зоны за 5000 тиков")
+    x, y, _, _ = _reg_pose_mm(core)
+    angle = math.degrees(math.atan2(y, x))
+    assert angle <= 165.0, f"поза в регистрах вне сектора: {angle:.4f}°"
+    # и от неё можно ехать дальше LINE внутрь зоны
+    assert cmd(core, 4, OP["JOG_STEP"], 0, mm(1.0), 0, 0, 100)["status"] == ACK
+
+
+def test_jog_step_target_on_inclusive_boundary_is_accepted():
+    # Ревью №3: 128.2 + (-28.2) во float = 99.99999999999999 < r_min 100 -> ложный NAK.
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PTP_MOVE"], mm(128.2), 0, mm(-40.0), 0, KIND["JOINT"], 100)["status"] == ACK
+    run_until_activity_zero(core)
+    res = cmd(core, 3, OP["JOG_STEP"], mm(-28.2), 0, 0, 0, 100)
+    assert (res["status"], res["errno"]) == (ACK, 0)
+
+
+def test_stop_level_zero_during_move_is_fail_safe_hard():
+    # Ревью №4, решение ведущего: уровень 0 не определён в §8; изменение STOP_REQ — это намерение
+    # остановиться, поэтому 0 работает как HARD (обрыв), но серво и ПЧ не трогает.
+    core = fresh_core()
+    servo_on(core, 1)
+    move_seq = _start_long_ptp(core, 2)
+    core.tick()
+    core.write(REG["STOP_REQ"], [4 * 1 + 0])
+    core.tick()
+    assert core.read(REG["TLM_ACTIVITY"], 1)[0] == 0
+    assert core.read(REG["TLM_ERR_SEQ"], 1)[0] == move_seq
+    assert core.read(REG["TLM_ERRNO_LAST"], 1)[0] == 13
+    assert core.read(REG["TLM_STOP_ACK"], 1)[0] == 4
+    assert core.read(REG["TLM_SERVO"], 1)[0] == 1
+    assert core.vfd_stop_requests == 0
+
+
+@pytest.mark.parametrize("bad_dt", [float("nan"), float("inf"), -0.01])
+def test_non_finite_or_negative_dt_is_no_time(bad_dt):
+    # Ревью №5: tick(nan) падал ValueError, tick(-0.01) вёл позу назад.
+    core = fresh_core()
+    servo_on(core, 1)
+    _start_long_ptp(core, 2)
+    core.tick()
+    before = _reg_pose_mm(core)
+    core.tick(bad_dt)
+    assert _reg_pose_mm(core) == before
+    assert core.read(REG["TLM_ACTIVITY"], 1)[0] != 0
+
+
+def test_jog_cont_step_is_capped_on_huge_dt():
+    # Открытый пункт ревью: без потолка шаг JOG_CONT при dt=1 с — 250 мм, перепрыгивает мёртвую зону.
+    core = fresh_core()
+    servo_on(core, 1)
+    assert cmd(core, 2, OP["PARAM_SET"], PARAM_ID["P_JOG_CONT_MAX"], 250)["status"] == ACK
+    assert cmd(core, 3, OP["JOG_CONT"], 2, 250)["status"] == ACK  # X-, 250 мм/с
+    prev = _reg_pose_mm(core)
+    for i in range(20):
+        if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
+            break
+        core.write(REG["JOG_LEASE"], [i + 1])
+        core.tick(1.0)
+        cur = _reg_pose_mm(core)
+        assert math.dist(cur[:3], prev[:3]) <= 100 / 3 + 0.1
+        prev = cur
