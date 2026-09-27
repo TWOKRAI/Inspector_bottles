@@ -234,10 +234,48 @@
 
 #### Task 1.2a — Бэкенд-команды пресета (ORDER С3)
 
-Команды пресета с ревизией по образцу `recipe.*` (`get` → `{preset, rev}`, `commit{preset, base_rev}` →
-`{ok, rev}` / `conflict`), превью по `seed` рендером того же `LayeredObject`, горячая подмена пресета в
-`scene_source` без рестарта. Единственная поверхность для обоих клиентов (О-5). Закрыть до T2.4
-`robot-protocol-v2`. Спека — при постановке. **Dependencies:** 1.0, 1.1b.
+**Level:** Senior (поток команд ↔ воркер кадра, атомарная запись) · **Assignee:** teamlead · **Уточнено 2026-09-27**
+**Goal:** пресет слоёв правится на живой ленте без рестарта; единственная поверхность для HTML (1.2h) и Qt (1.2b).
+Закрыть до T2.4 `robot-protocol-v2`.
+
+**Устройство (решение лида, образец — `multiprocess_framework/modules/recipe/service.py`):**
+- Три команды плагина `scene_source` (рядом с `scene.*`, `truth.*`): `preset.get`, `preset.commit`, `preset.preview`.
+  Ответ ошибки — `{"status": "error", "code": <invalid|conflict|bad_request|io_error>, "message": …}`.
+- `rev` — непрозрачная строка = `sha256(байты файла пресета).hexdigest()`; клиент только сравнивает. Правка файла мимо
+  команды меняет `rev` → у редактора `conflict`, как у `recipe`.
+- `preset.get {}` → `{status: ok, preset: to_dict(), rev, path, class_names}`. Плагин собран из каталога (не `.yaml`) —
+  `rev`/`path` = `None`, правка недоступна.
+- `preset.commit {preset: dict, base_rev: str}`: валидация `ScenePreset.from_dict` и сборка `ObjectFactory` (чтение
+  картинок) — в потоке команд, **до** замка; ошибка → `invalid` с текстом, файл не тронут. Под замком пресета: `base_rev`
+  ≠ `rev` текущих байтов → `conflict` с `current_rev`; иначе атомарная запись (`to_yaml` во временный файл того же
+  каталога → `os.replace`) → новый `rev`, и готовая фабрика кладётся в «ожидающую подмену». Плагин не из `.yaml` →
+  `bad_request`. Перекрытие `defect_probability` из конфига стенда применяется к живой фабрике так же, как в `configure`.
+- Подмена — в воркере: `produce()` в начале кадра (рядом с `_drain_jobs`) забирает ожидающую фабрику и зовёт новый
+  `ObjectSpawner.set_factory(f)`. Объекты уже на ленте не меняются (их RGBA закэширован), новым пресетом рисуются только
+  новые. Нажатие «выпусти брак» (`force_defect_next`), ждущее на старой фабрике, переносится на новую.
+- `preset.preview {preset?: dict, seeds?: list[int], tile_px?: int}` → `{status: ok, png_b64, tiles: [{seed,
+  class_name, layer_params}]}`: сетка объектов `ObjectFactory(preset или текущий).make(…, default_rng(seed))`, плитки
+  вписаны в `tile_px` (по умолчанию 160, максимум 256), не больше 16 seed. Спавнер, `rng` плагина, файл и `rev` не
+  трогаются. Размер ответа замеряется и пишется в README (L-6: крупные ответы через pipe).
+- HTTP-маршруты веб-пульта — не здесь, в 1.2h.
+
+**Acceptance criteria (тестер, до кода; плагин с фейковым ctx, как в тестах `scene_source`):**
+- [ ] P1: `preset.get` на плагине из `.yaml` — `preset` равен `ScenePreset.from_yaml(файл).to_dict()`, `rev` ==
+      `sha256(байты файла)`, `path` — этот файл; плагин из каталога — `rev is None`, `path is None`.
+- [ ] P2: `commit` со свежим `base_rev` (цвет диска → красный) → `ok`, новый `rev` == `sha256` новых байтов; файл,
+      перечитанный `from_yaml`, несёт новый цвет; строки путей в файле те же, что были.
+- [ ] P3: `commit` с устаревшим `base_rev` → `conflict` с `current_rev`, байты файла не изменились; из двух `commit` с одним
+      `base_rev` (параллельно, два потока) успешен ровно один.
+- [ ] P4: `commit` невалидного пресета (два слоя `class://`) → `invalid`, имя слоя в тексте; `commit` с несуществующей
+      картинкой слоя → `invalid`; в обоих случаях файл не тронут и `produce()` продолжает давать кадры.
+- [ ] P5: горячая подмена: до `commit` в кадрах нет красных пикселей, после `commit` (диск красный) и N вызовов
+      `produce()` — есть; рестарта плагина нет.
+- [ ] P6: `preview` с seeds `[1, 2, 3, 4]` — PNG декодируется, `tiles` — 4 записи в порядке seed; вызов `preview` между
+      кадрами не меняет последующие кадры (побитово против такого же плагина без `preview`).
+- [ ] P7: `preview` с переданным несохранённым `preset` не меняет файл и `rev`; `seeds` из 17 элементов или `tile_px` 257
+      → `bad_request`.
+- [ ] P8: плагин из каталога: `commit` → `bad_request`, на диске ничего не создано.
+**Dependencies:** 1.0, 1.1b.
 
 **Входы из ревью 1.0 (NIT-1..5, `docs/reviews/2026-09-27_line-sim-layer-editor-task-1.0-review.md`) — решить в спеке 1.2a:**
 - «Новый пресет» (`base_dir=None`) → `to_yaml` пишет относительные строки как есть, после перезагрузки они
