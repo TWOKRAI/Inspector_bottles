@@ -11,6 +11,7 @@
 | подмена пресета целиком (в т.ч. `defect_probability` файла) | `scene_source`: `preset.get` / `preset.commit`, горячая подмена через `_pending_factory` (Task 1.2a) | механизм передачи фабрики переиспользовать как есть |
 | постановка задания робота из потока команд | `scene.job_done` → `self._jobs` (deque), разбор в начале `produce()` | **образец дисциплины потоков для всех новых команд** |
 | счётчики правды | `truth.status` / `truth.reset` | не трогаем |
+| **сам пульт** | `pult_web`: таблицы маршрутов `_COMMAND_BY_PATH` (→ процесс `robot`) и `_SCENE_COMMAND_BY_PATH` (→ процесс сцены), общий `_dispatch()`, готовый `self._scene_client`, страница `_PAGE_TEMPLATE` с блоками «Задания», «Что дошло до робота», «Правда сцены» | **владелец 2026-09-27/28: «используй готовые механизмы пульта»** — новые ручки выводятся сюда таблицей маршрутов и ещё одним блоком страницы, свой сервер/клиент не заводится |
 
 Остаются непокрытыми четыре ручки плана: **поток**, **доля брака**, **пауза**, **«выпусти брак сейчас»**.
 В ядре (`Services/line_sim/core/spawner.py`, `factory.py`) три из них уже реализованы
@@ -31,7 +32,7 @@
 
 ---
 
-### Task 6.1 — Ручки потока, брака и паузы у `scene_source`
+## Task 6.1 — Ручки потока, брака и паузы у `scene_source`
 
 **Level:** Middle+ (Sonnet, extended thinking)
 **Assignee:** developer
@@ -43,9 +44,14 @@
 - `Plugins/sim/scene_source/plugin.py` — очередь управления + четыре команды + расширение `scene.status`
 - `Services/line_sim/tests/test_spawner.py` — тесты сеттера потока
 - `Plugins/sim/scene_source/tests/` — тесты команд (файл по образцу существующих)
-- `Services/line_sim/README.md`, `Plugins/sim/scene_source/README.md` — новая поверхность
+- `Plugins/sim/pult_web/plugin.py` — четыре маршрута в `_SCENE_COMMAND_BY_PATH`, `GET /api/scene`, блок «Сцена» на странице
+- `Plugins/sim/pult_web/tests/` — тесты маршрутов (файл по образцу существующих)
+- `Services/line_sim/README.md`, `Plugins/sim/scene_source/README.md`, `Plugins/sim/pult_web/README.md` — новая поверхность
 
-**Steps:**
+Разбивается на два захода: **6.1a** — команды `scene_source` + ядро (первые пять файлов),
+**6.1b** — вывод их на пульт (`pult_web`). 6.1b не начинается, пока 6.1a не зелёная.
+
+### Шаги
 
 1. **`ObjectSpawner.set_flow(*, interval_s=None, spacing_mm=None)`** — переключает режим отсчёта
    следующего спавна на живом спавнере. Проверка «ровно один задан + `0 < lo <= hi`» сейчас написана
@@ -61,7 +67,9 @@
    `dict` вида `{"op": "pause"|"flow"|"defect_now", ...}`; разбор — новым `_drain_control()` в начале
    `produce()`, рядом с `_drain_jobs()` / `_apply_pending_factory()`. Разбор в порядке поступления.
 4. **`scene.pause {"paused": bool}`** — кладёт `{"op": "pause", "paused": ...}`. Не-bool → ответ
-   `{"status": "error", ...}`, ничего в очередь не кладётся.
+   `{"status": "error", "code": "invalid", "message": ...}`, ничего в очередь не кладётся.
+   **Код ошибки — обязателен у всех четырёх команд** (как у `preset.commit`: `invalid` / `io_error` /
+   `conflict`): пульт форвардит ответ как есть, и без кода клиент отличает отказ только по тексту.
 5. **`scene.flow`** — `{"interval_s": [lo, hi]}` ЛИБО `{"spacing_mm": [lo, hi]}`, ровно один ключ.
    Валидация значений — **до** постановки в очередь (та же вынесенная функция из шага 1): кривой
    аргумент отвечает ошибкой немедленно, а не молча ломает кадровый цикл через тик.
@@ -75,7 +83,17 @@
 8. **`scene.status`** — добавить `paused`, `flow`, `defect_probability` (действующая: override, если
    задан, иначе из пресета), `force_defect_pending`. Существующие ключи `active` / `recent` не менять.
 
-**Acceptance criteria:**
+9. **Пульт (6.1b, готовым механизмом).** В `_SCENE_COMMAND_BY_PATH` (адресат — процесс сцены,
+   клиент `pult._scene_client`, он уже заведён) добавить `/api/scene/pause` → `scene.pause`,
+   `/api/scene/flow` → `scene.flow`, `/api/scene/defect_rate` → `scene.defect_rate`,
+   `/api/scene/defect_now` → `scene.defect_now`; в `do_GET` — `/api/scene` → `scene.status` тем же
+   `_dispatch()`. Тело форвардится КАК ЕСТЬ: пульт поля не валидирует (правило `_COMMAND_BY_PATH`),
+   вся проверка — в плагине сцены, ответ отдаётся как есть. Новых серверов, клиентов и таблиц не
+   заводить. На странице — один блок «Сцена» в стиле соседних: чекбокс паузы, число доли брака,
+   кнопка «Выпусти брак», два поля потока с выбором режима, строка статуса из `/api/scene` в том же
+   опросе, что уже крутится для `/api/truth`.
+
+### Критерии приёмки
 - [ ] `scene.pause {"paused": true}` → следующий `produce()` не создаёт НИ одного нового объекта при
       сколь угодно большом изменении энкодера/времени; `scene.pause {"paused": false}` → спавн
       возобновляется. Проверяется числом активных объектов до/после, не фактом вызова сеттера.
@@ -97,11 +115,26 @@
       который зовёт `cmd_*` и убеждается, что состояние спавнера до `produce()` НЕ изменилось).
 - [ ] `scene.status` отдаёт `paused` / `flow` / `defect_probability` / `force_defect_pending`,
       согласованные с тем, что реально делает движок (значение после применения, не заявка).
-- [ ] Радиус `Services/line_sim/tests Plugins/sim/scene_source/tests` — 0 failed.
+- [ ] Радиус `Services/line_sim/tests Plugins/sim/scene_source/tests Plugins/sim/pult_web/tests` — 0 failed.
 
-**Out of scope:** скорость ленты (уже `belt.*` у `sim_robot_host`); маршруты `pult_web` и любой GUI
-(6.1 — командная поверхность, пульт — `backend_ctl` 8766); запись доли брака в файл пресета;
-ROI и Qt-окно (6.3, DEFERRED).
+**Пульт (6.1b):**
+- [ ] `POST /api/scene/pause` с телом `{"paused": true}` доходит до команды `scene.pause` **в процесс
+      сцены** (не в `robot`) с телом КАК ЕСТЬ — проверяется фейковым `DeviceHubClient`: assert на
+      имя команды, тело и то, что использован `_scene_client`.
+- [ ] Ответ плагина сцены отдаётся клиенту как есть; отказ `{"status": "error", "code": "invalid"}`
+      не превращается в 200.
+- [ ] `GET /api/scene` отдаёт то же, что `scene.status` (те же ключи).
+- [ ] Существующие маршруты `/api/run`, `/api/status`, `/api/truth`, `/api/journal` работают как
+      раньше — прогон существующих тестов `pult_web` без правок в них.
+- [ ] Страница отдаёт блок «Сцена» (`GET /` содержит его разметку), и `_PAGE_TEMPLATE` остаётся
+      валидной `str.format`-строкой (двойные фигурные скобки в CSS/JS) — тест на рендер страницы.
+
+### Границы
+
+**Out of scope:** скорость ленты (уже `belt.*` у `sim_robot_host`); запись доли брака в файл
+пресета; ROI и Qt-окно (6.3, DEFERRED); Qt-вкладка сима (1.2b редактора, ждёт gui-constructor И3);
+в `pult_web` — маршруты `preset.*`, блок редактора слоёв и его JS (задача 1.2h соседней сессии),
+общий `_MAX_BODY_BYTES`, общий таймаут клиентов и форма ответа `_dispatch()` (их правит 1.2h).
 
 **Edge cases:**
 - команда пришла до первой дельты мира (`_world_ready is False`) — заявка ждёт в очереди и
