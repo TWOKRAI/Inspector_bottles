@@ -121,6 +121,28 @@ async function run() {
     // Раздел «Что дошло до робота»: опрос /api/journal раз в 1000 мс, читаем #wire.
     await sleep(1200);
     process.stdout.write(JSON.stringify({ wireText: el("wire").textContent }));
+  } else if (scenario === "preset_edit_save") {
+    // Task 1.2h, приёмка H7 / сценарии П1-П2: открыть (первый GET /api/preset
+    // при загрузке страницы), править offset_px первого слоя, «сохранить».
+    // Id полей ("layer0_offset_x", "btnPresetSave") — догадка тестера, контракт
+    // 1.2h не даёт литералов разметки редактора (см. test_acceptance_1_2h_preset.py).
+    await sleep(300); // время на начальный preset.get при загрузке страницы
+    el("layer0_offset_x").value = "15";
+    el("layer0_offset_x").fire("change");
+    el("btnPresetSave").fire("click");
+    await sleep(300); // время на POST /api/preset/commit
+  } else if (scenario === "preset_edit_conflict_then_retry") {
+    // Task 1.2h, приёмка H8 / сценарий П5: commit -> conflict -> правка не
+    // теряется -> повторное «сохранить» уходит с current_rev как base_rev.
+    await sleep(300);
+    el("layer0_offset_x").value = "15";
+    el("layer0_offset_x").fire("change");
+    el("btnPresetSave").fire("click"); // первый save -> conflict (двойник настроен в Python-тесте)
+    await sleep(300);
+    const offsetXAfterConflict = el("layer0_offset_x").value;
+    el("btnPresetSave").fire("click"); // повторный save -> должен уйти с current_rev как base_rev
+    await sleep(300);
+    process.stdout.write(JSON.stringify({ offsetXAfterConflict }));
   }
   process.exit(0);
 }
