@@ -37,6 +37,11 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `POST /api/journal/reset` | `{}` | `sim_robot.journal_reset` | результат команды как есть |
 | `GET /api/truth` | — | `truth.status` → процесс `scene_process` | результат команды как есть (Task 5.3a) |
 | `POST /api/truth/reset` | `{}` | `truth.reset` → процесс `scene_process` | результат команды как есть (Task 5.3a) |
+| `GET /api/scene` | — | `scene.status` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
+| `POST /api/scene/pause` | `{paused}` | `scene.pause` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
+| `POST /api/scene/flow` | `{interval_s}` либо `{spacing_mm}` | `scene.flow` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
+| `POST /api/scene/defect_rate` | `{probability}` | `scene.defect_rate` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
+| `POST /api/scene/defect_now` | `{}` | `scene.defect_now` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
 
 Путь **не валидирует** поля тела — форвардит их адресату как есть (`robot` или,
 для `truth.*`, процессу сцены), валидация (`bad_args` и т.п.) целиком на
@@ -161,13 +166,34 @@ dead-man'а при удержании (ревью 2.3b, итерация 2, на
 не зависят (раздельные опросы, раздельные клиенты `DeviceHubClient`). Кнопка
 «Сброс правды» → `POST /api/truth/reset`, сразу повторный опрос.
 
+**Блок «Сцена» (Task 6.1b).** Готовым механизмом маршрутов (`_SCENE_COMMAND_BY_PATH`,
+общий `_dispatch()`, уже заведённый `pult._scene_client`) — новый сервер/клиент/таблица
+не заводятся. Четыре ручки: чекбокс паузы (`scene.pause`), число доли брака 0..1 +
+«Применить» (`scene.defect_rate`), кнопка «Выпусти брак» (`scene.defect_now`), выбор
+режима потока (`interval_s`/`spacing_mm`) с полями `lo`/`hi` + «Применить» (`scene.flow`).
+Опрос `GET /api/scene` — **тем же таймером**, что уже тянет `/api/truth` (свой `setInterval`
+не заведён), строка состояния: «пауза=… поток=… доля_брака=… брак_в_очереди=…» из ключей
+ответа `scene.status` как есть.
+
+**Повтор на `overloaded`.** Команды сцены отвечают типизированным `code`
+(`invalid`/`overloaded`, `Plugins/sim/scene_source/README.md`), но `_dispatch()` пульта
+схлопывает ЛЮБОЙ `status == "error"` в `504 {ok: false, error: <message>}` — `code` в
+HTTP-тело не попадает (известное ограничение этой версии `_dispatch()`, самого метода
+эта задача не переписывает). Поэтому страница распознаёт `overloaded` по подстроке
+«переполнена» в тексте `error` (литерал сообщения `_push_control`,
+`Plugins/sim/scene_source/plugin.py`) — единственный канал, доступный ей сегодня — и
+повторяет ту же заявку РОВНО один раз (`overloaded` означает «не принято», а не «принято
+позже»; без повтора ручка встанет не на последнее нажатое значение). Остальные коды —
+текст показывается в строке состояния, без повтора.
+
 ## Границы
 
 Импорт `Plugins.sim.robot_host` и `multiprocess_prototype.*` запрещён (ADR-120) —
 единственный канал к `robot` — `DeviceHubClient`.
 
-## Out of scope (Task 2.3b)
+## Out of scope (Task 2.3b, ручки сцены — Task 6.1b)
 
-Авторизация и доступ не с `127.0.0.1`; ручки потока/брака/паузы (Ф6.1, после
-Ф3); WebSocket/SSE вместо опроса; подписка на дерево `sim.belt.**` в пульте;
-стили сверх читаемости.
+Авторизация и доступ не с `127.0.0.1`; WebSocket/SSE вместо опроса; подписка на дерево
+`sim.belt.**` в пульте; стили сверх читаемости; маршруты `preset.*`/блок редактора слоёв
+и его JS, общий `_MAX_BODY_BYTES`/таймаут клиентов/форма ответа `_dispatch()` (задача 1.2h
+соседней сессии).

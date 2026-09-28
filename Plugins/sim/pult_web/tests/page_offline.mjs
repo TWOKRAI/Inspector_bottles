@@ -121,6 +121,15 @@ async function run() {
     // Раздел «Что дошло до робота»: опрос /api/journal раз в 1000 мс, читаем #wire.
     await sleep(1200);
     process.stdout.write(JSON.stringify({ wireText: el("wire").textContent }));
+  } else if (scenario === "scene_overloaded") {
+    // Ф6.1b: клик «Выпусти брак» на overloaded (двойник отвечает overloaded на
+    // scene.defect_now) -> страница обязана повторить тот же POST ровно один раз.
+    el("btnSceneDefectNow").fire("click");
+    await sleep(300); // время на POST + повторный POST
+  } else if (scenario === "scene_status") {
+    // Ф6.1b §2: опрос /api/scene тем же таймером, что /api/truth (1000 мс).
+    await sleep(1200);
+    process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
   }
   process.exit(0);
 }
