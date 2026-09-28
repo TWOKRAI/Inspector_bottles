@@ -123,7 +123,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — AP
 - **Прототип не обрастает универсальным:** вынос во framework / `Services` / `Plugins` — по тесту слоя.
 - Планировать не дальше одной фазы вперёд. Сессия целиком в планах — сигнал, а не работа.
 
-## 4. Контроль планов — все 50 планов `plans/`
+## 4. Контроль планов — все 51 план `plans/`
 
 Колонка **Полоса** — буква из §2. **Статус** сверен git'ом 2026-09-26.
 
@@ -144,6 +144,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — AP
 | [otel-export](../otel-export.md) | Ф | Ф0–Ф2 почти целиком, Ф3 наполовину; в `main` | 2.5 |
 | [framework-architecture-rework](../framework-architecture-rework/plan.md) | Ф | DRAFT ред. 3, ревью 7/10, решения Ф0 не приняты | 2.1 отдельно; остальное ⛔ Р-1 |
 | [dataset-annotation](../dataset-annotation/plan.md) | Д | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.1 |
+| [qr-code-reader](../qr-code-reader.md) | — | Шаг 0 (ingest мануалов) DONE; правка по документам закрыта. Вне полос §2 — новое железо | Ф0 на стенде: IDMVS → ModBus Mode, три Space/Offset/Size, версия прошивки |
 
 ### 4.2 Ждут триггера — не трогать до условия
 
