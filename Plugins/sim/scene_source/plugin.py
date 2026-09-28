@@ -713,6 +713,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
             on_disk = self._normalized_file_dict(raw, path)
             changed = {key: value for key, value in new_dict.items() if on_disk.get(key, _MISSING_KEY) != value}
             if not changed:
+                # Ничего не записано, но пресет клиента по построению РАВЕН файлу, а поле
+                # плагина могло протухнуть от внешней правки файла мимо команды (ревью
+                # итерация 2, остаточный путь Ф1: угол на диске 30, в памяти 0 -> любая
+                # последующая пересборка фабрики откатывала бы объект к 0).
+                self._preset = preset
                 return {"status": "ok", "rev": current_rev, "changed": False}
             if not os.access(path, os.W_OK):
                 return {

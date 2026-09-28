@@ -133,6 +133,14 @@ def test_control_queue_applies_pause_toggles_in_fifo_order(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+def test_control_queue_ceiling_literal_is_64(tmp_path):
+    """Потолок очереди -- ЛИТЕРАЛ, а не то, что написано в коде под тестом (ревью
+    итерация 2: все тесты потолка читали `plugin._control.maxlen`, поэтому смена 64 на 1
+    никого бы не уронила, а README называет 64 контрактом)."""
+    plugin, _sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [1e9, 1e9], "scene_length_mm": 1e9})
+    assert plugin._control.maxlen == 64
+
+
 def test_control_queue_maxlen_bounds_growth_when_produce_never_called(tmp_path):
     """Контракт лида, edge case §3: очередь управления не должна расти без предела, если
     produce() не зовут. Находка Ф3(б), ревью итерация 2: `deque(maxlen=...)` больше НЕ
