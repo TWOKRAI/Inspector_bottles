@@ -24,6 +24,33 @@ from Services.line_sim.core.layered_object import LayeredObject
 from Services.line_sim.interfaces import ObjectPassport
 
 
+def validate_flow(
+    interval_s: tuple[float, float] | None,
+    spacing_mm: tuple[float, float] | None,
+) -> None:
+    """Проверка режима отсчёта следующего спавна — ровно один из двух задан, каждый
+    диапазон `(lo, hi)` с `0 < lo <= hi`. Вынесена из `__init__` (Task 6.1, контракт
+    `plans/line-sim/phase-6-contract-6.1.md` шаг 1), чтобы `ObjectSpawner.set_flow()`
+    (смена режима на живом спавнере) звала ТУ ЖЕ проверку, а не свою копию."""
+    if (interval_s is None) == (spacing_mm is None):
+        raise ValueError(
+            "ровно один из interval_s/spacing_mm должен быть задан — "
+            f"interval_s={interval_s!r}, spacing_mm={spacing_mm!r}"
+        )
+    if interval_s is not None:
+        lo, hi = interval_s
+        if lo > hi:
+            raise ValueError(f"interval_s: lo={lo} > hi={hi} — нижняя граница интервала больше верхней")
+        if lo <= 0:
+            raise ValueError(f"interval_s: lo={lo} <= 0 — интервал спавна должен быть положительным")
+    else:
+        lo, hi = spacing_mm  # type: ignore[misc]  # spacing_mm гарантированно не None (проверка выше)
+        if lo > hi:
+            raise ValueError(f"spacing_mm: lo={lo} > hi={hi} — нижняя граница шага больше верхней")
+        if lo <= 0:
+            raise ValueError(f"spacing_mm: lo={lo} <= 0 — шаг спавна должен быть положительным")
+
+
 class ObjectSpawner:
     """Спавнит объекты на ленте по интервалу, снимает уехавшие за `scene_length_mm`.
 
@@ -66,23 +93,7 @@ class ObjectSpawner:
         scene_length_mm: float,
         max_active: int = 200,
     ) -> None:
-        if (interval_s is None) == (spacing_mm is None):
-            raise ValueError(
-                "ровно один из interval_s/spacing_mm должен быть задан — "
-                f"interval_s={interval_s!r}, spacing_mm={spacing_mm!r}"
-            )
-        if interval_s is not None:
-            lo, hi = interval_s
-            if lo > hi:
-                raise ValueError(f"interval_s: lo={lo} > hi={hi} — нижняя граница интервала больше верхней")
-            if lo <= 0:
-                raise ValueError(f"interval_s: lo={lo} <= 0 — интервал спавна должен быть положительным")
-        else:
-            lo, hi = spacing_mm  # type: ignore[misc]  # spacing_mm гарантированно не None (проверка выше)
-            if lo > hi:
-                raise ValueError(f"spacing_mm: lo={lo} > hi={hi} — нижняя граница шага больше верхней")
-            if lo <= 0:
-                raise ValueError(f"spacing_mm: lo={lo} <= 0 — шаг спавна должен быть положительным")
+        validate_flow(interval_s, spacing_mm)
         if scene_length_mm <= 0:
             raise ValueError(f"scene_length_mm={scene_length_mm} <= 0 — длина сцены должна быть положительной")
         if max_active <= 0:
@@ -232,6 +243,51 @@ class ObjectSpawner:
 
     def set_paused(self, paused: bool) -> None:
         self._paused = paused
+
+    @property
+    def paused(self) -> bool:
+        """Read-only — ручка «пауза» стенда (`scene.status`, Task 6.1) не лезет в приватное поле."""
+        return self._paused
+
+    @property
+    def flow(self) -> dict:
+        """Read-only снимок активного режима отсчёта спавна — `{"mode": "interval_s"|
+        "spacing_mm", "lo": float, "hi": float}` (Task 6.1, `scene.status`)."""
+        if self._interval_s is not None:
+            lo, hi = self._interval_s
+            mode = "interval_s"
+        else:
+            lo, hi = self._spacing_mm  # type: ignore[misc]  # ровно один режим задан всегда
+            mode = "spacing_mm"
+        return {"mode": mode, "lo": lo, "hi": hi}
+
+    def set_flow(
+        self,
+        *,
+        interval_s: tuple[float, float] | None = None,
+        spacing_mm: tuple[float, float] | None = None,
+    ) -> None:
+        """Переключить режим отсчёта следующего спавна на ЖИВОМ спавнере (Task 6.1,
+        ручка «поток» стенда) — та же проверка, что в `__init__` (`validate_flow`), кривые
+        аргументы бросают `ValueError` ДО любой мутации состояния (отказ атомарен —
+        текущий режим остаётся как был).
+
+        Сбрасывает НЕЗАВЕРШЁННЫЙ отсчёт только СВОЕГО вида: новый `interval_s` взводит
+        срок заново (`_deadline = None`, как на первом тике — вызывающий воркер передаёт
+        актуальный `now_wall_s` на следующем `tick()`), новый `spacing_mm` сбрасывает
+        только порог до следующего спавна (`_next_spacing_mm = None`). `_last_spawn_encoder`
+        (путь ленты, уже пройденный с последнего реального спавна) НЕ трогается ни в одном
+        из двух случаев — переключение режима не должно стирать то, что лента уже проехала.
+        Активные объекты, нумерация (`_next_id_n`) и пауза не меняются вовсе."""
+        validate_flow(interval_s, spacing_mm)
+        if interval_s is not None:
+            self._interval_s = interval_s
+            self._spacing_mm = None
+            self._deadline = None
+        else:
+            self._spacing_mm = spacing_mm
+            self._interval_s = None
+            self._next_spacing_mm = None
 
     def set_factory(self, factory: ObjectFactory) -> None:
         """Горячая подмена фабрики (Task 1.2a, `preset.commit`): СЛЕДУЮЩИЕ спавны строит

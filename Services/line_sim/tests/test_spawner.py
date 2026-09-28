@@ -24,6 +24,7 @@ import yaml
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import ObjectFactory, ObjectSpawner, ScenePreset
 from Services.line_sim.core.belt import FACTOR_MM, encoder_to_offset_mm
+from Services.line_sim.core.spawner import validate_flow
 
 
 def _make_factory(tmp_path: Path, defect_probability: float = 0.0) -> ObjectFactory:
@@ -346,3 +347,121 @@ def test_spacing_ceiling_does_not_move_threshold_and_resumes_after_despawn(tmp_p
     active = spawner.active_objects()
     assert len(active) == 1
     assert active[0].passport.spawn_encoder == far
+
+
+# --------------------------------------------------------------------------
+# Task 6.1 — set_flow()/validate_flow() (ручка «поток» стенда), paused/flow
+# --------------------------------------------------------------------------
+
+
+def test_validate_flow_used_by_constructor_and_set_flow_are_the_same_function(tmp_path):
+    """`validate_flow` — модульная функция, не приватный метод: доступна отдельно от
+    класса и звана И конструктором, И `set_flow` (контракт лида шаг 1 — одна проверка,
+    не две копии)."""
+    with pytest.raises(ValueError) as exc:
+        validate_flow(None, None)
+    assert "interval_s" in str(exc.value)
+    assert "spacing_mm" in str(exc.value)
+    validate_flow(interval_s=(1.0, 2.0), spacing_mm=None)  # не бросает — валидные аргументы
+
+
+def test_set_flow_rejects_invalid_args_without_changing_mode(tmp_path):
+    """Кривые аргументы `set_flow` дают тот же `ValueError`, что конструктор, и НЕ меняют
+    текущий режим спавнера — проверка целиком ДО мутации состояния (отказ атомарен)."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory, interval_s=(0.5, 0.5), scene_length_mm=100.0)
+
+    with pytest.raises(ValueError) as exc_both:
+        spawner.set_flow(interval_s=(1.0, 1.0), spacing_mm=(10.0, 10.0))
+    assert "interval_s" in str(exc_both.value)
+    assert "spacing_mm" in str(exc_both.value)
+    assert spawner.flow == {"mode": "interval_s", "lo": 0.5, "hi": 0.5}
+
+    with pytest.raises(ValueError, match="spacing_mm"):
+        spawner.set_flow(spacing_mm=(10.0, 5.0))
+    assert spawner.flow == {"mode": "interval_s", "lo": 0.5, "hi": 0.5}, "отказ не должен менять режим"
+
+
+def test_set_flow_to_interval_resets_only_deadline_not_spacing_progress(tmp_path):
+    """Переключение spacing_mm -> interval_s: `_deadline=None` (срок взводится заново),
+    но `_last_spawn_encoder` НЕ трогается (путь ленты уже пройден — контракт лида шаг 1).
+    Первый `tick()` после переключения только взводит срок, не спавнит, даже если
+    `now_wall_s` уже "просрочен" относительно нового интервала — иначе забытый сброс
+    `_deadline` дал бы мгновенный спавн по случайно совпавшему старому сроку."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory, spacing_mm=(50.0, 50.0), scene_length_mm=1e9)
+    rng = np.random.default_rng(300)
+
+    spawner.tick(now_encoder=0.0, now_wall_s=1000.0, rng=rng)  # spacing: первый спавн сразу
+    assert len(spawner.active_objects()) == 1
+    last_spawn_encoder_before = spawner._last_spawn_encoder
+    assert last_spawn_encoder_before is not None
+
+    spawner.set_flow(interval_s=(1.0, 1.0))
+    assert spawner._deadline is None
+    assert spawner._last_spawn_encoder == last_spawn_encoder_before, (
+        "переключение режима не должно стирать уже пройденный путь ленты"
+    )
+
+    spawner.tick(now_encoder=0.0, now_wall_s=1000.0, rng=rng)
+    assert len(spawner.active_objects()) == 1, "первый tick после переключения не должен спавнить мгновенно"
+
+    spawner.tick(now_encoder=0.0, now_wall_s=1001.1, rng=rng)  # интервал (1с) истёк
+    assert len(spawner.active_objects()) == 2, "по времени спавн обязан случиться после взведённого срока"
+
+
+def test_set_flow_to_spacing_resets_only_next_spacing_not_last_encoder_or_deadline(tmp_path):
+    """Переключение interval_s -> spacing_mm: `_next_spacing_mm=None`, чужой `_deadline`
+    НЕ трогается (симметричный hazard предыдущему тесту — реализация не должна сбрасывать
+    оба счётчика разом, только счётчик СВОЕГО режима)."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory, interval_s=(1e9, 1e9), scene_length_mm=1e9)
+    rng = np.random.default_rng(301)
+
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # взводит дедлайн, не спавнит
+    assert spawner.active_objects() == []
+    deadline_before = spawner._deadline
+    assert deadline_before is not None
+
+    spawner.set_flow(spacing_mm=(50.0, 50.0))
+    assert spawner._next_spacing_mm is None
+    assert spawner._deadline == deadline_before, "смена на НЕ-interval режим не должна трогать чужой _deadline"
+
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)  # spacing: _last_spawn_encoder=None -> спавн сразу
+    assert len(spawner.active_objects()) == 1
+
+
+def test_set_flow_does_not_touch_active_objects_or_numbering(tmp_path):
+    """Активные объекты и нумерация (`_next_id_n`) не меняются при смене режима на живом
+    спавнере (контракт лида шаг 1)."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory, spacing_mm=(50.0, 50.0), scene_length_mm=1e9)
+    rng = np.random.default_rng(302)
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=rng)
+    spawner.tick(now_encoder=1000.0, now_wall_s=0.0, rng=rng)
+    active_before = spawner.active_objects()
+    next_id_before = spawner._next_id_n
+    assert len(active_before) == 2
+
+    spawner.set_flow(interval_s=(5.0, 5.0))
+
+    assert spawner.active_objects() == active_before
+    assert spawner._next_id_n == next_id_before
+
+
+def test_paused_and_flow_properties_are_read_only_snapshots(tmp_path):
+    """`paused`/`flow` — read-only отражение приватного состояния, для `scene.status`
+    (Task 6.1) без прямого доступа к приватным полям спавнера."""
+    factory = _make_factory(tmp_path)
+    spawner = ObjectSpawner(factory, interval_s=(1.0, 2.0), scene_length_mm=100.0)
+    assert spawner.flow == {"mode": "interval_s", "lo": 1.0, "hi": 2.0}
+    assert spawner.paused is False
+
+    spawner.set_paused(True)
+    assert spawner.paused is True
+
+    spawner.set_flow(spacing_mm=(3.0, 4.0))
+    assert spawner.flow == {"mode": "spacing_mm", "lo": 3.0, "hi": 4.0}
+
+    with pytest.raises(AttributeError):
+        spawner.paused = False  # read-only — нет сеттера у свойства (есть set_paused())
