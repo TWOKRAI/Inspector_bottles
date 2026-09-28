@@ -1,0 +1,498 @@
+<title>Подключение ID3013</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#f4f5f2; --panel:#ffffff; --panel-2:#eceee9;
+    --ink:#15181a; --ink-2:#4d5652; --ink-3:#7c857f;
+    --rule:#d5dad4;
+    --accent:#0f6e5c; --accent-soft:#e2efe9;
+    --danger:#a8201a; --danger-soft:#f8e6e4;
+    --warn:#8a5a00; --warn-soft:#f7eedd;
+    --casing:#5f6866; --stripe:#f6f6f4;
+    --shadow:0 1px 0 rgba(21,24,26,.04), 0 6px 18px -12px rgba(21,24,26,.35);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#121513; --panel:#1a1e1c; --panel-2:#232825;
+      --ink:#e9ede9; --ink-2:#a3aca7; --ink-3:#7d8681;
+      --rule:#2e3532;
+      --accent:#57cfae; --accent-soft:#16302a;
+      --danger:#ff7a6d; --danger-soft:#33201e;
+      --warn:#e3ad4b; --warn-soft:#2e2718;
+      --casing:#98a29d; --stripe:#e8ece9;
+      --shadow:0 1px 0 rgba(0,0,0,.3), 0 8px 22px -14px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#121513; --panel:#1a1e1c; --panel-2:#232825;
+    --ink:#e9ede9; --ink-2:#a3aca7; --ink-3:#7d8681;
+    --rule:#2e3532;
+    --accent:#57cfae; --accent-soft:#16302a;
+    --danger:#ff7a6d; --danger-soft:#33201e;
+    --warn:#e3ad4b; --warn-soft:#2e2718;
+    --casing:#98a29d; --stripe:#e8ece9;
+    --shadow:0 1px 0 rgba(0,0,0,.3), 0 8px 22px -14px rgba(0,0,0,.8);
+  }
+
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"IBM Plex Sans", system-ui, sans-serif;
+    font-size:15px; line-height:1.6;
+    padding-inline:20px;
+  }
+  .wrap{max-width:1060px; margin:0 auto; display:flex; flex-direction:column; gap:34px; padding-block:40px 64px;}
+
+  h1,h2,h3{font-family:"Barlow Condensed", "Arial Narrow", sans-serif; text-wrap:balance; margin:0; letter-spacing:.01em;}
+  h1{font-size:clamp(34px,6vw,52px); font-weight:700; line-height:1.02; text-transform:uppercase;}
+  h2{font-size:clamp(23px,3.4vw,30px); font-weight:600; text-transform:uppercase;}
+  h3{font-size:18px; font-weight:600;}
+  p{margin:0;}
+  code,.mono{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:.92em;}
+
+  .eyebrow{
+    font-family:"IBM Plex Mono", monospace; font-size:11px; font-weight:600;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3);
+  }
+
+  header{display:flex; flex-direction:column; gap:12px; border-bottom:2px solid var(--ink); padding-bottom:22px;}
+  .sub{color:var(--ink-2); max-width:64ch;}
+
+  section{display:flex; flex-direction:column; gap:16px;}
+  .sec-head{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; border-bottom:1px solid var(--rule); padding-bottom:8px;}
+  .sec-head .eyebrow{margin-left:auto;}
+
+  .panel{
+    background:var(--panel); border:1px solid var(--rule); border-radius:3px;
+    box-shadow:var(--shadow); padding:18px;
+  }
+  .fig{display:flex; flex-direction:column; gap:12px;}
+  .fig-scroll{overflow-x:auto;}
+  .fig-scroll svg{display:block; width:100%; min-width:660px; height:auto;}
+  .cap{font-size:13.5px; color:var(--ink-2);}
+  .cap b{color:var(--ink); font-weight:600;}
+
+  .w{fill:none; stroke-linecap:round; stroke-linejoin:round;}
+  .casing{stroke:var(--casing); stroke-width:7.5;}
+  .core{stroke-width:3.4;}
+  .stripe{stroke:var(--stripe); stroke-width:3.4; stroke-dasharray:5 8;}
+  .c-red{stroke:#d1382a;} .c-black{stroke:#15181a;} .c-gray{stroke:#9ba3a1;}
+  .c-blue{stroke:#2f6fb5;} .c-brown{stroke:#7a4a23;} .c-pink{stroke:#e88aa6;}
+  .c-purple{stroke:#7a52b0;}
+  .rail{stroke:var(--ink-3); stroke-width:1.6; fill:none;}
+  .rail-dash{stroke:var(--ink-3); stroke-width:1.6; fill:none; stroke-dasharray:7 6;}
+  .box{fill:var(--panel-2); stroke:var(--ink); stroke-width:1.8;}
+  .box-soft{fill:none; stroke:var(--rule); stroke-width:1.4;}
+  .res{fill:var(--panel); stroke:var(--ink); stroke-width:1.6;}
+  .node{fill:var(--ink); stroke:none;}
+  .t{font-family:"IBM Plex Mono", monospace; font-size:12px; fill:var(--ink); font-weight:600;}
+  .t2{font-family:"IBM Plex Mono", monospace; font-size:11px; fill:var(--ink-2);}
+  .tt{font-family:"Barlow Condensed", sans-serif; font-size:17px; font-weight:600; fill:var(--ink); text-transform:uppercase; letter-spacing:.03em;}
+  .barrier{stroke:var(--accent); stroke-width:1.8; stroke-dasharray:6 5; fill:none;}
+  .t-acc{font-family:"IBM Plex Mono", monospace; font-size:11px; fill:var(--accent); font-weight:600;}
+  .t-warn{font-family:"IBM Plex Mono", monospace; font-size:11px; fill:var(--danger); font-weight:600;}
+  .arrow{fill:var(--ink);}
+
+  table{border-collapse:collapse; width:100%; font-size:13.5px;}
+  th,td{text-align:left; padding:7px 10px; border-bottom:1px solid var(--rule); vertical-align:top;}
+  th{font-family:"Barlow Condensed",sans-serif; font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-2); font-weight:600; border-bottom:1.5px solid var(--ink);}
+  td.num,th.num{font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace;}
+  .tbl-scroll{overflow-x:auto;}
+  .tbl-scroll table{min-width:540px;}
+
+  .swatch{display:inline-block; width:26px; height:11px; border-radius:2px; border:1px solid var(--casing); vertical-align:middle; margin-right:7px;}
+
+  .note{border-left:3px solid var(--accent); background:var(--accent-soft); padding:12px 16px; border-radius:0 3px 3px 0; font-size:14px;}
+  .danger{border-left:3px solid var(--danger); background:var(--danger-soft); padding:12px 16px; border-radius:0 3px 3px 0; font-size:14px;}
+  .danger strong{color:var(--danger);}
+  .warn{border-left:3px solid var(--warn); background:var(--warn-soft); padding:12px 16px; border-radius:0 3px 3px 0; font-size:14px;}
+
+  .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px;}
+  ul{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:5px;}
+  .kv{display:flex; flex-direction:column; gap:2px;}
+  .kv .k{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3);}
+  .kv .v{font-family:"Barlow Condensed",sans-serif; font-size:26px; font-weight:600; line-height:1.1; font-variant-numeric:tabular-nums;}
+  .kvrow{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:18px;}
+  footer{border-top:1px solid var(--rule); padding-top:18px; color:var(--ink-2); font-size:13px; display:flex; flex-direction:column; gap:8px;}
+  .h3-tight{margin-bottom:10px;}
+</style>
+
+<div class="wrap">
+
+<header>
+  <span class="eyebrow">Hikrobot ID3000 · MV-ID3013PM-06M · UM V4.0.1</span>
+  <h1>Подключение ID3013</h1>
+  <p class="sub">Питание, дискретные входы и выходы. Всё ниже — из официального руководства на серию ID3000. <b>На нашем экземпляре не проверено ничего</b>, и главный вопрос — общий ли GND — зависит от версии железа. Раздел 3 объясняет, почему это нужно выяснить до паяльника.</p>
+</header>
+
+<section>
+  <div class="sec-head"><h2>1 · Питание</h2><span class="eyebrow">табл. 4-1</span></div>
+
+  <div class="panel fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 900 235" role="img" aria-label="Питание считывателя от блока питания 12-24 вольт через клемму 8 и клемму 7 восьмиконтактного клеммника">
+      <rect class="box" x="24" y="66" width="170" height="110" rx="3"/>
+      <text class="tt" x="109" y="99" text-anchor="middle">Блок питания</text>
+      <text class="t" x="109" y="122" text-anchor="middle">12 … 24 В ⎓</text>
+      <text class="t2" x="109" y="142" text-anchor="middle">отдельный, PoE нет</text>
+      <text class="t" x="186" y="163" text-anchor="end">+</text>
+      <text class="t" x="186" y="183" text-anchor="end">–</text>
+
+      <rect class="box" x="360" y="36" width="160" height="170" rx="3"/>
+      <text class="tt" x="440" y="62" text-anchor="middle">8-pin клеммник</text>
+      <text class="t2" x="440" y="80" text-anchor="middle">на конце кабеля</text>
+      <text class="t" x="376" y="116">кл. 8 · POWER_IN</text>
+      <text class="t" x="376" y="150">кл. 7 · GND</text>
+      <text class="t2" x="376" y="180">кл. 1…6 — сигналы</text>
+
+      <rect class="box" x="676" y="56" width="200" height="130" rx="3"/>
+      <text class="tt" x="776" y="88" text-anchor="middle">MV-ID3013PM</text>
+      <text class="t2" x="776" y="110" text-anchor="middle">разъём 17-pin M12</text>
+      <text class="t2" x="776" y="132" text-anchor="middle">кабель разветвляется на</text>
+      <text class="t2" x="776" y="150" text-anchor="middle">RJ45 · DB9 · клеммник</text>
+      <text class="t2" x="776" y="170" text-anchor="middle">+ 2 свободных провода</text>
+
+      <path class="w casing" d="M194 158 H 250 V 110 H 360"/>
+      <path class="w core c-red" d="M194 158 H 250 V 110 H 360"/>
+      <text class="t2" x="254" y="102">красный · pin 1</text>
+
+      <path class="w casing" d="M194 180 H 226 V 145 H 360"/>
+      <path class="w core c-black" d="M194 180 H 226 V 145 H 360"/>
+      <text class="t2" x="254" y="166">чёрный · pin 11</text>
+
+      <path class="w casing" d="M520 121 H 676"/>
+      <path class="w core c-gray" d="M520 121 H 676"/>
+      <text class="t2" x="598" y="111" text-anchor="middle">17-pin M12</text>
+
+      <circle class="node" cx="360" cy="110" r="3.5"/>
+      <circle class="node" cx="360" cy="145" r="3.5"/>
+    </svg>
+    </div>
+    <p class="cap"><b>Клемма 8 — плюс, клемма 7 — минус.</b> Тот же чёрный провод (pin 11) мануал в колонке «I/O Signal Source» называет <span class="mono">Signal ground</span>: в неразвязанном исполнении это одновременно минус питания и земля сигналов. Ровно об этом раздел 3.</p>
+  </div>
+
+  <div class="danger">
+    <strong>Не запитывать двумя способами разом.</strong> У разъёма DB9 на том же кабеле есть клемма <b>12 В</b>. Мануал дословно: питать можно либо через 8-pin клеммник, либо через DB9, и одновременно оба — <span class="mono">«may cause the burnout of the power supply»</span>.
+  </div>
+
+  <div class="kvrow panel">
+    <div class="kv"><span class="k">Питание</span><span class="v">12–24 В⎓</span></div>
+    <div class="kv"><span class="k">Пробой входа</span><span class="v">36 В</span></div>
+    <div class="kv"><span class="k">Ток входа max</span><span class="v">25 мА</span></div>
+    <div class="kv"><span class="k">Ток выхода max</span><span class="v">200 мА</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>2 · Что где в кабеле</h2><span class="eyebrow">17-pin M12 → четыре конца</span></div>
+  <div class="panel tbl-scroll">
+    <table>
+      <thead><tr>
+        <th class="num">Pin</th><th>Сигнал</th><th>Цвет провода</th><th>Куда выходит</th><th>Линия в IDMVS</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>POWER_IN</td><td><span class="swatch" style="background:#d1382a"></span>красный</td><td>клемма 8</td><td>—</td></tr>
+        <tr><td class="num">11</td><td>GND</td><td><span class="swatch" style="background:#15181a"></span>чёрный</td><td>клемма 7</td><td>земля сигналов</td></tr>
+        <tr><td class="num">16</td><td><b>DI_0</b></td><td><span class="swatch" style="background:#9ba3a1"></span>серый</td><td>клемма 1</td><td>Line 0 · вход</td></tr>
+        <tr><td class="num">17</td><td><b>DI_1</b></td><td><span class="swatch" style="background:#f2f2ee"></span>белый</td><td>клемма 2</td><td>Line 1 · вход</td></tr>
+        <tr><td class="num">9</td><td><b>DI_2</b></td><td><span class="swatch" style="background:#2f6fb5"></span>синий</td><td>клемма 3</td><td>Line 2 · вход</td></tr>
+        <tr><td class="num">8</td><td><b>DO_0</b></td><td><span class="swatch" style="background:linear-gradient(90deg,#2f6fb5 50%,#f2f2ee 50%)"></span>сине-белый</td><td>клемма 4</td><td>Line 3 · выход</td></tr>
+        <tr><td class="num">10</td><td><b>DO_1</b></td><td><span class="swatch" style="background:linear-gradient(90deg,#7a4a23 50%,#f2f2ee 50%)"></span>коричнево-белый</td><td>клемма 5</td><td>Line 4 · выход</td></tr>
+        <tr><td class="num">2</td><td><b>DO_2</b></td><td><span class="swatch" style="background:#7a4a23"></span>коричневый</td><td>клемма 6</td><td>Line 5 · выход</td></tr>
+        <tr><td class="num">12</td><td><b>IN_R</b> — общая точка либо резистор входов</td><td><span class="swatch" style="background:#e88aa6"></span>розовый</td><td><b>свободный конец</b></td><td>—</td></tr>
+        <tr><td class="num">3</td><td><b>OUT_R</b> — общая точка либо резистор выходов</td><td><span class="swatch" style="background:linear-gradient(90deg,#7a52b0 50%,#f2f2ee 50%)"></span>фиолетово-белый</td><td><b>свободный конец</b></td><td>—</td></tr>
+        <tr><td class="num">4 / 5</td><td>RS232 TX / RX</td><td>красно-синий / серо-розовый</td><td>DB9 female</td><td>—</td></tr>
+        <tr><td class="num">6, 7, 14, 15</td><td>Fast Ethernet</td><td>бело-оранжевый, зелёный, оранжевый, бело-зелёный</td><td>RJ45</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="warn"><b>Розового и фиолетово-белого в клеммнике нет.</b> Это два отдельных свободных конца, и без них вход и выход не работают. Если задействуете все три канала I/O сразу, мануал требует либо 8-pin IO box, либо ручную разводку этих концов с резистором.</div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>3 · Какая у вас версия</h2><span class="eyebrow">развилка</span></div>
+  <p class="sub">Это единственное место, где ответ на вопрос «общий ли GND» не один. Схема подключения к ПЛК зависит от него целиком, поэтому версию железа снимают до монтажа.</p>
+  <div class="grid2">
+    <div class="panel fig">
+      <h3>Версия 3.0 — развязанная</h3>
+      <p class="cap">Дословно: <span class="mono">«pin 2/8/9/10/16/17 is isolated input or output»</span>. Две независимые земли. Розовый и фиолетово-белый работают как <b>общие точки внешней цепи</b>.</p>
+      <p class="cap"><b>GND не общий — в этом весь смысл.</b> Схема — раздел 4.</p>
+    </div>
+    <div class="panel fig">
+      <h3>Версия 2.0 и старше</h3>
+      <p class="cap">Развязки нет. Розовый и фиолетово-белый — линии <b>подтягивающего резистора</b>: 330 Ом вниз для PNP, 1 кОм вверх для NPN.</p>
+      <p class="cap"><b>GND общий</b> — минус питания камеры и земля внешнего устройства соединяются. Схема — раздел 5.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>4 · Версия 3.0 — развязанная</h2><span class="eyebrow">рис. 6-5 … 6-13</span></div>
+  <div class="panel fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 900 410" role="img" aria-label="Развязанное подключение: два независимых контура питания, сигнальные провода пересекают барьер развязки, розовый и фиолетово-белый замыкают внешний контур">
+      <path class="barrier" d="M534 26 V 392"/>
+      <text class="t-acc" x="534" y="18" text-anchor="middle">ГАЛЬВАНИЧЕСКАЯ РАЗВЯЗКА</text>
+
+      <rect class="box-soft" x="16" y="290" width="150" height="76" rx="3"/>
+      <text class="t" x="91" y="316" text-anchor="middle">БП камеры</text>
+      <text class="t2" x="91" y="336" text-anchor="middle">12–24 В ⎓</text>
+      <text class="t2" x="91" y="356" text-anchor="middle">контур PWR</text>
+
+      <rect class="box" x="210" y="48" width="200" height="318" rx="3"/>
+      <text class="tt" x="310" y="78" text-anchor="middle">Считыватель</text>
+      <text class="t2" x="310" y="97" text-anchor="middle">MV-ID3013PM</text>
+
+      <text class="t" x="226" y="136">DI_0</text><text class="t2" x="226" y="152">кл. 1 · серый</text>
+      <text class="t" x="226" y="196">IN_R</text><text class="t2" x="226" y="212">розовый</text>
+      <text class="t" x="226" y="256">DO_0</text><text class="t2" x="226" y="272">кл. 4 · сине-бел.</text>
+      <text class="t" x="226" y="316">OUT_R</text><text class="t2" x="226" y="332">фиолет.-бел.</text>
+
+      <path class="w casing" d="M166 306 H 188 V 114 H 210"/>
+      <path class="w core c-red" d="M166 306 H 188 V 114 H 210"/>
+      <text class="t2" x="192" y="106">PWR +</text>
+
+      <path class="w casing" d="M166 346 H 178 V 358 H 210"/>
+      <path class="w core c-black" d="M166 346 H 178 V 358 H 210"/>
+      <text class="t2" x="216" y="382">GND of PWR — только камера</text>
+
+      <rect class="box" x="650" y="124" width="180" height="150" rx="3"/>
+      <text class="tt" x="740" y="156" text-anchor="middle">ПЛК / датчик</text>
+      <text class="t2" x="740" y="176" text-anchor="middle">своё питание VCC</text>
+      <text class="t2" x="740" y="202" text-anchor="middle">выход → на DI_0</text>
+      <text class="t2" x="740" y="222" text-anchor="middle">вход ← с DO_0</text>
+
+      <path class="rail" d="M566 60 H 880"/>
+      <text class="t" x="880" y="52" text-anchor="end">VCC + внешнего контура</text>
+      <path class="rail" d="M566 358 H 880"/>
+      <text class="t" x="880" y="382" text-anchor="end">GND of VCC — внешнего</text>
+      <path class="rail" d="M740 60 V 124"/>
+      <path class="rail" d="M740 274 V 358"/>
+
+      <path class="w casing" d="M410 132 H 650"/>
+      <path class="w core c-gray" d="M410 132 H 650"/>
+      <text class="t2" x="530" y="124" text-anchor="middle">сигнал триггера</text>
+
+      <path class="w casing" d="M410 192 H 596"/>
+      <path class="w core c-pink" d="M410 192 H 596"/>
+      <path class="w casing" d="M596 192 V 358"/>
+      <path class="w core c-pink" d="M596 192 V 358"/>
+      <path class="w core c-pink" d="M596 192 V 60" stroke-dasharray="6 7" opacity=".6"/>
+      <circle class="node" cx="596" cy="192" r="3.5"/>
+      <text class="t-acc" x="606" y="300">PNP → вниз, на GND</text>
+      <text class="t-acc" x="606" y="92">NPN → вверх, на VCC</text>
+
+      <path class="w casing" d="M410 252 H 650"/>
+      <path class="w core c-blue" d="M410 252 H 650"/>
+      <path class="w stripe" d="M410 252 H 650"/>
+      <text class="t2" x="530" y="244" text-anchor="middle">сигнал результата</text>
+
+      <path class="w casing" d="M410 312 H 634"/>
+      <path class="w core c-purple" d="M410 312 H 634"/>
+      <path class="w stripe" d="M410 312 H 634"/>
+      <path class="w casing" d="M634 312 V 358"/>
+      <path class="w core c-purple" d="M634 312 V 358"/>
+      <path class="w core c-purple" d="M634 312 V 60" stroke-dasharray="6 7" opacity=".6"/>
+      <circle class="node" cx="634" cy="312" r="3.5"/>
+
+      <circle class="node" cx="596" cy="358" r="3.5"/>
+      <circle class="node" cx="634" cy="358" r="3.5"/>
+      <circle class="node" cx="740" cy="358" r="3.5"/>
+    </svg>
+    </div>
+    <p class="cap"><b>Сплошная линия вниз — вариант PNP, пунктир вверх — вариант NPN.</b> Это один и тот же провод, просто две точки назначения. Розовый <span class="mono">IN_R</span> и фиолетово-белый <span class="mono">OUT_R</span> замыкают контур <b>внешнего</b> устройства, а не камеры. Чёрный провод камеры к этой земле не подключается — иначе развязки нет.</p>
+  </div>
+  <div class="panel tbl-scroll">
+    <table>
+      <thead><tr><th>Внешнее устройство</th><th>Розовый IN_R и фиолетово-белый OUT_R подключить к</th></tr></thead>
+      <tbody>
+        <tr><td><b>PNP</b></td><td>минусу внешнего питания — <span class="mono">GND of VCC</span></td></tr>
+        <tr><td><b>NPN</b></td><td>плюсу внешнего питания — <span class="mono">VCC</span>; мануал советует через 1 кОм</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>5 · Версия 2.0 — общий GND</h2><span class="eyebrow">рис. 6-8 … 6-15</span></div>
+  <div class="panel fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 900 410" role="img" aria-label="Неразвязанное подключение: одна общая земля для камеры и внешнего устройства, розовый и фиолетово-белый через резисторы">
+      <rect class="box-soft" x="16" y="286" width="150" height="76" rx="3"/>
+      <text class="t" x="91" y="312" text-anchor="middle">БП камеры</text>
+      <text class="t2" x="91" y="332" text-anchor="middle">12–24 В ⎓</text>
+      <text class="t2" x="91" y="352" text-anchor="middle">PWR</text>
+
+      <rect class="box" x="210" y="44" width="200" height="300" rx="3"/>
+      <text class="tt" x="310" y="74" text-anchor="middle">Считыватель</text>
+      <text class="t2" x="310" y="93" text-anchor="middle">MV-ID3013PM</text>
+      <text class="t" x="226" y="132">DI_0</text><text class="t2" x="226" y="148">кл. 1 · серый</text>
+      <text class="t" x="226" y="192">IN_R</text><text class="t2" x="226" y="208">розовый</text>
+      <text class="t" x="226" y="252">DO_0</text><text class="t2" x="226" y="268">кл. 4 · сине-бел.</text>
+      <text class="t" x="226" y="312">OUT_R</text><text class="t2" x="226" y="328">фиолет.-бел.</text>
+
+      <path class="w casing" d="M166 302 H 188 V 110 H 210"/>
+      <path class="w core c-red" d="M166 302 H 188 V 110 H 210"/>
+      <text class="t2" x="192" y="102">PWR +</text>
+
+      <rect class="box" x="650" y="120" width="180" height="134" rx="3"/>
+      <text class="tt" x="740" y="152" text-anchor="middle">ПЛК / датчик</text>
+      <text class="t2" x="740" y="176" text-anchor="middle">выход → на DI_0</text>
+      <text class="t2" x="740" y="196" text-anchor="middle">вход ← с DO_0</text>
+      <text class="t-warn" x="740" y="226" text-anchor="middle">VCC ≤ PWR</text>
+
+      <path class="rail-dash" d="M470 56 H 880"/>
+      <text class="t" x="880" y="48" text-anchor="end">VCC внешнего — для NPN-подтяжки</text>
+      <path class="rail-dash" d="M740 56 V 120"/>
+
+      <path class="rail" d="M130 376 H 880" stroke-width="2.6"/>
+      <text class="t-acc" x="300" y="398">ОБЩАЯ ЗЕМЛЯ — минус питания камеры и земля внешнего устройства</text>
+      <path class="w casing" d="M166 342 H 178 V 376"/>
+      <path class="w core c-black" d="M166 342 H 178 V 376"/>
+      <path class="rail" d="M740 254 V 376"/>
+      <circle class="node" cx="178" cy="376" r="4"/>
+      <circle class="node" cx="740" cy="376" r="4"/>
+
+      <path class="w casing" d="M410 132 H 650"/>
+      <path class="w core c-gray" d="M410 132 H 650"/>
+      <text class="t2" x="530" y="124" text-anchor="middle">сигнал триггера</text>
+
+      <path class="w casing" d="M410 192 H 486"/>
+      <path class="w core c-pink" d="M410 192 H 486"/>
+      <rect class="res" x="486" y="181" width="48" height="22" rx="2"/>
+      <text class="t2" x="510" y="196" text-anchor="middle">330 Ω</text>
+      <path class="w casing" d="M534 192 H 556 V 376"/>
+      <path class="w core c-pink" d="M534 192 H 556 V 376"/>
+      <circle class="node" cx="556" cy="376" r="4"/>
+      <text class="t-acc" x="566" y="184">PNP: 330 Ω вниз, на землю</text>
+      <text class="t-acc" x="566" y="204">NPN: 1 кОм вверх, на VCC</text>
+
+      <path class="w casing" d="M410 252 H 650"/>
+      <path class="w core c-blue" d="M410 252 H 650"/>
+      <path class="w stripe" d="M410 252 H 650"/>
+      <text class="t2" x="530" y="244" text-anchor="middle">сигнал результата</text>
+
+      <path class="w casing" d="M410 312 H 486"/>
+      <path class="w core c-purple" d="M410 312 H 486"/>
+      <path class="w stripe" d="M410 312 H 486"/>
+      <rect class="res" x="486" y="301" width="48" height="22" rx="2"/>
+      <text class="t2" x="510" y="316" text-anchor="middle">330 Ω</text>
+      <path class="w casing" d="M534 312 H 600 V 376"/>
+      <path class="w core c-purple" d="M534 312 H 600 V 376"/>
+      <path class="w stripe" d="M534 312 H 600 V 376"/>
+      <circle class="node" cx="600" cy="376" r="4"/>
+    </svg>
+    </div>
+    <p class="cap"><b>Номиналы из мануала:</b> внешнее устройство PNP — <span class="mono">330 Ω</span> на землю; NPN — <span class="mono">1 кОм</span> на VCC. Одинаково для входов (розовый) и для выходов (фиолетово-белый). Резистор можно поставить свой либо взять 8-pin IO box — он ровно для того и сделан, чтобы переключать подтяжку поканально.</p>
+  </div>
+  <div class="danger"><strong>VCC внешнего устройства не должно быть выше PWR камеры.</strong> Дословно: <span class="mono">«The voltage of VCC should not higher than that of PWR. Otherwise, the device's output signal may have exception»</span>. То есть камеру на 12 В с 24-вольтовым ПЛК в паре так не соединяют.</div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>6 · Минимальная связка с ПЛК</h2><span class="eyebrow">без единого протокола</span></div>
+  <div class="panel fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 900 290" role="img" aria-label="Минимальная связка: ПЛК даёт триггер на вход DI_0, камера отвечает выходами DO_0 ReadSuccess и DO_1 NoCodeRead">
+      <rect class="box" x="60" y="56" width="200" height="180" rx="3"/>
+      <text class="tt" x="160" y="88" text-anchor="middle">ПЛК</text>
+      <text class="t2" x="160" y="108" text-anchor="middle">датчик на линии</text>
+      <text class="t2" x="246" y="150" text-anchor="end">выход</text>
+      <text class="t2" x="246" y="188" text-anchor="end">вход 1</text>
+      <text class="t2" x="246" y="216" text-anchor="end">вход 2</text>
+
+      <rect class="box" x="620" y="56" width="220" height="180" rx="3"/>
+      <text class="tt" x="730" y="88" text-anchor="middle">Считыватель</text>
+      <text class="t2" x="730" y="108" text-anchor="middle">Trigger Source = Line 0</text>
+      <text class="t" x="636" y="150">DI_0</text>
+      <text class="t" x="636" y="188">DO_0</text>
+      <text class="t" x="636" y="216">DO_1</text>
+
+      <path class="w casing" d="M260 144 H 614"/>
+      <path class="w core c-gray" d="M260 144 H 614"/>
+      <text class="t2" x="437" y="134" text-anchor="middle">триггер · серый · клемма 1</text>
+      <path class="arrow" d="M596 138 L 618 144 L 596 150 Z"/>
+
+      <path class="w casing" d="M266 182 H 620"/>
+      <path class="w core c-blue" d="M266 182 H 620"/>
+      <path class="w stripe" d="M266 182 H 620"/>
+      <text class="t2" x="443" y="172" text-anchor="middle">ReadSuccess · сине-белый · клемма 4</text>
+      <path class="arrow" d="M284 176 L 262 182 L 284 188 Z"/>
+
+      <path class="w casing" d="M266 210 H 620"/>
+      <path class="w core c-brown" d="M266 210 H 620"/>
+      <path class="w stripe" d="M266 210 H 620"/>
+      <text class="t2" x="443" y="234" text-anchor="middle">NoCodeRead · коричнево-белый · клемма 5</text>
+      <path class="arrow" d="M284 204 L 262 210 L 284 216 Z"/>
+
+      <text class="t-warn" x="450" y="268" text-anchor="middle">плюс общие точки: розовый IN_R и фиолетово-белый OUT_R — разделы 4 и 5</text>
+    </svg>
+    </div>
+    <p class="cap">ПЛК даёт импульс на <span class="mono">DI_0</span>, камера снимает кадр, декодирует и отвечает двумя выходами: <b>прочиталось</b> и <b>не прочиталось</b>. Modbus, TCP и прочие протоколы тут не нужны вообще — они понадобятся, когда ПЛК должна получить <b>саму строку кода</b>, а не факт «ок / не ок».</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>7 · Что настраивается на линиях</h2><span class="eyebrow">IDMVS → I/O Control Settings</span></div>
+  <div class="grid2">
+    <div class="panel fig">
+      <h3>Входы DI_0 / DI_1 / DI_2</h3>
+      <ul>
+        <li>источник аппаратного триггера — выбор линии</li>
+        <li>полярность <span class="mono">Rising</span> / <span class="mono">Falling Edge</span></li>
+        <li><span class="mono">Debounce Time</span> — подавление дребезга</li>
+        <li><span class="mono">Counter</span> — триггер после N импульсов</li>
+        <li><span class="mono">IO Stop Trigger Selector</span> — останов съёмки</li>
+      </ul>
+    </div>
+    <div class="panel fig">
+      <h3>Выходы DO_0 / DO_1 / DO_2</h3>
+      <p class="cap">У каждого свои <span class="mono">Inverter</span>, <span class="mono">Delay Time</span>, <span class="mono">Duration</span>. Событие выбирается из списка:</p>
+      <ul>
+        <li><b>ReadSuccess</b> / <b>NoCodeRead</b> — результат чтения</li>
+        <li><b>CompareSuccess</b> / <b>CompareFail</b> — сверка с эталоном</li>
+        <li>HardTriggerActive / SoftTriggerActive — эхо триггера</li>
+        <li>ExposureStartActive (+ Ahead Time), AcquisitionStart/Stop, FrameBurstStart/Stop</li>
+        <li>CounterActive, TimerActive</li>
+        <li>LightStrobeLong — внешняя подсветка</li>
+        <li>CommandControlIO — дёрнуть выход командой снаружи</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>8 · Уровни и пределы</h2><span class="eyebrow">табл. 6-2, 6-3</span></div>
+  <div class="grid2">
+    <div class="panel tbl-scroll">
+      <h3 class="h3-tight">Входы</h3>
+      <table>
+        <thead><tr><th>Уровень</th><th class="num">VCC = 24 В</th><th class="num">VCC = 12 В</th></tr></thead>
+        <tbody>
+          <tr><td>Low</td><td class="num">0 … 9 В</td><td class="num">0 … 5,4 В</td></tr>
+          <tr><td>High</td><td class="num">11 … 24 В</td><td class="num">7,56 … 12 В</td></tr>
+          <tr><td>Задержка фронта</td><td class="num" colspan="2">1,3 … 3,5 мкс</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="panel tbl-scroll">
+      <h3 class="h3-tight">Выходы</h3>
+      <table>
+        <thead><tr><th>Параметр</th><th class="num">при 12 В и 1 кОм</th></tr></thead>
+        <tbody>
+          <tr><td>Low</td><td class="num">212 мВ</td></tr>
+          <tr><td>High</td><td class="num">11,8 В</td></tr>
+          <tr><td>Фронт и спад</td><td class="num">0,4 мкс</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="note"><b>Выход — не источник 24 В, а ключ.</b> Уровень задаёт внешняя подтяжка, которую подаёте вы. Таблица снята при 12 В и 1 кОм, и мануал прямо предупреждает: при другом напряжении числа будут другие. <span class="mono">VCC</span> в обеих таблицах — питание соответствующего устройства, поэтому пороги входа едут вместе с питанием камеры.</div>
+</section>
+
+<footer>
+  <p><b>Источник:</b> ID3000 Series Industrial Code Reader User Manual, UD47062B, V4.0.1 от 15.06.2026 — главы 4 и 6. Локально: <span class="mono">knowledge/raw/books/id3000-series-um-en-v401/</span>.</p>
+  <p><b>Чего я не проверял.</b> Камеру я не видел; всё выше — мануал на серию ID3000, а не на нашу модель. Топологию я снял с текстовых подписей к рисункам 6-5…6-15, а не с самих рисунков: полярность и номиналы читаются однозначно, но <b>перед монтажом сверьте с PDF глазами</b>. Версия железа (3.0 или 2.0) и версия прошивки на нашем экземпляре неизвестны — обе снимаются в Ф0.</p>
+</footer>
+
+</div>
