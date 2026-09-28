@@ -135,22 +135,33 @@ def test_control_queue_applies_pause_toggles_in_fifo_order(tmp_path):
 
 def test_control_queue_maxlen_bounds_growth_when_produce_never_called(tmp_path):
     """Контракт лида, edge case §3: очередь управления не должна расти без предела, если
-    produce() не зовут. `collections.deque(maxlen=...)` роняет САМЫЕ СТАРЫЕ заявки при
-    переполнении -- проверяем и потолок, и то, что выжившие -- это ПОСЛЕДНИЕ поставленные
-    (не случайно какие-то)."""
+    produce() не зовут. Находка Ф3(б), ревью итерация 2: `deque(maxlen=...)` больше НЕ
+    роняет старые заявки молча -- переполнение отвечает `overloaded` и не кладёт заявку
+    вовсе (см. `_push_control`, `test_control_queue_full_rejects_instead_of_dropping_oldest`
+    -- полная проверка находки там); здесь -- только сам факт потолка (очередь не растёт
+    сверх maxlen, а выжившие -- это ПЕРВЫЕ поставленные, не какие попало)."""
     plugin, _sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9})
 
     maxlen = plugin._control.maxlen
     assert maxlen is not None and maxlen > 0, "потолок очереди управления должен быть задан явно"
 
     n_pushed = maxlen + 20
+    ok_count = 0
+    overloaded_count = 0
     for i in range(n_pushed):
-        assert _call(plugin, "scene.pause", {"paused": bool(i % 2)}) == {"status": "ok"}
+        res = _call(plugin, "scene.pause", {"paused": bool(i % 2)})
+        if res == {"status": "ok"}:
+            ok_count += 1
+        else:
+            assert res["status"] == "error" and res["code"] == "overloaded", res
+            overloaded_count += 1
 
+    assert ok_count == maxlen, "ровно maxlen заявок обязаны быть приняты"
+    assert overloaded_count == n_pushed - maxlen, "остальные обязаны быть отклонены, не приняты молча"
     assert len(plugin._control) == maxlen, "очередь не должна расти сверх заявленного потолка"
-    # Последняя поставленная заявка (paused = bool((n_pushed - 1) % 2)) обязана выжить --
-    # deque(maxlen=...) роняет старые с противоположного конца, не новые.
-    assert plugin._control[-1]["paused"] == bool((n_pushed - 1) % 2)
+    # Выжившие -- это ПЕРВЫЕ поставленные (paused = bool(i % 2) для i=0..maxlen-1) --
+    # переполнение отклоняет НОВЫЕ заявки, не роняет старые.
+    assert plugin._control[-1]["paused"] == bool((maxlen - 1) % 2)
 
 
 # --------------------------------------------------------------------------- #
@@ -262,3 +273,144 @@ def test_defect_rate_override_persists_across_later_preset_commit(tmp_path):
     assert plugin._live_factory._preset.defect_probability == pytest.approx(0.9), (
         "второй раунд: последний вызванный -- scene.defect_rate, его фабрика и должна победить"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Ревью итерация 2 (5 находок, plans/line-sim/phase-6-contract-6.1.md)        #
+# --------------------------------------------------------------------------- #
+
+
+def test_defect_rate_after_preset_commit_keeps_committed_layers(tmp_path):
+    """Находка Ф1: `self._preset` пишется только в `configure()`, поэтому после ЛЮБОГО
+    `preset.commit` оно протухает -- `cmd_defect_rate` пересобирает фабрику из
+    УСТАРЕВШЕГО пресета и откатывает содержательную правку commit'а. Проверяем полем,
+    не связанным с `defect_probability` (`angle_range_deg`), чтобы не спутать с Ф2/
+    override-полем: commit меняет угол с [0,0] на [10,10], затем `scene.defect_rate` --
+    применённая (последняя в `_pending_factory`, maxlen=1) фабрика обязана нести
+    committed [10,10], а не сконфигурированные [0,0]."""
+    class_dir = tmp_path / "cat" / "square"
+    class_dir.mkdir(parents=True)
+    sprite = np.zeros((16, 16, 4), dtype=np.uint8)
+    sprite[:, :, :3] = 128
+    sprite[:, :, 3] = 255
+    imwrite_unicode(class_dir / "sprite.png", cv2.cvtColor(sprite, cv2.COLOR_RGBA2BGRA))
+
+    preset_path = tmp_path / "preset.yaml"
+    preset_path.write_text(
+        yaml.safe_dump(
+            {"catalog_dir": "cat", "defect_probability": 0.0, "angle_range_deg": [0.0, 0.0], "layers": []},
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    plugin, sp = _make_plugin(
+        {"preset_path": str(preset_path), "spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9}
+    )
+    assert plugin._spawner is not None, "фикстура должна собрать движок из .yaml-пресета"
+
+    got = _call(plugin, "preset.get", {})
+    preset_dict = dict(got["preset"])
+    preset_dict["angle_range_deg"] = [10.0, 10.0]
+    commit_res = _call(plugin, "preset.commit", {"preset": preset_dict, "base_rev": got["rev"]})
+    assert commit_res["status"] == "ok" and commit_res["changed"] is True, commit_res
+
+    assert _call(plugin, "scene.defect_rate", {"probability": 0.0}) == {"status": "ok"}
+
+    _push_encoder(sp, 0)
+    plugin.produce()  # применяет ПОСЛЕДНЮЮ фабрику в _pending_factory -- фабрику defect_rate
+    active = plugin._spawner.active_objects()
+    assert len(active) == 1
+    assert active[0].passport.angle_deg == pytest.approx(10.0), (
+        "фабрика defect_rate обязана нести правку preset.commit, а не устаревший self._preset из configure()"
+    )
+
+
+def test_status_defect_probability_is_applied_not_requested(tmp_path):
+    """Находка Ф2: `scene.status["defect_probability"]` обязан отдавать ПРИМЕНЁННОЕ
+    значение (у `self._live_factory`), а не заявку `scene.defect_rate`, которая ещё
+    сидит в `_pending_factory` и применится только на следующем `produce()`."""
+    plugin, sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9})
+    _push_encoder(sp, 0)
+    plugin.produce()  # фабрика configure(), defect_probability дефолтный 0.0
+    assert _call(plugin, "scene.status")["defect_probability"] == pytest.approx(0.0)
+
+    assert _call(plugin, "scene.defect_rate", {"probability": 0.9}) == {"status": "ok"}
+    status_pending = _call(plugin, "scene.status")
+    assert status_pending["defect_probability"] == pytest.approx(0.0), (
+        "заявка ещё не применена produce() -- scene.status обязан отдавать ПРИМЕНЁННОЕ, не заявленное"
+    )
+
+    plugin.produce()  # применяет фабрику defect_rate
+    assert _call(plugin, "scene.status")["defect_probability"] == pytest.approx(0.9)
+
+
+def test_controls_report_not_applied_without_engine(tmp_path):
+    """Находка Ф3(а): без собранного движка (`self._spawner is None`) три ручки обязаны
+    отдавать `applied: False` и НИЧЕГО не класть в очередь управления -- как уже делает
+    `scene.defect_rate`. Раньше `scene.pause`/`scene.flow`/`scene.defect_now` отвечали
+    голым `{"status": "ok"}` и клали заявку, которую `_drain_control()` потом молча
+    выбрасывает (некому применять) -- клиент получал ложный `ok`."""
+    plugin, _sp = _make_plugin({"preset_path": str(tmp_path / "does-not-exist")})
+    assert plugin._spawner is None, "фикстура: движок не должен был собраться"
+
+    assert _call(plugin, "scene.pause", {"paused": True}) == {"status": "ok", "applied": False}
+    assert len(plugin._control) == 0, "заявка не должна была попасть в очередь -- некому её применять"
+
+    assert _call(plugin, "scene.flow", {"spacing_mm": [10.0, 10.0]}) == {"status": "ok", "applied": False}
+    assert len(plugin._control) == 0
+
+    assert _call(plugin, "scene.defect_now", {}) == {"status": "ok", "applied": False}
+    assert len(plugin._control) == 0
+
+
+def test_control_queue_full_rejects_instead_of_dropping_oldest(tmp_path):
+    """Находка Ф3(б): `deque(maxlen=64)` молча роняет САМЫЕ СТАРЫЕ заявки при
+    переполнении -- теряется самая ранняя (например снятие паузы). Вместо этого --
+    явная проверка перед `append`: переполнение отвечает `{"status": "error", "code":
+    "overloaded", ...}` и не кладёт заявку, а первая поставленная остаётся на месте."""
+    plugin, _sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9})
+    maxlen = plugin._control.maxlen
+    assert maxlen is not None and maxlen > 0
+
+    assert _call(plugin, "scene.pause", {"paused": True}) == {"status": "ok"}
+    for i in range(1, maxlen):
+        assert _call(plugin, "scene.pause", {"paused": bool(i % 2)}) == {"status": "ok"}
+    assert len(plugin._control) == maxlen
+
+    overflow = _call(plugin, "scene.pause", {"paused": False})
+    assert overflow["status"] == "error" and overflow["code"] == "overloaded", overflow
+    assert overflow.get("message"), "текст ошибки должен быть непустым"
+    assert len(plugin._control) == maxlen, "переполнение не должно менять размер очереди"
+    assert plugin._control[0] == {"op": "pause", "paused": True}, (
+        "самая первая заявка обязана остаться на месте -- не потеряна переполнением"
+    )
+
+
+def test_defect_now_rejects_garbage_payload(tmp_path):
+    """Находка Ф4 (часть 1): `scene.defect_now` не валидировал ничего -- любой мусор в
+    payload давал `ok`. Принимать только `None`/`{}`, иначе `invalid`, очередь не
+    трогается."""
+    plugin, _sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9})
+
+    res = _call(plugin, "scene.defect_now", "мусор")
+    assert res["status"] == "error" and res["code"] == "invalid", res
+    assert len(plugin._control) == 0
+
+    res2 = _call(plugin, "scene.defect_now", {"unexpected": 1})
+    assert res2["status"] == "error" and res2["code"] == "invalid", res2
+    assert len(plugin._control) == 0
+
+    assert _call(plugin, "scene.defect_now", {}) == {"status": "ok"}
+    assert _call(plugin, "scene.defect_now", None) == {"status": "ok"}
+
+
+def test_flow_rejects_explicit_null_second_key(tmp_path):
+    """Находка Ф4 (часть 2): присутствие ключа в `cmd_flow` обязано определяться через
+    `in data`, а не `is not None` -- второй ключ, явно выставленный в `None`, всё равно
+    СЧИТАЕТСЯ присутствующим, и тогда в payload'е присутствуют ОБА ключа -- `invalid`,
+    как и при двух непустых значениях."""
+    plugin, _sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9})
+
+    res = _call(plugin, "scene.flow", {"interval_s": [1.0, 2.0], "spacing_mm": None})
+    assert res["status"] == "error" and res["code"] == "invalid", res
+    assert len(plugin._control) == 0

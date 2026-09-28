@@ -101,27 +101,33 @@ README.md`).
 **Дисциплина потоков** — та же, что у `scene.job_done`/`preset.commit`: НИ ОДНА из
 четырёх команд не зовёт `ObjectSpawner` напрямую из потока команд (у него ровно один
 вызывающий поток, докстринг `spawner.py`). `scene.pause`/`scene.flow`/`scene.defect_now`
-кладут намерение `{"op": ...}` в `self._control` (`collections.deque(maxlen=64)` — явный
-потолок, чтобы очередь не росла без предела, если `produce()` никогда не зовут);
-разбор — `_drain_control()` в начале `produce()`, рядом с `_drain_jobs()`/
-`_apply_pending_factory()`, СТРОГО в порядке поступления (FIFO) — это и даёт
-«в силе последняя» для pause/flow и «нажатия не схлопываются» для `defect_now`.
-Заявка, пришедшая ДО первой дельты мира (`_world_ready is False`), не теряется —
-`_drain_control()` не зависит от `_world_ready`, применяется на первом же `produce()`.
+кладут намерение `{"op": ...}` в `self._control` (`_push_control` — переполнение,
+`len >= 64`, отвечает `overloaded` и не кладёт заявку, вместо молчаливого падения самой
+старой из `deque(maxlen=64)`, например снятие паузы); разбор — `_drain_control()` в
+начале `produce()`, рядом с `_drain_jobs()`/`_apply_pending_factory()`, СТРОГО в порядке
+поступления (FIFO) — это и даёт «в силе последняя» для pause/flow. `defect_now` —
+отдельный случай, см. его пункт ниже: очередь разбирается ДО КОНЦА всегда, «не
+схлопывание» нажатий даёт отдельный счётчик, не порядок разбора очереди. Движок не
+собран (`self._spawner is None`) — все три отвечают `{"status": "ok", "applied": False}`,
+ничего не ставя в очередь (тот же приём, что у `scene.defect_rate`). Заявка, пришедшая
+ДО первой дельты мира (`_world_ready is False`), не теряется — `_drain_control()` не
+зависит от `_world_ready`, применяется на первом же `produce()`.
 
 | Команда | Вход | Ответ |
 |---|---|---|
-| `scene.pause` | `{"paused": bool}` | `{"status": "ok"}` либо `{"status": "error", "code": "invalid", "message": ...}` |
-| `scene.flow` | РОВНО один из `{"interval_s": [lo, hi]}` / `{"spacing_mm": [lo, hi]}` | `{"status": "ok"}` либо `invalid` |
-| `scene.defect_rate` | `{"probability": 0.0..1.0}` | `{"status": "ok"}` (движок собран) либо `{"status": "ok", "applied": False}` (не собран) либо `invalid` |
-| `scene.defect_now` | `{}` | `{"status": "ok"}` |
+| `scene.pause` | `{"paused": bool}` | `ok` / `{"applied": False}` (движок не собран) / `invalid` / `overloaded` |
+| `scene.flow` | РОВНО один из `{"interval_s": [lo, hi]}` / `{"spacing_mm": [lo, hi]}` (по ключу `in data`, см. ниже) | `ok` / `{"applied": False}` / `invalid` / `overloaded` |
+| `scene.defect_rate` | `{"probability": 0.0..1.0}` | `ok` (движок собран) / `{"applied": False}` (не собран) / `invalid` |
+| `scene.defect_now` | `None` или `{}` (иначе `invalid`) | `ok` / `{"applied": False}` / `invalid` / `overloaded` |
 
 - **`scene.pause`** — намерение `set_paused(bool)`; не-`bool` — `invalid`, ничего не
   ставится в очередь.
 - **`scene.flow`** — валидация значений (`validate_flow` — та же функция, что
   `ObjectSpawner.__init__`/`set_flow`) **до** постановки в очередь: кривой аргумент
   (оба ключа сразу, ни одного, `lo > hi`, `lo <= 0`) отвечает `invalid` немедленно, не
-  долетая до спавнера и не портя тик.
+  долетая до спавнера и не портя тик. Присутствие ключа проверяется через `in data`, не
+  `is not None` — `{"interval_s": [...], "spacing_mm": None}` считается ДВУМЯ
+  присутствующими ключами (`invalid`), не «ровно один задан».
 - **`scene.defect_rate`** — НЕ заводит своего механизма подмены фабрики: пересобирает
   `ObjectFactory(apply_defect_override(<пресет в памяти>, probability))` и кладёт в
   СУЩЕСТВУЮЩИЙ `self._pending_factory` (maxlen=1, тот же слот, что `preset.commit`) —
@@ -133,13 +139,19 @@ README.md`).
   `defect_probability`, `Services/line_sim/core/preset.py::load_scene_preset`) — файл
   пресета при этом пишется буквально тем, что прислал клиент commit'а, override его не
   трогает. Движок не собран — `applied: False`, фабрика не строится вовсе.
-- **`scene.defect_now`** — кладёт `{"op": "defect_now"}`; разбор зовёт
-  `spawner.force_defect_next()`. `ObjectFactory.force_defect_next()` — булев ОДНОРАЗОВЫЙ
-  флаг (Task 3.2), не счётчик: если предыдущее нажатие ЕЩЁ не досталось ни одному спавну
-  (флаг уже взведён), `_drain_control()` откладывает следующую заявку `defect_now` до
-  следующего `produce()` — иначе два нажатия подряд схлопнулись бы в один дефект. На
-  паузе объект не создаётся, но нажатие не теряется (LS-006/LS-007 — флаг гасится только
-  после успешной сборки).
+- **`scene.defect_now`** — принимает только `None`/`{}` (иначе `invalid`), кладёт
+  `{"op": "defect_now"}`; разбор зовёт `spawner.force_defect_next()`.
+  `ObjectFactory.force_defect_next()` — булев ОДНОРАЗОВЫЙ флаг (Task 3.2), не счётчик,
+  поэтому нажатия, не доставшиеся ни одному спавну, копятся ОТДЕЛЬНЫМ счётчиком
+  `_defect_now_credits` и тратятся по одному за кадр, как только фабрика свободна.
+  Очередь управления при этом разбирается ДО КОНЦА на каждом `produce()` всегда —
+  «не схлопывание» нажатий (два подряд дают два дефектных объекта) даёт отдельный
+  счётчик, а не задержка заявки в голове самой очереди (первая редакция держала
+  непотраченную заявку в голове `_control`, что на паузе блокировало и всё, что
+  вставало за ней, включая снятие той самой паузы — дефект найден инъекцией лида
+  2026-09-28, регрессия закреплена в `tests/test_lead_6_1.py`). На паузе объект не
+  создаётся, но нажатие не теряется (LS-006/LS-007 — флаг гасится только после
+  успешной сборки).
 
 Потоки: команда идёт в потоке команд и только кладёт задание в `collections.deque`;
 спавнер меняет только `produce()`. В начале каждого кадра, ДО `spawner.tick()` и

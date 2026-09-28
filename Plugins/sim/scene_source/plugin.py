@@ -477,7 +477,12 @@ class SceneSourcePlugin(ProcessModulePlugin):
         active = len(self._spawner.active_objects()) if self._spawner is not None else 0
         with self._lock:
             recent = list(self._recent)
-        if self._preset is not None:
+        if self._live_factory is not None:
+            # Ф2 (ревью итерация 2): применённое, не заявленное -- живая фабрика уже несёт
+            # результат последнего _apply_pending_factory() (commit/defect_rate), заявка,
+            # ещё сидящая в _pending_factory, здесь не видна до следующего produce().
+            defect_probability = self._live_factory.defect_probability
+        elif self._preset is not None:
             defect_probability = (
                 self._defect_override if self._defect_override is not None else self._preset.defect_probability
             )
@@ -526,30 +531,53 @@ class SceneSourcePlugin(ProcessModulePlugin):
     def cmd_pause(self, data: dict | None = None) -> dict:
         """`scene.pause {"paused": bool}` — останавливает/возобновляет НОВЫЙ спавн
         (деспавн не трогается, см. `ObjectSpawner.set_paused`). Кладёт намерение в
-        очередь управления — спавнер меняется только на следующем `produce()`."""
+        очередь управления — спавнер меняется только на следующем `produce()`.
+        Движок не собран (`self._spawner is None`) -> `{"status": "ok", "applied": False}`,
+        в очередь ничего не кладётся -- как уже делает `scene.defect_rate` (Ф3а, ревью
+        итерация 2). Очередь переполнена -> `overloaded`, см. `_push_control` (Ф3б)."""
         if not isinstance(data, dict) or not isinstance(data.get("paused"), bool):
             return self._invalid(f"scene.pause: ожидается {{'paused': bool}}, получено {data!r}")
-        self._control.append({"op": "pause", "paused": data["paused"]})
-        return {"status": "ok"}
+        if self._spawner is None:
+            return {"status": "ok", "applied": False}
+        overload = self._push_control({"op": "pause", "paused": data["paused"]})
+        return overload if overload is not None else {"status": "ok"}
 
     def cmd_flow(self, data: dict | None = None) -> dict:
         """`scene.flow` — РОВНО один из `{"interval_s": [lo, hi]}` / `{"spacing_mm": [lo,
         hi]}`. Валидация — той же `validate_flow`, что и `ObjectSpawner.__init__`/
         `set_flow`, ДО постановки в очередь: кривой аргумент не долетает до спавнера
-        вовсе, ничего не ломает через тик."""
+        вовсе, ничего не ломает через тик.
+
+        Присутствие ключа определяется через `in data`, НЕ `is not None` (Ф4, ревью
+        итерация 2) — `{"interval_s": [...], "spacing_mm": None}` обязан считаться ДВУМЯ
+        присутствующими ключами (`invalid`), а не «ровно один задан»: раньше явный `null`
+        второго ключа маскировался под «не задан» и проходил валидацию.
+
+        Движок не собран -> `{"status": "ok", "applied": False}` (Ф3а), очередь
+        переполнена -> `overloaded` (Ф3б, `_push_control`)."""
         if not isinstance(data, dict):
             return self._invalid(f"scene.flow: ожидается dict, получено {data!r}")
-        raw_interval = data.get("interval_s")
-        raw_spacing = data.get("spacing_mm")
+        interval_present = "interval_s" in data
+        spacing_present = "spacing_mm" in data
+        if interval_present == spacing_present:
+            return self._invalid(f"scene.flow: ожидается ровно один из interval_s/spacing_mm, получено {data!r}")
         try:
-            interval_s = (float(raw_interval[0]), float(raw_interval[1])) if raw_interval is not None else None
-            spacing_mm = (float(raw_spacing[0]), float(raw_spacing[1])) if raw_spacing is not None else None
+            if interval_present:
+                raw_interval = data["interval_s"]
+                interval_s = (float(raw_interval[0]), float(raw_interval[1]))
+                spacing_mm = None
+            else:
+                raw_spacing = data["spacing_mm"]
+                spacing_mm = (float(raw_spacing[0]), float(raw_spacing[1]))
+                interval_s = None
             validate_flow(interval_s, spacing_mm)
         except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ с кодом, не исключение
             return self._invalid(f"scene.flow: {exc!r}")
         kwargs = {"interval_s": interval_s} if interval_s is not None else {"spacing_mm": spacing_mm}
-        self._control.append({"op": "flow", "kwargs": kwargs})
-        return {"status": "ok"}
+        if self._spawner is None:
+            return {"status": "ok", "applied": False}
+        overload = self._push_control({"op": "flow", "kwargs": kwargs})
+        return overload if overload is not None else {"status": "ok"}
 
     def cmd_defect_rate(self, data: dict | None = None) -> dict:
         """`scene.defect_rate {"probability": p}` (Task 6.1 шаг 6) — НЕ заводит своего
@@ -581,9 +609,18 @@ class SceneSourcePlugin(ProcessModulePlugin):
         разбор зовёт `spawner.force_defect_next()`. Нажатия НЕ схлопываются (два подряд
         дают два дефектных объекта — FIFO очереди, каждое своя запись); на паузе объект
         не создаётся, но нажатие не теряется (гарантия `ObjectFactory`/`ObjectSpawner`,
-        LS-006/LS-007 — флаг гасится только после успешной сборки)."""
-        self._control.append({"op": "defect_now"})
-        return {"status": "ok"}
+        LS-006/LS-007 — флаг гасится только после успешной сборки).
+
+        Принимает только `None`/`{}` (Ф4, ревью итерация 2) — раньше не валидировал ничего
+        и клал в очередь ЛЮБОЙ payload, включая мусор. Движок не собран ->
+        `{"status": "ok", "applied": False}` (Ф3а), очередь переполнена -> `overloaded`
+        (Ф3б, `_push_control`)."""
+        if data is not None and data != {}:
+            return self._invalid(f"scene.defect_now: ожидается None или пустой dict, получено {data!r}")
+        if self._spawner is None:
+            return {"status": "ok", "applied": False}
+        overload = self._push_control({"op": "defect_now"})
+        return overload if overload is not None else {"status": "ok"}
 
     # ------------------------------------------------------------------ #
     # Команды пресета (Task 1.2a — план line-sim-layer-editor, «Устройство»)
@@ -688,6 +725,14 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 new_rev = self._file_rev()
             except OSError as exc:
                 return {"status": "error", "code": "io_error", "message": f"preset.commit: {exc}"}
+            # Ф1 (ревью итерация 2): без этого self._preset остаётся тем, что собрал
+            # configure() -- любой ПОСЛЕДУЮЩИЙ scene.defect_rate пересобирает фабрику из
+            # УСТАРЕВШЕГО пресета и откатывает содержательную правку этого commit'а.
+            # `preset` -- БЕЗ override (тот же объект, что ушёл в файл строкой выше), а не
+            # `factory`/`apply_defect_override(...)` -- иначе доля брака начнёт наслаиваться
+            # на себя на следующем commit'е. Не зависит от `engine` -- поле плагина, не
+            # состояние движка.
+            self._preset = preset
             if engine:
                 self._pending_factory.append(factory)  # затирает ещё не применённую — в силе последняя
         result = {"status": "ok", "rev": new_rev, "changed": True, "applied": engine}
@@ -746,6 +791,24 @@ class SceneSourcePlugin(ProcessModulePlugin):
         """Ответ на кривые аргументы ручек стенда (Task 6.1) — `code` обязателен у всех
         четырёх команд (контракт лида шаг 3), тот же образец, что `preset.commit`."""
         return {"status": "error", "code": "invalid", "message": message}
+
+    def _push_control(self, op: dict) -> dict | None:
+        """Поставить намерение в очередь управления (Ф3б, ревью итерация 2) — вызывается
+        ТОЛЬКО когда `self._spawner is not None` (иначе `applied: False`, см. вызывающих).
+
+        Переполнение (`len(self._control) >= _CONTROL_MAXLEN`) отвечает `overloaded` и
+        НИЧЕГО не кладёт — `deque(maxlen=...)` при `append` сам по себе молча роняет
+        САМУЮ СТАРУЮ заявку слева (например снятие паузы), что теряет заявку без единого
+        сигнала клиенту. Явная проверка перед `append` возвращает контроль клиенту вместо
+        того. `maxlen` у `deque` остаётся страховкой (двойная защита), не единственной."""
+        if len(self._control) >= _CONTROL_MAXLEN:
+            return {
+                "status": "error",
+                "code": "overloaded",
+                "message": "scene_source: очередь управления переполнена — заявка отклонена",
+            }
+        self._control.append(op)
+        return None
 
     def _drain_control(self) -> None:
         """Разобрать очередь управления ручками стенда целиком (воркер produce(), рядом
