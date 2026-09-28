@@ -392,8 +392,15 @@ document.getElementById("btnTruthReset").onclick = function () {{
 // сегодня. overloaded значит «не принято» (README scene_source) — страница обязана
 // повторить ту же заявку РОВНО один раз, иначе ручка встанет не на последнее значение.
 function isSceneOverloaded(resp) {{
-  return !!resp && resp.ok === false && typeof resp.error === "string" &&
-    resp.error.indexOf("переполнена") !== -1;
+  if (!resp || resp.ok !== false) {{ return false; }}
+  // Три признака: `code` напрямую (заработает, когда соседняя сессия 1.2h научит
+  // `_dispatch()` проносить код наружу), слово "overloaded" в тексте и русский литерал
+  // сообщения `_push_control` — сегодня доходит только последний. Связка literal<->текст
+  // закреплена тестом `test_overloaded_literal_matches_scene_source`, поэтому
+  // переименование сообщения в scene_source ломает тест, а не молча гасит повтор.
+  if (resp.code === "overloaded") {{ return true; }}
+  return typeof resp.error === "string" &&
+    (resp.error.indexOf("overloaded") !== -1 || resp.error.indexOf("переполнена") !== -1);
 }}
 function postScene(path, body) {{
   return post(path, body).then(function (r) {{

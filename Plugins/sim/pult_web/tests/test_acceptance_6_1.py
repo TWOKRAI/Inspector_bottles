@@ -330,3 +330,34 @@ def test_page_scene_polls_status(start_pult) -> None:
     assert out.get("sceneText") == "пауза=true  поток=interval_s [2, 4]  доля_брака=0.3  брак_в_очереди=false", (
         f"страница показала: {out.get('sceneText')!r}"
     )
+
+
+def test_overloaded_literal_matches_scene_source() -> None:
+    """Страница узнаёт отказ `overloaded` по литералу сообщения, потому что `_dispatch()`
+    сегодня теряет `code`. Связка модулей закреплена здесь: переименуют сообщение в
+    `scene_source` — покраснеет этот тест, а не молча перестанет работать повтор заявки.
+
+    Берётся НАСТОЯЩИЙ ответ настоящего плагина сцены (не литерал, переписанный руками):
+    заполняем очередь управления до потолка и читаем текст отказа.
+    """
+    from unittest.mock import MagicMock
+
+    from Plugins.sim.scene_source.plugin import SceneSourcePlugin
+
+    plugin = SceneSourcePlugin()
+    ctx = MagicMock()
+    ctx.state_proxy = None
+    ctx.config = {"resolution_width": 8, "resolution_height": 8}
+    plugin.configure(ctx)
+    plugin._spawner = object()  # движок не нужен: важен только путь отказа очереди
+    reply = {"status": "ok"}
+    for _ in range(200):
+        reply = plugin.cmd_defect_now({})
+        if reply.get("status") == "error":
+            break
+    assert reply["code"] == "overloaded", "плагин сцены обязан отказывать кодом overloaded"
+    message = reply["message"]
+    assert "переполнена" in message, (
+        "страница пульта ищет в тексте отказа подстроку «переполнена» "
+        "(isSceneOverloaded в _PAGE_TEMPLATE) — текст сообщения изменился, повтор заявки умрёт"
+    )
