@@ -74,8 +74,20 @@ class Handler(socketserver.BaseRequestHandler):
 
 
 class Server(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
+    # НЕ allow_reuse_address: на Windows это `SO_REUSEADDR`, а он разрешает двум
+    # слушателям делить порт — тогда ядро отдаёт подключения прибора одному из них,
+    # и второй зонд молча показывает пустой экран. Именно так был потерян первый
+    # прогон рецепта 2026-09-28 (забытый зонд держал 5000). С выключенным флагом
+    # второй запуск на занятом порту падает с понятным «адрес уже используется».
+    allow_reuse_address = False
     daemon_threads = True
+
+    def server_bind(self) -> None:
+        """Занять порт монопольно (там, где ОС это умеет)."""
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        super().server_bind()
 
 
 def selfcheck() -> int:

@@ -38,14 +38,26 @@ class TestParsePacket:
         assert parse_packet(b"__NOCODE__;", **kwargs).status is ReadStatus.NO_CODE
         assert parse_packet(b"__BADCODE__;", **kwargs).status is ReadStatus.BAD_CODE
 
-    def test_одинаковые_тексты_делают_bad_code_недостижимым(self) -> None:
-        """Заводское умолчание: оба текста ``NoRead``.
+    def test_одинаковые_тексты_дают_no_code_а_не_bad_code(self) -> None:
+        """Заводское умолчание прибора: оба текста ``NoRead``.
 
-        Это ограничение настройки прибора, а не разбора — «код есть, но не
-        читается» в таком виде неотличим от «кода нет».
+        Различение выключено, и трактовка обязана быть «кода нет»: это точный и
+        безопасный вывод, тогда как «код есть, но не читается» при неотличимых
+        текстах — догадка. Прежняя реализация делала наоборот, и счётчик пустых
+        срабатываний вечно стоял на нуле, а «код есть, не читается» считал всё
+        (находка ревью Ф2 №5).
         """
         kwargs = {"no_code_text": "NoRead", "bad_code_text": "NoRead"}
-        assert parse_packet(b"NoRead;", **kwargs).status is ReadStatus.BAD_CODE
+        assert parse_packet(b"NoRead;", **kwargs).status is ReadStatus.NO_CODE
+
+    def test_пустой_результат_это_no_code_а_не_успех(self) -> None:
+        """Пришёл только терминатор — срабатывание без кода.
+
+        Успешного чтения с пустым кодом не бывает; трактовать пустоту как OK
+        значило бы отдать в pipeline пустой код как годный.
+        """
+        assert parse_packet(b";").status is ReadStatus.NO_CODE
+        assert parse_packet(b";").payload == ""
 
     def test_обрамление_другой_конфигурации_снимается(self) -> None:
         assert parse_packet(b"\x02QR-30MM;\x03\r\n").payload == "QR-30MM"
@@ -53,8 +65,12 @@ class TestParsePacket:
     def test_префикс_снимается(self) -> None:
         assert parse_packet(b">>QR-30MM;", prefix=">>").payload == "QR-30MM"
 
-    def test_код_совпавший_с_текстом_noread_уходит_в_брак(self) -> None:
-        """Причина, по которой в тексты NoRead кладут ``__NOCODE__``, а не слово."""
+    def test_код_совпавший_с_текстом_noread_неотличим_от_пустого(self) -> None:
+        """Почему в тексты NoRead кладут ``__NOCODE__``, а не обычное слово.
+
+        Настоящий код `NoRead` на наклейке был бы посчитан пустым срабатыванием —
+        разбор различает их только по тексту, другого признака в пакете нет.
+        """
         assert parse_packet(b"NoRead;").status is ReadStatus.NO_CODE
 
     def test_to_dict_отдаёт_примитивы(self) -> None:
@@ -84,6 +100,16 @@ class TestSplitStream:
 
     def test_без_терминатора_всё_уходит_в_остаток(self) -> None:
         assert split_stream(b"QR-10MM", terminator="") == ([], b"QR-10MM")
+
+    def test_пакет_из_одного_терминатора_не_теряется(self) -> None:
+        """Пустое срабатывание — тоже срабатывание.
+
+        Прежний фильтр выбрасывал такой пакет молча; если прибор настроен с
+        пустым `Output NoRead Text`, каждое пустое чтение исчезало бесследно
+        (находка ревью Ф2 №8).
+        """
+        assert split_stream(b";") == ([b";"], b"")
+        assert split_stream(b"A;;B;") == ([b"A;", b";", b"B;"], b"")
 
 
 class TestResultSink:

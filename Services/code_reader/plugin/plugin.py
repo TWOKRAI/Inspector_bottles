@@ -40,6 +40,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 
 from Services.code_reader.core.result import ReadResult, ReadStatus
 from Services.code_reader.core.sink import ResultSink
+from Services.code_reader.interfaces import CodeReaderSinkProtocol
 
 from .registers import CodeReaderRegisters
 
@@ -101,7 +102,9 @@ class CodeReaderPlugin(ProcessModulePlugin):
         self._history: deque[dict] = deque(maxlen=_HISTORY_LIMIT)
         self._lock = threading.Lock()
         self._seq = 0
-        self._sink: ResultSink | None = None
+        self._sink: CodeReaderSinkProtocol | None = None
+        # Метка текущего запуска приёма; колбэки прошлых запусков её не пройдут.
+        self._sink_token: object | None = None
         ctx.log_info(
             f"CodeReaderPlugin[{self._reg.reader_id}]: configured "
             f"({self._reg.host}:{self._reg.port}, терминатор {self._reg.terminator!r})"
@@ -113,6 +116,7 @@ class CodeReaderPlugin(ProcessModulePlugin):
             self._start_sink()
         else:
             self._reg.sink_state = "stopped"
+            self._publish_state()
 
     def shutdown(self, ctx: PluginContext) -> None:
         """Остановить приём и освободить порт."""
@@ -130,38 +134,52 @@ class CodeReaderPlugin(ProcessModulePlugin):
         их в потоке источника нельзя (см. докстринг модуля).
         """
         with self._lock:
-            if not self._queue:
-                return []
             items = list(self._queue)
             self._queue.clear()
-        self._publish_state()
+        # Публикуем то, что принесли коды. Смена связи и ошибки приёма публикуются
+        # не здесь, а сразу из своих колбэков (`_on_client`, `_on_sink_error`) —
+        # именно потому, что происходят когда кодов НЕТ. Инъекция подтвердила: без
+        # этой развязки обрыв в дереве состояния не появлялся вовсе (находка ревью 3).
+        if items:
+            self._publish_state()
         return items
 
     def _on_result(self, result: ReadResult) -> None:
-        """Обработчик ResultSink. Вызывается в потоке соединения, не в source."""
-        self._seq += 1
-        item = {
-            "code": result.payload,
-            "status": result.status.value,
-            "raw_hex": result.raw.hex(" ").upper(),
-            "ts": time.time(),
-            "seq_id": self._seq,
-            "reader_id": self._reg.reader_id,
-            "data_type": "code",
-        }
+        """Обработчик ResultSink. Вызывается в потоке соединения, не в source.
+
+        Всё изменение состояния — под одним `self._lock`. Потоков соединений может
+        быть больше одного (прибор переподключился раньше, чем ядро закрыло прежнее
+        соединение; два прибора на один порт), и вне замка инкременты теряются:
+        замер ревью Ф2 — 8 потоков, 160 000 срабатываний, 175 потерянных приращений
+        `total_reads` при неизменном `seq`.
+        """
+        now = time.time()
         with self._lock:
+            self._seq += 1
+            item = {
+                "code": result.payload,
+                "status": result.status.value,
+                "raw_hex": result.raw.hex(" ").upper(),
+                "ts": now,
+                "seq_id": self._seq,
+                "reader_id": self._reg.reader_id,
+                "data_type": "code",
+            }
             overflow = len(self._queue) == _QUEUE_LIMIT
             self._queue.append(item)
             self._history.append({"code": item["code"], "status": item["status"], "ts": item["ts"]})
             if overflow:
                 self._reg.dropped += 1
-        self._count(result.status)
-        if result.status is ReadStatus.OK:
-            self._reg.last_code = result.payload
-        self._reg.last_status = result.status.value
+            self._count(result.status)
+            if result.status is ReadStatus.OK:
+                self._reg.last_code = result.payload
+            self._reg.last_status = result.status.value
 
     def _count(self, status: ReadStatus) -> None:
-        """Счётчики по исходу срабатывания — три разных, не один общий."""
+        """Счётчики по исходу срабатывания — три разных, не один общий.
+
+        Вызывается под `self._lock` (см. `_on_result`).
+        """
         if status is ReadStatus.OK:
             self._reg.total_reads += 1
         elif status is ReadStatus.NO_CODE:
@@ -169,18 +187,42 @@ class CodeReaderPlugin(ProcessModulePlugin):
         else:
             self._reg.bad_reads += 1
 
-    def _on_client(self, count: int) -> None:
-        """Прибор подключился/отвалился — обновить состояние связи."""
+    def _on_client(self, token: object, count: int) -> None:
+        """Прибор подключился/отвалился — обновить состояние связи.
+
+        Колбэк несёт метку своего запуска: доживающий поток погашенного приёмника
+        её не пройдёт и состояние после `stop_sink` не перепишет — ревью Ф2 намерило
+        15 прогонов из 30, где инспектор показывал «слушаем» при освобождённом порте.
+        """
+        if token is not self._sink_token:
+            return
         self._reg.sink_state = "connected" if count else "listening"
         self._ctx.log_info(f"CodeReaderPlugin[{self._reg.reader_id}]: соединений {count} ({self._reg.sink_state})")
+        self._publish_state()
+
+    def _on_sink_error(self, token: object, message: str) -> None:
+        """Потеря данных или обрыв — наружу текстом, а не молчанием."""
+        if token is not self._sink_token:
+            return
+        self._reg.last_error = message
+        self._ctx.log_error(f"CodeReaderPlugin[{self._reg.reader_id}]: {message}")
+        self._publish_state()
 
     def _publish_state(self) -> None:
-        """Опубликовать телеметрию в реактивное дерево (живой GUI)."""
+        """Опубликовать телеметрию в реактивное дерево (живой GUI).
+
+        Зовётся там, где состояние изменилось: из колбэков приёма (смена связи,
+        ошибка) и из `produce()`, когда пришли коды. На пустом проходе `produce()`
+        молчит — иначе на 20 Гц дерево получало бы двадцать дельт в секунду ни о чём.
+        Флага «изменилось ли» здесь нет намеренно: инъекция показала, что он не
+        охранял ничего (когда есть коды, он всегда поднят).
+        """
         proxy = getattr(self._ctx, "state_proxy", None)
         if proxy is None:
             return
         with self._lock:
             history = list(self._history)
+            pending = len(self._queue)
         try:
             proxy.merge(
                 f"processes.{self._ctx.process_name}.state.code_reader",
@@ -191,6 +233,9 @@ class CodeReaderPlugin(ProcessModulePlugin):
                     "total_reads": self._reg.total_reads,
                     "no_reads": self._reg.no_reads,
                     "bad_reads": self._reg.bad_reads,
+                    "dropped": self._reg.dropped,
+                    "last_error": self._reg.last_error,
+                    "pending": pending,
                     "history": history,
                 },
             )
@@ -206,6 +251,18 @@ class CodeReaderPlugin(ProcessModulePlugin):
         if self._sink is not None and self._sink.is_running:
             return {"status": "ok", "running": True, "port": self._sink.port}
         reg = self._reg
+        if not reg.terminator:
+            # Без терминатора поток не режется вообще: приём копил бы байты в памяти
+            # и не отдал ни одного кода (ревью Ф2: 11 МБ входа → 0 items, 0 ошибок).
+            # Нарезки по паузе в сервисе нет, поэтому отказываем громко.
+            return self._fail_start(
+                "терминатор не задан: без `Output Stop Text` поток прибора не режется "
+                "на пакеты. Укажи терминатор прибора (по умолчанию ';')"
+            )
+        # Метка запуска: колбэки несут её с собой и после stop_sink молчат —
+        # доживающий поток погашенного приёмника не переписывает телеметрию.
+        token = object()
+        self._sink_token = token
         sink = ResultSink(
             self._on_result,
             host=reg.host,
@@ -214,17 +271,15 @@ class CodeReaderPlugin(ProcessModulePlugin):
             prefix=reg.prefix,
             no_code_text=reg.no_code_text,
             bad_code_text=reg.bad_code_text or None,
-            on_client=self._on_client,
+            on_client=lambda count: self._on_client(token, count),
+            on_error=lambda message: self._on_sink_error(token, message),
         )
         try:
             sink.start()
         except OSError as exc:
             # Порт занят (не освобождён прошлым процессом) или нет прав. Не падаем:
             # процесс живёт, GUI видит причину в last_error.
-            self._reg.sink_state = "stopped"
-            self._reg.last_error = str(exc)
-            self._ctx.log_error(f"CodeReaderPlugin[{reg.reader_id}]: не удалось занять порт {reg.port}: {exc}")
-            return {"status": "error", "running": False, "error": str(exc)}
+            return self._fail_start(f"не удалось занять порт {reg.port}: {exc}")
         self._sink = sink
         self._reg.sink_state = "listening"
         self._reg.last_error = ""
@@ -232,14 +287,29 @@ class CodeReaderPlugin(ProcessModulePlugin):
             f"CodeReaderPlugin[{reg.reader_id}]: приём на {reg.host}:{sink.port} "
             f"(прибор подключается сам, режим TCP Client)"
         )
+        self._publish_state()
         return {"status": "ok", "running": True, "port": sink.port}
 
-    def _stop_sink(self) -> dict:
-        """Погасить приёмник (идемпотентно)."""
-        if self._sink is not None:
-            self._sink.stop()
-            self._sink = None
+    def _fail_start(self, message: str) -> dict:
+        """Приём не поднялся: причина наружу, процесс жив."""
         self._reg.sink_state = "stopped"
+        self._reg.last_error = message
+        self._ctx.log_error(f"CodeReaderPlugin[{self._reg.reader_id}]: {message}")
+        self._publish_state()
+        return {"status": "error", "running": False, "error": message}
+
+    def _stop_sink(self) -> dict:
+        """Погасить приёмник (идемпотентно).
+
+        `self._sink = None` ДО `stop()`: колбэки доживающих потоков сверяются с этим
+        полем и после снятия молчат, а сам `stop()` дожидается их завершения.
+        """
+        sink, self._sink = self._sink, None
+        self._sink_token = None
+        if sink is not None:
+            sink.stop()
+        self._reg.sink_state = "stopped"
+        self._publish_state()
         return {"status": "ok", "running": False}
 
     # ------------------------------------------------------------------ #
@@ -281,11 +351,12 @@ class CodeReaderPlugin(ProcessModulePlugin):
 
     def cmd_reset_stats(self, data: dict) -> dict:
         """Сбросить счётчики и историю (наладка стенда)."""
+        reg = self._reg
         with self._lock:
             self._history.clear()
-        reg = self._reg
-        reg.total_reads = reg.no_reads = reg.bad_reads = reg.dropped = 0
-        reg.last_code = reg.last_status = reg.last_error = ""
+            reg.total_reads = reg.no_reads = reg.bad_reads = reg.dropped = 0
+            reg.last_code = reg.last_status = reg.last_error = ""
+        self._publish_state()
         return {"status": "ok"}
 
     def get_status(self) -> dict[str, Any]:
