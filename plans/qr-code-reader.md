@@ -546,7 +546,35 @@ NPN — pull-up 1 кОм).
 После Ф1. Самостоятельная ценность: наблюдение и наладка сейчас, заготовка канала
 камера → ПК на будущее.
 
-### Ф2 — слой наблюдения и симулятор (без GUI)
+### Ф2 — слой наблюдения и симулятор (без GUI) — ✅ ВЫПОЛНЕНА 2026-09-28, но НЕ по этому проекту
+
+**Итог.** Слой наблюдения есть и проверен на живом бэкенде, однако два
+архитектурных решения Task 2.2 отменены — см. [`Services/code_reader/DECISIONS.md`](../Services/code_reader/DECISIONS.md),
+ADR-CR-001. Постановка ниже сохранена для истории.
+
+| Было в плане | Сделано |
+|---|---|
+| Каналы внутри плагина `Plugins/sources/code_reader/`, карве-аут в `Services/` потом | **Сразу сервис** `Services/code_reader/` + плагин внутри него (`plugin/`), как у `modbus` / `phone_gateway`. Причина: домен вырос за пределы канала — формат, снятый с железа, три исхода чтения, зонды стенда, `docs/SETUP.md`. Плюс прямая просьба владельца «сервис как полагается». `discovery.plugin_paths` уже сканирует `Services/` — отдельная запись в `Plugins/` не нужна |
+| `Protocol CodeReaderBackend` + фабрика `create_backend(kind)`, каналы `sim` и `tcp` | **Ни Protocol, ни фабрики.** Прибор — `TCP Client`, подключается к нам сам: канал ровно один, мы сервер. Симулятор — не второй backend, а внешний процесс, играющий прибора (`tools/reader_sim.py`); он проверяет настоящий сетевой путь, чего in-process заглушка не делает. Абстракция на одну реализацию не вводится; триггер вернуться — `serial` или опрос Modbus |
+| `trigger()` как команда плагина | **Команды нет.** Боевой триггер аппаратный (DI_0), через ПК не проходит. Сетевой триггер (`TCP Start` и REG0.1) из Ф0 на нашем экземпляре ещё не снят — добавлять команду по документу, не проверив, значит зашить догадку |
+| `sim_server.py` в плагине, режимы `free_run` / `triggered` | `tools/reader_sim.py`: коды по кругу, доля «кода нет» (`--no-read-every`), интервал, свой `--selfcheck`. Режима `triggered` нет — по той же причине, что и команды `trigger` |
+
+**Живые числа (рецепт `qr_reader_demo`, бэкенд с `BACKEND_CTL=1`):** 20 срабатываний
+симулятора → `total_reads=16`, `no_reads=4`, `dropped=0`, `pending=0`, история из 20
+записей в порядке отправки. Симулятор перезапущен → счётчик пошёл дальше (16 → 19),
+процесс не перезапускался. Занятый порт → `sink_state=stopped`,
+`last_error=WinError 10048`, процесс жив.
+
+**Дефект, найденный стендом:** `SO_REUSEADDR` на Windows разрешал ВТОРОГО слушателя
+на том же порту — приём выглядел живым и не получал ничего (забытый
+`tools/id3000_tcp_sink.py` держал 5000). Исправлено `SO_EXCLUSIVEADDRUSE`,
+ADR-CR-002.
+
+**Что из Ф2 не сделано:** независимый `tester` (Task 2.1) не запускался — тесты
+писал автор реализации; `reviewer` (Task 2.4) не запускался. По правилам проекта
+задача считается непроверенной до их прогона.
+
+#### Исходная постановка Ф2 (2026-09-28)
 
 #### Task 2.1 — [RED] Независимые приёмочные тесты
 **Level:** Middle · **Assignee:** `tester` · **Layer:** tests
@@ -613,7 +641,18 @@ class CodeReaderBackend(Protocol):
 
 ---
 
-### Ф3 — рецепт-стенд «вижу, что прочиталось»
+### Ф3 — рецепт-стенд «вижу, что прочиталось» — ⏳ частично (рецепт есть, картинки нет)
+
+Рецепт [`multiprocess_prototype/recipes/qr_reader_demo.yaml`](../multiprocess_prototype/recipes/qr_reader_demo.yaml)
+создан и проверен живым прогоном; 6 тестов в `recipes/tests/test_qr_reader_demo.py`
+(gate-валидатор, видимость движком, совпадение `plugin_class` и параметров с
+register). Отличия от Task 3.2: имя `qr_reader_demo`, `wires` и `displays` пусты —
+это стенд наблюдения, код видно в инспекторе и в `processes.reader.state.code_reader`.
+
+**Осталось:** плагин отображения `code_view` (Task 3.1) и замер задержки
+«срабатывание → код на экране» (Task 3.3) — без потребителя мерить нечем.
+
+#### Исходная постановка Ф3
 
 #### Task 3.1 — Плагин отображения кода
 **Level:** Middle · **Assignee:** `developer` · **Layer:** plugins
@@ -703,20 +742,23 @@ class CodeReaderBackend(Protocol):
 python scripts/id3000_plc_probe.py                       # мы — ПЛК-мастер, опрашиваем камеру
 python -m Services.modbus.server --tcp 0.0.0.0:5020      # либо камера пишет нам (сервер сам печатает)
 
-# Трек B — интеграция
-python -m Plugins.sources.code_reader.sim_server --port 5055 --mode triggered
-python multiprocess_prototype/run.py qr_scan_demo
+# Трек B — интеграция (фактические команды, проверены 2026-09-28)
+python multiprocess_prototype/run.py qr_reader_demo
+python Services/code_reader/tools/reader_sim.py --port 5000 --interval 1.0 --no-read-every 5
 
 # Тесты и гейты
-python -m pytest Plugins/sources/code_reader/tests Plugins/render/code_view/tests -q
+python -m pytest Services/code_reader/tests -q
 python -m pytest multiprocess_prototype/recipes/tests multiprocess_prototype/backend/tests -q
 python scripts/validate.py
 make check            # ruff + pyright + bandit
 sentrux check .       # CLI, НЕ mcp__sentrux__check_rules — он проверяет часть правил и молчит об этом
 ```
 
-Живой зонд состояния без GUI (`BACKEND_CTL=1`): `state_get` по `processes.reader.state` —
-`last_code`, `total_reads`, `no_reads`, `triggers_sent`, `status`.
+Живой зонд состояния без GUI (`BACKEND_CTL=1`) — проверено: `state_get_subtree` по
+`processes.reader.state.code_reader` (`last_code`, `last_status`, `sink_state`,
+`total_reads`, `no_reads`, `bad_reads`, `history`), `send_command reader get_status`
+(то же плюс `clients`, `pending`, `dropped`, `port`, `last_error`),
+`introspect_registers reader`. Поля `triggers_sent` нет — команды триггера нет.
 
 ---
 
@@ -737,5 +779,5 @@ sentrux check .       # CLI, НЕ mcp__sentrux__check_rules — он прове�
 - **Факты про SDK `MvCodeReader`** (имя, функции, видимость через обычную GigE-энумерацию) взяты из **неофициального стороннего GitHub-репозитория**. Официальной страницы Hikrobot с этим именем найти не удалось. Проверяется за одну команду — Ф0 п.1, и это надёжнее любого найденного источника.
 - **Привязка снимка к срабатыванию триггера** дословно не подтверждена — логична для считывателя, но цитаты нет. Task 5.1 на этом и споткнётся, если окажется, что связи нет.
 - **Расшифровка «PM» в названии модели не найдена** нигде, включая официальный PDF с правилами именования (не распарсился). На план не влияет, но если понадобится заказывать такую же — знать неоткуда.
-- **Путь worker → GUI для readonly-строки** взят из докстринга `pilot_widgets`. Систему я не запускал, `last_code` в инспекторе не видел. Поэтому основное отображение — кадр через `displays:`; регистры довеском, проверяются в Task 3.3.
+- ~~**Путь worker → GUI для readonly-строки** взят из докстринга `pilot_widgets`.~~ **ПРОВЕРЕНО 2026-09-28:** `introspect_registers reader` отдаёт все поля `code_reader` со живыми значениями, `processes.reader.state.code_reader` содержит last_code/счётчики/историю. Проверено зондом `backend_ctl`, **не глазами в GUI** — окно инспектора я не открывал.
 - **Часть страниц мануала не извлеклась** (формат строки TCP, префикс/суффикс, имя файла при FTP, профиль Profinet). Это не «нет функции», а «не прочитал» — смотреть в клиенте на стенде.
