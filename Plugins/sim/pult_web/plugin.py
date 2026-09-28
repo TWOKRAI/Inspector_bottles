@@ -424,6 +424,12 @@ function getScene() {{
     return r.ok ? r.json() : Promise.reject(new Error("http " + r.status));
   }});
 }}
+function sceneUnavailable() {{
+  // Отказ обязан быть виден и когда САМА сцена не отвечает: иначе `sceneError` молча
+  // ждёт восстановления и всплывает минутами позже, про давно забытое нажатие
+  // (находка ревью 6.1b, итерация 2).
+  return sceneError ? ("сцена недоступна   отказ сцены: " + sceneError) : "сцена недоступна";
+}}
 function pollScene() {{
   getScene().then(function (s) {{
     if (s && s.status === "ok") {{
@@ -439,10 +445,10 @@ function pollScene() {{
         document.getElementById("sceneStatus").textContent += "   отказ сцены: " + sceneError;
       }}
     }} else {{
-      document.getElementById("sceneStatus").textContent = "сцена недоступна";
+      document.getElementById("sceneStatus").textContent = sceneUnavailable();
     }}
   }}).catch(function () {{
-    document.getElementById("sceneStatus").textContent = "сцена недоступна";
+    document.getElementById("sceneStatus").textContent = sceneUnavailable();
   }});
 }}
 document.getElementById("scenePause").onchange = function () {{

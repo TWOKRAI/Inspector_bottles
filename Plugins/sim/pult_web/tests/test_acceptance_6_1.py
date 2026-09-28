@@ -436,3 +436,26 @@ def test_page_shows_scene_refusal_text(start_pult) -> None:
 
     assert "отказ сцены" in out["sceneText"], out["sceneText"]
     assert "вне диапазона" in out["sceneText"], out["sceneText"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_page_shows_refusal_even_when_scene_is_down(start_pult) -> None:
+    """Находка ревью 6.1b, итерация 2: отказ не имеет права прятаться за «сцена недоступна».
+
+    Иначе `sceneError` молча ждёт восстановления сцены и всплывает минутами позже, про
+    давно забытое нажатие.
+    """
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["scene.defect_rate"] = {
+        "status": "error",
+        "code": "invalid",
+        "message": "scene.defect_rate: probability=1.5 вне диапазона [0, 1]",
+    }
+    scene_client.responses["scene.status"] = {"status": "error", "message": "нет ответа"}
+
+    out = _run_page_js(port, "scene_error_when_down")
+
+    assert "сцена недоступна" in out["sceneText"], out["sceneText"]
+    assert "отказ сцены" in out["sceneText"], out["sceneText"]

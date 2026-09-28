@@ -130,9 +130,15 @@ async function run() {
     // Ф6.1b, находка ревью: галка паузы идёт за ДВИЖКОМ (/api/scene), а не за нажатием.
     await sleep(1200);
     process.stdout.write(JSON.stringify({ pauseChecked: el("scenePause").checked }));
+  } else if (scenario === "scene_error_when_down") {
+    // Ф6.1b, находка ревью итерации 2: отказ виден и когда сама сцена не отвечает.
+    el("btnSceneDefectRate").fire("click");
+    await sleep(1400); // дать опросу перерисовать строку хотя бы раз
+    process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
   } else if (scenario === "scene_error_text") {
     // Ф6.1b, находка ревью: отказ сцены виден оператору в строке состояния.
-    // Читаем СРАЗУ после клика — через секунду опрос перепишет строку состоянием сцены.
+    // Читаем сразу после клика, но опрос отказ НЕ затирает — он держится в `sceneError`
+    // до следующей принятой заявки (ревью итерации 2 проверило это на 2600 мс).
     el("btnSceneDefectRate").fire("click");
     await sleep(200);
     process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
