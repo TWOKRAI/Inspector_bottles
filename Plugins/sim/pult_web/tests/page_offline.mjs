@@ -10,13 +10,27 @@ const base = `http://127.0.0.1:${port}`;
 const html = await (await fetch(base + "/")).text();
 const src = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
+// Записи присваивания `.innerHTML =` на ЛЮБОМ узле (созданном через
+// getElementById ИЛИ createElement) — Task 1.2h ит.2, Н3: тест на
+// экранирование `layer.name` проверяет, что вредоносная строка никогда не
+// попадает в этот сток, а не только что страница не падает.
+const innerHtmlWrites = [];
 function makeEl(id) {
-  return {
-    id,
+  const node = {
+    id: id || "",
     value: id === "freqNum" || id === "freq" ? "25" : "101.1",
     checked: false,
     textContent: "",
+    className: "",
+    children: [],
     h: {},
+    appendChild(child) {
+      // Реальный DOM: строит дерево. Здесь достаточно не падать — getElementById
+      // остаётся независимым реестром по id (находка ревью 5.3a), поэтому дерево
+      // самих объектов никто не обходит.
+      this.children.push(child);
+      return child;
+    },
     addEventListener(t, f) {
       (this.h[t] ||= []).push(f);
     },
@@ -28,6 +42,17 @@ function makeEl(id) {
       if (typeof this["on" + t] === "function") this["on" + t]({ type: t });
     },
   };
+  let _innerHTML = "";
+  Object.defineProperty(node, "innerHTML", {
+    get() {
+      return _innerHTML;
+    },
+    set(v) {
+      _innerHTML = v;
+      innerHtmlWrites.push(String(v));
+    },
+  });
+  return node;
 }
 const els = {};
 function el(id) {
@@ -46,6 +71,17 @@ const doc = {
   hidden: false,
   h: {},
   getElementById: el,
+  // Task 1.2h ит.2, Н3: renderPresetLayers строит строку слоя через
+  // document.createElement + textContent (не innerHTML) — харнессу нужен сам
+  // createElement, иначе loadPreset() падает при первом же непустом preset.get.
+  // Узел БЕЗ id (в отличие от getElementById) не кэшируется в `els` — он не
+  // адресуется по id со страницы, только через appendChild родителя.
+  createElement(_tag) {
+    return makeEl("");
+  },
+  createTextNode(text) {
+    return { nodeValue: text, textContent: text };
+  },
   addEventListener(t, f) {
     (this.h[t] ||= []).push(f);
   },
@@ -168,6 +204,39 @@ async function run() {
     // Ф6.1b §2: опрос /api/scene тем же таймером, что /api/truth (1000 мс).
     await sleep(1200);
     process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
+  } else if (scenario === "preset_undo_restores_field") {
+    // Task 1.2h ит.2, Н2: правка поля БЕЗ единого «Сохранить», затем «Отмена» —
+    // обязана вернуть прежнее значение (сценарий П6). before/afterUndo должны
+    // совпасть; до этой правки стек пополнялся только перед commit, поэтому
+    // здесь при первой правке было пусто и «Отмена» ничего не делала.
+    await sleep(300); // время на начальный preset.get при загрузке страницы
+    const before = el("layer0_offset_x").value;
+    el("layer0_offset_x").value = "15";
+    el("layer0_offset_x").fire("change");
+    el("btnPresetUndo").fire("click");
+    await sleep(50);
+    process.stdout.write(JSON.stringify({ before, afterUndo: el("layer0_offset_x").value }));
+  } else if (scenario === "preset_layer_name_escaped") {
+    // Task 1.2h ит.2, Н3: имя слоя с тегом не должно попасть ни в один
+    // .innerHTML сырым (перехват записи — innerHtmlWrites). revText в выводе
+    // доказывает, что страница ДОШЛА до рендера, а не тихо упала до записи
+    // (иначе innerHtmlLeaked=false был бы вакуумным «доказательством»).
+    await sleep(300);
+    const leaked = innerHtmlWrites.some((v) => v.indexOf("onerror") !== -1);
+    process.stdout.write(
+      JSON.stringify({ innerHtmlLeaked: leaked, revText: el("presetRev").textContent })
+    );
+  } else if (scenario === "preset_state_probe") {
+    // Task 1.2h ит.2, Н4: engine/rev — состояние после начального preset.get,
+    // без правок. Один сценарий, три конфигурации preset.get со стороны Python.
+    await sleep(300);
+    process.stdout.write(
+      JSON.stringify({
+        engineWarnText: el("presetEngineWarn").textContent,
+        revText: el("presetRev").textContent,
+        saveDisabled: !!el("btnPresetSave").disabled,
+      })
+    );
   }
   process.exit(0);
 }

@@ -80,6 +80,22 @@ _DEFAULT_TIMEOUT_S = 1.0
 #: Тело запроса больше этого — 413, ДО чтения (DESIGN п.3 плана).
 _MAX_BODY_BYTES = 4096
 
+#: Потолок дренажа тела после отказа 413 (ревью Task 1.2h ит.1, Н1). Раньше
+#: `_drain_body` вычитывала ВЕСЬ заявленный `Content-Length` — клиент,
+#: заявивший гигабайт и приславший 64 байта, ответа не получал вовсе и держал
+#: поток (замер ревью: 8 с без ответа, 22 живых потока вместо 3). Дренаж нужен
+#: ТОЛЬКО чтобы закрытие сокета не оборвало уже отправленный ответ RST'ом на
+#: Windows (WinError 10053) — не для того, чтобы дочитывать заявленное целиком.
+_MAX_DRAIN_BYTES = 65536
+
+#: Таймаут сокета обработчика (ревью Task 1.2h ит.1, Н1) — без него
+#: `rfile.read()` в дренаже (и в обычном чтении тела) блокируется бессрочно,
+#: если клиент перестал слать байты. `BaseHTTPRequestHandler.timeout`
+#: (наследуется от `socketserver.StreamRequestHandler`) даёт `self.connection.
+#: settimeout(...)` в `setup()` — действует на КАЖДЫЙ блокирующий вызов сокета
+#: обработчика, не только на дренаж.
+_DRAIN_TIMEOUT_S = 2.0
+
 #: Путь -> команда ``belt.*`` (DESIGN п.3 плана, HTTP API). Тело форвардится
 #: КАК ЕСТЬ — путь не валидирует поля, это дело ``robot`` (Task 2.3a).
 _COMMAND_BY_PATH = {
@@ -552,6 +568,20 @@ var presetBaseRev = null;
 var presetEngine = undefined;
 var presetUndoStack = [];
 var presetFieldMap = [];
+// Снимок кладётся в стек при ПЕРВОМ изменении формы после последней
+// синхронизации (ревью Task 1.2h ит.1, Н2: раньше стек пополнялся только
+// перед commit, поэтому «Отмена» без единого сохранения не отменяла ничего —
+// зонд ревью: before=0, afterUndo=15). presetDirty сбрасывается в false в
+// каждой точке синхронизации формы с состоянием: после начальной загрузки,
+// после успешного commit, после самой «Отмены».
+var presetDirty = false;
+
+function markPresetDirty() {
+  if (!presetDirty) {
+    presetUndoStack.push(presetState);
+    presetDirty = true;
+  }
+}
 
 function presetFieldKind(value) {
   if (typeof value === "number") return "number";
@@ -586,6 +616,7 @@ function presetBindField(i, key, value) {
       var id = "layer" + i + "_" + base + "_" + axis;
       var el = document.getElementById(id);
       el.value = String(value[idx]);
+      el.addEventListener("change", markPresetDirty);
       presetFieldMap.push({ id: id, layerIndex: i, key: key, subIndex: idx, kind: "number" });
     });
     return;
@@ -600,6 +631,7 @@ function presetBindField(i, key, value) {
   } else {
     el.value = (value === null || value === undefined) ? "" : String(value);
   }
+  el.addEventListener("change", markPresetDirty);
   presetFieldMap.push({ id: id, layerIndex: i, key: key, subIndex: null, kind: kind });
 }
 
@@ -607,15 +639,29 @@ function renderPresetLayers() {
   presetFieldMap = [];
   var container = document.getElementById("presetLayers");
   var layers = (presetState && presetState.layers) || [];
-  var html = "";
+  container.innerHTML = "";
   layers.forEach(function (layer, i) {
-    html += '<div class="row"><b>' + (layer.name || ("слой " + i)) + '</b> ';
+    // Имя слоя — данные пресета, которые страница сама даёт править и
+    // коммитит в YAML (петля замкнута) — через textContent, НЕ innerHTML
+    // (ревью Task 1.2h ит.1, Н3: конкатенация строки пускала <img
+    // onerror=...> в разметку сырым). Остальная часть строки (лейблы полей,
+    // ключи схемы) — не данные пресета, свои имена задаёт не оператор,
+    // поэтому остаётся строкой через presetFieldMarkup.
+    var row = document.createElement("div");
+    row.className = "row";
+    var nameEl = document.createElement("b");
+    nameEl.textContent = layer.name || ("слой " + i);
+    row.appendChild(nameEl);
+    row.appendChild(document.createTextNode(" "));
+    var fieldsHtml = "";
     Object.keys(layer).forEach(function (key) {
-      html += presetFieldMarkup(i, key, layer[key]);
+      fieldsHtml += presetFieldMarkup(i, key, layer[key]);
     });
-    html += "</div>";
+    var fields = document.createElement("span");
+    fields.innerHTML = fieldsHtml;
+    row.appendChild(fields);
+    container.appendChild(row);
   });
-  container.innerHTML = html;
   layers.forEach(function (layer, i) {
     Object.keys(layer).forEach(function (key) {
       presetBindField(i, key, layer[key]);
@@ -652,6 +698,8 @@ function loadPreset() {
       presetState = resp.preset;
       presetBaseRev = (resp.rev === undefined) ? null : resp.rev;
       presetEngine = resp.engine;
+      presetUndoStack = [];
+      presetDirty = false;
       renderPresetLayers();
       updatePresetRevDisplay();
       updatePresetEngineWarn();
@@ -709,9 +757,11 @@ document.getElementById("btnPresetSave").onclick = function () {
       return;
     }
     if (r && r.status === "ok" && r.rev) {
-      presetUndoStack.push(presetState);
+      // Снимок в стек кладёт markPresetDirty при правке поля (Н2), не здесь —
+      // сохранение лишь двигает точку синхронизации вперёд.
       presetState = nextPreset;
       presetBaseRev = r.rev;
+      presetDirty = false;
       updatePresetRevDisplay();
       return;
     }
@@ -723,6 +773,7 @@ document.getElementById("btnPresetSave").onclick = function () {
 document.getElementById("btnPresetUndo").onclick = function () {
   if (!presetUndoStack.length) return;
   presetState = presetUndoStack.pop();
+  presetDirty = false;
   renderPresetLayers();
 };
 
@@ -757,6 +808,12 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
     """
 
     class _PultHandler(http.server.BaseHTTPRequestHandler):
+        #: Таймаут сокета (ревью Task 1.2h ит.1, Н1) — без него блокирующее
+        #: чтение тела (обычное и дренаж после 413) висит бессрочно, если
+        #: клиент перестал слать байты. Атрибут читает `socketserver.
+        #: StreamRequestHandler.setup()` и вызывает `connection.settimeout(...)`.
+        timeout = _DRAIN_TIMEOUT_S
+
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - сигнатура stdlib
             """Подавить дефолтный access-лог в stderr (не наш log-разъём)."""
 
@@ -795,14 +852,25 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 if code is not None:
                     self._reply_json(_ERROR_CODE_TO_HTTP.get(code, 400), result)
                     return
-                fallback = "robot_error" if client is pult._client else "scene_error"
+                if client is pult._client:
+                    fallback = "robot_error"
+                elif client is pult._scene_client:
+                    fallback = "scene_error"
+                else:
+                    fallback = "layers_error"
                 self._reply_json(504, {"ok": False, "error": result.get("message", fallback)})
                 return
             self._reply_json(200, result)
 
         def _drain_body(self, length: int) -> None:
-            """Вычитать и отбросить тело сверх маршрутного потолка — не для команды,
-            только чтобы закрытие сокета после 413 не оборвало клиента RST'ом."""
+            """Вычитать и отбросить не более ``length`` байт тела — не для команды,
+            только чтобы закрытие сокета после 413 не оборвало клиента RST'ом.
+            Вызывающий код (``_read_command_body``) передаёт сюда уже ОГРАНИЧЕННОЕ
+            число (``min(заявленный Content-Length, _MAX_DRAIN_BYTES)``, ревью
+            Task 1.2h ит.1, Н1) — сама функция потолка не знает и читает ровно
+            столько, сколько ей велено. Таймаут сокета (``_DRAIN_TIMEOUT_S``,
+            задан классу обработчика) не даёт чтению зависнуть, если клиент
+            перестал слать байты."""
             remaining = length
             try:
                 while remaining > 0:
@@ -822,6 +890,12 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             прежний общий ``_MAX_BODY_BYTES``), до чтения тела; 400 ``bad_length`` —
             отрицательный ``Content-Length`` (иначе ``rfile.read(-1)`` читал бы до
             EOF в обход 413, ревью 5.3a п.3); 400 ``bad_json`` — кривой JSON/не dict.
+
+            ``(None, (413, None))`` — особый случай (ревью Task 1.2h ит.1, Н1):
+            для 413 ответ клиенту уже отправлен ВНУТРИ этого метода (см. ниже),
+            вызывающий ``do_POST`` не должен отвечать повторно — ``payload is
+            None`` в паре отказа сигналит именно это, а не «отказа не было»
+            (для «не было» первый элемент пары — ``None`` целиком).
             """
             length_header = self.headers.get("Content-Length")
             try:
@@ -831,13 +905,19 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             if length < 0:
                 return None, (400, {"ok": False, "error": "bad_length"})
             if length > max_bytes:
-                # Отказ по-прежнему решается ДО обращения к телу ради команды — эти
-                # байты никуда не форвардятся и не парсятся. Дренаж нужен отдельно:
-                # закрытие сокета с непрочитанным входом рвёт клиента RST'ом на
-                # Windows (замер Task 1.2h — WinError 10053 на теле 300 КБ без
-                # дренажа, портит СЛЕДУЮЩИЙ тест).
-                self._drain_body(length)
-                return None, (413, {"ok": False, "error": "too_large"})
+                # Решение отказать по-прежнему принимается ДО обращения к телу ради
+                # команды — эти байты никуда не форвардятся и не парсятся. Но ответ
+                # клиенту уходит СНАЧАЛА, дренаж — ПОСЛЕ (ревью Task 1.2h ит.1, Н1):
+                # раньше сервер вычитывал ВЕСЬ заявленный Content-Length перед
+                # ответом — клиент, заявивший гигабайт и приславший 64 байта, не
+                # получал ответа вовсе и держал поток (замер ревью: 8 с без ответа).
+                # Дренаж ограничен `_MAX_DRAIN_BYTES` и фактически заявленным телом —
+                # он нужен только чтобы закрытие сокета не оборвало уже отправленный
+                # ответ RST'ом на Windows (замер Task 1.2h — WinError 10053), не
+                # чтобы дочитывать заявленный Content-Length целиком.
+                self._reply_json(413, {"ok": False, "error": "too_large"})
+                self._drain_body(min(length, _MAX_DRAIN_BYTES))
+                return None, (413, None)
             raw = self.rfile.read(length) if length else b""
             if not raw.strip():
                 return {}, None
@@ -907,7 +987,10 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             args, error = self._read_command_body(max_bytes)
             if error is not None:
                 status, payload = error
-                self._reply_json(status, payload)
+                if payload is not None:
+                    self._reply_json(status, payload)
+                # payload is None -> 413 уже отправлен внутри _read_command_body
+                # (ревью Task 1.2h ит.1, Н1) — отвечать здесь второй раз нельзя.
                 return
             self._dispatch(command, args, client, timeout)
 

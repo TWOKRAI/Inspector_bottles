@@ -20,9 +20,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import socket
+import subprocess
+import threading
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -37,6 +42,22 @@ from Plugins.sim.pult_web.plugin import PultWebPlugin
 _MJPEG_URL = "http://127.0.0.1:8091/"
 _TIMEOUT_S = 1.0
 _COMMIT_CAP = 262144  # Находка 1 Task 1.2h — потолок тела /api/preset/commit.
+
+#: Итерация 2 ревью — офлайн-харнесс реального <script> страницы (page_offline.mjs).
+_PAGE_HARNESS = Path(__file__).with_name("page_offline.mjs")
+_NODE = shutil.which("node")
+
+#: Литералы разметки редактора, закреплённые планом («Закреплено после слепого
+#: тестировщика», 2026-09-28) — Н5 ревью ит.1.
+_PINNED_MARKUP_IDS = (
+    "presetRev",
+    "presetLayers",
+    "presetEngineWarn",
+    "btnPresetPreview",
+    "btnPresetSave",
+    "btnPresetUndo",
+    "presetPreviewImg",
+)
 
 
 class _FakeDeviceHubClient:
@@ -87,6 +108,20 @@ def _http(port: int, method: str, path: str, body: Any = None) -> tuple[int, byt
             return resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
+
+
+def _run_page_js(port: int, scenario: str) -> dict:
+    """Прогнать НАСТОЯЩИЙ ``<script>`` страницы (``page_offline.mjs``) и разобрать
+    stdout — та же техника, что в ``test_acceptance_1_2h_preset.py``."""
+    assert _NODE is not None, "node недоступен в PATH — офлайн-JS-тесты этого файла пропущены"
+    result = subprocess.run(
+        [_NODE, str(_PAGE_HARNESS), str(port), scenario],
+        capture_output=True,
+        encoding="utf-8",  # не text=True: node пишет UTF-8, а системная локаль тут cp1251
+        timeout=15.0,
+    )
+    assert result.returncode == 0, f"page_offline.mjs упал: stdout={result.stdout!r} stderr={result.stderr!r}"
+    return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
 @pytest.fixture
@@ -266,3 +301,227 @@ def test_preset_commit_content_type_guard_still_applies(start_pult) -> None:
     assert status == 415, f"commit без Content-Type -> {status}, тело: {raw[:300]!r}"
     assert json.loads(raw.decode("utf-8")) == {"ok": False, "error": "unsupported_media_type"}
     assert scene_client.calls == [], "команда не должна была вызваться при отказе по Content-Type"
+
+
+# --------------------------------------------------------------------------- #
+# Итерация 2 ревью (docs/reviews/2026-09-28_task-1.2h-review.md)              #
+# --------------------------------------------------------------------------- #
+# Н1 [блокер] 413 отвечает ДО дренажа, дренаж ограничен потолком и таймаутом. #
+# --------------------------------------------------------------------------- #
+
+
+def test_oversized_declared_length_replies_413_without_reading_all(start_pult) -> None:
+    """Н1: клиент, заявивший Content-Length гигабайт и приславший 64 байта,
+    обязан получить 413 быстро — сервер не имеет права ждать, пока дочитает
+    весь заявленный Content-Length (зонд ревью: 8 с без ответа, 22 живых
+    потока вместо 3 на неисправленном коде). Дедлайн — свой daemon-поток с
+    join(), не pytest-timeout (пустышка в этом окружении, см. TRAPS)."""
+    _plugin, _ctx, port = start_pult()
+    before_threads = threading.active_count()
+
+    result: dict[str, Any] = {}
+
+    def _attempt() -> None:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+                sock.sendall(
+                    b"POST /api/preset/commit HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1:" + str(port).encode("ascii") + b"\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: 1000000000\r\n"
+                    b"\r\n"
+                    b"x" * 64
+                )
+                sock.settimeout(5.0)
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                result["data"] = data
+        except OSError as exc:  # соединение оборвётся сервером после ответа — не отказ теста
+            result["error"] = repr(exc)
+
+    thread = threading.Thread(target=_attempt, daemon=True)
+    started = time.monotonic()
+    thread.start()
+    thread.join(timeout=8.0)
+    elapsed = time.monotonic() - started
+
+    assert not thread.is_alive(), "413 не пришёл за 8 с — сервер завис на заявленном Content-Length"
+    data = result.get("data", b"")
+    assert data, f"нет ответа вовсе (ошибка сокета: {result.get('error')!r})"
+    status_line = data.split(b"\r\n", 1)[0]
+    assert b" 413 " in status_line, f"ожидался 413, получено: {status_line!r} за {elapsed:.2f} с"
+
+    # Дренаж (до 2 с, _DRAIN_TIMEOUT_S) успевает завершиться — поток обработчика не
+    # должен пережить его надолго (потоки daemon, но зонд ревью именно про их число).
+    time.sleep(2.5)
+    after_threads = threading.active_count()
+    assert after_threads <= before_threads + 1, (
+        f"живых потоков после дренажа: {after_threads} (было {before_threads}) — утечка потока"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Н7 [minor] preset.preview без code подписывается layers_error, не scene_error #
+# --------------------------------------------------------------------------- #
+
+
+def test_layers_route_error_without_code_uses_layers_error_fallback(start_pult) -> None:
+    """Н7: развилка ``_dispatch`` подписи отказа была двусторонней (клиент
+    ``robot`` -> ``robot_error``, иначе всегда ``scene_error``) — третий клиент
+    (``layers_process``, маршрут ``preset.preview``) получал чужую подпись."""
+    _plugin, _ctx, port = start_pult()
+    layers_client = _client_for("layers")
+    assert layers_client is not None
+    layers_client.responses["preset.preview"] = {"status": "error"}  # без message и без code
+
+    status, raw = _http(port, "POST", "/api/preset/preview", {"seeds": [1]})
+
+    assert status == 504, f"отказ preview без code -> {status}, тело: {raw[:300]!r}"
+    assert json.loads(raw.decode("utf-8")) == {"ok": False, "error": "layers_error"}
+
+
+# --------------------------------------------------------------------------- #
+# Н2 [блокер] «Отмена» отменяет и без предшествующего сохранения              #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_undo_restores_previous_field_value(start_pult) -> None:
+    """Н2: раньше стек пополнялся только перед успешным ``commit`` — правка
+    поля и клик «Отмена» БЕЗ единого сохранения оставляли новое значение
+    (зонд ревью: before=0, afterUndo=15). Снимок теперь кладётся в стек при
+    первом изменении формы после последней синхронизации; на бэкенд при
+    отмене по-прежнему ничего не уходит (сценарий П6)."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None
+    scene_client.responses["preset.get"] = {
+        "status": "ok",
+        "rev": "rev-1",
+        "preset": {"layers": [{"name": "cap", "offset_px": [0, 0]}]},
+    }
+
+    out = _run_page_js(port, "preset_undo_restores_field")
+
+    assert out["before"] == "0", f"поле до правки должно быть 0: {out!r}"
+    assert out["afterUndo"] == "0", f"«Отмена» обязана вернуть прежнее значение: {out!r}"
+    commit_calls = [c for c in scene_client.calls if c[0] == "preset.commit"]
+    assert commit_calls == [], f"«Отмена» не должна была ничего отправить на бэкенд: {commit_calls!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Н3 [блокер] layer.name не попадает ни в один innerHTML сырым               #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_layer_name_is_escaped_in_markup(start_pult) -> None:
+    """Н3: строка слоя раньше собиралась конкатенацией и уходила в
+    ``container.innerHTML`` целиком — имя слоя с тегом доезжало до присваивания
+    неэкранированным (зонд ревью: ``<img src=x onerror=...>``). Проверка —
+    перехват КАЖДОЙ записи ``.innerHTML =`` в офлайн-харнессе (не только что
+    страница не упала); ``revText`` доказывает, что рендер дошёл до конца, а не
+    тихо провалился до записи (иначе ``innerHtmlLeaked=false`` был бы вакуумным)."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None
+    malicious_name = "<img src=x onerror=\"fetch('/api/run')\">"
+    scene_client.responses["preset.get"] = {
+        "status": "ok",
+        "rev": "rev-1",
+        "preset": {"layers": [{"name": malicious_name, "offset_px": [0, 0]}]},
+    }
+
+    out = _run_page_js(port, "preset_layer_name_escaped")
+
+    assert out["revText"] == "рев.: rev-1", f"страница не должна была упасть при рендере: {out!r}"
+    assert out["innerHtmlLeaked"] is False, f"onerror утёк в innerHTML: {out!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Н4 [major] engine:false / engine отсутствует / rev:null — три состояния    #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_engine_false_shows_restart_warning(start_pult) -> None:
+    """Н4: ``engine: false`` обязан сказать словами — иначе редактор молча
+    врёт «сохранено и поехало» (план, «Закреплено после слепого тестировщика»,
+    2026-09-28); logикa уже верна, теста не было."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None
+    scene_client.responses["preset.get"] = {
+        "status": "ok",
+        "rev": "rev-1",
+        "preset": {"layers": []},
+        "engine": False,
+    }
+
+    out = _run_page_js(port, "preset_state_probe")
+
+    assert out["engineWarnText"] != "", f"engine=false должен дать непустой текст предупреждения: {out!r}"
+    assert out["saveDisabled"] is False, f"engine=false не должен блокировать «Сохранить»: {out!r}"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_engine_absent_shows_no_warning(start_pult) -> None:
+    """Н4: ``engine`` отсутствует в ответе (форма двойников приёмки — 3 ключа)
+    -> «неизвестно», не «false» — страница не должна врать про состояние,
+    которое не проверяла (сравнение ``=== false``, не отрицание)."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None
+    scene_client.responses["preset.get"] = {
+        "status": "ok",
+        "rev": "rev-1",
+        "preset": {"layers": []},
+    }
+
+    out = _run_page_js(port, "preset_state_probe")
+
+    assert out["engineWarnText"] == "", f"engine отсутствует -> текст должен быть пуст: {out!r}"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_rev_null_blocks_save(start_pult) -> None:
+    """Н4: ``rev: null`` (пресет собран из каталога, не из ``.yaml``) -> текст
+    про недоступность и «Сохранить» заблокировано."""
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None
+    scene_client.responses["preset.get"] = {
+        "status": "ok",
+        "rev": None,
+        "preset": {"layers": []},
+        "engine": True,
+    }
+
+    out = _run_page_js(port, "preset_state_probe")
+
+    assert out["saveDisabled"] is True, f"rev=null должен блокировать «Сохранить»: {out!r}"
+    assert "нет" in out["revText"], f"revText должен сказать про недоступность: {out!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Н5 [major] закреплённые планом id разметки редактора, не подстроки H6      #
+# --------------------------------------------------------------------------- #
+
+
+def test_preset_section_markup_has_pinned_ids(start_pult) -> None:
+    """Н5: H6 приёмки ищет подстроки и ловит посторонние id (``btnPresetPreview``
+    содержит "rev" через "P-rev-iew"); из семи литералов, закреплённых планом,
+    в тестах встречался ровно один. Проверка — точное вхождение ``id="<литерал>"``
+    по всем семи в сыром HTML (``GET /``, не через ``page_offline.mjs`` — тот
+    же довод, что у H6: харнесс создаёт фиктивный элемент под любой id)."""
+    _plugin, _ctx, port = start_pult()
+    status, raw = _http(port, "GET", "/")
+    html = raw.decode("utf-8")
+    assert status == 200
+
+    missing = [name for name in _PINNED_MARKUP_IDS if f'id="{name}"' not in html]
+    assert not missing, f"в разметке не найдены закреплённые id: {missing!r}"
