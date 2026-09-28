@@ -263,6 +263,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
         # в CPython): ни одна из этих команд не зовёт ObjectSpawner напрямую, разбор —
         # в _drain_control(), в начале produce(). maxlen — см. докстринг _CONTROL_MAXLEN.
         self._control: collections.deque[dict] = collections.deque(maxlen=_CONTROL_MAXLEN)
+        # Нажатия «выпусти брак», ещё не отданные фабрике: флаг форс-брака одноразовый,
+        # поэтому нажатия копятся счётчиком и тратятся по одному за кадр. Меняется только
+        # воркером (`_drain_control`), поток команд его не трогает.
+        self._defect_now_credits = 0
 
         # Task 5.2 (контракт лида §2): правда на проводе — свой лок (НЕ self._lock мира),
         # чтобы truth.status/truth.reset из потока команд не ждали лок мира и наоборот.
@@ -756,27 +760,36 @@ class SceneSourcePlugin(ProcessModulePlugin):
         `_CONTROL_MAXLEN`) — спавнера, которому адресовано намерение, не существует.
 
         `defect_now` — особый случай: `ObjectFactory.force_defect_next()` булев ОДНОРАЗОВЫЙ
-        флаг, не счётчик нажатий (Task 3.2). Если предыдущее нажатие ЕЩЁ не досталось ни
-        одному спавну (`force_defect_pending` уже `True`), второе нажатие обязано ЖДАТЬ
-        своей очереди — иначе оба «выпусти брак» схлопнутся в один дефектный объект
-        (контракт лида, критерий 3: два нажатия подряд дают ДВА дефекта). Такая заявка
-        (и всё, что после неё — FIFO) остаётся в очереди до продюсера, где предыдущий
-        форс-брак уже будет погашен успешным `make()`."""
+        флаг, не счётчик нажатий (Task 3.2), поэтому два нажатия подряд схлопнулись бы в
+        один дефектный объект (контракт лида, критерий 3: два нажатия дают ДВА дефекта).
+        Нажатия копятся ОТДЕЛЬНЫМ счётчиком `_defect_now_credits`, а не задержкой в голове
+        очереди: очередь всегда разбирается до конца, кредит тратится по одному за кадр,
+        как только фабрика свободна.
+
+        Почему не «ждать в голове очереди» (инъекция лида 2026-09-28, дефект найден
+        воспроизведением, не чтением): на паузе фабрика форс-брак не тратит НИКОГДА, и всё,
+        что встало за не выпущенным `defect_now` — в том числе снятие той самой паузы — не
+        применялось. Пульт в этом состоянии не мог снять паузу ничем, кроме рестарта
+        процесса. Регрессия — `tests/test_lead_6_1.py`."""
         while self._control:
-            if self._spawner is None:
-                self._control.popleft()  # некому применять -- см. докстринг _CONTROL_MAXLEN
-                continue
-            op = self._control[0]
-            if op["op"] == "defect_now" and self._live_factory is not None and self._live_factory.force_defect_pending:
-                break
             op = self._control.popleft()
+            if self._spawner is None:
+                continue  # некому применять -- см. докстринг _CONTROL_MAXLEN
             kind = op["op"]
             if kind == "pause":
                 self._spawner.set_paused(op["paused"])
             elif kind == "flow":
                 self._spawner.set_flow(**op["kwargs"])
             elif kind == "defect_now":
-                self._spawner.force_defect_next()
+                # потолок тот же, что у очереди: копить нажатия без предела незачем
+                self._defect_now_credits = min(self._defect_now_credits + 1, _CONTROL_MAXLEN)
+        if (
+            self._spawner is not None
+            and self._defect_now_credits > 0
+            and not (self._live_factory is not None and self._live_factory.force_defect_pending)
+        ):
+            self._spawner.force_defect_next()
+            self._defect_now_credits -= 1
 
     def _drain_jobs(self) -> None:
         """Разобрать очередь заданий целиком (воркер produce(), ДО `spawner.tick()`).

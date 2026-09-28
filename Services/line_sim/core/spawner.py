@@ -210,6 +210,14 @@ class ObjectSpawner:
             return
 
         if self._last_spawn_encoder is not None:
+            # Порог сброшен `set_flow()` (Task 6.1) при уже пройденном пути — взвести его
+            # ЗДЕСЬ, где есть `rng`, от НОВОГО диапазона. Без этой ветки сравнение ниже
+            # ловило `None` и роняло тик `TypeError`, который `produce()` глушит своим
+            # `except Exception` — лента ехала, объекты не появлялись, в логе только
+            # предупреждение «сбой фабрики» (инъекция лида 2026-09-28, воспроизведение в
+            # `Plugins/sim/scene_source/tests/test_lead_6_1.py`).
+            if self._next_spacing_mm is None:
+                self._next_spacing_mm = float(rng.uniform(*self._spacing_mm))
             traveled_mm = encoder_to_offset_mm(now_encoder, self._last_spawn_encoder)
             if traveled_mm < self._next_spacing_mm:
                 return

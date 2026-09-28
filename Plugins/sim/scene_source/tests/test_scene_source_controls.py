@@ -32,6 +32,7 @@ import yaml
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from Services.dataset_gen.core.catalog import imwrite_unicode
+from Services.line_sim.core.belt import FACTOR_MM
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 
 pytestmark = pytest.mark.timeout(30)
@@ -159,25 +160,32 @@ def test_control_queue_maxlen_bounds_growth_when_produce_never_called(tmp_path):
 
 def test_defect_now_second_press_stays_queued_until_first_is_consumed(tmp_path):
     """`ObjectFactory.force_defect_next()` -- булев флаг, не счётчик (Task 3.2). Два
-    нажатия `scene.defect_now` ДО того, как первое досталось спавну (produce() без
-    движения энкодера -- порог `spacing_mm` не пройден, спавна не будет), обязаны
-    оставить ВТОРОЕ нажатие в очереди -- иначе оба схлопнутся в один `force_defect_next()`
-    и второй оператор "потеряет" своё нажатие молча."""
-    plugin, sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [1e9, 1e9], "scene_length_mm": 1e9})
+    нажатия `scene.defect_now` ДО того, как первое досталось спавну, не имеют права
+    схлопнуться в один дефектный объект: второе ждёт своей очереди, пока флаг не погашен.
+
+    Проверяется НАБЛЮДАЕМЫЙ итог (два дефектных объекта), а не место хранения заявки:
+    первая редакция держала её в голове `_control` и блокировала этим всю очередь
+    (дефект, найденный инъекцией лида 2026-09-28 -- см. `test_lead_6_1.py`), сейчас это
+    счётчик кредитов. Тест не должен падать от такой замены -- он про свойство."""
+    plugin, sp = _make_plugin_with_engine(tmp_path, {"spawn_spacing_mm": [10.0, 10.0], "scene_length_mm": 1e9})
     _push_encoder(sp, 0)
-    plugin.produce()  # obj1 -- первый спавн spacing-режима, порог теперь далеко (1e9 мм)
+    plugin.produce()  # obj1 -- первый спавн spacing-режима, он НЕ дефектный
     assert len(plugin._spawner.active_objects()) == 1
+    assert plugin._spawner.active_objects()[0].passport.defect is None
 
     assert _call(plugin, "scene.defect_now", {}) == {"status": "ok"}
     assert _call(plugin, "scene.defect_now", {}) == {"status": "ok"}
-    assert len(plugin._control) == 2, "обе заявки должны лежать в очереди ДО produce()"
 
-    plugin.produce()  # энкодер не двигаем -- порог не пройден, новый спавн не наступит
+    plugin.produce()  # энкодер не двигаем -- порог не пройден, спавна нет
     assert len(plugin._spawner.active_objects()) == 1, "фикстура: спавна в этом produce() быть не должно"
-    assert len(plugin._control) == 1, (
-        "второе нажатие обязано остаться в очереди -- флаг ещё не погашен спавном (первое нажатие не потеряно)"
-    )
-    assert plugin._live_factory.force_defect_pending is True
+    assert plugin._live_factory.force_defect_pending is True, "первое нажатие уже отдано фабрике"
+
+    # лента едет: оба нажатия обязаны стать ДВУМЯ дефектными объектами, не одним
+    for i in range(1, 4):
+        _push_encoder(sp, i * 10.0 / FACTOR_MM)
+        plugin.produce()
+    defects = [obj for obj in plugin._spawner.active_objects() if obj.passport.defect is not None]
+    assert len(defects) == 2, "второе нажатие потеряно -- два нажатия схлопнулись в один брак"
 
 
 # --------------------------------------------------------------------------- #
