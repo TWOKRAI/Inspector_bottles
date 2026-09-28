@@ -68,6 +68,14 @@ class ObjectFactory:
         return self._catalog.class_names if self._catalog is not None else []
 
     @property
+    def defect_probability(self) -> float:
+        """Доля брака, реально ЗАШИТАЯ в эту фабрику (Task 6.1, ревью итерация 2, Ф2) --
+        `self._preset.defect_probability` уже несёт `apply_defect_override`, если фабрика
+        собрана через него (`cmd_preset_commit`/`cmd_defect_rate`). Источник для
+        `scene.status`, чтобы отдавать ПРИМЕНЁННОЕ значение, а не заявку клиента."""
+        return self._preset.defect_probability
+
+    @property
     def force_defect_pending(self) -> bool:
         """Взведён ли одноразовый флаг `force_defect_next()` (ещё не погашен успешным `make()`).
         Только чтение — нужен `ObjectSpawner.set_factory()`, чтобы перенести нажатие на новую фабрику."""

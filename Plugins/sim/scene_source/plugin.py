@@ -94,6 +94,7 @@ from Services.line_sim.core import (
     match_job,
     resolve_repo_path,
 )
+from Services.line_sim.core.spawner import validate_flow
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -112,6 +113,13 @@ _DEFAULT_CAMERA_ID = 0
 _DEFAULT_MATCH_RADIUS_MM = 5.0
 _DEFAULT_DUP_WINDOW_S = 10.0  # тот же дефолт, что у SimJournal
 _RECENT_MAXLEN = 32
+
+#: Task 6.1: очередь управления (pause/flow/defect_now) — ограничена явно (контракт
+#: лида, edge case §3), чтобы она не росла без предела, если produce() не зовут (движок
+#: не собран, `self._spawner is None` — тогда _drain_control() каждый кадр выбрасывает
+#: накопленное без применения). Тот же порядок величины, что _RECENT_MAXLEN — четырёх
+#: ручек стенда оператор физически не нажмёт быстрее этого числа раз между кадрами.
+_CONTROL_MAXLEN = 64
 
 #: Task 5.2 (контракт лида §2) + 5.1b (§3): правда на проводе — TruthLedger + шесть
 #: уровней (пятый исходный + ``truth_false_alarm_frozen_xy`` — причина «те же X/Y с
@@ -179,6 +187,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
         "truth.reset": "cmd_truth_reset",
         "preset.get": "cmd_preset_get",
         "preset.commit": "cmd_preset_commit",
+        "scene.pause": "cmd_pause",
+        "scene.flow": "cmd_flow",
+        "scene.defect_rate": "cmd_defect_rate",
+        "scene.defect_now": "cmd_defect_now",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -245,6 +257,16 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._jobs: collections.deque[JobDone] = collections.deque()
         self._removed: collections.deque[tuple[float, Any]] = collections.deque()
         self._recent: collections.deque[dict] = collections.deque(maxlen=_RECENT_MAXLEN)
+
+        # Task 6.1: очередь управления ручками стенда (pause/flow/defect_now) — тот же
+        # приём, что `_jobs` (append из потока команд, popleft из воркера, оба атомарны
+        # в CPython): ни одна из этих команд не зовёт ObjectSpawner напрямую, разбор —
+        # в _drain_control(), в начале produce(). maxlen — см. докстринг _CONTROL_MAXLEN.
+        self._control: collections.deque[dict] = collections.deque(maxlen=_CONTROL_MAXLEN)
+        # Нажатия «выпусти брак», ещё не отданные фабрике: флаг форс-брака одноразовый,
+        # поэтому нажатия копятся счётчиком и тратятся по одному за кадр. Меняется только
+        # воркером (`_drain_control`), поток команд его не трогает.
+        self._defect_now_credits = 0
 
         # Task 5.2 (контракт лида §2): правда на проводе — свой лок (НЕ self._lock мира),
         # чтобы truth.status/truth.reset из потока команд не ждали лок мира и наоборот.
@@ -385,6 +407,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         не движение уже пришедшего значения. Рендер компоновщика продолжает работать всегда
         (активных объектов ещё нет — кадр останется фоном, независимо от `now_encoder`)."""
         self._drain_jobs()
+        self._drain_control()
         self._apply_pending_factory()
         now_encoder = self._read_world_encoder()
 
@@ -443,14 +466,45 @@ class SceneSourcePlugin(ProcessModulePlugin):
         return {"status": "ok"}
 
     def cmd_status(self, data: dict | None = None) -> dict:
-        """`scene.status` (поток команд): число активных объектов + последние исходы.
+        """`scene.status` (поток команд): число активных объектов + последние исходы +
+        (Task 6.1) `paused`/`flow`/`defect_probability`/`force_defect_pending` — снимок
+        РЕАЛЬНОГО состояния движка (после применения на `produce()`, не сырая заявка
+        клиента из очереди управления).
 
         `active_objects()` — копия списка (`list(...)`, одна C-операция под GIL), спавнер
-        отсюда не мутируется."""
+        отсюда не мутируется. Движок не собран -> `paused=False`, `flow={}`,
+        `force_defect_pending=False`, `defect_probability` — по override/пресету, как обычно."""
         active = len(self._spawner.active_objects()) if self._spawner is not None else 0
         with self._lock:
             recent = list(self._recent)
-        return {"status": "ok", "active": active, "recent": recent}
+        if self._live_factory is not None:
+            # Ф2 (ревью итерация 2): применённое, не заявленное -- живая фабрика уже несёт
+            # результат последнего _apply_pending_factory() (commit/defect_rate), заявка,
+            # ещё сидящая в _pending_factory, здесь не видна до следующего produce().
+            defect_probability = self._live_factory.defect_probability
+        elif self._preset is not None:
+            defect_probability = (
+                self._defect_override if self._defect_override is not None else self._preset.defect_probability
+            )
+        else:
+            defect_probability = self._defect_override if self._defect_override is not None else 0.0
+        if self._spawner is not None:
+            spawner_flow = self._spawner.flow
+            flow = {spawner_flow["mode"]: [spawner_flow["lo"], spawner_flow["hi"]]}
+            paused = self._spawner.paused
+        else:
+            flow = {}
+            paused = False
+        force_defect_pending = self._live_factory.force_defect_pending if self._live_factory is not None else False
+        return {
+            "status": "ok",
+            "active": active,
+            "recent": recent,
+            "paused": paused,
+            "flow": flow,
+            "defect_probability": defect_probability,
+            "force_defect_pending": force_defect_pending,
+        }
 
     def cmd_truth_status(self, data: dict | None = None) -> dict:
         """`truth.status` (поток команд): снимок счётчиков `TruthLedger` — §2 контракта."""
@@ -464,6 +518,109 @@ class SceneSourcePlugin(ProcessModulePlugin):
         with self._truth_lock:
             self._truth.reset()
         return {"status": "ok"}
+
+    # ------------------------------------------------------------------ #
+    # Ручки стенда (Task 6.1 — контракт лида, plans/line-sim/phase-6-contract-6.1.md):
+    # поток, доля брака, пауза, «выпусти брак сейчас». Ни одна не зовёт ObjectSpawner
+    # напрямую из потока команд (дисциплина потоков, докстринг модуля spawner.py) —
+    # pause/flow/defect_now кладут намерение в self._control, разбирает _drain_control()
+    # в начале produce(). Валидация — здесь, ДО постановки в очередь (кривой аргумент
+    # отвечает ошибкой немедленно, не тратя такт воркера).
+    # ------------------------------------------------------------------ #
+
+    def cmd_pause(self, data: dict | None = None) -> dict:
+        """`scene.pause {"paused": bool}` — останавливает/возобновляет НОВЫЙ спавн
+        (деспавн не трогается, см. `ObjectSpawner.set_paused`). Кладёт намерение в
+        очередь управления — спавнер меняется только на следующем `produce()`.
+        Движок не собран (`self._spawner is None`) -> `{"status": "ok", "applied": False}`,
+        в очередь ничего не кладётся -- как уже делает `scene.defect_rate` (Ф3а, ревью
+        итерация 2). Очередь переполнена -> `overloaded`, см. `_push_control` (Ф3б)."""
+        if not isinstance(data, dict) or not isinstance(data.get("paused"), bool):
+            return self._invalid(f"scene.pause: ожидается {{'paused': bool}}, получено {data!r}")
+        if self._spawner is None:
+            return {"status": "ok", "applied": False}
+        overload = self._push_control({"op": "pause", "paused": data["paused"]})
+        return overload if overload is not None else {"status": "ok"}
+
+    def cmd_flow(self, data: dict | None = None) -> dict:
+        """`scene.flow` — РОВНО один из `{"interval_s": [lo, hi]}` / `{"spacing_mm": [lo,
+        hi]}`. Валидация — той же `validate_flow`, что и `ObjectSpawner.__init__`/
+        `set_flow`, ДО постановки в очередь: кривой аргумент не долетает до спавнера
+        вовсе, ничего не ломает через тик.
+
+        Присутствие ключа определяется через `in data`, НЕ `is not None` (Ф4, ревью
+        итерация 2) — `{"interval_s": [...], "spacing_mm": None}` обязан считаться ДВУМЯ
+        присутствующими ключами (`invalid`), а не «ровно один задан»: раньше явный `null`
+        второго ключа маскировался под «не задан» и проходил валидацию.
+
+        Движок не собран -> `{"status": "ok", "applied": False}` (Ф3а), очередь
+        переполнена -> `overloaded` (Ф3б, `_push_control`)."""
+        if not isinstance(data, dict):
+            return self._invalid(f"scene.flow: ожидается dict, получено {data!r}")
+        interval_present = "interval_s" in data
+        spacing_present = "spacing_mm" in data
+        if interval_present == spacing_present:
+            return self._invalid(f"scene.flow: ожидается ровно один из interval_s/spacing_mm, получено {data!r}")
+        try:
+            if interval_present:
+                raw_interval = data["interval_s"]
+                interval_s = (float(raw_interval[0]), float(raw_interval[1]))
+                spacing_mm = None
+            else:
+                raw_spacing = data["spacing_mm"]
+                spacing_mm = (float(raw_spacing[0]), float(raw_spacing[1]))
+                interval_s = None
+            validate_flow(interval_s, spacing_mm)
+        except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ с кодом, не исключение
+            return self._invalid(f"scene.flow: {exc!r}")
+        kwargs = {"interval_s": interval_s} if interval_s is not None else {"spacing_mm": spacing_mm}
+        if self._spawner is None:
+            return {"status": "ok", "applied": False}
+        overload = self._push_control({"op": "flow", "kwargs": kwargs})
+        return overload if overload is not None else {"status": "ok"}
+
+    def cmd_defect_rate(self, data: dict | None = None) -> dict:
+        """`scene.defect_rate {"probability": p}` (Task 6.1 шаг 6) — НЕ заводит своего
+        механизма подмены фабрики: пересобирает `ObjectFactory` из ТЕКУЩЕГО пресета в
+        памяти (`apply_defect_override`) и кладёт её в СУЩЕСТВУЮЩИЙ `_pending_factory`
+        (maxlen=1, тот же механизм, что `preset.commit`) — гонка `defect_rate`↔`commit`
+        в одном кадре разрешается «в силе последняя», как и было. `self._defect_override`
+        обновляется сразу (плагин-уровневое поле, не спавнер — не нарушает дисциплину
+        потоков), чтобы последующий `preset.commit`/`scene.status` не отдал старую долю.
+        Файл пресета НЕ переписывается. Движок не собран (`_spawner is None`) ->
+        `{"status": "ok", "applied": False}`, фабрика не строится — нечего применять."""
+        if not isinstance(data, dict):
+            return self._invalid(f"scene.defect_rate: ожидается dict, получено {data!r}")
+        probability = data.get("probability")
+        if not isinstance(probability, (int, float)) or isinstance(probability, bool):
+            return self._invalid(f"scene.defect_rate: probability должен быть числом 0..1, получено {probability!r}")
+        probability = float(probability)
+        if not (0.0 <= probability <= 1.0):
+            return self._invalid(f"scene.defect_rate: probability={probability} вне диапазона [0, 1]")
+        if self._spawner is None or self._preset is None:
+            return {"status": "ok", "applied": False}
+        self._defect_override = probability
+        factory = ObjectFactory(apply_defect_override(self._preset, probability))
+        self._pending_factory.append(factory)  # затирает не применённую — в силе последняя
+        return {"status": "ok"}
+
+    def cmd_defect_now(self, data: dict | None = None) -> dict:
+        """`scene.defect_now {}` (Task 6.1 шаг 7) — кладёт намерение в очередь управления;
+        разбор зовёт `spawner.force_defect_next()`. Нажатия НЕ схлопываются (два подряд
+        дают два дефектных объекта — FIFO очереди, каждое своя запись); на паузе объект
+        не создаётся, но нажатие не теряется (гарантия `ObjectFactory`/`ObjectSpawner`,
+        LS-006/LS-007 — флаг гасится только после успешной сборки).
+
+        Принимает только `None`/`{}` (Ф4, ревью итерация 2) — раньше не валидировал ничего
+        и клал в очередь ЛЮБОЙ payload, включая мусор. Движок не собран ->
+        `{"status": "ok", "applied": False}` (Ф3а), очередь переполнена -> `overloaded`
+        (Ф3б, `_push_control`)."""
+        if data is not None and data != {}:
+            return self._invalid(f"scene.defect_now: ожидается None или пустой dict, получено {data!r}")
+        if self._spawner is None:
+            return {"status": "ok", "applied": False}
+        overload = self._push_control({"op": "defect_now"})
+        return overload if overload is not None else {"status": "ok"}
 
     # ------------------------------------------------------------------ #
     # Команды пресета (Task 1.2a — план line-sim-layer-editor, «Устройство»)
@@ -556,6 +713,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
             on_disk = self._normalized_file_dict(raw, path)
             changed = {key: value for key, value in new_dict.items() if on_disk.get(key, _MISSING_KEY) != value}
             if not changed:
+                # Ничего не записано, но пресет клиента по построению РАВЕН файлу, а поле
+                # плагина могло протухнуть от внешней правки файла мимо команды (ревью
+                # итерация 2, остаточный путь Ф1: угол на диске 30, в памяти 0 -> любая
+                # последующая пересборка фабрики откатывала бы объект к 0).
+                self._preset = preset
                 return {"status": "ok", "rev": current_rev, "changed": False}
             if not os.access(path, os.W_OK):
                 return {
@@ -568,6 +730,14 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 new_rev = self._file_rev()
             except OSError as exc:
                 return {"status": "error", "code": "io_error", "message": f"preset.commit: {exc}"}
+            # Ф1 (ревью итерация 2): без этого self._preset остаётся тем, что собрал
+            # configure() -- любой ПОСЛЕДУЮЩИЙ scene.defect_rate пересобирает фабрику из
+            # УСТАРЕВШЕГО пресета и откатывает содержательную правку этого commit'а.
+            # `preset` -- БЕЗ override (тот же объект, что ушёл в файл строкой выше), а не
+            # `factory`/`apply_defect_override(...)` -- иначе доля брака начнёт наслаиваться
+            # на себя на следующем commit'е. Не зависит от `engine` -- поле плагина, не
+            # состояние движка.
+            self._preset = preset
             if engine:
                 self._pending_factory.append(factory)  # затирает ещё не применённую — в силе последняя
         result = {"status": "ok", "rev": new_rev, "changed": True, "applied": engine}
@@ -620,6 +790,74 @@ class SceneSourcePlugin(ProcessModulePlugin):
     @staticmethod
     def _bad_request(message: str) -> dict:
         return {"status": "error", "code": "bad_request", "message": message}
+
+    @staticmethod
+    def _invalid(message: str) -> dict:
+        """Ответ на кривые аргументы ручек стенда (Task 6.1) — `code` обязателен у всех
+        четырёх команд (контракт лида шаг 3), тот же образец, что `preset.commit`."""
+        return {"status": "error", "code": "invalid", "message": message}
+
+    def _push_control(self, op: dict) -> dict | None:
+        """Поставить намерение в очередь управления (Ф3б, ревью итерация 2) — вызывается
+        ТОЛЬКО когда `self._spawner is not None` (иначе `applied: False`, см. вызывающих).
+
+        Переполнение (`len(self._control) >= _CONTROL_MAXLEN`) отвечает `overloaded` и
+        НИЧЕГО не кладёт — `deque(maxlen=...)` при `append` сам по себе молча роняет
+        САМУЮ СТАРУЮ заявку слева (например снятие паузы), что теряет заявку без единого
+        сигнала клиенту. Явная проверка перед `append` возвращает контроль клиенту вместо
+        того. `maxlen` у `deque` остаётся страховкой (двойная защита), не единственной."""
+        if len(self._control) >= _CONTROL_MAXLEN:
+            return {
+                "status": "error",
+                "code": "overloaded",
+                "message": "scene_source: очередь управления переполнена — заявка отклонена",
+            }
+        self._control.append(op)
+        return None
+
+    def _drain_control(self) -> None:
+        """Разобрать очередь управления ручками стенда целиком (воркер produce(), рядом
+        с `_drain_jobs()`/`_apply_pending_factory()`, Task 6.1) — В ПОРЯДКЕ ПОСТУПЛЕНИЯ
+        (FIFO), поэтому «в силе последняя» для pause/flow получается сама собой, а
+        нажатия defect_now не схлопываются (каждое — отдельный вызов `force_defect_next()`).
+
+        Не зависит от `_world_ready` — намерение, пришедшее до первой дельты мира,
+        применяется на первом же produce() (спавнер уже создан в `configure()`,
+        независимо от того, пришла ли дельта энкодера). Движок не собран (`_spawner is
+        None`) -> очередь просто выбрасывается без применения (см. докстринг
+        `_CONTROL_MAXLEN`) — спавнера, которому адресовано намерение, не существует.
+
+        `defect_now` — особый случай: `ObjectFactory.force_defect_next()` булев ОДНОРАЗОВЫЙ
+        флаг, не счётчик нажатий (Task 3.2), поэтому два нажатия подряд схлопнулись бы в
+        один дефектный объект (контракт лида, критерий 3: два нажатия дают ДВА дефекта).
+        Нажатия копятся ОТДЕЛЬНЫМ счётчиком `_defect_now_credits`, а не задержкой в голове
+        очереди: очередь всегда разбирается до конца, кредит тратится по одному за кадр,
+        как только фабрика свободна.
+
+        Почему не «ждать в голове очереди» (инъекция лида 2026-09-28, дефект найден
+        воспроизведением, не чтением): на паузе фабрика форс-брак не тратит НИКОГДА, и всё,
+        что встало за не выпущенным `defect_now` — в том числе снятие той самой паузы — не
+        применялось. Пульт в этом состоянии не мог снять паузу ничем, кроме рестарта
+        процесса. Регрессия — `tests/test_lead_6_1.py`."""
+        while self._control:
+            op = self._control.popleft()
+            if self._spawner is None:
+                continue  # некому применять -- см. докстринг _CONTROL_MAXLEN
+            kind = op["op"]
+            if kind == "pause":
+                self._spawner.set_paused(op["paused"])
+            elif kind == "flow":
+                self._spawner.set_flow(**op["kwargs"])
+            elif kind == "defect_now":
+                # потолок тот же, что у очереди: копить нажатия без предела незачем
+                self._defect_now_credits = min(self._defect_now_credits + 1, _CONTROL_MAXLEN)
+        if (
+            self._spawner is not None
+            and self._defect_now_credits > 0
+            and not (self._live_factory is not None and self._live_factory.force_defect_pending)
+        ):
+            self._spawner.force_defect_next()
+            self._defect_now_credits -= 1
 
     def _drain_jobs(self) -> None:
         """Разобрать очередь заданий целиком (воркер produce(), ДО `spawner.tick()`).

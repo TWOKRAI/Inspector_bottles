@@ -143,6 +143,31 @@ async function run() {
     el("btnPresetSave").fire("click"); // повторный save -> должен уйти с current_rev как base_rev
     await sleep(300);
     process.stdout.write(JSON.stringify({ offsetXAfterConflict }));
+  } else if (scenario === "scene_overloaded") {
+    // Ф6.1b: клик «Выпусти брак» на overloaded (двойник отвечает overloaded на
+    // scene.defect_now) -> страница обязана повторить тот же POST ровно один раз.
+    el("btnSceneDefectNow").fire("click");
+    await sleep(300); // время на POST + повторный POST
+  } else if (scenario === "scene_pause_sync") {
+    // Ф6.1b, находка ревью: галка паузы идёт за ДВИЖКОМ (/api/scene), а не за нажатием.
+    await sleep(1200);
+    process.stdout.write(JSON.stringify({ pauseChecked: el("scenePause").checked }));
+  } else if (scenario === "scene_error_when_down") {
+    // Ф6.1b, находка ревью итерации 2: отказ виден и когда сама сцена не отвечает.
+    el("btnSceneDefectRate").fire("click");
+    await sleep(1400); // дать опросу перерисовать строку хотя бы раз
+    process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
+  } else if (scenario === "scene_error_text") {
+    // Ф6.1b, находка ревью: отказ сцены виден оператору в строке состояния.
+    // Читаем сразу после клика, но опрос отказ НЕ затирает — он держится в `sceneError`
+    // до следующей принятой заявки (ревью итерации 2 проверило это на 2600 мс).
+    el("btnSceneDefectRate").fire("click");
+    await sleep(200);
+    process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
+  } else if (scenario === "scene_status") {
+    // Ф6.1b §2: опрос /api/scene тем же таймером, что /api/truth (1000 мс).
+    await sleep(1200);
+    process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
   }
   process.exit(0);
 }

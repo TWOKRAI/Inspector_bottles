@@ -89,12 +89,18 @@ _COMMAND_BY_PATH = {
     "/api/journal/reset": "sim_robot.journal_reset",
 }
 
-#: Путь -> команда ``truth.*`` (Task 5.3a, §1) — адресат ТОЛЬКО процесс сцены,
-#: не ``robot``. Отдельная карта, чтобы ``do_POST`` мог выбрать правильный
-#: клиент (``pult._scene_client``, а не ``pult._client``) по тому, в какой из
-#: двух карт нашёлся путь.
+#: Путь -> команда ``truth.*``/``scene.*`` (Task 5.3a §1, Task 6.1b шаг 9) —
+#: адресат ТОЛЬКО процесс сцены, не ``robot``. Отдельная карта, чтобы
+#: ``do_POST`` мог выбрать правильный клиент (``pult._scene_client``, а не
+#: ``pult._client``) по тому, в какой из двух карт нашёлся путь. Тело
+#: форвардится КАК ЕСТЬ — та же дисциплина, что у ``_COMMAND_BY_PATH``, вся
+#: валидация полей — в плагине сцены (``Plugins/sim/scene_source``).
 _SCENE_COMMAND_BY_PATH = {
     "/api/truth/reset": "truth.reset",
+    "/api/scene/pause": "scene.pause",
+    "/api/scene/flow": "scene.flow",
+    "/api/scene/defect_rate": "scene.defect_rate",
+    "/api/scene/defect_now": "scene.defect_now",
 }
 
 #: Страница пульта — Русские подписи, dead-man на jog-кнопках, опрос статуса.
@@ -161,6 +167,32 @@ button {{ font-size: 1.2em; padding: 4px 12px; }}
   <div id="truth">правда недоступна</div>
   <button id="btnTruthReset">Сброс правды</button>
 </div>
+
+<h2>Сцена</h2>
+<div class="row">
+  <label><input type="checkbox" id="scenePause"> Пауза спавна</label>
+</div>
+<div class="row">
+  <label>Доля брака (0..1):
+    <input type="number" id="sceneDefectRate" min="0" max="1" step="0.01" value="0">
+  </label>
+  <button id="btnSceneDefectRate">Применить</button>
+</div>
+<div class="row">
+  <button id="btnSceneDefectNow">Выпусти брак</button>
+</div>
+<div class="row">
+  <label>Поток:
+    <select id="sceneFlowMode">
+      <option value="interval_s">interval_s</option>
+      <option value="spacing_mm">spacing_mm</option>
+    </select>
+  </label>
+  <label>lo: <input type="number" id="sceneFlowLo" step="0.1" value="2"></label>
+  <label>hi: <input type="number" id="sceneFlowHi" step="0.1" value="4"></label>
+  <button id="btnSceneFlow">Применить</button>
+</div>
+<div class="row" id="sceneStatus">сцена недоступна</div>
 
 <script>
 function post(path, body) {{
@@ -347,8 +379,105 @@ function pollTruth() {{
 document.getElementById("btnTruthReset").onclick = function () {{
   post("/api/truth/reset", {{}}).then(pollTruth);
 }};
-setInterval(pollTruth, 1000);
-pollTruth();
+
+// Сцена (Ф6.1b) — четыре ручки командами scene_source готовым механизмом маршрутов
+// (_SCENE_COMMAND_BY_PATH -> pult._scene_client -> _dispatch), тот же опрос, что и
+// /api/truth (см. ниже, общий setInterval, свой таймер не заводим). Пульт поля не
+// валидирует — это дело плагина сцены, тело форвардится как есть.
+// `_dispatch()` пульта схлопывает ЛЮБОЙ status=="error" в HTTP 504
+// {{ok: false, error: <message>}} — типизированный code (invalid/overloaded) до
+// страницы не доходит (известное ограничение, чинит соседняя сессия 1.2h), поэтому
+// overloaded распознаём по литералу сообщения `_push_control`
+// (Plugins/sim/scene_source/plugin.py) — единственный канал, который у страницы есть
+// сегодня. overloaded значит «не принято» (README scene_source) — страница обязана
+// повторить ту же заявку РОВНО один раз, иначе ручка встанет не на последнее значение.
+function isSceneOverloaded(resp) {{
+  if (!resp || resp.ok !== false) {{ return false; }}
+  // Три признака: `code` напрямую (заработает, когда соседняя сессия 1.2h научит
+  // `_dispatch()` проносить код наружу), слово "overloaded" в тексте и русский литерал
+  // сообщения `_push_control` — сегодня доходит только последний. Связка literal<->текст
+  // закреплена тестом `test_overloaded_literal_matches_scene_source`, поэтому
+  // переименование сообщения в scene_source ломает тест, а не молча гасит повтор.
+  if (resp.code === "overloaded") {{ return true; }}
+  return typeof resp.error === "string" &&
+    (resp.error.indexOf("overloaded") !== -1 || resp.error.indexOf("переполнена") !== -1);
+}}
+var sceneError = "";
+function postScene(path, body) {{
+  // Повтор РОВНО один и РОВНО на overloaded («заявка не принята»). Любой другой отказ —
+  // в том числе таймаут транспорта, где заявка МОГЛА дойти — не повторяем: `defect_now`
+  // не идемпотентна, повтор на таймауте выпустил бы два брака вместо одного
+  // (находка ревью 6.1b, закреплено test_page_scene_no_retry_on_other_errors).
+  return post(path, body).then(function (r) {{
+    return isSceneOverloaded(r) ? post(path, body) : r;
+  }}).then(function (r) {{
+    // Отказ обязан быть ВИДЕН оператору и НЕ пропадать на ближайшем опросе: держим его
+    // в `sceneError`, пока не пройдёт следующая заявка. Прежняя редакция писала текст
+    // прямо в строку состояния, и `pollScene` затирал его через доли секунды — находка
+    // ревью 6.1b (README обещал показ, страница поле `error` не выводила вовсе).
+    sceneError = (r && r.ok === false && r.error) ? String(r.error) : "";
+    return r;
+  }});
+}}
+function getScene() {{
+  return fetch("/api/scene").then(function (r) {{
+    return r.ok ? r.json() : Promise.reject(new Error("http " + r.status));
+  }});
+}}
+function sceneUnavailable() {{
+  // Отказ обязан быть виден и когда САМА сцена не отвечает: иначе `sceneError` молча
+  // ждёт восстановления и всплывает минутами позже, про давно забытое нажатие
+  // (находка ревью 6.1b, итерация 2).
+  return sceneError ? ("сцена недоступна   отказ сцены: " + sceneError) : "сцена недоступна";
+}}
+function pollScene() {{
+  getScene().then(function (s) {{
+    if (s && s.status === "ok") {{
+      var mode = Object.keys(s.flow || {{}})[0];
+      var flowText = mode ? (mode + " [" + s.flow[mode][0] + ", " + s.flow[mode][1] + "]") : "—";
+      document.getElementById("sceneStatus").textContent =
+        "пауза=" + s.paused + "  поток=" + flowText +
+        "  доля_брака=" + s.defect_probability + "  брак_в_очереди=" + s.force_defect_pending;
+      // Галка обязана идти за ДВИЖКОМ, а не за нажатием: отвергнутая заявка иначе
+      // оставляла бы пульт в противоречии с самим собой (находка ревью 6.1b).
+      document.getElementById("scenePause").checked = !!s.paused;
+      if (sceneError) {{
+        document.getElementById("sceneStatus").textContent += "   отказ сцены: " + sceneError;
+      }}
+    }} else {{
+      document.getElementById("sceneStatus").textContent = sceneUnavailable();
+    }}
+  }}).catch(function () {{
+    document.getElementById("sceneStatus").textContent = sceneUnavailable();
+  }});
+}}
+document.getElementById("scenePause").onchange = function () {{
+  postScene("/api/scene/pause", {{paused: document.getElementById("scenePause").checked}}).then(pollScene);
+}};
+document.getElementById("btnSceneDefectRate").onclick = function () {{
+  postScene("/api/scene/defect_rate", {{
+    probability: parseFloat(document.getElementById("sceneDefectRate").value),
+  }}).then(pollScene);
+}};
+document.getElementById("btnSceneDefectNow").onclick = function () {{
+  postScene("/api/scene/defect_now", {{}}).then(pollScene);
+}};
+document.getElementById("btnSceneFlow").onclick = function () {{
+  var mode = document.getElementById("sceneFlowMode").value;
+  var lo = parseFloat(document.getElementById("sceneFlowLo").value);
+  var hi = parseFloat(document.getElementById("sceneFlowHi").value);
+  var body = {{}};
+  body[mode] = [lo, hi];
+  postScene("/api/scene/flow", body).then(pollScene);
+}};
+
+// Общий таймер с /api/truth (DESIGN п.4 — свой интервал не заводим).
+function pollTruthAndScene() {{
+  pollTruth();
+  pollScene();
+}}
+setInterval(pollTruthAndScene, 1000);
+pollTruthAndScene();
 </script>
 </body>
 </html>
@@ -464,6 +593,9 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 return
             if self.path == "/api/truth":
                 self._dispatch("truth.status", {}, pult._scene_client)
+                return
+            if self.path == "/api/scene":
+                self._dispatch("scene.status", {}, pult._scene_client)
                 return
             self._reply_json(404, {"ok": False, "error": "not_found"})
 

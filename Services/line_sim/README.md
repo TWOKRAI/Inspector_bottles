@@ -27,7 +27,8 @@ from Services.line_sim import (
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
-| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200)` — ровно один из `interval_s`/`spacing_mm` (Task 3.3a, LS-010): `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3 |
+| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200)` — ровно один из `interval_s`/`spacing_mm` (Task 3.3a, LS-010): `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3; `set_flow(*, interval_s=None, spacing_mm=None)`, `paused`/`flow` (read-only) — Task 6.1 |
+| `validate_flow` | `core/spawner.py` | `validate_flow(interval_s, spacing_mm) -> None` — проверка режима отсчёта спавна (ровно один задан, `0 < lo <= hi`), вынесена из `ObjectSpawner.__init__` и звана также из `set_flow` (Task 6.1) — не экспортирован через `Services.line_sim`/`Services.line_sim.core`, импорт напрямую из `core.spawner` |
 | `encoder_to_offset_mm` | `core/belt.py` | `(enc_now - spawn_enc) * FACTOR_MM`; константы — из `Services.robot_comm.core.registers` |
 
 ## Выборка и рендер — один раз
@@ -212,6 +213,32 @@ interval` — пропущенные интервалы НЕ догоняютс�
 СЛЕДУЮЩИЙ реальный спавн (после снятия паузы); брак не теряется, потому что фабрика гасит флаг
 только после успешной сборки (LS-006/LS-007). Выбран этот вариант (не «спавнить немедленно,
 игнорируя паузу») — оператор не получает объект на остановленном потоке (LS-008).
+
+### `set_flow()` / `paused` / `flow` — смена режима на живом спавнере (Task 6.1)
+
+`ObjectSpawner.set_flow(*, interval_s=None, spacing_mm=None)` переключает режим отсчёта
+следующего спавна БЕЗ пересоздания спавнера — ручка «поток» стенда
+(`Plugins/sim/scene_source`, команда `scene.flow`). Проверка аргументов — та же
+`validate_flow(interval_s, spacing_mm)`, что и в `__init__` (модульная функция `core/
+spawner.py`, не приватный метод — вынесена, чтобы не было двух копий одной проверки);
+кривые аргументы бросают `ValueError` ДО любой мутации состояния — отказ атомарен,
+текущий режим спавнера не меняется.
+
+Сброс отсчёта — ТОЛЬКО своего вида: новый `interval_s` взводит срок заново
+(`_deadline = None`, ровно как на самом первом `tick()` спавнера); новый `spacing_mm`
+сбрасывает лишь порог до следующего спавна (`_next_spacing_mm = None`).
+`_last_spawn_encoder` (путь ленты, уже пройденный с последнего РЕАЛЬНОГО спавна) не
+трогается НИ В ОДНОМ из двух случаев — переключение режима не должно стирать то, что
+лента уже проехала. Активные объекты, нумерация (`_next_id_n`) и пауза не меняются.
+
+`paused -> bool` и `flow -> {"mode": "interval_s"|"spacing_mm", "lo": float, "hi":
+float}` — read-only свойства для `scene.status`, чтобы не лезть в приватные поля
+спавнера снаружи.
+
+**Дисциплина потоков (Task 6.1, наравне с остальными командами `scene_source`):**
+`set_flow()`, как и `set_paused()`/`force_defect_next()`, вызывается ТОЛЬКО из потока
+воркера кадров — команды кладут намерение в очередь и не трогают спавнер напрямую (см.
+`Plugins/sim/scene_source/README.md`).
 
 ## ObjectSpawner — известные ограничения и потокобезопасность
 
