@@ -310,6 +310,34 @@ def test_page_scene_retries_on_overloaded(start_pult) -> None:
 
 
 @pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"status": "error", "message": "timeout"},
+        {"status": "error", "code": "invalid", "message": "scene.defect_now: ожидается None или {}"},
+    ],
+    ids=["timeout", "invalid"],
+)
+def test_page_scene_no_retry_on_other_errors(start_pult, reply) -> None:
+    """Находка ревью 6.1b: прежний тест закреплял ЧИСЛО повторов, но не ПРИЧИНУ.
+
+    Со сломанным `isSceneOverloaded` (повтор на ЛЮБОЙ отказ) он оставался зелёным, а
+    таймаут транспорта — случай, когда заявка МОГЛА дойти — давал бы два брака вместо
+    одного: `scene.defect_now` не идемпотентна. Здесь отказ НЕ `overloaded`, и вызов
+    обязан быть ровно один.
+    """
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["scene.defect_now"] = dict(reply)
+
+    _run_page_js(port, "scene_overloaded")
+
+    calls = [c for c in scene_client.calls if c[0] == "scene.defect_now"]
+    assert len(calls) == 1, f"отказ не overloaded — повтора быть не должно: {calls!r}"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
 def test_page_scene_polls_status(start_pult) -> None:
     """Строка состояния заполняется из ``/api/scene`` (тот же таймер, что ``/api/truth``)."""
     _plugin, _ctx, port = start_pult()
@@ -361,3 +389,50 @@ def test_overloaded_literal_matches_scene_source() -> None:
         "страница пульта ищет в тексте отказа подстроку «переполнена» "
         "(isSceneOverloaded в _PAGE_TEMPLATE) — текст сообщения изменился, повтор заявки умрёт"
     )
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_page_pause_checkbox_follows_engine(start_pult) -> None:
+    """Находка ревью 6.1b: галка паузы обязана идти за движком, а не за нажатием.
+
+    Опрос `/api/scene` отдаёт `paused: True` — галка встаёт сама, даже если оператор
+    её не трогал (и наоборот: отвергнутая заявка не оставит пульт в противоречии).
+    """
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["scene.status"] = {
+        "status": "ok",
+        "active": 0,
+        "recent": [],
+        "paused": True,
+        "flow": {"spacing_mm": [10.0, 10.0]},
+        "defect_probability": 0.0,
+        "force_defect_pending": False,
+    }
+
+    out = _run_page_js(port, "scene_pause_sync")
+
+    assert out["pauseChecked"] is True, "галка не встала по состоянию движка"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node недоступен в PATH")
+def test_page_shows_scene_refusal_text(start_pult) -> None:
+    """Находка ревью 6.1b: отказ сцены обязан быть виден оператору, а не пропадать.
+
+    README обещал «текст показывается в строке состояния» — до этой правки страница
+    поле `error` нигде не выводила, и `invalid` был невидим.
+    """
+    _plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["scene.defect_rate"] = {
+        "status": "error",
+        "code": "invalid",
+        "message": "scene.defect_rate: probability=1.5 вне диапазона [0, 1]",
+    }
+
+    out = _run_page_js(port, "scene_error_text")
+
+    assert "отказ сцены" in out["sceneText"], out["sceneText"]
+    assert "вне диапазона" in out["sceneText"], out["sceneText"]

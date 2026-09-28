@@ -402,9 +402,21 @@ function isSceneOverloaded(resp) {{
   return typeof resp.error === "string" &&
     (resp.error.indexOf("overloaded") !== -1 || resp.error.indexOf("переполнена") !== -1);
 }}
+var sceneError = "";
 function postScene(path, body) {{
+  // Повтор РОВНО один и РОВНО на overloaded («заявка не принята»). Любой другой отказ —
+  // в том числе таймаут транспорта, где заявка МОГЛА дойти — не повторяем: `defect_now`
+  // не идемпотентна, повтор на таймауте выпустил бы два брака вместо одного
+  // (находка ревью 6.1b, закреплено test_page_scene_no_retry_on_other_errors).
   return post(path, body).then(function (r) {{
     return isSceneOverloaded(r) ? post(path, body) : r;
+  }}).then(function (r) {{
+    // Отказ обязан быть ВИДЕН оператору и НЕ пропадать на ближайшем опросе: держим его
+    // в `sceneError`, пока не пройдёт следующая заявка. Прежняя редакция писала текст
+    // прямо в строку состояния, и `pollScene` затирал его через доли секунды — находка
+    // ревью 6.1b (README обещал показ, страница поле `error` не выводила вовсе).
+    sceneError = (r && r.ok === false && r.error) ? String(r.error) : "";
+    return r;
   }});
 }}
 function getScene() {{
@@ -420,6 +432,12 @@ function pollScene() {{
       document.getElementById("sceneStatus").textContent =
         "пауза=" + s.paused + "  поток=" + flowText +
         "  доля_брака=" + s.defect_probability + "  брак_в_очереди=" + s.force_defect_pending;
+      // Галка обязана идти за ДВИЖКОМ, а не за нажатием: отвергнутая заявка иначе
+      // оставляла бы пульт в противоречии с самим собой (находка ревью 6.1b).
+      document.getElementById("scenePause").checked = !!s.paused;
+      if (sceneError) {{
+        document.getElementById("sceneStatus").textContent += "   отказ сцены: " + sceneError;
+      }}
     }} else {{
       document.getElementById("sceneStatus").textContent = "сцена недоступна";
     }}

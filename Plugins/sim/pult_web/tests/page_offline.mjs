@@ -126,6 +126,16 @@ async function run() {
     // scene.defect_now) -> страница обязана повторить тот же POST ровно один раз.
     el("btnSceneDefectNow").fire("click");
     await sleep(300); // время на POST + повторный POST
+  } else if (scenario === "scene_pause_sync") {
+    // Ф6.1b, находка ревью: галка паузы идёт за ДВИЖКОМ (/api/scene), а не за нажатием.
+    await sleep(1200);
+    process.stdout.write(JSON.stringify({ pauseChecked: el("scenePause").checked }));
+  } else if (scenario === "scene_error_text") {
+    // Ф6.1b, находка ревью: отказ сцены виден оператору в строке состояния.
+    // Читаем СРАЗУ после клика — через секунду опрос перепишет строку состоянием сцены.
+    el("btnSceneDefectRate").fire("click");
+    await sleep(200);
+    process.stdout.write(JSON.stringify({ sceneText: el("sceneStatus").textContent }));
   } else if (scenario === "scene_status") {
     // Ф6.1b §2: опрос /api/scene тем же таймером, что /api/truth (1000 мс).
     await sleep(1200);
