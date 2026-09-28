@@ -451,10 +451,12 @@ class TestНаходкиРевью:
         уже погашенного приёма.
         """
         release = threading.Event()
+        entered = threading.Event()
 
         plugin = _make_plugin()
 
         def slow_handler(result: object) -> None:
+            entered.set()
             release.wait(5.0)
 
         plugin._on_result = slow_handler  # обработчик занят дольше дедлайна join
@@ -463,9 +465,10 @@ class TestНаходкиРевью:
             port = plugin.cmd_get_status({})["port"]
             with socket.create_connection(("127.0.0.1", port), timeout=2.0) as conn:
                 conn.sendall(b"SLOW;")
-                deadline = time.monotonic() + 2.0
-                while plugin._reg.sink_state != "connected" and time.monotonic() < deadline:
-                    time.sleep(0.01)
+                # Ждём именно ВХОД в обработчик, а не состояние связи: «подключён»
+                # публикуется до первого пакета, и тест мигал — посылка «обработчик
+                # занят дольше дедлайна» молча не выполнялась (находка ревью №10).
+                assert entered.wait(3.0), "обработчик не начал работу"
                 plugin.cmd_stop_sink({})  # вернётся по дедлайну, поток ещё жив
                 assert plugin._reg.sink_state == "stopped"
                 release.set()  # поток доживает и вызывает колбэк «соединений 0»
@@ -657,3 +660,233 @@ class TestНаходкиРевью:
     # поэтому разницы «закрыли сами» и «закрыл GC» тест не видит — инъекция это
     # подтвердила (снятие `server.close()` не уронило ни одного теста). Правка
     # оставлена как гигиена, её отсутствие теста названо в STATUS.md.
+
+
+class TestНаходкиРевьюИтерация2:
+    def test_1_ошибка_приёма_публикуется_без_кодов_и_без_смены_связи(self) -> None:
+        """Находка 1 (итерация 2): самая ценная дорога публикации была без теста.
+
+        Ошибка приёма (расхождение терминатора) обязана попасть в дерево состояния,
+        когда НЕ пришло ни одного кода и связь не менялась — то есть без единого
+        повода, по которому дерево публиковалось раньше.
+        """
+
+        class RecordingProxy:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def merge(self, path: str, data: dict) -> None:
+                self.calls.append((path, data))
+
+        proxy = RecordingProxy()
+        cfg = {"host": "127.0.0.1", "port": _free_port(), "auto_start": False}
+        plugin = CodeReaderPlugin()
+        plugin.configure(
+            PluginContext(
+                services=MockProcessServices(name="reader", config=cfg, state_proxy=proxy),
+                config=cfg,
+            )
+        )
+        plugin.cmd_start_sink({})
+        try:
+            port = plugin.cmd_get_status({})["port"]
+            with socket.create_connection(("127.0.0.1", port), timeout=2.0) as conn:
+                before = len(proxy.calls)
+                conn.sendall(b"X" * 200_000)  # ни одного терминатора
+                deadline = time.monotonic() + 5.0
+                published = None
+                while time.monotonic() < deadline:
+                    for _path, data in proxy.calls[before:]:
+                        if data.get("last_error"):
+                            published = data
+                            break
+                    if published:
+                        break
+                    time.sleep(0.02)
+            assert published, "ошибка приёма в дерево не опубликована"
+            assert "терминатор" in published["last_error"]
+            assert published["total_reads"] == 0, "тест должен идти БЕЗ кодов"
+        finally:
+            plugin.cmd_stop_sink({})
+
+    def test_2_перезапуск_приёмника_не_воскрешает_старый_поток(self) -> None:
+        """Находка 2 (итерация 2): проверка того, что Event создаётся в start().
+
+        Один и тот же объект `ResultSink` останавливаем и запускаем снова. Если
+        событие стопа общее на все запуски, поток прошлого запуска «оживает» и
+        второй пакет может быть обработан дважды или не тем потоком.
+        """
+        received: list[str] = []
+        sink = ResultSink(lambda result: received.append(result.payload), host="127.0.0.1", port=0)
+        sink.start()
+        first_port = sink.port
+        try:
+            with socket.create_connection(("127.0.0.1", first_port), timeout=2.0) as conn:
+                conn.sendall(b"FIRST;")
+                deadline = time.monotonic() + 2.0
+                while not received and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            sink.stop()
+            sink.start()  # тот же объект, новый слушатель
+            with socket.create_connection(("127.0.0.1", sink.port), timeout=2.0) as conn:
+                conn.sendall(b"SECOND;")
+                deadline = time.monotonic() + 2.0
+                while len(received) < 2 and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            assert received == ["FIRST", "SECOND"], f"получено {received}"
+            assert sink.client_count == 0 or sink.client_count == 1
+        finally:
+            sink.stop()
+
+    def test_5_смерть_приёма_не_выглядит_как_слушаем(self) -> None:
+        """Находка 5 (итерация 2): accept() отказал сам — приём мёртв и должен сказать.
+
+        Раньше цикл приёма выходил молча: `running` становился False, а телеметрия
+        продолжала показывать «слушаем» с пустой ошибкой, и подключиться к нам было
+        уже нельзя. Плюс `get_status` падал на закрытом сокете (находка 6).
+        """
+        plugin = _make_plugin()
+        plugin.cmd_start_sink({})
+        try:
+            # Авария: слушающий сокет закрыт извне (в бою — исчерпание дескрипторов).
+            plugin._sink._server.close()
+            deadline = time.monotonic() + 3.0
+            while not plugin._reg.last_error and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert plugin._reg.last_error, "смерть приёма прошла молча"
+            assert "accept" in plugin._reg.last_error
+            assert plugin._reg.sink_state == "stopped", "мёртвый приём числится слушающим"
+            status = plugin.cmd_get_status({})  # находка 6: не падает на закрытом сокете
+            assert status["running"] is False
+        finally:
+            plugin.cmd_stop_sink({})
+
+    def test_4_stop_соблюдает_свой_таймаут_при_занятых_обработчиках(self) -> None:
+        """Находка 4 (итерация 2): join стоял по таймауту НА КАЖДОЕ соединение.
+
+        Четыре занятых обработчика превращали заявленные 2 с в 4-5 с. Проверяем, что
+        `stop(timeout)` возвращается в пределах своего обещания (с запасом на планировщик).
+        """
+        release = threading.Event()
+        entered: list[int] = []
+
+        def slow_handler(_result: object) -> None:
+            entered.append(1)
+            release.wait(5.0)
+
+        sink = ResultSink(slow_handler, host="127.0.0.1", port=0)
+        sink.start()
+        conns = []
+        try:
+            for _ in range(4):
+                conn = socket.create_connection(("127.0.0.1", sink.port), timeout=2.0)
+                conn.sendall(b"BUSY;")
+                conns.append(conn)
+            deadline = time.monotonic() + 3.0
+            while len(entered) < 4 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert len(entered) == 4, f"занято обработчиков: {len(entered)}"
+            start = time.monotonic()
+            sink.stop(timeout=1.0)
+            elapsed = time.monotonic() - start
+            assert elapsed < 1.6, f"stop(timeout=1.0) занял {elapsed:.2f} с"
+        finally:
+            release.set()
+            for conn in conns:
+                conn.close()
+            sink.stop()
+
+    def test_7_заглушка_по_контракту_проходит_команду_статуса(self) -> None:
+        """Находка 7 (итерация 2): Protocol не объявлял `client_count`.
+
+        Заглушка, написанная строго по Protocol, проходила `isinstance`, а на команде
+        статуса падала `AttributeError`. Проверяем то, для чего Protocol и заявлен:
+        подменяемость приёмника заглушкой.
+        """
+        from Services.code_reader.interfaces import CodeReaderSinkProtocol
+
+        class StubSink:
+            def __init__(self) -> None:
+                self._running = True
+
+            @property
+            def port(self) -> int:
+                return 5555
+
+            @property
+            def is_running(self) -> bool:
+                return self._running
+
+            @property
+            def is_listening(self) -> bool:
+                return self._running
+
+            @property
+            def client_count(self) -> int:
+                return 0
+
+            def start(self) -> None:
+                self._running = True
+
+            def stop(self, timeout: float = 2.0) -> None:
+                self._running = False
+
+        class IncompleteStub:
+            """Заглушка без `client_count` и `is_listening` — контракт обязан её отвергнуть."""
+
+            @property
+            def port(self) -> int:
+                return 1
+
+            @property
+            def is_running(self) -> bool:
+                return True
+
+            def start(self) -> None: ...
+
+            def stop(self, timeout: float = 2.0) -> None: ...
+
+        # Негативная половина: без полей, которыми пользуется плагин, контракт не
+        # выполнен. Без этой проверки Protocol мог молча похудеть обратно.
+        assert not isinstance(IncompleteStub(), CodeReaderSinkProtocol)
+
+        stub = StubSink()
+        assert isinstance(stub, CodeReaderSinkProtocol)
+        plugin = _make_plugin()
+        plugin._sink = stub
+        status = plugin.cmd_get_status({})
+        assert status["port"] == 5555
+        assert status["running"] is True
+        assert status["clients"] == 0
+
+    def test_11_переполнение_очереди_видно_в_дереве_сразу(self) -> None:
+        """Находка 11 (итерация 2): `dropped` доезжал только со следующим сливом.
+
+        Условие, поднимающее `dropped`, — это ровно «`produce()` не зовут», поэтому
+        ждать публикации от `produce()` бессмысленно.
+        """
+
+        class RecordingProxy:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def merge(self, path: str, data: dict) -> None:
+                self.calls.append((path, data))
+
+        from Services.code_reader.core.result import ReadResult, ReadStatus
+        from Services.code_reader.plugin.plugin import _QUEUE_LIMIT
+
+        proxy = RecordingProxy()
+        cfg = {"host": "127.0.0.1", "port": _free_port(), "auto_start": False}
+        plugin = CodeReaderPlugin()
+        plugin.configure(
+            PluginContext(
+                services=MockProcessServices(name="reader", config=cfg, state_proxy=proxy),
+                config=cfg,
+            )
+        )
+        for i in range(_QUEUE_LIMIT + 3):
+            plugin._on_result(ReadResult(raw=b"X;", payload=f"X{i}", status=ReadStatus.OK))
+        dropped_seen = [data["dropped"] for _path, data in proxy.calls if data.get("dropped")]
+        assert dropped_seen, "потери в дерево не опубликованы без produce()"
+        assert dropped_seen[-1] == 3, dropped_seen

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
 from collections.abc import Callable
 
 from Services.code_reader.core.result import ReadResult, parse_packet, split_stream
@@ -124,12 +125,16 @@ class ResultSink:
         self._backlog = backlog
         self._buffer_limit = buffer_limit
         self._server: socket.socket | None = None
+        # Фактический порт помним отдельно: `getsockname()` на закрытом сокете даёт
+        # WinError 10038, и команда статуса падала на аварийно закрытом слушателе.
+        self._bound_port = port
         self._thread: threading.Thread | None = None
         # Событие создаётся в start(), а не здесь: объект переиспользуем, и общий
         # на все запуски Event воскрешал бы потоки прошлого запуска (`_stop.clear()`
         # снимал стоп с потока, который уже должен был умереть).
         self._stop = threading.Event()
         self._stop.set()
+        self._listening = False
         self._clients = 0
         self._clients_lock = threading.Lock()
         # Живые соединения: нужны, чтобы stop() закрыл их и дождался потоков, а не
@@ -141,14 +146,28 @@ class ResultSink:
 
     @property
     def port(self) -> int:
-        """Фактический порт — осмыслен после start(), если запрошен порт 0."""
-        if self._server is None:
-            return self._port
-        return self._server.getsockname()[1]
+        """Фактический порт — осмыслен после start(), если запрошен порт 0.
+
+        Читается из запомненного значения, а не из сокета: сокет может быть уже
+        закрыт (штатно или аварийно), и `getsockname()` на нём бросает OSError —
+        команда статуса падала ровно на этом.
+        """
+        return self._bound_port
 
     @property
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def is_listening(self) -> bool:
+        """Можно ли к нам подключиться прямо сейчас.
+
+        Отличается от `is_running` моментом: когда `accept()` отказывает сам (не по
+        нашему стопу), признак снимается ДО отчёта об ошибке, а поток в это время
+        ещё выполняет последние строки и по `is_running` числится живым. Именно из
+        этого зазора телеметрия показывала «слушаем» у мёртвого приёма.
+        """
+        return self._listening
 
     @property
     def client_count(self) -> int:
@@ -178,7 +197,9 @@ class ResultSink:
             server.close()
             raise
         server.settimeout(0.2)  # чтобы stop() не ждал следующего клиента
+        self._bound_port = server.getsockname()[1]
         self._server = server
+        self._listening = True
         self._thread = threading.Thread(target=self._accept_loop, daemon=True)
         self._thread.start()
 
@@ -190,6 +211,7 @@ class ResultSink:
         того, как вызывающий объявил приём погашенным.
         """
         self._stop.set()
+        self._listening = False
         # Порядок остановки: сначала разбудить соединения, потом дождаться потоков.
         # Быстрее не получается: поток приёма сидит в accept() с шагом 0,2 с, и на
         # Windows закрытие слушающего сокета из другого потока заблокированный accept
@@ -205,14 +227,22 @@ class ResultSink:
                 conn.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
+        deadline = time.monotonic() + timeout
         if self._thread is not None:
             self._thread.join(timeout)
             self._thread = None
         if self._server is not None:
             self._server.close()
             self._server = None
+        # Общий дедлайн на все соединения: раньше join стоял по таймауту НА КАЖДОЕ,
+        # и заявленный `timeout=2.0` превращался в 4-5 с на четырёх занятых
+        # обработчиках (замер ревью). Потоки демонические: не дождались — идём
+        # дальше, они умрут сами, а вызывающий получает обещанное время.
         for thread, _conn in conns:
-            thread.join(_JOIN_TIMEOUT)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(remaining)
 
     def __enter__(self) -> ResultSink:
         self.start()
@@ -230,7 +260,15 @@ class ResultSink:
                 conn, _ = server.accept()
             except socket.timeout:
                 continue
-            except OSError:
+            except OSError as exc:
+                if not self._stop.is_set():
+                    # Не наш штатный останов: слушающий сокет умер сам (исчерпание
+                    # дескрипторов, сбой интерфейса). Раньше цикл выходил молча, и
+                    # приём оставался «слушаем» навсегда, не принимая никого.
+                    # Признак снимаем ДО отчёта: обработчик отчёта смотрит именно на
+                    # него, чтобы перевести состояние в «не слушаем».
+                    self._listening = False
+                    self._report(f"приём остановлен: accept() отказал: {exc}")
                 break
             thread = threading.Thread(target=self._serve, args=(conn,), daemon=True)
             with self._conns_lock:

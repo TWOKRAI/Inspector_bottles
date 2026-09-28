@@ -171,9 +171,14 @@ class CodeReaderPlugin(ProcessModulePlugin):
             if overflow:
                 self._reg.dropped += 1
             self._count(result.status)
+            # Условие, поднимающее `dropped`, — это ровно «`produce()` не сливает
+            # очередь». Значит ждать публикации от `produce()` нельзя: именно в этом
+            # состоянии её и не будет (находка ревью Ф2 №11 второй итерации).
             if result.status is ReadStatus.OK:
                 self._reg.last_code = result.payload
             self._reg.last_status = result.status.value
+        if overflow:
+            self._publish_state()
 
     def _count(self, status: ReadStatus) -> None:
         """Счётчики по исходу срабатывания — три разных, не один общий.
@@ -201,9 +206,18 @@ class CodeReaderPlugin(ProcessModulePlugin):
         self._publish_state()
 
     def _on_sink_error(self, token: object, message: str) -> None:
-        """Потеря данных или обрыв — наружу текстом, а не молчанием."""
+        """Потеря данных или обрыв — наружу текстом, а не молчанием.
+
+        Отдельно ловим фатальный случай: приёмник перестал слушать (accept() отказал
+        сам, не по нашему стопу). Тогда «слушаем» — ложь: подключиться к нам уже
+        нельзя, и состояние обязано стать `stopped`. Проверяем это по самому
+        приёмнику (`is_listening`), а не по тексту сообщения.
+        """
         if token is not self._sink_token:
             return
+        sink = self._sink
+        if sink is not None and not sink.is_listening:
+            self._reg.sink_state = "stopped"
         self._reg.last_error = message
         self._ctx.log_error(f"CodeReaderPlugin[{self._reg.reader_id}]: {message}")
         self._publish_state()
@@ -301,8 +315,10 @@ class CodeReaderPlugin(ProcessModulePlugin):
     def _stop_sink(self) -> dict:
         """Погасить приёмник (идемпотентно).
 
-        `self._sink = None` ДО `stop()`: колбэки доживающих потоков сверяются с этим
-        полем и после снятия молчат, а сам `stop()` дожидается их завершения.
+        Молчание колбэков доживающих потоков держит НЕ это поле, а метка запуска
+        `self._sink_token` (см. `_on_client`). Порядок «сначала снять `self._sink`,
+        потом `stop()`» — гигиена для `is_running` и `cmd_get_status`, чтобы они не
+        отвечали про приёмник, который уже гасится.
         """
         sink, self._sink = self._sink, None
         self._sink_token = None

@@ -48,7 +48,10 @@ class CodeReaderRegisters(SchemaBase):
     # --- Формат пакета (настройки прибора, см. docs/SETUP.md разд. 4-5) ---
     terminator: Annotated[
         str,
-        FieldMeta("Терминатор", info="`Output Stop Text`; пусто = границ пакета нет"),
+        FieldMeta(
+            "Терминатор",
+            info="`Output Stop Text` прибора; пустое значение приём отвергает (ADR-CR-005)",
+        ),
     ] = ";"
 
     prefix: Annotated[
@@ -87,7 +90,11 @@ class CodeReaderRegisters(SchemaBase):
 
     total_reads: Annotated[
         int,
-        FieldMeta("Прочитано кодов", readonly=True),
+        FieldMeta(
+            "Прочитано кодов",
+            info="Только успешные чтения. Всего срабатываний = total_reads + no_reads + bad_reads",
+            readonly=True,
+        ),
     ] = 0
 
     no_reads: Annotated[
