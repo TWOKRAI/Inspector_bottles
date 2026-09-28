@@ -20,8 +20,9 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `port` | `8092` | порт пульта |
 | `mjpeg_url` | `http://127.0.0.1:8091/` | адрес двери кадров (`<img src=...>` на странице) |
 | `robot_process` | `robot` | имя процесса-адресата `DeviceHubClient` для `belt.*`/`sim_robot.*` |
-| `scene_process` | `camera` | имя процесса-адресата ВТОРОГО `DeviceHubClient` (Task 5.3a) для `truth.*` — отдельный клиент, не `robot_process` |
-| `timeout_s` | `1.0` | таймаут `DeviceHubClient.request` на каждую ручку (оба клиента) |
+| `scene_process` | `camera` | имя процесса-адресата ВТОРОГО `DeviceHubClient` (Task 5.3a) для `truth.*`/`scene.*`/`preset.get`/`preset.commit` — отдельный клиент, не `robot_process` |
+| `layers_process` | `layers` | имя процесса-адресата ТРЕТЬЕГО `DeviceHubClient` (Task 1.2h) для `preset.preview` — превью рендера вынесено в отдельный процесс (плагин `layer_preview`), не в `scene_process` |
+| `timeout_s` | `1.0` | таймаут `DeviceHubClient.request` по умолчанию на каждую ручку (все три клиента); часть маршрутов пресета переопределяет его своим (см. ниже) |
 
 ## HTTP API
 
@@ -42,21 +43,33 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `POST /api/scene/flow` | `{interval_s}` либо `{spacing_mm}` | `scene.flow` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
 | `POST /api/scene/defect_rate` | `{probability}` | `scene.defect_rate` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
 | `POST /api/scene/defect_now` | `{}` | `scene.defect_now` → процесс `scene_process` | результат команды как есть (Task 6.1b) |
+| `GET /api/preset` | — | `preset.get` → процесс `scene_process` | результат команды как есть (Task 1.2h) |
+| `POST /api/preset/commit` | `{preset, base_rev}` | `preset.commit` → процесс `scene_process` | результат команды как есть (Task 1.2h); потолок тела 256 КБ (не общие 4 КБ) |
+| `POST /api/preset/preview` | `{preset?, seeds?, tile_px?}` | `preset.preview` → процесс `layers_process` | результат команды как есть (Task 1.2h); таймаут маршрута 5.0 с (не общий 1.0 с) |
 
 Путь **не валидирует** поля тела — форвардит их адресату как есть (`robot` или,
-для `truth.*`, процессу сцены), валидация (`bad_args` и т.п.) целиком на
-стороне адресата. Отказы ДО обращения к адресату: чужой `Host` (не `127.0.0.1:<port>`/`localhost:<port>`, в том числе
+для `truth.*`/`scene.*`/`preset.*`, процессу сцены или `layers_process`),
+валидация (`bad_args` и т.п.) целиком на стороне адресата. Отказы ДО обращения
+к адресату: чужой `Host` (не `127.0.0.1:<port>`/`localhost:<port>`, в том числе
 без порта, `[::1]` и HTTP/1.0 без `Host`) → `403 {ok: false, error:
 "forbidden_host"}` на `GET` и `POST` (защита от DNS rebinding); неизвестный путь
 → `404`; `POST` с `Content-Type` не `application/json…` (в том числе без него,
 как у голого `curl -X POST`) → `415 {ok: false, error: "unsupported_media_type"}`;
 кривой JSON тела → `400 {ok: false, error: "bad_json"}`; отрицательный
-`Content-Length` → `400 {ok: false, error: "bad_length"}`; тело > 4 КБ
-(`Content-Length`, до чтения) → `413`. Ответ адресата со `status: "error"` →
-`504 {ok: false, error: <message клиента>}`, без `message` — `robot_error` или
-`scene_error` по адресату. Ответ `robot` с `ok: false` при
-`status: "ok"` (например, `server_not_running`) уходит как есть с кодом 200 —
-страница различает его по `ok`.
+`Content-Length` → `400 {ok: false, error: "bad_length"}`; тело больше потолка
+маршрута (`Content-Length`, до чтения — 4 КБ на всех маршрутах, кроме `/api/
+preset/commit`, у него 256 КБ, Task 1.2h) → `413`.
+
+**Ответ адресата со `status: "error"` — две формы (Task 1.2h, Находка 2).** Если
+в ответе есть поле `code` (сегодня отдают только `preset.*`/`scene.*`) — тело
+команды идёт КАК ЕСТЬ, HTTP-статус по `code`: `invalid`/`bad_request`/
+`overloaded` → `400`, `conflict` → `409` (несёт `current_rev`), `io_error` →
+`500`, код вне этой таблицы → `400`. Если поля `code` в ответе нет (`belt.*`/
+`sim_robot.*`) — прежнее поведение: `504 {ok: false, error: <message клиента>}`,
+без `message` — `robot_error` или `scene_error` по адресату. `504` остаётся
+только за «не дошло» (клиент не получил ответ вовсе). Ответ `robot` с `ok:
+false` при `status: "ok"` (например, `server_not_running`) уходит как есть с
+кодом 200 — страница различает его по `ok`.
 
 ## Поток вызова — HTTP-обработчик, не приёмный цикл
 
@@ -176,16 +189,16 @@ dead-man'а при удержании (ревью 2.3b, итерация 2, на
 ответа `scene.status` как есть.
 
 **Повтор на `overloaded`.** Команды сцены отвечают типизированным `code`
-(`invalid`/`overloaded`, `Plugins/sim/scene_source/README.md`), но `_dispatch()` пульта
-схлопывает ЛЮБОЙ `status == "error"` в `504 {ok: false, error: <message>}` — `code` в
-HTTP-тело не попадает (известное ограничение этой версии `_dispatch()`, самого метода
-эта задача не переписывает). Поэтому страница распознаёт `overloaded` по подстроке
-«переполнена» в тексте `error` (литерал сообщения `_push_control`,
-`Plugins/sim/scene_source/plugin.py`) — единственный канал, доступный ей сегодня — и
-повторяет ту же заявку РОВНО один раз (`overloaded` означает «не принято», а не «принято
-позже»; без повтора ручка встанет не на последнее нажатое значение). Повтор ровно на
-`overloaded` и ни на чём другом: `scene.defect_now` НЕ идемпотентна, и повтор на таймауте
-транспорта (где заявка могла дойти) выпустил бы два брака вместо одного — закреплено
+(`invalid`/`overloaded`, `Plugins/sim/scene_source/README.md`); с Task 1.2h
+(Находка 2) `_dispatch()` пульта проносит `code` в HTTP-тело как есть — страница
+распознаёт `overloaded` в первую очередь по `resp.code === "overloaded"`, а
+подстрока «переполнена» в тексте `error` (литерал сообщения `_push_control`,
+`Plugins/sim/scene_source/plugin.py`) остаётся резервом на случай ответа без
+`code`. Повторяет ту же заявку РОВНО один раз (`overloaded` означает «не
+принято», а не «принято позже»; без повтора ручка встанет не на последнее
+нажатое значение). Повтор ровно на `overloaded` и ни на чём другом:
+`scene.defect_now` НЕ идемпотентна, и повтор на таймауте транспорта (где
+заявка могла дойти) выпустил бы два брака вместо одного — закреплено
 `test_page_scene_no_retry_on_other_errors`.
 
 Остальные отказы — текст держится в строке состояния (`sceneError`) до следующей принятой
@@ -195,14 +208,49 @@ HTTP-тело не попадает (известное ограничение �
 с `paused` из `/api/scene` — она идёт за ДВИЖКОМ, а не за нажатием, иначе отвергнутая
 заявка оставила бы пульт в противоречии с самим собой.
 
+### Редактор слоёв (Task 1.2h)
+
+Тонкий клиент трёх команд `preset.*` (`Plugins/sim/scene_source`/`Plugins/sim/layer_preview`,
+Task 1.2a): своей логики и своего рендера нет. Раздел собран отдельными константами
+(`_PRESET_SECTION` — разметка, `_PRESET_SCRIPT` — JS), вставленными в `_PAGE_TEMPLATE`
+через `.format()`-плейсхолдеры `{preset_section}`/`{preset_script}` — фигурные скобки JS
+внутри этих констант удваивать не нужно (это подставляемые значения, не часть текста,
+который сам форматируется), в отличие от JS внутри самого `_PAGE_TEMPLATE`.
+
+При загрузке страницы — один `GET /api/preset`: рисует строки слоёв из `preset.layers`
+полями по типу значения (словарь несёт ВСЕ поля, включая дефолтные), id поля —
+`layer<i>_<имя поля>` (первый слой, X смещения — `layer0_offset_x`); поле `<база>_px` из
+двух чисел (типично `offset_px`) разбивается на два поля `<база>_x`/`<база>_y`. Известный
+потолок: `null`/вложенные объекты (`augment`, `color_rgb`) и произвольные массивы — только
+для чтения (JSON-текст), без Pydantic-схемы в ответе команды форму для них не построить
+(`ponytail:` в коде — путь наверх — `model_json_schema()` в `preset.get`, когда
+`scene_source` освободится). Ответ бэкенда несёт 6 ключей (`status, preset, rev, path,
+class_names, engine`), тестовые двойники — 3 (`status, rev, preset`): страница не считает
+отсутствие `engine`/`path`/`class_names` отказом. `engine === false` → предупреждение в
+`#presetEngineWarn` словами («движок не собран…»); `engine` отсутствует → «неизвестно», без
+предупреждения. `rev == null` (плагин собран из каталога, не из `.yaml`) → «Сохранить»
+заблокирована.
+
+«Превью» → `POST /api/preset/preview` с текущим состоянием полей, картинка из `png_b64` —
+в `#presetPreviewImg` (`data:image/png;base64,…`). «Сохранить» → `POST /api/preset/commit`
+с `{preset, base_rev}`, где `base_rev` — `rev` последнего успешного `get`/`commit`; ответ
+`conflict` не стирает правку в полях, `current_rev` запоминается как новый `base_rev`
+(повторное «Сохранить» уходит уже с ним). Undo — стек словарей `presetState` в браузере,
+на бэкенд при отмене ничего не уходит; пополняется перед каждым успешным `commit`.
+
+Поведение проверяется настоящим `<script>` через `page_offline.mjs` (сценарии
+`preset_edit_save`/`preset_edit_conflict_then_retry`) против живого сервера с двойником
+`DeviceHubClient` — те же приёмы, что у остальных блоков страницы (см. выше).
+
 ## Границы
 
 Импорт `Plugins.sim.robot_host` и `multiprocess_prototype.*` запрещён (ADR-120) —
 единственный канал к `robot` — `DeviceHubClient`.
 
-## Out of scope (Task 2.3b, ручки сцены — Task 6.1b)
+## Out of scope (Task 2.3b, ручки сцены — Task 6.1b, редактор слоёв — Task 1.2h)
 
 Авторизация и доступ не с `127.0.0.1`; WebSocket/SSE вместо опроса; подписка на дерево
-`sim.belt.**` в пульте; стили сверх читаемости; маршруты `preset.*`/блок редактора слоёв
-и его JS, общий `_MAX_BODY_BYTES`/таймаут клиентов/форма ответа `_dispatch()` (задача 1.2h
-соседней сессии).
+`sim.belt.**` в пульте; стили сверх читаемости; мышь на канве и добавление нового PNG-слоя
+(Task 1.3 — вне 1.2h); Qt-вкладка (Task 1.2b); правки `Plugins/sim/scene_source` и
+`Plugins/sim/layer_preview` (это Task 1.2a, не пульт); Pydantic-схема на странице (см.
+известный потолок выше).

@@ -74,6 +74,7 @@ _DEFAULT_PORT = 8092
 _DEFAULT_MJPEG_URL = "http://127.0.0.1:8091/"
 _DEFAULT_ROBOT_PROCESS = "robot"
 _DEFAULT_SCENE_PROCESS = "camera"
+_DEFAULT_LAYERS_PROCESS = "layers"
 _DEFAULT_TIMEOUT_S = 1.0
 
 #: Тело запроса больше этого — 413, ДО чтения (DESIGN п.3 плана).
@@ -101,6 +102,33 @@ _SCENE_COMMAND_BY_PATH = {
     "/api/scene/flow": "scene.flow",
     "/api/scene/defect_rate": "scene.defect_rate",
     "/api/scene/defect_now": "scene.defect_now",
+}
+
+#: POST-маршруты редактора пресета (Task 1.2h) — путь -> (команда, имя атрибута
+#: клиента на ``PultWebPlugin``, потолок тела маршрута в байтах (``None`` = общий
+#: ``_MAX_BODY_BYTES``), таймаут маршрута в секундах (``None`` = общий
+#: ``pult._timeout_s``)). Отдельная таблица НИЖЕ ``_SCENE_COMMAND_BY_PATH`` —
+#: ``do_POST`` ищет в ней ПОСЛЕ обеих существующих таблиц. ``preset.commit``
+#: несёт пресет целиком (диапазоны по каждому слою) — общий потолок 4 КБ его
+#: режет, поднят до 256 КБ только на этот маршрут. ``preset.preview`` рендерит
+#: сетку образцов (~88 мс на README ``layer_preview``, до ~1.3 с на крупных
+#: спрайтах) — общий таймаут 1.0 с его режет, поднят до 5.0 с только на этот
+#: маршрут. Тело форвардится КАК ЕСТЬ — та же дисциплина, что у двух таблиц выше.
+_PRESET_ROUTES: dict[str, tuple[str, str, int | None, float | None]] = {
+    "/api/preset/commit": ("preset.commit", "_scene_client", 262144, None),
+    "/api/preset/preview": ("preset.preview", "_layers_client", None, 5.0),
+}
+
+#: Код ответа команды (``code``) -> HTTP-статус (Находка 2, Task 1.2h). Ответ
+#: команды без поля ``code`` (``belt.*``/``sim_robot.*`` — типизированных кодов
+#: не отдают) не подпадает под эту таблицу и идёт прежним путём: 504
+#: ``{ok: false, error: ...}`` (см. ``_dispatch``). Код вне таблицы -> 400.
+_ERROR_CODE_TO_HTTP = {
+    "invalid": 400,
+    "bad_request": 400,
+    "overloaded": 400,
+    "conflict": 409,
+    "io_error": 500,
 }
 
 #: Страница пульта — Русские подписи, dead-man на jog-кнопках, опрос статуса.
@@ -194,6 +222,7 @@ button {{ font-size: 1.2em; padding: 4px 12px; }}
 </div>
 <div class="row" id="sceneStatus">сцена недоступна</div>
 
+{preset_section}
 <script>
 function post(path, body) {{
   return fetch(path, {{
@@ -392,12 +421,12 @@ document.getElementById("btnTruthReset").onclick = function () {{
 // сегодня. overloaded значит «не принято» (README scene_source) — страница обязана
 // повторить ту же заявку РОВНО один раз, иначе ручка встанет не на последнее значение.
 function isSceneOverloaded(resp) {{
-  if (!resp || resp.ok !== false) {{ return false; }}
-  // Три признака: `code` напрямую (заработает, когда соседняя сессия 1.2h научит
-  // `_dispatch()` проносить код наружу), слово "overloaded" в тексте и русский литерал
-  // сообщения `_push_control` — сегодня доходит только последний. Связка literal<->текст
-  // закреплена тестом `test_overloaded_literal_matches_scene_source`, поэтому
-  // переименование сообщения в scene_source ломает тест, а не молча гасит повтор.
+  if (!resp || (resp.ok !== false && resp.status !== "error")) {{ return false; }}
+  // Три признака: `code` напрямую (Task 1.2h, Находка 2 — `_dispatch()` теперь проносит
+  // типизированный код наружу как есть, без обёртки {{ok:false}}), слово "overloaded" в
+  // тексте и русский литерал сообщения `_push_control` (резерв на случай отказа без code).
+  // Связка literal<->текст закреплена тестом `test_overloaded_literal_matches_scene_source`,
+  // поэтому переименование сообщения в scene_source ломает тест, а не молча гасит повтор.
   if (resp.code === "overloaded") {{ return true; }}
   return typeof resp.error === "string" &&
     (resp.error.indexOf("overloaded") !== -1 || resp.error.indexOf("переполнена") !== -1);
@@ -412,10 +441,13 @@ function postScene(path, body) {{
     return isSceneOverloaded(r) ? post(path, body) : r;
   }}).then(function (r) {{
     // Отказ обязан быть ВИДЕН оператору и НЕ пропадать на ближайшем опросе: держим его
-    // в `sceneError`, пока не пройдёт следующая заявка. Прежняя редакция писала текст
-    // прямо в строку состояния, и `pollScene` затирал его через доли секунды — находка
-    // ревью 6.1b (README обещал показ, страница поле `error` не выводила вовсе).
-    sceneError = (r && r.ok === false && r.error) ? String(r.error) : "";
+    // в `sceneError`, пока не пройдёт следующая заявка. Форма отказа — одна из двух
+    // (Task 1.2h, Находка 2): «не дошло» -> {{ok:false, error}}, типизированный отказ ->
+    // {{status:"error", code, message}} как есть — читаем текст из того поля, что есть.
+    var errText = (r && r.ok === false && r.error) ? String(r.error)
+      : (r && r.status === "error" && r.message) ? String(r.message)
+      : "";
+    sceneError = errText;
     return r;
   }});
 }}
@@ -478,9 +510,223 @@ function pollTruthAndScene() {{
 }}
 setInterval(pollTruthAndScene, 1000);
 pollTruthAndScene();
+{preset_script}
 </script>
 </body>
 </html>
+"""
+
+#: Раздел «Редактор слоёв» (Task 1.2h) — отдельной константой, не внутри чужих
+#: блоков «Правда сцены»/«Сцена» (DESIGN п.4 задачи). Литералы id закреплены
+#: планом («Закреплено после слепого тестировщика», 2026-09-28): presetRev,
+#: presetLayers, presetEngineWarn, btnPresetPreview, btnPresetSave,
+#: btnPresetUndo, presetPreviewImg. Значение подставляется в ``_PAGE_TEMPLATE``
+#: КАК ``.format()``-аргумент (не часть текста, который сам форматируется) —
+#: фигурные скобки JS в ``_PRESET_SCRIPT`` ниже удваивать не нужно.
+_PRESET_SECTION = """<h2>Редактор слоёв</h2>
+<div class="row" id="presetRev">рев.: —</div>
+<div class="row" id="presetEngineWarn"></div>
+<div class="row" id="presetLayers"></div>
+<div class="row">
+  <button id="btnPresetPreview">Превью</button>
+  <button id="btnPresetSave">Сохранить</button>
+  <button id="btnPresetUndo">Отмена</button>
+</div>
+<div class="row"><img id="presetPreviewImg" alt="превью пресета"></div>"""
+
+#: JS редактора слоёв — тонкий клиент трёх команд ``preset.*`` (1.2a), своего
+#: рендера нет: превью — картинка ``png_b64`` от бэкенда как есть. Форма строится
+#: из словаря ``preset.get`` по типу значения поля (DESIGN п.4): числа/строки/
+#: булевы — обычные поля, поле ``<база>_px`` из двух чисел — два поля ``_x``/``_y``
+#: (id первого слоя по X — литерал плана ``layer0_offset_x``), всё остальное
+#: (``null``, вложенные объекты вроде ``augment``/``color_rgb``, произвольные
+#: массивы) — известный потолок: поле только для чтения, без Pydantic-схемы в
+#: ответе команды форму для них не построить (ponytail: путь наверх —
+#: ``model_json_schema()`` в ``preset.get``, когда ``scene_source`` освободится).
+#: Ответ ``preset.get`` бэкенда несёт 6 ключей (``status, preset, rev, path,
+#: class_names, engine``), тестовые двойники — 3 (``status, rev, preset``):
+#: код ниже НЕ считает отсутствие ``engine``/``path``/``class_names`` отказом.
+_PRESET_SCRIPT = """
+var presetState = null;
+var presetBaseRev = null;
+var presetEngine = undefined;
+var presetUndoStack = [];
+var presetFieldMap = [];
+
+function presetFieldKind(value) {
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "string") return "string";
+  return "json";
+}
+
+function presetFieldMarkup(i, key, value) {
+  if (key.slice(-3) === "_px" && Array.isArray(value) && value.length === 2) {
+    var base = key.slice(0, -3);
+    return (
+      '<label>' + base + '_x: <input id="layer' + i + '_' + base + '_x" type="number"></label> ' +
+      '<label>' + base + '_y: <input id="layer' + i + '_' + base + '_y" type="number"></label> '
+    );
+  }
+  var kind = presetFieldKind(value);
+  var type = kind === "boolean" ? "checkbox" : (kind === "number" ? "number" : "text");
+  return '<label>' + key + ': <input id="layer' + i + '_' + key + '" type="' + type + '"' +
+    (kind === "json" ? " readonly" : "") + '></label> ';
+}
+
+// Значения полей читаются заново через getElementById (не хранятся в замыкании
+// markup-строки): в браузере innerHTML создаёт реальные элементы под этими id,
+// а офлайн-харнесс тестов (page_offline.mjs) создаёт фиктивный элемент под
+// ЛЮБОЙ id при первом обращении (находка ревью 5.3a) — обе среды видят одну
+// и ту же функцию без разветвления по среде исполнения.
+function presetBindField(i, key, value) {
+  if (key.slice(-3) === "_px" && Array.isArray(value) && value.length === 2) {
+    var base = key.slice(0, -3);
+    ["x", "y"].forEach(function (axis, idx) {
+      var id = "layer" + i + "_" + base + "_" + axis;
+      var el = document.getElementById(id);
+      el.value = String(value[idx]);
+      presetFieldMap.push({ id: id, layerIndex: i, key: key, subIndex: idx, kind: "number" });
+    });
+    return;
+  }
+  var kind = presetFieldKind(value);
+  var id = "layer" + i + "_" + key;
+  var el = document.getElementById(id);
+  if (kind === "boolean") {
+    el.checked = !!value;
+  } else if (kind === "json") {
+    el.value = JSON.stringify(value === undefined ? null : value);
+  } else {
+    el.value = (value === null || value === undefined) ? "" : String(value);
+  }
+  presetFieldMap.push({ id: id, layerIndex: i, key: key, subIndex: null, kind: kind });
+}
+
+function renderPresetLayers() {
+  presetFieldMap = [];
+  var container = document.getElementById("presetLayers");
+  var layers = (presetState && presetState.layers) || [];
+  var html = "";
+  layers.forEach(function (layer, i) {
+    html += '<div class="row"><b>' + (layer.name || ("слой " + i)) + '</b> ';
+    Object.keys(layer).forEach(function (key) {
+      html += presetFieldMarkup(i, key, layer[key]);
+    });
+    html += "</div>";
+  });
+  container.innerHTML = html;
+  layers.forEach(function (layer, i) {
+    Object.keys(layer).forEach(function (key) {
+      presetBindField(i, key, layer[key]);
+    });
+  });
+}
+
+function updatePresetRevDisplay() {
+  var haveRev = presetBaseRev !== null && presetBaseRev !== undefined;
+  document.getElementById("presetRev").textContent = haveRev
+    ? "рев.: " + presetBaseRev
+    : "рев.: нет (пресет собран из каталога \\u2014 сохранение недоступно)";
+  document.getElementById("btnPresetSave").disabled = !haveRev;
+}
+
+function updatePresetEngineWarn() {
+  // engine === false -> собран старый движок, commit запишет файл, но правка
+  // приедет на ленту только после перезапуска (DESIGN, закреплено планом
+  // 2026-09-28). engine отсутствует (двойники тестов) -> "неизвестно", не
+  // предупреждаем — иначе редактор врал бы о состоянии, которого не проверял.
+  document.getElementById("presetEngineWarn").textContent =
+    presetEngine === false
+      ? "движок не собран: правка запишется в файл, но на ленте появится только после перезапуска"
+      : "";
+}
+
+function getPreset() {
+  return fetch("/api/preset").then(function (r) { return r.json(); });
+}
+
+function loadPreset() {
+  return getPreset().then(function (resp) {
+    if (resp && resp.status === "ok") {
+      presetState = resp.preset;
+      presetBaseRev = (resp.rev === undefined) ? null : resp.rev;
+      presetEngine = resp.engine;
+      renderPresetLayers();
+      updatePresetRevDisplay();
+      updatePresetEngineWarn();
+    } else {
+      document.getElementById("presetRev").textContent = "пресет недоступен";
+    }
+  }).catch(function () {
+    document.getElementById("presetRev").textContent = "пресет недоступен";
+  });
+}
+
+// Undo — стек словарей в браузере (DESIGN): на бэкенд при отмене ничего не
+// уходит, откат — это повторный рендер presetState из стека.
+function collectPresetFromFields() {
+  var next = JSON.parse(JSON.stringify(presetState));
+  presetFieldMap.forEach(function (f) {
+    var layer = next.layers[f.layerIndex];
+    var el = document.getElementById(f.id);
+    var parsed = f.kind === "boolean" ? el.checked : el.value;
+    if (f.kind === "number") parsed = parseFloat(parsed);
+    if (f.kind === "json") {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch (e) {
+        parsed = f.subIndex === null ? layer[f.key] : layer[f.key][f.subIndex];
+      }
+    }
+    if (f.subIndex === null) {
+      layer[f.key] = parsed;
+    } else {
+      layer[f.key][f.subIndex] = parsed;
+    }
+  });
+  return next;
+}
+
+document.getElementById("btnPresetPreview").onclick = function () {
+  post("/api/preset/preview", { preset: collectPresetFromFields() }).then(function (r) {
+    if (r && r.png_b64) {
+      document.getElementById("presetPreviewImg").src = "data:image/png;base64," + r.png_b64;
+    }
+  });
+};
+
+document.getElementById("btnPresetSave").onclick = function () {
+  if (presetBaseRev === null || presetBaseRev === undefined) return; // rev==null -> писать некуда
+  var nextPreset = collectPresetFromFields();
+  post("/api/preset/commit", { preset: nextPreset, base_rev: presetBaseRev }).then(function (r) {
+    if (r && r.code === "conflict") {
+      // П5: правку НЕ теряем (поля не перерисовываем), current_rev запоминаем
+      // как новый base_rev для повторного «Сохранить».
+      presetBaseRev = r.current_rev;
+      document.getElementById("presetRev").textContent =
+        "конфликт: пресет изменили параллельно, правка на экране сохранена, повторите «Сохранить»";
+      return;
+    }
+    if (r && r.status === "ok" && r.rev) {
+      presetUndoStack.push(presetState);
+      presetState = nextPreset;
+      presetBaseRev = r.rev;
+      updatePresetRevDisplay();
+      return;
+    }
+    document.getElementById("presetRev").textContent =
+      "ошибка сохранения: " + ((r && (r.message || r.error)) || "неизвестно");
+  });
+};
+
+document.getElementById("btnPresetUndo").onclick = function () {
+  if (!presetUndoStack.length) return;
+  presetState = presetUndoStack.pop();
+  renderPresetLayers();
+};
+
+loadPreset();
 """
 
 
@@ -531,25 +777,51 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
 
-        def _dispatch(self, command: str, args: dict, client: DeviceHubClient) -> None:
-            """Форвард команды выбранному клиенту (``robot`` или сцена) и ответ как есть (DESIGN п.3)."""
-            result = client.request(command, args, timeout=pult._timeout_s)
+        def _dispatch(self, command: str, args: dict, client: DeviceHubClient, timeout: float | None = None) -> None:
+            """Форвард команды выбранному клиенту и ответ (DESIGN п.3; Находки 2-3 Task 1.2h).
+
+            ``timeout`` — таймаут МАРШРУТА (``None`` -> общий ``pult._timeout_s``,
+            прежнее поведение для всех маршрутов до 1.2h). Ответ команды с полем
+            ``code`` отдаётся КАК ЕСТЬ, HTTP-статус — по ``_ERROR_CODE_TO_HTTP``
+            (код вне таблицы -> 400); ответ БЕЗ ``code`` в ошибке — прежнее
+            поведение: 504 ``{ok: false, error: ...}``. 504 остаётся только за
+            «не дошло» (клиент не смог получить ответ вовсе).
+            """
+            result = client.request(command, args, timeout=timeout if timeout is not None else pult._timeout_s)
             if not isinstance(result, dict):
                 result = {"status": "error", "message": "bad_response"}
             if result.get("status") == "error":
+                code = result.get("code")
+                if code is not None:
+                    self._reply_json(_ERROR_CODE_TO_HTTP.get(code, 400), result)
+                    return
                 fallback = "robot_error" if client is pult._client else "scene_error"
                 self._reply_json(504, {"ok": False, "error": result.get("message", fallback)})
                 return
             self._reply_json(200, result)
 
-        def _read_command_body(self) -> tuple[dict | None, tuple[int, dict] | None]:
+        def _drain_body(self, length: int) -> None:
+            """Вычитать и отбросить тело сверх маршрутного потолка — не для команды,
+            только чтобы закрытие сокета после 413 не оборвало клиента RST'ом."""
+            remaining = length
+            try:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            except OSError:
+                return
+
+        def _read_command_body(self, max_bytes: int = _MAX_BODY_BYTES) -> tuple[dict | None, tuple[int, dict] | None]:
             """Прочитать РОВНО ``Content-Length`` байт (не до EOF, см. докстринг модуля).
 
             Возвращает ``(args, None)`` при успехе либо ``(None, (status, payload))``
-            для одного из отказов ДО вызова команды (DESIGN п.3): 413 — размер, до
-            чтения тела; 400 ``bad_length`` — отрицательный ``Content-Length`` (иначе
-            ``rfile.read(-1)`` читал бы до EOF в обход 413, ревью 5.3a п.3);
-            400 ``bad_json`` — кривой JSON/не dict.
+            для одного из отказов ДО вызова команды (DESIGN п.3): 413 — размер
+            больше ``max_bytes`` (потолок МАРШРУТА, Находка 1 Task 1.2h; дефолт —
+            прежний общий ``_MAX_BODY_BYTES``), до чтения тела; 400 ``bad_length`` —
+            отрицательный ``Content-Length`` (иначе ``rfile.read(-1)`` читал бы до
+            EOF в обход 413, ревью 5.3a п.3); 400 ``bad_json`` — кривой JSON/не dict.
             """
             length_header = self.headers.get("Content-Length")
             try:
@@ -558,7 +830,13 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 length = 0
             if length < 0:
                 return None, (400, {"ok": False, "error": "bad_length"})
-            if length > _MAX_BODY_BYTES:
+            if length > max_bytes:
+                # Отказ по-прежнему решается ДО обращения к телу ради команды — эти
+                # байты никуда не форвардятся и не парсятся. Дренаж нужен отдельно:
+                # закрытие сокета с непрочитанным входом рвёт клиента RST'ом на
+                # Windows (замер Task 1.2h — WinError 10053 на теле 300 КБ без
+                # дренажа, портит СЛЕДУЮЩИЙ тест).
+                self._drain_body(length)
                 return None, (413, {"ok": False, "error": "too_large"})
             raw = self.rfile.read(length) if length else b""
             if not raw.strip():
@@ -597,6 +875,9 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             if self.path == "/api/scene":
                 self._dispatch("scene.status", {}, pult._scene_client)
                 return
+            if self.path == "/api/preset":
+                self._dispatch("preset.get", {}, pult._scene_client)
+                return
             self._reply_json(404, {"ok": False, "error": "not_found"})
 
         def do_POST(self) -> None:  # noqa: N802 - имя метода задано stdlib
@@ -605,9 +886,17 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 return
             command = _COMMAND_BY_PATH.get(self.path)
             client = pult._client
+            max_bytes = _MAX_BODY_BYTES
+            timeout: float | None = None
             if command is None:
                 command = _SCENE_COMMAND_BY_PATH.get(self.path)
                 client = pult._scene_client
+            if command is None:
+                preset_route = _PRESET_ROUTES.get(self.path)
+                if preset_route is not None:
+                    command, client_attr, route_max_bytes, timeout = preset_route
+                    client = getattr(pult, client_attr)
+                    max_bytes = route_max_bytes if route_max_bytes is not None else _MAX_BODY_BYTES
             if command is None:
                 self._reply_json(404, {"ok": False, "error": "not_found"})
                 return
@@ -615,12 +904,12 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             if not content_type.startswith("application/json"):
                 self._reply_json(415, {"ok": False, "error": "unsupported_media_type"})
                 return
-            args, error = self._read_command_body()
+            args, error = self._read_command_body(max_bytes)
             if error is not None:
                 status, payload = error
                 self._reply_json(status, payload)
                 return
-            self._dispatch(command, args, client)
+            self._dispatch(command, args, client, timeout)
 
     return _PultHandler
 
@@ -648,11 +937,17 @@ class PultWebPlugin(ProcessModulePlugin):
         self._mjpeg_url: str = cfg.get("mjpeg_url", _DEFAULT_MJPEG_URL)
         self._robot_process: str = cfg.get("robot_process", _DEFAULT_ROBOT_PROCESS)
         self._scene_process: str = cfg.get("scene_process", _DEFAULT_SCENE_PROCESS)
+        self._layers_process: str = cfg.get("layers_process", _DEFAULT_LAYERS_PROCESS)
         self._timeout_s: float = float(cfg.get("timeout_s", _DEFAULT_TIMEOUT_S))
 
         self._client = DeviceHubClient(ctx, target_process=self._robot_process, default_timeout=self._timeout_s)
         self._scene_client = DeviceHubClient(ctx, target_process=self._scene_process, default_timeout=self._timeout_s)
-        self._page_bytes = _PAGE_TEMPLATE.format(mjpeg_url=self._mjpeg_url).encode("utf-8")
+        self._layers_client = DeviceHubClient(ctx, target_process=self._layers_process, default_timeout=self._timeout_s)
+        self._page_bytes = _PAGE_TEMPLATE.format(
+            mjpeg_url=self._mjpeg_url,
+            preset_section=_PRESET_SECTION,
+            preset_script=_PRESET_SCRIPT,
+        ).encode("utf-8")
 
         self._server: http.server.ThreadingHTTPServer | None = None
         self._server_thread: threading.Thread | None = None
@@ -661,7 +956,7 @@ class PultWebPlugin(ProcessModulePlugin):
 
         ctx.log_info(
             f"pult_web: конфиг принят, {self._host}:{self._port}, robot={self._robot_process}, "
-            f"scene={self._scene_process}, mjpeg_url={self._mjpeg_url}"
+            f"scene={self._scene_process}, layers={self._layers_process}, mjpeg_url={self._mjpeg_url}"
         )
 
     def start(self, ctx: PluginContext) -> None:
