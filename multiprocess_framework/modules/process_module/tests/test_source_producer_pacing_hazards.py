@@ -17,8 +17,10 @@
 **Часы «как на Windows» (ревью B-1, находка 4).** CI гоняется на Linux, где
 ``time.monotonic`` точный — откат правки там ничего бы не уронил. Фикстура ``clock``
 прогоняет каждый тест дважды: на настоящих часах и на эмуляции Windows, где
-``monotonic`` квантован шагом GetTickCount64 (15.625 мс). Это модель ОС, а не шпион
-на имени: код, выбравший любые часы с грубым шагом, падает одинаково на обеих ОС.
+``monotonic``/``monotonic_ns`` квантованы шагом GetTickCount64 (15.625 мс). Это модель
+тех часов, что грубые на Windows, а не шпион на имени: откат темпа на любые из них падает
+на обеих ОС. ``time.time`` не огрубляем — его шаг зависит от системного таймера машины
+(замер ревьюера: ~1 мс, кто-то перевёл таймер), обещать тут нечего.
 """
 
 from __future__ import annotations
@@ -41,13 +43,17 @@ _WINDOWS_TICK_S = 0.015625
 
 
 def _windows_like_time() -> SimpleNamespace:
-    """Модуль ``time``, чей monotonic ведёт себя как на Windows; остальное — настоящее."""
+    """Модуль ``time``, чей monotonic/monotonic_ns ведут себя как на Windows; остальное — настоящее."""
 
     def coarse_monotonic() -> float:
         return math.floor(time.perf_counter() / _WINDOWS_TICK_S) * _WINDOWS_TICK_S
 
+    def coarse_monotonic_ns() -> int:
+        return int(coarse_monotonic() * 1_000_000_000)
+
     fake = SimpleNamespace(**{name: getattr(time, name) for name in dir(time) if not name.startswith("__")})
     fake.monotonic = coarse_monotonic
+    fake.monotonic_ns = coarse_monotonic_ns
     return fake
 
 

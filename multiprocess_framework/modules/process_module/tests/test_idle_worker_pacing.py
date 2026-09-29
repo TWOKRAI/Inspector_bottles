@@ -37,9 +37,7 @@ def _measure_rate(interval_ms: float, window_s: float = 3.0) -> float:
     return (len(stamps) - 1) / (stamps[-1] - stamps[0])
 
 
-def test_idle_worker_33ms_interval_runs_near_30_per_second() -> None:
-    rate = _measure_rate(33.333)
-    assert 28.5 <= rate <= 31.5, f"цикл 33.3 мс дал {rate:.2f}/с (до B-1 на Windows ~21)"
+# 30/с (цикл 33.3 мс) — в test_source_producer_pacing_hazards.py под обоими вариантами часов.
 
 
 def test_idle_worker_16ms_interval_runs_near_60_per_second() -> None:
