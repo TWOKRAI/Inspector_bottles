@@ -3,7 +3,7 @@
 > Перенесено дословно из `plans/QUEUE.md` 2026-09-26 при разбиении на папку `plans/queue/`.
 > Действующий порядок — [`ORDER.md`](ORDER.md).
 
-Идентификаторы (`L-*`, `K-*`, `W-*`, `T-*`, `S-*`, `D-*`, `R-*`) стабильны: на них ссылаются тесты, ADR и сессии.
+Идентификаторы (`L-*`, `K-*`, `W-*`, `T-*`, `S-*`, `D-*`, `R-*`, `C-*`) стабильны: на них ссылаются тесты, ADR и сессии.
 
 ### Дефекты жизненного цикла процесса (заведено ревью Ф3, не наблюдаемость)
 
@@ -189,3 +189,12 @@ S-1 — **8/10 APPROVED**; S-2 + S-5/S-6/S-7 — **6/10, нужны правки
 | R-2 | Слово со страницы телефона не доходит до раскладки | `POST http://…:8080/word` «РАК» → `{"ok": true, "seq": 2}`, но `layout.word_layout.word_norm = ""`: `PhoneCameraPlugin._maybe_publish_word` кладёт слово только в state `processes.phone.state.phone.word`, в `signal_2` его переносит лишь команда `emit_signal`, которую в дереве никто не зовёт (grep). Шапка `letter_robot_sim.yaml`/`hikvision_letter_robot.yaml` обещает «слово задаётся с телефона (phone.signal_2)» | открыт; обход на стенде — регистр `word_layout.target_word` (так «РЭП» собралось: 3/3 слота, 3 задания, 3 выполнено). Переписывается вместе с `letter-robot-cycle` на v2 |
 | R-3 | Комментарий `apps/line_sim/pipeline.yaml:83-84` называет буквы каталога «АКРХ», в `data/line_sim/letter_catalog/` лежат Б, Г, О, Х | `ls data/line_sim/letter_catalog` на Mac 2026-09-27 | открыт, косметика; каталог — gitignored `data/`, на разных машинах может отличаться — буквы стоит писать в `meta.yaml` каталога, а не в комментарий |
 
+### Стенд считывателя кодов (заведено 2026-09-29, попутные находки Task 6.3 `code-reader-sdk` и фикса формы кадра ADR-SRM-017)
+
+Все три — старые дефекты, не от правок `8d41c685`/`eb58afde`/`78d587c8`.
+
+| # | Дефект | Что измерено | Статус |
+|---|---|---|---|
+| C-1 | Серое превью в GUI сломано: кадр `(H, W)` не рисуется | `multiprocess_prototype/frontend/widgets/image_panel/presenter.py:91-96` строит `QImage` `Format_RGB888` с `bytes_per_line = 3 * w` поверх 2D-буфера — заявлено 3,9 МБ поверх 1,3 МБ (чтение за границей), плюс `frame[..., ::-1]` на 2D отражает кадр по ширине; `multiprocess_framework/modules/frontend_module/widgets/image_panel.py:37` `h, w, ch = frame.shape` падает `ValueError` на 2D. Транспорт с ADR-SRM-017 отдаёт серый кадр как `(H, W)` — ровно тот случай | открыт; без него кадр SDK-считывателя (`code_reader_sdk`, моно ID3013) в интерфейсе не виден. Фикс — `Format_Grayscale8` для `ndim == 2`, S |
+| C-2 | Красные без правок на Windows: 3 сокетных HOL-теста `router_module` и `r2` в `test_remote_frame_source` | прогон 2026-09-29 на Windows 10: красные и без правок SHM (сверка в сессии фикса формы кадра, коммит-база не записана) | открыт; гипотеза — поведение сокетов Windows, не проверена. Нужен прогон на Mac для сравнения |
+| C-3 | TCP-нода рецепта засчитывает `BadRead` прибора как прочитанный код | `multiprocess_prototype/recipes/qr_reader_demo.yaml:64` и `qr_reader_sdk_demo.yaml:78`: `bad_code_text: ""` → текст неудачи не распознаётся. Уже записано в `Services/code_reader/STATUS.md` («Открыто по коду», п. 2) | открыт; фикс — прописать заводской текст неудачи прибора в оба рецепта, S |
