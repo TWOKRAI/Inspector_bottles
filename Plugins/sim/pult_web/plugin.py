@@ -130,12 +130,14 @@ _SCENE_COMMAND_BY_PATH = {
 #: сетку образцов (~88 мс на README ``layer_preview``, до ~1.3 с на крупных
 #: спрайтах) — общий таймаут 1.0 с его режет, поднят до 5.0 с только на этот
 #: маршрут. ``preset.layout`` (Task 1.3h-a) раскладывает слои пресета по картинкам
-#: тем же процессом ``layers`` — тот же таймаут 5.0 с и общий потолок тела.
+#: тем же процессом ``layers`` — тот же таймаут 5.0 с. ``preview`` и ``layout`` с
+#: канвы 1.3h-b шлют ТЕКУЩИЙ пресет целиком (``{preset: ...}``), как ``commit``, —
+#: тот же потолок 256 КБ (общие 4 КБ резали бы пресет из нескольких слоёв с диапазонами).
 #: Тело форвардится КАК ЕСТЬ — та же дисциплина, что у двух таблиц выше.
 _PRESET_ROUTES: dict[str, tuple[str, str, int | None, float | None]] = {
     "/api/preset/commit": ("preset.commit", "_scene_client", 262144, None),
-    "/api/preset/preview": ("preset.preview", "_layers_client", None, 5.0),
-    "/api/preset/layout": ("preset.layout", "_layers_client", None, 5.0),
+    "/api/preset/preview": ("preset.preview", "_layers_client", 262144, 5.0),
+    "/api/preset/layout": ("preset.layout", "_layers_client", 262144, 5.0),
 }
 
 #: Код ответа команды (``code``) -> HTTP-статус (Находка 2, Task 1.2h). Ответ
@@ -162,6 +164,8 @@ body {{ font-family: sans-serif; margin: 16px; }}
 .row {{ margin: 8px 0; }}
 button {{ font-size: 1.2em; padding: 4px 12px; }}
 #status {{ font-family: monospace; white-space: pre; }}
+#presetLayers .selected {{ background: #ffe08a; }}
+#presetCanvas {{ border: 1px solid #888; background: #ddd; touch-action: none; cursor: crosshair; }}
 #wire {{ font-family: monospace; font-size: 0.9em; white-space: pre; max-height: 360px;
         overflow-y: auto; border: 1px solid #888; padding: 4px; }}
 </style>
@@ -539,7 +543,9 @@ pollTruthAndScene();
 #: блоков «Правда сцены»/«Сцена» (DESIGN п.4 задачи). Литералы id закреплены
 #: планом («Закреплено после слепого тестировщика», 2026-09-28): presetRev,
 #: presetLayers, presetEngineWarn, btnPresetPreview, btnPresetSave,
-#: btnPresetUndo, presetPreviewImg. Значение подставляется в ``_PAGE_TEMPLATE``
+#: btnPresetUndo, presetPreviewImg; канва 1.3h-b — presetCanvas, presetZoom (масштаб
+#: в процентах), presetLayoutError (контракт в докстринге
+#: ``tests/test_acceptance_1_3h_canvas.py``). Значение подставляется в ``_PAGE_TEMPLATE``
 #: КАК ``.format()``-аргумент (не часть текста, который сам форматируется) —
 #: фигурные скобки JS в ``_PRESET_SCRIPT`` ниже удваивать не нужно.
 _PRESET_SECTION = """<h2>Редактор слоёв</h2>
@@ -550,6 +556,15 @@ _PRESET_SECTION = """<h2>Редактор слоёв</h2>
   <button id="btnPresetPreview">Превью</button>
   <button id="btnPresetSave">Сохранить</button>
   <button id="btnPresetUndo">Отмена</button>
+</div>
+<div class="row">
+  <label>Масштаб, %: <input id="presetZoom" type="number" min="10" max="1000" step="10" value="100"></label>
+  <span id="presetLayoutError" style="color: #b00"></span>
+</div>
+<div class="row">
+  <canvas id="presetCanvas" width="640" height="480" tabindex="0"></canvas>
+  <div>ЛКМ — выбрать и тащить слой; ручки выбранного: круг над рамкой — поворот, угол — масштаб;
+    стрелки — 1 px (Shift — 10 px); колесо — масштаб; средняя кнопка или пробел+ЛКМ — панорама</div>
 </div>
 <div class="row"><img id="presetPreviewImg" alt="превью пресета"></div>"""
 
@@ -670,6 +685,7 @@ function renderPresetLayers() {
       presetBindField(i, key, layer[key]);
     });
   });
+  presetUpdateSelection();
 }
 
 function updatePresetRevDisplay() {
@@ -703,9 +719,11 @@ function loadPreset() {
       presetEngine = resp.engine;
       presetUndoStack = [];
       presetDirty = false;
+      presetSelected = null;
       renderPresetLayers();
       updatePresetRevDisplay();
       updatePresetEngineWarn();
+      requestPresetLayout();
     } else {
       document.getElementById("presetRev").textContent = "пресет недоступен";
     }
@@ -778,7 +796,380 @@ document.getElementById("btnPresetUndo").onclick = function () {
   presetState = presetUndoStack.pop();
   presetDirty = false;
   renderPresetLayers();
+  requestPresetLayout();
 };
+
+// ---------------------------------------------------------------------------
+// Канва редактора слоёв (Task 1.3h-b). Своего рендера нет: слои — PNG бэкенда из
+// POST /api/preset/layout (тело — ТЕКУЩЕЕ состояние правки), каждый ставится левым
+// верхним углом в origin_px (из center_px не пересчитывается). Контракт — докстринг
+// tests/test_acceptance_1_3h_canvas.py. Экран <-> объект:
+//   экран = центр канвы + (объект - canvas_px/2 + пан) * z
+// Пан хранится в px ОБЪЕКТА — поэтому масштаб всегда вокруг центра канвы.
+// Во время жеста сдвиг — готовый битмап со смещением; поворот/масштаб — пунктирная
+// рамка-призрак, перерисовку слоя делает бэкенд после отпускания.
+// ---------------------------------------------------------------------------
+var presetCanvas = document.getElementById("presetCanvas");
+var presetZoomInput = document.getElementById("presetZoom");
+var presetLayout = null;    // последняя ПРИНЯТАЯ раскладка: {cw, ch, layers: [{name, img, hit, x, y, w, h}]}
+var presetLayoutSeq = 0;    // номер последнего запроса: ответ старого запроса новый не затирает
+var presetSelected = null;  // имя выбранного слоя пресета (null — ничего)
+var presetGesture = null;   // жест указателя: {kind: move|rotate|scale|pan, name, id, start, cur, center}
+var presetZoom = 1;
+var presetPan = [0, 0];
+var presetSpaceHeld = false;
+var presetDrawPending = false;
+var PRESET_HANDLE_PX = 8;   // полуразмер ручки на экране
+var PRESET_ROT_ARM_PX = 24; // вынос ручки поворота над рамкой
+
+function presetLayerIndex(name) {
+  var layers = (presetState && presetState.layers) || [];
+  for (var i = 0; i < layers.length; i++) {
+    if (layers[i].name === name) return i;
+  }
+  return -1;
+}
+
+function presetLayoutEntry(name) {
+  if (!presetLayout) return null;
+  for (var i = 0; i < presetLayout.layers.length; i++) {
+    if (presetLayout.layers[i].name === name) return presetLayout.layers[i];
+  }
+  return null;
+}
+
+// Подсветка строки формы выбранного слоя (строка i <-> presetState.layers[i]).
+function presetUpdateSelection() {
+  var rows = document.getElementById("presetLayers").children || [];
+  var idx = presetSelected === null ? -1 : presetLayerIndex(presetSelected);
+  for (var i = 0; i < rows.length; i++) rows[i].classList.toggle("selected", i === idx);
+}
+
+function presetShowLayoutError(text) {
+  document.getElementById("presetLayoutError").textContent = text;
+}
+
+function presetToScreen(ox, oy) {
+  var L = presetLayout;
+  return [
+    presetCanvas.width / 2 + (ox - L.cw / 2 + presetPan[0]) * presetZoom,
+    presetCanvas.height / 2 + (oy - L.ch / 2 + presetPan[1]) * presetZoom,
+  ];
+}
+
+function presetToObject(sx, sy) {
+  var L = presetLayout;
+  return [
+    (sx - presetCanvas.width / 2) / presetZoom - presetPan[0] + L.cw / 2,
+    (sy - presetCanvas.height / 2) / presetZoom - presetPan[1] + L.ch / 2,
+  ];
+}
+
+// offsetX/Y — CSS px; если канву растянули стилем, приводим к px битмапа.
+function presetPointerXY(e) {
+  var kx = presetCanvas.width / (presetCanvas.clientWidth || presetCanvas.width);
+  var ky = presetCanvas.height / (presetCanvas.clientHeight || presetCanvas.height);
+  return [e.offsetX * kx, e.offsetY * ky];
+}
+
+// Сдвиг слоя жестом «перенос» в px объекта (для рисования во время жеста).
+function presetMoveShift(name) {
+  var g = presetGesture;
+  if (!g || g.kind !== "move" || g.name !== name) return [0, 0];
+  return [(g.cur[0] - g.start[0]) / presetZoom, (g.cur[1] - g.start[1]) / presetZoom];
+}
+
+// Поворот (градусы, CCW при оси Y вниз — как _rotate в line_sim) и множитель
+// масштаба жеста ручкой — относительно центра рамки на момент нажатия.
+function presetHandleDelta(g) {
+  var sx = g.start[0] - g.center[0], sy = g.start[1] - g.center[1];
+  var cx = g.cur[0] - g.center[0], cy = g.cur[1] - g.center[1];
+  var d = -(Math.atan2(cy, cx) - Math.atan2(sy, sx)) * 180 / Math.PI;
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  var r0 = Math.sqrt(sx * sx + sy * sy);
+  var k = r0 > 0 ? Math.sqrt(cx * cx + cy * cy) / r0 : 1;
+  return { angle: g.kind === "rotate" ? d : 0, k: g.kind === "scale" ? k : 1 };
+}
+
+// Рамка выбранного слоя и ручки в экранных px (null — нечего показывать).
+function presetHandles() {
+  var ly = presetSelected === null ? null : presetLayoutEntry(presetSelected);
+  if (!ly) return null;
+  var d = presetMoveShift(ly.name);
+  var a = presetToScreen(ly.x + d[0], ly.y + d[1]);
+  var b = presetToScreen(ly.x + d[0] + ly.w, ly.y + d[1] + ly.h);
+  var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+  return { x0: a[0], y0: a[1], x1: b[0], y1: b[1], cx: cx, cy: cy,
+           rot: [cx, a[1] - PRESET_ROT_ARM_PX], scale: [b[0], b[1]] };
+}
+
+function presetNear(p, q) {
+  return Math.abs(p[0] - q[0]) <= PRESET_HANDLE_PX && Math.abs(p[1] - q[1]) <= PRESET_HANDLE_PX;
+}
+
+// Выбор по альфе: сверху вниз, первый слой с alpha > 0 под курсором (не по bbox).
+function presetHitLayer(sx, sy) {
+  if (!presetLayout) return null;
+  var o = presetToObject(sx, sy);
+  for (var i = presetLayout.layers.length - 1; i >= 0; i--) {
+    var ly = presetLayout.layers[i];
+    var u = Math.floor(o[0] - ly.x), v = Math.floor(o[1] - ly.y);
+    if (u < 0 || v < 0 || u >= ly.w || v >= ly.h) continue;
+    if (ly.hit.getImageData(u, v, 1, 1).data[3] > 0) return ly.name;
+  }
+  return null;
+}
+
+function presetDraw() {
+  presetDrawPending = false;
+  var ctx = presetCanvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, presetCanvas.width, presetCanvas.height);
+  if (!presetLayout) return;
+  var L = presetLayout, z = presetZoom;
+  ctx.setTransform(z, 0, 0, z,
+    presetCanvas.width / 2 + (presetPan[0] - L.cw / 2) * z,
+    presetCanvas.height / 2 + (presetPan[1] - L.ch / 2) * z);
+  L.layers.forEach(function (ly) {
+    var d = presetMoveShift(ly.name);
+    ctx.drawImage(ly.img, ly.x + d[0], ly.y + d[1]);
+  });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  var h = presetHandles();
+  if (!h) return;
+  ctx.strokeStyle = "#f80";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(h.x0, h.y0, h.x1 - h.x0, h.y1 - h.y0);
+  ctx.beginPath();
+  ctx.moveTo(h.cx, h.y0);
+  ctx.lineTo(h.rot[0], h.rot[1]);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(h.rot[0], h.rot[1], PRESET_HANDLE_PX, 0, 2 * Math.PI);
+  ctx.stroke();
+  var hs = PRESET_HANDLE_PX;
+  ctx.strokeRect(h.scale[0] - hs, h.scale[1] - hs, 2 * hs, 2 * hs);
+  var g = presetGesture;
+  if (g && (g.kind === "rotate" || g.kind === "scale")) {
+    var t = presetHandleDelta(g);
+    ctx.save();
+    ctx.translate(g.center[0], g.center[1]);
+    ctx.rotate(-t.angle * Math.PI / 180);
+    ctx.scale(t.k, t.k);
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(h.x0 - h.cx, h.y0 - h.cy, h.x1 - h.x0, h.y1 - h.y0);
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+}
+
+function presetScheduleDraw() {
+  if (presetDrawPending) return;
+  presetDrawPending = true;
+  requestAnimationFrame(presetDraw);
+}
+
+function requestPresetLayout() {
+  if (!presetState) return;
+  var seq = ++presetLayoutSeq;
+  fetch("/api/preset/layout", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ preset: collectPresetFromFields() }),
+  }).then(function (r) {
+    return r.json().then(
+      function (data) { return { http: r.status, data: data }; },
+      function () { return { http: r.status, data: null }; });
+  }).then(function (res) {
+    if (seq !== presetLayoutSeq) return;
+    var d = res.data;
+    if (res.http !== 200 || !d || d.status !== "ok" || !Array.isArray(d.layers) || !Array.isArray(d.canvas_px)) {
+      presetShowLayoutError("раскладка не получена (HTTP " + res.http + "): " +
+        ((d && (d.message || d.error || d.code)) || "ответ без раскладки"));
+      return;
+    }
+    var entries = d.layers.map(function (ly) {
+      var img = new Image();
+      img.src = "data:image/png;base64," + ly.png_b64;
+      return { name: ly.name, img: img, x: ly.origin_px[0], y: ly.origin_px[1] };
+    });
+    return Promise.all(entries.map(function (en) { return en.img.decode(); })).then(function () {
+      if (seq !== presetLayoutSeq) return;
+      entries.forEach(function (en) {
+        en.w = en.img.naturalWidth || en.img.width;
+        en.h = en.img.naturalHeight || en.img.height;
+        var hitCanvas = document.createElement("canvas");
+        hitCanvas.width = en.w;
+        hitCanvas.height = en.h;
+        en.hit = hitCanvas.getContext("2d");
+        en.hit.drawImage(en.img, 0, 0);
+      });
+      presetLayout = { cw: d.canvas_px[0], ch: d.canvas_px[1], layers: entries };
+      presetShowLayoutError("");
+      presetScheduleDraw();
+    });
+  }).catch(function (err) {
+    if (seq === presetLayoutSeq) presetShowLayoutError("раскладка не получена: " + err);
+  });
+}
+
+// Правка слоя с канвы: снимок ТЕКУЩЕЙ правки (с ненажатым «Сохранить» вводом в
+// полях) — ровно одна запись «Отмена» на жест/нажатие, затем форма из нового
+// состояния. presetDirty = false: форма только что синхронизирована с presetState,
+// значит следующий ввод в поле положит СВОЙ снимок (markPresetDirty 1.2h как есть).
+// Правка без изменения (клик без движения) — ни записи, ни запроса раскладки.
+function presetApplyEdit(name, mutate) {
+  var idx = presetLayerIndex(name);
+  if (idx < 0) return;
+  var snapshot = collectPresetFromFields();
+  var next = JSON.parse(JSON.stringify(snapshot));
+  mutate(next.layers[idx]);
+  if (JSON.stringify(next) === JSON.stringify(snapshot)) return;
+  presetUndoStack.push(snapshot);
+  presetState = next;
+  presetDirty = false;
+  renderPresetLayers();
+  // готовый битмап сдвигается сразу, не дожидаясь ответа раскладки
+  var before = snapshot.layers[idx].offset_px || [0, 0], after = next.layers[idx].offset_px || [0, 0];
+  var ly = presetLayoutEntry(name);
+  if (ly) {
+    ly.x += after[0] - before[0];
+    ly.y += after[1] - before[1];
+  }
+  presetScheduleDraw();
+  requestPresetLayout();
+}
+
+function presetShiftLayer(name, dx, dy, round) {
+  presetApplyEdit(name, function (layer) {
+    var off = Array.isArray(layer.offset_px) ? layer.offset_px : [0, 0];
+    var x = off[0] + dx, y = off[1] + dy;
+    layer.offset_px = round ? [Math.round(x), Math.round(y)] : [x, y];
+  });
+}
+
+function presetFinishGesture(g) {
+  if (g.kind === "move") {
+    // ponytail: offset_px округляется до целого px — при зуме > 100 % полпикселя мышью не задать (стрелки — 1 px)
+    presetShiftLayer(g.name, (g.cur[0] - g.start[0]) / presetZoom, (g.cur[1] - g.start[1]) / presetZoom, true);
+    return;
+  }
+  var t = presetHandleDelta(g);
+  presetApplyEdit(g.name, function (layer) {
+    if (g.kind === "rotate") {
+      var a = (typeof layer.angle_deg === "number" ? layer.angle_deg : 0) + t.angle;
+      while (a > 180) a -= 360;
+      while (a <= -180) a += 360;
+      layer.angle_deg = Math.round(a * 10) / 10;
+    } else {
+      var s = (typeof layer.scale === "number" ? layer.scale : 1) * t.k;
+      layer.scale = Math.max(0.05, Math.round(s * 1000) / 1000);
+    }
+  });
+}
+
+function presetTrack(g, p) {
+  if (g.kind === "pan") {
+    presetPan = [presetPan[0] + (p[0] - g.cur[0]) / presetZoom, presetPan[1] + (p[1] - g.cur[1]) / presetZoom];
+  }
+  g.cur = p;
+}
+
+presetCanvas.addEventListener("pointerdown", function (e) {
+  if (!presetLayout || presetGesture) return;
+  var p = presetPointerXY(e);
+  var kind = null, h = null;
+  if (e.button === 1 || (e.button === 0 && presetSpaceHeld)) {
+    kind = "pan";
+  } else if (e.button === 0) {
+    h = presetHandles();
+    if (h && presetNear(p, h.rot)) kind = "rotate";
+    else if (h && presetNear(p, h.scale)) kind = "scale";
+    else {
+      var hit = presetHitLayer(p[0], p[1]);
+      presetSelected = hit !== null && presetLayerIndex(hit) >= 0 ? hit : null; // авто-слой base не правится
+      presetUpdateSelection();
+      presetScheduleDraw();
+      if (presetSelected !== null) kind = "move";
+    }
+  }
+  if (!kind) return;
+  if (e.preventDefault) e.preventDefault();
+  presetGesture = { kind: kind, name: presetSelected, id: e.pointerId, start: p, cur: p,
+                    center: h ? [h.cx, h.cy] : null };
+  try { presetCanvas.setPointerCapture(e.pointerId); } catch (err) { /* указатель уже ушёл */ }
+});
+
+presetCanvas.addEventListener("pointermove", function (e) {
+  var g = presetGesture;
+  if (!g || e.pointerId !== g.id) return;
+  presetTrack(g, presetPointerXY(e));
+  presetScheduleDraw();
+});
+
+presetCanvas.addEventListener("pointerup", function (e) {
+  var g = presetGesture;
+  if (!g || e.pointerId !== g.id) return;
+  presetTrack(g, presetPointerXY(e));
+  presetGesture = null;
+  try { presetCanvas.releasePointerCapture(e.pointerId); } catch (err) { /* уже отпущен */ }
+  if (g.kind !== "pan" && (g.cur[0] !== g.start[0] || g.cur[1] !== g.start[1])) presetFinishGesture(g);
+  presetScheduleDraw();
+});
+
+// Отмена жеста системой (pointercancel) или потеря захвата до pointerup: правка не применяется.
+function presetCancelGesture(e) {
+  var g = presetGesture;
+  if (!g || (e && e.pointerId !== undefined && e.pointerId !== g.id)) return;
+  presetGesture = null;
+  presetScheduleDraw();
+}
+presetCanvas.addEventListener("pointercancel", presetCancelGesture);
+presetCanvas.addEventListener("lostpointercapture", presetCancelGesture);
+
+function presetSetZoomPct(pct) {
+  if (!(pct > 0)) return; // пусто/0/мусор — масштаб прежний
+  presetZoom = Math.min(1000, Math.max(10, pct)) / 100;
+  presetScheduleDraw();
+}
+presetZoomInput.addEventListener("input", function () { presetSetZoomPct(parseFloat(presetZoomInput.value)); });
+presetZoomInput.addEventListener("change", function () { presetSetZoomPct(parseFloat(presetZoomInput.value)); });
+
+// Колесо — масштаб вокруг центра канвы (как поле presetZoom), поле идёт следом.
+presetCanvas.addEventListener("wheel", function (e) {
+  if (!e.deltaY) return;
+  if (e.preventDefault) e.preventDefault();
+  var pct = Math.round(Math.min(1000, Math.max(10, presetZoom * 100 * (e.deltaY < 0 ? 1.25 : 0.8))));
+  presetZoomInput.value = String(pct);
+  presetSetZoomPct(pct);
+}, { passive: false });
+
+function presetKeyFromField(e) {
+  var tag = e && e.target && e.target.tagName ? String(e.target.tagName).toUpperCase() : "";
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+var PRESET_ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+document.addEventListener("keydown", function (e) {
+  if (presetKeyFromField(e)) return; // стрелки в поле ввода — поля, не слоя
+  if (e.key === " " || e.code === "Space") {
+    presetSpaceHeld = true;
+    return;
+  }
+  if (!Object.prototype.hasOwnProperty.call(PRESET_ARROWS, e.key) || presetSelected === null) return;
+  if (e.preventDefault) e.preventDefault();
+  var step = e.shiftKey ? 10 : 1, d = PRESET_ARROWS[e.key];
+  presetShiftLayer(presetSelected, d[0] * step, d[1] * step, false);
+});
+document.addEventListener("keyup", function (e) {
+  if (e.key === " " || e.code === "Space") presetSpaceHeld = false;
+});
+window.addEventListener("blur", function () { presetSpaceHeld = false; });
+
+// Ввод в поле формы — раскладка по новому состоянию (change всплывает до контейнера).
+document.getElementById("presetLayers").addEventListener("change", function () { requestPresetLayout(); });
 
 loadPreset();
 """

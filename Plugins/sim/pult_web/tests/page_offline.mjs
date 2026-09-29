@@ -637,6 +637,23 @@ async function run() {
           repeat: false, target: cv,
         });
         await sleep(40);
+      } else if (st.op === "keyup") {
+        // Task 1.3h-b, хазарды автора: отпускание клавиши (пробел+ЛКМ = панорама).
+        doc.fire("keyup", {
+          key: st.key, code: st.key, shiftKey: !!st.shift, ctrlKey: false, altKey: false, metaKey: false,
+          repeat: false, target: cv,
+        });
+        await sleep(10);
+      } else if (st.op === "wheel") {
+        // Task 1.3h-b, хазарды автора: колесо над канвой (deltaY < 0 — от себя).
+        cv.fire("wheel", ptr(st.at || [0, 0], { deltaY: st.deltaY, deltaX: 0, deltaMode: 0, buttons: 0 }));
+        await sleep(10);
+      } else if (st.op === "fire") {
+        // Task 1.3h-b, хазарды автора: произвольное событие указателя на канве
+        // (pointercancel / pointerleave / lostpointercapture) с координатой `at`.
+        cv.fire(st.type, ptr(st.at || [0, 0], { button: -1, buttons: held === null ? 0 : mask(held) }));
+        if (st.clears) held = null;
+        await sleep(5);
       } else if (st.op === "press_button") { el(st.id).fire("click"); await sleep(30); }
       else if (st.op === "set_field") {
         el(st.id).value = String(st.value);
