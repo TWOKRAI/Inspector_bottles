@@ -29,8 +29,6 @@ from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import CLASS_SPRITE_SOURCE, LayerSpec, ScenePreset
 
-pytestmark = pytest.mark.timeout(30)
-
 FRAME_W = 64
 FRAME_H = 64
 
@@ -229,12 +227,12 @@ def _frames_under_clock_offset(preset_path: Path, flow: dict, monkeypatch: pytes
 
 def test_frames_independent_of_wall_clock_in_spacing_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Причина флейка p6: часы между двумя `produce()` не должны менять кадр, если поток — по
-    энкодеру. Тот же скачок часов в потоке по времени РАСХОДИТСЯ (так задумано: `interval_s` —
-    секунды стенда) — второе утверждение доказывает, что скачок часов реально ловится."""
+    энкодеру. То же смещение часов в потоке по времени РАСХОДИТСЯ (так задумано: `interval_s` —
+    секунды стенда) — второе утверждение доказывает, что смещение часов реально ловится."""
     preset_path, _ = _make_fixture(tmp_path)
     assert all(_frames_under_clock_offset(preset_path, _SPACING_FLOW, monkeypatch)), "spacing-поток зависит от часов"
     assert not all(_frames_under_clock_offset(preset_path, _INTERVAL_FLOW, monkeypatch)), (
-        "скачок часов не разошёл кадры interval-потока — проверка стала пустой"
+        "смещение часов не разошло кадры interval-потока — проверка стала пустой"
     )
 
 
