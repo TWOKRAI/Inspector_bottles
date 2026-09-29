@@ -65,7 +65,7 @@ GUI (шаг С5). Ф — одна задача в паузе между прод
 (форма телеметрии сохраняется), `device-tree-recipe` (данные робота вне `devices.yaml`), `line-sim` (T2.4),
 `gui-constructor` и `frontend-constructor` (потребитель пакетов и форм).
 
-### С — слои симулятора ([`line-sim-layer-editor`](../line-sim-layer-editor.md), [`line-sim`](../line-sim/plan.md))
+### С — слои симулятора ([`line-sim-layer-editor`](../line-sim-layer-editor/plan.md), [`line-sim`](../line-sim/plan.md))
 
 Факт: контракт слоя 3.1a в коде (`Services/line_sim/{interfaces.py, core/preset.py, core/layered_object.py}`).
 line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 закрыты. Редактор — APPROVED 09-27: HTML и Qt над одними
@@ -79,7 +79,8 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | С4 ✅ | line-sim **6.1** [DONE 09-28] — 6.1a команды потока, брака, паузы у `scene_source`; 6.1b те же ручки на веб-пульте готовым механизмом маршрутов. В `main` — `2d680cfb` | — | сценарии испытаний инспектора и робота |
 | С5 ✅ | редактор **1.2h** [DONE 09-29] HTML-клиент на `pult_web`: маршруты `preset.*`, форма из пресета, превью, undo, код ошибки в HTTP-статус. В `main` — `f8d39a89` | С3 | редактор мышью без ожидания И2–И5 |
 | С5a ✅ | редактор **1.3h-a** [DONE 09-29] команда `preset.layout` + маршрут `/api/preset/layout`: слои пресета по отдельности с `origin_px` (`d6225d81`, `82fc47db`, ревью APPROVE_WITH_NITS). Ветка `feat/line-sim-layer-editor`, в `main` НЕ влита | С5 | бэкенд для канвы |
-| С5b ▶ | редактор **1.3h-b** канва мышью на странице `pult_web` (teamlead): перетаскивание готовых спрайтов, выбор по альфе, одна правка = одна запись undo | С5a | редактор «как в Paint» без ожидания Qt; **приёмка — владельцем на живом стенде** |
+| С5b ✅ | редактор **1.3h-b** [DONE 09-29, принята владельцем на живом стенде] канва мышью на странице `pult_web`: перетаскивание готовых спрайтов, выбор по альфе, одна правка = одна запись undo; B1 (фокус) найден в живом Chrome. Ветка `feat/line-sim-layer-editor` | С5a | редактор «как в Paint» без ожидания Qt |
+| С5c ✅ | редактор **1.3h-c** [DONE 09-29] слои и PNG: `preset.sprites`, добавить / заменить / удалить / выше / ниже; F1/F2 из живого Chrome закрыты (`d82161e4`), ревью APPROVE_WITH_NITS. Ветка `feat/line-sim-layer-editor`, в `main` НЕ влита | С5b | состав слоёв мышью; дальше 1.3h-d — загрузка PNG из браузера |
 | С0 ✅ | долг [DONE 09-29]: 10 стабильно красных тестов sim + 12 в `robot_comm` + флики delay_ms, jog, drop, p6, pult_web 10053 — починены по причинам, без skip (`09604ce8`, `25cbd7e3`, `2272b466`); передача — [`2026-09-29_failing-tests-and-b1-handoff.md`](../../docs/handoffs/2026-09-29_failing-tests-and-b1-handoff.md) | — | зелёная база для приёмки T2.4 |
 | С6 ⛔ | редактор **1.2b** Qt-вкладка `sim.*` → **1.3** канва; 2.1 налив — по вопросу 1 плана | С3 + И3 → И5 | тот же редактор внутри GUI, паритет с HTML |
 | — | line-sim Ф4 камера — файл под ред. 1, переписать перед исполнением; 5.5 — по вопросу 1 line-sim | ⛔ | — |
@@ -141,7 +142,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | План | Полоса | Статус | Следующий шаг |
 |---|---|---|---|
 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Р | T0.1–T2.W в `main` (`0dcffc5e`); GATE-0 не оформлен ⚠ шапка «ждёт ревью» | О-10 → T2.3; ∥ T1.2/T1.3 |
-| [line-sim-layer-editor](../line-sim-layer-editor.md) | С | APPROVED 09-27; 1.0, 1.1b, 1.2a, 1.2h в `main`; 1.3h-a на ветке | 1.3h-b |
+| [line-sim-layer-editor](../line-sim-layer-editor/plan.md) | С | APPROVED 09-27; 1.0, 1.1b, 1.2a, 1.2h в `main`; 1.3h-a, 1.3h-b, 1.3h-c на ветке | влить ветку в `main` → 1.3h-d |
 | [line-sim](../line-sim/plan.md) | С | Ф0–Ф3, Ф5 DONE в `main`; Ф6: 6.1 в `main`, 6.2 DONE 09-27; Ф4 на переписывание; 5.5 DEFERRED. Метка `[BLOCKED]` у 1.1 устарела | 6.3 ROI мышью — после 1.3h-b |
 | [gui-constructor](../gui-constructor/plan.md) | И | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.0 |
 | [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5 в `main` | 1b.2c ∥ 1b.2d |

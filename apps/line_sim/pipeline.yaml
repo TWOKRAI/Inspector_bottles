@@ -82,7 +82,10 @@ processes:
         # кириллические эталоны, инструмент:
         #   python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites \
         #       --letters АКРХ --diameter-px 300 --out data/line_sim/letter_catalog
-        preset_path: data/line_sim/letter_catalog_rep
+        # Стенд редактора слоёв (1.2h/1.3h): слоёный пресет — диск и буква отдельными слоями.
+        # Каталог-спрайты (правка владельца 8441b531) — data/line_sim/letter_catalog_rep:
+        # у них нет слоёв, редактор показывает «рев.: нет» и не сохраняет.
+        preset_path: Services/line_sim/presets/letters_layered.yaml
         # 800 px ROI = 98 мм ленты вдоль хода (калибровка рецепта, u = x_roi/800).
         px_per_mm: 8.163265
         # Центр ROI по вертикали (v=0.5): roi.y + roi.height/2 = 297 + 481/2 = 537.5.
@@ -165,7 +168,7 @@ processes:
       - plugin_class: Plugins.sim.layer_preview.plugin.LayerPreviewPlugin
         plugin_name: layer_preview
         category: control
-        preset_path: data/line_sim/letter_catalog
+        preset_path: Services/line_sim/presets/letters_layered.yaml
         defect_probability: 0.25
 
 # Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).

@@ -14,7 +14,7 @@ import numpy as np
 
 from Services.dataset_gen.core.augment import apply_occlusion
 from Services.line_sim.core.catalog_bridge import load_catalog, load_image_rgba
-from Services.line_sim.core.layered_object import LayeredObject
+from Services.line_sim.core.layered_object import LayeredObject, _load_sprite
 from Services.line_sim.core.preset import CLASS_SPRITE_SOURCE, ScenePreset
 from Services.line_sim.interfaces import LayerSpec, ObjectPassport
 
@@ -22,6 +22,14 @@ _DEFECT_LAYER_NAME = "damaged"
 _DEFECT_COLOR_RGB = (60.0, 60.0, 60.0)  # тёмно-серый — грязь/скол
 _DEFECT_SIDE_FRAC = 0.35  # ~35% меньшей стороны базового спрайта
 _DEFECT_OFFSET_FRAC = 0.15  # смещение пятна к верхнему левому углу (не по центру)
+
+
+def _read_only_view(arr: np.ndarray) -> np.ndarray:
+    """Read-only вид без копии: `_transform` без трансформа возвращает сам кэш фабрики,
+    запись через ответ испортила бы все следующие `make()`."""
+    view = arr.view()
+    view.flags.writeable = False
+    return view
 
 
 class ObjectFactory:
@@ -97,6 +105,38 @@ class ObjectFactory:
         """
         forced = self._force_defect_pending
 
+        class_name, angle_deg, bottom_layers = self._resolve_bottom_layers(rng)
+
+        # ponytail: блоб дефекта строится из спрайта НИЖНЕГО слоя (bottom_layers[0]) как есть —
+        # его собственные offset/scale/angle игнорируются (как и раньше для "base"); апгрейд —
+        # компоновать блоб в объектных координатах, если нижний слой получит трансформ.
+        bottom_sprite = bottom_layers[0].sprite_source
+        damaged_layer = LayerSpec(
+            name=_DEFECT_LAYER_NAME,
+            mode="defect",
+            sprite_source=self._build_defect_blob(bottom_sprite),
+            defect_probability=self._preset.defect_probability,
+        )
+        layers = [*bottom_layers, damaged_layer]
+
+        passport = ObjectPassport(
+            object_id=object_id,
+            class_name=class_name,
+            angle_deg=angle_deg,
+            defect=_DEFECT_LAYER_NAME if forced else None,
+            spawn_encoder=spawn_encoder,
+        )
+        obj = LayeredObject(passport=passport, layers=layers, rng=rng)
+        self._force_defect_pending = False  # гасим ТОЛЬКО после успеха — см. докстринг выше
+        return obj
+
+    def _resolve_bottom_layers(self, rng: np.random.Generator) -> tuple[str, float, list[LayerSpec]]:
+        """Класс, угол объекта и слои пресета (без defect-слоя) — из `rng`.
+
+        Порядок розыгрышей — часть контракта seed (LS-006): `integers` (класс) -> `uniform`
+        (угол) -> `get_sprite`. Общий для `make()` и `nominal_layers()`, чтобы для одного seed
+        класс в ленте, плитке превью и раскладке слоёв совпадал.
+        """
         if self._catalog is None:
             # Пресет без catalog_dir (только layers — гарантировано ScenePreset._catalog_or_layers,
             # там же отдельно запрещён слой class:// без catalog_dir, так что self._extra_layers
@@ -125,29 +165,31 @@ class ObjectFactory:
                     LayerSpec(name="base", mode="static", sprite_source=base_sprite),
                     *self._extra_layers,
                 ]
+        return class_name, angle_deg, bottom_layers
 
-        # ponytail: блоб дефекта строится из спрайта НИЖНЕГО слоя (bottom_layers[0]) как есть —
-        # его собственные offset/scale/angle игнорируются (как и раньше для "base"); апгрейд —
-        # компоновать блоб в объектных координатах, если нижний слой получит трансформ.
-        bottom_sprite = bottom_layers[0].sprite_source
-        damaged_layer = LayerSpec(
-            name=_DEFECT_LAYER_NAME,
-            mode="defect",
-            sprite_source=self._build_defect_blob(bottom_sprite),
-            defect_probability=self._preset.defect_probability,
-        )
-        layers = [*bottom_layers, damaged_layer]
+    def nominal_layers(self, rng: np.random.Generator) -> tuple[str, list[tuple[str, np.ndarray, float, float]]]:
+        """Слои пресета по отдельности в НОМИНАЛЕ: `(class_name, [(имя, RGBA, offset_x, offset_y)])`.
 
-        passport = ObjectPassport(
-            object_id=object_id,
-            class_name=class_name,
-            angle_deg=angle_deg,
-            defect=_DEFECT_LAYER_NAME if forced else None,
-            spawn_encoder=spawn_encoder,
-        )
-        obj = LayeredObject(passport=passport, layers=layers, rng=rng)
-        self._force_defect_pending = False  # гасим ТОЛЬКО после успеха — см. докстринг выше
-        return obj
+        Класс и спрайт — как в `make()` для того же `rng` (`_resolve_bottom_layers`); угол объекта
+        игнорируется (раскладка при угле 0). Каждый слой — тот же `LayeredObject._transform`
+        (заливка -> scale -> поворот слоя), но БЕЗ выборки augment; defect-слои пропускаются.
+        Только читает: `force_defect_next()` не читается и не гасится (это просмотр, не объект ленты).
+        Массивы — read-only виды (не копии): ссылки на кэш фабрики наружу не уходят записываемыми.
+        """
+        class_name, _angle_deg, bottom_layers = self._resolve_bottom_layers(rng)
+        layers = [
+            (
+                layer.name,
+                _read_only_view(
+                    LayeredObject._transform(_load_sprite(layer), layer.scale, layer.angle_deg, 0.0, layer.color_rgb)
+                ),
+                layer.offset_px[0],
+                layer.offset_px[1],
+            )
+            for layer in bottom_layers
+            if layer.mode != "defect"
+        ]
+        return class_name, layers
 
     @staticmethod
     def _build_defect_blob(base_rgba: np.ndarray) -> np.ndarray:

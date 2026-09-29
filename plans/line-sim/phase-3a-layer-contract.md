@@ -3,7 +3,7 @@
 Часть плана [`plan.md`](plan.md), продолжение Task 3.1 из
 [`phase-3-object-engine.md`](phase-3-object-engine.md). Вынесено в свой файл из-за лимита
 размера документа (32 КБ на файл). Потребитель контракта — редактор слоёв, план
-[`line-sim-layer-editor`](../line-sim-layer-editor.md).
+[`line-sim-layer-editor`](../line-sim-layer-editor/plan.md).
 
 ---
 

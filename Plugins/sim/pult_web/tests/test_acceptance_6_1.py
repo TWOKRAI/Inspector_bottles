@@ -226,7 +226,7 @@ def test_scene_error_code_survives_to_client(start_pult) -> None:
     **Обновлено Task 1.2h (Находка 2).** ``_dispatch()`` больше не схлопывает
     типизированный отказ в 504 — код читается из поля ``code`` (``invalid`` ->
     400), тело command-ответа отдаётся КАК ЕСТЬ, без обёртки ``{ok: false}``
-    (см. ``plans/line-sim-layer-editor.md``, раздел Task 1.2h, «Находка 2»).
+    (см. ``plans/line-sim-layer-editor/phase-1-html-form.md``, раздел Task 1.2h, «Находка 2»).
     """
     _plugin, _ctx, port = start_pult()
     scene_client = _client_for("camera")

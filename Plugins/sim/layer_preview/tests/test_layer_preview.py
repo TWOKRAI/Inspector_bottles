@@ -372,7 +372,7 @@ def test_preview_applies_stand_defect_override(tmp_path: Path) -> None:
 
 
 def test_preview_catalog_mode_like_the_stand(tmp_path: Path) -> None:
-    """Стенд (`apps/line_sim/pipeline.yaml`) держит `preset_path` = каталог классов, не .yaml."""
+    """Каталожный `preset_path` (каталог классов, не .yaml) — режим стенда до 1.3h, остаётся рабочим."""
     _preset_path, catalog_dir = _make_fixture(tmp_path)
     plugin = _new_preview(catalog_dir)
     res = _call_command(plugin, "preset.preview", {"seeds": [1, 2]})
@@ -397,7 +397,11 @@ def test_plugin_is_side_effect_control_without_ports() -> None:
 
     assert LayerPreviewPlugin.category == "control"
     assert LayerPreviewPlugin.inputs == [] and LayerPreviewPlugin.outputs == []
-    assert LayerPreviewPlugin.commands == {"preset.preview": "cmd_preset_preview"}
+    assert LayerPreviewPlugin.commands == {
+        "preset.preview": "cmd_preset_preview",
+        "preset.layout": "cmd_preset_layout",
+        "preset.sprites": "cmd_preset_sprites",
+    }
 
 
 def test_layer_preview_does_not_import_scene_source() -> None:

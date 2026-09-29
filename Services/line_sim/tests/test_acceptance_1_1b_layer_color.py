@@ -1,6 +1,6 @@
 """RED-приёмка Task 1.1b, блок B — заливка слоя цветом (`LayerSpec.color_rgb`).
 
-Независимый тест (blind): пишется ДО реализации, по спеке `plans/line-sim-layer-editor.md`
+Независимый тест (blind): пишется ДО реализации, по спеке `plans/line-sim-layer-editor/phase-1-engine.md`
 (раздел Task 1.1b, критерии B1-B3). НЕ читает `Services/line_sim/core/*.py`.
 
 B1/B2 идут через `ScenePreset` (Dict at Boundary) — `ScenePreset.layers[*].sprite_source`
