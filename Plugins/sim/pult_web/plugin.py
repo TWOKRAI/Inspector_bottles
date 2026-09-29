@@ -930,8 +930,8 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             принять его за «пустое» нельзя: команда ушла бы с ``{}`` (ревью pult-flake
             2026-09-29); 501 ``transfer_encoding_not_supported`` — любой
             ``Transfer-Encoding`` (RFC 9112 §6.1: кодирование, которого сервер не
-            понимает, — 501; chunked HTTP/1.0-сервер не разбирает, 411 — это про
-            ОТСУТСТВУЮЩИЙ ``Content-Length``, а он тут не отсутствует); 400 ``bad_json`` —
+            понимает, — SHOULD 501; HTTP/1.0-сервер не понимает ни одного кодирования,
+            включая chunked; 411 тоже законен, выбран 501 как буква §6.1); 400 ``bad_json`` —
             кривой JSON/не dict. Ни один из этих отказов до команды не доходит и
             ``_body_consumed`` не выставляет — ``_linger_close`` доотдаёт тело.
 

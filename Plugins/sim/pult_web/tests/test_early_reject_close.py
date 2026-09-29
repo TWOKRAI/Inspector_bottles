@@ -80,14 +80,13 @@ def _exchange(
     host: str | None = None,
     ctype: str = "application/json",
     content_length: int | None = None,
+    te: str | None = None,
 ) -> int:
     """Отправить POST (заголовки и тело — ДВУМЯ send, как http.client) и вернуть код ответа."""
     length = len(body) if content_length is None else content_length
+    framing = f"Transfer-Encoding: {te}\r\n" if te else f"Content-Length: {length}\r\n"
     head = (
-        f"POST {path} HTTP/1.1\r\n"
-        f"Host: {host or f'127.0.0.1:{port}'}\r\n"
-        f"Content-Type: {ctype}\r\n"
-        f"Content-Length: {length}\r\n\r\n"
+        f"POST {path} HTTP/1.1\r\nHost: {host or f'127.0.0.1:{port}'}\r\nContent-Type: {ctype}\r\n{framing}\r\n"
     ).encode("ascii")
     with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
         sock.sendall(head)
@@ -111,6 +110,9 @@ _FAMILY = [
     ("too_large_413", "/api/run", _BIG, {}, 413),
     ("negative_length_huge_body_400", "/api/run", _HUGE, {"content_length": -1}, 400),
     ("unsupported_type_huge_body_415", "/api/preset/commit", _HUGE, {"ctype": "text/plain"}, 415),
+    # Ветка TE в условии «тела нет» `_linger_close` (ревью ит.2, K4): без неё 501 на chunked-теле
+    # в сотни КБ терялся в 8-31 % обменов, а маленькие тела и 30 раундов этого не видели.
+    ("chunked_huge_body_501", "/api/run", _HUGE, {"te": "chunked"}, 501),
 ]
 
 
