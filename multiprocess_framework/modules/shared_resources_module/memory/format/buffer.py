@@ -199,7 +199,9 @@ def pack_images_fast(
         buffer[offset] = ord(img.dtype.char)
         offset += 1
         dest = np.ndarray((h, w, c), dtype=img.dtype, buffer=buffer, offset=offset)
-        np.copyto(dest, img)
+        # reshape: серый (H, W) без оси каналов не broadcast'ится в (H, W, 1) — без него
+        # каждый mono-кадр падал в pickle-fallback (стенд code_reader_sdk 2026-09-29).
+        np.copyto(dest, img.reshape(h, w, c))
         offset += slot_size
 
 

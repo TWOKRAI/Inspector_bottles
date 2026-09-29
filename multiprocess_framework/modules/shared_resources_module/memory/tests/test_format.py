@@ -123,6 +123,26 @@ class TestPackFormatsInterchangeable:
         data_len = 12 + 1 + 10 * 10 * 3
         assert buf_legacy[4 : 4 + data_len] == buf_fast[4 : 4 + data_len]
 
+    def test_gray_2d_frame_packs_fast_like_legacy(self):
+        """Серый кадр (H, W) без оси каналов — быстрый путь пишет его так же, как legacy.
+
+        Живой стенд 2026-09-29 (code_reader_sdk, 1280×1024 mono): fast-путь падал на
+        broadcast (H, W) → (H, W, 1), все 15 кадров ушли pickle-fallback через pipe.
+        Читатель восстанавливает такой кадр как (H, W, 1) — это формат слота.
+        """
+        slot = (4, 5, 1)
+        img = np.arange(20, dtype=np.uint8).reshape(4, 5)
+        size = calculate_buffer_size(1, slot, np.uint8)
+        buf_legacy = bytearray(size)
+        buf_fast = bytearray(size)
+        pack_images_legacy(memoryview(buf_legacy), [img], slot, np.dtype(np.uint8))
+        pack_images_fast(memoryview(buf_fast), [img], slot, np.dtype(np.uint8))
+
+        assert buf_fast == buf_legacy
+        out = unpack_images(memoryview(buf_fast), slot, np.uint8)
+        assert out[0].shape == (4, 5, 1)
+        assert out[0][:, :, 0].tolist() == img.tolist()
+
     def test_unpack_copy_true_returns_own_data(self):
         shape = (5, 5, 3)
         size = calculate_buffer_size(2, shape, np.uint8)
