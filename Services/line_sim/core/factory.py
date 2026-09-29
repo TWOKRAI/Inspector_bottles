@@ -24,6 +24,14 @@ _DEFECT_SIDE_FRAC = 0.35  # ~35% меньшей стороны базового 
 _DEFECT_OFFSET_FRAC = 0.15  # смещение пятна к верхнему левому углу (не по центру)
 
 
+def _read_only_view(arr: np.ndarray) -> np.ndarray:
+    """Read-only вид без копии: `_transform` без трансформа возвращает сам кэш фабрики,
+    запись через ответ испортила бы все следующие `make()`."""
+    view = arr.view()
+    view.flags.writeable = False
+    return view
+
+
 class ObjectFactory:
     """Строит `LayeredObject` ленты: класс/угол — из rng, дефект `"damaged"` —
     с вероятностью пресета или форсированно через `force_defect_next()`.
@@ -166,12 +174,15 @@ class ObjectFactory:
         игнорируется (раскладка при угле 0). Каждый слой — тот же `LayeredObject._transform`
         (заливка -> scale -> поворот слоя), но БЕЗ выборки augment; defect-слои пропускаются.
         Только читает: `force_defect_next()` не читается и не гасится (это просмотр, не объект ленты).
+        Массивы — read-only виды (не копии): ссылки на кэш фабрики наружу не уходят записываемыми.
         """
         class_name, _angle_deg, bottom_layers = self._resolve_bottom_layers(rng)
         layers = [
             (
                 layer.name,
-                LayeredObject._transform(_load_sprite(layer), layer.scale, layer.angle_deg, 0.0, layer.color_rgb),
+                _read_only_view(
+                    LayeredObject._transform(_load_sprite(layer), layer.scale, layer.angle_deg, 0.0, layer.color_rgb)
+                ),
                 layer.offset_px[0],
                 layer.offset_px[1],
             )

@@ -26,6 +26,7 @@ from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
+import pytest
 
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import CLASS_SPRITE_SOURCE, LayerSpec, ScenePreset
@@ -166,3 +167,156 @@ def test_b_nominal_layers_keeps_force_defect_pending(tmp_path: Path) -> None:
 
 def test_c_make_output_unchanged_by_resolve_bottom_layers_extraction(tmp_path: Path) -> None:
     assert _fingerprints(tmp_path) == _EXPECTED
+
+
+# --------------------------------------------------------------------------- #
+# Итерация 2 ревью 1.3h-a: origin_px, canvas_size без _compose, read-only      #
+# --------------------------------------------------------------------------- #
+#
+# Что тут может сломаться. (1) Страница ставит PNG слоя по `center_px`, а лента — по
+# `int(round(cx - sw/2))` (банкирское округление `composite`): при полупиксельном
+# положении JS `Math.round` даёт другой пиксель, редактор рисует не то, что увидит лента.
+# Поэтому ответ несёт целый угол `origin_px`, и тест собирает объект ленты ИМЕННО по нему.
+# (2) `render_layout` считал размер канвы полным `_compose` (для offset 20000 px это канва
+# 40000 px — сотни мс и сотни МБ ради двух чисел). (3) `nominal_layers` отдавал ссылки на
+# кэш фабрики (`_transform` без трансформа возвращает сам спрайт): запись через ответ
+# портит все следующие `make()`.
+
+
+def _origin_fixture(tmp_path: Path) -> ScenePreset:
+    """Пресет без каталога, слои static: угол 37 (повёрнутый размер нечётный) + дробные смещения;
+    диапазон угла объекта [0, 0], брак 0 — объект ленты для любого seed один и тот же."""
+    data_rng = np.random.default_rng(99)
+    paths = {}
+    for name, (h, w) in {"a": (30, 30), "b": (21, 14)}.items():
+        sprite = data_rng.integers(0, 256, size=(h, w, 4), dtype=np.uint8)
+        sprite[:, :, 3] = data_rng.choice([0, 90, 255], size=(h, w)).astype(np.uint8)  # полупрозрачные пиксели
+        _write_png(tmp_path / f"{name}.png", sprite)
+        paths[name] = str(tmp_path / f"{name}.png")
+    return ScenePreset(
+        angle_range_deg=(0.0, 0.0),
+        defect_probability=0.0,
+        layers=[
+            LayerSpec(name="a", mode="static", sprite_source=paths["a"], angle_deg=37.0, offset_px=(3.5, -2.0)),
+            LayerSpec(name="b", mode="static", sprite_source=paths["b"], offset_px=(-1.5, 4.0)),
+        ],
+    )
+
+
+def _decode_layer(layer: dict) -> np.ndarray:
+    import base64
+
+    raw = np.frombuffer(base64.b64decode(layer["png_b64"]), dtype=np.uint8)
+    return cv2.cvtColor(cv2.imdecode(raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGRA2RGBA)
+
+
+def _over_premultiplied(pm: np.ndarray, a: np.ndarray, sprite: np.ndarray, x0: int, y0: int) -> None:
+    """Свой малый «over» в целый угол (x0, y0): та же арифметика, что `compose.composite`,
+    но место задано снаружи, без собственного выбора угла. Пишет в pm/a на месте."""
+    sh, sw = sprite.shape[:2]
+    bh, bw = a.shape
+    bx0, by0, bx1, by1 = max(0, x0), max(0, y0), min(bw, x0 + sw), min(bh, y0 + sh)
+    region = sprite[by0 - y0 : by1 - y0, bx0 - x0 : bx1 - x0]
+    alpha = region[:, :, 3:4].astype(np.float32) / 255.0
+    fg = region[:, :, :3].astype(np.float32)
+    bg = pm[by0:by1, bx0:bx1].astype(np.float32)
+    pm[by0:by1, bx0:bx1] = np.clip(fg * alpha + bg * (1.0 - alpha) + 0.5, 0, 255).astype(np.uint8)
+    white = np.full_like(fg, 255.0)
+    a3 = np.repeat(a[by0:by1, bx0:bx1, None], 3, axis=2).astype(np.float32)
+    a[by0:by1, bx0:bx1] = np.clip(white * alpha + a3 * (1.0 - alpha) + 0.5, 0, 255).astype(np.uint8)[:, :, 0]
+
+
+def _assemble_by_origin(result: dict) -> np.ndarray:
+    w, h = result["canvas_px"]
+    pm = np.zeros((h, w, 3), dtype=np.uint8)
+    a = np.zeros((h, w), dtype=np.uint8)
+    for layer in result["layers"]:
+        x0, y0 = layer["origin_px"]
+        _over_premultiplied(pm, a, _decode_layer(layer), x0, y0)
+    af = a.astype(np.float32)
+    rgb = np.where(af[:, :, None] > 0, pm.astype(np.float32) * 255.0 / np.maximum(af, 1.0)[:, :, None], 0.0)
+    return np.dstack([np.clip(rgb + 0.5, 0, 255).astype(np.uint8), a])
+
+
+def test_origin_px_assembles_belt_object_bitwise(tmp_path: Path) -> None:
+    from Services.line_sim.core.preview import render_layout
+
+    preset = _origin_fixture(tmp_path)
+    factory = ObjectFactory(preset)
+    for seed in range(6):
+        result = render_layout(preset, seed)
+        belt = factory.make(f"o-{seed}", 0.0, np.random.default_rng(seed)).render()
+        assembled = _assemble_by_origin(result)
+        assert assembled.shape == belt.shape, (seed, assembled.shape, belt.shape)
+        assert np.array_equal(assembled, belt), f"seed {seed}: сборка по origin_px != объект ленты"
+
+
+def test_origin_px_differs_from_js_round_somewhere(tmp_path: Path) -> None:
+    """Страж вакуумности теста выше: есть слой, чей неокруглённый угол ровно .5 и где банкирское
+    `round` расходится с JS `Math.round` (floor(v + 0.5)) — иначе тест собрал бы объект и по центру."""
+    import math
+
+    from Services.line_sim.core.preview import render_layout
+
+    result = render_layout(_origin_fixture(tmp_path), 0)
+    cw, ch = result["canvas_px"]
+    diverging = []
+    for layer in result["layers"]:
+        (cx, cy), (sw, sh) = layer["center_px"], layer["size_px"]
+        for raw in (cw / 2.0 + cx - sw / 2.0, ch / 2.0 + cy - sh / 2.0):
+            if raw % 1 == 0.5 and round(raw) != math.floor(raw + 0.5):
+                diverging.append((layer["name"], raw))
+    assert diverging, "в фикстуре нет полупиксельного случая с расхождением round/Math.round"
+    assert any(layer["size_px"][0] % 2 == 1 for layer in result["layers"]), "нет слоя нечётной ширины"
+
+
+def test_canvas_px_equals_belt_render_shape(tmp_path: Path) -> None:
+    from Services.line_sim.core.preview import render_layout
+
+    preset = _origin_fixture(tmp_path)
+    factory = ObjectFactory(preset)
+    for seed in range(4):
+        belt = factory.make(f"c-{seed}", 0.0, np.random.default_rng(seed)).render()
+        canvas = render_layout(preset, seed)["canvas_px"]
+        assert canvas == [belt.shape[1], belt.shape[0]], (seed, canvas, belt.shape)
+    assert canvas == [50, 48], "фикстура должна давать непустую канву с нечётным слоем внутри"
+
+
+def test_nominal_layers_arrays_read_only(tmp_path: Path) -> None:
+    preset = _origin_fixture(tmp_path)
+    # слой без трансформа: `_transform` вернул бы сам кэш фабрики, а не копию
+    plain = LayerSpec(name="plain", mode="static", sprite_source=preset.layers[1].sprite_source)
+    preset = preset.model_copy(update={"layers": [preset.layers[0], plain]})
+    factory = ObjectFactory(preset)
+    before = factory.make("r", 0.0, np.random.default_rng(3)).render().tobytes()
+
+    _, layers = factory.nominal_layers(np.random.default_rng(3))
+
+    assert [name for name, *_ in layers] == ["a", "plain"]
+    for name, arr, _ox, _oy in layers:
+        assert arr.flags.writeable is False, f"слой {name}: массив записываемый"
+    with pytest.raises(ValueError):
+        layers[1][1][:] = 0  # запись в «plain» не должна дойти до кэша фабрики
+    after = factory.make("r", 0.0, np.random.default_rng(3)).render().tobytes()
+    assert after == before, "make() после nominal_layers изменился"
+
+
+def test_render_layout_does_not_compose(tmp_path: Path) -> None:
+    """Наблюдаемая цена, а не имя вызова: слой со смещением 20000 px раньше давал канву
+    40000 px через полный `_compose` (ревью: 714 мс на слое 1200 px). Фикстура: второй слой
+    x30 (630x420 px) со смещением 20000 -> канва 40420x630. Замер 2026-09-29, прогретый кэш:
+    ДО правки 1491-1698 мс, ПОСЛЕ 10 мс. Граница 150 мс: в 15 раз выше замера после правки
+    (запас на загруженную машину) и в 10 раз ниже замера до правки."""
+    import time
+
+    from Services.line_sim.core.preview import render_layout
+
+    preset = _origin_fixture(tmp_path)
+    far = preset.layers[1].model_copy(update={"offset_px": (20000.0, 0.0), "scale": 30.0})
+    preset = preset.model_copy(update={"layers": [preset.layers[0], far]})
+    render_layout(preset, 0)  # прогрев кэша фабрики
+    start = time.perf_counter()
+    result = render_layout(preset, 0)
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    assert result["canvas_px"][0] > 40000, result["canvas_px"]
+    assert elapsed_ms < 150.0, f"render_layout со смещением 20000 px: {elapsed_ms:.0f} мс"

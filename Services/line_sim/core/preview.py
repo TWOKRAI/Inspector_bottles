@@ -13,7 +13,7 @@
   (90,90,90) с сохранением пропорций, тайлы в одну строку. `ObjectFactory` кэшируется на
   одну запись по каноническому JSON пресета (картинки на диске кэш не версирует).
 - `render_layout(preset, seed)` — каждый слой пресета отдельной RGBA-картинкой в номинале
-  (Task 1.3h-a): `{class_name, canvas_px, layers[{name, png_b64, center_px, size_px}]}`.
+  (Task 1.3h-a): `{class_name, canvas_px, layers[{name, png_b64, center_px, size_px, origin_px}]}`.
 - `confine_preset_paths(preset, allowed_roots)` — каждый путь картинки (`catalog_dir`,
   `sprite_source` кроме `class://`) после `resolve()` лежит в одном из корней, иначе
   `ValueError(OUTSIDE_ROOTS_MESSAGE)` — ОДИН текст, не зависящий от существования файла.
@@ -31,7 +31,7 @@ import cv2
 import numpy as np
 
 from Services.line_sim.core.factory import ObjectFactory
-from Services.line_sim.core.layered_object import LayeredObject
+from Services.line_sim.core.layered_object import canvas_size
 from Services.line_sim.core.preset import CLASS_SPRITE_SOURCE, ScenePreset
 
 PREVIEW_MAX_SEEDS = 16
@@ -118,25 +118,31 @@ def render_layout(preset: ScenePreset, seed: int) -> dict:
     Тот же `np.random.default_rng(seed)`, что у плиток `render_preview_grid`, поэтому `class_name`
     для seed совпадает с плиткой. `layers[i]` — `{name, png_b64 (RGBA PNG), center_px [ox, oy]
     (смещение центра слоя от центра объекта, Y вниз), size_px [w, h]}` в порядке пресета;
-    `canvas_px = [w, h]` — канва объекта из тех же слоёв (`LayeredObject._compose`). Ошибки
+    `origin_px [x, y]` — целый левый верхний угол слоя на канве `canvas_px`, ровно как его ставит
+    лента (без пересчёта из `center_px`); `canvas_px = [w, h]` — размер канвы объекта из тех же
+    слоёв (`layered_object.canvas_size`, без рендера). Ошибки
     сборки фабрики/слоёв пробрасываются как есть (хост отвечает `invalid`)."""
     class_name, placed = _cached_factory(preset).nominal_layers(np.random.default_rng(seed))
-    canvas = LayeredObject._compose([(rgba, ox, oy) for _, rgba, ox, oy in placed], 0.0)
+    canvas_w, canvas_h = canvas_size([(rgba, ox, oy) for _, rgba, ox, oy in placed])
     layers = []
     for name, rgba, ox, oy in placed:
         ok, png = cv2.imencode(".png", cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
         if not ok:
             raise ValueError(f"cv2.imencode(.png) вернул False (слой '{name}')")
         h, w = rgba.shape[:2]
+        # Угол, куда лента кладёт слой: `composite` берёт `int(round(cx - sw / 2))` с
+        # cx = w_канвы / 2 + ox (банкирское округление Python, не JS Math.round).
+        origin = [int(round(canvas_w / 2.0 + ox - w / 2.0)), int(round(canvas_h / 2.0 + oy - h / 2.0))]
         layers.append(
             {
                 "name": name,
                 "png_b64": base64.b64encode(png.tobytes()).decode("ascii"),
                 "center_px": [ox, oy],
                 "size_px": [w, h],
+                "origin_px": origin,
             }
         )
-    return {"class_name": class_name, "canvas_px": [canvas.shape[1], canvas.shape[0]], "layers": layers}
+    return {"class_name": class_name, "canvas_px": [canvas_w, canvas_h], "layers": layers}
 
 
 def confine_preset_paths(preset: ScenePreset, allowed_roots: Iterable[str | Path]) -> None:
