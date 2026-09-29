@@ -248,15 +248,15 @@ def test_gesture_survives_layout_reply_arriving_mid_gesture(start_pult) -> None:
 
 
 def test_stale_layout_reply_does_not_overwrite_newer(start_pult) -> None:
-    """Shift+→ дважды: ответ на первое нажатие ([15,5]) задержан на 0.6 с и приходит ПОСЛЕ ответа
-    на второе ([25,5]) — картинка остаётся на [25,5] (origin 105), ошибки нет."""
+    """Два жеста подряд: ответ на первый ([15,5]) задержан на 0.6 с и приходит ПОСЛЕ ответа на
+    второй ([25,5]) — картинка остаётся на [25,5] (origin 105), ошибки нет. Жесты, а не стрелки:
+    стрелки с 1.3h-b ит.2 просят раскладку одним отложенным запросом на серию."""
     stand = _stand(start_pult, [_layer("cap", 5, 5)])
     _delay_layout(stand, lambda a: _offset0(a) == [15, 5], 0.6)
     steps = [
         _WAIT2,
-        *_click_cap(),
-        {"op": "key", "key": "ArrowRight", "shift": True},
-        {"op": "key", "key": "ArrowRight", "shift": True},
+        {"op": "drag", "from": _screen((105, 105)), "to": [15, 5], "steps": 2},
+        {"op": "drag", "from": [15, 5], "to": [25, 5], "steps": 2},
         {"op": "sleep", "ms": 1000},
         _snap("end"),
     ]
@@ -267,6 +267,34 @@ def test_stale_layout_reply_does_not_overwrite_newer(start_pult) -> None:
     assert [15, 5] in offsets and offsets[-1] == [25, 5], offsets
     cx, cy = out["canvas"][0] / 2, out["canvas"][1] / 2
     assert _cap_draws(out)[-1] == pytest.approx([cx + 5, cy - 15, cx + 45, cy + 25], abs=0.01)
+
+
+def test_stale_error_does_not_overwrite_fresh_success(start_pult) -> None:
+    """K11a: ответ на первый жест — медленный `invalid` (0.6 с), на второй — быстрый успех;
+    запоздалая ошибка НЕ затирает пустую строку `#presetLayoutError` (номер запроса проверяется
+    и на ветке отказа, не только после декодирования картинок)."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    original = stand.layers.handlers["preset.layout"]
+
+    def slow_invalid_for_first(args: dict) -> dict:
+        if _offset0(args) == [6, 5]:
+            time.sleep(0.6)
+            return {"status": "error", "code": "invalid", "message": "устаревший отказ"}
+        return original(args)
+
+    stand.layers.handlers["preset.layout"] = slow_invalid_for_first
+    steps = [
+        _WAIT2,
+        {"op": "drag", "from": _screen((105, 105)), "to": [6, 5], "steps": 1},
+        {"op": "drag", "from": [6, 5], "to": [16, 5], "steps": 2},
+        {"op": "sleep", "ms": 1000},
+        _snap("end"),
+    ]
+    out = _run_canvas(stand.port, steps)
+    end = out["snaps"]["end"]
+    assert _xy(end) == [16.0, 5.0], end
+    assert [6, 5] in [_offset0(a) for a in stand.layout_requests()], "контроль: медленный запрос ушёл"
+    assert end["error"] == "", f"запоздалая ошибка затёрла успех: {end['error']!r}"
 
 
 # --------------------------------------------------------------------------- #
@@ -415,3 +443,164 @@ def test_layout_and_preview_body_cap_is_262144(start_pult, path: str, command: s
     data = _declared_only(port, path, _CAP + 1)
     assert b" 413 " in data.split(b"\r\n", 1)[0], f"{path}: {_CAP + 1} байт -> {data[:100]!r}"
     assert len(layers.calls) == 1, "на 413 команда не зовётся"
+
+
+# --------------------------------------------------------------------------- #
+# Клавиатура: серия стрелок, пробел, поле ввода (Task 1.3h-b ит.2)            #
+# --------------------------------------------------------------------------- #
+_KEY_DEBOUNCE_MS = 200  # PRESET_KEY_LAYOUT_MS страницы; пауза в тесте заведомо больше
+
+
+def test_arrow_burst_requests_layout_once(start_pult) -> None:
+    """20 стрелок → подряд (без пауз): смещение [5,5] -> [25,5], в «Отмене» 20 записей (по одной на
+    нажатие), а раскладку просят ОДИН раз — после паузы > 200 мс, во время серии ни разу. Цена
+    `preset.layout` 50-90 мс на слое 1200 px: запрос на каждое нажатие копил бы очередь."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    steps = [
+        _WAIT2,
+        *_click_cap(),
+        _snap("s0"),
+        {"op": "key", "key": "ArrowRight", "times": 20, "gap": 0},
+        _snap("burst"),
+        {"op": "sleep", "ms": _KEY_DEBOUNCE_MS * 3},
+        _snap("end"),
+    ]
+    steps += [{"op": "press_button", "id": "btnPresetUndo"} for _ in range(19)]
+    steps += [_snap("undo19"), {"op": "press_button", "id": "btnPresetUndo"}, _snap("undo20")]
+    out = _run_canvas(stand.port, steps)
+    s = out["snaps"]
+    n0 = s["s0"]["layoutCount"]
+    assert _xy(s["burst"]) == [25.0, 5.0], "форма идёт за каждым нажатием, не за таймером"
+    assert s["burst"]["layoutCount"] == n0, f"во время серии раскладку не просят: {s['burst']}"
+    assert s["end"]["layoutCount"] == n0 + 1, f"после серии — ровно один запрос: {s['end']}"
+    assert _offset0(stand.layout_requests()[n0]) == [25, 5], "запрос несёт итог серии"
+    assert _xy(s["undo19"]) == [6.0, 5.0] and _xy(s["undo20"]) == [5.0, 5.0], (
+        f"20 нажатий = 20 записей «Отмена»: {s['undo19']['fields']} / {s['undo20']['fields']}"
+    )
+
+
+def test_space_on_canvas_prevents_default_and_on_button_is_ignored(start_pult) -> None:
+    """Пробел над канвой: preventDefault (страница не прокручивается) и флаг панорамы — ЛКМ-жест
+    после него не двигает слой. Пробел на кнопке/поле: ни preventDefault (кнопка нажимается
+    пробелом), ни флага — жест двигает слой как обычно."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    drag = {"op": "drag", "from": _screen((105, 105)), "to": [25, 5], "steps": 2}
+    on_canvas = _run_canvas(
+        stand.port,
+        [
+            _WAIT2,
+            *_click_cap(),
+            {"op": "key", "key": " ", "code": "Space"},
+            drag,
+            {"op": "sleep", "ms": 200},
+            _snap("e"),
+        ],
+    )
+    assert on_canvas["pd"] == [" "], f"пробел над канвой обязан звать preventDefault: {on_canvas['pd']}"
+    assert _xy(on_canvas["snaps"]["e"]) == [5.0, 5.0], "пробел+ЛКМ — панорама, слой не сдвинут"
+    for tag in ("BUTTON", "INPUT"):
+        on_control = _run_canvas(
+            stand.port,
+            [
+                _WAIT2,
+                *_click_cap(),
+                {"op": "key", "key": " ", "code": "Space", "target": tag},
+                drag,
+                {"op": "sleep", "ms": 200},
+                _snap("e"),
+            ],
+        )
+        assert on_control["pd"] == [], f"пробел на {tag}: preventDefault не звать: {on_control['pd']}"
+        assert _xy(on_control["snaps"]["e"]) == [25.0, 5.0], f"пробел на {tag} не включает панораму"
+
+
+def test_arrow_from_input_does_not_move_layer(start_pult) -> None:
+    """K20: стрелка в поле ввода (target INPUT) — правка текста, не слоя: смещение [5,5],
+    preventDefault не звали (каретка в поле должна двигаться)."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    out = _run_canvas(
+        stand.port,
+        [
+            _WAIT2,
+            *_click_cap(),
+            {"op": "key", "key": "ArrowRight", "target": "INPUT"},
+            {"op": "sleep", "ms": 300},
+            _snap("e"),
+        ],
+    )
+    assert _xy(out["snaps"]["e"]) == [5.0, 5.0], out["snaps"]["e"]
+    assert out["pd"] == [], out["pd"]
+
+
+# --------------------------------------------------------------------------- #
+# Указатель и форма (Task 1.3h-b ит.2)                                        #
+# --------------------------------------------------------------------------- #
+def test_pointerup_of_foreign_pointer_ignored(start_pult) -> None:
+    """K19: pointerup ДРУГОГО указателя (pointerId 2) посреди жеста не завершает его: итог считается
+    по pointerup своего указателя — [25,5], не по чужой точке (100,100)."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    steps = [
+        _WAIT2,
+        {"op": "press", "at": _screen((105, 105))},
+        {"op": "move", "at": [15, 5]},
+        {"op": "fire", "type": "pointerup", "at": [100, 100], "pointerId": 2},
+        {"op": "move", "at": [25, 5]},
+        {"op": "release", "at": [25, 5]},
+        {"op": "sleep", "ms": 300},
+        _snap("end"),
+    ]
+    out = _run_canvas(stand.port, steps)
+    assert _xy(out["snaps"]["end"]) == [25.0, 5.0], out["snaps"]["end"]
+
+
+def test_field_change_rerequests_layout_with_typed_value(start_pult) -> None:
+    """K9b + обработчик change на #presetLayers: ввод 50 в поле x и всплывший `change` -> ровно
+    один новый запрос раскладки (всего 2), и его тело несёт набранное [50,5], а не старое
+    состояние presetState."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    steps = [
+        _WAIT2,
+        {"op": "sleep", "ms": 200},
+        {"op": "set_field", "id": "layer0_offset_x", "value": 50},
+        {"op": "fire_el", "id": "presetLayers", "type": "change"},
+        {"op": "sleep", "ms": 400},
+        _snap("end"),
+    ]
+    out = _run_canvas(stand.port, steps)
+    offsets = [_offset0(a) for a in stand.layout_requests()]
+    assert len(offsets) == 2, offsets
+    assert offsets[-1] == [50, 5], offsets
+    assert out["snaps"]["end"]["layoutCount"] == 2
+
+
+def test_rename_in_form_keeps_layer_editable(start_pult) -> None:
+    """Слой переименовали в форме (layer0_name=cap2) и раскладка перезапрошена: имя слоя на канве —
+    новое, состояние `presetState` ещё со старым. Клик выбирает слой, жест +20 двигает его."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    tolerant = stand.layers.handlers["preset.layout"]
+
+    def any_name(args: dict) -> dict:
+        layers = args["preset"]["layers"]
+        reply = tolerant({"preset": {"layers": [dict(ly, name="cap") for ly in layers]}})
+        for entry, ly in zip(reply["layers"][1:], layers):
+            entry["name"] = ly["name"]  # спрайт cap под новым именем: _SPRITES других имён не знает
+        return reply
+
+    stand.layers.handlers["preset.layout"] = any_name
+    steps = [
+        _WAIT2,
+        {"op": "sleep", "ms": 200},
+        {"op": "set_field", "id": "layer0_name", "value": "cap2"},
+        {"op": "fire_el", "id": "presetLayers", "type": "change"},
+        {"op": "sleep", "ms": 400},
+        *_click_cap(),
+        _snap("clicked"),
+        {"op": "drag", "from": _screen((105, 105)), "to": [25, 5], "steps": 2},
+        {"op": "sleep", "ms": 300},
+        _snap("dragged"),
+    ]
+    out = _run_canvas(stand.port, steps)
+    s = out["snaps"]
+    assert stand.layout_requests()[-1]["preset"]["layers"][0]["name"] == "cap2", "контроль: имя ушло в раскладку"
+    assert len(s["clicked"]["selected"]) == 1, f"клик по переименованному слою не выбрал строку: {s['clicked']}"
+    assert _xy(s["dragged"]) == [25.0, 5.0], s["dragged"]

@@ -819,11 +819,16 @@ var presetZoom = 1;
 var presetPan = [0, 0];
 var presetSpaceHeld = false;
 var presetDrawPending = false;
+var presetLayoutTimer = null; // отложенный запрос раскладки после серии стрелок
+var PRESET_KEY_LAYOUT_MS = 200; // пауза после последней стрелки; preset.layout на слое 1200 px — 50-90 мс
 var PRESET_HANDLE_PX = 8;   // полуразмер ручки на экране
 var PRESET_ROT_ARM_PX = 24; // вынос ручки поворота над рамкой
 
+// Имя ищется в ПОЛЯХ формы (collectPresetFromFields) — тот же источник, что и тело
+// запроса раскладки: слой, переименованный в форме, на канве приходит уже с новым
+// именем, а presetState ещё со старым (ревью 1.3h-b ит.1, MINOR-3).
 function presetLayerIndex(name) {
-  var layers = (presetState && presetState.layers) || [];
+  var layers = presetState ? collectPresetFromFields().layers : [];
   for (var i = 0; i < layers.length; i++) {
     if (layers[i].name === name) return i;
   }
@@ -1019,7 +1024,10 @@ function requestPresetLayout() {
 // состояния. presetDirty = false: форма только что синхронизирована с presetState,
 // значит следующий ввод в поле положит СВОЙ снимок (markPresetDirty 1.2h как есть).
 // Правка без изменения (клик без движения) — ни записи, ни запроса раскладки.
-function presetApplyEdit(name, mutate) {
+// deferLayout (стрелки): запись «Отмена», форма и битмап — на каждое нажатие, а раскладку
+// просят ОДИН раз после паузы PRESET_KEY_LAYOUT_MS (серия из 20 нажатий = 1 запрос, не 20).
+// Жест (deferLayout не задан) просит сразу и снимает висящий таймер стрелок.
+function presetApplyEdit(name, mutate, deferLayout) {
   var idx = presetLayerIndex(name);
   if (idx < 0) return;
   var snapshot = collectPresetFromFields();
@@ -1038,15 +1046,23 @@ function presetApplyEdit(name, mutate) {
     ly.y += after[1] - before[1];
   }
   presetScheduleDraw();
-  requestPresetLayout();
+  if (presetLayoutTimer !== null) {
+    clearTimeout(presetLayoutTimer);
+    presetLayoutTimer = null;
+  }
+  if (deferLayout) presetLayoutTimer = setTimeout(function () {
+    presetLayoutTimer = null;
+    requestPresetLayout();
+  }, PRESET_KEY_LAYOUT_MS);
+  else requestPresetLayout();
 }
 
-function presetShiftLayer(name, dx, dy, round) {
+function presetShiftLayer(name, dx, dy, round, deferLayout) {
   presetApplyEdit(name, function (layer) {
     var off = Array.isArray(layer.offset_px) ? layer.offset_px : [0, 0];
     var x = off[0] + dx, y = off[1] + dy;
     layer.offset_px = round ? [Math.round(x), Math.round(y)] : [x, y];
-  });
+  }, deferLayout);
 }
 
 function presetFinishGesture(g) {
@@ -1145,6 +1161,12 @@ presetCanvas.addEventListener("wheel", function (e) {
   presetSetZoomPct(pct);
 }, { passive: false });
 
+// Пробел — панорама только когда источник — канва или страница: на кнопке/ссылке/поле
+// пробел принадлежит элементу (нажатие кнопки, ввод) — флаг не ставим, preventDefault не зовём.
+function presetSpaceOnCanvas(e) {
+  return !e.target || e.target === presetCanvas || e.target === document.body;
+}
+
 function presetKeyFromField(e) {
   var tag = e && e.target && e.target.tagName ? String(e.target.tagName).toUpperCase() : "";
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
@@ -1155,13 +1177,15 @@ var PRESET_ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], 
 document.addEventListener("keydown", function (e) {
   if (presetKeyFromField(e)) return; // стрелки в поле ввода — поля, не слоя
   if (e.key === " " || e.code === "Space") {
+    if (!presetSpaceOnCanvas(e)) return;
+    if (e.preventDefault) e.preventDefault(); // без этого пробел прокручивает страницу
     presetSpaceHeld = true;
     return;
   }
   if (!Object.prototype.hasOwnProperty.call(PRESET_ARROWS, e.key) || presetSelected === null) return;
   if (e.preventDefault) e.preventDefault();
   var step = e.shiftKey ? 10 : 1, d = PRESET_ARROWS[e.key];
-  presetShiftLayer(presetSelected, d[0] * step, d[1] * step, false);
+  presetShiftLayer(presetSelected, d[0] * step, d[1] * step, false, true);
 });
 document.addEventListener("keyup", function (e) {
   if (e.key === " " || e.code === "Space") presetSpaceHeld = false;

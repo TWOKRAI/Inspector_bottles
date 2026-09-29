@@ -574,7 +574,7 @@ async function run() {
     }, 20000).unref();
     const steps = JSON.parse(process.argv[4] || "[]");
     const cv = el("presetCanvas");
-    const out = { snaps: {}, waits: [], aborted: null };
+    const out = { snaps: {}, waits: [], aborted: null, pd: [] };
     let held = null;
     const mask = (b) => (b === 0 ? 1 : b === 2 ? 2 : b === 1 ? 4 : 0);
     const ptr = (at, extra) => {
@@ -632,10 +632,16 @@ async function run() {
         release(st.to);
         await sleep(5);
       } else if (st.op === "key") {
-        doc.fire("keydown", {
-          key: st.key, code: st.key, shiftKey: !!st.shift, ctrlKey: false, altKey: false, metaKey: false,
-          repeat: false, target: cv,
-        });
+        // Task 1.3h-b ит.2: `target` — tagName источника события (по умолчанию канва),
+        // `times`/`gap` — серия нажатий подряд; вызовы preventDefault копятся в out.pd.
+        const tgt = st.target ? { tagName: st.target } : cv;
+        for (let r = 0; r < (st.times || 1); r++) {
+          doc.fire("keydown", {
+            key: st.key, code: st.code || st.key, shiftKey: !!st.shift, ctrlKey: false, altKey: false,
+            metaKey: false, repeat: r > 0, target: tgt, preventDefault() { out.pd.push(st.key); },
+          });
+          if (st.gap !== undefined) await sleep(st.gap);
+        }
         await sleep(40);
       } else if (st.op === "keyup") {
         // Task 1.3h-b, хазарды автора: отпускание клавиши (пробел+ЛКМ = панорама).
@@ -651,9 +657,17 @@ async function run() {
       } else if (st.op === "fire") {
         // Task 1.3h-b, хазарды автора: произвольное событие указателя на канве
         // (pointercancel / pointerleave / lostpointercapture) с координатой `at`.
-        cv.fire(st.type, ptr(st.at || [0, 0], { button: -1, buttons: held === null ? 0 : mask(held) }));
+        // `pointerId` — чужой указатель (второй палец), по умолчанию 1.
+        cv.fire(st.type, ptr(st.at || [0, 0], Object.assign(
+          { button: -1, buttons: held === null ? 0 : mask(held) },
+          st.pointerId ? { pointerId: st.pointerId } : {})));
         if (st.clears) held = null;
         await sleep(5);
+      } else if (st.op === "fire_el") {
+        // Событие на элементе по id: всплывающий `change` до #presetLayers в браузере
+        // приходит от поля формы, а `set_field` вызывает только обработчики самого поля.
+        el(st.id).fire(st.type);
+        await sleep(10);
       } else if (st.op === "press_button") { el(st.id).fire("click"); await sleep(30); }
       else if (st.op === "set_field") {
         el(st.id).value = String(st.value);
