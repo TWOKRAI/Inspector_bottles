@@ -663,7 +663,11 @@ class BuiltinCommands:
                 self._cmd_introspect_registers,
                 "Регистры процесса (имена + поля) из RegistersManager",
             ),
-            ("introspect.status", self._cmd_introspect_status, "Имя процесса, статус, воркеры (имена + статусы)"),
+            (
+                "introspect.status",
+                self._cmd_introspect_status,
+                "Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2)",
+            ),
             (
                 "introspect.router_stats",
                 self._cmd_introspect_router_stats,
@@ -785,6 +789,9 @@ class BuiltinCommands:
         целевого процесса). Честная наблюдаемость для debug-plane и fault-injection
         (Ф3.7): harness читает pid → ``os.kill(pid, SIGKILL)`` для проверки
         авто-рестарта. Аддитивно — прежние поля не тронуты.
+
+        ``cv_threads`` (Task 4.6) — ДЕЙСТВУЮЩЕЕ число потоков OpenCV процесса
+        (``cv2.getNumThreads()``), ``None`` — cv2 недоступен.
         """
         svc = self._services
         workers: dict = {}

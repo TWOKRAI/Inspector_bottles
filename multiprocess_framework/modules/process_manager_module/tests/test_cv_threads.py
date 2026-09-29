@@ -62,10 +62,9 @@ def _run_child(tmp_path, monkeypatch, config: dict, block_cv2: bool = False) -> 
 
 
 def _child_config(**extra) -> dict:
-    # Форма реального proc_dict: рецептные ключи живут во вложенном "config"
-    # (GenericProcess читает get_config("config")); дублируем на верхнем уровне, чтобы
-    # тест не диктовал реализации, ОТКУДА именно читать.
-    return {"config": dict(extra), **extra}
+    # РЕАЛЬНАЯ форма proc_dict у runner'а: рецептные ключи живут ТОЛЬКО во вложенном "config"
+    # (GenericProcessConfig.build() кладёт их туда; верхнего уровня у cv_threads в проде нет).
+    return {"config": dict(extra)}
 
 
 # --------------------------------------------------------------------------- #
@@ -118,6 +117,53 @@ def test_child_starts_without_cv2_and_reports_none(tmp_path, monkeypatch) -> Non
     assert got.get("run", _MISSING) is None, got
     # ... и ИМЕННО None в introspect.status (не «ключа нет», не исключение)
     assert got.get("status", _MISSING) is None, got
+
+
+def test_top_level_key_is_fallback_for_flat_configs(tmp_path, monkeypatch, recipe_value) -> None:
+    # Запасной путь для не-Generic процессов: плоский конфиг без вложенного "config".
+    got = _run_child(tmp_path, monkeypatch, {"cv_threads": recipe_value})
+    assert got.get("_hung") is False, got
+    assert got.get("run", _MISSING) == recipe_value, got
+
+
+def test_recipe_to_child_chain_via_real_build(tmp_path, monkeypatch, recipe_value) -> None:
+    # Вся цепочка без ручной сборки конфига: extras рецепта -> as_generic_config().build()
+    # -> bundle -> настоящий runner в spawn-ребёнке -> реальное getNumThreads().
+    cfg = ProcessConfig(process_name="p", plugins=[], extras={"cv_threads": recipe_value}).as_generic_config()
+    _name, proc_dict = cfg.build()
+    got = _run_child(tmp_path, monkeypatch, dict(proc_dict))
+    assert got.get("_hung") is False, got
+    assert got.get("init", _MISSING) == recipe_value, got
+    assert got.get("run", _MISSING) == recipe_value, got
+
+
+def test_non_numeric_extras_value_error_names_the_key() -> None:
+    cfg = ProcessConfig(process_name="p", plugins=[], extras={"cv_threads": "abc"})
+    with pytest.raises(Exception, match="cv_threads"):
+        cfg.as_generic_config()
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 2.5, "abc"])
+def test_invalid_value_in_runner_falls_back_to_default_with_warning(monkeypatch, bad) -> None:
+    from multiprocess_framework.modules.process_manager_module.runner.process_runner import _apply_cv_threads
+
+    applied: list = []
+
+    class _FakeCv2:
+        @staticmethod
+        def setNumThreads(n):
+            applied.append(n)
+
+    warnings: list = []
+
+    class _Log:
+        def warning(self, msg):
+            warnings.append(msg)
+
+    monkeypatch.setitem(sys.modules, "cv2", _FakeCv2)
+    _apply_cv_threads({"config": {"cv_threads": bad}}, _Log())
+    assert applied == [2], (bad, applied)
+    assert len(warnings) == 1 and "cv_threads" in warnings[0], warnings
 
 
 # --------------------------------------------------------------------------- #

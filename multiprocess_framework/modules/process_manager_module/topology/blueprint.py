@@ -326,7 +326,8 @@ class ProcessConfig(SchemaBase):
         # (runner применит дефолт 2).
         cv_threads = _pick("cv_threads", None)
         if cv_threads is not None:
-            base_kwargs["cv_threads"] = int(cv_threads)
+            # Сырое значение: pydantic отвергнет 'abc' / 2.9 ошибкой с именем поля cv_threads.
+            base_kwargs["cv_threads"] = cv_threads
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(
