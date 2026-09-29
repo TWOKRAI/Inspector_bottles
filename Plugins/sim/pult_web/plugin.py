@@ -133,11 +133,14 @@ _SCENE_COMMAND_BY_PATH = {
 #: тем же процессом ``layers`` — тот же таймаут 5.0 с. ``preview`` и ``layout`` с
 #: канвы 1.3h-b шлют ТЕКУЩИЙ пресет целиком (``{preset: ...}``), как ``commit``, —
 #: тот же потолок 256 КБ (общие 4 КБ резали бы пресет из нескольких слоёв с диапазонами).
+#: ``preset.sprites`` (Task 1.3h-c) — список PNG каталога спрайтов, тело ``{}`` (общий
+#: потолок 4 КБ), тот же процесс ``layers`` и таймаут 5.0 с, что у ``layout``.
 #: Тело форвардится КАК ЕСТЬ — та же дисциплина, что у двух таблиц выше.
 _PRESET_ROUTES: dict[str, tuple[str, str, int | None, float | None]] = {
     "/api/preset/commit": ("preset.commit", "_scene_client", 262144, None),
     "/api/preset/preview": ("preset.preview", "_layers_client", 262144, 5.0),
     "/api/preset/layout": ("preset.layout", "_layers_client", 262144, 5.0),
+    "/api/preset/sprites": ("preset.sprites", "_layers_client", 4096, 5.0),
 }
 
 #: Код ответа команды (``code``) -> HTTP-статус (Находка 2, Task 1.2h). Ответ
@@ -546,7 +549,10 @@ pollTruthAndScene();
 #: presetLayers, presetEngineWarn, btnPresetPreview, btnPresetSave,
 #: btnPresetUndo, presetPreviewImg; канва 1.3h-b — presetCanvas, presetZoom (масштаб
 #: в процентах), presetLayoutError (контракт в докстринге
-#: ``tests/test_acceptance_1_3h_canvas.py``). Значение подставляется в ``_PAGE_TEMPLATE``
+#: ``tests/test_acceptance_1_3h_canvas.py``); список слоёв 1.3h-c — presetSpriteSelect,
+#: btnLayerAdd, btnLayerSprite, btnLayerDelete, btnLayerUp, btnLayerDown,
+#: btnSpritesRefresh, presetSpritesError (контракт в докстринге
+#: ``tests/test_acceptance_1_3h_c_layers.py``). Значение подставляется в ``_PAGE_TEMPLATE``
 #: КАК ``.format()``-аргумент (не часть текста, который сам форматируется) —
 #: фигурные скобки JS в ``_PRESET_SCRIPT`` ниже удваивать не нужно.
 _PRESET_SECTION = """<h2>Редактор слоёв</h2>
@@ -557,6 +563,16 @@ _PRESET_SECTION = """<h2>Редактор слоёв</h2>
   <button id="btnPresetPreview">Превью</button>
   <button id="btnPresetSave">Сохранить</button>
   <button id="btnPresetUndo">Отмена</button>
+</div>
+<div class="row">
+  <select id="presetSpriteSelect"></select>
+  <button id="btnLayerAdd">Добавить слой</button>
+  <button id="btnLayerSprite">Заменить картинку</button>
+  <button id="btnLayerDelete">Удалить</button>
+  <button id="btnLayerUp">Выше</button>
+  <button id="btnLayerDown">Ниже</button>
+  <button id="btnSpritesRefresh">Обновить список</button>
+  <span id="presetSpritesError" style="color: #b00"></span>
 </div>
 <div class="row">
   <label>Масштаб, %: <input id="presetZoom" type="number" min="10" max="1000" step="10" value="100"></label>
@@ -1060,6 +1076,32 @@ function presetApplyEdit(name, mutate, deferLayout) {
   else requestPresetLayout();
 }
 
+// Правка СОСТАВА слоёв (Task 1.3h-c: добавить / удалить / выше / ниже / заменить картинку) —
+// брат presetApplyEdit: та же одна запись «Отмена» (снимок ТЕКУЩЕЙ правки, с полями формы),
+// та же форма из нового состояния и тот же запрос раскладки. Отличия: правится массив слоёв
+// целиком (mutate(layers) может ещё выставить presetSelected — рендер идёт ПОСЛЕ него),
+// битмапа для сдвига нет, а запрос раскладки всегда немедленный и снимает висящий таймер
+// стрелок: запрос уйдёт с составом, в котором стрелки уже учтены (presetState их хранит),
+// а ++presetLayoutSeq в нём глушит ещё летящий ответ на старый состав. Ничего не
+// изменившая операция — ни записи «Отмена», ни запроса.
+function presetApplyLayersEdit(mutate) {
+  if (!presetState) return;
+  var snapshot = collectPresetFromFields();
+  var next = JSON.parse(JSON.stringify(snapshot));
+  mutate(next.layers);
+  if (JSON.stringify(next) === JSON.stringify(snapshot)) return;
+  presetUndoStack.push(snapshot);
+  presetState = next;
+  presetDirty = false;
+  renderPresetLayers();
+  presetScheduleDraw();
+  if (presetLayoutTimer !== null) {
+    clearTimeout(presetLayoutTimer);
+    presetLayoutTimer = null;
+  }
+  requestPresetLayout();
+}
+
 function presetShiftLayer(name, dx, dy, round, deferLayout) {
   presetApplyEdit(name, function (layer) {
     var off = Array.isArray(layer.offset_px) ? layer.offset_px : [0, 0];
@@ -1200,7 +1242,144 @@ window.addEventListener("blur", function () { presetSpaceHeld = false; });
 // Ввод в поле формы — раскладка по новому состоянию (change всплывает до контейнера).
 document.getElementById("presetLayers").addEventListener("change", function () { requestPresetLayout(); });
 
+// ---------------------------------------------------------------------------
+// Состав слоёв (Task 1.3h-c): список PNG от POST /api/preset/sprites и пять операций над
+// presetState (каждая — одна запись «Отмена» и один запрос раскладки, presetApplyLayersEdit).
+// Имена файлов — ДАННЫЕ: в <option> они идут через textContent/value, не через innerHTML.
+// ---------------------------------------------------------------------------
+var PRESET_CLASS_SOURCE = "class://";
+var PRESET_CLASS_ENTRY = { path: PRESET_CLASS_SOURCE, sprite_source: PRESET_CLASS_SOURCE };
+var PRESET_RESERVED_NAMES = ["base", "damaged"]; // имена авто-слоёв раскладки
+var presetSpriteEntries = [];   // файлы последнего принятого списка: [{path, sprite_source}]
+var presetLayerTemplate = null; // layer_template последнего принятого списка
+
+function presetShowSpritesError(text) {
+  document.getElementById("presetSpritesError").textContent = text;
+}
+
+// Пересобирает <select>: пункт class:// и файлы; прежний выбор сохраняется, если пункт остался.
+function presetFillSpriteSelect() {
+  var sel = document.getElementById("presetSpriteSelect");
+  var keep = sel.value;
+  sel.textContent = "";
+  function add(value, text) {
+    var opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    sel.appendChild(opt);
+  }
+  add(PRESET_CLASS_SOURCE, "спрайт класса (class://)");
+  presetSpriteEntries.forEach(function (en) { add(en.sprite_source, en.path); });
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === keep) sel.selectedIndex = i;
+  }
+}
+
+function presetLoadSprites() {
+  return post("/api/preset/sprites", {}).then(function (r) {
+    if (!r || r.status !== "ok" || !Array.isArray(r.files)) {
+      var why = (r && (r.message || r.error || r.code)) || "ответ без списка";
+      presetShowSpritesError("список спрайтов не получен: " + why);
+      return;
+    }
+    presetSpriteEntries = r.files;
+    presetLayerTemplate = r.layer_template || null;
+    presetFillSpriteSelect();
+    presetShowSpritesError(r.truncated ? "показаны первые " + r.files.length : "");
+  }).catch(function (err) {
+    presetShowSpritesError("список спрайтов не получен: " + err);
+  });
+}
+
+// Запись списка, выбранная в <select> (по value = sprite_source); null — пусто/неизвестно.
+function presetSelectedSpriteEntry() {
+  var value = document.getElementById("presetSpriteSelect").value;
+  if (value === PRESET_CLASS_SOURCE) return PRESET_CLASS_ENTRY;
+  for (var i = 0; i < presetSpriteEntries.length; i++) {
+    if (presetSpriteEntries[i].sprite_source === value) return presetSpriteEntries[i];
+  }
+  return null;
+}
+
+// Основа имени файла (последний компонент path без расширения); `class` для class://.
+function presetLayerStem(entry) {
+  if (entry.sprite_source === PRESET_CLASS_SOURCE) return "class";
+  var file = String(entry.path).split("/").pop();
+  var dot = file.lastIndexOf(".");
+  return (dot > 0 ? file.slice(0, dot) : file) || "layer";
+}
+
+// Занято (слой пресета или авто-слой) -> _2, _3, ... Массив, не объект: имя может быть "constructor".
+function presetUniqueLayerName(stem, layers) {
+  var taken = PRESET_RESERVED_NAMES.concat(layers.map(function (ly) { return ly.name; }));
+  var name = stem;
+  for (var n = 2; taken.indexOf(name) >= 0; n++) name = stem + "_" + n;
+  return name;
+}
+
+// Принимает ЗАПИСЬ СПИСКА {path, sprite_source}, не <select>: загрузка PNG (1.3h-d) отдаст ответ той же формы.
+function presetAddLayer(entry) {
+  if (!presetState) return;
+  if (!presetLayerTemplate) {
+    presetShowSpritesError("нет шаблона слоя: обновите список спрайтов");
+    return;
+  }
+  presetApplyLayersEdit(function (layers) {
+    var layer = JSON.parse(JSON.stringify(presetLayerTemplate));
+    layer.name = presetUniqueLayerName(presetLayerStem(entry), layers);
+    layer.sprite_source = entry.sprite_source;
+    layers.push(layer); // в конец = рисуется поверх
+    presetSelected = layer.name;
+  });
+}
+
+// Индекс выбранного слоя в ТЕКУЩЕЙ правке; -1 — ничего не выбрано (тогда кнопки — no-op).
+function presetSelectedIndex() {
+  return presetSelected === null ? -1 : presetLayerIndex(presetSelected);
+}
+
+function presetDeleteLayer() {
+  var idx = presetSelectedIndex();
+  if (idx < 0) return;
+  if (presetGesture) presetCancelGesture(); // тащат слой, который сейчас исчезнет: жест без записи «Отмена»
+  presetApplyLayersEdit(function (layers) {
+    layers.splice(idx, 1);
+    presetSelected = null;
+  });
+}
+
+// delta +1 — «Выше» (к концу списка, рисуется поверх), -1 — «Ниже». У края — no-op.
+function presetMoveLayer(delta) {
+  var idx = presetSelectedIndex();
+  if (idx < 0) return;
+  presetApplyLayersEdit(function (layers) {
+    var to = idx + delta;
+    if (to < 0 || to >= layers.length) return;
+    var moved = layers.splice(idx, 1)[0];
+    layers.splice(to, 0, moved);
+  });
+}
+
+function presetReplaceSprite(entry) {
+  var idx = presetSelectedIndex();
+  if (idx < 0 || !entry) return;
+  presetApplyLayersEdit(function (layers) {
+    layers[idx].sprite_source = entry.sprite_source;
+  });
+}
+
+document.getElementById("btnLayerAdd").onclick = function () {
+  var entry = presetSelectedSpriteEntry();
+  if (entry) presetAddLayer(entry);
+};
+document.getElementById("btnLayerSprite").onclick = function () { presetReplaceSprite(presetSelectedSpriteEntry()); };
+document.getElementById("btnLayerDelete").onclick = presetDeleteLayer;
+document.getElementById("btnLayerUp").onclick = function () { presetMoveLayer(1); };
+document.getElementById("btnLayerDown").onclick = function () { presetMoveLayer(-1); };
+document.getElementById("btnSpritesRefresh").onclick = function () { presetLoadSprites(); };
+
 loadPreset();
+presetLoadSprites();
 """
 
 

@@ -1,8 +1,14 @@
 # Plugins/sim/pult_web — STATUS
 
-**Состояние: сделано (Task 1.3h-b плана `line-sim-layer-editor` — канва мышью в редакторе слоёв; ждёт break-injection лида и ревью).**
+**Состояние: сделано (Task 1.3h-c/c2 плана `line-sim-layer-editor` — маршрут `/api/preset/sprites` и страница состава слоёв; ждёт break-injection лида, ревью и живой прогон в Chrome).**
 
-**Обновлено:** 2026-09-29 — Task 1.3h-b: `#presetCanvas` / `#presetZoom` / `#presetLayoutError`,
+**Обновлено:** 2026-09-29 — Task 1.3h-c/c2: `POST /api/preset/sprites` (строка `_PRESET_ROUTES`, `layers_process`,
+5.0 с, потолок 4 КБ); `<select>` спрайтов + «Добавить слой» / «Заменить картинку» / «Удалить» / «Выше» /
+«Ниже» / «Обновить список», одна запись «Отмена» и один запрос раскладки на операцию
+(`presetApplyLayersEdit`). Слепая приёмка 31/31 (S4 5 + C 26), хазарды автора 10; весь радиус
+`pult_web` 165. Живой Chrome не проверен (фокус кнопок, события `<select>`). См. README, «Состав слоёв».
+
+Предыдущее обновление (Task 1.3h-b): `#presetCanvas` / `#presetZoom` / `#presetLayoutError`,
 слои из `preset.layout` по `origin_px`, выбор по альфе, перенос/поворот/масштаб мышью, стрелки,
 колесо, панорама, одна запись «Отмена» на жест; потолок тела `/api/preset/layout` и
 `/api/preset/preview` — 256 КБ. Слепая приёмка 13/13, хазарды автора 11. Подробности —
@@ -31,6 +37,7 @@ README, «Канва редактора».
 | Localhost-страж (`Host` не 127.0.0.1/localhost:port) | есть: 403 на `GET`/`POST`, DNS-rebinding отбит |
 | Content-Type-страж на `POST` (не `application/json`) | есть: 415 до чтения тела, двойник не вызван |
 | `POST /api/preset/layout` (Task 1.3h-a) | есть: строка `_PRESET_ROUTES`, форвард `preset.layout` в `layers_process`, таймаут 5.0 с, коды как у `/api/preset/preview`; потолок тела 256 КБ (1.3h-b); канва страницы — 1.3h-b, см. README |
+| `POST /api/preset/sprites` (Task 1.3h-c) | есть: строка `_PRESET_ROUTES`, форвард `preset.sprites` в `layers_process`, таймаут 5.0 с, потолок тела 4 КБ; страница — `<select>` + пять кнопок, см. README |
 | Страница: `pollStatus` на отказ (`ok: false`/не-2xx) | есть: «robot не отвечает», не `undefined`-поля |
 | Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
 | Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
