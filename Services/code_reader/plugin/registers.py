@@ -50,7 +50,7 @@ class CodeReaderRegisters(SchemaBase):
         str,
         FieldMeta(
             "Терминатор",
-            info="`Output Stop Text` прибора; пустое значение приём отвергает (ADR-CR-005)",
+            info="Хвост `TCP Client Output Format String` прибора; пустое значение приём отвергает (ADR-CR-005)",
         ),
     ] = ";"
 

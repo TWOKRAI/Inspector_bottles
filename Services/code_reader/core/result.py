@@ -7,8 +7,10 @@
 
     QR-30MM;   ->   51 52 2D 33 30 4D 4D 3B
 
-Суффикс задаётся полем `Output Stop Text` (по умолчанию ``;``), префикс —
-`Output Start Text`. CR/LF и STX/ETX прибор не добавляет, но у другого
+Суффикс — хвост строки формата `TCP Client Output Format String` (у нас
+``<code_content>;``), префикс — её начало. Тексты неудачи (NoRead) через строку
+формата НЕ идут: терминатор прибор к ним не добавляет, он должен стоять в самом
+тексте (снято 2026-09-29, `docs/SETUP.md` раздел 5). CR/LF и STX/ETX прибор не добавляет, но у другого
 экземпляра или прошивки они могут быть, поэтому разбор их терпит.
 """
 
@@ -72,8 +74,8 @@ def parse_packet(
 
     Args:
         data: сырые байты ровно одного результата (без склейки).
-        terminator: `Output Stop Text` из настроек прибора.
-        prefix: `Output Start Text`; пустой, если не задан.
+        terminator: хвост `TCP Client Output Format String` прибора.
+        prefix: начало строки формата; пустой, если не задан.
         no_code_text: `Output NoRead Text` — «кода нет».
         bad_code_text: `Output With Code NoRead Text` — «код есть, не читается».
             None означает, что различение выключено и оба случая придут как

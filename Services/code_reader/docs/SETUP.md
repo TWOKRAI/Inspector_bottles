@@ -31,6 +31,9 @@ GigE Vision broadcast, подсеть угадывать не нужно — п�
 Обычный MVS SDK считыватель **видит** — проверено, `MV_CC_EnumDevices` возвращает
 его как GigE-устройство. [железо]
 
+Управление через GenICam (открытие, чтение/запись узлов, почему нет кадра) —
+[`GENICAM.md`](GENICAM.md). [железо, 2026-09-29]
+
 ### Ловушки сети
 
 - `192.168.1.1` — типовой адрес роутера. Когда ноутбук попадёт в обычную сеть,
@@ -149,6 +152,20 @@ Communication Settings → Communication Protocols = TCP Client
   TCP Dst Port        = 5000
 ```
 
+⚠ **TCP Client выключается после перезапуска питания, если не сохранён в User
+Set** (2026-09-29: утром прибор к порту 5000 не подключался вовсе, пока его не
+включили и не сохранили). После любой правки в IDMVS — сохранить в `UserSet1`
+(он у прибора текущий и загрузочный).
+
+⚠ **Пока IDMVS подключён к прибору, в TCP результаты, похоже, не идут** —
+тишина при открытом IDMVS и поток сразу после закрытия, дважды. Изолированно не
+проверено. На время работы линии IDMVS держать закрытым.
+
+Переподключение [железо, 2026-09-29]: после перезапуска нашего приёмника прибор
+вернулся за ~7 с; после выдернутого и возвращённого кабеля у ПК — через 7 с после
+появления линка, коды пошли. Обрыв у ПК Windows рвёт сокет сразу (`WinError 10054`);
+обрыв за коммутатором (линк у ПК жив) — путь keepalive, не проверен.
+
 Почему клиент, а не сервер: при недоступности приёмника прибор копит результаты
 (`Output Result Buffer`, число задаётся `Output Result Buffer Number`) и досылает
 после восстановления связи. В обратной схеме буфер не работает. [мануал]
@@ -160,8 +177,26 @@ QR-30MM;
 51 52 2D 33 30 4D 4D 3B
 ```
 
-**Суффикс `;` (0x3B). CR/LF нет. STX/ETX нет.** Настраивается:
-`Output Start Text` — префикс, `Output Stop Text` — суффикс.
+**Суффикс `;` (0x3B). CR/LF нет. STX/ETX нет.**
+
+**`;` — это хвост строки формата, а не отдельный Stop Text** (снято 2026-09-29,
+IDMVS → `All Feature` → `Result Setting Control`) [железо]:
+
+```
+TCP Client Format Output Content = Code Content
+TCP Client Output Format String  = <code_content>;
+TCP Client Format Prefix Content = Code Number     TCP Client Output Prefix String = (пусто)
+TCP Client Format Suffix Content = Code Number     TCP Client Output Suffix String = (пусто)
+```
+
+`Output Start Text` / `Output Stop Text` из мануала (8.x, табл. 8-21) в блоке
+TCP Client этой прошивки не видны. Через строку формата идут **только удачные
+коды** — тексты неудачи (раздел 5) прибор шлёт как есть, без неё.
+
+В строку формата можно добавить метаданные (табл. 8-21 мануала): `<code_type>`,
+`<code_quality>`, `<code_eval_score>`, `<trigger_num>`, `<ppm>`, `<algo_time>` и др.
+Приём сейчас считает весь пакет содержимым кода — метаданные потребуют разбора
+полей на нашей стороне.
 
 Раздела «Set Result Format» в мануале ID3000 **нет** — только в changelog как
 существующий. Формат снимается прибором, не вычитывается.
@@ -174,20 +209,39 @@ QR-30MM;
 
 ## 5. Отбраковка: NoRead
 
-Параметры (`All Feature` → поиск `noread`): [железо]
+Параметры (`All Feature` → поиск `noread`), состояние на 2026-09-29: [железо]
 
 ```
 Code Algorithm Params
-  With Code But NoRead Check Enable       = вкл
+  With Code But NoRead Check Enable       = (вкл/выкл — меняли в ходе проверки)
 Result Setting Control
   Segregate Unreadable-coded Images       = выкл
   Fill in ROI Output Noread               = выкл
   TCP Client Output NoRead Enable         = вкл
-  TCP Client Output NoRead Text           = NoRead
-  TCP Client Output With Code NoRead Text = NoRead
+  TCP Client Output NoRead Text           = NoRead;    ← различение выключено
+  TCP Client Output NoCode Text           = NoRead;    ← различение включено, кода нет
+  TCP Client Output With Code NoRead Text = BadRead;   ← различение включено, код не читается
 Statistics Info
   Noread Frame Number                     = счётчик неудач
 ```
+
+⚠ **Терминатор обязан стоять ВНУТРИ текста неудачи.** Тексты неудачи не проходят
+через строку формата (раздел 4), и `;` к ним не добавляется. Заводское `NoRead`
+приходит голым `4E 6F 52 65 61 64` — приём держит его в буфере (снаружи «ничего не
+пришло», `no_reads = 0`), а со следующим удачным кодом склеивает в
+`NoReadQR-12MM` **со статусом `ok`**. Снято 2026-09-29: четыре склейки ровно на
+`Noread Frame Number = 4`; поле `NoCode Text` дало то же самое (`NoCode` без `;`).
+После текста `NoRead;` — чистые `4E 6F 52 65 61 64 3B` / `no_code`.
+
+Текстов **три**, а не два: при выключенном различении работает `NoRead Text`,
+при включённом — `NoCode Text` и `With Code NoRead Text`. Править все три.
+
+`BadRead` за день пришёл один раз и склеенным (`NoCodeBadRead` + пустой пакет —
+похоже на `BadRead;;`, то есть этот текст, возможно, идёт через строку формата и
+получает второй `;`). Сырых байтов этого пакета нет. Вызвать «код есть, не
+читается» повторно не удалось: заклеенная середина QR даёт «кода нет» (прибор не
+находит код), а замазанный маркером, смятый и под углом — **читается** (коррекция
+ошибок QR). Различение на линии не проверено.
 
 **Смысл: прибор различает два вида неудачи** — «кода в кадре нет вообще»
 (нет маркировки, не та деталь, промах мимо поля зрения) и «код найден, но не
@@ -199,8 +253,9 @@ Statistics Info
 разные:
 
 ```
-TCP Client Output NoRead Text           = __NOCODE__
-TCP Client Output With Code NoRead Text = __BADCODE__
+TCP Client Output NoRead Text           = __NOCODE__;
+TCP Client Output NoCode Text           = __NOCODE__;
+TCP Client Output With Code NoRead Text = __BADCODE__;
 ```
 
 Подчёркивания — от совпадения с настоящей маркировкой: если содержимое реального
