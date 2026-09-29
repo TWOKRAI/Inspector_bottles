@@ -814,6 +814,12 @@ document.getElementById("btnPresetUndo").onclick = function () {
   if (!presetUndoStack.length) return;
   presetState = presetUndoStack.pop();
   presetDirty = false;
+  // «Добавить» -> «Отмена» убирает выбранный слой: выбор на исчезнувшее имя молча «оживёт» у слоя, которому
+  // потом дадут это имя (1.3h-c-fix, F2). Сверка — по presetState, НЕ presetLayerIndex: та накладывает поля
+  // формы (ещё старой, длиннее состояния) по индексу и упала бы до renderPresetLayers.
+  if (presetSelected !== null && !presetState.layers.some(function (ly) { return ly.name === presetSelected; })) {
+    presetSelected = null;
+  }
   renderPresetLayers();
   requestPresetLayout();
 };
@@ -1379,6 +1385,16 @@ document.getElementById("btnLayerDelete").onclick = presetDeleteLayer;
 document.getElementById("btnLayerUp").onclick = function () { presetMoveLayer(1); };
 document.getElementById("btnLayerDown").onclick = function () { presetMoveLayer(-1); };
 document.getElementById("btnSpritesRefresh").onclick = function () { presetLoadSprites(); };
+
+// После кнопки редактора фокус — канве (1.3h-c-fix, F1; родня B1): браузер оставляет его на нажатой кнопке,
+// и пробел (панорама) или Enter нажали бы её ещё раз — лишний слой, лишний сдвиг, повторная запись «Сохранить».
+// Отдельный слушатель, не onclick: те уже заняты действиями кнопок. Кнопки пульта ленты фокус не трогают.
+["btnPresetPreview", "btnPresetSave", "btnPresetUndo", "btnLayerAdd", "btnLayerSprite", "btnLayerDelete",
+ "btnLayerUp", "btnLayerDown", "btnSpritesRefresh"].forEach(function (id) {
+  document.getElementById(id).addEventListener("click", function () {
+    if (presetCanvas.focus) presetCanvas.focus({ preventScroll: true });
+  });
+});
 
 loadPreset();
 presetLoadSprites();
