@@ -1,6 +1,6 @@
 # Task 1.3h-b — исправления по ревью ит.1 (developer)
 
-Ветка `feat/line-sim-layer-editor`, база b73afaa2. Ревью: `docs/reviews/2026-09-29_task-1.3h-b-review-it1.md`.
+Ветка `feat/line-sim-layer-editor`, база b73afaa2. Ревью: `docs/reviews/2026-09-29_line-sim-layer-editor-task-1.3h-b-review-it1.md`.
 
 ## Что сделано
 
