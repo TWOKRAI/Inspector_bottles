@@ -26,10 +26,11 @@ from Services.code_reader.tests.test_sdk_plugin import (  # noqa: F401 — make_
     _bounded,
     _cmd,
     _raw,
+    _LATE_BLOCK_S,
     _status,
     make_plugin,
 )
-from Services.code_reader.tests.test_sdk_reader import FakeApi, wait_until
+from Services.code_reader.tests.test_sdk_reader import FakeApi, sdk_error, wait_until
 
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
@@ -236,3 +237,102 @@ def test_reader_factory_is_read_at_configure_time_and_gets_register_values(monke
 def test_default_reader_factory_is_sdk_code_reader():
     """Боевое значение шва — сам `SdkCodeReader` (иначе плагин без подмены не соберёт читателя)."""
     assert CodeReaderSdkPlugin.__dict__["reader_factory"] is SdkCodeReader
+
+
+# --------------------------------------------------------------------------
+# 5. Причина сбоя не стирается, если поток захвата сбоит до возврата take_device
+# --------------------------------------------------------------------------
+
+
+class _RaceReader(SdkCodeReader):
+    """`start()` возвращает только после финального сбоя потока: худший порядок, но законный."""
+
+    def start(self):
+        ok = super().start()
+        if ok:
+            assert wait_until(lambda: self.state == "error" and not self.stats()["device_held"], 3.0), (
+                "читатель не дошёл до error"
+            )
+        return ok
+
+
+def test_failure_right_after_take_keeps_reason(monkeypatch):
+    """Свойство: три ошибки подряд, случившиеся ДО возврата `take_device`, оставляют причину
+    в `get_status` и в дереве (критерий «три ошибки -> last_error непуст»).
+
+    Ломается, если после `reader.start()` плагин стирает `_last_error` (или прячет текст
+    читателя по равенству строк): поток захвата уже отчитался через `on_error`, и причина
+    исчезает при `device_state == "error"`. Читатель здесь детерминирован — `start()` ждёт
+    финального сбоя, а не надеется на планировщик (на живой гонке ломалось 26 из 50).
+    """
+    api = FakeApi(script=[sdk_error(-1)] * 3)
+    monkeypatch.setattr(CodeReaderSdkPlugin, "reader_factory", functools.partial(_RaceReader, api=api))
+    plugin, ctx = _configure({"auto_start": False, "timeout_ms": 10})
+    try:
+        res = _bounded(lambda: plugin.cmd_take_device({}))
+        status = _bounded(lambda: plugin.cmd_get_status({}))
+
+        assert status["device_state"] == "error"
+        assert status["last_error"], f"причина error стёрта: errors={status['errors']}"
+        assert ctx.state_proxy.tree()["last_error"], "причины нет в дереве"
+        assert res["status"] == "ok"  # start() сам прошёл: сбой случился уже в потоке захвата
+    finally:
+        _bounded(lambda: plugin.shutdown(ctx), 15.0)
+
+
+# --------------------------------------------------------------------------
+# 6. Дерево узнаёт о позднем выходе потока захвата без единой команды
+# --------------------------------------------------------------------------
+
+
+def test_tree_learns_late_release_via_produce_only(make_plugin):  # noqa: F811
+    """Свойство: когда поток захвата наконец отпустил прибор, дерево и `get_status` показывают
+    `device_held False` и пустой `last_error`, хотя после этого не было ни одной команды —
+    только проходы `produce()`.
+
+    Ломается, если `produce()` публикует лишь при наличии кадров (пустой проход молчит), или
+    если «прибор ещё отпускается» остаётся в `last_error` после выхода потока, или если
+    `device_held` не попадает в дерево.
+    """
+    api = FakeApi(block_s=_LATE_BLOCK_S)
+    w = make_plugin(api, timeout_ms=100)
+    _cmd(w, "take_device")
+    assert wait_until(lambda: api.in_flight > 0, 3.0), "поток захвата не вошёл в get_frame"
+
+    res = _cmd(w, "release_device", deadline=20.0)
+    assert res["released"] is False
+    assert w.proxy.tree()["device_held"] is True  # публикация команды уже несёт device_held
+    assert w.proxy.tree()["last_error"] == "прибор ещё отпускается"
+
+    def tree_released() -> bool:
+        w.plugin.produce()  # единственное, что здесь дёргается: команд нет
+        return w.proxy.tree().get("device_held") is False
+
+    assert wait_until(tree_released, _LATE_BLOCK_S + 6.0), "дерево не узнало, что прибор отпущен"
+    assert w.proxy.tree()["last_error"] == ""
+    status = _status(w)
+    assert status["device_held"] is False
+    assert status["last_error"] == ""
+
+
+def test_status_poll_does_not_swallow_release_for_tree(make_plugin):  # noqa: F811
+    """Свойство: опрос `get_status` (GUI опрашивает постоянно) не отменяет публикацию смены
+    `device_held` — отметка «что ушло в дерево» ставится только там, где дерево реально обновлено.
+
+    Ломается, если отметку ставит `_snapshot` (его зовёт и `get_status`, который не публикует):
+    опрос между выходом потока и следующим `produce()` «съедает» смену, дерево навсегда
+    остаётся с `device_held True` и «прибор ещё отпускается». Найдено лидером на ревью-фиксе.
+    """
+    api = FakeApi(block_s=_LATE_BLOCK_S)
+    w = make_plugin(api, timeout_ms=100)
+    _cmd(w, "take_device")
+    assert wait_until(lambda: api.in_flight > 0, 3.0), "поток захвата не вошёл в get_frame"
+    assert _cmd(w, "release_device", deadline=20.0)["released"] is False
+
+    # GUI-опрос без produce(): ждём выхода потока только через get_status.
+    assert wait_until(lambda: _status(w)["device_held"] is False, _LATE_BLOCK_S + 6.0), "поток не вышел"
+    assert w.proxy.tree()["device_held"] is True  # дерево ещё не обновлялось — это нормально
+
+    w.plugin.produce()  # первый же проход источника обязан донести смену
+    assert w.proxy.tree()["device_held"] is False
+    assert w.proxy.tree()["last_error"] == ""

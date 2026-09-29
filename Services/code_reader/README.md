@@ -157,10 +157,11 @@ SHM в конфиге не объявляется:
 (`stopped | running | not_found | busy | error`, всегда из читателя), `device`
 (`ip`/`model`/`serial` или `None`), `last_code`, `last_status`, `last_quality`,
 `total_reads`, `no_reads`, `bad_reads`, `frames`, `errors`, `dropped`, `last_error`,
-`pending`, `history` (20 последних срабатываний). Публикуется из `produce()`, когда пришли
-кадры, из колбэка ошибки, при переполнении очереди и из команд; на пустом проходе
-`produce()` молчит. `device_held` в дерево **не** попадает — только в ответы
-`release_device` и `get_status`.
+`pending`, `device_held` (поток захвата ещё держит прибор), `history` (20 последних
+срабатываний). Публикуется из `produce()`, когда пришли кадры или сменился `device_held`, из
+колбэка ошибки, при переполнении очереди и из команд; на пустом проходе без смены
+`device_held` `produce()` молчит. «Прибор ещё отпускается» в `last_error` живёт, пока
+`device_held` истинно, и снимается сам, когда поток захвата вышел.
 
 **Параметры** (`CodeReaderSdkRegisters`): `device_ip` (пусто = первый найденный),
 `reader_id` (`id3013`), `auto_start` (`true` — взять прибор в `start()`, иначе командой),

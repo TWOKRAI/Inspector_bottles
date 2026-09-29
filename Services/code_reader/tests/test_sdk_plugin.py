@@ -340,6 +340,21 @@ def test_item_has_no_bytes_and_is_json_without_frame(make_plugin):
 
     _walk(item)
     assert "frame" in item  # иначе «JSON без frame» ничего не доказывает
+    # Точный набор ключей: картинка едет только под `frame`; любой другой ключ (preview,
+    # pixels, ...) — новый путь для тяжёлых данных мимо claim check.
+    assert set(item) == {
+        "code",
+        "status",
+        "ts",
+        "seq_id",
+        "reader_id",
+        "codes",
+        "trigger_index",
+        "frame_num",
+        "no_read_num",
+        "pixel_format",
+        "frame",
+    }
     json.dumps({k: v for k, v in item.items() if k != "frame"})  # numpy-скаляры/bytes/enum уронят
 
     assert item["code"] == "QR-15MM"
@@ -381,6 +396,7 @@ def test_broken_jpeg_keeps_code_drops_frame(make_plugin):
     assert [i["code"] for i in items] == ["QR-15MM", "QR-20MM"]
     assert [i["status"] for i in items] == ["ok", "ok"]
     assert "frame" not in items[0]  # ключа нет, а не None: порт frame optional
+    assert set(items[0]) == set(items[1]) - {"frame"}  # остальные ключи те же, лишнего нет
     assert isinstance(items[1]["frame"], np.ndarray)  # следующий хороший кадр не потерян
     assert _status(w)["errors"] > errors_before
 

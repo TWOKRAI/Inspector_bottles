@@ -116,12 +116,13 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         self._seq = 0
         self._last_quality: dict | None = None
         self._decode_errors = 0
-        # Сообщение об ошибке, известное плагину (колбэк читателя, отказ декода,
-        # «ещё отпускается»); пусто -> показываем last_error читателя.
+        # Единственный источник причины сбоя: все ошибки читателя (и отказ start()) приходят
+        # в `_on_error`; сюда же — отказ декода и «ещё отпускается». Читателя не опрашиваем.
         self._last_error = ""
+        # `device_held`, ушедший в дерево в последний раз: produce() публикует при смене.
+        self._published_held = False
         # Счётчики читателя не сбрасываются — reset_stats запоминает точку отсчёта.
         self._baseline = {"frames": 0, "ok": 0, "no_code": 0, "bad_code": 0, "errors": 0}
-        self._cleared_error: str | None = None
         self._reader: SdkCodeReader = type(self).reader_factory(
             self._on_frame,
             self._on_error,
@@ -169,8 +170,11 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                 self._on_decode_error(frame, exc)
             items.append(item)
         # Публикуем то, что принесли кадры. Смена состояния и ошибки публикуются из своих
-        # колбэков: они происходят и когда кадров нет.
-        if items:
+        # колбэков: они происходят и когда кадров нет. Исключение — выход потока захвата после
+        # позднего release_device: колбэка у него нет, о смене `device_held` узнаём здесь.
+        # Читатель опрашиваем без замка плагина (у него свой короткий замок).
+        held_changed = bool(self._reader.stats()["device_held"]) != self._published_held
+        if items or held_changed:
             self._publish_state()
         return items
 
@@ -252,10 +256,11 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         reg = self._reg
         with self._lock:
             base = self._baseline
-            reader_error = stats["last_error"] or ""
-            if reader_error == self._cleared_error:
-                reader_error = ""
-            last_error = self._last_error or reader_error
+            device_held = bool(stats["device_held"])
+            last_error = self._last_error
+            # «ещё отпускается» — производное от device_held: поток вышел -> сообщение снято.
+            if last_error == _STILL_HELD and not device_held:
+                last_error = ""
             # register — зеркало для GUI, читают отсюда только при показе.
             reg.device_state = stats["state"]
             reg.total_reads = stats["ok"] - base["ok"]
@@ -267,6 +272,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             return {
                 "device_state": reg.device_state,
                 "device": stats["device"],
+                "device_held": device_held,
                 "last_code": reg.last_code,
                 "last_status": reg.last_status,
                 "last_quality": self._last_quality,
@@ -285,25 +291,21 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         """Опубликовать телеметрию в реактивное дерево (живой GUI).
 
         Зовётся там, где состояние изменилось: из `on_error`, при переполнении, из
-        команд и из `produce()`, когда пришли кадры. На пустом проходе молчит.
+        команд и из `produce()`, когда пришли кадры или сменился `device_held`.
+
+        Отметку `_published_held` ставим только здесь, после записи в дерево: `_snapshot`
+        зовёт и `get_status`, который не публикует, — отметка оттуда «съедала» бы смену
+        (тест `test_status_poll_does_not_swallow_release_for_tree`).
         """
         proxy = getattr(self._ctx, "state_proxy", None)
         if proxy is None:
             return
         try:
-            proxy.merge(
-                f"processes.{self._ctx.process_name}.state.code_reader_sdk",
-                self._snapshot(),
-            )
+            snapshot = self._snapshot()
+            proxy.merge(f"processes.{self._ctx.process_name}.state.code_reader_sdk", snapshot)
+            self._published_held = snapshot["device_held"]
         except Exception as exc:  # noqa: BLE001 — публикация телеметрии не критична
             self._ctx.log_error(f"CodeReaderSdkPlugin: публикация состояния не удалась: {exc}")
-
-    def _forget_errors(self) -> None:
-        """Забыть накопленные ошибки: свои и то, что читатель уже показывал."""
-        reader_error = self._reader.stats()["last_error"]
-        with self._lock:
-            self._last_error = ""
-            self._cleared_error = reader_error
 
     # ------------------------------------------------------------------ #
     # Команды из GUI
@@ -311,9 +313,11 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
 
     def cmd_take_device(self, data: dict) -> dict:
         """Взять прибор и начать захват. Отказ — `status: error` с причиной, не исключение."""
+        # Старую причину стираем ДО start(): поток захвата может сбоить раньше, чем вернётся
+        # start(), и его ошибка (через `_on_error`) уже принадлежит новой сессии.
+        with self._lock:
+            self._last_error = ""
         ok = self._reader.start()
-        if ok:
-            self._forget_errors()
         self._publish_state()
         snapshot = self._snapshot()
         result: dict[str, Any] = {"status": "ok" if ok else "error", "device_state": snapshot["device_state"]}
@@ -357,7 +361,6 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             self._baseline = {k: stats[k] for k in self._baseline}
             self._decode_errors = 0
             self._last_error = ""
-            self._cleared_error = stats["last_error"]
             self._last_quality = None
             reg.dropped = 0
             reg.last_code = reg.last_status = ""
