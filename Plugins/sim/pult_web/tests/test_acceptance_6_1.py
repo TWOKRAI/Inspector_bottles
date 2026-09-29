@@ -223,28 +223,29 @@ def test_get_api_scene_forwards_scene_status(start_pult) -> None:
 def test_scene_error_code_survives_to_client(start_pult) -> None:
     """Отказ ``{"status": "error", "code": "invalid", ...}`` не превращается в 200.
 
-    ``code`` в HTTP-тело не попадает (``_dispatch()`` его не читает — см.
-    докстринг модуля), поэтому единственное проверяемое здесь — код ответа и
-    ``ok: false``, не сохранённый ``code``.
+    **Обновлено Task 1.2h (Находка 2).** ``_dispatch()`` больше не схлопывает
+    типизированный отказ в 504 — код читается из поля ``code`` (``invalid`` ->
+    400), тело command-ответа отдаётся КАК ЕСТЬ, без обёртки ``{ok: false}``
+    (см. ``plans/line-sim-layer-editor.md``, раздел Task 1.2h, «Находка 2»).
     """
     _plugin, _ctx, port = start_pult()
     scene_client = _client_for("camera")
     assert scene_client is not None, "нет клиента процесса сцены"
-    scene_client.responses["scene.pause"] = {
+    reply = {
         "status": "error",
         "code": "invalid",
         "message": "scene.pause: ожидается {'paused': bool}, получено {}",
     }
+    scene_client.responses["scene.pause"] = reply
 
     status, raw = _http(port, "POST", "/api/scene/pause", {"paused": "yes"})
 
-    # 504, а не голый "!= 200": маршрут обязан реально дойти до _dispatch() и
-    # получить status=="error" от двойника, а не молча провалиться в 404
-    # (заглушка "любой != 200" была бы зелена и без маршрута вовсе — не то, что
-    # проверяется).
-    assert status == 504, f"отказ команды сцены -> {status}, тело: {raw[:300]!r}"
+    # 400, а не голый "!= 200": маршрут обязан реально дойти до _dispatch() и
+    # получить status=="error" код="invalid" от двойника, а не молча провалиться
+    # в 404 (заглушка "любой != 200" была бы зелена и без маршрута вовсе).
+    assert status == 400, f"отказ команды сцены с code=invalid -> {status}, тело: {raw[:300]!r}"
     body = json.loads(raw.decode("utf-8"))
-    assert body.get("ok") is False, f"отказ без ok:false: {body!r}"
+    assert body == reply, f"тело ответа не равно ответу двойника как есть: {body!r}"
     assert scene_client.calls == [("scene.pause", {"paused": "yes"})], (
         f"кривой paused должен был всё равно дойти до scene.pause (валидация — в плагине сцены): {scene_client.calls!r}"
     )

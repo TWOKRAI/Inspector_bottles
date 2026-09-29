@@ -185,7 +185,7 @@ def _run_page_js(port: int, scenario: str) -> dict:
     result = subprocess.run(
         [_NODE, str(_PAGE_HARNESS), str(port), scenario],
         capture_output=True,
-        text=True,
+        encoding="utf-8",  # не text=True: node пишет UTF-8, а системная локаль тут cp1251
         timeout=15.0,
     )
     assert result.returncode == 0, f"page_offline.mjs упал: stdout={result.stdout!r} stderr={result.stderr!r}"
