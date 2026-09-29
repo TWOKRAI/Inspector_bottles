@@ -58,7 +58,9 @@ from __future__ import annotations
 
 import http.server
 import json
+import socket
 import threading
+import time
 from typing import Any
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -80,20 +82,20 @@ _DEFAULT_TIMEOUT_S = 1.0
 #: Тело запроса больше этого — 413, ДО чтения (DESIGN п.3 плана).
 _MAX_BODY_BYTES = 4096
 
-#: Потолок дренажа тела после отказа 413 (ревью Task 1.2h ит.1, Н1). Раньше
-#: `_drain_body` вычитывала ВЕСЬ заявленный `Content-Length` — клиент,
-#: заявивший гигабайт и приславший 64 байта, ответа не получал вовсе и держал
-#: поток (замер ревью: 8 с без ответа, 22 живых потока вместо 3). Дренаж нужен
-#: ТОЛЬКО чтобы закрытие сокета не оборвало уже отправленный ответ RST'ом на
-#: Windows (WinError 10053) — не для того, чтобы дочитывать заявленное целиком.
-_MAX_DRAIN_BYTES = 65536
+#: Потолок «доотдачи» тела после РАННЕГО отказа (400/403/404/413/415 — ответ ушёл, тело
+#: не читалось), байт. Нужен ТОЛЬКО чтобы закрытие сокета не оборвало уже отправленный
+#: ответ RST'ом (Windows: WinError 10053/10054) — не чтобы дочитывать заявленный
+#: `Content-Length` (ревью Task 1.2h ит.1, Н1: гигабайт заявлен — ответ не получен).
+#: 1 МиБ = вчетверо больше самого большого потолка маршрута (256 КБ у `/api/preset/commit`):
+#: байты сверх потолка снова дают RST (замер: потолок 64 КБ при теле 600 КБ — 12 из 100
+#: обменов без ответа, при 1 МиБ — 0), а время держит `_DRAIN_TIMEOUT_S`.
+_MAX_DRAIN_BYTES = 1_048_576
 
-#: Таймаут сокета обработчика (ревью Task 1.2h ит.1, Н1) — без него
-#: `rfile.read()` в дренаже (и в обычном чтении тела) блокируется бессрочно,
-#: если клиент перестал слать байты. `BaseHTTPRequestHandler.timeout`
-#: (наследуется от `socketserver.StreamRequestHandler`) даёт `self.connection.
-#: settimeout(...)` в `setup()` — действует на КАЖДЫЙ блокирующий вызов сокета
-#: обработчика, не только на дренаж.
+#: Общий дедлайн «доотдачи» (`_linger_close`), секунды: за это время клиент обязан
+#: закрыть свою сторону (обычный клиент делает это сразу после чтения ответа), иначе
+#: сокет закрывается как есть. Дедлайн ОБЩИЙ, а не на каждый `recv`: медленная струйка
+#: байт не продлевает его. На класс обработчика таймаут НЕ вешается (ревью Task 1.2h
+#: ит.2): он резал бы и чтение валидного тела команды.
 _DRAIN_TIMEOUT_S = 2.0
 
 #: Путь -> команда ``belt.*`` (DESIGN п.3 плана, HTTP API). Тело форвардится
@@ -864,33 +866,48 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 return
             self._reply_json(200, result)
 
-        def _drain_body(self, length: int) -> None:
-            """Вычитать и отбросить не более ``length`` байт тела — не для команды,
-            только чтобы закрытие сокета после 413 не оборвало клиента RST'ом.
-            Вызывающий код (``_read_command_body``) передаёт сюда уже ОГРАНИЧЕННОЕ
-            число (``min(заявленный Content-Length, _MAX_DRAIN_BYTES)``, ревью
-            Task 1.2h ит.1, Н1) — сама функция потолка не знает и читает ровно
-            столько, сколько ей велено. Таймаут сокета (``_DRAIN_TIMEOUT_S``,
-            ставится на время дренажа и снимается после) не даёт чтению зависнуть,
-            если клиент перестал слать байты. Таймаут именно ЗДЕСЬ, а не на классе
-            обработчика: на классе он резал бы и чтение валидного тела команды
-            (ревью Task 1.2h ит.2)."""
-            previous = self.connection.gettimeout()
+        #: Тело запроса прочитано командой (``_read_command_body``) — иначе после ответа
+        #: в приёмном буфере или в пути могут остаться его байты (см. ``_linger_close``).
+        _body_consumed = False
+
+        def handle(self) -> None:
+            super().handle()
+            self._linger_close()
+
+        def _linger_close(self) -> None:
+            """Закрыть соединение так, чтобы уже отправленный ответ дошёл (ЕДИНЫЙ механизм
+            для ВСЕХ ранних отказов: 400/403/404/413/415, где тело не читалось).
+
+            Причина (замер pult-flake, 2026-09-29): ``close()`` сокета с непрочитанными
+            байтами в приёмном буфере Windows завершает RST'ом, и клиент, ещё не
+            успевший прочитать ответ, получает WinError 10053/10054 вместо кода.
+            Клиент шлёт заголовки и тело ДВУМЯ ``send``, так что тело может прийти и
+            ПОСЛЕ ответа сервера — точное чтение ``Content-Length`` тут не помогло бы
+            (для ``-1``/гигабайта его и нет). Поэтому: полузакрытие на запись
+            (клиент получает EOF после ответа) и чтение с отбрасыванием, пока клиент
+            не закроет свою сторону, — не более ``_MAX_DRAIN_BYTES`` байт и
+            ``_DRAIN_TIMEOUT_S`` секунд СУММАРНО (потолок 413 остаётся потолком)."""
+            headers = getattr(self, "headers", None)
+            if self._body_consumed or headers is None:
+                return
+            if headers.get("Content-Length", "0").strip() == "0" and headers.get("Transfer-Encoding") is None:
+                return
+            deadline = time.monotonic() + _DRAIN_TIMEOUT_S
+            remaining = _MAX_DRAIN_BYTES
             try:
-                self.connection.settimeout(_DRAIN_TIMEOUT_S)
-                remaining = length
+                self.wfile.flush()
+                self.connection.shutdown(socket.SHUT_WR)
                 while remaining > 0:
-                    chunk = self.rfile.read(min(remaining, 65536))
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        return
+                    self.connection.settimeout(left)
+                    chunk = self.connection.recv(min(remaining, 65536))
                     if not chunk:
-                        break
+                        return
                     remaining -= len(chunk)
             except OSError:
                 return
-            finally:
-                try:
-                    self.connection.settimeout(previous)
-                except OSError:
-                    pass
 
         def _read_command_body(self, max_bytes: int = _MAX_BODY_BYTES) -> tuple[dict | None, tuple[int, dict] | None]:
             """Прочитать РОВНО ``Content-Length`` байт (не до EOF, см. докстринг модуля).
@@ -916,20 +933,15 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             if length < 0:
                 return None, (400, {"ok": False, "error": "bad_length"})
             if length > max_bytes:
-                # Решение отказать по-прежнему принимается ДО обращения к телу ради
-                # команды — эти байты никуда не форвардятся и не парсятся. Но ответ
-                # клиенту уходит СНАЧАЛА, дренаж — ПОСЛЕ (ревью Task 1.2h ит.1, Н1):
-                # раньше сервер вычитывал ВЕСЬ заявленный Content-Length перед
-                # ответом — клиент, заявивший гигабайт и приславший 64 байта, не
-                # получал ответа вовсе и держал поток (замер ревью: 8 с без ответа).
-                # Дренаж ограничен `_MAX_DRAIN_BYTES` и фактически заявленным телом —
-                # он нужен только чтобы закрытие сокета не оборвало уже отправленный
-                # ответ RST'ом на Windows (замер Task 1.2h — WinError 10053), не
-                # чтобы дочитывать заявленный Content-Length целиком.
+                # Решение отказать принимается ДО обращения к телу: эти байты никуда не
+                # форвардятся и не парсятся. Ответ уходит СНАЧАЛА (ревью Task 1.2h ит.1,
+                # Н1: вычитывание заявленного Content-Length ДО ответа держало клиента,
+                # заявившего гигабайт, без ответа вовсе). Доставку ответа при закрытии
+                # обеспечивает общий `_linger_close` (ограниченный, для всех ранних отказов).
                 self._reply_json(413, {"ok": False, "error": "too_large"})
-                self._drain_body(min(length, _MAX_DRAIN_BYTES))
                 return None, (413, None)
             raw = self.rfile.read(length) if length else b""
+            self._body_consumed = True
             if not raw.strip():
                 return {}, None
             try:
