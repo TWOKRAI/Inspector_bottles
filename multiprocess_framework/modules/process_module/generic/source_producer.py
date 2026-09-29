@@ -1,7 +1,7 @@
 """SourceProducer — produce()-loop для source-плагинов.
 
 plugin.produce() → FrameShmMiddleware.strip_and_write() → IPC send в chain_targets.
-Smart sleep для target FPS.
+Темп target FPS — ``FramePacer`` (perf_counter + абсолютное расписание, Task 4.3a).
 
 Используется GenericProcess как LOOP worker.
 """
@@ -17,6 +17,7 @@ from ..health import IHealthReporter
 from . import frame_trace
 from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
+from .pacing import FramePacer
 from .plugin_runner import PluginRunner
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
@@ -84,6 +85,8 @@ class SourceProducer:
         # Тайминг цикла (produce + send + smart-sleep) для телеметрии GUI.
         # target_interval = 1/target_fps, поэтому effective_hz ≈ фактический FPS.
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
+        # Task 4.3a: темп по абсолютному расписанию на perf_counter (см. pacing.py).
+        self._pacer = FramePacer(self._target_interval)
         # HP-1 (Ф7 G.1): per-stage latency (capture/send), за флагом FW_PERF_PROBES,
         # дефолт OFF — см. perf_probes.py.
         self._perf = perf_probes.LatencyProbes()
@@ -104,7 +107,8 @@ class SourceProducer:
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """LOOP worker: produce() → SHM write → IPC send.
 
-        Smart sleep: вычитает время produce() из target_interval.
+        Темп: ``FramePacer`` — дедлайн такта от предыдущего дедлайна, время produce()
+        поглощается интервалом, опоздание не досылается пачкой (Task 4.3a).
 
         КОНТРАКТ КООПЕРАТИВНОСТИ: цикл проверяет ``stop_event`` каждую итерацию,
         но НЕ может прервать блокирующий ``produce()`` извне (Python-потоки не
@@ -115,10 +119,11 @@ class SourceProducer:
         """
         while not stop_event.is_set():
             if pause_event.is_set():
+                self._pacer.reset()  # после паузы расписание — от «сейчас»
                 time.sleep(0.05)
                 continue
 
-            t_start = time.monotonic()
+            t_start = time.perf_counter()
 
             # Снимок кумулятивного счётчика ошибок ДО produce() — чтобы отличить
             # честно-успешную итерацию от той, где плагин ПРОГЛОТИЛ ошибку внутри
@@ -199,13 +204,10 @@ class SourceProducer:
             if self._health is not None and self._health.breaker_open:
                 self._sleep_cooperative(self._breaker_backoff, stop_event)
             else:
-                elapsed = time.monotonic() - t_start
-                sleep_time = self._target_interval - elapsed
-                if sleep_time > 0:
-                    self._sleep_cooperative(sleep_time, stop_event)
+                self._pacer.wait(stop_event)
 
             # Полный цикл (produce + send + sleep) → телеметрия.
-            self._cycle_metrics.record(time.monotonic() - t_start)
+            self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _sleep_cooperative(self, sleep_time: float, stop_event: threading.Event) -> None:
         """Сон порциями с проверкой stop_event (отзывчивость на остановку).
@@ -216,9 +218,9 @@ class SourceProducer:
         """
         if sleep_time <= 0:
             return
-        deadline = time.monotonic() + sleep_time
-        while time.monotonic() < deadline and not stop_event.is_set():
-            time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
+        deadline = time.perf_counter() + sleep_time
+        while time.perf_counter() < deadline and not stop_event.is_set():
+            time.sleep(max(0.0, min(0.01, deadline - time.perf_counter())))
 
     def _send_item(self, item: dict) -> None:
         """IPC send одного item.

@@ -23,11 +23,10 @@ import time
 from typing import Any
 
 from .cycle_metrics import CycleMetricsRecorder
+from .pacing import FramePacer
 
 # Дефолтный интервал цикла, если target_interval_ms не задан (2 Гц).
 _DEFAULT_INTERVAL_S = 0.5
-# Максимальная порция сна — для отзывчивости на stop_event.
-_SLEEP_CHUNK_S = 0.01
 
 
 class IdleWorker:
@@ -57,6 +56,8 @@ class IdleWorker:
         # Телеметрия цикла — общий recorder (тот же контракт ключей, что у
         # SourceProducer/PipelineExecutor/DataReceiver).
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
+        # Task 4.3a: темп по абсолютному расписанию на perf_counter (см. pacing.py).
+        self._pacer = FramePacer(self._target_interval)
 
         # Ф7 G.8: busy-маркер на время полезной нагрузки цикла (кадра). Пишет ТОЛЬКО
         # поток воркера, читает drain-поток (WorkerManager.drain_worker) — bool-read под
@@ -96,6 +97,7 @@ class IdleWorker:
         while not stop_event.is_set():
             if pause_event.is_set():
                 # Пауза — не жжём CPU, быстро выходим по stop_event.
+                self._pacer.reset()  # после паузы расписание — от «сейчас»
                 stop_event.wait(0.05)
                 continue
             self._run_once(stop_event, pause_event)
@@ -106,7 +108,7 @@ class IdleWorker:
 
     def _run_once(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """Один цикл: работа + smart-sleep + запись тайминга."""
-        t_start = time.monotonic()
+        t_start = time.perf_counter()
 
         # Ф7 G.8: busy на время кадра — drain дожидается его завершения перед stop.
         self._busy = True
@@ -115,14 +117,9 @@ class IdleWorker:
         finally:
             self._busy = False
 
-        elapsed = time.monotonic() - t_start
-        sleep_time = self._target_interval - elapsed
-        if sleep_time > 0:
-            deadline = time.monotonic() + sleep_time
-            while time.monotonic() < deadline and not stop_event.is_set():
-                time.sleep(max(0.0, min(_SLEEP_CHUNK_S, deadline - time.monotonic())))
+        self._pacer.wait(stop_event)
 
-        self._cycle_metrics.record(time.monotonic() - t_start)
+        self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _do_work(self) -> None:
         """Хук полезной нагрузки воркера.
