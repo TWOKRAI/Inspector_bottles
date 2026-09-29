@@ -213,6 +213,12 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         final = sprites_dir / clean
         if final.exists():  # на Windows без учёта регистра — как ФС; контракт: conflict
             return _conflict(f"preset.sprite_put: файл уже есть: {clean}")
+        # Запись списка — ДО записи файла: relpath между дисками (sprites_dir и каталог пресета на разных
+        # дисках) после os.link оставил бы опубликованный файл без ответа.
+        try:
+            entry = sprite_entry(final, sprites_dir, self._preset_dir() or REPO_ROOT)
+        except ValueError as exc:
+            return _bad_request(f"preset.sprite_put: слой не сошлётся на sprites_dir ({exc})")
         try:
             fd, tmp = tempfile.mkstemp(dir=sprites_dir, suffix=".uploading")
         except OSError as exc:
@@ -238,9 +244,12 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         finally:
             try:
                 os.unlink(tmp)
-            except FileNotFoundError:
+            except OSError:
+                # ponytail: занятый tmp (антивирус на Windows) остаётся сиротой `.uploading` — `preset.sprites`
+                # его не показывает; сбой здесь не должен отнять ответ у опубликованного файла. Уборка сирот —
+                # если накопятся.
                 pass
-        return {"status": "ok", "file": sprite_entry(final, sprites_dir, self._preset_dir() or REPO_ROOT)}
+        return {"status": "ok", "file": entry}
 
     def _checked_sprites_dir(self, label: str) -> tuple[Path, dict[str, Any] | None]:
         """``sprites_dir`` за оградой и существующий, иначе ``(путь, ответ-ошибка)``: ОДНО правило для
