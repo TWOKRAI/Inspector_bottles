@@ -481,7 +481,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         with self._lock:
             deadline = self._jog_deadline
             regs = self._jog_regs
-            if deadline is None or time.monotonic() < deadline:
+            if deadline is None or time.perf_counter() < deadline:
                 return
             current = tuple(core.read(VFD_CMD_ADDR, 3))
             if current == regs:
@@ -735,7 +735,10 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         with self._lock:
             self._server.core.command_vfd(run=True, freq_hz=freq_hz_f, reverse=reverse)
             self._jog_regs = regs
-            self._jog_deadline = time.monotonic() + self._jog_timeout_ms / 1000.0
+            # perf_counter, не monotonic: на Windows (CPython 3.12) monotonic = GetTickCount64 с шагом
+            # 15.625 мс — дедлайн dead-man'а «плыл» бы на тик в обе стороны (замер: 60 мс сна видны
+            # как 46.9 мс в 13% случаев, сторож не видит истёкший дедлайн).
+            self._jog_deadline = time.perf_counter() + self._jog_timeout_ms / 1000.0
             self._jogging = True
         return self._belt_status()
 
