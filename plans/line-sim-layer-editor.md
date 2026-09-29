@@ -513,7 +513,11 @@ undo) пишутся один раз и потом гоняются против
   (`getImageData` своей картинки слоя); клик в прозрачную область верхнего → слой под ним. Выбор синхронен
   со строками формы 1.2h.
 
-**1.3h-a — бэкенд раскладки (developer).**
+**1.3h-a — бэкенд раскладки (developer).** **[DONE 2026-09-29]** `d6225d81` реализация, `18c80454` решение по `base`,
+`82fc47db` правки ревью (`origin_px`, канва без `_compose`, read-only). Тестер вслепую 9 RED → green; инъекции лида
+I1–I12 и J1–J4b — охраняются все заявленные свойства, пробелы I9 (defect-слои) и I10 (`seed=True`) записаны в STATUS.
+Ревью: ит.1 APPROVE_WITH_NITS (5 находок), ит.2 APPROVE_WITH_NITS. В ответ добавлен целый `origin_px` — страница
+ставит слой по нему, а не пересчитывает из `center_px` (JS `Math.round` расходится с лентой).
 Files: `Services/line_sim/core/layered_object.py` (публичный метод над тем, что сегодня собирает `_compose`),
 `Services/line_sim/core/preview.py` (`render_layout`), `Plugins/sim/layer_preview/plugin.py` (команда
 `preset.layout`), `Plugins/sim/pult_web/plugin.py` (маршрут `POST /api/preset/layout` → `layers_process`,
