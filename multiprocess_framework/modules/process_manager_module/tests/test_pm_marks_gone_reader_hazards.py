@@ -76,10 +76,44 @@ def _bounded(fn: Callable[[], Any], deadline_s: float) -> Any:
     return box.get("value")
 
 
+def _pid_present(pid: int) -> bool:
+    """Ещё ли выполняется процесс ``pid``, БЕЗ реапа (в отличие от ``Process.is_alive``
+    из второго потока).
+
+    POSIX: ``os.kill(pid, 0)`` — ``ProcessLookupError`` = pid ушёл из таблицы.
+    Windows: ``os.kill(pid, 0)`` НЕ проба — сигнал 0 там равен ``CTRL_C_EVENT`` и уходит в
+    ``GenerateConsoleCtrlEvent``, который живость не проверяет (измерено: для процесса,
+    убитого ``terminate``, но чей kernel-объект ещё держат дескрипторы, вызов возвращает
+    успех; для давно исчезшего pid — ``OSError [WinError 87]``, не ``ProcessLookupError``).
+    Поэтому там смотрим код завершения: kernel-объект мёртвого процесса живёт, пока его
+    держит хоть один дескриптор, а «мёртв» значит «код выхода не ``STILL_ACTIVE``»."""
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False  # объекта процесса уже нет
+    try:
+        code = wintypes.DWORD()
+        return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        k32.CloseHandle(handle)
+
+
 class _MarkWatcher:
-    """Фоновый опрос метки: фиксирует, был ли pid читателя ещё в таблице процессов
-    в момент, когда метка впервые стала видна. ``os.kill(pid, 0)`` не реапит, в
-    отличие от ``Process.is_alive`` из второго потока."""
+    """Фоновый опрос метки: фиксирует, выполнялся ли ещё процесс читателя в момент, когда
+    метка впервые стала видна (проба — ``_pid_present``)."""
 
     def __init__(self, q, pid: int) -> None:
         self._q = q
@@ -94,11 +128,7 @@ class _MarkWatcher:
         while not self._stop.is_set():
             if self._q.is_reader_gone():
                 self.seen_mark = True
-                try:
-                    os.kill(self._pid, 0)
-                    self.pid_present_at_mark = True
-                except ProcessLookupError:
-                    self.pid_present_at_mark = False
+                self.pid_present_at_mark = _pid_present(self._pid)
                 return
             time.sleep(0.001)
 
