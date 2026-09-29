@@ -1,0 +1,67 @@
+# Хендофф: transport-single-policy Ф4 (claim check по размеру) — 2026-09-29
+
+**Ветка:** `feat/qr-code-reader`.
+**План:** [`plans/transport-single-policy.md`](../../plans/transport-single-policy.md), Фаза 4.
+**Коммиты сессии:**
+- `216220fb` — контракт C1–C8;
+- `dd1491e3` — реализация 4.1;
+- `1d27607e` — план 4.2–4.3;
+- последний `docs(...)` коммит — ревью и этот хендофф.
+
+## Сделано
+
+**Task 4.0 — разведка.** [Аудит](../audits/2026-09-29_transport-f4-payload-inventory.md):
+- маска 307 КБ и `rendered_frame` 921 КБ ехали через pipe, около 61 МБ/с pickle;
+- `/output_frames_N` на Mac — голые имена SHM на POSIX без `FW_SHM_OWNER_INCARNATION`;
+- item таскает все ключи через все хопы → обрезка item записана в бэклог как B-7 (решение владельца: после claim check).
+
+**Task 4.1 — `dd1491e3`.** Кольцо на ключ, `_shm_refs`, порог 8192 Б, тикет на ссылку.
+- Tester в worktree до реализации: 10 RED → green.
+- Инъекции лида: 8 патчей, пустых тестов нет.
+- Живой замер `inspection_full`: max data-сообщения 781 Б против 1 229 554 Б, 0 fallback и дропов, fps 21.3 как до, CPU не хуже.
+
+**Ревью 4.1 — REQUEST_CHANGES.** [Отчёт](../reviews/2026-09-29_task-4.1-review.md).
+
+## Следующий шаг — Task 4.1-fix (малый, developer + повторное ревью по фиксу)
+
+1. `_is_large_array` (`frame_shm_middleware.py:67`): гейт `dtype.kind in "biufc" and ndim in (2, 3)`, остальное inline. Тесты на `<U`, object, `datetime64`, 1D, 4D.
+2. `_ring_by_slot` (`:482`): неизвестный непустой `slot` отбрасывать и считать счётчиком; в кольцо `frame` уходит только тикет без `slot`.
+3. Сузить C1 в плане и в tester-файле `test_claim_check_any_key.py` до «числовой массив, ndim 2–3».
+4. Живой замер `letter_robot_sim` (+ `apps/line_sim`).
+   - Скрипты: `stand.py`, `perf.py`, `agg.py`, `hook/sitecustomize.py` в scratchpad сессии 245f214a. Он временный — при необходимости восстановить по описанию метода в аудите 4.0.
+   - `perf.py` = `BackendHarness` + `telemetry_set(latency_ms, fps)` + `watch_like_gui` + `telemetry_snapshot` + сумма CPU потомков через psutil.
+
+Затем **Task 4.2** (расширена ревью, пункты а–ж в плане):
+- ссылка живёт один хоп;
+- один формат ссылки для `frame`;
+- уникальные имена SHM;
+- release после отправки;
+- `on_evict` без copy-out;
+- потолок числа колец.
+
+Затем **Task 4.3** — стенд 60/100 fps 1080p.
+В конце фазы — **CTO (Fable)** проверяет архитектуру всей Ф4 (решение владельца).
+
+## Решения владельца в этой сессии
+
+- 4.1 — claim check по размеру; обрезка item — позже (B-7).
+- Главное — стабильно, без костылей, универсально, под камеры 60–100 fps.
+- Флип `FW_SHM_OWNER_INCARNATION` принят как часть 4.2 (владелец не возразил на трактовку «стабильность = да»).
+- Архитектуру фазы в конце проверяет Fable.
+
+## Ловушки
+
+- **Два дефекта при loan ON** — F1 (запись поверх живых данных соседа) и release до send — проявляются только при loan ON. Сейчас он выключен по умолчанию, но эти дефекты блокируют флип дефолтов в 4.3.
+- **Старые красные тесты.** H8/H9 `test_reader_gone_hazards` и 3 сокетных HOL-теста красные в полном прогоне и до 4.1 (C-2 в `plans/queue/defects.md`) — не путать с регрессией.
+- **План перерос лимит.** `plans/transport-single-policy.md` — 53 КБ при бюджете 32 КБ (doc-size-guard). Разбить на `plans/transport-single-policy/plan.md` + `phase-4.md` отдельным `docs(plans)` коммитом.
+- **Бриф агента.** Хук `lint-brief` требует бриф по `.claude/plugins/dev/templates/executor-brief.md`, не больше 6 файлов.
+- **Чужие файлы в дереве.** В рабочем дереве лежат незакоммиченные файлы других сессий (`.claude/memory/*`, `.claude/agent-memory/tester/*`) — не стейджить.
+- **qex недоступен.** Во время сессии qex лежал (Ollama down).
+
+## Попутно записано
+
+- C-1 — серое превью в GUI сломано;
+- C-2 — красные тесты на Windows;
+- C-3 — `bad_code_text: ""`.
+
+Всё в `plans/queue/defects.md`. C-1 не исправлено: без него кадр SDK-считывателя в GUI не виден.
