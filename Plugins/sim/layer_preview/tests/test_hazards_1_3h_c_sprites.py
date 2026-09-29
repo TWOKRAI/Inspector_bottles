@@ -316,6 +316,19 @@ def test_non_dict_body_is_bad_request(tmp_path: Path) -> None:
     assert plugin.cmd_preset_sprites(None).get("status") == "ok"  # как у соседних команд: None == {}
 
 
+def test_missing_dir_outside_fence_is_bad_request_not_io_error(tmp_path: Path) -> None:
+    """Ограда — РАНЬШЕ существования: отсутствующий каталог вне ограды -> `bad_request`, а не `io_error`
+    с путём в `message` (иначе ответ выдаёт, есть ли путь за оградой). Добавлен лидом: инъекция «is_dir до
+    ограды» оставляла зелёными все 30 тестов — тесты ограды брали существующий каталог."""
+    missing = tmp_path / "nowhere_zq9"
+    plugin = _new_preview(None, sprites_dir=str(missing))
+
+    res = _within_deadline(lambda: plugin.cmd_preset_sprites({}))
+
+    assert not missing.exists()
+    assert res.get("status") == "error" and res.get("code") == "bad_request", res
+
+
 def test_sprites_dir_that_is_a_file_is_io_error(tmp_path: Path) -> None:
     preset_path, sprites_dir = _make_world(tmp_path)
     not_a_dir = sprites_dir / "file_zq9.txt"
