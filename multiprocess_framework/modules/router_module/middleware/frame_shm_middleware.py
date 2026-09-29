@@ -65,11 +65,21 @@ FRAME_KEY = "frame"
 
 
 def _is_large_array(value: Any) -> bool:
-    """ndarray с ``nbytes >= CLAIM_CHECK_MIN_NBYTES`` (C1/C2). Импорт numpy — локальный
-    (модуль не тянет numpy на уровне импорта; после первого вызова это поиск в sys.modules)."""
+    """Числовой ndarray ``ndim`` 2–3 с ``nbytes >= CLAIM_CHECK_MIN_NBYTES`` (C1/C2).
+
+    4.1-fix (ревью 4.1, находка 1): SHM-слот хранит изображение-подобный массив
+    ``(H, W[, C])`` числового dtype. Строки (``<U``), object, ``datetime64``, 1D и 4D+
+    через слот не восстанавливаются (молча ``None`` / dtype без единицы / ERROR на каждое
+    сообщение) — они едут inline, как до 4.1. Импорт numpy — локальный (модуль не тянет
+    numpy на уровне импорта; после первого вызова это поиск в sys.modules)."""
     from numpy import ndarray
 
-    return isinstance(value, ndarray) and value.nbytes >= CLAIM_CHECK_MIN_NBYTES
+    return (
+        isinstance(value, ndarray)
+        and value.dtype.kind in "biufc"
+        and value.ndim in (2, 3)
+        and value.nbytes >= CLAIM_CHECK_MIN_NBYTES
+    )
 
 
 class _Ring:
@@ -357,6 +367,10 @@ class FrameShmMiddleware:
         # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware —
         # manager считает свои, но raw-путь его не проходит). Агрегируется в get_stats.
         self.frame_torn_reads = 0
+        # 4.1-fix: тикетов release с неизвестным ``slot`` отброшено (не наше кольцо —
+        # не трогаем ничей займ). ponytail: не в get_shm_stats (набор ключей закреплён
+        # и уходит в телеметрию) — добавить туда в 4.2 вместе с форматом ссылки.
+        self.frame_release_unknown_slot = 0
         # Ф7 G.5.c: post-use re-check zero-copy view — слот перезаписан под живым view.
         # H-задача (Этап 2): счётчик теперь у reader'а (`self._reader.stale_drops`),
         # frame_stale_drops — read-only property (агрегируется в get_stats → heartbeat).
@@ -479,14 +493,19 @@ class FrameShmMiddleware:
             self._rings = {**self._rings, key: ring}  # copy-on-write (см. __init__)
         return ring
 
-    def _ring_by_slot(self, slot: Any) -> _Ring:
-        """Кольцо по имени слота из тикета. Нет/неизвестно → кольцо ``frame`` (до 4.1 все
-        тикеты шли в единственный пул — back-compat тикетов без ``slot``)."""
-        if slot:
-            for ring in self._rings.values():
-                if ring.slot == slot:
-                    return ring
-        return self._frame_ring
+    def _ring_by_slot(self, slot: Any) -> Optional[_Ring]:
+        """Кольцо по имени слота из тикета. Нет ``slot`` → кольцо ``frame`` (до 4.1 все
+        тикеты шли в единственный пул — back-compat тикетов без ``slot``).
+
+        4.1-fix (ревью 4.1, находка 3): НЕИЗВЕСТНЫЙ непустой ``slot`` → ``None``, тикет
+        отбрасывается. Раньше он падал в кольцо ``frame``, и ``evicted=True`` (без
+        generation-guard) снимал чужой займ кадра."""
+        if not slot:
+            return self._frame_ring
+        for ring in self._rings.values():
+            if ring.slot == slot:
+                return ring
+        return None
 
     def _sum_stat(self, name: str) -> int:
         return sum(ring.stat(name) for ring in list(self._rings.values()))
@@ -771,6 +790,18 @@ class FrameShmMiddleware:
             else:
                 item.pop(SHM_REFS_KEY, None)
 
+    def _count_unknown_slot_ticket(self, slot: Any) -> None:
+        """4.1-fix: учесть отброшенный тикет с неизвестным ``slot`` (счётчик всегда,
+        лог — первый и каждый N-й, как pickle-fallback)."""
+        self.frame_release_unknown_slot += 1
+        n = self.frame_release_unknown_slot
+        if n == 1 or n % _PICKLE_WARN_EVERY == 0:
+            self._log_error(
+                f"FrameShmMiddleware: тикет release с неизвестным slot={slot!r} отброшен "
+                f"[owner={self._owner}; кольца={sorted(r.slot for r in self._rings.values())}; "
+                f"всего={n}]"
+            )
+
     def _note_loan_exhausted(self, ring: Optional[_Ring] = None) -> None:
         """Ф7 G.5.d (В3): free-list исчерпан → back-pressure = ГРОМКИЙ drop-на-источнике
         (кадр не уходит; счётчик всегда, WARNING throttled). Живую камеру НЕ блокируем.
@@ -791,7 +822,7 @@ class FrameShmMiddleware:
         """Ф7 G.5.d-2 (В3): owner-side release-handler — тонкий адаптер к пулам (H-задача).
 
         Consumer, дочитав view, шлёт пачку тикетов ``{slot?, index, generation, reader}``;
-        Task 4.1: тикеты раскладываются по кольцам по ``slot`` (нет/неизвестен → кольцо
+        Task 4.1: тикеты раскладываются по кольцам по ``slot`` (нет → кольцо
         ``frame``, back-compat), каждое кольцо делегирует декремент в СВОЙ
         ``FramePool.release`` (guard'ы — refcount==0/stale generation/dup reader — внутри
         пула; generation читает ``gen_reader`` кольца). refcount мутирует ТОЛЬКО этот
@@ -809,6 +840,9 @@ class FrameShmMiddleware:
         for ticket in releases:
             slot = ticket.get("slot") if isinstance(ticket, dict) else None
             ring = self._ring_by_slot(slot)
+            if ring is None:
+                self._count_unknown_slot_ticket(slot)
+                continue
             by_ring.setdefault(id(ring), (ring, []))[1].append(ticket)
         for ring, tickets in by_ring.values():
             ring.release(tickets, evicted)

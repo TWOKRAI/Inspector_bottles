@@ -215,3 +215,63 @@ def test_small_frame_still_by_reference_small_key_inline(made):
     assert out is not None
     assert "frame" not in out["data"] and out["data"].get("shm_name") == "output_frames"
     assert out["data"]["small"] is small and "_shm_refs" not in out["data"]
+
+
+# ============================ 4.1-fix (ревью 4.1, находки 1 и 3) ============================
+def _not_image_like() -> dict[str, np.ndarray]:
+    """Крупные (>= 8192 Б) массивы, которые SHM-слот не восстанавливает: едут inline."""
+    obj = np.empty((40, 40), dtype=object)
+    obj[:] = "x"
+    return {
+        "unicode": np.full((20, 8), "abcdefghijklmnop", dtype="<U16"),  # 10240 Б
+        "object": obj,  # 12800 Б на 64-бит
+        "datetime": np.arange(2048).astype("datetime64[s]").reshape(32, 64),  # 16384 Б
+        "one_d": _arr((2048,), "float32", seed=1),  # 8192 Б
+        "four_d": _arr((4, 16, 16, 8), seed=2),  # 8192 Б
+    }
+
+
+@pytest.mark.parametrize("key", list(_not_image_like()))
+def test_non_image_array_travels_inline_and_arrives_intact(made, key):
+    """Строки, object, ``datetime64``, 1D и 4D крупнее порога едут inline и доходят как были:
+    без ссылки, без pickle-fallback, dtype (с единицей) и значения сохранены. Красит: убрать
+    из ``_is_large_array`` условие ``dtype.kind`` (unicode/object/datetime уходят ссылкой и
+    теряются) или ``ndim`` (1D — ERROR и fallback на каждое сообщение, 4D — ссылкой)."""
+    value = _not_image_like()[key]
+    assert value.nbytes >= 8192  # литерал порога, иначе тест ничего не проверяет
+    mw, gui = _owner(made, coll=2), _reader(made)
+
+    def scenario() -> dict:
+        out = _send(mw, {key: value, "n": 1})
+        assert out is not None
+        assert out["data"][key] is value, f"{key}: массив не остался inline"
+        assert key not in out["data"].get("_shm_refs", {}), f"{key}: ушёл ссылкой"
+        assert mw.frame_pickle_fallbacks == 0
+        return gui.on_receive(pickle.loads(pickle.dumps(out)))
+
+    got = _bounded(scenario)["data"][key]
+    assert got.dtype == value.dtype and got.shape == value.shape
+    assert (got == value).all()
+
+
+def test_release_with_unknown_slot_is_dropped_not_routed_to_frame_ring(loan, made):
+    """Тикет вытеснения с неизвестным ``slot`` отбрасывается и считается: займ кольца
+    ``frame`` остаётся, следующий ``frame`` исчерпан. Контроль: тот же тикет БЕЗ ``slot``
+    (back-compat) займ снимает. Красит: fallback неизвестного slot на кольцо ``frame``
+    в ``_ring_by_slot`` (чужой тикет снимает займ кадра, который ещё читают)."""
+    mw = _owner(made, coll=1)
+    stray = {"slot": "output_frames__nope", "index": 0, "generation": -1, "reader": "p"}
+
+    def scenario() -> None:
+        assert _send(mw, {"frame": _arr(FRAME, seed=1)}) is not None  # кольцо frame: 1/1
+        mw.release_slots([stray], evicted=True)
+        assert mw.frame_release_unknown_slot == 1
+        assert _send(mw, {"frame": _arr(FRAME, seed=2)}) is None, "чужой тикет снял займ кадра"
+        assert mw.frame_loan_exhausted == 1
+
+        no_slot = {k: v for k, v in stray.items() if k != "slot"}
+        mw.release_slots([no_slot], evicted=True)
+        assert _send(mw, {"frame": _arr(FRAME, seed=3)}) is not None, "тикет без slot не снял займ"
+        assert mw.frame_release_unknown_slot == 1
+
+    _bounded(scenario)
