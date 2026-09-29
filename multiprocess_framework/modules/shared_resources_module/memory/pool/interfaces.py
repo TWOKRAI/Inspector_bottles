@@ -39,7 +39,7 @@ drift → drop, НЕ порча).
 
 from __future__ import annotations
 
-from typing import Callable, Protocol, TypedDict, runtime_checkable
+from typing import Callable, NotRequired, Protocol, TypedDict, runtime_checkable
 
 
 class LoanTicket(TypedDict):
@@ -47,11 +47,16 @@ class LoanTicket(TypedDict):
 
     Потребитель, дочитав view слота, шлёт владельцу пачку тикетов. ``generation`` —
     поколение слота на момент чтения (seqlock); ``-1`` = слот без seqlock (guard-no-op).
+    ``slot`` (Task 4.1, необязательный) — имя SHM-слота кольца, к которому относится
+    займ: у владельца одно кольцо на ключ data, транспорт маршрутизирует тикет в пул
+    своего кольца. Нет ``slot`` → кольцо кадра (``output_frames``), как до 4.1. Сам пул
+    поле не читает — пул одного кольца.
     """
 
     index: int
     generation: int
     reader: str
+    slot: NotRequired[str]
 
 
 class PoolStats(TypedDict):

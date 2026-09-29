@@ -831,28 +831,37 @@ class RouterManager(ChannelRoutingManager):
         data = evicted_item.get("data")
         if not isinstance(data, dict):
             return
-        owner = data.get("owner") or data.get("shm_owner")
-        shm_name = data.get("shm_name")
-        idx = data.get("shm_index")
-        if not owner or not shm_name or idx is None:
-            return  # не кадровое сообщение (нет SHM-координат) — займа нет, релизить нечего
-        release_msg = {
-            "target": owner,
-            "type": "shm_release",
-            "queue_type": "system",
-            "data": {
-                "evicted": True,
-                "releases": [{"slot": shm_name, "index": idx, "generation": -1, "reader": reader_process}],
-            },
-        }
-        try:
-            # Прямой put в system-очередь владельца (не router.send) — избегаем ре-энтранта
-            # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
-            qr.send_to_queue(owner, "system", release_msg)
-        except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
-            self._log_debug(
-                lambda exc=exc: f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc!r}"
+        # Task 4.1 (C5): ссылка frame (плоские поля) + каждая ссылка крупного ключа
+        # (``data["_shm_refs"][key]``) — по тикету на ссылку, пачкой на владельца.
+        refs = [data]
+        extra = data.get("_shm_refs")
+        if isinstance(extra, dict):
+            refs.extend(r for r in extra.values() if isinstance(r, dict))
+        by_owner: dict = {}
+        for ref in refs:
+            owner = ref.get("owner") or ref.get("shm_owner")
+            shm_name = ref.get("shm_name")
+            idx = ref.get("shm_index")
+            if not owner or not shm_name or idx is None:
+                continue  # нет SHM-координат — займа нет, релизить нечего
+            by_owner.setdefault(owner, []).append(
+                {"slot": shm_name, "index": idx, "generation": -1, "reader": reader_process}
             )
+        for owner, releases in by_owner.items():
+            release_msg = {
+                "target": owner,
+                "type": "shm_release",
+                "queue_type": "system",
+                "data": {"evicted": True, "releases": releases},
+            }
+            try:
+                # Прямой put в system-очередь владельца (не router.send) — избегаем ре-энтранта
+                # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
+                qr.send_to_queue(owner, "system", release_msg)
+            except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
+                self._log_debug(
+                    lambda exc=exc, owner=owner: f"_on_frame_evicted: release owner={owner!r} не отправлен: {exc!r}"
+                )
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.

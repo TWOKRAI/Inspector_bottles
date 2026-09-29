@@ -284,6 +284,23 @@ class PipelineExecutor:
                             "index": int(it.get("shm_index", -1)),
                         }
                     )
+            # Task 4.1 (C5): по тикету на КАЖДУЮ восстановленную view-ссылку крупного
+            # ключа (``_shm_refs[key]`` несёт свою view-мету — её пишет reader при
+            # restore). ``shm_name`` = слот кольца ключа → владелец маршрутизирует release
+            # в пул этого кольца; re-check (_frame_views_valid) охватывает и эти view.
+            refs = it.get("_shm_refs")
+            if isinstance(refs, dict):
+                for ref in refs.values():
+                    if isinstance(ref, dict) and ref.get("_frame_is_view") and ref.get("_shm_view_name"):
+                        tickets.append(
+                            {
+                                "view_name": ref["_shm_view_name"],
+                                "generation": int(ref.get("_shm_view_generation", -1)),
+                                "owner": ref.get("owner") or ref.get("shm_owner") or "",
+                                "shm_name": ref.get("shm_name", ""),
+                                "index": int(ref.get("shm_index", -1)),
+                            }
+                        )
         return tickets
 
     def _frame_views_valid(self, view_tickets: list[dict]) -> bool:
