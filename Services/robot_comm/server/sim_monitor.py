@@ -60,8 +60,10 @@ class SimMonitorWindow(QWidget):
     def __init__(self, journal: SimJournal, *, poll_ms: int = 100, max_lines: int = 3000) -> None:
         super().__init__()
         self._journal = journal
-        # Якорь для перевода монотонных отметок журнала в настенное время.
-        self._t0_mono = time.monotonic()
+        # Якорь для перевода отметок журнала в настенное время — на ЧАСАХ САМОГО ЖУРНАЛА
+        # (perf_counter по умолчанию), а не на своих: иначе показанное время уезжает на разницу
+        # часов (+28 мс на аптайме 5.8 ч).
+        self._t0_mono = journal.clock()
         self._t0_wall = time.time()
         # Предыдущая отметка ПО КАЖДОЙ стороне — Δt должен считаться внутри
         # колонки: «три задания за 100 мс» видно именно так.

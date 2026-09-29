@@ -19,6 +19,8 @@ import matplotlib
 import numpy as np
 import pytest
 
+from Services.dataset_gen.core.catalog import imread_unicode
+
 WORKTREE_ROOT = Path(__file__).resolve().parents[3]
 FONT_DIR = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
 DEJAVU_SANS = FONT_DIR / "DejaVuSans.ttf"
@@ -84,8 +86,8 @@ def test_font_tool_writes_centered_black_letters_per_font(tmp_path: Path) -> Non
 
     images: dict[Path, np.ndarray] = {}
     for f in expected_files:
-        bgra = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
-        assert bgra is not None, f"не удалось прочитать {f}"
+        # cv2.imread на Windows не открывает путь с кириллицей (папка буквы «А») — читаем как продукт пишет.
+        bgra = imread_unicode(f, cv2.IMREAD_UNCHANGED)
         assert bgra.shape == (100, 100, 4), f"{f}: shape={bgra.shape}, ожидали (100,100,4)"
         rgba = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGBA)
         images[f] = rgba

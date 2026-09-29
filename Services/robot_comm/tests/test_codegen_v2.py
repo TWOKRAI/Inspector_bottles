@@ -103,6 +103,19 @@ def test_generate_is_deterministic():
         assert sha8 in header
 
 
+def test_yaml_sha8_independent_of_checkout_line_endings(tmp_path):
+    """Один и тот же протокол в LF- и CRLF-checkout даёт один отпечаток (маркер в Lua-блоке робота)."""
+    from Services.robot_comm import codegen
+
+    lf_text = _YAML_PATH.read_bytes().replace(b"\r\n", b"\n")
+    for name, data in (("lf", lf_text), ("crlf", lf_text.replace(b"\n", b"\r\n"))):
+        proto_dir = tmp_path / name / "Services" / "robot_comm" / "protocols"
+        proto_dir.mkdir(parents=True)
+        (proto_dir / "delta_v2.yaml").write_bytes(data)
+
+    assert codegen.yaml_sha8(tmp_path / "lf") == codegen.yaml_sha8(tmp_path / "crlf")
+
+
 def test_check_clean_and_stale(tmp_path):
     from Services.robot_comm import codegen
 
@@ -230,7 +243,8 @@ def test_lua_block_markers_and_sha():
     from Services.robot_comm import codegen
 
     text = codegen.lua_block(_REPO_ROOT)
-    sha8 = hashlib.sha256(_YAML_PATH.read_bytes()).hexdigest()[:8]
+    # Отпечаток протокола — от LF-формы файла: checkout с core.autocrlf на Windows даёт CRLF, а Mac/Orin/git-blob — LF.
+    sha8 = hashlib.sha256(_YAML_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:8]
 
     assert codegen.yaml_sha8(_REPO_ROOT) == sha8
     assert text.startswith(f"-- ===== BEGIN GENERATED (delta_v2.yaml {sha8}) =====")

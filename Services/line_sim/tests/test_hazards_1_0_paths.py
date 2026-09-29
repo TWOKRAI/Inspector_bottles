@@ -257,9 +257,12 @@ def test_save_as_on_windows_writes_forward_slashes(monkeypatch: pytest.MonkeyPat
     a_dir.mkdir()
     b_dir.mkdir()
     preset = ScenePreset.from_dict({"catalog_dir": "sprites", "base_dir": str(a_dir)})
+    # Ссылка на настоящую функцию берётся ДО подмены: на Windows `os.path` и есть `ntpath`,
+    # setattr заменяет ту же функцию, и лямбда, зовущая `ntpath.relpath` по имени, рекурсирует в себя.
+    windows_relpath = ntpath.relpath
     monkeypatch.setattr(
         "Services.line_sim.core.preset.os.path.relpath",
-        lambda _path, _start: ntpath.relpath(r"C:\proj\A\sprites", r"C:\proj\B"),
+        lambda _path, _start: windows_relpath(r"C:\proj\A\sprites", r"C:\proj\B"),
     )
     preset.to_yaml(b_dir / "q.yaml")
     written = yaml.safe_load((b_dir / "q.yaml").read_text(encoding="utf-8"))

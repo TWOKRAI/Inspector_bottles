@@ -171,7 +171,9 @@ class SimJournal:
         dup_window_s: float = 10.0,
         maxlen: int = 4000,
         word_order: str = "little",
-        clock: Callable[[], float] = time.monotonic,
+        # perf_counter, не monotonic: на Windows (CPython 3.12) monotonic = GetTickCount64 с шагом
+        # ~15.6 мс, и строки пачки записей получают одинаковое t (склеенная строка «не сдвигается»).
+        clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._dup_radius_mm = dup_radius_mm
         self._dup_window_s = dup_window_s
@@ -195,6 +197,12 @@ class SimJournal:
         # repeats_frozen_xy) УШЛА отсюда в 5.1b — см. _register_job.
         self.dups_same_capture = 0
         self.dups_tracked = 0
+
+    @property
+    def clock(self) -> Callable[[], float]:
+        """Часы журнала: в них выражены ``JournalEntry.t``. Потребителю, переводящему отметки в
+        настенное время (``SimMonitorWindow``), якорь нужен ИМЕННО на этих часах — не на своих."""
+        return self._clock
 
     # ------------------------------------------------------------------ #
     # Вход: записи с провода
