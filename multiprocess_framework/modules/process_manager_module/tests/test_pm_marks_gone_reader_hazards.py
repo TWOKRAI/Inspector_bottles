@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
 import threading
 import time
 from typing import Any, Callable, List
@@ -76,10 +75,29 @@ def _bounded(fn: Callable[[], Any], deadline_s: float) -> Any:
     return box.get("value")
 
 
+def _pid_present(pid: int) -> bool:
+    """Ещё ли выполняется процесс ``pid``, БЕЗ реапа (в отличие от ``Process.is_alive``
+    из второго потока).
+
+    Не ``os.kill(pid, 0)``: на Windows сигнал 0 равен ``CTRL_C_EVENT`` и уходит в
+    ``GenerateConsoleCtrlEvent`` — живость он не проверяет (замер 2026-09-29: для процесса,
+    убитого ``terminate``, чей kernel-объект держит дескриптор родителя, вызов «успешен»).
+    psutil на Windows смотрит код выхода (``STILL_ACTIVE``), на POSIX — таблицу процессов;
+    зомби считаем мёртвым. Тот же приём — ``backend_ctl/tests/test_switch_honest_state_live.py::_pid_alive``.
+    Замер 2026-09-29 (spawn, Windows): жив → True; убит, дескриптор держит родитель → False;
+    после ``Process.close()`` → False; несуществующий pid → False."""
+    import psutil
+
+    try:
+        proc = psutil.Process(pid)
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+
 class _MarkWatcher:
-    """Фоновый опрос метки: фиксирует, был ли pid читателя ещё в таблице процессов
-    в момент, когда метка впервые стала видна. ``os.kill(pid, 0)`` не реапит, в
-    отличие от ``Process.is_alive`` из второго потока."""
+    """Фоновый опрос метки: фиксирует, выполнялся ли ещё процесс читателя в момент, когда
+    метка впервые стала видна (проба — ``_pid_present``)."""
 
     def __init__(self, q, pid: int) -> None:
         self._q = q
@@ -94,11 +112,7 @@ class _MarkWatcher:
         while not self._stop.is_set():
             if self._q.is_reader_gone():
                 self.seen_mark = True
-                try:
-                    os.kill(self._pid, 0)
-                    self.pid_present_at_mark = True
-                except ProcessLookupError:
-                    self.pid_present_at_mark = False
+                self.pid_present_at_mark = _pid_present(self._pid)
                 return
             time.sleep(0.001)
 
@@ -187,6 +201,9 @@ def test_mark_only_after_confirmed_death() -> None:
     try:
         reader.start()
         time.sleep(0.3)
+        # Положительный контроль пробы (ревью 2026-09-29): проба, всегда отвечающая False,
+        # сделала бы тест зелёным и при метке ДО смерти.
+        assert _pid_present(reader.pid) is True, "проба не видит живой процесс читателя"
         watcher = _MarkWatcher(q, reader.pid)
         assert _bounded(lambda: registry.stop_one("Reader", timeout=0.3), 10.0) is True
         time.sleep(0.05)
