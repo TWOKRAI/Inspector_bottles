@@ -7,6 +7,10 @@
 
 from __future__ import annotations
 
+import re
+import time
+from datetime import datetime
+
 import pytest
 
 pytest.importorskip("PySide6", reason="GUI-монитор требует PySide6")
@@ -82,3 +86,36 @@ def test_line_carries_time_and_delta_within_its_column(window) -> None:
     assert len(lines) == 2
     assert lines[0].count(":") >= 2  # HH:MM:SS.mmm
     assert lines[1].lstrip().split()[1].startswith("+")  # у второй строки есть дельта
+
+
+def _shown_minus_now_s(win: SimMonitorWindow, journal: SimJournal) -> float:
+    """Показанное окном время строки журнала минус настенное «сейчас» (сек., с учётом полуночи)."""
+    journal.on_event("[CVT]  выполнено -> робот свободен")
+    (entry,) = journal.drain()
+    match = re.search(r"(\d\d):(\d\d):(\d\d)\.(\d{3})", win._render(entry))
+    assert match, "в строке нет отметки времени"
+    hh, mm, ss, ms = (int(g) for g in match.groups())
+    shown = hh * 3600 + mm * 60 + ss + ms / 1000
+    now = datetime.now()
+    diff = shown - (now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6)
+    return (diff + 43200) % 86400 - 43200
+
+
+def test_monitor_time_is_anchored_on_the_journal_clock(qtbot) -> None:
+    """Часы журнала выданы с произвольным сдвигом от monotonic: якорь окна на своих часах
+    показал бы время со сдвигом (здесь +5000 с), на часах журнала — текущее."""
+    journal = SimJournal(clock=lambda: time.monotonic() + 5000.0)
+    win = SimMonitorWindow(journal, poll_ms=10_000)
+    qtbot.addWidget(win)
+
+    assert abs(_shown_minus_now_s(win, journal)) < 0.05
+
+
+def test_monitor_time_matches_wall_clock_with_default_journal_clock(qtbot) -> None:
+    """Штатные часы журнала (perf_counter): расхождение с настенным временем — единицы мс, не десятки
+    (на Windows perf_counter и monotonic расходятся на 28 мс и растут с аптаймом)."""
+    journal = SimJournal()
+    win = SimMonitorWindow(journal, poll_ms=10_000)
+    qtbot.addWidget(win)
+
+    assert abs(_shown_minus_now_s(win, journal)) < 0.015
