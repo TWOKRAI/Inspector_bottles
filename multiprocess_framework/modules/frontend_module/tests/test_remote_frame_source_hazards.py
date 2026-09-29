@@ -81,9 +81,9 @@ def _in_thread(fn: Callable[[], Any], deadline: float) -> Dict[str, Any]:
 
 def _segment() -> shared_memory.SharedMemory:
     frame = np.full((48, 64, 3), 9, dtype=np.uint8)
-    size = calculate_buffer_size(1, frame.shape, frame.dtype, seqlock=False)
+    size = calculate_buffer_size(1, frame.shape, frame.dtype, seqlock=True)
     shm = shared_memory.SharedMemory(name=f"t13h{uuid.uuid4().hex[:8]}", create=True, size=size)
-    pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=False)
+    pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=True)  # первая запись: поколение 2
     return shm
 
 
@@ -94,7 +94,7 @@ def _push(sock_ch: SocketChannel, address: str, name: str, bseq: int) -> None:
             "targets": [address],
             "command": "frames.frame",
             "sender": "gui",
-            "data": {"sender": "camA", "name": name, "idx": 0, "seqlock": False, "bseq": bseq, "ts": time.time()},
+            "data": {"sender": "camA", "name": name, "gen": 2, "bseq": bseq, "ts": time.time()},
         }
     )
 
@@ -105,7 +105,7 @@ class _Stand:
     def __init__(self) -> None:
         self.router, self.sock_ch = _make_host(
             {
-                "frames.subscribe": lambda m: {"success": True, "seqlock": False, "owner_incarnation": False},
+                "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": False},
                 "frames.unsubscribe": lambda m: {"success": True, "removed": True},
                 "ping": lambda m: {"pong": True},
             }
@@ -204,11 +204,11 @@ def _wait(predicate: Callable[[], bool], timeout: float = 3.0) -> bool:
 
 
 def test_d_odd_generation_is_torn_not_delivered() -> None:
-    """(d) Слот с НЕЧЁТНЫМ поколением (писатель посреди записи) при ``seqlock=True`` →
-    колбэк не зовётся, ``torn == 1``. Детерминированно, без гонки писателя.
+    """(d) Слот с НЕЧЁТНЫМ поколением (писатель посреди записи; ссылка указывает на прежнюю
+    запись, gen=2) → колбэк не зовётся, ``torn == 1``. Детерминированно, без гонки писателя.
 
-    Инъекция: ``verify_seqlock=seqlock`` → ``False`` в ``_read_noting_generation`` →
-    кадр читается как целый и доставляется → красный."""
+    Инъекция: сверка ``read_generation(buf) != gen`` в ``ShmFrameReader._read_at_generation``
+    убрана → кадр читается как целый и доставляется → красный."""
     import struct
 
     frame = np.full((48, 64, 3), 5, dtype=np.uint8)
@@ -224,7 +224,7 @@ def test_d_odd_generation_is_torn_not_delivered() -> None:
         delivered: list = []
         source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
         source.subscribe(None, lambda s, a, b: delivered.append(b))
-        client.push({"sender": "camA", "name": shm.name, "idx": 0, "seqlock": True, "bseq": 1, "ts": 0.0})
+        client.push({"sender": "camA", "name": shm.name, "gen": 2, "bseq": 1, "ts": 0.0})
 
         assert _wait(lambda: source.stats["torn"] + source.stats["delivered"] + source.stats["errors"] >= 1)
         assert delivered == [], "кадр с нечётным поколением доставлен как целый"
@@ -237,12 +237,12 @@ def test_d_odd_generation_is_torn_not_delivered() -> None:
 
 
 def test_e_unsubscribe_during_in_flight_copy_drops_the_frame() -> None:
-    """(e) ``unsubscribe`` вернулся, пока поток копирования внутри ``read_frame`` →
+    """(e) ``unsubscribe`` вернулся, пока поток копирования внутри ``read_ref`` →
     прочитанный ПОСЛЕ этого кадр не доставляется и считается ``superseded``.
 
     Инъекция: проверка эпохи перед dispatch (``if epoch != self._epoch``) → ``if False`` →
     кадр доставлен после отписки → красный."""
-    client = _StubClient({"success": True, "seqlock": False, "owner_incarnation": False})
+    client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": False})
     delivered: list = []
     source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
     source.subscribe(None, lambda s, a, b: delivered.append(b))
@@ -251,7 +251,7 @@ def test_e_unsubscribe_during_in_flight_copy_drops_the_frame() -> None:
     release = threading.Event()
 
     class _BlockingReader:
-        def read_frame(self, name: str, seqlock: bool = False, **kw: Any) -> np.ndarray:
+        def read_ref(self, name: str, gen: int, **kw: Any) -> np.ndarray:
             entered.set()
             release.wait(5.0)
             return np.zeros((2, 2, 3), dtype=np.uint8)
@@ -261,8 +261,8 @@ def test_e_unsubscribe_during_in_flight_copy_drops_the_frame() -> None:
 
     source._reader = _BlockingReader()  # белый ящик: держим копию «в полёте»
     try:
-        client.push({"sender": "camA", "name": "slot", "idx": 0, "seqlock": False, "bseq": 1, "ts": 0.0})
-        assert entered.wait(3.0), "поток копирования не дошёл до read_frame"
+        client.push({"sender": "camA", "name": "slot", "gen": 2, "bseq": 1, "ts": 0.0})
+        assert entered.wait(3.0), "поток копирования не дошёл до read_ref"
 
         box = _in_thread(source.unsubscribe, deadline=3.0)
         assert not box["alive"] and "exc" not in box, box
@@ -286,7 +286,7 @@ def test_f_unsubscribe_sends_frames_unsubscribe_to_host() -> None:
     seen: list = []
     router, sock_ch = _make_host(
         {
-            "frames.subscribe": lambda m: {"success": True, "seqlock": False, "owner_incarnation": False},
+            "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": False},
             "frames.unsubscribe": lambda m: seen.append(m.get("data")) or {"success": True, "removed": True},
         }
     )
@@ -321,7 +321,7 @@ def test_m1_close_on_silent_host_returns_fast() -> None:
     долго незачем. Инъекция: вернуть в ``close`` полный таймаут ``unsubscribe()`` → красный."""
     router, sock_ch = _make_host(
         {
-            "frames.subscribe": lambda m: {"success": True, "seqlock": False, "owner_incarnation": False},
+            "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": False},
             "frames.unsubscribe": lambda m: time.sleep(2.5) or {"success": True},
         }
     )
@@ -355,7 +355,7 @@ def test_m3_subscribe_after_timed_out_close_leaves_one_copy_thread() -> None:
 
     before = _copy_threads()
     shm = _segment()
-    client = _StubClient({"success": True, "seqlock": False, "owner_incarnation": False})
+    client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": False})
     entered = threading.Event()
     returned = threading.Event()
 
@@ -367,7 +367,7 @@ def test_m3_subscribe_after_timed_out_close_leaves_one_copy_thread() -> None:
     source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
     try:
         source.subscribe(None, _sleepy)
-        client.push({"sender": "camA", "name": shm.name, "idx": 0, "seqlock": False, "bseq": 1, "ts": 0.0})
+        client.push({"sender": "camA", "name": shm.name, "gen": 2, "bseq": 1, "ts": 0.0})
         assert entered.wait(3.0), "колбэк не вызван"
 
         box = _in_thread(source.close, deadline=4.0)

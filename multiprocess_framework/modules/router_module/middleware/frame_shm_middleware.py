@@ -13,9 +13,9 @@ realloc-on-grow + round-robin — канон generic). Прежний `find_free
 снят (он всегда возвращал 0 — `index_usage` никем не инкрементился). Различие путей —
 только адаптер: откуда берётся frame и куда кладутся координаты.
 
-**Ф7 G.3 (b) — seqlock.** Слот SHM может быть в seqlock-формате (ADR-SRM-011). Флаг
-формата едет в сообщении полем `shm_seqlock` (Dict at Boundary) — cross-process reader
-(`FrameReader.read_frame`, H-задача) сверяет generation и дропает torn/in-progress кадр.
+**Ф7 G.3 (b) — seqlock.** Слот SHM может быть в seqlock-формате (ADR-SRM-011). Task 4.4: заголовок
+seqlock у слота ВСЕГДА (флага нет); поколение записи едет в ссылке (`gen`), cross-process reader
+(`FrameReader.read_ref`) сверяет его до и после чтения и дропает stale/torn кадр.
 
 **Ф7 G.3 (d) — громкий pickle-fallback.** Сбой SHM-write (mm есть, но запись не удалась)
 → кадр уходит pickle-через-Queue (×3 латентность). Раньше — молча. Теперь: счётчик
@@ -24,7 +24,7 @@ realloc-on-grow + round-robin — канон generic). Прежний `find_free
 **Ф7 G.3 (кэш handles) / H-задача Этап 2.** Cross-process raw-чтение открывало SharedMemory
 на каждый кадр (open/mmap/close + resource_tracker). Кэш handles + zero-copy view + post-use
 re-check вынесены за фасад `FrameReader` (модуль памяти); транспорт держит reader через DI и
-делегирует (`read_frame`/`view_valid`/`close_handle_cache`), синхронизация — внутри reader'а.
+делегирует (`read_ref`/`view_valid`/`close_handle_cache`), синхронизация — внутри reader'а.
 
 **Ф7 G.4.b — глубина кольца per-camera (B-8).** `coll` (число SHM-слотов round-robin)
 теперь настраивается на КОНКРЕТНУЮ камеру: явный `coll` из рецепта/wire (`buffer_slots`,
@@ -40,12 +40,6 @@ Claim Check: пиксели (numpy) едут в OS SHM, по очереди — 
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
-
-from multiprocess_framework.modules.logger_module import get_std_logger
-
-# Ф6.х.7в: модульный логгер по конвенции 6.0 (вызов get_std_logger внутри
-# except был отклонением, найденным ревью в файле-образце миграции).
-_log = get_std_logger(__name__)
 
 # Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
 _HANDLE_CACHE_CAP = 8
@@ -120,8 +114,6 @@ class _Ring:
         # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c) + dtype. None — ещё не выделяли.
         self.alloc_shape: tuple[int, int, int] | None = None
         self.alloc_dtype: str | None = None
-        # Ф7 G.3(b): формат seqlock ФАКТИЧЕСКОГО слота (считывается у mm после аллокации).
-        self.slot_seqlock = False
         self.pool: Optional[Any] = pool
         # H-ревью (E2): транзитный кэш handles на время ОДНОГО release() пачки этого кольца.
         self.release_handles_cache: Optional[Any] = None
@@ -185,12 +177,6 @@ class _Ring:
             # сбрасывается в «всё свободно»; старые займы void. Только СВОЙ пул.
             if self.pool is not None:
                 self.pool.reset()
-            # Ф7 G.3(b): считать ФАКТИЧЕСКИЙ формат слота (seqlock задаёт mm).
-            try:
-                md = mw._mm.get_memory_data(mw._owner, self.slot)
-                self.slot_seqlock = bool(md.get("seqlock", False)) if md else False
-            except Exception:
-                self.slot_seqlock = False
         except Exception as e:
             mw._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
 
@@ -210,7 +196,6 @@ class _Ring:
         self.created_slot = False  # H5b: принят чужой слот (PM) — release его не трогает
         self.alloc_shape = tuple(existing_shape)  # type: ignore[assignment]
         self.alloc_dtype = str(existing_dtype)
-        self.slot_seqlock = bool(md.get("seqlock", False))
 
     def release_owned(self) -> None:
         """H5b: освободить СВОЙ созданный слот на teardown (принятый PM-слот не трогает)."""
@@ -320,12 +305,8 @@ class FrameShmMiddleware:
         cache_shm_handles: кэшировать SHM-handles читателя (Ф7 G.3). None → env
             ``FW_SHM_HANDLE_CACHE`` → False (прежний open/close на кадр).
 
-    Формат слота seqlock (Ф7 G.3b) middleware НЕ решает сам, а СЧИТЫВАЕТ у слота
-    после аллокации (``MemoryManager.get_memory_data(...)["seqlock"]``) и кладёт
-    авторитетно в сообщение как ``shm_seqlock`` — иначе флаг в сообщении мог бы
-    разойтись с реальным форматом слота (writer в seqlock, сообщение говорит нет →
-    reader читает не с того offset). Флаг слота задаёт сам MemoryManager
-    (``seqlock_frames`` ctor > env ``FW_SHM_SEQLOCK``, ADR-SRM-011).
+    Заголовок seqlock у слота ВСЕГДА (Task 4.4; флага ``FW_SHM_SEQLOCK`` больше нет): поколение
+    записи слота — это и есть ``gen`` в ссылке, по нему reader отличает свою запись от переписанной.
 
     Attributes:
         frame_boundary_crossings: Ф7 G.6 — сколько раз кадр реально пересёк границу
@@ -549,10 +530,6 @@ class FrameShmMiddleware:
     @property
     def _write_index(self) -> int:
         return self._frame_ring.write_index
-
-    @property
-    def _slot_seqlock(self) -> bool:
-        return self._frame_ring.slot_seqlock
 
     def _frame_fits(self, frame: Any) -> bool:
         return self._frame_ring.fits(frame)

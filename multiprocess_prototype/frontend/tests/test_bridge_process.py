@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Tuple
 from multiprocess_prototype.frontend.bridge_process import FrameBridge
 
 #: Ключи дескриптора — ровно эти, в этом порядке (см. remote_frame_source.py DESCRIPTOR_KEYS).
-_DESCRIPTOR_KEYS = ("sender", "name", "idx", "seqlock", "bseq", "ts")
+_DESCRIPTOR_KEYS = ("sender", "name", "gen", "bseq", "ts")
 
 
 class _FakeRouter:
@@ -32,16 +32,14 @@ class _FakeRouter:
         self.calls.append((message, priority))
 
 
-def _shm_msg(sender: str, name: str = "shmslot0", idx: int = 0) -> Dict[str, Any]:
-    """data-конверт продюсера с кадром через SHM (поля по DESIGN п.3, ``frame_shm_middleware``)."""
+def _shm_msg(sender: str, name: str = "shmslot0", idx: int = 0, gen: int = 2) -> Dict[str, Any]:
+    """data-конверт продюсера с кадром через SHM (Task 4.4: ссылка на кадр в ``_shm_refs["frame"]``)."""
     return {
         "sender": sender,
         "data": {
-            "shm_actual_name": name,
-            "shm_index": idx,
-            "shm_seqlock": False,
-            "owner": "camera_0",
-            "shm_name": "camera_0_ring",
+            "_shm_refs": {
+                "frame": {"owner": "camera_0", "slot": "camera_0_ring", "idx": idx, "gen": gen, "name": name}
+            },
             "width": 640,
             "height": 480,
         },
@@ -50,14 +48,13 @@ def _shm_msg(sender: str, name: str = "shmslot0", idx: int = 0) -> Dict[str, Any
 
 def _no_shm_msg(sender: str) -> Dict[str, Any]:
     """data-конверт без кадра (не через SHM) — build_frame_descriptor вернул бы None."""
-    return {"sender": sender, "data": {"note": "не кадр, нет shm_actual_name"}}
+    return {"sender": sender, "data": {"note": "не кадр, нет _shm_refs"}}
 
 
 def _new_bridge(router: _FakeRouter, **flags: bool) -> FrameBridge:
     return FrameBridge(
         router,
         "gui",
-        seqlock=flags.get("seqlock", False),
         owner_incarnation=flags.get("owner_incarnation", False),
         loan_protocol=flags.get("loan_protocol", False),
     )
@@ -75,15 +72,15 @@ def test_b1_no_subscribers_zero_pushes() -> None:
 
 
 def test_b2_subscribe_then_frame_push_exact_shape_and_size() -> None:
-    """B2: subscribe + data-сообщение с shm_* → РОВНО один push, targets=[адрес],
+    """B2: subscribe + data-сообщение со ссылкой _shm_refs["frame"] → РОВНО один push, targets=[адрес],
     command="frames.frame", ключи дескриптора дословно DESCRIPTOR_KEYS, JSON ≤ 300 байт."""
     router = _FakeRouter()
     bridge = _new_bridge(router)
 
     resp = bridge.cmd_subscribe({"subscriber": "pult.sess1"})
-    assert resp == {"success": True, "seqlock": False, "owner_incarnation": False}
+    assert resp == {"success": True, "seqlock": True, "owner_incarnation": False}
 
-    bridge.on_drained([_shm_msg("camA", name="shmslotA", idx=3)])
+    bridge.on_drained([_shm_msg("camA", name="shmslotA", idx=3, gen=6)])
 
     assert len(router.calls) == 1, "ожидался ровно один push"
     message, priority = router.calls[0]
@@ -98,8 +95,7 @@ def test_b2_subscribe_then_frame_push_exact_shape_and_size() -> None:
     assert tuple(descriptor.keys()) == _DESCRIPTOR_KEYS, f"ключи дескриптора не совпали: {tuple(descriptor.keys())}"
     assert descriptor["sender"] == "camA"
     assert descriptor["name"] == "shmslotA"
-    assert descriptor["idx"] == 3
-    assert descriptor["seqlock"] is False
+    assert descriptor["gen"] == 6
     assert descriptor["bseq"] == 1  # первый дескриптор — bseq == 1
 
     encoded = json.dumps(descriptor).encode()
@@ -121,8 +117,8 @@ def test_b3_unsubscribe_stops_further_pushes() -> None:
     assert router.calls == []
 
 
-def test_b4_msg_without_shm_actual_name_is_skipped() -> None:
-    """B4: сообщение без shm_actual_name (не кадр) → 0 push'ей, даже с активным подписчиком."""
+def test_b4_msg_without_frame_ref_is_skipped() -> None:
+    """B4: сообщение без ссылки на кадр (не кадр) → 0 push'ей, даже с активным подписчиком."""
     router = _FakeRouter()
     bridge = _new_bridge(router)
     bridge.cmd_subscribe({"subscriber": "pult.sess1"})

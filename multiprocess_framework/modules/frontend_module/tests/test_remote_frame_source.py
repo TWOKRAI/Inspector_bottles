@@ -35,8 +35,10 @@ import numpy as np
 import pytest
 
 from multiprocess_framework.modules.frontend_module.bridge.remote_frame_source import (
+    DESCRIPTOR_KEYS,
     RemoteFrameSource,
     RemoteFrameSourceError,
+    build_frame_descriptor,
 )
 from multiprocess_framework.modules.router_module.adapters.socket_bridge_adapter import SocketBridgeAdapter
 from multiprocess_framework.modules.router_module.channels.queue_channel import QueueChannel
@@ -46,6 +48,7 @@ from multiprocess_framework.modules.router_module.core.router_manager import Rou
 from multiprocess_framework.modules.shared_resources_module.memory.format.buffer import (
     calculate_buffer_size,
     pack_images,
+    read_generation,
 )
 
 # --------------------------------------------------------------------------- харнесс хоста
@@ -155,17 +158,21 @@ def _corner_frame(h: int = 480, w: int = 640, value: int = 7) -> np.ndarray:
     return frame
 
 
-def _write_frame(name: str, frame: np.ndarray, *, seqlock: bool = False):
-    size = calculate_buffer_size(1, frame.shape, frame.dtype, seqlock=seqlock)
+#: Поколение слота после ПЕРВОЙ записи (0 -> 2): ссылка на этот кадр несёт gen=2 (Task 4.4).
+_FIRST_GEN = 2
+
+
+def _write_frame(name: str, frame: np.ndarray):
+    """Слот с заголовком seqlock (он ВСЕГДА включён, Task 4.4) + одна запись."""
+    size = calculate_buffer_size(1, frame.shape, frame.dtype, seqlock=True)
     shm = shared_memory.SharedMemory(name=name, create=True, size=size)
-    pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=seqlock)
+    pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=True)
+    assert read_generation(shm.buf) == _FIRST_GEN
     return shm
 
 
-def _push_descriptor(
-    host: _Host, address: str, sender: str, name: str, bseq: int, *, seqlock: bool = False, idx=None
-) -> None:
-    descriptor = {"sender": sender, "name": name, "idx": idx, "seqlock": seqlock, "bseq": bseq, "ts": time.time()}
+def _push_descriptor(host: _Host, address: str, sender: str, name: str, bseq: int, *, gen: int = _FIRST_GEN) -> None:
+    descriptor = {"sender": sender, "name": name, "gen": gen, "bseq": bseq, "ts": time.time()}
     host.push(
         {
             "type": "event",
@@ -189,7 +196,7 @@ def test_r1_bitwise_identical_frame_and_matching_bseq() -> None:
     name = _shm_name("r1")
     shm = _write_frame(name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": False, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
     )
     source = None
     try:
@@ -201,7 +208,7 @@ def test_r1_bitwise_identical_frame_and_matching_bseq() -> None:
             lambda: source.subscribe(None, lambda sender, arr, bseq: received.append((sender, arr, bseq))),
             timeout=5.0,
         )
-        assert resp == {"success": True, "seqlock": False, "owner_incarnation": False}
+        assert resp == {"success": True, "seqlock": True, "owner_incarnation": False}
 
         _push_descriptor(host, client.subscriber_address, "camA", name, bseq=1)
 
@@ -234,7 +241,7 @@ _R2_SCRIPT = (
     "name = sys.argv[1]\n"
     "track = sys.argv[2] == '1'\n"
     "reader = ShmFrameReader(cache_enabled=False, zero_copy=False, cap=1, track=track)\n"
-    "reader.read_frame(name)\n"
+    "reader.read_ref(name, 2)\n"
 )
 
 
@@ -303,7 +310,7 @@ def test_r3_missing_segment_counts_and_next_valid_still_delivered() -> None:
     valid_name = _shm_name("r3")
     shm = _write_frame(valid_name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": False, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
     )
     source = None
     try:
@@ -341,7 +348,7 @@ def test_r4_duplicate_descriptor_delivered_once() -> None:
     name = _shm_name("r4")
     shm = _write_frame(name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": False, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
     )
     source = None
     try:
@@ -374,14 +381,14 @@ def test_r4_duplicate_descriptor_delivered_once() -> None:
 # --------------------------------------------------------------------------- R5
 
 
-def _writer_thread(shm_name: str, stop: threading.Event, *, seqlock: bool) -> threading.Thread:
+def _writer_thread(shm_name: str, stop: threading.Event) -> threading.Thread:
     def _run() -> None:
         shm = shared_memory.SharedMemory(name=shm_name, create=False)
         try:
             n = 0
             while not stop.is_set():
                 frame = _corner_frame(value=(n % 250) + 1)
-                pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=seqlock)
+                pack_images(shm.buf, [frame], frame.shape, frame.dtype, seqlock=True)
                 n += 1
                 time.sleep(0.001)
         finally:
@@ -398,17 +405,18 @@ def _corner_values_match(frame: np.ndarray) -> bool:
 
 
 def test_r5_seqlock_zero_corner_mismatches_under_concurrent_writer() -> None:
-    """R5 (seqlock=True): писатель непрерывно перезаписывает слот → у ВСЕХ доставленных
-    кадров 0 расхождений углов (seqlock ловит torn-чтение и возвращает None → не
-    засчитывается delivered). torn печатается, не проверяется числом (порога нет)."""
+    """R5: писатель непрерывно перезаписывает слот → у ВСЕХ доставленных кадров 0 расхождений
+    углов (ссылка ``(name, gen)`` + seqlock ловят stale/torn-чтение → ``None`` → не засчитывается
+    delivered). Дескриптор несёт поколение, прочитанное хостом в момент пуша. torn печатается,
+    не проверяется числом (порога нет)."""
     name = _shm_name("r5")
     seed = _corner_frame()
-    shm = _write_frame(name, seed, seqlock=True)
+    shm = _write_frame(name, seed)
     host = _make_command_host(
         {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
     )
     stop = threading.Event()
-    writer = _writer_thread(name, stop, seqlock=True)
+    writer = _writer_thread(name, stop)
     source = None
     try:
         client = SocketClient(host.host, host.port, sender="pult")
@@ -418,56 +426,13 @@ def test_r5_seqlock_zero_corner_mismatches_under_concurrent_writer() -> None:
         _call_with_deadline(lambda: source.subscribe(None, lambda s, a, b: received.append(a)), timeout=5.0)
 
         for bseq in range(1, 60):
-            _push_descriptor(host, client.subscriber_address, "camA", name, bseq=bseq, seqlock=True)
+            _push_descriptor(host, client.subscriber_address, "camA", name, bseq=bseq, gen=read_generation(shm.buf))
             time.sleep(0.005)
         _wait(lambda: len(received) >= 1, timeout=3.0)
 
         mismatches = sum(1 for f in received if not _corner_values_match(f))
-        print(
-            f"R5 seqlock=True: доставлено={len(received)} torn={source.stats.get('torn')} "
-            f"расхождения_углов={mismatches}"
-        )
-        assert mismatches == 0, f"{mismatches} доставленных кадров с расходящимися углами при seqlock=True"
-    finally:
-        stop.set()
-        writer.join(timeout=2.0)
-        if source is not None:
-            source.close()
-        shm.close()
-        try:
-            shm.unlink()
-        except FileNotFoundError:
-            pass
-        host.close()
-
-
-def test_r5_without_seqlock_measures_mismatches_no_assert() -> None:
-    """R5 (без seqlock): то же самое, но torn-детекции нет по построению (docstring
-    задачи: «Torn-кадры детектируются только при FW_SHM_SEQLOCK=1»). Печатаем число
-    расхождений на ~50 кадров, БЕЗ assert — это измерение, не приёмка."""
-    name = _shm_name("r5b")
-    seed = _corner_frame()
-    shm = _write_frame(name, seed, seqlock=False)
-    host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": False, "owner_incarnation": False}}
-    )
-    stop = threading.Event()
-    writer = _writer_thread(name, stop, seqlock=False)
-    source = None
-    try:
-        client = SocketClient(host.host, host.port, sender="pult")
-        client.connect()
-        received: List[np.ndarray] = []
-        source = RemoteFrameSource(client, dispatch=lambda fn: fn())
-        _call_with_deadline(lambda: source.subscribe(None, lambda s, a, b: received.append(a)), timeout=5.0)
-
-        for bseq in range(1, 60):
-            _push_descriptor(host, client.subscriber_address, "camA", name, bseq=bseq, seqlock=False)
-            time.sleep(0.005)
-        _wait(lambda: len(received) >= 1, timeout=3.0)
-
-        mismatches = sum(1 for f in received if not _corner_values_match(f))
-        print(f"R5 seqlock=False: доставлено={len(received)} расхождения_углов={mismatches} (без порога)")
+        print(f"R5: доставлено={len(received)} torn={source.stats.get('torn')} расхождения_углов={mismatches}")
+        assert mismatches == 0, f"{mismatches} доставленных кадров с расходящимися углами"
     finally:
         stop.set()
         writer.join(timeout=2.0)
@@ -492,7 +457,7 @@ def test_r6_slow_callback_does_not_slow_producer_superseded_grows() -> None:
     frame = _corner_frame()
     shm = _write_frame(name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": False, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
     )
     source = None
     try:
@@ -579,7 +544,7 @@ def test_r8_on_reconnected_resubscribes_with_new_subscriber_address() -> None:
 
     def _handle_subscribe(msg: Dict[str, Any]) -> Dict[str, Any]:
         subscribe_calls.append(msg.get("data", {}).get("subscriber"))
-        return {"success": True, "seqlock": False, "owner_incarnation": False}
+        return {"success": True, "seqlock": True, "owner_incarnation": False}
 
     host = _make_command_host({"frames.subscribe": _handle_subscribe})
     source = None
@@ -603,4 +568,61 @@ def test_r8_on_reconnected_resubscribes_with_new_subscriber_address() -> None:
     finally:
         if source is not None:
             source.close()
+        host.close()
+
+
+# --------------------------------------------------------------------------- Task 4.4: ссылка на кадр
+
+
+def test_build_descriptor_from_frame_ref() -> None:
+    """Дескриптор строится из ``data["_shm_refs"]["frame"]``: имя + поколение, ничего лишнего."""
+    ref = {"owner": "camera_0", "slot": "ring", "idx": 1, "gen": 6, "name": "shm_actual"}
+    d = build_frame_descriptor("camA", {"_shm_refs": {"frame": ref, "mask": dict(ref, name="other")}}, 4)
+    assert d is not None
+    assert tuple(d) == DESCRIPTOR_KEYS == ("sender", "name", "gen", "bseq", "ts")
+    assert (d["sender"], d["name"], d["gen"], d["bseq"]) == ("camA", "shm_actual", 6, 4)
+
+
+def test_build_descriptor_none_when_no_frame_ref() -> None:
+    """Не кадр: нет ссылки на ``frame`` (только чужой ключ / старые плоские поля / битый ref) → None."""
+    ref = {"owner": "o", "slot": "s", "idx": 0, "gen": 2, "name": "n"}
+    assert build_frame_descriptor("camA", {"_shm_refs": {"mask": ref}}, 1) is None
+    assert build_frame_descriptor("camA", {"shm_actual_name": "n", "shm_index": 0}, 1) is None
+    assert build_frame_descriptor("camA", {"_shm_refs": {"frame": {"name": "n"}}}, 1) is None  # нет gen
+    assert build_frame_descriptor("camA", {"_shm_refs": {"frame": dict(ref, name="")}}, 1) is None
+
+
+def test_stale_ref_is_dropped_and_counted_torn() -> None:
+    """Ссылка на прежнюю запись (ячейку успели переписать, gen 2 -> 4) -> кадр НЕ доставлен,
+    ``torn == 1``; ссылка с актуальным gen после этого доставляется."""
+    name = _shm_name("r9")
+    shm = _write_frame(name, _corner_frame(value=1))
+    pack_images(shm.buf, [_corner_frame(value=2)], (480, 640, 3), np.uint8, seqlock=True)  # gen -> 4
+    assert read_generation(shm.buf) == 4
+    host = _make_command_host(
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+    )
+    source = None
+    try:
+        client = SocketClient(host.host, host.port, sender="pult")
+        client.connect()
+        received: List[Any] = []
+        source = RemoteFrameSource(client, dispatch=lambda fn: fn())
+        _call_with_deadline(lambda: source.subscribe(None, lambda s, a, b: received.append(a)), timeout=5.0)
+
+        _push_descriptor(host, client.subscriber_address, "camA", name, bseq=1, gen=2)  # устаревшая
+        assert _wait(lambda: source.stats["torn"] == 1, timeout=3.0), source.stats
+        assert received == [], "кадр по устаревшей ссылке доставлен"
+
+        _push_descriptor(host, client.subscriber_address, "camA", name, bseq=2, gen=4)  # актуальная
+        assert _wait(lambda: len(received) == 1, timeout=3.0), source.stats
+        assert int(received[0][0, 0, 0]) == 2, "прочитана не та запись, на которую указывала ссылка"
+    finally:
+        if source is not None:
+            source.close()
+        shm.close()
+        try:
+            shm.unlink()
+        except FileNotFoundError:
+            pass
         host.close()

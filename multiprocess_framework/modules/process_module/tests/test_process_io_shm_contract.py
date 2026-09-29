@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
-"""H7 (Ф7 G.3): ProcessIO.write_frames_to_shm — тот же контракт, что FrameShmMiddleware.
+"""H7 (Ф7 G.3) + Task 4.4: ProcessIO.write_frames_to_shm — тот же контракт, что FrameShmMiddleware.
 
 Публичный API на каждом процессе с plugins (живых вызовов 0, но контракт держим —
-урок G.2 «неиспользуемые пути = контракты»): shm_seqlock из АВТОРИТЕТНОГО
-get_memory_data + round-robin (снят сломанный find_free_index, всегда 0).
+урок G.2 «неиспользуемые пути = контракты»): возвращает SHM-ссылку кадра
+``{"owner", "slot", "idx", "gen", "name"}`` (формат ``data["_shm_refs"][key]``) + round-robin
+(снят сломанный find_free_index, всегда 0).
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from multiprocess_framework.modules.process_module.io.process_io import ProcessIO
 from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
+from multiprocess_framework.modules.shared_resources_module.memory.reader import ShmFrameReader
 
 
 class _FakeProc:
@@ -23,29 +26,44 @@ class _FakeProc:
         return True
 
 
-def test_write_frames_stamps_seqlock_and_round_robin():
-    mm = MemoryManager(seqlock_frames=True)
+def test_write_frames_returns_frame_ref_and_round_robin():
+    mm = MemoryManager()
     try:
         mm.create_memory_dict("region", {"slot": (1, (8, 8, 3), "uint8")}, coll=3)
         io = ProcessIO(_FakeProc(mm))
         frame = np.full((8, 8, 3), 5, np.uint8)
         refs = [io.write_frames_to_shm("region", "slot", [frame]) for _ in range(4)]
         assert all(r is not None for r in refs)
-        assert all(r["shm_seqlock"] is True for r in refs), "H7: seqlock обязан быть в контракте"
-        assert [r["shm_index"] for r in refs] == [0, 1, 2, 0], "round-robin, не find_free_index=0"
+        assert all(set(r) == {"owner", "slot", "idx", "gen", "name"} for r in refs), "формат ссылки Task 4.4"
+        assert all(r["owner"] == "region" and r["slot"] == "slot" for r in refs)
+        assert all(r["gen"] > 0 and r["gen"] % 2 == 0 for r in refs), "gen — ЧЁТНОЕ поколение записи"
+        assert [r["idx"] for r in refs] == [0, 1, 2, 0], "round-robin, не find_free_index=0"
     finally:
         mm.close_all()
 
 
-def test_write_frames_seqlock_false_when_slot_plain():
-    mm = MemoryManager()  # seqlock off
+def test_write_frames_ref_reads_back_by_generation():
+    """Ссылка из write_frames_to_shm читается по (name, gen); после перезаписи ячейки — stale (None)."""
+    mm = MemoryManager()
+    reader = ShmFrameReader(cache_enabled=False, zero_copy=False, cap=4)
     try:
         mm.create_memory_dict("r", {"s": (1, (4, 4, 3), "uint8")}, coll=1)
         io = ProcessIO(_FakeProc(mm))
-        ref = io.write_frames_to_shm("r", "s", [np.zeros((4, 4, 3), np.uint8)])
-        assert ref is not None and ref["shm_seqlock"] is False
+        first = io.write_frames_to_shm("r", "s", [np.full((4, 4, 3), 7, np.uint8)])
+        assert (reader.read_ref(first["name"], first["gen"]) == 7).all()
+        second = io.write_frames_to_shm("r", "s", [np.full((4, 4, 3), 9, np.uint8)])  # coll=1: та же ячейка
+        assert second["gen"] > first["gen"]
+        assert reader.read_ref(first["name"], first["gen"]) is None, "старая ссылка на переписанную ячейку"
+        assert (reader.read_ref(second["name"], second["gen"]) == 9).all()
     finally:
+        reader.close()
         mm.close_all()
+
+
+def test_write_frames_rejects_not_single_frame():
+    io = ProcessIO(_FakeProc(MemoryManager()))
+    with pytest.raises(ValueError):
+        io.write_frames_to_shm("r", "s", [np.zeros((4, 4, 3), np.uint8)] * 2)
 
 
 def test_write_frames_none_without_mm():

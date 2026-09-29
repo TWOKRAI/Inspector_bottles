@@ -277,16 +277,6 @@ def test_memory_manager_seqlock_roundtrip():
         mm.close_all()
 
 
-def test_memory_manager_seqlock_off_by_default():
-    """Без ctor-флага и без env FW_SHM_SEQLOCK → seqlock=False (прежний формат)."""
-    mm = MemoryManager()
-    try:
-        assert mm.create_memory_dict("o", {"f": (1, (4, 4, 3), "uint8")}, coll=1)
-        assert mm.get_memory_data("o", "f")["seqlock"] is False
-    finally:
-        mm.close_all()
-
-
 # --- H1: живучесть слота (отравление/exception/clear по протоколу) ----------------
 
 

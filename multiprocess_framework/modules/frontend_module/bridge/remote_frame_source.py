@@ -16,8 +16,9 @@
 Команды хоста (``targets=[<имя процесса gui>]``, ``data`` — dict)
 --------------------------------------------------------------------
 ``frames.subscribe {"subscriber": <адрес>, "senders": [<имя>, ...] | None}``
-    Успех — РОВНО ``{"success": True, "seqlock": bool, "owner_incarnation": bool}``
-    (значения флагов ``FW_SHM_SEQLOCK`` / ``FW_SHM_OWNER_INCARNATION`` хоста).
+    Успех — РОВНО ``{"success": True, "seqlock": True, "owner_incarnation": bool}``
+    (``seqlock`` — константа для внешних клиентов: заголовок seqlock у слота всегда включён,
+    флага ``FW_SHM_SEQLOCK`` больше нет; ``owner_incarnation`` — значение флага хоста).
     Отказ — ``{"success": False, "reason": str}``; при включённом на хосте
     ``FW_SHM_LOAN_PROTOCOL`` ``reason`` содержит подстроку ``"FW_SHM_LOAN_PROTOCOL"``
     (заём слота мост не возвращает — Task 2.1).
@@ -57,7 +58,7 @@ FRAMES_PUSH: str = "frames.frame"
 #: Команда чтения счётчиков моста.
 FRAMES_STATS: str = "frames.stats"
 #: Ключи дескриптора — ровно эти, в этом порядке, никаких других.
-DESCRIPTOR_KEYS: tuple = ("sender", "name", "idx", "seqlock", "bseq", "ts")
+DESCRIPTOR_KEYS: tuple = ("sender", "name", "gen", "bseq", "ts")
 #: Потолок размера дескриптора: ``len(json.dumps(descriptor).encode()) <= 300``.
 DESCRIPTOR_MAX_BYTES: int = 300
 
@@ -98,42 +99,37 @@ def build_frame_descriptor(sender: Any, data: Any, bseq: int) -> Optional[Dict[s
 
     Pre:  ``sender`` — ``msg["sender"]`` конверта (имя продюсера); ``data`` — ``msg["data"]``
           (что угодно); ``bseq`` — int, номер дескриптора моста.
-    Post: ``None``, если ``data`` не dict либо в нём нет непустой строки
-          ``"shm_actual_name"`` (кадр ушёл не через SHM — описывать нечего);
-          либо ``sender`` не непустая строка.
+    Post: ``None``, если ``data`` не dict либо в нём нет ссылки на кадр
+          ``data["_shm_refs"]["frame"]`` с непустой строкой ``"name"`` и целым ``"gen"``
+          (кадр ушёл не через SHM — описывать нечего); либо ``sender`` не непустая строка.
           Иначе dict с ключами РОВНО :data:`DESCRIPTOR_KEYS` в этом порядке:
 
           * ``"sender"``  — ``sender`` (str);
-          * ``"name"``    — ``data["shm_actual_name"]`` (str, имя слота SHM);
-          * ``"idx"``     — ``int(data["shm_index"])``, либо ``None``, если ключа нет;
-          * ``"seqlock"`` — ``bool(data.get("shm_seqlock", False))``;
+          * ``"name"``    — ``ref["name"]`` (str, фактическое имя слота SHM);
+          * ``"gen"``     — ``int(ref["gen"])`` (чётное поколение записи, на которую указывает ссылка);
           * ``"bseq"``    — ``int(bseq)``;
           * ``"ts"``      — ``time.time()`` в момент построения (float, секунды эпохи).
 
-          Остальные поля ``data`` (``owner``, ``shm_name``, ``width`` …) не копируются.
-          Для ``sender`` и ``name`` длиной ≤ 64 ASCII-символа
+          Остальные поля ссылки и ``data`` (``owner``, ``slot``, ``idx``, ``width`` …) не
+          копируются. Для ``sender`` и ``name`` длиной ≤ 64 ASCII-символа
           ``len(json.dumps(result).encode()) <= DESCRIPTOR_MAX_BYTES``.
           Не бросает: любой неподходящий вход — ``None``.
     """
     if not isinstance(sender, str) or not sender or not isinstance(data, dict):
         return None
-    name = data.get("shm_actual_name")
+    refs = data.get("_shm_refs")
+    ref = refs.get("frame") if isinstance(refs, dict) else None
+    if not isinstance(ref, dict):
+        return None
+    name = ref.get("name")
     if not isinstance(name, str) or not name:
         return None
     try:
-        raw_idx = data.get("shm_index")
-        idx = None if raw_idx is None else int(raw_idx)
+        gen = int(ref["gen"])
         seq = int(bseq)
-    except (TypeError, ValueError):
+    except (KeyError, TypeError, ValueError):
         return None
-    return {
-        "sender": sender,
-        "name": name,
-        "idx": idx,
-        "seqlock": bool(data.get("shm_seqlock", False)),
-        "bseq": seq,
-        "ts": time.time(),
-    }
+    return {"sender": sender, "name": name, "gen": gen, "bseq": seq, "ts": time.time()}
 
 
 class RemoteFrameSource:
@@ -162,14 +158,14 @@ class RemoteFrameSource:
       (push при отсутствии подписки игнорируется и не считается);
     * ``delivered`` — кадров, переданных в ``dispatch`` (передано, а не «колбэк отработал»);
     * ``dup``       — дескрипторов, пропущенных дедупликацией: ``bseq`` равен ``bseq``
-      последнего доставленного кадра того же ``sender``, либо (при ``seqlock``) пара
+      последнего доставленного кадра того же ``sender``, либо пара
       (имя слота, поколение) равна паре последнего доставленного кадра того же ``sender``;
-    * ``torn``      — чтений при ``seqlock=True``, вернувших ``None`` (слот перезаписан во
-      время копии — кадр отброшен);
+    * ``torn``      — чтений ``read_ref``, вернувших ``None`` (слот уже переписан другой записью
+      либо перезаписан во время копии — кадр отброшен);
     * ``missing``   — слотов, которых нет (``FileNotFoundError`` при открытии по имени);
       не исключение наружу — счётчик и строка лога, следующий дескриптор обрабатывается;
     * ``errors``    — всё прочее: дескриптор без нужных ключей, иное исключение чтения,
-      ``None`` без ``seqlock``, исключение самого ``dispatch``;
+      исключение самого ``dispatch``;
     * ``superseded`` — дескрипторов, вытесненных из ящика новым дескриптором того же
       ``sender`` до того, как поток копирования их забрал (latest-wins); сюда же —
       выброшенные из ящика или из обработки снятием подписки, повторным ``subscribe``
@@ -242,7 +238,7 @@ class RemoteFrameSource:
               "senders": list(senders) | None}}``, где ``<адрес>`` =
               ``client.subscriber_address``.
         Post (успех): возвращает ответ хоста
-              ``{"success": True, "seqlock": bool, "owner_incarnation": bool}``;
+              ``{"success": True, "seqlock": True, "owner_incarnation": bool}``;
               подписка активна: каждый последующий push ``frames.frame`` читается и
               доставляется ``on_frame`` через ``dispatch`` как ``(descriptor["sender"],
               frame, descriptor["bseq"])``, где ``frame`` — СОБСТВЕННАЯ копия кадра
@@ -474,23 +470,28 @@ class RemoteFrameSource:
     def _process(self, sender: str, descriptor: Dict[str, Any], epoch: int, on_frame: Any, reader: Any) -> str:
         """Один дескриптор → имя счётчика, в который он попал."""
         name = descriptor.get("name")
+        gen = descriptor.get("gen")
         bseq = descriptor.get("bseq")
-        seqlock = bool(descriptor.get("seqlock"))
-        if not isinstance(name, str) or not name or not isinstance(bseq, int) or on_frame is None or reader is None:
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(gen, int)
+            or not isinstance(bseq, int)
+            or on_frame is None
+            or reader is None
+        ):
             return "errors"
         last = self._last.get(sender)
         if last is not None and last[0] == bseq:
             return "dup"
-        meta: Dict[str, Any] = {}
         try:
-            frame = reader.read_frame(name, seqlock=seqlock, copy=True, view_meta=meta)
+            frame = reader.read_ref(name, gen, copy=True)
         except FileNotFoundError:
             self._warn(f"RemoteFrameSource: слота '{name}' нет (sender={sender}, bseq={bseq})")
             return "missing"
         if frame is None:
-            return "torn" if seqlock else "errors"
-        gen = int(meta.get("_shm_generation", -1)) if seqlock else -1
-        if gen >= 0 and last is not None and last[1] == name and last[2] == gen:
+            return "torn"  # слот уже переписан (stale) либо перезапись пришлась на чтение
+        if last is not None and last[1] == name and last[2] == gen:
             return "dup"
         with self._cond:
             if epoch != self._epoch:

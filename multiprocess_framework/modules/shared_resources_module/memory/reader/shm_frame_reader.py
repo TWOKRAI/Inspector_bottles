@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from ..format import read_generation, read_single_frame
 
@@ -90,26 +90,6 @@ class ShmFrameReader:
         (флаг off) кэш пуст → 0 (off = прежнее поведение). len(dict) атомарен в CPython."""
         return len(self._cache)
 
-    def read_frame(
-        self,
-        shm_actual_name: str,
-        seqlock: bool = False,
-        *,
-        copy: bool = True,
-        view_meta: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Any]:
-        from multiprocessing import shared_memory as _shm_mod
-
-        if self._cache_enabled:
-            return self._read_cached(shm_actual_name, seqlock, copy, view_meta, _shm_mod)
-
-        # Без кэша сегмент закрывается сразу → view повис бы: копия обязательна.
-        shm = self._open(shm_actual_name, _shm_mod)
-        try:
-            return self._read_noting_generation(shm.buf, seqlock, True, view_meta)
-        finally:
-            shm.close()
-
     def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional[Any]:
         """Task 4.4: прочитать кадр по ссылке (``ref["name"]``, ``ref["gen"]``).
 
@@ -155,52 +135,8 @@ class ShmFrameReader:
             resource_tracker.unregister(shm._name, "shared_memory")
         return shm
 
-    @staticmethod
-    def _read_noting_generation(
-        buf: Any, seqlock: bool, copy: bool, view_meta: Optional[Dict[str, Any]]
-    ) -> Optional[Any]:
-        """Копия кадра; при ``copy=True`` и ``view_meta`` — поколение прочитанного кадра
-        в ``view_meta["_shm_generation"]`` (gui-service 1.3, дедуп у внешнего читателя).
-
-        Поколение известно, только если оно чётное и одинаково до и после чтения (писатель
-        между ними не начинал запись — поколение монотонно); иначе ``-1`` («не знаю»).
-        Без seqlock поколения нет — ``-1``."""
-        if not (copy and view_meta is not None):
-            return read_single_frame(buf, verify_seqlock=seqlock, copy=copy)
-        gen_before = read_generation(buf) if seqlock else -1
-        frame = read_single_frame(buf, verify_seqlock=seqlock, copy=copy)
-        gen = -1
-        if seqlock and gen_before % 2 == 0 and read_generation(buf) == gen_before:
-            gen = gen_before
-        view_meta["_shm_generation"] = gen
-        return frame
-
-    def _read_cached(
-        self,
-        shm_actual_name: str,
-        seqlock: bool,
-        copy: bool,
-        view_meta: Optional[Dict[str, Any]],
-        shm_mod: Any,
-    ) -> Optional[Any]:
-        """Ф7 H-ревью (S2): open + чтение буфера под ОДНИМ lock — иначе close() на потоке
-        message_processor (wire.deconfigure) порвал бы shm.buf под чтением здесь (поток
-        DataReceiver). Под zero-copy view остаётся валиден после lock: эвикция с close() под
-        zero-copy отключена (сегмент жив до teardown), а teardown-close() сам берёт этот
-        lock → сериализован с чтением."""
-        with self._lock:
-            shm = self._open_cached_locked(shm_actual_name, shm_mod)
-            frame = self._read_noting_generation(shm.buf, seqlock, copy, view_meta)
-            if frame is not None and not copy and view_meta is not None:
-                # Мета для G.5.c: поколение на момент чтения (сверка ПОСЛЕ использования
-                # view). Без seqlock поколения нет → -1 (re-check неактивен).
-                view_meta["_frame_is_view"] = True
-                view_meta["_shm_view_name"] = shm_actual_name
-                view_meta["_shm_view_generation"] = read_generation(shm.buf) if seqlock else -1
-        return frame
-
     def _open_cached_locked(self, shm_actual_name: str, shm_mod: Any) -> Any:
-        """Открыть SharedMemory с LRU-кэшем. ВЫЗЫВАТЬ под ``self._lock`` (read_frame его
+        """Открыть SharedMemory с LRU-кэшем. ВЫЗЫВАТЬ под ``self._lock`` (read_ref его
         уже держит — иначе close() на другом потоке порвал бы буфер под чтением, S2)."""
         shm = self._cache.pop(shm_actual_name, None)
         if shm is not None:
