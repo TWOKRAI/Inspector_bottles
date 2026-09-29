@@ -21,12 +21,17 @@ def _normalize_response(raw: dict) -> dict:
     обработчика на ВЕРХНИЙ уровень::
 
         {"success": True,  "result": <результат плагина>, ...}  — успех
-        {"success": False, "result": {"status": "error", "message": ...}}
+        {"success": False, "result": {"status": "error", "message": ..., "code": ...}}
         {"success": False, "error": "timeout"}                   — отказ транспорта
+
+    Ветка ошибки сохраняет поля обработчика (``code``, ``current_rev`` и т.п.);
+    ``status`` всегда "error", ``message`` всегда задан.
 
     Форма ``{"data": {"result": ...}}`` — наследие, оставлена запасной веткой.
     До 2026-09-22 искали только её, и все поля ответа терялись (пульт line-sim
     получал голое ``{"status": "ok"}``, воспроизведено вживую).
+    До 2026-09-29 ветка ошибки тоже отбрасывала поля плагина: pult_web отвечал
+    504 вместо 409 на конфликт пресета (воспроизведено вживую).
     """
     if not isinstance(raw, dict):
         return {"status": "error", "message": "некорректный ответ"}
@@ -50,7 +55,7 @@ def _normalize_response(raw: dict) -> dict:
             or detail.get("error")
             or "неизвестная ошибка"
         )
-        return {"status": "error", "message": str(message)}
+        return {**detail, "status": "error", "message": str(message)}
 
     if isinstance(result, dict):
         return result if "status" in result else {"status": "ok", **result}
