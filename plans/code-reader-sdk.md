@@ -170,13 +170,105 @@
 - [x] Исключение в `on_frame` на кадре N → кадр N+1 доставлен, `errors == 1`.
 **Out of scope:** плагин и рецепт (Task 6.3), автопереподключение (решение 6), запись параметров.
 
-### Task 6.3 — Плагин `code_reader_sdk` + рецепт (следующий цикл, спецификация после 6.1–6.2)
-Порт `code` (dict, как у TCP-плагина + `corners`, `quality`, `trigger_index`) и порт `frame`
-(SHM, образец `hikvision_camera/plugin/config.py`); команды `take_device` / `release_device`;
-рецепт `qr_reader_sdk_demo`. Живой стенд: 20 срабатываний, задержка «триггер → кадр в прототипе»,
-идут ли коды по TCP, пока прибор открыт SDK.
+### Task 6.3 — Плагин `code_reader_sdk` + рецепт `qr_reader_sdk_demo`
+**Level:** Middle+ (плагин по готовому образцу TCP-плагина) · **Assignee:** `teamlead` (модель Sonnet —
+решение владельца 2026-09-29: Sonnet пишет, Opus ревьюит, Fable — только если Opus не справился) ·
+**Layer:** services + prototype
+**Goal:** SDK-канал в pipeline: каждое срабатывание прибора → один item с кодами и кадром, прибор
+берётся и отпускается командами, состояние видно в дереве.
+
+**Решения лидера (из разведки 2026-09-29):**
+1. **Отдельный плагин `code_reader_sdk`**, не режим TCP-плагина: разные жизненные циклы (приём порта vs
+   эксклюзивный захват прибора), общая у них только форма item.
+2. **Форма item совместима с TCP-плагином** — те же плоские ключи `code` (строка, первый читаемый код или
+   `""`), `status`, `ts`, `seq_id`, `reader_id`; потребитель кодов не различает каналы. Сверху:
+   `codes` (список `CodeRead` в dict: `text`, `status`, `bar_type`, `corners`, `angle_deg`, `ppm`,
+   `algo_ms`, `quality` — `None` или dict), `trigger_index`, `frame_num`, `no_read_num`, `pixel_format`,
+   `frame` (ndarray `uint8` H×W — `decode_image`). `data_type` плагин **не ставит** (SourceProducer
+   проставит `"frame"` при наличии кадра).
+3. **Кадр — только под ключом `frame`.** Claim check (`FrameShmMiddleware.strip_and_write`,
+   `frame_shm_middleware.py:660`) видит только этот ключ; SHM выделяется лениво на первом кадре
+   (`:427`), объявлять `memory` в конфиге не нужно — рецепты `hikvision_*` его тоже не объявляют.
+   **Запрещено:** JPEG-байты (`image`) в item, отрисованный кадр с углами под любым ключом — они пошли бы
+   через pipe (L-6, `plans/transport-single-policy.md` Ф4). Углы едут числами, рисует потребитель.
+4. **Порты:** `code` (`dtype="str"`, обязательный) и `frame` (`dtype="image/gray"`, `optional=True` —
+   при ошибке декода item уходит без кадра: код — главный продукт, ошибка считается в `errors`).
+5. **Поток:** `SdkCodeReader.on_frame` (поток захвата) кладёт `SdkFrame` в `deque(maxlen=_QUEUE_LIMIT=8)`
+   под замком; переполнение → `dropped += 1` и публикация состояния сразу (тот же довод, что у TCP-плагина:
+   переполнение = `produce()` не сливает). `produce()` сливает очередь и **декодирует там** (решение 5
+   плана: сессия не платит за декод). ponytail: декод до 8 JPEG в одном `produce()` ~ до 100 мс —
+   потолок; если линия быстрее — декод в поток захвата или ограничение на проход.
+6. **Команды:** `take_device` → `reader.start()`; `release_device` → `reader.stop()` + ответ
+   `{"status","released": bool, "device_held": bool}`; `get_status`; `reset_stats`. `auto_start`
+   (по умолчанию `true`) берёт прибор в `start()`; `shutdown()` зовёт `stop()`.
+7. **Вход ревью 6.2, п.1 (поздний stop):** `SdkCodeReader.stats()` получает ключ
+   `device_held: bool` — поток захвата ещё жив (он и только он отпускает прибор). `release_device`
+   отвечает `released = not device_held`; при `False` в `last_error` — «прибор ещё отпускается».
+8. **Вход ревью 6.2, п.2–3 (перезапуск после сбоя):** автопереподключения нет (решение 6 плана).
+   Колбэк `on_error` плагина **не зовёт** `start()` (там он всегда `False`). `error`/`busy`/`not_found`
+   публикуются в дерево; вернуть прибор — командой `take_device` (оператор/GUI). Отказ `start()`
+   «поток ещё не завершился» → ответ команды `status: error` с этим текстом, не исключение.
+9. **Шов для тестов:** `CodeReaderSdkPlugin.reader_factory: ClassVar = SdkCodeReader`; тест подменяет
+   на `functools.partial(SdkCodeReader, api=FakeApi(...))`. Фейк — из `tests/test_sdk_reader.py`.
+10. **Публикация:** `processes.<process_name>.state.code_reader_sdk` — `device_state`, `device`
+    (`ip`/`model`/`serial` или `None`), `last_code`, `last_status`, `last_quality`, `total_reads`,
+    `no_reads`, `bad_reads`, `frames`, `errors`, `dropped`, `last_error`, `pending`, `history`
+    (20 последних: `code`, `status`, `ts`, `trigger_index`). Публикуется: при кодах из `produce()`,
+    из `on_error`, при переполнении, из команд. `device_state` — из `reader.state` (не своя копия).
+
+**Files:**
+1. `Services/code_reader/core/sdk_reader.py` — `stats()["device_held"]` (решение 7).
+2. `Services/code_reader/plugin/sdk_registers.py` — `CodeReaderSdkRegisters` (`device_ip` `""` = первый,
+   `reader_id` `id3013`, `auto_start`, `timeout_ms` 500 (100–5000), телеметрия readonly — по решению 10).
+3. `Services/code_reader/plugin/sdk_config.py` — identity + `register_bindings` (образец `config.py`).
+4. `Services/code_reader/plugin/sdk_plugin.py` — `CodeReaderSdkPlugin`, `@register_plugin("code_reader_sdk", category="source")`.
+5. `Services/code_reader/plugin/__init__.py` — экспорт.
+6. `multiprocess_prototype/recipes/qr_reader_sdk_demo.yaml` — нода `reader_sdk` (SDK) **и** нода
+   `reader_tcp` (TCP-плагин, порт 5000): рецепт отвечает на живой вопрос «идут ли коды по TCP, пока
+   прибор открыт SDK».
+7. `multiprocess_prototype/recipes/tests/test_qr_reader_sdk_demo.py` — по образцу `test_qr_reader_demo.py`.
+8. Тесты: `Services/code_reader/tests/test_sdk_plugin.py` (tester, слепой), hazard-тесты автора — туда же
+   или `test_sdk_plugin_hazards.py`.
+9. `Services/code_reader/{README,STATUS,DECISIONS}.md` — плагин, решения 1/3/7/8 как ADR-CR.
+
+**Acceptance criteria:**
+- [ ] Реестр плагинов знает `code_reader_sdk` (category `source`); порты `code` (обязательный) и
+      `frame` (optional) объявлены.
+- [ ] Фейковый прибор отдаёт кадры по таблице контекста (ok ×2, bad_code, no_code) → `produce()` отдаёт
+      4 item в порядке `trigger_index`; у каждого `code`/`status` как у TCP-плагина
+      (`"QR-15MM"`/`"ok"`, `""`/`"bad_code"`, `""`/`"no_code"`), `seq_id` 1..4, `reader_id`.
+- [ ] `frame` — `numpy.ndarray` `uint8` формы `(1024, 1280)` для JPEG, сгенерированного в тесте.
+- [ ] В item нет значений типа `bytes`/`bytearray` ни на каком уровне вложенности; всё, кроме `frame`,
+      проходит `json.dumps`; `codes[i].corners` — 4 пары чисел; `quality` — `None` при
+      `bIsGetQuality = false`.
+- [ ] Битый JPEG → item с кодом, **без** `frame`, `errors` вырос; следующий кадр доставлен с `frame`.
+- [ ] Переполнение (9 кадров без `produce()`) → `dropped == 1`, в очереди 8, в дереве `dropped == 1`
+      **до** следующего `produce()`.
+- [ ] `produce()` не блокирует: при пустой очереди возвращает `[]` за < 50 мс, даже когда фейковый
+      `get_frame` висит.
+- [ ] `take_device`: успех → `device_state == "running"`; занят → `status: error`, `device_state == "busy"`,
+      текст про IDMVS; нет прибора → `not_found`. Повторный `take_device` при `running` — `ok` без
+      второго `open`.
+- [ ] `release_device` при фейке, который **блокирует** `get_frame` дольше дедлайна `stop()` →
+      `released: False`, `device_held: True`; после выхода потока `get_status` → `device_held: False`.
+      Обычный случай → `released: True` за ≤ `2 + timeout_ms/1000` с.
+- [ ] Три ошибки `get_frame` подряд → `device_state == "error"`, `last_error` непуст, в дереве то же;
+      `open` **не** вызван второй раз сам (нет автопереподключения); `take_device` после выхода потока
+      → снова `running`.
+- [ ] `shutdown()` отпускает прибор (`close` вызван ровно раз на открытие).
+- [ ] Рецепт: gate-валидатор проходит, движок видит, классы обеих нод импортируются, параметры нод
+      существуют в их register'ах.
+- [ ] Живой стенд (лидер): 20 срабатываний → 20 item; в `processes.reader_sdk.state.code_reader_sdk`
+      счётчики сходятся с табло прибора; **максимум байт data-сообщения `reader_sdk → gui` ≤ 16 384**
+      (кадр уехал в SHM — у item есть `shm_name`); задержка «триггер → item в gui» — число;
+      ответ на вопрос TCP-при-SDK — фактом.
+- [ ] Break-injection лидера: кадр под ключом `image` вместо `frame` → порог 16 384 нарушен (или тест на
+      отсутствие `bytes` краснеет); `device_held` всегда `False` → тест позднего stop краснеет.
+**Out of scope:** автопереподключение, запись параметров прибора, перевод `nOverQuality` в буквы (шкала не
+снята — нужен `2D Code Quality Enable` на приборе), GUI-виджет с отрисовкой углов, Ф4 transport.
 
 ## Итог 6.1–6.2 (2026-09-29)
+
 
 267 тестов в `Services/code_reader/tests` (195 слепых + 2 hazard teamlead + 8 hazard итерации 2 и правок ревью);
 инъекции лидера 27/27 (6.1: 10, 6.2: 12 — одна дыра K5 закрыта тестом, итерация 2: 4 + 1);
