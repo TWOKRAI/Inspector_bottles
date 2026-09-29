@@ -46,6 +46,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Радиус слияния мимо контракт- и живых тестов](feedback_merge_radius_skips_live_and_contract_tests.md) — без --backend-live живые в skipped
 - [Лог из shutdown() не доходит до стора](feedback_shutdown_logs_miss_the_store.md) — stop() снимает store-tap раньше; kwargs в extra.context
 - [Инъекции — только по закоммиченному коду](feedback_injection_scripts_on_committed_code.md) — checkout съел фикс; zsh не бьёт $VAR
+- [Широкий except в кадровом цикле прячет мёртвый механизм](feedback_broad_except_in_frame_loop_hides_dead_mechanism.md) — лента едет, объектов нет, тесты зелёные
 - [Слияние: тип feat, не merge](feedback_merge_commit_needs_feat_type.md) — хук режет merge(...), -F - не читает stdin
 
 ### User
