@@ -193,7 +193,16 @@ def test_drop_refuses_then_recovers(running_plugin) -> None:
     resp = _call(plugin, "fault.drop", {"seconds": 3})
     assert resp["ok"] is True, f"fault.drop должен вернуть ok=True: {resp!r}"
 
-    assert not _try_connect(_HOST, port, timeout=1.0), "коннект во время drop должен быть отказан за <=1с"
+    # Команда возвращается раньше, чем поток закроет слушателя (plugin.py, fault.drop), поэтому
+    # «отказан за <=1с» — опрос до первого отказа в пределах секунды, а не одна попытка сразу
+    # (одна попытка ловила ещё живого слушателя — флик, найден ревью 2026-09-29).
+    refused = False
+    while time.monotonic() < t_cmd + 1.0:
+        if not _try_connect(_HOST, port, timeout=0.2):
+            refused = True
+            break
+        time.sleep(0.02)
+    assert refused, "коннект во время drop должен быть отказан за <=1с"
 
     deadline = t_cmd + 5.0
     reconnected = False

@@ -88,34 +88,49 @@ def test_line_carries_time_and_delta_within_its_column(window) -> None:
     assert lines[1].lstrip().split()[1].startswith("+")  # у второй строки есть дельта
 
 
-def _shown_minus_now_s(win: SimMonitorWindow, journal: SimJournal) -> float:
-    """Показанное окном время строки журнала минус настенное «сейчас» (сек., с учётом полуночи)."""
+def _sec_of_day(t: datetime) -> float:
+    return t.hour * 3600 + t.minute * 60 + t.second + t.microsecond / 1e6
+
+
+def _wrap(d: float) -> float:
+    """Разность секунд суток с учётом полуночи."""
+    return (d + 43200) % 86400 - 43200
+
+
+def _slack_around_shown_s(win: SimMonitorWindow, journal: SimJournal) -> tuple[float, float]:
+    """(показанное − «до события», «после отрисовки» − показанное), сек.
+
+    Настенное время снимается ДО ``on_event`` и ПОСЛЕ ``_render``: верное окно показывает время
+    между ними, и проверка не зависит от нагрузки (простой потока расширяет окно, а не роняет
+    тест — нит ревью 2026-09-29 к допуску 15 мс). Отметка усечена до мс → допуск 2 мс снизу."""
+    before = _sec_of_day(datetime.now())
     journal.on_event("[CVT]  выполнено -> робот свободен")
     (entry,) = journal.drain()
     match = re.search(r"(\d\d):(\d\d):(\d\d)\.(\d{3})", win._render(entry))
     assert match, "в строке нет отметки времени"
+    after = _sec_of_day(datetime.now())
     hh, mm, ss, ms = (int(g) for g in match.groups())
     shown = hh * 3600 + mm * 60 + ss + ms / 1000
-    now = datetime.now()
-    diff = shown - (now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6)
-    return (diff + 43200) % 86400 - 43200
+    return _wrap(shown - before), _wrap(after - shown)
 
 
 def test_monitor_time_is_anchored_on_the_journal_clock(qtbot) -> None:
-    """Часы журнала выданы с произвольным сдвигом от monotonic: якорь окна на своих часах
+    """Часы журнала выданы с произвольным сдвигом (точные, чтобы не мерить их квантование): якорь на своих часах
     показал бы время со сдвигом (здесь +5000 с), на часах журнала — текущее."""
-    journal = SimJournal(clock=lambda: time.monotonic() + 5000.0)
+    journal = SimJournal(clock=lambda: time.perf_counter() + 5000.0)
     win = SimMonitorWindow(journal, poll_ms=10_000)
     qtbot.addWidget(win)
 
-    assert abs(_shown_minus_now_s(win, journal)) < 0.05
+    since_before, until_after = _slack_around_shown_s(win, journal)
+    assert since_before >= -0.002 and until_after >= -0.002, (since_before, until_after)
 
 
 def test_monitor_time_matches_wall_clock_with_default_journal_clock(qtbot) -> None:
-    """Штатные часы журнала (perf_counter): расхождение с настенным временем — единицы мс, не десятки
+    """Штатные часы журнала (perf_counter): показанное время — между отметками «до» и «после»
     (на Windows perf_counter и monotonic расходятся на 28 мс и растут с аптаймом)."""
     journal = SimJournal()
     win = SimMonitorWindow(journal, poll_ms=10_000)
     qtbot.addWidget(win)
 
-    assert abs(_shown_minus_now_s(win, journal)) < 0.015
+    since_before, until_after = _slack_around_shown_s(win, journal)
+    assert since_before >= -0.002 and until_after >= -0.002, (since_before, until_after)
