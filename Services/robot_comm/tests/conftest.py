@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import os
+
+# Тесты видов рисуют в QPixmap и читают пиксели: платформа Qt — «offscreen», не зависит от того,
+# кто и как запустил pytest. До импорта Qt и до любого QApplication; setdefault — явная
+# переменная окружения (например, для отладки на реальном экране) по-прежнему главнее.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import pytest
 
 from Services.robot_comm.core.client import RobotClient
