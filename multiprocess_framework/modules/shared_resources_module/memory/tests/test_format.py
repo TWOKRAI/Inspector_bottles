@@ -160,13 +160,14 @@ class TestShapeIsPreserved:
         assert out[0].tolist() == img.tolist()
 
     @pytest.mark.parametrize("shape", [(4, 5), (4, 5, 1), (4, 5, 3)])
-    def test_read_single_frame_keeps_shape(self, shape):
+    @pytest.mark.parametrize("copy", [True, False])
+    def test_read_single_frame_keeps_shape(self, shape, copy):
         slot = (4, 5, 3)
         img = np.arange(int(np.prod(shape)), dtype=np.uint8).reshape(shape)
         buf = bytearray(calculate_buffer_size(1, slot, np.uint8))
         pack_images_fast(memoryview(buf), [img], slot, np.dtype(np.uint8))
 
-        out = read_single_frame(memoryview(buf))
+        out = read_single_frame(memoryview(buf), copy=copy)
         assert out.shape == shape
         assert out.tolist() == img.tolist()
 
