@@ -250,6 +250,74 @@ function attachCanvas(node, w, h) {
   node._ctxLog = () => (cx ? cx.log : []);
 }
 
+// Task 1.3h-c: <select> и <option> списка спрайтов. Модель браузера, которую харнесс
+// ПРИНИМАЕТ НА ВЕРУ (живой Chrome проверяет лид, харнесс слеп к умолчаниям браузера):
+//  - без явного выбора выбран ПЕРВЫЙ пункт (selectedIndex 0, value = его value);
+//  - пунктов нет -> value "" и selectedIndex -1;
+//  - `select.value = X` выбирает пункт с value === X, а несуществующее X снимает выбор (-1, "");
+//  - `option.value` без явного значения равен textContent; `option.selected = true` выбирает пункт;
+//  - innerHTML = "" / textContent = "" / replaceChildren() / length = 0 / removeChild сбрасывают
+//    выбор на «первый»; пункты добавляются через appendChild (или add), options — живой список;
+//  - событий харнесс сам НЕ шлёт: шаг select_option ставит выбор и шлёт `input` + `change`
+//    (как пользователь); чтение select.value в обработчике кнопки видит выбранный пункт.
+function attachOption(node) {
+  let v;
+  Object.defineProperty(node, "value", {
+    get() { return v !== undefined ? v : node.textContent; },
+    set(x) { v = String(x); },
+  });
+  Object.defineProperty(node, "text", {
+    get() { return node.textContent; },
+    set(x) { node.textContent = String(x); },
+  });
+  Object.defineProperty(node, "selected", {
+    get() {
+      const par = node._parent;
+      return par ? par.selectedIndex === par.children.indexOf(node) : !!node._want;
+    },
+    set(b) {
+      node._want = !!b;
+      if (b && node._parent) node._parent.selectedIndex = node._parent.children.indexOf(node);
+    },
+  });
+}
+
+function attachSelect(node) {
+  let sel = null; // null — «авто»: первый пункт
+  const cur = () => (node.children.length === 0 ? -1 : sel === null ? 0 : sel < node.children.length ? sel : -1);
+  node._onClear = () => { sel = null; };
+  Object.defineProperty(node, "options", { get() { return node.children; } });
+  Object.defineProperty(node, "length", {
+    get() { return node.children.length; },
+    set(n) { if (n === 0) { node.children = []; sel = null; } },
+  });
+  Object.defineProperty(node, "selectedIndex", {
+    get: cur,
+    set(i) { sel = i >= 0 && i < node.children.length ? i : -1; },
+  });
+  Object.defineProperty(node, "value", {
+    get() { const i = cur(); return i < 0 ? "" : node.children[i].value; },
+    set(x) { sel = node.children.findIndex((o) => o.value === String(x)); },
+  });
+  Object.defineProperty(node, "textContent", {
+    get() { return node.children.map((o) => o.textContent).join(""); },
+    set() { node.children = []; sel = null; },
+  });
+  const append = node.appendChild;
+  node.appendChild = (child) => {
+    append.call(node, child);
+    if (child) {
+      child._parent = node;
+      if (child._want) sel = node.children.length - 1;
+    }
+    return child;
+  };
+  node.add = node.appendChild;
+  const remove = node.removeChild;
+  node.removeChild = (child) => { sel = null; return remove.call(node, child); };
+  node.replaceChildren = (...kids) => { node.children = []; sel = null; kids.forEach((k) => node.appendChild(k)); };
+}
+
 // Записи присваивания `.innerHTML =` на ЛЮБОМ узле (созданном через
 // getElementById ИЛИ createElement) — Task 1.2h ит.2, Н3: тест на
 // экранирование `layer.name` проверяет, что вредоносная строка никогда не
@@ -327,14 +395,17 @@ function makeEl(id, tag) {
     set(v) {
       _innerHTML = v;
       node.children = []; // как в DOM: присваивание innerHTML сносит потомков
+      if (node._onClear) node._onClear(); // <select>: выбор снова «первый пункт»
       innerHtmlWrites.push(String(v));
     },
   });
+  if (tag === "select") attachSelect(node);
+  if (tag === "option") attachOption(node);
   return node;
 }
 const els = {};
 function el(id) {
-  return (els[id] ||= makeEl(id, id === "presetCanvas" ? "canvas" : ""));
+  return (els[id] ||= makeEl(id, id === "presetCanvas" ? "canvas" : id === "presetSpriteSelect" ? "select" : ""));
 }
 const win = {
   h: {},
@@ -572,6 +643,36 @@ async function run() {
       };
     }
     process.stdout.write(JSON.stringify(res));
+  } else if (scenario === "select_selfcheck") {
+    // Task 1.3h-c: самопроверка модели <select>/<option> БЕЗ обращения страницы к ней (см. attachSelect).
+    const mk = (v, t) => {
+      const o = doc.createElement("option");
+      if (v !== undefined) o.value = v;
+      o.textContent = t;
+      return o;
+    };
+    const s = el("presetSpriteSelect");
+    const r = { tag: s.tagName };
+    r.empty = [s.value, s.selectedIndex, s.options.length];
+    s.appendChild(mk("v1", "t1"));
+    s.appendChild(mk("v2", "t2"));
+    s.appendChild(mk(undefined, "only-text"));
+    r.auto_first = [s.value, s.selectedIndex, s.options.length];
+    s.value = "v2";
+    r.set_v2 = [s.value, s.selectedIndex];
+    s.value = "nope";
+    r.set_unknown = [s.value, s.selectedIndex];
+    s.selectedIndex = 2;
+    r.text_fallback = [s.value, s.selectedIndex];
+    s.innerHTML = "";
+    r.cleared = [s.value, s.selectedIndex, s.options.length];
+    s.appendChild(mk("w1", "u1"));
+    r.after_clear = [s.value, s.selectedIndex];
+    const o2 = mk("w2", "u2");
+    o2.selected = true;
+    s.appendChild(o2);
+    r.pre_selected = [s.value, s.selectedIndex];
+    process.stdout.write(JSON.stringify(r));
   } else if (scenario === "canvas_script") {
     // Task 1.3h-b: сценарий из JSON-шагов (argv[4]) над НАСТОЯЩЕЙ страницей.
     // Координаты `at`/`from`/`to` — смещения в пикселях канвы ОТ ЦЕНТРА канвы.
@@ -584,7 +685,7 @@ async function run() {
     }, 20000).unref();
     const steps = JSON.parse(process.argv[4] || "[]");
     const cv = el("presetCanvas");
-    const out = { snaps: {}, waits: [], aborted: null, pd: [] };
+    const out = { snaps: {}, waits: [], aborted: null, pd: [], selects: [] };
     let held = null;
     const mask = (b) => (b === 0 ? 1 : b === 2 ? 2 : b === 1 ? 4 : 0);
     const ptr = (at, extra) => {
@@ -599,6 +700,13 @@ async function run() {
       (el("presetLayers").children || [])
         .filter((r) => String(r.className).split(/\s+/).includes("selected"))
         .map((r) => (r.children[0] && r.children[0].textContent) || "");
+    // Task 1.3h-c: значения глобалов страницы (`var presetState` — свойство глобального объекта vm).
+    const pageJson = (expr) => {
+      try {
+        const t = vm.runInContext(`JSON.stringify(${expr})`, ctx);
+        return t === undefined ? null : JSON.parse(t);
+      } catch (e) { return null; }
+    };
     const layoutCount = () => fetchLog.filter((e) => e.path === "/api/preset/layout" && e.method === "POST").length;
     const press = (at, button) => {
       held = button || 0;
@@ -684,6 +792,19 @@ async function run() {
       } else if (st.op === "focus_el") {
         // B1: клик по кнопке формы отдаёт ей фокус (пробел потом нажал бы её при keyup).
         el(st.id).focus();
+      } else if (st.op === "select_option") {
+        // Task 1.3h-c: пользователь выбирает пункт <select> по value: selectedIndex + input + change.
+        // Нет такого пункта -> сценарий прерывается (aborted), как провал wait_drawn.
+        const s = el(st.id);
+        const oi = s.children.findIndex((o) => o.value === String(st.value));
+        out.selects.push({ id: st.id, value: st.value, ok: oi >= 0, have: s.children.map((o) => o.value) });
+        if (oi < 0) out.aborted = i;
+        else {
+          s.selectedIndex = oi;
+          s.fire("input");
+          s.fire("change");
+          await sleep(10);
+        }
       } else if (st.op === "press_button") { el(st.id).fire("click"); await sleep(30); }
       else if (st.op === "set_field") {
         el(st.id).value = String(st.value);
@@ -700,6 +821,17 @@ async function run() {
           layoutCount: layoutCount(),
           active: doc.activeElement.id || doc.activeElement.tagName, // id узла или "BODY"
           focusCalls: cv.focusCalls.slice(), // копия: снимок не должен меняться задним числом
+          // Task 1.3h-c: состав слоёв (presetState.layers), то, что видно в форме (collectPresetFromFields),
+          // имена строк формы (первый потомок строки — <b>), список спрайтов и текст отказа списка.
+          layers: pageJson("presetState && presetState.layers"),
+          form: pageJson("presetState ? collectPresetFromFields().layers : null"),
+          rows: (el("presetLayers").children || []).map((r) => (r.children[0] && r.children[0].textContent) || ""),
+          sel: {
+            options: el("presetSpriteSelect").children.map((o) => ({ value: o.value, text: o.textContent })),
+            value: el("presetSpriteSelect").value,
+            index: el("presetSpriteSelect").selectedIndex,
+          },
+          spritesError: el("presetSpritesError").textContent,
         };
       }
     }
