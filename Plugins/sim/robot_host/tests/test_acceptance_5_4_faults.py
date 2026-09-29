@@ -394,6 +394,7 @@ def test_status_lists_faults_and_clear_empties(running_plugin) -> None:
 
 def test_delay_ms_delays_and_does_not_serialize(running_plugin) -> None:
     plugin, _ctx, port = running_plugin
+    # Замеры — perf_counter: time.monotonic на Windows квантуется по 15.625 мс и даёт ложные 0.297 с.
 
     resp = _call(plugin, "fault.delay_ms", {"ms": 300})
     assert resp["ok"] is True
@@ -401,9 +402,9 @@ def test_delay_ms_delays_and_does_not_serialize(running_plugin) -> None:
     client = _mb_client()(host=_HOST, port=port, timeout=3)
     _mb_connect(client)
     try:
-        t0 = time.monotonic()
+        t0 = time.perf_counter()
         _mb_read(client, REG_FREE, 1)
-        elapsed_single = time.monotonic() - t0
+        elapsed_single = time.perf_counter() - t0
     finally:
         client.close()
     assert elapsed_single >= 0.3, f"единичное чтение должно быть задержано >=0.3с: {elapsed_single:.3f}с"
@@ -420,13 +421,13 @@ def test_delay_ms_delays_and_does_not_serialize(running_plugin) -> None:
         except BaseException as exc:  # noqa: BLE001
             errors[idx] = exc
 
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     threads = [threading.Thread(target=_worker, args=(i, c), daemon=True) for i, c in enumerate(clients)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=2.0)
-    elapsed_concurrent = time.monotonic() - t0
+    elapsed_concurrent = time.perf_counter() - t0
     for c in clients:
         c.close()
     assert all(not t.is_alive() for t in threads), "конкурентное чтение зависло дольше join-дедлайна"
@@ -442,9 +443,9 @@ def test_delay_ms_delays_and_does_not_serialize(running_plugin) -> None:
     client2 = _mb_client()(host=_HOST, port=port, timeout=3)
     _mb_connect(client2)
     try:
-        t0 = time.monotonic()
+        t0 = time.perf_counter()
         _mb_read(client2, REG_FREE, 1)
-        elapsed_after_clear = time.monotonic() - t0
+        elapsed_after_clear = time.perf_counter() - t0
     finally:
         client2.close()
     assert elapsed_after_clear < 0.1, f"после clear чтение всё ещё задержано: {elapsed_after_clear:.3f}с"
