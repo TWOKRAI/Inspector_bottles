@@ -110,3 +110,4 @@
 - [Plan-Driven Dev](project_plan_driven_dev.md) — slug, Refs-trailer · [checkboxes [x]+hash](feedback_plan_checkboxes.md) · [dual-save](feedback_plan_dual_save.md)
 - [Причина из плана — гипотеза](feedback_the_plans_stated_cause_is_a_hypothesis.md) — симптом верен до числа, причина нет; зонд мимо подозреваемой плоскости · [Спека может врать](feedback_plan_spec_can_lie.md) — имя поля сверять с кодом · [позиционный вызов прячет имена](feedback_positional_call_hides_parameter_name_drift.md)
 - [Железо владельца и роли машин](project_hardware_roles_2026_09_23.md) — RTX 3050 4 ГБ = симулятор, Orin NX 16 = линия
+- [Bash heredoc схлопывает `\\`](feedback_bash_heredoc_collapses_backslashes.md) — такие файлы через Write · [ctypes setattr по чужому имени молчит](feedback_ctypes_setattr_unknown_field_is_silent.md) — проверять _fields_
