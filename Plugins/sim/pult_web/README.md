@@ -46,6 +46,7 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `GET /api/preset` | — | `preset.get` → процесс `scene_process` | результат команды как есть (Task 1.2h) |
 | `POST /api/preset/commit` | `{preset, base_rev}` | `preset.commit` → процесс `scene_process` | результат команды как есть (Task 1.2h); потолок тела 256 КБ (не общие 4 КБ) |
 | `POST /api/preset/preview` | `{preset?, seeds?, tile_px?}` | `preset.preview` → процесс `layers_process` | результат команды как есть (Task 1.2h); таймаут маршрута 5.0 с (не общий 1.0 с) |
+| `POST /api/preset/layout` | `{preset?, seed?}` | `preset.layout` → процесс `layers_process` | результат команды как есть (Task 1.3h-a, слои раздельно для канвы); таймаут маршрута 5.0 с |
 
 Путь **не валидирует** поля тела — форвардит их адресату как есть (`robot` или,
 для `truth.*`/`scene.*`/`preset.*`, процессу сцены или `layers_process`),

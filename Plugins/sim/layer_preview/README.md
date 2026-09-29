@@ -1,7 +1,7 @@
 # Plugins/sim/layer_preview — превью пресета слоёв в своём процессе
 
 Плагин процесса `layers` приложения `apps/line_sim` (редактор слоёв, Task 1.2a, ревью S1). Одна команда —
-`preset.preview`: сетка объектов пресета по seed в PNG. Своих портов данных нет (side-effect, `category: control`).
+`preset.preview`: сетка объектов пресета по seed в PNG; `preset.layout`: слои объекта раздельно для канвы редактора. Своих портов данных нет (side-effect, `category: control`).
 
 ## Зачем отдельный процесс
 
@@ -26,6 +26,21 @@ bad_request, message}`.
   16×113 — 100–137 КБ. Спрайты 1200 px — до 1.3 с на превью (держит только поток `layers`). Замеры ревью 1.2a it.2.
 - Лимиты: 1..16 seed, `tile_px` 16..256 и бюджет `len(seeds) × tile_px² ≤ 8 × 160²` — иначе `bad_request`.
 - Рендер — `Services.line_sim.core.preview.render_preview_grid` (кэш фабрики — одна запись на процесс).
+
+`preset.layout {preset?: dict, seed?: int}` → `{status: ok, class_name, canvas_px: [w, h], layers: [{name, png_b64,
+center_px: [x, y], size_px: [w, h]}]}` (Task 1.3h-a, канва редактора на `pult_web`); ошибки — те же `invalid` /
+`bad_request`, та же ограда путей клиентского пресета.
+
+- Каждый слой объекта ленты — отдельной RGBA-картинкой, уже после заливки, `scale` и поворота слоя (тот же
+  `LayeredObject._transform`); **номинал**: `augment` не разыгрывается, угол объекта 0, defect-слои не рисуются.
+- Слои — снизу вверх как у объекта ленты: у пресета с каталогом без слоя `class://` первым идёт авто-слой `base`
+  (спрайт класса), он не редактируется — страница сопоставляет слои с пресетом по имени.
+- `center_px` — центр слоя относительно центра объекта (Y вниз), `canvas_px` — размер объекта в номинале.
+- Класс для `seed` тот же, что у плитки `preset.preview` с этим seed (общий `np.random.default_rng(seed)` и
+  общий розыгрыш `ObjectFactory._resolve_bottom_layers`); `force_defect_next()` раскладка не трогает.
+- `seed` — целое ≥ 0 (не `bool`), по умолчанию 0; верхней границы нет.
+- Цена (замер 2026-09-29, Windows): `letters_layered.yaml` (диск + буква 300 px) — 22 мс, 10 КБ JSON;
+  каталог `letter_catalog_rep` — 0.5 мс, 2 КБ.
 
 ## Конфиг (`pipeline.yaml`)
 

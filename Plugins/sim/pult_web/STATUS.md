@@ -22,6 +22,7 @@
 | Медленный `robot` не блокирует соседний `GET /` | есть: `ThreadingHTTPServer` — поток на соединение |
 | Localhost-страж (`Host` не 127.0.0.1/localhost:port) | есть: 403 на `GET`/`POST`, DNS-rebinding отбит |
 | Content-Type-страж на `POST` (не `application/json`) | есть: 415 до чтения тела, двойник не вызван |
+| `POST /api/preset/layout` (Task 1.3h-a) | есть: строка `_PRESET_ROUTES`, форвард `preset.layout` в `layers_process`, таймаут 5.0 с, коды как у `/api/preset/preview`; страница канву пока не рисует — 1.3h-b |
 | Страница: `pollStatus` на отказ (`ok: false`/не-2xx) | есть: «robot не отвечает», не `undefined`-поля |
 | Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
 | Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
