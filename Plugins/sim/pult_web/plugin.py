@@ -808,11 +808,13 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
     """
 
     class _PultHandler(http.server.BaseHTTPRequestHandler):
-        #: Таймаут сокета (ревью Task 1.2h ит.1, Н1) — без него блокирующее
-        #: чтение тела (обычное и дренаж после 413) висит бессрочно, если
-        #: клиент перестал слать байты. Атрибут читает `socketserver.
-        #: StreamRequestHandler.setup()` и вызывает `connection.settimeout(...)`.
-        timeout = _DRAIN_TIMEOUT_S
+        # Таймаут сокета НЕ задаётся атрибутом `timeout` класса (ревью Task 1.2h
+        # ит.2): `socketserver.StreamRequestHandler.setup()` повесил бы его на
+        # КАЖДОЕ чтение этого обработчика, и легитимный клиент, шлющий 256 КБ
+        # `commit` с паузой длиннее таймаута, получал бы обрыв (`WinError 10053`)
+        # вместо ответа — замер ревью: пауза 2.8 с посреди валидного тела, ни
+        # 413, ни 408, ни какого-либо HTTP-ответа. Таймаут нужен ровно там, где
+        # мы читаем байты, которые никому не нужны, — см. `_drain_body`.
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - сигнатура stdlib
             """Подавить дефолтный access-лог в stderr (не наш log-разъём)."""
@@ -869,10 +871,14 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             число (``min(заявленный Content-Length, _MAX_DRAIN_BYTES)``, ревью
             Task 1.2h ит.1, Н1) — сама функция потолка не знает и читает ровно
             столько, сколько ей велено. Таймаут сокета (``_DRAIN_TIMEOUT_S``,
-            задан классу обработчика) не даёт чтению зависнуть, если клиент
-            перестал слать байты."""
-            remaining = length
+            ставится на время дренажа и снимается после) не даёт чтению зависнуть,
+            если клиент перестал слать байты. Таймаут именно ЗДЕСЬ, а не на классе
+            обработчика: на классе он резал бы и чтение валидного тела команды
+            (ревью Task 1.2h ит.2)."""
+            previous = self.connection.gettimeout()
             try:
+                self.connection.settimeout(_DRAIN_TIMEOUT_S)
+                remaining = length
                 while remaining > 0:
                     chunk = self.rfile.read(min(remaining, 65536))
                     if not chunk:
@@ -880,6 +886,11 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                     remaining -= len(chunk)
             except OSError:
                 return
+            finally:
+                try:
+                    self.connection.settimeout(previous)
+                except OSError:
+                    pass
 
         def _read_command_body(self, max_bytes: int = _MAX_BODY_BYTES) -> tuple[dict | None, tuple[int, dict] | None]:
             """Прочитать РОВНО ``Content-Length`` байт (не до EOF, см. докстринг модуля).

@@ -525,3 +525,63 @@ def test_preset_section_markup_has_pinned_ids(start_pult) -> None:
 
     missing = [name for name in _PINNED_MARKUP_IDS if f'id="{name}"' not in html]
     assert not missing, f"в разметке не найдены закреплённые id: {missing!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Ревью итерации 2: таймаут дренажа не смеет резать валидное тело команды      #
+# --------------------------------------------------------------------------- #
+
+
+def test_slow_but_valid_body_is_not_cut_by_drain_timeout(start_pult) -> None:
+    """Лечение Н1 внесло регрессию: таймаут стоял атрибутом ``timeout`` КЛАССА
+    обработчика, поэтому ``socketserver.StreamRequestHandler.setup()`` вешал его
+    на любое чтение. Легитимный клиент, шлющий валидное тело с паузой длиннее
+    таймаута, получал обрыв соединения вместо ответа (замер ревью ит.2: пауза
+    2.8 с посреди тела ``/api/preset/commit`` -> ``WinError 10053``, ни 413, ни
+    408, ни какого-либо HTTP-ответа, команда до бэкенда не доходила).
+
+    Здесь тело уходит двумя кусками с паузой 2.8 с — заведомо больше
+    ``_DRAIN_TIMEOUT_S`` (2.0 с). Дедлайн — свой daemon-поток с ``join()``:
+    ``pytest.mark.timeout`` в этом окружении пустышка (плагин не установлен).
+    """
+    plugin, _ctx, port = start_pult()
+    scene_client = _client_for("camera")
+    assert scene_client is not None, "нет клиента процесса сцены"
+    scene_client.responses["preset.commit"] = {"status": "ok", "rev": "rev-2"}
+
+    body = json.dumps({"preset": {"layers": []}, "base_rev": "rev-1"}).encode("utf-8")
+    head, tail = body[:10], body[10:]
+    result: dict[str, Any] = {}
+
+    def _attempt() -> None:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=15.0) as sock:
+                sock.sendall(
+                    b"POST /api/preset/commit HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1:" + str(port).encode("ascii") + b"\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                    b"\r\n" + head
+                )
+                time.sleep(2.8)  # дольше _DRAIN_TIMEOUT_S — медленный, но честный клиент
+                sock.sendall(tail)
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                result["data"] = data
+        except OSError as exc:
+            result["error"] = repr(exc)
+
+    thread = threading.Thread(target=_attempt, daemon=True)
+    thread.start()
+    thread.join(timeout=20.0)
+
+    assert not thread.is_alive(), "ответ не пришёл за 20 с"
+    data = result.get("data", b"")
+    assert data, f"соединение оборвано без ответа: {result.get('error')!r}"
+    status_line = data.split(b"\r\n", 1)[0]
+    assert b" 200 " in status_line, f"медленное валидное тело -> {status_line!r}"
+    assert scene_client.calls, "команда preset.commit до бэкенда не дошла"
