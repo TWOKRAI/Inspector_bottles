@@ -3,6 +3,7 @@
 Инъектор неисправности обязан задержать ответ НЕ меньше заказанного. Цикл asyncio на Windows
 живёт на грубых часах (15.625 мс) и в часто просыпающемся цикле будит ``asyncio.sleep`` раньше
 срока — тест гонит настоящий биндер в таком цикле и меряет ``perf_counter``.
+Тонкая поломка (дедлайн добора на ``time.monotonic``) ловится в 10 прогонах из 10 (см. фазовую паузу).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from Services.robot_comm.server.sim_core import RobotSimCore
 pytestmark = pytest.mark.skipif(not sim_robot.MODBUS_AVAILABLE, reason="pymodbus не установлен")
 
 _DELAY_S = 0.03
-_SAMPLES = 80
+_SAMPLES = 120
 
 
 async def _measure_binder_delays() -> list[float]:
@@ -38,6 +39,9 @@ async def _measure_binder_delays() -> list[float]:
         started = time.perf_counter()
         await binder(3, 0, 0, 1, registers, None)
         elapsed.append(time.perf_counter() - started)
+        # Сбиваем фазу относительно сетки тиков часов: без паузы каждый замер стартует в ту же
+        # долю тика, и тонкая поломка (дедлайн на time.monotonic) видна лишь в единичных замерах.
+        await asyncio.sleep(0.0007)
     stop.set()
     await ticking
     return elapsed

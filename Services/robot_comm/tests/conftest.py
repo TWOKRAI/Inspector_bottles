@@ -20,6 +20,10 @@ from Services.robot_comm.testing.fake_transport import FakeRobotTransport
 # Тесты видов рисуют в QPixmap и читают пиксели: платформа Qt — «offscreen», не зависит от того,
 # кто и как запустил pytest. Переменная читается при создании QApplication, импорты ей не мешают; setdefault — явная
 # переменная окружения (например, для отладки на реальном экране) по-прежнему главнее.
+# ВНИМАНИЕ: переменные окружения — на весь процесс pytest, а не на пакет: если в одном запуске собраны
+# и тесты robot_comm, и чужие Qt-тесты (testpaths по умолчанию включают multiprocess_prototype/frontend),
+# те тоже пойдут на offscreen (и на Windows — с одним DejaVuSans). Замер: набор упавших во фронте тот
+# же с conftest и без; перенос в корневой conftest — отдельная задача.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 

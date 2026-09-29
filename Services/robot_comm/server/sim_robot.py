@@ -68,7 +68,7 @@ if MODBUS_AVAILABLE and sys.platform == "win32":
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)  # type: ignore[attr-defined]
-                sock.bind((host, port))  # пустой host = все интерфейсы, как у pymodbus
+                sock.bind((host, port))  # AF_INET: только IPv4 (asyncio поднял бы и v6)
                 return await self.loop.create_server(self.handle_new_connection, sock=sock, start_serving=True)
             except BaseException:
                 sock.close()
