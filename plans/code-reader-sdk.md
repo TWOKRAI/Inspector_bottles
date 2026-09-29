@@ -232,37 +232,45 @@
 9. `Services/code_reader/{README,STATUS,DECISIONS}.md` — плагин, решения 1/3/7/8 как ADR-CR.
 
 **Acceptance criteria:**
-- [ ] Реестр плагинов знает `code_reader_sdk` (category `source`); порты `code` (обязательный) и
+- [x] Реестр плагинов знает `code_reader_sdk` (category `source`); порты `code` (обязательный) и
       `frame` (optional) объявлены.
-- [ ] Фейковый прибор отдаёт кадры по таблице контекста (ok ×2, bad_code, no_code) → `produce()` отдаёт
+- [x] Фейковый прибор отдаёт кадры по таблице контекста (ok ×2, bad_code, no_code) → `produce()` отдаёт
       4 item в порядке `trigger_index`; у каждого `code`/`status` как у TCP-плагина
       (`"QR-15MM"`/`"ok"`, `""`/`"bad_code"`, `""`/`"no_code"`), `seq_id` 1..4, `reader_id`.
-- [ ] `frame` — `numpy.ndarray` `uint8` формы `(1024, 1280)` для JPEG, сгенерированного в тесте.
-- [ ] В item нет значений типа `bytes`/`bytearray` ни на каком уровне вложенности; всё, кроме `frame`,
+- [x] `frame` — `numpy.ndarray` `uint8` формы `(1024, 1280)` для JPEG, сгенерированного в тесте.
+- [x] В item нет значений типа `bytes`/`bytearray` ни на каком уровне вложенности; всё, кроме `frame`,
       проходит `json.dumps`; `codes[i].corners` — 4 пары чисел; `quality` — `None` при
       `bIsGetQuality = false`.
-- [ ] Битый JPEG → item с кодом, **без** `frame`, `errors` вырос; следующий кадр доставлен с `frame`.
-- [ ] Переполнение (9 кадров без `produce()`) → `dropped == 1`, в очереди 8, в дереве `dropped == 1`
+- [x] Битый JPEG → item с кодом, **без** `frame`, `errors` вырос; следующий кадр доставлен с `frame`.
+- [x] Переполнение (9 кадров без `produce()`) → `dropped == 1`, в очереди 8, в дереве `dropped == 1`
       **до** следующего `produce()`.
-- [ ] `produce()` не блокирует: при пустой очереди возвращает `[]` за < 50 мс, даже когда фейковый
+- [x] `produce()` не блокирует: при пустой очереди возвращает `[]` за < 50 мс, даже когда фейковый
       `get_frame` висит.
-- [ ] `take_device`: успех → `device_state == "running"`; занят → `status: error`, `device_state == "busy"`,
+- [x] `take_device`: успех → `device_state == "running"`; занят → `status: error`, `device_state == "busy"`,
       текст про IDMVS; нет прибора → `not_found`. Повторный `take_device` при `running` — `ok` без
       второго `open`.
-- [ ] `release_device` при фейке, который **блокирует** `get_frame` дольше дедлайна `stop()` →
+- [x] `release_device` при фейке, который **блокирует** `get_frame` дольше дедлайна `stop()` →
       `released: False`, `device_held: True`; после выхода потока `get_status` → `device_held: False`.
       Обычный случай → `released: True` за ≤ `2 + timeout_ms/1000` с.
-- [ ] Три ошибки `get_frame` подряд → `device_state == "error"`, `last_error` непуст, в дереве то же;
+- [x] Три ошибки `get_frame` подряд → `device_state == "error"`, `last_error` непуст, в дереве то же;
       `open` **не** вызван второй раз сам (нет автопереподключения); `take_device` после выхода потока
       → снова `running`.
-- [ ] `shutdown()` отпускает прибор (`close` вызван ровно раз на открытие).
-- [ ] Рецепт: gate-валидатор проходит, движок видит, классы обеих нод импортируются, параметры нод
+- [x] `shutdown()` отпускает прибор (`close` вызван ровно раз на открытие).
+- [x] Рецепт: gate-валидатор проходит, движок видит, классы обеих нод импортируются, параметры нод
       существуют в их register'ах.
-- [ ] Живой стенд (лидер): 20 срабатываний → 20 item; в `processes.reader_sdk.state.code_reader_sdk`
+- [x] Живой стенд (лидер): 20 срабатываний → 20 item; в `processes.reader_sdk.state.code_reader_sdk`
       счётчики сходятся с табло прибора; **максимум байт data-сообщения `reader_sdk → gui` ≤ 16 384**
       (кадр уехал в SHM — у item есть `shm_name`); задержка «триггер → item в gui» — число;
       ответ на вопрос TCP-при-SDK — фактом.
-- [ ] Break-injection лидера: кадр под ключом `image` вместо `frame` → порог 16 384 нарушен (или тест на
+      **Итог 2026-09-29 (частично):** два прогона, 15 + 13 срабатываний (trigger 335–362 без пропусков) →
+      15 + 13 item, `errors 0`, `dropped 0`; 7/2/6 и 5/3/5 ok/bad/no. Прогон 1 нашёл дефект фреймворка:
+      все 15 кадров ушли pickle-fallback — `pack_images_fast` не принимал серый 2D (фикс `8d41c685`);
+      прогон 2 после рестарта `reader_sdk`: SHM 13/13, `frame_pickle_fallbacks 0`. Размер item без кадра —
+      497 Б (1 код) / 680 Б (3 кода), **посчитан на форме item, на проводе не перехвачен**. TCP при открытом
+      SDK — **коды идут** (оба канала, ~10 мс друг от друга). **Не снято:** задержка «триггер → gui» (у
+      аппаратного триггера нет метки времени на ПК), сверка с табло прибора (сверено по непрерывности
+      `trigger_index`).
+- [x] Break-injection лидера: кадр под ключом `image` вместо `frame` → порог 16 384 нарушен (или тест на
       отсутствие `bytes` краснеет); `device_held` всегда `False` → тест позднего stop краснеет.
 **Out of scope:** автопереподключение, запись параметров прибора, перевод `nOverQuality` в буквы (шкала не
 снята — нужен `2D Code Quality Enable` на приборе), GUI-виджет с отрисовкой углов, Ф4 transport.
