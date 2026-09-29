@@ -1,7 +1,7 @@
 # Хендофф: transport-single-policy Ф4 (claim check по размеру) — 2026-09-29
 
 **Ветка:** `feat/qr-code-reader`.
-**План:** [`plans/transport-single-policy.md`](../../plans/transport-single-policy.md), Фаза 4.
+**План:** [`plans/transport-single-policy/plan.md`](../../plans/transport-single-policy/plan.md), Фаза 4.
 **Коммиты сессии:**
 - `216220fb` — контракт C1–C8;
 - `dd1491e3` — реализация 4.1;
@@ -53,7 +53,7 @@
 
 - **Два дефекта при loan ON** — F1 (запись поверх живых данных соседа) и release до send — проявляются только при loan ON. Сейчас он выключен по умолчанию, но эти дефекты блокируют флип дефолтов в 4.3.
 - **Старые красные тесты.** H8/H9 `test_reader_gone_hazards` и 3 сокетных HOL-теста красные в полном прогоне и до 4.1 (C-2 в `plans/queue/defects.md`) — не путать с регрессией.
-- **План перерос лимит.** `plans/transport-single-policy.md` — 53 КБ при бюджете 32 КБ (doc-size-guard). Разбить на `plans/transport-single-policy/plan.md` + `phase-4.md` отдельным `docs(plans)` коммитом.
+- **План разбит** (2026-09-29): `plans/transport-single-policy/plan.md` + `phase-0-1.md`, `phase-2-3.md`, `phase-4.md`. Ф4 — в `phase-4.md`.
 - **Бриф агента.** Хук `lint-brief` требует бриф по `.claude/plugins/dev/templates/executor-brief.md`, не больше 6 файлов.
 - **Чужие файлы в дереве.** В рабочем дереве лежат незакоммиченные файлы других сессий (`.claude/memory/*`, `.claude/agent-memory/tester/*`) — не стейджить.
 - **qex недоступен.** Во время сессии qex лежал (Ollama down).

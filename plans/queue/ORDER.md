@@ -93,7 +93,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — AP
 
 | # | Задача | План | Для чего |
 |---|---|---|---|
-| Ф1 | **4.0** разведка → **4.1** claim check масок и кадров (L-6: 0.3–1.2 МБ через 64-КБ pipe) | [`transport-single-policy`](../transport-single-policy.md) Ф4 | С: симулятор — второй поставщик кадров; разблокирует lifecycle Ф2 |
+| Ф1 | **4.0** разведка → **4.1** claim check масок и кадров (L-6: 0.3–1.2 МБ через 64-КБ pipe) | [`transport-single-policy`](../transport-single-policy/plan.md) Ф4 | С: симулятор — второй поставщик кадров; разблокирует lifecycle Ф2 |
 | Ф2 | **4.5** `ServiceContext`; миграция `robot_comm`, `vfd_comm`, `modbus` названа в задаче | [`observability-closure`](../observability-closure/plan.md) | Р: `robot_comm` дал 0 записей ошибок на 2336 строк журнала |
 | Ф3 | **2.1** развести глаголы `record_metric` (counter/gauge по сборке) | [`framework-architecture-rework`](../framework-architecture-rework/plan.md) | Р: до того, как `client_v2` начнёт публиковать метрики; от codemod не зависит |
 | Ф4 | Условия CTO: юнит-тест severity (~15 строк, ▶ сейчас), флейк `children_exit_hook`, прогон `--backend-live`; затем Ф2 перемер | [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) | Ф2 перемер ⛔ Ф1 |
@@ -137,7 +137,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — AP
 | [gui-constructor](../gui-constructor/plan.md) | И | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.0 |
 | [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5 в `main` | 1b.2c ∥ 1b.2d |
 | [frontend-constructor](../frontend-constructor/plan.md) | И | Блок А DONE; Ф4/Ф5 ушли в gui-constructor; Блок В ⛔ окно codemod | — |
-| [transport-single-policy](../transport-single-policy.md) | Ф | 0.1, 0.3 в `main`; 0.2, Ф1–Ф4 не начаты | Ф4 4.0 |
+| [transport-single-policy](../transport-single-policy/plan.md) | Ф | 0.1, 0.3 в `main`; 0.2, Ф1–Ф4 не начаты | Ф4 4.0 |
 | [observability-closure](../observability-closure/plan.md) | Ф | Ф0–Ф3 DONE, Ф4: 4.4, 4.11, 4.13 DONE; ветка в `main` | 4.5 / 4.3b |
 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Ф | Ф1 DONE (merge `ae0eebde`), CTO с условиями | юнит-тест severity |
 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Ф | не начат; Ф3 сделана в gui-service 1.3a, 3.2 = `8fae4034` | Ф1 |

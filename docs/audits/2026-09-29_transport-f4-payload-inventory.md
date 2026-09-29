@@ -1,6 +1,6 @@
 # Инвентарь крупных грузов в data-очередях и разбор `SHM fallback failed` (Task 4.0)
 
-**План:** [`transport-single-policy`](../../plans/transport-single-policy.md), Фаза 4, Task 4.0.
+**План:** [`transport-single-policy`](../../plans/transport-single-policy/plan.md), Фаза 4, Task 4.0.
 **Дата:** 2026-09-29. **Исполнитель:** investigator (только диагностика, код не правился).
 **Стенд:** Windows 10 (spawn), ветка `feat/qr-code-reader` на `78d587c8`+ (после ADR-SRM-017).
 **Метод:** `sitecustomize.py` с хуком на `multiprocessing.queues.Queue.put`, считает
