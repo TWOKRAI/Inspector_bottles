@@ -101,6 +101,23 @@ _LISTENER_READY_TIMEOUT_S = 0.5
 _LISTENER_STOP_TIMEOUT_S = 2.0
 
 
+async def _sleep_at_least(delay: float) -> None:
+    """``asyncio.sleep`` с гарантией НЕ КОРОЧЕ ``delay`` по точным часам (``perf_counter``).
+
+    Цикл asyncio на Windows/CPython 3.12 живёт на ``time.monotonic`` с шагом 15.625 мс и по
+    правилу «таймер готов, если ``when < time() + clock_resolution``» будит ``sleep`` раньше
+    срока: в цикле, который просыпается часто (другие клиенты, тикер), замерено 241 из 300
+    ``asyncio.sleep(0.3)`` короче 0.3 с, минимум 0.2835 с. Инъектор неисправности «задержка ответа»
+    обязан держать не меньше заказанного, поэтому дожидаемся дедлайна на точных часах.
+    ponytail: добор — короткие ``sleep`` в цикле (до ~16 мс уступаем циклу, пока часы догоняют);
+    апгрейд — ``call_at`` по точным часам, если понадобится не жечь эти итерации.
+    """
+    deadline = time.perf_counter() + delay
+    await asyncio.sleep(delay)
+    while (rest := deadline - time.perf_counter()) > 0:
+        await asyncio.sleep(rest)
+
+
 def _make_register_binder(
     core: RobotSimCore,
     bound_event: threading.Event,
@@ -148,7 +165,7 @@ def _make_register_binder(
         if delay_source is not None:
             delay = delay_source()
             if delay > 0:
-                await asyncio.sleep(delay)
+                await _sleep_at_least(delay)
         if not bound_event.is_set():
             core.attach(registers)
             bound_event.set()
