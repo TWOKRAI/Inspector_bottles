@@ -171,7 +171,9 @@ class SimJournal:
         dup_window_s: float = 10.0,
         maxlen: int = 4000,
         word_order: str = "little",
-        clock: Callable[[], float] = time.monotonic,
+        # perf_counter, не monotonic: на Windows (CPython 3.12) monotonic = GetTickCount64 с шагом
+        # ~15.6 мс, и строки пачки записей получают одинаковое t (склеенная строка «не сдвигается»).
+        clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._dup_radius_mm = dup_radius_mm
         self._dup_window_s = dup_window_s
