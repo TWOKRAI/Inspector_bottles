@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
 import threading
 import time
 from typing import Any, Callable, List
@@ -80,35 +79,20 @@ def _pid_present(pid: int) -> bool:
     """Ещё ли выполняется процесс ``pid``, БЕЗ реапа (в отличие от ``Process.is_alive``
     из второго потока).
 
-    POSIX: ``os.kill(pid, 0)`` — ``ProcessLookupError`` = pid ушёл из таблицы.
-    Windows: ``os.kill(pid, 0)`` НЕ проба — сигнал 0 там равен ``CTRL_C_EVENT`` и уходит в
-    ``GenerateConsoleCtrlEvent``, который живость не проверяет (измерено: для процесса,
-    убитого ``terminate``, но чей kernel-объект ещё держат дескрипторы, вызов возвращает
-    успех; для давно исчезшего pid — ``OSError [WinError 87]``, не ``ProcessLookupError``).
-    Поэтому там смотрим код завершения: kernel-объект мёртвого процесса живёт, пока его
-    держит хоть один дескриптор, а «мёртв» значит «код выхода не ``STILL_ACTIVE``»."""
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-    import ctypes
-    from ctypes import wintypes
+    Не ``os.kill(pid, 0)``: на Windows сигнал 0 равен ``CTRL_C_EVENT`` и уходит в
+    ``GenerateConsoleCtrlEvent`` — живость он не проверяет (замер 2026-09-29: для процесса,
+    убитого ``terminate``, чей kernel-объект держит дескриптор родителя, вызов «успешен»).
+    psutil на Windows смотрит код выхода (``STILL_ACTIVE``), на POSIX — таблицу процессов;
+    зомби считаем мёртвым. Тот же приём — ``backend_ctl/tests/test_switch_honest_state_live.py::_pid_alive``.
+    Замер 2026-09-29 (spawn, Windows): жив → True; убит, дескриптор держит родитель → False;
+    после ``Process.close()`` → False; несуществующий pid → False."""
+    import psutil
 
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.OpenProcess.restype = wintypes.HANDLE
-    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    k32.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not handle:
-        return False  # объекта процесса уже нет
     try:
-        code = wintypes.DWORD()
-        return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
-    finally:
-        k32.CloseHandle(handle)
+        proc = psutil.Process(pid)
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
 
 
 class _MarkWatcher:
