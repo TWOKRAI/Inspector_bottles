@@ -245,6 +245,13 @@ max 1 229 548 Б; `renderer`/`inspector`/`storage` `data` — 307 848 Б (мас
 - Нужна ли `storage` маска 308 КБ на кадр вообще.
 **Acceptance:** таблица с числами с живого стенда; причина `SHM fallback failed` с воспроизведением; предложение порога.
 
+**✅ Выполнено 2026-09-29** — [аудит](../docs/audits/2026-09-29_transport-f4-payload-inventory.md).
+- **Размеры (Windows):** сошлись с замером на Mac до 6 Б. `gui/data` — два потока, 1 229 554 Б и 307 975 Б; маска 307 364 Б inline в 4 очередях. В сумме около 61 МБ/с pickle.
+- **`/output_frames_N`:** на Windows не воспроизводится. На POSIX причина — голое общее имя сегмента при `FW_SHM_OWNER_INCARNATION=0`: unlink соседа (открытый вопрос владельцу в `OPEN_QUESTIONS.md`).
+- **Кто читает маску:** `storage` и `inspector` её не читают. `storage` пишет `str(item)` — усечённый repr маски, мусор.
+- **Главное:** item таскает все ключи через все хопы.
+- **Предложение порога:** claim check при `nbytes ≥ 8192` на массив, приёмка ≤ 16384 Б на сообщение.
+
 ### Task 4.1 — Claim check по размеру, под любым ключом item
 
 **Level:** Senior · **Assignee:** teamlead · **Layer:** framework
