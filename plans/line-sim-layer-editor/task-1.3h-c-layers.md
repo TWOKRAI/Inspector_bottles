@@ -1,5 +1,9 @@
 # line-sim-layer-editor — Task 1.3h-c: слои на `pult_web`
 
+**Статус: DONE 2026-09-29.** Приёмка: 27+5 инъекций лида, живой Chrome (F1/F2 найдены и закрыты `d82161e4`),
+ревью APPROVE_WITH_NITS — [`docs/reviews/2026-09-29_line-sim-layer-editor-task-1.3h-c-review.md`](../../docs/reviews/2026-09-29_line-sim-layer-editor-task-1.3h-c-review.md).
+Хвосты — R-4, R-5 в `plans/queue/defects.md`.
+
 Родительский план: [`line-sim-layer-editor`](plan.md). Предыдущая задача — 1.3h-b в
 [phase-1-canvas-html.md](phase-1-canvas-html.md).
 

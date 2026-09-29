@@ -140,7 +140,7 @@
 | 1.3 | Qt-канва | PENDING (после 1.2b) | [phase-1-qt.md](phase-1-qt.md) |
 | 1.3h-a | бэкенд раскладки `preset.layout` | DONE 2026-09-29 | [phase-1-canvas-html.md](phase-1-canvas-html.md) |
 | 1.3h-b | канва мышью | DONE 2026-09-29 (владелец) | [phase-1-canvas-html.md](phase-1-canvas-html.md) |
-| **1.3h-c** | **слои: добавить, удалить, порядок, выбор PNG** | **PENDING — следующая** | [task-1.3h-c-layers.md](task-1.3h-c-layers.md) |
+| 1.3h-c | слои: добавить, удалить, порядок, выбор PNG | DONE 09-29 (ревью APPROVE_WITH_NITS; F1/F2 из Chrome — `d82161e4`) | [task-1.3h-c-layers.md](task-1.3h-c-layers.md) |
 | 1.3h-d | загрузка PNG из браузера (канал записи) | PENDING, заготовка | [task-1.3h-c-layers.md](task-1.3h-c-layers.md#заготовка-под-канал-записи--task-13h-d) |
 | 2.1 | налив `fill_level` | НЕОБЯЗАТЕЛЬНО | [phase-2-effects.md](phase-2-effects.md) |
 
