@@ -229,3 +229,10 @@ def test_a_raising_exit_report_does_not_escape(harness):
     harness.pm._process_registry = _Exploding()
 
     harness.pm._publish_stop_summary({"a": True, "b": False})  # не должно бросить
+
+    # Не бросить — не значит проглотить (ревью B-1, инъекция R2: `_log_error` → `pass`
+    # оставляла файл зелёным): отказ публикации обязан дойти до приёмника записью ERROR
+    # с причиной.
+    errors = [r for r in harness.records() if r["level"] == "ERROR"]
+    assert len(errors) == 1, f"ожидалась одна запись ERROR, записи: {harness.records()}"
+    assert "слот разделяемой памяти недоступен" in errors[0]["message"]

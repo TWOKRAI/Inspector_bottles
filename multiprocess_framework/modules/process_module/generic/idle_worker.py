@@ -108,7 +108,7 @@ class IdleWorker:
         """Один цикл: работа + smart-sleep + запись тайминга."""
         # B-1: часы темпа — perf_counter, НЕ monotonic. На Windows monotonic = GetTickCount64
         # с шагом 15.6 мс: интервал 33.3 мс округлялся до трёх тиков → 21 fps вместо 30
-        # (замер 2026-09-29: 21.4 → 29.6). time.sleep в Python 3.11+ и так высокоточный.
+        # (замер на SourceProducer 2026-09-29: 21.4 → 29.6). time.sleep в Python 3.11+ точный.
         t_start = time.perf_counter()
 
         # Ф7 G.8: busy на время кадра — drain дожидается его завершения перед stop.
