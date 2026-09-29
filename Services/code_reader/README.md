@@ -19,8 +19,9 @@
   прибора, лист тестовых QR для подбора размера и дистанции;
 - **второй канал — MvCodeReader SDK** (`sdk/` + `core/sdk_*`): кадр прибора вместе с
   кодами, 4 углами каждого кода на кадре, статусом и оценкой качества. Прибор при этом
-  открыт эксклюзивно — IDMVS к нему не подключится. Плагин поверх — Task 6.3 плана
-  `plans/code-reader-sdk.md`; TCP-канал остаётся запасным.
+  открыт эксклюзивно — IDMVS к нему не подключится. Поверх — source-плагин
+  `code_reader_sdk` (Task 6.3 плана `plans/code-reader-sdk.md`, раздел «SDK-плагин»
+  ниже); TCP-канал остаётся запасным.
 
 Автономная работа с ПЛК (дискретные выходы, Modbus) идёт **мимо** этого
 сервиса — там наша система в цепочке не участвует. Сервис описывает и её
@@ -47,7 +48,10 @@ code_reader/
 ├── plugin/              source-плагин для прототипа (discovery видит Services/)
 │   ├── plugin.py        CodeReaderPlugin — приём → produce() → порт code
 │   ├── registers.py     параметры приёма + телеметрия для GUI
-│   └── config.py        identity + register_bindings
+│   ├── config.py        identity + register_bindings
+│   ├── sdk_plugin.py    CodeReaderSdkPlugin — захват прибора → produce() → порты code, frame
+│   ├── sdk_registers.py CodeReaderSdkRegisters — параметры SDK-канала + телеметрия
+│   └── sdk_config.py    identity + register_bindings SDK-плагина
 ├── tools/               зонды для стенда, запускаются вручную
 │   ├── id3000_discover.py    обнаружение через GigE broadcast, версия прошивки
 │   ├── id3000_tcp_sink.py    сырой дамп потока (текст + hex)
@@ -105,6 +109,68 @@ python Services/code_reader/tools/reader_sim.py --port 5000 --interval 1.0
 редакторе Pipeline. Команды ноды: `start_sink`, `stop_sink`, `get_status`,
 `reset_stats`. Команды `trigger` нет: боевой триггер аппаратный (DI_0) и через ПК
 не проходит.
+
+### SDK-плагин `code_reader_sdk` (рецепт `qr_reader_sdk_demo`)
+
+```bash
+python multiprocess_prototype/run.py qr_reader_sdk_demo
+```
+
+Отдельный source-плагин, **не режим TCP-плагина**: у каналов разные жизненные циклы
+(приём порта против эксклюзивного захвата прибора), общая у них только форма item
+(ADR-CR-006). Прибор берётся `SdkCodeReader`-ом, пока плагин его держит, IDMVS к нему
+не подключится. В рецепте две ноды: `reader_sdk` (этот плагин) и `reader_tcp`
+(TCP-плагин, порт 5000) — вторая отвечает на стендовый вопрос «идут ли коды по TCP,
+пока прибор открыт SDK».
+
+**Что отдаёт.** Один item на срабатывание:
+
+| Ключи | Что |
+|---|---|
+| `code`, `status`, `ts`, `seq_id`, `reader_id` | плоские, как у TCP-плагина: потребитель кодов каналы не различает. `code` — текст первого читаемого кода или `""` |
+| `codes` | список кодов кадра: `text`, `status`, `bar_type`, `corners` (4 угла), `angle_deg`, `ppm`, `algo_ms`, `quality` (`None`, если прибор качество не считал) |
+| `trigger_index`, `frame_num`, `no_read_num`, `pixel_format` | счётчики и формат кадра от прибора |
+| `frame` | картинка `uint8` H×W; **нет**, если JPEG не декодировался (код при этом уходит, ошибка считается в `errors`) |
+
+`data_type` плагин не ставит — проставит `SourceProducer`, когда в item есть кадр.
+Порты: `code` (`str`, обязательный), `frame` (`image/gray`, `optional`).
+
+**Картинка едет только под ключом `frame`.** Claim check в SHM
+(`FrameShmMiddleware.strip_and_write`) смотрит только этот ключ; JPEG-байты или
+отрисованный кадр под другим ключом пошли бы через pipe (64 КБ). Углы кодов едут
+числами в `codes[*].corners`, рисует потребитель. Тест
+`test_item_has_no_bytes_and_is_json_without_frame` рекурсивно запрещает `bytes` в item;
+второй ndarray под посторонним ключом он **не** ловит — это правило держится ревью, не тестом.
+SHM в конфиге не объявляется:
+слот выделяется лениво на первом кадре (ADR-CR-007).
+
+**Команды** (`commands` плагина):
+
+| Команда | Ответ |
+|---|---|
+| `take_device` | `{status: ok\|error, device_state}` (+ `error` с причиной при отказе). Вернуть прибор после сбоя — только ею: автопереподключения нет (ADR-CR-009) |
+| `release_device` | `{status, released, device_held}`; `released = not device_held` (ADR-CR-008). При позднем `get_frame` — `status: error`, `released: false`, `error: "прибор ещё отпускается"` |
+| `get_status` | полная телеметрия + `reader_id`, `device_held` |
+| `reset_stats` | сброс счётчиков, истории и ошибок; счётчики читателя не обнуляются, запоминается точка отсчёта |
+
+**Состояние** — `processes.<proc>.state.code_reader_sdk`: `device_state`
+(`stopped | running | not_found | busy | error`, всегда из читателя), `device`
+(`ip`/`model`/`serial` или `None`), `last_code`, `last_status`, `last_quality`,
+`total_reads`, `no_reads`, `bad_reads`, `frames`, `errors`, `dropped`, `last_error`,
+`pending`, `history` (20 последних срабатываний). Публикуется из `produce()`, когда пришли
+кадры, из колбэка ошибки, при переполнении очереди и из команд; на пустом проходе
+`produce()` молчит. `device_held` в дерево **не** попадает — только в ответы
+`release_device` и `get_status`.
+
+**Параметры** (`CodeReaderSdkRegisters`): `device_ip` (пусто = первый найденный),
+`reader_id` (`id3013`), `auto_start` (`true` — взять прибор в `start()`, иначе командой),
+`timeout_ms` (500, допустимо 10–5000; им же ограничено время остановки). Остальное —
+телеметрия, readonly.
+
+**Поток.** Поток захвата кладёт кадр в очередь на 8; `produce()` её сливает, декодирует
+JPEG и отдаёт items, не блокируясь. Переполнение считается в `dropped` и публикуется
+сразу (старые кадры теряются, потеря видна, а не молчалива). Известные пределы — в
+`STATUS.md`, раздел «Ф6 / Task 6.3».
 
 ### Принимать результаты в коде
 

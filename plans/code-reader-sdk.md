@@ -219,7 +219,7 @@
 **Files:**
 1. `Services/code_reader/core/sdk_reader.py` — `stats()["device_held"]` (решение 7).
 2. `Services/code_reader/plugin/sdk_registers.py` — `CodeReaderSdkRegisters` (`device_ip` `""` = первый,
-   `reader_id` `id3013`, `auto_start`, `timeout_ms` 500 (100–5000), телеметрия readonly — по решению 10).
+   `reader_id` `id3013`, `auto_start`, `timeout_ms` 500 (10–5000: слепые тесты гоняют короткие таймауты; на приборе — 500), телеметрия readonly — по решению 10).
 3. `Services/code_reader/plugin/sdk_config.py` — identity + `register_bindings` (образец `config.py`).
 4. `Services/code_reader/plugin/sdk_plugin.py` — `CodeReaderSdkPlugin`, `@register_plugin("code_reader_sdk", category="source")`.
 5. `Services/code_reader/plugin/__init__.py` — экспорт.

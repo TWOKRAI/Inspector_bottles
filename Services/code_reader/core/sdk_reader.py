@@ -130,12 +130,17 @@ class SdkCodeReader:
         # start() и так проверяет is_alive() — мёртвый поток повторному открытию не мешает.
 
     def stats(self) -> dict[str, Any]:
+        # device_held: поток захвата ещё жив. Прибор отпускает только он (`_release` в finally),
+        # поэтому после stop() с поздним get_frame это единственный честный ответ «прибор отпущен?».
+        # self._thread читается без _life намеренно: stop()/start() держат его на весь enum/open.
+        thread = self._thread
         with self._lock:
             return {
                 **self._counts,
                 "state": self._state,
                 "last_error": self._last_error,
                 "device": None if self._device is None else dict(self._device),
+                "device_held": thread is not None and thread.is_alive(),
             }
 
     # ------------------------------------------------------------------ открытие

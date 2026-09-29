@@ -1,0 +1,93 @@
+# Рецепт qr_reader_sdk_demo — кадр и коды со считывателя ID3000 через MvCodeReader SDK.
+#
+# Нода reader_sdk (CodeReaderSdkPlugin) берёт прибор ЭКСКЛЮЗИВНО и на каждое
+# срабатывание отдаёт item: плоские code/status/seq_id (как у TCP-плагина) + codes
+# с углами и качеством + frame (серая картинка uint8, едет через SHM). Состояние —
+# processes.reader_sdk.state.code_reader_sdk.
+#
+# Нода reader_tcp (CodeReaderPlugin, порт 5000) — живой вопрос стенда: идут ли коды
+# по TCP, пока прибор открыт SDK. Сравнить счётчики двух нод после серии срабатываний.
+#
+# Перед запуском:
+#   - закрыть IDMVS: он держит прибор эксклюзивно, нода получит busy;
+#   - выключить VPN (WireGuard): он прячет прибор от EnumDevices (0 устройств);
+#   - SDK ищется: env MVCR_SDK_DIR -> каталог плагина установленного IDMVS.
+#
+# Запуск: python multiprocess_prototype/run.py qr_reader_sdk_demo
+#
+# Команды reader_sdk: take_device / release_device / get_status / reset_stats.
+# Автопереподключения нет: после error прибор возвращает take_device.
+# Боевой триггер аппаратный (DI_0) и через ПК не идёт.
+
+name: qr_reader_sdk_demo
+version: 1
+description: "Считыватель кодов ID3000: SDK (кадр + коды) и TCP параллельно — стенд наблюдения"
+
+blueprint:
+  name: qr_reader_sdk_demo
+  description: "reader_sdk (code_reader_sdk): срабатывание -> item {code, codes, frame}; reader_tcp — контроль TCP-канала"
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+
+    - process_name: reader_sdk
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      # 20 Гц: produce() не ждёт кадра (захват в своём потоке), только сливает очередь.
+      source_target_fps: 20
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Services.code_reader.plugin.sdk_plugin.CodeReaderSdkPlugin
+          plugin_name: code_reader_sdk
+          category: source
+          # Пусто = первый найденный прибор.
+          device_ip: ""
+          reader_id: id3013-sdk
+          auto_start: true
+          timeout_ms: 500
+
+    - process_name: reader_tcp
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      source_target_fps: 20
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Services.code_reader.plugin.plugin.CodeReaderPlugin
+          plugin_name: code_reader
+          category: source
+          host: 0.0.0.0
+          port: 5000
+          reader_id: id3013-tcp
+          auto_start: true
+          # Формат снят с нашего экземпляра (прошивка V4.0.2.C), см. docs/SETUP.md.
+          terminator: ";"
+          prefix: ""
+          no_code_text: NoRead
+          bad_code_text: ""
+
+  wires: []
+  displays: []
+
+  metadata:
+    gui_positions:
+      reader_sdk.code_reader_sdk:
+        - 40.0
+        - 40.0
+      reader_tcp.code_reader:
+        - 40.0
+        - 200.0
+    locked_nodes: []
+
+displays: []
