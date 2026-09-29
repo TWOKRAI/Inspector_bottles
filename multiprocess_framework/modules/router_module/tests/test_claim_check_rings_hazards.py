@@ -222,12 +222,20 @@ def _not_image_like() -> dict[str, np.ndarray]:
     """Крупные (>= 8192 Б) массивы, которые SHM-слот не восстанавливает: едут inline."""
     obj = np.empty((40, 40), dtype=object)
     obj[:] = "x"
+    masked = _arr((64, 64), "float32", seed=3)
     return {
         "unicode": np.full((20, 8), "abcdefghijklmnop", dtype="<U16"),  # 10240 Б
         "object": obj,  # 12800 Б на 64-бит
         "datetime": np.arange(2048).astype("datetime64[s]").reshape(32, 64),  # 16384 Б
         "one_d": _arr((2048,), "float32", seed=1),  # 8192 Б
         "four_d": _arr((4, 16, 16, 8), seed=2),  # 8192 Б
+        # повторное ревью 4.1-fix: слот хранит dtype.char — порядок байт и единица теряются
+        "big_endian_u2": np.arange(4096, dtype=">u2").reshape(64, 64),  # 8192 Б
+        "big_endian_f4": _arr((64, 64), "float32", seed=4).astype(">f4"),  # 16384 Б
+        "timedelta": np.arange(2048).astype("timedelta64[ms]").reshape(32, 64),  # 16384 Б
+        "bytes": np.full((32, 32), b"abcdefgh", dtype="S8"),  # 8192 Б
+        "void": np.zeros((32, 32), dtype=[("a", "<i4"), ("b", "<f4")]),  # 8192 Б
+        "masked": np.ma.array(masked, mask=masked > 0.5),  # 16384 Б, подкласс ndarray
     }
 
 
@@ -250,8 +258,12 @@ def test_non_image_array_travels_inline_and_arrives_intact(made, key):
         return gui.on_receive(pickle.loads(pickle.dumps(out)))
 
     got = _bounded(scenario)["data"][key]
-    assert got.dtype == value.dtype and got.shape == value.shape
-    assert (got == value).all()
+    # pickle сам приводит big-endian к нативному порядку (значения те же) — это провод, не SHM
+    want = value if value.dtype.isnative else value.astype(value.dtype.newbyteorder("="))
+    assert type(got) is type(value) and got.dtype == want.dtype and got.shape == want.shape
+    assert got.tobytes() == want.tobytes()
+    if isinstance(value, np.ma.MaskedArray):
+        assert (np.ma.getmaskarray(got) == np.ma.getmaskarray(value)).all(), "маска потеряна"
 
 
 def test_release_with_unknown_slot_is_dropped_not_routed_to_frame_ring(loan, made):
@@ -260,12 +272,15 @@ def test_release_with_unknown_slot_is_dropped_not_routed_to_frame_ring(loan, mad
     (back-compat) займ снимает. Красит: fallback неизвестного slot на кольцо ``frame``
     в ``_ring_by_slot`` (чужой тикет снимает займ кадра, который ещё читают)."""
     mw = _owner(made, coll=1)
+    logs: list[str] = []
+    mw._log_error = logs.append  # счётчик не в get_shm_stats — лог единственный сигнал в проде
     stray = {"slot": "output_frames__nope", "index": 0, "generation": -1, "reader": "p"}
 
     def scenario() -> None:
         assert _send(mw, {"frame": _arr(FRAME, seed=1)}) is not None  # кольцо frame: 1/1
         mw.release_slots([stray], evicted=True)
         assert mw.frame_release_unknown_slot == 1
+        assert [m for m in logs if "output_frames__nope" in m], f"нет лога отброшенного тикета: {logs}"
         assert _send(mw, {"frame": _arr(FRAME, seed=2)}) is None, "чужой тикет снял займ кадра"
         assert mw.frame_loan_exhausted == 1
 

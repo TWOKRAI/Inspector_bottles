@@ -65,18 +65,22 @@ FRAME_KEY = "frame"
 
 
 def _is_large_array(value: Any) -> bool:
-    """Числовой ndarray ``ndim`` 2–3 с ``nbytes >= CLAIM_CHECK_MIN_NBYTES`` (C1/C2).
+    """Голый числовой ndarray нативного порядка байт, ``ndim`` 2–3, ``nbytes >=
+    CLAIM_CHECK_MIN_NBYTES`` (C1/C2).
 
-    4.1-fix (ревью 4.1, находка 1): SHM-слот хранит изображение-подобный массив
-    ``(H, W[, C])`` числового dtype. Строки (``<U``), object, ``datetime64``, 1D и 4D+
-    через слот не восстанавливаются (молча ``None`` / dtype без единицы / ERROR на каждое
-    сообщение) — они едут inline, как до 4.1. Импорт numpy — локальный (модуль не тянет
-    numpy на уровне импорта; после первого вызова это поиск в sys.modules)."""
+    4.1-fix (ревью 4.1, находка 1 + повторное ревью): SHM-слот хранит изображение-подобный
+    массив ``(H, W[, C])`` числового dtype, а в заголовке — только ``dtype.char``. Поэтому
+    через слот не восстанавливаются: строки/bytes/object/void/``datetime64``/``timedelta64``
+    (молча ``None`` / dtype без единицы / fallback), big-endian (порядок байт теряется —
+    приходят неверные числа), подкласс ndarray (``MaskedArray`` теряет маску), 1D и 4D+
+    (ERROR на каждое сообщение). Всё это едет inline, как до 4.1. Импорт numpy — локальный
+    (модуль не тянет numpy на уровне импорта; после первого вызова это поиск в sys.modules)."""
     from numpy import ndarray
 
     return (
-        isinstance(value, ndarray)
+        type(value) is ndarray
         and value.dtype.kind in "biufc"
+        and value.dtype.isnative
         and value.ndim in (2, 3)
         and value.nbytes >= CLAIM_CHECK_MIN_NBYTES
     )

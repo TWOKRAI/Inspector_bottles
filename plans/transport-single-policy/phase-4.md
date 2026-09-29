@@ -68,10 +68,10 @@ max 1 229 548 Б; `renderer`/`inspector`/`storage` `data` — 307 848 Б (мас
 - отпуск при вытеснении: `router_manager.py:836`.
 
 **Контракт (приёмка tester'а, чёрный ящик):**
-- **C1. Отправка.** Data-сообщение с **числовым** (`dtype.kind in "biufc"`) ndarray `ndim` 2–3 и `nbytes ≥ 8192` под любым ключом верхнего уровня `data` (включая `frame` и новый `foo`) после send-middleware:
+- **C1. Отправка.** Data-сообщение с **голым числовым** ndarray (`type is ndarray`, `dtype.kind in "biufc"`, нативный порядок байт) `ndim` 2–3 и `nbytes ≥ 8192` под любым ключом верхнего уровня `data` (включая `frame` и новый `foo`) после send-middleware:
   - `len(pickle.dumps(msg)) ≤ 16384`;
   - ни одного ndarray ≥ 8192 внутри.
-- **C2. Мелочь.** ndarray `< 8192`, нечисловые (`<U`, object, `datetime64`), 1D и 4D+ массивы любого размера и не-массивы едут inline и не меняются (сужено 4.1-fix).
+- **C2. Мелочь.** ndarray `< 8192`, нечисловые (`<U`, `S`, object, void, `datetime64`, `timedelta64`), big-endian, подклассы ndarray (`MaskedArray`), 1D и 4D+ массивы любого размера и не-массивы едут inline и не меняются (сужено 4.1-fix).
 - **C3. Приём в пайплайне.** В item после приёма `item[key]` равен исходному массиву побайтно:
   - форма и dtype сохраняются (ADR-SRM-017: `(H, W)`, `(H, W, 1)`, `(H, W, 3)`);
   - это верно для двух крупных ключей разных формы и dtype в одном item одновременно;

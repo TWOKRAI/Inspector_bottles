@@ -10,8 +10,9 @@ Router-уровень: реальные ``MemoryManager`` + ``FrameShmMiddleware
     ``zero_copy=False`` (как ``multiprocess_prototype/frontend/process.py``), вызов ``on_receive``;
   * между ними провод = ``pickle`` туда-обратно (как очередь процесса).
 
-C1 сужен 4.1-fix (ревью 4.1): ссылкой едет только ЧИСЛОВОЙ ndarray ``ndim`` 2–3; строки,
-object, ``datetime64``, 1D и 4D+ — inline (авторский тест в ``test_claim_check_rings_hazards.py``).
+C1 сужен 4.1-fix (ревью 4.1): ссылкой едет только голый ЧИСЛОВОЙ ndarray нативного порядка байт,
+``ndim`` 2–3; строки, object, void, ``datetime64``/``timedelta64``, big-endian, подклассы,
+1D и 4D+ — inline (авторский тест в ``test_claim_check_rings_hazards.py``).
 Все массивы этого файла — числовые 2D/3D, формулировки ниже читать с этой оговоркой.
 
 Пороги — литералы: ``nbytes >= 8192`` едет ссылкой, ``8191`` — inline; всё data-сообщение
