@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import os
+import stat
 import sys
 import threading
 import time
@@ -286,11 +287,20 @@ def test_io_error_on_read_only_dir(tmp_path):
 def test_commit_keeps_file_mode(tmp_path):
     preset_path = _make_fixture(tmp_path)
     os.chmod(preset_path, 0o644)
+    # Свойство — «commit не меняет права файла»: сравниваем с правами ДО, а не с литералом.
+    # На Windows chmod трогает только бит «только чтение», и st_mode пишемого файла всегда
+    # 0o666 (не 0o644) — литерал там недостижим; на POSIX точное 0o644 держит предусловие.
+    mode_before = stat.S_IMODE(preset_path.stat().st_mode)
+    if os.name == "posix":
+        assert mode_before == 0o644, mode_before
     plugin, _sp = _new_plugin(preset_path)
     got = _cmd(plugin, "preset.get", {})
     res = _cmd(plugin, "preset.commit", {"preset": _with_color(got["preset"], [255, 0, 0]), "base_rev": got["rev"]})
     assert res["status"] == "ok", res
-    assert preset_path.stat().st_mode & 0o777 == 0o644, "commit сменил права файла пресета (tmp создаётся 0600)"
+    mode_after = stat.S_IMODE(preset_path.stat().st_mode)
+    assert mode_after == mode_before, (
+        f"commit сменил права пресета: {mode_before:o} -> {mode_after:o} (tmp создаётся 0600)"
+    )
 
 
 def test_client_base_dir_is_ignored(tmp_path):
