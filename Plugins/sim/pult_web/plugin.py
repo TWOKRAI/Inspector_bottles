@@ -897,7 +897,8 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             headers = getattr(self, "headers", None)
             if self._body_consumed or headers is None:
                 return
-            if headers.get("Content-Length", "0").strip() == "0" and headers.get("Transfer-Encoding") is None:
+            lengths = headers.get_all("Content-Length") or []
+            if all(v.strip() == "0" for v in lengths) and headers.get("Transfer-Encoding") is None:
                 return
             deadline = time.monotonic() + _DRAIN_TIMEOUT_S
             remaining = _MAX_DRAIN_BYTES
@@ -924,7 +925,15 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             больше ``max_bytes`` (потолок МАРШРУТА, Находка 1 Task 1.2h; дефолт —
             прежний общий ``_MAX_BODY_BYTES``), до чтения тела; 400 ``bad_length`` —
             отрицательный ``Content-Length`` (иначе ``rfile.read(-1)`` читал бы до
-            EOF в обход 413, ревью 5.3a п.3); 400 ``bad_json`` — кривой JSON/не dict.
+            EOF в обход 413, ревью 5.3a п.3) либо нечисловой/противоречивый (несколько
+            разных значений) — тело нельзя ни прочитать, ни отбросить по длине, а молча
+            принять его за «пустое» нельзя: команда ушла бы с ``{}`` (ревью pult-flake
+            2026-09-29); 501 ``transfer_encoding_not_supported`` — любой
+            ``Transfer-Encoding`` (RFC 9112 §6.1: кодирование, которого сервер не
+            понимает, — 501; chunked HTTP/1.0-сервер не разбирает, 411 — это про
+            ОТСУТСТВУЮЩИЙ ``Content-Length``, а он тут не отсутствует); 400 ``bad_json`` —
+            кривой JSON/не dict. Ни один из этих отказов до команды не доходит и
+            ``_body_consumed`` не выставляет — ``_linger_close`` доотдаёт тело.
 
             ``(None, (413, None))`` — особый случай (ревью Task 1.2h ит.1, Н1):
             для 413 ответ клиенту уже отправлен ВНУТРИ этого метода (см. ниже),
@@ -932,13 +941,15 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             None`` в паре отказа сигналит именно это, а не «отказа не было»
             (для «не было» первый элемент пары — ``None`` целиком).
             """
-            length_header = self.headers.get("Content-Length")
-            try:
-                length = int(length_header) if length_header is not None else 0
-            except ValueError:
-                length = 0
-            if length < 0:
+            if self.headers.get("Transfer-Encoding") is not None:
+                return None, (501, {"ok": False, "error": "transfer_encoding_not_supported"})
+            # Все значения всех заголовков Content-Length (RFC 9110 §8.6: список через запятую
+            # допустим, если значения одинаковы). Строго ASCII-цифры: ``int()`` принял бы
+            # "+5", "1_0" и юникодные цифры; ``-1`` и пустая строка — тоже отказ.
+            values = [v.strip() for h in (self.headers.get_all("Content-Length") or []) for v in h.split(",")]
+            if any(not (v.isascii() and v.isdigit()) for v in values) or len(set(values)) > 1:
                 return None, (400, {"ok": False, "error": "bad_length"})
+            length = int(values[0]) if values else 0
             if length > max_bytes:
                 # Решение отказать принимается ДО обращения к телу: эти байты никуда не
                 # форвардятся и не парсятся. Ответ уходит СНАЧАЛА (ревью Task 1.2h ит.1,

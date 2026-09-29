@@ -226,3 +226,70 @@ def test_handler_closes_connection_after_response_http10(port) -> None:
         except TimeoutError:
             pytest.fail(f"соединение осталось открытым после ответа (keep-alive?): {raw[:60]!r}")
     assert raw.startswith(b"HTTP/1.0 200"), raw[:60]
+
+
+def _raw_status(port: int, method: str, path: str, header_lines: list[str], body: bytes) -> int:
+    """Запрос с ТОЧНЫМИ заголовками (клиент stdlib не пошлёт chunked без длины, `abc`, дубли).
+
+    Заголовки и тело — двумя ``send``, ответ читается до первой строки."""
+    head = (
+        f"{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n" + "".join(f"{h}\r\n" for h in header_lines) + "\r\n"
+    ).encode("ascii")
+    with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+        sock.sendall(head)
+        if body:
+            sock.sendall(body)
+        raw = b""
+        while b"\r\n" not in raw:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+    assert raw.startswith(b"HTTP/"), f"ответа нет: {raw!r}"
+    return int(raw.split(b" ", 2)[1])
+
+
+_JSON = "Content-Type: application/json"
+_CHUNKED_BODY = b"7\r\n{}      \r\n0\r\n\r\n"
+
+#: (метка, заголовки, тело, ожидаемый код) — кадрирование, которое сервер не может разобрать.
+_BAD_FRAMING = [
+    ("chunked_no_length_501", [_JSON, "Transfer-Encoding: chunked"], _CHUNKED_BODY, 501),
+    ("chunked_with_length_501", [_JSON, "Transfer-Encoding: chunked", "Content-Length: 5"], _CHUNKED_BODY, 501),
+    ("unknown_coding_501", [_JSON, "Transfer-Encoding: gzip"], _BODY, 501),
+    ("length_abc_400", [_JSON, "Content-Length: abc"], _BODY, 400),
+    ("length_plus_sign_400", [_JSON, "Content-Length: +8"], _BODY, 400),
+    ("length_empty_400", [_JSON, "Content-Length: "], _BODY, 400),
+    ("length_list_conflict_400", [_JSON, "Content-Length: 8, 9"], _BODY, 400),
+    ("length_two_headers_conflict_400", [_JSON, "Content-Length: 8", "Content-Length: 9"], _BODY, 400),
+    ("length_zero_then_body_400", [_JSON, "Content-Length: 0, 8"], _BODY, 400),
+]
+
+
+@pytest.mark.parametrize(("label", "headers", "body", "expected"), _BAD_FRAMING, ids=[f[0] for f in _BAD_FRAMING])
+def test_unparseable_body_framing_rejected_before_command(port, label, headers, body, expected) -> None:
+    """Тело, длину которого не понять, отклоняется ДО команды — не выполняется с ``{}``.
+
+    До фикса (ревью pult-flake, 2026-09-29) ``Transfer-Encoding: chunked`` и
+    ``Content-Length: abc`` на валидном маршруте давали 200 и ``belt.run`` с пустыми
+    аргументами: тело не читалось, но считалось прочитанным. Ответ обязан доходить в каждом
+    из обменов (отказ идёт через ``_linger_close`` — тело доотдаётся, RST нет)."""
+    for i in range(30):
+        status = _raw_status(port, "POST", "/api/run", headers, body)
+        assert status == expected, f"{label} #{i}: код {status}, ожидался {expected}"
+    assert _FakeDeviceHubClient.calls == [], f"{label}: отказ дошёл до команды: {_FakeDeviceHubClient.calls[:2]}"
+
+
+def test_duplicate_equal_content_length_is_accepted(port) -> None:
+    """Совпадающие значения списком (``Content-Length: 8, 8``) — один заголовок (RFC 9110 §8.6):
+    команда выполняется с настоящим телом. Граница «отказ только для противоречия», а не для дубля."""
+    status = _raw_status(port, "POST", "/api/run", [_JSON, "Content-Length: 8, 8"], b'{"a": 1}')
+    assert status == 200
+    assert _FakeDeviceHubClient.calls == [("belt.run", {"a": 1})]
+
+
+def test_get_without_body_unchanged(port) -> None:
+    """GET без тела (путь, не проходящий через ``_read_command_body``) не затронут: 200 и команда ушла."""
+    status = _raw_status(port, "GET", "/api/status", [], b"")
+    assert status == 200
+    assert _FakeDeviceHubClient.calls == [("belt.status", {})]

@@ -55,8 +55,13 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 "forbidden_host"}` на `GET` и `POST` (защита от DNS rebinding); неизвестный путь
 → `404`; `POST` с `Content-Type` не `application/json…` (в том числе без него,
 как у голого `curl -X POST`) → `415 {ok: false, error: "unsupported_media_type"}`;
-кривой JSON тела → `400 {ok: false, error: "bad_json"}`; отрицательный
-`Content-Length` → `400 {ok: false, error: "bad_length"}`; тело больше потолка
+кривой JSON тела → `400 {ok: false, error: "bad_json"}`; отрицательный,
+нечисловой (`abc`, `+5`, пустой) или противоречивый (`8, 9`, два заголовка с разными
+значениями) `Content-Length` → `400 {ok: false, error: "bad_length"}` (совпадающие
+значения `8, 8` — один заголовок, принимаются); любой `Transfer-Encoding` (в том числе
+`chunked`; сервер HTTP/1.0 его не разбирает) → `501 {ok: false, error:
+"transfer_encoding_not_supported"}` (RFC 9112 §6.1: непонятное кодирование — 501; 411 —
+про отсутствующий `Content-Length`, не про этот случай) — до команды такой запрос не доходит; тело больше потолка
 маршрута (`Content-Length`, до чтения — 4 КБ на всех маршрутах, кроме `/api/
 preset/commit`, у него 256 КБ, Task 1.2h) → `413`. Все ранние отказы (400/403/404/413/415) отвечают **не читая тело**; ответ уходит
 клиенту первым, а закрытие делает общий `_linger_close`: полузакрытие на запись и чтение с
