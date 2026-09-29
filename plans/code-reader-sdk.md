@@ -48,6 +48,30 @@
 6. **Автопереподключения в первом цикле нет** (named ceiling): после устойчивой ошибки сессия
    переходит в `error` и ждёт `stop()`/`start()`. Триггер вернуться — первый обрыв на стенде.
 
+## Уточнения контракта после RED-прогона (2026-09-29, решения лидера)
+
+Два независимых тестировщика угадали разное там, где контракт молчал. Решено:
+
+1. **`RawFrame` — плоский frozen dataclass, по ключевым словам:** `image: bytes`, `width`, `height`,
+   `pixel_type`, `trigger_index`, `frame_num`, `no_read_num` (все `int`; `no_read_num` — из
+   `RESULT_BCR_EX2.nNoReadNum`), `codes: tuple[BCR_INFO_EX2, ...]` — **копии** записей, не ссылки в
+   буфер SDK. Нулевой указатель списка кодов → `codes = ()`.
+2. **`DeviceEntry`:** `ip`, `model`, `serial` (`str`) + `info` — копия `DEVICE_INFO`, из которой
+   `open()` делает `CreateHandle`.
+3. **`open()` при ошибке `OpenDevice` сам зовёт `DestroyHandle`** и поднимает `SdkError`: у
+   вызывающего handle ещё нет. «busy → close для созданного handle» относится к отказу на
+   `start_grabbing` (handle уже есть).
+4. **`sdk.loader.IDMVS_PLUGIN_DIR: Path`** — модульная константа пути по умолчанию.
+5. **Ключи `CodeQuality.grades` → поля `CODE_INFO`:** `decode`→`nDeCode`, `contrast`→`nSCGrade`,
+   `modulation`→`nModGrade`, `fixed_pattern_damage`→`nFPDGrade`, `axial_nonuniformity`→`nANGrade`,
+   `grid_nonuniformity`→`nGNGrade`, `unused_error_correction`→`nUECGrade`; `overall`→`nOverQuality`;
+   `score`→`nIDRScore` **записи кода** (не `CODE_INFO`). Флаг `bIsGetQuality` — на запись кода.
+6. **`E_NODATA` — успешный вызов:** сбрасывает счётчик «ошибок подряд». Ошибки `get_frame` идут и в
+   `errors`. `start()` из `error` разрешён (после внутреннего закрытия прибора).
+7. Раскладка структур сверена дважды независимо: тестировщик посчитал смещения по заголовку вручную
+   (`bIsGetQuality` @4360, `nReserved` @4400, `BCR_INFO_EX2` = 4628, `RESULT_BCR_EX2` = 1 388 436,
+   `IMAGE_OUT_INFO_EX2` = 200), зонд лидера прочитал живой прибор с `len_ok` на каждом коде.
+
 ## Ф6 — задачи
 
 ### Task 6.1 — Слой `sdk/`: загрузка, структуры, тонкая обёртка
