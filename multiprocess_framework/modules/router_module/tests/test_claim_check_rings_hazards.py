@@ -258,10 +258,11 @@ def test_non_image_array_travels_inline_and_arrives_intact(made, key):
         return gui.on_receive(pickle.loads(pickle.dumps(out)))
 
     got = _bounded(scenario)["data"][key]
-    # pickle сам приводит big-endian к нативному порядку (значения те же) — это провод, не SHM
-    want = value if value.dtype.isnative else value.astype(value.dtype.newbyteorder("="))
-    assert type(got) is type(value) and got.dtype == want.dtype and got.shape == want.shape
-    assert got.tobytes() == want.tobytes()
+    # Порядок байт меняет ПРОВОД, не middleware: pickle протокола <= 4 (дефолт ForkingPickler
+    # на 3.12) приводит big-endian к нативному, протокол 5 сохраняет. Сравнение — без порядка.
+    native = lambda a: a if a.dtype.isnative else a.astype(a.dtype.newbyteorder("="))  # noqa: E731
+    assert type(got) is type(value) and native(got).dtype == native(value).dtype and got.shape == value.shape
+    assert native(got).tobytes() == native(value).tobytes()
     if isinstance(value, np.ma.MaskedArray):
         assert (np.ma.getmaskarray(got) == np.ma.getmaskarray(value)).all(), "маска потеряна"
 
