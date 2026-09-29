@@ -236,14 +236,23 @@ def test_file_on_another_drive_from_preset_dir_is_skipped_not_fatal(
 ) -> None:
     """Каталог пресета хоста на другом диске, чем `sprites_dir`: для каждого файла `relpath` бросает
     `ValueError` -> список пуст, ответ `ok` (а не исключение на весь запрос).
-    Диск пресета несуществующий: `sprites` читает только путь, файла пресета не открывает."""
+    Диск пресета несуществующий: `sprites` читает только путь, файла пресета не открывает.
+    Буква берётся вне маски `GetLogicalDrives()`: она включает и сетевые диски, в том числе отключённые,
+    а `resolve()` на отключённом сетевом диске ждёт сетевой таймаут (так тест вис на `Z:`)."""
+    import ctypes
+    import string
+
     import Plugins.sim.layer_preview.plugin as plugin_module
 
     root = tmp_path / "root"
     sprites_dir = root / "sprites"
     _write_png(sprites_dir / "a.png")
     monkeypatch.setattr(plugin_module, "REPO_ROOT", root.resolve())
-    other_drive = "Z:" if tmp_path.drive.upper() != "Z:" else "Y:"
+    mask = ctypes.windll.kernel32.GetLogicalDrives()
+    free = [c for i, c in enumerate(string.ascii_uppercase) if i >= 2 and not mask >> i & 1]
+    if not free:
+        pytest.skip("все буквы дисков заняты")
+    other_drive = f"{free[-1]}:"
     plugin = _new_preview(f"{other_drive}\\presets\\p.yaml", sprites_dir=str(sprites_dir))
 
     res = _sprites_ok(plugin)
