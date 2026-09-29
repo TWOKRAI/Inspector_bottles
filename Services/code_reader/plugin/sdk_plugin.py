@@ -121,6 +121,11 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         self._last_error = ""
         # `device_held`, ушедший в дерево в последний раз: produce() публикует при смене.
         self._published_held = False
+        # Сериализует «снимок → merge → отметка» между потоками захвата, источника и команд:
+        # иначе устаревший снимок одного потока ложится в дерево поверх свежего и отметка
+        # врёт (ревью 6.3 итерации 2, п.3: дерево застревало с device_held True). Под ним
+        # берутся только короткие замки (читателя и self._lock), держатели которых сюда не ходят.
+        self._publish_lock = threading.Lock()
         # Счётчики читателя не сбрасываются — reset_stats запоминает точку отсчёта.
         self._baseline = {"frames": 0, "ok": 0, "no_code": 0, "bad_code": 0, "errors": 0}
         self._reader: SdkCodeReader = type(self).reader_factory(
@@ -301,9 +306,10 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         if proxy is None:
             return
         try:
-            snapshot = self._snapshot()
-            proxy.merge(f"processes.{self._ctx.process_name}.state.code_reader_sdk", snapshot)
-            self._published_held = snapshot["device_held"]
+            with self._publish_lock:
+                snapshot = self._snapshot()
+                proxy.merge(f"processes.{self._ctx.process_name}.state.code_reader_sdk", snapshot)
+                self._published_held = snapshot["device_held"]
         except Exception as exc:  # noqa: BLE001 — публикация телеметрии не критична
             self._ctx.log_error(f"CodeReaderSdkPlugin: публикация состояния не удалась: {exc}")
 
@@ -348,7 +354,6 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         return {
             "status": "ok",
             "reader_id": self._reg.reader_id,
-            "device_held": bool(self._reader.stats()["device_held"]),
             **self._snapshot(),
         }
 
