@@ -1,6 +1,6 @@
 """RED-приёмка Task 1.1b, блок C — инструмент `tools.make_font_letters`.
 
-Независимый тест (blind): пишется ДО реализации, по спеке `plans/line-sim-layer-editor.md`
+Независимый тест (blind): пишется ДО реализации, по спеке `plans/line-sim-layer-editor/phase-1-engine.md`
 (раздел Task 1.1b, критерии C1-C2). НЕ читает `Services/line_sim/tools/*.py`.
 
 Инструмент запускается subprocess'ом (модуль ещё не существует -> ModuleNotFoundError

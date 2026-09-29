@@ -60,7 +60,7 @@ GUI (шаг С5). Ф — одна задача в паузе между прод
 (форма телеметрии сохраняется), `device-tree-recipe` (данные робота вне `devices.yaml`), `line-sim` (T2.4),
 `gui-constructor` и `frontend-constructor` (потребитель пакетов и форм).
 
-### С — слои симулятора ([`line-sim-layer-editor`](../line-sim-layer-editor.md), [`line-sim`](../line-sim/plan.md))
+### С — слои симулятора ([`line-sim-layer-editor`](../line-sim-layer-editor/plan.md), [`line-sim`](../line-sim/plan.md))
 
 Факт: контракт слоя 3.1a в коде (`Services/line_sim/{interfaces.py, core/preset.py, core/layered_object.py}`).
 line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — APPROVED 09-27: HTML и Qt над одними бэкенд-командами.
@@ -133,7 +133,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — AP
 | План | Полоса | Статус | Следующий шаг |
 |---|---|---|---|
 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Р | ред. 2 от 09-27 ждёт GATE-0; проба платформы готова | Р0 → GATE-1 ∥ T0.1 |
-| [line-sim-layer-editor](../line-sim-layer-editor.md) | С | DRAFT, шапка устарела («ждёт 3.1+3.1a» — обе закрыты) | approve → 1.1 |
+| [line-sim-layer-editor](../line-sim-layer-editor/plan.md) | С | DRAFT, шапка устарела («ждёт 3.1+3.1a» — обе закрыты) | approve → 1.1 |
 | [line-sim](../line-sim/plan.md) | С | Ф0–Ф3, Ф5 DONE в `main`; Ф4 на переписывание; Ф6 6.1/6.2 PENDING; 5.5 DEFERRED. Метка `[BLOCKED]` у 1.1 устарела | 6.1 |
 | [gui-constructor](../gui-constructor/plan.md) | И | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.0 |
 | [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5 в `main` | 1b.2c ∥ 1b.2d |
