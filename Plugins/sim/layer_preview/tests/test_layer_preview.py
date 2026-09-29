@@ -181,7 +181,12 @@ def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
 def _frames_after_clock_jump(preset_path: Path, flow: dict, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
     """Два одинаковых инстанса на одних значениях энкодера; на шаге 2 часы `produce()` уходят
     на 0.5 с вперёд МЕЖДУ `a.produce()` и `b.produce()` (то, что на Windows делает тик 15.6 мс).
-    Возвращает по шагу: совпали ли кадры побитно."""
+    Возвращает по шагу: совпали ли кадры побитно.
+
+    30 шагов, не 6: часы, попавшие в состояние потока (rng, срок спавна), меняют только БУДУЩИЕ
+    объекты, а они рождаются за кадром — за 3 шага после скачка не въезжают в видимую зону
+    (инъекция лида 2026-09-29: spacing-поток тянет rng по часам → при 6 шагах тест зелёный,
+    при 20+ красный)."""
     import types
 
     from Plugins.sim.scene_source import plugin as scene_plugin
@@ -191,7 +196,7 @@ def _frames_after_clock_jump(preset_path: Path, flow: dict, monkeypatch: pytest.
     plugin_a, sp_a = _new_scene(preset_path, flow)
     plugin_b, sp_b = _new_scene(preset_path, flow)
     equal = []
-    for i in range(6):
+    for i in range(30):
         _emit_encoder(sp_a, i * 5.0, float(i))
         _emit_encoder(sp_b, i * 5.0, float(i))
         frame_a = plugin_a.produce()[0]["frame"]
