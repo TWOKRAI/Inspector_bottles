@@ -55,6 +55,8 @@ class ShmFrameReader:
         # PipelineExecutor на re-check) — lock сериализует dict + close.
         self._lock = threading.Lock()
         self._stale_drops = 0
+        # Task 4.4: перезапись слота ВО ВРЕМЯ чтения по ссылке (``read_ref``) — torn.
+        self._torn_reads = 0
         # Ф7 H-ревью: ошибки close() handle больше НЕ глотаются молча (принцип «терять
         # можно, молчать нельзя», ADR-SRM-012) — считаем + опц. debug-лог.
         self._close_errors = 0
@@ -63,6 +65,12 @@ class ShmFrameReader:
     @property
     def stale_drops(self) -> int:
         return self._stale_drops
+
+    @property
+    def torn_reads(self) -> int:
+        """Task 4.4: сколько раз слот был перезаписан ВО ВРЕМЯ чтения по ссылке (после проверки
+        поколения, до конца копии/создания view) — ``read_ref`` вернул ``None``."""
+        return self._torn_reads
 
     @property
     def close_errors(self) -> int:
@@ -101,6 +109,40 @@ class ShmFrameReader:
             return self._read_noting_generation(shm.buf, seqlock, True, view_meta)
         finally:
             shm.close()
+
+    def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional[Any]:
+        """Task 4.4: прочитать кадр по ссылке (``ref["name"]``, ``ref["gen"]``).
+
+        Поколение слота сверяется с ``gen`` ДО чтения (расхождение → ``None`` + ``stale_drops``:
+        ячейка уже переписана другой записью) и ПОСЛЕ него (расхождение → ``None`` +
+        ``torn_reads``: перезапись пришлась на чтение). Так вернуть пиксели чужой записи под
+        ссылкой на эту нельзя. ``copy=False`` + активный кэш → VIEW (его переживание сверяет
+        ``view_valid`` с тем же ``gen``); без кэша копия форсируется. Бросает при ошибке открытия
+        сегмента и при реальной порче заголовка (стабильное поколение)."""
+        from multiprocessing import shared_memory as _shm_mod
+
+        if self._cache_enabled:
+            # open + чтение под ОДНИМ lock (S2, см. _read_cached): close() другого потока не рвёт buf.
+            with self._lock:
+                shm = self._open_cached_locked(name, _shm_mod)
+                return self._read_at_generation(shm.buf, gen, copy)
+        shm = self._open(name, _shm_mod)
+        try:
+            return self._read_at_generation(shm.buf, gen, True)
+        finally:
+            shm.close()
+
+    def _read_at_generation(self, buf: Any, gen: int, copy: bool) -> Optional[Any]:
+        if read_generation(buf) != gen:
+            self._stale_drops += 1
+            return None
+        frame = read_single_frame(buf, verify_seqlock=True, copy=copy)
+        # read_single_frame сверяет поколение только с СОБСТВЕННЫМ первым чтением: если запись
+        # целиком уложилась между нашей проверкой и его стартом, оно вернёт новый кадр — ловим тут.
+        if frame is None or read_generation(buf) != gen:
+            self._torn_reads += 1
+            return None
+        return frame
 
     def _open(self, shm_actual_name: str, shm_mod: Any) -> Any:
         """Открыть сегмент по имени; при ``track=False`` — сразу снять его с учёта

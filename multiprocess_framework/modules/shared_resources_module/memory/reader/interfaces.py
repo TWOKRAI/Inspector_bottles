@@ -44,6 +44,13 @@ class FrameReader(Protocol):
         """
         ...
 
+    def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional[Any]:
+        """Task 4.4: прочитать кадр по ссылке ``(name, gen)`` — поколение слота обязано быть
+        ``gen`` и ДО, и ПОСЛЕ чтения. Расхождение до → ``None`` + ``stale_drops``; во время →
+        ``None`` + ``torn_reads`` (оба счётчика — свойства reader'а). ``copy=False`` + активный
+        кэш → VIEW в слот. Бросает при ошибке открытия сегмента."""
+        ...
+
     def view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
         """Post-use re-check (G.5.c): жив ли ещё zero-copy view (слот не перезаписан).
 
@@ -59,7 +66,13 @@ class FrameReader(Protocol):
 
     @property
     def stale_drops(self) -> int:
-        """Сколько zero-copy view дропнуто post-use re-check'ом (наблюдаемость)."""
+        """Сколько чтений/view отброшено по расхождению поколения: ссылка на перезаписанную
+        ячейку (Task 4.4) или view, пережитый перезаписью (post-use re-check)."""
+        ...
+
+    @property
+    def torn_reads(self) -> int:
+        """Task 4.4: сколько чтений по ссылке порвала перезапись слота во время копии."""
         ...
 
 

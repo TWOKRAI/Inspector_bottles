@@ -264,49 +264,27 @@ class PipelineExecutor:
         return result.frame
 
     def _collect_view_tickets(self, items: list[dict]) -> list[dict]:
-        """Ф7 G.5.c/d-2: снять тикеты входных zero-copy view-items — для re-check
-        (view_name+generation) И release (owner+shm_name+index+generation). Пусто, если
-        zero-copy не использовался (нет middleware / нет ``_frame_is_view``) — ноль
-        оверхеда на не-view пути."""
+        """Ф7 G.5.c/d-2: снять входные zero-copy view-ссылки items — для re-check и release.
+
+        Task 4.4: тикет = сама ссылка ``{owner, slot, idx, gen, name}`` из процесс-локального
+        ``item["_shm_views"]`` (её пишет ``restore_frame`` для каждого массива, восстановленного
+        view; мета view на проводе больше не ездит). Пусто, если zero-copy не использовался
+        (нет middleware / нет ``_shm_views``) — ноль оверхеда на не-view пути. Ссылки крупных
+        ключей входят в тот же список (C5): re-check и release охватывают и их."""
         if self._shm is None:
             return []
         tickets: list[dict] = []
         for it in items:
-            if it.get("_frame_is_view"):
-                name = it.get("_shm_view_name")
-                if name:
-                    tickets.append(
-                        {
-                            "view_name": name,
-                            "generation": int(it.get("_shm_view_generation", -1)),
-                            "owner": it.get("owner") or it.get("shm_owner") or "",
-                            "shm_name": it.get("shm_name", ""),
-                            "index": int(it.get("shm_index", -1)),
-                        }
-                    )
-            # Task 4.1 (C5): по тикету на КАЖДУЮ восстановленную view-ссылку крупного
-            # ключа (``_shm_refs[key]`` несёт свою view-мету — её пишет reader при
-            # restore). ``shm_name`` = слот кольца ключа → владелец маршрутизирует release
-            # в пул этого кольца; re-check (_frame_views_valid) охватывает и эти view.
-            refs = it.get("_shm_refs")
-            if isinstance(refs, dict):
-                for ref in refs.values():
-                    if isinstance(ref, dict) and ref.get("_frame_is_view") and ref.get("_shm_view_name"):
-                        tickets.append(
-                            {
-                                "view_name": ref["_shm_view_name"],
-                                "generation": int(ref.get("_shm_view_generation", -1)),
-                                "owner": ref.get("owner") or ref.get("shm_owner") or "",
-                                "shm_name": ref.get("shm_name", ""),
-                                "index": int(ref.get("shm_index", -1)),
-                            }
-                        )
+            views = it.get("_shm_views")
+            if isinstance(views, list):
+                tickets.extend(ref for ref in views if isinstance(ref, dict) and ref.get("name"))
         return tickets
 
     def _frame_views_valid(self, view_tickets: list[dict]) -> bool:
-        """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан).
-        Любой drift → False (middleware уже учёл frame_stale_drops) → батч дропается."""
-        return all(self._shm.frame_view_valid(t["view_name"], t["generation"]) for t in view_tickets)
+        """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан — поколение
+        слота равно ``ref["gen"]``). Любой drift → False (middleware уже учёл
+        frame_stale_drops) → батч дропается."""
+        return all(self._shm.frame_view_valid(ref) for ref in view_tickets)
 
     def _loan_active(self) -> bool:
         """Ф7 G.5 ревью-фикс 13: активен ли loan-протокол (публичный контракт middleware)."""
@@ -325,12 +303,12 @@ class PipelineExecutor:
         под loan-протоколом (иначе ноль оверхеда)."""
         if not view_tickets or not self._loan_active():
             return
-        for t in view_tickets:
-            owner = t.get("owner")
-            if not owner or t.get("index", -1) < 0:
+        for ref in view_tickets:
+            owner = ref.get("owner")
+            if not owner or ref.get("idx", -1) < 0:
                 continue
             self._pending_releases.setdefault(owner, []).append(
-                {"slot": t["shm_name"], "index": t["index"], "generation": t["generation"], "reader": self._node}
+                {"slot": ref["slot"], "index": ref["idx"], "generation": ref["gen"], "reader": self._node}
             )
             self._pending_release_count += 1
         if self._pending_release_count >= self._release_threshold():

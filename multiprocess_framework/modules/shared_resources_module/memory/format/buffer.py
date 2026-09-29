@@ -232,9 +232,13 @@ def pack_images(
     fast: bool = True,
     seqlock: bool = False,
     on_recover: Optional[Callable[[int], None]] = None,
-) -> None:
+) -> Optional[int]:
     """
     Записать изображения в буфер.
+
+    Returns:
+        seqlock=True — ЧЁТНОЕ поколение, которое произвела ЭТА запись (``writing_gen + 1``;
+        Task 4.4: ссылка на SHM несёт его как ``gen``); seqlock=False — ``None``.
 
     Args:
         fast: True — pack_images_fast (по умолчанию), False — pack_images_legacy
@@ -265,7 +269,7 @@ def pack_images(
             pack_images_fast(buffer, images, max_shape, expected_dtype, base=base)
         else:
             pack_images_legacy(buffer, images, max_shape, expected_dtype, base=base)
-        return
+        return None
 
     # H1b: на входе generation может быть НЕЧЁТНЫМ (прошлый writer не довёл запись —
     # исключение выше по стеку без finally в старой версии, либо kill -9). writing_gen
@@ -294,6 +298,7 @@ def pack_images(
     finally:
         # generation ВСЕГДА → чётное (стабильно), даже при исключении.
         _write_generation(buffer, writing_gen + 1)
+    return writing_gen + 1
 
 
 def clear_slot_seqlock(buffer: memoryview) -> None:

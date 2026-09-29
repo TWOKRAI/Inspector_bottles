@@ -302,9 +302,6 @@ class DataReceiver:
             "region_name",
             "frame_id",
             "timestamp",
-            "owner",
-            "shm_name",
-            "shm_index",
             "sender",
             "data_type",
         ):
