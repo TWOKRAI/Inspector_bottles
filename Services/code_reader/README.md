@@ -16,7 +16,11 @@
 - отличить «код прочитан» от «кода нет» и «код есть, но не читается»;
 - отдать код в pipeline прототипа source-плагином `code_reader` (порт `code`);
 - дать зонды для стенда: обнаружение прибора, сырой дамп потока, симулятор
-  прибора, лист тестовых QR для подбора размера и дистанции.
+  прибора, лист тестовых QR для подбора размера и дистанции;
+- **второй канал — MvCodeReader SDK** (`sdk/` + `core/sdk_*`): кадр прибора вместе с
+  кодами, 4 углами каждого кода на кадре, статусом и оценкой качества. Прибор при этом
+  открыт эксклюзивно — IDMVS к нему не подключится. Плагин поверх — Task 6.3 плана
+  `plans/code-reader-sdk.md`; TCP-канал остаётся запасным.
 
 Автономная работа с ПЛК (дискретные выходы, Modbus) идёт **мимо** этого
 сервиса — там наша система в цепочке не участвует. Сервис описывает и её
@@ -29,9 +33,17 @@
 ```
 code_reader/
 ├── interfaces.py        публичный контракт — единственная точка входа извне
+├── sdk/                 MvCodeReader SDK через ctypes; DLL из установленного IDMVS,
+│   │                    в репозиторий не копируется; грузится лениво (не при импорте)
+│   ├── loader.py        find_sdk_dir / load_library (аргумент → $MVCR_SDK_DIR → IDMVS)
+│   ├── structures.py    структуры по MvCodeReaderParams.h V1.5.3, code_bytes()
+│   ├── api.py           MvCodeReaderApi, DeviceEntry, RawFrame (копия кадра и кодов)
+│   └── errors.py        SdkError, SdkNotFoundError, коды возврата
 ├── core/
 │   ├── result.py        ReadResult, ReadStatus, parse_packet, split_stream
-│   └── sink.py          ResultSink — TCP-сервер приёма
+│   ├── sink.py          ResultSink — TCP-сервер приёма
+│   ├── sdk_frame.py     SdkFrame / CodeRead / CodeQuality, frame_from_raw, decode_image
+│   └── sdk_reader.py    SdkCodeReader — сессия прибора: поток захвата, stop, busy
 ├── plugin/              source-плагин для прототипа (discovery видит Services/)
 │   ├── plugin.py        CodeReaderPlugin — приём → produce() → порт code
 │   ├── registers.py     параметры приёма + телеметрия для GUI
@@ -40,9 +52,11 @@ code_reader/
 │   ├── id3000_discover.py    обнаружение через GigE broadcast, версия прошивки
 │   ├── id3000_tcp_sink.py    сырой дамп потока (текст + hex)
 │   ├── reader_sim.py         симулятор прибора — прогон без железа
-│   └── qr_test_sheet.py      лист тестовых QR с точной геометрией
+│   ├── qr_test_sheet.py      лист тестовых QR с точной геометрией
+│   └── mvcr_probe.py         зонд SDK: кадр + коды + углы (--selfcheck без железа)
 ├── docs/
-│   └── SETUP.md         ★ все тонкости настройки, снятые с прибора
+│   ├── SETUP.md         ★ все тонкости настройки, снятые с прибора
+│   └── GENICAM.md       прибор через обычный MVS SDK: управлять можно, кадра нет
 └── tests/
 ```
 

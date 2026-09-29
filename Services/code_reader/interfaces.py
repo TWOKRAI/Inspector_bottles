@@ -12,8 +12,21 @@ from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from Services.code_reader.core.result import ReadResult, ReadStatus
+from Services.code_reader.core.sdk_frame import CodeQuality, CodeRead, SdkFrame, decode_image, frame_from_raw
+from Services.code_reader.core.sdk_reader import SdkCodeReader
 
-__all__ = ["CodeReaderSinkProtocol", "ReadResult", "ReadStatus", "ResultHandler"]
+__all__ = [
+    "CodeQuality",
+    "CodeRead",
+    "CodeReaderSinkProtocol",
+    "ReadResult",
+    "ReadStatus",
+    "ResultHandler",
+    "SdkCodeReader",
+    "SdkFrame",
+    "decode_image",
+    "frame_from_raw",
+]
 
 ResultHandler = Callable[[ReadResult], None]
 

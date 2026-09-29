@@ -827,7 +827,14 @@ def test_open_creates_handle_then_opens_it_and_returns_handle() -> None:
     names = lib.names()
     assert names.index("CreateHandle") < names.index("OpenDevice")
     (create_args,) = lib.args_of("CreateHandle")
-    assert _address_of(create_args[1]) == ctypes.addressof(lib.dev_bufs[1])
+    # Решение лидера (эскалация 6.1): в CreateHandle уходит КОПИЯ из DeviceEntry.info —
+    # вендорский Demo/VC/ConnectSpecCamera тоже передаёт DEVICE_INFO со стека. Проверяем
+    # байты (прибор тот же) и что это не указатель в буфер EnumDevices (он переживает
+    # повторный EnumDevices).
+    passed = _address_of(create_args[1])
+    expected = bytes(lib.dev_bufs[1])
+    assert ctypes.string_at(passed, len(expected)) == expected
+    assert passed != ctypes.addressof(lib.dev_bufs[1])
     (open_args,) = lib.args_of("OpenDevice")
     assert _hv(open_args[0]) == 0x5150
 

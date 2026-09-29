@@ -74,11 +74,15 @@ MV_CODEREADER_EnumDevices(list) rc=0x00000000
 `ExportJob`/`ImportJob` (выгрузка конфигурации), `GIGE_ForceIp`/`SetIpConfig`,
 `RegisterTriggerCallBack`, `XML_GetGenICamXML`.
 
-⚠ **Заголовков нет:** каталог `Development` в IDMVS пуст, ни одного `.h`. Имена
-функций берутся из таблицы экспортов, а **раскладку структур угадывать нельзя** —
-попытка стоила `access violation`. Сигнатура `EnumDevices` оказалась с одним
-аргументом, а не двумя, как в MVS. Для обёртки нужен официальный MvCodeReader SDK
-с сайта Hikrobot либо переустановка IDMVS с компонентом Development.
+**Заголовки есть — в архиве** `Development\Development.zip` (32 МБ; до 2026-09-29 здесь
+ошибочно стояло «каталог пуст» — искали `.h`, в `.zip` не заглянули). Внутри
+`Modules/MvCodeReaderSDK/`: `Include/*.h` (V1.5.3), `Doc/*Developer Guide*.PDF`, примеры
+VC/C#/Java (Python нет), `SDK/win64/*.dll`. Обёртка по ним — `sdk/` сервиса
+(Ф6 плана, `plans/code-reader-sdk.md`). Прежняя попытка угадать раскладку без заголовков
+стоила `access violation`.
+
+⚠ Включённый VPN (WireGuard) прячет прибор от `EnumDevices` — 0 устройств при живом
+линке и живом `ping` до отключения VPN (2026-09-29).
 
 Отдельные утилиты рядом: `Ip_Configurator.exe`, `Firmware_Updater.exe`,
 `Import_Export_Features.exe`, `LogViewer.exe`.
