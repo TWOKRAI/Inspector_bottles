@@ -479,6 +479,53 @@ def test_arrow_burst_requests_layout_once(start_pult) -> None:
     )
 
 
+def test_late_gesture_reply_does_not_roll_back_arrow_shift(start_pult) -> None:
+    """F1 (ревью ит.2): жест до [15,5], его ответ раскладки задержан на 0,1 с, за это время идут
+    4 стрелки с паузой 60 мс. Ответ на жест, пришедший ПОСЛЕ первой стрелки, не должен откатить
+    битмап к смещению жеста: x рамки cap на канве не убывает. На старом коде x рамки — `[305, 310, 315, 316,
+    317, 316, 317, 319]` (317 -> 316: запоздалый ответ), номер запроса стрелка не двигала."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    _delay_layout(stand, lambda a: _offset0(a) == [15, 5], 0.1)
+    out = _run_canvas(
+        stand.port,
+        [
+            _WAIT2,
+            {"op": "drag", "from": _screen((105, 105)), "to": [15, 5], "steps": 2},
+            {"op": "key", "key": "ArrowRight", "times": 4, "gap": 60},
+            {"op": "sleep", "ms": _KEY_DEBOUNCE_MS * 3},
+            _snap("end"),
+        ],
+    )
+    xs = [b[0] for b in _cap_draws(out)]
+    assert len(xs) >= 5, f"вакуумная проверка: рисовать было нечего: {xs}"
+    assert xs == sorted(xs), f"битмап откатился назад после запоздалого ответа жеста: {xs}"
+    assert _xy(out["snaps"]["end"]) == [19.0, 5.0], out["snaps"]["end"]["fields"]
+
+
+def test_gesture_clears_pending_arrow_timer(start_pult) -> None:
+    """F2 (ревью ит.2): 2 стрелки, до истечения 200 мс — жест до [17,5]. Жест просит раскладку сам и
+    обязан снять висящий таймер стрелок: после паузы всего один запрос (жеста), а не два. Охраняет
+    clearTimeout в пути без deferLayout: без него таймер стрелок стрельнул бы вторым запросом."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    out = _run_canvas(
+        stand.port,
+        [
+            _WAIT2,
+            *_click_cap(),
+            _snap("s0"),
+            {"op": "key", "key": "ArrowRight", "times": 2, "gap": 0},
+            {"op": "drag", "from": _screen((107, 105)), "to": [17, 5], "steps": 2},
+            {"op": "sleep", "ms": _KEY_DEBOUNCE_MS * 3},
+            _snap("end"),
+        ],
+    )
+    n0 = out["snaps"]["s0"]["layoutCount"]
+    reqs = stand.layout_requests()[n0:]
+    assert len(reqs) == 1, f"после стрелок и жеста ждём один запрос раскладки: {[_offset0(a) for a in reqs]}"
+    assert _offset0(reqs[0]) == [17, 5], "единственный запрос несёт итог жеста"
+    assert _xy(out["snaps"]["end"]) == [17.0, 5.0], out["snaps"]["end"]["fields"]
+
+
 def test_space_on_canvas_prevents_default_and_on_button_is_ignored(start_pult) -> None:
     """Пробел над канвой: preventDefault (страница не прокручивается) и флаг панорамы — ЛКМ-жест
     после него не двигает слой. Пробел на кнопке/поле: ни preventDefault (кнопка нажимается
@@ -512,6 +559,27 @@ def test_space_on_canvas_prevents_default_and_on_button_is_ignored(start_pult) -
         )
         assert on_control["pd"] == [], f"пробел на {tag}: preventDefault не звать: {on_control['pd']}"
         assert _xy(on_control["snaps"]["e"]) == [25.0, 5.0], f"пробел на {tag} не включает панораму"
+
+
+def test_space_with_target_body_prevents_default_and_pans(start_pult) -> None:
+    """F3 (ревью ит.2): пробел, у которого источник — сам `document.body` (фокус ни на чём, страница
+    сфокусирована), — та же панорама, что и над канвой: preventDefault (страница не прокручивается),
+    ЛКМ-жест при зажатом пробеле не двигает слой. Харнесс раньше не имел `document.body`, и ветка
+    `e.target === document.body` не исполнялась вовсе."""
+    stand = _stand(start_pult, [_layer("cap", 5, 5)])
+    out = _run_canvas(
+        stand.port,
+        [
+            _WAIT2,
+            *_click_cap(),
+            {"op": "key", "key": " ", "code": "Space", "target": "BODY"},
+            {"op": "drag", "from": _screen((105, 105)), "to": [25, 5], "steps": 2},
+            {"op": "sleep", "ms": 200},
+            _snap("e"),
+        ],
+    )
+    assert out["pd"] == [" "], f"пробел на body обязан звать preventDefault: {out['pd']}"
+    assert _xy(out["snaps"]["e"]) == [5.0, 5.0], "пробел на body + ЛКМ — панорама, слой не сдвинут"
 
 
 def test_arrow_from_input_does_not_move_layer(start_pult) -> None:

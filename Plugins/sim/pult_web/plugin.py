@@ -1050,6 +1050,8 @@ function presetApplyEdit(name, mutate, deferLayout) {
     clearTimeout(presetLayoutTimer);
     presetLayoutTimer = null;
   }
+  // ответ раскладки на прошлый жест, ещё летящий, не должен затереть битмап, уже сдвинутый стрелкой
+  if (deferLayout) ++presetLayoutSeq;
   if (deferLayout) presetLayoutTimer = setTimeout(function () {
     presetLayoutTimer = null;
     requestPresetLayout();

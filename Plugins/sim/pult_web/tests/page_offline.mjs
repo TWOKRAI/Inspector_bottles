@@ -341,6 +341,8 @@ const win = {
 };
 const doc = {
   hidden: false,
+  // document.body: страница сравнивает с ним источник пробела (presetSpaceOnCanvas)
+  body: makeEl("", "body"),
   h: {},
   getElementById: el,
   // Task 1.2h ит.2, Н3: renderPresetLayers строит строку слоя через
@@ -634,7 +636,8 @@ async function run() {
       } else if (st.op === "key") {
         // Task 1.3h-b ит.2: `target` — tagName источника события (по умолчанию канва),
         // `times`/`gap` — серия нажатий подряд; вызовы preventDefault копятся в out.pd.
-        const tgt = st.target ? { tagName: st.target } : cv;
+        // "BODY" — сам doc.body (страница сравнивает по ссылке, а не по tagName).
+        const tgt = st.target === "BODY" ? doc.body : st.target ? { tagName: st.target } : cv;
         for (let r = 0; r < (st.times || 1); r++) {
           doc.fire("keydown", {
             key: st.key, code: st.code || st.key, shiftKey: !!st.shift, ctrlKey: false, altKey: false,
