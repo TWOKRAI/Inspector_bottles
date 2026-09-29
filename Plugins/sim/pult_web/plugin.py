@@ -166,6 +166,7 @@ button {{ font-size: 1.2em; padding: 4px 12px; }}
 #status {{ font-family: monospace; white-space: pre; }}
 #presetLayers .selected {{ background: #ffe08a; }}
 #presetCanvas {{ border: 1px solid #888; background: #ddd; touch-action: none; cursor: crosshair; }}
+#presetCanvas:focus {{ outline: 1px dotted #888; }}
 #wire {{ font-family: monospace; font-size: 0.9em; white-space: pre; max-height: 360px;
         overflow-y: auto; border: 1px solid #888; padding: 4px; }}
 </style>
@@ -1095,6 +1096,8 @@ function presetTrack(g, p) {
 }
 
 presetCanvas.addEventListener("pointerdown", function (e) {
+  // preventDefault ниже гасит и смену фокуса: без явного focus() пробел (панорама) нажал бы кнопку формы
+  if (presetCanvas.focus) presetCanvas.focus({ preventScroll: true });
   if (!presetLayout || presetGesture) return;
   var p = presetPointerXY(e);
   var kind = null, h = null;

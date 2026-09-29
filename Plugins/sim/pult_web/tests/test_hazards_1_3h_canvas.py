@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 import time
@@ -580,6 +581,47 @@ def test_space_with_target_body_prevents_default_and_pans(start_pult) -> None:
     )
     assert out["pd"] == [" "], f"пробел на body обязан звать preventDefault: {out['pd']}"
     assert _xy(out["snaps"]["e"]) == [5.0, 5.0], "пробел на body + ЛКМ — панорама, слой не сдвинут"
+
+
+def test_canvas_pointerdown_takes_focus_so_space_pans_not_button(start_pult) -> None:
+    """B1 (живой Chrome, 1.3h-b): `pointerdown` зовёт `preventDefault`, а он гасит и смену фокуса —
+    после клика по «Отмена» фокус оставался на кнопке, пробел (панорама) на keyup нажимал её.
+    Теперь `pointerdown` первой строкой берёт фокус: клик по слою И клик по пустому месту (до любого
+    раннего return) переводит `document.activeElement` на канву, `focus` получает
+    `{preventScroll: true}`; пробел с источником = activeElement — preventDefault + панорама
+    (слой не сдвинут). Канва фокусируема: `tabindex="0"` в исходной разметке.
+    Настоящее «пробел нажимает сфокусированную кнопку» — поведение браузера, харнесс его не
+    исполняет: живая проверка остаётся за лидом."""
+    with urllib.request.urlopen(f"http://127.0.0.1:{start_pult()}/", timeout=10.0) as resp:
+        html = resp.read().decode("utf-8")
+    assert re.search(r'<canvas\b[^>]*\bid="presetCanvas"[^>]*\btabindex="0"', html), "канва без tabindex=0"
+    for label, click_at in (("слой", _screen((105, 105))), ("пустое место", [-90, -90])):
+        stand = _stand(start_pult, [_layer("cap", 5, 5)])
+        out = _run_canvas(
+            stand.port,
+            [
+                _WAIT2,
+                {"op": "focus_el", "id": "btnPresetUndo"},
+                _snap("before"),
+                {"op": "click", "at": click_at},
+                {"op": "sleep", "ms": 60},
+                _snap("clicked"),
+                {"op": "key", "key": " ", "code": "Space", "target": "ACTIVE"},
+                {"op": "drag", "from": _screen((105, 105)), "to": [25, 5], "steps": 2},
+                {"op": "sleep", "ms": 200},
+                _snap("e"),
+            ],
+        )
+        s = out["snaps"]
+        assert s["before"]["active"] == "btnPresetUndo" and s["before"]["focusCalls"] == [], (
+            f"{label}: контроль харнесса (фокус на кнопке, канва ещё не звала focus): {s['before']}"
+        )
+        assert s["clicked"]["active"] == "presetCanvas", f"{label}: фокус остался не на канве: {s['clicked']}"
+        assert s["clicked"]["focusCalls"] == [{"preventScroll": True}], (
+            f"{label}: focus обязан идти с preventScroll: {s['clicked']['focusCalls']}"
+        )
+        assert out["pd"] == [" "], f"{label}: пробел с источником-канвой обязан звать preventDefault: {out['pd']}"
+        assert _xy(s["e"]) == [5.0, 5.0], f"{label}: пробел+ЛКМ — панорама, слой не сдвинут: {s['e']['fields']}"
 
 
 def test_arrow_from_input_does_not_move_layer(start_pult) -> None:

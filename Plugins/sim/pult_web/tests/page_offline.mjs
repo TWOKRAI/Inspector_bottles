@@ -283,7 +283,13 @@ function makeEl(id, tag) {
     },
     setAttribute() {},
     getAttribute() { return null; },
-    focus() {},
+    // Task 1.3h-b, B1: как в DOM — focus() переносит document.activeElement на узел;
+    // вызовы (с опциями) копятся в focusCalls, чтобы тест видел { preventScroll: true }.
+    focusCalls: [],
+    focus(opts) {
+      node.focusCalls.push(opts === undefined ? null : opts);
+      doc.activeElement = node;
+    },
     blur() {},
     setPointerCapture() {},
     releasePointerCapture() {},
@@ -365,6 +371,8 @@ const doc = {
     (this.h[t] || []).forEach((f) => f(e));
   },
 };
+// Фокус страницы по умолчанию — body (как в браузере без сфокусированного элемента).
+doc.activeElement = doc.body;
 // Журнал fetch страницы: маршрут, метод, тело, HTTP-статус (Task 1.3h-b: сколько раз
 // страница просила раскладку, с каким телом, каким кодом ответил плагин).
 const fetchLog = [];
@@ -637,7 +645,9 @@ async function run() {
         // Task 1.3h-b ит.2: `target` — tagName источника события (по умолчанию канва),
         // `times`/`gap` — серия нажатий подряд; вызовы preventDefault копятся в out.pd.
         // "BODY" — сам doc.body (страница сравнивает по ссылке, а не по tagName).
-        const tgt = st.target === "BODY" ? doc.body : st.target ? { tagName: st.target } : cv;
+        // "ACTIVE" — тот, кто сейчас в document.activeElement (B1: куда браузер шлёт пробел).
+        const tgt = st.target === "BODY" ? doc.body : st.target === "ACTIVE" ? doc.activeElement
+          : st.target ? { tagName: st.target } : cv;
         for (let r = 0; r < (st.times || 1); r++) {
           doc.fire("keydown", {
             key: st.key, code: st.code || st.key, shiftKey: !!st.shift, ctrlKey: false, altKey: false,
@@ -671,6 +681,9 @@ async function run() {
         // приходит от поля формы, а `set_field` вызывает только обработчики самого поля.
         el(st.id).fire(st.type);
         await sleep(10);
+      } else if (st.op === "focus_el") {
+        // B1: клик по кнопке формы отдаёт ей фокус (пробел потом нажал бы её при keyup).
+        el(st.id).focus();
       } else if (st.op === "press_button") { el(st.id).fire("click"); await sleep(30); }
       else if (st.op === "set_field") {
         el(st.id).value = String(st.value);
@@ -685,6 +698,8 @@ async function run() {
           error: el("presetLayoutError").textContent,
           rev: el("presetRev").textContent,
           layoutCount: layoutCount(),
+          active: doc.activeElement.id || doc.activeElement.tagName, // id узла или "BODY"
+          focusCalls: cv.focusCalls.slice(), // копия: снимок не должен меняться задним числом
         };
       }
     }
