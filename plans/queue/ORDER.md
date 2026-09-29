@@ -92,7 +92,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | Шаг | Задачи | Условие |
 |---|---|---|
 | И1 ▶ | gui-service **1b.2c** вердикт бэкенда до формы ∥ **1b.2d** правила регистра описанием | — (заполнитель пауз) |
-| И2 | gui-constructor Ф1: **1.0** правила слоёв → 1.1 характеризация → 1.2 разборка `run_gui` (**`app.py`**) → 1.3 → 1.4 → 1.5 | approve плана (О-2); до 1.3 — явные Р-A/B/C/D/F |
+| И2 | gui-constructor Ф1: **1.0** правила слоёв → 1.1 характеризация (**вход: ~20 красных тестов фронта** sandbox/dashboard на main 09-29, видел ревьюер, не разбирались — сначала отделить давние от регрессий) → 1.2 разборка `run_gui` (**`app.py`**) → 1.3 → 1.4 → 1.5 | approve плана (О-2); до 1.3 — явные Р-A/B/C/D/F |
 | И3 | gui-constructor **2.1** оболочка `host/` → **2.2** `inspector.classic` → gui-service **1.4** `apps/gui_client` → 2.4 `minimal_gui` | И2. 2.3 (minimal_app) и 4.1 (KnobAddress) — заполнители в любой момент |
 | И4 | gui-service **1b.2b** (`app.py` — строго после И2) → 1b.3 → 1b.4 auth | И2 |
 | И5 | gui-constructor **3.1 ∥ 3.2** + gui-service **3.1/3.2** → **3.3** пакет `sim.*` → **3.4** черновик + ревизия | И3 |
@@ -105,11 +105,11 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | Ф1 | **4.0** разведка → **4.1** claim check масок и кадров (L-6: 0.3–1.2 МБ через 64-КБ pipe) | [`transport-single-policy`](../transport-single-policy.md) Ф4 | С: симулятор — второй поставщик кадров; разблокирует lifecycle Ф2 |
 | Ф2 | **4.5** `ServiceContext`; миграция `robot_comm`, `vfd_comm`, `modbus` названа в задаче | [`observability-closure`](../observability-closure/plan.md) | Р: `robot_comm` дал 0 записей ошибок на 2336 строк журнала |
 | Ф3 | **2.1** развести глаголы `record_metric` (counter/gauge по сборке) | [`framework-architecture-rework`](../framework-architecture-rework/plan.md) | Р: до того, как `client_v2` начнёт публиковать метрики; от codemod не зависит |
-| Ф4 | Условия CTO: юнит-тест severity (~15 строк, ▶ сейчас), флейк `children_exit_hook`, прогон `--backend-live`; затем Ф2 перемер | [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) | Ф2 перемер ⛔ Ф1 |
+| Ф4 | Условия CTO: ~~юнит-тест severity~~ (DONE 09-29, `97bdcf9b`), флейк `children_exit_hook`, прогон `--backend-live`; **ещё два флейка graceful stop на Windows** (давние, замер 09-29: база 6/12 и 5/12, main 1/8 и 1/8) — `test_graceful_stop_acceptance::…test_message_to_live_reader_is_delivered_before_exit`, `test_pm_marks_gone_reader_hazards::test_stop_many_unblocks_writer_of_dead_reader_gracefully`; затем Ф2 перемер | [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) | Ф2 перемер ⛔ Ф1 |
 | Ф5 | Ф1 — четыре P0 «правда не агрегируется» | [`backend-ctl-review-remediation`](../backend-ctl-review-remediation.md) | Р: отладка mailbox/ACK инструментом, который не прячет потери |
 | Ф6 | остаток closure: 4.3b → 4.6 нейтральный словарь → 4.15 хоп-лаг → 4.14 ретенция по байтам; 4.3, 4.12, 4.16; Ф5 | observability-closure | С: сим как второе приложение не наследует словарь инспектора |
 | Ф7 | 2.5, Ф3–Ф4 | [`otel-export`](../otel-export.md) | после closure 4.3b |
-| Ф8 🔧 | D1: проверка lifecycle 1.5 на Linux/Orin; gui-service на Linux не проверялся | lifecycle-stop-ownership | Р и линия, если хост — Orin (О-6) |
+| Ф8 🔧 | D1: проверка lifecycle 1.5 на Linux/Orin; gui-service на Linux не проверялся; **L-7** (`defects.md`) — сторож смерти родителя на Windows не срабатывает никогда, на редкой ветке шлёт Ctrl+C — чинить вместе с D1 (один механизм, две ОС), железо для Windows-части не нужно | lifecycle-stop-ownership | Р и линия, если хост — Orin (О-6) |
 | — | Окно codemod (rework Ф3–Ф6) → frontend-constructor Блок В | rework | ⛔ решение Р-1 rework и естественная пауза; условия входа — [`history.md`](history.md), «Жёсткие условия» |
 
 ### Д — датасет ([`dataset-annotation`](../dataset-annotation/plan.md)) — в паузах
