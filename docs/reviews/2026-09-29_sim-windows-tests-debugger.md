@@ -57,3 +57,38 @@
 - pult_web-флики в совместном прогоне (`test_truth_routes_forbidden_host_403`) — известное семейство, не трогал.
 - (C): DejaVuSans подмешан только на win32; на Linux/macOS offscreen шрифты берёт у системы (fontconfig), там не проверял.
 - Подмена `QT_QPA_FONTDIR` создаёт временный каталог при импорте conftest и удаляет его `atexit`; при жёстком убийстве процесса каталог `qt_fonts_*` в %TEMP% останется.
+
+# Раунд 3: флик test_delay_ms_delays_and_does_not_serialize
+
+Гипотеза лида (asyncio.sleep на Windows будит раньше срока -> задержка короче заказанной) — ПОДТВЕРЖДЕНА, но с оговоркой: проявляется только в часто просыпающемся цикле. Два разных эффекта дали один флик.
+
+## Измерения (perf_counter, Windows 10, CPython 3.12, `loop._clock_resolution` = 0.015625, monotonic = GetTickCount64)
+| Замер | Результат |
+|---|---|
+| `asyncio.sleep(0.3)` в простаивающем цикле, N=200 | 0 короче 0.3, min 0.3058 (округление select вверх маскирует) |
+| настоящий `SimRobotServer` + pymodbus-клиент, `delay_ms=300`, N=150, сервер простаивает | 0 короче, min 0.3013 (perf_counter клиента) |
+| те же 150 чтений, но часы `time.monotonic` (как в тесте) | 45 из 150 «короче 0.3» (значения 0.296/0.297/0.312/0.313 — квантование) |
+| `asyncio.sleep(0.3)` в цикле с тикером 1 мс, N=300 | **241 из 300 короче 0.3, min 0.2835** |
+| `threading.Event.wait(0.05)` / `time.sleep(0.05)`, N=300 | 0 короче, min 0.0567 / 0.0501 |
+
+Итого: (1) флик теста — артефакт часов ТЕСТА (`time.monotonic`, 19 тиков = 0.297 с) при реальных 0.3013+ с; (2) при этом у продукта настоящий скрытый дефект: правило asyncio «таймер готов, если `when < time() + clock_resolution`» на грубых часах будит `sleep` до тика раньше срока, и в нагруженном цикле (другие клиенты, тикер) `fault.delay_ms` держит меньше заказанного — в простаивающем его прячет округление select.
+
+## Коммиты
+- 2e85220c (Layer: services) `Services/robot_comm/server/sim_robot.py`: `_sleep_at_least(delay)` — дедлайн на `perf_counter`, после `asyncio.sleep` добор короткими sleep; биндер зовёт его. Новый `Services/robot_comm/tests/test_sim_robot_delay_floor.py`: настоящий биндер в цикле с тикером 1 мс, 80 замеров perf_counter, все >= заказанного (0.03 с). Отмена (`CancelledError`) проходит сквозь цикл добора как прежде.
+- 52e77f5d (Layer: tests) целевой тест меряет `time.perf_counter()` (все 6 замеров).
+
+## Проверка
+- Целевой тест: 50 из 50 зелёных (до: 4-6 падений из 25).
+- Новый тест без фикса (биндер снова на `asyncio.sleep`): красный, 76 из 80 замеров короче, вплоть до 0.0152 при заказанных 0.03. С фиксом зелёный.
+- Предсказание, что умрёт при откате: откат 2e85220c -> `test_binder_delay_is_never_shorter_than_configured_in_a_busy_loop` красный (проверено). Откат 52e77f5d -> целевой тест снова флакает (~16-24% на прогон); остальные не затронуты.
+- Совместный прогон `Plugins/sim Services/line_sim Services/robot_comm` (переменная не задана): 1396 passed, 2 failed — pult_web-флики (`test_truth_routes_forbidden_host_403`, `test_non_json_content_type_rejected_415`), семейство из OPEN_QUESTIONS; без изменений по сравнению с раундом 2.
+
+## Другие места с ожиданием (grep по Plugins/sim и Services/robot_comm/server, без tests/)
+- `asyncio.sleep` в продукте: только `Services/robot_comm/server/sim_robot.py:151` (биндер) — исправлено. Других нет.
+- Потоковые ожидания: `Plugins/sim/robot_host/plugin.py:870` (`cancel.wait(seconds)`, длительность обрыва `fault.drop`), `:876` (`_shutdown_event.wait(0.5)`, пауза перед повтором), `:442` (`time.sleep(interval)` публикатора); `Plugins/sim/mjpeg_sink/plugin.py:126`; `Services/robot_comm/server/sim_robot.py:299,317` (`time.sleep(0.005)` опрос готовности), `:385` (`time.sleep(tick_interval)` тикер, dt считается по факту — см. его докстринг), `:435`. Замер `Event.wait` и `time.sleep` — 0 недобираний из 300, они не на цикле asyncio. Контракта «минимум» у них нет (ожидание — период опроса/паузы или верхняя граница) — не менял.
+
+## Что оставил открытым / ненадёжно
+- Добор в `_sleep_at_least` — короткие `asyncio.sleep(rest)` в цикле: до ~16 мс уступает циклу и крутится, пока точные часы догоняют (помечено `ponytail:`). Цена на нагруженном сервере не мерена; апгрейд — `call_at` по точным часам.
+- Гарантия проверена только на Windows/py3.12; на Linux/macOS `monotonic` точный, добор там срабатывает 0 раз (не мерил).
+- Верхняя граница `elapsed_concurrent < 0.55` в целевом тесте осталась как была; добор добавляет до ~16 мс к каждой задержке — на 50 прогонах запас хватило, на медленной машине не проверял.
+- pult_web-флики не трогал.
