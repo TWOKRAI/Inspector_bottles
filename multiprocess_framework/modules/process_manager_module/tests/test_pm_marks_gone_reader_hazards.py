@@ -201,6 +201,9 @@ def test_mark_only_after_confirmed_death() -> None:
     try:
         reader.start()
         time.sleep(0.3)
+        # Положительный контроль пробы (ревью 2026-09-29): проба, всегда отвечающая False,
+        # сделала бы тест зелёным и при метке ДО смерти.
+        assert _pid_present(reader.pid) is True, "проба не видит живой процесс читателя"
         watcher = _MarkWatcher(q, reader.pid)
         assert _bounded(lambda: registry.stop_one("Reader", timeout=0.3), 10.0) is True
         time.sleep(0.05)
