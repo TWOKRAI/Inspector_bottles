@@ -52,6 +52,25 @@ class TestBasicRoundtrip:
         assert restored is not None and restored.shape == (600, 80, 3)
 
 
+class TestShapePreservedThroughShm:
+    """Форма кадра не зависит от способа доставки: SHM отдаёт то же, что inline/pickle.
+
+    Живой стенд 2026-09-29 (code_reader_sdk, серый 1280×1024): до фикса каждый (H, W)
+    уходил pickle-fallback (`frame_pickle_fallbacks` 15/15), а (H, W, 1) из SHM менял
+    бы форму у потребителя. Проверяется на настоящем MemoryManager, не на формате.
+    """
+
+    @pytest.mark.parametrize("shape", [(1024, 1280), (1024, 1280, 1), (600, 800, 3)])
+    def test_shape_survives_shm(self, shape):
+        mw = _mw()
+        frame = np.arange(int(np.prod(shape)), dtype=np.uint32).astype(np.uint8).reshape(shape)
+        via_shm, restored = _roundtrip(mw, frame)
+        assert via_shm is True, f"{shape} должен идти через SHM, а не pickle-fallback"
+        assert mw.frame_pickle_fallbacks == 0
+        assert restored is not None and restored.shape == shape
+        assert np.array_equal(restored, frame)
+
+
 class TestResizeReallocation:
     """Регресс: рост кадра → переаллокация → SHM (не pickle), размер корректен."""
 

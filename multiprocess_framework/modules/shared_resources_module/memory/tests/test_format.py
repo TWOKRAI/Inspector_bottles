@@ -14,6 +14,7 @@ from ..format.buffer import (
     pack_images,
     pack_images_fast,
     pack_images_legacy,
+    read_single_frame,
     unpack_images,
 )
 
@@ -128,7 +129,6 @@ class TestPackFormatsInterchangeable:
 
         Живой стенд 2026-09-29 (code_reader_sdk, 1280×1024 mono): fast-путь падал на
         broadcast (H, W) → (H, W, 1), все 15 кадров ушли pickle-fallback через pipe.
-        Читатель восстанавливает такой кадр как (H, W, 1) — это формат слота.
         """
         slot = (4, 5, 1)
         img = np.arange(20, dtype=np.uint8).reshape(4, 5)
@@ -139,9 +139,36 @@ class TestPackFormatsInterchangeable:
         pack_images_fast(memoryview(buf_fast), [img], slot, np.dtype(np.uint8))
 
         assert buf_fast == buf_legacy
-        out = unpack_images(memoryview(buf_fast), slot, np.uint8)
-        assert out[0].shape == (4, 5, 1)
-        assert out[0][:, :, 0].tolist() == img.tolist()
+
+
+class TestShapeIsPreserved:
+    """Транспорт возвращает ровно ту форму, что получил: (H, W), (H, W, 1) и (H, W, 3) —
+    каждая своя. Иначе форма кадра зависела бы от способа доставки (SHM против pickle/inline).
+    Решение владельца 2026-09-29."""
+
+    @pytest.mark.parametrize("shape", [(4, 5), (4, 5, 1), (4, 5, 3)])
+    @pytest.mark.parametrize("packer", [pack_images_fast, pack_images_legacy])
+    @pytest.mark.parametrize("copy", [True, False])
+    def test_roundtrip_keeps_shape(self, shape, packer, copy):
+        slot = (4, 5, 3)
+        img = np.arange(int(np.prod(shape)), dtype=np.uint8).reshape(shape)
+        buf = bytearray(calculate_buffer_size(1, slot, np.uint8))
+        packer(memoryview(buf), [img], slot, np.dtype(np.uint8))
+
+        out = unpack_images(memoryview(buf), slot, np.uint8, copy=copy)
+        assert out[0].shape == shape
+        assert out[0].tolist() == img.tolist()
+
+    @pytest.mark.parametrize("shape", [(4, 5), (4, 5, 1), (4, 5, 3)])
+    def test_read_single_frame_keeps_shape(self, shape):
+        slot = (4, 5, 3)
+        img = np.arange(int(np.prod(shape)), dtype=np.uint8).reshape(shape)
+        buf = bytearray(calculate_buffer_size(1, slot, np.uint8))
+        pack_images_fast(memoryview(buf), [img], slot, np.dtype(np.uint8))
+
+        out = read_single_frame(memoryview(buf))
+        assert out.shape == shape
+        assert out.tolist() == img.tolist()
 
     def test_unpack_copy_true_returns_own_data(self):
         shape = (5, 5, 3)
