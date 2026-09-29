@@ -29,3 +29,31 @@
 - #1: `SO_EXCLUSIVEADDRUSE` проверен на Python 3.12 / Windows 10 / pymodbus 3.13; подкласс опирается на `init_setup_connect_listen`, `loop`, `handle_new_connection` pymodbus — при апгрейде pymodbus сломаться может, сломается громко (падение теста).
 - Вне охвата в `Services/robot_comm`: 12 падений без моих правок (test_z_view_internal и др.) — не разбирал.
 - Плагинный `_probe_port_free` не менял; остаётся TOCTOU-проба ДО pymodbus (как раньше), слушающий сокет теперь сам эксклюзивен.
+
+# Раунд 2: Services/robot_comm (12 падений при неустановленной QT_QPA_PLATFORM)
+
+Команда: `env -u QT_QPA_PLATFORM PYTHONPATH=$PWD python -m pytest -q Services/robot_comm`.
+До: 12 failed / 822 passed. После: 0 failed / 835 passed / 5 skipped / 2 xpassed. Skip/xfail не добавлено.
+Совместный прогон `Plugins/sim Services/line_sim Services/robot_comm`: 1395 passed, 2 failed — оба плавающие (см. ниже).
+
+| # | Тест(ы) | Причина | Сторона | Фикс | SHA |
+|---|---|---|---|---|---|
+| A | 11 Qt-тестов видов (test_sim_view*, test_z_view*, test_t2w_lead_guards rz/zscale) | на нативной платформе Qt под Windows пиксели QPixmap не те; проходили только с внешним `QT_QPA_PLATFORM=offscreen` | (b) | `Services/robot_comm/tests/conftest.py`: `os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")`, явная переменная главнее | 880f36e4 |
+| C | test_zscale_mark_label_flips_below_at_top | не продукт: на offscreen под Windows нет шрифтов (`QFontDatabase: Cannot find font directory ... Qt no longer ships fonts`), текст рисуется рамками-заглушками. Вход: ZScale 120x300, P_HOME_Z=0 -> линия y=8, drawText baseline=14 (как задумано). Наблюдено без шрифта: полноцветные пиксели в строках 2-9 (тест ищет 11-23). Со шрифтом: строки 6-13 (пересечение с 11-23 есть) | (b) окружение | conftest: на win32 `QT_QPA_FONTDIR` -> временный каталог с одним DejaVuSans.ttf из matplotlib (зависимость проекта); явная переменная главнее | 7cd8fb50 |
+| B | test_lua_block_markers_and_sha (`'6f7b966e' == 'a14430ba'`) | тест хешировал СЫРЫЕ байты autocrlf-checkout (CRLF, a14430ba); продукт `codegen.yaml_sha8` уже нормализует CRLF->LF: git-blob (LF) и Windows-checkout дают одинаково 6f7b966e | (b) | тест хеширует LF-форму; новый `test_yaml_sha8_independent_of_checkout_line_endings` (LF и CRLF -> один отпечаток) | 85997fe9 |
+
+## По (B): что сравнивает прошивка
+- Единственная величина от БАЙТ файла — sha8 в заголовке сгенерированного Lua-блока (`-- ===== BEGIN GENERATED (delta_v2.yaml <sha8>) =====`), маркер актуальности; он уже LF-нормализован в продукте. Замер: git-blob 6f7b966e / product на CRLF-checkout 6f7b966e / сырые байты CRLF a14430ba.
+- `DICT_FINGERPRINT` (23080) — CRC16 по разобранному словарю параметров (`codegen._dict_fingerprint(doc["params"])`), от концов строк не зависит. `TLM_FW_BUILD` — номер сборки прошивки, не хеш файла.
+- Поэтому вариант «.gitattributes eol=lf» или правка кодогена не нужны: протокол и закоммиченные артефакты (`core/protocol_v2.py`, `core/params_v2.py`) не менялись, `codegen.check` чист. Контракт робота не тронут; эскалации не требуется.
+- Break-injection: убрал `.replace(b"\r\n", b"\n")` в `yaml_sha8` -> красные: новый тест, `test_lua_block_markers_and_sha`, `test_cli_check_exit_code` (3 из 3, как ожидал; кроме ожидаемых двух cli_check тоже смотрит закоммиченные артефакты). Продукт восстановлен, `git status` чист.
+
+## Что интерпретировал, а не выполнил буквально
+- Задание (C) описано как «падает даже с offscreen» — воспроизведено ровно так; причина в шрифтах offscreen, а не в метриках продукта. Лечение вынесено в окружение тестов, а не в тест (утверждение не менял).
+- conftest ставит offscreen для всего pytest-процесса, если собраны тесты robot_comm (переменная общая на процесс). В совместном прогоне это тоже прошло.
+
+## Что оставил открытым / ненадёжно
+- ИСПРАВЛЕНИЕ раунда 1: флик `test_delay_ms_delays_and_does_not_serialize` — НЕ от моих правок. Замер 25 прогонов подряд: HEAD 6/25 падений, база 89d4f156 4/25. Прежнее «0 из 6 на базе» было везением. Причина, вероятно: тест меряет `time.monotonic` (шаг 15.625 мс, elapsed 0.297 = 19 тиков), а `asyncio.sleep` на том же грубом таймере может проснуться на тик раньше -> «>= 0.3» недобирает. Не чинил (вне охвата, плавающий), продуктовый ли это дефект (задержка короче заданной до ~15 мс на Windows) — не доказано.
+- pult_web-флики в совместном прогоне (`test_truth_routes_forbidden_host_403`) — известное семейство, не трогал.
+- (C): DejaVuSans подмешан только на win32; на Linux/macOS offscreen шрифты берёт у системы (fontconfig), там не проверял.
+- Подмена `QT_QPA_FONTDIR` создаёт временный каталог при импорте conftest и удаляет его `atexit`; при жёстком убийстве процесса каталог `qt_fonts_*` в %TEMP% останется.
