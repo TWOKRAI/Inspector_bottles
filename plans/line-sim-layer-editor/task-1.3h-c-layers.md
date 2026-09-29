@@ -24,8 +24,8 @@
 - **Путь для `sprite_source` считает бэкенд, не JS.** Относительно каталога файла пресета хоста (у пресета без
   файла — от корня репозитория), прямыми слэшами, по правилу Task 1.0. Считает **одна** функция —
   «файл в `sprites_dir` → запись списка»; её же позовёт запись 1.3h-d. Страница вставляет строку как есть.
-- **Ответ:** `{status: ok, dir, files: [{path, sprite_source}], truncated, layer_template}`. `path` — от корня
-  репозитория, это подпись в списке. Поиск рекурсивный, по `*.png` без учёта регистра; порядок — по `path`; не
+- **Ответ:** `{status: ok, dir, files: [{path, sprite_source}], truncated, layer_template}`. `path` — от `sprites_dir`
+  (прямые слэши), это подпись в списке; `dir` — сам каталог от корня репозитория, если он внутри репо, иначе абсолютный. Поиск рекурсивный, по `*.png` без учёта регистра; порядок — по `path`; не
   больше 500 записей, лишние отрезаются с `truncated: true`. Файл, чей `resolve()` уходит за пределы
   `confine_preset_paths` (симлинк наружу), в список не попадает: `commit` его всё равно отверг бы.
 - **`layer_template`** — `LayerSpec(name="_", mode="static", sprite_source="_").model_dump(mode="json")`: полный
@@ -61,10 +61,11 @@
 (`_PRESET_ROUTES`, `_PRESET_SECTION`, `_PRESET_SCRIPT`; + `README.md`, `STATUS.md`), `apps/line_sim/pipeline.yaml`
 (только если нужен явный `sprites_dir`), `Plugins/sim/pult_web/tests/page_offline.mjs` (харнесс: `<select>`,
 `options`, `value`), тесты: `Plugins/sim/layer_preview/tests/test_acceptance_1_3h_c_sprites.py` и
-`Plugins/sim/pult_web/tests/test_acceptance_1_3h_c_layers.py` (тестер), `test_hazards_1_3h_c_*.py` (автор).
+`Plugins/sim/pult_web/tests/test_acceptance_1_3h_c_route.py` (S4) и `test_acceptance_1_3h_c_layers.py` (C1–C10)
+(тестеры; второй расширяет и `page_offline.mjs`), `test_hazards_1_3h_c_*.py` (автор).
 `scene_source` и `Services/line_sim/**` **не трогаются**.
 
-**Steps:** 1. Тестер вслепую (Sonnet 5.5) в worktree на коммите этого плана — оба механизма одним заходом.
+**Steps:** 1. Два тестера вслепую (Sonnet 5.5) параллельно, каждый в своём worktree на коммите этого плана: S1–S4 и C1–C10.
 2. c1: команда `preset.sprites` + маршрут + README/STATUS (developer). 3. c2: разметка и JS страницы, харнесс
 (teamlead). 4. Инъекции лида по каждому свойству ниже, против тестов автора и тестера, предсказания до прогона.
 5. Ревью (Opus) синхронно. 6. Живой прогон лидом в Chrome.
@@ -73,8 +74,10 @@
 
 Тестер до кода; двойники процессов + `page_offline.mjs`, как в 1.3h-b; литералы — в тестах, не из кода.
 
-- [ ] S1: дерево `tmp/sprites/{a.png, sub/b.PNG, c.jpg, notes.txt}`, пресет `tmp/presets/p.yaml` → `files` ровно
-      `sprites/a.png`, `sprites/sub/b.PNG` в этом порядке; `sprite_source` у `a.png` — ровно `"../sprites/a.png"`.
+- [ ] S1: пресет `tmp/p.yaml`, `sprites_dir` = `tmp/sprites/{a.png, sub/b.PNG, c.jpg, notes.txt}` → `files[].path` ровно
+      `a.png`, `sub/b.PNG` в этом порядке; `sprite_source` у них — ровно `"sprites/a.png"` и `"sprites/sub/b.PNG"`.
+      (Каталог картинок внутри каталога пресета: ограда пускает только корень репозитория и каталог пресета, а
+      tmp вне репо — `tmp/presets` + `tmp/sprites` были бы отвергнуты самим `preset.layout`.)
       Каждый отданный `sprite_source`, вписанный в слой пресета, проходит `preset.layout` → `ok` (путь реально грузится).
 - [ ] S2: `layer_template` с подставленными `name`/`sprite_source` проходит `LayerSpec(**…)`; его ключи совпадают с
       полями `LayerSpec`; `offset_px == [0, 0]`, `angle_deg == 0`, `scale == 1`, `mode == "static"`.
