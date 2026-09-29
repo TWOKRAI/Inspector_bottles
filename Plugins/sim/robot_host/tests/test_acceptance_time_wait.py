@@ -25,6 +25,7 @@ TIME_WAIT на macOS живёт ~30 с (2×MSL), и общий порт межд
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 
@@ -153,9 +154,17 @@ def test_precondition_plain_bind_on_time_wait_port_raises_eaddrinuse() -> None:
 
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        with pytest.raises(OSError) as exc_info:
+        if sys.platform == "win32":
+            # Факт платформы: на Windows TIME_WAIT не блокирует bind (ни обычный, ни
+            # эксклюзивный), поэтому «TIME_WAIT даёт EADDRINUSE» там не существует, а
+            # ``_probe_port_free`` не ставит SO_REUSEADDR (он разрешил бы bind поверх ЖИВОГО
+            # слушателя). Фиксируем именно это: bind проходит, и AC1 ниже проверяет, что
+            # плагин с эксклюзивным сокетом слушателя поднимается на таком порту.
             probe.bind((_HOST, port))
-        assert exc_info.value.errno == 48 or "Address already in use" in str(exc_info.value)
+        else:
+            with pytest.raises(OSError) as exc_info:
+                probe.bind((_HOST, port))
+            assert exc_info.value.errno == 48 or "Address already in use" in str(exc_info.value)
     finally:
         probe.close()
 

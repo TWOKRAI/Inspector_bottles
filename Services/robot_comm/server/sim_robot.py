@@ -19,10 +19,12 @@ Graceful degradation: модуль импортируется без pymodbus; �
 from __future__ import annotations
 
 import asyncio
+import socket
 import sys
 import threading
 import time
 import traceback
+from functools import partial
 from typing import Callable
 
 from Services.modbus.sdk.errors import ModbusNotAvailableError
@@ -41,6 +43,39 @@ except ImportError:  # pragma: no cover
     SimDevice = None  # type: ignore
     ModbusTcpServer = None  # type: ignore
     MODBUS_AVAILABLE = False
+
+if MODBUS_AVAILABLE and sys.platform == "win32":
+
+    class _ExclusiveBindModbusTcpServer(ModbusTcpServer):  # type: ignore[misc, valid-type]
+        """``ModbusTcpServer`` с ЭКСКЛЮЗИВНЫМ сокетом слушателя (только Windows).
+
+        pymodbus 3.13 жёстко передаёт ``reuse_address=True`` (transport.py, ``create_server``),
+        а на Windows ``SO_REUSEADDR`` — не «переживи TIME_WAIT», как на POSIX (там TIME_WAIT
+        на Windows вообще не мешает bind), а «привяжись ПОВЕРХ живого слушателя с тем же
+        флагом»: второй слушатель молча садился на порт занятого чужого, ``start_listener()``
+        не поднимал ``RuntimeError``. ``SO_EXCLUSIVEADDRUSE`` на нашем сокете даёт ``WSAEADDRINUSE``
+        на любой живой слушатель (проверено: и с ``SO_REUSEADDR``, и без) и без гонки
+        «проверил-потом-занял» — отказ приходит от самого ``bind`` слушающего сокета.
+        Ошибка bind уходит в ``OSError`` -> ``listen()`` pymodbus -> ``serve_forever()``
+        -> ``RuntimeError`` -> ``start_listener()``, как на POSIX.
+        """
+
+        def init_setup_connect_listen(self, host: str, port: int) -> None:
+            super().init_setup_connect_listen(host, port)
+            self.call_create = partial(self._create_exclusive, host, port)
+
+        async def _create_exclusive(self, host: str, port: int):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)  # type: ignore[attr-defined]
+                sock.bind((host, port))  # пустой host = все интерфейсы, как у pymodbus
+                return await self.loop.create_server(self.handle_new_connection, sock=sock, start_serving=True)
+            except BaseException:
+                sock.close()
+                raise
+
+    # Имя ``ModbusTcpServer`` остаётся точкой подмены модуля (тесты оборачивают его подклассом).
+    ModbusTcpServer = _ExclusiveBindModbusTcpServer  # type: ignore[misc]
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5021  # не 5020 — там тестовый slave Services/modbus
