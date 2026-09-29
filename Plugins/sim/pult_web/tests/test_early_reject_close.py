@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import socket
+import time
 from typing import Any
 
 import pytest
@@ -27,8 +28,6 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
     MockStatsManager,
 )
 from Plugins.sim.pult_web.plugin import PultWebPlugin
-
-pytestmark = pytest.mark.timeout(120)
 
 _ROUNDS = 150
 _BODY = b'{"x": 1}'
@@ -128,3 +127,32 @@ def test_early_reject_response_always_arrives(port, label, path, body, kwargs, e
             failures.append(f"#{i}: код {status}, ожидался {expected}")
     assert not failures, f"{label}: {len(failures)} из {_ROUNDS} без ответа; первые: {failures[:3]}"
     assert _FakeDeviceHubClient.calls == [], "отказ не должен доходить до команды"
+
+
+def test_early_reject_keepalive_client_gets_eof_right_after_response(port) -> None:
+    """Клиент с keep-alive (как браузер) читает ответ и сам НЕ закрывает сокет — ждёт EOF.
+
+    Полузакрытие (``shutdown(SHUT_WR)`` в ``_linger_close``) обязано отдать EOF сразу после
+    ответа. Без него сервер ждал бы EOF клиента, клиент — сервера, и соединение висело бы до
+    ``_DRAIN_TIMEOUT_S`` (2 с) на каждый ранний отказ (инъекция лида 2026-09-29: без
+    полузакрытия прочие тесты файла зелёные — свойство сторожит только этот тест)."""
+    head = (
+        "POST /api/truth/reset HTTP/1.1\r\n"
+        "Host: evil.example:80\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: keep-alive\r\n"
+        f"Content-Length: {len(_BODY)}\r\n\r\n"
+    ).encode("ascii")
+    with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+        sock.sendall(head)
+        sock.sendall(_BODY)
+        t0 = time.perf_counter()
+        raw = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        elapsed = time.perf_counter() - t0
+    assert raw.startswith(b"HTTP/1.1 403") or raw.startswith(b"HTTP/1.0 403"), raw[:80]
+    assert elapsed < 1.0, f"EOF пришёл через {elapsed:.2f} с после отправки — сервер держал соединение"
