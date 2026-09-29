@@ -47,6 +47,7 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `POST /api/preset/commit` | `{preset, base_rev}` | `preset.commit` → процесс `scene_process` | результат команды как есть (Task 1.2h); потолок тела 256 КБ (не общие 4 КБ) |
 | `POST /api/preset/preview` | `{preset?, seeds?, tile_px?}` | `preset.preview` → процесс `layers_process` | результат команды как есть (Task 1.2h); таймаут маршрута 5.0 с (не общий 1.0 с); потолок тела 256 КБ (Task 1.3h-b) |
 | `POST /api/preset/sprites` | `{}` | `preset.sprites` → процесс `layers_process` | результат команды как есть (Task 1.3h-c, список PNG и `layer_template`); таймаут маршрута 5.0 с; потолок тела 4 КБ |
+| `POST /api/preset/sprite_put` | `{name, png_b64}` | `preset.sprite_put` → процесс `layers_process` | результат команды как есть (Task 1.3h-d, загрузка PNG); таймаут маршрута 5.0 с; потолок тела 9 МиБ (413 до чтения тела); `conflict` → 409, `bad_request`/`invalid` → 400, `io_error` → 500 |
 | `POST /api/preset/layout` | `{preset?, seed?}` | `preset.layout` → процесс `layers_process` | результат команды как есть (Task 1.3h-a, слои раздельно для канвы); таймаут маршрута 5.0 с; потолок тела 256 КБ (Task 1.3h-b — канва шлёт пресет целиком) |
 
 Путь **не валидирует** поля тела — форвардит их адресату как есть (`robot` или,
@@ -314,6 +315,14 @@ class_names, engine`), тестовые двойники — 3 (`status, rev, pr
 | `#btnLayerSprite` «Заменить картинку» | меняется только `sprite_source` |
 | `#btnLayerDelete` «Удалить» | слоя нет, выбора нет; идущий жест обрывается без записи «Отмены» |
 | `#btnLayerUp` / `#btnLayerDown` | на одну позицию к концу / к началу списка; выбор идёт за слоем |
+
+Загрузка PNG (Task 1.3h-d): `<input type="file" id="presetSpriteFile" accept="image/png">` рядом с `<select>`. На
+`change` файл читается `FileReader.readAsDataURL`, префикс `data:…;base64,` отбрасывается, уходит
+`POST /api/preset/sprite_put {name: file.name, png_b64}`. Успех (`status === "ok"` и есть `file`) — `presetLoadSprites()`
+и `presetAddLayer(r.file)` (тот же путь, что «Добавить слой»; `sprite_source` — из ответа). Иначе текст
+`message || error || code` — в `#presetSpritesError`, слой не добавляется. После обработки (любой исход) `input.value = ""`
+(тот же файл можно выбрать снова) и фокус — канве `#presetCanvas`. Приёмка `tests/test_acceptance_1_3h_d_{route,page}.py`;
+живой Chrome (реальный диалог выбора файла, куда уходит фокус) харнесс не проверяет.
 
 Каждая операция — `presetApplyLayersEdit`: одна запись «Отмена» (снимок текущей правки из полей),
 форма из нового состояния, один `POST /api/preset/layout`, снимающий висящий таймер стрелок. Операция,

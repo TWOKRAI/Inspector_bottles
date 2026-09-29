@@ -2,7 +2,7 @@
 
 **Состояние: сделано (Task 1.3h-c/c2 плана `line-sim-layer-editor` — маршрут `/api/preset/sprites` и страница состава слоёв; ждёт break-injection лида, ревью и живой прогон в Chrome).**
 
-**Обновлено:** 2026-09-29 — Task 1.3h-c/c2: `POST /api/preset/sprites` (строка `_PRESET_ROUTES`, `layers_process`,
+**Обновлено:** 2026-09-29 (позже) — Task 1.3h-d: `POST /api/preset/sprite_put` (9 МиБ, 5.0 с, `layers_process`) и `<input type=file id=presetSpriteFile>` на странице; слепая приёмка 13 (маршрут + страница) зелёная; инъекции лида, живой стенд и Chrome — ещё нет. Ниже — прежнее, Task 1.3h-c/c2: `POST /api/preset/sprites` (строка `_PRESET_ROUTES`, `layers_process`,
 5.0 с, потолок 4 КБ); `<select>` спрайтов + «Добавить слой» / «Заменить картинку» / «Удалить» / «Выше» /
 «Ниже» / «Обновить список», одна запись «Отмена» и один запрос раскладки на операцию
 (`presetApplyLayersEdit`). Слепая приёмка 31/31 (S4 5 + C 26), хазарды автора 10; весь радиус
@@ -38,6 +38,7 @@ README, «Канва редактора».
 | Content-Type-страж на `POST` (не `application/json`) | есть: 415 до чтения тела, двойник не вызван |
 | `POST /api/preset/layout` (Task 1.3h-a) | есть: строка `_PRESET_ROUTES`, форвард `preset.layout` в `layers_process`, таймаут 5.0 с, коды как у `/api/preset/preview`; потолок тела 256 КБ (1.3h-b); канва страницы — 1.3h-b, см. README |
 | `POST /api/preset/sprites` (Task 1.3h-c) | есть: строка `_PRESET_ROUTES`, форвард `preset.sprites` в `layers_process`, таймаут 5.0 с, потолок тела 4 КБ; страница — `<select>` + пять кнопок, см. README |
+| `POST /api/preset/sprite_put` (Task 1.3h-d) | есть: строка `_PRESET_ROUTES`, форвард `preset.sprite_put` в `layers_process`, таймаут 5.0 с, потолок тела 9 МиБ (413 до чтения); страница — `<input type=file>` + `FileReader`, см. README |
 | Страница: `pollStatus` на отказ (`ok: false`/не-2xx) | есть: «robot не отвечает», не `undefined`-поля |
 | Страница: `jogStop` без активного jog | есть: no-op, не шлёт лишний `/api/stop` чужой ленте |
 | Страница: повторный `pointerdown` во время jog | есть: игнорируется, осиротевшего таймера нет |
