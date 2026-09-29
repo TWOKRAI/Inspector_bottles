@@ -46,6 +46,7 @@ Task 2.3b плана [`plans/line-sim/phase-2-belt-truth.md`](../../../plans/lin
 | `GET /api/preset` | — | `preset.get` → процесс `scene_process` | результат команды как есть (Task 1.2h) |
 | `POST /api/preset/commit` | `{preset, base_rev}` | `preset.commit` → процесс `scene_process` | результат команды как есть (Task 1.2h); потолок тела 256 КБ (не общие 4 КБ) |
 | `POST /api/preset/preview` | `{preset?, seeds?, tile_px?}` | `preset.preview` → процесс `layers_process` | результат команды как есть (Task 1.2h); таймаут маршрута 5.0 с (не общий 1.0 с); потолок тела 256 КБ (Task 1.3h-b) |
+| `POST /api/preset/sprites` | `{}` | `preset.sprites` → процесс `layers_process` | результат команды как есть (Task 1.3h-c, список PNG и `layer_template`); таймаут маршрута 5.0 с; потолок тела 4 КБ |
 | `POST /api/preset/layout` | `{preset?, seed?}` | `preset.layout` → процесс `layers_process` | результат команды как есть (Task 1.3h-a, слои раздельно для канвы); таймаут маршрута 5.0 с; потолок тела 256 КБ (Task 1.3h-b — канва шлёт пресет целиком) |
 
 Путь **не валидирует** поля тела — форвардит их адресату как есть (`robot` или,
@@ -285,6 +286,32 @@ class_names, engine`), тестовые двойники — 3 (`status, rev, pr
 (`setPointerCapture`), всплытие `change` полей до `#presetLayers` (раскладка после ввода в
 поле), `passive: false` у колеса, `Image.decode()` настоящего браузера, CSS-растяжение канвы.
 
+### Состав слоёв: список PNG и кнопки (Task 1.3h-c)
+
+`POST /api/preset/sprites` (тело `{}`) → `preset.sprites` в процессе `layers` (список `*.png` каталога
+`layer_preview.sprites_dir` + `layer_template`, потолок тела 4 КБ, таймаут 5.0 с, ответ как есть).
+Страница запрашивает список один раз при загрузке и по «Обновить список» (`#btnSpritesRefresh`) и
+пересобирает `<select id="presetSpriteSelect">`: первый пункт `class://` («спрайт класса»), затем файлы
+(`value` = `sprite_source`, текст = `path`; имена файлов — данные, идут через `textContent`, не `innerHTML`).
+Отказ списка (`io_error`, `bad_request`, сеть) пишется в `#presetSpritesError`, остальной редактор
+работает; `truncated: true` — там же «показаны первые N».
+
+| Кнопка | Эффект (над выбранным слоем, если он нужен) |
+|---|---|
+| `#btnLayerAdd` «Добавить слой» | копия `layer_template`, `name` — основа имени файла (`class` для `class://`; занято, а также `base` и `damaged` — `_2`, `_3`…), слой — в конец (поверх) и выбранный |
+| `#btnLayerSprite` «Заменить картинку» | меняется только `sprite_source` |
+| `#btnLayerDelete` «Удалить» | слоя нет, выбора нет; идущий жест обрывается без записи «Отмены» |
+| `#btnLayerUp` / `#btnLayerDown` | на одну позицию к концу / к началу списка; выбор идёт за слоем |
+
+Каждая операция — `presetApplyLayersEdit`: одна запись «Отмена» (снимок текущей правки из полей),
+форма из нового состояния, один `POST /api/preset/layout`, снимающий висящий таймер стрелок. Операция,
+ничего не изменившая (нет выбора, «Выше» у верхнего), записи и запроса не даёт. `presetAddLayer`
+принимает запись списка `{path, sprite_source}`, не `<select>` — загрузка PNG из браузера (Task 1.3h-d)
+отдаст ей ответ той же формы. Не-RGBA файл отвергает раскладка (`invalid`), текст — в `#presetLayoutError`.
+Проверено в харнессе `page_offline.mjs` (модель `<select>` принята на веру): приёмка
+`tests/test_acceptance_1_3h_c_{route,layers}.py`, хазарды `tests/test_hazards_1_3h_c_layers.py`. Фокус
+кнопок после клика и события `<select>` настоящего браузера харнесс не исполняет — их проверяет живой Chrome.
+
 ## Границы
 
 Импорт `Plugins.sim.robot_host` и `multiprocess_prototype.*` запрещён (ADR-120) —
@@ -293,7 +320,7 @@ class_names, engine`), тестовые двойники — 3 (`status, rev, pr
 ## Out of scope (Task 2.3b, ручки сцены — Task 6.1b, редактор слоёв — Task 1.2h)
 
 Авторизация и доступ не с `127.0.0.1`; WebSocket/SSE вместо опроса; подписка на дерево
-`sim.belt.**` в пульте; стили сверх читаемости; добавление/удаление/порядок слоёв и выбор
-PNG (Task 1.3h-c); дефектные слои и диапазоны `augment` на канве; Qt-вкладка (Task 1.2b); правки `Plugins/sim/scene_source` и
+`sim.belt.**` в пульте; стили сверх читаемости; загрузка PNG из браузера (Task 1.3h-d); смена
+`mode` кнопками; дефектные слои и диапазоны `augment` на канве; Qt-вкладка (Task 1.2b); правки `Plugins/sim/scene_source` и
 `Plugins/sim/layer_preview` (это Task 1.2a, не пульт); Pydantic-схема на странице (см.
 известный потолок выше).
