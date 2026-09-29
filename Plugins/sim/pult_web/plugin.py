@@ -816,7 +816,8 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
         # `commit` с паузой длиннее таймаута, получал бы обрыв (`WinError 10053`)
         # вместо ответа — замер ревью: пауза 2.8 с посреди валидного тела, ни
         # 413, ни 408, ни какого-либо HTTP-ответа. Таймаут нужен ровно там, где
-        # мы читаем байты, которые никому не нужны, — см. `_drain_body`.
+        # мы читаем байты, которые никому не нужны, — см. `_linger_close` (там таймаут
+        # ставится на время «доотдачи» и снимается вместе с соединением).
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - сигнатура stdlib
             """Подавить дефолтный access-лог в stderr (не наш log-разъём)."""
@@ -886,7 +887,13 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
             (для ``-1``/гигабайта его и нет). Поэтому: полузакрытие на запись
             (клиент получает EOF после ответа) и чтение с отбрасыванием, пока клиент
             не закроет свою сторону, — не более ``_MAX_DRAIN_BYTES`` байт и
-            ``_DRAIN_TIMEOUT_S`` секунд СУММАРНО (потолок 413 остаётся потолком)."""
+            ``_DRAIN_TIMEOUT_S`` секунд СУММАРНО (потолок 413 остаётся потолком).
+
+            Опора на HTTP/1.0 (``protocol_version`` по умолчанию у stdlib): один запрос
+            на соединение. Поэтому флаг ``_body_consumed`` на экземпляре обработчика —
+            флаг ЗАПРОСА, а «доотдача» после цикла ``handle()`` не задевает следующий
+            запрос. Переход на HTTP/1.1 (keep-alive) сломал бы оба допущения — его
+            сторожит ``test_handler_closes_connection_after_response_http10``."""
             headers = getattr(self, "headers", None)
             if self._body_consumed or headers is None:
                 return

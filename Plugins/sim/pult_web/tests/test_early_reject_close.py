@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import socket
+import threading
 import time
 from typing import Any
 
@@ -27,7 +28,7 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
     MockProcessServices,
     MockStatsManager,
 )
-from Plugins.sim.pult_web.plugin import PultWebPlugin
+from Plugins.sim.pult_web.plugin import _DRAIN_TIMEOUT_S, PultWebPlugin
 
 _ROUNDS = 150
 _BODY = b'{"x": 1}'
@@ -156,3 +157,72 @@ def test_early_reject_keepalive_client_gets_eof_right_after_response(port) -> No
         elapsed = time.perf_counter() - t0
     assert raw.startswith(b"HTTP/1.1 403") or raw.startswith(b"HTTP/1.0 403"), raw[:80]
     assert elapsed < 1.0, f"EOF пришёл через {elapsed:.2f} с после отправки — сервер держал соединение"
+
+
+def test_early_reject_total_deadline_closes_trickling_client(port) -> None:
+    """Общий дедлайн ``_DRAIN_TIMEOUT_S`` не продлевается медленной струйкой байт.
+
+    Клиент получает 403 (чужой Host, ``Content-Length: 1000000``), сам НЕ закрывает сокет
+    и шлёт по байту каждые 0.3 с. Сервер обязан закрыть соединение не позже
+    ``_DRAIN_TIMEOUT_S`` + запас — это видно на границе ОС: очередной ``send`` клиента падает
+    (RST). Инъекция «таймаут на каждый ``recv`` без общего дедлайна» продлевает ожидание
+    каждым байтом — ``send`` не падает шесть секунд (замер ревью: 6.01 с против 2.02 с),
+    тест краснеет. Клиент — daemon-поток с ``join`` по дедлайну: зависшее не блокирует набор."""
+    head = (
+        "POST /api/truth/reset HTTP/1.1\r\n"
+        "Host: evil.example:80\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: 1000000\r\n\r\n"
+    ).encode("ascii")
+    observed: dict[str, Any] = {"failed_at": None}
+    watch_s = 6.0  # заведомо дольше дедлайна сервера — по нему «не закрыл» отличается от «закрыл»
+
+    def _trickle() -> None:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+                sock.sendall(head)
+                t0 = time.perf_counter()
+                while time.perf_counter() - t0 < watch_s:
+                    try:
+                        sock.sendall(b"x")
+                    except OSError as exc:
+                        observed["failed_at"] = time.perf_counter() - t0
+                        observed["error"] = type(exc).__name__
+                        return
+                    time.sleep(0.3)
+        except OSError as exc:  # не смогли даже подключиться — это провал, а не «закрыл»
+            observed["connect_error"] = repr(exc)
+
+    thread = threading.Thread(target=_trickle, daemon=True)
+    thread.start()
+    thread.join(timeout=watch_s + 4.0)
+    assert not thread.is_alive(), "клиент-струйка завис — join по дедлайну истёк"
+    assert "connect_error" not in observed, observed
+    failed_at = observed["failed_at"]
+    assert failed_at is not None, f"сервер не закрыл соединение за {watch_s} с: дедлайн доотдачи не общий"
+    assert failed_at <= _DRAIN_TIMEOUT_S + 1.0, (
+        f"сервер закрыл только на {failed_at:.2f} с при дедлайне {_DRAIN_TIMEOUT_S} с"
+    )
+
+
+def test_handler_closes_connection_after_response_http10(port) -> None:
+    """Сервер закрывает соединение после ответа даже на keep-alive-запрос (HTTP/1.0).
+
+    ``_linger_close`` опирается на «один запрос на соединение» (флаг ``_body_consumed`` на
+    экземпляре, доотдача после цикла ``handle``). Свойство видно на границе ОС: клиент
+    HTTP/1.1 с ``Connection: keep-alive`` получает EOF сразу после ответа. При переходе на
+    ``protocol_version = "HTTP/1.1"`` соединение осталось бы открытым — ``recv`` упал бы
+    по таймауту, а не вернул пустые байты."""
+    request = (f"GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: keep-alive\r\n\r\n").encode("ascii")
+    with socket.create_connection(("127.0.0.1", port), timeout=1.0) as sock:
+        sock.sendall(request)
+        raw = b""
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+        except TimeoutError:
+            pytest.fail(f"соединение осталось открытым после ответа (keep-alive?): {raw[:60]!r}")
+    assert raw.startswith(b"HTTP/1.0 200"), raw[:60]
