@@ -408,3 +408,37 @@ def test_replace_with_same_source_is_noop(start_pult) -> None:
     assert _state(s["u1"]) == _INITIAL and _state(s["u2"]) == _INITIAL, "запись в стеке одна: вторая «Отмена» пуста"
     assert s["u1"]["layoutCount"] == s["other"]["layoutCount"] + 1
     assert s["u2"]["layoutCount"] == s["u1"]["layoutCount"], "пустой стек: «Отмена» не запрашивает раскладку"
+
+
+def test_down_on_bottom_of_three_layers_is_noop(start_pult) -> None:
+    """«Ниже» у нижнего слоя при ТРЁХ слоях — no-op: ни сдвига состава, ни запроса, ни записи «Отмена».
+    Добавлен лидом (приёмка 1.3h-c): при двух слоях `splice(-1, 0, x)` после удаления первого возвращает тот же
+    порядок, поэтому C6 с двумя слоями не видит пропавшую проверку края; при трёх — `[disk, letter, cap]` стал бы
+    `[letter, disk, cap]`. Контроль — «Ниже» на среднем слое работает и оставляет одну запись."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            {"op": "sleep", "ms": 300},
+            _click(_AT_DISK),
+            _snap("pre"),
+            _btn("btnLayerDown"),
+            _SETTLE,
+            _snap("down_bottom"),
+            _click(_AT_LETTER),
+            _btn("btnLayerDown"),
+            _SETTLE,
+            _snap("control"),
+            _UNDO,
+            _SETTLE,
+            _snap("u1"),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["pre"]["selected"] == ["disk"], "контроль: выбран нижний слой"
+    assert _names(_eff(s["down_bottom"])) == ["disk", "letter", "cap"], s["down_bottom"]["layers"]
+    assert s["down_bottom"]["layoutCount"] == s["pre"]["layoutCount"], "no-op без запроса раскладки"
+    assert _names(_eff(s["control"])) == ["letter", "disk", "cap"], "положительный контроль: «Ниже» на среднем"
+    assert _names(_eff(s["u1"])) == ["disk", "letter", "cap"], "одна «Отмена» откатывает контроль — no-op записи нет"
