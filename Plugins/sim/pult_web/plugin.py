@@ -442,13 +442,13 @@ document.getElementById("btnTruthReset").onclick = function () {{
 // (_SCENE_COMMAND_BY_PATH -> pult._scene_client -> _dispatch), тот же опрос, что и
 // /api/truth (см. ниже, общий setInterval, свой таймер не заводим). Пульт поля не
 // валидирует — это дело плагина сцены, тело форвардится как есть.
-// `_dispatch()` пульта схлопывает ЛЮБОЙ status=="error" в HTTP 504
-// {{ok: false, error: <message>}} — типизированный code (invalid/overloaded) до
-// страницы не доходит (известное ограничение, чинит соседняя сессия 1.2h), поэтому
-// overloaded распознаём по литералу сообщения `_push_control`
-// (Plugins/sim/scene_source/plugin.py) — единственный канал, который у страницы есть
-// сегодня. overloaded значит «не принято» (README scene_source) — страница обязана
-// повторить ту же заявку РОВНО один раз, иначе ручка встанет не на последнее значение.
+// Ответ с типизированным code (invalid/overloaded) `_dispatch()` отдаёт как есть
+// (1.2h), а с R-4 (2026-09-29) code доходит и живьём — до того `DeviceHubClient`
+// терял его, и любой status=="error" схлопывался в HTTP 504 {{ok: false, error}}.
+// `isSceneOverloaded` смотрит сперва `code`, резервом — литерал сообщения `_push_control`
+// (Plugins/sim/scene_source/plugin.py) на случай отказа без code. overloaded значит
+// «не принято» (README scene_source) — страница обязана повторить ту же
+// заявку РОВНО один раз, иначе ручка встанет не на последнее значение.
 function isSceneOverloaded(resp) {{
   if (!resp || (resp.ok !== false && resp.status !== "error")) {{ return false; }}
   // Три признака: `code` напрямую (Task 1.2h, Находка 2 — `_dispatch()` теперь проносит
