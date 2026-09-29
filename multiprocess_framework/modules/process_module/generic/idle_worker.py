@@ -106,7 +106,10 @@ class IdleWorker:
 
     def _run_once(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """Один цикл: работа + smart-sleep + запись тайминга."""
-        t_start = time.monotonic()
+        # B-1: часы темпа — perf_counter, НЕ monotonic. На Windows monotonic = GetTickCount64
+        # с шагом 15.6 мс: интервал 33.3 мс округлялся до трёх тиков → 21 fps вместо 30
+        # (замер 2026-09-29: 21.4 → 29.6). time.sleep в Python 3.11+ и так высокоточный.
+        t_start = time.perf_counter()
 
         # Ф7 G.8: busy на время кадра — drain дожидается его завершения перед stop.
         self._busy = True
@@ -115,14 +118,14 @@ class IdleWorker:
         finally:
             self._busy = False
 
-        elapsed = time.monotonic() - t_start
+        elapsed = time.perf_counter() - t_start
         sleep_time = self._target_interval - elapsed
         if sleep_time > 0:
-            deadline = time.monotonic() + sleep_time
-            while time.monotonic() < deadline and not stop_event.is_set():
-                time.sleep(max(0.0, min(_SLEEP_CHUNK_S, deadline - time.monotonic())))
+            deadline = time.perf_counter() + sleep_time
+            while time.perf_counter() < deadline and not stop_event.is_set():
+                time.sleep(max(0.0, min(_SLEEP_CHUNK_S, deadline - time.perf_counter())))
 
-        self._cycle_metrics.record(time.monotonic() - t_start)
+        self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _do_work(self) -> None:
         """Хук полезной нагрузки воркера.

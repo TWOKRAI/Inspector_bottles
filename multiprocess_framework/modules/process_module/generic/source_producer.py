@@ -118,7 +118,10 @@ class SourceProducer:
                 time.sleep(0.05)
                 continue
 
-            t_start = time.monotonic()
+            # B-1: часы темпа — perf_counter, НЕ monotonic. На Windows monotonic = GetTickCount64
+            # с шагом 15.6 мс: интервал 33.3 мс округлялся до трёх тиков → 21 fps вместо 30
+            # (замер 2026-09-29: 21.4 → 29.6). time.sleep в Python 3.11+ и так высокоточный.
+            t_start = time.perf_counter()
 
             # Снимок кумулятивного счётчика ошибок ДО produce() — чтобы отличить
             # честно-успешную итерацию от той, где плагин ПРОГЛОТИЛ ошибку внутри
@@ -199,13 +202,13 @@ class SourceProducer:
             if self._health is not None and self._health.breaker_open:
                 self._sleep_cooperative(self._breaker_backoff, stop_event)
             else:
-                elapsed = time.monotonic() - t_start
+                elapsed = time.perf_counter() - t_start
                 sleep_time = self._target_interval - elapsed
                 if sleep_time > 0:
                     self._sleep_cooperative(sleep_time, stop_event)
 
             # Полный цикл (produce + send + sleep) → телеметрия.
-            self._cycle_metrics.record(time.monotonic() - t_start)
+            self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _sleep_cooperative(self, sleep_time: float, stop_event: threading.Event) -> None:
         """Сон порциями с проверкой stop_event (отзывчивость на остановку).
@@ -216,9 +219,9 @@ class SourceProducer:
         """
         if sleep_time <= 0:
             return
-        deadline = time.monotonic() + sleep_time
-        while time.monotonic() < deadline and not stop_event.is_set():
-            time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
+        deadline = time.perf_counter() + sleep_time
+        while time.perf_counter() < deadline and not stop_event.is_set():
+            time.sleep(max(0.0, min(0.01, deadline - time.perf_counter())))
 
     def _send_item(self, item: dict) -> None:
         """IPC send одного item.
