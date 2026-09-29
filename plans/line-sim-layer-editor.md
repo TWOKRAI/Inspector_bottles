@@ -518,8 +518,9 @@ Files: `Services/line_sim/core/layered_object.py` (публичный метод
 `Services/line_sim/core/preview.py` (`render_layout`), `Plugins/sim/layer_preview/plugin.py` (команда
 `preset.layout`), `Plugins/sim/pult_web/plugin.py` (маршрут `POST /api/preset/layout` → `layers_process`,
 таймаут маршрута как у превью), README/STATUS обоих плагинов.
-Ответ: `{status, canvas_px: [w, h], layers: [{name, png_b64, center_px: [x, y], size_px: [w, h]}]}` —
-порядок слоёв = порядок пресета (снизу вверх); пути — через `confine_preset_paths`, как у `preset.preview`.
+Запрос: `{preset?, seed?}` (дефолт — пресет хоста, `seed` 0). Ответ: `{status, class_name, canvas_px: [w, h],
+layers: [{name, png_b64, center_px: [x, y], size_px: [w, h]}]}` — `center_px` относительно центра объекта (ось Y
+вниз), порядок слоёв = порядок пресета (снизу вверх); пути — через `confine_preset_paths`, как у `preset.preview`.
 
 **1.3h-b — канва на странице (teamlead).**
 Files: `Plugins/sim/pult_web/plugin.py` (`_PRESET_SECTION`/`_PRESET_SCRIPT`), `page_offline.mjs` (харнесс).
