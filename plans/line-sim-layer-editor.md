@@ -520,7 +520,11 @@ Files: `Services/line_sim/core/layered_object.py` (публичный метод
 таймаут маршрута как у превью), README/STATUS обоих плагинов.
 Запрос: `{preset?, seed?}` (дефолт — пресет хоста, `seed` 0). Ответ: `{status, class_name, canvas_px: [w, h],
 layers: [{name, png_b64, center_px: [x, y], size_px: [w, h]}]}` — `center_px` относительно центра объекта (ось Y
-вниз), порядок слоёв = порядок пресета (снизу вверх); пути — через `confine_preset_paths`, как у `preset.preview`.
+вниз), порядок слоёв = слои объекта ленты снизу вверх: авто-слой `base` (спрайт класса — у пресета с каталогом
+без слоя `class://`) и дальше слои пресета в его порядке; угол объекта — 0; `canvas_px` — размер объекта при
+номинале; пути — через `confine_preset_paths`, как у `preset.preview`. **Решение лида 2026-09-29** (эскалация
+разработчика): `base` в раскладке остаётся — канва показывает объект ленты; страница сопоставляет слои с
+`presetState` по имени (имена уникальны — `LayeredObject` отвергает дубли), `base` виден, но не редактируется.
 
 **1.3h-b — канва на странице (teamlead).**
 Files: `Plugins/sim/pult_web/plugin.py` (`_PRESET_SECTION`/`_PRESET_SCRIPT`), `page_offline.mjs` (харнесс).

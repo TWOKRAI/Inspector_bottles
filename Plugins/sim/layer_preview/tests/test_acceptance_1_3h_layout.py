@@ -172,7 +172,10 @@ def test_a_layers_separate_in_preset_order(tmp_path: Path) -> None:
         [_layer_dict("zz_first", "disk.png"), _layer_dict("aa_second", "rect.png")],
     )
     res2 = _layout_ok(plugin, {"preset": reversed_alpha})
-    assert [layer["name"] for layer in res2["layers"]] == ["zz_first", "aa_second"], res2["layers"]
+    # Решение лида 2026-09-29 (эскалация разработчика): каталог без слоя class:// -> лента сама
+    # подкладывает снизу авто-слой «base» со спрайтом класса; раскладка показывает объект ленты
+    # как есть («что видно в редакторе, то и поедет»), поэтому «base» первым, дальше — пресет.
+    assert [layer["name"] for layer in res2["layers"]] == ["base", "zz_first", "aa_second"], res2["layers"]
 
 
 # --------------------------------------------------------------------------- #
