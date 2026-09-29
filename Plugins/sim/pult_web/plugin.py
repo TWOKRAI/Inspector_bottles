@@ -129,10 +129,13 @@ _SCENE_COMMAND_BY_PATH = {
 #: режет, поднят до 256 КБ только на этот маршрут. ``preset.preview`` рендерит
 #: сетку образцов (~88 мс на README ``layer_preview``, до ~1.3 с на крупных
 #: спрайтах) — общий таймаут 1.0 с его режет, поднят до 5.0 с только на этот
-#: маршрут. Тело форвардится КАК ЕСТЬ — та же дисциплина, что у двух таблиц выше.
+#: маршрут. ``preset.layout`` (Task 1.3h-a) раскладывает слои пресета по картинкам
+#: тем же процессом ``layers`` — тот же таймаут 5.0 с и общий потолок тела.
+#: Тело форвардится КАК ЕСТЬ — та же дисциплина, что у двух таблиц выше.
 _PRESET_ROUTES: dict[str, tuple[str, str, int | None, float | None]] = {
     "/api/preset/commit": ("preset.commit", "_scene_client", 262144, None),
     "/api/preset/preview": ("preset.preview", "_layers_client", None, 5.0),
+    "/api/preset/layout": ("preset.layout", "_layers_client", None, 5.0),
 }
 
 #: Код ответа команды (``code``) -> HTTP-статус (Находка 2, Task 1.2h). Ответ

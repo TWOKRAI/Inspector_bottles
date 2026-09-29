@@ -331,7 +331,10 @@ def test_plugin_is_side_effect_control_without_ports() -> None:
 
     assert LayerPreviewPlugin.category == "control"
     assert LayerPreviewPlugin.inputs == [] and LayerPreviewPlugin.outputs == []
-    assert LayerPreviewPlugin.commands == {"preset.preview": "cmd_preset_preview"}
+    assert LayerPreviewPlugin.commands == {
+        "preset.preview": "cmd_preset_preview",
+        "preset.layout": "cmd_preset_layout",
+    }
 
 
 def test_layer_preview_does_not_import_scene_source() -> None:

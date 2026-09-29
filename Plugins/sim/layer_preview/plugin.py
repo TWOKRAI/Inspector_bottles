@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""``LayerPreviewPlugin`` — команда ``preset.preview`` в отдельном процессе (ревью 1.2a S1).
+"""``LayerPreviewPlugin`` — команды ``preset.preview`` и ``preset.layout`` в отдельном процессе (ревью 1.2a S1).
 
 Превью реального пресета стоит ~87 мс (почти всё — ``ObjectFactory.make`` на полном спрайте).
 В процессе сцены это время держало бы единственный поток команд — тот же, что дренирует
@@ -19,6 +19,11 @@
 принудительно каталог файла (у каталожного — корень репозитория), пути картинок — только в
 корне репозитория или каталоге файла (``confine_preset_paths``). Ответы: ``ok`` +
 ``png_b64`` + ``tiles``; ``bad_request`` (форма/пределы); ``invalid`` (пресет/картинки).
+
+``preset.layout`` (Task 1.3h-a): ``seed`` (целое >= 0, по умолчанию 0) / ``preset`` — каждый слой
+пресета отдельной RGBA-картинкой в номинале (без augment, угол объекта 0), см.
+``Services.line_sim.core.preview.render_layout``. Ответ ``ok`` + ``class_name`` + ``canvas_px`` +
+``layers``; те же ``bad_request`` / ``invalid`` и та же ограда путей, что у ``preset.preview``.
 """
 
 from __future__ import annotations
@@ -44,19 +49,19 @@ from Services.line_sim.core import (
     resolve_repo_path,
     validate_preview_request,
 )
-from Services.line_sim.core.preview import PREVIEW_DEFAULT_SEEDS, PREVIEW_DEFAULT_TILE_PX
+from Services.line_sim.core.preview import PREVIEW_DEFAULT_SEEDS, PREVIEW_DEFAULT_TILE_PX, render_layout
 
 
 @register_plugin("layer_preview", category="control", description="Превью пресета слоёв line_sim (процесс layers)")
 class LayerPreviewPlugin(ProcessModulePlugin):
-    """Side-effect плагин: одна команда ``preset.preview``."""
+    """Side-effect плагин: команды ``preset.preview`` и ``preset.layout``."""
 
     name = "layer_preview"
     category = "control"
 
     inputs: list = []
     outputs: list = []
-    commands: dict = {"preset.preview": "cmd_preset_preview"}
+    commands: dict = {"preset.preview": "cmd_preset_preview", "preset.layout": "cmd_preset_layout"}
 
     def configure(self, ctx: PluginContext) -> None:
         cfg = dict(ctx.config)
@@ -90,6 +95,24 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         except Exception as exc:  # noqa: BLE001 — любой сбой сборки превью -> invalid с текстом
             return {"status": "error", "code": "invalid", "message": str(exc)}
         return {"status": "ok", "png_b64": base64.b64encode(png).decode("ascii"), "tiles": tiles}
+
+    def cmd_preset_layout(self, data: dict | None = None) -> dict:
+        """``preset.layout`` — см. докстринг модуля."""
+        data = data if data is not None else {}
+        if not isinstance(data, dict):
+            return _bad_request("preset.layout: ожидается dict")
+        seed = data.get("seed", 0)
+        if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
+            return _bad_request("preset.layout: seed — целое >= 0")
+        preset_dict = data.get("preset")
+        if preset_dict is not None and not isinstance(preset_dict, dict):
+            return _bad_request("preset.layout: preset — dict или отсутствует")
+        try:
+            preset = self._client_preset(preset_dict) if preset_dict is not None else self._configured_preset()
+            layout = render_layout(preset, seed)
+        except Exception as exc:  # noqa: BLE001 — любой сбой сборки раскладки -> invalid с текстом
+            return {"status": "error", "code": "invalid", "message": str(exc)}
+        return {"status": "ok", **layout}
 
     def _configured_preset(self) -> ScenePreset:
         """Пресет конфига с override; файл — перечитывается при смене ``rev`` его байт."""
