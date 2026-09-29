@@ -794,12 +794,21 @@ class BuiltinCommands:
                 workers = wm.get_all_workers_status()
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"worker_manager: {exc}"}
+        # Task 4.6: реально действующее число потоков OpenCV (не рецептное значение —
+        # его мог сменить кто угодно после старта). None — cv2 нет в окружении.
+        try:
+            import cv2
+
+            cv_threads = cv2.getNumThreads()
+        except ImportError:
+            cv_threads = None
         return {
             "success": True,
             "process": svc.name,
             "pid": os.getpid(),
             "status": getattr(svc, "_current_process_status", "unknown"),
             "workers": workers,
+            "cv_threads": cv_threads,
         }
 
     def _cmd_introspect_capabilities(self, data=None, **kwargs) -> dict:

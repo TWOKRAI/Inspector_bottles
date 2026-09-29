@@ -202,6 +202,44 @@ def _attach_stop_event_to_process_data(
     custom["stop_event"] = stop_event
 
 
+# Task 4.6: дефолт потоков OpenCV на процесс. Без него каждый процесс берёт все ядра
+# (cv2.getNumThreads() == числу логических CPU), и N процессов душат друг друга.
+DEFAULT_CV_THREADS = 2
+
+
+def _apply_cv_threads(process_config: Any, log: Any) -> None:
+    """Применить ``cv_threads`` процесса к OpenCV этого OS-процесса (``cv2.setNumThreads``).
+
+    Ключ живёт во вложенном ``config`` (так его кладёт ``GenericProcessConfig.build()``),
+    плоский верхний уровень — запасной путь для не-Generic процессов. Нет ключа / None →
+    ``DEFAULT_CV_THREADS``. cv2 не установлен → тихо ничего: framework не зависит от OpenCV,
+    поэтому импорт ленивый и только здесь.
+
+    Как подбирать (для будущих агентов): дефолт 2, потому что несколько занятых процессов
+    порождают каждый свой пул OpenCV размером с число ядер и дерутся за них. Поднимать
+    (4-8) — для одного тяжёлого процесса на крупных кадрах, пока остальные простаивают;
+    1 — лёгким процессам на мелких кадрах. Правило: сумма ``cv_threads`` одновременно
+    занятых процессов ≈ числу ядер. Действующее значение видно в ``introspect.status``
+    (``cv_threads``). Выбирать замером (CPU процесса + время плагина), а не на глаз.
+    """
+    cfg = process_config if isinstance(process_config, dict) else {}
+    nested = cfg.get("config")
+    raw = nested.get("cv_threads") if isinstance(nested, dict) else None
+    if raw is None:
+        raw = cfg.get("cv_threads")
+    n = DEFAULT_CV_THREADS
+    if raw is not None:
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            log.warning(f"cv_threads={raw!r} не число — применён дефолт {DEFAULT_CV_THREADS}")
+    try:
+        import cv2
+    except ImportError:
+        return
+    cv2.setNumThreads(n)
+
+
 def run_process_function(
     class_path: str,
     process_name: str,
@@ -292,6 +330,10 @@ def run_process_function(
                 process_config = process_data.config.process
             elif process_data.custom:
                 process_config = process_data.custom.get("process_config", process_data.custom.copy())
+
+        # Task 4.6: потоки OpenCV — ДО создания класса процесса (плагины могут дёрнуть cv2
+        # уже в __init__/initialize).
+        _apply_cv_threads(process_config, log)
 
         process_instance = process_class(
             name=process_name,
