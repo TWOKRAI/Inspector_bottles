@@ -88,7 +88,15 @@ def _make_fixture(tmp_path: Path) -> tuple[Path, Path]:
     return preset_path, catalog_dir
 
 
-def _new_scene(preset_path_cfg: Path) -> tuple[SceneSourcePlugin, _FakeStateProxy]:
+#: Поток объектов ПО ЭНКОДЕРУ (`spawn_spacing_mm`): кадр — чистая функция (пресет, seed, энкодер).
+#: Поток по времени (`spawn_interval_s`) считает срок спавна по `time.monotonic()` в
+#: `produce()` — два инстанса, вызванные один за другим, видят РАЗНЫЕ часы и спавнят на разных
+#: шагах; для сравнения кадров двух инстансов он не годится (флейк p6, ~1 из 10 прогонов).
+_SPACING_FLOW = {"spawn_spacing_mm": [4.0, 6.0]}
+_INTERVAL_FLOW = {"spawn_interval_s": [0.01, 0.02]}
+
+
+def _new_scene(preset_path_cfg: Path, flow: dict | None = None) -> tuple[SceneSourcePlugin, _FakeStateProxy]:
     state_proxy = _FakeStateProxy()
     ctx = MagicMock()
     ctx.state_proxy = state_proxy
@@ -97,7 +105,7 @@ def _new_scene(preset_path_cfg: Path) -> tuple[SceneSourcePlugin, _FakeStateProx
         "resolution_height": FRAME_H,
         "px_per_mm": 1.0,
         "belt_y_px": FRAME_H / 2,
-        "spawn_interval_s": [0.01, 0.02],
+        **(flow if flow is not None else _INTERVAL_FLOW),
         "scene_length_mm": 1_000_000.0,
         "preset_path": str(preset_path_cfg),
         "seed": 0,
@@ -139,8 +147,8 @@ def _decode(result: dict) -> np.ndarray:
 
 def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
     preset_path, _catalog_dir = _make_fixture(tmp_path)
-    plugin_a, sp_a = _new_scene(preset_path)
-    plugin_b, sp_b = _new_scene(preset_path)
+    plugin_a, sp_a = _new_scene(preset_path, _SPACING_FLOW)
+    plugin_b, sp_b = _new_scene(preset_path, _SPACING_FLOW)
     preview = _new_preview(preset_path)
 
     def _step(enc: float, t: float) -> tuple[np.ndarray, np.ndarray]:
@@ -168,6 +176,41 @@ def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
     for i, enc in enumerate((15.0, 20.0, 25.0), start=3):
         fa, fb = _step(enc, float(i))
         assert np.array_equal(fa, fb), f"preview повлиял на последующие кадры (побитовое расхождение) на шаге {i}"
+
+
+def _frames_after_clock_jump(preset_path: Path, flow: dict, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Два одинаковых инстанса на одних значениях энкодера; на шаге 2 часы `produce()` уходят
+    на 0.5 с вперёд МЕЖДУ `a.produce()` и `b.produce()` (то, что на Windows делает тик 15.6 мс).
+    Возвращает по шагу: совпали ли кадры побитно."""
+    import types
+
+    from Plugins.sim.scene_source import plugin as scene_plugin
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(scene_plugin, "time", types.SimpleNamespace(monotonic=lambda: clock["t"]))
+    plugin_a, sp_a = _new_scene(preset_path, flow)
+    plugin_b, sp_b = _new_scene(preset_path, flow)
+    equal = []
+    for i in range(6):
+        _emit_encoder(sp_a, i * 5.0, float(i))
+        _emit_encoder(sp_b, i * 5.0, float(i))
+        frame_a = plugin_a.produce()[0]["frame"]
+        if i == 2:
+            clock["t"] += 0.5
+        frame_b = plugin_b.produce()[0]["frame"]
+        equal.append(bool(np.array_equal(frame_a, frame_b)))
+    return equal
+
+
+def test_frames_independent_of_wall_clock_in_spacing_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Причина флейка p6: часы между двумя `produce()` не должны менять кадр, если поток — по
+    энкодеру. Тот же скачок часов в потоке по времени РАСХОДИТСЯ (так задумано: `interval_s` —
+    секунды стенда) — второе утверждение доказывает, что скачок часов реально ловится."""
+    preset_path, _ = _make_fixture(tmp_path)
+    assert all(_frames_after_clock_jump(preset_path, _SPACING_FLOW, monkeypatch)), "spacing-поток зависит от часов"
+    assert not all(_frames_after_clock_jump(preset_path, _INTERVAL_FLOW, monkeypatch)), (
+        "скачок часов не разошёл кадры interval-потока — проверка стала пустой"
+    )
 
 
 # --- P7 (перенесено из приёмки тестера) ---
