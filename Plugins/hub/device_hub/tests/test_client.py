@@ -47,6 +47,42 @@ class TestNormalizeResponse:
         assert result["status"] == "error"
 
 
+class TestErrorBranchHazards:
+    """Хазарды ветки ошибки ``_normalize_response`` (автор механизма).
+
+    Что может сломаться именно здесь, при такой сборке:
+    - ``result`` конверта — ТОТ ЖЕ объект, что вернул обработчик; если ветка
+      ошибки допишет ``status``/``message`` в него на месте (``detail[...] = ...``
+      вместо копии ``{**detail, ...}``), обработчик увидит чужие ключи;
+    - обработчик мог положить ``status: "ok"`` при ``success: False`` — статус
+      обязан остаться "error", а не выиграть у распаковки полей плагина.
+    """
+
+    def test_handler_result_not_mutated(self) -> None:
+        handler_result = {"code": "conflict", "current_rev": 7}
+        raw = {"success": False, "result": handler_result}
+
+        out = _normalize_response(raw)
+
+        assert handler_result == {"code": "conflict", "current_rev": 7}
+        assert out is not handler_result
+        assert out == {
+            "code": "conflict",
+            "current_rev": 7,
+            "status": "error",
+            "message": "неизвестная ошибка",
+        }
+
+    def test_handler_status_ok_under_failure_is_forced_to_error(self) -> None:
+        raw = {"success": False, "result": {"status": "ok", "code": "x", "message": "boom"}}
+
+        out = _normalize_response(raw)
+
+        assert out["status"] == "error"
+        assert out["message"] == "boom"
+        assert out["code"] == "x"
+
+
 # ------------------------------------------------------------------ #
 # DeviceHubClient
 # ------------------------------------------------------------------ #
