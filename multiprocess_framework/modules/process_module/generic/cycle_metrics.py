@@ -36,7 +36,7 @@ class CycleMetricsRecorder:
 
     - ``record(cycle_duration_s)`` — если сам замерил длительность цикла;
     - контекст-менеджер ``measure()`` — обернуть тело итерации (засекает
-      monotonic на входе и фиксирует на выходе).
+      perf_counter на входе и фиксирует на выходе).
 
     ``get_cycle_metrics`` отдаёт снимок в том же формате, что IdleWorker.
     """

@@ -302,8 +302,10 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 
 **Условия до старта Ф2 (CTO):**
 - [ ] D1 — Linux/Orin проверка Task 1.5 на целевой машине (числа Ф2 на платформе с непроверенным сторожем бессмысленны).
-- [ ] Юнит-тест правила severity `_publish_stop_summary` (литерал WARNING при любом `reported=false`) — в CI сегодня
+- [x] Юнит-тест правила severity `_publish_stop_summary` (литерал WARNING при любом `reported=false`) — в CI сегодня
   severity не защищена ничем (инъекция D CTO: 0 красных), живые тесты CI не гоняет.
+  **[DONE 2026-09-29]** `test_stop_summary_severity.py` (24 теста, слепой тестер; уровень у приёмника `LoggerManager`),
+  инъекции: флип уровней → 18 красных, без `reported=False` → 4, `_log_error`→`pass` → 1. Ветка `fix/b1-source-pacing`.
 - [ ] `--backend-live` (stop_summary 3 + system_shutdown 2 + exit_loss) — вручную перед Ф2 или в CI.
 - [ ] Флейк `children_exit_hook_in_system_stop_mode` (1/9) — починить или квантовать до «20 циклов» Ф2.
 
