@@ -59,7 +59,7 @@ def _make_catalog(tmp_path: Path) -> Path:
     return tmp_path / "catalog"
 
 
-def test_h8_relative_background_texture_resolved_from_repo_root_not_cwd(tmp_path, monkeypatch):
+def test_h8_relative_background_texture_resolved_from_repo_root_not_cwd(tmp_path, monkeypatch, repo_texture_dir):
     """H8: относительный `background_texture` резолвится от КОРНЯ РЕПОЗИТОРИЯ, не от
     CWD процесса. CWD намеренно меняется ДО `configure()` — наивная реализация
     (резолвинг относительно CWD, без похода к `_REPO_ROOT`) читала бы файл в неверном
@@ -83,7 +83,7 @@ def test_h8_relative_background_texture_resolved_from_repo_root_not_cwd(tmp_path
     ОС/окружение), тест падает громко, а не тихо становится бесполезным."""
     catalog_dir = _make_catalog(tmp_path)
     texture_bgr = np.full((48, 48, 3), fill_value=(77, 88, 99), dtype=np.uint8)
-    texture_path = tmp_path / "h8_texture.png"
+    texture_path = repo_texture_dir / "h8_texture.png"  # на одном диске с корнем репо (relpath между C:/D: невозможен)
     imwrite_unicode(texture_path, texture_bgr)
     relative_path = os.path.relpath(texture_path, _REPO_ROOT)
 
