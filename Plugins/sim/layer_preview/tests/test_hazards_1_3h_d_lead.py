@@ -62,3 +62,22 @@ def test_f_tmp_unlink_failure_after_publish_keeps_the_ok_reply(world, monkeypatc
     monkeypatch.undo()
     assert res.get("status") == "ok" and res.get("file", {}).get("path") == "up.png", res
     assert (sprites_dir / "up.png").read_bytes() == png
+
+
+@pytest.mark.parametrize("corrupt", ["signature", "pixel_cap"])
+def test_g_rejected_bytes_never_reach_the_decoder(world, monkeypatch: pytest.MonkeyPatch, corrupt: str) -> None:
+    """Ревью 1.3h-d F1/F3: сигнатура и IHDR-потолок — ДО любого декодера OpenCV. Инъекция J1 (без проверки
+    сигнатуры) была зелёной: WebP/TIFF отсекает проверка IHDR, а PNG с битой сигнатурой отсекал сам декодер —
+    исход `invalid` тот же, но байты из сети уже побывали в декодере. Здесь свойство и есть «декодер не вызван»."""
+    plugin, sprites_dir = world
+    png = bytearray(_rgba_png())
+    if corrupt == "signature":
+        png[1:4] = b"XNG"  # IHDR на месте, сигнатура битая
+    else:
+        png[16:24] = (5000).to_bytes(4, "big") + (5000).to_bytes(4, "big")  # IHDR 5000x5000 > 4096²
+    reached: list[str] = []
+    monkeypatch.setattr(f"{_PLUGIN}.load_image_rgba", lambda path: reached.append(str(path)))
+    res = _put(plugin, "up.png", base64.b64encode(bytes(png)).decode("ascii"))
+    assert res.get("code") == "invalid", res
+    assert reached == [], f"декодер вызван на отвергнутых байтах: {reached}"
+    assert not any(sprites_dir.iterdir()) or all(p.suffix != ".uploading" for p in sprites_dir.iterdir())
