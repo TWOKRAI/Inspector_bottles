@@ -14,12 +14,17 @@
 
 from __future__ import annotations
 
+import json
+
 from Plugins.sim.pult_web.tests.test_acceptance_1_3h_c_layers import (  # noqa: F401  (start_pult — фикстура)
     _A,
     _AT_DISK,
+    _C,
+    _CLASS,
     _INITIAL,
     _READY,
     _SETTLE,
+    _SPRITES_OK,
     _UNDO,
     _assert_ran,
     _btn,
@@ -223,3 +228,54 @@ def test_h4_rename_then_up_then_undo_twice_never_selects_a_foreign_layer(start_p
     before, after = s["undo2"]["fields"], s["arrow"]["fields"]
     moved = {k: (before[k], after[k]) for k in _FIELDS if before[k] != after[k]}
     assert set(moved) <= {"layer0_offset_x"}, f"стрелка сдвинула чужой слой: {moved!r}"
+
+
+def test_h5_stale_network_failure_does_not_overwrite_fresh_list(start_pult) -> None:
+    """(h5) Первый «Обновить список» удержан (`hold_fetch`), второй получает свежий список (только c.png);
+    затем удержанный первый запрос ОТКЛОНЯЕТСЯ сетью (сервер рвёт соединение, `fetch` -> reject, ответа нет
+    вообще — ветка `.catch` страницы): текст «список спрайтов не получен» не появляется, список остаётся вторым.
+
+    Как достигнуто без правки харнесса: обработчик `preset.sprites` двойника на втором вызове (первый «Обновить»)
+    бросает исключение — `http.server` закрывает сокет без ответа, `real`-fetch харнесса отклоняется, а страница
+    узнаёт об этом лишь по `release_fetch` (после свежего ответа второго запроса).
+
+    Что ломает: убрать `if (seq !== presetSpritesSeq) return;` из `.catch` `presetLoadSprites` — запоздавший обрыв
+    старого запроса пишет отказ поверх свежего успеха (акцептанс (б) это не ловит: там отказ приходит ТЕЛОМ ответа,
+    через `.then`, а не отклонением промиса)."""
+    fresh = {**_SPRITES_OK, "files": [{"path": "c.png", "sprite_source": _C}]}
+    stand = _stand(start_pult, _INITIAL, sprites_replies=[_SPRITES_OK, fresh])
+    calls = {"n": 0}
+
+    def sprites(args: dict) -> dict:
+        calls["n"] += 1
+        if calls["n"] == 2:  # первый «Обновить»: соединение рвётся без ответа
+            raise RuntimeError("обрыв: сервер не ответил")
+        return json.loads(json.dumps(fresh if calls["n"] > 2 else _SPRITES_OK))
+
+    stand.layers.handlers["preset.sprites"] = sprites
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            {"op": "hold_fetch", "path": "/api/preset/sprites"},
+            _btn("btnSpritesRefresh"),
+            {"op": "sleep", "ms": 200},  # первый запрос дошёл до сервера (и оборвался)
+            _btn("btnSpritesRefresh"),
+            {"op": "settle"},
+            _snap("fresh_only"),
+            {"op": "release_fetch", "path": "/api/preset/sprites", "index": 0},
+            {"op": "sleep", "ms": 200},
+            _snap("after"),
+        ],
+    )
+    _assert_ran(out)
+    assert calls["n"] == 3, f"загрузка + два «Обновить список»: {calls['n']}"
+    for key in ("fresh_only", "after"):
+        snap = out["snaps"][key]
+        assert sorted(o["value"] for o in snap["sel"]["options"]) == sorted([_C, _CLASS]), (
+            f"[{key}] список должен быть вторым (c.png + class://): {snap['sel']['options']!r}"
+        )
+        assert "список спрайтов не получен" not in snap["spritesError"], (
+            f"[{key}] запоздавший обрыв показан поверх свежего списка: {snap['spritesError']!r}"
+        )
