@@ -243,6 +243,9 @@ class SourceProducer:
 
         # frame-trace: отметить отправителя/время → receiver посчитает transport.
         frame_trace.stamp_send(item, self._node)
+        # Task 4.5d: штамп отправки для transport_ms — всегда (не под FW_FRAME_TRACE).
+        # Читает и вынимает DataReceiver получателя.
+        item["_t_sent_ns"] = time.perf_counter_ns()
 
         for target in targets:
             msg = {

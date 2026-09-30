@@ -54,7 +54,7 @@ _TIMEOUT_S = 30.0
 
 #: Литерал, а не ``gated_metrics()``: ожидание, вычисленное проверяемым кодом,
 #: согласилось бы с любым ответом, включая пустой.
-# Task 4.5a (queue_wait_ms, pacer_late) и 4.5b (cpu, plugin_ms) — к прежним пяти.
+# Task 4.5a (queue_wait_ms, pacer_late), 4.5b (cpu, plugin_ms) и 4.5d (transport_ms) — к прежним пяти.
 _FRAMEWORK_METRICS = (
     "cpu",
     "cycle_duration_ms",
@@ -65,6 +65,7 @@ _FRAMEWORK_METRICS = (
     "plugin_ms",
     "queue_wait_ms",
     "shm",
+    "transport_ms",
 )
 
 _TPC = "multiprocess_framework.modules.process_module.configs.telemetry_publish_config"

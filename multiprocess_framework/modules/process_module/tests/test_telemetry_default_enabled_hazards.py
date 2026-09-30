@@ -248,7 +248,7 @@ class TestReplaceModeDropsDefaultEnabledSilently:
         выход:  [boot]   default_enabled=False, due_metrics=['fps']            (1 имя)
                 [после]  default_enabled=True,  due_metrics=['cpu', 'cycle_duration_ms',
                          'effective_hz', 'fps', 'latency_ms', 'pacer_late',
-                         'plugin_ms', 'queue_wait_ms', 'shm']                   (9 имён)
+                         'plugin_ms', 'queue_wait_ms', 'shm', 'transport_ms']    (10 имён)
 
     Семантика ``replace`` сама по себе КОРРЕКТНА и документирована (Task 5.10.f —
     ``replace`` заменяет секцию целиком, находка ревью там же) — она не меняется этим
@@ -294,7 +294,8 @@ class TestReplaceModeDropsDefaultEnabledSilently:
             "plugin_ms",
             "queue_wait_ms",
             "shm",
-        }, "каталог разрешённых расширился со ВСЕХ девяти фреймворковых имён — не только fps"
+            "transport_ms",
+        }, "каталог разрешённых расширился со ВСЕХ десяти фреймворковых имён — не только fps"
 
     def test_merge_mode_preserves_the_flip(self) -> None:
         """Контроль: тот же сценарий с явным ``telemetry_mode: merge`` держит флип.
