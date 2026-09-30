@@ -67,8 +67,8 @@
 | GATE-0 | ревью ред. 2 и YAML | владелец | T0.1–T0.2 | — |
 | T0.3 | перенос отчёта пробы в YAML и документы | ведущий + tech-writer | GATE-1 | S |
 | T1.1 | кодоген: Python, `RobotParamsV2`, Lua-блок | developer | GATE-0 | M |
-| T1.2 | схемные инварианты YAML | tester | T1.1 | S |
-| T1.3 | сборщик прошивки `build_fw.py` | developer | T1.1 | S |
+| ✓ T1.2 | схемные инварианты YAML (bc8cacc1, ревью 7904f6d6) | tester | T1.1 | S |
+| ✓ T1.3 | сборщик прошивки `build_fw.py` (99a1dc8d…c8494eef) | developer | T1.1 | S |
 | T2.0 | геометрия SCARA `programs/geometry.py` (зона, отрезки, сектор, СК) — один модуль для sim, compile и проверок | developer | T1.1 | S |
 | T2.1 | sim v2: mailbox, параметры, плоскость безопасности | developer | T1.1 | M |
 | T2.2 | sim v2: движение, зона SCARA, стоп, jog | developer | T2.1, T2.0 | M |
