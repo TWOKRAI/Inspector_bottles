@@ -58,6 +58,7 @@ _(empty)_
 - [Порядок работ: plans/queue/ORDER.md, робот → слои сима](project_work_order_2026_09_22_line_sim_then_pult.md) — приоритет владельца 09-26
 - [GUI: рецепт и auth — бэкенд, Пульт — сервис](project_gui_services_composition_2026_09_23.md) — сборка из сервисов, 09-23
 - [Железо владельца и роли машин](project_hardware_roles_2026_09_23.md) — RTX 3050 4 ГБ = симулятор, Orin NX 16 = линия
+- [ГЛАВНАЯ ЦЕЛЬ: выявлять требования к мощности](project_capacity_planning_goal.md) — не успевает → чей этап и во что упёрлись: код → язык → железо → несколько ПК, до бюджета
 - [GUI-конструктор: слои и эталоны](project_gui_constructor_layers_2026_09_26.md) — fw=конструктор, прототип тонкий, minimal_gui, 09-26
 
 ### Reference
