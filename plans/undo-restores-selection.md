@@ -1,6 +1,6 @@
 # undo-restores-selection — «Отмена» и «Повтор» возвращают выбор операции
 
-- **Дата:** 2026-09-30 · **Ветка:** `feat/undo-restores-selection` (от `main` 66cdfd56) · **Статус:** ACTIVE
+- **Дата:** 2026-09-30 · **Ветка:** `feat/undo-restores-selection` (от `main` 66cdfd56) · **Статус:** DONE 2026-09-30
 - **Решение владельца 2026-09-30:** «сделай и там и там как лучше и правильнее». Лид выбрал поведение
   Photoshop / Figma / Illustrator / Blender: выбор — часть записи истории. Веб-редактор слоёв (`pult_web`, R-5)
   уже так работает, приводим к нему Qt.
@@ -49,17 +49,17 @@
 - memo хранятся только внутри записей: обрезка по `max_history` и `clear()` их отпускают.
 
 **Acceptance criteria** (Qt, `qtbot`, через те же пути, что кнопки и удаление в вкладке):
-- [ ] A1 выбран узел A → добавить процесс B → undo → выбран ровно A, B нет.
-- [ ] A2 ничего не выбрано → добавить B → undo → ничего не выбрано.
-- [ ] A3 выбран B → удалить B → undo → B есть и выбран ровно B.
-- [ ] A4 после A3 → redo → B нет, выбор равен выбору сразу после исходного удаления.
-- [ ] A5 выбран B → `SetPluginConfig`/`MovePlugin` на B → undo → выбран B.
-- [ ] A6 запись, сделанная `dispatch` в обход вкладки (без memo) → undo → уцелевшие из текущего выбора, без исключений.
-- [ ] A7 две правки одного узла с одним `coalesce_key` → один undo → выбор до первой правки.
-- [ ] A8 `SnapshotHistory(max_history=N)`, N+5 записей с memo → memo вытесненных записей собраны сборщиком мусора
+- [x] A1 выбран узел A → добавить процесс B → undo → выбран ровно A, B нет.
+- [x] A2 ничего не выбрано → добавить B → undo → ничего не выбрано.
+- [x] A3 выбран B → удалить B → undo → B есть и выбран ровно B.
+- [x] A4 после A3 → redo → B нет, выбор равен выбору сразу после исходного удаления.
+- [x] A5 выбран B → `SetPluginConfig`/`MovePlugin` на B → undo → выбран B.
+- [x] A6 запись, сделанная `dispatch` в обход вкладки (без memo) → undo → уцелевшие из текущего выбора, без исключений.
+- [x] A7 две правки одного узла с одним `coalesce_key` → один undo → выбор до первой правки.
+- [x] A8 `SnapshotHistory(max_history=N)`, N+5 записей с memo → memo вытесненных записей собраны сборщиком мусора
       (`weakref`), undo до дна не падает; то же после `clear()`.
-- [ ] A9 `SnapshotHistory` без memo ведёт себя побайтно как раньше (существующие тесты `actions_module` зелёные).
-- [ ] Радиус зелёный: `multiprocess_framework/modules/actions_module/tests`, `multiprocess_prototype/adapters/dispatch`,
+- [x] A9 `SnapshotHistory` без memo ведёт себя побайтно как раньше (существующие тесты `actions_module` зелёные).
+- [x] Радиус зелёный: `multiprocess_framework/modules/actions_module/tests`, `multiprocess_prototype/adapters/dispatch`,
       `multiprocess_prototype/frontend/widgets/tabs/pipeline/tests`, `multiprocess_prototype/frontend/tests`.
 
 **Break-injection (лид, предсказания до прогона):**
@@ -72,3 +72,16 @@
 **Out of scope:** веб-редактор слоёв; другие вкладки (settings/plugins/services — у них нет выбора объектов на холсте);
 слияние движков (constructor-maturity P1); «Повтор» в вебе.
 **Риски:** `_restore` публикует `TopologyReplaced` синхронно, change-callback идёт после — порядок проверять тестом, не чтением.
+
+## Итог (2026-09-30)
+
+Слепой тестер (Sonnet) `fde79ab2`: 20 красных / 9 зелёных → developer (Sonnet) `09ea9a1c` → инъекции лида → ревью Opus
+APPROVE_WITH_NITS → итерация 1 `abc0c875`, `548d4f6a`, `56a7ed5b` → повторное ревью APPROVE_WITH_NITS (оба пункта закрыты в `56a7ed5b`).
+Радиус 1570 passed / 8 skipped. Инъекции: 13 из 13 убиты (I1–I10, N2, N4, N4b), наборы красных совпали с предсказаниями,
+кроме I4/I6 — ждал красный A4, он зелёный: вкладка не выбирает новые узлы, поэтому «выбор после» сегодня равен
+«выбору до минус удалённые», и на уровне Qt подмену не отличить; ловят framework-тест redo, A7 redo и hazard-тест захвата.
+Ревью: [`docs/reviews/2026-09-30_undo-restores-selection-task-1.1-review.md`](../docs/reviews/2026-09-30_undo-restores-selection-task-1.1-review.md).
+
+**Открыто:** смешанное удаление (процесс + бокс) = 2 записи истории, одна «Отмена» возвращает выбор последней —
+лучше, чем было (пусто), но не весь; одна запись на `remove_selected` — отдельная задача. Живой Qt-стенд не
+запускался — доказательство pytest на настоящих `PipelineTab`/`GraphScene`/инспекторе (зонд ревьюера).
