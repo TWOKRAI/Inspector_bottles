@@ -66,6 +66,9 @@ def check_write_within_chunk(doc: dict) -> list[str]:
     Записи клиента: mailbox CMD (одним FC16, флаг — отдельно) — его размах от CMD_BASE до конца
     последнего регистра в [CMD_BASE, RES_BASE); любой другой rw-блок кроме sc_buf (тот пишется
     кусками по WRITE_CHUNK по определению) обязан влезать в один кусок.
+
+    Размах считается от CMD_BASE (слово флага включено), а FC16 пишет с CMD_BASE + 1 — проверка строже
+    реальной на одно слово, это осознанный запас.
     """
     c = doc["constants"]
     chunk = c["WRITE_CHUNK"]
@@ -81,7 +84,10 @@ def check_write_within_chunk(doc: dict) -> list[str]:
 
 
 def check_sc_chunk_is_whole_records(doc: dict) -> list[str]:
-    """Кусок записи буфера сценария кратен SC_STRIDE — запись не рвётся посреди слота."""
+    """Кусок записи буфера сценария кратен SC_STRIDE — запись не рвётся посреди слота.
+
+    Удобство ПК (кусок не рвёт слот), не правило протокола — protocol-spec этого не требует.
+    """
     c = doc["constants"]
     if c["WRITE_CHUNK"] % c["SC_STRIDE"] != 0:
         return [f"WRITE_CHUNK={c['WRITE_CHUNK']} не кратен SC_STRIDE={c['SC_STRIDE']}"]
@@ -89,7 +95,12 @@ def check_sc_chunk_is_whole_records(doc: dict) -> list[str]:
 
 
 def check_tlm_read_within_max(doc: dict) -> list[str]:
-    """Вся TLM-плоскость читается одним FC3: размах от TLM_BASE до конца последнего tlm_* <= READ_MAX."""
+    """Вся TLM-плоскость читается одним FC3: размах от TLM_BASE до конца последнего tlm_* <= READ_MAX.
+
+    Выбор по префиксу `tlm_`, а не по адресу: зона TLM 0x1040..0x107F — 64 слова < READ_MAX=125, адресный
+    выбор с верхней границей делает проверку вакуумной (замечание m4 ревью T1.2 отклонено по этой причине);
+    проверка ловит `tlm_`-регистр, вынесенный за зону.
+    """
     c = doc["constants"]
     tlm = [r for n, r in doc["registers"].items() if n.startswith("tlm_")]
     span = max(r["address"] + _width(r) for r in tlm) - c["TLM_BASE"]
@@ -249,10 +260,13 @@ def test_no_opcode_exceeds_twelve_args_literal(doc: dict) -> None:
 
 
 def test_snapshot_is_well_formed(snapshot: dict[int, str]) -> None:
-    """Снимок непуст (иначе проверка стабильности вакуумна), без дублей id и имён, отсортирован по id."""
+    """Снимок непуст (иначе проверка стабильности вакуумна), без дублей id и имён, отсортирован по id.
+
+    Новый параметр -> добавить строку `id name` в param_ids.snapshot.
+    """
     lines = [ln for ln in _SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()]
     ids = [int(ln.split(None, 1)[0]) for ln in lines]
-    assert len(ids) == 58
+    assert len(ids) >= 58
     assert ids == sorted(set(ids))
     assert len(set(snapshot.values())) == len(snapshot)
 
@@ -276,7 +290,7 @@ def _overlap_via_existing_test(doc: dict) -> list[str]:
     return []
 
 
-def _vfd_via_existing_test(doc: dict) -> list[str]:
+def _dw_even_via_existing_test(doc: dict) -> list[str]:
     try:
         _existing.test_structural_invariant_dw_on_even_address(doc)
     except AssertionError as exc:
@@ -368,7 +382,7 @@ def _m_signed_reg_with_range(d: dict) -> None:
 _CORRUPTIONS: list[tuple[str, Callable[[dict], list[str]], Callable[[dict], None]]] = [
     ("reg_into_vfd_block", _overlap_via_existing_test, _m_shift_into_vfd),
     ("reg_into_other_block", _overlap_via_existing_test, _m_shift_into_cmd),
-    ("dw_on_odd_address", _vfd_via_existing_test, _m_odd_dw),
+    ("dw_on_odd_address", _dw_even_via_existing_test, _m_odd_dw),
     ("write_cmd_args_40", check_write_within_chunk, _m_cmd_args_40),
     ("write_chunk_not_multiple_of_stride", check_sc_chunk_is_whole_records, _m_write_chunk_not_multiple),
     ("tlm_far_register", check_tlm_read_within_max, _m_tlm_far),
