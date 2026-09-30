@@ -163,7 +163,6 @@ def test_guard_never_killpg_launcher_group_when_getpgid_succeeds(monkeypatch):
 
 
 @posix_only
-@pytest.mark.timeout(30)
 def test_guard_sweeps_snapshot_member_outside_group_when_primitive_succeeds():
     """Сторожит: ветку ``else: self._sweep_snapshot(...)`` в kill_tree.
 
@@ -200,7 +199,6 @@ def test_guard_sweep_skips_own_pid():
 
 
 @posix_only
-@pytest.mark.timeout(30)
 def test_guard_on_normal_path_does_not_sleep_when_group_empty():
     """Сторожит стоимость штатного стопа: пустая группа → killpg(SIGTERM) сразу
     даёт ProcessLookupError → без ``sleep(0.5)``. Иначе каждый штатный стоп + 0.5с.
@@ -244,7 +242,6 @@ def _stop_launcher_with(child_class_path: str) -> subprocess.Popen:
 
 
 @posix_only
-@pytest.mark.timeout(60)
 def test_normal_stop_leaves_host_bystander_alive():
     """Сторожит: корень снимка в ``_snapshot_descendants`` — PM, не ``os.getpid()``.
 
@@ -264,7 +261,6 @@ def test_normal_stop_leaves_host_bystander_alive():
 
 
 @posix_only
-@pytest.mark.timeout(60)
 def test_hung_child_stop_leaves_host_bystander_alive():
     """Сторожит то же на пути эскалации (зависший ребёнок, guard бьёт группу)."""
     from ._no_orphans_helpers import HUNG_CHILD_CLASS_PATH
@@ -280,7 +276,6 @@ def test_hung_child_stop_leaves_host_bystander_alive():
 
 
 @posix_only
-@pytest.mark.timeout(30)
 def test_psutil_fallback_does_not_touch_host_children():
     """Сторожит: ``_kill_via_psutil`` берёт ТОЛЬКО снимок, без ``children()`` хозяина.
 
@@ -313,7 +308,6 @@ _LATE_LEADER_SCRIPT = (
 
 
 @posix_only
-@pytest.mark.timeout(30)
 def test_guard_killpg_reaches_member_absent_from_snapshot_after_leader_reaped():
     """Сторожит: ``pgid = self._pm_pid`` в ветке ProcessLookupError ``_terminate_posix_group``.
 

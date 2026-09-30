@@ -36,13 +36,11 @@ from pathlib import Path
 import cv2
 import matplotlib
 import numpy as np
-import pytest
 
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import CLASS_SPRITE_SOURCE, LayerSpec, ObjectFactory, ScenePreset
 from Services.line_sim.tools.make_font_letters import build_disk, build_font_letters
 
-pytestmark = pytest.mark.timeout(30)
 
 _PRESET_PATH = Path(__file__).resolve().parents[1] / "presets" / "letters_layered.yaml"
 

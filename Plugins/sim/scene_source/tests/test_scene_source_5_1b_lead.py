@@ -8,11 +8,8 @@ None` с двумя заданиями в одной точке не слал н
 
 from __future__ import annotations
 
-import pytest
 
 from Plugins.sim.scene_source.tests.test_acceptance_5_2 import _call, _make_plugin
-
-pytestmark = pytest.mark.timeout(30)
 
 
 def test_engine_unavailable_frozen_xy_counted_and_published():

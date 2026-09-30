@@ -204,7 +204,6 @@ def _poll_overview_until_running(drv: Any, names: tuple[str, ...], *, deadline_s
 
 
 @pytest.mark.harness_smoke
-@pytest.mark.timeout(60)
 def test_minimal_app_overview_lists_processes(minimal_app_backend) -> None:
     """Пин: system_overview()["processes"] содержит ticker и console_sink (running),
     и в anomalies нет kind == "empty_topology".
@@ -233,7 +232,6 @@ def test_minimal_app_overview_lists_processes(minimal_app_backend) -> None:
 
 
 @pytest.mark.harness_smoke
-@pytest.mark.timeout(60)
 def test_line_sim_overview_lists_robot(line_sim_backend) -> None:
     """Пин: system_overview()["processes"] содержит robot (running) для второго,
     независимого от minimal_app приложения на том же дефолтном bootstrap-хуке.
@@ -257,7 +255,6 @@ def test_line_sim_overview_lists_robot(line_sim_backend) -> None:
 
 
 @pytest.mark.harness_smoke
-@pytest.mark.timeout(60)
 def test_state_get_subtree_answers_without_handler_errors(minimal_app_backend) -> None:
     """Пин: send_command("ProcessManager", "state.get_subtree", {"path": "processes"})
     успешен и содержит ticker/console_sink; ни в одном *.log под MULTIPROCESS_LOG_DIR

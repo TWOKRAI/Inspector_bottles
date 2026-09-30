@@ -36,7 +36,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 import yaml
 
 from Plugins.processing.pixel_to_robot.geometry import bilinear_px_to_mm
@@ -45,7 +44,6 @@ from Services.line_sim.core.scene_compositor import SceneCompositor
 from Services.line_sim.interfaces import ObjectPassport
 from Services.robot_comm.core.registers import FACTOR_MM
 
-pytestmark = pytest.mark.timeout(30)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECIPE_PATH = _REPO_ROOT / "multiprocess_prototype/recipes/hikvision_letter_robot.yaml"

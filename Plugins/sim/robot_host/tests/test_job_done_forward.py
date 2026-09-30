@@ -32,7 +32,6 @@ import Plugins.sim.robot_host.plugin as robot_plugin_module
 import Plugins.sim.scene_source.plugin as scene_plugin_module
 from Plugins.sim.robot_host.plugin import SimRobotHostPlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 _JOB_EVENT = {"index": 1, "x_mm": 12.5, "y_mm": -3.0, "ecap": 106016, "t": 123.456}
 

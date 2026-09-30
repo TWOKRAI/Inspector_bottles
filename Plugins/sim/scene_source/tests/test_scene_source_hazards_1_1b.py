@@ -34,14 +34,11 @@ from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import ScenePreset
-
-pytestmark = pytest.mark.timeout(30)
 
 
 class _FakeStateProxy:

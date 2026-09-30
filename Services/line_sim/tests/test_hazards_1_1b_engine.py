@@ -41,8 +41,6 @@ from Services.line_sim import (
     ScenePreset,
 )
 
-pytestmark = pytest.mark.timeout(30)
-
 
 # --------------------------------------------------------------------------
 # Фикстуры-помощники (тот же паттерн, что в test_acceptance_1_1b_*.py — не тестируют

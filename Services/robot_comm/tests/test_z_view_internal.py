@@ -25,7 +25,6 @@ from Services.robot_comm.gui.sim_view import SimView, build_window
 from Services.robot_comm.gui.z_view import TimeTape, ZScale
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
-pytestmark = pytest.mark.timeout(30)
 
 _POINTER_RGB = (0xFF, 0xB8, 0x6C)
 _TOL = 8

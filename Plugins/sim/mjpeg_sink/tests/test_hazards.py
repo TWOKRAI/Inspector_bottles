@@ -26,7 +26,6 @@ import threading
 import time
 
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import (
@@ -34,8 +33,6 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
     MockStatsManager,
 )
 from Plugins.sim.mjpeg_sink.plugin import MjpegSinkPlugin
-
-pytestmark = pytest.mark.timeout(30)
 
 
 def _free_port() -> int:

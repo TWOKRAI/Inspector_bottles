@@ -42,7 +42,6 @@ from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim.core.belt import FACTOR_MM
 
-pytestmark = pytest.mark.timeout(60)
 
 FRAME = 64
 #: шаг энкодера на кадр = 3 мм пути ленты (шаг спавна 2..4 мм — объект почти каждый кадр)

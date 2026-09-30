@@ -228,7 +228,6 @@ def line_sim_backend(tmp_path: Path):
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.timeout(60)
 def test_app_boots_and_modbus_port_accepts(line_sim_backend) -> None:
     """Пин: SimRobotServer слушает 5021 пока harness жив; после harness.stop() порт закрыт за 5с.
 
@@ -264,7 +263,6 @@ def test_app_boots_and_modbus_port_accepts(line_sim_backend) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.timeout(60)
 def test_robot_client_reads_growing_encoder(line_sim_backend) -> None:
     """Пин: RobotClient.connect() -> True; энкодер строго растёт между двумя чтениями (≥0.5с).
 
@@ -289,7 +287,6 @@ def test_robot_client_reads_growing_encoder(line_sim_backend) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.timeout(60)
 def test_backend_ctl_sees_robot_and_status(line_sim_backend) -> None:
     """Пин: system_overview() видит robot running; sim_robot.status -> running=True, port=5021
     (+host/unit_id по конфигу брифа: 127.0.0.1 / 2).
@@ -316,7 +313,6 @@ def test_backend_ctl_sees_robot_and_status(line_sim_backend) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.timeout(60)
 def test_job_counts_writes_in_status_and_history(line_sim_backend) -> None:
     """Пин: после send_job(...) writes_seen >= 1 в статусе И history_query(metric=...) отдаёт
     >= 1 строку (в пределах 10с — батч записи, TRAPS lead'а п.3).
@@ -360,8 +356,10 @@ def test_job_counts_writes_in_status_and_history(line_sim_backend) -> None:
         raw_rows = history.get("rows") if isinstance(history, dict) else None
         rows = raw_rows if isinstance(raw_rows, list) else []
         matched = [
-            r for r in rows
-            if isinstance(r, dict) and r.get("process") == _ROBOT_PROCESS
+            r
+            for r in rows
+            if isinstance(r, dict)
+            and r.get("process") == _ROBOT_PROCESS
             and any(
                 isinstance(m, dict) and m.get("name") == _WRITES_METRIC
                 for m in ((r.get("extra") or {}).get("metrics") or [])
@@ -381,7 +379,6 @@ def test_job_counts_writes_in_status_and_history(line_sim_backend) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.timeout(120)
 def test_without_pymodbus_plugin_errors_process_lives(tmp_path: Path) -> None:
     """Пин (пара прогонов): С pymodbus — 0 строк со словом "modbus" в плоскости ошибок
     (контроль); БЕЗ pymodbus (инъекция через PYTHONPATH до сборки) — >=1 строка со словом

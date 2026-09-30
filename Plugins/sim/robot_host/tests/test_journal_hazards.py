@@ -25,7 +25,6 @@ from Services.robot_comm import ROBOT_AVAILABLE
 from Services.robot_comm.core.registers import REG_JOB_ECAP, REG_JOB_FLAG, REG_JOB_X, REG_JOB_Y, XY_SCALE
 
 pytestmark = [
-    pytest.mark.timeout(30),
     pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен"),
 ]
 

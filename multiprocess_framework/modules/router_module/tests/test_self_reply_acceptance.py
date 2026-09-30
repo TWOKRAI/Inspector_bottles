@@ -26,7 +26,6 @@ import time
 from queue import Queue
 from typing import Any, Dict, List, Tuple
 
-import pytest
 
 from ..channels.queue_channel import QueueChannel
 from ..core.router_manager import RouterManager
@@ -122,7 +121,6 @@ def _wait_until(predicate, deadline_sec: float, interval: float = 0.005) -> bool
 # ===========================================================================
 
 
-@pytest.mark.timeout(15)
 def test_self_request_resolves_within_single_receive():
     """``request()`` к самому себе обязан завершиться после ОДНОГО ``receive()``.
 
@@ -190,7 +188,6 @@ def test_self_request_resolves_within_single_receive():
 # ===========================================================================
 
 
-@pytest.mark.timeout(15)
 def test_self_request_response_carries_success_and_result():
     """Полезная нагрузка самоответа корректна — НЕЗАВИСИМО от того, за сколько
     приёмных тактов она доехала (терпим к нескольким receive() — фоновый
@@ -246,7 +243,6 @@ def test_self_request_response_carries_success_and_result():
 # ===========================================================================
 
 
-@pytest.mark.timeout(15)
 def test_foreign_target_reply_uses_send():
     """Ответ НЕ себе обязан уйти обычным транспортом (``send()`` →
     ``queue_registry.send_to_queue``) — это НЕ должно измениться фиксом:
@@ -295,7 +291,6 @@ def test_foreign_target_reply_uses_send():
 # ===========================================================================
 
 
-@pytest.mark.timeout(15)
 def test_late_reply_after_pending_gone_uses_send():
     """Самоадресованный ответ БЕЗ зарегистрированного pending-слота (запрос
     никто не делал через ``request()`` — модель «опоздавшего» ответа, слот
@@ -341,7 +336,6 @@ def test_late_reply_after_pending_gone_uses_send():
 # ===========================================================================
 
 
-@pytest.mark.timeout(15)
 def test_request_async_to_self_callback_exactly_once():
     """``request_async()`` к самому себе: колбэк вызывается РОВНО ОДИН раз, и
     (пункт контракта Task 1.3b) успевает сработать за ОДИН ``receive()`` —

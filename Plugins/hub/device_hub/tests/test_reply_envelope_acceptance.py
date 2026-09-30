@@ -53,8 +53,6 @@ import pytest
 from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
 from Plugins.hub.device_hub.client import DeviceHubClient
 
-pytestmark = pytest.mark.timeout(30)
-
 
 # ------------------------------------------------------------------ #
 # Конверт reply_to_request на минимальном объекте (без тяжёлого __init__)

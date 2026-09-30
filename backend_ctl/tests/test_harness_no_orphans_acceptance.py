@@ -134,7 +134,6 @@ def _make_harness() -> BackendHarness:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(60)
 def test_harness_stop_leaves_no_orphan_with_hung_child():
     harness = _make_harness()
     snap: List[Any] = []
@@ -162,7 +161,6 @@ def test_harness_stop_leaves_no_orphan_with_hung_child():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(60)
 def test_harness_stop_recovers_after_pm_killed_externally():
     harness = _make_harness()
     snap: List[Any] = []

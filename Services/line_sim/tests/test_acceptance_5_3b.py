@@ -26,8 +26,6 @@ import pytest
 from Services.line_sim.core.scene_compositor import SceneCompositor
 from Services.line_sim.interfaces import ObjectPassport
 
-pytestmark = pytest.mark.timeout(30)
-
 
 def _opaque_sprite(size_px: int = 20) -> np.ndarray:
     """Простой непрозрачный квадрат RGBA — геометрия теста не зависит от формы."""

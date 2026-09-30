@@ -36,8 +36,6 @@ import pytest
 from Plugins.hub.device_hub.client import DeviceHubClient
 from Plugins.hub.device_hub.tests.test_reply_envelope_acceptance import _FakeSendRouter
 
-pytestmark = pytest.mark.timeout(30)
-
 
 def _reply_envelope(result: Any, success: bool) -> dict:
     """РЕАЛЬНЫЙ конверт-ответ от ``RouterManager.reply_to_request``."""

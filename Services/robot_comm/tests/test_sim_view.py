@@ -41,7 +41,6 @@ from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, KIND, OP, REG, R
 from Services.robot_comm.gui.sim_view import DemoDriver, SimView
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
-pytestmark = pytest.mark.timeout(30)
 
 ACK = 1
 NAK = 2

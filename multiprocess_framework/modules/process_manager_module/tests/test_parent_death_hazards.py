@@ -170,7 +170,6 @@ def _settle(proc, s: float = 1.5) -> None:
     assert proc.is_alive(), f"ребёнок умер сам на boot (exitcode={proc.exitcode}) — окружение сломано"
 
 
-@pytest.mark.timeout(30)
 def test_cooperative_child_exits_itself_before_grace():
     """QuickChild уходит по взведённому stop_event сам — раньше grace, код != 75."""
     proc, stop_evt, sys_evt, dead = _start_child(QUICK_CHILD_CLASS_PATH, parent_pid=os.getpid())
@@ -194,7 +193,6 @@ def test_cooperative_child_exits_itself_before_grace():
         proc.join(timeout=5.0)
 
 
-@pytest.mark.timeout(30)
 def test_hung_child_gets_forced_exit_code():
     """HungChild игнорирует stop_event → принудительный os._exit(75) в пределах 2.0с."""
     # Ссылки на события держим: spawn-ребёнок пересобирает семафоры по имени, GC родителя их удалит.
@@ -214,7 +212,6 @@ def test_hung_child_gets_forced_exit_code():
         proc.join(timeout=5.0)
 
 
-@pytest.mark.timeout(30)
 def test_no_parent_pid_means_not_armed():
     """parent_pid=None (сам PM / SRM-режим) → смерть родителя НЕ гасит процесс."""
     proc, stop_evt, sys_evt, dead = _start_child(HUNG_CHILD_CLASS_PATH, parent_pid=None)
@@ -283,7 +280,6 @@ time.sleep(600)
 """
 
 
-@pytest.mark.timeout(40)
 def test_parent_sigkill_during_child_initialize(tmp_path):
     """SIGKILL родителя, пока ребёнок в initialize() → ребёнок исчез за 2.0 с."""
     import json

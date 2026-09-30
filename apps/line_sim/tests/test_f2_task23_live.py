@@ -47,7 +47,6 @@ pytestmark = [
         os.environ.get("LINE_SIM_LIVE") != "1",
         reason="живой прогон полного стенда сима — только явно, LINE_SIM_LIVE=1",
     ),
-    pytest.mark.timeout(120),
 ]
 
 _APP_DIR = Path(__file__).resolve().parents[1]

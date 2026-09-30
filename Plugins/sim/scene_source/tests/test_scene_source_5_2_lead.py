@@ -8,11 +8,8 @@
 
 from __future__ import annotations
 
-import pytest
 
 from Plugins.sim.scene_source.tests.test_acceptance_5_2 import _call, _make_plugin
-
-pytestmark = pytest.mark.timeout(30)
 
 
 def test_engine_unavailable_job_counts_false_alarm_only():

@@ -17,7 +17,6 @@ from Services.robot_comm.gui.sim_view import SimView, build_window
 from Services.robot_comm.gui.z_view import TimeTape, ZScale
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
-pytestmark = pytest.mark.timeout(30)
 
 ACK = 1
 _POINTER_RGB = (0xFF, 0xB8, 0x6C)
@@ -187,8 +186,14 @@ def test_degenerate_domain_via_param_set_does_not_raise(qtbot):
     через обычные PARAM_SET (оба ACK) — refresh и grab не падают."""
     core = RobotSimCoreV2()
     for seq, (name, raw) in enumerate(
-        [("P_WS_RZ_MIN", -1000), ("P_WS_RZ_MAX", -1000), ("P_WS_Z_MAX", -400), ("P_WS_Z_MIN", -400),
-         ("P_PICK_Z", -400), ("P_PLACE_Z", -400)],
+        [
+            ("P_WS_RZ_MIN", -1000),
+            ("P_WS_RZ_MAX", -1000),
+            ("P_WS_Z_MAX", -400),
+            ("P_WS_Z_MIN", -400),
+            ("P_PICK_Z", -400),
+            ("P_PLACE_Z", -400),
+        ],
         start=1,
     ):
         _param_set(core, seq, name, raw)

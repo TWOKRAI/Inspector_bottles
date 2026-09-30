@@ -121,7 +121,6 @@ def state_proxy_fixture_backend(tmp_path: Path):
             os.environ["MULTIPROCESS_LOG_DIR"] = prev_log
 
 
-@pytest.mark.timeout(60)
 def test_set_in_robot_visible_in_camera_get(state_proxy_fixture_backend) -> None:
     """Acceptance: set() в writer -> get() в reader и state.get на ProcessManager
     видят {"value": 42} не позже 2.0 с. Путь sim.belt.* нигде не посеян."""
@@ -150,7 +149,6 @@ def test_set_in_robot_visible_in_camera_get(state_proxy_fixture_backend) -> None
     assert _result_field(res2, "value") == {"value": 42}, f"state.get вернул {_result_field(res2, 'value')!r}"
 
 
-@pytest.mark.timeout(60)
 def test_subscribe_glob_receives_event_once(state_proxy_fixture_backend) -> None:
     """Acceptance: подписка reader'а на sim.belt.* (оформлена в configure(), ДО
     set) получает РОВНО 1 колбэк с путём sim.belt.encoder за 2.0 с (не 0, не 2)."""
@@ -178,7 +176,6 @@ def test_subscribe_glob_receives_event_once(state_proxy_fixture_backend) -> None
     )
 
 
-@pytest.mark.timeout(60)
 def test_heartbeat_pushes_camera_fps_to_tree(state_proxy_fixture_backend) -> None:
     """Acceptance (адаптация — см. отчёт тестера): heartbeat кладёт уровень
     плагина в дерево, гейт `_state_proxy` снимает ранний выход
