@@ -39,3 +39,44 @@
 - [ ] Стоимость: CPU стенда 480p 25 fps с новыми полями — не больше +1 % к базе (три прогона).
 - [ ] Плагин со `sleep(0.030)` при потоке 50 fps: `queue_wait_ms` растёт, а `plugin_ms` остаётся в [29, 33] —
       задержка приписана очереди, а не плагину.
+
+#### Решения лида перед запуском (2026-09-30, инвентарь Explore по `8c…`/`e285fdf5`)
+
+Бриф исполнителя — ≤ 6 файлов и ≤ 10 RED, поэтому 4.5 режется на три механизма; у каждого свой tester до кода.
+Части независимы по файлам, кроме `telemetry.py` (a, c — разные функции) и `builtin_commands.py` (b, c — разные
+хэндлеры); сливает лид.
+
+**Отступления от дизайна выше:**
+- **Частота тактов — из реестра `~MHz`, без калибровки.** Замер лида: i5-12500H, `~MHz` = 3110; занятый поток даёт
+  0.998 / 0.995 / 0.988 ядра на окнах 0.03 / 0.3 / 2 с. Калибровка busy-loop в каждом ребёнке при старте стенда
+  как раз и есть «не в покое» (−12 % в 4.6). Калибровка — только запасной путь, если ключа нет.
+- **Пейсер:** `achieved_hz` и `target_hz` уже публикуются (`effective_hz`, `target_interval_ms` из
+  `CycleMetricsRecorder`). Нового — только счётчик `late`.
+- **`queue_wait_ms` и `pacer_late` — поля воркера** (`workers.<w>.*`) через штатный `get_cycle_metrics()` →
+  `WorkerManager.get_worker_status` → `build_worker_telemetry`, а не `state.*`: у heartbeat нет доступа к
+  executor'у, а канал воркера уже есть. `plugin_ms` — в `state.plugin_ms.<плагин>`: `PluginRunner` один на процесс
+  (общий у producer и executor, `generic_process.py:240`), в поле воркера он задвоился бы.
+- **Кольца:** список `rings: [{key, name, depth}]` (ключ `key` не уникален между middleware'ами процесса).
+
+**4.5a — поля воркера: ожидание в очереди, опоздания пейсера.**
+`pacing.py` (`FramePacer.late` +1, когда `nxt < now`), `source_producer.py` / `idle_worker.py` (`pacer_late` в
+`get_cycle_metrics`), `data_receiver.py` (три `put` кладут `_StampedBatch(list)` с `enq_ts = perf_counter()`),
+`pipeline_executor.py` (после `get` EMA α = 0.1 `queue_wait_ms`, чужой батч без метки — не считается),
+`heartbeat/telemetry.py` (`declare_metric` `queue_wait_ms`, `pacer_late`, проброс в `workers.<w>`).
+
+**4.5b — поля процесса: CPU, время плагина, ёмкость очередей.**
+Новый `heartbeat/cpu_clock.py` (Windows `QueryProcessCycleTime` / `~MHz`, POSIX `time.process_time`,
+`method` = `cycles` | `process_time`), `plugin_runner.py` (пара `perf_counter` только вокруг `plugin.process` /
+`plugin.produce`, EMA α = 0.1 под lock, снимок `plugin_ms()`), `generic_process.py` (публичные `plugin_runner`,
+`chain_queue`), `process_heartbeat.py` (`state.cpu.cores` по дельте между тиками, `state.plugin_ms`, метрики
+`cpu`, `plugin_ms`), `builtin_commands.py` (`introspect.status → cpu: {cores, seconds_total, method}`;
+`introspect.queues → queues: {qtype: {size, maxsize}}, chain_queue: {size, maxsize}`, `maxsize` у mp-очереди —
+`_maxsize` CPython).
+
+**4.5c — транспорт: байты, отказы восстановления, кольца.**
+`frame_shm_middleware.py` (`bytes_written` += `frame.nbytes` в `_Ring.write_and_publish` после успешной записи;
+`bytes_read` += `arr.nbytes` в `_read_ref`, только `arr is not None`; оба под одним lock middleware'а;
+`ring_info()`), `router_manager.py` (`get_shm_stats`: `shm_bytes_written`, `shm_bytes_read`,
+`frame_restore_failures`; `get_ring_info()`), `heartbeat/telemetry.py` (`bytes_written`, `bytes_read`,
+`restore_failures` в `state.shm`), `router_module/tests/test_shm_stats_narrow.py` (`NARROW_KEYS`),
+`builtin_commands.py` (`introspect.router_stats → rings`).
