@@ -41,6 +41,13 @@
   сразу после перерисовки; при `undo` ставить «до», при `redo` — «после»; записи без memo — прежний путь G.6.3.
 - `actions_module/DECISIONS.md` — локальное ADR про memo (затем `python -m scripts.sync`); README/STATUS модуля.
 
+**Зафиксированный API `SnapshotHistory`** (тестер и разработчик пишут против него; остальной дизайн — за разработчиком):
+- `record(*, before, after, label, command_type, coalesce_key=None, memo_before=None, memo_after=None)`; при coalescing
+  хранится `memo_before` первой записи серии и `memo_after` новой.
+- `take_undo_with_memo() -> tuple[T, object | None] | None` — снимок `before` и `memo_before` отменённой записи;
+  `take_redo_with_memo() -> tuple[T, object | None] | None` — `after` и `memo_after`. `take_undo()`/`take_redo()` не меняются.
+- memo хранятся только внутри записей: обрезка по `max_history` и `clear()` их отпускают.
+
 **Acceptance criteria** (Qt, `qtbot`, через те же пути, что кнопки и удаление в вкладке):
 - [ ] A1 выбран узел A → добавить процесс B → undo → выбран ровно A, B нет.
 - [ ] A2 ничего не выбрано → добавить B → undo → ничего не выбрано.
@@ -49,7 +56,8 @@
 - [ ] A5 выбран B → `SetPluginConfig`/`MovePlugin` на B → undo → выбран B.
 - [ ] A6 запись, сделанная `dispatch` в обход вкладки (без memo) → undo → уцелевшие из текущего выбора, без исключений.
 - [ ] A7 две правки одного узла с одним `coalesce_key` → один undo → выбор до первой правки.
-- [ ] A8 `max_history=N`, N+5 команд → memo не копятся сверх записей (число хранимых memo ≤ записей undo+redo), undo до дна не падает.
+- [ ] A8 `SnapshotHistory(max_history=N)`, N+5 записей с memo → memo вытесненных записей собраны сборщиком мусора
+      (`weakref`), undo до дна не падает; то же после `clear()`.
 - [ ] A9 `SnapshotHistory` без memo ведёт себя побайтно как раньше (существующие тесты `actions_module` зелёные).
 - [ ] Радиус зелёный: `multiprocess_framework/modules/actions_module/tests`, `multiprocess_prototype/adapters/dispatch`,
       `multiprocess_prototype/frontend/widgets/tabs/pipeline/tests`, `multiprocess_prototype/frontend/tests`.
