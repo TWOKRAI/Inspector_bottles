@@ -155,6 +155,8 @@ class TestCheckCompatibility:
         class FakePort:
             def __init__(self, name: str) -> None:
                 self.name = name
+                self.dtype = "image/bgr"  # без dtype правило по dtype закрыло бы плагин раньше, чем len(required) > 1
+                self.optional = False
 
         entry = _MockEntry(
             name="multi_blend",
@@ -181,6 +183,7 @@ class TestCheckCompatibility:
             ([("region", "image/bgr", False)], True, ""),  # имя порта — метка графа, важен dtype (flip/negative)
             ([("mask", "image/gray", False)], False, "mask"),  # единственный обязательный вход — не BGR
             ([("x", "image/bgr", True)], True, ""),  # необязательный BGR-вход под любым именем
+            ([("a", "image/bgr", False), ("b", "image/bgr", False)], False, "a"),  # два обязательных BGR
         ],
     )
     def test_check_input_ports_rule(self, ports, ok, reason_part) -> None:
@@ -211,6 +214,7 @@ class TestCheckCompatibility:
 
         class FakePort:
             name = "frame"
+            dtype = "image/bgr"  # вход сам проходит правило dtype — закрыть может только категория
             optional = False
 
         entry = _MockEntry(name="probe", category=category, inputs=[FakePort()])
@@ -218,6 +222,7 @@ class TestCheckCompatibility:
 
         assert result.ok is False
         assert result.reason
+        assert "требует входы из цепочки" not in result.reason  # причина — категория, а не вход
 
     def test_check_unknown_plugin_disabled(self) -> None:
         """Незарегистрированный плагин → disabled (не None, не краш)."""
