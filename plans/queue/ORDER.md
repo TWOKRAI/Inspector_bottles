@@ -137,7 +137,8 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED). Редактор — AP
 | [gui-constructor](../gui-constructor/plan.md) | И | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.0 |
 | [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5 в `main` | 1b.2c ∥ 1b.2d |
 | [frontend-constructor](../frontend-constructor/plan.md) | И | Блок А DONE; Ф4/Ф5 ушли в gui-constructor; Блок В ⛔ окно codemod | — |
-| [transport-single-policy](../transport-single-policy/plan.md) | Ф | 0.1, 0.3 в `main`; 0.2, Ф1–Ф4 не начаты | Ф4 4.0 |
+| [transport-single-policy](../transport-single-policy/plan.md) | Ф | Ф4: 4.4, 4.5, 4.6 слиты в `feat/qr-code-reader` (09-30) | 4.8a → 4.7 → 4.8b |
+| [pipeline-node-timing](../pipeline-node-timing.md) | И | заведён 09-30 (владелец): время узлов в GUI; дефекты PC-1..4 | T1 — дефект эталона PC-1 |
 | [observability-closure](../observability-closure/plan.md) | Ф | Ф0–Ф3 DONE, Ф4: 4.4, 4.11, 4.13 DONE; ветка в `main` | 4.5 / 4.3b |
 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Ф | Ф1 DONE (merge `ae0eebde`), CTO с условиями | юнит-тест severity |
 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Ф | не начат; Ф3 сделана в gui-service 1.3a, 3.2 = `8fae4034` | Ф1 |
