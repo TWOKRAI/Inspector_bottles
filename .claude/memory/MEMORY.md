@@ -48,6 +48,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Радиус слияния мимо контракт- и живых тестов](feedback_merge_radius_skips_live_and_contract_tests.md) — без --backend-live живые в skipped
 - [Лог из shutdown() не доходит до стора](feedback_shutdown_logs_miss_the_store.md) — stop() снимает store-tap раньше; kwargs в extra.context
 - [Инъекции — только по закоммиченному коду](feedback_injection_scripts_on_committed_code.md) — checkout съел фикс; zsh не бьёт $VAR
+- [Харнесс страницы слеп к браузеру](feedback_node_page_harness_blind_to_browser_defaults.md) — B1: пробел жал кнопку в фокусе; в VS Code браузер — через @browser
 - [Слияние: тип feat, не merge](feedback_merge_commit_needs_feat_type.md) — хук режет merge(...), -F - не читает stdin
 
 ### User
@@ -67,3 +68,7 @@ _(empty)_
 > Не путать с `~/.claude/projects/<project>/memory/` (нативный путь Claude
 > Code) — мы намеренно переопределяем его на `.claude/memory/` ради
 > портативности. Per-project, не входит в seed.
+- [CTO: pass model fable explicitly](feedback_cto_spawn_explicit_fable.md) — frontmatter alone ran cto on Opus
+- [Windows CPU: psutil is tick-sampled](feedback_windows_cpu_psutil_tick_sampled.md) — use QueryProcessCycleTime; monotonic has 15.6 ms steps
+- [line_sim stand: preset.commit from a worktree](feedback_line_sim_stand_preset_from_worktree.md) — temp .yaml + catalog beside it; revert via sed, restore CRLF
+- [cv_threads: OpenCV pool per process](feedback_cv_threads_tuning.md) — tune per recipe by measurement; default 2, not our workers
