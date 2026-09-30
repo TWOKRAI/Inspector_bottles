@@ -115,10 +115,12 @@ processes:
         #   python -m Services.line_sim.tools.make_seamless_texture фото.jpg \
         #       --out data/line_sim/belt_tile.png --scene-px-per-mm 8.163265 --pitch-mm <шаг звена, мм>
         # --scene-px-per-mm обязан совпадать с px_per_mm выше. Путь от корня репозитория.
-        # Текущая плитка (2026-09-30): 408x440 = ровно два звена (шаг 204 px, автокорреляция)
-        # из фото data/backgrounds/belt (12 кропов 300x300 сшиваются в 598x440 без расхождений),
-        # масштаб 1:1 — диск на реальном кадре 629x484 тоже 300 px. Зеркальный режим инструмента
-        # для цепи не годится (стыки звеньев зеркалятся в «Н»), резка по периоду — пока вручную.
+        # Текущая плитка (2026-09-30, plans/line-sim-belt-look): фото data/line_sim/belt_photo_full.png
+        # (598x484 — 12 кропов data/backgrounds/belt + борта с реального кадра, выровненные вдоль X),
+        # масштаб 1:1 (диск на реальном кадре 629x484 — 300 px). Сборка — 2 звена, 410x484:
+        #   python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png \
+        #       --out data/line_sim/belt_tile.png --force-period
+        # Без --force-period фото цепи уходит в зеркало (неровный свет, см. README инструмента).
         background_texture: data/line_sim/belt_tile.png
         defect_probability: 0.25
         stale_ms: 500

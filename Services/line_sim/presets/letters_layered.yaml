@@ -1,15 +1,13 @@
 # Пресет line_sim: буквы из шрифтов на дисках (слой диска + слой класса). Сборка каталога,
 # смысл полей и примеры аугментации — Services/line_sim/presets/README.md: редактор слоёв
 # (preset.commit) заменяет изменённый ключ целиком, комментарии ВНУТРИ него не выживают.
-catalog_dir: ../../../data/line_sim/letters_font
+catalog_dir: ../../../data/line_sim/letters_ink
 angle_range_deg: [0, 360]
 defect_probability: 0.0
 layers:
   - name: disk
     mode: static
-    sprite_source: ../../../data/line_sim/letters_font_disk.png
-    color_rgb: [255, 255, 255]
+    sprite_source: ../../../data/line_sim/letters_ink_disk.png
   - name: letter
     mode: static
     sprite_source: class://
-    color_rgb: [0, 0, 0]
