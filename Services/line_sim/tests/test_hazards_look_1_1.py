@@ -121,3 +121,37 @@ def test_h6_vignetted_sine_with_force_period_gives_period():
     res = make_seamless_tile(img, force_period=True)
     assert (res.method, res.period_px, res.tile.shape[1]) == ("period", 20, 100)
     assert res.note == "резерв: 5 период(а), старт 15"
+
+
+def test_period_survives_brightness_ramp_gradient_not_brightness():
+    """J1: NCC считается по градиенту, а не по яркости. Плавная рампа освещения 1.0 -> 0.4 вдоль X
+    ломает яркостную корреляцию (на фикстуре она даёт ложный лаг 33), градиентную — почти нет."""
+    img = cv2.imread(str(FIXTURE), cv2.IMREAD_COLOR)
+    ramp = np.linspace(1.0, 0.4, img.shape[1])
+    lit = np.clip(img.astype(np.float64) * ramp[None, :, None], 0, 255).astype(np.uint8)
+    got = find_period(lit)
+    assert got is not None and abs(got - 205) <= 1, f"find_period={got!r}, ждали 205 +-1"
+
+
+def _best_gradient_ncc_peak(image: np.ndarray, min_lag: int = 4) -> float:
+    """Лучший локальный максимум NCC градиента — независимый пересчёт для гарда пустого теста."""
+    gx = cv2.Sobel(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32), cv2.CV_32F, 1, 0, ksize=3)
+    width = image.shape[1]
+
+    def ncc(k: int) -> float:
+        a = gx[:, : width - k].ravel().astype(np.float64)
+        b = gx[:, k:].ravel().astype(np.float64)
+        a -= a.mean()
+        b -= b.mean()
+        return float(a @ b / np.sqrt((a @ a) * (b @ b)))
+
+    c = {k: ncc(k) for k in range(min_lag - 1, width // 2 + 2)}
+    return max(c[k] for k in range(min_lag, width // 2 + 1) if c[k - 1] < c[k] >= c[k + 1])
+
+
+def test_noise_has_no_period_because_of_ncc_threshold():
+    """J3: у белого шума локальные максимумы NCC есть, но слабые; порог `_NCC_MIN` их отсекает."""
+    noise = np.random.default_rng(0).integers(0, 256, (60, 300, 3), dtype=np.uint8)
+    best = _best_gradient_ncc_peak(noise)
+    assert 0.0 < best < 0.2, f"гард: лучший максимум NCC на шуме {best:.3f} должен быть в (0, 0.2), иначе тест пустой"
+    assert find_period(noise) is None
