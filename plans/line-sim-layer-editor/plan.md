@@ -141,7 +141,7 @@
 | 1.3h-a | бэкенд раскладки `preset.layout` | DONE 2026-09-29 | [phase-1-canvas-html.md](phase-1-canvas-html.md) |
 | 1.3h-b | канва мышью | DONE 2026-09-29 (владелец) | [phase-1-canvas-html.md](phase-1-canvas-html.md) |
 | 1.3h-c | слои: добавить, удалить, порядок, выбор PNG | DONE 09-29 (ревью APPROVE_WITH_NITS; F1/F2 из Chrome — `d82161e4`) | [task-1.3h-c-layers.md](task-1.3h-c-layers.md) |
-| 1.3h-d | загрузка PNG из браузера (канал записи) | код готов 09-30: ревью ит.2 APPROVE_WITH_NITS (ниты закрыты), живой стенд пройден; ждёт Chrome | [task-1.3h-d-upload.md](task-1.3h-d-upload.md) |
+| 1.3h-d | загрузка PNG из браузера (канал записи) | DONE 2026-09-30 (ревью ит.2 APPROVE_WITH_NITS, ниты закрыты; живой стенд и Chrome пройдены) | [task-1.3h-d-upload.md](task-1.3h-d-upload.md) |
 | 2.1 | налив `fill_level` | НЕОБЯЗАТЕЛЬНО | [phase-2-effects.md](phase-2-effects.md) |
 
 ## Порядок запуска задач
