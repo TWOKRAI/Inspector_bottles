@@ -4,9 +4,13 @@
 
 * зерно — сумма uint8 + гауссов шум: без float/clip значение оборачивается (255 + 20 -> 19), и на
   белой краске появляются тёмные точки, на чёрной — яркие; среднее и σ почти не выдают это;
-* зерно и цвет применяются по маске «альфа > 0»: сдвиг маски или шум по всему массиву даёт «гало»
-  из шумного RGB в прозрачности (в файле его не видно, но при наложении на ленту оно всплывает);
+* цвет краски пишется во ВСЕ пиксели, зерно — только где «альфа > 0»: чёрный RGB прозрачных
+  соседей при масштабировании (`LayeredObject._transform`, без премультипликации) затемняет кромку,
+  а шум по всему массиву даёт «гало» из шумного RGB в прозрачности;
 * `--disk-from-photo` без `--disk-out` должен падать разбором аргументов ДО записи чего-либо;
+* вырез фото-диска: центр круга должен попасть в центр выреза (сдвиг на 0.5 px открывает кромку
+  ленты под альфой), а размытая альфа не должна упираться в край канвы (ступенька на крайних строках);
+* нечитаемое фото (в т.ч. пустой файл -> `cv2.error`) — отказ с путём и без единого файла в `--out`;
 * круг у самого края фото — вырез квадрата `[c-r, c+r]` уходит за массив: срез numpy молча
   обрезался бы (и размер вырезки поплыл бы) либо дал IndexError;
 * `_disk_alpha` вынесен из `build_disk` рефакторингом — вывод обязан остаться байт в байт прежним
@@ -24,7 +28,14 @@ import numpy as np
 import pytest
 
 from Services.dataset_gen.core.catalog import imwrite_unicode
-from Services.line_sim.tools.make_font_letters import _finish_ink, build_disk, build_disk_from_photo, main
+from Services.line_sim.core.layered_object import LayeredObject
+from Services.line_sim.tools.make_font_letters import (
+    _finish_ink,
+    _render_letter,
+    build_disk,
+    build_disk_from_photo,
+    main,
+)
 
 DEJAVU_SANS = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSans.ttf"
 
@@ -59,12 +70,12 @@ def test_grain_clips_instead_of_wrapping_on_black_ink() -> None:
     assert np.mean(rgb > 225) < 0.005, f"доля ярких {np.mean(rgb > 225):.3f} на чёрной краске — признак обёртки"
 
 
-def test_grain_and_ink_leave_transparent_pixels_untouched() -> None:
-    """Пиксели с альфа == 0 сохраняют исходный RGB (10, 20, 30): ни цвет краски, ни зерно туда не
-    просачиваются. Правая половина непрозрачная — контроль, что зерно вообще применилось."""
+def test_grain_leaves_transparent_pixels_untouched() -> None:
+    """Только зерно (без краски): пиксели с альфа == 0 сохраняют исходный RGB (10, 20, 30), шум туда не
+    просачивается. Правая половина непрозрачная — контроль, что зерно вообще применилось."""
     rgba = _solid_rgba((10, 20, 30), 0)
     rgba[:, 50:, 3] = 255
-    out = _finish_ink(rgba, (200, 200, 200), 9.0, 0.0, np.random.default_rng(3))
+    out = _finish_ink(rgba, None, 9.0, 0.0, np.random.default_rng(3))
     left = out[:, :50]
     assert (left[:, :, 0] == 10).all() and (left[:, :, 1] == 20).all() and (left[:, :, 2] == 30).all(), (
         "RGB прозрачных пикселей изменился"
@@ -73,16 +84,40 @@ def test_grain_and_ink_leave_transparent_pixels_untouched() -> None:
     assert out[:, 50:, 0:3].std() > 5, "на непрозрачной половине зерна нет — контроль не сработал"
 
 
-def test_blur_leaves_far_transparent_pixels_untouched() -> None:
-    """С мягким краем маска «альфа > 0» расширяется на пару пикселей, но далёкая прозрачность
-    (>= 10 px от края) остаётся с исходным RGB (10, 20, 30)."""
+def test_ink_fills_transparent_pixels_without_grain() -> None:
+    """Краска пишется во ВСЕ пиксели (color bleed при интерполяции: у прозрачных соседей не должно быть
+    чёрного RGB), альфа не трогается, а в прозрачных пикселях RGB == краска БЕЗ шума."""
+    rgba = _solid_rgba((10, 20, 30), 0)
+    rgba[:, 50:, 3] = 255
+    out = _finish_ink(rgba, (200, 150, 100), 9.0, 0.0, np.random.default_rng(3))
+    left = out[:, :50]
+    assert (left[:, :, 0] == 200).all() and (left[:, :, 1] == 150).all() and (left[:, :, 2] == 100).all()
+    assert (left[:, :, 3] == 0).all() and (out[:, 50:, 3] == 255).all(), "альфа изменилась"
+    assert out[:, 50:, 0:3].std() > 5, "на непрозрачной половине зерна нет — контроль не сработал"
+
+
+def test_blur_far_transparent_pixels_get_flat_ink() -> None:
+    """С мягким краем зерно ложится по расширенной маске «альфа > 0», а далёкая прозрачность
+    (>= 10 px от края) — ровный цвет краски без шума."""
     rgba = _solid_rgba((10, 20, 30), 0)
     rgba[40:60, 40:60, 3] = 255
-    out = _finish_ink(rgba, (200, 200, 200), 9.0, 1.0, np.random.default_rng(3))
+    out = _finish_ink(rgba, (200, 150, 100), 9.0, 1.0, np.random.default_rng(3))
     corner = out[0:20, 0:20]
-    assert (corner[:, :, 0] == 10).all() and (corner[:, :, 1] == 20).all() and (corner[:, :, 2] == 30).all()
+    assert (corner[:, :, 0] == 200).all() and (corner[:, :, 1] == 150).all() and (corner[:, :, 2] == 100).all()
     assert (corner[:, :, 3] == 0).all()
     assert out[45:55, 45:55, 3].min() == 255, "ядро квадрата после blur 1 px потеряло непрозрачность"
+
+
+def test_ink_letter_edge_does_not_darken_when_scaled() -> None:
+    """Реальный путь: буква с краской (65, 70, 82) и мягким краем -> `LayeredObject._transform` scale 0.9.
+    Каждый видимый пиксель обязан остаться цветом краски (замер: с чёрным RGB прозрачности min R был 11)."""
+    letter = _render_letter(DEJAVU_SANS, "А", 300, 0.6)
+    sprite = _finish_ink(letter, (65, 70, 82), 0.0, 1.0, np.random.default_rng(0))
+    out = LayeredObject._transform(sprite, 0.9, 0.0, 0.0, None)
+    visible = out[:, :, 3] > 0
+    rgb = out[:, :, 0:3][visible].astype(int)
+    assert visible.sum() > 1000
+    assert (rgb == (65, 70, 82)).all(), f"кромка потемнела: min по каналам {rgb.min(axis=0)}"
 
 
 def test_finish_ink_defaults_return_array_untouched() -> None:
@@ -173,6 +208,83 @@ def test_disk_from_photo_rejects_bright_non_circular_shape(tmp_path: Path) -> No
         build_disk_from_photo(path, 64)
 
     assert isinstance(exc.value.code, str) and str(path) in exc.value.code, f"код выхода: {exc.value.code!r}"
+
+
+@pytest.mark.parametrize("flag", ["--grain-sigma", "--edge-blur-px"])
+@pytest.mark.parametrize("bad", ["-1", "inf", "nan", "-inf"])
+def test_negative_or_nonfinite_sigma_is_parser_error(flag: str, bad: str, tmp_path: Path) -> None:
+    """Отрицательное/inf/nan для σ зерна и размытия -> код 2 до записи (без проверки они тихо
+    превращались в «без эффекта» или в мусор в PNG)."""
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        main(["--letters", "А", "--font", str(DEJAVU_SANS), "--out", str(out), f"{flag}={bad}"])
+    assert exc.value.code == 2
+    assert not out.exists()
+
+
+def test_disk_crop_is_centered_on_circle_center(tmp_path: Path) -> None:
+    """Диск с центром (60, 60), r 60 в фото 122x122: центр яркой части результата обязан лежать в центре
+    канвы 31.5 (допуск 0.15 px). Замер: вырез `round(cx - r)` сдвигал его на ~1 px входа (0.5 px канвы 64) —
+    открывалась кайма ленты. Плюс: пиксели с альфа >= 250 светлее 200. (Дробный центр даёт остаточную
+    погрешность до 0.5 px входа из-за целочисленного x0 — тут проверяется целый, где точность достижима.)"""
+    photo = np.full((122, 122, 3), 30, dtype=np.uint8)
+    cv2.circle(photo, (60, 60), 60, (235, 235, 235), -1)
+    path = tmp_path / "centered.png"
+    imwrite_unicode(path, photo)
+
+    rgba = build_disk_from_photo(path, 64)
+
+    lum = rgba[:, :, 0:3].astype(np.float64).mean(axis=2)
+    ys, xs = np.nonzero(lum > 130)
+    assert abs(xs.mean() - 31.5) < 0.15 and abs(ys.mean() - 31.5) < 0.15, (
+        f"центр яркой части ({xs.mean():.2f}, {ys.mean():.2f}), ожидали (31.5, 31.5)"
+    )
+    assert lum[rgba[:, :, 3] >= 250].min() >= 200, "под альфа >= 250 виден тёмный RGB ленты"
+
+
+def test_photo_disk_alpha_does_not_touch_canvas_border(tmp_path: Path) -> None:
+    """Размытая альфа фото-диска не упирается в край канвы: у всех пикселей крайних строк и столбцов
+    альфа <= 5 (замер: при отступе 2 px было 30 — ступенька на ~22 % окружности)."""
+    photo = np.full((200, 200, 3), 30, dtype=np.uint8)
+    cv2.circle(photo, (100, 100), 90, (235, 235, 235), -1)
+    path = tmp_path / "round.png"
+    imwrite_unicode(path, photo)
+
+    a = build_disk_from_photo(path, 300)[:, :, 3]
+
+    edge = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+    assert int(edge.max()) <= 5, f"альфа на краю канвы до {int(edge.max())}"
+    assert a[150, 150] == 255
+
+
+def test_disk_from_empty_photo_file_exits_with_path(tmp_path: Path) -> None:
+    """Пустой файл (0 байт): `cv2.imdecode` бросает `cv2.error`, а не ValueError — обязан быть
+    `SystemExit` с путём, не трейсбэк."""
+    path = tmp_path / "empty.png"
+    path.write_bytes(b"")
+
+    with pytest.raises(SystemExit) as exc:
+        build_disk_from_photo(path, 64)
+
+    assert isinstance(exc.value.code, str) and str(path) in exc.value.code
+
+
+def test_unreadable_photo_writes_no_letters(tmp_path: Path) -> None:
+    """Нечитаемое фото: `main` падает ДО записи букв — в `--out` нет ни одного файла, диска тоже нет."""
+    bad = tmp_path / "broken.png"
+    bad.write_bytes(b"not an image")
+    out = tmp_path / "out"
+    disk = tmp_path / "disk.png"
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            ["--letters", "А", "--font", str(DEJAVU_SANS), "--out", str(out)]
+            + ["--disk-from-photo", str(bad), "--disk-out", str(disk)]
+        )
+
+    assert isinstance(exc.value.code, str) and str(bad) in exc.value.code
+    assert not out.exists() or not any(out.rglob("*.png")), "буквы записаны до чтения фото"
+    assert not disk.exists()
 
 
 def test_build_disk_bytes_unchanged_after_alpha_refactor() -> None:
