@@ -335,10 +335,14 @@ def test_name_uniqueness_uses_form_state_and_keeps_unsaved_edits(start_pult) -> 
         pytest.param(_AT_CAP, 2, id="last"),
     ],
 )
-def test_undo_delete_restores_index_and_leaves_no_selection(start_pult, at: list[float], index: int) -> None:
-    """Удалён ПЕРВЫЙ / ПОСЛЕДНИЙ слой, «Отмена» -> слой на прежнем индексе (в C5 — средний). Выбор после
-    «Отмены» пуст (после удаления его нет, «Отмена» его не воскрешает), и кнопки инертны: «Выше» ни запроса,
-    ни записи — цепочка «Выше» на выбранном слое сразу после работает (контроль)."""
+def test_undo_delete_restores_index_and_reselects_the_layer(start_pult, at: list[float], index: int) -> None:
+    """Удалён ПЕРВЫЙ / ПОСЛЕДНИЙ слой, «Отмена» -> слой на прежнем индексе (в C5 — средний) и он ВЫБРАН снова
+    (выбор такой, каким был прямо перед удалением). «Выше» сразу после «Отмены» действует на него: у первого
+    слоя (disk) он уходит к концу списка (запрос раскладки +1), у последнего (cap) — край, no-op (запроса нет).
+    Затем клик по слою и «Ниже» — ещё один сдвиг.
+
+    Контракт изменён в R-5 (итерация 2): «Отмена» операции над составом возвращает выбор, бывший до неё; выбор —
+    строка, не имя."""
     stand = _stand(start_pult, _INITIAL)
     out = _run_canvas(
         stand.port,
@@ -354,7 +358,7 @@ def test_undo_delete_restores_index_and_leaves_no_selection(start_pult, at: list
             _snap("undone"),
             _btn("btnLayerUp"),
             _SETTLE,
-            _snap("inert"),
+            _snap("after_up"),
             _click(at),
             _btn("btnLayerDown"),
             _SETTLE,
@@ -365,12 +369,23 @@ def test_undo_delete_restores_index_and_leaves_no_selection(start_pult, at: list
     s = out["snaps"]
     assert len(_state(s["deleted"])) == 2
     assert _state(s["undone"]) == _INITIAL, f"слой на прежнем индексе {index}: {s['undone']['layers']!r}"
-    assert s["undone"]["selected"] == [], f"выбор после «Отмены» удаления пуст: {s['undone']['selected']!r}"
-    assert s["inert"]["layoutCount"] == s["undone"]["layoutCount"], "«Выше» без выбора: запроса раскладки нет"
-    assert _state(s["inert"]) == _INITIAL
-    assert s["control"]["layoutCount"] == s["inert"]["layoutCount"] + (1 if index > 0 else 0), (
-        f"контроль: «Ниже» на выбранном слое {'работает' if index > 0 else 'у нижнего — no-op'}"
+    expected_name = _INITIAL[index]["name"]
+    assert s["undone"]["selected"] == [expected_name], (
+        f"после «Отмены» удаления вернувшийся слой выбран: {s['undone']['selected']!r}"
     )
+    up_moves = index == 0  # у последнего слоя «Выше» — край, no-op
+    assert s["after_up"]["layoutCount"] == s["undone"]["layoutCount"] + (1 if up_moves else 0), (
+        f"«Выше» действует на вернувшийся слой: {s['undone']['layoutCount']} -> {s['after_up']['layoutCount']}"
+    )
+    assert [ly["name"] for ly in _state(s["after_up"])] == (
+        ["letter", "disk", "cap"] if up_moves else ["disk", "letter", "cap"]
+    ), f"порядок после «Выше»: {s['after_up']['layers']!r}"
+    assert s["control"]["layoutCount"] == s["after_up"]["layoutCount"] + 1, (
+        f"контроль: «Ниже» на выбранном слое работает: {s['after_up']['layoutCount']} -> {s['control']['layoutCount']}"
+    )
+    assert [ly["name"] for ly in _state(s["control"])] == (
+        ["disk", "letter", "cap"] if up_moves else ["disk", "cap", "letter"]
+    ), f"порядок после «Ниже»: {s['control']['layers']!r}"
 
 
 def test_replace_with_same_source_is_noop(start_pult) -> None:

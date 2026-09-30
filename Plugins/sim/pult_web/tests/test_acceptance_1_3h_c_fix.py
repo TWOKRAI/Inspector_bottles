@@ -297,11 +297,13 @@ def test_f2_add_then_undo_leaves_no_highlighted_row(start_pult) -> None:
     assert s["undone"]["selected"] == [], f"после «Добавить» -> «Отмена» выбора нет: {s['undone']['selected']!r}"
 
 
-def test_f2_add_then_undo_arrows_are_inert_and_write_no_undo_record(start_pult) -> None:
-    """F2: после «Добавить» -> «Отмена» стрелка не шлёт раскладку и не пишет запись «Отмена». Запись ловится цепочкой:
-    три «Добавить» (записи R1..R3), «Отмена» (снимает R3; выбранный `b` исчез), стрелка, «Отмена» — если стрелка
-    записала лишнее, эта «Отмена» снимет её и слоёв останется 5, а не 4. (До исправления зелёное: стрелки
-    молча инертны — тест держит эту инертность и после.)"""
+def test_f2_add_then_undo_restores_previous_selection_never_the_removed_layer(start_pult) -> None:
+    """F2: после трёх «Добавить» (a, c, b) и «Отмены» выбор возвращается на `c` (выбран был до добавления b), а
+    исчезнувший `b` не выбирается и не двигается никогда. Стрелка сдвигает `c` и пишет РОВНО ОДНУ запись «Отмена»:
+    следующая «Отмена» снимает сдвиг (слои те же, c на месте), а не R2; ещё одна — снимает R2 (a, c -> a).
+
+    Контракт изменён в R-5 (итерация 2): «Отмена» операции над составом возвращает выбор, бывший до неё; выбор —
+    строка, не имя. Прежняя версия требовала «стрелки инертны» — побочный эффект выбора по имени."""
     stand = _stand(start_pult, _INITIAL)
     out = _run_canvas(
         stand.port,
@@ -315,27 +317,34 @@ def test_f2_add_then_undo_arrows_are_inert_and_write_no_undo_record(start_pult) 
             _pick(_B),
             _btn("btnLayerAdd"),  # R3, слои: +a +c +b
             _SETTLE,
-            _UNDO,  # снимает R3 -> [.., a, c]; выбранный «b» исчез
+            _UNDO,  # снимает R3 -> [.., a, c]; выбранный «b» исчез, выбор возвращается на c
             _SETTLE,
             _snap("undone"),
-            {"op": "key", "key": "ArrowRight", "target": "BODY"},
-            {"op": "key", "key": "ArrowDown", "shift": True, "target": "BODY"},
+            {"op": "key", "key": "ArrowRight", "target": "BODY"},  # одна стрелка = одна запись «Отмена»
             _SETTLE,
             _snap("arrows"),
-            _UNDO,  # снимает R2 (если стрелки записей не писали) -> [.., a]
+            _UNDO,  # снимает запись стрелки -> c на прежнем месте, слои те же
             _SETTLE,
             _snap("undo2"),
+            _UNDO,  # снимает R2 -> [.., a]
+            _SETTLE,
+            _snap("undo3"),
         ],
     )
     _assert_ran(out)
     s = out["snaps"]
     assert [ly["name"] for ly in _eff(s["undone"])] == ["disk", "letter", "cap", "a", "c"], _eff(s["undone"])
-    assert _eff(s["arrows"]) == _eff(s["undone"]), "стрелки без выбора ничего не сдвигают"
-    assert s["arrows"]["layoutCount"] == s["undone"]["layoutCount"], (
-        f"стрелки без выбора не запрашивают раскладку: {s['undone']['layoutCount']} -> {s['arrows']['layoutCount']}"
+    assert s["undone"]["selected"] == ["c"], f"выбор вернулся на c (до добавления b): {s['undone']['selected']!r}"
+    before, after = _eff(s["undone"]), _eff(s["arrows"])
+    moved = [(b["name"], b["offset_px"], a["offset_px"]) for b, a in zip(before, after) if b != a]
+    assert moved == [("c", [0, 0], [1, 0])], f"стрелки сдвигают ровно c (и никого другого): {moved!r}"
+    assert s["arrows"]["selected"] == ["c"], f"выбор остался на c: {s['arrows']['selected']!r}"
+    assert s["arrows"]["layoutCount"] > s["undone"]["layoutCount"], "стрелки на выбранном слое просят раскладку"
+    assert _eff(s["undo2"]) == before, (
+        f"«Отмена» после стрелки снимает ОДНУ запись стрелки (c на старом месте, слои те же): {_eff(s['undo2'])!r}"
     )
-    assert [ly["name"] for ly in _eff(s["undo2"])] == ["disk", "letter", "cap", "a"], (
-        f"вторая «Отмена» должна снять R2 (a, c -> a); лишняя запись стрелки оставила бы 5 слоёв: {_eff(s['undo2'])!r}"
+    assert [ly["name"] for ly in _eff(s["undo3"])] == ["disk", "letter", "cap", "a"], (
+        f"следующая «Отмена» снимает R2 (a, c -> a); лишняя запись стрелки оставила бы 5 слоёв: {_eff(s['undo3'])!r}"
     )
 
 
