@@ -39,13 +39,14 @@ class TestGatedMetricsLocation:
 
         assert gated_metrics is NEW_LOCATION
 
-    def test_the_framework_declares_exactly_the_five_metrics(self) -> None:
+    def test_the_framework_declares_exactly_the_ten_metrics(self) -> None:
         """Состав каталога — литералом, а не выводом из самого каталога.
 
         Ожидание, посчитанное через ``declared_metrics()``, согласилось бы с
         любым ответом, включая пустой; поэтому здесь перечень написан руками.
         Пять имён — те же, что были в снятом кортеже ``GATED_METRICS``: Ф8.1
-        меняла ВЛАДЕНИЕ каталогом, а не его содержимое.
+        меняла ВЛАДЕНИЕ каталогом, а не его содержимое. Task 4.5a добавила
+        ``queue_wait_ms`` и ``pacer_late``, 4.5b — ``cpu`` и ``plugin_ms``, 4.5d — ``transport_ms``: теперь десять.
 
         **Объектив сменён: раньше срез реестра по владельцу, теперь — места
         объявления в исходниках** (Ф1 «порт наблюдений»). Прежняя редакция звала
@@ -58,11 +59,13 @@ class TestGatedMetricsLocation:
         больше не у кого.
 
         Свойство при этом ЖИВО и звучит буквально так же: «фреймворк объявляет
-        ровно эти пять». Оно проверяется по местам вызова ``declare_metric`` в
-        дереве фреймворка — это тот же вопрос, заданный другому свидетелю, и он
+        ровно эти десять» (пять исходных + queue_wait_ms, pacer_late — 4.5a, cpu, plugin_ms — 4.5b,
+        transport_ms — 4.5d).
+        Оно проверяется по местам
+        вызова ``declare_metric`` в дереве фреймворка — это тот же вопрос, заданный другому свидетелю, и он
         к загрязнению реестра прикладными плагинами невосприимчив по построению.
-        Ослабить тест до «пять имён есть среди gated_metrics()» было бы тихой
-        потерей: шестая метрика фреймворка проехала бы молча.
+        Ослабить тест до «десять имён есть среди gated_metrics()» было бы тихой
+        потерей: одиннадцатая метрика фреймворка проехала бы молча.
 
         Скан привязан к КОНВЕНЦИИ имени константы (``METRIC_* = declare_metric(...)``),
         а не к любому упоминанию: голый ``declare_metric(`` ловил ещё и докстринг
@@ -82,8 +85,20 @@ class TestGatedMetricsLocation:
             for name in pattern.findall(path.read_text(encoding="utf-8")):
                 declared_in_sources.add(name)
                 sites += 1
-        assert sites == 5, f"мест объявления метрик во фреймворке стало {sites}, а не 5"
-        assert declared_in_sources == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+        assert sites == 10, f"мест объявления метрик во фреймворке стало {sites}, а не 10"
+        # Task 4.5a добавила queue_wait_ms и pacer_late, 4.5b — cpu и plugin_ms, 4.5d — transport_ms к прежним пяти.
+        assert declared_in_sources == {
+            "fps",
+            "latency_ms",
+            "effective_hz",
+            "cycle_duration_ms",
+            "shm",
+            "queue_wait_ms",
+            "pacer_late",
+            "cpu",
+            "plugin_ms",
+            "transport_ms",
+        }
         # Каталог гейта — надмножество: обходя его, гейт видит и прикладные имена.
         assert declared_in_sources.issubset(set(gated_metrics()))
 

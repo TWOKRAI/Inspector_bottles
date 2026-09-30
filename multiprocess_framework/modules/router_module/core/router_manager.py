@@ -1743,7 +1743,8 @@ class RouterManager(ChannelRoutingManager):
     def get_shm_stats(self) -> Dict[str, int]:
         """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
 
-        Те же тринадцать чисел, что телеметрия публикует в ``processes.<name>.state.shm``,
+        Те же семнадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои
+        восстановления, 4.5c), что телеметрия публикует в ``processes.<name>.state.shm``,
         но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
         ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
         dispatcher'ов), не читаются полные ``_stats``.
@@ -1790,12 +1791,27 @@ class RouterManager(ChannelRoutingManager):
             "frame_slots_released": _mw("frame_slots_released"),
             "frame_slots_reclaimed": _mw("frame_slots_reclaimed"),
             "frame_handle_cache_size": _mw("frame_handle_cache_size"),
+            # 4.5c: объём кадрового транспорта и ссылки, не восстановленные из-за сбоя/битой ссылки.
+            "shm_bytes_written": _mw("bytes_written"),
+            "shm_bytes_read": _mw("bytes_read"),
+            "shm_bytes_mapped": _mw("bytes_mapped"),
+            "frame_restore_failures": _mw("frame_restore_failures"),
             "queue_data_evicted": _q("data_evicted"),
             "queue_system_evict_blocked": _q("system_evict_blocked"),
             "queue_observability_evicted": _q("observability_evicted"),
             "queue_observability_send_failed": _q("observability_send_failed"),
             "observability_delivery_failed": delivery_failed,
         }
+
+    def get_ring_info(self) -> List[Dict[str, Any]]:
+        """4.5c: описание SHM-колец всех кадровых middleware роутера — конкатенация ``ring_info()``
+        (`` {key, name, depth}`` на кольцо); middleware без ``ring_info`` пропускаются."""
+        rings: List[Dict[str, Any]] = []
+        for mw in list(self._frame_middlewares):
+            info = getattr(mw, "ring_info", None)
+            if callable(info):
+                rings.extend(info())
+        return rings
 
     def get_stats(self) -> Dict[str, Any]:
         """Полная статистика: счётчики, каналы, dispatcher'ы, потоки."""

@@ -792,6 +792,11 @@ class BuiltinCommands:
 
         ``cv_threads`` (Task 4.6) — ДЕЙСТВУЮЩЕЕ число потоков OpenCV процесса
         (``cv2.getNumThreads()``), ``None`` — cv2 недоступен.
+
+        ``cpu`` (Task 4.5b) — ``{cores, seconds_total, method}``: ``cores`` — последнее
+        показание с тика heartbeat (``None`` — дельты ещё нет), ``seconds_total`` —
+        накопленные CPU-секунды, ``method`` — "cycles" | "process_time". Статус
+        ``sample()`` НЕ зовёт: дельту ведёт только тик, иначе опрос сдвинул бы окно.
         """
         svc = self._services
         workers: dict = {}
@@ -809,6 +814,10 @@ class BuiltinCommands:
             cv_threads = cv2.getNumThreads()
         except ImportError:
             cv_threads = None
+        from ..heartbeat.cpu_clock import process_clock
+
+        clock = process_clock()
+        hb = getattr(svc, "_heartbeat", None)
         return {
             "success": True,
             "process": svc.name,
@@ -816,6 +825,11 @@ class BuiltinCommands:
             "status": getattr(svc, "_current_process_status", "unknown"),
             "workers": workers,
             "cv_threads": cv_threads,
+            "cpu": {
+                "cores": getattr(hb, "last_cpu_cores", None),
+                "seconds_total": round(clock.seconds_total(), 3),
+                "method": clock.method,
+            },
         }
 
     def _cmd_introspect_capabilities(self, data=None, **kwargs) -> dict:
@@ -1038,6 +1052,12 @@ class BuiltinCommands:
         # get_stats() возвращает {"router": {...счётчики...}, ...}; берём router-секцию
         router_stats = stats.get("router", stats) if isinstance(stats, dict) else {}
         result = {"success": True, "process": svc.name, "router_stats": router_stats}
+        # 4.5c: описание SHM-колец процесса (роутер без get_ring_info → пусто).
+        try:
+            ring_info = getattr(router, "get_ring_info", None)
+            result["rings"] = ring_info() if callable(ring_info) else []
+        except Exception:  # noqa: BLE001 — наблюдаемость не критична
+            result["rings"] = []
         # Ф3.1: аддитивно epoch и число применённых refresh из своей PSR-записи
         # (наблюдаемость routing-epoch; driver-обёртка читает только router_stats).
         try:
@@ -1295,17 +1315,57 @@ class BuiltinCommands:
 
         Растущая system/data-очередь = процесс не успевает разгребать вход —
         частая причина «команда/кадр будто не доходит».
+
+        Task 4.5b: ``queue_sizes`` (только глубины) сохранён; рядом ``queues`` —
+        ``{тип: {size, maxsize}}`` и ``chain_queue`` — ``{size, maxsize}`` очереди
+        DataReceiver -> PipelineExecutor (``None`` — у процесса нет data-плоскости).
+        ``maxsize`` — ёмкость: глубина без неё не отличает «3 из 6» от «3 из 5000».
         """
         svc = self._services
         sizes: dict = {}
+        detail: dict = {}
         queues = getattr(svc, "queues", None)
         if isinstance(queues, dict):
-            for qtype, queue in queues.items():
-                try:
-                    sizes[qtype] = queue.qsize()
-                except (NotImplementedError, OSError, AttributeError):
-                    sizes[qtype] = None  # qsize недоступен (macOS) — диагностично само по себе
-        return {"success": True, "process": svc.name, "queue_sizes": sizes}
+            for qtype, q in queues.items():
+                size = self._queue_size(q)
+                sizes[qtype] = size
+                detail[qtype] = {"size": size, "maxsize": self._queue_maxsize(q)}
+        chain = getattr(svc, "chain_queue", None)
+        chain_info = None if chain is None else {"size": self._queue_size(chain), "maxsize": self._queue_maxsize(chain)}
+        return {
+            "success": True,
+            "process": svc.name,
+            "queue_sizes": sizes,
+            "queues": detail,
+            "chain_queue": chain_info,
+        }
+
+    @staticmethod
+    def _queue_size(q: Any) -> int | None:
+        try:
+            return q.qsize()
+        except (NotImplementedError, OSError, AttributeError):
+            return None  # qsize недоступен (macOS) — диагностично само по себе
+
+    @staticmethod
+    def _queue_maxsize(q: Any) -> int | None:
+        """Ёмкость очереди: число; ``0`` — без предела; ``None`` — узнать нельзя.
+
+        «Без предела» у двух видов очередей выглядит по-разному: ``queue.Queue(0)`` хранит 0,
+        ``multiprocessing.Queue(0)`` — ``SEM_VALUE_MAX`` (2147483647). Оба приводятся к 0,
+        чтобы ``None`` значил только «неизвестно» (ревью 4.5, находка 5).
+        """
+        from multiprocessing.synchronize import SEM_VALUE_MAX
+
+        # ponytail: у multiprocessing.Queue ёмкость лежит только в CPython-приватном
+        # ``_maxsize`` (публичного аксессора нет) — сломается, если CPython его переименует;
+        # тогда вернётся None, а не исключение. У queue.Queue — публичный ``maxsize``.
+        m = getattr(q, "maxsize", None)
+        if m is None:
+            m = getattr(q, "_maxsize", None)
+        if not isinstance(m, int):
+            return None
+        return 0 if m <= 0 or m >= SEM_VALUE_MAX else m
 
     def _cmd_introspect_memory(self, data=None, **kwargs) -> dict:
         """Инвентарь памяти процесса: SHM / пул займов / очереди (Ф2 Task 2.4).

@@ -246,8 +246,9 @@ class TestReplaceModeDropsDefaultEnabledSilently:
                 БЕЗ mode= (дефолт функции — "replace", тот же дефолт, что у команды
                 при отсутствующем ``telemetry_mode``, ``builtin_commands.py:2279``)
         выход:  [boot]   default_enabled=False, due_metrics=['fps']            (1 имя)
-                [после]  default_enabled=True,  due_metrics=['cycle_duration_ms',
-                         'effective_hz', 'fps', 'latency_ms', 'shm']            (5 имён)
+                [после]  default_enabled=True,  due_metrics=['cpu', 'cycle_duration_ms',
+                         'effective_hz', 'fps', 'latency_ms', 'pacer_late',
+                         'plugin_ms', 'queue_wait_ms', 'shm', 'transport_ms']    (10 имён)
 
     Семантика ``replace`` сама по себе КОРРЕКТНА и документирована (Task 5.10.f —
     ``replace`` заменяет секцию целиком, находка ревью там же) — она не меняется этим
@@ -284,12 +285,17 @@ class TestReplaceModeDropsDefaultEnabledSilently:
             "флип, поставленный на boot, снят соседней правкой"
         )
         assert hb._telemetry_gate.due_metrics(now=0.0) == {
+            "cpu",
             "cycle_duration_ms",
             "effective_hz",
             "fps",
             "latency_ms",
+            "pacer_late",
+            "plugin_ms",
+            "queue_wait_ms",
             "shm",
-        }, "каталог разрешённых расширился со ВСЕХ пяти фреймворковых имён — не только fps"
+            "transport_ms",
+        }, "каталог разрешённых расширился со ВСЕХ десяти фреймворковых имён — не только fps"
 
     def test_merge_mode_preserves_the_flip(self) -> None:
         """Контроль: тот же сценарий с явным ``telemetry_mode: merge`` держит флип.
