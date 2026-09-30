@@ -49,6 +49,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Лог из shutdown() не доходит до стора](feedback_shutdown_logs_miss_the_store.md) — stop() снимает store-tap раньше; kwargs в extra.context
 - [Инъекции — только по закоммиченному коду](feedback_injection_scripts_on_committed_code.md) — checkout съел фикс; zsh не бьёт $VAR
 - [Харнесс страницы слеп к браузеру](feedback_node_page_harness_blind_to_browser_defaults.md) — B1: пробел жал кнопку в фокусе; в VS Code браузер — через @browser
+- [Стенд и тесты: протокол между сессиями](feedback_shared_stand_and_tests_protocol.md) — stand.lock measure/functional, замер по SHA, A/B
 - [Слияние: тип feat, не merge](feedback_merge_commit_needs_feat_type.md) — хук режет merge(...), -F - не читает stdin
 
 ### User
