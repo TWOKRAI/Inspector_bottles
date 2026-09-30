@@ -551,3 +551,41 @@ def test_h13_orphan_notice_cleared_when_preset_arrives(start_pult) -> None:
     assert snaps["preset_loaded"]["spritesError"] == "", (
         f"текст остался после прихода пресета: {snaps['preset_loaded']['spritesError']!r}"
     )
+
+
+_ANGLES = ["layer0_angle_deg", "layer1_angle_deg", "layer2_angle_deg"]  # порядок _INITIAL: disk 12.5, letter 0, cap 0
+_LETTER_ROT_HANDLE = [60, -39]  # рамка letter на экране: x 45..75, y -15..15; ручка поворота — над центром на 24 px
+
+
+def test_h14_renamed_selected_layer_keeps_canvas_handles(start_pult) -> None:
+    """(h14) Выбран letter кликом по канве; в форме он переименован (change, ждём ответ раскладки с НОВЫМ именем);
+    ручка поворота перетащена на 90 ПО часовой -> угол letter (строка 1) стал -90, углы disk (12.5) и cap (0)
+    не изменились.
+
+    Что ломает: слушатель `change` на #presetLayers перестаёт переносить выбор на новое имя (`presetSelected` остаётся
+    «letter»). Действия идут по строке и этого не заметят, а рамка, ручки и разбор нажатия на канве ищут запись
+    раскладки по ИМЕНИ: «letter» в раскладке уже нет, ручек нет, перетаскивание ничего не меняет."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_LETTER),
+            *_rename(1, "letter2"),
+            _SETTLE,  # ответ раскладки с новым именем принят
+            _snap("renamed", _ANGLES),
+            {"op": "drag", "from": _LETTER_ROT_HANDLE, "to": [60 + 39, 0], "steps": 4},
+            _SETTLE,
+            _snap("rotated", _ANGLES),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert stand.layout_requests()[-1]["preset"]["layers"][1]["name"] == "letter2", (
+        "предусловие: раскладка с новым именем"
+    )
+    before, after = s["renamed"]["fields"], s["rotated"]["fields"]
+    assert before == {"layer0_angle_deg": "12.5", "layer1_angle_deg": "0", "layer2_angle_deg": "0"}, before
+    assert abs(float(after["layer1_angle_deg"]) - (-90)) < 0.2, f"ручка переименованного слоя не сработала: {after!r}"
+    assert (after["layer0_angle_deg"], after["layer2_angle_deg"]) == ("12.5", "0"), f"сдвинут чужой слой: {after!r}"
