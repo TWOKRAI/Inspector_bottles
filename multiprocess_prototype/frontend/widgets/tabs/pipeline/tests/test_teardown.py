@@ -25,8 +25,7 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector import Node
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.tab import PipelineTab
 
-from ._helpers import make_pipeline_services
-from .test_presenter_domain_dispatch import _make_orchestrator_services
+from ._helpers import make_pipeline_services, make_pipeline_services_with_orchestrator
 
 
 # ------------------------------------------------------------------ #
@@ -194,7 +193,7 @@ class TestPresenterDispose:
         держит сильную ссылку на presenter и зовёт его мёртвую scene после undo.
         Список слушателей читаем напрямую: публичного геттера у диспетчера нет.
         """
-        services = _make_orchestrator_services()
+        services = make_pipeline_services_with_orchestrator()
         listeners = services.commands._view_restore_listeners
         presenter = PipelinePresenter(services)
 

@@ -163,6 +163,23 @@ def test_raising_view_state_does_not_fail_dispatch_and_gives_no_memo() -> None:
     assert not any(x.startswith("listener") for x in log)
 
 
+def test_hostile_view_state_repr_does_not_fail_dispatch() -> None:
+    """view_state бросает И при вызове, И в __repr__: dispatch проходит, memo записи None.
+
+    Ломается, если в логе _capture_view_state вернуть `%r` вместо _describe_cb: repr внутри
+    except бросает второй раз и роняет dispatch (ревью ит.1, находка 4 — остаток шаблона).
+    """
+    disp, _bus, log = _build()
+    disp.add_view_restore_listener(lambda m: log.append(f"listener:{m}"))
+
+    events = disp.dispatch(AddProcess(process_name="a"), view_state=_HostileCallback())
+
+    assert [type(e) for e in events] == [ProcessAdded]
+    log.clear()
+    assert disp.undo() is True
+    assert not any(x.startswith("listener") for x in log)
+
+
 def test_view_state_captured_before_apply_and_after_publish() -> None:
     """memo_before снимается до apply, memo_after -- после публикации событий.
 
