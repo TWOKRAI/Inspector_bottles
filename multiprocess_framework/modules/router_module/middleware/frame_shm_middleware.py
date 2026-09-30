@@ -374,6 +374,10 @@ class FrameShmMiddleware:
         self._last_write_error = ""
         # M2a: троттлинг «frame не восстановлен» (штатный drop после G.7, не ERROR-спам).
         self._restore_fail_count = 0
+        # 4.4c: сегмент ссылки уже отвязан (realloc кольца/смена инкарнации владельцем) — это stale
+        # (ячейка переписана/исчезла ДО чтения), но reader этого не видит (open бросает раньше
+        # проверки поколения) — считаем здесь и складываем в ``frame_stale_drops``.
+        self._stale_unlinked_drops = 0
         # Task 4.1: состояние слота (allocated/created/ёмкость/seqlock/пул) живёт в
         # кольцах per-key (``_Ring``), см. ``_rings`` ниже; плоские ``_allocated``,
         # ``_alloc_shape``, ``_pool``... — read-only делегаты к кольцу ``frame``.
@@ -586,15 +590,18 @@ class FrameShmMiddleware:
 
     @property
     def frame_stale_drops(self) -> int:
-        """Ссылок/view отброшено по расхождению поколения (Task 4.4: ячейка переписана ДО
-        чтения; Ф7 G.5.c: view пережил перезапись) — read-only проекция счётчика reader'а
-        (единственный источник)."""
-        return self._reader.stale_drops
+        """СООБЩЕНИЙ отброшено по расхождению поколения (Task 4.4: ячейка переписана ДО чтения;
+        Ф7 G.5.c: view пережил перезапись) — read-only проекция счётчика reader'а (единственный
+        источник + отвязанные сегменты ссылок, 4.4c). Единица — сообщение, не ссылка (4.4c): приём
+        останавливается на первой провалившейся ссылке, executor считает один раз на батч, дверь
+        отправки — на item."""
+        return self._reader.stale_drops + self._stale_unlinked_drops
 
     @property
     def frame_torn_reads(self) -> int:
-        """Task 4.4: перезапись слота ВО ВРЕМЯ чтения по ссылке — проекция счётчика reader'а
-        (подменный reader без ``torn_reads`` → 0)."""
+        """Task 4.4: СООБЩЕНИЙ отброшено из-за перезаписи слота ВО ВРЕМЯ чтения по ссылке (единица —
+        сообщение, не ссылка, 4.4c: чтение останавливается на первой провалившейся) — проекция
+        счётчика reader'а (подменный reader без ``torn_reads`` → 0)."""
         return getattr(self._reader, "torn_reads", 0)
 
     @property
@@ -891,6 +898,10 @@ class FrameShmMiddleware:
         Ссылки, восстановленные view, записываются в ПРОЦЕСС-ЛОКАЛЬНЫЙ ключ ``data["_shm_views"]``
         — по ним executor и дверь отправки проверяют, что view пережил обработку.
 
+        Атомарность (4.4c): ссылки одного сообщения читаются по порядку и чтение ОСТАНАВЛИВАЕТСЯ на
+        первой, что вернула ``None``; всё уже восстановленное снимается, в ``data`` ставится метка
+        ``_shm_dropped`` — сообщение отброшено целиком (никогда ``frame`` без ``mask``).
+
         Pickle-fallback: ``frame`` уже в сообщении (не через SHM) — берётся как есть.
         """
         data = msg.get("data", msg)
@@ -901,7 +912,11 @@ class FrameShmMiddleware:
         refs = data.get(SHM_REFS_KEY)
         if refs:
             views = self._restore_refs(msg, data, refs, allow_view=True)
-            if views:
+            if views is None:
+                # 4.4c: item атомарен — одна нечитаемая ссылка отбрасывает ВСЁ сообщение; приёмник
+                # (DataReceiver) по метке не строит item.
+                data[SHM_DROPPED_KEY] = True
+            elif views:
                 data[SHM_VIEWS_KEY] = views
         return msg
 
@@ -909,7 +924,8 @@ class FrameShmMiddleware:
         """Прочитать один массив по ссылке ``{owner, slot, idx, gen, name}``.
 
         Returns ``(массив | None, это_view)``. ``None`` = перезаписано до чтения (stale) или во
-        время (torn) — оба штатные дропы со счётчиком у reader'а, без лога; сбой открытия сегмента
+        время (torn) — оба штатные дропы со счётчиком у reader'а, без лога; сегмент отвязан
+        (``FileNotFoundError``) — тот же stale, счёт у middleware; сбой открытия сегмента
         (throttled лог) тоже ``None``. view (zero-copy) — только при ``allow_view`` И активном
         zero_copy (гейтнут в ctor на handle-кэш): поколение слота у view всегда сверяется с
         ``ref["gen"]`` (``frame_view_valid``), отдельной меты на провод не нужно."""
@@ -919,6 +935,11 @@ class FrameShmMiddleware:
             view = allow_view and self._zero_copy
             try:
                 arr = self._reader.read_ref(name, gen, copy=not view)
+            except FileNotFoundError:
+                # 4.4c: сегмент ссылки отвязан (realloc кольца у владельца) — штатный stale-дроп, счёт
+                # без лога (не ERROR на каждое сообщение, как и stale по поколению у reader'а).
+                self._stale_unlinked_drops += 1
+                return None, False
             except Exception as e:
                 self._log_error(f"FrameShmMiddleware: чтение {label} по ссылке не удалось: {e} (shm={name})")
             else:
@@ -933,13 +954,20 @@ class FrameShmMiddleware:
             )
         return None, False
 
-    def _restore_refs(self, msg: dict, data: dict, refs: Any, allow_view: bool) -> list:
+    def _restore_refs(self, msg: dict, data: dict, refs: Any, allow_view: bool) -> Optional[list]:
         """Каждую ссылку ``_shm_refs[key]`` -> массив: ``frame`` в ``msg["frame"]``, прочие в
         ``data[key]``. Ключ, уже несущий значение (массив уехал inline), не трогается. Битая
-        ссылка — пропуск. Возвращает список ссылок, восстановленных view."""
+        ссылка (не dict) — пропуск.
+
+        Атомарность (4.4c): на ПЕРВОЙ ссылке, вернувшей ``None`` (stale/torn/сбой открытия), чтение
+        останавливается, уже восстановленные ключи снимаются, возвращается ``None`` = сообщение
+        отбрасывается целиком. Счётчик reader'а (``frame_stale_drops``/``frame_torn_reads``)
+        растёт один раз — на ту единственную ссылку, что провалилась, т.е. считаются СООБЩЕНИЯ.
+        Иначе возвращает список ссылок, восстановленных view (возможно пустой)."""
         views: list = []
         if not isinstance(refs, dict):
             return views
+        restored: list = []  # (контейнер, ключ) — что снять при отбрасывании
         for key, ref in refs.items():
             if not isinstance(ref, dict):
                 continue
@@ -952,7 +980,12 @@ class FrameShmMiddleware:
                     continue
                 target = data
             arr, is_view = self._read_ref(ref, key, allow_view=allow_view)
+            if arr is None:
+                for container, done_key in restored:
+                    container.pop(done_key, None)
+                return None
             target[key] = arr
+            restored.append((target, key))
             if is_view:
                 views.append(ref)
         return views
@@ -1138,11 +1171,15 @@ class FrameShmMiddleware:
         КОПИЕЙ (copy-out потребитель release не шлёт) по ``ref["name"]`` со сверкой поколения
         ``ref["gen"]``: перезаписанная ячейка -> ``None`` + ``frame_stale_drops``, рваное чтение ->
         ``None`` + ``frame_torn_reads``.
+
+        Атомарность (4.4c): нечитаемая ссылка любого ключа -> ``None`` из middleware (RouterManager
+        считает это ``middleware_dropped`` и сообщение не доставляет) — потребитель не увидит ни
+        ``frame`` без ``mask``, ни ключ со значением ``None``.
         """
         data = msg.get("data")
         if not isinstance(data, dict):
             return msg
         refs = data.get(SHM_REFS_KEY)
-        if refs:
-            self._restore_refs(msg, data, refs, allow_view=False)
+        if refs and self._restore_refs(msg, data, refs, allow_view=False) is None:
+            return None  # 4.4c: одна нечитаемая ссылка -> сообщение отбрасывается целиком (drop у router'а)
         return msg

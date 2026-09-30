@@ -580,8 +580,8 @@ def test_a7_control_copy_out_restores_frame_and_large_key(rig):
 
 def test_a7_copy_out_restores_and_counts_stale(rig):
     """A7: обе ссылки (``frame`` и ``foo``) устарели до приёма (кольца обернулись) -> ``on_receive``
-    возвращает ``None`` под обоими ключами (никаких пикселей новых записей), ``frame_stale_drops`` == 2
-    (по одному на ключ), ``frame_torn_reads`` == 0."""
+    возвращает ``None`` (сообщение отброшено целиком, никаких пикселей новых записей),
+    ``frame_stale_drops`` == 1 (одно сообщение), ``frame_torn_reads`` == 0."""
     writer, gui = rig.make("A"), rig.make("gui")
 
     def scenario() -> tuple[dict, list[np.ndarray]]:
@@ -590,12 +590,18 @@ def test_a7_copy_out_restores_and_counts_stale(rig):
         return gui.on_receive(wire), foreign
 
     msg, foreign = _bounded(scenario)
-    for key in KEYS:
-        got = _pick(msg, key)
-        if got is not None:
-            who = "пиксели НОВОЙ записи (чужой кадр)" if any(_same(got, f) for f in foreign) else "какой-то массив"
-            pytest.fail(f"copy-out вернул {who} под ключом {key!r} вместо None")
-    assert gui.frame_stale_drops == 2, f"frame_stale_drops = {gui.frame_stale_drops}, ожидалось 2 (по одному на ключ)"
+    # 4.4c (решение лида 2026-09-30): сообщение с нечитаемой ссылкой отбрасывается целиком —
+    # on_receive возвращает None (не msg с None под ключами). Проверка «нет чужих пикселей» — на msg,
+    # если он вдруг вернулся.
+    if msg is not None:
+        for key in KEYS:
+            got = _pick(msg, key)
+            if got is not None:
+                who = "пиксели НОВОЙ записи (чужой кадр)" if any(_same(got, f) for f in foreign) else "какой-то массив"
+                pytest.fail(f"copy-out вернул {who} под ключом {key!r} вместо None")
+    assert msg is None, "сообщение с устаревшими ссылками должно быть отброшено целиком (None)"
+    # 4.4c (решение лида 2026-09-30): счётчик — сообщения, не ссылки
+    assert gui.frame_stale_drops == 1, f"frame_stale_drops = {gui.frame_stale_drops}, ожидалось 1 (одно сообщение)"
     assert gui.frame_torn_reads == 0
 
 

@@ -7,7 +7,10 @@
   * две устаревшие входные ссылки считаются ОДНИМ дропом (проверка останавливается на первой);
   * здоровый item на повторе не пишет заново и не несёт ни ``_shm_views``, ни чужих ссылок;
   * унаследованные ссылки не переживают send-дверь, даже когда своих массивов нет;
-  * тикеты loan/evict строятся из ссылки ``{owner, slot, idx, gen, name}``.
+  * тикеты loan/evict строятся из ссылки ``{owner, slot, idx, gen, name}``;
+  * 4.4c: item атомарен — если ХОТЬ ОДНА ссылка сообщения не читается (stale/torn), сообщение
+    отбрасывается ЦЕЛИКОМ (никаких ``mask=None`` при живом ``frame``), чтение останавливается на
+    первой неудаче, счётчик считает СООБЩЕНИЯ.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from multiprocess_framework.modules.router_module.core.router_manager import Rou
 from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
 
-SHAPES = {"frame": (48, 64, 3), "foo": (100, 100)}  # оба >= 8192 Б
+SHAPES = {"frame": (48, 64, 3), "foo": (100, 100), "mask": (100, 120)}  # все >= 8192 Б
 
 
 @pytest.fixture(autouse=True)
@@ -159,3 +162,92 @@ def test_evicted_release_tickets_come_from_refs():
     sent.clear()
     RouterManager._on_frame_evicted(router, {"data": {"n": 1}}, "B")
     assert sent == []
+
+
+# ===================== 4.4c: item атомарен (frame прочитан, mask перезаписана) =====================
+def _wire_frame_and_mask(writer):
+    """Провод-сообщение с двумя ссылками (frame, mask) + ссылка на mask, которую потом перепишут."""
+    import pickle
+
+    out = _send(writer, {"frame": _arr("frame", 1), "mask": _arr("mask", 2), "n": 1})
+    return pickle.loads(pickle.dumps(out))
+
+
+@pytest.mark.parametrize("view", [False, True], ids=["copy", "view"])
+def test_frame_ok_mask_stale_drops_whole_message_restore(made, view):
+    """Живой стенд 1080p: frame прочитан целым, mask перезаписана -> сообщение отброшено ЦЕЛИКОМ:
+    ни ``frame``, ни ``mask`` не восстановлены, метка ``_shm_dropped`` стоит, view-билетов нет,
+    ``frame_stale_drops`` == 1 (одно сообщение), torn == 0."""
+    writer, reader = _mw(made, "A"), _mw(made, "B", view=view)
+    wire = _wire_frame_and_mask(writer)
+    _overwrite(writer, "mask")  # кольцо mask обернулось, кольцо frame не тронуто
+
+    msg = reader.restore_frame(wire)
+    data = msg["data"]
+    assert msg.get("frame") is None and data.get("frame") is None, "frame доставлен при потерянной mask"
+    assert "mask" not in data, "под ключом mask лежит значение (None тоже нельзя: ключ обязан отсутствовать)"
+    assert data.get("_shm_dropped") is True
+    assert "_shm_views" not in data
+    assert reader.frame_stale_drops == 1 and reader.frame_torn_reads == 0
+
+
+def test_frame_ok_mask_stale_on_receive_returns_none(made):
+    """Copy-out (GUI): frame цел, mask перезаписана -> ``on_receive`` возвращает ``None``
+    (RouterManager считает это middleware_dropped), ``frame_stale_drops`` == 1."""
+    writer, gui = _mw(made, "A"), _mw(made, "gui")
+    wire = _wire_frame_and_mask(writer)
+    _overwrite(writer, "mask")
+
+    assert gui.on_receive(wire) is None
+    assert gui.frame_stale_drops == 1 and gui.frame_torn_reads == 0
+
+
+def test_first_ref_stale_second_not_read(made):
+    """Чтение останавливается на первой неудаче: frame перезаписан, mask жива -> сегмент mask
+    НЕ открыт reader'ом (граница reader'а: view-режим кэширует каждый открытый handle, в кэше
+    только сегмент frame), stale == 1."""
+    writer, reader = _mw(made, "A"), _mw(made, "B", view=True)
+    wire = _wire_frame_and_mask(writer)
+    _overwrite(writer, "frame")
+    assert reader.frame_handle_cache_size == 0
+
+    msg = reader.restore_frame(wire)
+    assert msg["data"].get("_shm_dropped") is True
+    assert reader.frame_handle_cache_size == 1, "сегмент mask прочитан, хотя frame уже провалился"
+    assert reader.frame_stale_drops == 1
+
+
+def test_torn_on_second_ref_counts_one_torn_message(made):
+    """frame цел, mask рвётся (ссылка на нечётное поколение слота — writer «в процессе»): сообщение
+    отброшено целиком, ``frame_torn_reads`` == 1, ``frame_stale_drops`` == 0."""
+    from multiprocess_framework.modules.shared_resources_module.memory.format import buffer as buf_mod
+
+    writer, reader = _mw(made, "A"), _mw(made, "B")
+    wire = _wire_frame_and_mask(writer)
+    ref = wire["data"]["_shm_refs"]["mask"]
+    handle = writer._mm.get_memory_data("A", ref["slot"])["handles"][ref["idx"]]
+    odd = buf_mod.read_generation(handle.buf) + 1
+    buf_mod._write_generation(handle.buf, odd)
+    ref["gen"] = odd
+
+    msg = reader.restore_frame(wire)
+    assert msg.get("frame") is None and msg["data"].get("frame") is None
+    assert "mask" not in msg["data"] and msg["data"].get("_shm_dropped") is True
+    assert reader.frame_torn_reads == 1 and reader.frame_stale_drops == 0
+
+
+def test_unlinked_segment_ref_is_stale_drop_counted_without_error_log(made):
+    """Сегмент ссылки отвязан (realloc кольца у владельца): открытие бросает раньше проверки
+    поколения — это тот же stale: сообщение отброшено целиком, ``frame_stale_drops`` == 1, ERROR-лога
+    на каждое такое сообщение нет."""
+    logs: list[str] = []
+    writer = _mw(made, "A")
+    reader = _mw(made, "B", log_error=logs.append)
+    wire = _wire_frame_and_mask(writer)
+    wire["data"]["_shm_refs"]["mask"]["name"] = "no_such_segment_4_4c"
+
+    msg = reader.restore_frame(wire)
+    assert msg["data"].get("_shm_dropped") is True and "mask" not in msg["data"]
+    assert msg.get("frame") is None
+    assert reader.frame_stale_drops == 1 and reader.frame_torn_reads == 0
+    assert logs == [], f"stale-дроп отвязанного сегмента залогирован как ошибка: {logs}"
