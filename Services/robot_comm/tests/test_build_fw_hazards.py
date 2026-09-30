@@ -38,18 +38,44 @@ def _fake_lua_block(monkeypatch):
     monkeypatch.setattr(codegen, "lua_block", lambda root: "-- GEN\nREG = {A = 1}")
 
 
-def test_luacheck_runs_on_built_artifact(tmp_path, monkeypatch):
-    """luacheck получает путь к собранному артефакту (в src лежит не-Lua токен @@FW_BUILD@@)."""
-    root = make_root(tmp_path, DEFAULT)
-    runs: list = []
+def _fake_luacheck(monkeypatch):
+    """Подмена luacheck: пишет argv и «существовал ли артефакт в момент вызова»."""
+    runs: list[tuple[list, bool]] = []
+
+    def fake_run(cmd, *a, **k):
+        runs.append((list(cmd), Path(cmd[-1]).exists()))
+        return subprocess.CompletedProcess(cmd, 0)
+
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "C:/fake/luacheck.exe")
-    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: runs.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return runs
+
+
+def test_luacheck_runs_on_built_artifact_after_write(tmp_path, monkeypatch):
+    """luacheck: конфиг из robot/v2, последним аргументом собранный артефакт, к моменту вызова он уже записан."""
+    root = make_root(tmp_path, DEFAULT)
+    runs = _fake_luacheck(monkeypatch)
     assert build_fw.main(["--root", str(root)]) == 0
-    assert runs and Path(runs[-1][-1]) == root / ART
-    assert (root / ART).exists(), "к моменту запуска luacheck артефакт уже записан"
+    ((cmd, existed),) = runs
+    assert existed is True, "luacheck вызван до записи артефакта"
+    assert Path(cmd[-1]) == root / ART
+    assert cmd[1] == "--config" and Path(cmd[2]) == root / "robot/v2/.luacheckrc"
     runs.clear()
     assert build_fw.main(["--check", "--root", str(root)]) == 0
-    assert runs and Path(runs[-1][-1]) == root / ART
+    ((cmd, existed),) = runs
+    assert existed is True and Path(cmd[-1]) == root / ART
+    assert cmd[1] == "--config" and Path(cmd[2]) == root / "robot/v2/.luacheckrc"
+
+
+def test_check_stale_artifact_skips_luacheck(tmp_path, monkeypatch):
+    """--check по устаревшему артефакту: rc=1, luacheck не зовётся."""
+    root = make_root(tmp_path, DEFAULT)
+    runs = _fake_luacheck(monkeypatch)
+    assert build_fw.main(["--root", str(root)]) == 0
+    runs.clear()
+    (root / SRC / "20_body.lua").write_bytes(b"x = 201\n")
+    assert build_fw.main(["--check", "--root", str(root)]) == 1
+    assert runs == []
 
 
 def test_bom_in_source_is_build_error(tmp_path):

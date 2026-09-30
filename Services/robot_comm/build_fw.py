@@ -17,8 +17,8 @@
 - Артефакт пишется байтами (LF, без CR): на машине autocrlf=true ``write_text`` дал бы CRLF.
 
 CLI: ``python -m Services.robot_comm.build_fw [--check] [--root PATH]``. Сборка (запись) либо
-``--check`` (без записи), затем luacheck по СОБРАННОМУ артефакту (в src лежит не-Lua токен
-``@@FW_BUILD@@``); luacheck нет в PATH -> предупреждение в stderr, не провал.
+``--check`` (без записи), затем luacheck (конфиг ``robot/v2/.luacheckrc``) по СОБРАННОМУ артефакту
+(в src лежит не-Lua токен ``@@FW_BUILD@@``); luacheck нет в PATH -> предупреждение в stderr, не провал.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from Services.robot_comm import codegen
 
 SRC_REL = Path("robot/v2/src")
 ARTIFACT_REL = Path("robot/v2/main_v2.lua")
+LUACHECKRC_REL = Path("robot/v2/.luacheckrc")
 
 _HEADER = "00_header.lua"
 _GENERATED = "10_generated.lua"
@@ -131,14 +132,18 @@ def check(root: Path) -> list[str]:
     return []
 
 
-def _luacheck(path: Path) -> bool:
-    """False, если luacheck запущен и нашёл проблемы. Нет luacheck -> предупреждение, True."""
+def _luacheck(root: Path) -> bool:
+    """luacheck по собранному артефакту с конфигом robot/v2/.luacheckrc (артефакт — последний аргумент).
+
+    False, если luacheck запущен и нашёл проблемы. Нет luacheck -> предупреждение, True.
+    """
     exe = shutil.which("luacheck")
     if exe is None:
         print("предупреждение: luacheck не найден в PATH, статпроверка Lua пропущена", file=sys.stderr)
         return True
     # exe из shutil.which, без shell
-    if subprocess.run([exe, str(path)]).returncode != 0:  # nosec B603
+    result = subprocess.run([exe, "--config", str(root / LUACHECKRC_REL), str(root / ARTIFACT_REL)])  # nosec B603
+    if result.returncode != 0:
         print("luacheck: найдены проблемы", file=sys.stderr)
         return False
     return True
@@ -164,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     except BuildError as exc:
         print(f"ошибка сборки: {exc}", file=sys.stderr)
         return 1
-    return 0 if _luacheck(artifact) else 1
+    return 0 if _luacheck(root) else 1
 
 
 if __name__ == "__main__":
