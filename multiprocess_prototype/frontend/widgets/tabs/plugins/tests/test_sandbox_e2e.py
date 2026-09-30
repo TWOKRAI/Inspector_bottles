@@ -82,6 +82,8 @@ def _import_real_plugins():
 
     importlib.import_module("Plugins.processing.grayscale.plugin")
     importlib.import_module("Plugins.processing.color_mask.plugin")
+    importlib.import_module("Plugins.processing.hsv_mask.plugin")
+    importlib.import_module("Plugins.processing.blob_detector.plugin")
     importlib.import_module("Plugins.processing.stitcher.plugin")
 
 
@@ -138,8 +140,9 @@ class TestColorMaskFullPipeline:
     ) -> None:
         """color_mask с широким HSV-диапазоном → результат не None, shape (H, W, 3).
 
-        ColorMaskPlugin.process возвращает mask_bgr — 3-канальный BGR
-        (см. plugin.py: mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)).
+        ColorMaskPlugin кладёт в item["mask"] одноканальную маску (кадр не меняет);
+        песочница берёт первый image/*-выход плагина (mask) и сама переводит
+        gray → BGR, чтобы вид всегда получал (H, W, 3).
         """
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
@@ -156,8 +159,55 @@ class TestColorMaskFullPipeline:
 
         assert result is not None, "color_mask должен вернуть результат, не None"
         assert isinstance(result, np.ndarray)
-        # ColorMaskPlugin возвращает BGR 3-канальный (mask_bgr)
+        # Песочница конвертирует gray-маску в BGR
         assert result.shape == (50, 50, 3), f"Ожидали shape (50, 50, 3), получили {result.shape}"
+
+    def test_color_mask_sandbox_shows_the_mask_not_the_frame(
+        self,
+        ctx_with_real_registry,
+        minimal_bgr_frame,
+    ) -> None:
+        """Красная половина попадает в H 0..10 (белая), зелёная — нет (чёрная).
+
+        Раньше песочница показывала result["frame"] — вход без изменений.
+        """
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        config = {"h_min": 0, "h_max": 10, "s_min": 10, "s_max": 255, "v_min": 10, "v_max": 255}
+        out = SandboxPresenter(ctx_with_real_registry).run_once("color_mask", minimal_bgr_frame, config)
+
+        assert out.shape == (50, 50, 3)
+        assert out[5, 25].tolist() == [255, 255, 255]
+        assert out[45, 25].tolist() == [0, 0, 0]
+
+    def test_hsv_mask_sandbox_shows_the_mask_not_the_frame(
+        self,
+        ctx_with_real_registry,
+        minimal_bgr_frame,
+    ) -> None:
+        """То же для hsv_mask: первый image/*-выход — mask."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        config = {"h_min": 0, "h_max": 10, "s_min": 10, "s_max": 255, "v_min": 10, "v_max": 255}
+        out = SandboxPresenter(ctx_with_real_registry).run_once("hsv_mask", minimal_bgr_frame, config)
+
+        assert out.shape == (50, 50, 3)
+        assert out[5, 25].tolist() == [255, 255, 255]
+        assert out[45, 25].tolist() == [0, 0, 0]
+
+    def test_blob_detector_sandbox_still_shows_the_frame(
+        self,
+        ctx_with_real_registry,
+        minimal_bgr_frame,
+    ) -> None:
+        """blob_detector: первый image/*-выход — frame, не mask (guard: зелёная нижняя половина видна)."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        config = {"h_min": 0, "h_max": 10, "s_min": 10, "s_max": 255, "v_min": 10, "v_max": 255, "draw_contours": False}
+        out = SandboxPresenter(ctx_with_real_registry).run_once("blob_detector", minimal_bgr_frame, config)
+
+        assert out.shape == (50, 50, 3)
+        assert out[45, 25].tolist() == [0, 255, 0]
 
     def test_color_mask_result_not_empty(
         self,

@@ -60,6 +60,52 @@ def test_bad_upstream_mask_falls_back_to_own_thresholding(bad_mask):
     assert dets[0]["bbox"] == [50, 50, 101, 101]
 
 
+def _warning_count(plugin: BlobDetectorPlugin) -> int:
+    return plugin._ctx.log_warning.call_count
+
+
+def test_rejected_mask_warns_exactly_once_over_many_frames():
+    """Маска от другого разрешения (после resize) отвергается молча раньше: 10 кадров -> ровно 1 предупреждение."""
+    plugin = _plugin()
+    half_mask = np.full((100, 100), 255, dtype=np.uint8)
+
+    for _ in range(10):
+        plugin.process([{"frame": _frame_with_white_square(), "mask": half_mask}])
+
+    assert _warning_count(plugin) == 1
+    msg = plugin._ctx.log_warning.call_args[0][0]
+    assert "(100, 100)" in msg and "(200, 200)" in msg  # обе формы названы
+
+
+def test_bool_dtype_mask_warns_exactly_once():
+    plugin = _plugin()
+    bool_mask = np.full((200, 200), True, dtype=bool)
+
+    plugin.process([{"frame": _frame_with_white_square(), "mask": bool_mask}])
+    plugin.process([{"frame": _frame_with_white_square(), "mask": bool_mask}])
+
+    assert _warning_count(plugin) == 1
+    assert "bool" in plugin._ctx.log_warning.call_args[0][0]
+
+
+def test_no_mask_does_not_warn():
+    plugin = _plugin()
+
+    plugin.process([{"frame": _frame_with_white_square()}])
+    plugin.process([{"frame": _frame_with_white_square(), "mask": None}])
+
+    assert _warning_count(plugin) == 0
+
+
+def test_valid_mask_does_not_warn():
+    plugin = _plugin()
+    good_mask = np.zeros((200, 200), dtype=np.uint8)
+
+    plugin.process([{"frame": _frame_with_white_square(), "mask": good_mask}])
+
+    assert _warning_count(plugin) == 0
+
+
 def test_draw_contours_returns_new_frame_with_contours_and_keeps_input():
     """draw_contours: выходной frame — другой объект с нарисованными контурами, вход не тронут."""
     frame = _frame_with_white_square()

@@ -22,6 +22,17 @@ from multiprocess_framework.modules.process_module.plugins import register_plugi
 from .registers import BlobDetectorRegisters
 
 
+def _mask_reject_reason(mask: object, frame: np.ndarray) -> str:
+    """Почему чужая маска не годится (для предупреждения); условие годности — в process()."""
+    if not isinstance(mask, np.ndarray):
+        return f"не ndarray: {type(mask).__name__}"
+    if mask.ndim != 2:
+        return f"ndim={mask.ndim}, нужна 2D"
+    if mask.dtype != np.uint8:
+        return f"dtype={mask.dtype}, нужен uint8"
+    return f"размер маски {mask.shape} != размер кадра {frame.shape[:2]}"
+
+
 @register_plugin("blob_detector", category="processing", description="Детекция цветных контуров по HSV-маске")
 class BlobDetectorPlugin(ProcessModulePlugin):
     """HSV-маска → findContours → фильтрация по area → detections."""
@@ -57,6 +68,7 @@ class BlobDetectorPlugin(ProcessModulePlugin):
         """Настройка: register managed (GUI) или локальный (defaults)."""
         self._ctx = ctx
         self._reg = self._init_register(ctx)
+        self._warned_bad_mask = False
 
         ctx.log_info(
             f"BlobDetectorPlugin: HSV [{self._reg.h_min},{self._reg.s_min},{self._reg.v_min}]-"
@@ -87,6 +99,10 @@ class BlobDetectorPlugin(ProcessModulePlugin):
         ):
             mask = upstream
         else:
+            if upstream is not None and not self._warned_bad_mask:
+                self._warned_bad_mask = True
+                reason = _mask_reject_reason(upstream, frame)
+                self._ctx.log_warning(f"BlobDetectorPlugin: маска отвергнута ({reason}), порогуем цвет сами")
             # HSV-пороги из register
             lower = np.array([self._reg.h_min, self._reg.s_min, self._reg.v_min], dtype=np.uint8)
             upper = np.array([self._reg.h_max, self._reg.s_max, self._reg.v_max], dtype=np.uint8)

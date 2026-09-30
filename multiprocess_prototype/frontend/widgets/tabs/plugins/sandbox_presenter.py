@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import cv2
 import numpy as np
 
 from multiprocess_framework.modules.logger_module import get_std_logger
@@ -216,11 +217,20 @@ class SandboxPresenter:
         plugin.configure(ctx)
         result = plugin.process([{"frame": frame}])
 
-        # Извлекаем frame из первого результата
+        # Показываем первый image/*-выход плагина (color_mask/hsv_mask → mask,
+        # blob_detector → frame); нет такого порта или значения → "frame".
         if result and isinstance(result, list) and len(result) > 0:
-            out_frame = result[0].get("frame")
-            if out_frame is not None:
-                return out_frame
+            key = next(
+                (p.name for p in getattr(plugin_cls, "outputs", []) if str(p.dtype).startswith("image/")),
+                "frame",
+            )
+            out = result[0].get(key)
+            if out is None:
+                out = result[0].get("frame")
+            if out is not None:
+                if out.ndim == 2:  # gray-маска → BGR: вид всегда получает (H, W, 3)
+                    out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
+                return out
 
         return None
 
