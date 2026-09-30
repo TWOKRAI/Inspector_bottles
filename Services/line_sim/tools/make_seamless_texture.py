@@ -9,7 +9,17 @@
 начало (не целое число найденных периодов: в пикселях сцены период звена нецелый).
 Принимается, только если шов (разница последнего и первого столбца) не хуже внутренней
 разницы между соседними столбцами —
-иначе выбор периода дал бы более грубый скачок на стыке, чем внутри тайла. (2) Зеркало:
+иначе выбор периода дал бы более грубый скачок на стыке, чем внутри тайла.
+Резерв (только с `--force-period`): `_best_crop` ищет старт в [0, 8] и ширину >= W/2
+по 1D-профилю яркости; на реальном фото цепи ни один такой кроп не проходит шов
+(лучший — на +3.82 хуже при start=6, c=320), и до зеркала пробуются кропы ширины
+k * период (k от W // период вниз до 1) с наилучшим по столбцам стартом.
+Резерв опт-ин, потому что автоматически он ошибается: на виньетированной синусоиде
+(H6 из 3_6, дрейф средней яркости >= 20 %) он выбирает кроп с проходящим швом, но
+видимым скачком огибающей яркости; у реальной цепи при неровном свете дрейф средней
+яркости тайла против соседнего периода 16-22 % — на уровне H6, автоматически их не
+различить. Без флага — как раньше.
+(2) Зеркало:
 `[image | image[:, ::-1]]` — стыкует буквально одинаковые столбцы, шов = 0 всегда;
 кросс-фейда нет (на зеркальной склейке он ничего не чинит, только размывает). Выбранный
 путь, найденный период и остаточная разница кромок печатаются числами, а не решаются
@@ -147,9 +157,40 @@ def _best_crop(image: np.ndarray, period: int) -> tuple[int, int]:
     return min(by_width[best_c])[1], best_c
 
 
-def make_seamless_tile(image: np.ndarray) -> SeamlessResult:
-    """Собрать бесшовный тайл: период — если он есть и его шов не хуже внутреннего,
-    иначе зеркало."""
+def _period_multiple_crop(image: np.ndarray, period: int) -> SeamlessResult | None:
+    """Резерв: тайл шириной `k * period`, k от `W // period` вниз до 1; первый с швом не хуже внутреннего.
+
+    Старт `s` из `[0, W - c)` — минимум средней абсолютной разницы столбцов `s` и `s + c`
+    (та же мера, что `_step`: все строки и каналы). Ни один k не подошёл — `None`.
+    """
+    width = image.shape[1]
+    height = image.shape[0]
+    for k in range(width // period, 0, -1):
+        crop_w = k * period
+        if crop_w >= width:
+            continue
+        diff = np.abs(image[:, : width - crop_w].astype(np.float64) - image[:, crop_w:].astype(np.float64))
+        start = int(np.argmin(diff.reshape(height, width - crop_w, -1).mean(axis=(0, 2))))
+        tile = image[:, start : start + crop_w].copy()
+        inner_diff, seam_diff = _seam_and_inner(tile)
+        if seam_diff <= inner_diff:
+            note = f"резерв: {k} период(а), старт {start}"
+            return SeamlessResult(tile, "period", period, seam_diff, inner_diff, note=note)
+    return None
+
+
+def make_seamless_tile(image: np.ndarray, *, force_period: bool = False) -> SeamlessResult:
+    """Собрать бесшовный тайл: период — если он есть и его шов не хуже внутреннего, иначе зеркало.
+
+    `force_period=True` добавляет между ними резервную обрезку по кратному периоду
+    (`_period_multiple_crop`). Резерв нужен, потому что `_best_crop` ищет старт в [0, 8] и
+    ширину >= W/2 по 1D-профилю; на реальном фото цепи ни один его кроп не проходит шов
+    (лучший +3.82 при start=6, c=320), хотя период найден верно. Критерий шва в резерве тот же.
+    Опт-ин, а не автомат: на виньетированной синусоиде (H6 из 3_6) дрейф средней яркости
+    >= 20 %, а на реальной цепи при неровном свете 16-22 % — автоматически не различить, и
+    автомат выдал бы на H6 «period» с видимым скачком огибающей. Без флага (по умолчанию)
+    поведение прежнее: `_best_crop`, затем зеркало.
+    """
     period = find_period(image)
     note = ""
     if period is not None:
@@ -158,6 +199,10 @@ def make_seamless_tile(image: np.ndarray) -> SeamlessResult:
         inner_diff, seam_diff = _seam_and_inner(candidate)
         if seam_diff <= inner_diff:
             return SeamlessResult(candidate, "period", period, seam_diff, inner_diff)
+        if force_period:
+            fallback = _period_multiple_crop(image, period)
+            if fallback is not None:
+                return fallback
         note = (
             f"период найден ({period} px), но шов ({seam_diff:.2f}) хуже "
             f"внутренней разницы тайла ({inner_diff:.2f}) — откат на зеркальную склейку"
@@ -198,6 +243,16 @@ def main(argv: list[str] | None = None) -> int:
         dest="pitch_mm",
         help="шаг звена ленты в мм — период ищется на исходнике, коэффициент = S*M/P0",
     )
+    parser.add_argument(
+        "--force-period",
+        action="store_true",
+        dest="force_period",
+        help=(
+            "фото заведомо периодическое (цепь): при провале обычной обрезки резать по k периодам "
+            "с лучшим швом; яркость по кадру должна быть ровной — виньетирование даст видимый "
+            "скачок огибающей"
+        ),
+    )
     args = parser.parse_args(argv)
 
     has_reference = args.photo_width_mm is not None or args.pitch_mm is not None
@@ -237,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         image = cv2.resize(image, (new_w, new_h), interpolation=interp)
 
-    result = make_seamless_tile(image)
+    result = make_seamless_tile(image, force_period=args.force_period)
     imwrite_unicode(args.out, result.tile)
 
     tile_h, tile_w = result.tile.shape[:2]
