@@ -22,9 +22,19 @@ from Plugins.sim.pult_web.tests.test_acceptance_1_3h_c_layers import (  # noqa: 
 )
 from Plugins.sim.pult_web.tests.test_acceptance_1_3h_d_page import (
     _ERR_CONFLICT,
+    _FOCUS_INPUT,
+    _INPUT,
     _OK_REPLY,
+    _READY,
+    _SETTLE,
+    _SETTLED,
+    _assert_ran,
+    _choose,
     _put_posts,
+    _run_canvas,
+    _snap,
     _sprite_posts,
+    _stub_put,
     _upload,
 )
 
@@ -48,3 +58,26 @@ def test_ok_without_file_is_handled_as_a_refusal_not_as_a_success(start_pult) ->
     assert count == refusal_count, f"ok без file перезапросил список, как успех: {count} против {refusal_count}"
     assert after["layers"] == _INITIAL, f"ok без file: слой не добавляется: {after['layers']!r}"
     assert after["spritesError"].strip(), "ok без file: текст отказа показан"
+
+
+def test_file_over_6_mib_is_refused_before_reading_and_without_a_post(start_pult) -> None:
+    """Файл 6 МиБ + 1 байт: страница отказывает по `file.size` — ни чтения (FileReader), ни POST `sprite_put`."""
+    stand = _stand(start_pult, _INITIAL, sprites_replies=[_SPRITES_OK])
+    out = _run_canvas(
+        stand.port,
+        [
+            _stub_put(_OK_REPLY, 200),
+            _READY,
+            _SETTLE,
+            _FOCUS_INPUT,
+            {**_choose("big.png"), "size": 6_291_457},
+            _SETTLED,
+            _snap("after", [_INPUT]),
+        ],
+    )
+    _assert_ran(out)
+    after = out["snaps"]["after"]
+    assert _put_posts(out) == [], "больше 6 МиБ: POST sprite_put не уходит"
+    assert "6 МиБ" in after["spritesError"], f"текст отказа показан: {after['spritesError']!r}"
+    assert after["fields"][_INPUT] == "", "контроль вводa сброшен (тот же файл можно выбрать снова)"
+    assert after["layers"] == _INITIAL, "слой не добавлен"

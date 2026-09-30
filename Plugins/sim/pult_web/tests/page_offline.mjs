@@ -874,7 +874,7 @@ async function run() {
         // Task 1.3h-d: пользователь выбрал файл в <input type=file>: files = [{name}], value = "C:\fakepath\name",
         // FileReader отдаст st.dataUrl; затем `change` (как браузер).
         const inp = el(st.id);
-        inp._pick({ name: st.name, size: 3, type: "image/png", _dataUrl: st.dataUrl });
+        inp._pick({ name: st.name, size: st.size !== undefined ? st.size : String(st.dataUrl || "").length, type: "image/png", _dataUrl: st.dataUrl });
         inp.fire("change");
         await sleep(10);
       } else if (st.op === "settle") {
