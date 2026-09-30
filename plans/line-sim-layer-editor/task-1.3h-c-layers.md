@@ -175,6 +175,7 @@
       на другом слое. Прежняя «инертность» стрелок была побочным эффектом выбора по имени. Тесты:
       `test_f2_add_then_undo_restores_previous_selection_never_the_removed_layer`,
       `test_undo_delete_restores_index_and_reselects_the_layer`.
+      **Подтверждено владельцем 2026-09-30**; Qt приводится к тому же контракту — [`undo-restores-selection`](../undo-restores-selection.md).
 - [ ] F2: «Отмена», после которой выбранный слой остался (сдвиг выбранного стрелкой → «Отмена»), выбор сохраняет.
 - [ ] Радиус `Plugins/sim/pult_web/tests` + `Plugins/sim/layer_preview/tests` зелёный.
 **Out of scope:** R-4 (`device_hub`); запрет второго `class://`; поля формы (ввод в `<input>` фокус не отдаёт).
