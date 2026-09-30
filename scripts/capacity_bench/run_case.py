@@ -80,9 +80,10 @@ def run(recipe: str, secs: float, port: int) -> dict:
             time.sleep(WARMUP_S)
             pids = _pids(drv, names, _find_payload)
             probes = {name: cpu_probe.ProcessCpu(pid) for name, pid in pids.items()}
-            c0 = {name: p.read_seconds() for name, p in probes.items()}
-            # Снимок счётчиков в тот же момент, что и c0: shm/pacer_late копятся с запуска процесса.
+            # Снимок счётчиков ДО начала окна CPU: shm/pacer_late копятся с запуска процесса, а n вызовов
+            # IPC между c0 и t0 завышали бы ядра (числитель длиннее знаменателя, ревью 4.8a итерация 2).
             before = {name: _fields(drv, name) for name in probes}
+            c0 = {name: p.read_seconds() for name, p in probes.items()}
             t0 = time.perf_counter()
             hz_polled: dict[str, list[float]] = {name: [] for name in probes}
             while time.perf_counter() - t0 < secs:
