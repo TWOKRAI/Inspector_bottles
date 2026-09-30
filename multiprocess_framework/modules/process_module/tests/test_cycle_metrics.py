@@ -24,6 +24,8 @@ _EXPECTED_KEYS = {"cycle_duration_ms", "effective_hz", "target_interval_ms", "cy
 # Task 4.5a: воркеры-обёртки добавляют к базовому снимку свои поля кадрового пути.
 _SOURCE_KEYS = _EXPECTED_KEYS | {"pacer_late"}
 _EXECUTOR_KEYS = _EXPECTED_KEYS | {"queue_wait_ms"}
+# Task 4.5d: приёмник добавляет время транспорта между процессами.
+_RECEIVER_KEYS = _EXPECTED_KEYS | {"transport_ms"}
 
 
 class TestCycleMetricsRecorder:
@@ -205,4 +207,4 @@ class TestApplicationWorkerCycleMetrics:
             chain_queue=queue.Queue(),
         )
         assert getattr(dr.run_loop, "__self__", None) is dr
-        assert set(dr.get_cycle_metrics().keys()) == _EXPECTED_KEYS
+        assert set(dr.get_cycle_metrics().keys()) == _RECEIVER_KEYS
