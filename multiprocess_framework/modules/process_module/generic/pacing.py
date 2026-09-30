@@ -35,6 +35,14 @@ class FramePacer:
     def __init__(self, interval_s: float) -> None:
         self._interval = max(0.0, float(interval_s))
         self._next: float | None = None
+        # Сколько раз такт начался с опозданием (работа длиннее интервала). Накопительный,
+        # reset() его не обнуляет; пишет только поток-владелец.
+        self._late = 0
+
+    @property
+    def late(self) -> int:
+        """Сколько тактов начато с опозданием (накопительно, с создания пейсера)."""
+        return self._late
 
     def reset(self) -> None:
         """Забыть расписание: следующий ``wait`` отсчитает интервал от «сейчас»."""
@@ -47,6 +55,7 @@ class FramePacer:
         if nxt < now:
             # Опоздали: такты, пропущенные за время работы, не досылаем пачкой.
             nxt = now
+            self._late += 1
         self._next = nxt
         while not stop_event.is_set():
             left = nxt - time.perf_counter()

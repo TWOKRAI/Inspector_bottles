@@ -60,6 +60,8 @@ METRIC_FPS = declare_metric("fps", owner=__name__)
 METRIC_LATENCY_MS = declare_metric("latency_ms", owner=__name__)
 METRIC_EFFECTIVE_HZ = declare_metric("effective_hz", owner=__name__)
 METRIC_CYCLE_DURATION_MS = declare_metric("cycle_duration_ms", owner=__name__)
+METRIC_QUEUE_WAIT_MS = declare_metric("queue_wait_ms", owner=__name__)
+METRIC_PACER_LATE = declare_metric("pacer_late", owner=__name__)
 
 
 def build_worker_telemetry(
@@ -76,14 +78,18 @@ def build_worker_telemetry(
 
         path = f"processes.{name}"
         data = {
-            "workers": {wname: {"status", "effective_hz"?, "cycle_duration_ms"?}, ...},
+            "workers": {wname: {"status", "effective_hz"?, "cycle_duration_ms"?,
+                                "queue_wait_ms"?, "pacer_late"?}, ...},
             "state":   {"fps"?, "latency_ms"?},   # агрегат
         }
 
     Правила (паритет с прежней логикой при ``allowed_metrics=None``):
       - per-worker: ``status`` — всегда (если не None, вне гейта); ``effective_hz`` —
         при hz>0 И если метрика разрешена; ``cycle_duration_ms`` — при lat>0 И если
-        разрешена; воркер без единого поля не попадает в payload;
+        разрешена; ``queue_wait_ms`` (EMA ожидания в chain_queue, у PipelineExecutor) и
+        ``pacer_late`` (счётчик опоздавших тактов, у SourceProducer/IdleWorker) — при
+        наличии числа, включая 0, если разрешены; воркер без единого поля не попадает
+        в payload;
       - агрегат ``state``: ``fps`` = max(hz) по running-воркерам с hz>0 (если ``fps``
         разрешён); ``latency_ms`` = max(cycle_duration_ms) среди них (если ``latency_ms``
         разрешён); нет hz>0 → без агрегата;
@@ -156,6 +162,13 @@ def build_worker_telemetry(
             wp["effective_hz"] = round(hz, 1)
         if lat_ok and isinstance(lat, (int, float)) and lat > 0:
             wp["cycle_duration_ms"] = round(lat, 1)
+        # Task 4.5a: ноль здесь — показание («не ждали» / «не опаздывали»), не отсутствие.
+        qw = w.get("queue_wait_ms")
+        if _ok("queue_wait_ms") and isinstance(qw, (int, float)) and not isinstance(qw, bool):
+            wp["queue_wait_ms"] = round(qw, 1)
+        late = w.get("pacer_late")
+        if _ok("pacer_late") and isinstance(late, int) and not isinstance(late, bool):
+            wp["pacer_late"] = late
         # Признак движения для опроса (см. include_cycles). Вне гейта: это не метрика
         # «сколько сейчас», а счётчик, по которому судят о свежести самих метрик.
         # Читается из УЖЕ снятого статуса — ни второго обхода, ни нового механизма.

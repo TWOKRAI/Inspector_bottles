@@ -21,6 +21,9 @@ from multiprocess_framework.modules.process_module.plugins.base import ProcessMo
 
 
 _EXPECTED_KEYS = {"cycle_duration_ms", "effective_hz", "target_interval_ms", "cycles"}
+# Task 4.5a: воркеры-обёртки добавляют к базовому снимку свои поля кадрового пути.
+_SOURCE_KEYS = _EXPECTED_KEYS | {"pacer_late"}
+_EXECUTOR_KEYS = _EXPECTED_KEYS | {"queue_wait_ms"}
 
 
 class TestCycleMetricsRecorder:
@@ -122,7 +125,7 @@ class TestApplicationWorkerCycleMetrics:
             chain_targets=["out"],
             target_fps=50.0,
         )
-        assert set(producer.get_cycle_metrics().keys()) == _EXPECTED_KEYS
+        assert set(producer.get_cycle_metrics().keys()) == _SOURCE_KEYS
 
         stop, pause = threading.Event(), threading.Event()
         t = threading.Thread(target=producer.run_loop, args=(stop, pause))
@@ -156,7 +159,7 @@ class TestApplicationWorkerCycleMetrics:
         ex.bind_queue(q)
         # run — bound-метод инстанса (не lambda), __self__ резолвится.
         assert getattr(ex.run, "__self__", None) is ex
-        assert set(ex.get_cycle_metrics().keys()) == _EXPECTED_KEYS
+        assert set(ex.get_cycle_metrics().keys()) == _EXECUTOR_KEYS
 
     def test_pipeline_executor_records_on_batch(self) -> None:
         q: queue.Queue = queue.Queue()

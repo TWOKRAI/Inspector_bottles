@@ -74,7 +74,9 @@ class IdleWorker:
 
         WorkerManager.get_worker_status подмешивает результат в статус воркера.
         """
-        return self._cycle_metrics.get_cycle_metrics()
+        metrics = self._cycle_metrics.get_cycle_metrics()
+        metrics["pacer_late"] = self._pacer.late
+        return metrics
 
     @property
     def is_busy(self) -> bool:
