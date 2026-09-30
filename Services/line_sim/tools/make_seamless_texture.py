@@ -2,8 +2,10 @@
 """Превратить произвольную фотографию (ленты, стола, чего угодно) в бесшовный
 прокручиваемый тайл фона для `SceneCompositor` (Task 3.6).
 
-Два пути. (1) Периодический: период вдоль X ищется автокорреляцией профиля столбцов
-(среднее по строкам и каналам); ширина тайла — там, где рисунок лучше всего повторяет своё
+Два пути. (1) Периодический: период вдоль X ищется нормированной корреляцией горизонтального
+градиента (Sobel по X, 2D — все строки сразу): в цепи повторяется рисунок звена, а не яркость
+столбца; побеждает наименьший лаг среди локальных максимумов, не слабее 0.9 от лучшего (так P
+выигрывает у 2P). Ширина тайла — там, где рисунок лучше всего повторяет своё
 начало (не целое число найденных периодов: в пикселях сцены период звена нецелый).
 Принимается, только если шов (разница последнего и первого столбца) не хуже внутренней
 разницы между соседними столбцами —
@@ -32,8 +34,13 @@ from Services.dataset_gen.core.catalog import imread_unicode, imwrite_unicode
 #: и совсем маленькие лаги совпадают с локальным шумом соседних пикселей.
 _MIN_LAG = 4
 
-#: Порог нормированной автокорреляции для признания локального максимума периодом.
-_AC_THRESHOLD = 0.5
+#: Минимум NCC градиента для признания максимума периодом. Замер: реальное фото 0.463 (лаг 205),
+#: следующий локальный максимум 0.019 — порог 0.2 отсекает шум и оставляет запас вдвое до периода.
+_NCC_MIN = 0.2
+
+#: Доля от лучшего NCC, с которой меньший лаг вытесняет лучший (P против 2P: гармоника даёт ~то же).
+#: Замер: чистый P=100/W=400,500 и P=64/W=512 -> P; ложные 120 и 160 синтетики -> периоды, не P/4, P/3.
+_HARMONIC_FRAC = 0.9
 
 #: Насколько далеко от левого края может начинаться тайл: край ресайза (INTER_LINEAR повторяет
 #: крайний пиксель) и край объектива не повторяют рисунок. Замер: пила ×7.5 — первые 4 столбца
@@ -62,37 +69,42 @@ class SeamlessResult:
 
 
 def find_period(image: np.ndarray) -> int | None:
-    """Период вдоль X по автокорреляции профиля яркости столбцов.
+    """Период вдоль X по нормированной корреляции горизонтального градиента (2D).
 
-    Pre: `image` — `(H, W, C)`, любой числовой dtype.
-    Post: первый локальный максимум нормированной автокорреляции
-    (`ac[k-1] < ac[k] >= ac[k+1]`) с `ac[k] / ac[0] >= 0.5` для `k` в `[4, W // 2]`;
-    плоский профиль (нулевая дисперсия) или отсутствие такого максимума — `None`.
+    Pre: `image` — `(H, W, C)` BGR или `(H, W)` / `(H, W, 1)`, любой числовой dtype.
+    Post: `int` лаг `k` из `[_MIN_LAG, W // 2]` — наименьший локальный максимум NCC
+    (`c[k-1] < c[k] >= c[k+1]`) с `c[k] >= _HARMONIC_FRAC * лучший`, при условии лучший
+    `>= _NCC_MIN`; иначе (плоское/безградиентное изображение, слишком узкое, нет максимума
+    или он слабее порога) — `None`.
+
+    Отвергнуто (замер на `fixtures/belt_photo_full.png`):
+    - автокорреляция 1D-профиля столбцов — ложный лаг 42 в 4 раза сильнее 204;
+    - 2D-разность сдвига по яркости — минимумы 89 (17.22) и 204 (17.14) неразличимы.
     """
     width = image.shape[1]
-    profile = image.mean(axis=(0, 2), dtype=np.float64)  # без копии всего фото во float64
-    profile = profile - profile.mean()
-    if not np.any(profile):
+    if width // 2 < _MIN_LAG:
         return None
-
-    def ac(lag: int) -> float | None:
-        if lag < 0 or lag >= width:
-            return None
-        denom = width - lag
-        return float(np.sum(profile[: width - lag] * profile[lag:]) / denom)
-
-    ac0 = ac(0)
-    if not ac0:
-        return None
+    gray = image if image.ndim == 2 or image.shape[2] == 1 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = np.ascontiguousarray(gray.reshape(image.shape[0], width).astype(np.float32))
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
 
     max_lag = width // 2
-    for k in range(_MIN_LAG, max_lag + 1):
-        prev, cur, nxt = ac(k - 1), ac(k), ac(k + 1)
-        if prev is None or cur is None or nxt is None:
-            continue
-        if prev < cur >= nxt and (cur / ac0) >= _AC_THRESHOLD:
-            return k
-    return None
+    ncc = np.zeros(max_lag + 2)  # индексы лагов 0..max_lag + 1; нужны соседи k-1 и k+1
+    for k in range(_MIN_LAG - 1, max_lag + 2):
+        a = gx[:, : width - k].ravel().astype(np.float64)
+        b = gx[:, k:].ravel().astype(np.float64)
+        a -= a.mean()
+        b -= b.mean()
+        denom = np.sqrt(np.dot(a, a) * np.dot(b, b))
+        ncc[k] = float(np.dot(a, b) / denom) if denom > 0 else 0.0
+
+    peaks = [k for k in range(_MIN_LAG, max_lag + 1) if ncc[k - 1] < ncc[k] >= ncc[k + 1]]
+    if not peaks:
+        return None
+    best = max(ncc[k] for k in peaks)
+    if best < _NCC_MIN:
+        return None
+    return int(next(k for k in peaks if ncc[k] >= _HARMONIC_FRAC * best))
 
 
 def _step(a: np.ndarray, b: np.ndarray) -> float:
