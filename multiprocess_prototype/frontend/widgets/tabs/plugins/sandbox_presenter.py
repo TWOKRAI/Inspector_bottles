@@ -7,13 +7,20 @@ By design: sandbox требует живой Python plugin_class (entry.plugin_c
 для инстанцирования плагина -- не покрывается PluginCatalog (метаданные).
 Bridge _registry остаётся навсегда. Q-F2=C (owner-decision 2026-05-28).
 
-Совместимые плагины (stateless, single-frame, single-input):
-- processing: grayscale, color_mask, flip, resize, negative и т.п.
+Песочница подаёт ровно `{"frame": frame}`. Совместим плагин, который запускается
+от одного кадра И не имеет побочных эффектов.
+
+Совместимые (запускаются от одного кадра, без побочных эффектов):
+- processing / render / filter / hub / utility: grayscale, color_mask, blob_detector
+  (необязательный вход mask не мешает) и т.п.
 
 Несовместимые:
 - source -- источники данных, используйте ServicesTab
 - runtime / control -- требуют pipeline-контекст
-- multi-input / stitcher -- семантика N:1 (fan-in), требует несколько потоков
+- io / output / sink -- пишут наружу (файлы, устройства)
+- calibration -- требует робота / стенд
+- обязательный вход, кроме frame (mask, detections, ...) -- берётся из цепочки
+- stitcher -- семантика N:1 (fan-in), требует несколько потоков
 """
 
 from __future__ import annotations
@@ -48,13 +55,19 @@ class SandboxCompatibility:
 
 
 # Категории, несовместимые с sandbox
-_DISABLED_CATEGORIES: frozenset[str] = frozenset({"source", "runtime", "control"})
+_DISABLED_CATEGORIES: frozenset[str] = frozenset(
+    {"source", "runtime", "control", "io", "output", "sink", "calibration"}
+)
 
 # Причины отказа по категории
 _CATEGORY_REASONS: dict[str, str] = {
     "source": "источник данных — используйте превью сервиса в ServicesTab",
     "runtime": "требует pipeline-контекст",
     "control": "требует pipeline-контекст",
+    "io": "пишет наружу (файлы/устройства) — не для песочницы",
+    "output": "пишет наружу (файлы/устройства) — не для песочницы",
+    "sink": "пишет наружу (файлы/устройства) — не для песочницы",
+    "calibration": "требует робота/стенд",
 }
 
 # Hardcode имён плагинов с семантикой multi-input (fan-in N:1).
@@ -96,10 +109,15 @@ class SandboxPresenter:
         1. Registry недоступен → disabled (нет данных для проверки).
         2. Плагин не найден в registry → disabled.
         3. category == "source" → disabled.
-        4. category in ("runtime", "control") → disabled.
+        4. category in _DISABLED_CATEGORIES (runtime, control, io, output, sink, calibration) → disabled.
         5. name in _MULTI_INPUT_NAMES → disabled (stitcher: семантика N:1).
-        6. len(inputs) > 1 → disabled (несколько входных портов).
-        7. Иначе → ok=True.
+        6. Есть ОБЯЗАТЕЛЬНЫЙ вход, кроме "frame" → disabled (данные берутся из цепочки;
+           необязательные входы, например mask у blob_detector, не считаются).
+        7. Входы есть, но среди них нет "frame" → disabled (плагин не принимает кадр).
+        8. Иначе → ok=True.
+
+        Категории io / output / sink / calibration отсекаются на шаге 4 вместе с
+        source / runtime / control: песочница не должна писать файлы и дёргать устройства.
 
         Args:
             plugin_name: имя плагина (ключ в registry).
@@ -138,13 +156,18 @@ class SandboxPresenter:
                 reason="требует несколько входных потоков (pipeline-контекст)",
             )
 
-        # Проверяем количество входных портов
+        # Песочница подаёт только {"frame": frame}: обязательный вход с другим именем
+        # взять неоткуда. Необязательные входы считаем «не требует» — плагин обязан
+        # работать и без них.
         inputs = getattr(entry, "inputs", [])
-        if len(inputs) > 1:
+        required_extra = [p.name for p in inputs if not getattr(p, "optional", False) and p.name != "frame"]
+        if required_extra:
             return SandboxCompatibility(
                 ok=False,
-                reason="требует несколько входных потоков (pipeline-контекст)",
+                reason=f"требует входы из цепочки: {', '.join(required_extra)}",
             )
+        if inputs and not any(p.name == "frame" for p in inputs):
+            return SandboxCompatibility(ok=False, reason="не принимает кадр")
 
         return SandboxCompatibility(ok=True, reason="")
 
@@ -170,8 +193,9 @@ class SandboxPresenter:
             config_overrides: словарь с параметрами конфига (например HSV-диапазоны).
 
         Returns:
-            Выходной numpy array (frame из первого результирующего item)
-            или None при ошибке / пустом результате.
+            Выходной numpy array: первый image/*-выход плагина (иначе "frame") из первого
+            результирующего item; 2D-маска переводится в BGR (H, W, 3).
+            None при ошибке / пустом результате.
         """
         try:
             return self._run_once_unsafe(plugin_name, frame, config_overrides)

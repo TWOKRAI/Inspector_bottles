@@ -148,7 +148,7 @@ class TestCheckCompatibility:
         assert "pipeline" in result.reason.lower() or "контекст" in result.reason
 
     def test_check_multi_input_port_disabled(self) -> None:
-        """Плагин с len(inputs) > 1 → disabled."""
+        """Плагин с несколькими ОБЯЗАТЕЛЬНЫМИ входами, среди которых нет frame → disabled, причина называет порты."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         # Создаём mock entry с 2 входными портами
@@ -166,6 +166,51 @@ class TestCheckCompatibility:
 
         presenter = SandboxPresenter(ctx)
         result = presenter.check_compatibility("multi_blend")
+
+        assert result.ok is False
+        assert "frame_a" in result.reason and "frame_b" in result.reason
+
+    @pytest.mark.parametrize(
+        ("ports", "ok", "reason_part"),
+        [
+            ([("frame", False), ("mask", True)], True, ""),  # необязательный mask не мешает
+            ([("frame", False), ("mask", False)], False, "mask"),  # обязательный не-frame вход
+            ([], True, ""),  # чистый плагин без входов
+            ([("x", True)], False, "не принимает кадр"),  # frame среди входов нет
+            ([("frame", True), ("mask", True)], True, ""),  # всё необязательное, frame есть
+        ],
+    )
+    def test_check_input_ports_rule(self, ports, ok, reason_part) -> None:
+        """Правило входов: мешают только обязательные не-frame; без frame среди входов — отказ."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        class FakePort:
+            def __init__(self, name: str, optional: bool) -> None:
+                self.name = name
+                self.optional = optional
+
+        entry = _MockEntry(
+            name="probe",
+            category="processing",
+            inputs=[FakePort(n, o) for n, o in ports],
+        )
+        result = SandboxPresenter(_make_ctx(registry=_MockRegistry([entry]))).check_compatibility("probe")
+
+        assert result.ok is ok
+        assert reason_part in result.reason
+        assert (result.reason == "") == ok
+
+    @pytest.mark.parametrize("category", ["io", "output", "sink", "calibration"])
+    def test_check_side_effect_category_disabled(self, category) -> None:
+        """io/output/sink/calibration закрыты даже с единственным входом frame."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        class FakePort:
+            name = "frame"
+            optional = False
+
+        entry = _MockEntry(name="probe", category=category, inputs=[FakePort()])
+        result = SandboxPresenter(_make_ctx(registry=_MockRegistry([entry]))).check_compatibility("probe")
 
         assert result.ok is False
         assert result.reason
