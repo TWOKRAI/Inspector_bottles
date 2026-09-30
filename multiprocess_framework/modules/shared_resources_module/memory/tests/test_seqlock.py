@@ -16,6 +16,7 @@ GATE (правило фазы): без КРАСНОГО репродьюсера
 from __future__ import annotations
 
 import struct
+import sys
 import threading
 import time
 
@@ -358,3 +359,71 @@ def test_seqlock_malformed_header_with_gen_change_is_torn_none():
     finally:
         buf_mod.read_generation = real
     assert result is None, "torn (gen изменился) обязан дать None, не исключение"
+
+
+# --- Task 4.4 итерация 2 (часть B): маска поколения и счётчики читателя -----------------------
+
+
+def test_pack_images_returns_masked_gen_at_wrap():
+    """Свойство: возвращённое ``pack_images`` поколение равно тому, что увидит reader в заголовке, и на
+    переходе через 2**32 (заголовок хранит ``value & 0xFFFFFFFF``). Заголовок = 0xFFFFFFFE (чётный,
+    последний перед оберткой) -> запись пишет 0xFFFFFFFF / 0x100000000&mask = 0; вернуть обязана 0.
+    Красный revert: ``return writing_gen + 1`` без ``& _UINT32_MASK`` -> вернёт 4294967296."""
+    mv, shape, dtype = _alloc(seqlock=True)
+    buf_mod._write_generation(mv, 0xFFFFFFFE)
+    returned = fmt.pack_images(mv, [np.zeros(shape, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    assert fmt.read_generation(mv) == 0
+    assert returned == 0
+
+
+def test_stale_counter_no_lost_updates_under_threads():
+    """Свойство: ``stale_drops`` не теряет обновлений, когда ``view_valid`` бьют 4 потока сразу (в проде —
+    DataReceiver и PipelineExecutor). Два потока идут веткой ``gen<0``, два — веткой «поколение разошлось»
+    на настоящем кэшированном буфере; итог обязан быть ровно 4 * N.
+    Одного ``setswitchinterval(1e-6)`` мало: на CPython 3.12 переключение GIL внутри ``+=`` (LOAD_ATTR ->
+    BINARY_OP -> STORE_ATTR нет точек проверки) не воспроизводится за 80 тыс. вызовов (измерено: зелёный
+    на голом ``+=``). Поэтому поток трассирует опкоды ``view_valid`` и уступает GIL (``sleep(0)``) между
+    ними — это и вскрывает окно чтение-запись.
+    Красный revert: вернуть голый ``self._stale_drops += 1`` вне ``with self._lock`` в ``view_valid``.
+    Потоки — daemon с join-дедлайном (зависание -> падение, не подвисание набора)."""
+    from types import SimpleNamespace
+
+    from multiprocess_framework.modules.shared_resources_module.memory.reader.shm_frame_reader import ShmFrameReader
+
+    per_thread = 1_500
+    reader = ShmFrameReader(cache_enabled=True, zero_copy=True, cap=4)
+    reader._cache["seg"] = SimpleNamespace(buf=memoryview(bytearray(64)))  # поколение 0 -> ссылка gen=2 устарела
+    target_code = ShmFrameReader.view_valid.__code__
+
+    def local_trace(frame, event, arg):
+        if event == "opcode":
+            time.sleep(0)  # уступить GIL между опкодами ``+=``
+        return local_trace
+
+    def global_trace(frame, event, arg):
+        if frame.f_code is target_code:
+            frame.f_trace_opcodes = True
+            return local_trace
+        return None
+
+    def hammer(gen: int) -> None:
+        sys.settrace(global_trace)
+        try:
+            for _ in range(per_thread):
+                assert reader.view_valid("seg", gen) is False
+        finally:
+            sys.settrace(None)
+
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=hammer, args=(g,), daemon=True) for g in (-1, -1, 2, 2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60)
+        assert not any(t.is_alive() for t in threads), "view_valid завис (deadlock на lock?)"
+    finally:
+        sys.setswitchinterval(old_interval)
+        reader._cache.clear()
+    assert reader.stale_drops == 4 * per_thread

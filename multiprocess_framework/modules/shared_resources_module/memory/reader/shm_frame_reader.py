@@ -95,32 +95,43 @@ class ShmFrameReader:
 
         Поколение слота сверяется с ``gen`` ДО чтения (расхождение → ``None`` + ``stale_drops``:
         ячейка уже переписана другой записью) и ПОСЛЕ него (расхождение → ``None`` +
-        ``torn_reads``: перезапись пришлась на чтение). Так вернуть пиксели чужой записи под
-        ссылкой на эту нельзя. ``copy=False`` + активный кэш → VIEW (его переживание сверяет
-        ``view_valid`` с тем же ``gen``); без кэша копия форсируется. Бросает при ошибке открытия
-        сегмента и при реальной порче заголовка (стабильное поколение)."""
+        ``torn_reads``: перезапись пришлась на чтение). Для КОПИИ (``copy=True``, а без кэша она
+        форсируется) пиксели чужой записи под ссылкой на эту не вернутся. ``copy=False`` + активный
+        кэш → VIEW: его слот можно перезаписать ПОСЛЕ возврата — это ловит ``view_valid`` (сверка с
+        тем же ``gen``) и дверь отправки. Бросает при ошибке открытия сегмента и при реальной
+        порче заголовка (стабильное поколение)."""
         from multiprocessing import shared_memory as _shm_mod
 
         if self._cache_enabled:
             # open + чтение под ОДНИМ lock (S2, см. _read_cached): close() другого потока не рвёт buf.
             with self._lock:
                 shm = self._open_cached_locked(name, _shm_mod)
-                return self._read_at_generation(shm.buf, gen, copy)
+                return self._read_at_generation(shm.buf, gen, copy, lock_held=True)
         shm = self._open(name, _shm_mod)
         try:
-            return self._read_at_generation(shm.buf, gen, True)
+            return self._read_at_generation(shm.buf, gen, True, lock_held=False)
         finally:
             shm.close()
 
-    def _read_at_generation(self, buf: Any, gen: int, copy: bool) -> Optional[Any]:
+    def _bump(self, attr: str, *, lock_held: bool) -> None:
+        """``+= 1`` счётчика под ``self._lock``: его бьют два потока (DataReceiver в ``read_ref``,
+        PipelineExecutor в ``view_valid``), голый ``+=`` теряет обновления. Lock не реентерабелен —
+        тот, кто уже держит его (кэш-путь ``read_ref``), передаёт ``lock_held=True``."""
+        if lock_held:
+            setattr(self, attr, getattr(self, attr) + 1)
+            return
+        with self._lock:
+            setattr(self, attr, getattr(self, attr) + 1)
+
+    def _read_at_generation(self, buf: Any, gen: int, copy: bool, *, lock_held: bool) -> Optional[Any]:
         if read_generation(buf) != gen:
-            self._stale_drops += 1
+            self._bump("_stale_drops", lock_held=lock_held)
             return None
         frame = read_single_frame(buf, verify_seqlock=True, copy=copy)
         # read_single_frame сверяет поколение только с СОБСТВЕННЫМ первым чтением: если запись
         # целиком уложилась между нашей проверкой и его стартом, оно вернёт новый кадр — ловим тут.
         if frame is None or read_generation(buf) != gen:
-            self._torn_reads += 1
+            self._bump("_torn_reads", lock_held=lock_held)
             return None
         return frame
 
@@ -169,22 +180,19 @@ class ShmFrameReader:
 
     def view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
         """Post-use re-check (G.5.c). gen<0 / handle нет / поколение разошлось → drop."""
-        if gen_at_read < 0:
-            self._stale_drops += 1
-            return False
         # get + read_generation под ТЕМ ЖЕ lock, что open/close — иначе close() на потоке
         # DataReceiver порвал бы backing-mmap под read_generation здесь (поток Executor).
+        # Счётчик — под ним же: все три причины дропа (gen<0, handle нет, поколение разошлось)
+        # бьют один и тот же ``_stale_drops`` с двух потоков.
         with self._lock:
-            shm = self._cache.get(shm_view_name)
-            if shm is None:
-                # handle эвиктнут/сменился → сегмент мог закрыться → консервативный drop.
+            valid = False
+            if gen_at_read >= 0:
+                shm = self._cache.get(shm_view_name)
+                # shm None: handle эвиктнут/сменился → сегмент мог закрыться → консервативный drop.
+                valid = shm is not None and read_generation(shm.buf) == gen_at_read
+            if not valid:
                 self._stale_drops += 1
-                return False
-            valid = read_generation(shm.buf) == gen_at_read
-        if valid:
-            return True
-        self._stale_drops += 1
-        return False
+            return valid
 
     def close(self) -> None:
         with self._lock:

@@ -482,8 +482,8 @@ class RemoteFrameSource:
         ):
             return "errors"
         last = self._last.get(sender)
-        if last is not None and last[0] == bseq:
-            return "dup"
+        if last is not None and (last[0] == bseq or (last[1] == name and last[2] == gen)):
+            return "dup"  # тот же bseq либо та же запись слота под новым bseq — до копии в 6 МБ
         try:
             frame = reader.read_ref(name, gen, copy=True)
         except FileNotFoundError:
@@ -491,8 +491,6 @@ class RemoteFrameSource:
             return "missing"
         if frame is None:
             return "torn"  # слот уже переписан (stale) либо перезапись пришлась на чтение
-        if last is not None and last[1] == name and last[2] == gen:
-            return "dup"
         with self._cond:
             if epoch != self._epoch:
                 return "superseded"  # подписку сняли/заменили, пока копировали

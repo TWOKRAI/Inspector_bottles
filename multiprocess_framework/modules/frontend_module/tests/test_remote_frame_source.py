@@ -626,3 +626,33 @@ def test_stale_ref_is_dropped_and_counted_torn() -> None:
         except FileNotFoundError:
             pass
         host.close()
+
+
+def test_same_name_gen_new_bseq_is_dup_without_reading() -> None:
+    """Свойство: дескриптор с тем же (name, gen), что у последнего доставленного, но НОВЫМ bseq — дубль,
+    и решается он ДО чтения слота (копия 6 МБ на дубль не делается). Читатель — на границе: фейк считает
+    вызовы ``read_ref``. Красный revert: вернуть проверку ``last[1] == name and last[2] == gen`` после
+    ``reader.read_ref`` в ``RemoteFrameSource._process`` -> чтений 2, а не 1."""
+
+    class _CountingReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def read_ref(self, name: str, gen: int, *, copy: bool = True) -> np.ndarray:
+            self.calls += 1
+            return np.zeros((2, 2), dtype=np.uint8)
+
+    source = RemoteFrameSource(Mock(), dispatch=lambda fn: fn())
+    reader = _CountingReader()
+    delivered: List[Any] = []
+
+    def on_frame(sender: str, frame: np.ndarray, bseq: int) -> None:
+        delivered.append(bseq)
+
+    def descriptor(bseq: int) -> Dict[str, Any]:
+        return {"sender": "camA", "name": "slot_x", "gen": 2, "bseq": bseq, "ts": 0.0}
+
+    assert source._process("camA", descriptor(1), 0, on_frame, reader) == "delivered"
+    assert source._process("camA", descriptor(2), 0, on_frame, reader) == "dup"
+    assert reader.calls == 1, "дубль (то же name/gen, новый bseq) прочитан из SHM"
+    assert delivered == [1]

@@ -279,6 +279,32 @@ def test_small_view_crop_copied_before_door(made):
     assert sender.frame_stale_drops == 0
 
 
+def test_door_copies_before_check_under_overwrite_in_check(made):
+    """Свойство: порядок двери — сначала КОПИЯ inline-срезов view, потом проверка входов. Писатель A
+    перезаписывает ячейку прямо ВНУТРИ проверки (``frame_view_valid`` вернул исходный ответ, и сразу
+    после него слот переписан) -> отправленный crop обязан нести ОРИГИНАЛЬНЫЕ пиксели: копия уже снята.
+    Красный revert: в ``strip_and_write`` поменять местами ``_copy_inline_views(item)`` и
+    ``_inputs_still_valid(item)`` -> копия снимется с уже переписанной памяти, crop чужой."""
+    sender, writer, item, want_crop = _item_with_small_view_only(made)
+    real_valid = sender.frame_view_valid
+    fired: list[bool] = []
+
+    def valid_then_overwrite(ref):
+        ok = real_valid(ref)
+        if not fired:
+            fired.append(True)
+            _overwrite(writer, "frame")  # ответ уже получен, слот источника переписан
+        return ok
+
+    sender.frame_view_valid = valid_then_overwrite  # публичный контракт двери, на экземпляре
+    out = _send(sender, item)
+    assert fired, "стенд неисправен: проверка входов не вызвана"
+    assert out is not None and sender.frame_stale_drops == 0
+    shipped = out["data"]["crop"]
+    assert shipped.tobytes() == want_crop.tobytes(), "crop снят с памяти, переписанной внутри проверки"
+    assert shipped.flags.owndata
+
+
 def test_views_without_large_entries_still_pass_door(made):
     """Свойство: item с views и ТОЛЬКО малыми массивами (крупных нет) всё равно проходит дверь: слот входа
     перезаписан до отправки -> item дропнут (None), ``frame_stale_drops`` == 1.

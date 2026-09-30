@@ -298,7 +298,8 @@ def pack_images(
     finally:
         # generation ВСЕГДА → чётное (стабильно), даже при исключении.
         _write_generation(buffer, writing_gen + 1)
-    return writing_gen + 1
+    # Маска — как в _write_generation: на переходе через 2**32 вернуть то, что увидит reader.
+    return (writing_gen + 1) & _UINT32_MASK
 
 
 def clear_slot_seqlock(buffer: memoryview) -> None:
