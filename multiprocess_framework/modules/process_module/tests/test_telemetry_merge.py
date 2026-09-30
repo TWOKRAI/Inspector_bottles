@@ -191,6 +191,10 @@ class TestH8RouterShmStatsPublish:
             "slots_reclaimed": 0,
             # Ф7 G.7 (0.5): размер reader-кэша SHM-handle (health-сигнал утечки).
             "cache_size": 0,
+            # Task 4.5c: байты кадрового транспорта и отказы восстановления.
+            "bytes_written": 0,
+            "bytes_read": 0,
+            "restore_failures": 0,
         }
 
     def test_publishes_when_only_cache_size_nonzero(self) -> None:

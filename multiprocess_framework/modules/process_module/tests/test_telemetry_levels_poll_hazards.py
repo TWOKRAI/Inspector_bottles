@@ -90,6 +90,10 @@ SHM_KEYS = {
     "slots_released",
     "slots_reclaimed",
     "cache_size",
+    # Task 4.5c: байты кадрового транспорта и отказы восстановления.
+    "bytes_written",
+    "bytes_read",
+    "restore_failures",
 }
 
 
