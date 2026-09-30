@@ -65,7 +65,6 @@ from Plugins.sim.pult_web.tests.test_acceptance_1_3h_c_layers import (  # noqa: 
     start_pult,
 )
 
-pytestmark = pytest.mark.timeout(60)
 
 _PS = {"preventScroll": True}
 

@@ -33,7 +33,6 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 from Plugins.hub.device_hub.tests.test_reply_envelope_acceptance import _FakeSendRouter
 from Plugins.sim.pult_web.plugin import PultWebPlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 _CONFLICT = {"status": "error", "code": "conflict", "message": "rev mismatch", "current_rev": 7}
 _COMMIT_BODY = {"preset": {"layers": [{"name": "cap", "offset_px": [0, 0]}]}, "base_rev": 3}

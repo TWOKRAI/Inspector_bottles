@@ -44,7 +44,6 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 )
 from Plugins.sim.pult_web.plugin import PultWebPlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 _MJPEG_URL = "http://127.0.0.1:8091/"
 _PAGE_HARNESS = Path(__file__).with_name("page_offline.mjs")

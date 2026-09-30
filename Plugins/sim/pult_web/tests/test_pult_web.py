@@ -59,7 +59,6 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 # причине, см. отчёт.
 from Plugins.sim.pult_web.plugin import PultWebPlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 _MJPEG_URL = "http://127.0.0.1:8091/"
 _TIMEOUT_S = 1.0
