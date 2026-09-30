@@ -114,12 +114,14 @@ def test_disk_from_photo_without_disk_out_is_parser_error(tmp_path: Path, capsys
     assert not out.exists(), "при ошибке разбора аргументов что-то уже записано на диск"
 
 
-@pytest.mark.parametrize("bad", ["300,0,0", "1,2", "a,b,c", "-1,0,0", "1,2,3,4"])
+@pytest.mark.parametrize("bad", ["300,0,0", "1,2", "a,b,c", "-1,0,0", "0,0,-1", "1,2,3,4"])
 def test_bad_ink_rgb_is_parser_error(bad: str, tmp_path: Path) -> None:
-    """Неверный `--ink-rgb` -> код 2 до какой-либо записи."""
+    """Неверный `--ink-rgb` -> код 2 до какой-либо записи. Форма `--ink-rgb=<v>`: значение с ведущим
+    минусом (`-1,0,0`) в раздельной форме argparse принял бы за флаг и упал бы по другой причине,
+    не по проверке диапазона 0..255."""
     out = tmp_path / "out"
     with pytest.raises(SystemExit) as exc:
-        main(["--letters", "А", "--font", str(DEJAVU_SANS), "--out", str(out), "--ink-rgb", bad])
+        main(["--letters", "А", "--font", str(DEJAVU_SANS), "--out", str(out), f"--ink-rgb={bad}"])
     assert exc.value.code == 2
     assert not out.exists()
 
@@ -154,6 +156,23 @@ def test_disk_from_photo_pads_when_crop_leaves_the_array(tmp_path: Path) -> None
     assert rgba.shape == (64, 64, 4)
     assert rgba[32, 32, 3] == 255 and abs(int(rgba[32, 32, 0]) - 235) <= 3
     assert rgba[0, 0, 3] == 0 and rgba[63, 63, 3] == 0
+    # Различитель padding: угол результата — реплицированный тёмный фон фото (30), а не светлый диск.
+    # Без padding срез [-3:117] превращается в полоску 3 px светлого диска, и угол становится светлым.
+    assert int(rgba[0, 0, 0:3].max()) < 60, f"RGB угла {rgba[0, 0, 0:3]}: не реплицированный фон"
+
+
+def test_disk_from_photo_rejects_bright_non_circular_shape(tmp_path: Path) -> None:
+    """Светлый прямоугольник 200x40 на тёмном фоне 340x340: радиус описанного круга ~102 px (больше
+    порога 20), поэтому отсекать его может только проверка заполнения (площадь < 0.8·π·r²)."""
+    photo = np.full((340, 340, 3), 30, dtype=np.uint8)
+    photo[150:190, 70:270] = 235
+    path = tmp_path / "bar.png"
+    imwrite_unicode(path, photo)
+
+    with pytest.raises(SystemExit) as exc:
+        build_disk_from_photo(path, 64)
+
+    assert isinstance(exc.value.code, str) and str(path) in exc.value.code, f"код выхода: {exc.value.code!r}"
 
 
 def test_build_disk_bytes_unchanged_after_alpha_refactor() -> None:
