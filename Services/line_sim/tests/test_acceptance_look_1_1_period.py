@@ -80,7 +80,10 @@ def real_result():
     img = cv2.imread(str(FIXTURE), cv2.IMREAD_COLOR)
     assert img is not None, f"фикстура не читается: {FIXTURE}"
     assert img.shape == (484, 598, 3), f"неожиданная форма фикстуры: {img.shape}"
-    return make_seamless_tile(img)
+    # Правка лида 2026-09-30 (контракт, не обход): резерв k периодов включается только
+    # force_period=True. Без флага на этом фото -> mirror: дрейф яркости между звеньями 16-22 %,
+    # у виньетированной синусоиды H6 (test_hazards_3_6) от 20 % — автоматически не различить.
+    return make_seamless_tile(img, force_period=True)
 
 
 def test_real_belt_photo_gives_period_tile(real_result):
