@@ -31,7 +31,9 @@ from Plugins.sim.pult_web.tests.test_acceptance_1_3h_c_layers import (  # noqa: 
     _assert_ran,
     _btn,
     _click,
+    _data_url,
     _eff,
+    _layout_reply,
     _pick,
     _snap,
     _stand,
@@ -589,3 +591,174 @@ def test_h14_renamed_selected_layer_keeps_canvas_handles(start_pult) -> None:
     assert before == {"layer0_angle_deg": "12.5", "layer1_angle_deg": "0", "layer2_angle_deg": "0"}, before
     assert abs(float(after["layer1_angle_deg"]) - (-90)) < 0.2, f"ручка переименованного слоя не сработала: {after!r}"
     assert (after["layer0_angle_deg"], after["layer2_angle_deg"]) == ("12.5", "0"), f"сдвинут чужой слой: {after!r}"
+
+
+# --- R-5 итерация 3: канва <-> форма по имени — только когда имя в форме ЕДИНСТВЕННОЕ -----------------------------
+# Канва живёт в именах ПОСЛЕДНЕЙ ПРИНЯТОЙ раскладки; раскладку с дублем имён бэкенд отвергает, и на канве остаётся
+# прежняя. Форма живёт в строках. Имя -> строка верно только при единственном совпадении в форме; иначе ни выбора
+# с канвы, ни рамки/ручек/сдвига битмапа.
+
+
+def _refuse_duplicate_names(stand) -> None:
+    """Двойник `preset.layout` отвергает пресет с повторяющимися именами слоёв (как настоящий бэкенд)."""
+
+    def layout(args: dict) -> dict:
+        layers = (args.get("preset") or {}).get("layers") or []
+        names = [ly["name"] for ly in layers]
+        if len(set(names)) != len(names):
+            return {"status": "error", "code": "invalid", "message": "duplicate layer name"}
+        return _layout_reply(layers)
+
+    stand.layers.handlers["preset.layout"] = layout
+
+
+def _bboxes(out: dict, source: str) -> set[tuple]:
+    """Разные bbox, с которыми картинка слоя `source` рисовалась на #presetCanvas за весь сценарий."""
+    return {tuple(d["bbox"]) for d in out["draws"] if d["src"] == _data_url(source)}
+
+
+#: Выбран letter кликом, строка 1 переименована в «disk» (дубль строки 0): раскладку бэкенд отверг, на канве прежняя.
+_PRE_DUP = [_READY, _SETTLE, _click(_AT_LETTER), *_rename(1, "disk"), _SETTLE, _snap("renamed", _FIELDS + _ANGLES)]
+_DISK_ROT_HANDLE = [0, -74]  # рамка КАРТИНКИ disk: -50..50 по обеим осям; ручка поворота — над центром на 24 px
+
+
+def test_h15_duplicate_name_no_frame_on_a_foreign_picture(start_pult) -> None:
+    """(h15) Выбран letter (строка 1), в форме он переименован в «disk» — дубль строки 0. Стрелка вправо двигает
+    ДАННЫЕ строки 1 (60 -> 61), а на канве ни одна картинка не сдвигается: имя «disk» в форме не единственное,
+    картинку выбранной строки по нему не найти (ответ раскладки перерисует канву сам).
+
+    Что ломает: рамка, призрак и сдвиг битмапа ищут запись раскладки по ИМЕНИ выбранного слоя — в устаревшей
+    раскладке «disk» это картинка строки 0: сдвинулся бы битмап disk (ревью R-5 ит.2, dup_frame_arrow).
+    Рамку наблюдать в харнессе нечем (strokeRect не логируется) — её отсутствие держит h16."""
+    stand = _stand(start_pult, _INITIAL)
+    _refuse_duplicate_names(stand)
+    out = _run_canvas(stand.port, [*_PRE_DUP, _KEY_RIGHT, _SETTLE, _snap("arrow", _FIELDS)])
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["renamed"]["error"], f"предусловие: раскладку с дублем бэкенд отверг: {s['renamed']['error']!r}"
+    assert s["arrow"]["fields"] == _offs("0", "61", "-70"), f"стрелка двигает данные строки 1: {s['arrow']['fields']!r}"
+    for source in ("sprites/disk.png", "sprites/letter.png", "sprites/cap.png"):
+        assert len(_bboxes(out, source)) == 1, f"на канве сдвинута картинка {source}: {_bboxes(out, source)!r}"
+
+
+def test_h16_duplicate_name_rotate_handle_absent(start_pult) -> None:
+    """(h16) Та же исходная (строка 1 «disk» — дубль). Тянем там, где у КАРТИНКИ disk ручка поворота: ни угол строки 1
+    (letter по данным), ни угол строки 0 (disk — не выбран) не меняются: рамки у неоднозначного имени нет.
+
+    Что ломает: рамка ищется по имени -> стоит на картинке disk, её ручка поворачивает строку 1 (ревью: 0 -> -36.5,
+    центр — от disk). Вариант J10 (конец жеста ищет строку по имени g.name, а не берёт g.row) на коде ДО правки
+    повернул бы disk (12.5 -> -24) — это тоже красный. После правки жест на неоднозначном имени не начинается,
+    поэтому J10 этим тестом больше не различим (жесту нужно единственное имя, а тогда имя -> строка однозначно)."""
+    stand = _stand(start_pult, _INITIAL)
+    _refuse_duplicate_names(stand)
+    out = _run_canvas(
+        stand.port,
+        [*_PRE_DUP, {"op": "drag", "from": _DISK_ROT_HANDLE, "to": [40, -54]}, _SETTLE, _snap("rot", _ANGLES)],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["renamed"]["error"], f"предусловие: раскладку с дублем бэкенд отверг: {s['renamed']['error']!r}"
+    assert s["rot"]["fields"] == {"layer0_angle_deg": "12.5", "layer1_angle_deg": "0", "layer2_angle_deg": "0"}, (
+        f"ручка чужой картинки повернула слой: {s['rot']['fields']!r}"
+    )
+
+
+def test_h17_canvas_click_on_stale_name_selects_nothing(start_pult) -> None:
+    """(h17) Строка 0 (disk) переименована в «letter» — дубль строки 1; раскладку бэкенд отверг, на канве прежняя.
+    Тянем КАРТИНКУ letter: имя «letter» в форме у двух строк -> ничего не выбрано, ничьё смещение не меняется.
+
+    Что ломает: клик по канве ищет строку по имени картинки первым совпадением -> выбрана строка 0 (disk по данным),
+    перенос сдвигает её 0 -> 10 (ревью R-5 ит.2, stale_click_drag; то же и до R-5)."""
+    stand = _stand(start_pult, _INITIAL)
+    _refuse_duplicate_names(stand)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            *_rename(0, "letter"),
+            _SETTLE,
+            _snap("renamed", _FIELDS),
+            {"op": "drag", "from": _AT_LETTER, "to": [_AT_LETTER[0] + 10, 0]},
+            _SETTLE,
+            _snap("dragged", _FIELDS),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["renamed"]["error"], f"предусловие: раскладку с дублем бэкенд отверг: {s['renamed']['error']!r}"
+    assert s["dragged"]["fields"] == _OFF3, f"перенос картинки с неоднозначным именем сдвинул строку: {s['dragged']!r}"
+    assert s["dragged"]["selected"] == [], f"неоднозначное имя не выбирает строку: {s['dragged']['selected']!r}"
+
+
+def test_h18_orphan_text_keeps_newer_refresh_error(start_pult) -> None:
+    """(h18) Пресет не загружен. Загрузка PNG прошла, её обновление списка задержано; тем временем ручное «Обновить»
+    отказало («каталога нет») и показано; затем пришёл устаревший ответ обновления загрузки. На экране ОБА: текст-
+    сирота И отказ более нового запроса.
+
+    Что ломает: устаревший ответ (undefined — строкой владеет более новый запрос) пишет только текст-сироту поверх
+    отказа, и причина пустого/старого списка пропадает (ревью R-5 ит.2, находка 4a)."""
+    stand = _stand(start_pult, _INITIAL, sprites_replies=[_SPRITES_OK, _SPRITES_OK, _REFUSAL])
+    stand.scene.responses["preset.get"] = {"status": "error", "code": "unavailable", "message": "нет"}
+    sp = "/api/preset/sprites"
+    out = _run_canvas(
+        stand.port,
+        [
+            {"op": "stub_fetch", "path": _PUT, "status": 200, "json": _PUT_OK},
+            {"op": "sleep", "ms": 500},
+            {"op": "hold_fetch", "path": sp, "count": 2},
+            _CHOOSE,
+            {"op": "sleep", "ms": 200},
+            _btn("btnSpritesRefresh"),
+            {"op": "sleep", "ms": 200},
+            {"op": "release_fetch", "path": sp, "index": 1},
+            {"op": "sleep", "ms": 100},
+            _snap("manual_failed"),
+            {"op": "release_fetch", "path": sp, "index": 0},
+            {"op": "sleep", "ms": 100},
+            _snap("stale_upload_reply"),
+        ],
+    )
+    s = out["snaps"]
+    assert s["manual_failed"]["spritesError"] == "список спрайтов не получен: каталога нет", (
+        f"предусловие: отказ ручного обновления показан: {s['manual_failed']['spritesError']!r}"
+    )
+    assert s["stale_upload_reply"]["spritesError"] == (
+        "файл up.png сохранён, слой не добавлен: пресет не загружен; список спрайтов не получен: каталога нет"
+    ), f"текст-сирота и отказ более нового обновления: {s['stale_upload_reply']['spritesError']!r}"
+
+
+def test_h19_preset_load_removes_only_the_orphan_text(start_pult) -> None:
+    """(h19) Пресет грузится медленно (1.2 с). Загрузка PNG прошла, обновление списка после неё отказало: на экране
+    «сирота; отказ». Пресет пришёл -> исчезает только сирота, отказ списка остаётся (список его так и не обновил).
+
+    Что ломает: loadPreset стирает весь текст вместе с отказом списка (ревью R-5 ит.2, находка 4b)."""
+    stand = _stand(start_pult, _INITIAL, sprites_replies=[_SPRITES_OK, _REFUSAL])
+    ok = dict(stand.scene.responses["preset.get"])
+
+    def slow_get(args: dict) -> dict:
+        time.sleep(1.2)
+        return json.loads(json.dumps(ok))
+
+    stand.scene.handlers["preset.get"] = slow_get
+    out = _run_canvas(
+        stand.port,
+        [
+            {"op": "stub_fetch", "path": _PUT, "status": 200, "json": _PUT_OK},
+            {"op": "sleep", "ms": 100},
+            _CHOOSE,
+            {"op": "sleep", "ms": 400},
+            _snap("uploaded"),
+            {"op": "sleep", "ms": 1500},
+            {"op": "settle"},
+            _snap("preset_loaded"),
+        ],
+    )
+    s = out["snaps"]
+    assert "сохранён, слой не добавлен" in s["uploaded"]["spritesError"], (
+        f"предусловие: сирота показана: {s['uploaded']['spritesError']!r}"
+    )
+    assert s["preset_loaded"]["rev"] == "рев.: rev-1", f"предусловие: пресет пришёл: {s['preset_loaded']['rev']!r}"
+    assert s["preset_loaded"]["spritesError"] == "список спрайтов не получен: каталога нет", (
+        f"loadPreset должен снять только сироту: {s['preset_loaded']['spritesError']!r}"
+    )
