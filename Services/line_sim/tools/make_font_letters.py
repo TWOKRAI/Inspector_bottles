@@ -23,6 +23,26 @@
 Шрифт без глифа для буквы (например `cmr10.ttf` из matplotlib — латинский
 математический шрифт без кириллицы) -> `SystemExit` с именем файла шрифта и буквой
 в тексте ошибки, ничего не пишется на диск для этой пары шрифт/буква.
+
+Краска (Task 1.2, line-sim-belt-look) — все флаги необязательны, без них вывод байт в байт прежний:
+
+    --ink-rgb R,G,B        цвет краски букв (RGB там, где альфа > 0), по умолчанию чёрный
+    --grain-sigma S        σ гауссова зерна по каждому каналу, только на буквах (альфа > 0)
+    --seed N               seed зерна (один rng на запуск, порядок буква x шрифт фиксирован)
+    --edge-blur-px S       σ гауссова размытия альфы буквы (мягкий край)
+    --disk-from-photo PATH диск --disk-out вырезается из реального фото (нужен --disk-out)
+
+Измеренные реальные значения: цвет краски ≈ (65, 70, 82), зерно σ ≈ 9, край ~2 px, диск 300 px.
+Зерно у фото-диска не добавляется — оно в самом фото (σ ≈ 8); `--grain-sigma` относится к буквам.
+
+    python -m Services.line_sim.tools.make_font_letters --letters АК --font ... --out ... \\
+        --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 \\
+        --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png --disk-out ...
+
+`--disk-from-photo`: фото -> порог яркости 150 -> крупнейшая компонента -> `minEnclosingCircle`;
+печать внутри круга стирается `cv2.inpaint`; квадрат по кругу -> `--size-px`; альфа — тот же круг,
+что у `build_disk`, слегка размытый (край ~2.5 px). Нет круга (площадь < 0.8·πr², r < 20 px,
+нечитаемое фото) -> `SystemExit` с путём фото.
 """
 
 from __future__ import annotations
@@ -34,7 +54,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from Services.dataset_gen.core.catalog import imwrite_unicode
+from Services.dataset_gen.core.catalog import imread_unicode, imwrite_unicode
 from Services.line_sim.tools.make_letter_catalog import DEFAULT_DIAMETER_PX
 
 #: Кодпоинт, заведомо не занятый реальными шрифтами (private use, категория `Co`, плоскость 16;
@@ -46,6 +66,17 @@ _MISSING_PROBE_CH = "\U0010fffd"
 _CANVAS_FACTOR = 4
 
 _DEFAULT_LETTER_FRAC = 0.6
+
+#: Порог яркости: диск светлее (маска диска), печать темнее (маска печати) — Task 1.2.
+_PHOTO_GRAY_THRESHOLD = 150
+#: Диск считается найденным, если его компонента занимает не меньше этой доли круга.
+_MIN_DISK_FILL = 0.8
+_MIN_DISK_RADIUS_PX = 20
+#: Отступ маски печати от края круга (не стирать кромку диска) и ядро её расширения.
+_PRINT_MASK_MARGIN_PX = 3
+_PRINT_DILATE_KERNEL = 5
+#: σ размытия альфы фото-диска: край 10->90 % ~2.5 px вместо 1 px у `build_disk`.
+_PHOTO_DISK_EDGE_SIGMA = 1.0
 
 
 def _render_mask(font_path: Path, ch: str, font_size_pt: int, canvas_px: int) -> np.ndarray:
@@ -143,20 +174,63 @@ def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: floa
     return rgba
 
 
+def _finish_ink(
+    rgba: np.ndarray,
+    ink_rgb: tuple[int, int, int] | None,
+    grain_sigma: float,
+    edge_blur_px: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Покрасить букву: мягкий край -> цвет краски -> зерно. Без опций возвращает `rgba` как есть.
+
+    Порядок: альфа размывается ПЕРВОЙ, цвет и зерно применяются по итоговой маске `альфа > 0` —
+    иначе расширенная размытием кромка осталась бы чёрной, а не цветом краски. Зерно считается в
+    float и клипуется в uint8 (без переполнения); прозрачные пиксели (альфа == 0) не трогаются.
+    """
+    if ink_rgb is None and grain_sigma <= 0 and edge_blur_px <= 0:
+        return rgba
+    if edge_blur_px > 0:
+        rgba[:, :, 3] = cv2.GaussianBlur(rgba[:, :, 3], (0, 0), sigmaX=edge_blur_px)
+    ink_mask = rgba[:, :, 3] > 0
+    if ink_rgb is not None:
+        rgba[ink_mask, 0:3] = ink_rgb
+    if grain_sigma > 0:
+        noise = rng.normal(0.0, grain_sigma, size=rgba.shape[:2] + (3,))
+        noisy = rgba[:, :, 0:3].astype(np.float64) + noise
+        rgba[ink_mask, 0:3] = np.clip(np.rint(noisy[ink_mask]), 0, 255).astype(np.uint8)
+    return rgba
+
+
 def build_font_letters(
     letters: str,
     fonts: list[Path],
     size_px: int,
     letter_frac: float,
     out: Path,
+    *,
+    ink_rgb: tuple[int, int, int] | None = None,
+    grain_sigma: float = 0.0,
+    edge_blur_px: float = 0.0,
+    seed: int = 0,
 ) -> list[Path]:
     """Собрать каталог `out/<буква>/<стем файла шрифта>.png` для каждой пары буква x
     шрифт. Возвращает список записанных файлов (порядок: буквы `letters`, внутри —
-    порядок `fonts`)."""
+    порядок `fonts`). Опции краски (`ink_rgb`, `grain_sigma`, `edge_blur_px`, `seed`) — см.
+    `_finish_ink`; по умолчанию вывод прежний."""
+    rng = np.random.default_rng(seed)  # один на вызов: порядок буква x шрифт фиксирует зерно
     # Сначала все рендеры, потом запись: ошибка на любой паре не оставляет пустых папок
     # классов, которые каталог молча принял бы (ревью 1.1b, NIT-3).
     rendered = [
-        (out / letter / f"{Path(font_path).stem}.png", _render_letter(Path(font_path), letter, size_px, letter_frac))
+        (
+            out / letter / f"{Path(font_path).stem}.png",
+            _finish_ink(
+                _render_letter(Path(font_path), letter, size_px, letter_frac),
+                ink_rgb,
+                grain_sigma,
+                edge_blur_px,
+                rng,
+            ),
+        )
         for letter in letters
         for font_path in fonts
     ]
@@ -166,21 +240,91 @@ def build_font_letters(
     return [dest for dest, _ in rendered]
 
 
-def build_disk(size_px: int) -> np.ndarray:
-    """Белый непрозрачный диск диаметром `size_px` на прозрачном фоне (RGBA), с
-    антиалиасингом края: рисуется в 4x масштабе и уменьшается `cv2.INTER_AREA` — углы
-    канвы остаются прозрачными (эллипс не касается краёв квадрата)."""
+def _disk_alpha(size_px: int) -> np.ndarray:
+    """Альфа круга диаметром `size_px` (uint8, `size_px` x `size_px`): рисуется в 4x масштабе и
+    уменьшается `cv2.INTER_AREA` — антиалиасинг края, углы канвы остаются прозрачными
+    (эллипс не касается краёв квадрата)."""
     big = size_px * _CANVAS_FACTOR
     img = Image.new("L", (big, big), 0)
     draw = ImageDraw.Draw(img)
     draw.ellipse((0, 0, big - 1, big - 1), fill=255)
     alpha_big = np.array(img)
-    alpha = cv2.resize(alpha_big, (size_px, size_px), interpolation=cv2.INTER_AREA)
+    return cv2.resize(alpha_big, (size_px, size_px), interpolation=cv2.INTER_AREA)
 
+
+def build_disk(size_px: int) -> np.ndarray:
+    """Белый непрозрачный диск диаметром `size_px` на прозрачном фоне (RGBA), с
+    антиалиасингом края (`_disk_alpha`)."""
     rgba = np.zeros((size_px, size_px, 4), dtype=np.uint8)
     rgba[:, :, 0:3] = 255
-    rgba[:, :, 3] = alpha
+    rgba[:, :, 3] = _disk_alpha(size_px)
     return rgba
+
+
+def _find_disk_circle(gray: np.ndarray, photo_path: Path) -> tuple[float, float, float]:
+    """Круг диска на фото `(cx, cy, r)`: крупнейшая светлая компонента + `minEnclosingCircle`.
+    `SystemExit` с путём фото, если компонента не похожа на круг (заполнение < 0.8, r < 20 px)."""
+    mask = (gray > _PHOTO_GRAY_THRESHOLD).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if count < 2:
+        raise SystemExit(
+            f"make_font_letters: на фото {photo_path} нет светлой области диска (яркость > {_PHOTO_GRAY_THRESHOLD})"
+        )
+    label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    area = float(stats[label, cv2.CC_STAT_AREA])
+    contours, _ = cv2.findContours((labels == label).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    (cx, cy), r = cv2.minEnclosingCircle(np.concatenate(contours))
+    if r < _MIN_DISK_RADIUS_PX or area < _MIN_DISK_FILL * np.pi * r * r:
+        raise SystemExit(
+            f"make_font_letters: на фото {photo_path} не найден круглый диск "
+            f"(r={r:.1f} px, площадь {area:.0f} при круге {np.pi * r * r:.0f})"
+        )
+    return float(cx), float(cy), float(r)
+
+
+def build_disk_from_photo(photo_path: Path, size_px: int) -> np.ndarray:
+    """Диск из реального фото (RGBA `size_px` x `size_px`): печать стёрта `cv2.inpaint`,
+    настоящее зерно фото сохранено, альфа — круг `_disk_alpha`, слегка размытый.
+
+    Pre: на фото светлый (> 150) круглый диск радиусом >= 20 px.
+    Post: `SystemExit` с путём фото, если фото не читается или круга нет.
+    """
+    try:
+        photo = imread_unicode(photo_path, cv2.IMREAD_COLOR)
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"make_font_letters: фото {photo_path} не читается: {exc}") from exc
+    gray = cv2.cvtColor(photo, cv2.COLOR_BGR2GRAY)
+    cx, cy, r = _find_disk_circle(gray, photo_path)
+
+    yy, xx = np.mgrid[0 : gray.shape[0], 0 : gray.shape[1]]
+    inside = (xx - cx) ** 2 + (yy - cy) ** 2 <= (r - _PRINT_MASK_MARGIN_PX) ** 2
+    print_mask = (inside & (gray < _PHOTO_GRAY_THRESHOLD)).astype(np.uint8) * 255
+    print_mask = cv2.dilate(print_mask, np.ones((_PRINT_DILATE_KERNEL, _PRINT_DILATE_KERNEL), np.uint8))
+    clean = cv2.inpaint(photo, print_mask, 5, cv2.INPAINT_TELEA)
+
+    # Квадрат [c - r, c + r]; если круг у края фото — добиваем повтором крайних пикселей.
+    side = int(round(2 * r))
+    x0, y0 = int(round(cx - r)), int(round(cy - r))
+    pad = side  # с запасом: сдвиг выреза не выходит за padded-массив (круг всегда внутри фото)
+    padded = cv2.copyMakeBorder(clean, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+    crop = padded[y0 + pad : y0 + pad + side, x0 + pad : x0 + pad + side]
+    resized = cv2.resize(crop, (size_px, size_px), interpolation=cv2.INTER_AREA)
+
+    rgba = np.zeros((size_px, size_px, 4), dtype=np.uint8)
+    rgba[:, :, 0:3] = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    rgba[:, :, 3] = cv2.GaussianBlur(_disk_alpha(size_px), (0, 0), sigmaX=_PHOTO_DISK_EDGE_SIGMA)
+    return rgba
+
+
+def _parse_ink_rgb(text: str) -> tuple[int, int, int]:
+    """`R,G,B` -> кортеж из трёх int 0..255; иначе `ArgumentTypeError` (argparse -> exit 2)."""
+    try:
+        parts = [int(p) for p in text.split(",")]
+    except ValueError:
+        parts = []
+    if len(parts) != 3 or not all(0 <= v <= 255 for v in parts):
+        raise argparse.ArgumentTypeError(f"ожидали R,G,B — три целых 0..255, получили {text!r}")
+    return (parts[0], parts[1], parts[2])
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -203,15 +347,38 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--out", required=True, help="каталог классов-букв (создаётся)")
     parser.add_argument("--disk-out", default=None, help="путь для белого диска-подложки (опционально)")
+    parser.add_argument("--ink-rgb", type=_parse_ink_rgb, default=None, help="цвет краски букв R,G,B (0..255)")
+    parser.add_argument("--grain-sigma", type=float, default=0.0, help="σ зерна на буквах (дефолт 0 — без зерна)")
+    parser.add_argument("--seed", type=int, default=0, help="seed зерна (дефолт 0)")
+    parser.add_argument("--edge-blur-px", type=float, default=0.0, help="σ размытия альфы буквы (дефолт 0)")
+    parser.add_argument(
+        "--disk-from-photo", default=None, help="фото реального диска для --disk-out (вместо белого круга)"
+    )
     args = parser.parse_args(argv)
+    if args.disk_from_photo and not args.disk_out:
+        parser.error("--disk-from-photo требует --disk-out")
 
     fonts = [Path(f) for f in args.font]
     out = Path(args.out)
-    written = build_font_letters(args.letters, fonts, args.size_px, args.letter_frac, out)
+    written = build_font_letters(
+        args.letters,
+        fonts,
+        args.size_px,
+        args.letter_frac,
+        out,
+        ink_rgb=args.ink_rgb,
+        grain_sigma=args.grain_sigma,
+        edge_blur_px=args.edge_blur_px,
+        seed=args.seed,
+    )
     print(f"буквы: {len(args.letters)}, шрифты: {len(fonts)} -> {len(written)} файлов в {out}")
 
     if args.disk_out:
-        disk = build_disk(args.size_px)
+        disk = (
+            build_disk_from_photo(Path(args.disk_from_photo), args.size_px)
+            if args.disk_from_photo
+            else build_disk(args.size_px)
+        )
         disk_path = Path(args.disk_out)
         disk_path.parent.mkdir(parents=True, exist_ok=True)
         imwrite_unicode(disk_path, cv2.cvtColor(disk, cv2.COLOR_RGBA2BGRA))

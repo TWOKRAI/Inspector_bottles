@@ -40,6 +40,26 @@ python -m Services.line_sim.tools.make_font_letters \
     --disk-out data/line_sim/letters_font_disk.png
 ```
 
+Те же спрайты «как на реальной ленте» — краска, зерно, мягкий край и диск, вырезанный из реального
+фото (значения измерены: цвет краски ≈ (65, 70, 82), зерно σ ≈ 9, край ≈ 2 px, диск 300 px). Зерно
+у диска не добавляется — оно уже есть в самом фото; `--grain-sigma` относится только к буквам:
+
+```bash
+python -m Services.line_sim.tools.make_font_letters \
+    --letters АК \
+    --font "$FONTS/DejaVuSans.ttf" \
+    --font "$FONTS/DejaVuSans-Bold.ttf" \
+    --size-px 300 --letter-frac 0.6 \
+    --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 \
+    --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png \
+    --out data/line_sim/letters_font \
+    --disk-out data/line_sim/letters_font_disk.png
+```
+
+`--disk-from-photo` требует `--disk-out`. Внимание: `color_rgb` слоя **заменяет** RGB спрайта
+(`LayeredObject._transform`), поэтому для текстурированных (покрашенных, с зерном) спрайтов слои
+пресета должны быть **без** `color_rgb` — иначе заливка сотрёт и краску, и зерно.
+
 ### Примеры аугментации слоёв
 
 Реальные диски не варьируются (один физический диск), печать на диске не гуляет по масштабу,
