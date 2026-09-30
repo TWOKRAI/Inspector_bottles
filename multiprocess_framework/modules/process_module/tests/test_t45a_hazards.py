@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 
 from multiprocess_framework.modules.process_module.generic.data_receiver import DataReceiver
+from multiprocess_framework.modules.process_module.generic.pacing import FramePacer
 
 
 def _receiver(chain_queue: queue.Queue, **kw) -> DataReceiver:
@@ -45,3 +47,20 @@ def test_bound_lag_drop_path_works_with_stamped_batch() -> None:
     assert dr.lag_dropped_total == 3
     ids = [q.get_nowait()[0]["frame_id"] for _ in range(2)]
     assert ids == [3, 4]
+
+
+def test_pacer_late_is_cumulative_across_reset() -> None:
+    """``reset()`` забывает расписание, но НЕ счёт опозданий (контракт 4.5a).
+
+    Пауза воркера зовёт ``reset()``; обнули он счётчик, каждая пауза стирала бы историю
+    опозданий, и «источник не успевает» пропадало бы из heartbeat после любой паузы.
+    Добавлен лидом: инъекция A2 («reset обнуляет late») не роняла ни один тест.
+    """
+    stop = threading.Event()
+    pacer = FramePacer(0.005)
+    pacer.wait(stop)
+    time.sleep(0.02)  # работа дольше интервала — следующий такт опоздал
+    pacer.wait(stop)
+    assert pacer.late == 1
+    pacer.reset()
+    assert pacer.late == 1, "reset() стёр счёт опозданий"
