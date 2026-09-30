@@ -5,6 +5,7 @@ Processing-плагин: process(items) → items с cv2.findContours.
 V3_MY_PURE: plugin самодостаточен — создаёт локальный register
 если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
+
 from __future__ import annotations
 
 import cv2
@@ -30,6 +31,13 @@ class BlobDetectorPlugin(ProcessModulePlugin):
 
     inputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Входной BGR-кадр"),
+        Port(
+            name="mask",
+            dtype="image/gray",
+            shape="(H, W)",
+            optional=True,
+            description="Маска от предыдущего плагина (color_mask); без неё детектор порогует цвет сам",
+        ),
     ]
     outputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр (опционально с контурами)"),
@@ -60,18 +68,30 @@ class BlobDetectorPlugin(ProcessModulePlugin):
 
     @for_each
     def process(self, item: dict) -> dict | None:
-        """BGR → HSV-маска → findContours → фильтрация → detections."""
+        """Маска (готовая из item["mask"] или своя HSV) → findContours → фильтрация → detections.
+
+        Рисование контуров идёт на КОПИИ кадра: входной массив не меняется.
+        """
         frame = item.get("frame")
         if frame is None:
             return None
 
-        # HSV-пороги из register
-        lower = np.array([self._reg.h_min, self._reg.s_min, self._reg.v_min], dtype=np.uint8)
-        upper = np.array([self._reg.h_max, self._reg.s_max, self._reg.v_max], dtype=np.uint8)
-
-        # Применяем HSV-маску
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, lower, upper)
+        # Готовая маска от предыдущего плагина — только если она точно годится:
+        # 2D uint8 того же размера, что кадр. Иначе порогуем цвет сами (старый путь).
+        upstream = item.get("mask")
+        if (
+            isinstance(upstream, np.ndarray)
+            and upstream.ndim == 2
+            and upstream.dtype == np.uint8
+            and upstream.shape == frame.shape[:2]
+        ):
+            mask = upstream
+        else:
+            # HSV-пороги из register
+            lower = np.array([self._reg.h_min, self._reg.s_min, self._reg.v_min], dtype=np.uint8)
+            upper = np.array([self._reg.h_max, self._reg.s_max, self._reg.v_max], dtype=np.uint8)
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv, lower, upper)
 
         # Находим контуры на бинарной маске
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -86,15 +106,18 @@ class BlobDetectorPlugin(ProcessModulePlugin):
             if self._reg.max_area > 0 and area > self._reg.max_area:
                 continue
             x, y, w, h = cv2.boundingRect(c)
-            detections.append({
-                "bbox": [x, y, x + w, y + h],
-                "center": [x + w // 2, y + h // 2],
-                "area": area,
-            })
+            detections.append(
+                {
+                    "bbox": [x, y, x + w, y + h],
+                    "center": [x + w // 2, y + h // 2],
+                    "area": area,
+                }
+            )
             filtered_contours.append(c)
 
-        # Опционально рисуем контуры на кадре
+        # Опционально рисуем контуры — на копии, входной кадр не трогаем
         if self._reg.draw_contours and filtered_contours:
+            frame = frame.copy()
             cv2.drawContours(
                 frame,
                 filtered_contours,
@@ -103,7 +126,7 @@ class BlobDetectorPlugin(ProcessModulePlugin):
                 self._reg.contour_thickness,
             )
 
-        return {**item, "detections": detections, "contours": filtered_contours, "mask": mask}
+        return {**item, "frame": frame, "detections": detections, "contours": filtered_contours, "mask": mask}
 
     # --- Команды ---
 

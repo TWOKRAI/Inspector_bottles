@@ -1,6 +1,9 @@
 """ColorMaskPlugin — HSV-маска по цвету.
 
 Processing-плагин: process(items) -> items с cv2.inRange.
+Кадр `frame` НЕ меняется: маска (uint8, (H, W)) кладётся в item["mask"]
+и потребляется дальше по цепочке (blob_detector). Чтобы увидеть маску на
+дисплее — поставить после плагина `mask_to_frame`.
 
 V3_MY_PURE: plugin самодостаточен — создаёт локальный register
 если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
@@ -9,7 +12,6 @@ V3_MY_PURE: plugin самодостаточен — создаёт локаль�
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import cv2
 import numpy as np
@@ -27,7 +29,10 @@ from .registers import ColorMaskRegisters
 
 @register_plugin("color_mask", category="processing", description="HSV-маска по цвету")
 class ColorMaskPlugin(ProcessModulePlugin):
-    """HSV-маска по цвету с runtime-настройкой через регистр."""
+    """HSV-маска по цвету с runtime-настройкой через регистр.
+
+    Кадр `frame` остаётся как есть; маска добавляется в item["mask"].
+    """
 
     name = "color_mask"
     category = "processing"
@@ -36,7 +41,7 @@ class ColorMaskPlugin(ProcessModulePlugin):
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Входной BGR-кадр"),
     ]
     outputs = [
-        Port(name="mask", dtype="image/gray", shape="(H, W, 1)", description="Бинарная маска"),
+        Port(name="mask", dtype="image/gray", shape="(H, W)", description="Бинарная маска"),
     ]
 
     commands = {
@@ -84,7 +89,7 @@ class ColorMaskPlugin(ProcessModulePlugin):
 
     @for_each
     def _process_item(self, item: dict) -> dict | None:
-        """BGR -> HSV -> inRange -> маска (BGR 3ch для pipeline совместимости)."""
+        """BGR -> HSV -> inRange -> item["mask"] (uint8, (H, W)); frame не трогаем."""
         frame = item.get("frame")
         if frame is None:
             return None
@@ -95,8 +100,7 @@ class ColorMaskPlugin(ProcessModulePlugin):
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, lower, upper)
-        mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        return {**item, "frame": mask_bgr}
+        return {**item, "mask": mask}
 
     def process(self, items: list[dict]) -> list[dict]:
         """Обёртка: замер latency + публикация метрик в StateStore раз в секунду."""
@@ -122,16 +126,16 @@ class ColorMaskPlugin(ProcessModulePlugin):
         if self._state_proxy is None:
             return
 
-        avg_latency = (
-            self._latency_sum_ms / self._latency_count
-            if self._latency_count > 0 else 0.0
-        )
+        avg_latency = self._latency_sum_ms / self._latency_count if self._latency_count > 0 else 0.0
         path = f"processes.{self._ctx.process_name}.state"
-        self._state_proxy.merge(path, {
-            "status": "running",
-            "processed_count": self._processed_count,
-            "avg_latency_ms": round(avg_latency, 2),
-        })
+        self._state_proxy.merge(
+            path,
+            {
+                "status": "running",
+                "processed_count": self._processed_count,
+                "avg_latency_ms": round(avg_latency, 2),
+            },
+        )
 
         # Сбросить накопители для следующего интервала
         self._latency_sum_ms = 0.0
