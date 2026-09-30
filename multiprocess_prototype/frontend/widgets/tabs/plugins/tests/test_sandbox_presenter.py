@@ -148,7 +148,7 @@ class TestCheckCompatibility:
         assert "pipeline" in result.reason.lower() or "контекст" in result.reason
 
     def test_check_multi_input_port_disabled(self) -> None:
-        """Плагин с несколькими ОБЯЗАТЕЛЬНЫМИ входами, среди которых нет frame → disabled, причина называет порты."""
+        """Плагин с несколькими ОБЯЗАТЕЛЬНЫМИ входами → disabled, причина называет порты."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         # Создаём mock entry с 2 входными портами
@@ -173,26 +173,30 @@ class TestCheckCompatibility:
     @pytest.mark.parametrize(
         ("ports", "ok", "reason_part"),
         [
-            ([("frame", False), ("mask", True)], True, ""),  # необязательный mask не мешает
-            ([("frame", False), ("mask", False)], False, "mask"),  # обязательный не-frame вход
+            ([("frame", "image/bgr", False), ("mask", "image/gray", True)], True, ""),  # необязательный mask не мешает
+            ([("frame", "image/bgr", False), ("mask", "image/gray", False)], False, "mask"),  # два обязательных
             ([], True, ""),  # чистый плагин без входов
-            ([("x", True)], False, "не принимает кадр"),  # frame среди входов нет
-            ([("frame", True), ("mask", True)], True, ""),  # всё необязательное, frame есть
+            ([("x", "image/gray", True)], False, "не принимает кадр"),  # BGR-входа нет вовсе
+            ([("frame", "image/bgr", True), ("mask", "image/gray", True)], True, ""),  # всё необязательное, BGR есть
+            ([("region", "image/bgr", False)], True, ""),  # имя порта — метка графа, важен dtype (flip/negative)
+            ([("mask", "image/gray", False)], False, "mask"),  # единственный обязательный вход — не BGR
+            ([("x", "image/bgr", True)], True, ""),  # необязательный BGR-вход под любым именем
         ],
     )
     def test_check_input_ports_rule(self, ports, ok, reason_part) -> None:
-        """Правило входов: мешают только обязательные не-frame; без frame среди входов — отказ."""
+        """Правило входов по dtype: один обязательный image/bgr (или ни одного, но BGR-вход есть)."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         class FakePort:
-            def __init__(self, name: str, optional: bool) -> None:
+            def __init__(self, name: str, dtype: str, optional: bool) -> None:
                 self.name = name
+                self.dtype = dtype
                 self.optional = optional
 
         entry = _MockEntry(
             name="probe",
             category="processing",
-            inputs=[FakePort(n, o) for n, o in ports],
+            inputs=[FakePort(n, d, o) for n, d, o in ports],
         )
         result = SandboxPresenter(_make_ctx(registry=_MockRegistry([entry]))).check_compatibility("probe")
 

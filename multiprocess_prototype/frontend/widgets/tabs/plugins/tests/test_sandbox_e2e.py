@@ -457,8 +457,8 @@ class TestCompatibilityRuleRealRegistry:
 
         assert SandboxPresenter(ctx_with_real_registry).check_compatibility("mjpeg_sink").ok is False
 
-    def test_required_non_frame_input_disables_plugin(self, all_real_plugins, ctx_with_real_registry) -> None:
-        """blob_filter (processing, обязательный вход mask) → ok=False, причина называет порт."""
+    def test_required_non_bgr_input_disables_plugin(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """blob_filter: единственный обязательный вход mask не image/bgr → ok=False, причина называет порт."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         result = SandboxPresenter(ctx_with_real_registry).check_compatibility("blob_filter")
@@ -466,8 +466,38 @@ class TestCompatibilityRuleRealRegistry:
         assert result.ok is False
         assert "mask" in result.reason
 
+    @pytest.mark.parametrize("name", ["flip", "negative"])
+    def test_region_named_bgr_input_keeps_plugin_open(self, all_real_plugins, ctx_with_real_registry, name) -> None:
+        """flip/negative: порт назван "region", но это image/bgr = item["frame"] → открыты (имя порта — метка графа)."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        result = SandboxPresenter(ctx_with_real_registry).check_compatibility(name)
+
+        assert result.ok is True, result.reason
+
+    def test_flip_run_once_flips_rows(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """run_once(flip): первая строка результата == последняя строка входа."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        frame = np.arange(6 * 4 * 3, dtype=np.uint8).reshape(6, 4, 3)
+        out = SandboxPresenter(ctx_with_real_registry).run_once("flip", frame, {})
+
+        assert out is not None
+        assert out[0].tolist() == frame[-1].tolist()
+        assert out[-1].tolist() == frame[0].tolist()
+
+    def test_negative_run_once_inverts(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """run_once(negative): результат == 255 - вход."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        frame = np.arange(6 * 4 * 3, dtype=np.uint8).reshape(6, 4, 3)
+        out = SandboxPresenter(ctx_with_real_registry).run_once("negative", frame, {})
+
+        assert out is not None
+        assert out.tolist() == (255 - frame).tolist()
+
     def test_optional_non_frame_input_keeps_plugin_open(self, all_real_plugins, ctx_with_real_registry) -> None:
-        """circle_detector: frame и mask оба необязательные → открыт (правило не считает необязательные)."""
+        """circle_detector: frame и mask оба необязательные, image/bgr среди входов есть → открыт."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
         assert SandboxPresenter(ctx_with_real_registry).check_compatibility("circle_detector").ok is True

@@ -19,7 +19,7 @@ Bridge _registry остаётся навсегда. Q-F2=C (owner-decision 2026-
 - runtime / control -- требуют pipeline-контекст
 - io / output / sink -- пишут наружу (файлы, устройства)
 - calibration -- требует робота / стенд
-- обязательный вход, кроме frame (mask, detections, ...) -- берётся из цепочки
+- несколько обязательных входов или обязательный не image/bgr (mask, detections, ...) -- берётся из цепочки
 - stitcher -- семантика N:1 (fan-in), требует несколько потоков
 """
 
@@ -111,9 +111,11 @@ class SandboxPresenter:
         3. category == "source" → disabled.
         4. category in _DISABLED_CATEGORIES (runtime, control, io, output, sink, calibration) → disabled.
         5. name in _MULTI_INPUT_NAMES → disabled (stitcher: семантика N:1).
-        6. Есть ОБЯЗАТЕЛЬНЫЙ вход, кроме "frame" → disabled (данные берутся из цепочки;
-           необязательные входы, например mask у blob_detector, не считаются).
-        7. Входы есть, но среди них нет "frame" → disabled (плагин не принимает кадр).
+        6. Больше одного ОБЯЗАТЕЛЬНОГО входа, либо единственный обязательный не image/bgr
+           → disabled (данные берутся из цепочки; необязательные входы, например mask у
+           blob_detector, не считаются; имя порта — метка графа, судим по dtype).
+        7. Обязательных входов нет, входы есть, но ни один не image/bgr → disabled
+           (плагин не принимает кадр).
         8. Иначе → ok=True.
 
         Категории io / output / sink / calibration отсекаются на шаге 4 вместе с
@@ -156,17 +158,21 @@ class SandboxPresenter:
                 reason="требует несколько входных потоков (pipeline-контекст)",
             )
 
-        # Песочница подаёт только {"frame": frame}: обязательный вход с другим именем
-        # взять неоткуда. Необязательные входы считаем «не требует» — плагин обязан
-        # работать и без них.
+        # Имена портов — метки графа, а не ключи item (flip/negative: порт "region" читает
+        # item["frame"]). Песочница подаёт один BGR-кадр, поэтому судим по dtype:
+        # единственный обязательный вход должен быть image/bgr. Необязательные входы
+        # не считаются — плагин обязан работать и без них.
         inputs = getattr(entry, "inputs", [])
-        required_extra = [p.name for p in inputs if not getattr(p, "optional", False) and p.name != "frame"]
-        if required_extra:
+        required = [p for p in inputs if not getattr(p, "optional", False)]
+        blockers = (
+            required if len(required) > 1 else [p for p in required if str(getattr(p, "dtype", "")) != "image/bgr"]
+        )
+        if blockers:
             return SandboxCompatibility(
                 ok=False,
-                reason=f"требует входы из цепочки: {', '.join(required_extra)}",
+                reason=f"требует входы из цепочки: {', '.join(p.name for p in blockers)}",
             )
-        if inputs and not any(p.name == "frame" for p in inputs):
+        if inputs and not required and not any(str(getattr(p, "dtype", "")) == "image/bgr" for p in inputs):
             return SandboxCompatibility(ok=False, reason="не принимает кадр")
 
         return SandboxCompatibility(ok=True, reason="")
