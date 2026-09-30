@@ -33,4 +33,9 @@ instead of failing loudly.
   never count a non-applied patch as "0 tests died". Normalise `\n` -> `\r\n` when the target file is CRLF.
   line-sim 1.3h-b (2026-09-29): `Plugins/sim/pult_web/plugin.py` is CRLF — 6 of 22 multi-line patches silently
   did not match and would have read as "unguarded"; the count check caught it.
+- Repeated 2026-09-30 (Task 4.5e, transport-single-policy): the lead's own quick fix was left uncommitted, a one-line
+  `sed` injection was reverted with `git checkout -- <file>` and the fix vanished; the second injection then "passed
+  by prediction" against the reverted file. Saved only by a `cp` backup made before the loop. Rule, no exceptions for
+  "just a one-liner": `git commit` first, then inject; after each revert `git diff --quiet` must be clean AND the
+  injection must be verified to have applied (`git diff --quiet` NON-clean after the patch).
 - Related: [[merge-radius-skips-live-and-contract-tests]].
