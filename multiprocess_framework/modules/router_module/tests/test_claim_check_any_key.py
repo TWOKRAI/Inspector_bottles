@@ -16,12 +16,18 @@ C1 сужен 4.1-fix (ревью 4.1): ссылкой едет только г�
 Все массивы этого файла — числовые 2D/3D, формулировки ниже читать с этой оговоркой.
 
 Пороги — литералы: ``nbytes >= 8192`` едет ссылкой, ``8191`` — inline; всё data-сообщение
-после send-middleware ``len(pickle.dumps(msg)) <= 16384``. Имена ссылочных полей
-(``shm_name``, ``_shm_refs`` ...) НЕ пинятся — проверяются только размер, отсутствие
-крупного ndarray внутри сообщения и побайтное равенство после приёма (форма И dtype).
+после send-middleware ``len(pickle.dumps(msg)) <= 16384``.
 
-Рядом с каждым RED стоит CONTROL на ключе ``frame``, зелёный уже сегодня: он доказывает,
-что стенд исправен, а красный падает именно из-за отсутствующей фичи.
+Task 4.4 (формат ссылки): ссылка на ЛЮБОЙ крупный ключ, включая ``frame``, лежит в
+``msg["data"]["_shm_refs"][key]`` (пять полей — точный набор пинит ``test_frame_ref_gen.py``, A5);
+плоских полей ``shm_name``/``shm_index``/... нет. Здесь это учтено так: везде, где тест раньше
+проверял «крупный массив уехал ссылкой», теперь проверяется ещё и ``_shm_refs[key]`` ровно для этих
+ключей (``_assert_refs``); inline-ключи (8191 Б) в ``_shm_refs`` НЕ попадают. Все прочие свойства C1-C8
+(размер сообщения, отсутствие ndarray, побайтное равенство после приёма — форма И dtype, fan-out,
+независимость колец) не изменились. Флаг ``FW_SHM_SEQLOCK`` удалён (заголовок поколения всегда).
+
+Рядом с каждым RED стоит CONTROL, зелёный до 4.4: он доказывает, что стенд исправен, а красный падает
+именно из-за отсутствующей фичи.
 
 Не покрыто здесь (в другом файле): C3 (приём в пайплайне, отдельный ОС-процесс) и C5 (займы).
 """
@@ -170,6 +176,15 @@ def _assert_same(got: Any, want: np.ndarray, label: str) -> None:
     assert got.tobytes() == want.tobytes(), f"{label}: содержимое не совпало побайтно"
 
 
+def _assert_refs(out: dict, keys: set[str]) -> None:
+    """Формат 4.4: ссылки на ровно эти ключи лежат в ``data["_shm_refs"]``, плоских полей нет."""
+    data = out["data"]
+    refs = data.get("_shm_refs")
+    assert isinstance(refs, dict), f"нет data['_shm_refs']; ключи data: {sorted(data)}"
+    assert set(refs) == keys, f"_shm_refs по ключам {sorted(refs)}, ожидалось {sorted(keys)}"
+    assert "shm_name" not in data and "shm_index" not in data, "остались плоские поля ссылки старого формата"
+
+
 def _assert_small_wire(out: dict) -> None:
     """Суть C1 в двух утверждениях: размер и отсутствие крупного ndarray внутри."""
     big = _big_arrays(out)
@@ -180,10 +195,11 @@ def _assert_small_wire(out: dict) -> None:
 
 # ===================================== C1: отправка =====================================
 def test_c1_control_frame_goes_by_reference_message_small(make_owner):
-    """CONTROL (зелёный сегодня): ключ ``frame`` крупнее порога -> сообщение мелкое."""
+    """C1 (ключ ``frame``, формат 4.4): крупнее порога -> сообщение мелкое, ссылка в ``_shm_refs["frame"]``."""
     mw = make_owner()
     out = _bounded(lambda: _send(mw, {"frame": _arr((100, 100, 3), seed=1), "n": 1}))
     _assert_small_wire(out)
+    _assert_refs(out, {"frame"})
 
 
 def test_c1_foo_goes_by_reference_message_small(make_owner):
@@ -191,6 +207,7 @@ def test_c1_foo_goes_by_reference_message_small(make_owner):
     mw = make_owner()
     out = _bounded(lambda: _send(mw, {"foo": _arr((100, 100, 3), seed=2), "n": 1}))
     _assert_small_wire(out)
+    _assert_refs(out, {"foo"})
 
 
 def test_c1_two_large_keys_message_small(make_owner):
@@ -209,7 +226,9 @@ def test_c1_two_large_keys_message_small(make_owner):
             },
         )
 
-    _assert_small_wire(_bounded(scenario))
+    out = _bounded(scenario)
+    _assert_small_wire(out)
+    _assert_refs(out, {"frame", "rendered_frame", "mask"})
 
 
 # ===================================== C2: мелочь ======================================
@@ -225,6 +244,7 @@ def test_c2_boundary_8191_inline_8192_by_reference(make_owner):
 
     big = _big_arrays(out)
     assert big == [], f"массив ровно 8192 Б остался inline (порог >= 8192): {big}"
+    _assert_refs(out, {"foo"})  # ссылкой — только 8192 Б; 8191 Б под ``bar`` в _shm_refs не попадает
     inline = out["data"].get("bar")
     assert isinstance(inline, np.ndarray), "массив 8191 Б обязан ехать inline под своим ключом"
     _assert_same(inline, below, "bar (8191 Б)")
@@ -245,13 +265,14 @@ def test_c2_small_values_inline_unchanged(make_owner):
 
 # ================================== C4: приём copy-out =================================
 def test_c4_control_frame_restored_by_on_receive(make_owner, make_consumer):
-    """CONTROL (зелёный сегодня): путь ``frame`` для GUI — восстановлен в ``msg["frame"]``."""
+    """Путь ``frame`` для GUI: ссылка в ``_shm_refs["frame"]`` (4.4), восстановлен в ``msg["frame"]``."""
     owner, gui = make_owner(), make_consumer()
     frame = _arr((48, 64, 3), seed=9)
 
     def scenario() -> dict:
         out = _send(owner, {"frame": frame, "n": 7})
         _assert_small_wire(out)
+        _assert_refs(out, {"frame"})
         return gui.on_receive(_wire(out))
 
     got = _bounded(scenario)
@@ -270,6 +291,7 @@ def test_c4_on_receive_restores_rendered_frame(make_owner, make_consumer):
     def scenario() -> dict:
         out = _send(owner, {"frame": frame, "rendered_frame": rendered, "n": 7})
         _assert_small_wire(out)  # массив реально ушёл в SHM, а не остался в конверте
+        _assert_refs(out, {"frame", "rendered_frame"})
         return gui.on_receive(_wire(out))
 
     got = _bounded(scenario)
@@ -285,7 +307,6 @@ def _fanout_scenario(monkeypatch, make_owner, make_consumer, keys: tuple[str, ..
     следствиям: если бы второй send писал заново, B (следующий item) упёрся бы в исчерпание
     кольца — ``strip`` вернул бы None, а ``frame_loan_exhausted`` вырос бы."""
     monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
     owner = make_owner(coll=2, num_consumers=2)
     gui1, gui2 = make_consumer("gui1"), make_consumer("gui2")
     shapes = {"frame": (48, 64, 3), "foo": (100, 100)}  # 9216 Б и 10000 Б — оба >= порога
@@ -299,6 +320,9 @@ def _fanout_scenario(monkeypatch, make_owner, make_consumer, keys: tuple[str, ..
         assert out1 is not None and out2 is not None
         _assert_small_wire(out1)
         _assert_small_wire(out2)
+        _assert_refs(out1, set(keys))
+        _assert_refs(out2, set(keys))  # повтор fan-out несёт ТЕ ЖЕ ссылки (свои: owner == "own")
+        assert out1["data"]["_shm_refs"] == out2["data"]["_shm_refs"], "повтор fan-out переписал ссылки (запись дважды)"
 
         item_b = {k: _arr(v.shape, str(v.dtype), seed=90) for k, v in arrays.items()}
         out_b = owner.strip_data_frame_on_send({"target": "t1", "type": "data", "channel": "data", "data": item_b})
@@ -313,7 +337,7 @@ def _fanout_scenario(monkeypatch, make_owner, make_consumer, keys: tuple[str, ..
 
 
 def test_c6_control_fanout_frame_written_once_both_restore(monkeypatch, make_owner, make_consumer):
-    """CONTROL (зелёный сегодня): fan-out одного ``frame`` — пишется один раз, оба восстановили."""
+    """Fan-out одного ``frame`` — пишется один раз, обе ссылки в ``_shm_refs["frame"]``, оба восстановили."""
     _fanout_scenario(monkeypatch, make_owner, make_consumer, ("frame",))
 
 
@@ -337,16 +361,30 @@ def _realloc_scenario(make_owner, make_consumer, grow: str, stable: str) -> None
     stable_2 = _arr(small[stable], dtypes[stable], seed=31)
     grow_2 = _arr(grown[grow], dtypes[grow], seed=32)
 
-    def scenario() -> tuple[dict, dict]:
+    def scenario() -> tuple[dict, dict, int, tuple[str, str]]:
         m1 = _send(owner, {stable: stable_1, grow: _arr(small[grow], dtypes[grow], seed=33)})
         m2 = _send(owner, {stable: stable_2, grow: grow_2})
         _assert_small_wire(m1)
         _assert_small_wire(m2)
+        _assert_refs(m1, {"frame", "foo"})
+        _assert_refs(m2, {"frame", "foo"})
+        # Кольцо ``stable`` не пересоздано: имя сегмента без хвоста ``_<idx>`` одно до и после роста.
+        rings = tuple(m["data"]["_shm_refs"][stable]["name"].rsplit("_", 1)[0] for m in (m1, m2))
+        stale_before = gui.frame_stale_drops
         # m1 читается только теперь, уже после роста ключа ``grow``.
-        return gui.on_receive(_wire(m1)), gui.on_receive(_wire(m2))
+        got1 = gui.on_receive(_wire(m1))
+        return got1, gui.on_receive(_wire(m2)), gui.frame_stale_drops - stale_before, rings
 
-    got1, got2 = _bounded(scenario)
-    _assert_same(_restored(got1, stable), stable_1, f"сообщение 1 ДО роста {grow!r}: ключ {stable!r}")
+    got1, got2, stale_m1, rings = _bounded(scenario)
+    assert rings[0] == rings[1], f"кольцо {stable!r} пересоздано ростом {grow!r}: {rings}"
+    if grow == "frame":
+        # 4.4c (решение лида 2026-09-30): сообщение в полёте во время realloc соседнего ключа
+        # отбрасывается целиком — атомарность; C7 держит то, что кольцо B не пересоздано и следующее
+        # сообщение восстанавливается полностью.
+        assert got1 is None, "сообщение 1 с нечитаемой ссылкой (отвязанный сегмент) обязано быть отброшено целиком"
+        assert stale_m1 == 1, f"отвязанный сегмент — stale-дроп ровно на сообщение, счётчик вырос на {stale_m1}"
+    else:
+        _assert_same(_restored(got1, stable), stable_1, f"сообщение 1 ДО роста {grow!r}: ключ {stable!r}")
     _assert_same(_restored(got2, stable), stable_2, f"сообщение 2: ключ {stable!r}")
     _assert_same(_restored(got2, grow), grow_2, f"сообщение 2: выросший ключ {grow!r}")
 

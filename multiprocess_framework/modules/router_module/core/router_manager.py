@@ -831,21 +831,21 @@ class RouterManager(ChannelRoutingManager):
         data = evicted_item.get("data")
         if not isinstance(data, dict):
             return
-        # Task 4.1 (C5): ссылка frame (плоские поля) + каждая ссылка крупного ключа
-        # (``data["_shm_refs"][key]``) — по тикету на ссылку, пачкой на владельца.
-        refs = [data]
-        extra = data.get("_shm_refs")
-        if isinstance(extra, dict):
-            refs.extend(r for r in extra.values() if isinstance(r, dict))
+        # Task 4.4: одна ссылка ``{owner, slot, idx, gen, name}`` на КАЖДЫЙ крупный массив (и
+        # ``frame``) — по тикету на ссылку, пачкой на владельца. ``gen`` известен, но при
+        # ``evicted=True`` пул поколением не гардится (сообщение не читалось).
+        refs = data.get("_shm_refs")
         by_owner: dict = {}
-        for ref in refs:
-            owner = ref.get("owner") or ref.get("shm_owner")
-            shm_name = ref.get("shm_name")
-            idx = ref.get("shm_index")
-            if not owner or not shm_name or idx is None:
+        for ref in refs.values() if isinstance(refs, dict) else ():
+            if not isinstance(ref, dict):
+                continue
+            owner = ref.get("owner")
+            slot = ref.get("slot")
+            idx = ref.get("idx")
+            if not owner or not slot or idx is None:
                 continue  # нет SHM-координат — займа нет, релизить нечего
             by_owner.setdefault(owner, []).append(
-                {"slot": shm_name, "index": idx, "generation": -1, "reader": reader_process}
+                {"slot": slot, "index": idx, "generation": ref.get("gen", -1), "reader": reader_process}
             )
         for owner, releases in by_owner.items():
             release_msg = {

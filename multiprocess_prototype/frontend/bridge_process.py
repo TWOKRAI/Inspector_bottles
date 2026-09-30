@@ -51,20 +51,18 @@ class FrameBridge:
         router: Any,
         name: str,
         *,
-        seqlock: bool,
         owner_incarnation: bool,
         loan_protocol: bool,
     ) -> None:
         """Pre:  ``router`` — объект с ``send_async(message, priority="normal")``;
               ``name`` — имя процесса-хоста (поле ``sender`` push'ей); флаги —
-              значения ``FW_SHM_SEQLOCK`` / ``FW_SHM_OWNER_INCARNATION`` /
+              значения ``FW_SHM_OWNER_INCARNATION`` /
               ``FW_SHM_LOAN_PROTOCOL`` этого процесса.
         Post: подписчиков нет; ``bseq`` = 0; ``sent_total`` = 0; ``errors`` = 0;
               ни одного вызова ``router``.
         """
         self._router = router
         self._name = name
-        self._seqlock = bool(seqlock)
         self._owner_incarnation = bool(owner_incarnation)
         self._loan_protocol = bool(loan_protocol)
         self._lock = threading.Lock()
@@ -82,7 +80,8 @@ class FrameBridge:
                 (проверяется первым, до разбора аргументов);
               * ``subscriber`` отсутствует/пуст;
               * ``senders`` не ``None`` и не list/tuple строк.
-        Post (успех): РОВНО ``{"success": True, "seqlock": bool, "owner_incarnation": bool}``;
+        Post (успех): РОВНО ``{"success": True, "seqlock": True, "owner_incarnation": bool}``
+              (``seqlock`` — константа для внешних клиентов: заголовок seqlock всегда включён);
               адрес ``subscriber`` получает дескрипторы кадров, чей ``sender`` входит в
               ``senders`` (``None`` либо ключ отсутствует — все отправители). Повторный
               вызов с тем же адресом заменяет фильтр, счётчик ``sent`` адреса сохраняется.
@@ -105,7 +104,7 @@ class FrameBridge:
         with self._lock:
             prev = self._subs.get(subscriber)
             self._subs[subscriber] = {"senders": senders, "sent": prev["sent"] if prev else 0}
-        return {"success": True, "seqlock": self._seqlock, "owner_incarnation": self._owner_incarnation}
+        return {"success": True, "seqlock": True, "owner_incarnation": self._owner_incarnation}
 
     def cmd_unsubscribe(self, data: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
         """``frames.unsubscribe {"subscriber": str}``.
@@ -161,7 +160,7 @@ class FrameBridge:
               "data": descriptor}`` (один и тот же дескриптор, один ``bseq``). Успешный
               вызов: ``sent[адрес] += 1``, ``sent_total += 1``. Исключение ``send_async`` —
               ``errors += 1``, остальным подписчикам отправка продолжается, наружу не
-              пробрасывается. Сообщение без кадра (нет ``shm_actual_name``) — пропускается.
+              пробрасывается. Сообщение без кадра (нет ``data["_shm_refs"]["frame"]``) — пропускается.
         """
         for msg in msgs:
             if not isinstance(msg, dict):
@@ -216,7 +215,6 @@ class BridgeGuiProcess(HeadlessGuiProcess):
         self.frame_bridge = FrameBridge(
             self.router_manager,
             self.name,
-            seqlock=is_enabled("FW_SHM_SEQLOCK"),
             owner_incarnation=is_enabled("FW_SHM_OWNER_INCARNATION"),
             loan_protocol=is_enabled("FW_SHM_LOAN_PROTOCOL"),
         )

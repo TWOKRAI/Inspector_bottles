@@ -87,11 +87,16 @@ class ProcessIO:
         FrameShmMiddleware — H7, Ф7 G.3).
 
         Returns:
-            dict {"shm_name", "shm_index", "shm_actual_name", "shm_seqlock"} при
-            успехе; None если memory_manager недоступен, слот не создан или запись
-            не удалась. ``shm_seqlock`` — АВТОРИТЕТНО из get_memory_data (иначе
-            cross-process reader читал бы не с того offset).
+            SHM-ссылка кадра ``{"owner", "slot", "idx", "gen", "name"}`` (тот же формат, что
+            ``data["_shm_refs"][key]`` у FrameShmMiddleware; ``owner`` — ``region`` (имя владельца памяти),
+            ``gen`` — чётное поколение записи) при успехе; None если memory_manager недоступен,
+            слот не создан или запись не удалась. Читать: ``ShmFrameReader.read_ref(name, gen)``.
+        Raises:
+            ValueError: ``frames`` не из одного кадра (ссылка указывает на ОДИН кадр — Task 4.4;
+            раньше писались все кадры списка под одним слотом).
         """
+        if len(frames) != 1:
+            raise ValueError(f"write_frames_to_shm: ссылка указывает на один кадр, получено {len(frames)}")
         mm = getattr(self._p, "memory_manager", None)
         if not mm:
             return None
@@ -102,15 +107,11 @@ class ProcessIO:
         key = (region, slot)
         idx = self._shm_write_index.get(key, 0) % coll
         self._shm_write_index[key] = idx + 1
-        actual = mm.write_images(region, slot, frames, idx)
-        if not actual:
+        written = mm.write_frame(region, slot, frames[0], idx)
+        if not written:
             return None
-        return {
-            "shm_name": slot,
-            "shm_index": idx,
-            "shm_actual_name": actual,
-            "shm_seqlock": bool(md.get("seqlock", False)),  # H7: контракт как в middleware
-        }
+        name, gen = written
+        return {"owner": region, "slot": slot, "idx": idx, "gen": gen, "name": name}
 
     # ---- Logs ----
 

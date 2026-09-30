@@ -17,7 +17,7 @@ from typing import Callable
 from . import frame_trace
 from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
-from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import SHM_DROPPED_KEY, FrameShmMiddleware
 from .collector_registry import ItemCollector
 
 
@@ -258,6 +258,10 @@ class DataReceiver:
             if self._shm:
                 with self._perf.measure("restore"):
                     msg = self._shm.restore_frame(msg)
+                # 4.4c: item атомарен — сообщение с нечитаемой SHM-ссылкой отброшено целиком
+                # (метку ставит restore_frame, счётчик уже учтён там). Ни item, ни ``mask=None``.
+                if self._is_shm_dropped(msg):
+                    continue
 
             # Построить item из msg
             item = self._build_item(msg)
@@ -274,6 +278,12 @@ class DataReceiver:
 
             # Полный цикл обработки одного сообщения → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)
+
+    @staticmethod
+    def _is_shm_dropped(msg: dict) -> bool:
+        """Есть ли на сообщении метка ``_shm_dropped`` (её ставит ``restore_frame``, 4.4c)."""
+        data = msg.get("data", msg)
+        return isinstance(data, dict) and bool(data.get(SHM_DROPPED_KEY))
 
     def _build_item(self, msg: dict) -> dict:
         """Построить item из IPC сообщения.
@@ -302,9 +312,6 @@ class DataReceiver:
             "region_name",
             "frame_id",
             "timestamp",
-            "owner",
-            "shm_name",
-            "shm_index",
             "sender",
             "data_type",
         ):

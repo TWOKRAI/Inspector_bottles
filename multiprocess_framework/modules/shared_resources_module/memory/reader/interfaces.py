@@ -14,7 +14,7 @@ TECH_STACK §7) = новая реализация под ЭТИМ ЖЕ Protocol.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -26,22 +26,11 @@ class FrameReader(Protocol):
     owner_incarnation — резолвятся транспортом, reader получает уже согласованные флаги).
     """
 
-    def read_frame(
-        self,
-        shm_actual_name: str,
-        seqlock: bool = False,
-        *,
-        copy: bool = True,
-        view_meta: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Any]:
-        """Прочитать ОДИН кадр из SHM по фактическому OS-имени (cross-process).
-
-        При активном кэше handle переиспользуется; иначе open/close на кадр (копия
-        форсируется — сегмент закрывается сразу, view повис бы). ``copy=False`` +
-        активный кэш → VIEW в слот, и в ``view_meta`` кладётся мета для post-use re-check
-        (``_frame_is_view``/``_shm_view_name``/``_shm_view_generation``). ``None`` —
-        torn/in-progress под seqlock (штатный drop). Бросает при ошибке открытия.
-        """
+    def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional[Any]:
+        """Task 4.4: прочитать кадр по ссылке ``(name, gen)`` — поколение слота обязано быть
+        ``gen`` и ДО, и ПОСЛЕ чтения. Расхождение до → ``None`` + ``stale_drops``; во время →
+        ``None`` + ``torn_reads`` (оба счётчика — свойства reader'а). ``copy=False`` + активный
+        кэш → VIEW в слот. Бросает при ошибке открытия сегмента."""
         ...
 
     def view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
@@ -59,7 +48,13 @@ class FrameReader(Protocol):
 
     @property
     def stale_drops(self) -> int:
-        """Сколько zero-copy view дропнуто post-use re-check'ом (наблюдаемость)."""
+        """Сколько чтений/view отброшено по расхождению поколения: ссылка на перезаписанную
+        ячейку (Task 4.4) или view, пережитый перезаписью (post-use re-check)."""
+        ...
+
+    @property
+    def torn_reads(self) -> int:
+        """Task 4.4: сколько чтений по ссылке порвала перезапись слота во время копии."""
         ...
 
 
