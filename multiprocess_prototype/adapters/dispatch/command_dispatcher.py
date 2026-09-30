@@ -316,7 +316,7 @@ class CommandDispatcherOrchestrator:
         try:
             return view_state()
         except Exception:
-            logger.exception("Ошибка в view_state %r -- memo записи будет None", view_state)
+            logger.exception("Ошибка в view_state %s -- memo записи будет None", _describe_cb(view_state))
             return None
 
     def _apply_memo(self, memo: object | None) -> None:
