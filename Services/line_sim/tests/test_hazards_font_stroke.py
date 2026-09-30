@@ -62,3 +62,18 @@ def test_h3_rng_order_letter_font_stroke_first_triple_keeps_grain(tmp_path: Path
     assert (zero_first / "DejaVuSans.png").read_bytes() == (plain / "DejaVuSans.png").read_bytes()
     assert (zero_last / "DejaVuSans.png").read_bytes() != (plain / "DejaVuSans.png").read_bytes()
     assert (zero_first / "DejaVuSans-Bold.png").read_bytes() != (plain / "DejaVuSans-Bold.png").read_bytes()
+
+
+def test_h4_guard_boundary_4n_vs_desired_height(tmp_path: Path) -> None:
+    """Граница защиты `4 * N >= round(frac * size)`: size 100, frac 0.6 -> desired 60.
+    N=14 (4N == 56 == desired - 4) принимается, N=15 (4N == 60 == desired) отвергается ДО рендера,
+    сообщение содержит `--stroke-px` и оба числа; N=15 в списке вместе с валидным N=0 не пишет и N=0."""
+    ok = build_font_letters("I", [DEJAVU_SANS], 100, 0.6, tmp_path / "ok", stroke_px=[14])
+    assert [p.name for p in ok] == ["DejaVuSans_s14.png"]
+
+    out = tmp_path / "bad"
+    with pytest.raises(SystemExit) as exc:
+        build_font_letters("I", [DEJAVU_SANS], 100, 0.6, out, stroke_px=[0, 15])
+    message = str(exc.value)
+    assert "--stroke-px" in message and "60" in message and "15" in message, message
+    assert not out.exists() or _names(out) == set(), f"записано: {sorted(_names(out))}"

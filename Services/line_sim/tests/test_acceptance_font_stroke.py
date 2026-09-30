@@ -206,14 +206,18 @@ def _sprite(run: tuple[subprocess.CompletedProcess, Path], n: int) -> np.ndarray
     return rgba
 
 
-@pytest.mark.parametrize(("n", "grow", "tol"), [(2, 4, 1.5), (4, 8, 2.0)])
-def test_s3_stroke_widens_bar_by_2n_px(stroke_run_i, n: int, grow: int, tol: float) -> None:
-    """S3: ширина штриха «I» на средней высоте (alpha > 127) = база + 2N (N=2: +4±1.5; N=4: +8±2),
-    база — со спрайта N=0 того же прогона."""
-    base = _mid_row_width(_sprite(stroke_run_i, 0))
-    assert base > 0, "на спрайте N=0 нет непрозрачных пикселей на средней строке"
-    width = _mid_row_width(_sprite(stroke_run_i, n))
-    assert abs(width - (base + grow)) <= tol, f"N={n}: ширина штриха {width}, база {base}; ожидали {base + grow}±{tol}"
+@pytest.mark.parametrize("n", [2, 4])
+def test_s3_stroke_widens_bar_within_fixed_height_band(stroke_run_i, n: int) -> None:
+    """S3: ширина штриха «I» на средней высоте (alpha > 127): width(N) - width(0) в [1.5*N, 2*N + 1],
+    и width(4) > width(2) > width(0); база — со спрайта N=0 того же прогона.
+    Изменено лидом: модель +2N была ошибкой брифа лида: глиф при постоянной высоте сжимается."""
+    widths = {k: _mid_row_width(_sprite(stroke_run_i, k)) for k in (0, 2, 4)}
+    assert widths[0] > 0, "на спрайте N=0 нет непрозрачных пикселей на средней строке"
+    grow = widths[n] - widths[0]
+    assert 1.5 * n <= grow <= 2 * n + 1, (
+        f"N={n}: прирост ширины {grow} (ширины {widths}), ожидали [{1.5 * n}, {2 * n + 1}]"
+    )
+    assert widths[4] > widths[2] > widths[0], f"ширина должна расти с N строго: {widths}"
 
 
 def test_s4_control_default_run_height_and_centre(tmp_path: Path) -> None:
@@ -334,9 +338,11 @@ def test_s7_literal_brief_case_wide_glyph_guard_fires(tmp_path: Path) -> None:
     _assert_wide_guard(result, out_dir)
 
 
-def test_s7_stroke_alone_makes_glyph_too_wide(tmp_path: Path) -> None:
-    """S7 (изолирующий вариант): Ж, --size-px 120 --letter-frac 0.6 — без штриха влезает (контроль, код 0,
-    зелёный сегодня); с `--stroke-px 20` (+40 px ширины) — не влезает -> guard срабатывает."""
+def test_s7_stroke_too_thick_for_letter_height_is_rejected(tmp_path: Path) -> None:
+    """S7 (изолирующий вариант): Ж, --size-px 120 --letter-frac 0.6 — без штриха влезает (контроль, код 0);
+    с `--stroke-px 20` -> ненулевой выход, в сообщении `--stroke-px`, ничего не записано.
+    Изменено лидом: высота буквы при штрихе постоянна (дизайн), поэтому штрих не расширяет глиф за size_px;
+    вместо этого слишком толстый штрих отвергается."""
     base = ["--letters", "Ж", "--font", str(DEJAVU_SANS), "--size-px", "120", "--letter-frac", "0.6"]
 
     control = _run_tool([*base, "--out", str(tmp_path / "control")])
@@ -344,7 +350,11 @@ def test_s7_stroke_alone_makes_glyph_too_wide(tmp_path: Path) -> None:
 
     out_dir = tmp_path / "out"
     result = _run_tool([*base, "--stroke-px", "20", "--out", str(out_dir)])
-    _assert_wide_guard(result, out_dir)
+    assert result.returncode != 0, f"слишком толстый штрих должен давать ненулевой код: {_diag(result)}"
+    text = result.stdout + result.stderr
+    assert UNRECOGNIZED not in text, f"отказ из-за неизвестной опции, а не из-за толщины: {text!r}"
+    assert "--stroke-px" in text, f"в сообщении нет '--stroke-px': {text!r}"
+    _assert_nothing_written(out_dir)
 
 
 def test_s7_small_stroke_below_the_limit_is_accepted(tmp_path: Path) -> None:

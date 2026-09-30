@@ -263,6 +263,14 @@ def build_font_letters(
     Опции краски (`ink_rgb`, `grain_sigma`, `edge_blur_px`, `seed`) — см. `_finish_ink`;
     по умолчанию вывод прежний."""
     strokes = list(dict.fromkeys(stroke_px))
+    # ДО любого рендера: слишком толстый штрих вырождает глиф в пятно (высота буквы постоянна, глиф сжимается).
+    desired_h = round(letter_frac * size_px)
+    for stroke in strokes:
+        if 4 * stroke >= desired_h:
+            raise SystemExit(
+                f"make_font_letters: --stroke-px {stroke} слишком велик для высоты буквы {desired_h} px "
+                f"(4 * {stroke} = {4 * stroke} >= {desired_h}) — уменьшите --stroke-px или увеличьте --letter-frac"
+            )
     rng = np.random.default_rng(seed)  # один на вызов: порядок буква x шрифт x штрих фиксирует зерно
     # Сначала все рендеры, потом запись: ошибка на любой паре не оставляет пустых папок
     # классов, которые каталог молча принял бы (ревью 1.1b, NIT-3).
