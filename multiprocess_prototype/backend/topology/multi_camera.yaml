@@ -76,6 +76,12 @@ processes:
         s_max: 255
         v_min: 50
         v_max: 255
+      # color_mask теперь не подменяет кадр, а кладёт маску в item["mask"];
+      # для показа маски на дисплее — мост mask_to_frame.
+      - plugin_class: Plugins.processing.mask_to_frame.plugin.MaskToFramePlugin
+        plugin_name: mask_to_frame
+        category: processing
+        source_key: mask
 
   # --- Процессор 1: детекция контуров для камеры 1 ---
   - process_name: processor_1
