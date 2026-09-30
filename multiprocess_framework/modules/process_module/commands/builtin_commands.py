@@ -1349,10 +1349,23 @@ class BuiltinCommands:
 
     @staticmethod
     def _queue_maxsize(q: Any) -> int | None:
+        """Ёмкость очереди: число; ``0`` — без предела; ``None`` — узнать нельзя.
+
+        «Без предела» у двух видов очередей выглядит по-разному: ``queue.Queue(0)`` хранит 0,
+        ``multiprocessing.Queue(0)`` — ``SEM_VALUE_MAX`` (2147483647). Оба приводятся к 0,
+        чтобы ``None`` значил только «неизвестно» (ревью 4.5, находка 5).
+        """
+        from multiprocessing.synchronize import SEM_VALUE_MAX
+
         # ponytail: у multiprocessing.Queue ёмкость лежит только в CPython-приватном
         # ``_maxsize`` (публичного аксессора нет) — сломается, если CPython его переименует;
         # тогда вернётся None, а не исключение. У queue.Queue — публичный ``maxsize``.
-        return getattr(q, "maxsize", None) or getattr(q, "_maxsize", None)
+        m = getattr(q, "maxsize", None)
+        if m is None:
+            m = getattr(q, "_maxsize", None)
+        if not isinstance(m, int):
+            return None
+        return 0 if m <= 0 or m >= SEM_VALUE_MAX else m
 
     def _cmd_introspect_memory(self, data=None, **kwargs) -> dict:
         """Инвентарь памяти процесса: SHM / пул займов / очереди (Ф2 Task 2.4).

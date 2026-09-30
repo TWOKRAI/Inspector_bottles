@@ -134,3 +134,21 @@ def test_t45b_hazard_real_runner_wired_into_heartbeat_publish() -> None:
     assert 9.0 <= published["detector"] <= 15.0
     assert round(published["detector"], 1) == published["detector"]
     assert hb.current_levels_snapshot()["state"]["plugin_ms"] == published
+
+
+def test_t45b_hazard_cpu_is_measured_even_when_the_gate_closes_its_publication() -> None:
+    """Гейт решает ПУБЛИКАЦИЮ ``state.cpu``, а не замер (ревью 4.5, находка 1).
+
+    В прототипе ``telemetry.publish.default_enabled: false`` пропускает только
+    fps/latency_ms; замер под тем же гейтом оставлял ``last_cpu_cores = None`` навсегда,
+    и ``introspect.status`` / опрос не видели CPU ни у одного процесса.
+    """
+    proxy = _Proxy()
+    hb = ProcessHeartbeat(_Services(proxy))
+    hb._publish_telemetry_to_tree({}, {"fps"})
+    _burn(0.2)
+    hb._publish_telemetry_to_tree({}, {"fps"})
+    assert all("cpu" not in data.get("state", {}) for _p, data in proxy.merged), "гейт закрыт — в дерево cpu не идёт"
+    cores = hb.last_cpu_cores
+    assert cores is not None and cores > 0.5, f"замер встал вместе с публикацией: {cores}"
+    assert hb.current_levels_snapshot()["state"]["cpu"] == {"cores": hb.last_cpu_cores}

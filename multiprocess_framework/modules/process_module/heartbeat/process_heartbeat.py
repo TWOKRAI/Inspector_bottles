@@ -1425,10 +1425,13 @@ class ProcessHeartbeat:
 
         # (3b) Task 4.5b: ядра процесса и время плагинов. sample() зовётся ТОЛЬКО здесь
         # (раз в тик): дельта считается к прошлому тику, второй вызыватель разбил бы окно.
-        if allowed_metrics is None or "cpu" in allowed_metrics:
-            cores = self._cpu_clock.sample()
-            if cores is not None:
-                self.last_cpu_cores = round(cores, 2)
+        # Замер — на КАЖДОМ тике, гейт решает лишь публикацию в дерево: под гейтом
+        # прототипа (default_enabled: false, только fps/latency_ms) замер вставал целиком,
+        # и status/опрос не видели CPU ни у кого (ревью 4.5, находка 1). Цена — один ctypes-вызов.
+        cores = self._cpu_clock.sample()
+        if cores is not None:
+            self.last_cpu_cores = round(cores, 2)
+            if allowed_metrics is None or "cpu" in allowed_metrics:
                 state["cpu"] = {"cores": self.last_cpu_cores}
         if allowed_metrics is None or "plugin_ms" in allowed_metrics:
             plugin_ms = self._plugin_ms_section()
