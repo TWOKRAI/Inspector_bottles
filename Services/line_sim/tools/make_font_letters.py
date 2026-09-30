@@ -28,13 +28,16 @@
 
     --ink-rgb R,G,B        цвет краски букв (RGB во ВСЕХ пикселях, альфа не трогается), по умолчанию чёрный
     --grain-sigma S        σ гауссова зерна по каждому каналу, только на буквах (альфа > 0)
-    --seed N               seed зерна (один rng на запуск, порядок буква x шрифт фиксирован;
-                       зерно буквы поэтому зависит от набора букв и шрифтов запуска)
+    --seed N               seed зерна (один rng на запуск, порядок буква x шрифт x штрих фиксирован;
+                       зерно буквы поэтому зависит от набора букв, шрифтов и штрихов запуска)
     --edge-blur-px S       σ гауссова размытия альфы буквы (мягкий край)
     --disk-from-photo PATH диск --disk-out вырезается из реального фото (нужен --disk-out)
     --stroke-px N          толщина обводки буквы в px (целое >= 0, флаг повторяемый): по файлу на значение,
                        `<шрифт>.png` при 0, `<шрифт>_s<N>.png` при N > 0; высота буквы остаётся
-                       `--letter-frac`, штрих добавляет N px с каждой стороны за счёт самого глифа
+                       `--letter-frac`, штрих добавляет N px с каждой стороны за счёт самого глифа;
+                       `4 * N >= round(letter_frac * size_px)` (глиф вырождается в пятно) -> `SystemExit`
+                       с `--stroke-px`, до любого рендера. `--out` не очищается: повторный запуск с меньшим
+                       набором штрихов оставляет старые `*_s<N>.png` — берите чистую папку
 
 Измеренные реальные значения: цвет краски ≈ (65, 70, 82) по 20 кадрам плана (в фикстуре ядро
 (59, 65, 77)), зерно σ ≈ 9, край ~2 px, диск 300 px.
@@ -49,11 +52,12 @@
 DejaVu regular 0.066-0.077, bold 0.098-0.138 — обводка закрывает промежуток):
 
     python -m Services.line_sim.tools.make_font_letters --letters АК \\
-        --font .../DejaVuSans.ttf --font .../DejaVuSans-Bold.ttf --font .../DejaVuSansMono.ttf \\
-        --stroke-px 0 --stroke-px 2 --stroke-px 4 --size-px 300 --letter-frac 0.6 --out ...
+        --font .../DejaVuSans.ttf --font .../DejaVuSansMono.ttf \\
+        --stroke-px 0 --stroke-px 1 --stroke-px 2 --stroke-px 3 --size-px 300 --letter-frac 0.6 --out ...
 
-Зерно (один rng на запуск) идёт в порядке буква x шрифт x штрих: спрайт N=0 совпадает с прогоном без
-`--stroke-px` побайтно только для первой тройки буква/шрифт; следующие получают другие числа зерна.
+Зерно (один rng на запуск) идёт в порядке буква x шрифт x штрих: при `--grain-sigma` спрайт N=0 совпадает
+с прогоном без `--stroke-px` побайтно только когда 0 — ПЕРВОЕ значение `--stroke-px` (и только для первой
+тройки буква/шрифт); иначе или для следующих троек числа зерна другие.
 
 `--disk-from-photo`: фото -> порог яркости 150 -> крупнейшая компонента -> `minEnclosingCircle`;
 печать внутри круга стирается `cv2.inpaint`; квадрат по кругу (центр круга — в центре выреза) ->
@@ -262,6 +266,11 @@ def build_font_letters(
     `<стем>_s<N>.png` при N > 0; повторы в `stroke_px` отбрасываются (остаётся первое вхождение).
     Опции краски (`ink_rgb`, `grain_sigma`, `edge_blur_px`, `seed`) — см. `_finish_ink`;
     по умолчанию вывод прежний."""
+    if not stroke_px:
+        raise ValueError("stroke_px пуст: нужно хотя бы одно значение (по умолчанию (0,))")
+    for value in stroke_px:
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"stroke_px: ожидали целые >= 0, получили {value!r}")
     strokes = list(dict.fromkeys(stroke_px))
     # ДО любого рендера: слишком толстый штрих вырождает глиф в пятно (высота буквы постоянна, глиф сжимается).
     desired_h = round(letter_frac * size_px)
@@ -432,7 +441,10 @@ def main(argv: list[str] | None = None) -> None:
         type=_parse_stroke_px,
         action="append",
         default=None,
-        help="толщина обводки букв в px, целое >= 0 (можно повторять: по файлу на значение; дефолт 0)",
+        help=(
+            "толщина обводки букв в px, целое >= 0 (можно повторять: по файлу на значение; дефолт 0); "
+            "4 * N >= высоты буквы (letter_frac * size_px) отвергается"
+        ),
     )
     parser.add_argument(
         "--disk-from-photo", default=None, help="фото реального диска для --disk-out (вместо белого круга)"
@@ -452,6 +464,7 @@ def main(argv: list[str] | None = None) -> None:
         disk = build_disk_from_photo(Path(args.disk_from_photo), args.size_px)
     elif args.disk_out:
         disk = build_disk(args.size_px)
+    stroke_values = args.stroke_px or [0]
     written = build_font_letters(
         args.letters,
         fonts,
@@ -462,9 +475,12 @@ def main(argv: list[str] | None = None) -> None:
         grain_sigma=args.grain_sigma,
         edge_blur_px=args.edge_blur_px,
         seed=args.seed,
-        stroke_px=args.stroke_px or [0],
+        stroke_px=stroke_values,
     )
-    print(f"буквы: {len(args.letters)}, шрифты: {len(fonts)} -> {len(written)} файлов в {out}")
+    print(
+        f"буквы: {len(args.letters)}, шрифты: {len(fonts)} x штрихи: {len(set(stroke_values))} "
+        f"-> {len(written)} файлов в {out}"
+    )
 
     if disk is not None:
         disk_path = Path(args.disk_out)

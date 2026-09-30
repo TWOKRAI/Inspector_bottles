@@ -77,3 +77,22 @@ def test_h4_guard_boundary_4n_vs_desired_height(tmp_path: Path) -> None:
     message = str(exc.value)
     assert "--stroke-px" in message and "60" in message and "15" in message, message
     assert not out.exists() or _names(out) == set(), f"записано: {sorted(_names(out))}"
+
+
+def test_h5_empty_stroke_list_is_rejected_not_silently_empty(tmp_path: Path) -> None:
+    """`stroke_px=[]` раньше молча возвращал [] и ничего не писал; теперь ValueError до рендера."""
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="stroke_px"):
+        build_font_letters("I", [DEJAVU_SANS], 100, 0.6, out, stroke_px=[])
+    assert not out.exists() or _names(out) == set()
+
+
+@pytest.mark.parametrize("bad", [-1, 1.5, "2", True])
+def test_h6_bad_stroke_value_in_api_is_rejected_before_render(tmp_path: Path, bad: object) -> None:
+    """`[0, bad]`: раньше отрицательное давало имя `<stem>.png` и перезаписывало файл N=0; теперь ValueError
+    с плохим значением в тексте, ни одного файла (валидный 0 тоже не пишется)."""
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="stroke_px") as exc:
+        build_font_letters("I", [DEJAVU_SANS], 100, 0.6, out, stroke_px=[0, bad])  # type: ignore[list-item]
+    assert repr(bad) in str(exc.value)
+    assert not out.exists() or _names(out) == set()
