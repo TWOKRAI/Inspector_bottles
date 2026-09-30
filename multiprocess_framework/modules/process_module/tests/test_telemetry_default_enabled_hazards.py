@@ -285,14 +285,16 @@ class TestReplaceModeDropsDefaultEnabledSilently:
             "флип, поставленный на boot, снят соседней правкой"
         )
         assert hb._telemetry_gate.due_metrics(now=0.0) == {
+            "cpu",
             "cycle_duration_ms",
             "effective_hz",
             "fps",
             "latency_ms",
             "pacer_late",
+            "plugin_ms",
             "queue_wait_ms",
             "shm",
-        }, "каталог разрешённых расширился со ВСЕХ пяти фреймворковых имён — не только fps"
+        }, "каталог разрешённых расширился со ВСЕХ девяти фреймворковых имён — не только fps"
 
     def test_merge_mode_preserves_the_flip(self) -> None:
         """Контроль: тот же сценарий с явным ``telemetry_mode: merge`` держит флип.
