@@ -88,7 +88,7 @@
 | # | Что | Где |
 |---|---|---|
 | Усл. 1 | редакция T4.1 (43 727 → три файла ≤ 32 КБ, содержание выше) | `design-*.md`; Ф1 1.3–1.5, Ф2 2.1–2.2 |
-| Усл. 2 | синхронизация соседей | правки 2026-09-26 в: `frontend-constructor/plan.md`, gui-service (`plan.md`, `architecture.md`, `context.md`, `phase-1`, `phase-3`), rework 2б.2, `line-sim-layer-editor.md`, `gui-bootstrap-design.md`, `constructor-layers.md` |
+| Усл. 2 | синхронизация соседей | правки 2026-09-26 в: `frontend-constructor/plan.md`, gui-service (`plan.md`, `architecture.md`, `context.md`, `phase-1`, `phase-3`), rework 2б.2, `line-sim-layer-editor/plan.md`, `gui-bootstrap-design.md`, `constructor-layers.md` |
 | Усл. 3 | правила `Services ↛ Qt` кроме `gui/`, `examples ↛ Services/Plugins` | Task 1.0 (форма — по синтаксису, см. решения) |
 | Усл. 4 | вопрос (i) владельцу, развести четыре «Пульта» | (i) закрыт владельцем 2026-09-26 (`constructor-layers.md` → «Имена»); четыре значения — `design-shell-layout.md` §6.3, плашка терминологии в gui-service `plan.md` |
 | Усл. 5 | числа (89 файлов / метод счёта; `line_sim` Qt-free) | `design-shell-layout.md` §4 (line_sim Qt-free, греп перепроверен); число 89 в плане не используется |
@@ -172,7 +172,7 @@
 | [`frontend-constructor`](../frontend-constructor/plan.md) | инвентарь T3.0, промоушен кита Ф3, гейты Ф6 | заменяет Ф4 (T4.1–T4.6) и Ф5 | Блок В остаётся там; T4.x/T5.x там помечены «перенесено» |
 | [`framework-architecture-rework`](../framework-architecture-rework/plan.md) | окно codemod (не мешать), Р-4 | новые файлы `frontend_module/bootstrap/*`, `host/*`, `knobs/*` — в список 2б.2 | удаление Gen-1 (3.0) — решение rework, не этого плана |
 | [`line-sim`](../line-sim/plan.md) | дерево `apps/line_sim` 8766, команды `belt.*` (2.3a), контракт слоёв 3.1a | точку посадки Qt-частей Ф6 (пакет `sim.*`) | бэкенд симулятора — там |
-| [`line-sim-layer-editor`](../line-sim-layer-editor.md) | — | пакет `sim.*`, помощник ревизии (3.4), шина (3.2) | команды слоёв на бэкенде и виджеты редактора — там; «автономное окно» заменено вкладкой пакета |
+| [`line-sim-layer-editor`](../line-sim-layer-editor/plan.md) | — | пакет `sim.*`, помощник ревизии (3.4), шина (3.2) | команды слоёв на бэкенде и виджеты редактора — там; «автономное окно» заменено вкладкой пакета |
 | [`dataset-annotation`](../dataset-annotation/) | транспорт и клиент канала файлов (его 2.1) | форма `ctx.files.fetch` в контракте, `WidgetSpec`/контекст (Ф1 1.5) для его 2.5b, правило `Services ↛ Qt` (1.0), шаблоны «ревизия»/«долгая задача» | сервис датасета, виджет разметки, адаптер `AnnotationPorts` до 1.5 (закат — его 2.5b) — там |
 
 ## Риски

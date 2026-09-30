@@ -1,7 +1,7 @@
 # line_sim — статус
 
 **Состояние:** Task 3.1 + 3.1a + 3.2 + 3.3 + 3.3a + 3.4 + 3.6 (план `plans/line-sim/phase-3-object-engine.md`)
-+ Task 1.0 плана `plans/line-sim-layer-editor.md` (переносимые пути пресета: `base_dir`
++ Task 1.0 плана `plans/line-sim-layer-editor/phase-1-engine.md` (переносимые пути пресета: `base_dir`
 вместо абсолютизации строк, LS-013) + Task 1.1b (диск и буква раздельными слоями: `class://`,
 `color_rgb`, `tools/make_font_letters.py`, пресет `letters_layered.yaml`, LS-014) + Task 1.2a
 (`ObjectSpawner.set_factory`, `ObjectFactory.force_defect_pending` — горячая подмена пресета в `scene_source`).
@@ -18,7 +18,7 @@
 | Пресет `letters_disk.yaml` | готово (ссылается на каталог dataset_gen, картинок не копирует) |
 | `ObjectSpawner` — спавн по интервалу ИЛИ по шагу ленты в мм, деспавн, пауза, форс-хук брака | готово (Task 3.3, режим `spacing_mm` — Task 3.3a, LS-010) |
 | Подключение к `SceneSourcePlugin` (`Plugins/sim/scene_source`) | готово (Task 3.4; `spawn_spacing_mm` — Task 3.3a) |
-| Фон-тайл в `SceneCompositor` (`background_tile`) + `tools/make_seamless_texture.py` | готово (Task 3.6, LS-011); на реальном фото ленты ещё не прогонялся — ждёт снимка владельца |
+| Фон-тайл в `SceneCompositor` (`background_tile`) + `tools/make_seamless_texture.py` | готово (Task 3.6, LS-011); на реальном фото прогнан (Task 1.1): `fixtures/belt_photo_full.png`, период 205 px, тайл 205x484 (с `--force-period`; без флага — зеркало, обычная обрезка шов не проходит) |
 | `core/matching.py` (`match_job`/`object_robot_xy`, `BeltGeometry`/`JobDone`/`MatchResult`) + `ObjectSpawner.remove()` | готово (Task 3.5a, LS-012) — job↔object matching для плагина сцены (часть B) |
 | `core/truth.py` (`TruthLedger`) — поймал/пропустил/дубль/ложная тревога/ошибка захвата | готово (Task 5.2; 5.1b — `false_alarm_frozen_xy`: ложная тревога в той же точке X/Y с другим `ecap`, окно `frozen_window_s` 10 с по `job.t`, радиус `frozen_radius_mm` 5 мм); подключение к `Plugins/sim/scene_source` — команды `truth.status`/`truth.reset`, уровни `truth_*` (ADR-PM-038, прореживание `truth_publish_s`) |
 | `SceneCompositor(belt_direction, entry_x_px)` + `tools/make_letter_catalog.py` — сим подогнан под боевой рецепт `hikvision_letter_robot.yaml` | готово (Task 5.3b, контракт §4.1–§4.2); согласованность геометрии сима с `bilinear_px_to_mm` прототипа сторожит `apps/line_sim/tests/test_fit_letter_robot.py` |

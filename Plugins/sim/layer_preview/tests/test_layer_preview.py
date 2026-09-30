@@ -29,8 +29,6 @@ from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import CLASS_SPRITE_SOURCE, LayerSpec, ScenePreset
 
-pytestmark = pytest.mark.timeout(30)
-
 FRAME_W = 64
 FRAME_H = 64
 
@@ -88,7 +86,16 @@ def _make_fixture(tmp_path: Path) -> tuple[Path, Path]:
     return preset_path, catalog_dir
 
 
-def _new_scene(preset_path_cfg: Path) -> tuple[SceneSourcePlugin, _FakeStateProxy]:
+#: Поток объектов ПО ЭНКОДЕРУ (`spawn_spacing_mm`): кадр — чистая функция (пресет, seed, энкодер).
+#: Поток по времени (`spawn_interval_s`) считает срок спавна по `time.monotonic()` в
+#: `produce()` — два инстанса, вызванные один за другим, видят РАЗНЫЕ часы и спавнят на разных
+#: шагах; для сравнения кадров двух инстансов он не годится (флейк p6: 8 расхождений из 1000
+#: прогонов в одном процессе без единого превью, замер 2026-09-29).
+_SPACING_FLOW = {"spawn_spacing_mm": [4.0, 6.0]}
+_INTERVAL_FLOW = {"spawn_interval_s": [0.01, 0.02]}
+
+
+def _new_scene(preset_path_cfg: Path, flow: dict | None = None) -> tuple[SceneSourcePlugin, _FakeStateProxy]:
     state_proxy = _FakeStateProxy()
     ctx = MagicMock()
     ctx.state_proxy = state_proxy
@@ -97,7 +104,7 @@ def _new_scene(preset_path_cfg: Path) -> tuple[SceneSourcePlugin, _FakeStateProx
         "resolution_height": FRAME_H,
         "px_per_mm": 1.0,
         "belt_y_px": FRAME_H / 2,
-        "spawn_interval_s": [0.01, 0.02],
+        **(flow if flow is not None else _INTERVAL_FLOW),
         "scene_length_mm": 1_000_000.0,
         "preset_path": str(preset_path_cfg),
         "seed": 0,
@@ -137,20 +144,35 @@ def _decode(result: dict) -> np.ndarray:
 # --- P6 (перенесено из приёмки тестера) ---
 
 
+#: p6: 30 шагов по 5 отсчётов энкодера. Спавны spacing-потока (шаг 4-6 мм, 0.72 мм на шаг) — на
+#: шагах 0, 8, 14, 23 (замер): превью вызываются после шага 5, так что три спавна из четырёх
+#: происходят ПОСЛЕ превью — побочный эффект превью на рождение объектов виден.
+_P6_STEPS = 30
+_P6_PREVIEW_AFTER = 5
+
+
+def _p6_run(plugin: SceneSourcePlugin, sp: _FakeStateProxy, steps: range) -> list[np.ndarray]:
+    frames = []
+    for i in steps:
+        _emit_encoder(sp, i * 5.0, float(i))
+        frames.append(plugin.produce()[0]["frame"])
+    return frames
+
+
 def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
     preset_path, _catalog_dir = _make_fixture(tmp_path)
-    plugin_a, sp_a = _new_scene(preset_path)
-    plugin_b, sp_b = _new_scene(preset_path)
+    # Эталон записан ДО любого превью на отдельном инстансе (spacing-поток — чистая функция
+    # пресета, seed и энкодера): симметричный побочный эффект превью, задевающий и «тот же»
+    # инстанс, и сравниваемый с ним, сравнением двух живых инстансов не виден.
+    ref_plugin, ref_sp = _new_scene(preset_path, _SPACING_FLOW)
+    reference = _p6_run(ref_plugin, ref_sp, range(_P6_STEPS))
+
+    plugin, sp = _new_scene(preset_path, _SPACING_FLOW)
     preview = _new_preview(preset_path)
 
-    def _step(enc: float, t: float) -> tuple[np.ndarray, np.ndarray]:
-        _emit_encoder(sp_a, enc, t)
-        _emit_encoder(sp_b, enc, t)
-        return plugin_a.produce()[0]["frame"], plugin_b.produce()[0]["frame"]
-
-    for i, enc in enumerate((0.0, 5.0, 10.0)):
-        fa, fb = _step(enc, float(i))
-        assert np.array_equal(fa, fb), f"два одинаковых инстанса разошлись ДО preview на шаге {i}"
+    before = _p6_run(plugin, sp, range(_P6_PREVIEW_AFTER + 1))
+    for i, frame in enumerate(before):
+        assert np.array_equal(frame, reference[i]), f"инстанс разошёлся с эталоном ДО preview на шаге {i}"
 
     for _ in range(3):  # любое число превью
         result = _call_command(preview, "preset.preview", {"seeds": [1, 2, 3, 4]})
@@ -165,9 +187,53 @@ def test_p6_preview_grid_and_no_effect_on_frames(tmp_path: Path) -> None:
         for tile in tiles:
             assert "class_name" in tile and "layer_params" in tile, tile
 
-    for i, enc in enumerate((15.0, 20.0, 25.0), start=3):
-        fa, fb = _step(enc, float(i))
-        assert np.array_equal(fa, fb), f"preview повлиял на последующие кадры (побитовое расхождение) на шаге {i}"
+    spawned_before = len(plugin._spawner.active_objects())
+    after = _p6_run(plugin, sp, range(_P6_PREVIEW_AFTER + 1, _P6_STEPS))
+    assert len(plugin._spawner.active_objects()) > spawned_before, "после превью не было ни одного спавна — окно пустое"
+    for i, frame in enumerate(after, start=_P6_PREVIEW_AFTER + 1):
+        assert np.array_equal(frame, reference[i]), (
+            f"preview повлиял на последующие кадры (расхождение с эталоном) на шаге {i}"
+        )
+
+
+def _frames_under_clock_offset(preset_path: Path, flow: dict, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Два одинаковых инстанса на одних значениях энкодера; с шага 2 и до конца `b` видит часы
+    на 0.5 с впереди `a` (тик Windows 15.6 мс между `a.produce()` и `b.produce()` — то же
+    самое, только постоянное). `time.monotonic` подменён глобально (как в `test_lead_6_1.py`),
+    а не `scene_plugin.time`, поэтому виден и спавнер, читающий свои часы сам.
+    Возвращает по шагу: совпали ли кадры побитно.
+
+    30 шагов: энкодер идёт по 5 отсчётов за шаг = 5 × FACTOR_MM 0.144473 ≈ 0.72 мм, а шаг
+    спавна >= 4 мм — спавн случается раз в 6-8 шагов (замер: шаги 0, 8, 14, 23). Окно в 6
+    шагов после скачка не содержит ни одного спавна, и часы в пороге спавна остаются
+    невидимыми; с 2 по 29 шаг их три."""
+    import time
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
+    plugin_a, sp_a = _new_scene(preset_path, flow)
+    plugin_b, sp_b = _new_scene(preset_path, flow)
+    equal = []
+    for i in range(30):
+        _emit_encoder(sp_a, i * 5.0, float(i))
+        _emit_encoder(sp_b, i * 5.0, float(i))
+        clock["t"] = 1000.0
+        frame_a = plugin_a.produce()[0]["frame"]
+        clock["t"] = 1000.0 + (0.5 if i >= 2 else 0.0)
+        frame_b = plugin_b.produce()[0]["frame"]
+        equal.append(bool(np.array_equal(frame_a, frame_b)))
+    return equal
+
+
+def test_frames_independent_of_wall_clock_in_spacing_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Причина флейка p6: часы между двумя `produce()` не должны менять кадр, если поток — по
+    энкодеру. То же смещение часов в потоке по времени РАСХОДИТСЯ (так задумано: `interval_s` —
+    секунды стенда) — второе утверждение доказывает, что смещение часов реально ловится."""
+    preset_path, _ = _make_fixture(tmp_path)
+    assert all(_frames_under_clock_offset(preset_path, _SPACING_FLOW, monkeypatch)), "spacing-поток зависит от часов"
+    assert not all(_frames_under_clock_offset(preset_path, _INTERVAL_FLOW, monkeypatch)), (
+        "смещение часов не разошло кадры interval-потока — проверка стала пустой"
+    )
 
 
 # --- P7 (перенесено из приёмки тестера) ---
@@ -306,7 +372,7 @@ def test_preview_applies_stand_defect_override(tmp_path: Path) -> None:
 
 
 def test_preview_catalog_mode_like_the_stand(tmp_path: Path) -> None:
-    """Стенд (`apps/line_sim/pipeline.yaml`) держит `preset_path` = каталог классов, не .yaml."""
+    """Каталожный `preset_path` (каталог классов, не .yaml) — режим стенда до 1.3h, остаётся рабочим."""
     _preset_path, catalog_dir = _make_fixture(tmp_path)
     plugin = _new_preview(catalog_dir)
     res = _call_command(plugin, "preset.preview", {"seeds": [1, 2]})
@@ -331,7 +397,12 @@ def test_plugin_is_side_effect_control_without_ports() -> None:
 
     assert LayerPreviewPlugin.category == "control"
     assert LayerPreviewPlugin.inputs == [] and LayerPreviewPlugin.outputs == []
-    assert LayerPreviewPlugin.commands == {"preset.preview": "cmd_preset_preview"}
+    assert LayerPreviewPlugin.commands == {
+        "preset.preview": "cmd_preset_preview",
+        "preset.layout": "cmd_preset_layout",
+        "preset.sprites": "cmd_preset_sprites",
+        "preset.sprite_put": "cmd_preset_sprite_put",
+    }
 
 
 def test_layer_preview_does_not_import_scene_source() -> None:

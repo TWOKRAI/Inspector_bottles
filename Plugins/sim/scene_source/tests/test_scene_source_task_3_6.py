@@ -123,7 +123,7 @@ def test_unreadable_texture_logs_once_and_falls_back(tmp_path):
     assert len(plugin._spawner.active_objects()) > 0, "объекты должны продолжать спавниться на сплошном фоне"
 
 
-def test_texture_channel_order_in_frame(tmp_path):
+def test_texture_channel_order_in_frame(tmp_path, repo_texture_dir):
     """Добавленный критерий: BGR-пиксель `(200, 10, 30)` в файле-текстуре -> ровно
     `(200, 10, 30)` в `produce()[0]["frame"]` (BGR) на строке ленты. Путь передаётся
     ОТНОСИТЕЛЬНО КОРНЯ РЕПОЗИТОРИЯ (`os.path.relpath`), чтобы покрыть и root-relative
@@ -132,7 +132,7 @@ def test_texture_channel_order_in_frame(tmp_path):
 
     texture_bgr = np.empty((64, 64, 3), dtype=np.uint8)
     texture_bgr[:, :, 0], texture_bgr[:, :, 1], texture_bgr[:, :, 2] = 200, 10, 30
-    texture_path = tmp_path / "texture.png"
+    texture_path = repo_texture_dir / "texture.png"  # на одном диске с корнем репо: relpath между C:/D: невозможен
     imwrite_unicode(texture_path, texture_bgr)
     relative_texture_path = os.path.relpath(texture_path, _REPO_ROOT)
 

@@ -3,7 +3,7 @@
 `scene_source`: `preset.get` / `preset.commit`, горячая подмена на живой ленте.
 P6/P7 (`preset.preview`) перенесены в `Plugins/sim/layer_preview/tests/test_layer_preview.py` —
 хост превью сменился (ревью 1.2a S1), утверждения сохранены.
-Источник контракта — `plans/line-sim-layer-editor.md`, раздел «Устройство»
+Источник контракта — `plans/line-sim-layer-editor/phase-1-engine.md`, раздел «Устройство»
 и критерии P1-P8 Task 1.2a; спецификация не смотрела в реализацию (её ещё нет).
 
 Плагин собирается через фейковый `ctx` (паттерн — `test_scene_source_hazards_1_1b.py`,

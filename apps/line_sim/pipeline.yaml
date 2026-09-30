@@ -82,7 +82,10 @@ processes:
         # кириллические эталоны, инструмент:
         #   python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites \
         #       --letters АКРХ --diameter-px 300 --out data/line_sim/letter_catalog
-        preset_path: data/line_sim/letter_catalog_rep
+        # Стенд редактора слоёв (1.2h/1.3h): слоёный пресет — диск и буква отдельными слоями.
+        # Каталог-спрайты (правка владельца 8441b531) — data/line_sim/letter_catalog_rep:
+        # у них нет слоёв, редактор показывает «рев.: нет» и не сохраняет.
+        preset_path: Services/line_sim/presets/letters_layered.yaml
         # 800 px ROI = 98 мм ленты вдоль хода (калибровка рецепта, u = x_roi/800).
         px_per_mm: 8.163265
         # Центр ROI по вертикали (v=0.5): roi.y + roi.height/2 = 297 + 481/2 = 537.5.
@@ -112,7 +115,13 @@ processes:
         #   python -m Services.line_sim.tools.make_seamless_texture фото.jpg \
         #       --out data/line_sim/belt_tile.png --scene-px-per-mm 8.163265 --pitch-mm <шаг звена, мм>
         # --scene-px-per-mm обязан совпадать с px_per_mm выше. Путь от корня репозитория.
-        # background_texture: data/line_sim/belt_tile.png
+        # Текущая плитка (2026-09-30, plans/line-sim-belt-look): фото data/line_sim/belt_photo_full.png
+        # (598x484 — 12 кропов data/backgrounds/belt + борта с реального кадра, выровненные вдоль X),
+        # масштаб 1:1 (диск на реальном кадре 629x484 — 300 px). Сборка — 2 звена, 410x484:
+        #   python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png \
+        #       --out data/line_sim/belt_tile.png --force-period
+        # Без --force-period фото цепи уходит в зеркало (неровный свет, см. README инструмента).
+        background_texture: data/line_sim/belt_tile.png
         defect_probability: 0.25
         stale_ms: 500
         # Меньше половины шага 164 мм (контракт §4.3) — отставание тракта зрения
@@ -165,7 +174,7 @@ processes:
       - plugin_class: Plugins.sim.layer_preview.plugin.LayerPreviewPlugin
         plugin_name: layer_preview
         category: control
-        preset_path: data/line_sim/letter_catalog
+        preset_path: Services/line_sim/presets/letters_layered.yaml
         defect_probability: 0.25
 
 # Task 1.6: кольцо записей flight_ring у camera (роль `ring` зонда приёмки, R10).

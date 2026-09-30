@@ -25,6 +25,7 @@ TIME_WAIT на macOS живёт ~30 с (2×MSL), и общий порт межд
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 
@@ -141,8 +142,25 @@ def _put_port_into_server_side_time_wait(port: int) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _port_in_time_wait(port: int, *, timeout: float = 2.0) -> bool:
+    """Есть ли TCP-соединение в TIME_WAIT на локальном (127.0.0.1, port) — по таблице ОС (psutil)."""
+    import psutil
+
+    def _present() -> bool:
+        return any(
+            c.status == psutil.CONN_TIME_WAIT and c.laddr and c.laddr.ip == _HOST and c.laddr.port == port
+            for c in psutil.net_connections(kind="tcp")
+        )
+
+    return _wait_until(_present, timeout=timeout)
+
+
 def test_precondition_plain_bind_on_time_wait_port_raises_eaddrinuse() -> None:
     """Сначала доказываем, что сценарий вообще воспроизводит TIME_WAIT.
+
+    POSIX: простой bind на таком порту даёт EADDRINUSE. Windows: bind проходит (TIME_WAIT его не
+    блокирует), поэтому предусловием служит наличие самого TIME_WAIT в таблице ОС (psutil), а затем
+    факт «bind проходит» — имя теста историческое.
 
     Без этой проверки AC1 мог бы пройти ВПУСТУЮ — если порт после закрытий
     почему-то оказался свободным (ОС не поставила TIME_WAIT), тест ниже
@@ -153,9 +171,20 @@ def test_precondition_plain_bind_on_time_wait_port_raises_eaddrinuse() -> None:
 
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        with pytest.raises(OSError) as exc_info:
+        if sys.platform == "win32":
+            # Факт платформы: на Windows TIME_WAIT не блокирует bind (ни обычный, ни
+            # эксклюзивный), поэтому «TIME_WAIT даёт EADDRINUSE» там не существует, а
+            # ``_probe_port_free`` не ставит SO_REUSEADDR (он разрешил бы bind поверх ЖИВОГО
+            # слушателя). Фиксируем именно это: bind проходит, и AC1 ниже проверяет, что
+            # плагин с эксклюзивным сокетом слушателя поднимается на таком порту.
+            # «bind проходит» верно и без TIME_WAIT — поэтому сначала доказываем, что порт
+            # в TIME_WAIT на самом деле (иначе AC1 прошёл бы впустую).
+            assert _port_in_time_wait(port), f"порт {port} не в TIME_WAIT — сценарий не воспроизвёл предусловие"
             probe.bind((_HOST, port))
-        assert exc_info.value.errno == 48 or "Address already in use" in str(exc_info.value)
+        else:
+            with pytest.raises(OSError) as exc_info:
+                probe.bind((_HOST, port))
+            assert exc_info.value.errno == 48 or "Address already in use" in str(exc_info.value)
     finally:
         probe.close()
 

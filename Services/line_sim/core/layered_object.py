@@ -95,6 +95,17 @@ def _over(canvas_pm: np.ndarray, canvas_a: np.ndarray, sprite: np.ndarray, cente
     return canvas_pm, alpha3[:, :, 0]
 
 
+def canvas_size(placed: list[tuple[np.ndarray, float, float]]) -> tuple[int, int]:
+    """Размер симметричной канвы `(w, h)` под слои `[(RGBA, offset_x, offset_y)]` — без рендера.
+
+    Формула та же, что использует `LayeredObject._compose`: полуразмер = max(|offset| + размер/2),
+    вверх до целого, канва чётная (центр объекта в центре). Нужна тем, кому размер канвы
+    нужен без самой картинки (`preview.render_layout`)."""
+    half_w = max(abs(ox) + s.shape[1] / 2.0 for s, ox, _ in placed)
+    half_h = max(abs(oy) + s.shape[0] / 2.0 for s, _, oy in placed)
+    return 2 * math.ceil(half_w), 2 * math.ceil(half_h)
+
+
 class LayeredObject:
     """Объект = паспорт + слои; RGBA компонуется один раз при создании.
 
@@ -202,9 +213,7 @@ class LayeredObject:
         """Слои на симметричную канву (центр объекта в центре), затем поворот объекта."""
         # ponytail: смещение слоя округляется до целого пикселя (так ставит composite);
         # субпиксельное размещение — если понадобится.
-        half_w = max(abs(ox) + s.shape[1] / 2.0 for s, ox, _ in placed)
-        half_h = max(abs(oy) + s.shape[0] / 2.0 for s, _, oy in placed)
-        w, h = 2 * math.ceil(half_w), 2 * math.ceil(half_h)
+        w, h = canvas_size(placed)
         canvas_pm = np.zeros((h, w, 3), dtype=np.uint8)
         canvas_a = np.zeros((h, w), dtype=np.uint8)
         for sprite, ox, oy in placed:

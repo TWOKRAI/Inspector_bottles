@@ -1,6 +1,6 @@
 """RED-приёмка Task 1.1b, блок A — слой класса (`sprite_source: "class://"`).
 
-Независимый тест (blind): пишется ДО реализации, по спеке `plans/line-sim-layer-editor.md`
+Независимый тест (blind): пишется ДО реализации, по спеке `plans/line-sim-layer-editor/phase-1-engine.md`
 (раздел Task 1.1b, критерии A1-A5). НЕ читает `Services/line_sim/core/*.py`.
 
 Каталог фикстур: `cat/<class>/<file>.png` — по одному спрайту на класс, BGRA на диске

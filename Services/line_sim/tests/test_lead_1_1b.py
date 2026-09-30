@@ -61,6 +61,7 @@ def test_font_tool_rejects_letter_wider_than_canvas_and_writes_nothing(tmp_path:
     """Ревью 1.1b, SHOULD-1 + NIT-3: DejaVuSans «Ж» (ширина/высота ≈ 1.42) при `letter_frac=0.8` шире
     квадрата `size_px` — выход с ошибкой (шрифт, буква в тексте), и НИ ОДНОГО файла/папки в `out`
     (иначе каталог молча принял бы пустой класс). При `letter_frac=0.6` та же буква проходит."""
+    import os
     import subprocess
     import sys
 
@@ -69,12 +70,35 @@ def test_font_tool_rejects_letter_wider_than_canvas_and_writes_nothing(tmp_path:
     font = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSans.ttf"
     root = Path(__file__).resolve().parents[3]
 
+    # Урезанное окружение, но на Windows без SYSTEMROOT не стартует winsock (WinError 10106 при
+    # import _overlapped) — интерпретатор падает раньше инструмента.
+    # PYTHONIOENCODING: кириллица «Ж» в сообщении не зависит от локали (cp1251/cp1252).
+    child_env = {"PYTHONPATH": str(root), "PATH": "/usr/bin:/bin", "PYTHONIOENCODING": "utf-8"}
+    if sys.platform == "win32":
+        child_env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+
     def run(frac: str, out: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "Services.line_sim.tools.make_font_letters", "--letters", "ИЖ",
-             "--font", str(font), "--size-px", "100", "--letter-frac", frac, "--out", str(out)],
-            capture_output=True, text=True, timeout=60, cwd=root,
-            env={"PYTHONPATH": str(root), "PATH": "/usr/bin:/bin"},
+            [
+                sys.executable,
+                "-m",
+                "Services.line_sim.tools.make_font_letters",
+                "--letters",
+                "ИЖ",
+                "--font",
+                str(font),
+                "--size-px",
+                "100",
+                "--letter-frac",
+                frac,
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            timeout=60,
+            cwd=root,
+            env=child_env,
         )
 
     bad = run("0.8", tmp_path / "bad")
