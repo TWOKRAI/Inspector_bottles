@@ -1038,6 +1038,12 @@ class BuiltinCommands:
         # get_stats() возвращает {"router": {...счётчики...}, ...}; берём router-секцию
         router_stats = stats.get("router", stats) if isinstance(stats, dict) else {}
         result = {"success": True, "process": svc.name, "router_stats": router_stats}
+        # 4.5c: описание SHM-колец процесса (роутер без get_ring_info → пусто).
+        try:
+            ring_info = getattr(router, "get_ring_info", None)
+            result["rings"] = ring_info() if callable(ring_info) else []
+        except Exception:  # noqa: BLE001 — наблюдаемость не критична
+            result["rings"] = []
         # Ф3.1: аддитивно epoch и число применённых refresh из своей PSR-записи
         # (наблюдаемость routing-epoch; driver-обёртка читает только router_stats).
         try:

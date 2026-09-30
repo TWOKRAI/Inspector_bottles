@@ -269,6 +269,11 @@ def build_router_shm_telemetry(router: Any) -> dict:
         # Ф7 G.7 (0.5): размер reader-кэша SHM-handle. НЕ потеря, а health-сигнал:
         # под zero-copy эвикция отключена → рост на инкарнацию = утечка handle.
         "cache_size": _n("frame_handle_cache_size"),
+        # 4.5c: объём кадрового транспорта (байты массивов, записанные/прочитанные через SHM) и число
+        # ссылок, не восстановленных из-за сбоя/битой ссылки (штатный stale сюда не входит).
+        "bytes_written": _n("shm_bytes_written"),
+        "bytes_read": _n("shm_bytes_read"),
+        "restore_failures": _n("frame_restore_failures"),
     }
 
 
