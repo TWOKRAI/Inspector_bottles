@@ -20,7 +20,7 @@ exactly to reveal requirements of simple vs hard tasks on given hardware.
 
 **How to apply:**
 - Every drop/lag must be counted AND attributed to a stage (transport, queue wait, plugin, send) — a
-  bare "dropped N" is not enough; see Task 4.5 / 4.8 in `plans/transport-single-policy/phase-4-redesign.md`.
+  bare "dropped N" is not enough; see `plans/transport-single-policy/task-4.5.md` / `task-4.8.md`.
 - Classify the limit: one process pinned near 1.0 core → Python/GIL-bound (parallelize or rewrite);
   all cores busy → hardware; copy/bytes dominating → memory bandwidth/transport; camera/NIC → I/O.
 - Overflow policy differs by consumer: GUI = latest frame; inspection = every frame, loud
