@@ -57,6 +57,8 @@ _(empty)_
 - [GUI: рецепт и auth — бэкенд, Пульт — сервис](project_gui_services_composition_2026_09_23.md) — сборка из сервисов, 09-23
 - [Железо владельца и роли машин](project_hardware_roles_2026_09_23.md) — RTX 3050 4 ГБ = симулятор, Orin NX 16 = линия
 - [GUI-конструктор: слои и эталоны](project_gui_constructor_layers_2026_09_26.md) — fw=конструктор, прототип тонкий, minimal_gui, 09-26
+- [Модели агентов](feedback_agent_models_sonnet_impl_opus_review.md) — реализация Sonnet 5.5, ревью Opus 5.5, `model` передавать явно
+- [Проверка замка стенда должна гейтить команду](feedback_stand_lock_check_must_gate_the_command.md) — `[ ! -e stand.lock ] && pytest`, не просто cat рядом
 
 ### Reference
 - [Мануалы Delta RL/CVT и факты из них](reference_delta_rl_manual.md) — ось «RZ», 0x3000 retained, TimerRead, Lua≥5.2
