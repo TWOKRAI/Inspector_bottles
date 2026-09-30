@@ -35,6 +35,8 @@ OFF по умолчанию (``os.environ`` не читается на hot path,
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import TYPE_CHECKING, Callable
 
 from ...config_module.feature_flags import resolve
@@ -112,6 +114,10 @@ class PluginRunner:
         self._post_hooks: list[PostHook] = []
         self._log_error = log_error or (lambda msg: None)
         self._validate_ports = resolve("FW_PORT_VALIDATE", validate_ports)
+        # EMA времени самого plugin.process()/produce() (мс) по имени плагина.
+        # Раннер общий для потоков producer и executor (generic_process) -> под замком.
+        self._ms_lock = threading.Lock()
+        self._ms_ema: dict[str, float] = {}
 
     # ------------------------------------------------------------------ #
     #  Регистрация наблюдателей (Этап 5: io-debug publisher)              #
@@ -146,7 +152,9 @@ class PluginRunner:
         if getattr(plugin, "enabled", True):
             if self._validate_ports:
                 validate_items_against_ports(plugin.name, "input", getattr(plugin, "inputs", []), items)
+            t0 = time.perf_counter()
             outputs = plugin.process(items)
+            self._note_ms(plugin, (time.perf_counter() - t0) * 1000.0)
             if self._validate_ports:
                 validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
         else:
@@ -158,11 +166,29 @@ class PluginRunner:
     def call_produce(self, plugin: "ProcessModulePlugin") -> list[dict]:
         """Вызвать plugin.produce() с хуками. Исключение плагина пробрасывается."""
         self._run_pre(plugin, "produce", None)
+        t0 = time.perf_counter()
         outputs = plugin.produce()
+        self._note_ms(plugin, (time.perf_counter() - t0) * 1000.0)
         if self._validate_ports:
             validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
         self._run_post(plugin, "produce", None, outputs)
         return outputs
+
+    def plugin_ms(self) -> dict[str, float]:
+        """Копия EMA (alpha 0.1) времени process()/produce() по имени плагина, мс.
+
+        Считает ТОЛЬКО сам вызов плагина: хуки, валидация портов и bypass
+        (enabled=False) в цифру не попадают; упавший плагин не пишет ничего.
+        """
+        with self._ms_lock:
+            return dict(self._ms_ema)
+
+    def _note_ms(self, plugin: "ProcessModulePlugin", ms: float) -> None:
+        key = getattr(plugin, "name", None) or type(plugin).__name__
+        with self._ms_lock:
+            ema = self._ms_ema.get(key)
+            # Первый сэмпл — начальное значение; дальше ema += 0.1 * (x - ema).
+            self._ms_ema[key] = ms if ema is None else ema + 0.1 * (ms - ema)
 
     # ------------------------------------------------------------------ #
     #  Внутреннее: изоляция хуков                                         #

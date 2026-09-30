@@ -215,6 +215,31 @@ info = router.get_dispatcher_info()
 # → channel_dispatcher / message_dispatcher: handlers, scenarios, counts
 ```
 
+### Счётчики кадрового транспорта и кольца (Task 4.5c/4.5e)
+
+`FrameShmMiddleware` считает объём кадрового пути под собственным замком (записывать могут поток-продюсер
+и потоки executor'а, а `+=` по атрибуту не атомарен): `bytes_written` — байты массивов, записанные в слот
+после **успешной** `write_frame`; `bytes_read` — байты, **скопированные** при чтении по ссылке;
+`bytes_mapped` — байты, прочитанные как view (zero-copy, без копии); единая точка чтения — `_read_ref`.
+Stale, torn и битая ссылка байт не дают. Байты удачной ссылки засчитываются, даже если сообщение потом
+отброшено целиком (4.4c), поэтому `bytes_read + bytes_mapped` — верхняя оценка доставленного.
+
+```python
+router.get_shm_stats()
+# → узкий снимок; новые ключи: shm_bytes_written, shm_bytes_read, shm_bytes_mapped,
+#   frame_restore_failures (ссылки, не восстановленные из-за сбоя открытия / битой ссылки;
+#   штатный stale не входит)
+
+router.get_ring_info()
+# → [{"key": ..., "name": <имя слота кольца>, "depth": <число ячеек round-robin>}, ...]
+#   конкатенация FrameShmMiddleware.ring_info() всех кадровых middleware; без ring_info — пропуск
+```
+
+`key` не уникален между middleware'ами процесса — кольцо опознаётся парой `key` + `name`.
+В телеметрию счётчики уходят как `processes.<P>.state.shm.{bytes_written,bytes_read,bytes_mapped,restore_failures}`
+(сборщик — `process_module`), кольца — в ответ `introspect.router_stats` полем `rings`.
+Что означают поля и где их предел — `process_module/README.md`, «Наблюдаемость пути кадра».
+
 ---
 
 ## Каналы (IMessageChannel)

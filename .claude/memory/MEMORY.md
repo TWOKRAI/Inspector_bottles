@@ -50,6 +50,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Инъекции — только по закоммиченному коду](feedback_injection_scripts_on_committed_code.md) — checkout съел фикс; zsh не бьёт $VAR
 - [Харнесс страницы слеп к браузеру](feedback_node_page_harness_blind_to_browser_defaults.md) — B1: пробел жал кнопку в фокусе; в VS Code браузер — через @browser
 - [Широкий except в кадровом цикле прячет мёртвый механизм](feedback_broad_except_in_frame_loop_hides_dead_mechanism.md) — лента едет, объектов нет, тесты зелёные
+- [Стенд и тесты: протокол между сессиями](feedback_shared_stand_and_tests_protocol.md) — stand.lock measure/functional, замер по SHA, A/B
 - [Слияние: тип feat, не merge](feedback_merge_commit_needs_feat_type.md) — хук режет merge(...), -F - не читает stdin
 
 ### User
@@ -60,6 +61,7 @@ _(empty)_
 - [GUI: рецепт и auth — бэкенд, Пульт — сервис](project_gui_services_composition_2026_09_23.md) — сборка из сервисов, 09-23
 - [Железо владельца и роли машин](project_hardware_roles_2026_09_23.md) — RTX 3050 4 ГБ = симулятор, Orin NX 16 = линия
 - [ГЛАВНАЯ ЦЕЛЬ: выявлять требования к мощности](project_capacity_planning_goal.md) — не успевает → чей этап и во что упёрлись: код → язык → железо → несколько ПК, до бюджета
+- [Бенч мощности — одна команда на любом железе](project_portable_capacity_bench.md) — Orin NX/Linux, паспорт машины, самопроверка часов
 - [GUI-конструктор: слои и эталоны](project_gui_constructor_layers_2026_09_26.md) — fw=конструктор, прототип тонкий, minimal_gui, 09-26
 
 ### Reference

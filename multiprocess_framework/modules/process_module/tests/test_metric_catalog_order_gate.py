@@ -57,7 +57,19 @@ _TIMEOUT_S = 30.0
 
 #: Литерал, а не producer(declared_metrics()) — ожидание, вычисленное тем же
 #: кодом, который проверяется, согласилось бы с любым ответом (в т.ч. пустым).
-_FRAMEWORK_METRICS = ("cycle_duration_ms", "effective_hz", "fps", "latency_ms", "shm")
+# Task 4.5a (queue_wait_ms, pacer_late), 4.5b (cpu, plugin_ms) и 4.5d (transport_ms) — к прежним пяти.
+_FRAMEWORK_METRICS = (
+    "cpu",
+    "cycle_duration_ms",
+    "effective_hz",
+    "fps",
+    "latency_ms",
+    "pacer_late",
+    "plugin_ms",
+    "queue_wait_ms",
+    "shm",
+    "transport_ms",
+)
 
 #: Общий пролог: fake-сервисы (без pytest — subprocess исполняет голым python -c),
 #: тот же минимальный контракт, что у ``_FakeServices`` в test_telemetry_gate.py
