@@ -3950,6 +3950,7 @@ test_storeless_mode_get_returns_default_and_process_lives`.
   (`CpuClock()`), синглтон остался для `seconds_total` в `introspect.status`.
 
 **Последствия и границы.**
+* `transport_ms` включает ожидание во входящей mp-очереди, пока приём блокирован backpressure'ом `chain_queue`: рост вместе с `queue_wait_ms` = упор в исполнитель получателя, а не в транспорт (ревью итерации 2, N1).
 * Каталог метрик фреймворка: 5 → 10 имён (`queue_wait_ms`, `pacer_late`, `cpu`, `plugin_ms`,
   `transport_ms`); стражи каталога обновлены литералами.
 * **`~MHz` проверена только на i5-12500H (3110 МГц).** На AMD и серверных процессорах значение реестра

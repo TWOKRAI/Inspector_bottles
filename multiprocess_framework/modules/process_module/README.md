@@ -764,7 +764,7 @@ merge` пересобирают `publish` ЦЕЛИКОМ из присланно
 | Поле | Где лежит | Что значит | Границы |
 |---|---|---|---|
 | `queue_wait_ms` | `processes.<P>.workers.<w>.*` (воркер с `PipelineExecutor`) | EMA (α = 0.1) ожидания коллекции в `chain_queue`: метка `enq_ts` ставится в `DataReceiver` перед `put`, читается исполнителем после `get` | Ожидание из-за backpressure на `put` входит намеренно. Чужой батч без метки не считается. 0 — показание («не ждали»), не отсутствие |
-| `transport_ms` | `processes.<P>.workers.<w>.*` (воркер с `DataReceiver`) | EMA (α = 0.1) пути отправка → межпроцессная очередь data → unpickle → SHM-restore. Штамп `_t_sent_ns` (`perf_counter_ns`) ставят `SourceProducer` и `PipelineExecutor` на каждом item, `DataReceiver` вынимает его при приёме | Ключ есть всегда, `0.0` до первого отсчёта. Штамп сопоставим между процессами на Windows (`perf_counter` общесистемный; дельта родитель/потомок 0.6–0.8 мс, замер лида) — на других ОС не проверялось |
+| `transport_ms` | `processes.<P>.workers.<w>.*` (воркер с `DataReceiver`) | EMA (α = 0.1) пути отправка → межпроцессная очередь data → unpickle → SHM-restore. Штамп `_t_sent_ns` (`perf_counter_ns`) ставят `SourceProducer` и `PipelineExecutor` на каждом item, `DataReceiver` вынимает его при приёме | Ключ есть всегда, `0.0` до первого отсчёта. Штамп сопоставим между процессами на Windows (`perf_counter` общесистемный; дельта родитель/потомок 0.6–0.8 мс, замер лида) — на других ОС не проверялось. **Включает и ожидание во входящей mp-очереди**, пока `DataReceiver` блокирован на `put` в `chain_queue`: рост `transport_ms` ВМЕСТЕ с `queue_wait_ms` — упор в исполнитель получателя, а не в транспорт (ревью 4.5 итерация 2, N1: `queue_wait` [400.4, 400.6, 0.2] мс → `transport_ms` 40.5) |
 | `pacer_late` | `processes.<P>.workers.<w>.*` (`SourceProducer`, `IdleWorker`) | Сколько тактов `FramePacer` начато с опозданием (работа длиннее интервала); накопительный | Переживает `FramePacer.reset()`. Рядом уже были `effective_hz` и `target_interval_ms` — нового только счётчик |
 | `cpu.cores` | `processes.<P>.state.cpu.cores` | Ядра процесса = ΔCPU-секунд / Δстенного времени между тиками heartbeat | См. ниже «Как читать `cpu`» |
 | `plugin_ms.<плагин>` | `processes.<P>.state.plugin_ms` | EMA (α = 0.1) только самого `plugin.process()` / `plugin.produce()`, мс, 1 знак | Хуки, валидация портов и bypass (`enabled=False`) не входят; упавший плагин не пишет. Ключ — имя плагина: одноимённые экземпляры сливаются в одну EMA |
@@ -794,7 +794,7 @@ merge` пересобирают `publish` ЦЕЛИКОМ из присланно
 | Команда | Новое |
 |---|---|
 | `introspect.status` | `cpu: {cores, seconds_total, method}` (`seconds_total` — накопленные CPU-секунды, часы-синглтон `process_clock()`) |
-| `introspect.queues` | к прежним `queue_sizes` добавлены `queues: {тип: {size, maxsize}}` и `chain_queue: {size, maxsize}` (`None` — нет data-плоскости). `maxsize`: `0` — без предела, `None` — узнать нельзя. У `mp.Queue` ёмкость берётся из CPython-приватного `_maxsize` |
+| `introspect.queues` | к прежним `queue_sizes` добавлены `queues: {тип: {size, maxsize}}` и `chain_queue: {size, maxsize}` (у `GenericProcess` есть всегда, у процесса только с источником — `{size: 0, …}`; `None` — процесс не `GenericProcess`, например GUI). `maxsize`: `0` — без предела, `None` — узнать нельзя. У `mp.Queue` ёмкость берётся из CPython-приватного `_maxsize` |
 | `introspect.router_stats` | `rings: [{key, name, depth}]` — см. `router_module/README.md` |
 
 ### Что поля НЕ дают
