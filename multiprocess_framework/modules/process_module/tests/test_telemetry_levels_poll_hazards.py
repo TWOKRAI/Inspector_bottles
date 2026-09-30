@@ -93,6 +93,7 @@ SHM_KEYS = {
     # Task 4.5c: байты кадрового транспорта и отказы восстановления.
     "bytes_written",
     "bytes_read",
+    "bytes_mapped",
     "restore_failures",
 }
 

@@ -371,6 +371,7 @@ class FrameShmMiddleware:
         self._bytes_lock = threading.Lock()
         self._bytes_written = 0
         self._bytes_read = 0
+        self._bytes_mapped = 0
         # M2c / Task 4.4: torn-чтения (перезапись слота во время чтения по ссылке) считает
         # reader — ``frame_torn_reads`` ниже проецирует его счётчик (агрегируется в get_stats).
         # 4.1-fix: тикетов release с неизвестным ``slot`` отброшено (не наше кольцо —
@@ -624,6 +625,11 @@ class FrameShmMiddleware:
         with self._bytes_lock:
             self._bytes_written += n
 
+    def _add_bytes_mapped(self, n: int) -> None:
+        """4.5e: прибавить ``n`` байт, прочитанных как view без копии (под замком)."""
+        with self._bytes_lock:
+            self._bytes_mapped += n
+
     def _add_bytes_read(self, n: int) -> None:
         """4.5c: прибавить ``n`` байт к счётчику чтения (под замком)."""
         with self._bytes_lock:
@@ -636,8 +642,16 @@ class FrameShmMiddleware:
 
     @property
     def bytes_read(self) -> int:
-        """4.5c: суммарно байт массивов, успешно прочитанных по ссылке (stale/torn/битая — 0)."""
+        """4.5c: суммарно байт массивов, успешно СКОПИРОВАННЫХ по ссылке (stale/torn/битая — 0).
+
+        4.5e: zero-copy view сюда не входит — см. :attr:`bytes_mapped`.
+        """
         return self._bytes_read
+
+    @property
+    def bytes_mapped(self) -> int:
+        """4.5e: суммарно байт массивов, прочитанных по ссылке как view (zero-copy, без копии)."""
+        return self._bytes_mapped
 
     def ring_info(self) -> list[dict]:
         """4.5c: описание созданных колец — по записи ``{key, name, depth}`` на кольцо
@@ -1000,7 +1014,12 @@ class FrameShmMiddleware:
                 if arr is not None:
                     # 4.5c: байты чтения — только успешное чтение (stale/torn → arr None → 0);
                     # единая точка для restore_frame и on_receive (оба идут через _read_ref).
-                    self._add_bytes_read(int(arr.nbytes))
+                    # 4.5e: view (zero-copy) — отдельный счётчик: копии не было, и для отчёта о
+                    # мощности «скопировано» не должно включать «отображено» (ревью 4.5, находка 4).
+                    if view:
+                        self._add_bytes_mapped(int(arr.nbytes))
+                    else:
+                        self._add_bytes_read(int(arr.nbytes))
                 return arr, (view and arr is not None)
         # Сбой открытия / битая ссылка — M2a: throttled (штатный drop после G.7, не ERROR-спам).
         self._restore_fail_count += 1

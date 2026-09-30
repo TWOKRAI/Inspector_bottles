@@ -286,6 +286,7 @@ def build_router_shm_telemetry(router: Any) -> dict:
         # ссылок, не восстановленных из-за сбоя/битой ссылки (штатный stale сюда не входит).
         "bytes_written": _n("shm_bytes_written"),
         "bytes_read": _n("shm_bytes_read"),
+        "bytes_mapped": _n("shm_bytes_mapped"),
         "restore_failures": _n("frame_restore_failures"),
     }
 

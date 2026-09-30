@@ -52,6 +52,7 @@ NARROW_KEYS = (
     "frame_handle_cache_size",
     "shm_bytes_written",
     "shm_bytes_read",
+    "shm_bytes_mapped",
     "frame_restore_failures",
     "queue_data_evicted",
     "queue_system_evict_blocked",

@@ -194,6 +194,7 @@ class TestH8RouterShmStatsPublish:
             # Task 4.5c: байты кадрового транспорта и отказы восстановления.
             "bytes_written": 0,
             "bytes_read": 0,
+            "bytes_mapped": 0,
             "restore_failures": 0,
         }
 

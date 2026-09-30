@@ -1743,7 +1743,7 @@ class RouterManager(ChannelRoutingManager):
     def get_shm_stats(self) -> Dict[str, int]:
         """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
 
-        Те же шестнадцать чисел (тринадцать прежних + байты SHM записи/чтения и сбои
+        Те же семнадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои
         восстановления, 4.5c), что телеметрия публикует в ``processes.<name>.state.shm``,
         но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
         ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
@@ -1794,6 +1794,7 @@ class RouterManager(ChannelRoutingManager):
             # 4.5c: объём кадрового транспорта и ссылки, не восстановленные из-за сбоя/битой ссылки.
             "shm_bytes_written": _mw("bytes_written"),
             "shm_bytes_read": _mw("bytes_read"),
+            "shm_bytes_mapped": _mw("bytes_mapped"),
             "frame_restore_failures": _mw("frame_restore_failures"),
             "queue_data_evicted": _q("data_evicted"),
             "queue_system_evict_blocked": _q("system_evict_blocked"),
