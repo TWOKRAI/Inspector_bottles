@@ -2,7 +2,7 @@
 """Ф7 G.5.b — zero-copy чтение кадра (restore_frame отдаёт view, а не .copy()).
 
 Гейт активации: FW_SHM_ZERO_COPY И живой handle-кэш (FW_SHM_HANDLE_CACHE +
-FW_SHM_OWNER_INCARNATION) И seqlock (FW_SHM_SEQLOCK). Без любого из них — копия
+FW_SHM_OWNER_INCARNATION) (seqlock-заголовок слота — всегда, Task 4.4). Без любого из них — копия
 (бит-в-бит прежнее / безопасно). Ключевой инвариант владельца: форма view берётся
 из per-image заголовка → переменная форма кадра (grayscale/resize/crop) корректна.
 
@@ -25,7 +25,6 @@ from multiprocess_framework.modules.shared_resources_module.memory.core.manager 
 
 
 def _enable_zero_copy(monkeypatch) -> None:
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
     monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
     monkeypatch.setenv("FW_SHM_HANDLE_CACHE", "1")
     monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
@@ -33,7 +32,7 @@ def _enable_zero_copy(monkeypatch) -> None:
 
 def _writer_reader():
     """Writer и reader на РАЗНЫХ MemoryManager → path-1 (mm) у reader'а не находит
-    чужого owner'а → падает на path-2 (raw open по shm_actual_name) = zero-copy путь."""
+    чужого owner'а → падает на path-2 (raw open по ref["name"]) = zero-copy путь."""
     writer = FrameShmMiddleware(MemoryManager(), owner="cam0", slot="output_frames", coll=4)
     reader = FrameShmMiddleware(MemoryManager(), owner="reader", slot="unused")
     return writer, reader
@@ -61,7 +60,7 @@ class TestGate:
             probe = _restore_probe(reader, out)
             assert probe is not None and probe[1] == 7
             assert probe[2] is False  # копия (frombuffer-view отсутствует)
-            assert out.get("_frame_is_view") is None  # маркера нет
+            assert out.get("_shm_views") is None  # view-билетов нет
         finally:
             reader.close_handle_cache()
             writer.release_owned_memory()
@@ -90,10 +89,9 @@ class TestZeroCopyView:
             out = writer.strip_and_write({"frame": np.full((32, 48, 3), 11, np.uint8)})
             probe = _restore_probe(reader, out)
             assert probe == ((32, 48, 3), 11, True)  # форма, значение, IS view
-            # Мета для post-use re-check (G.5.c).
-            assert out.get("_frame_is_view") is True
-            assert out.get("_shm_view_name") == out["shm_actual_name"]
-            assert out.get("_shm_view_generation", -1) >= 0  # seqlock → реальное поколение
+            # Билет для post-use re-check (G.5.c): сама ссылка на кадр (name + gen записи).
+            assert out.get("_shm_views") == [out["_shm_refs"]["frame"]]
+            assert out["_shm_refs"]["frame"]["gen"] > 0
         finally:
             reader.close_handle_cache()
             writer.release_owned_memory()

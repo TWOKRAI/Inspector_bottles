@@ -42,7 +42,6 @@ def _clean_shm_flags(monkeypatch):
 @pytest.fixture
 def loan(monkeypatch):
     monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
 
 
 @pytest.fixture
@@ -213,8 +212,8 @@ def test_small_frame_still_by_reference_small_key_inline(made):
 
     out = _bounded(lambda: _send(mw, item))
     assert out is not None
-    assert "frame" not in out["data"] and out["data"].get("shm_name") == "output_frames"
-    assert out["data"]["small"] is small and "_shm_refs" not in out["data"]
+    assert "frame" not in out["data"] and out["data"]["_shm_refs"]["frame"]["slot"] == "output_frames"
+    assert out["data"]["small"] is small and "small" not in out["data"]["_shm_refs"]
 
 
 # ============================ 4.1-fix (ревью 4.1, находки 1 и 3) ============================

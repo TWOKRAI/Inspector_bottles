@@ -3,7 +3,7 @@
 
 Между _execute_chain и _send_results: если входной view не пережил обработку
 (middleware.frame_view_valid → False), результат НЕ отправляется (построен на
-порванных пикселях). На не-view пути (нет _frame_is_view) — ноль оверхеда.
+порванных пикселях). На не-view пути (нет _shm_views) — ноль оверхеда.
 """
 
 from __future__ import annotations
@@ -24,9 +24,14 @@ class _FakeShm:
         self._valid = valid
         self.calls: list[tuple[str, int]] = []
 
-    def frame_view_valid(self, name: str, gen: int) -> bool:
-        self.calls.append((name, gen))
+    def frame_view_valid(self, ref: dict) -> bool:
+        self.calls.append((ref["name"], ref["gen"]))
         return self._valid
+
+
+def _ref(owner: str, idx: int, gen: int, name: str | None = None) -> dict:
+    """Ссылка SHM (Task 4.4): она же билет re-check/release."""
+    return {"owner": owner, "slot": "output_frames", "idx": idx, "gen": gen, "name": name or f"v{idx}"}
 
 
 def _make_executor(shm, sent: list):
@@ -41,40 +46,23 @@ def _make_executor(shm, sent: list):
 class TestCollectAndValidate:
     def test_collect_only_view_items(self):
         ex = _make_executor(_FakeShm(True), [])
+        ref0, ref1 = _ref("cam0", 0, 4, "seg0"), _ref("cam1", 1, 6, "seg1")
         items = [
-            {
-                "_frame_is_view": True,
-                "_shm_view_name": "seg0",
-                "_shm_view_generation": 4,
-                "shm_owner": "cam0",
-                "shm_name": "output_frames",
-                "shm_index": 0,
-            },
+            {"_shm_views": [ref0]},
             {"frame": "plain"},  # не view — игнор
-            {
-                "_frame_is_view": True,
-                "_shm_view_name": "seg1",
-                "_shm_view_generation": 6,
-                "owner": "cam1",
-                "shm_name": "output_frames",
-                "shm_index": 1,
-            },
+            {"_shm_views": [ref1]},
         ]
-        tickets = ex._collect_view_tickets(items)
-        assert [(t["view_name"], t["generation"], t["owner"], t["index"]) for t in tickets] == [
-            ("seg0", 4, "cam0", 0),
-            ("seg1", 6, "cam1", 1),
-        ]
+        assert ex._collect_view_tickets(items) == [ref0, ref1]
 
     def test_no_middleware_no_checks(self):
         ex = _make_executor(None, [])
-        assert ex._collect_view_tickets([{"_frame_is_view": True, "_shm_view_name": "x"}]) == []
+        assert ex._collect_view_tickets([{"_shm_views": [_ref("cam0", 0, 2, "x")]}]) == []
 
     def test_all_valid_true_any_stale_false(self):
         ex_ok = _make_executor(_FakeShm(True), [])
-        assert ex_ok._frame_views_valid([{"view_name": "seg0", "generation": 4}]) is True
+        assert ex_ok._frame_views_valid([_ref("cam0", 0, 4, "seg0")]) is True
         ex_bad = _make_executor(_FakeShm(False), [])
-        assert ex_bad._frame_views_valid([{"view_name": "seg0", "generation": 4}]) is False
+        assert ex_bad._frame_views_valid([_ref("cam0", 0, 4, "seg0")]) is False
 
 
 class TestRunLoopDrop:
@@ -94,7 +82,7 @@ class TestRunLoopDrop:
         sent: list = []
         shm = _FakeShm(valid=False)  # view устарел
         ex = _make_executor(shm, sent)
-        self._run_one_batch(ex, [{"_frame_is_view": True, "_shm_view_name": "seg0", "_shm_view_generation": 2}])
+        self._run_one_batch(ex, [{"_shm_views": [_ref("cam0", 0, 2, "seg0")]}])
         assert sent == []  # дропнут, не отправлен
         assert shm.calls  # re-check был вызван
 
@@ -102,9 +90,9 @@ class TestRunLoopDrop:
         sent: list = []
         shm = _FakeShm(valid=True)
         ex = _make_executor(shm, sent)
-        self._run_one_batch(ex, [{"_frame_is_view": True, "_shm_view_name": "seg0", "_shm_view_generation": 2}])
+        self._run_one_batch(ex, [{"_shm_views": [_ref("cam0", 0, 2, "seg0")], "marker": 7}])
         assert len(sent) == 1  # валиден → отправлен
-        assert sent[0]["data"]["_shm_view_name"] == "seg0"
+        assert sent[0]["data"]["marker"] == 7
 
     def test_non_view_batch_sent_without_recheck(self):
         sent: list = []
@@ -116,14 +104,7 @@ class TestRunLoopDrop:
 
 
 def _view_item(owner, idx, gen):
-    return {
-        "_frame_is_view": True,
-        "_shm_view_name": f"v{idx}",
-        "_shm_view_generation": gen,
-        "owner": owner,
-        "shm_name": "output_frames",
-        "shm_index": idx,
-    }
+    return {"_shm_views": [_ref(owner, idx, gen)]}
 
 
 class TestReleaseAccumulation:
@@ -185,4 +166,4 @@ class TestReleaseAccumulation:
 
 
 def _ticket(owner, idx, gen):
-    return {"view_name": f"v{idx}", "generation": gen, "owner": owner, "shm_name": "output_frames", "index": idx}
+    return _ref(owner, idx, gen)

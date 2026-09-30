@@ -30,7 +30,7 @@ class TestLoanOff:
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="output_frames", coll=3)
         assert mw._loan_protocol is False
         try:
-            indices = [mw.strip_and_write({"frame": _frame(i)}).get("shm_index") for i in range(7)]
+            indices = [mw.strip_and_write({"frame": _frame(i)})["_shm_refs"]["frame"]["idx"] for i in range(7)]
             assert indices == [0, 1, 2, 0, 1, 2, 0]  # слепой цикл
             assert mw.frame_loan_exhausted == 0
         finally:
@@ -115,7 +115,7 @@ class TestNumConsumersWiring:
         try:
             # Пишем БОЛЬШЕ глубины кольца без единого release — при loan это дало бы
             # исчерпание; при round-robin (В1) слоты циклятся, дропов нет.
-            indices = [mw.strip_and_write({"frame": _frame(i)}).get("shm_index") for i in range(7)]
+            indices = [mw.strip_and_write({"frame": _frame(i)})["_shm_refs"]["frame"]["idx"] for i in range(7)]
             assert indices == [0, 1, 2, 0, 1, 2, 0]  # слепой цикл, как loan-off
             assert mw.frame_loan_exhausted == 0
         finally:
@@ -146,7 +146,6 @@ class TestReleaseSlots:
 
     def _mw(self, monkeypatch, coll=2, num_consumers=1):
         monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
-        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")  # generation-guard требует seqlock
         return FrameShmMiddleware(
             MemoryManager(), owner="cam", slot="output_frames", coll=coll, num_consumers=num_consumers
         )
@@ -155,7 +154,7 @@ class TestReleaseSlots:
         """loan все слоты → исчерпание; release одного → снова доступен."""
         mw = self._mw(monkeypatch, coll=2)
         try:
-            i0 = mw.strip_and_write({"frame": _frame(0)})["shm_index"]
+            i0 = mw.strip_and_write({"frame": _frame(0)})["_shm_refs"]["frame"]["idx"]
             mw.strip_and_write({"frame": _frame(1)})  # i1
             gen0 = mw._read_own_slot_generation(i0)
             # исчерпан → drop-на-источнике
@@ -166,7 +165,7 @@ class TestReleaseSlots:
             assert mw._pool._refcount[i0] == 0
             assert mw.frame_slots_released == 1
             out = mw.strip_and_write({"frame": _frame(3)})
-            assert "frame" not in out and out["shm_index"] == i0
+            assert "frame" not in out and out["_shm_refs"]["frame"]["idx"] == i0
         finally:
             mw.release_owned_memory()
 
@@ -175,7 +174,7 @@ class TestReleaseSlots:
         mw = self._mw(monkeypatch, coll=2, num_consumers=2)
         try:
             item = mw.strip_and_write({"frame": _frame(1)})
-            idx = item["shm_index"]
+            idx = item["_shm_refs"]["frame"]["idx"]
             gen = mw._read_own_slot_generation(idx)
             assert mw._pool._refcount[idx] == 2
             t0 = {"index": idx, "generation": gen, "reader": "c0"}
@@ -193,7 +192,7 @@ class TestReleaseSlots:
         mw = self._mw(monkeypatch, coll=2)
         try:
             item = mw.strip_and_write({"frame": _frame(1)})
-            idx = item["shm_index"]
+            idx = item["_shm_refs"]["frame"]["idx"]
             gen = mw._read_own_slot_generation(idx)
             mw.release_slots([{"index": idx, "generation": gen + 100, "reader": "c0"}])
             assert mw._pool._refcount[idx] == 1  # stale gen → не декрементнут
@@ -215,7 +214,6 @@ class TestReleaseOnEvict:
 
     def _mw(self, monkeypatch, coll=2, num_consumers=1):
         monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
-        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")  # seqlock → gen_reader отдаёт gen≥0
         return FrameShmMiddleware(
             MemoryManager(), owner="cam", slot="output_frames", coll=coll, num_consumers=num_consumers
         )
@@ -225,7 +223,7 @@ class TestReleaseOnEvict:
         ШТАТНЫЙ release его бы отверг (gen-guard) — а evicted-release освобождает слот."""
         mw = self._mw(monkeypatch, coll=2)
         try:
-            i0 = mw.strip_and_write({"frame": _frame(0)})["shm_index"]
+            i0 = mw.strip_and_write({"frame": _frame(0)})["_shm_refs"]["frame"]["idx"]
             mw.strip_and_write({"frame": _frame(1)})  # занят i1
             # исчерпание: третий кадр не проходит (оба слота заняты).
             assert mw.strip_and_write({"frame": _frame(2)}).get("frame") is not None
@@ -242,7 +240,7 @@ class TestReleaseOnEvict:
             assert mw.frame_loans_released_on_evict == 1
             # free-list восстановлен → следующий write занимает i0.
             out = mw.strip_and_write({"frame": _frame(3)})
-            assert "frame" not in out and out["shm_index"] == i0
+            assert "frame" not in out and out["_shm_refs"]["frame"]["idx"] == i0
         finally:
             mw.release_owned_memory()
 
@@ -252,7 +250,7 @@ class TestReleaseOnEvict:
         mw = self._mw(monkeypatch, coll=1, num_consumers=2)
         try:
             item = mw.strip_and_write({"frame": _frame(1)})
-            idx = item["shm_index"]
+            idx = item["_shm_refs"]["frame"]["idx"]
             gen = mw._read_own_slot_generation(idx)
             assert mw._pool._refcount[idx] == 2
             # lines не прочитал (вытеснен) → evicted-release его доли.
@@ -288,7 +286,6 @@ class TestReleaseOnEvict:
 
 def _loan_mw(monkeypatch, coll=2, num_consumers=1):
     monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
     return FrameShmMiddleware(
         MemoryManager(), owner="cam", slot="output_frames", coll=coll, num_consumers=num_consumers
     )
@@ -342,7 +339,7 @@ class TestReclaimOnDeath:
         mw = _loan_mw(monkeypatch, coll=1, num_consumers=2)
         try:
             item = mw.strip_and_write({"frame": _frame(0)})
-            idx = item["shm_index"]
+            idx = item["_shm_refs"]["frame"]["idx"]
             gen = mw._read_own_slot_generation(idx)
             mw.release_slots([{"index": idx, "generation": gen, "reader": "c0"}])  # c0 отпустил
             assert mw._pool._refcount[idx] == 1
