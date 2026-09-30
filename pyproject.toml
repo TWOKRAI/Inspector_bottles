@@ -260,6 +260,7 @@ testpaths = [
     "multiprocess_prototype/backend/state",
     "multiprocess_prototype/backend/config/tests",
     "multiprocess_prototype/backend/displays/tests",
+    "scripts/capacity_bench/tests",
     "scripts/code_stats/tests",
     "scripts/sync/tests",
     "scripts/validate_commit/tests",
