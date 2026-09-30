@@ -1401,6 +1401,8 @@ presetSpriteFileInput.addEventListener("change", function () {
     presetSpriteFileInput.value = ""; // тот же файл можно выбрать снова
     if (presetCanvas.focus) presetCanvas.focus({ preventScroll: true }); // не оставлять фокус на контроле (F1 1.3h-c)
   }
+  // Потолок сервера (6 МиБ): больше — не читаем и не шлём.
+  if (file.size > 6291456) { presetUploadFail("файл больше 6 МиБ"); done(); return; }
   var reader = new FileReader();
   reader.onerror = function () { presetUploadFail("файл не прочитан"); done(); };
   reader.onload = function () {

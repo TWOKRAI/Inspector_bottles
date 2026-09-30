@@ -40,12 +40,15 @@
 абсолютный или с диском, длиннее 128, суффикс не ``.png``, основа из одних ``_``/``.``, зарезервированное имя Windows;
 не base64; больше ``SPRITE_PUT_MAX_BYTES`` = 6 МиБ; ``sprites_dir`` вне ограды — раньше существования), ``io_error``
 (каталога нет; сбой записи), ``conflict`` (файл с таким именем уже есть — на Windows без учёта регистра, как ФС),
-``invalid`` (байты — не RGBA-картинка). Символы вне ``[\\w.-]`` (Unicode ``\\w``, кириллица остаётся) заменяются на
-``_``; сохраняется очищенное имя. Запись: ``mkstemp`` в самом ``sprites_dir`` (суффикс ``.uploading``, его
-``preset.sprites`` не показывает) -> запись + ``fsync`` -> ``load_image_rgba`` на временном файле -> ``os.link`` под
-итоговым именем -> ``unlink`` временного в ``finally``. ``os.link``, а не ``os.replace``: ``replace`` молча
-перезаписал бы файл, появившийся у внешнего писателя между проверкой существования и публикацией, а ``link``
-на занятое имя падает ``FileExistsError`` -> ``conflict``, чужой файл цел. Успех: ``ok`` + ``file`` (``sprite_entry``).
+``invalid`` (байты — не PNG: сигнатура и IHDR читаются ДО диска и любого декодера, пикселей больше
+``SPRITE_PUT_MAX_PIXELS`` = 4096x4096; либо не RGBA-картинка). Символы вне ``[\w.-]`` (Unicode ``\w``, кириллица
+остаётся) заменяются на ``_``; сохраняется очищенное имя. Запись: ОДНО создание ``O_EXCL`` в самом ``sprites_dir``
+(имя ``<hex>.uploading``; не ``mkstemp`` — тот на Windows при ACL-отказе повторяет попытки до 2^31 и подвешивает
+поток команды; суффикс ``.uploading`` ``preset.sprites`` не показывает) -> запись + ``fsync`` ->
+``load_image_rgba`` на временном файле -> ``os.link`` под итоговым именем -> ``unlink`` временного в
+``finally``. ``os.link``, а не ``os.replace``: ``replace`` молча перезаписал бы файл, появившийся у внешнего
+писателя между проверкой существования и публикацией, а ``link`` на занятое имя падает ``FileExistsError`` ->
+``conflict``, чужой файл цел. Успех: ``ok`` + ``file`` (``sprite_entry``).
 """
 
 from __future__ import annotations
@@ -54,7 +57,8 @@ import base64
 import binascii
 import os
 import re
-import tempfile
+import secrets
+import struct
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
@@ -81,6 +85,7 @@ from Services.line_sim.core.preview import PREVIEW_DEFAULT_SEEDS, PREVIEW_DEFAUL
 
 SPRITES_DIR_DEFAULT = "data/line_sim"  # каталог PNG по умолчанию (от корня репо; `data/` в .gitignore)
 SPRITE_PUT_MAX_BYTES = 6_291_456  # потолок PNG ``preset.sprite_put`` после base64 (маршрут режет тело на 9 МиБ)
+SPRITE_PUT_MAX_PIXELS = 16_777_216  # 4096x4096 = 64 МиБ RGBA после декода; реальные спрайты ~656x850
 SPRITE_PUT_NAME_MAX = 128
 SPRITES_MAX_FILES = 500  # потолок списка ``preset.sprites``; лишнее отрезается с ``truncated: true``
 
@@ -207,6 +212,15 @@ class LayerPreviewPlugin(ProcessModulePlugin):
             return _bad_request("preset.sprite_put: png_b64 — не base64")
         if len(raw) > SPRITE_PUT_MAX_BYTES:
             return _bad_request(f"preset.sprite_put: PNG больше {SPRITE_PUT_MAX_BYTES} байт")
+        # Сигнатура и потолок пикселей из IHDR — ДО диска и любого декодера: cv2.imdecode определяет формат по
+        # содержимому, а 6 МиБ режут сжатые байты, не пиксели (PNG-бомба).
+        if raw[:8] != b"\x89PNG\r\n\x1a\n":
+            return _invalid("preset.sprite_put: не PNG (нет сигнатуры)")
+        if len(raw) < 24 or raw[12:16] != b"IHDR":
+            return _invalid("preset.sprite_put: не PNG (нет заголовка IHDR)")
+        width, height = struct.unpack(">II", raw[16:24])
+        if width == 0 or height == 0 or width * height > SPRITE_PUT_MAX_PIXELS:
+            return _invalid(f"preset.sprite_put: размер {width}x{height} вне 1..{SPRITE_PUT_MAX_PIXELS} пикселей")
         sprites_dir, error_reply = self._checked_sprites_dir("preset.sprite_put")
         if error_reply is not None:
             return error_reply
@@ -219,8 +233,11 @@ class LayerPreviewPlugin(ProcessModulePlugin):
             entry = sprite_entry(final, sprites_dir, self._preset_dir() or REPO_ROOT)
         except ValueError as exc:
             return _bad_request(f"preset.sprite_put: слой не сошлётся на sprites_dir ({exc})")
+        # ОДНА попытка O_EXCL, не mkstemp: тот на Windows повторяет попытки при PermissionError (ACL deny, а
+        # os.access(W_OK) при этом True) до TMP_MAX = 2^31 — поток команды не возвращался.
+        tmp = sprites_dir / f"{secrets.token_hex(8)}.uploading"
         try:
-            fd, tmp = tempfile.mkstemp(dir=sprites_dir, suffix=".uploading")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         except OSError as exc:
             return _io_error(f"preset.sprite_put: временный файл не создан: {exc}")
         try:
@@ -234,7 +251,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
             try:
                 load_image_rgba(tmp)
             except Exception as exc:  # noqa: BLE001 — не PNG/битый/без альфы: cv2.error и AttributeError (imread -> None)
-                return {"status": "error", "code": "invalid", "message": f"preset.sprite_put: не RGBA-картинка ({exc})"}
+                return _invalid(f"preset.sprite_put: не RGBA-картинка ({exc})")
             try:
                 os.link(tmp, final)  # не os.replace: тот перезаписал бы файл внешнего писателя (см. докстринг модуля)
             except FileExistsError:
@@ -344,6 +361,10 @@ def _bad_request(message: str) -> dict[str, Any]:
 
 def _io_error(message: str) -> dict[str, Any]:
     return {"status": "error", "code": "io_error", "message": message}
+
+
+def _invalid(message: str) -> dict[str, Any]:
+    return {"status": "error", "code": "invalid", "message": message}
 
 
 def _conflict(message: str) -> dict[str, Any]:
