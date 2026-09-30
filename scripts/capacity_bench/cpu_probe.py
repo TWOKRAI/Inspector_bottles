@@ -35,30 +35,11 @@ def parse_proc_stat(text: str) -> tuple[int, int]:
     return int(tail[11]), int(tail[12])
 
 
-def _resolve_launcher(pid: int) -> int:
-    """pid интерпретатора за venv-заглушкой.
-
-    Windows-venv: `sys.executable` — редиректор, который порождает настоящий python.exe
-    отдельным процессом. Такты заглушки ~0 (замерено: busy-цикл читался как 0.0 ядра), а
-    считать нужно интерпретатор — её единственного потомка. Не заглушка -> pid как есть.
-    """
-    if not _IS_WINDOWS or sys.executable == getattr(sys, "_base_executable", sys.executable):
-        return pid
-    try:
-        proc = psutil.Process(pid)
-        if os.path.normcase(proc.exe()) != os.path.normcase(sys.executable):
-            return pid
-        kids = proc.children()
-        return kids[0].pid if len(kids) == 1 else pid
-    except psutil.Error:
-        return pid
-
-
 class ProcessCpu:
     """CPU-секунды всех потоков процесса `pid` с его старта. `method`: cycles|proc_stat|psutil."""
 
     def __init__(self, pid: int) -> None:
-        self.pid = _resolve_launcher(pid)
+        self.pid = pid
         self.method = "psutil"
         self._handle = None
         self._hz = 0.0
@@ -71,7 +52,7 @@ class ProcessCpu:
         elif _IS_LINUX and self._init_proc_stat():
             self.method = "proc_stat"
         if self.method == "psutil":
-            self._psutil = psutil.Process(pid)
+            self._psutil = psutil.Process(self.pid)
 
     def _init_cycles(self) -> bool:
         try:
@@ -147,7 +128,8 @@ def clock_selfcheck(seconds: float = 2.0, tolerance: float = 0.05, probe=Process
     процесс гарантированно убит и дожат `wait()` к возврату.
     """
     code = f"import time\nt = time.perf_counter()\nwhile time.perf_counter() - t < {seconds + 5}:\n    pass\n"
-    child = subprocess.Popen([sys.executable, "-c", code])
+    # Базовый интерпретатор, не venv-редиректор: зонд меряет pid, который ему дали.
+    child = subprocess.Popen([getattr(sys, "_base_executable", sys.executable), "-c", code])
     reader = None
     try:
         time.sleep(0.3)  # прогрев: старт интерпретатора не должен попасть в окно

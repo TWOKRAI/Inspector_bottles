@@ -26,6 +26,19 @@ def _require(container: dict, key: str) -> None:
         raise RuntimeError(f"в базе {_BASE} у камеры нет ключа {key!r}")
 
 
+def _relocate_db_paths(node, out_dir: Path) -> None:
+    """Каждый ключ `db_path` -> файл с тем же именем в каталоге кейса (не в меряемое дерево)."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "db_path" and isinstance(value, str):
+                node[key] = str(out_dir / Path(value).name)
+            else:
+                _relocate_db_paths(value, out_dir)
+    elif isinstance(node, list):
+        for item in node:
+            _relocate_db_paths(item, out_dir)
+
+
 def render_recipe(height: int, fps: int, out_dir: Path) -> Path:
     if height not in _RESOLUTION:
         raise ValueError(f"высота {height} не поддерживается: {sorted(_RESOLUTION)}")
@@ -36,6 +49,7 @@ def render_recipe(height: int, fps: int, out_dir: Path) -> Path:
         _require(container, key)
     plugin["resolution_width"], plugin["resolution_height"] = width, height
     proc["source_target_fps"] = fps
+    _relocate_db_paths(recipe, Path(out_dir))
 
     out = Path(out_dir) / f"stand_{height}_{fps}.yaml"
     out.write_text(yaml.safe_dump(recipe, allow_unicode=True, sort_keys=False), encoding="utf-8")

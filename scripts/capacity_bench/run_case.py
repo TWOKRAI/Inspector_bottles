@@ -64,6 +64,10 @@ def _pids(drv, names: list[str], find_payload) -> dict[str, int]:
     return pids
 
 
+def _fields(drv, name: str) -> dict:
+    return fields.extract_fields(_dig(drv.introspect_telemetry(name), "levels") or {})
+
+
 def run(recipe: str, secs: float, port: int) -> dict:
     from backend_ctl.harness import BackendHarness, _find_payload
 
@@ -77,6 +81,8 @@ def run(recipe: str, secs: float, port: int) -> dict:
             pids = _pids(drv, names, _find_payload)
             probes = {name: cpu_probe.ProcessCpu(pid) for name, pid in pids.items()}
             c0 = {name: p.read_seconds() for name, p in probes.items()}
+            # Снимок счётчиков в тот же момент, что и c0: shm/pacer_late копятся с запуска процесса.
+            before = {name: _fields(drv, name) for name in probes}
             t0 = time.perf_counter()
             hz_polled: dict[str, list[float]] = {name: [] for name in probes}
             while time.perf_counter() - t0 < secs:
@@ -91,14 +97,14 @@ def run(recipe: str, secs: float, port: int) -> dict:
 
             processes = {}
             for name in probes:
-                levels = _dig(drv.introspect_telemetry(name), "levels") or {}
-                got = fields.extract_fields(levels)
-                if got["hz"] is None and hz_polled[name]:
+                got = fields.window(before[name], _fields(drv, name))
+                if hz_polled[name]:  # медиана опросов за окно, а не один снимок в конце
                     got["hz"] = statistics.median(hz_polled[name])
                 processes[name] = {"ext_cores": round((c1[name] - c0[name]) / dt, 3), **got}
             return {
                 "processes": processes,
                 "total_ext_cores": round(sum(p["ext_cores"] for p in processes.values()), 3),
+                "missing": [n for n in names if n not in probes],
             }
         finally:
             for p in probes.values():

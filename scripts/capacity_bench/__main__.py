@@ -18,6 +18,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import psutil
+
 from . import matrix
 from .cpu_probe import clock_selfcheck
 from .passport import collect_passport
@@ -69,20 +71,62 @@ def _parse_pytest_summary(text: str) -> tuple[int, int]:
     return 0, 0
 
 
-def run_tests(repo: Path) -> dict:
-    t0 = time.perf_counter()
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", *TEST_DIRS, "-q"],
-        cwd=repo,
-        env=dict(os.environ, PYTHONPATH=str(repo)),
-        capture_output=True,
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Потомки первыми (снимок дерева, пока родитель жив), потом сам процесс."""
+    with contextlib.suppress(psutil.Error):
+        for child in psutil.Process(proc.pid).children(recursive=True):
+            with contextlib.suppress(psutil.Error):
+                child.kill()
+    proc.kill()
+
+
+def _run_tree(cmd: list, *, cwd: Path, env: dict, timeout: float) -> tuple[int, str, str]:
+    """(rc, stdout, stderr). Таймаут и Ctrl+C убивают ВСЁ дерево, не только прямого потомка.
+
+    `subprocess.run` по таймауту убивает лишь прямой процесс (на Windows-venv — редиректор), а стенд
+    внутри живёт дальше и держит унаследованный pipe: `communicate()` после kill ждёт его выхода.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=TESTS_TIMEOUT_S,
     )
-    passed, failed = _parse_pytest_summary(proc.stdout)
-    return {"rc": proc.returncode, "passed": passed, "failed": failed, "duration_s": round(time.perf_counter() - t0, 1)}
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except BaseException:  # TimeoutExpired и KeyboardInterrupt: одинаково добить дерево и пробросить
+        _kill_tree(proc)
+        with contextlib.suppress(subprocess.TimeoutExpired):  # сирота вне дерева не должен повесить нас снова
+            proc.communicate(timeout=10)
+        raise
+    return proc.returncode, out, err
+
+
+def run_tests(repo: Path) -> dict:
+    """Итог pytest; сбой запуска (в т.ч. таймаут) не отменяет замер: rc=None и `error`."""
+    t0 = time.perf_counter()
+    try:
+        rc, out, _ = _run_tree(
+            [sys.executable, "-m", "pytest", *TEST_DIRS, "-q"],
+            cwd=repo,
+            env=dict(os.environ, PYTHONPATH=str(repo)),
+            timeout=TESTS_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 — замер важнее тестов; ошибка уходит в отчёт
+        duration = round(time.perf_counter() - t0, 1)
+        return {
+            "rc": None,
+            "passed": None,
+            "failed": None,
+            "duration_s": duration,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    passed, failed = _parse_pytest_summary(out)
+    return {"rc": rc, "passed": passed, "failed": failed, "duration_s": round(time.perf_counter() - t0, 1)}
 
 
 def run_one(tree: Path, label: str, height: int, fps: int, secs: int, port: int) -> dict:
@@ -90,7 +134,7 @@ def run_one(tree: Path, label: str, height: int, fps: int, secs: int, port: int)
     with tempfile.TemporaryDirectory(prefix="bench_case_", ignore_cleanup_errors=True) as tmp:
         recipe = render_recipe(height, fps, Path(tmp))
         out = Path(tmp) / "case.json"
-        proc = subprocess.run(
+        rc, _, stderr = _run_tree(
             [
                 sys.executable,
                 str(PKG_DIR / "run_case.py"),
@@ -105,14 +149,10 @@ def run_one(tree: Path, label: str, height: int, fps: int, secs: int, port: int)
             ],
             cwd=tree,
             env=dict(os.environ, PYTHONPATH=str(tree), PYTHONIOENCODING="utf-8"),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=secs + CASE_TIMEOUT_MARGIN_S,
         )
-        if proc.returncode != 0:
-            raise RuntimeError(f"run_case rc={proc.returncode} ({label}, {height}p@{fps}): {proc.stderr[-1500:]}")
+        if rc != 0:
+            raise RuntimeError(f"run_case rc={rc} ({label}, {height}p@{fps}): {stderr[-1500:]}")
         data = json.loads(out.read_text(encoding="utf-8"))
     return {"height": height, "fps": fps, "secs": secs, "sha": _git_head(tree), "tree": label, **data}
 
@@ -134,9 +174,12 @@ def _baseline_worktree(sha: str | None):
         try:
             yield tree
         finally:
-            subprocess.run(
+            proc = subprocess.run(
                 ["git", "-C", str(REPO), "worktree", "remove", "--force", str(tree)], capture_output=True, timeout=120
             )
+            if proc.returncode != 0:  # иначе в .git/worktrees остаётся запись о каталоге, которого уже нет
+                print(f"capacity_bench: не удалось убрать worktree {tree}: rc={proc.returncode}", file=sys.stderr)
+                subprocess.run(["git", "-C", str(REPO), "worktree", "prune"], capture_output=True, timeout=120)
 
 
 def run_matrix(profile: str, baseline: str | None, port: int, cases_out: list) -> None:

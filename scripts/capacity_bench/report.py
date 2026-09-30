@@ -16,9 +16,9 @@ _COLUMNS = (
     ("hz", "Гц"),
     ("queue_wait_ms", "queue_wait_ms"),
     ("transport_ms", "transport_ms"),
-    ("pacer_late", "pacer_late"),
+    ("pacer_late", "pacer_late за окно"),
     ("plugin_ms", "plugin_ms"),
-    ("shm", "shm"),
+    ("shm", "shm за окно"),
 )
 
 
@@ -64,6 +64,8 @@ def _tests_md(tests: dict | None) -> list[str]:
         f"rc={tests.get('rc')}, passed={tests.get('passed')}, failed={tests.get('failed')}, "
         f"{_fmt(tests.get('duration_s'), 1)} с.",
     ]
+    if tests.get("error"):
+        lines += ["", f"ошибка запуска тестов: {tests['error']}"]
     if tests.get("rc") != 0:
         lines += ["", f"**{TESTS_FAILED}** — замер ниже снят на непроверенной сборке."]
     return lines
@@ -74,13 +76,16 @@ def _case_md(case: dict) -> list[str]:
     lines = [
         head,
         "",
-        f"sha `{case.get('sha')}`, сумма ядер снаружи: {_fmt(case.get('total_ext_cores'))}",
+        f"sha `{case.get('sha')}`, сумма ядер снаружи по измеренным процессам рецепта: "
+        f"{_fmt(case.get('total_ext_cores'))}",
         "",
         "| процесс | " + " | ".join(title for _, title in _COLUMNS) + " |",
         "|---|" + "---|" * len(_COLUMNS),
     ]
     for name, fields in (case.get("processes") or {}).items():
         lines.append(f"| {name} | " + " | ".join(_fmt(fields.get(key)) for key, _ in _COLUMNS) + " |")
+    if case.get("missing"):
+        lines += ["", f"не измерены: {', '.join(case['missing'])}"]
     return lines
 
 

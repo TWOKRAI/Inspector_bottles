@@ -41,7 +41,8 @@ def _report():
 
 @contextlib.contextmanager
 def _child(code: str):
-    proc = subprocess.Popen([sys.executable, "-c", code])
+    # Базовый интерпретатор: зонд меряет pid, который ему дали, а не потомка venv-редиректора.
+    proc = subprocess.Popen([getattr(sys, "_base_executable", sys.executable), "-c", code])
     try:
         yield proc
     finally:

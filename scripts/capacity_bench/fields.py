@@ -38,3 +38,25 @@ def extract_fields(levels: dict) -> dict:
         "pacer_late": sum(pacer_late) if pacer_late else None,
         "shm": {k: shm[k] for k in SHM_KEYS if k in shm} or None,
     }
+
+
+# Накопительные с запуска процесса; `bytes_mapped` — размер отображения (текущее значение).
+_DELTA_SHM = ("bytes_written", "bytes_read", "stale_drops", "torn_reads")
+
+
+def _delta(before, after):
+    return after - before if _num(before) and _num(after) else None
+
+
+def window(before: dict, after: dict) -> dict:
+    """Поля окна замера: счётчики — `after - before`, остальное — из `after` как есть.
+
+    Оба аргумента — выход `extract_fields` (снимок на t0 и снимок в конце). Счётчик, которого нет
+    хотя бы на одной стороне, даёт None: молча брать абсолют нельзя — он копился с запуска процесса.
+    """
+    out = dict(after)
+    out["pacer_late"] = _delta(before.get("pacer_late"), after.get("pacer_late"))
+    shm_after, shm_before = after.get("shm"), _dict(before.get("shm"))
+    if isinstance(shm_after, dict):
+        out["shm"] = {k: _delta(shm_before.get(k), v) if k in _DELTA_SHM else v for k, v in shm_after.items()}
+    return out
