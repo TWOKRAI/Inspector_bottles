@@ -2,10 +2,14 @@ BlobDetectorPlugin — детекция цветных контуров по HSV
 
 Category: processing
 Inputs:   frame (image/bgr) — BGR-кадр
+          mask (image/gray, опционально) — готовая маска из цепочки (2D uint8, размер как у кадра)
 Outputs:  frame (image/bgr) — кадр (опционально с контурами), detections (list[dict]), mask (image/gray)
 
 Описание:
-  Применяет HSV-маску к BGR-кадру, находит контуры через cv2.findContours,
+  Берёт готовую маску из item["mask"], если она годится (2D uint8, тот же HxW, что кадр),
+  иначе строит свою по HSV-порогам. HSV-пороги детектора действуют только без маски.
+  Маска пришла, но не годится → одно предупреждение в лог и свои HSV-пороги.
+  Находит контуры через cv2.findContours,
   фильтрует по площади (min_area/max_area), возвращает detections с bbox/center/area.
   Опционально рисует контуры на кадре.
 

@@ -148,9 +148,12 @@ def test_pnt_t1_blob_detector_raw_frame_without_mask_finds_six():
 
 
 def test_pnt_t1_draw_contours_does_not_modify_input_frame():
-    """draw_contours: true — входной массив кадра после process не изменён (рисуем на копии)."""
-    params = _processor_params("inspection_full.yaml")["blob_detector"]
-    assert params["draw_contours"] is True
+    """draw_contours: true — входной массив кадра после process не изменён (рисуем на копии).
+
+    В эталонных топологиях рисование выключено (его делает render_overlay), поэтому
+    включаем его здесь явно: свойство «рисуем на копии» нужно при любом значении в YAML.
+    """
+    params = {**_processor_params("inspection_full.yaml")["blob_detector"], "draw_contours": True}
     frame = _make_frame()
     before = frame.copy()
 
