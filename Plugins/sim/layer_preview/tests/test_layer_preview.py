@@ -401,6 +401,7 @@ def test_plugin_is_side_effect_control_without_ports() -> None:
         "preset.preview": "cmd_preset_preview",
         "preset.layout": "cmd_preset_layout",
         "preset.sprites": "cmd_preset_sprites",
+        "preset.sprite_put": "cmd_preset_sprite_put",
     }
 
 

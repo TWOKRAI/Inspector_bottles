@@ -118,6 +118,52 @@ class ImageStub {
   }
 }
 
+// Task 1.3h-d (страница): заглушки загрузки файла. `FileReader.readAsDataURL(file)` асинхронно (setTimeout 0)
+// отдаёт `result = file._dataUrl` и зовёт onload / addEventListener("load") / onloadend; `<input type=file>`
+// (id presetSpriteFile) держит `files` (список с item()) и модель браузера, принимаемую НА ВЕРУ: запись
+// `value = ""` очищает `files`, запись непустой строки — InvalidStateError (как в браузере); объекты File,
+// уже взятые из списка, остаются годными (FileReader читает `file._dataUrl`, а не input).
+class FileReaderStub {
+  constructor() {
+    this.result = null;
+    this.error = null;
+    this.readyState = 0;
+    this.onload = null;
+    this.onerror = null;
+    this.onloadend = null;
+    this._l = {};
+  }
+  addEventListener(t, f) { (this._l[t] ||= []).push(f); }
+  removeEventListener() {}
+  readAsDataURL(file) {
+    setTimeout(() => {
+      this.result = file && file._dataUrl !== undefined ? file._dataUrl : null;
+      this.readyState = 2;
+      for (const t of ["load", "loadend"]) {
+        const ev = { type: t, target: this };
+        const h = this["on" + t];
+        if (typeof h === "function") h.call(this, ev);
+        (this._l[t] || []).forEach((f) => f.call(this, ev));
+      }
+    }, 0);
+  }
+}
+
+function attachFileInput(node) {
+  const mkList = (arr) => Object.assign(arr, { item: (i) => arr[i] || null });
+  node.files = mkList([]);
+  node._pickedValue = "";
+  Object.defineProperty(node, "value", {
+    get() { return node._pickedValue; },
+    set(x) {
+      if (String(x) !== "") throw new Error("InvalidStateError: file input value can only be set to the empty string");
+      node._pickedValue = "";
+      node.files = mkList([]);
+    },
+  });
+  node._pick = (file) => { node._pickedValue = "C:\\fakepath\\" + file.name; node.files = mkList([file]); };
+}
+
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
 // Программный 2D-контекст: drawImage (translate/scale/rotate/setTransform, ближайший
@@ -400,12 +446,13 @@ function makeEl(id, tag) {
     },
   });
   if (tag === "select") attachSelect(node);
+  if (id === "presetSpriteFile") attachFileInput(node);
   if (tag === "option") attachOption(node);
   return node;
 }
 const els = {};
 function el(id) {
-  return (els[id] ||= makeEl(id, id === "presetCanvas" ? "canvas" : id === "presetSpriteSelect" ? "select" : ""));
+  return (els[id] ||= makeEl(id, id === "presetCanvas" ? "canvas" : id === "presetSpriteSelect" ? "select" : id === "presetSpriteFile" ? "input" : ""));
 }
 const win = {
   h: {},
@@ -447,13 +494,27 @@ doc.activeElement = doc.body;
 // Журнал fetch страницы: маршрут, метод, тело, HTTP-статус (Task 1.3h-b: сколько раз
 // страница просила раскладку, с каким телом, каким кодом ответил плагин).
 const fetchLog = [];
+// Task 1.3h-d: подмена ответа по пути (шаг stub_fetch) и учёт незавершённых fetch (шаг settle).
+const fetchStubs = {};
+let pendingFetches = 0;
+let lastFetchAt = 0;
 const ctxFetch = (p, o) => {
   const entry = { path: p, method: (o && o.method) || "GET", body: o && o.body ? String(o.body) : null, status: null };
   fetchLog.push(entry);
+  lastFetchAt = Date.now();
+  if (fetchStubs[p]) {
+    const st = fetchStubs[p];
+    entry.status = st.status;
+    entry.stubbed = true;
+    return Promise.resolve(new Response(JSON.stringify(st.json), { status: st.status, headers: { "Content-Type": "application/json" } }));
+  }
+  pendingFetches++;
   return fetch(base + p, o).then((r) => {
     entry.status = r.status;
+    pendingFetches--;
+    lastFetchAt = Date.now();
     return r;
-  });
+  }, (e) => { pendingFetches--; throw e; });
 };
 const ctx = {
   document: doc,
@@ -466,6 +527,7 @@ const ctx = {
   requestAnimationFrame: (f) => setTimeout(() => f(Date.now()), 16),
   cancelAnimationFrame: (id) => clearTimeout(id),
   Image: ImageStub,
+  FileReader: FileReaderStub,
   atob: (v) => Buffer.from(String(v), "base64").toString("binary"),
   btoa: (v) => Buffer.from(String(v), "binary").toString("base64"),
   parseFloat,
@@ -805,6 +867,22 @@ async function run() {
           s.fire("change");
           await sleep(10);
         }
+      } else if (st.op === "stub_fetch") {
+        // Task 1.3h-d: ответ на fetch(st.path) подменяется (st.status, st.json) — сервер не зовётся.
+        fetchStubs[st.path] = { status: st.status || 200, json: st.json };
+      } else if (st.op === "choose_file") {
+        // Task 1.3h-d: пользователь выбрал файл в <input type=file>: files = [{name}], value = "C:\fakepath\name",
+        // FileReader отдаст st.dataUrl; затем `change` (как браузер).
+        const inp = el(st.id);
+        inp._pick({ name: st.name, size: st.size !== undefined ? st.size : String(st.dataUrl || "").length, type: "image/png", _dataUrl: st.dataUrl });
+        inp.fire("change");
+        await sleep(10);
+      } else if (st.op === "settle") {
+        // Task 1.3h-d: ждём, пока не будет незавершённых fetch и 150 мс тишины (цепочка чтение -> POST -> список).
+        const deadline = Date.now() + 4000;
+        await sleep(60);
+        while (Date.now() < deadline && (pendingFetches > 0 || Date.now() - lastFetchAt < 150)) await sleep(20);
+        await sleep(60);
       } else if (st.op === "press_button") { el(st.id).fire("click"); await sleep(30); }
       else if (st.op === "set_field") {
         el(st.id).value = String(st.value);

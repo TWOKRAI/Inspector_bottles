@@ -137,12 +137,15 @@ _SCENE_COMMAND_BY_PATH = {
 #: тот же потолок 256 КБ (общие 4 КБ резали бы пресет из нескольких слоёв с диапазонами).
 #: ``preset.sprites`` (Task 1.3h-c) — список PNG каталога спрайтов, тело ``{}`` (общий
 #: потолок 4 КБ), тот же процесс ``layers`` и таймаут 5.0 с, что у ``layout``.
+#: ``preset.sprite_put`` (Task 1.3h-d) — загрузка PNG из браузера в base64: потолок 9 МиБ тела (6 МиБ PNG ×4/3 +
+#: обвязка), 413 до чтения тела; тот же процесс ``layers`` и таймаут 5.0 с (запись + ``fsync`` + проверка RGBA).
 #: Тело форвардится КАК ЕСТЬ — та же дисциплина, что у двух таблиц выше.
 _PRESET_ROUTES: dict[str, tuple[str, str, int | None, float | None]] = {
     "/api/preset/commit": ("preset.commit", "_scene_client", 262144, None),
     "/api/preset/preview": ("preset.preview", "_layers_client", 262144, 5.0),
     "/api/preset/layout": ("preset.layout", "_layers_client", 262144, 5.0),
     "/api/preset/sprites": ("preset.sprites", "_layers_client", 4096, 5.0),
+    "/api/preset/sprite_put": ("preset.sprite_put", "_layers_client", 9_437_184, 5.0),
 }
 
 #: Код ответа команды (``code``) -> HTTP-статус (Находка 2, Task 1.2h). Ответ
@@ -568,6 +571,7 @@ _PRESET_SECTION = """<h2>Редактор слоёв</h2>
 </div>
 <div class="row">
   <select id="presetSpriteSelect"></select>
+  <input type="file" id="presetSpriteFile" accept="image/png">
   <button id="btnLayerAdd">Добавить слой</button>
   <button id="btnLayerSprite">Заменить картинку</button>
   <button id="btnLayerDelete">Удалить</button>
@@ -1385,6 +1389,38 @@ document.getElementById("btnLayerDelete").onclick = presetDeleteLayer;
 document.getElementById("btnLayerUp").onclick = function () { presetMoveLayer(1); };
 document.getElementById("btnLayerDown").onclick = function () { presetMoveLayer(-1); };
 document.getElementById("btnSpritesRefresh").onclick = function () { presetLoadSprites(); };
+
+// Загрузка PNG (1.3h-d): файл -> base64 без префикса data:...;base64, -> sprite_put -> слой из ответа.
+// Успех — только `ok` И `file`; всё прочее — текст в presetSpritesError, слой не добавляется.
+function presetUploadFail(text) { presetShowSpritesError("загрузка не удалась: " + text); }
+var presetSpriteFileInput = document.getElementById("presetSpriteFile");
+presetSpriteFileInput.addEventListener("change", function () {
+  var file = presetSpriteFileInput.files && presetSpriteFileInput.files[0];
+  if (!file) return;
+  function done() {
+    presetSpriteFileInput.value = ""; // тот же файл можно выбрать снова
+    if (presetCanvas.focus) presetCanvas.focus({ preventScroll: true }); // не оставлять фокус на контроле (F1 1.3h-c)
+  }
+  // Потолок сервера (6 МиБ): больше — не читаем и не шлём.
+  if (file.size > 6291456) { presetUploadFail("файл больше 6 МиБ"); done(); return; }
+  var reader = new FileReader();
+  reader.onerror = function () { presetUploadFail("файл не прочитан"); done(); };
+  reader.onload = function () {
+    var url = String(reader.result);
+    var png_b64 = url.slice(url.indexOf(",") + 1);
+    post("/api/preset/sprite_put", { name: file.name, png_b64: png_b64 }).then(function (r) {
+      if (r && r.status === "ok" && r.file) {
+        presetLoadSprites();
+        presetAddLayer(r.file);
+      } else {
+        presetUploadFail((r && (r.message || r.error || r.code)) || "ответ без файла");
+      }
+    }).catch(function (err) {
+      presetUploadFail(String(err));
+    }).then(done);
+  };
+  reader.readAsDataURL(file);
+});
 
 // После кнопки редактора фокус — канве (1.3h-c-fix, F1; родня B1): браузер оставляет его на нажатой кнопке,
 // и пробел (панорама) или Enter нажали бы её ещё раз — лишний слой, лишний сдвиг, повторная запись «Сохранить».
