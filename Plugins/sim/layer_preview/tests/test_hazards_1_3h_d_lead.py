@@ -81,3 +81,30 @@ def test_g_rejected_bytes_never_reach_the_decoder(world, monkeypatch: pytest.Mon
     assert res.get("code") == "invalid", res
     assert reached == [], f"декодер вызван на отвергнутых байтах: {reached}"
     assert not any(sprites_dir.iterdir()) or all(p.suffix != ".uploading" for p in sprites_dir.iterdir())
+
+
+def test_h_sixteen_bit_png_is_invalid_it_would_never_build_a_layer(world) -> None:
+    """Ревью 1.3h-d ит.2: RGBA 16 бит сохранялся с `ok`, а `preset.layout` на нём падал (`uint16`) — файл лежит,
+    слоя нет, повтор под тем же именем даёт 409. Отказ — до диска."""
+    import cv2
+    import numpy as np
+
+    plugin, sprites_dir = world
+    rgba16 = np.full((8, 8, 4), 30000, np.uint16)
+    png = cv2.imencode(".png", rgba16)[1].tobytes()
+    assert png[24] == 16, "контроль: закодирован 16-битный PNG"
+    res = _put(plugin, "deep.png", base64.b64encode(png).decode("ascii"))
+    assert res.get("code") == "invalid", res
+    assert not (sprites_dir / "deep.png").exists()
+
+
+def test_i_exactly_the_pixel_cap_is_accepted(world) -> None:
+    """Граница `SPRITE_PUT_MAX_PIXELS` = 4096² включительно (ревью ит.2: `>` → `>=` оставался зелёным)."""
+    import cv2
+    import numpy as np
+
+    plugin, sprites_dir = world
+    png = cv2.imencode(".png", np.zeros((4096, 4096, 4), np.uint8))[1].tobytes()
+    res = _put(plugin, "cap.png", base64.b64encode(png).decode("ascii"))
+    assert res.get("status") == "ok", res
+    assert (sprites_dir / "cap.png").read_bytes() == png

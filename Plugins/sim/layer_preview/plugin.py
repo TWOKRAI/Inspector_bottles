@@ -85,7 +85,7 @@ from Services.line_sim.core.preview import PREVIEW_DEFAULT_SEEDS, PREVIEW_DEFAUL
 
 SPRITES_DIR_DEFAULT = "data/line_sim"  # каталог PNG по умолчанию (от корня репо; `data/` в .gitignore)
 SPRITE_PUT_MAX_BYTES = 6_291_456  # потолок PNG ``preset.sprite_put`` после base64 (маршрут режет тело на 9 МиБ)
-SPRITE_PUT_MAX_PIXELS = 16_777_216  # 4096x4096 = 64 МиБ RGBA после декода; реальные спрайты ~656x850
+SPRITE_PUT_MAX_PIXELS = 16_777_216  # 4096x4096: пик ~130 МиБ (декод 64 МиБ + копия cvtColor); спрайты ~656x850
 SPRITE_PUT_NAME_MAX = 128
 SPRITES_MAX_FILES = 500  # потолок списка ``preset.sprites``; лишнее отрезается с ``truncated: true``
 
@@ -221,6 +221,8 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         width, height = struct.unpack(">II", raw[16:24])
         if width == 0 or height == 0 or width * height > SPRITE_PUT_MAX_PIXELS:
             return _invalid(f"preset.sprite_put: размер {width}x{height} вне 1..{SPRITE_PUT_MAX_PIXELS} пикселей")
+        if raw[24] == 16:  # декодер отдал бы uint16, слой (RGBA uint8) из файла не построится — ревью 1.3h-d ит.2
+            return _invalid("preset.sprite_put: 16 бит на канал не поддерживается — нужен 8-битный RGBA PNG")
         sprites_dir, error_reply = self._checked_sprites_dir("preset.sprite_put")
         if error_reply is not None:
             return error_reply
