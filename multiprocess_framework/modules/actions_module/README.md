@@ -39,6 +39,10 @@ from multiprocess_framework.modules.actions_module.persistence import (
 )
 ```
 
+`SnapshotHistory[T]`: `record(..., memo_before=None, memo_after=None)` хранит рядом со снимками
+непрозрачные памятки вида UI (например, выбор узлов); `take_undo_with_memo()` /
+`take_redo_with_memo()` возвращают `(снимок, memo)`; `take_undo()`/`take_redo()` — только снимок (ADR ACT-003).
+
 ## Расширение в приложении
 
 ```python

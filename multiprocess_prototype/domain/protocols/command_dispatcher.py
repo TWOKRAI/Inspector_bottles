@@ -56,11 +56,14 @@ class CommandDispatcher(Protocol):
         *,
         coalesce_key: str | None = None,
         undoable: bool = True,
+        view_state: Callable[[], object] | None = None,
     ) -> list[ProjectEvent]:
         """Выполнить команду. Возвращает список эмитированных событий.
 
         coalesce_key — группировка undo-записей (серия slider-тиков → одна запись).
         undoable — False для команд вне undo-истории (например, переключение рецепта).
+        view_state — необязательная фабрика memo вида UI (выбор узлов): снимается до и после
+        команды, хранится в записи истории и возвращается слушателям при undo/redo.
         """
         ...
 

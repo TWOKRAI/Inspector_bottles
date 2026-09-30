@@ -79,6 +79,14 @@ class PipelineMutations:
         self._layout = layout
         self._report = report
 
+    def _dispatch(self, cmd: Any, **kw: Any) -> Any:
+        """Единая точка dispatch команд вкладки: прикладывает выбор узлов к записи истории.
+
+        view_state=host.capture_selection_memo -- dispatcher снимет memo выбора до и после
+        команды; undo/redo вернут выбор той операции (Task 1.1, plans/undo-restores-selection.md).
+        """
+        return self._services.commands.dispatch(cmd, view_state=self._host.capture_selection_memo, **kw)
+
     # ------------------------------------------------------------------ #
     #  Inspector-driven правки                                            #
     # ------------------------------------------------------------------ #
@@ -119,7 +127,7 @@ class PipelineMutations:
         )
         try:
             with self._host.block_signals():
-                self._services.commands.dispatch(
+                self._dispatch(
                     cmd,
                     coalesce_key=f"set_config:{process_name}:{field_name}",
                 )
@@ -222,11 +230,11 @@ class PipelineMutations:
         coalesce_key = f"rebind-display:{old_display_id}->{new_display_id}"
         for src in sources:
             try:
-                self._services.commands.dispatch(
+                self._dispatch(
                     UnbindDisplay(node_id=src, display_id=old_display_id),
                     coalesce_key=coalesce_key,
                 )
-                self._services.commands.dispatch(
+                self._dispatch(
                     BindDisplay(node_id=src, display_id=new_display_id),
                     coalesce_key=coalesce_key,
                 )
@@ -260,7 +268,7 @@ class PipelineMutations:
         coalesce_key = f"move-node:{from_process}->{to_process}"
         for _ in range(plugin_count):
             try:
-                self._services.commands.dispatch(
+                self._dispatch(
                     MovePlugin(from_process=from_process, from_index=0, to_process=to_process),
                     coalesce_key=coalesce_key,
                 )
@@ -342,7 +350,7 @@ class PipelineMutations:
             plugins=(PluginInstance(plugin_name=plugin_name, category=category),),
         )
         try:
-            self._services.commands.dispatch(cmd)
+            self._dispatch(cmd)
         except DomainError as exc:
             logger.error("AddProcess отклонён: %s", exc)
             self._report(f"Не удалось добавить процесс: {exc}")
@@ -420,7 +428,7 @@ class PipelineMutations:
                         continue
                     cmd = UnbindDisplay(node_id=di.get("node_id", ""), display_id=node_id)
                     try:
-                        self._services.commands.dispatch(cmd)
+                        self._dispatch(cmd)
                         dispatched = True
                     except DomainError as exc:
                         logger.warning("UnbindDisplay отклонён: %s", exc)
@@ -439,7 +447,7 @@ class PipelineMutations:
                 gui_positions.pop(node_id, None)
                 cmd = self._delete_command_for(node_id)
                 try:
-                    self._services.commands.dispatch(cmd)
+                    self._dispatch(cmd)
                     dispatched = True
                 except DomainError as exc:
                     logger.error("%s отклонён: %s", type(cmd).__name__, exc)
@@ -488,7 +496,7 @@ class PipelineMutations:
                 return False
             cmd = BindDisplay(node_id=source, display_id=display_id)
             try:
-                self._services.commands.dispatch(cmd)
+                self._dispatch(cmd)
             except DomainError as exc:
                 logger.warning("BindDisplay отклонён: %s", exc)
                 self._report(f"Не удалось привязать дисплей: {exc}")
@@ -518,7 +526,7 @@ class PipelineMutations:
 
         cmd = ConnectWire(source=source, target=target)
         try:
-            self._services.commands.dispatch(cmd)
+            self._dispatch(cmd)
         except DomainError as exc:
             # Цикл или dangling process → graceful return False, repo не мутирован
             logger.warning("ConnectWire отклонён: %s", exc)
@@ -546,7 +554,7 @@ class PipelineMutations:
         else:
             cmd = DisconnectWire(source=source, target=target)
         try:
-            self._services.commands.dispatch(cmd)
+            self._dispatch(cmd)
         except DomainError as exc:
             logger.warning("%s отклонён: %s", type(cmd).__name__, exc)
             self._report(f"Не удалось удалить связь: {exc}")

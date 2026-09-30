@@ -69,6 +69,10 @@ class PipelineHost(Protocol):
         """Снять node_id выделенных нод ДО scene reload."""
         ...
 
+    def capture_selection_memo(self) -> object:
+        """Снять выбор узлов как непрозрачный memo для записи истории (PipelineSelectionMemo)."""
+        ...
+
     def restore_selection(self, node_ids: list[str]) -> None:
         """Восстановить выделение ПОСЛЕ reload."""
         ...

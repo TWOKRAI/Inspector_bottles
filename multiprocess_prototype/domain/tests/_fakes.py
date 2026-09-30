@@ -420,6 +420,7 @@ class FakeCommandDispatcher:
         *,
         coalesce_key: str | None = None,
         undoable: bool = True,
+        view_state: Callable[[], object] | None = None,
     ) -> list[ProjectEvent]:
         self.last_command = command
         self.dispatched.append(command)
