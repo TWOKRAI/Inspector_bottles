@@ -98,7 +98,11 @@ def test_t45b_hazard_levels_snapshot_does_not_advance_cpu_window() -> None:
     """Два опроса между тиками не сдвигают дельту: следующий тик видит ВСЮ нагрузку окна.
 
     Если бы снимок звал ``sample()``, окно сбросилось бы на опросе, и тик 2 измерил бы
-    почти пустой хвост после него (~0 ядер), а не 0.3 с нагрузки.
+    только хвост после него. Хвост обязан быть ПРОСТОЕМ (``sleep``): сразу после опроса
+    меряющий поток сам занят, и крошечное окно давало ~1 ядро — первая редакция теста
+    стояла без простоя и выживала под инъекцией «опрос зовёт sample()» (инъекция лида
+    B6, 2026-09-30). С простоем: честно ≈ 0.5 ядра (0.3 с нагрузки / 0.6 с окна),
+    со сдвинутым окном ≈ 0.
     """
     proxy = _Proxy()
     hb = ProcessHeartbeat(_Services(proxy))
@@ -108,9 +112,10 @@ def test_t45b_hazard_levels_snapshot_does_not_advance_cpu_window() -> None:
     snap2 = hb.current_levels_snapshot()
     assert snap1 is None or "cpu" not in snap1.get("state", {}), "до второго тика показания нет"
     assert snap2 is None or "cpu" not in snap2.get("state", {})
+    time.sleep(0.3)  # простой: окно, сдвинутое опросом, видело бы только его
     hb._publish_telemetry_to_tree({}, None)  # тик 2
     cores = proxy.merged[-1][1]["state"]["cpu"]["cores"]
-    assert cores > 0.5, f"опрос съел окно тика: cores={cores}"
+    assert 0.3 < cores < 0.75, f"опрос съел окно тика или окно посчитано не так: cores={cores}"
     # и после тика опрос отдаёт ровно то же число (push ⊆ poll), не пересчитывая его
     assert hb.current_levels_snapshot()["state"]["cpu"] == {"cores": cores}
 
