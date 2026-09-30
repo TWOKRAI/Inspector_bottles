@@ -21,11 +21,13 @@ from __future__ import annotations
 import numpy as np
 
 import cv2
+import pytest
 from pathlib import Path
 
 from Services.line_sim.tools.make_seamless_texture import (
     _period_multiple_crop,
     find_period,
+    main,
     make_seamless_tile,
 )
 
@@ -155,3 +157,34 @@ def test_noise_has_no_period_because_of_ncc_threshold():
     best = _best_gradient_ncc_peak(noise)
     assert 0.0 < best < 0.2, f"гард: лучший максимум NCC на шуме {best:.3f} должен быть в (0, 0.2), иначе тест пустой"
     assert find_period(noise) is None
+
+
+def test_cli_force_period_flag_reaches_make_seamless_tile(tmp_path, capsys):
+    """Флаг `--force-period` в `main` реально доходит до `make_seamless_tile` (не подменён на False)."""
+    out = tmp_path / "t.png"
+    assert main([str(FIXTURE), "--out", str(out), "--force-period"]) == 0
+    assert "method=period period_px=205" in capsys.readouterr().out
+    assert cv2.imread(str(out), cv2.IMREAD_COLOR).shape == (484, 205, 3)
+
+    out2 = tmp_path / "t2.png"
+    assert main([str(FIXTURE), "--out", str(out2)]) == 0
+    assert "method=mirror" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.int32, np.int64, np.float32, np.float64])
+def test_find_period_accepts_any_numeric_dtype_bgr(dtype):
+    """Pre обещает любой числовой dtype: cvtColor float64/int32/int64 не берёт — нужно привести до конвертации."""
+    img = _bgr(_rows_pattern(50, 250)).astype(dtype)
+    assert find_period(img) == 50
+
+
+def test_note_says_fallback_was_tried_when_it_also_fails():
+    """Период найден, но ни обычный кроп, ни резерв k·P шов не проходят — note об этом говорит."""
+    x = np.arange(400)
+    col = (np.linspace(0, 200, 400) + 8 * np.sin(2 * np.pi * x / 50)).clip(0, 255).astype(np.uint8)  # рампа рвёт шов
+    img = _bgr(np.tile(col[None, :], (16, 1)))
+    with_flag = make_seamless_tile(img, force_period=True)
+    assert with_flag.method == "mirror"
+    assert with_flag.note.startswith("период найден (50 px)")
+    assert "резерв k·P тоже не прошёл шов" in with_flag.note
+    assert "резерв" not in make_seamless_tile(img).note  # без флага резерв не пробовался

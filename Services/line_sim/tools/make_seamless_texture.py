@@ -17,8 +17,8 @@ k * период (k от W // период вниз до 1) с наилучши�
 Резерв опт-ин, потому что автоматически он ошибается: на виньетированной синусоиде
 (H6 из 3_6, дрейф средней яркости >= 20 %) он выбирает кроп с проходящим швом, но
 видимым скачком огибающей яркости; у реальной цепи при неровном свете дрейф средней
-яркости тайла против соседнего периода 16-22 % — на уровне H6, автоматически их не
-различить. Без флага — как раньше.
+яркости тайла против соседнего периода 16-22 % (мера: |mean(тайл) − mean(соседний
+период)| / mean(фото)) — на уровне H6, автоматически их не различить. Без флага — как раньше.
 (2) Зеркало:
 `[image | image[:, ::-1]]` — стыкует буквально одинаковые столбцы, шов = 0 всегда;
 кросс-фейда нет (на зеркальной склейке он ничего не чинит, только размывает). Выбранный
@@ -40,7 +40,7 @@ import numpy as np
 
 from Services.dataset_gen.core.catalog import imread_unicode, imwrite_unicode
 
-#: Минимальный лаг автокорреляции — короче реального периода звена ленты не бывает,
+#: Минимальный лаг корреляции — короче реального периода звена ленты не бывает,
 #: и совсем маленькие лаги совпадают с локальным шумом соседних пикселей.
 _MIN_LAG = 4
 
@@ -94,12 +94,16 @@ def find_period(image: np.ndarray) -> int | None:
     width = image.shape[1]
     if width // 2 < _MIN_LAG:
         return None
-    gray = image if image.ndim == 2 or image.shape[2] == 1 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = np.ascontiguousarray(gray.reshape(image.shape[0], width).astype(np.float32))
+    # cvtColor не берёт float64/int32/int64, но берёт float32 — приводим до конвертации.
+    gray = image.astype(np.float32)
+    if gray.ndim == 3 and gray.shape[2] != 1:
+        gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
+    gray = np.ascontiguousarray(gray.reshape(image.shape[0], width))
     gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
 
     max_lag = width // 2
     ncc = np.zeros(max_lag + 2)  # индексы лагов 0..max_lag + 1; нужны соседи k-1 и k+1
+    # ponytail: O(W·H·W/2) — 0.84 с на 598x484, ~23 с на 2000x1500; FFT-корреляция, если станет мешать
     for k in range(_MIN_LAG - 1, max_lag + 2):
         a = gx[:, : width - k].ravel().astype(np.float64)
         b = gx[:, k:].ravel().astype(np.float64)
@@ -187,7 +191,8 @@ def make_seamless_tile(image: np.ndarray, *, force_period: bool = False) -> Seam
     ширину >= W/2 по 1D-профилю; на реальном фото цепи ни один его кроп не проходит шов
     (лучший +3.82 при start=6, c=320), хотя период найден верно. Критерий шва в резерве тот же.
     Опт-ин, а не автомат: на виньетированной синусоиде (H6 из 3_6) дрейф средней яркости
-    >= 20 %, а на реальной цепи при неровном свете 16-22 % — автоматически не различить, и
+    >= 20 %, а на реальной цепи при неровном свете 16-22 % (мера: |mean(тайл) − mean(соседний
+    период)| / mean(фото); другой мерой 14-21 %, вывод тот же) — автоматически не различить, и
     автомат выдал бы на H6 «period» с видимым скачком огибающей. Без флага (по умолчанию)
     поведение прежнее: `_best_crop`, затем зеркало.
     """
@@ -199,16 +204,18 @@ def make_seamless_tile(image: np.ndarray, *, force_period: bool = False) -> Seam
         inner_diff, seam_diff = _seam_and_inner(candidate)
         if seam_diff <= inner_diff:
             return SeamlessResult(candidate, "period", period, seam_diff, inner_diff)
+        tried = ""
         if force_period:
             fallback = _period_multiple_crop(image, period)
             if fallback is not None:
                 return fallback
+            tried = "; резерв k·P тоже не прошёл шов"
         note = (
             f"период найден ({period} px), но шов ({seam_diff:.2f}) хуже "
-            f"внутренней разницы тайла ({inner_diff:.2f}) — откат на зеркальную склейку"
+            f"внутренней разницы тайла ({inner_diff:.2f}){tried} — откат на зеркальную склейку"
         )
     else:
-        note = "период не найден автокорреляцией — зеркальная склейка"
+        note = "период не найден (NCC градиента ниже порога или нет максимума) — зеркальная склейка"
 
     mirror = np.concatenate([image, image[:, ::-1]], axis=1)
     inner_diff, seam_diff = _seam_and_inner(mirror)
