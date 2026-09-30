@@ -120,7 +120,10 @@ def test_a1_rename_undo_keeps_selection(start_pult) -> None:
 def test_a2_undo_does_not_move_foreign_layer(start_pult) -> None:
     """(а2) Репро ревью 2: в форме letter -> `x`, disk -> `letter` (два `change` с всплытием), клик по disk на канве,
     «Отмена» -> выбран восстановленный disk; стрелка вправо двигает ТОЛЬКО его: смещение disk 0 -> 1, смещение соседа
-    (слой 1, прежде `letter`) остаётся 60 (баг: 60 -> 61 — стрелка ушла на слой с занятым именем)."""
+    (слой 1, прежде `letter`) остаётся 60 (баг: 60 -> 61 — стрелка ушла на слой с занятым именем).
+
+    Правка R-5 ит.3 (лид, по ревью ит.2 находка 2): после двух переименований добавлен `_SETTLE` перед кликом —
+    клик должен попасть в раскладку с новыми именами; без ожидания это гонка с её ответом (флейк 1 из 5)."""
     stand = _stand(start_pult, _INITIAL)
     out = _run_canvas(
         stand.port,
@@ -129,6 +132,7 @@ def test_a2_undo_does_not_move_foreign_layer(start_pult) -> None:
             _SETTLE,
             *_rename(1, "x"),
             *_rename(0, "letter"),
+            _SETTLE,
             _click(_AT_DISK),
             _UNDO,
             _SETTLE,
