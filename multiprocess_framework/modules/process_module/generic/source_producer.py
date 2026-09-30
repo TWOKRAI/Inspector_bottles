@@ -100,6 +100,7 @@ class SourceProducer:
         p50/p99/count по этапам capture/send (HP-1, Ф7 G.1).
         """
         metrics = self._cycle_metrics.get_cycle_metrics()
+        metrics["pacer_late"] = self._pacer.late
         if perf_probes.enabled():
             metrics["perf_probes"] = self._perf.get_stats()
         return metrics

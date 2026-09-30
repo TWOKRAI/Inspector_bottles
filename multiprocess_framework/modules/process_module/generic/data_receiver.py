@@ -21,6 +21,16 @@ from ...router_module.middleware.frame_shm_middleware import SHM_DROPPED_KEY, Fr
 from .collector_registry import ItemCollector
 
 
+class _StampedBatch(list):
+    """Коллекция items с меткой постановки в очередь (``perf_counter``).
+
+    Метку читает PipelineExecutor, чтобы посчитать ожидание в chain_queue. Остаётся
+    обычным ``list`` для всех потребителей.
+    """
+
+    __slots__ = ("enq_ts",)
+
+
 class DataReceiver:
     """Приём data-plane IPC → item → ItemCollector → chain_queue.
 
@@ -183,6 +193,10 @@ class DataReceiver:
         очереди: downstream consumer уже остановлен, ждать бессмысленно. Item
         дропается (единственный случай) чтобы воркер мог выйти gracefully.
         """
+        # Метка ставится один раз, до всех путей put: ожидание из-за backpressure
+        # считается ожиданием исполнителя намеренно.
+        items = _StampedBatch(items)
+        items.enq_ts = time.perf_counter()
         if self._max_lag_items and self._bound_lag(items):
             return
         try:

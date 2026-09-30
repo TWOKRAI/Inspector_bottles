@@ -121,6 +121,11 @@ class PipelineExecutor:
         # get_cycle_metrics через target.__self__ и FPS/latency не доедут до GUI.
         self._chain_queue: queue.Queue | None = None
 
+        # Task 4.5a: EMA ожидания коллекции в chain_queue (мс); пишет только поток
+        # исполнителя. Первый замер задаёт EMA, дальше сглаживание 0.1.
+        self._queue_wait_ms = 0.0
+        self._queue_wait_seen = False
+
         # Ф7 G.5.d-2 (В3): накопитель release-тикетов zero-copy займов по владельцам.
         # Флаш пачкой по порогу (амортизация границы; release НЕ на per-frame пути) +
         # на остановке ворки (не потерять хвост). Порог = боевая глубина кольца (≈coll).
@@ -148,7 +153,9 @@ class PipelineExecutor:
         heartbeat → ProcessMonitor.state.fps/latency_ms → GUI. Отражает только
         итерации с реальной обработкой batch'а (см. CycleMetricsRecorder в __init__).
         """
-        return self._cycle_metrics.get_cycle_metrics()
+        metrics = self._cycle_metrics.get_cycle_metrics()
+        metrics["queue_wait_ms"] = round(self._queue_wait_ms, 2)
+        return metrics
 
     def run_loop(
         self,
@@ -180,6 +187,16 @@ class PipelineExecutor:
                 if self._pending_release_count:
                     self._flush_releases()
                 continue
+
+            # Task 4.5a: сколько коллекция прождала в очереди (метку ставит DataReceiver).
+            enq = getattr(items, "enq_ts", None)
+            if enq is not None:
+                wait_ms = (time.perf_counter() - enq) * 1000.0
+                if self._queue_wait_seen:
+                    self._queue_wait_ms += 0.1 * (wait_ms - self._queue_wait_ms)
+                else:
+                    self._queue_wait_ms = wait_ms
+                    self._queue_wait_seen = True
 
             # Тайминг полезной итерации (chain-обработка + send), без учёта
             # ожидания на пустой очереди. perf_counter (не monotonic): работа

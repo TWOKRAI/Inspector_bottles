@@ -39,13 +39,14 @@ class TestGatedMetricsLocation:
 
         assert gated_metrics is NEW_LOCATION
 
-    def test_the_framework_declares_exactly_the_five_metrics(self) -> None:
+    def test_the_framework_declares_exactly_the_seven_metrics(self) -> None:
         """Состав каталога — литералом, а не выводом из самого каталога.
 
         Ожидание, посчитанное через ``declared_metrics()``, согласилось бы с
         любым ответом, включая пустой; поэтому здесь перечень написан руками.
         Пять имён — те же, что были в снятом кортеже ``GATED_METRICS``: Ф8.1
-        меняла ВЛАДЕНИЕ каталогом, а не его содержимое.
+        меняла ВЛАДЕНИЕ каталогом, а не его содержимое. Task 4.5a добавила
+        ``queue_wait_ms`` и ``pacer_late`` — теперь семь.
 
         **Объектив сменён: раньше срез реестра по владельцу, теперь — места
         объявления в исходниках** (Ф1 «порт наблюдений»). Прежняя редакция звала
@@ -82,8 +83,16 @@ class TestGatedMetricsLocation:
             for name in pattern.findall(path.read_text(encoding="utf-8")):
                 declared_in_sources.add(name)
                 sites += 1
-        assert sites == 5, f"мест объявления метрик во фреймворке стало {sites}, а не 5"
-        assert declared_in_sources == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+        assert sites == 7, f"мест объявления метрик во фреймворке стало {sites}, а не 7"
+        assert declared_in_sources == {
+            "fps",
+            "latency_ms",
+            "effective_hz",
+            "cycle_duration_ms",
+            "shm",
+            "queue_wait_ms",
+            "pacer_late",
+        }
         # Каталог гейта — надмножество: обходя его, гейт видит и прикладные имена.
         assert declared_in_sources.issubset(set(gated_metrics()))
 
