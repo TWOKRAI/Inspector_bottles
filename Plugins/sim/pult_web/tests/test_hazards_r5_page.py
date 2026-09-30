@@ -2,9 +2,9 @@
 """Hazard-тесты автора R-5 (а) — выбор слоя принадлежит СТРОКЕ формы.
 
 Автор пишет их про внутренние места механизма, которые слепой tester (`test_acceptance_r5_page.py`) не видел:
-выбор хранится парой «имя + строка», строка захватывается в «Отмене» ДО извлечения из стека, а решение «что считать
-идентичностью слоя — строку или имя» зависит от того, была ли форма правлена (`presetDirty`) до нажатия. Ломаются
-эти места тихо: подсветка/стрелка уходят на ЧУЖОЙ слой, ошибок в консоли нет.
+выбор хранится парой «имя + строка»; действия (стрелка, «Удалить», «Выше») идут по СТРОКЕ, а не по поиску имени, а
+запись стека «Отмена» помнит род правки (`reorders`) и строку выбора до операции над составом. Ломаются эти места
+тихо: подсветка/стрелка уходят на ЧУЖОЙ слой, ошибок в консоли нет.
 
 Идиома та же, что в приёмке: харнесс `page_offline.mjs`, только наблюдаемое (поля формы, подсветка, тела запросов).
 Никакого `pytest.mark.timeout` (плагин не установлен) — каждый блокирующий вызов харнесса ограничен его дедлайнами.
@@ -15,10 +15,12 @@
 from __future__ import annotations
 
 import json
+import time
 
 from Plugins.sim.pult_web.tests.test_acceptance_1_3h_c_layers import (  # noqa: F401  (start_pult — фикстура)
     _A,
     _AT_DISK,
+    _AT_LETTER,
     _C,
     _CLASS,
     _INITIAL,
@@ -90,13 +92,15 @@ def test_h1_up_then_rename_other_layer_then_undo_keeps_moved_layer_selected(star
     )
 
 
-def test_h2_delete_selected_then_undo_leaves_nothing_selected(start_pult) -> None:
-    """(h2) Удалить выбранный disk, «Отмена» -> слой вернулся, но выбора НЕТ (подсвеченных строк нет), стрелка —
-    no-op (ни одно смещение не меняется).
+def test_h2_delete_selected_then_undo_selects_the_restored_layer_again(start_pult) -> None:
+    """(h2) Удалить выбранный disk, «Отмена» -> слой вернулся И выбран снова (строка 0), стрелка двигает именно его.
 
-    Что ломает: «Отмена» после операции над составом (форма синхронна, `presetDirty=false`) выбирает по строке
-    `presetSelectedRow`, оставшейся от до-удаления (0) — вернувшийся disk оказался бы выбранным «по воскрешению»;
-    либо не сбрасывает `presetSelectedRow` при удалении, и подсветка/стрелка живут на пустом месте."""
+    СМЫСЛ ИЗМЕНЁН ПО ДИЗАЙНУ (итерация 2 R-5, решение лида): в итерации 1 тест требовал «выбора нет»; теперь запись
+    «Отмена» операции над составом помнит строку выбора ДО операции, и «Отмена» её возвращает — выбор, каким он был
+    прямо перед удалением. Чужого слоя это не задевает: строка берётся из записи, а не ищется по имени.
+
+    Что ломает: «Отмена» не восстанавливает строку из записи (выбор остаётся пустым) либо берёт её из
+    `presetSelectedRow` уже после `pop`; либо «Удалить» не сбрасывает выбор (контроль `deleted.selected == []`)."""
     stand = _stand(start_pult, _INITIAL)
     out = _run_canvas(
         stand.port,
@@ -120,31 +124,24 @@ def test_h2_delete_selected_then_undo_leaves_nothing_selected(start_pult) -> Non
     assert [ly["name"] for ly in _eff(s["deleted"])] == ["letter", "cap"], f"предусловие: {_eff(s['deleted'])!r}"
     assert s["deleted"]["selected"] == [], f"после удаления выбирать нечего: {s['deleted']['selected']!r}"
     assert _eff(s["undone"]) == _INITIAL, f"«Отмена» вернула слой: {_eff(s['undone'])!r}"
-    assert s["undone"]["selected"] == [], f"выбор не воскресает: {s['undone']['selected']!r}"
-    assert (
-        s["arrow"]["fields"]
-        == s["undone"]["fields"]
-        == {
-            "layer0_offset_x": "0",
-            "layer1_offset_x": "60",
-            "layer2_offset_x": "-70",
-        }
-    ), f"стрелка без выбора не двигает ничего: {s['undone']['fields']!r} -> {s['arrow']['fields']!r}"
+    assert s["undone"]["selected"] == ["disk"], f"вернувшийся слой выбран снова: {s['undone']['selected']!r}"
+    assert s["undone"]["fields"] == {"layer0_offset_x": "0", "layer1_offset_x": "60", "layer2_offset_x": "-70"}
+    assert s["arrow"]["fields"] == {"layer0_offset_x": "1", "layer1_offset_x": "60", "layer2_offset_x": "-70"}, (
+        f"стрелка должна сдвинуть вернувшийся disk (строка 0): {s['undone']['fields']!r} -> {s['arrow']['fields']!r}"
+    )
 
 
-def test_h3_rename_then_add_then_undo_twice_selects_nothing_and_moves_nothing(start_pult) -> None:
-    """(h3) Выбран disk; переименован в disk2 (выбор идёт за именем); «Добавить» a.png (операция над составом при
-    ПРАВЛЕННОЙ форме -> выбран новый слой `a`); «Отмена» дважды -> слои как были (disk, letter, cap), выбора НЕТ,
-    стрелка — no-op.
+def test_h3_rename_then_add_then_undo_twice_restores_the_selection_row(start_pult) -> None:
+    """(h3) Выбран disk (строка 0); переименован в disk2; «Добавить» a.png (выбран новый слой `a`, строка 3);
+    «Отмена» №1 -> слои до «Добавить» (disk2, letter, cap), выбрана строка 0 (как до операции); «Отмена» №2 (правка
+    полей — строки те же, текущая строка 0 остаётся) -> слои как были (disk, letter, cap), выбран disk, и стрелка
+    двигает именно его, а не соседа.
 
-    Отличие от брифа лида: там ожидалось «выбор на исходной строке под исходным именем». По дизайну этого не будет:
-    после «Добавить» выбран `a`, первая «Отмена» его убирает (F2, страж а4), вторая ничего не выбирает — выбор
-    молча не воскресает. Ловим здесь именно чужой/призрачный выбор.
+    СМЫСЛ ИЗМЕНЁН ПО ДИЗАЙНУ (итерация 2 R-5, тот же дизайн, что у h2): в итерации 1 после «Отмен» ожидалось
+    «выбора нет»; теперь запись «Добавить» помнит строку 0, а правка полей строку не трогает.
 
-    Что ломает: «Отмена» №1 берёт строку 0 из `presetSelectedRow` (форма была правлена ДО «Добавить», но
-    `presetDirty` после операции над составом уже false — ветка «по строке» не должна срабатывать); либо
-    `presetSelected` остаётся на `disk2`/`a`, и после второй «Отмены» подсветка попадает на слой, получивший это
-    имя случайно."""
+    Что ломает: восстановление по имени (после №2 имя `disk2` исчезло бы — выбор потерян) либо строка из
+    `presetSelectedRow`, не обновлённого записью (после №1 остался бы выбранным призрачный индекс 3)."""
     stand = _stand(start_pult, _INITIAL)
     out = _run_canvas(
         stand.port,
@@ -173,18 +170,13 @@ def test_h3_rename_then_add_then_undo_twice_selects_nothing_and_moves_nothing(st
     s = out["snaps"]
     assert [ly["name"] for ly in _eff(s["added"])] == ["disk2", "letter", "cap", "a"], _eff(s["added"])
     assert s["added"]["selected"] == ["a"], f"контроль: выбран добавленный слой: {s['added']['selected']!r}"
-    assert s["undo1"]["selected"] == [], f"добавленного слоя нет, выбирать нечего: {s['undo1']['selected']!r}"
+    assert [ly["name"] for ly in _eff(s["undo1"])] == ["disk2", "letter", "cap"], _eff(s["undo1"])
+    assert s["undo1"]["selected"] == ["disk2"], f"выбор как до «Добавить» (строка 0): {s['undo1']['selected']!r}"
     assert _eff(s["undo2"]) == _INITIAL, f"вторая «Отмена» вернула исходные слои: {_eff(s['undo2'])!r}"
-    assert s["undo2"]["selected"] == [], f"ничего не выбрано: {s['undo2']['selected']!r}"
-    assert (
-        s["arrow"]["fields"]
-        == s["undo2"]["fields"]
-        == {
-            "layer0_offset_x": "0",
-            "layer1_offset_x": "60",
-            "layer2_offset_x": "-70",
-        }
-    ), f"стрелка без выбора не двигает ничего: {s['undo2']['fields']!r} -> {s['arrow']['fields']!r}"
+    assert s["undo2"]["selected"] == ["disk"], f"выбран disk (строка 0): {s['undo2']['selected']!r}"
+    assert s["arrow"]["fields"] == {"layer0_offset_x": "1", "layer1_offset_x": "60", "layer2_offset_x": "-70"}, (
+        f"стрелка должна сдвинуть disk (строка 0): {s['undo2']['fields']!r} -> {s['arrow']['fields']!r}"
+    )
 
 
 def test_h4_rename_then_up_then_undo_twice_never_selects_a_foreign_layer(start_pult) -> None:
@@ -279,3 +271,283 @@ def test_h5_stale_network_failure_does_not_overwrite_fresh_list(start_pult) -> N
         assert "список спрайтов не получен" not in snap["spritesError"], (
             f"[{key}] запоздавший обрыв показан поверх свежего списка: {snap['spritesError']!r}"
         )
+
+
+_OFF3 = {"layer0_offset_x": "0", "layer1_offset_x": "60", "layer2_offset_x": "-70"}
+
+
+def _offs(a: str, b: str, c: str) -> dict:
+    return {"layer0_offset_x": a, "layer1_offset_x": b, "layer2_offset_x": c}
+
+
+def test_h6_swap_arrow_undo_twice_moves_the_clicked_layer(start_pult) -> None:
+    """(h6) Выбран letter (строка 1); имена строк 0/1 обменяны на x/disk; стрелка сдвигает строку 1 (60 -> 61);
+    «Отмена» (стрелка), «Отмена» (правка имён) -> имена исходные, выбран по-прежнему letter (строка 1), и стрелка
+    двигает letter: 60 -> 61, а диск (строка 0, чьё имя занял бы поиск по имени `disk`) остаётся на 0.
+
+    Что ломает: эвристика «правлена ли форма» (`presetDirty`) — после стрелки форма синхронна, запись правки
+    ПОЛЕЙ разбирается веткой «по имени», и имя `disk` находит ЧУЖОЙ слой (строку 0)."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_LETTER),
+            *_rename(0, "x"),
+            *_rename(1, "disk"),
+            _SETTLE,
+            _KEY_RIGHT,
+            _SETTLE,
+            _snap("arrow", _FIELDS),
+            _UNDO,
+            _SETTLE,
+            _UNDO,
+            _SETTLE,
+            _snap("undo2", _FIELDS),
+            _KEY_RIGHT,
+            _SETTLE,
+            _snap("arrow2", _FIELDS),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["arrow"]["fields"] == _offs("0", "61", "-70"), f"предусловие: стрелка двигает строку 1: {s['arrow']!r}"
+    assert _eff(s["undo2"]) == _INITIAL, f"обе «Отмены» вернули исходные слои: {_eff(s['undo2'])!r}"
+    assert s["undo2"]["selected"] == ["letter"], f"выбран должен остаться letter: {s['undo2']['selected']!r}"
+    assert s["arrow2"]["fields"] == _offs("0", "61", "-70"), (
+        f"стрелка должна сдвинуть letter (строка 1), не disk: {s['undo2']['fields']!r} -> {s['arrow2']['fields']!r}"
+    )
+
+
+def test_h7_swap_save_undo_moves_the_clicked_layer(start_pult) -> None:
+    """(h7) Выбран letter (строка 1); имена строк 0/1 обменяны на x/disk; «Сохранить» (форма синхронна); «Отмена» ->
+    исходные имена, выбран letter (строка 1), стрелка двигает letter (60 -> 61), disk остаётся на 0.
+
+    Что ломает: после «Сохранить» `presetDirty=false`, и «Отмена» правки полей уходит в ветку «по имени»: `disk`
+    находится в восстановленном состоянии на строке 0."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_LETTER),
+            *_rename(0, "x"),
+            *_rename(1, "disk"),
+            _SETTLE,
+            _btn("btnPresetSave"),
+            _SETTLE,
+            _UNDO,
+            _SETTLE,
+            _snap("undo", _FIELDS),
+            _KEY_RIGHT,
+            _SETTLE,
+            _snap("arrow", _FIELDS),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert len(stand.commits()) == 1, f"предусловие: «Сохранить» отправил ровно один commit: {stand.commits()!r}"
+    assert _eff(s["undo"]) == _INITIAL, f"«Отмена» вернула исходные имена: {_eff(s['undo'])!r}"
+    assert s["undo"]["selected"] == ["letter"], f"выбран должен остаться letter: {s['undo']['selected']!r}"
+    assert s["arrow"]["fields"] == _offs("0", "61", "-70"), (
+        f"стрелка должна сдвинуть letter (строка 1): {s['undo']['fields']!r} -> {s['arrow']['fields']!r}"
+    )
+
+
+def test_h8_rename_save_undo_keeps_selection(start_pult) -> None:
+    """(h8) Выбран disk (строка 0); переименован в disk2; «Сохранить»; «Отмена» -> имя вернулось, выбран disk
+    (подсвечена строка 0), стрелка двигает его.
+
+    Что ломает: «Отмена» после «Сохранить» ищет выбранное имя `disk2` в восстановленном состоянии — его там нет,
+    выбор молча сбрасывается."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_DISK),
+            *_rename(0, "disk2"),
+            _SETTLE,
+            _btn("btnPresetSave"),
+            _SETTLE,
+            _UNDO,
+            _SETTLE,
+            _snap("undo", _FIELDS),
+            _KEY_RIGHT,
+            _SETTLE,
+            _snap("arrow", _FIELDS),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert _eff(s["undo"]) == _INITIAL, f"«Отмена» вернула имя: {_eff(s['undo'])!r}"
+    assert s["undo"]["selected"] == ["disk"], f"выбор должен пережить «Отмену»: {s['undo']['selected']!r}"
+    assert s["arrow"]["fields"] == _offs("1", "60", "-70"), (
+        f"стрелка должна сдвинуть disk: {s['undo']['fields']!r} -> {s['arrow']['fields']!r}"
+    )
+
+
+def test_h9_rename_drag_undo_twice_keeps_selection(start_pult) -> None:
+    """(h9) Выбран disk; переименован в disk2; перетащен мышью (+10 px); «Отмена» (перетаскивание) -> выбран disk2;
+    «Отмена» (переименование) -> имя disk, и выбор СОХРАНЁН (подсвечена строка 0).
+
+    Что ломает: после перетаскивания форма синхронна, «Отмена» переименования ищет имя `disk2` в состоянии, где
+    его уже нет, — выбор теряется."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_DISK),
+            *_rename(0, "disk2"),
+            _SETTLE,
+            {"op": "drag", "from": _AT_DISK, "to": [10, 0]},
+            _SETTLE,
+            _snap("dragged", _FIELDS),
+            _UNDO,
+            _SETTLE,
+            _snap("undo1", _FIELDS),
+            _UNDO,
+            _SETTLE,
+            _snap("undo2", _FIELDS),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["dragged"]["fields"] == _offs("10", "60", "-70"), f"предусловие: диск перетащен: {s['dragged']!r}"
+    assert s["undo1"]["fields"] == _OFF3 and s["undo1"]["selected"] == ["disk2"], (
+        f"«Отмена» перетаскивания: {s['undo1']!r}"
+    )
+    assert _eff(s["undo2"]) == _INITIAL, f"«Отмена» переименования вернула имя: {_eff(s['undo2'])!r}"
+    assert s["undo2"]["selected"] == ["disk"], f"выбор должен пережить обе «Отмены»: {s['undo2']['selected']!r}"
+
+
+def test_h10_duplicate_name_delete_removes_the_selected_row(start_pult) -> None:
+    """(h10) Выбран letter (строка 1); в форме ему дали имя `disk` (дубль имени строки 0); «Удалить» -> удалена
+    строка 1 (бывший letter), остались настоящий disk и cap.
+
+    Что ломает: «Удалить» ищет индекс по имени и берёт ПЕРВОЕ совпадение — строку 0 (настоящий disk) —
+    остались бы letter и cap. Форма допускает дубли (правка полей не проверяет), бэкенд отклонит их лишь при
+    сохранении."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_LETTER),
+            *_rename(1, "disk"),
+            _SETTLE,
+            _btn("btnLayerDelete"),
+            _SETTLE,
+            _snap("deleted"),
+        ],
+    )
+    _assert_ran(out)
+    form = _eff(out["snaps"]["deleted"])
+    assert [ly["name"] for ly in form] == ["disk", "cap"], f"после удаления должны остаться disk и cap: {form!r}"
+    assert [ly["sprite_source"] for ly in form] == ["sprites/disk.png", "sprites/cap.png"], (
+        f"удалён не тот слой (остался letter вместо disk?): {[ly['sprite_source'] for ly in form]!r}"
+    )
+    assert out["snaps"]["deleted"]["selected"] == [], f"после удаления выбирать нечего: {out['snaps']['deleted']!r}"
+
+
+def test_h11_duplicate_name_arrow_moves_the_selected_row(start_pult) -> None:
+    """(h11) Выбран letter (строка 1); ему дали имя `disk` (дубль строки 0); стрелка вправо -> сдвигается строка 1
+    (60 -> 61), строка 0 остаётся на 0, подсвечена ровно одна строка.
+
+    Что ломает: стрелка ищет слой по имени и берёт первое совпадение — сдвинула бы настоящий disk (0 -> 1)."""
+    stand = _stand(start_pult, _INITIAL)
+    out = _run_canvas(
+        stand.port,
+        [
+            _READY,
+            _SETTLE,
+            _click(_AT_LETTER),
+            *_rename(1, "disk"),
+            _SETTLE,
+            _snap("renamed", _FIELDS),
+            _KEY_RIGHT,
+            _SETTLE,
+            _snap("arrow", _FIELDS),
+        ],
+    )
+    _assert_ran(out)
+    s = out["snaps"]
+    assert s["renamed"]["fields"] == _OFF3, f"предусловие: само переименование ничего не двигает: {s['renamed']!r}"
+    assert s["arrow"]["fields"] == _offs("0", "61", "-70"), (
+        f"стрелка должна сдвинуть строку 1: {s['renamed']['fields']!r} -> {s['arrow']['fields']!r}"
+    )
+    assert len(s["arrow"]["selected"]) == 1, f"подсвечена ровно одна строка: {s['arrow']['selected']!r}"
+
+
+_UP_PATH = "../../data/line_sim/up.png"
+_PUT_OK = {"status": "ok", "file": {"path": "up.png", "sprite_source": _UP_PATH}}
+_REFUSAL = {"status": "error", "code": "io_error", "message": "каталога нет"}
+_CHOOSE = {"op": "choose_file", "id": "presetSpriteFile", "name": "up.png", "dataUrl": "data:image/png;base64,QUJD"}
+_PUT = "/api/preset/sprite_put"
+
+
+def test_h12_orphan_upload_when_list_refresh_fails_says_both(start_pult) -> None:
+    """(h12) Пресет не загружен; загрузка PNG прошла (файл сохранён), а обновление списка спрайтов после неё отказало.
+    Текст ошибки содержит ОБА факта: «файл up.png сохранён, слой не добавлен: пресет не загружен» И причину отказа
+    списка («список спрайтов не получен: каталога нет»).
+
+    Что ломает: обновление списка отказало -> старый код всё равно пишет только «сохранён, слой не добавлен» поверх
+    текста отказа, и причина, по которой список пуст/устарел, теряется."""
+    stand = _stand(start_pult, _INITIAL, sprites_replies=[_SPRITES_OK, _REFUSAL])
+    stand.scene.responses["preset.get"] = {"status": "error", "code": "unavailable", "message": "нет"}
+    out = _run_canvas(
+        stand.port,
+        [
+            {"op": "stub_fetch", "path": _PUT, "status": 200, "json": _PUT_OK},
+            {"op": "sleep", "ms": 500},
+            _CHOOSE,
+            {"op": "settle"},
+            _snap("after"),
+        ],
+    )
+    text = out["snaps"]["after"]["spritesError"]
+    assert "файл up.png сохранён, слой не добавлен: пресет не загружен" in text, f"нет факта сохранения: {text!r}"
+    assert "список спрайтов не получен: каталога нет" in text, f"причина отказа списка потеряна: {text!r}"
+
+
+def test_h13_orphan_notice_cleared_when_preset_arrives(start_pult) -> None:
+    """(h13) Загрузка PNG прошла ДО того, как пресет загрузился (`preset.get` двойника отвечает через 1.2 с): виден
+    текст «файл ... сохранён, слой не добавлен: пресет не загружен». Когда пресет пришёл, текст исчезает — он
+    описывал состояние, которого уже нет.
+
+    Что ломает: текст-«сирота» остаётся на странице навсегда, хотя пресет загружен и слои редактируются."""
+    stand = _stand(start_pult, _INITIAL)
+    ok = dict(stand.scene.responses["preset.get"])
+
+    def slow_get(args: dict) -> dict:
+        time.sleep(1.2)
+        return json.loads(json.dumps(ok))
+
+    stand.scene.handlers["preset.get"] = slow_get
+    out = _run_canvas(
+        stand.port,
+        [
+            {"op": "stub_fetch", "path": _PUT, "status": 200, "json": _PUT_OK},
+            {"op": "sleep", "ms": 100},
+            _CHOOSE,
+            {"op": "sleep", "ms": 400},
+            _snap("uploaded"),
+            {"op": "sleep", "ms": 1500},
+            {"op": "settle"},
+            _snap("preset_loaded"),
+        ],
+    )
+    snaps = out["snaps"]
+    assert "сохранён, слой не добавлен" in snaps["uploaded"]["spritesError"], (
+        f"предусловие: текст-сирота показан: {snaps['uploaded']['spritesError']!r}"
+    )
+    assert snaps["preset_loaded"]["rev"] == "рев.: rev-1", f"предусловие: пресет пришёл: {snaps['preset_loaded']!r}"
+    assert snaps["preset_loaded"]["spritesError"] == "", (
+        f"текст остался после прихода пресета: {snaps['preset_loaded']['spritesError']!r}"
+    )
