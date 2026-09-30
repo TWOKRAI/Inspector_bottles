@@ -100,6 +100,18 @@ class CommandDispatcher(Protocol):
         """
         ...
 
+    def add_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        """Подписаться на «вернуть вид UI» при undo/redo (получает memo записи).
+
+        Вызывается после восстановления Project, только если у записи memo не None.
+        Повторная подписка того же cb — no-op.
+        """
+        ...
+
+    def remove_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        """Отписаться от «вернуть вид UI». Отсутствующий cb — no-op (идемпотентно)."""
+        ...
+
 
 __all__ = [
     "CommandDispatcher",

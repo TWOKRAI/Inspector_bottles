@@ -177,13 +177,9 @@ class PipelinePresenter:
         )
 
         # Task 1.1: undo/redo возвращают выбор операции. Слушатель вызывается диспетчером
-        # ПОСЛЕ _restore (TopologyReplaced уже перерисовал scene). getattr -- у fake-диспетчеров
-        # метода может не быть.
-        self._view_restore_registered = False
-        add_listener = getattr(services.commands, "add_view_restore_listener", None)
-        if add_listener is not None:
-            add_listener(self._on_view_restore)
-            self._view_restore_registered = True
+        # ПОСЛЕ _restore (TopologyReplaced уже перерисовал scene). Методы входят в протокол
+        # CommandDispatcher, поэтому регистрируем напрямую.
+        services.commands.add_view_restore_listener(self._on_view_restore)
 
     def dispose(self) -> None:
         """Teardown presenter'а: отписки EventBus + остановка таймера + разрыв ссылок.
@@ -203,11 +199,8 @@ class PipelinePresenter:
         if self._recipe_activated_sub is not None:
             self._recipe_activated_sub.unsubscribe()
             self._recipe_activated_sub = None
-        if self._view_restore_registered:
-            remove_listener = getattr(self._services.commands, "remove_view_restore_listener", None)
-            if remove_listener is not None:
-                remove_listener(self._on_view_restore)
-            self._view_restore_registered = False
+        # remove_* терпит отсутствующий cb -- повторный dispose безопасен.
+        self._services.commands.remove_view_restore_listener(self._on_view_restore)
         # Н-3: дебаунс-таймер авто-персиста — владелец LayoutController (F.7).
         # stop_persist_timer идемпотентен и безопасен в destroyed-пути (singleShot
         # QTimer БЕЗ parent; без stop() отложенный timeout дёрнул бы персист на

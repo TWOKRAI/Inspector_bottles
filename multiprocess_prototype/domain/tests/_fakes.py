@@ -413,6 +413,9 @@ class FakeCommandDispatcher:
     def __init__(self) -> None:
         self.last_command: ProjectCommand | None = None
         self.dispatched: list[ProjectCommand] = []
+        # Реальный список, чтобы тесты могли проверить подписку/отписку слушателя.
+        # Fake не делает undo, поэтому сам слушателей не вызывает.
+        self.view_restore_listeners: list[Callable[[object], None]] = []
 
     def dispatch(
         self,
@@ -447,6 +450,16 @@ class FakeCommandDispatcher:
     def add_change_callback(self, cb: Callable[[], None]) -> None:
         # G.4.4: fake не держит истории → нечего нотифицировать (no-op).
         pass
+
+    def add_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        if cb not in self.view_restore_listeners:
+            self.view_restore_listeners.append(cb)
+
+    def remove_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        try:
+            self.view_restore_listeners.remove(cb)
+        except ValueError:
+            pass
 
 
 _cd: CommandDispatcher = FakeCommandDispatcher()

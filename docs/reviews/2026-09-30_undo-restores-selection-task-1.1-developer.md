@@ -21,3 +21,11 @@
 
 ## Радиус
 `actions_module/tests + prototype/adapters + pipeline/tests + prototype/frontend/tests`: 1223 passed, 3 skipped. Расширенный (+ `domain`): 1344 passed, 5 skipped. ruff check/format — чисто.
+
+## Итерация 1 (правки по ревью: nits 1, 2, 4)
+
+- N1: `add_view_restore_listener` / `remove_view_restore_listener` вынесены в Protocol `CommandDispatcher`; `FakeCommandDispatcher` держит реальный список `view_restore_listeners` (undo в fake не симулируется, слушателей не зовёт). `PipelinePresenter` регистрирует напрямую в `__init__`, снимает напрямую в `dispose()`; `getattr` и флаг `_view_restore_registered` удалены.
+- N2: `test_teardown.py::TestPresenterDispose::test_dispose_unregisters_view_restore_listener_on_real_dispatcher` -- реальные orchestrator-сервисы, слушатель в `_view_restore_listeners` (приватный список, публичного геттера нет), снят после `dispose()`, второй `dispose()` не бросает.
+- N4: `_describe_cb(cb)` в `command_dispatcher.py` (не бросает), `%s` вместо `%r` в `_apply_memo` / `_notify_change`; два hazard-теста с `_HostileCallback` (падают вызов, `__repr__`, `__getattr__`).
+- Своя break-injection (до сдачи лиду): `%r` вместо `_describe_cb` -> 2 N4-теста красные; удалить remove в `dispose()` -> N2-тест красный (3 failed / 19 passed на двух файлах). Файлы восстановлены, `git diff` чистый от инъекций.
+- Радиус: 1569 passed, 8 skipped. ruff check / format --check чисто.

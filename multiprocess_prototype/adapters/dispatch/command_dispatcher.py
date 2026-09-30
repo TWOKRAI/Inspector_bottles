@@ -45,6 +45,18 @@ from .project_holder import ProjectHolder  # re-export для backward-compat
 logger = get_std_logger(__name__)
 
 
+def _describe_cb(cb: object) -> str:
+    """Имя колбэка для лога; никогда не бросает (у объекта-слушателя __repr__ может падать).
+
+    Логирование ошибки слушателя не должно само стать источником исключения:
+    иначе один сломанный слушатель валит undo/redo и остальных слушателей.
+    """
+    try:
+        return getattr(cb, "__qualname__", None) or type(cb).__name__
+    except Exception:
+        return "<callback>"
+
+
 def _fmt_value(value: object) -> str:
     """Компактное строковое представление значения поля для label истории.
 
@@ -315,7 +327,7 @@ class CommandDispatcherOrchestrator:
             try:
                 cb(memo)
             except Exception:
-                logger.exception("Ошибка в view-restore listener %r", cb)
+                logger.exception("Ошибка в view-restore listener %s", _describe_cb(cb))
 
     def _notify_change(self) -> None:
         """Вызвать все change-callback'и. Исключение в одном не валит остальные."""
@@ -323,7 +335,7 @@ class CommandDispatcherOrchestrator:
             try:
                 cb()
             except Exception:
-                logger.exception("Ошибка в change callback %r", cb)
+                logger.exception("Ошибка в change callback %s", _describe_cb(cb))
 
     def _restore(self, project: Project) -> None:
         """Восстановить снимок Project: derived store + holder.

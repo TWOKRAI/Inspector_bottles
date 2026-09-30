@@ -26,6 +26,7 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import Pipe
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.tab import PipelineTab
 
 from ._helpers import make_pipeline_services
+from .test_presenter_domain_dispatch import _make_orchestrator_services
 
 
 # ------------------------------------------------------------------ #
@@ -185,6 +186,25 @@ class TestPresenterDispose:
 
         assert presenter._scene is None
         assert getattr(presenter, "_inspector", None) is None
+
+    def test_dispose_unregisters_view_restore_listener_on_real_dispatcher(self):
+        """Слушатель вида снимается в dispose() с РЕАЛЬНОГО диспетчера (Task 1.1, N2).
+
+        Ломается, если убрать remove_view_restore_listener из dispose(): диспетчер
+        держит сильную ссылку на presenter и зовёт его мёртвую scene после undo.
+        Список слушателей читаем напрямую: публичного геттера у диспетчера нет.
+        """
+        services = _make_orchestrator_services()
+        listeners = services.commands._view_restore_listeners
+        presenter = PipelinePresenter(services)
+
+        assert presenter._on_view_restore in listeners
+
+        presenter.dispose()
+
+        assert presenter._on_view_restore not in listeners
+        presenter.dispose()  # повторный dispose не бросает
+        assert presenter._on_view_restore not in listeners
 
 
 # ===========================================================================

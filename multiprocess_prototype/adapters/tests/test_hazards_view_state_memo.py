@@ -97,6 +97,51 @@ def test_raising_listener_does_not_stop_undo_other_listeners_or_notify() -> None
     assert "second" in log and "change" in log
 
 
+class _HostileCallback:
+    """Слушатель, у которого падают И вызов, И __repr__/__str__/__qualname__ (ревью 1.1, N4)."""
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr broken")
+
+    __str__ = __repr__
+
+    def __getattr__(self, name: str) -> object:
+        raise RuntimeError("getattr broken")
+
+    def __call__(self, *_args: object) -> None:
+        raise RuntimeError("call broken")
+
+
+def test_hostile_listener_repr_does_not_break_undo_or_neighbours() -> None:
+    """Слушатель с падающим __repr__ и вызовом: undo True, соседи и change-callback живы.
+
+    Ломается, если в logger.exception вернуть `%r` от колбэка: форматирование записи
+    бросит из except-блока и undo упадёт вместе с остальными слушателями.
+    """
+    disp, _bus, log = _build()
+    disp.add_view_restore_listener(_HostileCallback())
+    disp.add_view_restore_listener(lambda _m: log.append("second"))
+    disp.add_change_callback(lambda: log.append("change"))
+    disp.dispatch(AddProcess(process_name="a"), view_state=lambda: "memo")
+    log.clear()
+
+    assert disp.undo() is True
+
+    assert "second" in log and "change" in log
+
+
+def test_hostile_change_callback_repr_does_not_break_notify() -> None:
+    """То же для change-callback: сосед после враждебного колбэка всё равно вызван."""
+    disp, _bus, log = _build()
+    disp.add_change_callback(_HostileCallback())
+    disp.add_change_callback(lambda: log.append("change"))
+
+    events = disp.dispatch(AddProcess(process_name="a"))
+
+    assert [type(e) for e in events] == [ProcessAdded]
+    assert "change" in log
+
+
 def test_raising_view_state_does_not_fail_dispatch_and_gives_no_memo() -> None:
     """view_state бросает: dispatch проходит, запись без memo, undo не зовёт слушателей.
 
