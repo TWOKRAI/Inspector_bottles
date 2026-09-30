@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...observability_declarations import declare_metric
+from .cpu_clock import CpuClock
 
 if TYPE_CHECKING:
     pass
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
 # только после первого вызова публикатора, то есть каталог отвечал бы на вопрос
 # «что бывает» уже после того, как по нему приняли решение.
 METRIC_SHM = declare_metric("shm", owner=__name__)
+# Task 4.5b: ядра процесса (по тактам, не по тикам) и EMA времени process()/produce() плагина.
+METRIC_CPU = declare_metric("cpu", owner=__name__)
+METRIC_PLUGIN_MS = declare_metric("plugin_ms", owner=__name__)
 
 
 def _observation_port_of(services: Any) -> Any:
@@ -110,6 +114,13 @@ class ProcessHeartbeat:
         # «сработает ли авто-возврат TTL» — подметальщик живёт на этом такте, и
         # процесс без него срок принимает, но не исполняет.
         self._started: bool = False
+        # Task 4.5b: последнее показание ядер с тика (None — дельты ещё нет). Опрос
+        # (current_levels_snapshot) читает его, но НЕ зовёт sample(): иначе он съел бы окно тика.
+        self.last_cpu_cores: float | None = None
+        # Своё окно дельты у каждого heartbeat (в проде он один на процесс): общий синглтон
+        # process_clock() переносил бы окно между экземплярами и делал «первый тик без cpu»
+        # зависимым от порядка тестов. Синглтон остаётся для introspect.status (seconds_total).
+        self._cpu_clock = CpuClock()
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -1412,6 +1423,18 @@ class ProcessHeartbeat:
                 if shm and any(shm.values()):
                     state["shm"] = shm
 
+        # (3b) Task 4.5b: ядра процесса и время плагинов. sample() зовётся ТОЛЬКО здесь
+        # (раз в тик): дельта считается к прошлому тику, второй вызыватель разбил бы окно.
+        if allowed_metrics is None or "cpu" in allowed_metrics:
+            cores = self._cpu_clock.sample()
+            if cores is not None:
+                self.last_cpu_cores = round(cores, 2)
+                state["cpu"] = {"cores": self.last_cpu_cores}
+        if allowed_metrics is None or "plugin_ms" in allowed_metrics:
+            plugin_ms = self._plugin_ms_section()
+            if plugin_ms:
+                state["plugin_ms"] = plugin_ms
+
         # (4) Снятие здесь не стоит — оно ушло шагом (0) наверх, и это не
         # перестановка ради красоты.
         #
@@ -1439,6 +1462,12 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish телеметрии процесса: {exc}", module="heartbeat")
+
+    def _plugin_ms_section(self) -> dict:
+        """EMA времени плагинов из PluginRunner сервисов, мс с 1 знаком; пусто — раннера/замеров нет."""
+        runner = getattr(self._services, "plugin_runner", None)
+        ms = runner.plugin_ms() if runner else {}
+        return {name: round(value, 1) for name, value in ms.items()}
 
     def current_levels_snapshot(self) -> dict | None:
         """Пакетный снимок текущих УРОВНЕЙ процесса — один вызов, все метрики (Task 3.2).
@@ -1528,6 +1557,17 @@ class ProcessHeartbeat:
             state = dict(plugin_levels)
             state.update(data.get("state") or {})
             data["state"] = state
+
+        # Task 4.5b: cpu/plugin_ms — тот же набор, что у тика (push ⊆ poll). sample() тут НЕ
+        # зовётся: берём ``last_cpu_cores`` тика, чтобы опрос не сдвинул окно дельты.
+        extra: dict = {}
+        if self.last_cpu_cores is not None:
+            extra["cpu"] = {"cores": self.last_cpu_cores}
+        plugin_ms = self._plugin_ms_section()
+        if plugin_ms:
+            extra["plugin_ms"] = plugin_ms
+        if extra:
+            data["state"] = {**(data.get("state") or {}), **extra}
 
         router = getattr(self._services, "router_manager", None)
         if router is not None:

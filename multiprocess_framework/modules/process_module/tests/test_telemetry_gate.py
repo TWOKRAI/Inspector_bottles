@@ -39,7 +39,7 @@ class TestGatedMetricsLocation:
 
         assert gated_metrics is NEW_LOCATION
 
-    def test_the_framework_declares_exactly_the_five_metrics(self) -> None:
+    def test_the_framework_declares_exactly_the_seven_metrics(self) -> None:
         """Состав каталога — литералом, а не выводом из самого каталога.
 
         Ожидание, посчитанное через ``declared_metrics()``, согласилось бы с
@@ -58,10 +58,10 @@ class TestGatedMetricsLocation:
         больше не у кого.
 
         Свойство при этом ЖИВО и звучит буквально так же: «фреймворк объявляет
-        ровно эти пять». Оно проверяется по местам вызова ``declare_metric`` в
-        дереве фреймворка — это тот же вопрос, заданный другому свидетелю, и он
+        ровно эти семь» (пять исходных + cpu, plugin_ms — Task 4.5b). Оно проверяется по местам
+        вызова ``declare_metric`` в дереве фреймворка — это тот же вопрос, заданный другому свидетелю, и он
         к загрязнению реестра прикладными плагинами невосприимчив по построению.
-        Ослабить тест до «пять имён есть среди gated_metrics()» было бы тихой
+        Ослабить тест до «семь имён есть среди gated_metrics()» было бы тихой
         потерей: шестая метрика фреймворка проехала бы молча.
 
         Скан привязан к КОНВЕНЦИИ имени константы (``METRIC_* = declare_metric(...)``),
@@ -82,8 +82,17 @@ class TestGatedMetricsLocation:
             for name in pattern.findall(path.read_text(encoding="utf-8")):
                 declared_in_sources.add(name)
                 sites += 1
-        assert sites == 5, f"мест объявления метрик во фреймворке стало {sites}, а не 5"
-        assert declared_in_sources == {"fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"}
+        assert sites == 7, f"мест объявления метрик во фреймворке стало {sites}, а не 7"
+        # Task 4.5b добавила cpu и plugin_ms к прежним пяти.
+        assert declared_in_sources == {
+            "fps",
+            "latency_ms",
+            "effective_hz",
+            "cycle_duration_ms",
+            "shm",
+            "cpu",
+            "plugin_ms",
+        }
         # Каталог гейта — надмножество: обходя его, гейт видит и прикладные имена.
         assert declared_in_sources.issubset(set(gated_metrics()))
 
