@@ -138,7 +138,7 @@ class _Ring:
         Целевая форма = max(текущая_ёмкость, форма_массива) по каждому измерению —
         блок не сжимается (меньшие массивы читаются по header), но растёт под бо́льшие.
         При переаллокации закрывается ТОЛЬКО слот этого кольца (owner → unlink), новый
-        shm_actual_name едет в каждом сообщении → читатели следуют. Кольца других ключей
+        новое ``name`` едет в ссылке каждого следующего сообщения → читатели следуют. Кольца других ключей
         не трогаются (C7): их слоты и живые view читателей остаются валидными.
         """
         mw = self.mw
@@ -365,7 +365,7 @@ class FrameShmMiddleware:
         # reader — ``frame_torn_reads`` ниже проецирует его счётчик (агрегируется в get_stats).
         # 4.1-fix: тикетов release с неизвестным ``slot`` отброшено (не наше кольцо —
         # не трогаем ничей займ). ponytail: не в get_shm_stats (набор ключей закреплён
-        # и уходит в телеметрию) — добавить туда в 4.2 вместе с форматом ссылки.
+        # и уходит в телеметрию) — добавить туда отдельной задачей, если понадобится.
         self.frame_release_unknown_slot = 0
         # Ф7 G.5.c: post-use re-check zero-copy view — слот перезаписан под живым view.
         # H-задача (Этап 2): счётчик теперь у reader'а (`self._reader.stale_drops`),
@@ -378,6 +378,11 @@ class FrameShmMiddleware:
         # (ячейка переписана/исчезла ДО чтения), но reader этого не видит (open бросает раньше
         # проверки поколения) — считаем здесь и складываем в ``frame_stale_drops``.
         self._stale_unlinked_drops = 0
+        # 4.4d: доначисление executor'а — батч из N выходов дропнут целиком, reader посчитал 1
+        # (``all()`` встал на первой ссылке), остальные N-1 сообщений — сюда (``note_stale_drops``).
+        # Без замка, как ``_stale_unlinked_drops``: потоки (executor / приём) пишут разные счётчики
+        # и читаются только на heartbeat-снимке.
+        self._stale_batch_drops = 0
         # Task 4.1: состояние слота (allocated/created/ёмкость/seqlock/пул) живёт в
         # кольцах per-key (``_Ring``), см. ``_rings`` ниже; плоские ``_allocated``,
         # ``_alloc_shape``, ``_pool``... — read-only делегаты к кольцу ``frame``.
@@ -591,11 +596,25 @@ class FrameShmMiddleware:
     @property
     def frame_stale_drops(self) -> int:
         """СООБЩЕНИЙ отброшено по расхождению поколения (Task 4.4: ячейка переписана ДО чтения;
-        Ф7 G.5.c: view пережил перезапись) — read-only проекция счётчика reader'а (единственный
-        источник + отвязанные сегменты ссылок, 4.4c). Единица — сообщение, не ссылка (4.4c): приём
-        останавливается на первой провалившейся ссылке, executor считает один раз на батч, дверь
-        отправки — на item."""
-        return self._reader.stale_drops + self._stale_unlinked_drops
+        Ф7 G.5.c: view пережил перезапись) — счётчик reader'а + отвязанные сегменты ссылок (4.4c) +
+        доначисление ``note_stale_drops``. Единица — ОДНО отброшенное сообщение на обоих путях
+        (4.4d): приём останавливается на первой провалившейся ссылке, дверь отправки считает item
+        один раз, дроп батча из N выходов executor'ом = 1 (reader) + N-1 (``note_stale_drops``)."""
+        return self._reader.stale_drops + self._stale_unlinked_drops + self._stale_batch_drops
+
+    def note_stale_drops(self, n: int) -> None:
+        """Публичный контракт для ``PipelineExecutor`` (4.4d): доначислить ``n`` отброшенных сообщений
+        в ``frame_stale_drops``. Executor зовёт с ``N - 1`` при дропе батча из N выходов — первое
+        сообщение уже посчитал reader. ``n <= 0`` — no-op."""
+        if n > 0:
+            self._stale_batch_drops += n
+
+    @property
+    def frame_restore_failures(self) -> int:
+        """Ссылок не восстановлено из-за сбоя открытия/битой ссылки (кроме штатного stale по
+        поколению и отвязанного сегмента — те в ``frame_stale_drops``). Read-only проекция счётчика,
+        из-за которого throttled-лог «не восстановлен» видит только каждое 300-е."""
+        return self._restore_fail_count
 
     @property
     def frame_torn_reads(self) -> int:
@@ -712,9 +731,9 @@ class FrameShmMiddleware:
         аллокаций — правило G.9).
 
         Единое ядро для strip_and_write И on_send (Ф7 G.3a): lazy-alloc + realloc при
-        росте кадра + round-robin по слотам. Формат слота (seqlock) применяет
-        MemoryManager по стампу; в ``dest`` едет только флаг ``shm_seqlock`` (для
-        cross-process reader).
+        росте кадра + round-robin по слотам. Заголовок seqlock у слота
+        всегда; в ``dest`` кладётся ссылка ``{owner, slot, idx, gen, name}`` (поколение записи — в
+        ``gen``, отдельных флагов формата нет).
 
         Returns:
             True — записано в SHM, координаты в ``dest``; False — mm отсутствует или
@@ -1002,6 +1021,18 @@ class FrameShmMiddleware:
                 entries.append((key, value))
         return entries
 
+    @staticmethod
+    def _copy_inline_views(item: dict) -> None:
+        """Заменить копиями ndarray верхнего уровня item'а с ``not flags.owndata`` (4.4d): после записи
+        в кольца в item остаются только inline-значения, а те из них, что смотрят в память чужого слота
+        (срез view), роутер сериализует после двери. Вложенные структуры не трогаются (см. остаток в
+        ``strip_and_write``)."""
+        from numpy import ndarray
+
+        for key, value in list(item.items()):
+            if isinstance(value, ndarray) and not value.flags.owndata:
+                item[key] = value.copy()
+
     def strip_and_write(self, item: dict) -> dict:
         """Записать frame и крупные массивы в SHM, убрать из item, добавить shm_ref.
 
@@ -1012,6 +1043,15 @@ class FrameShmMiddleware:
         item и идёт pickle; это ГРОМКО (``frame_pickle_fallbacks``, G.3d). mm=None —
         pickle-by-design, не деградация. Исчерпание займа на любом кольце — drop всего
         сообщения (``_last_loan_exhausted``; дропает send-middleware).
+
+        Дверь отправки (Task 4.4 / 4.4d). Если item несёт ``_shm_views`` (входы — zero-copy view на
+        чужие слоты) и mm есть — ПОСЛЕ записи в кольца и ДО возврата: (1) каждый оставшийся в item
+        ndarray верхнего уровня с ``not flags.owndata`` (малый срез view, 1D/4D, не-native dtype,
+        fallback-массив) заменяется копией — иначе он сериализуется роутером уже ПОСЛЕ двери, а слот
+        источника за это время перезаписывается; (2) ``_inputs_still_valid`` — перезаписанный вход
+        помечает item ``_shm_dropped`` (дроп всех целей, один раз на item). Проверка идёт и в ветке
+        БЕЗ крупных массивов. Известный остаток: массивы во ВЛОЖЕННЫХ list/dict не копируются и
+        дверь их не защищает.
 
         Fan-out (F1, ревью 2026-07-13): producer переиспользует ОДИН item-dict для
         нескольких targets — первый вызов стрипает массивы (→ SHM), второй и далее видят
@@ -1030,6 +1070,7 @@ class FrameShmMiddleware:
             self._bump_boundary_only()
             return item
         entries = self._large_entries(item)
+        has_views = bool(item.get(SHM_VIEWS_KEY))
         if entries and self._mm is not None:
             self._write_item_arrays(item, entries)
             # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
@@ -1037,14 +1078,17 @@ class FrameShmMiddleware:
             self._bump_frame_hops(item)
             if self._last_loan_exhausted:
                 return item  # дропнется целиком; входные ссылки нужны повторной попытке
-            if not self._inputs_still_valid(item):
-                item[SHM_DROPPED_KEY] = True
-                return item
         else:
             # mm=None -> pickle-by-design (массивы остаются в item), не деградация.
             item.pop(SHM_REFS_KEY, None)
             if entries:
                 self._bump_frame_hops(item)
+        if has_views and self._mm is not None:
+            # copy-then-check (4.4d): сначала копии inline-срезов view, потом проверка входов.
+            self._copy_inline_views(item)
+            if not self._inputs_still_valid(item):
+                item[SHM_DROPPED_KEY] = True
+                return item
         # Один хоп: унаследованные ссылки (owner != self) уже заменены своими, локальная мета
         # view с провода снимается.
         item.pop(SHM_VIEWS_KEY, None)
@@ -1097,18 +1141,34 @@ class FrameShmMiddleware:
     # RouterManager middleware-протокол: on_send / on_receive
     # ------------------------------------------------------------------
 
+    def _drop_foreign_refs(self, data: Any) -> None:
+        """Снять из ``data["_shm_refs"]`` ссылки с ``owner != self._owner`` (4.4d); опустевший ключ
+        удаляется. Не dict / нет ссылок — no-op."""
+        refs = data.get(SHM_REFS_KEY) if isinstance(data, dict) else None
+        if not isinstance(refs, dict):
+            return
+        own = {k: r for k, r in refs.items() if isinstance(r, dict) and r.get("owner") == self._owner}
+        if len(own) == len(refs):
+            return
+        if own:
+            data[SHM_REFS_KEY] = own
+        else:
+            data.pop(SHM_REFS_KEY, None)
+
     def on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Перехватить исходящее сообщение: записать frame в SHM, заменить на координаты.
 
         Ф7 G.3a: запись делегирована в единое ядро `_write_frame_into_slot`
         (round-robin вместо снятого find_free_index). Сбой write (mm есть) →
         громкий pickle-fallback (G.3d). frame берётся из top-level ``msg["frame"]``,
-        координаты кладутся в ``msg["data"]`` (+ width/height для back-compat).
+        ссылка кладётся в ``msg["data"]["_shm_refs"]["frame"]`` (форма — в заголовке слота).
 
         Если в msg нет ключа "frame" — либо это вообще не кадровое сообщение (нет
         "data" или в нём нет shm-маркера — не трогаем, ноль накладных), либо frame
         уже стрипнут раньше для другого send этого же msg (fan-out replay, F1
-        ревью 2026-07-13: считаем границу ЕЩЁ РАЗ — это реальный отдельный IPC-send).
+        ревью 2026-07-13: считаем границу ЕЩЁ РАЗ — это реальный отдельный IPC-send). Ссылки чужого
+        владельца (``owner != self._owner``) на этом пути снимаются — один хоп (4.4d): ссылка деда
+        не должна ехать дальше.
         """
         frame = msg.get("frame")
         if frame is None:
@@ -1121,6 +1181,7 @@ class FrameShmMiddleware:
             existing_data = msg.get("data")
             if self._has_own_ref(existing_data):
                 self._bump_boundary_only()
+            self._drop_foreign_refs(existing_data)
             return msg
 
         # Проверка что это numpy ndarray (без жёсткого импорта numpy на уровне модуля)

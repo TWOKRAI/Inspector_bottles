@@ -20,7 +20,7 @@ from .cycle_metrics import CycleMetricsRecorder
 from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
 from .plugin_runner import PluginRunner
 from ...chain_module import ChainRunnable, RunnableStep
-from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY, FrameShmMiddleware
 
 
 class PipelineExecutor:
@@ -227,10 +227,19 @@ class PipelineExecutor:
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
 
-        # Stale view → ДРОП батча (frame_stale_drops уже учтён в _frame_views_valid).
+        # Stale view → ДРОП батча. Единица счётчика — сообщение: reader уже учёл 1 (первая
+        # провалившаяся ссылка, ``all()`` останавливается), доначисляем остальные N-1 выходов.
         if not valid:
+            if len(items) > 1:
+                self._shm.note_stale_drops(len(items) - 1)
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
+
+        # Дверь отправки проверяет ТОЛЬКО views, что лежат на самом item: плагин, пересобравший dict
+        # (например center_crop), их теряет. Каждый выход получает свои views + билеты входного батча
+        # (без дублей по (name, gen)) в НОВОМ списке — вход не мутируется. Нет билетов — нет работы.
+        if view_tickets:
+            self._attach_batch_views(items, view_tickets)
 
         # Отправить результаты по IPC
         self._send_results(items)
@@ -275,15 +284,34 @@ class PipelineExecutor:
             return []
         tickets: list[dict] = []
         for it in items:
-            views = it.get("_shm_views")
+            views = it.get(SHM_VIEWS_KEY)
             if isinstance(views, list):
                 tickets.extend(ref for ref in views if isinstance(ref, dict) and ref.get("name"))
         return tickets
 
+    @staticmethod
+    def _attach_batch_views(items: list[dict], view_tickets: list[dict]) -> None:
+        """Записать в каждый выходной item ``_shm_views`` = его собственные views + ``view_tickets``
+        батча, без дублей по (name, gen). Новый список на item (общий список между выходами дал бы
+        сквозную мутацию при fan-out)."""
+        for item in items:
+            merged: list[dict] = []
+            seen: set[tuple] = set()
+            own = item.get(SHM_VIEWS_KEY)
+            for ref in [*(own if isinstance(own, list) else ()), *view_tickets]:
+                if not isinstance(ref, dict):
+                    continue
+                key = (ref.get("name"), ref.get("gen"))
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(ref)
+            item[SHM_VIEWS_KEY] = merged
+
     def _frame_views_valid(self, view_tickets: list[dict]) -> bool:
         """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан — поколение
-        слота равно ``ref["gen"]``). Любой drift → False (middleware уже учёл
-        frame_stale_drops) → батч дропается."""
+        слота равно ``ref["gen"]``). Любой drift → False (reader уже учёл ОДИН stale-дроп —
+        ``all()`` останавливается на первой ссылке; остальные выходы батча доначисляет ``_run_batch``
+        через ``note_stale_drops``) → батч дропается."""
         return all(self._shm.frame_view_valid(ref) for ref in view_tickets)
 
     def _loan_active(self) -> bool:

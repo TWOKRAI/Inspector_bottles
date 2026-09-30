@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
+
+import pytest
 
 from multiprocess_framework.modules.process_module.generic.pipeline_executor import (
     PipelineExecutor,
@@ -167,3 +170,117 @@ class TestReleaseAccumulation:
 
 def _ticket(owner, idx, gen):
     return _ref(owner, idx, gen)
+
+
+# ===================== Task 4.4 итерация 2 (часть A): дверь отправки видит каждый вход =====================
+# Реальный PipelineExecutor + реальный FrameShmMiddleware (стенд из test_frame_ref_gen): проверяются
+# два свойства, которые фейк-middleware выше доказать не может.
+from multiprocess_framework.modules.router_module.tests import test_frame_ref_gen as _T  # noqa: E402
+
+
+@pytest.fixture
+def rig(monkeypatch):
+    for name in [k for k in os.environ if k.startswith("FW_SHM_")]:
+        monkeypatch.delenv(name, raising=False)  # флаги SHM берутся только из теста
+    r = _T._Rig()
+    yield r
+    r.close()
+
+
+class _Rebuild(_T._Probe):
+    """Плагин, пересобирающий dict (как center_crop): свежий dict на выходе, ``_shm_views`` теряется."""
+
+    def process(self, items):
+        super().process(items)
+        return [{"frame": it["frame"], "n": it.get("n")} for it in items]
+
+
+class _FanOut(_T._Probe):
+    """Плагин, из одного входа делающий три выхода (свежие dict'ы) — батч из трёх сообщений."""
+
+    def process(self, items):
+        super().process(items)
+        return [{"frame": items[0]["frame"], "n": i} for i in range(3)]
+
+
+def test_rebuilt_item_blocked_by_send_door(rig, monkeypatch):
+    """Свойство: плагин вернул СВЕЖИЙ dict (``_shm_views`` потерян) — executor всё равно передаёт двери
+    билеты входного батча, и вход, перезаписанный ПОСЛЕ re-check executor'а и ДО копии в кольцо
+    отправителя, дропается: ни к одной цели не уходит, ``frame_stale_drops`` == 1 (один раз на item).
+    Красный revert: убрать в ``_run_batch`` слияние ``item[SHM_VIEWS_KEY]`` -> ушло к t1, t2, stale 0."""
+    writer = rig.make("A")
+    mm_b = _T.MemoryManager()
+    sender = rig.make("B", view=True, mm=mm_b)
+    fired: list[int] = []
+    real_write = mm_b.write_images
+
+    def write_after_overwrite(*args, **kwargs):
+        if not fired:
+            fired.append(1)
+            _T._overwrite(writer, "frame")  # писатель переписывает входную ячейку прямо перед копией
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(mm_b, "write_images", write_after_overwrite)
+    sent: list[str] = []
+
+    def send_like_router(target, msg):
+        if sender.strip_data_frame_on_send(msg) is not None:
+            sent.append(target)
+
+    probe = _Rebuild("frame")
+
+    def scenario():
+        item = _T._receive_as_pipeline(sender, _T._wire(_T._send(writer, {"frame": _T._arr("frame", 1), "n": 1})))
+        ex = PipelineExecutor(
+            plugins=[probe], chain_targets=["t1", "t2"], shm_middleware=sender, send_fn=send_like_router, node_name="B"
+        )
+        _T._run_executor(ex, [item], probe.done)
+
+    _T._bounded(scenario)
+    assert fired, "стенд неисправен: перехват write_images отправителя не сработал"
+    assert sent == [], f"пересобранный item ушёл к целям {sent} с пикселями перезаписанного входа"
+    assert sender.frame_stale_drops == 1, f"frame_stale_drops = {sender.frame_stale_drops}, ожидалось 1"
+
+
+def test_batch_drop_counts_one_per_output_item(rig):
+    """Свойство: единица счётчика — ОДНО отброшенное сообщение. Вход перезаписан во время цепочки,
+    плагин вернул три выхода -> батч из трёх сообщений дропнут, ``frame_stale_drops`` == 3 (reader
+    посчитал 1 на первой провалившейся ссылке, executor доначислил ``N - 1``), ничего не отправлено.
+    Красный revert: убрать вызов ``note_stale_drops`` в ``_run_batch`` -> stale == 1."""
+    writer, reader = rig.make("A"), rig.make("B", view=True)
+    sent: list[str] = []
+    probe = _FanOut("frame", lambda: _T._overwrite(writer, "frame"))
+
+    def scenario():
+        item = _T._receive_as_pipeline(reader, _T._wire(_T._send(writer, {"frame": _T._arr("frame", 1), "n": 1})))
+        ex = PipelineExecutor(
+            plugins=[probe],
+            chain_targets=["out"],
+            shm_middleware=reader,
+            send_fn=lambda target, msg: sent.append(target),
+            node_name="B",
+        )
+        _T._run_executor(ex, [item], probe.done)
+
+    _T._bounded(scenario)
+    assert sent == [], "батч ушёл дальше, хотя входной view был перезаписан во время обработки"
+    assert reader.frame_stale_drops == 3, f"frame_stale_drops = {reader.frame_stale_drops}, ожидалось 3"
+
+
+def test_output_views_are_own_plus_batch_tickets_deduped_in_new_list():
+    """Свойство: не-view батч не получает ключа ``_shm_views`` вовсе (ноль работы на не-view пути); у
+    view-батча каждый выход несёт СВОИ views + билеты батча без дублей по (name, gen), в НОВОМ списке
+    (список входа не мутируется). Красный revert: убрать слияние в ``_run_batch`` -> у item 1 только own."""
+    sent: list = []
+    ex = _make_executor(_FakeShm(valid=True), sent)
+    TestRunLoopDrop()._run_one_batch(ex, [{"frame": "plain"}])
+    assert "_shm_views" not in sent[0]["data"]
+
+    sent.clear()
+    own, other = _ref("cam0", 0, 2, "seg0"), _ref("cam1", 1, 4, "seg1")
+    own_list = [own]
+    TestRunLoopDrop()._run_one_batch(ex, [{"_shm_views": own_list, "marker": 1}, {"_shm_views": [other], "marker": 2}])
+    views_by_marker = {m["data"]["marker"]: m["data"]["_shm_views"] for m in sent}
+    assert views_by_marker[1] == [own, other]  # своя ссылка + билет соседа, own не задвоена
+    assert views_by_marker[2] == [other, own]
+    assert own_list == [own], "список views входа мутирован на месте"

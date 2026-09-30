@@ -251,3 +251,89 @@ def test_unlinked_segment_ref_is_stale_drop_counted_without_error_log(made):
     assert msg.get("frame") is None
     assert reader.frame_stale_drops == 1 and reader.frame_torn_reads == 0
     assert logs == [], f"stale-дроп отвязанного сегмента залогирован как ошибка: {logs}"
+
+
+# ===================== Task 4.4 итерация 2 (часть A): дверь отправки =====================
+def _item_with_small_view_only(made):
+    """Item после приёма: ``frame`` убран, остался только МАЛЫЙ (192 Б, inline) срез view на слот A.
+    Возвращает (sender, writer, item, оригинальные пиксели среза)."""
+    writer, sender = _mw(made, "A"), _mw(made, "B", view=True)
+    item = _receive_views(writer, sender, keys=("frame",))
+    assert item["_shm_views"], "стенд неисправен: нет view"
+    item["crop"] = item["frame"][:8, :8]  # 8x8x3 = 192 Б < 8192 -> inline, но память слота A
+    assert not item["crop"].flags.owndata
+    return sender, writer, item, _arr("frame", 1)[:8, :8].copy()
+
+
+def test_small_view_crop_copied_before_door(made):
+    """Свойство: малый inline-срез view копируется ДО двери — пиксели, ушедшие получателю, равны
+    оригиналу даже когда писатель A перезаписал ячейку ПОСЛЕ двери (до pickle роутера).
+    Красный revert: убрать копирование owndata=False значений в ``strip_and_write`` -> crop чужой."""
+    sender, writer, item, want_crop = _item_with_small_view_only(made)
+    out = _send(sender, item)
+    assert out is not None
+    _overwrite(writer, "frame")  # после двери, до сериализации роутера
+    shipped = out["data"]["crop"]
+    assert shipped.tobytes() == want_crop.tobytes(), "crop уехал ссылкой на память слота A, не копией"
+    assert shipped.flags.owndata
+    assert sender.frame_stale_drops == 0
+
+
+def test_views_without_large_entries_still_pass_door(made):
+    """Свойство: item с views и ТОЛЬКО малыми массивами (крупных нет) всё равно проходит дверь: слот входа
+    перезаписан до отправки -> item дропнут (None), ``frame_stale_drops`` == 1.
+    Красный revert: вернуть дверь только в ветку ``entries`` -> item ушёл (не None), stale 0."""
+    sender, writer, item, _ = _item_with_small_view_only(made)
+    item.pop("frame")  # крупных записей нет
+    _overwrite(writer, "frame")
+    assert _send(sender, item) is None, "item с перезаписанным view и без крупных массивов ушёл к получателю"
+    assert sender.frame_stale_drops == 1
+
+
+def test_item_without_views_keeps_inline_arrays_uncopied(made):
+    """CONTROL (зелёный до и после): у item БЕЗ ``_shm_views`` inline-массивы — те же объекты после
+    strip (копия «на всякий случай» на не-view пути = лишняя стоимость на кадр)."""
+    sender = _mw(made, "B", view=True)
+    base = _arr("foo", 5)
+    small = base[:8, :8]  # owndata=False, но view'ов SHM у item'а нет -> не трогать
+    out = _send(sender, {"frame": _arr("frame", 1), "small": small})
+    assert out is not None and out["data"]["small"] is small
+
+
+def test_on_send_strips_foreign_owner_refs(made):
+    """Свойство: on_send для не-data сообщения БЕЗ top-level frame снимает ссылки чужого владельца
+    (второй хоп не должен везти ссылки деда), свои оставляет (граница считается); пустой ``_shm_refs``
+    исчезает. Красный revert: вернуть ``return msg`` без чистки -> owner A уезжает дальше."""
+    w = _mw(made, "W")
+    foreign = {"owner": "A", "slot": "output_frames", "idx": 0, "gen": 2, "name": "x"}
+    own = {"owner": "W", "slot": "output_frames", "idx": 1, "gen": 4, "name": "y"}
+
+    only_foreign = w.on_send({"type": "frame_ready", "data": {"_shm_refs": {"frame": dict(foreign)}}})
+    assert "_shm_refs" not in only_foreign["data"], f"ссылка A уехала вторым хопом: {only_foreign['data']}"
+
+    hops = w.frame_boundary_crossings
+    mixed = w.on_send({"type": "frame_ready", "data": {"_shm_refs": {"frame": dict(foreign), "mask": dict(own)}}})
+    assert mixed["data"]["_shm_refs"] == {"mask": own}
+    assert w.frame_boundary_crossings == hops + 1, "граница своей ссылки не посчитана"
+
+
+def test_restore_failures_public(made):
+    """Свойство: счётчик битых ссылок доступен публично и только на чтение (``frame_restore_failures``);
+    ссылка без имени сегмента -> +1. Красный revert: убрать property -> AttributeError."""
+    reader = _mw(made, "B")
+    assert reader.frame_restore_failures == 0
+    wire = {"data": {"_shm_refs": {"frame": {"owner": "A", "slot": "s", "idx": 0, "gen": 2, "name": None}}}}
+    reader.restore_frame(wire)
+    assert reader.frame_restore_failures == 1
+    with pytest.raises(AttributeError):
+        reader.frame_restore_failures = 5  # type: ignore[misc]
+
+
+def test_note_stale_drops_adds_to_frame_stale_drops(made):
+    """Свойство: ``note_stale_drops(n)`` прибавляет n к ``frame_stale_drops`` (единица — сообщение);
+    n <= 0 — no-op. Красный revert: убрать метод -> AttributeError."""
+    mw = _mw(made, "B")
+    mw.note_stale_drops(2)
+    mw.note_stale_drops(0)
+    mw.note_stale_drops(-3)
+    assert mw.frame_stale_drops == 2
