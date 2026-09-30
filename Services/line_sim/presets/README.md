@@ -54,12 +54,20 @@ python -m Services.line_sim.tools.make_font_letters \
     --letters АК \
     --font "$FONTS/DejaVuSans.ttf" \
     --font "$FONTS/DejaVuSans-Bold.ttf" \
+    --font "$FONTS/DejaVuSansMono.ttf" \
+    --stroke-px 0 --stroke-px 2 --stroke-px 4 \
     --size-px 300 --letter-frac 0.6 \
     --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 \
     --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png \
     --out data/line_sim/letters_font \
     --disk-out data/line_sim/letters_font_disk.png
 ```
+
+`--stroke-px N` (повторяемый, целое >= 0) — аугментация толщиной штриха: на каждую пару буква x шрифт
+по файлу на значение (`DejaVuSans.png` при 0, `DejaVuSans_s2.png` при 2). Зачем: штрих реальной
+этикетки — 0.081 диаметра диска, у DejaVu regular 0.066–0.077, у bold 0.098–0.138 (измерено 2026-09-30),
+поэтому каталог должен покрывать этот диапазон сам. Высота буквы остаётся `--letter-frac`
+(глиф уменьшается на толщину обводки), зерно идёт в порядке буква x шрифт x штрих.
 
 `--disk-from-photo` требует `--disk-out`. Внимание: `color_rgb` слоя **заменяет** RGB спрайта
 (`LayeredObject._transform`), поэтому для текстурированных (покрашенных, с зерном) спрайтов слои

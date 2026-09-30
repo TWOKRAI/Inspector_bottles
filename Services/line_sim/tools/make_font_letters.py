@@ -32,6 +32,9 @@
                        зерно буквы поэтому зависит от набора букв и шрифтов запуска)
     --edge-blur-px S       σ гауссова размытия альфы буквы (мягкий край)
     --disk-from-photo PATH диск --disk-out вырезается из реального фото (нужен --disk-out)
+    --stroke-px N          толщина обводки буквы в px (целое >= 0, флаг повторяемый): по файлу на значение,
+                       `<шрифт>.png` при 0, `<шрифт>_s<N>.png` при N > 0; высота буквы остаётся
+                       `--letter-frac`, штрих добавляет N px с каждой стороны за счёт самого глифа
 
 Измеренные реальные значения: цвет краски ≈ (65, 70, 82) по 20 кадрам плана (в фикстуре ядро
 (59, 65, 77)), зерно σ ≈ 9, край ~2 px, диск 300 px.
@@ -41,6 +44,16 @@
     python -m Services.line_sim.tools.make_font_letters --letters АК --font ... --out ... \\
         --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 \\
         --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png --disk-out ...
+
+Аугментация шрифтом И толщиной (штрих реальной этикетки — 0.081 диаметра диска, измерено 2026-09-30;
+DejaVu regular 0.066-0.077, bold 0.098-0.138 — обводка закрывает промежуток):
+
+    python -m Services.line_sim.tools.make_font_letters --letters АК \\
+        --font .../DejaVuSans.ttf --font .../DejaVuSans-Bold.ttf --font .../DejaVuSansMono.ttf \\
+        --stroke-px 0 --stroke-px 2 --stroke-px 4 --size-px 300 --letter-frac 0.6 --out ...
+
+Зерно (один rng на запуск) идёт в порядке буква x шрифт x штрих: спрайт N=0 совпадает с прогоном без
+`--stroke-px` побайтно только для первой тройки буква/шрифт; следующие получают другие числа зерна.
 
 `--disk-from-photo`: фото -> порог яркости 150 -> крупнейшая компонента -> `minEnclosingCircle`;
 печать внутри круга стирается `cv2.inpaint`; квадрат по кругу (центр круга — в центре выреза) ->
@@ -53,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import math
+from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
@@ -87,16 +101,19 @@ _PHOTO_DISK_EDGE_SIGMA = 1.0
 _PHOTO_DISK_MARGIN_PX = 3
 
 
-def _render_mask(font_path: Path, ch: str, font_size_pt: int, canvas_px: int) -> np.ndarray:
+def _render_mask(font_path: Path, ch: str, font_size_pt: int, canvas_px: int, stroke_px: int = 0) -> np.ndarray:
     """Один символ `ch`, отрисованный шрифтом `font_path` размера `font_size_pt` в
-    центр квадратной канвы `canvas_px` x `canvas_px` -> маска "L" (0..255)."""
+    центр квадратной канвы `canvas_px` x `canvas_px` -> маска "L" (0..255).
+    `stroke_px` > 0 — обводка Pillow (`stroke_width`): утолщает глиф на `stroke_px` px с каждой стороны."""
     try:
         font = ImageFont.truetype(str(font_path), font_size_pt)
     except OSError as exc:  # битмап-шрифт, битый файл (ревью 1.1b, NIT-6)
         raise SystemExit(f"make_font_letters: шрифт {font_path.name} не открывается как масштабируемый: {exc}") from exc
     img = Image.new("L", (canvas_px, canvas_px), 0)
     draw = ImageDraw.Draw(img)
-    draw.text((canvas_px / 2, canvas_px / 2), ch, font=font, fill=255, anchor="mm")
+    draw.text(
+        (canvas_px / 2, canvas_px / 2), ch, font=font, fill=255, anchor="mm", stroke_width=stroke_px, stroke_fill=255
+    )
     return np.array(img)
 
 
@@ -141,7 +158,7 @@ def _center_crop(source: np.ndarray, center_rc: tuple[float, float], out_size: i
     return out
 
 
-def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: float) -> np.ndarray:
+def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: float, stroke_px: int = 0) -> np.ndarray:
     """Одна буква одного шрифта -> RGBA `size_px` x `size_px` (RGB=0 чёрный, альфа=маска).
 
     Pre: `font_path` содержит глиф буквы `letter` (иначе `SystemExit`, см.
@@ -153,6 +170,10 @@ def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: floa
     на канве с запасом (`_CANVAS_FACTOR`) -> измерить высоту альфа-bbox -> посчитать
     коэффициент масштаба к желаемой высоте -> перерендерить финальным размером шрифта ->
     вырезать квадрат `size_px` так, чтобы центр НОВОГО альфа-bbox совпал с центром канвы.
+
+    `stroke_px` > 0: обводка добавляет `2 * stroke_px` px к высоте, поэтому после рендера со штрихом
+    высота сверяется с желаемой и при расхождении > 1 px делается ОДНА поправка размера шрифта (уменьшается
+    сам глиф, штрих остаётся `stroke_px`). `stroke_px == 0` — прежний путь без изменений.
     """
     canvas_px = size_px * _CANVAS_FACTOR
     probe_mask = _render_mask(font_path, letter, size_px, canvas_px)
@@ -164,9 +185,19 @@ def _render_letter(font_path: Path, letter: str, size_px: int, letter_frac: floa
     desired_h = round(letter_frac * size_px)
     final_font_size = max(1, round(size_px * (desired_h / probe_h)))
 
-    final_mask = _render_mask(font_path, letter, final_font_size, canvas_px)
+    final_mask = _render_mask(font_path, letter, final_font_size, canvas_px, stroke_px)
     final_bbox = _alpha_bbox(final_mask)
     assert final_bbox is not None, f"перерендер {font_path.name}/{letter!r} дал пустую маску при size={final_font_size}"
+    if stroke_px > 0:
+        stroked_h = final_bbox[1] - final_bbox[0] + 1
+        glyph_h = stroked_h - 2 * stroke_px  # высота самого глифа без обводки
+        if abs(stroked_h - desired_h) > 1 and glyph_h > 0:
+            final_font_size = max(1, round(final_font_size * (desired_h - 2 * stroke_px) / glyph_h))
+            final_mask = _render_mask(font_path, letter, final_font_size, canvas_px, stroke_px)
+            final_bbox = _alpha_bbox(final_mask)
+            assert final_bbox is not None, (
+                f"поправка {font_path.name}/{letter!r} дала пустую маску при size={final_font_size}, stroke={stroke_px}"
+            )
     fy0, fy1, fx0, fx1 = final_bbox
     width = max(fx1 - fx0 + 1, fy1 - fy0 + 1)  # и высота: --letter-frac > 1 (ревью 1.1b it.2, NIT-7)
     if width >= size_px:  # масштаб по высоте; широкая буква молча обрезалась бы по бокам (ревью 1.1b)
@@ -223,19 +254,23 @@ def build_font_letters(
     grain_sigma: float = 0.0,
     edge_blur_px: float = 0.0,
     seed: int = 0,
+    stroke_px: Sequence[int] = (0,),
 ) -> list[Path]:
-    """Собрать каталог `out/<буква>/<стем файла шрифта>.png` для каждой пары буква x
-    шрифт. Возвращает список записанных файлов (порядок: буквы `letters`, внутри —
-    порядок `fonts`). Опции краски (`ink_rgb`, `grain_sigma`, `edge_blur_px`, `seed`) — см.
-    `_finish_ink`; по умолчанию вывод прежний."""
-    rng = np.random.default_rng(seed)  # один на вызов: порядок буква x шрифт фиксирует зерно
+    """Собрать каталог `out/<буква>/<стем файла шрифта>.png` для каждой тройки буква x
+    шрифт x толщина штриха. Возвращает список записанных файлов (порядок: буквы `letters`,
+    внутри — порядок `fonts`, внутри — `stroke_px`). Имя файла: `<стем>.png` при штрихе 0,
+    `<стем>_s<N>.png` при N > 0; повторы в `stroke_px` отбрасываются (остаётся первое вхождение).
+    Опции краски (`ink_rgb`, `grain_sigma`, `edge_blur_px`, `seed`) — см. `_finish_ink`;
+    по умолчанию вывод прежний."""
+    strokes = list(dict.fromkeys(stroke_px))
+    rng = np.random.default_rng(seed)  # один на вызов: порядок буква x шрифт x штрих фиксирует зерно
     # Сначала все рендеры, потом запись: ошибка на любой паре не оставляет пустых папок
     # классов, которые каталог молча принял бы (ревью 1.1b, NIT-3).
     rendered = [
         (
-            out / letter / f"{Path(font_path).stem}.png",
+            out / letter / (Path(font_path).stem + (f"_s{stroke}" if stroke > 0 else "") + ".png"),
             _finish_ink(
-                _render_letter(Path(font_path), letter, size_px, letter_frac),
+                _render_letter(Path(font_path), letter, size_px, letter_frac, stroke),
                 ink_rgb,
                 grain_sigma,
                 edge_blur_px,
@@ -244,6 +279,7 @@ def build_font_letters(
         )
         for letter in letters
         for font_path in fonts
+        for stroke in strokes
     ]
     for dest, rgba in rendered:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -348,6 +384,17 @@ def _parse_ink_rgb(text: str) -> tuple[int, int, int]:
     return (parts[0], parts[1], parts[2])
 
 
+def _parse_stroke_px(text: str) -> int:
+    """Неотрицательное целое; иначе `ArgumentTypeError` (argparse -> exit 2, до любого рендера)."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"ожидали целое >= 0, получили {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"ожидали целое >= 0, получили {text!r}")
+    return value
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--letters", required=True, help="буквы каталога, по одному символу (например АК)")
@@ -372,6 +419,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--grain-sigma", type=float, default=0.0, help="σ зерна на буквах (дефолт 0 — без зерна)")
     parser.add_argument("--seed", type=int, default=0, help="seed зерна (дефолт 0)")
     parser.add_argument("--edge-blur-px", type=float, default=0.0, help="σ размытия альфы буквы (дефолт 0)")
+    parser.add_argument(
+        "--stroke-px",
+        type=_parse_stroke_px,
+        action="append",
+        default=None,
+        help="толщина обводки букв в px, целое >= 0 (можно повторять: по файлу на значение; дефолт 0)",
+    )
     parser.add_argument(
         "--disk-from-photo", default=None, help="фото реального диска для --disk-out (вместо белого круга)"
     )
@@ -400,6 +454,7 @@ def main(argv: list[str] | None = None) -> None:
         grain_sigma=args.grain_sigma,
         edge_blur_px=args.edge_blur_px,
         seed=args.seed,
+        stroke_px=args.stroke_px or [0],
     )
     print(f"буквы: {len(args.letters)}, шрифты: {len(fonts)} -> {len(written)} файлов в {out}")
 
