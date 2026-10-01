@@ -66,7 +66,8 @@ _EDGE_MARGIN = 8
 #: Пороги просвета для `gap_alpha_mask` (HSV OpenCV: H 0..179, S 0..255), границы включительные.
 #: Замер на реальном тайле belt_photo_full (`--force-period`, 410x484). Мера «стол виден» — пиксели
 #: V >= 130 в столбцах шва (x mod 205 из 180..204 и 0..2, строки 22..461): 1065 px, это мятные клинья у
-#: концов щели; посередине щели стол не виден вовсе (V звено ≈75 -> тень соседа ≈30). Эти значения
+#: концов щели; посередине щели стол почти не виден (53 px из 1065, V щели ≈82 против ≈62 у соседа).
+#: Эти значения
 #: покрывают 72.4 % видимого стола; ложно прозрачны (V < 100) 0.28 % тайла; всего прозрачно 0.87 %.
 #: Таблица и рассыпь — README. Правило универсальное (цветовой ключ H и S), без привязки к ленте.
 _GAP_HUE = (25, 85)
@@ -355,7 +356,9 @@ def main(argv: list[str] | None = None) -> int:
     ):
         if value is not None and not args.gap_alpha:
             parser.error(f"{flag} требует --gap-alpha")
-    gap_hue = _int_pair(parser, "--gap-hue", args.gap_hue or f"{_GAP_HUE[0]},{_GAP_HUE[1]}", 179)
+    gap_hue = _int_pair(
+        parser, "--gap-hue", args.gap_hue if args.gap_hue is not None else f"{_GAP_HUE[0]},{_GAP_HUE[1]}", 179
+    )
     if gap_hue[0] > gap_hue[1]:
         parser.error(f"--gap-hue: LO больше HI, получено {args.gap_hue!r}")
     try:
@@ -364,7 +367,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--gap-sat-min: ожидается целое, получено {args.gap_sat_min!r}")
     if not 0 <= gap_sat_min <= 255:
         parser.error(f"--gap-sat-min: значение должно быть в 0..255, получено {args.gap_sat_min!r}")
-    rails_px = _int_pair(parser, "--rails-px", args.rails_px or f"{_RAILS_PX[0]},{_RAILS_PX[1]}", None)
+    rails_px = _int_pair(
+        parser, "--rails-px", args.rails_px if args.rails_px is not None else f"{_RAILS_PX[0]},{_RAILS_PX[1]}", None
+    )
 
     has_reference = args.photo_width_mm is not None or args.pitch_mm is not None
     if args.scene_px_per_mm is not None and not has_reference:

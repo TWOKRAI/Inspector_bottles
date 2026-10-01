@@ -139,3 +139,12 @@ def test_negative_rails_message_says_nonnegative_not_a_range(tmp_path, capsys):
         tool.main([str(_write_photo(tmp_path)), "--out", str(tmp_path / "o.png"), "--gap-alpha", "--rails-px=-1,0"])
     err = capsys.readouterr().err.rsplit("error:", 1)[1]
     assert "--rails-px" in err and ">= 0" in err and "0..…" not in err
+
+
+@pytest.mark.parametrize("arg", ["--gap-hue=", "--rails-px="])
+def test_empty_flag_value_is_an_error_not_a_silent_default(tmp_path, capsys, arg):
+    """Пустое значение — ошибка с именем флага, а не тихий дефолт (ревью 1.2 ит.2, нит 1)."""
+    with pytest.raises(SystemExit):
+        tool.main([str(_write_photo(tmp_path)), "--out", str(tmp_path / "o.png"), "--gap-alpha", arg])
+    err = capsys.readouterr().err.rsplit("error:", 1)[1]
+    assert arg.rstrip("=") in err
