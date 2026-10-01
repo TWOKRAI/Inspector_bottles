@@ -31,8 +31,8 @@ def test_torn_read_adds_zero_to_bytes_read() -> None:
     """Поколение слота отравлено в нечёт (writer «в процессе»), ссылка называет его -> torn-дроп,
     ``frame_torn_reads`` == 1, ``bytes_read`` == 0. Красный revert: считать байты до проверки
     поколения (внутри reader'а) -> 1200."""
-    prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s", zero_copy=False)
-    consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s", zero_copy=False)
+    prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
+    consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
     try:
         item = prod.strip_and_write({"frame": _frame(1)})
         ref = item["_shm_refs"]["frame"]
@@ -56,7 +56,7 @@ def test_failed_write_adds_zero_to_bytes_written() -> None:
     """``write_frame`` возвращает None (нет слота/валидация) -> кадр уходит pickle-fallback'ом,
     ``bytes_written`` == 0. Красный revert: считать байты до проверки результата записи -> 1200."""
     mm = MemoryManager()
-    mw = FrameShmMiddleware(mm, owner="o", slot="s", zero_copy=False)
+    mw = FrameShmMiddleware(mm, owner="o", slot="s")
     mm.write_frame = lambda *a, **k: None  # type: ignore[method-assign]
     try:
         mw.strip_and_write({"frame": _frame(2)})

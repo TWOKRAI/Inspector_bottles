@@ -105,7 +105,7 @@ class _Stand:
     def __init__(self) -> None:
         self.router, self.sock_ch = _make_host(
             {
-                "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": False},
+                "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": True},
                 "frames.unsubscribe": lambda m: {"success": True, "removed": True},
                 "ping": lambda m: {"pong": True},
             }
@@ -220,7 +220,7 @@ def test_d_odd_generation_is_torn_not_delivered() -> None:
         gen = struct.unpack_from("<I", shm.buf, 0)[0]
         struct.pack_into("<I", shm.buf, 0, gen | 1)  # запись «в процессе»
 
-        client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": False})
+        client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": True})
         delivered: list = []
         source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
         source.subscribe(None, lambda s, a, b: delivered.append(b))
@@ -242,7 +242,7 @@ def test_e_unsubscribe_during_in_flight_copy_drops_the_frame() -> None:
 
     Инъекция: проверка эпохи перед dispatch (``if epoch != self._epoch``) → ``if False`` →
     кадр доставлен после отписки → красный."""
-    client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": False})
+    client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": True})
     delivered: list = []
     source = RemoteFrameSource(client, dispatch=lambda fn: fn())  # type: ignore[arg-type]
     source.subscribe(None, lambda s, a, b: delivered.append(b))
@@ -286,7 +286,7 @@ def test_f_unsubscribe_sends_frames_unsubscribe_to_host() -> None:
     seen: list = []
     router, sock_ch = _make_host(
         {
-            "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": False},
+            "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": True},
             "frames.unsubscribe": lambda m: seen.append(m.get("data")) or {"success": True, "removed": True},
         }
     )
@@ -321,7 +321,7 @@ def test_m1_close_on_silent_host_returns_fast() -> None:
     долго незачем. Инъекция: вернуть в ``close`` полный таймаут ``unsubscribe()`` → красный."""
     router, sock_ch = _make_host(
         {
-            "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": False},
+            "frames.subscribe": lambda m: {"success": True, "seqlock": True, "owner_incarnation": True},
             "frames.unsubscribe": lambda m: time.sleep(2.5) or {"success": True},
         }
     )
@@ -355,7 +355,7 @@ def test_m3_subscribe_after_timed_out_close_leaves_one_copy_thread() -> None:
 
     before = _copy_threads()
     shm = _segment()
-    client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": False})
+    client = _StubClient({"success": True, "seqlock": True, "owner_incarnation": True})
     entered = threading.Event()
     returned = threading.Event()
 

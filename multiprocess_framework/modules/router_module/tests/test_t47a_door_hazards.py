@@ -48,7 +48,7 @@ def made():
 
 def _mw(made, owner: str, *, view: bool = False) -> FrameShmMiddleware:
     mm = MemoryManager()
-    extra = dict(owner_incarnation=True, cache_shm_handles=True, zero_copy=True) if view else {"zero_copy": False}
+    extra: dict = {}
     mw = FrameShmMiddleware(mm, owner=owner, slot="output_frames", coll=3, **extra)
     made.append((mw, mm))
     return mw
@@ -156,7 +156,7 @@ def test_mm_none_path_untouched(made):
     """``mm=None`` -> pickle-by-design: проверки входов нет ни до, ни после 4.7a. Массивы остаются
     в item (даже срез view — копии в этой ветке не делается), ``_shm_views`` снят, дропа нет."""
     _, _, received = _received(made)
-    sender = FrameShmMiddleware(None, owner="C", slot="output_frames", coll=3, zero_copy=False)
+    sender = FrameShmMiddleware(None, owner="C", slot="output_frames", coll=3)
     crop = received["frame"][:8, :8]
     item = _output(received, crop=crop, mask=_arr("mask", 7))
 

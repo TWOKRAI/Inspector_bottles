@@ -13,7 +13,6 @@ from __future__ import annotations
 import gc
 
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.process_module.heartbeat.telemetry import build_router_shm_telemetry
 from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import FrameShmMiddleware
@@ -22,17 +21,10 @@ from multiprocess_framework.modules.router_module.tests import test_t45c_transpo
 FRAME_BYTES = 921_600  # 480 × 640 × 3, uint8
 
 
-@pytest.fixture
-def zero_copy_env(monkeypatch):
-    # zero-copy гейтнут на handle-кэш и уникальные имена (до 4.7 — флаги).
-    monkeypatch.setenv("FW_SHM_HANDLE_CACHE", "1")
-    monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
-
-
-def _pair(reader_zero_copy: bool):
+def _pair():
     mmw, mmr = T.MemoryManager(), T.MemoryManager()
-    w = FrameShmMiddleware(mmw, owner="A", slot="output_frames", coll=3, zero_copy=False)
-    r = FrameShmMiddleware(mmr, owner="B", slot="output_frames", coll=3, zero_copy=reader_zero_copy)
+    w = FrameShmMiddleware(mmw, owner="A", slot="output_frames", coll=3)
+    r = FrameShmMiddleware(mmr, owner="B", slot="output_frames", coll=3)
     return mmw, mmr, w, r
 
 
@@ -48,16 +40,15 @@ def _close(*objs) -> None:
                     pass
 
 
-def _restore_one(w, r):
+def _restore_one(w, r, *, copy_out: bool = False):
     msg = T._wire(T._send(w, {"frame": np.zeros((480, 640, 3), np.uint8)}))
-    out = r.restore_frame(msg)
+    out = r.on_receive(msg) if copy_out else r.restore_frame(msg)
     return out.get("frame") if out.get("frame") is not None else out["data"].get("frame")
 
 
-def test_t45e_view_read_counts_mapped_not_read(zero_copy_env) -> None:
-    mmw, mmr, w, r = _pair(reader_zero_copy=True)
+def test_t45e_view_read_counts_mapped_not_read() -> None:
+    mmw, mmr, w, r = _pair()
     try:
-        assert r._zero_copy, "предпосылка: zero-copy у читателя активен"
         arr = _restore_one(w, r)
         assert arr is not None and not arr.flags.owndata, "предпосылка: прочитан view"
         assert r.bytes_mapped == FRAME_BYTES
@@ -68,9 +59,9 @@ def test_t45e_view_read_counts_mapped_not_read(zero_copy_env) -> None:
 
 
 def test_t45e_copy_read_counts_read_not_mapped() -> None:
-    mmw, mmr, w, r = _pair(reader_zero_copy=False)
+    mmw, mmr, w, r = _pair()
     try:
-        arr = _restore_one(w, r)
+        arr = _restore_one(w, r, copy_out=True)
         assert arr is not None and arr.flags.owndata, "предпосылка: прочитана копия"
         assert r.bytes_read == FRAME_BYTES
         assert r.bytes_mapped == 0
@@ -79,8 +70,8 @@ def test_t45e_copy_read_counts_read_not_mapped() -> None:
         _close(r, w, mmr, mmw)
 
 
-def test_t45e_stats_and_telemetry_carry_mapped(zero_copy_env) -> None:
-    mmw, mmr, w, r = _pair(reader_zero_copy=True)
+def test_t45e_stats_and_telemetry_carry_mapped() -> None:
+    mmw, mmr, w, r = _pair()
     try:
         router = T._router_with(r)
         arr = _restore_one(w, r)

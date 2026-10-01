@@ -51,7 +51,7 @@ def made():
 
 def _mw(made, owner: str, *, view: bool = False, **kw) -> FrameShmMiddleware:
     mm = MemoryManager()
-    extra = dict(owner_incarnation=True, cache_shm_handles=True, zero_copy=True) if view else {"zero_copy": False}
+    extra: dict = {}
     mw = FrameShmMiddleware(mm, owner=owner, slot="output_frames", coll=3, **extra, **kw)
     made.append((mw, mm))
     return mw

@@ -94,7 +94,7 @@ def make_consumer():
 
     def _make(name: str = "gui") -> FrameShmMiddleware:
         mm = MemoryManager()
-        mw = FrameShmMiddleware(mm, owner=name, slot="output_frames", zero_copy=False)
+        mw = FrameShmMiddleware(mm, owner=name, slot="output_frames")
         made.append((mw, mm))
         return mw
 

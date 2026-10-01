@@ -21,21 +21,19 @@ from multiprocess_framework.modules.shared_resources_module.memory.reader import
 class _FakeShm:
     """Мок SharedMemory-handle: считает close() и опц. бросает (эмуляция BufferError)."""
 
-    def __init__(self, *, raise_on_close: bool = False) -> None:
+    def __init__(self, *, raise_on_close: "Exception | None" = None) -> None:
         self.closed = 0
         self._raise = raise_on_close
         self.buf = memoryview(bytearray(64))
 
     def close(self) -> None:
         self.closed += 1
-        if self._raise:
-            raise BufferError("exported view alive")
+        if self._raise is not None:
+            raise self._raise
 
 
 def _reader(**kw: Any) -> ShmFrameReader:
-    base = dict(cache_enabled=True, zero_copy=False, cap=2)
-    base.update(kw)
-    return ShmFrameReader(**base)  # type: ignore[arg-type]
+    return ShmFrameReader(**kw)
 
 
 class TestProtocolConformance:
@@ -52,22 +50,22 @@ class TestProtocolConformance:
 class TestViewValid:
     def test_negative_generation_is_stale(self):
         """gen_at_read<0 (без seqlock) → drop + счётчик (re-check неактивен)."""
-        r = _reader(zero_copy=True)
+        r = _reader()
         assert r.view_valid("any", -1) is False
         assert r.stale_drops == 1
 
     def test_missing_handle_is_conservative_drop(self):
         """Handle не в кэше (эвиктнут/сменился) → консервативный drop."""
-        r = _reader(zero_copy=True)
+        r = _reader()
         assert r.view_valid("missing", 0) is False
         assert r.stale_drops == 1
 
     def test_generation_match_and_mismatch(self):
-        r = _reader(zero_copy=True)
+        r = _reader()
         shm = _FakeShm()
         # заголовок generation по смещению 0 (uint32 LE) — используем read_generation
         # косвенно: положим handle в кэш и сверим против прочитанного поколения.
-        r._cache["v"] = shm
+        r._cache[("v",)] = ("v", shm)
         from multiprocess_framework.modules.shared_resources_module.memory.format import (
             read_generation,
         )
@@ -87,28 +85,36 @@ class TestCloseAndErrors:
     def test_close_closes_all_and_clears(self):
         r = _reader()
         a, b = _FakeShm(), _FakeShm()
-        r._cache["a"] = a
-        r._cache["b"] = b
+        r._cache[("a",)] = ("a", a)
+        r._cache[("b",)] = ("b", b)
         r.close()
         assert a.closed == 1 and b.closed == 1
         assert r._cache == {}
         assert r.close_errors == 0
 
     def test_close_error_counted_not_swallowed(self):
-        """H-ревью (S3): ошибка close() СЧИТАЕТСЯ (не глотается молча) + опц. лог."""
+        """H-ревью (S3): ошибка close() (не BufferError) СЧИТАЕТСЯ (не глотается молча) + опц. лог."""
         logs: list[str] = []
         r = _reader(log=logs.append)
-        r._cache["bad"] = _FakeShm(raise_on_close=True)
+        r._cache[("bad",)] = ("bad", _FakeShm(raise_on_close=OSError("boom")))
         r.close()
         assert r.close_errors == 1
         assert logs and "close()" in logs[0]
 
-    def test_lru_eviction_closes_oldest_without_zero_copy(self):
-        """Без zero-copy кэш эвиктит старейший handle при переполнении cap (с close)."""
-        r = _reader(zero_copy=False, cap=1)
+    def test_close_with_live_view_defers_not_error(self):
+        """4.7b2: BufferError (живой view) — не ошибка: handle ждёт в ``_retired``, ``deferred_closes`` +1."""
+        r = _reader()
+        bad = _FakeShm(raise_on_close=BufferError("exported view alive"))
+        r._cache[("bad",)] = ("bad", bad)
+        r.close()
+        assert r.close_errors == 0 and r.deferred_closes == 1
+        assert r._retired == [bad] and r._cache == {}
+
+    def test_new_name_under_same_key_retires_old_handle(self):
+        """4.7b: новое имя под тем же ключом — старый handle закрыт и убран из кэша."""
+        r = _reader()
         old = _FakeShm()
-        r._cache["old"] = old
-        # добавить второй через locked-хелпер (эмулируем внутренний путь open)
+        r._cache[("o", "s", 0)] = ("old", old)
 
         class _Mod:
             @staticmethod
@@ -116,6 +122,7 @@ class TestCloseAndErrors:
                 return _FakeShm()
 
         with r._lock:
-            r._open_cached_locked("new", _Mod)
-        assert old.closed == 1  # старейший закрыт при эвикции
-        assert "old" not in r._cache
+            r._open_cached_locked(("o", "s", 0), "new", _Mod)
+        assert old.closed == 1
+        assert r._cache[("o", "s", 0)][0] == "new"
+        assert r.cache_size == 1

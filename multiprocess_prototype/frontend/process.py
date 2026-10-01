@@ -44,13 +44,10 @@ class GuiProcess(ProcessModule):
         # SHM receive middleware: при получении данных — читать кадр из SHM
         # owner/slot — fallback, реальные координаты берутся из msg["data"]
         if self.router_manager and self.memory_manager:
-            # Ф7 G.5.b: GUI-путь ЯВНО copy-out (zero_copy=False перекрывает env-флаг).
-            # Qt держит пиксели дольше любого кадрового окна (в модели/кэше рендера),
-            # поэтому view в слот для дисплея небезопасен; zero-copy — только на
-            # data-plane цепочки инспекции. Пересмотр GUI-zero-copy — отдельный заход.
-            self._recv_frame_mw = FrameShmMiddleware(
-                self.memory_manager, owner=self.name, slot="output_frames", zero_copy=False
-            )
+            # Ф7 G.5.b: GUI-путь copy-out: ``on_receive`` отдаёт КОПИЮ (Qt держит пиксели дольше
+            # любого кадрового окна — в модели/кэше рендера, view в слот небезопасен); view без копии
+            # получает только ``restore_frame`` конвейера инспекции (4.7b).
+            self._recv_frame_mw = FrameShmMiddleware(self.memory_manager, owner=self.name, slot="output_frames")
             self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
             # Ф7 G.3-нит: зарегистрировать middleware в агрегации router-stats, чтобы
             # torn/drop/pickle-fallback на ДИСПЛЕЙ-пути были видны в introspect.router_stats

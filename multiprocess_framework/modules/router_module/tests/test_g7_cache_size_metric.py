@@ -19,15 +19,9 @@ from multiprocess_framework.modules.shared_resources_module.memory.core.manager 
 )
 
 
-def _enable_handle_cache(monkeypatch) -> None:
-    monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
-    monkeypatch.setenv("FW_SHM_HANDLE_CACHE", "1")
-
-
 class TestHandleCacheSizeMetric:
-    def test_cache_size_grows_with_cross_process_read(self, monkeypatch):
+    def test_cache_size_grows_with_cross_process_read(self):
         """С handle-кэшем чтение кадра оседает handle'ом в кэше → cache_size растёт."""
-        _enable_handle_cache(monkeypatch)
         writer = FrameShmMiddleware(MemoryManager(), owner="cam0", slot="output_frames", coll=2)
         reader = FrameShmMiddleware(MemoryManager(), owner="reader", slot="unused")
         try:
@@ -41,17 +35,3 @@ class TestHandleCacheSizeMetric:
             writer.release_owned_memory()
             # После teardown кэш очищен.
             assert reader.frame_handle_cache_size == 0
-
-    def test_cache_size_zero_without_handle_cache(self, monkeypatch):
-        """Флаг off: сегмент открывается/закрывается на кадр, кэш пуст → 0 (бит-в-бит)."""
-        monkeypatch.delenv("FW_SHM_HANDLE_CACHE", raising=False)
-        monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
-        writer = FrameShmMiddleware(MemoryManager(), owner="cam0", slot="output_frames", coll=2)
-        reader = FrameShmMiddleware(MemoryManager(), owner="reader", slot="unused")
-        try:
-            out = writer.strip_and_write({"frame": np.full((16, 16, 3), 1, np.uint8)})
-            reader.restore_frame({"data": out})
-            assert reader.frame_handle_cache_size == 0
-        finally:
-            reader.close_handle_cache()
-            writer.release_owned_memory()
