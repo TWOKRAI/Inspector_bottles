@@ -121,6 +121,10 @@ class ObjectPassport:
     для `defect` — `{"active": bool}`. Слой с `color_rgb` добавляет ключ
     `"color_rgb": [r, g, b]` (после сдвига тона слоя, если он был) — у `static`-слоя
     с заливкой это единственный ключ записи. Заполняет `LayeredObject`.
+
+    `lateral_px` — смещение объекта поперёк хода ленты в пикселях кадра (знаковое,
+    `+` = вниз по кадру, `0.0` = по центру полосы `belt_y_px`). Проставляет `ObjectSpawner`
+    при спавне (`lateral_offset_px`); кадр и истина робота (`object_robot_xy`) читают его.
     """
 
     object_id: str
@@ -129,6 +133,7 @@ class ObjectPassport:
     defect: str | None
     spawn_encoder: float
     layer_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    lateral_px: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Сериализация на границе (Dict at Boundary, Task 3.4): только JSON-совместимые
@@ -141,6 +146,7 @@ class ObjectPassport:
             "defect": self.defect,
             "spawn_encoder": float(self.spawn_encoder),
             "layer_params": _json_safe(self.layer_params),
+            "lateral_px": float(self.lateral_px),
         }
 
     @classmethod
@@ -153,6 +159,7 @@ class ObjectPassport:
             defect=data["defect"],
             spawn_encoder=float(data["spawn_encoder"]),
             layer_params=dict(data.get("layer_params") or {}),
+            lateral_px=float(data.get("lateral_px", 0.0)),
         )
 
 

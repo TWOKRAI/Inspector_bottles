@@ -269,7 +269,7 @@ float}` — read-only свойства для `scene.status`, чтобы не л
 `item["frame"]` содержит именно эти байты в этом порядке.
 
 Центр объекта: `cx = entry_x_px + belt_direction * encoder_to_offset_mm(now_encoder,
-passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px - y_px`; рисуется альфа-композицией
+passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px + passport.lateral_px - y_px`; рисуется альфа-композицией
 (`dataset_gen.core.compose.composite`, тот же примитив, что `LayeredObject`). Возвращаются
 паспорта объектов, чей bbox пересекается с `camera_rect` (частично видимый — считается видимым,
 отрисовывается только видимая часть); порядок — спавна (`spawner.active_objects()`). bbox,
@@ -288,6 +288,23 @@ passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px - y_px`; рисуе
 Объекты рисуются в порядке спавна — при перекрытии более поздний перекрывает более ранний
 (z-order = порядок списка, без отдельного сортировочного ключа).
 
+### Поперечное смещение дисков (`sim-lateral-offset`, Task 1.1)
+
+`ObjectPassport.lateral_px: float = 0.0` — смещение поперёк хода ленты в пикселях кадра
+(знаковое, `+` = вниз по кадру); `to_dict` всегда пишет его, `from_dict` старого словаря без
+ключа даёт `0.0`. Проставляет `ObjectSpawner(..., lateral_offset_px=(lo, hi))` (`0 <= lo <= hi`,
+дефолт `(0, 0)`): после `factory.make()` — модуль `rng.uniform(lo, hi)`, затем знак ±1
+равновероятно; диапазон `(0, 0)` rng НЕ трогает (поток случайных чисел, кадры и паспорта байт в
+байт прежние, `lateral_px` всегда `0.0`, не `-0.0`). Компоновщик рисует диск на
+`belt_y_px + lateral_px`; истина робота — `object_robot_xy(..., lateral_px=, px_per_mm=)` +=
+`(lateral_px / px_per_mm) * frame_down`, где `frame_down` — необязательные
+`BeltGeometry.frame_down_ux/uy` (единичный вектор «вниз по кадру» в системе робота; одна
+компонента без второй — `ValueError`; ненулевое смещение без `frame_down` — `ValueError`).
+
+**Известное расхождение (не чинится):** сим изотропен (8.163 px/мм по обеим осям), линейная
+калибровка рецепта по вертикали — 78.4 мм / 481 px = 6.135 px/мм: для 20 px это 2.45 мм (сим)
+против 3.26 мм (прототип), ≈0.8 мм невязки `pick_error`.
+
 ### Фон-текстура (Task 3.6, LS-011)
 
 `SceneCompositor(..., background_tile=None)` — необязательный тайл фона, RGB `uint8`
@@ -304,9 +321,9 @@ passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px - y_px`; рисуе
 
 ## `core/matching.py` — job↔object matching (Task 3.5a, LS-012)
 
-`match_job(active, job, geometry, *, removed=(), match_radius_mm=5.0)` сопоставляет
+`match_job(active, job, geometry, *, removed=(), match_radius_mm=5.0, px_per_mm=None)` сопоставляет
 событие `RobotSimCore.on_job_done` (`JobDone`) с ближайшим объектом сцены по невязке XY
-в системе координат робота (`object_robot_xy`, `BeltGeometry`). Победитель из `active` ->
+в системе координат робота (`object_robot_xy`, `BeltGeometry`; `px_per_mm` нужен только объектам с `lateral_px != 0`). Победитель из `active` ->
 `matched`, из `removed` (уже снятых) -> `dup`, иначе `no_object`. Используется плагином
 `Plugins/sim/scene_source` (часть B) вместе с `ObjectSpawner.remove()`.
 

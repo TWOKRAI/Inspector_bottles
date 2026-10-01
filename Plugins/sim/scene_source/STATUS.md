@@ -14,8 +14,11 @@
 | Задания робота (Task 3.5b) | есть: команды `scene.job_done`/`scene.status`, конфиг `geometry`/`match_radius_mm`/`dup_window_s`, разбор очереди в начале `produce()` (`match_job` → `spawner.remove`); `tests/test_scene_source_task_3_5.py` (tester) — 7/7; `tests/test_scene_source_hazards_3_5.py` (автор) — 3/3 (200 заданий из 4 потоков во время `produce()`, `ecap` далеко впереди мира, два задания на объект в одном разборе) |
 | Границы | `tests/test_scene_source_acceptance.py::test_no_forbidden_imports` — 0 запрещённых импортов |
 | Направление ленты / точка входа (Task 5.3b) | есть: конфиг `belt_direction` → `SceneCompositor` (точку входа `entry_x_px` плагин выводит сам из `resolution_width`; неверное направление → откат на фон с записью в лог); `tests/test_scene_source_hazards.py::test_belt_direction_minus_one_object_moves_toward_smaller_x` (автор, WIRING реальным плагином+движком) |
+| Поперечное смещение дисков (`sim-lateral-offset` 1.1) | есть: ключ `lateral_offset_px` (дефолт ядра `[0, 0]`, стенд `[10, 20]`), проверка в `configure()` вне try/except движка (`ValueError` с ключом и значением; ненулевой диапазон без `geometry.frame_down_*` — тоже), `lateral_px` в `sim.objects`, `px_per_mm` в `match_job`; `tests/test_acceptance_lateral_offset_plugin.py` (tester, слепой) |
 
 ## Долг / открытые вопросы
+
+- `sim-lateral-offset`: сим изотропен (8.163 px/мм по обеим осям), рецепт по вертикали — 6.135 px/мм; невязка ≈0.8 мм на 20 px, не исправлена (см. README).
 
 - Сцена обновляется ≈8 раз/с, не 20: дельты мира приходят пачками ~120 мс (замер ревью 2026-09-22, Task 2.2, актуально и с движком).
 - `scene_length_mm`/`belt_y_px` дефолты — эвристика разработчика (не измерены на живом стенде), см. README.

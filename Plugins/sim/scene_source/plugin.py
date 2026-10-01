@@ -94,7 +94,7 @@ from Services.line_sim.core import (
     match_job,
     resolve_repo_path,
 )
-from Services.line_sim.core.spawner import validate_flow
+from Services.line_sim.core.spawner import validate_flow, validate_lateral_offset_px
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -252,6 +252,16 @@ class SceneSourcePlugin(ProcessModulePlugin):
         # `dup`; `_recent` читает поток команд — пишется и копируется под `self._lock`.
         geometry_cfg = cfg.get("geometry") or {"origin_x_mm": 0.0, "origin_y_mm": 0.0}
         self._geometry = BeltGeometry.from_dict(geometry_cfg)
+        self._px_per_mm = px_per_mm
+        # Поперечное смещение дисков: ValueError НЕ пойман try/except сборки движка ниже —
+        # кривой ключ или смещение без frame_down (истина робота молча врала бы) = ошибка
+        # конфигурации стенда, а не повод откатиться на фон.
+        lateral_offset_px = validate_lateral_offset_px(cfg.get("lateral_offset_px", (0.0, 0.0)))
+        if lateral_offset_px[1] > 0.0 and not self._geometry.has_frame_down:
+            raise ValueError(
+                f"scene_source: lateral_offset_px={list(lateral_offset_px)!r} требует geometry.frame_down_ux/"
+                f"frame_down_uy (единичный вектор «вниз по кадру» в системе робота), получено geometry={geometry_cfg!r}"
+            )
         self._match_radius_mm = float(cfg.get("match_radius_mm", _DEFAULT_MATCH_RADIUS_MM))
         self._dup_window_s = float(cfg.get("dup_window_s", _DEFAULT_DUP_WINDOW_S))
         self._jobs: collections.deque[JobDone] = collections.deque()
@@ -303,7 +313,9 @@ class SceneSourcePlugin(ProcessModulePlugin):
             preset = load_scene_preset(preset_path, self._defect_override)
             self._preset = preset
             factory = ObjectFactory(preset)
-            self._spawner = ObjectSpawner(factory, scene_length_mm=scene_length_mm, **spawner_kwargs)
+            self._spawner = ObjectSpawner(
+                factory, scene_length_mm=scene_length_mm, lateral_offset_px=lateral_offset_px, **spawner_kwargs
+            )
             self._compositor = SceneCompositor(
                 self._spawner,
                 px_per_mm=px_per_mm,
@@ -883,6 +895,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                     self._geometry,
                     removed=[passport for _t, passport in self._removed],
                     match_radius_mm=self._match_radius_mm,
+                    px_per_mm=self._px_per_mm,
                 )
                 if result.outcome == "matched" and result.object_id is not None:
                     passport = self._spawner.remove(result.object_id)

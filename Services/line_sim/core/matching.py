@@ -39,17 +39,44 @@ class BeltGeometry:
     """Координаты робота, отвечающие точке сцены «путь 0 вдоль ленты, центр полосы».
 
     Направление хода ленты не поле — общий `BELT_UX`/`BELT_UY` (см. `belt.py`).
+
+    `frame_down_ux/uy` — необязательный единичный вектор «вниз по кадру» в системе робота
+    (поперёк ленты); нужен только для поперечного смещения дисков (`lateral_px`). Оба или
+    ни одного: одна компонента без второй — `ValueError`.
     """
 
     origin_x_mm: float = 0.0
     origin_y_mm: float = 0.0
+    frame_down_ux: float | None = None
+    frame_down_uy: float | None = None
+
+    def __post_init__(self) -> None:
+        if (self.frame_down_ux is None) != (self.frame_down_uy is None):
+            raise ValueError(
+                "geometry: frame_down_ux и frame_down_uy задаются парой — "
+                f"получено frame_down_ux={self.frame_down_ux!r}, frame_down_uy={self.frame_down_uy!r}"
+            )
+
+    @property
+    def has_frame_down(self) -> bool:
+        return self.frame_down_ux is not None
 
     def to_dict(self) -> dict[str, float]:
-        return {"origin_x_mm": self.origin_x_mm, "origin_y_mm": self.origin_y_mm}
+        out = {"origin_x_mm": self.origin_x_mm, "origin_y_mm": self.origin_y_mm}
+        if self.frame_down_ux is not None and self.frame_down_uy is not None:
+            out["frame_down_ux"] = self.frame_down_ux
+            out["frame_down_uy"] = self.frame_down_uy
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BeltGeometry:
-        return cls(origin_x_mm=float(data["origin_x_mm"]), origin_y_mm=float(data["origin_y_mm"]))
+        ux, uy = data.get("frame_down_ux"), data.get("frame_down_uy")
+        return cls(
+            origin_x_mm=float(data["origin_x_mm"]),
+            origin_y_mm=float(data["origin_y_mm"]),
+            frame_down_ux=None if ux is None else float(ux),
+            frame_down_uy=None if uy is None else float(uy),
+        )
 
 
 @dataclass(frozen=True)
@@ -86,11 +113,33 @@ class MatchResult:
     residual_mm: float | None
 
 
-def object_robot_xy(spawn_encoder: float, ecap: float, geometry: BeltGeometry) -> tuple[float, float]:
+def object_robot_xy(
+    spawn_encoder: float,
+    ecap: float,
+    geometry: BeltGeometry,
+    *,
+    lateral_px: float = 0.0,
+    px_per_mm: float | None = None,
+) -> tuple[float, float]:
     """Координаты объекта в системе робота на момент энкодера `ecap` — тот же путь
-    вдоль ленты, что и трекинг робота (`FACTOR_MM`, `BELT_UX`/`BELT_UY`)."""
+    вдоль ленты, что и трекинг робота (`FACTOR_MM`, `BELT_UX`/`BELT_UY`).
+
+    Поперечное смещение (`lateral_px != 0`) добавляет `(lateral_px / px_per_mm) * frame_down`;
+    без `frame_down` в `geometry` или без `px_per_mm` это `ValueError` — молча врать про
+    позицию нельзя. `lateral_px == 0` — прежний результат, `px_per_mm`/`frame_down` не нужны."""
     off = encoder_to_offset_mm(ecap, spawn_encoder)
-    return geometry.origin_x_mm + BELT_UX * off, geometry.origin_y_mm + BELT_UY * off
+    x = geometry.origin_x_mm + BELT_UX * off
+    y = geometry.origin_y_mm + BELT_UY * off
+    if lateral_px != 0.0:
+        if not geometry.has_frame_down or px_per_mm is None:
+            raise ValueError(
+                f"object_robot_xy: lateral_px={lateral_px!r} требует frame_down в geometry и px_per_mm "
+                f"(frame_down={geometry.frame_down_ux!r}/{geometry.frame_down_uy!r}, px_per_mm={px_per_mm!r})"
+            )
+        lateral_mm = lateral_px / px_per_mm
+        x += lateral_mm * geometry.frame_down_ux  # type: ignore[operator]  # has_frame_down проверен выше
+        y += lateral_mm * geometry.frame_down_uy  # type: ignore[operator]
+    return x, y
 
 
 def match_job(
@@ -100,6 +149,7 @@ def match_job(
     *,
     removed: Iterable[ObjectPassport] = (),
     match_radius_mm: float = 5.0,
+    px_per_mm: float | None = None,
 ) -> MatchResult:
     """Сопоставить `job` с ближайшим объектом среди `active` ∪ `removed` — см. Post
     докстринга модуля."""
@@ -111,13 +161,17 @@ def match_job(
     best_is_active = False
 
     for passport in active:
-        x, y = object_robot_xy(passport.spawn_encoder, job.ecap, geometry)
+        x, y = object_robot_xy(
+            passport.spawn_encoder, job.ecap, geometry, lateral_px=passport.lateral_px, px_per_mm=px_per_mm
+        )
         residual = math.hypot(x - job.x_mm, y - job.y_mm)
         if best_residual is None or residual < best_residual:
             best_residual, best_object_id, best_is_active = residual, passport.object_id, True
 
     for passport in removed:
-        x, y = object_robot_xy(passport.spawn_encoder, job.ecap, geometry)
+        x, y = object_robot_xy(
+            passport.spawn_encoder, job.ecap, geometry, lateral_px=passport.lateral_px, px_per_mm=px_per_mm
+        )
         residual = math.hypot(x - job.x_mm, y - job.y_mm)
         if best_residual is None or residual < best_residual:
             best_residual, best_object_id, best_is_active = residual, passport.object_id, False
