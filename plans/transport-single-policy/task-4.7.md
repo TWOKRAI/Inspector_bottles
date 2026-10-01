@@ -255,7 +255,7 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 - `frame_stale_drops` = `reader.stale_drops` + отвязанные сегменты + `note_stale_drops`. Один счётчик reader'а бьют
   restore, pre-chain, post-chain и дверь, по месту дроп не различить. Поэтому формула приёмки сводится по сумме (ниже).
 - Pre-chain stale считает входы (`1 + note_stale_drops(len(items)-1)`), post-chain — выходы
-  (`pipeline_executor.py:262-267`; 2→1 даёт 2 против 1, 1→3 даёт 1 против 3). Дверь считает выходы
+  (`pipeline_executor.py:264-268`; 2→1 даёт 2 против 1, 1→3 даёт 1 против 3). Дверь считает выходы
   (по одному на item). После 4.7d-2 post-chain считает входы, как pre-chain; дверь остаётся по выходам.
 - `valid` вычисляется на `pipeline_executor.py:254`, до `if not items: return` (`:258`), но ветка `if not valid`
   (`:264-268`) стоит ПОСЛЕ него: при пустом выходе и устаревшем view reader уже прибавил 1, а батч «не дропнут».
@@ -291,7 +291,8 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
   `not_inspected_lag`,
   `not_inspected_stale_restore` — только при `every`.
 - `PipelineExecutor.get_cycle_metrics()`: `not_inspected_stale_exec` — только при `every`; `not_inspected_handled` —
-  всегда: сколько маркер-item'ов прошло через `_forward_markers` (рождённые в этом процессе на restore/bound/exec и
+  всегда: сколько маркер-item'ов отправил исполнитель (через `_forward_markers` или, на post-chain stale, прямо через
+  `_send_results`; рождённые в этом процессе на restore/bound/exec и
   пришедшие сверху). Дверные маркеры сюда не входят.
 - `FrameShmMiddleware`: свойство `door_drops` (всегда; выходов, дропнутых дверью по `_inputs_still_valid`; это
   подмножество `frame_stale_drops`, не добавка к нему) и `not_inspected_door` (только при `every`; рождено, не
@@ -336,8 +337,8 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 **Acceptance:**
 - [ ] `ProcessConfig(process_name="p", extras={"overflow": "every"}).as_generic_config().overflow == "every"`; без ключа
       `== "latest"`.
-- [ ] `ProcessConfig(process_name="p", extras={"overflow": "sometimes"}).as_generic_config()` → `ValueError`, текст
-      содержит `p`, `overflow` и `'sometimes'`.
+- [ ] `ProcessConfig(process_name="proc_x", extras={"overflow": "sometimes"}).as_generic_config()` → `ValueError`,
+      текст содержит `proc_x`, `overflow` и `'sometimes'`.
 - [ ] `GenericProcessConfig(overflow="every").build()[1]["config"]["overflow"] == "every"`; при `latest` ключа
       `"overflow"` в `proc_dict["config"]` нет (golden-снапшоты `build` не меняются).
 - [ ] `build_marker({"trace_id": "t1", "capture_ts": 12.5, "frame_id": 7, "camera_id": "cam0", "frame": <ndarray>,
@@ -357,7 +358,7 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 **Files:** `multiprocess_framework/modules/process_module/generic/data_receiver.py`,
 `multiprocess_framework/modules/process_module/generic/pipeline_executor.py`,
 `multiprocess_framework/modules/process_module/generic/plugin_operation_step.py`,
-`multiprocess_framework/modules/process_module/plugins/plugin_runner.py` (валидация портов пропускает маркер-items).
+`multiprocess_framework/modules/process_module/generic/plugin_runner.py` (валидация портов пропускает маркер-items).
 Существующие тесты, которые меняются намеренно: `test_g5c_executor_drop.py:245` (1→3 пинит 3, станет 1) и
 `test_cycle_metrics.py:164` (`_EXECUTOR_KEYS` — точный набор, добавляется `not_inspected_handled`).
 **Steps:**
@@ -366,8 +367,12 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
    соседняя более ранняя коллекция `pending[i-1]` — маркер-коллекция, маркеры дописываются в неё
    (`pending[i-1].extend(markers); del pending[i]`), иначе `pending[i] = markers`. Без склейки маркер-коллекции копятся
    до `queue_size` и `put` блокирует приёмник — `every` превращался бы обратно в блокировку. Порядок маркеров
-   сохраняется. Маркер-коллекция не кадровая (`_is_frame_collection` её не считает) и потолком не вытесняется. Метка
+   сохраняется. **Инвариант (ревью спеки итер. 2):** после `_bound_lag` в очереди нет двух соседних маркер-коллекций,
+   в том числе при `excess > 1` (после отката на блокирующий `put`): склейка — отдельным проходом после всех замен
+   вызова. Маркер-коллекция не кадровая (`_is_frame_collection` её не считает) и потолком не вытесняется. Метка
    `enq_ts` — момент первой замены. При `latest` — `del`, как сейчас. `lag_dropped_items` растёт в обоих режимах.
+   Ловушка: при `queue_size <= lag` первая замена места не освобождает — под `every` приёмник уходит в блокирующий
+   `put`; в рецептах сегодня 64 против 2, проверка конфигурации — вне 4.7d.
 2. `run_loop`: на ветке `_is_shm_dropped` при `every` вместо `continue` строится маркер из `msg` (`reason="stale_restore"`,
    `source` = имя узла) и уходит `self.on_items_ready([marker])` — мимо коллектора. При `latest` — `continue`, как сейчас.
    Покрывает любой отказ restore: stale, torn, отвязанный сегмент, сбой открытия ссылки.
@@ -397,6 +402,9 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
       `lag_dropped_items == 4`, `not_inspected_lag == 4`.
 - [ ] Bound, `every`, `chain_queue` `maxsize=3`, 50 кадровых коллекций подряд, исполнитель не читает: приёмник не
       блокируется (вызов в daemon-потоке завершается до дедлайна), `qsize() <= 3`, `not_inspected_lag == 48`.
+- [ ] `every`, lag 2: `chain_queue` заполнена напрямую (мимо приёмника) кадровыми коллекциями `[b1, b2, b3, b4]`,
+      затем через приёмник приходит `b5` (`excess == 3`). Очередь: `[M(b1,b2,b3), b4, b5]` — маркеры ОДНОЙ коллекцией,
+      соседних маркер-коллекций нет; `not_inspected_lag == 3`.
 - [ ] Тот же вход t1..t6 при `latest`: `qsize() == 2`, `[c5, c6]`, маркеров в очереди 0, свойство
       `lag_dropped_total == 4`, `lag_dropped_items == 4`, ключа `not_inspected_lag` в `get_cycle_metrics()` нет.
 - [ ] Выброшена коллекция из 2 items (`t1`, `t2`) при `every`: на её месте одна коллекция из 2 маркеров (`t1`, `t2`);
@@ -427,7 +435,8 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
       `not_inspected_stale_exec == 3`, `not_inspected_handled` +3.
 - [ ] Stale post-chain 2→1 (плагин склеивает 2 входа в 1 выход, слот перезаписан во время `process`), `every`:
       `send_fn` получила 2 маркера (`t1,t2`) и 0 обычных, `frame_stale_drops` +2 (было +1 по выходам),
-      `not_inspected_stale_exec == 2`; плагин (в т.ч. с `accepts_markers = True`) вызван ровно 1 раз — на входах,
+      `not_inspected_stale_exec == 2`, `not_inspected_handled` +2; плагин (в т.ч. с `accepts_markers = True`) вызван
+      ровно 1 раз — на входах,
       маркеры его повторно не проходят.
 - [ ] Stale post-chain 1→3: `frame_stale_drops` +1 (было +3), 1 маркер.
 - [ ] Stale post-chain, плагин вернул `[]`, слот перезаписан: `frame_stale_drops` +1 (вход), 1 маркер (`every`).
@@ -438,7 +447,7 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 ###### 4.7d-3 — Маркер в двери отправителя (3 кода-файла, developer; только после слияния 4.7b в main)
 **Files:** `multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py`
 (`strip_data_frame_on_send`, `strip_and_write`; конструктор принимает `overflow`, read-only свойство `overflow`,
-`source` = `self._owner`), `multiprocess_framework/modules/router_module/router_manager.py` (`get_shm_stats`: ключи
+`source` = `self._owner`), `multiprocess_framework/modules/router_module/core/router_manager.py` (`get_shm_stats`: ключи
 `door_drops` всегда, `not_inspected_door` только при `every`; тест `test_shm_stats_narrow` обновляется),
 `process_module/generic/generic_process.py` (передача `overflow` в `FrameShmMiddleware`).
 **Steps:** 1. Счётчик `door_drops` (всегда): +1 на каждый item, у которого `strip_and_write` впервые поставил
@@ -491,7 +500,7 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
       валидации регистра.
 - [ ] `reject_delay_ms=50`, маркер: `process` длится ≥ 50 мс (как обычный брак).
 - [ ] Маркер даёт ровно одну широкую запись (`_write_unit_event`, `decisive=False`) со своим `trace_id`.
-- [ ] Связка с 4.7d-2: цепочка `[blob_detector, robot_control]`, маркер-коллекция на входе: `blob_detector.process`
+- [ ] (после слияния 4.7d-2; до него — `xfail(strict=True)`) Связка с 4.7d-2: цепочка `[blob_detector, robot_control]`, маркер-коллекция на входе: `blob_detector.process`
       вызван 0 раз, `robot_control.process` — 1 раз.
 
 ###### 4.7d-5 — Приёмка на стенде (лид, без кода)
