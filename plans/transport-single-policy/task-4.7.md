@@ -239,7 +239,11 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 
 **Ответы владельца (2026-10-01, до ревью спеки):**
 - Умолчание — `latest` для всех процессов, включая процессы с processing-плагинами (решение 1 подтверждено).
-- Отбраковщик на маркер `not_inspected` — `reject` (политика 4.7d-4 подтверждена, код можно писать).
+- Отбраковщик на маркер `not_inspected` — `reject` по умолчанию, но **настраиваемо** (уточнение владельца): «в идеале
+  чтоб настраивалась и можно было бы потом делать алгоритм что с этим делать, но главное — система знает, что это за
+  тип объекта». Отсюда: регистр `robot_control.not_inspected_action: reject | pass` (умолчание `reject`), а тип объекта
+  задаёт контракт маркера (`is_marker`, `reason`, `source`, `trace_id`) — любой плагин с `accepts_markers = True`
+  может завести свой алгоритм поверх него. Сам «алгоритм» — вне 4.7d.
 - Тег `not_inspected` от сбоя плагина (кадр с картинкой, сегодня уходит как `pass`) — **отдельной задачей после 4.7d**,
   в 4.7d-4 не входит.
 
@@ -458,14 +462,17 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 - [ ] Реальный путь на двух настоящих middleware (писатель и читатель, настоящее SHM): перезапись входа в двери под `every`
       даёт на стороне читателя item с `is_marker(item)`; под `latest` читатель ничего не получает.
 
-###### 4.7d-4 — Отбраковщик принимает маркер (1 код-файл, developer; решение о политике — за владельцем)
-**Files:** `Plugins/control/robot_control/plugin.py`.
+###### 4.7d-4 — Отбраковщик принимает маркер (2 кода-файла, developer; политика подтверждена владельцем)
+**Files:** `Plugins/control/robot_control/plugin.py`, `Plugins/control/robot_control/registers.py` (новое поле
+`not_inspected_action: Literal["reject", "pass"] = "reject"` с `FieldMeta`, рядом с `reject_delay_ms`; образец
+поля-перечисления — спросить `know-transport`).
 **Контекст:** без этого шага маркер доезжает и виден в счётчиках, но `RobotControlPlugin` его не видит или считает
 годным (item без детекций → `pass`). Политика «непроверенное = брак» взята из `multiprocess_prototype/plans/phase5_data_pipeline.md`
 («лучше выкинуть хорошую, чем пропустить плохую»); подтверждена владельцем 2026-10-01.
 **Steps:** 1. `accepts_markers = True` на классе. 2. Ветка маркера стоит ДО `self._total_inspected += 1` (`plugin.py:136`).
-Для маркер-item: `inspection_result = {"action": "reject", "reason": "not_inspected", "origin": <reason маркера>,
-"source": <source маркера>}`; свой счётчик `total_not_inspected` (+1 на каждый маркер, в т.ч. при `enabled=False`);
+Для маркер-item: `inspection_result = {"action": <not_inspected_action>, "reason": "not_inspected",
+"origin": <reason маркера>, "source": <source маркера>}` (при умолчании `action == "reject"`; задержка (б) — только
+при `reject`); свой счётчик `total_not_inspected` (+1 на каждый маркер, в т.ч. при `enabled=False`);
 `total_inspected` и `_total_rejected` не растут, вердикт-документ и фронт `_rejecting` не пишутся и не меняются.
 3. Решения лида по ревью спеки (находка 7): (а) `enabled=False` → `{"action": "pass", "reason": "disabled", "origin": …,
 "source": …}`, как у обычного item в выключенном плагине; (б) `reject_delay_ms` применяется к маркеру так же, как к
@@ -479,6 +486,9 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 - [ ] Маркер не пишет вердикт-документ (`_verdicts_written` не меняется) и не меняет `_rejecting`; `_total_rejected`
       не растёт.
 - [ ] `enabled=False`, маркер: `action == "pass"`, `reason == "disabled"`, `total_not_inspected == 1`.
+- [ ] `not_inspected_action="pass"`, маркер: `action == "pass"`, `reason == "not_inspected"`, `origin` сохранён,
+      `total_not_inspected == 1`, задержки нет; умолчание регистра — `"reject"`; значение вне `reject|pass` — ошибка
+      валидации регистра.
 - [ ] `reject_delay_ms=50`, маркер: `process` длится ≥ 50 мс (как обычный брак).
 - [ ] Маркер даёт ровно одну широкую запись (`_write_unit_event`, `decisive=False`) со своим `trace_id`.
 - [ ] Связка с 4.7d-2: цепочка `[blob_detector, robot_control]`, маркер-коллекция на входе: `blob_detector.process`
