@@ -206,3 +206,31 @@ def test_queue_at_chain_maxsize_with_only_signals_is_not_dropped():
             break
     assert drained == ["s1", "s2", "f"]
     assert receiver.lag_dropped_total == 0
+
+
+def test_transit_over_budget_is_in_cycle_metrics_only_behind_a_ring():
+    """C3: ``transit_over_budget`` — число для планирования мощности, оно обязано быть в метриках цикла.
+
+    B = 6, lag 2, глубина IPC 7 > 4 -> свойство 1 и ключ метрик 1 (ревью: раньше ключа не было). Получатель
+    не за кольцом (B = 0) ключ не получает: транзит у него не измеряется, ноль был бы ложным показанием.
+    """
+
+    def receiver_with(budget: int) -> DataReceiver:
+        return DataReceiver(
+            receive_fn=lambda **_: None,
+            shm_middleware=None,
+            item_collector=object(),
+            chain_queue=queue.Queue(maxsize=8),
+            max_lag_items=2,
+            inflight_budget=budget,
+            ipc_depth_fn=lambda: 7,
+        )
+
+    behind = receiver_with(6)
+    behind._note_ipc_depth()
+    assert behind.transit_over_budget == 1
+    assert behind.get_cycle_metrics()["transit_over_budget"] == 1
+
+    loose = receiver_with(0)
+    loose._note_ipc_depth()
+    assert "transit_over_budget" not in loose.get_cycle_metrics()

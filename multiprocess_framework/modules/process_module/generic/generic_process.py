@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import queue
 
+from ..commands.builtin_commands import BuiltinCommands
 from ..core.process_module import ProcessModule
 from ..plugins.base import PluginState
 from .data_receiver import DataReceiver
@@ -133,12 +134,7 @@ class GenericProcess(ProcessModule):
     def _data_queue_depth(self) -> int | None:
         """Глубина собственной IPC data-очереди процесса (Task 4.7c, C3); None — узнать нельзя."""
         q = (self.queues or {}).get("data")
-        if q is None:
-            return None
-        try:
-            return q.qsize()
-        except (NotImplementedError, OSError, AttributeError):
-            return None  # qsize недоступен (macOS) — как builtin_commands._queue_size
+        return None if q is None else BuiltinCommands._queue_size(q)
 
     def _init_data_pipeline(self) -> None:
         """Bootstrap data pipeline: DataReceiver, PipelineExecutor, SourceProducer."""

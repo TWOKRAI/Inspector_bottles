@@ -1085,7 +1085,9 @@ class FrameShmMiddleware:
         root = arr
         while isinstance(root, ndarray) and root.base is not None:
             root = root.base
-        return not isinstance(root, ndarray)
+        # Корень-ndarray без base, но с owndata=False (view из C-расширения без base) память не
+        # владеет -> чужая (4.7a, ревью N-2).
+        return not (isinstance(root, ndarray) and root.flags.owndata)
 
     @classmethod
     def _copy_inline_views(cls, item: dict) -> bool:

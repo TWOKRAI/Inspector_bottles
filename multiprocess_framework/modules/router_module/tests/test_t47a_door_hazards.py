@@ -3,8 +3,9 @@
 трогала чужую память». Слепой набор (``test_t47a_door_owndata.py``) закрывает контракт; здесь —
 то, что видно только изнутри:
 
-* флаги ``owndata`` снимаются ДО ``_write_item_arrays`` (он вынимает массивы из item) — иначе
-  крупный срез входа, ушедший в кольцо, не оставит следа и дверь пропустит устаревший кадр;
+* «чужая память» (корень цепочки ``.base`` не владеющий ndarray) определяется ДО ``_write_item_arrays``
+  (он вынимает массивы из item) — иначе крупный срез входа, ушедший в кольцо, не оставит следа и
+  дверь пропустит устаревший кадр;
 * fan-out повтор item-а (один dict на несколько targets) не меняет вердикт;
 * ``mm=None`` (pickle-by-design) — проверки входов не было и нет;
 * ``_copy_inline_views`` возвращает bool «копировал» — на нём держится вторая половина условия.
@@ -221,3 +222,30 @@ def test_foreign_reshaped_slice_via_real_shm_view_dropped(made):
 
     assert _send(sender, item) is None
     assert sender.frame_stale_drops == 1
+
+
+def test_ndarray_root_without_owndata_counts_as_foreign_memory():
+    """N-2: корень цепочки ``.base`` — ndarray, но ``owndata=False`` и ``base is None`` (view из
+    C-расширения без base): память он не владеет -> чужая. Такой ndarray из чистого Python не собрать
+    (``np.ndarray(buffer=...)`` всегда ставит base), поэтому имитируем подклассом, у которого ``base`` и
+    ``flags`` переопределены — ``_views_foreign_memory`` читает именно эти два атрибута.
+    """
+
+    class _NoBaseNoOwn(np.ndarray):
+        @property
+        def base(self):  # noqa: D102
+            return None
+
+        @property
+        def flags(self):  # noqa: D102
+            class _F:
+                owndata = False
+
+            return _F()
+
+    root = np.zeros(8, dtype=np.uint8).view(_NoBaseNoOwn)
+    assert FrameShmMiddleware._views_foreign_memory(root) is True
+    # контроль: обычный владеющий массив и его срез — свои
+    own = np.zeros(8, dtype=np.uint8)
+    assert FrameShmMiddleware._views_foreign_memory(own) is False
+    assert FrameShmMiddleware._views_foreign_memory(own[2:5]) is False

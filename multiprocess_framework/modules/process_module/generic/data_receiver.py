@@ -135,6 +135,9 @@ class DataReceiver:
         # Task 4.7c (C3): gauge глубины IPC data-очереди; ключа нет, пока глубину ни разу не прочли.
         if self._ipc_queue_depth is not None:
             metrics["ipc_queue_depth"] = self._ipc_queue_depth
+        # Task 4.7c (C3): число для планирования мощности; ключ только у получателя за кольцом (B > 0).
+        if self._inflight_budget > 0:
+            metrics["transit_over_budget"] = self._transit_over_budget
         return metrics
 
     def _note_ipc_depth(self) -> None:
