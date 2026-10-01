@@ -6,13 +6,15 @@
 - validate_wire(): проверка корректности конфигурации
 - round-trip: from_topology_entry() / to_topology_entry()
 
-Pure Python, 0 зависимостей (кроме dataclasses, typing).
+Pure Python (dataclasses, typing + одна константа глубины кольца из shared_resources_module.qos).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from typing import Any
+
+from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 
 
 @dataclass(frozen=True)
@@ -22,7 +24,7 @@ class ShmConfig:
     # Имя SHM-региона; авто-генерация если пусто
     shm_name: str = ""
     # Количество слотов кольцевого буфера
-    buffer_slots: int = 4
+    buffer_slots: int = DEFAULT_FRAME_RING_DEPTH
     # Процесс-владелец SHM; авто = source_process
     owner_process: str = ""
     # Стратегия создания: "direct" | "via_pm"
@@ -95,7 +97,7 @@ class WireConfig:
             "transport": "router",          # опционально
             "shm_config": {                 # опционально
                 "shm_name": "...",
-                "buffer_slots": 4,
+                "buffer_slots": 8,
                 "owner_process": "...",
                 "strategy": "direct",
             }
@@ -104,7 +106,7 @@ class WireConfig:
         shm_entry = entry.get("shm_config", {})
         shm_config = ShmConfig(
             shm_name=shm_entry.get("shm_name", ""),
-            buffer_slots=shm_entry.get("buffer_slots", 4),
+            buffer_slots=shm_entry.get("buffer_slots", DEFAULT_FRAME_RING_DEPTH),
             owner_process=shm_entry.get("owner_process", ""),
             strategy=shm_entry.get("strategy", "direct"),
         )

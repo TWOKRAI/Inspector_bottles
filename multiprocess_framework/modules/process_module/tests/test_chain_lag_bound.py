@@ -67,7 +67,8 @@ def _drain(chain: queue.Queue) -> List[str]:
 
 
 def _item(marker: str) -> list[dict]:
-    return [{"marker": marker}]
+    # Task 4.7c (C1): потолок считает только КАДРОВЫЕ коллекции — item несёт ключ ``frame``.
+    return [{"marker": marker, "frame": 0}]
 
 
 # =============================================================================

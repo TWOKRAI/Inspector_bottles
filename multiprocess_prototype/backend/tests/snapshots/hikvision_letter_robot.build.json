@@ -1503,7 +1503,7 @@
     "draw": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "gui"
         ],
@@ -1521,6 +1521,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1875,7 +1876,7 @@
     "gui": {
       "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -1883,6 +1884,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2216,7 +2218,7 @@
     "layout": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -2224,6 +2226,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2598,7 +2601,7 @@
     "line": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "recog",
           "draw"
@@ -2609,6 +2612,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2956,7 +2960,7 @@
     "maskview": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "gui"
         ],
@@ -2966,6 +2970,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3688,7 +3693,7 @@
     "recog": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "gui",
           "layout"
@@ -3707,6 +3712,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -4099,7 +4105,7 @@
     "vision": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "line",
           "recog",
@@ -4112,6 +4118,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {

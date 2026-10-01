@@ -229,6 +229,21 @@ class PipelineExecutor:
         # плагины его читали, writer мог обернуть кольцо и перезаписать слот).
         view_tickets = self._collect_view_tickets(items)
 
+        # Task 4.7c (C4): поколение входных view — ДО цепочки (чтение gen — микросекунды).
+        # Кадр, порванный уже на входе (слот перезаписан, пока сообщение ждало в очереди), не
+        # должен кормить плагины: цепочка отработала бы на порванных пикселях зря. Единица счёта
+        # здесь — ВХОДНЫЕ сообщения батча: reader уже учёл ОДИН stale-дроп (``all()`` остановился на
+        # первой ссылке), остальные N-1 входов доначисляем. У пост-проверки ниже единица другая —
+        # ВЫХОДЫ цепочки (батч 2 -> 1 даёт здесь 2, там 1; 1 -> 3 даёт 1 и 3). Счёт не выравнивался
+        # намеренно; какая единица нужна маркерам not_inspected/overflow — решает спека 4.7d.
+        # Займы освобождаем в любом случае.
+        if view_tickets and not self._frame_views_valid(view_tickets):
+            if len(items) > 1:
+                self._shm.note_stale_drops(len(items) - 1)
+            self._accumulate_releases(view_tickets)
+            self._cycle_metrics.record(time.perf_counter() - t_start)
+            return
+
         # Прогнать items через chain плагинов
         items = self._execute_chain(items)
 

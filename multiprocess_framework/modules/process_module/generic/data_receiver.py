@@ -17,7 +17,7 @@ from typing import Callable
 from . import frame_trace
 from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
-from ...router_module.middleware.frame_shm_middleware import SHM_DROPPED_KEY, FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import SHM_DROPPED_KEY, SHM_VIEWS_KEY, FrameShmMiddleware
 from .collector_registry import ItemCollector
 
 
@@ -57,6 +57,8 @@ class DataReceiver:
         node_name: str = "",
         max_lag_items: int = 0,
         clock: Callable[[], float] | None = None,
+        inflight_budget: int = 0,
+        ipc_depth_fn: Callable[[], int | None] | None = None,
     ) -> None:
         self._receive = receive_fn
         # Ф7 G.5.a — снятие двойной конверсии на data-plane. Флаг читается ОДИН раз
@@ -82,6 +84,13 @@ class DataReceiver:
         self._lag_dropped_since_log = 0
         self._lag_log_window = 5.0
         self._lag_last_log = 0.0
+        # Task 4.7c (C3): бюджет кадров в полёте B и чтение глубины СВОЕЙ IPC data-очереди.
+        # Транзит (кадры между очередью и приёмником) не навязывается размером очереди, а
+        # меряется: глубина > B - lag -> счётчик. B = 0 — получатель не за кольцом, не меряем.
+        self._inflight_budget = max(0, int(inflight_budget))
+        self._ipc_depth_fn = ipc_depth_fn
+        self._ipc_queue_depth: int | None = None
+        self._transit_over_budget = 0
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
         # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
@@ -123,7 +132,41 @@ class DataReceiver:
             metrics["perf_probes"] = self._perf.get_stats()
         # Task 4.5d: ключ есть всегда (0.0 до первого отсчёта) — ноль здесь показание.
         metrics["transport_ms"] = round(self._transport_ms, 2)
+        # Task 4.7c (C3): gauge глубины IPC data-очереди; ключа нет, пока глубину ни разу не прочли.
+        if self._ipc_queue_depth is not None:
+            metrics["ipc_queue_depth"] = self._ipc_queue_depth
+        # Task 4.7c (C3): число для планирования мощности; ключ только у получателя за кольцом (B > 0).
+        if self._inflight_budget > 0:
+            metrics["transit_over_budget"] = self._transit_over_budget
         return metrics
+
+    def _note_ipc_depth(self) -> None:
+        """Снять глубину IPC data-очереди и учесть превышение транзитного запаса (C3).
+
+        Зовётся на каждое полученное сообщение. Глубина > ``B - max_lag_items`` значит, что
+        кадров в пути больше запаса, и самый старый из них рискует пережить свой кадр.
+        Падение чтения глубины не должно ронять приём: платформа без qsize даёт None.
+        """
+        if self._ipc_depth_fn is None:
+            return
+        try:
+            depth = self._ipc_depth_fn()
+        except Exception as exc:  # noqa: BLE001 — измерение не вправе остановить приём
+            self._log_error(f"DataReceiver: не удалось прочитать глубину IPC-очереди: {exc}")
+            return
+        self._ipc_queue_depth = depth
+        if depth is not None and self._inflight_budget > 0 and depth > self._inflight_budget - self._max_lag_items:
+            self._transit_over_budget += 1
+
+    @property
+    def ipc_queue_depth(self) -> int | None:
+        """Последняя прочитанная глубина IPC data-очереди (None — не читали / узнать нельзя)."""
+        return self._ipc_queue_depth
+
+    @property
+    def transit_over_budget(self) -> int:
+        """Сколько раз глубина IPC data-очереди превысила транзитный запас ``B - lag``."""
+        return self._transit_over_budget
 
     def _note_transport(self, msg: dict) -> None:
         """Снять штамп отправки ``_t_sent_ns`` с сообщения и обновить EMA ``transport_ms``.
@@ -163,10 +206,17 @@ class DataReceiver:
         вытеснил 1646 штук (``queue_data_evicted`` у `seg`). То есть гарантия «не
         дропаем» уже не действовала, а платили за неё задержкой.
 
-        Что делает. Перед укладкой новой коллекции выбрасывает самые СТАРЫЕ, пока
-        в очереди не останется меньше потолка. Отставание сверху ограничено
-        ``max_lag_items / темп исполнителя``: 4 коллекции при 3.3 к/с — 1.2 с,
-        «несколько кадров, чтобы догнать пробку», а не секунды накопления.
+        Что делает. Перед укладкой новой КАДРОВОЙ коллекции выбрасывает самые СТАРЫЕ
+        кадровые коллекции, пока их в очереди не останется меньше потолка. Отставание
+        сверху ограничено ``max_lag_items / темп исполнителя``: 4 коллекции при 3.3 к/с —
+        1.2 с, «несколько кадров, чтобы догнать пробку», а не секунды накопления.
+
+        **Считаются только кадры (Task 4.7c, C1).** Бюджет кольца — про кадры: потолок
+        должен держать «в полёте» не больше B кадров, а сигнал без кадра (кнопка, команда)
+        слот кольца не занимает. Раньше потолок считал сообщения и вытеснял сигнал вместе
+        с кадрами. Коллекция кадровая, если хоть один её item несёт ``_shm_views`` или
+        ``frame`` — в том числе join, где сигнал склеен с кадром. Сигнальная коллекция
+        потолком не вытесняется и в счёт не идёт (идёт обычным ``put``).
 
         Потеря — со счётом и голосом: счётчик ``lag_dropped_total`` растёт всегда,
         WARNING печатается не чаще раза в 5 с и несёт число выброшенных за окно
@@ -175,25 +225,41 @@ class DataReceiver:
 
         Returns:
             True — коллекция уложена (вызывающему делать нечего).
-            False — уложить не удалось (гонка с потребителем): пусть работает
-            прежняя дорога с блокировкой, а не тихая потеря.
+            False — потолок не применим (сигнал) либо уложить не удалось (гонка с
+            потребителем): пусть работает прежняя дорога с блокировкой, а не тихая потеря.
         """
+        if not self._is_frame_collection(items):
+            return False
         dropped = 0
-        while self._chain_queue.qsize() >= self._max_lag_items:
-            try:
-                self._chain_queue.get_nowait()
-            except queue.Empty:  # потребитель успел вычерпать — места хватит
-                break
-            dropped += 1
+        chain = self._chain_queue
+        # Выборочное удаление из середины очереди — только под mutex Queue (иначе гонка
+        # с get() потребителя), и после него обязательно not_full.notify(): блокированный в
+        # put() производитель ждёт на not_full и без сигнала не узнал бы, что место освободилось.
+        with chain.mutex:
+            pending = chain.queue
+            frame_idx = [i for i, coll in enumerate(pending) if self._is_frame_collection(coll)]
+            excess = len(frame_idx) - self._max_lag_items + 1
+            if excess > 0:
+                for i in reversed(frame_idx[:excess]):  # с конца: индексы оставшихся не плывут
+                    del pending[i]
+                dropped = excess
+                # Приёмник — единственный производитель chain_queue, поэтому notify защитный и сегодня
+                # ненаблюдаем (замер: без него все тесты зелёные).
+                chain.not_full.notify(dropped)
         try:
-            self._chain_queue.put_nowait(items)
+            chain.put_nowait(items)
         except queue.Full:
-            # Гонка: место заняли между get и put. Не теряем молча — уходим на
-            # прежнюю дорогу (блокирующий put с алертом).
+            # Гонка: место заняли между удалением и put (или очередь забита сигналами). Не теряем
+            # молча — уходим на прежнюю дорогу (блокирующий put с алертом).
             self._note_lag_drops(dropped)
             return False
         self._note_lag_drops(dropped)
         return True
+
+    @staticmethod
+    def _is_frame_collection(items: list[dict]) -> bool:
+        """Кадровая ли коллекция: хоть один item несёт ``_shm_views`` или ``frame`` (C1)."""
+        return any(isinstance(it, dict) and (SHM_VIEWS_KEY in it or "frame" in it) for it in items)
 
     def _note_lag_drops(self, dropped: int) -> None:
         """Учесть выброшенные коллекции; голос — не чаще раза в окно, с числом."""
@@ -287,6 +353,9 @@ class DataReceiver:
             )
             if msg is None:
                 continue
+
+            # Task 4.7c (C3): глубина IPC-очереди на каждое полученное сообщение.
+            self._note_ipc_depth()
 
             # Тайминг полезной итерации (restore + build + on_item), без учёта
             # ожидания на пустом receive. perf_counter (не monotonic): работа

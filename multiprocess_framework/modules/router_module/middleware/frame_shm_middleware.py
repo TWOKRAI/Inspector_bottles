@@ -28,7 +28,7 @@ re-check вынесены за фасад `FrameReader` (модуль памят
 
 **Ф7 G.4.b — глубина кольца per-camera (B-8).** `coll` (число SHM-слотов round-robin)
 теперь настраивается на КОНКРЕТНУЮ камеру: явный `coll` из рецепта/wire (`buffer_slots`,
-раньше игнорировался) > QoS-профиль data при `FW_QOS_PROFILES` (history_depth) > 3.
+раньше игнорировался) > `DEFAULT_FRAME_RING_DEPTH` (8, Task 4.7c; гейта QoS на глубину нет).
 Каждый source-процесс = свой `owner` = своё независимое кольцо (изоляция цепочек камер:
 замедление/дроп одной камеры не трогает слоты другой). Владение слотом до release
 последним читателем (fan-out refcount, reclaim-on-death) — G.5 (нагружено только с
@@ -352,10 +352,8 @@ class FrameShmMiddleware:
         self._slot = slot
         # Ф7 G.4.b: глубина кольца per-camera (число SHM-слотов round-robin). Явный
         # coll (не None, >0) выигрывает — приходит из рецепта/wire (buffer_slots) на
-        # конкретную камеру; иначе при FW_QOS_PROFILES — боевая глубина из QoS-профиля
-        # data (history_depth=4, «несколько кадров на джиттер»); иначе прежний дефолт 3
-        # (откат бит-в-бит). Каждый источник = свой owner = своё независимое кольцо
-        # (изоляция per-camera по построению; общего слота нет).
+        # конкретную камеру; иначе DEFAULT_FRAME_RING_DEPTH (8, Task 4.7c). Каждый источник =
+        # свой owner = своё независимое кольцо (изоляция per-camera по построению).
         self._coll = self._resolve_ring_depth(coll)
         self._log_error = log_error or (lambda msg: None)
         # Ф7 G.6 (F5 ревью 2026-07-13): собственный счётчик, БЕЗ колбэка в
@@ -691,21 +689,18 @@ class FrameShmMiddleware:
 
     @classmethod
     def _resolve_ring_depth(cls, explicit: Optional[int]) -> int:
-        """Глубина кольца SHM-слотов (Ф7 G.4.b, B-8).
+        """Глубина кольца SHM-слотов (Ф7 G.4.b, B-8; Task 4.7c).
 
-        Приоритет: явный ``coll`` (не None, >0 — из рецепта/wire per-camera) > при
-        ``FW_QOS_PROFILES`` боевая глубина из QoS-профиля data (``history_depth``,
-        «несколько кадров на джиттер») > прежний дефолт 3 (откат бит-в-бит). Раньше
-        глубина была ЖЁСТКО 3 везде, а ``buffer_slots`` из wire-команды игнорировался
-        («информативно») — кольцо не настраивалось per-camera (B-8).
+        Явный ``coll`` (не None, >0 — из рецепта/wire per-camera) выигрывает, иначе
+        ``DEFAULT_FRAME_RING_DEPTH`` (8). Гейта ``FW_QOS_PROFILES`` на глубину нет: одна
+        глубина для всех, от неё же считается бюджет «в полёте» получателя (очередь + lag
+        строго меньше кольца — сообщение не переживает свой кадр).
         """
         if explicit is not None and explicit > 0:
             return int(explicit)
-        if cls._resolve_bool_flag(None, "FW_QOS_PROFILES"):
-            from ...shared_resources_module.qos import qos_for
+        from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 
-            return max(1, qos_for("data").history_depth)
-        return 3
+        return DEFAULT_FRAME_RING_DEPTH
 
     def _bump_frame_hops(self, container: dict) -> None:
         """Инкремент per-item поля frame_hops + агрегатного счётчика (Ф7 G.6).
@@ -1090,7 +1085,9 @@ class FrameShmMiddleware:
         root = arr
         while isinstance(root, ndarray) and root.base is not None:
             root = root.base
-        return not isinstance(root, ndarray)
+        # Корень-ndarray без base, но с owndata=False (view из C-расширения без base) память не
+        # владеет -> чужая (4.7a, ревью N-2).
+        return not (isinstance(root, ndarray) and root.flags.owndata)
 
     @classmethod
     def _copy_inline_views(cls, item: dict) -> bool:

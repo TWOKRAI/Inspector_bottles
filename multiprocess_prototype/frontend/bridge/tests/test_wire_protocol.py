@@ -52,7 +52,6 @@ def full_wire() -> WireConfig:
 
 
 class TestProperties:
-
     def test_source_target_process_properties(self, minimal_wire: WireConfig) -> None:
         """source_process и target_process извлекают имя процесса до первой точки."""
         assert minimal_wire.source_process == "camera_0"
@@ -73,7 +72,6 @@ class TestProperties:
 
 
 class TestWithDefaults:
-
     def test_with_defaults_fills_shm_name(self, minimal_wire: WireConfig) -> None:
         """Если shm_name пуст — генерируется shm_{source}_{target}."""
         result = minimal_wire.with_defaults()
@@ -124,7 +122,6 @@ class TestWithDefaults:
 
 
 class TestRoundTrip:
-
     def test_from_topology_entry_roundtrip(self, full_wire: WireConfig) -> None:
         """from_topology_entry(key, to_topology_entry()) == исходный wire."""
         entry = full_wire.to_topology_entry()
@@ -142,7 +139,7 @@ class TestRoundTrip:
         assert wire.source == "proc_a.plug.out"
         assert wire.target == "proc_b.plug.in"
         assert wire.transport == "router"  # дефолт
-        assert wire.shm_config.buffer_slots == 4  # дефолт
+        assert wire.shm_config.buffer_slots == 8  # дефолт (DEFAULT_FRAME_RING_DEPTH)
 
     def test_to_topology_entry_contains_all_keys(self, minimal_wire: WireConfig) -> None:
         """to_topology_entry() содержит все необходимые ключи."""
@@ -169,7 +166,6 @@ class TestRoundTrip:
 
 
 class TestValidateWire:
-
     def test_validate_happy_path(self, minimal_wire: WireConfig) -> None:
         """Корректный wire проходит все проверки."""
         ok, error = validate_wire(minimal_wire)

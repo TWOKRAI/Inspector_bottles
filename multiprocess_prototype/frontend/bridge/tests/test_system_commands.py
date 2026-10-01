@@ -43,7 +43,6 @@ def simple_wire() -> WireConfig:
 
 
 class TestProcessLifecycle:
-
     def test_build_process_start(self) -> None:
         """build_process_start возвращает cmd + process_name."""
         result = build_process_start("camera_0")
@@ -67,7 +66,6 @@ class TestProcessLifecycle:
 
 
 class TestHotAddRemove:
-
     def test_build_hot_add_process(self) -> None:
         """build_hot_add_process с явным plugin_config."""
         result = build_hot_add_process(
@@ -109,7 +107,6 @@ class TestHotAddRemove:
 
 
 class TestWireManagement:
-
     def test_build_wire_setup(self, simple_wire: WireConfig) -> None:
         """build_wire_setup формирует полный dict с вложенным shm_config."""
         result = build_wire_setup(simple_wire)
@@ -141,7 +138,7 @@ class TestWireManagement:
         assert "buffer_slots" in shm
         assert "owner_process" in shm
         assert "strategy" in shm
-        assert shm["buffer_slots"] == 4
+        assert shm["buffer_slots"] == 8
         assert shm["strategy"] == "direct"
 
     def test_build_wire_setup_preserves_explicit_shm(self) -> None:
@@ -170,7 +167,6 @@ class TestWireManagement:
 
 
 class TestSystemCommandsRegistry:
-
     def test_system_commands_registry(self) -> None:
         """SYSTEM_COMMANDS содержит все 7 команд."""
         expected_keys = {

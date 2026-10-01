@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import queue
 
+from ..commands.builtin_commands import BuiltinCommands
 from ..core.process_module import ProcessModule
 from ..plugins.base import PluginState
 from .data_receiver import DataReceiver
@@ -130,6 +131,11 @@ class GenericProcess(ProcessModule):
 
     # --- Data Pipeline (Phase 5) — остаётся без изменений ---
 
+    def _data_queue_depth(self) -> int | None:
+        """Глубина собственной IPC data-очереди процесса (Task 4.7c, C3); None — узнать нельзя."""
+        q = (self.queues or {}).get("data")
+        return None if q is None else BuiltinCommands._queue_size(q)
+
     def _init_data_pipeline(self) -> None:
         """Bootstrap data pipeline: DataReceiver, PipelineExecutor, SourceProducer."""
         app_cfg = self.get_config("config") or {}
@@ -143,6 +149,8 @@ class GenericProcess(ProcessModule):
         # через 30 секунд, бесполезен, а очередь всё равно теряет — см.
         # DataReceiver._bound_lag. Дефолт 0 — поведение не меняется молча.
         max_lag_items = app_cfg.get("chain_max_lag_items", 0)
+        # Task 4.7c: бюджет кадров в полёте B (0 = получатель не за кольцом — транзит не меряем).
+        inflight_budget = app_cfg.get("inflight_budget", 0)
         source_fps = app_cfg.get("source_target_fps", 25.0)
         max_fails = app_cfg.get("error_max_consecutive_fails", 5)
         auto_reset = app_cfg.get("error_auto_reset_sec", 60.0)
@@ -193,13 +201,10 @@ class GenericProcess(ProcessModule):
         # пути вообще не считает, а wire.configure-путь (builtin_commands.py) считает
         # всегда — раньше была асимметрия.
         router = getattr(self, "router_manager", None)
-        # Ф7 G.4.b: глубина кольца per-camera из конфига процесса (рецепт). Гейт
-        # FW_QOS_PROFILES (ревью 2026-07-14, откат бит-в-бит): off → None → middleware
-        # даёт прежние 3; on → frame_ring_depth (или профиль). Каждый source-процесс =
-        # свой owner = своё независимое кольцо (изоляция per-camera).
-        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
-
-        frame_ring_depth = app_cfg.get("frame_ring_depth") if is_enabled("FW_QOS_PROFILES") else None
+        # Ф7 G.4.b: глубина кольца per-camera из конфига процесса (рецепт). Task 4.7c: гейта
+        # FW_QOS_PROFILES нет — 0/не задана → middleware даёт DEFAULT_FRAME_RING_DEPTH (8).
+        # Каждый source-процесс = свой owner = своё независимое кольцо (изоляция per-camera).
+        frame_ring_depth = app_cfg.get("frame_ring_depth")
         # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
         # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
         # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.
@@ -269,6 +274,8 @@ class GenericProcess(ProcessModule):
                 log_debug=self._log_debug,
                 node_name=self.name,
                 max_lag_items=max_lag_items,
+                inflight_budget=inflight_budget,
+                ipc_depth_fn=self._data_queue_depth,
             )
             # Подключить callback
             collector._on_ready = self._data_receiver.on_items_ready
