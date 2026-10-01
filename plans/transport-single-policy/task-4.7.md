@@ -93,3 +93,79 @@
 
 **Out of scope (шаги 3–5 вердикта, отдельно):** B-7 per-target; `render_overlay` ROI; `color_mask`
 без потребителя; финальная приёмка 4.3 (480p/1080p × 60/100).
+
+#### Разбиение на подзадачи (2026-10-01, разведка по `e6976f8b`)
+
+Сверка спеки с кодом: `FW_SHM_SEQLOCK` уже удалён из реестра в 4.4, в коде его имя осталось только в
+docstring'ах. `blob_detector` после T1 уже копирует кадр перед рисованием (`plugin.py:135-145`), от
+пункта 3 остаётся тест на read-only вход. `bseq` в pipeline нет: он есть только в мосте GUI. Ключа
+`overflow` нет нигде. Data-очередь сейчас у всех 50 (`DEFAULT_QUEUES`). Блюпринт `queues` не задаёт.
+Оба сборщика (`assembler.py:139`, `app_module/builder.py:253`) идут через
+`TopologyBlueprint.build_configs()`, туда и кладётся вывод размеров.
+
+Ориентир владельца (2026-10-01): система универсальная и производительная по всем узлам. Отсюда одно
+правило для всех узлов без исключений по типу процесса: бюджет в полёте (4.7c) выводится для любого
+процесса за любым писателем кольца (generic или wire), а не только за generic.
+
+Порядок: 4.7a → 4.7b → 4.7c → 4.7d. Код пишет Sonnet (`developer`), ревью — Opus. Слепой tester
+запускается на каждую подзадачу до кода, в worktree на коммите этого раздела.
+
+##### 4.7a — Предусловия P-1, P-2
+**Files:** `Plugins/_shared/fanin/join_inspector_manager.py`,
+`multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py` (`strip_and_write`).
+**Acceptance:**
+- [ ] join двух входов, у каждого `_shm_views` (список ссылок): у склеенного item'а `_shm_views` =
+      конкатенация обоих (первичный вход первым), независимо от `_list_keys` в конфиге.
+- [ ] `_shm_views` только у вторичного входа → есть в склеенном item'е.
+- [ ] Дверь: вход-view устарел (поколение слота сменилось) к моменту отправки, а выход не несёт ни
+      одного массива с `flags.owndata == False` (dict без массивов; массивы-копии) → сообщение уходит,
+      stale-счётчики не растут.
+- [ ] Дверь: выход несёт массив без `owndata` (view или срез входа), вход устарел → дроп, как сейчас.
+
+##### 4.7b — Один режим shm: имена, кэш handles, zero-copy, флаги
+**Files:** `config_module/feature_flags.py`, `shared_resources_module/memory/platform/shm.py`,
+`shared_resources_module/memory/core/manager.py`, `shared_resources_module/memory/reader/shm_frame_reader.py`,
+`router_module/middleware/frame_shm_middleware.py`, `frontend_module/bridge/remote_frame_source.py`,
+`multiprocess_prototype/frontend/bridge_process.py`, рецепты и `backend_ctl/probes` с env-строками флагов.
+**Acceptance:**
+- [ ] В реестре нет `FW_SHM_OWNER_INCARNATION`, `FW_SHM_HANDLE_CACHE`, `FW_SHM_ZERO_COPY`.
+      `FW_SHM_LOAN_PROTOCOL` остаётся выключенным, с пометкой FROZEN (п. 6), и в его `requires` нет удалённых
+      флагов. `grep FW_SHM_` в `*.py`/`*.yaml` вне реестра и тестов находит только `LOAN_PROTOCOL` и
+      `PREFIX_CLEANUP`.
+- [ ] Имя сегмента без env: два владельца с ключом `mask` дают разные имена. Это проверяется для
+      Windows-ветки и для POSIX-ветки (платформа подменяется в тесте). В имени есть владелец, pid и
+      инкарнация. Повторное создание тем же владельцем даёт новое имя.
+- [ ] Кэш reader'а без env и без кэпа 8. Ключ — `(owner, slot, idx)` из ссылки. 100 realloc писателя
+      подряд: открытых handles у читателя ≤ глубина × ключи. Без живых view `close_errors` не растёт.
+- [ ] Handle с живым view при отставке не закрывается и не роняет чтение. Он закрывается на следующей
+      отставке или на teardown после освобождения view. Отложенные закрытия видны счётчиком.
+- [ ] Читатель-пайплайн (`restore_frame` с `allow_view=True`) без env получает view только для чтения
+      (`flags.writeable == False`). Copy-out (`on_receive`, GUI, мост) получает копию с проверкой `gen`.
+- [ ] `blob_detector(draw_contours=True)` на read-only входе работает, вход не меняется.
+
+##### 4.7c — Глубина кольца и размер очереди из рецепта
+**Files:** `router_module/middleware/frame_shm_middleware.py` (`_resolve_ring_depth`),
+`process_module/generic/{generic_process.py,generic_process_config.py}`, `process_module/commands/builtin_commands.py`
+(wire `buffer_slots`), `frontend_module/bridge/wire_protocol.py`, `process_manager_module/topology/blueprint.py`,
+новый `process_manager_module/topology/inflight.py`.
+**Контракт:** `inflight_budget(writer_depths, *, queue=None, lag=None, process="?") -> tuple[int, int]`
+возвращает `(data_queue_maxsize, chain_max_lag_items)`. D = min(writer_depths), бюджет B = D − 2.
+По умолчанию lag = 2, queue = B − lag. Явный `queue` или `lag` из рецепта с queue + lag > B →
+`ValueError` с текстом `очередь <queue> больше кольца <D>` и именем процесса. Если D < 4, то
+`ValueError`: на очередь ≥ 1 и lag ≥ 1 места нет, а lag 0 в `DataReceiver` означает «без границы».
+Ключи рецепта процесса — `data_queue_maxsize` (новый) и `chain_max_lag_items` (есть).
+**Acceptance:**
+- [ ] Без env и без настройки глубина кольца generic-писателя 8, wire `buffer_slots` 8. Гейта
+      `FW_QOS_PROFILES` на глубину нет.
+- [ ] Процесс за писателем кольца (generic или wire) после `build_configs()` получает data-очередь 4 и
+      `chain_max_lag_items` 2.
+- [ ] `frame_ring_depth: 12` у писателя даёт очередь 8 и lag 2. Два писателя с глубинами 8 и 12 дают
+      очередь 4.
+- [ ] Явная `data_queue_maxsize: 20` при глубине 8 → ошибка сборки: «очередь 20 больше кольца 8».
+- [ ] Процесс без входа от generic-писателя сохраняет прежнюю data-очередь 50.
+
+##### 4.7d — Правило переполнения `overflow: latest | every` (п. 7)
+Отложена до 4.7c. Первым шагом решается открытый вопрос п. 7: где рождается маркер `not_inspected`.
+Мест дропа четыре: вытеснение в IPC-очереди у писателя, `_bound_lag` в приёмнике, stale/torn при
+восстановлении, дверь. Метаданные кадра есть только в месте дропа, а разрыв последовательности их не
+знает, и `bseq` в pipeline нет. Решение — за владельцем или CTO, до спеки 4.7d.
