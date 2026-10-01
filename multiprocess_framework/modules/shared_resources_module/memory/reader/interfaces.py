@@ -21,24 +21,25 @@ from typing import Any, Optional, Protocol, runtime_checkable
 class FrameReader(Protocol):
     """Reader-side тракт кадра: кэш handles + чтение + zero-copy view + re-check.
 
-    Реализация — per-consumer (живёт в middleware процесса-читателя). Активность кэша/
-    zero-copy задаётся на конструировании (жёсткие связки G.5: zero_copy ⊃ cache ⊃
-    owner_incarnation — резолвятся транспортом, reader получает уже согласованные флаги).
+    Реализация — per-consumer (живёт в middleware процесса-читателя). Кэш handles включён
+    всегда (Task 4.7b), ключ — ``(owner, slot, idx)`` из ссылки (``key=``): новое имя сегмента
+    под тем же ключом отправляет старый handle в отставку; handle с живым view закрывается позже.
     """
 
-    def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional[Any]:
+    def read_ref(self, name: str, gen: int, *, copy: bool = True, key: Optional[tuple] = None) -> Optional[Any]:
         """Task 4.4: прочитать кадр по ссылке ``(name, gen)`` — поколение слота обязано быть
         ``gen`` и ДО, и ПОСЛЕ чтения. Расхождение до → ``None`` + ``stale_drops``; во время →
-        ``None`` + ``torn_reads`` (оба счётчика — свойства reader'а). ``copy=False`` + активный
-        кэш → VIEW в слот. Бросает при ошибке открытия сегмента."""
+        ``None`` + ``torn_reads`` (оба счётчика — свойства reader'а). ``copy=False`` → read-only
+        VIEW в слот. ``key`` — ``(owner, slot, idx)`` ссылки (``None`` → ``(name,)``). Бросает при
+        ошибке открытия сегмента."""
         ...
 
-    def view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
+    def view_valid(self, shm_view_name: str, gen_at_read: int, *, key: Optional[tuple] = None) -> bool:
         """Post-use re-check (G.5.c): жив ли ещё zero-copy view (слот не перезаписан).
 
         Сверяет ТЕКУЩЕЕ поколение слота с поколением на момент чтения. Совпало → view
-        валиден. Разошлось / handle эвиктнут / gen_at_read<0 → drop (счётчик
-        ``stale_drops``), НЕ порча. Использует тот же кэшированный handle (без нового open).
+        валиден. Разошлось / handle сменился (другое имя под ``key``) / gen_at_read<0 → drop
+        (счётчик ``stale_drops``), НЕ порча. Использует тот же кэшированный handle (без нового open).
         """
         ...
 

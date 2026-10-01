@@ -345,10 +345,8 @@ class TestG3HandleCache:
         prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
         item = prod.strip_and_write({"frame": _frame(16, 16)})
 
-        # H4: кэш активен только в связке с owner_incarnation.
-        consumer = FrameShmMiddleware(
-            MemoryManager(), owner="c", slot="s", cache_shm_handles=True, owner_incarnation=True
-        )
+        # 4.7b: кэш handles включён всегда.
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
         r1 = consumer.restore_frame({"data": dict(item)}).get("frame")
         r2 = consumer.restore_frame({"data": dict(item)}).get("frame")
         assert r1 is not None and r2 is not None
@@ -358,31 +356,9 @@ class TestG3HandleCache:
         assert len(consumer._reader._cache) == 0
         prod._mm.close_all()
 
-    def test_no_cache_by_default(self):
-        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
-        item = prod.strip_and_write({"frame": _frame(16, 16)})
-        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")  # cache off
-        consumer.restore_frame({"data": dict(item)})
-        assert len(consumer._reader._cache) == 0  # без кэша handle не хранится
-        prod._mm.close_all()
-
 
 class TestH4CacheRealloc:
-    """H4: кэш handles × переиспользование имени → жёсткая связка с owner_incarnation."""
-
-    def test_cache_disabled_without_incarnation(self):
-        """H4: cache запрошен БЕЗ incarnation → кэш ОТКЛЮЧЁН + WARNING (риск frozen frame)."""
-        logs: list[str] = []
-        mw = FrameShmMiddleware(
-            MemoryManager(),
-            owner="c",
-            slot="s",
-            cache_shm_handles=True,
-            owner_incarnation=False,
-            log_error=logs.append,
-        )
-        assert mw._cache_shm_handles is False, "кэш обязан быть отключён без incarnation"
-        assert any("owner_incarnation" in m for m in logs), "ожидался WARNING про связку"
+    """H4: кэш handles × realloc слота — имя сегмента меняется, кэш не отдаёт замороженный кадр."""
 
     def test_cache_with_incarnation_realloc_delivers_new_frame(self):
         """H4: cache+incarnation, realloc (resize) → имя меняется → кадр №2 доставлен
@@ -393,10 +369,7 @@ class TestH4CacheRealloc:
             MemoryManager(),
             owner="c",
             slot="s",
-            cache_shm_handles=True,
-            owner_incarnation=True,
         )
-        assert consumer._cache_shm_handles is True
         r1 = consumer.restore_frame({"data": dict(item1)}).get("frame")
         assert r1 is not None and int(r1.min()) == 11
 
@@ -424,10 +397,7 @@ class TestH4CacheRealloc:
             MemoryManager(),
             owner="c_combo",
             slot="s_combo",
-            cache_shm_handles=True,
-            owner_incarnation=True,
         )
-        assert consumer._cache_shm_handles is True
 
         # Write→read через seqlock корректен (кадр №1, дважды — handle кэшируется).
         r1a = consumer.restore_frame({"data": dict(item1)}).get("frame")

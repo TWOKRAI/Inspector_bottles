@@ -196,7 +196,7 @@ def test_r1_bitwise_identical_frame_and_matching_bseq() -> None:
     name = _shm_name("r1")
     shm = _write_frame(name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": True}}
     )
     source = None
     try:
@@ -208,7 +208,7 @@ def test_r1_bitwise_identical_frame_and_matching_bseq() -> None:
             lambda: source.subscribe(None, lambda sender, arr, bseq: received.append((sender, arr, bseq))),
             timeout=5.0,
         )
-        assert resp == {"success": True, "seqlock": True, "owner_incarnation": False}
+        assert resp == {"success": True, "seqlock": True, "owner_incarnation": True}
 
         _push_descriptor(host, client.subscriber_address, "camA", name, bseq=1)
 
@@ -240,7 +240,7 @@ _R2_SCRIPT = (
     "from multiprocess_framework.modules.shared_resources_module.memory.reader.shm_frame_reader import ShmFrameReader\n"
     "name = sys.argv[1]\n"
     "track = sys.argv[2] == '1'\n"
-    "reader = ShmFrameReader(cache_enabled=False, zero_copy=False, cap=1, track=track)\n"
+    "reader = ShmFrameReader(track=track)\n"
     "reader.read_ref(name, 2)\n"
 )
 
@@ -310,7 +310,7 @@ def test_r3_missing_segment_counts_and_next_valid_still_delivered() -> None:
     valid_name = _shm_name("r3")
     shm = _write_frame(valid_name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": True}}
     )
     source = None
     try:
@@ -348,7 +348,7 @@ def test_r4_duplicate_descriptor_delivered_once() -> None:
     name = _shm_name("r4")
     shm = _write_frame(name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": True}}
     )
     source = None
     try:
@@ -413,7 +413,7 @@ def test_r5_seqlock_zero_corner_mismatches_under_concurrent_writer() -> None:
     seed = _corner_frame()
     shm = _write_frame(name, seed)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": True}}
     )
     stop = threading.Event()
     writer = _writer_thread(name, stop)
@@ -457,7 +457,7 @@ def test_r6_slow_callback_does_not_slow_producer_superseded_grows() -> None:
     frame = _corner_frame()
     shm = _write_frame(name, frame)
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": True}}
     )
     source = None
     try:
@@ -544,7 +544,7 @@ def test_r8_on_reconnected_resubscribes_with_new_subscriber_address() -> None:
 
     def _handle_subscribe(msg: Dict[str, Any]) -> Dict[str, Any]:
         subscribe_calls.append(msg.get("data", {}).get("subscriber"))
-        return {"success": True, "seqlock": True, "owner_incarnation": False}
+        return {"success": True, "seqlock": True, "owner_incarnation": True}
 
     host = _make_command_host({"frames.subscribe": _handle_subscribe})
     source = None
@@ -600,7 +600,7 @@ def test_stale_ref_is_dropped_and_counted_torn() -> None:
     pack_images(shm.buf, [_corner_frame(value=2)], (480, 640, 3), np.uint8, seqlock=True)  # gen -> 4
     assert read_generation(shm.buf) == 4
     host = _make_command_host(
-        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": False}}
+        {"frames.subscribe": lambda msg: {"success": True, "seqlock": True, "owner_incarnation": True}}
     )
     source = None
     try:

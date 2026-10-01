@@ -46,7 +46,7 @@ def test_c_unsubscribe_from_another_thread_mid_fanout_is_serialized() -> None:
                 t.start()
                 t.join(0.2)
 
-    bridge = FrameBridge(_RacingRouter(), "gui", owner_incarnation=False, loan_protocol=False)
+    bridge = FrameBridge(_RacingRouter(), "gui", loan_protocol=False)
     bridge_box["b"] = bridge
     bridge.cmd_subscribe({"subscriber": "p.1"})
     bridge.cmd_subscribe({"subscriber": "p.2"})

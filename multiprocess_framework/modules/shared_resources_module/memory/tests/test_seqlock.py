@@ -391,8 +391,9 @@ def test_stale_counter_no_lost_updates_under_threads():
     from multiprocess_framework.modules.shared_resources_module.memory.reader.shm_frame_reader import ShmFrameReader
 
     per_thread = 1_500
-    reader = ShmFrameReader(cache_enabled=True, zero_copy=True, cap=4)
-    reader._cache["seg"] = SimpleNamespace(buf=memoryview(bytearray(64)))  # поколение 0 -> ссылка gen=2 устарела
+    reader = ShmFrameReader()
+    # поколение 0 -> ссылка gen=2 устарела
+    reader._cache[("seg",)] = ("seg", SimpleNamespace(buf=memoryview(bytearray(64))))
     target_code = ShmFrameReader.view_valid.__code__
 
     def local_trace(frame, event, arg):
@@ -431,7 +432,7 @@ def test_stale_counter_no_lost_updates_under_threads():
 
 def test_read_ref_uncached_stale_counter_no_lost_updates_under_threads():
     """Свойство: на БЕЗКЭШЕВОМ пути ``read_ref`` (lock снаружи не держится) ``stale_drops`` не теряет
-    обновлений при 4 потоках: инкремент идёт через ``_bump(lock_held=False)`` под ``self._lock``. Слот
+    обновлений при 4 потоках: инкремент идёт через ``_bump`` под ``self._lock`` (read_ref держит его всегда). Слот
     реальный (поколение 0), ссылка несёт gen=2 -> каждый вызов stale; итог ровно 4 * N.
     Техника та же, что у теста ``view_valid``: трассировка опкодов ``_bump`` + ``sleep(0)`` между ними.
     Красный revert: в ``_bump`` заменить ``with self._lock: setattr(...)`` голым ``setattr(...)``.
@@ -445,7 +446,7 @@ def test_read_ref_uncached_stale_counter_no_lost_updates_under_threads():
     shape = (4, 4, 3)
     size = fmt.calculate_buffer_size(1, shape, _DTYPE, seqlock=True)
     shm = shared_memory.SharedMemory(name=f"t44e{uuid4().hex[:8]}", create=True, size=size)
-    reader = ShmFrameReader(cache_enabled=False, zero_copy=False, cap=4)
+    reader = ShmFrameReader()
     target_code = ShmFrameReader._bump.__code__
 
     def local_trace(frame, event, arg):

@@ -112,7 +112,11 @@ def _copy_read(pair: _Pair, out: dict) -> np.ndarray:
     return frame
 
 
-@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
+@pytest.mark.xfail(
+    strict=True,
+    reason="4.7b2: падает только на предпосылке len(names)==300 — имя сегмента при realloc без инкарнации не меняется "
+    "(MemoryManager.owner_incarnation всегда включён — задача b1); снять маркер после слияния b1",
+)
 def test_100_reallocs_bounded_open_handles(make_pair) -> None:
     pair = make_pair(3)
     depth, keys = 3, 1
@@ -133,7 +137,6 @@ def test_100_reallocs_bounded_open_handles(make_pair) -> None:
     assert len(names) == 300, f"предпосылка: ожидалось 100 realloc x 3 слота = 300 разных имён, получено {len(names)}"
 
 
-@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_cache_not_capped_at_8_for_depth_12(make_pair) -> None:
     pair = make_pair(12)
     for i in range(12):
@@ -144,7 +147,6 @@ def test_cache_not_capped_at_8_for_depth_12(make_pair) -> None:
 
 
 @pytest.mark.parametrize("trigger", ["next_retirement", "teardown"])
-@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_retired_handle_with_live_view_closed_later(make_pair, trigger: str) -> None:
     pair = make_pair(2)
     # 1. читатель держит ЖИВОЙ view на слот idx0 первого сегмента (zero-copy по умолчанию, без env)

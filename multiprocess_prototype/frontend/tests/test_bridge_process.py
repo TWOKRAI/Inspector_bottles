@@ -55,7 +55,6 @@ def _new_bridge(router: _FakeRouter, **flags: bool) -> FrameBridge:
     return FrameBridge(
         router,
         "gui",
-        owner_incarnation=flags.get("owner_incarnation", False),
         loan_protocol=flags.get("loan_protocol", False),
     )
 
@@ -78,7 +77,7 @@ def test_b2_subscribe_then_frame_push_exact_shape_and_size() -> None:
     bridge = _new_bridge(router)
 
     resp = bridge.cmd_subscribe({"subscriber": "pult.sess1"})
-    assert resp == {"success": True, "seqlock": True, "owner_incarnation": False}
+    assert resp == {"success": True, "seqlock": True, "owner_incarnation": True}
 
     bridge.on_drained([_shm_msg("camA", name="shmslotA", idx=3, gen=6)])
 

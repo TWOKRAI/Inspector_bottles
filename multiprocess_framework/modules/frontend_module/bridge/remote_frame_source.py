@@ -16,9 +16,9 @@
 Команды хоста (``targets=[<имя процесса gui>]``, ``data`` — dict)
 --------------------------------------------------------------------
 ``frames.subscribe {"subscriber": <адрес>, "senders": [<имя>, ...] | None}``
-    Успех — РОВНО ``{"success": True, "seqlock": True, "owner_incarnation": bool}``
-    (``seqlock`` — константа для внешних клиентов: заголовок seqlock у слота всегда включён,
-    флага ``FW_SHM_SEQLOCK`` больше нет; ``owner_incarnation`` — значение флага хоста).
+    Успех — РОВНО ``{"success": True, "seqlock": True, "owner_incarnation": True}``
+    (``seqlock`` и ``owner_incarnation`` — константы для внешних клиентов: заголовок seqlock у слота
+    и инкарнация в имени сегмента всегда включены; поля оставлены ради закреплённого контракта).
     Отказ — ``{"success": False, "reason": str}``; при включённом на хосте
     ``FW_SHM_LOAN_PROTOCOL`` ``reason`` содержит подстроку ``"FW_SHM_LOAN_PROTOCOL"``
     (заём слота мост не возвращает — Task 2.1).
@@ -66,7 +66,9 @@ DESCRIPTOR_MAX_BYTES: int = 300
 COPY_THREAD_NAME: str = "remote-frame-copy"
 
 _STAT_KEYS = ("received", "delivered", "dup", "torn", "missing", "errors", "superseded")
-#: LRU-кэп handle'ов при owner_incarnation: по слоту на кадр кольца, с запасом.
+#: Кэп handle'ов моста: дескриптор несёт только имя сегмента (без owner/slot/idx), поэтому кэш
+#: ключуется ИМЕНЕМ и отставку по смене имени не видит — держим LRU с этим потолком (по слоту
+#: на кадр кольца, с запасом).
 _HANDLE_CAP = 32
 _IDLE_WAIT_SEC = 0.5
 _CLOSE_JOIN_SEC = 2.0
@@ -83,6 +85,31 @@ Dispatch = Callable[[Callable[[], None]], None]
 
 #: Колбэк кадра: ``on_frame(sender, frame, bseq)``.
 OnFrame = Callable[[str, "np.ndarray", int], None]
+
+
+class _NameCappedReader:
+    """``ShmFrameReader`` (``track=False``) с кэпом handle'ов по имени — LRU ``_HANDLE_CAP``.
+
+    Ключ кэша читателя — ``(name,)``; вытесненное имя отправляется в ``ShmFrameReader.retire``
+    (handle с живым view закроется позже, как у любой отставки). Вызывается ТОЛЬКО с потока копирования.
+    """
+
+    def __init__(self) -> None:
+        self._reader = ShmFrameReader(track=False)
+        self._names: Dict[str, None] = {}  # порядок вставки = свежесть
+
+    def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional["np.ndarray"]:
+        frame = self._reader.read_ref(name, gen, copy=copy)  # бросает до касания LRU, если сегмента нет
+        self._names.pop(name, None)
+        self._names[name] = None
+        if len(self._names) > _HANDLE_CAP:
+            oldest = next(iter(self._names))
+            del self._names[oldest]
+            self._reader.retire((oldest,))
+        return frame
+
+    def close(self) -> None:
+        self._reader.close()
 
 
 class RemoteFrameSourceError(RuntimeError):
@@ -212,8 +239,7 @@ class RemoteFrameSource:
         self._epoch = 0
         # sender → (bseq, имя слота, поколение) последнего доставленного кадра (дедуп).
         self._last: Dict[str, tuple] = {}
-        self._reader: Optional[ShmFrameReader] = None
-        self._reader_cached: Optional[bool] = None
+        self._reader: Optional[_NameCappedReader] = None
         self._thread: Optional[threading.Thread] = None
         # Стоп — у КАЖДОГО потока свой (поколение): close(), не дождавшийся потока
         # (колбэк спит на нём), и следующий subscribe() не должны оживить старый поток
@@ -238,14 +264,13 @@ class RemoteFrameSource:
               "senders": list(senders) | None}}``, где ``<адрес>`` =
               ``client.subscriber_address``.
         Post (успех): возвращает ответ хоста
-              ``{"success": True, "seqlock": True, "owner_incarnation": bool}``;
+              ``{"success": True, "seqlock": True, "owner_incarnation": True}``;
               подписка активна: каждый последующий push ``frames.frame`` читается и
               доставляется ``on_frame`` через ``dispatch`` как ``(descriptor["sender"],
               frame, descriptor["bseq"])``, где ``frame`` — СОБСТВЕННАЯ копия кадра
               (не view в SHM; ``shape``/``dtype`` — из заголовка слота), побитово равная
               содержимому слота на момент копии. Поток копирования запущен. Кэш
-              handle'ов SHM включён, только если хост ответил ``owner_incarnation=True``
-              (иначе open/close на каждый кадр). Сегменты открываются
+              handle'ов SHM включён всегда (LRU ``_HANDLE_CAP`` по имени). Сегменты открываются
               ``ShmFrameReader(track=False)`` — выход процесса-читателя сегмент хоста
               не удаляет. Повторный вызов заменяет фильтр и колбэк.
         Raises: :class:`RemoteFrameSourceError` — хост ответил ``success`` не ``True``
@@ -266,7 +291,7 @@ class RemoteFrameSource:
             self._senders = senders_list
             self._on_frame = on_frame
             self._begin_epoch_locked()
-            self._ensure_reader_locked(bool(reply.get("owner_incarnation")))
+            self._ensure_reader_locked()
             self._active = True
             self._ensure_thread_locked()
         return reply
@@ -310,7 +335,7 @@ class RemoteFrameSource:
               ``subscriber_address`` и прежним ``senders``; колбэк прежний (подписчик
               ничего не перерегистрирует); ящик очищен; память дедупликации сброшена
               (хост мог перезапуститься — ``bseq`` начинается заново); кэш handle'ов
-              закрыт (сегменты могли пересоздаться); включение кэша — по новому ответу.
+              закрыт (сегменты могли пересоздаться); новый читатель создаётся заново.
               Без активной подписки — ни одного сетевого вызова.
         Raises: :class:`RemoteFrameSourceError` — хост отказал (подписка после этого не
               активна); исключение разрыва клиента пробрасывается.
@@ -322,7 +347,7 @@ class RemoteFrameSource:
             # Хост мог перезапуститься: bseq начинается заново, сегменты пересозданы.
             self._begin_epoch_locked()
             self._last.clear()
-            reader, self._reader, self._reader_cached = self._reader, None, None
+            reader, self._reader = self._reader, None
         if reader is not None:
             reader.close()
         address = self._client.subscriber_address
@@ -330,12 +355,12 @@ class RemoteFrameSource:
             self._deactivate()
             raise RemoteFrameSourceError("RemoteFrameSource.on_reconnected: клиент не подключён")
         try:
-            reply = self._request_subscribe(address, senders_list, _RESUBSCRIBE_TIMEOUT)
+            self._request_subscribe(address, senders_list, _RESUBSCRIBE_TIMEOUT)
         except BaseException:
             self._deactivate()
             raise
         with self._cond:
-            self._ensure_reader_locked(bool(reply.get("owner_incarnation")))
+            self._ensure_reader_locked()
 
     def close(self) -> None:
         """Освободить ресурсы. Не бросает, идемпотентен.
@@ -359,7 +384,7 @@ class RemoteFrameSource:
             self._thread_stop = None
             self._cond.notify_all()
             thread, reader = self._thread, self._reader
-            self._thread, self._reader, self._reader_cached = None, None, None
+            self._thread, self._reader = None, None
         if thread is not None and thread is not threading.current_thread():
             # Дедлайн: колбэк, исполняемый dispatch'ем прямо на потоке копирования, может
             # спать сколько угодно — close() его не ждёт дольше.
@@ -411,16 +436,10 @@ class RemoteFrameSource:
             self._begin_epoch_locked()
             return was_active
 
-    def _ensure_reader_locked(self, cached: bool) -> None:
-        # Кэш handle'ов — только при owner_incarnation (иначе realloc под тем же именем
-        # оставил бы нас на старом сегменте). track=False: сегмент хоста не наш.
-        if self._reader is not None and self._reader_cached == cached:
-            return
-        old = self._reader
-        self._reader = ShmFrameReader(cache_enabled=cached, zero_copy=False, cap=_HANDLE_CAP, track=False)
-        self._reader_cached = cached
-        if old is not None:
-            old.close()
+    def _ensure_reader_locked(self) -> None:
+        # track=False: сегмент хоста не наш (см. _NameCappedReader).
+        if self._reader is None:
+            self._reader = _NameCappedReader()
 
     def _ensure_thread_locked(self) -> None:
         if self._thread is not None and self._thread.is_alive():

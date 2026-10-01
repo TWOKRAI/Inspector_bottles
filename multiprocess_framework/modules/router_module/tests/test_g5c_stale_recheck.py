@@ -19,17 +19,10 @@ from multiprocess_framework.modules.shared_resources_module.memory.core.manager 
 )
 
 
-def _enable_zero_copy(monkeypatch) -> None:
-    monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
-    monkeypatch.setenv("FW_SHM_HANDLE_CACHE", "1")
-    monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
-
-
 class TestMiddlewareRecheck:
-    def test_valid_immediately_then_stale_after_wrap(self, monkeypatch):
+    def test_valid_immediately_then_stale_after_wrap(self):
         """Сразу после чтения view валиден; после оборота кольца (перезапись слота) —
         stale (drift поколения) → drop + счётчик."""
-        _enable_zero_copy(monkeypatch)
         writer = FrameShmMiddleware(MemoryManager(), owner="cam0", slot="output_frames", coll=2)
         reader = FrameShmMiddleware(MemoryManager(), owner="reader", slot="unused")
         try:
@@ -53,16 +46,14 @@ class TestMiddlewareRecheck:
             reader.close_handle_cache()
             writer.release_owned_memory()
 
-    def test_negative_generation_is_invalid(self, monkeypatch):
+    def test_negative_generation_is_invalid(self):
         """gen<0 (view без seqlock — не должно происходить) → консервативно невалиден."""
-        _enable_zero_copy(monkeypatch)
         reader = FrameShmMiddleware(MemoryManager(), owner="r", slot="s")
         assert reader.frame_view_valid({"name": "any", "gen": -1}) is False
         assert reader.frame_stale_drops == 1
 
-    def test_unknown_name_is_invalid(self, monkeypatch):
+    def test_unknown_name_is_invalid(self):
         """handle не в кэше (эвикция/смена имени) → сегмент мог уехать → drop."""
-        _enable_zero_copy(monkeypatch)
         reader = FrameShmMiddleware(MemoryManager(), owner="r", slot="s")
         assert reader.frame_view_valid({"name": "nonexistent_segment", "gen": 2}) is False
         assert reader.frame_stale_drops == 1
