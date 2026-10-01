@@ -23,7 +23,7 @@ from Services.line_sim import (
 | `LayerAugment` | `interfaces.py` | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params`; `to_dict()`/`from_dict()` — Dict at Boundary (Task 3.4) |
 | `SceneCompositorProtocol` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` (переименован из `SceneCompositor` при подключении конкретного класса, LS-009) |
-| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), background_tile=None, belt_direction=1, entry_x_px=0.0)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; фон-тайл — Task 3.6; `belt_direction`/`entry_x_px` — Task 5.3b |
+| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), background_tile=None, belt_direction=1, entry_x_px=0.0, background_layers=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; фон-тайл — Task 3.6; `background_layers` — стек слоёв фона из `Services/layer_render` (взаимоисключающе с `background_tile`, цвета RGB); `belt_direction`/`entry_x_px` — Task 5.3b |
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
@@ -318,6 +318,8 @@ passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px + passport.lateral_
 - По Y тайл кладётся по центру линии ленты: верх `round(belt_y_px - th/2)`, строки вне полосы
   закрашиваются `background_bgr`.
 - `background_tile=None` — кадр байт в байт как в 3.4.
+- `background_layers=None` — прежняя ветка заливки/тайла нетронута; задан — заменяет заливку и тайл
+  (вместе с `background_tile` — `ValueError`), сдвиг и `belt_direction` те же. Схема — `Services/layer_render/README.md`.
 
 ## `core/matching.py` — job↔object matching (Task 3.5a, LS-012)
 

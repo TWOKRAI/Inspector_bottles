@@ -26,15 +26,24 @@
 (циклический индекс по модулю ширины тайла). По Y тайл кладётся симметрично относительно
 `belt_y_px`; строки выше/ниже полосы тайла закрашиваются `background_bgr`, как и раньше.
 `background_tile=None` — поведение байт в байт как до Task 3.6 (сплошная заливка).
+
+**Стек слоёв фона (layer-render, Task 1.1).** `background_layers` — необязательный список
+`SolidFill | ScrollingTile` снизу вверх (`Services/layer_render`). Задан — заменяет и заливку
+`background_bgr`, и `background_tile` (вместе с `background_tile` — `ValueError`); под всеми слоями
+чёрный, цвета слоёв — сразу RGB (не BGR, как `background_bgr`). Сдвиг тайлов — тот же `shift_px` и тот же
+`belt_direction`, что в ветке `background_tile`. `None` — прежняя ветка нетронута.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 import numpy as np
 
 from Services.dataset_gen.core.compose import composite
 from Services.line_sim.core.belt import encoder_to_offset_mm
 from Services.line_sim.core.spawner import ObjectSpawner
+from Services.layer_render import ScrollingTile, SolidFill, fold_background, render_background
 from Services.line_sim.interfaces import ObjectPassport
 
 
@@ -63,10 +72,13 @@ class SceneCompositor:
         background_tile: np.ndarray | None = None,
         belt_direction: int = 1,
         entry_x_px: float = 0.0,
+        background_layers: Sequence[SolidFill | ScrollingTile] | None = None,
     ) -> None:
         # bool — подкласс int (True == 1), дробное 1.0 тоже равно 1: оба отклоняются (ревью 5.3b п.3).
         if isinstance(belt_direction, bool) or not isinstance(belt_direction, int) or belt_direction not in (1, -1):
             raise ValueError(f"belt_direction: ожидалось ±1, получено {belt_direction!r}")
+        if background_layers is not None and background_tile is not None:
+            raise ValueError("background_layers и background_tile взаимоисключающи: задан и стек слоёв, и тайл")
         self._spawner = spawner
         self._px_per_mm = px_per_mm
         self._belt_y_px = belt_y_px
@@ -74,6 +86,8 @@ class SceneCompositor:
         self._background_tile = None if background_tile is None else _validate_background_tile(background_tile)
         self._belt_direction = belt_direction
         self._entry_x_px = entry_x_px
+        # Стек слоёв (layer-render 1.1) сворачивается один раз; None — прежняя ветка заливки/тайла.
+        self._bg_layers = None if background_layers is None else fold_background(list(background_layers))
 
     def render(
         self, now_encoder: float, camera_rect: tuple[float, float, float, float]
@@ -82,25 +96,36 @@ class SceneCompositor:
         x_px, y_px, w_px, h_px = camera_rect
         w, h = int(round(w_px)), int(round(h_px))
         frame = np.empty((h, w, 3), dtype=np.uint8)
-        # background_bgr — концептуально BGR (имя параметра из контракта тестера);
-        # кадр хранится в RGB, поэтому каналы переставляются при заливке фона.
-        b, g, r = self._background_bgr
-        frame[:, :, 0] = r
-        frame[:, :, 1] = g
-        frame[:, :, 2] = b
-
-        if self._background_tile is not None:
-            tile = self._background_tile
-            th, tw = tile.shape[:2]
-            # Тот же px_per_mm и тот же encoder_to_offset_mm, что у объектов (см.
-            # докстринг модуля) — начало отсчёта тайла (spawn_enc=0.0) фиксировано, не
-            # завязано на конкретный объект.
+        if self._bg_layers is not None:
+            # Стек слоёв (layer-render 1.1): тот же shift_px, что у ветки тайла ниже; цвета слоёв — уже RGB.
             shift_px = int(round(float(encoder_to_offset_mm(now_encoder, 0.0) * self._px_per_mm)))
-            cols = (np.arange(w) + int(round(x_px)) - self._belt_direction * shift_px) % tw
-            top = int(round(self._belt_y_px - th / 2))
-            rows = np.arange(h) + int(round(y_px)) - top
-            valid = (rows >= 0) & (rows < th)
-            frame[valid] = tile[rows[valid]][:, cols]
+            render_background(
+                frame,
+                self._bg_layers,
+                scroll_px=self._belt_direction * shift_px,
+                origin_xy=(int(round(x_px)), int(round(y_px))),
+                center_y=self._belt_y_px,
+            )
+        else:
+            # background_bgr — концептуально BGR (имя параметра из контракта тестера);
+            # кадр хранится в RGB, поэтому каналы переставляются при заливке фона.
+            b, g, r = self._background_bgr
+            frame[:, :, 0] = r
+            frame[:, :, 1] = g
+            frame[:, :, 2] = b
+
+            if self._background_tile is not None:
+                tile = self._background_tile
+                th, tw = tile.shape[:2]
+                # Тот же px_per_mm и тот же encoder_to_offset_mm, что у объектов (см.
+                # докстринг модуля) — начало отсчёта тайла (spawn_enc=0.0) фиксировано, не
+                # завязано на конкретный объект.
+                shift_px = int(round(float(encoder_to_offset_mm(now_encoder, 0.0) * self._px_per_mm)))
+                cols = (np.arange(w) + int(round(x_px)) - self._belt_direction * shift_px) % tw
+                top = int(round(self._belt_y_px - th / 2))
+                rows = np.arange(h) + int(round(y_px)) - top
+                valid = (rows >= 0) & (rows < th)
+                frame[valid] = tile[rows[valid]][:, cols]
 
         passports: list[ObjectPassport] = []
         for obj in self._spawner.active_objects():

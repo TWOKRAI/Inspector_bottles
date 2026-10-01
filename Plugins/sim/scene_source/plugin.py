@@ -82,6 +82,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from Services.dataset_gen.core.catalog import imread_unicode
+from Services.layer_render import ScrollingTile, SolidFill, background_layers_from_config
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, confine_preset_paths
 from Services.line_sim.core import (
     REPO_ROOT,
@@ -290,6 +291,25 @@ class SceneSourcePlugin(ProcessModulePlugin):
         # Task 3.6: фон-текстура строится ДО try-блока сборки движка — нечитаемый файл
         # не должен ронять движок целиком (он остаётся живым на сплошном фоне).
         background_texture = cfg.get("background_texture")
+        # layer-render 1.1: стек слоёв `background_layers` — ошибка схемы выходит из configure()
+        # (вне try/except сборки движка и до чтения текстуры); нечитаемый тайл слоя — один log_error, слой выброшен.
+        background_items = cfg.get("background_layers")
+        background_layers: list[SolidFill | ScrollingTile] | None = None
+        layer_tile_info: list[str | None] = []  # по одному на вызов загрузки (порядок tile в конфиге)
+        if background_items is not None:
+            if background_texture is not None:
+                raise ValueError("scene_source: background_layers и background_texture взаимоисключающи")
+
+            def load_layer_image(path: str) -> np.ndarray | None:
+                image = self._load_layer_image(ctx, path)
+                if image is None:
+                    layer_tile_info.append(None)
+                else:
+                    mode = "RGBA" if image.shape[2] == 4 else "RGB"
+                    layer_tile_info.append(f"tile({path}, {image.shape[1]}x{image.shape[0]}, {mode})")
+                return image
+
+            background_layers = background_layers_from_config(background_items, load_layer_image)
         background_tile = self._load_background_tile(ctx, background_texture)
 
         # Task 1.2a: команды пресета. Свой лок (НЕ self._lock мира, НЕ self._truth_lock) —
@@ -322,6 +342,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 belt_y_px=belt_y_px,
                 background_bgr=_BACKGROUND_BGR,
                 background_tile=background_tile,
+                background_layers=background_layers,
                 belt_direction=belt_direction,
                 entry_x_px=entry_x_px,
             )
@@ -332,7 +353,16 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 "кадры будут только фоном"
             )
 
-        if background_tile is not None:
+        if background_layers is not None:
+            tile_infos = iter(layer_tile_info)
+            parts = []
+            for item in background_items:
+                if "solid" in item:
+                    parts.append("solid({},{},{})".format(*item["solid"]))
+                elif (info := next(tile_infos)) is not None:
+                    parts.append(info)
+            background_desc = f"слои[{', '.join(parts)}]"
+        elif background_tile is not None:
             tile_h, tile_w = background_tile.shape[:2]
             background_desc = f"текстура ({background_texture}, {tile_w}x{tile_h})"
         else:
@@ -367,6 +397,21 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 f"scene_source: фон-текстура недоступна (background_texture={resolved!r}): {exc!r} — "
                 "используется сплошной фон"
             )
+            return None
+
+    def _load_layer_image(self, ctx: PluginContext, tile_path: str) -> np.ndarray | None:
+        """Загрузить картинку слоя `tile` (layer-render 1.1): RGB или RGBA uint8. Путь резолвится от
+        корня репозитория; ЛЮБАЯ причина нечитаемости (нет файла, битые байты, не 8 бит, не 3/4 канала)
+        даёт ровно один `ctx.log_error` и `None` — слой выбрасывается, движок живёт."""
+        resolved = self._resolve_preset_path(tile_path)
+        try:
+            image = imread_unicode(resolved, cv2.IMREAD_UNCHANGED)
+            if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] not in (3, 4):
+                raise ValueError(f"ожидался uint8 (H, W, 3|4), получено dtype={image.dtype} shape={image.shape}")
+            code = cv2.COLOR_BGRA2RGBA if image.shape[2] == 4 else cv2.COLOR_BGR2RGB
+            return cv2.cvtColor(image, code)
+        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — слой выбрасывается, не падение
+            ctx.log_error(f"scene_source: тайл слоя фона недоступен (tile={resolved!r}): {exc!r} — слой выброшен")
             return None
 
     def start(self, ctx: PluginContext) -> None:
