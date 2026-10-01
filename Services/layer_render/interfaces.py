@@ -19,17 +19,33 @@ import numpy as np
 
 @dataclass(frozen=True)
 class SolidFill:
-    """Сплошная заливка: `color_rgb` — три целых 0..255 в порядке R, G, B."""
+    """Сплошная заливка: `color_rgb` — три целых 0..255 в порядке R, G, B.
+
+    Pre: три целых 0..255 (bool/float/str не принимаются) — иначе `ValueError`. Сохраняется кортежем.
+    """
 
     color_rgb: tuple[int, int, int]
 
+    def __post_init__(self) -> None:
+        color = self.color_rgb
+        if not isinstance(color, (list, tuple)) or len(color) != 3:
+            raise ValueError(f"SolidFill.color_rgb: ожидались три целых [R, G, B]: {color!r}")
+        for channel in color:
+            # bool — подкласс int: True/False как канал цвета отвергаются явно.
+            if isinstance(channel, bool) or not isinstance(channel, int):
+                raise ValueError(f"SolidFill.color_rgb: каналы должны быть целыми числами: {color!r}")
+            if not 0 <= channel <= 255:
+                raise ValueError(f"SolidFill.color_rgb: каналы должны лежать в 0..255: {color!r}")
+        object.__setattr__(self, "color_rgb", tuple(color))
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, eq=False)
 class ScrollingTile:
     """Тайл фона: `image` — uint8 `(H, W, 3)` RGB (непрозрачный) или `(H, W, 4)` RGBA (по альфе).
 
     Pre: `H >= 1`, `W >= 1`, uint8, 3 или 4 канала — иначе `ValueError` в конструкторе.
-    Массив не копируется и не изменяется слоем.
+    Слой хранит собственную копию массива, только для чтения: правка исходника после создания слоя на кадр не
+    влияет. `eq=False` — сравнение и хеш по идентичности (поле-ndarray ломает поэлементное `==`).
     """
 
     image: np.ndarray
@@ -44,3 +60,6 @@ class ScrollingTile:
             raise ValueError(f"ScrollingTile.image: ожидалась форма (H, W, 3|4), получено shape={image.shape}")
         if image.shape[0] < 1 or image.shape[1] < 1:
             raise ValueError(f"ScrollingTile.image: высота и ширина должны быть >= 1, получено shape={image.shape}")
+        frozen_copy = np.array(image, copy=True)
+        frozen_copy.flags.writeable = False
+        object.__setattr__(self, "image", frozen_copy)

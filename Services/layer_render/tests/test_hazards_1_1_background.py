@@ -86,7 +86,7 @@ def test_fold_result_shape_solid_then_opaque_rgb_tile_then_remaining_tiles():
     assert [type(x) for x in folded] == [SolidFill, ScrollingTile, ScrollingTile]
     assert folded[0].color_rgb == (1, 2, 3), "верхний solid прячет нижний"
     assert folded[1].image.shape == (5, 5, 3)
-    assert folded[2].image is t2
+    assert folded[2].image is not t2 and np.array_equal(folded[2].image, t2)
     assert [type(x) for x in fold_background([])] == [SolidFill]
 
 
@@ -177,3 +177,44 @@ def test_loader_is_not_called_when_schema_is_bad_and_dropped_tile_keeps_order_of
 def test_bool_color_channel_is_rejected(color):
     with pytest.raises(ValueError):
         background_layers_from_config([{"solid": color}], lambda p: None)
+
+
+def test_mutating_source_tile_arrays_after_construction_does_not_change_next_frame():
+    """Алиасинг: тайл №1 раньше был снимком (копия свёртки), тайлы выше — живыми ссылками."""
+    rng = np.random.default_rng(7)
+    t1, t2 = _rand_tile(rng, 15, 9, 4), _rand_tile(rng, 15, 9, 4)
+    layers = [SolidFill((4, 5, 6)), ScrollingTile(t1), ScrollingTile(t2)]
+    folded = fold_background(layers)
+    before = _draw(folded, scroll_px=2, center_y=11.0)
+    t1[...] = 255 - t1
+    t2[...] = 255 - t2
+    assert np.array_equal(_draw(folded, scroll_px=2, center_y=11.0), before)
+    assert np.array_equal(
+        _draw(layers, scroll_px=2, center_y=11.0), _draw(fold_background(layers), scroll_px=2, center_y=11.0)
+    )
+
+
+def test_tile_image_is_a_private_read_only_copy():
+    src = np.zeros((3, 3, 3), dtype=np.uint8)
+    tile = ScrollingTile(src)
+    assert tile.image is not src and not np.shares_memory(tile.image, src)
+    with pytest.raises(ValueError):
+        tile.image[0, 0, 0] = 1
+    assert all(not layer.image.flags.writeable for layer in fold_background([tile, ScrollingTile(src)])[1:])
+
+
+def test_scrolling_tile_equality_and_hash_use_identity_and_do_not_raise():
+    a, b = ScrollingTile(np.zeros((2, 2, 3), dtype=np.uint8)), ScrollingTile(np.zeros((2, 2, 3), dtype=np.uint8))
+    assert a == a and a != b
+    assert len({a, b, a}) == 2
+
+
+@pytest.mark.parametrize("color", [(300, 0, 0), (0, -1, 0), (1, 2), (True, 0, 0), (0.5, 0, 0), "abc"])
+def test_solid_fill_bad_color_raises_valueerror(color):
+    with pytest.raises(ValueError):
+        SolidFill(color)
+
+
+def test_solid_fill_normalizes_list_color_to_tuple_and_keeps_value_equality():
+    assert SolidFill([1, 2, 3]) == SolidFill((1, 2, 3))
+    assert SolidFill([1, 2, 3]).color_rgb == (1, 2, 3)
