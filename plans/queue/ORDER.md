@@ -103,7 +103,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 
 | # | Задача | План | Для чего |
 |---|---|---|---|
-| Ф1 | **4.0** разведка → **4.1** claim check масок и кадров (L-6: 0.3–1.2 МБ через 64-КБ pipe) | [`transport-single-policy`](../transport-single-policy.md) Ф4 | С: симулятор — второй поставщик кадров; разблокирует lifecycle Ф2 |
+| Ф1 | **4.0** разведка → **4.1** claim check масок и кадров (L-6: 0.3–1.2 МБ через 64-КБ pipe) | [`transport-single-policy`](../transport-single-policy/plan.md) Ф4 | С: симулятор — второй поставщик кадров; разблокирует lifecycle Ф2 |
 | Ф2 | **4.5** `ServiceContext`; миграция `robot_comm`, `vfd_comm`, `modbus` названа в задаче | [`observability-closure`](../observability-closure/plan.md) | Р: `robot_comm` дал 0 записей ошибок на 2336 строк журнала |
 | Ф3 | **2.1** развести глаголы `record_metric` (counter/gauge по сборке) | [`framework-architecture-rework`](../framework-architecture-rework/plan.md) | Р: до того, как `client_v2` начнёт публиковать метрики; от codemod не зависит |
 | Ф4 | Условия CTO: ~~юнит-тест severity~~ (DONE 09-29, `97bdcf9b`), флейк `children_exit_hook`, прогон `--backend-live`; **ещё два флейка graceful stop на Windows** (давние, замер 09-29: база 6/12 и 5/12, main 1/8 и 1/8) — `test_graceful_stop_acceptance::…test_message_to_live_reader_is_delivered_before_exit`, `test_pm_marks_gone_reader_hazards::test_stop_many_unblocks_writer_of_dead_reader_gracefully`; затем Ф2 перемер | [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) | Ф2 перемер ⛔ Ф1 |
@@ -133,7 +133,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 - **Прототип не обрастает универсальным:** вынос во framework / `Services` / `Plugins` — по тесту слоя.
 - Планировать не дальше одной фазы вперёд. Сессия целиком в планах — сигнал, а не работа.
 
-## 4. Контроль планов — все 50 планов `plans/`
+## 4. Контроль планов — все 51 план `plans/`
 
 Колонка **Полоса** — буква из §2. **Статус** сверен git'ом 2026-09-26; строки Р и С — 2026-09-29.
 
@@ -147,13 +147,15 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | [gui-constructor](../gui-constructor/plan.md) | И | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.0 |
 | [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5 в `main` | 1b.2c ∥ 1b.2d |
 | [frontend-constructor](../frontend-constructor/plan.md) | И | Блок А DONE; Ф4/Ф5 ушли в gui-constructor; Блок В ⛔ окно codemod | — |
-| [transport-single-policy](../transport-single-policy.md) | Ф | 0.1, 0.3 в `main`; 0.2, Ф1–Ф4 не начаты | Ф4 4.0 |
+| [transport-single-policy](../transport-single-policy/plan.md) | Ф | Ф4: 4.4, 4.5, 4.6 слиты в `feat/qr-code-reader` (09-30) | 4.8a → 4.7 → 4.8b |
+| [pipeline-node-timing](../pipeline-node-timing.md) | И | заведён 09-30 (владелец): время узлов в GUI; дефекты PC-1..4 | T1 — дефект эталона PC-1 |
 | [observability-closure](../observability-closure/plan.md) | Ф | Ф0–Ф3 DONE, Ф4: 4.4, 4.11, 4.13 DONE; ветка в `main` | 4.5 / 4.3b |
 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Ф | Ф1 DONE (merge `ae0eebde`), CTO с условиями | юнит-тест severity |
 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Ф | не начат; Ф3 сделана в gui-service 1.3a, 3.2 = `8fae4034` | Ф1 |
 | [otel-export](../otel-export.md) | Ф | Ф0–Ф2 почти целиком, Ф3 наполовину; в `main` | 2.5 |
 | [framework-architecture-rework](../framework-architecture-rework/plan.md) | Ф | DRAFT ред. 3, ревью 7/10, решения Ф0 не приняты | 2.1 отдельно; остальное ⛔ Р-1 |
 | [dataset-annotation](../dataset-annotation/plan.md) | Д | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.1 |
+| [qr-code-reader](../qr-code-reader.md) | — | Шаг 0 (ingest мануалов) DONE; правка по документам закрыта. Вне полос §2 — новое железо | Ф0 на стенде: IDMVS → ModBus Mode, три Space/Offset/Size, версия прошивки |
 
 ### 4.2 Ждут триггера — не трогать до условия
 

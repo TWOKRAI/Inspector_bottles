@@ -61,7 +61,8 @@ processes:
         category: processing
         min_area: 100
         max_area: 0
-        draw_contours: true
+        # Контуры рисует render_overlay (draw_detections); здесь — без копии кадра.
+        draw_contours: false
 
   # --- Рендерер: наложение маски и bbox на кадр ---
   - process_name: renderer

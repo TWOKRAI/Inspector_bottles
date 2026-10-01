@@ -21,7 +21,7 @@ Consumer process (дочерние): create=False, close() при shutdown.
 """
 
 from multiprocessing import shared_memory
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -57,7 +57,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         process: Optional[Any] = None,
         process_state_registry: Optional[Any] = None,
         logger: Optional[Any] = None,
-        seqlock_frames: Optional[bool] = None,
+        seqlock_frames: bool = True,
         owner_incarnation: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
@@ -90,7 +90,9 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         # Ф7 G.3(b): формат слота seqlock (ADR-SRM-011). Стампуется на слот при
         # создании → write/read/size самосогласованы. torn — счётчик дропов гонки
         # (reader поймал перезапись под собой; наблюдаемость через get_stats).
-        self._seqlock_frames: bool = self._resolve_env_flag(seqlock_frames, "FW_SHM_SEQLOCK")
+        # Task 4.4: seqlock ВСЕГДА (флаг FW_SHM_SEQLOCK удалён) — поколение слота и есть
+        # идентичность кадра в ссылке. ``False`` оставлен только ради тестов старого формата.
+        self._seqlock_frames: bool = bool(seqlock_frames)
         # Ф7 G.3(b) / B-6/B-7: имя SHM с owner+incarnation (ADR-SRM-011) — stale-процесс
         # не пишет в чужой сегмент, мультикамера без коллизий. Дефолт False = прежнее имя.
         self._owner_incarnation: bool = self._resolve_env_flag(owner_incarnation, "FW_SHM_OWNER_INCARNATION")
@@ -350,6 +352,30 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             # H1c: seqlock-слот чистим по протоколу (не raw buf[:]=0 мимо generation).
             val.clear_memory_slot(memory_data.get("handles"), index, seqlock=seqlock)
             return None
+
+    def write_frame(
+        self,
+        process_name: str,
+        shm_name: str,
+        image: np.ndarray,
+        index: int,
+        *,
+        pack_fast: bool = True,
+    ) -> Optional[Tuple[str, int]]:
+        """Записать ОДИН кадр и вернуть ``(фактическое имя сегмента, чётное поколение ЭТОЙ записи)``.
+
+        Task 4.4: пара (name, gen) — то, на что указывает ссылка SHM. Запись идёт через
+        ``write_images`` (одна точка записи), поколение читается сразу после неё: слот пишет
+        ровно один писатель (инвариант single-writer-per-slot, buffer.py), между записью и
+        чтением поколение не меняется. ``None`` — запись не удалась. Слот без seqlock
+        (только тесты старого формата) поколения не имеет → ``gen`` = -1."""
+        name = self.write_images(process_name, shm_name, [image], index, pack_fast=pack_fast)
+        if name is None:
+            return None
+        memory_data = self.get_memory_data(process_name, shm_name)
+        if not memory_data or not memory_data.get("seqlock", False):
+            return name, -1
+        return name, fmt.read_generation(memory_data["handles"][index].buf)
 
     def _on_seqlock_recover(self, gen: int) -> None:
         """H1b: writer нашёл слот с НЕЧЁТНЫМ generation (прошлая запись не довелась —

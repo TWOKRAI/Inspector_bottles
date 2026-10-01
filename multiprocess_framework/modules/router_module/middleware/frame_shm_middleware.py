@@ -13,9 +13,9 @@ realloc-on-grow + round-robin — канон generic). Прежний `find_free
 снят (он всегда возвращал 0 — `index_usage` никем не инкрементился). Различие путей —
 только адаптер: откуда берётся frame и куда кладутся координаты.
 
-**Ф7 G.3 (b) — seqlock.** Слот SHM может быть в seqlock-формате (ADR-SRM-011). Флаг
-формата едет в сообщении полем `shm_seqlock` (Dict at Boundary) — cross-process reader
-(`FrameReader.read_frame`, H-задача) сверяет generation и дропает torn/in-progress кадр.
+**Ф7 G.3 (b) — seqlock.** Слот SHM может быть в seqlock-формате (ADR-SRM-011). Task 4.4: заголовок
+seqlock у слота ВСЕГДА (флага нет); поколение записи едет в ссылке (`gen`), cross-process reader
+(`FrameReader.read_ref`) сверяет его до и после чтения и дропает stale/torn кадр.
 
 **Ф7 G.3 (d) — громкий pickle-fallback.** Сбой SHM-write (mm есть, но запись не удалась)
 → кадр уходит pickle-через-Queue (×3 латентность). Раньше — молча. Теперь: счётчик
@@ -24,7 +24,7 @@ realloc-on-grow + round-robin — канон generic). Прежний `find_free
 **Ф7 G.3 (кэш handles) / H-задача Этап 2.** Cross-process raw-чтение открывало SharedMemory
 на каждый кадр (open/mmap/close + resource_tracker). Кэш handles + zero-copy view + post-use
 re-check вынесены за фасад `FrameReader` (модуль памяти); транспорт держит reader через DI и
-делегирует (`read_frame`/`view_valid`/`close_handle_cache`), синхронизация — внутри reader'а.
+делегирует (`read_ref`/`view_valid`/`close_handle_cache`), синхронизация — внутри reader'а.
 
 **Ф7 G.4.b — глубина кольца per-camera (B-8).** `coll` (число SHM-слотов round-robin)
 теперь настраивается на КОНКРЕТНУЮ камеру: явный `coll` из рецепта/wire (`buffer_slots`,
@@ -39,13 +39,8 @@ Claim Check: пиксели (numpy) едут в OS SHM, по очереди — 
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Dict, Optional
-
-from multiprocess_framework.modules.logger_module import get_std_logger
-
-# Ф6.х.7в: модульный логгер по конвенции 6.0 (вызов get_std_logger внутри
-# except был отклонением, найденным ревью в файле-образце миграции).
-_log = get_std_logger(__name__)
 
 # Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
 _HANDLE_CACHE_CAP = 8
@@ -53,6 +48,249 @@ _HANDLE_CACHE_CAP = 8
 _PICKLE_WARN_EVERY = 300
 # Throttle лога «frame не восстановлен» (штатный drop после G.7 — не ERROR на каждый кадр).
 _RESTORE_FAIL_WARN_EVERY = 300
+
+# Task 4.1 (transport-single-policy, C1-C2): порог claim check по размеру. Любой ключ
+# ВЕРХНЕГО уровня ``msg["data"]`` (кроме ``frame`` — тот ссылкой всегда) с ndarray
+# ``nbytes >= CLAIM_CHECK_MIN_NBYTES`` едет ссылкой на SHM; мельче — inline, не трогается.
+CLAIM_CHECK_MIN_NBYTES = 8192
+# Task 4.4: ЕДИНЫЙ формат ссылки для КАЖДОГО крупного массива, включая ``frame``:
+# ``data["_shm_refs"][key] = {"owner", "slot", "idx", "gen", "name"}`` — ровно пять полей.
+# ``gen`` — ЧЁТНОЕ поколение слота, которое произвела ЭТА запись: ссылка указывает на КАДР,
+# а не на ячейку кольца. Читатель сверяет поколение слота с ``gen`` (перезаписанная ячейка →
+# ``None`` + stale, а не чужие пиксели).
+SHM_REFS_KEY = "_shm_refs"
+# Ключ кадра: ссылка на него лежит там же, где и остальные (``_shm_refs["frame"]``).
+FRAME_KEY = "frame"
+# Ключи item'а, живущие ТОЛЬКО внутри процесса (на провод не уходят, send-дверь их снимает):
+#  * ``_shm_views`` — список входных ссылок, восстановленных zero-copy view (для post-use
+#    re-check в executor и в двери отправки);
+#  * ``_shm_dropped`` — метка «вход был перезаписан, пока копировали»: item и все его fan-out
+#    повторы дропаются.
+SHM_VIEWS_KEY = "_shm_views"
+SHM_DROPPED_KEY = "_shm_dropped"
+
+
+def _is_large_array(value: Any) -> bool:
+    """Голый числовой ndarray нативного порядка байт, ``ndim`` 2–3, ``nbytes >=
+    CLAIM_CHECK_MIN_NBYTES`` (C1/C2).
+
+    4.1-fix (ревью 4.1, находка 1 + повторное ревью): SHM-слот хранит изображение-подобный
+    массив ``(H, W[, C])`` числового dtype, а в заголовке — только ``dtype.char``. Поэтому
+    через слот не восстанавливаются: строки/bytes/object/void/``datetime64``/``timedelta64``
+    (молча ``None`` / dtype без единицы / fallback), big-endian (порядок байт теряется —
+    приходят неверные числа), подкласс ndarray (``MaskedArray`` теряет маску), 1D и 4D+
+    (ERROR на каждое сообщение). Всё это едет inline, как до 4.1. Импорт numpy — локальный
+    (модуль не тянет numpy на уровне импорта; после первого вызова это поиск в sys.modules)."""
+    from numpy import ndarray
+
+    return (
+        type(value) is ndarray
+        and value.dtype.kind in "biufc"
+        and value.dtype.isnative
+        and value.ndim in (2, 3)
+        and value.nbytes >= CLAIM_CHECK_MIN_NBYTES
+    )
+
+
+class _Ring:
+    """Кольцо SHM-слотов ОДНОГО ключа data (Task 4.1, C7): своё имя слота, своя ёмкость,
+    свой пул займов. Realloc одного кольца закрывает ТОЛЬКО свой слот — чужие кольца
+    (и живые view читателей на них) не трогает.
+
+    Состояние, которое до 4.1 жило плоскими полями middleware (``_allocated``,
+    ``_alloc_shape``, ``_pool``, ...), переехало сюда; у ``FrameShmMiddleware`` на них
+    остались read-only property-делегаты к кольцу ``frame`` (back-compat тестов/stats).
+    Общие вещи (mm, owner, глубина, лог, reader) берутся у middleware ``mw``.
+    """
+
+    def __init__(self, mw: "FrameShmMiddleware", key: str, slot: str, pool: Optional[Any]) -> None:
+        self.mw = mw
+        self.key = key
+        self.slot = slot
+        self.allocated = False
+        # H5b: создал ли слот САМ этот middleware (create_memory_dict) или ПРИНЯЛ чужой
+        # (adopt PM-памяти). release_owned освобождает только СВОЁ.
+        self.created_slot = False
+        self.write_index = 0
+        # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c) + dtype. None — ещё не выделяли.
+        self.alloc_shape: tuple[int, int, int] | None = None
+        self.alloc_dtype: str | None = None
+        self.pool: Optional[Any] = pool
+        # H-ревью (E2): транзитный кэш handles на время ОДНОГО release() пачки этого кольца.
+        self.release_handles_cache: Optional[Any] = None
+
+    # --- ёмкость -------------------------------------------------------------------
+    def fits(self, frame: Any) -> bool:
+        """Влезает ли массив в текущую выделенную ёмкость (по каждому измерению + dtype)."""
+        if self.alloc_shape is None:
+            return False
+        fh, fw, fc = FrameShmMiddleware._shape_hwc(frame)
+        ah, aw, ac = self.alloc_shape
+        return fh <= ah and fw <= aw and fc <= ac and str(frame.dtype) == self.alloc_dtype
+
+    def ensure_capacity(self, frame: Any) -> None:
+        """Lazy-аллокация при первом массиве + grow-only realloc при росте."""
+        if not self.allocated or not self.fits(frame):
+            self.allocate(frame)
+
+    def allocate(self, frame: Any) -> None:
+        """(Пере)выделить SHM-блоки под массив. Grow-only: ёмкость только растёт.
+
+        Целевая форма = max(текущая_ёмкость, форма_массива) по каждому измерению —
+        блок не сжимается (меньшие массивы читаются по header), но растёт под бо́льшие.
+        При переаллокации закрывается ТОЛЬКО слот этого кольца (owner → unlink), новый
+        новое ``name`` едет в ссылке каждого следующего сообщения → читатели следуют. Кольца других ключей
+        не трогаются (C7): их слоты и живые view читателей остаются валидными.
+        """
+        mw = self.mw
+        try:
+            fh, fw, fc = FrameShmMiddleware._shape_hwc(frame)
+            dtype = str(frame.dtype)
+            # H5a: adopt-if-exists — PM в wire_setup мог УЖЕ создать (owner, slot).
+            if not self.allocated:
+                self.adopt_existing_slot_if_any()
+            # Grow-only: не уменьшаем ёмкость (избегаем «качелей» при чередовании размеров).
+            if self.alloc_shape is not None and dtype == self.alloc_dtype:
+                ah, aw, ac = self.alloc_shape
+                target = (max(ah, fh), max(aw, fw), max(ac, fc))
+            else:
+                target = (fh, fw, fc)
+
+            # Уже выделено и форма не меняется — ничего не делаем (defensive).
+            if self.allocated and target == self.alloc_shape and dtype == self.alloc_dtype:
+                return
+
+            # Переаллокация: закрыть СВОЙ старый блок (owner → unlink), затем создать новый.
+            if self.allocated:
+                try:
+                    mw._mm.close_memory(mw._owner, self.slot)
+                except Exception as e:
+                    mw._log_error(f"FrameShmMiddleware: close old SHM before realloc: {e}")
+
+            memory_names = {self.slot: (1, target, dtype)}
+            mw._mm.create_memory_dict(mw._owner, memory_names, mw._coll)
+            self.allocated = True
+            self.created_slot = True  # H5b: слот создан ЭТИМ middleware → он его и освободит
+            self.alloc_shape = target
+            self.alloc_dtype = dtype
+            self.write_index = 0  # свежие слоты — пишем с начала кольца
+            # Ф7 G.5.d (В3): свежее кольцо (старые сегменты unlink'нуты) → free-list
+            # сбрасывается в «всё свободно»; старые займы void. Только СВОЙ пул.
+            if self.pool is not None:
+                self.pool.reset()
+        except Exception as e:
+            mw._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
+
+    def adopt_existing_slot_if_any(self) -> None:
+        """H5a: если mm уже держит (owner, slot) — принять как выделенный, не создавать
+        второй раз. Grow-only realloc в allocate пересоздаст лишь при росте массива."""
+        mw = self.mw
+        try:
+            md = mw._mm.get_memory_data(mw._owner, self.slot)
+        except Exception:
+            return
+        params = md.get("params", {}).get(self.slot) if md else None
+        if not params:
+            return
+        _, existing_shape, existing_dtype = params
+        self.allocated = True
+        self.created_slot = False  # H5b: принят чужой слот (PM) — release его не трогает
+        self.alloc_shape = tuple(existing_shape)  # type: ignore[assignment]
+        self.alloc_dtype = str(existing_dtype)
+
+    def release_owned(self) -> None:
+        """H5b: освободить СВОЙ созданный слот на teardown (принятый PM-слот не трогает)."""
+        mw = self.mw
+        if mw._mm is None or not self.allocated or not self.created_slot:
+            return
+        try:
+            mw._mm.close_memory(mw._owner, self.slot)
+        except Exception as exc:  # noqa: BLE001 — teardown не критичен
+            mw._log_error(f"FrameShmMiddleware: release_owned_memory failed: {exc}")
+        self.allocated = False
+        self.created_slot = False
+        self.alloc_shape = None
+        self.alloc_dtype = None
+
+    # --- запись --------------------------------------------------------------------
+    def acquire(self) -> Optional[int]:
+        """Ф7 G.5.d (В3): индекс слота. loan — СВОБОДНЫЙ слот из free-list (None =
+        исчерпание, сигнал поднимает middleware); off → слепой round-robin (бит-в-бит)."""
+        if self.pool is not None:
+            return self.pool.acquire()
+        idx = self.write_index % self.mw._coll
+        self.write_index += 1
+        return idx
+
+    def abort(self, idx: int) -> None:
+        """Отменить loan без publish (WRITING→FREE). Без пула — no-op."""
+        if self.pool is not None:
+            self.pool.abort(idx)
+
+    def write_and_publish(self, frame: Any, idx: int, dest: Dict[str, Any]) -> bool:
+        """Записать массив в слот ``idx`` и (при loan) опубликовать; ссылка (пять полей
+        формата 4.4: owner/slot/idx/gen/name) → ``dest``.
+
+        True — записано (dest заполнен); False — write не удался (причина в
+        ``mw._last_write_error``; вызывающий отменит loan через ``abort``)."""
+        mw = self.mw
+        try:
+            written = mw._mm.write_frame(mw._owner, self.slot, frame, idx)
+            if written:
+                # 4.5c: байты считаем ТОЛЬКО после успешной записи (упавший write_frame не даёт байтов);
+                # единая точка для generic-пути и wire-пути (on_send → _write_frame_into_slot).
+                mw._add_bytes_written(int(getattr(frame, "nbytes", 0)))
+                if self.pool is not None:
+                    # loan/publish: слот занят num_consumers читателями; release (d-2) → 0.
+                    self.pool.commit(idx, mw._num_consumers)
+                shm_name, gen = written
+                dest["owner"] = mw._owner
+                dest["slot"] = self.slot
+                dest["idx"] = idx
+                dest["gen"] = gen
+                dest["name"] = shm_name
+                return True
+            mw._last_write_error = "write_frame вернул None (нет слота/валидация)"
+        except Exception as exc:  # noqa: BLE001 — причина едет в громкий лог (M2d)
+            mw._last_write_error = repr(exc)
+        return False
+
+    # --- владение (release/reclaim) -------------------------------------------------
+    def read_generation(self, idx: int) -> int:
+        """Ф7 G.5.d-2: ТЕКУЩЕЕ поколение СВОЕГО слота (owner-side) — gen_reader пула.
+        -1 при недоступности. Handles при release пачки сняты один раз (E2)."""
+        mw = self.mw
+        try:
+            handles = self.release_handles_cache
+            if handles is None:
+                md = mw._mm.get_memory_data(mw._owner, self.slot) if mw._mm else None
+                handles = md.get("handles") if md else None
+            if handles and 0 <= idx < len(handles) and handles[idx] is not None:
+                from ...shared_resources_module.memory.format import read_generation
+
+                return read_generation(handles[idx].buf)
+        except Exception:
+            pass
+        return -1
+
+    def release(self, releases: list, evicted: bool) -> None:
+        """Делегация пачки тикетов ЭТОГО кольца в его пул (см. release_slots)."""
+        if self.pool is None or not releases:
+            return
+        if evicted:
+            self.pool.release_evicted(releases)
+            return
+        mw = self.mw
+        try:
+            md = mw._mm.get_memory_data(mw._owner, self.slot) if mw._mm else None
+            self.release_handles_cache = md.get("handles") if md else None
+            self.pool.release(releases)
+        finally:
+            self.release_handles_cache = None
+
+    def stat(self, name: str) -> int:
+        """Счётчик пула кольца (0 без пула)."""
+        return self.pool.snapshot_stats()[name] if self.pool is not None else 0
 
 
 class FrameShmMiddleware:
@@ -71,12 +309,8 @@ class FrameShmMiddleware:
         cache_shm_handles: кэшировать SHM-handles читателя (Ф7 G.3). None → env
             ``FW_SHM_HANDLE_CACHE`` → False (прежний open/close на кадр).
 
-    Формат слота seqlock (Ф7 G.3b) middleware НЕ решает сам, а СЧИТЫВАЕТ у слота
-    после аллокации (``MemoryManager.get_memory_data(...)["seqlock"]``) и кладёт
-    авторитетно в сообщение как ``shm_seqlock`` — иначе флаг в сообщении мог бы
-    разойтись с реальным форматом слота (writer в seqlock, сообщение говорит нет →
-    reader читает не с того offset). Флаг слота задаёт сам MemoryManager
-    (``seqlock_frames`` ctor > env ``FW_SHM_SEQLOCK``, ADR-SRM-011).
+    Заголовок seqlock у слота ВСЕГДА (Task 4.4; флага ``FW_SHM_SEQLOCK`` больше нет): поколение
+    записи слота — это и есть ``gen`` в ссылке, по нему reader отличает свою запись от переписанной.
 
     Attributes:
         frame_boundary_crossings: Ф7 G.6 — сколько раз кадр реально пересёк границу
@@ -131,9 +365,19 @@ class FrameShmMiddleware:
         self.frame_boundary_crossings = 0
         # Ф7 G.3(d): громкий pickle-fallback (счётчик всегда, WARNING throttled).
         self.frame_pickle_fallbacks = 0
-        # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware —
-        # manager считает свои, но raw-путь его не проходит). Агрегируется в get_stats.
-        self.frame_torn_reads = 0
+        # 4.5c: объём, реально записанный в SHM / прочитанный из SHM (байты массивов). Замок, а не
+        # голый ``+=``: писать могут поток-продюсер и потоки executor'а, а ``+=`` по атрибуту не атомарен
+        # при переключении GIL (потерянное приращение) — приёмка требует точную сумму.
+        self._bytes_lock = threading.Lock()
+        self._bytes_written = 0
+        self._bytes_read = 0
+        self._bytes_mapped = 0
+        # M2c / Task 4.4: torn-чтения (перезапись слота во время чтения по ссылке) считает
+        # reader — ``frame_torn_reads`` ниже проецирует его счётчик (агрегируется в get_stats).
+        # 4.1-fix: тикетов release с неизвестным ``slot`` отброшено (не наше кольцо —
+        # не трогаем ничей займ). ponytail: не в get_shm_stats (набор ключей закреплён
+        # и уходит в телеметрию) — добавить туда отдельной задачей, если понадобится.
+        self.frame_release_unknown_slot = 0
         # Ф7 G.5.c: post-use re-check zero-copy view — слот перезаписан под живым view.
         # H-задача (Этап 2): счётчик теперь у reader'а (`self._reader.stale_drops`),
         # frame_stale_drops — read-only property (агрегируется в get_stats → heartbeat).
@@ -141,20 +385,18 @@ class FrameShmMiddleware:
         self._last_write_error = ""
         # M2a: троттлинг «frame не восстановлен» (штатный drop после G.7, не ERROR-спам).
         self._restore_fail_count = 0
-        self._allocated = False
-        # H5b: создал ли слот САМ этот middleware (create_memory_dict) или ПРИНЯЛ чужой
-        # (adopt PM-памяти). release_owned_memory освобождает только СВОЁ — иначе
-        # deconfigure снёс бы PM-память (created==1 через configure/deconfigure-циклы).
-        self._created_slot = False
-        self._write_index = 0
-        # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c). None — ещё не выделяли.
-        # Нужна для переаллокации при росте кадра (resize): иначе кадр больше блока
-        # не влезает → write_images падает → вечный pickle-fallback (медленно).
-        self._alloc_shape: tuple[int, int, int] | None = None
-        self._alloc_dtype: str | None = None
-        # Ф7 G.3(b): формат seqlock ФАКТИЧЕСКОГО слота (считывается у mm после
-        # аллокации, НЕ решается middleware) → авторитетно едет в shm_seqlock.
-        self._slot_seqlock = False
+        # 4.4c: сегмент ссылки уже отвязан (realloc кольца/смена инкарнации владельцем) — это stale
+        # (ячейка переписана/исчезла ДО чтения), но reader этого не видит (open бросает раньше
+        # проверки поколения) — считаем здесь и складываем в ``frame_stale_drops``.
+        self._stale_unlinked_drops = 0
+        # 4.4d: доначисление executor'а — батч из N выходов дропнут целиком, reader посчитал 1
+        # (``all()`` встал на первой ссылке), остальные N-1 сообщений — сюда (``note_stale_drops``).
+        # Без замка, как ``_stale_unlinked_drops``: потоки (executor / приём) пишут разные счётчики
+        # и читаются только на heartbeat-снимке.
+        self._stale_batch_drops = 0
+        # Task 4.1: состояние слота (allocated/created/ёмкость/seqlock/пул) живёт в
+        # кольцах per-key (``_Ring``), см. ``_rings`` ниже; плоские ``_allocated``,
+        # ``_alloc_shape``, ``_pool``... — read-only делегаты к кольцу ``frame``.
         # H4: кэш handles БЕЗОПАСЕН только когда имя меняется на КАЖДЫЙ realloc
         # (owner_incarnation). Иначе realloc = unlink+create ТОГО ЖЕ имени (POSIX,
         # incarnation off) → cache hit на осиротевшие страницы → замороженный кадр №1
@@ -232,24 +474,94 @@ class FrameShmMiddleware:
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
-        # H-ревью (E2): транзитный кэш handles на время ОДНОГО release(): все тикеты пачки
-        # одного owner/slot → memory-data dict строим раз, а не на каждый тикет.
-        self._release_handles_cache: Optional[Any] = None
-        # Пул владения слотами (тип: FramePool). None при выключенном loan-протоколе.
-        # DI (H-ревью 2026-07-14): инжектированный ``pool`` выигрывает (подмена на
-        # Rust/iceoryx2 под тем же ``FramePool`` не трогает транспорт); None + флаг →
+        # Task 4.1 (C7): одно кольцо на ключ data. Ключ ``frame`` — слот ``slot`` как
+        # прежде (back-compat читателей, stats, adopt PM wire_setup); остальные ключи —
+        # слот ``<slot>__<key>``, кольцо создаётся лениво на первом крупном массиве.
+        # Copy-on-write: писатель подменяет dict целиком, читатели (release на
+        # message_processor, get_stats) берут снимок ссылки — без гонки «dict changed size».
+        # Пул кольца ``frame`` (тип: FramePool). DI (H-ревью 2026-07-14): инжектированный
+        # ``pool`` выигрывает (подмена на Rust/iceoryx2 не трогает транспорт); None + флаг →
         # дефолт-фабрика ``LoanLedger``; None + флаг off → пул=None (слепой round-robin).
-        self._pool: Optional[Any] = pool
-        if self._pool is None and self._loan_protocol and self._num_consumers > 0:
-            # Import runtime-local (как format-хелперы) — coupling router→shared_resources
-            # остаётся runtime, не top-level. gen_reader = чтение поколения СВОЕГО слота
-            # (seqlock) → пул SHM-агностичен (не знает про формат слота).
-            from ...shared_resources_module.memory.pool import LoanLedger
+        # Ф7 G.7: пул только при num_consumers>0 (copy-out/GUI исключены из счёта).
+        self._pooled = pool is not None or (self._loan_protocol and self._num_consumers > 0)
+        frame_ring = _Ring(self, FRAME_KEY, self._slot, pool)
+        if frame_ring.pool is None and self._pooled:
+            frame_ring.pool = self._make_pool(frame_ring)
+        self._frame_ring = frame_ring
+        self._rings: Dict[str, _Ring] = {FRAME_KEY: frame_ring}
 
-            self._pool = LoanLedger(self._coll, gen_reader=self._read_own_slot_generation)
-            # Ф7 G.7: num_consumers проведён из топологии (число loan-aware целей владельца,
-            # copy-out/GUI исключены — см. связку выше). Пул создаётся только при >0, поэтому
-            # исчерпание из-за GUI-only fan-out (резидуал G.5) больше не воспроизводится.
+    def _make_pool(self, ring: _Ring) -> Any:
+        """Дефолтный пул займов кольца. Import runtime-local — coupling
+        router→shared_resources остаётся runtime. gen_reader = поколение СВОЕГО слота
+        кольца → пул SHM-агностичен."""
+        from ...shared_resources_module.memory.pool import LoanLedger
+
+        return LoanLedger(self._coll, gen_reader=ring.read_generation)
+
+    def _ring_for(self, key: str) -> _Ring:
+        """Кольцо ключа; не-``frame`` ключ получает своё кольцо лениво (слот ``<slot>__<key>``).
+        Создаёт только поток-писатель (send-путь, single-writer)."""
+        ring = self._rings.get(key)
+        if ring is None:
+            ring = _Ring(self, key, f"{self._slot}__{key}", None)
+            if self._pooled:
+                ring.pool = self._make_pool(ring)
+            self._rings = {**self._rings, key: ring}  # copy-on-write (см. __init__)
+        return ring
+
+    def _ring_by_slot(self, slot: Any) -> Optional[_Ring]:
+        """Кольцо по имени слота из тикета. Нет ``slot`` → кольцо ``frame`` (до 4.1 все
+        тикеты шли в единственный пул — back-compat тикетов без ``slot``).
+
+        4.1-fix (ревью 4.1, находка 3): НЕИЗВЕСТНЫЙ непустой ``slot`` → ``None``, тикет
+        отбрасывается. Раньше он падал в кольцо ``frame``, и ``evicted=True`` (без
+        generation-guard) снимал чужой займ кадра."""
+        if not slot:
+            return self._frame_ring
+        for ring in self._rings.values():
+            if ring.slot == slot:
+                return ring
+        return None
+
+    def _sum_stat(self, name: str) -> int:
+        return sum(ring.stat(name) for ring in list(self._rings.values()))
+
+    # --- back-compat: плоское состояние слота = кольцо ``frame`` (read-only) ---------
+    @property
+    def _pool(self) -> Optional[Any]:
+        return self._frame_ring.pool
+
+    @property
+    def _allocated(self) -> bool:
+        return self._frame_ring.allocated
+
+    @property
+    def _created_slot(self) -> bool:
+        return self._frame_ring.created_slot
+
+    @property
+    def _alloc_shape(self) -> tuple[int, int, int] | None:
+        return self._frame_ring.alloc_shape
+
+    @property
+    def _alloc_dtype(self) -> str | None:
+        return self._frame_ring.alloc_dtype
+
+    @property
+    def _write_index(self) -> int:
+        return self._frame_ring.write_index
+
+    def _frame_fits(self, frame: Any) -> bool:
+        return self._frame_ring.fits(frame)
+
+    def _allocate_shm(self, frame: Any) -> None:
+        self._frame_ring.allocate(frame)
+
+    def _adopt_existing_slot_if_any(self) -> None:
+        self._frame_ring.adopt_existing_slot_if_any()
+
+    def _read_own_slot_generation(self, idx: int) -> int:
+        return self._frame_ring.read_generation(idx)
 
     @property
     def loan_protocol_enabled(self) -> bool:
@@ -273,30 +585,92 @@ class FrameShmMiddleware:
     @property
     def frame_loan_exhausted(self) -> int:
         """Исчерпаний free-list (громкий drop-на-источнике: читатели отстали)."""
-        return self._pool.snapshot_stats()["loan_exhausted"] if self._pool else 0
+        return self._sum_stat("loan_exhausted")
 
     @property
     def frame_slots_released(self) -> int:
         """Слотов освобождено release'ами (здоровье loan-цикла)."""
-        return self._pool.snapshot_stats()["slots_released"] if self._pool else 0
+        return self._sum_stat("slots_released")
 
     @property
     def frame_slots_reclaimed(self) -> int:
         """Займов реклеймлено после смерти читателя (kill-9 без release)."""
-        return self._pool.snapshot_stats()["slots_reclaimed"] if self._pool else 0
+        return self._sum_stat("slots_reclaimed")
 
     @property
     def frame_loans_released_on_evict(self) -> int:
         """LIVE-2: займов освобождено при вытеснении сообщения из полной очереди до
         прочтения (release-on-evict). Без этого пути займ вытесненного кадра не отпустил
         бы никто → free-list деградировал до перманентной смерти кольца. Пул=None → 0."""
-        return self._pool.snapshot_stats()["slots_released_on_evict"] if self._pool else 0
+        return self._sum_stat("slots_released_on_evict")
 
     @property
     def frame_stale_drops(self) -> int:
-        """Ф7 H-задача (Этап 2): zero-copy view'ов дропнуто post-use re-check'ом —
-        read-only проекция счётчика reader'а (единственный источник)."""
-        return self._reader.stale_drops
+        """СООБЩЕНИЙ отброшено по расхождению поколения (Task 4.4: ячейка переписана ДО чтения;
+        Ф7 G.5.c: view пережил перезапись) — счётчик reader'а + отвязанные сегменты ссылок (4.4c) +
+        доначисление ``note_stale_drops``. Единица — ОДНО отброшенное сообщение на обоих путях
+        (4.4d): приём останавливается на первой провалившейся ссылке, дверь отправки считает item
+        один раз, дроп батча из N выходов executor'ом = 1 (reader) + N-1 (``note_stale_drops``)."""
+        return self._reader.stale_drops + self._stale_unlinked_drops + self._stale_batch_drops
+
+    def note_stale_drops(self, n: int) -> None:
+        """Публичный контракт для ``PipelineExecutor`` (4.4d): доначислить ``n`` отброшенных сообщений
+        в ``frame_stale_drops``. Executor зовёт с ``N - 1`` при дропе батча из N выходов — первое
+        сообщение уже посчитал reader. ``n <= 0`` — no-op."""
+        if n > 0:
+            self._stale_batch_drops += n
+
+    def _add_bytes_written(self, n: int) -> None:
+        """4.5c: прибавить ``n`` байт к счётчику записи (под замком — см. комментарий в ``__init__``)."""
+        with self._bytes_lock:
+            self._bytes_written += n
+
+    def _add_bytes_mapped(self, n: int) -> None:
+        """4.5e: прибавить ``n`` байт, прочитанных как view без копии (под замком)."""
+        with self._bytes_lock:
+            self._bytes_mapped += n
+
+    def _add_bytes_read(self, n: int) -> None:
+        """4.5c: прибавить ``n`` байт к счётчику чтения (под замком)."""
+        with self._bytes_lock:
+            self._bytes_read += n
+
+    @property
+    def bytes_written(self) -> int:
+        """4.5c: суммарно байт массивов, успешно записанных в слоты СВОИХ колец (любой ключ)."""
+        return self._bytes_written
+
+    @property
+    def bytes_read(self) -> int:
+        """4.5c: суммарно байт массивов, успешно СКОПИРОВАННЫХ по ссылке (stale/torn/битая — 0).
+
+        4.5e: zero-copy view сюда не входит — см. :attr:`bytes_mapped`.
+        """
+        return self._bytes_read
+
+    @property
+    def bytes_mapped(self) -> int:
+        """4.5e: суммарно байт массивов, прочитанных по ссылке как view (zero-copy, без копии)."""
+        return self._bytes_mapped
+
+    def ring_info(self) -> list[dict]:
+        """4.5c: описание созданных колец — по записи ``{key, name, depth}`` на кольцо
+        (``name`` — имя слота кольца, ``depth`` — число ячеек round-robin)."""
+        return [{"key": r.key, "name": r.slot, "depth": self._coll} for r in list(self._rings.values())]
+
+    @property
+    def frame_restore_failures(self) -> int:
+        """Ссылок не восстановлено из-за сбоя открытия/битой ссылки (кроме штатного stale по
+        поколению и отвязанного сегмента — те в ``frame_stale_drops``). Read-only проекция счётчика,
+        из-за которого throttled-лог «не восстановлен» видит только каждое 300-е."""
+        return self._restore_fail_count
+
+    @property
+    def frame_torn_reads(self) -> int:
+        """Task 4.4: СООБЩЕНИЙ отброшено из-за перезаписи слота ВО ВРЕМЯ чтения по ссылке (единица —
+        сообщение, не ссылка, 4.4c: чтение останавливается на первой провалившейся) — проекция
+        счётчика reader'а (подменный reader без ``torn_reads`` → 0)."""
+        return getattr(self._reader, "torn_reads", 0)
 
     @property
     def frame_handle_cache_size(self) -> int:
@@ -381,26 +755,20 @@ class FrameShmMiddleware:
         каждый цикл configure/deconfigure копил сегменты (POSIX). Здесь owner закрывает+
         unlink'ает СВОЙ слот; сброс _allocated → следующий configure выделит заново.
         ПРИНЯТУЮ (adopt) PM-память НЕ трогает (``_created_slot`` False).
+        Task 4.1: по ВСЕМ кольцам (frame + кольца крупных ключей).
         """
-        if self._mm is None or not self._allocated or not self._created_slot:
-            return
-        try:
-            self._mm.close_memory(self._owner, self._slot)
-        except Exception as exc:  # noqa: BLE001 — teardown не критичен
-            self._log_error(f"FrameShmMiddleware: release_owned_memory failed: {exc}")
-        self._allocated = False
-        self._created_slot = False
-        self._alloc_shape = None
-        self._alloc_dtype = None
+        for ring in list(self._rings.values()):
+            ring.release_owned()
 
-    def frame_view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
+    def frame_view_valid(self, ref: Dict[str, Any]) -> bool:
         """Ф7 G.5.c — post-use re-check: жив ли ещё zero-copy view (слот не перезаписан).
 
-        Делегирует в `FrameReader.view_valid` (H-задача, Этап 2). Публичный контракт для
-        `PipelineExecutor` (сверка ПОСЛЕ обработки цепочки): совпало поколение → view
-        валиден; разошлось / handle эвиктнут / gen<0 → drop (счётчик ``frame_stale_drops``
-        у reader'а), НЕ порча. Синхронизация — внутри reader'а (свой lock)."""
-        return self._reader.view_valid(shm_view_name, gen_at_read)
+        Task 4.4: сверяет ТЕКУЩЕЕ поколение слота ``ref["name"]`` с ``ref["gen"]`` — тем, что
+        писатель поставил в ссылку (а не с поколением, увиденным при чтении). Делегирует в
+        ``FrameReader.view_valid``: совпало → валиден; разошлось / handle эвиктнут / gen<0 →
+        drop (счётчик ``frame_stale_drops`` у reader'а), НЕ порча. Публичный контракт для
+        ``PipelineExecutor`` и двери отправки. Синхронизация — внутри reader'а (свой lock)."""
+        return self._reader.view_valid(ref["name"], ref["gen"])
 
     # ------------------------------------------------------------------
     # Единое ядро записи кадра в SHM (Ф7 G.3a — канон generic)
@@ -412,9 +780,9 @@ class FrameShmMiddleware:
         аллокаций — правило G.9).
 
         Единое ядро для strip_and_write И on_send (Ф7 G.3a): lazy-alloc + realloc при
-        росте кадра + round-robin по слотам. Формат слота (seqlock) применяет
-        MemoryManager по стампу; в ``dest`` едет только флаг ``shm_seqlock`` (для
-        cross-process reader).
+        росте кадра + round-robin по слотам. Заголовок seqlock у слота
+        всегда; в ``dest`` кладётся ссылка ``{owner, slot, idx, gen, name}`` (поколение записи — в
+        ``gen``, отдельных флагов формата нет).
 
         Returns:
             True — записано в SHM, координаты в ``dest``; False — mm отсутствует или
@@ -424,122 +792,144 @@ class FrameShmMiddleware:
         if self._mm is None:
             self._last_write_error = "memory_manager=None"
             return False
-
+        ring = self._frame_ring
         # Lazy allocation при первом кадре + ПЕРЕАЛЛОКАЦИЯ при росте кадра (resize).
-        if not self._allocated or not self._frame_fits(frame):
-            self._allocate_shm(frame)
-
-        idx = self._acquire_slot()
+        ring.ensure_capacity(frame)
+        idx = self._acquire_slot(ring)
         if idx is None:
             return False  # loan-исчерпание (drop-на-источнике; счётчик — в _acquire_slot)
-        if self._write_and_publish(frame, idx, dest):
+        if ring.write_and_publish(frame, idx, dest):
             return True
         # Ф7 H-ревью: write не удался → ОТМЕНИТЬ loan (WRITING→FREE), иначе зарезервированный
         # acquire'ом слот утёк бы навсегда (ёмкость кольца тает). loan↔publish/abort (iceoryx2).
-        if self._pool is not None:
-            self._pool.abort(idx)
+        ring.abort(idx)
         return False
 
-    def _acquire_slot(self) -> Optional[int]:
-        """Ф7 G.5.d (В3): выбор индекса слота. loan-протокол — СВОБОДНЫЙ слот из free-list
-        (``acquire`` резервирует WRITING); нет свободных → None + громкий drop-на-источнике
-        (не write-fail). off → прежний слепой round-robin (бит-в-бит)."""
-        if self._pool is not None:
-            idx = self._pool.acquire()
-            if idx is None:
-                self._note_loan_exhausted()
-            return idx
-        idx = self._write_index % self._coll
-        self._write_index += 1
+    def _acquire_slot(self, ring: Optional[_Ring] = None) -> Optional[int]:
+        """Ф7 G.5.d (В3): выбор индекса слота кольца (по умолчанию ``frame``). loan-протокол
+        — СВОБОДНЫЙ слот из free-list (``acquire`` резервирует WRITING); нет свободных →
+        None + громкий drop-на-источнике (не write-fail). off → слепой round-robin."""
+        ring = ring or self._frame_ring
+        idx = ring.acquire()
+        if idx is None:
+            self._note_loan_exhausted(ring)
         return idx
 
-    def _write_and_publish(self, frame: Any, idx: int, dest: Dict[str, Any]) -> bool:
-        """Записать кадр в слот ``idx`` и (при loan) опубликовать (commit); координаты → ``dest``.
+    def _write_item_arrays(self, item: Dict[str, Any], entries: list) -> None:
+        """Task 4.1: записать массивы item'а (``frame`` + крупные ключи) в их кольца.
 
-        True — записано (dest заполнен); False — write не удался (причина в
-        ``_last_write_error``; вызывающий отменит loan через ``abort``)."""
-        try:
-            shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
-            if shm_name:
-                if self._pool is not None:
-                    # loan/publish: слот занят num_consumers читателями; release (d-2) → 0.
-                    self._pool.commit(idx, self._num_consumers)
-                dest["owner"] = self._owner
-                dest["shm_owner"] = self._owner
-                dest["shm_name"] = self._slot
-                dest["shm_index"] = idx
-                dest["shm_actual_name"] = shm_name
-                dest["shm_seqlock"] = self._slot_seqlock
-                return True
-            self._last_write_error = "write_images вернул None (нет слота/валидация)"
-        except Exception as exc:  # noqa: BLE001 — причина едет в громкий лог (M2d)
-            self._last_write_error = repr(exc)
-        return False
+        Две фазы — займы ВСЕГО сообщения берутся до первой записи:
+          1. ёмкость + ``acquire`` по каждому кольцу. Исчерпание на ЛЮБОМ кольце →
+             займы, уже взятые под это сообщение другими кольцами, отменяются (``abort``),
+             ``_last_loan_exhausted`` → send-middleware дропает всё сообщение (C5, как
+             drop кадра до 4.1). Без отмены слот кольца ``frame`` утёк бы в WRITING навсегда.
+          2. запись + publish. Сбой записи ОДНОГО ключа → abort его займа, массив остаётся
+             inline (громкий pickle-fallback); остальные ключи идут ссылкой.
 
-    def _note_loan_exhausted(self) -> None:
+        Task 4.4: ссылка на КАЖДЫЙ ключ (и ``frame``) — ``item["_shm_refs"][key]``; исходящий
+        ``_shm_refs`` — НОВЫЙ dict только со СВОИМИ ссылками (унаследованные от предыдущего хопа
+        не пересылаются никогда: один хоп), массив из item убирается.
+        """
+        planned: list = []
+        for key, arr in entries:
+            ring = self._ring_for(key)
+            ring.ensure_capacity(arr)
+            idx = self._acquire_slot(ring)
+            if idx is None:
+                for _key, _arr, taken_ring, taken_idx in planned:
+                    taken_ring.abort(taken_idx)
+                return
+            planned.append((key, arr, ring, idx))
+
+        own_refs: Dict[str, Any] = {}
+        for key, arr, ring, idx in planned:
+            ref: Dict[str, Any] = {}
+            if ring.write_and_publish(arr, idx, ref):
+                own_refs[key] = ref
+                item.pop(key, None)
+                continue
+            ring.abort(idx)
+            self._note_pickle_fallback(f"strip_and_write[{key}]")
+        if own_refs:
+            item[SHM_REFS_KEY] = own_refs
+        else:
+            item.pop(SHM_REFS_KEY, None)
+
+    def _has_own_ref(self, container: Any) -> bool:
+        """Task 4.4: несёт ли dict ссылку СВОЕГО владельца — признак fan-out повтора (item уже
+        стрипнут для другого target). Унаследованные ссылки (owner другой) — не признак."""
+        refs = container.get(SHM_REFS_KEY) if isinstance(container, dict) else None
+        if not isinstance(refs, dict):
+            return False
+        return any(isinstance(r, dict) and r.get("owner") == self._owner for r in refs.values())
+
+    def _inputs_still_valid(self, item: Dict[str, Any]) -> bool:
+        """Дверь отправки (Task 4.4): все ли входные view item'а пережили копию в свои кольца.
+
+        Проверка идёт ПОСЛЕ записи (seqlock-идиома: скопировали, потом убедились, что источник не
+        менялся). Останавливается на ПЕРВОЙ перезаписанной ссылке — ``frame_stale_drops`` растёт
+        ОДИН раз на item, а не на ссылку."""
+        for ref in item.get(SHM_VIEWS_KEY) or ():
+            if not self.frame_view_valid(ref):
+                return False
+        return True
+
+    def _count_unknown_slot_ticket(self, slot: Any) -> None:
+        """4.1-fix: учесть отброшенный тикет с неизвестным ``slot`` (счётчик всегда,
+        лог — первый и каждый N-й, как pickle-fallback)."""
+        self.frame_release_unknown_slot += 1
+        n = self.frame_release_unknown_slot
+        if n == 1 or n % _PICKLE_WARN_EVERY == 0:
+            self._log_error(
+                f"FrameShmMiddleware: тикет release с неизвестным slot={slot!r} отброшен "
+                f"[owner={self._owner}; кольца={sorted(r.slot for r in self._rings.values())}; "
+                f"всего={n}]"
+            )
+
+    def _note_loan_exhausted(self, ring: Optional[_Ring] = None) -> None:
         """Ф7 G.5.d (В3): free-list исчерпан → back-pressure = ГРОМКИЙ drop-на-источнике
         (кадр не уходит; счётчик всегда, WARNING throttled). Живую камеру НЕ блокируем.
 
         Ф7 H-задача: счётчик инкрементит пул внутри ``acquire()`` (при None); здесь —
-        только per-write сигнал + throttled лог (читаем актуальное число из пула)."""
+        только per-write сигнал + throttled лог (сумма по кольцам)."""
         self._last_loan_exhausted = True
+        slot = ring.slot if ring is not None else self._slot
         n = self.frame_loan_exhausted
         if n == 1 or n % _PICKLE_WARN_EVERY == 0:
             self._log_error(
                 f"FrameShmMiddleware: free-list исчерпан (читатели отстали), кадр дропнут "
-                f"на источнике [owner={self._owner}/{self._slot}; глубина={self._coll}; "
+                f"на источнике [owner={self._owner}/{slot}; глубина={self._coll}; "
                 f"всего={n}]"
             )
 
-    def _read_own_slot_generation(self, idx: int) -> int:
-        """Ф7 G.5.d-2: прочитать ТЕКУЩЕЕ поколение СВОЕГО слота (owner-side) — для
-        generation-guard на release. Под займом (refcount>0) writer слот не трогает,
-        поэтому поколение стабильно = то, что прочитал consumer. -1 при недоступности.
-
-        H-ревью (E2): при release пачки handles уже сняты ОДИН раз (release_slots →
-        ``_release_handles_cache``) — не пересобираем memory-data dict на КАЖДЫЙ тикет."""
-        try:
-            handles = self._release_handles_cache
-            if handles is None:
-                md = self._mm.get_memory_data(self._owner, self._slot) if self._mm else None
-                handles = md.get("handles") if md else None
-            if handles and 0 <= idx < len(handles) and handles[idx] is not None:
-                from ...shared_resources_module.memory.format import read_generation
-
-                return read_generation(handles[idx].buf)
-        except Exception:
-            pass
-        return -1
-
     def release_slots(self, releases: list, evicted: bool = False) -> None:
-        """Ф7 G.5.d-2 (В3): owner-side release-handler — тонкий адаптер к пулу (H-задача).
+        """Ф7 G.5.d-2 (В3): owner-side release-handler — тонкий адаптер к пулам (H-задача).
 
-        Consumer, дочитав view, шлёт пачку тикетов ``{index, generation, reader}``;
-        транспорт делегирует декремент refcount в ``FramePool.release`` (guard'ы —
-        refcount==0/stale generation/dup reader — внутри пула; generation читается
-        инжектированным ``gen_reader`` = ``_read_own_slot_generation``). refcount мутирует
-        ТОЛЬКО этот (owner) процесс. Любая ошибка учёта безопасна: В1 re-check ловит
-        преждевременное освобождение (writer перезапишет → drift → drop, не corruption).
+        Consumer, дочитав view, шлёт пачку тикетов ``{slot?, index, generation, reader}``;
+        Task 4.1: тикеты раскладываются по кольцам по ``slot`` (нет → кольцо
+        ``frame``, back-compat), каждое кольцо делегирует декремент в СВОЙ
+        ``FramePool.release`` (guard'ы — refcount==0/stale generation/dup reader — внутри
+        пула; generation читает ``gen_reader`` кольца). refcount мутирует ТОЛЬКО этот
+        (owner) процесс. Любая ошибка учёта безопасна: В1 re-check ловит преждевременное
+        освобождение (writer перезапишет → drift → drop, не corruption).
 
         ``evicted=True`` (LIVE-2): пачка пришла не от дочитавшего потребителя, а от
-        транспорта, ВЫТЕСНИВШЕГО кадр из полной очереди до прочтения. Тикеты поколения не
-        несут → делегируем в ``FramePool.release_evicted`` (release БЕЗ generation-guard;
-        handles-кэш не нужен — gen_reader не зовётся). Без этого займ вытесненного кадра
-        утекал бы навсегда (перманентная смерть кольца, воспроизведено live).
+        транспорта, ВЫТЕСНИВШЕГО сообщение из полной очереди до прочтения. Тикеты поколения
+        не несут → ``FramePool.release_evicted`` (без generation-guard). Без этого займ
+        вытесненного сообщения утекал бы навсегда (перманентная смерть кольца).
         """
-        if self._pool is None or not releases:
+        if not releases:
             return
-        if evicted:
-            self._pool.release_evicted(releases)
-            return
-        # H-ревью (E2): снять handles ОДИН раз на пачку — gen_reader читает из кэша, не
-        # пересобирает memory-data dict на каждый тикет. finally гарантирует сброс кэша.
-        try:
-            md = self._mm.get_memory_data(self._owner, self._slot) if self._mm else None
-            self._release_handles_cache = md.get("handles") if md else None
-            self._pool.release(releases)
-        finally:
-            self._release_handles_cache = None
+        by_ring: Dict[int, tuple] = {}
+        for ticket in releases:
+            slot = ticket.get("slot") if isinstance(ticket, dict) else None
+            ring = self._ring_by_slot(slot)
+            if ring is None:
+                self._count_unknown_slot_ticket(slot)
+                continue
+            by_ring.setdefault(id(ring), (ring, []))[1].append(ticket)
+        for ring, tickets in by_ring.values():
+            ring.release(tickets, evicted)
 
     def reclaim_reader(self, dead_reader: str) -> int:
         """Ф7 G.5.e (В3): реклейм займов МЁРТВОГО читателя (kill-9 без release) — адаптер.
@@ -547,17 +937,19 @@ class FrameShmMiddleware:
         При fan-out мёртвый reader держал все слоты, которые ещё НЕ отпустил → пул
         декрементит за него (тот же учёт, инициатор — владелец по confirmed-death
         соседа: supervisor/incarnation). Идемпотентно (повторный вызов после реклейма →
-        0). Транспорт делегирует в ``FramePool.reclaim`` и лишь ГРОМКО логирует результат
-        (логирование — дело транспорта-владельца, у пула логгера нет). Вторая линия —
-        startup-cleanup осиротевших сегментов G.3(c); В1 re-check ловит любую ошибку
-        учёта. Возвращает число реклеймленных займов."""
-        if self._pool is None or not dead_reader:
+        0). Task 4.1: по ВСЕМ кольцам. Транспорт лишь ГРОМКО логирует результат
+        (у пула логгера нет). Вторая линия — startup-cleanup осиротевших сегментов G.3(c);
+        В1 re-check ловит любую ошибку учёта. Возвращает число реклеймленных займов."""
+        if not dead_reader:
             return 0
-        reclaimed = self._pool.reclaim(dead_reader)
+        reclaimed = 0
+        for ring in list(self._rings.values()):
+            if ring.pool is not None:
+                reclaimed += ring.pool.reclaim(dead_reader)
         if reclaimed:
             self._log_error(
                 f"FrameShmMiddleware: реклейм {reclaimed} займов мёртвого читателя "
-                f"'{dead_reader}' [owner={self._owner}/{self._slot}]"
+                f"'{dead_reader}' [owner={self._owner}/{self._slot}*]"
             )
         return reclaimed
 
@@ -566,119 +958,198 @@ class FrameShmMiddleware:
     # ------------------------------------------------------------------
 
     def restore_frame(self, msg: dict) -> dict:
-        """Восстановить frame из SHM ref в item.
+        """Восстановить массивы из ссылок ``data["_shm_refs"]`` (Task 4.4: включая ``frame``).
 
-        Входящий msg содержит shm_name, shm_index (или owner + slot + index).
-        Читает ndarray из SHM → кладёт в msg["frame"].
+        ``frame`` -> ``msg["frame"]``; остальные ключи -> ``data[key]`` (Task 4.1). Чтение — по
+        ``ref["name"]`` со сверкой поколения ``ref["gen"]`` (view при zero_copy, иначе копия;
+        перезаписанная ячейка / рваное чтение -> ``None`` + счётчик, НЕ чужие пиксели).
+        Ссылки, восстановленные view, записываются в ПРОЦЕСС-ЛОКАЛЬНЫЙ ключ ``data["_shm_views"]``
+        — по ним executor и дверь отправки проверяют, что view пережил обработку.
 
-        Стратегия:
-          1. MemoryManager.read_images() — если SHM handle есть в этом процессе
-          2. Fallback: прямое открытие SharedMemory по shm_actual_name (cross-process)
+        Атомарность (4.4c): ссылки одного сообщения читаются по порядку и чтение ОСТАНАВЛИВАЕТСЯ на
+        первой, что вернула ``None``; всё уже восстановленное снимается, в ``data`` ставится метка
+        ``_shm_dropped`` — сообщение отброшено целиком (никогда ``frame`` без ``mask``).
+
+        Pickle-fallback: ``frame`` уже в сообщении (не через SHM) — берётся как есть.
         """
         data = msg.get("data", msg)
-
-        # Pickle fallback: frame уже в сообщении (не через SHM)
-        if "frame" in msg and msg["frame"] is not None:
+        if not isinstance(data, dict):
             return msg
-        if "frame" in data and data.get("frame") is not None:
-            msg["frame"] = data["frame"]
-            return msg
+        if msg.get(FRAME_KEY) is None and data.get(FRAME_KEY) is not None:
+            msg[FRAME_KEY] = data[FRAME_KEY]
+        refs = data.get(SHM_REFS_KEY)
+        if refs:
+            views = self._restore_refs(msg, data, refs, allow_view=True)
+            if views is None:
+                # 4.4c: item атомарен — одна нечитаемая ссылка отбрасывает ВСЁ сообщение; приёмник
+                # (DataReceiver) по метке не строит item.
+                data[SHM_DROPPED_KEY] = True
+            elif views:
+                data[SHM_VIEWS_KEY] = views
+        return msg
 
-        shm_owner = data.get("owner", data.get("shm_owner", ""))
-        shm_name = data.get("shm_name", "")
-        shm_index = data.get("shm_index", 0)
+    def _read_ref(self, ref: dict, label: str, allow_view: bool) -> tuple[Any, bool]:
+        """Прочитать один массив по ссылке ``{owner, slot, idx, gen, name}``.
 
-        if not shm_owner or not shm_name:
-            return msg
-
-        # Попытка 1: через MemoryManager (работает в пределах одного процесса; знает
-        # seqlock-формат из своей меты слота, сам дропает torn → None).
-        try:
-            images = self._mm.read_images(shm_owner, shm_name, shm_index, n=1)
-            if images:
-                msg["frame"] = images[0]
-                return msg
-        except Exception:
-            pass
-
-        # Попытка 2: прямое открытие SharedMemory по shm_actual_name (cross-process).
-        # Флаг seqlock едет в сообщении (Dict at Boundary) — reader сверяет generation.
-        shm_actual_name = data.get("shm_actual_name")
-        if shm_actual_name:
-            seqlock = bool(data.get("shm_seqlock", False))
-            # Ф7 G.5.b: zero-copy view вместо .copy() — только при активном zero_copy
-            # (уже гейтнут на handle-кэш в ctor) И seqlock (read-moment torn-защита +
-            # generation для post-use re-check G.5.c). Без seqlock — копия (нет защиты).
-            view = self._zero_copy and seqlock
+        Returns ``(массив | None, это_view)``. ``None`` = перезаписано до чтения (stale) или во
+        время (torn) — оба штатные дропы со счётчиком у reader'а, без лога; сегмент отвязан
+        (``FileNotFoundError``) — тот же stale, счёт у middleware; сбой открытия сегмента
+        (throttled лог) тоже ``None``. view (zero-copy) — только при ``allow_view`` И активном
+        zero_copy (гейтнут в ctor на handle-кэш): поколение слота у view всегда сверяется с
+        ``ref["gen"]`` (``frame_view_valid``), отдельной меты на провод не нужно."""
+        name = ref.get("name")
+        gen = ref.get("gen")
+        if name and isinstance(gen, int):
+            view = allow_view and self._zero_copy
             try:
-                frame = self._reader.read_frame(
-                    shm_actual_name,
-                    seqlock=seqlock,
-                    copy=not view,
-                    view_meta=data if view else None,
-                )
-                if frame is not None:
-                    msg["frame"] = frame
-                    return msg
-                # M2c: None при seqlock = torn/in-progress → ШТАТНЫЙ drop (счётчик, не лог).
-                if seqlock:
-                    self.frame_torn_reads += 1
-                    msg["frame"] = None
-                    return msg
+                arr = self._reader.read_ref(name, gen, copy=not view)
+            except FileNotFoundError:
+                # 4.4c: сегмент ссылки отвязан (realloc кольца у владельца) — штатный stale-дроп, счёт
+                # без лога (не ERROR на каждое сообщение, как и stale по поколению у reader'а).
+                self._stale_unlinked_drops += 1
+                return None, False
             except Exception as e:
-                self._log_error(f"FrameShmMiddleware(generic): SHM fallback failed: {e} (shm={shm_actual_name})")
-
-        # Обе попытки не сработали (не seqlock-torn) — M2a: throttled (после G.7 иначе
-        # ERROR на каждый дропнутый кадр), это штатный drop, не критичная ошибка.
-        msg["frame"] = None
+                self._log_error(f"FrameShmMiddleware: чтение {label} по ссылке не удалось: {e} (shm={name})")
+            else:
+                if arr is not None:
+                    # 4.5c: байты чтения — только успешное чтение (stale/torn → arr None → 0);
+                    # единая точка для restore_frame и on_receive (оба идут через _read_ref).
+                    # 4.5e: view (zero-copy) — отдельный счётчик: копии не было, и для отчёта о
+                    # мощности «скопировано» не должно включать «отображено» (ревью 4.5, находка 4).
+                    if view:
+                        self._add_bytes_mapped(int(arr.nbytes))
+                    else:
+                        self._add_bytes_read(int(arr.nbytes))
+                return arr, (view and arr is not None)
+        # Сбой открытия / битая ссылка — M2a: throttled (штатный drop после G.7, не ERROR-спам).
         self._restore_fail_count += 1
         if self._restore_fail_count == 1 or self._restore_fail_count % _RESTORE_FAIL_WARN_EVERY == 0:
             self._log_error(
-                f"FrameShmMiddleware(generic): frame не восстановлен (drop) "
-                f"({shm_owner}/{shm_name}[{shm_index}], "
-                f"actual={data.get('shm_actual_name', 'N/A')}; всего={self._restore_fail_count})"
+                f"FrameShmMiddleware: {label} не восстановлен (drop) "
+                f"({ref.get('owner')}/{ref.get('slot')}[{ref.get('idx')}], name={name or 'N/A'}; "
+                f"всего={self._restore_fail_count})"
             )
-        return msg
+        return None, False
+
+    def _restore_refs(self, msg: dict, data: dict, refs: Any, allow_view: bool) -> Optional[list]:
+        """Каждую ссылку ``_shm_refs[key]`` -> массив: ``frame`` в ``msg["frame"]``, прочие в
+        ``data[key]``. Ключ, уже несущий значение (массив уехал inline), не трогается. Битая
+        ссылка (не dict) — пропуск.
+
+        Атомарность (4.4c): на ПЕРВОЙ ссылке, вернувшей ``None`` (stale/torn/сбой открытия), чтение
+        останавливается, уже восстановленные ключи снимаются, возвращается ``None`` = сообщение
+        отбрасывается целиком. Счётчик reader'а (``frame_stale_drops``/``frame_torn_reads``)
+        растёт один раз — на ту единственную ссылку, что провалилась, т.е. считаются СООБЩЕНИЯ.
+        Иначе возвращает список ссылок, восстановленных view (возможно пустой)."""
+        views: list = []
+        if not isinstance(refs, dict):
+            return views
+        restored: list = []  # (контейнер, ключ) — что снять при отбрасывании
+        for key, ref in refs.items():
+            if not isinstance(ref, dict):
+                continue
+            if key == FRAME_KEY:
+                if msg.get(FRAME_KEY) is not None:
+                    continue
+                target = msg
+            else:
+                if data.get(key) is not None:
+                    continue
+                target = data
+            arr, is_view = self._read_ref(ref, key, allow_view=allow_view)
+            if arr is None:
+                for container, done_key in restored:
+                    container.pop(done_key, None)
+                return None
+            target[key] = arr
+            restored.append((target, key))
+            if is_view:
+                views.append(ref)
+        return views
+
+    def _large_entries(self, item: dict) -> list:
+        """(ключ, массив) к записи ссылкой: ``frame`` (всегда, если не None) первым, затем
+        крупные ndarray прочих ключей ВЕРХНЕГО уровня (C1/C2; вложенные — вне 4.1)."""
+        entries = []
+        frame = item.get(FRAME_KEY)
+        if frame is not None:
+            entries.append((FRAME_KEY, frame))
+        for key, value in item.items():
+            if key != FRAME_KEY and _is_large_array(value):
+                entries.append((key, value))
+        return entries
+
+    @staticmethod
+    def _copy_inline_views(item: dict) -> None:
+        """Заменить копиями ndarray верхнего уровня item'а с ``not flags.owndata`` (4.4d): после записи
+        в кольца в item остаются только inline-значения, а те из них, что смотрят в память чужого слота
+        (срез view), роутер сериализует после двери. Вложенные структуры не трогаются (см. остаток в
+        ``strip_and_write``)."""
+        from numpy import ndarray
+
+        for key, value in list(item.items()):
+            if isinstance(value, ndarray) and not value.flags.owndata:
+                item[key] = value.copy()
 
     def strip_and_write(self, item: dict) -> dict:
-        """Записать frame в SHM, убрать из item, добавить shm_ref.
+        """Записать frame и крупные массивы в SHM, убрать из item, добавить shm_ref.
 
-        Делегирует запись в единое ядро `_write_frame_into_slot` (Ф7 G.3a). Fallback:
-        если SHM write не удался (mm есть, но write failed) — frame остаётся в item и
-        пойдёт через pickle в IPC; это ГРОМКО (счётчик frame_pickle_fallbacks, G.3d).
-        mm=None (SHM не сконфигурирован) — pickle-by-design, не считается деградацией.
+        Task 4.1: ``frame`` — ссылкой всегда (плоские поля в item); любой другой ключ
+        верхнего уровня с ndarray ``nbytes >= CLAIM_CHECK_MIN_NBYTES`` — ссылкой в
+        ``item["_shm_refs"][key]`` (своё кольцо на ключ, ``_write_item_arrays``). Мельче —
+        inline, не трогается. Fallback: SHM write не удался (mm есть) — массив остаётся в
+        item и идёт pickle; это ГРОМКО (``frame_pickle_fallbacks``, G.3d). mm=None —
+        pickle-by-design, не деградация. Исчерпание займа на любом кольце — drop всего
+        сообщения (``_last_loan_exhausted``; дропает send-middleware).
+
+        Дверь отправки (Task 4.4 / 4.4d). Если item несёт ``_shm_views`` (входы — zero-copy view на
+        чужие слоты) и mm есть — ПОСЛЕ записи в кольца и ДО возврата: (1) каждый оставшийся в item
+        ndarray верхнего уровня с ``not flags.owndata`` (малый срез view, 1D/4D, не-native dtype,
+        fallback-массив) заменяется копией — иначе он сериализуется роутером уже ПОСЛЕ двери, а слот
+        источника за это время перезаписывается; (2) ``_inputs_still_valid`` — перезаписанный вход
+        помечает item ``_shm_dropped`` (дроп всех целей, один раз на item). Проверка идёт и в ветке
+        БЕЗ крупных массивов. Известный остаток: массивы во ВЛОЖЕННЫХ list/dict не копируются и
+        дверь их не защищает.
 
         Fan-out (F1, ревью 2026-07-13): producer переиспользует ОДИН item-dict для
-        нескольких targets — первый вызов стрипает frame (пиксели → SHM), второй и
-        далее видят уже стрипнутый item (frame=None, shm_name уже проставлен). Это
-        ВСЁ РАВНО реальный отдельный IPC-send (другому target) — агрегатный
-        счётчик границ считает его, per-item поле ``frame_hops`` НЕ задваивает.
+        нескольких targets — первый вызов стрипает массивы (→ SHM), второй и далее видят
+        уже стрипнутый item (массивов нет, ссылки проставлены). Это ВСЁ РАВНО реальный
+        отдельный IPC-send — агрегатный счётчик границ считает его, ``frame_hops`` НЕ
+        задваивает, повторной записи нет (C6).
 
         Returns:
-            item без "frame" (+ shm_ref) или item с "frame" (fallback).
+            item без массивов (+ shm_ref) или item с массивами (fallback).
         """
-        frame = item.get("frame")
-        if frame is None:
-            if item.get("shm_name"):
-                # Fan-out replay — тот же item уже стрипнут для другого target.
-                self._bump_boundary_only()
+        self._last_loan_exhausted = False
+        if item.get(SHM_DROPPED_KEY):
+            return item  # fan-out повтор уже отброшенного item'а — дропает strip_data_frame_on_send
+        if self._has_own_ref(item):
+            # Fan-out replay — тот же item уже стрипнут для другого target.
+            self._bump_boundary_only()
             return item
-
-        if self._mm is not None:
-            if self._write_frame_into_slot(frame, item):
-                # SHM write OK — координаты уже в item, убрать frame.
-                item.pop("frame", None)
-            elif not self._last_loan_exhausted:
-                # mm есть, write не удался (НЕ исчерпание loan) → громкий pickle-fallback
-                # (G.3d). При исчерпании loan (В3) — это DROP, а не fallback: кадр не
-                # уходит; drop выполняет send-middleware (strip_data_frame_on_send → None).
-                self._note_pickle_fallback("strip_and_write")
-        # mm=None → pickle-by-design (frame остаётся в item), не деградация.
-
-        # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
-        # pickle-fallback — оба пути кладут item на исходящий транспорт).
-        self._bump_frame_hops(item)
-
+        entries = self._large_entries(item)
+        has_views = bool(item.get(SHM_VIEWS_KEY))
+        if entries and self._mm is not None:
+            self._write_item_arrays(item, entries)
+            # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
+            # pickle-fallback — оба пути кладут item на исходящий транспорт).
+            self._bump_frame_hops(item)
+            if self._last_loan_exhausted:
+                return item  # дропнется целиком; входные ссылки нужны повторной попытке
+        else:
+            # mm=None -> pickle-by-design (массивы остаются в item), не деградация.
+            item.pop(SHM_REFS_KEY, None)
+            if entries:
+                self._bump_frame_hops(item)
+        if has_views and self._mm is not None:
+            # copy-then-check (4.4d): сначала копии inline-срезов view, потом проверка входов.
+            self._copy_inline_views(item)
+            if not self._inputs_still_valid(item):
+                item[SHM_DROPPED_KEY] = True
+                return item
+        # Один хоп: унаследованные ссылки (owner != self) уже заменены своими, локальная мета
+        # view с провода снимается.
+        item.pop(SHM_VIEWS_KEY, None)
         return item
 
     @staticmethod
@@ -688,90 +1159,6 @@ class FrameShmMiddleware:
         if len(sh) == 2:
             return int(sh[0]), int(sh[1]), 1
         return int(sh[0]), int(sh[1]), int(sh[2])
-
-    def _frame_fits(self, frame: Any) -> bool:
-        """Влезает ли кадр в текущую выделенную ёмкость (по каждому измерению + dtype)."""
-        if self._alloc_shape is None:
-            return False
-        fh, fw, fc = self._shape_hwc(frame)
-        ah, aw, ac = self._alloc_shape
-        return fh <= ah and fw <= aw and fc <= ac and str(frame.dtype) == self._alloc_dtype
-
-    def _allocate_shm(self, frame: Any) -> None:
-        """(Пере)выделить SHM-блоки под кадр. Grow-only: ёмкость только растёт.
-
-        Целевая форма = max(текущая_ёмкость, форма_кадра) по каждому измерению —
-        блок не сжимается (меньшие кадры читаются по header), но растёт под бо́льшие.
-        Растёт ограниченное число раз (до максимума кадра камеры) → сходится, без
-        thrash. При переаллокации старый блок закрывается (owner → unlink), новый
-        создаётся; новый shm_actual_name едет в каждом сообщении → читатели следуют.
-        """
-        try:
-            fh, fw, fc = self._shape_hwc(frame)
-            dtype = str(frame.dtype)
-            # H5a: adopt-if-exists — PM в wire_setup мог УЖЕ создать (owner, slot).
-            # Свежий middleware (wire.configure, _allocated=False) создал бы ВТОРОЙ раз,
-            # осиротив первый handle. Если mm уже держит слот — принять как выделенный
-            # (grow-only ниже пересоздаст лишь при росте кадра).
-            if not self._allocated:
-                self._adopt_existing_slot_if_any()
-            # Grow-only: не уменьшаем ёмкость (избегаем «качелей» при чередовании размеров).
-            if self._alloc_shape is not None and dtype == self._alloc_dtype:
-                ah, aw, ac = self._alloc_shape
-                target = (max(ah, fh), max(aw, fw), max(ac, fc))
-            else:
-                target = (fh, fw, fc)
-
-            # Уже выделено и форма не меняется — ничего не делаем (defensive).
-            if self._allocated and target == self._alloc_shape and dtype == self._alloc_dtype:
-                return
-
-            # Переаллокация: закрыть старый блок (owner → unlink), затем создать новый.
-            if self._allocated:
-                try:
-                    self._mm.close_memory(self._owner, self._slot)
-                except Exception as e:
-                    self._log_error(f"FrameShmMiddleware: close old SHM before realloc: {e}")
-
-            memory_names = {self._slot: (1, target, dtype)}
-            self._mm.create_memory_dict(self._owner, memory_names, self._coll)
-            self._allocated = True
-            self._created_slot = True  # H5b: слот создан ЭТИМ middleware → он его и освободит
-            self._alloc_shape = target
-            self._alloc_dtype = dtype
-            self._write_index = 0  # свежие слоты — пишем с начала кольца
-            # Ф7 G.5.d (В3): свежее кольцо (старые сегменты unlink'нуты) → free-list
-            # сбрасывается в «всё свободно»; старые займы void (сегменты ушли, читатели
-            # инвалидируют кэш по incarnation, В1 re-check дропнет). H-задача: reset у пула.
-            if self._pool is not None:
-                self._pool.reset()
-            # Ф7 G.3(b): считать ФАКТИЧЕСКИЙ формат слота (seqlock задаёт mm) —
-            # авторитетный источник для shm_seqlock в сообщении.
-            try:
-                md = self._mm.get_memory_data(self._owner, self._slot)
-                self._slot_seqlock = bool(md.get("seqlock", False)) if md else False
-            except Exception:
-                self._slot_seqlock = False
-        except Exception as e:
-            self._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
-
-    def _adopt_existing_slot_if_any(self) -> None:
-        """H5a: если mm уже держит (owner, slot) — принять как выделенный, не создавать
-        второй раз. Grow-only realloc в _allocate_shm пересоздаст лишь при росте кадра.
-        """
-        try:
-            md = self._mm.get_memory_data(self._owner, self._slot)
-        except Exception:
-            return
-        params = md.get("params", {}).get(self._slot) if md else None
-        if not params:
-            return
-        _, existing_shape, existing_dtype = params
-        self._allocated = True
-        self._created_slot = False  # H5b: принят чужой слот (PM) — release его не трогает
-        self._alloc_shape = tuple(existing_shape)  # type: ignore[assignment]
-        self._alloc_dtype = str(existing_dtype)
-        self._slot_seqlock = bool(md.get("seqlock", False))
 
     def strip_data_frame_on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send-middleware для data-pipeline (P3.1.2): вынести frame из msg["data"] в SHM.
@@ -802,11 +1189,29 @@ class FrameShmMiddleware:
             # None из send-middleware = router дропает отправку (middleware_dropped).
             if self._last_loan_exhausted:
                 return None
+            # Task 4.4: вход был перезаписан, пока копировали (дверь отправки) -> дроп ВСЕХ целей:
+            # метка живёт на item'е, повтор fan-out видит её и тоже возвращает None.
+            if data.get(SHM_DROPPED_KEY):
+                return None
         return msg
 
     # ------------------------------------------------------------------
     # RouterManager middleware-протокол: on_send / on_receive
     # ------------------------------------------------------------------
+
+    def _drop_foreign_refs(self, data: Any) -> None:
+        """Снять из ``data["_shm_refs"]`` ссылки с ``owner != self._owner`` (4.4d); опустевший ключ
+        удаляется. Не dict / нет ссылок — no-op."""
+        refs = data.get(SHM_REFS_KEY) if isinstance(data, dict) else None
+        if not isinstance(refs, dict):
+            return
+        own = {k: r for k, r in refs.items() if isinstance(r, dict) and r.get("owner") == self._owner}
+        if len(own) == len(refs):
+            return
+        if own:
+            data[SHM_REFS_KEY] = own
+        else:
+            data.pop(SHM_REFS_KEY, None)
 
     def on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Перехватить исходящее сообщение: записать frame в SHM, заменить на координаты.
@@ -814,12 +1219,14 @@ class FrameShmMiddleware:
         Ф7 G.3a: запись делегирована в единое ядро `_write_frame_into_slot`
         (round-robin вместо снятого find_free_index). Сбой write (mm есть) →
         громкий pickle-fallback (G.3d). frame берётся из top-level ``msg["frame"]``,
-        координаты кладутся в ``msg["data"]`` (+ width/height для back-compat).
+        ссылка кладётся в ``msg["data"]["_shm_refs"]["frame"]`` (форма — в заголовке слота).
 
         Если в msg нет ключа "frame" — либо это вообще не кадровое сообщение (нет
         "data" или в нём нет shm-маркера — не трогаем, ноль накладных), либо frame
         уже стрипнут раньше для другого send этого же msg (fan-out replay, F1
-        ревью 2026-07-13: считаем границу ЕЩЁ РАЗ — это реальный отдельный IPC-send).
+        ревью 2026-07-13: считаем границу ЕЩЁ РАЗ — это реальный отдельный IPC-send). Ссылки чужого
+        владельца (``owner != self._owner``) на этом пути снимаются — один хоп (4.4d): ссылка деда
+        не должна ехать дальше.
         """
         frame = msg.get("frame")
         if frame is None:
@@ -830,8 +1237,9 @@ class FrameShmMiddleware:
             if msg.get("type") == "data":
                 return msg
             existing_data = msg.get("data")
-            if isinstance(existing_data, dict) and existing_data.get("shm_name"):
+            if self._has_own_ref(existing_data):
                 self._bump_boundary_only()
+            self._drop_foreign_refs(existing_data)
             return msg
 
         # Проверка что это numpy ndarray (без жёсткого импорта numpy на уровне модуля)
@@ -855,7 +1263,8 @@ class FrameShmMiddleware:
         if self._mm is None:
             return msg  # pickle-by-design (SHM не сконфигурирован)
 
-        if not self._write_frame_into_slot(frame, data):
+        ref: Dict[str, Any] = {}
+        if not self._write_frame_into_slot(frame, ref):
             # Ф7 G.5.d (В3): исчерпание free-list → DROP-на-источнике (None = дроп send),
             # НЕ pickle-fallback.
             if self._last_loan_exhausted:
@@ -864,11 +1273,11 @@ class FrameShmMiddleware:
             self._note_pickle_fallback("on_send")
             return msg
 
-        # Убрать frame из сообщения (не передавать numpy через IPC). Координаты слота
-        # уже в data (M3). width/height — back-compat поля для старых читателей.
+        # Убрать frame из сообщения (не передавать numpy через IPC). Task 4.4: ссылка — в том же
+        # формате, что и на generic-пути (``data["_shm_refs"]["frame"]``, только СВОИ ссылки);
+        # ``width``/``height`` больше не пишутся — форма едет в заголовке слота.
         msg.pop("frame", None)
-        data["width"] = frame.shape[1]
-        data["height"] = frame.shape[0]
+        data[SHM_REFS_KEY] = {FRAME_KEY: ref}
 
         return msg
 
@@ -877,44 +1286,19 @@ class FrameShmMiddleware:
 
         Если msg["data"] не содержит SHM-координат — пропускает без изменений.
 
-        Стратегия чтения (приоритет):
-          1. MemoryManager.read_images() с координатами из сообщения
-          2. Прямое открытие SharedMemory по shm_actual_name (другой OS-процесс),
-             seqlock-флаг из сообщения (Ф7 G.3b) → reader дропает torn.
+        Task 4.4: ВСЕ ссылки (``frame`` -> ``msg["frame"]``, прочие -> ``data[key]``) читаются
+        КОПИЕЙ (copy-out потребитель release не шлёт) по ``ref["name"]`` со сверкой поколения
+        ``ref["gen"]``: перезаписанная ячейка -> ``None`` + ``frame_stale_drops``, рваное чтение ->
+        ``None`` + ``frame_torn_reads``.
+
+        Атомарность (4.4c): нечитаемая ссылка любого ключа -> ``None`` из middleware (RouterManager
+        считает это ``middleware_dropped`` и сообщение не доставляет) — потребитель не увидит ни
+        ``frame`` без ``mask``, ни ключ со значением ``None``.
         """
         data = msg.get("data")
         if not isinstance(data, dict):
             return msg
-
-        shm_name = data.get("shm_name")
-        shm_index = data.get("shm_index")
-
-        if shm_name is None or shm_index is None:
-            return msg
-
-        # Координаты из сообщения (приоритет) или конфигурация middleware (fallback)
-        owner = data.get("shm_owner", self._owner)
-        slot = shm_name or self._slot
-
-        # Попытка 1: через MemoryManager (работает если handles открыты в этом процессе)
-        if self._mm:
-            images = self._mm.read_images(owner, slot, shm_index, n=1)
-            if images:
-                msg["frame"] = images[0]
-                return msg
-
-        # Попытка 2: прямое открытие SharedMemory по фактическому имени.
-        shm_actual_name = data.get("shm_actual_name")
-        if shm_actual_name:
-            seqlock = bool(data.get("shm_seqlock", False))
-            try:
-                frame = self._reader.read_frame(shm_actual_name, seqlock=seqlock)
-                if frame is not None:
-                    msg["frame"] = frame
-                elif seqlock:
-                    # M2c: torn/in-progress → штатный drop (счётчик, агрегируется в get_stats).
-                    self.frame_torn_reads += 1
-            except Exception as exc:
-                _log.warning("SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name)
-
+        refs = data.get(SHM_REFS_KEY)
+        if refs and self._restore_refs(msg, data, refs, allow_view=False) is None:
+            return None  # 4.4c: одна нечитаемая ссылка -> сообщение отбрасывается целиком (drop у router'а)
         return msg

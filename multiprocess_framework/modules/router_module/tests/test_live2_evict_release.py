@@ -79,7 +79,8 @@ class TestOnFrameEvictedEnvelope:
     def test_builds_release_to_owner_with_evicted_flag(self):
         qr = _FakeQR()
         rm = RouterManager(manager_name="seg", queue_registry=qr)
-        evicted = {"type": "data", "data": {"owner": "seg", "shm_name": "output_frames", "shm_index": 5}}
+        ref = {"owner": "seg", "slot": "output_frames", "idx": 5, "gen": 4, "name": "seg_output_frames_5"}
+        evicted = {"type": "data", "data": {"_shm_refs": {"frame": ref}}}
         rm._on_frame_evicted(evicted, reader_process="lines")
 
         assert len(qr.sent) == 1
@@ -91,13 +92,22 @@ class TestOnFrameEvictedEnvelope:
         rel = msg["data"]["releases"][0]
         assert rel["index"] == 5
         assert rel["reader"] == "lines"  # непрочитавший потребитель
-        assert rel["generation"] == -1  # тикет вытеснения поколения не несёт
+        assert rel["generation"] == 4  # gen ссылки едет в тикете; при evicted=True пул им не гардится
 
-    def test_owner_from_shm_owner_fallback(self):
+    def test_release_per_ref_batched_by_owner(self):
+        """Ссылка на КАЖДЫЙ массив (не только frame): по тикету на ссылку, пачкой на владельца."""
         qr = _FakeQR()
         rm = RouterManager(manager_name="seg", queue_registry=qr)
-        rm._on_frame_evicted({"data": {"shm_owner": "cam0", "shm_name": "s", "shm_index": 0}}, "lines")
-        assert qr.sent and qr.sent[0][0] == "cam0"
+        refs = {
+            "frame": {"owner": "cam0", "slot": "f", "idx": 0, "gen": 2, "name": "n0"},
+            "mask": {"owner": "cam0", "slot": "m", "idx": 1, "gen": 2, "name": "n1"},
+            "depth": {"owner": "cam1", "slot": "d", "idx": 2, "gen": 2, "name": "n2"},
+        }
+        rm._on_frame_evicted({"data": {"_shm_refs": refs}}, "lines")
+        by_target = {target: msg["data"]["releases"] for target, _qt, msg in qr.sent}
+        assert sorted(by_target) == ["cam0", "cam1"]
+        assert sorted((r["slot"], r["index"]) for r in by_target["cam0"]) == [("f", 0), ("m", 1)]
+        assert [(r["slot"], r["index"]) for r in by_target["cam1"]] == [("d", 2)]
 
     def test_non_frame_eviction_ignored(self):
         qr = _FakeQR()
@@ -114,7 +124,6 @@ class TestEvictReleaseIntegration:
 
     def test_full_queue_eviction_frees_owner_slot(self, monkeypatch):
         monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
-        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
 
         psr = ProcessStateRegistry()
         qr = QueueRegistry(process_state_registry=psr)
@@ -131,7 +140,7 @@ class TestEvictReleaseIntegration:
         try:
             # seg записывает 2 кадра → оба слота заняты займом (refcount=[1,1]).
             item_a = mw.strip_and_write({"frame": _frame(0)})
-            idx_a = item_a["shm_index"]
+            idx_a = item_a["_shm_refs"]["frame"]["idx"]
             item_b = mw.strip_and_write({"frame": _frame(1)})
             assert mw._pool._refcount == [1, 1]
 

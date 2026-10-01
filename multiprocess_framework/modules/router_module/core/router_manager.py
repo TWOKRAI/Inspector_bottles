@@ -831,28 +831,37 @@ class RouterManager(ChannelRoutingManager):
         data = evicted_item.get("data")
         if not isinstance(data, dict):
             return
-        owner = data.get("owner") or data.get("shm_owner")
-        shm_name = data.get("shm_name")
-        idx = data.get("shm_index")
-        if not owner or not shm_name or idx is None:
-            return  # не кадровое сообщение (нет SHM-координат) — займа нет, релизить нечего
-        release_msg = {
-            "target": owner,
-            "type": "shm_release",
-            "queue_type": "system",
-            "data": {
-                "evicted": True,
-                "releases": [{"slot": shm_name, "index": idx, "generation": -1, "reader": reader_process}],
-            },
-        }
-        try:
-            # Прямой put в system-очередь владельца (не router.send) — избегаем ре-энтранта
-            # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
-            qr.send_to_queue(owner, "system", release_msg)
-        except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
-            self._log_debug(
-                lambda exc=exc: f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc!r}"
+        # Task 4.4: одна ссылка ``{owner, slot, idx, gen, name}`` на КАЖДЫЙ крупный массив (и
+        # ``frame``) — по тикету на ссылку, пачкой на владельца. ``gen`` известен, но при
+        # ``evicted=True`` пул поколением не гардится (сообщение не читалось).
+        refs = data.get("_shm_refs")
+        by_owner: dict = {}
+        for ref in refs.values() if isinstance(refs, dict) else ():
+            if not isinstance(ref, dict):
+                continue
+            owner = ref.get("owner")
+            slot = ref.get("slot")
+            idx = ref.get("idx")
+            if not owner or not slot or idx is None:
+                continue  # нет SHM-координат — займа нет, релизить нечего
+            by_owner.setdefault(owner, []).append(
+                {"slot": slot, "index": idx, "generation": ref.get("gen", -1), "reader": reader_process}
             )
+        for owner, releases in by_owner.items():
+            release_msg = {
+                "target": owner,
+                "type": "shm_release",
+                "queue_type": "system",
+                "data": {"evicted": True, "releases": releases},
+            }
+            try:
+                # Прямой put в system-очередь владельца (не router.send) — избегаем ре-энтранта
+                # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
+                qr.send_to_queue(owner, "system", release_msg)
+            except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
+                self._log_debug(
+                    lambda exc=exc, owner=owner: f"_on_frame_evicted: release owner={owner!r} не отправлен: {exc!r}"
+                )
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
@@ -1734,7 +1743,8 @@ class RouterManager(ChannelRoutingManager):
     def get_shm_stats(self) -> Dict[str, int]:
         """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
 
-        Те же тринадцать чисел, что телеметрия публикует в ``processes.<name>.state.shm``,
+        Те же семнадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои
+        восстановления, 4.5c), что телеметрия публикует в ``processes.<name>.state.shm``,
         но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
         ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
         dispatcher'ов), не читаются полные ``_stats``.
@@ -1781,12 +1791,27 @@ class RouterManager(ChannelRoutingManager):
             "frame_slots_released": _mw("frame_slots_released"),
             "frame_slots_reclaimed": _mw("frame_slots_reclaimed"),
             "frame_handle_cache_size": _mw("frame_handle_cache_size"),
+            # 4.5c: объём кадрового транспорта и ссылки, не восстановленные из-за сбоя/битой ссылки.
+            "shm_bytes_written": _mw("bytes_written"),
+            "shm_bytes_read": _mw("bytes_read"),
+            "shm_bytes_mapped": _mw("bytes_mapped"),
+            "frame_restore_failures": _mw("frame_restore_failures"),
             "queue_data_evicted": _q("data_evicted"),
             "queue_system_evict_blocked": _q("system_evict_blocked"),
             "queue_observability_evicted": _q("observability_evicted"),
             "queue_observability_send_failed": _q("observability_send_failed"),
             "observability_delivery_failed": delivery_failed,
         }
+
+    def get_ring_info(self) -> List[Dict[str, Any]]:
+        """4.5c: описание SHM-колец всех кадровых middleware роутера — конкатенация ``ring_info()``
+        (`` {key, name, depth}`` на кольцо); middleware без ``ring_info`` пропускаются."""
+        rings: List[Dict[str, Any]] = []
+        for mw in list(self._frame_middlewares):
+            info = getattr(mw, "ring_info", None)
+            if callable(info):
+                rings.extend(info())
+        return rings
 
     def get_stats(self) -> Dict[str, Any]:
         """Полная статистика: счётчики, каналы, dispatcher'ы, потоки."""

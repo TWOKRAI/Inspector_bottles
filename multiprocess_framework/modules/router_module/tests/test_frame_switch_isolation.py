@@ -41,7 +41,7 @@ def _write(mw: FrameShmMiddleware, val: int) -> dict:
 
 def _reader() -> FrameShmMiddleware:
     """Получатель в ОТДЕЛЬНОМ процессе не держит handles источника → рабочий путь
-    восстановления = Попытка 2 по ``shm_actual_name`` (аудит B-7: «рабочий путь —
+    восстановления = Попытка 2 по ``ref["name"]`` (аудит B-7: «рабочий путь —
     fallback по имени из сообщения»). mm=None форсит именно его (кросс-процессный
     raw-open), а не Попытку 1 по owner/slot/index (которая читала бы ТЕКУЩИЙ регион)."""
     return FrameShmMiddleware(memory_manager=None, owner="reader", slot="output_frames")
@@ -67,7 +67,7 @@ def test_switch_stale_coords_drop_not_wrong_frame():
         coords_b = _write(cam_v2, 222)
 
         # Имена различны (owner+incarnation) — reuse невозможен.
-        assert coords_a["shm_actual_name"] != coords_b["shm_actual_name"]
+        assert coords_a["_shm_refs"]["frame"]["name"] != coords_b["_shm_refs"]["frame"]["name"]
 
         # In-flight получатель со СТАРЫМИ координатами A: drop (сегмент ушёл) либо старый
         # кадр (111) — НИКОГДА новый (222). «Перепутанных кадров» нет по построению.

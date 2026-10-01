@@ -216,9 +216,23 @@ class _Services(MockProcessServices):
         return [str(entry.get("msg", "")) for entry in self.logs if entry.get("level") == "WARNING"]
 
 
+class _NoCpu:
+    """Датчик CPU без показаний: эти тесты судят УРОВНИ, как и без воркеров/router'а.
+
+    С Task 4.5b тик публикует ``state.cpu`` со второго вызова — и сценарий «публиковать
+    нечего» (ранний выход, на котором держится снятие писателя) иначе недостижим.
+    """
+
+    method = "none"
+
+    def sample(self) -> None:
+        return None
+
+
 def _boot(name: str = "proc") -> tuple[_Services, ProcessHeartbeat]:
     services = _Services(name=name)
     hb = ProcessHeartbeat(services)
+    hb._cpu_clock = _NoCpu()
     services._heartbeat = hb
     return services, hb
 

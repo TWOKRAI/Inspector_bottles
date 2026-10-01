@@ -35,9 +35,9 @@ def test_every_requires_target_is_registered():
 
 def test_resolve_returns_default_when_env_unset(monkeypatch):
     # given флаг с default=False и неустановленной переменной
-    monkeypatch.delenv("FW_SHM_SEQLOCK", raising=False)
+    monkeypatch.delenv("FW_SHM_PREFIX_CLEANUP", raising=False)
     # then возвращается default
-    assert ff.resolve("FW_SHM_SEQLOCK") is False
+    assert ff.resolve("FW_SHM_PREFIX_CLEANUP") is False
 
 
 def test_resolve_default_true_flag_stays_on_when_unset(monkeypatch):
@@ -49,9 +49,9 @@ def test_resolve_default_true_flag_stays_on_when_unset(monkeypatch):
 
 def test_env_overrides_default(monkeypatch):
     # when env явно задаёт истинное значение
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
+    monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "1")
     # then env побеждает default
-    assert ff.resolve("FW_SHM_SEQLOCK") is True
+    assert ff.resolve("FW_SHM_PREFIX_CLEANUP") is True
 
 
 def test_env_zero_overrides_default_true(monkeypatch):
@@ -81,27 +81,27 @@ def test_state_storm_flags_are_gone_from_registry():
 
 def test_ctor_beats_env(monkeypatch):
     # given env говорит off
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "0")
+    monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "0")
     # when ctor явно передаёт True
     # then ctor побеждает env
-    assert ff.resolve("FW_SHM_SEQLOCK", explicit=True) is True
-    assert ff.resolve("FW_SHM_SEQLOCK", explicit=False) is False
+    assert ff.resolve("FW_SHM_PREFIX_CLEANUP", explicit=True) is True
+    assert ff.resolve("FW_SHM_PREFIX_CLEANUP", explicit=False) is False
 
 
 def test_empty_env_falls_back_to_default(monkeypatch):
     # пустая строка трактуется как «не задано» → default
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "")
-    assert ff.resolve("FW_SHM_SEQLOCK") is False
+    monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "")
+    assert ff.resolve("FW_SHM_PREFIX_CLEANUP") is False
 
 
 def test_truthy_parsing_is_canonical(monkeypatch):
     # канонический truthy-набор (F9): 1/true/yes/on регистронезависимо
     for raw in ("1", "true", "TRUE", "Yes", "on"):
-        monkeypatch.setenv("FW_SHM_SEQLOCK", raw)
-        assert ff.resolve("FW_SHM_SEQLOCK") is True, raw
+        monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", raw)
+        assert ff.resolve("FW_SHM_PREFIX_CLEANUP") is True, raw
     for raw in ("0", "false", "no", "off", "garbage"):
-        monkeypatch.setenv("FW_SHM_SEQLOCK", raw)
-        assert ff.resolve("FW_SHM_SEQLOCK") is False, raw
+        monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", raw)
+        assert ff.resolve("FW_SHM_PREFIX_CLEANUP") is False, raw
 
 
 # ── typo-guard: неизвестное имя громко падает ─────────────────────────────────
@@ -139,11 +139,11 @@ def test_canonical_name_wins_over_alias(monkeypatch):
 
 
 def test_state_of_reports_source(monkeypatch):
-    monkeypatch.delenv("FW_SHM_SEQLOCK", raising=False)
-    assert ff.state_of("FW_SHM_SEQLOCK").source == "default"
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
-    assert ff.state_of("FW_SHM_SEQLOCK").source == "env"
-    assert ff.state_of("FW_SHM_SEQLOCK", explicit=False).source == "ctor"
+    monkeypatch.delenv("FW_SHM_PREFIX_CLEANUP", raising=False)
+    assert ff.state_of("FW_SHM_PREFIX_CLEANUP").source == "default"
+    monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "1")
+    assert ff.state_of("FW_SHM_PREFIX_CLEANUP").source == "env"
+    assert ff.state_of("FW_SHM_PREFIX_CLEANUP", explicit=False).source == "ctor"
 
 
 def test_list_flags_covers_whole_registry():
