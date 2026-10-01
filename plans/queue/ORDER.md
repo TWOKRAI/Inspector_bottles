@@ -87,7 +87,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | С0 ✅ | долг [DONE 09-29]: 10 стабильно красных тестов sim + 12 в `robot_comm` + флики delay_ms, jog, drop, p6, pult_web 10053 — починены по причинам, без skip (`09604ce8`, `25cbd7e3`, `2272b466`); передача — [`2026-09-29_failing-tests-and-b1-handoff.md`](../../docs/handoffs/2026-09-29_failing-tests-and-b1-handoff.md) | — | зелёная база для приёмки T2.4 |
 | С6 ⛔ | редактор **1.2b** Qt-вкладка `sim.*` → **1.3** канва; 2.1 налив — по вопросу 1 плана | С3 + И3 → И5 | тот же редактор внутри GUI, паритет с HTML |
 | — | line-sim Ф4 камера — файл под ред. 1, переписать перед исполнением; 5.5 — по вопросу 1 line-sim | ⛔ | — |
-| С7 | **фронт полосы С — план [`layer-render`](../layer-render/plan.md)** (DRAFT; один механизм слоёв для сима и генератора обучения, буквы — первый потребитель). Волна 1 (Task 1.1 ∥ 1.2) — в работе в отдельной сессии на ветке `feat/layer-render`, в `main` не влита (проверено `merge-base --is-ancestor` 2026-10-01) | — | сим и обучение на одном механизме слоёв; закрывает 0.1 `letters-retrain` |
+| С7 | **фронт полосы С — план [`layer-render`](../layer-render/plan.md)** (DRAFT; один механизм слоёв для сима и генератора обучения, буквы — первый потребитель). Волна 1 (Task 1.1 стек фона ∥ 1.2 `--gap-alpha`) влита в `main` 2026-10-01 (`4acca4687`); волна 2 ({1.3 ∥ 2.1}) ждёт ответа владельца | — | сим и обучение на одном механизме слоёв; закрывает 0.1 `letters-retrain` |
 
 Решения владельца 2026-09-27 (О-2 по редактору, О-3, О-5) и новые задачи 1.0/1.1b/1.2a/1.2h — в плане
 редактора, раздел «Решения 2026-09-27». Ветка `feat/line-sim-layer-editor` влита в `main` (`79dda66a9`, `c2a3b876a`), worktree `.claude/worktrees/ls-layer`.
@@ -161,7 +161,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | [framework-architecture-rework](../framework-architecture-rework/plan.md) | Ф | DRAFT ред. 3, ревью 7/10, решения Ф0 не приняты | 2.1 отдельно; остальное ⛔ Р-1 |
 | [dataset-annotation](../dataset-annotation/plan.md) | Д | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.1 |
 | [code-reader-sdk](../code-reader-sdk.md) | — | дочерний к qr-code-reader (трек B); Task 6.1–6.3 DONE, 6.3 — 09-29 (`909ae5c0f` спека, `f99835753` плагин, `f25ad852b` итог стенда) | простаивает: следующие пункты без номера — `Services/code_reader/STATUS.md:243` («Открыто по коду»: защита от склейки, пустой `bad_code_text`, `last_error` после переподключения) |
-| [layer-render](../layer-render/plan.md) | С | DRAFT в `main`; волна 1 (1.1 ∥ 1.2) — в работе в другой сессии на `feat/layer-render`, в `main` не влита | волна 1 → 1.3 (фон слоями, границы в `.sentrux/rules.toml`) |
+| [layer-render](../layer-render/plan.md) | С | волна 1 (1.1 ∥ 1.2) в `main` (`4acca4687`); волна 2 ждёт владельца | волна 1 → 1.3 (фон слоями, границы в `.sentrux/rules.toml`) |
 | [letters-retrain](../letters-retrain/plan.md) | — | IN PROGRESS: 0.2 (`50df705f`), 0.3 (`5ed21461`, `87d50a0f`) в `main`; 0.1 передана в layer-render; 0.4 ждёт layer-render 1.3. Вне полос §2 — задача владельца 10-01 | 0.4 базовая линия сети на исправленном симе |
 | [qr-code-reader](../qr-code-reader.md) | — | Шаг 0 (ingest мануалов) DONE; правка по документам закрыта. Вне полос §2 — новое железо | Ф0 на стенде: IDMVS → ModBus Mode, три Space/Offset/Size, версия прошивки |
 
