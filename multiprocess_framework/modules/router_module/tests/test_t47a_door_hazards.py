@@ -169,15 +169,55 @@ def test_mm_none_path_untouched(made):
 
 # ----------------------------------------------------------------------- _copy_inline_views -> bool
 def test_copy_inline_views_returns_true_only_when_copied():
-    base = np.zeros((16, 16), dtype=np.uint8)
-    view = base[:4, :4]
     own = np.zeros((4, 4), dtype=np.uint8)
+    own_view = np.zeros((16, 16), dtype=np.uint8)[:4, :4]  # свой view: корень .base — ndarray
+    foreign = np.frombuffer(bytearray(64), dtype=np.uint8)[:16]  # корень — bytearray, не ndarray
 
-    only_own = {"a": own, "s": "x", "n": 1}
+    only_own = {"a": own, "ov": own_view, "s": "x", "n": 1}
     assert FrameShmMiddleware._copy_inline_views(only_own) is False
-    assert only_own["a"] is own
+    assert only_own["a"] is own and only_own["ov"] is own_view
 
-    with_view = {"a": own, "v": view}
+    with_view = {"a": own, "v": foreign}
     assert FrameShmMiddleware._copy_inline_views(with_view) is True
     assert with_view["a"] is own
-    assert with_view["v"].flags.owndata and with_view["v"] is not view
+    assert with_view["v"].flags.owndata and with_view["v"] is not foreign
+
+
+# ------------------------------------------ свои view плагина vs чужой слот (ревью A-1, корень .base)
+def _own_views(received: dict) -> dict:
+    own = received["frame"].copy()  # владелец данных, вне слота входа
+    return {
+        "reshape": own.reshape(-1, 3),  # крупный: уйдёт в кольцо
+        "slice_of_copy": own[:8, :8],  # малый inline-срез собственной копии
+        "expand": own[:8, :8, 0][..., None],  # [..., None] от собственного среза
+        "small_view": own.reshape(-1)[:64],
+    }
+
+
+@pytest.mark.parametrize("name", ["reshape", "slice_of_copy", "expand", "small_view"])
+def test_own_view_output_not_dropped_on_stale_input(made, name):
+    """Собственные view плагина (корень .base — ndarray) не зависят от слота входа: при перезаписанном
+    входе item уходит, stale не растёт. ``flags.owndata`` давал здесь ложный дроп."""
+    writer, sender, received = _received(made)
+    arr = _own_views(received)[name]
+    assert not arr.flags.owndata, "стенд неисправен: нужен именно view"
+    item = _output(received, out=arr)
+    _overwrite_input(writer)
+
+    out = _send(sender, item)
+
+    assert out is not None, f"собственный view {name!r} дропнут из-за перезаписи входа"
+    assert sender.frame_stale_drops == 0
+
+
+def test_foreign_reshaped_slice_via_real_shm_view_dropped(made):
+    """Парный случай: срез ЧУЖОГО слота (через reshape — цепочка .base длиннее одного звена) +
+    перезаписанный вход -> дроп. Корень цепочки — не ndarray."""
+    writer, sender, received = _received(made)
+    arr = received["frame"].reshape(-1)[:64]
+    assert FrameShmMiddleware._views_foreign_memory(arr)
+    item = _output(received, out=arr)
+    _overwrite_input(writer)
+
+    assert _send(sender, item) is None
+    assert sender.frame_stale_drops == 1

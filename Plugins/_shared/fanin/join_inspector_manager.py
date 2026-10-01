@@ -26,10 +26,7 @@ import threading
 import time
 from typing import Callable, Iterable
 
-# Билеты view на чужие SHM-слоты (дверь отправки, 4.4/4.7a). Строка = frame_shm_middleware.SHM_VIEWS_KEY;
-# плагин фреймворк не импортирует (слои), поэтому константа продублирована; при переименовании ключа
-# в фреймворке менять и здесь (автоматической сверки нет).
-_SHM_VIEWS_KEY = "_shm_views"
+from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY
 
 
 class JoinInspectorManager:
@@ -108,7 +105,7 @@ class JoinInspectorManager:
             if item is None:
                 continue
             for k, v in item.items():
-                if (k == _SHM_VIEWS_KEY or k in self._list_keys) and isinstance(v, list):
+                if (k == SHM_VIEWS_KEY or k in self._list_keys) and isinstance(v, list):
                     # новый список на каждом слиянии: список входа не расширяем in-place
                     prev = merged.get(k)
                     merged[k] = (prev if isinstance(prev, list) else []) + v
