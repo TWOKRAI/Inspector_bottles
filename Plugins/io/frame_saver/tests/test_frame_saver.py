@@ -364,3 +364,95 @@ class TestRetention:
         p = make_plugin(tmp_path, subfolder_by_date=True, index_source="counter", max_days=0)
         p.process([frame(0)])
         assert (tmp_path / "2026-01-01").exists()
+
+
+# ---------------------------------------------------------------------------
+# 4.7b2: вход конвейера — view в слот кольца; удерживаемые кадры обязаны быть копиями
+# ---------------------------------------------------------------------------
+
+
+def test_trigger_accumulate_buffer_survives_ring_overwrite(tmp_path: Path) -> None:
+    """Реальное кольцо глубиной 8 (restore_frame -> read-only view), 20 кадров, buffer_size=10:
+    буфер хранит [10..19], а не перезаписанные слоты. Красный revert: ``kept = item`` в process()."""
+    from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+    from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
+
+    wmm, rmm = MemoryManager(), MemoryManager()
+    writer = FrameShmMiddleware(wmm, owner="cam0", slot="output_frames", coll=8)
+    reader = FrameShmMiddleware(rmm, owner="reader", slot="unused")
+    plugin = make_plugin(tmp_path, save_mode="trigger", buffer_mode="accumulate", buffer_size=10)
+    try:
+        for i in range(20):
+            out = writer.strip_and_write({"frame": np.full((64, 64, 3), i, np.uint8)})
+            msg = reader.restore_frame({"data": out})
+            fr = msg["frame"] if msg.get("frame") is not None else msg["data"]["frame"]
+            assert not fr.flags.owndata, "предпосылка: вход — view в слот"
+            plugin.process([{"frame": fr}])
+            del fr, msg
+        assert [int(it["frame"][0, 0, 0]) for it in plugin._buffer] == list(range(10, 20))
+        assert int(plugin._last_frame_item["frame"][0, 0, 0]) == 19
+    finally:
+        import gc
+
+        gc.collect()
+        plugin._buffer.clear()
+        plugin._last_frame_item = None
+        gc.collect()
+        for fin in (reader.close_handle_cache, writer.release_owned_memory, rmm.close_all, wmm.close_all):
+            try:
+                fin()
+            except Exception:  # noqa: BLE001 — уборка
+                pass
+
+
+def _ring_pair(depth: int):
+    from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+    from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
+
+    wmm, rmm = MemoryManager(), MemoryManager()
+    return (
+        wmm,
+        rmm,
+        FrameShmMiddleware(wmm, owner="cam0", slot="output_frames", coll=depth),
+        FrameShmMiddleware(rmm, owner="reader", slot="unused"),
+    )
+
+
+def _close_ring(*objs) -> None:
+    import gc
+
+    gc.collect()
+    for o in objs:
+        for fin in ("close_handle_cache", "release_owned_memory", "close_all"):
+            f = getattr(o, fin, None)
+            if callable(f):
+                try:
+                    f()
+                except Exception:  # noqa: BLE001 — уборка
+                    pass
+
+
+def test_stream_last_frame_survives_ring_overwrite_until_trigger(tmp_path: Path) -> None:
+    """stream, save_every_n огромный (в цикле ничего не сохраняется): 20 кадров через реальное кольцо глубиной 8,
+    потом ещё 8 записей в кольцо (перезаписывают слот кадра 19), триггер -> на диске кадр 19.
+    Красный revert: ``self._last_frame_item = item`` в process() (на диске пиксель перезаписанного слота)."""
+    wmm, rmm, writer, reader = _ring_pair(8)
+    plugin = make_plugin(tmp_path, save_mode="stream", save_every_n=10_000, image_format="png", subfolder_by_date=False)
+    try:
+        for i in range(20):
+            out = writer.strip_and_write({"frame": np.full((64, 64, 3), i, np.uint8)})
+            msg = reader.restore_frame({"data": out})
+            fr = msg["frame"] if msg.get("frame") is not None else msg["data"]["frame"]
+            assert not fr.flags.owndata, "предпосылка: вход — view в слот"
+            plugin.process([{"frame": fr}])
+            del fr, msg
+        for i in range(100, 108):  # кольцо обернулось: слот кадра 19 перезаписан
+            writer.strip_and_write({"frame": np.full((64, 64, 3), i, np.uint8)})
+        assert list(tmp_path.glob("*.png")) == [], "предпосылка: в цикле ничего не сохранено"
+        plugin._fire_trigger()
+        files = sorted(tmp_path.glob("*.png"))
+        assert len(files) == 1
+        assert int(cv2.imread(str(files[0]))[0, 0, 0]) == 19
+    finally:
+        plugin._last_frame_item = None
+        _close_ring(reader, writer, rmm, wmm)

@@ -69,8 +69,11 @@ SHM_DROPPED_KEY = "_shm_dropped"
 
 
 def _ref_key(ref: Dict[str, Any]) -> tuple:
-    """Ключ кэша handles читателя: ``(owner, slot, idx)`` ссылки (Task 4.7b)."""
-    return (ref.get("owner"), ref.get("slot"), ref.get("idx"))
+    """Ключ кэша handles читателя: ``(owner, slot, idx)`` ссылки (Task 4.7b); без ``owner`` — ``(name,)``."""
+    owner = ref.get("owner")
+    if owner is None:  # ссылка без владельца: ключ по имени (иначе все кадры делили бы ключ (None, None, None))
+        return (ref.get("name"),)
+    return (owner, ref.get("slot"), ref.get("idx"))
 
 
 def _is_large_array(value: Any) -> bool:
@@ -640,8 +643,9 @@ class FrameShmMiddleware:
     def frame_handle_cache_size(self) -> int:
         """Ф7 G.7 (0.5): размер reader-кэша SHM-handle — read-only проекция reader'а.
 
-        Под zero-copy эвикция отключена → на soak следим за ростом на инкарнацию
-        (резидуал G.5). Без handle-кэша (флаг off) — 0."""
+        Кэш всегда включён (4.7b): по handle на ключ ``(owner, slot, idx)``, новое имя под ключом
+        отставляет старый handle (с живым view — отложенно, в счёт не входит). Устойчивый рост на soak —
+        утечка handle через рестарт владельца. 0 — пока ничего не читали."""
         return self._reader.cache_size
 
     @staticmethod
