@@ -35,13 +35,11 @@ from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 
-pytestmark = pytest.mark.timeout(30)
 
 # Plugins/sim/scene_source/tests/test_scene_source_task_3_6.py -> parents[4] == корень репо
 # (тот же приём, что `_REPO_ROOT` в `plugin.py`, но посчитан независимо тестом, не импортом

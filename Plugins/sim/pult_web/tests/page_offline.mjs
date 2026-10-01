@@ -137,9 +137,12 @@ class FileReaderStub {
   removeEventListener() {}
   readAsDataURL(file) {
     setTimeout(() => {
-      this.result = file && file._dataUrl !== undefined ? file._dataUrl : null;
+      // R-5: file._readError — чтение падает: result=null, error задан, события error + loadend (без load).
+      const bad = !!(file && file._readError);
+      this.result = !bad && file && file._dataUrl !== undefined ? file._dataUrl : null;
+      if (bad) this.error = { name: "NotReadableError", message: "harness: read error" };
       this.readyState = 2;
-      for (const t of ["load", "loadend"]) {
+      for (const t of bad ? ["error", "loadend"] : ["load", "loadend"]) {
         const ev = { type: t, target: this };
         const h = this["on" + t];
         if (typeof h === "function") h.call(this, ev);
@@ -496,6 +499,7 @@ doc.activeElement = doc.body;
 const fetchLog = [];
 // Task 1.3h-d: подмена ответа по пути (шаг stub_fetch) и учёт незавершённых fetch (шаг settle).
 const fetchStubs = {};
+const fetchHolds = {}; // R-5: путь -> { left, held: [release fn] }
 let pendingFetches = 0;
 let lastFetchAt = 0;
 const ctxFetch = (p, o) => {
@@ -509,12 +513,26 @@ const ctxFetch = (p, o) => {
     return Promise.resolve(new Response(JSON.stringify(st.json), { status: st.status, headers: { "Content-Type": "application/json" } }));
   }
   pendingFetches++;
-  return fetch(base + p, o).then((r) => {
+  const real = fetch(base + p, o).then((r) => {
     entry.status = r.status;
     pendingFetches--;
     lastFetchAt = Date.now();
     return r;
   }, (e) => { pendingFetches--; throw e; });
+  // R-5: шаг hold_fetch — ближайшие `count` запросов к пути уходят на сервер сразу (порядок ответов сервера
+  // = порядок вызовов), но страница получает ответ только по шагу release_fetch (ответ «в обратном порядке»).
+  // abort сигнала страницы отклоняет удержанный запрос сразу — как fetch в браузере.
+  const hold = fetchHolds[p];
+  if (hold && hold.left > 0) {
+    hold.left--;
+    entry.held = true;
+    real.catch(() => {});
+    return new Promise((res, rej) => {
+      hold.held.push(() => real.then(res, rej));
+      if (o && o.signal && o.signal.addEventListener) o.signal.addEventListener("abort", () => rej(o.signal.reason));
+    });
+  }
+  return real;
 };
 const ctx = {
   document: doc,
@@ -527,6 +545,7 @@ const ctx = {
   requestAnimationFrame: (f) => setTimeout(() => f(Date.now()), 16),
   cancelAnimationFrame: (id) => clearTimeout(id),
   Image: ImageStub,
+  AbortController,
   FileReader: FileReaderStub,
   atob: (v) => Buffer.from(String(v), "base64").toString("binary"),
   btoa: (v) => Buffer.from(String(v), "binary").toString("base64"),
@@ -747,7 +766,7 @@ async function run() {
     }, 20000).unref();
     const steps = JSON.parse(process.argv[4] || "[]");
     const cv = el("presetCanvas");
-    const out = { snaps: {}, waits: [], aborted: null, pd: [], selects: [] };
+    const out = { snaps: {}, waits: [], aborted: null, pd: [], selects: [], picks: [] };
     let held = null;
     const mask = (b) => (b === 0 ? 1 : b === 2 ? 2 : b === 1 ? 4 : 0);
     const ptr = (at, extra) => {
@@ -870,11 +889,21 @@ async function run() {
       } else if (st.op === "stub_fetch") {
         // Task 1.3h-d: ответ на fetch(st.path) подменяется (st.status, st.json) — сервер не зовётся.
         fetchStubs[st.path] = { status: st.status || 200, json: st.json };
+      } else if (st.op === "hold_fetch") {
+        // R-5: удержать ответы на ближайшие st.count (по умолчанию 1) запросов к st.path до release_fetch.
+        fetchHolds[st.path] = { left: st.count || 1, held: [] };
+      } else if (st.op === "release_fetch") {
+        // R-5: отдать странице ответ удержанного запроса №st.index (0 — первый удержанный). Нет такого -> aborted.
+        const h = fetchHolds[st.path];
+        if (!h || !h.held[st.index || 0]) out.aborted = i;
+        else { h.held[st.index || 0](); await sleep(30); }
       } else if (st.op === "choose_file") {
         // Task 1.3h-d: пользователь выбрал файл в <input type=file>: files = [{name}], value = "C:\fakepath\name",
         // FileReader отдаст st.dataUrl; затем `change` (как браузер).
         const inp = el(st.id);
-        inp._pick({ name: st.name, size: st.size !== undefined ? st.size : String(st.dataUrl || "").length, type: "image/png", _dataUrl: st.dataUrl });
+        // R-5: st.readError — FileReader этого файла отдаст ошибку; picks — значение контрола сразу после выбора.
+        inp._pick({ name: st.name, size: st.size !== undefined ? st.size : String(st.dataUrl || "").length, type: "image/png", _dataUrl: st.dataUrl, _readError: !!st.readError });
+        out.picks.push({ id: st.id, name: st.name, value: inp.value });
         inp.fire("change");
         await sleep(10);
       } else if (st.op === "settle") {

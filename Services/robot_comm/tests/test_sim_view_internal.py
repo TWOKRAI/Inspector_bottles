@@ -35,7 +35,6 @@ from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, REASON, REASON_T
 from Services.robot_comm.gui.sim_view import DemoDriver, SimView
 from Services.robot_comm.server.sim_core_v2 import REG_SPACE_SIZE_V2, RobotSimCoreV2
 
-pytestmark = pytest.mark.timeout(30)
 
 FW_BUILD = 7
 

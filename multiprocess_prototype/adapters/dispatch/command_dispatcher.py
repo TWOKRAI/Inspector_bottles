@@ -45,6 +45,18 @@ from .project_holder import ProjectHolder  # re-export для backward-compat
 logger = get_std_logger(__name__)
 
 
+def _describe_cb(cb: object) -> str:
+    """Имя колбэка для лога; никогда не бросает (у объекта-слушателя __repr__ может падать).
+
+    Логирование ошибки слушателя не должно само стать источником исключения:
+    иначе один сломанный слушатель валит undo/redo и остальных слушателей.
+    """
+    try:
+        return getattr(cb, "__qualname__", None) or type(cb).__name__
+    except Exception:
+        return "<callback>"
+
+
 def _fmt_value(value: object) -> str:
     """Компактное строковое представление значения поля для label истории.
 
@@ -118,6 +130,9 @@ class CommandDispatcherOrchestrator:
         self._history = ProjectHistory(max_history=max_history)
         # G.4.4: подписчики на изменение истории (UI кнопки undo/redo, History-вкладка)
         self._change_callbacks: list[Callable[[], None]] = []
+        # Слушатели «вернуть вид UI» (например, выбор узлов) — вызываются из undo/redo
+        # с memo записи ПОСЛЕ восстановления Project (см. _apply_memo).
+        self._view_restore_listeners: list[Callable[[object], None]] = []
 
     def dispatch(
         self,
@@ -125,6 +140,7 @@ class CommandDispatcherOrchestrator:
         *,
         coalesce_key: str | None = None,
         undoable: bool = True,
+        view_state: Callable[[], object] | None = None,
     ) -> list[ProjectEvent]:
         """Выполнить команду: apply -> save topology -> publish events -> record history.
 
@@ -134,6 +150,12 @@ class CommandDispatcherOrchestrator:
                             undo-запись). None — без coalescing.
             undoable -- False для команд, не попадающих в историю (например,
                         одноразовые reload). По умолчанию True.
+            view_state -- фабрика непрозрачного memo вида UI (например, выбор узлов).
+                          Вызывается ДО apply (memo_before) и ПОСЛЕ публикации событий
+                          (memo_after); попадает в запись истории и возвращается
+                          слушателям add_view_restore_listener при undo/redo. Исключение
+                          внутри view_state логируется, memo становится None -- dispatch
+                          из-за вида UI не падает.
         Post:
             - Project в holder обновлён.
             - Topology записана в topology_repo (store публикует TopologyReplaced).
@@ -146,6 +168,9 @@ class CommandDispatcherOrchestrator:
         """
         # 1. Текущий Project
         current = self._holder.get()
+
+        # 1b. memo вида UI ДО мутации (пока scene ещё не перерисована)
+        memo_before = self._capture_view_state(view_state)
 
         # 2. Динамический ApplyContext (новый каждый dispatch)
         ctx = self._apply_context_factory()
@@ -164,6 +189,10 @@ class CommandDispatcherOrchestrator:
         for event in events:
             self._event_bus.publish(event)
 
+        # 6b. memo вида UI ПОСЛЕ мутации: события опубликованы, TopologyReplaced уже
+        #     перерисовал scene, выбор -- итоговый
+        memo_after = self._capture_view_state(view_state)
+
         # 7. Записываем снимок в undo-историю (G.4.1)
         if undoable:
             self._history.record(
@@ -172,6 +201,8 @@ class CommandDispatcherOrchestrator:
                 label=_describe(command, before=current),
                 command_type=type(command).__name__,
                 coalesce_key=coalesce_key,
+                memo_before=memo_before,
+                memo_after=memo_after,
             )
 
         # 8. Уведомляем UI-подписчиков об изменении истории (G.4.4)
@@ -198,10 +229,12 @@ class CommandDispatcherOrchestrator:
         Returns:
             True если что-то отменено, False если undo-стек пуст.
         """
-        target = self._history.take_undo()
-        if target is None:
+        taken = self._history.take_undo_with_memo()
+        if taken is None:
             return False
+        target, memo = taken
         self._restore(target)
+        self._apply_memo(memo)
         self._notify_change()
         return True
 
@@ -211,10 +244,12 @@ class CommandDispatcherOrchestrator:
         Returns:
             True если что-то повторено, False если redo-стек пуст.
         """
-        target = self._history.take_redo()
-        if target is None:
+        taken = self._history.take_redo_with_memo()
+        if taken is None:
             return False
+        target, memo = taken
         self._restore(target)
+        self._apply_memo(memo)
         self._notify_change()
         return True
 
@@ -257,13 +292,50 @@ class CommandDispatcherOrchestrator:
         except ValueError:
             pass
 
+    def add_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        """Подписаться на «вернуть вид UI» при undo/redo (получает memo записи).
+
+        Вызывается только если у записи memo не None, после _restore (TopologyReplaced уже
+        перерисовал scene) и до change-callback'ов.
+        """
+        if cb not in self._view_restore_listeners:
+            self._view_restore_listeners.append(cb)
+
+    def remove_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        """Отписаться от «вернуть вид UI»."""
+        try:
+            self._view_restore_listeners.remove(cb)
+        except ValueError:
+            pass
+
+    @staticmethod
+    def _capture_view_state(view_state: Callable[[], object] | None) -> object | None:
+        """Снять memo вида UI; исключение логируем и деградируем до None."""
+        if view_state is None:
+            return None
+        try:
+            return view_state()
+        except Exception:
+            logger.exception("Ошибка в view_state %s -- memo записи будет None", _describe_cb(view_state))
+            return None
+
+    def _apply_memo(self, memo: object | None) -> None:
+        """Отдать memo слушателям. None -- никого не зовём; ошибка слушателя не валит остальных."""
+        if memo is None:
+            return
+        for cb in list(self._view_restore_listeners):
+            try:
+                cb(memo)
+            except Exception:
+                logger.exception("Ошибка в view-restore listener %s", _describe_cb(cb))
+
     def _notify_change(self) -> None:
         """Вызвать все change-callback'и. Исключение в одном не валит остальные."""
         for cb in self._change_callbacks:
             try:
                 cb()
             except Exception:
-                logger.exception("Ошибка в change callback %r", cb)
+                logger.exception("Ошибка в change callback %s", _describe_cb(cb))
 
     def _restore(self, project: Project) -> None:
         """Восстановить снимок Project: derived store + holder.

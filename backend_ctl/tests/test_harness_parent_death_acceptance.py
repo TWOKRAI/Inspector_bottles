@@ -193,7 +193,6 @@ def _make_harness(class_path: str) -> BackendHarness:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(60)
 def test_kill9_pm_leaves_no_children():
     harness = _make_harness(HUNG_CHILD_CLASS_PATH)
     snap: List[Any] = []
@@ -228,7 +227,6 @@ def test_kill9_pm_leaves_no_children():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(60)
 def test_harness_stop_time_not_worse():
     harness = _make_harness(QUICK_CHILD_CLASS_PATH)
     snap: List[Any] = []

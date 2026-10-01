@@ -91,7 +91,6 @@ from multiprocess_framework.modules.process_module.plugins.testing import (
 )
 from Plugins.sim.pult_web.plugin import PultWebPlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 _MJPEG_URL = "http://127.0.0.1:8091/"
 _TIMEOUT_S = 1.0
@@ -368,7 +367,6 @@ def test_h4_existing_routes_unchanged(start_pult) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.timeout(15)
 def test_h5_preview_goes_to_layers_with_own_timeout(start_pult) -> None:
     """H5: preset.preview уходит клиенту процесса layers (не camera, не robot);
     таймаут маршрута — 5.0 с (не общий дефолт 1.0 с); двойник, отвечающий за

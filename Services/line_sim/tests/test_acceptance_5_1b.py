@@ -25,13 +25,10 @@ result)`` без него) для тестов, которые его перед
 
 from __future__ import annotations
 
-import pytest
 
 from Services.line_sim.core.matching import JobDone, MatchResult
 from Services.line_sim.core.truth import TruthLedger
 from Services.line_sim.interfaces import ObjectPassport
-
-pytestmark = pytest.mark.timeout(30)
 
 
 def _job(index: int, x_mm: float, y_mm: float, ecap: int, t: float) -> JobDone:

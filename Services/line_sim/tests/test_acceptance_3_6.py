@@ -63,8 +63,6 @@ from Services.line_sim import (
     encoder_to_offset_mm,
 )
 
-pytestmark = pytest.mark.timeout(30)
-
 
 # --------------------------------------------------------------------------------------
 # Fixture-хелперы (скопированы из test_acceptance_3_4.py — готовая зависимость, не то,

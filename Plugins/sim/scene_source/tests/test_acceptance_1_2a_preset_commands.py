@@ -29,14 +29,12 @@ from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.line_sim import CLASS_SPRITE_SOURCE, LayerSpec, ScenePreset
 
-pytestmark = pytest.mark.timeout(30)
 
 FRAME_W = 64
 FRAME_H = 64

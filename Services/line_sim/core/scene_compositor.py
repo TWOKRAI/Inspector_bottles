@@ -3,7 +3,8 @@
 
 Геометрия объекта в кадре (контракт лида, план Task 3.4 ред. 2):
 `cx = encoder_to_offset_mm(now_encoder, passport.spawn_encoder) * px_per_mm - x_px`,
-`cy = belt_y_px - y_px`. Кадр — RGB uint8 `(h_px, w_px, 3)`; в BGR переводит вызывающий
+`cy = belt_y_px + passport.lateral_px - y_px` (`lateral_px` — поперечное смещение диска,
+по умолчанию `0.0` -> прежний кадр байт в байт). Кадр — RGB uint8 `(h_px, w_px, 3)`; в BGR переводит вызывающий
 (плагин), НЕ этот класс (LS-009).
 
 **Направление ленты и точка входа (контракт лида 5.3b, §4.2.1).** `belt_direction`
@@ -106,7 +107,7 @@ class SceneCompositor:
             sprite = obj.render()
             offset_mm = encoder_to_offset_mm(now_encoder, obj.passport.spawn_encoder)
             cx = self._entry_x_px + self._belt_direction * offset_mm * self._px_per_mm - x_px
-            cy = self._belt_y_px - y_px
+            cy = self._belt_y_px + obj.passport.lateral_px - y_px
             sh, sw = sprite.shape[:2]
             if not _bbox_intersects(cx, cy, sw, sh, w, h):
                 continue

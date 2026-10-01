@@ -5,6 +5,7 @@
 - **Статус:** DETAILED (ожидает approval + старт P0-gate). P1.1 = read-only investigation (обязателен ПЕРВЫМ).
 - **Ветка:** `refactor/constructor-maturity`
 - **Master:** [`plan.md`](plan.md)
+- **2026-09-30:** [`undo-restores-selection`](../undo-restores-selection.md) добавляет в `SnapshotHistory` непрозрачный memo записи (выбор узлов). Слияние движков его сохраняет.
 
 ## Назначение
 

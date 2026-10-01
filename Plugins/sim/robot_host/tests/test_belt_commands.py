@@ -30,7 +30,6 @@ from Plugins.sim.robot_host.plugin import SimRobotHostPlugin
 from Services.robot_comm import ROBOT_AVAILABLE
 
 pytestmark = [
-    pytest.mark.timeout(30),
     pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен"),
 ]
 

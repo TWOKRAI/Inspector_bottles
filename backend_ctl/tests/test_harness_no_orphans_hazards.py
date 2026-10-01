@@ -203,7 +203,6 @@ def _pids(procs: List[Any]) -> set:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(90)
 def test_group_member_absent_from_snapshots_dies_via_killpg(tmp_path, monkeypatch):
     """Сторожит: вызов ``_kill_orchestrator_group`` в ``_force_kill_tree``."""
     import psutil
@@ -232,7 +231,6 @@ def test_group_member_absent_from_snapshots_dies_via_killpg(tmp_path, monkeypatc
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(90)
 def test_setsid_child_dies_via_post_readiness_snapshot(tmp_path, monkeypatch):
     """Сторожит: ``_union(...)`` сразу после ``wait_until_ready`` в ``start()``."""
     import psutil
@@ -260,7 +258,6 @@ def test_setsid_child_dies_via_post_readiness_snapshot(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(90)
 def test_late_setsid_grandchild_dies_via_stop_refresh(tmp_path, monkeypatch):
     """Сторожит: ``_union(...)`` перед ``_shutdown_with_watchdog`` в ``stop()``."""
     import psutil

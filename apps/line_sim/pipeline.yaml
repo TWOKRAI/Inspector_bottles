@@ -131,7 +131,16 @@ processes:
         # origin_x_mm = 497.4 - 78.4*0.5 = 458.2 (v=0.5, центр ROI по вертикали);
         # origin_y_mm = -428.265 (при entry x=1440: Y = -282 - 98*(1194/800) = -428.265,
         # дальше растёт линейно с off — см. Task 5.3b, контракт §4.1).
-        geometry: {origin_x_mm: 458.2, origin_y_mm: -428.265}
+        # frame_down — единичный вектор «вниз по кадру» в системе робота (нужен поперечному
+        # смещению дисков, lateral_offset_px ниже): калибровка рецепта — верх ROI X=497.4,
+        # низ ROI X=419.0, Y по вертикали не меняется -> вниз по кадру = -X робота = (-1, 0).
+        geometry: {origin_x_mm: 458.2, origin_y_mm: -428.265, frame_down_ux: -1.0, frame_down_uy: 0.0}
+        # Поперечное смещение дисков (plans/sim-lateral-offset.md): реальная лента кладёт диски не
+        # строго по центру. Модуль смещения в пикселях кадра, знак случайный (вверх/вниз по кадру);
+        # [0, 0] — выключено (дефолт ядра). Запас ROI: 481 px по высоте, диск ≈300 px -> целиком
+        # внутри до ±90 px; больше 90 — диск режется краем ROI (честный сценарий, правкой ключа).
+        # Нужен frame_down в geometry выше — иначе ValueError на старте.
+        lateral_offset_px: [10, 20]
 
   - process_name: mjpeg
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess

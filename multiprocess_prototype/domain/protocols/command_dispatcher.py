@@ -56,11 +56,14 @@ class CommandDispatcher(Protocol):
         *,
         coalesce_key: str | None = None,
         undoable: bool = True,
+        view_state: Callable[[], object] | None = None,
     ) -> list[ProjectEvent]:
         """Выполнить команду. Возвращает список эмитированных событий.
 
         coalesce_key — группировка undo-записей (серия slider-тиков → одна запись).
         undoable — False для команд вне undo-истории (например, переключение рецепта).
+        view_state — необязательная фабрика memo вида UI (выбор узлов): снимается до и после
+        команды, хранится в записи истории и возвращается слушателям при undo/redo.
         """
         ...
 
@@ -95,6 +98,18 @@ class CommandDispatcher(Protocol):
         этому колбэку. Позволяет диспетчеру структурно удовлетворять
         framework-протоколу `UndoRedoController`.
         """
+        ...
+
+    def add_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        """Подписаться на «вернуть вид UI» при undo/redo (получает memo записи).
+
+        Вызывается после восстановления Project, только если у записи memo не None.
+        Повторная подписка того же cb — no-op.
+        """
+        ...
+
+    def remove_view_restore_listener(self, cb: Callable[[object], None]) -> None:
+        """Отписаться от «вернуть вид UI». Отсутствующий cb — no-op (идемпотентно)."""
         ...
 
 

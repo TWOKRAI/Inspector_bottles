@@ -1,0 +1,2 @@
+-- Таблицы REG/OP/ERR/PDEF/... подставляются из delta_v2.yaml (codegen.lua_block).
+-- @@GENERATED@@

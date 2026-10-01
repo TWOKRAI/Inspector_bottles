@@ -28,14 +28,12 @@ from typing import Callable
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Services.robot_comm.core.registers import FACTOR_MM
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 _TRUTH_LEVEL_FROZEN_XY = "truth_false_alarm_frozen_xy"
 

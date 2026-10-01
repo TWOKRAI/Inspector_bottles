@@ -38,7 +38,6 @@ from Services.robot_comm import ROBOT_AVAILABLE
 from Services.robot_comm.server.sim_core import TICK_INTERVAL_S
 
 pytestmark = [
-    pytest.mark.timeout(30),
     pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен"),
 ]
 

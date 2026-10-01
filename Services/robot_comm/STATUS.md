@@ -33,6 +33,8 @@
 - [x] T2.W (протокол v2, отладочный вид) — стрелка RZ в `SimView` +
   `ZScale`/`TimeTape` (`gui/z_view.py`); заменяется виджетами GUI-конструктора в Ф6
 
+- [x] `build_fw.py` — сборщик прошивки `robot/v2/src/NN_*.lua` -> `robot/v2/main_v2.lua` (T1.3, robot-protocol-v2)
+
 ## Не сделано / дальше
 
 - [x] ~~Плагины robot_io / robot_draw~~ → robot_io тонкий (job-форвард), robot_draw удалён (логика в RobotDriver)

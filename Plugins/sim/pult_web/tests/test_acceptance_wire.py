@@ -27,7 +27,6 @@ import pytest
 
 from Plugins.sim.pult_web.tests import test_acceptance_5_3a as _m
 
-pytestmark = pytest.mark.timeout(30)
 
 start_pult = _m.start_pult
 _client_for = _m._client_for

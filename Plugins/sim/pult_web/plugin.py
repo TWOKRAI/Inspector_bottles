@@ -617,9 +617,18 @@ var presetFieldMap = [];
 // после успешного commit, после самой «Отмены».
 var presetDirty = false;
 
+// Запись стека «Отмена»: {state, row, reorders}. reorders — операция над составом, после которой принадлежность строк
+// может смениться (добавить / удалить / выше / ниже / заменить); row — строка выбора в момент записи (-1 — ничего).
+// Так «Отмена» знает род правки и не гадает по presetDirty/имени: правка полей и жест строк не меняют.
+// row по умолчанию — текущая presetSelectedRow; операция над составом передаёт строку, снятую ДО mutate
+// (mutate уже поставил новый выбор).
+function presetPushUndo(state, reorders, row) {
+  presetUndoStack.push({ state: state, row: row === undefined ? presetSelectedRow : row, reorders: reorders });
+}
+
 function markPresetDirty() {
   if (!presetDirty) {
-    presetUndoStack.push(presetState);
+    presetPushUndo(presetState, false);
     presetDirty = true;
   }
 }
@@ -708,6 +717,8 @@ function renderPresetLayers() {
       presetBindField(i, key, layer[key]);
     });
   });
+  // строку выбора рендер НЕ считает: её ставят до рендера presetSelect, мутации add/delete/выше/ниже и «Отмена»
+  // (пересчёт по имени вернул бы первое совпадение имени — чужую строку при дубле)
   presetUpdateSelection();
 }
 
@@ -742,7 +753,13 @@ function loadPreset() {
       presetEngine = resp.engine;
       presetUndoStack = [];
       presetDirty = false;
-      presetSelected = null;
+      // пресет пришёл: текст «слой не добавлен: пресет не загружен» устарел — снимается только он (с «; »),
+      // отказ списка рядом с ним остаётся: список его так и не обновил
+      if (presetOrphanText !== null) {
+        var shown = document.getElementById("presetSpritesError").textContent;
+        presetShowSpritesError(shown.slice(presetOrphanText.length).replace(/^; /, ""));
+      }
+      presetSelect(null);
       renderPresetLayers();
       updatePresetRevDisplay();
       updatePresetEngineWarn();
@@ -816,14 +833,18 @@ document.getElementById("btnPresetSave").onclick = function () {
 
 document.getElementById("btnPresetUndo").onclick = function () {
   if (!presetUndoStack.length) return;
-  presetState = presetUndoStack.pop();
+  var e = presetUndoStack.pop();
+  presetState = e.state;
   presetDirty = false;
-  // «Добавить» -> «Отмена» убирает выбранный слой: выбор на исчезнувшее имя молча «оживёт» у слоя, которому
-  // потом дадут это имя (1.3h-c-fix, F2). Сверка — по presetState, НЕ presetLayerIndex: та накладывает поля
-  // формы (ещё старой, длиннее состояния) по индексу и упала бы до renderPresetLayers.
-  if (presetSelected !== null && !presetState.layers.some(function (ly) { return ly.name === presetSelected; })) {
-    presetSelected = null;
-  }
+  // Выбор — СТРОКА. Правка без перестановки строк (поля, жест, стрелка): строки те же, остаётся текущая строка.
+  // Операция над составом: возвращается строка, какой она была прямо перед операцией (e.row; -1 — ничего).
+  // Имя выбора берётся из восстановленного состояния, а не ищется: строку НЕ считать через presetRowOfName —
+  // она читает поля формы, которые до renderPresetLayers ещё старые. Исчезнувшее имя не оживает у чужого слоя
+  // (1.3h-c-fix, F2): выбор — строка из записи, а не имя.
+  var row = e.reorders ? e.row : presetSelectedRow;
+  if (row >= presetState.layers.length) row = -1;
+  presetSelectedRow = row;
+  presetSelected = row < 0 ? null : presetState.layers[row].name;
   renderPresetLayers();
   requestPresetLayout();
 };
@@ -843,7 +864,13 @@ var presetZoomInput = document.getElementById("presetZoom");
 var presetLayout = null;    // последняя ПРИНЯТАЯ раскладка: {cw, ch, layers: [{name, img, hit, x, y, w, h}]}
 var presetLayoutSeq = 0;    // номер правки/запроса (растёт и на стрелке, F1): старый ответ не принят
 var presetSelected = null;  // имя выбранного слоя пресета (null — ничего)
-var presetGesture = null;   // жест указателя: {kind: move|rotate|scale|pan, name, id, start, cur, center}
+// Строка формы выбранного слоя (-1 — ничего). Выбор принадлежит СТРОКЕ: имя в форме правится и повторяется,
+// строка — нет (правка полей строк не переставляет). Подсветку рисует ТОЛЬКО presetUpdateSelection по этой строке;
+// ДЕЙСТВИЯ над данными слоя (стрелки, конец жеста, «Удалить», «Выше»/«Ниже», «Заменить») берут её, не ищут имя.
+// КАРТИНКА на канве — запись последней принятой раскладки, у неё есть только имя: связь строка <-> картинка
+// есть лишь при ЕДИНСТВЕННОМ таком имени в форме (presetRowOfName / presetSelectedLayoutEntry), иначе её нет вовсе.
+var presetSelectedRow = -1;
+var presetGesture = null;   // жест указателя: {kind: move|rotate|scale|pan, name, row, id, start, cur, center}
 var presetZoom = 1;
 var presetPan = [0, 0];
 var presetSpaceHeld = false;
@@ -853,15 +880,31 @@ var PRESET_KEY_LAYOUT_MS = 200; // пауза после последней ст
 var PRESET_HANDLE_PX = 8;   // полуразмер ручки на экране
 var PRESET_ROT_ARM_PX = 24; // вынос ручки поворота над рамкой
 
+// Строка формы с этим именем, если оно в форме ЕДИНСТВЕННОЕ; нет такого или дубль — -1.
 // Имя ищется в ПОЛЯХ формы (collectPresetFromFields) — тот же источник, что и тело
 // запроса раскладки: слой, переименованный в форме, на канве приходит уже с новым
-// именем, а presetState ещё со старым (ревью 1.3h-b ит.1, MINOR-3).
-function presetLayerIndex(name) {
+// именем, а presetState ещё со старым (ревью 1.3h-b ит.1, MINOR-3). Дубль — не «первое
+// совпадение»: раскладку с дублем бэкенд отвергает, на канве остаётся прежняя, и имя её
+// картинки может принадлежать другой строке (R-5 ит.3). Звать только когда форма
+// отрисована из presetState (не между pop «Отмены» и renderPresetLayers).
+function presetRowOfName(name) {
   var layers = presetState ? collectPresetFromFields().layers : [];
+  var row = -1;
   for (var i = 0; i < layers.length; i++) {
-    if (layers[i].name === name) return i;
+    if (layers[i].name !== name) continue;
+    if (row >= 0) return -1;
+    row = i;
   }
-  return -1;
+  return row;
+}
+
+// Картинка выбранной строки в раскладке: только если имя этой строки в форме единственное, иначе null
+// (рамки, ручек, призрака и сдвига битмапа нет; ответ раскладки перерисует канву сам).
+function presetSelectedLayoutEntry() {
+  if (presetSelectedRow < 0 || !presetState) return null;
+  var row = collectPresetFromFields().layers[presetSelectedRow];
+  if (!row || presetRowOfName(row.name) !== presetSelectedRow) return null;
+  return presetLayoutEntry(row.name);
 }
 
 function presetLayoutEntry(name) {
@@ -872,11 +915,19 @@ function presetLayoutEntry(name) {
   return null;
 }
 
-// Подсветка строки формы выбранного слоя (строка i <-> presetState.layers[i]).
+// Подсветка строки формы выбранного слоя (строка i <-> presetState.layers[i]) — по presetSelectedRow.
 function presetUpdateSelection() {
   var rows = document.getElementById("presetLayers").children || [];
-  var idx = presetSelected === null ? -1 : presetLayerIndex(presetSelected);
-  for (var i = 0; i < rows.length; i++) rows[i].classList.toggle("selected", i === idx);
+  for (var i = 0; i < rows.length; i++) rows[i].classList.toggle("selected", i === presetSelectedRow);
+}
+
+// Выбор по имени (клик по канве, сброс при загрузке пресета). Строку считает presetRowOfName по ОТРИСОВАННОЙ
+// форме: имя не единственное (дубль) или его нет (авто-слой base) -> ничего не выбрано. Звать только когда форма
+// соответствует presetState. Мутации add/delete/выше/ниже и «Отмена» ставят presetSelected + presetSelectedRow сами.
+function presetSelect(name) {
+  presetSelectedRow = name === null ? -1 : presetRowOfName(name);
+  presetSelected = presetSelectedRow < 0 ? null : name;
+  presetUpdateSelection();
 }
 
 function presetShowLayoutError(text) {
@@ -906,10 +957,11 @@ function presetPointerXY(e) {
   return [e.offsetX * kx, e.offsetY * ky];
 }
 
-// Сдвиг слоя жестом «перенос» в px объекта (для рисования во время жеста).
-function presetMoveShift(name) {
+// Сдвиг выбранного слоя жестом «перенос» в px объекта (для рисования во время жеста; к какой картинке его
+// приложить — решает presetSelectedLayoutEntry, не имя жеста).
+function presetMoveShift() {
   var g = presetGesture;
-  if (!g || g.kind !== "move" || g.name !== name) return [0, 0];
+  if (!g || g.kind !== "move" || g.row !== presetSelectedRow) return [0, 0];
   return [(g.cur[0] - g.start[0]) / presetZoom, (g.cur[1] - g.start[1]) / presetZoom];
 }
 
@@ -928,9 +980,9 @@ function presetHandleDelta(g) {
 
 // Рамка выбранного слоя и ручки в экранных px (null — нечего показывать).
 function presetHandles() {
-  var ly = presetSelected === null ? null : presetLayoutEntry(presetSelected);
+  var ly = presetSelectedLayoutEntry();
   if (!ly) return null;
-  var d = presetMoveShift(ly.name);
+  var d = presetMoveShift();
   var a = presetToScreen(ly.x + d[0], ly.y + d[1]);
   var b = presetToScreen(ly.x + d[0] + ly.w, ly.y + d[1] + ly.h);
   var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
@@ -965,8 +1017,9 @@ function presetDraw() {
   ctx.setTransform(z, 0, 0, z,
     presetCanvas.width / 2 + (presetPan[0] - L.cw / 2) * z,
     presetCanvas.height / 2 + (presetPan[1] - L.ch / 2) * z);
+  var sel = presetSelectedLayoutEntry();
   L.layers.forEach(function (ly) {
-    var d = presetMoveShift(ly.name);
+    var d = ly === sel ? presetMoveShift() : [0, 0];
     ctx.drawImage(ly.img, ly.x + d[0], ly.y + d[1]);
   });
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1056,20 +1109,22 @@ function requestPresetLayout() {
 // deferLayout (стрелки): запись «Отмена», форма и битмап — на каждое нажатие, а раскладку
 // просят ОДИН раз после паузы PRESET_KEY_LAYOUT_MS (серия из 20 нажатий = 1 запрос, не 20).
 // Жест (deferLayout не задан) просит сразу и снимает висящий таймер стрелок.
-function presetApplyEdit(name, mutate, deferLayout) {
-  var idx = presetLayerIndex(name);
-  if (idx < 0) return;
+// Данные слоя задаются СТРОКОЙ (не именем: при дубле имён поиск по имени берёт первое совпадение — чужой слой);
+// картинка для сдвига битмапа — presetSelectedLayoutEntry (только при единственном имени в форме, иначе её нет).
+function presetApplyEdit(row, mutate, deferLayout) {
   var snapshot = collectPresetFromFields();
+  if (row < 0 || row >= snapshot.layers.length) return;
   var next = JSON.parse(JSON.stringify(snapshot));
-  mutate(next.layers[idx]);
+  mutate(next.layers[row]);
   if (JSON.stringify(next) === JSON.stringify(snapshot)) return;
-  presetUndoStack.push(snapshot);
+  presetPushUndo(snapshot, false); // жест/стрелка строк не переставляют: «Отмена» оставит текущую строку выбора
   presetState = next;
   presetDirty = false;
   renderPresetLayers();
-  // готовый битмап сдвигается сразу, не дожидаясь ответа раскладки
-  var before = snapshot.layers[idx].offset_px || [0, 0], after = next.layers[idx].offset_px || [0, 0];
-  var ly = presetLayoutEntry(name);
+  // готовый битмап сдвигается сразу, не дожидаясь ответа раскладки (форма уже из next: хелпер читает её);
+  // картинки нет (имя не единственное) — сдвиг пропускается, канву перерисует ответ раскладки
+  var before = snapshot.layers[row].offset_px || [0, 0], after = next.layers[row].offset_px || [0, 0];
+  var ly = row === presetSelectedRow ? presetSelectedLayoutEntry() : null;
   if (ly) {
     ly.x += after[0] - before[0];
     ly.y += after[1] - before[1];
@@ -1091,7 +1146,7 @@ function presetApplyEdit(name, mutate, deferLayout) {
 // Правка СОСТАВА слоёв (Task 1.3h-c: добавить / удалить / выше / ниже / заменить картинку) —
 // брат presetApplyEdit: та же одна запись «Отмена» (снимок ТЕКУЩЕЙ правки, с полями формы),
 // та же форма из нового состояния и тот же запрос раскладки. Отличия: правится массив слоёв
-// целиком (mutate(layers) может ещё выставить presetSelected — рендер идёт ПОСЛЕ него),
+// целиком (mutate(layers) может ещё выставить presetSelected и presetSelectedRow — рендер идёт ПОСЛЕ него),
 // битмапа для сдвига нет, а запрос раскладки всегда немедленный и снимает висящий таймер
 // стрелок: запрос уйдёт с составом, в котором стрелки уже учтены (presetState их хранит),
 // а ++presetLayoutSeq в нём глушит ещё летящий ответ на старый состав. Ничего не
@@ -1100,9 +1155,10 @@ function presetApplyLayersEdit(mutate) {
   if (!presetState) return;
   var snapshot = collectPresetFromFields();
   var next = JSON.parse(JSON.stringify(snapshot));
+  var rowBefore = presetSelectedRow; // ДО mutate: он ставит новый выбор, а «Отмена» вернёт прежний
   mutate(next.layers);
   if (JSON.stringify(next) === JSON.stringify(snapshot)) return;
-  presetUndoStack.push(snapshot);
+  presetPushUndo(snapshot, true, rowBefore);
   presetState = next;
   presetDirty = false;
   renderPresetLayers();
@@ -1114,8 +1170,8 @@ function presetApplyLayersEdit(mutate) {
   requestPresetLayout();
 }
 
-function presetShiftLayer(name, dx, dy, round, deferLayout) {
-  presetApplyEdit(name, function (layer) {
+function presetShiftLayer(row, dx, dy, round, deferLayout) {
+  presetApplyEdit(row, function (layer) {
     var off = Array.isArray(layer.offset_px) ? layer.offset_px : [0, 0];
     var x = off[0] + dx, y = off[1] + dy;
     layer.offset_px = round ? [Math.round(x), Math.round(y)] : [x, y];
@@ -1125,11 +1181,11 @@ function presetShiftLayer(name, dx, dy, round, deferLayout) {
 function presetFinishGesture(g) {
   if (g.kind === "move") {
     // ponytail: offset_px округляется до целого px — при зуме > 100 % полпикселя мышью не задать (стрелки — 1 px)
-    presetShiftLayer(g.name, (g.cur[0] - g.start[0]) / presetZoom, (g.cur[1] - g.start[1]) / presetZoom, true);
+    presetShiftLayer(g.row, (g.cur[0] - g.start[0]) / presetZoom, (g.cur[1] - g.start[1]) / presetZoom, true);
     return;
   }
   var t = presetHandleDelta(g);
-  presetApplyEdit(g.name, function (layer) {
+  presetApplyEdit(g.row, function (layer) {
     if (g.kind === "rotate") {
       var a = (typeof layer.angle_deg === "number" ? layer.angle_deg : 0) + t.angle;
       while (a > 180) a -= 360;
@@ -1163,15 +1219,16 @@ presetCanvas.addEventListener("pointerdown", function (e) {
     else if (h && presetNear(p, h.scale)) kind = "scale";
     else {
       var hit = presetHitLayer(p[0], p[1]);
-      presetSelected = hit !== null && presetLayerIndex(hit) >= 0 ? hit : null; // авто-слой base не правится
-      presetUpdateSelection();
+      presetSelect(hit); // имя не единственное в форме или авто-слой base -> ничего не выбрано
       presetScheduleDraw();
       if (presetSelected !== null) kind = "move";
     }
   }
   if (!kind) return;
   if (e.preventDefault) e.preventDefault();
-  presetGesture = { kind: kind, name: presetSelected, id: e.pointerId, start: p, cur: p,
+  // row — для правки: строка захвачена в начале жеста; name — имя формы на тот момент (правка его не читает).
+  // Жест ручкой начинается только на рамке, а рамка есть лишь у единственного имени (presetSelectedLayoutEntry)
+  presetGesture = { kind: kind, name: presetSelected, row: presetSelectedRow, id: e.pointerId, start: p, cur: p,
                     center: h ? [h.cx, h.cy] : null };
   try { presetCanvas.setPointerCapture(e.pointerId); } catch (err) { /* указатель уже ушёл */ }
 });
@@ -1241,10 +1298,10 @@ document.addEventListener("keydown", function (e) {
     presetSpaceHeld = true;
     return;
   }
-  if (!Object.prototype.hasOwnProperty.call(PRESET_ARROWS, e.key) || presetSelected === null) return;
+  if (!Object.prototype.hasOwnProperty.call(PRESET_ARROWS, e.key) || presetSelectedRow < 0) return;
   if (e.preventDefault) e.preventDefault();
   var step = e.shiftKey ? 10 : 1, d = PRESET_ARROWS[e.key];
-  presetShiftLayer(presetSelected, d[0] * step, d[1] * step, false, true);
+  presetShiftLayer(presetSelectedRow, d[0] * step, d[1] * step, false, true);
 });
 document.addEventListener("keyup", function (e) {
   if (e.key === " " || e.code === "Space") presetSpaceHeld = false;
@@ -1252,7 +1309,14 @@ document.addEventListener("keyup", function (e) {
 window.addEventListener("blur", function () { presetSpaceHeld = false; });
 
 // Ввод в поле формы — раскладка по новому состоянию (change всплывает до контейнера).
-document.getElementById("presetLayers").addEventListener("change", function () { requestPresetLayout(); });
+// Выбор принадлежит строке (R-5 а): переименование выбранного слоя в форме переносит выбор на новое имя.
+document.getElementById("presetLayers").addEventListener("change", function () {
+  if (presetState && presetSelectedRow >= 0) {
+    var row = collectPresetFromFields().layers[presetSelectedRow];
+    if (row) presetSelected = row.name;
+  }
+  requestPresetLayout();
+});
 
 // ---------------------------------------------------------------------------
 // Состав слоёв (Task 1.3h-c): список PNG от POST /api/preset/sprites и пять операций над
@@ -1264,8 +1328,14 @@ var PRESET_CLASS_ENTRY = { path: PRESET_CLASS_SOURCE, sprite_source: PRESET_CLAS
 var PRESET_RESERVED_NAMES = ["base", "damaged"]; // имена авто-слоёв раскладки
 var presetSpriteEntries = [];   // файлы последнего принятого списка: [{path, sprite_source}]
 var presetLayerTemplate = null; // layer_template последнего принятого списка
+// Текст «файл сохранён, слой не добавлен: пресет не загружен», стоящий ПРЕФИКСОМ на экране (null — его нет)
+var presetOrphanText = null;
+var presetSpritesSeq = 0;       // номер запроса списка: ответ не последнего запроса (R-5 б) страница не показывает
 
+// Любой показ текста снимает флаг «сироты»: на экране уже не тот текст, loadPreset его не тронет
+// (загрузка без пресета ставит флаг ПОСЛЕ показа своего текста).
 function presetShowSpritesError(text) {
+  presetOrphanText = null;
   document.getElementById("presetSpritesError").textContent = text;
 }
 
@@ -1287,19 +1357,25 @@ function presetFillSpriteSelect() {
   }
 }
 
+// Промис: true — принят успешный ответ, false — показан отказ, undefined — ответ устарел (его не показали).
 function presetLoadSprites() {
+  var seq = ++presetSpritesSeq;
   return post("/api/preset/sprites", {}).then(function (r) {
+    if (seq !== presetSpritesSeq) return; // пришёл позже более свежего запроса: он уже показан
     if (!r || r.status !== "ok" || !Array.isArray(r.files)) {
       var why = (r && (r.message || r.error || r.code)) || "ответ без списка";
       presetShowSpritesError("список спрайтов не получен: " + why);
-      return;
+      return false;
     }
     presetSpriteEntries = r.files;
     presetLayerTemplate = r.layer_template || null;
     presetFillSpriteSelect();
     presetShowSpritesError(r.truncated ? "показаны первые " + r.files.length : "");
+    return true;
   }).catch(function (err) {
+    if (seq !== presetSpritesSeq) return;
     presetShowSpritesError("список спрайтов не получен: " + err);
+    return false;
   });
 }
 
@@ -1342,12 +1418,13 @@ function presetAddLayer(entry) {
     layer.sprite_source = entry.sprite_source;
     layers.push(layer); // в конец = рисуется поверх
     presetSelected = layer.name;
+    presetSelectedRow = layers.length - 1;
   });
 }
 
-// Индекс выбранного слоя в ТЕКУЩЕЙ правке; -1 — ничего не выбрано (тогда кнопки — no-op).
+// Индекс выбранного слоя в ТЕКУЩЕЙ правке — строка выбора (не поиск по имени); -1 — ничего (кнопки — no-op).
 function presetSelectedIndex() {
-  return presetSelected === null ? -1 : presetLayerIndex(presetSelected);
+  return presetSelectedRow;
 }
 
 function presetDeleteLayer() {
@@ -1357,6 +1434,7 @@ function presetDeleteLayer() {
   presetApplyLayersEdit(function (layers) {
     layers.splice(idx, 1);
     presetSelected = null;
+    presetSelectedRow = -1;
   });
 }
 
@@ -1369,6 +1447,7 @@ function presetMoveLayer(delta) {
     if (to < 0 || to >= layers.length) return;
     var moved = layers.splice(idx, 1)[0];
     layers.splice(to, 0, moved);
+    presetSelectedRow = to; // выбранный слой переехал вместе с выбором (имя то же)
   });
 }
 
@@ -1410,8 +1489,20 @@ presetSpriteFileInput.addEventListener("change", function () {
     var png_b64 = url.slice(url.indexOf(",") + 1);
     post("/api/preset/sprite_put", { name: file.name, png_b64: png_b64 }).then(function (r) {
       if (r && r.status === "ok" && r.file) {
-        presetLoadSprites();
-        presetAddLayer(r.file);
+        if (presetState) {
+          presetLoadSprites();
+          presetAddLayer(r.file);
+        } else {
+          // файл сохранён, слоя нет (пресет не загружен): текст ПОСЛЕ обновления списка, иначе оно его сотрёт.
+          // Не true — на экране чужой текст, который терять нельзя: false — отказ ЭТОГО обновления, undefined —
+          // строкой владеет более новое обновление (его отказ). Тогда сирота встаёт префиксом: «сирота; текст».
+          presetLoadSprites().then(function (ok) {
+            var text = "файл " + r.file.path + " сохранён, слой не добавлен: пресет не загружен";
+            var shown = document.getElementById("presetSpritesError").textContent;
+            presetShowSpritesError(ok !== true && shown ? text + "; " + shown : text);
+            presetOrphanText = text; // loadPreset снимет только этот префикс, когда пресет придёт
+          });
+        }
       } else {
         presetUploadFail((r && (r.message || r.error || r.code)) || "ответ без файла");
       }

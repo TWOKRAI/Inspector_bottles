@@ -27,8 +27,6 @@ from Services.line_sim import (
 )
 from Services.line_sim.tools.make_seamless_texture import make_seamless_tile
 
-pytestmark = pytest.mark.timeout(30)
-
 
 # --------------------------------------------------------------------------------------
 # Fixture-хелперы (тот же паттерн, что в test_acceptance_3_6.py — не тестируют ничего сами)

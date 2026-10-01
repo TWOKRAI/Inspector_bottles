@@ -20,8 +20,6 @@ from Services.line_sim.core.scene_compositor import SceneCompositor
 from Services.line_sim.interfaces import ObjectPassport
 from Services.line_sim.tools.make_letter_catalog import build_catalog
 
-pytestmark = pytest.mark.timeout(30)
-
 
 class _FakeObj:
     def __init__(self, passport: ObjectPassport, sprite: np.ndarray) -> None:

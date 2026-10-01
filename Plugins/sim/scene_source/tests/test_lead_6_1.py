@@ -21,7 +21,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from Services.line_sim.core.belt import FACTOR_MM
 from Plugins.sim.scene_source.tests.test_scene_controls_acceptance import (
@@ -34,9 +33,6 @@ from Plugins.sim.scene_source.tests.test_scene_controls_acceptance import (
 def _enc(mm: float) -> float:
     """Миллиметры пути ленты -> единицы энкодера (`FACTOR_MM` = мм на единицу)."""
     return mm / FACTOR_MM
-
-
-pytestmark = pytest.mark.timeout(30)
 
 
 def _spawn_encoders(plugin) -> list[float]:

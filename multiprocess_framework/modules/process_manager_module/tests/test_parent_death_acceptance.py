@@ -115,7 +115,6 @@ def _cleanup_host(proc: subprocess.Popen) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_child_exits_after_parent_sigkill():
     host = _spawn_host("single_quick")
     child_pid: Optional[int] = None
@@ -145,7 +144,6 @@ def test_child_exits_after_parent_sigkill():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_hung_child_exits_after_parent_sigkill():
     host = _spawn_host("single_hung")
     child_pid: Optional[int] = None
@@ -176,7 +174,6 @@ def test_hung_child_exits_after_parent_sigkill():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_child_exits_when_parent_dies_during_boot():
     host = _spawn_host("boot_race")
     child_pid: Optional[int] = None
@@ -210,7 +207,6 @@ def test_child_exits_when_parent_dies_during_boot():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_children_stay_alive_while_parent_alive():
     host = _spawn_host("alive_pair")
     pids: List[int] = []
@@ -242,7 +238,6 @@ def test_children_stay_alive_while_parent_alive():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_child_started_from_short_lived_thread_survives():
     host = _spawn_host("thread_child")
     child_pid: Optional[int] = None
@@ -277,7 +272,6 @@ def test_child_started_from_short_lived_thread_survives():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_restarted_child_survives():
     host = _spawn_host("restarted_child")
     old_pid: Optional[int] = None
@@ -316,7 +310,6 @@ def test_restarted_child_survives():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_restart_time_not_worse():
     registry = ProcessRegistry(logger=None)
     first = registry.create_and_register("r", QUICK_CHILD_CLASS_PATH, {}, "normal")

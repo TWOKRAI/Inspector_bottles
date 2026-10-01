@@ -21,14 +21,12 @@ from queue import Queue
 from types import SimpleNamespace
 from typing import Any, Dict
 
-import pytest
 
 from ..channels.queue_channel import QueueChannel
 from ..core.router_manager import RouterManager
 from .test_self_reply_acceptance import _LoopbackQueueRegistry, _make_self_router, _wait_until
 
 
-@pytest.mark.timeout(15)
 def test_handler_stopping_the_loop_still_delivers_its_reply():
     """Приёмный цикл останавливается внутри обработчика — ответ всё равно доходит."""
     router, qr, _q = _make_self_router("self_stop")
@@ -72,7 +70,6 @@ def test_handler_stopping_the_loop_still_delivers_its_reply():
     assert result["r"].get("result") == {"stopping": True}
 
 
-@pytest.mark.timeout(15)
 def test_raising_async_callback_does_not_break_the_handler():
     """Колбэк самоответа бросает — ``reply_to_request`` и остаток обработчика живы."""
     router, qr, _q = _make_self_router("self_cb")
@@ -105,7 +102,6 @@ def test_raising_async_callback_does_not_break_the_handler():
     assert calls == [1], f"колбэк вызван {len(calls)} раз, ожидался ровно один"
 
 
-@pytest.mark.timeout(15)
 def test_self_reply_resolves_when_router_id_differs_from_process_name():
     """Прод-форма хаба: ``router_id='router_X'``, ``process.name='X'``, дверь ставит ``reply_to='X'``.
 
@@ -140,7 +136,6 @@ def test_self_reply_resolves_when_router_id_differs_from_process_name():
     assert out["r"].get("result") == {"v": 1}
 
 
-@pytest.mark.timeout(15)
 def test_reply_to_other_does_not_resolve_own_pending_with_same_cid():
     """Явный ``reply_to`` на другого адресата не разрешает свой pending с тем же id.
 

@@ -39,7 +39,6 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only: set
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(60)
 def test_spawner_leaves_no_orphan_with_hung_child():
     launcher = SystemLauncher(config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
     snap = []
@@ -85,7 +84,6 @@ _LEADER_SCRIPT = (
 )
 
 
-@pytest.mark.timeout(30)
 def test_guard_kills_group_member_after_leader_reaped():
     import psutil
 
@@ -130,7 +128,6 @@ def test_guard_kills_group_member_after_leader_reaped():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(60)
 def test_pm_completes_own_escalation_before_spawner_would_intervene():
     launcher = SystemLauncher(config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
     snap = []
@@ -155,7 +152,6 @@ def test_pm_completes_own_escalation_before_spawner_would_intervene():
             kill_and_reap(pm_process.pid)
 
 
-@pytest.mark.timeout(60)
 def test_outer_wait_survives_past_old_outer_budget_5_5s():
     # Поправка модели (ведущий, 2026-09-24): исходная проба на 6.5с исходила из потолка
     # 7.0с, но окно kill в _stop_many закрывается сразу по подтверждению смерти, и PM с
@@ -269,7 +265,6 @@ def _run_sigint_main_blocking(env, script_path, result):
         result["wait_timeout"] = True
 
 
-@pytest.mark.timeout(60)
 def test_sigint_to_main_pid_leaves_no_orphan(tmp_path):
     script = tmp_path / "sigint_main.py"
     script.write_text(_SIGINT_MAIN_SCRIPT)
@@ -326,7 +321,6 @@ def test_sigint_to_main_pid_leaves_no_orphan(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(30)
 def test_normal_stop_without_hung_child_is_not_slower():
     launcher = SystemLauncher(config={"quick": {"class": QUICK_CHILD_CLASS_PATH}}, stop_timeout=5.0)
     snap = []

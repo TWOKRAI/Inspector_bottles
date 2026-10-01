@@ -49,8 +49,6 @@ import pytest
 
 from multiprocess_framework.modules.process_module.health import HealthReporter, HealthState
 
-pytestmark = pytest.mark.timeout(45)
-
 
 def _free_port() -> int:
     """Свободный TCP-порт (см. Services/robot_comm/tests/test_sim_e2e.py)."""

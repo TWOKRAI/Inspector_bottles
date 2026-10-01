@@ -22,6 +22,7 @@
 | `core/matching.py` (`match_job`/`object_robot_xy`, `BeltGeometry`/`JobDone`/`MatchResult`) + `ObjectSpawner.remove()` | готово (Task 3.5a, LS-012) — job↔object matching для плагина сцены (часть B) |
 | `core/truth.py` (`TruthLedger`) — поймал/пропустил/дубль/ложная тревога/ошибка захвата | готово (Task 5.2; 5.1b — `false_alarm_frozen_xy`: ложная тревога в той же точке X/Y с другим `ecap`, окно `frozen_window_s` 10 с по `job.t`, радиус `frozen_radius_mm` 5 мм); подключение к `Plugins/sim/scene_source` — команды `truth.status`/`truth.reset`, уровни `truth_*` (ADR-PM-038, прореживание `truth_publish_s`) |
 | `SceneCompositor(belt_direction, entry_x_px)` + `tools/make_letter_catalog.py` — сим подогнан под боевой рецепт `hikvision_letter_robot.yaml` | готово (Task 5.3b, контракт §4.1–§4.2); согласованность геометрии сима с `bilinear_px_to_mm` прототипа сторожит `apps/line_sim/tests/test_fit_letter_robot.py` |
+| Поперечное смещение дисков: `ObjectPassport.lateral_px`, `ObjectSpawner(lateral_offset_px)`, `cy` компоновщика, `BeltGeometry.frame_down_*` + поперечное слагаемое `object_robot_xy` | готово (`plans/sim-lateral-offset.md` Task 1.1); `tests/test_acceptance_lateral_offset.py` (tester, слепой), `tests/test_lateral_offset_hazards.py` (автор). Известное расхождение: изотропия сима 8.163 px/мм против 6.135 px/мм рецепта по вертикали — ≈0.8 мм на 20 px, не чинится |
 
 **Известное ограничение (2026-09-22):** эталоны дисков-букв реально не сняты на этой машине —
 `data/dataset_gen/ru_letters_real/sprites` отсутствует. `tools/cut_real_disks.py` готовит их из

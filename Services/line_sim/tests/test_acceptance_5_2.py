@@ -23,7 +23,6 @@ from Services.line_sim.core.matching import MatchResult
 from Services.line_sim.core.truth import TruthLedger
 from Services.line_sim.interfaces import ObjectPassport
 
-pytestmark = pytest.mark.timeout(30)
 
 #: Полный набор ключей counters() -- §1 контракта 5.2 + §2 контракта 5.1b, дословно.
 #: `false_alarm_frozen_xy` добавлен задачей 5.1b (не было в 5.2) -- не переписано

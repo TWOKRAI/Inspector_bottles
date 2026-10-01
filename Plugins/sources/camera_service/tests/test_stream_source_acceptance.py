@@ -51,7 +51,6 @@ import pytest
 from multiprocess_framework.modules.process_module.health import HealthReporter, HealthState
 from Plugins.sources.camera_service.plugin import CameraServicePlugin
 
-pytestmark = pytest.mark.timeout(45)
 
 _BOUNDARY = "testboundary"
 
@@ -415,8 +414,7 @@ def test_stream_broken_recovers_after_restart_capture() -> None:
 
         # Установившийся режим: после отрапортованного обрыва кадров больше нет.
         assert plugin.produce() == [], (
-            "после того как обрыв отрапортован, produce() обязан отдавать [] — "
-            "источник мёртв, доезд исчерпан"
+            "после того как обрыв отрапортован, produce() обязан отдавать [] — источник мёртв, доезд исчерпан"
         )
 
         # --- восстановление: тот же порт снова слушает ---

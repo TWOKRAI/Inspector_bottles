@@ -19,7 +19,7 @@
 | NodeMoveHandler | handlers/move_handler.py | Готов | apply/revert перемещения ноды через `on_position_changed(node_id, x, y)` callback |
 | TopologyMutationHandler | handlers/topology_handler.py | Готов | apply/revert мутаций topology через `TopologyHolderProtocol` + опциональный `TopologyBridgeProtocol` |
 | **snapshot** | | | |
-| SnapshotHistory[T] | snapshot_history.py | Готов | Generic snapshot-стек над immutable-агрегатом T (record/take_undo/take_redo/can_*/entries/clear, coalescing, max_history); строит. блок SNAPSHOT-реализации `UndoRedoController` |
+| SnapshotHistory[T] | snapshot_history.py | Готов | Generic snapshot-стек над immutable-агрегатом T (record/take_undo/take_redo/can_*/entries/clear, coalescing, max_history); строит. блок SNAPSHOT-реализации `UndoRedoController`. Task 1.1: опциональные memo_before/memo_after в записи + `take_undo_with_memo`/`take_redo_with_memo` (ADR ACT-003) |
 | SnapshotEntry | snapshot_history.py | Готов | Проекция метаданных записи стека (label/command_type/timestamp), generic-аналог доменного HistoryEntry |
 | **interfaces (канонический контракт, Фаза 2)** | | | |
 | IRegistersManagerGui | interfaces.py (Protocol) | Готов | Контракт RegistersManager на стороне GUI (`set_field_value`); поднят из bus.py |

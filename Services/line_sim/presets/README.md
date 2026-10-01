@@ -53,13 +53,33 @@ python -m Services.line_sim.tools.make_font_letters \
 python -m Services.line_sim.tools.make_font_letters \
     --letters АК \
     --font "$FONTS/DejaVuSans.ttf" \
-    --font "$FONTS/DejaVuSans-Bold.ttf" \
+    --font "$FONTS/DejaVuSansMono.ttf" \
+    --stroke-px 0 --stroke-px 1 --stroke-px 2 --stroke-px 3 \
     --size-px 300 --letter-frac 0.6 \
     --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 \
     --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png \
     --out data/line_sim/letters_font \
     --disk-out data/line_sim/letters_font_disk.png
+
+# второй проход в ту же (свежую) --out: один жирный выброс оставлен для аугментации намеренно
+python -m Services.line_sim.tools.make_font_letters \
+    --letters АК \
+    --font "$FONTS/DejaVuSans-Bold.ttf" \
+    --size-px 300 --letter-frac 0.6 \
+    --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 \
+    --out data/line_sim/letters_font
 ```
+
+`--stroke-px N` (повторяемый, целое >= 0) — аугментация толщиной штриха: на каждую пару буква x шрифт
+по файлу на значение (`DejaVuSans.png` при 0, `DejaVuSans_s2.png` при 2). Цель измерения: реальный
+штрих — 0.081 диаметра диска (2026-09-30), DejaVu regular при N=0 — 0.066–0.077, каждый +1 px
+≈ +0.004–0.01; поэтому regular идёт с N=0..3, а Bold (0.098–0.138) — одним проходом без штриха.
+Высота буквы остаётся `--letter-frac` (глиф уменьшается на толщину обводки). Слишком толстый штрих
+(`4 * N >= round(letter_frac * size_px)`, глиф вырождается в пятно) отвергается до рендера с
+сообщением про `--stroke-px`. Зерно идёт в порядке буква x шрифт x штрих; при `--grain-sigma` спрайт N=0
+совпадает с прогоном без `--stroke-px` побайтно, только если 0 — первое значение `--stroke-px`.
+**`--out` не очищается:** повторный запуск с меньшим набором штрихов оставляет в папке старые
+`*_s<N>.png` — для нового набора берите свежую папку.
 
 `--disk-from-photo` требует `--disk-out`. Внимание: `color_rgb` слоя **заменяет** RGB спрайта
 (`LayeredObject._transform`), поэтому для текстурированных (покрашенных, с зерном) спрайтов слои

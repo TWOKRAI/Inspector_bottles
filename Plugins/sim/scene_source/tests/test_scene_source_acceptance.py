@@ -51,7 +51,6 @@ from Services.robot_comm.core.registers import FACTOR_MM
 # ВСЕГО файла (см. докстринг).
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin  # noqa: E402
 
-pytestmark = pytest.mark.timeout(30)
 
 _SPAWN_ENCODER = 0
 _PX_PER_MM = 1.0

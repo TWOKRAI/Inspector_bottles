@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, ContextManager, Iterator
 
@@ -40,6 +41,17 @@ if TYPE_CHECKING:
     from .inspector.inspector_panel import NodeInspectorPanel
 
 logger = get_std_logger(__name__)
+
+
+@dataclass(frozen=True)
+class PipelineSelectionMemo:
+    """Выбор узлов вкладки (node_id), приложенный к записи undo-истории.
+
+    Для истории непрозрачен: хранится рядом со снимками Project и возвращается
+    presenter'у при undo/redo (Task 1.1). Только id -- объекты узлов пересоздаются reload'ом.
+    """
+
+    node_ids: tuple[str, ...]
 
 
 class PipelinePresenter:
@@ -164,6 +176,11 @@ class PipelinePresenter:
             RecipeActivated, self._on_recipe_activated
         )
 
+        # Task 1.1: undo/redo возвращают выбор операции. Слушатель вызывается диспетчером
+        # ПОСЛЕ _restore (TopologyReplaced уже перерисовал scene). Методы входят в протокол
+        # CommandDispatcher, поэтому регистрируем напрямую.
+        services.commands.add_view_restore_listener(self._on_view_restore)
+
     def dispose(self) -> None:
         """Teardown presenter'а: отписки EventBus + остановка таймера + разрыв ссылок.
 
@@ -182,6 +199,8 @@ class PipelinePresenter:
         if self._recipe_activated_sub is not None:
             self._recipe_activated_sub.unsubscribe()
             self._recipe_activated_sub = None
+        # remove_* терпит отсутствующий cb -- повторный dispose безопасен.
+        self._services.commands.remove_view_restore_listener(self._on_view_restore)
         # Н-3: дебаунс-таймер авто-персиста — владелец LayoutController (F.7).
         # stop_persist_timer идемпотентен и безопасен в destroyed-пути (singleShot
         # QTimer БЕЗ parent; без stop() отложенный timeout дёрнул бы персист на
@@ -294,6 +313,10 @@ class PipelinePresenter:
     def capture_selection(self) -> list[str]:
         """Снять выделение до reload (host-контракт, делегат _capture_selection)."""
         return self._capture_selection()
+
+    def capture_selection_memo(self) -> PipelineSelectionMemo:
+        """Снять выбор как memo записи истории (host-контракт, строится из _capture_selection)."""
+        return PipelineSelectionMemo(node_ids=tuple(self._capture_selection()))
 
     def restore_selection(self, node_ids: list[str]) -> None:
         """Восстановить выделение после reload (host-контракт, делегат _restore_selection)."""
@@ -481,6 +504,20 @@ class PipelinePresenter:
         with self._block_signals():
             nodes, edges = self._topology_to_graph(self._services.topology.load().to_dict())
             self.load_scene_with_ports(nodes, edges)
+
+    def _on_view_restore(self, memo: object) -> None:
+        """Слушатель undo/redo: вернуть выбор, записанный вместе с операцией (Task 1.1).
+
+        Чужие memo игнорируем. Как в G.6.3 (_on_topology_replaced): восстановление внутри
+        suppress-окна -- setSelected → selectionChanged → вкладка наполняет inspector
+        обновлённой моделью, а field_changed-сигналы формы гасятся. Узлов, которых после
+        reload нет, пропускаем.
+        """
+        if not isinstance(memo, PipelineSelectionMemo) or not self._scene:
+            return
+        with self._block_signals():
+            self._scene.clearSelection()
+            self._restore_selection(list(memo.node_ids))
 
     def _capture_selection(self) -> list[str]:
         """G.6.3: снять node_id выделенных нод ДО scene reload."""

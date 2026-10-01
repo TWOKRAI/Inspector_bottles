@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
+
 import numpy as np
 
 from Services.line_sim.core.belt import encoder_to_offset_mm
@@ -51,6 +54,27 @@ def validate_flow(
             raise ValueError(f"spacing_mm: lo={lo} <= 0 — шаг спавна должен быть положительным")
 
 
+def validate_lateral_offset_px(value: object) -> tuple[float, float]:
+    """Проверка диапазона модуля поперечного смещения `lateral_offset_px = (lo, hi)` (пиксели
+    кадра): пара конечных чисел (bool не число), `0 <= lo <= hi`. Возвращает `(float, float)`.
+    Текст `ValueError` называет ключ и полученное значение. Общая для `ObjectSpawner.__init__`
+    и плагина `scene_source` — одна проверка, не две копии."""
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in value)
+    ):
+        raise ValueError(f"lateral_offset_px: ожидалась пара конечных чисел [lo, hi], получено {value!r}")
+    lo, hi = float(value[0]), float(value[1])
+    if lo < 0:
+        raise ValueError(
+            f"lateral_offset_px: lo={lo} < 0 — модуль смещения не может быть отрицательным (получено {value!r})"
+        )
+    if lo > hi:
+        raise ValueError(f"lateral_offset_px: lo={lo} > hi={hi} — нижняя граница больше верхней (получено {value!r})")
+    return lo, hi
+
+
 class ObjectSpawner:
     """Спавнит объекты на ленте по интервалу, снимает уехавшие за `scene_length_mm`.
 
@@ -73,7 +97,14 @@ class ObjectSpawner:
 
     Pre: ровно один из `interval_s` / `spacing_mm` задан. `interval_s = (lo, hi)` с
     `0 < lo <= hi`; `spacing_mm = (lo, hi)` с `0 < lo <= hi`; `scene_length_mm > 0`;
-    `max_active > 0`.
+    `max_active > 0`; `lateral_offset_px = (lo, hi)` с `0 <= lo <= hi`.
+
+    Поперечное смещение (`lateral_offset_px`, пиксели кадра): каждому НОВОМУ объекту после
+    `factory.make()` (поэтому розыгрыши фабрики не сдвигаются) проставляется
+    `passport.lateral_px = ±rng.uniform(lo, hi)` (сначала модуль, затем знак ±1 равновероятно).
+    Диапазон `(0, 0)` (дефолт) rng не трогает вовсе — поток случайных чисел и кадры байт в байт
+    прежние, `lateral_px == 0.0` (не `-0.0`). Живёт в спавнере, а не в фабрике: переживает
+    `set_factory()` (`preset.commit`).
     Post: `tick()` создаёт не больше одного объекта за вызов; в режиме `interval_s`
     пропущенные интервалы не догоняются — следующий срок считается от `now_wall_s`
     текущего тика, не от просроченного срока. В режиме `spacing_mm` первый объект
@@ -92,8 +123,10 @@ class ObjectSpawner:
         spacing_mm: tuple[float, float] | None = None,
         scene_length_mm: float,
         max_active: int = 200,
+        lateral_offset_px: tuple[float, float] = (0.0, 0.0),
     ) -> None:
         validate_flow(interval_s, spacing_mm)
+        self._lateral_offset_px = validate_lateral_offset_px(lateral_offset_px)
         if scene_length_mm <= 0:
             raise ValueError(f"scene_length_mm={scene_length_mm} <= 0 — длина сцены должна быть положительной")
         if max_active <= 0:
@@ -169,9 +202,22 @@ class ObjectSpawner:
                 return
             object_id = f"obj-{self._next_id_n}"
             self._deadline = now_wall_s + float(rng.uniform(*self._interval_s))
-            obj = self._factory.make(object_id, spawn_encoder=now_encoder, rng=rng)
+            obj = self._make(object_id, now_encoder, rng)
             self._active.append(obj)
             self._next_id_n += 1
+
+    def _make(self, object_id: str, now_encoder: float, rng: np.random.Generator) -> LayeredObject:
+        """`factory.make()` + поперечное смещение паспорта (см. докстринг класса). Розыгрыш —
+        ПОСЛЕ сборки объекта: исключение фабрики не тратит rng, а розыгрыши фабрики идут
+        в прежнем порядке."""
+        obj = self._factory.make(object_id, spawn_encoder=now_encoder, rng=rng)
+        lo, hi = self._lateral_offset_px
+        if hi > 0.0:
+            magnitude = float(rng.uniform(lo, hi))
+            sign = 1.0 if rng.random() < 0.5 else -1.0
+            # `+ 0.0` гасит `-0.0` (магнитуда 0 со знаком минус): -0.0 + 0.0 == +0.0.
+            obj.passport = replace(obj.passport, lateral_px=sign * magnitude + 0.0)
+        return obj
 
     def _tick_spacing(self, *, now_encoder: float, rng: np.random.Generator) -> None:
         """Режим `spacing_mm` (Task 3.3a): следующий объект появляется, когда лента
@@ -228,7 +274,7 @@ class ObjectSpawner:
         object_id = f"obj-{self._next_id_n}"
         self._last_spawn_encoder = now_encoder
         self._next_spacing_mm = float(rng.uniform(*self._spacing_mm))
-        obj = self._factory.make(object_id, spawn_encoder=now_encoder, rng=rng)
+        obj = self._make(object_id, now_encoder, rng)
         self._active.append(obj)
         self._next_id_n += 1
 

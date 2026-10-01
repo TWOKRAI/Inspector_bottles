@@ -114,6 +114,8 @@
 
 ### Task 3.4 — Помощник «черновик + ревизия» во фреймворке (второй потребитель после `recipe.*`)
 
+> **2026-09-30:** выбор при undo/redo — по контракту [`undo-restores-selection`](../undo-restores-selection.md) (выбор — часть записи).
+
 - **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer
 - **Handoff:** tester (RED, worktree) → developer → reviewer
 - **Goal:** холсты-редакторы (рецепт, слои; позже разметка) сохраняют документ командой с ревизией одним

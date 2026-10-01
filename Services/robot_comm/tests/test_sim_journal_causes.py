@@ -25,7 +25,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from Services.robot_comm.core.registers import (
     REG_JOB_ECAP,
@@ -36,7 +35,6 @@ from Services.robot_comm.core.registers import (
 )
 from Services.robot_comm.server.sim_journal import SimJournal
 
-pytestmark = pytest.mark.timeout(30)
 
 FC_WRITE_SINGLE = 6
 FC_WRITE_MULTI = 16

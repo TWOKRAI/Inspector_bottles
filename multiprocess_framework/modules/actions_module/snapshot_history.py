@@ -56,6 +56,10 @@ class _Snapshot:
     command_type: str
     timestamp: float
     coalesce_key: str | None
+    # Непрозрачные «памятки» вида UI (например, выбор узлов) до/после мутации.
+    # История их не читает и не интерпретирует — только хранит рядом со снимками.
+    memo_before: object = None
+    memo_after: object = None
 
 
 class SnapshotHistory(Generic[T]):
@@ -84,12 +88,18 @@ class SnapshotHistory(Generic[T]):
         label: str,
         command_type: str,
         coalesce_key: str | None = None,
+        memo_before: object = None,
+        memo_after: object = None,
     ) -> None:
         """Записать выполненную мутацию в undo-стек.
 
         Coalescing: если coalesce_key совпадает с вершиной undo-стека, записи сливаются —
         сохраняется before самой первой (для корректного полного отката серии), after
         берётся новый. Новая запись всегда чистит redo-стек.
+
+        memo_before/memo_after — непрозрачные памятки вида UI. При coalescing действует то же
+        правило, что и для снимков: memo_before берётся у самой первой записи серии (ДОСЛОВНО,
+        даже если он None), memo_after — новый.
         """
         if coalesce_key is not None and self._undo and self._undo[-1].coalesce_key == coalesce_key:
             prev = self._undo[-1]
@@ -100,6 +110,8 @@ class SnapshotHistory(Generic[T]):
                 command_type=command_type,
                 timestamp=time.time(),
                 coalesce_key=coalesce_key,
+                memo_before=prev.memo_before,
+                memo_after=memo_after,
             )
         else:
             self._undo.append(
@@ -110,6 +122,8 @@ class SnapshotHistory(Generic[T]):
                     command_type=command_type,
                     timestamp=time.time(),
                     coalesce_key=coalesce_key,
+                    memo_before=memo_before,
+                    memo_after=memo_after,
                 )
             )
             if len(self._undo) > self._max_history:
@@ -124,19 +138,29 @@ class SnapshotHistory(Generic[T]):
 
     def take_undo(self) -> T | None:
         """Снять верхнюю запись в redo и вернуть снимок before. None если стек пуст."""
+        taken = self.take_undo_with_memo()
+        return None if taken is None else taken[0]
+
+    def take_redo(self) -> T | None:
+        """Вернуть запись из redo обратно в undo и вернуть снимок after. None если пуст."""
+        taken = self.take_redo_with_memo()
+        return None if taken is None else taken[0]
+
+    def take_undo_with_memo(self) -> tuple[T, object | None] | None:
+        """Как take_undo, но вместе с memo_before записи. None если стек пуст."""
         if not self._undo:
             return None
         snap = self._undo.pop()
         self._redo.append(snap)
-        return cast("T", snap.before)
+        return cast("T", snap.before), snap.memo_before
 
-    def take_redo(self) -> T | None:
-        """Вернуть запись из redo обратно в undo и вернуть снимок after. None если пуст."""
+    def take_redo_with_memo(self) -> tuple[T, object | None] | None:
+        """Как take_redo, но вместе с memo_after записи. None если пуст."""
         if not self._redo:
             return None
         snap = self._redo.pop()
         self._undo.append(snap)
-        return cast("T", snap.after)
+        return cast("T", snap.after), snap.memo_after
 
     # ------------------------------------------------------------------
     # Запросы

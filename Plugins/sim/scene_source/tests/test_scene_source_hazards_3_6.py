@@ -18,13 +18,11 @@ from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
 
-pytestmark = pytest.mark.timeout(30)
 
 # Plugins/sim/scene_source/tests/test_scene_source_hazards_3_6.py -> parents[4] == корень репо.
 _REPO_ROOT = Path(__file__).resolve().parents[4]

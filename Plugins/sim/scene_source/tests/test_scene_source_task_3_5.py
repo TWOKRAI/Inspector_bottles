@@ -33,13 +33,11 @@ from typing import Callable
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from Services.dataset_gen.core.catalog import imwrite_unicode
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 
-pytestmark = pytest.mark.timeout(30)
 
 #: Литералы контракта (§4/§2 «Контракт лида 3.5») — НЕ импорт нового matching.py.
 _FACTOR_MM = 0.144473

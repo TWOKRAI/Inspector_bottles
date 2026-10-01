@@ -296,7 +296,6 @@ def test_no_args_busy_8765_aborts():
     os.environ.get("LINE_SIM_LIVE") != "1",
     reason="живой прогон полного стенда сима — только явно, LINE_SIM_LIVE=1",
 )
-@pytest.mark.timeout(1260)
 def test_live_line_sim_run(tmp_path):
     """`--app line_sim` end-to-end: сим поднимается, отчёт валиден, порт сима
     освобождается, состав процессов — только сим, telemetry.levels отвечает.

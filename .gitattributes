@@ -1,3 +1,5 @@
 # Журнал сессий только дополняется — union-merge снимает конфликт
 # при merge-back из worktree (pre-commit хук стейджит его в каждый коммит).
 docs/sessions/*.md merge=union
+robot/v2/main_v2.lua text eol=lf
+robot/v2/src/*.lua text eol=lf

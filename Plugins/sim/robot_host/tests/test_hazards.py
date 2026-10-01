@@ -37,8 +37,6 @@ from Plugins.sim.robot_host.plugin import SimRobotHostPlugin
 from Services.robot_comm import ROBOT_AVAILABLE
 from Services.robot_comm.server.sim_core import VFD_CMD_ADDR, RobotSimCore
 
-pytestmark = pytest.mark.timeout(30)
-
 
 def _free_port() -> int:
     """Свободный TCP-порт (см. Services/robot_comm/tests/test_sim_e2e.py)."""

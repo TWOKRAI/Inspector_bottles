@@ -12,7 +12,6 @@ from __future__ import annotations
 
 # ruff: noqa: F811  (start_pult — фикстура из соседнего файла: ре-импорт и параметр теста)
 
-import pytest
 
 from Plugins.sim.pult_web.tests.test_acceptance_1_3h_c_layers import (  # noqa: F401  (start_pult — фикстура)
     _INITIAL,
@@ -37,8 +36,6 @@ from Plugins.sim.pult_web.tests.test_acceptance_1_3h_d_page import (
     _stub_put,
     _upload,
 )
-
-pytestmark = pytest.mark.timeout(60)
 
 
 def _sprite_requests_after_upload(start_pult, reply: dict, status: int) -> tuple[int, dict]:

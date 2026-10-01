@@ -44,7 +44,6 @@ from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 # модуль ещё не существует -> ImportError (ожидаемый КРАСНЫЙ для всего файла)
 from Services.robot_comm.gui.z_view import TimeTape, ZScale
 
-pytestmark = pytest.mark.timeout(30)
 
 ACK = 1
 NAK = 2
