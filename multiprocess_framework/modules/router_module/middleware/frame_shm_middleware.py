@@ -1080,16 +1080,23 @@ class FrameShmMiddleware:
         return entries
 
     @staticmethod
-    def _copy_inline_views(item: dict) -> None:
+    def _copy_inline_views(item: dict) -> bool:
         """Заменить копиями ndarray верхнего уровня item'а с ``not flags.owndata`` (4.4d): после записи
         в кольца в item остаются только inline-значения, а те из них, что смотрят в память чужого слота
         (срез view), роутер сериализует после двери. Вложенные структуры не трогаются (см. остаток в
-        ``strip_and_write``)."""
+        ``strip_and_write``).
+
+        Returns:
+            True, если скопирован хотя бы один массив (4.7a: дверь трогала чужую память -> входы надо
+            перепроверить)."""
         from numpy import ndarray
 
+        copied = False
         for key, value in list(item.items()):
             if isinstance(value, ndarray) and not value.flags.owndata:
                 item[key] = value.copy()
+                copied = True
+        return copied
 
     def strip_and_write(self, item: dict) -> dict:
         """Записать frame и крупные массивы в SHM, убрать из item, добавить shm_ref.
@@ -1107,8 +1114,11 @@ class FrameShmMiddleware:
         ndarray верхнего уровня с ``not flags.owndata`` (малый срез view, 1D/4D, не-native dtype,
         fallback-массив) заменяется копией — иначе он сериализуется роутером уже ПОСЛЕ двери, а слот
         источника за это время перезаписывается; (2) ``_inputs_still_valid`` — перезаписанный вход
-        помечает item ``_shm_dropped`` (дроп всех целей, один раз на item). Проверка идёт и в ветке
-        БЕЗ крупных массивов. Известный остаток: массивы во ВЛОЖЕННЫХ list/dict не копируются и
+        помечает item ``_shm_dropped`` (дроп всех целей, один раз на item). 4.7a: (2) выполняется
+        ТОЛЬКО если дверь реально трогала чужую память — в кольцо ушёл массив с ``not flags.owndata``
+        или ``_copy_inline_views`` скопировал хоть один inline-срез; выход только из массивов-владельцев
+        (``owndata``) или вовсе без массивов уходит без проверки входов — перезапись слота входа его
+        не портит (ложный дроп 4.7a). Известный остаток: массивы во ВЛОЖЕННЫХ list/dict не копируются и
         дверь их не защищает.
 
         Fan-out (F1, ревью 2026-07-13): producer переиспользует ОДИН item-dict для
@@ -1129,6 +1139,8 @@ class FrameShmMiddleware:
             return item
         entries = self._large_entries(item)
         has_views = bool(item.get(SHM_VIEWS_KEY))
+        # 4.7a: флаги owndata снимаем ДО _write_item_arrays — он вынимает массивы из item.
+        touched_foreign = any(not arr.flags.owndata for _, arr in entries)
         if entries and self._mm is not None:
             self._write_item_arrays(item, entries)
             # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
@@ -1143,8 +1155,10 @@ class FrameShmMiddleware:
                 self._bump_frame_hops(item)
         if has_views and self._mm is not None:
             # copy-then-check (4.4d): сначала копии inline-срезов view, потом проверка входов.
-            self._copy_inline_views(item)
-            if not self._inputs_still_valid(item):
+            # 4.7a: проверка — только если в двери копировалась чужая память (не-owndata массив в
+            # кольцо или inline-срез); выход-владелец данных от перезаписи слота входа не зависит.
+            touched_foreign = self._copy_inline_views(item) or touched_foreign
+            if touched_foreign and not self._inputs_still_valid(item):
                 item[SHM_DROPPED_KEY] = True
                 return item
         # Один хоп: унаследованные ссылки (owner != self) уже заменены своими, локальная мета
