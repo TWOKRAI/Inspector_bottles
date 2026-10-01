@@ -32,11 +32,13 @@ _SKIP_DIRS = {"tests", "docs", "plans", ".git", ".venv", ".claude", "graphify-ou
 
 
 @pytest.mark.parametrize("name", REMOVED)
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_removed_flags_absent_from_registry(name: str) -> None:
     assert name not in ff.FLAGS, f"{name} должен быть удалён из реестра (один режим shm)"
     assert name not in [f.name for f in ff._FLAG_LIST], f"{name} остался в _FLAG_LIST"
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_loan_protocol_frozen_without_dangling_requires() -> None:
     assert "FW_SHM_LOAN_PROTOCOL" in ff.FLAGS, "LOAN_PROTOCOL остаётся в реестре (заморожен, не удалён)"
     flag = ff.FLAGS["FW_SHM_LOAN_PROTOCOL"]
@@ -71,6 +73,7 @@ def _tracked_sources() -> list[Path]:
     return files
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_no_fw_shm_refs_outside_registry() -> None:
     offenders: dict[str, set[str]] = {}
     scanned = _tracked_sources()

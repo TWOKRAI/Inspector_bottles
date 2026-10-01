@@ -40,6 +40,7 @@ def _lag(proc_dict: dict) -> int:
     return proc_dict["config"].get("chain_max_lag_items", 0)
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_reader_behind_generic_writer_4_2():
     """Писатель без настройки глубины (дефолт кольца 8) -> получатель: очередь 4, lag 2."""
     built = _build(
@@ -52,6 +53,7 @@ def test_reader_behind_generic_writer_4_2():
     assert _lag(built["det"]) == 2
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_writer_depth12_reader_8_2():
     """frame_ring_depth: 12 у писателя -> очередь 8, lag 2."""
     built = _build(
@@ -64,6 +66,7 @@ def test_writer_depth12_reader_8_2():
     assert _lag(built["det"]) == 2
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_two_writers_depth_8_and_12_give_queue_4():
     """Два писателя в один процесс, глубины 8 и 12 -> бюджет по минимуму: очередь 4, lag 2."""
     built = _build(
@@ -77,6 +80,7 @@ def test_two_writers_depth_8_and_12_give_queue_4():
     assert _lag(built["det"]) == 2
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_reader_behind_wire_4_2():
     """Процесс, которому кадры приходят по wire (приёмник wire-кольца), тоже «за писателем кольца»:
     у wire нет chain_targets на этом пути, и правило обязано сработать так же — очередь 4, lag 2."""
@@ -91,6 +95,7 @@ def test_reader_behind_wire_4_2():
     assert _lag(built["dst"]) == 2
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_every_hop_of_a_chain_gets_4_2_and_the_head_keeps_50():
     """cam -> det -> disp: и det (за cam), и disp (за det) получают 4/2 — одно правило для всех
     узлов, не только для первого хопа; голова цепочки без входа сохраняет 50."""
@@ -106,6 +111,7 @@ def test_every_hop_of_a_chain_gets_4_2_and_the_head_keeps_50():
     assert _data_queue(built["cam"]) == 50
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_explicit_lag_3_gives_queue_3_lag_3():
     """Явный chain_max_lag_items: 3 у получателя при кольце 8 -> очередь добирается до 3 (6 - 3)."""
     built = _build(
@@ -118,6 +124,7 @@ def test_explicit_lag_3_gives_queue_3_lag_3():
     assert _lag(built["det"]) == 3
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_explicit_queue_4_within_budget_is_kept():
     """Явная data_queue_maxsize: 4 при кольце 8 (4 + lag 2 = 6 = бюджет) принимается как есть."""
     built = _build(
@@ -130,6 +137,7 @@ def test_explicit_queue_4_within_budget_is_kept():
     assert _lag(built["det"]) == 2
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_explicit_queue_20_build_error():
     """Явная data_queue_maxsize: 20 при кольце 8 -> ошибка сборки «очередь 20 больше кольца 8»
     с именем процесса. Раньше ключ молча терялся (extra=ignore) и сборка проходила."""

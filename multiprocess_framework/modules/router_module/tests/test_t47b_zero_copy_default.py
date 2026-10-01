@@ -62,6 +62,7 @@ def _frame_of(msg: dict):
     return msg.get("frame") if msg.get("frame") is not None else msg["data"].get("frame")
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_restore_frame_view_readonly_without_env(pair) -> None:
     writer, reader = pair
     out = _send(writer, 1)  # слот idx0

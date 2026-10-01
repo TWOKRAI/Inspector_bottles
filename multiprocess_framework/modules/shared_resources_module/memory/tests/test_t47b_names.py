@@ -64,17 +64,20 @@ def _assert_distinct_owners(made: list) -> None:
     assert pid in tokens_a and pid in tokens_b, f"pid не в имени: {name_a!r} / {name_b!r}"
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_two_owners_mask_distinct_posix_without_env(monkeypatch, made) -> None:
     monkeypatch.setattr(shm_mod, "is_windows", lambda: False)
     _assert_distinct_owners(made)
 
 
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_two_owners_mask_distinct_windows_without_env(monkeypatch, made) -> None:
     monkeypatch.setattr(shm_mod, "is_windows", lambda: True)
     _assert_distinct_owners(made)
 
 
 @pytest.mark.parametrize("windows", [False, True], ids=["posix", "windows"])
+@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_same_owner_creating_again_gets_new_name(monkeypatch, made, windows: bool) -> None:
     monkeypatch.setattr(shm_mod, "is_windows", lambda: windows)
     first = shm_mod.create_shm_blocks("mask", SIZE, 1, owner="A")
