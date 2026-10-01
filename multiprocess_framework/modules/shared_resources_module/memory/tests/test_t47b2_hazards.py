@@ -172,3 +172,24 @@ def test_c_close_with_live_views_does_not_raise_and_keeps_them_retired(segs) -> 
     assert reader._retired == []
     if IS_NT:
         assert not _name_alive(s1.name) and not _name_alive(s2.name), "отложенные handles не закрыты повторным close()"
+
+
+def test_d_view_valid_false_when_key_now_holds_another_segment_with_equal_generation(segs) -> None:
+    """(d) realloc писателя под ТЕМ ЖЕ ключом: в кэше уже другой сегмент, и его поколение РАВНО поколению,
+    на котором прочитан старый view. ``view_valid(старое_имя, старый_gen, key)`` обязан дать False и
+    +1 к ``stale_drops``: сверка одного поколения без имени приняла бы чужой слот за свой view.
+    Красный revert: убрать ``entry[0] == shm_view_name`` из ``ShmFrameReader.view_valid``."""
+    old, new = segs("old", 1), segs("new", 2)
+    assert old.name != new.name and old.gen == new.gen, "предпосылка: разные сегменты, равное поколение"
+    reader = ShmFrameReader()
+    view = reader.read_ref(old.name, old.gen, copy=False, key=KEY)
+    assert view is not None
+    assert reader.view_valid(old.name, old.gen, key=KEY) is True  # контроль: до realloc view валиден
+    assert reader.stale_drops == 0
+
+    assert reader.read_ref(new.name, new.gen, copy=True, key=KEY) is not None  # realloc: ключ -> новый сегмент
+    assert reader.view_valid(old.name, old.gen, key=KEY) is False
+    assert reader.stale_drops == 1
+    del view
+    gc.collect()
+    reader.close()
