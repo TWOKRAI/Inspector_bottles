@@ -240,6 +240,8 @@ class DataReceiver:
                 for i in reversed(frame_idx[:excess]):  # с конца: индексы оставшихся не плывут
                     del pending[i]
                 dropped = excess
+                # Приёмник — единственный производитель chain_queue, поэтому notify защитный и сегодня
+                # ненаблюдаем (замер: без него все тесты зелёные).
                 chain.not_full.notify(dropped)
         try:
             chain.put_nowait(items)

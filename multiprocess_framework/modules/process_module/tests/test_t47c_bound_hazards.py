@@ -91,6 +91,10 @@ def test_concurrent_consumer_get_and_selective_removal_lose_nothing():
     Свойства: (1) ни один сигнал не потерян (потолок их не вытесняет; потребитель их выбрал бы все),
     (2) кадры: принятые + выброшенные потолком == отправленные (не потеряно и не размножено),
     (3) всё завершается в дедлайн — без взаимной блокировки на mutex/not_full.
+
+    Чего тест НЕ доказывает: что выборочное удаление идёт под mutex. Гонка слишком редка, чтобы её
+    поймать (инъекция «mutex -> if True» + «notify -> pass» оставила 73 теста зелёными); это держит
+    детерминированный ``test_bound_waits_for_the_queue_mutex_before_touching_the_deque``.
     """
     n = 2000
     chain: queue.Queue = queue.Queue(maxsize=64)
@@ -126,6 +130,42 @@ def test_concurrent_consumer_get_and_selective_removal_lose_nothing():
     assert len(frames) + receiver.lag_dropped_total == n, (len(frames), receiver.lag_dropped_total)
     assert len(set(frames)) == len(frames), "кадр размножен"
     assert frames == sorted(frames, key=lambda m: int(m[1:])), "порядок кадров нарушен"
+
+
+def test_bound_waits_for_the_queue_mutex_before_touching_the_deque():
+    """Детерминированно: пока ДРУГОЙ поток держит ``chain_queue.mutex``, потолок не трогает очередь.
+
+    lag 2, в очереди [f1, f2]; главный поток берёт mutex, в daemon-потоке идёт ``on_items_ready(f3)``.
+    Наблюдаемое: (1) через 0.2 с вызов не завершён (ждёт замок очереди), (2) содержимое очереди всё ещё
+    [f1, f2] — самый старый кадр НЕ удалён из-под чужого замка (при удалении без mutex f1 исчез бы уже
+    здесь, до отпускания); после отпускания вызов завершается в дедлайн 2 с, очередь [f2, f3], выброшен 1.
+    Без spy на имена: судим по эффекту — потолок ждёт собственный замок очереди.
+    """
+    chain: queue.Queue = queue.Queue(maxsize=64)
+    receiver = _receiver(chain, max_lag=2)
+    receiver.on_items_ready(_frame("f1"))
+    receiver.on_items_ready(_frame("f2"))
+
+    done = threading.Event()
+
+    def bound_put() -> None:
+        receiver.on_items_ready(_frame("f3"))
+        done.set()
+
+    chain.mutex.acquire()
+    try:
+        t = threading.Thread(target=bound_put, daemon=True)
+        t.start()
+        time.sleep(0.2)
+        assert not done.is_set(), "потолок завершился, пока замок очереди занят другим потоком"
+        assert [c[0]["marker"] for c in chain.queue] == ["f1", "f2"], "очередь тронута без замка очереди"
+    finally:
+        chain.mutex.release()
+
+    t.join(2.0)
+    assert done.is_set(), "потолок не завершился после отпускания замка очереди"
+    assert [c[0]["marker"] for c in chain.queue] == ["f2", "f3"]
+    assert receiver.lag_dropped_total == 1
 
 
 def test_queue_at_chain_maxsize_with_only_signals_is_not_dropped():
