@@ -39,7 +39,13 @@ class MLInferenceRegisters(SchemaBase):
     # --- Параметры вывода ---
     confidence_threshold: Annotated[
         float,
-        FieldMeta("Порог уверенности", info="Отсекать предсказания ниже порога", min=0.0, max=1.0, round_k=2),
+        FieldMeta(
+            "Порог уверенности",
+            info="Ниже порога предсказание НЕ отсекается, а помечается below_threshold (потребитель не действует)",
+            min=0.0,
+            max=1.0,
+            round_k=2,
+        ),
     ] = 0.5
     top_k: Annotated[
         int,
@@ -80,6 +86,8 @@ class MLInferenceRegisters(SchemaBase):
     # (full-симметрия/нет детекции/нет угла). Иначе доворот по неопределённому углу.
     last_angle_deg: Annotated[float, FieldMeta("Последний угол", readonly=True, unit="°")] = 0.0
     last_angle_valid: Annotated[bool, FieldMeta("Угол определён", readonly=True)] = False
+    # КОНТРАКТ: True = топ-1 ниже порога (или предсказания нет) — потребитель НЕ действует по last_label.
+    last_below_threshold: Annotated[bool, FieldMeta("Ниже порога", readonly=True)] = True
     avg_latency_ms: Annotated[float, FieldMeta("Латентность (сред.)", readonly=True, unit="ms")] = 0.0
     last_latency_ms: Annotated[float, FieldMeta("Латентность (послед.)", readonly=True, unit="ms")] = 0.0
     max_latency_ms: Annotated[float, FieldMeta("Латентность (макс. за окно)", readonly=True, unit="ms")] = 0.0

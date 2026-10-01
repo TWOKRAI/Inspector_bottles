@@ -361,6 +361,8 @@ class WordLayoutPlugin(ProcessModulePlugin):
         top = preds[0]
         if not isinstance(top, dict) or not top.get("label"):
             return None
+        if top.get("below_threshold"):  # ml_inference: ниже СВОЕГО порога — робот диск не берёт
+            return None
         if float(top.get("confidence", 1.0)) < float(self._reg.min_confidence):
             return None
         return {

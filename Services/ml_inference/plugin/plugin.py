@@ -88,7 +88,12 @@ class MLInferencePlugin(ProcessModulePlugin):
     ]
     outputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр (опц. overlay)"),
-        Port(name="predictions", dtype="list[dict]", shape="N", description="Топ-K: class_id, label, confidence"),
+        Port(
+            name="predictions",
+            dtype="list[dict]",
+            shape="N",
+            description="Топ-K: class_id, label, confidence, below_threshold",
+        ),
     ]
 
     commands = {
@@ -174,15 +179,18 @@ class MLInferencePlugin(ProcessModulePlugin):
                 # lock: команда set_model/reload на другом потоке может в этот момент
                 # выгружать/пересоздавать сессию (engine.load_model → unload → _session=None)
                 with self._engine_lock:
-                    preds = self._engine.predict(
-                        frame,
-                        top_k=self._reg.top_k,
-                        threshold=self._reg.confidence_threshold,
+                    # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
+                    # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
+                    preds = self._mark_below_threshold(
+                        self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0)
                     )
             except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
                 self._reg.last_error = str(exc)
                 self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
                 logger.exception("MLInferencePlugin: inference error")  # traceback в лог
+                # регистры не держат прошлый кадр (stale last_below_threshold=False выглядел бы
+                # как «уверенное попадание»): пустой результат → fail-safe «не доверять»
+                self._update_last_pred_telemetry([])
                 return {**item, "predictions": []}
             # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
             # висит в телеметрии до перезагрузки модели)
@@ -196,7 +204,11 @@ class MLInferencePlugin(ProcessModulePlugin):
             self._last_predictions = preds
             self._update_last_pred_telemetry(preds)
         else:
-            preds = self._last_predictions
+            # кэш помечается ТЕКУЩИМ порогом: cmd_set_threshold между кадрами inference_every_n>1
+            # действует сразу (поднятый порог не оставит диск «уверенным» по устаревшему флагу)
+            preds = self._mark_below_threshold(self._last_predictions)
+            if preds:
+                self._reg.last_below_threshold = bool(preds[0]["below_threshold"])
 
         result_frame = frame
         if self._reg.draw_overlay and preds:
@@ -207,9 +219,17 @@ class MLInferencePlugin(ProcessModulePlugin):
         # полным кадром через pickle на каждом кадре (грабли line_filter).
         return {**item, "frame": result_frame, "predictions": preds}
 
+    def _mark_below_threshold(self, preds: list[dict]) -> list[dict]:
+        """Копии предсказаний с `below_threshold = confidence < confidence_threshold` (строго `<`)."""
+        threshold = float(self._reg.confidence_threshold)
+        return [{**p, "below_threshold": float(p["confidence"]) < threshold} for p in preds]
+
     @staticmethod
     def _draw_overlay(frame, top1: dict):
         """Топ-1 класс + confidence + угол (если определён) поверх кадра.
+
+        Ниже порога (`below_threshold`): оранжевый цвет и пометка «<порог» — оператор видит,
+        что робот эту букву не возьмёт.
 
         Угол: angle_valid=True → «θ°»; есть angle_deg, но valid=False (full-симметрия)
         → «любой» (доворот не нужен). Кириллица рисуется через PIL.
@@ -219,6 +239,8 @@ class MLInferencePlugin(ProcessModulePlugin):
             text += f"  {top1['angle_deg']:.0f}°"
         elif "angle_deg" in top1:
             text += "  ∠любой"
+        if top1.get("below_threshold"):
+            return _put_text_unicode(frame, text + "  <порог", (8, 6), (0, 165, 255))
         return _put_text_unicode(frame, text, (8, 6), (0, 255, 0))
 
     # ------------------------------------------------------------------ #
@@ -261,6 +283,7 @@ class MLInferencePlugin(ProcessModulePlugin):
         # сбросить угловую телеметрию — у новой модели может не быть angle_head
         self._reg.last_angle_deg = 0.0
         self._reg.last_angle_valid = False
+        self._reg.last_below_threshold = True
         self._reg.active_providers = ""
         # lock: не пересоздавать сессию, пока predict() на другом потоке её читает
         with self._engine_lock:
@@ -279,7 +302,9 @@ class MLInferencePlugin(ProcessModulePlugin):
                 self._ctx.log_error(f"MLInferencePlugin: не удалось загрузить '{self._reg.model}': {exc}")
 
     def _update_last_pred_telemetry(self, preds: list[dict]) -> None:
-        """Обновить readonly-поля последнего предсказания (класс + угол).
+        """Обновить readonly-поля последнего предсказания (класс + угол + below_threshold).
+
+        Пустой результат → last_below_threshold=True (fail-safe: «нет предсказания» = не доверять).
 
         При пустом результате / отсутствии угла у top-1 СБРАСЫВАЕМ angle_valid И
         обнуляем сам угол/класс — иначе в телеметрии висит фантом прошлого объекта
@@ -291,9 +316,11 @@ class MLInferencePlugin(ProcessModulePlugin):
             self._reg.last_confidence = 0.0
             self._reg.last_angle_deg = 0.0
             self._reg.last_angle_valid = False
+            self._reg.last_below_threshold = True
             return
         top = preds[0]
         self._reg.last_label = top["label"]
+        self._reg.last_below_threshold = bool(top["below_threshold"])
         self._reg.last_confidence = round(float(top["confidence"]), 4)
         if "angle_deg" in top:
             self._reg.last_angle_deg = round(float(top["angle_deg"]), 2)
@@ -326,6 +353,7 @@ class MLInferencePlugin(ProcessModulePlugin):
                     "last_confidence": self._reg.last_confidence,
                     "last_angle_deg": self._reg.last_angle_deg,
                     "last_angle_valid": self._reg.last_angle_valid,
+                    "last_below_threshold": self._reg.last_below_threshold,
                     "avg_latency_ms": self._reg.avg_latency_ms,
                     "last_latency_ms": self._reg.last_latency_ms,
                     "max_latency_ms": self._reg.max_latency_ms,
