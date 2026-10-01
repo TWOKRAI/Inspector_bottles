@@ -1,0 +1,144 @@
+# Фаза 1 — фон из слоёв + альфа плитки
+
+Родитель: [plan.md](plan.md). Итог фазы, видимый владельцу: на стенде `apps/line_sim` под лентой чёрное — в просветах
+между звеньями и выше/ниже ленты; фон задаётся списком слоёв в конфиге. Заменяет Task 0.1 `letters-retrain`.
+
+Общий порядок исполнения каждой задачи (конвенция проекта): **tester (Sonnet 5.5, слепой, git worktree на коммите
+до реализации, только критерии приёмки; запрещены файлы реализации и тесты автора)** → **developer (Sonnet 5.5) или
+teamlead (Opus 5.5)** → **break-injection лида** (по одной на заявленное свойство, предсказание до прогона) →
+**reviewer (Opus 5.5, `run_in_background: false`, вердикт по SHA)**. Исполнитель не коммитит в `main` и не пушит;
+лимит — 2 итерации на петлю, третья — эскалация к `teamlead`.
+
+---
+
+### Task 1.1 — [VERTICAL SLICE] стек фона `background_layers` от конфига до кадра сима
+
+- **Статус:** [PENDING] · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
+- **Module contract:** new-full (`Services/layer_render/` — пакет: `__init__.py`, `interfaces.py`, `background.py`)
+- **CHAIN:** `tester`(RED) → `teamlead`(GREEN) → `reviewer`
+
+**Goal:** ключ `background_layers` в конфиге `scene_source` задаёт фон сцены стеком слоёв снизу вверх (`solid` — заливка
+RGB, `tile` — RGB/RGBA-картинка, прокручивается с лентой); без ключа кадр байт в байт прежний.
+
+**Files:**
+1. `Services/layer_render/__init__.py` (новый)
+2. `Services/layer_render/interfaces.py` (новый) — `SolidFill(color_rgb)`, `ScrollingTile(image)` (frozen dataclass, RGB или RGBA uint8)
+3. `Services/layer_render/background.py` (новый) — `background_layers_from_config(items, load_image)`, `render_background(...)`
+4. `Services/layer_render/README.md` + STATUS.md рядом (новые; README — контракт, схема YAML, порядок сцены)
+5. `Services/line_sim/core/scene_compositor.py` — необязательный `background_layers`
+6. `Plugins/sim/scene_source/plugin.py` — ключ `background_layers` (чтение картинок, ошибки)
+- тесты: каталог `Services/layer_render/tests/` (новый) и файл `test_background_layers_*.py` в тестах `scene_source`
+
+**DESIGN:**
+- Схема YAML (одна и та же для сима и, в 2.2, для генератора):
+  ```yaml
+  background_layers:          # снизу вверх
+    - solid: [0, 0, 0]        # RGB, не BGR
+    - tile: data/line_sim/belt_tile.png   # путь от корня репо; RGB = непрозрачно, RGBA = по альфе
+  ```
+  Элемент — словарь ровно с одним ключом `solid` или `tile`; иное (`{}`, два ключа, неизвестный ключ, цвет не из трёх
+  int 0..255, пустой список) → `ValueError`, текст называет индекс элемента и значение. Под всеми слоями — чёрный.
+- `tile` раскладывается **ровно как сегодня** `background_tile` (`scene_compositor.py:92-103`): столбцы — по модулю
+  ширины со сдвигом `belt_direction * round(encoder_to_offset_mm(now, 0) * px_per_mm)`, строки — симметрично `belt_y_px`,
+  строки вне тайла — прозрачны (видно слой ниже). Сдвиг считает `SceneCompositor` и передаёт в `render_background`
+  числом — `layer_render` не знает про энкодер и про `line_sim`.
+- Смешение — альфа-«over»; альфа 255 даёт пиксель тайла точно, альфа 0 — пиксель ниже точно.
+- Подсказка (не требование): сплошные слои под единственной плиткой сворачиваются в один непрозрачный тайл при сборке
+  компоновщика — тогда кадр стоит столько же, сколько старый путь.
+- `SceneCompositor(..., background_layers=None)`: `None` → ветка 3.6 нетронута (`background_bgr` + `background_tile`).
+  Заданы оба (`background_layers` и `background_tile`) → `ValueError` в конструкторе.
+- Плагин: `background_layers` и `background_texture` в одном конфиге → `ValueError` в `configure()` (ошибка конфигурации
+  стенда, не откат). Нечитаемая картинка слоя `tile` → ровно один `ctx.log_error`, слой выброшен, движок жив (тот же
+  приём, что `_load_background_tile`, `plugin.py:352-370`). Чтение — `imread_unicode(..., IMREAD_UNCHANGED)`, BGR(A)→RGB(A).
+- Строка лога `configure()` называет фон: `фон=слои[solid(0,0,0), tile(<путь>, 410x484, RGBA)]`.
+
+**Steps:** 1. tester пишет приёмку по Acceptance (RED). 2. teamlead: `interfaces.py` + `background.py` → компоновщик →
+плагин. 3. Прогон радиуса + золотые эталоны. 4. Замер производительности (см. ниже), числа — в отчёт.
+
+**Acceptance:**
+- [ ] Без ключа `background_layers` золотой эталон плагина `test_acceptance_lateral_offset_plugin.py:492-493` — зелёный без правки литералов.
+- [ ] Эквивалентность старому пути: `[{solid: [60,60,60]}, {tile: <RGB-тайл>}]` даёт кадр, **побайтно равный** старому
+      `background_bgr=(60,60,60), background_tile=<тот же тайл>`, на 3 позициях энкодера × `belt_direction ±1` × `y_px` с
+      тайлом, выходящим за верх и низ кадра.
+- [ ] RGBA-тайл 4×4 с альфой 0 в одном столбце поверх `solid [0,0,0]`: в этом столбце пиксели кадра `[0,0,0]`, в остальных — RGB тайла.
+- [ ] Альфа 128 над `solid [0,0,0]` и пикселем тайла `[200,100,50]` → `[100,50,25]` ± 1.
+- [ ] Каждая форма кривого ключа из DESIGN → `ValueError` с индексом элемента; оба ключа фона в конфиге плагина → `ValueError`.
+- [ ] Нечитаемый файл `tile` → ровно 1 `log_error` за `configure()`, 0 исключений в 10 вызовах `produce()`.
+- [ ] Медиана `SceneCompositor.render()` на 1440×1080 без объектов, 200 кадров: `[solid, RGBA-тайл 410×484]` ≤ 1.3× медианы
+      старого пути `background_tile` на той же машине; оба числа в отчёте.
+- [ ] `layer_render` не импортирует `Services.line_sim`, `Services.dataset_gen`, `Services.ml_train` (тест на AST импорта).
+
+**Goldens:** `test_acceptance_lateral_offset_plugin.py:492-493`, `test_acceptance_3_6.py`, `test_hazards_3_6.py`,
+`test_scene_source_task_3_6.py`, `test_scene_source_hazards_3_6.py`, `test_hazards_1_3h_layout.py:40-44`.
+
+**Out of scope:** конфиг стенда и пересборка плитки (1.3), инструмент (1.2), эффекты на слоях фона, фон в ветке
+`_background_only_frame`, правка `pipeline.yaml`.
+
+**TRAPS:** `background_bgr` концептуально BGR, кадр хранится в RGB (`scene_compositor.py:85-90`) — в новой схеме цвет
+сразу RGB, не переставлять дважды. `composite` из `dataset_gen` округляет центр — для тайла не годится, тайл индексируется.
+
+---
+
+### Task 1.2 — опция `--gap-alpha` у `make_seamless_texture`: просветы прозрачные
+
+- **Статус:** [PENDING] · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Module contract:** impl-only (CLI-инструмент, новая необязательная опция)
+- **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+
+**Goal:** с `--gap-alpha` инструмент пишет RGBA-PNG: RGB — тот же тайл, что без опции, альфа 0 в просветах между звеньями,
+255 на звеньях и бортах.
+
+**Files:**
+1. `Services/line_sim/tools/make_seamless_texture.py` — опция + чистая функция `gap_alpha_mask(tile_rgb, ...) -> uint8`
+2. `Services/line_sim/README.md` — раздел инструмента: рецепт и измеренные пороги
+- тесты: `Services/line_sim/tests/test_acceptance_gap_alpha.py`, `test_hazards_gap_alpha.py`
+
+**DESIGN:**
+- Маска считается по HSV готового тайла (после масштаба и шва — иначе маска не совпадёт с пикселями): пиксель — просвет,
+  если тон в `--gap-hue LO,HI` и насыщенность ≥ `--gap-sat-min`, и строка не в зоне бортов `--rails-px TOP,BOTTOM`
+  (строки `[0, TOP)` и `[h-BOTTOM, h)` — всегда альфа 255).
+- Дефолты порогов — **измерить** на `data/line_sim/belt_photo_full.png` → тайл (рецепт `apps/line_sim/pipeline.yaml:119-123`)
+  и записать в README с числами замера (медианы H/S у просветов и у звеньев). Фото и тайл лежат в `data/` (вне git):
+  на 2026-10-01 — в worktree `.claude/worktrees/stand/data/line_sim/`.
+- Маска бинарная; сглаживание края — не делать (YAGNI, добавить, если на стенде будет «лесенка»).
+- Без `--gap-alpha` — путь записи не меняется.
+
+**Acceptance:**
+- [ ] Без опции выход побайтно равен выходу до задачи (sha256 PNG на синтетическом фото, литерал снят тестером до реализации).
+- [ ] С опцией: `out[:, :, :3]` побайтно равен тайлу без опции (опция добавляет только альфу).
+- [ ] Синтетический тайл (тестер рисует сам: серые звенья V≈78, мятные просветы V≈79 с S выше звеньев, зелёные борта
+      15 строк сверху/снизу S≈100 V≈190): альфа 0 у ≥ 99 % пикселей просвета, 255 у ≥ 99 % пикселей звеньев, у 100 % бортов.
+- [ ] Альфа периодична: столбец 0 и столбец `w` (сдвиг на период) совпадают у ≥ 99 % строк на реальном тайле.
+- [ ] Пороги — параметры CLI; кривые значения (`LO>HI`, вне 0..179/0..255, `TOP+BOTTOM ≥ h`) → `SystemExit` с именем флага.
+- [ ] README: рецепт команды с `--gap-alpha` и таблица замера порогов.
+
+**Goldens:** `test_acceptance_look_1_1_period.py`, `test_hazards_look_1_1.py`, тесты инструмента из `test_acceptance_3_6.py`.
+
+**Out of scope:** пересборка `data/line_sim/belt_tile.png` и конфиг стенда (1.3), фон выше/ниже ленты, перерисовка фото.
+
+---
+
+### Task 1.3 — плитка RGBA + стенд на `[чёрный, плитка]` + границы sentrux
+
+- **Статус:** [PENDING] (зависит от 1.1, 1.2) · **Level:** Middle (Sonnet 5.5) · **Assignee:** developer → живой стенд лида → reviewer
+- **Module contract:** n/a (данные, конфиг, правила)
+- **CHAIN:** `developer` → `reviewer`(express)
+- **Независимый тестер:** не запускается — задача без кода (данные + конфиг + правила). Проверка — замер лида на живом
+  стенде (стадия 4); до замера задача считается непроверенной. Сказать это в коммите.
+
+**Goal:** стенд `apps/line_sim` рисует ленту поверх чёрного: просветы и поля выше/ниже ленты — чёрные.
+
+**Files:**
+1. `data/line_sim/belt_tile.png` — пересобрать с `--gap-alpha` (вне git; старый сохранить как `belt_tile_rgb.png`)
+2. `apps/line_sim/pipeline.yaml` — `background_texture` → `background_layers: [{solid: [0,0,0]}, {tile: data/line_sim/belt_tile.png}]`, комментарий-рецепт обновить
+3. `.sentrux/rules.toml` — четыре `[[boundaries]]`: layer_render ↛ line_sim, layer_render ↛ dataset_gen, layer_render ↛ ml_train, dataset_gen ↛ line_sim (все под `Services/`)
+4. `Services/STATUS.md` — строка `layer_render`
+5. `Services/layer_render/DECISIONS.md` (новый) — LR-001: пакет ниже обоих сервисов, политика реэкспорта, контракт rng
+
+**Acceptance:**
+- [ ] `sentrux check .` (CLI, не MCP) — `✓ All rules pass`, число проверенных правил выросло на 4 против `main`; вывод в отчёт.
+- [ ] Живой стенд (лид, `backend_ctl`): на кадре `scene_source` медиана V пикселей просветов (маска из 1.2, перенесённая
+      на кадр) ≤ 10, медиана V звеньев — в пределах ± 3 от кадра до задачи; поля выше/ниже ленты — `[0,0,0]`.
+- [ ] `python scripts/validate.py` — зелёный (у нового модуля README/STATUS/DECISIONS/interfaces/tests на месте).
+
+**Out of scope:** код. Если стенд показывает дефект — новая задача, не правка здесь.
