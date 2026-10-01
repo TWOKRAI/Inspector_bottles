@@ -154,6 +154,28 @@ from   = "Services/auth/*"
 to     = "multiprocess_prototype/*"
 reason = "Services/auth — чистый backend, импорт Qt-виджетов и app-кода запрещён (PR2 auth-rbac)"
 
+# Services/layer_render — пакет ниже line_sim и dataset_gen (layer-render LR-001):
+# они его импортируют, он их — нет; ml_train потребляет только готовые кадры.
+[[boundaries]]
+from   = "Services/layer_render/*"
+to     = "Services/line_sim/*"
+reason = "layer_render лежит ниже line_sim: line_sim его импортирует, обратная зависимость — цикл (layer-render LR-001)"
+
+[[boundaries]]
+from   = "Services/layer_render/*"
+to     = "Services/dataset_gen/*"
+reason = "layer_render лежит ниже dataset_gen: обратная зависимость — цикл (layer-render LR-001)"
+
+[[boundaries]]
+from   = "Services/layer_render/*"
+to     = "Services/ml_train/*"
+reason = "layer_render — рендер-ядро без ML: обучение его потребляет, не наоборот (layer-render LR-001)"
+
+[[boundaries]]
+from   = "Services/dataset_gen/*"
+to     = "Services/line_sim/*"
+reason = "dataset_gen лежит ниже line_sim (общее ядро — layer_render); line_sim импортирует dataset_gen, не наоборот (layer-render LR-001)"
+
 # Plugins → не знают про конкретное приложение
 [[boundaries]]
 from   = "Plugins/*"

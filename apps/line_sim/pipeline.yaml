@@ -110,8 +110,9 @@ processes:
         # Кадр — 176 мм (1440/8.163265); остальное — зона робота после кадра, при
         # job_ms 1000 (контракт §4.3).
         scene_length_mm: 600
-        # Task 3.6: фон — любая картинка, прокручивается с энкодером (сплошной серый, пока ключ
-        # закомментирован). Тайл из фото ленты сверху:
+        # layer-render 1.3: фон — стек слоёв снизу вверх, тайл прокручивается с энкодером
+        # (единственный способ задать фон; без ключа — сплошной серый). Цвета solid — RGB.
+        # Тайл из фото ленты сверху:
         #   python -m Services.line_sim.tools.make_seamless_texture фото.jpg \
         #       --out data/line_sim/belt_tile.png --scene-px-per-mm 8.163265 --pitch-mm <шаг звена, мм>
         # --scene-px-per-mm обязан совпадать с px_per_mm выше. Путь от корня репозитория.
@@ -121,7 +122,11 @@ processes:
         #   python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png \
         #       --out data/line_sim/belt_tile.png --force-period
         # Без --force-period фото цепи уходит в зеркало (неровный свет, см. README инструмента).
-        background_texture: data/line_sim/belt_tile.png
+        # Тайл belt_tile.png собирается с `--gap-alpha` (щели между звеньями — альфа), поэтому
+        # под ним чёрный слой, а не серый фон плагина.
+        background_layers:
+          - solid: [0, 0, 0]
+          - tile: data/line_sim/belt_tile.png
         defect_probability: 0.25
         stale_ms: 500
         # Меньше половины шага 164 мм (контракт §4.3) — отставание тракта зрения

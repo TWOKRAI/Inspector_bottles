@@ -48,15 +48,6 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 Паспорта объектов публикуются в общий мир (``sim.objects``) ТОЛЬКО когда меняется
 МНОЖЕСТВО активных ``object_id`` (спавн/деспавн) — позиция в мир не пишется,
 её считает потребитель из энкодера и ``passport.spawn_encoder`` (LS-009).
-
-**Task 3.6 — фон-текстура ленты.** Ключ конфига ``background_texture`` (путь,
-относительный — от корня репозитория, тем же ``_resolve_preset_path``, что и
-``preset_path``) читается через ``imread_unicode``/BGR->RGB и передаётся в
-``SceneCompositor`` как ``background_tile``. Файл не читается (нет файла, битые байты)
-— ровно один ``ctx.log_error`` в ``configure()``, движок остаётся живым на сплошном
-фоне (``background_bgr``); из ``produce()`` по этой причине ошибок нет. Ветка «движок
-недоступен» (``_background_only_frame``) текстуру не использует — это отдельный,
-более редкий отказ (каталог классов недоступен), out of scope для 3.6.
 """
 
 from __future__ import annotations
@@ -288,17 +279,19 @@ class SceneSourcePlugin(ProcessModulePlugin):
         for level_name in _TRUTH_LEVELS:
             ctx.declare_metric(level_name)
 
-        # Task 3.6: фон-текстура строится ДО try-блока сборки движка — нечитаемый файл
-        # не должен ронять движок целиком (он остаётся живым на сплошном фоне).
-        background_texture = cfg.get("background_texture")
+        # layer-render 1.3: одиночная фон-текстура удалена — один способ задать фон (LR-002).
+        # Любое значение ключа (в т.ч. None) — ошибка схемы, выходит из configure() до сборки движка.
+        if "background_texture" in cfg:
+            raise ValueError(
+                "scene_source: ключ background_texture удалён (layer-render 1.3) — "
+                "задайте фон через background_layers: [{solid: [R, G, B]}, {tile: <путь>}]"
+            )
         # layer-render 1.1: стек слоёв `background_layers` — ошибка схемы выходит из configure()
-        # (вне try/except сборки движка и до чтения текстуры); нечитаемый тайл слоя — один log_error, слой выброшен.
+        # (вне try/except сборки движка); нечитаемый тайл слоя — один log_error, слой выброшен.
         background_items = cfg.get("background_layers")
         background_layers: list[SolidFill | ScrollingTile] | None = None
         layer_tile_info: list[str | None] = []  # по одному на вызов загрузки (порядок tile в конфиге)
         if background_items is not None:
-            if background_texture is not None:
-                raise ValueError("scene_source: background_layers и background_texture взаимоисключающи")
 
             def load_layer_image(path: str) -> np.ndarray | None:
                 image = self._load_layer_image(ctx, path)
@@ -310,7 +303,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 return image
 
             background_layers = background_layers_from_config(background_items, load_layer_image)
-        background_tile = self._load_background_tile(ctx, background_texture)
 
         # Task 1.2a: команды пресета. Свой лок (НЕ self._lock мира, НЕ self._truth_lock) —
         # сериализует только commit'ы между собой (сравнение rev + запись файла).
@@ -341,7 +333,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 px_per_mm=px_per_mm,
                 belt_y_px=belt_y_px,
                 background_bgr=_BACKGROUND_BGR,
-                background_tile=background_tile,
                 background_layers=background_layers,
                 belt_direction=belt_direction,
                 entry_x_px=entry_x_px,
@@ -362,9 +353,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 elif (info := next(tile_infos)) is not None:
                     parts.append(info)
             background_desc = f"слои[{', '.join(parts)}]"
-        elif background_tile is not None:
-            tile_h, tile_w = background_tile.shape[:2]
-            background_desc = f"текстура ({background_texture}, {tile_w}x{tile_h})"
         else:
             background_desc = f"цвет {_BACKGROUND_BGR}"
 
@@ -378,26 +366,6 @@ class SceneSourcePlugin(ProcessModulePlugin):
     def _resolve_preset_path(preset_path: str | None) -> str | None:
         """Тонкий делегат `Services.line_sim.core.resolve_repo_path` (тесты зовут это имя)."""
         return resolve_repo_path(preset_path)
-
-    def _load_background_tile(self, ctx: PluginContext, texture_path: str | None) -> np.ndarray | None:
-        """Загрузить фон-текстуру (Task 3.6): `None` -> `None`; путь резолвится от
-        корня репозитория тем же `_resolve_preset_path`, что и `preset_path`. ЛЮБАЯ
-        причина нечитаемости (нет файла — `OSError` из `np.fromfile`, битые байты —
-        `ValueError` из `imread_unicode`) даёт ровно один `ctx.log_error` и откат на
-        `None` (сплошной фон) — этот метод НЕ внутри try/except сборки движка, сбой
-        текстуры не должен глушить остальную сборку."""
-        if texture_path is None:
-            return None
-        resolved = self._resolve_preset_path(texture_path)
-        try:
-            bgr = imread_unicode(resolved, cv2.IMREAD_COLOR)
-            return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — откат на цвет, не падение
-            ctx.log_error(
-                f"scene_source: фон-текстура недоступна (background_texture={resolved!r}): {exc!r} — "
-                "используется сплошной фон"
-            )
-            return None
 
     def _load_layer_image(self, ctx: PluginContext, tile_path: str) -> np.ndarray | None:
         """Загрузить картинку слоя `tile` (layer-render 1.1): RGB или RGBA uint8. Путь резолвится от

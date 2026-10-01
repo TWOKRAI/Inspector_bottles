@@ -429,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         f"method={result.method} period_px={period_token} seam_diff={result.seam_diff:.4f} "
         f"inner_diff={result.inner_diff:.4f} scale={scale:.4f} size={tile_w}x{tile_h}{gap_info}{source}{reason}"
     )
-    print(f"background_texture: {args.out}")
+    print(f"background_layers: [{{solid: [0, 0, 0]}}, {{tile: {args.out}}}]")
     return 0
 
 
