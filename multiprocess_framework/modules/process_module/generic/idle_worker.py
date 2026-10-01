@@ -110,6 +110,8 @@ class IdleWorker:
 
     def _run_once(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """Один цикл: работа + smart-sleep + запись тайминга."""
+        # B-1 (main d19e09d0): часы темпа — perf_counter, НЕ monotonic. На Windows monotonic =
+        # GetTickCount64 с шагом 15.6 мс: 33.3 мс округлялись до трёх тиков → 21 fps вместо 30.
         t_start = time.perf_counter()
 
         # Ф7 G.8: busy на время кадра — drain дожидается его завершения перед stop.

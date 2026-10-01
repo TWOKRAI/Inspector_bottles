@@ -124,6 +124,8 @@ class SourceProducer:
                 time.sleep(0.05)
                 continue
 
+            # B-1 (main d19e09d0): часы темпа — perf_counter, НЕ monotonic. На Windows monotonic =
+            # GetTickCount64 с шагом 15.6 мс: 33.3 мс округлялись до трёх тиков → 21 fps вместо 30.
             t_start = time.perf_counter()
 
             # Снимок кумулятивного счётчика ошибок ДО produce() — чтобы отличить

@@ -26,6 +26,8 @@ import threading
 import time
 from typing import Callable, Iterable
 
+from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY
+
 
 class JoinInspectorManager:
     """Корреляция именованных входов (по data_type) по ключу (camera_id, seq_id).
@@ -92,7 +94,9 @@ class JoinInspectorManager:
 
     def _merge(self, by_type: dict[str, dict]) -> dict:
         """Слить items по data_type в один. primary первым (его скаляры приоритетны);
-        list-ключи (overlay) конкатенируются по всем входам.
+        list-ключи (overlay) конкатенируются по всем входам. ``_shm_views`` — всегда list-ключ
+        (4.7a P-1): билеты view ВСЕХ входов склеиваются в порядке слияния (primary первым), иначе
+        дверь отправки проверяла бы только первый вход, а перезапись второго осталась бы незамеченной.
         """
         order = [self._primary] + [dt for dt in by_type if dt != self._primary]
         merged: dict = {}
@@ -101,7 +105,8 @@ class JoinInspectorManager:
             if item is None:
                 continue
             for k, v in item.items():
-                if k in self._list_keys and isinstance(v, list):
+                if (k == SHM_VIEWS_KEY or k in self._list_keys) and isinstance(v, list):
+                    # новый список на каждом слиянии: список входа не расширяем in-place
                     prev = merged.get(k)
                     merged[k] = (prev if isinstance(prev, list) else []) + v
                 elif k not in merged:

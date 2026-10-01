@@ -47,7 +47,32 @@
   `_inputs_still_valid`, только если в двери скопировано что-то с `not flags.owndata`; тест F2a.
   Репро: scratchpad сессии `77e53bb3…/rev44b/r2.py`, `r2j.py`.
 
-**Acceptance:**
+#### Перемер стенда после T1 (2026-09-30)
+
+`a0457ee8`, `seed_stand45.py T1r1/T1r2 1080 100 30`, два прогона. База «до T1» — замер B 4.5 (`dadd9918`, один прогон, цепочка без детекций):
+
+| Поле | До T1 | После T1 (r1 / r2) |
+|---|---|---|
+| processor Гц | 54–58 | 54.8 / 51.2 |
+| processor `color_mask` + `blob_detector`, мс | 8.4 + 6.7 = 15.1 | 11.5 + 1.9 = 13.4 / 11.8 + 1.8 = 13.6 |
+| processor `queue_wait_ms` | 1110 | 1098 / 1102 |
+| processor `transport_ms` (приём data) | — | 26.6 / 27.0 |
+| processor stale / torn за 30 с | 821 / 1247 | 838 / 1065 · 797 / 967 |
+| renderer `render_overlay`, мс | 11.6 | **38.9 / 39.5** |
+| renderer Гц / `queue_wait_ms` | — | **21.3 / 3053** · 20.4 / 3119 |
+| renderer stale / torn | — | 1231 / 313 · 1185 / 313 |
+| camera `pacer_late` за прогон | 42 | **456 / 497** |
+| ядра всего (снаружи, 16 логических) | — | 4.62 / 4.81 |
+
+Выводы для 4.7/4.8: (1) T1 не сдвинула узкое место processor — очередь по-прежнему ~1.1 с, stale + torn
+≈ 1800–1900 за 30 с, то есть проблема 4.7 не в стоимости цепочки. (2) Цепочка на стенде 13.4 мс, а у
+`bench_t1` 4.1–4.7 мс: `color_mask` в живом процессе 11.5 мс против 8.4 до T1. Причина не найдена (кандидаты:
+`cv_threads`, соседние процессы на тех же ядрах, другой вход после T1). (3) **Новое узкое место — renderer:**
+теперь есть что рисовать, `render_overlay` 11.6 → 39 мс, 21 Гц, очередь 3 с. `overflow: latest` (п. 7)
+для renderer обязателен, иначе он копит секунды. (4) `pacer_late` камеры вырос ×11 — не разбирал,
+для 4.8. Сырые `s45_T1r*.json` лежат в `%TEMP%` (временные).
+
+#### Acceptance
 - [ ] В реестре нет `FW_SHM_OWNER_INCARNATION`, `FW_SHM_HANDLE_CACHE`, `FW_SHM_ZERO_COPY`,
       `FW_SHM_SEQLOCK`; `grep FW_SHM_` вне реестра, тестов и истории — только `LOAN_PROTOCOL` и
       `PREFIX_CLEANUP`.
@@ -68,3 +93,122 @@
 
 **Out of scope (шаги 3–5 вердикта, отдельно):** B-7 per-target; `render_overlay` ROI; `color_mask`
 без потребителя; финальная приёмка 4.3 (480p/1080p × 60/100).
+
+#### Разбиение на подзадачи (2026-10-01, разведка по `e6976f8b`)
+
+Сверка спеки с кодом: `FW_SHM_SEQLOCK` уже удалён из реестра в 4.4, в коде его имя осталось только в
+docstring'ах. `blob_detector` после T1 уже копирует кадр перед рисованием (`plugin.py:135-145`), от
+пункта 3 остаётся тест на read-only вход. `bseq` в pipeline нет: он есть только в мосте GUI. Ключа
+`overflow` нет нигде. Data-очередь сейчас у всех 50 (`DEFAULT_QUEUES`). Блюпринт `queues` не задаёт.
+Оба сборщика (`assembler.py:139`, `app_module/builder.py:253`) идут через
+`TopologyBlueprint.build_configs()`, туда и кладётся вывод размеров.
+
+Ориентир владельца (2026-10-01): система универсальная и производительная по всем узлам. Отсюда одно
+правило для всех узлов без исключений по типу процесса: бюджет в полёте (4.7c) выводится для любого
+процесса за любым писателем кольца (generic или wire), а не только за generic.
+
+Порядок: 4.7a → 4.7b → 4.7c → 4.7d. Код пишет Sonnet (`developer`), ревью — Opus. Слепой tester
+запускается на каждую подзадачу до кода, в worktree на коммите этого раздела.
+
+##### 4.7a — Предусловия P-1, P-2
+**Files:** `Plugins/_shared/fanin/join_inspector_manager.py`,
+`multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py` (`strip_and_write`).
+**Acceptance:**
+- [ ] join двух входов, у каждого `_shm_views` (список ссылок): у склеенного item'а `_shm_views` =
+      конкатенация обоих (первичный вход первым), независимо от `_list_keys` в конфиге.
+- [ ] `_shm_views` только у вторичного входа → есть в склеенном item'е.
+- [ ] Дверь: вход-view устарел (поколение слота сменилось) к моменту отправки, а выход не несёт ни
+      одного массива с `flags.owndata == False` (dict без массивов; массивы-копии) → сообщение уходит,
+      stale-счётчики не растут.
+- [ ] Дверь: выход несёт массив без `owndata` (view или срез входа), вход устарел → дроп, как сейчас.
+
+##### 4.7b — Один режим shm: имена, кэш handles, zero-copy, флаги
+**Files:** `config_module/feature_flags.py`, `shared_resources_module/memory/platform/shm.py`,
+`shared_resources_module/memory/core/manager.py`, `shared_resources_module/memory/reader/shm_frame_reader.py`,
+`router_module/middleware/frame_shm_middleware.py`, `frontend_module/bridge/remote_frame_source.py`,
+`multiprocess_prototype/frontend/bridge_process.py`, рецепты и `backend_ctl/probes` с env-строками флагов.
+**Acceptance:**
+- [ ] В реестре нет `FW_SHM_OWNER_INCARNATION`, `FW_SHM_HANDLE_CACHE`, `FW_SHM_ZERO_COPY`.
+      `FW_SHM_LOAN_PROTOCOL` остаётся выключенным, с пометкой FROZEN (п. 6), и в его `requires` нет удалённых
+      флагов. `grep FW_SHM_` в `*.py`/`*.yaml` вне реестра и тестов находит только `LOAN_PROTOCOL` и
+      `PREFIX_CLEANUP`.
+- [ ] Имя сегмента без env: два владельца с ключом `mask` дают разные имена. Это проверяется для
+      Windows-ветки и для POSIX-ветки (платформа подменяется в тесте). В имени есть владелец, pid и
+      инкарнация. Повторное создание тем же владельцем даёт новое имя.
+- [ ] Кэш reader'а без env и без кэпа 8. Ключ — `(owner, slot, idx)` из ссылки. 100 realloc писателя
+      подряд: открытых handles у читателя ≤ глубина × ключи. Без живых view `close_errors` не растёт.
+- [ ] Handle с живым view при отставке не закрывается и не роняет чтение. Он закрывается на следующей
+      отставке или на teardown после освобождения view. Отложенные закрытия видны счётчиком.
+- [ ] Читатель-пайплайн (`restore_frame` с `allow_view=True`) без env получает view только для чтения
+      (`flags.writeable == False`). Copy-out (`on_receive`, GUI, мост) получает копию с проверкой `gen`.
+- [ ] `blob_detector(draw_contours=True)` на read-only входе работает, вход не меняется.
+
+##### 4.7c — Глубина кольца и размер очереди из рецепта
+**Files:** `router_module/middleware/frame_shm_middleware.py` (`_resolve_ring_depth`),
+`process_module/generic/{generic_process.py,generic_process_config.py}`, `process_module/commands/builtin_commands.py`
+(wire `buffer_slots`), `frontend_module/bridge/wire_protocol.py`, `process_manager_module/topology/blueprint.py`,
+новый `process_manager_module/topology/inflight.py`.
+**Контракт:** `inflight_budget(writer_depths, *, queue=None, lag=None, process="?") -> tuple[int, int]`
+возвращает `(data_queue_maxsize, chain_max_lag_items)`. D = min(writer_depths), бюджет B = D − 2.
+По умолчанию lag = 2, queue = B − lag. Явный `queue` или `lag` из рецепта с queue + lag > B →
+`ValueError` с текстом `очередь <queue> больше кольца <D>` и именем процесса. Если D < 4, то
+`ValueError`: на очередь ≥ 1 и lag ≥ 1 места нет, а lag 0 в `DataReceiver` означает «без границы».
+Ключи рецепта процесса — `data_queue_maxsize` (новый) и `chain_max_lag_items` (есть).
+**Acceptance:**
+- [ ] Без env и без настройки глубина кольца generic-писателя 8, wire `buffer_slots` 8. Гейта
+      `FW_QOS_PROFILES` на глубину нет.
+- [ ] Процесс за писателем кольца (generic или wire) после `build_configs()` получает data-очередь 4 и
+      `chain_max_lag_items` 2.
+- [ ] `frame_ring_depth: 12` у писателя даёт очередь 8 и lag 2. Два писателя с глубинами 8 и 12 дают
+      очередь 4.
+- [ ] Явная `data_queue_maxsize: 20` при глубине 8 → ошибка сборки: «очередь 20 больше кольца 8».
+- [ ] Процесс без входа от generic-писателя сохраняет прежнюю data-очередь 50.
+
+##### 4.7e — Несколько камер (указание владельца 2026-10-01)
+Камер может быть больше одной. Они не должны конфликтовать и должны работать максимально эффективно.
+Сквозной критерий для 4.7b–d, отдельного кода не требует.
+- [ ] Две камеры с одинаковыми ключами (`frame`, `mask`) получают непересекающиеся сегменты. Для
+      длинных имён уникальность держится на хеше полного имени (`_bounded_name`), а владелец и pid
+      читаются в имени, только если укладываются в лимит.
+- [ ] Узел за несколькими камерами (join, inspector) получает бюджет в полёте по минимальной глубине их
+      колец (`inflight_budget([8, 12]) == (4, 2)`). Кэш handles у такого узла ограничен суммой
+      «глубина × ключи» по камерам.
+- [ ] **Живьём (лид):** двухкамерный рецепт (`dualcam_synth`) 30 с: чужих кадров 0 у обеих камер,
+      `pacer_late` и stale+torn по каждой камере в отчёте, A/B к базе в одном окне замка.
+- [ ] Вывод бюджета и глубины берётся из рецепта каждого процесса. Глобальной константы «на систему»
+      нет: третья камера с `frame_ring_depth: 12` не меняет бюджет узлов за первыми двумя.
+
+##### 4.7d — Правило переполнения `overflow: latest | every` (п. 7)
+Отложена до 4.7c. Первым шагом решается открытый вопрос п. 7: где рождается маркер `not_inspected`.
+Мест дропа четыре: вытеснение в IPC-очереди у писателя, `_bound_lag` в приёмнике, stale/torn при
+восстановлении, дверь. Метаданные кадра есть только в месте дропа, а разрыв последовательности их не
+знает, и `bseq` в pipeline нет. Решение — за владельцем или CTO, до спеки 4.7d.
+
+#### Статус на 2026-10-01 (пауза по просьбе владельца)
+
+| Часть | Итог |
+|---|---|
+| 4.7a | Слита в ветку. Слепой tester `0d1b4f8a`, developer `8b3f2c1d`, ревью Opus — APPROVE_WITH_NITS, итерация 1 `9fc01550` (своя память плагина по корню `.base`, ключ `SHM_VIEWS_KEY` импортом). Инъекции лида 7/7 пойманы. Итерация 1 повторным ревью не смотрелась |
+| 4.7b | Только слепые RED-тесты (`efd8d3df`), в ветке они стоят как `xfail(strict=True)`. Реализации нет |
+| 4.7c | Реализация `a8ffdf54` на `feat/t47c-impl`, **в ветку не слита**. Ревью — REQUEST_CHANGES, вердикт CTO — переделать. RED-тесты стоят как `xfail(strict=True)` |
+| 4.7d | Место маркера решено вердиктом CTO (ниже). Спеки нет |
+
+**Вердикт CTO (`docs/reviews/2026-10-01_task-4.7-cto-verdict.md`) заменяет п. 5 дизайна и acceptance «очередь 4».**
+Бюджет в полёте считает **кадры**, а не сообщения. Сигналы и решения бюджет не вытесняет: ревью
+воспроизвело потерю кнопки `pult → points` при очереди 4 и lag 2. Условия:
+- **C1.** Bound в `DataReceiver` считает только коллекции с `_shm_views`/`frame`. Удаление выборочное,
+  под `chain_queue.mutex`.
+- **C2.** IPC data-очередь остаётся memory cap 50. `data_queue_maxsize` из топологии не выводится:
+  писатель не может отличить кадр от сигнала, `get_nowait` на чужой `mp.Queue`.
+- **C3.** `inflight_budget` остаётся (D − 2, lag 2). Глубина IPC-очереди измеряется (gauge +
+  `transit_over_budget`), а не навязывается.
+- **C4.** Проверка поколения view идёт ДО цепочки, а не только после.
+- **Провод.** Для провода глубина берётся у кольца процесса-источника (находка ревью C-1).
+
+Маркер `not_inspected` (4.7d) рождается там, где на руках метаданные кадра: bound приёмника, stale на
+`restore_frame`, stale/torn в `_run_batch`, дверь (к своим `chain_targets`). У писателя только
+счётчик `data_evicted`. Acceptance 4.7d: `lag_dropped + stale@restore + stale/torn@exec +
+door_drops = маркеры`. `data_evicted` считается отдельно и под `every` на стенде равен 0.
+
+**Следующие шаги:** переделка 4.7c по C1–C4 и проводу (developer, ветка `feat/t47c-impl` как
+основа) → 4.7b → 4.7d → живой A/B (≥ 3 прогона на сторону, `dualcam_synth` по 4.7e).

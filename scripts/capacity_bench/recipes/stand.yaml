@@ -1,0 +1,204 @@
+# ЗАКРЕПЛЁННАЯ копия multiprocess_prototype/backend/topology/inspection_full.yaml для бенча ёмкости
+# (scripts/capacity_bench, Task 4.8a). Бенч меняет только разрешение камеры и source_target_fps
+# (recipe.render_recipe). Не править вслед за исходным рецептом: замеры между машинами и
+# коммитами сопоставимы, только пока стенд один и тот же. Обновлять осознанно, отдельным коммитом.
+
+# inspection_full — Полная инспекция с отбраковкой и записью в БД
+#
+# Pipeline:
+#   camera_0   — CameraServicePlugin (simulator) → BGR-кадры @ 25 fps
+#   processor  — ColorMaskPlugin (красные объекты) + BlobDetectorPlugin
+#   renderer   — RenderOverlayPlugin (красный overlay + bbox)
+#   inspector  — RobotControlPlugin (reject/pass по площади дефекта)
+#   storage    — DatabasePlugin (batch INSERT в SQLite)
+#   gui        — отображение результата
+#
+# Запуск:
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/inspection_full.yaml
+
+name: inspection_full
+description: "Полная инспекция: камера → маска → детекция → overlay → отбраковка → БД → GUI"
+
+processes:
+  # Презентация: объявляется ЗДЕСЬ, в headless-воплощении. presentation-overlay
+  # подменяет класс на Qt-шный (frontend/presentation.yaml). Адрес, который никто
+  # не объявил, отвергается сборкой — см. SystemBlueprint._unaddressable_chain_targets.
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+    plugins: []
+
+  # --- Камера: захват кадров через simulator backend ---
+  - process_name: camera_0
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: high
+    chain_targets:
+      - processor
+    source_target_fps: 25
+    plugins:
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
+        plugin_name: camera_service
+        category: source
+        camera_type: simulator
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        auto_start: true
+
+  # --- Процессор: детекция красных объектов (дефектов) ---
+  - process_name: processor
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    # Детектор — общий исток двух дорог: показа (renderer) и решения (inspector).
+    # До 2026-08-09 маршрута processor→inspector не было вовсе, хотя провод
+    # `blob_detector.detections → robot_control.detections` объявлен: коллекция у
+    # инспектора не собиралась, и RobotControlPlugin.process не вызывался ни разу
+    # (живой прогон: total_inspected=0 при 1772 принятых сообщениях, молча).
+    chain_targets:
+      - renderer
+      - inspector
+    plugins:
+      # Шаг 1: HSV-маска красного диапазона (H: 0-30, насыщенный цвет)
+      - plugin_class: Plugins.processing.color_mask.plugin.ColorMaskPlugin
+        plugin_name: color_mask
+        category: processing
+        h_min: 0
+        h_max: 30
+        s_min: 100
+        s_max: 255
+        v_min: 100
+        v_max: 255
+      # Шаг 2: Детекция контуров — красные контуры, фильтр по площади
+      - plugin_class: Plugins.processing.blob_detector.plugin.BlobDetectorPlugin
+        plugin_name: blob_detector
+        category: processing
+        min_area: 200
+        max_area: 50000
+        # Контуры не рисуем: детекции рисует render_overlay (draw_detections), а рисование
+        # здесь стоит копии кадра 1080p (~1 мс) — цепочка выходила за 5 мс (ревью T1).
+        draw_contours: false
+        contour_color_bgr: [0, 0, 255]
+
+  # --- Рендерер: красный overlay + bounding boxes ---
+  - process_name: renderer
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    # Показ, а не решение: отрисованный кадр уходит на дисплей, а отбраковку
+    # считает inspector напрямую от детектора (см. wires ниже).
+    chain_targets:
+      - gui
+    plugins:
+      - plugin_class: Plugins.render.render_overlay.plugin.RenderOverlayPlugin
+        plugin_name: render_overlay
+        category: processing
+        mask_alpha: 0.4
+        mask_color_b: 0
+        mask_color_g: 0
+        mask_color_r: 255
+        draw_detections: true
+
+  # --- Инспектор: принятие решения reject/pass по размеру дефекта ---
+  - process_name: inspector
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    chain_targets:
+      - storage
+      - gui
+    plugins:
+      - plugin_class: Plugins.control.robot_control.plugin.RobotControlPlugin
+        plugin_name: robot_control
+        category: processing
+        enabled: true
+        min_defect_area: 500
+
+  # --- Хранилище: batch-запись результатов в SQLite ---
+  - process_name: storage
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: low
+    plugins:
+      - plugin_class: Plugins.io.database.plugin.DatabasePlugin
+        plugin_name: database
+        category: output
+        db_path: "data/inspection_results.db"
+        batch_size: 50
+        flush_interval_sec: 1.0
+
+
+# --- Наблюдаемость рецепта (слой L2) ---
+#
+# Ф5 (задача 5.1): кольцо ЗАПИСЕЙ на инспекторе — том процессе, который выносит
+# вердикт и зовёт `ctx.flight_dump` на фронте pass→reject.
+#
+# ЛОВУШКА, названная явно (Р5.1-7, класс дефекта задачи 2.1): без `type: memory`
+# общий цикл секции `channels` строит ФАЙЛОВЫЙ приёмник под тем же именем
+# (дефолт `LoggerChannelSchema.type == "file"`), и снаружи разница не видна —
+# канал есть, `flight.sink` на него указывает, а `tail()` у файла отсутствует.
+# Дамп в этом случае отвечает «приёмник записей не хранит», и лечится это здесь,
+# а не в коде.
+#
+# Маршрут обязателен ровно так же: объявленный и не смаршрутизированный канал
+# поднят и вечно пуст. Наборы каналов SYSTEM/BUSINESS переписаны ЦЕЛИКОМ (ось
+# `channels` — замещающая, а не аддитивная), поэтому дефолтные приёмники
+# перечислены рядом с кольцом: пропусти их — и записи инспектора исчезли бы из
+# system.log/messages.log, а тест «дамп непустой» остался бы зелёным.
+#
+# `enabled: true` — на этом стенде дамп нужен; дефолт механизма — выключен.
+observability:
+  processes:
+    inspector:
+      channels:
+        flight_ring:
+          type: memory
+          capacity: 500
+      scopes:
+        SYSTEM:
+          channels: [console, system_file, flight_ring]
+        BUSINESS:
+          # Task 3.2 (Р-7(а)): `system_file` УБРАН из BUSINESS. Ось `channels`
+          # замещающая, поэтому дефолт фреймворка сюда не доезжает: пока он
+          # стоял здесь, `messages.log` инспектора оставался подмножеством его
+          # `system.log` — ровно тот дубль, ради снятия которого решение и
+          # принималось. Не возвращать: это не «потерянный дефолтный приёмник».
+          channels: [messages_file, flight_ring]
+      flight:
+        enabled: true
+        sink: flight_ring
+        keep: 5
+
+# Port-level разводка (обязательна для валидации SystemBlueprint.check()).
+# Раньше топология полагалась только на chain_targets (процесс-уровень) и НЕ проходила
+# валидацию портов — была незапускаемой. Восстановлено по фактическим портам плагинов.
+wires:
+  # Камера → детекция. color_mask кладёт mask(gray) в item внутри процесса processor,
+  # blob_detector берёт её оттуда (связь внутри процесса, на графе провода нет).
+  # Собственные HSV-пороги blob_detector (слайдеры, set_color_range) действуют,
+  # только когда маска не пришла. Кадр blob_detector получает напрямую с камеры.
+  - source: camera_0.camera_service.frame
+    target: processor.color_mask.frame
+  - source: camera_0.camera_service.frame
+    target: processor.blob_detector.frame
+  # Детекция → overlay (кадр + маска + детекции)
+  - source: processor.blob_detector.frame
+    target: renderer.render_overlay.frame
+  - source: processor.blob_detector.mask
+    target: renderer.render_overlay.mask
+  - source: processor.blob_detector.detections
+    target: renderer.render_overlay.detections
+  # Детектор → инспектор: ОБА входа от одного отправителя, в одном item.
+  # Раньше кадр приходил от renderer, а детекции от processor — коллекция из двух
+  # разных отправителей у инспектора не собиралась, и плагин не вызывался ни разу
+  # (живой прогон 2026-08-09: total_inspected=0 при 1772 принятых сообщениях,
+  # молча). Overlay остаётся дорогой ПОКАЗА, а не дорогой решения.
+  - source: processor.blob_detector.frame
+    target: inspector.robot_control.frame
+  - source: processor.blob_detector.detections
+    target: inspector.robot_control.detections
+  # Инспектор → БД (результат инспекции, dict)
+  - source: inspector.robot_control.inspection_result
+    target: storage.database.result
+
+# Отображение результата на gui-дисплее (как в рецепте color_inspect).
+displays:
+  - node_id: renderer.render_overlay.rendered_frame
+    display_id: main
+    display_name: Результат инспекции

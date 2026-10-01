@@ -1080,16 +1080,36 @@ class FrameShmMiddleware:
         return entries
 
     @staticmethod
-    def _copy_inline_views(item: dict) -> None:
-        """Заменить копиями ndarray верхнего уровня item'а с ``not flags.owndata`` (4.4d): после записи
-        в кольца в item остаются только inline-значения, а те из них, что смотрят в память чужого слота
-        (срез view), роутер сериализует после двери. Вложенные структуры не трогаются (см. остаток в
-        ``strip_and_write``)."""
+    def _views_foreign_memory(arr: Any) -> bool:
+        """Смотрит ли ndarray в память НЕ numpy-владельца (4.7a, ревью A-1): корень цепочки ``.base`` —
+        не ``ndarray`` (буфер SHM-слота: memoryview/mmap). Свои view плагина (reshape, срез копии,
+        ``[..., None]``, малый срез собственного массива) приходят к ndarray-корню с ``owndata`` и
+        от перезаписи слота входа не зависят; ``flags.owndata`` их путал бы с чужими срезами."""
         from numpy import ndarray
 
+        root = arr
+        while isinstance(root, ndarray) and root.base is not None:
+            root = root.base
+        return not isinstance(root, ndarray)
+
+    @classmethod
+    def _copy_inline_views(cls, item: dict) -> bool:
+        """Заменить копиями ndarray верхнего уровня item'а, смотрящие в ЧУЖУЮ память (4.4d, 4.7a):
+        после записи в кольца в item остаются только inline-значения, а те из них, что смотрят в память
+        чужого слота (срез view), роутер сериализует после двери. Свои view плагина не копируются.
+        Вложенные структуры не трогаются (см. остаток в ``strip_and_write``).
+
+        Returns:
+            True, если скопирован хотя бы один массив (4.7a: дверь трогала чужую память -> входы надо
+            перепроверить)."""
+        from numpy import ndarray
+
+        copied = False
         for key, value in list(item.items()):
-            if isinstance(value, ndarray) and not value.flags.owndata:
+            if isinstance(value, ndarray) and cls._views_foreign_memory(value):
                 item[key] = value.copy()
+                copied = True
+        return copied
 
     def strip_and_write(self, item: dict) -> dict:
         """Записать frame и крупные массивы в SHM, убрать из item, добавить shm_ref.
@@ -1104,11 +1124,15 @@ class FrameShmMiddleware:
 
         Дверь отправки (Task 4.4 / 4.4d). Если item несёт ``_shm_views`` (входы — zero-copy view на
         чужие слоты) и mm есть — ПОСЛЕ записи в кольца и ДО возврата: (1) каждый оставшийся в item
-        ndarray верхнего уровня с ``not flags.owndata`` (малый срез view, 1D/4D, не-native dtype,
+        ndarray верхнего уровня, смотрящий в чужую память (малый срез view, 1D/4D, не-native dtype,
         fallback-массив) заменяется копией — иначе он сериализуется роутером уже ПОСЛЕ двери, а слот
         источника за это время перезаписывается; (2) ``_inputs_still_valid`` — перезаписанный вход
-        помечает item ``_shm_dropped`` (дроп всех целей, один раз на item). Проверка идёт и в ветке
-        БЕЗ крупных массивов. Известный остаток: массивы во ВЛОЖЕННЫХ list/dict не копируются и
+        помечает item ``_shm_dropped`` (дроп всех целей, один раз на item). 4.7a: (2) выполняется
+        ТОЛЬКО если дверь реально трогала чужую память — в кольцо ушёл массив, смотрящий в чужой буфер
+        (``_views_foreign_memory``: корень ``.base`` не ndarray), или ``_copy_inline_views`` скопировал
+        хоть один такой inline-срез; выход из собственных массивов (в т.ч. их view) или вовсе без массивов
+        уходит без проверки входов — перезапись слота входа его не портит (ложный дроп 4.7a).
+        Известный остаток: массивы во ВЛОЖЕННЫХ list/dict не копируются и
         дверь их не защищает.
 
         Fan-out (F1, ревью 2026-07-13): producer переиспользует ОДИН item-dict для
@@ -1129,6 +1153,8 @@ class FrameShmMiddleware:
             return item
         entries = self._large_entries(item)
         has_views = bool(item.get(SHM_VIEWS_KEY))
+        # 4.7a: «чужая память» определяем ДО _write_item_arrays — он вынимает массивы из item.
+        touched_foreign = any(self._views_foreign_memory(arr) for _, arr in entries)
         if entries and self._mm is not None:
             self._write_item_arrays(item, entries)
             # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
@@ -1143,8 +1169,10 @@ class FrameShmMiddleware:
                 self._bump_frame_hops(item)
         if has_views and self._mm is not None:
             # copy-then-check (4.4d): сначала копии inline-срезов view, потом проверка входов.
-            self._copy_inline_views(item)
-            if not self._inputs_still_valid(item):
+            # 4.7a: проверка — только если в двери копировалась чужая память (чужой view в
+            # кольцо или inline-срез); выход-владелец данных от перезаписи слота входа не зависит.
+            touched_foreign = self._copy_inline_views(item) or touched_foreign
+            if touched_foreign and not self._inputs_still_valid(item):
                 item[SHM_DROPPED_KEY] = True
                 return item
         # Один хоп: унаследованные ссылки (owner != self) уже заменены своими, локальная мета
