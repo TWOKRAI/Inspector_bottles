@@ -31,8 +31,10 @@
 # === РОБОТ (долг интеграции) ===
 #   Угол готов в infer.ml_inference.predictions[0] (angle_deg + angle_valid) и в
 #   телеметрии last_angle_deg/last_angle_valid. Потребитель-робот ещё НЕ подключён:
-#   при wiring ОБЯЗАТЕЛЬНО проверять angle_valid (False = full-симметрия/нет детекции
-#   → НЕ доворачивать). См. контракт в Services/ml_inference/plugin/registers.py.
+#   при wiring ОБЯЗАТЕЛЬНО проверять `last_angle_valid` И `last_below_threshold == False`
+#   (angle_valid=False = full-симметрия/нет детекции → НЕ доворачивать; угол считается и ниже
+#   порога, там below_threshold=True → диск не брать). См. контракт в
+#   Services/ml_inference/plugin/registers.py.
 #
 # === SMOKE: вебкамера (capture). Для прода заменить capture на Hikvision-источник. ===
 # Запуск: python multiprocess_prototype/run.py letter_angle_inspect

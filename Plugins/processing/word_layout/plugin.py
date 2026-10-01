@@ -46,7 +46,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
             name="predictions",
             dtype="list[dict]",
             shape="N",
-            description="Топ-K от ml_inference: label, confidence, angle_deg, angle_valid",
+            description="Топ-K от ml_inference: label, confidence, angle_deg, angle_valid, below_threshold",
         ),
         Port(name="word", dtype="any", optional=True, description="Целевое слово (строка/dict); иначе register"),
         Port(name="trigger", dtype="any", optional=True, description="Сигнал «взять диск» (если use_trigger)"),
@@ -361,7 +361,10 @@ class WordLayoutPlugin(ProcessModulePlugin):
         top = preds[0]
         if not isinstance(top, dict) or not top.get("label"):
             return None
-        if float(top.get("confidence", 1.0)) < float(self._reg.min_confidence):
+        if top.get("below_threshold"):  # ml_inference: ниже СВОЕГО порога — робот диск не берёт
+            return None
+        # not (>=), а не `<`: NaN-уверенность не должна проходить как «уверенная»
+        if not (float(top.get("confidence", 1.0)) >= float(self._reg.min_confidence)):
             return None
         return {
             "label": str(top["label"]),
