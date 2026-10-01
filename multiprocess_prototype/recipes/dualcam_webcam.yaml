@@ -3,7 +3,7 @@
 # Идея владельца (Ф7 G.7 Фаза 3): смешанный мультикамерный tier — camera_0 это
 # настоящая вебкамера (CapturePlugin, device_id=0), camera_1 — синтетическая
 # имитация второй камеры (SyntheticFrameSourcePlugin, camera_id=1). Оба владеют
-# СВОИМ SHM-кольцом; FW_SHM_OWNER_INCARNATION разводит имена сегментов владельцев
+# СВОИМ SHM-кольцом; имена сегментов владельцев разводятся всегда (owner+pid+инкарнация)
 # → кольца двух камер НЕ коллизируют. Отличие от dualcam_synth.yaml — только
 # плагин camera_0 (реальная камера вместо синтетики).
 #
@@ -12,8 +12,7 @@
 #   camera_1[synthetic, id=1]   -> consumer_1[frame_counter]
 #
 # Запуск (headless soak Фазы 3, полный набор флагов):
-#   BACKEND_CTL=1 FW_PERF_PROBES=1 FW_SHM_OWNER_INCARNATION=1 FW_SHM_SEQLOCK=1 \
-#   FW_SHM_HANDLE_CACHE=1 FW_QOS_PROFILES=1 FW_SHM_ZERO_COPY=1 FW_SHM_LOAN_PROTOCOL=1 \
+#   BACKEND_CTL=1 FW_PERF_PROBES=1 FW_QOS_PROFILES=1 FW_SHM_LOAN_PROTOCOL=1 \
 #   FW_DATA_PLANE_DICTS=1 FW_USE_KIND_CHANNELS=1 FW_GC_FREEZE=1 \
 #   python -m backend_ctl.probes.g7_dualcam_probe   (нужна подключённая камера на device_id=0)
 name: dualcam_webcam

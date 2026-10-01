@@ -58,7 +58,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         process_state_registry: Optional[Any] = None,
         logger: Optional[Any] = None,
         seqlock_frames: bool = True,
-        owner_incarnation: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
         BaseManager.__init__(self, manager_name=manager_name, process=process)
@@ -90,12 +89,10 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         # Ф7 G.3(b): формат слота seqlock (ADR-SRM-011). Стампуется на слот при
         # создании → write/read/size самосогласованы. torn — счётчик дропов гонки
         # (reader поймал перезапись под собой; наблюдаемость через get_stats).
-        # Task 4.4: seqlock ВСЕГДА (флаг FW_SHM_SEQLOCK удалён) — поколение слота и есть
+        # Task 4.4: seqlock ВСЕГДА (флага больше нет) — поколение слота и есть
         # идентичность кадра в ссылке. ``False`` оставлен только ради тестов старого формата.
         self._seqlock_frames: bool = bool(seqlock_frames)
-        # Ф7 G.3(b) / B-6/B-7: имя SHM с owner+incarnation (ADR-SRM-011) — stale-процесс
-        # не пишет в чужой сегмент, мультикамера без коллизий. Дефолт False = прежнее имя.
-        self._owner_incarnation: bool = self._resolve_env_flag(owner_incarnation, "FW_SHM_OWNER_INCARNATION")
+        # Task 4.7b: имя SHM ВСЕГДА с owner+pid+incarnation (ADR-SRM-011) — флага нет.
         self._stats = {
             "created": 0,
             "written": 0,
@@ -104,17 +101,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             "torn": 0,
             "seqlock_recovered": 0,
         }
-
-    @staticmethod
-    def _resolve_env_flag(explicit: Optional[bool], env_name: str) -> bool:
-        """Разрешить булев флаг Ф7 G.3 (ADR-SRM-011).
-
-        Приоритет: явный ctor-аргумент (не None) > env ``env_name`` (в т.ч.
-        явное ``=0``) > default. Default теперь берётся из реестра feature_flags.
-        """
-        from ....config_module.feature_flags import resolve
-
-        return resolve(env_name, explicit)
 
     def initialize(self) -> bool:
         try:
@@ -222,9 +208,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
             size = fmt.calculate_buffer_size(num_images, image_shape, dtype, seqlock=self._seqlock_frames)
-            shm_list = po.create_shm_blocks(
-                name, size, coll, owner=process_name, owner_incarnation=self._owner_incarnation
-            )
+            shm_list = po.create_shm_blocks(name, size, coll, owner=process_name)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
                 continue
@@ -251,9 +235,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
             size = fmt.calculate_buffer_size(num_images, image_shape, dtype, seqlock=self._seqlock_frames)
-            shm_list = po.create_shm_blocks(
-                name, size, coll, owner=process_name, owner_incarnation=self._owner_incarnation
-            )
+            shm_list = po.create_shm_blocks(name, size, coll, owner=process_name)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
                 continue
