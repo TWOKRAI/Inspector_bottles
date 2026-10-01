@@ -38,7 +38,25 @@ Graceful degradation: сервис импортируется без ML-библ
 - **Порог уверенности**, **Top-K**, **Инференс каждый N-й кадр**, **Рисовать результат**.
 
 Выходные порты: `frame` (кадр, опц. overlay) + `predictions` (`list[dict]`:
-`class_id`, `label`, `confidence`).
+`class_id`, `label`, `confidence`, `below_threshold`).
+
+### «Подпись всегда» и `below_threshold` (Task 0.3, letters-retrain)
+
+Плагин НЕ отсекает предсказания ниже порога: движок зовётся с `threshold=0.0`, `predictions`
+содержит 1..`top_k` элементов (топ-1 есть всегда, если модель отработала), у каждого
+`below_threshold = (confidence < confidence_threshold)` — строгое `<`, `confidence == порог`
+НЕ ниже. Угол считается для топ-1 и ниже порога. `InferenceEngine.predict` и
+`classify_postprocess` не менялись (`holdout_eval` по-прежнему получает отсечение по своему `threshold`).
+
+- Register `last_below_threshold` (readonly): флаг топ-1. `True` и при отсутствии предсказания
+  (ошибка инференса, смена модели) — fail-safe «не доверять»; `last_label`/`last_confidence` —
+  топ-1 всегда, и ниже порога.
+- Overlay ниже порога: оранжевый цвет и суффикс «<порог» (выше порога — зелёный, как раньше).
+- `inference_every_n > 1`: кэш помечается ТЕКУЩИМ порогом на каждом кадре — `set_threshold`
+  между инференсами действует сразу (флаг «as of now», не «as of inference»).
+- **Безопасность:** робот не действует ниже порога. `ml_inference` лишь помечает; страж на
+  стороне потребителя — `word_layout` отказывается от предсказания с `below_threshold=True`
+  (двойная проверка, см. его README). Новый потребитель `predictions` обязан проверять флаг.
 
 Команды (live): `set_model`, `set_threshold`, `reload_model`.
 

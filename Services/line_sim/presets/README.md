@@ -49,31 +49,47 @@ python -m Services.line_sim.tools.make_font_letters \
 Цвет краски пишется во все пиксели буквы, включая прозрачные (иначе при масштабе кромка темнеет).
 Зерно буквы зависит от набора букв и шрифтов запуска (один rng на запуск):
 
+Каталог `letters_ink` (А К Р Х), пересобран 2026-10-01 под геометрию реальных дисков (Task 0.2,
+`plans/letters-retrain/plan.md`). Запуск из корня worktree, по проходу на шрифт в одну **свежую**
+`--out`; `--letter-frac` калибруется по шрифту отдельно:
+
 ```bash
-python -m Services.line_sim.tools.make_font_letters \
-    --letters АК \
-    --font "$FONTS/DejaVuSans.ttf" \
-    --font "$FONTS/DejaVuSansMono.ttf" \
-    --stroke-px 0 --stroke-px 1 --stroke-px 2 --stroke-px 3 \
-    --size-px 300 --letter-frac 0.6 \
+FONTS="$(python -c 'import matplotlib; print(matplotlib.get_data_path())')/fonts/ttf"
+# старый каталог не удалять: mv data/line_sim/letters_ink data/line_sim/letters_ink_v2_big
+#                            mv data/line_sim/letters_ink_disk.png data/line_sim/letters_ink_disk_v2_big.png
+for F in DejaVuSans DejaVuSansMono; do
+  python -m Services.line_sim.tools.make_font_letters \
+    --letters АКРХ \
+    --font "$FONTS/$F.ttf" \
+    --stroke-px 3 \
+    --size-px 300 --letter-frac 0.4763 \
     --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 \
     --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png \
-    --out data/line_sim/letters_font \
-    --disk-out data/line_sim/letters_font_disk.png
-
-# второй проход в ту же (свежую) --out: один жирный выброс оставлен для аугментации намеренно
-python -m Services.line_sim.tools.make_font_letters \
-    --letters АК \
-    --font "$FONTS/DejaVuSans-Bold.ttf" \
-    --size-px 300 --letter-frac 0.6 \
-    --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 \
-    --out data/line_sim/letters_font
+    --out data/line_sim/letters_ink \
+    --disk-out data/line_sim/letters_ink_disk.png
+done
 ```
 
+Цель измерения (2026-10-01, реальные кадры + вырезки обучающей выборки, скрипт `lm.py`): высота
+буквы / диаметр диска `D` = **0.486**; толщина штриха / `D` = **0.083** (реальный разброс
+0.070–0.091). Видимый диск спрайта 294 px (альфа `size_px - 6`), поэтому `h/D = letter-frac * 300 / 294`:
+`0.4763 -> 0.486` (для обоих шрифтов одинаково; прежнее `0.6` давало 0.612 — буква на четверть
+крупнее реальной). Принято по каждому файлу: `h/D` в [0.47, 0.50], штрих (гребень distance transform,
+`2 * median / D`) в [0.075, 0.091]. Измерено: `h/D` = 0.486 у всех 8 файлов, штрих 0.075–0.088.
+
+Почему именно так:
+
+- **Bold убран.** Штрих Bold — 0.141–0.156 `D`, вдвое выше реального диапазона; прежний «жирный выброс
+  для аугментации» учил сеть несуществующей толщине.
+- **Один `--stroke-px 3`.** Из пробы 2/3/4 при `h/D` 0.486 в допуск по всем буквам входит только 3:
+  `s2` даёт 0.069–0.073 у части букв (А/К/Х), `s4` — 0.095 у К моно. Аугментации штриха внутри
+  допуска у DejaVu нет; разнообразие толщины должен давать другой шрифт, а не `--stroke-px`.
+- **DejaVu — hold-out-шрифты Фазы 1.** Их спрайты нужны только симулятору для проверки; в обучающую
+  выборку они попадать не должны (оценка на невиданных шрифтах теряет смысл).
+
 `--stroke-px N` (повторяемый, целое >= 0) — аугментация толщиной штриха: на каждую пару буква x шрифт
-по файлу на значение (`DejaVuSans.png` при 0, `DejaVuSans_s2.png` при 2). Цель измерения: реальный
-штрих — 0.081 диаметра диска (2026-09-30), DejaVu regular при N=0 — 0.066–0.077, каждый +1 px
-≈ +0.004–0.01; поэтому regular идёт с N=0..3, а Bold (0.098–0.138) — одним проходом без штриха.
+по файлу на значение (`DejaVuSans.png` при 0, `DejaVuSans_s2.png` при 2). Для актуального каталога цель
+и выбор значений — в блоке выше (на `letter-frac` 0.4763 каждый +1 px ≈ +0.005–0.01 к штриху).
 Высота буквы остаётся `--letter-frac` (глиф уменьшается на толщину обводки). Слишком толстый штрих
 (`4 * N >= round(letter_frac * size_px)`, глиф вырождается в пятно) отвергается до рендера с
 сообщением про `--stroke-px`. Зерно идёт в порядке буква x шрифт x штрих; при `--grain-sigma` спрайт N=0

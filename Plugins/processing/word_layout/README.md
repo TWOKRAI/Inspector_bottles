@@ -10,7 +10,7 @@ Processing-плагин: по целевому слову, координата�
 ## Поток
 
 ```
-ml_inference.predictions [{label, angle_deg, angle_valid, confidence}]
+ml_inference.predictions [{label, angle_deg, angle_valid, confidence, below_threshold}]
         │
    word_layout  ── потоковый жадный матчинг буквы в слот слова ──►
         │
@@ -25,7 +25,7 @@ ml_inference.predictions [{label, angle_deg, angle_valid, confidence}]
 
 | Порт | Тип | Назначение |
 |------|-----|-----------|
-| `predictions` (вход) | list[dict] | топ-K от ml_inference (label/angle_deg/angle_valid) |
+| `predictions` (вход) | list[dict] | топ-K от ml_inference (label/angle_deg/angle_valid/confidence/below_threshold) |
 | `word` (вход, опц.) | str/dict | целевое слово (иначе register `target_word`) |
 | `trigger` (вход, опц.) | any | «взять диск» при `use_trigger=True` |
 | `robot_job` (выход) | dict | поза роботу `{x_mm, y_mm, z_mm, r_deg, …}` |
@@ -47,6 +47,14 @@ ml_inference.predictions [{label, angle_deg, angle_valid, confidence}]
 ориентация общая (`angle_zero_deg`, дефолт 0 = прямо). При `angle_valid=False`
 (полная симметрия буквы, напр. «О») доворот = 0. `angle_zero_deg`/`angle_invert` —
 калибровка нуля и направления модель↔робот (подбирается на железе).
+
+## Страж «ниже порога» (Task 0.3, letters-retrain)
+
+`ml_inference` отдаёт топ-1 ВСЕГДА, с флагом `below_threshold` (confidence ниже ЕГО порога).
+`word_layout` отказывается от такого предсказания (`robot_job` не выдаётся, слот не занимается,
+кадр не «сжигает» слот) — независимо от своего `min_confidence`: порог ml_inference может быть
+выше (0.8 против 0.5), и 0.6 «уверенно» для word_layout, но не для ml. Нет ключа
+`below_threshold` (старый продюсер) → прежнее поведение (только `min_confidence`).
 
 ## Детект «нового диска»
 
