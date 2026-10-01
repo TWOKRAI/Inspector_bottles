@@ -56,12 +56,11 @@
 #
 # Предусловие: apps/line_sim поднят (процессы camera→mjpeg, сток на :8091) +
 # сим-робот apps/line_sim (Modbus TCP :5021, см. data/devices.yaml прототипа, apps/line_sim/README.md).
-# Запуск: FW_SHM_OWNER_INCARNATION=1 python multiprocess_prototype/run.py letter_robot_sim
+# Запуск: python multiprocess_prototype/run.py letter_robot_sim
 #
-# ⚠ FW_SHM_OWNER_INCARNATION=1 — обязателен на POSIX (и здесь, и в apps/line_sim). Без него
-#   прототип теряет треть кадров и читает чужие SHM-сегменты (голые имена /output_frames_N
-#   у всех владельцев), а hz этого не показывает. Дефект фреймворка, задача — в
-#   docs/claude/OPEN_QUESTIONS.md («SHM-кольца на POSIX…»). Рецептом флаг не задаётся — только env.
+# Имена SHM-сегментов несут owner+pid+инкарнацию всегда (Task 4.7b, флага нет): на POSIX
+# больше нет голых имён /output_frames_N у всех владельцев (раньше — потеря трети кадров
+# и чтение чужих сегментов, пока имена были без owner).
 name: letter_robot_sim
 version: 3
 description: "Сим-вариант hikvision_letter_robot: камера — MJPEG-сток apps/line_sim, а не Hikvision"

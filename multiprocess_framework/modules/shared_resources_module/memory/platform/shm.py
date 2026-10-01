@@ -106,7 +106,7 @@ def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
 
     Общая логика для ``cleanup_known_shm_at_startup`` (точный cleanup ``{name}_{i}``) И
     ``extract_memory_region_names`` (M8a: базовые имена как ПРЕФИКСЫ для
-    ``cleanup_orphaned_by_prefix`` — owner_incarnation суффиксует ДАЖЕ объявленные в
+    ``cleanup_orphaned_by_prefix`` — имя всегда суффиксуется (owner+pid+инкарнация), даже объявленные в
     конфиге имена, точный cleanup их тогда не поймает, только префиксный).
 
     Поддерживает форматы: плоский {"x": (h,w,c), "coll": 2} и вложенный {"names": {...}}.
@@ -193,56 +193,49 @@ def extract_memory_region_names(processes_config: dict[str, Any] | None) -> list
     return ordered
 
 
-def _unique_base_name(
-    base_name: str,
-    *,
-    fresh: bool = False,
-    owner: str | None = None,
-    owner_incarnation: bool = False,
-) -> str:
-    """Уникальное имя SHM.
+def _unique_base_name(base_name: str, *, owner: str | None = None) -> str:
+    """Уникальное имя SHM — один режим на всех платформах, без env-флагов (Task 4.7b).
 
-    На Windows дополняется PID (избежать FileExistsError от предыдущих ЗАПУСКОВ).
-    ``fresh=True`` дополнительно добавляет инкарнацию — для пересоздания внутри одного
-    процесса (hot-swap), когда старый сегмент с тем же PID-именем ещё не освобождён.
-
-    Ф7 G.3(b) / B-6/B-7 (ADR-SRM-011), ``owner_incarnation=True``: имя ВСЕГДА несёт
-    owner + pid (H2: на ВСЕХ платформах, не только Windows — иначе на POSIX
-    ``_incarnation`` сбрасывается в каждом процессе → два интерпретатора дают ОДНО
-    имя и один unlink'ает сегмент другого) + свежую инкарнацию на КАЖДОЕ создание.
-    Два живых источника с одинаковым slot-именем в разных процессах больше не
-    коллидируют; stale-процесс после switch не переиспользует чужое имя. Consumer
-    читает ФАКТИЧЕСКОЕ имя (PSR memory_names / shm_actual_name) — суффикс прозрачен.
+    Имя ВСЕГДА несёт owner + pid + свежую инкарнацию на КАЖДОЕ создание
+    (ADR-SRM-011, B-6/B-7): на POSIX ``_incarnation`` сбрасывается в каждом процессе —
+    без pid два интерпретатора дали бы ОДНО имя и один unlink'ал бы сегмент другого;
+    без owner два живых источника с одинаковым slot-именем в разных процессах
+    коллидировали бы. Consumer читает ФАКТИЧЕСКОЕ имя (PSR memory_names /
+    shm_actual_name) — суффикс прозрачен. Платформенная разница осталась только в
+    unlink / повторе при ``FileExistsError`` (см. ``create_shm_blocks``).
 
     H3 (macOS PSHMNAMLEN ~31): при переполнении ``_MAX_BASE_NAME_LEN`` имя
-    детерминированно схлопывается в ``{base[:10]}_{blake2s8}`` (хеш кодирует
-    owner+pid+inc → уникальность сохранена, длина ≤ лимита).
+    детерминированно схлопывается в ``{base}_{blake2s8}`` (хеш кодирует
+    owner+pid+inc → уникальность сохранена, длина ≤ лимита). Owner и pid при этом
+    в имени НЕ читаются — читаются только если имя уместилось в лимит.
     """
-    if owner_incarnation:
-        parts = [base_name]
-        if owner:
-            parts.append(str(owner))
-        parts.append(str(os.getpid()))  # H2: pid на ВСЕХ платформах
-        parts.append(str(next(_incarnation)))
-        return _bounded_name(base_name, "_".join(parts))
-    if is_windows():
-        suffix = f"_{next(_incarnation)}" if fresh else ""
-        return f"{base_name}_{os.getpid()}{suffix}"
-    # POSIX: unlink освобождает сразу; fresh нужен лишь если живой holder держит сегмент.
-    return f"{base_name}_{next(_incarnation)}" if fresh else base_name
+    parts = [base_name]
+    if owner:
+        parts.append(str(owner))
+    parts.append(str(os.getpid()))
+    parts.append(str(next(_incarnation)))
+    return _bounded_name(base_name, "_".join(parts))
 
 
 def _bounded_name(base_name: str, full: str) -> str:
     """H3: если ``full`` (без ``_{idx}``-суффикса от create_shm_blocks) длиннее лимита —
-    детерминированно схлопнуть в ``{base[:10]}_{blake2s8}`` (≤ 19 симв., + ``_{idx}`` ≤ 30).
+    детерминированно схлопнуть в ``{base}_{blake2s8}`` (≤ 26 симв., + ``_{idx}`` ≤ 30).
 
-    Хеш от ПОЛНОГО имени (owner+pid+inc) сохраняет уникальность; человекочитаемый
-    префикс base — для отладки. macOS PSHMNAMLEN ≈ 31 → держим базу ≤ 26.
+    Хеш от ПОЛНОГО имени (owner+pid+inc) сохраняет уникальность. Базовое slot-имя
+    остаётся ЦЕЛЫМ, пока ``len(base) + 1 + 8 <= _MAX_BASE_NAME_LEN`` — тогда схлопнутое имя
+    по-прежнему начинается с base, и ``cleanup_orphaned_by_prefix(base)`` его видит.
+    macOS PSHMNAMLEN ≈ 31 → держим базу ≤ 26.
+
+    ponytail: base длиннее ``_MAX_BASE_NAME_LEN - 9`` (17) усекается до ``base[:17]`` и
+    prefix-cleanup по ПОЛНОМУ base такое имя не поймает (Linux). Потолок известен, не
+    решается: слот-имена проекта (output_frames, mask) короче; при появлении длинных —
+    искать по усечённому префиксу в cleanup.
     """
     if len(full) <= _MAX_BASE_NAME_LEN:
         return full
     digest = hashlib.blake2s(full.encode("utf-8"), digest_size=4).hexdigest()  # 8 hex
-    return f"{base_name[:10]}_{digest}"
+    keep = _MAX_BASE_NAME_LEN - 1 - len(digest)
+    return f"{base_name[:keep]}_{digest}"
 
 
 def create_shm_block(name: str, size: int) -> ShmType:
@@ -314,16 +307,12 @@ def create_shm_blocks(
     coll: int,
     *,
     owner: str | None = None,
-    owner_incarnation: bool = False,
 ) -> Optional[List[ShmType]]:
     """
     Создать coll блоков SharedMemory с именами {base_name}_0, {base_name}_1, ...
 
-    На Windows base_name дополняется PID для избежания FileExistsError от предыдущих запусков.
+    Имя несёт owner + pid + инкарнацию всегда (см. ``_unique_base_name``).
     Фактические имена (shm.name) сохраняются в memory_names для consumer-процессов.
-
-    Ф7 G.3(b): ``owner_incarnation=True`` → имя несёт owner+инкарнацию всегда (B-6/B-7,
-    ADR-SRM-011), см. ``_unique_base_name``.
 
     При ошибке создания любого блока — закрывает и удаляет уже созданные,
     возвращает None.
@@ -334,7 +323,7 @@ def create_shm_blocks(
     # не ждёт этого окна. Consumer'ы читают фактические имена → суффикс прозрачен.
     last_exc: Exception | None = None
     for attempt in range(3):
-        base = _unique_base_name(base_name, fresh=(attempt > 0), owner=owner, owner_incarnation=owner_incarnation)
+        base = _unique_base_name(base_name, owner=owner)
         shm_list: List[ShmType] = []
         try:
             for i in range(coll):

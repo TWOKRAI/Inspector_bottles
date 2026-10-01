@@ -93,30 +93,11 @@ class FlagState:
 _FLAG_LIST: Tuple[FeatureFlag, ...] = (
     # — SHM кадровый тракт (Ф7 G.3–G.5, dark-launch, откат бит-в-бит) —
     FeatureFlag(
-        "FW_SHM_OWNER_INCARNATION",
-        default=False,
-        doc="Имена сегментов {slot}_{owner}_{pid}_{inc}: читатели следуют за "
-        "рестартом писателя, мультикамера без коллизий (обязателен на POSIX-мультикамере).",
-    ),
-    FeatureFlag(
-        "FW_SHM_HANDLE_CACHE",
-        default=False,
-        doc="Кэш mmap-хэндлов reader'а: снятие open/mmap/close на кадр.",
-        requires=("FW_SHM_OWNER_INCARNATION",),
-    ),
-    FeatureFlag(
-        "FW_SHM_ZERO_COPY",
-        default=False,
-        doc="View вместо копии на data-plane (GUI остаётся copy-out). "
-        "Enforcement жёсткого требования — во FrameShmMiddleware.",
-        requires=("FW_SHM_HANDLE_CACHE", "FW_SHM_OWNER_INCARNATION"),
-    ),
-    FeatureFlag(
         "FW_SHM_LOAN_PROTOCOL",
         default=False,
-        doc="Owner-mediated loan/release слотов (refcount): медленный потребитель "
-        "не блокирует камеру, kill-9 читателя → reclaim.",
-        requires=("FW_SHM_ZERO_COPY",),
+        doc="FROZEN (Task 4.7, п.6): owner-mediated loan/release слотов (refcount) — "
+        "заморожен выключенным, не развивать. Имена сегментов (owner+pid+inc) и прочие "
+        "бывшие SHM-флаги (Task 4.7b) флагами больше не управляются.",
     ),
     FeatureFlag(
         "FW_SHM_PREFIX_CLEANUP",

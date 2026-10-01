@@ -157,20 +157,19 @@ def test_list_flags_covers_whole_registry():
 
 
 def test_validate_flags_missing_dependency():
-    # zero-copy включён без handle-cache/owner-incarnation → нарушения
+    # gc-scheduled включён без gc-freeze → нарушение
     snapshot = {name: False for name in ff.FLAGS}
-    snapshot["FW_SHM_ZERO_COPY"] = True
+    snapshot["FW_GC_SCHEDULED"] = True
     problems = ff.validate(snapshot)
-    assert any("FW_SHM_ZERO_COPY" in p and "FW_SHM_HANDLE_CACHE" in p for p in problems)
+    assert any("FW_GC_SCHEDULED" in p and "FW_GC_FREEZE" in p for p in problems)
 
 
 def test_validate_passes_when_dependencies_satisfied():
     # согласованный набор → пустой список
     snapshot = {name: False for name in ff.FLAGS}
     snapshot.update(
-        FW_SHM_OWNER_INCARNATION=True,
-        FW_SHM_HANDLE_CACHE=True,
-        FW_SHM_ZERO_COPY=True,
+        FW_GC_FREEZE=True,
+        FW_GC_SCHEDULED=True,
     )
     assert ff.validate(snapshot) == []
 

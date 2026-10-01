@@ -453,7 +453,7 @@ class SystemLauncher:
                 from ...shared_resources_module.buffers import cleanup_orphaned_by_prefix
 
                 # M8a: базовые имена config-объявленных memory-регионов ТОЖЕ годятся как
-                # префиксы (owner_incarnation суффиксует их так же, как output_frames —
+                # префиксы (имя всегда суффиксуется owner+pid+инкарнацией, как у output_frames —
                 # точный cleanup выше их не поймает). "output_frames" всегда в списке —
                 # это лениво выделяемый слот пайплайна, в processes_config не объявлен
                 # ни в каком виде (см. _DEFAULT_FRAME_SLOT_PREFIX).

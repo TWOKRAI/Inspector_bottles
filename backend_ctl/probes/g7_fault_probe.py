@@ -16,9 +16,8 @@ consumer) через :class:`BackendHarness` с ВКЛЮЧЁННЫМИ флаг�
       → torn drop (``frame_torn_reads``), слот НЕ отравлен, консьюмер не падает.
 
 Запуск (флаги — в env; полный набор лесенки Фазы 1):
-  BACKEND_CTL=1 FW_PERF_PROBES=1 FW_DATA_PLANE_DICTS=1 FW_SHM_SEQLOCK=1 \
-  FW_SHM_OWNER_INCARNATION=1 FW_SHM_HANDLE_CACHE=1 FW_QOS_PROFILES=1 \
-  FW_SHM_ZERO_COPY=1 FW_SHM_LOAN_PROTOCOL=1 FW_USE_KIND_CHANNELS=1 FW_GC_FREEZE=1 \
+  BACKEND_CTL=1 FW_PERF_PROBES=1 FW_DATA_PLANE_DICTS=1 FW_QOS_PROFILES=1 \
+  FW_SHM_LOAN_PROTOCOL=1 FW_USE_KIND_CHANNELS=1 FW_GC_FREEZE=1 \
   python -m backend_ctl.probes.g7_fault_probe kill_reader
 
 Числа печатаются json — переносятся в baseline.md вручную (живой документ плана).
