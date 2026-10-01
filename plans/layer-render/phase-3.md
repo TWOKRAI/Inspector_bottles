@@ -27,7 +27,7 @@
 
 **Acceptance:**
 - [ ] `Services.dataset_gen.core.compose.composite is Services.layer_render.compose.composite` — и так для всех пяти имён.
-- [ ] Все золотые эталоны плана (`plan.md` → «Золотые эталоны») — зелёные без правки литералов.
+- [ ] Все золотые эталоны плана ([goldens.md](goldens.md)) — зелёные без правки литералов.
 - [ ] `sentrux check .` — зелёный; `layer_render` не импортирует `dataset_gen`.
 
 **Out of scope:** правка импортов у потребителей (`line_sim`, `ml_train`, плагины) — реэкспорт для того и есть.
