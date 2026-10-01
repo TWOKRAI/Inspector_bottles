@@ -34,6 +34,9 @@ from Services.line_sim.core.belt import BELT_UX, BELT_UY, encoder_to_offset_mm
 from Services.line_sim.interfaces import ObjectPassport
 
 
+_FRAME_DOWN_UNIT_TOL = 1e-3  # допуск длины `frame_down`: 1e-3 на 100 мм поперёк = 0.1 мм
+
+
 @dataclass(frozen=True)
 class BeltGeometry:
     """Координаты робота, отвечающие точке сцены «путь 0 вдоль ленты, центр полосы».
@@ -42,7 +45,8 @@ class BeltGeometry:
 
     `frame_down_ux/uy` — необязательный единичный вектор «вниз по кадру» в системе робота
     (поперёк ленты); нужен только для поперечного смещения дисков (`lateral_px`). Оба или
-    ни одного: одна компонента без второй — `ValueError`.
+    ни одного: одна компонента без второй — `ValueError`; пара обязана быть конечной и единичной
+    (`|hypot - 1| <= 1e-3`), иначе `ValueError`.
     """
 
     origin_x_mm: float = 0.0
@@ -55,6 +59,17 @@ class BeltGeometry:
             raise ValueError(
                 "geometry: frame_down_ux и frame_down_uy задаются парой — "
                 f"получено frame_down_ux={self.frame_down_ux!r}, frame_down_uy={self.frame_down_uy!r}"
+            )
+        ux, uy = self.frame_down_ux, self.frame_down_uy
+        if (
+            ux is not None
+            and uy is not None
+            and not (math.isfinite(ux) and math.isfinite(uy) and abs(math.hypot(ux, uy) - 1.0) <= _FRAME_DOWN_UNIT_TOL)
+        ):
+            raise ValueError(
+                "geometry: (frame_down_ux, frame_down_uy) — единичный вектор (длина 1 ± "
+                f"{_FRAME_DOWN_UNIT_TOL}), иначе поперечное слагаемое истины робота молча врёт — "
+                f"получено frame_down_ux={ux!r}, frame_down_uy={uy!r}"
             )
 
     @property

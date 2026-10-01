@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -193,3 +194,59 @@ def test_validator_rejects_bool_and_accepts_tuple_and_list() -> None:
     with pytest.raises(ValueError, match="lateral_offset_px"):
         validate_lateral_offset_px([True, 5])
     assert validate_lateral_offset_px([10, 20]) == validate_lateral_offset_px((10.0, 20.0)) == (10.0, 20.0)
+
+
+_NAN = float("nan")
+_INF = float("inf")
+_BAD_FRAME_DOWN = [
+    pytest.param((0.0, 0.0), id="zero-vector"),
+    pytest.param((-78.4, 0.0), id="not-unit-mm-length"),
+    pytest.param((_NAN, 0.0), id="nan"),
+    pytest.param((_INF, 0.0), id="inf"),
+]
+
+
+@pytest.mark.parametrize("ux_uy", _BAD_FRAME_DOWN)
+def test_non_unit_frame_down_is_value_error(ux_uy) -> None:
+    """Что ломается: проверка «парой» пропускала любой вектор. Измерено на 97dcfed0 при
+    `object_robot_xy(0, 0, g, lateral_px=20, px_per_mm=8.163265)`, origin_x 458.2: (0, 0) -> X=458.2
+    (поперечное слагаемое молча ноль), (-78.4, 0) -> X=266.12 вместо 455.75 (промах 190 мм),
+    (nan, 0) -> (nan, 0.0). Обязана падать сразу и в конструкторе, и на dict-границе; текст
+    называет `frame_down_ux`/`frame_down_uy`."""
+    ux, uy = ux_uy
+    with pytest.raises(ValueError, match="frame_down_ux.*frame_down_uy"):
+        BeltGeometry(origin_x_mm=458.2, origin_y_mm=0.0, frame_down_ux=ux, frame_down_uy=uy)
+    with pytest.raises(ValueError, match="frame_down_ux.*frame_down_uy"):
+        BeltGeometry.from_dict({"origin_x_mm": 458.2, "origin_y_mm": 0.0, "frame_down_ux": ux, "frame_down_uy": uy})
+
+
+@pytest.mark.parametrize("ux_uy", [(-1.0, 0.0), (0.6, 0.8)])
+def test_unit_frame_down_is_accepted_and_applied(ux_uy) -> None:
+    """Что ломается: проверка длины отвергла бы рабочий вектор стенда (-1, 0) или косой единичный
+    (0.6, 0.8). Литерал: 20 px / 8.0 px/мм = 2.5 мм вдоль вектора."""
+    ux, uy = ux_uy
+    g = BeltGeometry(origin_x_mm=100.0, origin_y_mm=200.0, frame_down_ux=ux, frame_down_uy=uy)
+    assert BeltGeometry.from_dict(g.to_dict()) == g
+    x, y = object_robot_xy(0.0, 0.0, g, lateral_px=20.0, px_per_mm=8.0)
+    assert (x, y) == pytest.approx((100.0 + 2.5 * ux, 200.0 + 2.5 * uy))
+
+
+@pytest.mark.parametrize("ux_uy", _BAD_FRAME_DOWN)
+def test_plugin_configure_rejects_bad_frame_down(ux_uy) -> None:
+    """Что ломается: плагин собирал `BeltGeometry.from_dict` без проверки — кривой вектор при
+    `lateral_offset_px > 0` стартовал бы, а истина робота молча врала. ValueError обязан вылететь
+    из `configure`, не из `produce()`. Конфиг минимален: проверка геометрии идёт раньше сборки движка."""
+    from Plugins.sim.scene_source.plugin import SceneSourcePlugin
+
+    ux, uy = ux_uy
+    ctx = MagicMock()
+    ctx.config = {
+        "resolution_width": 320,
+        "resolution_height": 240,
+        "px_per_mm": 8.163265,
+        "belt_y_px": 120,
+        "lateral_offset_px": [10.0, 20.0],
+        "geometry": {"origin_x_mm": 458.2, "origin_y_mm": 0.0, "frame_down_ux": ux, "frame_down_uy": uy},
+    }
+    with pytest.raises(ValueError, match="frame_down_ux.*frame_down_uy"):
+        SceneSourcePlugin().configure(ctx)  # type: ignore[arg-type]
