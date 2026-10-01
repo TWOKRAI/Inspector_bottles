@@ -110,3 +110,32 @@ def test_gap_alpha_mask_does_not_mutate_input_even_if_readonly():
     mask = tool.gap_alpha_mask(rgb)
     assert mask.shape == rgb.shape[:2] and mask.dtype == np.uint8
     assert np.array_equal(rgb, before)
+
+
+def test_no_flag_stdout_has_no_gap_token_and_first_line_equals_pre_task_literal(tmp_path, capsys):
+    """J10: без `--gap-alpha` строка итога побайтно прежняя. Литерал снят инструментом коммита 4b152c52f
+    (до задачи) на этом же синтетическом фото."""
+    assert tool.main([str(_write_photo(tmp_path)), "--out", str(tmp_path / "o.png")]) == 0
+    out = capsys.readouterr().out
+    assert "transparent_frac" not in out
+    assert out.splitlines()[0] == (
+        "method=period period_px=40 seam_diff=2.4028 inner_diff=30.3438 scale=1.0000 size=200x96"
+    )
+
+
+@pytest.mark.parametrize("flag", ["--gap-hue=25,85", "--gap-sat-min=40", "--rails-px=22,22"])
+def test_threshold_flag_without_gap_alpha_is_an_error_naming_the_flag(tmp_path, capsys, flag):
+    """Порог без `--gap-alpha` молча игнорировался бы: теперь SystemExit, имя флага после `error:`."""
+    with pytest.raises(SystemExit) as info:
+        tool.main([str(_write_photo(tmp_path)), "--out", str(tmp_path / "o.png"), flag])
+    assert info.value.code not in (0, None)
+    err = capsys.readouterr().err.rsplit("error:", 1)[1]
+    assert flag.split("=")[0] in err and "--gap-alpha" in err
+    assert not (tmp_path / "o.png").exists()
+
+
+def test_negative_rails_message_says_nonnegative_not_a_range(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        tool.main([str(_write_photo(tmp_path)), "--out", str(tmp_path / "o.png"), "--gap-alpha", "--rails-px=-1,0"])
+    err = capsys.readouterr().err.rsplit("error:", 1)[1]
+    assert "--rails-px" in err and ">= 0" in err and "0..…" not in err

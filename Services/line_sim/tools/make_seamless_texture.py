@@ -64,11 +64,13 @@ _HARMONIC_FRAC = 0.9
 _EDGE_MARGIN = 8
 
 #: Пороги просвета для `gap_alpha_mask` (HSV OpenCV: H 0..179, S 0..255), границы включительные.
-#: Замер на реальном тайле belt_photo_full (`--force-period`, 410x484): просвет — мятный клин у концов
-#: щели (H 70..90, S 40..140); звенья H≈105, S≈17 (p99 = 47). S >= 45 держит рассыпь ложных пикселей
-#: на звеньях ниже 0.3 % тайла; щель посередине (H 90..100, S 20..30) от звена по HSV не отличается.
-_GAP_HUE = (55, 95)
-_GAP_SAT_MIN = 45
+#: Замер на реальном тайле belt_photo_full (`--force-period`, 410x484). Мера «стол виден» — пиксели
+#: V >= 130 в столбцах шва (x mod 205 из 180..204 и 0..2, строки 22..461): 1065 px, это мятные клинья у
+#: концов щели; посередине щели стол не виден вовсе (V звено ≈75 -> тень соседа ≈30). Эти значения
+#: покрывают 72.4 % видимого стола; ложно прозрачны (V < 100) 0.28 % тайла; всего прозрачно 0.87 %.
+#: Таблица и рассыпь — README. Правило универсальное (цветовой ключ H и S), без привязки к ленте.
+_GAP_HUE = (25, 85)
+_GAP_SAT_MIN = 40
 #: Зелёные борта: верх — строки 0..20, низ — 464..483 (S 77..140, H 70..75, тон в диапазоне просвета),
 #: поэтому зона борта принудительно непрозрачна. С запасом на тёмную кромку (строки 20..21 и 462..463).
 _RAILS_PX = (22, 22)
@@ -263,8 +265,10 @@ def _int_pair(parser: argparse.ArgumentParser, flag: str, raw: str, upper: int |
         a, b = (int(part) for part in raw.split(","))
     except ValueError:
         parser.error(f"{flag}: ожидается пара целых 'A,B', получено {raw!r}")
-    if min(a, b) < 0 or (upper is not None and max(a, b) > upper):
-        parser.error(f"{flag}: значения должны быть в 0..{upper if upper is not None else '…'}, получено {raw!r}")
+    if min(a, b) < 0:
+        parser.error(f"{flag}: значения должны быть >= 0, получено {raw!r}")
+    if upper is not None and max(a, b) > upper:
+        parser.error(f"{flag}: значения должны быть в 0..{upper}, получено {raw!r}")
     return a, b
 
 
@@ -314,37 +318,53 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--gap-hue",
-        default=f"{_GAP_HUE[0]},{_GAP_HUE[1]}",
+        default=None,
         dest="gap_hue",
         metavar="LO,HI",
-        help="диапазон тона просвета (H OpenCV 0..179, включительно); по умолчанию %(default)s",
+        help=(
+            "диапазон тона просвета (H OpenCV 0..179, включительно); "
+            f"по умолчанию {_GAP_HUE[0]},{_GAP_HUE[1]}; требует --gap-alpha"
+        ),
     )
     parser.add_argument(
         "--gap-sat-min",
-        default=str(_GAP_SAT_MIN),
+        default=None,
         dest="gap_sat_min",
         metavar="N",
-        help="минимальная насыщенность просвета (S 0..255, включительно); по умолчанию %(default)s",
+        help=(
+            f"минимальная насыщенность просвета (S 0..255, включительно); по умолчанию {_GAP_SAT_MIN}; "
+            "требует --gap-alpha"
+        ),
     )
     parser.add_argument(
         "--rails-px",
-        default=f"{_RAILS_PX[0]},{_RAILS_PX[1]}",
+        default=None,
         dest="rails_px",
         metavar="TOP,BOTTOM",
-        help="строки зелёных бортов сверху/снизу — всегда непрозрачны; по умолчанию %(default)s",
+        help=(
+            "строки зелёных бортов сверху/снизу — всегда непрозрачны; задаются в пикселях ТАЙЛА и НЕ "
+            f"пересчитываются с --scene-px-per-mm; по умолчанию {_RAILS_PX[0]},{_RAILS_PX[1]}; требует --gap-alpha"
+        ),
     )
     args = parser.parse_args(argv)
 
-    gap_hue = _int_pair(parser, "--gap-hue", args.gap_hue, 179)
+    for flag, value in (
+        ("--gap-hue", args.gap_hue),
+        ("--gap-sat-min", args.gap_sat_min),
+        ("--rails-px", args.rails_px),
+    ):
+        if value is not None and not args.gap_alpha:
+            parser.error(f"{flag} требует --gap-alpha")
+    gap_hue = _int_pair(parser, "--gap-hue", args.gap_hue or f"{_GAP_HUE[0]},{_GAP_HUE[1]}", 179)
     if gap_hue[0] > gap_hue[1]:
         parser.error(f"--gap-hue: LO больше HI, получено {args.gap_hue!r}")
     try:
-        gap_sat_min = int(args.gap_sat_min)
+        gap_sat_min = int(args.gap_sat_min if args.gap_sat_min is not None else _GAP_SAT_MIN)
     except ValueError:
         parser.error(f"--gap-sat-min: ожидается целое, получено {args.gap_sat_min!r}")
     if not 0 <= gap_sat_min <= 255:
         parser.error(f"--gap-sat-min: значение должно быть в 0..255, получено {args.gap_sat_min!r}")
-    rails_px = _int_pair(parser, "--rails-px", args.rails_px, None)
+    rails_px = _int_pair(parser, "--rails-px", args.rails_px or f"{_RAILS_PX[0]},{_RAILS_PX[1]}", None)
 
     has_reference = args.photo_width_mm is not None or args.pitch_mm is not None
     if args.scene_px_per_mm is not None and not has_reference:
