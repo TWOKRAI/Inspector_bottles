@@ -1429,6 +1429,8 @@ class ProcessModulePlugin(ABC):
         Default: pass-through (return items).
         items — список {"frame": ndarray, ...metadata}.
         Чистая обработка: без IPC, без SHM, без PluginContext.
+        Вход — read-only view в слот кольца, действителен только внутри process(); хранишь
+        дольше (буфер, self._last*) — копируй (4.7b).
 
         Покрывает все семантики:
           1:1   resize, grayscale, negative, ...

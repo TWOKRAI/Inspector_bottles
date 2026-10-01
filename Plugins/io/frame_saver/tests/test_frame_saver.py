@@ -364,3 +364,42 @@ class TestRetention:
         p = make_plugin(tmp_path, subfolder_by_date=True, index_source="counter", max_days=0)
         p.process([frame(0)])
         assert (tmp_path / "2026-01-01").exists()
+
+
+# ---------------------------------------------------------------------------
+# 4.7b2: вход конвейера — view в слот кольца; удерживаемые кадры обязаны быть копиями
+# ---------------------------------------------------------------------------
+
+
+def test_trigger_accumulate_buffer_survives_ring_overwrite(tmp_path: Path) -> None:
+    """Реальное кольцо глубиной 8 (restore_frame -> read-only view), 20 кадров, buffer_size=10:
+    буфер хранит [10..19], а не перезаписанные слоты. Красный revert: ``kept = item`` в process()."""
+    from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+    from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
+
+    wmm, rmm = MemoryManager(), MemoryManager()
+    writer = FrameShmMiddleware(wmm, owner="cam0", slot="output_frames", coll=8)
+    reader = FrameShmMiddleware(rmm, owner="reader", slot="unused")
+    plugin = make_plugin(tmp_path, save_mode="trigger", buffer_mode="accumulate", buffer_size=10)
+    try:
+        for i in range(20):
+            out = writer.strip_and_write({"frame": np.full((64, 64, 3), i, np.uint8)})
+            msg = reader.restore_frame({"data": out})
+            fr = msg["frame"] if msg.get("frame") is not None else msg["data"]["frame"]
+            assert not fr.flags.owndata, "предпосылка: вход — view в слот"
+            plugin.process([{"frame": fr}])
+            del fr, msg
+        assert [int(it["frame"][0, 0, 0]) for it in plugin._buffer] == list(range(10, 20))
+        assert int(plugin._last_frame_item["frame"][0, 0, 0]) == 19
+    finally:
+        import gc
+
+        gc.collect()
+        plugin._buffer.clear()
+        plugin._last_frame_item = None
+        gc.collect()
+        for fin in (reader.close_handle_cache, writer.release_owned_memory, rmm.close_all, wmm.close_all):
+            try:
+                fin()
+            except Exception:  # noqa: BLE001 — уборка
+                pass

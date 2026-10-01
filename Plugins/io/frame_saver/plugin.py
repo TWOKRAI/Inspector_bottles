@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -57,6 +58,15 @@ _EXT_BY_FORMAT = {
 
 # Порог троттлинга логов ошибок записи (не спамить при заполненном диске).
 _ERROR_LOG_EVERY = 50
+
+
+def _owned(item: dict) -> dict:
+    """Item, переживающий ``process()``: ndarray-значения скопированы.
+
+    Вход конвейера — read-only view в слот кольца (4.7b), валидный только внутри ``process()``;
+    слот перезапишут, пока кадр лежит в буфере/``_last_frame_item``.
+    """
+    return {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in item.items()}
 
 
 @register_plugin(
@@ -146,7 +156,8 @@ class FrameSaverPlugin(ProcessModulePlugin):
             with self._lock:
                 if "frame" in item:
                     self._frame_count += 1
-                    self._last_frame_item = item
+                    kept = _owned(item)  # вход — read-only view в слот кольца, живёт только внутри process()
+                    self._last_frame_item = kept
                     if self._reg.save_mode == "stream":
                         if self._force_next or self._frame_count % self._reg.save_every_n == 0:
                             self._force_next = False
@@ -154,9 +165,9 @@ class FrameSaverPlugin(ProcessModulePlugin):
                     else:  # trigger — не сохраняем в потоке, буферизуем
                         if self._reg.buffer_mode == "last":
                             self._buffer.clear()
-                            self._buffer.append(item)  # держим только последний
+                            self._buffer.append(kept)  # держим только последний
                         else:  # accumulate — deque(maxlen) сам вытесняет старые
-                            self._buffer.append(item)
+                            self._buffer.append(kept)
 
                 # Сигнал с провода (отдельный item с trigger_key).
                 if self._reg.trigger_key in item:
