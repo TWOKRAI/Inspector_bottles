@@ -86,3 +86,18 @@ branch: feat/layer-render (план) → main
   Гашение: `BackendDriver(...).connect()` обязателен перед `system_command`.
 - Отработанные worktree этой сессии: lat-off, lat-off-tester, gaps-tester (пустой, контракт отменён), label-tester, retrain — влиты/не нужны.
 - main не запушен.
+
+## Addendum — тестеры волны 1 вернулись (после хендоффа)
+
+- **1.1** → `tests/lr-1.1-blind` **30b5d4a2**: 3 файла (`Services/layer_render/tests/test_acceptance_1_1_background_layers.py`,
+  `Services/line_sim/tests/test_acceptance_1_1_background_layers_compositor.py`, `Plugins/sim/scene_source/tests/test_background_layers_acceptance_1_1.py`),
+  83 RED / 5 GREEN (контроли «без ключа — прежний кадр», sha256 сняты на дереве до задачи). Пины тестера, которых в плане нет —
+  СВЕРИТЬ с исполнителем ДО реализации (несовпадение формата = ложный RED): текст ValueError содержит индекс слоя и маркер значения;
+  пустой `background_layers: []` в плагине = ValueError; нечитаемый tile выбрасывается, ошибка — одна запись `log_error`, фон чёрный;
+  размер в логе `ШxВ` (`tile(<путь>, 7x5, RGBA)`). Замер ≤ 1.3× (шум old-vs-old 1.000–1.009, старый путь ≈ 9.3 мс/кадр 1440×1080).
+- **1.2** → `tests/lr-1.2-blind` **a5d898e7**: `Services/line_sim/tests/test_acceptance_layer_render_1_2_gap_alpha.py`, 32 RED / 2 GREEN.
+  Пины: `--gap-hue LO,HI` и `--gap-sat-min` — границы включительные; `--rails-px=TOP,BOTTOM` (через `=`); `gap_alpha_mask(tile_rgb)` →
+  2D uint8, вход не меняет; альфа бинарная, 4-й канал PNG; ошибка порога — имя флага после `error:` в stderr.
+  **Предупреждение тестера:** на РЕАЛЬНОЙ плитке звенья H≈105, S≈20–27, а пикселей с S≥30 всего ≈2 % — «мятный просвет» из плана
+  может оказаться тоньше. Исполнитель 1.2 сначала МЕРИТ реальную плитку (`merge-main/data/line_sim/belt_photo_full.png`), потом дефолты;
+  реальный тест (единственный на дефолтах) использует придуманные тестером границы доли прозрачных 0..0.5 — может падать не из-за дефекта.
