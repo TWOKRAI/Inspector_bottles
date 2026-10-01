@@ -71,7 +71,6 @@ def _tracked_sources() -> list[Path]:
     return files
 
 
-@pytest.mark.xfail(strict=True, reason="RED-спека 4.7b, реализации нет")
 def test_no_fw_shm_refs_outside_registry() -> None:
     offenders: dict[str, set[str]] = {}
     scanned = _tracked_sources()

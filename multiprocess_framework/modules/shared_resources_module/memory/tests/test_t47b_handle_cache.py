@@ -112,11 +112,6 @@ def _copy_read(pair: _Pair, out: dict) -> np.ndarray:
     return frame
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="4.7b2: падает только на предпосылке len(names)==300 — имя сегмента при realloc без инкарнации не меняется "
-    "(MemoryManager.owner_incarnation всегда включён — задача b1); снять маркер после слияния b1",
-)
 def test_100_reallocs_bounded_open_handles(make_pair) -> None:
     pair = make_pair(3)
     depth, keys = 3, 1

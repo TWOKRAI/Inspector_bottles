@@ -314,7 +314,7 @@ class FrameShmMiddleware:
     кэпа; конвейер (``restore_frame``) получает read-only view без копии, copy-out (``on_receive``)
     — копию с проверкой поколения.
 
-    Заголовок seqlock у слота ВСЕГДА (Task 4.4; флага ``FW_SHM_SEQLOCK`` больше нет): поколение
+    Заголовок seqlock у слота ВСЕГДА (Task 4.4; отдельного флага seqlock больше нет): поколение
     записи слота — это и есть ``gen`` в ссылке, по нему reader отличает свою запись от переписанной.
 
     Attributes:
