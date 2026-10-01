@@ -59,6 +59,8 @@ _(empty)_
 - [GUI-конструктор: слои и эталоны](project_gui_constructor_layers_2026_09_26.md) — fw=конструктор, прототип тонкий, minimal_gui, 09-26
 - [Модели агентов](feedback_agent_models_sonnet_impl_opus_review.md) — реализация Sonnet 5.5, ревью Opus 5.5, `model` передавать явно
 - [Проверка замка стенда должна гейтить команду](feedback_stand_lock_check_must_gate_the_command.md) — `[ ! -e stand.lock ] && pytest`, не просто cat рядом
+- [Универсальный генератор объектов](project_universal_object_generator.md) — слои+аугментация под любые продукты, не «генератор букв»; фон тоже слои
+- [Задача букв: буква и угол](project_letters_task_scope.md) — без дефектов, подпись всегда, робот ниже порога не берёт, геометрия буквы 0.486·D
 
 ### Reference
 - [Мануалы Delta RL/CVT и факты из них](reference_delta_rl_manual.md) — ось «RZ», 0x3000 retained, TimerRead, Lua≥5.2
