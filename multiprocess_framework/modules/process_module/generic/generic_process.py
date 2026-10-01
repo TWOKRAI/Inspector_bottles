@@ -103,6 +103,16 @@ class GenericProcess(ProcessModule):
 
         super()._init_custom_managers()
 
+    @property
+    def plugin_runner(self) -> PluginRunner:
+        """Единый раннер плагинов процесса (read-only; heartbeat читает из него ``plugin_ms()``)."""
+        return self._plugin_runner
+
+    @property
+    def chain_queue(self) -> "queue.Queue | None":
+        """Очередь DataReceiver -> PipelineExecutor (read-only; ``None`` до сборки data-плоскости)."""
+        return getattr(self, "_chain_queue", None)
+
     def shutdown(self) -> bool:
         """Останов: ``proxy.shutdown()`` (шлёт state.unsubscribe_all) ПОКА роутер жив, затем база."""
         state_proxy = getattr(self, "_state_proxy", None)

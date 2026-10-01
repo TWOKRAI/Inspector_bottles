@@ -69,7 +69,9 @@ processes:
         category: processing
         min_area: 200
         max_area: 50000
-        draw_contours: true
+        # Контуры не рисуем: детекции рисует render_overlay (draw_detections), а рисование
+        # здесь стоит копии кадра 1080p (~1 мс) — цепочка выходила за 5 мс (ревью T1).
+        draw_contours: false
         contour_color_bgr: [0, 0, 255]
 
   # --- Рендерер: красный overlay + bounding boxes ---
@@ -162,8 +164,10 @@ observability:
 # Раньше топология полагалась только на chain_targets (процесс-уровень) и НЕ проходила
 # валидацию портов — была незапускаемой. Восстановлено по фактическим портам плагинов.
 wires:
-  # Камера → детекция (color_mask 1-й; blob_detector берёт кадр напрямую — выход
-  # color_mask это mask(gray), несовместим с frame(bgr), auto-wiring не покрывает).
+  # Камера → детекция. color_mask кладёт mask(gray) в item внутри процесса processor,
+  # blob_detector берёт её оттуда (связь внутри процесса, на графе провода нет).
+  # Собственные HSV-пороги blob_detector (слайдеры, set_color_range) действуют,
+  # только когда маска не пришла. Кадр blob_detector получает напрямую с камеры.
   - source: camera_0.camera_service.frame
     target: processor.color_mask.frame
   - source: camera_0.camera_service.frame

@@ -52,7 +52,7 @@ def _switch_and_probe(owner_incarnation: bool):
         try:
             shm = shared_memory.SharedMemory(name=name_a, create=False)
             try:
-                frame_old = fmt.read_single_frame(shm.buf, verify_seqlock=False)
+                frame_old = fmt.read_single_frame(shm.buf, verify_seqlock=True)
             finally:
                 shm.close()
         except FileNotFoundError:
@@ -100,7 +100,7 @@ def test_hp5_inflight_held_handle_reads_old_frame_not_new():
 
         # In-flight держатель открывает сегмент ДО switch (реальная гонка «кадр в полёте»).
         inflight = shared_memory.SharedMemory(name=name_a, create=False)
-        before = fmt.read_single_frame(inflight.buf, verify_seqlock=False)
+        before = fmt.read_single_frame(inflight.buf, verify_seqlock=True)
         assert before is not None and int(before.max()) == 111
 
         # Switch: release + recreate + записать НОВЫЙ кадр (222) в свежую инкарнацию.
@@ -111,7 +111,7 @@ def test_hp5_inflight_held_handle_reads_old_frame_not_new():
         assert name_a != name_b
 
         # Чтение через УДЕРЖАННЫЙ handle: старый сегмент (111), не перепутанный новый (222).
-        after = fmt.read_single_frame(inflight.buf, verify_seqlock=False)
+        after = fmt.read_single_frame(inflight.buf, verify_seqlock=True)
         assert after is not None and int(after.max()) == 111, "in-flight держатель прочитал НОВЫЙ кадр (confusion)"
     finally:
         if inflight is not None:

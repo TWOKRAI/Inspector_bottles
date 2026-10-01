@@ -93,11 +93,6 @@ class FlagState:
 _FLAG_LIST: Tuple[FeatureFlag, ...] = (
     # — SHM кадровый тракт (Ф7 G.3–G.5, dark-launch, откат бит-в-бит) —
     FeatureFlag(
-        "FW_SHM_SEQLOCK",
-        default=False,
-        doc="Seqlock слота SHM: чётность generation → нет torn-frame (ADR-SRM-011).",
-    ),
-    FeatureFlag(
         "FW_SHM_OWNER_INCARNATION",
         default=False,
         doc="Имена сегментов {slot}_{owner}_{pid}_{inc}: читатели следуют за "

@@ -1,0 +1,227 @@
+# code_reader
+
+Сервис промышленного считывателя кодов **Hikrobot ID3000** (наш экземпляр —
+`MV-ID3013PM-06M-SENSOTEC`). Приём результатов чтения по TCP, разбор формата,
+зонды для стенда и вся снятая с прибора конфигурация в одном месте.
+
+---
+
+## Назначение
+
+Считыватель декодирует код сам и отдаёт строку наружу. Этот сервис отвечает за
+сторону ПК:
+
+- принять результаты по TCP (прибор работает как `TCP Client`, мы — сервер);
+- разобрать пакет в типизированный `ReadResult` с внятным статусом;
+- отличить «код прочитан» от «кода нет» и «код есть, но не читается»;
+- отдать код в pipeline прототипа source-плагином `code_reader` (порт `code`);
+- дать зонды для стенда: обнаружение прибора, сырой дамп потока, симулятор
+  прибора, лист тестовых QR для подбора размера и дистанции;
+- **второй канал — MvCodeReader SDK** (`sdk/` + `core/sdk_*`): кадр прибора вместе с
+  кодами, 4 углами каждого кода на кадре, статусом и оценкой качества. Прибор при этом
+  открыт эксклюзивно — IDMVS к нему не подключится. Поверх — source-плагин
+  `code_reader_sdk` (Task 6.3 плана `plans/code-reader-sdk.md`, раздел «SDK-плагин»
+  ниже); TCP-канал остаётся запасным.
+
+Автономная работа с ПЛК (дискретные выходы, Modbus) идёт **мимо** этого
+сервиса — там наша система в цепочке не участвует. Сервис описывает и её
+настройку в `docs/SETUP.md`, потому что документ один на прибор.
+
+---
+
+## Структура
+
+```
+code_reader/
+├── interfaces.py        публичный контракт — единственная точка входа извне
+├── sdk/                 MvCodeReader SDK через ctypes; DLL из установленного IDMVS,
+│   │                    в репозиторий не копируется; грузится лениво (не при импорте)
+│   ├── loader.py        find_sdk_dir / load_library (аргумент → $MVCR_SDK_DIR → IDMVS)
+│   ├── structures.py    структуры по MvCodeReaderParams.h V1.5.3, code_bytes()
+│   ├── api.py           MvCodeReaderApi, DeviceEntry, RawFrame (копия кадра и кодов)
+│   └── errors.py        SdkError, SdkNotFoundError, коды возврата
+├── core/
+│   ├── result.py        ReadResult, ReadStatus, parse_packet, split_stream
+│   ├── sink.py          ResultSink — TCP-сервер приёма
+│   ├── sdk_frame.py     SdkFrame / CodeRead / CodeQuality, frame_from_raw, decode_image
+│   └── sdk_reader.py    SdkCodeReader — сессия прибора: поток захвата, stop, busy
+├── plugin/              source-плагин для прототипа (discovery видит Services/)
+│   ├── plugin.py        CodeReaderPlugin — приём → produce() → порт code
+│   ├── registers.py     параметры приёма + телеметрия для GUI
+│   ├── config.py        identity + register_bindings
+│   ├── sdk_plugin.py    CodeReaderSdkPlugin — захват прибора → produce() → порты code, frame
+│   ├── sdk_registers.py CodeReaderSdkRegisters — параметры SDK-канала + телеметрия
+│   └── sdk_config.py    identity + register_bindings SDK-плагина
+├── tools/               зонды для стенда, запускаются вручную
+│   ├── id3000_discover.py    обнаружение через GigE broadcast, версия прошивки
+│   ├── id3000_tcp_sink.py    сырой дамп потока (текст + hex)
+│   ├── reader_sim.py         симулятор прибора — прогон без железа
+│   ├── qr_test_sheet.py      лист тестовых QR с точной геометрией
+│   └── mvcr_probe.py         зонд SDK: кадр + коды + углы (--selfcheck без железа)
+├── docs/
+│   ├── SETUP.md         ★ все тонкости настройки, снятые с прибора
+│   └── GENICAM.md       прибор через обычный MVS SDK: управлять можно, кадра нет
+└── tests/
+```
+
+---
+
+## Быстрый старт
+
+### Найти прибор и узнать прошивку
+
+```bash
+.venv/Scripts/python.exe Services/code_reader/tools/id3000_discover.py
+```
+
+Работает без IDMVS и без `MvCodeReader` SDK — GigE-broadcast, подсеть угадывать
+не нужно.
+
+### Снять формат строки с прибора
+
+```bash
+.venv/Scripts/python.exe Services/code_reader/tools/id3000_tcp_sink.py --port 5000
+```
+
+Печатает каждый пакет текстом и в hex. Терминатор и обрамление видно только во
+втором виде — в мануале их нет. Настройка прибора — `docs/SETUP.md`, раздел 4.
+
+### Напечатать тестовые мишени
+
+```bash
+.venv/Scripts/python.exe Services/code_reader/tools/qr_test_sheet.py "QR" --sizes 10,15,20,30 --open
+```
+
+Каждый код несёт свой размер в содержимом, так что в History сразу видно, какой
+габарит прочёлся. Печатать строго 100%, на листе есть контрольная линейка.
+
+### Запустить в прототипе (рецепт `qr_reader_demo`)
+
+```bash
+python multiprocess_prototype/run.py qr_reader_demo
+# во втором терминале — симулятор прибора, если железа нет:
+python Services/code_reader/tools/reader_sim.py --port 5000 --interval 1.0
+```
+
+Нода `reader` поднимает приём на 5000, коды видны в инспекторе (`last_code`,
+`total_reads`, `no_reads`, `sink_state`) и в дереве состояния
+`processes.reader.state.code_reader`. Порт `code` привязывается к потребителю в
+редакторе Pipeline. Команды ноды: `start_sink`, `stop_sink`, `get_status`,
+`reset_stats`. Команды `trigger` нет: боевой триггер аппаратный (DI_0) и через ПК
+не проходит.
+
+### SDK-плагин `code_reader_sdk` (рецепт `qr_reader_sdk_demo`)
+
+```bash
+python multiprocess_prototype/run.py qr_reader_sdk_demo
+```
+
+Отдельный source-плагин, **не режим TCP-плагина**: у каналов разные жизненные циклы
+(приём порта против эксклюзивного захвата прибора), общая у них только форма item
+(ADR-CR-006). Прибор берётся `SdkCodeReader`-ом, пока плагин его держит, IDMVS к нему
+не подключится. В рецепте две ноды: `reader_sdk` (этот плагин) и `reader_tcp`
+(TCP-плагин, порт 5000) — вторая отвечает на стендовый вопрос «идут ли коды по TCP,
+пока прибор открыт SDK».
+
+**Что отдаёт.** Один item на срабатывание:
+
+| Ключи | Что |
+|---|---|
+| `code`, `status`, `ts`, `seq_id`, `reader_id` | плоские, как у TCP-плагина: потребитель кодов каналы не различает. `code` — текст первого читаемого кода или `""` |
+| `codes` | список кодов кадра: `text`, `status`, `bar_type`, `corners` (4 угла), `angle_deg`, `ppm`, `algo_ms`, `quality` (`None`, если прибор качество не считал) |
+| `trigger_index`, `frame_num`, `no_read_num`, `pixel_format` | счётчики и формат кадра от прибора |
+| `frame` | картинка `uint8` H×W; **нет**, если JPEG не декодировался (код при этом уходит, ошибка считается в `errors`) |
+
+`data_type` плагин не ставит — проставит `SourceProducer`, когда в item есть кадр.
+Порты: `code` (`str`, обязательный), `frame` (`image/gray`, `optional`).
+
+**Картинка едет только под ключом `frame`.** Claim check в SHM
+(`FrameShmMiddleware.strip_and_write`) смотрит только этот ключ; JPEG-байты или
+отрисованный кадр под другим ключом пошли бы через pipe (64 КБ). Углы кодов едут
+числами в `codes[*].corners`, рисует потребитель. Тест
+`test_item_has_no_bytes_and_is_json_without_frame` рекурсивно запрещает `bytes` в item;
+второй ndarray под посторонним ключом он **не** ловит — это правило держится ревью, не тестом.
+SHM в конфиге не объявляется:
+слот выделяется лениво на первом кадре (ADR-CR-007).
+
+**Команды** (`commands` плагина):
+
+| Команда | Ответ |
+|---|---|
+| `take_device` | `{status: ok\|error, device_state}` (+ `error` с причиной при отказе). Вернуть прибор после сбоя — только ею: автопереподключения нет (ADR-CR-009) |
+| `release_device` | `{status, released, device_held}`; `released = not device_held` (ADR-CR-008). При позднем `get_frame` — `status: error`, `released: false`, `error: "прибор ещё отпускается"` |
+| `get_status` | полная телеметрия + `reader_id`, `device_held` |
+| `reset_stats` | сброс счётчиков, истории и ошибок; счётчики читателя не обнуляются, запоминается точка отсчёта |
+
+**Состояние** — `processes.<proc>.state.code_reader_sdk`: `device_state`
+(`stopped | running | not_found | busy | error`, всегда из читателя), `device`
+(`ip`/`model`/`serial` или `None`), `last_code`, `last_status`, `last_quality`,
+`total_reads`, `no_reads`, `bad_reads`, `frames`, `errors`, `dropped`, `last_error`,
+`pending`, `device_held` (поток захвата ещё держит прибор), `history` (20 последних
+срабатываний). Публикуется из `produce()`, когда пришли кадры или сменился `device_held`, из
+колбэка ошибки, при переполнении очереди и из команд; на пустом проходе без смены
+`device_held` `produce()` молчит. «Прибор ещё отпускается» в `last_error` живёт, пока
+`device_held` истинно, и снимается сам, когда поток захвата вышел.
+
+**Параметры** (`CodeReaderSdkRegisters`): `device_ip` (пусто = первый найденный),
+`reader_id` (`id3013`), `auto_start` (`true` — взять прибор в `start()`, иначе командой),
+`timeout_ms` (500, допустимо 10–5000; им же ограничено время остановки). Остальное —
+телеметрия, readonly.
+
+**Поток.** Поток захвата кладёт кадр в очередь на 8; `produce()` её сливает, декодирует
+JPEG и отдаёт items, не блокируясь. Переполнение считается в `dropped` и публикуется
+сразу (старые кадры теряются, потеря видна, а не молчалива). Известные пределы — в
+`STATUS.md`, раздел «Ф6 / Task 6.3».
+
+### Принимать результаты в коде
+
+```python
+from Services.code_reader import ResultSink, ReadStatus
+
+def on_result(result):
+    if result.status is ReadStatus.OK:
+        print("годен:", result.payload)
+    else:
+        print("брак:", result.status.value)
+
+with ResultSink(on_result, port=5000) as sink:
+    ...  # обработчик вызывается в потоке соединения
+```
+
+---
+
+## Что важно знать до первого запуска
+
+- **Формат результата снят с прибора, а не из мануала** — раздела «Set Result
+  Format» в документации ID3000 нет. На нашем экземпляре это `QR-30MM;`,
+  терминатор `;`, без CR/LF и STX/ETX.
+- **TCP не сохраняет границ сообщений.** Резать поток по терминатору
+  обязательно; этим занят `split_stream`, и `ResultSink` его использует.
+- **Два вида неудачи различимы только если задать им разные тексты.** Завод
+  ставит обоим `NoRead`, и тогда «код есть, но не читается» неотличим от «кода
+  нет». См. `docs/SETUP.md`, раздел 5.
+- **Один порт — один приёмник.** На Windows `SO_REUSEADDR` разрешает двум
+  слушателям делить порт, и ядро отдаёт соединение одному из них: приём выглядит
+  живым, а кодов нет. `ResultSink` ставит `SO_EXCLUSIVEADDRUSE`, поэтому занятый
+  порт даёт понятную ошибку в `last_error`. Забытый `tools/id3000_tcp_sink.py`
+  на том же порту — самая вероятная причина «прибор шлёт, а рецепт молчит».
+- **Терминатор в настройке приёма обязан совпадать с хвостом `TCP Client Output
+  Format String` прибора** (у нас `<code_content>;`), **и тот же символ должен
+  стоять внутри текстов NoRead** — к ним прибор его не добавляет (`docs/SETUP.md` §5).
+  Иначе поток не режется на пакеты вовсе — и это та же форма отказа, что делёжка
+  порта: приём показывает «подключён», кодов нет. Теперь такой поток не копится в
+  памяти молча: буфер сбрасывается на 64 КиБ, а причина видна в `last_error`.
+  Пустой терминатор приём отвергает на старте.
+- **Версия железа 2.0/3.0 не установлена** — до неё не подключать ни вход DI_0,
+  ни выходы. Кнопка на корпусе прибора и TCP от неё не зависят.
+
+---
+
+## Связанное
+
+- [`docs/SETUP.md`](docs/SETUP.md) — настройка прибора, все тонкости с пометкой
+  источника: снято с железа / из мануала / предположение.
+- [`docs/diagrams/wiring/id3013-wiring.html`](../../docs/diagrams/wiring/id3013-wiring.html) — монтажные схемы.
+- [`plans/qr-code-reader.md`](../../plans/qr-code-reader.md) — план работ, карта регистров Modbus.
+- `knowledge/raw/books/id3000-series-um-en-v401/` — официальный мануал (соседний
+  проект obsidian).

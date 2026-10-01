@@ -20,7 +20,6 @@ from multiprocess_framework.modules.shared_resources_module.memory.core.manager 
 
 
 def _enable_zero_copy(monkeypatch) -> None:
-    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
     monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
     monkeypatch.setenv("FW_SHM_HANDLE_CACHE", "1")
     monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
@@ -36,12 +35,11 @@ class TestMiddlewareRecheck:
         try:
             out = writer.strip_and_write({"frame": np.full((16, 16, 3), 1, np.uint8)})
             frame = reader.restore_frame({"data": out})["frame"]
-            name = out["_shm_view_name"]
-            gen = out["_shm_view_generation"]
+            ref = dict(out["_shm_refs"]["frame"])  # билет: name + gen ЗАПИСИ (Task 4.4)
             del frame  # дропаем view (backing mmap можно трогать)
 
             # Сразу после чтения — слот не тронут → валиден, без drop.
-            assert reader.frame_view_valid(name, gen) is True
+            assert reader.frame_view_valid(ref) is True
             assert reader.frame_stale_drops == 0
 
             # Writer оборачивает кольцо coll=2: две записи возвращают его на slot name.
@@ -49,7 +47,7 @@ class TestMiddlewareRecheck:
             writer.strip_and_write({"frame": np.full((16, 16, 3), 3, np.uint8)})
 
             # Слот перезаписан под тем поколением → drift → stale drop.
-            assert reader.frame_view_valid(name, gen) is False
+            assert reader.frame_view_valid(ref) is False
             assert reader.frame_stale_drops == 1
         finally:
             reader.close_handle_cache()
@@ -59,12 +57,12 @@ class TestMiddlewareRecheck:
         """gen<0 (view без seqlock — не должно происходить) → консервативно невалиден."""
         _enable_zero_copy(monkeypatch)
         reader = FrameShmMiddleware(MemoryManager(), owner="r", slot="s")
-        assert reader.frame_view_valid("any", -1) is False
+        assert reader.frame_view_valid({"name": "any", "gen": -1}) is False
         assert reader.frame_stale_drops == 1
 
     def test_unknown_name_is_invalid(self, monkeypatch):
         """handle не в кэше (эвикция/смена имени) → сегмент мог уехать → drop."""
         _enable_zero_copy(monkeypatch)
         reader = FrameShmMiddleware(MemoryManager(), owner="r", slot="s")
-        assert reader.frame_view_valid("nonexistent_segment", 2) is False
+        assert reader.frame_view_valid({"name": "nonexistent_segment", "gen": 2}) is False
         assert reader.frame_stale_drops == 1

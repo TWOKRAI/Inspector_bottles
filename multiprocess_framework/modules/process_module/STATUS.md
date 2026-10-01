@@ -4,6 +4,8 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-09-30 (Task 4.5 — постоянные поля наблюдаемости пути кадра):** воркер получил `queue_wait_ms`, `transport_ms`, `pacer_late`; процесс — `state.cpu.cores` (такты + `~MHz`, замер каждый тик), `state.plugin_ms.<плагин>`, `state.shm.bytes_written|bytes_read|bytes_mapped|restore_failures`; `backend_ctl`: `introspect.status.cpu`, `introspect.queues.queues`/`chain_queue`, `introspect.router_stats.rings`. Каталог метрик 5 → 10. `~MHz` проверена только на i5-12500H. Описание — README «Наблюдаемость пути кадра», решение — ADR-PM-050.
+
 - **2026-09-07 (Task 3.8 пункт «в» плана `observability-closure` — голос фоновой уборки истории):**
   Уборка стора (`sweep_observability_history`) работала и **молчала**: отчёт `{by_age, by_rows,
   remaining}` возвращался и выбрасывался вызывающим (`process_heartbeat.py:535`), поэтому

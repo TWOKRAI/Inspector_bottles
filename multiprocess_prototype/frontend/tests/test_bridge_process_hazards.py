@@ -19,7 +19,10 @@ from multiprocess_prototype.frontend.bridge_process import FrameBridge
 
 
 def _frame_msg(sender: str) -> Dict[str, Any]:
-    return {"sender": sender, "data": {"shm_actual_name": "slot0", "shm_index": 0, "shm_seqlock": False}}
+    return {
+        "sender": sender,
+        "data": {"_shm_refs": {"frame": {"owner": "o", "slot": "s", "idx": 0, "gen": 2, "name": "slot0"}}},
+    }
 
 
 def test_c_unsubscribe_from_another_thread_mid_fanout_is_serialized() -> None:
@@ -43,7 +46,7 @@ def test_c_unsubscribe_from_another_thread_mid_fanout_is_serialized() -> None:
                 t.start()
                 t.join(0.2)
 
-    bridge = FrameBridge(_RacingRouter(), "gui", seqlock=False, owner_incarnation=False, loan_protocol=False)
+    bridge = FrameBridge(_RacingRouter(), "gui", owner_incarnation=False, loan_protocol=False)
     bridge_box["b"] = bridge
     bridge.cmd_subscribe({"subscriber": "p.1"})
     bridge.cmd_subscribe({"subscriber": "p.2"})

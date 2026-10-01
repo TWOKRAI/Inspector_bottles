@@ -62,7 +62,7 @@
 | 5 | `refcount` | uint8 | Fan-out: сколько читателей держат слот (задел под G.4, пока не используется). |
 | 6 | `reserved` | uint16 | Выравнивание / будущие флаги пула-QoS. |
 | 8 | `num_images` | uint32 | СУЩЕСТВУЮЩИЙ заголовок блока изображений (в legacy-формате лежал на offset 0, здесь сдвинут на `+8`). |
-| 12+ | per-image | — | `(h,w,c uint32) + dtype (1 байт) + payload + padding` — как в legacy, без изменений. |
+| 12+ | per-image | — | `(h,w,c uint32) + dtype (1 байт) + payload + padding` — как в legacy. **`c = 0`** — кадр без оси каналов `(H, W)`: данные как один канал, читатель возвращает `(H, W)` (ADR-SRM-017). |
 
 **Базовый сдвиг блока изображений** (`_image_block_base(seqlock)` в `format/buffer.py`):
 `base = SLOT_HEADER_SIZE (8)` при `seqlock=True`, `base = 0` при `seqlock=False` (дефолт,

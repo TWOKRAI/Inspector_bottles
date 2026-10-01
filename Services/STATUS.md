@@ -4,7 +4,10 @@
 
 **Слои:** `multiprocess_framework → Services → Plugins → multiprocess_prototype`.
 
-**Обновлено:** 2026-06-13 — добавлен `ml_train` (обучение и выбор моделей: MobileNetV3/V4 + timm,
+**Обновлено:** 2026-09-28 — добавлен `code_reader` (считыватель кодов Hikrobot ID3000: приём
+результатов по TCP, разбор формата, source-плагин для прототипа, зонды стенда, вся снятая с
+прибора настройка в `docs/SETUP.md`).
+Ранее 2026-06-13 — добавлен `ml_train` (обучение и выбор моделей: MobileNetV3/V4 + timm,
 3 источника данных, ONNX-экспорт в формат ml_inference).
 Ранее 2026-06-12 — добавлен `dataset_gen` (генерация синтетических датасетов cut-and-paste,
 пресет «русские буквы на дисках»).
@@ -27,6 +30,7 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | `ml_inference` | foundation | Инференс НС (кадр→классы): data-driven sidecar + pluggable backend (ONNX осн., torch опц.); processing-плагин `ml_inference` + widget `model_picker` | — |
 | `dataset_gen` | ready | Универсальный генератор синтетического датасета (cut-and-paste): классификация + угол поворота, авто-детектор симметрии (none/180/full), экспорт на диск / torch Dataset на лету; пресет «русские буквы на дисках» | — |
 | `ml_train` | ready | Универсальное обучение и выбор моделей: MobileNetV3 (torchvision) / MobileNetV4 + `timm/<имя>` (timm), классы + угол; AMP/EMA/mixup/warmup+cosine; RunRegistry; ONNX-экспорт + sidecar → ml_inference | — |
+| `code_reader` | ready | Считыватель кодов Hikrobot ID3000 (`MV-ID3013PM-06M`): `ResultSink` (TCP-сервер приёма) + разбор формата, снятого с прибора; source-плагин `code_reader` (порт `code`, рецепт `qr_reader_demo`); зонды стенда (discovery, сырой дамп, симулятор прибора, лист тестовых QR). Версия железа 2.0/3.0 не установлена — I/O не подключать. Настройка целиком — [`docs/SETUP.md`](code_reader/docs/SETUP.md) | — |
 | `line_sim` | foundation | Движок сцены симулятора линии: объект из слоёв (static/augmented/defect), выборка и рендер один раз при создании, пресет сцены (Pydantic, YAML round-trip), геометрия ленты от энкодера. Спавн, композитор кадра и каталог — Ф3.2–3.4 | LS-001..006 |
 
 ## Правила слоя

@@ -1,0 +1,76 @@
+# Рецепт qr_reader_demo — приём кодов с промышленного считывателя ID3000.
+#
+# Нода reader (CodeReaderPlugin) поднимает TCP-приёмник: прибор в режиме
+# `TCP Client` подключается к нам сам и на каждое срабатывание триггера шлёт
+# один пакет. Результат виден в инспекторе ноды (last_code, счётчики, состояние
+# связи) и в дереве состояния processes.reader.state.code_reader.
+#
+# Запуск БЕЗ ЖЕЛЕЗА (симулятор — во втором терминале, ПОСЛЕ старта рецепта):
+#   1) python multiprocess_prototype/run.py qr_reader_demo
+#   2) python Services/code_reader/tools/reader_sim.py --port 5000 --interval 1.0
+#
+# Запуск С ЖЕЛЕЗОМ: в IDMVS → Communication Settings → TCP Client указать
+#   TCP Dst Addr = IP этого ПК, TCP Dst Port = порт ноды (5000).
+#   Настройка прибора целиком — Services/code_reader/docs/SETUP.md.
+#
+# Боевой триггер аппаратный (DI_0 от датчика линии) и через ПК не идёт — команды
+# `trigger` у ноды нет намеренно. Команды: start_sink / stop_sink / get_status /
+# reset_stats.
+#
+# Потребителя кодов здесь нет (wires пусты): рецепт — стенд наблюдения. Привязать
+# порт `code` к потребителю можно в редакторе Pipeline.
+
+name: qr_reader_demo
+version: 1
+description: "Считыватель кодов ID3000: приём по TCP → порт code (стенд наблюдения)"
+
+blueprint:
+  name: qr_reader_demo
+  description: "Нода reader (code_reader): пакет от прибора → item {code, status, seq_id}"
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+
+    - process_name: reader
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      # 20 Гц: produce() не ждёт кода (приём асинхронный), опрос очереди дешёвый.
+      source_target_fps: 20
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Services.code_reader.plugin.plugin.CodeReaderPlugin
+          plugin_name: code_reader
+          category: source
+          host: 0.0.0.0
+          port: 5000
+          reader_id: id3013
+          auto_start: true
+          # Формат снят с нашего экземпляра (прошивка V4.0.2.C), не из мануала.
+          terminator: ";"
+          prefix: ""
+          no_code_text: NoRead
+          # Пусто = различение «код есть, но не читается» выключено на приборе.
+          bad_code_text: ""
+
+  wires: []
+  displays: []
+
+  metadata:
+    gui_positions:
+      reader.code_reader:
+        - 40.0
+        - 40.0
+    locked_nodes: []
+
+displays: []

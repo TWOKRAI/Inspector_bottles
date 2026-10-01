@@ -29,10 +29,20 @@ def _frame(h: int, w: int, val: int = 50) -> np.ndarray:
     return np.full((h, w, 3), val, dtype=np.uint8)
 
 
+def _ref(data: dict) -> dict:
+    """Ссылка на кадр в исходящем data (Task 4.4: ``data["_shm_refs"]["frame"]``)."""
+    return data["_shm_refs"]["frame"]
+
+
+def _via_shm(data: dict) -> bool:
+    """Кадр ушёл в SHM: в data есть ссылка на ``frame``."""
+    return "frame" in data.get("_shm_refs", {})
+
+
 def _roundtrip(mw: FrameShmMiddleware, frame: np.ndarray) -> tuple[bool, np.ndarray | None]:
     """strip_and_write → restore_frame. Возвращает (через_shm, восстановленный_кадр)."""
     out = mw.strip_and_write({"frame": frame.copy(), "seq_id": 1})
-    via_shm = "shm_actual_name" in out
+    via_shm = _via_shm(out)
     restored = mw.restore_frame({"data": out}).get("frame")
     return via_shm, restored
 
@@ -50,6 +60,25 @@ class TestBasicRoundtrip:
         via_shm, restored = _roundtrip(mw, _frame(600, 80))  # меньше — влезает
         assert via_shm is True
         assert restored is not None and restored.shape == (600, 80, 3)
+
+
+class TestShapePreservedThroughShm:
+    """Форма кадра не зависит от способа доставки: SHM отдаёт то же, что inline/pickle.
+
+    Живой стенд 2026-09-29 (code_reader_sdk, серый 1280×1024): до фикса каждый (H, W)
+    уходил pickle-fallback (`frame_pickle_fallbacks` 15/15), а (H, W, 1) из SHM менял
+    бы форму у потребителя. Проверяется на настоящем MemoryManager, не на формате.
+    """
+
+    @pytest.mark.parametrize("shape", [(1024, 1280), (1024, 1280, 1), (600, 800, 3)])
+    def test_shape_survives_shm(self, shape):
+        mw = _mw()
+        frame = np.arange(int(np.prod(shape)), dtype=np.uint32).astype(np.uint8).reshape(shape)
+        via_shm, restored = _roundtrip(mw, frame)
+        assert via_shm is True, f"{shape} должен идти через SHM, а не pickle-fallback"
+        assert mw.frame_pickle_fallbacks == 0
+        assert restored is not None and restored.shape == shape
+        assert np.array_equal(restored, frame)
 
 
 class TestResizeReallocation:
@@ -121,10 +150,14 @@ class TestFrameBoundaryCounter:
         assert mw.frame_boundary_crossings == 1
         # Повторный "hop" того же item (симуляция второго звена pipeline'а) —
         # счётчик накапливается, а не сбрасывается.
+        # Следующее звено — ДРУГОЙ процесс (свой owner): унаследованная ссылка своего owner
+        # у ТОГО ЖЕ middleware была бы принята за повтор fan-out, а не за второй хоп.
+        mw2 = FrameShmMiddleware(MemoryManager(), owner="test_owner_2", slot="output_frames", coll=3)
         out["frame"] = _frame(600, 800)  # следующий узел снова кладёт кадр в SHM
-        out2 = mw.strip_and_write(out)
+        out2 = mw2.strip_and_write(out)
         assert out2["frame_hops"] == 2
-        assert mw.frame_boundary_crossings == 2
+        assert mw2.frame_boundary_crossings == 1
+        assert _ref(out2)["owner"] == "test_owner_2"
 
     def test_strip_and_write_increments_on_pickle_fallback(self):
         """Кадр без SHM (memory_manager=None) всё равно уходит через IPC (pickle) —
@@ -132,7 +165,7 @@ class TestFrameBoundaryCounter:
         mw = FrameShmMiddleware(memory_manager=None, owner="test_owner", slot="output_frames")
         item = {"frame": _frame(600, 800)}
         out = mw.strip_and_write(item)
-        assert "shm_actual_name" not in out  # ушёл через pickle-fallback
+        assert "_shm_refs" not in out  # ушёл через pickle-fallback
         assert out["frame"] is not None  # frame не вырезан (pickle-путь)
         assert out["frame_hops"] == 1
         assert mw.frame_boundary_crossings == 1
@@ -193,7 +226,7 @@ class TestFanOutBoundaryCounting:
 
         assert mw.frame_boundary_crossings == 2  # оба send'а реальны — оба посчитаны
         assert item["frame_hops"] == 1  # per-item поле НЕ задвоено (документированное приближение)
-        assert "shm_actual_name" in item  # первый send реально стрипнул кадр в SHM
+        assert _via_shm(item)  # первый send реально стрипнул кадр в SHM
 
     def test_strip_and_write_fan_out_three_targets(self):
         mw = _mw()
@@ -211,7 +244,7 @@ class TestFanOutBoundaryCounting:
         mw = _mw()
         msg = {"frame": _frame(600, 800)}
         mw.on_send(msg)  # первый send: lazy-alloc + SHM write успешен, frame стрипнут
-        assert "shm_actual_name" in msg["data"]
+        assert _via_shm(msg["data"])
         mw.on_send(msg)  # второй send того же msg: frame уже None, data несёт shm_name
         assert mw.frame_boundary_crossings == 2
         assert msg["data"]["frame_hops"] == 1  # приближение, как и для generic-пути
@@ -229,7 +262,7 @@ class TestOnSendDefensiveDataField:
         out = mw.on_send(msg)  # не должно бросить
         assert isinstance(out["data"], dict)
         assert out["data"]["frame_hops"] == 1
-        assert "shm_actual_name" in out["data"]  # SHM-запись всё же прошла, несмотря на data=None
+        assert _via_shm(out["data"])  # SHM-запись всё же прошла, несмотря на data=None
 
 
 class _WriteFailsMM:
@@ -254,7 +287,7 @@ class TestG3WriteUnificationAndLoudFallback:
         indices = []
         for _ in range(5):
             out = mw.on_send({"frame": _frame(8, 8), "data": {}})
-            indices.append(out["data"]["shm_index"])
+            indices.append(_ref(out["data"])["idx"])
         assert indices == [0, 1, 2, 0, 1], f"ожидался round-robin, получено {indices}"
         mw._mm.close_all()
 
@@ -278,24 +311,25 @@ class TestG3WriteUnificationAndLoudFallback:
 class TestG3SeqlockCrossProcess:
     """Ф7 G.3(b) — seqlock-флаг едет в сообщении, cross-process reader сверяет generation."""
 
-    def test_seqlock_flag_stamped_in_message(self):
-        mw_on = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="o", slot="s")
-        item = mw_on.strip_and_write({"frame": _frame(8, 8)})
-        assert item.get("shm_seqlock") is True
-        mw_on._mm.close_all()
-
-        mw_off = FrameShmMiddleware(MemoryManager(), owner="o", slot="s")
-        item2 = mw_off.strip_and_write({"frame": _frame(8, 8)})
-        assert item2.get("shm_seqlock") is False
-        mw_off._mm.close_all()
+    def test_ref_carries_even_write_generation(self):
+        """Task 4.4: заголовок seqlock у слота всегда; ссылка несёт ЧЁТНОЕ поколение записи,
+        каждая следующая запись в ту же ячейку — строго большее."""
+        mw = FrameShmMiddleware(MemoryManager(), owner="o", slot="s", coll=1)
+        gens = []
+        for _ in range(3):
+            item = mw.strip_and_write({"frame": _frame(8, 8)})
+            gens.append(_ref(item)["gen"])
+        assert all(g > 0 and g % 2 == 0 for g in gens), gens
+        assert gens == sorted(set(gens)), f"поколение обязано расти: {gens}"
+        mw._mm.close_all()
 
     def test_seqlock_cross_process_raw_read_roundtrip(self):
         """Producer пишет seqlock-слот; consumer БЕЗ handle читает через raw-путь
         (read_single_frame(verify_seqlock=True)) — кадр восстанавливается корректно."""
-        prod = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="p", slot="s")
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
         frame = _frame(20, 30, 77)
         item = prod.strip_and_write({"frame": frame.copy()})
-        assert item["shm_seqlock"] is True and "shm_actual_name" in item
+        assert _via_shm(item)
 
         # Consumer — своя (пустая) mm: read_images промахнётся → raw seqlock-путь.
         consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
@@ -368,7 +402,7 @@ class TestH4CacheRealloc:
 
         # Realloc: кадр больше блока → пересоздание со СВЕЖЕЙ инкарнацией (новое имя).
         item2 = prod.strip_and_write({"frame": _frame(300, 300, 22)})
-        assert item2["shm_actual_name"] != item1["shm_actual_name"], "имя обязано смениться"
+        assert _ref(item2)["name"] != _ref(item1)["name"], "имя обязано смениться"
         r2 = consumer.restore_frame({"data": dict(item2)}).get("frame")
         assert r2 is not None and int(r2.min()) == 22, "кадр №2, не замороженный №1"
         consumer.close_handle_cache()
@@ -381,10 +415,10 @@ class TestH4CacheRealloc:
         новая инкарнация имени) кэш consumer'а НЕ отдаёт стейл-handle (H4) — читает
         СВЕЖИЙ кадр №2, а не замороженный №1. Комбинация всех трёх флагов ранее не
         покрывалась ни одним тестом по отдельности (H4-тест выше — без seqlock)."""
-        mm_producer = MemoryManager(seqlock_frames=True, owner_incarnation=True)
+        mm_producer = MemoryManager(owner_incarnation=True)
         prod = FrameShmMiddleware(mm_producer, owner="p_combo", slot="s_combo")
         item1 = prod.strip_and_write({"frame": _frame(100, 100, 11)})
-        assert item1["shm_seqlock"] is True, "producer обязан стамповать seqlock-формат"
+        assert _ref(item1)["gen"] % 2 == 0, "producer обязан стамповать чётное поколение записи"
 
         consumer = FrameShmMiddleware(
             MemoryManager(),
@@ -405,8 +439,8 @@ class TestH4CacheRealloc:
         # Realloc (рост кадра) — свежая инкарнация имени; кэш обязан подхватить новое имя,
         # а не отдать замороженный кадр №1 (H4).
         item2 = prod.strip_and_write({"frame": _frame(300, 300, 22)})
-        assert item2["shm_seqlock"] is True
-        assert item2["shm_actual_name"] != item1["shm_actual_name"], "имя обязано смениться (realloc)"
+        assert _ref(item2)["gen"] % 2 == 0
+        assert _ref(item2)["name"] != _ref(item1)["name"], "имя обязано смениться (realloc)"
         r2 = consumer.restore_frame({"data": dict(item2)}).get("frame")
         assert r2 is not None and int(r2.min()) == 22, "кадр №2 (seqlock+incarnation+cache), не замороженный №1"
 
@@ -464,7 +498,7 @@ class TestM2M3Observability:
         item = {"frame": _frame(20, 20)}
         out = mw.strip_and_write(item)
         assert out is item, "должен вернуться ТОТ ЖЕ объект (без аллокации coords-dict)"
-        assert "shm_actual_name" in item
+        assert _via_shm(item)
 
     def test_m2d_fallback_log_includes_reason(self):
         """M2d: первый throttled fallback-лог несёт причину (repr сбоя записи)."""
@@ -475,23 +509,41 @@ class TestM2M3Observability:
         assert any("причина=" in m for m in logs), "в логе fallback должна быть причина"
 
     def test_m2c_torn_raw_read_increments_counter(self):
-        """M2c: cross-process seqlock-чтение поймало torn → счётчик frame_torn_reads."""
+        """M2c: cross-process чтение поймало запись «в процессе» (поколение слота нечётно и
+        ссылка называет именно его) → кадр отброшен, счётчик frame_torn_reads."""
         from multiprocess_framework.modules.shared_resources_module.memory.format import (
             buffer as buf_mod,
         )
 
-        prod = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="p", slot="s")
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
         item = prod.strip_and_write({"frame": _frame(20, 20, 33)})
-        assert item["shm_seqlock"] is True
-        # Отравить generation слота продюсера в нечёт (writer «в процессе записи»).
-        idx = item["shm_index"]
-        handle = prod._mm.get_memory_data("p", "s")["handles"][idx]
-        buf_mod._write_generation(handle.buf, buf_mod.read_generation(handle.buf) + 1)
+        ref = _ref(item)
+        assert ref["gen"] % 2 == 0
+        # Отравить generation слота продюсера в нечёт (writer «в процессе записи»); ссылка на
+        # это поколение — единственный способ детерминированно попасть в torn, а не в stale.
+        handle = prod._mm.get_memory_data("p", "s")["handles"][ref["idx"]]
+        odd = buf_mod.read_generation(handle.buf) + 1
+        buf_mod._write_generation(handle.buf, odd)
+        ref["gen"] = odd
 
         consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
         out = consumer.restore_frame({"data": dict(item)})
         assert out.get("frame") is None, "torn → drop"
         assert consumer.frame_torn_reads == 1
+        prod._mm.close_all()
+
+    def test_stale_ref_dropped_not_counted_torn(self):
+        """Ячейку переписали после выдачи ссылки (gen ссылки < gen слота) → кадр отброшен как
+        stale (счётчик reader'а), а НЕ отдан чужой записью и не засчитан torn."""
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s", coll=1)
+        item1 = prod.strip_and_write({"frame": _frame(20, 20, 33)})
+        prod.strip_and_write({"frame": _frame(20, 20, 44)})  # coll=1: та же ячейка, gen +2
+
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
+        out = consumer.restore_frame({"data": dict(item1)})
+        assert out.get("frame") is None, "ссылка на переписанную запись не должна отдавать чужие пиксели"
+        assert consumer.frame_torn_reads == 0
+        assert consumer._reader.stale_drops == 1
         prod._mm.close_all()
 
 

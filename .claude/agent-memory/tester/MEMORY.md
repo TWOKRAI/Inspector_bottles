@@ -24,3 +24,4 @@
 - [config.reload inline rejects unknown observability keys](feedback_config_reload_inline_rejects_unknown_observability_keys.md) — session door only: clean success=False + "did you mean", not silent extra=ignore drop
 - [import-guard needs AST, not substring](feedback_import_guard_substring_vs_ast.md) — a docstring naming the other module fails a text-grep guard with zero real import
 - [angle boundary rounds outward at raw precision](feedback_angle_boundary_rounds_outward_at_raw_precision.md) — recompute atan2 from ROUNDED raw ints, not the float formula, before pinning accept/reject
+- [control-script tmp inside repo defeats confinement](feedback_control_script_tmp_inside_repo_defeats_confinement.md) — use OS temp (C:), REPO_ROOT is an allowed root so outside-control returns ok
