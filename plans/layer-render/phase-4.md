@@ -14,6 +14,8 @@
 - **Статус:** [PENDING] (зависит от 2.2, 3.3) · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (новый ключ конфига плагина и поле `SimCropConfig`)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** 2.2, 3.3
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** список эффектов на весь кадр после композиции объектов — в сим-кадре и в обучающем вырезе, один YAML-блок.
 
@@ -51,6 +53,8 @@ scene_effects:            # по порядку, сверху вниз
 - **Статус:** [PENDING] (зависит от 3.2, 3.3) · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** public-api-change (новое необязательное поле `LayerSpec`)
 - **CHAIN:** `tester`(RED) → `teamlead`(GREEN) → `reviewer`
+- **Dependencies:** 3.2, 3.3
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** у слоя объекта — свой список эффектов (шум/зерно краски, блик плёнки, размытие края), разыгрывается один раз
 при создании объекта из sub-rng слоя; альфа слоя не меняется.
@@ -81,6 +85,8 @@ YAML без ключа `effects` и `to_dict` без пустого `effects` �
 - **Статус:** [PENDING] (зависит от 4.2) · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (новая команда `layer_preview`)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** 4.2
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** в свойствах слоя редактора — список эффектов: добавить (выпадающий список имён), параметры-диапазоны,
 вероятность, удалить, порядок; сетка образцов превью показывает эффект без запуска стенда.
@@ -104,9 +110,11 @@ YAML без ключа `effects` и `to_dict` без пустого `effects` �
 
 ### Task 4.4 — панель эффектов сцены в `pult_web` (живьём, командой)
 
-- **Статус:** [PENDING] (зависит от 4.1; решение О-2) · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [PENDING] (зависит от 4.1, 4.3; О-2 — только живьём) · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (команды `scene.effects.get` / `scene.effects.set` у `scene_source`)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** 4.1, 4.3 (поля строятся из `effects.catalog`)
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** оператор включает и крутит эффекты кадра сима из пульта, видит результат на живом кадре.
 

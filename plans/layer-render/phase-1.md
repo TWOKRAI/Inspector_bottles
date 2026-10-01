@@ -7,7 +7,10 @@
 до реализации, только критерии приёмки; запрещены файлы реализации и тесты автора)** → **developer (Sonnet 5.5) или
 teamlead (Opus 5.5)** → **break-injection лида** (по одной на заявленное свойство, предсказание до прогона) →
 **reviewer (Opus 5.5, `run_in_background: false`, вердикт по SHA)**. Исполнитель не коммитит в `main` и не пушит;
-лимит — 2 итерации на петлю, третья — эскалация к `teamlead`.
+лимит — 2 итерации на петлю, третья — эскалация к `teamlead`. Каждая задача с кодом проходит grep рамки
+(plan.md → «Рамка плана») по своим новым/изменённым файлам механизма. Данные продукта, реальная плитка и фото лежат
+в `data/` вне git — тесты тестера и CI работают на синтетических копиях той же структуры; реальные данные — отдельный
+прогон лида точной командой из задачи.
 
 ---
 
@@ -16,6 +19,8 @@ teamlead (Opus 5.5)** → **break-injection лида** (по одной на з�
 - **Статус:** [PENDING] · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** new-full (`Services/layer_render/` — пакет: `__init__.py`, `interfaces.py`, `background.py`)
 - **CHAIN:** `tester`(RED) → `teamlead`(GREEN) → `reviewer`
+- **Dependencies:** нет
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** ключ `background_layers` в конфиге `scene_source` задаёт фон сцены стеком слоёв снизу вверх (`solid` — заливка
 RGB, `tile` — RGB/RGBA-картинка, прокручивается с лентой); без ключа кадр байт в байт прежний.
@@ -47,9 +52,12 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
   компоновщика — тогда кадр стоит столько же, сколько старый путь.
 - `SceneCompositor(..., background_layers=None)`: `None` → ветка 3.6 нетронута (`background_bgr` + `background_tile`).
   Заданы оба (`background_layers` и `background_tile`) → `ValueError` в конструкторе.
-- Плагин: `background_layers` и `background_texture` в одном конфиге → `ValueError` в `configure()` (ошибка конфигурации
-  стенда, не откат). Нечитаемая картинка слоя `tile` → ровно один `ctx.log_error`, слой выброшен, движок жив (тот же
-  приём, что `_load_background_tile`, `plugin.py:352-370`). Чтение — `imread_unicode(..., IMREAD_UNCHANGED)`, BGR(A)→RGB(A).
+- Где `ValueError`: кривая схема — в `background_layers_from_config` (функция); плагин зовёт её в `configure()` **до и вне**
+  try/except сборки движка (`plugin.py:312-333`), поэтому ошибка схемы и «оба ключа фона» (`background_layers` +
+  `background_texture`) роняют `configure()` — ошибка конфигурации стенда, не откат. Нечитаемая картинка слоя `tile` —
+  не ошибка схемы: ровно один `ctx.log_error`, слой выброшен, движок жив (приём `_load_background_tile`,
+  `plugin.py:352-370`); если выброшены все слои — стек пуст, фон чёрный (это не «пустой список» схемы).
+  Чтение — `imread_unicode(..., IMREAD_UNCHANGED)`, BGR(A)→RGB(A).
 - Строка лога `configure()` называет фон: `фон=слои[solid(0,0,0), tile(<путь>, 410x484, RGBA)]`.
 
 **Steps:** 1. tester пишет приёмку по Acceptance (RED). 2. teamlead: `interfaces.py` + `background.py` → компоновщик →
@@ -57,12 +65,13 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 
 **Acceptance:**
 - [ ] Без ключа `background_layers` золотой эталон плагина `test_acceptance_lateral_offset_plugin.py:492-493` — зелёный без правки литералов.
-- [ ] Эквивалентность старому пути: `[{solid: [60,60,60]}, {tile: <RGB-тайл>}]` даёт кадр, **побайтно равный** старому
-      `background_bgr=(60,60,60), background_tile=<тот же тайл>`, на 3 позициях энкодера × `belt_direction ±1` × `y_px` с
+- [ ] Эквивалентность старому пути: `[{solid: [10,20,30]}, {tile: <RGB-тайл>}]` даёт кадр, **побайтно равный** старому
+      `background_bgr=(30,20,10), background_tile=<тот же тайл>` (несимметричный цвет ловит перестановку RGB/BGR), на 3 позициях энкодера × `belt_direction ±1` × `y_px` с
       тайлом, выходящим за верх и низ кадра.
 - [ ] RGBA-тайл 4×4 с альфой 0 в одном столбце поверх `solid [0,0,0]`: в этом столбце пиксели кадра `[0,0,0]`, в остальных — RGB тайла.
 - [ ] Альфа 128 над `solid [0,0,0]` и пикселем тайла `[200,100,50]` → `[100,50,25]` ± 1.
-- [ ] Каждая форма кривого ключа из DESIGN → `ValueError` с индексом элемента; оба ключа фона в конфиге плагина → `ValueError`.
+- [ ] Каждая форма кривой схемы → `ValueError` из `background_layers_from_config` с индексом элемента; она же и «оба ключа
+      фона» из `configure()` плагина — исключение выходит наружу (движок не собирается на сплошном фоне).
 - [ ] Нечитаемый файл `tile` → ровно 1 `log_error` за `configure()`, 0 исключений в 10 вызовах `produce()`.
 - [ ] Медиана `SceneCompositor.render()` на 1440×1080 без объектов, 200 кадров: `[solid, RGBA-тайл 410×484]` ≤ 1.3× медианы
       старого пути `background_tile` на той же машине; оба числа в отчёте.
@@ -84,6 +93,8 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 - **Статус:** [PENDING] · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** impl-only (CLI-инструмент, новая необязательная опция)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** нет; `Services/line_sim/README.md` правит и 2.2 (разные разделы — лид сводит при слиянии)
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** с `--gap-alpha` инструмент пишет RGBA-PNG: RGB — тот же тайл, что без опции, альфа 0 в просветах между звеньями,
 255 на звеньях и бортах.
@@ -108,7 +119,8 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 - [ ] С опцией: `out[:, :, :3]` побайтно равен тайлу без опции (опция добавляет только альфу).
 - [ ] Синтетический тайл (тестер рисует сам: серые звенья V≈78, мятные просветы V≈79 с S выше звеньев, зелёные борта
       15 строк сверху/снизу S≈100 V≈190): альфа 0 у ≥ 99 % пикселей просвета, 255 у ≥ 99 % пикселей звеньев, у 100 % бортов.
-- [ ] Альфа периодична: столбец 0 и столбец `w` (сдвиг на период) совпадают у ≥ 99 % строк на реальном тайле.
+- [ ] Альфа периодична: на синтетическом тайле с известным периодом `P` (два периода в ширину) столбцы `x` и `x+P`
+      совпадают у ≥ 99 % строк для всех `x < P`; на реальном тайле — то же с `P = period_px` из вывода инструмента (прогон лида в 1.3).
 - [ ] Пороги — параметры CLI; кривые значения (`LO>HI`, вне 0..179/0..255, `TOP+BOTTOM ≥ h`) → `SystemExit` с именем флага.
 - [ ] README: рецепт команды с `--gap-alpha` и таблица замера порогов.
 
@@ -123,6 +135,8 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 - **Статус:** [PENDING] (зависит от 1.1, 1.2) · **Level:** Middle (Sonnet 5.5) · **Assignee:** developer → живой стенд лида → reviewer
 - **Module contract:** n/a (данные, конфиг, правила)
 - **CHAIN:** `developer` → `reviewer`(express)
+- **Dependencies:** 1.1, 1.2
+- **Gate:** `sentrux check .` зелёный; замер лида на стенде записан; `reviewer`(express) APPROVED
 - **Независимый тестер:** не запускается — задача без кода (данные + конфиг + правила). Проверка — замер лида на живом
   стенде (стадия 4); до замера задача считается непроверенной. Сказать это в коммите.
 
@@ -134,11 +148,15 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 3. `.sentrux/rules.toml` — четыре `[[boundaries]]`: layer_render ↛ line_sim, layer_render ↛ dataset_gen, layer_render ↛ ml_train, dataset_gen ↛ line_sim (все под `Services/`)
 4. `Services/STATUS.md` — строка `layer_render`
 5. `Services/layer_render/DECISIONS.md` (новый) — LR-001: пакет ниже обоих сервисов, политика реэкспорта, контракт rng
+6. `scripts/validate.py` — `"layer_render"` в список `SERVICES` (`validate.py:73-77`; без этого validate новый модуль не смотрит)
 
 **Acceptance:**
 - [ ] `sentrux check .` (CLI, не MCP) — `✓ All rules pass`, число проверенных правил выросло на 4 против `main`; вывод в отчёт.
 - [ ] Живой стенд (лид, `backend_ctl`): на кадре `scene_source` медиана V пикселей просветов (маска из 1.2, перенесённая
       на кадр) ≤ 10, медиана V звеньев — в пределах ± 3 от кадра до задачи; поля выше/ниже ленты — `[0,0,0]`.
-- [ ] `python scripts/validate.py` — зелёный (у нового модуля README/STATUS/DECISIONS/interfaces/tests на месте).
+- [ ] `python scripts/validate.py` — зелёный, и `layer_render` в его выводе (README/STATUS/interfaces/tests проверены);
+      инъекция: убрать `Services/layer_render/STATUS.md` → validate красный.
+- [ ] Реальная плитка (лид): `python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png
+      --out data/line_sim/belt_tile.png --force-period --gap-alpha` — `period_px` и проверка периодичности альфы в отчёте.
 
 **Out of scope:** код. Если стенд показывает дефект — новая задача, не правка здесь.

@@ -15,18 +15,23 @@
 - **Статус:** [PENDING] · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает `compose`; `dataset_gen.core.compose` — реэкспорт)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** 1.1
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** `composite`, `rotate_expand`, `crop_to_alpha`, `fit_longest_side`, `cast_contact_shadow` определены в
 `Services/layer_render/compose.py`; старый модуль — только реэкспорт.
 
 **Files:**
-1. `Services/layer_render/compose.py` (новый — тело из `Services/dataset_gen/core/compose.py`, 153 стр., без изменений)
+1. `Services/layer_render/compose.py` (новый) — тело `dataset_gen` compose (153 стр.) без изменений
 2. `Services/dataset_gen/core/compose.py` — реэкспорт пяти имён
-3. `Services/layer_render/__init__.py`, `Services/layer_render/interfaces.py`, `Services/layer_render/README.md`
-- тесты: `Services/layer_render/tests/test_compose_identity.py`; `Services/dataset_gen/tests/test_compose.py` остаётся где есть
+3. `Services/layer_render/io.py` (новый) — `imread_unicode`/`imwrite_unicode`, тело из каталога `dataset_gen` без изменений
+4. `Services/dataset_gen/core/catalog.py` — реэкспорт двух функций
+5. `Services/layer_render/__init__.py`, `Services/layer_render/README.md`
+- тесты: `Services/layer_render/tests/test_compose_identity.py` (старый тест compose в `dataset_gen` остаётся где есть)
 
 **Acceptance:**
-- [ ] `Services.dataset_gen.core.compose.composite is Services.layer_render.compose.composite` — и так для всех пяти имён.
+- [ ] `Services.dataset_gen.core.compose.composite is Services.layer_render.compose.composite` — и так для всех пяти имён
+      и для `imread_unicode`/`imwrite_unicode` (`dataset_gen.core.catalog` ↔ `layer_render.io`).
 - [ ] Все золотые эталоны плана ([goldens.md](goldens.md)) — зелёные без правки литералов.
 - [ ] `sentrux check .` — зелёный; `layer_render` не импортирует `dataset_gen`.
 
@@ -39,6 +44,8 @@
 - **Статус:** [PENDING] (зависит от 3.1 и от слияния 2.2) · **Level:** Senior+ (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** public-api-change
 - **CHAIN:** `teamlead`(INTERFACE) → `tester`(RED) → `teamlead`(GREEN) → `reviewer`
+- **Dependencies:** 3.1, слияние 2.2 (`factory.py`)
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** розыгрыш и композиция стека слоёв — чистая функция в `layer_render`, не знающая паспорта и `line_sim`;
 `LayeredObject` остаётся публичным именем `line_sim` и собирает паспорт вокруг неё.
@@ -75,6 +82,8 @@
 - **Статус:** [PENDING] (зависит от 3.1) · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** public-api-change
 - **CHAIN:** `tester`(RED: оракул — копия старого `apply_photometric` в тесте) → `teamlead`(GREEN) → `reviewer`
+- **Dependencies:** 3.1
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** фотометрия — упорядоченный список `EffectSpec`, исполняемый `apply_effects`; `AugmentConfig` превращается в
 этот список, и `apply_photometric` становится одной строкой поверх него.

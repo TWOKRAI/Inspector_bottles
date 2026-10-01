@@ -10,9 +10,9 @@
 
 | Вид | Что даёт | Потребитель | Сегодня |
 |---|---|---|---|
-| `image` | RGBA из файла | слои пресетов, `tile` фона (1.1) | строка-путь в `sprite_source` |
-| `class` | разыгранный эталон класса каталога | слой `class://`, генератор 2.2 | `class://` + `SpriteCatalog` |
-| `solid` | заливка цветом (весь холст или по альфе другого источника) | `solid` фона (1.1), `color_rgb` слоя | `color_rgb`, `background_bgr` |
+| `image` | RGBA из файла (`layer_render.io` из 3.1) | слои пресетов, `tile` фона (1.1) | строка-путь в `sprite_source` |
+| `class` | эталон класса из каталога, **переданного вызывающим** | слой `class://`, генератор 2.2 | `class://` + `SpriteCatalog` |
+| `solid` | заливка цветом заданного размера | `solid` фона (1.1), `color_rgb` слоя | `color_rgb`, `background_bgr` |
 | `glyph` | текст шрифтом: высота, штрих, краска, зерно, мягкий край | каталоги первого продукта | `make_font_letters`, `make_ru_letter_sprites` (два кода) |
 | `cutout` | вырез объекта из фото с прозрачным фоном | реальные эталоны каталогов | `dataset_gen/core/realcut.py`, `tools/cut_real_disks.py` |
 
@@ -30,9 +30,16 @@
 - **Статус:** [PENDING] (зависит от 1.1, 3.2) · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** public-api-change (`LayerSpec.sprite_source` принимает словарь; новый модуль `layer_render.sources`)
 - **CHAIN:** `teamlead`(INTERFACE) → `tester`(RED) → `teamlead`(GREEN) → `reviewer`
+- **Dependencies:** 3.1 (`io.py`), 3.2 (`layers.py`)
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** реестр `SOURCES: dict[str, fn -> RGBA]` с тремя видами; `sprite_source` в YAML принимает и прежние формы
-(строка-путь, `class://`), и словарь `{image: путь}` / `{solid: {color_rgb, size_px | like: <слой>}}`.
+(строка-путь, `class://`), и словарь `{image: путь}` / `{solid: {color_rgb, size_px}}`.
+
+**DESIGN — без обратного импорта.** `layer_render` не импортирует `dataset_gen`: `image` читает через `layer_render.io`
+(переехал в 3.1); `class` получает каталог от вызывающего — любой объект с `get_sprite(class_index, rng)` (фабрика
+`line_sim` передаёт свой `SpriteCatalog`), так же как `cutout` в 5.3 получает детектор функцией. `SpriteCatalog` остаётся в
+`dataset_gen`.
 
 **Files:**
 1. `Services/layer_render/sources.py` (новый)
@@ -49,6 +56,7 @@
 - [ ] Неизвестный вид → `ValueError` со списком известных; ни один источник не тянет rng, если не разыгрывает (`class` — тянет как сегодня).
 - [ ] Эталоны фона 1.1 и `test_acceptance_lateral_offset_plugin.py:492-493` — зелёные.
 - [ ] `pult_web` грузит и сохраняет пресет со словарным источником (YAML round-trip через `preset.commit`).
+- [ ] AST-тест 1.1 расширен на `sources.py`: `layer_render` не импортирует `dataset_gen`/`line_sim`.
 
 **Out of scope:** `glyph` (5.2), `cutout` (5.3), поля редактора для выбора вида (строка-путь в редакторе работает как сегодня).
 
@@ -56,9 +64,11 @@
 
 ### Task 5.2 — источник `glyph` + один CLI каталога глифов; два старых генератора — прокладки
 
-- **Статус:** [PENDING] (зависит от 5.1 и решения О-3) · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [PENDING] (зависит от 5.1; О-3 — новые пиксели) · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (новый вид источника + новый CLI; старые CLI сохраняются)
 - **CHAIN:** `tester`(RED: sha256 выходов обоих старых CLI до задачи) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** 5.1
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
 **Goal:** текст шрифтом рисует **одна** функция `SOURCES["glyph"](text, font, height_px | height_frac, stroke_px, ink_rgb,
 grain_sigma, edge_blur_px, rng)`; каталог глифов строит один CLI с продуктово-нейтральными аргументами; оба прежних
@@ -73,14 +83,16 @@ grain_sigma, edge_blur_px, rng)`; каталог глифов строит од�
 5. README обоих сервисов (dataset_gen, line_sim) — где теперь инструмент
 - тесты рядом с кодом: test_source_glyph.py (layer_render), test_make_glyph_catalog.py (dataset_gen)
 
-**Acceptance:**
+**Acceptance (О-3 решено 2026-10-01: новые пиксели допустимы):**
 - [ ] `test_acceptance_look_1_2_ink_disk.py`, `test_hazards_look_1_2.py`, `test_acceptance_1_1b_font_tool.py`,
-      `test_acceptance_font_stroke.py`, `test_hazards_font_stroke.py`, `test_hazards_1_1b_tool_preset.py` — зелёные без правки.
-- [ ] О-3 «побайтно» (рекомендация): sha256 всех файлов `make_ru_letter_sprites --font <DejaVuSans-Bold из matplotlib>
-      --size 256` — литералы сняты тестером до задачи — совпадают после. О-3 «новые пиксели»: высота/D ∈ [0.47, 0.50]
-      методом замера лида, пресеты `ru_letters_disk.yaml`/`manual_letters_disk.yaml` грузятся.
+      `test_acceptance_font_stroke.py`, `test_hazards_font_stroke.py`, `test_hazards_1_1b_tool_preset.py` — зелёные; где литерал
+      PNG меняется из-за нового источника — лид фиксирует это отдельной строкой в отчёте (было/стало), не молча.
+- [ ] Геометрия по замеру: высота глифа / D ∈ [0.47, 0.50], штрих / D ∈ [0.075, 0.091] на каталоге первого продукта
+      (метод замера лида из `letters-retrain`); пресеты `ru_letters_disk.yaml`/`manual_letters_disk.yaml` грузятся.
+- [ ] Старые каталоги не удалены — переименованы с суффиксом версии (`<имя>_v1`), команда переименования и пути в отчёте
+      (данные вне git — шаг лида).
 - [ ] `make_glyph_catalog` с не-кириллицей (`--chars 0123`, латинский шрифт) строит каталог — продукт без правки кода.
-- [ ] `ImageFont.truetype` для глифа — ровно в одном месте (`sources.py`; `preview.py` подписи — не глиф, не считается).
+- [ ] `ImageFont.truetype` для глифа — ровно в одном месте (`sources.py`; подписи `preview.py` — не глиф).
 - [ ] `grep -inE "letter|букв|disk|диск"` по `sources.py` и `make_glyph_catalog.py` — 0 совпадений.
 
 **Out of scope:** вид `glyph` прямо в слое пресета без каталога — работает автоматически через реестр 5.1, отдельных
@@ -93,12 +105,14 @@ grain_sigma, edge_blur_px, rng)`; каталог глифов строит од�
 - **Статус:** [PENDING] (зависит от 5.1) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (новый вид источника; CLI `cut_real_disks` сохраняется)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Dependencies:** 5.1
+- **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; grep рамки — 0
 
-**Goal:** вырез объекта из фото с прозрачным фоном — вид `cutout` в реестре; форма выделения — параметр (`shape: circle`
-— единственная сегодня, это `detect_disk` из `realcut.py`).
+**Goal:** вырез объекта из фото с прозрачным фоном — вид `cutout` в реестре; детектор формы передаёт вызывающий
+(сегодня единственный — `detect_disk` из `realcut.py`, круг). Параметра `shape` нет (YAGNI: одно значение).
 
 **Files:**
-1. `Services/layer_render/sources.py` — вид `cutout(image, shape="circle", ...)`; детекция круга передаётся функцией (без импорта `dataset_gen`)
+1. `Services/layer_render/sources.py` — вид `cutout(image, detect, ...)`; `detect` — функция вызывающего (без импорта `dataset_gen`)
 2. `Services/dataset_gen/core/realcut.py` — регистрирует/зовёт `cutout` с `detect_disk`; поведение то же
 3. `Services/dataset_gen/tools/cut_real_disks.py` — без изменений CLI, внутри — `cutout`
 4. `Services/dataset_gen/README.md`
@@ -106,7 +120,6 @@ grain_sigma, edge_blur_px, rng)`; каталог глифов строит од�
 
 **Acceptance:**
 - [ ] `test_realcut.py` — зелёный без правки; `cut_real_disks` на 3 фикстурных фото — побайтно прежние эталоны (литералы — тестер до задачи).
-- [ ] `shape` вне `{"circle"}` → `ValueError`, текст называет допустимые и говорит, что некруглые формы — вне плана.
 - [ ] `layer_render` не импортирует `dataset_gen` (AST-тест 1.1).
 
 **Out of scope:** некруглые формы (прямоугольник, полигон, маска по сегментации) — когда появится такой продукт; правка
