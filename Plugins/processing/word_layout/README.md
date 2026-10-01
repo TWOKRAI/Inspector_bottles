@@ -10,7 +10,7 @@ Processing-плагин: по целевому слову, координата�
 ## Поток
 
 ```
-ml_inference.predictions [{label, angle_deg, angle_valid, confidence}]
+ml_inference.predictions [{label, angle_deg, angle_valid, confidence, below_threshold}]
         │
    word_layout  ── потоковый жадный матчинг буквы в слот слова ──►
         │
@@ -25,7 +25,7 @@ ml_inference.predictions [{label, angle_deg, angle_valid, confidence}]
 
 | Порт | Тип | Назначение |
 |------|-----|-----------|
-| `predictions` (вход) | list[dict] | топ-K от ml_inference (label/angle_deg/angle_valid) |
+| `predictions` (вход) | list[dict] | топ-K от ml_inference (label/angle_deg/angle_valid/confidence/below_threshold) |
 | `word` (вход, опц.) | str/dict | целевое слово (иначе register `target_word`) |
 | `trigger` (вход, опц.) | any | «взять диск» при `use_trigger=True` |
 | `robot_job` (выход) | dict | поза роботу `{x_mm, y_mm, z_mm, r_deg, …}` |

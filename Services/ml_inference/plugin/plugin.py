@@ -189,7 +189,10 @@ class MLInferencePlugin(ProcessModulePlugin):
                 self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
                 logger.exception("MLInferencePlugin: inference error")  # traceback в лог
                 # регистры не держат прошлый кадр (stale last_below_threshold=False выглядел бы
-                # как «уверенное попадание»): пустой результат → fail-safe «не доверять»
+                # как «уверенное попадание»): пустой результат → fail-safe «не доверять».
+                # Кэш чистим тоже: иначе при inference_every_n>1 следующий кадр отдал бы
+                # предсказание ДО ошибки как «уверенное», а регистры остались бы fail-safe.
+                self._last_predictions = []
                 self._update_last_pred_telemetry([])
                 return {**item, "predictions": []}
             # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
@@ -220,9 +223,13 @@ class MLInferencePlugin(ProcessModulePlugin):
         return {**item, "frame": result_frame, "predictions": preds}
 
     def _mark_below_threshold(self, preds: list[dict]) -> list[dict]:
-        """Копии предсказаний с `below_threshold = confidence < confidence_threshold` (строго `<`)."""
+        """Копии предсказаний с `below_threshold = not (confidence >= confidence_threshold)`.
+
+        Граница `==` порога — не ниже. NaN-уверенность → below (сравнение с NaN ложно, поэтому
+        `conf < thr` пропустило бы её как «уверенную»).
+        """
         threshold = float(self._reg.confidence_threshold)
-        return [{**p, "below_threshold": float(p["confidence"]) < threshold} for p in preds]
+        return [{**p, "below_threshold": not (float(p["confidence"]) >= threshold)} for p in preds]
 
     @staticmethod
     def _draw_overlay(frame, top1: dict):

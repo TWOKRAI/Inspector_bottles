@@ -81,9 +81,10 @@ class MLInferenceRegisters(SchemaBase):
     ] = ""
     last_label: Annotated[str, FieldMeta("Последний класс", readonly=True)] = ""
     last_confidence: Annotated[float, FieldMeta("Последняя уверенность", readonly=True)] = 0.0
-    # КОНТРАКТ: last_angle_deg валиден ТОЛЬКО при last_angle_valid=True. Потребитель
-    # (робот-доворот) ОБЯЗАН сначала проверить last_angle_valid; при False — НЕ доворачивать
-    # (full-симметрия/нет детекции/нет угла). Иначе доворот по неопределённому углу.
+    # КОНТРАКТ: last_angle_deg валиден ТОЛЬКО при last_angle_valid=True. Угол считается и для топ-1
+    # НИЖЕ порога, поэтому потребитель (робот-доворот) ОБЯЗАН проверить ОБА условия:
+    # `last_angle_valid` И `last_below_threshold == False`. last_angle_valid=False — НЕ доворачивать
+    # (full-симметрия/нет детекции/нет угла); below_threshold=True — буква не доверена, диск не брать.
     last_angle_deg: Annotated[float, FieldMeta("Последний угол", readonly=True, unit="°")] = 0.0
     last_angle_valid: Annotated[bool, FieldMeta("Угол определён", readonly=True)] = False
     # КОНТРАКТ: True = топ-1 ниже порога (или предсказания нет) — потребитель НЕ действует по last_label.
