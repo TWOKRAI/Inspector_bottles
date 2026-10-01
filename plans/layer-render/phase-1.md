@@ -130,33 +130,49 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 
 ---
 
-### Task 1.3 — плитка RGBA + стенд на `[чёрный, плитка]` + границы sentrux
+### Task 1.3 — стенд на `[чёрный, плитка]` + границы sentrux + удаление ветки `background_tile`
 
-- **Статус:** [PENDING] (зависит от 1.1, 1.2) · **Level:** Middle (Sonnet 5.5) · **Assignee:** developer → живой стенд лида → reviewer
-- **Module contract:** n/a (данные, конфиг, правила)
-- **CHAIN:** `developer` → `reviewer`(express)
+- **Статус:** [IN PROGRESS] волна 2 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → живой стенд лида → reviewer
+- **Module contract:** public-api-change (удаляются kwarg `SceneCompositor(background_tile=)` и ключ конфига `background_texture`)
+- **CHAIN:** `tester`(RED, worktree до кода) → `developer`(GREEN) → инъекции лида → стенд лида → `reviewer`
 - **Dependencies:** 1.1, 1.2
-- **Gate:** `sentrux check .` зелёный; замер лида на стенде записан; `reviewer`(express) APPROVED
-- **Независимый тестер:** не запускается — задача без кода (данные + конфиг + правила). Проверка — замер лида на живом
-  стенде (стадия 4); до замера задача считается непроверенной. Сказать это в коммите.
+- **Gate:** RED тестера → GREEN; инъекции записаны; `sentrux check .` зелёный; замер стенда записан; `reviewer` APPROVED
+- **Перестроено 2026-10-01 (волна 2):** условие CTO (б) — после перевода стенда ветка `background_tile` и ключ
+  `background_texture` удаляются в этой же задаче. С кодом задача получает слепого тестера (раньше «без кода, без тестера»).
+  Критерий периодичности альфы на реальной плитке снят (решение владельца: два периода тайла — разные звенья).
 
-**Goal:** стенд `apps/line_sim` рисует ленту поверх чёрного: просветы и поля выше/ниже ленты — чёрные.
+**Goal:** стенд `apps/line_sim` рисует ленту поверх чёрного стеком `background_layers`; старого пути фона-тайла нет —
+один способ задать фон.
 
 **Files:**
-1. `data/line_sim/belt_tile.png` — пересобрать с `--gap-alpha` (вне git; старый сохранить как `belt_tile_rgb.png`)
-2. `apps/line_sim/pipeline.yaml` — `background_texture` → `background_layers: [{solid: [0,0,0]}, {tile: data/line_sim/belt_tile.png}]`, комментарий-рецепт обновить
-3. `.sentrux/rules.toml` — четыре `[[boundaries]]`: layer_render ↛ line_sim, layer_render ↛ dataset_gen, layer_render ↛ ml_train, dataset_gen ↛ line_sim (все под `Services/`)
-4. `Services/STATUS.md` — строка `layer_render`
-5. `Services/layer_render/DECISIONS.md` (новый) — LR-001: пакет ниже обоих сервисов, политика реэкспорта, контракт rng
-6. `scripts/validate.py` — `"layer_render"` в список `SERVICES` (`validate.py:73-77`; без этого validate новый модуль не смотрит)
+1. `data/line_sim/belt_tile.png` — пересобрать с `--gap-alpha` (вне git; старый сохранить как `belt_tile_rgb.png`) — **лид**
+2. `apps/line_sim/pipeline.yaml` — `background_texture` → `background_layers: [{solid: [0, 0, 0]}, {tile: data/line_sim/belt_tile.png}]`, комментарий-рецепт обновить
+3. `Services/line_sim/core/scene_compositor.py` — удалить kwarg `background_tile`, `_validate_background_tile`, ветку рендера тайла; `background_bgr` (сплошная заливка без слоёв) остаётся
+4. `Plugins/sim/scene_source/plugin.py` — удалить чтение `background_texture` и `_load_background_tile`; ключ `background_texture` в конфиге → `ValueError` из `configure()` с подсказкой `background_layers` (не тихое игнорирование)
+5. Тесты старого пути (`Services/line_sim/tests/test_acceptance_3_6.py`, `test_hazards_3_6.py`, `test_hazards_5_3b.py::test_background_tile_shifts_same_direction_as_objects_when_reversed`,
+   `Plugins/sim/scene_source/tests/test_scene_source_task_3_6.py`, `test_scene_source_hazards_3_6.py`, ветки `background_texture` в тестах 1.1) — **перевести на `background_layers`**
+   с теми же литералами sha256, либо удалить с указанием теста, который держит то же свойство. Таблица «старый тест → новый/эквивалент» — в отчёт
+6. README/STATUS/DECISIONS `Services/line_sim`, `Plugins/sim/scene_source`, `Services/layer_render/README.md` — убрать `background_texture`/`background_tile` как живой путь (в DECISIONS — запись об удалении)
+7. `.sentrux/rules.toml` — четыре `[[boundaries]]`: layer_render ↛ line_sim, layer_render ↛ dataset_gen, layer_render ↛ ml_train, dataset_gen ↛ line_sim (все под `Services/`)
+8. `Services/STATUS.md` — строка `layer_render`
+9. `Services/layer_render/DECISIONS.md` (новый) — LR-001: пакет ниже обоих сервисов, политика реэкспорта, контракт rng; LR-002: один способ задать фон (удаление `background_texture`)
+10. `scripts/validate.py` — `"layer_render"` в список `SERVICES` (`validate.py:73-77`)
 
 **Acceptance:**
-- [ ] `sentrux check .` (CLI, не MCP) — `✓ All rules pass`, число проверенных правил выросло на 4 против `main`; вывод в отчёт.
-- [ ] Живой стенд (лид, `backend_ctl`): на кадре `scene_source` медиана V пикселей просветов (маска из 1.2, перенесённая
-      на кадр) ≤ 10, медиана V звеньев — в пределах ± 3 от кадра до задачи; поля выше/ниже ленты — `[0,0,0]`.
-- [ ] `python scripts/validate.py` — зелёный, и `layer_render` в его выводе (README/STATUS/interfaces/tests проверены);
-      инъекция: убрать `Services/layer_render/STATUS.md` → validate красный.
-- [ ] Реальная плитка (лид): `python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png
-      --out data/line_sim/belt_tile.png --force-period --gap-alpha` — `period_px` и проверка периодичности альфы в отчёте.
+- [ ] A1. `SceneCompositor(..., background_tile=<любой массив>)` → `TypeError` (kwarg нет); в `scene_compositor.py` нет имени `background_tile`.
+- [ ] A2. `scene_source.configure()` с ключом `background_texture` (любое значение, в т.ч. `None`-строка пути, и вместе с `background_layers`)
+      → `ValueError` из `configure()`, в тексте есть `background_layers`. Без ключа — поведение 1.1 как есть.
+- [ ] A3. Эталоны старого пути держатся на новом: кадры `scene_source`/`SceneCompositor` с `background_layers: [{solid: <тот же цвет>}, {tile: <тот же файл>}]`
+      дают **те же литералы sha256**, что пинили тесты 3.6 и `_GOLDEN_BACKGROUND_TEXTURE_SHA` (1.1). Литералы не переписываются.
+- [ ] A4. Свойства 3.6/5.3b на пути `background_layers`: фон едет с энкодером в ту же сторону, что объекты, и при реверсе ленты;
+      сдвиг цикличен по ширине тайла; узкий тайл заполняет кадр без растяжения; относительный путь `tile` — от корня репо, не от cwd;
+      нечитаемый тайл — один `log_error`, слой выброшен, движок работает.
+- [ ] A5. `apps/line_sim/pipeline.yaml`: у `scene_source` ключ `background_layers` ровно `[{solid: [0, 0, 0]}, {tile: data/line_sim/belt_tile.png}]`, ключа `background_texture` нет.
+- [ ] A6. `grep -rnE "background_texture|background_tile" Services Plugins apps` вне `tests/`, `DECISIONS.md` и текста `ValueError`/строки миграции в README — 0.
+- [ ] A7. `sentrux check .` (CLI, не MCP) — `✓ All rules pass`, правил на 4 больше, чем на `main`; вывод в отчёт.
+- [ ] A8. `python scripts/validate.py` — зелёный, `layer_render` в выводе; инъекция: убрать `Services/layer_render/STATUS.md` → validate красный.
+- [ ] A9 (лид, стенд, `backend_ctl`): на кадре `scene_source` медиана V просветов (маска 1.2, перенесённая на кадр) ≤ 10, медиана V звеньев ± 3
+      от кадра до задачи; поля выше/ниже ленты — `[0,0,0]`.
+- [ ] A10 (лид): `python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png --out data/line_sim/belt_tile.png --force-period --gap-alpha` — `period_px` в отчёте.
 
-**Out of scope:** код. Если стенд показывает дефект — новая задача, не правка здесь.
+**Out of scope:** `_background_only_frame` `scene_source` (сплошная заливка остаётся); фон в пресете (Ф3); правки `dataset_gen`.
