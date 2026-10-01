@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+import statistics
+import time
+import warnings
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -34,6 +37,8 @@ _CIRCLES = [
 ]
 _RED_BGR = (20, 20, 220)
 _SERVICE_KEYS = {"plugin_class", "plugin_name", "category"}
+_TIMING_BUDGET_MS = 5.0
+_TIMING_RUNS = 50
 
 
 def _make_mock_ctx(config: dict) -> MagicMock:
@@ -160,6 +165,44 @@ def test_pnt_t1_draw_contours_does_not_modify_input_frame():
     _blob(params).process([{"frame": frame}])
 
     assert np.array_equal(frame, before)
+
+
+def test_pnt_t1_chain_timing_within_budget_or_warns():
+    """Медиана времени цепочки на эталонном кадре — информационно, бюджет не блокирует.
+
+    Решение владельца 2026-10-01: порог 5 мс machine-dependent (ревью этой задачи получило 6.33 мс
+    median на другой машине против 4.6 мс у лида), поэтому превышение — предупреждение, не red.
+    Детекции проверяются литералом, чтобы тест не стал пустым при превышении бюджета.
+    """
+    params = _processor_params("inspection_full.yaml")
+    color_mask = _color_mask(params["color_mask"])
+    blob = _blob(params["blob_detector"])
+    frame = _make_frame()
+
+    def _run_once() -> list[dict]:
+        return blob.process(color_mask.process([{"frame": frame.copy()}]))
+
+    for _ in range(5):
+        _run_once()
+
+    samples_ms = []
+    out = None
+    for _ in range(_TIMING_RUNS):
+        start = time.perf_counter()
+        out = _run_once()
+        samples_ms.append((time.perf_counter() - start) * 1000)
+
+    assert len(out[0]["detections"]) == 6
+
+    median_ms = statistics.median(samples_ms)
+    if median_ms > _TIMING_BUDGET_MS:
+        warnings.warn(
+            f"цепочка inspection_full: median {median_ms:.2f} мс > бюджета {_TIMING_BUDGET_MS} мс "
+            "(не блокирует, machine-dependent — см. docs/reviews/2026-10-01_task-T1-review.md); "
+            "оптимизация color_mask (HSV) отложена до фреймворковых задач",
+            UserWarning,
+            stacklevel=1,
+        )
 
 
 def test_pnt_t1_mask_of_different_size_falls_back_to_own_thresholding():
