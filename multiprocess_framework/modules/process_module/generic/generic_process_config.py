@@ -156,7 +156,7 @@ class GenericProcessConfig(ProcessLaunchConfig):
             info="Глубина SHM-кольца кадров ЭТОГО owner'а (per-camera, Ф7 G.4.b). "
             "0 = не задана → DEFAULT_FRAME_RING_DEPTH (8, Task 4.7c; без гейта FW_QOS_PROFILES). "
             "От глубины кольца писателя считается бюджет «в полёте» получателей "
-            "(data-очередь + chain_max_lag_items <= глубина - 2). "
+            "в КАДРАХ (B = глубина - 2; lag <= B - 2, транзит измеряется). "
             "В рецепте — extras.frame_ring_depth.",
             min=0,
         ),
@@ -165,12 +165,23 @@ class GenericProcessConfig(ProcessLaunchConfig):
     data_queue_maxsize: Annotated[
         int,
         FieldMeta(
-            "Размер data-очереди",
-            info="Размер data-очереди процесса (Task 4.7c). 0 = авто: у процесса за кольцом "
-            "кадров выводится из топологии (кольцо - 2 - chain_max_lag_items), иначе прежние 50. "
-            ">0 = явный размер; при входе от писателя кольца обязан влезать в бюджет «в полёте», "
-            "иначе ошибка сборки. В proc_dict уходит как queues['data']['maxsize']. "
-            "В рецепте — extras.data_queue_maxsize.",
+            "Потолок памяти data-очереди",
+            info="Потолок памяти IPC data-очереди процесса (Task 4.7c): 0 = 50 (дефолт при "
+            "регистрации), из топологии НЕ выводится. >0 = явный потолок из рецепта, принимается "
+            "как есть (в бюджет кадров не входит). В proc_dict уходит как "
+            "queues['data']['maxsize']. В рецепте — extras.data_queue_maxsize.",
+            min=0,
+        ),
+    ] = 0
+
+    inflight_budget: Annotated[
+        int,
+        FieldMeta(
+            "Бюджет кадров в полёте",
+            info="Бюджет B = (минимум глубин колец писателей) - 2: сколько кадров получатель "
+            "вправе держать «в полёте» (Task 4.7c). Проставляется топологией при сборке. "
+            "0 = получатель не за кольцом → транзит не измеряется. Приёмник считает "
+            "transit_over_budget, когда глубина IPC-очереди > B - chain_max_lag_items.",
             min=0,
         ),
     ] = 0
@@ -282,6 +293,10 @@ class GenericProcessConfig(ProcessLaunchConfig):
         if self.data_queue_maxsize > 0:
             queues = proc_dict["queues"]
             proc_dict["queues"] = {**queues, "data": {**queues.get("data", {}), "maxsize": self.data_queue_maxsize}}
+        # Task 4.7c: inflight_budget 0 = «не за кольцом» — как cv_threads, в proc_dict не кладём
+        # (форму proc_dict процессов без входа от писателя и golden-снапшоты не меняем).
+        if not proc_dict["config"].get("inflight_budget"):
+            proc_dict["config"].pop("inflight_budget", None)
         # Task 4.6: незаданный cv_threads в proc_dict не кладём — форму каждого proc_dict
         # (и golden-снапшоты build) не меняем; отсутствие = дефолт 2 в runner'е.
         if proc_dict["config"].get("cv_threads") is None:

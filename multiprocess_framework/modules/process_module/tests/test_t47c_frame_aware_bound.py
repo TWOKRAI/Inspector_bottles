@@ -33,7 +33,6 @@ import time
 from typing import List
 
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.process_module.generic.collector_registry import PassThroughCollector
 from multiprocess_framework.modules.process_module.generic.data_receiver import DataReceiver
@@ -82,7 +81,6 @@ def _signal(marker: str) -> list[dict]:
 # =============================================================================
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C1")
 def test_signal_survives_lag_bound():
     """Репро вердикта: lag 2; сигнал + кадры f1, f2, затем f3 -> выброшен самый старый КАДР (f1),
     сигнал на месте, порядок оставшихся сохранён, счётчик +1.
@@ -99,7 +97,6 @@ def test_signal_survives_lag_bound():
     assert receiver.lag_dropped_total == 1
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C1")
 def test_only_frame_collections_counted():
     """lag 2 и десять сигналов подряд (кадров нет вовсе) -> не выброшен ни один: сигналы в счёт потолка
     не входят и им не вытесняются; порядок прежний.
@@ -115,7 +112,6 @@ def test_only_frame_collections_counted():
     assert receiver.lag_dropped_total == 0
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C1")
 def test_views_and_frame_keys_both_count_as_frame_collection():
     """lag 1: коллекция с ``_shm_views`` (без ключа frame), сигнал, коллекция с ``frame``.
     Укладка третьей: кадровых уже 1 >= потолка -> выброшена ПЕРВАЯ (view-коллекция v1) — значит, ``_shm_views``
@@ -132,7 +128,6 @@ def test_views_and_frame_keys_both_count_as_frame_collection():
     assert receiver.lag_dropped_total == 1
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C1 (join: сигнал внутри коллекции с кадром = кадровая)")
 def test_join_collection_with_signal_part_counts_as_frame():
     """Коллекция join [сигнал-часть, кадр-часть] — КАДРОВАЯ (хотя бы один item несёт кадр) и потолком
     выбрасывается как кадровая. lag 1: j1 (join), чистый сигнал sig, j2 (join) -> выброшена j1, сигнал жив:
@@ -210,7 +205,6 @@ def _run_receiver_with_depths(depths: list[int], *, budget: int, lag: int, tail_
     return receiver
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C3")
 def test_transit_over_budget_counted_on_both_sides_of_the_boundary():
     """B = 6, lag 2 -> порог транзита B - lag = 4. Глубина IPC на получениях: 0, 4, 5, 7, 4 -> считаются
     ровно две (5 и 7: строго больше 4); глубина ровно 4 не считается ни разу (граница с обеих сторон)."""
@@ -219,7 +213,6 @@ def test_transit_over_budget_counted_on_both_sides_of_the_boundary():
     assert receiver.transit_over_budget == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C3 (gauge глубины IPC-очереди)")
 def test_ipc_depth_gauge_is_recorded():
     """Каждое получение пишет глубину IPC-очереди gauge'ом: постоянная глубина 13 (число, которого нет
     среди остальных метрик цикла) видна наружу — свойством ``ipc_queue_depth`` или полем

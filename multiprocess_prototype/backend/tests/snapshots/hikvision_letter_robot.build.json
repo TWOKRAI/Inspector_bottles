@@ -1521,6 +1521,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -1858,7 +1859,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256
@@ -1883,6 +1884,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2199,7 +2201,7 @@
       "protected": true,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256
@@ -2224,6 +2226,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2581,7 +2584,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256
@@ -2609,6 +2612,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -2939,7 +2943,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256
@@ -2966,6 +2970,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -3292,7 +3297,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256
@@ -3707,6 +3712,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -4082,7 +4088,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256
@@ -4112,6 +4118,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
         "observability_app": {
@@ -4497,7 +4504,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 4
+          "maxsize": 50
         },
         "observability": {
           "maxsize": 256

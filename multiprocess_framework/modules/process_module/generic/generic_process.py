@@ -130,6 +130,16 @@ class GenericProcess(ProcessModule):
 
     # --- Data Pipeline (Phase 5) — остаётся без изменений ---
 
+    def _data_queue_depth(self) -> int | None:
+        """Глубина собственной IPC data-очереди процесса (Task 4.7c, C3); None — узнать нельзя."""
+        q = (self.queues or {}).get("data")
+        if q is None:
+            return None
+        try:
+            return q.qsize()
+        except (NotImplementedError, OSError, AttributeError):
+            return None  # qsize недоступен (macOS) — как builtin_commands._queue_size
+
     def _init_data_pipeline(self) -> None:
         """Bootstrap data pipeline: DataReceiver, PipelineExecutor, SourceProducer."""
         app_cfg = self.get_config("config") or {}
@@ -143,6 +153,8 @@ class GenericProcess(ProcessModule):
         # через 30 секунд, бесполезен, а очередь всё равно теряет — см.
         # DataReceiver._bound_lag. Дефолт 0 — поведение не меняется молча.
         max_lag_items = app_cfg.get("chain_max_lag_items", 0)
+        # Task 4.7c: бюджет кадров в полёте B (0 = получатель не за кольцом — транзит не меряем).
+        inflight_budget = app_cfg.get("inflight_budget", 0)
         source_fps = app_cfg.get("source_target_fps", 25.0)
         max_fails = app_cfg.get("error_max_consecutive_fails", 5)
         auto_reset = app_cfg.get("error_auto_reset_sec", 60.0)
@@ -266,6 +278,8 @@ class GenericProcess(ProcessModule):
                 log_debug=self._log_debug,
                 node_name=self.name,
                 max_lag_items=max_lag_items,
+                inflight_budget=inflight_budget,
+                ipc_depth_fn=self._data_queue_depth,
             )
             # Подключить callback
             collector._on_ready = self._data_receiver.on_items_ready

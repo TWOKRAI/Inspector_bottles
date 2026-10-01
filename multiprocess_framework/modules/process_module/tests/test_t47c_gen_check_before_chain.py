@@ -63,7 +63,6 @@ class _SeenPlugin:
         return items
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C4")
 def test_stale_input_never_reaches_chain(rig):
     """Вход, порванный ДО исполнителя, не доходит до цепочки: плагин видит только свежий кадр 2,
     наружу уходит один выход (n == 2), дроп stale-входа посчитан один раз."""

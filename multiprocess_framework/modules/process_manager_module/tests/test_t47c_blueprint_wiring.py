@@ -45,7 +45,6 @@ def _lag(proc_dict: dict) -> int:
     return proc_dict["config"].get("chain_max_lag_items", 0)
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2/C3 (очередь 50 у всех, lag 2 из бюджета)")
 def test_reader_behind_generic_writer_50_2():
     """Писатель без настройки глубины (дефолт кольца 8) -> получатель: очередь 50 (cap), lag 2."""
     built = _build(
@@ -58,7 +57,6 @@ def test_reader_behind_generic_writer_50_2():
     assert _lag(built["det"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2 (очередь НЕ выводится из глубины кольца)")
 def test_reader_queue_stays_50():
     """frame_ring_depth: 12 у писателя -> очередь по-прежнему 50 (старая модель выводила 8), lag 2.
 
@@ -75,7 +73,6 @@ def test_reader_queue_stays_50():
     assert _lag(built["det"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2/C3")
 def test_two_writers_depth_8_and_12_give_queue_50_lag_2():
     """Два писателя в один процесс, глубины 8 и 12 -> бюджет по минимуму (D = 8, B = 6): lag 2; очередь 50."""
     built = _build(
@@ -89,7 +86,6 @@ def test_two_writers_depth_8_and_12_give_queue_50_lag_2():
     assert _lag(built["det"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2/C3")
 def test_reader_behind_wire_50_2():
     """Процесс, которому кадры приходят по wire (приёмник wire-кольца), тоже «за писателем кольца»:
     у wire нет chain_targets на этом пути, и правило обязано сработать так же — очередь 50, lag 2."""
@@ -104,7 +100,6 @@ def test_reader_behind_wire_50_2():
     assert _lag(built["dst"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2/C3")
 def test_every_hop_of_a_chain_gets_lag_2_and_all_queues_are_50():
     """cam -> det -> disp: и det (за cam), и disp (за det) получают lag 2 — одно правило для всех
     узлов, не только для первого хопа; очередь у всех 50, у головы цепочки (без входа) lag нет."""
@@ -120,7 +115,6 @@ def test_every_hop_of_a_chain_gets_lag_2_and_all_queues_are_50():
     assert (_data_queue(built["cam"]), _lag(built["cam"])) == (50, 0)
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C3 (явный lag допустим iff lag <= B - 2)")
 def test_explicit_lag_valid_iff_at_most_b_minus_2():
     """Кольцо 8 -> B = 6 -> явный chain_max_lag_items допустим до B - 2 = 4 включительно.
     lag 4 (граница) собирается: lag 4, очередь 50. lag 5 (на единицу больше) -> ValueError при сборке.
@@ -137,7 +131,6 @@ def test_explicit_lag_valid_iff_at_most_b_minus_2():
         _build(base + [ProcessConfig(process_name="det", extras={"chain_max_lag_items": 5})])
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2 (явная очередь = cap, не бюджет)")
 def test_explicit_queue_4_within_budget_is_kept():
     """Явная data_queue_maxsize: 4 принимается как есть (cap), lag 2 из бюджета кольца 8."""
     built = _build(
@@ -150,7 +143,6 @@ def test_explicit_queue_4_within_budget_is_kept():
     assert _lag(built["det"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: C2 (явная очередь = cap, не ошибка)")
 def test_explicit_queue_is_cap_no_error():
     """Явная data_queue_maxsize: 20 при кольце 8 -> сборка БЕЗ ошибки, очередь ровно 20 (cap рецепта),
     lag 2. Старая модель давала ошибку «очередь 20 больше кольца 8»; сегодня ключ молча теряется
@@ -165,7 +157,6 @@ def test_explicit_queue_is_cap_no_error():
     assert _lag(built["det"]) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="4.7c rework: провод читает кольцо ИСТОЧНИКА (C-1)")
 def test_wire_depth_from_source_ring_12():
     """phone_sketch-подобный чертёж: источник с frame_ring_depth 12 имеет И chain_targets, И порт-провод
     к тому же получателю. Глубина для получателя берётся из кольца ИСТОЧНИКА (12 -> D = 12, B = 10),

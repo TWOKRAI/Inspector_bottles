@@ -3,7 +3,9 @@
 
 Слепой tester писал по критериям приёмки; здесь то, что видно только изнутри построения
 ``_apply_inflight_budgets``: обход топологии с циклами, один писатель на двух читателей с разными
-явными бюджетами, несколько камер, не влияющих друг на друга, и ловушка «lag 0 = без границы».
+явными значениями, несколько камер, не влияющих друг на друга, и ловушка «lag 0 = без границы».
+Контракт после переделки по вердикту CTO (C2/C3): топология пишет только ``chain_max_lag_items``
+и ``inflight_budget`` (B = D - 2), data-очередь остаётся потолком памяти (50 или явный из рецепта).
 Ожидаемые значения — литералы.
 """
 
@@ -29,6 +31,10 @@ def _lag(proc_dict: dict) -> int:
     return proc_dict["config"].get("chain_max_lag_items", 0)
 
 
+def _budget(proc_dict: dict) -> int:
+    return proc_dict["config"].get("inflight_budget", 0)
+
+
 def _build_with_deadline(processes: list[ProcessConfig], seconds: float = 10.0) -> dict[str, dict]:
     """Сборка в демон-потоке с дедлайном: бесконечный обход упал бы тестом, а не повесил сьют."""
     box: dict = {}
@@ -49,21 +55,21 @@ def _build_with_deadline(processes: list[ProcessConfig], seconds: float = 10.0) 
 
 
 def test_cycle_between_processes_does_not_loop():
-    """a -> b -> a: обход один проход по chain_targets, не граф-обход; оба получают 4/2."""
+    """a -> b -> a: обход один проход по chain_targets, не граф-обход; оба получают очередь 50, lag 2."""
     built = _build_with_deadline(
         [
             ProcessConfig(process_name="a", chain_targets=["b"]),
             ProcessConfig(process_name="b", chain_targets=["a"]),
         ]
     )
-    assert (_queue(built["a"]), _lag(built["a"])) == (4, 2)
-    assert (_queue(built["b"]), _lag(built["b"])) == (4, 2)
+    assert (_queue(built["a"]), _lag(built["a"])) == (50, 2)
+    assert (_queue(built["b"]), _lag(built["b"])) == (50, 2)
 
 
 def test_self_feed_does_not_loop():
-    """Процесс, адресующий самого себя, — писатель собственного входа: 4/2, без зависания."""
+    """Процесс, адресующий самого себя, — писатель собственного входа: 50/2, без зависания."""
     built = _build_with_deadline([ProcessConfig(process_name="loop", chain_targets=["loop"])])
-    assert (_queue(built["loop"]), _lag(built["loop"])) == (4, 2)
+    assert (_queue(built["loop"]), _lag(built["loop"])) == (50, 2)
 
 
 def test_hierarchical_target_address_counts_as_reader():
@@ -74,13 +80,13 @@ def test_hierarchical_target_address_counts_as_reader():
             ProcessConfig(process_name="det"),
         ]
     )
-    assert (_queue(built["det"]), _lag(built["det"])) == (4, 2)
+    assert (_queue(built["det"]), _lag(built["det"])) == (50, 2)
 
 
 def test_writer_feeding_two_readers_with_different_explicit_budgets():
-    """Один писатель (кольцо 12) -> два читателя: у каждого свой явный бюджет, друг друга не трогают.
+    """Один писатель (кольцо 12) -> два читателя: у каждого своё явное значение, друг друга не трогают.
 
-    r_small: явная очередь 2 -> (2, 2); r_big: явный lag 3 -> очередь добирается 10 - 3 = 7.
+    r_small: явная очередь 2 = потолок памяти -> (2, lag 2); r_big: явный lag 3 -> (очередь 50, lag 3).
     """
     built = _build_with_deadline(
         [
@@ -90,30 +96,59 @@ def test_writer_feeding_two_readers_with_different_explicit_budgets():
         ]
     )
     assert (_queue(built["r_small"]), _lag(built["r_small"])) == (2, 2)
-    assert (_queue(built["r_big"]), _lag(built["r_big"])) == (7, 3)
+    assert (_queue(built["r_big"]), _lag(built["r_big"])) == (50, 3)
 
 
-def test_one_readers_bad_explicit_queue_names_that_reader_only():
-    """Ошибка явной очереди называет ИМЕННО провинившегося читателя, а не соседа с тем же писателем."""
+def test_explicit_queue_of_one_reader_does_not_touch_the_neighbour():
+    """Явный потолок памяти 30 у одного читателя (кольцо 8) — не ошибка (C2) и соседа с тем же
+    писателем не задевает: у good остаётся 50."""
+    built = _build_with_deadline(
+        [
+            ProcessConfig(process_name="cam", chain_targets=["good", "bad"]),
+            ProcessConfig(process_name="good"),
+            ProcessConfig(process_name="bad", extras={"data_queue_maxsize": 30}),
+        ]
+    )
+    assert (_queue(built["bad"]), _lag(built["bad"])) == (30, 2)
+    assert (_queue(built["good"]), _lag(built["good"])) == (50, 2)
+
+
+def test_one_readers_bad_explicit_lag_names_that_reader_only():
+    """Явный lag 5 при кольце 8 (B = 6, предел B - 2 = 4): ошибка называет ИМЕННО провинившегося."""
     bp = SystemBlueprint(
         name="t47c_hazard",
         processes=[
             ProcessConfig(process_name="cam", chain_targets=["good", "bad"]),
             ProcessConfig(process_name="good"),
-            ProcessConfig(process_name="bad", extras={"data_queue_maxsize": 30}),
+            ProcessConfig(process_name="bad", extras={"chain_max_lag_items": 5}),
         ],
     )
-    with pytest.raises(ValueError, match="очередь 30 больше кольца 8") as exc:
+    with pytest.raises(ValueError) as exc:
         bp.build_configs()
     assert "'bad'" in str(exc.value)
     assert "'good'" not in str(exc.value)
 
 
+def test_explicit_lag_on_ring_4_is_always_an_error():
+    """Кольцо 4 -> B = 2 -> предел явного lag B - 2 = 0: допустимого явного значения нет вовсе
+    (выведенный по умолчанию lag 1 при этом собирается — граница D = 4 жива)."""
+    base = [ProcessConfig(process_name="cam", chain_targets=["det"], extras={"frame_ring_depth": 4})]
+    built = _build_with_deadline(base + [ProcessConfig(process_name="det")])
+    assert (_queue(built["det"]), _lag(built["det"]), _budget(built["det"])) == (50, 1, 2)
+    for lag in (1, 2):
+        bp = SystemBlueprint(
+            name="t47c_hazard",
+            processes=base + [ProcessConfig(process_name="det", extras={"chain_max_lag_items": lag})],
+        )
+        with pytest.raises(ValueError, match="'det'"):
+            bp.build_configs()
+
+
 def test_three_cameras_each_reader_budget_from_its_own_writer_only():
     """Камеры 8, 8 и 12 кормят три РАЗНЫХ читателя: бюджет каждого — по своему писателю.
 
-    Читатель камеры 12 получает 8/2, а не 4/2 от соседей с кольцом 8 (владелец: несколько камер
-    не должны влиять друг на друга).
+    Читатель камеры 12 получает B = 10, а не 6 от соседей с кольцом 8 (владелец: несколько камер
+    не должны влиять друг на друга); очередь у всех 50, lag 2.
     """
     built = _build_with_deadline(
         [
@@ -125,15 +160,15 @@ def test_three_cameras_each_reader_budget_from_its_own_writer_only():
             ProcessConfig(process_name="det_c"),
         ]
     )
-    assert (_queue(built["det_a"]), _lag(built["det_a"])) == (4, 2)
-    assert (_queue(built["det_b"]), _lag(built["det_b"])) == (4, 2)
-    assert (_queue(built["det_c"]), _lag(built["det_c"])) == (8, 2)
+    assert (_queue(built["det_a"]), _lag(built["det_a"]), _budget(built["det_a"])) == (50, 2, 6)
+    assert (_queue(built["det_b"]), _lag(built["det_b"]), _budget(built["det_b"])) == (50, 2, 6)
+    assert (_queue(built["det_c"]), _lag(built["det_c"]), _budget(built["det_c"])) == (50, 2, 10)
 
 
 def test_derived_lag_is_never_zero_behind_a_ring():
     """Ловушка: chain_max_lag_items == 0 в DataReceiver = «без границы». Читатель за кольцом
-    любой допустимой глубины (4..12) получает lag >= 1 — в том числе на границе 4 (1, 1)."""
-    for depth, expected in [(4, (1, 1)), (5, (1, 2)), (8, (4, 2)), (12, (8, 2))]:
+    любой допустимой глубины (4..12) получает lag >= 1 — в том числе на границе 4 (lag 1)."""
+    for depth, expected in [(4, (50, 1)), (5, (50, 2)), (8, (50, 2)), (12, (50, 2))]:
         built = _build_with_deadline(
             [
                 ProcessConfig(process_name="cam", chain_targets=["det"], extras={"frame_ring_depth": depth}),
@@ -159,7 +194,8 @@ def test_writer_ring_below_4_fails_build_with_reader_name():
 
 def test_second_build_is_idempotent():
     """build_configs() дважды на одном чертеже даёт одно и то же: вывод бюджета не пишет в
-    ProcessConfig (ни в extras, ни в поля), иначе второй вызов принял бы выведенное за явное."""
+    ProcessConfig (ни в extras, ни в поля), иначе второй вызов принял бы выведенное за явное
+    (выведенный lag 2 стал бы «явным», а при смене кольца не пересчитался бы)."""
     bp = SystemBlueprint(
         name="t47c_hazard",
         processes=[
@@ -170,5 +206,6 @@ def test_second_build_is_idempotent():
     first = {name: (_queue(d), _lag(d)) for name, d in (c.build() for c in bp.build_configs())}
     second = {name: (_queue(d), _lag(d)) for name, d in (c.build() for c in bp.build_configs())}
     assert first == second
-    assert first["det"] == (8, 2)
+    assert first["det"] == (50, 2)
+    assert _budget(dict(c.build() for c in bp.build_configs())["det"]) == 10
     assert bp.processes[1].extras == {}

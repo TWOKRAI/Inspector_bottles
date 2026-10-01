@@ -566,26 +566,27 @@ class SystemBlueprint(SchemaBase):
         """Собрать список GenericProcessConfig для launcher.
 
         Task 4.7c: после сборки каждому процессу, получающему кадры от писателя кольца,
-        проставляется бюджет «в полёте» (data-очередь + ``chain_max_lag_items``), выведенный
-        из топологии; ошибки несовместимых явных значений поднимаются здесь, при сборке.
+        проставляется бюджет «в полёте» в КАДРАХ (``chain_max_lag_items`` и ``inflight_budget``),
+        выведенный из топологии; data-очередь (потолок памяти) из топологии не выводится.
+        Ошибки несовместимых явных значений поднимаются здесь, при сборке.
         """
         configs = [p.as_generic_config() for p in self.processes]
         self._apply_inflight_budgets(configs)
         return configs
 
     def _apply_inflight_budgets(self, configs: list[GenericProcessConfig]) -> None:
-        """Выставить data-очередь и lag получателям кадров (Task 4.7c, правило «очередь + lag <= D - 2»).
+        """Выставить lag и бюджет «в полёте» получателям кадров (Task 4.7c, правило «кадры в полёте <= D - 2»).
 
         Получатель кадров — процесс, который называют в ``chain_targets`` писателя (generic) или
         приёмник wire между РАЗНЫМИ процессами. Бюджет получателя считается только по его
         собственным писателям (минимум их колец), поэтому камеры друг на друга не влияют.
         Процесс без входа от писателя кольца не трогается (очередь 50, lag как задан).
-        Писатель с ``frame_ring_depth`` 0 — кольцо ``DEFAULT_FRAME_RING_DEPTH``; wire — тоже
-        дефолт (глубину wire-кольца ``buffer_slots`` задаёт PM, не чертёж).
+        Писатель с ``frame_ring_depth`` 0 — кольцо ``DEFAULT_FRAME_RING_DEPTH``; wire берёт
+        глубину из кольца процесса-источника (так же, как chain_targets).
         """
         from ...message_module.addressing import is_broadcast
         from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
-        from .inflight import inflight_budget
+        from .inflight import inflight_budget, ring_budget
 
         by_name = {cfg.process_name: cfg for cfg in configs}
         writer_depths: dict[str, list[int]] = {}
@@ -601,16 +602,23 @@ class SystemBlueprint(SchemaBase):
             src_proc = wire.source.split(".")[0]
             tgt_proc = wire.target.split(".")[0]
             if src_proc and src_proc != tgt_proc and tgt_proc in by_name:
-                writer_depths.setdefault(tgt_proc, []).append(DEFAULT_FRAME_RING_DEPTH)
+                # Глубина — из кольца ИСТОЧНИКА провода (вердикт CTO, C-1): иначе ручка
+                # frame_ring_depth писателя мертва, стоит ему добавить порт-провод.
+                src_cfg = by_name.get(src_proc)
+                depth = (src_cfg.frame_ring_depth if src_cfg else 0) or DEFAULT_FRAME_RING_DEPTH
+                writer_depths.setdefault(tgt_proc, []).append(depth)
 
         for name, depths in writer_depths.items():
             cfg = by_name[name]
-            cfg.data_queue_maxsize, cfg.chain_max_lag_items = inflight_budget(
+            # data_queue_maxsize топологией НЕ пишется (C2): это потолок памяти — явный из рецепта
+            # или 0 (-> 50 при регистрации). Бюджет считает кадры: lag + измеряемый транзит.
+            _, cfg.chain_max_lag_items = inflight_budget(
                 depths,
                 queue=cfg.data_queue_maxsize or None,
                 lag=cfg.chain_max_lag_items or None,
                 process=name,
             )
+            cfg.inflight_budget = ring_budget(depths, process=name)
 
     def shm_names(self) -> list[str]:
         """Все SHM-имена из всех процессов."""

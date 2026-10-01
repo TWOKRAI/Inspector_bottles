@@ -42,7 +42,8 @@ def test_bound_lag_drop_path_works_with_stamped_batch() -> None:
     q: queue.Queue = queue.Queue()
     dr = _receiver(q, max_lag_items=2)
     for i in range(5):
-        dr.on_items_ready([{"frame_id": i}])
+        # Task 4.7c (C1): потолок считает только кадровые коллекции — item несёт ключ ``frame``.
+        dr.on_items_ready([{"frame_id": i, "frame": 0}])
     assert q.qsize() == 2
     assert dr.lag_dropped_total == 3
     ids = [q.get_nowait()[0]["frame_id"] for _ in range(2)]

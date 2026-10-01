@@ -28,7 +28,6 @@ def _clean_shm_and_qos_env(monkeypatch):
 
 @pytest.mark.parametrize("qos", [None, "1"], ids=["no-env", "qos-profiles-on"])
 @pytest.mark.parametrize("explicit", [None, 0, -2], ids=["none", "zero", "negative"])
-@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_generic_writer_ring_default_8_without_env(monkeypatch, qos, explicit):
     """Глубина не задана (None / 0 / <0 = «не задана» в рецепте) -> 8, и это не зависит от
     FW_QOS_PROFILES (гейта на глубину нет — при QoS не 4)."""
@@ -58,7 +57,6 @@ def test_explicit_ring_depth_still_wins_over_default():
         ),
     ],
 )
-@pytest.mark.xfail(strict=True, reason="RED-спека 4.7c, переделка по вердикту CTO")
 def test_wire_buffer_slots_default_8(make):
     """Wire без явного buffer_slots получает 8 — со всех трёх путей построения конфига."""
     assert make() == 8
