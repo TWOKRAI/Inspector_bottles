@@ -47,7 +47,7 @@ def background_layers_from_config(
     layers: list[SolidFill | ScrollingTile] = []
     for item in items:
         if "solid" in item:
-            layers.append(SolidFill(color_rgb=tuple(item["solid"])))
+            layers.append(SolidFill(color_rgb=item["solid"]))
             continue
         image = load_image(item["tile"])
         if image is not None:
@@ -69,15 +69,11 @@ def _validate_item(i: int, item: object) -> None:
         if not isinstance(item["tile"], str) or not item["tile"]:
             raise bad("значение 'tile' должно быть непустой строкой-путём")
         return
-    color = item["solid"]
-    if not isinstance(color, (list, tuple)) or len(color) != 3:
-        raise bad("'solid' должен быть списком из трёх целых [R, G, B]")
-    for channel in color:
-        # bool — подкласс int: True/False как канал цвета отвергаются явно.
-        if isinstance(channel, bool) or not isinstance(channel, int):
-            raise bad("каналы 'solid' должны быть целыми числами")
-        if not 0 <= channel <= 255:
-            raise bad("каналы 'solid' должны лежать в 0..255")
+    # Единственное место правил цвета — `SolidFill.__post_init__`; здесь его ошибка дополняется индексом и repr.
+    try:
+        SolidFill(color_rgb=item["solid"])
+    except ValueError as exc:
+        raise bad(str(exc)) from exc
 
 
 def _fill(frame: np.ndarray, color_rgb: tuple[int, int, int]) -> None:
@@ -107,8 +103,9 @@ def fold_background(layers: Sequence[SolidFill | ScrollingTile]) -> list[SolidFi
     """Свернуть стек: `[SolidFill, (ScrollingTile непрозрачный RGB)?, *остальные тайлы]`.
 
     `SolidFill` прячет всё под собой — отсчёт идёт от последнего. Подложка без заливки — чёрный.
-    Первый тайл над подложкой запекается с её цветом в непрозрачный RGB-тайл (RGB-тайл копируется
-    как есть); тайлы выше первого остаются RGBA-слоями для общего пути. Входные массивы не меняются.
+    Первый тайл над подложкой запекается с её цветом в непрозрачный RGB-тайл (RGB-тайл берётся
+    как есть, приватную копию делает `ScrollingTile`); тайлы выше первого остаются RGBA-слоями для общего
+    пути. Входные массивы не меняются.
     """
     base = _BLACK
     tiles: list[ScrollingTile] = []
@@ -122,7 +119,7 @@ def fold_background(layers: Sequence[SolidFill | ScrollingTile]) -> list[SolidFi
 
     first, rest = tiles[0].image, tiles[1:]
     if first.shape[2] == 3:
-        baked = first.copy()
+        baked = first  # `ScrollingTile(...)` ниже сам берёт приватную копию — отдельный `.copy()` не нужен
     else:
         baked = _over(first, np.array(base.color_rgb, dtype=np.uint16))
     return [base, ScrollingTile(image=baked), *rest]

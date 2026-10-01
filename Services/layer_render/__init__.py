@@ -1,17 +1,35 @@
 # -*- coding: utf-8 -*-
-"""`layer_render` — стек слоёв фона для сцены (Task 1.1). Контракт — в README.md."""
+"""`layer_render` — стек слоёв фона для сцены (Task 1.1), геометрия/композиция и Windows-safe I/O (Task 2.1).
+
+Контракт — в README.md.
+"""
 
 from Services.layer_render.background import (
     background_layers_from_config,
     fold_background,
     render_background,
 )
+from Services.layer_render.compose import (
+    cast_contact_shadow,
+    composite,
+    crop_to_alpha,
+    fit_longest_side,
+    rotate_expand,
+)
 from Services.layer_render.interfaces import ScrollingTile, SolidFill
+from Services.layer_render.io import imread_unicode, imwrite_unicode
 
 __all__ = [
     "ScrollingTile",
     "SolidFill",
     "background_layers_from_config",
+    "cast_contact_shadow",
+    "composite",
+    "crop_to_alpha",
+    "fit_longest_side",
     "fold_background",
+    "imread_unicode",
+    "imwrite_unicode",
     "render_background",
+    "rotate_expand",
 ]
