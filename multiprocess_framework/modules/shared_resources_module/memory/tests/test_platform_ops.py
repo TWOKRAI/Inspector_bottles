@@ -7,6 +7,7 @@
 import platform
 import pytest
 
+from ..platform import shm as shm_mod
 from ..platform import (
     cleanup_stale_shm,
     create_shm_block,
@@ -70,6 +71,39 @@ class TestCreateShmBlocks:
         assert second[0].name != first[0].name
         for shm in (*first, *second):
             close_shm(shm, unlink=is_posix())
+
+    def test_file_exists_retries_with_fresh_name_and_spares_occupied(self, monkeypatch):
+        """Первое сгенерированное имя занято → повтор со СВЕЖИМ именем; чужой сегмент не снят.
+
+        Без повтора (range(3) → range(1)) create вернул бы None. ``cleanup_stale_shm``
+        глушим: на POSIX она сама бы unlink'нула занятое имя и коллизии не возникло бы —
+        здесь моделируется сегмент, который удерживает другой владелец.
+        """
+        occupied = create_shm_block("t47b1_occupied_0", 256)
+        blocks = None
+        try:
+            real = shm_mod._unique_base_name
+            calls: list[str] = []
+
+            def first_name_occupied(base_name, *, owner=None):
+                calls.append(base_name)
+                return "t47b1_occupied" if len(calls) == 1 else real(base_name, owner=owner)
+
+            monkeypatch.setattr(shm_mod, "_unique_base_name", first_name_occupied)
+            monkeypatch.setattr(shm_mod, "cleanup_stale_shm", lambda name: False)
+
+            blocks = create_shm_blocks("t47b1_slot", 256, 1)
+
+            assert blocks is not None, "при занятом имени нужен повтор со свежим именем"
+            assert len(calls) == 2
+            assert blocks[0].name != occupied.name
+            still = open_shm_block(occupied.name)
+            assert still is not None, "занятый сегмент не должен быть снят повтором"
+            close_shm(still, unlink=False)
+        finally:
+            for shm in blocks or []:
+                close_shm(shm, unlink=is_posix())
+            close_shm(occupied, unlink=is_posix())
 
 
 @pytest.mark.skipif(SKIP_MACOS, reason="SharedMemory unreliable on macOS")
