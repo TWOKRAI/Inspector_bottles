@@ -154,8 +154,23 @@ class GenericProcessConfig(ProcessLaunchConfig):
         FieldMeta(
             "Frame ring depth",
             info="Глубина SHM-кольца кадров ЭТОГО owner'а (per-camera, Ф7 G.4.b). "
-            "0 = не задана → QoS-профиль data (при FW_QOS_PROFILES) или дефолт 3. "
-            "Действует только при FW_QOS_PROFILES=1. В рецепте — extras.frame_ring_depth.",
+            "0 = не задана → DEFAULT_FRAME_RING_DEPTH (8, Task 4.7c; без гейта FW_QOS_PROFILES). "
+            "От глубины кольца писателя считается бюджет «в полёте» получателей "
+            "(data-очередь + chain_max_lag_items <= глубина - 2). "
+            "В рецепте — extras.frame_ring_depth.",
+            min=0,
+        ),
+    ] = 0
+
+    data_queue_maxsize: Annotated[
+        int,
+        FieldMeta(
+            "Размер data-очереди",
+            info="Размер data-очереди процесса (Task 4.7c). 0 = авто: у процесса за кольцом "
+            "кадров выводится из топологии (кольцо - 2 - chain_max_lag_items), иначе прежние 50. "
+            ">0 = явный размер; при входе от писателя кольца обязан влезать в бюджет «в полёте», "
+            "иначе ошибка сборки. В proc_dict уходит как queues['data']['maxsize']. "
+            "В рецепте — extras.data_queue_maxsize.",
             min=0,
         ),
     ] = 0
@@ -261,6 +276,12 @@ class GenericProcessConfig(ProcessLaunchConfig):
         # plugins уже в payload через model_dump() в super().build(),
         # но нужно убедиться что они в config
         proc_dict["config"]["plugins"] = self.plugins
+        # Task 4.7c: data_queue_maxsize — не ключ config, а размер очереди. Забираем из config
+        # всегда (форму proc_dict не меняем) и кладём в queues['data'] только если задан >0.
+        proc_dict["config"].pop("data_queue_maxsize", None)
+        if self.data_queue_maxsize > 0:
+            queues = proc_dict["queues"]
+            proc_dict["queues"] = {**queues, "data": {**queues.get("data", {}), "maxsize": self.data_queue_maxsize}}
         # Task 4.6: незаданный cv_threads в proc_dict не кладём — форму каждого proc_dict
         # (и golden-снапшоты build) не меняем; отсутствие = дефолт 2 в runner'е.
         if proc_dict["config"].get("cv_threads") is None:

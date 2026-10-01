@@ -26,6 +26,7 @@ from ...logger_module.channels.log_channel import (
 from ...process_module import ProcessModule
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import QueueRegistry
+from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
 from ..core.process_status import ProcessStatusMonitor
@@ -951,7 +952,7 @@ class ProcessManagerProcess(ProcessModule):
 
         # SHM аллокация (если transport == "router")
         shm_name = shm_config.get("shm_name", wire_key)
-        buffer_slots = shm_config.get("buffer_slots", 4)
+        buffer_slots = shm_config.get("buffer_slots", DEFAULT_FRAME_RING_DEPTH)
         owner = shm_config.get("owner_process", source_process)
 
         if transport == "router":
@@ -1162,7 +1163,7 @@ class ProcessManagerProcess(ProcessModule):
                     "wire_key": wire_key,
                     "shm_name": shm_cfg.get("shm_name", wire_key),
                     "shm_owner": shm_cfg.get("owner_process", src),
-                    "buffer_slots": shm_cfg.get("buffer_slots", 4),
+                    "buffer_slots": shm_cfg.get("buffer_slots", DEFAULT_FRAME_RING_DEPTH),
                     "role": role,
                 },
             }

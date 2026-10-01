@@ -315,12 +315,16 @@ class ProcessConfig(SchemaBase):
         # Проверено отказом: положенный в `metadata` ключ не доехал вовсе — `metadata`
         # читается только ради легаси-коллектора, а _pick смотрит в extras.
         chain_max_lag_items = _pick("chain_max_lag_items", 0)
+        # Task 4.7c: явный размер data-очереди (0 = авто из топологии, см. build_configs).
+        data_queue_maxsize = _pick("data_queue_maxsize", 0)
         if frame_ring_depth:
             base_kwargs["frame_ring_depth"] = int(frame_ring_depth)
         if copy_out_targets:
             base_kwargs["copy_out_targets"] = list(copy_out_targets)
         if chain_max_lag_items:
             base_kwargs["chain_max_lag_items"] = int(chain_max_lag_items)
+        if data_queue_maxsize:
+            base_kwargs["data_queue_maxsize"] = int(data_queue_maxsize)
         # Task 4.6: число потоков OpenCV процесса. Тот же путь, что у ключей выше:
         # без имени ЗДЕСЬ extras.cv_threads молча отбрасывается. None = не задан
         # (runner применит дефолт 2).
@@ -559,8 +563,54 @@ class SystemBlueprint(SchemaBase):
                 proc.extras = {k: v for k, v in proc.extras.items() if k not in shadow_keys}
 
     def build_configs(self) -> list[GenericProcessConfig]:
-        """Собрать список GenericProcessConfig для launcher."""
-        return [p.as_generic_config() for p in self.processes]
+        """Собрать список GenericProcessConfig для launcher.
+
+        Task 4.7c: после сборки каждому процессу, получающему кадры от писателя кольца,
+        проставляется бюджет «в полёте» (data-очередь + ``chain_max_lag_items``), выведенный
+        из топологии; ошибки несовместимых явных значений поднимаются здесь, при сборке.
+        """
+        configs = [p.as_generic_config() for p in self.processes]
+        self._apply_inflight_budgets(configs)
+        return configs
+
+    def _apply_inflight_budgets(self, configs: list[GenericProcessConfig]) -> None:
+        """Выставить data-очередь и lag получателям кадров (Task 4.7c, правило «очередь + lag <= D - 2»).
+
+        Получатель кадров — процесс, который называют в ``chain_targets`` писателя (generic) или
+        приёмник wire между РАЗНЫМИ процессами. Бюджет получателя считается только по его
+        собственным писателям (минимум их колец), поэтому камеры друг на друга не влияют.
+        Процесс без входа от писателя кольца не трогается (очередь 50, lag как задан).
+        Писатель с ``frame_ring_depth`` 0 — кольцо ``DEFAULT_FRAME_RING_DEPTH``; wire — тоже
+        дефолт (глубину wire-кольца ``buffer_slots`` задаёт PM, не чертёж).
+        """
+        from ...message_module.addressing import is_broadcast
+        from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
+        from .inflight import inflight_budget
+
+        by_name = {cfg.process_name: cfg for cfg in configs}
+        writer_depths: dict[str, list[int]] = {}
+        for cfg in configs:
+            depth = cfg.frame_ring_depth or DEFAULT_FRAME_RING_DEPTH
+            for target in cfg.chain_targets or []:
+                if not target or is_broadcast(str(target)):
+                    continue
+                head = str(target).split(".")[0]
+                if head in by_name:
+                    writer_depths.setdefault(head, []).append(depth)
+        for wire in self.wires:
+            src_proc = wire.source.split(".")[0]
+            tgt_proc = wire.target.split(".")[0]
+            if src_proc and src_proc != tgt_proc and tgt_proc in by_name:
+                writer_depths.setdefault(tgt_proc, []).append(DEFAULT_FRAME_RING_DEPTH)
+
+        for name, depths in writer_depths.items():
+            cfg = by_name[name]
+            cfg.data_queue_maxsize, cfg.chain_max_lag_items = inflight_budget(
+                depths,
+                queue=cfg.data_queue_maxsize or None,
+                lag=cfg.chain_max_lag_items or None,
+                process=name,
+            )
 
     def shm_names(self) -> list[str]:
         """Все SHM-имена из всех процессов."""

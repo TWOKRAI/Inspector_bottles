@@ -94,10 +94,16 @@ class QoSProfile:
 
 # system/command — control-plane: process.stop/heartbeat терять нельзя.
 _SYSTEM = QoSProfile(RELIABLE, history_depth=0, drop_policy=DROP_NEVER, deadline_ms=0)
+# Единая глубина кадрового SHM-кольца по умолчанию (Task 4.7c). ОДИН источник правды: кольцо
+# генерик-писателя, ``buffer_slots`` wire и профиль data берут её отсюда — литерал 8 больше нигде
+# не повторяется. Гейта по FW_QOS_PROFILES нет: глубина одна для всех. Из неё же строится бюджет
+# «в полёте» получателя (``process_manager_module/topology/inflight.py``): очередь + lag < кольца.
+DEFAULT_FRAME_RING_DEPTH = 8
+
 # data — кадры/данные: старый кадр конвейеру бесполезен → drop_oldest, живую камеру не
-# тормозим. history_depth=4 — дефолт глубины кольца (несколько кадров на джиттер, G.4.b);
+# тормозим. history_depth = DEFAULT_FRAME_RING_DEPTH — дефолт глубины кольца (G.4.b, 4.7c);
 # deadline 33 мс ≈ бюджет 30 FPS.
-_DATA = QoSProfile(BEST_EFFORT, history_depth=4, drop_policy=DROP_OLDEST, deadline_ms=33)
+_DATA = QoSProfile(BEST_EFFORT, history_depth=DEFAULT_FRAME_RING_DEPTH, drop_policy=DROP_OLDEST, deadline_ms=33)
 # state — реактивное дерево: важен ПОСЛЕДНИЙ снимок (coalesce), keep_last=1.
 _STATE = QoSProfile(BEST_EFFORT, history_depth=1, drop_policy=DROP_OLDEST, deadline_ms=0)
 # observability/log — телеметрия: буфер 1024 (капасити BoundedChannel), drop_oldest.

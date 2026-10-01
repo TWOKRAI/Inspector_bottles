@@ -1503,7 +1503,7 @@
     "draw": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "gui"
         ],
@@ -1858,7 +1858,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256
@@ -1875,7 +1875,7 @@
     "gui": {
       "class": "multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -2199,7 +2199,7 @@
       "protected": true,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256
@@ -2216,7 +2216,7 @@
     "layout": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [],
         "collector": {},
         "copy_out_targets": [],
@@ -2581,7 +2581,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256
@@ -2598,7 +2598,7 @@
     "line": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "recog",
           "draw"
@@ -2939,7 +2939,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256
@@ -2956,7 +2956,7 @@
     "maskview": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "gui"
         ],
@@ -3292,7 +3292,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256
@@ -3688,7 +3688,7 @@
     "recog": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "gui",
           "layout"
@@ -4082,7 +4082,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256
@@ -4099,7 +4099,7 @@
     "vision": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
-        "chain_max_lag_items": 0,
+        "chain_max_lag_items": 2,
         "chain_targets": [
           "line",
           "recog",
@@ -4497,7 +4497,7 @@
       "protected": false,
       "queues": {
         "data": {
-          "maxsize": 50
+          "maxsize": 4
         },
         "observability": {
           "maxsize": 256

@@ -3,7 +3,7 @@
 
 Раньше глубина была ЖЁСТКО 3 везде, `buffer_slots` из wire-команды игнорировался
 («информативно») → кольцо не настраивалось (де-факто одно-слотовый round-robin). Теперь:
-явный coll (рецепт/wire) > QoS-профиль data при FW_QOS_PROFILES > 3. Каждый source =
+явный coll (рецепт/wire) > DEFAULT_FRAME_RING_DEPTH (8, Task 4.7c; гейта QoS нет). Каждый source =
 свой owner = своё независимое кольцо (общего слота нет).
 """
 
@@ -28,26 +28,26 @@ class TestResolveRingDepth:
         assert FrameShmMiddleware._resolve_ring_depth(8) == 8
         assert FrameShmMiddleware._resolve_ring_depth(1) == 1
 
-    def test_none_defaults_to_3_without_flag(self, monkeypatch):
+    def test_none_defaults_to_8_without_flag(self, monkeypatch):
         monkeypatch.delenv("FW_QOS_PROFILES", raising=False)
-        assert FrameShmMiddleware._resolve_ring_depth(None) == 3
+        assert FrameShmMiddleware._resolve_ring_depth(None) == 8
 
-    def test_none_uses_profile_with_flag(self, monkeypatch):
+    def test_none_is_8_with_flag_too(self, monkeypatch):
         monkeypatch.setenv("FW_QOS_PROFILES", "1")
-        # qos_for("data").history_depth == 4 (боевая глубина «несколько кадров»)
-        assert FrameShmMiddleware._resolve_ring_depth(None) == 4
+        # гейта FW_QOS_PROFILES на глубину нет (Task 4.7c): с флагом то же 8
+        assert FrameShmMiddleware._resolve_ring_depth(None) == 8
 
     def test_nonpositive_explicit_falls_through(self, monkeypatch):
         monkeypatch.delenv("FW_QOS_PROFILES", raising=False)
-        assert FrameShmMiddleware._resolve_ring_depth(0) == 3
-        assert FrameShmMiddleware._resolve_ring_depth(-2) == 3
+        assert FrameShmMiddleware._resolve_ring_depth(0) == 8
+        assert FrameShmMiddleware._resolve_ring_depth(-2) == 8
 
     def test_ctor_uses_resolved_depth(self, monkeypatch):
         monkeypatch.delenv("FW_QOS_PROFILES", raising=False)
-        assert FrameShmMiddleware(MemoryManager(), owner="o", slot="s")._coll == 3
+        assert FrameShmMiddleware(MemoryManager(), owner="o", slot="s")._coll == 8
         assert FrameShmMiddleware(MemoryManager(), owner="o", slot="s", coll=6)._coll == 6
         monkeypatch.setenv("FW_QOS_PROFILES", "1")
-        assert FrameShmMiddleware(MemoryManager(), owner="o", slot="s")._coll == 4
+        assert FrameShmMiddleware(MemoryManager(), owner="o", slot="s")._coll == 8
 
 
 class TestRingWraps:
