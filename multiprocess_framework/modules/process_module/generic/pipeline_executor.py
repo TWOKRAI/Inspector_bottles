@@ -20,7 +20,7 @@ from .cycle_metrics import CycleMetricsRecorder
 from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
 from .plugin_runner import PluginRunner
 from ...chain_module import ChainRunnable, RunnableStep
-from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY, FrameShmMiddleware
 
 
 class PipelineExecutor:
@@ -121,6 +121,11 @@ class PipelineExecutor:
         # get_cycle_metrics через target.__self__ и FPS/latency не доедут до GUI.
         self._chain_queue: queue.Queue | None = None
 
+        # Task 4.5a: EMA ожидания коллекции в chain_queue (мс); пишет только поток
+        # исполнителя. Первый замер задаёт EMA, дальше сглаживание 0.1.
+        self._queue_wait_ms = 0.0
+        self._queue_wait_seen = False
+
         # Ф7 G.5.d-2 (В3): накопитель release-тикетов zero-copy займов по владельцам.
         # Флаш пачкой по порогу (амортизация границы; release НЕ на per-frame пути) +
         # на остановке ворки (не потерять хвост). Порог = боевая глубина кольца (≈coll).
@@ -148,7 +153,9 @@ class PipelineExecutor:
         heartbeat → ProcessMonitor.state.fps/latency_ms → GUI. Отражает только
         итерации с реальной обработкой batch'а (см. CycleMetricsRecorder в __init__).
         """
-        return self._cycle_metrics.get_cycle_metrics()
+        metrics = self._cycle_metrics.get_cycle_metrics()
+        metrics["queue_wait_ms"] = round(self._queue_wait_ms, 2)
+        return metrics
 
     def run_loop(
         self,
@@ -180,6 +187,16 @@ class PipelineExecutor:
                 if self._pending_release_count:
                     self._flush_releases()
                 continue
+
+            # Task 4.5a: сколько коллекция прождала в очереди (метку ставит DataReceiver).
+            enq = getattr(items, "enq_ts", None)
+            if enq is not None:
+                wait_ms = (time.perf_counter() - enq) * 1000.0
+                if self._queue_wait_seen:
+                    self._queue_wait_ms += 0.1 * (wait_ms - self._queue_wait_ms)
+                else:
+                    self._queue_wait_ms = wait_ms
+                    self._queue_wait_seen = True
 
             # Тайминг полезной итерации (chain-обработка + send), без учёта
             # ожидания на пустой очереди. perf_counter (не monotonic): работа
@@ -227,10 +244,19 @@ class PipelineExecutor:
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
 
-        # Stale view → ДРОП батча (frame_stale_drops уже учтён в _frame_views_valid).
+        # Stale view → ДРОП батча. Единица счётчика — сообщение: reader уже учёл 1 (первая
+        # провалившаяся ссылка, ``all()`` останавливается), доначисляем остальные N-1 выходов.
         if not valid:
+            if len(items) > 1:
+                self._shm.note_stale_drops(len(items) - 1)
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
+
+        # Дверь отправки проверяет ТОЛЬКО views, что лежат на самом item: плагин, пересобравший dict
+        # (например center_crop), их теряет. Каждый выход получает свои views + билеты входного батча
+        # (без дублей по (name, gen)) в НОВОМ списке — вход не мутируется. Нет билетов — нет работы.
+        if view_tickets:
+            self._attach_batch_views(items, view_tickets)
 
         # Отправить результаты по IPC
         self._send_results(items)
@@ -264,32 +290,46 @@ class PipelineExecutor:
         return result.frame
 
     def _collect_view_tickets(self, items: list[dict]) -> list[dict]:
-        """Ф7 G.5.c/d-2: снять тикеты входных zero-copy view-items — для re-check
-        (view_name+generation) И release (owner+shm_name+index+generation). Пусто, если
-        zero-copy не использовался (нет middleware / нет ``_frame_is_view``) — ноль
-        оверхеда на не-view пути."""
+        """Ф7 G.5.c/d-2: снять входные zero-copy view-ссылки items — для re-check и release.
+
+        Task 4.4: тикет = сама ссылка ``{owner, slot, idx, gen, name}`` из процесс-локального
+        ``item["_shm_views"]`` (её пишет ``restore_frame`` для каждого массива, восстановленного
+        view; мета view на проводе больше не ездит). Пусто, если zero-copy не использовался
+        (нет middleware / нет ``_shm_views``) — ноль оверхеда на не-view пути. Ссылки крупных
+        ключей входят в тот же список (C5): re-check и release охватывают и их."""
         if self._shm is None:
             return []
         tickets: list[dict] = []
         for it in items:
-            if it.get("_frame_is_view"):
-                name = it.get("_shm_view_name")
-                if name:
-                    tickets.append(
-                        {
-                            "view_name": name,
-                            "generation": int(it.get("_shm_view_generation", -1)),
-                            "owner": it.get("owner") or it.get("shm_owner") or "",
-                            "shm_name": it.get("shm_name", ""),
-                            "index": int(it.get("shm_index", -1)),
-                        }
-                    )
+            views = it.get(SHM_VIEWS_KEY)
+            if isinstance(views, list):
+                tickets.extend(ref for ref in views if isinstance(ref, dict) and ref.get("name"))
         return tickets
 
+    @staticmethod
+    def _attach_batch_views(items: list[dict], view_tickets: list[dict]) -> None:
+        """Записать в каждый выходной item ``_shm_views`` = его собственные views + ``view_tickets``
+        батча, без дублей по (name, gen). Новый список на item (общий список между выходами дал бы
+        сквозную мутацию при fan-out)."""
+        for item in items:
+            merged: list[dict] = []
+            seen: set[tuple] = set()
+            own = item.get(SHM_VIEWS_KEY)
+            for ref in [*(own if isinstance(own, list) else ()), *view_tickets]:
+                if not isinstance(ref, dict):
+                    continue
+                key = (ref.get("name"), ref.get("gen"))
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(ref)
+            item[SHM_VIEWS_KEY] = merged
+
     def _frame_views_valid(self, view_tickets: list[dict]) -> bool:
-        """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан).
-        Любой drift → False (middleware уже учёл frame_stale_drops) → батч дропается."""
-        return all(self._shm.frame_view_valid(t["view_name"], t["generation"]) for t in view_tickets)
+        """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан — поколение
+        слота равно ``ref["gen"]``). Любой drift → False (reader уже учёл ОДИН stale-дроп —
+        ``all()`` останавливается на первой ссылке; остальные выходы батча доначисляет ``_run_batch``
+        через ``note_stale_drops``) → батч дропается."""
+        return all(self._shm.frame_view_valid(ref) for ref in view_tickets)
 
     def _loan_active(self) -> bool:
         """Ф7 G.5 ревью-фикс 13: активен ли loan-протокол (публичный контракт middleware)."""
@@ -308,12 +348,12 @@ class PipelineExecutor:
         под loan-протоколом (иначе ноль оверхеда)."""
         if not view_tickets or not self._loan_active():
             return
-        for t in view_tickets:
-            owner = t.get("owner")
-            if not owner or t.get("index", -1) < 0:
+        for ref in view_tickets:
+            owner = ref.get("owner")
+            if not owner or ref.get("idx", -1) < 0:
                 continue
             self._pending_releases.setdefault(owner, []).append(
-                {"slot": t["shm_name"], "index": t["index"], "generation": t["generation"], "reader": self._node}
+                {"slot": ref["slot"], "index": ref["idx"], "generation": ref["gen"], "reader": self._node}
             )
             self._pending_release_count += 1
         if self._pending_release_count >= self._release_threshold():
@@ -397,6 +437,9 @@ class PipelineExecutor:
 
             # frame-trace: отметить отправителя/время → receiver посчитает transport.
             frame_trace.stamp_send(item, self._node)
+            # Task 4.5d: штамп отправки для transport_ms — всегда (не под FW_FRAME_TRACE),
+            # один на item до цикла по targets. Читает и вынимает DataReceiver получателя.
+            item["_t_sent_ns"] = time.perf_counter_ns()
 
             # Отправить в каждый target
             for target in targets:

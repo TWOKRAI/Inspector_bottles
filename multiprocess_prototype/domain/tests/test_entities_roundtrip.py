@@ -406,6 +406,12 @@ class TestExtrasShorthandDriftGuard:
             "репозитория (замер 2026-08-12). Плоский ключ свернулся бы в metadata и стал "
             "бы нем — это проверено отказом при вводе ручки"
         ),
+        "cv_threads": (
+            "потоки OpenCV процесса (Task 4.6 transport-single-policy, 2026-09-29): тот же "
+            "класс extras-only, что chain_max_lag_items. Форма в рецепте — "
+            "`extras: {cv_threads: N}` (так в TEMPLATE.yaml). Плоский `cv_threads: 4` на "
+            "стенде 4.6 свернулся в metadata и не дошёл до процесса — проверено отказом"
+        ),
     }
 
     @staticmethod
@@ -510,7 +516,7 @@ class TestExtrasShorthandDriftGuard:
         )
 
         extras_only = self._framework_pick_keys() - set(ProcessConfig.model_fields)
-        assert extras_only == {"frame_ring_depth", "copy_out_targets", "chain_max_lag_items"}, (
+        assert extras_only == {"frame_ring_depth", "copy_out_targets", "chain_max_lag_items", "cv_threads"}, (
             f"состав extras-only ключей framework изменился: {sorted(extras_only)}. "
             "Такой ключ живёт только в extras (typed-поля не плодим, рычаг C6 №1) — "
             "проверьте, что домен доносит его форму, и обновите этот список."

@@ -762,14 +762,14 @@ class TestLogActiveFeatureFlags:
 
     def test_active_flag_is_reported_with_source(self, monkeypatch) -> None:
         # given один флаг включён через env
-        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
+        monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "1")
 
         pmp = self._bare_pmp()
         pmp._log_active_feature_flags()
 
         # then info-строка называет флаг и источник env
         msg = pmp._log_info.call_args[0][0]
-        assert "FW_SHM_SEQLOCK" in msg and "env" in msg
+        assert "FW_SHM_PREFIX_CLEANUP" in msg and "env" in msg
 
     def test_requires_violation_emits_warning(self, monkeypatch) -> None:
         # given zero-copy включён без своих зависимостей

@@ -82,7 +82,23 @@ def _import_real_plugins():
 
     importlib.import_module("Plugins.processing.grayscale.plugin")
     importlib.import_module("Plugins.processing.color_mask.plugin")
+    importlib.import_module("Plugins.processing.hsv_mask.plugin")
+    importlib.import_module("Plugins.processing.blob_detector.plugin")
     importlib.import_module("Plugins.processing.stitcher.plugin")
+
+
+@pytest.fixture(scope="module")
+def all_real_plugins(_import_real_plugins):
+    """Импортировать ВСЕ Plugins/**/plugin.py (тот же importlib-механизм) — полный реальный реестр."""
+    import importlib
+    from pathlib import Path
+
+    import Plugins
+
+    root = Path(Plugins.__path__[0])
+    for plugin_file in sorted(root.rglob("plugin.py")):
+        rel = plugin_file.relative_to(root).with_suffix("").parts
+        importlib.import_module(".".join(("Plugins", *rel)))
 
 
 @pytest.fixture(scope="module")
@@ -138,8 +154,9 @@ class TestColorMaskFullPipeline:
     ) -> None:
         """color_mask с широким HSV-диапазоном → результат не None, shape (H, W, 3).
 
-        ColorMaskPlugin.process возвращает mask_bgr — 3-канальный BGR
-        (см. plugin.py: mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)).
+        ColorMaskPlugin кладёт в item["mask"] одноканальную маску (кадр не меняет);
+        песочница берёт первый image/*-выход плагина (mask) и сама переводит
+        gray → BGR, чтобы вид всегда получал (H, W, 3).
         """
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
 
@@ -156,8 +173,68 @@ class TestColorMaskFullPipeline:
 
         assert result is not None, "color_mask должен вернуть результат, не None"
         assert isinstance(result, np.ndarray)
-        # ColorMaskPlugin возвращает BGR 3-канальный (mask_bgr)
+        # Песочница конвертирует gray-маску в BGR
         assert result.shape == (50, 50, 3), f"Ожидали shape (50, 50, 3), получили {result.shape}"
+
+    def test_color_mask_sandbox_shows_the_mask_not_the_frame(
+        self,
+        ctx_with_real_registry,
+        minimal_bgr_frame,
+    ) -> None:
+        """Красная половина попадает в H 0..10 (белая), зелёная — нет (чёрная).
+
+        Раньше песочница показывала result["frame"] — вход без изменений.
+        """
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        config = {"h_min": 0, "h_max": 10, "s_min": 10, "s_max": 255, "v_min": 10, "v_max": 255}
+        out = SandboxPresenter(ctx_with_real_registry).run_once("color_mask", minimal_bgr_frame, config)
+
+        assert out.shape == (50, 50, 3)
+        assert out[5, 25].tolist() == [255, 255, 255]
+        assert out[45, 25].tolist() == [0, 0, 0]
+
+    def test_hsv_mask_sandbox_shows_the_mask_not_the_frame(
+        self,
+        ctx_with_real_registry,
+        minimal_bgr_frame,
+    ) -> None:
+        """То же для hsv_mask: первый image/*-выход — mask."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        config = {"h_min": 0, "h_max": 10, "s_min": 10, "s_max": 255, "v_min": 10, "v_max": 255}
+        out = SandboxPresenter(ctx_with_real_registry).run_once("hsv_mask", minimal_bgr_frame, config)
+
+        assert out.shape == (50, 50, 3)
+        assert out[5, 25].tolist() == [255, 255, 255]
+        assert out[45, 25].tolist() == [0, 0, 0]
+
+    def test_blob_detector_sandbox_output_key_is_frame_not_mask(
+        self,
+        ctx_with_real_registry,
+        minimal_bgr_frame,
+    ) -> None:
+        """Выбор ключа вывода: у blob_detector первый image/*-выход — frame, не mask.
+
+        Guard: зелёная нижняя половина видна (не показана маска). Совместимость
+        плагина с песочницей проверяет test_blob_detector_is_sandbox_compatible.
+        """
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        config = {"h_min": 0, "h_max": 10, "s_min": 10, "s_max": 255, "v_min": 10, "v_max": 255, "draw_contours": False}
+        out = SandboxPresenter(ctx_with_real_registry).run_once("blob_detector", minimal_bgr_frame, config)
+
+        assert out.shape == (50, 50, 3)
+        assert out[45, 25].tolist() == [0, 255, 0]
+
+    def test_blob_detector_is_sandbox_compatible(self, ctx_with_real_registry) -> None:
+        """blob_detector: необязательный вход mask не закрывает песочницу (регрессия T1)."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        result = SandboxPresenter(ctx_with_real_registry).check_compatibility("blob_detector")
+
+        assert result.ok is True, result.reason
+        assert result.reason == ""
 
     def test_color_mask_result_not_empty(
         self,
@@ -332,6 +409,98 @@ class TestStitcherDisabledInUI:
 # ---------------------------------------------------------------------------
 # Тест 4: sandbox widget apply grayscale через QThread
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Правило совместимости на реальном реестре: «от одного кадра» И «без побочных эффектов»
+# ---------------------------------------------------------------------------
+
+_SIDE_EFFECT_OR_CONTEXT_CATEGORIES = {"source", "runtime", "control", "io", "output", "sink", "calibration"}
+
+
+class TestCompatibilityRuleRealRegistry:
+    """check_compatibility на полном реальном реестре (все Plugins/**/plugin.py)."""
+
+    def test_every_non_processing_context_category_is_disabled(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """Любой плагин категорий source/runtime/control/io/output/sink/calibration → ok=False."""
+        from multiprocess_framework.modules.process_module.plugins import PluginRegistry
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        presenter = SandboxPresenter(ctx_with_real_registry)
+        entries = [e for e in PluginRegistry.list() if e.category in _SIDE_EFFECT_OR_CONTEXT_CATEGORIES]
+
+        assert entries, "в реальном реестре нет ни одного плагина этих категорий — тест пуст"
+        # Категории io/output/sink/calibration должны быть представлены (иначе тест не ловит их удаление).
+        assert {"io", "sink", "calibration"} <= {e.category for e in entries}
+        opened = [e.name for e in entries if presenter.check_compatibility(e.name).ok]
+        assert opened == [], f"побочные эффекты/контекст, но открыты в песочнице: {opened}"
+
+    @pytest.mark.parametrize("name", ["frame_saver", "robot_io"])
+    def test_side_effect_plugins_disabled_because_of_side_effects(
+        self, all_real_plugins, ctx_with_real_registry, name
+    ) -> None:
+        """frame_saver (sink) и robot_io (io): отказ именно из-за побочных эффектов.
+
+        Старое правило `len(inputs) > 1` тоже закрывало их (случайно, по числу входов) —
+        поэтому проверяем причину, а не только ok=False.
+        """
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        result = SandboxPresenter(ctx_with_real_registry).check_compatibility(name)
+
+        assert result.ok is False
+        assert "пишет наружу" in result.reason
+
+    def test_single_input_sink_no_longer_passes_by_accident(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """mjpeg_sink (sink, единственный вход frame) раньше проходил правило по числу входов."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        assert SandboxPresenter(ctx_with_real_registry).check_compatibility("mjpeg_sink").ok is False
+
+    def test_required_non_bgr_input_disables_plugin(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """blob_filter: единственный обязательный вход mask не image/bgr → ok=False, причина называет порт."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        result = SandboxPresenter(ctx_with_real_registry).check_compatibility("blob_filter")
+
+        assert result.ok is False
+        assert "mask" in result.reason
+
+    @pytest.mark.parametrize("name", ["flip", "negative"])
+    def test_region_named_bgr_input_keeps_plugin_open(self, all_real_plugins, ctx_with_real_registry, name) -> None:
+        """flip/negative: порт назван "region", но это image/bgr = item["frame"] → открыты (имя порта — метка графа)."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        result = SandboxPresenter(ctx_with_real_registry).check_compatibility(name)
+
+        assert result.ok is True, result.reason
+
+    def test_flip_run_once_flips_rows(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """run_once(flip): первая строка результата == последняя строка входа."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        frame = np.arange(6 * 4 * 3, dtype=np.uint8).reshape(6, 4, 3)
+        out = SandboxPresenter(ctx_with_real_registry).run_once("flip", frame, {})
+
+        assert out is not None
+        assert out[0].tolist() == frame[-1].tolist()
+        assert out[-1].tolist() == frame[0].tolist()
+
+    def test_negative_run_once_inverts(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """run_once(negative): результат == 255 - вход."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        frame = np.arange(6 * 4 * 3, dtype=np.uint8).reshape(6, 4, 3)
+        out = SandboxPresenter(ctx_with_real_registry).run_once("negative", frame, {})
+
+        assert out is not None
+        assert out.tolist() == (255 - frame).tolist()
+
+    def test_optional_non_frame_input_keeps_plugin_open(self, all_real_plugins, ctx_with_real_registry) -> None:
+        """circle_detector: frame и mask оба необязательные, image/bgr среди входов есть → открыт."""
+        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox_presenter import SandboxPresenter
+
+        assert SandboxPresenter(ctx_with_real_registry).check_compatibility("circle_detector").ok is True
 
 
 class TestSandboxWidgetApplyGrayscale:

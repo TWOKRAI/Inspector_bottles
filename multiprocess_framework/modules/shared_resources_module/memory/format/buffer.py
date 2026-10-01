@@ -41,6 +41,26 @@ HEADER_SIZE = 4
 # Размер заголовка одного изображения: h, w, c (3x uint32) + dtype (1 byte)
 IMAGE_HEADER_SIZE = 12 + 1
 
+# c == 0 в заголовке изображения: у кадра НЕ было оси каналов (серый (H, W)). Данные
+# лежат как один канал, читатель возвращает (H, W). Транспорт отдаёт ровно ту форму,
+# что получил: (H, W), (H, W, 1) и (H, W, 3) различимы (решение владельца 2026-09-29) —
+# иначе форма кадра зависела бы от способа доставки (SHM против pickle/inline).
+NO_CHANNEL_AXIS = 0
+
+
+def _image_dims(img: np.ndarray) -> tuple[int, int, int, int]:
+    """(h, w, c_данных, c_заголовка) кадра; для (H, W) данных 1 канал, в заголовке 0."""
+    h, w = img.shape[:2]
+    if img.ndim == 2:
+        return h, w, 1, NO_CHANNEL_AXIS
+    return h, w, img.shape[2], img.shape[2]
+
+
+def _stored_shape(h: int, w: int, c: int) -> tuple[int, ...]:
+    """Форма кадра по заголовку: c == NO_CHANNEL_AXIS -> (h, w), иначе (h, w, c)."""
+    return (h, w) if c == NO_CHANNEL_AXIS else (h, w, c)
+
+
 # --- SLOT-header (seqlock, Ф7 G.3(b) / ADR-SRM-011) -------------------------------
 # Фиксированный префикс перед блоком изображений, когда слот в seqlock-формате.
 SLOT_HEADER_SIZE = 8
@@ -138,11 +158,10 @@ def pack_images_legacy(
     for img in images:
         if img.dtype != expected_dtype:
             raise ValueError(f"dtype mismatch: {img.dtype} != {expected_dtype}")
-        h, w = img.shape[:2]
-        c = 1 if img.ndim == 2 else img.shape[2]
+        h, w, c, c_header = _image_dims(img)
         if h > max_h or w > max_w or c > max_c:
             raise ValueError(f"Image shape ({h}x{w}x{c}) exceeds max ({max_h}x{max_w}x{max_c})")
-        buffer[offset : offset + 12] = struct.pack("III", h, w, c)
+        buffer[offset : offset + 12] = struct.pack("III", h, w, c_header)
         offset += 12
         buffer[offset] = ord(img.dtype.char)
         offset += 1
@@ -190,16 +209,17 @@ def pack_images_fast(
     for img in images:
         if img.dtype != expected_dtype:
             raise ValueError(f"dtype mismatch: {img.dtype} != {expected_dtype}")
-        h, w = img.shape[:2]
-        c = 1 if img.ndim == 2 else img.shape[2]
+        h, w, c, c_header = _image_dims(img)
         if h > max_h or w > max_w or c > max_c:
             raise ValueError(f"Image shape ({h}x{w}x{c}) exceeds max ({max_h}x{max_w}x{max_c})")
-        buffer[offset : offset + 12] = struct.pack("III", h, w, c)
+        buffer[offset : offset + 12] = struct.pack("III", h, w, c_header)
         offset += 12
         buffer[offset] = ord(img.dtype.char)
         offset += 1
         dest = np.ndarray((h, w, c), dtype=img.dtype, buffer=buffer, offset=offset)
-        np.copyto(dest, img)
+        # reshape: серый (H, W) без оси каналов не broadcast'ится в (H, W, 1) — без него
+        # каждый mono-кадр падал в pickle-fallback (стенд code_reader_sdk 2026-09-29).
+        np.copyto(dest, img.reshape(h, w, c))
         offset += slot_size
 
 
@@ -212,9 +232,13 @@ def pack_images(
     fast: bool = True,
     seqlock: bool = False,
     on_recover: Optional[Callable[[int], None]] = None,
-) -> None:
+) -> Optional[int]:
     """
     Записать изображения в буфер.
+
+    Returns:
+        seqlock=True — ЧЁТНОЕ поколение, которое произвела ЭТА запись (``writing_gen + 1``;
+        Task 4.4: ссылка на SHM несёт его как ``gen``); seqlock=False — ``None``.
 
     Args:
         fast: True — pack_images_fast (по умолчанию), False — pack_images_legacy
@@ -245,7 +269,7 @@ def pack_images(
             pack_images_fast(buffer, images, max_shape, expected_dtype, base=base)
         else:
             pack_images_legacy(buffer, images, max_shape, expected_dtype, base=base)
-        return
+        return None
 
     # H1b: на входе generation может быть НЕЧЁТНЫМ (прошлый writer не довёл запись —
     # исключение выше по стеку без finally в старой версии, либо kill -9). writing_gen
@@ -274,6 +298,8 @@ def pack_images(
     finally:
         # generation ВСЕГДА → чётное (стабильно), даже при исключении.
         _write_generation(buffer, writing_gen + 1)
+    # Маска — как в _write_generation: на переходе через 2**32 вернуть то, что увидит reader.
+    return (writing_gen + 1) & _UINT32_MASK
 
 
 def clear_slot_seqlock(buffer: memoryview) -> None:
@@ -380,8 +406,8 @@ def _read_image_block(
         dtype_char = chr(buffer[offset])
         dtype = np.dtype(dtype_char)
         offset += 1
-        arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
-        reshaped = arr.reshape((h, w, c))
+        arr = np.frombuffer(buffer, dtype=dtype, count=h * w * max(c, 1), offset=offset)
+        reshaped = arr.reshape(_stored_shape(h, w, c))
         if copy:
             images.append(reshaped.copy())
         else:
@@ -456,8 +482,8 @@ def _read_one_frame(buffer: memoryview, base: int, *, copy: bool = True) -> Opti
     offset += 12
     dtype = np.dtype(chr(buffer[offset]))
     offset += 1
-    arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
-    reshaped = arr.reshape((h, w, c))
+    arr = np.frombuffer(buffer, dtype=dtype, count=h * w * max(c, 1), offset=offset)
+    reshaped = arr.reshape(_stored_shape(h, w, c))
     if copy:
         return reshaped.copy()
     # Ф7 G.5 ревью-фикс 8: zero-copy view READ-ONLY (мутация плагином мимо seqlock =

@@ -17,8 +17,18 @@ from typing import Callable
 from . import frame_trace
 from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
-from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import SHM_DROPPED_KEY, FrameShmMiddleware
 from .collector_registry import ItemCollector
+
+
+class _StampedBatch(list):
+    """Коллекция items с меткой постановки в очередь (``perf_counter``).
+
+    Метку читает PipelineExecutor, чтобы посчитать ожидание в chain_queue. Остаётся
+    обычным ``list`` для всех потребителей.
+    """
+
+    __slots__ = ("enq_ts",)
 
 
 class DataReceiver:
@@ -89,6 +99,9 @@ class DataReceiver:
         # холостые spin'ы при пустом receive (иначе effective_hz отражал бы
         # частоту опроса, а не реальный поток данных).
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=0.0)
+        # Task 4.5d: EMA времени транспорта между процессами (первый отсчёт задаёт значение).
+        self._transport_ms = 0.0
+        self._transport_seen = False
         # HP-1 (Ф7 G.1): per-stage latency (receive/restore), за флагом
         # FW_PERF_PROBES, дефолт OFF — см. perf_probes.py.
         self._perf = perf_probes.LatencyProbes()
@@ -108,7 +121,37 @@ class DataReceiver:
         metrics = self._cycle_metrics.get_cycle_metrics()
         if perf_probes.enabled():
             metrics["perf_probes"] = self._perf.get_stats()
+        # Task 4.5d: ключ есть всегда (0.0 до первого отсчёта) — ноль здесь показание.
+        metrics["transport_ms"] = round(self._transport_ms, 2)
         return metrics
+
+    def _note_transport(self, msg: dict) -> None:
+        """Снять штамп отправки ``_t_sent_ns`` с сообщения и обновить EMA ``transport_ms``.
+
+        Штамп вынимается ВСЕГДА, даже испорченный: ключ не должен дойти до коллектора и
+        далее до отправки вниз по цепочке (там штамп ставит уже свой отправитель).
+
+        Почему ``perf_counter_ns``: на Windows он общесистемный, поэтому штамп родителя
+        сопоставим с часами дочернего процесса (замер лида: дельта родитель/потомок
+        0.6-0.8 мс); ``time.time()`` ходит шагами по 15.6 мс и для миллисекунд не годится.
+
+        Что входит в число: отправка -> межпроцессная очередь данных -> unpickle ->
+        SHM-restore. Вместе с ``queue_wait_ms`` (ожидание в chain_queue) и ``plugin_ms``
+        объясняет, из чего сложилась задержка кадра (цель владельца - требования к мощности).
+        Затор исполнителя сюда тоже попадает: пока приём блокирован на ``put`` в chain_queue,
+        следующий кадр ждёт во входящей очереди. Рост вместе с ``queue_wait_ms`` = упор в
+        исполнитель получателя, а не в транспорт (ревью 4.5, итерация 2, N1).
+        """
+        data = msg.get("data", msg)
+        sent = data.pop("_t_sent_ns", None) if isinstance(data, dict) else None
+        if not isinstance(sent, int) or isinstance(sent, bool):
+            return
+        ms = (time.perf_counter_ns() - sent) / 1e6
+        if self._transport_seen:
+            self._transport_ms += 0.1 * (ms - self._transport_ms)
+        else:
+            self._transport_ms = ms
+            self._transport_seen = True
 
     def _bound_lag(self, items: list[dict]) -> bool:
         """Догоняющий буфер: держать не более ``max_lag_items`` свежих коллекций.
@@ -183,6 +226,10 @@ class DataReceiver:
         очереди: downstream consumer уже остановлен, ждать бессмысленно. Item
         дропается (единственный случай) чтобы воркер мог выйти gracefully.
         """
+        # Метка ставится один раз, до всех путей put: ожидание из-за backpressure
+        # считается ожиданием исполнителя намеренно.
+        items = _StampedBatch(items)
+        items.enq_ts = time.perf_counter()
         if self._max_lag_items and self._bound_lag(items):
             return
         try:
@@ -258,6 +305,13 @@ class DataReceiver:
             if self._shm:
                 with self._perf.measure("restore"):
                     msg = self._shm.restore_frame(msg)
+                # 4.4c: item атомарен — сообщение с нечитаемой SHM-ссылкой отброшено целиком
+                # (метку ставит restore_frame, счётчик уже учтён там). Ни item, ни ``mask=None``.
+                if self._is_shm_dropped(msg):
+                    continue
+
+            # Task 4.5d: время транспорта — до построения item, чтобы штамп не утёк в него.
+            self._note_transport(msg)
 
             # Построить item из msg
             item = self._build_item(msg)
@@ -274,6 +328,12 @@ class DataReceiver:
 
             # Полный цикл обработки одного сообщения → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)
+
+    @staticmethod
+    def _is_shm_dropped(msg: dict) -> bool:
+        """Есть ли на сообщении метка ``_shm_dropped`` (её ставит ``restore_frame``, 4.4c)."""
+        data = msg.get("data", msg)
+        return isinstance(data, dict) and bool(data.get(SHM_DROPPED_KEY))
 
     def _build_item(self, msg: dict) -> dict:
         """Построить item из IPC сообщения.
@@ -302,9 +362,6 @@ class DataReceiver:
             "region_name",
             "frame_id",
             "timestamp",
-            "owner",
-            "shm_name",
-            "shm_index",
             "sender",
             "data_type",
         ):

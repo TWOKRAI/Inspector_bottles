@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from ..format import read_generation, read_single_frame
 
@@ -55,6 +55,8 @@ class ShmFrameReader:
         # PipelineExecutor на re-check) — lock сериализует dict + close.
         self._lock = threading.Lock()
         self._stale_drops = 0
+        # Task 4.4: перезапись слота ВО ВРЕМЯ чтения по ссылке (``read_ref``) — torn.
+        self._torn_reads = 0
         # Ф7 H-ревью: ошибки close() handle больше НЕ глотаются молча (принцип «терять
         # можно, молчать нельзя», ADR-SRM-012) — считаем + опц. debug-лог.
         self._close_errors = 0
@@ -63,6 +65,12 @@ class ShmFrameReader:
     @property
     def stale_drops(self) -> int:
         return self._stale_drops
+
+    @property
+    def torn_reads(self) -> int:
+        """Task 4.4: сколько раз слот был перезаписан ВО ВРЕМЯ чтения по ссылке (после проверки
+        поколения, до конца копии/создания view) — ``read_ref`` вернул ``None``."""
+        return self._torn_reads
 
     @property
     def close_errors(self) -> int:
@@ -82,25 +90,50 @@ class ShmFrameReader:
         (флаг off) кэш пуст → 0 (off = прежнее поведение). len(dict) атомарен в CPython."""
         return len(self._cache)
 
-    def read_frame(
-        self,
-        shm_actual_name: str,
-        seqlock: bool = False,
-        *,
-        copy: bool = True,
-        view_meta: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Any]:
+    def read_ref(self, name: str, gen: int, *, copy: bool = True) -> Optional[Any]:
+        """Task 4.4: прочитать кадр по ссылке (``ref["name"]``, ``ref["gen"]``).
+
+        Поколение слота сверяется с ``gen`` ДО чтения (расхождение → ``None`` + ``stale_drops``:
+        ячейка уже переписана другой записью) и ПОСЛЕ него (расхождение → ``None`` +
+        ``torn_reads``: перезапись пришлась на чтение). Для КОПИИ (``copy=True``, а без кэша она
+        форсируется) пиксели чужой записи под ссылкой на эту не вернутся. ``copy=False`` + активный
+        кэш → VIEW: его слот можно перезаписать ПОСЛЕ возврата — это ловит ``view_valid`` (сверка с
+        тем же ``gen``) и дверь отправки. Бросает при ошибке открытия сегмента и при реальной
+        порче заголовка (стабильное поколение)."""
         from multiprocessing import shared_memory as _shm_mod
 
         if self._cache_enabled:
-            return self._read_cached(shm_actual_name, seqlock, copy, view_meta, _shm_mod)
-
-        # Без кэша сегмент закрывается сразу → view повис бы: копия обязательна.
-        shm = self._open(shm_actual_name, _shm_mod)
+            # open + чтение под ОДНИМ lock (S2, см. _read_cached): close() другого потока не рвёт buf.
+            with self._lock:
+                shm = self._open_cached_locked(name, _shm_mod)
+                return self._read_at_generation(shm.buf, gen, copy, lock_held=True)
+        shm = self._open(name, _shm_mod)
         try:
-            return self._read_noting_generation(shm.buf, seqlock, True, view_meta)
+            return self._read_at_generation(shm.buf, gen, True, lock_held=False)
         finally:
             shm.close()
+
+    def _bump(self, attr: str, *, lock_held: bool) -> None:
+        """``+= 1`` счётчика под ``self._lock``: его бьют два потока (DataReceiver в ``read_ref``,
+        PipelineExecutor в ``view_valid``), голый ``+=`` теряет обновления. Lock не реентерабелен —
+        тот, кто уже держит его (кэш-путь ``read_ref``), передаёт ``lock_held=True``."""
+        if lock_held:
+            setattr(self, attr, getattr(self, attr) + 1)
+            return
+        with self._lock:
+            setattr(self, attr, getattr(self, attr) + 1)
+
+    def _read_at_generation(self, buf: Any, gen: int, copy: bool, *, lock_held: bool) -> Optional[Any]:
+        if read_generation(buf) != gen:
+            self._bump("_stale_drops", lock_held=lock_held)
+            return None
+        frame = read_single_frame(buf, verify_seqlock=True, copy=copy)
+        # read_single_frame сверяет поколение только с СОБСТВЕННЫМ первым чтением: если запись
+        # целиком уложилась между нашей проверкой и его стартом, оно вернёт новый кадр — ловим тут.
+        if frame is None or read_generation(buf) != gen:
+            self._bump("_torn_reads", lock_held=lock_held)
+            return None
+        return frame
 
     def _open(self, shm_actual_name: str, shm_mod: Any) -> Any:
         """Открыть сегмент по имени; при ``track=False`` — сразу снять его с учёта
@@ -113,52 +146,8 @@ class ShmFrameReader:
             resource_tracker.unregister(shm._name, "shared_memory")
         return shm
 
-    @staticmethod
-    def _read_noting_generation(
-        buf: Any, seqlock: bool, copy: bool, view_meta: Optional[Dict[str, Any]]
-    ) -> Optional[Any]:
-        """Копия кадра; при ``copy=True`` и ``view_meta`` — поколение прочитанного кадра
-        в ``view_meta["_shm_generation"]`` (gui-service 1.3, дедуп у внешнего читателя).
-
-        Поколение известно, только если оно чётное и одинаково до и после чтения (писатель
-        между ними не начинал запись — поколение монотонно); иначе ``-1`` («не знаю»).
-        Без seqlock поколения нет — ``-1``."""
-        if not (copy and view_meta is not None):
-            return read_single_frame(buf, verify_seqlock=seqlock, copy=copy)
-        gen_before = read_generation(buf) if seqlock else -1
-        frame = read_single_frame(buf, verify_seqlock=seqlock, copy=copy)
-        gen = -1
-        if seqlock and gen_before % 2 == 0 and read_generation(buf) == gen_before:
-            gen = gen_before
-        view_meta["_shm_generation"] = gen
-        return frame
-
-    def _read_cached(
-        self,
-        shm_actual_name: str,
-        seqlock: bool,
-        copy: bool,
-        view_meta: Optional[Dict[str, Any]],
-        shm_mod: Any,
-    ) -> Optional[Any]:
-        """Ф7 H-ревью (S2): open + чтение буфера под ОДНИМ lock — иначе close() на потоке
-        message_processor (wire.deconfigure) порвал бы shm.buf под чтением здесь (поток
-        DataReceiver). Под zero-copy view остаётся валиден после lock: эвикция с close() под
-        zero-copy отключена (сегмент жив до teardown), а teardown-close() сам берёт этот
-        lock → сериализован с чтением."""
-        with self._lock:
-            shm = self._open_cached_locked(shm_actual_name, shm_mod)
-            frame = self._read_noting_generation(shm.buf, seqlock, copy, view_meta)
-            if frame is not None and not copy and view_meta is not None:
-                # Мета для G.5.c: поколение на момент чтения (сверка ПОСЛЕ использования
-                # view). Без seqlock поколения нет → -1 (re-check неактивен).
-                view_meta["_frame_is_view"] = True
-                view_meta["_shm_view_name"] = shm_actual_name
-                view_meta["_shm_view_generation"] = read_generation(shm.buf) if seqlock else -1
-        return frame
-
     def _open_cached_locked(self, shm_actual_name: str, shm_mod: Any) -> Any:
-        """Открыть SharedMemory с LRU-кэшем. ВЫЗЫВАТЬ под ``self._lock`` (read_frame его
+        """Открыть SharedMemory с LRU-кэшем. ВЫЗЫВАТЬ под ``self._lock`` (read_ref его
         уже держит — иначе close() на другом потоке порвал бы буфер под чтением, S2)."""
         shm = self._cache.pop(shm_actual_name, None)
         if shm is not None:
@@ -191,22 +180,19 @@ class ShmFrameReader:
 
     def view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
         """Post-use re-check (G.5.c). gen<0 / handle нет / поколение разошлось → drop."""
-        if gen_at_read < 0:
-            self._stale_drops += 1
-            return False
         # get + read_generation под ТЕМ ЖЕ lock, что open/close — иначе close() на потоке
         # DataReceiver порвал бы backing-mmap под read_generation здесь (поток Executor).
+        # Счётчик — под ним же: все три причины дропа (gen<0, handle нет, поколение разошлось)
+        # бьют один и тот же ``_stale_drops`` с двух потоков.
         with self._lock:
-            shm = self._cache.get(shm_view_name)
-            if shm is None:
-                # handle эвиктнут/сменился → сегмент мог закрыться → консервативный drop.
+            valid = False
+            if gen_at_read >= 0:
+                shm = self._cache.get(shm_view_name)
+                # shm None: handle эвиктнут/сменился → сегмент мог закрыться → консервативный drop.
+                valid = shm is not None and read_generation(shm.buf) == gen_at_read
+            if not valid:
                 self._stale_drops += 1
-                return False
-            valid = read_generation(shm.buf) == gen_at_read
-        if valid:
-            return True
-        self._stale_drops += 1
-        return False
+            return valid
 
     def close(self) -> None:
         with self._lock:

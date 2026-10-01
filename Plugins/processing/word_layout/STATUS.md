@@ -14,6 +14,9 @@
   валидация структуры headless.
 - **Тесты:** 50 (geometry/assembler/plugin), ruff чист.
 
+- **Страж `below_threshold` (Task 0.3 letters-retrain):** `_top_pred` отказывает предсказанию
+  с `below_threshold=True`; тесты `test_acceptance_below_threshold_guard.py`.
+
 ## Открыто
 
 - **Движение робота:** `layout.word_layout.robot_job → robot_io → devices` — после калибровки

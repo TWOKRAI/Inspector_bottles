@@ -173,6 +173,17 @@ class GenericProcessConfig(ProcessLaunchConfig):
         ),
     ] = 0
 
+    cv_threads: Annotated[
+        int | None,
+        FieldMeta(
+            "OpenCV threads",
+            info="Число потоков OpenCV (cv2.setNumThreads) ЭТОГО процесса. None = не задано → "
+            "runner применяет дефолт 2 (по умолчанию OpenCV берёт все ядра, и N процессов "
+            "душат друг друга). В рецепте — extras.cv_threads.",
+            min=1,
+        ),
+    ] = None
+
     copy_out_targets: Annotated[
         list[str],
         FieldMeta(
@@ -250,4 +261,8 @@ class GenericProcessConfig(ProcessLaunchConfig):
         # plugins уже в payload через model_dump() в super().build(),
         # но нужно убедиться что они в config
         proc_dict["config"]["plugins"] = self.plugins
+        # Task 4.6: незаданный cv_threads в proc_dict не кладём — форму каждого proc_dict
+        # (и golden-снапшоты build) не меняем; отсутствие = дефолт 2 в runner'е.
+        if proc_dict["config"].get("cv_threads") is None:
+            proc_dict["config"].pop("cv_threads", None)
         return name, proc_dict

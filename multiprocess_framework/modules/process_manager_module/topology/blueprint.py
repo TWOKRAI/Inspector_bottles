@@ -321,6 +321,13 @@ class ProcessConfig(SchemaBase):
             base_kwargs["copy_out_targets"] = list(copy_out_targets)
         if chain_max_lag_items:
             base_kwargs["chain_max_lag_items"] = int(chain_max_lag_items)
+        # Task 4.6: число потоков OpenCV процесса. Тот же путь, что у ключей выше:
+        # без имени ЗДЕСЬ extras.cv_threads молча отбрасывается. None = не задан
+        # (runner применит дефолт 2).
+        cv_threads = _pick("cv_threads", None)
+        if cv_threads is not None:
+            # Сырое значение: pydantic отвергнет 'abc' / 2.9 ошибкой с именем поля cv_threads.
+            base_kwargs["cv_threads"] = cv_threads
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(

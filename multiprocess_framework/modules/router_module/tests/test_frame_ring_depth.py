@@ -52,18 +52,18 @@ class TestResolveRingDepth:
 
 class TestRingWraps:
     def test_write_index_cycles_over_coll(self):
-        """Кадры пишутся round-robin по coll слотам: shm_index циклит 0..coll-1."""
+        """Кадры пишутся round-robin по coll слотам: ref["idx"] циклит 0..coll-1."""
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="output_frames", coll=4)
         indices = []
         for i in range(10):
             out = mw.strip_and_write({"frame": _frame(i), "seq": i})
-            indices.append(out.get("shm_index"))
+            indices.append(out["_shm_refs"]["frame"]["idx"])
         assert indices == [0, 1, 2, 3, 0, 1, 2, 3, 0, 1]  # депт 4 → цикл
 
     def test_deeper_ring_holds_more_slots(self):
         """coll=6 → 6 различных слотов до перезаписи (не де-факто одно-слотовый)."""
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="output_frames", coll=6)
-        seen = {mw.strip_and_write({"frame": _frame(i)}).get("shm_index") for i in range(6)}
+        seen = {mw.strip_and_write({"frame": _frame(i)})["_shm_refs"]["frame"]["idx"] for i in range(6)}
         assert seen == {0, 1, 2, 3, 4, 5}
 
 
@@ -71,7 +71,7 @@ class TestPerCameraIsolation:
     def test_two_cameras_independent_rings(self, monkeypatch):
         """Два owner'а на одном MemoryManager → независимые регионы/кольца, без коллизий.
 
-        Изоляция OS-имён SHM-сегментов (assert shm_actual_name) держится под флагом
+        Изоляция OS-имён SHM-сегментов (assert ref["name"]) держится под флагом
         FW_SHM_OWNER_INCARNATION (owner+incarnation в имени, фундамент G.3) — иначе оба
         owner'а получают `{slot}_{index}` и OS-имена совпадают. Ставим флаг явно: без
         него тест проходил лишь из-за утечки env по порядку прогона (детерминированно
@@ -86,9 +86,10 @@ class TestPerCameraIsolation:
         out1 = cam1.strip_and_write({"frame": _frame(22)})
 
         # Разные владельцы → разные SHM-сегменты (изоляция цепочек камер).
-        assert out0["shm_owner"] == "cam0"
-        assert out1["shm_owner"] == "cam1"
-        assert out0["shm_actual_name"] != out1["shm_actual_name"]
+        ref0, ref1 = out0["_shm_refs"]["frame"], out1["_shm_refs"]["frame"]
+        assert ref0["owner"] == "cam0"
+        assert ref1["owner"] == "cam1"
+        assert ref0["name"] != ref1["name"]
 
         # Кадр каждой камеры восстанавливается своим значением (нет перепутывания).
         f0 = cam0.restore_frame({"data": out0})["frame"]
