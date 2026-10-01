@@ -27,6 +27,9 @@ k * период (k от W // период вниз до 1) с наилучши�
 
     python -m Services.line_sim.tools.make_seamless_texture photo.jpg --out tile.png \
         --scene-px-per-mm 0.6 --pitch-mm 55.0
+
+`--gap-alpha` пишет RGBA-PNG: альфа 0 в просветах между звеньями (мятный фон, по тону и насыщенности
+в HSV), 255 на звеньях и бортах; RGB-часть остаётся побайтно тем же тайлом (`gap_alpha_mask`).
 """
 
 from __future__ import annotations
@@ -59,6 +62,19 @@ _HARMONIC_FRAC = 0.9
 #: нужную ширину (ревью, H15).
 # ponytail: фиксированный отступ; подбирать по фото — когда реальный снимок покажет, что мало.
 _EDGE_MARGIN = 8
+
+#: Пороги просвета для `gap_alpha_mask` (HSV OpenCV: H 0..179, S 0..255), границы включительные.
+#: Замер на реальном тайле belt_photo_full (`--force-period`, 410x484). Мера «стол виден» — пиксели
+#: V >= 130 в столбцах шва (x mod 205 из 180..204 и 0..2, строки 22..461): 1065 px, это мятные клинья у
+#: концов щели; посередине щели стол почти не виден (53 px из 1065, V щели ≈82 против ≈62 у соседа).
+#: Эти значения
+#: покрывают 72.4 % видимого стола; ложно прозрачны (V < 100) 0.28 % тайла; всего прозрачно 0.87 %.
+#: Таблица и рассыпь — README. Правило универсальное (цветовой ключ H и S), без привязки к ленте.
+_GAP_HUE = (25, 85)
+_GAP_SAT_MIN = 40
+#: Зелёные борта: верх — строки 0..20, низ — 464..483 (S 77..140, H 70..75, тон в диапазоне просвета),
+#: поэтому зона борта принудительно непрозрачна. С запасом на тёмную кромку (строки 20..21 и 462..463).
+_RAILS_PX = (22, 22)
 
 
 @dataclass(frozen=True)
@@ -222,6 +238,41 @@ def make_seamless_tile(image: np.ndarray, *, force_period: bool = False) -> Seam
     return SeamlessResult(mirror, "mirror", None, seam_diff, inner_diff, note=note)
 
 
+def gap_alpha_mask(
+    tile_rgb: np.ndarray,
+    *,
+    hue: tuple[int, int] = _GAP_HUE,
+    sat_min: int = _GAP_SAT_MIN,
+    rails_px: tuple[int, int] = _RAILS_PX,
+) -> np.ndarray:
+    """Альфа-маска просветов тайла: `(H, W)` uint8, 0 — просвет, 255 — звено/борт.
+
+    Pre: `tile_rgb` — `(H, W, 3)` uint8 в порядке RGB (инструмент читает BGR — конвертировать до вызова).
+    Просвет = `hue[0] <= H <= hue[1]` И `S >= sat_min` (HSV OpenCV, границы включительные). Строки
+    `[0, rails_px[0])` и `[H - rails_px[1], H)` всегда 255: у зелёных бортов тон и насыщенность
+    в пороге просвета. Бинарная, без сглаживания края. Вход не меняется.
+    """
+    hsv = cv2.cvtColor(tile_rgb, cv2.COLOR_RGB2HSV)
+    gap = (hsv[:, :, 0] >= hue[0]) & (hsv[:, :, 0] <= hue[1]) & (hsv[:, :, 1] >= sat_min)
+    top, bottom = rails_px
+    gap[:top] = False
+    gap[tile_rgb.shape[0] - bottom :] = False
+    return np.where(gap, 0, 255).astype(np.uint8)
+
+
+def _int_pair(parser: argparse.ArgumentParser, flag: str, raw: str, upper: int | None) -> tuple[int, int]:
+    """`"A,B"` -> `(A, B)`; нецелое/не два числа/вне `[0, upper]` -> `parser.error` с именем флага."""
+    try:
+        a, b = (int(part) for part in raw.split(","))
+    except ValueError:
+        parser.error(f"{flag}: ожидается пара целых 'A,B', получено {raw!r}")
+    if min(a, b) < 0:
+        parser.error(f"{flag}: значения должны быть >= 0, получено {raw!r}")
+    if upper is not None and max(a, b) > upper:
+        parser.error(f"{flag}: значения должны быть в 0..{upper}, получено {raw!r}")
+    return a, b
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Превратить фото в бесшовный тайл фона сцены (period/mirror, см. докстринг модуля)."
@@ -260,7 +311,65 @@ def main(argv: list[str] | None = None) -> int:
             "скачок огибающей"
         ),
     )
+    parser.add_argument(
+        "--gap-alpha",
+        action="store_true",
+        dest="gap_alpha",
+        help="писать RGBA-PNG: альфа 0 в просветах между звеньями (по HSV), 255 на звеньях и бортах",
+    )
+    parser.add_argument(
+        "--gap-hue",
+        default=None,
+        dest="gap_hue",
+        metavar="LO,HI",
+        help=(
+            "диапазон тона просвета (H OpenCV 0..179, включительно); "
+            f"по умолчанию {_GAP_HUE[0]},{_GAP_HUE[1]}; требует --gap-alpha"
+        ),
+    )
+    parser.add_argument(
+        "--gap-sat-min",
+        default=None,
+        dest="gap_sat_min",
+        metavar="N",
+        help=(
+            f"минимальная насыщенность просвета (S 0..255, включительно); по умолчанию {_GAP_SAT_MIN}; "
+            "требует --gap-alpha"
+        ),
+    )
+    parser.add_argument(
+        "--rails-px",
+        default=None,
+        dest="rails_px",
+        metavar="TOP,BOTTOM",
+        help=(
+            "строки зелёных бортов сверху/снизу — всегда непрозрачны; задаются в пикселях ТАЙЛА и НЕ "
+            f"пересчитываются с --scene-px-per-mm; по умолчанию {_RAILS_PX[0]},{_RAILS_PX[1]}; требует --gap-alpha"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    for flag, value in (
+        ("--gap-hue", args.gap_hue),
+        ("--gap-sat-min", args.gap_sat_min),
+        ("--rails-px", args.rails_px),
+    ):
+        if value is not None and not args.gap_alpha:
+            parser.error(f"{flag} требует --gap-alpha")
+    gap_hue = _int_pair(
+        parser, "--gap-hue", args.gap_hue if args.gap_hue is not None else f"{_GAP_HUE[0]},{_GAP_HUE[1]}", 179
+    )
+    if gap_hue[0] > gap_hue[1]:
+        parser.error(f"--gap-hue: LO больше HI, получено {args.gap_hue!r}")
+    try:
+        gap_sat_min = int(args.gap_sat_min if args.gap_sat_min is not None else _GAP_SAT_MIN)
+    except ValueError:
+        parser.error(f"--gap-sat-min: ожидается целое, получено {args.gap_sat_min!r}")
+    if not 0 <= gap_sat_min <= 255:
+        parser.error(f"--gap-sat-min: значение должно быть в 0..255, получено {args.gap_sat_min!r}")
+    rails_px = _int_pair(
+        parser, "--rails-px", args.rails_px if args.rails_px is not None else f"{_RAILS_PX[0]},{_RAILS_PX[1]}", None
+    )
 
     has_reference = args.photo_width_mm is not None or args.pitch_mm is not None
     if args.scene_px_per_mm is not None and not has_reference:
@@ -300,14 +409,25 @@ def main(argv: list[str] | None = None) -> int:
         image = cv2.resize(image, (new_w, new_h), interpolation=interp)
 
     result = make_seamless_tile(image, force_period=args.force_period)
-    imwrite_unicode(args.out, result.tile)
-
     tile_h, tile_w = result.tile.shape[:2]
+    out_image = result.tile
+    gap_info = ""
+    if args.gap_alpha:
+        if sum(rails_px) >= tile_h:
+            parser.error(f"--rails-px: TOP+BOTTOM = {sum(rails_px)} не меньше высоты тайла {tile_h}")
+        # Маска — по ГОТОВОМУ тайлу (после масштаба и шва); функция берёт RGB, тайл — BGR.
+        alpha = gap_alpha_mask(
+            cv2.cvtColor(result.tile, cv2.COLOR_BGR2RGB), hue=gap_hue, sat_min=gap_sat_min, rails_px=rails_px
+        )
+        out_image = np.dstack([result.tile, alpha])
+        gap_info = f" transparent_frac={float((alpha == 0).mean()):.4f}"
+    imwrite_unicode(args.out, out_image)
+
     period_token = "none" if result.period_px is None else str(result.period_px)
     reason = f" note={result.note}" if result.note else ""
     print(
         f"method={result.method} period_px={period_token} seam_diff={result.seam_diff:.4f} "
-        f"inner_diff={result.inner_diff:.4f} scale={scale:.4f} size={tile_w}x{tile_h}{source}{reason}"
+        f"inner_diff={result.inner_diff:.4f} scale={scale:.4f} size={tile_w}x{tile_h}{gap_info}{source}{reason}"
     )
     print(f"background_texture: {args.out}")
     return 0

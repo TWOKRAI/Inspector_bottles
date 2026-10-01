@@ -31,6 +31,7 @@ Acceptance) + рамка `plan.md`. Рабочее дерево — git worktree
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -378,9 +379,7 @@ def test_gap_alpha_mask_is_pure_2d_uint8(tmp_path):
 
 
 # ── 9. реальный ассет (вне git; пропуск, если его нет) ───────────────────────────────────
-_REAL = Path(
-    "D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/merge-main/data/line_sim/belt_photo_full.png"
-)
+_REAL = Path(os.environ.get("LINE_SIM_BELT_PHOTO") or Path(__file__).parents[3] / "data/line_sim/belt_photo_full.png")
 
 
 @pytest.mark.skipif(not _REAL.exists(), reason="реального фото ленты нет (data/ вне git)")
