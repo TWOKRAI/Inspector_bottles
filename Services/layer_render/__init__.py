@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """`layer_render` — стек слоёв фона для сцены (Task 1.1), геометрия/композиция и Windows-safe I/O (Task 2.1),
-фотометрические эффекты (Task 2.2).
+фотометрические эффекты (Task 2.2), стек слоёв объекта (Task 2.3).
 
 Контракт — в README.md.
 """
@@ -21,25 +21,49 @@ from Services.layer_render.crop import resize_square, side_from_radius, square_c
 from Services.layer_render.effects import EFFECT_PARAMS, EFFECTS, EffectSpec, apply_effects
 from Services.layer_render.interfaces import ScrollingTile, SolidFill
 from Services.layer_render.io import imread_unicode, imwrite_unicode
+from Services.layer_render.layers import (
+    AUGMENT_FIELDS,
+    ComposedLayers,
+    LayerAugment,
+    LayerMode,
+    LayerSpec,
+    RangeF,
+    SpriteSource,
+    canvas_size,
+    compose_layers,
+    load_layer_sprite,
+    transform_layer,
+)
 
 __all__ = [
+    "AUGMENT_FIELDS",
+    "ComposedLayers",
     "EFFECTS",
     "EFFECT_PARAMS",
     "EffectSpec",
+    "LayerAugment",
+    "LayerMode",
+    "LayerSpec",
+    "RangeF",
     "ScrollingTile",
     "SolidFill",
+    "SpriteSource",
     "apply_effects",
     "background_layers_from_config",
+    "canvas_size",
     "cast_contact_shadow",
+    "compose_layers",
     "composite",
     "crop_to_alpha",
     "fit_longest_side",
     "fold_background",
     "imread_unicode",
     "imwrite_unicode",
+    "load_layer_sprite",
     "render_background",
     "resize_square",
     "rotate_expand",
     "side_from_radius",
     "square_crop",
+    "transform_layer",
 ]

@@ -13,8 +13,9 @@ from __future__ import annotations
 import numpy as np
 
 from Services.dataset_gen.core.augment import apply_occlusion
+from Services.layer_render import load_layer_sprite
 from Services.line_sim.core.catalog_bridge import load_catalog, load_image_rgba
-from Services.line_sim.core.layered_object import LayeredObject, _load_sprite
+from Services.line_sim.core.layered_object import LayeredObject
 from Services.line_sim.core.preset import CLASS_SPRITE_SOURCE, ScenePreset
 from Services.line_sim.interfaces import LayerSpec, ObjectPassport
 
@@ -181,7 +182,9 @@ class ObjectFactory:
             (
                 layer.name,
                 _read_only_view(
-                    LayeredObject._transform(_load_sprite(layer), layer.scale, layer.angle_deg, 0.0, layer.color_rgb)
+                    LayeredObject._transform(
+                        load_layer_sprite(layer), layer.scale, layer.angle_deg, 0.0, layer.color_rgb
+                    )
                 ),
                 layer.offset_px[0],
                 layer.offset_px[1],

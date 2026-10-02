@@ -22,11 +22,16 @@
 | `side_from_radius(radius, radius_scale, margin_px)` | (`crop`, Task 6.1) сторона квадрата: `max(2, int(round(2·r·scale)) + 2·int(margin))` |
 | `square_crop(frame, cx, cy, side, oob, pad_value=(0,0,0))` | (`crop`, Task 6.1) квадрат `side`×`side`, угол `(cx - side//2, cy - side//2)`; **всегда копия**, не view кадра. `oob` у границы: `drop` -> `None`; `pad` -> холст `pad_value`; `clamp` -> обрезка по кадру (нет пересечения -> `None`); `replicate` -> репликация края (нет пересечения -> `ValueError`). Неизвестный `oob` -> `ValueError` |
 | `resize_square(crop, out)` | (`crop`, Task 6.1) ресайз к `out`×`out`: `out <= 0` или уже готово -> тот же объект; иначе INTER_AREA при `crop.shape[0] > out`, INTER_LINEAR иначе |
+| `LayerMode`, `RangeF`, `SpriteSource`, `AUGMENT_FIELDS`, `LayerAugment`, `LayerSpec` | (`layers`, Task 2.3) слой объекта и диапазоны его аугментации (pydantic, frozen); перенесены из `line_sim.interfaces` дословно, поля не менялись. Поворот CCW, ось Y вниз |
+| `load_layer_sprite(layer)` | (`layers`) RGBA uint8 спрайт слоя; callable-провайдер зовётся один раз; строковый id -> `TypeError`, не RGBA -> `ValueError` |
+| `transform_layer(sprite, scale, angle_deg, hue_deg, color_rgb=None)` | (`layers`) заливка -> scale -> поворот (кратные 90° — `rot90`) -> сдвиг тона; без трансформа возвращает **сам** `sprite` (не копию) |
+| `canvas_size(placed)` | (`layers`) размер `(w, h)` симметричной канвы под `[(RGBA, offset_x, offset_y)]` без рендера |
+| `compose_layers(layers, rng, object_angle_deg=0.0, forced_defects=(), *, label="")` -> `ComposedLayers(rgba, layer_params, active_defects)` | (`layers`) розыгрыш и композиция стека: слой i берёт `rng.spawn(len(layers))[i]`; `rgba` — новый **записываемый** массив; `active_defects` — в порядке слоёв. Ошибки по порядку: `forced_defects` строкой -> `TypeError`; пустой список -> спрайты -> дубли имён -> неизвестный `forced_defects` -> прозрачный итог (`ValueError`). Все с префиксом `LayeredObject '<label>':`, кроме ошибок спрайта (`load_layer_sprite`: `TypeError`/`ValueError` с именем слоя, без префикса). Известное старое поведение (follow-up, не исправлено): стек, где на канву не попал ни один слой (только defect-слои, ни один не активен), падает сырым `ValueError` из `max()` на пустой последовательности |
 
 Карта зоны выреза: `docs/maps/crop.md`.
 
 Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
-`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций). Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.
+`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций), `Services.line_sim.interfaces.LayerSpec` и ещё пять типов слоя, `Services.line_sim.core.layered_object.canvas_size`, `LayeredObject._transform` (= `transform_layer`). `LayeredObject` — обёртка: разбор `passport.defect`, `compose_layers`, паспорт, read-only кэш. Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.
 
 ## Схема YAML `background_layers`
 
