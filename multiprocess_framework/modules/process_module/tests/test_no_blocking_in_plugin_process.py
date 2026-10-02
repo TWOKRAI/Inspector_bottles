@@ -20,8 +20,17 @@ AST по ``<корень>/**/plugin.py``, функции ``process`` / ``_proces
 
 * ``time.sleep(...)`` и любой вызов вида ``<имя>.sleep(...)`` (покрывает ``import time as t``);
 * голый ``sleep(...)`` (``from time import sleep``);
-* областью поиска служат ТОЛЬКО функции с именем ``process`` или ``_process_*`` — ``configure``,
-  ``start``, воркер-петли и любые прочие методы плагина ожидать вправе.
+* корни поиска — функции с именем ``process`` или ``_process_*``; ``configure``, ``start``,
+  воркер-петли и прочие методы ожидать вправе, ЕСЛИ их не зовёт горячий путь;
+* **транзитивность по ``self``** (ревью 5.2, инъекция лида M6b: ``time.sleep`` в помощнике
+  ``_actuate``, вызванном из ``process()``, — страж по одним именам был зелёным). От корня страж
+  идёт по вызовам ``self.<метод>()`` методов ТОГО ЖЕ класса, транзитивно (множество посещённых),
+  и называет цепочку: ``process -> _actuate``. Одно место докладывается один раз — по самой
+  короткой цепочке.
+
+**Чего страж НЕ видит** (честно, без «гарантирует»): функции уровня модуля и чужих модулей,
+методы базового класса и миксинов, вызовы через ``getattr``/переменную/колбэк, ``Event.wait`` и
+``queue.get(timeout=…)``. Он ловит ``sleep`` в коде самого класса плагина, не больше.
 
 Самотесты стража помечены «контроль»: они зелёные сегодня по построению (страж — часть этого
 файла) и держат сам детектор от вырождения в «ничего не находит». Красный сегодня — один:
@@ -65,20 +74,70 @@ def _call_name(node: ast.Call) -> str | None:
     return None
 
 
+def _self_calls(fn: ast.AST, methods: dict) -> list[str]:
+    """Имена методов того же класса, вызванных из ``fn`` как ``self.<имя>(...)``, в порядке исходника."""
+    names: list[str] = []
+    for node in ast.walk(fn):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "self"
+            and node.func.attr in methods
+        ):
+            names.append(node.func.attr)
+    return names
+
+
+def _sleeps(fn: ast.AST) -> list[tuple[int, str]]:
+    return [(n.lineno, name) for n in ast.walk(fn) if isinstance(n, ast.Call) and (name := _call_name(n)) is not None]
+
+
 def find_blocking_calls(root: Path) -> list[BlockingCall]:
-    """Найти ожидания в ``process`` / ``_process_*`` всех ``<root>/**/plugin.py``."""
+    """Найти ожидания на горячем пути ``process`` / ``_process_*`` всех ``<root>/**/plugin.py``.
+
+    ``function`` — цепочка от корня: ``"process"`` для прямого вызова,
+    ``"process -> _actuate"`` для вызова в методе того же класса.
+    """
     found: list[BlockingCall] = []
     for plugin_file in sorted(Path(root).rglob("plugin.py")):
         tree = ast.parse(plugin_file.read_text(encoding="utf-8"), filename=str(plugin_file))
         rel = plugin_file.relative_to(root).as_posix()
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or not _is_process_function(fn.name):
+        # (строка, вызов) -> самая короткая цепочка; одно место — одна строка отчёта.
+        best: dict[tuple[int, str], list[str]] = {}
+
+        def note(chain: list[str], fn: ast.AST) -> None:
+            for lineno, call in _sleeps(fn):
+                key = (lineno, call)
+                if key not in best or len(chain) < len(best[key]):
+                    best[key] = chain
+
+        in_class: set[int] = set()
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
                 continue
-            for node in ast.walk(fn):
-                if isinstance(node, ast.Call):
-                    name = _call_name(node)
-                    if name is not None:
-                        found.append(BlockingCall(rel, node.lineno, fn.name, name))
+            methods = {m.name: m for m in cls.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            in_class.update(id(m) for m in methods.values())
+            for root_name in (n for n in methods if _is_process_function(n)):
+                # BFS: цепочки в порядке длины, посещённые не повторяются (рекурсия не зацикливает).
+                visited = {root_name}
+                queue = [[root_name]]
+                while queue:
+                    chain = queue.pop(0)
+                    note(chain, methods[chain[-1]])
+                    for callee in _self_calls(methods[chain[-1]], methods):
+                        if callee not in visited:
+                            visited.add(callee)
+                            queue.append([*chain, callee])
+        # Функции с именем процесса вне класса (уровень модуля) — только прямой вызов.
+        for fn in ast.walk(tree):
+            if (
+                isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and _is_process_function(fn.name)
+                and id(fn) not in in_class
+            ):
+                note([fn.name], fn)
+        found.extend(BlockingCall(rel, lineno, " -> ".join(chain), call) for (lineno, call), chain in best.items())
     return sorted(found)
 
 
@@ -156,6 +215,72 @@ def test_guard_catches_bare_sleep_and_aliased_time_module(tmp_path: Path) -> Non
     found = {(c.path, c.call) for c in find_blocking_calls(tmp_path)}
 
     assert found == {("bare/plugin.py", "sleep"), ("aliased/plugin.py", "t.sleep")}
+
+
+def test_guard_follows_self_method_calls_from_process_and_names_the_chain(tmp_path: Path) -> None:
+    """Ревью 5.2 (инъекция M6b): ``process()`` -> ``self._actuate()`` -> ``time.sleep`` -> красный."""
+    _write_plugin(
+        tmp_path,
+        "hidden_sleep",
+        "import time\n\n"
+        "class P:\n"
+        "    def process(self, items):\n"
+        "        self._actuate()\n"
+        "        return items\n"
+        "    def _actuate(self):\n"
+        "        self._wait()\n"
+        "    def _wait(self):\n"
+        "        time.sleep(0.1)\n",
+    )
+
+    assert find_blocking_calls(tmp_path) == [
+        BlockingCall("hidden_sleep/plugin.py", 10, "process -> _actuate -> _wait", "time.sleep")
+    ]
+    with pytest.raises(AssertionError) as exc:
+        assert_no_blocking_calls(tmp_path)
+    assert "hidden_sleep/plugin.py:10" in str(exc.value)
+
+
+def test_guard_reports_a_place_once_by_the_shortest_chain_and_survives_recursion(tmp_path: Path) -> None:
+    """``process`` зовёт ``_process_marker`` с ``sleep``: одна строка отчёта (корень ``_process_marker``).
+
+    Взаимная рекурсия ``_a`` <-> ``_b`` не зацикливает обход.
+    """
+    _write_plugin(
+        tmp_path,
+        "dup",
+        "import time\n\n"
+        "class P:\n"
+        "    def process(self, items):\n"
+        "        self._process_marker(items)\n"
+        "        self._a()\n"
+        "    def _process_marker(self, item):\n"
+        "        time.sleep(0.05)\n"
+        "    def _a(self):\n"
+        "        self._b()\n"
+        "    def _b(self):\n"
+        "        self._a()\n",
+    )
+
+    assert find_blocking_calls(tmp_path) == [BlockingCall("dup/plugin.py", 8, "_process_marker", "time.sleep")]
+
+
+def test_guard_does_not_follow_calls_on_other_objects_or_sleep_in_unreached_methods(tmp_path: Path) -> None:
+    """``other._wait()`` — не ``self``; ``_loop`` никто с горячего пути не зовёт -> зелёный."""
+    _write_plugin(
+        tmp_path,
+        "clean2",
+        "import time\n\n"
+        "class P:\n"
+        "    def process(self, items):\n"
+        "        other = P()\n"
+        "        other._loop()\n"
+        "        return items\n"
+        "    def _loop(self):\n"
+        "        time.sleep(0.05)\n",
+    )
+
+    assert find_blocking_calls(tmp_path) == []
 
 
 def test_guard_is_green_on_a_clean_plugin_and_ignores_sleep_outside_process(tmp_path: Path) -> None:

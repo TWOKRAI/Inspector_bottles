@@ -139,7 +139,12 @@ class RobotControlPlugin(ProcessModulePlugin):
         # Планировщик процесса тронут этим плагином: тогда stats() читается в
         # cmd_get_stats. Без этого флага get_stats создавал бы планировщик сам.
         self._scheduler_used: bool = False
-        # WARNING об устаревшем reject_delay_ms — один раз на экземпляр плагина.
+        # Точка отсчёта процессных счётчиков планировщика на момент reset_counters:
+        # late_fires / unfired_on_stop_items принадлежат планировщику ПРОЦЕССА, и
+        # обнулить их у него плагин не вправе — он вычитает свою базу (ревью 5.2).
+        self._sched_baseline: dict = {}
+        # WARNING об устаревшем reject_delay_ms — один раз на экземпляр плагина,
+        # на первом process() при любом исходе (решение лида, ревью 5.2).
         self._reject_delay_warned: bool = False
 
         ctx.log_info(
@@ -169,6 +174,8 @@ class RobotControlPlugin(ProcessModulePlugin):
         # Это не кадр, а «кадр не проверен»: total_inspected, _total_rejected, вердикт-
         # документы и фронт _rejecting в любом режиме не трогаем (иначе маркер посреди
         # серии брака сбросил бы фронт, и следующий кадр дал бы второй вердикт).
+        if not self._reject_delay_warned and self._reg.reject_delay_ms:
+            self._warn_deprecated_alias()
         if is_marker(item):
             return self._process_marker(item)
 
@@ -287,6 +294,14 @@ class RobotControlPlugin(ProcessModulePlugin):
         """``effective_transit = transit_ms or reject_delay_ms`` — читается на каждом вызове."""
         return int(self._reg.transit_ms or self._reg.reject_delay_ms or 0)
 
+    def _warn_deprecated_alias(self) -> None:
+        """Один WARNING на экземпляр: регистр ``reject_delay_ms`` устарел (алиас ``transit_ms``)."""
+        self._reject_delay_warned = True
+        self._ctx.log_warning(
+            f"RobotControlPlugin: регистр reject_delay_ms={self._reg.reject_delay_ms} устарел — "
+            "это алиас transit_ms (действует при transit_ms=0), сна в process() больше нет"
+        )
+
     def _no_actuation(self) -> dict:
         """Поля широкой записи для исхода без привода (pass, выключенный плагин)."""
         return {"actuation": "none", "fire_at": None, "transit_ms": self._transit_ms()}
@@ -299,12 +314,6 @@ class RobotControlPlugin(ProcessModulePlugin):
         выстрел синхронно), ``unscheduled`` (нет ``capture_ts``), ``scheduled`` /
         ``missed`` (ответ планировщика).
         """
-        if self._reg.reject_delay_ms and not self._reject_delay_warned:
-            self._reject_delay_warned = True
-            self._ctx.log_warning(
-                f"RobotControlPlugin: регистр reject_delay_ms={self._reg.reject_delay_ms} устарел — "
-                "это алиас transit_ms (действует при transit_ms=0), сна в process() больше нет"
-            )
         transit_ms = self._transit_ms()
         if transit_ms <= 0:
             # Решение 8: без транзита планировщик не нужен и не создаётся.
@@ -526,6 +535,9 @@ class RobotControlPlugin(ProcessModulePlugin):
             self._actuation_fired_items = 0
         self._actuation_missed_items = 0
         self._actuation_unscheduled_items = 0
+        # Процессные счётчики планировщика не обнуляются у него (он общий), а
+        # запоминаются базой: get_stats отдаёт прирост с момента сброса.
+        self._sched_baseline = self._ctx.scheduler.stats() if self._scheduler_used else {}
         self._ctx.log_info("RobotControlPlugin: счётчики сброшены")
         return {"status": "ok"}
 
@@ -540,16 +552,19 @@ class RobotControlPlugin(ProcessModulePlugin):
         rate = self._total_rejected / self._total_inspected if self._total_inspected > 0 else 0.0
         # late_fires / unfired_on_stop_items — счёт ПЛАНИРОВЩИКА ПРОЦЕССА (он один на
         # процесс): плагин не видит, опоздал ли выстрел. fired/missed/unscheduled — свои.
+        # От процессных отнимается база последнего reset_counters.
         sched = self._ctx.scheduler.stats() if self._scheduler_used else {}
+        base = self._sched_baseline
         with self._actuation_lock:
             fired = self._actuation_fired_items
         return {
             "status": "ok",
             "actuation_fired_items": fired,
             "actuation_missed_items": self._actuation_missed_items,
-            "actuation_late_fires": int(sched.get("late_fires", 0)),
+            "actuation_late_fires": int(sched.get("late_fires", 0)) - int(base.get("late_fires", 0)),
             "actuation_unscheduled_items": self._actuation_unscheduled_items,
-            "actuation_unfired_on_stop_items": int(sched.get("unfired_on_stop_items", 0)),
+            "actuation_unfired_on_stop_items": int(sched.get("unfired_on_stop_items", 0))
+            - int(base.get("unfired_on_stop_items", 0)),
             "total_inspected": self._total_inspected,
             "total_rejected": self._total_rejected,
             "reject_rate": round(rate, 4),

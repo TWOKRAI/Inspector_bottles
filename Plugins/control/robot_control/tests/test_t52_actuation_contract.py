@@ -546,3 +546,43 @@ def test_capture_ts_reaches_the_solver_through_the_real_plugin_runner() -> None:
 
     assert events[-1]["actuation"] == "scheduled", "capture_ts не дошёл до решателя: запись не поставлена"
     assert ctx.scheduler.pending() == 1
+
+
+# --- Ревью 5.2, находка 4: полный литерал записи о разрыве из acceptance 5.3 -------------------------
+
+
+def test_gap_record_full_literal_of_task_5_3_with_single_source_uses_the_source_key() -> None:
+    """Литерал ``build_gap`` из acceptance 5.3: один узел-источник -> есть ``source`` и ``camera_id``.
+
+    Покрывает ветку ``item["source"]`` у записи с ``count > 1`` (фикстура ``_gap_record`` её не несёт).
+    """
+    plugin, ctx, _, events = _plugin({"transit_ms": 100})
+    ts3 = time.time() - 0.050
+    ts1 = ts3 - 0.020
+    record = {
+        "inspection_status": "not_inspected",
+        "overflow_marker": True,
+        "count": 3,
+        "trace_ids": ["t1", "t2", "t3"],
+        "first_capture_ts": ts1,
+        "last_capture_ts": ts3,
+        "reasons": {"lag": 2, "stale_restore": 1},
+        "sources": {"processor_0": 3},
+        "source": "processor_0",
+        "camera_id": "cam_0",
+    }
+
+    out = plugin.process([record])
+
+    result = out[0]["inspection_result"]
+    assert result["action"] == "reject"
+    assert result["source"] == "processor_0"  # одиночный источник — строкой, не гистограммой
+    assert result["origin"] == {"lag": 2, "stale_restore": 1}  # reason нет -> гистограмма причин
+    rec = events[-1]
+    assert rec["actuation"] == "scheduled"
+    assert rec["count"] == 3
+    assert rec["trace_ids"] == ["t1", "t2", "t3"]
+    assert rec["fire_at"] == pytest.approx(ts1 + 0.100, abs=1e-9)
+    assert "processor_0@" not in rec["summary"] and "@processor_0" in rec["summary"]
+    assert ctx.scheduler.pending() == 1
+    assert _stat(plugin, "total_not_inspected") == 3

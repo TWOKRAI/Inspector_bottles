@@ -72,7 +72,8 @@ Outputs:  frame (image/bgr), inspection_result (dict)
   - get_stats          — текущая статистика + total_not_inspected, verdicts_written/verdicts_unwritten,
                          actuation_fired_items, actuation_missed_items, actuation_unscheduled_items
                          (свои), actuation_late_fires, actuation_unfired_on_stop_items (счёт
-                         планировщика ПРОЦЕССА: он один на процесс)
+                         планировщика ПРОЦЕССА: он один на процесс; reset_counters
+                         не трогает его, а запоминает базу — get_stats отдаёт прирост)
 
 Config:
   - enabled (bool, True)
@@ -80,7 +81,7 @@ Config:
   - transit_ms (int, 0) — путь изделия от кадра до толкателя, мс; 0 — привод сразу
   - actuation_tolerance_ms (int, 20) — допуск окна: позже — missed / late_fires
   - reject_delay_ms (int, 0) — УСТАРЕЛ: алиас transit_ms (действует при transit_ms = 0),
-    ненулевое значение даёт один WARNING на экземпляр плагина
+    ненулевое значение даёт один WARNING на экземпляр плагина (на первом process(), при любом исходе)
   - max_detections_for_reject (int, 0)
   - not_inspected_action (reject|pass, reject) — реакция на маркер not_inspected
 
