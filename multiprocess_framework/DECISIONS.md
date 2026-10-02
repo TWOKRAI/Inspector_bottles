@@ -2576,7 +2576,7 @@
 | Модуль | Файл | Слой | Статус |
 |--------|------|------|--------|
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…007 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., `_track_error` тотален — мусор на входе становится фактом, а не броском) |
-| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…009 (Удаление `_compat.py`, ..., `core/metrics.py` — заморозка S-27 с голосом и потолком) |
+| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…010 (Удаление `_compat.py`, ..., Правила значения данными в `FieldMeta(rules=...)` + атомарная запись `apply_values`) |
 | `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…004 (Извлечение ScenarioManager из Dispatcher, ..., Асимметрия дефолта `expects_full_message` (Dispatcher vs RouterManager)) |
 | `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…018 (Паттерн CRM (ChannelRoutingManager), ..., `ObservabilityStore` держит `emergency_log` на четырёх миграциях открытия — рекурсия настоящая, не отговорка (Task 4.11, часть B)) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…012 (Удаление LogDispatcher, ..., Окно голоса — общий механизм с политикой процесса, факт и голос разделены (Ф1.4 / M17)) |
