@@ -1625,29 +1625,32 @@ class ProcessModulePlugin(ABC):
     def cmd_set_config(self, data: dict) -> dict:
         """Generic handler для bridge.on_field_set → applied dict из GUI.
 
-        Применяет {field: value} к self._reg через setattr. Поля без
-        соответствующего атрибута игнорируются (graceful skip с логом).
+        Применяет {field: value} к self._reg ВСЁ ИЛИ НИЧЕГО (``apply_values``, ADR-DS-010):
+        отказ любого поля → ``{"status": "error", "error": текст}`` без исключения наружу,
+        ни одно поле не изменено. Поля без соответствующего атрибута игнорируются
+        (graceful skip с логом).
 
         Плагин может переопределить, добавив "set_config" в self.commands —
         тогда этот generic не регистрируется (см. _auto_register_commands).
 
         Returns:
-            {"status": "ok", "applied": {...}, "skipped": [...]}
+            {"status": "ok", "applied": {...}, "skipped": [...]} — ``applied`` несёт
+            СОХРАНЁННЫЕ (нормализованные) значения.
         """
         reg = getattr(self, "_reg", None)
         if reg is None:
             return {"status": "error", "error": "_reg not initialized"}
 
-        applied: dict[str, Any] = {}
-        skipped: list[str] = []
-        for field_name, value in data.items():
-            if hasattr(reg, field_name):
-                setattr(reg, field_name, value)
-                applied[field_name] = value
-            else:
-                skipped.append(field_name)
-
+        known = {name: value for name, value in data.items() if hasattr(reg, name)}
+        skipped = [name for name in data if name not in known]
         ctx = getattr(self, "_ctx", None)
+        ok, err = reg.apply_values(known)
+        if not ok:
+            if ctx is not None and hasattr(ctx, "log_warning"):
+                ctx.log_warning(f"[{self.name} set_config] отказ, ничего не записано: {err}")
+            return {"status": "error", "error": err}
+        applied: dict[str, Any] = {name: getattr(reg, name) for name in known}
+
         if ctx is not None and hasattr(ctx, "log_info"):
             ctx.log_info(f"[{self.name} set_config] applied={applied}" + (f" skipped={skipped}" if skipped else ""))
 

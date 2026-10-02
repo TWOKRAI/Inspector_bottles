@@ -71,6 +71,13 @@ class SchemaBase(SchemaMixin, BaseModel):
         Итерируем только поля с FieldMeta, пропуская plain-поля без метаданных.
         """
         for name, meta in type(self).get_all_fields_meta().items():
+            # Межполевое правило le_field (ADR-DS-010): значение ≤ значения названного поля,
+            # None с любой стороны — пропуск. Текст называет поля, но НЕ значения.
+            le_field = meta.rules.get("le_field")
+            if le_field is not None:
+                value, bound = getattr(self, name), getattr(self, le_field, None)
+                if value is not None and bound is not None and value > bound:
+                    raise ValueError(f"Поле '{name}' должно быть не больше поля '{le_field}'")
             # Пропускаем поля без числовых ограничений — раннее завершение
             if meta.min is None and meta.max is None:
                 continue

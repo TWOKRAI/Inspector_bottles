@@ -16,9 +16,12 @@ SchemaMixin — миксин с методами работы с полями д
 
 Backward compatibility: RegisterMixin = SchemaMixin (алиас в конце файла).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, Tuple
+
+from pydantic_core import ValidationError
 
 if TYPE_CHECKING:
     from .field_meta import FieldMeta
@@ -114,10 +117,7 @@ class SchemaMixin:
         """
         Метаданные всех полей с FieldMeta: {имя_поля: metadata_dict}.
         """
-        return {
-            name: self.get_field_metadata(name, lang, translation_manager)
-            for name in self.get_all_fields_meta()
-        }
+        return {name: self.get_field_metadata(name, lang, translation_manager) for name in self.get_all_fields_meta()}
 
     def get_field_description(
         self,
@@ -143,10 +143,7 @@ class SchemaMixin:
 
     def get_field_descriptions(self, separator: str = ".") -> dict[str, str]:
         """Словарь {имя_поля: info/description} для всех полей с FieldMeta."""
-        return {
-            name: meta.get_info() or meta.get_description()
-            for name, meta in self.get_all_fields_meta().items()
-        }
+        return {name: meta.get_info() or meta.get_description() for name, meta in self.get_all_fields_meta().items()}
 
     # =========================================================================
     # 2. Валидация значений
@@ -227,8 +224,7 @@ class SchemaMixin:
         return {
             name: self.get_field_metadata(name)
             for name in self.model_fields  # type: ignore[attr-defined]
-            if (meta := self.get_field_meta(name)) is not None
-            and meta.is_visible(access_level)
+            if (meta := self.get_field_meta(name)) is not None and meta.is_visible(access_level)
         }
 
     # =========================================================================
@@ -284,11 +280,45 @@ class SchemaMixin:
         valid, error = self.validate_field(field_name, value, access_level)
         if not valid:
             return False, error
+        return self.apply_values({field_name: value})
+
+    def apply_values(self, values: dict[str, Any]) -> tuple[bool, str | None]:
+        """Записать ``values`` ВСЁ ИЛИ НИЧЕГО (Task 1b.2d-2, ADR-DS-010).
+
+        pydantic v2 ``validate_assignment`` кладёт значение ДО model-after-валидатора и не
+        откатывает его, когда тот бросает. Здесь: снимок затронутых ключей ``__dict__`` и
+        копия ``__pydantic_fields_set__`` → ``setattr`` по ключам → на ЛЮБОМ исключении
+        восстановить оба и вернуть ``(False, текст)``.
+
+        Текст отказа строится из ``errors(include_input=False)``: введённое значение (секрет
+        в ``headers``) не попадает в него ни на одном пути, даже у копии без
+        ``hide_input_in_errors``.
+
+        Полная перевалидация ``model_validate({**текущие, **values})`` отвергнута: у регистра
+        otel пустой дефолт ``endpoint=""``, и правка чужого поля отвергалась бы по нему.
+        """
+        # ponytail: правка двух связанных полей одним вызовом зависит от порядка ключей —
+        # допустимая пара {max_queue_size: 100, max_export_batch_size: 50} построчно
+        # отвергается (так же в _init_register). «Всё или ничего» соблюдается. Снять —
+        # проверкой кандидата целиком, когда появится нужда.
+        missing = object()
+        before = {name: self.__dict__.get(name, missing) for name in values}
+        fields_set = set(self.__pydantic_fields_set__)  # type: ignore[attr-defined]
         try:
-            setattr(self, field_name, value)
-            return True, None
+            for name, value in values.items():
+                setattr(self, name, value)
         except Exception as exc:
-            return False, str(exc)
+            # __dict__ перечитывается ЗДЕСЬ: pydantic-core на validate_assignment заменяет
+            # объект __dict__ целиком, ссылка, взятая до setattr, указывала бы на старый.
+            current = self.__dict__
+            for name, old in before.items():
+                if old is missing:
+                    current.pop(name, None)
+                else:
+                    current[name] = old
+            object.__setattr__(self, "__pydantic_fields_set__", fields_set)
+            return False, _refusal_text(exc)
+        return True, None
 
     def values_dict(self) -> dict[str, Any]:
         """
@@ -298,6 +328,17 @@ class SchemaMixin:
         в новом коде предпочтительнее использовать model_dump() напрямую.
         """
         return self.model_dump()  # type: ignore[attr-defined]
+
+
+def _refusal_text(exc: Exception) -> str:
+    """Текст отказа записи без введённого значения: ``loc: msg; ...``."""
+    if not isinstance(exc, ValidationError):
+        return f"{type(exc).__name__}: {exc}"
+    parts = []
+    for item in exc.errors(include_url=False, include_context=False, include_input=False):
+        loc = ".".join(str(p) for p in item["loc"])
+        parts.append(f"{loc}: {item['msg']}" if loc else item["msg"])
+    return "; ".join(parts)
 
 
 # Backward compatibility alias

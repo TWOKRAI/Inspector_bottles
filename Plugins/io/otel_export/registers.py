@@ -37,7 +37,7 @@ from typing import Annotated
 
 from multiprocess_framework.modules.process_module.plugins import FieldMeta, register_schema
 
-from Services.otel_export.config import OtelExportConfig
+from Services.otel_export.config import ENDPOINT_RULES, OtelExportConfig
 
 __all__ = ["OtelExportRegisters"]
 
@@ -65,5 +65,8 @@ class OtelExportRegisters(OtelExportConfig):
                 "успевал построиться без аргументов — пустое значение "
                 "отвергается на шаге `configure()` плагина, с именем ключа"
             ),
+            # Те же правила, что у сервиса: переобъявление поля стирает FieldMeta родителя
+            # вместе с его rules (ADR-DS-010).
+            rules=ENDPOINT_RULES,
         ),
     ] = ""

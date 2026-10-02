@@ -29,6 +29,9 @@ FieldMeta — дескриптор метаданных поля для Annotate
 
 from __future__ import annotations
 
+import logging
+import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, Union
 
 if TYPE_CHECKING:
@@ -72,6 +75,63 @@ WidgetType = Literal[
     "model_picker",
 ]
 
+_log = logging.getLogger(__name__)
+
+# Закрытый словарь правил (Task 1b.2d-2, ADR-DS-010). Правило — ДАННЫЕ, а не python-код
+# класса: копия регистра на GUI-стороне строится из FieldInfo + FieldMeta, и
+# field_validator/model_validator туда не доезжают. Пополняется только по реальной нужде.
+#   strip           — str.strip() до остальных проверок
+#   pattern         — re.fullmatch по строке
+#   value_pattern   — re.fullmatch по каждому значению dict
+#   pattern_message — текст отказа для pattern/value_pattern
+#   choices_map     — поиск по value.upper() (НЕ casefold), промах = отказ, значение → каноничное
+#   le_field        — значение ≤ значения названного поля; None с любой стороны = пропуск
+#                     (исполняется в SchemaBase._check_field_constraints — межполевое)
+# Тексты отказа НИКОГДА не содержат введённое значение: отказ уезжает в журнал, а в
+# headers лежат секреты.
+RULE_KEYS: frozenset[str] = frozenset(
+    {"strip", "pattern", "pattern_message", "value_pattern", "choices_map", "le_field"}
+)
+# Правила уровня поля — исполняются after-валидатором в __get_pydantic_core_schema__.
+_FIELD_RULE_KEYS: frozenset[str] = frozenset({"strip", "pattern", "value_pattern", "choices_map"})
+_DEFAULT_PATTERN_MESSAGE = "значение не соответствует требуемой форме"
+
+
+def _make_rules_validator(rules: dict[str, Any]):
+    """Функция-валидатор поля по словарю правил (вызывается ПОСЛЕ проверки типа pydantic)."""
+    strip = bool(rules.get("strip"))
+    pattern = re.compile(rules["pattern"]) if "pattern" in rules else None
+    value_pattern = re.compile(rules["value_pattern"]) if "value_pattern" in rules else None
+    message = rules.get("pattern_message") or _DEFAULT_PATTERN_MESSAGE
+    choices_map: dict[str, str] | None = rules.get("choices_map")
+    needs_str = strip or pattern is not None or choices_map is not None
+
+    def _validate(value: Any) -> Any:
+        if needs_str:
+            # Нестроковый вход → ValueError (= ValidationError), не AttributeError на .strip()
+            if not isinstance(value, str):
+                raise ValueError("ожидается строка")
+            if strip:
+                value = value.strip()
+            if pattern is not None and pattern.fullmatch(value) is None:
+                raise ValueError(message)
+            if choices_map is not None:
+                canonical = choices_map.get(value.upper())
+                if canonical is None:
+                    allowed = " | ".join(dict.fromkeys(choices_map.values()))
+                    raise ValueError(f"значение вне допустимого набора: {allowed}")
+                value = canonical
+        if value_pattern is not None:
+            if not isinstance(value, Mapping):
+                raise ValueError("ожидается словарь")
+            for key, item in value.items():
+                if not isinstance(item, str) or value_pattern.fullmatch(item) is None:
+                    # Называется КЛЮЧ, значение не печатается
+                    raise ValueError(f"ключ {key!r}: {message}")
+        return value
+
+    return _validate
+
 
 class FieldMeta:
     """
@@ -102,6 +162,9 @@ class FieldMeta:
         ui_hidden       — не показывать поле в сгенерированной форме (build_form_for_schema),
                           НЕЗАВИСИМО от access_level/hidden — это чисто presentation-фильтр
                           для конкретной формы, а не контроль доступа к данным
+        rules           — правила значения ДАННЫМИ (закрытый словарь RULE_KEYS, ADR-DS-010):
+                          одинаково исполняются на исходном классе и на копии из каталога.
+                          Неизвестный ключ → ValueError
 
     Примечание про widget:
         Отдельного "ui_widget" нет — widget уже служит единственным источником
@@ -128,6 +191,7 @@ class FieldMeta:
         "ui_group",
         "ui_order",
         "ui_hidden",
+        "rules",
     )
 
     def __init__(
@@ -159,6 +223,8 @@ class FieldMeta:
         ui_group: str | None = None,
         ui_order: int | None = None,
         ui_hidden: bool = False,
+        # Правила значения (см. RULE_KEYS). None/{} — правил нет, поле не платит ничего.
+        rules: dict[str, Any] | None = None,
     ) -> None:
         self.description = description
         self.info = info
@@ -186,6 +252,11 @@ class FieldMeta:
         self.ui_group = ui_group
         self.ui_order = ui_order
         self.ui_hidden = ui_hidden
+        rules = dict(rules or {})
+        unknown = set(rules) - RULE_KEYS
+        if unknown:
+            raise ValueError(f"FieldMeta: неизвестные правила {sorted(unknown)}; допустимы {sorted(RULE_KEYS)}")
+        self.rules: dict[str, Any] = rules
 
     # =========================================================================
     # Интеграция с Pydantic v2
@@ -196,8 +267,17 @@ class FieldMeta:
         source_type: Any,
         handler: "GetCoreSchemaHandler",
     ) -> "CoreSchema":
-        """Прозрачный для Pydantic — делегирует схему базовому типу без изменений."""
-        return handler(source_type)
+        """Схема базового типа; при правилах уровня поля — обёрнута after-валидатором.
+
+        Поле без ``rules`` получает схему БЕЗ изменений (130 наследников SchemaBase не
+        платят ни обёртки, ни вызова на присваивании).
+        """
+        schema = handler(source_type)
+        if not _FIELD_RULE_KEYS.intersection(self.rules):
+            return schema
+        from pydantic_core import core_schema
+
+        return core_schema.no_info_after_validator_function(_make_rules_validator(self.rules), schema)
 
     def __repr__(self) -> str:
         parts = [repr(self.description)]
@@ -308,6 +388,8 @@ class FieldMeta:
             "ui_group": self.ui_group,
             "ui_order": self.ui_order,
             "ui_hidden": self.ui_hidden,
+            # JSON-safe: строки, bool, dict строк. Копия, чтобы получатель не мутировал класс.
+            "rules": {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.rules.items()},
         }
 
     @classmethod
@@ -319,4 +401,12 @@ class FieldMeta:
         попадают (см. docstring выше) — после round-trip они возвращаются к дефолту {}.
         """
         kwargs = {k: v for k, v in d.items() if k in cls.__slots__}
+        rules = kwargs.get("rules")
+        if rules:
+            # GUI старше хаба не должен терять копию регистра целиком из-за одного
+            # незнакомого правила: оно отбрасывается со строкой в журнал.
+            unknown = sorted(set(rules) - RULE_KEYS)
+            if unknown:
+                _log.warning("FieldMeta.from_dict: отброшены неизвестные правила %s", unknown)
+                kwargs["rules"] = {k: v for k, v in rules.items() if k in RULE_KEYS}
         return cls(**kwargs)

@@ -201,10 +201,14 @@ class RegistersManager(BaseManager, ObservableMixin):
         is_valid, err = self.validate_field_value(register_name, field_name, value)
         if not is_valid:
             return False, err
-        try:
-            setattr(reg, field_name, value)
-        except Exception as exc:
-            return False, str(exc)
+        # Всё или ничего (ADR-RM-007): отказ не оставляет значения в регистре, а текст
+        # отказа не содержит введённого значения (секрет в headers не уезжает в журнал).
+        ok, err = reg.apply_values({field_name: value})
+        if not ok:
+            return False, err
+        # Подписчикам и send_callback — СОХРАНЁННОЕ (нормализованное) значение: копия
+        # хранит "WARNING", виджет должен получить "WARNING", а не введённое "warn".
+        value = getattr(reg, field_name)
         self._log_debug(f"set_field_value: {register_name}.{field_name} = {value!r}")
         self._notify_observers(register_name, field_name, value)
         if self._send_callback:

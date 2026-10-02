@@ -18,14 +18,13 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
-from urllib.parse import urlparse
 
-from pydantic import ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import ConfigDict, ValidationError
 
-from multiprocess_framework.modules.channel_routing_module.levels import normalize_level_name
+from multiprocess_framework.modules.channel_routing_module.levels import LEVEL_ALIASES, SEVERITY_NUMBERS
 from multiprocess_framework.modules.process_module.plugins import FieldMeta, SchemaBase
 
-__all__ = ["ENV_PLACEHOLDER_RE", "OtelExportConfig", "format_validation_error"]
+__all__ = ["ENDPOINT_RULES", "ENV_PLACEHOLDER_RE", "OtelExportConfig", "format_validation_error"]
 
 
 #: Единственная допустимая форма значения заголовка: подстановка переменной
@@ -33,6 +32,39 @@ __all__ = ["ENV_PLACEHOLDER_RE", "OtelExportConfig", "format_validation_error"]
 #: только маскировкой в readback: замаскированный в выдаче секрет всё равно
 #: лежал бы в git-истории рецепта.
 ENV_PLACEHOLDER_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
+
+#: Правила адреса приёмника — ДАННЫМИ в `FieldMeta(rules=...)` (ADR-DS-010), чтобы копия
+#: регистра на GUI-стороне отвергала то же, что оригинал. Константа, а не литерал у поля:
+#: `OtelExportRegisters` (Plugins) переобъявляет `endpoint` своим `FieldMeta` и обязан
+#: передать ТЕ ЖЕ правила — переобъявление стирает метаданные родителя.
+#:
+#: **Почему путь сигнала обязателен (замер 2026-09-07, Task 2.3)** против настоящего
+#: `otelcol` 0.158.0: POST `http://127.0.0.1:4318` → **404**, `.../v1/logs` → **200**,
+#: `.../v1/traces` → 404 (контроль: дело в пути, не в теле). SDK шлёт явный аргумент
+#: ДОСЛОВНО (`_log_exporter/__init__.py:91`), путь дописывается только на env-дороге
+#: `OTEL_EXPORTER_OTLP_ENDPOINT` — наше поле по смыслу равно `..._LOGS_ENDPOINT`. Отказ, а
+#: не дописывание пути: тихо переписанный адрес выглядит отказом сети (28 раз подряд до
+#: замера), отказ виден на старте одной строкой. Заглушка стенда Task 2.2 принимала POST
+#: по любому пути — «фейковая оснастка доказывает оснастку».
+#:
+#: Регулярка требует схему http(s), непустой хост (без `/?#` и пробелов) и путь хотя бы с
+#: одним символом кроме `/`. Принятый дрейф против прежнего `urlparse`: отвергаются
+#: `HTTP://…` (верхний регистр схемы), адреса с `?` и `#`, пробел внутри; `http://[::1/…`
+#: — отказ валидации вместо `ValueError` из `urlparse`. Пустой адрес → тот же текст.
+#: Текст отказа НЕ печатает адрес: в нём бывают `user:pass@`.
+ENDPOINT_RULES: dict[str, Any] = {
+    "strip": True,
+    "pattern": r"https?://[^\s/?#]+/[^\s?#]*[^\s/?#][^\s?#]*",
+    "pattern_message": (
+        "endpoint неполон: нужен адрес со схемой http:// или https://, хостом с портом и путём "
+        "сигнала (для логов — /v1/logs). SDK шлёт по адресу ДОСЛОВНО, и настоящий приёмник "
+        "отвечает 404 (замерено на otelcol 0.158.0). Полная форма: http://127.0.0.1:4318/v1/logs"
+    ),
+}
+
+#: Имя уровня → каноничное, из шкалы `channel_routing_module/levels.py` (свой список имён
+#: не заводится). Поиск по `value.upper()` — как у `normalize_level_name`.
+_LEVEL_CHOICES: dict[str, str] = {**{name: name for name in SEVERITY_NUMBERS}, **LEVEL_ALIASES}
 
 
 def format_validation_error(error: ValidationError) -> str:
@@ -93,6 +125,7 @@ class OtelExportConfig(SchemaBase):
                 "адрес без пути даёт 404. Обязателен: dev-адрес годится только стенду, "
                 "на Jetson/Raspberry коллектор стоит на другой машине"
             ),
+            rules=ENDPOINT_RULES,
         ),
     ]
     """Обязателен и БЕЗ дефолта: тихий дефолт `127.0.0.1:4318` увёл бы записи в
@@ -104,6 +137,9 @@ class OtelExportConfig(SchemaBase):
         FieldMeta(
             "Level",
             info="Уровень подписки на хвост наблюдаемости: DEBUG | INFO | WARNING | ERROR | CRITICAL",
+            # Незнакомое имя отвергается, а не подменяется мягким дефолтом: подписка «на
+            # всякий случай DEBUG» дороже отказа на старте. Алиасы WARN/FATAL раскрываются.
+            rules={"choices_map": _LEVEL_CHOICES},
         ),
     ] = "INFO"
     """Дефолт INFO — главный рычаг объёма (Р-4). DEBUG включают на время сверки
@@ -125,6 +161,17 @@ class OtelExportConfig(SchemaBase):
         FieldMeta(
             "Headers",
             info="Заголовки OTLP (токены облачных приёмников). Значения — только ${ENV_VAR}",
+            # Значение — только `${ENV_VAR}` ЦЕЛИКОМ (fullmatch: `"${X}\n"` тоже отказ —
+            # намеренное ужесточение против прежнего `.match`). Текст отказа называет КЛЮЧ
+            # и форму, но НИКОГДА значение: отказ уезжает в журнал, печать значения
+            # превратила бы правило в утечку секрета.
+            rules={
+                "value_pattern": ENV_PLACEHOLDER_RE.pattern,
+                "pattern_message": (
+                    "значение обязано быть подстановкой окружения вида ${ENV_VAR} целиком; литерал "
+                    "в конфиге запрещён (секреты в env). Само значение здесь не печатается намеренно"
+                ),
+            },
         ),
     ] = {}
     """Значение-литерал отвергается валидатором. `readback()` отдаёт `***`."""
@@ -154,7 +201,15 @@ class OtelExportConfig(SchemaBase):
 
     max_export_batch_size: Annotated[
         int,
-        FieldMeta("Max export batch size", info="Сколько записей уходит одним запросом", min=1),
+        FieldMeta(
+            "Max export batch size",
+            info="Сколько записей уходит одним запросом",
+            min=1,
+            # Правило не наше: `BatchLogRecordProcessor._validate_arguments` (SDK 1.44.0)
+            # бросает ValueError на batch > queue. Ловим на границе конфига, чтобы адрес
+            # ошибки назывался нашим ключом, а не всплывал из конструктора в `configure()`.
+            rules={"le_field": "max_queue_size"},
+        ),
     ] = 512
 
     export_timeout_ms: Annotated[
@@ -195,131 +250,6 @@ class OtelExportConfig(SchemaBase):
     """64 = порядок «8 процессов сегодня (20 после closure 4.8) × несколько
     инкарнаций»: ключ пула включает `incarnation`, то есть каждый рестарт
     источника добавляет запись. Не бесконечность — иначе долгий прогон течёт."""
-
-    # ------------------------------------------------------------------ #
-    # Валидация границы
-    # ------------------------------------------------------------------ #
-
-    @field_validator("endpoint")
-    @classmethod
-    def _endpoint_not_blank(cls, value: str) -> str:
-        """Пустая строка — это не «значение по умолчанию», а не заполненный ключ."""
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError(
-                "endpoint пуст: адрес приёмника OTLP обязателен "
-                "(напр. http://127.0.0.1:4318/v1/logs). Тихого дефолта здесь нет"
-            )
-        return stripped
-
-    @field_validator("endpoint")
-    @classmethod
-    def _endpoint_carries_signal_path(cls, value: str) -> str:
-        """Адрес обязан нести путь сигнала — SDK шлёт по нему **дословно**.
-
-        **Замер, из-за которого валидатор появился (2026-09-07, Task 2.3).** Против
-        настоящего `otelcol` 0.158.0 с включённым конвейером логов:
-
-        | POST | ответ |
-        |---|---|
-        | ``http://127.0.0.1:4318`` | **404** |
-        | ``http://127.0.0.1:4318/v1/logs`` | **200** |
-        | ``http://127.0.0.1:4318/v1/traces`` | 404 (контроль: дело в пути, не в теле) |
-
-        Причина в SDK и она односторонняя: явный аргумент уходит без изменений
-        (``_log_exporter/__init__.py:91`` — ``self._endpoint = endpoint or ...``), а
-        путь дописывается ТОЛЬКО на дороге переменной окружения
-        ``OTEL_EXPORTER_OTLP_ENDPOINT``. То есть наше поле по смыслу равно
-        ``OTEL_EXPORTER_OTLP_LOGS_ENDPOINT``, у которого путь входит в значение.
-
-        **Почему отказ, а не дописывание пути.** Прямой прецедент — вердикт CTO о
-        форме ``${ENV_VAR}``: не заводить свой разворачиватель для того, что SDK уже
-        определил. Дописывание пути «когда его нет» тихо переписало бы адрес и тому,
-        кто целил в шлюз на корне, а цена ошибки здесь несимметрична: отказ виден на
-        старте одной строкой, а тихо неверный адрес выглядит как отказ сети — и до
-        сегодня выглядел им 28 раз подряд.
-
-        **Чем это скрывалось.** Заглушка стенда Task 2.2 принимала POST по любому
-        пути и отвечала 200, поэтому ``exported`` рос, а до настоящего приёмника не
-        доезжало ничего. Ровно правило проекта «фейковая оснастка доказывает
-        оснастку»: приёмка обязана хоть раз пройти через настоящего потребителя.
-        """
-        parsed = urlparse(value)
-        # Разбирается АДРЕС ЦЕЛИКОМ, а не одно поле.
-        #
-        # Первая редакция смотрела только на `path` — и была зелёной по неверной
-        # причине (находка ревью, воспроизведена): у адреса без схемы `urlparse`
-        # читает номер порта как путь, поэтому `localhost:4318` давал
-        # `scheme='localhost'`, `path='4318'` и ПРОХОДИЛ сторож именно потому, что
-        # пути у него нет. Сквозной прогон такого адреса: схема приняла, доставка
-        # `accepted=0 failed=1` — то есть ровно тот дефект, который задача закрывает,
-        # только вошедший другой дверью.
-        missing: list[str] = []
-        if parsed.scheme not in {"http", "https"}:
-            missing.append("схема http:// или https://")
-        if not parsed.netloc:
-            missing.append("хост с портом")
-        if not parsed.path.strip("/"):
-            missing.append("путь сигнала (для логов — /v1/logs)")
-        if missing:
-            raise ValueError(
-                f"endpoint {value!r} неполон, не хватает: {', '.join(missing)}. SDK шлёт по адресу "
-                "ДОСЛОВНО, и настоящий приёмник отвечает 404 (замерено на otelcol 0.158.0). "
-                "Полная форма: http://127.0.0.1:4318/v1/logs"
-            )
-        return value
-
-    @field_validator("level")
-    @classmethod
-    def _level_is_known(cls, value: str) -> str:
-        """Имя уровня — только из шкалы фреймворка; алиасы WARN/FATAL раскрываются.
-
-        Свой список имён здесь не заводится: единственный владелец шкалы —
-        `channel_routing_module/levels.py`. Незнакомое имя отвергается, а не
-        подменяется мягким дефолтом: подписка «на всякий случай DEBUG» дороже
-        отказа на старте.
-        """
-        canonical = normalize_level_name(value)
-        if canonical is None:
-            raise ValueError(
-                f"неизвестный уровень {value!r}: допустимы "
-                "DEBUG | INFO | WARNING | ERROR | CRITICAL (алиасы WARN, FATAL)"
-            )
-        return canonical
-
-    @field_validator("headers")
-    @classmethod
-    def _headers_only_env_placeholders(cls, value: dict[str, str]) -> dict[str, str]:
-        """Значение заголовка — только `${ENV_VAR}` целиком.
-
-        В тексте ошибки называется КЛЮЧ и требуемая форма, но НИКОГДА само
-        значение: сообщение об отвергнутом секрете уезжает в журнал, и печать
-        значения превратила бы валидатор в утечку.
-        """
-        for name, raw in value.items():
-            if not isinstance(raw, str) or not ENV_PLACEHOLDER_RE.match(raw):
-                raise ValueError(
-                    f"заголовок {name!r}: значение обязано быть подстановкой "
-                    "окружения вида ${ENV_VAR} целиком; литерал в конфиге запрещён "
-                    "(секреты в env). Само значение здесь не печатается намеренно"
-                )
-        return value
-
-    @model_validator(mode="after")
-    def _batch_fits_queue(self) -> "OtelExportConfig":
-        """Батч не больше очереди — иначе SDK откажет уже при построении.
-
-        Правило не наше: `BatchLogRecordProcessor._validate_arguments` (SDK 1.44.0)
-        бросает ValueError на `max_export_batch_size > max_queue_size`. Ловим на
-        границе конфига, чтобы адрес ошибки назывался нашим ключом, а не всплывал
-        из чужого конструктора внутри `configure()`.
-        """
-        if self.max_export_batch_size > self.max_queue_size:
-            raise ValueError(
-                f"max_export_batch_size ({self.max_export_batch_size}) больше "
-                f"max_queue_size ({self.max_queue_size}) — SDK такой батчер не построит"
-            )
-        return self
 
     # ------------------------------------------------------------------ #
     # Dict at Boundary

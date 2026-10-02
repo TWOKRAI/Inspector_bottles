@@ -1,14 +1,13 @@
 """LineFilterRegisters — параметры фильтра виртуальной линии + FieldMeta.
 
-Инвариант hysteresis_margin ≥ dedup_radius валидируется (иначе дребезг на границе
-зоны не гасится). Все параметры — через self._reg (managed или локальный).
+Инвариант hysteresis_margin ≥ dedup_radius валидируется правилом-данными
+``le_field`` у ``dedup_radius`` (ADR-DS-010) — иначе дребезг на границе зоны не
+гасится. Все параметры — через self._reg (managed или локальный).
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Literal
-
-from pydantic import model_validator
 
 from multiprocess_framework.modules.process_module.plugins import register_schema
 from multiprocess_framework.modules.process_module.plugins import FieldMeta
@@ -85,6 +84,9 @@ class LineFilterRegisters(SchemaBase):
             min=1,
             max=100,
             unit="px",
+            # hysteresis_margin ≥ dedup_radius — иначе дребезг границы не гасится.
+            # Правило ДАННЫМИ (не model_validator): копия регистра в GUI исполняет его так же.
+            rules={"le_field": "hysteresis_margin"},
         ),
     ] = 5
     min_hits: Annotated[
@@ -143,12 +145,3 @@ class LineFilterRegisters(SchemaBase):
             info="current — события этого кадра; accumulated — весь накопленный список",
         ),
     ] = "current"
-
-    @model_validator(mode="after")
-    def _check_hysteresis(self):
-        """hysteresis_margin ≥ dedup_radius — иначе дребезг границы не гасится."""
-        if self.hysteresis_margin < self.dedup_radius:
-            raise ValueError(
-                f"hysteresis_margin ({self.hysteresis_margin}) must be >= dedup_radius ({self.dedup_radius})"
-            )
-        return self
