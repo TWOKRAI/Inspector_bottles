@@ -6,6 +6,7 @@ Task 1.3: единственный способ задать фон сцены �
 Task 2.2: фотометрические эффекты перенесены в `effects.py` как упорядоченный реестр; `apply_photometric` — одна строка над `apply_effects`.
 Task 6.1: одна функция квадратного выреза `crop.py` (`side_from_radius`, `square_crop`, `resize_square`); `center_crop` и `holdout_eval._crop_disk` делегируют, выход побайтно прежний (кроме: всегда копия; `replicate` без пересечения — `ValueError`). С Task 6.4 `_crop_disk` режет по формуле конвейера (`side_from_radius` + `pad` + `resize_square`, побайтно равен `center_crop`); у `replicate` потребителей нет, режим оставлен как контракт. Карта — [docs/maps/crop.md](../../docs/maps/crop.md).
 Task 2.3: стек слоёв объекта — `layers.py` (`LayerSpec`/`LayerAugment`/`compose_layers` и ещё 8 имён); `line_sim.LayeredObject` — обёртка вокруг `compose_layers`, выход сима побайтно прежний.
+Task 2.4a: `ScenePreset` и каталог классов переехали в пакет — `preset.py`, `catalog.py` (с `CatalogConfig`), `metadata.py` (с `SymmetryType`), `procedural_backgrounds.py`; старые модули `line_sim`/`dataset_gen` — реэкспорт, поведение побайтно прежнее.
 Решения пакета — [DECISIONS.md](DECISIONS.md). Карта зоны — [docs/maps/layer_render.md](../../docs/maps/layer_render.md).
 
 ## Что есть
@@ -16,6 +17,7 @@ Task 2.3: стек слоёв объекта — `layers.py` (`LayerSpec`/`Layer
 - `effects.py` — Task 2.2: 11 функций эффектов (дословно из `dataset_gen.core.augment`), `EFFECTS` (12 записей, порядок = порядок прохода), `EFFECT_PARAMS`, `EffectSpec`, `apply_effects`; `dataset_gen.core.augment` реэкспортирует функции (тот же объект).
 - `crop.py` — Task 6.1: вырез квадрата с четырьмя режимами у границы (`drop`/`pad`/`clamp`/`replicate`), ресайз ко входу модели.
 - `layers.py` — Task 2.3: типы слоя (из `line_sim.interfaces` дословно), `load_layer_sprite`, `transform_layer`, `canvas_size`, `compose_layers` -> `ComposedLayers`; `line_sim.interfaces` и `layered_object` реэкспортируют (тот же объект).
+- `preset.py`, `catalog.py`, `metadata.py`, `procedural_backgrounds.py` — Task 2.4a: `ScenePreset`/`CLASS_SPRITE_SOURCE`, `SpriteCatalog`/`ClassEntry`/`CatalogConfig`, `ClassMeta`/`load_meta`/`write_meta`/`SymmetryType`, `procedural_background` (дословно из `line_sim.core.preset`, `dataset_gen.core.{catalog,metadata,backgrounds,config}`); старые пути — реэкспорт (тот же объект). Блок стенда (`REPO_ROOT`, `resolve_repo_path`, `load_scene_preset`) остался в `line_sim.core.preset`.
 - Подключено: `SceneCompositor(background_layers=...)`, ключ `background_layers` в `scene_source`.
 
 ## Тесты
@@ -31,4 +33,4 @@ Task 2.3: стек слоёв объекта — `layers.py` (`LayerSpec`/`Layer
 
 ## Не сделано
 
-Эффекты на слоях/сцене (`apply_effects_rgba`), переключение потребителей на новые импорты, эффекты на слоях фона, фон в пресете сцены (Ф3), пересборка `data/line_sim/belt_tile.png` с `--gap-alpha` (шаг лида).
+`ObjectFactory`, `RenderedObject`, `catalog_bridge`, `preview` (Task 2.4b); перевод потребителей на новые пути импорта; эффекты на слоях/сцене (`apply_effects_rgba`), эффекты на слоях фона, фон в пресете сцены (Ф3), пересборка `data/line_sim/belt_tile.png` с `--gap-alpha` (шаг лида).

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """`layer_render` — стек слоёв фона для сцены (Task 1.1), геометрия/композиция и Windows-safe I/O (Task 2.1),
-фотометрические эффекты (Task 2.2), стек слоёв объекта (Task 2.3).
+фотометрические эффекты (Task 2.2), стек слоёв объекта (Task 2.3), пресет сцены и каталог классов (Task 2.4a).
 
 Контракт — в README.md.
 """
@@ -10,6 +10,7 @@ from Services.layer_render.background import (
     fold_background,
     render_background,
 )
+from Services.layer_render.catalog import CatalogConfig, ClassEntry, SpriteCatalog
 from Services.layer_render.compose import (
     cast_contact_shadow,
     composite,
@@ -34,9 +35,16 @@ from Services.layer_render.layers import (
     load_layer_sprite,
     transform_layer,
 )
+from Services.layer_render.metadata import ClassMeta, SymmetryType, load_meta, write_meta
+from Services.layer_render.preset import CLASS_SPRITE_SOURCE, ScenePreset
+from Services.layer_render.procedural_backgrounds import procedural_background
 
 __all__ = [
     "AUGMENT_FIELDS",
+    "CLASS_SPRITE_SOURCE",
+    "CatalogConfig",
+    "ClassEntry",
+    "ClassMeta",
     "ComposedLayers",
     "EFFECTS",
     "EFFECT_PARAMS",
@@ -46,8 +54,11 @@ __all__ = [
     "LayerSpec",
     "RangeF",
     "ScrollingTile",
+    "ScenePreset",
     "SolidFill",
+    "SpriteCatalog",
     "SpriteSource",
+    "SymmetryType",
     "apply_effects",
     "background_layers_from_config",
     "canvas_size",
@@ -60,10 +71,13 @@ __all__ = [
     "imread_unicode",
     "imwrite_unicode",
     "load_layer_sprite",
+    "load_meta",
+    "procedural_background",
     "render_background",
     "resize_square",
     "rotate_expand",
     "side_from_radius",
     "square_crop",
     "transform_layer",
+    "write_meta",
 ]

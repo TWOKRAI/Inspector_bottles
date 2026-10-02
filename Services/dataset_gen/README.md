@@ -185,7 +185,7 @@ python -m Services.dataset_gen.tools.cut_real_disks \
 
 Имена классов бывают кириллицей («А/», «Б/») — `cv2.imread`/`imwrite` не умеют
 non-ASCII пути на Windows. Весь I/O — через `imread_unicode`/`imwrite_unicode`
-([core/catalog.py](core/catalog.py)). При генерации эталонов критично центрирование
+(определены в [`Services/layer_render/io.py`](../layer_render/io.py), реэкспорт из [core/catalog.py](core/catalog.py)). Каталог классов (`SpriteCatalog`, `CatalogConfig`), `ClassMeta`/`SymmetryType` и процедурные фоны с Task 2.4a живут в `Services/layer_render` (`catalog.py`, `metadata.py`, `procedural_backgrounds.py`); `core/{catalog,metadata,backgrounds}.py` и `CatalogConfig`/`SymmetryType` в `core/config.py` — реэкспорт, тот же объект. При генерации эталонов критично центрирование
 глифа по фактическому bbox чернил — смещение в полпикселя ломает детекцию
 180°-симметрии (см. [tools/make_ru_letter_sprites.py](tools/make_ru_letter_sprites.py)).
 
