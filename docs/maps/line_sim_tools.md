@@ -1,6 +1,7 @@
 # Карта зоны: `Services/line_sim/tools/make_seamless_texture.py`
 
 Первый автор — Task 1.4 (layer-render); дальше правят в своём handoff. Номера строк — на коммит Task 1.4.
+
 ## Функции
 
 - `find_period`, `make_seamless_tile(image, *, force_period)` — период/зеркало, бесшовный тайл (`:100`, `:205`).
@@ -28,7 +29,7 @@
 | `min_area <= 0` и `1` — не фильтр | `:268` | hazards `min_area_one_is_a_no_op`, `negative_*` |
 | Края тайла по x не склеиваются | (нет кода — решение) | A3 `x_edges_are_not_glued` |
 | Фильтр трогает только альфу (RGB тайла тот же) | `:449-455` | A5 RGB, hazards `combine_into_the_written_alpha` |
-| Вход функции не мутируется | `:262-271` (работа на копии `gap`) | hazards `input_not_mutated`, 1.2 `does_not_mutate_input` |
+| Вход функции не мутируется | `:262-271` (`gap` — новый массив, вход не трогается) | hazards `input_not_mutated`, 1.2 `does_not_mutate_input` |
 
 ## Тесты
 

@@ -51,6 +51,17 @@ def test_input_not_mutated_and_output_is_a_new_array():
     assert out.base is None or not np.shares_memory(out, rgb)
 
 
+@pytest.mark.parametrize("rails", [_NO_RAILS, (3, 3)])
+def test_writable_input_is_not_mutated_with_filter_on(rails):
+    """Записываемый вход (read-only тест такую запись не ловит: она бросила бы ValueError, а не промолчала).
+    Ровно ОДИН вызов на кейс: два одинаковых XOR-вызова взаимно уничтожили бы правку входа."""
+    rgb = _tile(20, 30, _rect(2, 2, 1, 3) | _rect(8, 8, 3, 4))
+    assert rgb.flags.writeable
+    before = rgb.copy()
+    tool.gap_alpha_mask(rgb, rails_px=rails, min_area=8)
+    assert rgb.tobytes() == before.tobytes()
+
+
 def test_min_area_one_is_a_no_op_on_a_noisy_tile():
     """Площадь любой компоненты >= 1, значит `< 1` не отбрасывает ничего: выход == min_area=0 побайтно."""
     rng = np.random.default_rng(14)
