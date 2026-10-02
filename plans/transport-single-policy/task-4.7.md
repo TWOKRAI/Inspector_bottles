@@ -131,20 +131,47 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 `router_module/middleware/frame_shm_middleware.py`, `frontend_module/bridge/remote_frame_source.py`,
 `multiprocess_prototype/frontend/bridge_process.py`, рецепты и `backend_ctl/probes` с env-строками флагов.
 **Acceptance:**
-- [ ] В реестре нет `FW_SHM_OWNER_INCARNATION`, `FW_SHM_HANDLE_CACHE`, `FW_SHM_ZERO_COPY`.
+- [x] В реестре нет `FW_SHM_OWNER_INCARNATION`, `FW_SHM_HANDLE_CACHE`, `FW_SHM_ZERO_COPY`.
       `FW_SHM_LOAN_PROTOCOL` остаётся выключенным, с пометкой FROZEN (п. 6), и в его `requires` нет удалённых
       флагов. `grep FW_SHM_` в `*.py`/`*.yaml` вне реестра и тестов находит только `LOAN_PROTOCOL` и
       `PREFIX_CLEANUP`.
-- [ ] Имя сегмента без env: два владельца с ключом `mask` дают разные имена. Это проверяется для
+- [x] Имя сегмента без env: два владельца с ключом `mask` дают разные имена. Это проверяется для
       Windows-ветки и для POSIX-ветки (платформа подменяется в тесте). В имени есть владелец, pid и
       инкарнация. Повторное создание тем же владельцем даёт новое имя.
-- [ ] Кэш reader'а без env и без кэпа 8. Ключ — `(owner, slot, idx)` из ссылки. 100 realloc писателя
+- [x] Кэш reader'а без env и без кэпа 8. Ключ — `(owner, slot, idx)` из ссылки. 100 realloc писателя
       подряд: открытых handles у читателя ≤ глубина × ключи. Без живых view `close_errors` не растёт.
-- [ ] Handle с живым view при отставке не закрывается и не роняет чтение. Он закрывается на следующей
-      отставке или на teardown после освобождения view. Отложенные закрытия видны счётчиком.
-- [ ] Читатель-пайплайн (`restore_frame` с `allow_view=True`) без env получает view только для чтения
+- [x] Handle с живым view при отставке не закрывается и не роняет чтение. Он закрывается на следующей
+      отставке или на teardown после освобождения view. Отложенные закрытия видны счётчиком
+      (выполнено как свойство reader'а `deferred_closes`; в телеметрию не экспортируется).
+- [x] Читатель-пайплайн (`restore_frame` с `allow_view=True`) без env получает view только для чтения
       (`flags.writeable == False`). Copy-out (`on_receive`, GUI, мост) получает копию с проверкой `gen`.
-- [ ] `blob_detector(draw_contours=True)` на read-only входе работает, вход не меняется.
+- [x] `blob_detector(draw_contours=True)` на read-only входе работает, вход не меняется.
+
+**Итог (2026-10-02, в main `6e0fbec0b`, интеграционная ветка `feat/t47b-integrate`):**
+- **b1** `4b773d416` + `9dd99c852`: один режим имени `{base}_{owner}_{pid}_{inc}` через `_bounded_name`;
+  схлопнутое длинное имя держит ПОЛНЫЙ `base`, пока `len(base) + 9 ≤ 26` → `{base}_{hash8}` (prefix-cleanup его
+  видит); `base` длиннее 17 символов — известный потолок (`ponytail:` в `shm.py`). Флаги
+  `FW_SHM_OWNER_INCARNATION` / `FW_SHM_HANDLE_CACHE` / `FW_SHM_ZERO_COPY` удалены из реестра,
+  `FW_SHM_LOAN_PROTOCOL` — FROZEN без `requires`. Повтор при `FileExistsError` оставлен и покрыт тестом.
+  Ревью Opus: REQUEST_CHANGES → исправлено.
+- **b2** `6604d96f1` + `b16e11dbc` + `f169cab0f` + `e1e4af8cc`: кэш reader'а всегда включён, ключ
+  `(owner, slot, idx)` (без owner — `(name,)`), кэпа 8 нет; handle с живым view при отставке → `_retired` +
+  `deferred_closes`, повтор на следующей отставке и в `close()`; пайплайн получает read-only view, `on_receive`
+  копирует; мост держит LRU по имени с кэпом 32. `frame_saver` копирует удерживаемые за пределами `process()`
+  элементы (регрессия, найденная ревью); контракт плагина — строка в `process_module/plugins/base.py`.
+  Ревью Opus: REQUEST_CHANGES → APPROVE_WITH_NITS → нитки закрыты.
+- **Интеграция** `c1ed6f578` (снят последний `xfail`), `9f6e989a3` (C7: сообщение в полёте целиком дропается
+  со stale-счётом при realloc ЛЮБОГО ключа — решение 4.4c теперь единое; до 4.7b ветка `foo` «выживала» лишь
+  потому, что переиспользованное имя молча читало НОВЫЙ сегмент; тест префикса не зависит от глобального
+  счётчика инкарнаций).
+- **Инъекции лида:** b1 — 7/7 свойств убиты; b2 — 7 свойств, 6 убиты сразу, дыру проверки имени в
+  `view_valid` закрыл `b16e11dbc`; тесты `frame_saver` и ключа ссылки проверены откатом.
+- **Радиус** (`multiprocess_framework/modules` + `blob_detector` + prototype/frontend + `backend_ctl`, sampler
+  stress-тест исключён): main 17 failed / интеграция 17 failed; два новых красных в интеграции исправлены в
+  `9f6e989a3`; router + shared_resources + frame_saver после правки: 1083 passed, 3 failed (известные
+  `test_socket_channel_hol_*`).
+- **Остаётся:** `deferred_closes` не в телеметрии; кэп моста 32 по имени даёт 0 попаданий при 5×8 и 3×12 —
+  уходит в 4.7e; prefix-cleanup и осиротевшие сегменты POSIX — вопрос владельцу в `OPEN_QUESTIONS.md`.
 
 ##### 4.7c — Глубина кольца и размер очереди из рецепта
 **Files:** `router_module/middleware/frame_shm_middleware.py` (`_resolve_ring_depth`),
@@ -425,7 +452,7 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 | Часть | Итог |
 |---|---|
 | 4.7a | Слита в ветку. Слепой tester `0d1b4f8a`, developer `8b3f2c1d`, ревью Opus — APPROVE_WITH_NITS, итерация 1 `9fc01550` (своя память плагина по корню `.base`, ключ `SHM_VIEWS_KEY` импортом) — ревью Opus APPROVE_WITH_NITS, страховка owndata (N-2) в `5dff941f1`. Инъекции лида 7/7 пойманы |
-| 4.7b | Только слепые RED-тесты (`efd8d3df`), в ветке они стоят как `xfail(strict=True)`. Реализации нет |
+| 4.7b | **DONE** (2026-10-02), в main `6e0fbec0b`. b1 `4b773d416` + `9dd99c852` (имя, реестр флагов), b2 `6604d96f1` + `b16e11dbc` + `f169cab0f` + `e1e4af8cc` (кэш reader'а, read-only view, `frame_saver`), интеграция `c1ed6f578` + `9f6e989a3` (C7). Слепые RED `efd8d3df` пройдены, `xfail` сняты. Ревью Opus: b1 и b2 REQUEST_CHANGES → исправлено → APPROVE_WITH_NITS. Инъекции лида: b1 7/7, b2 7 свойств. Подробности — в разделе 4.7b выше |
 | 4.7c | Переделана по C1–C4 и проводу: tester `da19b452a`, developer `375bbb4b2` + `f4f8993c7` + `5dff941f1`, инъекции лида 11 мутаций (`notify` — ненаблюдаем, задокументировано), ревью Opus APPROVE_WITH_NITS, нитки закрыты. Решение записано как ADR-173 (`multiprocess_framework/DECISIONS.md`). Первая редакция `a8ffdf54` отвергнута (REQUEST_CHANGES + вердикт CTO) |
 | 4.7d | Место маркера решено вердиктом CTO (ниже). Спеки нет |
 
@@ -446,5 +473,5 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 счётчик `data_evicted`. Acceptance 4.7d: `lag_dropped + stale@restore + stale/torn@exec +
 door_drops = маркеры`. `data_evicted` считается отдельно и под `every` на стенде равен 0.
 
-**Следующие шаги:** 4.7c переделана и ждёт слияния лидом (ветка `feat/t47c-impl`) → 4.7b → 4.7d → живой A/B
+**Следующие шаги (обновлено 2026-10-02):** 4.7c и 4.7b слиты в main (`6e0fbec0b`) → 4.7d (3-я часть после rebase на `6e0fbec0b`) → живой A/B
 (≥ 3 прогона на сторону, `dualcam_synth` по 4.7e).

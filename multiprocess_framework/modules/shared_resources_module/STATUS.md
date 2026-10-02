@@ -113,7 +113,7 @@
 - **seqlock** (`FW_SHM_SEQLOCK`): 8-байтовый SLOT-header (generation/state/refcount) сразу под
   будущий frame-pool G.4; writer инкрементит generation до/после записи, reader сверяет →
   torn-frame = честный drop (`format/buffer.py`, `MemoryManager` стампует слот, torn-счётчик в stats).
-- **owner+incarnation в имени** (`FW_SHM_OWNER_INCARNATION`, B-6/B-7): имя
+- **owner+incarnation в имени** (B-6/B-7; флаг `FW_SHM_OWNER_INCARNATION` удалён в Task 4.7b — режим всегда включён): имя
   `{slot}_{owner}_{pid}_{inc}` — stale-процесс не пишет в чужой сегмент, мультикамера без коллизий.
 - **startup prefix-cleanup** (`FW_SHM_PREFIX_CLEANUP`, §5.4): осиротевшие рантайм-слоты
   (`output_frames_*`) чистятся на буте (Linux /dev/shm; Windows — ОС сама).
