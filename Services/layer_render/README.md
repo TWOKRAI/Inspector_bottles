@@ -1,6 +1,6 @@
-# layer_render — стек слоёв фона
+# layer_render — слои сцены: фон, объект, пресет, каталог классов
 
-Слой Services. Механизм «стопка слоёв снизу вверх -> кадр фона». Ничего не знает про энкодер, ленту,
+Слой Services. Механизмы: «стопка слоёв снизу вверх -> кадр фона», стек слоёв объекта, пресет сцены (`ScenePreset`), каталог классов (`SpriteCatalog`). Ничего не знает про энкодер, ленту,
 `line_sim`, `dataset_gen`, `ml_train`, плагины и прототип: вызывающий отдаёт готовый сдвиг `scroll_px` числом.
 
 ## Контракт (`Services.layer_render`)
@@ -27,11 +27,15 @@
 | `transform_layer(sprite, scale, angle_deg, hue_deg, color_rgb=None)` | (`layers`) заливка -> scale -> поворот (кратные 90° — `rot90`) -> сдвиг тона; без трансформа возвращает **сам** `sprite` (не копию) |
 | `canvas_size(placed)` | (`layers`) размер `(w, h)` симметричной канвы под `[(RGBA, offset_x, offset_y)]` без рендера |
 | `compose_layers(layers, rng, object_angle_deg=0.0, forced_defects=(), *, label="")` -> `ComposedLayers(rgba, layer_params, active_defects)` | (`layers`) розыгрыш и композиция стека: слой i берёт `rng.spawn(len(layers))[i]`; `rgba` — новый **записываемый** массив; `active_defects` — в порядке слоёв. Ошибки по порядку: `forced_defects` строкой -> `TypeError`; пустой список -> спрайты -> дубли имён -> неизвестный `forced_defects` -> прозрачный итог (`ValueError`). Все с префиксом `LayeredObject '<label>':`, кроме ошибок спрайта (`load_layer_sprite`: `TypeError`/`ValueError` с именем слоя, без префикса). Известное старое поведение (follow-up, не исправлено): стек, где на канву не попал ни один слой (только defect-слои, ни один не активен), падает сырым `ValueError` из `max()` на пустой последовательности |
+| `ScenePreset`, `CLASS_SPRITE_SOURCE` | (`preset`, Task 2.4a) пресет сцены (pydantic, frozen): `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers`, `base_dir`; `from_dict`/`to_dict`/`from_yaml`/`to_yaml`/`resolve_path`. Перенесён из `line_sim.core.preset` дословно. Блок конфига стенда (`REPO_ROOT`, `resolve_repo_path`, `apply_defect_override`, `load_scene_preset`) остался в `line_sim.core.preset`: здесь `REPO_ROOT` нет |
+| `SpriteCatalog(config, background_cache_size=64)`, `ClassEntry`, `CatalogConfig(classes_dir, backgrounds_dir=None)` | (`catalog`, Task 2.4a) каталог классов: лист = папка со спрайтами RGBA, индекс по пути; `get_sprite(i, rng)`, `get_background(rng, size_hw)` (фон из папки или процедурный). Перенесены из `dataset_gen.core.catalog` и `dataset_gen.core.config` дословно |
+| `ClassMeta`, `load_meta(directory)`, `write_meta(directory, meta)`, `SymmetryType`, `META_FILENAMES` | (`metadata`, Task 2.4a) разметка узла каталога (`meta.yaml`/`.yml`/`.json`), наследуется сверху вниз. Перенесены из `dataset_gen.core.metadata` и `dataset_gen.core.config` |
+| `procedural_background(rng, size_hw)` | (`procedural_backgrounds`, Task 2.4a) случайный процедурный фон из 4 текстур (`gradient_bg`, `brushed_metal_bg`, `conveyor_belt_bg`, `speckled_bg`, реестр `_GENERATORS`). Имя модуля не `backgrounds`: рядом `background.py` (стек слоёв фона) |
 
 Карта зоны выреза: `docs/maps/crop.md`.
 
 Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
-`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций), `Services.line_sim.interfaces.LayerSpec` и ещё пять типов слоя, `Services.line_sim.core.layered_object.canvas_size`, `LayeredObject._transform` (= `transform_layer`). `LayeredObject` — обёртка: разбор `passport.defect`, `compose_layers`, паспорт, read-only кэш. Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.
+`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций), `Services.line_sim.interfaces.LayerSpec` и ещё пять типов слоя, `Services.line_sim.core.preset.{ScenePreset, CLASS_SPRITE_SOURCE}` (Task 2.4a), `Services.dataset_gen.core.{catalog,metadata,backgrounds}` (все имена, включая `imread_unicode`/`imwrite_unicode` и `_GENERATORS`), `CatalogConfig` и `SymmetryType` из `Services.dataset_gen.core.config`, `Services.line_sim.core.layered_object.canvas_size`, `LayeredObject._transform` (= `transform_layer`). `LayeredObject` — обёртка: разбор `passport.defect`, `compose_layers`, паспорт, read-only кэш. Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.
 
 ## Схема YAML `background_layers`
 

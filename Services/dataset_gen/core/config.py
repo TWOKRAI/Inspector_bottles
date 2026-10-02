@@ -12,12 +12,13 @@ Dict-at-boundary: `from_dict`/`to_dict`; `from_yaml` резолвит относ
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
 
-SymmetryType = Literal["none", "180", "full"]
+from Services.layer_render.catalog import CatalogConfig
+from Services.layer_render.metadata import SymmetryType
 
 RangeF = tuple[float, float]
 RangeI = tuple[int, int]
@@ -204,24 +205,6 @@ class AugmentConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Каталог, размещение, симметрия, выход
 # ---------------------------------------------------------------------------
-
-
-class CatalogConfig(BaseModel):
-    """Источники данных — две независимые папки.
-
-    classes_dir — каталог классов: подкаталог на класс (имя подкаталога = имя
-    класса), внутри один или несколько RGBA-эталонов (PNG/WebP/TIFF, объект на
-    прозрачном фоне). Служебные папки и метаданные рядом с классами (имя с «.»
-    или «_», напр. `_meta/`, и любые файлы верхнего уровня) игнорируются —
-    классами считаются только обычные подкаталоги со спрайтами.
-
-    backgrounds_dir — каталог фоновых RGB-фото; сканируется РЕКУРСИВНО, поэтому
-    фоны можно раскладывать по подпапкам-категориям (belt/, tray/, table/).
-    None → процедурные фоны (несколько типов текстур) для быстрого старта/тестов.
-    """
-
-    classes_dir: Path
-    backgrounds_dir: Path | None = None
 
 
 class PlacementConfig(BaseModel):
