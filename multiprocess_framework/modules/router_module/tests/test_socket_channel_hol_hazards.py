@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 import tracemalloc
@@ -365,6 +366,15 @@ def test_second_sender_to_stuck_socket_does_not_wait_again() -> None:
     try:
         c = _stuck_client(ch, 1)
         payload = "x" * (4 * 1024 * 1024)
+        if sys.platform == "win32":
+            # Windows принимает ПЕРВЫЕ ДВЕ отправки любого размера без блокировки —
+            # таймаут записи наступает на третьей. Без прогрева два потока теста
+            # шлют по одному send, таймаута нет и WARNING нет (Task 5.5, п.1c).
+            # На POSIX прогрев не нужен и вреден: первый же send блокируется и
+            # отбрасывает клиента ДО замера, поэтому там поведение теста прежнее.
+            ch.send({"type": "event", "payload": payload})
+            ch.send({"type": "event", "payload": payload})
+            warnings.clear()
         ends: Dict[str, float] = {}
         barrier = threading.Barrier(2)
 
