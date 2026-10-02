@@ -374,7 +374,6 @@ class _CountingRobotControl(RobotControlPlugin):
         return super().process(items)
 
 
-@pytest.mark.xfail(strict=True, reason="needs 4.7d-2")
 def test_marker_collection_skips_blob_detector_and_reaches_robot_control() -> None:
     blob = _SpyBlobDetector()
     robot = _CountingRobotControl()

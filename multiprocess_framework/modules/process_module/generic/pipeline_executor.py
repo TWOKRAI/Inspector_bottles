@@ -18,9 +18,10 @@ from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
-from .plugin_runner import PluginRunner
+from .plugin_runner import PluginRunner, is_marker_collection
 from ...chain_module import ChainRunnable, RunnableStep
 from ...router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY, FrameShmMiddleware
+from ...router_module.middleware.not_inspected_marker import build_marker
 
 
 class PipelineExecutor:
@@ -61,7 +62,12 @@ class PipelineExecutor:
         self._runner = plugin_runner or PluginRunner(log_error=log_error)
         # Имя процесса-узла — для frame-trace (process-спан node, transport from).
         self._node = node_name
+        if overflow not in ("latest", "every"):
+            raise ValueError(f"overflow={overflow!r} — expected 'latest' or 'every'")
         self._overflow = overflow
+        # Task 4.7d-2b: входы, замененные маркером stale_exec (только every); маркеры, прошедшие через узел.
+        self._not_inspected_stale_exec = 0
+        self._not_inspected_handled = 0
         self._shm = shm_middleware
         self._send = send_fn
         self._max_fails = max_consecutive_fails
@@ -162,6 +168,10 @@ class PipelineExecutor:
         """
         metrics = self._cycle_metrics.get_cycle_metrics()
         metrics["queue_wait_ms"] = round(self._queue_wait_ms, 2)
+        # Task 4.7d-2b: ключ есть всегда (ноль — показание); stale_exec — только у узла с политикой every.
+        metrics["not_inspected_handled"] = self._not_inspected_handled
+        if self._overflow == "every":
+            metrics["not_inspected_stale_exec"] = self._not_inspected_stale_exec
         return metrics
 
     def run_loop(
@@ -231,6 +241,17 @@ class PipelineExecutor:
         ветви это ровно то место, где след кадра протёк бы в следующий такт.
         Ранний ``return`` из метода такой двусмысленности не имеет.
         """
+        # Task 4.7d-2b: коллекция из одних маркеров — мимо проверок view и мимо плагинов без accepts_markers.
+        if is_marker_collection(items):
+            self._forward_markers(items, t_start)
+            return
+
+        # Единица счёта дропа — ВХОД батча (n_in), в обеих проверках (4.7d-2b). Маркеры stale_exec строим
+        # ДО цепочки: плагин вправе заменить или мутировать dict'ы входа, а маркер несёт метаданные входа.
+        n_in = len(items)
+        every = self._overflow == "every"
+        stale_markers = [build_marker(it, reason="stale_exec", source=self._node) for it in items] if every else []
+
         # Ф7 G.5.c: снять view-тикеты ВХОДНЫХ items ДО прогона — цепочка может
         # заменить item/frame, а re-check/release относятся к ВХОДНОМУ кадру (пока
         # плагины его читали, writer мог обернуть кольцо и перезаписать слот).
@@ -240,14 +261,17 @@ class PipelineExecutor:
         # Кадр, порванный уже на входе (слот перезаписан, пока сообщение ждало в очереди), не
         # должен кормить плагины: цепочка отработала бы на порванных пикселях зря. Единица счёта
         # здесь — ВХОДНЫЕ сообщения батча: reader уже учёл ОДИН stale-дроп (``all()`` остановился на
-        # первой ссылке), остальные N-1 входов доначисляем. У пост-проверки ниже единица другая —
-        # ВЫХОДЫ цепочки (батч 2 -> 1 даёт здесь 2, там 1; 1 -> 3 даёт 1 и 3). Счёт не выравнивался
-        # намеренно; какая единица нужна маркерам not_inspected/overflow — решает спека 4.7d.
-        # Займы освобождаем в любом случае.
+        # первой ссылке), остальные N-1 входов доначисляем. Пост-проверка ниже считает так же (с 4.7d-2b —
+        # по ВХОДАМ, а не по выходам цепочки). Займы освобождаем в любом случае.
         if view_tickets and not self._frame_views_valid(view_tickets):
-            if len(items) > 1:
-                self._shm.note_stale_drops(len(items) - 1)
+            if n_in > 1:
+                self._shm.note_stale_drops(n_in - 1)
             self._accumulate_releases(view_tickets)
+            if every:
+                # Каждый вход заменяется маркером; цепочка идёт только для плагинов с accepts_markers.
+                self._not_inspected_stale_exec += n_in
+                self._forward_markers(stale_markers, t_start)
+                return
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
 
@@ -261,16 +285,22 @@ class PipelineExecutor:
         valid = self._frame_views_valid(view_tickets) if view_tickets else True
         self._accumulate_releases(view_tickets)
 
-        # Если items пустой после chain — ничего не отправляем (но release уже учтён).
-        if not items:
+        # Stale view → ДРОП батча (проверяется РАНЬШЕ пустого выхода: вход потерян, даже если плагин вернул []).
+        # Единица счётчика — ВХОД: reader уже учёл 1 (первая провалившаяся ссылка, ``all()``
+        # останавливается), доначисляем остальные n_in - 1.
+        if not valid:
+            if n_in > 1:
+                self._shm.note_stale_drops(n_in - 1)
+            if every:
+                # Цепочка уже отработала на этих входах — маркеры идут прямо в отправку, минуя её.
+                self._not_inspected_stale_exec += n_in
+                self._not_inspected_handled += n_in
+                self._send_results(stale_markers)
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
 
-        # Stale view → ДРОП батча. Единица счётчика — сообщение: reader уже учёл 1 (первая
-        # провалившаяся ссылка, ``all()`` останавливается), доначисляем остальные N-1 выходов.
-        if not valid:
-            if len(items) > 1:
-                self._shm.note_stale_drops(len(items) - 1)
+        # Если items пустой после chain — ничего не отправляем (но release уже учтён).
+        if not items:
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
 
@@ -284,6 +314,17 @@ class PipelineExecutor:
         self._send_results(items)
 
         # Полный цикл обработки batch'а (chain + send) → телеметрия.
+        self._cycle_metrics.record(time.perf_counter() - t_start)
+
+    def _forward_markers(self, items: list[dict], t_start: float) -> None:
+        """Пропустить коллекцию маркеров: без проверок view, цепочка — только для плагинов с accepts_markers.
+
+        Шаги цепочки сами пропускают маркер мимо плагинов без ``accepts_markers`` (PluginOperationStep /
+        SuspectTagStep). Маркер не несёт кадра, поэтому ``_attach_batch_views`` не нужен.
+        """
+        out = self._execute_chain(items)
+        self._not_inspected_handled += len(items)
+        self._send_results(out)
         self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:

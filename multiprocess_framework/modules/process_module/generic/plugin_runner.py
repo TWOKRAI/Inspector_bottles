@@ -41,9 +41,19 @@ from typing import TYPE_CHECKING, Callable
 
 from ...config_module.feature_flags import resolve
 from ..plugins.port import validate_items_against_ports
+from ...router_module.middleware.not_inspected_marker import is_marker
 
 if TYPE_CHECKING:
     from ..plugins.base import ProcessModulePlugin
+
+
+def is_marker_collection(items: object) -> bool:
+    """Непустая коллекция целиком из маркеров ``not_inspected`` (Task 4.7d-2b).
+
+    Смешанная коллекция (маркер + обычный item) маркерной НЕ считается и идёт обычным путём.
+    """
+    return isinstance(items, (list, tuple)) and bool(items) and all(isinstance(i, dict) and is_marker(i) for i in items)
+
 
 # pre-hook:  (plugin, method, inputs) -> None
 PreHook = Callable[["ProcessModulePlugin", str, "list[dict] | None"], None]
@@ -150,12 +160,14 @@ class PluginRunner:
         """
         self._run_pre(plugin, "process", items)
         if getattr(plugin, "enabled", True):
-            if self._validate_ports:
+            # 4.7d-2b: маркер не несёт кадра/детекций — порты на нём не проверяются (ни вход, ни выход).
+            markers_in = is_marker_collection(items)
+            if self._validate_ports and not markers_in:
                 validate_items_against_ports(plugin.name, "input", getattr(plugin, "inputs", []), items)
             t0 = time.perf_counter()
             outputs = plugin.process(items)
             self._note_ms(plugin, (time.perf_counter() - t0) * 1000.0)
-            if self._validate_ports:
+            if self._validate_ports and not markers_in and not is_marker_collection(outputs):
                 validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
         else:
             outputs = items  # bypass: кадр без обработки (свои Port-декларации не проверяем)

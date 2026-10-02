@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
+from .plugin_runner import is_marker_collection
+
 if TYPE_CHECKING:
     from ..plugins.base import ProcessModulePlugin
     from .plugin_runner import PluginRunner
@@ -73,6 +75,10 @@ class PluginOperationStep:
         items = data
         if not items:
             return items
+        # 4.7d-2b: коллекция маркеров идёт мимо плагина без ``accepts_markers`` — без вызова раннера и
+        # без колбэков breaker (маркер не сбой и не успех плагина).
+        if is_marker_collection(items) and not getattr(self._plugin, "accepts_markers", False):
+            return items
         try:
             outputs = self._runner.call_process(self._plugin, items)
         except Exception as exc:  # noqa: BLE001 — error-policy pass-through (Q7), как в старом цикле
@@ -107,7 +113,7 @@ class SuspectTagStep:
 
     def execute(self, data: Any, context: Any) -> Any:
         items = data
-        if not items:
+        if not items or is_marker_collection(items):  # тег маркера not_inspected не перетирается (4.7d-2b)
             return items
         for item in items:
             item["inspection_status"] = "suspect"
