@@ -9,8 +9,9 @@
     неизвестный дефект раньше розыгрыша — rng не тронут);
   * H4 `label` в тексте — по умолчанию пустая метка, а не `None`/исключение;
   * H5 `layer_render` в рантайме не тянет `line_sim` (граница слоёв: `line_sim` → `layer_render`, не наоборот);
+  * H7 `forced_defects` строкой — `TypeError` до любых проверок и до `spawn` (иначе строка разобралась бы по буквам);
   * H6 алиас `LayeredObject._transform` — тот же объект, что `transform_layer`, и на «как есть» отдаёт сам спрайт
-    (кэш фабрики: `ObjectFactory.bottom_layout` оборачивает ответ read-only видом без копии).
+    (кэш фабрики: `ObjectFactory.nominal_layers` оборачивает ответ read-only видом без копии).
 """
 
 from __future__ import annotations
@@ -132,3 +133,24 @@ def test_h6_layered_object_transform_alias_is_transform_layer_and_keeps_identity
     assert LayeredObject._transform is transform_layer
     assert LayeredObject._transform(sprite, 1.0, 0.0, 0.0, None) is sprite
     assert LayeredObject._transform(sprite, 1.0, 0.0, 0.0, (1, 2, 3)) is not sprite
+
+
+@pytest.mark.parametrize(
+    ("forced", "layer_names"),
+    [("scratch", ("base", "scratch")), ("d", ("base", "d"))],
+    ids=["word-split-into-letters", "one-letter-layer-silently-forced"],
+)
+def test_h7_forced_defects_as_bare_string_is_type_error_and_rng_untouched(forced, layer_names):
+    """Ловит: `list(forced_defects)` на строке — `"scratch"` даёт буквы (ложный «неизвестный дефект»),
+    а `"d"` при слое `d` молча включает дефект. Значение в текст не эхуется."""
+    base, defect = layer_names
+    layers = [
+        LayerSpec(name=base, mode="static", sprite_source=_sprite()),
+        LayerSpec(name=defect, mode="defect", sprite_source=_sprite(2, 2, 10), defect_probability=0.0),
+    ]
+    rng = np.random.default_rng(11)
+    with pytest.raises(TypeError) as e:
+        compose_layers(layers, rng, 0.0, forced, label="X")
+    assert str(e.value).startswith("LayeredObject 'X': forced_defects — последовательность имён")
+    assert repr(forced) not in str(e.value)
+    assert rng.bit_generator.seed_seq.n_children_spawned == 0

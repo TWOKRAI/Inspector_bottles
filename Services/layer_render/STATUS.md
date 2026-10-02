@@ -25,9 +25,9 @@ Task 2.3: стек слоёв объекта — `layers.py` (`LayerSpec`/`Layer
 - `tests/test_hazards_1_1_background.py` — автор: свёртка == общий путь == попиксельный оракул на случайных
   RGBA-стеках, альфа 0/255 точно, знак `scroll_px`, тайл выше кадра, неизменность входов, пустой стек.
 - `tests/test_acceptance_2_2_effects.py` — слепые (порядок, пустой список, вентиль prob, U8-круг, `EffectSpec`, реэкспорт, слой импортов); `tests/test_hazards_2_2_effects.py` — автор: алиасинг параметров, read-only вход, JPEG на значениях вне 0..255, повтор spec; оракул `apply_photometric` и `EFFECT_PARAMS == AugmentConfig` — в `Services/dataset_gen/tests/test_augment_equivalence.py`.
-- `tests/test_acceptance_2_3_layers.py` — слепые (sha-литералы до задачи на 6 стеках × 3 seed, тексты ошибок, реэкспорт, AST); `tests/test_hazards_2_3_layers.py` — автор: read-only обёртки не замораживает вход, генератор `forced_defects`, порядок проверок и rng, пустая метка, рантайм-импорт без `line_sim`/`dataset_gen`, алиас `_transform`. Оба файла импортируют `line_sim` (обёртку сверяют с ядром) — исключение из правила ниже.
+- `tests/test_acceptance_2_3_layers.py` — слепые (sha-литералы до задачи на 6 стеках × 3 seed, тексты ошибок, реэкспорт, AST); `tests/test_hazards_2_3_layers.py` — автор: read-only обёртки не замораживает вход, генератор `forced_defects`, порядок проверок и rng, пустая метка, рантайм-импорт без `line_sim`/`dataset_gen`, алиас `_transform`.
 - Слепые тесты компоновщика и плагина лежат в `Services/line_sim/tests/` и `Plugins/sim/scene_source/tests/`
-  (правило слоёв: тесты `layer_render` не импортируют `line_sim`).
+  (правило слоёв: код пакета, кроме `tests/`, не импортирует `line_sim`; тесты эквивалентности обёртки — `test_acceptance_2_2_effects.py` (a6), `test_acceptance_2_3_layers.py`, `test_hazards_2_3_layers.py` — исключения с локальным импортом; перенос их в `line_sim/tests` — вопрос владельца, OPEN).
 
 ## Не сделано
 

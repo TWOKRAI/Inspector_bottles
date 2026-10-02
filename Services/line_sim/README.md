@@ -5,7 +5,7 @@
 обучения) сцена держит НЕСКОЛЬКО объектов на непрерывно движущейся ленте.
 
 Зависимости: numpy, opencv, pydantic, pyyaml. Без torch и PySide6 (сверяется тестом в подпроцессе). Транзитивно: `Services.robot_comm` (pymodbus) через импорт констант из `robot_comm.core.registers` — около 0.3 с на холодный импорт; перенос констант — отдельный follow-up.
-Геометрия слоя переиспользует `Services.dataset_gen.core.compose` (`rotate_expand`, `composite`).
+Розыгрыш и композиция слоёв — `Services.layer_render.layers` (`compose_layers`, `transform_layer`; геометрия — `Services.layer_render.compose`, Task 2.3); `Services.dataset_gen.core.compose` остался только у `core/scene_compositor.py`.
 
 ## Публичный контракт
 
@@ -19,8 +19,8 @@ from Services.line_sim import (
 
 | Символ | Где | Что |
 |---|---|---|
-| `LayerSpec` | `interfaces.py` | слой: `name`, `mode` (`static`/`augmented`/`defect`), `sprite_source`, `offset_px`, `angle_deg`, `scale`, `augment`, `defect_probability` |
-| `LayerAugment` | `interfaces.py` | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
+| `LayerSpec` | `interfaces.py` (реэкспорт; определён в `Services.layer_render.layers`, Task 2.3) | слой: `name`, `mode` (`static`/`augmented`/`defect`), `sprite_source`, `offset_px`, `angle_deg`, `scale`, `augment`, `defect_probability` |
+| `LayerAugment` | `interfaces.py` (реэкспорт из `Services.layer_render.layers`) | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params`; `to_dict()`/`from_dict()` — Dict at Boundary (Task 3.4) |
 | `SceneCompositorProtocol` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` (переименован из `SceneCompositor` при подключении конкретного класса, LS-009) |
 | `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), belt_direction=1, entry_x_px=0.0, background_layers=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; `background_layers` — стек слоёв фона из `Services/layer_render` (цвета RGB), единственный способ положить тайл под объекты; `belt_direction`/`entry_x_px` — Task 5.3b |

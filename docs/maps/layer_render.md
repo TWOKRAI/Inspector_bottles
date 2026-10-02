@@ -48,7 +48,7 @@
 
 - `Services/layer_render/tests/` — `test_acceptance_*` (слепые, тестер), `test_hazards_*` (автор механизма).
 - `Services/dataset_gen/tests/test_augment_equivalence.py` — оракул `apply_photometric`, sha-литералы, `EFFECT_PARAMS == AugmentConfig`.
-- `Services/line_sim/tests/`, `Plugins/sim/*/tests/` — потребители фона и сцены (слой не импортирует `line_sim`, поэтому тесты там).
+- `Services/line_sim/tests/`, `Plugins/sim/*/tests/` — потребители фона и сцены. Код пакета (кроме `tests/`) не импортирует `line_sim`; тесты эквивалентности обёртки (2.2 a6, 2.3 tester и hazards) — исключения с локальным импортом; перенос их в `line_sim/tests` — вопрос владельца (OPEN).
 
 ## Открыто
 
