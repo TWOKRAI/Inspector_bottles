@@ -10,9 +10,10 @@
 | `background.py` | `background_layers_from_config`, `fold_background`, `render_background` | стек слоёв -> кадр фона |
 | `compose.py` | `rotate_expand`, `crop_to_alpha`, `fit_longest_side`, `cast_contact_shadow`, `composite` | геометрия и композиция спрайта (Task 2.1) |
 | `io.py` | `imread_unicode`, `imwrite_unicode` | Windows-safe I/O (Task 2.1) |
+| `layers.py` | `LayerMode`, `RangeF`, `SpriteSource`, `AUGMENT_FIELDS`, `LayerAugment`, `LayerSpec`, `ComposedLayers`, `load_layer_sprite`, `transform_layer`, `canvas_size`, `compose_layers` | стек слоёв объекта: розыгрыш и композиция в RGBA (Task 2.3); не знает паспорта и `line_sim` |
 | `effects.py` | `EFFECTS`, `EFFECT_PARAMS`, `EffectSpec`, `apply_effects`; функции `apply_glare`, `apply_shadow`, `apply_occlusion`, `apply_motion_blur`, `make_motion_kernel`, `apply_vignette`, `apply_brightness_contrast`, `apply_gamma`, `apply_color_temperature`, `apply_channel_shift`, `apply_jpeg` | фотометрические эффекты кадра (Task 2.2) |
 
-Старые пути — реэкспорт, тот же объект (`is`): `dataset_gen.core.compose.*`, `dataset_gen.core.catalog.imread_unicode/imwrite_unicode`, `dataset_gen.core.augment.<11 функций>` (потребитель — `line_sim/core/factory.py`: `apply_occlusion`).
+Старые пути — реэкспорт, тот же объект (`is`): `dataset_gen.core.compose.*`, `dataset_gen.core.catalog.imread_unicode/imwrite_unicode`, `dataset_gen.core.augment.<11 функций>` (потребитель — `line_sim/core/factory.py`: `apply_occlusion`); `line_sim.interfaces.<6 типов слоя>`, `line_sim.core.layered_object.canvas_size`, `LayeredObject._transform` (= `transform_layer`). Приватные `_rotate`/`_hue_shift`/`_over`/`_compose_canvas` не реэкспортируются; `factory.py` берёт `load_layer_sprite` из `Services.layer_render`.
 Мост конфига остался в `dataset_gen`: `augment_config_to_effects(cfg)` и `apply_photometric` в `dataset_gen/core/augment.py:62,71`.
 
 ## Инварианты и где они держатся
