@@ -23,8 +23,8 @@ User reads and edits (this is the user interface to the code)
 
 | Agent | Skill | Purpose |
 |-------|-------|---------|
-| **spec-writer** (Sonnet 4.6) | `/dev:spec:spec` | Create / update spec files |
-| **manager** (Sonnet 4.6) | `/dev:spec:spec-sync` | Compare spec with code → decompose → Task X.Y |
+| **spec-writer** (Sonnet) | `/dev:spec:spec` | Create / update spec files |
+| **manager** (Opus) | `/dev:spec:spec-sync` | Compare spec with code → decompose → Task X.Y |
 
 ## Typical spec file structure
 

@@ -1450,3 +1450,50 @@ GENERATED, до FW_BUILD — без цикла)? Цена смены: литер
 
 Тест «стек слоёв ≤ 1.3× старого пути» удалён в 1.3 вместе со старым путём. Замер ревьюера (1440×1080, медиана 200):
 `[solid, RGB]` 3.5–3.7 мс, `[solid, RGBA]` 5.5–5.8 мс, старый путь был 10.5–11.5 мс. Нужен ли абсолютный бюджет кадра — открыто.
+
+## Именование планов: с датой или без (2026-10-02, prompt-audit)
+
+Три источника расходятся. `plans/README.md`, `manager.md`, `/dev:plan` и `.claude/CLAUDE.md`: `plans/YYYY-MM-DD_<slug>`, «дата всегда в имени».
+Корневой `CLAUDE.md` (строка про Slug и Хранение) и `Refs:` в шаблоне коммита: `plans/<slug>`. Практика: из 62 записей в `plans/` с датой
+только 4, все недавние планы (`layer-render`, `letters-retrain`, `transport-single-policy`) без даты. Валидатор коммитов принимает оба вида.
+Нужно решение владельца: какой вид канонический. После решения привести в соответствие остальные два источника.
+
+## `lint_settings.py`: уже существующие нарушения в settings.json (2026-10-02, prompt-audit)
+
+Линтер выдаёт ✗ на `Write(...)` в deny (правила `Write(path)` Claude Code не применяет, работает только `Edit(path)`) и на `Bash(cp *)`,
+`Bash(git merge *)`, `Bash(git cherry-pick *)` в allow. К правке хуков ponytail это не относится; файл генерируется из `settings.partial.json`
+плагинов, чинить нужно там. Скрипт падает в консоли cp1251 на символе ✗ (нужен `PYTHONIOENCODING=utf-8`).
+
+## Память Claude Code: абсолютный Mac-путь в отслеживаемом settings.local.json (2026-10-02, ревью prompt-audit)
+
+`.claude/settings.local.json` лежит в git и держит `autoMemoryDirectory` вида `/Users/twokrai/Project_code/Inspector_bottles/.claude/memory`.
+На Windows этот путь превращается в `D:\Users\twokrai\…`: каталог пуст (создан 2026-09-28). `~/.claude/projects/<hash>/memory/` — архив:
+414 файлов, последняя авто-запись 2026-09-09 (по замеру ревью; в `.claude/memory/` — 35 файлов). РЕШЕНО владельцем 2026-10-02: каждая машина пишет в свою локальную память (Windows — Windows, Mac — Mac), общее — через `docs/claude/memory/`.
+Сделано на Windows: ключ `autoMemoryDirectory` убран из локальной копии `settings.local.json`, файл скрыт `git update-index --skip-worktree` (в коммиты не попадает).
+Не проверено: что новая сессия на Windows пишет в `~/.claude/projects/<hash>/memory/`. Остаётся: файл отслеживается git с Mac-путём; на Mac менять ничего не нужно,
+но `git pull` с правкой этого файла на Windows упрётся в skip-worktree (снять: `git update-index --no-skip-worktree .claude/settings.local.json`).
+
+## Именование планов: дополнение (2026-10-02)
+
+Кроме `plans/README.md`, `manager.md`, `/dev:plan` и корневого `CLAUDE.md`, форму имени задают ещё `.claude/modes/_stack.md:40` (`plans/<slug>.md`)
+и `.claude/modes/dev.md:207` (с датой, в том же абзаце ссылка на `_stack.md`). Менять форму до решения владельца нельзя.
+
+## Модули: расхождение раскладки в skill `module-contract` (2026-10-02)
+
+Skill требует `src/<package>/<module>/` + `interface.py` + `_impl/` + `tests/contract/`. В репозитории у 27 модулей фреймворка лежат
+`README.md`, `STATUS.md`, `interfaces.py`, `tests/`. Ссылку на skill из таблицы «Project layout» я убрал; сам skill не правил.
+
+## team-brief.md / executor-brief.md: заметки по моделям прошлого поколения (2026-10-02)
+
+Заголовки «Sonnet 5», «Opus 5», «Fable 5.1» (`team-brief.md:58,63,71`; в `executor-brief.md:119` — «Fable»). Алиасы теперь указывают на 5.5. У Opus 5.5 effort по
+умолчанию `medium`, мышление отключить нельзя. Сами советы нужно сверить с разделами «Migrating to Opus/Sonnet 5.5» skill `claude-api`, затем
+переименовать заголовки по ярусу. Не сделано.
+
+## qex: модель и размерность зависят от машины (2026-10-02, по ревью, не проверено мной)
+
+Ревью утверждает: на Mac стоит `8b-qex` / 4096, а в корневом `CLAUDE.md` описан Windows (`0.6b` / 1024). Это было до моей правки. Проверить на Mac.
+
+## Сид 1.2.0 против проектного текста режима (2026-10-02)
+
+`claude-kit upgrade` перезаписывает `.claude/plugins/dev/modes/dev.md` текстом сида и стирает проектные правки (так 2026-09-20 пропала строка `graph_slice`).
+Правила: проектный текст выигрывает у сида; после апгрейда сверять `dev.md` с `git diff` и возвращать проектные строки.

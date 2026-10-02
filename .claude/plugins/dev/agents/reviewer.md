@@ -28,6 +28,8 @@ Activated by `MODE: plan` as the prompt's first line (absent → code-review bel
 
 Verdict: `APPROVED` or `CHANGES REQUESTED` with a list of `checklist item → Task → what to fix`.
 
+**On a single Task file** (spec review before the tester) the checklist is (a), (d), (f) plus: (i) each DESIGN decision names its reason; (ii) no decision breaks an invariant of the touched module (read its README / DECISIONS); (iii) error texts never carry the input value. Same verdict format.
+
 ## Boundary: reviewer vs teamlead
 
 | Situation | Agent |

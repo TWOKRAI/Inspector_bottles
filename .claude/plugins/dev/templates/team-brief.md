@@ -53,22 +53,13 @@ Final message: outcome first, then files, then the non-empty section
 </report>
 ```
 
-## Per-model notes — add the line for the teammate's tier
+## Per-model notes
 
-- **Sonnet 5** (`developer`, `tester`, `debugger`, `tech-writer`): literal and precise. State
-  the scope explicitly ("every call site", "all four files"); give task, intent and
-  constraints up front in one message rather than drip-fed. For finding-type work:
-  "Report every issue you find, including uncertain and low-severity ones; a separate pass
-  filters — coverage is the goal here."
-- **Opus 5** (`teamlead`, `reviewer`, `investigator`, `manager`): remove "double-check" and
-  "verify with a subagent" lines — it verifies on its own and over-verifies when told to.
-  Constrain scope ("deliver what was asked, at the scope intended"), cap delegation ("do not
-  spawn subagents for work you can finish in a handful of tool calls"), and ask for concise
-  output explicitly — effort does not shorten its prose.
-- **Haiku 4.5** (`junior`, `docs-writer`): numbered steps, exact anchors and file lists, one
-  verification command, a fixed report shape. Expect no inference: anything not written down
-  comes back as a question, which is the intended behaviour.
-- **Fable 5.1** (`cto`): say what progress text you want between tool calls; add "first
-  privately list what you need next, then request everything independent in one response";
-  scope is the deliverable; it finishes long tasks unattended, so never ask it to wait for
-  permission on work already requested. Prefer targeted edits over rewrites (read-only here).
+The per-model lines live in one place: `executor-brief.md` → "Per-model line" (re-baselined 2026-10-02 for the current
+generation). Append the line for the teammate's tier to this brief.
+
+## Re-summon message (SendMessage by agentId)
+
+Send, in this order: the spec SHA and what changed since the agent last read it; what is done and what is left, taken from
+the worktree including uncommitted work; the next task; `re-read <section>` when the spec changed. Measured on 1b.2d: a
+teamlead resumed after a 429 without loss when this list was explicit.

@@ -32,7 +32,7 @@ FILES (complete list — nothing else; need another file -> stop and ask the lea
   1. <path> — <what changes there>
   2. <path> — <…>
 
-REDS (predicted red tests, <= 10, `path::test_name`; "n/a — <why>" for docs / config):
+REDS (predicted red tests, <= 10, `path::test_name`; "n/a — <why>" for docs / config, and for a blind tester whose DESIGN is the test design):
   - tests/<…>::test_<…>
 
 ACCEPTANCE: numbers the lead will check by running <command>
@@ -108,12 +108,19 @@ the hook reads it on the agent's next tool call.
 
 ## Per-model line — append one to the brief
 
+Re-baselined 2026-10-02 against the claude-api migration guide (Opus 5.5, Sonnet 5.5, Fable 5.1). Re-baseline when a new model ships.
+
 - **Sonnet** (`developer`, `tester`, `debugger`, `tech-writer`): literal and precise — name
   every call site and every file; task, intent and constraints up front in one message. For
-  finding-type work: "report every issue, including uncertain and low-severity ones".
+  finding-type work: "report every issue, including uncertain and low-severity ones". It follows
+  "only use tools when strictly necessary" / "minimize tool calls" literally — never write them; drop
+  "do not be lazy" lines. At `low` effort it sometimes calls a change done without a real check, so the
+  brief demands the acceptance command and its pasted output.
 - **Opus** (`teamlead`, `reviewer`, `investigator`, `manager`): drop "double-check" lines — it
   over-verifies when told to; constrain scope, cap delegation ("no subagents for work you can
-  finish in a handful of calls"), ask for concise output explicitly.
+  finish in a handful of calls"), ask for concise output explicitly. Thinking is always on and the
+  effort default is `medium`: set `effort` in the agent frontmatter on purpose; at `xhigh`/`max` a turn
+  runs for minutes, so launch `reviewer` and `tester` synchronously and plan for the wait.
 - **Haiku** (`junior`, `docs-writer`): numbered steps, exact anchors and file lists, one
   verification command, a fixed report shape; anything unwritten comes back as a question.
 - **Fable** (`cto`): say which progress text you want between tool calls; "first privately list

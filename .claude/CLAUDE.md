@@ -1,7 +1,7 @@
 # KnowledgeOS — Project Extensions
 
 Agents: `.claude/agents/`, commands: `.claude/commands/`, modes: `.claude/modes/`.
-Project context, vault zones, rules, stack → see root `CLAUDE.md` (single source of truth).
+Project context, rules, stack → see root `CLAUDE.md` (single source of truth).
 
 ## Modes (read the right one before starting any task)
 
@@ -37,7 +37,7 @@ Rules:
 - **Author writes hazard tests for the mechanism.** Most of the value arrives while writing
   the docstring — "what can break in *this* mechanism, given how it is built" — not from the
   run. Author's tests are additional, never a replacement.
-- **Independent `tester` — ALWAYS, on every task. No "selectively".** (Owner's decision,
+- **Independent `tester` — on every task, once per mechanism, before the implementation. No "selectively".** (Owner's decision,
   2026-08-13, replacing the earlier carve-out for "internal mechanism work". The carve-out
   was doing exactly what the rule below warned about: decaying into "never". Measured on
   Task 2.1 of `telemetry-stage6`, where the skip had already been declared and the tester
@@ -93,6 +93,7 @@ answer; follow it and only speak up when deviating.
 
 | Stage | Who | Notes |
 |---|---|---|
+| 0. Spec review | `reviewer`, **synchronous, once on the Task text** (DESIGN / FILES / REDS), via `MODE: plan` on one Task file (`reviewer.md`) | before the tester: the tester's acceptance lines must be final. Verdict `APPROVED` / `CHANGES REQUESTED` with a list. Not run for solo-trivial work. Measured: 1b.2d — 3 blockers fixed by editing text; layer-render 5.3 without it — 3 code-review iterations. |
 | 1. Independent acceptance tests | `tester`, **once per mechanism, before the implementation** | synchronous, from acceptance criteria only. Runs in a **git worktree at the pre-implementation commit** — blindness is enforced by the tree, not by prose (see below). Its tests are expected RED; they are the spec handed to stage 2. |
 | 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. I keep the spec, the acceptance and the measurements. |
 | 3. Break-injection | me, never delegated | against **both** test sets — the author's and the tester's. Predictions written before the run. |
@@ -127,8 +128,8 @@ solo as the named exception. Say so if the owner meant the opposite.
 
 ## Subagents are background by default (Claude Code 2.1.212+, STRICT)
 
-Upgraded 2026-08-05, 2.1.152 → 2.1.222. Three defaults changed underneath the rules above,
-and each one fails **silently** — nothing errors, the guarantee just stops holding.
+Three Claude Code defaults changed underneath the rules above, and each one fails **silently** —
+nothing errors, the guarantee just stops holding.
 
 | New default | What it breaks here | What to do |
 |---|---|---|
@@ -136,15 +137,13 @@ and each one fails **silently** — nothing errors, the guarantee just stops hol
 | A finished background agent **commits, pushes, and opens a draft PR** on its own — it no longer asks | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
 | Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
 
-Also gone: the `/agents` wizard (2.1.200) and `ultraplan` (2.1.222). Permission mode
-"Default" is now called "Manual". `/review` is a fast single-pass PR review; `/code-review`
-is the multi-agent one and it **runs in the background** since 2.1.218 — for a verdict this
-project's rules will accept, drive `reviewer` directly instead.
+`/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
+the background** — for a verdict this project's rules will accept, drive `reviewer` directly instead.
 
 ## ponytail — when the laziness ladder applies
 
 The `ponytail` skill (`.claude/plugins/ponytail/`) is installed **skills-only**: no
-SessionStart hook, so it never injects itself. Its own description says "use on ANY coding
+SessionStart hook (the `hooks` key is removed from its vendored `plugin.json`; the composer wires that key from every enabled plugin), so it never injects itself. Its own description says "use on ANY coding
 task", which in this repo would mean always-on with random timing — the boundary below
 replaces that. Deliberate: the measured win (JetBrains, 80 paired tasks) is −15% code /
 −10% cost on greenfield feature work, and this repo is mostly mechanism work on 27 existing
@@ -229,7 +228,7 @@ after every commit; `docs/sessions/*.md` merges by union (`.gitattributes`). No 
 the main `.venv` with `PYTHONPATH=$PWD` from the worktree root — the package is not an editable
 install, and `uv sync` would fetch CPU torch instead of the CUDA wheel.
 
-Engine limits (2.1.222): teammates do not survive `/resume`; one team per session; teammates cannot
+Engine limits (last verified on 2.1.222 — re-check after an upgrade): teammates do not survive `/resume`; one team per session; teammates cannot
 spawn teams or background subagents; split panes are unavailable in Windows Terminal / VS Code —
 in-process only (↑/↓ + Enter opens a teammate, Esc back, x stops, Ctrl+T task list). Each teammate
 is a full session: ~25k tokens of context before its first tool call.
@@ -238,16 +237,22 @@ is a full session: ~25k tokens of context before its first tool call.
 
 Measured over Task 4.7d (`docs/claude/pilot-company-v2.md`, 30 agent runs, ~3.0M subagent tokens).
 A fresh agent costs **107–228k** just to enter a task; the same agent re-summoned with `SendMessage`
-costs **+3…56k** for a fix, a review round or a whole next subtask. Rules:
+costs **+3…56k** for a fix, a review round or a whole next subtask (1b.2d, pilot v3: 4 fresh 130–209k,
+5 re-summons +7…48k). These are the tool's `total_tokens` — new tokens, cache reads excluded. Under the
+cache-read metric of `team-protocol` §6 a re-summon after 5 minutes idle pays 1.25× its whole context, so
+until one re-summoned subtask is measured in cache_read tokens, re-summon for review fixes and round 2
+(≤10 calls), and treat a whole next subtask on the same agent as provisional. Rules:
 
 - **Address = agentId, never the name.** Names stop resolving after a 429 or the next day; agentIds do.
   The lead keeps an `agentId` table in its handoff (`docs/handoffs/<date>_<track>-lead.md`).
-- **Developer: one per track, re-summoned per subtask.** Review fixes go to the AUTHOR before its
+- **Developer: one per track.** Review fixes go to the AUTHOR before its
   handoff — a fresh successor paid 175k to apply 8 small fixes the author would have done for +8…30k.
   Set the handoff threshold (~150k) *after* the review nits are closed, not before.
 - **Reviewer round 2: re-summon the round-1 reviewer by agentId** — even when someone else wrote the
   fixes (+14k / +21k against 140–213k fresh, and it re-ran its own reproductions).
-- **Tester and round-1 reviewer stay fresh.** Independence is the product: every fresh reviewer found
+- **Tester and round-1 reviewer stay fresh relative to the code** — an agent that has seen the implementation
+  never writes the RED or the first review; the same blind tester may be re-summoned for a new mechanism of
+  the same task. Independence is the product: every fresh reviewer found
   something the author and the blind tester had missed. This pilot changes nothing in the three-roles rules.
 - **No standing "expert" agent; write a map file instead** (`docs/maps/<subsystem>.md`). The long-lived
   expert cost 310k and, re-summoned, reported two "spec conflicts" from a spec revision that no longer
@@ -267,14 +272,21 @@ costs **+3…56k** for a fix, a review round or a whole next subtask. Rules:
 | Plans (workspace/plans/, apps/*/plans/, projects/*/plans/) | **Russian** | User reviews and edits plans |
 | Wiki articles | **Russian** | Target audience is Russian |
 | Technical terms (pipeline, frontmatter, RAG, etc.) | English as-is | Standard terminology |
-| CLAUDE.md, agent prompts, memory, settings.json | English | Token efficiency, system-only files |
+| `.claude/` files: CLAUDE.md, agent prompts, skills, memory, settings.json | English | Token efficiency, system-only files (root `CLAUDE.md` is Russian: the owner reads it) |
 
-- `preferredLanguage: ru` in settings.json reinforces this
+- the native `language` key in `.claude/settings.json` reinforces this (`project-rules` §6)
 - Internal reasoning can be in any language — only output matters
+
+**Explanation style: STE-80 (since 2026-10-02).** Complex explanations — to the owner and between
+roles — follow ASD-STE100 relaxed to ~80% (Karpathy's tip): one idea per sentence (≤25 words),
+active voice, one term per thing, answer first, literals instead of adjectives, no filler. The
+rules are structural, so they apply to the Russian text too; the language policy above does not
+change. Rules and relaxations: `project-rules` §9. Does not apply to code, logs, commit
+trailers. `caveman` overrides it on request.
 
 ## Commands — quick reference
 
-Full list in the corresponding mode file. Key commands (76 command files in 14 namespaces, counted 2026-09-02):
+Full list in the corresponding mode file. Key commands (recount: `find .claude/commands -name '*.md' | wc -l`):
 
 - **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:team`, `/dev:adr`, `/dev:plan-status`
   (bare `/plan` and `/review` are Claude Code built-ins — plan mode and PR review; the
@@ -336,16 +348,16 @@ tokens — that's what `caveman` is for, trigger-based, user-facing only).
 
 | What | Path | Written by |
 |-----|------|-------|
-| Main package | `src/<package>/` | developer |
-| **Module contract** | `src/<package>/<module>/{README.md,interface.py,_impl/}` (full) or `<module>.py` (lite) + `tests/contract/test_<module>.py` | developer (skill `module-contract`) |
-| Tests | `tests/` | tester |
+| Code | `multiprocess_framework/`, `Services/`, `Plugins/`, `multiprocess_prototype/` (root `CLAUDE.md` → «Ключевые пути») | developer |
+| **Module contract** | `<module>/{README.md,STATUS.md,interfaces.py,tests/}` | developer |
+| Tests | `<module>/tests/` | tester |
 | Scripts / commit validator | `scripts/`, `scripts/validate_commit/` | developer / seed (autocopy) |
 | Commit guide | `.claude/COMMIT_GUIDE.md` | seed (autocopy) |
 | Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up`, pre-commit-session-log hook |
 | Task plans | `plans/YYYY-MM-DD_<slug>.md` (single) or `.../plan.md`+`phase-N.md` (multi-phase) | `/dev:plan` (Manager) |
 | Long-term memory | `.claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
 | Layer enum | `.claude/commit-layers.txt` | project (manual) |
-| Commands/Agents/Skills | `.claude/{commands,agents,skills}/…` (materialized, gitignored) | `plugin sync` from `plugins/<id>/…` |
+| Commands/Agents/Skills | `.claude/{commands,agents,skills}/…` (materialized copies, git-tracked: edit the source in `plugins/<id>/…`, then copy) | `plugin sync` from `plugins/<id>/…` |
 | Hooks | composed in `.claude/settings.json` | `plugin sync` from `plugin.json.hooks` |
 | Living spec | `docs/direction/` | `/dev:spec:spec`, `/dev:spec:spec-sync` |
 | Data (gitignored) | `data/` | runtime |

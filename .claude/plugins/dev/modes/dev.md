@@ -27,22 +27,24 @@ The `/dev:pipeline` skill runs the full chain with failure-recovery via the debu
 
 | Agent | Model | Skill | When to call |
 |-------|-------|-------|--------------|
+| **cto** | Fable | Agent tool / `/dev:team` | Verdicts only: phase acceptance (three lenses), merge gate, arbitration, top of the escalation ladder. Once per phase, never per task. Does NOT write code |
 | **spec-writer** | Sonnet | `/dev:spec:spec`, `/dev:spec:spec-sync` | Living product spec — from the user's perspective |
 | **manager** | Opus | `/dev:plan` | Decompose a phase into Task X.Y with complexity levels. Does NOT write code |
-| **junior** | Haiku | Agent tool | Mechanical, fully-specified changes only (exact diff, rename list, fixture copy), under 20 lines. Never commits |
 | **developer** | Sonnet | `/dev:implement` | Standard Task implementation per spec (Middle/Middle+). Code + smoke-test + commit |
 | **teamlead** | Opus | Agent tool | Senior+: architecture, refactoring, integration. Escalation on 3rd review/debug iteration |
+| **junior** | Haiku | Agent tool / `/dev:team` | Mechanical, fully specified changes only (apply a given diff sketch, rename per list, fixture copy; under 20 lines). Stops on any decision. Does NOT commit |
 | **tester** | Sonnet | `/dev:test` | Pytest against acceptance criteria from spec. Does NOT change logic |
 | **debugger** | Sonnet | `/dev:debug` | Reproduce → hypotheses → root cause. Fixes within scope or delivers a diagnosis |
 | **investigator** | Opus | Agent tool | Read-only diagnosis of cross-module problems. Does not write code, delivers a report |
-| **reviewer** | Opus | `/dev:review` | Full review (10+ files, architecture, security). Max 2 iterations — then escalate to teamlead. Does NOT write code |
-| **integrator** | Opus | Agent tool | Post-review integration-risk report (`/dev:pipeline` stage S7) — dsm-delta, blast radius, dead/dup signals. Read-only |
-| **ai-judge** | Opus | Agent tool | Impartial PASS/BLOCK on a machine signal only (S2 contract-complete gate, escalation edge cases). No access to implementer reasoning |
+| **reviewer** | Opus | `/dev:review` | Review after every task (project rule); full review for 10+ files, architecture, security. Max 2 iterations — then escalate to teamlead. Does NOT write code |
+| **integrator** | Opus | `/dev:pipeline` S7 | Integration risk after implementation (cycles, god nodes, coverage drop). Does NOT write code |
+| **ai-judge** | Opus | `/dev:pipeline` gates | PASS/BLOCK verdict on a machine signal (S2 contract-complete, S3/S7 edge cases). Does NOT write code |
 | **docs-writer** | Haiku | `/core:team:docs` | Simple docs: docstrings, module README, STATUS.md |
 | **tech-writer** | Sonnet | Agent tool | Complex docs: DECISIONS.md (ADR), ARCHITECTURE.md, MIGRATION_*.md, RFC-*.md |
-| **cto** | Fable | Agent tool | Phase acceptance through three lenses, merge gate, arbitration when teamlead and reviewer disagree. Once per phase or disputed decision, never per task |
 
-Shared rules for all 14 agents live in `project-rules` (preloaded via `skills:`).
+Shared rules for all 14 agents live in one skill, `project-rules` (preloaded via `skills:`).
+Team mode (agents that persist in the session, shared task list, hooks as gates): `/dev:team`,
+guide `docs/claude/AGENT_TEAMS_GUIDE.md`.
 
 ## Boundary rules
 
@@ -66,8 +68,9 @@ Shared rules for all 14 agents live in `project-rules` (preloaded via `skills:`)
   travels **in the Task spec text** handed down to each subagent.
 - Every subagent brief carries the guardrail line: `report only; commit only if
   your role says so`.
-- Never claim the engine commits changes or opens a pull request on its own —
-  only an agent whose role explicitly says so commits, and none open a PR unattended.
+- A finished background agent may commit, push and open a draft PR on its own
+  (`.claude/CLAUDE.md` → "Subagents are background by default"). The guardrail line above is
+  the defence: never leave it out of a brief.
 
 ## Test authorship — three roles, three defect classes
 
@@ -78,17 +81,18 @@ role covers all three.
 |------|--------|-------------------------|
 | **tester** | the failing test from the contract (RED), then regression | wrong behavior — output diverges from spec/contract |
 | **developer** | unit tests for branches only visible inside `_impl/` | internal edge cases a black-box test never reaches |
-| **reviewer** | no new test — break-injection against each claimed one | a test that passes no matter what — the assertion proves nothing |
+| **reviewer** | no new test — reproduces the scenario by running | a test that passes no matter what — the assertion proves nothing |
 
-- An **independent tester is the default on any task that changes behavior**. A skip
-  is allowed only for docs/mechanical work, and it is **recorded** both in the plan
-  and in the commit message.
-- **break-injection on every claimed property is the reviewer's job**: revert the
-  implementation, confirm the test goes red.
+- An **independent tester runs on every task, once per mechanism, before the code** (in a
+  worktree at the pre-implementation commit). There is no legitimate skip: a forced one
+  (agent unavailable, pure docs) is **recorded** in the plan and the commit message, and the
+  task counts as unverified until the tester runs.
+- **break-injection on every claimed property is mandatory.** The lead runs it (stage 3 of
+  the launch convention in `.claude/CLAUDE.md`): revert the implementation, confirm the test goes red.
 - A test that **stays green when the implementation is reverted does not exist** —
   rewrite or delete it.
 - A **hanging test is worse than a missing one** (it blocks the pipeline silently) —
-  `pytest-timeout` is on project-wide.
+  a test that can block runs the call in a daemon thread with a join deadline.
 - An **expected value is a literal**, never recomputed from the code under test.
 - The words **"impossible" / "guaranteed" / "cannot"** are allowed only next to a
   reproduction that demonstrates the claim.
@@ -151,7 +155,7 @@ semantics here (that would create a second source to keep in sync).
 | Flow stage | Primary MCP | Fallback (no MCP) |
 |-----------|-------------|-------------------|
 | **plan** (manager) | `mcp:qex:search_code` (recon) + `mcp:sentrux:health` / `mcp:sentrux:dsm` (architecture) | `Grep` + read module READMEs |
-| **INTERFACE** | `mcp:codegraph:codegraph_explore` — call paths + blast radius of the new/changed API | `git diff` + `Grep` for call sites |
+| **INTERFACE** | `mcp:codegraph:codegraph_explore` — blast radius of the new/changed API | `python scripts/graph_slice/graph_slice.py <module> --inbound-only` (dependents from the graphify graph; heed its staleness header), then `git diff` + `Grep` for call sites |
 | **RED** (tester) | `mcp:qex:search_code` — edge cases in related code | `Grep` by symbol + read neighbors |
 | **GREEN** (developer/teamlead) | `mcp:serena:rename_symbol` / `find_referencing_symbols` (symbol ops) + `mcp:context7:query-docs` (library API) + `mcp:ast-grep:scan` (codemod) | `WebFetch` for docs + `Grep` / `Edit` |
 | **regression** (tester) | `mcp:sentrux:test_gaps` — uncovered zones | `pytest --cov` read by hand |
@@ -181,7 +185,8 @@ The coordinator (Opus) does NOT write code itself when a task is delegated. Role
 - Opus agents — critical decisions (manager, reviewer, teamlead, investigator, integrator, ai-judge);
   Fable — cto (phase acceptance, arbitration)
 
-Exception: if the task is trivial (<30 lines, one file) — the coordinator may do it directly without delegating.
+Exception: a genuinely trivial task (1–3 files, under ~80 lines, no new mechanism) — the coordinator may do it
+directly and says so in the task write-up (`.claude/CLAUDE.md` → Task launch convention). Stages 1, 3 and 5 have no solo variant.
 
 ## Memory discipline (capture at Task boundary)
 
