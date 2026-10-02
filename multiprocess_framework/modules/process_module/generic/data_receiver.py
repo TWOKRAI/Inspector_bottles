@@ -32,6 +32,17 @@ class _StampedBatch(list):
     __slots__ = ("enq_ts",)
 
 
+class _MarkerBatch(_StampedBatch):
+    """Коллекция ИЗ ОДНИХ маркеров ``not_inspected`` (4.7d-2).
+
+    Любая маркер-коллекция, которую приёмник кладёт в ``chain_queue`` (замена при lag, stale_restore, IPC-маркер,
+    результат склейки), — этого типа. Тип заменяет проход по items под ``chain.mutex``: ``_bound_lag`` и
+    ``_coalesce_markers`` спрашивают ``isinstance`` — O(1) вместо O(число маркеров) на каждый кадр.
+    """
+
+    __slots__ = ()
+
+
 class DataReceiver:
     """Приём data-plane IPC → item → ItemCollector → chain_queue.
 
@@ -266,7 +277,7 @@ class DataReceiver:
                     self._lag_dropped_items += len(victim)  # считаем ДО замены/удаления
                     if self._overflow == "every":
                         # Кадр заменяется на месте легкими маркерами (4.7d-2a): длина очереди не меняется.
-                        markers = _StampedBatch(
+                        markers = _MarkerBatch(
                             build_marker(it if isinstance(it, dict) else {}, reason="lag", source=self._node)
                             for it in victim
                         )
@@ -295,20 +306,18 @@ class DataReceiver:
         return True
 
     @staticmethod
-    def _is_marker_collection(items: list[dict]) -> bool:
-        """Коллекция целиком из маркеров переполнения (и не пустая)."""
-        return bool(items) and all(isinstance(it, dict) and is_marker(it) for it in items)
+    def _coalesce_markers(pending) -> int:
+        """Склеить соседние ``_MarkerBatch`` в ту, что раньше (её ``enq_ts`` и тип сохраняются).
 
-    @classmethod
-    def _coalesce_markers(cls, pending) -> int:
-        """Склеить соседние маркер-коллекции в ту, что раньше (её ``enq_ts`` сохраняется).
-
-        Зовётся под ``chain.mutex``. Возвращает, сколько коллекций убрано из очереди.
+        Склейка происходит ТОЛЬКО здесь, то есть только внутри ``_bound_lag`` сразу после замены кадра
+        маркерами: маркер-коллекция, пришедшая в очередь обычным ``put`` (IPC-маркер, stale_restore), с
+        соседями не склеивается, пока потолок не сработает. Зовётся под ``chain.mutex``; проверка — по типу
+        (O(1)), не по содержимому. Возвращает, сколько коллекций убрано из очереди.
         """
         freed = 0
         j = 0
         while j < len(pending) - 1:
-            if cls._is_marker_collection(pending[j]) and cls._is_marker_collection(pending[j + 1]):
+            if isinstance(pending[j], _MarkerBatch) and isinstance(pending[j + 1], _MarkerBatch):
                 pending[j].extend(pending[j + 1])
                 del pending[j + 1]
                 freed += 1
@@ -318,7 +327,13 @@ class DataReceiver:
 
     @staticmethod
     def _is_frame_collection(items: list[dict]) -> bool:
-        """Кадровая ли коллекция: хоть один item несёт ``_shm_views`` или ``frame`` (C1)."""
+        """Кадровая ли коллекция: хоть один item несёт ``_shm_views`` или ``frame`` (C1).
+
+        ``_MarkerBatch`` — нет, по типу: маркер кадра не несёт, а проход по длинной голове из маркеров под
+        ``chain.mutex`` (``_bound_lag`` зовёт это на КАЖДОЙ коллекции очереди) — ровно то, что тип устраняет.
+        """
+        if isinstance(items, _MarkerBatch):
+            return False
         return any(isinstance(it, dict) and (SHM_VIEWS_KEY in it or "frame" in it) for it in items)
 
     def _note_lag_drops(self, dropped: int) -> None:
@@ -354,7 +369,8 @@ class DataReceiver:
         """
         # Метка ставится один раз, до всех путей put: ожидание из-за backpressure
         # считается ожиданием исполнителя намеренно.
-        items = _StampedBatch(items)
+        if not isinstance(items, _MarkerBatch):  # _MarkerBatch уже штампованный список: тип не теряем
+            items = _StampedBatch(items)
         items.enq_ts = time.perf_counter()
         if self._max_lag_items and self._bound_lag(items):
             return
@@ -441,7 +457,7 @@ class DataReceiver:
                         # 4.7d-2a: потерянный кадр не исчезает молча — вместо него идёт маркер, мимо коллектора.
                         marker = build_marker(meta_from_msg(msg), reason="stale_restore", source=self._node)
                         self._not_inspected_stale_restore += 1
-                        self.on_items_ready([marker])
+                        self.on_items_ready(_MarkerBatch([marker]))
                     continue
 
             # Task 4.5d: время транспорта — до построения item, чтобы штамп не утёк в него.
@@ -459,7 +475,7 @@ class DataReceiver:
 
                 if is_marker(item):
                     # 4.7d-2a: пришедший по IPC маркер не склеивается коллектором — отдельной коллекцией.
-                    self.on_items_ready([item])
+                    self.on_items_ready(_MarkerBatch([item]))
                 else:
                     # Передать в коллектор
                     self._collector.on_item(item)

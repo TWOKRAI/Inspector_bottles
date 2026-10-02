@@ -60,3 +60,12 @@ def meta_from_msg(msg: dict[str, Any]) -> dict[str, Any]:
 def is_marker(item: dict[str, Any]) -> bool:
     """Маркер переполнения — не любой кадр с тегом ``not_inspected`` (тег сбоя плагина идёт с кадром)."""
     return item.get("overflow_marker") is True and item.get("inspection_status") == NOT_INSPECTED
+
+
+def is_marker_collection(items: object) -> bool:
+    """Непустая коллекция целиком из маркеров ``not_inspected`` (единственное определение, Task 4.7d-2).
+
+    Смешанная коллекция (маркер + обычный item) маркерной НЕ считается и идёт обычным путём. Обходит items:
+    под ``chain.mutex`` приёмника не зовётся (там тип ``_MarkerBatch``, проверка O(1)).
+    """
+    return isinstance(items, (list, tuple)) and bool(items) and all(isinstance(i, dict) and is_marker(i) for i in items)

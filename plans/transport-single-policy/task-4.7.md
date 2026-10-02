@@ -370,17 +370,17 @@ transport. 4.7d-5 — после 2, 3 и 4. Слепой tester — на каж�
    соседняя более ранняя коллекция `pending[i-1]` — маркер-коллекция, маркеры дописываются в неё
    (`pending[i-1].extend(markers); del pending[i]`), иначе `pending[i] = markers`. Без склейки маркер-коллекции копятся
    до `queue_size` и `put` блокирует приёмник — `every` превращался бы обратно в блокировку. Порядок маркеров
-   сохраняется. **Инвариант (ревью спеки итер. 2):** после `_bound_lag` в очереди нет двух соседних маркер-коллекций,
+   сохраняется. **Инвариант (ревью спеки итер. 2):** после замены в `_bound_lag` в очереди нет двух соседних маркер-коллекций,
    в том числе при `excess > 1` (после отката на блокирующий `put`): склейка — отдельным проходом после всех замен
    вызова. Маркер-коллекция не кадровая (`_is_frame_collection` её не считает) и потолком не вытесняется. Метка
-   `enq_ts` — момент первой замены. При `latest` — `del`, как сейчас. `lag_dropped_items` растёт в обоих режимах.
+   `enq_ts` — момент первой замены. Склейка происходит ТОЛЬКО в `_bound_lag`; маркер-коллекция — тип `_MarkerBatch` (проверка `isinstance`, O(1) под `mutex`). При `latest` — `del`, как сейчас. `lag_dropped_items` растёт в обоих режимах.
    Ловушка: при `queue_size <= lag` первая замена места не освобождает — под `every` приёмник уходит в блокирующий
    `put`; в рецептах сегодня 64 против 2, проверка конфигурации — вне 4.7d.
 2. `run_loop`: на ветке `_is_shm_dropped` при `every` вместо `continue` строится маркер из `msg` (`reason="stale_restore"`,
    `source` = имя узла) и уходит `self.on_items_ready([marker])` — мимо коллектора. При `latest` — `continue`, как сейчас.
    Покрывает любой отказ restore: stale, torn, отвязанный сегмент, сбой открытия ссылки.
 3. `run_loop`: пришедший по IPC маркер (`is_marker(data)`), в любом режиме, не идёт в коллектор, а уходит
-   `on_items_ready([item])` отдельной коллекцией. `_build_item` добавляет к нему msg-ключ `sender` — это допустимо,
+   `on_items_ready([item])` отдельной коллекцией. `_build_item` добавляет к нему msg-ключи `sender` и `timestamp` (поля `Message`) — это допустимо,
    поля маркера не меняются.
 4. `_run_batch`: коллекция из одних маркеров (`all(is_marker)`) идёт в `_forward_markers`: без проверок view и без
    `_attach_batch_views`, `_execute_chain` (плагины без `accepts_markers` пропускаются) → `_send_results`;
@@ -455,6 +455,8 @@ transport. 4.7d-5 — после 2, 3 и 4. Слепой tester — на каж�
 - [ ] `meta_from_msg({"data": {"trace_id": "t1", "capture_ts": 2.0, "camera_id": 0}, "frame_id": 5, "camera_id": "x"})`
       `== {"trace_id": "t1", "capture_ts": 2.0, "camera_id": 0, "frame_id": 5}` (`camera_id` из `data` побеждает `msg`,
       0 сохраняется).
+
+**Правки ревью 4.7d-2a/2b — внесены (1–8, dev-transport-3):** `_MarkerBatch`, один `is_marker_collection` в `not_inspected_marker.py`, склейка только в `_bound_lag`, `sender`/`timestamp` в IPC-маркере, маркер-коллекция вне EMA `queue_wait_ms` и вне `_cycle_metrics`, порты по ITEM, переименован тест drop.
 
 ###### 4.7d-3 — Маркер в двери отправителя (3 кода-файла, developer; только после слияния 4.7b в main)
 **Files:** `multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py`

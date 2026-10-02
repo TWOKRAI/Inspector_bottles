@@ -18,10 +18,10 @@ from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
-from .plugin_runner import PluginRunner, is_marker_collection
+from .plugin_runner import PluginRunner
 from ...chain_module import ChainRunnable, RunnableStep
 from ...router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY, FrameShmMiddleware
-from ...router_module.middleware.not_inspected_marker import build_marker
+from ...router_module.middleware.not_inspected_marker import build_marker, is_marker_collection
 
 
 class PipelineExecutor:
@@ -206,8 +206,9 @@ class PipelineExecutor:
                 continue
 
             # Task 4.5a: сколько коллекция прождала в очереди (метку ставит DataReceiver).
+            # Маркер-коллекция в EMA не входит (4.7d-2): её ожидание — не ожидание кадра, иначе метрика врёт.
             enq = getattr(items, "enq_ts", None)
-            if enq is not None:
+            if enq is not None and not is_marker_collection(items):
                 wait_ms = (time.perf_counter() - enq) * 1000.0
                 if self._queue_wait_seen:
                     self._queue_wait_ms += 0.1 * (wait_ms - self._queue_wait_ms)
@@ -321,11 +322,14 @@ class PipelineExecutor:
 
         Шаги цепочки сами пропускают маркер мимо плагинов без ``accepts_markers`` (PluginOperationStep /
         SuspectTagStep). Маркер не несёт кадра, поэтому ``_attach_batch_views`` не нужен.
+
+        Цикл в ``_cycle_metrics`` НЕ пишется (4.7d-2): работа над маркером — не обработка кадра, иначе
+        ``effective_hz`` / ``cycle_duration_ms`` описывали бы смесь кадров и маркеров. ``t_start`` оставлен
+        в сигнатуре ради вызывающих.
         """
         out = self._execute_chain(items)
         self._not_inspected_handled += len(items)
         self._send_results(out)
-        self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
         """Прогон items через processing-плагины поверх ``ChainRunnable`` (C6d).

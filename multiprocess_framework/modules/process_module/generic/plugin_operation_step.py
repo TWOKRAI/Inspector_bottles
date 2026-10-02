@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
-from .plugin_runner import is_marker_collection
+from ...router_module.middleware.not_inspected_marker import is_marker_collection
 
 if TYPE_CHECKING:
     from ..plugins.base import ProcessModulePlugin

@@ -10,12 +10,21 @@
 from __future__ import annotations
 
 import os
+import queue
+import threading
 import time
 
 import pytest
 
+from multiprocess_framework.modules.process_module.generic.data_receiver import _MarkerBatch, _StampedBatch
 from multiprocess_framework.modules.process_module.generic.pipeline_executor import PipelineExecutor
-from multiprocess_framework.modules.router_module.middleware.not_inspected_marker import build_marker, is_marker
+from multiprocess_framework.modules.process_module.generic.plugin_runner import PluginRunner
+from multiprocess_framework.modules.process_module.plugins.port import Port, PortValidationError
+from multiprocess_framework.modules.router_module.middleware.not_inspected_marker import (
+    build_marker,
+    is_marker,
+    is_marker_collection,
+)
 from multiprocess_framework.modules.router_module.tests import test_frame_ref_gen as _T
 
 
@@ -133,3 +142,124 @@ def test_breaker_untouched_by_100_marker_batches_through_live_failing_and_bypass
     assert len(sent) == 100
     assert all(m["data"]["inspection_status"] == "not_inspected" for _t, m in sent)
     assert ex.get_cycle_metrics()["not_inspected_handled"] == 100
+
+
+# --------------------------------------------------------------------------------------------
+# Ревью 2a/2b: маркер-коллекция не загрязняет метрики исполнителя (queue_wait_ms EMA, цикл)
+# --------------------------------------------------------------------------------------------
+def _drive_loop(ex: PipelineExecutor, batches: list, expect_sent: int, sent: list) -> None:
+    """Прогнать ``run_loop`` реальной очередью: положить батчи, дождаться отправок, остановить и дождаться выхода
+    (после ``join`` итерация, включая запись цикла, завершена целиком)."""
+    chain: queue.Queue = queue.Queue()
+    for b in batches:
+        chain.put(b)
+    stop, pause = threading.Event(), threading.Event()
+    worker = threading.Thread(target=ex.run_loop, args=(chain, stop, pause), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + _T.DEADLINE_S
+    while len(sent) < expect_sent and time.monotonic() < deadline:
+        time.sleep(0.005)
+    stop.set()
+    worker.join(_T.DEADLINE_S)
+    assert len(sent) == expect_sent and not worker.is_alive(), f"sent={len(sent)}, ожидалось {expect_sent}"
+
+
+def test_marker_only_batch_leaves_queue_wait_ema_and_cycle_metrics_untouched():
+    """Маркер-коллекция, ждавшая в очереди 5 с, и ничего больше: ``queue_wait_ms == 0.0`` (в EMA не вошла),
+    ``cycles == 0``, ``cycle_duration_ms == 0.0`` — но отправлена (1) и ``not_inspected_handled == 1``."""
+    sent: list = []
+    ex = _executor([_Plugin("p")], sent=sent)
+    batch = _MarkerBatch([_marker("m1")])
+    batch.enq_ts = time.perf_counter() - 5.0
+
+    _drive_loop(ex, [batch], 1, sent)
+
+    metrics = ex.get_cycle_metrics()
+    assert metrics["queue_wait_ms"] == 0.0
+    assert metrics["cycles"] == 0 and metrics["cycle_duration_ms"] == 0.0
+    assert metrics["not_inspected_handled"] == 1
+
+
+def test_frame_batch_after_marker_batch_is_the_only_one_in_ema_and_cycles_control():
+    """CONTROL: маркер-коллекция (ждала 5 с), затем кадровая (ждала 0.5 с). EMA = ровно ожидание кадра
+    (400..700 мс; если бы маркер вошёл, первая проба дала бы 5000 и EMA ушла бы за 4000), ``cycles == 1``."""
+    sent: list = []
+    ex = _executor([_Plugin("p")], sent=sent)
+    markers = _MarkerBatch([_marker("m1")])
+    markers.enq_ts = time.perf_counter() - 5.0
+    frames = _StampedBatch([{"trace_id": "f1", "x": 1}])
+    frames.enq_ts = time.perf_counter() - 0.5
+
+    _drive_loop(ex, [markers, frames], 2, sent)
+
+    metrics = ex.get_cycle_metrics()
+    assert 400.0 <= metrics["queue_wait_ms"] <= 700.0, metrics["queue_wait_ms"]
+    assert metrics["cycles"] == 1
+    assert metrics["not_inspected_handled"] == 1
+
+
+# --------------------------------------------------------------------------------------------
+# Ревью 2b (minor): порты проверяются по ITEM, маркерный вход не оправдывает невалидный НЕмаркерный выход
+# --------------------------------------------------------------------------------------------
+class _PortPlugin:
+    enabled = True
+    name = "ported"
+    inputs = [Port(name="frame")]
+    outputs = [Port(name="mask")]
+
+    def __init__(self, fn) -> None:
+        self._fn = fn
+
+    def process(self, items: list[dict]) -> list[dict]:
+        return self._fn(items)
+
+
+def _call(plugin, items):
+    return PluginRunner(validate_ports=True).call_process(plugin, items)
+
+
+def test_ports_marker_input_does_not_excuse_invalid_non_marker_output():
+    """Вход — маркер (портов не проверяем), выход — маркер + item без порта ``mask``: PortValidationError на item."""
+    plugin = _PortPlugin(lambda its: [_marker("m1"), {"trace_id": "bad"}])
+    with pytest.raises(PortValidationError, match="mask"):
+        _call(plugin, [_marker("m0")])
+
+
+def test_ports_mixed_input_validates_the_non_marker_item():
+    """Вход [маркер, item без ``frame``]: коллекция не маркерная и маркер внутри не оправдывает item."""
+    plugin = _PortPlugin(lambda its: [{"mask": 1}])
+    with pytest.raises(PortValidationError, match="frame"):
+        _call(plugin, [_marker("m0"), {"trace_id": "bad"}])
+
+
+def test_ports_mixed_input_with_valid_item_passes_marker_is_not_validated():
+    """Вход [маркер, валидный item ``frame``]: маркер без порта ``frame`` ошибки не даёт (порты — по ITEM, а не по
+    коллекции: смешанная коллекция раньше проверялась целиком и маркер внутри её валил)."""
+    out = _call(_PortPlugin(lambda its: [{"mask": 1}]), [_marker("m0"), {"frame": 1}])
+    assert out[0]["mask"] == 1
+
+
+def test_ports_pure_marker_in_and_out_pass_and_valid_items_pass_control():
+    """Маркер на входе и выходе при обязательных портах — не ошибка; CONTROL: валидный item проходит."""
+    out = _call(_PortPlugin(lambda its: its), [_marker("m0")])
+    assert len(out) == 1 and out[0]["inspection_status"] == "not_inspected" and out[0]["trace_id"] == "m0"
+    out = _call(_PortPlugin(lambda its: [{"mask": 1}]), [{"frame": 1}])
+    assert out[0]["mask"] == 1
+
+
+# --------------------------------------------------------------------------------------------
+# Ревью 2a (nit 4 + DRY): одно определение is_marker_collection
+# --------------------------------------------------------------------------------------------
+def test_single_marker_collection_predicate_lives_in_marker_module():
+    """Потребители берут ОДИН объект функции из ``not_inspected_marker``; старых имён нет."""
+    from multiprocess_framework.modules.process_module.generic import (
+        data_receiver,
+        pipeline_executor,
+        plugin_operation_step,
+        plugin_runner,
+    )
+
+    assert pipeline_executor.is_marker_collection is is_marker_collection
+    assert plugin_operation_step.is_marker_collection is is_marker_collection
+    assert not hasattr(plugin_runner, "is_marker_collection")
+    assert not hasattr(data_receiver.DataReceiver, "_is_marker_collection")

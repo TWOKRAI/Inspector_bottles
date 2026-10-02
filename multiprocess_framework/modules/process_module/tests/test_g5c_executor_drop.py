@@ -242,7 +242,7 @@ def test_rebuilt_item_blocked_by_send_door(rig, monkeypatch):
     assert sender.frame_stale_drops == 1, f"frame_stale_drops = {sender.frame_stale_drops}, ожидалось 1"
 
 
-def test_batch_drop_counts_one_per_output_item(rig):
+def test_batch_drop_counts_one_per_input_item(rig):
     """Свойство: единица счётчика — ВХОДНОЕ сообщение (с 4.7d-2b; раньше считались выходы цепочки).
     Вход перезаписан во время цепочки, плагин вернул три выхода -> дропнут один вход,
     ``frame_stale_drops`` == 1 (reader посчитал 1 на первой провалившейся ссылке, ``n_in - 1`` == 0
