@@ -809,6 +809,41 @@ merge` пересобирают `publish` ЦЕЛИКОМ из присланно
 
 ---
 
+## Политика переполнения `overflow` и маркер `not_inspected` (Task 4.7d)
+
+> Решение, отвергнутые варианты и формула приёмки — [ADR-174](../../DECISIONS.md). Здесь только то, что видно из `process_module`.
+
+Ключ процесса `overflow: latest|every` живёт в `extras` рецепта (typed-поля нет; плоская запись молча уходит в `metadata`).
+Читает его `GenericProcess._init_data_pipeline` и передаёт в `DataReceiver`, `PipelineExecutor` и `FrameShmMiddleware`.
+По умолчанию `latest` — кадр, не успевший в бюджет ADR-173, выбрасывается и считается. Под `every` на его месте рождается
+маркер `not_inspected` (контракт — `router_module/middleware/not_inspected_marker.py`) — по одному на потерянный входной item:
+
+| Где рождается | Причина (`reason`) | Код |
+|---|---|---|
+| потолок отставания приёмника | `lag` | `DataReceiver._bound_lag`: кадровая коллекция заменяется на месте `_MarkerBatch`, соседние `_MarkerBatch` склеиваются |
+| отказ `restore_frame` | `stale_restore` | `DataReceiver.run_loop`, ветка `_shm_dropped`: маркер мимо коллектора |
+| слот входа перезаписан до/после цепочки | `stale_exec` | `PipelineExecutor._run_batch`; post-chain маркеры идут прямо в `_send_results` |
+| дверь отправителя | `door` | `FrameShmMiddleware` — см. `router_module/README.md` |
+
+Пришедший по IPC маркер в любом режиме идёт в `chain_queue` отдельной коллекцией, мимо коллектора; шаги цепочки пропускают его
+мимо плагинов без `accepts_markers` (без вызова, без счётчиков breaker, без проверки портов).
+
+Счётчики воркеров (в `get_cycle_metrics()`):
+
+| Ключ | Воркер | Когда есть | Что значит |
+|---|---|---|---|
+| `lag_dropped_items` | `DataReceiver` | `chain_max_lag_items > 0`, любой режим | Сумма items в выброшенных потолком коллекциях (`lag_dropped_total` — число коллекций) |
+| `not_inspected_lag` | `DataReceiver` | только `every` | Маркеров рождено потолком; равно `lag_dropped_items` |
+| `not_inspected_stale_restore` | `DataReceiver` | только `every` | Маркеров по отказу восстановления кадра из SHM |
+| `not_inspected_stale_exec` | `PipelineExecutor` | только `every` | Входных items, заменённых маркером при stale на исполнении |
+| `not_inspected_handled` | `PipelineExecutor` | всегда | Маркер-items, отправленных исполнителем (рождённые здесь и пришедшие сверху; дверные не входят) |
+
+Под `latest` четыре ключа `not_inspected_*` отсутствуют (не нули). **В дерево телеметрии эти ключи не попадают:**
+`build_worker_telemetry` публикует только объявленные метрики. Читать — `introspect.status`, поле `workers` (сырой статус
+воркеров); счётчики двери — `introspect.router_stats`. Установлено чтением кода (`heartbeat/telemetry.py`), не прогоном.
+
+---
+
 ## Уровни плагина: объявить и отдать (Task 3.5 / Ф1 «порт наблюдений», ADR-PM-038)
 
 > Сверено **2026-08-20** (`plans/observation-port/plan.md`, Task 1.2 + фазовое ревью Task 1.5).

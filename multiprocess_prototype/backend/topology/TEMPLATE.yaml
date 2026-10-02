@@ -55,6 +55,14 @@ processes:
     #   большом кадре, пока остальные простаивают; 1 — лёгкой обработке и мелким кадрам. Прикидка:
     #   сумма cv_threads одновременно загруженных процессов ≈ числу ядер. Подбирать замером (CPU
     #   процесса + время плагина в backend_ctl), не на глаз; фактическое значение — introspect.status.
+    #   overflow: latest              # Политика переполнения: latest (умолчание) | every. ТОЛЬКО под extras.
+    #   Под `latest` кадр, не успевший в бюджет «в полёте», молча выбрасывается и считается. Под `every` на его
+    #   месте идёт маркер `not_inspected` — по одному на потерянный кадр (приёмник, restore, исполнитель, дверь);
+    #   отбраковщик (`robot_control`) реагирует по регистру `not_inspected_action: reject|pass`. Включать на узлах
+    #   инспекции цепочки целиком. ADR-174 в multiprocess_framework/DECISIONS.md.
+    #   Ловушка плоской формы: `overflow: every` прямо у процесса (не под extras) сворачивается в `metadata` и
+    #   молча игнорируется — бэкенд остаётся на `latest`, ошибки нет (см. _FLAT_FORM_NOT_ACCEPTED в
+    #   multiprocess_prototype/domain/tests/test_entities_roundtrip.py).
     plugins:
       # Добавьте processing-плагины:
       # - color_mask, grayscale, negative, flip, resize
