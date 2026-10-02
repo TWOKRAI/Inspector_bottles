@@ -1,0 +1,96 @@
+# Итог Task 1.0 — plans_ledger.py читает эталон формата задачи
+
+- **План:** [2026-10-02_plans-progress-dashboard.md](2026-10-02_plans-progress-dashboard.md), Task 1.0
+- **Исполнитель:** teamlead (Opus), worktree `team-plans-ledger`, ветка `feat/plans-ledger-1-0`, база `439f391f1`
+- **Коммиты:** `5c6341067` — характеризация гейтов на старом коде; `7518a1ba9` — правка ledger + зеркало + манифест + сдвиги в тестах
+
+## Числа приёмки
+
+| Проверка | Результат |
+|---|---|
+| `test_acceptance_ledger.py` (тестер) | до правки 20 failed / 3 passed; после — 23 passed |
+| `test_ledger_characterization.py` (тестер) | 8 passed до и после |
+| `test_ledger_gates_characterization.py` (мой) | 37 passed на старом коде (`5c6341067`); после правки 60 passed (37 − 3 сдвига переписаны + 1 тест сдвига N1 + 23 авторских) |
+| `status` на снимке `tests/fixtures/real` | `layer-render/plan.md: 5/20`, `2026-09-22_gui-service/plan.md: 10/21` |
+| `status` на реальном `line-sim` | done 24, total 30, dropped 2 (DEFERRED) → печать `24/28` |
+| `close 2026-10-02_etalon.md` с двумя `[DONE 2026-10-02 — …]` | exit 0 без `--force` (тест тестера) |
+| `diff -q` источник ↔ зеркало | пусто до правки и после |
+| sha256 зеркала = манифест | `e09ac78c…2ff08` = строка 44 `.claude/.delivery-manifest.json` |
+
+Команда: `python -m pytest scripts/plans_progress/tests/test_acceptance_ledger.py scripts/plans_progress/tests/test_ledger_characterization.py scripts/plans_progress/tests/test_ledger_gates_characterization.py -q --tb=short -p no:cacheprovider` → `91 passed`.
+
+## Сдвиги характеризации (тесты помечены «СДВИГ 1.0»)
+
+1. `contract_files_fingerprint`: `phase-N-имя.md` входит в контракт (`test_files_fingerprint_file_set`).
+2. `check_plan_gate` видит задачу под `####` (`test_gate_h4_task_heading`).
+3. `check_plan_gate` видит `### Task 1.3a` отдельно от `1.3` (`test_gate_suffixed_id_is_its_own_task`).
+4. **Не названный в плане:** `SCOPE_GREW` у плана с пунктами раздела считает задачи по пунктам. Новый `tasks/1.3.md` без пункта больше не растит счёт; `CONTRACT_DRIFT` по-прежнему ловит файл (`test_task_file_without_order_item_does_not_grow_scope`). Это прямое следствие правила N1. Два старых теста роста объёма переписаны: задача добавляется пунктом и файлом.
+
+## Сдвиги на реальном дереве (`plans/`, 60 активных планов, старый ledger против нового)
+
+Метод: оба модуля грузятся из файла; по `list_active_plans(".")` сравниваются `summarize_plan`, `contract_files_fingerprint` и `check_plan_gate`. `contract.lock` в репозитории нет ни одного, поэтому ни один утверждённый план не ломается.
+
+**Набор файлов контракта (10 планов):** `layer-render` +2 (`phase-2-core`, `phase-5-editor`), `gui-service` +4, `line-sim` +7 — совпадает с замером плана. Сверх замера: `constructor-maturity` +1, `dataset-annotation` +5, `gui-constructor` +5, `line-sim-layer-editor` +5, `observability-closure` +6, `observation-port` +5, `transport-single-policy` +3.
+
+**Отпечаток содержимого `plan.md` (5 планов):** `gui-service`, `layer-render`, `line-sim`, этот план, `telemetry-delivery-simplification`. Причина: хвост `[DONE … ]` и id `1b.x` теперь срезаются на строке-задаче раздела (ловушка 3 брифа).
+
+**Счёт `done/total/dropped` (24 плана):** было `0/0` у 19 планов. Изменились: `layer-render` 0/17 → 5/20; `gui-service` 0/0 → 10/21; `line-sim` 0/0 → 24/30, dropped 2; `transport-single-policy` 0/16 → 0/31; `observability-unified-routing` 16/31 → 16/32; `telemetry-stage6` 11/12 → 11/13; `telemetry-delivery-simplification` 1/6 → 2/6; этот план 0/0 → 0/7; `gui-telemetry-read-model` 0/0 → 11/11; `observability-closure` 0/0 → 22/52; `observation-port` 0/0 → 18/24; `observability-review-remediation` 0/0 → 7/20; прочие — с `0/0` на `0/N`. Три плана стали «готовы» и попадут в `DONE_NOT_ARCHIVED`: `gui-telemetry-read-model` (11/11), `sim-lateral-offset` (1/1), `undo-restores-selection` (1/1).
+
+**Гейт: ушло 2 находки** — обе у задач, которые теперь читаются как `DONE`: `layer-render` Task 1.3 `TASK_TOO_MANY_FILES`, `telemetry-delivery-simplification` Task 1.1 `TASK_INCOMPLETE`.
+
+**Гейт: 191 новая находка.** `TASK_TOO_BIG` — размер phase-файлов с суффиксом имени (их раньше не читал `check_plan_sizes`; он же отказывает `approve`/`amend`). `TASK_INCOMPLETE` без скобок — нет всех трёх полей; в скобках — каких нет. Задачи под `####`: `line-sim-layer-editor` (все 9), `qr-code-reader`, `telemetry-publish-control`, `observability-unified-routing` 2.3b, `transport-single-policy/phase-4` 4.3a. Id с буквой: `1.3a`/`1.3b`/`1.3c`/`4.3b` (`observability-closure`), `1b.*` (`gui-service`), `1.1b`/`1.2a`/`1.2b`/`1.2h`/`1.3h` (`line-sim-layer-editor`), `P1.1` (`constructor-maturity`).
+
+| План | Код | Число | Задачи |
+|---|---|---|---|
+| `2026-05-29_constructor-maturity` | TASK_INCOMPLETE | 1 | P1.1(Files+Handoff) |
+| `2026-09-22_gui-service` | TASK_INCOMPLETE | 11 | 1.4(Handoff), 1b.3(Handoff), 1b.4(Handoff), 2.1(Handoff), 2.2(Handoff), 2.3(Handoff), 3.1(Handoff), 3.2(Handoff), 3.3(Handoff), 1b.2b, 1b.2c |
+| `2026-09-22_gui-service` | TASK_TOO_BIG | 2 | phase-1-one-machine.md, phase-1b-recipe-service.md |
+| `2026-09-22_gui-service` | TASK_TOO_MANY_FILES | 3 | 1.4, 2.1, 2.2 |
+| `2026-10-02_plans-progress-dashboard.md` | TASK_INCOMPLETE | 7 | 1.0(Files+Handoff), 1.1(Files+Handoff), 1.2(Files+Handoff), 1.3, 2.1, 2.2, 2.3 |
+| `dataset-annotation` | TASK_INCOMPLETE | 2 | 5.1(Files), 5.2(Files) |
+| `dataset-annotation` | TASK_TOO_MANY_FILES | 1 | 1.1 |
+| `gui-constructor` | TASK_INCOMPLETE | 3 | 5.1(Files), 5.2(Files+Handoff), 5.3 |
+| `gui-constructor` | TASK_TOO_MANY_FILES | 1 | 1.3 |
+| `layer-render` | TASK_INCOMPLETE | 6 | 2.5, 6.1, 6.2, 6.3, 6.4, 6.5 |
+| `lifecycle-graceful-stop.md` | TASK_INCOMPLETE | 2 | 1.1(Files+Handoff), 1.2(Files) |
+| `line-sim-layer-editor` | TASK_INCOMPLETE | 9 | 1.3h(Handoff), 1.0(Handoff), 1.1(Handoff), 1.1b(Files+Handoff), 1.2a(Files+Handoff), 1.2h(Acceptance+Handoff), 1.2b(Handoff), 1.3(Handoff), 2.1(Files+Handoff) |
+| `line-sim` | TASK_INCOMPLETE | 6 | 1.1(Handoff), 4.1(Handoff), 4.2(Handoff), 4.3(Handoff), 5.5, 6.3(Handoff) |
+| `line-sim` | TASK_TOO_BIG | 4 | phase-1-vertical-slice.md, phase-2-belt-truth.md, phase-3-object-engine.md, phase-5-ground-truth.md |
+| `line-sim` | TASK_TOO_MANY_FILES | 1 | 1.1 |
+| `observability-closure` | TASK_INCOMPLETE | 30 | 0.1(Handoff), 0.2(Handoff), 0.3(Handoff), 0.4(Handoff), 0.5(Files+Handoff), 1.3, 1.3a(Handoff), 1.3b(Handoff), 1.3c(Handoff), 2.6, 3.0(Acceptance+Handoff), 3.8, 4.10(Handoff), 4.12(Handoff), 4.14(Handoff), 4.15(Handoff), 4.16(Handoff), 4.1(Handoff), 4.2(Handoff), 4.3(Handoff), 4.3b(Handoff), 4.5(Handoff), 4.6(Handoff), 4.7(Handoff), 4.8, 4.9(Handoff), 5.1(Handoff), 5.2(Handoff), 5.3(Handoff), 5.4(Files+Handoff) |
+| `observability-closure` | TASK_TOO_BIG | 4 | phase-1-invisible-failures.md, phase-2-one-policy.md, phase-3-store-and-signal.md, phase-4-scale-and-form.md |
+| `observability-closure` | TASK_TOO_MANY_FILES | 3 | 4.15, 4.6, 4.9 |
+| `observability-f1-hardening.md` | TASK_INCOMPLETE | 16 | A1(Files+Handoff), A2(Files+Handoff), A3(Files+Handoff), A4(Files+Handoff), B1(Files+Handoff), B2(Files+Handoff), C1(Files+Handoff), C2(Files+Handoff), D1(Files+Handoff), D2(Files+Handoff), D3(Files+Handoff), D4(Files+Handoff), D5(Files+Handoff), D6(Files+Handoff), D7(Files+Handoff), F2(Files+Handoff) |
+| `observability-review-remediation.md` | TASK_INCOMPLETE | 13 | C1, D1(Files+Handoff), D2(Files+Handoff), D3(Files+Handoff), D4(Files+Handoff), D5(Files+Handoff), D6(Files+Handoff), D7(Files+Handoff), D8(Files+Handoff), E1(Files+Handoff), E2(Files+Handoff), E3(Files+Handoff), F1(Files+Handoff) |
+| `observability-unified-routing.md` | TASK_INCOMPLETE | 1 | 2.3b |
+| `observation-port` | TASK_INCOMPLETE | 6 | 0.2(Handoff), 2.4(Files+Handoff), 5.2(Handoff), 5.3(Handoff), 5.4(Files+Handoff), 5.5(Files+Handoff) |
+| `observation-port` | TASK_TOO_BIG | 3 | phase-1-2-address-and-removal.md, phase-4-policy-glob.md, phase-5-single-writer.md |
+| `pipeline-node-timing.md` | TASK_INCOMPLETE | 4 | T1(Files+Handoff), T2(Files+Handoff), T3, T4 |
+| `proto-frontend-carve.md` | TASK_INCOMPLETE | 6 | 0.1(Handoff), 1.1(Handoff), 1.2(Handoff), 2.1(Handoff), 2.2(Handoff), 3.1(Handoff) |
+| `proto-frontend-carve.md` | TASK_TOO_MANY_FILES | 1 | 1.1 |
+| `qr-code-reader.md` | TASK_INCOMPLETE | 19 | 0.0(Files+Handoff), 0.1(Files+Handoff), 1.1(Files+Handoff), 1.2(Files+Handoff), 1.3(Files+Handoff), 1.4(Files+Handoff), 1.5, 2.1(Files), 2.2(Handoff), 2.3(Handoff), 2.4, 3.1(Files+Handoff), 3.2(Handoff), 3.3, 3.4, 4.1(Files+Handoff), 4.2, 5.1(Files+Handoff), 5.2 |
+| `telemetry-publish-control.md` | TASK_INCOMPLETE | 10 | 0.1(Handoff), 1.1(Handoff), 1.2(Handoff), 1.3(Handoff), 2.1(Handoff), 3.1(Handoff), 3.2(Handoff), 3.3(Handoff), 4.1(Files+Handoff), 4.2 |
+| `telemetry-stage6.md` | TASK_INCOMPLETE | 1 | 3.5 |
+| `transport-single-policy` | TASK_INCOMPLETE | 15 | 0.1(Handoff), 0.2(Handoff), 0.3(Handoff), 1.1(Handoff), 1.2(Handoff), 1.3(Handoff), 1.4(Handoff), 2.1(Handoff), 3.1(Handoff), 4.4(Handoff), 4.5, 4.6(Files+Handoff), 4.7, 4.8, 4.3a |
+
+## Отступления от DESIGN
+
+1. **`# fmt: off` в источнике и зеркале** (3 строки перед `from __future__`). Зеркало на базе `439f391f1` уже не проходило pre-commit `ruff-format`: проект — 120 колонок, сид — 88, `.claude/` исключён из ruff, `scripts/` — нет. Хук переписывал зеркало (77+/267−), и `diff -q` перестал бы быть пустым. **Отклонение от апстрима сида: 3 строки.** Альтернатива — исключение `scripts/plans_ledger.py` из `ruff-format` в `.pre-commit-config.yaml`; решает лид при слиянии.
+2. **Знаменатель `status`** = `total − dropped − unknown`, а не `total − dropped`. `unknown` — пункт без слова набора (`?`); так же считает дашборд по «Формату». `PlanSummary` получил поле `unknown` (по умолчанию 0) и свойство `counted`. `?` не даёт плану стать «готовым»: `close` его не архивирует.
+3. **`dropped`** теперь включает `DEFERRED`/`SUPERSEDED` (кроме `SKIPPED`/`CANCELLED`). Гейт освобождает только `SUPERSEDED`/`SKIPPED`/`CANCELLED`; `DEFERRED` гейт проверяет, как и раньше.
+4. **`task_order_marker` возвращает слово как в тексте:** `SKIPPED`/`CANCELLED` не переименованы в `SUPERSEDED` (публичный вывод не менялся).
+5. **`~~Task` и `СНЯТА`** → `SUPERSEDED` (правило «Формата»; в пяти точках DESIGN не было).
+6. **Гейт для задачи-пункта без заголовка** берёт тело из вложенных строк пункта (`  - **Files:** …`). Без этого каждая такая задача давала бы «нет всех трёх полей».
+7. **Текстовые выводы `status`** (список, `--plan`, `--oneline`) печатают `done/counted`; JSON `computed.total` прежний, в `status --json` добавлен ключ `computed.counted`.
+8. `close` на плане без даты отвечает `error: <имя>: no YYYY-MM-DD_ prefix — cannot pick a quarter`, exit 2 (как раньше для готового плана без даты); проверка теперь стоит до «готов».
+
+## Что я оставил открытым и что в моей работе ненадёжно
+
+- **Инъекций я не делал** — это стадия лида. 23 авторских теста зелёные с первого прогона; ни один не проверен красным на сломанной версии.
+- `build_summary` (SUMMARY.md при `close` каталожного плана) берёт задачи из заголовков, а не из пунктов. У `gui-service` в SUMMARY не будет `1b.2a`, `1b.2c`, `1b.2d`, `1b.2b-pre`. Вне DESIGN.
+- `**Статус:**` в теле задачи ledger не читает (это правило 1.1). План без раздела с `**Статус:** [DONE]` и неотмеченными чекбоксами для ledger остаётся открытым — расхождение с дашбордом возможно.
+- Статус на строке-продолжении не срезается в `contract_fingerprint`: флип такого статуса двигает отпечаток (так было и раньше).
+- `check_ledger`/`add_row` считают «все закрыты» как `done == total`, без `dropped`; `_is_done` — с `dropped`. Расхождение старое, не трогал.
+- Манифест хранит хеш LF-файла. При `core.autocrlf=true` свежий checkout даст CRLF и другой `sha256sum` рабочей копии. На базе было так же.
+- 191 новая гейт-находка не блокирует CI (гейт зовут `status --plan --check` и `approve`), но `approve` на 10 планах с крупными phase-файлами теперь откажет по `TASK_TOO_BIG`.
+- Сдвиг ledger дойдёт до других проектов claude-kit при следующем `plugin upgrade`. Запись в `amendments.md` не сделана: у плана нет каталога и файла `amendments.md`, а он не в моих FILES.

@@ -100,7 +100,13 @@ KEY_PRESENT_IN_APP = "log_level"
 #   * `heartbeat_interval_sec` — Task 2.3 (`98afa654`), честный такт в readback.
 # Прирост ровно на сумму новых секций и ни одного ключа сверх — это и есть
 # проверка: расползись слой L1, множество сошлось бы иначе, а не только число.
-EXPECTED_FRAMEWORK_KEY_COUNT = 37
+#
+# С Task 5.5 пин — файл-снимок, а не число: падение называет КЛЮЧ, который
+# появился или пропал, а не «38 != 37». К перечню выше добавился
+# `history.queue_capacity` — Task 3.3 (`4611c9b4a`, 2026-09-06): ёмкость очереди
+# истории стала ручкой. Ключ легитимный, число 37 просто не пере-пинили.
+# Менять снимок — только осознанно и с причиной в том же коммите.
+FRAMEWORK_KEYS_SNAPSHOT = Path(__file__).parent / "snapshots" / "hot_rebuild_framework_keys.txt"
 
 
 class _FakeChildProcess:
@@ -307,22 +313,28 @@ def test_hot_rebuild_key_present_in_system_yaml_is_app_layer(scenario: _Scenario
 
 
 def test_hot_rebuild_framework_layer_key_count_is_pinned(scenario: _Scenario) -> None:
-    """К3: число ключей со слоем framework — литерал, зафиксированный вручную
-    измерением на реальном system.yaml (не выражение от кода под тестом).
+    """К3: множество ключей со слоем framework сверяется с файлом-снимком
+    ``snapshots/hot_rebuild_framework_keys.txt``, снятым измерением на реальном
+    system.yaml (не выражение от кода под тестом). Имя теста историческое: до
+    Task 5.5 здесь был пин числа (37), падение не называло, какой ключ появился.
 
     Если резолвер провенанса когда-нибудь начнёт засчитывать L1 "заданным" по
     ключам, которые оператор не писал (класс регресса "exclude_unset потерялся
     на границе процессов" — см. докстринг sys_config_for_orchestrator в
     launch.py: тот же класс дефекта раздувал L1 с 12 до 23 ключей на боевом
     файле) — framework-набор молча просядет к нулю или расползётся, а тест,
-    сравнивающий систему саму с собой, прошёл бы в обоих случаях. Число ниже —
-    внешняя, независимая точка отсчёта именно против этого.
+    сравнивающий систему саму с собой, прошёл бы в обоих случаях. Снимок —
+    внешняя, независимая точка отсчёта именно против этого; правка снимка — осознанное
+    решение с причиной в коммите (например, +``history.queue_capacity``, 4611c9b4a).
     """
     framework_keys = sorted(k for k, v in scenario.hot_provenance.items() if v["layer"] == "framework")
-    assert len(framework_keys) == EXPECTED_FRAMEWORK_KEY_COUNT, (
-        f"framework-ключей на горячей дороге: {len(framework_keys)} (список: {framework_keys}), "
-        f"а зафиксировано {EXPECTED_FRAMEWORK_KEY_COUNT} — слой L1 расширился или сузился незамеченным; "
-        f"если system.yaml поменяли осознанно — замените константу и объясните почему в этом же коммите"
+    expected_keys = sorted(FRAMEWORK_KEYS_SNAPSHOT.read_text(encoding="utf-8").split())
+    extra = sorted(set(framework_keys) - set(expected_keys))
+    missing = sorted(set(expected_keys) - set(framework_keys))
+    assert framework_keys == expected_keys, (
+        f"слой L1 на горячей дороге разошёлся со снимком {FRAMEWORK_KEYS_SNAPSHOT.name}: "
+        f"появились {extra}, пропали {missing} (было {len(expected_keys)}, стало {len(framework_keys)}) — "
+        f"если system.yaml/схему поменяли осознанно, обновите снимок и объясните почему в этом же коммите"
     )
 
 

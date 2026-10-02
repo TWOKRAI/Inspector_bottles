@@ -332,8 +332,10 @@ release за lock-free refcount пула.
   ревьюера: `closed:s1 0.704` раньше `handler_done 1.501`; брокер (`observability_broker.py:290`)
   отвергает поздний `note_point` → отписка не доходит до дочернего → призрачный форвардер
   (класс Н3-1). Правка: сбой записи под `_write_lock` только **помечает** сокет (`_dead`) и
-  делает `shutdown(SHUT_RDWR)`; ничего не снимает и не оповещает. `shutdown` будит recv
-  read-loop'а (EOF), и соединение снимает единственная точка — выход read-loop
+  делает `shutdown(SHUT_RDWR)`; ничего не снимает и не оповещает. На POSIX `shutdown` будит recv
+  read-loop'а (EOF). **На Windows не будит** (проба Task 5.5: `shutdown rdwr -> STILL BLOCKED after 3s`):
+  read-loop выходит по пометке `_dead` на следующем `socket.timeout` (≤ 0.5 с); пир, который продолжает
+  слать, получает RST, и recv бросает `OSError`. В обоих случаях соединение снимает единственная точка — выход read-loop
   (`_unregister_clients` → `_await_handlers` → `_finish_drop`). `_drop_clients` удалён.
 - *Запись стоит не дольше одного таймаута сокета (0.5 с) на медленного клиента.* Прежний
   текст «остальные ждут ≤ 0.5 с, один раз» был неверен: второй отправитель, взявший снимок

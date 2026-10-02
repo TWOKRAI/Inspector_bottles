@@ -42,17 +42,24 @@ from multiprocess_framework.modules.process_module.configs.telemetry_publish_con
     ensure_framework_producers,
 )
 
-#: Пять метрик фреймворка — ЛИТЕРАЛ из задачи 0.1, а не значение, вычисленное тем
-#: же кодом, который проверяется: ожидание, выведенное из проверяемого, согласится
-#: с любым ответом, включая пустой. Сверено чтением: ``fps``, ``latency_ms``,
-#: ``effective_hz``, ``cycle_duration_ms`` объявляет ``heartbeat/telemetry.py``,
-#: ``shm`` — ``heartbeat/process_heartbeat.py``.
+#: Десять метрик фреймворка — ЛИТЕРАЛ, а не значение, вычисленное тем же кодом,
+#: который проверяется: ожидание, выведенное из проверяемого, согласится с любым
+#: ответом, включая пустой. Сверено чтением: ``fps``, ``latency_ms``, ``effective_hz``,
+#: ``cycle_duration_ms``, ``queue_wait_ms``, ``transport_ms``, ``pacer_late`` объявляет
+#: ``heartbeat/telemetry.py``; ``shm``, ``cpu``, ``plugin_ms`` — ``heartbeat/process_heartbeat.py``.
+#: Исходные пять — Task 0.1; ``cpu``/``plugin_ms`` — Task 4.5b (6601abd2b),
+#: ``queue_wait_ms``/``pacer_late`` — 4.5a (2d66b285e), ``transport_ms`` — 4.5d (0cf9781cb).
 EXPECTED_FRAMEWORK_METRICS: Tuple[str, ...] = (
+    "cpu",
     "cycle_duration_ms",
     "effective_hz",
     "fps",
     "latency_ms",
+    "pacer_late",
+    "plugin_ms",
+    "queue_wait_ms",
     "shm",
+    "transport_ms",
 )
 
 #: Хвосты имён модулей-производителей. Хвосты, а не полные имена: каталог

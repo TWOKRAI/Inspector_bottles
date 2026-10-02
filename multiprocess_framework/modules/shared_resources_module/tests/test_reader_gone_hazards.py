@@ -48,6 +48,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 from multiprocess_framework.modules.process_manager_module.runner.process_runner import (
     run_process_function,
@@ -340,6 +341,11 @@ class _SendBigPlusThree:
         pass
 
 
+# Корень репозитория от места файла, а не от cwd: дочерний `python -c` должен найти
+# пакет multiprocess_framework при запуске из любого каталога (в .venv нет editable-установки).
+# tests -> shared_resources_module -> modules -> multiprocess_framework -> корень.
+_REPO_ROOT = str(Path(__file__).resolve().parents[3].parent)
+
 _H8_SCRIPT = f"""
 import multiprocessing, time
 from multiprocess_framework.modules.process_manager_module.runner.process_runner import run_process_function
@@ -360,7 +366,7 @@ q.cancel_join_thread()
 
 class TestH8ExitLineReachesStderr:
     def test_real_pair_prints_literal_line(self) -> None:
-        env = dict(os.environ, PYTHONPATH=os.getcwd())
+        env = dict(os.environ, PYTHONPATH=_REPO_ROOT)
         proc = subprocess.run([sys.executable, "-c", _H8_SCRIPT], capture_output=True, text=True, timeout=40, env=env)
         assert "EXITCODES 0 0" in proc.stdout, (proc.stdout, proc.stderr[-2000:])
         lines = [ln for ln in proc.stderr.splitlines() if "queues released to gone readers" in ln]
@@ -378,7 +384,7 @@ class _SendBigOnly(_SendBigPlusThree):
 
 class TestH9InFlightLossWithEmptyBufferIsPrinted:
     def test_single_stuck_frame_prints_line_with_zero_buffered(self) -> None:
-        env = dict(os.environ, PYTHONPATH=os.getcwd())
+        env = dict(os.environ, PYTHONPATH=_REPO_ROOT)
         script = _H8_SCRIPT.replace("._SendBigPlusThree", "._SendBigOnly")
         proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=40, env=env)
         assert "EXITCODES 0 0" in proc.stdout, (proc.stdout, proc.stderr[-2000:])
