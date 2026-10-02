@@ -15,6 +15,7 @@ PluginContext даёт доступ ко всему что есть в ProcessMo
 from __future__ import annotations
 
 import functools
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -38,7 +39,20 @@ from .manifest import PLUGIN_API_VERSION
 
 if TYPE_CHECKING:
     from ..health import HealthReporter
+    from .interfaces import IActuationScheduler
     from .metrics import PluginMetrics
+
+
+#: Атрибут ``services``, где живёт планировщик привода процесса (Task 5.2).
+_ACTUATION_SCHEDULER_ATTR = "_actuation_scheduler"
+#: Замок get-or-create планировщика. Один на модуль, то есть на процесс: держится
+#: только на первом обращении, горячий путь его не берёт.
+_ACTUATION_SCHEDULER_LOCK = threading.Lock()
+
+
+def _dispatch_payload(payload: Any, count: int) -> None:
+    """``fire`` планировщика процесса: payload — вызываемый, ему отдаётся ``count``."""
+    payload(count)
 
 
 def for_each(func):
@@ -239,6 +253,62 @@ class PluginContext:
             reporter = HealthReporter(state, source=getattr(self, "_plugin_name", "") or "")
             self._health_reporter = reporter
         return reporter
+
+    # ------------------------------------------------------------------
+    # Task 5.2 — планировщик привода (ADR-PM-051)
+    # ------------------------------------------------------------------
+
+    @property
+    def scheduler(self) -> "IActuationScheduler":
+        """Один планировщик привода на процесс (:class:`ActuationScheduler`).
+
+        **Почему на ``services``, а не на ctx.** ``PluginContext`` у каждого плагина
+        свой (``with_config`` создаёт новый), а планировщик и его воркер обязаны
+        быть одни на процесс. Поэтому объект живёт в ``services._actuation_scheduler``
+        и создаётся под замком: два плагина, впервые обратившиеся одновременно,
+        получат один объект и один воркер.
+
+        **``fire`` — диспетчер.** Планировщик процесса общий, поэтому ``fire`` не
+        знает плагинов: он зовёт ``payload(count)``. Плагин передаёт вызываемый
+        payload (``functools.partial`` своего обработчика).
+
+        **Воркер.** При ``worker_manager is not None`` первое обращение создаёт
+        воркер ``actuation`` (``ExecutionMode.LOOP``, ``auto_start=True`` ЯВНО: у
+        настоящего ``WorkerAdapter``/``WorkerManager`` умолчание ``False``). Без
+        менеджера (юниты) воркера нет, ``tick()`` зовут руками.
+
+        Импорт внутри свойства: ``generic/__init__`` тянет ``generic_process`` →
+        ``plugins``, и импорт на уровне модуля замкнул бы цикл.
+        """
+        existing = getattr(self.services, _ACTUATION_SCHEDULER_ATTR, None)
+        if existing is not None:
+            return existing
+        with _ACTUATION_SCHEDULER_LOCK:
+            existing = getattr(self.services, _ACTUATION_SCHEDULER_ATTR, None)
+            if existing is not None:
+                return existing
+            from ..generic.actuation_scheduler import ActuationScheduler
+
+            scheduler = ActuationScheduler(_dispatch_payload, on_error=self._report_actuation_error)
+            setattr(self.services, _ACTUATION_SCHEDULER_ATTR, scheduler)
+            if self.worker_manager is not None:
+                from ...worker_module import ExecutionMode, ThreadConfig
+
+                created = self.worker_manager.create_worker(
+                    "actuation",
+                    scheduler.run_loop,
+                    ThreadConfig(execution_mode=ExecutionMode.LOOP),
+                    auto_start=True,
+                )
+                if created is False:
+                    # Цели будут копиться без выстрелов — это видно в pending(),
+                    # но причина должна прозвучать один раз здесь.
+                    self.log_warning("ctx.scheduler: воркер 'actuation' не создан (create_worker вернул False)")
+            return scheduler
+
+    def _report_actuation_error(self, exc: BaseException) -> None:
+        """Отказ ``fire`` — инцидент процесса: одна дверь ``health.report_error``."""
+        self.health.report_error(exc, context="actuation.fire", throttle=30.0)
 
     # ------------------------------------------------------------------
     # Ф8.7 — плоскость документов: дорога приложения в долговечное хранилище

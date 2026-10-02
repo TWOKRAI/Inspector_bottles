@@ -22,6 +22,7 @@ from ..generic.generic_process_config import PluginConfig
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...registers_module import RegistersManager
 from ...worker_module import ExecutionMode, ThreadConfig
+from .interfaces import IActuationScheduler
 from .base import PluginContext, PluginState, ProcessModulePlugin, SubPluginContext, for_each
 from .manager import PluginDiscoveryResult, PluginManager
 from .metrics import PluginMetrics
@@ -44,6 +45,8 @@ __all__ = [
     "PluginManager",
     "PluginDiscoveryResult",
     "for_each",
+    # Планировщик привода (Task 5.2): контракт ctx.scheduler
+    "IActuationScheduler",
     # Реэкспорт схем/конфига (фасад для плагинов)
     "SchemaBase",
     "FieldMeta",

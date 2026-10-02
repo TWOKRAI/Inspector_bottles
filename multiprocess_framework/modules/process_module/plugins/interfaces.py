@@ -419,3 +419,42 @@ class IProcessServices(Protocol):
         ``isinstance(process, IProcessServices)`` падала бы на штатной конфигурации.
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Планировщик привода (Task 5.2, ADR-PM-051)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class IActuationScheduler(Protocol):
+    """Контракт ``ctx.scheduler`` — один планировщик привода на процесс.
+
+    Плагин ставит цель и сразу возвращается; исполняет цель воркер ``actuation``
+    (или ``tick()`` руками в юнитах, где ``worker_manager is None``).
+    ``payload`` планировщика процесса — вызываемый: выстрел зовёт ``payload(count)``.
+    """
+
+    def schedule(
+        self,
+        fire_at: float,
+        window_end: float,
+        count: int,
+        payload: Any,
+        *,
+        tolerance_s: float | None = None,
+    ) -> str:
+        """``"scheduled"`` | ``"missed"`` (окно ``window_end + tolerance`` закрыто)."""
+        ...
+
+    def pending(self) -> int:
+        """Сколько целей ждут выстрела."""
+        ...
+
+    def tick(self) -> int:
+        """Выстрелить наступившие цели; вернуть число выстрелов."""
+        ...
+
+    def stats(self) -> dict:
+        """Снимок: ``fired_items``, ``missed_items``, ``late_fires``, ``unfired_on_stop_items``."""
+        ...

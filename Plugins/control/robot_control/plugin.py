@@ -29,13 +29,19 @@ total_inspected/total_rejected, не пишет вердикт-документ 
 По умолчанию механизм выключен (``observability.flight.enabled``), и выключенный
 он отвечает названным отказом, а не тишиной.
 
+Task 5.2 (контракт привода, ADR-PM-051): конвейер не ждёт механизма. В ``process()``
+нет ``time.sleep``: отбраковка ставится в планировщик процесса (``ctx.scheduler``)
+целью ``capture_ts + transit_ms`` и исполняется его воркером. Устаревшая цель не
+стреляет, а считается (``actuation_missed_items``). ``transit_ms == 0`` — привод
+срабатывает сразу на решении (``immediate``), планировщик не создаётся.
+
 V3_MY_PURE: plugin самодостаточен — создаёт локальный register
 если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
 """
 
 from __future__ import annotations
 
-import time
+import threading
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -123,9 +129,23 @@ class RobotControlPlugin(ProcessModulePlugin):
         self._verdicts_unwritten: int = 0
         self._verdict_gap_reported: bool = False
 
+        # Task 5.2 — счётчики привода этого плагина. fired пишут ДВА потока
+        # (immediate — поток исполнителя, scheduled — воркер actuation), поэтому
+        # под замком; missed/unscheduled пишет только поток исполнителя.
+        self._actuation_lock = threading.Lock()
+        self._actuation_fired_items: int = 0
+        self._actuation_missed_items: int = 0
+        self._actuation_unscheduled_items: int = 0
+        # Планировщик процесса тронут этим плагином: тогда stats() читается в
+        # cmd_get_stats. Без этого флага get_stats создавал бы планировщик сам.
+        self._scheduler_used: bool = False
+        # WARNING об устаревшем reject_delay_ms — один раз на экземпляр плагина.
+        self._reject_delay_warned: bool = False
+
         ctx.log_info(
             f"RobotControlPlugin: enabled={self._reg.enabled}, "
             f"min_defect_area={self._reg.min_defect_area}, "
+            f"transit_ms={self._reg.transit_ms}, "
             f"reject_delay_ms={self._reg.reject_delay_ms}, "
             f"not_inspected_action={self._reg.not_inspected_action}"
         )
@@ -142,7 +162,7 @@ class RobotControlPlugin(ProcessModulePlugin):
         2. Если disabled → pass (reason=disabled)
         3. Фильтрация detections по min_defect_area
         4. Ограничение по max_detections_for_reject (если > 0)
-        5. Если есть дефекты → reject + задержка
+        5. Если есть дефекты → reject + постановка привода (без ожидания)
         6. Запись inspection_result в item
         """
         # Task 4.7d-4: маркер переполнения — ПЕРВАЯ ветка, до счётчика осмотренных.
@@ -168,7 +188,7 @@ class RobotControlPlugin(ProcessModulePlugin):
             # Ф4: выключенный плагин — тоже состояние линии, и единица через него
             # прошла. Молчание здесь означало бы «изделий не было», тогда как их
             # просто никто не судил.
-            self._write_unit_event(item, result, (), decisive=False)
+            self._write_unit_event(item, result, (), decisive=False, **self._no_actuation())
             return item
 
         # Получаем список детекций
@@ -186,19 +206,20 @@ class RobotControlPlugin(ProcessModulePlugin):
         if len(defects) > 0:
             action = "reject"
             self._total_rejected += 1
-            # Вердикт — на ФРОНТЕ решения, до задержки: она может длиться
-            # сотни миллисекунд, и документ, записанный после неё, нёс бы
-            # время механизма, а не время решения.
+            # Вердикт — на ФРОНТЕ решения, до срабатывания привода: оно наступит
+            # через transit_ms, и документ, записанный по выстрелу, нёс бы
+            # время механизма, а не время решения (решение 6: fire пишет только
+            # счётчики).
             front = not self._rejecting
             if front:
                 self._write_verdict(item, defects)
             self._rejecting = True
-            # Задержка перед отбраковкой (например, для синхронизации с механизмом)
-            if self._reg.reject_delay_ms > 0:
-                time.sleep(self._reg.reject_delay_ms / 1000.0)
+            capture_ts = item.get("capture_ts")
+            actuation = self._actuate(1, capture_ts, capture_ts)
         else:
             action = "pass"
             self._rejecting = False
+            actuation = self._no_actuation()
 
         # Вычисляем коэффициент отбраковки
         rate = self._total_rejected / self._total_inspected if self._total_inspected > 0 else 0.0
@@ -215,7 +236,7 @@ class RobotControlPlugin(ProcessModulePlugin):
         # Ф4: широкая запись — ОДНА на единицу, и её решительность совпадает с
         # фронтом вердикта. Две записи (фронт + поток) на одном кадре означали бы
         # два ответа на вопрос «что было с этим изделием», а вопрос один.
-        self._write_unit_event(item, result, defects, decisive=front)
+        self._write_unit_event(item, result, defects, decisive=front, **actuation)
 
         # Ф5 (5.1): дамп кольца — ПОСЛЕДНИМ из трёх жестов фронта, и порядок
         # несущий (Р5.1-11). Кольцо снимается в момент вызова: позови мы дамп
@@ -228,20 +249,92 @@ class RobotControlPlugin(ProcessModulePlugin):
         return item
 
     def _process_marker(self, item: dict) -> dict:
-        """Решение по маркеру not_inspected: политика «непроверенное = брак» (по умолчанию reject)."""
-        self._total_not_inspected += 1
-        origin = {"origin": item.get("reason"), "source": item.get("source")}
+        """Решение по маркеру not_inspected: политика «непроверенное = брак» (по умолчанию reject).
+
+        Task 5.2: читает ОБЕ формы — маркер 4.7d-1 (один кадр, ``capture_ts``) и
+        запись о разрыве 5.3 (``count``, ``first/last_capture_ts``, гистограммы
+        ``reasons``/``sources``, список ``trace_ids``). Запись о разрыве — ОДНА
+        постановка с окном ``[first + transit, last + transit]``, а не по кадру.
+        """
+        count = int(item.get("count", 1) or 1)
+        first = item.get("first_capture_ts", item.get("capture_ts"))
+        last = item.get("last_capture_ts", item.get("capture_ts"))
+        self._total_not_inspected += count
+        # Причина и источник: у записи о разрыве со смешанными причинами одного
+        # `reason` нет — едет гистограмма, а не None.
+        origin = {
+            "origin": item["reason"] if "reason" in item else item.get("reasons"),
+            "source": item["source"] if "source" in item else item.get("sources"),
+        }
         if not self._reg.enabled:
             result = {"action": "pass", "reason": "disabled", **origin}
         else:
             result = {"action": self._reg.not_inspected_action, "reason": "not_inspected", **origin}
-            # Задержка — как у обычного брака (синхронизация с механизмом); pass-маркеру её нет.
-            if result["action"] == "reject" and self._reg.reject_delay_ms > 0:
-                time.sleep(self._reg.reject_delay_ms / 1000.0)
         item["inspection_result"] = result
+        # Привод — как у обычного брака; pass-маркер в очередь не ставится.
+        actuation = self._actuate(count, first, last) if result["action"] == "reject" else self._no_actuation()
+        extra = {"count": count, **actuation}
+        if "trace_ids" in item:
+            # Поимённый поиск у записи о разрыве — по trace_ids; trace_id пуст.
+            extra["trace_ids"] = list(item.get("trace_ids") or [])
         # Одна широкая запись на исход (учёт по trace_id, 4.7d-5); не решающая — вердикта нет.
-        self._write_unit_event(item, result, [], decisive=False)
+        self._write_unit_event(item, result, [], decisive=False, **extra)
         return item
+
+    # --- Привод (Task 5.2, ADR-PM-051) ---
+
+    def _transit_ms(self) -> int:
+        """``effective_transit = transit_ms or reject_delay_ms`` — читается на каждом вызове."""
+        return int(self._reg.transit_ms or self._reg.reject_delay_ms or 0)
+
+    def _no_actuation(self) -> dict:
+        """Поля широкой записи для исхода без привода (pass, выключенный плагин)."""
+        return {"actuation": "none", "fire_at": None, "transit_ms": self._transit_ms()}
+
+    def _actuate(self, count: int, first_ts: float | None, last_ts: float | None) -> dict:
+        """Поставить срабатывание привода на ``count`` единиц; вернуть поля широкой записи.
+
+        Ожидания здесь нет: при ``transit > 0`` цель уходит в ``ctx.scheduler`` и
+        метод сразу возвращается. Значения ``actuation``: ``immediate`` (transit 0,
+        выстрел синхронно), ``unscheduled`` (нет ``capture_ts``), ``scheduled`` /
+        ``missed`` (ответ планировщика).
+        """
+        if self._reg.reject_delay_ms and not self._reject_delay_warned:
+            self._reject_delay_warned = True
+            self._ctx.log_warning(
+                f"RobotControlPlugin: регистр reject_delay_ms={self._reg.reject_delay_ms} устарел — "
+                "это алиас transit_ms (действует при transit_ms=0), сна в process() больше нет"
+            )
+        transit_ms = self._transit_ms()
+        if transit_ms <= 0:
+            # Решение 8: без транзита планировщик не нужен и не создаётся.
+            self._on_actuation_fire(count)
+            return {"actuation": "immediate", "fire_at": None, "transit_ms": 0}
+        if first_ts is None or last_ts is None:
+            self._actuation_unscheduled_items += count
+            return {"actuation": "unscheduled", "fire_at": None, "transit_ms": transit_ms}
+        transit_s = transit_ms / 1000.0
+        fire_at = float(first_ts) + transit_s
+        self._scheduler_used = True
+        status = self._ctx.scheduler.schedule(
+            fire_at,
+            float(last_ts) + transit_s,
+            count,
+            self._on_actuation_fire,
+            tolerance_s=self._reg.actuation_tolerance_ms / 1000.0,
+        )
+        if status == "missed":
+            self._actuation_missed_items += count
+        return {"actuation": status, "fire_at": fire_at, "transit_ms": transit_ms}
+
+    def _on_actuation_fire(self, count: int) -> None:
+        """Выстрел привода. Пишет ТОЛЬКО счётчики (решение 6): вердикт уже записан на решении.
+
+        Зовётся из потока исполнителя (``immediate``) или из воркера ``actuation``
+        (``payload(count)`` диспетчера планировщика процесса).
+        """
+        with self._actuation_lock:
+            self._actuation_fired_items += count
 
     # --- Дамп кольца записей (Ф5, задача 5.1) ---
 
@@ -291,6 +384,7 @@ class RobotControlPlugin(ProcessModulePlugin):
         defects,
         *,
         decisive: bool,
+        **extra,
     ) -> None:
         """Одна широкая запись обо всей единице работы.
 
@@ -311,6 +405,8 @@ class RobotControlPlugin(ProcessModulePlugin):
             "roi_omitted": max(0, len(boxes) - self.ROI_LIMIT),
             "defect_area_max": max(areas) if areas else 0.0,
             "min_defect_area": self._reg.min_defect_area,
+            # Task 5.2: actuation / fire_at / transit_ms; у маркеров ещё count / trace_ids.
+            **extra,
         }
         if decisive:
             # Ключ к вердикт-документу той же единицы: у документа он тоже есть
@@ -408,11 +504,11 @@ class RobotControlPlugin(ProcessModulePlugin):
         return {"status": "ok", "enabled": False}
 
     def cmd_set_delay(self, data: dict) -> dict:
-        """Установить задержку отбраковки в миллисекундах."""
+        """Устарело (Task 5.2): пишет ``transit_ms``, а не ``reject_delay_ms``."""
         delay_ms = max(0, int(data.get("delay_ms", 0)))
-        self._reg.reject_delay_ms = delay_ms
-        self._ctx.log_info(f"RobotControlPlugin: задержка установлена {delay_ms} мс")
-        return {"status": "ok", "delay_ms": delay_ms}
+        self._reg.transit_ms = delay_ms
+        self._ctx.log_warning(f"RobotControlPlugin: set_delay устарела, пишет transit_ms={delay_ms} мс")
+        return {"status": "ok", "delay_ms": delay_ms, "transit_ms": delay_ms}
 
     def cmd_reset_counters(self, data: dict) -> dict:
         """Обнулить счётчики статистики.
@@ -426,6 +522,10 @@ class RobotControlPlugin(ProcessModulePlugin):
         self._total_not_inspected = 0
         self._verdicts_written = 0
         self._verdicts_unwritten = 0
+        with self._actuation_lock:
+            self._actuation_fired_items = 0
+        self._actuation_missed_items = 0
+        self._actuation_unscheduled_items = 0
         self._ctx.log_info("RobotControlPlugin: счётчики сброшены")
         return {"status": "ok"}
 
@@ -438,8 +538,18 @@ class RobotControlPlugin(ProcessModulePlugin):
         различить их не может, а причину называет разовая строка журнала.
         """
         rate = self._total_rejected / self._total_inspected if self._total_inspected > 0 else 0.0
+        # late_fires / unfired_on_stop_items — счёт ПЛАНИРОВЩИКА ПРОЦЕССА (он один на
+        # процесс): плагин не видит, опоздал ли выстрел. fired/missed/unscheduled — свои.
+        sched = self._ctx.scheduler.stats() if self._scheduler_used else {}
+        with self._actuation_lock:
+            fired = self._actuation_fired_items
         return {
             "status": "ok",
+            "actuation_fired_items": fired,
+            "actuation_missed_items": self._actuation_missed_items,
+            "actuation_late_fires": int(sched.get("late_fires", 0)),
+            "actuation_unscheduled_items": self._actuation_unscheduled_items,
+            "actuation_unfired_on_stop_items": int(sched.get("unfired_on_stop_items", 0)),
             "total_inspected": self._total_inspected,
             "total_rejected": self._total_rejected,
             "reject_rate": round(rate, 4),
