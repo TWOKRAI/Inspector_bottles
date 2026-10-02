@@ -4,7 +4,7 @@
 
 ### Task 2.4b — `ObjectFactory` и превью переезжают в `layer_render`, фабрика отдаёт `RenderedObject` (часть бывш. 2.4)
 
-- **Статус:** [PENDING] волна 5; ревью спеки ит.1 — CHANGES REQUESTED, правки B1–B2, M1–M3, m1–m6 внесены (2026-10-02) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [PENDING] волна 5; ревью спеки ит.1 — CHANGES REQUESTED (B1–B2, M1–M3, m1–m6 внесены), ит.2 — APPROVED, две мелкие правки внесены (2026-10-02) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает `factory`, `preview`, `load_catalog`, `load_image_rgba`,
   `json_safe`; `line_sim.ObjectFactory` становится наследником `layer_render.factory.ObjectFactory`;
   `LayeredObject` получает второй конструктор; `line_sim.core.{preview,catalog_bridge}` — реэкспорт)
@@ -103,7 +103,7 @@
       `Services.line_sim.ObjectFactory._build_defect_blob is Services.layer_render.factory.ObjectFactory._build_defect_blob`.
       AST: в `line_sim/core/factory.py` нет `def` с именами `render`, `nominal_layers`, `_resolve_bottom_layers`,
       `_build_defect_blob` и нет присваиваний `_DEFECT_*`; в `line_sim/core/preview.py` и `catalog_bridge.py` — ни
-      одного `def`/`class` и ни одного присваивания, кроме `__all__`; в `line_sim/interfaces.py` нет `def _json_safe`.
+      одного `def`/`class` и ни одного узла `Assign`/`AnnAssign`/`AugAssign`, кроме `__all__` (`import`/`from … import` — не присваивания); в `line_sim/interfaces.py` нет `def _json_safe`.
 - [ ] A3. **Фабрика `layer_render` даёт прежний объект.** Литералы снимает тестер на коде до переезда через
       `line_sim.ObjectFactory.make` (окружение снимка — комментарием: ОС, версии cv2/numpy). Пресеты в `tmp_path` (сборка
       как в `Plugins/sim/layer_preview/tests/test_hazards_1_3h_layout.py`): со слоем `class://`; с каталогом без
@@ -128,6 +128,7 @@
       `passport.defect == "damaged"`, флаг после успеха `False`; если `render` поднял исключение (подмена
       `factory._catalog.get_sprite` на падающую), флаг остаётся `True`, и следующий успешный `make` получает дефект.
       База `layer_render` не имеет атрибутов `force_defect_next` и `force_defect_pending`.
+
 ##### Превью, импорты, проверки лида (A6–A10)
 
 - [ ] A6. **Превью побайтно прежнее** — литералы до переезда через `Services.line_sim.core.preview`:
@@ -171,8 +172,7 @@
 тесты (`apply_occlusion`, `load_layer_sprite`, `_DEFECT_*`), хотя сам их больше не использует — без `__all__` ruff снимет.
 `factory._catalog.get_sprite = flaky` (`test_hazards_3_2.py:79`) подменяет метод на **объекте** каталога: `render` обязан
 звать `self._catalog.get_sprite` в момент вызова. Связанный метод, сохранённый в `__init__`, тихо обойдёт подмену, и тест
-флаки-каталога позеленеет без свойства. `_DEFECT_SIDE_FRAC`/`_DEFECT_OFFSET_FRAC` в `line_sim/core/factory.py` не
-используются — ruff F401 снимет импорт; нужен `# noqa: F401` с причиной (как `import os` в 2.4a). `render` не копирует `rgba`
+флаки-каталога позеленеет без свойства. `_DEFECT_SIDE_FRAC`/`_DEFECT_OFFSET_FRAC` в `line_sim/core/factory.py` не используются — держит их только `__all__` (см. выше); `noqa` не нужен. `render` не копирует `rgba`
 в `from_rendered`: копия удвоит память объекта ленты и сломает `render() is r.rgba`. Тест рамки сканирует все `.py`
 пакета кроме `tests/` — новые `factory.py`/`preview.py` попадают в него автоматически. Кэш превью `_factory_cache` —
 глобал модуля `layer_render.preview`; присваивание через старый модуль (`line_sim.core.preview._factory_cache = None`)
