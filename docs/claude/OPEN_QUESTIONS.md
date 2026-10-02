@@ -1519,3 +1519,10 @@ Skill требует `src/<package>/<module>/` + `interface.py` + `_impl/` + `te
 
 `claude-kit upgrade` перезаписывает `.claude/plugins/dev/modes/dev.md` текстом сида и стирает проектные правки (так 2026-09-20 пропала строка `graph_slice`).
 Правила: проектный текст выигрывает у сида; после апгрейда сверять `dev.md` с `git diff` и возвращать проектные строки.
+
+## pult_web: флак `test_acceptance_r5_page.py::test_a2_undo_highlights_restored_layer_not_the_foreign_one` (2026-10-02)
+
+Упал 1 раз в радиусе на `6af2f78a` (1 failed / 1919 passed, ~8.5 мин, общий прогон layer_render+dataset_gen+line_sim+ml_train+
+center_crop+sim/*). Отдельно — 5/5 passed, файл целиком — 17/17. Слияние `main` `pult_web` не трогало (diff пуст). Текст ошибки не
+сохранён (`--tb=line` вывел только имя). Гипотеза — время/порядок в node:vm-харнессе под нагрузкой (тест из 5.3, проверял выделение после
+«Отмены»), не подтверждена. Следующий прогон с `--tb=short` — сохранить вывод; два падения подряд — `investigator`.
