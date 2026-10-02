@@ -313,16 +313,19 @@ def test_hot_rebuild_key_present_in_system_yaml_is_app_layer(scenario: _Scenario
 
 
 def test_hot_rebuild_framework_layer_key_count_is_pinned(scenario: _Scenario) -> None:
-    """К3: число ключей со слоем framework — литерал, зафиксированный вручную
-    измерением на реальном system.yaml (не выражение от кода под тестом).
+    """К3: множество ключей со слоем framework сверяется с файлом-снимком
+    ``snapshots/hot_rebuild_framework_keys.txt``, снятым измерением на реальном
+    system.yaml (не выражение от кода под тестом). Имя теста историческое: до
+    Task 5.5 здесь был пин числа (37), падение не называло, какой ключ появился.
 
     Если резолвер провенанса когда-нибудь начнёт засчитывать L1 "заданным" по
     ключам, которые оператор не писал (класс регресса "exclude_unset потерялся
     на границе процессов" — см. докстринг sys_config_for_orchestrator в
     launch.py: тот же класс дефекта раздувал L1 с 12 до 23 ключей на боевом
     файле) — framework-набор молча просядет к нулю или расползётся, а тест,
-    сравнивающий систему саму с собой, прошёл бы в обоих случаях. Число ниже —
-    внешняя, независимая точка отсчёта именно против этого.
+    сравнивающий систему саму с собой, прошёл бы в обоих случаях. Снимок —
+    внешняя, независимая точка отсчёта именно против этого; правка снимка — осознанное
+    решение с причиной в коммите (например, +``history.queue_capacity``, 4611c9b4a).
     """
     framework_keys = sorted(k for k, v in scenario.hot_provenance.items() if v["layer"] == "framework")
     expected_keys = sorted(FRAMEWORK_KEYS_SNAPSHOT.read_text(encoding="utf-8").split())

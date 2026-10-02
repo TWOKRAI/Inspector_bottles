@@ -205,8 +205,10 @@ class SocketChannel(MessageChannel):
         sendall), ловится как OSError → один WARNING, сокет помечен мёртвым и
         ``shutdown`` (под ``_write_lock``). Следующие отправители его пропускают,
         поэтому запись стоит не дольше одного таймаута сокета на медленного клиента.
-        С учёта соединение снимает только выход его read-loop (``shutdown`` будит
-        recv), после обработчиков сессии. Посокетные локи не заведены (YAGNI).
+        С учёта соединение снимает только выход его read-loop, после обработчиков
+        сессии. На POSIX ``shutdown`` будит recv (EOF); на Windows не будит — read-loop
+        выходит по пометке ``_dead`` на следующем таймауте recv (≤ 0.5 с), а пир, который
+        продолжает слать, получает RST, и recv бросает OSError (Task 5.5, ревью). Посокетные локи не заведены (YAGNI).
 
         Returns:
             {"status": "success"|"error", "channel": name, ...}.
@@ -279,7 +281,8 @@ class SocketChannel(MessageChannel):
 
         Мёртвый (помечен) или уже закрытый сокет пропускается молча — ни второго
         ожидания таймаута, ни EBADF. Сбой записи: один WARNING, пометка, ``shutdown``
-        (read-loop этого соединения получит EOF и снимет его с учёта сам). Больше
+        (read-loop снимет соединение сам: на POSIX — по EOF, на Windows — по ``_dead``
+        на таймауте recv, см. ``_read_loop``). Больше
         ничего — ни снятия сессии, ни оповещения отсюда (ревью 1.3a, ADR-RTR-012).
         """
         if sock in self._dead or sock.fileno() == -1:
@@ -351,7 +354,7 @@ class SocketChannel(MessageChannel):
             try:
                 chunk = client.recv(4096)
             except socket.timeout:
-                # Windows: ``shutdown(SHUT_RDWR)`` из ``_write_line`` не будит
+                # Windows: ``shutdown(SHUT_RDWR)`` из ``_write_locked`` не будит
                 # блокирующий ``recv`` — EOF не приходит, и без этой проверки сессия
                 # висит вечно. Сокет помечен в ``_dead`` → выходим, дальше обычная
                 # уборка после цикла. Чтение множества БЕЗ ``_write_lock``: добавляют

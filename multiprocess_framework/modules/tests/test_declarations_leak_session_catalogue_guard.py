@@ -13,7 +13,7 @@
 самого конца прогона (после последнего теста, где бы он ни лежал), НЕ до конца
 локального каталога — ровно то поведение, которое нужно стражу.
 
-**Демонстрация красноты (проверено вручную 2026-08-28).** Пять метрик объявляются
+**Демонстрация красноты (проверено вручную 2026-08-28; тогда метрик было пять, с 30.09 — десять).** Метрики объявляются
 при ИМПОРТЕ `process_module/heartbeat/telemetry.py` и `process_heartbeat.py`.
 Прогон `pytest multiprocess_framework/modules/tests multiprocess_framework/modules/
 statistics_module/tests multiprocess_framework/modules/process_module/tests` (в
