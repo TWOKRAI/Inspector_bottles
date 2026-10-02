@@ -228,3 +228,7 @@
 ### Task 2.4a — `ScenePreset` и каталог классов переезжают в `layer_render`, старые места — реэкспорт (часть бывш. 2.4)
 
 Спека вынесена в [phase-2-core-2.4a.md](phase-2-core-2.4a.md) (файл фазы перерос бюджет 32 КБ). Ревью спеки, раунд 1 — CHANGES REQUESTED, правки B1–B4, M1–M4 внесены (2026-10-02).
+
+### Task 2.4b — `ObjectFactory` и превью переезжают в `layer_render`, фабрика отдаёт `RenderedObject` (часть бывш. 2.4)
+
+Спека — в [phase-2-core-2.4b.md](phase-2-core-2.4b.md) (файл фазы у бюджета 32 КБ).
