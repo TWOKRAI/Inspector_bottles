@@ -27,6 +27,7 @@ def _extra_sprites(monkeypatch):
     """Раскладка стенда строит картинку по ИМЕНИ слоя: новым именам (cap2, cap_2) даём красный спрайт cap."""
     monkeypatch.setitem(t._SPRITES, "cap2", t._SPRITES["cap"])
     monkeypatch.setitem(t._SPRITES, "cap_2", t._SPRITES["cap"])
+    monkeypatch.setitem(t._SPRITES, "tmp", t._SPRITES["cap"])
 
 
 def _rename(i: int, name: str) -> list[dict]:
@@ -137,3 +138,78 @@ def test_no_ghost_flag_sticks_to_layer_renamed_into_old_name(start_pult) -> None
     assert out["pixels"]["bolt"] == t.RED, (
         f"слой, получивший имя cap2, исчез с канвы (призрачный флаг), пиксель: {out['pixels']['bolt']}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Итерация 3 (teamlead): флаг принадлежит СЛОЮ (строке), не имени.             #
+# Геометрия: plate 60x60 (70..130), cap 40x40 на (20,0) -> (100..140, 80..120),  #
+# bolt 40x40 на (-60,-60) -> (20..60); спрайт канвы стенд выбирает по ИМЕНИ.    #
+# --------------------------------------------------------------------------- #
+VIS_IDS = ["presetVis1", "presetVis2", "presetVis3"]
+
+
+def test_s1_layer_added_after_rename_into_duplicate_is_born_visible(start_pult) -> None:
+    """S1 ревью ит.2: скрыли cap (строка 1), переименовали её в «bolt» (дубль), «Добавить» sprites/cap.png -> новый
+    слой получил свободное теперь имя «cap» (строка 3, (0,0) -> 80..120). Флаг остаётся у строки 1, новый слой
+    рождается видимым: красный cap на (90,100), presetVis3 отмечен, presetVis1 снят, строка 1 (зелёный спрайт bolt
+    на 100..140) не нарисована - на (135,100) серый base."""
+    stand = _stand_with_sprite_list(start_pult)
+    steps = [
+        t.WAIT, t.SETTLE, t._toggle("presetVis1", False), t.SETTLE,
+        *_rename(1, "bolt"), t.SETTLE,
+        {"op": "select_option", "id": "presetSpriteSelect", "value": "sprites/cap.png"},
+        {"op": "press_button", "id": "btnLayerAdd"}, t.SETTLE, t._sleep(150), t._snap("added"),
+        t._px("new", (90, 100)), t._px("row1", t.CAP_ONLY), t._ui("u", VIS_IDS),
+    ]  # fmt: skip
+    assert _NODE is not None, "node недоступен в PATH"
+    out = _run(stand.port, "canvas_script", steps)
+    assert out["aborted"] is None and all(w["ok"] for w in out["waits"]), f"сценарий прерван: {out['aborted']}"
+    assert t._names(out, "added") == ["plate", "bolt", "bolt", "cap"], f"precondition: {t._names(out, 'added')}"
+    assert t._sel(out, "added") == ["cap"], f"новый слой выбран: {t._sel(out, 'added')}"
+    assert out["pixels"]["new"] == t.RED, f"новый слой «cap» родился скрытым (флаг по имени): {out['pixels']['new']}"
+    assert out["pixels"]["row1"] == t.GRAY, f"скрытая строка 1 нарисована после переименования: {out['pixels']}"
+    c = out["ui"]["u"]["checked"]
+    assert c == {"presetVis1": False, "presetVis2": True, "presetVis3": True}, f"чекбоксы не равны флагам строк: {c}"
+
+
+def test_s2_flag_stays_on_its_row_through_rename_chain(start_pult) -> None:
+    """S2 ревью ит.2: скрыли cap (строка 1), строку 1 -> «bolt» (дубль), строку 2 (настоящий bolt) -> «cap».
+    Флаг не прыгает: строка 1 (теперь зелёный спрайт bolt на 100..140) не нарисована - (135,100) серый; строка 2
+    (теперь красный спрайт cap на 20..60) видна - (40,40) красный и выбирается кликом; presetVis1 снят, presetVis2
+    отмечен."""
+    steps = [
+        t.WAIT, t.SETTLE, t._toggle("presetVis1", False), t.SETTLE,
+        *_rename(1, "bolt"), t.SETTLE, *_rename(2, "cap"), t.SETTLE, t._sleep(150),
+        t._px("row1", t.CAP_ONLY), t._px("row2", t.BOLT), t._ui("u", VIS_IDS[:2]),
+        t._click(t.BOLT), t._sleep(250), t._snap("click"),
+    ]  # fmt: skip
+    _stand_, out = t._go(start_pult, steps)
+    # имена в снимке - presetState, переименование поля его не трогает; что раскладка ушла с новыми именами,
+    # видно по пикселю строки 2: красный спрайт cap стенд рисует только для имени «cap»
+    assert out["pixels"]["row1"] == t.GRAY, f"скрытая строка 1 снова видна (флаг ушёл с имени): {out['pixels']}"
+    assert out["pixels"]["row2"] == t.RED, f"строку 2 скрыл чужой флаг, доставшийся по имени: {out['pixels']}"
+    c = out["ui"]["u"]["checked"]
+    assert c == {"presetVis1": False, "presetVis2": True}, f"чекбоксы не равны флагам строк: {c}"
+    # выбор харнесс читает по подсвеченным строкам, их подпись <b> - имя на последнем рендере: у строки 2 это «bolt»
+    assert t._sel(out, "click") == ["bolt"], f"видимая строка 2 не выбирается кликом: {t._sel(out, 'click')}"
+
+
+def test_swap_names_via_temp_then_undo_returns_flag_to_same_layer(start_pult) -> None:
+    """Нит ревью ит.2: скрыли cap (строка 1), обменяли имена строк 1 и 2 через tmp, Ctrl+Z (одна запись - снимок
+    до первой правки поля: имена plate, cap, bolt). Флаг - у строки 1 и после обмена, и после «Отмены»:
+    (135,100) серый, bolt на (40,40) зелёный; presetVis1 снят, presetVis2 отмечен."""
+    steps = [
+        t.WAIT, t.SETTLE, t._toggle("presetVis1", False), t.SETTLE,
+        *_rename(1, "tmp"), t.SETTLE, *_rename(2, "cap"), t.SETTLE, *_rename(1, "bolt"), t.SETTLE, t._sleep(150),
+        t._px("sw_row1", t.CAP_ONLY), t._px("sw_row2", t.BOLT),
+        CTRL_Z, t.SETTLE, t._sleep(150), t._snap("undo"),
+        t._px("u_row1", t.CAP_ONLY), t._px("u_row2", t.BOLT), t._ui("u", VIS_IDS[:2]),
+    ]  # fmt: skip
+    _stand_, out = t._go(start_pult, steps)
+    px = out["pixels"]
+    assert px["sw_row1"] == t.GRAY and px["sw_row2"] == t.RED, f"после обмена флаг ушёл со строки 1: {px}"
+    assert t._names(out, "undo") == ["plate", "cap", "bolt"], f"precondition: {t._names(out, 'undo')}"
+    assert px["u_row1"] == t.GRAY, f"после «Отмены» скрытый cap снова виден: {px['u_row1']}"
+    assert px["u_row2"] == t.GREEN, f"после «Отмены» флаг переехал на bolt: {px['u_row2']}"
+    c = out["ui"]["u"]["checked"]
+    assert c == {"presetVis1": False, "presetVis2": True}, f"чекбоксы не равны флагам строк: {c}"

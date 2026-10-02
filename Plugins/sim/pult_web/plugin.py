@@ -631,10 +631,13 @@ var presetDirty = false;
 // Так «Отмена» знает род правки и не гадает по presetDirty/имени: правка полей и жест строк не меняют.
 // row по умолчанию — текущая presetSelectedRow; операция над составом передаёт строку, снятую ДО mutate
 // (mutate уже поставил новый выбор). sel — имена выбранных слоёв на тот же момент (5.3): «Отмена» операции над составом
-// возвращает весь выбор, а не только главный слой.
-function presetPushUndo(state, reorders, row, sel) {
+// возвращает весь выбор, а не только главный слой. ids — id слоёв строк state (5.3, ит.3): «Отмена» возвращает их
+// вместе с состоянием, и флаги, ключённые по id, оказываются на тех же слоях (запись — копия, тождество объектов
+// её не переживает, id — переживает). Операция над составом передаёт ids, снятые ДО mutate.
+function presetPushUndo(state, reorders, row, sel, ids) {
   presetUndoStack.push({ state: state, row: row === undefined ? presetSelectedRow : row, reorders: reorders,
-                         sel: sel === undefined ? presetSelection.slice() : sel });
+                         sel: sel === undefined ? presetSelection.slice() : sel,
+                         ids: ids === undefined ? presetLayerIds.slice() : ids });
 }
 
 function markPresetDirty() {
@@ -714,9 +717,10 @@ function renderPresetLayers() {
     nameEl.textContent = layer.name || ("слой " + i);
     row.appendChild(nameEl);
     row.appendChild(document.createTextNode(" "));
-    // Флаги «видим» / «заперт» (5.3): клиентские, по ИМЕНИ слоя; в presetFieldMap и в тела запросов не попадают
-    row.appendChild(presetFlagLabel("видим", "Vis", i, !presetHidden[layer.name]));
-    row.appendChild(presetFlagLabel("заперт", "Lock", i, !!presetLocked[layer.name]));
+    // Флаги «видим» / «заперт» (5.3): клиентские, за СЛОЕМ (id строки), не за именем; в presetFieldMap и в тела
+    // запросов не попадают
+    row.appendChild(presetFlagLabel("видим", "Vis", i, !presetHidden[presetLayerIds[i]]));
+    row.appendChild(presetFlagLabel("заперт", "Lock", i, !!presetLocked[presetLayerIds[i]]));
     var fieldsHtml = "";
     Object.keys(layer).forEach(function (key) {
       fieldsHtml += presetFieldMarkup(i, key, layer[key]);
@@ -734,13 +738,6 @@ function renderPresetLayers() {
   // строку выбора рендер НЕ считает: её ставят до рендера presetSelect, мутации add/delete/выше/ниже и «Отмена»
   // (пересчёт по имени вернул бы первое совпадение имени — чужую строку при дубле)
   presetRowNames = layers.map(function (layer) { return layer.name; });
-  // Флаг живёт, пока в пресете есть слой с этим именем: флаги имён, которых нет, отбрасываются
-  // (иначе новый слой с именем удалённого рождался скрытым, а слой, получивший «призрачное» имя, пропадал с канвы)
-  [presetHidden, presetLocked].forEach(function (flags) {
-    Object.keys(flags).forEach(function (name) {
-      if (presetRowNames.indexOf(name) < 0) delete flags[name];
-    });
-  });
   presetUpdateSelection();
 }
 
@@ -786,6 +783,7 @@ function loadPreset() {
       presetState = resp.preset;
       presetBaseRev = (resp.rev === undefined) ? null : resp.rev;
       presetEngine = resp.engine;
+      presetLayerIds = (presetState.layers || []).map(presetNewLayerId); // пришли новые слои: флагов у них нет
       presetUndoStack = [];
       presetDirty = false;
       // пресет пришёл: текст «слой не добавлен: пресет не загружен» устарел — снимается только он (с «; »),
@@ -870,6 +868,7 @@ function presetUndo() {
   if (!presetUndoStack.length) return;
   var e = presetUndoStack.pop();
   presetState = e.state;
+  presetLayerIds = e.ids; // слои строк — те, что были в записи: флаги (по id) возвращаются на свои слои
   presetDirty = false;
   // Выбор — СТРОКА. Правка без перестановки строк (поля, жест, стрелка): строки те же, остаётся текущая строка.
   // Операция над составом: возвращается строка, какой она была прямо перед операцией (e.row; -1 — ничего).
@@ -880,15 +879,15 @@ function presetUndo() {
   if (row >= presetState.layers.length) row = -1;
   presetSelectedRow = row;
   presetSelected = row < 0 ? null : presetState.layers[row].name;
-  // Переименование откатывается так же, как делалось: флаги и выбор переезжают на имена восстановленного состояния
+  // Переименование откатывается так же, как делалось: выбор переезжает на имена восстановленного состояния
   presetTrackRenames(presetState.layers);
   // Выбор (5.3): имена из записи (операция над составом) или текущего выбора; исчезнувшие, скрытые и запертые
-  // отпадают — главный слой тоже: флаг по имени пережил «Отмену», и такой слой выбирать нельзя
+  // отпадают — главный слой тоже: флаг его слоя пережил «Отмену», и такой слой выбирать нельзя
   var names = presetState.layers.map(function (ly) { return ly.name; });
   var keep = (e.reorders && e.sel ? e.sel : presetSelection).filter(function (n) {
-    return presetSelectable(n) && names.indexOf(n) >= 0;
+    return names.indexOf(n) >= 0 && !presetRowFlagged(names.indexOf(n));
   });
-  if (presetSelected !== null && !presetSelectable(presetSelected)) {
+  if (presetSelected !== null && presetRowFlagged(presetSelectedRow)) {
     presetSelected = null;
     presetSelectedRow = -1;
   } else if (presetSelected !== null && keep.indexOf(presetSelected) < 0) {
@@ -936,10 +935,15 @@ var presetSelectedRow = -1;
 // не отнимает у него стрелки). Рамка и ручки — только при ровно одном выбранном. Инвариант: presetSelectedRow >= 0 <=>
 // список не пуст. Ставят список presetSetSelection и места, где прежде ставились presetSelected/presetSelectedRow.
 var presetSelection = [];
-// имя слоя -> true: клиентские флаги, в пресет и в тела запросов не попадают
-var presetHidden = Object.create(null); // не рисуется и не выбирается
-var presetLocked = Object.create(null); // имя слоя -> true: рисуется, но не выбирается и не тащится
-var presetRowNames = [];    // имена строк формы на последней сверке: по ним флаги и выбор переезжают при переименовании
+// Флаги «видим»/«заперт» принадлежат СЛОЮ, не имени (5.3, ит.3): имя в форме правится, повторяется и меняется местами
+// с чужим, а слой — нет. presetLayerIds[i] — клиентский id слоя строки i (параллельно presetState.layers): его двигает
+// каждая операция над составом, его хранит запись «Отмены»; новый слой получает новый id — рождается без флагов.
+// Ни id, ни флаги не попадают в presetState, в тела commit/layout и в presetDirty.
+var presetLayerIds = [];
+var presetNextLayerId = 1;
+var presetHidden = Object.create(null); // id слоя -> true: не рисуется и не выбирается
+var presetLocked = Object.create(null); // id слоя -> true: рисуется, но не выбирается и не тащится
+var presetRowNames = [];    // имена строк формы на последней сверке: по ним выбор переезжает при переименовании
 var presetGridEl = document.getElementById("presetGrid");
 var presetGridStepEl = document.getElementById("presetGridStep");
 var presetGesture = null;   // жест указателя: {kind: move|rotate|scale|pan, name, row, rows, id, start, cur, center}
@@ -980,29 +984,39 @@ function presetRowFinder() {
   };
 }
 
-// Выбор можно сделать только из видимых и не запертых слоёв.
-function presetSelectable(name) {
-  return !presetHidden[name] && !presetLocked[name];
+function presetNewLayerId() {
+  return presetNextLayerId++;
+}
+
+// Выбор можно сделать только из видимых и не запертых слоёв. Слой — id (у авто-слоя base его нет: не флажок).
+function presetIdFlagged(id) {
+  return id !== null && id !== undefined && !!(presetHidden[id] || presetLocked[id]);
+}
+
+function presetRowFlagged(row) {
+  return presetIdFlagged(presetLayerIds[row]);
 }
 
 // Строки выбранных слоёв: главный (последний) — по presetSelectedRow, остальные — по имени (дубль имени — не берётся).
+// Строка слоя с флагом не берётся никогда: выбор хранит имена, и имя могло перейти к скрытому/запертому слою.
 function presetSelectionRows() {
   if (!presetSelection.length) return [];
   var find = presetRowFinder(), rows = [], last = presetSelection.length - 1;
   presetSelection.forEach(function (name, i) {
     var r = i === last ? presetSelectedRow : find(name);
-    if (r >= 0 && rows.indexOf(r) < 0) rows.push(r);
+    if (r >= 0 && rows.indexOf(r) < 0 && !presetRowFlagged(r)) rows.push(r);
   });
   return rows;
 }
 
 // Новый выбор по именам (порядок = порядок добавления, главный — последний). Берутся только имена, у которых
-// в ОТРИСОВАННОЙ форме ровно одна строка (авто-слой base и дубли отпадают).
+// в ОТРИСОВАННОЙ форме ровно одна строка (авто-слой base и дубли отпадают) и слой этой строки без флагов.
 // Звать, когда форма соответствует presetState.
 function presetSetSelection(names) {
   var find = presetRowFinder(), list = [];
   names.forEach(function (n) {
-    if (list.indexOf(n) < 0 && find(n) >= 0) list.push(n);
+    var r = find(n);
+    if (list.indexOf(n) < 0 && r >= 0 && !presetRowFlagged(r)) list.push(n);
   });
   presetSelection = list;
   presetSelected = list.length ? list[list.length - 1] : null;
@@ -1010,17 +1024,14 @@ function presetSetSelection(names) {
   presetUpdateSelection();
 }
 
-// Переименование в форме (5.3): строка та же, имя новое — флаги и выбор переезжают на новое имя, иначе скрытый слой
-// «воскресал» бы, а выбор терял слой. Переименование = «старое имя пропало, новое единственное»;
-// перестановки и дубли — не оно.
+// Переименование в форме (5.3): строка та же, имя новое — выбор (он хранит имена) переезжает на новое имя, иначе
+// выбор терял бы слой. Переименование = «старое имя пропало, новое единственное»; перестановки и дубли — не оно.
+// Флаги эта эвристика не трогает: они за id слоя и переименования не замечают.
 function presetTrackRenames(layers) {
   var now = layers.map(function (ly) { return ly.name; });
   presetRowNames.forEach(function (old, i) {
     var nu = now[i];
     if (nu === undefined || nu === old || now.indexOf(old) >= 0 || now.indexOf(nu) !== now.lastIndexOf(nu)) return;
-    [presetHidden, presetLocked].forEach(function (m) {
-      if (m[old]) { m[nu] = true; delete m[old]; }
-    });
     presetSelection = presetSelection.map(function (n) { return n === old ? nu : n; });
   });
   presetRowNames = now;
@@ -1136,13 +1147,13 @@ function presetNear(p, q) {
 }
 
 // Выбор по альфе: сверху вниз, первый слой с alpha > 0 под курсором (не по bbox). Скрытые и запертые слои пропускаются
-// (5.3): клик проходит к слою ниже.
+// (5.3): клик проходит к слою ниже. Слой картинки — её id (presetLayout), не имя.
 function presetHitLayer(sx, sy) {
   if (!presetLayout) return null;
   var o = presetToObject(sx, sy);
   for (var i = presetLayout.layers.length - 1; i >= 0; i--) {
     var ly = presetLayout.layers[i];
-    if (!presetSelectable(ly.name)) continue;
+    if (presetIdFlagged(ly.id)) continue;
     var u = Math.floor(o[0] - ly.x), v = Math.floor(o[1] - ly.y);
     if (u < 0 || v < 0 || u >= ly.w || v >= ly.h) continue;
     if (ly.hit.getImageData(u, v, 1, 1).data[3] > 0) return ly.name;
@@ -1169,7 +1180,7 @@ function presetDraw() {
     presetCanvas.height / 2 + (presetPan[1] - L.ch / 2) * z);
   var moving = presetMovingEntries(), shift = presetMoveShift();
   L.layers.forEach(function (ly) {
-    if (presetHidden[ly.name]) return; // скрытый слой не рисуется (5.3)
+    if (ly.id !== null && presetHidden[ly.id]) return; // скрытый слой не рисуется (5.3)
     var d = moving.indexOf(ly) >= 0 ? shift : [0, 0];
     ctx.drawImage(ly.img, ly.x + d[0], ly.y + d[1]);
   });
@@ -1223,10 +1234,15 @@ function presetScheduleDraw() {
 function requestPresetLayout() {
   if (!presetState) return;
   var seq = ++presetLayoutSeq;
+  var body = collectPresetFromFields();
+  // Слой каждой картинки ответа — id строки запроса (5.3, ит.3): k-я картинка имени N <-> k-я строка с именем N.
+  // Ключ — имя на момент ЗАПРОСА, поэтому переименование после него флаг картинки не уводит. Авто-слои — без id.
+  var idsByName = Object.create(null), reqIds = presetLayerIds.slice();
+  body.layers.forEach(function (ly, i) { (idsByName[ly.name] = idsByName[ly.name] || []).push(reqIds[i]); });
   fetch("/api/preset/layout", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ preset: collectPresetFromFields() }),
+    body: JSON.stringify({ preset: body }),
   }).then(function (r) {
     return r.json().then(
       function (data) { return { http: r.status, data: data }; },
@@ -1242,7 +1258,8 @@ function requestPresetLayout() {
     var entries = d.layers.map(function (ly) {
       var img = new Image();
       img.src = "data:image/png;base64," + ly.png_b64;
-      return { name: ly.name, img: img, x: ly.origin_px[0], y: ly.origin_px[1] };
+      var q = idsByName[ly.name], id = q && q.length ? q.shift() : null;
+      return { name: ly.name, id: id, img: img, x: ly.origin_px[0], y: ly.origin_px[1] };
     });
     return Promise.all(entries.map(function (en) { return en.img.decode(); })).then(function () {
       if (seq !== presetLayoutSeq) return;
@@ -1325,9 +1342,11 @@ function presetApplyLayersEdit(mutate) {
   var next = JSON.parse(JSON.stringify(snapshot));
   var rowBefore = presetSelectedRow; // ДО mutate: он ставит новый выбор, а «Отмена» вернёт прежний
   var selBefore = presetSelection.slice();
-  mutate(next.layers);
+  var ids = presetLayerIds.slice(); // mutate(layers, ids) двигает id слоёв ровно как сами слои (5.3, ит.3)
+  mutate(next.layers, ids);
   if (JSON.stringify(next) === JSON.stringify(snapshot)) return;
-  presetPushUndo(snapshot, true, rowBefore, selBefore);
+  presetPushUndo(snapshot, true, rowBefore, selBefore, presetLayerIds);
+  presetLayerIds = ids;
   presetState = next;
   presetDirty = false;
   renderPresetLayers();
@@ -1558,13 +1577,14 @@ document.getElementById("presetLayers").addEventListener("change", function (e) 
   requestPresetLayout();
 });
 
-// Переключение флага строки i (kind "Vis" | "Lock"): слой покидает выбор при ЛЮБОМ переключении любого флага.
+// Переключение флага строки i (kind "Vis" | "Lock"): флаг ставится слою строки (его id), слой покидает выбор при
+// ЛЮБОМ переключении любого флага.
 function presetToggleFlag(kind, i, checked) {
-  var name = presetRowNames[i];
-  if (name === undefined) return;
+  var id = presetLayerIds[i], name = presetRowNames[i];
+  if (id === undefined) return;
   var map = kind === "Vis" ? presetHidden : presetLocked;
-  if (kind === "Vis" ? !checked : checked) map[name] = true;
-  else delete map[name];
+  if (kind === "Vis" ? !checked : checked) map[id] = true;
+  else delete map[id];
   presetSetSelection(presetSelection.filter(function (n) { return n !== name; }));
   presetScheduleDraw();
 }
@@ -1576,7 +1596,7 @@ function presetFocusCanvas() {
 // Ctrl/Meta+A: все видимые и не запертые слои пресета в порядке строк; главный — последний.
 function presetSelectAll() {
   if (!presetState) return;
-  presetSetSelection(collectPresetFromFields().layers.map(function (ly) { return ly.name; }).filter(presetSelectable));
+  presetSetSelection(collectPresetFromFields().layers.map(function (ly) { return ly.name; })); // флаги отсеет он
   presetScheduleDraw();
 }
 
@@ -1692,11 +1712,12 @@ function presetAddLayer(entry) {
     presetShowSpritesError("нет шаблона слоя: обновите список спрайтов");
     return;
   }
-  presetApplyLayersEdit(function (layers) {
+  presetApplyLayersEdit(function (layers, ids) {
     var layer = JSON.parse(JSON.stringify(presetLayerTemplate));
     layer.name = presetUniqueLayerName(presetLayerStem(entry), layers);
     layer.sprite_source = entry.sprite_source;
     layers.push(layer); // в конец = рисуется поверх
+    ids.push(presetNewLayerId()); // новый слой — новый id: рождается видимым и незапертым
     presetSelected = layer.name;
     presetSelection = [layer.name];
     presetSelectedRow = layers.length - 1;
@@ -1713,8 +1734,8 @@ function presetDeleteLayer() {
   var rows = presetSelectionRows().sort(function (a, b) { return b - a; }); // с конца: индексы не съезжают
   if (!rows.length) return;
   if (presetGesture) presetCancelGesture(); // тащат слой, который сейчас исчезнет: жест без записи «Отмена»
-  presetApplyLayersEdit(function (layers) {
-    rows.forEach(function (r) { layers.splice(r, 1); });
+  presetApplyLayersEdit(function (layers, ids) {
+    rows.forEach(function (r) { layers.splice(r, 1); ids.splice(r, 1); });
     presetSelected = null;
     presetSelection = [];
     presetSelectedRow = -1;
@@ -1725,11 +1746,12 @@ function presetDeleteLayer() {
 function presetMoveLayer(delta) {
   var idx = presetSelectedIndex();
   if (idx < 0) return;
-  presetApplyLayersEdit(function (layers) {
+  presetApplyLayersEdit(function (layers, ids) {
     var to = idx + delta;
     if (to < 0 || to >= layers.length) return;
     var moved = layers.splice(idx, 1)[0];
     layers.splice(to, 0, moved);
+    ids.splice(to, 0, ids.splice(idx, 1)[0]);
     presetSelectedRow = to; // выбранный слой переехал вместе с выбором (имя то же)
   });
 }
