@@ -140,8 +140,9 @@
 
 - **Статус:** [PENDING] волна 4 · **Level:** Senior+ (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render.layers`: `LayerMode`, `RangeF`, `SpriteSource`, `AUGMENT_FIELDS`,
-  `LayerAugment`, `LayerSpec`, `ComposedLayers`, `load_layer_sprite`, `transform_layer`, `canvas_size`, `compose_layers`;
-  в `line_sim` — реэкспорт тех же объектов)
+  `LayerAugment`, `LayerSpec`, `ComposedLayers`, `load_layer_sprite`, `transform_layer`, `canvas_size`, `compose_layers` — все 11
+  в `Services.layer_render.__all__`; в `line_sim` — реэкспорт шести типов в `interfaces.py`, `canvas_size` и алиас
+  `LayeredObject._transform` в `layered_object.py`)
 - **CHAIN:** `tester`(RED: литералы на коде до задачи) → `teamlead`(GREEN) → инъекции лида → `reviewer`
 - **Dependencies:** 2.1 (DONE), 2.2 (DONE). Параллельно 6.4: общие только `layer_render/README.md`, `STATUS.md` — разные строки, сводит лид
 - **Gate:** RED тестера → GREEN; инъекции записаны; `reviewer` APPROVED по SHA; grep рамки по `layers.py` — 0
@@ -155,11 +156,12 @@
    `Services/line_sim/core/layered_object.py` дословно: `_load_sprite` (`:25-41`) → `load_layer_sprite`, `_rotate`
    (`:44-57`), `_hue_shift` (`:60-67`), `_hue_shift_color` (`:70-82`), `_over` (`:85-95`), `canvas_size` (`:98-107`),
    `LayeredObject._transform` (`:189-209`) → `transform_layer`, `LayeredObject._compose` (`:211-228`) → `_compose_canvas`;
-   тело `LayeredObject.__init__` (`:126-182`) → `compose_layers`
-2. `Services/line_sim/interfaces.py` — шесть имён из п.1 — явным `import` из `layer_render.layers` + `__all__`; `ObjectPassport` и `Protocol` сцены остаются
-3. `Services/line_sim/core/layered_object.py` — `LayeredObject.__init__` = `compose_layers(...)` + `replace(passport, ...)` + read-only;
-   `canvas_size` — реэкспорт (потребитель `core/preview.py:34`); `LayeredObject._transform = staticmethod(transform_layer)`
-   (потребитель — `tests/test_hazards_look_1_2.py:116`, правка тестов запрещена)
+   тело `LayeredObject.__init__` (`:126-185`) → `compose_layers`, **включая** `_compose` и проверку прозрачности (`:183-185`)
+2. `Services/line_sim/interfaces.py` — шесть типов из п.1 — явным `import` из `layer_render.layers` + `__all__`; `ObjectPassport` и `Protocol` сцены остаются
+3. `Services/line_sim/core/layered_object.py` — в обёртке остаются: разбор `passport.defect` (`:140`), `replace(passport, ...)` (`:182`),
+   read-only (`:186`). `canvas_size` — реэкспорт **в `__all__` модуля** (потребитель `core/preview.py:34`; без `__all__` pre-commit
+   `ruff --fix` F401 удалит неиспользуемый импорт — `.pre-commit-config.yaml:34-35`). `LayeredObject._transform = staticmethod(transform_layer)`
+   (потребители — `core/factory.py:184` и `tests/test_hazards_look_1_2.py:116`, правка тестов запрещена)
 4. `Services/line_sim/core/factory.py:17,184` — `_load_sprite` → `load_layer_sprite` из `Services.layer_render` (приватные имена не реэкспортируются, правило `docs/maps/layer_render.md`)
 5. `Services/layer_render/__init__.py`, `README.md` (Public API), `STATUS.md`; `docs/maps/layer_render.md` — строка `layers.py`
 - тесты тестера: `Services/layer_render/tests/test_acceptance_2_3_layers.py`
@@ -167,20 +169,24 @@
 **DESIGN:**
 - Перенос **дословный**, ни одного «попутного улучшения»: `rng.spawn(len(layers))`, порядок `uniform` по `AUGMENT_FIELDS`,
   `sub.random() < defect_probability`, премультиплицированная канва и распремультипликация, `rot90` на кратных 90°,
-  `_hue_shift` через HSV. Импорты `composite`/`rotate_expand` — из `Services.layer_render.compose` (сейчас `layered_object.py:20`
-  берёт их через реэкспорт `dataset_gen.core.compose` — тот же объект).
+  `_hue_shift` через HSV. Импорты `composite`/`rotate_expand` — из `Services.layer_render.compose` (сейчас `layered_object.py:21`
+  берёт их через реэкспорт `dataset_gen.core.compose` — тот же объект). Докстринги — дословно, кроме ссылок на переименованные
+  имена (`canvas_size` ссылается на `LayeredObject._compose` → `_compose_canvas`).
 - Сигнатура: `compose_layers(layers, rng, object_angle_deg=0.0, forced_defects=(), *, label="") -> ComposedLayers`;
   `ComposedLayers` — `NamedTuple(rgba, layer_params, active_defects)`. `rgba` — **записываемый** массив (read-only ставит
   обёртка: функция не знает про кэш). `active_defects` — `tuple[str, ...]` в порядке слоёв.
-- **Порядок проверок и тексты ошибок — прежние**, `label` подставляется туда, где сейчас `passport.object_id`:
-  пустой список → спрайты все (`load_layer_sprite`, `TypeError`/`ValueError`) → дубли имён → неизвестный принудительный
-  дефект → розыгрыш → полностью прозрачный RGBA. Разбор строки `passport.defect` (`split(",")`, `strip`) остаётся в обёртке;
-  `compose_layers` получает уже список имён.
-- `layer_render` не импортирует `ObjectPassport` и `Services.line_sim`. Текст `TypeError` про строковый `sprite_source`
-  называет `ObjectFactory` словами — это не импорт, текст не меняется.
-- Имена и типы полей `LayerSpec` не меняются — на них стоят `pult_web` (`plugin.py:1126-1183`) и YAML пресетов.
-  `LayerSpec.__module__` станет `Services.layer_render.layers`; pickle берёт класс по этому пути — сохранённых на диск
-  pickle `LayerSpec` в проекте нет (тестер проверяет грепом и пишет число в отчёт).
+- **Порядок проверок и тексты ошибок — прежние** (проверено ревью спеки запуском): пустой список → спрайты все
+  (`load_layer_sprite`, `TypeError`/`ValueError`) → дубли имён → неизвестный принудительный дефект → розыгрыш → полностью
+  прозрачный RGBA. Префикс `LayeredObject '<label>':` остаётся в текстах `compose_layers` (`label` — на месте
+  `passport.object_id`; слово `LayeredObject` в тексте — как упоминание `ObjectFactory`, не импорт). Разбор строки
+  `passport.defect` (`split(",")`, `strip`) остаётся в обёртке; `compose_layers` получает уже список имён.
+- Тексты ошибок содержат входные значения (`sprite_source='{source}'`, `defect={unknown}`, `color_rgb … {value!r}`) —
+  сохраняются ради A6; правка текстов вне задачи.
+- `layer_render` не импортирует `ObjectPassport` и `Services.line_sim`.
+- Имена и типы полей `LayerSpec` не меняются — на них стоят `pult_web` (`plugin.py:1310-1396` — `offset_px`, `angle_deg`,
+  `scale`; `:1627-1763` — `sprite_source`) и YAML пресетов. `LayerSpec.__module__` станет `Services.layer_render.layers`;
+  pickle/deepcopy `LayerSpec` в рабочем коде нет (ревью спеки: grep → 0), `model_json_schema()` никто не вызывает, заголовок
+  ошибки pydantic берётся из имени класса.
 - Докстринг модуля `line_sim/interfaces.py` (конвенция поворота, пример-литерал) переезжает в `layers.py` и остаётся
   ссылкой в `line_sim`.
 
@@ -191,20 +197,28 @@
 - [ ] A2. `compose_layers` напрямую на тех же входах — те же sha256 RGBA и те же `layer_params`, что A1.
 - [ ] A3. `test_hazards_1_3h_layout.py:40-44` (15 отпечатков), `test_acceptance_lateral_offset_plugin.py:492-493`,
       `test_acceptance_lateral_offset.py:355`, золотые эталоны ([goldens.md](goldens.md)), все тесты `Services/line_sim/tests/`,
-      `Plugins/sim/*/tests/`, `Services/layer_render/tests/` — зелёные без правки.
+      `Plugins/sim/*/tests/`, `Services/layer_render/tests/` — зелёные без правки (кроме известного флака
+      `test_acceptance_r5_page.py::test_a2_undo_highlights_restored_layer_not_the_foreign_one`, запись `c6e04318f`: повтор зелёный — в отчёт).
 - [ ] A4. `Services.line_sim.interfaces.<n> is Services.layer_render.layers.<n>` для `LayerSpec`, `LayerAugment`,
-      `AUGMENT_FIELDS`; `layered_object.canvas_size is layers.canvas_size`; `LayeredObject._transform` работает как раньше.
+      `AUGMENT_FIELDS`; `layered_object.canvas_size is layers.canvas_size`;
+      `LayeredObject._transform is Services.layer_render.layers.transform_layer`; `transform_layer(s, 1.0, 0.0, 0.0, None) is s`;
+      sha256 `LayeredObject._transform(s, 0.9, 37.0, 30.0, (10, 20, 30))` на RGBA-спрайте из seed — литерал до задачи.
+- [ ] A4b. Все 11 имён Module contract — в `Services.layer_render.__all__`; `Services.line_sim.LayerSpec is Services.layer_render.LayerSpec`
+      (образец — `test_acceptance_6_1_crop.py:596-602`).
 - [ ] A5. Детерминизм и чистота: `compose_layers` дважды с одним seed — побайтно тот же RGBA; входной список слоёв и
       callable-провайдеры не мутированы; провайдер вызван ровно один раз на слой; выход `rgba.flags.writeable is True`,
       `LayeredObject.render().flags.writeable is False`.
-- [ ] A6. Ошибки — прежние тип и текст (литералы до задачи): пустой список, строковый `sprite_source`, RGB-спрайт, дубли
-      имён, неизвестный принудительный дефект, прозрачный итог; при одновременных «битый спрайт + дубли имён» — ошибка спрайта.
+- [ ] A6. Ошибки — прежние тип и текст (литералы до задачи, через `LayeredObject(...)`): пустой список, строковый
+      `sprite_source`, RGB-спрайт, дубли имён, неизвестный принудительный дефект, прозрачный итог; при одновременных «битый
+      спрайт + дубли имён» — ошибка спрайта. Через `compose_layers(..., label="X")` — тот же тип и `"'X'" in str(e)`
+      (кроме ошибок спрайта: они называют слой, не объект).
 - [ ] A7. AST: `Services/layer_render/**` (кроме `tests/`) не импортирует `dataset_gen`/`line_sim`/`ml_train`; `sentrux check .`
       зелёный; validate без ошибок.
 
 **Out of scope:** эффекты слоя (`LayerSpec.effects`, Ф3/3.1), новые поля слоя, перенос `ObjectFactory`/`ScenePreset`/`preview` (2.4),
-субпиксельное размещение (`ponytail:` в `_compose`), ниты ревью 1.1 сверх уже закрытых.
+субпиксельное размещение (`ponytail:` в `_compose`), правка текстов ошибок, ниты ревью 1.1 сверх уже закрытых.
 
 **TRAPS:** `color_rgb` у defect-слоя пишется в `layer_params` **до** `continue` невыпавшего — и с `dhue = 0.0`; `_hue_shift_color`
-при `hue_deg == 0.0` возвращает вход как есть (без HSV-округления); `scale != 1.0`/`angle_deg != 0.0`/`hue_deg != 0.0` —
-ветки «как есть» в `transform_layer` отдают **сам спрайт** (кэш фабрики), не копию — `test_hazards_1_3h_layout.py:287` это держит.
+при `hue_deg == 0.0` возвращает вход как есть (без HSV-округления); при `scale == 1.0`, `angle_deg == 0.0`, `hue_deg == 0.0`
+и `color_rgb is None` `transform_layer` отдаёт **сам спрайт** (кэш фабрики), не копию — идентичность держит A4;
+`test_hazards_1_3h_layout.py:287` держит только read-only вид; `canvas_size` в `layered_object.py` без `__all__` снесёт ruff.
