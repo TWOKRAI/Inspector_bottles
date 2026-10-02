@@ -321,7 +321,7 @@ UNMARKED_PLAN = """# План
 ### Task 1.4 — чекбоксы
 - [ ] шаг
 
-### Task 1.5 — голое слово — DONE 50df705f
+### Task 1.5 — починить DONE-детектор
 текст
 """
 
@@ -348,7 +348,7 @@ def _cli(root: Path, *flags: str):
 def test_unmarked_counts_only_heading_tasks_without_any_sign(tmp_path):
     plan = pp.discover(_write_plan(tmp_path, "2026-10-02_um", UNMARKED_PLAN))[0]
     marks = {t.id: t.unmarked for t in plan.tasks}
-    # 1.1 и 1.5 (голое слово не статус) без признаков; 1.2 группа, 1.3 строка, 1.4 чекбокс
+    # 1.1 и 1.5 (слово DONE в середине названия — не статус) без признаков; 1.2 группа, 1.3 строка, 1.4 чекбокс
     assert marks == {"1.1": True, "1.2": False, "1.3": False, "1.4": False, "1.5": True}
     assert plan.unmarked == 2
     assert {t.id: t.status for t in plan.tasks}["1.5"] == "pending"

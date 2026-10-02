@@ -72,3 +72,16 @@ assert "legacy" in plans_json(root)   # ключ plan = basename без .md (р�
 Замер: у `transport-single-policy` без отметки 7 из 31 (не все 31); у `framework-architecture-rework` 10 из 11.
 
 Открыто: `unmarked` считается только у задач из заголовков; задачи из `tasks/<id>.md` без `**Статус:**` и чекбоксов тоже получают PENDING, но не помечаются (в задании сказано «из заголовка»). Чип и атрибут в браузере глазами не смотрены.
+
+## Раунд 3 (правки по ревью кода, итерация 1)
+
+Девять правок, тесты в `scripts/plans_progress/tests/test_review_fixes.py` (42 теста, до правок 32 красных). Весь набор `scripts/plans_progress/tests`: 283 passed.
+1. Статус в хвосте заголовка вне `[...]` (`✅`, `— DONE 50df705f`, `(ЗАКРЫТА …)`, `**[x] СДЕЛАНА**`); слово в середине названия статусом не считается; `ЧАСТИЧНО` отсекает хвост. Приоритет: `**Статус:**` > группа `[...]` > хвост > чекбоксы.
+2. `--check`: нет `plans/`, нет живых планов или нет `--baseline` -> exit 2; в «Итог» — «проверено планов N».
+3. `UNCLOSED_FENCE`: блокирует для §4.1. Живое дерево: `truth-holes-closure` (§4.3, info). `observability-closure/review-phase-1.md` — не план и не phase-файл, не читается. База осталась без строк.
+4. `tasks/<id>.md` без статуса -> `unmarked`.
+5. `TASK_ID_UNPARSED` (info): `observation-port` («Т.1»), `framework-architecture-rework` («2б.1»).
+6. `*.result-*.md` — служебные файлы.
+7. `NOT_UTF8` (info).
+8. Отсутствующая база — exit 2; битая — exit 1.
+9. Удалены `STATUS_ORDER` и `Item.checkbox`.
