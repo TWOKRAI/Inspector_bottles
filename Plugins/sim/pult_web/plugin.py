@@ -734,6 +734,13 @@ function renderPresetLayers() {
   // строку выбора рендер НЕ считает: её ставят до рендера presetSelect, мутации add/delete/выше/ниже и «Отмена»
   // (пересчёт по имени вернул бы первое совпадение имени — чужую строку при дубле)
   presetRowNames = layers.map(function (layer) { return layer.name; });
+  // Флаг живёт, пока в пресете есть слой с этим именем: флаги имён, которых нет, отбрасываются
+  // (иначе новый слой с именем удалённого рождался скрытым, а слой, получивший «призрачное» имя, пропадал с канвы)
+  [presetHidden, presetLocked].forEach(function (flags) {
+    Object.keys(flags).forEach(function (name) {
+      if (presetRowNames.indexOf(name) < 0) delete flags[name];
+    });
+  });
   presetUpdateSelection();
 }
 
@@ -873,13 +880,30 @@ function presetUndo() {
   if (row >= presetState.layers.length) row = -1;
   presetSelectedRow = row;
   presetSelected = row < 0 ? null : presetState.layers[row].name;
-  // Выбор (5.3): имена из записи (операция над составом) или текущего выбора; исчезнувшие, скрытые и запертые отпадают,
-  // главный слой — строка выше — всегда в выборе
+  // Переименование откатывается так же, как делалось: флаги и выбор переезжают на имена восстановленного состояния
+  presetTrackRenames(presetState.layers);
+  // Выбор (5.3): имена из записи (операция над составом) или текущего выбора; исчезнувшие, скрытые и запертые
+  // отпадают — главный слой тоже: флаг по имени пережил «Отмену», и такой слой выбирать нельзя
+  var names = presetState.layers.map(function (ly) { return ly.name; });
   var keep = (e.reorders && e.sel ? e.sel : presetSelection).filter(function (n) {
-    return presetSelectable(n) && presetState.layers.some(function (ly) { return ly.name === n; });
+    return presetSelectable(n) && names.indexOf(n) >= 0;
   });
-  if (presetSelected === null) keep = [];
-  else if (keep.indexOf(presetSelected) < 0) keep = [presetSelected];
+  if (presetSelected !== null && !presetSelectable(presetSelected)) {
+    presetSelected = null;
+    presetSelectedRow = -1;
+  } else if (presetSelected !== null && keep.indexOf(presetSelected) < 0) {
+    keep = [presetSelected];
+  }
+  // главного нет (не было или отпал): им становится последний из оставшихся с единственной строкой
+  while (presetSelected === null && keep.length) {
+    var cand = keep[keep.length - 1], at = names.indexOf(cand);
+    if (at >= 0 && at === names.lastIndexOf(cand)) {
+      presetSelected = cand;
+      presetSelectedRow = at;
+    } else {
+      keep.pop();
+    }
+  }
   presetSelection = keep;
   renderPresetLayers();
   requestPresetLayout();
