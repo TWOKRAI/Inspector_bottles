@@ -12,7 +12,7 @@ branch: feat/layer-render
 - Решения владельца 2026-10-02 (в журнале `plan.md`): волна 5 — только 2.4; 2.4 режется на **2.4a** (пресет + каталог,
   чистые переносы) и **2.4b** (фабрика → `RenderedObject` + превью); `SpriteCatalog` переезжает **целиком** с `CatalogConfig`,
   метой, `SymmetryType`, процедурными фонами; три теста в `layer_render/tests` с импортом `line_sim` — утверждённое исключение.
-- Спека 2.4a — `plans/layer-render/phase-2-core.md`, раздел «Task 2.4a» (`67bca9cf0`). Разведка: agentId `a60b3d02cfe190df2`
+- Спека 2.4a — `plans/layer-render/phase-2-core-2.4a.md` (вынесена из `phase-2-core.md`; первая версия `67bca9cf0`; ревью спеки — reviewer `ad12e5fcbddf2455c`). Разведка: agentId `a60b3d02cfe190df2`
   (Explore, отчёт в транскрипте; ключевые факты вошли в спеку и TRAPS).
 - Страница для владельца обновлена: claude.ai/artifact/2K3PQc8BqtrCAghdgg2ppp (версия 2 — система редактора целиком, планы).
 - Память: `feedback_one_control_proves_sufficiency_not_exclusivity` (dual-write, `90ac5c2c8`).
