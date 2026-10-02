@@ -168,6 +168,16 @@ def test_crlf_and_bom_plan_parses_like_lf(tmp_path):
     assert [(t.id, t.status, t.ref) for t in plan.tasks] == [("1.1", "done", "abc1234"), ("1.2", "pending", None)]
 
 
+def test_bom_before_the_section_heading_is_stripped(tmp_path):
+    """BOM опасен, только когда первой строкой файла стоит заголовок раздела: BOM + `##` не заголовок."""
+    f = tmp_path / "p.md"
+    f.write_bytes("\ufeff## Порядок выполнения\n\n- Task 1.1: a [DONE]\n".encode("utf-8"))
+    text = pp.read_text(f)
+    assert not text.startswith("\ufeff")
+    items, _ = pp.parse_items(text)
+    assert [(i.id, i.status) for i in items] == [("1.1", "done")]
+
+
 def test_lone_cr_line_breaks_are_normalized(tmp_path):
     f = tmp_path / "p.md"
     f.write_bytes("a\rb\r\nc".encode("utf-8"))
