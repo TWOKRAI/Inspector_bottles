@@ -42,6 +42,8 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Dict, Optional
 
+from .not_inspected_marker import build_marker, meta_from_msg
+
 # Throttle громкого WARNING про pickle-fallback (счётчик — всегда, лог — раз в N кадров).
 _PICKLE_WARN_EVERY = 300
 # Throttle лога «frame не восстановлен» (штатный drop после G.7 — не ERROR на каждый кадр).
@@ -350,7 +352,11 @@ class FrameShmMiddleware:
         num_consumers: int = 1,
         pool: Optional[Any] = None,
         reader: Optional[Any] = None,
+        overflow: str = "latest",
     ) -> None:
+        if overflow not in ("latest", "every"):
+            raise ValueError(f"overflow={overflow!r} — expected 'latest' or 'every'")
+        self._overflow = overflow
         self._mm = memory_manager
         self._owner = owner
         self._slot = slot
@@ -371,6 +377,11 @@ class FrameShmMiddleware:
         # голый ``+=``: писать могут поток-продюсер и потоки executor'а, а ``+=`` по атрибуту не атомарен
         # при переключении GIL (потерянное приращение) — приёмка требует точную сумму.
         self._bytes_lock = threading.Lock()
+        # 4.7d-3: дверь отправки. door_drops — item'ов, у которых strip_and_write ВПЕРВЫЕ поставил
+        # ``_shm_dropped`` (на item, не на цель fan-out; всегда). not_inspected_door — маркеров, рождённых
+        # дверью (только при every; ключ в get_shm_stats тоже только при every).
+        self.door_drops = 0
+        self.not_inspected_door = 0
         self._bytes_written = 0
         self._bytes_read = 0
         self._bytes_mapped = 0
@@ -570,6 +581,11 @@ class FrameShmMiddleware:
         прочтения (release-on-evict). Без этого пути займ вытесненного кадра не отпустил
         бы никто → free-list деградировал до перманентной смерти кольца. Пул=None → 0."""
         return self._sum_stat("slots_released_on_evict")
+
+    @property
+    def overflow(self) -> str:
+        """Политика переполнения latest|every (4.7d-3: при every дверь отправки шлёт маркер вместо ``None``)."""
+        return self._overflow
 
     @property
     def frame_stale_drops(self) -> int:
@@ -1142,6 +1158,8 @@ class FrameShmMiddleware:
             touched_foreign = self._copy_inline_views(item) or touched_foreign
             if touched_foreign and not self._inputs_still_valid(item):
                 item[SHM_DROPPED_KEY] = True
+                with self._bytes_lock:  # item считается один раз: повтор fan-out вернётся на ранней ветке выше
+                    self.door_drops += 1
                 return item
         # Один хоп: унаследованные ссылки (owner != self) уже заменены своими, локальная мета
         # view с провода снимается.
@@ -1188,7 +1206,16 @@ class FrameShmMiddleware:
             # Task 4.4: вход был перезаписан, пока копировали (дверь отправки) -> дроп ВСЕХ целей:
             # метка живёт на item'е, повтор fan-out видит её и тоже возвращает None.
             if data.get(SHM_DROPPED_KEY):
-                return None
+                if self._overflow != "every":
+                    return None
+                # 4.7d-3: вместо дропа — маркер. Замена НА МЕСТЕ в общем data-dict: повторный send fan-out
+                # (тот же dict) видит маркер без ``_shm_dropped`` — второго рождения нет. target/type/channel
+                # сообщения не трогаем. Мета — до замены, общим ``meta_from_msg`` (те же правила, что у приёмника).
+                marker = build_marker(meta_from_msg(msg), reason="door", source=self._owner)
+                data.clear()
+                data.update(marker)
+                with self._bytes_lock:
+                    self.not_inspected_door += 1
         return msg
 
     # ------------------------------------------------------------------

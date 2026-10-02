@@ -30,18 +30,44 @@ Outputs:  frame (image/bgr), inspection_result (dict)
   построению, и решение выносит порог — он и едет.
   trace_id едет и в вердикт-документе — по нему две записи сходятся.
 
+Маркер not_inspected (Task 4.7d-4):
+  Под политикой переполнения overflow: every кадр, который не успели проверить,
+  заменяется лёгким маркером (inspection_status="not_inspected", overflow_marker=True,
+  reason, source, trace_id). Плагин принимает его (accepts_markers = True) и решает по
+  регистру not_inspected_action: reject (по умолчанию, «непроверенное = брак») или pass.
+  inspection_result маркера: action, reason="not_inspected", origin (причина маркера),
+  source. Выключенный плагин пропускает маркер (action=pass, reason=disabled).
+  Задержка reject_delay_ms применяется только к reject-маркеру.
+  Маркер считается ТОЛЬКО в total_not_inspected: total_inspected и total_rejected не
+  растут, вердикт-документ не пишется, фронт решения не меняется.
+  Широкая запись — одна на маркер, не решающая, текст "<action>: не проверен
+  (<origin>@<source>)" — находим поиском по тексту.
+
+Задержка и устаревшие маркеры (ADR-174, вердикт CTO 4.7d):
+  reject_delay_ms при reject-маркере отрабатывается КАЖДЫЙ раз, как на обычном браке.
+  После стоянки исполнителя в голове накапливаются тысячи маркеров (20 тыс. x 100 мс
+  ~ 33 мин отбраковки давно ушедших бутылок); старить маркеры по capture_ts плагин
+  пока не умеет - вопрос владельцу в docs/claude/OPEN_QUESTIONS.md, запись
+  "4.7d: отбраковщик отрабатывает задержку на каждый маркер".
+  Маркер с source=inspector при строке журнала у того же trace_id - надгробие кадра
+  (осмотрен, копия кадра испорчена), а не второй исход: исход кадра - широкая запись
+  этого плагина. При reject_delay_ms >= ring_depth / fps маркером становится каждый
+  брак (риг CTO: кольцо 3, задержка 30 мс - 10 из 10); умолчание 0 - редкая гонка.
+  Решение и формулы - multiprocess_framework/DECISIONS.md, ADR-174.
+
 Команды:
   - enable             — включить отбраковку
   - disable            — выключить
   - set_delay          — задержка отбраковки (мс)
   - reset_counters     — обнулить счётчики (фронт решения не трогают)
-  - get_stats          — текущая статистика + verdicts_written/verdicts_unwritten
+  - get_stats          — текущая статистика + total_not_inspected, verdicts_written/verdicts_unwritten
 
 Config:
   - enabled (bool, True)
   - min_defect_area (int, 500)
   - reject_delay_ms (int, 0)
   - max_detections_for_reject (int, 0)
+  - not_inspected_action (reject|pass, reject) — реакция на маркер not_inspected
 
 Зависимости: нет (только stdlib)
 Справочник v1: multiprocess_prototype/services/robot/service.py

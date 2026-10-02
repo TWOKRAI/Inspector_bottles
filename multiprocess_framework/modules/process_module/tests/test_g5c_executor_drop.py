@@ -242,11 +242,11 @@ def test_rebuilt_item_blocked_by_send_door(rig, monkeypatch):
     assert sender.frame_stale_drops == 1, f"frame_stale_drops = {sender.frame_stale_drops}, ожидалось 1"
 
 
-def test_batch_drop_counts_one_per_output_item(rig):
-    """Свойство: единица счётчика — ОДНО отброшенное сообщение. Вход перезаписан во время цепочки,
-    плагин вернул три выхода -> батч из трёх сообщений дропнут, ``frame_stale_drops`` == 3 (reader
-    посчитал 1 на первой провалившейся ссылке, executor доначислил ``N - 1``), ничего не отправлено.
-    Красный revert: убрать вызов ``note_stale_drops`` в ``_run_batch`` -> stale == 1."""
+def test_batch_drop_counts_one_per_input_item(rig):
+    """Свойство: единица счётчика — ВХОДНОЕ сообщение (с 4.7d-2b; раньше считались выходы цепочки).
+    Вход перезаписан во время цепочки, плагин вернул три выхода -> дропнут один вход,
+    ``frame_stale_drops`` == 1 (reader посчитал 1 на первой провалившейся ссылке, ``n_in - 1`` == 0
+    доначислять нечего), ничего не отправлено."""
     writer, reader = rig.make("A"), rig.make("B", view=True)
     sent: list[str] = []
     probe = _FanOut("frame", lambda: _T._overwrite(writer, "frame"))
@@ -264,7 +264,7 @@ def test_batch_drop_counts_one_per_output_item(rig):
 
     _T._bounded(scenario)
     assert sent == [], "батч ушёл дальше, хотя входной view был перезаписан во время обработки"
-    assert reader.frame_stale_drops == 3, f"frame_stale_drops = {reader.frame_stale_drops}, ожидалось 3"
+    assert reader.frame_stale_drops == 1, f"frame_stale_drops = {reader.frame_stale_drops}, ожидалось 1"
 
 
 def test_output_views_are_own_plus_batch_tickets_deduped_in_new_list():

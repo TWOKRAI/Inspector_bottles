@@ -61,6 +61,14 @@ register_route("order", "queue_channel")
 - [x] Этап 7: Тесты адаптеров + `_attach_logger` + `channel_types` (интеграционные с LoggerManager — опционально позже)
 - [ ] Этап 8: Полная интеграция с process_module (config-driven setup)
 
+## Обновление 2026-10-02 (Task 4.7d-3, ADR-174)
+
+- `FrameShmMiddleware`: параметр и свойство `overflow` (`latest|every`); под `every` дверной дроп (`_shm_dropped` после перезаписи входа) заменяет `msg["data"]` маркером `not_inspected` (`reason="door"`) вместо `None`.
+- Новый модуль `middleware/not_inspected_marker.py`: `build_marker`, `meta_from_msg`, `is_marker`, `is_marker_collection`, `MARKER_REASONS`.
+- `get_shm_stats()`: `door_drops` (всегда), `not_inspected_door` (только при `every`). В телеметрию `state.shm` не добавлены.
+- **Известный дефект, не чинится:** `_last_loan_exhausted` общий для потоков источника и исполнителя; под loan-протоколом (заморожен, `FW_SHM_LOAN_PROTOCOL` выключен) может превратить дверной дроп под `every` в `None` после `door_drops += 1`. Найдено ревью чтением, не воспроизведено.
+- **Не измерено:** цена `build_marker` + замены содержимого на дропе; живой стенд 4.7d-5 в работе.
+
 ## Известные проблемы
 
 - **configs/:** `RouterManagerConfig` (SchemaBase) — метаданные; рантайм не переведён
@@ -82,3 +90,4 @@ register_route("order", "queue_channel")
 | 2026-07-14 | Ф7 G.3 (ADR-RTR-009): FrameShmMiddleware — одно ядро записи `_write_frame_into_slot` (round-robin, снят сломанный find_free_index в on_send); кэш SHM-handles читателя (флаг `FW_SHM_HANDLE_CACHE` удалён в Task 4.7b — кэш всегда включён); громкий pickle-fallback `frame_pickle_fallbacks` (→ `get_stats().router`); cross-process seqlock через `shm_seqlock` в сообщении + `read_single_frame`. Дефолты OFF, не в проде до G.7 | 5 |
 | 2026-08-23 | ADR-RTR-011: контракт `request()` стал исполняемым — вызов с приёмного потока бросает `RouterReentrantRequestError` (было: тихие 5 с до таймаута), отсутствие приёмного цикла даёт быстрый отказ `reason="no_receive_pump"` через 0.5 с. Добавлен `request_async(on_response=…)` — неблокирующий запрос с колбэком на приёмном потоке, «ровно один раз» через снятие слота под локом, подметание просроченных на приёмном такте | 5 |
 | 2026-09-30 | Task 4.5c/4.5e: `FrameShmMiddleware` считает `bytes_written` / `bytes_read` (копии) / `bytes_mapped` (view) под замком; `get_shm_stats` +`shm_bytes_written\|read\|mapped`, `frame_restore_failures`; новый `get_ring_info()` → `[{key, name, depth}]` | 5 |
+| 2026-10-02 | Task 4.7d-3 (ADR-174): дверь отправителя под `overflow: every` рождает маркер `not_inspected` вместо дропа; `get_shm_stats` +`door_drops`, `not_inspected_door`; модуль `not_inspected_marker.py` | 5 |

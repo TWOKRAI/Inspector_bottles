@@ -9,7 +9,7 @@ Dict at Boundary: plugins хранятся как list[dict] (model_dump()),
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import ConfigDict, model_validator
 
@@ -199,6 +199,16 @@ class GenericProcessConfig(ProcessLaunchConfig):
         ),
     ] = 0
 
+    overflow: Annotated[
+        Literal["latest", "every"],
+        FieldMeta(
+            "Политика переполнения",
+            info="latest = прежнее поведение (свежий кадр важнее, лишнее молча выбрасывается). "
+            "every = каждый кадр обязан дойти или быть заменён маркером not_inspected "
+            "(Task 4.7d). В рецепте — extras.overflow.",
+        ),
+    ] = "latest"
+
     cv_threads: Annotated[
         int | None,
         FieldMeta(
@@ -301,4 +311,7 @@ class GenericProcessConfig(ProcessLaunchConfig):
         # (и golden-снапшоты build) не меняем; отсутствие = дефолт 2 в runner'е.
         if proc_dict["config"].get("cv_threads") is None:
             proc_dict["config"].pop("cv_threads", None)
+        # Task 4.7d-1: overflow пишем ТОЛЬКО при "every" — golden-снапшоты build не меняем.
+        if proc_dict["config"].get("overflow") != "every":
+            proc_dict["config"].pop("overflow", None)
         return name, proc_dict

@@ -41,9 +41,11 @@ from typing import TYPE_CHECKING, Callable
 
 from ...config_module.feature_flags import resolve
 from ..plugins.port import validate_items_against_ports
+from ...router_module.middleware.not_inspected_marker import is_marker
 
 if TYPE_CHECKING:
     from ..plugins.base import ProcessModulePlugin
+
 
 # pre-hook:  (plugin, method, inputs) -> None
 PreHook = Callable[["ProcessModulePlugin", str, "list[dict] | None"], None]
@@ -150,18 +152,27 @@ class PluginRunner:
         """
         self._run_pre(plugin, "process", items)
         if getattr(plugin, "enabled", True):
+            # 4.7d-2b: маркер не несёт кадра/детекций — порты на нём не проверяются. Фильтр — по ITEM, а не
+            # по коллекции: маркерный вход не должен пропускать невалидный НЕмаркерный выход (и наоборот).
             if self._validate_ports:
-                validate_items_against_ports(plugin.name, "input", getattr(plugin, "inputs", []), items)
+                self._validate_non_markers(plugin, "input", items)
             t0 = time.perf_counter()
             outputs = plugin.process(items)
             self._note_ms(plugin, (time.perf_counter() - t0) * 1000.0)
             if self._validate_ports:
-                validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
+                self._validate_non_markers(plugin, "output", outputs)
         else:
             outputs = items  # bypass: кадр без обработки (свои Port-декларации не проверяем)
         _carry_system_fields(items, outputs)
         self._run_post(plugin, "process", items, outputs)
         return outputs
+
+    @staticmethod
+    def _validate_non_markers(plugin: "ProcessModulePlugin", direction: str, items: list[dict]) -> None:
+        """Проверить порты только на НЕмаркерных items; пустой остаток — нечего проверять."""
+        rest = [x for x in items if not is_marker(x)]
+        if rest:
+            validate_items_against_ports(plugin.name, direction, getattr(plugin, f"{direction}s", []), rest)
 
     def call_produce(self, plugin: "ProcessModulePlugin") -> list[dict]:
         """Вызвать plugin.produce() с хуками. Исключение плагина пробрасывается."""

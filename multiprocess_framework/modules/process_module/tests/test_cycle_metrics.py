@@ -23,7 +23,7 @@ from multiprocess_framework.modules.process_module.plugins.base import ProcessMo
 _EXPECTED_KEYS = {"cycle_duration_ms", "effective_hz", "target_interval_ms", "cycles"}
 # Task 4.5a: воркеры-обёртки добавляют к базовому снимку свои поля кадрового пути.
 _SOURCE_KEYS = _EXPECTED_KEYS | {"pacer_late"}
-_EXECUTOR_KEYS = _EXPECTED_KEYS | {"queue_wait_ms"}
+_EXECUTOR_KEYS = _EXPECTED_KEYS | {"queue_wait_ms", "not_inspected_handled"}
 # Task 4.5d: приёмник добавляет время транспорта между процессами.
 _RECEIVER_KEYS = _EXPECTED_KEYS | {"transport_ms"}
 

@@ -234,6 +234,27 @@ spawn teams or background subagents; split panes are unavailable in Windows Term
 in-process only (↑/↓ + Enter opens a teammate, Esc back, x stops, Ctrl+T task list). Each teammate
 is a full session: ~25k tokens of context before its first tool call.
 
+## Persistent agents across a track — re-summon, don't respawn (pilot «Компания v2», 2026-10-02)
+
+Measured over Task 4.7d (`docs/claude/pilot-company-v2.md`, 30 agent runs, ~3.0M subagent tokens).
+A fresh agent costs **107–228k** just to enter a task; the same agent re-summoned with `SendMessage`
+costs **+3…56k** for a fix, a review round or a whole next subtask. Rules:
+
+- **Address = agentId, never the name.** Names stop resolving after a 429 or the next day; agentIds do.
+  The lead keeps an `agentId` table in its handoff (`docs/handoffs/<date>_<track>-lead.md`).
+- **Developer: one per track, re-summoned per subtask.** Review fixes go to the AUTHOR before its
+  handoff — a fresh successor paid 175k to apply 8 small fixes the author would have done for +8…30k.
+  Set the handoff threshold (~150k) *after* the review nits are closed, not before.
+- **Reviewer round 2: re-summon the round-1 reviewer by agentId** — even when someone else wrote the
+  fixes (+14k / +21k against 140–213k fresh, and it re-ran its own reproductions).
+- **Tester and round-1 reviewer stay fresh.** Independence is the product: every fresh reviewer found
+  something the author and the blind tester had missed. This pilot changes nothing in the three-roles rules.
+- **No standing "expert" agent; write a map file instead** (`docs/maps/<subsystem>.md`). The long-lived
+  expert cost 310k and, re-summoned, reported two "spec conflicts" from a spec revision that no longer
+  existed. Anyone re-summoned after a spec change gets the spec SHA and an order to re-read the section.
+- **The live stand stays mandatory before merge.** It found two things no review predicted, one of them
+  contradicting the CTO's own forecast (4.7d-5: `reject_delay_ms=100` under `every` → zero verdicts).
+
 ## Language policy (STRICT)
 
 **All user-facing output MUST be in Russian. No exceptions.**

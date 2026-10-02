@@ -4,6 +4,17 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-10-02 (Task 4.7d — политика переполнения `overflow` и маркер `not_inspected`, ADR-174):**
+  `overflow: latest|every` (только `extras`, по умолчанию `latest`) прошёл через `generic_process_config`, `blueprint.as_generic_config`
+  и `GenericProcess._init_data_pipeline` в `DataReceiver`, `PipelineExecutor`, `FrameShmMiddleware`. Под `every` потерянный кадр
+  заменяется маркером на трёх местах `process_module` (`lag` в `_bound_lag` со склейкой `_MarkerBatch`, `stale_restore` на
+  `restore_frame`, `stale_exec` в `_run_batch`; четвёртое — дверь, в `router_module`). Новые счётчики воркеров:
+  `lag_dropped_items`, `not_inspected_lag`, `not_inspected_stale_restore`, `not_inspected_stale_exec` (только `every`, кроме
+  `lag_dropped_items`), `not_inspected_handled` (всегда). Шаги цепочки пропускают маркер мимо плагинов без `accepts_markers`.
+  Описание — раздел «Политика переполнения» в `README.md`. **Не закрыто:** живой стенд 4.7d-5 — в работе, формула приёмки на
+  числах не проверена; ключи `not_inspected_*` не публикуются в дерево телеметрии (читаются через `introspect.status`);
+  дефект N3 (`_last_loan_exhausted` общий для потоков под замороженным loan-протоколом) известен и не чинится в 4.7d.
+
 - **2026-09-30 (Task 4.5 — постоянные поля наблюдаемости пути кадра):** воркер получил `queue_wait_ms`, `transport_ms`, `pacer_late`; процесс — `state.cpu.cores` (такты + `~MHz`, замер каждый тик), `state.plugin_ms.<плагин>`, `state.shm.bytes_written|bytes_read|bytes_mapped|restore_failures`; `backend_ctl`: `introspect.status.cpu`, `introspect.queues.queues`/`chain_queue`, `introspect.router_stats.rings`. Каталог метрик 5 → 10. `~MHz` проверена только на i5-12500H. Описание — README «Наблюдаемость пути кадра», решение — ADR-PM-050.
 
 - **2026-09-07 (Task 3.8 пункт «в» плана `observability-closure` — голос фоновой уборки истории):**
