@@ -2,7 +2,7 @@
 date: 2026-10-02
 topic: prompt-audit и правка .claude (STE-80, последние модели, правила по пилотам v2/v3)
 machine: Windows
-branch: chore/claude-prompt-audit (worktree .claude/worktrees/prompt-audit), 4 коммита от main 6f88d6e3c, в main НЕ влито
+branch: main (влито fast-forward 2026-10-02, tip 27c833e8c; ветка и worktree удалены)
 ---
 
 ## Session goal
@@ -36,11 +36,8 @@ branch: chore/claude-prompt-audit (worktree .claude/worktrees/prompt-audit), 4 �
 3. Продуктовые дефекты из чата gui-service 1b.2d (не про `.claude`): утечка `user:pass@` в журнал при успешной записи (`registers_module/core/manager.py:222`, `process_module/plugins/base.py:1655`); откат отвергнутого значения не проверен в `camera_service/plugin.py:331,417` и `process_module/plugins/base.py:1420`.
 
 ## Next step
-Влить ветку `chore/claude-prompt-audit` в `main` fast-forward (нужно «да» владельца; SHA соседям заранее).
-Коммиты ветки: `a7eec31e5` правила и тексты, `7732d5b48` модели и линтер, `c20d36d0f` ponytail, `922804347` память (включая записи соседних чатов: pydantic и qex runbook), плюс коммит этого handoff.
-Порядок слияния в корне: 1) убедиться, что 54 файла в корне идентичны ветке (`git diff chore/claude-prompt-audit -- <пути>` пуст, untracked-файлы сравнить через `git show`);
-2) убрать дубликаты в корне (`git restore` для изменённых, `rm` для untracked: они уже в ветке); 3) `git merge --ff-only chore/claude-prompt-audit`;
-4) `git worktree remove .claude/worktrees/prompt-audit` и удалить ветку. До слияния корень остаётся «грязным» теми же файлами, поэтому новые чаты в корне видят новые правила.
+Влито в `main` (`6f88d6e3c` → `27c833e8c`, 5 коммитов: `a7eec31e5` правила, `7732d5b48` модели и линтер, `c20d36d0f` ponytail, `922804347` память, `27c833e8c` handoff).
+Первое действие в новом чате: проверить две вещи, которые я не мог проверить из старой сессии. 1) В начале сессии нет `PONYTAIL MODE ACTIVE`. 2) Автопамять Windows пишет в `~/.claude/projects/<hash>/memory/` (после правки локального `.claude/settings.local.json`). Затем решения владельца из списка выше.
 
 ## Агенты (дозывать только по agentId)
 | Роль | agentId | Модель | Замечание |
@@ -54,8 +51,9 @@ branch: chore/claude-prompt-audit (worktree .claude/worktrees/prompt-audit), 4 �
 - **ponytail остаётся активным только в сессиях, начатых до правки;** новые чаты запускаются уже без него. Проверка: в начале сессии не должно быть `PONYTAIL MODE ACTIVE`. Если появится — композер вернул хук: открыть `settings.json`/`plugin.json`.
 - Не запускать `claude-kit upgrade` / `claude-kit sync` не сверив `dev.md` и `plugin.json` ponytail.
 - Независимый tester на эти правки не запускался; проверка — только тесты линтера (48), `validate.py`, `lint_agents.py` и ревью Fable.
-- Корень (`main`) пока «грязный» теми же файлами, что в ветке; `.claude/settings.local.json` скрыт `skip-worktree` (локальная правка памяти Windows, в коммиты не идёт).
+- `.claude/settings.local.json` на Windows скрыт `git update-index --skip-worktree` (локальная правка памяти, в коммиты не идёт).
 - `docs/claude/memory/feedback_qex_full_rebuild_runbook.md` — не мой, содержимое не проверял; взят в коммит памяти, чтобы ссылки индекса не повисли.
+- Раздел «Persistent agents across a track» в `.claude/CLAUDE.md` сохранён, но правлен: метрика `total_tokens` против cache-read, дозов на целую подзадачу — provisional, «fresh» у тестера = не видел код. Чат `inspector-bottles-6e` просил сообщить об изменениях раздела.
 
 ## Files changed
-См. `git log --stat main..chore/claude-prompt-audit`: 5 коммитов, ~60 файлов (инструкции, линтер и тесты, ponytail, память, этот handoff).
+См. `git log --stat 6f88d6e3c..27c833e8c`: 5 коммитов, ~60 файлов (инструкции, линтер и тесты, ponytail, память, handoff).
