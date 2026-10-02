@@ -2,7 +2,12 @@
 
 Processing-плагин: принимает item с detections (от blob_detector),
 фильтрует дефекты по min_defect_area, принимает решение reject/pass.
-Ведёт статистику: total_inspected, total_rejected, reject_rate.
+Ведёт статистику: total_inspected, total_rejected, reject_rate, total_not_inspected.
+
+Task 4.7d-4: принимает маркер ``not_inspected`` (кадр выброшен при переполнении и НЕ
+проверен): по умолчанию reject («непроверенное = брак»), регистр
+``not_inspected_action`` может заменить на pass. Маркер — не осмотр: он не входит в
+total_inspected/total_rejected, не пишет вердикт-документ и не трогает фронт решения.
 
 Ф8.7: решение об отбраковке — **вердикт о качестве**, и он уходит документом в
 плоскость документов (``ctx.write_document``), а не строкой в диагностический
@@ -121,7 +126,8 @@ class RobotControlPlugin(ProcessModulePlugin):
         ctx.log_info(
             f"RobotControlPlugin: enabled={self._reg.enabled}, "
             f"min_defect_area={self._reg.min_defect_area}, "
-            f"reject_delay_ms={self._reg.reject_delay_ms}"
+            f"reject_delay_ms={self._reg.reject_delay_ms}, "
+            f"not_inspected_action={self._reg.not_inspected_action}"
         )
 
     # --- Обработка ---
@@ -131,6 +137,7 @@ class RobotControlPlugin(ProcessModulePlugin):
         """Принять решение reject/pass по списку detections.
 
         Алгоритм:
+        0. Маркер not_inspected → своя ветка (_process_marker), дальше не идём
         1. Инкремент total_inspected
         2. Если disabled → pass (reason=disabled)
         3. Фильтрация detections по min_defect_area
@@ -310,9 +317,16 @@ class RobotControlPlugin(ProcessModulePlugin):
             # (см. _write_verdict), и по паре «trace_id + reject_seq» две записи
             # сходятся без догадок.
             fields["reject_seq"] = self._total_rejected
+        # Маркер (в result есть ключ origin — и при not_inspected, и при disabled) называет
+        # свой тип прямо в тексте: «reject: дефектов 0» читалось бы как брак без дефектов,
+        # а FTS ищет только по тексту (message/module/process), не по полям записи.
+        if "origin" in result:
+            summary = f"{result.get('action')}: не проверен ({result.get('origin')}@{result.get('source')})"
+        else:
+            summary = f"{result.get('action')}: дефектов {len(areas)}"
         self._ctx.write_event(
             "inspection",
-            f"{result.get('action')}: дефектов {len(areas)}",
+            summary,
             unit=item,
             decisive=decisive,
             **fields,
