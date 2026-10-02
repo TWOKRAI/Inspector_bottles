@@ -72,6 +72,9 @@ _EDGE_MARGIN = 8
 #: Таблица и рассыпь — README. Правило универсальное (цветовой ключ H и S), без привязки к ленте.
 _GAP_HUE = (25, 85)
 _GAP_SAT_MIN = 40
+# Площадь (px, 8-связность), меньше которой прозрачная компонента — «перец» и закрывается. Замер на реальном
+# тайле 410x484: 523 из 537 компонент < 8 px, 14 >= 8 px, между 7 и 12 px пусто. Дефолт ИНСТРУМЕНТА; у функции — 0.
+_GAP_MIN_AREA = 8
 #: Зелёные борта: верх — строки 0..20, низ — 464..483 (S 77..140, H 70..75, тон в диапазоне просвета),
 #: поэтому зона борта принудительно непрозрачна. С запасом на тёмную кромку (строки 20..21 и 462..463).
 _RAILS_PX = (22, 22)
@@ -244,6 +247,7 @@ def gap_alpha_mask(
     hue: tuple[int, int] = _GAP_HUE,
     sat_min: int = _GAP_SAT_MIN,
     rails_px: tuple[int, int] = _RAILS_PX,
+    min_area: int = 0,
 ) -> np.ndarray:
     """Альфа-маска просветов тайла: `(H, W)` uint8, 0 — просвет, 255 — звено/борт.
 
@@ -251,12 +255,20 @@ def gap_alpha_mask(
     Просвет = `hue[0] <= H <= hue[1]` И `S >= sat_min` (HSV OpenCV, границы включительные). Строки
     `[0, rails_px[0])` и `[H - rails_px[1], H)` всегда 255: у зелёных бортов тон и насыщенность
     в пороге просвета. Бинарная, без сглаживания края. Вход не меняется.
+
+    `min_area` — фильтр «перца»: ПОСЛЕ принудительной непрозрачности бортов прозрачные компоненты
+    (8-связность) площадью строго меньше `min_area` px становятся 255. `0` — фильтр выключен, выход
+    побайтно как без параметра. Края тайла по x не склеиваются. Трогает только альфу.
     """
     hsv = cv2.cvtColor(tile_rgb, cv2.COLOR_RGB2HSV)
     gap = (hsv[:, :, 0] >= hue[0]) & (hsv[:, :, 0] <= hue[1]) & (hsv[:, :, 1] >= sat_min)
     top, bottom = rails_px
     gap[:top] = False
     gap[tile_rgb.shape[0] - bottom :] = False
+    if min_area > 0:
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(gap.astype(np.uint8), connectivity=8)
+        # label 0 — непрозрачный фон; его пиксели не в gap, так что `small[0]` ни на что не влияет
+        gap &= ~(stats[:, cv2.CC_STAT_AREA] < min_area)[labels]
     return np.where(gap, 0, 255).astype(np.uint8)
 
 
@@ -347,12 +359,23 @@ def main(argv: list[str] | None = None) -> int:
             f"пересчитываются с --scene-px-per-mm; по умолчанию {_RAILS_PX[0]},{_RAILS_PX[1]}; требует --gap-alpha"
         ),
     )
+    parser.add_argument(
+        "--gap-min-area",
+        default=None,
+        dest="gap_min_area",
+        metavar="N",
+        help=(
+            "прозрачные компоненты (8-связность) площадью меньше N px становятся непрозрачными "
+            f"(фильтр «перца»); по умолчанию {_GAP_MIN_AREA}, 0 — выключить; требует --gap-alpha"
+        ),
+    )
     args = parser.parse_args(argv)
 
     for flag, value in (
         ("--gap-hue", args.gap_hue),
         ("--gap-sat-min", args.gap_sat_min),
         ("--rails-px", args.rails_px),
+        ("--gap-min-area", args.gap_min_area),
     ):
         if value is not None and not args.gap_alpha:
             parser.error(f"{flag} требует --gap-alpha")
@@ -367,6 +390,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--gap-sat-min: ожидается целое, получено {args.gap_sat_min!r}")
     if not 0 <= gap_sat_min <= 255:
         parser.error(f"--gap-sat-min: значение должно быть в 0..255, получено {args.gap_sat_min!r}")
+    try:
+        gap_min_area = int(args.gap_min_area if args.gap_min_area is not None else _GAP_MIN_AREA)
+    except ValueError:
+        parser.error(f"--gap-min-area: ожидается целое, получено {args.gap_min_area!r}")
+    if gap_min_area < 0:
+        parser.error(f"--gap-min-area: значение должно быть >= 0, получено {args.gap_min_area!r}")
     rails_px = _int_pair(
         parser, "--rails-px", args.rails_px if args.rails_px is not None else f"{_RAILS_PX[0]},{_RAILS_PX[1]}", None
     )
@@ -417,7 +446,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--rails-px: TOP+BOTTOM = {sum(rails_px)} не меньше высоты тайла {tile_h}")
         # Маска — по ГОТОВОМУ тайлу (после масштаба и шва); функция берёт RGB, тайл — BGR.
         alpha = gap_alpha_mask(
-            cv2.cvtColor(result.tile, cv2.COLOR_BGR2RGB), hue=gap_hue, sat_min=gap_sat_min, rails_px=rails_px
+            cv2.cvtColor(result.tile, cv2.COLOR_BGR2RGB),
+            hue=gap_hue,
+            sat_min=gap_sat_min,
+            rails_px=rails_px,
+            min_area=gap_min_area,
         )
         out_image = np.dstack([result.tile, alpha])
         gap_info = f" transparent_frac={float((alpha == 0).mean()):.4f}"
