@@ -73,7 +73,7 @@
       `Services.dataset_gen.core.backgrounds.{procedural_background, gradient_bg, brushed_metal_bg, conveyor_belt_bg, speckled_bg}`
       `is` `Services.layer_render.procedural_backgrounds.<имя>`; `Services.dataset_gen.core.backgrounds._GENERATORS is
       Services.layer_render.procedural_backgrounds._GENERATORS`; `Services.dataset_gen.core.catalog.{imread_unicode,
-      imwrite_unicode}` `is` `Services.layer_render.io.<имя>`. Пакетный уровень: `Services.dataset_gen.core.{SpriteCatalog,
+      imwrite_unicode}` `is` `Services.layer_render.io.<имя>` (их `__module__` — `Services.layer_render.io`). Пакетный уровень: `Services.dataset_gen.core.{SpriteCatalog,
       ClassMeta, SymmetryType, load_meta, write_meta}` и `Services.dataset_gen.{ClassMeta, SymmetryType}` — тот же объект.
       Для классов и функций `__module__` = новый модуль. `SymmetryType is ...` — вакуумна (кэш `typing`), её держит A2.
 - [ ] A2. Старые модули не определяют переехавшее (AST): в `dataset_gen/core/catalog.py`, `metadata.py`, `backgrounds.py` —
@@ -88,7 +88,7 @@
       отвергает). Проверяются: `class_names`, `num_classes`, поля `entry(i)`/`ClassMeta` (через `model_dump`; пути — относительно
       корня дерева, не абсолютные `tmp_path`); `get_sprite(i, rng)` по seed 0..4 — оракул: исходные массивы, которые тест
       записал (не хэш), и тест проверяет, что seed 0..4 выбрали оба спрайта класса с двумя; `get_background(rng, size_hw)`
-      с `backgrounds_dir=None` (процедурные, sha256) и с папкой фонов (2 файла, один в подпапке; sha256 и проверка, что
+      с `backgrounds_dir=None` (процедурные, sha256) и с папкой фонов (2 однотонных файла разного цвета, один в подпапке; выбор узнаётся по цвету кропа, не по приватному `_background_cache`; sha256 и проверка, что
       выбраны оба файла) по seed 0..4; `procedural_background(rng, (h, w))` для seed 0..9 и двух размеров (sha256);
       `load_meta` на папке без meta и с каждым из `META_FILENAMES`. **Отдельное дерево** со спрайтом BGR без альфы:
       `load()` поднимает `ValueError`, литералом — хвост сообщения без пути.
@@ -100,7 +100,7 @@
       (в нём ссылка на минорную версию pydantic и `input_value`).
 - [ ] A5. Блок стенда не сломан: `Services.line_sim.core.preset.REPO_ROOT == Path(__file__).resolve().parents[3]` тестового
       файла и `(REPO_ROOT / "pyproject.toml").is_file()` (путь литералом не писать — файл переносится из worktree тестера);
-      `resolve_repo_path("data/x") == REPO_ROOT / "data/x"`; `load_scene_preset("<любой каталог>", None).defect_probability
+      `Path(resolve_repo_path("data/x")) == REPO_ROOT / "data" / "x"` (функция возвращает `str`); `load_scene_preset("<любой каталог>", None).defect_probability
       == 0.0`; `load_scene_preset(None, None)` поднимает `ValidationError`, `errors()[0]["msg"]` — литерал; подмена
       `monkeypatch.setattr("Services.line_sim.core.preset.os.path.relpath", ...)` не падает `AttributeError`
       (на этом стоит `line_sim/tests/test_hazards_1_0_paths.py:264`).
