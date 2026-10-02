@@ -46,6 +46,13 @@
 
 ## Порядок выполнения
 
+> **Формат задачи — единый эталон** (его читают `plans_ledger.py` и `scripts/plans_progress/plans_progress.py`).
+> Одна строка на задачу; статус пишется **один раз — здесь**, в теле задачи он не повторяется:
+> `- Task <id>: название [СТАТУС] (после <id>)`. Закрытие: `[DONE 2026-10-02 — <хеш>; числа приёмки]`.
+> Статусы: `PENDING`, `IN PROGRESS`, `DONE`, `BLOCKED`, `DEFERRED`, `SUPERSEDED`; процент считается без `DEFERRED` и `SUPERSEDED`.
+> Прогресс всех планов: `python scripts/plans_progress/plans_progress.py --html`; линт формата:
+> `python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt`.
+
 ### Phase 1: <название фазы>
 
 **Цель фазы:** одна фраза.
@@ -57,7 +64,7 @@
 
 ### Phase 2: <название фазы>
 
-- Task 2.1: <короткое название> [PENDING] (зависит от 1.1, 1.2)
+- Task 2.1: <короткое название> [PENDING] (после 1.2)
 
 Тело каждой задачи — отдельный файл `tasks/<id>.md`, скопированный из
 [`TASK.template.md`](TASK.template.md): его метки (`TASK`/`ROLE`/`CHAIN`/
@@ -69,10 +76,10 @@
 ## Малый план (single-file, < 50 строк ТЗ)
 
 Без каталога `tasks/` — тело задачи пишется прямо здесь, под заголовком фазы,
-тем же блоком, что гейт проверяет по месту (Files/Acceptance/Handoff):
+тем же блоком, что гейт проверяет по месту (Files/Acceptance/Handoff). Статус задачи —
+только строкой `- Task <id>: … [СТАТУС]` в «Порядке выполнения» выше, в теле его нет:
 
 ### Task 1.1: <короткое название> **[VERTICAL SLICE]**
-- **Статус:** [PENDING]
 - **Файлы:** `path/to/file.py`, `path/to/other.py`
 - **Acceptance:** end-to-end сценарий — что можно продемонстрировать после Task (CLI invocation / HTTP request / UI click → видимый результат)
 - **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a
@@ -83,7 +90,6 @@
 Описание задачи: что именно сделать. Если нужны заметки по реализации — здесь.
 
 ### Task 1.2: <короткое название>
-- **Статус:** [PENDING]
 - **Файлы:** `...`
 - **Acceptance:** `...`
 - **Module contract:** new-full | new-lite | public-api-change | impl-only | n/a

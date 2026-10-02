@@ -62,6 +62,27 @@ New plans start from [`.claude/plugins/core/templates/PLAN.template.md`](../.cla
 
 Manager выбирает: single-file (атомарная задача, < 50 строк ТЗ) или multi-phase (2+ независимых этапов).
 
+## Формат задачи и прогресс
+
+Статус задачи пишется **один раз** — строкой в разделе `## Порядок выполнения` плана (заголовок начинается с «Порядок выполнения»; номер `3.` допустим):
+
+```
+- Task <id>: название [PENDING] (после <id>)
+- Task <id>: название [DONE 2026-10-02 — `хеш`; числа приёмки]
+```
+
+Статусы — закрытый набор: `PENDING`, `IN PROGRESS`, `DONE`, `BLOCKED`, `DEFERRED`, `SUPERSEDED`. Процент = `DONE / (всего − DEFERRED − SUPERSEDED)`, рядом всегда `N из M`.
+Тело задачи статус не повторяет: при расхождении побеждает строка списка. Id — `1.1`, `1b.2a`, `P1.1`. Старые планы в других форматах читаются терпимо
+(заголовок `#### Task X.Y` + `**Статус:**`, таблица с `✓`, `tasks/<id>.md`); массово их не переписываем — приводим к эталону при касании.
+
+```bash
+python scripts/plans_progress/plans_progress.py --html     # страница data/plans_progress.html: шкалы, ячейки по задачам, раскрытие
+python scripts/plans_progress/plans_progress.py --json     # те же данные для скриптов
+python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt   # линт; красный только на новую блокирующую находку
+```
+
+Закрытый план уходит в `_archive/` (`close`); страница показывает его в свёрнутой секции «Архив». Подробности — [`scripts/plans_progress/README.md`](../scripts/plans_progress/README.md).
+
 ## Ledger — единый индекс (не перечитывай все планы)
 
 Этот файл — **ledger** (файл учёта, машиночитаемый): агент в новой сессии читает его
