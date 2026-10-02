@@ -24,11 +24,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 
 from Services.dataset_gen.core.catalog import imread_unicode
 from Services.dataset_gen.core.realcut import detect_disk
+from Services.layer_render.crop import square_crop
 from Services.ml_inference.engine import InferenceEngine
 
 logger = get_std_logger(__name__)
@@ -47,18 +47,15 @@ def _crop_disk(bgr: np.ndarray, margin: float) -> np.ndarray:
     Квадрат обязателен: при resize_policy=stretch прямоугольный кроп растянул бы
     диск и сдвинул угол. У края кадра недостающие поля достраиваются репликацией
     края (тёмно-синий фон реплицируется в тёмно-синий — без чёрной рамки).
+    Результат всегда копия кадра, не view.
+
+    Raises:
+        ValueError: квадрат не пересекает кадр (cx <= -half или cx >= w + half, то же по y).
     """
-    h, w = bgr.shape[:2]
     cx, cy, r = detect_disk(bgr)
     half = int(round(r * (1.0 + margin)))
-    sx0, sy0 = max(0, cx - half), max(0, cy - half)
-    sx1, sy1 = min(w, cx + half), min(h, cy + half)
-    crop = bgr[sy0:sy1, sx0:sx1]
-    top, left = sy0 - (cy - half), sx0 - (cx - half)
-    bottom, right = 2 * half - (top + crop.shape[0]), 2 * half - (left + crop.shape[1])
-    if any(b > 0 for b in (top, bottom, left, right)):
-        crop = cv2.copyMakeBorder(crop, top, max(0, bottom), left, max(0, right), cv2.BORDER_REPLICATE)
-    return crop
+    # Вырез — Services.layer_render.crop.square_crop; квадрат целиком вне кадра → ValueError (без обработки).
+    return square_crop(bgr, cx, cy, 2 * half, oob="replicate")
 
 
 def _angle_error(pred_deg: float, true_deg: float, symmetry: str) -> float:

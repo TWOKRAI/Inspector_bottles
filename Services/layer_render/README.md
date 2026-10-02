@@ -19,6 +19,11 @@
 | `EffectSpec(name, prob=1.0, params={})` | (`effects`) шаг списка; `ValueError` на неизвестное имя / ключ параметра / prob вне 0..1; `params` — глубокая копия под `MappingProxyType` (read-only только верхний уровень, вложенные списки изменяемы), недостающие ключи из `EFFECT_PARAMS`; сравнение по идентичности |
 | `apply_effects(frame_u8, specs, rng)` | (`effects`) прогон списка по порядку; вентиль `rng.random() < prob` тянется всегда; пустой список — копия кадра без розыгрышей; вход не меняется |
 | `apply_glare`, `apply_shadow`, `apply_occlusion`, `apply_motion_blur`, `make_motion_kernel`, `apply_vignette`, `apply_brightness_contrast`, `apply_gamma`, `apply_color_temperature`, `apply_channel_shift`, `apply_jpeg` | (`effects`, Task 2.2) функции эффектов, перенесены из `dataset_gen.core.augment` без изменений |
+| `side_from_radius(radius, radius_scale, margin_px)` | (`crop`, Task 6.1) сторона квадрата: `max(2, int(round(2·r·scale)) + 2·int(margin))` |
+| `square_crop(frame, cx, cy, side, oob, pad_value=(0,0,0))` | (`crop`, Task 6.1) квадрат `side`×`side`, угол `(cx - side//2, cy - side//2)`; **всегда копия**, не view кадра. `oob` у границы: `drop` -> `None`; `pad` -> холст `pad_value`; `clamp` -> обрезка по кадру (нет пересечения -> `None`); `replicate` -> репликация края (нет пересечения -> `ValueError`). Неизвестный `oob` -> `ValueError` |
+| `resize_square(crop, out)` | (`crop`, Task 6.1) ресайз к `out`×`out`: `out <= 0` или уже готово -> тот же объект; иначе INTER_AREA при `crop.shape[0] > out`, INTER_LINEAR иначе |
+
+Карта зоны выреза: `docs/maps/crop.md`.
 
 Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
 `Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций). Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.

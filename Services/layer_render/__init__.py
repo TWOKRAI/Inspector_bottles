@@ -17,6 +17,7 @@ from Services.layer_render.compose import (
     fit_longest_side,
     rotate_expand,
 )
+from Services.layer_render.crop import resize_square, side_from_radius, square_crop
 from Services.layer_render.effects import EFFECT_PARAMS, EFFECTS, EffectSpec, apply_effects
 from Services.layer_render.interfaces import ScrollingTile, SolidFill
 from Services.layer_render.io import imread_unicode, imwrite_unicode
@@ -37,5 +38,8 @@ __all__ = [
     "imread_unicode",
     "imwrite_unicode",
     "render_background",
+    "resize_square",
     "rotate_expand",
+    "side_from_radius",
+    "square_crop",
 ]
