@@ -31,6 +31,7 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 | Пункт | `- Task <id>: название [СТАТУС]`; допустим `**` перед `Task`; строки-продолжения принадлежат пункту |
 | Статус | первая группа `[...]` со словом набора, код-спаны не считаются; слово не примыкает к букве, `_`, `-` |
 | Набор слов | `PENDING`, `IN PROGRESS`, `DONE`, `BLOCKED`, `DEFERRED`, `SUPERSEDED` (`SKIPPED`/`CANCELLED` → `SUPERSEDED`) |
+| Статус в заголовке задачи | `[...]` в строке заголовка; иначе хвост вне скобок: `✅`, `— DONE 50df705f`, `(ЗАКРЫТА 2026-08-03)` (слово — только перед датой, хешем или пояснением в скобках) |
 | Хвост | допустим у любого статуса: `[DONE 2026-10-02 — \`hash\`; числа]`; незакрытая группа идёт до конца пункта |
 | Без статуса | `~~Task X.Y~~` и `СНЯТА` → `superseded`; иначе `unknown` (`?`) |
 | Родитель | пункт без статуса, за которым идёт более глубокий пункт, — не задача |
@@ -38,7 +39,9 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 | Процент | `done / (всего − deferred − superseded − unknown)`; рядом всегда `N из M` |
 
 Находки: `NO_TASKS` и `UNKNOWN_STATUS` блокируют только для планов §4.1 `ORDER.md`; `DUP_ID` блокирует всегда;
-`DUP_HEADING`, `STATUS_CONFLICT`, `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED` — информационные.
+`UNCLOSED_FENCE` (нечётное число ограждений кода) блокирует так же, как `NO_TASKS`, — только для §4.1;
+`DUP_HEADING`, `STATUS_CONFLICT`, `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
+`--check` без `plans/`, без живых планов или с отсутствующим `--baseline` завершается кодом 2.
 Архивные планы линт не смотрит.
 
 ## Тесты

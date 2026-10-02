@@ -53,7 +53,6 @@ CANON_BY_WORD = {
     "SKIPPED": "superseded",
     "CANCELLED": "superseded",
 }
-STATUS_ORDER = ("done", "pending", "in_progress", "blocked", "deferred", "superseded", "unknown")
 DROPPED = ("deferred", "superseded")
 
 # Слово набора не примыкает к букве/цифре/`_`/`-`: `[DONE-ish]`, `[UNDONE]`, `[DONE_x]` — не статус.
@@ -74,6 +73,9 @@ BULLET_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*$")
 HEAD_TASK_RE = re.compile(r"^(?:\*\*)?Task[ \t]+(?P<id>" + ID_PATTERN + r")" + _ID_END + r"(?P<rest>.*)$")
 FENCE_RE = re.compile(r"^[ \t]*(?:```|~~~)")
+# `Task <токен>` с цифрой, но не id по эталону (кириллическая `Т.1`): находка TASK_ID_UNPARSED
+UNPARSED_ITEM_RE = re.compile(r"^[ \t]*[-*+][ \t]+(?:\[[ xX]\][ \t]+)?(?:\*\*|~~|__)*Task[ \t]+(?P<tok>\S*\d\S*)")
+UNPARSED_HEAD_RE = re.compile(r"^(?:\*\*)?Task[ \t]+(?P<tok>\S*\d\S*)")
 STATUS_LINE_RE = re.compile(r"\*\*Статус:?\*\*:?[ \t]*(?P<rest>.*)$")
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[(?P<mark>[ xX])\]")
 HASH_RE = re.compile(r"`([0-9a-f]{7,40})`")
@@ -83,6 +85,11 @@ DATED_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 TABLE_ID_RE = re.compile(r"^(?P<mark>[✓✔\s]*)(?P<id>T\d+(?:\.[A-Za-z0-9]+)?)(?=\s|$)")
 
 SERVICE_NAMES = {"queue", "_archive", "QUEUE.md", "README.md"}
+RESULT_FILE_RE = re.compile(r"\.result-.+\.md$")  # итоги задач `<план>.result-1.1.md` — не планы
+
+
+def is_service_name(name: str) -> bool:
+    return name.startswith(".") or name in SERVICE_NAMES or bool(RESULT_FILE_RE.search(name))
 
 
 # ----------------------------------------------------------------------------- модель
@@ -106,6 +113,9 @@ class Plan:
     dup_ids: list[str] = field(default_factory=list)  # id у двух и более пунктов списка
     dup_headings: list[str] = field(default_factory=list)  # id у двух и более заголовков
     conflicts: list[str] = field(default_factory=list)  # id со STATUS_CONFLICT
+    unclosed_fence: list[str] = field(default_factory=list)  # файлы с нечётным числом ограждений
+    unparsed: list[str] = field(default_factory=list)  # `Task <токен>` с неразобранным id
+    bad_encoding: list[str] = field(default_factory=list)  # файлы не в UTF-8
     lane: str | None = None
     tier: str | None = None
     info: list[tuple[str, str]] = field(default_factory=list)  # из ORDER.md: (метка, текст)
@@ -159,9 +169,18 @@ class Finding:
 # ----------------------------------------------------------------------------- чтение текста
 
 
-def read_text(path: Path) -> str:
-    """UTF-8 (BOM допустим), переводы строк нормализованы в LF."""
-    data = path.read_bytes().decode("utf-8-sig", errors="replace")
+def read_text(path: Path, bad: list[str] | None = None) -> str:
+    """UTF-8 (BOM допустим), переводы строк нормализованы в LF.
+
+    Файл не в UTF-8 читается с заменой символов, а его имя попадает в `bad` (находка NOT_UTF8).
+    """
+    raw = path.read_bytes()
+    try:
+        data = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        data = raw.decode("utf-8-sig", errors="replace")
+        if bad is not None and path.name not in bad:
+            bad.append(path.name)
     return data.replace("\r\n", "\n").replace("\r", "\n")
 
 
@@ -224,6 +243,54 @@ def find_status(text: str) -> tuple[str, int] | None:
     return None
 
 
+_TAIL_WORD_RE = re.compile(
+    r"(?<![\w-])(DONE|ЗАКРЫТ[АО]?|СДЕЛАН[АО]?|SUPERSEDED|СНЯТА|DEFERRED|ОТЛОЖЕН[АО]?)(?![\w-])", re.IGNORECASE
+)
+_TAIL_CANON = {
+    "DONE": "done",
+    "ЗАКРЫТ": "done",
+    "ЗАКРЫТА": "done",
+    "ЗАКРЫТО": "done",
+    "СДЕЛАН": "done",
+    "СДЕЛАНА": "done",
+    "СДЕЛАНО": "done",
+    "SUPERSEDED": "superseded",
+    "СНЯТА": "superseded",
+    "DEFERRED": "deferred",
+    "ОТЛОЖЕН": "deferred",
+    "ОТЛОЖЕНА": "deferred",
+    "ОТЛОЖЕНО": "deferred",
+}
+_TAIL_MARK_RE = re.compile(r"[✅✔✓]")
+# После слова статуса допустимы только даты, хеши, пунктуация и скобочное пояснение до конца строки.
+_TAIL_REST_RE = re.compile(
+    r"^(?:[\s*+,;.:)\]\x00]|\d{4}-\d{2}-\d{2}|\d{1,2}-\d{2}|[0-9a-f]{7,40}(?!\w))*(?:\(.*)?$", re.DOTALL
+)
+
+
+def find_tail_status(rest: str) -> str | None:
+    """Статус в строке заголовка вне `[...]`: `✅`, `— DONE 50df705f`, `(ЗАКРЫТА 2026-08-03)`.
+
+    Слово считается статусом, только если после него идут даты, хеши и пояснение в скобках: слово в
+    середине названия («починить DONE-детектор», «DONE: переключает…») статусом не является.
+    `ЧАСТИЧНО` отсекает всё после себя: «⚠️ ЧАСТИЧНО (… шаг 3 отложен)» — не отложена, а не закрыта.
+    """
+    masked = mask_code(rest)
+    partial = re.search(r"ЧАСТИЧНО", masked, re.IGNORECASE)
+    limit = partial.start() if partial else len(masked)
+    found: list[tuple[int, str]] = []
+    mark = _TAIL_MARK_RE.search(masked)
+    if mark and mark.start() < limit:
+        found.append((mark.start(), "done"))
+    for m in _TAIL_WORD_RE.finditer(masked):
+        if m.start() < limit and _TAIL_REST_RE.match(masked[m.end() :]):
+            found.append((m.start(), _TAIL_CANON[m.group(1).upper()]))
+            break
+    if found:
+        return min(found)[1]
+    return "pending" if partial else None
+
+
 def find_bare_word(text: str) -> str | None:
     """Слово набора где угодно в тексте (для строки `**Статус:** BLOCKED`)."""
     m = _WORD_RE.search(mask_code(text))
@@ -240,7 +307,6 @@ class Item:
     status: str
     ref: str | None
     indent: int
-    checkbox: str | None  # "x" | " " | None
     conflict: bool = False
 
 
@@ -283,13 +349,20 @@ def _finish_item(m: re.Match, cont: list[str]) -> Item:
         status=status,
         ref=ref,
         indent=len(m.group("indent").expandtabs(4)),
-        checkbox=mark,
         conflict=conflict,
     )
 
 
-def parse_items(text: str) -> tuple[list[Item], bool]:
-    """Пункты `- Task <id>` раздела порядка -> (задачи после снятия родителей, были ли пункты вообще)."""
+def has_unclosed_fence(text: str) -> bool:
+    """Нечётное число ограждений: разбор остаток файла после открытого ограждения пропускает."""
+    return sum(1 for ln in text.split("\n") if FENCE_RE.match(ln)) % 2 == 1
+
+
+def parse_items(text: str, unparsed: list[str] | None = None) -> tuple[list[Item], bool]:
+    """Пункты `- Task <id>` раздела порядка -> (задачи после снятия родителей, были ли пункты вообще).
+
+    Строки `- Task <токен>` с неразобранным id добавляются в `unparsed`.
+    """
     items: list[Item] = []
     cur: tuple[re.Match, list[str]] | None = None
     sec_level: int | None = None
@@ -328,6 +401,9 @@ def parse_items(text: str) -> tuple[list[Item], bool]:
             cur = (im, [])
         elif BULLET_RE.match(line):
             close()
+            bad = UNPARSED_ITEM_RE.match(line)
+            if bad and unparsed is not None:
+                unparsed.append(bad.group("tok"))
         elif cur is not None:
             cur[1].append(line.strip())
     close()
@@ -350,7 +426,7 @@ class HeadTask:
     title: str
     status: str  # итоговый (для набора из заголовков)
     line_status: str | None  # слово набора в `**Статус:**` тела
-    unmarked: bool = False  # нет `**Статус:**`, группы в заголовке и чекбоксов
+    unmarked: bool = False  # нет `**Статус:**`, группы и хвоста в заголовке, чекбоксов
 
 
 def _checkbox_status(body: list[str]) -> str:
@@ -366,7 +442,7 @@ def _status_line(body: list[str]) -> str | None:
     return None
 
 
-def parse_heading_tasks(text: str) -> list[HeadTask]:
+def parse_heading_tasks(text: str, unparsed: list[str] | None = None) -> list[HeadTask]:
     """Заголовки `#{2,6} Task <id>`; тело — до заголовка не глубже или до следующего Task-заголовка."""
     lines = text.split("\n")
     heads: list[tuple[int, int, re.Match]] = []  # (индекс строки, уровень, совпадение)
@@ -386,6 +462,10 @@ def parse_heading_tasks(text: str) -> list[HeadTask]:
         tm = HEAD_TASK_RE.match(hm.group(2)) if level >= 2 else None
         if tm:
             heads.append((idx, level, tm))
+        elif level >= 2 and unparsed is not None:
+            bad = UNPARSED_HEAD_RE.match(hm.group(2))
+            if bad:
+                unparsed.append(bad.group("tok"))
     result: list[HeadTask] = []
     for idx, level, tm in heads:
         end = len(lines)
@@ -401,13 +481,16 @@ def parse_heading_tasks(text: str) -> list[HeadTask]:
         rest = tm.group("rest")
         group = find_status(rest)
         title = re.sub(r"^[\s:.\-—–*~_]+", "", rest[: group[1]] if group else rest).replace("**", "").strip()
+        tail = None if (line_status or group) else find_tail_status(rest)
         if line_status:
             status = line_status
         elif group:
             status = group[0]
+        elif tail:
+            status = tail
         else:
             status = _checkbox_status(body)
-        unmarked = not line_status and not group and not any(CHECKBOX_RE.match(ln) for ln in body)
+        unmarked = not (line_status or group or tail or any(CHECKBOX_RE.match(ln) for ln in body))
         result.append(HeadTask(tm.group("id"), " ".join(title.split())[:160], status, line_status, unmarked))
     return result
 
@@ -441,10 +524,10 @@ def parse_table_tasks(text: str) -> list[Task]:
     return tasks
 
 
-def parse_task_file(path: Path) -> Task | None:
+def parse_task_file(path: Path, bad: list[str] | None = None) -> Task | None:
     if not ID_RE.fullmatch(path.stem):
         return None
-    body = read_text(path).split("\n")
+    body = read_text(path, bad).split("\n")
     title = ""
     for ln in body:
         hm = HEADING_RE.match(ln)
@@ -453,8 +536,10 @@ def parse_task_file(path: Path) -> Task | None:
             if tm:
                 title = " ".join(re.sub(r"^[\s:.\-—–*~_]+", "", tm.group("rest")).split())[:160]
             break
-    status = _status_line(body) or _checkbox_status(body)
-    return Task(path.stem, title, status)
+    line_status = _status_line(body)
+    status = line_status or _checkbox_status(body)
+    unmarked = not line_status and not any(CHECKBOX_RE.match(ln) for ln in body)
+    return Task(path.stem, title, status, None, unmarked)
 
 
 # ----------------------------------------------------------------------------- план целиком
@@ -473,32 +558,36 @@ def _dedupe_first(tasks: list[Task]) -> list[Task]:
 def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archived: bool) -> Plan:
     """Набор задач (N1): пункты раздела порядка; иначе заголовки -> таблица `✓` -> tasks/<id>.md."""
     plan = Plan(name=name, rel=rel, archived=archived)
-    main_text = read_text(main) if main.is_file() else ""
+    main_text = read_text(main, plan.bad_encoding) if main.is_file() else ""
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
     task_files: list[Path] = []
+    fence_texts: list[tuple[str, str]] = list(head_files)  # файлы, где ищем незакрытое ограждение
     if plan_dir is not None:
         siblings = sorted((p for p in plan_dir.iterdir() if p.is_file()), key=lambda p: natural_key(p.name))
         for p in siblings:
             if PHASE_FILE_RE.match(p.name):
-                head_files.append((p.name, read_text(p)))
+                head_files.append((p.name, read_text(p, plan.bad_encoding)))
+                fence_texts.append(head_files[-1])
         for p in siblings:
             if p.name == "tasks.md" or (p.name.startswith("tasks-") and p.suffix == ".md"):
-                table_texts.append(read_text(p))
+                table_texts.append(read_text(p, plan.bad_encoding))
+                fence_texts.append((p.name, table_texts[-1]))
         tdir = plan_dir / "tasks"
         if tdir.is_dir():
             task_files = sorted((p for p in tdir.glob("*.md") if p.is_file()), key=lambda p: natural_key(p.name))
 
+    plan.unclosed_fence = [name_ for name_, text in fence_texts if has_unclosed_fence(text)]
     heads: list[HeadTask] = []
     for _fname, text in head_files:
-        heads.extend(parse_heading_tasks(text))
+        heads.extend(parse_heading_tasks(text, plan.unparsed))
     counts: dict[str, int] = {}
     for h in heads:
         counts[h.id] = counts.get(h.id, 0) + 1
     plan.dup_headings = [i for i, c in counts.items() if c > 1]
 
-    items, had_items = parse_items(main_text)
+    items, had_items = parse_items(main_text, plan.unparsed)
     if had_items:
         plan.tasks = [Task(it.id, it.title, it.status, it.ref) for it in items]
         seen: dict[str, int] = {}
@@ -527,7 +616,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     if table:
         plan.tasks = _dedupe_first(table)
         return plan
-    files = [t for t in (parse_task_file(p) for p in task_files) if t]
+    files = [t for t in (parse_task_file(p, plan.bad_encoding) for p in task_files) if t]
     plan.tasks = _dedupe_first(files)
     return plan
 
@@ -541,7 +630,7 @@ def _plan_entries(base: Path, archived: bool, root: Path) -> list[Plan]:
         return plans
     for entry in sorted(base.iterdir(), key=lambda p: p.name):
         n = entry.name
-        if n.startswith(".") or n in SERVICE_NAMES:
+        if is_service_name(n):
             continue
         if entry.is_file() and entry.suffix == ".md":
             plans.append(analyze_plan(entry.stem, entry, None, entry.relative_to(root).as_posix(), archived))
@@ -558,7 +647,7 @@ def discover(root: Path) -> list[Plan]:
     arch = plans_dir / "_archive"
     if arch.is_dir():
         for entry in sorted(arch.iterdir(), key=lambda p: p.name):
-            if entry.name.startswith("."):
+            if entry.name.startswith(".") or RESULT_FILE_RE.search(entry.name):
                 continue
             if entry.is_dir() and QUARTER_RE.match(entry.name):
                 plans.extend(_plan_entries(entry, True, root))
@@ -678,6 +767,15 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
         in_41 = p.tier == "4.1"
         if not p.tasks:
             out.append(Finding("NO_TASKS", p.name, None, in_41, "в плане не найдено ни одной задачи"))
+        if p.unclosed_fence:
+            files = ", ".join(p.unclosed_fence)
+            text = f"нечётное число ограждений кода, остаток файла не разобран: {files}"
+            out.append(Finding("UNCLOSED_FENCE", p.name, None, in_41, text))
+        if p.unparsed:
+            text = f"строк Task с неразобранным id: {len(p.unparsed)} (первая: «{p.unparsed[0]}»)"
+            out.append(Finding("TASK_ID_UNPARSED", p.name, None, False, text))
+        if p.bad_encoding:
+            out.append(Finding("NOT_UTF8", p.name, None, False, f"файл не в UTF-8: {', '.join(p.bad_encoding)}"))
         for t in p.tasks:
             if t.status == "unknown":
                 out.append(
@@ -718,6 +816,7 @@ def load_baseline(path: Path) -> set[str]:
 
 def run_check(plans: list[Plan], baseline: set[str], out) -> int:
     findings = build_findings(plans)
+    checked = sum(1 for p in plans if not p.archived)
     new_blocking = 0
     blocking = 0
     present = set()
@@ -732,8 +831,8 @@ def run_check(plans: list[Plan], baseline: set[str], out) -> int:
     info = len(findings) - blocking
     stale = len(baseline - present)
     print(
-        f"Итог: блокирующих {blocking}, из них новых {new_blocking}; информационных {info}; "
-        f"устаревших строк базы {stale}",
+        f"Итог: проверено планов {checked}; блокирующих {blocking}, из них новых {new_blocking}; "
+        f"информационных {info}; устаревших строк базы {stale}",
         file=out,
     )
     return 1 if new_blocking else 0
@@ -955,7 +1054,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root: Path = args.root.resolve()
     order_path = args.order if args.order is not None else root / "plans" / "queue" / "ORDER.md"
+    if args.check:
+        # молчаливый зелёный на пустом корне хуже красного: --check обязан что-то проверить
+        if not (root / "plans").is_dir():
+            print(f"ошибка: нет каталога plans/ в корне {root}", file=sys.stderr)
+            return 2
+        if args.baseline is not None and not args.baseline.is_file():
+            print(f"ошибка: база не найдена: {args.baseline}", file=sys.stderr)
+            return 2
     plans = discover(root)
+    if args.check and not any(not p.archived for p in plans):
+        print(f"ошибка: в {root / 'plans'} нет ни одного живого плана", file=sys.stderr)
+        return 2
     rows = parse_order(order_path)
     apply_order(plans, rows)
     live, archive = page_order(plans, rows)
@@ -970,7 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
         target.write_text(to_html(live, archive, root), encoding="utf-8")
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
-        baseline = load_baseline(args.baseline) if args.baseline and args.baseline.is_file() else set()
+        baseline = load_baseline(args.baseline) if args.baseline else set()
         code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout)
     if not (args.json or args.html is not None or args.check):
         for p in ordered:
