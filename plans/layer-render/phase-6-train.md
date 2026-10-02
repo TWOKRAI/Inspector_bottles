@@ -20,7 +20,7 @@
 1. `Services/layer_render/crop.py` (новый) — `side_from_radius(radius, radius_scale, margin_px) -> int`,
    `square_crop(frame, cx, cy, side, oob, pad_value=(0, 0, 0)) -> np.ndarray | None`, `resize_square(crop, out) -> np.ndarray`
 2. `Services/layer_render/__init__.py`, `Services/layer_render/README.md` (Public API)
-3. `Plugins/processing/center_crop/plugin.py` — `_resolve_side` (`:112-124`), `_crop_square` + `_pad_canvas` (`:137-181`),
+3. `Plugins/processing/center_crop/plugin.py` — `_resolve_side` (`:112-124`), `_crop_square` + `_pad_canvas` (`:137-179`),
    `_resize_output` (`:100-110`) делегируют
 4. `Services/ml_train/holdout_eval.py` — `_crop_disk` (`:44-61`) делегирует: `detect_disk` и `half = round(r·(1+margin))`
    остаются, вырез — `square_crop(bgr, cx, cy, 2·half, oob="replicate")`
@@ -31,9 +31,13 @@
   `drop` → `None`, если квадрат хоть частично вне кадра; `pad` → холст `side×side` цветом `pad_value` по правилу
   `_pad_canvas` (`(color + [0,0,0])[:c]` для 3D, `color[0]` для 2D), пересечение вклеено, без пересечения — чистый холст;
   `clamp` → пересечение (меньше стороны), без пересечения — `None`; `replicate` → `cv2.copyMakeBorder(..., BORDER_REPLICATE)`
-  как в `_crop_disk`. Без пересечения у `replicate` — `ValueError` (сейчас там падает `cv2.error`; это не контракт).
+  как в `_crop_disk` при частичном пересечении. «Нет пересечения» определяется по обрезанным границам (`sx1 <= sx0` или
+  `sy1 <= sy0`, где `sx1 = min(w, x0 + side)`), и у `replicate` это `ValueError`. Сегодня `_crop_disk` в этом случае
+  молча отдаёт мусор: отрицательный конец среза заворачивается, и форма выходит неверная (ревью спеки: центр
+  (100, −100), r=30 → (230, 70, 3)). Это намеренное изменение, не перенос.
 - Привязка: `x0 = cx - side // 2`, ширина и высота ровно `side` — как в обоих местах (у `_crop_disk` `side = 2·half`, чётная).
-- **Выход — всегда копия, никогда view кадра** (`plugin.py:147` — «отвязать от SHM-буфера»; с 4.7b кадр — read-only view SHM).
+- **Выход — всегда копия, никогда view кадра** (`plugin.py:148` — «отвязать от SHM-буфера»; с 4.7b кадр — read-only view SHM).
+  У `center_crop` это перенос; у `_crop_disk` — **намеренное изменение** (сегодня квадрат внутри кадра отдаётся view), байты те же.
 - `side_from_radius` — формула `plugin.py:121-122`: `max(2, int(round(2·r·scale)) + 2·int(margin))`. Fallback «радиус
   неизвестен → `side_px`» (`size_mode`, `radius` пустой) остаётся в плагине — это знание регистра, не выреза.
 - `resize_square(crop, out)`: `out <= 0` или уже `out×out` → вход как есть; иначе `INTER_AREA` при уменьшении,
@@ -50,10 +54,12 @@
 - [ ] A2. `square_crop` напрямую на тех же входах — те же sha256, что A1 (функция = поведение плагина).
 - [ ] A3. Выход `square_crop` не делит память с кадром (`np.shares_memory(out, frame) is False`) во всех четырёх режимах,
       включая «квадрат целиком внутри»; на read-only кадре (`frame.flags.writeable = False`) — работает, выход записываемый.
-- [ ] A4. `square_crop(..., oob="bogus")` → `ValueError`, текст называет значение; `replicate` без пересечения → `ValueError`.
+- [ ] A4. `square_crop(..., oob="bogus")` → `ValueError`, текст называет значение; `replicate` без пересечения → `ValueError`
+      в трёх положениях: центр ниже кадра, далеко выше (`cy + side//2 < 0`) и далеко левее (`cx + side//2 < 0`).
 - [ ] A5. `side_from_radius(150, 1.0, 14) == 328` (рецепт `letter_robot_sim.yaml:250-254`); `side_from_radius(0, 1.0, 0) == 2`.
 - [ ] A6. `resize_square`: 328→128 — `INTER_AREA` (литерал sha256 до задачи), 64→128 — `INTER_LINEAR`, `out=0` — вход `is` выход.
 - [ ] A7. Существующие тесты `Plugins/processing/center_crop/tests/` и `Services/ml_train/tests/` — зелёные без правки;
       AST: `layer_render` не импортирует `dataset_gen`/`line_sim`/`ml_train`; `sentrux check .` зелёный.
 
-**Out of scope:** смена формулы `holdout_eval` (6.4); новые режимы выреза; круглая маска; генератор (6.2).
+**Out of scope:** смена формулы `holdout_eval` (6.4); новые режимы выреза; круглая маска; генератор (6.2);
+`layer_render/STATUS.md` — его ведёт 2.2, строку про `crop` дописывает лид при слиянии.

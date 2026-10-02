@@ -87,9 +87,12 @@
   порядка нет — `augment_config_to_effects` обходит ключи `EFFECTS`.
 - `apply_effects(frame_u8, specs, rng)`: `specs == []` → `frame.copy()`, ноль розыгрышей. Иначе кадр — float32; на каждый
   spec — `rng.random() < spec.prob` (розыгрыш **всегда**, и при `prob 1.0`, и при `0.0` — как сейчас), затем запись реестра.
-  Эффекты, работающие на uint8 (`jpeg` — множество `_U8_EFFECTS` рядом с `EFFECTS`), получают `clip→uint8` кадр; clip —
-  один раз перед первым таким эффектом и в конце; выход uint8 той же формы.
-- `EffectSpec` — frozen dataclass `(name, prob=1.0, params={})` (как `SolidFill` в `background.py`): неизвестное `name` →
+  Эффекты, работающие на uint8 (`jpeg` — множество `_U8_EFFECTS` рядом с `EFFECTS`), получают `np.clip(x, 0, 255).astype(uint8)`;
+  после U8-эффекта кадр снова `astype(float32)` — каждый U8-эффект получает свой clip, порядок списка любой. В конце —
+  clip→uint8; выход uint8 той же формы. (Канонический порядок — `jpeg` последним — даёт ровно нынешний один clip.)
+- `EffectSpec` — `@dataclass(frozen=True, eq=False)` `(name, prob=1.0, params: Mapping = field(default_factory=dict))`;
+  `__post_init__` проверяет и кладёт слитые с дефолтами параметры через `object.__setattr__` как `MappingProxyType`
+  (образец — `ScrollingTile`, `layer_render/interfaces.py:42-65`). Хешируемость не нужна (`eq=False` — по идентичности). Неизвестное `name` →
   `ValueError` со списком известных; неизвестный ключ `params` → `ValueError` с именем ключа и списком допустимых;
   отсутствующий ключ → дефолт из `EFFECT_PARAMS`; `prob` вне [0, 1] → `ValueError`.
 - `EFFECT_PARAMS: dict[str, dict[str, default]]` — имена параметров и дефолты **равны** полям соответствующих моделей
@@ -104,13 +107,20 @@
 - [ ] A1. Эквивалентность: оракул (дословная копия старого `apply_photometric` в тесте, снятая **на коде до задачи**) и новый
       `apply_photometric` на 50 seed × 3 конфига (все 12 эффектов `enabled, prob 1.0`; дефолтный `AugmentConfig`; все
       выключены) × кадр 64×48 — побайтно равные кадры **и** равное `rng.bit_generator.state` после вызова.
+- [ ] A1b. Тела функций перенесены дословно: оракул A1 зовёт модульные имена, а после переезда это те же объекты — сам по себе
+      он тела не проверяет. Поэтому тестер на коде **до** задачи снимает sha256-литералы: по одному на конфиг A1 (байты 50
+      кадров подряд, seed 0…49) и по одному на каждую из 11 функций эффектов на фиксированных параметрах — после задачи те же.
+- [ ] A1c. Нестандартный порядок: `apply_effects(frame, [EffectSpec("jpeg"), EffectSpec("noise")], rng)` — работает, выход
+      uint8 той же формы; два U8-эффекта подряд — тоже.
 - [ ] A2. `apply_effects(frame, [], rng)` — состояние rng не изменилось, кадр равен входу и не является им (`is not`).
 - [ ] A3. `list(EFFECTS)` — ровно канонический порядок из DESIGN (литерал в тесте).
 - [ ] A4. Для каждого эффекта `EFFECT_PARAMS[n]` равен `getattr(AugmentConfig(), n).model_dump(exclude={"enabled","prob"})`
       (кортеж ↔ список нормализовать).
 - [ ] A5. `EffectSpec("nope")` → `ValueError`, в тексте `glare` и `jpeg`; `EffectSpec("noise", params={"sigma": 1})` →
       `ValueError` с `sigma` и `std`; `EffectSpec("noise", prob=1.5)` → `ValueError`.
-- [ ] A6. Для каждого имени `n` из `augment.py:27-177`: `Services.dataset_gen.core.augment.<n> is Services.layer_render.effects.<n>`;
+- [ ] A6. Для каждого из 11 имён `apply_glare, make_motion_kernel, apply_motion_blur, apply_brightness_contrast,
+      apply_color_temperature, apply_channel_shift, apply_shadow, apply_occlusion, apply_gamma, apply_vignette, apply_jpeg`:
+      `Services.dataset_gen.core.augment.<n> is Services.layer_render.effects.<n>` (`_uniform` — приватный, не реэкспортируется);
       `Services/line_sim/core/factory.py:15` (`apply_occlusion`) работает без правки.
 - [ ] A7. `test_augment.py`, `test_engine.py`, `test_export_preview.py` (`Services/dataset_gen/tests/`), золотые эталоны
       ([goldens.md](goldens.md)) и тесты `Services/layer_render/tests/` — зелёные без правки литералов.
