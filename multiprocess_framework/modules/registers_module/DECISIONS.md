@@ -184,6 +184,18 @@ field_type, meta] if meta else field_type, default)})()` — над уже де�
   `list[Annotated[int, Field(ge=0)]]` с `[-1]`: оригинал отвергает, копия принимает),
   модели, `tuple` кроме трёх `int`. `Any` совпадает. В реальных регистрах таких полей
   сейчас 0 (обход каталога прогоном).
+- **2026-10-02, Task 1b.2d-2:** ограничение «class-level python-валидаторы не доезжают»
+  для двух регистров, которые их несли (`otel_export` — 4 `field_validator` + 1
+  `model_validator`, унаследованные из `OtelExportConfig`; `line_filter` — 1
+  `model_validator`), СНЯТО переносом правил в данные: `FieldMeta(rules=...)` (закрытый
+  словарь `strip`/`pattern`/`value_pattern`/`choices_map`/`le_field`, ADR-DS-010) едет в
+  копию через `FieldMeta.to_dict()/from_dict()` и исполняется на ней тем же кодом, что на
+  оригинале. Контракт-тест `adapters/tests/test_1b2d_no_python_validators_contract.py`
+  падает на любом новом `field_validator`/`model_validator` у register-класса каталога —
+  новое правило обязано стать данными. `set_field_value` пишет через
+  `SchemaMixin.apply_values` (всё или ничего: отказ ничего не оставляет в регистре, текст
+  отказа без введённого значения) и уведомляет подписчиков и `send_callback`
+  СОХРАНЁННЫМ (нормализованным) значением, а не введённым (`warn` → `WARNING`).
 - **Финальный судья — бэкенд.** Копия существует только на GUI-стороне для
   немедленной обратной связи форме; фактическая запись регистра процесса идёт через
   `send_callback`/`register_update` и там же валидируется ещё раз (`cmd_set_config`,

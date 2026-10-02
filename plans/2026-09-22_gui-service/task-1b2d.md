@@ -53,7 +53,10 @@
   - `pattern: str` + `pattern_message: str` — `re.fullmatch` по строке. otel `endpoint`:
     `https?://[^\s/?#]+/[^\s?#]*[^\s/?#][^\s?#]*` (teamlead сверяет с корпусом
     `Services/otel_export/tests/test_endpoint_signal_path_hazard.py` и вправе поправить регулярку, записав итог
-    сюда). `pattern_message` обязан содержать `/v1/logs` и `404` (их требует корпус). **Принятый дрейф** против
+    сюда). **Итог teamlead (2026-10-02): регулярка оставлена без поправок** — литерал
+    `https?://[^\s/?#]+/[^\s?#]*[^\s/?#][^\s?#]*` в `Services/otel_export/config.py::ENDPOINT_RULES`; корпус:
+    8/8 неполных адресов отвергнуты с `/v1/logs` и `404` в тексте, 3/3 полных приняты дословно, расхождений
+    с прежним `urlparse` на корпусе нет (дрейф ниже — только вне корпуса). `pattern_message` обязан содержать `/v1/logs` и `404` (их требует корпус). **Принятый дрейф** против
     `urlparse`: отвергаются `HTTP://…` (верхний регистр схемы), адреса с `?` и `#`, пробел внутри; `http://[::1/…`
     даёт отказ валидации вместо `ValueError` из `urlparse`. Текст отказа для пустого адреса — `pattern_message`.
   - `value_pattern: str` + `pattern_message` — `re.fullmatch` для каждого значения `dict` (otel `headers`:
