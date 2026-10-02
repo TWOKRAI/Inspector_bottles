@@ -1,33 +1,32 @@
 ---
 date: 2026-10-02
-topic: layer-render волна 5 (Task 2.4a) — спека написана, дальше ревью спеки
+topic: layer-render волна 5 — Task 2.4a влита; дальше спека 2.4b
 machine: Windows
 branch: feat/layer-render
 ---
 
 ## Состояние
 
-- Волна 4 влита: 2.3 `ca0e6203a`, 6.4 `e18d22d44`, закрытие `7f414a2dc`; радиус 1597 passed, 3 skipped. Временные
-  worktree и ветки волны 4 удалены. `main` не двигался (сосед — сессия 19, transport-single-policy: SHA сообщить до движения `main`).
-- Решения владельца 2026-10-02 (в журнале `plan.md`): волна 5 — только 2.4; 2.4 режется на **2.4a** (пресет + каталог,
-  чистые переносы) и **2.4b** (фабрика → `RenderedObject` + превью); `SpriteCatalog` переезжает **целиком** с `CatalogConfig`,
-  метой, `SymmetryType`, процедурными фонами; три теста в `layer_render/tests` с импортом `line_sim` — утверждённое исключение.
-- Спека 2.4a — `plans/layer-render/phase-2-core-2.4a.md` (вынесена из `phase-2-core.md`; первая версия `67bca9cf0`; ревью спеки — reviewer `ad12e5fcbddf2455c`). Разведка: agentId `a60b3d02cfe190df2`
-  (Explore, отчёт в транскрипте; ключевые факты вошли в спеку и TRAPS).
-- Страница для владельца обновлена: claude.ai/artifact/2K3PQc8BqtrCAghdgg2ppp (версия 2 — система редактора целиком, планы).
-- Память: `feedback_one_control_proves_sufficiency_not_exclusivity` (dual-write, `90ac5c2c8`).
+- **2.4a влита** `be42ba755` (реализация `6c242c9e5`, инъекции `20368ee6d`, правки ревью `a696ec57d`, закрытие `d4126d5f6`).
+  Радиус после слияния: layer_render + line_sim + dataset_gen 1578 passed, 3 skipped; до слияния ещё ml_train 141, Plugins/sim 743.
+  Спека — `plans/layer-render/phase-2-core-2.4a.md` (ревью спеки 2 итерации). Матрица — `docs/reviews/2026-10-02_task-2.4a-lead-injections.md`.
+- `main` не двигался (сосед — сессия 19, transport-single-policy: SHA сообщить до движения `main`).
+- agentId трека: reviewer спеки `ad12e5fcbddf2455c`, tester `abd50f618b77d078d`, developer `a7aa8eddb36a6a74f`, reviewer кода `afc0aa8cf3f434b74`.
+  Для 2.4b: developer — тот же (re-summon по agentId, спеку отдать с SHA и приказом перечитать); tester и reviewer кода — свежие.
+- Память: `feedback_pytest_import_order_hides_a_cycle` (dual-write, `d4126d5f6`).
 
 ## Next step
 
-1. **Стадия 0:** reviewer Opus, синхронно, `MODE: plan` на текст Task 2.4a (DESIGN / FILES / Acceptance). Правки — в спеку.
-2. Слепой tester (Sonnet) в worktree на коммите после правок спеки, до кода; файл `test_acceptance_2_4a_preset_catalog.py`;
-   литералы A3/A4 снимаются на коде до переезда.
-3. developer (Sonnet) в своём worktree; коммитит лид. Затем инъекции лида (оба набора), ревью Opus, слияние.
-4. 2.4b — спека после слияния 2.4a (разведка уже есть: `make()` в line_sim обязан вернуть `LayeredObject`; приватные
-   `_preset`, `_catalog`, `_build_defect_blob`, `_DEFECT_*` трогают тесты; `LayeredObject` нужен второй конструктор из `RenderedObject`).
+1. Спека Task 2.4b (лид): `ObjectFactory` → `layer_render.factory`, `RenderedObject`; `line_sim.ObjectFactory.make` → `LayeredObject`
+   (второй конструктор из `RenderedObject`); `preview` на `RenderedObject`; эталоны кадров прежние. Разведка: приватные `_preset`,
+   `_catalog`, `_build_defect_blob`, `_DEFECT_*` трогают тесты. Файл спеки — отдельный (`phase-2-core-2.4b.md`): `phase-2-core.md` у бюджета.
+2. Стадия 0 → слепой tester в worktree → developer → инъекции → ревью → слияние.
 
 ## Open
 
 - Follow-up: `compose_layers` на стеке без слоёв на канве падает сырым `ValueError: max() iterable argument is empty`.
-- 6.4: CLI-границы шире регистра `center_crop` (0.1..5.0) — записано в докстринге, не исправлено.
+- Follow-up: `line_sim` `test_font_tool_rejects_font_without_glyph`, `test_letter_catalog_tool_missing_letter` красные с
+  `PYTHONIOENCODING=utf-8` (и до 2.4a) — декодирование stderr подпроцесса.
+- К 2.4b: докстринг `layer_render/preset.py` ссылается на `dataset_gen.core.config.GeneratorConfig`, `catalog_bridge`, LS-007/013.
+- 6.4: CLI-границы шире регистра `center_crop` (0.1..5.0) — в докстринге, не исправлено.
 - `docs/claude/OPEN_QUESTIONS.md` 168 КБ при бюджете 32 КБ — отдельной задачей.
