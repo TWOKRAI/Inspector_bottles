@@ -714,7 +714,9 @@ def test_old_archive_plan_in_unknown_format_gives_no_findings(make_root, progres
     )
     cp = progress(root, "--check")
     assert cp.returncode == 0, check_out(cp)[:500]
-    assert "legacy" in plans_json(root), "якорь: архивный план виден в --json"
+    assert any("legacy" in key for key in plans_json(root)), (
+        "якорь: архивный план виден в --json (ключ — basename без .md)"
+    )
     assert not any(
         "legacy" in ln for ln in check_out(cp).splitlines() if re.search(r"NO_TASKS|UNKNOWN_STATUS|DUP_|NO_DATE", ln)
     )
