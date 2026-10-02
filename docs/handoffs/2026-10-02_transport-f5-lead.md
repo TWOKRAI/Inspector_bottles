@@ -30,7 +30,8 @@
   - 5.2 `b2ab22ff1` (team-t52): 12/12 по предсказанию; находка M6b — страж AST слеп к `sleep` в помощнике `_actuate` (держит только p99). Решения лида в работе: fire = диспетчер `payload(count)`, `tolerance_s` на запись, WARNING алиаса раз на экземпляр, `test_verdict_documents` переписан (спека «без изменений» ошибочна — поправить в плане при слиянии). Открыто: счётчики late/unfired — процессные, не по плагину; PLUGIN_API_VERSION не поднят → OPEN_QUESTIONS; ADR-PM-051.
   - 5.3 `2254a2b2c` + `ffb698fd9` (team-t53): 13/13; L10 (замок слияния в хвост) ловит только авторский тест с окном 0.3 с. Отклонения приняты: `test_t47d2b_author.py` и кейс `is marker` → равенство. Pickle 1078 id = 37 968 Б.
   - 5.4 `0bd3fce1f` (team-t54): 8/8; **K6/K7 зелёные — звено GenericProcess → SourceProducer не охранено ни одним тестом**; исправление обязательно (тест на настоящем GenericProcess, убивающий K6 и K7) — автору (developer, agentId ниже, 157k) вместе с находками ревью. Авторских hazard-тестов у 5.4 нет — дефект брифа лида. Флейк `test_mark_only_after_confirmed_death` — прогнать на базе `4aed4a3dd`.
-- **Следующие шаги после компакта:** (1) три СВЕЖИХ синхронных ревьюера (5.2, 5.3, 5.4), в бриф — итоги инъекций из `docs/reviews/2026-10-02_task-5.{2,3,4}-injections/`; (2) правки ревью — авторам по agentId; (3) полный `run_framework_tests.py` + `logger_module/tests` ×3 на t55 (когда никто не грузит CPU) → SHA соседу 60 → слияние t55 в main; (4) слияние t52/t53/t54 в `feat/transport-f5` (конфликт: `multiprocess_framework/DECISIONS.md` у 5.3 + `scripts.sync` лидом; номера ADR-PM-051 / ADR-PMM-034); (5) стенды D100 (5.2), P10 (5.3), s0 (5.4) под `stand.lock`.
+- **Ревью волны 2 (сессия 20):** 5.2 CHANGES REQUESTED (страж транзитивно, сброс счётчиков, WARNING на первом `process()`, фикстура записи 5.3; цель после закрытого окна → CTO, OPEN_QUESTIONS); 5.3 APPROVED (тексты ⌈N/1500⌉ и режим красного L10, проба `acquire(blocking=False)`, `_CARRIED_SYSTEM_FIELDS` + поля записи); 5.4 CHANGES REQUESTED (тест K6/K7 на настоящем GenericProcess + 4 hazard-теста, снять `@pytest.mark.timeout`). Правки отправлены авторам по agentId — ждём SHA. **Условие слияния:** 5.3 не в main без 5.2 (в дереве 5.3 `robot_control` считает запись за 1 кадр); P10 — только на дереве с обеими. **На слиянии лиду:** `python -m scripts.sync` (дрифт `ADR-PMM-001…033 → 034`), поправить в плане «`test_verdict_documents` без изменений» и «WARNING один раз на процесс» → «на экземпляр».
+- **Следующие шаги после компакта (исходные):** (1) три СВЕЖИХ синхронных ревьюера (5.2, 5.3, 5.4), в бриф — итоги инъекций из `docs/reviews/2026-10-02_task-5.{2,3,4}-injections/`; (2) правки ревью — авторам по agentId; (3) полный `run_framework_tests.py` + `logger_module/tests` ×3 на t55 (когда никто не грузит CPU) → SHA соседу 60 → слияние t55 в main; (4) слияние t52/t53/t54 в `feat/transport-f5` (конфликт: `multiprocess_framework/DECISIONS.md` у 5.3 + `scripts.sync` лидом; номера ADR-PM-051 / ADR-PMM-034); (5) стенды D100 (5.2), P10 (5.3), s0 (5.4) под `stand.lock`.
 - Мусор вне репо: `C:/t54ref` (копия фреймворка тестера 5.4) — удаление `rm -rf` запрещено правилами, просить владельца.
 
 ## Следующие шаги (по порядку)
@@ -54,7 +55,10 @@
 | tester RED 5.4 | `a1fc33e1c2ae840eb` | 187k |
 | teamlead 5.2 (реализация, team-t52) | `a8e2b5cc9f20512f9` | в работе, фон |
 | teamlead 5.3 (реализация, team-t53) | `aedeeac947002f768` | в работе, фон |
-| developer 5.4 (реализация, team-t54) | `a7db2e08b1b860d78` | в работе, фон; шаг 2: блокировки нет |
+| developer 5.4 (реализация, team-t54) | `a7db2e08b1b860d78` | дозван на правки ревью 1 |
+| reviewer 5.2 (код) | `a4ecb97af27002458` | 206k — дозвать на раунд 2 |
+| reviewer 5.3 (код) | `a6f6cd104159fc4a1` | 224k — APPROVED, раунд 2 не нужен |
+| reviewer 5.4 (код) | `a95dd3d836dfd45bf` | 228k — дозвать на раунд 2 |
 
 ## Открыто
 - Segfault `test_sampler_ceiling_policy` не воспроизведён — записать в `OPEN_QUESTIONS.md` при закрытии 5.5.
