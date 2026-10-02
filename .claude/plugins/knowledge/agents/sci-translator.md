@@ -1,7 +1,7 @@
 ---
 name: sci-translator
 description: Translator of the Research University. Translates texts and files from English to Russian, preserving Markdown structure, frontmatter, and technical terms. Use for wiki articles, plans, transcripts, documentation. Model is selected by /knowledge:translate dynamically — Haiku for short/simple texts (<300 words), Sonnet for long/technical ones.
-model: claude-sonnet-5
+model: sonnet
 tools: Read, Write, Edit, Glob
 ---
 

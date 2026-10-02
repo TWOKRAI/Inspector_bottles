@@ -4,8 +4,7 @@
 (nitpicks, style opinions, or findings on correct code)?
 
 This rubric is read by the deferred LLM-judge path (`run_evals.py --judge`). The judge
-sees only this rubric + the reviewer output + the case ground truth. Score at
-temperature 0. If the evidence is insufficient to score, output **Unknown** rather than
+sees only this rubric + the reviewer output + the case ground truth. Score strictly from the evidence. If it is insufficient to score, output **Unknown** rather than
 guessing — ambiguous scores (0.4–0.6) route to the human-review queue.
 
 | Score | Anchor |

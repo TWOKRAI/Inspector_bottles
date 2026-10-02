@@ -95,8 +95,7 @@ and the graders fire.
    - A trial passes only if recall is 1.0, zero decoy hits, verdict correct, format
      valid, and boundary intact.
 2. **LLM-judge (deferred).** One isolated judge per subjective dimension
-   (`rubrics/{signal_noise,severity,thoroughness,boundary_discipline}.md`), temperature
-   0, with an explicit *Unknown* escape hatch. Scores 0.4–0.6 go to a human-review
+   (`rubrics/{signal_noise,severity,thoroughness,boundary_discipline}.md`), with an explicit *Unknown* escape hatch. Scores 0.4–0.6 go to a human-review
    queue, not a binary.
 
 Aggregate: **pass^k** (passed every one of k trials — the honest metric for a reviewer
@@ -104,14 +103,14 @@ you must trust) is the headline; pass@k and mean recall ± Wilson CI are seconda
 
 ## Deferred layers
 
-`--invoke` (live reviewer via `claude -p`) and `--judge` (LLM-judge, `claude-opus-4-8`)
+`--invoke` (live reviewer via `claude -p`) and `--judge` (LLM-judge, `opus` alias)
 both currently exit with a "deferred" message. Wiring them is the Phase 3.c follow-up:
 
 - Add `ANTHROPIC_API_KEY` as a workflow secret and create
   `.github/workflows/evals-nightly.yml` (`schedule` cron + `workflow_dispatch`) — never
   per-PR (cost + non-determinism). Run small `k` (3–5) and report pass^k + Wilson CI.
-- Judge default model `claude-opus-4-8` (same tier as the reviewer under test — no
-  silent downgrade; the cheaper `claude-sonnet-5` is an explicit high-volume option).
+- Judge default: the `opus` alias (same tier as the reviewer under test — no
+  silent downgrade; the `sonnet` alias is an explicit high-volume option).
   Use `messages.count_tokens` for cost estimation, never tiktoken.
 - Local Ollama is **not** a viable default judge: the installed models are
   embedding-only (`does not support generate`); a generative model must be pulled

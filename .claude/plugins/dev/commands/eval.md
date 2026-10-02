@@ -39,7 +39,7 @@ flags and deferred to a follow-up (they need an `ANTHROPIC_API_KEY` and run nigh
 never per-PR):
 
 - `--invoke` — live-invoke the reviewer via headless `claude -p` per case.
-- `--judge` — add per-dimension LLM-judge scores (`claude-opus-4-8`, temperature 0,
+- `--judge` — add per-dimension LLM-judge scores (judge on the `opus` alias, no sampling parameters,
   one isolated judge per rubric in `dev/evals/reviewer/rubrics/`; ambiguous 0.4–0.6
   scores route to a human-review queue).
 

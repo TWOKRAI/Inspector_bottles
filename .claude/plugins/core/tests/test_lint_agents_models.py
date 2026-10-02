@@ -62,3 +62,75 @@ def test_agent_model_is_current(path: Path):
         f"({sorted(linter.CURRENT_MODELS)}). Предпочтительна форма-алиас: opus/sonnet/haiku/fable — "
         "она не устаревает при выходе нового поколения."
     )
+
+
+def test_latest_generation_is_known_and_current():
+    """Литералы, не константы линтера: ID нового поколения обязаны проходить гейт."""
+    linter = _load_linter()
+    for model in ("opus", "sonnet", "haiku", "fable", "claude-opus-5-5", "claude-sonnet-5-5",
+                  "claude-fable-5-1", "claude-haiku-4-5"):
+        assert model in linter.KNOWN_MODELS, f"{model} не известен линтеру"
+        assert model in linter.CURRENT_MODELS, f"{model} не считается текущим"
+
+
+def test_previous_generation_is_known_but_not_current():
+    """Прошлое поколение — допустимый пин, но не «последняя модель яруса»."""
+    linter = _load_linter()
+    for model in ("claude-opus-4-8", "claude-sonnet-5"):
+        assert model in linter.KNOWN_MODELS, f"{model} выпал из известных"
+        assert model not in linter.CURRENT_MODELS, f"{model} застрял в текущих"
+
+
+def _write_probe_agent(tmp_path: Path, model: str) -> Path:
+    path = tmp_path / "probe.md"
+    path.write_text(
+        f"---\nname: probe\ndescription: probe agent\nmodel: {model}\n---\nBody.\n", encoding="utf-8"
+    )
+    return path
+
+
+def test_lint_warns_on_previous_generation_model(tmp_path: Path):
+    """Поведение, не данные: агент на прошлом поколении получает предупреждение «not latest-of-tier»."""
+    linter = _load_linter()
+    errors, warnings = linter.lint_file(_write_probe_agent(tmp_path, "claude-opus-4-8"))
+    assert errors == [], errors
+    assert any("latest-of-tier" in w for w in warnings), warnings
+
+
+@pytest.mark.parametrize("model", ["opus", "claude-opus-5-5", "claude-sonnet-5-5"])
+def test_lint_is_silent_on_latest_model(tmp_path: Path, model: str):
+    """Обратная сторона: актуальная модель не даёт предупреждений про модель."""
+    linter = _load_linter()
+    errors, warnings = linter.lint_file(_write_probe_agent(tmp_path, model))
+    assert errors == [], errors
+    assert not [w for w in warnings if "model" in w], warnings
+
+
+def _roster_fixture(tmp_path: Path, roster_tier: str):
+    """Плагин `dev` с одним агентом (model: opus) и таблицей состава, где роль названа ярусом `roster_tier`."""
+    agents = tmp_path / "dev" / "agents"
+    agents.mkdir(parents=True)
+    (tmp_path / "dev" / "modes").mkdir()
+    agent = agents / "manager.md"
+    agent.write_text("---\nname: manager\ndescription: m\nmodel: opus\n---\nBody.\n", encoding="utf-8")
+    (tmp_path / "dev" / "modes" / "dev.md").write_text(
+        "| Agent | Model | Skill | When |\n|---|---|---|---|\n"
+        f"| **manager** | {roster_tier} | `/dev:plan` | plan |\n",
+        encoding="utf-8",
+    )
+    return agents, {"manager": agent}
+
+
+def test_roster_tier_drift_is_reported(tmp_path: Path):
+    """Таблица состава говорит Sonnet, frontmatter — opus: линтер обязан назвать расхождение."""
+    linter = _load_linter()
+    agents, files = _roster_fixture(tmp_path, "Sonnet")
+    errors = linter.cross_check_model_tiers(agents, files)
+    assert len(errors) == 1 and "manager" in errors[0], errors
+
+
+def test_roster_tier_match_is_silent(tmp_path: Path):
+    """Ярус в таблице совпадает с frontmatter: тишина."""
+    linter = _load_linter()
+    agents, files = _roster_fixture(tmp_path, "Opus")
+    assert linter.cross_check_model_tiers(agents, files) == []

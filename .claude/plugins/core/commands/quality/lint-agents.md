@@ -18,10 +18,10 @@ name-to-filename match, and cross-references from CLAUDE.md.
 ## What it checks
 
 1. Frontmatter is present and parses
-2. Required keys: `name`, `description`, `model`, `tools`
+2. Required keys: `name`, `description`, `model` (`tools` is optional: omit it to inherit the project tool set)
 3. `name` matches the file name
-4. `model` is a known Claude ID (claude-opus-4-7, claude-sonnet-5, etc.)
-5. `tools` is a non-empty comma-separated list
+4. `model` is a known Claude ID (`opus`/`sonnet`/`haiku`/`fable` aliases or claude-opus-5-5, claude-sonnet-5-5, etc.)
+5. when present, `tools` is a non-empty list
 6. `description` ≤ 500 characters
 7. The body has at least one markdown heading
 8. Cross-check: role names in CLAUDE.md have corresponding files

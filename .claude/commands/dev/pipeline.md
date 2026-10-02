@@ -214,12 +214,9 @@ Launch the **reviewer** agent (Opus, `run_in_background: false` — the verdict 
 with the implementer's errors: the same model weights tend to repeat the author's blind spot
 ("uncorrelated errors" — an independent reviewer catches what the author structurally cannot see).
 The ideal is review by a model of a **different family/version** than the one that wrote the code.
-- **Config (once it becomes possible):** `reviewer_model: claude-opus-4-9` in this file or
-  `.claude/modes/_stack.md` → the orchestrator brings up reviewer on the specified model in S6.
-- **Current status — advisory-only:** Claude Code is tied to the `claude-*` family, cross-vendor
-  review is unavailable; for now pick the **most different available** configuration (the newest version
-  of Opus / extended thinking for reviewer), even if the implementer used the same one. The
-  `reviewer_model:` field records the intent for the future; in practice reviewer stays Opus.
+- **Status — advisory-only:** Claude Code is tied to the `claude-*` family, cross-vendor
+  review is unavailable. Pick the **most different available** configuration: `reviewer` on the
+  `opus` alias (always the newest Opus), even if the implementer used the same tier.
 
 ### 7. Integration (S7)
 
