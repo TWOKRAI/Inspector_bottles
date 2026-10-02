@@ -172,3 +172,29 @@ def test_effects_registry_entries_use_only_their_own_param_keys():
         arg = np.clip(base, 0, 255).astype(np.uint8) if name == "jpeg" else base.copy()
         out = fn(arg, EFFECT_PARAMS[name], np.random.default_rng(0))
         assert out.shape == base.shape, name
+
+
+# --- fix-раунд ревью: чистота записей реестра и dtype входа -------------------------------------------
+
+
+@pytest.mark.parametrize("name", list(EFFECTS))
+def test_registry_entry_leaves_its_input_array_unchanged(name):
+    """Запись реестра не правит массив вызывающего (раньше noise делал `x +=` и возвращал тот же объект)."""
+    base = np.random.default_rng(3).uniform(0, 255, (24, 32, 3)).astype(np.float32)
+    arg = np.clip(base, 0, 255).astype(np.uint8) if name == "jpeg" else base.copy()
+    before = arg.copy()
+    out = EFFECTS[name](arg, EFFECT_PARAMS[name], np.random.default_rng(0))
+    assert arg.tobytes() == before.tobytes(), f"{name}: запись реестра изменила входной массив"
+    assert out is not arg, f"{name}: вернула тот же объект"
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int16])
+@pytest.mark.parametrize(
+    "specs", [[], [EffectSpec("noise", prob=0.0)], [EffectSpec("noise")]], ids=["empty", "closed", "open"]
+)
+def test_non_uint8_frame_raises_value_error_naming_dtype_before_any_draw(dtype, specs):
+    rng = np.random.default_rng(6)
+    before = rng.bit_generator.state
+    with pytest.raises(ValueError, match=np.dtype(dtype).name):
+        apply_effects(_FRAME.astype(dtype), specs, rng)
+    assert rng.bit_generator.state == before

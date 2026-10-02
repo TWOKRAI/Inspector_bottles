@@ -245,9 +245,8 @@ def _fx_channel_shift(x: np.ndarray, p: Mapping[str, Any], rng: np.random.Genera
 
 def _fx_noise(x: np.ndarray, p: Mapping[str, Any], rng: np.random.Generator) -> np.ndarray:
     std = _uniform(rng, p["std"])
-    # standard_normal(dtype=float32) — без промежуточного float64-массива
-    x += rng.standard_normal(x.shape, dtype=np.float32) * std
-    return x
+    # standard_normal(dtype=float32) — без промежуточного float64-массива; вход не меняем (запись реестра чистая)
+    return x + rng.standard_normal(x.shape, dtype=np.float32) * std
 
 
 def _fx_jpeg(x_u8: np.ndarray, p: Mapping[str, Any], rng: np.random.Generator) -> np.ndarray:
@@ -258,6 +257,7 @@ def _fx_jpeg(x_u8: np.ndarray, p: Mapping[str, Any], rng: np.random.Generator) -
 EffectFn = Callable[[np.ndarray, Mapping[str, Any], np.random.Generator], np.ndarray]
 
 # Порядок вставки = канонический порядок прохода. Добавить эффект = функция + запись здесь + запись в EFFECT_PARAMS.
+# Точка расширения на этапе импорта: во время работы EFFECTS/EFFECT_PARAMS не менять.
 EFFECTS: dict[str, EffectFn] = {
     "glare": _fx_glare,
     "shadow": _fx_shadow,
@@ -298,8 +298,9 @@ class EffectSpec:
     """Один шаг списка эффектов: имя из `EFFECTS`, вероятность применения, параметры.
 
     Pre: `name` в `EFFECTS`; ключи `params` ⊆ ключей `EFFECT_PARAMS[name]`; `0 <= prob <= 1` — иначе `ValueError`.
-    Post: `params` — read-only `MappingProxyType`, недостающие ключи добавлены из `EFFECT_PARAMS`, глубокая копия
-    (правка словаря вызывающего на spec не влияет). `eq=False` — сравнение по идентичности.
+    Post: `params` — `MappingProxyType` (read-only только верхний уровень: вложенные списки изменяемы), недостающие
+    ключи добавлены из `EFFECT_PARAMS`, глубокая копия (правка словаря вызывающего на spec не влияет).
+    `eq=False` — сравнение по идентичности.
     """
 
     name: str
@@ -324,10 +325,13 @@ class EffectSpec:
 def apply_effects(frame_u8: np.ndarray, specs: Sequence[EffectSpec], rng: np.random.Generator) -> np.ndarray:
     """Применяет список эффектов к uint8-кадру HxWx3 RGB по порядку списка.
 
-    Pre: `frame_u8` — HxWx3 uint8; `specs` — `EffectSpec` в порядке применения.
+    Pre: `frame_u8` — HxWx3 uint8 (иной dtype — `ValueError`, проверка до любого розыгрыша); `specs` — `EffectSpec`
+    в порядке применения.
     Post: uint8 той же формы; вход не меняется; пустой список — копия входа без единого розыгрыша `rng`.
     Вентиль `rng.random() < prob` тянется ВСЕГДА (и при prob 0.0/1.0) — поток rng не зависит от значения prob.
     """
+    if frame_u8.dtype != np.uint8:
+        raise ValueError(f"apply_effects: ожидался кадр dtype=uint8, получено dtype={frame_u8.dtype}")
     if not specs:
         return frame_u8.copy()
     x = frame_u8.astype(np.float32)
