@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
+import re
 import sys
 from pathlib import Path
 
@@ -18,15 +20,37 @@ def _pad_color_bgr(text: str) -> tuple[int, int, int]:
     """Разбор `B,G,R` → кортеж из трёх int в 0..255; иначе ArgumentTypeError (введённое не повторяем)."""
     error = argparse.ArgumentTypeError("ожидается формат B,G,R: три целых числа 0..255 через запятую")
     parts = text.split(",")
-    if len(parts) != 3:
+    # Только ASCII-цифры: int() терпит пробелы, «1_0», полноширинные цифры — регистр их не примет.
+    if len(parts) != 3 or not all(re.fullmatch(r"[0-9]{1,3}", p) for p in parts):
         raise error
-    try:
-        values = tuple(int(p) for p in parts)
-    except ValueError:
-        raise error from None
-    if not all(0 <= v <= 255 for v in values):
+    values = tuple(int(p) for p in parts)
+    if not all(v <= 255 for v in values):
         raise error
     return values  # type: ignore[return-value]
+
+
+def _radius_scale(text: str) -> float:
+    """Конечное число > 0 (как регистр `center_crop`: 0, <0, nan, inf отвергаются). Введённое не повторяем."""
+    error = argparse.ArgumentTypeError("ожидается конечное число больше 0")
+    try:
+        value = float(text)
+    except ValueError:
+        raise error from None
+    if not math.isfinite(value) or value <= 0:
+        raise error
+    return value
+
+
+def _non_negative_int(text: str) -> int:
+    """Целое >= 0 (0 допустим: для `--output-size` это «без ресайза»). Введённое не повторяем."""
+    error = argparse.ArgumentTypeError("ожидается целое число не меньше 0")
+    try:
+        value = int(text)
+    except ValueError:
+        raise error from None
+    if value < 0:
+        raise error
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,10 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     p_eval.add_argument("--device", default="cpu")
     # Параметры выреза: default=None — дефолты живут только в сигнатуре evaluate_holdout.
     p_eval.add_argument(
-        "--radius-scale", type=float, default=None, help="масштаб радиуса диска (дефолт в evaluate_holdout)"
+        "--radius-scale", type=_radius_scale, default=None, help="масштаб радиуса диска (дефолт в evaluate_holdout)"
     )
-    p_eval.add_argument("--margin-px", type=int, default=None, help="поля вокруг диска, px (дефолт в evaluate_holdout)")
-    p_eval.add_argument("--output-size", type=int, default=None, help="сторона выхода, px; 0 — без ресайза")
+    p_eval.add_argument(
+        "--margin-px", type=_non_negative_int, default=None, help="поля вокруг диска, px (дефолт в evaluate_holdout)"
+    )
+    p_eval.add_argument(
+        "--output-size", type=_non_negative_int, default=None, help="сторона выхода, px; 0 — без ресайза"
+    )
     p_eval.add_argument("--pad-color-bgr", type=_pad_color_bgr, default=None, help="цвет заливки у края кадра: B,G,R")
 
     sub.add_parser("archs", help="доступные архитектуры")

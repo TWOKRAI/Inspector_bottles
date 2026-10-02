@@ -131,7 +131,8 @@ pytest Services/ml_train/tests/   # config/metrics/selection — без torch;
 ## Валидация на реальном hold-out (`eval`)
 
 ```bash
-python -m Services.ml_train eval <model_id> <holdout_dir> [--models-dir data/models]     [--radius-scale 1.0] [--margin-px 14] [--output-size 128] [--pad-color-bgr B,G,R]
+python -m Services.ml_train eval <model_id> <holdout_dir> [--models-dir data/models] \
+    [--radius-scale 1.0] [--margin-px 14] [--output-size 128] [--pad-color-bgr B,G,R]
 ```
 
 Раскладка hold-out: `<holdout_dir>/<буква>/<угол>.jpg`. Кадр режется **по формуле конвейера** перед `ml_inference`

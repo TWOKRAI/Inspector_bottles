@@ -18,6 +18,7 @@
 
 Запуск:
     python -m Services.ml_train eval <model_id> <holdout_dir> [--models-dir data/models]
+        [--radius-scale 1.0] [--margin-px 14] [--output-size 128] [--pad-color-bgr B,G,R]
 """
 
 from __future__ import annotations
@@ -54,7 +55,8 @@ def _crop_disk(
 ) -> np.ndarray:
     """КВАДРАТНЫЙ вырез вокруг диска по формуле конвейера (как `CenterCropPlugin`).
 
-    Сторона = `side_from_radius(r, radius_scale, margin_px)` = 2·r·radius_scale + 2·margin_px.
+    Сторона = `side_from_radius(r, radius_scale, margin_px)` = max(2, round(2·r·radius_scale) + 2·margin_px)
+    (округление и нижняя граница 2 px — в `side_from_radius`).
     Квадрат обязателен: при resize_policy=stretch прямоугольный вырез растянул бы диск
     и сдвинул угол. У края кадра недостающие поля заливаются `pad_color_bgr` (`oob="pad"`);
     квадрат без пересечения с кадром даёт чистый холст этого цвета, исключения нет.

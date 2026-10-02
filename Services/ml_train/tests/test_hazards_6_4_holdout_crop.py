@@ -94,7 +94,7 @@ def _spy_eval(monkeypatch) -> dict:
     [
         (["--margin-px", "0"], {"margin_px": 0}),
         (["--output-size", "0"], {"output_size": 0}),
-        (["--radius-scale", "0"], {"radius_scale": 0.0}),
+        (["--radius-scale", "0.25"], {"radius_scale": 0.25}),
         (["--pad-color-bgr", "0,0,0"], {"pad_color_bgr": (0, 0, 0)}),
         (["--margin-px", "3", "--output-size", "64"], {"margin_px": 3, "output_size": 64}),
     ],
@@ -108,7 +108,23 @@ def test_cli_forwards_falsy_values_and_only_the_given_flags(monkeypatch, tmp_pat
     assert type(forwarded.get("pad_color_bgr", ())) is tuple
 
 
-@pytest.mark.parametrize("bad", ["7,8", "7,8,300", "7,8,-1", "a,b,c", "7.5,8,9", "7,8,9,10", ""])
+_BAD_PAD = [
+    "7,8",
+    "7,8,300",
+    "7,8,-1",
+    "a,b,c",
+    "7.5,8,9",
+    "7,8,9,10",
+    "",
+    # допуски int(): пробелы, подчёркивание, полноширинные цифры, ведущие нули (четыре цифры)
+    " 7, 8, 9",
+    "1_0,2,3",
+    "７,8,9",
+    "0007,8,9",
+]
+
+
+@pytest.mark.parametrize("bad", _BAD_PAD)
 def test_cli_bad_pad_color_names_the_format_and_does_not_echo_the_input(monkeypatch, tmp_path, capsys, bad):
     got = _spy_eval(monkeypatch)
     with pytest.raises(SystemExit) as exc:
@@ -119,6 +135,48 @@ def test_cli_bad_pad_color_names_the_format_and_does_not_echo_the_input(monkeypa
     assert "B,G,R" in err
     if bad:
         assert f"'{bad}'" not in err and f"{bad}" not in err.split("B,G,R")[-1]
+
+
+@pytest.mark.parametrize(
+    "flag, bad",
+    [
+        ("--radius-scale", "nan"),
+        ("--radius-scale", "inf"),
+        ("--radius-scale", "-inf"),
+        ("--radius-scale", "0"),
+        ("--radius-scale", "-1"),
+        ("--radius-scale", "abc"),
+        ("--margin-px", "-1"),
+        ("--margin-px", "1.5"),
+        ("--output-size", "-1"),
+        ("--output-size", "x"),
+    ],
+)
+def test_cli_rejects_geometry_the_pipeline_register_rejects(monkeypatch, tmp_path, capsys, flag, bad):
+    """nan/inf/<=0 радиус, отрицательные поля/размер -> exit 2 до загрузки модели; правило названо, ввод не повторён."""
+    got = _spy_eval(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["eval", "m", str(tmp_path), f"{flag}={bad}"])
+    assert exc.value.code == 2
+    assert "kwargs" not in got
+    err = capsys.readouterr().err
+    assert "ожидается" in err
+    assert f"'{bad}'" not in err and f"={bad}" not in err.split("error:")[-1]
+
+
+@pytest.mark.parametrize(
+    ("flag", "raw", "key", "expected"),
+    [
+        ("--margin-px", "0", "margin_px", 0),
+        ("--output-size", "0", "output_size", 0),
+        ("--radius-scale", "0.001", "radius_scale", 0.001),
+    ],
+)
+def test_cli_geometry_boundaries_stay_accepted(monkeypatch, tmp_path, flag, raw, key, expected):
+    """0 для margin-px/output-size (без ресайза) и сколь угодно малый положительный radius-scale допустимы."""
+    got = _spy_eval(monkeypatch)
+    assert cli.main(["eval", "m", str(tmp_path), f"{flag}={raw}"]) == 0
+    assert got["kwargs"][key] == expected
 
 
 # --- лог --------------------------------------------------------------------------------------------------------------
