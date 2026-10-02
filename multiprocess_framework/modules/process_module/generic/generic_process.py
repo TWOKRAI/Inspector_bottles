@@ -346,6 +346,10 @@ class GenericProcess(ProcessModule):
                 plugin_runner=self._plugin_runner,
                 health=HealthReporter(health_state, source=source_plugin.name),
                 breaker_backoff_sec=breaker_backoff,
+                # Task 5.4 (ADR-PMM-034): runner кладёт событие готовности системы на
+                # экземпляр до initialize(); нет (юниты, SRM-mode) → без ожидания.
+                ready_event=getattr(self, "_sources_ready_event", None),
+                log_warning=self._log_warning,
             )
             self._source_producers.append(producer)
 

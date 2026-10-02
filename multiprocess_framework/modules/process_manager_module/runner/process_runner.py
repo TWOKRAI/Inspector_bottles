@@ -252,6 +252,8 @@ def run_process_function(
     new_session: bool = False,
     parent_pid: Optional[int] = None,
     exit_report: Optional[Any] = None,
+    *,
+    system_ready_event: Optional[Event] = None,
 ):
     """
     Top-level функция для запуска процесса внутри OS-процесса.
@@ -267,6 +269,12 @@ def run_process_function(
         buffered_dropped]; пишется в ``finally`` итогом ``release_queues_at_exit``, PM
         читает его в ``shutdown()`` через ``ProcessRegistry.exit_report(name)``. None —
         не сторожим (SRM-mode тестов, процесс без ``_create_process``).
+
+    system_ready_event: событие готовности СИСТЕМЫ (Task 5.4, ADR-PMM-034) — только kwarg
+        (шестой позиционный — ``new_session``). Кладётся атрибутом ``_sources_ready_event``
+        на экземпляр ДО ``initialize()``; ребёнок его только читает (источники ждут
+        перед первым produce()), взводит один PM. НЕ ``attach_ready_event``: тот — про
+        СОБСТВЕННУЮ готовность ребёнка.
 
     new_session: POSIX — сделать setsid() (стать лидером новой сессии/группы),
         чтобы ВСЕ потомки этого процесса попали в одну process group. Тогда
@@ -343,6 +351,11 @@ def run_process_function(
             shared_resources=shared_resources,
             config=process_config,
         )
+
+        # Task 5.4 (ADR-PMM-034): ДО initialize() — GenericProcess может строить
+        # SourceProducer уже в initialize(), а не только в run().
+        if system_ready_event is not None:
+            process_instance._sources_ready_event = system_ready_event
 
         if hasattr(process_instance, "initialize"):
             try:

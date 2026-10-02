@@ -1586,3 +1586,49 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
   (останов watcher'ов, `SSM.shutdown`) теперь выполняется ПОСЛЕ `stop_all` — на `main` он шёл ДО. В окне
   между стартом `stop_all` и остановкой watcher'ов последний ещё жив и теоретически может разослать
   `reconfigure` уже умирающим детям. Не измерено живым репро.
+
+## ADR-PMM-034: `system_ready_event` едет ребёнку наследованием через `Process(kwargs)`; источники ждут его перед первым `produce()` (Task 5.4, 2026-10-02)
+
+**Статус:** принято — реализовано (Task 5.4 плана `transport-single-policy`); стенд-гейт (`queue_data_evicted` в `s0`) — за лидом.
+**Дата:** 2026-10-02
+**Refs:** [plans/transport-single-policy/phase-5.md](../../../plans/transport-single-policy/phase-5.md) (Task 5.4), ADR-116 (событие готовности системы)
+
+### Контекст
+
+На старте источник (`SourceProducer`) начинал `produce()` сразу, а сосед-потребитель ещё не читал свою очередь:
+кадры вытеснялись (`queue_data_evicted` 24-41 за прогон в `s0`). Событие готовности системы
+(`ProcessManagerProcess._system_ready_event`, его взводит один PM в `_announce_ready()` после boot-барьера)
+до детей не доходило: `ProcessRegistry._create_process` вырезает `system_ready_event` из bundle custom,
+потому что `mp.Event` на Windows-spawn пиклится только наследованием.
+
+### Решение
+
+1. **Проводка:** PM → `ProcessRegistry(system_ready_event=...)` → `Process(kwargs={"system_ready_event": ...,
+   "parent_pid": ..., "exit_report": ...})` → `run_process_function(..., *, system_ready_event=None)` →
+   атрибут экземпляра `_sources_ready_event` (runner ставит его ДО `initialize()`, потому что
+   `GenericProcess` строит `SourceProducer` уже в `initialize()`) → `SourceProducer(ready_event=..., log_warning=...)`.
+2. **Ожидание в `SourceProducer.run_loop`** — в потоке источника, до первого `produce()`: `ready_event.wait` кусками
+   ≤ 0.05 с, между кусками проверяются `stop_event` и срок. Срок — `DEFAULT_PREROLL_TIMEOUT_S = 10.0`
+   (модульная константа, читается в момент ожидания). Срок истёк → ровно одна строка `log_warning` с текстом
+   `preroll` и старт. Стоп во время ожидания → выход без `produce()` и без WARNING. `ready_event is None` →
+   без ожидания, поведение прежнее. Взведённое событие (рестарт процесса, процесс из switch после boot) → ожидания нет.
+3. **Событие только читается.** Взводит его один PM; ни runner, ни ребёнок не зовут `set()`.
+
+### Отвергнуто
+
+- **Позиционный аргумент в `args=(...)`.** Шестой позиционный параметр `run_process_function` — `new_session`;
+  событие попало бы туда молча. Поэтому — `kwargs` и keyword-only параметр (позиционный вызов → `TypeError`).
+- **Bundle custom.** Bundle регистрируется в `process_state_registry` и сериализуется через `Queue`; сырой `mp.Event`
+  там падает с `RuntimeError` на Windows-spawn. Ключ вырезается нарочно и вырезаться продолжает.
+- **`attach_ready_event`.** Этим методом PM объявляет СВОЮ готовность, и ребёнок, получивший системное событие
+  через него, взводил бы его сам (`_announce_ready` в конце `run()`) — источники отпустило бы первым же готовым ребёнком.
+  Отдельный атрибут `_sources_ready_event` только читается.
+
+### Последствия
+
+- Взаимной блокировки нет: `_wait_boot_ready` ждёт собственное `ready_event` ребёнка, которое тот взводит в конце
+  `run()` (после старта воркеров, регистрации команд и heartbeat) — кадр для этого не нужен, а ожидание источника
+  идёт в его собственном воркер-потоке и `run()` не блокирует.
+- Готовность ≠ темп: ленивая загрузка модели в первом `process()` даст вытеснения и после `ready` — preroll их не лечит.
+- Срок preroll — константа, ключа конфига нет (вне объёма). Повторный preroll при рестарте одного процесса — вне объёма:
+  событие к тому времени уже взведено.
