@@ -24,6 +24,11 @@
 | 5.5A код | `c8a1853f4` (ветка t55): socket read-loop `_dead` → break, Path `as_posix()`, `get_std_logger` в field_meta/sdk_reader |
 | инъекции 5.5A | I1–I4 живы по предсказанию (I3 переделана: заплата после `from __future__`) — [`docs/reviews/2026-10-02_task-5.5a-injections/`](../reviews/2026-10-02_task-5.5a-injections/) |
 
+## Состояние на 2026-10-02 вечер (после компакта)
+- 5.5: ветка `fix/t55-green-main` HEAD `39718c6f9` — код, тесты, правки ревью, ship, OPEN_QUESTIONS. Осталось: полный `run_framework_tests.py` + `logger_module/tests` ×3 (segfault) + прогон CTO из 5 файлов — **после** исполнителей волны 2 (CPU, тайминговые тесты); SHA соседу 60; слияние в main. Инъекция «/dev:ship отказывает» — за владельцем.
+- Волна 2: спека финальна `c4ffa28af` (ред. 3); RED-наборы: t52 `acdd15ba1`, t53 `027bf9b0d`, t54 `4aed4a3dd`; исполнители в фоне. Дальше: инъекции лида против обоих наборов → ревью каждой → стенд.
+- Мусор вне репо: `C:/t54ref` (копия фреймворка тестера 5.4) — удаление `rm -rf` запрещено правилами, просить владельца.
+
 ## Следующие шаги (по порядку)
 1. ~~Переделать I3~~ — сделано, жива.
 2. (в работе, дозван 2026-10-02, два брифа в одном сообщении) Дозвать `dev-t55` (agentId ниже) на **5.5B** — тестовые правки, ≤ 6 файлов: снимки вместо пинов (`test_hot_rebuild_provenance_acceptance.py:309-322`, `test_catalog_kind_roundtrip.py:67`); `test_second_sender_to_stuck_socket` — 2 прогревочных `send` + `warnings.clear()`; `test_yaml_io.py::test_update_yaml_preserving_keeps_file_mode` — skipif win32; `test_remote_frame_source.py::test_r2_*` — skipif win32 (вердикт рассуждением); `test_reader_gone_hazards.py` H8/H9 — PYTHONPATH из `__file__`, не `os.getcwd()`; литерал `_EXPECTED_FRAMEWORK_METRICS` (`tests/test_declarations_leak_session_catalogue_guard.py:34`) — 5 → 10 имён (проверить объявления в `process_module/heartbeat/`). Два брифа по ≤ 6 файлов (лимит хука).
@@ -38,7 +43,14 @@
 | debugger 5.5 диагноз | `a52f1f37cca20d851` | 198k — за порогом, свежего вместо него |
 | cto 5.1 | `aebdaa3b36791e860` | 242k |
 | reviewer спек волны 2 | `a6267fc79dbcdffc7` | 210k — дозвать на итерацию 2 спек |
-| developer 5.5 | `a8a80c7f5d48416bc` | 113k — дозвать на 5.5B |
+| developer 5.5 | `a8a80c7f5d48416bc` | 167k после 5.5B — за порогом, свежего |
+| reviewer 5.5 (код) | `aa3a684b6cf539a59` | 192k — дозвать на итерацию 2 5.5, если будет |
+| tester RED 5.2 | `a23540be420c15aa1` | 236k — эталон в scratchpad |
+| tester RED 5.3 | `aaf44f211e9262ca8` | 217k |
+| tester RED 5.4 | `a1fc33e1c2ae840eb` | 187k |
+| teamlead 5.2 (реализация, team-t52) | `a8e2b5cc9f20512f9` | в работе, фон |
+| teamlead 5.3 (реализация, team-t53) | `aedeeac947002f768` | в работе, фон |
+| developer 5.4 (реализация, team-t54) | `a7db2e08b1b860d78` | в работе, фон; шаг 2: блокировки нет |
 
 ## Открыто
 - Segfault `test_sampler_ceiling_policy` не воспроизведён — записать в `OPEN_QUESTIONS.md` при закрытии 5.5.
