@@ -64,8 +64,8 @@ def test_resolve_kind_stable_across_json_roundtrip_for_all_register_fields() -> 
         # потеряет Services/ целиком (62 плагина -> меньше, но всё ещё > 0) — пин
         # РОВНО числа делает такую потерю видимой падением теста, а не тишиной.
         # Переустановить при изменении регистров Plugins/Services (новое/удалённое поле).
-        assert checked == 448, (
-            f"ожидали 448 register-полей (Plugins+Services), получили {checked} — "
+        assert checked == 449, (
+            f"ожидали 449 register-полей (Plugins+Services), получили {checked} — "
             f"либо discover() что-то потерял (напр. Services/), либо регистры менялись "
             f"(тогда пере-пин числа осознанно)"
         )
