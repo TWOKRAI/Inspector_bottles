@@ -45,7 +45,7 @@ def test_write_frames_returns_frame_ref_and_round_robin():
 def test_write_frames_ref_reads_back_by_generation():
     """Ссылка из write_frames_to_shm читается по (name, gen); после перезаписи ячейки — stale (None)."""
     mm = MemoryManager()
-    reader = ShmFrameReader(cache_enabled=False, zero_copy=False, cap=4)
+    reader = ShmFrameReader()
     try:
         mm.create_memory_dict("r", {"s": (1, (4, 4, 3), "uint8")}, coll=1)
         io = ProcessIO(_FakeProc(mm))

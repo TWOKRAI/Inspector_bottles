@@ -120,9 +120,7 @@ def child_b(q_ab, q_bc, evt_b_forwarded, evt_done, res_q) -> None:
     try:
         mm = MemoryManager()
         # B читает у A view'ом (как боевой конвейер) и пишет в СВОЁ кольцо.
-        b = FrameShmMiddleware(
-            mm, owner="B", slot="output_frames", coll=3, owner_incarnation=True, cache_shm_handles=True, zero_copy=True
-        )
+        b = FrameShmMiddleware(mm, owner="B", slot="output_frames", coll=3)
         wire = pickle.loads(q_ab.get(timeout=WAIT_S))
         receiver = DataReceiver(
             receive_fn=lambda **_: None,
@@ -171,7 +169,7 @@ def child_c(q_bc, evt_garbage_done, res_q) -> None:
     mm = None
     try:
         mm = MemoryManager()
-        c = FrameShmMiddleware(mm, owner="C", slot="unused", zero_copy=False)
+        c = FrameShmMiddleware(mm, owner="C", slot="unused")
         wire = pickle.loads(q_bc.get(timeout=WAIT_S))
         if not evt_garbage_done.wait(WAIT_S):
             raise TimeoutError("A не закончил порчу колец за отведённое время")

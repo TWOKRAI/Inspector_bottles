@@ -4,12 +4,11 @@
 Поднимает ``recipes/dualcam_synth.yaml`` (camera_0/camera_1 → consumer_0/consumer_1)
 через :class:`BackendHarness` с флагами движка (env), крутит ``duration`` секунд и
 снимает FPS + ``state.shm.*`` каждой из 4 нод. Проверяемый инвариант мультикамеры:
-FW_SHM_OWNER_INCARNATION разводит имена SHM-сегментов владельцев → два кольца НЕ
-коллизируют, оба тракта текут параллельно, счётчики потерь чисты.
+имена SHM-сегментов владельцев разводятся всегда (owner+pid+инкарнация, Task 4.7b) →
+два кольца НЕ коллизируют, оба тракта текут параллельно, счётчики потерь чисты.
 
 Запуск (полный набор флагов — в env):
-  BACKEND_CTL=1 FW_PERF_PROBES=1 FW_SHM_SEQLOCK=1 FW_SHM_OWNER_INCARNATION=1 \
-  FW_SHM_HANDLE_CACHE=1 FW_QOS_PROFILES=1 FW_SHM_ZERO_COPY=1 FW_SHM_LOAN_PROTOCOL=1 \
+  BACKEND_CTL=1 FW_PERF_PROBES=1 FW_QOS_PROFILES=1 FW_SHM_LOAN_PROTOCOL=1 \
   FW_DATA_PLANE_DICTS=1 FW_USE_KIND_CHANNELS=1 FW_GC_FREEZE=1 \
   python -m backend_ctl.probes.g7_dualcam_probe [duration_sec]
 

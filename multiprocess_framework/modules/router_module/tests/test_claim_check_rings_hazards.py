@@ -68,7 +68,7 @@ def _owner(made, *, coll: int, num_consumers: int = 1) -> FrameShmMiddleware:
 
 def _reader(made) -> FrameShmMiddleware:
     mm = MemoryManager()
-    mw = FrameShmMiddleware(mm, owner="gui", slot="output_frames", zero_copy=False)
+    mw = FrameShmMiddleware(mm, owner="gui", slot="output_frames")
     made.append((mw, mm))
     return mw
 

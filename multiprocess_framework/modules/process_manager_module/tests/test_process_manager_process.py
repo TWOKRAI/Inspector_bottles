@@ -772,10 +772,9 @@ class TestLogActiveFeatureFlags:
         assert "FW_SHM_PREFIX_CLEANUP" in msg and "env" in msg
 
     def test_requires_violation_emits_warning(self, monkeypatch) -> None:
-        # given zero-copy включён без своих зависимостей
-        for name in ("FW_SHM_HANDLE_CACHE", "FW_SHM_OWNER_INCARNATION"):
-            monkeypatch.delenv(name, raising=False)
-        monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
+        # given gc-scheduled включён без своей зависимости gc-freeze
+        monkeypatch.delenv("FW_GC_FREEZE", raising=False)
+        monkeypatch.setenv("FW_GC_SCHEDULED", "1")
 
         pmp = self._bare_pmp()
         pmp._log_active_feature_flags()
@@ -783,4 +782,4 @@ class TestLogActiveFeatureFlags:
         # then advisory-нарушение уходит в warning
         assert pmp._log_warning.called
         warned = " ".join(c[0][0] for c in pmp._log_warning.call_args_list)
-        assert "FW_SHM_ZERO_COPY" in warned
+        assert "FW_GC_SCHEDULED" in warned

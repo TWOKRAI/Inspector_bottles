@@ -39,11 +39,7 @@ _RECIPE = _RECIPES / "g1_perf_probe.yaml"
 #: ``FW_GC_SCHEDULED`` НЕ включаем — measurement-gated, см. докстринг модуля.
 _SOAK_FLAGS: tuple[str, ...] = (
     "FW_DATA_PLANE_DICTS",
-    "FW_SHM_SEQLOCK",
-    "FW_SHM_OWNER_INCARNATION",
-    "FW_SHM_HANDLE_CACHE",
     "FW_QOS_PROFILES",
-    "FW_SHM_ZERO_COPY",
     "FW_SHM_LOAN_PROTOCOL",
     "FW_USE_KIND_CHANNELS",
     "FW_GC_FREEZE",

@@ -5,9 +5,10 @@ HP-5 (audit 2026-07-12): при switch рецепта старый сегмен�
 создаёт сегмент С ТЕМ ЖЕ именем → in-flight сообщение со старым именем читает НОВЫЙ кадр
 («перепутанные кадры»). Статус «митигировано 5cd23192» — не сверен.
 
-Здесь СВЕРЕНО замером: без owner+incarnation имя переиспользуется (name_a == name_b) и
-старое in-flight имя читает новый кадр (confusion). С owner+incarnation имена различны,
-старое имя недоступно/держит старый контент — confusion невозможен по построению.
+Здесь СВЕРЕНО замером: без owner+incarnation имя переиспользовалось (name_a == name_b) и
+старое in-flight имя читало новый кадр (confusion). Task 4.7b: owner+incarnation — единственный
+режим (флага нет); имена различны, старое имя недоступно/держит старый контент — confusion
+невозможен по построению. Тест «репродьюсер до фикса» удалён вместе с режимом, который он пинил.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import sys
 from multiprocessing import shared_memory
 
 import numpy as np
+import pytest
 
 from multiprocess_framework.modules.shared_resources_module.memory import format as fmt
 from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
@@ -30,12 +32,12 @@ _SHAPE = (8, 8, 3)
 _DTYPE = np.uint8
 
 
-def _switch_and_probe(owner_incarnation: bool):
+def _switch_and_probe():
     """Создать слот, записать A, «switch» (release+recreate), записать B.
 
     Returns: (name_a, name_b, frame_via_old_name | None).
     """
-    mm = MemoryManager(owner_incarnation=owner_incarnation)
+    mm = MemoryManager()
     try:
         mm.create_memory_dict("cam", {"of": (1, _SHAPE, "uint8")}, coll=2)
         mm.write_images("cam", "of", [np.full(_SHAPE, 111, _DTYPE)], 0)
@@ -62,22 +64,11 @@ def _switch_and_probe(owner_incarnation: bool):
         mm.close_all()
 
 
-def test_hp5_without_owner_incarnation_reuses_name_and_confuses_frames():
-    """РЕПРОДЬЮСЕР (before): без owner+incarnation имя переиспользуется → старое
-    in-flight имя читает НОВЫЙ кадр (222) = «перепутанные кадры» (HP-5 подтверждён,
-    митигация 5cd23192 недостаточна)."""
-    name_a, name_b, frame_old = _switch_and_probe(owner_incarnation=False)
-    assert name_a == name_b, "без флага имя слота переиспользуется при switch"
-    assert frame_old is not None, "старое имя указывает на переиспользованный сегмент"
-    # Confusion: читаем по СТАРОМУ имени, а получаем НОВЫЙ кадр (все 222).
-    assert int(frame_old.min()) == int(frame_old.max()) == 222
-
-
 def test_hp5_owner_incarnation_prevents_frame_confusion():
-    """ФИКС (after): owner+incarnation → имена различны; FRESH-open старого имени после
+    """ФИКС: owner+incarnation → имена различны; FRESH-open старого имени после
     switch НЕ возвращает новый кадр. H6: ассерты БЕЗУСЛОВНЫ по обеим веткам."""
-    name_a, name_b, frame_old = _switch_and_probe(owner_incarnation=True)
-    assert name_a != name_b, "с флагом каждое создание — свежая инкарнация (нет reuse)"
+    name_a, name_b, frame_old = _switch_and_probe()
+    assert name_a != name_b, "каждое создание — свежая инкарнация (нет reuse)"
     # H6: branch-ассерты явные — а не «if frame_old is not None» (который скипался 15/15).
     if frame_old is None:
         # Ожидаемо и УТВЕРЖДАЕТСЯ: сегмент name_a ушёл (unlink) → in-flight честно дропнется.
@@ -91,7 +82,7 @@ def test_hp5_inflight_held_handle_reads_old_frame_not_new():
     """H6 (контентная безопасность): реальный in-flight держатель открыл сегмент ДО
     switch и держит handle. После release+recreate чтение через ЭТОТ handle обязано
     вернуть СТАРЫЙ кадр (111), НИКОГДА новый (222) — с owner_incarnation по построению."""
-    mm = MemoryManager(owner_incarnation=True)
+    mm = MemoryManager()
     inflight = None
     try:
         mm.create_memory_dict("cam", {"of": (1, _SHAPE, "uint8")}, coll=2)
@@ -121,7 +112,7 @@ def test_hp5_inflight_held_handle_reads_old_frame_not_new():
 
 def test_owner_incarnation_names_distinct_per_owner():
     """B-7 мультикамера: два владельца с одним slot-именем → разные фактические имена."""
-    mm = MemoryManager(owner_incarnation=True)
+    mm = MemoryManager()
     try:
         mm.create_memory_dict("cam0", {"of": (1, _SHAPE, "uint8")}, coll=1)
         mm.create_memory_dict("cam1", {"of": (1, _SHAPE, "uint8")}, coll=1)
@@ -132,23 +123,12 @@ def test_owner_incarnation_names_distinct_per_owner():
         mm.close_all()
 
 
-def test_owner_incarnation_off_by_default():
-    """Дефолт (нет ctor-флага и env) → прежняя схема имён (без owner в имени)."""
-    mm = MemoryManager()
-    try:
-        mm.create_memory_dict("cam", {"of": (1, _SHAPE, "uint8")}, coll=1)
-        name = mm.get_actual_shm_name("cam", "of", 0)
-        assert "cam" not in name  # owner не вшит в имя при выключенном флаге
-    finally:
-        mm.close_all()
-
-
 # --- H2: PID в имени на всех платформах (POSIX-коллизия двух интерпретаторов) ------
 
 
 def test_h2_name_contains_pid_when_short():
     """H2: короткое имя несёт литеральный pid (для cross-process уникальности)."""
-    name = _unique_base_name("of", owner="cam", owner_incarnation=True)
+    name = _unique_base_name("of", owner="cam")
     assert str(os.getpid()) in name, f"pid обязателен в имени, получено '{name}'"
 
 
@@ -161,7 +141,7 @@ def test_h2_two_interpreters_produce_distinct_names():
     code = (
         "from multiprocess_framework.modules.shared_resources_module.memory.platform.shm "
         "import _unique_base_name; "
-        "print(_unique_base_name('output_frames', owner='camera_0', owner_incarnation=True))"
+        "print(_unique_base_name('output_frames', owner='camera_0'))"
     )
     env = dict(os.environ, PYTHONPATH=root)
     n1 = subprocess.check_output([sys.executable, "-c", code], env=env, text=True).strip()
@@ -174,7 +154,7 @@ def test_h2_two_interpreters_produce_distinct_names():
 
 def test_h3_long_owner_name_bounded_for_macos():
     """H3: длинный owner (process_grayscale из modbus_demo.yaml) → базовое имя ≤ 26."""
-    name = _unique_base_name("output_frames", owner="process_grayscale", owner_incarnation=True)
+    name = _unique_base_name("output_frames", owner="process_grayscale")
     assert len(name) <= _MAX_BASE_NAME_LEN, f"имя '{name}' длиной {len(name)} > {_MAX_BASE_NAME_LEN}"
     # + суффикс _{idx} от create_shm_blocks (до _63) обязан уложиться в ~30.
     assert len(f"{name}_63") <= 30
@@ -182,5 +162,42 @@ def test_h3_long_owner_name_bounded_for_macos():
 
 def test_h3_short_name_not_compacted():
     """H3: короткое имя НЕ схлопывается (остаётся человекочитаемым)."""
-    name = _unique_base_name("of", owner="cam", owner_incarnation=True)
+    name = _unique_base_name("of", owner="cam")
     assert name.startswith("of_cam_") and len(name) <= _MAX_BASE_NAME_LEN
+
+
+# --- Task 4.7b: orphan prefix cleanup видит имена, которые строит _unique_base_name ---
+
+
+def test_prefix_cleanup_matches_uncollapsed_name(monkeypatch):
+    """Имя уместилось в лимит → полное базовое slot-имя остаётся префиксом (литерал).
+
+    Длина имени зависит от ГЛОБАЛЬНОГО счётчика инкарнаций (растёт за прогон — после ~100 созданий имя
+    схлопывается) и от числа цифр pid: счётчик и pid фиксируем, иначе тест зависит от порядка прогона."""
+    import itertools
+
+    from multiprocess_framework.modules.shared_resources_module.buffers.cleanup import _matches_any_prefix
+    from multiprocess_framework.modules.shared_resources_module.memory.platform import shm as shm_mod
+
+    monkeypatch.setattr(shm_mod, "_incarnation", itertools.count(1))
+    monkeypatch.setattr(shm_mod.os, "getpid", lambda: 4242)
+    name = _unique_base_name("output_frames", owner="cam")
+    assert len(name) <= _MAX_BASE_NAME_LEN and name.startswith("output_frames_cam_")
+    assert _matches_any_prefix(f"{name}_0", ["output_frames"])
+
+
+@pytest.mark.parametrize("base", ["output_frames", "mask"])
+def test_prefix_cleanup_matches_collapsed_names_and_owners_stay_distinct(base: str):
+    """Схлопнутое имя (длинный owner) держит ПОЛНЫЙ base в начале → prefix-cleanup его видит,
+    а разные владельцы остаются разными (хеш от полного имени)."""
+    from multiprocess_framework.modules.shared_resources_module.buffers.cleanup import _matches_any_prefix
+
+    owners = ["camera_0", "process_grayscale", "x" * 40]
+    names = [_unique_base_name(base, owner=o) for o in owners]
+    for name in names:
+        assert len(name) <= _MAX_BASE_NAME_LEN, name
+        assert _matches_any_prefix(f"{name}_0", [base]), f"prefix-cleanup не видит {name!r} по {base!r}"
+    assert len(set(names)) == len(owners), f"владельцы слились в одно имя: {names}"
+    # длинные owner'ы реально схлопнулись (а не уместились) — иначе тест пуст
+    assert not any(o in names[2] for o in owners[2:]), names[2]
+    assert names[1] == f"{base}_{names[1].rsplit('_', 1)[1]}", names[1]

@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """Ф7 G.5.b — zero-copy чтение кадра (restore_frame отдаёт view, а не .copy()).
 
-Гейт активации: FW_SHM_ZERO_COPY И живой handle-кэш (FW_SHM_HANDLE_CACHE +
-FW_SHM_OWNER_INCARNATION) (seqlock-заголовок слота — всегда, Task 4.4). Без любого из них — копия
-(бит-в-бит прежнее / безопасно). Ключевой инвариант владельца: форма view берётся
+С 4.7b гейтов и флагов нет: view у ``restore_frame`` всегда, у ``on_receive`` — копия
+(seqlock-заголовок слота — всегда, Task 4.4). Ключевой инвариант владельца: форма view берётся
 из per-image заголовка → переменная форма кадра (grayscale/resize/crop) корректна.
 
 post-use re-check поколения (безопасность УДЕРЖАНИЯ view) — G.5.c; здесь проверяется
@@ -22,12 +21,6 @@ from multiprocess_framework.modules.router_module.middleware.frame_shm_middlewar
 from multiprocess_framework.modules.shared_resources_module.memory.core.manager import (
     MemoryManager,
 )
-
-
-def _enable_zero_copy(monkeypatch) -> None:
-    monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
-    monkeypatch.setenv("FW_SHM_HANDLE_CACHE", "1")
-    monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
 
 
 def _writer_reader():
@@ -50,41 +43,43 @@ def _restore_probe(reader, out):
 
 
 class TestGate:
-    def test_default_off_is_copy(self, monkeypatch):
-        """Без флага zero-copy отключён; restore возвращает копию, меты view нет."""
-        monkeypatch.delenv("FW_SHM_ZERO_COPY", raising=False)
+    """4.7b: гейтов нет — конвейер (``restore_frame``) всегда получает read-only view,
+    copy-out (``on_receive``) — копию."""
+
+    def test_restore_frame_is_view_without_any_env(self):
+        """Без env restore_frame отдаёт view в слот (не копию), билет re-check'а есть."""
         writer, reader = _writer_reader()
-        assert reader._zero_copy is False
         try:
             out = writer.strip_and_write({"frame": np.full((32, 48, 3), 7, np.uint8)})
             probe = _restore_probe(reader, out)
             assert probe is not None and probe[1] == 7
-            assert probe[2] is False  # копия (frombuffer-view отсутствует)
-            assert out.get("_shm_views") is None  # view-билетов нет
+            assert probe[2] is True  # view
+            assert out.get("_shm_views") == [out["_shm_refs"]["frame"]]
         finally:
             reader.close_handle_cache()
             writer.release_owned_memory()
 
-    def test_disabled_without_handle_cache(self, monkeypatch):
-        """zero_copy запрошен, но кэш выключен → ОТКЛЮЧЁН (view повис бы)."""
-        monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
-        monkeypatch.delenv("FW_SHM_HANDLE_CACHE", raising=False)
-        mw = FrameShmMiddleware(MemoryManager(), owner="o", slot="s")
-        assert mw._zero_copy is False
-
-    def test_ctor_optout_wins(self, monkeypatch):
-        """GUI-паттерн: zero_copy=False в ctor перекрывает env-флаг (copy-out гарантирован)."""
-        _enable_zero_copy(monkeypatch)
-        mw = FrameShmMiddleware(MemoryManager(), owner="gui", slot="s", zero_copy=False)
-        assert mw._zero_copy is False
+    def test_on_receive_is_copy_out(self):
+        """GUI-путь (``on_receive``) — независимая копия и без view-билетов; кэш handles живёт."""
+        writer, reader = _writer_reader()
+        try:
+            out = writer.strip_and_write({"frame": np.full((32, 48, 3), 9, np.uint8)})
+            msg = reader.on_receive({"data": out})
+            frame = msg["frame"] if msg.get("frame") is not None else msg["data"]["frame"]
+            assert frame.flags.owndata and frame.flags.writeable
+            assert int(frame.min()) == int(frame.max()) == 9
+            assert out.get("_shm_views") is None
+            assert reader.frame_handle_cache_size == 1
+            del frame, msg
+        finally:
+            reader.close_handle_cache()
+            writer.release_owned_memory()
 
 
 class TestZeroCopyView:
-    def test_restore_returns_view(self, monkeypatch):
-        """restore_frame под гейтом → view в слот (shares buffer), не копия + мета."""
-        _enable_zero_copy(monkeypatch)
+    def test_restore_returns_view(self):
+        """restore_frame → view в слот (shares buffer), не копия + мета."""
         writer, reader = _writer_reader()
-        assert reader._zero_copy is True
         try:
             out = writer.strip_and_write({"frame": np.full((32, 48, 3), 11, np.uint8)})
             probe = _restore_probe(reader, out)
@@ -96,10 +91,9 @@ class TestZeroCopyView:
             reader.close_handle_cache()
             writer.release_owned_memory()
 
-    def test_view_variable_shape_crop(self, monkeypatch):
+    def test_view_variable_shape_crop(self):
         """Ключевой инвариант владельца: crop-кадр МЕНЬШЕ слота → view имеет форму из
         per-image заголовка, не тянет max-слот/padding/соседний кадр."""
-        _enable_zero_copy(monkeypatch)
         writer, reader = _writer_reader()
         try:
             # Первый кадр большой → слот выделен под 64×64×3.
@@ -112,9 +106,8 @@ class TestZeroCopyView:
             reader.close_handle_cache()
             writer.release_owned_memory()
 
-    def test_view_grayscale_channel(self, monkeypatch):
+    def test_view_grayscale_channel(self):
         """grayscale (c=1) через view: форма (h,w,1) корректна."""
-        _enable_zero_copy(monkeypatch)
         writer, reader = _writer_reader()
         try:
             writer.strip_and_write({"frame": np.full((32, 48, 3), 1, np.uint8)})  # alloc цветной
@@ -125,12 +118,11 @@ class TestZeroCopyView:
             reader.close_handle_cache()
             writer.release_owned_memory()
 
-    def test_view_is_readonly(self, monkeypatch):
+    def test_view_is_readonly(self):
         """Ревью-фикс 8: zero-copy view READ-ONLY — in-place мутация плагином мимо
         seqlock (тихая порча чужого слота) невозможна; попытка записи → ValueError."""
         import pytest
 
-        _enable_zero_copy(monkeypatch)
         writer, reader = _writer_reader()
         try:
             out = writer.strip_and_write({"frame": np.full((16, 16, 3), 7, np.uint8)})

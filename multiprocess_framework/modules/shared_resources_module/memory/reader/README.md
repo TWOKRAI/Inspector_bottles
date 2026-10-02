@@ -5,7 +5,7 @@ Protocol-фасадом в модуле памяти, а не в транспо�
 
 ## Зачем
 
-G.3/G.5.b/c построили кэш SHM-handles + zero-copy view + post-use re-check прямо в
+G.3/G.5.b/c построили (тогда за флагами, см. «Режим один» ниже) кэш SHM-handles + zero-copy view + post-use re-check прямо в
 `FrameShmMiddleware`, причём приватный `_cache_lock` дёргал ещё и `PipelineExecutor`
 (cross-module доступ к внутренностям транспорта). H-задача сводит reader в один модуль:
 транспорт делегирует, синхронизация кэша — внутреннее дело reader'а.
@@ -14,10 +14,12 @@ G.3/G.5.b/c построили кэш SHM-handles + zero-copy view + post-use re
 
 | Метод | Смысл |
 |-------|-------|
-| `read_frame(name, seqlock, *, copy, view_meta) -> frame\|None` | чтение одного кадра (кэш handles; `copy=False` → view + мета для re-check) |
-| `view_valid(shm_view_name, gen_at_read) -> bool` | post-use re-check (G.5.c): слот не перезаписан под живым view |
-| `close()` | закрыть все кэшированные handles (teardown) |
-| `stale_drops` (property) | сколько view дропнуто re-check'ом (наблюдаемость) |
+| `read_ref(name, gen, *, copy, key) -> frame\|None` | чтение кадра по ссылке (Task 4.4): сверка `gen` до и после; `copy=False` → read-only view; `key=(owner, slot, idx)` — ключ кэша handles |
+| `view_valid(shm_view_name, gen_at_read, *, key) -> bool` | post-use re-check (G.5.c): слот не перезаписан под живым view |
+| `retire(key)` — только `ShmFrameReader`, не в Protocol | убрать handle ключа (кэп у вызывающего: мост держит LRU по имени, 32) |
+| `close()` | закрыть все кэшированные handles и отложенные (`_retired`) — teardown |
+| `stale_drops`, `torn_reads` (properties) | сколько чтений/view дропнуто по расхождению `gen` / порвано перезаписью |
+| `close_errors`, `deferred_closes` — только `ShmFrameReader`, не в Protocol | ошибки закрытия и handles, отложенные из-за живого view; в телеметрию не экспортируются |
 
 ## Синхронизация (гонка закрыта по построению)
 
@@ -27,11 +29,14 @@ re-check). `ShmFrameReader` держит СВОЙ lock и сериализует
 НЕ трогает кэш напрямую (раньше executor лез в приватный `_cache_lock`/`_shm_handle_cache`
 транспорта).
 
-## Жёсткие связки флагов (резолвит транспорт, reader получает согласованные)
+## Режим один (Task 4.7b, 2026-10-02)
 
-`zero_copy` ⊃ `cache_enabled` ⊃ `owner_incarnation` (G.5): view живёт после чтения → нужен
-кэш (иначе сегмент закрыт, view повис); кэш безопасен только при смене имени на каждый
-realloc (owner_incarnation). Под `zero_copy` эвикция с `close()` ОТКЛЮЧЕНА.
+Флаги `FW_SHM_ZERO_COPY`, `FW_SHM_HANDLE_CACHE`, `FW_SHM_OWNER_INCARNATION` удалены из реестра.
+Кэш handles всегда включён; ключ — `(owner, slot, idx)` из ссылки (без owner — `(name,)`), кэпа 8 нет.
+Handle с живым view при отставке не закрывается: он уходит в `_retired` (счётчик `deferred_closes`
+у reader'а) и закрывается на следующей отставке либо в `close()`. Пайплайн получает view только
+для чтения, `on_receive` копирует. Бывшая связка `zero_copy ⊃ cache ⊃ owner_incarnation` теперь
+выполняется по построению: имя меняется на каждое создание сегмента всегда.
 
 ## Реализации
 

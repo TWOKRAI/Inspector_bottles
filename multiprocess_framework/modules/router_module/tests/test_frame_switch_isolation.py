@@ -53,7 +53,7 @@ def _read(reader: FrameShmMiddleware, coords: dict):
 
 def test_switch_stale_coords_drop_not_wrong_frame():
     """Switch источника: старые координаты у получателя → drop (None), НЕ новый кадр (B-7/B-9)."""
-    mm = MemoryManager(owner_incarnation=True)
+    mm = MemoryManager()
     reader = _reader()
     try:
         cam_v1 = FrameShmMiddleware(mm, owner="cam0", slot="output_frames", coll=3)
@@ -82,7 +82,7 @@ def test_switch_stale_coords_drop_not_wrong_frame():
 
 def test_switch_of_one_camera_does_not_disturb_another():
     """Изоляция цепочек (G.4.b принцип 7): switch cam0 не трогает кадры cam1."""
-    mm = MemoryManager(owner_incarnation=True)
+    mm = MemoryManager()
     reader = _reader()
     try:
         cam0_v1 = FrameShmMiddleware(mm, owner="cam0", slot="output_frames", coll=3)

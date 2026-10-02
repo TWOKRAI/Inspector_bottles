@@ -100,7 +100,7 @@ class _Rig:
         slot: str = "output_frames",
     ) -> FrameShmMiddleware:
         mm = mm or MemoryManager()
-        extra = dict(owner_incarnation=True, cache_shm_handles=True, zero_copy=True) if view else {"zero_copy": False}
+        extra: dict = {}
         mw = FrameShmMiddleware(mm, owner=owner, slot=slot, coll=coll, **extra)
         self._made.append((mw, mm))
         return mw

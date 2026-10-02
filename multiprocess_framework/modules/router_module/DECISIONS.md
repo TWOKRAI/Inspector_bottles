@@ -111,6 +111,8 @@ cross-process путь `_read_shm_from_actual_name` открывал `SharedMemo
 смене имени (grow-realloc/incarnation меняют имя → новая запись, старая вытесняется + close);
 teardown закрывает все. Дефолт False = прежний open/close на кадр.
 
+> **Уточнение 2026-10-02 (Task 4.7b):** флаг `FW_SHM_HANDLE_CACHE` удалён — кэш reader'а всегда включён, ключ `(owner, slot, idx)` из ссылки (без owner — `(name,)`), кэпа 8 нет; handle с живым view при отставке уходит в `_retired` и закрывается позже. Мост (`remote_frame_source`) держит свой LRU по имени с кэпом 32.
+
 **Решение (d) — громкий pickle-fallback (перф-ревью п.3).** При неудаче SHM-write кадр молча
 оставался в сообщении и уезжал pickle-через-Queue (латентность ×3, метрик ноль). Добавлен
 plain-int `frame_pickle_fallbacks` (по образцу `frame_boundary_crossings`, БЕЗ lock/колбэка на

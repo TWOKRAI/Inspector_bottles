@@ -74,7 +74,7 @@ class _Rig:
 
     def make(self, owner: str, *, coll: int = RING_DEPTH) -> FrameShmMiddleware:
         mm = MemoryManager()
-        mw = FrameShmMiddleware(mm, owner=owner, slot="output_frames", coll=coll, zero_copy=False)
+        mw = FrameShmMiddleware(mm, owner=owner, slot="output_frames", coll=coll)
         self._made.append((mw, mm))
         return mw
 
@@ -208,7 +208,7 @@ def test_t45c_bytes_read_counts_fresh_refs(rig):
 
     def scenario() -> int:
         for seed in range(5):
-            msg = reader.restore_frame(_wire(_send(writer, {"frame": _frame(seed)})))
+            msg = reader.on_receive(_wire(_send(writer, {"frame": _frame(seed)})))
             assert msg.get("frame") is not None or msg["data"].get("frame") is not None, "стенд: кадр не восстановлен"
         return reader.bytes_read
 
@@ -221,12 +221,12 @@ def test_t45c_bytes_read_stale_ref_adds_nothing(rig):
     writer, reader = rig.make("A"), rig.make("B")
 
     def scenario() -> None:
-        fresh = reader.restore_frame(_wire(_send(writer, {"frame": _frame(1)})))
+        fresh = reader.on_receive(_wire(_send(writer, {"frame": _frame(1)})))
         assert (fresh.get("frame") is not None) or (fresh["data"].get("frame") is not None), "стенд: fresh не прочитан"
         stale_wire = _wire(_send(writer, {"frame": _frame(2)}))
         for seed in range(RING_DEPTH):  # обернуть кольцо: ячейка stale_wire перезаписана
             _send(writer, {"frame": _frame(100 + seed)})
-        reader.restore_frame(stale_wire)
+        reader.on_receive(stale_wire)
 
     _bounded(scenario)
     assert reader.frame_stale_drops == 1, "стенд: ссылка не оказалась stale (обёртка кольца не сработала)"
@@ -260,7 +260,7 @@ def test_t45c_shm_stats_and_telemetry_carry_the_new_counters(rig):
     broken = {"owner": "A", "slot": "output_frames", "idx": 0, "gen": 2, "name": None}
 
     def scenario() -> None:
-        reader.restore_frame(_wire(_send(writer, {"frame": _frame(1)})))
+        reader.on_receive(_wire(_send(writer, {"frame": _frame(1)})))
         _send(writer, {"frame": _frame(2)})
         reader.restore_frame({"data": {"_shm_refs": {"frame": broken}}})
 

@@ -42,8 +42,6 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Dict, Optional
 
-# Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
-_HANDLE_CACHE_CAP = 8
 # Throttle громкого WARNING про pickle-fallback (счётчик — всегда, лог — раз в N кадров).
 _PICKLE_WARN_EVERY = 300
 # Throttle лога «frame не восстановлен» (штатный drop после G.7 — не ERROR на каждый кадр).
@@ -68,6 +66,14 @@ FRAME_KEY = "frame"
 #    повторы дропаются.
 SHM_VIEWS_KEY = "_shm_views"
 SHM_DROPPED_KEY = "_shm_dropped"
+
+
+def _ref_key(ref: Dict[str, Any]) -> tuple:
+    """Ключ кэша handles читателя: ``(owner, slot, idx)`` ссылки (Task 4.7b); без ``owner`` — ``(name,)``."""
+    owner = ref.get("owner")
+    if owner is None:  # ссылка без владельца: ключ по имени (иначе все кадры делили бы ключ (None, None, None))
+        return (ref.get("name"),)
+    return (owner, ref.get("slot"), ref.get("idx"))
 
 
 def _is_large_array(value: Any) -> bool:
@@ -306,10 +312,12 @@ class FrameShmMiddleware:
         slot: имя SHM-слота (для write).
         coll: количество SHM-слотов (размер ring buffer) — generic-путь.
         log_error: callback логирования ошибок — generic-путь.
-        cache_shm_handles: кэшировать SHM-handles читателя (Ф7 G.3). None → env
-            ``FW_SHM_HANDLE_CACHE`` → False (прежний open/close на кадр).
 
-    Заголовок seqlock у слота ВСЕГДА (Task 4.4; флага ``FW_SHM_SEQLOCK`` больше нет): поколение
+    Кэш SHM-handles читателя включён ВСЕГДА (Task 4.7b): ключ ``(owner, slot, idx)`` ссылки, без
+    кэпа; конвейер (``restore_frame``) получает read-only view без копии, copy-out (``on_receive``)
+    — копию с проверкой поколения.
+
+    Заголовок seqlock у слота ВСЕГДА (Task 4.4; отдельного флага seqlock больше нет): поколение
     записи слота — это и есть ``gen`` в ссылке, по нему reader отличает свою запись от переписанной.
 
     Attributes:
@@ -338,10 +346,6 @@ class FrameShmMiddleware:
         slot: str = "output_frames",
         coll: Optional[int] = None,
         log_error: Callable[[str], None] | None = None,
-        cache_shm_handles: Optional[bool] = None,
-        owner_incarnation: Optional[bool] = None,
-        handle_cache_cap: int = _HANDLE_CACHE_CAP,
-        zero_copy: Optional[bool] = None,
         loan_protocol: Optional[bool] = None,
         num_consumers: int = 1,
         pool: Optional[Any] = None,
@@ -395,42 +399,12 @@ class FrameShmMiddleware:
         # Task 4.1: состояние слота (allocated/created/ёмкость/seqlock/пул) живёт в
         # кольцах per-key (``_Ring``), см. ``_rings`` ниже; плоские ``_allocated``,
         # ``_alloc_shape``, ``_pool``... — read-only делегаты к кольцу ``frame``.
-        # H4: кэш handles БЕЗОПАСЕН только когда имя меняется на КАЖДЫЙ realloc
-        # (owner_incarnation). Иначе realloc = unlink+create ТОГО ЖЕ имени (POSIX,
-        # incarnation off) → cache hit на осиротевшие страницы → замороженный кадр №1
-        # навсегда, тихо. Жёсткая связка: кэш активен ТОЛЬКО при owner_incarnation.
-        self._owner_incarnation = self._resolve_bool_flag(owner_incarnation, "FW_SHM_OWNER_INCARNATION")
-        cache_requested = self._resolve_bool_flag(cache_shm_handles, "FW_SHM_HANDLE_CACHE")
-        if cache_requested and not self._owner_incarnation:
-            self._log_error(
-                "FrameShmMiddleware: cache_shm_handles запрошен БЕЗ owner_incarnation — "
-                "кэш ОТКЛЮЧЁН (H4: риск замороженного кадра при realloc с переиспользованием имени)"
-            )
-            self._cache_shm_handles = False
-        else:
-            self._cache_shm_handles = cache_requested
-        self._handle_cache_cap = max(1, int(handle_cache_cap))  # L4: конфигурируемый кэп
-        # Ф7 G.5.b: zero-copy чтение (restore_frame отдаёт VIEW в слот, без .copy()).
-        # ЖЁСТКАЯ связка с handle-кэшем: без него сегмент закрывается сразу после
-        # чтения (`shm.close()` в finally) → view повис бы (use-after-free/BufferError).
-        # Поэтому zero-copy активен ТОЛЬКО при живом кэше (который сам требует
-        # owner_incarnation, H4). Безопасность удержания view после возврата (слот не
-        # перезаписан) — seqlock read-moment (здесь) + post-use re-check (G.5.c).
-        zero_copy_requested = self._resolve_bool_flag(zero_copy, "FW_SHM_ZERO_COPY")
-        if zero_copy_requested and not self._cache_shm_handles:
-            self._log_error(
-                "FrameShmMiddleware: zero_copy запрошен БЕЗ активного handle-кэша — "
-                "ОТКЛЮЧЁН (view повис бы на закрытом сегменте; кэш требует "
-                "FW_SHM_HANDLE_CACHE + FW_SHM_OWNER_INCARNATION)"
-            )
-            self._zero_copy = False
-        else:
-            self._zero_copy = zero_copy_requested
         # Ф7 H-задача (Этап 2): reader-side тракт (кэш handles + zero-copy view + post-use
         # re-check) вынесен за фасад ``FrameReader`` в модуль памяти. Транспорт держит
         # reader через DI и делегирует; синхронизация кэша — внутреннее дело reader'а
         # (гонка close↔read_generation закрыта: executor больше не лезет в приватный кэш).
-        # Флаги уже согласованы выше (zero_copy ⊃ cache ⊃ owner_incarnation).
+        # Кэш handles всегда включён (Task 4.7b): имя сегмента меняется на каждый realloc
+        # (инкарнация в имени), ключ кэша — (owner, slot, idx) ссылки.
         # DI (H-ревью 2026-07-14): инжектированный ``reader`` выигрывает — подмена
         # реализации (напр. Rust/iceoryx2 под тем же ``FrameReader``) не трогает транспорт;
         # None → дефолт-фабрика ``ShmFrameReader`` (обычный путь).
@@ -439,12 +413,7 @@ class FrameShmMiddleware:
         else:
             from ...shared_resources_module.memory.reader import ShmFrameReader
 
-            self._reader = ShmFrameReader(
-                cache_enabled=self._cache_shm_handles,
-                zero_copy=self._zero_copy,
-                cap=self._handle_cache_cap,
-                log=self._log_error,
-            )
+            self._reader = ShmFrameReader(log=self._log_error)
         # Ф7 H-задача (консолидация памяти): семантика владения слотом кольца
         # (free-list/refcount/release/reclaim) вынесена за фасад ``FramePool`` в модуль
         # памяти (`shared_resources_module.memory.pool`). Транспорт держит пул через DI и
@@ -674,8 +643,9 @@ class FrameShmMiddleware:
     def frame_handle_cache_size(self) -> int:
         """Ф7 G.7 (0.5): размер reader-кэша SHM-handle — read-only проекция reader'а.
 
-        Под zero-copy эвикция отключена → на soak следим за ростом на инкарнацию
-        (резидуал G.5). Без handle-кэша (флаг off) — 0."""
+        Кэш всегда включён (4.7b): по handle на ключ ``(owner, slot, idx)``, новое имя под ключом
+        отставляет старый handle (с живым view — отложенно, в счёт не входит). Устойчивый рост на soak —
+        утечка handle через рестарт владельца. 0 — пока ничего не читали."""
         return self._reader.cache_size
 
     @staticmethod
@@ -763,7 +733,7 @@ class FrameShmMiddleware:
         ``FrameReader.view_valid``: совпало → валиден; разошлось / handle эвиктнут / gen<0 →
         drop (счётчик ``frame_stale_drops`` у reader'а), НЕ порча. Публичный контракт для
         ``PipelineExecutor`` и двери отправки. Синхронизация — внутри reader'а (свой lock)."""
-        return self._reader.view_valid(ref["name"], ref["gen"])
+        return self._reader.view_valid(ref["name"], ref["gen"], key=_ref_key(ref))
 
     # ------------------------------------------------------------------
     # Единое ядро записи кадра в SHM (Ф7 G.3a — канон generic)
@@ -956,7 +926,7 @@ class FrameShmMiddleware:
         """Восстановить массивы из ссылок ``data["_shm_refs"]`` (Task 4.4: включая ``frame``).
 
         ``frame`` -> ``msg["frame"]``; остальные ключи -> ``data[key]`` (Task 4.1). Чтение — по
-        ``ref["name"]`` со сверкой поколения ``ref["gen"]`` (view при zero_copy, иначе копия;
+        ``ref["name"]`` со сверкой поколения ``ref["gen"]`` (read-only view, без копии;
         перезаписанная ячейка / рваное чтение -> ``None`` + счётчик, НЕ чужие пиксели).
         Ссылки, восстановленные view, записываются в ПРОЦЕСС-ЛОКАЛЬНЫЙ ключ ``data["_shm_views"]``
         — по ним executor и дверь отправки проверяют, что view пережил обработку.
@@ -989,15 +959,16 @@ class FrameShmMiddleware:
         Returns ``(массив | None, это_view)``. ``None`` = перезаписано до чтения (stale) или во
         время (torn) — оба штатные дропы со счётчиком у reader'а, без лога; сегмент отвязан
         (``FileNotFoundError``) — тот же stale, счёт у middleware; сбой открытия сегмента
-        (throttled лог) тоже ``None``. view (zero-copy) — только при ``allow_view`` И активном
-        zero_copy (гейтнут в ctor на handle-кэш): поколение слота у view всегда сверяется с
+        (throttled лог) тоже ``None``. view (zero-copy, read-only: ``writeable=False`` ставит
+        ``memory/format``) — при ``allow_view`` (конвейер); copy-out (``on_receive``) зовёт с
+        ``allow_view=False`` и получает копию. Поколение слота у view всегда сверяется с
         ``ref["gen"]`` (``frame_view_valid``), отдельной меты на провод не нужно."""
         name = ref.get("name")
         gen = ref.get("gen")
         if name and isinstance(gen, int):
-            view = allow_view and self._zero_copy
+            view = allow_view
             try:
-                arr = self._reader.read_ref(name, gen, copy=not view)
+                arr = self._reader.read_ref(name, gen, copy=not view, key=_ref_key(ref))
             except FileNotFoundError:
                 # 4.4c: сегмент ссылки отвязан (realloc кольца у владельца) — штатный stale-дроп, счёт
                 # без лога (не ERROR на каждое сообщение, как и stale по поколению у reader'а).
