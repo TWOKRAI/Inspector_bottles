@@ -9,12 +9,24 @@ Run the final check before shipping the code:
    ```bash
    make gate        # if there is a Makefile (lint + types + tests)
    ```
-   Fallback (if make is unavailable):
+   Fallback (if make is unavailable — e.g. Windows without GNU make):
    ```bash
    uv run ruff check .
    uv run pyright src   # same scope as CI; bare `pyright` pulls in tests/, where type debt usually piles up
    uv run pytest -q
    ```
+   **The fallback must cover every component of the project's `gate` target, not this
+   generic list.** Read the `gate:` line of the Makefile and run each recipe it expands
+   to. Example: if `gate: check test test-fw` and `test-fw` runs
+   `scripts/run_framework_tests.py`, the fallback without that script is blind to every
+   test outside the root testpaths (measured in Inspector_bottles, 2026-10-02: ~6.5k
+   framework tests).
+
+   **A red gate refuses the ship. No exceptions, no "pre-existing failure".** Any
+   failed / error / segfault in any gate component → stop, report the failing ids, do
+   not continue to the next step. The only legal quarantine is
+   `pytest.mark.xfail(strict=True, reason="<issue or OPEN_QUESTIONS link>")` committed
+   before the ship — never a skip without a reason, never "known red, ship anyway".
 
 2. **Change summary:**
    ```bash

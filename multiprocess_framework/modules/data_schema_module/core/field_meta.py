@@ -29,7 +29,6 @@ FieldMeta — дескриптор метаданных поля для Annotate
 
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, Union
@@ -74,8 +73,6 @@ WidgetType = Literal[
     # CardsFieldFactory.register_type(...) на стороне фронтенда.
     "model_picker",
 ]
-
-_log = logging.getLogger(__name__)
 
 # Закрытый словарь правил (Task 1b.2d-2, ADR-DS-010). Правило — ДАННЫЕ, а не python-код
 # класса: копия регистра на GUI-стороне строится из FieldInfo + FieldMeta, и
@@ -407,6 +404,10 @@ class FieldMeta:
             # незнакомого правила: оно отбрасывается со строкой в журнал.
             unknown = sorted(set(rules) - RULE_KEYS)
             if unknown:
-                _log.warning("FieldMeta.from_dict: отброшены неизвестные правила %s", unknown)
+                # ЛЕНИВЫЙ импорт: файл грузится из core/__init__.py на LAYER 0, модульный
+                # импорт logger_module замыкает кольцо (см. core/metrics.py::_std_logger).
+                from ...logger_module import get_std_logger
+
+                get_std_logger(__name__).warning("FieldMeta.from_dict: отброшены неизвестные правила %s", unknown)
                 kwargs["rules"] = {k: v for k, v in rules.items() if k in RULE_KEYS}
         return cls(**kwargs)
