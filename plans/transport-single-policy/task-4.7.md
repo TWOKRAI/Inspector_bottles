@@ -261,9 +261,11 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
   (`:264-268`) стоит ПОСЛЕ него: при пустом выходе и устаревшем view reader уже прибавил 1, а батч «не дропнут».
   4.7d-2 переносит ветку `if not valid` выше `:258`.
 - `lag_dropped_total` — свойство `DataReceiver` (`data_receiver.py:281`), не ключ `get_cycle_metrics()` (ревью спеки).
-- Флаги `FW_SHM_ZERO_COPY`, `HANDLE_CACHE`, `OWNER_INCARNATION` по умолчанию выключены (`feature_flags.py:96-112`); без
-  zero-copy у item нет `_shm_views`, и дропы stale_exec и двери не возникают по построению. Все тесты 4.7d с view
-  включают три флага так же, как тесты 4.7a; после слияния 4.7b флаги уходят, и тесты перебазируются.
+- **После 4.7b (main `6e0fbec0b`, ветка 4.7d перебазирована на `d60bd59ad`):** флагов `FW_SHM_ZERO_COPY`,
+  `HANDLE_CACHE`, `OWNER_INCARNATION` больше нет (resolve по ним — `KeyError`), zero-copy — единственный режим, у item
+  с кадром всегда есть `_shm_views`. Тесты 4.7d флаги НЕ включают. Вход плагина — read-only view (контракт 4.7b,
+  `process_module/plugins/base.py`). Отбрасывание сообщения в полёте при realloc ключа (C7) — ещё один путь отказа
+  restore, маркер `stale_restore`.
 - Под `FW_PORT_VALIDATE=1` маркер на плагине с обязательными портами (`robot_control`: `frame`, `detections`) падает
   в `PortValidationError` (`plugin_runner.py:153-159`, `port.py:187`) → `on_fail`, breaker растёт.
 - Полный разбор кода по подсистеме — [`docs/maps/transport.md`](../../docs/maps/transport.md).
@@ -313,11 +315,11 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 **Порядок и независимость (после ревью спеки).** 4.7d-1 первой; `frame_shm_middleware.py` она НЕ трогает (проводка
 `overflow` в middleware перенесена в 4.7d-3), поэтому от 4.7b не зависит. После неё 4.7d-2 и 4.7d-4 независимы
 (общих файлов нет) и идут параллельно. 4.7d-3 правит `frame_shm_middleware.py` и `router_manager.py` (зона 4.7b) —
-только после слияния 4.7b в main. Скрытые связи: сигнатура конструктора `FrameShmMiddleware` (4.7b), zero-copy флаги
-(уходят в 4.7b). 4.7d-5 — после 2, 3 и 4. Слепой tester — на каждую подзадачу до кода, в worktree на коммите
+после слияния 4.7b в main (выполнено 2026-10-02, `6e0fbec0b`); перед правкой `router_manager.py` — сообщить чату
+transport. 4.7d-5 — после 2, 3 и 4. Слепой tester — на каждую подзадачу до кода, в worktree на коммите
 перед реализацией.
 
-**Общее для всех acceptance с view/SHM:** три zero-copy флага включены (см. выше). Тест, который может заблокироваться
+**Общее для всех acceptance с view/SHM:** zero-copy — единственный режим после 4.7b, флагов нет. Тест, который может заблокироваться
 (полная `chain_queue`, `put` без `_stop_event`), гоняет вызов в daemon-потоке с дедлайном на `join`, а не висит.
 
 ###### 4.7d-1 — Ключ рецепта и контракт маркера (6 кода-файлов, developer)
@@ -354,11 +356,12 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
       ключа — `"latest"` (проверка на реальной сборке `_init_data_pipeline`, не на подменах).
 - [ ] Поведение под `every` в 4.7d-1 не меняется: существующие тесты `data_receiver` / `pipeline_executor` зелёные.
 
-###### 4.7d-2 — Рождение маркера в приёмнике и исполнителе, проход маркера (4 кода-файла, teamlead)
+###### 4.7d-2 — Рождение маркера в приёмнике и исполнителе, проход маркера (5 кода-файлов, teamlead; в пилоте — dev-transport)
 **Files:** `multiprocess_framework/modules/process_module/generic/data_receiver.py`,
 `multiprocess_framework/modules/process_module/generic/pipeline_executor.py`,
 `multiprocess_framework/modules/process_module/generic/plugin_operation_step.py`,
-`multiprocess_framework/modules/process_module/generic/plugin_runner.py` (валидация портов пропускает маркер-items).
+`multiprocess_framework/modules/process_module/generic/plugin_runner.py` (валидация портов пропускает маркер-items),
+`multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py` (помощник `meta_from_msg`, ниже).
 Существующие тесты, которые меняются намеренно: `test_g5c_executor_drop.py:245` (1→3 пинит 3, станет 1) и
 `test_cycle_metrics.py:164` (`_EXECUTOR_KEYS` — точный набор, добавляется `not_inspected_handled`).
 **Steps:**
@@ -395,6 +398,11 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
    цепочка на этих входах уже отработала, повторный проход дал бы второй исход у плагина (ревью спеки, находка 8);
    `not_inspected_handled` растёт и здесь. `not_inspected_stale_exec += len(inputs)` в обоих случаях. Выходы цепочки
    при post-chain stale не отправляются (как сейчас).
+7. (ревью 4.7d-1, minor 2) Конструкторы `DataReceiver` и `PipelineExecutor` проверяют `overflow in ("latest", "every")`
+   → иначе `ValueError`; ветвление везде строго `self._overflow == "every"`.
+8. (ревью 4.7d-1, minor 3) Правило «meta как в `_build_item`» — один помощник `meta_from_msg(msg) -> dict` в
+   `not_inspected_marker.py`: `trace_id`/`capture_ts` из `msg["data"]`, `frame_id`/`camera_id` из `data`, иначе из `msg`
+   (по наличию ключа). Restore строит маркер через него; bound и exec — из item (там meta уже собрана `_build_item`).
 **Acceptance** (литералы; `chain_queue` и `FrameShmMiddleware`/reader настоящие, исполнитель в тестах остановлен, где сказано):
 - [ ] Bound, `every`, `chain_max_lag_items=2`, `chain_queue` `maxsize=64`, исполнитель не читает. Приходят кадровые
       коллекции по 1 item, `trace_id` `t1..t6`. Очередь после шестой: `qsize() == 3`, порядок `[M(t1,t2,t3,t4), c5, c6]`,
@@ -443,6 +451,10 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 - [ ] Те же три сценария (pre 3, post 2→1, post 1→3) при `latest`: `send_fn` не вызывалась, `frame_stale_drops`
       +3 / +2 / +1, ключа `not_inspected_stale_exec` нет, `not_inspected_handled` не вырос.
 - [ ] Батч с неизменёнными view: маркеров 0, обычные результаты уходят как раньше.
+- [ ] `DataReceiver(..., overflow="Every")` и `PipelineExecutor(..., overflow="sometimes")` → `ValueError`.
+- [ ] `meta_from_msg({"data": {"trace_id": "t1", "capture_ts": 2.0, "camera_id": 0}, "frame_id": 5, "camera_id": "x"})`
+      `== {"trace_id": "t1", "capture_ts": 2.0, "camera_id": 0, "frame_id": 5}` (`camera_id` из `data` побеждает `msg`,
+      0 сохраняется).
 
 ###### 4.7d-3 — Маркер в двери отправителя (3 кода-файла, developer; только после слияния 4.7b в main)
 **Files:** `multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py`
@@ -516,8 +528,8 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 - [ ] Маркеры доезжают до соседа: `handled(next) − (lag + stale_restore + stale_exec)(next) == Σ born(prev_i) × N_i`,
       где `born` — все четыре `not_inspected_*` процесса-источника, `N_i` — число его `chain_targets`, сумма — по всем
       источникам узла (join).
-- [ ] Стенд — с zero-copy (до 4.7b флаги включены явно, после — единственный режим); иначе слагаемые stale_exec и
-      двери равны 0 по построению. Ключи `not_inspected_*` читаются там, где их видно: telemetry пропускает только
+- [ ] Стенд — на main после 4.7b (zero-copy — единственный режим), иначе слагаемые stale_exec и двери равны 0.
+      `backend/topology/TEMPLATE.yaml:50-57` — дописать `overflow` и ловушку плоской формы (ревью 4.7d-1, minor 4). Ключи `not_inspected_*` читаются там, где их видно: telemetry пропускает только
       объявленные метрики (`heartbeat/telemetry.py:63-69`) — проверить до прогона.
 - [ ] Если инспектор получает кадры по проводу: дропы middleware провода на приёме (`on_receive`) в счётчиках
       процесса не видны (ревью спеки) — учёт кадров по `trace_id` это покажет; записать, как ходит стенд.
