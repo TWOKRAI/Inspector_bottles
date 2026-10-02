@@ -100,7 +100,14 @@ class _Runner:
 
     def __init__(self, ready_event, *, class_path: str = _GP, keys: tuple[str, ...] = ("a",), sys_stop=None) -> None:
         cfg = {"config": {"plugins": _plugin_defs(*keys), "chain_targets": [], "source_target_fps": 100.0}}
-        bundle = {"queues": {"data": multiprocessing.Queue()}, "config": cfg, "custom": {"process_config": cfg}}
+        # Собственная готовность процесса (runner передаёт её через attach_ready_event, процесс
+        # взводит в конце run()) — якорь тестов «кадров нет»: отсчёт идёт от неё, а не от фиксированной паузы.
+        self.own = multiprocessing.Event()
+        bundle = {
+            "queues": {"data": multiprocessing.Queue()},
+            "config": cfg,
+            "custom": {"process_config": cfg, "ready_event": self.own},
+        }
         self.stop = threading.Event()
         self.thread = threading.Thread(
             target=run_process_function,
@@ -160,7 +167,8 @@ def test_real_generic_process_holds_source_until_system_ready_event(runners) -> 
     ev = multiprocessing.Event()
     r = runners(ev)
     r.start()
-    time.sleep(2.5)  # initialize() и воркер источника заведомо отработали
+    assert r.own.wait(10.0), "процесс не объявил собственную готовность за 10 с"
+    time.sleep(0.3)  # при K7 (ready_event=None) за 0.3 с идут десятки кадров
     assert CALLS["a"] == [], f"produce() вызван {len(CALLS['a'])} раз до set() системного события"
     t_set = time.perf_counter()
     ev.set()
@@ -176,7 +184,7 @@ def test_control_generic_process_without_event_produces_frames(runners) -> None:
     (плагин не загрузился, процесс не поднялся)."""
     r = runners(None)
     r.start()
-    assert _wait_first("a", 2.5), "без события источник GenericProcess не дал ни одного кадра за 2.5 с"
+    assert _wait_first("a", 10.0), "без события источник GenericProcess не дал ни одного кадра за 10 с"
     assert len(CALLS["a"]) > 0
 
 
@@ -200,7 +208,8 @@ def test_two_sources_in_one_process_both_wait_for_the_event(runners) -> None:
     ev = multiprocessing.Event()
     r = runners(ev, keys=("a", "b"))
     r.start()
-    time.sleep(2.5)
+    assert r.own.wait(10.0), "процесс не объявил собственную готовность за 10 с"
+    time.sleep(0.3)
     assert CALLS["a"] == [] and CALLS["b"] == [], (len(CALLS["a"]), len(CALLS["b"]))
     ev.set()
     assert _wait_first("a", 3.0), "источник a не стартовал после set()"
@@ -359,7 +368,10 @@ def test_system_stop_during_preroll_exits_runner_without_produce_or_warning(runn
     sys_stop = multiprocessing.Event()
     r = runners(multiprocessing.Event(), sys_stop=sys_stop)  # срок по умолчанию 10 с
     r.start()
-    time.sleep(2.0)  # процесс поднят, источник внутри preroll
+    # Процесс объявил готовность (его run() отработал) при 0 кадров: источник внутри preroll.
+    assert r.own.wait(10.0), "процесс не объявил собственную готовность за 10 с"
+    time.sleep(0.3)
+    assert CALLS["a"] == [], "кадры пошли до системного стопа и до set() события"
     assert r.thread.is_alive()
     t_stop = time.perf_counter()
     sys_stop.set()
