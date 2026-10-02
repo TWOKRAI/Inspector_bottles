@@ -178,6 +178,10 @@ plugins:
   # и assets. Vendored, а не consume: плагин ставится маркетплейсом глобально на
   # ВСЕ проекты, а здесь он нужен project-scoped и git-tracked.
   # Установлен SKILLS-ONLY: хуков в settings.json нет, always-on-инъекции нет.
+  # 2026-10-02: ключ "hooks" УДАЛЁН из .claude/plugins/ponytail/.claude-plugin/plugin.json.
+  # Композер (settings_compose/merge.py::_merge_hooks) подключает plugin.json.hooks каждого
+  # включённого плагина; флага hooks:false в enabled.yaml он не читает (проверено по локальному исходнику 1.1.0; композер 1.2.0 на машине не запускался).
+  # Из-за ключа сид 1.2.0 (2026-09-20) вернул always-on вопреки решению 2026-07-30.
   # Границу «когда применять» задаёт секция в .claude/CLAUDE.md; там же приоритет
   # (правила проекта побеждают ponytail). Детали и замеры, а также снипет хуков
   # на случай always-on — .claude/plugins/ponytail/WIRING.ru.md.
