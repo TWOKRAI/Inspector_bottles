@@ -1,5 +1,8 @@
 # Task 1b.2d — все правила регистра записаны описанием (спека лида, 2026-10-02)
 
+**Статус: DONE 2026-10-02.** 1b.2d-1 — `e7f4dc8ad`, `e8aeffa54`; 1b.2d-2 — `c4dc0bc01`, `e8d7b2d2c`, `a38756a5b`, `a6984d468`.
+Инъекции лида: 1b.2d-1 7/7, 1b.2d-2 13/13, правки ит.1 3/3 живы. Ревью: спека APPROVE_WITH_CHANGES → 1b.2d-1 APPROVE_WITH_NITS → 1b.2d-2 CHANGES_REQUESTED → ит.2 APPROVE_WITH_NITS (ниточка закрыта лидом).
+
 Родитель: [`phase-1b-recipe-service.md`](phase-1b-recipe-service.md), пункт 1b.2d.
 Ветка `feat/gs-1b2d` (worktree `.claude/worktrees/gs-1b2d`), стоит на слепых RED-тестах тестера
 `fffefb5da` (`tests/gs-1b2d-blind`, отчёт `docs/reviews/2026-10-02_task-1b2d-tester.md`).
@@ -118,6 +121,9 @@
 тот же reviewer дозовом → 1b.2d-2 teamlead → инъекции → тот же reviewer дозовом → слияние лидом, SHA соседям.
 
 ## Открыто
+
+- Флак: `process_module/tests/test_telemetry_default_enabled_hazards.py::…test_replace_without_default_enabled_key_reverts_the_flip`
+  упал один раз в общем прогоне (радиус 1b.2d + process_module, 4333 passed); отдельно и в `process_module/tests` зелёный и на ветке (3187), и на main (3184). Ветка его не вносит — порядок прогона.
 
 - Четвёртый путь голого `setattr` — `_init_register` (`plugins/base.py:1420-1422`, построение регистра из
   конфига): частичное применение при отказе не исследовано, в 1b.2d не входит.
