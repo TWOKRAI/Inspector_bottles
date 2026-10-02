@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """Авторские hazard-тесты Task 5.3b (контракт лида §4.2.1/§4.2.4).
 
-Что здесь проверяется — два опасных места, которые acceptance-тесты тестера не
-покрывают напрямую: (а) фоновый тайл при развороте ленты обязан ехать в ТУ ЖЕ
-сторону, что и объекты (иначе диски «едут по льду» относительно ленты — контракт
-§3, п.3); (б) каталожный инструмент отказывает на эталоне без альфа-канала, а не
-молча портит спрайт.
+Что здесь проверяется: (б) каталожный инструмент отказывает на эталоне без альфа-канала, а не
+молча портит спрайт; (в) `belt_direction` вне `{-1, 1}` отвергается. Hazard (а) — фоновый тайл при
+развороте ленты едет в ТУ ЖЕ сторону, что и объекты — удалён в layer-render 1.3 вместе с параметром
+одиночного тайла; то же свойство держит стек слоёв —
+`test_acceptance_1_3_single_background.py::test_layers_tile_shifts_same_direction_as_objects`.
 
 Файл лежит в ``Services/line_sim/tests/`` — импортирует только ``Services.line_sim.*``
 (граница слоёв, правило 9 корневого CLAUDE.md), без ``Plugins.*``.
@@ -17,108 +17,7 @@ import numpy as np
 import pytest
 
 from Services.line_sim.core.scene_compositor import SceneCompositor
-from Services.line_sim.interfaces import ObjectPassport
 from Services.line_sim.tools.make_letter_catalog import build_catalog
-
-
-class _FakeObj:
-    def __init__(self, passport: ObjectPassport, sprite: np.ndarray) -> None:
-        self.passport = passport
-        self._sprite = sprite
-
-    def render(self) -> np.ndarray:
-        return self._sprite
-
-
-class _FakeSpawner:
-    def __init__(self, obj: _FakeObj) -> None:
-        self._obj = obj
-
-    def active_objects(self) -> list[_FakeObj]:
-        return [self._obj]
-
-
-def _opaque_sprite(size_px: int = 10) -> np.ndarray:
-    sprite = np.zeros((size_px, size_px, 4), dtype=np.uint8)
-    sprite[:, :, 0] = 200
-    sprite[:, :, 3] = 255
-    return sprite
-
-
-def _make_marker_tile(tw: int = 200, th: int = 5) -> np.ndarray:
-    """Тайл-фон с ОДНОЙ отмеченной колонкой (индекс `tw // 2`) — маркер-канал 2."""
-    tile = np.full((th, tw, 3), 60, dtype=np.uint8)
-    tile[:, tw // 2, 2] = 255
-    return tile
-
-
-def _find_marker_col(frame: np.ndarray, row: int) -> int:
-    """Индекс колонки кадра, где найден маркер тайла (канал 2 > 200), в заданной строке."""
-    cols = np.nonzero(frame[row, :, 2] > 200)[0]
-    assert cols.size > 0, "маркер тайла не найден в кадре"
-    return int(cols.mean())
-
-
-# --------------------------------------------------------------------------- #
-# (a) §4.2.1 — фоновый тайл при belt_direction=-1 едет в ту же сторону,       #
-#     что и объекты (не в противоположную)                                    #
-# --------------------------------------------------------------------------- #
-
-
-def test_background_tile_shifts_same_direction_as_objects_when_reversed() -> None:
-    """§4.2.1: при `belt_direction=-1` сдвиг фонового тайла использует ТОТ ЖЕ знак,
-    что и объекты — иначе диски и лента расходятся визуально при развороте
-    (контракт §3, п.3: "без разворота расхождение до ~8 мм при радиусе
-    сопоставления 5 мм").
-
-    Guard: `self._belt_direction * shift_px` в формуле `cols` (`render()`) — убери
-    `self._belt_direction *` (голый `- shift_px`, старая формула) -> тайл и объект
-    едут в ПРОТИВОПОЛОЖНЫЕ стороны при `belt_direction=-1`, тест красный.
-    """
-    px_per_mm = 1.0
-    belt_y_px = 2.5
-    tile = _make_marker_tile(tw=200, th=5)
-    sprite = _opaque_sprite()
-    spawner = _FakeSpawner(
-        _FakeObj(ObjectPassport(object_id="o1", class_name="A", angle_deg=0.0, defect=None, spawn_encoder=0.0), sprite)
-    )
-    compositor = SceneCompositor(
-        spawner,
-        px_per_mm=px_per_mm,
-        belt_y_px=belt_y_px,
-        background_tile=tile,
-        belt_direction=-1,
-        entry_x_px=150.0,  # объект должен оставаться в кадре (0..200) на обоих замерах
-    )
-    camera_rect = (0.0, 0.0, 200.0, 5.0)
-
-    from Services.line_sim.core.belt import encoder_to_offset_mm
-    from Services.robot_comm.core.registers import FACTOR_MM
-
-    def _cx_and_marker(now_encoder: float) -> tuple[float, int]:
-        frame, passports = compositor.render(now_encoder=now_encoder, camera_rect=camera_rect)
-        assert passports
-        obj_mask = np.nonzero(frame[2, :, 0] > 150)[0]  # спрайт-маркер: канал 0
-        assert obj_mask.size > 0, "объект не найден в кадре"
-        cx = float(obj_mask.mean())
-        marker_col = _find_marker_col(frame, row=2)
-        return cx, marker_col
-
-    enc0 = 0.0
-    enc1 = 50.0 / FACTOR_MM  # offset ~50мм — меньше половины ширины тайла (100), без wraparound
-    assert encoder_to_offset_mm(enc1, 0.0) < 100.0
-
-    cx0, marker0 = _cx_and_marker(enc0)
-    cx1, marker1 = _cx_and_marker(enc1)
-
-    obj_delta = cx1 - cx0
-    marker_delta = marker1 - marker0
-    assert obj_delta != 0, "объект не сдвинулся между замерами — увеличьте enc1"
-    assert marker_delta != 0, "маркер тайла не сдвинулся между замерами"
-    assert (obj_delta > 0) == (marker_delta > 0), (
-        f"объект и фон едут в РАЗНЫЕ стороны при belt_direction=-1: "
-        f"объект {cx0:.1f}->{cx1:.1f} (Δ={obj_delta:.1f}), тайл {marker0}->{marker1} (Δ={marker_delta})"
-    )
 
 
 # --------------------------------------------------------------------------- #

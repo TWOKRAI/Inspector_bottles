@@ -153,7 +153,6 @@ def _uniform(frame: np.ndarray) -> tuple[int, int, int] | None:
 
 # Литералы сняты прогоном ЭТОГО набора на дереве до реализации (см. `_frames_sha`), не пересчитываются.
 _GOLDEN_NO_BACKGROUND_KEY_SHA = "be289ebfa70a8a1e1084537293e1727a5337bcc62393983eb4ac125ba31b603e"
-_GOLDEN_BACKGROUND_TEXTURE_SHA = "5dc6ff14006e6e3d707de4ec30dac05289410936a896875baa64fac63627709a"
 
 
 def test_no_background_key_frames_are_byte_identical_to_pre_task(tmp_path):
@@ -161,26 +160,14 @@ def test_no_background_key_frames_are_byte_identical_to_pre_task(tmp_path):
     assert _frames_sha(_cfg(tmp_path)) == _GOLDEN_NO_BACKGROUND_KEY_SHA
 
 
-def test_background_texture_only_frames_are_byte_identical_to_pre_task(tmp_path):
-    """[GREEN-контроль] Старый путь `background_texture` (ветка 3.6) — кадры не меняются."""
-    texture = tmp_path / "tile.png"
-    _write_rgb_tile(texture, th=40, tw=23)
-    assert _frames_sha(_cfg(tmp_path, background_texture=str(texture))) == _GOLDEN_BACKGROUND_TEXTURE_SHA
+# Равенство со старым путём (ключ `background_texture`, удалён в layer-render 1.3) — теперь литерал sha в
+# `test_acceptance_1_3_stand.py::test_a3_layers_solid_plus_tile_reproduces_pre_task_texture_sha`
+# (тот же снятый до удаления хеш, вход — `background_layers: [solid, tile]`).
 
 
 # --------------------------------------------------------------------------------------
-# Эквивалентность через плагин: layers [solid, tile] == background_texture, цвет RGB -> BGR
+# Слои: цвета RGB в конфиге -> BGR в кадре
 # --------------------------------------------------------------------------------------
-
-
-def test_layers_solid_plus_tile_frames_equal_background_texture_frames_with_objects(tmp_path):
-    """Тайл 120 строк при belt_y_px=60 закрывает кадр 160x120 целиком — заливка фона не видна, значит кадры
-    (с движущимися объектами на 6 шагах энкодера) обязаны совпасть побайтно со старым ключом."""
-    texture = tmp_path / "tile.png"
-    _write_rgb_tile(texture, th=120, tw=23, seed=4)
-    old = _frames_sha(_cfg(tmp_path / "old", background_texture=str(texture)))
-    new = _frames_sha(_cfg(tmp_path / "new", background_layers=[{"solid": [10, 20, 30]}, {"tile": str(texture)}]))
-    assert new == old
 
 
 def test_layers_solid_outside_short_tile_is_rgb_config_color_in_bgr_frame(tmp_path):

@@ -32,7 +32,7 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | `ml_train` | ready | Универсальное обучение и выбор моделей: MobileNetV3 (torchvision) / MobileNetV4 + `timm/<имя>` (timm), классы + угол; AMP/EMA/mixup/warmup+cosine; RunRegistry; ONNX-экспорт + sidecar → ml_inference | — |
 | `code_reader` | ready | Считыватель кодов Hikrobot ID3000 (`MV-ID3013PM-06M`): `ResultSink` (TCP-сервер приёма) + разбор формата, снятого с прибора; source-плагин `code_reader` (порт `code`, рецепт `qr_reader_demo`); зонды стенда (discovery, сырой дамп, симулятор прибора, лист тестовых QR). Версия железа 2.0/3.0 не установлена — I/O не подключать. Настройка целиком — [`docs/SETUP.md`](code_reader/docs/SETUP.md) | — |
 | `line_sim` | foundation | Движок сцены симулятора линии: объект из слоёв (static/augmented/defect), выборка и рендер один раз при создании, пресет сцены (Pydantic, YAML round-trip), геометрия ленты от энкодера. Спавн, композитор кадра и каталог — Ф3.2–3.4 | LS-001..006 |
-| `layer_render` | foundation | Стек слоёв фона для сцены (Task 1.1): `SolidFill`/`ScrollingTile` (RGB/RGBA), разбор YAML `background_layers`, свёртка стека, рисование в кадр; ничего не знает про ленту и энкодер. Подключён в `line_sim.SceneCompositor` и `scene_source` — [STATUS](layer_render/STATUS.md) | — |
+| `layer_render` | foundation | Стек слоёв фона для сцены (Task 1.1): `SolidFill`/`ScrollingTile` (RGB/RGBA), разбор YAML `background_layers`, свёртка стека, рисование в кадр; ничего не знает про ленту и энкодер. Подключён в `line_sim.SceneCompositor` и `scene_source` как единственный способ задать фон (Task 1.3, LR-002) — [STATUS](layer_render/STATUS.md), [DECISIONS](layer_render/DECISIONS.md) | — |
 
 ## Правила слоя
 

@@ -207,7 +207,7 @@ def _looks_like_relative_path(value: str) -> bool:
 
 
 #: Корень репозитория от расположения ЭТОГО файла (Services/line_sim/core/preset.py -> parents[3]).
-#: Относительные пути конфига стенда (`preset_path`, `background_texture`) резолвятся от него,
+#: Относительные пути конфига стенда (`preset_path`, `tile` слоя фона) резолвятся от него,
 #: а не от CWD процесса (фикс ревью P5 плагина `scene_source`).
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

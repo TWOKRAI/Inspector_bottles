@@ -14,52 +14,37 @@
 фикстур спавнера).
 
 Принятые из плана сигнатуры: `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr,
-background_tile, belt_direction, entry_x_px, background_layers=None)`; `SolidFill(color_rgb)`,
+belt_direction, entry_x_px, background_layers=None)` (параметр одиночного тайла удалён в layer-render 1.3,
+тесты сравнения со старым путём перенесены на независимый оракул формулы — см. ниже); `SolidFill(color_rgb)`,
 `ScrollingTile(image)`; `background_layers_from_config(items, load_image)`. Кадр компоновщика — RGB.
 """
 
 from __future__ import annotations
 
 import importlib
-import statistics
-import threading
-import time
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from Services.dataset_gen.core.catalog import imwrite_unicode
-from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset
-
-_DEADLINE_S = 180.0
+from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, encoder_to_offset_mm
 
 
 def _iface():
     return importlib.import_module("Services.layer_render.interfaces")
 
 
+def _solid(r: int, g: int, b: int):
+    return _iface().SolidFill(color_rgb=(r, g, b))
+
+
+def _tile_layer(image: np.ndarray):
+    return _iface().ScrollingTile(image=image)
+
+
 def _from_config_fn():
     return importlib.import_module("Services.layer_render.background").background_layers_from_config
-
-
-def _run_with_deadline(fn, deadline_s: float = _DEADLINE_S):
-    """`fn` в daemon-потоке с join-дедлайном: зависание = падение теста, а не подвисший прогон."""
-    box: dict = {}
-
-    def target() -> None:
-        try:
-            box["value"] = fn()
-        except BaseException as exc:  # noqa: BLE001 — пробросить в основной поток как есть
-            box["exc"] = exc
-
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
-    thread.join(deadline_s)
-    assert not thread.is_alive(), f"вызов завис дольше {deadline_s} с"
-    if "exc" in box:
-        raise box["exc"]
-    return box["value"]
 
 
 # --------------------------------------------------------------------------------------
@@ -97,7 +82,8 @@ def _uniform(frame: np.ndarray) -> tuple[int, int, int] | None:
 
 
 # --------------------------------------------------------------------------------------
-# Эквивалентность старому пути: solid [10,20,30] + RGB-тайл == background_bgr=(30,20,10) + background_tile
+# Свойства слоёв `solid [10,20,30]` + RGB-тайл против независимого оракула формулы фона
+# (до layer-render 1.3 сравнивалось с удалённым параметром одиночного тайла; формула — его буквальная копия)
 # --------------------------------------------------------------------------------------
 
 _W, _H, _BELT_Y, _X_PX = 97, 61, 30.0, 5.0
@@ -109,39 +95,47 @@ _TILE_HEIGHTS = [40, 80]
 _Y_PX = [0.0, 13.0]
 
 
+def _oracle_frame(tile, solid_rgb, direction, encoder, rect, belt_y, px_per_mm=1.0):
+    """Кадр фона по формуле контракта: заливка `solid_rgb`, тайл по X циклично со знаком `direction`, по Y — полоса
+    вокруг `belt_y` (строки вне полосы — заливка)."""
+    x_px, y_px, w_px, h_px = rect
+    w, h = int(round(w_px)), int(round(h_px))
+    th, tw = tile.shape[:2]
+    frame = np.empty((h, w, 3), dtype=np.uint8)
+    frame[:, :] = solid_rgb
+    shift_px = int(round(float(encoder_to_offset_mm(encoder, 0.0) * px_per_mm)))
+    cols = (np.arange(w) + int(round(x_px)) - direction * shift_px) % tw
+    top = int(round(belt_y - th / 2))
+    rows = np.arange(h) + int(round(y_px)) - top
+    valid = (rows >= 0) & (rows < th)
+    frame[valid] = tile[rows[valid]][:, cols]
+    return frame
+
+
 @pytest.mark.parametrize("y_px", _Y_PX)
 @pytest.mark.parametrize("th", _TILE_HEIGHTS)
 @pytest.mark.parametrize("direction", [1, -1])
 @pytest.mark.parametrize("encoder", _ENCODERS)
-def test_layers_solid_plus_rgb_tile_is_byte_identical_to_old_path(tmp_path, encoder, direction, th, y_px):
+def test_layers_solid_plus_rgb_tile_matches_formula_oracle(tmp_path, encoder, direction, th, y_px):
     tile = _asym_rgb_tile(th, 23)
-    old = SceneCompositor(
-        _spawner(tmp_path / "old"),
-        px_per_mm=1.0,
-        belt_y_px=_BELT_Y,
-        background_bgr=(30, 20, 10),
-        background_tile=tile,
-        belt_direction=direction,
-    )
     layers = _from_config_fn()([{"solid": [10, 20, 30]}, {"tile": "tile.png"}], lambda path: tile)
-    new = SceneCompositor(
-        _spawner(tmp_path / "new"),
+    comp = SceneCompositor(
+        _spawner(tmp_path),
         px_per_mm=1.0,
         belt_y_px=_BELT_Y,
         background_layers=layers,
         belt_direction=direction,
     )
     rect = (_X_PX, y_px, float(_W), float(_H))
-    frame_old = _render(old, encoder, rect)
-    frame_new = _render(new, encoder, rect)
-    assert frame_new.shape == frame_old.shape == (_H, _W, 3)
-    assert frame_new.dtype == np.uint8
-    assert np.array_equal(frame_new, frame_old)
+    frame = _render(comp, encoder, rect)
+    assert frame.shape == (_H, _W, 3)
+    assert frame.dtype == np.uint8
+    assert np.array_equal(frame, _oracle_frame(tile, (10, 20, 30), direction, encoder, rect, _BELT_Y))
 
 
-def test_equivalence_fixture_is_not_vacuous_old_path_frames_differ_across_encoders(tmp_path):
-    """Контроль фикстуры (зелёный и сегодня): старый путь на трёх энкодерах и двух направлениях даёт
-    РАЗНЫЕ кадры, а за пределами тайла виден заданный фон — иначе эквивалентность выше ничего не ловит."""
+def test_oracle_fixture_is_not_vacuous_layer_frames_differ_across_encoders(tmp_path):
+    """Контроль фикстуры: стек на трёх энкодерах и двух направлениях даёт РАЗНЫЕ кадры, а за пределами тайла виден
+    заданный фон — иначе сравнение с оракулом выше ничего не ловит."""
     tile = _asym_rgb_tile(40, 23)
     frames = []
     for direction in (1, -1):
@@ -149,8 +143,7 @@ def test_equivalence_fixture_is_not_vacuous_old_path_frames_differ_across_encode
             _spawner(tmp_path / f"d{direction}"),
             px_per_mm=1.0,
             belt_y_px=_BELT_Y,
-            background_bgr=(30, 20, 10),
-            background_tile=tile,
+            background_layers=[_solid(10, 20, 30), _tile_layer(tile)],
             belt_direction=direction,
         )
         for enc in _ENCODERS:
@@ -161,8 +154,7 @@ def test_equivalence_fixture_is_not_vacuous_old_path_frames_differ_across_encode
         _spawner(tmp_path / "lit"),
         px_per_mm=1.0,
         belt_y_px=_BELT_Y,
-        background_bgr=(30, 20, 10),
-        background_tile=tile,
+        background_layers=[_solid(10, 20, 30), _tile_layer(tile)],
     )
     frame = _render(comp, 0, (0.0, 0.0, float(_W), float(_H)))
     assert tuple(int(v) for v in frame[0, 0]) == (10, 20, 30)
@@ -181,10 +173,9 @@ def test_layers_solid_alone_is_rgb_not_bgr_literal(tmp_path):
     assert _uniform(frame) == (10, 20, 30)
 
 
-def test_background_layers_none_is_old_path_byte_identical(tmp_path):
-    """`background_layers=None` (явно) — ветка 3.6 нетронута: кадр байт в байт как без аргумента."""
-    tile = _asym_rgb_tile(40, 23)
-    kw = dict(px_per_mm=1.0, belt_y_px=_BELT_Y, background_bgr=(30, 20, 10), background_tile=tile)
+def test_background_layers_none_is_solid_fill_byte_identical(tmp_path):
+    """`background_layers=None` (явно) — сплошная заливка `background_bgr`: кадр байт в байт как без аргумента."""
+    kw = dict(px_per_mm=1.0, belt_y_px=_BELT_Y, background_bgr=(30, 20, 10))
     omitted = SceneCompositor(_spawner(tmp_path / "a"), **kw)
     explicit = SceneCompositor(_spawner(tmp_path / "b"), background_layers=None, **kw)
     rect = (_X_PX, 7.0, float(_W), float(_H))
@@ -196,18 +187,6 @@ def test_default_compositor_without_layers_keeps_default_gray_literal(tmp_path):
     """Контроль (зелёный и сегодня): без ключа и без тайла фон — прежний `background_bgr=(60,60,60)`."""
     comp = SceneCompositor(_spawner(tmp_path), px_per_mm=1.0, belt_y_px=30.0)
     assert _uniform(_render(comp, 0, (0.0, 0.0, 20.0, 12.0))) == (60, 60, 60)
-
-
-def test_both_background_layers_and_background_tile_raise_valueerror_in_constructor(tmp_path):
-    iface = _iface()
-    with pytest.raises(ValueError):
-        SceneCompositor(
-            _spawner(tmp_path),
-            px_per_mm=1.0,
-            belt_y_px=30.0,
-            background_layers=[iface.SolidFill(color_rgb=(0, 0, 0))],
-            background_tile=_asym_rgb_tile(8, 8),
-        )
 
 
 # --------------------------------------------------------------------------------------
@@ -245,8 +224,8 @@ def test_rgba_tile_alpha_zero_column_shows_black_solid_other_columns_show_tile_r
 @pytest.mark.parametrize("encoder", [0, 1000])
 def test_rgba_transparent_column_scrolls_together_with_the_tile(tmp_path, encoder, direction):
     """Альфа едет с тайлом: прозрачны ровно те пиксели кадра, под которыми лежит столбец тайла с альфой 0.
-    Положение столбца берётся из старого пути (R-канал кодирует индекс столбца), формулу сдвига тест
-    не пересчитывает."""
+    Положение столбца берётся из кадра со слоем RGB без альфы (R-канал кодирует индекс столбца), формулу сдвига
+    тест не пересчитывает."""
     iface = _iface()
     tw = 7
     rgb = np.zeros((7, tw, 3), dtype=np.uint8)
@@ -255,8 +234,12 @@ def test_rgba_transparent_column_scrolls_together_with_the_tile(tmp_path, encode
     rgba = np.concatenate([rgb, np.full((7, tw, 1), 255, dtype=np.uint8)], axis=2)
     rgba[:, 2, 3] = 0
 
-    old = SceneCompositor(
-        _spawner(tmp_path / "old"), px_per_mm=1.0, belt_y_px=3.5, background_tile=rgb, belt_direction=direction
+    opaque = SceneCompositor(
+        _spawner(tmp_path / "opaque"),
+        px_per_mm=1.0,
+        belt_y_px=3.5,
+        background_layers=[iface.SolidFill(color_rgb=(0, 0, 0)), iface.ScrollingTile(image=rgb)],
+        belt_direction=direction,
     )
     new = SceneCompositor(
         _spawner(tmp_path / "new"),
@@ -266,9 +249,9 @@ def test_rgba_transparent_column_scrolls_together_with_the_tile(tmp_path, encode
         belt_direction=direction,
     )
     rect = (0.0, 0.0, 30.0, 7.0)
-    frame_old = _render(old, encoder, rect)
-    expected = frame_old.copy()
-    transparent = frame_old[:, :, 0] == 25
+    frame_opaque = _render(opaque, encoder, rect)
+    expected = frame_opaque.copy()
+    transparent = frame_opaque[:, :, 0] == 25
     assert transparent.any(), "фикстура: столбец 2 обязан быть виден в кадре"
     expected[transparent] = (0, 0, 0)
     assert np.array_equal(_render(new, encoder, rect), expected)
@@ -387,49 +370,3 @@ def test_transparent_tile_rows_outside_tile_show_solid_below(tmp_path):
     assert _uniform(frame[:20]) == (10, 20, 30)
     assert _uniform(frame[40:]) == (10, 20, 30)
     assert _uniform(frame[20:40]) == (255, 255, 255)
-
-
-# --------------------------------------------------------------------------------------
-# Производительность: [solid, RGBA-тайл 410x484] <= 1.3x старого пути background_tile, кадр 1440x1080
-# --------------------------------------------------------------------------------------
-
-
-def test_render_median_with_layers_within_1_3x_of_old_background_tile_path(tmp_path):
-    iface = _iface()
-    rng = np.random.default_rng(1)
-    rgb = rng.integers(0, 256, size=(484, 410, 3), dtype=np.uint8)
-    alpha = np.where(rng.random((484, 410, 1)) < 0.2, 0, 255).astype(np.uint8)  # 20 % просветов
-    rgba = np.concatenate([rgb, alpha], axis=2)
-    rect = (0.0, 0.0, 1440.0, 1080.0)
-    old = SceneCompositor(
-        _spawner(tmp_path / "old"), px_per_mm=1.0, belt_y_px=540.0, background_bgr=(0, 0, 0), background_tile=rgb
-    )
-    new = SceneCompositor(
-        _spawner(tmp_path / "new"),
-        px_per_mm=1.0,
-        belt_y_px=540.0,
-        background_layers=[iface.SolidFill(color_rgb=(0, 0, 0)), iface.ScrollingTile(image=rgba)],
-    )
-
-    def measure() -> tuple[float, float]:
-        for comp in (old, new):  # прогрев
-            comp.render(0, rect)
-        old_t: list[float] = []
-        new_t: list[float] = []
-        for i in range(200):  # чередование: дрейф машины делится поровну
-            enc = i * 37
-            t0 = time.perf_counter()
-            old.render(enc, rect)
-            t1 = time.perf_counter()
-            new.render(enc, rect)
-            t2 = time.perf_counter()
-            old_t.append(t1 - t0)
-            new_t.append(t2 - t1)
-        return statistics.median(old_t), statistics.median(new_t)
-
-    old_median, new_median = _run_with_deadline(measure)
-    print(
-        f"\nmedian render 1440x1080: old={old_median * 1e3:.3f} ms, layers={new_median * 1e3:.3f} ms, "
-        f"ratio={new_median / old_median:.3f}"
-    )
-    assert new_median <= 1.3 * old_median, (old_median, new_median)
