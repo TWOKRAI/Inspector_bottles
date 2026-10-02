@@ -351,6 +351,14 @@ class SocketChannel(MessageChannel):
             try:
                 chunk = client.recv(4096)
             except socket.timeout:
+                # Windows: ``shutdown(SHUT_RDWR)`` из ``_write_line`` не будит
+                # блокирующий ``recv`` — EOF не приходит, и без этой проверки сессия
+                # висит вечно. Сокет помечен в ``_dead`` → выходим, дальше обычная
+                # уборка после цикла. Чтение множества БЕЗ ``_write_lock``: добавляют
+                # под локом, а здесь достаточно атомарного ``in`` — худший случай
+                # один лишний тик таймаута (0.5 с), лок в read-loop не берём.
+                if client in self._dead:
+                    break
                 continue
             except OSError:
                 break

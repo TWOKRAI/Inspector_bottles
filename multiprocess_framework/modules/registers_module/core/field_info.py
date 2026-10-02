@@ -159,7 +159,8 @@ def _json_safe(value: Any) -> Any:
     if value is _PYDANTIC_UNDEFINED:
         return None
     if isinstance(value, Path):
-        return str(value)
+        # Провод — POSIX: ``str(Path)`` на Windows даёт обратные слэши.
+        return value.as_posix()
     if isinstance(value, (tuple, list)):
         return [_json_safe(v) for v in value]
     if isinstance(value, dict):
