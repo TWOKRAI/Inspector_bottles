@@ -86,7 +86,10 @@
    Докстринги переписать: модуль (`:11-13`, «sidecar сам делает resize»), `_crop_disk` (`:45-53` — репликация, `Raises: ValueError`),
    комментарий `:57` — после задачи они ложные.
 2. `Services/ml_train/__main__.py:40-44,119` — флаги `--radius-scale`, `--margin-px`, `--output-size`, `--pad-color-bgr B,G,R`
-   с дефолтами рецепта, проброс в `evaluate_holdout`
+   с `default=None`; в `evaluate_holdout` передаются только заданные флаги (`None` не передаётся) — дефолты живут в одном месте,
+   в сигнатуре `evaluate_holdout`
+2b. `Services/ml_train/holdout_eval.py:118-120` — дефект строки лога: `ang_errors[-1]` берётся при `angle_valid` без условия `ok`
+   → `IndexError` на первом промахе буквы с цифрами в имени файла (ревью спеки, запуск). Чинить одной строкой: условие `ok and …`
 3. `Services/layer_render/tests/test_acceptance_6_1_crop.py`, `test_hazards_6_1_crop.py` — тесты, закрепившие **старую формулу**
    `_crop_disk` (список в DESIGN), удаляются **намеренно**; вместе с ними — помощник `_run_crop_disk` (`test_acceptance_6_1_crop.py:263-268`);
    докстринги и комментарии про `_crop_disk` (`test_acceptance_6_1_crop.py:12`, `:249`; `test_hazards_6_1_crop.py:5`, `:161`) — привести к новому
@@ -132,18 +135,23 @@
 - [ ] A4. Выход не делит память с кадром (`np.shares_memory is False`); read-only кадр работает.
 - [ ] A5. Сводка и CLI. Наблюдение: `monkeypatch` `holdout_eval.InferenceEngine` stub-ом (`load_model`, `_spec.symmetry = {}`,
       `predict(frame, top_k=1) -> [{"label", "confidence", "angle_deg", "angle_valid"}]`), `holdout_eval.detect_disk` — фиксированный
-      ответ, hold-out — одна папка-буква с одним PNG. Проверить: `evaluate_holdout(...)` с дефолтами →
+      ответ, hold-out — одна папка-буква с одним PNG `<буква>/0.png`; stub `predict` отдаёт `label`, равный имени папки, и
+      `angle_valid: True` (отдельный тест на промах: `label` чужой, `angle_valid: True`, файл `<буква>/0.png` → сводка без
+      исключения, `accuracy == 0.0` — ловит дефект `:118-120`). Проверить: `evaluate_holdout(...)` с дефолтами →
       `summary["crop"] == {"radius_scale": 1.0, "margin_px": 14, "output_size": 128, "pad_color_bgr": [0, 0, 0]}`;
       `evaluate_holdout(..., margin=0.18)` → `TypeError`. CLI: `main(["eval", "m", dir, "--pad-color-bgr", "7,8,9"])` → шпион на
-      `evaluate_holdout` получил `pad_color_bgr == (7, 8, 9)` (tuple из int); `--pad-color-bgr 7,8` и `7,8,300` → `SystemExit` с кодом 2;
-      `eval --help` перечисляет четыре новых флага.
+      `evaluate_holdout` получил `pad_color_bgr == (7, 8, 9)` (tuple из int); шпион возвращает `{"accuracy": 0.0, "angle_mae_deg": None}`
+      (`_cmd_eval` читает эти ключи после вызова, `__main__.py:120-127`); `main(["eval", "m", dir])` без флагов → в kwargs шпиона нет
+      ни одного из четырёх ключей; `--pad-color-bgr 7,8` и `7,8,300` → `SystemExit` с кодом 2; `eval --help` перечисляет четыре новых флага.
 - [ ] A6. Остальные тесты `Services/ml_train/tests/`, `Services/layer_render/tests/`, `Plugins/processing/center_crop/tests/` —
       зелёные без правки, кроме трёх удалённых из списка DESIGN.
 - [ ] A7. Прогон лида (данные вне git), модель `mobilenet_v3_large_20260616_050828`: точность буквы, MAE угла и доля ≤5°
       по **старой** и **новой** формуле рядом — в `Services/ml_train/STATUS.md` и в отчёте. Настоящей отложенной выборки на диске
       нет (2026-10-02): прогон идёт на `data/real_photos` (8 кадров, 2 буквы, участвовали в обучении), это пишется рядом с числами.
 - [ ] A8. Дефолты `evaluate_holdout` равны `config` у `center_crop` в `letter_robot_sim.yaml` (тест читает YAML; `pad_color_bgr` —
-      дефолт регистра `CenterCropRegisters`) — правка рецепта без правки дефолтов делает тест красным.
+      дефолт регистра `CenterCropRegisters`); тест также требует в рецепте `size_mode == "radius"`, `pad_if_oob is True`,
+      `drop_partial is False` — правка рецепта без правки `holdout_eval` делает тест красным. Секция ищется по `plugin_name: center_crop`
+      в `processes[*].plugins[*]`.
 
 **Out of scope:** смена модели; правка `detect_disk`; удаление `replicate`; сбор настоящей отложенной выборки (→ letters-retrain).
 
@@ -151,3 +159,5 @@
 спеки (worktree на коммите до кода), новое — на HEAD задачи. В worktree `data/models` содержит только `README.md` — команда с
 абсолютными путями основного дерева: `python -m Services.ml_train eval mobilenet_v3_large_20260616_050828
 D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/data/real_photos --models-dir D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/data/models`.
+Дефект `holdout_eval.py:118-120` есть и на базе: если старый прогон оборвётся `IndexError`, лид прикладывает ту же однострочную
+правку `ok and …` локально, вне git, и пишет это рядом с числом.
