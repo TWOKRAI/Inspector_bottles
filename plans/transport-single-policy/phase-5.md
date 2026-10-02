@@ -203,6 +203,19 @@
 - `make` на Windows-машине нет: шаг 4 сделан правкой fallback `/dev:ship` (прогнать каждую составляющую `gate`, включая `run_framework_tests.py`; красный гейт = отказ). Проверка «`/dev:ship` отказывает при красном gate инъекцией» требует запуска `/dev:ship` владельцем (`disable-model-invocation: true`) — лидом не выполнена.
 - Коммиты: `8cd6a60b2` диагноз, `c8a1853f4` код, `b2504d571` + `6f5468af1` тесты, `f1682779f` правки ревью, `286266608` ship, `39718c6f9` OPEN_QUESTIONS. Ревью: APPROVED_WITH_NITS (свежий reviewer). Инъекции 10/10 по предсказанию.
 
+### Task 5.5c — Весь `make gate` зелёный (решение владельца 2026-10-02)
+**Level:** Middle+ (Sonnet) / Senior для `docs_verify` · **Assignee:** developer + teamlead, tester по механизмам, reviewer · **Layer:** mixed
+**Goal:** правило `/dev:ship` «красный гейт отказывает» начинает действовать: на main зелёные все пять частей `gate`, а не только `test-fw`.
+**Почему отдельно:** 5.5 влита в main (`68fb2e6df`) без этого — 5.5 не вносит новых красных, а красное лежало на main до неё. Замеры: [`docs/reviews/2026-10-02_task-5.5-gate.md`](../../docs/reviews/2026-10-02_task-5.5-gate.md).
+**Объём на `003264912`/`68fb2e6df`:** ruff 7 ошибок (5 автофикс); pyright 1 error; bandit rc=1 (Medium 16, Low 3, High 0) — решить, какой порог считается красным, и записать в Makefile; корневой pytest 39 падений: `scripts/docs_verify/tests/test_docs_check.py` 29, `scripts/validate_commit` 2 (+2 зависят от текущей ветки git — тест обязан изолировать ветку), `observability/tests/test_empty_hint_and_lag.py` 2, `Services/line_sim` 2, `Services/tests/test_env_brand.py` 1, `Plugins/tests/test_no_silent_swallows.py` 1, `camera_service/test_stream_source_acceptance.py` 1, `backend_ctl/tests/test_probe_acceptance_profiles.py` 1; `examples/minimal_app/tests/test_ci_smoke.py` — ERROR в teardown только в полном наборе (флак).
+**Acceptance criteria:**
+- [ ] Каждое падение — починено или `xfail(strict=True, reason=<ссылка>)`; skip без причины запрещён.
+- [ ] Пять частей `gate` (ruff, pyright, bandit, pytest, `run_framework_tests.py`) — exit 0 на main, трижды для pytest-частей.
+- [ ] `test_validate_commit.py` не зависит от текущей ветки: зелёный на detached HEAD и на ветке с планом.
+**Out of scope:** pyright warnings (321), повышение строгости.
+
+---
+
 ### Task 5.6 — Стенд-гейт как скрипт и экспорт счётчиков тракта в телеметрию
 **Level:** Senior+ · **Assignee:** teamlead (скрипт + экспорт), tester (слепые тесты скрипта), reviewer · **Layer:** scripts + framework
 **Goal:** одна команда `python -m scripts.stand_gate --recipe <yaml> [--runs 3] [--pause 10]` поднимает стенд по протоколу замка, снимает счётчики, проверяет пороги §5 ревью и падает с кодом 1 при нарушении; счётчики 4.7c/d видны в дереве телеметрии, а не только в `introspect.status`.
