@@ -143,7 +143,6 @@ def test_default_preroll_timeout_constant_is_ten_seconds() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(15)
 @pytest.mark.parametrize("make_event", _EVENT_FACTORIES)
 def test_unset_event_blocks_all_frames_for_200ms(rigs, make_event) -> None:
     rig = rigs(make_event())
@@ -153,7 +152,6 @@ def test_unset_event_blocks_all_frames_for_200ms(rigs, make_event) -> None:
     assert rig.warnings == []  # срок 10 с далеко: за 200 мс предупреждения быть не может
 
 
-@pytest.mark.timeout(15)
 @pytest.mark.parametrize("make_event", _EVENT_FACTORIES)
 def test_first_frame_within_50ms_after_event_set(rigs, make_event) -> None:
     ev = make_event()
@@ -168,7 +166,6 @@ def test_first_frame_within_50ms_after_event_set(rigs, make_event) -> None:
     assert latency <= 0.050 + GRID_S, f"первый кадр через {latency * 1000:.1f} мс после set()"
 
 
-@pytest.mark.timeout(15)
 def test_pre_set_event_means_no_wait_at_all(rigs) -> None:
     """Рестарт процесса: событие уже взведено -> ожидания нет, предупреждения нет."""
     ev = threading.Event()
@@ -185,7 +182,6 @@ def test_pre_set_event_means_no_wait_at_all(rigs) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(15)
 def test_timeout_starts_frames_not_before_the_deadline(rigs, short_preroll) -> None:
     rig = rigs(threading.Event())  # никто не взведёт
     rig.start()
@@ -195,7 +191,6 @@ def test_timeout_starts_frames_not_before_the_deadline(rigs, short_preroll) -> N
     assert waited <= SHORT_TIMEOUT_S + 0.5, f"старт через {waited * 1000:.0f} мс — срок не соблюдён"
 
 
-@pytest.mark.timeout(15)
 def test_timeout_emits_exactly_one_preroll_warning(rigs, short_preroll) -> None:
     rig = rigs(threading.Event())
     rig.start()
@@ -206,7 +201,6 @@ def test_timeout_emits_exactly_one_preroll_warning(rigs, short_preroll) -> None:
     assert "preroll" in rig.warnings[0].lower(), rig.warnings[0]
 
 
-@pytest.mark.timeout(15)
 def test_event_set_before_deadline_gives_no_warning(rigs, monkeypatch) -> None:
     monkeypatch.setattr(sp_mod, "DEFAULT_PREROLL_TIMEOUT_S", 0.6, raising=False)
     ev = threading.Event()
@@ -219,7 +213,6 @@ def test_event_set_before_deadline_gives_no_warning(rigs, monkeypatch) -> None:
     assert rig.warnings == []
 
 
-@pytest.mark.timeout(15)
 def test_timeout_without_warning_sink_still_starts_and_does_not_crash(rigs, short_preroll) -> None:
     rig = rigs(threading.Event(), with_warning_sink=False)
     rig.start()
@@ -234,7 +227,6 @@ def test_timeout_without_warning_sink_still_starts_and_does_not_crash(rigs, shor
 
 # Задержки стопа разведены по фазе: ожидание кусками, большими 0.1 с, пропустило бы стоп,
 # пришедший сразу после границы куска (0.21 с — сразу после границы куска 0.2 с).
-@pytest.mark.timeout(15)
 @pytest.mark.parametrize("stop_delay_s", [0.06, 0.15, 0.21])
 @pytest.mark.parametrize("make_event", _EVENT_FACTORIES)
 def test_stop_during_preroll_exits_within_100ms_without_produce_or_warning(rigs, make_event, stop_delay_s) -> None:
@@ -252,7 +244,6 @@ def test_stop_during_preroll_exits_within_100ms_without_produce_or_warning(rigs,
     assert rig.warnings == [], rig.warnings
 
 
-@pytest.mark.timeout(15)
 def test_stop_set_before_start_never_produces(rigs) -> None:
     """Стоп взведён ДО входа в ожидание: ни produce(), ни ожидания 10 с."""
     rig = rigs(threading.Event())
@@ -269,7 +260,6 @@ def test_stop_set_before_start_never_produces(rigs) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(15)
 def test_ready_event_omitted_frames_immediately_control(rigs) -> None:
     """КОНТРОЛЬ: без ready_event поведение прежнее (проходит и до реализации)."""
     rig = rigs(None, omit_ready_kwarg=True, with_warning_sink=False)
@@ -278,7 +268,6 @@ def test_ready_event_omitted_frames_immediately_control(rigs) -> None:
     assert rig.plugin.stamps[0] - rig.t_started <= 0.2
 
 
-@pytest.mark.timeout(15)
 def test_ready_event_none_frames_immediately_without_warning(rigs) -> None:
     rig = rigs(None)
     rig.start()

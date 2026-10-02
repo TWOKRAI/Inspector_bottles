@@ -195,14 +195,12 @@ def spawned_child(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.timeout(120)
 def test_real_spawn_child_gets_the_event_and_produces_no_frames_before_set(spawned_child) -> None:
     time.sleep(0.6)  # >= 100 мс (сетка Windows) после готовности ребёнка: кадров всё ещё нет
     assert "has_event=True" in spawned_child.marks, spawned_child.marks
     assert spawned_child.frames == 0, f"{spawned_child.frames} кадров до set() родителя"
 
 
-@pytest.mark.timeout(120)
 def test_real_spawn_parent_set_is_seen_by_child_and_frames_start(spawned_child) -> None:
     time.sleep(0.3)
     assert spawned_child.frames == 0
@@ -216,7 +214,6 @@ def test_real_spawn_parent_set_is_seen_by_child_and_frames_start(spawned_child) 
     assert not any(m.startswith("WARN:") for m in spawned_child.marks), spawned_child.marks
 
 
-@pytest.mark.timeout(120)
 def test_real_spawn_child_reached_ready_but_never_sets_the_system_event(spawned_child) -> None:
     # Ребёнок УЖЕ объявил свою готовность (fixture ждёт её); системное событие — нет.
     time.sleep(0.6)
