@@ -33,6 +33,7 @@
 ---
 
 ### Task 5.0 — Сверка фактов до кода (лид, без правок)
+**Статус (2026-10-02): ✅ сделано** — [`docs/audits/2026-10-02_transport-facts.md`](../../docs/audits/2026-10-02_transport-facts.md). Кадры — дверью А; событие готовности до детей не доходит; **`multi_camera.yaml` и `inspection_basic.yaml` не стартуют с `917ec7ed4`** (блокер 5.9).
 **Level:** Senior (Opus) · **Assignee:** лид (teamlead при занятости) · **Layer:** docs
 **Goal:** закрыть пять непроверенных фактов, от которых зависят 5.4, 5.10 и остатки 4.7; ни один из них не угадывается по чтению.
 **Files:** без правок кода; новый `docs/audits/2026-10-0X_transport-facts.md`; чтение `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py:131,324,4135`, `multiprocess_framework/modules/process_module/generic/source_producer.py`, `multiprocess_framework/modules/router_module/core/router_manager.py:556-580,584-597`, `backend_ctl/probes/g7_soak_probe.py`.
@@ -44,11 +45,11 @@
 5. (д) Текст строки `RouterSendError delivery_failed` из лога P10: ветка `_do_send:572-575` («ни один из N адресатов не принял») или `:590` («канал вернул ошибку») — это и есть ответ (а) для пачки.
 6. (е) Жива ли проба `g7_soak_probe` против нынешнего бэкенда (запуск `--tier live` 1 мин): да/нет — для судьбы 0.3/3.1.
 **Acceptance criteria:**
-- [ ] Таблица «процесс × {sent_via_channel, sent_via_targets, put_timeout_total, errors_delivery_failed}» с литералами; вывод одной строкой: «кадры ходят дверью А/Б».
-- [ ] Ответ (б) «да/нет» с файлом:строкой, где событие появляется (или не появляется) у ребёнка.
-- [ ] `transit_over_budget` и `ipc_queue_depth` processor/inspector — числа.
-- [ ] Список рецептов: стартовал/нет, `read-only` в логах: 0/N.
-- [ ] Строка лога P10 процитирована, ветка названа.
+- [x] Таблица «процесс × {sent_via_channel, sent_via_targets, put_timeout_total, errors_delivery_failed}» с литералами; вывод одной строкой: «кадры ходят дверью А/Б».
+- [x] Ответ (б) «да/нет» с файлом:строкой, где событие появляется (или не появляется) у ребёнка.
+- [x] `transit_over_budget` и `ipc_queue_depth` processor/inspector — числа.
+- [x] Список рецептов: стартовал/нет, `read-only` в логах: 0/N.
+- [x] Строка лога P10 процитирована, ветка названа. — `docs/audits/2026-10-02_transport-facts.md`
 **Out of scope:** любые правки; выводы о мощности (4.8b).
 
 ### Task 5.1 — Разбор дизайна механизмов 5.2 и 5.3 у CTO (до кода)
