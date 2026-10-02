@@ -20,3 +20,11 @@ K8 runner отдаёт событие через `attach_ready_event` вмест
 - K6 (атрибут после initialize): `59 passed`. **Совпало — пробел покрытия.**
 - K7 (GenericProcess не передаёт событие): `59 passed`. **Совпало — пробел покрытия: последнее звено проводки не охраняет ни один тест.** Требование к исправлению: тест на настоящем `GenericProcess` (источник-плагин + `_sources_ready_event` → 0 кадров до set), убивающий K6 и K7.
 - K8: 5 failed — runner ×3 + spawn ×2. **Совпало.**
+
+## Раунд 2 (HEAD cddf05942, hazard-тесты автора) — предсказания до прогона
+K6 → красные 5 в test_t54_generic_process_preroll_hazards.py (holds_source, before_initialize, two_sources, warning, system_stop); контроль и 2 рестарта зелёные.
+K7 → красные 4 (те же без before_initialize).
+K9 `log_warning=None` в GenericProcess → красный 1 (warning_goes_through_the_process_logger).
+
+## Итог раунда 2 (лид) — 3 из 3 по предсказанию
+BASE `67 passed`. K6 → 5 красных (как предсказано); K7 → 4; K9 → 1 (`test_preroll_warning_goes_through_the_process_logger_exactly_once`). Пробел K6/K7 закрыт.

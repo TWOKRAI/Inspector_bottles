@@ -11,6 +11,7 @@ PY = r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/pyth
 MOD = W / "multiprocess_framework/modules"
 AS = "multiprocess_framework/modules/process_module/generic/actuation_scheduler.py"
 BASE = "multiprocess_framework/modules/process_module/plugins/base.py"
+GUARD = "multiprocess_framework/modules/process_module/tests/test_no_blocking_in_plugin_process.py"
 RC = "Plugins/control/robot_control/plugin.py"
 INJ = {
     "M1": [(AS, '                self._missed_items += count\n                return "missed"\n', "                self._missed_items += count\n")],
@@ -27,6 +28,10 @@ INJ = {
     "M9": [(BASE, "            setattr(self.services, _ACTUATION_SCHEDULER_ATTR, scheduler)", "            setattr(self, _ACTUATION_SCHEDULER_ATTR, scheduler)")],
     "M10": [(BASE, "        with _ACTUATION_SCHEDULER_LOCK:", "        if True:")],
     "M11": [(RC, "        if first_ts is None or last_ts is None:", "        if False:")],
+    # раунд 2 (79a923432)
+    "M12": [(GUARD, "                    for callee in _self_calls(methods[chain[-1]], methods):", "                    for callee in []:")],
+    "M13": [(RC, "        self._sched_baseline = self._ctx.scheduler.stats() if self._scheduler_used else {}", "        self._sched_baseline = {}")],
+    "M14": [(RC, "        if not self._reject_delay_warned and self._reg.reject_delay_ms:\n            self._warn_deprecated_alias()\n", "")],
 }
 F_TESTS = [
     "process_module/tests/test_actuation_scheduler.py",

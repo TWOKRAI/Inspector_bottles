@@ -25,12 +25,14 @@ INJ = {
          '                log.info("Process initialized")\n                if system_ready_event is not None:\n                    process_instance._sources_ready_event = system_ready_event\n'),
     ],
     "K7": [(GP, 'ready_event=getattr(self, "_sources_ready_event", None),', "ready_event=None,")],
+    "K9": [(GP, "                log_warning=self._log_warning,", "                log_warning=None,")],
     "K8": [(RUN, "            process_instance._sources_ready_event = system_ready_event\n",
             "            process_instance.attach_ready_event(system_ready_event)\n")],
 }
 TESTS = [
     "process_module/tests/test_t54_source_producer_preroll.py",
     "process_manager_module/tests/test_t54_ready_event_wiring.py",
+    "process_manager_module/tests/test_t54_generic_process_preroll_hazards.py",
 ]
 env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
 

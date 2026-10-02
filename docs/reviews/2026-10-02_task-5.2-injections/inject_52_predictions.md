@@ -31,3 +31,18 @@ BASE: F `62 passed`, P `121 passed`.
 | M10 без замка get-or-create | 1 (гонка 8 потоков) | 0 |
 | M11 нет ветки unscheduled | 0 | 4 |
 **Находка (M6b):** страж AST охраняет имена функций (`process`/`_process_*`), а не путь вызова: `sleep` в помощнике `_actuate`, который зовёт `process()`, страж пропускает. Свойство держит только p99-тест (живой замер). Вопрос ревьюеру: расширять страж на транзитивные вызовы внутри класса или принять p99 как охрану.
+
+## Раунд 2 (HEAD 79a923432, правки ревью) — предсказания до прогона
+M6b (тот же) → теперь КРАСНЫЙ страж `test_plugins_tree_has_no_sleep_in_process` (F ≥1) + p99/t47d4 в P как раньше.
+M12 обход self-вызовов выключен (`for callee in []`) → красные 1–2 самотеста транзитивности (follows / shortest chain); страж по дереву зелёный.
+M13 база сброса пустая (`self._sched_baseline = {}`) → красные 2 теста reset в test_t52_author.
+M14 вызов `_warn_deprecated_alias` в process() снят → красные 2–3 теста алиаса (контракт 100 браков, author 100 pass, «не повторяется»).
+
+## Итог раунда 2 (лид) — 4 из 4 по предсказанию
+BASE: F `65 passed`, P `126 passed`.
+| Заплата | F (фреймворк) | P (robot_control) |
+|---|---|---|
+| M6b sleep в `_actuate` | **1 — страж `test_plugins_tree_has_no_sleep_in_process` (дыра закрыта)** | 10 (контракт 8, t47d4 1, author 1) |
+| M12 обход self-вызовов выключен | 1 — `test_guard_follows_self_method_calls_from_process_and_names_the_chain` | 0 |
+| M13 база сброса пустая | 0 | 2 — оба reset в test_t52_author |
+| M14 предупреждение алиаса снято | 0 | 3 — контракт 100 браков, author «не повторяется», author 100 pass |
