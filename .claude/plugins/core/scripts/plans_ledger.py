@@ -171,6 +171,9 @@ Exit codes:
 Never deletes a plan: `close` / the doctor fix move it (`git mv` when tracked).
 """
 
+# fmt: off
+# The seed keeps its own 88-column format; a host project's formatter
+# (other line length) must not rewrite it, or the mirror drifts from source.
 from __future__ import annotations
 
 import argparse
@@ -185,6 +188,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 __all__ = [
@@ -315,24 +319,50 @@ _ARCHIVE_STEMS = ("архив", "archive")
 
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
-_TASK_HEADER_RE = re.compile(r"^###\s+Task\s+(\d+\.\d+)(?!\d)")
-_TASK_H1_HEADER_RE = re.compile(r"^#\s+Task\s+(\d+\.\d+)(?!\d)")
+# Task id (plans-progress-dashboard, «Формат задачи»): `1.3`, `1.3a`, `1b.2a`,
+# `1b.2b-pre`, `1.3h-c-fix`, `T1`. The id ends at whitespace, `:~*,;.` or the
+# end of the line. The group is atomic: an id that fails the end check never
+# backtracks into its own prefix (`Task 1.3a)` is not read as `Task 1`).
+_TASK_ID = r"[A-Z]{0,2}[0-9]+[a-z]?(?:\.[0-9]+[a-z]*)?(?:-[a-z0-9]+)*"
+_TASK_ID_END = r"(?=[\s:~*,;.]|$)"
+_TASK_REF = r"Task\s+(?>(" + _TASK_ID + r"))" + _TASK_ID_END
+_TASK_HEADER_RE = re.compile(r"^#{2,6}\s+" + _TASK_REF)
+_TASK_H1_HEADER_RE = re.compile(r"^#\s+" + _TASK_REF)
 _PHASE_HEADING_RE = re.compile(r"^##\s+Phase\s+(\d+)(?!\d)", re.IGNORECASE)
-_PHASE_FILE_RE = re.compile(r"^phase-(\d+)\.md$")
-_TASK_STEM_RE = re.compile(r"^(\d+)\.(\d+)$")
+_PHASE_FILE_RE = re.compile(r"^phase-(\d+)[a-z]?(?:-[^.]*)?\.md$")
+_TASK_STEM_RE = re.compile(r"^" + _TASK_ID + r"$")
 _CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[([ xX])\]")
 _LIST_ITEM_RE = re.compile(r"^\s*[-*+]\s+")
-_ORDER_TITLE_RE = re.compile(r"^(порядок выполнения|execution order)\b", re.IGNORECASE)
+_ORDER_TITLE_RE = re.compile(
+    r"^(?:(?:порядок выполнения|execution order)\b|порядок\s*$)", re.IGNORECASE
+)
+# A status word of the task format. It may carry a tail inside its group
+# (`[DONE 2026-10-02 — `hash`; …]`) and need not stand first in it
+# (`[5.3a DONE …]`), but it never touches a letter, `_` or `-` (`[DONE-ish]`
+# is not a status). SKIPPED/CANCELLED are the old spelling of SUPERSEDED.
 _ORDER_MARKER_RE = re.compile(
-    r"\[(DONE|PENDING|IN[ _]PROGRESS|BLOCKED|SKIPPED|CANCELLED)\]"
+    r"(?<![^\W\d])(?<!-)"
+    r"(DONE|PENDING|IN[ _]PROGRESS|BLOCKED|DEFERRED|SUPERSEDED|SKIPPED|CANCELLED)"
+    r"(?![^\W\d])(?!-)"
+)
+_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+_STRUCK_MARK_RE = re.compile(r"\bСНЯТА\b")
+# A task item of a «Порядок выполнения» section: indent, optional checkbox,
+# optional `**`/`~~`, then `Task <id>`.
+_ORDER_ITEM_RE = re.compile(r"^([ \t]*)[-*+]\s+(?:\[[ xX]\]\s+)?(\*\*|~~)?" + _TASK_REF)
+_ORDER_PHASE_RE = re.compile(
+    r"^#{2,6}\s+(?:Phase|Фаза|Ф)\s*(\d+[a-z]?)(?![\w.])", re.IGNORECASE
 )
 # A task-index line inside a «Порядок выполнения» section — same shape as
-# task_order_marker()'s per-task line_re, generalised to any task id. Used by
-# contract_fingerprint to cut the marker tail ONLY here, not on an arbitrary
-# line that happens to contain a `[DONE]`-shaped token (Task 5.1 fix, F7).
+# _ORDER_ITEM_RE, generalised to any task id. Used by contract_fingerprint to
+# cut the status group ONLY here, not on an arbitrary line that happens to
+# contain a `[DONE]`-shaped token (Task 5.1 fix, F7).
 _ORDER_TASK_LINE_RE = re.compile(
-    r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?(?:\*\*)?Task\s+\d+\.\d+(?!\d)"
+    r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?(?:\*\*|~~)?" + _TASK_REF
 )
+# Markers that take a task out of the denominator (plan done when the rest is
+# DONE) and those that also exempt it from the plan gate (nobody briefs it).
+_DROPPED_MARKERS = frozenset({"SKIPPED", "CANCELLED", "SUPERSEDED", "DEFERRED"})
 _JOURNAL_HEADING_RE = re.compile(r"^(progress log|журнал|journal)\b", re.IGNORECASE)
 _DATED_NAME_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})_")
 _BRANCH_RE = re.compile(
@@ -368,7 +398,7 @@ _ANY_FIELD_LABEL_RE = re.compile(
     r"|[A-ZА-ЯЁ][A-ZА-ЯЁ \-/]{2,}(?:[ \t]*\(.*)?:)"
 )
 # A task nobody will ever brief — exempt from the gate like a closed one.
-_GATE_EXEMPT_MARKERS = frozenset({"SKIPPED", "CANCELLED"})
+_GATE_EXEMPT_MARKERS = frozenset({"SKIPPED", "CANCELLED", "SUPERSEDED"})
 _BACKTICK_SPAN_RE = re.compile(r"`([^`\s]+)`")
 _PATH_EXT_RE = re.compile(r"\.\w{1,5}$")
 
@@ -404,6 +434,14 @@ class PlanSummary:
     phase: str | None
     open_tasks: list[str] = field(default_factory=list)
     dropped: int = 0
+    # Task items with no status word (`?`): not done, outside the printed
+    # denominator, but they keep the plan from counting as done.
+    unknown: int = 0
+
+    @property
+    def counted(self) -> int:
+        """The denominator ``status`` prints: total − dropped − unknown."""
+        return self.total - self.dropped - self.unknown
 
 
 @dataclass
@@ -468,12 +506,14 @@ def _unfenced_lines(text: str) -> list[tuple[str, bool]]:
     return out
 
 
-def _task_file_sort_key(path: Path) -> tuple[int, tuple[int, int] | str]:
-    """Numeric task-id order (``1.2`` < ``1.10``); a non-``N.M`` stem sorts
-    last, by name."""
-    m = _TASK_STEM_RE.match(path.stem)
-    if m:
-        return (0, (int(m.group(1)), int(m.group(2))))
+def _task_file_sort_key(
+    path: Path,
+) -> tuple[int, tuple[tuple[int, int | str], ...] | str]:
+    """Natural task-id order (``1.2`` < ``1.10`` < ``1.10a``); a stem that is
+    not a task id sorts last, by name."""
+    if _TASK_STEM_RE.match(path.stem):
+        chunks = re.findall(r"\d+|\D+", path.stem)
+        return (0, tuple((0, int(c)) if c.isdigit() else (1, c) for c in chunks))
     return (1, path.name)
 
 
@@ -491,11 +531,11 @@ def discover_plan_files(path: Path) -> list[Path]:
     if (path / "plan.md").is_file():
         found.append(path / "plan.md")
     phases = [
-        (int(m.group(1)), p)
+        (int(m.group(1)), p.name, p)
         for p in path.iterdir()
         if p.is_file() and (m := _PHASE_FILE_RE.match(p.name))
     ]
-    found.extend(p for _, p in sorted(phases))
+    found.extend(p for _, _, p in sorted(phases))
     tasks_dir = path / "tasks"
     if tasks_dir.is_dir():
         task_files = [
@@ -508,9 +548,10 @@ def discover_plan_files(path: Path) -> list[Path]:
 
 
 def extract_task_ids(text: str, in_task_file: bool = False) -> list[str]:
-    """Task ids from ``### Task X.Y`` headings; with ``in_task_file=True``
-    (a ``tasks/<id>.md`` file, which naturally starts with an H1) also accepts
-    a bare ``# Task X.Y`` heading — the global ``###`` form is never loosened."""
+    """Task ids from ``##``…``######`` ``Task <id>`` headings; with
+    ``in_task_file=True`` (a ``tasks/<id>.md`` file, which naturally starts
+    with an H1) also accepts a bare ``# Task <id>`` heading — an H1 elsewhere
+    never counts."""
     ids: list[str] = []
     for line, fenced in _unfenced_lines(text):
         if fenced:
@@ -532,13 +573,10 @@ def _task_body(text: str, task_id: str) -> list[str] | None:
     for i, (line, fenced) in enumerate(lines):
         if fenced:
             continue
-        m = _TASK_HEADER_RE.match(line)
-        start_level = 3
-        if m is None:
-            m = _TASK_H1_HEADER_RE.match(line)
-            start_level = 1
+        m = _TASK_HEADER_RE.match(line) or _TASK_H1_HEADER_RE.match(line)
         if not m or m.group(1) != task_id:
             continue
+        start_level = len(line) - len(line.lstrip("#"))
         body: list[str] = []
         for nxt, nxt_fenced in lines[i + 1 :]:
             heading = None if nxt_fenced else _HEADING_RE.match(nxt)
@@ -562,33 +600,188 @@ def task_checkbox_totals(text: str, task_id: str) -> tuple[int, int] | None:
     return sum(1 for mark in marks if mark in "xX"), len(marks)
 
 
-def task_order_marker(all_text: str, task_id: str) -> str | None:
-    """The ``[DONE]``/``[PENDING]``/… marker of the task's line in a
-    «Порядок выполнения» section, or ``None``."""
-    line_re = re.compile(
-        r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?(?:\*\*)?Task\s+"
-        + re.escape(task_id)
-        + r"(?!\d)"
-    )
+def _find_status_group(text: str) -> tuple[int, str] | None:
+    """``(offset of the opening "[", status word)`` of the first ``[...]``
+    group in *text* that holds a status word, or ``None``.
+
+    Code spans are blanked first (a status in backticks is a quote). A group
+    runs to its PAIRED ``]`` (nested ``[link](…)`` stays inside); an unclosed
+    group runs to the end of *text* (``[DEFERRED — после 4.1``). The word is
+    returned upper-case with ``_`` for the space (``IN_PROGRESS``)."""
+    masked = _CODE_SPAN_RE.sub(lambda m: " " * len(m.group()), text)
+    start = masked.find("[")
+    while start != -1:
+        depth = 0
+        end = len(masked)
+        for j in range(start, len(masked)):
+            if masked[j] == "[":
+                depth += 1
+            elif masked[j] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        word = _ORDER_MARKER_RE.search(masked, start + 1, end)
+        if word:
+            return start, word.group(1).upper().replace(" ", "_")
+        start = masked.find("[", start + 1)
+    return None
+
+
+@dataclass(frozen=True)
+class _OrderItem:
+    task_id: str
+    status: str | None  # status word, or None (`?`)
+    indent: int
+    phase: str | None  # from a `Phase N` / `ФN` heading inside the section
+    block: tuple[str, ...]  # the item line, its continuations, nested lines
+
+
+@lru_cache(maxsize=64)
+def _order_items(text: str) -> tuple[_OrderItem, ...]:
+    """Every ``- Task <id>`` item inside a «Порядок выполнения» section of
+    *text*, in document order.
+
+    An item runs to the next list item, blank line or heading; its
+    continuation lines belong to it, so the status may sit on a continuation
+    line. The status is :func:`_find_status_group` of that text; with no word,
+    ``~~Task`` or ``СНЯТА`` reads as SUPERSEDED. A parent item with no word
+    whose next item is indented deeper is not a task (its children are) and
+    is left out. ``block`` additionally keeps the deeper-indented lines under
+    the item (a task's fields in list form) for the plan gate."""
+    items: list[_OrderItem] = []
     section_level: int | None = None
-    for line, fenced in _unfenced_lines(all_text):
+    phase: str | None = None
+    current: dict | None = None
+    status_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal current
+        if current is None:
+            return
+        text_for_status = " ".join(status_lines)
+        group = _find_status_group(text_for_status)
+        status = group[1] if group else None
+        if status is None and (
+            current["prefix"] == "~~" or _STRUCK_MARK_RE.search(text_for_status)
+        ):
+            status = "SUPERSEDED"
+        items.append(
+            _OrderItem(
+                current["id"],
+                status,
+                current["indent"],
+                current["phase"],
+                tuple(current["block"]),
+            )
+        )
+        current = None
+
+    collecting_status = False
+    for line, fenced in _unfenced_lines(text):
         if fenced:
+            flush()
+            collecting_status = False
             continue
         heading = _HEADING_RE.match(line)
         if heading:
+            flush()
+            collecting_status = False
             level = len(heading.group(1))
             if _ORDER_TITLE_RE.match(heading.group(2)):
                 section_level = level
+                phase = None
                 continue
             if section_level is not None and level <= section_level:
                 section_level = None
+                continue
+            phase_heading = _ORDER_PHASE_RE.match(line)
+            if phase_heading:
+                phase = phase_heading.group(1)
             continue
-        if section_level is None or not line_re.match(line):
+        if section_level is None:
             continue
-        marker = _ORDER_MARKER_RE.search(line)
-        if marker:
-            return marker.group(1).upper().replace(" ", "_")
+        if not line.strip():
+            flush()
+            collecting_status = False
+            continue
+        if _LIST_ITEM_RE.match(line):
+            indent = len(line) - len(line.lstrip(" \t"))
+            if current is not None and indent > current["indent"]:
+                # a nested line: belongs to the item's block, not its status
+                collecting_status = False
+                item = _ORDER_ITEM_RE.match(line)
+                if item is None:
+                    current["block"].append(line)
+                    continue
+            flush()
+            item = _ORDER_ITEM_RE.match(line)
+            if item is None:
+                collecting_status = False
+                continue
+            current = {
+                "id": item.group(3),
+                "prefix": item.group(2),
+                "indent": indent,
+                "phase": phase,
+                "block": [line],
+            }
+            status_lines = [line]
+            collecting_status = True
+            continue
+        if current is not None:
+            current["block"].append(line)
+            if collecting_status:
+                status_lines.append(line)
+    flush()
+    kept: list[_OrderItem] = []
+    for i, item in enumerate(items):
+        nxt = items[i + 1] if i + 1 < len(items) else None
+        if item.status is None and nxt is not None and nxt.indent > item.indent:
+            continue  # a parent without a marker is not a task
+        kept.append(item)
+    return tuple(kept)
+
+
+def task_order_marker(all_text: str, task_id: str) -> str | None:
+    """The status word (``DONE``/``PENDING``/``IN_PROGRESS``/``BLOCKED``/
+    ``DEFERRED``/``SUPERSEDED``/``SKIPPED``/``CANCELLED``) of the task's item
+    in a «Порядок выполнения» section, or ``None``.
+
+    The id must match exactly: ``1b.2b-pre`` never gives its status to
+    ``1b.2b``, nor ``1b.2a`` to ``1b.2``."""
+    for item in _order_items(all_text):
+        if item.task_id == task_id and item.status is not None:
+            return item.status
     return None
+
+
+def _plan_doc_text(texts: list[tuple[Path, str]]) -> str | None:
+    """The text whose «Порядок выполнения» section defines the task set:
+    ``plan.md`` of a directory plan, or the single file of a v1 plan."""
+    for path, text in texts:
+        if path.name == "plan.md":
+            return text
+    if len(texts) == 1 and texts[0][0].parent.name != "tasks":
+        return texts[0][1]
+    return None
+
+
+def _section_task_items(texts: list[tuple[Path, str]]) -> list[_OrderItem]:
+    """The plan's task set from its order section, first occurrence of each
+    id; empty when the section is absent or has no task item (then the set
+    comes from ``Task`` headings, as before)."""
+    doc = _plan_doc_text(texts)
+    if doc is None:
+        return []
+    seen: set[str] = set()
+    out: list[_OrderItem] = []
+    for item in _order_items(doc):
+        if item.task_id in seen:
+            continue
+        seen.add(item.task_id)
+        out.append(item)
+    return out
 
 
 def is_task_closed(
@@ -625,6 +818,30 @@ def summarize_plan(paths: list[Path]) -> PlanSummary:
     dropped = 0
     open_tasks: list[str] = []
     phase: str | None = None
+    items = _section_task_items(texts)
+    if items:
+        # The order section defines the set (plan rule N1): `Task` headings and
+        # phase files give bodies, never new ids; the item's status decides.
+        unknown = 0
+        for item in items:
+            if item.status == "DONE":
+                done += 1
+            elif item.status in _DROPPED_MARKERS:
+                dropped += 1
+            else:
+                if item.status is None:
+                    unknown += 1
+                open_tasks.append(item.task_id)
+                if phase is None and item.status is not None and item.phase:
+                    phase = f"phase {item.phase}"
+        return PlanSummary(
+            done=done,
+            total=len(items),
+            phase=phase,
+            open_tasks=open_tasks,
+            dropped=dropped,
+            unknown=unknown,
+        )
     for path, text in texts:
         file_match = _PHASE_FILE_RE.match(path.name)
         current_phase = file_match.group(1) if file_match else None
@@ -646,7 +863,7 @@ def summarize_plan(paths: list[Path]) -> PlanSummary:
             if is_task_closed(all_text, task_id, task_file_text.get(task_id)):
                 done += 1
                 continue
-            if task_order_marker(all_text, task_id) in _GATE_EXEMPT_MARKERS:
+            if task_order_marker(all_text, task_id) in _DROPPED_MARKERS:
                 dropped += 1
                 continue
             open_tasks.append(task_id)
@@ -1175,56 +1392,82 @@ def check_plan_gate(plan_dir_or_file: Path) -> list[Finding]:
             task_file_text.setdefault(task_id, text)
             task_file_path.setdefault(task_id, p)
 
-    seen: set[str] = set()
+    # The task set follows summarize_plan(): the order section's items when
+    # it has any (status from the item, body from the heading or, without
+    # one, the item's own nested lines), else the `Task` headings.
+    heading_owner: dict[str, Path] = {}
     for p, text in texts:
-        in_task_file = p.parent.name == "tasks"
-        for task_id in extract_task_ids(text, in_task_file=in_task_file):
-            if task_id in seen:
+        for task_id in extract_task_ids(text, in_task_file=p.parent.name == "tasks"):
+            heading_owner.setdefault(task_id, p)
+    candidates: list[tuple[str, Path, list[str] | None]] = []
+    items = _section_task_items(texts)
+    if items:
+        plan_doc_path = next(
+            (p for p, _ in texts if p.name == "plan.md" or not is_dir), path
+        )
+        for item in items:
+            if item.status == "DONE" or item.status in _GATE_EXEMPT_MARKERS:
                 continue
-            seen.add(task_id)
+            item_body = None if item.task_id in heading_owner else list(item.block[1:])
+            candidates.append(
+                (
+                    item.task_id,
+                    heading_owner.get(item.task_id, plan_doc_path),
+                    item_body,
+                )
+            )
+    else:
+        for task_id, p in heading_owner.items():
             if is_task_closed(all_text, task_id, task_file_text.get(task_id)):
                 continue
             if task_order_marker(all_text, task_id) in _GATE_EXEMPT_MARKERS:
                 continue
-            source_text = task_file_text.get(task_id, all_text)
-            body = _task_body(source_text, task_id) or []
-            owning_path = task_file_path.get(task_id, p)
-            label = (
-                f"{path.name}/{owning_path.relative_to(path).as_posix()}"
-                if is_dir
-                else owning_path.name
+            candidates.append((task_id, p, None))
+
+    for task_id, p, item_body in candidates:
+        source_text = task_file_text.get(task_id, all_text)
+        body = (
+            item_body
+            if item_body is not None
+            else _task_body(source_text, task_id) or []
+        )
+        owning_path = task_file_path.get(task_id, p)
+        label = (
+            f"{path.name}/{owning_path.relative_to(path).as_posix()}"
+            if is_dir
+            else owning_path.name
+        )
+        field_match_idx: dict[str, int] = {}
+        for name, rx in _FIELD_PATTERNS.items():
+            for idx, line in enumerate(body):
+                if rx.match(line):
+                    field_match_idx[name] = idx
+                    break
+        missing = [
+            name
+            for name in ("Files", "Acceptance", "Handoff")
+            if name not in field_match_idx
+        ]
+        if missing:
+            findings.append(
+                Finding(
+                    TASK_INCOMPLETE,
+                    label,
+                    f"Task {task_id}: missing field(s): {', '.join(missing)}",
+                )
             )
-            field_match_idx: dict[str, int] = {}
-            for name, rx in _FIELD_PATTERNS.items():
-                for idx, line in enumerate(body):
-                    if rx.match(line):
-                        field_match_idx[name] = idx
-                        break
-            missing = [
-                name
-                for name in ("Files", "Acceptance", "Handoff")
-                if name not in field_match_idx
-            ]
-            if missing:
+        if "Files" in field_match_idx:
+            block = _field_block(body, field_match_idx["Files"])
+            n = _count_files_field_paths(block)
+            if n > TASK_MAX_FILES:
                 findings.append(
                     Finding(
-                        TASK_INCOMPLETE,
+                        TASK_TOO_MANY_FILES,
                         label,
-                        f"Task {task_id}: missing field(s): {', '.join(missing)}",
+                        f"Task {task_id}: {n} paths in Files > "
+                        f"{TASK_MAX_FILES} — split the task",
                     )
                 )
-            if "Files" in field_match_idx:
-                block = _field_block(body, field_match_idx["Files"])
-                n = _count_files_field_paths(block)
-                if n > TASK_MAX_FILES:
-                    findings.append(
-                        Finding(
-                            TASK_TOO_MANY_FILES,
-                            label,
-                            f"Task {task_id}: {n} paths in Files > "
-                            f"{TASK_MAX_FILES} — split the task",
-                        )
-                    )
     return findings
 
 
@@ -1740,7 +1983,7 @@ def contract_fingerprint(plan_md_text: str) -> str:
       section detection as :func:`task_order_marker`), only a task-index
       line (:data:`_ORDER_TASK_LINE_RE`, the same shape as
       :func:`task_order_marker`'s own line match) is cut before its
-      ``[DONE]``/``[PENDING]``/… marker (:data:`_ORDER_MARKER_RE`) —
+      status group (:func:`_find_status_group`, tail included) —
       flipping the marker, or appending ``(merge abc123 …)`` / ``->
       backlog (…)`` after it, never moves the fingerprint; a non-task-index
       line in the same section (a rule, a note) is hashed verbatim, marker
@@ -1768,9 +2011,9 @@ def contract_fingerprint(plan_md_text: str) -> str:
             elif section_level is not None and level <= section_level:
                 section_level = None
         if section_level is not None and _ORDER_TASK_LINE_RE.match(line):
-            marker = _ORDER_MARKER_RE.search(line)
-            if marker:
-                line = line[: marker.start()].rstrip()
+            group = _find_status_group(line)
+            if group:
+                line = line[: group[0]].rstrip()
         out_lines.append(line.rstrip())
     while out_lines and not out_lines[-1]:
         out_lines.pop()
@@ -2386,9 +2629,9 @@ def _order_line_for_task(all_text: str, task_id: str) -> str | None:
     :func:`task_order_marker`, but returning the whole line (so a trailing
     ``(`sha`)`` annotation can be read) instead of just the marker."""
     line_re = re.compile(
-        r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?(?:\*\*)?Task\s+"
+        r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?(?:\*\*|~~)?Task\s+"
         + re.escape(task_id)
-        + r"(?!\d)"
+        + _TASK_ID_END
     )
     section_level: int | None = None
     for line, fenced in _unfenced_lines(all_text):
@@ -2409,7 +2652,7 @@ def _order_line_for_task(all_text: str, task_id: str) -> str | None:
     return None
 
 
-_TASK_ANY_HEADING_RE = re.compile(r"^#{1,6}\s+Task\s+(\d+\.\d+)(?!\d)(.*)$")
+_TASK_ANY_HEADING_RE = re.compile(r"^#{1,6}\s+" + _TASK_REF + r"(.*)$")
 
 
 def _task_title(text: str, task_id: str, limit: int) -> str:
@@ -2727,6 +2970,7 @@ def _status_payload(root: Path) -> dict:
                     "total": summary.total,
                     "phase": summary.phase,
                     "open_tasks": summary.open_tasks,
+                    "counted": summary.counted,
                 },
             }
         )
@@ -2751,7 +2995,7 @@ def _print_status(payload: dict) -> None:
         comp = row["computed"]
         ledger = row["ledger"] or {}
         print(
-            f"{row['plan']}: {comp['done']}/{comp['total']}, "
+            f"{row['plan']}: {comp['done']}/{comp.get('counted', comp['total'])}, "
             f"{comp['phase'] or NO_VALUE}, ledger status "
             f"{ledger.get('status') or '(no row)'}"
         )
@@ -2903,7 +3147,7 @@ def main(argv: list[str] | None = None) -> int:
                 status_val = (row or {}).get("status") or "(no row)"
                 print(
                     f"{slug} · {summary.phase or NO_VALUE} · "
-                    f"{summary.done}/{summary.total} · {status_val}"
+                    f"{summary.done}/{summary.counted} · {status_val}"
                 )
             elif args.json:
                 obj = {"plan": key, "ledger": row, "computed": computed}
@@ -2915,7 +3159,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(obj, ensure_ascii=False, indent=2))
             else:
                 print(
-                    f"{key}: {summary.done}/{summary.total}, "
+                    f"{key}: {summary.done}/{summary.counted}, "
                     f"{summary.phase or NO_VALUE}, ledger status "
                     f"{(row or {}).get('status') or '(no row)'}"
                 )
@@ -2981,6 +3225,9 @@ def main(argv: list[str] | None = None) -> int:
         readme = _plans_dir(root) / "README.md"
         table = parse_ledger_table(_read(readme)) if readme.is_file() else LedgerTable()
         row = {_canonical(k): v for k, v in table.active.items()}.get(key)
+        # The name is checked before "done" (plan decision 9): an undated plan
+        # is refused for its name, never as "is not done".
+        quarter_for(path.name)
         summary = summarize_plan(discover_plan_files(path))
         if not args.force and not _is_done(summary, row):
             print(

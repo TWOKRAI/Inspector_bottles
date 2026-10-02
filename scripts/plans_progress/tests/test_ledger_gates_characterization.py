@@ -153,7 +153,7 @@ def test_files_fingerprint_file_set(tmp_path):
     _overall, files = L.contract_files_fingerprint(d)
     # СДВИГ 1.0: `phase-3-core.md` (фаза с суффиксом имени) входит в контракт после правки
     # `_PHASE_FILE_RE`; до правки набор был {plan.md, phase-2.md, tasks/1.1.md}.
-    assert sorted(files) == ["phase-2.md", "plan.md", "tasks/1.1.md"]
+    assert sorted(files) == ["phase-2.md", "phase-3-core.md", "plan.md", "tasks/1.1.md"]
 
 
 def test_files_fingerprint_overall_is_hash_of_sorted_rel_sha_lines(tmp_path):
@@ -262,7 +262,7 @@ def test_gate_h4_task_heading(tmp_path):
     # До правки `_TASK_HEADER_RE` требовал ровно `###`, и находки не было.
     text = "# P\n\n## Бюджет\n\n1k\n\n### Фаза 1\n\n#### Task 1.1 — a\n- [ ] шаг\n"
     f = _gate(tmp_path, "2026-10-02_h4.md", text)
-    assert _codes(f) == []
+    assert _codes(f) == [("TASK_INCOMPLETE", "Task 1.1: missing field(s): Files, Acceptance, Handoff")]
 
 
 def test_gate_suffixed_id_is_its_own_task(tmp_path):
@@ -270,7 +270,7 @@ def test_gate_suffixed_id_is_its_own_task(tmp_path):
     # как `1.3` (дубль соседа), и неполная 1.3a пряталась за полной 1.3.
     text = "# P\n\n## Бюджет\n\n1k\n\n### Task 1.3 — a\n" + FULL_FIELDS + "\n### Task 1.3a — b\n- [ ] шаг\n"
     f = _gate(tmp_path, "2026-10-02_sfx.md", text)
-    assert _codes(f) == []
+    assert _codes(f) == [("TASK_INCOMPLETE", "Task 1.3a: missing field(s): Files, Acceptance, Handoff")]
 
 
 # --------------------------------------------------------------------------- approve / amend / check_plan_contract
@@ -355,18 +355,36 @@ def test_contract_drift_on_title_edit(tmp_path):
     assert f[0].detail.startswith("changed plan.md after approval (2026-10-02)")
 
 
+def _add_task_1_3(d: Path) -> None:
+    plan = d / "plan.md"
+    plan.write_bytes(plan.read_bytes() + "- Task 1.3: c [PENDING]\n".encode("utf-8"))
+    _write(d, {"tasks/1.3.md": "# Task 1.3 — c\n" + FULL_FIELDS})
+
+
 def test_contract_scope_grew_past_125_percent(tmp_path):
     root, d = _v2_plan(tmp_path)
     L.approve_plan(root, "2026-10-02_v2", today=TODAY)
-    _write(d, {"tasks/1.3.md": "# Task 1.3 — c\n" + FULL_FIELDS})
+    _add_task_1_3(d)
     codes = sorted(x.code for x in L.check_plan_contract(d))
     assert codes == ["CONTRACT_DRIFT", "SCOPE_GREW"]
+
+
+def test_task_file_without_order_item_does_not_grow_scope(tmp_path):
+    # СДВИГ 1.0 (правило набора N1): план с пунктами раздела — набор = пункты. Новый
+    # `tasks/1.3.md` без пункта id не добавляет: SCOPE_GREW молчит, CONTRACT_DRIFT ловит файл.
+    # До правки набор шёл из заголовков, и тот же файл давал SCOPE_GREW (3 > 1.25 × 2).
+    root, d = _v2_plan(tmp_path)
+    L.approve_plan(root, "2026-10-02_v2", today=TODAY)
+    _write(d, {"tasks/1.3.md": "# Task 1.3 — c\n" + FULL_FIELDS})
+    f = L.check_plan_contract(d)
+    assert [x.code for x in f] == ["CONTRACT_DRIFT"]
+    assert "added tasks/1.3.md" in f[0].detail
 
 
 def test_amend_refreshes_lock(tmp_path):
     root, d = _v2_plan(tmp_path)
     L.approve_plan(root, "2026-10-02_v2", today=TODAY)
-    _write(d, {"tasks/1.3.md": "# Task 1.3 — c\n" + FULL_FIELDS})
+    _add_task_1_3(d)
     _write(d, {"amendments.md": AMENDMENTS + "| 1 | 2026-10-02 | ADDED Task 1.3 | +1 | +10k |\n"})
     L.amend_plan(root, "2026-10-02_v2", today=TODAY)
     lock = _lock(d)
@@ -388,3 +406,157 @@ def test_amend_refuses_row_without_verb(tmp_path):
     _write(d, {"amendments.md": AMENDMENTS + "| 1 | 2026-10-02 | просто так | — | — |\n"})
     with pytest.raises(L.ContractRefused, match="row 1: почему must name"):
         L.amend_plan(root, "2026-10-02_v2", today=TODAY)
+
+
+# --------------------------------------------------------------------------- авторские: опасности механизма Task 1.0
+# Каждый тест называет место, где именно этот разбор может сломаться.
+
+SEC = "# P\n\n## Порядок выполнения\n\n"
+SEC_BUDGET = "# P\n\n## Бюджет\n\n1k\n\n## Порядок выполнения\n\n"
+
+
+def _summary(tmp_path: Path, text: str, name: str = "2026-10-02_h.md"):
+    _write(tmp_path / "plans", {name: text})
+    s = L.summarize_plan(L.discover_plan_files(tmp_path / "plans" / name))
+    return s.done, s.counted, s.dropped, s.unknown
+
+
+def test_status_inside_code_span_is_a_quote(tmp_path):
+    assert _summary(tmp_path, SEC + "- Task 1.1: правка `[DONE]` в тексте [PENDING]\n") == (0, 1, 0, 0)
+
+
+def test_nested_link_inside_status_group(tmp_path):
+    # группа до ПАРНОЙ `]`: ссылка внутри не обрывает статус
+    text = SEC + "- Task 1.1: a [DONE 2026-10-02 — см. [контракт](x.md); ok]\n"
+    assert _summary(tmp_path, text) == (1, 1, 0, 0)
+
+
+def test_link_before_status_is_skipped(tmp_path):
+    # первая группа — ссылка без слова набора; статус — следующая группа
+    text = SEC + "- Task 1.1: см. [`gui`](../gui/plan.md) [PENDING] (после [план](y.md))\n"
+    assert _summary(tmp_path, text) == (0, 1, 0, 0)
+
+
+def test_status_word_not_first_in_group(tmp_path):
+    assert _summary(tmp_path, SEC + "- Task 5.3: a [5.3a DONE 2026-09-23, ok]\n") == (1, 1, 0, 0)
+
+
+def test_status_word_glued_to_dash_is_not_status(tmp_path):
+    # `[DONE-ish]` — не статус; пункт без слова набора -> `?` (не в знаменателе)
+    text = SEC + "- Task 1.1: a [DONE]\n- Task 1.2: b [PENDING]\n- Task 1.3: c [DONE-ish]\n"
+    assert _summary(tmp_path, text) == (1, 2, 0, 1)
+
+
+def test_unclosed_group_runs_to_end_of_item(tmp_path):
+    text = SEC + "- Task 6.3: окно [DEFERRED — после GUI-загрузки\n  generic-приложений\n- Task 6.4: b [PENDING]\n"
+    assert _summary(tmp_path, text) == (0, 1, 1, 0)
+
+
+def test_status_on_continuation_line(tmp_path):
+    text = SEC + "- Task 1.0: длинное название\n  продолжение **[DONE]** `eecba231`\n- Task 1.1: b [PENDING]\n"
+    assert _summary(tmp_path, text) == (1, 2, 0, 0)
+
+
+def test_blank_line_ends_the_item(tmp_path):
+    # статус после пустой строки уже не принадлежит пункту
+    text = SEC + "- Task 1.1: a\n\n[DONE]\n"
+    assert _summary(tmp_path, text) == (0, 0, 0, 1)
+
+
+def test_item_outside_section_is_a_reference(tmp_path):
+    text = "# P\n\n## Связи\n\n- **Task 0.1** — ЗАМЕНЕНА [DONE]\n\n## Порядок выполнения\n\n- Task 1.1: a [PENDING]\n"
+    assert _summary(tmp_path, text) == (0, 1, 0, 0)
+
+
+def test_section_ends_at_same_level_heading(tmp_path):
+    text = SEC + "### Phase 1\n\n- Task 1.1: a [DONE]\n\n## Риски\n\n- Task 9.9: b [PENDING]\n"
+    assert _summary(tmp_path, text) == (1, 1, 0, 0)
+
+
+def test_section_named_poryadok_alone(tmp_path):
+    # `## Порядок` — раздел; `## Порядок и окна` — нет
+    assert _summary(tmp_path, "# P\n\n## Порядок\n\n- Task 1.1: a [DONE]\n") == (1, 1, 0, 0)
+    other = "# P\n\n## Порядок и окна\n\n- Task 1.1: a [DONE]\n"
+    assert _summary(tmp_path, other, "2026-10-02_w.md") == (0, 0, 0, 0)
+
+
+def test_struck_task_and_snyata_are_superseded(tmp_path):
+    text = SEC + "- ~~Task 1.1~~: a\n- Task 1.2: b — СНЯТА\n- Task 1.3: c [PENDING]\n"
+    assert _summary(tmp_path, text) == (0, 1, 2, 0)
+
+
+def test_in_progress_and_blocked_are_open(tmp_path):
+    text = SEC + "- Task 1.1: a [IN PROGRESS]\n- Task 1.2: b [BLOCKED, частично]\n"
+    assert _summary(tmp_path, text) == (0, 2, 0, 0)
+
+
+def test_id_prefixes_do_not_leak_in_marker_lookup():
+    text = SEC + "- Task 1b.2b-pre: a [DONE]\n- Task 1b.2a: b [DONE]\n- Task 1b.2: c\n- Task 1.3a: d [DONE]\n"
+    assert L.task_order_marker(text, "1b.2b-pre") == "DONE"
+    assert L.task_order_marker(text, "1b.2b") is None
+    assert L.task_order_marker(text, "1b.2") is None
+    assert L.task_order_marker(text, "1.3") is None
+    assert L.task_order_marker(text, "1.3a") == "DONE"
+
+
+def test_id_end_punctuation_and_atomic_id():
+    text = "### Task 1.2: a\n### Task 1.3a — b\n#### Task T1, c\n## Task 2.1~~\n"
+    assert L.extract_task_ids(text) == ["1.2", "1.3a", "T1", "2.1"]
+    # `1.3a)` не откатывается к префиксу `1`; кириллица в id не читается вовсе
+    assert L.extract_task_ids("### Task 1.3a) a\n### Task 2б.1 — b\n") == []
+    # H1 — только в файле задачи
+    assert L.extract_task_ids("# Task 1.1 — a\n") == []
+    assert L.extract_task_ids("# Task 1.1 — a\n", in_task_file=True) == ["1.1"]
+
+
+def test_old_marker_words_are_returned_as_written():
+    # публичный task_order_marker отдаёт слово как в тексте: SKIPPED не переименован
+    text = SEC + "- Task 1.1: a [SKIPPED]\n- Task 1.2: b [CANCELLED]\n"
+    assert (L.task_order_marker(text, "1.1"), L.task_order_marker(text, "1.2")) == ("SKIPPED", "CANCELLED")
+
+
+def test_unknown_item_keeps_plan_from_done(tmp_path):
+    # `?` не в знаменателе, но план с ним не «готов» (close не архивирует молча)
+    _write(tmp_path / "plans", {"2026-10-02_u.md": SEC + "- Task 1.1: a [DONE]\n- Task 1.2: b\n"})
+    s = L.summarize_plan(L.discover_plan_files(tmp_path / "plans" / "2026-10-02_u.md"))
+    assert (s.done, s.counted, s.unknown, s.open_tasks) == (1, 1, 1, ["1.2"])
+    assert L._is_done(s, None) is False
+
+
+def test_fingerprint_cuts_tailed_marker_and_letter_ids():
+    # TRAP 3: хвост `[DONE … ]` и id `1b.2a` вырезаются; флип статуса не даёт CONTRACT_DRIFT
+    a = SEC + "- Task 1b.2a: a [PENDING]\n- Task 1.1: b [PENDING] (после 1.0)\n"
+    b = (
+        SEC
+        + "- Task 1b.2a: a [DONE 2026-10-02 — `abc1234`; 5 тестов]\n- Task 1.1: b [DONE 2026-10-02, merge [x](y)] (после 1.0)\n"
+    )
+    assert L.contract_fingerprint(a) == L.contract_fingerprint(b)
+
+
+def test_fingerprint_keeps_title_text_before_a_quoted_marker():
+    # статус в обратных кавычках — часть названия; правка названия двигает отпечаток
+    a = SEC + "- Task 1.1: замена `[DONE]` [PENDING]\n"
+    b = SEC + "- Task 1.1: замена `[DONE]` и ещё [PENDING]\n"
+    assert L.contract_fingerprint(a) != L.contract_fingerprint(b)
+
+
+def test_gate_on_item_task_without_heading_reads_nested_fields(tmp_path):
+    ok = SEC_BUDGET + "- Task 1.1: a [PENDING]\n  - **Files:** `a.py`\n  - **Acceptance:** ok\n  - **Handoff:** x\n"
+    assert _gate(tmp_path, "2026-10-02_g1.md", ok) == []
+    bad = SEC_BUDGET + "- Task 1.1: a [PENDING]\n- Task 1.2: b [DONE]\n"
+    expected = [("TASK_INCOMPLETE", "Task 1.1: missing field(s): Files, Acceptance, Handoff")]
+    assert _codes(_gate(tmp_path, "2026-10-02_g2.md", bad)) == expected
+
+
+def test_phase_files_sorted_by_number_then_name(tmp_path):
+    d = tmp_path / "plans" / "2026-10-02_ph"
+    names = ("phase-10.md", "phase-2.md", "phase-1b-x.md", "phase-1.md", "phase-2.result.md")
+    _write(d, {"plan.md": "# P\n", **{n: "x" for n in names}})
+    got = [p.name for p in L.discover_plan_files(d)]
+    assert got == ["plan.md", "phase-1.md", "phase-1b-x.md", "phase-2.md", "phase-10.md"]
+
+
+def test_task_files_natural_order(tmp_path):
+    d = tmp_path / "plans" / "2026-10-02_tf"
+    _write(d, {"plan.md": "# P\n", **{f"tasks/{i}.md": "x" for i in ("1.10", "1.2", "1b.2a", "1.2a", "notes")}})
+    assert [p.stem for p in L.discover_plan_files(d)[1:]] == ["1.2", "1.2a", "1.10", "1b.2a", "notes"]
