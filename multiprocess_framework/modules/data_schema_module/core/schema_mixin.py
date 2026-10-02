@@ -317,7 +317,7 @@ class SchemaMixin:
                 else:
                     current[name] = old
             object.__setattr__(self, "__pydantic_fields_set__", fields_set)
-            return False, _refusal_text(exc)
+            return False, refusal_text(exc)
         return True, None
 
     def values_dict(self) -> dict[str, Any]:
@@ -330,7 +330,7 @@ class SchemaMixin:
         return self.model_dump()  # type: ignore[attr-defined]
 
 
-def _refusal_text(exc: Exception) -> str:
+def refusal_text(exc: Exception) -> str:
     """Текст отказа записи без введённого значения: ``loc: msg; ...``."""
     if not isinstance(exc, ValidationError):
         return f"{type(exc).__name__}: {exc}"

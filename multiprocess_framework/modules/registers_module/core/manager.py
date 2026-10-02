@@ -22,7 +22,7 @@ from pydantic import create_model
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...data_schema_module import RegistersContainer, SchemaBase
-from ...data_schema_module.core.schema_mixin import _refusal_text
+from ...data_schema_module import refusal_text
 from ...logger_module import get_std_logger
 
 from .dispatch import resolve_dispatch_targets
@@ -215,7 +215,7 @@ class RegistersManager(BaseManager, ObservableMixin):
             try:
                 setattr(reg, field_name, value)
             except Exception as exc:
-                return False, _refusal_text(exc)
+                return False, refusal_text(exc)
         # Подписчикам и send_callback — СОХРАНЁННОЕ (нормализованное) значение: копия
         # хранит "WARNING", виджет должен получить "WARNING", а не введённое "warn".
         value = getattr(reg, field_name)

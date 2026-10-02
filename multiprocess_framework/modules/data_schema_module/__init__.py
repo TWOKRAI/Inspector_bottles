@@ -114,7 +114,7 @@ from .core.reference import (
 )
 from .core.register_dispatch import RegisterDispatchMeta
 from .core.schema_base import RegisterBase, SchemaBase
-from .core.schema_mixin import RegisterMixin, SchemaMixin
+from .core.schema_mixin import RegisterMixin, SchemaMixin, refusal_text
 from .core.validators import DataValidator
 
 # =============================================================================
@@ -165,6 +165,7 @@ from .container.registers_container import RegistersContainer
 # =============================================================================
 # Структура списка повторяет порядок слоёв выше для удобства навигации.
 __all__ = [
+    "refusal_text",
     # --- Layer 0: Контракты (Protocol/ABC) ---
     "HasBuild",
     "IAsyncRegisterStorage",
