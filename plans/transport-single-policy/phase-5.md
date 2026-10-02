@@ -196,6 +196,13 @@
 - [ ] `make gate` зелёный; `/dev:ship` отказывает при красном gate (проверено инъекцией — временно сломанный тест).
 **Out of scope:** новые тесты для транспорта (у задач свои).
 
+**Поставка (ветка `fix/t55-green-main`, 2026-10-02) — расхождения с буквой спеки, принятые лидом:**
+- Снимки — `.txt` (один ключ на строку, `snapshots/hot_rebuild_framework_keys.txt`, `snapshots/catalog_register_fields.txt`), не `*.snapshot.json`: падение называет появившиеся/пропавшие ключи; команды пересъёмки нет.
+- Файлы сверх `Files:` (цель «0 failed» их потребовала): `data_schema_module/core/field_meta.py`, `Services/code_reader/core/sdk_reader.py` (голый stdlib-логгер), `recipe/tests/test_yaml_io.py`, `frontend_module/tests/test_remote_frame_source.py` (skipif win32 с причиной), `shared_resources_module/tests/test_reader_gone_hazards.py` (PYTHONPATH от `__file__`), `tests/test_declarations_leak_session_catalogue_guard.py` + `tests/_declarations_catalogue_guard.py` (каталог метрик 5 → 10), `router_module/DECISIONS.md` (ADR-RTR-012: Windows), `.claude/plugins/dev/commands/ship.md` + зеркало (шаг 4).
+- Объяснение HOL-теста — в комментарии тела теста, не в докстринге.
+- `make` на Windows-машине нет: шаг 4 сделан правкой fallback `/dev:ship` (прогнать каждую составляющую `gate`, включая `run_framework_tests.py`; красный гейт = отказ). Проверка «`/dev:ship` отказывает при красном gate инъекцией» требует запуска `/dev:ship` владельцем (`disable-model-invocation: true`) — лидом не выполнена.
+- Коммиты: `8cd6a60b2` диагноз, `c8a1853f4` код, `b2504d571` + `6f5468af1` тесты, `f1682779f` правки ревью, `286266608` ship, `39718c6f9` OPEN_QUESTIONS. Ревью: APPROVED_WITH_NITS (свежий reviewer). Инъекции 10/10 по предсказанию.
+
 ### Task 5.6 — Стенд-гейт как скрипт и экспорт счётчиков тракта в телеметрию
 **Level:** Senior+ · **Assignee:** teamlead (скрипт + экспорт), tester (слепые тесты скрипта), reviewer · **Layer:** scripts + framework
 **Goal:** одна команда `python -m scripts.stand_gate --recipe <yaml> [--runs 3] [--pause 10]` поднимает стенд по протоколу замка, снимает счётчики, проверяет пороги §5 ревью и падает с кодом 1 при нарушении; счётчики 4.7c/d видны в дереве телеметрии, а не только в `introspect.status`.
