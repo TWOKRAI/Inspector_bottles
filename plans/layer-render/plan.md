@@ -90,7 +90,7 @@
 ### Ф2 — ядро сервиса (переезд в `Services/layer_render`) → [phase-2-core.md](phase-2-core.md)
 - Task 2.1: `compose.py` + `io` (бывш. 3.1) [DONE 2026-10-02 — `c9d56b11`; слепые 61 RED → 79 GREEN, инъекции 8/8, ревью Opus APPROVE_WITH_NITS (ниты: repr значения дважды в тексте ошибки `solid`, имя метрики A8 в отчёте); ниты ревью 1.1 закрыты] (∥ 2.2)
 - Task 2.2: `effects.py` + `EFFECT_PARAMS` + эквивалентность `apply_photometric` на 50 seed (бывш. 3.3) [DONE 2026-10-02 — `8665d7b7`; слепые 107 RED → GREEN, инъекции лида 18/18, ревью ит.2 APPROVED; отложено на Ф3: pickle `EffectSpec`, мост требует поле `AugmentConfig` на каждый ключ `EFFECTS`] (∥ 2.1)
-- Task 2.3: `LayerSpec`/`LayerAugment`/`compose_layers` (бывш. 3.2) [PENDING] (после 2.1)
+- Task 2.3: `LayerSpec`/`LayerAugment`/`compose_layers` (бывш. 3.2) [PENDING — волна 4, спека в phase-2-core.md] (после 2.1)
 - Task 2.4: переезд `ScenePreset`, `ObjectFactory` → `RenderedObject`, `SpriteCatalog`, `preview`; реэкспорты; счётчик импортов до/после [PENDING] (после 2.3)
 - Task 2.5: `render_scene(background, placed, effects, rng)`; `SceneCompositor` делегирует; кадры сима побайтно прежние [PENDING] (после 2.4)
 - В 2.1–2.3 закрыть ниты ревью 1.1: дубль проверки `solid` в `_validate_item` и `SolidFill.__post_init__`, лишние `tuple(...)`/`first.copy()`, README «цена ∝ min(th, высота кадра)», read-only копия в таблице Public API.
@@ -112,7 +112,7 @@
 - Task 6.1: одна функция выреза для `center_crop`, `holdout_eval` и генератора (бывш. 2.1) [DONE 2026-10-02 — `f9ef5c45`; слепые 107 RED → GREEN, инъекции лида 16/16 (дыра `clamp` на касании края закрыта ревью), ревью ит.2 APPROVED; намеренно: выход всегда копия, `replicate` без пересечения → `ValueError`]
 - Task 6.2: `LayerSceneGenerator` в `dataset_gen` поверх `layer_render`, секция `train.*` пресета (бывш. 2.2) [PENDING] (после 2.5, 6.1)
 - Task 6.3: CLI экспорта + пресет первого продукта + смоук `ml_train` (бывш. 2.3) [PENDING] — **открывает letters-retrain Ф1**
-- Task 6.4: `holdout_eval` на формуле конвейера (бывш. 2.4, О-1) [PENDING] (после 6.1)
+- Task 6.4: `holdout_eval` на формуле конвейера (бывш. 2.4, О-1) [PENDING — волна 4, спека в phase-6-train.md] (после 6.1)
 - Task 6.5: сведение `DatasetEngine` к пресету слоёв и удаление второго пути сборки картинки (решение владельца 2026-10-01: «свести к одному») [PENDING] (после 6.2)
 
 ### Ф7 — источники спрайтов (бывш. 5.1–5.3) [PENDING] (после 2.4)
