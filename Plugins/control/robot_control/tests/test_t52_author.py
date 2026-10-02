@@ -59,10 +59,13 @@ def _run_bounded(target, *args: Any, timeout: float = 5.0) -> None:
 
 
 def test_reset_counters_zeroes_late_fires_seen_by_get_stats() -> None:
-    # допуск 1 мс: выстрел через ~50 мс после постановки — опоздание
+    # допуск 1 мс. Цель — в БУДУЩЕМ (fire_at ~ now + 30 мс): шаг time.time() на Windows
+    # 15.625 мс, и цель «ровно сейчас» с окном +1 мс закрывалась шагом часов между
+    # чтением в тесте и чтением в schedule() -> "missed" (ревью 5.2: 3 из 1500).
+    # Выстрел через ~100 мс сна -> опоздание ~70 +- 16 мс > 1 мс, late_fires == 1.
     plugin, ctx, _ = _plugin({"transit_ms": 100, "actuation_tolerance_ms": 1})
-    plugin.process([_reject(time.time() - 0.100)])  # fire_at подтянут к «сейчас»
-    time.sleep(0.05)
+    plugin.process([_reject(time.time() - 0.100 + 0.030)])
+    time.sleep(0.1)
     assert ctx.scheduler.tick() == 1
     stats = plugin.cmd_get_stats({})
     assert (stats["actuation_fired_items"], stats["actuation_late_fires"]) == (1, 1)  # якорь

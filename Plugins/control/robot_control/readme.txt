@@ -73,7 +73,8 @@ Outputs:  frame (image/bgr), inspection_result (dict)
                          actuation_fired_items, actuation_missed_items, actuation_unscheduled_items
                          (свои), actuation_late_fires, actuation_unfired_on_stop_items (счёт
                          планировщика ПРОЦЕССА: он один на процесс; reset_counters
-                         не трогает его, а запоминает базу — get_stats отдаёт прирост)
+                         не трогает его, а запоминает базу — get_stats отдаёт прирост;
+                         база снимается, только если плагин уже ставил цели)
 
 Config:
   - enabled (bool, True)
