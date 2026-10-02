@@ -228,6 +228,7 @@ class GenericProcess(ProcessModule):
             coll=frame_ring_depth,
             log_error=self._log_error,
             num_consumers=num_consumers,
+            overflow=overflow,
         )
         if router is not None:
             # P3.1.2: Claim Check кадров — забота хаба, а не producer'ов. Регистрируем

@@ -1782,7 +1782,7 @@ class RouterManager(ChannelRoutingManager):
         with self._stats_lock:
             delivery_failed = int(self._stats.get("observability_delivery_failed", 0) or 0)
 
-        return {
+        stats = {
             "frame_pickle_fallbacks": _mw("frame_pickle_fallbacks"),
             "frame_torn_reads": _mw("frame_torn_reads"),
             "frame_boundary_crossings": _mw("frame_boundary_crossings"),
@@ -1801,7 +1801,12 @@ class RouterManager(ChannelRoutingManager):
             "queue_observability_evicted": _q("observability_evicted"),
             "queue_observability_send_failed": _q("observability_send_failed"),
             "observability_delivery_failed": delivery_failed,
+            # 4.7d-3: дропы двери отправки — всегда; рождённые ею маркеры — только у узла с политикой every.
+            "door_drops": _mw("door_drops"),
         }
+        if any(getattr(mw, "overflow", "latest") == "every" for mw in mws):
+            stats["not_inspected_door"] = _mw("not_inspected_door")
+        return stats
 
     def get_ring_info(self) -> List[Dict[str, Any]]:
         """4.5c: описание SHM-колец всех кадровых middleware роутера — конкатенация ``ring_info()``
