@@ -277,3 +277,104 @@ def test_html_progress_for_plan_with_only_dropped_tasks_is_valid():
     page = pp.to_html([p], [], Path("."))
     assert '<progress value="0" max="1">' in page  # max=0 был бы невалиден
     assert "0 из 0" in page
+
+
+# ------------------------------------------------------------------ нумерованный раздел порядка
+
+
+@pytest.mark.parametrize(
+    "heading",
+    ["## 3. Порядок выполнения", "### 2) Execution order", "## 10. Порядок", "## 1.Порядок выполнения (ред. 2)"],
+)
+def test_numbered_section_title_is_a_section(heading):
+    assert [i.id for i in items_of("- Task 1.1: a [DONE]\n", head=heading + "\n\n")] == ["1.1"]
+
+
+@pytest.mark.parametrize("heading", ["## Порядок и окна", "## 3. Порядок и окна", "## 1.2 Порядок выполнения"])
+def test_numbered_or_plain_non_section_titles_stay_non_sections(heading):
+    assert items_of("- Task 1.1: a [DONE]\n", head=heading + "\n\n") == []
+
+
+# ------------------------------------------------------------------ NO_STATUS_MARK / unmarked
+
+UNMARKED_PLAN = """# План
+
+### Task 1.1 — без признаков
+проза без статуса
+
+### Task 1.2 — группа в заголовке [DONE]
+текст
+
+### Task 1.3 — со строкой статуса
+**Статус:** [PENDING]
+
+### Task 1.4 — чекбоксы
+- [ ] шаг
+
+### Task 1.5 — голое слово — DONE 50df705f
+текст
+"""
+
+
+def _write_plan(tmp_path: Path, name: str, text: str) -> Path:
+    d = tmp_path / "plans" / name
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def _cli(root: Path, *flags: str):
+    import subprocess
+
+    return subprocess.run(
+        [sys.executable, str(_MOD_PATH), "--root", str(root), *flags],
+        capture_output=True,
+        timeout=60,
+        encoding="utf-8",
+        env={**__import__("os").environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+    )
+
+
+def test_unmarked_counts_only_heading_tasks_without_any_sign(tmp_path):
+    plan = pp.discover(_write_plan(tmp_path, "2026-10-02_um", UNMARKED_PLAN))[0]
+    marks = {t.id: t.unmarked for t in plan.tasks}
+    # 1.1 и 1.5 (голое слово не статус) без признаков; 1.2 группа, 1.3 строка, 1.4 чекбокс
+    assert marks == {"1.1": True, "1.2": False, "1.3": False, "1.4": False, "1.5": True}
+    assert plan.unmarked == 2
+    assert {t.id: t.status for t in plan.tasks}["1.5"] == "pending"
+
+
+def test_no_status_mark_is_printed_as_info_and_does_not_block(tmp_path):
+    root = _write_plan(tmp_path, "2026-10-02_um", UNMARKED_PLAN)
+    cp = _cli(root, "--check")
+    lines = [ln for ln in cp.stdout.splitlines() if ln.startswith("NO_STATUS_MARK")]
+    assert lines == ["NO_STATUS_MARK 2026-10-02_um info — 2 из 5 задач без отметки статуса, считаются PENDING"]
+    assert cp.returncode == 0
+
+
+def test_json_has_unmarked_and_list_plan_has_zero(tmp_path):
+    import json
+
+    root = _write_plan(tmp_path, "2026-10-02_um", UNMARKED_PLAN)
+    _write_plan(tmp_path, "2026-10-02_list", "# P\n\n## Порядок выполнения\n\n- Task 1.1: a [PENDING]\n- Task 1.2: b\n")
+    data = {r["plan"]: r for r in json.loads(_cli(root, "--json").stdout)}
+    assert data["2026-10-02_um"]["unmarked"] == 2
+    assert data["2026-10-02_list"]["unmarked"] == 0
+
+
+def test_html_chip_and_cell_attribute_only_for_unmarked_plan(tmp_path):
+    root = _write_plan(tmp_path, "2026-10-02_um", UNMARKED_PLAN)
+    _write_plan(tmp_path, "2026-10-02_list", "# P\n\n## Порядок выполнения\n\n- Task 1.1: a [PENDING]\n")
+    out = tmp_path / "page.html"
+    assert _cli(root, "--html", str(out)).returncode == 0
+    page = out.read_text(encoding="utf-8")
+    um, lst = page.split('data-plan="2026-10-02_um"')[1], page.split('data-plan="2026-10-02_list"')[1]
+    um = um.split("</details>")[0]
+    lst = lst.split("</details>")[0]
+    assert (
+        '<span class="chip warn" data-chip="unmarked" title="статус не размечен, цифра может быть занижена">⚠ 2 без отметки</span>'
+        in um
+    )
+    assert um.count('data-unmarked="1"') == 2
+    assert um.count('class="cell" data-status="pending" data-unmarked="1"') == 2
+    assert "data-chip" not in lst and "data-unmarked" not in lst

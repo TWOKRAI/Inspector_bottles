@@ -94,6 +94,7 @@ class Task:
     title: str
     status: str
     ref: str | None = None
+    unmarked: bool = False  # задача из заголовка без признаков статуса: pending «по умолчанию»
 
 
 @dataclass
@@ -111,6 +112,10 @@ class Plan:
 
     def count(self, status: str) -> int:
         return sum(1 for t in self.tasks if t.status == status)
+
+    @property
+    def unmarked(self) -> int:
+        return sum(1 for t in self.tasks if t.unmarked)
 
     @property
     def dropped(self) -> int:
@@ -241,6 +246,7 @@ class Item:
 
 def is_section_title(title: str) -> bool:
     t = re.sub(r"[*_`]", "", title).strip().casefold()
+    t = re.sub(r"^\d+[.)]\s*", "", t)  # нумерация: `3. Порядок выполнения`, `2) Execution order`
     return t.startswith(("порядок выполнения", "execution order")) or t == "порядок"
 
 
@@ -344,6 +350,7 @@ class HeadTask:
     title: str
     status: str  # итоговый (для набора из заголовков)
     line_status: str | None  # слово набора в `**Статус:**` тела
+    unmarked: bool = False  # нет `**Статус:**`, группы в заголовке и чекбоксов
 
 
 def _checkbox_status(body: list[str]) -> str:
@@ -400,7 +407,8 @@ def parse_heading_tasks(text: str) -> list[HeadTask]:
             status = group[0]
         else:
             status = _checkbox_status(body)
-        result.append(HeadTask(tm.group("id"), " ".join(title.split())[:160], status, line_status))
+        unmarked = not line_status and not group and not any(CHECKBOX_RE.match(ln) for ln in body)
+        result.append(HeadTask(tm.group("id"), " ".join(title.split())[:160], status, line_status, unmarked))
     return result
 
 
@@ -511,7 +519,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
         return plan
 
     if heads:
-        plan.tasks = _dedupe_first([Task(h.id, h.title, h.status) for h in heads])
+        plan.tasks = _dedupe_first([Task(h.id, h.title, h.status, None, h.unmarked) for h in heads])
         return plan
     table: list[Task] = []
     for text in table_texts:
@@ -683,6 +691,16 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
             out.append(Finding("STATUS_CONFLICT", p.name, i, False, "пункт списка и второй статус расходятся"))
         if not DATED_NAME_RE.match(p.name):
             out.append(Finding("NO_DATE_IN_NAME", p.name, None, False, "в имени нет даты: close план не примет"))
+        if p.unmarked:
+            out.append(
+                Finding(
+                    "NO_STATUS_MARK",
+                    p.name,
+                    None,
+                    False,
+                    f"{p.unmarked} из {len(p.tasks)} задач без отметки статуса, считаются PENDING",
+                )
+            )
         st = {t.status for t in p.tasks}
         if p.tasks and not (st & {"unknown", "pending", "in_progress", "blocked"}) and "done" in st:
             out.append(Finding("ALL_DONE_NOT_ARCHIVED", p.name, None, False, "все задачи закрыты, план не в архиве"))
@@ -736,6 +754,7 @@ def to_json(plans: list[Plan]) -> str:
             "total": p.total,
             "dropped": p.dropped,
             "unknown": p.unknown,
+            "unmarked": p.unmarked,
             "tasks": [{"id": t.id, "title": t.title, "status": t.status, "ref": t.ref} for t in p.tasks],
         }
         for p in plans
@@ -784,6 +803,9 @@ ul.tasks{margin:0;padding-left:0;list-style:none;font-size:.88rem}
 ul.tasks li{padding:2px 0;border-top:1px solid var(--line)}
 .st{display:inline-block;min-width:92px;color:var(--muted);font-size:.78rem}
 code{font-size:.8rem;color:var(--muted)}
+.chip.warn{font-size:.75rem;color:var(--in_progress);border:1px solid var(--in_progress);
+border-radius:10px;padding:0 7px}
+.cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
 """
 
 STATUS_RU = {
@@ -823,6 +845,12 @@ def _plan_html(p: Plan) -> str:
             extra.append(f"без статуса {p.unknown}")
         tail = f" ({', '.join(extra)})" if extra else ""
         s.append(f'<span class="tally">{_e(_tally(p.done, p.total) + tail)}</span>')
+        if p.unmarked:
+            s.append(
+                '<span class="chip warn" data-chip="unmarked" '
+                'title="статус не размечен, цифра может быть занижена">'
+                f"⚠ {p.unmarked} без отметки</span>"
+            )
     else:
         s.append('<span class="tally">нет задач в эталонном формате</span>')
     s.append("</summary>")
@@ -834,7 +862,8 @@ def _plan_html(p: Plan) -> str:
         s.append('<div class="cells">')
         for t in p.tasks:
             tip = f"{t.id} — {t.title} [{STATUS_RU[t.status]}]"
-            s.append(f'<span class="cell" data-status="{t.status}" title="{_e(tip)}">{_e(t.id)}</span>')
+            mark = ' data-unmarked="1"' if t.unmarked else ""
+            s.append(f'<span class="cell" data-status="{t.status}"{mark} title="{_e(tip)}">{_e(t.id)}</span>')
         s.append("</div>")
         s.append('<ul class="tasks">')
         for t in p.tasks:
