@@ -151,7 +151,8 @@ def test_marker_collection_skips_plain_plugin_and_suspect_step_and_goes_to_every
     """Исполнитель, маркер-коллекция, плагин без accepts_markers (в цепочке критический bypassed плагин):
     process вызван 0 раз, consecutive_fails не изменился, inspection_status == "not_inspected" (не
     "suspect"); send_fn получила по сообщению на каждый chain_targets, data равен маркеру (кроме служебных
-    _t_sent_ns / frame-trace штампа); not_inspected_handled +1."""
+    _t_sent_ns / frame-trace штампа); not_inspected_handled +1.
+    Task 5.3 (намеренно): data равен записи о разрыве count=1 (маркер + count/trace_ids/first/last/reasons/sources)."""
     crit = _Failing("crit")
     plain = _Plugin("plain")
     sent: list = []
@@ -178,20 +179,39 @@ def test_marker_collection_skips_plain_plugin_and_suspect_step_and_goes_to_every
             "trace_id": "m1",
             "capture_ts": 5.0,
             "camera_id": "cam0",
+            "count": 1,
+            "trace_ids": ["m1"],
+            "first_capture_ts": 5.0,
+            "last_capture_ts": 5.0,
+            "reasons": {"lag": 1},
+            "sources": {"upstream": 1},
         }
     assert ex.get_cycle_metrics()["not_inspected_handled"] == handled_before + 1
 
 
-def test_plugin_with_accepts_markers_gets_the_marker_exactly_once_same_object():
-    """Плагин с accepts_markers = True получает маркер-item в process ровно 1 раз (spy), тот же объект данных."""
+def test_plugin_with_accepts_markers_gets_the_marker_exactly_once():
+    """Плагин с accepts_markers = True получает маркер-item в process ровно 1 раз (spy).
+
+    Task 5.3 (намеренно): было «тот же объект данных». Исполнитель схлопывает коллекцию ``build_gap`` ДО цепочки,
+    а ``build_gap`` входы не мутирует — плагин видит НОВЫЙ dict, равный записи ``count=1``; маркер входа цел."""
     spy = _Plugin("keeper", accepts=True)
     marker = _marker("m1")
+    before = dict(marker)
     ex = _executor([spy])
 
     _drive(ex, [[marker]])
 
     assert spy.calls == 1
-    assert len(spy.seen[0]) == 1 and spy.seen[0][0] is marker
+    assert len(spy.seen[0]) == 1
+    assert _bare(spy.seen[0][0]) == {
+        **before,
+        "trace_ids": ["m1"],
+        "first_capture_ts": 5.0,
+        "last_capture_ts": 5.0,
+        "reasons": {"lag": 1},
+        "sources": {"upstream": 1},
+    }
+    assert marker == before, "build_gap мутировал маркер входа"
 
 
 def test_port_validate_does_not_apply_to_marker_items(monkeypatch):
@@ -248,6 +268,20 @@ def _stale_run(rig, *, overflow: str, kind: str, n_in: int, accepts: bool = Fals
     return ex, plugin, sent, reader.frame_stale_drops - before
 
 
+def _assert_gap_record(sent: list, trace_ids: list[str]) -> None:
+    """Task 5.3: stale-входы уезжают ОДНОЙ записью о разрыве на цель (``count`` = число входов, ``trace_ids`` по
+    порядку, ``reasons == {"stale_exec": n}``), а не сообщением-маркером на вход."""
+    data = _data(sent)
+    assert len(data) == 1, f"разрыв уехал {len(data)} сообщениями: {data}"
+    (d,) = data
+    assert is_marker(d)
+    assert d["count"] == len(trace_ids)
+    assert d["trace_ids"] == trace_ids
+    assert d["reasons"] == {"stale_exec": len(trace_ids)}
+    assert (d["first_capture_ts"], d["last_capture_ts"]) == (1.0, float(len(trace_ids)))
+    assert "frame" not in d and "_shm_views" not in d
+
+
 def _assert_markers(sent: list, trace_ids: list[str]) -> None:
     data = _data(sent)
     assert [d.get("trace_id") for d in data] == trace_ids
@@ -258,12 +292,12 @@ def _assert_markers(sent: list, trace_ids: list[str]) -> None:
 
 def test_stale_pre_chain_every_three_inputs_three_markers(rig):
     """Stale pre-chain, every, батч из 3 items (t1,t2,t3) со view, слот перезаписан до такта: цепочка не
-    вызывалась (spy 0), send_fn получила 3 сообщения-маркера (stale_exec, t1,t2,t3 по порядку),
-    frame_stale_drops +3, not_inspected_stale_exec == 3, not_inspected_handled +3."""
+    вызывалась (spy 0), frame_stale_drops +3, not_inspected_stale_exec == 3, not_inspected_handled +3.
+    Task 5.3 (намеренно): было «3 сообщения-маркера» — теперь 1 сообщение, запись count=3, trace_ids [t1,t2,t3]."""
     ex, plugin, sent, d_stale = _stale_run(rig, overflow="every", kind="pre", n_in=3)
 
     assert plugin.calls == 0
-    _assert_markers(sent, ["t1", "t2", "t3"])
+    _assert_gap_record(sent, ["t1", "t2", "t3"])
     assert d_stale == 3
     metrics = ex.get_cycle_metrics()
     assert metrics["not_inspected_stale_exec"] == 3
@@ -275,10 +309,11 @@ def test_stale_post_chain_every_2_to_1_counts_inputs_and_sends_markers_directly(
     """Stale post-chain 2->1 (плагин склеивает 2 входа в 1 выход, слот перезаписан во время process), every:
     send_fn получила 2 маркера (t1,t2) и 0 обычных, frame_stale_drops +2 (было +1 по выходам),
     not_inspected_stale_exec == 2, not_inspected_handled +2; плагин (в т.ч. с accepts_markers = True)
-    вызван ровно 1 раз — на входах, маркеры его повторно не проходят."""
+    вызван ровно 1 раз — на входах, маркеры его повторно не проходят.
+    Task 5.3 (намеренно): было «2 маркера» — теперь 1 запись count=2, trace_ids [t1,t2]."""
     ex, plugin, sent, d_stale = _stale_run(rig, overflow="every", kind="post_merge", n_in=2, accepts=accepts)
 
-    _assert_markers(sent, ["t1", "t2"])
+    _assert_gap_record(sent, ["t1", "t2"])
     assert plugin.calls == 1
     assert d_stale == 2
     metrics = ex.get_cycle_metrics()

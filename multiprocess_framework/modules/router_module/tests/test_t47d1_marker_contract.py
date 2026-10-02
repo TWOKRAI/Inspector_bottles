@@ -54,6 +54,7 @@ def test_build_marker_exact_dict_for_full_meta():
         "capture_ts": 12.5,
         "frame_id": 7,
         "camera_id": "cam0",
+        "count": 1,  # Task 5.3 (намеренно): маркер = потеря одного кадра
     }
 
 

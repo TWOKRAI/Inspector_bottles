@@ -94,7 +94,8 @@ def test_mixed_collection_takes_normal_path_and_plugin_sees_the_marker_inside():
 
 def test_post_chain_stale_markers_carry_original_trace_ids_when_plugin_mutates_input_in_place(rig):
     """Плагин на месте портит dict входа (trace_id/capture_ts) и возвращает его же; слот перезаписан во время
-    process, every: оба маркера stale_exec несут ИСХОДНЫЕ trace_id/capture_ts (собраны до цепочки)."""
+    process, every: оба маркера stale_exec несут ИСХОДНЫЕ trace_id/capture_ts (собраны до цепочки).
+    Task 5.3 (намеренно): маркеры уезжают одной записью о разрыве — исходные id в ``trace_ids``, ts в first/last."""
     writer, reader = rig.make("A"), rig.make("B")
     items = []
     for i in (1, 2):
@@ -115,7 +116,9 @@ def test_post_chain_stale_markers_carry_original_trace_ids_when_plugin_mutates_i
 
     data = [m["data"] for _t, m in sent]
     assert all(is_marker(d) for d in data), data
-    assert [(d["trace_id"], d["capture_ts"]) for d in data] == [("t1", 1.0), ("t2", 2.0)]
+    assert [(d["count"], d["trace_ids"], d["first_capture_ts"], d["last_capture_ts"]) for d in data] == [
+        (2, ["t1", "t2"], 1.0, 2.0)
+    ]
     assert plugin.calls == 1
 
 

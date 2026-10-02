@@ -42,7 +42,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable, Dict, Optional
 
-from .not_inspected_marker import build_marker, meta_from_msg
+from .not_inspected_marker import build_gap, build_marker, meta_from_msg
 
 # Throttle громкого WARNING про pickle-fallback (счётчик — всегда, лог — раз в N кадров).
 _PICKLE_WARN_EVERY = 300
@@ -1211,7 +1211,8 @@ class FrameShmMiddleware:
                 # 4.7d-3: вместо дропа — маркер. Замена НА МЕСТЕ в общем data-dict: повторный send fan-out
                 # (тот же dict) видит маркер без ``_shm_dropped`` — второго рождения нет. target/type/channel
                 # сообщения не трогаем. Мета — до замены, общим ``meta_from_msg`` (те же правила, что у приёмника).
-                marker = build_marker(meta_from_msg(msg), reason="door", source=self._owner)
+                # Task 5.3: дверь рожает запись о разрыве ``count=1`` — ту же форму, что уходит от исполнителя.
+                marker = build_gap([build_marker(meta_from_msg(msg), reason="door", source=self._owner)])[0]
                 data.clear()
                 data.update(marker)
                 with self._bytes_lock:
