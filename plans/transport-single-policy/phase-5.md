@@ -23,12 +23,12 @@
 Волна 2:  5.2 (robot_control)  ∥  5.3 (маркер/приёмник/исполнитель/дверь)  ∥  5.4 (источник/PM)
           — три писателя, файлы не пересекаются (контракт «маркер с count» зафиксирован в 5.1,
             поэтому 5.3 НЕ трогает robot_control, а 5.2 принимает count с первого дня)
-Волна 3:  5.6 (стенд-гейт + экспорт счётчиков) → первый прогон гейта закрывает acceptance 5.2/5.3/5.4
+Волна 3:  5.6 (стенд-гейт + экспорт счётчиков) ∥ 5.9a (валидатор портов + провода рецептов) → первый прогон гейта закрывает acceptance 5.2/5.3/5.4
 Волна 4:  5.7 (транзит и loan)  ∥  5.8 (пул исполнителя, batch-commit)  ∥  5.9 (две камеры, мост)
 Волна 5:  5.10 (одна дверь; условно — по 5.0(а))  ∥  5.11 (GUI-индикатор)  → 4.8b (в task-4.8.md)
 ```
 
-Зависимости жёсткие: 5.1 → {5.2, 5.3}; 5.3 → 5.6 (формула в items); 5.6 → {5.7, 5.8, 5.9} (гейт нужен для их приёмки); 5.0(а) → 5.10; 5.7 → решение по Task 1.1.
+Зависимости жёсткие: 5.1 → {5.2, 5.3}; 5.3 → 5.6 (формула в items); 5.6 → {5.7, 5.8, 5.9} (гейт нужен для их приёмки); 5.9a → 5.9 (рецепт двух камер должен стартовать); 5.0(а) → 5.10; 5.7 → решение по Task 1.1.
 
 ---
 
@@ -53,25 +53,28 @@
 **Out of scope:** любые правки; выводы о мощности (4.8b).
 
 ### Task 5.1 — Разбор дизайна механизмов 5.2 и 5.3 у CTO (до кода)
+**Статус (2026-10-02): ✅ сделано** — [`docs/reviews/2026-10-02_phase5-design-cto.md`](../../docs/reviews/2026-10-02_phase5-design-cto.md). Дизайн 5.2/5.3 принят с шестью правками (внесены ниже), добавлена Task 5.9a.
 **Level:** CTO (Fable) · **Assignee:** cto · **Layer:** docs
 **Goal:** тот шаг, которого не хватило в 4.7d: сценарный разбор дизайна механизма до кода. Входы — разделы «Дизайн» задач 5.2 и 5.3 ниже и факты 5.0; выход — решения, по которым пишутся слепые тесты.
 **Files:** новый `docs/reviews/2026-10-0X_phase5-design-cto.md`; этот файл (правка разделов «Дизайн» 5.2/5.3 лидом по решениям).
 **Steps:** CTO отвечает на вопросы списком, каждый — решение + сценарий, который его переворачивает: (1) планировщик привода — часть плагина `robot_control` или сервис процесса (`ProcessModule`), доступный любому решателю; (2) схема записи о разрыве: ключи, предел длины `trace_ids` (есть ли), поведение при `count=1`; (3) где склеивать — в приёмнике (уже `_MarkerBatch`) или в исполнителе перед отправкой; (4) формула приёмки в items: левая часть `Σ count`, `not_inspected_handled` считает items или записи; (5) fan-out: одна запись на цель, доставок N — как в 4.7d; (6) фронт `_rejecting` при планировщике: вердикт пишется на фронте решения (сейчас) или на выстреле; (7) совместимость `every`-записи с узлом `latest` посередине (проход записи не зависит от режима — остаётся?); (8) что делать с записью, чей `last_capture_ts + transit` уже в прошлом на момент прихода (старение).
 **Acceptance criteria:**
-- [ ] Восемь решений записаны, у каждого — «что перевернёт».
-- [ ] Разделы «Дизайн» 5.2 и 5.3 в этом файле приведены к решениям до запуска слепого tester'а (коммит `docs(plans)`).
+- [x] Восемь решений записаны, у каждого — «что перевернёт». (девять: плюс валидатор портов)
+- [x] Разделы «Дизайн» 5.2 и 5.3 в этом файле приведены к решениям до запуска слепого tester'а (коммит `docs(plans)`).
 **Out of scope:** код, тесты, приёмка фазы.
 
 ### Task 5.2 — Контракт привода: конвейер не ждёт механизма
-**Level:** Senior+ · **Assignee:** teamlead (код), tester (слепые тесты до кода), reviewer · **Layer:** plugins
+**Level:** Senior+ · **Assignee:** teamlead (код), tester (слепые тесты до кода), reviewer · **Layer:** mixed
 **Goal:** в `process()` решателя нет ожидания; отбраковка планируется по `capture_ts + transit_ms` и исполняется планировщиком; устаревшая цель не стреляет, а считается.
-**Files:** `Plugins/control/robot_control/plugin.py`, `Plugins/control/robot_control/registers.py`, новый `Plugins/control/robot_control/actuation.py` (планировщик), `Plugins/control/robot_control/tests/` (новые + намеренно изменяемые), `Plugins/control/robot_control/README.md`, новый `multiprocess_framework/modules/process_module/tests/test_no_blocking_in_plugin_process.py` (страж), `multiprocess_prototype/backend/topology/TEMPLATE.yaml` (новые регистры).
-**Дизайн (до решений 5.1 — предложение лида):**
-- Регистры: `transit_ms` (путь изделия от камеры до отбраковщика; по умолчанию = прежнему `reject_delay_ms`), `actuation_tolerance_ms` (по умолчанию 20), `reject_delay_ms` остаётся как deprecated-алиас `transit_ms` с WARNING раз на старт (OWNER-1).
-- `ActuationScheduler`: поток в процессе, min-heap по `fire_at`; `schedule(fire_at, trace_id, action, window_end=None)`; на `fire_at` зовёт `fire(action, trace_ids)`; `now > fire_at + tolerance` при постановке → `missed_actuation += 1`, не стреляет; `window_end` — одно срабатывание на окно (запись о разрыве 5.3: `[first_capture_ts, last_capture_ts] + transit`).
-- `process()`: решение → `_write_verdict` на фронте (как сейчас) → `scheduler.schedule(...)` → `return item`. `time.sleep` из `process()` и `_process_marker` удалён.
-- Маркер/запись с `count` (контракт 5.1): `total_not_inspected += count`, одна широкая запись на запись (как сейчас одна на маркер), одна постановка в планировщик на окно.
-- Страж: AST-тест обходит `Plugins/**/plugin.py`, функции `process`/`_process_*`: вызов `time.sleep`/`sleep(` → провал с именем файла. Проверка стража инъекцией: временно вернуть `sleep` в `robot_control` → тест красный.
+**Files:** `Plugins/control/robot_control/plugin.py`, `Plugins/control/robot_control/registers.py`, новый `multiprocess_framework/modules/process_module/generic/actuation_scheduler.py` (планировщик, решение 1 CTO), новый `multiprocess_framework/modules/process_module/tests/test_actuation_scheduler.py`, `Plugins/control/robot_control/tests/` (новые + намеренно изменяемые), `Plugins/control/robot_control/README.md`, новый `multiprocess_framework/modules/process_module/tests/test_no_blocking_in_plugin_process.py` (страж), `multiprocess_prototype/backend/topology/TEMPLATE.yaml` (новые регистры).
+**Дизайн (по решениям 5.1, [`docs/reviews/2026-10-02_phase5-design-cto.md`](../../docs/reviews/2026-10-02_phase5-design-cto.md)):**
+- Регистры: `transit_ms` (умолчание 0 = прежнее `reject_delay_ms`), `actuation_tolerance_ms` (умолчание 20), `reject_delay_ms` — deprecated-алиас с WARNING раз на старт (OWNER-1). `transit_ms == 0` → планировщик не используется, `fire` синхронно, `missed_actuation = 0` (решение 8).
+- `ActuationScheduler` — класс фреймворка `process_module/generic/actuation_scheduler.py` (heap под Lock, `clock` по умолчанию `time.time` — та же шкала, что `capture_ts`, `source_producer.py:188`; колбэк `fire(payload, count)`); `robot_control` запускает его воркером через `ctx.worker_manager.create_worker`. Новый вход в `PluginContext` не добавляется до второго потребителя (решение 1).
+- API: `schedule(fire_at, window_end, count, payload) -> "scheduled"|"missed"`; `now > window_end + tolerance` → `missed_items += count`, без постановки; `fire_at < now` → `fire_at = now`. `tick()`: стреляет все `fire_at ≤ now`, `late_fires += 1` при `now − fire_at > tolerance`. Счётчики: `fired_items`, `missed_items`, `late_fires`, `unscheduled_items` (нет `capture_ts`).
+- `process()`: решение → `_write_verdict` на фронте (как сейчас) → `status = scheduler.schedule(...)` → широкая запись с `actuation=status`, `fire_at`, `transit_ms` → `return item`. `time.sleep` удалён из `process()` и `_process_marker`. Вердикт пишется на решении, не на выстреле; `fire` документов не пишет (решение 6).
+- Запись с `count` (5.3): `total_not_inspected += count`; одна постановка с окном `[first_capture_ts + transit, last_capture_ts + transit]`; одна широкая запись; фронт `_rejecting` не меняется. Источник: `source`, если он есть, иначе гистограмма `sources` (единственный читатель — `plugin.py:233`).
+- Страж: AST по `Plugins/**/plugin.py`, функции `process`/`_process_*`: `time.sleep`/`sleep(` → красный с именем файла. Проверка стража инъекцией.
+- Критерий «стреляет в `[fire_at, fire_at + 0.002]`» — только с подменными часами; живьём — `late_fires` и p99 опоздания числом (Windows: сетка 15.6 мс).
 **Steps:** 1. tester: слепые тесты по acceptance в worktree до кода. 2. Регистры + планировщик + перевод `process()`. 3. Страж. 4. Инъекции лида (≥ 6: планировщик не стреляет по старой цели; стреляет дважды на окно; `tolerance` не читается; `count` не суммируется; фронт сломан; `sleep` вернулся). 5. Ревью. 6. Стенд-гейт (ниже).
 **Намеренно меняемые тесты:** `Plugins/control/robot_control/tests/test_plugin.py` — кейс «`reject_delay_ms=50`, маркер: `process` длится ≥ 50 мс» (acceptance 4.7d-4) переворачивается в «< 1 мс, в планировщике одна запись»; аналогичный кейс для обычного брака; `test_verdict_documents.py` — если 5.1 переносит фронт на выстрел (решение 6), кейсы фронта переписываются; `test_wide_event_emitter.py` — без изменений (одна запись на единицу сохраняется).
 **Acceptance criteria:**
@@ -87,11 +90,13 @@
 **Level:** Senior+ · **Assignee:** teamlead (код), tester, reviewer · **Layer:** framework
 **Goal:** потеря N кадров уезжает одной записью `not_inspected` с `count` и списком `trace_ids`, а не N сообщениями; память и fan-out O(1) на разрыв; поимённость по `trace_id` сохраняется.
 **Files:** `multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py` (`build_gap`, `is_marker` принимает `count`, `MARKER_REASONS` без изменений), `multiprocess_framework/modules/process_module/generic/data_receiver.py` (IPC-запись сверху — отдельной коллекцией, как маркер), `multiprocess_framework/modules/process_module/generic/pipeline_executor.py` (`_forward_markers`: `_MarkerBatch` → одна запись перед `_send_results`; `not_inspected_handled += Σ count`), `multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py` (дверной маркер = запись с `count=1`), `multiprocess_framework/modules/router_module/core/router_manager.py` (без изменений, если `get_shm_stats` не меняется), `multiprocess_framework/DECISIONS.md` (поправка ADR-174 п. 4–7), тесты `multiprocess_framework/modules/process_module/tests/test_t47d2_*.py`, `multiprocess_framework/modules/router_module/tests/test_t47d1_marker_contract.py`, `test_t47d3_*.py`.
-**Дизайн (до решений 5.1 — предложение лида):**
-- Склейка остаётся в приёмнике (`_MarkerBatch`, `_coalesce_markers`) — её тесты не меняются. Схлопывание в ОДНУ запись — в исполнителе, в `_forward_markers`, перед `_send_results`: `build_gap(markers)` → `{inspection_status, overflow_marker=True, count, trace_ids, first_capture_ts, last_capture_ts, reasons: {lag: n1, stale_restore: n2, ...}, source, camera_id (если один), frame_id_first/last (если были)}`. Маркер `count=1` сохраняет сегодняшние ключи (`trace_id`, `capture_ts`) для совместимости и имеет `count=1`.
-- `is_marker(item)`: `overflow_marker is True and inspection_status == "not_inspected"` — как сейчас; `count = item.get("count", 1)`.
-- Пришедшая сверху запись в приёмнике идёт `on_items_ready([item])`, как маркер (4.7d-2 шаг 3). Повторная склейка записей в приёмнике соседа — только в `_bound_lag` при замене (как сейчас), записи с `count>1` склеиваются суммой.
-- Формула приёмки (ADR-174 п. 5) — в items: слева `Σ count` рождённых записей, справа прежние счётчики; соседу `handled(next) − own(next) = Σ born(prev) × N`, где `handled` считает items (`Σ count`).
+**Дизайн (по решениям 5.1, [`docs/reviews/2026-10-02_phase5-design-cto.md`](../../docs/reviews/2026-10-02_phase5-design-cto.md)):**
+- Склейка в приёмнике — как есть (`_MarkerBatch`, `_coalesce_markers`, тесты не меняются). Плюс: в `on_items_ready` маркер-коллекция сливается в хвост очереди, если `pending[-1]` — `_MarkerBatch` (под `chain.mutex`, в обоих режимах). Причина: `_bound_lag` на маркер-коллекции не срабатывает (`data_receiver.py:263`), поток маркеров без кадров заполняет `chain_queue` по одному (решения 3(б), 7).
+- Схлопывание в записи — в исполнителе, в `_forward_markers`, ДО `_execute_chain`: `records = build_gap(items)` → цепочка по записям → `not_inspected_handled += Σ count` (по входу) → `_send_results`. Post-chain stale (`_run_batch`, ветка `not valid` под `every`) — тоже через `build_gap` (решения 3, 4).
+- `build_gap(items) -> list[dict]`, чанк `GAP_CHUNK = 1500`: `{inspection_status, overflow_marker: True, count, trace_ids, first_capture_ts (min), last_capture_ts (max), reasons: {…}, sources: {…}}` + `source`/`camera_id`/`reason`, если единственны. Вход может быть записью (`count>1`) — поля суммируются. `len(trace_ids) == count`. `count=1` несёт и сингулярные ключи (`trace_id`, `capture_ts`, `reason`). Пустой вход → `ValueError` (решение 2).
+- `is_marker` — без изменений (две пары ключей); `count = item.get("count", 1)`.
+- Дверь: запись `count=1` с полным набором ключей. Fan-out: одно рождение, N доставок одного dict (решение 5).
+- Формула ADR-174 п. 5 — в items; `handled` считает Σ count входа.
 **Steps:** 1. tester до кода. 2. `build_gap` + `_forward_markers`. 3. Дверь: `count=1`. 4. Приёмник: запись сверху. 5. Инъекции (≥ 8: `count` не суммируется; `trace_ids` теряет порядок; `first/last` перепутаны; запись сверху идёт в коллектор; дверь рожает две записи при fan-out; `handled` считает записи, а не items; `reasons` не агрегируются; `count=0`). 6. Ревью. 7. Стенд-гейт.
 **Намеренно меняемые тесты:** 4.7d-2 кейсы «stale pre-chain батч из 3 → `send_fn` получила 3 сообщения-маркера» → 1 сообщение, `count=3`, `trace_ids=[t1,t2,t3]`; «post-chain 2→1: 2 маркера» → 1 запись `count=2`; «маркер-коллекция, плагин без `accepts_markers`: `send_fn` по сообщению на цель, `data` равен маркеру» → `data` равен записи; `test_t47d1_marker_contract.py` — точный набор ключей `build_marker` дополняется `count` (литерал обновить); 4.7d-4 кейс «`blob_detector` 0 раз, `robot_control` 1 раз на маркер-коллекцию» — 1 раз на запись (не на маркер).
 **Acceptance criteria:**
@@ -99,7 +104,9 @@
 - [ ] Исполнитель, `_MarkerBatch` из 1078 маркеров, 2 `chain_targets`: `send_fn` вызвана ровно 2 раза, в обоих `data["count"] == 1078`, `len(trace_ids) == 1078`, порядок = порядок замены; `not_inspected_handled` +1078.
 - [ ] Дверь (`every`, fan-out 2): одна запись `count=1`, `not_inspected_door == 1`, `door_drops == 1`.
 - [ ] Приёмник соседа: запись сверху → отдельная коллекция, коллектор не вызван, поля целы; `robot_control.process` вызван 1 раз, `total_not_inspected += count`.
-- [ ] Размер pickle записи с 1078 `trace_ids` (32-символьных) — число в отчёте; ≤ 64 КиБ.
+- [ ] Размер pickle записи с 1078 `trace_ids` (32-символьных) — число в отчёте; ≤ 64 КиБ (CTO замерил прототипом 38 053 Б).
+- [ ] `build_gap` на 3008 маркерах → 3 записи (1500/1500/8), Σ count = 3008, `len(trace_ids) == count` у каждой.
+- [ ] 1000 IPC-записей в узел с паузой исполнителя (`latest` и `every`): `chain_queue.qsize() ≤ 2`, приёмник не блокируется.
 - [ ] Формула 4.7d (`every`, риг 4.7d-2 198/250/295) сходится в items с разностью 0.
 - [ ] **Стенд-гейт (P10 заново):** пауза исполнителя processor 10 с под `every`: у processor `errors_delivery_failed` Δ = 0 и `queue_data_evicted` Δ = 0 за дренаж; inspector/renderer `handled − own = Σ born(processor)` с разностью 0; ΔRSS processor ≤ 1 МиБ; дренаж ≤ 0.1 с; 2 прогона.
 **Out of scope:** `robot_control` (принимает `count` в 5.2); маркер у писателя; старение записей (5.2, решение 8 в 5.1).
@@ -183,6 +190,18 @@
 - [ ] **Стенд-гейт `multi_camera.yaml`, 30 с, 3 прогона:** чужих кадров 0 у обеих камер (пиксельная метка), `pacer_late` и stale_restore по каждой камере — числа; `queue_data_evicted = 0`; формула приёмки на узле за двумя камерами сходится.
 - [ ] Третья камера с `frame_ring_depth: 12` не меняет бюджет узлов за первыми двумя (`inflight_budget` тест есть; живьём — `chain_max_lag_items` узлов в `introspect.status`).
 **Out of scope:** аппаратные камеры (QR-прибор на триггере).
+
+### Task 5.9a — Валидатор моделирует проход ключа; рецепты получают провода (найдено в 5.0, решение 9 CTO)
+**Level:** Middle+ (Sonnet) · **Assignee:** developer, tester (слепой — по yaml и `check()`), reviewer · **Layer:** mixed
+**Goal:** `multi_camera.yaml` и `inspection_basic.yaml` стартуют; валидатор не требует, чтобы вход узла объявил непосредственный предшественник, если ключ доступен выше по цепочке.
+**Основание:** 5.0(г) — оба рецепта падают `SystemExit(1)` на `check()`. Разбор CTO ([`docs/reviews/2026-10-02_phase5-design-cto.md`](../../docs/reviews/2026-10-02_phase5-design-cto.md), решение 9): два дефекта. A (фреймворк): `validate_chain` (`port.py:210-231`) и `_is_covered_by_auto_wiring` (`blueprint.py:1006`) смотрят только предыдущий узел, а рантайм — dict, ключ живёт до перезаписи. B (прототип): у рецептов никогда не было `wires:` (в версии до `917ec7ed4` — тоже); `917ec7ed4` добавил только строку `color_mask → blob_detector`.
+**Files:** `multiprocess_framework/modules/process_module/plugins/port.py` (`validate_chain` → накопленная доступность: `wired_inputs процесса ∪ выходы предыдущих узлов`), `multiprocess_framework/modules/process_manager_module/topology/blueprint.py` (`_is_covered_by_auto_wiring` → та же функция), `multiprocess_prototype/backend/topology/multi_camera.yaml`, `inspection_basic.yaml` (секция `wires:` по образцу `inspection_full.yaml:171-198`), новый `multiprocess_framework/modules/process_module/tests/test_validate_chain_passthrough.py`, новый `multiprocess_prototype/backend/tests/test_topology_recipes_check.py` (все `backend/topology/*.yaml` без TEMPLATE/archive/tests → `check() == []`); строка-ссылка в `plans/pipeline-node-timing.md`.
+**Acceptance criteria:**
+- [ ] `check()` на `multi_camera.yaml` и `inspection_basic.yaml` → 0 ошибок; оба стартуют живьём 30 с (`sweep50.py` из `docs/audits/2026-10-02_transport-facts/`).
+- [ ] Инъекция «у `color_mask` убран выход `mask`» → ошибок 0 (`blob_detector.mask` optional); инъекция «у источника убран `frame`» → ошибка названа.
+- [ ] Страж по всем рецептам зелёный на HEAD и красный при удалении одного провода.
+**Out of scope:** вывод проводов из `chain_targets` (меняет вывод join-коллекторов, ADR-уровень); `dualcam_synth.yaml`.
+**Гейт-рецепт двух камер для 5.9 (OWNER-10, рекомендация CTO):** `scripts/capacity_bench/recipes/stand_dualcam.yaml` — закреплённая копия по конвенции `stand.yaml:1-4`: 2 синтетических источника 1080p → fan-in processor с `extras: {overflow: every}` → inspector → storage/gui; собирается из `multi_camera.yaml` после 5.9a. `dualcam_synth.yaml` не годится: нет fan-in узла.
 
 ### Task 5.10 — Одна дверь переполнения (Фаза 1 в сокращённой форме; условно)
 **Level:** Senior+ · **Assignee:** teamlead, tester, reviewer; ADR — tech-writer · **Layer:** framework
