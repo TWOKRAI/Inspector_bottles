@@ -6,11 +6,13 @@ Task 1.1 (plans/layer-render): вертикальный срез «конфиг 
 
 - `interfaces.py` — `SolidFill`, `ScrollingTile` (frozen dataclass; тайл валидируется в конструкторе).
 - `background.py` — `background_layers_from_config`, `fold_background`, `render_background`.
+- `compose.py`, `io.py` — Task 2.1: геометрия/композиция спрайта и Windows-safe `imread_unicode`/`imwrite_unicode` перенесены из `dataset_gen` дословно; старые пути — реэкспорт (тот же объект).
 - Подключено: `SceneCompositor(background_layers=...)`, ключ `background_layers` в `scene_source`.
 
 ## Тесты
 
 - `tests/test_acceptance_1_1_background_layers.py` — слепые (схема, слой импортов, рамка плана).
+- `tests/test_acceptance_2_1_compose_io.py` — слепые (идентичность `is`, `__module__`, отсутствие def в старом compose, слой импортов, хеш-пины поведения).
 - `tests/test_hazards_1_1_background.py` — автор: свёртка == общий путь == попиксельный оракул на случайных
   RGBA-стеках, альфа 0/255 точно, знак `scroll_px`, тайл выше кадра, неизменность входов, пустой стек.
 - Слепые тесты компоновщика и плагина лежат в `Services/line_sim/tests/` и `Plugins/sim/scene_source/tests/`

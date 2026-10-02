@@ -8,10 +8,16 @@
 | Имя | Что |
 |-----|-----|
 | `SolidFill(color_rgb)` | сплошная заливка, цвет **RGB** (не BGR), три целых 0..255 |
-| `ScrollingTile(image)` | тайл uint8 `(H, W, 3)` RGB или `(H, W, 4)` RGBA; едет по X, повторяется по ширине |
+| `ScrollingTile(image)` | тайл uint8 `(H, W, 3)` RGB или `(H, W, 4)` RGBA; едет по X, повторяется по ширине; хранит собственную **read-only копию** массива (правка исходника на кадр не влияет) |
 | `background_layers_from_config(items, load_image)` | YAML-список -> список слоёв; схему проверяет целиком до загрузки картинок |
 | `fold_background(layers)` | свёртка стека для скорости (см. ниже) |
 | `render_background(frame, layers, *, scroll_px, origin_xy, center_y)` | рисует стек в `frame` (HxWx3 RGB uint8) на месте |
+| `rotate_expand(sprite_rgba, angle_deg)`, `crop_to_alpha(sprite_rgba)`, `fit_longest_side(sprite, target_px)` | (`compose`, Task 2.1) геометрия спрайта: поворот CCW с расширением холста, обрезка по alpha > 0, масштаб длинной стороны |
+| `cast_contact_shadow(background_rgb, sprite_rgba, center_xy, opacity, blur_px, offset_xy)`, `composite(background_rgb, sprite_rgba, center_xy)` | (`compose`, Task 2.1) контактная тень и альфа-композиция спрайта на фон; обе возвращают копию, фон не меняют |
+| `imread_unicode(path, flags)`, `imwrite_unicode(path, image_bgr)` | (`io`, Task 2.1) чтение/запись изображений с non-ASCII путями (Windows-safe); `ValueError` при нечитаемом файле / сбое кодирования |
+
+Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
+`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`. Код функций перенесён без изменений.
 
 ## Схема YAML `background_layers`
 
@@ -48,7 +54,7 @@ CTO 2026-10-01 (`plans/layer-render/cto-verdict-2026-10-01.md`) фон пере�
 
 **Цена.** Замер 1440×1080: старый путь `background_tile` ≈ 8.8–9.1 мс, свёрнутый `[solid, RGBA-тайл]` ≈ 3.0–3.2 мс.
 Второй и следующие RGBA-тайлы идут общим путём «over»: смешивание идёт по строкам полосы тайла на всю ширину
-кадра, цена ∝ высоте тайла `th`. Замер (кадр шириной 1440): +28.6 мс на лишний RGBA-тайл при `th=484`,
+кадра, цена ∝ min(`th`, высота кадра). Замер (кадр шириной 1440): +28.6 мс на лишний RGBA-тайл при `th=484`,
 +65.8 мс при `th=1080`. Сегодня стенду нужен один тайл; ускорять — когда появится стек с двумя.
 
 ## Использование
