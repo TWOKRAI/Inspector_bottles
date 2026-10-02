@@ -1743,8 +1743,9 @@ class RouterManager(ChannelRoutingManager):
     def get_shm_stats(self) -> Dict[str, int]:
         """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
 
-        Те же семнадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои
-        восстановления, 4.5c), что телеметрия публикует в ``processes.<name>.state.shm``,
+        Восемнадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои восстановления, 4.5c,
+        + ``door_drops``, 4.7d-3; при ``overflow: every`` девятнадцатое — ``not_inspected_door``),
+        что телеметрия публикует в ``processes.<name>.state.shm``,
         но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
         ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
         dispatcher'ов), не читаются полные ``_stats``.
