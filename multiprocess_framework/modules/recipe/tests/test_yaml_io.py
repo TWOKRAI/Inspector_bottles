@@ -9,8 +9,10 @@ Home-тест generic-writer'а модуля `recipe` (C3, ADR-RCP-005). Пок�
 
 from __future__ import annotations
 
+import sys
 import textwrap
 
+import pytest
 import yaml
 
 from multiprocess_framework.modules.recipe.yaml_io import (
@@ -269,6 +271,10 @@ def test_update_yaml_preserving_serialization_failure_leaves_file_untouched(tmp_
     assert sorted(p.name for p in tmp_path.iterdir()) == ["r.yaml"]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="права файла POSIX: os.chmod на Windows отражает только бит read-only (0o644 и 0o640 дают 0o666)",
+)
 def test_update_yaml_preserving_keeps_file_mode(tmp_path):
     """mkstemp создаёт tmp с 0600 — после записи mode файла прежний (0644 и 0640)."""
     import os

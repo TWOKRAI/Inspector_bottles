@@ -29,9 +29,23 @@ import pytest
 
 from multiprocess_framework.modules.observability_declarations import declared_metrics
 
-#: Пять метрик, которые объявляет фреймворк (Task 0.1, Acceptance §3) — литерал
-#: из спеки задачи, а не значение, вычисленное тем же кодом, что проверяется.
-_EXPECTED_FRAMEWORK_METRICS = ("cycle_duration_ms", "effective_hz", "fps", "latency_ms", "shm")
+#: Десять метрик, которые объявляет фреймворк, — отсортированный литерал, а не значение,
+#: вычисленное тем же кодом, что проверяется. Пять исходных — Task 0.1, Acceptance §3.
+#: Пять добавлены Tasks 4.5a/b/d (30.09.2026): `cpu`, `plugin_ms` (6601abd2b),
+#: `queue_wait_ms`, `pacer_late` (2d66b285e), `transport_ms` (0cf9781cb); литерал не
+#: обновили — страж краснел на закрытии любой полной сессии (Task 5.5).
+_EXPECTED_FRAMEWORK_METRICS = (
+    "cpu",
+    "cycle_duration_ms",
+    "effective_hz",
+    "fps",
+    "latency_ms",
+    "pacer_late",
+    "plugin_ms",
+    "queue_wait_ms",
+    "shm",
+    "transport_ms",
+)
 
 
 @pytest.fixture(scope="session", autouse=True)

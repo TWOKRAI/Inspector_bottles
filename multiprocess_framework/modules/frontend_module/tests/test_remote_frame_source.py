@@ -282,6 +282,13 @@ def test_r2_external_reader_with_track_false_keeps_backend_segment_alive() -> No
             shm.close()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "хазард — эффект POSIX resource_tracker: SharedMemory регистрирует сегмент в нём только в ветке "
+        "_USE_POSIX (multiprocessing/shared_memory.py), на Windows сегмент живёт, пока открыт чей-то handle"
+    ),
+)
 def test_r2_control_external_reader_with_track_true_still_deletes_segment() -> None:
     """R2 (контроль, ожидаемо GREEN уже сейчас): track=True — прежнее поведение,
     хазард воспроизводится и ДО, и ПОСЛЕ фикса (внутри задачи не меняется)."""
