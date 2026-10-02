@@ -2,7 +2,7 @@
 date: 2026-10-02
 topic: prompt-audit и правка .claude (STE-80, последние модели, правила по пилотам v2/v3)
 machine: Windows
-branch: main (HEAD 6f88d6e3c), всё НЕ закоммичено
+branch: chore/claude-prompt-audit (worktree .claude/worktrees/prompt-audit), 4 коммита от main 6f88d6e3c, в main НЕ влито
 ---
 
 ## Session goal
@@ -36,12 +36,11 @@ branch: main (HEAD 6f88d6e3c), всё НЕ закоммичено
 3. Продуктовые дефекты из чата gui-service 1b.2d (не про `.claude`): утечка `user:pass@` в журнал при успешной записи (`registers_module/core/manager.py:222`, `process_module/plugins/base.py:1655`); откат отвергнутого значения не проверен в `camera_service/plugin.py:331,417` и `process_module/plugins/base.py:1420`.
 
 ## Next step
-Закоммитьте после явного «да» владельца. План коммитов (каждому нужны `Why:` и `Layer: infra`, пути добавлять явно, не `git add -A`):
-1. `chore(claude): правила и тексты — STE-80, стадия 0, метрика дозова, ложные факты` — `CLAUDE.md`, `.claude/CLAUDE.md`, `project-rules` и `team-protocol` (источник + зеркало), `dev.md`/`spec.md` (обе копии), `team.md`, `reviewer.md`, `pipeline.md`, `eval.md` (обе копии), `executor-brief.md`, `team-brief.md`, `FRAMEWORK_RULES_EXTRACT.md`, `OPEN_QUESTIONS.md`.
-2. `chore(claude): последние модели — линтер, тесты, шаблоны, sci-агенты, evals` — `lint_agents.py`, `test_lint_agents_models.py`, `_template.md`, `agent.template.md`, `lint-agents.md` (обе копии), 9 файлов `sci-*.md`, `evals/README.md`, `signal_noise.md`.
-3. `chore(claude): ponytail снова skills-only` — `enabled.yaml`, `plugin.json`, `settings.json`, `WIRING.ru.md`.
-4. `docs(claude): память — модели и явный model` — `feedback_always_latest_models.md`, `feedback_explicit_model_per_agent_role.md` + оба `MEMORY.md`; **плюс запись соседнего чата** `feedback_pydantic_assignment_keeps_rejected_value.md` (обе папки) — я обещал чату `inspector-bottles-00` взять её в свой коммит; отдельным пунктом в тексте.
-Этот handoff — в коммит 1 или отдельным `docs(handoffs)`.
+Влить ветку `chore/claude-prompt-audit` в `main` fast-forward (нужно «да» владельца; SHA соседям заранее).
+Коммиты ветки: `a7eec31e5` правила и тексты, `7732d5b48` модели и линтер, `c20d36d0f` ponytail, `922804347` память (включая записи соседних чатов: pydantic и qex runbook), плюс коммит этого handoff.
+Порядок слияния в корне: 1) убедиться, что 54 файла в корне идентичны ветке (`git diff chore/claude-prompt-audit -- <пути>` пуст, untracked-файлы сравнить через `git show`);
+2) убрать дубликаты в корне (`git restore` для изменённых, `rm` для untracked: они уже в ветке); 3) `git merge --ff-only chore/claude-prompt-audit`;
+4) `git worktree remove .claude/worktrees/prompt-audit` и удалить ветку. До слияния корень остаётся «грязным» теми же файлами, поэтому новые чаты в корне видят новые правила.
 
 ## Агенты (дозывать только по agentId)
 | Роль | agentId | Модель | Замечание |
@@ -55,7 +54,8 @@ branch: main (HEAD 6f88d6e3c), всё НЕ закоммичено
 - **ponytail остаётся активным только в сессиях, начатых до правки;** новые чаты запускаются уже без него. Проверка: в начале сессии не должно быть `PONYTAIL MODE ACTIVE`. Если появится — композер вернул хук: открыть `settings.json`/`plugin.json`.
 - Не запускать `claude-kit upgrade` / `claude-kit sync` не сверив `dev.md` и `plugin.json` ponytail.
 - Независимый tester на эти правки не запускался; проверка — только тесты линтера (48), `validate.py`, `lint_agents.py` и ревью Fable.
-- Незакоммиченные: 45 изменённых файлов + 4 новых memory-файла в `.claude/memory/` и `docs/claude/memory/` (+ `feedback_qex_full_rebuild_runbook.md` — не мой).
+- Корень (`main`) пока «грязный» теми же файлами, что в ветке; `.claude/settings.local.json` скрыт `skip-worktree` (локальная правка памяти Windows, в коммиты не идёт).
+- `docs/claude/memory/feedback_qex_full_rebuild_runbook.md` — не мой, содержимое не проверял; взят в коммит памяти, чтобы ссылки индекса не повисли.
 
 ## Files changed
-`git status`: 45 изменённых (+407/−184) и `??` memory-файлы; полный список — `git diff HEAD --stat`.
+См. `git log --stat main..chore/claude-prompt-audit`: 5 коммитов, ~60 файлов (инструкции, линтер и тесты, ponytail, память, этот handoff).
