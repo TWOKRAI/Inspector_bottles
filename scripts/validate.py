@@ -246,6 +246,35 @@ def check_adr_sync() -> None:
         errors.append(msg)
 
 
+def check_plans_progress() -> None:
+    check_header("7. Проверка планов (scripts/plans_progress --check --baseline)")
+    script = Path(__file__).parent / "plans_progress" / "plans_progress.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--root",
+            str(BASE),
+            "--check",
+            "--baseline",
+            str(BASE / "plans" / "queue" / "progress-baseline.txt"),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(BASE),
+    )
+    if result.returncode == 0:
+        print("  [OK] планы: новых блокирующих находок нет")
+    else:
+        msg = "  [FAIL] планы: новая блокирующая находка или проверка не запустилась"
+        print(msg)
+        for line in (result.stdout + result.stderr).splitlines():
+            if " blocking " in line or line.startswith(("Итог", "ошибка")):
+                print(f"    {line}")
+        errors.append(msg)
+
+
 def main() -> int:
     print("\nMULTIPROCESS FRAMEWORK — Валидация")
     print(f"Base: {BASE}")
@@ -258,6 +287,7 @@ def main() -> int:
     check_readme_files()
     check_services()
     check_adr_sync()
+    check_plans_progress()
 
     print(f"\n{'=' * 60}")
     print("  ИТОГ")

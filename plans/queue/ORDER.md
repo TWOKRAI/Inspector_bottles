@@ -231,3 +231,70 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | О-7 | `data/devices.yaml`: удалять (device-tree Фаза E) или хранить там состояние v2 | Р7 | хранить; Фазу E сузить |
 | О-8 | Перенос ~25 закрытых планов в `_archive/` (расширение №9); ссылки чинить скриптом | нет, гигиена | да, одним коммитом через `plans_ledger.py close` |
 | О-9 | Поправить корневой `CLAUDE.md`: Ultralytics не установлен и не в `pyproject.toml` | нет | да |
+
+## Прогресс планов (генерирует скрипт)
+
+Блок между маркерами пишет только `python scripts/plans_progress/plans_progress.py --sync-order` (лид, в `main`, в точке слияния); руками не править. На `main` `--check` краснеет, если блок устарел.
+
+<!-- progress:begin -->
+- robot-protocol-v2 — 5 из 21 · 24%
+- line-sim-layer-editor — 0 из 9 · 0%
+- line-sim — 24 из 28 · 86%
+- gui-constructor — 0 из 21 · 0%
+- 2026-09-22_gui-service — 10 из 21 · 48%
+- frontend-constructor — 0 из 24 · 0%
+- transport-single-policy — 1 из 31 · 3%
+- pipeline-node-timing — 0 из 4 · 0%
+- observability-closure — 26 из 52 · 50%
+- lifecycle-stop-ownership — 6 из 9 · 67%
+- backend-ctl-review-remediation — 0 из 16 · 0%
+- otel-export — 9 из 21 · 43%
+- framework-architecture-rework — 0 из 11 · 0%
+- dataset-annotation — 0 из 17 · 0%
+- code-reader-sdk — 2 из 3 · 67%
+- layer-render — 5 из 20 · 25%
+- letters-retrain — 2 из 3 · 67%
+- qr-code-reader — 0 из 19 · 0%
+- robot-place-pose — 0 из 0
+- robot-calibration — 0 из 0
+- camera-robot-calibration — 0 из 0
+- device-tree-recipe — 0 из 0
+- word-layout — 0 из 0
+- storage-stack-embedded-first — 0 из 11 · 0%
+- 2026-07-06_constructor-master — 0 из 0
+- lifecycle-graceful-stop — 1 из 2 · 50%
+- observability-roadmap — 0 из 0
+- observability-unified-routing — 21 из 32 · 66%
+- observability-review-remediation — 7 из 20 · 35%
+- observability-f1-hardening — 0 из 16 · 0%
+- observation-port — 22 из 24 · 92%
+- observability-dx — 0 из 0
+- telemetry-stage6 — 11 из 13 · 85%
+- telemetry-coherence-remediation — 11 из 12 · 92%
+- telemetry-dashboard — 6 из 6 · 100%
+- telemetry-publish-control — 10 из 10 · 100%
+- telemetry-delivery-simplification — 2 из 6 · 33%
+- telemetry-pull-on-demand — 0 из 0
+- gui-telemetry-read-model — 11 из 11 · 100%
+- truth-holes-closure — 14 из 15 · 93%
+- backend-ctl-proof-discipline — 8 из 16 · 50%
+- supervisor-alerting — 0 из 0
+- supervisor-backoff-jitter — 0 из 0
+- supervisor-strategies — 0 из 0
+- depends-on-readiness — 0 из 0
+- framework-layer-grouping — 0 из 0
+- 2026-06-05_sql-insert-many-atomic — 0 из 5 · 0%
+- 2026-05-29_constructor-maturity — 0 из 1 · 0%
+- current-path — 0 из 0
+- pipeline-color-inspection — 0 из 0
+- proto-frontend-carve — 0 из 6 · 0%
+- pult-control-panel — 0 из 0
+- line-sim-belt-look — 0 из 3 · 0%
+- sim-lateral-offset — 1 из 1 · 100%
+- undo-restores-selection — 1 из 1 · 100%
+- letter-robot-cycle — 0 из 6 · 0%
+- draw-mode-rework — 0 из 0
+- dataset-circle-capture — 0 из 0
+- 2026-10-02_plans-progress-dashboard — 4 из 10 · 40%
+в архиве: 86
+<!-- progress:end -->

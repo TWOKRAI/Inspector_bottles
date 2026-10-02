@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import subprocess
 import sys
@@ -814,8 +815,100 @@ def load_baseline(path: Path) -> set[str]:
     return keys
 
 
-def run_check(plans: list[Plan], baseline: set[str], out) -> int:
-    findings = build_findings(plans)
+# ----------------------------------------------------------------------------- блок прогресса в ORDER.md
+
+BEGIN_MARK = "<!-- progress:begin -->"
+END_MARK = "<!-- progress:end -->"
+
+
+def block_lines(live: list[Plan], archive: list[Plan]) -> list[str]:
+    """Строки блока: по строке на живой план (порядок страницы) и счётчик архива. Шкала — та же `_tally`."""
+    return [f"- {p.name} — {_tally(p.done, p.total)}" for p in live] + [f"в архиве: {len(archive)}"]
+
+
+def locate_block(lines: list[str]) -> tuple[int, int] | str:
+    """Индексы строк маркеров (begin, end) или текст ошибки. Маркер — строка целиком (пробелы по краям не в счёт)."""
+    marks = [(i, ln.strip()) for i, ln in enumerate(lines) if ln.strip() in (BEGIN_MARK, END_MARK)]
+    kinds = [m[1] for m in marks]
+    if kinds == [BEGIN_MARK, END_MARK]:
+        return marks[0][0], marks[1][0]
+    return (
+        f"нужна ровно одна пара маркеров {BEGIN_MARK} / {END_MARK} отдельными строками, "
+        f"найдено: progress:begin {kinds.count(BEGIN_MARK)}, progress:end {kinds.count(END_MARK)}"
+        + ("" if sorted(kinds) != [BEGIN_MARK, END_MARK] else "; progress:end стоит раньше progress:begin")
+    )
+
+
+def _decode(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def sync_order(order: Path, live: list[Plan], archive: list[Plan]) -> tuple[int, str]:
+    """Переписывает только строки между маркерами; остальные байты (и EOL файла) не трогает.
+
+    Возвращает (код, сообщение): 0 — готово или уже актуально, 2 — файла или маркеров нет, файл не менялся.
+    """
+    if not order.is_file():
+        return 2, f"ошибка --sync-order: нет файла ORDER: {order}"
+    raw = order.read_bytes()
+    text = _decode(raw)
+    lines = text.split("\n")
+    found = locate_block(lines)
+    if isinstance(found, str):
+        return 2, f"ошибка --sync-order: {order}: {found}"
+    begin, end = found
+    eol_tail = "\r" if "\r\n" in text else ""
+    new_lines = lines[: begin + 1] + [ln + eol_tail for ln in block_lines(live, archive)] + lines[end:]
+    new_text = "\n".join(new_lines)
+    if new_text == text:
+        return 0, f"ORDER уже актуален: {order}"
+    order.write_bytes(new_text.encode("utf-8", errors="surrogateescape"))
+    return 0, f"ORDER обновлён: {order}"
+
+
+def on_main_branch(root: Path) -> bool:
+    """`main` только если root — корень git-репозитория (вложенный в чужой репозиторий корень — не main)."""
+
+    def git(*args: str) -> str | None:
+        try:
+            cp = subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return cp.stdout.strip() if cp.returncode == 0 else None
+
+    top, branch = git("rev-parse", "--show-toplevel"), git("rev-parse", "--abbrev-ref", "HEAD")
+    if not top or branch != "main":
+        return False
+    try:
+        return os.path.samefile(top, root)
+    except OSError:
+        return False
+
+
+def order_block_findings(order: Path, live: list[Plan], archive: list[Plan], root: Path) -> list[Finding]:
+    """Дрейф блока: проверяется только на `main`, в ветках, detached HEAD и вне git — нет."""
+    if not order.is_file() or not on_main_branch(root):
+        return []
+    lines = _decode(order.read_bytes()).split("\n")
+    found = locate_block(lines)
+    if isinstance(found, str):
+        return [Finding("ORDER_BLOCK_MISSING", order.name, None, True, f"нет блока прогресса: {found}")]
+    body = [ln.rstrip("\r") for ln in lines[found[0] + 1 : found[1]]]
+    if body != block_lines(live, archive):
+        return [
+            Finding(
+                "ORDER_BLOCK_STALE",
+                order.name,
+                None,
+                True,
+                "блок прогресса устарел: python scripts/plans_progress/plans_progress.py --sync-order",
+            )
+        ]
+    return []
+
+
+def run_check(plans: list[Plan], baseline: set[str], out, extra: list[Finding] | None = None) -> int:
+    findings = build_findings(plans) + list(extra or [])
     checked = sum(1 for p in plans if not p.archived)
     new_blocking = 0
     blocking = 0
@@ -1042,6 +1135,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--check", action="store_true", help="линт; exit 1 при блокирующей находке вне базы")
     ap.add_argument("--baseline", type=Path, default=None, help="файл известных блокирующих находок")
+    ap.add_argument("--sync-order", action="store_true", help="переписать блок прогресса между маркерами в ORDER.md")
     return ap
 
 
@@ -1072,6 +1166,11 @@ def main(argv: list[str] | None = None) -> int:
     ordered = live + archive
     code = 0
 
+    if args.sync_order:
+        code, message = sync_order(order_path, live, archive)
+        print(message, file=sys.stderr if (args.json or code) else sys.stdout)
+        if code:
+            return code
     if args.json:
         print(to_json(ordered))
     if args.html is not None:
@@ -1081,8 +1180,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
         baseline = load_baseline(args.baseline) if args.baseline else set()
-        code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout)
-    if not (args.json or args.html is not None or args.check):
+        extra = order_block_findings(order_path, live, archive, root)
+        code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout, extra)
+    if not (args.json or args.html is not None or args.check or args.sync_order):
         for p in ordered:
             tag = "архив" if p.archived else (p.tier or "—")
             print(f"{p.name:48} {tag:6} {_tally(p.done, p.total)}")

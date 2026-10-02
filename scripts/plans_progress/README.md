@@ -19,6 +19,7 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 | `--html [PATH]` | страница без внешних ресурсов; по умолчанию `data/plans_progress.html` |
 | `--check` | печатает находки линта; exit 1 при новой блокирующей находке |
 | `--baseline PATH` | известные блокирующие находки (`<план>:<КОД>[:<id>]`); из базы не блокируют |
+| `--sync-order` | переписать блок прогресса между `<!-- progress:begin -->` и `<!-- progress:end -->` в `ORDER.md`; вне блока байты и EOL не меняются; нет файла или маркеров — exit 2, файл не трогается |
 
 Без флагов печатает сводную таблицу.
 
@@ -41,6 +42,9 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 Находки: `NO_TASKS` и `UNKNOWN_STATUS` блокируют только для планов §4.1 `ORDER.md`; `DUP_ID` блокирует всегда;
 `UNCLOSED_FENCE` (нечётное число ограждений кода) блокирует так же, как `NO_TASKS`, — только для §4.1;
 `DUP_HEADING`, `STATUS_CONFLICT`, `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
+`ORDER_BLOCK_STALE` (блок устарел) и `ORDER_BLOCK_MISSING` (нет пары маркеров) блокируют, но только на ветке `main`
+в корне git-репозитория (`--root` равен `git rev-parse --show-toplevel`); в ветках, при detached HEAD, вне git и в корне,
+вложенном в чужой репозиторий, блок не проверяется. Писатель блока — лид в `main`, в точке слияния.
 `--check` без `plans/`, без живых планов или с отсутствующим `--baseline` завершается кодом 2.
 Архивные планы линт не смотрит.
 
