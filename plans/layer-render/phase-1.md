@@ -176,3 +176,59 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 - [ ] A10 (лид): `python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png --out data/line_sim/belt_tile.png --force-period --gap-alpha` — `period_px` в отчёте.
 
 **Out of scope:** `_background_only_frame` `scene_source` (сплошная заливка остаётся); фон в пресете (Ф3); правки `dataset_gen`.
+
+---
+
+### Task 1.4 — фильтр площади в `gap_alpha_mask`: убрать «перец» плитки
+
+- **Статус:** [PENDING] волна 3 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (dev-effects после 2.2) → инъекции лида → reviewer
+- **Module contract:** public-api-change (новый keyword `min_area` у `gap_alpha_mask`, флаг CLI `--gap-min-area`)
+- **CHAIN:** `tester`(RED, worktree до кода) → `developer`(GREEN) → инъекции лида → `reviewer`
+- **Dependencies:** 1.2 (DONE)
+- **Gate:** RED тестера → GREEN; тесты 1.2 зелёные без правки; инъекции записаны; `reviewer` APPROVED по SHA
+
+**Почему.** Стенд волны 2: на звеньях чёрные крапинки. Замер лида 2026-10-02 на `data/line_sim/belt_tile.png`
+(RGBA 410×484, альфа = маска 1.2), 8-связность: прозрачных 1735 px в 537 компонентах; компонент < 8 px — 523
+(655 px), ≥ 8 px — 14 (1080 px). Между 7 px и 12 px в распределении нет ни одной компоненты — естественный разрыв,
+порог 8 стоит в нём.
+
+**Goal:** `gap_alpha_mask` отбрасывает прозрачные связные компоненты (8-связность) площадью меньше `min_area` px —
+они становятся непрозрачными (255); инструмент по умолчанию фильтрует с порогом 8.
+
+**Files:**
+1. `Services/line_sim/tools/make_seamless_texture.py` — keyword `min_area: int = 0` у `gap_alpha_mask` (`:241-260`);
+   константа `_GAP_MIN_AREA = 8` рядом с `_GAP_HUE`/`_GAP_SAT_MIN`; флаг `--gap-min-area N` с той же проверкой, что у
+   `--gap-sat-min` (`:353-369`: только вместе с `--gap-alpha`, целое ≥ 0, иначе `parser.error` с именем флага)
+2. `Services/line_sim/README.md` — раздел инструмента: флаг, порог 8 и замер выше
+- тесты тестера: `Services/line_sim/tests/test_acceptance_layer_render_1_4_gap_min_area.py`
+
+**DESIGN:**
+- Фильтр — один вызов `cv2.connectedComponentsWithStats((alpha == 0).astype(np.uint8), connectivity=8)`; компоненты с
+  `CC_STAT_AREA < min_area` → 255. Применяется **после** обнуления зон бортов (борта и так 255 — порядок не меняет
+  результат, но площадь считается уже без них).
+- Дефолт **функции** — `min_area=0` = фильтр выключен, выход побайтно прежний: на этом стоит тест 1.2
+  `test_hazards_gap_alpha.py:96` (однопиксельный просвет без нового параметра). Дефолт **CLI** — `_GAP_MIN_AREA = 8`:
+  это продуктовая починка, она приходит из инструмента.
+- Фильтр трогает только альфу: RGB выхода с `--gap-alpha` побайтно тот же, что без фильтра.
+- Обратная операция (закрыть непрозрачные точки внутри просвета) — не делается.
+
+**Acceptance:**
+- [ ] A1. `min_area=0` и отсутствие keyword — выход побайтно равен выходу до задачи (литералы тестера на синтетическом
+      тайле, снятые на коде до задачи); тесты 1.2 (`test_acceptance_layer_render_1_2_gap_alpha.py`,
+      `test_hazards_gap_alpha.py`) — зелёные без правки.
+- [ ] A2. Синтетический тайл с прозрачными компонентами площадью 1, 3, 7, 8, 20 px и `min_area=8`: компоненты 1/3/7 →
+      255, 8 и 20 — 0 попиксельно как без фильтра.
+- [ ] A3. 8-связность: два прозрачных пикселя, касающиеся только углом, — одна компонента площади 2 (при `min_area=3`
+      оба → 255, при `min_area=2` оба остаются 0); четыре таких пикселя по диагонали — одна компонента площади 4.
+- [ ] A4. Строки бортов (`rails_px`) — 255 при любом `min_area`; вход не мутирован; выход `uint8 (H, W)` ∈ {0, 255}.
+- [ ] A5. CLI: `--gap-alpha` без `--gap-min-area` = порог 8 (проверка на синтетическом фото: компонента 3 px исчезает,
+      8 px остаётся); `--gap-min-area 0` = выход как до задачи; `--gap-min-area` без `--gap-alpha`, `-1`, `abc` →
+      `SystemExit` с именем флага в stderr. RGB-каналы PNG с фильтром и без — побайтно равны.
+- [ ] A6 (лид, реальные данные вне git): `python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png
+      --out <tmp>/belt_tile.png --force-period --gap-alpha` → компонент < 8 px = 0; прозрачных компонент 14 ± 0 и
+      px 1080 ± 0 (замер выше); покрытие видимого стола — новое число рядом с прежним 72.4 %.
+- [ ] A7 (лид, стенд): стенд на плитке A6; на точном рендере (без JPEG) число тёмных (V < 10) связных пятен < 8 px
+      в полосе ленты — до и после числом (ожидание: после = 0); снимок кадра до/после в отчёт лида.
+
+**Out of scope:** сглаживание края маски; закрытие непрозрачных точек в просветах; смена правила H∧S и его порогов;
+код сима и `layer_render`.
