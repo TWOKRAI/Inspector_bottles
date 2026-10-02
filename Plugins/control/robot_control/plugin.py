@@ -39,6 +39,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.process_module.plugins import Port
 from multiprocess_framework.modules.process_module.plugins import register_plugin
+from multiprocess_framework.modules.router_module.middleware.not_inspected_marker import is_marker
 from Services.documents.interfaces import KIND_VERDICT
 
 from .registers import RobotControlRegisters
@@ -58,6 +59,8 @@ class RobotControlPlugin(ProcessModulePlugin):
 
     name = "robot_control"
     category = "processing"
+    # Task 4.7d-4: плагин принимает маркер not_inspected (проверка портов маркера — 4.7d-2).
+    accepts_markers = True
 
     inputs = [
         Port(
@@ -105,6 +108,8 @@ class RobotControlPlugin(ProcessModulePlugin):
         # Счётчики статистики (не в register — runtime-only)
         self._total_inspected: int = 0
         self._total_rejected: int = 0
+        # Task 4.7d-4: маркеры not_inspected — отдельный счёт, в total_inspected не входят.
+        self._total_not_inspected: int = 0
 
         # Ф8.7 — вердикты. `_rejecting` держит ФРОНТ решения: документ пишется
         # на переходе pass→reject, а не на каждом кадре брака (см. _write_verdict).
@@ -133,6 +138,13 @@ class RobotControlPlugin(ProcessModulePlugin):
         5. Если есть дефекты → reject + задержка
         6. Запись inspection_result в item
         """
+        # Task 4.7d-4: маркер переполнения — ПЕРВАЯ ветка, до счётчика осмотренных.
+        # Это не кадр, а «кадр не проверен»: total_inspected, _total_rejected, вердикт-
+        # документы и фронт _rejecting в любом режиме не трогаем (иначе маркер посреди
+        # серии брака сбросил бы фронт, и следующий кадр дал бы второй вердикт).
+        if is_marker(item):
+            return self._process_marker(item)
+
         self._total_inspected += 1
 
         # Плагин отключён — всегда пропускаем
@@ -206,6 +218,22 @@ class RobotControlPlugin(ProcessModulePlugin):
         if front:
             self._dump_flight(item, defects)
 
+        return item
+
+    def _process_marker(self, item: dict) -> dict:
+        """Решение по маркеру not_inspected: политика «непроверенное = брак» (по умолчанию reject)."""
+        self._total_not_inspected += 1
+        origin = {"origin": item.get("reason"), "source": item.get("source")}
+        if not self._reg.enabled:
+            result = {"action": "pass", "reason": "disabled", **origin}
+        else:
+            result = {"action": self._reg.not_inspected_action, "reason": "not_inspected", **origin}
+            # Задержка — как у обычного брака (синхронизация с механизмом); pass-маркеру её нет.
+            if result["action"] == "reject" and self._reg.reject_delay_ms > 0:
+                time.sleep(self._reg.reject_delay_ms / 1000.0)
+        item["inspection_result"] = result
+        # Одна широкая запись на исход (учёт по trace_id, 4.7d-5); не решающая — вердикта нет.
+        self._write_unit_event(item, result, [], decisive=False)
         return item
 
     # --- Дамп кольца записей (Ф5, задача 5.1) ---
@@ -381,6 +409,7 @@ class RobotControlPlugin(ProcessModulePlugin):
         """
         self._total_inspected = 0
         self._total_rejected = 0
+        self._total_not_inspected = 0
         self._verdicts_written = 0
         self._verdicts_unwritten = 0
         self._ctx.log_info("RobotControlPlugin: счётчики сброшены")
@@ -400,6 +429,7 @@ class RobotControlPlugin(ProcessModulePlugin):
             "total_inspected": self._total_inspected,
             "total_rejected": self._total_rejected,
             "reject_rate": round(rate, 4),
+            "total_not_inspected": self._total_not_inspected,
             "verdicts_written": self._verdicts_written,
             "verdicts_unwritten": self._verdicts_unwritten,
         }

@@ -6,7 +6,7 @@ Plugin всегда работает через self._reg (managed или лок
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from multiprocess_framework.modules.process_module.plugins import register_schema
 from multiprocess_framework.modules.process_module.plugins import FieldMeta
@@ -18,24 +18,51 @@ class RobotControlRegisters(SchemaBase):
     """Все параметры robot_control — управление отбраковкой."""
 
     # Флаг включения отбраковки
-    enabled: Annotated[bool, FieldMeta(
-        "Enabled", info="Включена ли отбраковка",
-    )] = True
+    enabled: Annotated[
+        bool,
+        FieldMeta(
+            "Enabled",
+            info="Включена ли отбраковка",
+        ),
+    ] = True
 
     # Минимальная площадь дефекта для reject
-    min_defect_area: Annotated[int, FieldMeta(
-        "Min Defect Area", info="Минимальная площадь дефекта для reject (пикселей)",
-        min=0, unit="px²",
-    )] = 500
+    min_defect_area: Annotated[
+        int,
+        FieldMeta(
+            "Min Defect Area",
+            info="Минимальная площадь дефекта для reject (пикселей)",
+            min=0,
+            unit="px²",
+        ),
+    ] = 500
 
     # Задержка отбраковки
-    reject_delay_ms: Annotated[int, FieldMeta(
-        "Reject Delay", info="Задержка отбраковки", unit="ms",
-        min=0,
-    )] = 0
+    reject_delay_ms: Annotated[
+        int,
+        FieldMeta(
+            "Reject Delay",
+            info="Задержка отбраковки",
+            unit="ms",
+            min=0,
+        ),
+    ] = 0
+
+    # Реакция на маркер not_inspected (Task 4.7d-4): кадр не проверен, а не «годен»
+    not_inspected_action: Annotated[
+        Literal["reject", "pass"],
+        FieldMeta(
+            "Not Inspected Action",
+            info="Реакция на маркер not_inspected (кадр не проверен): reject — отбраковать, pass — пропустить",
+        ),
+    ] = "reject"
 
     # Максимум детекций для reject (0 = любое количество)
-    max_detections_for_reject: Annotated[int, FieldMeta(
-        "Max Detections For Reject", info="Максимум детекций для reject (0 = любое количество)",
-        min=0,
-    )] = 0
+    max_detections_for_reject: Annotated[
+        int,
+        FieldMeta(
+            "Max Detections For Reject",
+            info="Максимум детекций для reject (0 = любое количество)",
+            min=0,
+        ),
+    ] = 0
