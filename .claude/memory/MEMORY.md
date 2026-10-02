@@ -81,3 +81,4 @@ _(empty)_
 - [line_sim stand: preset.commit from a worktree](feedback_line_sim_stand_preset_from_worktree.md) — temp .yaml + catalog beside it; revert via sed, restore CRLF
 - [cv_threads: OpenCV pool per process](feedback_cv_threads_tuning.md) — tune per recipe by measurement; default 2, not our workers
 - [Fake without the attribute the rule reads](feedback_fake_missing_attribute_vacuous_test.md) — earlier branch rejects it, test green for the wrong reason; assert the reason
+- [protect-branch блокирует коммиты субагентов в worktree](feedback_protect_branch_blocks_worktree_subagents.md) — стейдж + файл сообщения, коммитит лид

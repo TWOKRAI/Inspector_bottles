@@ -112,3 +112,4 @@
 - [Железо владельца и роли машин](project_hardware_roles_2026_09_23.md) — RTX 3050 4 ГБ = симулятор, Orin NX 16 = линия
 - [Широкий except в кадровом цикле прячет мёртвый механизм](feedback_broad_except_in_frame_loop_hides_dead_mechanism.md) — лента едет, объектов нет, тесты зелёные
 - [Bash heredoc схлопывает `\\`](feedback_bash_heredoc_collapses_backslashes.md) — такие файлы через Write · [ctypes setattr по чужому имени молчит](feedback_ctypes_setattr_unknown_field_is_silent.md) — проверять _fields_
+- [protect-branch блокирует коммиты субагентов в worktree](feedback_protect_branch_blocks_worktree_subagents.md) — стейдж + файл сообщения, коммитит лид
