@@ -87,8 +87,8 @@ _log = logging.getLogger(__name__)
 #   choices_map     — поиск по value.upper() (НЕ casefold), промах = отказ, значение → каноничное
 #   le_field        — значение ≤ значения названного поля; None с любой стороны = пропуск
 #                     (исполняется в SchemaBase._check_field_constraints — межполевое)
-# Тексты отказа НИКОГДА не содержат введённое значение: отказ уезжает в журнал, а в
-# headers лежат секреты.
+# Тексты отказа не печатают введённое значение: отказ уезжает в журнал, а в headers лежат
+# секреты. Ключ словаря (value_pattern) печатается — он тоже часть ввода, принято спекой.
 RULE_KEYS: frozenset[str] = frozenset(
     {"strip", "pattern", "pattern_message", "value_pattern", "choices_map", "le_field"}
 )
