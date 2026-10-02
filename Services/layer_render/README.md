@@ -15,6 +15,11 @@
 | `rotate_expand(sprite_rgba, angle_deg)`, `crop_to_alpha(sprite_rgba)`, `fit_longest_side(sprite, target_px)` | (`compose`, Task 2.1) геометрия спрайта: поворот CCW с расширением холста, обрезка по alpha > 0, масштаб длинной стороны |
 | `cast_contact_shadow(background_rgb, sprite_rgba, center_xy, opacity, blur_px, offset_xy)`, `composite(background_rgb, sprite_rgba, center_xy)` | (`compose`, Task 2.1) контактная тень и альфа-композиция спрайта на фон; обе возвращают копию, фон не меняют |
 | `imread_unicode(path, flags)`, `imwrite_unicode(path, image_bgr)` | (`io`, Task 2.1) чтение/запись изображений с non-ASCII путями (Windows-safe); `ValueError` при нечитаемом файле / сбое кодирования |
+| `side_from_radius(radius, radius_scale, margin_px)` | (`crop`, Task 6.1) сторона квадрата: `max(2, int(round(2·r·scale)) + 2·int(margin))` |
+| `square_crop(frame, cx, cy, side, oob, pad_value=(0,0,0))` | (`crop`, Task 6.1) квадрат `side`×`side`, угол `(cx - side//2, cy - side//2)`; **всегда копия**, не view кадра. `oob` у границы: `drop` -> `None`; `pad` -> холст `pad_value`; `clamp` -> обрезка по кадру (нет пересечения -> `None`); `replicate` -> репликация края (нет пересечения -> `ValueError`). Неизвестный `oob` -> `ValueError` |
+| `resize_square(crop, out)` | (`crop`, Task 6.1) ресайз к `out`×`out`: `out <= 0` или уже готово -> тот же объект; иначе INTER_AREA при `crop.shape[0] > out`, INTER_LINEAR иначе |
+
+Карта зоны выреза: `docs/maps/crop.md`.
 
 Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
 `Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`. Код функций перенесён без изменений.
