@@ -15,9 +15,13 @@
 | `rotate_expand(sprite_rgba, angle_deg)`, `crop_to_alpha(sprite_rgba)`, `fit_longest_side(sprite, target_px)` | (`compose`, Task 2.1) геометрия спрайта: поворот CCW с расширением холста, обрезка по alpha > 0, масштаб длинной стороны |
 | `cast_contact_shadow(background_rgb, sprite_rgba, center_xy, opacity, blur_px, offset_xy)`, `composite(background_rgb, sprite_rgba, center_xy)` | (`compose`, Task 2.1) контактная тень и альфа-композиция спрайта на фон; обе возвращают копию, фон не меняют |
 | `imread_unicode(path, flags)`, `imwrite_unicode(path, image_bgr)` | (`io`, Task 2.1) чтение/запись изображений с non-ASCII путями (Windows-safe); `ValueError` при нечитаемом файле / сбое кодирования |
+| `EFFECTS`, `EFFECT_PARAMS` | (`effects`, Task 2.2) упорядоченный реестр фотометрических эффектов `name -> fn(x_float32, params, rng) -> x` (кроме `jpeg`: он принимает и возвращает uint8; `apply_effects` сам делает clip→uint8 и обратно) (12 шт., порядок вставки = порядок прохода: блик, тень, окклюзия, расфокус, смаз, виньетка, яркость/контраст, gamma, температура, сдвиг каналов, шум, JPEG) и литералы дефолтов параметров |
+| `EffectSpec(name, prob=1.0, params={})` | (`effects`) шаг списка; `ValueError` на неизвестное имя / ключ параметра / prob вне 0..1; `params` — глубокая копия под `MappingProxyType` (read-only только верхний уровень, вложенные списки изменяемы), недостающие ключи из `EFFECT_PARAMS`; сравнение по идентичности |
+| `apply_effects(frame_u8, specs, rng)` | (`effects`) прогон списка по порядку; вентиль `rng.random() < prob` тянется всегда; пустой список — копия кадра без розыгрышей; вход не меняется |
+| `apply_glare`, `apply_shadow`, `apply_occlusion`, `apply_motion_blur`, `make_motion_kernel`, `apply_vignette`, `apply_brightness_contrast`, `apply_gamma`, `apply_color_temperature`, `apply_channel_shift`, `apply_jpeg` | (`effects`, Task 2.2) функции эффектов, перенесены из `dataset_gen.core.augment` без изменений |
 
 Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
-`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`. Код функций перенесён без изменений.
+`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций). Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.
 
 ## Схема YAML `background_layers`
 
@@ -61,3 +65,12 @@ CTO 2026-10-01 (`plans/layer-render/cto-verdict-2026-10-01.md`) фон пере�
 
 `SceneCompositor(background_layers=...)` (`Services/line_sim`) и ключ `background_layers` плагина `scene_source`.
 Миграция (layer-render 1.3): параметр компоновщика `background_tile` и ключ плагина `background_texture` удалены (ключ в конфиге — `ValueError`); вместо них `background_layers: [{solid: [R, G, B]}, {tile: <путь>}]`.
+
+## Как добавить эффект
+
+1. Функция `apply_<имя>(frame, ...)` в `effects.py` (float32 0–255 на входе и выходе; кодек-эффекту нужен uint8 — добавить имя в `_U8_EFFECTS`).
+2. Запись в `EFFECTS` — функция-шаг `(x, params, rng) -> x` без вентиля вероятности, значения тянет из `rng` в фиксированном порядке; место записи в словаре = место в проходе.
+3. Запись в `EFFECT_PARAMS` — дефолты параметров литералами (без `enabled`/`prob`); `layer_render` не импортирует `dataset_gen`, равенство полям `AugmentConfig` держит `test_a4_*`.
+4. Мост `augment_config_to_effects` (`dataset_gen/core/augment.py`) делает `getattr(cfg, имя)` для КАЖДОГО ключа `EFFECTS`: каждый ключ `EFFECTS` обязан быть полем `AugmentConfig` — добавить поле `*Aug` в `dataset_gen/core/config.py` и литерал в `test_a4_*` (`test_augment_equivalence.py`). Иначе `apply_photometric(frame, AugmentConfig(), rng)` падает с `AttributeError`. (Учесть в 4.1 и Ф3.)
+
+`EFFECTS` и `EFFECT_PARAMS` — точка расширения на этапе импорта; во время работы их менять нельзя (каждый новый `EffectSpec` читает их заново).
