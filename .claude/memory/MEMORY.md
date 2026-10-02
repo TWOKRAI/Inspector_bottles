@@ -82,3 +82,6 @@ _(empty)_
 - [cv_threads: OpenCV pool per process](feedback_cv_threads_tuning.md) — tune per recipe by measurement; default 2, not our workers
 - [Fake without the attribute the rule reads](feedback_fake_missing_attribute_vacuous_test.md) — earlier branch rejects it, test green for the wrong reason; assert the reason
 - [protect-branch блокирует коммиты субагентов в worktree](feedback_protect_branch_blocks_worktree_subagents.md) — стейдж + файл сообщения, коммитит лид
+- [pydantic assignment keeps the rejected value](feedback_pydantic_assignment_keeps_rejected_value.md) — model_validator(after) raise doesn't roll back; snapshot+restore, not full revalidation
+- [Always the latest models](feedback_always_latest_models.md) — Opus 5.5 / Sonnet 5.5 now; tier aliases over version pins; update lint allow-list on release
+- [Explicit model per agent role](feedback_explicit_model_per_agent_role.md) — pass `model` on every Agent call: reviewer/teamlead opus, developer/tester sonnet, cto (super-reviewer) fable

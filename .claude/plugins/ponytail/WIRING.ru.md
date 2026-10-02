@@ -1,6 +1,8 @@
 # ponytail — как он установлен здесь
 
 **Конфигурация: skills-only.** Хуков в `.claude/settings.json` нет, always-on-инъекции нет.
+Ключ `"hooks"` удалён из `.claude-plugin/plugin.json` (2026-10-02): композер сида подключает `plugin.json.hooks`
+каждого включённого плагина, и с ключом always-on возвращается после любого `plugin sync`. Вернуть always-on — вернуть ключ.
 Границу «когда применять» задаёт секция *«ponytail — when the laziness ladder applies»*
 в [`.claude/CLAUDE.md`](../../CLAUDE.md).
 

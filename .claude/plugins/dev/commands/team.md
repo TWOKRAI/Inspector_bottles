@@ -62,7 +62,7 @@ Role ↔ agent ↔ model — registry `.claude/plugins/dev/modes/dev.md`; who th
 `manager` are and what they don't do — skill [`team-protocol`](../skills/team-protocol/SKILL.md) §2;
 executor by task level — §2 above. Here, only what gets decided when assembling the team:
 
-- Always: you (lead/PM) and `reviewer` — synchronously after every task.
+- Always: you (lead/PM) and `reviewer` — once on the Task spec before the tester, and synchronously after every task.
 - `tester` — **once per mechanism, before implementation**, in a worktree on a pre-impl commit.
 - `debugger` — on a FAIL from the tester. `cto` — phase acceptance, merge gate, `teamlead` ↔
   `reviewer` dispute; **not** per task.

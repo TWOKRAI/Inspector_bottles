@@ -19,9 +19,10 @@ managed-регистр строкой `instance = reg_item()` — всегда �
 конструкторе, регистра у плагина не появляется вовсе (ни GUI-двери, ни
 `register_update`), и критерий Task 3.1 («фрагмент без `endpoint` → плагин в
 `error`») недостижим — до `error` дело не доходит. У `SchemaBase` не выставлен
-`validate_default`, поэтому пустой дефолт не проверяется валидатором
-`_endpoint_not_blank` при построении самого регистра: `OtelExportRegisters()`
-живёт. Отказ переезжает на шаг позже — в `OtelExportConfig(**reg.model_dump())`
+`validate_default`, поэтому пустой дефолт не проверяется правилами
+`ENDPOINT_RULES` (strip + pattern в `FieldMeta`, ADR-DS-010; до 2026-10-02 —
+валидатор `_endpoint_not_blank`) при построении самого регистра:
+`OtelExportRegisters()` живёт. Отказ переезжает на шаг позже — в `OtelExportConfig(**reg.model_dump())`
 внутри `configure()` плагина (Ф2.1), где пустой `endpoint` уже отвергается
 с именем ключа. Вариант (а) из ADR-OTEL-003; вариант (в) — строить
 managed-регистр из значений фрагмента, а не из дефолтов — долг closure,
@@ -37,7 +38,7 @@ from typing import Annotated
 
 from multiprocess_framework.modules.process_module.plugins import FieldMeta, register_schema
 
-from Services.otel_export.config import OtelExportConfig
+from Services.otel_export.config import ENDPOINT_RULES, OtelExportConfig
 
 __all__ = ["OtelExportRegisters"]
 
@@ -65,5 +66,8 @@ class OtelExportRegisters(OtelExportConfig):
                 "успевал построиться без аргументов — пустое значение "
                 "отвергается на шаге `configure()` плагина, с именем ключа"
             ),
+            # Те же правила, что у сервиса: переобъявление поля стирает FieldMeta родителя
+            # вместе с его rules (ADR-DS-010).
+            rules=ENDPOINT_RULES,
         ),
     ] = ""

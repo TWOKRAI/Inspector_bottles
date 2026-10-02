@@ -5,6 +5,5 @@
   "author": {
     "name": "Dietrich Gebert",
     "url": "https://github.com/DietrichGebert"
-  },
-  "hooks": "./hooks/claude-codex-hooks.json"
+  }
 }

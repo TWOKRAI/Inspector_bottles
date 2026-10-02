@@ -108,7 +108,7 @@ on the team whenever you expect escalations.
 | Mutation probe on the diff (S5) | script | `mutation_gate.py`; survivors are killed by a test or named equivalent — adds to break-injection |
 | Task closed (live team) | hook | `TaskCompleted`: ruff + pytest; 2 blocks → pass with a warning |
 | Went idle with uncommitted work | hook | `TeammateIdle` in the worktree |
-| Task review | `reviewer` | reproduction + break-injection; 2 iterations → `teamlead` |
+| Task review | `reviewer` | reproduction (break-injection is run by the lead); 2 iterations → `teamlead` |
 | Integration (S6) | `integrator` + script | `integration_gate.py`; advisory without a baseline |
 | Intake wording (S0) | **owner** | confirms goal / acceptance / out-of-scope before anything is built |
 | Plan approved (S1′) | `reviewer` `MODE: plan` → **owner** | the plan checklist |
@@ -143,7 +143,7 @@ Worktree creation, base ref per transport, who commits, merge-back (only the lea
 branch at a time), cleanup, the venv false-green trap, and shared `.git/hooks` all live in one
 place — `core/agents/_WORKTREE_PATTERN.md`; read it there, do not restate it.
 
-**One agent = one task** (in mode B: one worktree). Do not keep a warm agent alive across tasks to save its startup context. Measured 2026-09-10 on four implementers: a single task drives an agent to a peak context of **287–371k**, with 96–99 % of its calls already above the ~100k degradation line; a second task would start there, not at zero. The billed quantity is context × number of calls (125 M cache-read tokens across those four), so a long agent is not cheaper — each of its steps costs more than the last. Subagent prompt caching is 5-minute, so an agent idle while the lead merges is not warm either. Re-entry is made cheap by the plan and by role memory (`memory:` in the agent's frontmatter), not by keeping the agent alive.
+**One agent = one task** (in mode B: one worktree). Do not keep a warm agent alive across tasks to save its startup context. Measured 2026-09-10 on four implementers: a single task drives an agent to a peak context of **287–371k**, with 96–99 % of its calls already above the ~100k degradation line; a second task would start there, not at zero. The billed quantity is context × number of calls (125 M cache-read tokens across those four), so a long agent is not cheaper — each of its steps costs more than the last. Subagent prompt caching is 5-minute, so an agent idle while the lead merges is not warm either. Re-entry is made cheap by the plan and by role memory (`memory:` in the agent's frontmatter), not by keeping the agent alive. **Exception, measured 2026-10-02 (pilots v2, v3):** a review fix or a review round 2 goes back to the same agent by agentId (`.claude/CLAUDE.md` → Persistent agents). The 125 M figure above counts cache-read tokens; the pilots count the tool's `total_tokens` (new tokens), so the two numbers measure different things.
 
 **Cap and cleanup.** ≤ 3 concurrent writers (see `core/agents/_WORKTREE_PATTERN.md`); the lead removes every worktree **and its branch** at the wave's merge point — the engine only cleans a worktree that stayed unchanged, so any agent that commits leaves one behind. Clean before the next wave starts, never "later".
 

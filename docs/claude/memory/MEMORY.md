@@ -17,7 +17,7 @@
 - [RU-вывод и wc врут](feedback_ru_output_encoding_and_wc.md) — cp866; 0xA0; PYTHONIOENCODING=utf-8 · [Think EN, speak RU](feedback_think_en_speak_ru.md)
 - [monotonic Win = 15.6 мс](project_monotonic_resolution_windows.md) — разности <100 мс на сетку · [No global taskkill](feedback_no_global_taskkill.md) — только TaskStop или PID
 - [CUDA torch](project_cuda_torch_setup.md) — cu124 колесом; PyPI даёт +cpu · [GPU-мониторинг Win](reference_gpu_monitoring_windows.md) — Task Manager прячет CUDA, смотреть nvidia-smi
-- qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, устаревший отвечает уверенно · [таймаут реиндекса](project_qex_reindex_timeout.md) · [бюджет реиндекса](feedback_qex_reindex_budget.md) — keep_alive=-1 · [запросы по-английски](feedback_qex_query_english_code_bias.md) — RU-перефраз мимо · [модель по платформам](project_qex_model.md) — macOS 8b-qex/4096 с 2026-09-13, Win 0.6b; ловушка Ollama.app молча на CPU
+- qex: **[СНАЧАЛА сверить свежесть](feedback_check_qex_freshness_before_use.md)** — last_indexed vs сегодня, устаревший отвечает уверенно · **[RUNBOOK полного реиндекса (Win)](feedback_qex_full_rebuild_runbook.md)** — Ollama вне харнесса, тег -qex, PYTHONUTF8, timeout=7200000; «без таймаутов» = мой дефект запуска · [таймаут реиндекса](project_qex_reindex_timeout.md) · [бюджет реиндекса (под 4b)](feedback_qex_reindex_budget.md) — keep_alive=-1 · [запросы по-английски](feedback_qex_query_english_code_bias.md) — RU-перефраз мимо · [модель по платформам](project_qex_model.md) — macOS 8b-qex/4096 с 2026-09-13, Win 0.6b; ловушка Ollama.app молча на CPU
 
 - [Жёсткий потолок агентов выключен по умолчанию](feedback_agent_hard_budget_is_off_by_default.md) — soft 100k лишь предупреждает; hard — файл `<id>.budget` или env; developer ушёл до 401k 2026-09-20
 
@@ -113,3 +113,6 @@
 - [Широкий except в кадровом цикле прячет мёртвый механизм](feedback_broad_except_in_frame_loop_hides_dead_mechanism.md) — лента едет, объектов нет, тесты зелёные
 - [Bash heredoc схлопывает `\\`](feedback_bash_heredoc_collapses_backslashes.md) — такие файлы через Write · [ctypes setattr по чужому имени молчит](feedback_ctypes_setattr_unknown_field_is_silent.md) — проверять _fields_
 - [protect-branch блокирует коммиты субагентов в worktree](feedback_protect_branch_blocks_worktree_subagents.md) — стейдж + файл сообщения, коммитит лид
+- [pydantic assignment keeps the rejected value](feedback_pydantic_assignment_keeps_rejected_value.md) — model_validator(after) raise doesn't roll back; snapshot+restore, not full revalidation
+- [Всегда последние модели](feedback_always_latest_models.md) — сейчас Opus 5.5 / Sonnet 5.5; алиасы ярусов вместо версий; при выходе новой модели обновить список линтера
+- [Явная модель на роль агента](feedback_explicit_model_per_agent_role.md) — `model` в каждом вызове Agent: reviewer/teamlead opus, developer/tester sonnet, cto (суперревьювер) fable

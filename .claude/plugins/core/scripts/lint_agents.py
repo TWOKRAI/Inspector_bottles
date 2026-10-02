@@ -60,9 +60,12 @@ KNOWN_MODELS = {
     "sonnet",
     "haiku",
     "fable",
+    "claude-fable-5-1",
+    "claude-opus-5-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
@@ -75,15 +78,16 @@ KNOWN_MODELS = {
 # valid yet stale → soft WARNING here. The HARD gate that every *bundled* seed
 # agent is on a CURRENT model lives in tests/test_lint_agents_models.py.
 # Update both when a new model ships (source of truth: claude-api skill).
-#   Opus → claude-opus-4-8 · Sonnet → claude-sonnet-5 · Haiku → claude-haiku-4-5
+#   Opus → claude-opus-5-5 · Sonnet → claude-sonnet-5-5 · Haiku → claude-haiku-4-5 · Fable → claude-fable-5-1
 CURRENT_MODELS = {
     # Aliases can never be stale — they always point at the tier's latest.
     "opus",
     "sonnet",
     "haiku",
     "fable",
-    "claude-opus-4-8",
-    "claude-sonnet-5",
+    "claude-fable-5-1",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
     "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",  # dated alias of the current Haiku
     "inherit",
@@ -244,7 +248,7 @@ def _agent_model(agent_files: dict[str, Path], role: str) -> str | None:
 
 def _tier_matches(tier_word: str, model: str) -> bool:
     """'Opus' (table/description cell) is consistent with model: opus /
-    claude-opus-4-8 / etc. — a plain substring check on the tier name."""
+    claude-opus-5-5 / etc. — a plain substring check on the tier name."""
     return tier_word.lower() in model.lower()
 
 

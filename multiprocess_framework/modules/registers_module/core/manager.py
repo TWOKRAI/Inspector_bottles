@@ -22,6 +22,7 @@ from pydantic import create_model
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...data_schema_module import RegistersContainer, SchemaBase
+from ...data_schema_module import refusal_text
 from ...logger_module import get_std_logger
 
 from .dispatch import resolve_dispatch_targets
@@ -38,13 +39,6 @@ def _build_register_copy(name: str, fields: List[FieldInfo]) -> Any:
 
     Не переносится (см. ADR-RM-007 «Ограничения» — полный список с находками ревью):
 
-    - **параметризованные ``list``/``dict``** — кодек ``FieldInfo.to_dict()``/
-      ``from_dict()`` вырождает ``list[int]``/``dict[str, str]`` и т.п. в голый
-      ``list``/``dict`` (закрытый набор тегов типа, см. ``field_info.py``), поэтому
-      копия ПРИНИМАЕТ то, что реальный класс отклоняет (измерено ревью: 10 полей
-      в 7 регистрах, например ``blob_detector.contour_color_bgr = ['x']`` —
-      ``real=False``, ``copy=True``). Это ограничение кодека, а не этой функции —
-      чинить в Task 1b.2d.
     - **class-level python-валидаторы** (``field_validator``/``model_validator``)
       и class attribute ``register_dispatch`` — их несёт только исходный класс
       плагина, а не набор ``FieldInfo``.
@@ -208,10 +202,23 @@ class RegistersManager(BaseManager, ObservableMixin):
         is_valid, err = self.validate_field_value(register_name, field_name, value)
         if not is_valid:
             return False, err
-        try:
-            setattr(reg, field_name, value)
-        except Exception as exc:
-            return False, str(exc)
+        # Всё или ничего (ADR-RM-007): отказ не оставляет значения в регистре, а текст
+        # отказа не содержит введённого значения (секрет в headers не уезжает в журнал).
+        apply = getattr(reg, "apply_values", None)
+        if apply is not None:
+            ok, err = apply({field_name: value})
+            if not ok:
+                return False, err
+        else:
+            # Регистр не SchemaBase (менеджер принимает Any, напр. _RawRegisterData прототипа):
+            # прежний путь без отката, но контракт тот же — кортеж, текст без ввода.
+            try:
+                setattr(reg, field_name, value)
+            except Exception as exc:
+                return False, refusal_text(exc)
+        # Подписчикам и send_callback — СОХРАНЁННОЕ (нормализованное) значение: копия
+        # хранит "WARNING", виджет должен получить "WARNING", а не введённое "warn".
+        value = getattr(reg, field_name)
         self._log_debug(f"set_field_value: {register_name}.{field_name} = {value!r}")
         self._notify_observers(register_name, field_name, value)
         if self._send_callback:

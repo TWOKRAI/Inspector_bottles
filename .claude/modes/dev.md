@@ -27,20 +27,20 @@ The `/dev:pipeline` skill runs the full chain with failure-recovery via the debu
 
 | Agent | Model | Skill | When to call |
 |-------|-------|-------|--------------|
-| **cto** | Fable 5.1 | Agent tool / `/dev:team` | Verdicts only: phase acceptance (three lenses), merge gate, arbitration, top of the escalation ladder. Once per phase, never per task. Does NOT write code |
-| **spec-writer** | Sonnet 5 | `/dev:spec:spec`, `/dev:spec:spec-sync` | Living product spec — from the user's perspective |
-| **manager** | Opus 5 | `/dev:plan` | Decompose a phase into Task X.Y with complexity levels. Does NOT write code |
-| **developer** | Sonnet 5 | `/dev:implement` | Standard Task implementation per spec (Middle/Middle+). Code + smoke-test + commit |
-| **teamlead** | Opus 5 | Agent tool | Senior+: architecture, refactoring, integration. Escalation on 3rd review/debug iteration |
-| **junior** | Haiku 4.5 | Agent tool / `/dev:team` | Mechanical, fully specified changes only (rename per list, docstrings, fixture copies, STATUS.md). Stops on any decision. Does NOT commit |
-| **tester** | Sonnet 5 | `/dev:test` | Pytest against acceptance criteria from spec. Does NOT change logic |
-| **debugger** | Sonnet 5 | `/dev:debug` | Reproduce → hypotheses → root cause. Fixes within scope or delivers a diagnosis |
-| **investigator** | Opus 5 | Agent tool | Read-only diagnosis of cross-module problems. Does not write code, delivers a report |
-| **reviewer** | Opus 5 | `/dev:review` | Full review (10+ files, architecture, security). Max 2 iterations — then escalate to teamlead. Does NOT write code |
-| **integrator** | Opus 5 | `/dev:pipeline` S7 | Integration risk after implementation (cycles, god nodes, coverage drop). Does NOT write code |
-| **ai-judge** | Opus 5 | `/dev:pipeline` gates | PASS/BLOCK verdict on a machine signal (S2 contract-complete, S3/S7 edge cases). Does NOT write code |
-| **docs-writer** | Haiku 4.5 | `/core:team:docs` | Simple docs: docstrings, module README, STATUS.md |
-| **tech-writer** | Sonnet 5 | Agent tool | Complex docs: DECISIONS.md (ADR), ARCHITECTURE.md, MIGRATION_*.md, RFC-*.md |
+| **cto** | Fable | Agent tool / `/dev:team` | Verdicts only: phase acceptance (three lenses), merge gate, arbitration, top of the escalation ladder. Once per phase, never per task. Does NOT write code |
+| **spec-writer** | Sonnet | `/dev:spec:spec`, `/dev:spec:spec-sync` | Living product spec — from the user's perspective |
+| **manager** | Opus | `/dev:plan` | Decompose a phase into Task X.Y with complexity levels. Does NOT write code |
+| **developer** | Sonnet | `/dev:implement` | Standard Task implementation per spec (Middle/Middle+). Code + smoke-test + commit |
+| **teamlead** | Opus | Agent tool | Senior+: architecture, refactoring, integration. Escalation on 3rd review/debug iteration |
+| **junior** | Haiku | Agent tool / `/dev:team` | Mechanical, fully specified changes only (apply a given diff sketch, rename per list, fixture copy; under 20 lines). Stops on any decision. Does NOT commit |
+| **tester** | Sonnet | `/dev:test` | Pytest against acceptance criteria from spec. Does NOT change logic |
+| **debugger** | Sonnet | `/dev:debug` | Reproduce → hypotheses → root cause. Fixes within scope or delivers a diagnosis |
+| **investigator** | Opus | Agent tool | Read-only diagnosis of cross-module problems. Does not write code, delivers a report |
+| **reviewer** | Opus | `/dev:review` | Review after every task (project rule); full review for 10+ files, architecture, security. Max 2 iterations — then escalate to teamlead. Does NOT write code |
+| **integrator** | Opus | `/dev:pipeline` S7 | Integration risk after implementation (cycles, god nodes, coverage drop). Does NOT write code |
+| **ai-judge** | Opus | `/dev:pipeline` gates | PASS/BLOCK verdict on a machine signal (S2 contract-complete, S3/S7 edge cases). Does NOT write code |
+| **docs-writer** | Haiku | `/core:team:docs` | Simple docs: docstrings, module README, STATUS.md |
+| **tech-writer** | Sonnet | Agent tool | Complex docs: DECISIONS.md (ADR), ARCHITECTURE.md, MIGRATION_*.md, RFC-*.md |
 
 Shared rules for all 14 agents live in one skill, `project-rules` (preloaded via `skills:`).
 Team mode (agents that persist in the session, shared task list, hooks as gates): `/dev:team`,
@@ -49,14 +49,65 @@ guide `docs/claude/AGENT_TEAMS_GUIDE.md`.
 ## Boundary rules
 
 - **developer vs teamlead** — teamlead for architecture/refactoring (Opus); developer for standard implementation (Sonnet). When in doubt — developer
+- **junior vs docs-writer** — junior applies a code-shaped mechanical recipe that is already fully written down (rename list, diff sketch, fixture copy); docs-writer writes prose (docstrings, README, STATUS.md). A trivial change is still docs-writer's if the output is prose
 - **debugger vs investigator** — debugger fixes within scope (1-5 lines); investigator read-only diagnoses cross-module / architectural problems
 - **reviewer vs teamlead** — reviewer only reads and points out issues; teamlead writes code (express review for ≤3 files or Senior+ implementation)
+- **cto vs reviewer** — cto verdicts a phase or a disputed decision, called once per phase; reviewer verdicts a task-sized diff, called on every PR-sized change. Scope size decides which one, not seniority
 - **docs-writer vs tech-writer** — ADR / ARCHITECTURE / MIGRATION / RFC → tech-writer; everything else → docs-writer
 - **3 iterations — stop** — reviewer does not approve → teamlead escalation; debugger has not found root cause in 3 hypotheses → investigator or teamlead escalation
-- **Escalation ladder** — a question goes one level up, never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` → `teamlead` → `cto` → the owner (`project-rules` §7; format `ESCALATION -> <role>`: question / tried / blocked on / files)
+- **Escalation — one level up, never sideways, never a guess** — full ladder and message format: `project-rules` §7
 - **Parallel delegation** — for independent subtasks, call agents in a single message (multiple Agent tool calls), not sequentially. For a whole plan with independent Tasks, `/dev:pipeline` has an opt-in **Parallel mode** (worktree-isolated developer/tester per Task) — see [`commands/pipeline.md`](../commands/pipeline.md)
 
+## Subagent launch discipline
+
+- Subagents run **in the background by default**. Pass `run_in_background: false`
+  whenever the caller needs the answer in this same turn — always for **reviewer**
+  and **tester**, and for any other call the next step depends on.
+- Spawn nesting is capped by the engine itself; no documented env var controls it
+  — do not name one. The "2 iterations → escalate to teamlead" limit instead
+  travels **in the Task spec text** handed down to each subagent.
+- Every subagent brief carries the guardrail line: `report only; commit only if
+  your role says so`.
+- A finished background agent may commit, push and open a draft PR on its own
+  (`.claude/CLAUDE.md` → "Subagents are background by default"). The guardrail line above is
+  the defence: never leave it out of a brief.
+
+## Test authorship — three roles, three defect classes
+
+Three roles write tests; each catches a different class of defect, and no single
+role covers all three.
+
+| Role | Writes | Defect class it catches |
+|------|--------|-------------------------|
+| **tester** | the failing test from the contract (RED), then regression | wrong behavior — output diverges from spec/contract |
+| **developer** | unit tests for branches only visible inside `_impl/` | internal edge cases a black-box test never reaches |
+| **reviewer** | no new test — reproduces the scenario by running | a test that passes no matter what — the assertion proves nothing |
+
+- An **independent tester runs on every task, once per mechanism, before the code** (in a
+  worktree at the pre-implementation commit). There is no legitimate skip: a forced one
+  (agent unavailable, pure docs) is **recorded** in the plan and the commit message, and the
+  task counts as unverified until the tester runs.
+- **break-injection on every claimed property is mandatory.** The lead runs it (stage 3 of
+  the launch convention in `.claude/CLAUDE.md`): revert the implementation, confirm the test goes red.
+- A test that **stays green when the implementation is reverted does not exist** —
+  rewrite or delete it.
+- A **hanging test is worse than a missing one** (it blocks the pipeline silently) —
+  a test that can block runs the call in a daemon thread with a join deadline.
+- An **expected value is a literal**, never recomputed from the code under test.
+- The words **"impossible" / "guaranteed" / "cannot"** are allowed only next to a
+  reproduction that demonstrates the claim.
+
 ## Module Design Discipline (contract-first)
+
+**YAGNI ladder before new code.** Before writing anything new — including a helper inside an
+existing module — climb this ladder and stop at the first rung that answers the need:
+
+1. Is this needed right now, or is it speculative ("might need it later")?
+2. Does the project already have it — a util, a helper, a similar module?
+3. Does the stdlib cover it?
+4. Does an already-installed dependency cover it?
+5. Write the minimum that works — no speculative generality, no unused parameters.
+6. Mark a deliberate simplification with a comment (`# YAGNI: ...`) so a later reader sees a choice, not an oversight.
 
 When creating a new **public** module — follow contract-first: a module is born as a "contract + example tests" pair; the implementation is written after.
 
@@ -78,7 +129,7 @@ When creating a new **public** module — follow contract-first: a module is bor
 ## Common scenarios
 
 ```
-Mid-complexity task                 →  /dev:pipeline
+Any task, from idea to merge        →  /dev:pipeline [--team|--workflow]
 New feature — step by step          →  /dev:plan  →  /dev:implement  →  /dev:test  →  /dev:review  →  /dev:ship
 Architectural decision / refactor   →  teamlead via Agent tool (no skill wrapper)
 Failing test / regression           →  /dev:debug
@@ -87,6 +138,7 @@ ADR (architectural decision)        →  /dev:adr <title>  (wrapper over tech-wr
 Migration guide / ARCHITECTURE      →  tech-writer via Agent tool
 Living spec                         →  /dev:spec:spec  → user edits → /dev:spec:spec-sync
 Quick diff check                    →  /dev:ship  (tests + linter + diff review)
+Live agent team for a plan phase    →  /dev:team (requires plugin agent-teams)
 System health check                 →  /core:quality:doctor (MCP + agents + hooks + indexes + plans)
 Architecture diagrams stale         →  /core:infra:diagrams (pyreverse + pydeps + mermaid)
 Team roster                         →  /core:team:team
@@ -129,10 +181,12 @@ Skills augment commands and agents with behavioral patterns. When it is appropri
 
 The coordinator (Opus) does NOT write code itself when a task is delegated. Roles:
 - Opus — reads the user's spec, plans the strategy, delegates, checks agent output
-- Sonnet agents — heavy lifting in their own context windows (developer, tester, manager, debugger)
-- Opus agents — critical decisions (reviewer, teamlead, investigator)
+- Sonnet agents — heavy lifting in their own context windows (developer, tester, debugger)
+- Opus agents — critical decisions (manager, reviewer, teamlead, investigator, integrator, ai-judge);
+  Fable — cto (phase acceptance, arbitration)
 
-Exception: if the task is trivial (<30 lines, one file) — the coordinator may do it directly without delegating.
+Exception: a genuinely trivial task (1–3 files, under ~80 lines, no new mechanism) — the coordinator may do it
+directly and says so in the task write-up (`.claude/CLAUDE.md` → Task launch convention). Stages 1, 3 and 5 have no solo variant.
 
 ## Memory discipline (capture at Task boundary)
 
@@ -151,7 +205,7 @@ keeps long-term context flowing into `.claude/memory/` **during** work, not only
 
 Where plans are stored — see `.claude/modes/_stack.md` (section "Plans"). Typical templates:
 
-- **Single root:** `plans/<slug>.md` (simple project)
+- **Single root:** `plans/YYYY-MM-DD_<slug>.md` (single) or `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md` (multi-phase) — see `manager.md` "Plan naming convention"
 - **By scope:** `apps/{app}/plans/` (per-app in monorepo), `projects/{slug}/plans/` (per-project in multi-zone repo)
 
 Manager at `/dev:plan` picks the correct location based on task context and `_stack.md`.

@@ -53,7 +53,7 @@
    Принимать **`dict`**; Pydantic — внутри модуля. Сборка процессов: схемы → `process()` / `model_dump` — см. ADR-102, ADR-104, ADR-105 и `docs/CONFIG_*`.
 
 6. **Импорты в unit-тестах модулей**  
-   Под `modules/` — **плоские** имена пакетов (`from data_schema_module import ...`). Рабочий каталог pytest: **`multiprocess_framework/modules`** или скрипт `python scripts/run_framework_tests.py` из текущий каталог. Без `PYTHONPATH` запуск из корня часто даёт `ModuleNotFoundError`.
+   Под `modules/` — **плоские** имена пакетов (`from data_schema_module import ...`). Рабочий каталог pytest: **`multiprocess_framework/modules`** или скрипт `python scripts/run_framework_tests.py` из корня репозитория. Без `PYTHONPATH` запуск из корня часто даёт `ModuleNotFoundError`.
 
 7. **Логи (ADR-111)**  
    Пути логов не привязаны к cwd исходников; env `MULTIPROCESS_LOG_DIR` / `INSPECTOR_LOG_DIR`, в pytest — изолированный temp через `conftest.py`.

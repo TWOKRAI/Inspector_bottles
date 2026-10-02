@@ -96,7 +96,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 
 | Шаг | Задачи | Условие |
 |---|---|---|
-| И1 ▶ | gui-service **1b.2c** вердикт бэкенда до формы ∥ **1b.2d** правила регистра описанием | — (заполнитель пауз) |
+| И1 ▶ | gui-service **1b.2c** вердикт бэкенда до формы; ~~1b.2d~~ DONE 10-02 (правила описанием + откат отвергнутого значения, `task-1b2d.md`) | — (заполнитель пауз) |
 | И2 | gui-constructor Ф1: **1.0** правила слоёв → 1.1 характеризация (**вход: ~20 красных тестов фронта** sandbox/dashboard на main 09-29, видел ревьюер, не разбирались — сначала отделить давние от регрессий) → 1.2 разборка `run_gui` (**`app.py`**) → 1.3 → 1.4 → 1.5 | approve плана (О-2); до 1.3 — явные Р-A/B/C/D/F |
 | И3 | gui-constructor **2.1** оболочка `host/` → **2.2** `inspector.classic` → gui-service **1.4** `apps/gui_client` → 2.4 `minimal_gui` | И2. 2.3 (minimal_app) и 4.1 (KnobAddress) — заполнители в любой момент |
 | И4 | gui-service **1b.2b** (`app.py` — строго после И2) → 1b.3 → 1b.4 auth | И2 |
@@ -150,7 +150,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | [line-sim-layer-editor](../line-sim-layer-editor/plan.md) | С | APPROVED 09-27; 1.0, 1.1b, 1.2a, 1.2h, 1.3h-a…d в `main` (`79dda66a9`, `c2a3b876a`); осталось 1.2b → 1.3 (Qt, ждёт И3), 1.1 DEFERRED, 2.1 необязательно | 1.2b после И3 |
 | [line-sim](../line-sim/plan.md) | С | Ф0–Ф3, Ф5 DONE в `main`; Ф6: 6.1 в `main`, 6.2 DONE 09-27; Ф4 на переписывание; 5.5 DEFERRED. Метка `[BLOCKED]` у 1.1 устарела | 6.3 ROI мышью: условие ORDER «после 1.3h-b» снято (`79dda66a9`), но шапка `phase-6-pult-gui.md` держит 6.3 DEFERRED до GUI-загрузки generic-приложений — расхождение, снять при постановке |
 | [gui-constructor](../gui-constructor/plan.md) | И | DRAFT, ревью CTO: ACCEPT WITH CONDITIONS | approve → 1.0 |
-| [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5 в `main` | 1b.2c ∥ 1b.2d |
+| [2026-09-22_gui-service](../2026-09-22_gui-service/plan.md) | И | APPROVED ред. 2; 1.1–1.3b, 1b.1, 1b.2a, 1b.2b-pre, 1b.5, 1b.2d (10-02) в `main` | 1b.2c |
 | [frontend-constructor](../frontend-constructor/plan.md) | И | Блок А DONE; Ф4/Ф5 ушли в gui-constructor; Блок В ⛔ окно codemod | — |
 | [transport-single-policy](../transport-single-policy/plan.md) | Ф | Ф4: 4.0, 4.1, 4.4, 4.5, 4.6, 4.8a (`95093b966`), 4.7a, 4.7c (`375bbb4b2`, ADR-173) в `main`; 4.8c (бенч из GUI, спека `d3a1c3d11`) — кода нет, владельцем не подтверждена | 4.7b → 4.7d → живой A/B |
 | [pipeline-node-timing](../pipeline-node-timing.md) | И | заведён 09-30 (владелец): время узлов в GUI; дефекты PC-1..4; T1 DONE (`b611e7a7`, слияние `5a83c232` 10-01) | T2 — время узла на графе |
