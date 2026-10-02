@@ -85,7 +85,10 @@ def _describe_type(t: Any, *, nested: bool = False) -> dict[str, Any] | None:
     ``list[X]`` -> ``item``; ``dict[K, V]`` -> ``key``/``value`` (то же описание, что у
     верхнего уровня: ``choices`` у вложенного ``literal``, свои ``item``/``key``/``value``).
     Ключи отсутствуют у голого ``list``/``dict`` и когда тип элемента ``unsupported``
-    (``Any``, ``Optional[...]``) — тогда на той стороне границы элемент не проверяется.
+    (вне закрытого набора тегов) — копия там шире оригинала: ``Optional``/``Union``,
+    ограничения через ``Annotated`` (``list[Annotated[int, Field(ge=0)]]`` с ``[-1]``:
+    оригинал отвергает, копия принимает), модели, ``tuple`` кроме трёх ``int``.
+    ``Any`` совпадает.
     Для ``nested=True`` ``unsupported`` и ``literal`` без вариантов -> ``None`` (ключ не
     пишется; никогда не порождаем ``Literal[None]``).
     """
@@ -231,7 +234,7 @@ class FieldInfo:
         ``Literal[Color.RED]``) падают в ``str(value)``, никогда не бросают.
         """
         unwrapped, optional = _unwrap_optional(self.field_type)
-        type_desc = _describe_type(unwrapped) or {}
+        type_desc = _describe_type(unwrapped)
         tag = type_desc["type"]
         meta_dict = self.meta.to_dict() if self.meta is not None else None
         d: dict[str, Any] = {
