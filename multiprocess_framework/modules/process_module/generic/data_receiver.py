@@ -59,6 +59,7 @@ class DataReceiver:
         clock: Callable[[], float] | None = None,
         inflight_budget: int = 0,
         ipc_depth_fn: Callable[[], int | None] | None = None,
+        overflow: str = "latest",
     ) -> None:
         self._receive = receive_fn
         # Ф7 G.5.a — снятие двойной конверсии на data-plane. Флаг читается ОДИН раз
@@ -89,6 +90,7 @@ class DataReceiver:
         # меряется: глубина > B - lag -> счётчик. B = 0 — получатель не за кольцом, не меряем.
         self._inflight_budget = max(0, int(inflight_budget))
         self._ipc_depth_fn = ipc_depth_fn
+        self._overflow = overflow
         self._ipc_queue_depth: int | None = None
         self._transit_over_budget = 0
         self._log_info = log_info or (lambda msg: None)
@@ -118,6 +120,11 @@ class DataReceiver:
         # stop_event текущего run_loop — сохраняется при запуске воркера,
         # используется в on_items_ready для stop-aware backpressure.
         self._stop_event: threading.Event | None = None
+
+    @property
+    def overflow(self) -> str:
+        """Политика переполнения latest|every (Task 4.7d-1: пока только хранится, поведения нет)."""
+        return self._overflow
 
     def get_cycle_metrics(self) -> dict:
         """Снимок тайминга цикла приёма (потокобезопасно).

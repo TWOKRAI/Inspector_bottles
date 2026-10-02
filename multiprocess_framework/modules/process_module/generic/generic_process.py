@@ -149,6 +149,8 @@ class GenericProcess(ProcessModule):
         # через 30 секунд, бесполезен, а очередь всё равно теряет — см.
         # DataReceiver._bound_lag. Дефолт 0 — поведение не меняется молча.
         max_lag_items = app_cfg.get("chain_max_lag_items", 0)
+        # Task 4.7d-1: политика переполнения latest|every (пока только проводка, поведения нет).
+        overflow = app_cfg.get("overflow", "latest")
         # Task 4.7c: бюджет кадров в полёте B (0 = получатель не за кольцом — транзит не меряем).
         inflight_budget = app_cfg.get("inflight_budget", 0)
         source_fps = app_cfg.get("source_target_fps", 25.0)
@@ -276,6 +278,7 @@ class GenericProcess(ProcessModule):
                 max_lag_items=max_lag_items,
                 inflight_budget=inflight_budget,
                 ipc_depth_fn=self._data_queue_depth,
+                overflow=overflow,
             )
             # Подключить callback
             collector._on_ready = self._data_receiver.on_items_ready
@@ -294,6 +297,7 @@ class GenericProcess(ProcessModule):
                 log_debug=self._log_debug,
                 node_name=self.name,
                 plugin_runner=self._plugin_runner,
+                overflow=overflow,
             )
 
             # Запуск workers через WorkerManager

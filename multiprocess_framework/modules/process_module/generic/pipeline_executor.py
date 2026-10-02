@@ -52,6 +52,7 @@ class PipelineExecutor:
         log_debug: Callable[[str], None] | None = None,
         node_name: str = "",
         plugin_runner: PluginRunner | None = None,
+        overflow: str = "latest",
     ) -> None:
         self._plugins = plugins
         self._chain_targets = chain_targets
@@ -60,6 +61,7 @@ class PipelineExecutor:
         self._runner = plugin_runner or PluginRunner(log_error=log_error)
         # Имя процесса-узла — для frame-trace (process-спан node, transport from).
         self._node = node_name
+        self._overflow = overflow
         self._shm = shm_middleware
         self._send = send_fn
         self._max_fails = max_consecutive_fails
@@ -132,6 +134,11 @@ class PipelineExecutor:
         self._pending_releases: dict[str, list[dict]] = {}
         self._pending_release_count = 0
         self._release_batch_threshold = 8
+
+    @property
+    def overflow(self) -> str:
+        """Политика переполнения latest|every (Task 4.7d-1: пока только хранится, поведения нет)."""
+        return self._overflow
 
     def bind_queue(self, chain_queue: queue.Queue) -> None:
         """Привязать входную очередь для bound-метода run() (worker target)."""
