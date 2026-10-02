@@ -1,0 +1,70 @@
+"""Инъекции 5.5A: по одной заплате, прогон 4 файлов, откат через git checkout файла."""
+
+import subprocess
+import sys
+import os
+import re
+from pathlib import Path
+
+W = Path(r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/t55-green")
+PY = r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/python.exe"
+MOD = W / "multiprocess_framework/modules"
+TESTS = [
+    "router_module/tests/test_socket_channel_hol_acceptance.py",
+    "router_module/tests/test_socket_channel_hol_hazards.py",
+    "registers_module/tests/test_field_info_codec_acceptance.py",
+    "logger_module/tests/test_std_logger_guard.py",
+]
+F_SOCK = "multiprocess_framework/modules/router_module/channels/socket_channel.py"
+F_FI = "multiprocess_framework/modules/registers_module/core/field_info.py"
+F_FM = "multiprocess_framework/modules/data_schema_module/core/field_meta.py"
+F_SDK = "Services/code_reader/core/sdk_reader.py"
+INJ = {
+    "I1": [(F_SOCK, "                if client in self._dead:\n                    break\n", "")],
+    "I2": [(F_FI, "return value.as_posix()", "return str(value)")],
+    "I3": [(F_FM, None, "import logging\n_inj_log = logging.getLogger(__name__)\n")],
+    "I4": [(F_SDK, "_log = get_std_logger(__name__)", "import logging\n_log = logging.getLogger(__name__)")],
+}
+env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+
+
+def run():
+    r = subprocess.run(
+        [PY, "-m", "pytest", *TESTS, "-q", "--tb=no", "-p", "no:cacheprovider", "-rf"],
+        cwd=MOD,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=280,
+    )
+    fails = sorted(set(re.findall(r"FAILED \S+::(\S+)", r.stdout)))
+    summary = [l for l in r.stdout.splitlines() if " passed" in l or " failed" in l][-1:]
+    return fails, summary
+
+
+names = sys.argv[1:] or ["BASE", *INJ]
+for name in names:
+    if name != "BASE":
+        for f, a, b in INJ[name]:
+            p = W / f
+            with open(p, encoding="utf-8", newline="") as fh:
+                s = fh.read()
+            nl = "\r\n" if "\r\n" in s else "\n"
+            if a is None:
+                s = s.replace(nl, nl, 0)
+                s = b.replace("\n", nl) + s
+            else:
+                a2, b2 = a.replace("\n", nl), b.replace("\n", nl)
+                assert s.count(a2) == 1, (name, f)
+                s = s.replace(a2, b2)
+            with open(p, "w", encoding="utf-8", newline="") as fh:
+                fh.write(s)
+    try:
+        fails, summary = run()
+        print(name, summary, fails, flush=True)
+    finally:
+        if name != "BASE":
+            for f, *_ in INJ[name]:
+                subprocess.run(["git", "checkout", "--", f], cwd=W)
