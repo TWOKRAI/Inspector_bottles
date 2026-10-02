@@ -30,7 +30,7 @@ def _pad_color_bgr(text: str) -> tuple[int, int, int]:
 
 
 def _radius_scale(text: str) -> float:
-    """Конечное число > 0 (как регистр `center_crop`: 0, <0, nan, inf отвергаются). Введённое не повторяем."""
+    """Конечное число > 0 (0, <0, nan, inf отвергаются); регистр `center_crop` строже — 0.1..5.0. Эха нет."""
     error = argparse.ArgumentTypeError("ожидается конечное число больше 0")
     try:
         value = float(text)

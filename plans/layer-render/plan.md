@@ -90,7 +90,7 @@
 ### Ф2 — ядро сервиса (переезд в `Services/layer_render`) → [phase-2-core.md](phase-2-core.md)
 - Task 2.1: `compose.py` + `io` (бывш. 3.1) [DONE 2026-10-02 — `c9d56b11`; слепые 61 RED → 79 GREEN, инъекции 8/8, ревью Opus APPROVE_WITH_NITS (ниты: repr значения дважды в тексте ошибки `solid`, имя метрики A8 в отчёте); ниты ревью 1.1 закрыты] (∥ 2.2)
 - Task 2.2: `effects.py` + `EFFECT_PARAMS` + эквивалентность `apply_photometric` на 50 seed (бывш. 3.3) [DONE 2026-10-02 — `8665d7b7`; слепые 107 RED → GREEN, инъекции лида 18/18, ревью ит.2 APPROVED; отложено на Ф3: pickle `EffectSpec`, мост требует поле `AugmentConfig` на каждый ключ `EFFECTS`] (∥ 2.1)
-- Task 2.3: `LayerSpec`/`LayerAugment`/`compose_layers` (бывш. 3.2) [PENDING — волна 4, спека в phase-2-core.md] (после 2.1)
+- Task 2.3: `LayerSpec`/`LayerAugment`/`compose_layers` (бывш. 3.2) [DONE `ca0e6203a` — волна 4; реализация dfb0a6b3, ревью 45db709d APPROVED] (после 2.1)
 - Task 2.4: переезд `ScenePreset`, `ObjectFactory` → `RenderedObject`, `SpriteCatalog`, `preview`; реэкспорты; счётчик импортов до/после [PENDING] (после 2.3)
 - Task 2.5: `render_scene(background, placed, effects, rng)`; `SceneCompositor` делегирует; кадры сима побайтно прежние [PENDING] (после 2.4)
 - В 2.1–2.3 закрыть ниты ревью 1.1: дубль проверки `solid` в `_validate_item` и `SolidFill.__post_init__`, лишние `tuple(...)`/`first.copy()`, README «цена ∝ min(th, высота кадра)», read-only копия в таблице Public API.
@@ -112,7 +112,7 @@
 - Task 6.1: одна функция выреза для `center_crop`, `holdout_eval` и генератора (бывш. 2.1) [DONE 2026-10-02 — `f9ef5c45`; слепые 107 RED → GREEN, инъекции лида 16/16 (дыра `clamp` на касании края закрыта ревью), ревью ит.2 APPROVED; намеренно: выход всегда копия, `replicate` без пересечения → `ValueError`]
 - Task 6.2: `LayerSceneGenerator` в `dataset_gen` поверх `layer_render`, секция `train.*` пресета (бывш. 2.2) [PENDING] (после 2.5, 6.1)
 - Task 6.3: CLI экспорта + пресет первого продукта + смоук `ml_train` (бывш. 2.3) [PENDING] — **открывает letters-retrain Ф1**
-- Task 6.4: `holdout_eval` на формуле конвейера (бывш. 2.4, О-1) [PENDING — волна 4, спека в phase-6-train.md] (после 6.1)
+- Task 6.4: `holdout_eval` на формуле конвейера (бывш. 2.4, О-1) [DONE `e18d22d44` — волна 4; реализация 1d618b0b, ревью ит.2 7fc0e8ec APPROVED] (после 6.1)
 - Task 6.5: сведение `DatasetEngine` к пресету слоёв и удаление второго пути сборки картинки (решение владельца 2026-10-01: «свести к одному») [PENDING] (после 6.2)
 
 ### Ф7 — источники спрайтов (бывш. 5.1–5.3) [PENDING] (после 2.4)
@@ -212,3 +212,4 @@
 - 2026-10-02 — волна 2 влита в `feat/layer-render` (1.3, 2.1, 5.3); 5.3 прошла 3 итерации — модель «флаг по имени» из спеки лида оказалась неверной, исправлена teamlead; стенд нашёл «перец» плитки (предложена Task 1.4).
 - 2026-10-02 — волна 3 {2.2 ∥ 6.1} + 1.4 (фильтр «перца»), режим «Компания v3»: спеки 1.4 (`phase-1.md`), 2.2 (`phase-2-core.md`), 6.1 (новый `phase-6-train.md`); ревью спеки до тестеров.
 - 2026-10-02 — волна 3 влита в `feat/layer-render` (2.2, 6.1, 1.4) + `main` 9602157cb (`99905c91`); радиус 1920 passed, 5 skipped; sentrux ✓. Ревью спеки до тестеров нашло 3 MAJOR в 2.2; каждая задача — 2 итерации ревью. Замер режима — `docs/claude/pilot-company-v3.md`. Владелец добавил Ф9 (редактор разметки на том же механизме).
+- 2026-10-02 — волна 4 влита в `feat/layer-render` (2.3 `ca0e6203a`, 6.4 `e18d22d44`); радиус 1597 passed, 3 skipped (layer_render, line_sim, ml_train, center_crop, dataset_gen). Инъекции лида: 2.3 — 12+1, 6.4 — 11+2, все красные. Ревью: 2.3 APPROVED с первой итерации (4 NIT/MINOR внесены до слияния), 6.4 — 2 итерации: MAJOR был в тексте лида (объяснение A7 по одному контролю опровергнуто перекрёстными). A7 на `real_photos` вида робота не меряет: кадры уже вырезаны, вырез уходит за край; честное число — после отложенной выборки полными кадрами. Открыто владельцу: тесты в `layer_render/tests` с импортом `line_sim` (3 файла) — оставить исключением или перенести; follow-up — `compose_layers` без слоёв на канве падает сырой `max()`.

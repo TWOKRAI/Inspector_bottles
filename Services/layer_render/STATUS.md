@@ -4,7 +4,7 @@ Task 1.1 (plans/layer-render): вертикальный срез «конфиг 
 Task 1.3: единственный способ задать фон сцены — `background_layers` (прежние одиночный тайл компоновщика и ключ
 фон-текстуры плагина удалены, LR-002); стенд `apps/line_sim` на `[solid чёрный, tile belt_tile.png]`.
 Task 2.2: фотометрические эффекты перенесены в `effects.py` как упорядоченный реестр; `apply_photometric` — одна строка над `apply_effects`.
-Task 6.1: одна функция квадратного выреза `crop.py` (`side_from_radius`, `square_crop`, `resize_square`); `center_crop` и `holdout_eval._crop_disk` делегируют, выход побайтно прежний (кроме: всегда копия; `replicate` без пересечения — `ValueError`). Карта — [docs/maps/crop.md](../../docs/maps/crop.md).
+Task 6.1: одна функция квадратного выреза `crop.py` (`side_from_radius`, `square_crop`, `resize_square`); `center_crop` и `holdout_eval._crop_disk` делегируют, выход побайтно прежний (кроме: всегда копия; `replicate` без пересечения — `ValueError`). С Task 6.4 `_crop_disk` режет по формуле конвейера (`side_from_radius` + `pad` + `resize_square`, побайтно равен `center_crop`); у `replicate` потребителей нет, режим оставлен как контракт. Карта — [docs/maps/crop.md](../../docs/maps/crop.md).
 Task 2.3: стек слоёв объекта — `layers.py` (`LayerSpec`/`LayerAugment`/`compose_layers` и ещё 8 имён); `line_sim.LayeredObject` — обёртка вокруг `compose_layers`, выход сима побайтно прежний.
 Решения пакета — [DECISIONS.md](DECISIONS.md). Карта зоны — [docs/maps/layer_render.md](../../docs/maps/layer_render.md).
 
