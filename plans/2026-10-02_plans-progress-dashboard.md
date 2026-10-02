@@ -2,8 +2,8 @@
 
 - **Slug:** plans-progress-dashboard
 - **Дата:** 2026-10-02
-- **Статус:** DRAFT (ред. 3 после двух раундов спец-ревью: N1–N4 и R1–R7 закрыты текстом)
-- **Plan review:** CHANGES 7 (р.1), CHANGES 4 (р.2) → ред. 3 на express-ревью teamlead
+- **Статус:** DRAFT (ред. 4 после трёх раундов спец-ревью (reviewer ×2, teamlead): B1–B3 teamlead и замечания 1–7 закрыты текстом)
+- **Plan review:** CHANGES 7 (р.1), CHANGES 4 (р.2) → CHANGES 3 (р.3, teamlead) → ред. 4; дальше тестер, без четвёртого раунда
 - **Ветка:** `feat/plans-progress`
 - **Зона:** мета, кросс-планы (`plans/`, `scripts/`, `.claude/`). Слои коммитов: `scripts` / `docs` / `infra`.
 
@@ -51,10 +51,10 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 
 ## Формат задачи (эталон)
 
-**Раздел:** заголовок `#{2,6}` с текстом `Порядок выполнения`, `Порядок` или `Execution order` (регистр не важен).
+**Раздел:** заголовок `#{2,6}`, текст которого **начинается** с `Порядок выполнения` / `Execution order` или **равен** `Порядок` (регистр не важен); так `## Порядок и окна` (framework-architecture-rework) не раздел. Раздел кончается на следующем заголовке уровня ≤ уровня раздела. Раздел ищется только в `plan.md` плана.
 **Пункт:** `- Task <id>: название [СТАТУС] (после <id>)`; допустим префикс `**` перед `Task`. Пункт тянется до следующего пункта, пустой строки или заголовка;
 **строки-продолжения принадлежат пункту** (статус может стоять на продолжении: `line-sim/plan.md:486–487`).
-**Статус:** первая группа в `[...]` или `**[...]**` внутри пункта, где встретилось слово набора; слово может стоять не первым (`[5.3a DONE 2026-09-23, …]`).
+**Статус:** сначала из текста пункта снимаются код-спаны (`` `…` ``): статус внутри обратных кавычек — цитата, не статус. Затем — первая группа `[...]` или `**[...]**`, содержащая слово набора; слово может стоять не первым (`[5.3a DONE 2026-09-23, …]`), но не примыкает к букве, `_` или `-` (`[DONE-ish]` → не статус). Группа идёт до парной `]` с учётом вложенности (`[DONE … [контракт](…)]`).
 **Набор:** `PENDING`, `IN PROGRESS`, `DONE`, `BLOCKED`, `DEFERRED`, `SUPERSEDED`; старые `SKIPPED`/`CANCELLED` → `SUPERSEDED`.
 **Хвост разрешён у любого статуса:** `[DONE 2026-10-02 — \`hash\`; числа]`, `[BLOCKED, частично]`, `[DEFERRED — после 4.1`. Дата вне скобок (`**[DONE] 2026-08-31**`) читается.
 **Один маркер на пункт:** `- [x]` рядом с `[DONE]` — то же дублирование. `~~Task X.Y~~` и «СНЯТА» → `SUPERSEDED`. Пункт без слова набора → `?`.
@@ -67,6 +67,8 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 **Набор задач плана (N1, одно правило для дашборда и ledger):** если в разделе есть хотя бы один пункт `Task` — набор = **только эти пункты**. Заголовки `### Task` и файлы `phase-*`
 дают тело и `STATUS_CONFLICT` для id из набора, но **новых id не добавляют** (старые `3.3`, `4.3`, `4.4` из прежней нарезки `layer-render` не попадают в набор). Раздела нет
 или в нём нет пунктов → набор из заголовков `#{2,6} Task <id>`, затем из таблицы карты (`✓`), затем из `tasks/<id>.md`.
+**Задача из заголовка** (плана без списка): статус — слово набора в `**Статус:**` её тела; иначе первая группа со словом набора в строке заголовка; иначе `DONE`, если все чекбоксы тела отмечены (как `is_task_closed` ledger); иначе `PENDING`. `?` бывает только у пункта списка.
+**Таблица `✓`:** читаются файлы `tasks.md`, `tasks-*.md` и `plan.md`; задача — строка, первая ячейка которой `[✓ ]*T<цифры>(.<буквы-цифры>)?`, кроме суффикса `.x` и строк `GATE-*`/`Ф*`; `✓` = `DONE`, иначе `PENDING`.
 **Приоритет двух статусов одной задачи:** пункт списка побеждает `**Статус:**`; расхождение — `STATUS_CONFLICT` (сейчас такие есть: 1.1, 1.3, 2.1, 5.3 у `layer-render`).
 **Процент** = `DONE / (всего − DEFERRED − SUPERSEDED − ?)`; `?` — не done, не pending, не в знаменателе, но в линте. Рядом всегда `N из M`.
 
@@ -83,7 +85,7 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 - `--json` → stdout, список: `{"plan": "<basename>", "path": "<rel>", "archived": bool, "lane": str|null, "tier": "4.1"|"4.2"|"4.3"|null, "done": int, "total": int, "dropped": int, "unknown": int, "tasks": [{"id","title","status","ref"}]}`.
   `total` — после вычета `dropped` (DEFERRED+SUPERSEDED) и `unknown`; `ref` — первый хеш в обратных кавычках из хвоста пункта или `null`.
 - `--html PATH` — по умолчанию `data/plans_progress.html`. Разметка: `<details class="plan" data-plan="<basename>">`, внутри `<summary>` с названием и `<progress value max>`; ячейка на задачу — `<span class="cell" data-status="done|pending|in_progress|blocked|deferred|superseded|unknown">`; архив — `<details id="archive">`.
-- `--check` — печатает находки; exit 1 при блокирующих, не вошедших в базу; иначе 0. `--baseline PATH` — файл строк `<план>:<КОД>`; находка из базы не блокирует (храповик: база только убывает).
+- `--check` — печатает находки; exit 1 при блокирующих, не вошедших в базу; иначе 0. `--baseline PATH` — файл строк `<план>:<КОД>` (для `UNKNOWN_STATUS` и `DUP_ID` — `<план>:<КОД>:<id>`, чтобы новая находка внутри уже известного плана не пряталась); находка из базы не блокирует (храповик: база только убывает).
 
 | Находка | Блокирует | Когда |
 |---|---|---|
@@ -94,8 +96,8 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 | `NO_DATE_IN_NAME` | нет | `close` не примет (54 из 59 планов) |
 | `ALL_DONE_NOT_ARCHIVED` | нет | в наборе нет `?` и `PENDING`/`IN PROGRESS`/`BLOCKED`, есть хотя бы один `DONE`; план не в архиве (допустимо `DONE` + `DEFERRED`) |
 
-**Храповик вместо «чинить чужие планы».** Находки, которые сегодня блокируют (оценка ревьюера: 25 `NO_TASKS`, 27 `UNKNOWN_STATUS` — из них после правила про продолжения и хвосты остаются единицы),
-записываются в `plans/queue/progress-baseline.txt` при Task 1.1; `validate.py` краснеет только на **новую** находку. Владельцы планов убирают строки из базы при касании.
+**Храповик вместо «чинить чужие планы».** Находки, которые сегодня блокируют (оценка ревьюера: 25 `NO_TASKS`, 27 `UNKNOWN_STATUS` — до правил продолжений, хвостов и «Задачи из заголовка»),
+записываются в `plans/queue/progress-baseline.txt` при Task 1.1 (прототип teamlead: на §4.1 `NO_TASKS` — 1 план, `UNKNOWN_STATUS` — от 1 до 14 строк в зависимости от правила для заголовочных задач; после правила «Задача из заголовка» число падает, замер — в итоге 1.1); `validate.py` краснеет только на **новую** находку. Владельцы планов убирают строки из базы при касании.
 Литерал приёмки: `--check --baseline plans/queue/progress-baseline.txt` на SHA сдачи Task 1.1 даёт exit 0; число строк базы и список — в итоге задачи.
 
 ## Архив
@@ -108,10 +110,11 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 
 | Риск | Механизм | Что сделано |
 |---|---|---|
-| Два парсера дают две правды | `close` решает ledger'ом, страница — новым парсером | Task 1.0 берёт **те же** regex id, набора и фазы; общий набор фикстур `scripts/tests/fixtures/plans_formats/` читают оба парсера; литералы по реальным планам (`layer-render` → 5 из 20, `gui-service` → 10 из 21) |
-| Правка 3005-строчного ledger ломает его гейты (`contract.lock`, `approve`) | регрессия чужого механизма | его тесты зелёные до и после; правка — четыре точки (хвост, набор из списка, фазы с суффиксом, id); исполнитель `teamlead` |
+| Два парсера дают две правды | `close` решает ledger'ом, страница — новым парсером | Task 1.0 берёт **те же** regex id, набора и фазы; общий набор фикстур `scripts/plans_progress/tests/fixtures/plans_formats/` читают оба парсера; литералы по реальным планам (`layer-render` → 5 из 20, `gui-service` → 10 из 21) |
+| Правка 3005-строчного ledger ломает его гейты (`contract.lock`, `approve`) | регрессия чужого механизма | его тесты зелёные до и после; правка — шаблон id в шести regex + `_ORDER_MARKER_RE` + `_PHASE_FILE_RE` + правило набора в `summarize_plan`; характеризационные тесты ДО правки; исполнитель `teamlead` |
 | Блок в `ORDER.md` рождает конфликты | две полосы перегенерируют один hunk; чистый merge оставляет устаревший блок | блок пишет **только лид в `main`** в точке слияния; дрейф блока `--check` проверяет только на `main` |
 | Страница устаревает | `data/` в `.gitignore`, у каждого дерева своя копия | страница собирается по запросу; в шапке время сборки и SHA |
+| `#{2,6}` и id `1.3a` включают `check_plan_gate` на задачах, которые он раньше не видел; ledger — общий сид claude-kit | в итоге 1.0: список новых гейт-находок; сдвиг fingerprint → `amendments.md`; зеркало и манифест правятся вместе с источником |
 | Коллизия id между файлами | `phase-2.md:13` хранит старую `### Task 2.1` (теперь 6.1) | правило набора (заголовки не добавляют id) + информационная `DUP_HEADING` |
 
 ## Бюджет
@@ -125,14 +128,16 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 
 **Цель фазы:** страница показывает правду по всем планам; `close` понимает эталон. Первый видимый результат — в 1.1 (минимальный HTML), 1.0 — слой под ним, пометка [VERTICAL SLICE] стоит на 1.1.
 
-- Task 1.0: правка `scripts/plans_ledger.py`: хвост в `[DONE …]` и слова `DEFERRED`/`SUPERSEDED` (словарь); набор задач из пунктов раздела порядка по правилу из «Формата» (с regex id и извлечением из строки); файлы фаз по regex `^phase-(\d+)[a-z]?(?:-[^.]*)?\.md$` [PENDING]
-  - **Assignee:** `teamlead` (Opus; правка файла с гейтами `contract.lock`/`approve`) · **Files:** `scripts/plans_ledger.py`, `scripts/tests/test_plans_ledger*.py`, `scripts/tests/fixtures/plans_formats/` · **Module contract:** impl-only · **Handoff:** итог — `plans/2026-10-02_plans-progress-dashboard.result-1.0.md` (SHA, числа приёмки, отступления)
-  - **Приёмка (литералы):** фикстуры a/b/c/d (строка списка с хвостом без заголовка; с `[DONE]`; с заголовком; оба) → `1/1` каждая; `layer-render/plan.md` → `5/20`; `2026-09-22_gui-service/plan.md` → `10/21`; `close` на `2026-10-02_etalon.md` с двумя `[DONE 2026-10-02 — …]` проходит без `--force`; все прежние тесты ledger зелёные.
-- Task 1.1: `scripts/plans_progress.py` — парсер по эталону (список, `#{2,6} Task` + `**Статус:**`, таблица с `✓`, `tasks/<id>.md`), поиск по имени, `--json`, `--check` с базой, **минимальный `--html` на один план** [VERTICAL SLICE] [PENDING] (после 1.0)
-  - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/plans_progress.py`, `scripts/tests/test_plans_progress.py`, `plans/queue/progress-baseline.txt` · **Module contract:** new-lite (докстрока модуля: интерфейс, Pre/Post) · **Handoff:** итог — `…result-1.1.md`
+- Task 1.0: правка `plans_ledger.py` по правилам «Формата»: хвост в `[DONE …]` и слова `DEFERRED`/`SUPERSEDED`; набор задач из пунктов раздела; regex id в **шести** местах (`:318, :319, :334, :571, :2391, :2412`) и `_TASK_STEM_RE` (`:322`); файлы фаз `^phase-(\d+)[a-z]?(?:-[^.]*)?\.md$`; `task_order_marker` без `(?!\d)`-протечки (`1b.2b-pre` не отдаёт статус `1b.2b`, `1b.2a` не отдаёт статус родителю `1b.2`); `status` печатает `done/(total−dropped)` [PENDING]
+  - **Assignee:** `teamlead` (Opus; файл с гейтами `contract.lock`/`approve`/`amend`) · **Files:** источник `.claude/plugins/core/scripts/plans_ledger.py`, зеркало `scripts/plans_ledger.py` (`diff -q` до и после; без этого `plugin upgrade --apply` перезапишет правку молча), строка хеша в `.claude/.delivery-manifest.json:44`, тесты `scripts/plans_progress/tests/test_ledger_*.py`, фикстуры `scripts/plans_progress/tests/fixtures/plans_formats/` · **Module contract:** impl-only · **Handoff:** итог — `plans/2026-10-02_plans-progress-dashboard.result-1.0.md` (SHA, числа приёмки, отступления, **список сдвигов fingerprint**)
+  - **Порядок внутри задачи:** сначала характеризационные тесты `contract_fingerprint`, `check_plan_gate`, `approve`/`amend` на копиях фикстур (**тестов ledger в репозитории сегодня ноль**) — зелёные на старом коде; потом правка; после — зелёные, кроме названных сдвигов.
+  - **Известный сдвиг:** `contract_files_fingerprint` у планов с `phase-N-имя.md` меняется (добавятся файлы; замер teamlead: `layer-render` +2 файла и `plan.md`, `gui-service` +4, `line-sim` +7). В репозитории нет ни одного `contract.lock` (`find plans -name contract.lock` → 0), поэтому здесь это не ломает утверждённые планы; ledger — общий сид claude-kit, сдвиг дойдёт до других проектов — записать в `amendments.md` и в итог.
+  - **Приёмка (литералы):** фикстуры a/b/c/d (пункт с хвостом без заголовка; с `[DONE]`; с заголовком; оба) → `1/1` каждая; пункт с `` `[PENDING]` `` в тексте и `[DONE]` в конце → `1/1`; `layer-render/plan.md` → `5/20` (не `5/23`); `2026-09-22_gui-service/plan.md` → `10/21` (не `12/22`); `line-sim/plan.md` → знаменатель без DEFERRED; `close` на `2026-10-02_etalon.md` с двумя `[DONE 2026-10-02 — …]` проходит без `--force`; характеризационные тесты зелёные до и после, кроме названных сдвигов fingerprint; `check_plan_gate` на `####`-задачах и id `1.3a` (появятся новые гейт-находки) — перечислены в итоге.
+- Task 1.1: `scripts/plans_progress/plans_progress.py` — парсер по эталону (список, `#{2,6} Task` + `**Статус:**`, таблица с `✓`, `tasks/<id>.md`), поиск по имени, `--json`, `--check` с базой, **минимальный `--html` на один план** [VERTICAL SLICE] [PENDING] (после 1.0)
+  - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/plans_progress/plans_progress.py`, `scripts/plans_progress/tests/`, `plans/queue/progress-baseline.txt` · **Module contract:** new-lite (докстрока модуля: интерфейс, Pre/Post) · **Handoff:** итог — `…result-1.1.md`
   - **Приёмка (вход для tester, литералы):** по фикстуре на каждый случай «Формата» — пункт с хвостом; статус на строке-продолжении; `[5.3a DONE …]`; `[BLOCKED, частично]`; `#### Task` + `**Статус:**`; таблица `✓`; `tasks/<id>.md`; родитель без маркера; `~~Task~~`; id `1b.2b-pre` и `T1`; `- **Task` вне раздела. Фикстура `DONE, PENDING, [DONE-ish]` → `done=1, total=2, unknown=1`, линт называет строку. Список `[DONE]` + `**Статус:** [PENDING]` → `done`, `STATUS_CONFLICT`. Фикстура §4.1 без задач → `NO_TASKS`, exit 1; та же в §4.3 → exit 0. Два пункта с одним id → `DUP_ID`, exit 1; два заголовка в двух файлах → exit 0. Новая находка вне базы → exit 1, та же в базе → exit 0. `layer-render` → 5 из 20, `gui-service` → 10 из 21.
 - Task 1.2: полный `--html`: шкалы по полосам, `<details>`, ячейки, секция «Архив», светлая и тёмная тема, без внешних ресурсов, порядок по «Охвату страницы» [PENDING] (после 1.1)
-  - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/plans_progress.py` · **Module contract:** impl-only · **Handoff:** `…result-1.2.md`
+  - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/plans_progress/plans_progress.py` · **Module contract:** impl-only · **Handoff:** `…result-1.2.md`
   - **Приёмка:** число `.cell` = число всех задач плана, включая `deferred`, `superseded`, `unknown` (знаменатель шкалы их не включает, ячейки — включают); у каждого плана с ≥1 задачей есть `<summary>` с `<progress>`; план из `plans/_archive/2026-Q4/` (фикстура) — внутри `#archive`; после обмена строк A↔B в таблице §4.1 план B идёт в HTML раньше A; план вне `ORDER.md` идёт после §4.3; ссылка из `ORDER.md` на путь, которого больше нет, не ломает страницу; ни одного `http(s)://` в `src`/`href`/`@import`.
 - Task 1.3: список расхождений `robot-protocol-v2` (таблица карты `tasks.md` против `ORDER.md` §2 Р) — **отчёт, не правка**: 13 выполненных по §2 Р против 7 `✓`; передать сессии полосы Р [PENDING] (после 1.1)
   - **Assignee:** лид · **Files:** `plans/2026-10-02_plans-progress-dashboard.result-1.3.md` (новый) · **Handoff:** список в сессию Р через лида · **Приёмка:** таблица «T-id → статус в `tasks.md` → статус по `ORDER.md` §2 Р → коммит, если известен»; для T2.0–T2.2, T2.K, T2.V хеша в источниках нет — так и записать.
@@ -149,4 +154,4 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
   - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/validate.py`, `.claude/plugins/dev/commands/{ship,plan-status}.md` (+ зеркала) · **Handoff:** `…result-2.2.md` · **Приёмка:** `validate.py` зелёный на реальном дереве; искусственная новая блокирующая находка → красный.
 - Task 2.3: `--sync-order` — блок между `<!-- progress:begin -->` и `<!-- progress:end -->` в `ORDER.md` (только активные планы; ушедшие в архив выпадают, остаётся счётчик «в архиве: N») [PENDING] (после 2.2)
   - **Писатель:** только лид в `main` в точке слияния ветки; дрейф блока `--check` проверяет только на `main`, в ветках — не проверяет. Отдельного испытательного срока нет: правило единственного писателя снимает риск конфликтов.
-  - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/plans_progress.py`, `plans/queue/ORDER.md` · **Handoff:** `…result-2.3.md` · **Приёмка:** правка статуса в плане → `--sync-order` меняет в `ORDER.md` только строки между маркерами (`git diff`); блок устарел на `main` → `--check` exit 1; вне `main` → exit 0.
+  - **Assignee:** `developer` (Sonnet) · **Files:** `scripts/plans_progress/plans_progress.py`, `plans/queue/ORDER.md` · **Handoff:** `…result-2.3.md` · **Приёмка:** правка статуса в плане → `--sync-order` меняет в `ORDER.md` только строки между маркерами (`git diff`); блок устарел на `main` → `--check` exit 1; вне `main` → exit 0.
