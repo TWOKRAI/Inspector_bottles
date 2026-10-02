@@ -169,10 +169,18 @@ def test_h3_short_name_not_compacted():
 # --- Task 4.7b: orphan prefix cleanup видит имена, которые строит _unique_base_name ---
 
 
-def test_prefix_cleanup_matches_uncollapsed_name():
-    """Имя уместилось в лимит → полное базовое slot-имя остаётся префиксом (литерал)."""
-    from multiprocess_framework.modules.shared_resources_module.buffers.cleanup import _matches_any_prefix
+def test_prefix_cleanup_matches_uncollapsed_name(monkeypatch):
+    """Имя уместилось в лимит → полное базовое slot-имя остаётся префиксом (литерал).
 
+    Длина имени зависит от ГЛОБАЛЬНОГО счётчика инкарнаций (растёт за прогон — после ~100 созданий имя
+    схлопывается) и от числа цифр pid: счётчик и pid фиксируем, иначе тест зависит от порядка прогона."""
+    import itertools
+
+    from multiprocess_framework.modules.shared_resources_module.buffers.cleanup import _matches_any_prefix
+    from multiprocess_framework.modules.shared_resources_module.memory.platform import shm as shm_mod
+
+    monkeypatch.setattr(shm_mod, "_incarnation", itertools.count(1))
+    monkeypatch.setattr(shm_mod.os, "getpid", lambda: 4242)
     name = _unique_base_name("output_frames", owner="cam")
     assert len(name) <= _MAX_BASE_NAME_LEN and name.startswith("output_frames_cam_")
     assert _matches_any_prefix(f"{name}_0", ["output_frames"])
