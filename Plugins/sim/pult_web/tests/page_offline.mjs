@@ -789,6 +789,17 @@ async function run() {
       } catch (e) { return null; }
     };
     const layoutCount = () => fetchLog.filter((e) => e.path === "/api/preset/layout" && e.method === "POST").length;
+    // Task 5.3 (аддитивно): узел по id — сперва среди потомков #presetLayers (страница могла создать его через
+    // createElement и назначить id), иначе реестр getElementById (разметка через innerHTML + привязка по id).
+    const findNode = (id) => {
+      const stack = [...(el("presetLayers").children || [])];
+      while (stack.length) {
+        const n = stack.pop();
+        if (n && n.id === id) return n;
+        if (n && n.children) stack.push(...n.children);
+      }
+      return el(id);
+    };
     const press = (at, button) => {
       held = button || 0;
       cv.fire("pointerdown", ptr(at, { button: held, buttons: mask(held) }));
@@ -917,6 +928,71 @@ async function run() {
         el(st.id).value = String(st.value);
         el(st.id).fire("change");
         await sleep(10);
+      } else if (st.op === "press_mod" || st.op === "click_mod") {
+        // Task 5.3 (аддитивно): нажатие указателя с модификатором (`shift`); `press`/`click` его не умеют.
+        // press_mod оставляет кнопку зажатой (дальше move/release), click_mod сразу отпускает.
+        const b = st.button || 0;
+        held = b;
+        cv.fire("pointerdown", ptr(st.at, { button: b, buttons: mask(b), shiftKey: !!st.shift }));
+        await sleep(5);
+        if (st.op === "click_mod") {
+          cv.fire("pointerup", ptr(st.at, { button: b, buttons: 0, shiftKey: !!st.shift }));
+          held = null;
+          await sleep(5);
+        }
+      } else if (st.op === "key_mod") {
+        // Task 5.3 (аддитивно): как `key`, плюс ctrl/meta. Источник: BODY / ACTIVE / <tagName> / канва.
+        const tgt = st.target === "BODY" ? doc.body : st.target === "ACTIVE" ? doc.activeElement
+          : st.target ? { tagName: st.target } : cv;
+        for (let r = 0; r < (st.times || 1); r++) {
+          doc.fire("keydown", {
+            key: st.key, code: st.code || st.key, shiftKey: !!st.shift, ctrlKey: !!st.ctrl, altKey: false,
+            metaKey: !!st.meta, repeat: r > 0, target: tgt, preventDefault() { out.pd.push(st.key); },
+          });
+        }
+        await sleep(40);
+      } else if (st.op === "toggle") {
+        // Task 5.3 (аддитивно): пользователь щёлкает чекбокс по id. Как браузер: фокус на чекбокс (tagName INPUT —
+        // горячие клавиши страницы в нём игнорируются), `checked` = st.checked, затем click/input/change на узле
+        // и (для чекбоксов строк слоя) те же события «всплывают» до #presetLayers с target = узел.
+        const node = findNode(st.id);
+        node.tagName = "INPUT";
+        node.checked = !!st.checked;
+        node.focus();
+        for (const t of ["click", "input", "change"]) node.fire(t);
+        if (/^preset(Vis|Lock)\d+$/.test(st.id)) {
+          for (const t of ["click", "input", "change"]) el("presetLayers").fire(t, { target: node });
+        }
+        await sleep(40);
+      } else if (st.op === "type_field") {
+        // Task 5.3 (аддитивно): ввод в числовое поле как у пользователя — значение, затем input и change
+        // (`set_field` шлёт только change). Узел — через findNode (как у toggle).
+        const node = findNode(st.id);
+        node.value = String(st.value);
+        node.fire("input");
+        node.fire("change");
+        await sleep(20);
+      } else if (st.op === "pixel") {
+        // Task 5.3 (аддитивно): RGBA пикселя ОСНОВНОЙ канвы (смещение `at` от центра канвы, как у указателя).
+        const px = Math.trunc(cv.width / 2 + st.at[0]), py = Math.trunc(cv.height / 2 + st.at[1]);
+        const d = cv.getContext("2d").getImageData(px, py, 1, 1).data;
+        (out.pixels ||= {})[st.tag] = [d[0], d[1], d[2], d[3]];
+      } else if (st.op === "snap_ui") {
+        // Task 5.3 (аддитивно): состояние чекбоксов (`checked`: свойство узла), число запросов /api/preset*,
+        // разбор строк слоёв (id потомков и их разметка — где страница положила presetVis{i}/presetLock{i}).
+        const checked = {};
+        (st.checked || []).forEach((id) => { checked[id] = !!findNode(id).checked; });
+        const walk = (n, acc) => {
+          if (n.id) acc.ids.push({ id: n.id, type: n.type === undefined ? null : n.type, checked: !!n.checked });
+          if (typeof n.innerHTML === "string" && n.innerHTML) acc.markup += n.innerHTML;
+          (n.children || []).forEach((c) => walk(c, acc));
+          return acc;
+        };
+        (out.ui ||= {})[st.tag] = {
+          checked,
+          fetchCount: fetchLog.filter((e) => e.path.indexOf("/api/preset") === 0).length,
+          rowInfo: (el("presetLayers").children || []).map((r) => walk(r, { ids: [], markup: "" })),
+        };
       } else if (st.op === "snap") {
         const fields = {};
         (st.ids || []).forEach((id) => { fields[id] = el(id).value; });

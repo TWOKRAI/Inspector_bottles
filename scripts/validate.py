@@ -75,6 +75,7 @@ SERVICES = [
     "sql",
     "hikvision_camera",
     "otel_export",
+    "layer_render",
 ]
 
 # Сервисы, для которых требуется interfaces.py (Protocol-контракт)

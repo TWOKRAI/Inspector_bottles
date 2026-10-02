@@ -23,7 +23,7 @@ from Services.line_sim import (
 | `LayerAugment` | `interfaces.py` | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params`; `to_dict()`/`from_dict()` — Dict at Boundary (Task 3.4) |
 | `SceneCompositorProtocol` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` (переименован из `SceneCompositor` при подключении конкретного класса, LS-009) |
-| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), background_tile=None, belt_direction=1, entry_x_px=0.0, background_layers=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; фон-тайл — Task 3.6; `background_layers` — стек слоёв фона из `Services/layer_render` (взаимоисключающе с `background_tile`, цвета RGB); `belt_direction`/`entry_x_px` — Task 5.3b |
+| `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), belt_direction=1, entry_x_px=0.0, background_layers=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; `background_layers` — стек слоёв фона из `Services/layer_render` (цвета RGB), единственный способ положить тайл под объекты; `belt_direction`/`entry_x_px` — Task 5.3b |
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
 | `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
@@ -305,21 +305,19 @@ passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px + passport.lateral_
 калибровка рецепта по вертикали — 78.4 мм / 481 px = 6.135 px/мм: для 20 px это 2.45 мм (сим)
 против 3.26 мм (прототип), ≈0.8 мм невязки `pick_error`.
 
-### Фон-текстура (Task 3.6, LS-011)
+### Фон-тайл (Task 3.6, LS-011; с layer-render 1.3 — через `background_layers`, LS-015)
 
-`SceneCompositor(..., background_tile=None)` — необязательный тайл фона, RGB `uint8`
-`(th, tw, 3)`; иное — `ValueError` в конструкторе. Компоновщик хранит копию и файлов не читает
-(файл читает плагин, ключ `background_texture`).
+Тайл кладётся слоем `tile` стека `SceneCompositor(..., background_layers=[SolidFill(...), ScrollingTile(...)])`
+(`Services/layer_render`, схема — его README). Компоновщик файлов не читает (файл читает плагин по `background_layers`).
+Миграция: параметр `background_tile` и ключ плагина `background_texture` удалены — вместо них `background_layers: [{solid: [R, G, B]}, {tile: <путь>}]`.
 
 - По X тайл прокручивается на `shift_px = round(encoder_to_offset_mm(now_encoder, 0) *
-  px_per_mm)`: столбец кадра `u` показывает столбец тайла `(u + round(x_px) - shift_px) mod tw`.
+  px_per_mm)`: столбец кадра `u` показывает столбец тайла `(u + round(x_px) - belt_direction * shift_px) mod tw`.
   Формула и `px_per_mm` те же, что у объектов, поэтому объект стоит на одном месте рисунка ленты
   при любом ходе энкодера, в том числе назад. Тайл не растягивается: уже кадра — повторяется.
 - По Y тайл кладётся по центру линии ленты: верх `round(belt_y_px - th/2)`, строки вне полосы
-  закрашиваются `background_bgr`.
-- `background_tile=None` — кадр байт в байт как в 3.4.
-- `background_layers=None` — прежняя ветка заливки/тайла нетронута; задан — заменяет заливку и тайл
-  (вместе с `background_tile` — `ValueError`), сдвиг и `belt_direction` те же. Схема — `Services/layer_render/README.md`.
+  закрашиваются нижележащим слоем стека.
+- `background_layers=None` — сплошная заливка `background_bgr`, кадр байт в байт как в 3.4.
 
 ## `core/matching.py` — job↔object matching (Task 3.5a, LS-012)
 
@@ -390,7 +388,7 @@ python -m Services.line_sim.tools.make_seamless_texture фото.jpg --out data/
 - **зеркало** — `[фото | фото отражённое]`, шов ровно 0 по построению; кросс-фейда нет.
 
 Вывод — токены `method= period_px= seam_diff= inner_diff= scale= size=` и строка для конфига
-стенда `background_texture: <out>`. С `--pitch-mm` добавляются `source_period_px=` и
+стенда `background_layers: [{solid: [0, 0, 0]}, {tile: <out>}]`. С `--pitch-mm` добавляются `source_period_px=` и
 `links_in_photo=` — **сверить с числом звеньев на фото**: корреляция может взять двойной
 или половинный шаг звена (два шарнира на звено, звенья через одно темнее), и тогда масштаб
 выйдет вдвое не тем. `period_px` этого не покажет — после масштаба он равен `S·M` по
