@@ -18,6 +18,7 @@ from . import frame_trace
 from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
 from ...router_module.middleware.frame_shm_middleware import SHM_DROPPED_KEY, SHM_VIEWS_KEY, FrameShmMiddleware
+from ...router_module.middleware.not_inspected_marker import build_marker, is_marker, meta_from_msg
 from .collector_registry import ItemCollector
 
 
@@ -90,7 +91,14 @@ class DataReceiver:
         # меряется: глубина > B - lag -> счётчик. B = 0 — получатель не за кольцом, не меряем.
         self._inflight_budget = max(0, int(inflight_budget))
         self._ipc_depth_fn = ipc_depth_fn
+        if overflow not in ("latest", "every"):
+            raise ValueError(f"overflow={overflow!r} — expected 'latest' or 'every'")
         self._overflow = overflow
+        # Task 4.7d-2a: сколько items (не коллекций) выбросил потолок; под every — сколько из них
+        # заменено маркерами lag / сколько сообщений с нечитаемой SHM-ссылкой стали маркерами.
+        self._lag_dropped_items = 0
+        self._not_inspected_lag = 0
+        self._not_inspected_stale_restore = 0
         self._ipc_queue_depth: int | None = None
         self._transit_over_budget = 0
         self._log_info = log_info or (lambda msg: None)
@@ -145,6 +153,12 @@ class DataReceiver:
         # Task 4.7c (C3): число для планирования мощности; ключ только у получателя за кольцом (B > 0).
         if self._inflight_budget > 0:
             metrics["transit_over_budget"] = self._transit_over_budget
+        # Task 4.7d-2a: items, выброшенные потолком (в любом режиме); маркерные счётчики — только every.
+        if self._max_lag_items > 0:
+            metrics["lag_dropped_items"] = self._lag_dropped_items
+        if self._overflow == "every":
+            metrics["not_inspected_lag"] = self._not_inspected_lag
+            metrics["not_inspected_stale_restore"] = self._not_inspected_stale_restore
         return metrics
 
     def _note_ipc_depth(self) -> None:
@@ -248,11 +262,28 @@ class DataReceiver:
             excess = len(frame_idx) - self._max_lag_items + 1
             if excess > 0:
                 for i in reversed(frame_idx[:excess]):  # с конца: индексы оставшихся не плывут
-                    del pending[i]
+                    victim = pending[i]
+                    self._lag_dropped_items += len(victim)  # считаем ДО замены/удаления
+                    if self._overflow == "every":
+                        # Кадр заменяется на месте легкими маркерами (4.7d-2a): длина очереди не меняется.
+                        markers = _StampedBatch(
+                            build_marker(it if isinstance(it, dict) else {}, reason="lag", source=self._node)
+                            for it in victim
+                        )
+                        markers.enq_ts = time.perf_counter()
+                        pending[i] = markers
+                        self._not_inspected_lag += len(victim)
+                    else:
+                        del pending[i]
                 dropped = excess
-                # Приёмник — единственный производитель chain_queue, поэтому notify защитный и сегодня
-                # ненаблюдаем (замер: без него все тесты зелёные).
-                chain.not_full.notify(dropped)
+                if self._overflow == "every":
+                    freed = self._coalesce_markers(pending)
+                    if freed:
+                        chain.not_full.notify(freed)  # склейка освободила место блокированному put
+                else:
+                    # Приёмник — единственный производитель chain_queue, поэтому notify защитный и сегодня
+                    # ненаблюдаем (замер: без него все тесты зелёные).
+                    chain.not_full.notify(dropped)
         try:
             chain.put_nowait(items)
         except queue.Full:
@@ -262,6 +293,28 @@ class DataReceiver:
             return False
         self._note_lag_drops(dropped)
         return True
+
+    @staticmethod
+    def _is_marker_collection(items: list[dict]) -> bool:
+        """Коллекция целиком из маркеров переполнения (и не пустая)."""
+        return bool(items) and all(isinstance(it, dict) and is_marker(it) for it in items)
+
+    @classmethod
+    def _coalesce_markers(cls, pending) -> int:
+        """Склеить соседние маркер-коллекции в ту, что раньше (её ``enq_ts`` сохраняется).
+
+        Зовётся под ``chain.mutex``. Возвращает, сколько коллекций убрано из очереди.
+        """
+        freed = 0
+        j = 0
+        while j < len(pending) - 1:
+            if cls._is_marker_collection(pending[j]) and cls._is_marker_collection(pending[j + 1]):
+                pending[j].extend(pending[j + 1])
+                del pending[j + 1]
+                freed += 1
+            else:
+                j += 1
+        return freed
 
     @staticmethod
     def _is_frame_collection(items: list[dict]) -> bool:
@@ -384,6 +437,11 @@ class DataReceiver:
                 # 4.4c: item атомарен — сообщение с нечитаемой SHM-ссылкой отброшено целиком
                 # (метку ставит restore_frame, счётчик уже учтён там). Ни item, ни ``mask=None``.
                 if self._is_shm_dropped(msg):
+                    if self._overflow == "every":
+                        # 4.7d-2a: потерянный кадр не исчезает молча — вместо него идёт маркер, мимо коллектора.
+                        marker = build_marker(meta_from_msg(msg), reason="stale_restore", source=self._node)
+                        self._not_inspected_stale_restore += 1
+                        self.on_items_ready([marker])
                     continue
 
             # Task 4.5d: время транспорта — до построения item, чтобы штамп не утёк в него.
@@ -399,8 +457,12 @@ class DataReceiver:
                 # frame-trace: время передачи от предыдущего узла к этому.
                 frame_trace.record_transport(item, self._node)
 
-                # Передать в коллектор
-                self._collector.on_item(item)
+                if is_marker(item):
+                    # 4.7d-2a: пришедший по IPC маркер не склеивается коллектором — отдельной коллекцией.
+                    self.on_items_ready([item])
+                else:
+                    # Передать в коллектор
+                    self._collector.on_item(item)
 
             # Полный цикл обработки одного сообщения → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)

@@ -38,6 +38,25 @@ def build_marker(meta: dict[str, Any], *, reason: str, source: str) -> dict[str,
     return marker
 
 
+def meta_from_msg(msg: dict[str, Any]) -> dict[str, Any]:
+    """Метаданные для ``build_marker`` из IPC-сообщения — по правилам ``DataReceiver._build_item``.
+
+    ``trace_id`` / ``capture_ts`` — из ``msg["data"]``; ``frame_id`` / ``camera_id`` — из ``data``,
+    иначе из ``msg``. Ключ копируется по наличию, не по истинности (значение 0 сохраняется).
+    """
+    data = msg.get("data") or {}
+    meta: dict[str, Any] = {}
+    for key in ("trace_id", "capture_ts"):
+        if key in data:
+            meta[key] = data[key]
+    for key in ("frame_id", "camera_id"):
+        if key in data:
+            meta[key] = data[key]
+        elif key in msg:
+            meta[key] = msg[key]
+    return meta
+
+
 def is_marker(item: dict[str, Any]) -> bool:
     """Маркер переполнения — не любой кадр с тегом ``not_inspected`` (тег сбоя плагина идёт с кадром)."""
     return item.get("overflow_marker") is True and item.get("inspection_status") == NOT_INSPECTED
