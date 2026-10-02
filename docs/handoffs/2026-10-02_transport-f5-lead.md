@@ -22,10 +22,10 @@
 | ревью спек 5.2/5.3/5.4 | все три CHANGES REQUESTED — [`docs/reviews/2026-10-02_phase5-spec-review-w2.md`](../reviews/2026-10-02_phase5-spec-review-w2.md). **Правки в phase-5.md НЕ внесены** |
 | 5.5 диагноз | `8cd6a60b2` (ветка t55): 10 красных с вердиктом; segfault не воспроизведён (5 прогонов) |
 | 5.5A код | `c8a1853f4` (ветка t55): socket read-loop `_dead` → break, Path `as_posix()`, `get_std_logger` в field_meta/sdk_reader |
-| инъекции 5.5A | I1/I2/I4 живы по предсказанию; **I3 пустая** (заплата сломала сбор) — [`docs/reviews/2026-10-02_task-5.5a-injections/`](../reviews/2026-10-02_task-5.5a-injections/) |
+| инъекции 5.5A | I1–I4 живы по предсказанию (I3 переделана: заплата после `from __future__`) — [`docs/reviews/2026-10-02_task-5.5a-injections/`](../reviews/2026-10-02_task-5.5a-injections/) |
 
 ## Следующие шаги (по порядку)
-1. Переделать I3 (заплату в `field_meta.py` ставить после импортов модуля), записать итог.
+1. ~~Переделать I3~~ — сделано, жива.
 2. Дозвать `dev-t55` (agentId ниже) на **5.5B** — тестовые правки, ≤ 6 файлов: снимки вместо пинов (`test_hot_rebuild_provenance_acceptance.py:309-322`, `test_catalog_kind_roundtrip.py:67`); `test_second_sender_to_stuck_socket` — 2 прогревочных `send` + `warnings.clear()`; `test_yaml_io.py::test_update_yaml_preserving_keeps_file_mode` — skipif win32; `test_remote_frame_source.py::test_r2_*` — skipif win32 (вердикт рассуждением); `test_reader_gone_hazards.py` H8/H9 — PYTHONPATH из `__file__`, не `os.getcwd()`; литерал `_EXPECTED_FRAMEWORK_METRICS` (`tests/test_declarations_leak_session_catalogue_guard.py:34`) — 5 → 10 имён (проверить объявления в `process_module/heartbeat/`). Два брифа по ≤ 6 файлов (лимит хука).
 3. Инъекции 5.5B → ревьюер 5.5 (синхронно) → `make gate` в `/dev:ship` (`.claude/plugins/dev/commands/ship.md` + зеркало `.claude/commands/dev/ship.md`) → полный прогон → слияние t55 в main (SHA соседу 60 заранее).
 4. Внести правки ревью спек в 5.2/5.3/5.4 (решения лида уже приняты: широкая запись несёт `trace_ids`+`count`, 5.6 считает Σcount; `cmd_set_delay` пишет `transit_ms` с WARNING; чанк — жадная упаковка неделимых входов; `capture_ts None` → min/max по не-None; 5.4 — keyword-only `system_ready_event` через `kwargs`). Дозвать ревьюера спек по agentId на итерацию 2.

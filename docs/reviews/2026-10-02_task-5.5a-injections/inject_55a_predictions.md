@@ -11,3 +11,4 @@ I4 sdk_reader: вернуть logging.getLogger → +1: тот же тест.
 - I2: 2 failed — + test_fieldinfo_path_default_goes_as_str. **Совпало.**
 - I3: **пустая** — вывода нет: заплата (строки перед модулем) сломала сбор тестов. Свойство «field_meta без голого логгера» инъекцией НЕ доказано. Переделать: заплату ставить после импортов модуля.
 - I4: 2 failed — + test_no_bare_stdlib_logger_outside_whitelist. **Совпало.**
+- I3 v2 (заплата после `from __future__ import annotations`): `2 failed, 83 passed, 2 skipped` — + test_no_bare_stdlib_logger_outside_whitelist. **Совпало.** Свойство «field_meta без голого логгера» доказано. Урок v1: строки до `from __future__` ломают модуль целиком — сбор пуст, а не «тест зелёный».

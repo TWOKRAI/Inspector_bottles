@@ -22,7 +22,14 @@ F_SDK = "Services/code_reader/core/sdk_reader.py"
 INJ = {
     "I1": [(F_SOCK, "                if client in self._dead:\n                    break\n", "")],
     "I2": [(F_FI, "return value.as_posix()", "return str(value)")],
-    "I3": [(F_FM, None, "import logging\n_inj_log = logging.getLogger(__name__)\n")],
+    # I3 v2: заплата ПОСЛЕ `from __future__` (v1 ставила строки до него — сбор падал, ось пуста)
+    "I3": [
+        (
+            F_FM,
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\nimport logging\n_inj_log = logging.getLogger(__name__)\n",
+        )
+    ],
     "I4": [(F_SDK, "_log = get_std_logger(__name__)", "import logging\n_log = logging.getLogger(__name__)")],
 }
 env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
