@@ -333,9 +333,23 @@ _PHASE_FILE_RE = re.compile(r"^phase-(\d+)[a-z]?(?:-[^.]*)?\.md$")
 _TASK_STEM_RE = re.compile(r"^" + _TASK_ID + r"$")
 _CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[([ xX])\]")
 _LIST_ITEM_RE = re.compile(r"^\s*[-*+]\s+")
-_ORDER_TITLE_RE = re.compile(
-    r"^(?:(?:порядок выполнения|execution order)\b|порядок\s*$)", re.IGNORECASE
-)
+_ORDER_TITLE_MARKUP_RE = re.compile(r"[*_`]")
+_ORDER_TITLE_NUMBER_RE = re.compile(r"^\d+[.)]\s*")
+
+
+def _is_order_title(level: int, title: str) -> bool:
+    """A «Порядок выполнения» / "Execution order" section heading: level 2-6;
+    ``*``/``_``/backticks and a leading ``3.``/``2)`` number are ignored; the
+    text starts with «порядок выполнения»/"execution order" or equals
+    «порядок» (``## Порядок и окна`` is not one). Same rule as
+    ``is_section_title`` of plans_progress.py — both parsers must agree."""
+    if not 2 <= level <= 6:
+        return False
+    text = _ORDER_TITLE_MARKUP_RE.sub("", title).strip().casefold()
+    text = _ORDER_TITLE_NUMBER_RE.sub("", text)
+    return text.startswith(("порядок выполнения", "execution order")) or (
+        text == "порядок"
+    )
 # A status word of the task format. It may carry a tail inside its group
 # (`[DONE 2026-10-02 — `hash`; …]`) and need not stand first in it
 # (`[5.3a DONE …]`), but it never touches a letter, `_` or `-` (`[DONE-ish]`
@@ -688,7 +702,7 @@ def _order_items(text: str) -> tuple[_OrderItem, ...]:
             flush()
             collecting_status = False
             level = len(heading.group(1))
-            if _ORDER_TITLE_RE.match(heading.group(2)):
+            if _is_order_title(level, heading.group(2)):
                 section_level = level
                 phase = None
                 continue
@@ -2006,7 +2020,7 @@ def contract_fingerprint(plan_md_text: str) -> str:
         heading = _HEADING_RE.match(line)
         if heading:
             level = len(heading.group(1))
-            if _ORDER_TITLE_RE.match(heading.group(2)):
+            if _is_order_title(level, heading.group(2)):
                 section_level = level
             elif section_level is not None and level <= section_level:
                 section_level = None
@@ -2640,7 +2654,7 @@ def _order_line_for_task(all_text: str, task_id: str) -> str | None:
         heading = _HEADING_RE.match(line)
         if heading:
             level = len(heading.group(1))
-            if _ORDER_TITLE_RE.match(heading.group(2)):
+            if _is_order_title(level, heading.group(2)):
                 section_level = level
                 continue
             if section_level is not None and level <= section_level:
