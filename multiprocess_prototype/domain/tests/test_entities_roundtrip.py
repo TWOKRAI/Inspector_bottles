@@ -412,6 +412,17 @@ class TestExtrasShorthandDriftGuard:
             "`extras: {cv_threads: N}` (так в TEMPLATE.yaml). Плоский `cv_threads: 4` на "
             "стенде 4.6 свернулся в metadata и не дошёл до процесса — проверено отказом"
         ),
+        "data_queue_maxsize": (
+            "явный размер data-очереди (Task 4.7c): extras-only, как chain_max_lag_items. "
+            "Форма в рецепте — `extras: {data_queue_maxsize: N}`; плоский ключ свернулся бы "
+            "в metadata и не дошёл до процесса (долг 4.7c, найден при вводе overflow)"
+        ),
+        "overflow": (
+            "политика переполнения latest|every (Task 4.7d-1): extras-only, как "
+            "chain_max_lag_items. Форма в рецепте — `extras: {overflow: every}`; плоский "
+            "`overflow: every` у процесса свернулся бы в metadata и стал нем — проверено "
+            "прогоном ревьюера"
+        ),
     }
 
     @staticmethod
@@ -516,7 +527,14 @@ class TestExtrasShorthandDriftGuard:
         )
 
         extras_only = self._framework_pick_keys() - set(ProcessConfig.model_fields)
-        assert extras_only == {"frame_ring_depth", "copy_out_targets", "chain_max_lag_items", "cv_threads"}, (
+        assert extras_only == {
+            "frame_ring_depth",
+            "copy_out_targets",
+            "chain_max_lag_items",
+            "cv_threads",
+            "data_queue_maxsize",
+            "overflow",
+        }, (
             f"состав extras-only ключей framework изменился: {sorted(extras_only)}. "
             "Такой ключ живёт только в extras (typed-поля не плодим, рычаг C6 №1) — "
             "проверьте, что домен доносит его форму, и обновите этот список."

@@ -59,6 +59,7 @@ NARROW_KEYS = (
     "queue_observability_evicted",
     "queue_observability_send_failed",
     "observability_delivery_failed",
+    "door_drops",  # 4.7d-3: всегда; not_inspected_door — только при every (узел без middleware — latest)
 )
 
 

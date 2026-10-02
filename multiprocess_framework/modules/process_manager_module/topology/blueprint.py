@@ -317,6 +317,13 @@ class ProcessConfig(SchemaBase):
         chain_max_lag_items = _pick("chain_max_lag_items", 0)
         # Task 4.7c: явный размер data-очереди (0 = авто из топологии, см. build_configs).
         data_queue_maxsize = _pick("data_queue_maxsize", 0)
+        # Task 4.7d-1: политика переполнения latest|every. Только extras, как chain_max_lag_items.
+        # Проверка явная и ДО GenericProcessConfig: ошибка pydantic-Literal имени процесса не несёт.
+        overflow = _pick("overflow", "latest")
+        if overflow not in ("latest", "every"):
+            raise ValueError(f"process {self.process_name!r}: overflow={overflow!r} — expected 'latest' or 'every'")
+        if overflow == "every":
+            base_kwargs["overflow"] = overflow
         if frame_ring_depth:
             base_kwargs["frame_ring_depth"] = int(frame_ring_depth)
         if copy_out_targets:

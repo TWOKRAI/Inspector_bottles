@@ -237,6 +237,16 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
    сигналом. Это семантика join, не дефект bound. Сигнал в маркер не переносится, потеря сигнала видна только как
    `lag_dropped_items`.
 
+**Ответы владельца (2026-10-01, до ревью спеки):**
+- Умолчание — `latest` для всех процессов, включая процессы с processing-плагинами (решение 1 подтверждено).
+- Отбраковщик на маркер `not_inspected` — `reject` по умолчанию, но **настраиваемо** (уточнение владельца): «в идеале
+  чтоб настраивалась и можно было бы потом делать алгоритм что с этим делать, но главное — система знает, что это за
+  тип объекта». Отсюда: регистр `robot_control.not_inspected_action: reject | pass` (умолчание `reject`), а тип объекта
+  задаёт контракт маркера (`is_marker`, `reason`, `source`, `trace_id`) — любой плагин с `accepts_markers = True`
+  может завести свой алгоритм поверх него. Сам «алгоритм» — вне 4.7d.
+- Тег `not_inspected` от сбоя плагина (кадр с картинкой, сегодня уходит как `pass`) — **отдельной задачей после 4.7d**,
+  в 4.7d-4 не входит.
+
 **Что код делает сегодня (сверка по `23f872bce`, от неё зависят шаги):**
 - Нигде в коде нет читателя `inspection_status`. Тег ставят `PluginOperationStep` (сбой плагина) и `SuspectTagStep`, но
   `RobotControlPlugin.process` решает только по `item["detections"]`: item без детекций получает `action: "pass"`.
@@ -245,10 +255,20 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 - `frame_stale_drops` = `reader.stale_drops` + отвязанные сегменты + `note_stale_drops`. Один счётчик reader'а бьют
   restore, pre-chain, post-chain и дверь, по месту дроп не различить. Поэтому формула приёмки сводится по сумме (ниже).
 - Pre-chain stale считает входы (`1 + note_stale_drops(len(items)-1)`), post-chain — выходы
-  (`pipeline_executor.py:262-267`; 2→1 даёт 2 против 1, 1→3 даёт 1 против 3). Дверь считает выходы
+  (`pipeline_executor.py:264-268`; 2→1 даёт 2 против 1, 1→3 даёт 1 против 3). Дверь считает выходы
   (по одному на item). После 4.7d-2 post-chain считает входы, как pre-chain; дверь остаётся по выходам.
-- Пост-проверка `valid` стоит ПОСЛЕ `if not items: return` (`pipeline_executor.py:258-260`): при пустом выходе и
-  устаревшем view reader уже прибавил 1, но батч «не дропнут». 4.7d-2 ставит проверку `valid` раньше.
+- `valid` вычисляется на `pipeline_executor.py:254`, до `if not items: return` (`:258`), но ветка `if not valid`
+  (`:264-268`) стоит ПОСЛЕ него: при пустом выходе и устаревшем view reader уже прибавил 1, а батч «не дропнут».
+  4.7d-2 переносит ветку `if not valid` выше `:258`.
+- `lag_dropped_total` — свойство `DataReceiver` (`data_receiver.py:281`), не ключ `get_cycle_metrics()` (ревью спеки).
+- **После 4.7b (main `6e0fbec0b`, ветка 4.7d перебазирована на `d60bd59ad`):** флагов `FW_SHM_ZERO_COPY`,
+  `HANDLE_CACHE`, `OWNER_INCARNATION` больше нет (resolve по ним — `KeyError`), zero-copy — единственный режим, у item
+  с кадром всегда есть `_shm_views`. Тесты 4.7d флаги НЕ включают. Вход плагина — read-only view (контракт 4.7b,
+  `process_module/plugins/base.py`). Отбрасывание сообщения в полёте при realloc ключа (C7) — ещё один путь отказа
+  restore, маркер `stale_restore`.
+- Под `FW_PORT_VALIDATE=1` маркер на плагине с обязательными портами (`robot_control`: `frame`, `detections`) падает
+  в `PortValidationError` (`plugin_runner.py:153-159`, `port.py:187`) → `on_fail`, breaker растёт.
+- Полный разбор кода по подсистеме — [`docs/maps/transport.md`](../../docs/maps/transport.md).
 - «torn@exec» в коде нет: `_run_batch` видит только расхождение поколения (stale). Torn (перезапись во время чтения)
   возникает на restore (`frame_torn_reads`) и входит в причину `stale_restore`.
 
@@ -269,14 +289,18 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 
 **Счётчики (имена фиксированы, их читает слепой tester):**
 - `DataReceiver.get_cycle_metrics()`: `lag_dropped_items` (при `chain_max_lag_items > 0`, любой режим; сумма
-  `len(coll)` выброшенных коллекций; `lag_dropped_total` остаётся числом коллекций); `not_inspected_lag`,
+  `len(coll)` выброшенных коллекций; свойство `lag_dropped_total` остаётся числом коллекций и ключом не становится);
+  `not_inspected_lag`,
   `not_inspected_stale_restore` — только при `every`.
 - `PipelineExecutor.get_cycle_metrics()`: `not_inspected_stale_exec` — только при `every`; `not_inspected_handled` —
-  всегда: сколько маркер-item'ов прошло через `_forward_markers` (рождённые в этом процессе на restore/bound/exec и
+  всегда: сколько маркер-item'ов отправил исполнитель (через `_forward_markers` или, на post-chain stale, прямо через
+  `_send_results`; рождённые в этом процессе на restore/bound/exec и
   пришедшие сверху). Дверные маркеры сюда не входят.
 - `FrameShmMiddleware`: свойство `door_drops` (всегда; выходов, дропнутых дверью по `_inputs_still_valid`; это
   подмножество `frame_stale_drops`, не добавка к нему) и `not_inspected_door` (только при `every`; рождено, не
-  доставлено: при fan-out на N целей одно рождение = N доставок).
+  доставлено: при fan-out на N целей одно рождение = N доставок). Наружу — ключами `door_drops` / `not_inspected_door`
+  в `RouterManager.get_shm_stats` (набор ключей закрыт, `router_manager.py:1785-1804`; без этого слагаемое двери на
+  стенде не прочитать).
 - Публичное read-only свойство `overflow` у `DataReceiver`, `PipelineExecutor`, `FrameShmMiddleware`.
 - При `latest` ключей `not_inspected_lag`, `not_inspected_stale_restore`, `not_inspected_stale_exec`,
   `not_inspected_door` нет вовсе (не нули).
@@ -288,161 +312,248 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 стенде под `every` равен 0; не ноль — находка по мощности, не дефект 4.7d. Дроп по исчерпанию займа (loan заморожен),
 дроп при остановке (`stop_event` в `on_items_ready`) и дроп по `frame_id`-разрыву в формулу не входят.
 
-**Порядок и независимость.** 4.7d-1 первой. После неё 4.7d-2, 4.7d-3, 4.7d-4 независимы друг от друга (общих файлов
-нет) и идут параллельно. 4.7d-3 правит `frame_shm_middleware.py`, как и 4.7b: идти после слияния 4.7b или
-перебазироваться (разные методы, текстуально конфликта быть не должно). 4.7d-5 — после 2 и 3. Слепой tester — на
-каждую подзадачу до кода, в worktree на коммите этого раздела.
+**Порядок и независимость (после ревью спеки).** 4.7d-1 первой; `frame_shm_middleware.py` она НЕ трогает (проводка
+`overflow` в middleware перенесена в 4.7d-3), поэтому от 4.7b не зависит. После неё 4.7d-2 и 4.7d-4 независимы
+(общих файлов нет) и идут параллельно. 4.7d-3 правит `frame_shm_middleware.py` и `router_manager.py` (зона 4.7b) —
+после слияния 4.7b в main (выполнено 2026-10-02, `6e0fbec0b`); перед правкой `router_manager.py` — сообщить чату
+transport. 4.7d-5 — после 2, 3 и 4. Слепой tester — на каждую подзадачу до кода, в worktree на коммите
+перед реализацией.
 
-###### 4.7d-1 — Ключ рецепта и контракт маркера (4 кода-файла, developer)
+**Общее для всех acceptance с view/SHM:** zero-copy — единственный режим после 4.7b, флагов нет. Тест, который может заблокироваться
+(полная `chain_queue`, `put` без `_stop_event`), гоняет вызов в daemon-потоке с дедлайном на `join`, а не висит.
+
+###### 4.7d-1 — Ключ рецепта и контракт маркера (6 кода-файлов, developer)
 **Files:** новый `multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py`,
 `multiprocess_framework/modules/process_module/generic/generic_process_config.py`,
 `multiprocess_framework/modules/process_manager_module/topology/blueprint.py` (`as_generic_config`, по образцу `_pick`
-у `chain_max_lag_items`), `multiprocess_framework/modules/process_module/generic/generic_process.py` (чтение
-`overflow` из `app_cfg` и передача в `DataReceiver`, `PipelineExecutor`, `FrameShmMiddleware`; сами они меняются в 4.7d-2/3,
-здесь только проводка и kwarg `overflow="latest"` в их конструкторах).
+у `chain_max_lag_items`; typed-поля `ProcessConfig.overflow` нет, ключ живёт только в `extras`, как у
+`chain_max_lag_items` и `frame_ring_depth`), `multiprocess_framework/modules/process_module/generic/generic_process.py`
+(чтение `overflow` из `app_cfg` и передача в `DataReceiver`, `PipelineExecutor`),
+`process_module/generic/data_receiver.py` и `process_module/generic/pipeline_executor.py` — ТОЛЬКО kwarg
+`overflow="latest"` в конструкторе и read-only свойство `overflow`; поведение не меняется (оно — 4.7d-2).
+`FrameShmMiddleware` в 4.7d-1 не трогается (его проводка — 4.7d-3, после 4.7b).
 **Steps:** 1. Модуль маркера по контракту выше. 2. Поле `GenericProcessConfig.overflow: Literal["latest","every"] = "latest"`;
-`build()` кладёт `config["overflow"]` только при `every`. 3. `_pick("overflow", "latest")` в `as_generic_config`, ошибка
-сборки на неизвестное значение. 4. Проводка в `_init_data_pipeline`.
+`build()` кладёт `config["overflow"]` только при `every`. 3. `_pick("overflow", "latest")` в `as_generic_config` и явная
+проверка значения там же: `ValueError` с именем процесса (pydantic `Literal` сам имени процесса не несёт). 4. Проводка
+в `_init_data_pipeline`.
 **Acceptance:**
-- [ ] `ProcessConfig(process_name="p", extras={"overflow": "every"}).as_generic_config().overflow == "every"`; без ключа
-      `== "latest"`; typed-поле, заданное явно, перекрывает extras (как у остальных `_pick`).
-- [ ] `overflow: "sometimes"` в рецепте → `ValueError`, текст содержит имя процесса, `overflow` и `'sometimes'`.
-- [ ] `GenericProcessConfig(overflow="every").build()[1]["config"]["overflow"] == "every"`; при `latest` ключа
+- [x] `ProcessConfig(process_name="p", extras={"overflow": "every"}).as_generic_config().overflow == "every"`; без ключа
+      `== "latest"`.
+- [x] `ProcessConfig(process_name="proc_x", extras={"overflow": "sometimes"}).as_generic_config()` → `ValueError`,
+      текст содержит `proc_x`, `overflow` и `'sometimes'`.
+- [x] `GenericProcessConfig(overflow="every").build()[1]["config"]["overflow"] == "every"`; при `latest` ключа
       `"overflow"` в `proc_dict["config"]` нет (golden-снапшоты `build` не меняются).
-- [ ] `build_marker({"trace_id": "t1", "capture_ts": 12.5, "frame_id": 7, "camera_id": "cam0", "frame": <ndarray>,
+- [x] `build_marker({"trace_id": "t1", "capture_ts": 12.5, "frame_id": 7, "camera_id": "cam0", "frame": <ndarray>,
       "_shm_views": [...]}, reason="lag", source="processor_0")` равен ровно
       `{"inspection_status": "not_inspected", "overflow_marker": True, "reason": "lag", "source": "processor_0",
       "trace_id": "t1", "capture_ts": 12.5, "frame_id": 7, "camera_id": "cam0"}`.
-- [ ] `build_marker({}, reason="door", source="p")`: `trace_id == ""`, `capture_ts is None`, ключей `frame_id` и
+- [x] `build_marker({}, reason="door", source="p")`: `trace_id == ""`, `capture_ts is None`, ключей `frame_id` и
       `camera_id` нет. `build_marker({}, reason="foo", source="p")` → `ValueError`.
       `MARKER_REASONS == ("lag", "stale_restore", "stale_exec", "door")`.
-- [ ] `is_marker(build_marker(...)) is True`; `is_marker({"inspection_status": "not_inspected", "frame": f}) is False`;
+- [x] `is_marker(build_marker(...)) is True`; `is_marker({"inspection_status": "not_inspected", "frame": f}) is False`;
       `is_marker({}) is False`.
-- [ ] `GenericProcess` с `overflow: every` в конфиге: `receiver.overflow`, `executor.overflow`, `shm_middleware.overflow`
-      равны `"every"`; без ключа — `"latest"` (проверка на реальной сборке `_init_data_pipeline`, не на подменах).
+- [x] `GenericProcess` с `overflow: every` в конфиге: `receiver.overflow`, `executor.overflow` равны `"every"`; без
+      ключа — `"latest"` (проверка на реальной сборке `_init_data_pipeline`, не на подменах).
+- [x] Поведение под `every` в 4.7d-1 не меняется: существующие тесты `data_receiver` / `pipeline_executor` зелёные.
 
-###### 4.7d-2 — Рождение маркера в приёмнике и исполнителе, проход маркера (3 кода-файла, teamlead)
+###### 4.7d-2 — Рождение маркера в приёмнике и исполнителе, проход маркера (5 кода-файлов, teamlead; в пилоте — dev-transport)
 **Files:** `multiprocess_framework/modules/process_module/generic/data_receiver.py`,
 `multiprocess_framework/modules/process_module/generic/pipeline_executor.py`,
-`multiprocess_framework/modules/process_module/generic/plugin_operation_step.py`.
+`multiprocess_framework/modules/process_module/generic/plugin_operation_step.py`,
+`multiprocess_framework/modules/process_module/generic/plugin_runner.py` (валидация портов пропускает маркер-items),
+`multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py` (помощник `meta_from_msg`, ниже).
+Существующие тесты, которые меняются намеренно: `test_g5c_executor_drop.py:245` (1→3 пинит 3, станет 1) и
+`test_cycle_metrics.py:164` (`_EXECUTOR_KEYS` — точный набор, добавляется `not_inspected_handled`).
 **Steps:**
 1. `_bound_lag`: при `every` каждая выбрасываемая кадровая коллекция заменяется НА ТОМ ЖЕ МЕСТЕ очереди коллекцией
-   маркеров (`pending[i] = markers`, под `chain.mutex`, по маркеру на item, `reason="lag"`). Длина очереди не растёт,
-   порядок сохраняется. Маркер-коллекция не кадровая (`_is_frame_collection` её не считает) и потолком не вытесняется.
-   Метка `enq_ts` у неё — момент замены. При `latest` — `del`, как сейчас. Счётчик `lag_dropped_items` растёт в обоих режимах.
+   маркеров (под `chain.mutex`, по маркеру на item, `reason="lag"`). **Склейка (ревью спеки, находка 3):** если
+   соседняя более ранняя коллекция `pending[i-1]` — маркер-коллекция, маркеры дописываются в неё
+   (`pending[i-1].extend(markers); del pending[i]`), иначе `pending[i] = markers`. Без склейки маркер-коллекции копятся
+   до `queue_size` и `put` блокирует приёмник — `every` превращался бы обратно в блокировку. Порядок маркеров
+   сохраняется. **Инвариант (ревью спеки итер. 2):** после замены в `_bound_lag` в очереди нет двух соседних маркер-коллекций,
+   в том числе при `excess > 1` (после отката на блокирующий `put`): склейка — отдельным проходом после всех замен
+   вызова. Маркер-коллекция не кадровая (`_is_frame_collection` её не считает) и потолком не вытесняется. Метка
+   `enq_ts` — момент первой замены. Склейка происходит ТОЛЬКО в `_bound_lag`; маркер-коллекция — тип `_MarkerBatch` (проверка `isinstance`, O(1) под `mutex`). При `latest` — `del`, как сейчас. `lag_dropped_items` растёт в обоих режимах.
+   Ловушка: при `queue_size <= lag` первая замена места не освобождает — под `every` приёмник уходит в блокирующий
+   `put`; в рецептах сегодня 64 против 2, проверка конфигурации — вне 4.7d.
 2. `run_loop`: на ветке `_is_shm_dropped` при `every` вместо `continue` строится маркер из `msg` (`reason="stale_restore"`,
    `source` = имя узла) и уходит `self.on_items_ready([marker])` — мимо коллектора. При `latest` — `continue`, как сейчас.
    Покрывает любой отказ restore: stale, torn, отвязанный сегмент, сбой открытия ссылки.
 3. `run_loop`: пришедший по IPC маркер (`is_marker(data)`), в любом режиме, не идёт в коллектор, а уходит
-   `on_items_ready([item])` отдельной коллекцией.
+   `on_items_ready([item])` отдельной коллекцией. `_build_item` добавляет к нему msg-ключи `sender` и `timestamp` (поля `Message`) — это допустимо,
+   поля маркера не меняются.
 4. `_run_batch`: коллекция из одних маркеров (`all(is_marker)`) идёт в `_forward_markers`: без проверок view и без
    `_attach_batch_views`, `_execute_chain` (плагины без `accepts_markers` пропускаются) → `_send_results`;
    `not_inspected_handled += len(items)`.
 5. Шаги цепочки: `PluginOperationStep.execute` на маркер-коллекции возвращает её как есть, если у плагина нет
    `accepts_markers = True` (плагин не вызывается, `on_success`/`on_fail` и счётчики breaker не трогаются);
    `SuspectTagStep` маркер-коллекцию не тегирует (`not_inspected` не перезаписывается на `suspect`).
-6. Stale в `_run_batch` (оба режима): единица счёта — ВХОДНЫЕ items батча. Post-chain: `valid` проверяется до
-   `if not items`; `note_stale_drops(len(inputs) - 1)` вместо `len(items) - 1`. При `every` метаданные входов снимаются
-   ДО цепочки (`build_marker` из каждого входного item; плагин может заменить dict), и при stale (pre- или post-chain)
-   уходит по маркеру на вход, `reason="stale_exec"`, через `_forward_markers`; `not_inspected_stale_exec += len(inputs)`.
-   Выходы цепочки при post-chain stale не отправляются (как сейчас).
+   `plugin_runner`: валидация портов (`FW_PORT_VALIDATE`) к маркер-items не применяется — иначе маркер на плагине
+   с обязательными портами уходит в `on_fail`.
+6. Stale в `_run_batch` (оба режима): единица счёта — ВХОДНЫЕ items батча. Ветка `if not valid` переносится выше
+   `if not items` (`:258`); `note_stale_drops(len(inputs) - 1)` вместо `len(items) - 1`. При `every` метаданные входов
+   снимаются ДО цепочки (`build_marker` из каждого входного item; плагин может заменить dict). Pre-chain stale: по
+   маркеру на вход, `reason="stale_exec"`, через `_forward_markers` (цепочка не запускалась — плагины с
+   `accepts_markers` маркер получат). **Post-chain stale: маркеры идут прямо в `_send_results`, мимо цепочки** —
+   цепочка на этих входах уже отработала, повторный проход дал бы второй исход у плагина (ревью спеки, находка 8);
+   `not_inspected_handled` растёт и здесь. `not_inspected_stale_exec += len(inputs)` в обоих случаях. Выходы цепочки
+   при post-chain stale не отправляются (как сейчас).
+7. (ревью 4.7d-1, minor 2) Конструкторы `DataReceiver` и `PipelineExecutor` проверяют `overflow in ("latest", "every")`
+   → иначе `ValueError`; ветвление везде строго `self._overflow == "every"`.
+8. (ревью 4.7d-1, minor 3) Правило «meta как в `_build_item`» — один помощник `meta_from_msg(msg) -> dict` в
+   `not_inspected_marker.py`: `trace_id`/`capture_ts` из `msg["data"]`, `frame_id`/`camera_id` из `data`, иначе из `msg`
+   (по наличию ключа). Restore строит маркер через него; bound и exec — из item (там meta уже собрана `_build_item`).
 **Acceptance** (литералы; `chain_queue` и `FrameShmMiddleware`/reader настоящие, исполнитель в тестах остановлен, где сказано):
-- [ ] Bound, `every`, `chain_max_lag_items=2`, исполнитель не читает. Приходят кадровые коллекции по 1 item,
-      `trace_id` `t1..t6`. Очередь после шестой: `qsize() == 6`, порядок `[M(t1), M(t2), M(t3), M(t4), c5, c6]`, где `M(tN)` —
-      коллекция из одного маркера `reason="lag"`, `trace_id="tN"`. `lag_dropped_total == 4`, `lag_dropped_items == 4`,
-      `not_inspected_lag == 4`.
-- [ ] Тот же вход при `latest`: `qsize() == 2`, `[c5, c6]`, маркеров в очереди 0, `lag_dropped_total == 4`,
-      `lag_dropped_items == 4`, ключа `not_inspected_lag` в `get_cycle_metrics()` нет.
-- [ ] Выброшена коллекция из 2 items (`t1`, `t2`) при `every`: на её месте одна коллекция из 2 маркеров (`t1`, `t2`);
+- [x] Bound, `every`, `chain_max_lag_items=2`, `chain_queue` `maxsize=64`, исполнитель не читает. Приходят кадровые
+      коллекции по 1 item, `trace_id` `t1..t6`. Очередь после шестой: `qsize() == 3`, порядок `[M(t1,t2,t3,t4), c5, c6]`,
+      где `M(...)` — одна коллекция маркеров `reason="lag"` в этом порядке `trace_id`. Свойство `lag_dropped_total == 4`,
+      `lag_dropped_items == 4`, `not_inspected_lag == 4`.
+- [x] Bound, `every`, `chain_queue` `maxsize=3`, 50 кадровых коллекций подряд, исполнитель не читает: приёмник не
+      блокируется (вызов в daemon-потоке завершается до дедлайна), `qsize() <= 3`, `not_inspected_lag == 48`.
+- [x] `every`, lag 2: `chain_queue` заполнена напрямую (мимо приёмника) кадровыми коллекциями `[b1, b2, b3, b4]`,
+      затем через приёмник приходит `b5` (`excess == 3`). Очередь: `[M(b1,b2,b3), b4, b5]` — маркеры ОДНОЙ коллекцией,
+      соседних маркер-коллекций нет; `not_inspected_lag == 3`.
+- [x] Тот же вход t1..t6 при `latest`: `qsize() == 2`, `[c5, c6]`, маркеров в очереди 0, свойство
+      `lag_dropped_total == 4`, `lag_dropped_items == 4`, ключа `not_inspected_lag` в `get_cycle_metrics()` нет.
+- [x] Выброшена коллекция из 2 items (`t1`, `t2`) при `every`: на её месте одна коллекция из 2 маркеров (`t1`, `t2`);
       `lag_dropped_total` +1, `lag_dropped_items` +2, `not_inspected_lag` +2.
-- [ ] Сигнальная коллекция (без `frame` и `_shm_views`) не заменяется маркером и не вытесняется ни при каком режиме
-      (C1 сохраняется): очередь `[сигнал, c1, c2]`, приходит `c3`, lag 2 → `[сигнал, M(c1), c2, c3]`.
-- [ ] Join: выброшена коллекция `[{"frame": f, "trace_id": "t1", "pult": {...}}]` → ровно 1 маркер `t1`; в маркере
+- [x] Сигнальная коллекция (без `frame` и `_shm_views`) не заменяется маркером, не вытесняется ни при каком режиме и
+      разделяет маркеры (склейка только с соседней маркер-коллекцией): очередь `[сигнал, c1, c2]`, приходит `c3`,
+      lag 2 → `[сигнал, M(c1), c2, c3]`; затем `c4` → `[сигнал, M(c1,c2), c3, c4]`.
+- [x] Join: выброшена коллекция `[{"frame": f, "trace_id": "t1", "pult": {...}}]` → ровно 1 маркер `t1`; в маркере
       нет ключа `pult`; `lag_dropped_items == 1`.
-- [ ] Restore, `every`: `restore_frame` вернул msg с `_shm_dropped`, в `data` `trace_id="t9"`, `capture_ts=3.5`. В
+- [x] Restore, `every`: `restore_frame` вернул msg с `_shm_dropped`, в `data` `trace_id="t9"`, `capture_ts=3.5`. В
       `chain_queue` одна коллекция из одного маркера `{reason: "stale_restore", trace_id: "t9", capture_ts: 3.5, source: <имя узла>}`;
       `collector.on_item` не вызывался; `not_inspected_stale_restore == 1`. При `latest`: `chain_queue` пуст, коллектор не
       вызывался, ключа нет.
-- [ ] Restore на реальном middleware, `every`, четыре отказа по одному (перезапись слота до чтения; перезапись во время
+- [x] Restore на реальном middleware, `every`, четыре отказа по одному (перезапись слота до чтения; перезапись во время
       чтения; отвязанный сегмент; битая ссылка): каждый даёт ровно 1 маркер `stale_restore`, и после каждого
       `Δframe_stale_drops + Δframe_torn_reads + Δframe_restore_failures == 1`.
-- [ ] Пришедший по IPC маркер (`is_marker`), режимы `latest` и `every`: `collector.on_item` не вызывался, в `chain_queue`
-      отдельная коллекция из этого item'а, все поля маркера целы, `source` не изменён.
-- [ ] Исполнитель, маркер-коллекция, плагин без `accepts_markers` (в цепочке есть критический bypassed плагин): `process`
+- [x] Пришедший по IPC маркер (`is_marker`), режимы `latest` и `every`: `collector.on_item` не вызывался, в `chain_queue`
+      отдельная коллекция из этого item'а, все поля маркера целы (допустим добавленный ключ `sender`), `source` не изменён.
+- [x] `FW_PORT_VALIDATE=1`, плагин с `accepts_markers = True` и обязательными портами `frame`/`detections`, маркер на
+      входе: `process` вызван 1 раз, `PortValidationError` нет, `consecutive_fails` не изменился.
+- [x] Исполнитель, маркер-коллекция, плагин без `accepts_markers` (в цепочке есть критический bypassed плагин): `process`
       вызван 0 раз, `consecutive_fails` не изменился, `inspection_status == "not_inspected"` (не `"suspect"`);
       `send_fn` получила по сообщению на каждый `chain_targets`, `data` равен маркеру (кроме служебных `_t_sent_ns`,
       `frame_trace`-штампа); `not_inspected_handled` +1.
-- [ ] Плагин с `accepts_markers = True` получает маркер-item в `process` ровно 1 раз (spy), тот же объект данных.
-- [ ] Stale pre-chain, `every`, батч из 3 items (`t1,t2,t3`) со view, слот перезаписан до такта: цепочка не вызывалась
+- [x] Плагин с `accepts_markers = True` получает маркер-item в `process` ровно 1 раз (spy), тот же объект данных.
+- [x] Stale pre-chain, `every`, батч из 3 items (`t1,t2,t3`) со view, слот перезаписан до такта: цепочка не вызывалась
       (spy 0), `send_fn` получила 3 сообщения-маркера (`stale_exec`, `t1,t2,t3` по порядку), `frame_stale_drops` +3,
-      `not_inspected_stale_exec == 3`.
-- [ ] Stale post-chain 2→1 (плагин склеивает 2 входа в 1 выход, слот перезаписан во время `process`), `every`:
+      `not_inspected_stale_exec == 3`, `not_inspected_handled` +3.
+- [x] Stale post-chain 2→1 (плагин склеивает 2 входа в 1 выход, слот перезаписан во время `process`), `every`:
       `send_fn` получила 2 маркера (`t1,t2`) и 0 обычных, `frame_stale_drops` +2 (было +1 по выходам),
-      `not_inspected_stale_exec == 2`.
-- [ ] Stale post-chain 1→3: `frame_stale_drops` +1 (было +3), 1 маркер.
-- [ ] Stale post-chain, плагин вернул `[]`, слот перезаписан: `frame_stale_drops` +1 (вход), 1 маркер (`every`).
-- [ ] Те же три сценария (pre 3, post 2→1, post 1→3) при `latest`: `send_fn` не вызывалась, `frame_stale_drops`
+      `not_inspected_stale_exec == 2`, `not_inspected_handled` +2; плагин (в т.ч. с `accepts_markers = True`) вызван
+      ровно 1 раз — на входах,
+      маркеры его повторно не проходят.
+- [x] Stale post-chain 1→3: `frame_stale_drops` +1 (было +3), 1 маркер.
+- [x] Stale post-chain, плагин вернул `[]`, слот перезаписан: `frame_stale_drops` +1 (вход), 1 маркер (`every`).
+- [x] Те же три сценария (pre 3, post 2→1, post 1→3) при `latest`: `send_fn` не вызывалась, `frame_stale_drops`
       +3 / +2 / +1, ключа `not_inspected_stale_exec` нет, `not_inspected_handled` не вырос.
-- [ ] Батч с неизменёнными view: маркеров 0, обычные результаты уходят как раньше.
+- [x] Батч с неизменёнными view: маркеров 0, обычные результаты уходят как раньше.
+- [x] `DataReceiver(..., overflow="Every")` и `PipelineExecutor(..., overflow="sometimes")` → `ValueError`.
+- [x] `meta_from_msg({"data": {"trace_id": "t1", "capture_ts": 2.0, "camera_id": 0}, "frame_id": 5, "camera_id": "x"})`
+      `== {"trace_id": "t1", "capture_ts": 2.0, "camera_id": 0, "frame_id": 5}` (`camera_id` из `data` побеждает `msg`,
+      0 сохраняется).
 
-###### 4.7d-3 — Маркер в двери отправителя (1 код-файл, developer)
+**Правки ревью 4.7d-2a/2b — внесены (1–8, dev-transport-3):** `_MarkerBatch`, один `is_marker_collection` в `not_inspected_marker.py`, склейка только в `_bound_lag`, `sender`/`timestamp` в IPC-маркере, маркер-коллекция вне EMA `queue_wait_ms` и вне `_cycle_metrics`, порты по ITEM, переименован тест drop.
+
+###### 4.7d-3 — Маркер в двери отправителя (3 кода-файла, developer; только после слияния 4.7b в main)
 **Files:** `multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py`
-(`strip_data_frame_on_send`, `strip_and_write`; конструктор принимает `overflow`, `source` = `self._owner`).
+(`strip_data_frame_on_send`, `strip_and_write`; конструктор принимает `overflow`, read-only свойство `overflow`,
+`source` = `self._owner`), `multiprocess_framework/modules/router_module/core/router_manager.py` (`get_shm_stats`: ключи
+`door_drops` всегда, `not_inspected_door` только при `every`; тест `test_shm_stats_narrow` обновляется),
+`process_module/generic/generic_process.py` (передача `overflow` в `FrameShmMiddleware`).
 **Steps:** 1. Счётчик `door_drops` (всегда): +1 на каждый item, у которого `strip_and_write` впервые поставил
-`_shm_dropped`. 2. При `every` вместо `return None` содержимое `msg["data"]` заменяется на маркер (`reason="door"`,
+`_shm_dropped` (инкремент в `strip_and_write`, не в `strip_data_frame_on_send`: та зовётся раз на цель). 2. При `every` вместо `return None` содержимое `msg["data"]` заменяется на маркер (`reason="door"`,
 метаданные — из item до замены; `msg["target"]`, `type`, `channel` не трогаются), сообщение уходит. Замена идёт на
 месте в общем `data`-dict, поэтому повторный `send` fan-out видит уже маркер, и второе рождение не происходит.
 3. При `latest` — `None`, как сейчас.
 **Acceptance:**
-- [ ] `every`, одна цель: выход с массивом, смотрящим в чужой слот (условие дропа 4.7a), слот входа перезаписан во время
+- [x] `every`, одна цель: выход с массивом, смотрящим в чужой слот (условие дропа 4.7a), слот входа перезаписан во время
       копии. `strip_data_frame_on_send(msg)` возвращает msg, не `None`; `msg["data"]` равен маркеру `reason="door"`,
       `trace_id`/`capture_ts` исходного item, `source == owner`; в `msg["data"]` нет ключей `frame`, `_shm_refs`,
       `_shm_views`, `_shm_dropped`; `door_drops == 1`, `not_inspected_door == 1`, `frame_stale_drops` +1.
-- [ ] Fan-out на 2 цели, один и тот же `data`-dict: оба вызова возвращают сообщение с одним маркером;
+- [x] Fan-out на 2 цели, один и тот же `data`-dict: оба вызова возвращают сообщение с одним маркером;
       `not_inspected_door == 1`, `door_drops == 1` (рождено один раз, доставлено 2).
-- [ ] `latest`, тот же вход: возвращает `None` (как сегодня), `door_drops == 1`, ключа `not_inspected_door` нет.
-- [ ] Вход валиден: маркера нет, `door_drops == 0`, сообщение идёт как раньше. Выход без чужой памяти (4.7a): тоже 0.
-- [ ] `msg["target"]` сохранён при замене (per-item target не теряется).
-- [ ] Дроп по исчерпанию займа (`_last_loan_exhausted`) по-прежнему `None` в обоих режимах (loan заморожен, вне 4.7d).
-- [ ] Реальный путь на двух настоящих middleware (писатель и читатель, настоящее SHM): перезапись входа в двери под `every`
+- [x] `latest`, тот же вход: возвращает `None` (как сегодня), `door_drops == 1`, ключа `not_inspected_door` нет.
+- [x] Вход валиден: маркера нет, `door_drops == 0`, сообщение идёт как раньше. Выход без чужой памяти (4.7a): тоже 0.
+- [x] `msg["target"]` сохранён при замене (per-item target не теряется).
+- [x] `GenericProcess` с `overflow: every`: `shm_middleware.overflow == "every"`, без ключа `"latest"` (реальная сборка);
+      `get_shm_stats()` содержит `door_drops` в обоих режимах и `not_inspected_door` только при `every`.
+- [x] Дроп по исчерпанию займа (`_last_loan_exhausted`) по-прежнему `None` в обоих режимах (loan заморожен, вне 4.7d).
+- [x] Реальный путь на двух настоящих middleware (писатель и читатель, настоящее SHM): перезапись входа в двери под `every`
       даёт на стороне читателя item с `is_marker(item)`; под `latest` читатель ничего не получает.
 
-###### 4.7d-4 — Отбраковщик принимает маркер (1 код-файл, developer; решение о политике — за владельцем)
-**Files:** `Plugins/control/robot_control/plugin.py`.
+###### 4.7d-4 — Отбраковщик принимает маркер (2 кода-файла, developer; политика подтверждена владельцем)
+**Files:** `Plugins/control/robot_control/plugin.py`, `Plugins/control/robot_control/registers.py` (новое поле
+`not_inspected_action: Literal["reject", "pass"] = "reject"` с `FieldMeta`, рядом с `reject_delay_ms`; образец
+поля-перечисления — спросить `know-transport`).
 **Контекст:** без этого шага маркер доезжает и виден в счётчиках, но `RobotControlPlugin` его не видит или считает
 годным (item без детекций → `pass`). Политика «непроверенное = брак» взята из `multiprocess_prototype/plans/phase5_data_pipeline.md`
-(«лучше выкинуть хорошую, чем пропустить плохую»); подтверждение владельца нужно до кода.
-**Steps:** 1. `accepts_markers = True` на классе. 2. Для маркер-item: `inspection_result = {"action": "reject",
-"reason": "not_inspected", "origin": <reason маркера>, "source": <source маркера>}`; свой счётчик `total_not_inspected`;
-`total_inspected` не растёт, вердикт-документ и фронт `_rejecting` не пишутся и не меняются.
+(«лучше выкинуть хорошую, чем пропустить плохую»); подтверждена владельцем 2026-10-01.
+**Steps:** 1. `accepts_markers = True` на классе. 2. Ветка маркера стоит ДО `self._total_inspected += 1` (`plugin.py:136`).
+Для маркер-item: `inspection_result = {"action": <not_inspected_action>, "reason": "not_inspected",
+"origin": <reason маркера>, "source": <source маркера>}` (при умолчании `action == "reject"`; задержка (б) — только
+при `reject`); свой счётчик `total_not_inspected` (+1 на каждый маркер, в т.ч. при `enabled=False`);
+`total_inspected` и `_total_rejected` не растут, вердикт-документ и фронт `_rejecting` не пишутся и не меняются.
+3. Решения лида по ревью спеки (находка 7): (а) `enabled=False` → `{"action": "pass", "reason": "disabled", "origin": …,
+"source": …}`, как у обычного item в выключенном плагине; (б) `reject_delay_ms` применяется к маркеру так же, как к
+обычному браку (синхронизация с механизмом); (в) широкая запись `_write_unit_event(item, result, [], decisive=False)`
+пишется на маркер — один исход на `trace_id` для учёта 4.7d-5; (г) валидация портов маркер не трогает (4.7d-2,
+`plugin_runner`).
 **Acceptance:**
-- [ ] Маркер `reason="lag"`, `trace_id="t1"` в `process`: `item["inspection_result"]["action"] == "reject"`,
+- [x] Маркер `reason="lag"`, `trace_id="t1"` в `process`: `item["inspection_result"]["action"] == "reject"`,
       `["reason"] == "not_inspected"`, `["origin"] == "lag"`; `total_not_inspected == 1`, `total_inspected` не изменился.
-- [ ] Обычный item без детекций по-прежнему `pass`; обычный item с детекцией — `reject` (существующие тесты зелёные).
-- [ ] Маркер не пишет вердикт-документ (`_verdicts_written` не меняется) и не меняет `_rejecting`.
-- [ ] Связка с 4.7d-2: цепочка `[blob_detector, robot_control]`, маркер-коллекция на входе: `blob_detector.process`
+- [x] Обычный item без детекций по-прежнему `pass`; обычный item с детекцией — `reject` (существующие тесты зелёные).
+- [x] Маркер не пишет вердикт-документ (`_verdicts_written` не меняется) и не меняет `_rejecting`; `_total_rejected`
+      не растёт.
+- [x] `enabled=False`, маркер: `action == "pass"`, `reason == "disabled"`, `total_not_inspected == 1`.
+- [x] `not_inspected_action="pass"`, маркер: `action == "pass"`, `reason == "not_inspected"`, `origin` сохранён,
+      `total_not_inspected == 1`, задержки нет; умолчание регистра — `"reject"`; значение вне `reject|pass` — ошибка
+      валидации регистра.
+- [x] `reject_delay_ms=50`, маркер: `process` длится ≥ 50 мс (как обычный брак).
+- [x] Маркер даёт ровно одну широкую запись (`_write_unit_event`, `decisive=False`) со своим `trace_id`.
+- [x] (после слияния 4.7d-2; до него — `xfail(strict=True)`) Связка с 4.7d-2: цепочка `[blob_detector, robot_control]`, маркер-коллекция на входе: `blob_detector.process`
       вызван 0 раз, `robot_control.process` — 1 раз.
 
 ###### 4.7d-5 — Приёмка на стенде (лид, без кода)
 **Acceptance:**
-- [ ] ADR в `multiprocess_framework/DECISIONS.md` (одна запись: правило переполнения, единица счёта, три отказа от
+- [x] ADR в `multiprocess_framework/DECISIONS.md` (одна запись: правило переполнения, единица счёта, три отказа от
       иного места рождения маркера) + `python -m scripts.sync`; README/STATUS у `process_module` и `router_module`.
-- [ ] Стенд из перемера 4.7 (1080p, 100 fps, 30 с, пиксельная метка), процесс инспекции с `overflow: every`, плагин
+- [x] Стенд из перемера 4.7 (1080p, 100 fps, 30 с, пиксельная метка), процесс инспекции с `overflow: every`, плагин
       медленнее потока, ≥ 3 прогона. По каждому процессу формула приёмки сходится с разностью 0, числа слева и справа в
       отчёте. `data_evicted.<жертва>` 0 (иначе находка по мощности, не провал 4.7d).
-- [ ] Учёт кадров: для каждого `trace_id` камеры ровно один исход, результат на выходе цепочки либо маркер.
+- [x] Учёт кадров: для каждого `trace_id` камеры ровно один исход, результат на выходе цепочки либо маркер.
       `результатов + маркеров == кадров камеры − data_evicted` (литералы в отчёте). Ни один `trace_id` не встречается
       и там, и там.
-- [ ] Число маркеров, дошедших до следующего узла (`not_inspected_handled` у него), равно числу рождённых маркеров на
-      процессе при одной цели `chain_targets` (при N целях — рождённые × N).
-- [ ] Тот же стенд с `overflow: latest` (и процесс GUI/renderer/мост): маркеров 0, ключей `not_inspected_*` в метриках нет.
-- [ ] A/B `latest` против `every` на одной машине в одном окне замка: пропускная способность и `queue_wait_ms` в отчёте
+- [x] Маркеры доезжают до соседа: `handled(next) − (lag + stale_restore + stale_exec)(next) == Σ born(prev_i) × N_i`,
+      где `born` — все четыре `not_inspected_*` процесса-источника, `N_i` — число его `chain_targets`, сумма — по всем
+      источникам узла (join).
+- [x] Стенд — на main после 4.7b (zero-copy — единственный режим), иначе слагаемые stale_exec и двери равны 0.
+      `backend/topology/TEMPLATE.yaml:50-57` — дописать `overflow` и ловушку плоской формы (ревью 4.7d-1, minor 4). Ключи `not_inspected_*` читаются там, где их видно: telemetry пропускает только
+      объявленные метрики (`heartbeat/telemetry.py:63-69`) — проверить до прогона.
+- [x] Если инспектор получает кадры по проводу: дропы middleware провода на приёме (`on_receive`) в счётчиках
+      процесса не видны (ревью спеки) — учёт кадров по `trace_id` это покажет; записать, как ходит стенд.
+- [x] Тот же стенд с `overflow: latest` (и процесс GUI/renderer/мост): маркеров 0, ключей `not_inspected_*` в метриках нет.
+- [x] A/B `latest` против `every` на одной машине в одном окне замка: пропускная способность и `queue_wait_ms` в отчёте
       (цена маркеров).
+- [x] (CTO 2026-10-02, Q1) Исход кадра = широкая запись решателя; маркер с `source=inspector` при строке журнала — надгробие.
+      Инварианты: storage — результат XOR маркер на `trace_id`; журнал — ровно одна строка на `trace_id`, дошедший до цепочки.
+      Кросс-ведомость `J = |вердикты журнала ∩ маркеры storage с source=inspector| ≤ stale_exec(inspector) + door(inspector)`,
+      J числом в отчёте: прогон с `reject_delay_ms=0` (ожидание ≈0) и с `reject_delay_ms=100` (ожидание J ≈ числу браков).
+- [x] (CTO, Q2) `pause_event` исполнителя 10 с под `every`: длина головы маркеров ≈ fps×10, ΔRSS, время дренажа после resume,
+      `data_evicted` у очереди соседа. Потолка склейки нет (вердикт `docs/reviews/2026-10-02_task-4.7d-cto-verdict.md`).
+- [x] Известный дефект замороженного loan-протокола (ревью 4.7d-3, N3): `_last_loan_exhausted` общий для потоков — записать
+      в ADR как известное, не чинить в 4.7d.
+
+**Итог стенда 4.7d-5.** Стенд 4.7d-5 (2026-10-02, SHA `22a63e46b`, `stand.yaml` 1080p@100, окно 30 с, `every` на processor+inspector, 8 прогонов в одном окне замка + перепрогон паузы): формула по процессу — разность 0 во всех 5 прогонах `every` (окно и итог после тишины; напр. E1 processor 492=492, inspector 63=63); `latest` — маркеров 0, из ключей есть только `not_inspected_handled`; журнал решателя — 0 дублей `trace_id`, кадров камеры − записей журнала ≤ вытеснений (E1: 4609−4586=23 ≤ 30); J при `reject_delay_ms=0` — 1 надгробие на прогон; A/B: processor ~100 Гц в обоих режимах, `queue_wait_ms` < 1 мс. Пауза исполнителя 10 с: голова 1078 маркеров, ΔRSS +0.3 МиБ, дренаж 0.6 с; пачка теряется у соседей и считается ДВУМЯ счётчиками писателя: `queue_data_evicted` 245 + `errors_delivery_failed` 1076 = 1321 против недостачи 1317. **`reject_delay_ms=100` под `every`: 0 вердиктов за 30 с, все 893 записи журнала — маркеры** (решатель спит задержку на каждом маркере и не догоняет голову) — открытый вопрос владельцу, `docs/claude/OPEN_QUESTIONS.md`. Отчёт и сырьё: scratchpad лида `m47d/` (`report.txt`, `stand47d.py`, `analyze47d.py`).
 
 **Out of scope:** маркер по разрыву `frame_id` (вопрос владельцу в `docs/claude/OPEN_QUESTIONS.md`, 2026-10-01); маркер у
 писателя при вытеснении `data_evicted`; дроп по исчерпанию займа; дроп при остановке процесса; смена умолчания на
 `every`; разбор `OPEN_QUESTIONS` по ожидающему партнёру join при потерянной половине; приём маркера мостом и GUI
-(`frontend_module/bridge`), не являющимися generic-узлами; маркер для копии `copy_out_targets`.
+(`frontend_module/bridge`), не являющимися generic-узлами; маркер для копии `copy_out_targets`; реакция отбраковщика
+на тег `not_inspected` от сбоя плагина (отдельная задача после 4.7d, решение владельца 2026-10-01).
 
 **Единица счёта (ревью 4.7a/c) закрыта решением 2:** выбран входной item; post-chain переведён с выходов на входы;
 дверь считает выходы (она не знает состава батча) и совпадает с входами при цепочках 1→1, как на стенде.
@@ -454,7 +565,7 @@ docstring'ах. `blob_detector` после T1 уже копирует кадр �
 | 4.7a | Слита в ветку. Слепой tester `0d1b4f8a`, developer `8b3f2c1d`, ревью Opus — APPROVE_WITH_NITS, итерация 1 `9fc01550` (своя память плагина по корню `.base`, ключ `SHM_VIEWS_KEY` импортом) — ревью Opus APPROVE_WITH_NITS, страховка owndata (N-2) в `5dff941f1`. Инъекции лида 7/7 пойманы |
 | 4.7b | **DONE** (2026-10-02), в main `6e0fbec0b`. b1 `4b773d416` + `9dd99c852` (имя, реестр флагов), b2 `6604d96f1` + `b16e11dbc` + `f169cab0f` + `e1e4af8cc` (кэш reader'а, read-only view, `frame_saver`), интеграция `c1ed6f578` + `9f6e989a3` (C7). Слепые RED `efd8d3df` пройдены, `xfail` сняты. Ревью Opus: b1 и b2 REQUEST_CHANGES → исправлено → APPROVE_WITH_NITS. Инъекции лида: b1 7/7, b2 7 свойств. Подробности — в разделе 4.7b выше |
 | 4.7c | Переделана по C1–C4 и проводу: tester `da19b452a`, developer `375bbb4b2` + `f4f8993c7` + `5dff941f1`, инъекции лида 11 мутаций (`notify` — ненаблюдаем, задокументировано), ревью Opus APPROVE_WITH_NITS, нитки закрыты. Решение записано как ADR-173 (`multiprocess_framework/DECISIONS.md`). Первая редакция `a8ffdf54` отвергнута (REQUEST_CHANGES + вердикт CTO) |
-| 4.7d | Место маркера решено вердиктом CTO (ниже). Спеки нет |
+| 4.7d | **DONE** (2026-10-02, ветка `feat/t47d`): 4.7d-1…4 — слепые RED, код, инъекции лида, ревью Opus APPROVE/APPROVE_WITH_NITS; вердикт CTO ACCEPT WITH CONDITIONS; ADR-174; стенд пройден (итог в §4.7d-5). Открыто владельцу: задержка решателя на маркер |
 
 **Вердикт CTO (`docs/reviews/2026-10-01_task-4.7-cto-verdict.md`) заменяет п. 5 дизайна и acceptance «очередь 4».**
 Бюджет в полёте считает **кадры**, а не сообщения. Сигналы и решения бюджет не вытесняет: ревью

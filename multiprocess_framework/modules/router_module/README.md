@@ -242,6 +242,29 @@ router.get_ring_info()
 
 ---
 
+## Дверь отправителя под `overflow: every` и счётчики `door_drops` / `not_inspected_door` (Task 4.7d-3)
+
+> Решение и формула приёмки — [ADR-174](../../DECISIONS.md). Контракт маркера — `middleware/not_inspected_marker.py` (лежит здесь, рядом с `SHM_*`-ключами, чтобы `router_module` не импортировал `process_module`).
+
+`FrameShmMiddleware(overflow="latest"|"every")`, свойство `overflow` только для чтения; значение вне набора — `ValueError`. Если после копии
+inline-срезов вход оказался перезаписан (`_inputs_still_valid` ложно), `strip_and_write` ставит `_shm_dropped`. Дальше развилка в
+`strip_data_frame_on_send`: под `latest` — `None`, сообщение не уходит (как раньше); под `every` содержимое `msg["data"]` заменяется
+маркером `reason="door"` на месте в общем `data`-dict (`target`, `type`, `channel` не трогаются) и сообщение уходит своим целям. Повторный
+`send` fan-out видит уже маркер — второго рождения нет. Дроп по исчерпанию займа (`_last_loan_exhausted`) по-прежнему `None` в обоих режимах.
+
+```python
+router.get_shm_stats()
+# → + door_drops (всегда): item'ов, у которых дверь впервые поставила _shm_dropped; на item, не на цель fan-out;
+#   подмножество frame_stale_drops, не добавка к нему
+# → + not_inspected_door (ТОЛЬКО если у какого-то middleware overflow == "every"): маркеров рождено; при fan-out на N целей
+#   одно рождение = N доставок
+```
+
+Ключи входят в `get_stats()["router"]` (и в `introspect.router_stats`). В узкий набор телеметрии `state.shm`
+(`heartbeat/telemetry.py`, закрытый список) они **не** добавлены — читать опросом, не из дерева.
+
+---
+
 ## Каналы (IMessageChannel)
 
 Все каналы наследуют `IMessageChannel(IChannel)` из `channel_routing_module`:
