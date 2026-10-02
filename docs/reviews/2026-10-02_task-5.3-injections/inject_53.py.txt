@@ -12,6 +12,7 @@ MOD = W / "multiprocess_framework/modules"
 NIM = "multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py"
 DR = "multiprocess_framework/modules/process_module/generic/data_receiver.py"
 PE = "multiprocess_framework/modules/process_module/generic/pipeline_executor.py"
+PR = "multiprocess_framework/modules/process_module/generic/plugin_runner.py"
 FSM = "multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py"
 INJ = {
     "L1": [(NIM, '        "count": sum(_count(item) for item in inputs),', '        "count": len(inputs),')],
@@ -32,6 +33,9 @@ INJ = {
     "L11": [(DR, "        if isinstance(items, _MarkerBatch) and self._merge_into_tail(items):\n            return\n", "")],
     "L12": [(PE, "self._send_results(build_gap(stale_markers))", "self._send_results(stale_markers)")],
     "L13": [(NIM, '    marker["count"] = 1  #', "    pass  #")],
+    # раунд 2 (4a2d27e0a): поля записи через PluginRunner
+    "L14": [(PR, '    "frame_hops",\n    "count",\n', '    "frame_hops",\n')],
+    "L15": [(PR, '    "count",\n    "trace_ids",\n', '    "count",\n')],
 }
 env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
 

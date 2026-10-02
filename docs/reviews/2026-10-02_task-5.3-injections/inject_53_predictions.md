@@ -32,3 +32,17 @@ BASE `199 passed`. (Первый запуск упал на неуникальн
 | L11 слияние выключено | 15 | tail_merge 14, hazards 1 |
 | L12 post-chain без build_gap | 3 | t47d2 2, t47d2b 1 |
 | L13 build_marker без count | 5 | build_gap 2, t47d1 1, t47d2 1, hazards 1 |
+
+## Раунд 2 (HEAD 4a2d27e0a, правки ревью) — предсказания до прогона
+L10 без chain.mutex → красный только test_tail_merge_holds_chain_mutex_against_executor_get, теперь на детерминированной пробе (`mutex_free_inside_merge: True`).
+L14 `count` убран из _CARRIED_SYSTEM_FIELDS → красный только test_accepting_plugin_returning_fresh_dict_keeps_gap_record_fields; контроль кадра зелёный.
+L15 `trace_ids` убран → красный тот же один тест.
+
+## Итог раунда 2 (лид) — 3 из 3 по предсказанию
+BASE `201 passed`.
+| Заплата | Красные |
+|---|---|
+| L10 без chain.mutex | 1 — `test_tail_merge_holds_chain_mutex_against_executor_get` (проба замка) |
+| L14 без `count` в переносе | 1 — `test_accepting_plugin_returning_fresh_dict_keeps_gap_record_fields` |
+| L15 без `trace_ids` в переносе | 1 — тот же |
+Открыто (от автора): перенос полей записи идёт в общем движке — ключ `count` у кадра перенёсся бы тоже. Grep по `Plugins/ Services/ multiprocess_prototype/`: `"count"` есть только в ответах команд (`device_hub`, `modbus`), не в кадрах. Fan-in N:1 с записью не первым входом не проверен.
