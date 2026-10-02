@@ -25,7 +25,7 @@
 
 Выход никогда не view кадра: кадры из SHM (транспорт 4.7b) — read-only view на живой буфер.
 Держится в трёх местах: внутри кадра `crop.py:52-53` (`.copy()`), `clamp` `crop.py:73`, `pad`/`replicate` строят новый
-массив (`crop.py:94-103`, `copyMakeBorder` `crop.py:79`). Для `holdout_eval._crop_disk` это намеренное изменение: раньше
+массив (`crop.py:94-103`, `copyMakeBorder` `crop.py:79`). Для `holdout_eval._crop_disk` это было намеренное изменение 6.1: раньше
 полностью внутри кадра отдавался view (байты те же).
 
 ## Потребители
@@ -34,12 +34,12 @@
    `drop_partial` -> `drop` (побеждает), иначе `pad_if_oob` -> `pad` (цвет `pad_color_bgr`, `plugin.py:137`), иначе `clamp`.
    `_resolve_side` (fallback `size_mode`/радиус неизвестен -> `side_px`) остаётся в плагине, формула — `side_from_radius` (`plugin.py:117`).
    `_resize_output` (`plugin.py:106`) -> `resize_square(crop, output_size)`.
-2. `Services/ml_train/holdout_eval.py::_crop_disk` (`holdout_eval.py:44-58`) — `detect_disk`, `half = round(r·(1+margin))`,
-   `square_crop(bgr, cx, cy, 2*half, oob="replicate")`. Формула стороны НЕ менялась (её смена — Task 6.4).
-   Вызов в `evaluate_holdout` без try/except. `ValueError` — когда квадрат НЕ пересекает кадр (cx <= -half или
-   cx >= w + half, то же по y), а не «центр вне кадра»: `square_crop(f, -10, 100, 64, "replicate")` отдаёт (64, 64, 3).
-   Раньше при непересечении молча возвращался массив неверной формы. Обработки нет намеренно.
-   Из реального `detect_disk` недостижимо: центр внутри кадра, half >= 1 (ревьюер: 300 синтетических кадров, 0 случаев).
+2. `Services/ml_train/holdout_eval.py::_crop_disk` (Task 6.4) — формула конвейера, как у `center_crop`: `detect_disk`,
+   `side_from_radius(r, radius_scale, margin_px)`, `square_crop(bgr, cx, cy, side, oob="pad", pad_value=pad_color_bgr)`,
+   `resize_square(crop, output_size)`. Параметры без дефолтов; дефолты (рецепт `letter_robot_sim.yaml`: 1.0 / 14 / 128 /
+   `(0, 0, 0)`) — только в `evaluate_holdout`. `oob="pad"` при непересечении отдаёт чистый холст `pad_color_bgr`, `ValueError`
+   у `_crop_disk` больше нет. До 6.4 здесь была формула `2·round(r·(1+0.18))` и `oob="replicate"` (потребитель `replicate`
+   единственный; с 6.4 потребителей у `replicate` нет, режим оставлен как контракт, закреплённый тестами 6.1).
 
 ## Границы слоёв
 
@@ -49,5 +49,7 @@
 
 - `Services/layer_render/tests/test_acceptance_6_1_crop.py` — слепой набор tester (литералы sha256 снятые до задачи).
 - `Services/layer_render/tests/test_hazards_6_1_crop.py` — hazard-тесты автора (квадрат больше кадра, нечётная сторона,
-  read-only кадр, 2D/4-канал, маппинг регистра, `_crop_disk` с центром вне кадра).
+  read-only кадр, 2D/4-канал, маппинг регистра).
+- `Services/ml_train/tests/test_acceptance_6_4_holdout_crop.py`, `test_hazards_6_4_holdout_crop.py` — вырез `holdout_eval` по
+  формуле конвейера (слепой набор tester + hazard-тесты автора).
 - `Plugins/processing/center_crop/tests/test_plugin.py` — поведение плагина целиком.

@@ -3,13 +3,14 @@
 
 Источник контракта: `plans/layer-render/phase-6-train.md`, Task 6.1 (Goal, DESIGN, Acceptance A1-A7) плюс
 ТЕКУЩИЙ код, с которого сняты литералы: `Plugins/processing/center_crop/{plugin,registers}.py` и
-`Services/ml_train/holdout_eval.py::_crop_disk`. Worktree на коммите ДО реализации: `crop.py` не существует.
+`Services/ml_train/holdout_eval.py::_crop_disk` (на момент 6.1; с Task 6.4 `_crop_disk` режет по формуле конвейера, см.
+`test_acceptance_6_4_holdout_crop.py`). Worktree на коммите ДО реализации: `crop.py` не существует.
 
 ЗАПРЕЩЁННЫЕ ПУТИ (не читались): реализация `Services/layer_render/crop.py` (её нет по конструкции),
 `.claude/worktrees/*`, любые другие ветки, существующие тесты за пределами хелперов сборки плагина.
 
 Как устроен файл.
-  * Тесты, бьющие только в СЕГОДНЯШНЕЕ API (плагин, `_crop_disk`), зелёные уже сейчас — это страховочная сетка:
+  * Тесты, бьющие только в СЕГОДНЯШНЕЕ API (плагин), зелёные уже сейчас — это страховочная сетка:
     после задачи те же литералы обязаны держаться (A1).
   * Тесты `square_crop` / `resize_square` / `side_from_radius` красные до реализации: `Services.layer_render.crop`
     импортируется ВНУТРИ каждого теста, поэтому каждый падает сам (ModuleNotFoundError), а не одной ошибкой сбора.
@@ -246,7 +247,9 @@ def test_pad_two_dim_frame_plugin_literal_safety_net():
 
 
 # --- A1 (диск) ---------------------------------------------------------------------------------------------------
-# (cx, cy, r) на кадрах разного размера, диск у края, перекрытие только частичное. margin = 0.18 как в evaluate_holdout.
+# (cx, cy, r) на кадрах разного размера, диск у края, перекрытие только частичное. margin = 0.18 — формула
+# 2r·(1+margin) прежнего `_crop_disk` (до Task 6.4): литералы `_A1_DISK` теперь закрепляют
+# `square_crop(..., "replicate")`, не `_crop_disk`.
 _DISK_CASES: dict[str, tuple[tuple[int, int], tuple[int, int, int]]] = {
     "left_edge": ((200, 160), (20, 100, 30)),  # half=35: x0=-15
     "top_right_corner": ((200, 160), (150, 12, 25)),  # half=30: y0=-18, x1=180>160
@@ -260,26 +263,10 @@ def _disk_frame(name: str) -> np.ndarray:
     return _pattern(h, w, seed=777 + h + w)
 
 
-def _run_crop_disk(monkeypatch, name: str):
-    import Services.ml_train.holdout_eval as he
-
-    _, (cx, cy, r) = _DISK_CASES[name]
-    monkeypatch.setattr(he, "detect_disk", lambda bgr: (cx, cy, r))
-    return he._crop_disk(_disk_frame(name), _MARGIN)
-
-
-@pytest.mark.parametrize("name", list(_DISK_CASES))
-def test_a1_crop_disk_output_matches_literals_taken_before_the_task(monkeypatch, name):
-    """A1 (сетка, зелёная ДО задачи): `_crop_disk` (detect_disk подменён) = те же байты и форма после задачи.
-
-    Сравниваем БАЙТЫ, не identity: сегодня внутри кадра `_crop_disk` отдаёт view, после задачи — копию.
-    """
-    assert _digest(_run_crop_disk(monkeypatch, name)) == _A1_DISK[name]
-
-
 @pytest.mark.parametrize("name", list(_DISK_CASES))
 def test_a2_square_crop_replicate_matches_the_crop_disk_literals(name):
-    """A2: `square_crop(bgr, cx, cy, 2*half, "replicate")` даёт литералы `_crop_disk` (half = round(r*(1+margin)))."""
+    """A2: `square_crop(bgr, cx, cy, 2*half, "replicate")` даёт литералы прежнего `_crop_disk`
+    (half = round(r*(1+margin)))."""
     from Services.layer_render.crop import square_crop
 
     _, (cx, cy, r) = _DISK_CASES[name]
@@ -447,7 +434,7 @@ def test_a4_unknown_oob_raises_value_error_naming_the_value(name):
     ],
 )
 def test_a4_replicate_without_overlap_raises_value_error(label, cx, cy):
-    """A4: replicate без пересечения -> ValueError (сегодня `_crop_disk` отдаёт мусор неверной формы — не переносим)."""
+    """A4: replicate без пересечения -> ValueError (прежний `_crop_disk` до 6.4 отдавал мусор — не переносим)."""
     from Services.layer_render.crop import square_crop
 
     with pytest.raises(ValueError):

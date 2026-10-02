@@ -14,6 +14,21 @@ import sys
 from pathlib import Path
 
 
+def _pad_color_bgr(text: str) -> tuple[int, int, int]:
+    """Разбор `B,G,R` → кортеж из трёх int в 0..255; иначе ArgumentTypeError (введённое не повторяем)."""
+    error = argparse.ArgumentTypeError("ожидается формат B,G,R: три целых числа 0..255 через запятую")
+    parts = text.split(",")
+    if len(parts) != 3:
+        raise error
+    try:
+        values = tuple(int(p) for p in parts)
+    except ValueError:
+        raise error from None
+    if not all(0 <= v <= 255 for v in values):
+        raise error
+    return values  # type: ignore[return-value]
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(prog="python -m Services.ml_train", description="Обучение и выбор моделей")
@@ -42,6 +57,13 @@ def main(argv: list[str] | None = None) -> int:
     p_eval.add_argument("holdout_dir", help="папка hold-out: <буква>/<угол>.jpg")
     p_eval.add_argument("--models-dir", default="data/models")
     p_eval.add_argument("--device", default="cpu")
+    # Параметры выреза: default=None — дефолты живут только в сигнатуре evaluate_holdout.
+    p_eval.add_argument(
+        "--radius-scale", type=float, default=None, help="масштаб радиуса диска (дефолт в evaluate_holdout)"
+    )
+    p_eval.add_argument("--margin-px", type=int, default=None, help="поля вокруг диска, px (дефолт в evaluate_holdout)")
+    p_eval.add_argument("--output-size", type=int, default=None, help="сторона выхода, px; 0 — без ресайза")
+    p_eval.add_argument("--pad-color-bgr", type=_pad_color_bgr, default=None, help="цвет заливки у края кадра: B,G,R")
 
     sub.add_parser("archs", help="доступные архитектуры")
 
@@ -116,7 +138,14 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
     from Services.ml_train.holdout_eval import evaluate_holdout
 
-    summary = evaluate_holdout(args.model_id, args.holdout_dir, models_dir=args.models_dir, device=args.device)
+    crop_kwargs = {
+        key: value
+        for key in ("radius_scale", "margin_px", "output_size", "pad_color_bgr")
+        if (value := getattr(args, key)) is not None
+    }
+    summary = evaluate_holdout(
+        args.model_id, args.holdout_dir, models_dir=args.models_dir, device=args.device, **crop_kwargs
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     within_key = next((k for k in summary if k.startswith("angle_within_")), None)
     within = summary.get(within_key) if within_key else None

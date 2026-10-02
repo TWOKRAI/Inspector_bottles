@@ -2,8 +2,10 @@
 """Hazard-тесты автора Task 6.1: внутренние места `crop.py`, видимые только изнутри (дополнение к слепому набору).
 
 Что здесь может сломаться: квадрат больше кадра, нечётная сторона, read-only кадр (SHM), 2D/4-канальный холст,
-порядок проверок (неизвестный `oob` внутри кадра), маппинг регистра плагина, поведение `_crop_disk` на выходе
-центра за кадр. Ожидаемые значения — литералы или независимый `np.pad`.
+порядок проверок (неизвестный `oob` внутри кадра), маппинг регистра плагина.
+(Тесты `holdout_eval._crop_disk` убраны в Task 6.4: он режет по формуле конвейера,
+см. `Services/ml_train/tests/test_hazards_6_4_holdout_crop.py`.)
+Ожидаемые значения — литералы или независимый `np.pad`.
 """
 
 from __future__ import annotations
@@ -156,26 +158,3 @@ def test_plugin_passes_register_pad_colour_through():
     p = _plugin({"drop_partial": False, "pad_if_oob": True, "pad_color_bgr": [4, 5, 6]})
     out = p._crop_square(_frame(), 8, -50, 6)
     assert (out == np.array([4, 5, 6], dtype=np.uint8)).all()
-
-
-# --- holdout_eval._crop_disk ---------------------------------------------------------------------------------------
-
-
-def test_crop_disk_is_a_copy_and_side_formula_is_unchanged(monkeypatch):
-    """Внутри кадра: сторона 2*round(r*(1+margin)) = 2*round(25*1.2)=60, не view (изменение 6.1)."""
-    import Services.ml_train.holdout_eval as he
-
-    f = _ro(_frame(100, 100))
-    monkeypatch.setattr(he, "detect_disk", lambda bgr: (50, 50, 25))
-    out = he._crop_disk(f, 0.2)
-    assert out.shape == (60, 60, 3) and not np.shares_memory(out, f)
-    assert np.array_equal(out, f[20:80, 20:80])
-
-
-def test_crop_disk_center_outside_frame_raises_value_error(monkeypatch):
-    """Центр диска целиком вне кадра -> ValueError (раньше молча отдавалось мусорное по форме)."""
-    import Services.ml_train.holdout_eval as he
-
-    monkeypatch.setattr(he, "detect_disk", lambda bgr: (50, -200, 25))
-    with pytest.raises(ValueError):
-        he._crop_disk(_frame(100, 100), 0.2)

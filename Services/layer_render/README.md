@@ -20,7 +20,7 @@
 | `apply_effects(frame_u8, specs, rng)` | (`effects`) прогон списка по порядку; вентиль `rng.random() < prob` тянется всегда; пустой список — копия кадра без розыгрышей; вход не меняется |
 | `apply_glare`, `apply_shadow`, `apply_occlusion`, `apply_motion_blur`, `make_motion_kernel`, `apply_vignette`, `apply_brightness_contrast`, `apply_gamma`, `apply_color_temperature`, `apply_channel_shift`, `apply_jpeg` | (`effects`, Task 2.2) функции эффектов, перенесены из `dataset_gen.core.augment` без изменений |
 | `side_from_radius(radius, radius_scale, margin_px)` | (`crop`, Task 6.1) сторона квадрата: `max(2, int(round(2·r·scale)) + 2·int(margin))` |
-| `square_crop(frame, cx, cy, side, oob, pad_value=(0,0,0))` | (`crop`, Task 6.1) квадрат `side`×`side`, угол `(cx - side//2, cy - side//2)`; **всегда копия**, не view кадра. `oob` у границы: `drop` -> `None`; `pad` -> холст `pad_value`; `clamp` -> обрезка по кадру (нет пересечения -> `None`); `replicate` -> репликация края (нет пересечения -> `ValueError`). Неизвестный `oob` -> `ValueError` |
+| `square_crop(frame, cx, cy, side, oob, pad_value=(0,0,0))` | (`crop`, Task 6.1) квадрат `side`×`side`, угол `(cx - side//2, cy - side//2)`; **всегда копия**, не view кадра. `oob` у границы: `drop` -> `None`; `pad` -> холст `pad_value`; `clamp` -> обрезка по кадру (нет пересечения -> `None`); `replicate` -> репликация края (нет пересечения -> `ValueError`; **потребителей нет с Task 6.4**, режим оставлен как контракт, закреплённый тестами 6.1).  Неизвестный `oob` -> `ValueError` |
 | `resize_square(crop, out)` | (`crop`, Task 6.1) ресайз к `out`×`out`: `out <= 0` или уже готово -> тот же объект; иначе INTER_AREA при `crop.shape[0] > out`, INTER_LINEAR иначе |
 
 Карта зоны выреза: `docs/maps/crop.md`.

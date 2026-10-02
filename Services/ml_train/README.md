@@ -127,3 +127,19 @@ test-метрики при наличии test-сплита) · `best.pt` / `las
 pytest Services/ml_train/tests/   # config/metrics/selection — без torch;
                                   # data/trainer/export — пропускаются без ML-стека
 ```
+
+## Валидация на реальном hold-out (`eval`)
+
+```bash
+python -m Services.ml_train eval <model_id> <holdout_dir> [--models-dir data/models]     [--radius-scale 1.0] [--margin-px 14] [--output-size 128] [--pad-color-bgr B,G,R]
+```
+
+Раскладка hold-out: `<holdout_dir>/<буква>/<угол>.jpg`. Кадр режется **по формуле конвейера** перед `ml_inference`
+(Task 6.4): `detect_disk` -> `side_from_radius(r, radius_scale, margin_px)` -> `square_crop(oob="pad", pad_value=pad_color_bgr)`
+-> `resize_square(crop, output_size)` — те же функции `Services.layer_render`, что у `center_crop`. Число точности меряет то,
+что видит робот. Раньше был свой вырез `2r·(1+0.18)` с репликацией края.
+
+Дефолты выреза живут только в сигнатуре `evaluate_holdout` и равны рецепту `letter_robot_sim.yaml` (`center_crop`:
+`radius_scale 1.0`, `margin_px 14`, `output_size 128`) и регистру (`pad_color_bgr (0, 0, 0)`). CLI передаёт только заданные
+флаги. Сводка содержит ключ `"crop"` с применёнными значениями (`pad_color_bgr` — список). `--pad-color-bgr` — три целых 0..255.
+Детектор диска здесь свой (`detect_disk`, HoughCircles); в конвейере радиус даёт `circle_detector`.

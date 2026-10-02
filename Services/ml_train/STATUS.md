@@ -24,6 +24,15 @@
   ML-стека; torch НЕ импортируется при discovery)
 - Тесты: 39 + 3 фасадных (config/metrics/selection без torch; data/trainer/export — torch smoke CPU)
 
+## eval: вырез по формуле конвейера (Task 6.4)
+
+- `holdout_eval._crop_disk` режет кадр как `center_crop`: `side_from_radius` + `square_crop(oob="pad")` + `resize_square`;
+  `evaluate_holdout(radius_scale, margin_px, output_size, pad_color_bgr)` вместо `margin` (внешних вызовов с `margin` — 0);
+  сводка содержит `"crop"`. CLI `eval`: `--radius-scale`, `--margin-px`, `--output-size`, `--pad-color-bgr B,G,R`.
+- Исправлен `IndexError` в строке лога на промахе буквы (`err=` только при `ok and angle_valid`).
+- Числа прогона лида (модель `mobilenet_v3_large_20260616_050828`, `data/real_photos`: 8 кадров, 2 буквы, участвовали в обучении)
+  по старой и новой формуле — TBD, вносит лид.
+
 ## Ревью
 
 Fable-ревью 2026-06-13: APPROVE с замечаниями; MAJOR-1 (resize-политика)
