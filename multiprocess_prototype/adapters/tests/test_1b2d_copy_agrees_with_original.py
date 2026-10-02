@@ -18,11 +18,13 @@
 - «отклонено» = ``set_field_value`` вернул ``(False, _)``; текст ошибки НЕ сравнивается;
 - после отклонения ПОЛЕВОЙ проверкой (тип/элемент контейнера/значение поля) хранимое значение
   равно значению ДО присваивания — проверено на оригинале (``test_container_original_...``);
-- МЕЖПОЛЕВЫЕ правила (``model_validator``) НЕ откатывают присваивание на оригинале: измерено
-  2026-10-02 — ``max_export_batch_size <- 4096`` отклонено, но хранится 4096 (pydantic ставит
-  значение, потом зовёт after-валидатор). Это дефект/особенность оригинала, а не контракт: для
-  таких случаев хранимое после отказа допускает ЛЮБОЕ из двух значений (``_OneOf``: до / отвергнутое),
-  а оракул AC3 сравнивает хранимое только когда обе стороны ПРИНЯЛИ значение;
+- РЕШЕНИЕ ВЛАДЕЛЬЦА (2026-10-02, заменило мою прежнюю трактовку): отвергнутое значение НЕ остаётся
+  в регистре — ни на оригинале, ни на копии, ни на бэкенде; отказ = ничего не записано. Это
+  касается и межполевых правил (``model_validator``): раньше на оригинале измерено
+  ``max_export_batch_size <- 4096`` -> отклонено, но хранится 4096 (pydantic ставит значение,
+  потом зовёт after-валидатор, без отката). Теперь такие случаи ожидают прежний литерал
+  (6 / 5 / 512 / 2048) на ОБЕИХ сторонах и на этом дереве красные и на оригинале; оракул AC3
+  сравнивает хранимое ВСЕГДА, а не только при принятии;
 - ``blur`` (``register_classes == []``) не проверяется вовсе.
 """
 
@@ -43,19 +45,6 @@ from multiprocess_framework.modules.registers_module.core.manager import Registe
 # ---------------------------------------------------------------------------
 # Харнесс (тот же паттерн, что в test_catalog_registers_editing_acceptance.py)
 # ---------------------------------------------------------------------------
-
-
-class _OneOf:
-    """Ожидание «любое из перечисленных» — для хранимого значения после отказа межполевого правила."""
-
-    def __init__(self, *options: Any) -> None:
-        self.options = options
-
-    def __eq__(self, other: object) -> bool:
-        return any(other == o for o in self.options)
-
-    def __repr__(self) -> str:
-        return f"одно из {list(self.options)!r}"
 
 
 def _repo_root() -> Path:
@@ -104,7 +93,7 @@ def _check_case(plugin: str, field: str, value: Any, expect_ok: bool, expect_sto
     problems: list[str] = []
     for label, rm in (("оригинал", original), ("копия", copy_rm)):
         ok, stored = _assign(rm, plugin, field, value)
-        if ok is not expect_ok or not (expect_stored == stored):
+        if ok is not expect_ok or stored != expect_stored:
             problems.append(
                 f"{label}: {plugin}.{field} <- {value!r}: принято={ok!r} хранится={stored!r}; "
                 f"ожидалось принято={expect_ok!r} хранится={expect_stored!r}"
@@ -195,8 +184,8 @@ def test_container_valid_value_accepted_by_both(
     ("field", "value", "expect_ok", "expect_stored"),
     [
         # дефолты: dedup_radius=5, hysteresis_margin=6. Правило: hysteresis_margin >= dedup_radius.
-        ("hysteresis_margin", 4, False, _OneOf(6, 4)),  # 4 < 5 — нарушение
-        ("dedup_radius", 7, False, _OneOf(5, 7)),  # 7 > 6 — нарушение с другой стороны правила
+        ("hysteresis_margin", 4, False, 6),  # 4 < 5 — нарушение
+        ("dedup_radius", 7, False, 5),  # 7 > 6 — нарушение с другой стороны правила
         ("hysteresis_margin", 5, True, 5),  # граница: 5 == 5 — разрешено
         ("dedup_radius", 6, True, 6),  # граница: 6 == 6 — разрешено
     ],
@@ -274,8 +263,8 @@ def test_otel_unknown_level_rejected(value: str, expect_ok: bool, expect_stored:
     ("field", "value", "expect_ok", "expect_stored"),
     [
         # дефолты: max_queue_size=2048, max_export_batch_size=512. Правило: batch <= queue.
-        ("max_export_batch_size", 4096, False, _OneOf(512, 4096)),  # batch > queue
-        ("max_queue_size", 100, False, _OneOf(2048, 100)),  # queue < batch — нарушение с другой стороны
+        ("max_export_batch_size", 4096, False, 512),  # batch > queue
+        ("max_queue_size", 100, False, 2048),  # queue < batch — нарушение с другой стороны
         ("max_export_batch_size", 2048, True, 2048),  # граница: batch == queue — разрешено
         ("max_queue_size", 512, True, 512),  # граница: queue == batch — разрешено
     ],
@@ -290,12 +279,14 @@ def test_otel_batch_must_fit_queue(field: str, value: int, expect_ok: bool, expe
 def test_pinned_literals_hold_on_original() -> None:
     """Якорь AC2: ВСЕ литералы AC2 выше выполняются на ОРИГИНАЛЕ (зелёный сегодня).
 
-    Если здесь красно — неверен литерал тестера, а не копия. Таблица продублирована
+    Красен на этом дереве по 4 межполевым случаям (оригинал оставляет отвергнутое значение) —
+    решение владельца 2026-10-02: так быть не должно. Остальные строки таблицы зелёные; если
+    красна строка вне этих 4 — неверен литерал тестера, а не копия. Таблица продублирована
     намеренно (литералы, а не ссылка на параметры выше).
     """
     table: list[tuple[str, str, Any, bool, Any]] = [
-        ("line_filter", "hysteresis_margin", 4, False, _OneOf(6, 4)),
-        ("line_filter", "dedup_radius", 7, False, _OneOf(5, 7)),
+        ("line_filter", "hysteresis_margin", 4, False, 6),
+        ("line_filter", "dedup_radius", 7, False, 5),
         ("line_filter", "hysteresis_margin", 5, True, 5),
         ("line_filter", "dedup_radius", 6, True, 6),
         ("otel_export", "endpoint", "   ", False, ""),
@@ -309,8 +300,8 @@ def test_pinned_literals_hold_on_original() -> None:
         ("otel_export", "level", "bogus", False, "INFO"),
         ("otel_export", "level", "warn", True, "WARNING"),
         ("otel_export", "level", "debug", True, "DEBUG"),
-        ("otel_export", "max_export_batch_size", 4096, False, _OneOf(512, 4096)),
-        ("otel_export", "max_queue_size", 100, False, _OneOf(2048, 100)),
+        ("otel_export", "max_export_batch_size", 4096, False, 512),
+        ("otel_export", "max_queue_size", 100, False, 2048),
         ("otel_export", "max_export_batch_size", 2048, True, 2048),
         ("otel_export", "max_queue_size", 512, True, 512),
     ]
@@ -318,7 +309,7 @@ def test_pinned_literals_hold_on_original() -> None:
     for plugin, field, value, expect_ok, expect_stored in table:
         original, _ = _fresh_pair()
         ok, stored = _assign(original, plugin, field, value)
-        if ok is not expect_ok or not (expect_stored == stored):
+        if ok is not expect_ok or stored != expect_stored:
             wrong.append(
                 f"{plugin}.{field} <- {value!r}: принято={ok!r} хранится={stored!r}, "
                 f"ожидалось ({expect_ok!r}, {expect_stored!r})"
@@ -386,8 +377,7 @@ def _all_divergences() -> tuple[int, list[tuple[str, str, Any, Any, Any]]]:
             for probe in probes:
                 o = _assign(original, name, field, probe)
                 c = _assign(copy_rm, name, field, probe)
-                # хранимое сравниваем только когда обе стороны приняли (см. шапку: межполевой отказ не откатывает)
-                if o[0] != c[0] or (o[0] and o[1] != c[1]):
+                if o != c:
                     divergences.append((name, field, probe, o, c))
                 # вернуть исходное состояние напрямую (в обход валидации), чтобы разрыв не копился
                 orig_reg.__dict__[field] = copy.deepcopy(saved_o)
@@ -415,3 +405,48 @@ def test_oracle_no_divergence_outside_known_list() -> None:
     _compared, divergences = _all_divergences()
     unexpected = sorted({d[0] for d in divergences} - KNOWN_DIVERGENT_REGISTERS)
     assert not unexpected, f"расхождения вне известного списка: {unexpected}"
+
+
+# ---------------------------------------------------------------------------
+# (г) Текст отказа не содержит отвергнутого значения (секреты не утекают в ошибку)
+# ---------------------------------------------------------------------------
+
+
+def _error_text(rm: RegistersManager, plugin: str, field: str, value: Any) -> tuple[bool, str]:
+    ok, err = rm.set_field_value(plugin, field, copy.deepcopy(value))
+    return bool(ok), str(err)
+
+
+_LEAK_CASES = [
+    ("headers", {"Authorization": "literal-secret-123"}, "literal-secret-123"),
+    ("endpoint", "UNIQUE-MARKER-endpoint-7f3a9c", "UNIQUE-MARKER-endpoint-7f3a9c"),
+]
+
+
+@pytest.mark.parametrize(("field", "value", "marker"), _LEAK_CASES, ids=["headers_literal", "endpoint_marker"])
+def test_copy_rejection_is_refusal_without_echoing_the_value(field: str, value: Any, marker: str) -> None:
+    """Post: копия ОТВЕРГАЕТ значение и строка-маркер значения не попадает в текст ошибки.
+
+    Два условия в одном тесте намеренно: без первого «нет маркера в тексте» тривиально
+    выполнено у принявшей копии (``None`` -> ``"None"``).
+    """
+    _, copy_rm = _fresh_pair()
+    ok, text = _error_text(copy_rm, "otel_export", field, value)
+    assert ok is False, f"копия приняла {field}={value!r} (текст: {text!r})"
+    assert marker not in text, f"маркер отвергнутого значения попал в текст ошибки копии: {text!r}"
+
+
+@pytest.mark.parametrize(("field", "value", "marker"), _LEAK_CASES[:1], ids=["headers_literal"])
+def test_original_rejection_does_not_echo_the_value_anchor(field: str, value: Any, marker: str) -> None:
+    """Якорь (зелёный сегодня): ОРИГИНАЛ отвергает ``headers`` и не печатает значение (``hide_input_in_errors``).
+
+    ТОЛЬКО headers. Для ``endpoint`` якоря НЕТ намеренно: измерено, что у ОРИГИНАЛА валидатор
+    ``_endpoint_carries_signal_path`` сам вставляет значение в текст ошибки (``endpoint {value!r} неполон``),
+    поэтому ``hide_input_in_errors`` его не спасает — ожидание «оригинал не печатает endpoint» было
+    моей неверной моделью. Копия по (г) всё равно обязана не печатать маркер; если реализация
+    воспроизведёт текст валидатора, тест на копии останется красным — решение за лидом.
+    """
+    original, _ = _fresh_pair()
+    ok, text = _error_text(original, "otel_export", field, value)
+    assert ok is False, f"оригинал принял {field}={value!r}"
+    assert marker not in text, f"оригинал печатает значение в ошибке: {text!r}"
