@@ -69,6 +69,77 @@ def _type_tag(t: Any) -> str:
     return "unsupported"
 
 
+_SCALAR_TYPES: dict[str, Any] = {
+    "bool": bool,
+    "int": int,
+    "float": float,
+    "str": str,
+    "path": Path,
+    "tuple3int": tuple[int, int, int],
+}
+
+
+def _describe_type(t: Any, *, nested: bool = False) -> dict[str, Any] | None:
+    """Описать тип dict-ом ``{"type": тег, ...}`` — рекурсивно для элементов контейнеров.
+
+    ``list[X]`` -> ``item``; ``dict[K, V]`` -> ``key``/``value`` (то же описание, что у
+    верхнего уровня: ``choices`` у вложенного ``literal``, свои ``item``/``key``/``value``).
+    Ключи отсутствуют у голого ``list``/``dict`` и когда тип элемента ``unsupported``
+    (``Any``, ``Optional[...]``) — тогда на той стороне границы элемент не проверяется.
+    Для ``nested=True`` ``unsupported`` и ``literal`` без вариантов -> ``None`` (ключ не
+    пишется; никогда не порождаем ``Literal[None]``).
+    """
+    tag = _type_tag(t)
+    if nested and tag == "unsupported":
+        return None
+    desc: dict[str, Any] = {"type": tag}
+    args = get_args(t)
+    if tag == "literal":
+        if nested and not args:
+            return None
+        desc["choices"] = _json_safe(list(args))
+    elif tag == "list" and args:
+        item = _describe_type(args[0], nested=True)
+        if item is not None:
+            desc["item"] = item
+    elif tag == "dict" and len(args) == 2:
+        for key, arg in zip(("key", "value"), args):
+            sub = _describe_type(arg, nested=True)
+            if sub is not None:
+                desc[key] = sub
+    return desc
+
+
+def _build_type(desc: dict[str, Any]) -> Any:
+    """Собрать Python-тип по описанию ``_describe_type`` (обратное преобразование).
+
+    Нет ``item``/``key``/``value`` -> голый ``list``/``dict`` (старый payload хаба работает).
+    Недостающая половина ``dict`` -> ``Any`` на её месте.
+    """
+    tag = desc.get("type")
+    if tag == "literal":
+        choices = tuple(desc.get("choices") or [])
+        return Literal[choices] if choices else Literal[None]
+    if tag == "list":
+        item = _build_nested(desc.get("item"))
+        return list if item is None else list[item]
+    if tag == "dict":
+        key, value = _build_nested(desc.get("key")), _build_nested(desc.get("value"))
+        if key is None and value is None:
+            return dict
+        return dict[Any if key is None else key, Any if value is None else value]
+    return _SCALAR_TYPES.get(tag, object)
+
+
+def _build_nested(desc: Any) -> Any:
+    """Вложенное описание -> тип; ``None`` если описания нет или оно пустое (``literal`` без choices)."""
+    if not isinstance(desc, dict):
+        return None
+    if desc.get("type") == "literal" and not desc.get("choices"):
+        return None
+    return _build_type(desc)
+
+
 def _json_safe(value: Any) -> Any:
     """Рекурсивно привести значение к JSON-safe виду (никогда не бросает, ревью 1).
 
@@ -160,7 +231,8 @@ class FieldInfo:
         ``Literal[Color.RED]``) падают в ``str(value)``, никогда не бросают.
         """
         unwrapped, optional = _unwrap_optional(self.field_type)
-        tag = _type_tag(unwrapped)
+        type_desc = _describe_type(unwrapped) or {}
+        tag = type_desc["type"]
         meta_dict = self.meta.to_dict() if self.meta is not None else None
         d: dict[str, Any] = {
             "plugin_name": self.plugin_name,
@@ -171,8 +243,7 @@ class FieldInfo:
             "meta": _json_safe(meta_dict) if meta_dict is not None else None,
             "category": self.category,
         }
-        if tag == "literal":
-            d["choices"] = _json_safe(list(get_args(unwrapped)))
+        d.update((k, v) for k, v in type_desc.items() if k != "type")
         return d
 
     @classmethod
@@ -181,38 +252,18 @@ class FieldInfo:
 
         ``unsupported`` восстанавливается как ``object`` (сам по себе классифицируется
         обратно в ``unsupported`` — round-trip тега стабилен, даже если исходный
-        Python-тип не переносится через границу).
+        Python-тип не переносится через границу). ``list[X]``/``dict[K, V]`` собираются
+        из ``item``/``key``/``value`` (Task 1b.2d-1); без них — голый контейнер.
         """
         tag = d["type"]
         optional = bool(d.get("optional", False))
         default = d.get("default")
 
-        field_type: Any
-        if tag == "literal":
-            choices = tuple(d.get("choices") or [])
-            field_type = Literal[choices] if choices else Literal[None]
-        elif tag == "tuple3int":
-            field_type = tuple[int, int, int]
-            if isinstance(default, list):
-                default = tuple(default)
-        elif tag == "path":
-            field_type = Path
-            if isinstance(default, str):
-                default = Path(default)
-        elif tag == "bool":
-            field_type = bool
-        elif tag == "int":
-            field_type = int
-        elif tag == "float":
-            field_type = float
-        elif tag == "str":
-            field_type = str
-        elif tag == "list":
-            field_type = list
-        elif tag == "dict":
-            field_type = dict
-        else:
-            field_type = object
+        field_type: Any = _build_type(d)
+        if tag == "tuple3int" and isinstance(default, list):
+            default = tuple(default)
+        elif tag == "path" and isinstance(default, str):
+            default = Path(default)
 
         if optional:
             field_type = Optional[field_type]

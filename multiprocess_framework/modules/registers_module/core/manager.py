@@ -38,13 +38,6 @@ def _build_register_copy(name: str, fields: List[FieldInfo]) -> Any:
 
     Не переносится (см. ADR-RM-007 «Ограничения» — полный список с находками ревью):
 
-    - **параметризованные ``list``/``dict``** — кодек ``FieldInfo.to_dict()``/
-      ``from_dict()`` вырождает ``list[int]``/``dict[str, str]`` и т.п. в голый
-      ``list``/``dict`` (закрытый набор тегов типа, см. ``field_info.py``), поэтому
-      копия ПРИНИМАЕТ то, что реальный класс отклоняет (измерено ревью: 10 полей
-      в 7 регистрах, например ``blob_detector.contour_color_bgr = ['x']`` —
-      ``real=False``, ``copy=True``). Это ограничение кодека, а не этой функции —
-      чинить в Task 1b.2d.
     - **class-level python-валидаторы** (``field_validator``/``model_validator``)
       и class attribute ``register_dispatch`` — их несёт только исходный класс
       плагина, а не набор ``FieldInfo``.

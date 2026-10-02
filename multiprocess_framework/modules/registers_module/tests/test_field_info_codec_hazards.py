@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import pytest
 
@@ -357,3 +357,103 @@ def test_catalog_plugins_one_bad_plugin_does_not_kill_the_whole_catalog(
     # проверяет payload КАК ОН ЕСТЬ в тесте, а не то, что хендлер успел сделать сам с собой.
     dumped = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     assert json.loads(dumped) == payload
+
+
+# ---------------------------------------------------------------------------
+# Task 1b.2d-1: типы элементов list/dict едут через кодек
+# ---------------------------------------------------------------------------
+
+
+def _fi(field_type: object, default: object = None) -> FieldInfo:
+    return FieldInfo(plugin_name="p", field_name="f", field_type=field_type, default=default, meta=None, category="c")
+
+
+def _over_ipc(fi: FieldInfo) -> FieldInfo:
+    """to_dict -> json.dumps/loads (граница IPC настоящая: кортежи -> списки, ключи -> str) -> from_dict."""
+    return FieldInfo.from_dict(json.loads(json.dumps(fi.to_dict())))
+
+
+@pytest.mark.parametrize(
+    "field_type",
+    [
+        list[int],
+        list[dict],
+        dict[str, str],
+        list[list[int]],
+        dict[str, list[int]],
+        list[Literal["a", "b"]],
+        dict[str, Literal["x", "y"]],
+        list[tuple[int, int, int]],
+        Optional[list[int]],
+    ],
+    ids=lambda t: repr(t),
+)
+def test_nested_container_type_roundtrips_through_json(field_type: object) -> None:
+    """Тип с вложением переживает to_dict -> JSON -> from_dict РОВНО (==), а не вырождается в голый list/dict."""
+    assert _over_ipc(_fi(field_type)).field_type == field_type
+
+
+def test_list_item_and_dict_key_value_shapes_are_pinned_literals() -> None:
+    """Форма payload — литерал: ``list[dict]`` несёт ``item: {"type": "dict"}`` (голый dict — тег, ключ ЕСТЬ)."""
+    assert _fi(list[dict]).to_dict()["item"] == {"type": "dict"}
+    d = _fi(dict[str, list[int]]).to_dict()
+    assert d["key"] == {"type": "str"}
+    assert d["value"] == {"type": "list", "item": {"type": "int"}}
+
+
+def test_bare_and_unsupported_element_containers_carry_no_element_keys() -> None:
+    for t in (list, dict):
+        d = _fi(t).to_dict()
+        assert not {"item", "key", "value"} & d.keys(), d
+    assert "item" not in _fi(list[Any]).to_dict()
+    d = _fi(dict[str, Any]).to_dict()
+    assert d["key"] == {"type": "str"} and "value" not in d
+    assert "item" not in _fi(list[Optional[int]]).to_dict()  # Optional-элемент = unsupported
+
+
+def test_half_described_dict_rebuilds_missing_side_as_any() -> None:
+    d = _fi(dict[str, Any]).to_dict()
+    assert FieldInfo.from_dict(json.loads(json.dumps(d))).field_type == dict[str, Any]
+
+
+@pytest.mark.parametrize("tag, bare", [("list", list), ("dict", dict)])
+def test_old_payload_without_element_keys_builds_bare_container(tag: str, bare: type) -> None:
+    """Совместимость: payload старого хаба (нет item/key/value) читается как голый контейнер, не падает."""
+    old = {"plugin_name": "p", "field_name": "f", "type": tag, "optional": False, "default": None, "meta": None}
+    assert FieldInfo.from_dict(old).field_type is bare
+
+
+def test_nested_literal_keeps_choices_and_rejects_foreign_value() -> None:
+    from pydantic import TypeAdapter, ValidationError
+
+    restored = _over_ipc(_fi(list[Literal["a", "b"]], default=["a"])).field_type
+    ta = TypeAdapter(restored)
+    assert ta.validate_python(["a", "b"]) == ["a", "b"]
+    with pytest.raises(ValidationError):
+        ta.validate_python(["c"])
+
+
+def test_nested_literal_without_choices_in_payload_is_not_literal_none() -> None:
+    """Описание ``{"type": "literal"}`` без choices во вложении -> голый list (никогда ``list[Literal[None]]``)."""
+    d = {"plugin_name": "p", "field_name": "f", "type": "list", "item": {"type": "literal"}, "default": None}
+    assert FieldInfo.from_dict(d).field_type is list
+
+
+@pytest.mark.parametrize(
+    "field_type, wrong, right",
+    [
+        (list[int], ["x"], [1, 2]),
+        (dict[str, str], {"a": 1}, {"a": "b"}),
+        (list[dict], [1], [{"a": 1}]),
+    ],
+    ids=["list_int", "dict_str_str", "list_dict"],
+)
+def test_copy_type_rejects_wrong_element_like_original(field_type: object, wrong: object, right: object) -> None:
+    """Поведение, не форма: тип копии (после IPC) отвергает неверный элемент ровно как исходный тип."""
+    from pydantic import TypeAdapter, ValidationError
+
+    copy_ta, orig_ta = TypeAdapter(_over_ipc(_fi(field_type)).field_type), TypeAdapter(field_type)
+    for ta in (orig_ta, copy_ta):
+        assert ta.validate_python(right) == right
+        with pytest.raises(ValidationError):
+            ta.validate_python(wrong)
