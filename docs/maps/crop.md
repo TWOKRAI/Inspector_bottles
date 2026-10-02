@@ -34,10 +34,12 @@
    `drop_partial` -> `drop` (побеждает), иначе `pad_if_oob` -> `pad` (цвет `pad_color_bgr`, `plugin.py:137`), иначе `clamp`.
    `_resolve_side` (fallback `size_mode`/радиус неизвестен -> `side_px`) остаётся в плагине, формула — `side_from_radius` (`plugin.py:117`).
    `_resize_output` (`plugin.py:106`) -> `resize_square(crop, output_size)`.
-2. `Services/ml_train/holdout_eval.py::_crop_disk` (`holdout_eval.py:44-54`) — `detect_disk`, `half = round(r·(1+margin))`,
+2. `Services/ml_train/holdout_eval.py::_crop_disk` (`holdout_eval.py:44-58`) — `detect_disk`, `half = round(r·(1+margin))`,
    `square_crop(bgr, cx, cy, 2*half, oob="replicate")`. Формула стороны НЕ менялась (её смена — Task 6.4).
-   Вызов в `evaluate_holdout` без try/except: `ValueError` достижим, только если `detect_disk` вернул центр целиком вне кадра
-   (раньше молча возвращался массив неверной формы). Обработки нет намеренно.
+   Вызов в `evaluate_holdout` без try/except. `ValueError` — когда квадрат НЕ пересекает кадр (cx <= -half или
+   cx >= w + half, то же по y), а не «центр вне кадра»: `square_crop(f, -10, 100, 64, "replicate")` отдаёт (64, 64, 3).
+   Раньше при непересечении молча возвращался массив неверной формы. Обработки нет намеренно.
+   Из реального `detect_disk` недостижимо: центр внутри кадра, half >= 1 (ревьюер: 300 синтетических кадров, 0 случаев).
 
 ## Границы слоёв
 

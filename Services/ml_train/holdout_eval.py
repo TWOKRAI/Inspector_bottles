@@ -47,10 +47,14 @@ def _crop_disk(bgr: np.ndarray, margin: float) -> np.ndarray:
     Квадрат обязателен: при resize_policy=stretch прямоугольный кроп растянул бы
     диск и сдвинул угол. У края кадра недостающие поля достраиваются репликацией
     края (тёмно-синий фон реплицируется в тёмно-синий — без чёрной рамки).
+    Результат всегда копия кадра, не view.
+
+    Raises:
+        ValueError: квадрат не пересекает кадр (cx <= -half или cx >= w + half, то же по y).
     """
     cx, cy, r = detect_disk(bgr)
     half = int(round(r * (1.0 + margin)))
-    # Вырез — Services.layer_render.crop.square_crop; центр диска вне кадра целиком → ValueError (без обработки).
+    # Вырез — Services.layer_render.crop.square_crop; квадрат целиком вне кадра → ValueError (без обработки).
     return square_crop(bgr, cx, cy, 2 * half, oob="replicate")
 
 

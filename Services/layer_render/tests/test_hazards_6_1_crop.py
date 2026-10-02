@@ -103,6 +103,32 @@ def test_side_from_radius_floor_with_negative_margin():
     assert side_from_radius(1, 1.0, -50) == 2
 
 
+@pytest.mark.parametrize(
+    ("label", "cx", "cy"),
+    [("above", 80, -32), ("left", -32, 100), ("below", 80, 232), ("right", 192, 100)],
+)
+def test_clamp_square_exactly_touching_the_edge_is_none(label, cx, cy):
+    """clamp: квадрат 64 лишь касается края кадра 200x160 — пересечения нет -> None, не пустой массив."""
+    f = np.zeros((200, 160, 3), dtype=np.uint8)
+    assert square_crop(f, cx, cy, 64, "clamp") is None
+
+
+def test_pad_default_pad_value_fills_zero_in_every_channel():
+    """Без pad_value заливка 0 во всех каналах (кадр не нулевой, чтобы заливку было видно); пересечение вклеено."""
+    f = _frame() + 5  # без нулей в кадре не обязательно, но заливка точно не из кадра
+    out = square_crop(f, 1, 10, 6, "pad")  # x0 = -2: два левых столбца вне кадра
+    assert out.shape == (6, 6, 3)
+    assert (out[:, :2, :] == 0).all()
+    assert np.array_equal(out[:, 2:, :], f[7:13, 0:4, :])
+
+
+def test_pad_empty_pad_value_on_two_dim_frame_fills_zero():
+    """pad_value=() на 2D-кадре: заливка 0 (нет первого компонента), а не IndexError."""
+    f2 = _frame(c=1)[:, :, 0] + 5
+    out = square_crop(f2, -10, 10, 4, "pad", pad_value=())
+    assert out.shape == (4, 4) and (out == 0).all()
+
+
 # --- плагин: маппинг регистра -> oob ------------------------------------------------------------------------------
 
 
