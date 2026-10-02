@@ -46,3 +46,7 @@ BASE: F `65 passed`, P `126 passed`.
 | M12 обход self-вызовов выключен | 1 — `test_guard_follows_self_method_calls_from_process_and_names_the_chain` | 0 |
 | M13 база сброса пустая | 0 | 2 — оба reset в test_t52_author |
 | M14 предупреждение алиаса снято | 0 | 3 — контракт 100 браков, author «не повторяется», author 100 pass |
+
+## Раунд 3 (HEAD 07abab3c6, флак часов) — проверка лида
+`r7_flake_line.py 1500` → `runs 1500 failures 0, schedule statuses {'scheduled': 1500}` (до правки 3/1500 `missed`).
+Файлы `test_t52_actuation_contract.py` + `test_t52_author.py` подряд 60 раз → 0 прогонов с падениями (у тестера цели `time.time() - 0.090`, запас ~10 мс до fire_at — флака не видно, но на CI под нагрузкой не исключён).

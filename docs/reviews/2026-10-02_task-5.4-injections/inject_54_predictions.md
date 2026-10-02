@@ -28,3 +28,7 @@ K9 `log_warning=None` в GenericProcess → красный 1 (warning_goes_throu
 
 ## Итог раунда 2 (лид) — 3 из 3 по предсказанию
 BASE `67 passed`. K6 → 5 красных (как предсказано); K7 → 4; K9 → 1 (`test_preroll_warning_goes_through_the_process_logger_exactly_once`). Пробел K6/K7 закрыт.
+
+## Раунд 3 (HEAD aeaa5e623, якорь own ready_event) — предсказания до прогона
+K6 → 5 красных; K7 → 4; K9 → 1 (как в раунде 2).
+Итог раунда 3: BASE `67 passed`; K6 → 5, K7 → 4, K9 → 1 — 3 из 3 по предсказанию.
