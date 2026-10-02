@@ -21,7 +21,7 @@ from .plugin_operation_step import PipelineStepNode, PluginOperationStep, Suspec
 from .plugin_runner import PluginRunner
 from ...chain_module import ChainRunnable, RunnableStep
 from ...router_module.middleware.frame_shm_middleware import SHM_VIEWS_KEY, FrameShmMiddleware
-from ...router_module.middleware.not_inspected_marker import build_marker, is_marker_collection
+from ...router_module.middleware.not_inspected_marker import build_gap, build_marker, is_marker_collection
 
 
 class PipelineExecutor:
@@ -294,9 +294,10 @@ class PipelineExecutor:
                 self._shm.note_stale_drops(n_in - 1)
             if every:
                 # Цепочка уже отработала на этих входах — маркеры идут прямо в отправку, минуя её.
+                # Task 5.3: n_in маркеров уезжают записью о разрыве (⌈n_in/GAP_CHUNK⌉ сообщений), счёт — по входам.
                 self._not_inspected_stale_exec += n_in
                 self._not_inspected_handled += n_in
-                self._send_results(stale_markers)
+                self._send_results(build_gap(stale_markers))
             self._cycle_metrics.record(time.perf_counter() - t_start)
             return
 
@@ -323,12 +324,17 @@ class PipelineExecutor:
         Шаги цепочки сами пропускают маркер мимо плагинов без ``accepts_markers`` (PluginOperationStep /
         SuspectTagStep). Маркер не несёт кадра, поэтому ``_attach_batch_views`` не нужен.
 
+        Task 5.3: коллекция схлопывается в записи о разрыве (``build_gap``) ДО цепочки — плагин с
+        ``accepts_markers`` и ``send_fn`` видят ⌈Σ count / GAP_CHUNK⌉ записей, а не маркер на кадр.
+        ``not_inspected_handled`` растёт на Σ ``count`` ВХОДА (кадры, а не записи): формула ADR-174 п. 5 — в items.
+
         Цикл в ``_cycle_metrics`` НЕ пишется (4.7d-2): работа над маркером — не обработка кадра, иначе
         ``effective_hz`` / ``cycle_duration_ms`` описывали бы смесь кадров и маркеров. ``t_start`` оставлен
         в сигнатуре ради вызывающих.
         """
-        out = self._execute_chain(items)
-        self._not_inspected_handled += len(items)
+        lost = sum(item.get("count", 1) for item in items)  # по входу: build_gap не вправе менять счёт
+        out = self._execute_chain(build_gap(items))
+        self._not_inspected_handled += lost
         self._send_results(out)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
