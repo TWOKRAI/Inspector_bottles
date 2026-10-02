@@ -1,0 +1,65 @@
+"""Инъекции 5.4: по одной заплате, прогон набора, откат через git checkout файла."""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+W = Path(r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/team-t54")
+PY = r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/python.exe"
+MOD = W / "multiprocess_framework/modules"
+SP = "multiprocess_framework/modules/process_module/generic/source_producer.py"
+GP = "multiprocess_framework/modules/process_module/generic/generic_process.py"
+RUN = "multiprocess_framework/modules/process_manager_module/runner/process_runner.py"
+REG = "multiprocess_framework/modules/process_manager_module/core/process_registry.py"
+INJ = {
+    "K1": [(SP, "        if not self._wait_preroll(stop_event):\n            return\n", "")],
+    "K2": [(SP, "            if stop_event.is_set():\n                return False\n            remaining", "            remaining")],
+    "K3": [(SP, "            if remaining <= 0:", "            if False:")],
+    "K4": [(SP, "        timeout_s = DEFAULT_PREROLL_TIMEOUT_S", "        timeout_s = 10.0")],
+    "K5": [(REG, '                    "system_ready_event": self._system_ready_event,\n', "")],
+    "K6": [
+        (RUN, "        if system_ready_event is not None:\n            process_instance._sources_ready_event = system_ready_event\n", ""),
+        (RUN, '                log.info("Process initialized")\n',
+         '                log.info("Process initialized")\n                if system_ready_event is not None:\n                    process_instance._sources_ready_event = system_ready_event\n'),
+    ],
+    "K7": [(GP, 'ready_event=getattr(self, "_sources_ready_event", None),', "ready_event=None,")],
+    "K8": [(RUN, "            process_instance._sources_ready_event = system_ready_event\n",
+            "            process_instance.attach_ready_event(system_ready_event)\n")],
+}
+TESTS = [
+    "process_module/tests/test_t54_source_producer_preroll.py",
+    "process_manager_module/tests/test_t54_ready_event_wiring.py",
+]
+env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+
+
+def run():
+    extra = [str(p.relative_to(MOD)).replace("\\", "/") for p in (MOD / "process_module/tests").glob("test_source_producer*.py")]
+    r = subprocess.run(
+        [PY, "-m", "pytest", *TESTS, *extra, "-q", "--tb=no", "-p", "no:cacheprovider", "-rfE"],
+        cwd=MOD, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+    )
+    fails = sorted(set(re.findall(r"(?:FAILED|ERROR) \S+::(\S+)", r.stdout)))
+    summary = [ln for ln in r.stdout.splitlines() if " passed" in ln or " failed" in ln or " error" in ln][-1:]
+    return summary, len(fails), fails
+
+
+for name in sys.argv[1:]:
+    patches = INJ.get(name, [])
+    for f, a, b in patches:
+        p = W / f
+        with open(p, encoding="utf-8", newline="") as fh:
+            s = fh.read()
+        nl = "\r\n" if "\r\n" in s else "\n"
+        a2, b2 = a.replace("\n", nl), b.replace("\n", nl)
+        assert s.count(a2) == 1, (name, f, s.count(a2))
+        s = s.replace(a2, b2)
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write(s)
+    try:
+        print(name, *run(), flush=True)
+    finally:
+        for f in {f for f, *_ in patches}:
+            subprocess.run(["git", "checkout", "--", f], cwd=W)
