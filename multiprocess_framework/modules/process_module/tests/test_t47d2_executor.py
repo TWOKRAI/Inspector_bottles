@@ -189,7 +189,7 @@ def test_marker_collection_skips_plain_plugin_and_suspect_step_and_goes_to_every
     assert ex.get_cycle_metrics()["not_inspected_handled"] == handled_before + 1
 
 
-def test_plugin_with_accepts_markers_gets_the_marker_exactly_once_same_object():
+def test_plugin_with_accepts_markers_gets_the_marker_exactly_once():
     """Плагин с accepts_markers = True получает маркер-item в process ровно 1 раз (spy).
 
     Task 5.3 (намеренно): было «тот же объект данных». Исполнитель схлопывает коллекцию ``build_gap`` ДО цепочки,

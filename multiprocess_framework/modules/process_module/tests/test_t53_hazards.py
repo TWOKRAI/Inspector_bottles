@@ -117,12 +117,18 @@ class _HookedDeque(collections.deque):
 
 
 def test_tail_merge_holds_chain_mutex_against_executor_get():
-    """Внутри слияния (на чтении хвоста) стартует ``get()`` исполнителя. Под замком ``get`` НЕ завершается, пока
-    слияние не дописало хвост; после — он забирает ОДНУ коллекцию из обоих маркеров, очередь пуста, потерь нет.
+    """Внутри слияния (на чтении хвоста) проверяется замок и стартует ``get()`` исполнителя. Под замком ``get`` НЕ
+    завершается, пока слияние не дописало хвост; после — он забирает ОДНУ коллекцию из обоих маркеров, потерь нет.
 
-    Без замка ``get`` снимает голову за микросекунды внутри окна 0.3 с, ``extend`` идёт в уже снятый список,
-    и проверка ``got_inside_merge`` краснеет. Окно 0.3 с — запас против планировщика: ложный зелёный под поломкой
-    возможен, только если поток ``get`` не получил квант 0.3 с подряд.
+    Что ловит. Главная проверка детерминирована: внутри слияния ``chain.mutex.acquire(blocking=False)`` обязан
+    вернуть False (замок держит слияние). Без замка у гонки два исхода:
+      (а) ``get`` снимает единственную коллекцию между проверкой хвоста и ``extend``; повторное чтение
+          ``pending[-1]`` падает ``IndexError`` — громко. Под инъекцией тест видит именно этот исход
+          (ловится как ``merge_error``) — но красным его делает проба замка, проверяемая первой;
+      (б) ``get`` снимает коллекцию ПОСЛЕ чтения хвоста, но до ``extend``: дописанное уходит в уже взятый список,
+          молча. Этот исход тест напрямую не воспроизводит — хук стоит на первом чтении хвоста.
+    ``got_inside_merge`` (окно 0.3 с) — вторая, временная проверка; одна она могла бы ложно позеленеть, если поток
+    ``get`` не получил квант 0.3 с подряд.
     """
     chain: queue.Queue = queue.Queue(maxsize=8)
     receiver = DataReceiver(
@@ -150,15 +156,26 @@ def test_tail_merge_holds_chain_mutex_against_executor_get():
     getter = threading.Thread(target=executor_get, daemon=True)
 
     def inside_merge() -> None:
+        acquired = chain.mutex.acquire(blocking=False)
+        if acquired:
+            chain.mutex.release()
+        state["mutex_free_inside_merge"] = acquired
         getter.start()
         state["got_inside_merge"] = got.wait(0.3)
 
     hooked.hook = inside_merge
-    _bounded(lambda: receiver.on_items_ready(_MarkerBatch([_marker("b")])))
+    try:
+        _bounded(lambda: receiver.on_items_ready(_MarkerBatch([_marker("b")])))
+    except IndexError as exc:  # исход (а) гонки без замка: проверяется ПОСЛЕ пробы замка
+        state["merge_error"] = repr(exc)
     getter.join(DEADLINE_S)
 
+    assert state.get("mutex_free_inside_merge") is False, f"слияние идёт без chain.mutex: {state}"
+    assert "merge_error" not in state, f"слияние упало: {state}"
     assert not getter.is_alive(), "get() исполнителя завис"
-    assert state == {"got_inside_merge": False}, "get() исполнителя прошёл внутри слияния — замок не держится"
+    assert state == {"mutex_free_inside_merge": False, "got_inside_merge": False}, (
+        "get() исполнителя прошёл внутри слияния — замок не держится"
+    )
     assert [[m["trace_id"] for m in coll] for coll in taken] == [["a", "b"]]
     assert chain.qsize() == 0
 
@@ -317,3 +334,73 @@ def test_adr174_formula_in_items_with_mixed_records_markers_and_own_lag():
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-q"])
+
+
+# =============================================================================================
+# 4. Плагин с accepts_markers, вернувший свежий dict, не теряет поля записи (ревью 5.3, п. 4)
+# =============================================================================================
+class _FreshDictPlugin:
+    """Плагин строит НОВЫЙ выходной dict вместо мутации входа (как stitcher / center_crop)."""
+
+    enabled = True
+    inputs: list = []
+    outputs: list = []
+
+    def __init__(self, *, accepts: bool) -> None:
+        self.name = "fresh"
+        if accepts:
+            self.accepts_markers = True
+        self.calls = 0
+
+    def process(self, items: list[dict]) -> list[dict]:
+        self.calls += 1
+        return [{"x": 1}]
+
+
+def test_accepting_plugin_returning_fresh_dict_keeps_gap_record_fields():
+    """Запись count=1078 через плагин, вернувший ``[{"x": 1}]``: на выходе ``count`` 1078 и тот же список
+    ``trace_ids`` (иначе запись уехала бы дальше как потеря одного кадра)."""
+    record = _record("t", 1078, ts0=100.0)
+    plugin = _FreshDictPlugin(accepts=True)
+    sent: list = []
+    ex = PipelineExecutor(
+        plugins=[plugin],
+        chain_targets=["next"],
+        shm_middleware=None,
+        send_fn=lambda target, msg: sent.append((target, msg)),
+        node_name="ex",
+        overflow="every",
+    )
+
+    _bounded(lambda: ex._run_batch(_MarkerBatch([dict(record)]), 0.0))
+
+    assert plugin.calls == 1
+    (data,) = [m["data"] for _t, m in sent]
+    assert data["x"] == 1
+    assert data["count"] == 1078
+    assert data["trace_ids"] == record["trace_ids"]
+    assert (data["first_capture_ts"], data["last_capture_ts"]) == (100.0, 1177.0)
+    assert (data["reasons"], data["sources"]) == ({"lag": 1078}, {"up": 1078})
+
+
+def test_frame_item_through_fresh_dict_plugin_gets_no_gap_fields_control():
+    """Контроль: обычный кадр через тот же плагин — ни одного поля записи на выходе."""
+    plugin = _FreshDictPlugin(accepts=False)
+    sent: list = []
+    ex = PipelineExecutor(
+        plugins=[plugin],
+        chain_targets=["next"],
+        shm_middleware=None,
+        send_fn=lambda target, msg: sent.append((target, msg)),
+        node_name="ex",
+        overflow="every",
+    )
+
+    _bounded(lambda: ex._run_batch([{"trace_id": "f1", "capture_ts": 1.0, "n": 1}], 0.0))
+
+    assert plugin.calls == 1
+    (data,) = [m["data"] for _t, m in sent]
+    gap_keys = ("count", "trace_ids", "first_capture_ts", "last_capture_ts", "reasons", "sources")
+    leaked = [k for k in gap_keys if k in data]
+    assert leaked == []
+    assert data["trace_id"] == "f1"
