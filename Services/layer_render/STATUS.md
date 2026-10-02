@@ -33,4 +33,4 @@ Task 2.4a: `ScenePreset` и каталог классов переехали в 
 
 ## Не сделано
 
-`ObjectFactory`, `RenderedObject`, `catalog_bridge`, `preview` (Task 2.4b); перевод потребителей на новые пути импорта; Эффекты на слоях/сцене (`apply_effects_rgba`), переключение потребителей на новые импорты, эффекты на слоях фона, фон в пресете сцены (Ф3), пересборка `data/line_sim/belt_tile.png` с `--gap-alpha` (шаг лида).
+`ObjectFactory`, `RenderedObject`, `catalog_bridge`, `preview` (Task 2.4b); перевод потребителей на новые пути импорта; эффекты на слоях/сцене (`apply_effects_rgba`), эффекты на слоях фона, фон в пресете сцены (Ф3), пересборка `data/line_sim/belt_tile.png` с `--gap-alpha` (шаг лида).
