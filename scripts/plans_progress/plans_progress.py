@@ -5,16 +5,23 @@
 
     python scripts/plans_progress/plans_progress.py [--root DIR] [--order PATH]
         [--json] [--html [PATH]] [--check] [--baseline PATH] [--sync-order]
+        [--who] [--now ISO] [--active-window N[mhd]]
 
 * ``--root DIR``   каталог с ``plans/`` и ``plans/_archive/`` (по умолчанию корень репозитория);
 * ``--order PATH`` ``ORDER.md`` (по умолчанию ``<root>/plans/queue/ORDER.md``); файла нет -> полосы
   и ярусы ``null``, не ошибка;
 * ``--json``       stdout: список планов ``{plan, path, archived, lane, tier, done, total,
   dropped, unknown, unmarked, header_status, tasks:[{id, title, status, ref, after, ready}],
-  after, after_reason, waiting_on, ready, dep_unknown, dep_cycle}``; новые ключи — в конце объекта:
+  after, after_reason, waiting_on, ready, dep_unknown, dep_cycle, active}``; новые ключи — в конце объекта:
   поле плана ``После:`` / ``After:`` -> ``after`` (имена планов), ``waiting_on`` (условия ``⛔``),
   ``after_reason`` (текст после `` — ``); ``(после N.M)`` у пункта -> ``tasks[].after``;
   ``ready`` — можно брать в работу (см. README); ``dep_unknown``/``dep_cycle`` — имена планов;
+  ``active`` — worktree со свежим сигналом журнала, привязанные к плану: ``{branch, worktree, via,
+  sessions, agents, last_signal}``;
+* ``--who``       stdout: только ``{"active": [...], "orphans": [...]}`` (активные с ``plan`` и без плана);
+  не сочетается с ``--json``/``--html``/``--check``/``--sync-order`` (exit 2);
+* ``--now ISO``   «сейчас» для окна (местное, без пояса); ``--active-window N[mhd]`` — окно свежести (``6h``);
+  неверное значение -> exit 2;
 * ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``);
 * ``--check``      печатает находки линта; exit 1, если есть блокирующая находка вне базы;
 * ``--baseline P`` файл строк ``<план>:<КОД>`` (``<план>:<КОД>:<id>`` для UNKNOWN_STATUS и
@@ -43,7 +50,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +144,8 @@ class Plan:
     after_reason: str = ""  # текст после ` — ` в поле `После:`
     waiting_on: list[str] = field(default_factory=list)  # условия `⛔ …` из поля `После:`
     has_after_field: bool = False  # в первых 30 строках есть строка `После:`, даже `—`; в --json не выводится
+    header_branch: str = ""  # ветка из строки `Ветка:` / `Branch:` шапки; в --json не выводится
+    active: list[dict] = field(default_factory=list)  # worktree со свежим сигналом, привязанные к плану
     ready: bool = False  # заполняет resolve_deps
     dep_unknown: list[str] = field(default_factory=list)  # имена из `after`, которых нет среди планов
     dep_cycle: list[str] = field(default_factory=list)  # участники цикла, в котором стоит этот план
@@ -418,6 +427,30 @@ def find_after(text: str) -> tuple[list[str], list[str], str]:
         if name not in plans:
             plans.append(name)
     return plans, conditions, reason
+
+
+_BRANCH_LINE_RE = re.compile(
+    r"^\s*(?:>\s*)*(?:[-*+]\s+)?(?:\*\*)?(?:Ветка|Branch)(?:\*\*)?\s*:(?:\*\*)?\s*(?P<rest>.*)$"
+)
+_BRANCH_TOKEN_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)+")
+
+
+def find_header_branch(text: str) -> str:
+    """Ветка из первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет — `""`.
+
+    Разметка `- **…:**` и обратные кавычки допустимы; берётся первый токен вида `тип/имя`, хвост
+    (`— трек`, `(от main)`) отброшен.
+    """
+    in_fence = False
+    for line in text.split("\n")[:30]:
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        m = None if in_fence else _BRANCH_LINE_RE.match(line)
+        if m:
+            tok = _BRANCH_TOKEN_RE.search(m.group("rest").replace("`", ""))
+            return tok.group(0).rstrip(".") if tok else ""
+    return ""
 
 
 def find_bare_word(text: str) -> str | None:
@@ -719,6 +752,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     plan.header_status = find_header_status(main_text)
     plan.after, plan.waiting_on, plan.after_reason = find_after(main_text)
     plan.has_after_field = after_field_value(main_text) is not None
+    plan.header_branch = find_header_branch(main_text)
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
@@ -1263,6 +1297,236 @@ def run_check(plans: list[Plan], baseline: set[str], out, extra: list[Finding] |
     return 1 if new_blocking else 0
 
 
+# ----------------------------------------------------------------------------- активные worktree
+
+GIT_TIMEOUT = 10  # секунд на один вызов git: зависший git не вешает страницу
+DEFAULT_WINDOW = "6h"  # не измерено: окно «свежести» сигнала журнала
+_WINDOW_RE = re.compile(r"([0-9]+)([mhd])")
+_WINDOW_UNITS = {"m": "minutes", "h": "hours", "d": "days"}
+_GIT_ENV_DROP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")  # хук коммита выставляет их сам
+_REFS_TOKEN_RE = re.compile(r"plans/[^\s,;)]+")
+
+
+def parse_window(text: str) -> timedelta | None:
+    """`30m` / `6h` / `1d` -> интервал; иное (и слишком большое число) -> None."""
+    m = _WINDOW_RE.fullmatch(text)
+    if not m:
+        return None
+    try:
+        return timedelta(**{_WINDOW_UNITS[m.group(2)]: int(m.group(1))})
+    except OverflowError:
+        return None
+
+
+def parse_now(text: str) -> datetime | None:
+    """ISO-время местное, без пояса; с поясом и мусор -> None."""
+    try:
+        value = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return value if value.tzinfo is None else None
+
+
+def _git(args: list[str], cwd: Path | str) -> str | None:
+    """stdout git-команды или None: сбой запуска, таймаут и ненулевой код — одно и то же «шаг не дал ответа»."""
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_DROP}
+    try:
+        cp = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=GIT_TIMEOUT,
+            env=env,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return cp.stdout if cp.returncode == 0 else None
+
+
+def git_worktrees(root: Path) -> list[tuple[str, str]]:
+    """[(путь worktree как в porcelain, ветка)]; ветка `""` на detached HEAD.
+
+    Корни есть только если `root` — верхний каталог своего репозитория (`os.path.samefile`): корень внутри
+    чужого репозитория, вне git или подкаталог репозитория дают пустой список. Главное дерево — тоже корень.
+    """
+    top = _git(["rev-parse", "--show-toplevel"], root)
+    if not top or not top.strip():
+        return []
+    try:
+        if not os.path.samefile(top.strip(), root):
+            return []
+    except OSError:
+        return []
+    listing = _git(["worktree", "list", "--porcelain"], root)
+    out: list[tuple[str, str]] = []
+    for block in (listing or "").replace("\r\n", "\n").split("\n\n"):
+        path, branch, bare = "", "", False
+        for line in block.split("\n"):
+            if line.startswith("worktree "):
+                path = line[len("worktree ") :]
+            elif line.startswith("branch "):
+                ref = line[len("branch ") :].strip()
+                branch = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
+            elif line == "bare":
+                bare = True
+        if path and not bare:
+            out.append((path, branch))
+    return out
+
+
+def read_signal(worktree: Path | str, now: datetime, window: timedelta) -> dict | None:
+    """Свежие строки `<worktree>/data/agent-journal.jsonl` -> {sessions, agents, last_signal}; свежих нет -> None.
+
+    Не считаются: битый JSON, не-объект, `event` не строка или пуст, `ts` не строка / не ISO / с поясом.
+    Свежая: `now - ts <= окно`, будущее тоже свежее. `last_signal` — наибольший `ts` строкой как в журнале.
+    """
+    try:
+        text = (Path(worktree) / "data" / "agent-journal.jsonl").read_bytes().decode("utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    sessions: set[str] = set()
+    agents: set[str] = set()
+    last: tuple[datetime, str] | None = None
+    for line in text.split("\n"):  # не splitlines: U+2028 внутри строки JSON не конец записи
+        try:
+            obj = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        event, ts = obj.get("event"), obj.get("ts")
+        if not isinstance(event, str) or not event or not isinstance(ts, str):
+            continue
+        try:
+            when = datetime.fromisoformat(ts)
+        except ValueError:
+            continue
+        if when.tzinfo is not None or now - when > window:
+            continue
+        for key, bucket in (("session_id", sessions), ("agent_id", agents)):
+            value = obj.get(key)
+            if isinstance(value, str) and value:
+                bucket.add(value)
+        if last is None or when > last[0]:
+            last = (when, ts)
+    if last is None:
+        return None
+    return {"sessions": len(sessions), "agents": len(agents), "last_signal": last[1]}
+
+
+def plan_name_from_ref(value: str) -> str | None:
+    """Имя плана из пути или голого имени: первый сегмент после `plans/` (и `_archive/`, `<квартал>/`), без `.md`."""
+    parts = [p for p in value.strip().replace("\\", "/").split("/") if p not in ("", ".")]
+    if parts and parts[0] == "plans":
+        parts = parts[1:]
+    if parts and parts[0] == "_archive":
+        parts = parts[1:]
+        if parts and QUARTER_RE.match(parts[0]):
+            parts = parts[1:]
+    if not parts:
+        return None
+    name = parts[0][:-3] if parts[0].endswith(".md") else parts[0]
+    return name or None
+
+
+def find_plan(plans: list[Plan], name: str | None) -> Plan | None:
+    """План по имени: сначала живой, потом архивный."""
+    if not name:
+        return None
+    for archived in (False, True):
+        for p in plans:
+            if p.name == name and p.archived is archived:
+                return p
+    return None
+
+
+def _step_plan_ref(worktree: Path | None, plans: list[Plan]) -> Plan | None:
+    if worktree is None:
+        return None
+    value = _git(["config", "--worktree", "--get", "plan.ref"], worktree)
+    return find_plan(plans, plan_name_from_ref(value)) if value and value.strip() else None
+
+
+def _newest_refs_token(message: str) -> str | None:
+    """Первый токен `plans/…` строк `Refs:` сообщения (и их продолжений с отступом); нет — None."""
+    in_refs = False
+    for line in message.split("\n"):
+        if re.match(r"^\s*Refs:", line):
+            in_refs = True
+        elif not (in_refs and line[:1] in (" ", "\t")):
+            in_refs = False
+        if in_refs:
+            m = _REFS_TOKEN_RE.search(line)
+            if m:
+                return m.group(0).rstrip(".")
+    return None
+
+
+def _step_refs(branch: str, repo_root: Path, plans: list[Plan]) -> Plan | None:
+    """Самый новый коммит `main..<ветка>` с токеном `plans/…` в `Refs:`; неизвестное имя — к старым не идём."""
+    if not branch:
+        return None
+    log = _git(["log", "-z", "--format=%B", f"main..refs/heads/{branch}", "--"], repo_root)
+    for message in (log or "").split("\0"):
+        token = _newest_refs_token(message)
+        if token is not None:
+            return find_plan(plans, plan_name_from_ref(token))
+    return None
+
+
+def _step_header(branch: str, plans: list[Plan]) -> Plan | None:
+    """Строка `Ветка:` шапки: сначала живые планы, архивные — если у живых нет; два плана одного уровня — нет плана."""
+    if not branch:
+        return None
+    for archived in (False, True):
+        hits = [p for p in plans if p.archived is archived and p.header_branch == branch]
+        if hits:
+            return hits[0] if len(hits) == 1 else None
+    return None
+
+
+def resolve_plan(branch: str, worktree: Path | None, repo_root: Path, plans: list[Plan]) -> tuple[Plan, str] | None:
+    """(план, шаг) первого успешного шага `plan_ref` -> `refs` -> `header`; ни один не дал плана -> None.
+
+    `worktree=None` (ветка без каталога) пропускает только шаг `plan_ref`. `repo_root` — каталог, где `main`.
+    """
+    for via, found in (
+        ("plan_ref", lambda: _step_plan_ref(worktree, plans)),
+        ("refs", lambda: _step_refs(branch, repo_root, plans)),
+        ("header", lambda: _step_header(branch, plans)),
+    ):
+        plan = found()
+        if plan is not None:
+            return plan, via
+    return None
+
+
+def collect_active(
+    root: Path, plans: list[Plan], now: datetime, window: timedelta
+) -> tuple[list[tuple[Plan, dict]], list[dict]]:
+    """([(план, запись)], сироты) по worktree со свежим сигналом; git на корень — только после свежей строки."""
+    active: list[tuple[Plan, dict]] = []
+    orphans: list[dict] = []
+    for path, branch in git_worktrees(root):
+        signal = read_signal(path, now, window)
+        if signal is None:
+            continue
+        found = resolve_plan(branch, Path(path), root, plans)
+        if found is None:
+            orphans.append({"branch": branch, "worktree": path, **signal})
+        else:
+            plan, via = found
+            active.append((plan, {"branch": branch, "worktree": path, "via": via, **signal}))
+    return active, orphans
+
+
+def attach_active(plans: list[Plan], active: list[tuple[Plan, dict]]) -> None:
+    for plan, entry in sorted(active, key=lambda pe: pe[1]["worktree"]):
+        plan.active.append(entry)
+
+
 # ----------------------------------------------------------------------------- JSON
 
 
@@ -1297,6 +1561,7 @@ def to_json(plans: list[Plan]) -> str:
             "ready": p.ready,
             "dep_unknown": p.dep_unknown,
             "dep_cycle": p.dep_cycle,
+            "active": p.active,  # новые ключи — только в конец (README)
         }
         for p in plans
     ]
@@ -1574,6 +1839,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--check", action="store_true", help="линт; exit 1 при блокирующей находке вне базы")
     ap.add_argument("--baseline", type=Path, default=None, help="файл известных блокирующих находок")
     ap.add_argument("--sync-order", action="store_true", help="переписать блок прогресса между маркерами в ORDER.md")
+    ap.add_argument("--who", action="store_true", help="активные worktree и сироты: объект JSON на stdout")
+    ap.add_argument("--now", default=None, metavar="ISO", help="текущее время для окна: местное, без пояса")
+    ap.add_argument(
+        "--active-window",
+        default=DEFAULT_WINDOW,
+        metavar="N[mhd]",
+        help=f"окно свежести сигнала (по умолчанию {DEFAULT_WINDOW})",
+    )
     return ap
 
 
@@ -1584,6 +1857,18 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     args = build_parser().parse_args(argv)
+    # сообщения не повторяют значение флага: оно может быть чем угодно
+    window = parse_window(args.active_window)
+    if window is None:
+        print("ошибка: --active-window — число и единица измерения (минуты, часы, дни)", file=sys.stderr)
+        return 2
+    now = datetime.now() if args.now is None else parse_now(args.now)
+    if now is None:
+        print("ошибка: --now — время ISO местное, без пояса", file=sys.stderr)
+        return 2
+    if args.who and (args.json or args.html is not None or args.check or args.sync_order):
+        print("ошибка: --who не сочетается с другими режимами вывода", file=sys.stderr)
+        return 2
     root: Path = args.root.resolve()
     order_path = args.order if args.order is not None else root / "plans" / "queue" / "ORDER.md"
     if args.check:
@@ -1604,6 +1889,17 @@ def main(argv: list[str] | None = None) -> int:
     live, archive = page_order(plans, rows)
     ordered = live + archive
     code = 0
+    if args.json or args.who:
+        active, orphans = collect_active(root, ordered, now, window)
+        attach_active(ordered, active)
+    if args.who:
+        by_path = lambda e: e["worktree"]  # noqa: E731
+        who = {
+            "active": sorted(({"plan": p.name, **e} for p, e in active), key=by_path),
+            "orphans": sorted(orphans, key=by_path),
+        }
+        print(json.dumps(who, ensure_ascii=False, indent=2))
+        return 0
 
     if args.sync_order:
         code, message = sync_order(order_path, live, archive)
