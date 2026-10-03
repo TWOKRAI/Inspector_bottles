@@ -41,7 +41,7 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 
 Находки: `NO_TASKS` и `UNKNOWN_STATUS` блокируют только для планов §4.1 `ORDER.md`; `DUP_ID` блокирует всегда;
 `UNCLOSED_FENCE` (нечётное число ограждений кода) блокирует так же, как `NO_TASKS`, — только для §4.1;
-`DUP_HEADING`, `STATUS_CONFLICT`, `HEADER_STATUS_CONFLICT` (шапка плана done/superseded, а задачи не все закрыты), `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
+`DUP_HEADING`, `STATUS_CONFLICT`, `HEADER_STATUS_CONFLICT` (шапка плана done, а задачи не все закрыты; снятый superseded план — не конфликт), `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
 `ORDER_BLOCK_STALE` (блок устарел) и `ORDER_BLOCK_MISSING` (нет пары маркеров) — тоже информационные (чужое слияние в `main` не должно краснить `main`); печатаются только на ветке `main`
 в корне git-репозитория (`--root` равен `git rev-parse --show-toplevel`); в ветках, при detached HEAD, вне git и в корне,
 вложенном в чужой репозиторий, блок не проверяется. Писатель блока — лид в `main`, в точке слияния.

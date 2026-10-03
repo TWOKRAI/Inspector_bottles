@@ -44,7 +44,7 @@ COMMAND_FILES = [
     ".claude/plugins/dev/commands/plan-status.md",
     ".claude/commands/dev/plan-status.md",
 ]
-EXISTS_PHRASE = "if `scripts/plans_progress/plans_progress.py` exists"
+EXISTS_PHRASE = "if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists"
 
 
 @pytest.mark.parametrize("rel", COMMAND_FILES)
@@ -128,7 +128,9 @@ def _plan_file(header: str, items: str = "- Task 1.1: a [DONE]\n- Task 1.2: b [P
 
 
 HEADER_CASES = [
-    ("> Статус: **ред. 9 — ФАЗА E ЗАКРЫТА ЦЕЛИКОМ (2026-08-10).**", "done"),  # observability-review-remediation
+    # observability-review-remediation: слово не в начале значения ("ред. 9 — ФАЗА E ЗАКРЫТА …") — по правилу ревью не статус
+    ("> Статус: **ред. 9 — ФАЗА E ЗАКРЫТА ЦЕЛИКОМ (2026-08-10).**", None),
+    ("> Статус: **ЗАКРЫТА ЦЕЛИКОМ (2026-08-10).**", "done"),
     (
         "> Статус: **SUPERSEDED (2026-08-10, в день создания) → [`observability-roadmap.md`](observability-roadmap.md).**",
         "superseded",
@@ -325,4 +327,84 @@ def test_numbered_task_lines_are_reported_not_silently_dropped(make_root, progre
     root = make_root({"plans/2026-10-02_n.md": "# П\n\n" + SECTION + items})
     assert [t["id"] for t in plans_json(root)["2026-10-02_n"]["tasks"]] == ["1.3"]
     lines = _lines(_out(progress(root, "--check")), "TASK_ID_UNPARSED")
-    assert len(lines) == 1 and "строк Task с неразобранным id: 2" in lines[0], lines
+    assert len(lines) == 1 and "нумерованный пункт вне эталона" in lines[0], lines
+    assert "- Task" in lines[0] and "неразобранным id" not in lines[0], lines
+
+
+# =========================================================================== раунд ревью 2.4+2.5
+
+FALSE_DONE_HEADERS = [
+    "**Статус:** P1 (Python протокол) + P2 (Lua укладка) DONE — 116 тестов robot_comm/driver зелёные",  # robot-place-pose
+    "**Статус:** Phase 1-2 DONE (ядро + плагин, 49 тестов зелёных, ruff чист). Phase 3 ЧАСТИЧНО:",  # word-layout
+    "**Статус:** В работе. Тракт распознавания DONE. Цикл укладки→возврата — в процессе.",  # letter-robot-cycle
+    "**Статус:** **БЛОК А ЗАКРЫТ (2026-07-19), Блок В ждёт codemod.**",  # frontend-constructor
+    "**Статус:** Phase 1-3 DONE + qt-mcp smoke verified; остался Phase 4 (память).",  # pult-control-panel
+    "- **Статус:** DRAFT — после DONE первой фазы",
+]
+
+
+@pytest.mark.parametrize("header", FALSE_DONE_HEADERS)
+def test_header_word_must_start_the_status_value(make_root, one_plan, header):
+    root = make_root({"plans/2026-10-02_h.md": _plan_file(header)})
+    assert one_plan(root, "2026-10-02_h")["header_status"] is None
+
+
+START_HEADERS = [
+    ("**Статус:** DONE", "done"),
+    ("> Статус: **SUPERSEDED (2026-08-10)**", "superseded"),
+    ("> Статус: **ЗАКРЫТА ЦЕЛИКОМ**", "done"),
+    ("- **Статус:** **ЗАКРЫТ** — merge `1f6bbd40` (ADR-PM-018)", "done"),  # telemetry-publish-control
+    ("- **Статус:** DONE (2026-07-16). Фазы 0-3 закрыты", "done"),  # gui-telemetry-read-model
+    ("> **Статус: SUPERSEDED → [`telemetry-stage6.md`](telemetry-stage6.md) (Ф3)** — 2026-08-12", "superseded"),
+    ("**Статус:** ✅ DONE", "done"),
+]
+
+
+@pytest.mark.parametrize(("header", "expected"), START_HEADERS)
+def test_header_word_at_the_start_is_still_read(make_root, one_plan, header, expected):
+    root = make_root({"plans/2026-10-02_h.md": _plan_file(header)})
+    assert one_plan(root, "2026-10-02_h")["header_status"] == expected
+
+
+PAREN_NOT_STATUS = [
+    "### Task 7.1 — экспорт (DONE позже, после 3.1)",
+    "### Task 7.1 — режим (закрыт канал записи)",
+    "### Task 7.1 — выгрузка (сделано наполовину)",
+    "### Task 7.1 — кэш (отложено решение о TTL до замера)",
+    "### Task 7.1 — (снята блокировка записи) новый API",
+]
+
+
+@pytest.mark.parametrize("heading", PAREN_NOT_STATUS)
+def test_word_after_open_paren_needs_date_hash_comma_or_close_paren(make_root, one_plan, statuses, heading):
+    root = make_root({"plans/2026-10-02_t.md": "# П\n\n" + heading + "\nтекст\n"})
+    assert statuses(one_plan(root, "2026-10-02_t")) == {"7.1": "pending"}
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "### Task 7.1 — имя (ЗАКРЫТА 2026-08-09, ADR-PM-028)",
+        "### Task 7.1 — имя (DONE)",
+        "### Task 7.1 — имя (DONE `abc1234`)",
+        "### Task 7.1 — имя (закрыта, ADR-1)",
+    ],
+)
+def test_word_after_open_paren_with_date_hash_comma_or_close_paren_is_done(make_root, one_plan, statuses, heading):
+    root = make_root({"plans/2026-10-02_t.md": "# П\n\n" + heading + "\nтекст\n"})
+    assert statuses(one_plan(root, "2026-10-02_t")) == {"7.1": "done"}
+
+
+def test_header_conflict_is_not_reported_for_superseded_plans(make_root, progress):
+    root = make_root({"plans/2026-10-02_sup.md": _plan_file("- **Статус:** SUPERSEDED (2026-08-10)")})
+    cp = progress(root, "--check")
+    assert not _lines(_out(cp), "HEADER_STATUS_CONFLICT"), _out(cp)[-400:]
+    assert cp.returncode == 0
+
+
+def test_numbered_item_with_a_bad_id_keeps_the_unparsed_wording(make_root, progress):
+    root = make_root(
+        {"plans/2026-10-02_n.md": "# П\n\n" + SECTION + "- Task 1.1: a [DONE]\n1. Task \u0422.1: б [DONE]\n"}
+    )
+    lines = _lines(_out(progress(root, "--check")), "TASK_ID_UNPARSED")
+    assert len(lines) == 1 and "неразобранным id" in lines[0] and "нумерованный" not in lines[0], lines

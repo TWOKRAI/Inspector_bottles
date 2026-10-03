@@ -121,6 +121,7 @@ class Plan:
     conflicts: list[str] = field(default_factory=list)  # id со STATUS_CONFLICT
     unclosed_fence: list[str] = field(default_factory=list)  # файлы с нечётным числом ограждений
     unparsed: list[str] = field(default_factory=list)  # `Task <токен>` с неразобранным id
+    numbered: list[str] = field(default_factory=list)  # `1. Task <id>:` — нумерованные пункты вне эталона
     bad_encoding: list[str] = field(default_factory=list)  # файлы не в UTF-8
     lane: str | None = None
     tier: str | None = None
@@ -279,6 +280,10 @@ _TAIL_REST_RE = re.compile(
 )
 
 
+# Слово сразу после `(`: дальше обязательна дата, хеш, запятая или `)` — «(DONE позже, после 3.1)» не статус.
+_TAIL_PAREN_RE = re.compile(r"\s*(?:\d{4}-\d{2}-\d{2}|[0-9a-f]{7,40}(?!\w)|[,)\x00])")
+
+
 def _tail_separator(masked: str, pos: int) -> str | None:
     """`start` (перед позицией только пробелы), сам разделитель или None."""
     before = masked[:pos].rstrip()
@@ -310,7 +315,9 @@ def find_tail_status(rest: str) -> str | None:
         if m.start() >= limit:
             break
         sep = _tail_separator(masked, m.start())
-        if sep is not None and (sep == "(" or _TAIL_REST_RE.match(masked[m.end() :])):
+        tail = masked[m.end() :]
+        ok = _TAIL_PAREN_RE.match(tail) if sep == "(" else _TAIL_REST_RE.match(tail)
+        if sep is not None and ok:
             found.append((m.start(), _TAIL_CANON[m.group(1).upper()]))
             break
     if found:
@@ -333,7 +340,10 @@ def find_header_status(text: str) -> str | None:
         m = _HEADER_LINE_RE.match(line)
         if not m:
             continue
-        w = _HEADER_WORD_RE.search(mask_code(m.group("rest")))
+        # слово принимается только в начале значения (после `**`, `>`, скобок, эмодзи): «P1 + P2 DONE»,
+        # «В работе. … DONE», «Phase 1-3 DONE; остался Phase 4» статусом плана не являются
+        lead = re.sub(r"^[\W_]+", "", mask_code(m.group("rest")))
+        w = _HEADER_WORD_RE.match(lead)
         if not w:
             return None
         word = w.group(1)
@@ -412,7 +422,9 @@ def has_unclosed_fence(text: str) -> bool:
     return sum(1 for ln in text.split("\n") if FENCE_RE.match(ln)) % 2 == 1
 
 
-def parse_items(text: str, unparsed: list[str] | None = None) -> tuple[list[Item], bool]:
+def parse_items(
+    text: str, unparsed: list[str] | None = None, numbered: list[str] | None = None
+) -> tuple[list[Item], bool]:
     """Пункты `- Task <id>` раздела порядка -> (задачи после снятия родителей, были ли пункты вообще).
 
     Строки `- Task <токен>` с неразобранным id добавляются в `unparsed`.
@@ -456,8 +468,13 @@ def parse_items(text: str, unparsed: list[str] | None = None) -> tuple[list[Item
         elif BULLET_RE.match(line):
             close()
             bad = UNPARSED_ITEM_RE.match(line)
-            if bad and unparsed is not None:
-                unparsed.append(bad.group("tok").rstrip(".:,;"))
+            if bad:
+                tok = bad.group("tok").rstrip(".:,;")
+                if re.match(r"^[ \t]*\d+[.)]", line) and ID_RE.fullmatch(tok):
+                    if numbered is not None:
+                        numbered.append(tok)  # `1. Task 1.1:` с корректным id: вне эталона из-за нумерации
+                elif unparsed is not None:
+                    unparsed.append(tok)
         elif cur is not None:
             cur[1].append(line.strip())
     close()
@@ -642,7 +659,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
         counts[h.id] = counts.get(h.id, 0) + 1
     plan.dup_headings = [i for i, c in counts.items() if c > 1]
 
-    items, had_items = parse_items(main_text, plan.unparsed)
+    items, had_items = parse_items(main_text, plan.unparsed, plan.numbered)
     if had_items:
         plan.tasks = [Task(it.id, it.title, it.status, it.ref) for it in items]
         seen: dict[str, int] = {}
@@ -829,9 +846,15 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
         if p.unparsed:
             text = f"строк Task с неразобранным id: {len(p.unparsed)} (первая: «{p.unparsed[0]}»)"
             out.append(Finding("TASK_ID_UNPARSED", p.name, None, False, text))
-        if p.header_status in ("done", "superseded") and p.total > p.done:
+        if p.header_status == "done" and p.total > p.done:
             text = f"шапка: {p.header_status}, задачи {p.done} из {p.total}"
             out.append(Finding("HEADER_STATUS_CONFLICT", p.name, None, False, text))
+        if p.numbered:
+            text = (
+                f"нумерованный пункт вне эталона (используйте `- Task …`): {len(p.numbered)} "
+                f"(первый: «{p.numbered[0]}»)"
+            )
+            out.append(Finding("TASK_ID_UNPARSED", p.name, None, False, text))
         if p.bad_encoding:
             out.append(Finding("NOT_UTF8", p.name, None, False, f"файл не в UTF-8: {', '.join(p.bad_encoding)}"))
         for t in p.tasks:

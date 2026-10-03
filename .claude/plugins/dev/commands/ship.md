@@ -15,8 +15,8 @@ Run the final check before shipping the code:
    uv run pyright src   # same scope as CI; bare `pyright` pulls in tests/, where type debt usually piles up
    uv run pytest -q
    ```
-   Plans format check — if `scripts/plans_progress/plans_progress.py` exists (`make gate` does not run
-   `scripts/validate.py`); otherwise skip this step without error (the script is project-specific):
+   Plans format check — if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists
+   (`make gate` does not run `scripts/validate.py`); otherwise skip this step without error (project-specific):
    ```bash
    python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
    ```
@@ -124,8 +124,8 @@ If the plan is found and every Task = [DONE] (the remainder is only backlog / a 
    a new session reads an archived plan through its `SUMMARY.md` only.
 3. **Refresh, then check the ledger:** `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`, then `python3 scripts/plans_ledger.py status` — no findings for the closed plan
    (show other `WARN`s to the owner, but don't fix them silently).
-4. **Progress check (plans_progress):** if `scripts/plans_progress/plans_progress.py` exists, the plan format must be
-   clean; otherwise skip this step without error:
+4. **Progress check (plans_progress):** if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists,
+   the plan format must be clean; otherwise skip this step without error:
    ```bash
    python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
    ```
