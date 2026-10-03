@@ -16,6 +16,7 @@ import json
 import os
 import re
 import statistics
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -62,23 +63,48 @@ class StandRunError(Exception):
 
 
 # --- замок ------------------------------------------------------------------------
+LOCK_MODE_MEASURE = "measure"
+
+
 def default_lock_path(tree: Path) -> Path:
-    """``<основной checkout>/.claude/stand.lock`` — общий для всех worktree."""
-    git = tree / ".git"
-    if git.is_file():  # worktree: «gitdir: <main>/.git/worktrees/<имя>»
-        text = git.read_text(encoding="utf-8").strip()
-        gitdir = Path(text.split(":", 1)[1].strip())
-        return gitdir.parents[2] / ".claude" / "stand.lock"
-    return tree / ".claude" / "stand.lock"
+    """``<родитель основного дерева>/stand.lock`` (ред. 4): путь от ``git rev-parse --git-common-dir``,
+    а не от worktree — один файл протокола на все деревья (сегодня ``D:\\PROJECT_INNOTECH\\Inspector_vision``)."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"], cwd=tree, capture_output=True, text=True, check=False
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise StandRunError(f"git rev-parse --git-common-dir не ответил в {tree}: {proc.stderr.strip()}")
+    common = Path(proc.stdout.strip())
+    if not common.is_absolute():
+        common = tree / common
+    return common.resolve().parent.parent / "stand.lock"
 
 
 def check_stand_lock(lock: Path, token: str | None) -> None:
-    """Замок держит лид руками. Нет файла → код 2 (стенд не занят нами); ``token`` задан и не найден
-    в файле → замок чужой, код 2."""
+    """Замок протокола: строки ``сессия | время | режим | SHA | порты``. Код 2 (:class:`StandRunError`),
+    если токена нет, файла нет, ни одна строка не принадлежит сессии ``token`` (сравнение поля, не
+    подстроки) или режим этой строки не ``measure``."""
+    if not token:
+        raise StandRunError("живой режим требует --lock-token <сессия>")
     if not lock.is_file():
         raise StandRunError(f"замок {lock} не взят — возьмите stand.lock до прогона")
-    if token and token not in lock.read_text(encoding="utf-8", errors="replace"):
-        raise StandRunError(f"замок {lock} чужой (нет токена {token!r})")
+    rows = [
+        [f.strip() for f in line.split("|")]
+        for line in lock.read_text(encoding="utf-8", errors="replace").splitlines()
+        if line.strip()
+    ]
+    ours = [r for r in rows if r and r[0] == token]
+    if not ours:
+        raise StandRunError(f"замок {lock} чужой: нет строки сессии {token!r}")
+    mode = ours[-1][2] if len(ours[-1]) > 2 else ""
+    if mode != LOCK_MODE_MEASURE:
+        raise StandRunError(f"замок {lock}: режим {mode!r}, нужен {LOCK_MODE_MEASURE!r}")
+
+
+def require_pause(ordered: bool, paused: bool | None, res: dict) -> None:
+    """Заказанная пауза обязана состояться: иначе P10 без ``pause`` анализировался бы как кейс E."""
+    if ordered and paused is not True:
+        raise StandRunError(f"пауза исполнителя заказана, но не состоялась: {res.get('pause_error', paused)}")
 
 
 # --- рецепт -----------------------------------------------------------------------
@@ -154,34 +180,46 @@ def snap(drv: Any, procs: list[str]) -> dict:
 
 
 # --- дренаж -----------------------------------------------------------------------
+def executor_cycles(resp: Any, worker: str) -> int | None:
+    """``cycles`` воркера ``worker`` из ответа ``introspect_status`` (обёртка драйвера снимается)."""
+    ws = ((_payload(resp) or {}).get("workers") or {}).get(worker)
+    cycles = ws.get("cycles") if isinstance(ws, dict) else None
+    return cycles if isinstance(cycles, int) and not isinstance(cycles, bool) else None
+
+
 def measure_drain(
     poll: Callable[[], int | None],
-    baseline: float,
+    target: int,
+    t0: float,
     *,
     step_s: float = T.DRAIN_POLL_STEP_S,
     cap_s: float = DRAIN_CAP_S,
-    clock: Callable[[], float] = time.perf_counter,
-    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
 ) -> dict:
-    """Опрос ``poll()`` (ОДИН вызов драйвера) с шагом ``step_s`` до ``size <= baseline`` или ``cap_s``.
+    """Опрос ``poll()`` (ОДИН вызов ``introspect_status``, возвращает ``cycles`` исполнителя) с шагом
+    ``step_s``, пока ``cycles`` не дойдёт до ``target`` или не пройдёт ``cap_s`` от ``t0``.
 
-    Возвращает ``drain_s`` (от старта до первого опроса, где очередь вернулась; ``None`` — не вернулась
-    за ``cap_s``), ``drain_poll_period_s`` (наибольший интервал между соседними опросами — худший шаг,
-    по нему судится доказуемость порога) и ``drain_trace``.
+    ``t0`` — момент ДО отправки ``worker.start`` (ред. 4): задержка ответа на команду входит в дренаж.
+    ``drain_s`` — от ``t0`` до конца опроса, увидевшего ``target`` (верхняя граница; ``None`` — не дошёл
+    за ``cap_s``). ``drain_poll_period_s`` — наибольший интервал между соседними опросами, первый
+    интервал считается от ``t0``: это неопределённость момента, по ней судится доказуемость порога.
+    Часы — ``time.perf_counter`` модуля на момент вызова (подменяемы в тестах).
     """
-    t0 = clock()
+    clock = clock or time.perf_counter
+    sleep = sleep or time.sleep
     last = t0
     period = 0.0
     trace: list[tuple[float, int | None]] = []
     while True:
         t_call = clock()
-        size = poll()
+        cycles = poll()
         t_done = clock()
         period = max(period, t_done - last)
         last = t_done
         elapsed = t_done - t0
-        trace.append((round(elapsed, 4), size))
-        if size is not None and size <= baseline:
+        trace.append((round(elapsed, 4), cycles))
+        if cycles is not None and cycles >= target:
             return {"drain_s": round(elapsed, 4), "drain_poll_period_s": round(period, 4), "drain_trace": trace[:200]}
         if elapsed >= cap_s:
             return {"drain_s": None, "drain_poll_period_s": round(period, 4), "drain_trace": trace[:200]}
@@ -189,6 +227,8 @@ def measure_drain(
 
 
 def pause_executor(drv: Any, res: dict, secs: float) -> bool:
+    """Пауза исполнителя processor на ``secs`` и дренаж: ``backlog = chain_queue.size`` в ``pause_mid``,
+    ``drain_s`` — пока ``cycles`` исполнителя не вырастет на ``backlog + 1`` относительно ``pause_mid``."""
     st = _payload(drv.introspect_status("processor")) or {}
     names = [w for w in (st.get("workers") or {}) if "exec" in w.lower() or "pipeline" in w.lower()]
     res["pause_worker_names"] = list(st.get("workers") or {})
@@ -198,28 +238,32 @@ def pause_executor(drv: Any, res: dict, secs: float) -> bool:
     worker = names[0]
     import psutil
 
-    def _poll() -> int | None:
-        return chain_queue_size(drv.introspect_queues("processor"))
-
-    pre = [s for s in (_poll() for _ in range(3)) if s is not None]
-    baseline = statistics.median(pre) if pre else 0
     pid = st.get("pid")
     rss0 = psutil.Process(pid).memory_info().rss if pid else None
     t = time.perf_counter()
     res["pause_stop"] = drv.send_command("processor", "worker.stop", {"worker_name": worker}, timeout=10)
     time.sleep(secs)
     res["pause_mid"] = snap(drv, ["processor"])
+    mid = res["pause_mid"]["processor"]
+    backlog = chain_queue_size(mid.get("queues"))
+    cycles_mid = (mid.get("workers") or {}).get(worker, {}).get("cycles")
     rss1 = psutil.Process(pid).memory_info().rss if pid else None
+    t0 = time.perf_counter()  # ДО отправки: задержка ответа на worker.start входит в дренаж
     res["pause_start"] = drv.send_command("processor", "worker.start", {"worker_name": worker}, timeout=10)
-    t_res = time.perf_counter()
-    drain = measure_drain(_poll, baseline)
+    if backlog is None or not isinstance(cycles_mid, int):
+        # Воркер уже запущен обратно; без backlog/cycles дренаж не измерим — прогон сорван (код 2).
+        res["pause_error"] = f"pause_mid без chain_queue.size/cycles: backlog={backlog} cycles={cycles_mid}"
+        return False
+    drain = measure_drain(
+        lambda: executor_cycles(drv.introspect_status("processor"), worker), cycles_mid + backlog + 1, t0
+    )
     res["pause"] = {
         "worker": worker,
-        "stopped_s": round(t_res - t, 1),
+        "stopped_s": round(t0 - t, 1),
         "rss0": rss0,
         "rss1": rss1,
-        "drain_baseline": baseline,
-        "drain_pre_polls": pre,
+        "backlog": backlog,
+        "cycles_mid": cycles_mid,
         **drain,
         "after": snap(drv, PROCS),
     }
@@ -323,12 +367,14 @@ def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int) -> d
         while time.perf_counter() - t0 < WINDOW_S:
             if pause and paused is None and time.perf_counter() - t0 > PAUSE_AFTER_S:
                 paused = pause_executor(drv, res, PAUSE_SECS)
+                require_pause(True, paused, res)
             ov = drv.system_overview(timeout=5)
             for p in PROCS:
                 v = ov.get("processes", {}).get(p, {}).get("hz")
                 if isinstance(v, (int, float)):
                     hz[p].append(float(v))
             time.sleep(2)
+        require_pause(pause, paused, res)  # окно кончилось раньше паузы — тоже сорванный P10
         res["window_s"] = round(time.perf_counter() - t0, 2)
         res["s1"] = snap(drv, PROCS)
         res["rc_s1"] = _rc(drv)

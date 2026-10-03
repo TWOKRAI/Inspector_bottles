@@ -28,8 +28,10 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-throughput-gate", action="store_true", help="выключить ТОЛЬКО порог lag processor")
     ap.add_argument("--out-dir", default="reports/stand")
     ap.add_argument("--port", type=int, default=8775, help="порт драйвера живого стенда")
-    ap.add_argument("--lock", default=None, help="путь stand.lock (по умолчанию <основной checkout>/.claude/)")
-    ap.add_argument("--lock-token", default=None, help="подстрока, которой замок помечен как наш")
+    ap.add_argument(
+        "--lock", default=None, help="путь stand.lock (по умолчанию <родитель основного дерева>/stand.lock)"
+    )
+    ap.add_argument("--lock-token", default=None, help="сессия в строке замка (обязательна в живом режиме)")
     ap.add_argument("--json-dir", default=None, help="куда класть JSON живых кейсов (по умолчанию --out-dir)")
     return ap
 

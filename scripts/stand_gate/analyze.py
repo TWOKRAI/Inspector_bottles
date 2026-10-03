@@ -139,6 +139,23 @@ def _require(data: Any) -> None:
         absent = [p for p in REQUIRED_PROCESSES if p not in (data[snap] or {})]
         if absent:
             raise GateInputError(f"в {snap} нет процессов {absent}")
+    # Ред. 4: заказанная, но не состоявшаяся пауза — сбой прогона, а не кейс E.
+    if "pause_error" in data:
+        raise GateInputError(f"пауза исполнителя не состоялась: {data['pause_error']}")
+    if data.get("tag") == "P10" and "pause" not in data:
+        raise GateInputError("кейс P10 без ключа pause — пауза не состоялась")
+    # Ред. 4: снимок с ошибкой — не нули, а отсутствие данных.
+    sites = [("s0", data["s0"]), ("s2", data["s2"])]
+    if isinstance(data.get("pause"), dict) and isinstance(data["pause"].get("after"), dict):
+        sites.append(("pause.after", data["pause"]["after"]))
+    broken = [
+        f"{label}.{proc}: {rec['error']}"
+        for label, snap in sites
+        for proc, rec in (snap or {}).items()
+        if isinstance(rec, dict) and "error" in rec
+    ]
+    if broken:
+        raise GateInputError(f"снимок с ошибкой: {broken}")
     if detect_case(data) == "P10":
         pause = data["pause"] or {}
         need = [k for k in ("rss0", "rss1", "drain_s", "drain_poll_period_s", "after") if k not in pause]

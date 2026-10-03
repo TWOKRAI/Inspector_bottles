@@ -301,7 +301,7 @@ class TestReplaceModeDropsDefaultEnabledSilently:
             "queue_wait_ms",
             "shm",
             "transport_ms",
-        }, "каталог разрешённых расширился со ВСЕХ десяти фреймворковых имён — не только fps"
+        }, "каталог разрешённых расширился со ВСЕХ шестнадцати фреймворковых имён — не только fps"
 
     def test_merge_mode_preserves_the_flip(self) -> None:
         """Контроль: тот же сценарий с явным ``telemetry_mode: merge`` держит флип.
