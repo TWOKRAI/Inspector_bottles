@@ -70,7 +70,7 @@ CTO 2026-10-01 (`plans/layer-render/cto-verdict-2026-10-01.md`) фон пере�
 ## Сцена (`render_scene`)
 
 `render_scene(background, placed, effects, rng) -> np.ndarray` (`scene.py`, Task 2.5) — единственная функция кадра:
-сим (через `SceneCompositor`), превью редактора (4.2) и генератор обучения (6.2) зовут её же.
+сегодня её зовёт только `SceneCompositor` (сим); превью редактора (4.2) и генератор обучения (6.2) будут звать её же.
 
 | Имя | Что |
 |-----|-----|

@@ -284,7 +284,11 @@ passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px + passport.lateral_
 `composite` из `dataset_gen` ушёл. Кадры и паспорта побайтно прежние. **Сужение `background_bgr`:** без
 `background_layers` фон — `[SolidFill]`, цвет проверяет `SolidFill` в `__init__` — три `int` 0..255 (B, G, R), иначе
 `ValueError` (прежде `(300, 0, 0)`, `(-1, 0, 0)` падали `OverflowError` в `render()`, `(60.5, 60, 60)` усекался молча,
-`(np.int64(60), 60, 60)` и `(60.0, 60.0, 60.0)` работали). Вход не тройкой — ошибка распаковки, тоже в `__init__`.
+`(np.int64(60), 60, 60)` и `(60.0, 60.0, 60.0)` работали). Вход не тройкой — ошибка распаковки, тоже в `__init__`; `bool` (например `(True, 0, 0)`) тоже отклоняется.
+Ещё два сужения: спрайт спавнера не RGBA `uint8` (float32, uint16, RGB) — `ValueError` из `PlacedObject` (прежде кадр);
+элемент `background_layers` не `SolidFill`/`ScrollingTile` — `ValueError` `SceneBackground.layers[i]`, где `i` — индекс
+СВЁРНУТОГО стека (прежде `AttributeError` или кадр). Со стеком `belt_y_px` NaN/inf даёт ту же ошибку, но после чтения
+спавнера и `render()` объектов (прежде до).
 
 **Направление ленты и точка входа (Task 5.3b, контракт §4.2.1).** `belt_direction: int = 1`
 (только `±1`, иначе `ValueError`) и `entry_x_px: float = 0.0` — обобщение формулы центра под

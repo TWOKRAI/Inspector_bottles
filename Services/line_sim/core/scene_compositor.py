@@ -56,12 +56,19 @@ class SceneCompositor:
 
     Pre: `px_per_mm > 0`... — не проверяется явно (числовой параметр камеры, не
     пользовательский конфиг с валидацией на границе; проверка — Task 3.4/Ф4, если
-    понадобится). Со стеком слоёв `now_encoder` обязан быть конечным: NaN/inf дают
-    исключение при округлении сдвига (без стека — не дают). Форму тайла слоя проверяет
-    `ScrollingTile`, не этот класс.
+    понадобится). Со стеком слоёв `now_encoder` и `x_px`/`y_px` из `camera_rect` обязаны быть конечными: NaN/inf
+    дают исключение при округлении сдвига и начала окна (без стека — не дают: сдвиг и начало окна не считаются,
+    кадр — чистый фон). Со стеком `belt_y_px` NaN/inf даёт ту же ошибку, что прежде, но позже: после чтения
+    спавнера и `render()` объектов (прежде до). Форму тайла слоя проверяет `ScrollingTile`, не этот класс.
     `background_bgr` (без стека) — три `int` 0..255 в порядке (B, G, R): иначе `ValueError` в `__init__` (прежде
     `(300, 0, 0)` падал `OverflowError` в `render()`, а дробный цвет усекался молча; `np.int64` и `60.0` теперь тоже
-    отклоняются — правила цвета в одном месте, `SolidFill`). Не тройка — ошибка распаковки, тоже в `__init__`.
+    отклоняются, как и `bool` вроде `(True, 0, 0)` — правила цвета в одном месте, `SolidFill`). Не тройка — ошибка
+    распаковки, тоже в `__init__`.
+    Прочие сужения Task 2.5 (проверки `render_scene`, LR-003): спрайт спавнера не RGBA `uint8` (float32, uint16, RGB) —
+    `ValueError` из `PlacedObject` (прежде кадр; RGB со bbox, задевающим кадр, давал паспорт); элемент
+    `background_layers` не `SolidFill`/`ScrollingTile` (в том числе «утиный» тайл) — `ValueError`
+    `SceneBackground.layers[i]`, где `i` — индекс СВЁРНУТОГО стека, не пользовательского (прежде `AttributeError`
+    или кадр).
     Post: `render()` не мутирует `spawner` (не зовёт `tick()`/`active_objects()` кроме
     чтения); пустой спавнер даёт кадр одного фона, без исключений; возвращённые паспорта —
     объекты, чей bbox пересекается с `camera_rect` (частично видимый считается видимым),
@@ -108,7 +115,9 @@ class SceneCompositor:
         x_px, y_px, w_px, h_px = camera_rect
         w, h = int(round(w_px)), int(round(h_px))
         scroll_px = 0
+        origin_xy = (0, 0)  # SolidFill origin не читает: без стека x_px/y_px NaN/inf округлять нельзя (прежний кадр)
         if self._has_stack:
+            origin_xy = (int(round(x_px)), int(round(y_px)))
             # shift_px — тот же encoder_to_offset_mm * px_per_mm, что у объектов (начало отсчёта spawn_enc=0.0
             # фиксировано, не завязано на конкретный объект); знак — belt_direction, как у объектов.
             shift_px = int(round(float(encoder_to_offset_mm(now_encoder, 0.0) * self._px_per_mm)))
@@ -118,7 +127,7 @@ class SceneCompositor:
             (w, h),
             center_y=self._belt_y_px,
             scroll_px=scroll_px,
-            origin_xy=(int(round(x_px)), int(round(y_px))),
+            origin_xy=origin_xy,
         )
 
         placed: list[PlacedObject] = []

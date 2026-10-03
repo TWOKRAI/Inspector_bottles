@@ -187,6 +187,31 @@ def test_h5_with_stack_nan_encoder_raises_before_touching_the_spawner():
     assert spawner.calls == 0
 
 
+@pytest.mark.parametrize(
+    "rect",
+    [
+        pytest.param((float("nan"), 0.0, 40.0, 30.0), id="x-nan"),
+        pytest.param((float("inf"), 0.0, 40.0, 30.0), id="x-inf"),
+        pytest.param((0.0, float("nan"), 40.0, 30.0), id="y-nan"),
+        pytest.param((0.0, float("-inf"), 40.0, 30.0), id="y-minus-inf"),
+    ],
+)
+def test_h5_without_stack_nonfinite_camera_origin_does_not_raise(rect):
+    """Без стека начало окна `x_px`/`y_px` не округляется (SolidFill origin не читает): NaN/inf в камере не бросают,
+    кадр — чистый ЦВЕТНОЙ фон (серый порядок каналов не различил бы). Прежний код кадр отдавал; m1 ревью."""
+    frame, passports = _compositor(_FakeSpawner([]), background_bgr=(1, 2, 3)).render(0.0, rect)
+    assert frame.shape == (30, 40, 3)
+    assert passports == []
+    assert (frame == np.array([3, 2, 1], dtype=np.uint8)).all()
+
+
+def test_h5_with_stack_nonfinite_camera_origin_still_raises():
+    """Парный контроль: со стеком начало окна нужно тайлу, NaN в `x_px` бросает (прежнее поведение)."""
+    comp = _compositor(_FakeSpawner([]), background_layers=[SolidFill((1, 2, 3))])
+    with pytest.raises((ValueError, OverflowError)):
+        comp.render(0.0, (float("nan"), 0.0, 40.0, 30.0))
+
+
 def test_h6_bgr_to_rgb_on_three_distinct_channels():
     """`background_bgr=(1, 2, 3)` (B=1, G=2, R=3) -> пиксель RGB `(3, 2, 1)`; серый порядок не различает."""
     frame, _ = _compositor(_FakeSpawner([]), background_bgr=(1, 2, 3)).render(0.0, _RECT)
@@ -227,7 +252,11 @@ def test_h9_empty_stack_gives_black_frame_and_integer_belt_y_is_accepted():
     frame, _ = _compositor(_FakeSpawner([]), background_layers=[]).render(0.0, _RECT)
     assert frame.shape == (30, 40, 3) and not frame.any()
     tile = ScrollingTile(np.full((4, 6, 3), 77, dtype=np.uint8))
-    frame2, _ = _compositor(_FakeSpawner([]), background_layers=[tile]).render(0.0, _RECT)
+    from Services.line_sim import SceneCompositor
+
+    comp = SceneCompositor(_FakeSpawner([]), px_per_mm=3.0, belt_y_px=15, background_layers=[tile])  # целый belt_y_px
+    frame2, _ = comp.render(0.0, _RECT)
+    assert frame2.shape == (30, 40, 3)
     assert (frame2[13:17] == 77).all()  # полоса тайла: top = round(15 - 2) = 13, высота 4
 
 
