@@ -1,0 +1,8 @@
+HEAD f0c118f0b start 13:02:58
+run1 root rc=0 13:23:36 :: = 10609 passed, 97 skipped, 1 xfailed, 2 xpassed, 199 warnings in 1231.51s (0:20:31) =
+run1 fw rc=3 13:30:34 ::
+run2 root rc=0 13:52:39 :: = 10609 passed, 97 skipped, 1 xfailed, 2 xpassed, 199 warnings in 1316.42s (0:21:56) =
+run2 fw rc=0 14:04:43 :: ==== 10750 passed, 41 skipped, 1 xfailed, 78 warnings in 720.89s (0:12:00) ====
+run3 root rc=0 14:24:51 :: = 10609 passed, 97 skipped, 1 xfailed, 2 xpassed, 199 warnings in 1200.78s (0:20:00) =
+run3 fw rc=0 14:36:56 :: ==== 10750 passed, 41 skipped, 1 xfailed, 78 warnings in 722.30s (0:12:02) ====
+done 14:36:56
