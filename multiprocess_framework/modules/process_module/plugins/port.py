@@ -31,6 +31,7 @@ shape — шаблон размерности:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Annotated
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
@@ -195,39 +196,103 @@ def validate_items_against_ports(
                 )
 
 
-def validate_chain(plugins_with_ports: list[tuple[str, list[Port], list[Port]]]) -> list[str]:
-    """Валидировать цепочку плагинов внутри процесса.
+def available_keys(
+    chain: list[tuple[str, list[Port], list[Port]]],
+    *,
+    wired_inputs: Iterable[str] = (),
+) -> dict[str, Port]:
+    """Ключи, которые рантайм несёт в dict items к моменту после узлов ``chain``.
+
+    Рантайм передаёт между плагинами процесса ОДИН dict: ключ живёт до перезаписи.
+    Поэтому вход узла покрыт, если ИМЯ его порта есть среди имён проводов процесса
+    ∪ выходов узлов выше. Имя из провода даёт ``Port(dtype="any")`` (dtype провода
+    уже сверен циклом Wire в ``SystemBlueprint.check``). Выход узла перезаписывает
+    одноимённый ключ: побеждает последний производитель.
 
     Args:
-        plugins_with_ports: [(plugin_name, inputs, outputs), ...]
-            в порядке выполнения
-
-    Returns:
-        Список ошибок. Пустой = всё ОК.
+        chain: [(plugin_name, inputs, outputs), ...] в порядке выполнения.
+        wired_inputs: имена портов, приходящих проводом процесса (один проход
+            по итератору — генератор допустим).
     """
-    errors: list[str] = []
+    keys: dict[str, Port] = {name: Port(name=name, dtype="any") for name in wired_inputs}
+    for _, _, outputs in chain:
+        for out in outputs:
+            keys[out.name] = out
+    return keys
 
-    for i in range(1, len(plugins_with_ports)):
-        prev_name, _, prev_outputs = plugins_with_ports[i - 1]
-        curr_name, curr_inputs, _ = plugins_with_ports[i]
+
+def _last_producer(chain: list[tuple[str, list[Port], list[Port]]], key: str) -> tuple[str, list[Port]]:
+    """(имя, выходы) последнего узла chain, чей выход называется ``key`` — для текста ошибки."""
+    for name, _, outputs in reversed(chain):
+        if any(out.name == key for out in outputs):
+            return name, outputs
+    return "провод процесса", []
+
+
+def validate_chain_detailed(
+    plugins_with_ports: list[tuple[str, list[Port], list[Port]]],
+    *,
+    wired_inputs: Iterable[str] = (),
+) -> list[tuple[str, str, str]]:
+    """Как :func:`validate_chain`, но каждая ошибка несёт ``(plugin_name, port_name, text)``.
+
+    Нужна ``SystemBlueprint.check``: по паре (плагин, порт) он знает, какие адреса
+    уже названы, и не дублирует их ошибкой «не подключен».
+    """
+    wired = tuple(wired_inputs)  # итератор читается ровно один раз
+    findings: list[tuple[str, str, str]] = []
+
+    for i, (curr_name, curr_inputs, _) in enumerate(plugins_with_ports):
+        upstream = plugins_with_ports[:i]
+        keys = available_keys(upstream, wired_inputs=wired)
 
         for inp in curr_inputs:
             if inp.optional:
                 continue
 
-            # Ищем совместимый выход у предыдущего плагина
-            matched = False
-            for out in prev_outputs:
-                if are_ports_compatible(out, inp):
-                    matched = True
-                    break
-
-            if not matched:
+            producer_port = keys.get(inp.name)
+            if producer_port is None:
+                findings.append(
+                    (
+                        curr_name,
+                        inp.name,
+                        f"Вход '{curr_name}.{inp.name}' ({inp.dtype}) не подключен: "
+                        f"ключ '{inp.name}' не производит ни провод процесса, ни узел выше по цепочке",
+                    )
+                )
+            elif not are_ports_compatible(producer_port, inp):
+                prev_name, prev_outputs = _last_producer(upstream, inp.name)
                 out_types = ", ".join(f"{o.name}:{o.dtype}" for o in prev_outputs)
-                errors.append(
-                    f"{prev_name} → {curr_name}: "
-                    f"вход '{inp.name}' ({inp.dtype} {inp.shape}) "
-                    f"несовместим с выходами [{out_types}]"
+                findings.append(
+                    (
+                        curr_name,
+                        inp.name,
+                        f"{prev_name} → {curr_name}: "
+                        f"вход '{inp.name}' ({inp.dtype} {inp.shape}) "
+                        f"несовместим с выходами [{out_types}]",
+                    )
                 )
 
-    return errors
+    return findings
+
+
+def validate_chain(
+    plugins_with_ports: list[tuple[str, list[Port], list[Port]]],
+    *,
+    wired_inputs: Iterable[str] = (),
+) -> list[str]:
+    """Валидировать цепочку плагинов внутри процесса.
+
+    Вход узла i проверяется по :func:`available_keys` узлов 0…i-1 плюс провода
+    процесса. Два текста ошибки: ключа нет вовсе / ключ есть, но последний
+    производитель несовместим. Optional-входы ошибок не дают.
+
+    Args:
+        plugins_with_ports: [(plugin_name, inputs, outputs), ...]
+            в порядке выполнения
+        wired_inputs: имена портов, приходящих проводом процесса.
+
+    Returns:
+        Список ошибок. Пустой = всё ОК.
+    """
+    return [text for _, _, text in validate_chain_detailed(plugins_with_ports, wired_inputs=wired_inputs)]

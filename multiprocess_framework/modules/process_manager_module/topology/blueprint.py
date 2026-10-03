@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Annotated, Any
 
 from pydantic import field_validator, model_validator
@@ -31,7 +32,7 @@ from ...process_module.generic.collector_registry import (
     COLLECTOR_CONFIG_KEY,
     LEGACY_COLLECTOR_CONFIG_KEY,
 )
-from ...process_module.plugins.port import Port, are_ports_compatible, validate_chain
+from ...process_module.plugins.port import Port, are_ports_compatible, available_keys, validate_chain_detailed
 from ...process_module.plugins.registry import PluginRegistry
 from ...process_module.generic.generic_process_config import GenericProcessConfig, PluginConfig
 
@@ -835,15 +836,19 @@ class SystemBlueprint(SchemaBase):
             else:
                 wired_inputs.add(wire.target)
 
-        # Ф4.3 (C-4): оживление validate_chain — детальная диагностика ВНУТРИпроцессной
-        # линейной цепочки auto-wiring (какой плагин -> какой плагин, какой dtype
-        # несовместим), точка сборки — этот же check(). Входы, уже покрытые явным
-        # межпроцессным Wire (wired_inputs), исключаем из проверки: они не обязаны
-        # совпадать с ВЫХОДОМ предыдущего по позиции плагина (fan-in — второй вход
-        # приходит извне, а не по цепочке). Дублирует по сути bool-проверку
-        # _is_covered_by_auto_wiring ниже (тот же are_ports_compatible), но с
-        # человекочитаемым сообщением вместо generic «не подключён».
+        # Ф4.3 (C-4) + 5.9a: validate_chain_detailed — детальная диагностика ВНУТРИпроцессной
+        # цепочки. Рантайм несёт между плагинами один dict, поэтому вход узла покрыт,
+        # если ИМЯ порта есть среди имён проводов процесса (wired_names) ∪ выходов узлов
+        # выше (available_keys). Входы, покрытые явным Wire по адресу, исключаем из
+        # chain_inputs: они не обязаны совпадать с выходом узла выше (fan-in).
+        # Адрес процесса вставляем в текст «ключа нет» здесь: validate_chain его не знает.
+        reported: set[str] = set()  # адреса, уже названные ошибкой цепочки — один вход, одна ошибка
+        wired_names_by_process: dict[str, list[str]] = {}  # процесс -> имена портов, пришедшие проводом
+        for target in wired_inputs:
+            proc_name, _, rest = target.partition(".")
+            wired_names_by_process.setdefault(proc_name, []).append(rest.rsplit(".", 1)[-1])
         for proc in self.processes:
+            wired_names = wired_names_by_process.get(proc.process_name, [])
             chain: list[tuple[str, list[Port], list[Port]]] = []
             for pdict in proc.plugins:
                 plugin_name = pdict.get("plugin_name", "")
@@ -855,18 +860,24 @@ class SystemBlueprint(SchemaBase):
                 addr_prefix = f"{proc.process_name}.{plugin_name}."
                 chain_inputs = [p for p in entry.inputs if (addr_prefix + p.name) not in wired_inputs]
                 chain.append((plugin_name, chain_inputs, list(entry.outputs)))
-            errors.extend(validate_chain(chain))
+            for plugin_name, port_name, text in validate_chain_detailed(chain, wired_inputs=wired_names):
+                reported.add(f"{proc.process_name}.{plugin_name}.{port_name}")
+                if text.startswith("Вход '"):
+                    text = f"Вход '{proc.process_name}." + text[len("Вход '") :]
+                errors.append(text)
 
         # Проверяем обязательные входы
         for addr, port in input_map.items():
-            if not port.optional and addr not in wired_inputs:
+            if not port.optional and addr not in wired_inputs and addr not in reported:
                 # Входы внутри процесса могут быть покрыты auto-wiring
-                # (предыдущий плагин в цепочке), пропускаем такие
+                # (ключ несёт провод процесса или узел выше), пропускаем такие
                 parts = addr.split(".")
                 if len(parts) == 3:
                     proc_name = parts[0]
                     proc_cfg = next((p for p in self.processes if p.process_name == proc_name), None)
-                    if proc_cfg and _is_covered_by_auto_wiring(proc_cfg, parts[1], port):
+                    if proc_cfg and _is_covered_by_auto_wiring(
+                        proc_cfg, parts[1], port, wired_names_by_process.get(proc_name, [])
+                    ):
                         continue
                 errors.append(f"Вход '{addr}' ({port.dtype}) не подключен")
 
@@ -991,10 +1002,17 @@ def _find_plugin_entry(plugin_name: str, plugin_class: str):
     return None
 
 
-def _is_covered_by_auto_wiring(proc: ProcessConfig, plugin_name: str, input_port: Port) -> bool:
+def _is_covered_by_auto_wiring(
+    proc: ProcessConfig,
+    plugin_name: str,
+    input_port: Port,
+    wired_names: Iterable[str] = (),
+) -> bool:
     """Проверить покрыт ли вход auto-wiring внутри процесса.
 
-    Если предыдущий плагин в цепочке имеет совместимый выход — покрыт.
+    Покрыт, если ключ с именем порта несёт провод процесса (``wired_names``) или узел
+    выше по цепочке (тот же :func:`available_keys`, что у ``validate_chain``), и порт
+    совместим с последним производителем ключа.
     """
     plugin_names = [p.get("plugin_name", "") for p in proc.plugins]
 
@@ -1003,18 +1021,11 @@ def _is_covered_by_auto_wiring(proc: ProcessConfig, plugin_name: str, input_port
     except ValueError:
         return False
 
-    if idx == 0:
-        return False  # первый в цепочке — нет предшественника
+    upstream: list[tuple[str, list[Port], list[Port]]] = []
+    for pdict in proc.plugins[:idx]:
+        name = pdict.get("plugin_name", "")
+        entry = _find_plugin_entry(name, pdict.get("plugin_class", ""))
+        upstream.append((name, [], list(entry.outputs) if entry is not None else []))
 
-    # Проверяем предыдущий плагин
-    prev_name = plugin_names[idx - 1]
-    prev_class = proc.plugins[idx - 1].get("plugin_class", "")
-    prev_entry = _find_plugin_entry(prev_name, prev_class)
-    if prev_entry is None:
-        return False
-
-    for out_port in prev_entry.outputs:
-        if are_ports_compatible(out_port, input_port):
-            return True
-
-    return False
+    producer = available_keys(upstream, wired_inputs=wired_names).get(input_port.name)
+    return producer is not None and are_ports_compatible(producer, input_port)
