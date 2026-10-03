@@ -51,7 +51,15 @@ TIMEOUT = 120
 
 _INJECTION_SCRIPT = 'import subprocess\n\nsubprocess.run(["git", "status"])\n'
 _GATE_PHRASE = "Gated code staged without tests"
-_COMMIT_MESSAGE = "feat(x): y\n\nWhy: z\nLayer: tests\n"
+_COMMIT_MESSAGE = "feat(x): y\n\nWhy: проверка, что гейт тестов выключен\nLayer: tests\n"
+# Литеральный набор путей разных слоёв: гейт, выключенный только для `src/**`, не пройдёт.
+_STAGED_CODE = [
+    "src/a.py",
+    "Services/a.py",
+    "Plugins/a.py",
+    "multiprocess_framework/modules/a.py",
+    "multiprocess_prototype/a.py",
+]
 
 
 # --------------------------------------------------------------------------- helpers
@@ -181,14 +189,18 @@ def test_bandit_exclude_keeps_code_scanned() -> None:
 @pytest.mark.usefixtures("_pre_commit_available")
 def test_bandit_hook_skips_injection_script_in_docs_reviews(tmp_path: Path) -> None:
     proc = _bandit_on_file(tmp_path, "docs/reviews/inject.py")
-    assert proc.returncode == 0, f"bandit rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, f"bandit rc={proc.returncode}\n{out}"
+    assert "no files to check" in out, f"bandit was not skipped by exclude\n{out}"
 
 
 @pytest.mark.usefixtures("_pre_commit_available")
 def test_bandit_hook_still_fails_on_code(tmp_path: Path) -> None:
     """Контроль живости к тесту 4: тот же файл вне исключения даёт находки bandit."""
     proc = _bandit_on_file(tmp_path, "Services/inject.py")
-    assert proc.returncode != 0, f"bandit did not flag the injection script\n{proc.stdout}\n{proc.stderr}"
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, f"bandit did not flag the injection script\n{out}"
+    assert "B603" in out, f"rc != 0 without a bandit finding (environment failure?)\n{out}"
 
 
 # --------------------------------------------------------------------------- 5: tests gate off
@@ -201,8 +213,9 @@ def test_tests_gate_is_off_for_staged_code(tmp_path: Path) -> None:
     _git_ok(repo, "add", STACK_REL.as_posix(), VALIDATOR_REL.as_posix())
     _git_ok(repo, "commit", "-q", "-m", "init")  # хуков в репо нет -> валидатор не вмешивается
 
-    _write(repo / "src" / "a.py", "x = 1\n")
-    _git_ok(repo, "add", "src/a.py")
+    for rel in _STAGED_CODE:
+        _write(repo / rel, "x = 1\n")
+    _git_ok(repo, "add", *_STAGED_CODE)
     message = tmp_path / "COMMIT_MSG"
     _write(message, _COMMIT_MESSAGE)
 
