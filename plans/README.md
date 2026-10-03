@@ -2,9 +2,9 @@
 
 Manager (`/dev:plan <task>`) creates one plan per non-trivial task. **Дата ISO всегда в имени** — для хронологического поиска.
 
-- **Single plan (без фаз):** `plans/YYYY-MM-DD_<slug>.md` (один файл).
-- **Multi-phase plan (с фазами):** `plans/YYYY-MM-DD_<slug>/plan.md` + `plans/YYYY-MM-DD_<slug>/phase-1.md`, `phase-2.md`, …
-- **Plan layout v2 (большой план):** `plan.md` (контракт) + `tasks/<id>.md` (одна задача — один файл) + `amendments.md` (правки после approve, только дописывание); бюджеты размера проверяет `plans_ledger.py status --check`.
+- **Single plan (без фаз, < 50 строк ТЗ):** `plans/YYYY-MM-DD_<slug>.md` (один файл).
+- **Plan layout v2 (по умолчанию для всего остального):** `plans/YYYY-MM-DD_<slug>/plan.md` (контракт, задачи одной строкой) + `design.md` (спецификация, если нужна) + `tasks/<id>.md` (одна задача — один файл) + `tasks/<id>.result.md` (итог ≤ 2 KB) + `reports/` (длинные отчёты) + `amendments.md` (правки после approve, только дописывание). В `tasks/` допустимы только `<id>.md` и `<id>.result.md`. Бюджеты размера проверяет `plans_ledger.py status --check`.
+- **Multi-phase plan (legacy, новые не создаём):** `plan.md` + `phase-1.md`, `phase-2.md`, … — существующие читаются и закрываются как раньше.
 
 `<slug>` follows the convention in [`.claude/commands/dev/plan.md`](../.claude/commands/dev/plan.md): `kebab-case`, `<domain>-<topic>`, ≤ 40 chars. No bare counters (`PLAN-001`).
 
@@ -12,8 +12,8 @@ Manager (`/dev:plan <task>`) creates one plan per non-trivial task. **Дата I
 
 ## Lifecycle
 
-1. **`/dev:plan <task>`** → Manager writes plan file (или папку для multi-phase), creates branch `<type>/<slug>` (`feat`/`fix`/`refactor`/`docs`) **и регистрирует план строкой в ledger «Активные» ниже** (`python3 scripts/plans_ledger.py add <plan>`).
-2. **`/dev:implement Task X.Y`** → Developer implements the task, commits с `Refs: plans/YYYY-MM-DD_<slug>.md` (или `.../phase-N.md` для multi-phase) trailer, flips status `[PENDING]` → `[DONE]`.
+1. **`/dev:plan <task>`** → Manager writes plan file (или папку layout v2), creates branch `<type>/<slug>` (`feat`/`fix`/`refactor`/`docs`) **и регистрирует план строкой в ledger «Активные» ниже** (`python3 scripts/plans_ledger.py add <plan>`).
+2. **`/dev:implement Task X.Y`** → Developer implements the task, commits с `Refs: plans/YYYY-MM-DD_<slug>.md` (для layout v2 — `.../plan.md`; `phase-N.md` только у legacy multi-phase) trailer, flips status `[PENDING]` → `[DONE]`.
 3. **`/dev:ship`** → verifies `Refs:` trailers on the branch; когда все задачи `[DONE]` → закрывает план (`Status: DONE`) **и архивирует его (archive-on-done): `python3 scripts/plans_ledger.py close <plan>` — `git mv` в `_archive/<YYYY-Qn>/` + перенос строки в «Архив»**.
 4. **`/dev:plan-status`** → `python3 scripts/plans_ledger.py status` — обзор всех планов без перечитывания + progress bar для плана текущей ветки.
 
@@ -60,7 +60,7 @@ git log --grep="Refs: plans/2026-05" --oneline    # коммиты по план
 
 New plans start from [`.claude/plugins/core/templates/PLAN.template.md`](../.claude/plugins/core/templates/PLAN.template.md).
 
-Manager выбирает: single-file (атомарная задача, < 50 строк ТЗ) или multi-phase (2+ независимых этапов).
+Manager выбирает: single-file (атомарная задача, < 50 строк ТЗ) или layout v2 (всё остальное); multi-phase — legacy.
 
 ## Формат задачи и прогресс
 

@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TEMPLATES = REPO_ROOT / ".claude" / "plugins" / "core" / "templates"
 LEDGER = REPO_ROOT / "scripts" / "plans_ledger.py"
@@ -85,3 +87,43 @@ def test_ledger_brief_accepts_the_task_template(tmp_path):
     )
     assert cp.returncode == 0, f"brief exit {cp.returncode}: {cp.stdout[:300]!r} {cp.stderr[:300]!r}"
     assert "missing field" not in cp.stdout + cp.stderr
+
+
+# ── Task 3.6: раскладки, архив и зеркала (ревью Fable 2026-10-03 + вопрос владельца) ─────────────
+README_FILES = ("plans/README.md", ".claude/plugins/core/templates/plans-readme.template.md")
+MIRRORS = (
+    (".claude/plugins/dev/modes/dev.md", ".claude/modes/dev.md"),
+    (".claude/plugins/dev/agents/tester.md", ".claude/agents/dev/tester.md"),
+)
+
+
+def _read_repo(rel: str) -> str:
+    return (REPO_ROOT / rel).read_bytes().decode("utf-8").replace("\r\n", "\n")
+
+
+def test_plan_template_storage_note_names_layout_v2_legacy_and_archive():
+    text = _read("PLAN.template.md")
+    assert "`design.md` (если нужна спецификация)" in text
+    assert "Multi-phase (legacy, новые не создаём)" in text
+    assert "`plans/_archive/<YYYY-Qn>/`" in text
+
+
+@pytest.mark.parametrize("rel", README_FILES)
+def test_plans_readme_prefers_layout_v2_over_multi_phase(rel):
+    """Агент читает README и не должен снова выбрать multi-phase для нового плана."""
+    text = _read_repo(rel)
+    assert "Plan layout v2 (по умолчанию для всего остального)" in text
+    assert "multi-phase — legacy" in text
+    assert "или multi-phase (2+ независимых этапов)" not in text
+
+
+@pytest.mark.parametrize(("source", "mirror"), MIRRORS)
+def test_materialized_mirror_equals_plugin_source(source, mirror):
+    """Правка источника без зеркала (или наоборот) молча теряется при `claude-kit sync`."""
+    assert _read_repo(source) == _read_repo(mirror)
+
+
+def test_executor_brief_and_tester_point_at_plan_md_not_phase_files():
+    plan_line = _read_repo(".claude/plugins/dev/templates/executor-brief.md").split("PLAN:", 1)[1].split("\n", 1)[0]
+    assert "phase-N.md>" not in plan_line
+    assert "(legacy: phase-N.md)" in _read_repo(".claude/plugins/dev/agents/tester.md")
