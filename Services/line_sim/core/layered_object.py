@@ -16,6 +16,7 @@ from dataclasses import replace
 
 import numpy as np
 
+from Services.layer_render.factory import RenderedObject
 from Services.layer_render.layers import LayerSpec, canvas_size, compose_layers, transform_layer
 from Services.line_sim.interfaces import ObjectPassport
 
@@ -50,6 +51,24 @@ class LayeredObject:
         )
         self._rgba = composed.rgba
         self._rgba.flags.writeable = False  # кэш не портится через возвращённую ссылку
+
+    @classmethod
+    def from_rendered(cls, rendered: RenderedObject, *, object_id: str, spawn_encoder: float) -> LayeredObject:
+        """Объект ленты из готового `RenderedObject` (Task 2.4b): паспорт из его полей, без нового розыгрыша.
+
+        `render()` вернёт ТОТ ЖЕ массив `rendered.rgba` (копии нет); `lateral_px` — дефолт (его ставит спавнер).
+        """
+        obj = cls.__new__(cls)
+        obj.passport = ObjectPassport(
+            object_id=object_id,
+            class_name=rendered.class_name,
+            angle_deg=rendered.angle_deg,
+            defect=rendered.defect,
+            spawn_encoder=spawn_encoder,
+            layer_params=rendered.layer_params,
+        )
+        obj._rgba = rendered.rgba
+        return obj
 
     def render(self) -> np.ndarray:
         """Закэшированный RGBA объекта (read-only; копию делать вызывающему)."""

@@ -94,8 +94,10 @@ YAML пишется `yaml.safe_dump` — комментарии не сохра�
 
 ## ObjectFactory (Task 3.2)
 
+С Task 2.4b база фабрики (`render(rng, ...) -> RenderedObject`, `nominal_layers`) живёт в `Services/layer_render/factory.py`; `Services.line_sim.ObjectFactory` — её подкласс: `make()` = флаг оператора `force_defect_next()` + `render` + `LayeredObject.from_rendered` (паспорт ленты). `core/preview.py` и `core/catalog_bridge.py` — реэкспорт из `layer_render`.
+
 `ObjectFactory(preset)` — единственное место, которое знает про `SpriteCatalog`
-(`core/catalog_bridge.py`, тонкая обёртка над `dataset_gen.core.catalog`): если задан
+(`load_catalog` в `Services/layer_render/catalog.py`; `core/catalog_bridge.py` — реэкспорт): если задан
 `catalog_dir`, каталог грузится СРАЗУ в конструкторе (eager — `num_classes` доступен
 немедленно), ошибки каталога — как есть от `SpriteCatalog`, не переписываются. Доп. слои
 пресета резолвятся туда же (id → RGBA) один раз при конструкции.

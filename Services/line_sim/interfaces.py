@@ -20,6 +20,7 @@ from Services.layer_render.layers import (
     RangeF,
     SpriteSource,
 )
+from Services.layer_render.layers import json_safe as _json_safe
 
 __all__ = [
     "AUGMENT_FIELDS",
@@ -82,18 +83,6 @@ class ObjectPassport:
             layer_params=dict(data.get("layer_params") or {}),
             lateral_px=float(data.get("lateral_px", 0.0)),
         )
-
-
-def _json_safe(value: Any) -> Any:
-    """Рекурсивно привести numpy-скаляры (`np.float32`/`np.bool_`/…) к нативным типам
-    через `.item()` — контейнеры (`dict`/`list`) обходятся, остальное не трогается."""
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(v) for v in value]
-    return value
 
 
 class SceneCompositorProtocol(Protocol):

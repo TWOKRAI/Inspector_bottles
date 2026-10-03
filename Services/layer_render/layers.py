@@ -39,6 +39,7 @@ __all__ = [
     "SpriteSource",
     "canvas_size",
     "compose_layers",
+    "json_safe",
     "load_layer_sprite",
     "transform_layer",
 ]
@@ -221,6 +222,18 @@ def _over(canvas_pm: np.ndarray, canvas_a: np.ndarray, sprite: np.ndarray, cente
     white[:, :, :3] = 255
     alpha3 = composite(np.repeat(canvas_a[:, :, None], 3, axis=2), white, center_xy)
     return canvas_pm, alpha3[:, :, 0]
+
+
+def json_safe(value: Any) -> Any:
+    """Рекурсивно привести numpy-скаляры (`np.float32`/`np.bool_`/…) к нативным типам
+    через `.item()` — контейнеры (`dict`/`list`) обходятся, остальное не трогается."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [json_safe(v) for v in value]
+    return value
 
 
 def canvas_size(placed: list[tuple[np.ndarray, float, float]]) -> tuple[int, int]:

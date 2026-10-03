@@ -1,9 +1,8 @@
 """ScenePreset — конфиг сцены (Pydantic v2), dict/YAML на границе.
 
-По образцу `Services.dataset_gen.core.config.GeneratorConfig`. На dict-границе
-`sprite_source` — строка-идентификатор (загрузка спрайта — `ObjectFactory` из
-`catalog_bridge`, Task 3.2). `ScenePreset` сам картинок не читает (Dict at Boundary,
-LS-007) — каталог классов грузит `ObjectFactory`, здесь только путь и диапазоны.
+На dict-границе `sprite_source` — строка-идентификатор (загрузку спрайта делает
+`Services.layer_render.factory.ObjectFactory`). `ScenePreset` сам картинок не читает
+(Dict at Boundary) — каталог классов грузит фабрика, здесь только путь и диапазоны.
 """
 
 from __future__ import annotations

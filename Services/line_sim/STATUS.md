@@ -14,7 +14,7 @@
 | `encoder_to_offset_mm` | готово |
 | `SceneCompositorProtocol` (Protocol) + `SceneCompositor` (реализация) | готово (Task 3.4, LS-009) |
 | `ObjectPassport.to_dict()`/`from_dict()` | готово (Task 3.4, Dict at Boundary) |
-| `ObjectFactory` + `catalog_bridge` — класс/угол из rng, дефект-слой `"damaged"`, `force_defect_next()` | готово |
+| `ObjectFactory` + `catalog_bridge` — класс/угол из rng, дефект-слой `"damaged"`, `force_defect_next()` (с Task 2.4b: база и превью — в `layer_render`, здесь подкласс с `make()`; `catalog_bridge`/`preview` — реэкспорт) | готово |
 | Пресет `letters_disk.yaml` | готово (ссылается на каталог dataset_gen, картинок не копирует) |
 | `ObjectSpawner` — спавн по интервалу ИЛИ по шагу ленты в мм, деспавн, пауза, форс-хук брака | готово (Task 3.3, режим `spacing_mm` — Task 3.3a, LS-010) |
 | Подключение к `SceneSourcePlugin` (`Plugins/sim/scene_source`) | готово (Task 3.4; `spawn_spacing_mm` — Task 3.3a) |

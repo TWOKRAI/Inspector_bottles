@@ -264,3 +264,14 @@ def _cover_crop(image: np.ndarray, size_hw: tuple[int, int], rng: np.random.Gene
     y0 = int(rng.integers(h - th + 1))
     x0 = int(rng.integers(w - tw + 1))
     return image[y0 : y0 + th, x0 : x0 + tw].copy()
+
+
+def load_catalog(classes_dir: str | Path) -> SpriteCatalog:
+    """Загрузить каталог классов (эталоны — жадно, в память); ошибки — от `SpriteCatalog`.
+
+    Pre: classes_dir существует и содержит >=1 листовую папку со спрайтами.
+    Post: catalog.num_classes >= 1.
+    """
+    catalog = SpriteCatalog(CatalogConfig(classes_dir=Path(classes_dir), backgrounds_dir=None))
+    catalog.load()
+    return catalog
