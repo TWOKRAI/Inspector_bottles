@@ -1,0 +1,30 @@
+"""Инъекции лида, Task 5.5c. Предсказания ДО прогона. cwd = t55c-impl."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import inject_56 as m  # noqa: E402  (переиспользую run/main)
+
+m.RUNS = [(m.ROOT, [
+    "scripts/validate_commit/tests",
+    "Services/sql/tests",
+    "Plugins/tests/test_no_silent_swallows.py",
+])]
+VC = "scripts/validate_commit/validate_commit.py"
+VCT = "scripts/validate_commit/tests/test_validate_commit.py"
+BR = "Services/sql/core/base_repository.py"
+CR = "Plugins/calibration/camera_robot/plugin.py"
+m.INJ = {
+    "C1_no_folding": (VC, "                elif current_key is not None:\n", "                elif False:\n"),
+    "C2_no_plan_isolation": (VCT, '    monkeypatch.setattr(validate_commit, "plan_for_branch", lambda repo, branch: None)\n', "    pass\n"),
+    "C3_find_by_unchecked": (BR, "            if not _IDENTIFIER_RE.match(col):\n", "            if False:\n"),
+    "C4_drop_one_no_health_tag": (CR, "            except Empty:  # no-health: control-flow — очередь пуста, обычный такт воркера\n",
+                                  "            except Empty:\n"),
+}
+m.PRED = {
+    "C1_no_folding": "test_wrapped_why_value_still_parses, test_wrapped_layer_value_parses — 2",
+    "C2_no_plan_isolation": "blind test_validator_suite_green_on_branch_with_plan — 1 (дерево t55c-impl на ветке fix/t55c-gate-green: плана с таким слагом нет — сами тесты validate_commit могут остаться зелёными)",
+    "C3_find_by_unchecked": "тест идентификатора find_by в Services/sql/tests — 1",
+    "C4_drop_one_no_health_tag": "test_no_silent_swallows — 1",
+}
+m.main()

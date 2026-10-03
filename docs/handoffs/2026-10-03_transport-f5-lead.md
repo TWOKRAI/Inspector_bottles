@@ -1,40 +1,46 @@
 # Хендофф лида: transport-single-policy, фаза 5 — 2026-10-03 (сессия f4)
 
-**План:** [`plans/transport-single-policy/phase-5.md`](../../plans/transport-single-policy/phase-5.md). Предыдущий хендофф: [`2026-10-02_transport-f5-lead.md`](2026-10-02_transport-f5-lead.md).
-**Ветка лида:** `feat/transport-f5` в `.claude/worktrees/t5-lead`, HEAD `1be90767f` (спеки ред. 3). Дерево `stand` — detached на `978377d7d`.
+**План:** [`plans/transport-single-policy/phase-5.md`](../../plans/transport-single-policy/phase-5.md) (5.6 ред. 5, 5.9a ред. 3, 5.5c ред. 3). Предыдущий: [`2026-10-02_transport-f5-lead.md`](2026-10-02_transport-f5-lead.md).
+**Ветка фазы:** `feat/transport-f5` в `.claude/worktrees/t5-lead`, HEAD `fd906e4ee` — **5.9a и 5.6 влиты** (`594ba2a74`, `fd906e4ee`), `scripts.sync` без дрейфа. Дерево `stand` — detached `978377d7d`.
+**Соседи:** f0 (layer-render) гоняет матрицу 2.4b ~1–1.5 ч с 12:17 — перед следующим замером спросить; 5a (plans-progress) ждёт SHA перед слиянием своей Фазы 2 в main.
 
-## Сделано сегодня
-- Стенд-гейты 5.2/5.3/5.4 замерены: [`docs/reviews/2026-10-03_phase5-stand-w2.md`](../reviews/2026-10-03_phase5-stand-w2.md). 5.3 и 5.4 по существу зелёные, D100 зелёный в единицах. Не доказаны: дренаж ≤ 0.1 с (инструмент), `frame_stale_drops` в `s0` под `latest` (предложение лида — без порога, **ждёт владельца**).
-- ~~Регрессия queue_wait~~ — **опровергнута investigator**: бимодальность processor на обоих деревьях, мой вывод — артефакт снимка при n=2. Открыт возможный сдвиг ≈ 8 % (нужны 5+5 ABAB на тихой машине).
-- Дефект инструмента: журнал читал `observability.db` текстом (ложные дубли). Исправлено в `stand5.py`; фикстуры для 5.6.
-- Ревью спек волны 3: итерация 1 — CHANGES REQUESTED ×3; итерация 2 — 5.5c APPROVED, 5.6/5.9a остаток внесён лидом (ред. 3, `1be90767f`).
-- Слепые тестеры (worktree на коммите до кода): 5.6 `f8be92cf3` (100 тестов, 93 красных), 5.9a `589ba9308` (44, 23 красных), 5.5c `171f60fcc` (4, 1 красный + 2 контроля).
-
-## В работе (фон)
-| Задача | Роль | agentId | Worktree / ветка |
-|---|---|---|---|
-| регрессия queue_wait | investigator | `a2efdabbd459b2779` | read-only; может брать `stand.lock` под бисекцию |
-| 5.6 | teamlead | `a884bb0206821975c` | `t56-impl` / `feat/t56-impl` |
-| 5.9a | developer | `a2ae4cf1d9cf6dc8a` | `t59a-impl` / `feat/t59a-impl` |
-| 5.5c часть A (всё, кроме docs_verify) | developer | `aa6d56a78bc7e238e` | `t55c-impl` / `fix/t55c-gate-green` |
-
-Не запущено: **5.5c часть B — `scripts/docs_verify` (29 падений), teamlead** — ждёт свободного слота писателя (лимит 3), ветка — тот же `fix/t55c-gate-green` после части A или отдельная от неё.
-
-## agentId завершённых (дозывать по ним)
-| Роль | agentId |
+## Итог дня по задачам
+| Задача | Состояние |
 |---|---|
-| reviewer спек волны 3 (итерации 1–2 исчерпаны) | `a3d3a96081518bb77` |
-| tester 5.6 | `aeb38b2d344849a7f` |
-| tester 5.9a | `ae0ff6ae34d2bd137` |
-| tester 5.5c | `ae0df4bf34400f234` |
+| Стенд-гейты 5.2/5.3/5.4 | замер волны 2 — [`docs/reviews/2026-10-03_phase5-stand-w2.md`](../reviews/2026-10-03_phase5-stand-w2.md); первый прогон скрипта 5.6 — [`reports/stand/2026-10-03_first-run/`](../../reports/stand/2026-10-03_first-run/): **8 из 9 зелёные**, FAIL — дренаж P10_3 0.104 с по верхней границе (нижняя 0.063; 2 других — 0.057, 0.046) |
+| 5.9a | **влита.** 44 слепых + 5 авторских, 11 инъекций, живой старт (compositor 50.7 Гц), ревью APPROVED_WITH_NITS (ниты внесены лидом `5fba5c56d`) |
+| 5.6 | **влита.** 100 слепых + 23 авторских, 27 инъекций в 3 раундах, ревью: 2 итерации, остаток (правило нижней границы — ошибка лида, снято) проверен инъекциями лида без 3-го раунда |
+| 5.5c | **готова, ждёт ревью.** Ветка `fix/t55c-gate-green` (`.claude/worktrees/t55c-impl`), HEAD `f3b913751`. Гейт: ruff 0, pyright 0 errors, bandit -ll exit 0, корневой pytest 10607 passed / 0 failed, run_framework_tests 10750 / 0, docs_verify 36. Инъекции лида 4/4 пойманы (`inject_55c.json` в scratchpad — перенести). Найдена реальная дыра: `GenericRepository.find_by` — ключи kwargs в SQL без проверки → закрыта |
 
-## Решения лида по находкам тестеров (внести в план при слиянии)
-- 5.6: `every` = processor + inspector; stale_restore — сумма по всем процессам; `--no-throughput-gate` выключает только lag processor; NOT_MEASURED = `FAIL drain: NOT_MEASURED`; P10 без `pause.drain_poll_period_s` → код 2; `--from-json` nargs="+" и пишет отчёт.
-- 5.9a: `check()` ставит процесс внутрь кавычек адреса (`'processor.color_mask.frame'`); узел 0 — через `check()` (одна ошибка на адрес). Исполнитель добавил помощник `validate_chain_detailed` в `port.py`.
+## Что открыто
+- **Радиус слитой ветки фазы** (process/process_manager/router + stand_gate + backend + robot_control) — запущен в фоне в конце сессии, результат не прочитан. Первое действие новой сессии: прогнать заново и прочитать.
+- **5.5c:** синхронный reviewer (фокус: 44 тега `no-health` в Plugins — законная разметка или маскировка; 15 `nosec B608`; ruff-format переформатировал целые файлы — смотреть `git diff -w`; 2 xpassed не разобраны). Затем слияние в main **раньше** ветки фазы, SHA соседям f0 и 5a, потом main → `feat/transport-f5`.
+- **Инъекция «/dev:ship отказывает при красном гейте»** — только владелец.
+- **5.4 на `multi_camera.yaml`** (теперь стартует) — короткий замер после окна соседа f0.
+- **OPEN_QUESTIONS 2026-10-03:** модель доступности ключей для плагинов со свежим dict → CTO на приёмке фазы; бимодальность цикла processor (плохой режим 63–73 кадра/с, на обоих деревьях) — решение владельца.
+- **Решения владельца:** порог `frame_stale_drops` в `s0` под `latest` (предложение лида — без порога; в прогоне 5.6 storage 10–11); бимодальность — отдельная задача до 5.8 или ограничение стенда.
+- Тест рантайма `line_filter` (свежий dict теряет `frame`) на настоящих плагинах — отдельная задача (ниты ревью 5.9a).
+- `phase-5.md` > 100 КБ — разделить по `##` после слияний.
 
-## Дальше
-1. По каждому исполнителю: инъекции лида против ОБОИХ наборов (тестерского и авторского), предсказания до прогона → ревьюер синхронно → правки автору по agentId.
-2. 5.9a: живой старт `inspection_basic.yaml` и `multi_camera.yaml` 30 с (`sweep50.py`), compositor > 0 `composite_frame`.
-3. 5.6: первый прогон `--profile quick --runs 3` под `stand.lock` — закрывает гейты 5.2/5.3/5.4.
-4. 5.5c: часть B (docs_verify) → инъекция «/dev:ship отказывает» — за владельцем → слияние в main **раньше** `feat/transport-f5`, SHA соседям (сессии f0 layer-render, 5a plans-progress).
-5. Владельцу: порог `s0` под `latest`; регрессия queue_wait — по итогу investigator.
+## Ошибки лида за сессию (не повторять)
+1. «Регрессия queue_wait волны 2» по одному снимку `s1` при n=2 — опровергнута investigator (бимодальность на обоих деревьях). Число без разброса — наблюдение.
+2. Правило «нижняя граница дренажа → FAIL» — недоказуемо (маркеры не пишут `cycles`); снято после ревью.
+
+## agentId
+| Роль | agentId | Состояние |
+|---|---|---|
+| developer 5.5c | `aa6d56a78bc7e238e` | сдал, 255k — правки ревью ему, если мелкие |
+| teamlead 5.6 | `a884bb0206821975c` | 296k — за порогом, свежего |
+| developer 5.9a | `a2ae4cf1d9cf6dc8a` | 171k |
+| reviewer 5.6 | `ae4244d1de3a3b9b5` | итерации исчерпаны |
+| reviewer 5.9a | `af2e9f1550cb8c740` | итерации исчерпаны |
+| reviewer спек волны 3 | `a3d3a96081518bb77` | итерации исчерпаны |
+| investigator queue_wait | `a2efdabbd459b2779` | диагноз закрыт |
+| testers 5.6 / 5.9a / 5.5c | `aeb38b2d344849a7f` / `ae0ff6ae34d2bd137` / `ae0df4bf34400f234` | сдали |
+
+## Дальше (порядок)
+1. Радиус ветки фазы → прочитать.
+2. Свежий reviewer 5.5c (синхронно) → правки автору → слияние в main, SHA соседям.
+3. main → `feat/transport-f5`, корневой pytest на ветке фазы.
+4. После окна f0: 5.4 на `multi_camera.yaml` + повтор `stand_gate --runs 3` (дренаж).
+5. Волна 4: 5.8 ∥ 5.11 — спеки через reviewer MODE: plan.
