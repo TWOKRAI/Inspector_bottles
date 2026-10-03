@@ -1894,6 +1894,7 @@
   - Polling `process_state_registry` из launcher — не работает: каждый дочерний процесс создаёт свою копию SRM из bundle, статусы не видны из launcher.
   - «medium»-уровень (дочерние прошли initialize) — требует дополнительного IPC-протокола (process_ready msg), вынесено в будущую задачу.
 - Последствия: тесты становятся детерминированными и быстрыми; при добавлении medium-уровня готовности контракт `wait_until_ready()` не изменится.
+- Уточнение (2026-10-03, Task 5.4 transport-single-policy): то же событие теперь доходит и до дочерних процессов — наследованием через `Process(kwargs)`; источники ждут его перед первым `produce()`. См. [ADR-PMM-034](modules/process_manager_module/DECISIONS.md).
 
 ## ADR-117: Единый ProcessStatus enum — унификация из трёх определений
 - Дата: 2026-04-25
