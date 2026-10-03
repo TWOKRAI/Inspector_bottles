@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Копия артефакта https://claude.ai/artifact/2K3PQc8BqtrCAghdgg2ppp (версия 3, 2026-10-03).
+<!-- Копия артефакта https://claude.ai/artifact/2K3PQc8BqtrCAghdgg2ppp (версия 4, 2026-10-03, тёмная тема).
      В артефакте mermaid рисует сам claude.ai; здесь библиотека грузится с CDN — нужен интернет. -->
 <title>Сервис слоёв layer_render</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,36 +11,24 @@
 <style>
 /* Layout: одна колонка ~72ch, схемы и макет экрана — на всю ширину колонки; акцент — мятный цвет просвета ленты */
 :root {
-  --bg: #f3f5f4;
-  --surface: #ffffff;
-  --fg: #1d2421;
-  --muted: #5b6662;
-  --line: #d5dcd9;
-  --accent: #1f8a78;
-  --accent-soft: #dcefea;
-  --warn: #a8641a;
-  --warn-soft: #f6ead9;
-  --done: #3d7a3a;
-  --done-soft: #e1efdc;
-  --code-bg: #e9eeec;
-  --canvas: #1b1f1d;
-  --canvas-fg: #cfe9e2;
+  /* Тёмная тема всегда (просьба владельца 2026-10-03): одна палитра, без светлого варианта */
+  --bg: #141917;
+  --surface: #1c2320;
+  --fg: #e3e9e6;
+  --muted: #9aa7a2;
+  --line: #2e3833;
+  --accent: #5cc8b3;
+  --accent-soft: #1d3530;
+  --warn: #e0a35a;
+  --warn-soft: #3a2c1a;
+  --done: #8fcf86;
+  --done-soft: #1f3320;
+  --code-bg: #222b27;
+  --canvas: #0d100f;
+  --canvas-fg: #a9dccf;
   --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
   --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #141917; --surface: #1c2320; --fg: #e3e9e6; --muted: #9aa7a2; --line: #2e3833;
-    --accent: #5cc8b3; --accent-soft: #1d3530; --warn: #e0a35a; --warn-soft: #3a2c1a;
-    --done: #8fcf86; --done-soft: #1f3320; --code-bg: #222b27; --canvas: #0d100f; --canvas-fg: #a9dccf;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #141917; --surface: #1c2320; --fg: #e3e9e6; --muted: #9aa7a2; --line: #2e3833;
-  --accent: #5cc8b3; --accent-soft: #1d3530; --warn: #e0a35a; --warn-soft: #3a2c1a;
-  --done: #8fcf86; --done-soft: #1f3320; --code-bg: #222b27; --canvas: #0d100f; --canvas-fg: #a9dccf;
   color-scheme: dark;
 }
 body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--f-body); padding-inline: 16px; padding-block: 32px 64px; }
@@ -452,7 +440,7 @@ flowchart LR
 
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
 <script>
-  mermaid.initialize({ startOnLoad: true, theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });
+  mermaid.initialize({ startOnLoad: true, theme: 'dark' });
 </script>
 </body>
 </html>
