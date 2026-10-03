@@ -4,7 +4,7 @@
 Интерфейс (CLI, только stdlib)::
 
     python scripts/plans_progress/plans_progress.py [--root DIR] [--order PATH]
-        [--json] [--html [PATH]] [--check] [--baseline PATH]
+        [--json] [--html [PATH]] [--check] [--baseline PATH] [--sync-order]
 
 * ``--root DIR``   каталог с ``plans/`` и ``plans/_archive/`` (по умолчанию корень репозитория);
 * ``--order PATH`` ``ORDER.md`` (по умолчанию ``<root>/plans/queue/ORDER.md``); файла нет -> полосы
@@ -20,10 +20,13 @@
 ``unknown`` (``?``) бывает только у пункта списка без слова набора.
 
 Pre:  ``root/plans`` читается как каталог планов; файлы — UTF-8 (BOM и CRLF допустимы).
-Post: файлы планов не пишутся; ``--html`` пишет только по заданному пути. ``done`` — число задач
-      ``done``; ``total`` = всего - ``dropped`` (deferred + superseded) - ``unknown``.
+Post: файлы планов не пишутся. Пишут только два флага: ``--html`` — страницу по заданному пути
+      (по умолчанию ``data/plans_progress.html``), ``--sync-order`` — строки между маркерами
+      ``progress:begin``/``progress:end`` в ORDER.md (атомарно, остальные байты не меняются; писатель — лид
+      на ``main``). ``done`` — число задач ``done``; ``total`` = всего - ``dropped`` (deferred +
+      superseded) - ``unknown``.
 
-Правила разбора (эталон) — ``plans/2026-10-02_plans-progress-dashboard.md``, «Формат задачи».
+Правила разбора (эталон) — ``plans/2026-10-02_plans-progress-dashboard/design.md``, «Формат задачи».
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import subprocess
 import sys
@@ -74,7 +78,9 @@ HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*$")
 HEAD_TASK_RE = re.compile(r"^(?:\*\*)?Task[ \t]+(?P<id>" + ID_PATTERN + r")" + _ID_END + r"(?P<rest>.*)$")
 FENCE_RE = re.compile(r"^[ \t]*(?:```|~~~)")
 # `Task <токен>` с цифрой, но не id по эталону (кириллическая `Т.1`): находка TASK_ID_UNPARSED
-UNPARSED_ITEM_RE = re.compile(r"^[ \t]*[-*+][ \t]+(?:\[[ xX]\][ \t]+)?(?:\*\*|~~|__)*Task[ \t]+(?P<tok>\S*\d\S*)")
+UNPARSED_ITEM_RE = re.compile(
+    r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?(?:\*\*|~~|__)*Task[ \t]+(?P<tok>\S*\d\S*)"
+)
 UNPARSED_HEAD_RE = re.compile(r"^(?:\*\*)?Task[ \t]+(?P<tok>\S*\d\S*)")
 STATUS_LINE_RE = re.compile(r"\*\*Статус:?\*\*:?[ \t]*(?P<rest>.*)$")
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[(?P<mark>[ xX])\]")
@@ -115,9 +121,11 @@ class Plan:
     conflicts: list[str] = field(default_factory=list)  # id со STATUS_CONFLICT
     unclosed_fence: list[str] = field(default_factory=list)  # файлы с нечётным числом ограждений
     unparsed: list[str] = field(default_factory=list)  # `Task <токен>` с неразобранным id
+    numbered: list[str] = field(default_factory=list)  # `1. Task <id>:` — нумерованные пункты вне эталона
     bad_encoding: list[str] = field(default_factory=list)  # файлы не в UTF-8
     lane: str | None = None
     tier: str | None = None
+    header_status: str | None = None  # слово набора из строки `Статус:` в шапке плана
     info: list[tuple[str, str]] = field(default_factory=list)  # из ORDER.md: (метка, текст)
 
     def count(self, status: str) -> int:
@@ -243,8 +251,9 @@ def find_status(text: str) -> tuple[str, int] | None:
     return None
 
 
+# Латиница — только ВЕРХНИМ регистром («done» в названии — не статус); кириллица — без учёта регистра.
 _TAIL_WORD_RE = re.compile(
-    r"(?<![\w-])(DONE|ЗАКРЫТ[АО]?|СДЕЛАН[АО]?|SUPERSEDED|СНЯТА|DEFERRED|ОТЛОЖЕН[АО]?)(?![\w-])", re.IGNORECASE
+    r"(?<![\w-])((?-i:DONE|SUPERSEDED|DEFERRED)|(?i:ЗАКРЫТ[АО]?|СДЕЛАН[АО]?|СНЯТА|ОТЛОЖЕН[АО]?))(?![\w-])"
 )
 _TAIL_CANON = {
     "DONE": "done",
@@ -262,33 +271,88 @@ _TAIL_CANON = {
     "ОТЛОЖЕНО": "deferred",
 }
 _TAIL_MARK_RE = re.compile(r"[✅✔✓]")
-# После слова статуса допустимы только даты, хеши, пунктуация и скобочное пояснение до конца строки.
+_TAIL_PARTIAL_RE = re.compile(r"ЧАСТИЧНО|PARTIAL", re.IGNORECASE)
+# Перед словом статуса обязателен разделитель: начало хвоста, тире, `(`, знак, `**`, `]`, `:`.
+_TAIL_SEPARATORS = ("—", "–", "(", "✅", "✔", "✓", "**", "]", ":")
+# После слова/знака допустимы только даты, хеши, пунктуация и скобочное пояснение до конца строки.
 _TAIL_REST_RE = re.compile(
     r"^(?:[\s*+,;.:)\]\x00]|\d{4}-\d{2}-\d{2}|\d{1,2}-\d{2}|[0-9a-f]{7,40}(?!\w))*(?:\(.*)?$", re.DOTALL
 )
 
 
-def find_tail_status(rest: str) -> str | None:
-    """Статус в строке заголовка вне `[...]`: `✅`, `— DONE 50df705f`, `(ЗАКРЫТА 2026-08-03)`.
+# Слово сразу после `(`: дальше обязательна дата, хеш, запятая или `)` — «(DONE позже, после 3.1)» не статус.
+_TAIL_PAREN_RE = re.compile(r"\s*(?:\d{4}-\d{2}-\d{2}|[0-9a-f]{7,40}(?!\w)|[,)\x00])")
 
-    Слово считается статусом, только если после него идут даты, хеши и пояснение в скобках: слово в
-    середине названия («починить DONE-детектор», «DONE: переключает…») статусом не является.
-    `ЧАСТИЧНО` отсекает всё после себя: «⚠️ ЧАСТИЧНО (… шаг 3 отложен)» — не отложена, а не закрыта.
+
+def _tail_separator(masked: str, pos: int) -> str | None:
+    """`start` (перед позицией только пробелы), сам разделитель или None."""
+    before = masked[:pos].rstrip()
+    if not before:
+        return "start"
+    return next((sep for sep in _TAIL_SEPARATORS if before.endswith(sep)), None)
+
+
+def find_tail_status(rest: str) -> str | None:
+    """Статус в строке заголовка вне `[...]`: `✅`, `— DONE 50df705f`, `(ЗАКРЫТА 2026-08-03, ADR-1)`.
+
+    Слово принимается, только если перед ним разделитель и после него идут даты, хеши, пунктуация или
+    пояснение в скобках; слово сразу после `(` принимается с любым текстом до конца. «перевести план в DONE»,
+    «не DONE», «done» строчными, «DONE-детектор» статусом не являются. Знак ✅✔✓ принимается после тире, в
+    начале хвоста или в хвостовой позиции (дальше только дата/хеш/скобки): «кнопка ✅ в тулбаре» — нет.
+    `ЧАСТИЧНО`/`PARTIAL` отсекают всё после себя: «⚠️ PARTIAL (шаг 3 отложен)» — не отложена, а не закрыта.
     """
     masked = mask_code(rest)
-    partial = re.search(r"ЧАСТИЧНО", masked, re.IGNORECASE)
+    partial = _TAIL_PARTIAL_RE.search(masked)
     limit = partial.start() if partial else len(masked)
     found: list[tuple[int, str]] = []
-    mark = _TAIL_MARK_RE.search(masked)
-    if mark and mark.start() < limit:
-        found.append((mark.start(), "done"))
+    for m in _TAIL_MARK_RE.finditer(masked):
+        if m.start() >= limit:
+            break
+        if _tail_separator(masked, m.start()) in ("start", "—", "–") or _TAIL_REST_RE.match(masked[m.end() :]):
+            found.append((m.start(), "done"))
+            break
     for m in _TAIL_WORD_RE.finditer(masked):
-        if m.start() < limit and _TAIL_REST_RE.match(masked[m.end() :]):
+        if m.start() >= limit:
+            break
+        sep = _tail_separator(masked, m.start())
+        tail = masked[m.end() :]
+        ok = _TAIL_PAREN_RE.match(tail) if sep == "(" else _TAIL_REST_RE.match(tail)
+        if sep is not None and ok:
             found.append((m.start(), _TAIL_CANON[m.group(1).upper()]))
             break
     if found:
         return min(found)[1]
     return "pending" if partial else None
+
+
+_HEADER_LINE_RE = re.compile(
+    r"^\s*(?:>\s*)*(?:[-*+]\s+)?(?:\*\*)?(?:Статус|Status)(?:\*\*)?\s*:(?:\*\*)?\s*(?P<rest>.*)$"
+)
+_HEADER_WORD_RE = re.compile(
+    r"(?<![\w-])(IN[ _]PROGRESS|DONE|PENDING|BLOCKED|DEFERRED|SUPERSEDED|SKIPPED|CANCELLED"
+    r"|ЗАКРЫТ[АО]?|СНЯТ[АО]?)(?![\w-])"
+)
+
+
+def find_header_status(text: str) -> str | None:
+    """Первая строка `Статус:` / `**Статус:**` / `- **Статус:**` / `> Статус:` в первых 30 строках -> слово набора."""
+    for line in text.split("\n")[:30]:
+        m = _HEADER_LINE_RE.match(line)
+        if not m:
+            continue
+        # слово принимается только в начале значения (после `**`, `>`, скобок, эмодзи): «P1 + P2 DONE»,
+        # «В работе. … DONE», «Phase 1-3 DONE; остался Phase 4» статусом плана не являются
+        lead = re.sub(r"^[\W_]+", "", mask_code(m.group("rest")))
+        w = _HEADER_WORD_RE.match(lead)
+        if not w:
+            return None
+        word = w.group(1)
+        if word.startswith("ЗАКРЫТ"):
+            return "done"
+        if word.startswith("СНЯТ"):
+            return "superseded"
+        return canon_of(word)
+    return None
 
 
 def find_bare_word(text: str) -> str | None:
@@ -358,7 +422,9 @@ def has_unclosed_fence(text: str) -> bool:
     return sum(1 for ln in text.split("\n") if FENCE_RE.match(ln)) % 2 == 1
 
 
-def parse_items(text: str, unparsed: list[str] | None = None) -> tuple[list[Item], bool]:
+def parse_items(
+    text: str, unparsed: list[str] | None = None, numbered: list[str] | None = None
+) -> tuple[list[Item], bool]:
     """Пункты `- Task <id>` раздела порядка -> (задачи после снятия родителей, были ли пункты вообще).
 
     Строки `- Task <токен>` с неразобранным id добавляются в `unparsed`.
@@ -402,8 +468,13 @@ def parse_items(text: str, unparsed: list[str] | None = None) -> tuple[list[Item
         elif BULLET_RE.match(line):
             close()
             bad = UNPARSED_ITEM_RE.match(line)
-            if bad and unparsed is not None:
-                unparsed.append(bad.group("tok"))
+            if bad:
+                tok = bad.group("tok").rstrip(".:,;")
+                if re.match(r"^[ \t]*\d+[.)]", line) and ID_RE.fullmatch(tok):
+                    if numbered is not None:
+                        numbered.append(tok)  # `1. Task 1.1:` с корректным id: вне эталона из-за нумерации
+                elif unparsed is not None:
+                    unparsed.append(tok)
         elif cur is not None:
             cur[1].append(line.strip())
     close()
@@ -559,6 +630,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     """Набор задач (N1): пункты раздела порядка; иначе заголовки -> таблица `✓` -> tasks/<id>.md."""
     plan = Plan(name=name, rel=rel, archived=archived)
     main_text = read_text(main, plan.bad_encoding) if main.is_file() else ""
+    plan.header_status = find_header_status(main_text)
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
@@ -587,7 +659,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
         counts[h.id] = counts.get(h.id, 0) + 1
     plan.dup_headings = [i for i, c in counts.items() if c > 1]
 
-    items, had_items = parse_items(main_text, plan.unparsed)
+    items, had_items = parse_items(main_text, plan.unparsed, plan.numbered)
     if had_items:
         plan.tasks = [Task(it.id, it.title, it.status, it.ref) for it in items]
         seen: dict[str, int] = {}
@@ -774,6 +846,15 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
         if p.unparsed:
             text = f"строк Task с неразобранным id: {len(p.unparsed)} (первая: «{p.unparsed[0]}»)"
             out.append(Finding("TASK_ID_UNPARSED", p.name, None, False, text))
+        if p.header_status == "done" and p.total > p.done:
+            text = f"шапка: {p.header_status}, задачи {p.done} из {p.total}"
+            out.append(Finding("HEADER_STATUS_CONFLICT", p.name, None, False, text))
+        if p.numbered:
+            text = (
+                f"нумерованный пункт вне эталона (используйте `- Task …`): {len(p.numbered)} "
+                f"(первый: «{p.numbered[0]}»)"
+            )
+            out.append(Finding("TASK_ID_UNPARSED", p.name, None, False, text))
         if p.bad_encoding:
             out.append(Finding("NOT_UTF8", p.name, None, False, f"файл не в UTF-8: {', '.join(p.bad_encoding)}"))
         for t in p.tasks:
@@ -814,8 +895,136 @@ def load_baseline(path: Path) -> set[str]:
     return keys
 
 
-def run_check(plans: list[Plan], baseline: set[str], out) -> int:
-    findings = build_findings(plans)
+# ----------------------------------------------------------------------------- блок прогресса в ORDER.md
+
+BEGIN_MARK = "<!-- progress:begin -->"
+END_MARK = "<!-- progress:end -->"
+
+
+def trust_counts(p: Plan) -> tuple[int, int]:
+    """(пунктов без слова набора, задач без отметки статуса): общий источник для блока, CLI и страницы."""
+    return p.unknown, p.unmarked
+
+
+def trust_suffix(p: Plan) -> str:
+    """Хвост строки `· без статуса K` / `· без отметки K` — только при K > 0, формат `N из M` не меняется."""
+    unknown, unmarked = trust_counts(p)
+    return (f" · без статуса {unknown}" if unknown > 0 else "") + (f" · без отметки {unmarked}" if unmarked > 0 else "")
+
+
+def queue_scope(live: list[Plan]) -> tuple[list[Plan], list[Plan], list[Plan], list[Plan]]:
+    """Живые планы по секциям страницы: (очередь §4.1, ждут §4.2, не в ORDER, закрытые §4.3). Порядок сохраняется."""
+    return (
+        [p for p in live if p.tier == "4.1"],
+        [p for p in live if p.tier == "4.2"],
+        [p for p in live if p.tier is None],
+        [p for p in live if p.tier == "4.3"],
+    )
+
+
+def block_lines(live: list[Plan], archive: list[Plan]) -> list[str]:
+    """Строки блока: планы §4.1, §4.2 и без яруса (порядок страницы) и счётчик `в архиве`.
+
+    `в архиве` = архивные планы + закрытые §4.3. Шкала — та же `_tally`, что у страницы.
+    """
+    queue, waiting, unlisted, closed = queue_scope(live)
+    shown = queue + waiting + unlisted
+    return [f"- {p.name} — {_tally(p.done, p.total)}{trust_suffix(p)}" for p in shown] + [
+        f"в архиве: {len(archive) + len(closed)}"
+    ]
+
+
+def locate_block(lines: list[str]) -> tuple[int, int] | str:
+    """Индексы строк маркеров (begin, end) или текст ошибки. Маркер — строка целиком (пробелы по краям не в счёт)."""
+    marks = [(i, ln.strip()) for i, ln in enumerate(lines) if ln.strip() in (BEGIN_MARK, END_MARK)]
+    kinds = [m[1] for m in marks]
+    if kinds == [BEGIN_MARK, END_MARK]:
+        return marks[0][0], marks[1][0]
+    return (
+        f"нужна ровно одна пара маркеров {BEGIN_MARK} / {END_MARK} отдельными строками, "
+        f"найдено: progress:begin {kinds.count(BEGIN_MARK)}, progress:end {kinds.count(END_MARK)}"
+        + ("" if sorted(kinds) != [BEGIN_MARK, END_MARK] else "; progress:end стоит раньше progress:begin")
+    )
+
+
+def _decode(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def sync_order(order: Path, live: list[Plan], archive: list[Plan]) -> tuple[int, str]:
+    """Переписывает только строки между маркерами; остальные байты (и EOL файла) не трогает.
+
+    Возвращает (код, сообщение): 0 — готово или уже актуально, 2 — файла или маркеров нет, файл не менялся.
+    """
+    if not order.is_file():
+        return 2, f"ошибка --sync-order: нет файла ORDER: {order}"
+    raw = order.read_bytes()
+    text = _decode(raw)
+    lines = text.split("\n")
+    found = locate_block(lines)
+    if isinstance(found, str):
+        return 2, f"ошибка --sync-order: {order}: {found}"
+    begin, end = found
+    eol_tail = "\r" if "\r\n" in text else ""
+    new_lines = lines[: begin + 1] + [ln + eol_tail for ln in block_lines(live, archive)] + lines[end:]
+    new_text = "\n".join(new_lines)
+    if new_text == text:
+        return 0, f"ORDER уже актуален: {order}"
+    # атомарно: временный файл рядом + os.replace; при сбое ORDER не тронут, временный файл удалён
+    tmp = order.with_name(f".{order.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(new_text.encode("utf-8", errors="surrogateescape"))
+        os.replace(tmp, order)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return 0, f"ORDER обновлён: {order}"
+
+
+def on_main_branch(root: Path) -> bool:
+    """`main` только если root — корень git-репозитория (вложенный в чужой репозиторий корень — не main)."""
+
+    def git(*args: str) -> str | None:
+        try:
+            cp = subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return cp.stdout.strip() if cp.returncode == 0 else None
+
+    # `branch --show-current`, а не `rev-parse --abbrev-ref HEAD`: тег `main` на detached HEAD даёт `heads/main`
+    top, branch = git("rev-parse", "--show-toplevel"), git("branch", "--show-current")
+    if not top or branch != "main":
+        return False
+    try:
+        return os.path.samefile(top, root)
+    except OSError:
+        return False
+
+
+def order_block_findings(order: Path, live: list[Plan], archive: list[Plan], root: Path) -> list[Finding]:
+    """Дрейф блока: проверяется только на `main`, в ветках, detached HEAD и вне git — нет."""
+    if not order.is_file() or not on_main_branch(root):
+        return []
+    lines = _decode(order.read_bytes()).split("\n")
+    found = locate_block(lines)
+    if isinstance(found, str):
+        return [Finding("ORDER_BLOCK_MISSING", order.name, None, False, f"нет блока прогресса: {found}")]
+    body = [ln.rstrip("\r") for ln in lines[found[0] + 1 : found[1]]]
+    if body != block_lines(live, archive):
+        return [
+            Finding(
+                "ORDER_BLOCK_STALE",
+                order.name,
+                None,
+                False,
+                "блок прогресса устарел: python scripts/plans_progress/plans_progress.py --sync-order",
+            )
+        ]
+    return []
+
+
+def run_check(plans: list[Plan], baseline: set[str], out, extra: list[Finding] | None = None) -> int:
+    findings = build_findings(plans) + list(extra or [])
     checked = sum(1 for p in plans if not p.archived)
     new_blocking = 0
     blocking = 0
@@ -854,6 +1063,7 @@ def to_json(plans: list[Plan]) -> str:
             "dropped": p.dropped,
             "unknown": p.unknown,
             "unmarked": p.unmarked,
+            "header_status": p.header_status,
             "tasks": [{"id": t.id, "title": t.title, "status": t.status, "ref": t.ref} for t in p.tasks],
         }
         for p in plans
@@ -879,9 +1089,10 @@ h1{font-size:1.4rem;margin:0 0 4px}
 .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:16px}
 .lane{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .lane b{display:block;margin-bottom:2px}
-details.plan,details#archive{background:var(--card);border:1px solid var(--line);border-radius:8px;
+details.plan,details#archive,details#waiting{background:var(--card);border:1px solid var(--line);border-radius:8px;
 margin-bottom:8px;padding:0 12px}
-details#archive>details.plan{margin:8px 0}
+details#archive>details.plan,details#waiting>details.plan{margin:8px 0}
+h2{font-size:1.05rem;margin:16px 0 8px}
 summary{cursor:pointer;padding:9px 0;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 summary .name{font-weight:600}
 .badge{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 7px}
@@ -902,6 +1113,7 @@ ul.tasks{margin:0;padding-left:0;list-style:none;font-size:.88rem}
 ul.tasks li{padding:2px 0;border-top:1px solid var(--line)}
 .st{display:inline-block;min-width:92px;color:var(--muted);font-size:.78rem}
 code{font-size:.8rem;color:var(--muted)}
+.chip{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 7px}
 .chip.warn{font-size:.75rem;color:var(--in_progress);border:1px solid var(--in_progress);
 border-radius:10px;padding:0 7px}
 .cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
@@ -935,23 +1147,37 @@ def _plan_html(p: Plan) -> str:
         s.append(f'<span class="badge">полоса {_e(p.lane)}</span>')
     if p.tier:
         s.append(f'<span class="badge">§{_e(p.tier)}</span>')
+    unknown, unmarked = trust_counts(p)
+    unfinished = p.total > p.done
+    warn = p.header_status == "done" and p.tier in ("4.1", "4.2") and unfinished
+    shelved = not warn and (p.tier == "4.3" or p.header_status in ("done", "superseded"))
     if p.tasks:
-        s.append(f'<progress value="{p.done}" max="{max(p.total, 1)}"></progress>')
+        if not shelved:
+            s.append(f'<progress value="{p.done}" max="{max(p.total, 1)}"></progress>')
         extra = []
         if p.dropped:
             extra.append(f"снято/отложено {p.dropped}")
-        if p.unknown:
-            extra.append(f"без статуса {p.unknown}")
+        if unknown:
+            extra.append(f"без статуса {unknown}")
         tail = f" ({', '.join(extra)})" if extra else ""
         s.append(f'<span class="tally">{_e(_tally(p.done, p.total) + tail)}</span>')
-        if p.unmarked:
+        if unmarked:
             s.append(
                 '<span class="chip warn" data-chip="unmarked" '
                 'title="статус не размечен, цифра может быть занижена">'
-                f"⚠ {p.unmarked} без отметки</span>"
+                f"⚠ {unmarked} без отметки</span>"
             )
     else:
         s.append('<span class="tally">нет задач в эталонном формате</span>')
+    if warn:
+        s.append(
+            '<span class="chip warn" data-chip="header-conflict" title="шапка плана говорит DONE, задачи не закрыты">'
+            f"⚠ шапка: DONE, задачи {p.done} из {p.total}</span>"
+        )
+    elif shelved:
+        word = "снят" if p.header_status == "superseded" else "закрыт"
+        counts = f" · задачи {p.done} из {p.total}" if p.tasks and unfinished else ""
+        s.append(f'<span class="chip" data-chip="closed" title="план закрыт или поглощён">{word}{counts}</span>')
     s.append("</summary>")
     s.append('<div class="body">')
     s.append(f'<div class="info">{_e(p.rel)}</div>')
@@ -993,8 +1219,11 @@ def git_sha(root: Path) -> str:
 
 
 def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
+    """Страница: очередь §4.1, `#waiting` §4.2, `#unlisted` (нет в ORDER.md), `#archive` (архив + закрытые §4.3)."""
+    queue, waiting, unlisted, closed = queue_scope(live)
+    shelved = closed + archive
     lanes: dict[str, list[int]] = {}
-    for p in live:
+    for p in queue + waiting + unlisted:
         agg = lanes.setdefault(p.lane or "—", [0, 0, 0])
         agg[0] += p.done
         agg[1] += p.total
@@ -1007,8 +1236,9 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         "<title>Прогресс планов</title>",
         f"<style>{CSS}</style></head><body><main>",
         "<h1>Прогресс планов</h1>",
-        f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))} · живых планов {len(live)}, '
-        f"в архиве {len(archive)}</div>",
+        f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))}</div>',
+        f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
+        f"закрыто и в архиве {len(shelved)}</div>",
         '<section class="lanes">',
     ]
     for lane, (done, total, n) in lanes.items():
@@ -1018,12 +1248,26 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
             f'<span class="tally">{_e(_tally(done, total))}</span></div>'
         )
     parts.append("</section>")
-    parts.extend(_plan_html(p) for p in live)
-    a_done = sum(p.done for p in archive)
-    a_total = sum(p.total for p in archive)
+    parts.append('<section id="queue">')
+    parts.extend(_plan_html(p) for p in queue)
+    parts.append("</section>")
+    parts.append('<details id="waiting">')
+    parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
+    parts.extend(_plan_html(p) for p in waiting)
+    parts.append("</details>")
+    if unlisted:
+        parts.append('<section id="unlisted">')
+        parts.append(f"<h2>Нет в ORDER.md · {len(unlisted)}</h2>")
+        parts.extend(_plan_html(p) for p in unlisted)
+        parts.append("</section>")
+    a_done = sum(p.done for p in shelved)
+    a_total = sum(p.total for p in shelved)
     parts.append('<details id="archive">')
-    parts.append(f"<summary>Архив · {len(archive)} планов · итого {_e(_tally(a_done, a_total))}</summary>")
-    parts.extend(_plan_html(p) for p in archive)
+    parts.append(
+        f"<summary>Закрыто и в архиве · {len(shelved)} планов (§4.3 и _archive/) · "
+        f"итого {_e(_tally(a_done, a_total))}</summary>"
+    )
+    parts.extend(_plan_html(p) for p in shelved)
     parts.append("</details>")
     parts.append("</main></body></html>")
     return "\n".join(parts) + "\n"
@@ -1042,6 +1286,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--check", action="store_true", help="линт; exit 1 при блокирующей находке вне базы")
     ap.add_argument("--baseline", type=Path, default=None, help="файл известных блокирующих находок")
+    ap.add_argument("--sync-order", action="store_true", help="переписать блок прогресса между маркерами в ORDER.md")
     return ap
 
 
@@ -1072,6 +1317,11 @@ def main(argv: list[str] | None = None) -> int:
     ordered = live + archive
     code = 0
 
+    if args.sync_order:
+        code, message = sync_order(order_path, live, archive)
+        print(message, file=sys.stderr if (args.json or code) else sys.stdout)
+        if code:
+            return code
     if args.json:
         print(to_json(ordered))
     if args.html is not None:
@@ -1081,11 +1331,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
         baseline = load_baseline(args.baseline) if args.baseline else set()
-        code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout)
-    if not (args.json or args.html is not None or args.check):
+        extra = order_block_findings(order_path, live, archive, root)
+        code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout, extra)
+    if not (args.json or args.html is not None or args.check or args.sync_order):
         for p in ordered:
             tag = "архив" if p.archived else (p.tier or "—")
-            print(f"{p.name:48} {tag:6} {_tally(p.done, p.total)}")
+            print(f"{p.name:48} {tag:6} {_tally(p.done, p.total)}{trust_suffix(p)}")
     return code
 
 

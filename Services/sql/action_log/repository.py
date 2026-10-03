@@ -51,7 +51,7 @@ class ActionLogRepository:
 
         Возвращает список Action (от новейшего к старейшему).
         """
-        sql = f'SELECT * FROM "{self._table}" ORDER BY "timestamp" DESC LIMIT :limit'
+        sql = f'SELECT * FROM "{self._table}" ORDER BY "timestamp" DESC LIMIT :limit'  # nosec B608 — таблица — константа класса, значения bind-параметрами
         rows = self._adapter.query(sql, {"limit": n})
         return [from_action_log_row(ActionLogRow.model_validate(r)) for r in rows]
 
@@ -61,13 +61,13 @@ class ActionLogRepository:
         Используется для recovery: восстановление действий после определённого момента.
         Результат отсортирован по timestamp ASC (хронологический порядок).
         """
-        sql = f'SELECT * FROM "{self._table}" WHERE "timestamp" >= :ts ORDER BY "timestamp" ASC'
+        sql = f'SELECT * FROM "{self._table}" WHERE "timestamp" >= :ts ORDER BY "timestamp" ASC'  # nosec B608 — таблица — константа класса, значения bind-параметрами
         rows = self._adapter.query(sql, {"ts": timestamp})
         return [from_action_log_row(ActionLogRow.model_validate(r)) for r in rows]
 
     def count(self) -> int:
         """Получить общее количество записей в action_log."""
-        sql = f'SELECT COUNT(*) AS cnt FROM "{self._table}"'
+        sql = f'SELECT COUNT(*) AS cnt FROM "{self._table}"'  # nosec B608 — таблица — константа класса, значения bind-параметрами
         rows = self._adapter.query(sql)
         if rows:
             return int(rows[0].get("cnt", 0))
@@ -79,5 +79,5 @@ class ActionLogRepository:
         Returns:
             Количество удалённых строк.
         """
-        sql = f'DELETE FROM "{self._table}" WHERE "timestamp" < :ts'
+        sql = f'DELETE FROM "{self._table}" WHERE "timestamp" < :ts'  # nosec B608 — таблица — константа класса, значения bind-параметрами
         return self._adapter.execute(sql, {"ts": timestamp})

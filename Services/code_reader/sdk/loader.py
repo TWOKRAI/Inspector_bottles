@@ -34,7 +34,7 @@ def _candidates(explicit: str | Path | None) -> list[Path]:
     out: list[Path] = []
     if explicit is not None:
         out.append(Path(explicit))
-    env = os.environ.get(ENV_VAR)
+    env = os.environ.get("MVCR_SDK_DIR")  # литерал, не ENV_VAR: аудит env-имён (test_env_brand) не видит вычисляемые
     if env:
         out.append(Path(env))
     out.append(Path(IDMVS_PLUGIN_DIR))

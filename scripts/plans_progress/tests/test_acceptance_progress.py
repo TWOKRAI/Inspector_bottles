@@ -1,6 +1,6 @@
 # ruff: noqa: E501  -- литералы-фикстуры планов и ожидания в одну строку, форматтер их не переносит
 """Приёмка Task 1.1 + 1.2 (scripts/plans_progress/plans_progress.py) — слепые тесты по плану
-plans/2026-10-02_plans-progress-dashboard.md (разделы «Формат задачи», «Интерфейс», приёмка 1.1 и 1.2).
+plans/2026-10-02_plans-progress-dashboard/design.md (разделы «Формат задачи», «Интерфейс», приёмка 1.1 и 1.2).
 
 Скрипта ещё нет: тесты красные по построению. Каждый тест проверяет конкретный литерал
 (число, статус, id, код находки, порядок), а не только код возврата.
@@ -829,10 +829,13 @@ def test_html_order_follows_order_md_tables_then_unlisted_then_archive(
     root = make_root(files)
     page = parse_html(_html(progress, root, tmp_path))
     names = [norm_key(n) for n in page.plans]
-    # §4.1 по порядку таблицы (b раньше a, хотя по алфавиту наоборот), §4.2, §4.3, вне ORDER по имени, затем архив
-    assert names == ["p-b", "p-a", "c-wait", "d-closed", "u-1", "u-2", "2026-10-01_arch"], names
+    # Решение владельца 2026-10-03 («только очередь и актуальное из ORDER.md»), правка лида: §4.1 по порядку таблицы
+    # (b раньше a, хотя по алфавиту наоборот), §4.2, вне ORDER по имени; закрытые §4.3 уходят в свёрнутый «Архив»
+    # вместе с архивными планами (раньше §4.3 шёл перед «вне ORDER» и вне архива).
+    assert names == ["p-b", "p-a", "c-wait", "u-1", "u-2", "d-closed", "2026-10-01_arch"], names
+    assert page.plan_in_archive["d-closed"] is True
     assert page.plan_in_archive["2026-10-01_arch"] is True
-    assert all(not page.plan_in_archive[n] for n in names[:-1])
+    assert all(not page.plan_in_archive[n] for n in names[:-2])
 
 
 def test_html_swapping_rows_in_tier_41_swaps_plans(make_root, progress, parse_html, tmp_path, order_md, norm_key):

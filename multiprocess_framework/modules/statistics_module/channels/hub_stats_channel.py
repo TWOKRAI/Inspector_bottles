@@ -57,7 +57,7 @@ class HubStatsChannel(IChannel):
         #: Накопленный счётчик потерь stats-канала hub'а на момент прошлой
         #: записи — по его ПРИРОСТУ виден `drop_oldest`, который отвечает
         #: «success». См. `write`.
-        self._last_dropped = 0
+        self._last_dropped: int = 0
 
     @property
     def name(self) -> str:

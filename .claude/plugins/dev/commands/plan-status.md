@@ -25,6 +25,16 @@ Show progress across plans:
    `close` succeeds once every remaining task is done or dropped, without
    `--force`.
 
+   If `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists (otherwise skip this
+   step without error), progress by the
+   plan-format standard (one scale `N of M` per plan, findings) comes from it; the check is the one `/dev:ship`
+   runs, the page is for reading:
+   ```bash
+   python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
+   python3 scripts/plans_progress/plans_progress.py --html data/plans_progress.html   # page: --html
+   ```
+   Exit 1 of `--check` = a new blocking finding outside `plans/queue/progress-baseline.txt`.
+
 1. **Current branch:**
    ```bash
    git branch --show-current

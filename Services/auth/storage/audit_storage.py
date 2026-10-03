@@ -23,6 +23,7 @@ SqliteAuditStorage — хранилище сессий и аудит-лога н
     )
     storage.append_audit(entry)
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -205,16 +206,10 @@ class SqliteAuditStorage:
             Список SessionEntry, отсортированных по login_at DESC.
         """
         if user_id is not None:
-            sql = (
-                'SELECT * FROM "auth_sessions" WHERE "user_id" = :user_id '
-                'ORDER BY "login_at" DESC LIMIT :limit'
-            )
+            sql = 'SELECT * FROM "auth_sessions" WHERE "user_id" = :user_id ORDER BY "login_at" DESC LIMIT :limit'
             rows = self._adapter.query(sql, {"user_id": user_id, "limit": limit})
         else:
-            sql = (
-                'SELECT * FROM "auth_sessions" '
-                'ORDER BY "login_at" DESC LIMIT :limit'
-            )
+            sql = 'SELECT * FROM "auth_sessions" ORDER BY "login_at" DESC LIMIT :limit'
             rows = self._adapter.query(sql, {"limit": limit})
 
         return [SessionEntry.model_validate(row) for row in rows]
@@ -267,7 +262,7 @@ class SqliteAuditStorage:
             where_clause = "WHERE " + " AND ".join(conditions)
 
         sql = (
-            f'SELECT * FROM "audit_log" {where_clause} '
+            f'SELECT * FROM "audit_log" {where_clause} '  # nosec B608 — where_clause из литеральных фрагментов, значения bind-параметрами
             f'ORDER BY "ts" DESC LIMIT :limit OFFSET :offset'
         )
         rows = self._adapter.query(sql, params)

@@ -4,7 +4,7 @@ check_plan_gate, approve/amend, check_plan_contract.
 
 Набор написан на СТАРОМ коде (до Task 1.0) и обязан остаться зелёным после правки,
 кроме названных сдвигов. Каждый сдвиг помечен в тесте словом «СДВИГ 1.0» и описан в
-итоге задачи (plans/2026-10-02_plans-progress-dashboard.result-1.0.md).
+итоге задачи (plans/2026-10-02_plans-progress-dashboard/tasks/1.0.result.md).
 
 Модуль грузится из файла (scripts/plans_ledger.py — зеркало источника), в процессе:
 гейты — функции без CLI, а subprocess тут ничего не добавляет.

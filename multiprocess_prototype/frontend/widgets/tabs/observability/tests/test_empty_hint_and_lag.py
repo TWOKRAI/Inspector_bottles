@@ -171,6 +171,9 @@ class TestOnARealStore:
                     "extra": {},
                 }
             )
+            # Task 3.3: tap пишет в стор фоновым дренажом, а не из потока эмитента.
+            # close() дожимает очередь — без него панель читает стор раньше записи.
+            tap.close()
 
             panel = RecordHistoryPanel(store, "log")
             qtbot.addWidget(panel)
@@ -202,6 +205,7 @@ class TestOnARealStore:
                         "extra": {},
                     }
                 )
+            tap.close()  # Task 3.3: дожать фоновый дренаж до чтения (см. тест выше)
 
             errors = RecordHistoryPanel(store, "error")
             qtbot.addWidget(errors)

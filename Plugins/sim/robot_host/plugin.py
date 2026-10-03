@@ -294,7 +294,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
 
         try:
             self._probe_port_free()
-        except OSError as exc:
+        except OSError as exc:  # no-health: отказ старта уходит в self._fail (health/лог)
             self._fail(ctx, exc)
             return
 
@@ -317,7 +317,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             core = RobotSimCore(**core_kwargs)
             server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
             server.start()
-        except (ModbusNotAvailableError, ImportError, OSError, RuntimeError) as exc:  # noqa: BLE001 — деградация
+        except (ModbusNotAvailableError, ImportError, OSError, RuntimeError) as exc:  # noqa: BLE001 — деградация  # no-health: отказ старта уходит в self._fail (health/лог)
             # RuntimeError — Task 5.4: SimRobotServer.start_listener() может бросить её,
             # если слушатель аномально не поднялся за _LISTENER_READY_TIMEOUT_S (см. его
             # докстринг); та же дорога деградации, что и занятый порт.
@@ -753,7 +753,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             return self._bad_args("mm_s_at_max_freq обязателен и должен быть числом")
         try:
             self._server.core.belt.set_calibration(float(value))
-        except ValueError as exc:
+        except ValueError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
             return self._bad_args(str(exc))
         return self._belt_status()
 
@@ -785,7 +785,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             return SimRobotHostPlugin._bad_args("seconds обязателен и должен быть числом")
         try:
             finite = math.isfinite(value)
-        except OverflowError:
+        except OverflowError:  # no-health: ошибка уходит вызывающему в ответе команды
             return SimRobotHostPlugin._bad_args("seconds вне диапазона (переполнение)")
         if not finite or not (0 < value <= 3600):
             return SimRobotHostPlugin._bad_args(f"seconds={value!r} должен быть числом в (0, 3600]")
@@ -802,7 +802,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             return SimRobotHostPlugin._bad_args("ms обязателен и должен быть числом"), 0
         try:
             finite = math.isfinite(value)
-        except OverflowError:
+        except OverflowError:  # no-health: ошибка уходит вызывающему в ответе команды
             return SimRobotHostPlugin._bad_args("ms вне диапазона (переполнение)"), 0
         if not finite:
             return SimRobotHostPlugin._bad_args("ms должен быть конечным числом"), 0

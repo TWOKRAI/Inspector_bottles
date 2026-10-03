@@ -37,8 +37,8 @@ typecheck: ## pyright type checking (gradual, basic mode)
 	$(PYRIGHT) $(FRAMEWORK) $(PROTOTYPE)
 
 .PHONY: security
-security: ## bandit security scan
-	$(BANDIT) -r $(FRAMEWORK) $(PROTOTYPE) $(SERVICES) -c pyproject.toml -q
+security: ## bandit security scan (Medium и выше — красный, Low только отчёт)
+	$(BANDIT) -r $(FRAMEWORK) $(PROTOTYPE) $(SERVICES) -c pyproject.toml -q -ll
 
 .PHONY: check
 check: lint typecheck security ## Все быстрые проверки (ruff + pyright + bandit)

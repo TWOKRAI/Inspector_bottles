@@ -1,7 +1,7 @@
 # plans_progress — прогресс планов по единому эталону
 
 Читает планы из `plans/` и `plans/_archive/`, считает `N из M` по задачам и строит страницу.
-Только stdlib. План: [`plans/2026-10-02_plans-progress-dashboard.md`](../../plans/2026-10-02_plans-progress-dashboard.md).
+Только stdlib. План: [`plans/2026-10-02_plans-progress-dashboard/plan.md`](../../plans/2026-10-02_plans-progress-dashboard/plan.md).
 
 ## Команды
 
@@ -19,6 +19,7 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 | `--html [PATH]` | страница без внешних ресурсов; по умолчанию `data/plans_progress.html` |
 | `--check` | печатает находки линта; exit 1 при новой блокирующей находке |
 | `--baseline PATH` | известные блокирующие находки (`<план>:<КОД>[:<id>]`); из базы не блокируют |
+| `--sync-order` | переписать блок прогресса между `<!-- progress:begin -->` и `<!-- progress:end -->` в `ORDER.md`; вне блока байты и EOL не меняются; нет файла или маркеров — exit 2, файл не трогается |
 
 Без флагов печатает сводную таблицу.
 
@@ -40,12 +41,50 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 
 Находки: `NO_TASKS` и `UNKNOWN_STATUS` блокируют только для планов §4.1 `ORDER.md`; `DUP_ID` блокирует всегда;
 `UNCLOSED_FENCE` (нечётное число ограждений кода) блокирует так же, как `NO_TASKS`, — только для §4.1;
-`DUP_HEADING`, `STATUS_CONFLICT`, `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
+`DUP_HEADING`, `STATUS_CONFLICT`, `HEADER_STATUS_CONFLICT` (шапка плана done, а задачи не все закрыты; снятый superseded план — не конфликт), `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
+`ORDER_BLOCK_STALE` (блок устарел) и `ORDER_BLOCK_MISSING` (нет пары маркеров) — тоже информационные (чужое слияние в `main` не должно краснить `main`); печатаются только на ветке `main`
+в корне git-репозитория (`--root` равен `git rev-parse --show-toplevel`); в ветках, при detached HEAD, вне git и в корне,
+вложенном в чужой репозиторий, блок не проверяется. Писатель блока — лид в `main`, в точке слияния.
 `--check` без `plans/`, без живых планов или с отсутствующим `--baseline` завершается кодом 2.
 Архивные планы линт не смотрит.
+
+## Что показывает страница и блок
+
+Страница `--html`: основной список — планы §4.1 `ORDER.md` (порядок таблицы); `<details id="waiting">` — §4.2
+(ждут триггера); `<section id="unlisted">` — планы, которых нет в таблицах `ORDER.md` (новый план не пропадает,
+пока лид не внесёт его в очередь); `<details id="archive">` — `_archive/` и закрытые §4.3. Карточки полос считают
+только очередь, ждущих и «нет в ORDER».
+Блок `--sync-order`: строки для §4.1, §4.2 и планов без яруса; «в архиве» включает закрытые §4.3.
+`--json` и `--check` не сужаются: в них все планы, ярус — в поле `tier`.
+
+## Слияние ветки в main (порядок лида)
+
+Блок прогресса в `ORDER.md` пишет один человек — лид на `main`. Блок читает **рабочее** дерево, поэтому
+`--sync-order` идёт после слияния и до коммита. Хук `protect-branch` блокирует прямой коммит на `main`,
+поэтому коммит делает `git merge --continue`:
+
+```
+git merge --no-ff --no-commit <ветка>
+python scripts/plans_progress/plans_progress.py --sync-order
+git add plans/queue/ORDER.md
+git merge --continue
+```
+
+На ветках `--sync-order` не запускают: два писателя блока дают конфликт в одном hunk.
 
 ## Тесты
 
 ```
 python -m pytest scripts/plans_progress/tests/test_acceptance_progress.py scripts/plans_progress/tests/test_author_hazards.py -q
 ```
+
+## Доверие к цифрам
+
+- `header_status` в `--json` — слово набора из первой строки `Статус:` в первых 30 строках плана (`null`, если нет).
+  Закрытый план (§4.3 или шапка done/superseded) на странице показывает чип «закрыт»/«снят» вместо полосы,
+  числа `N из M` остаются; план из очереди §4.1/§4.2 с шапкой DONE и незакрытыми задачами — чип «⚠ шапка: DONE».
+- Строки блока и сводки CLI получают хвост `· без статуса K` (пункты без слова набора) и `· без отметки K`
+  (задачи из заголовков без признаков статуса) — только при K > 0.
+- Статус в строке заголовка вне `[...]`: латиница `DONE`/`SUPERSEDED`/`DEFERRED` только верхним регистром, перед
+  словом — разделитель (начало, `—`, `(`, `✅`, `**`, `]`, `:`); `PARTIAL`/`ЧАСТИЧНО` обрезают разбор.
+- Нумерованные `1. Task 1.1:` вне эталона не молчат: находка `TASK_ID_UNPARSED`.
