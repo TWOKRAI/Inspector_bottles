@@ -263,6 +263,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 - word-layout — 0 из 0
 - storage-stack-embedded-first — 0 из 11 · 0%
 - 2026-07-06_constructor-master — 0 из 0
-- 2026-10-02_plans-progress-dashboard — 13 из 25 · 52%
+- 2026-10-02_plans-progress-dashboard — 14 из 25 · 56%
+- 2026-10-03_commit-mechanism — 1 из 7 · 14%
 в архиве: 119
 <!-- progress:end -->
