@@ -26,6 +26,10 @@
 (та же формула и тот же `px_per_mm` — единственный инвариант, ради которого сдвиг существует: разойдись
 формулы, диски поедут «по льду» относительно ленты). `None` — сплошная заливка `background_bgr`.
 Прежний параметр одиночного тайла удалён в Task 1.3 (LR-002): та же картинка задаётся слоем `tile`.
+
+**Кадр рисует `layer_render.render_scene` (Task 2.5, LR-003).** Здесь остаются геометрия ленты, отсечение объектов
+по bbox и список паспортов; фон, порядок объектов и композиция — в `render_scene`. Без `background_layers` фон —
+стек из одного `SolidFill` (цвет `background_bgr` переставлен в RGB): правила цвета живут в одном месте.
 """
 
 from __future__ import annotations
@@ -34,10 +38,16 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from Services.dataset_gen.core.compose import composite
 from Services.line_sim.core.belt import encoder_to_offset_mm
 from Services.line_sim.core.spawner import ObjectSpawner
-from Services.layer_render import ScrollingTile, SolidFill, fold_background, render_background
+from Services.layer_render import (
+    PlacedObject,
+    SceneBackground,
+    ScrollingTile,
+    SolidFill,
+    fold_background,
+    render_scene,
+)
 from Services.line_sim.interfaces import ObjectPassport
 
 
@@ -49,6 +59,9 @@ class SceneCompositor:
     понадобится). Со стеком слоёв `now_encoder` обязан быть конечным: NaN/inf дают
     исключение при округлении сдвига (без стека — не дают). Форму тайла слоя проверяет
     `ScrollingTile`, не этот класс.
+    `background_bgr` (без стека) — три `int` 0..255 в порядке (B, G, R): иначе `ValueError` в `__init__` (прежде
+    `(300, 0, 0)` падал `OverflowError` в `render()`, а дробный цвет усекался молча; `np.int64` и `60.0` теперь тоже
+    отклоняются — правила цвета в одном месте, `SolidFill`). Не тройка — ошибка распаковки, тоже в `__init__`.
     Post: `render()` не мутирует `spawner` (не зовёт `tick()`/`active_objects()` кроме
     чтения); пустой спавнер даёт кадр одного фона, без исключений; возвращённые паспорта —
     объекты, чей bbox пересекается с `camera_rect` (частично видимый считается видимым),
@@ -72,38 +85,43 @@ class SceneCompositor:
         self._spawner = spawner
         self._px_per_mm = px_per_mm
         self._belt_y_px = belt_y_px
-        self._background_bgr = background_bgr
         self._belt_direction = belt_direction
         self._entry_x_px = entry_x_px
-        # Стек слоёв (layer-render 1.1) сворачивается один раз; None — сплошная заливка `background_bgr`.
-        self._bg_layers = None if background_layers is None else fold_background(list(background_layers))
+        # Сдвиг тайлов считается только со стеком: без него `now_encoder=NaN` не должен бросать (docstring класса).
+        self._has_stack = background_layers is not None
+        if background_layers is None:
+            # `background_bgr` — BGR, `SolidFill` — RGB: каналы переставляются здесь; цвет проверяет `SolidFill`.
+            b, g, r = background_bgr
+            try:
+                self._bg_layers: list[SolidFill | ScrollingTile] = [SolidFill(color_rgb=(r, g, b))]
+            except ValueError as exc:
+                # В тексте `SolidFill` чужое имя и обратный порядок каналов; значение не повторяем.
+                raise ValueError("SceneCompositor.background_bgr: ожидались три целых 0..255 (B, G, R)") from exc
+        else:
+            # Стек слоёв (layer-render 1.1) сворачивается один раз.
+            self._bg_layers = fold_background(list(background_layers))
 
     def render(
         self, now_encoder: float, camera_rect: tuple[float, float, float, float]
     ) -> tuple[np.ndarray, list[ObjectPassport]]:
-        """Кадр сцены (фон + активные объекты) + паспорта объектов в кадре."""
+        """Кадр сцены (фон + активные объекты) + паспорта объектов в кадре; рисует `render_scene`."""
         x_px, y_px, w_px, h_px = camera_rect
         w, h = int(round(w_px)), int(round(h_px))
-        frame = np.empty((h, w, 3), dtype=np.uint8)
-        if self._bg_layers is not None:
-            # Стек слоёв (layer-render 1.1): shift_px — тот же encoder_to_offset_mm * px_per_mm, что у объектов
-            # (начало отсчёта spawn_enc=0.0 фиксировано, не завязано на конкретный объект); цвета слоёв — уже RGB.
+        scroll_px = 0
+        if self._has_stack:
+            # shift_px — тот же encoder_to_offset_mm * px_per_mm, что у объектов (начало отсчёта spawn_enc=0.0
+            # фиксировано, не завязано на конкретный объект); знак — belt_direction, как у объектов.
             shift_px = int(round(float(encoder_to_offset_mm(now_encoder, 0.0) * self._px_per_mm)))
-            render_background(
-                frame,
-                self._bg_layers,
-                scroll_px=self._belt_direction * shift_px,
-                origin_xy=(int(round(x_px)), int(round(y_px))),
-                center_y=self._belt_y_px,
-            )
-        else:
-            # background_bgr — концептуально BGR (имя параметра из контракта тестера);
-            # кадр хранится в RGB, поэтому каналы переставляются при заливке фона.
-            b, g, r = self._background_bgr
-            frame[:, :, 0] = r
-            frame[:, :, 1] = g
-            frame[:, :, 2] = b
+            scroll_px = self._belt_direction * shift_px
+        background = SceneBackground(
+            self._bg_layers,
+            (w, h),
+            center_y=self._belt_y_px,
+            scroll_px=scroll_px,
+            origin_xy=(int(round(x_px)), int(round(y_px))),
+        )
 
+        placed: list[PlacedObject] = []
         passports: list[ObjectPassport] = []
         for obj in self._spawner.active_objects():
             sprite = obj.render()
@@ -113,9 +131,9 @@ class SceneCompositor:
             sh, sw = sprite.shape[:2]
             if not _bbox_intersects(cx, cy, sw, sh, w, h):
                 continue
-            frame = composite(frame, sprite, (cx, cy))
+            placed.append(PlacedObject(sprite, (cx, cy)))
             passports.append(obj.passport)
-        return frame, passports
+        return render_scene(background, placed, (), None), passports
 
 
 def _bbox_intersects(cx: float, cy: float, sw: int, sh: int, w: int, h: int) -> bool:

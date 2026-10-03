@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """`layer_render` — стек слоёв фона для сцены (Task 1.1), геометрия/композиция и Windows-safe I/O (Task 2.1),
 фотометрические эффекты (Task 2.2), стек слоёв объекта (Task 2.3), пресет сцены и каталог классов (Task 2.4a),
-фабрика объекта и превью (Task 2.4b).
+фабрика объекта и превью (Task 2.4b), кадр сцены одной функцией `render_scene` (Task 2.5).
 
 Контракт — в README.md.
 """
@@ -49,6 +49,7 @@ from Services.layer_render.preview import (
     validate_preview_request,
 )
 from Services.layer_render.procedural_backgrounds import procedural_background
+from Services.layer_render.scene import PlacedObject, SceneBackground, render_scene
 
 __all__ = [
     "AUGMENT_FIELDS",
@@ -65,11 +66,13 @@ __all__ = [
     "LayerSpec",
     "OUTSIDE_ROOTS_MESSAGE",
     "ObjectFactory",
+    "PlacedObject",
     "PreviewLimitError",
     "RangeF",
     "RenderedObject",
     "ScrollingTile",
     "ScenePreset",
+    "SceneBackground",
     "SolidFill",
     "SpriteCatalog",
     "SpriteSource",
@@ -95,6 +98,7 @@ __all__ = [
     "render_background",
     "render_layout",
     "render_preview_grid",
+    "render_scene",
     "resize_square",
     "rotate_expand",
     "side_from_radius",
