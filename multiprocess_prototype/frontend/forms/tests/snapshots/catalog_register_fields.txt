@@ -321,11 +321,13 @@ renderer_compositor.pip_scale
 resize.scale_factor
 resize.target_height
 resize.target_width
+robot_control.actuation_tolerance_ms
 robot_control.enabled
 robot_control.max_detections_for_reject
 robot_control.min_defect_area
 robot_control.not_inspected_action
 robot_control.reject_delay_ms
+robot_control.transit_ms
 robot_draw.device_id
 robot_draw.dry_run
 robot_draw.dump_path
