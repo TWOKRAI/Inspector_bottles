@@ -3,6 +3,17 @@
   "version": "0.5.0",
   "description": "Observability: native OTel telemetry + subagent journal + optional Grafana/ccusage stacks",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agent-journal.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "hooks": [
