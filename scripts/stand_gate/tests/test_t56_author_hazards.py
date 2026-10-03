@@ -289,23 +289,25 @@ def test_r2_drain_is_timed_from_sending_worker_start_and_counts_cycles(monkeypat
     pause = {k: v for k, v in res["pause"].items() if k not in ("after", "drain_trace")}
     assert pause.get("drain_s") is not None and pause["drain_s"] >= 0.15, pause
     assert pause["backlog"] == 3
-    # Первый интервал считается от t0 и включает ответ на команду (0.12 с) — период > 0.1. Но последний
-    # опрос, где цель ещё НЕ достигнута, был на 0.142 с: превышение доказано нижней границей, и вердикт —
-    # измеренный FAIL, а не NOT_MEASURED (решение лида, раунд 2b).
+    # Первый интервал считается от t0 и включает ответ на команду (0.12 с): период 0.122 > 0.1 → вердикт
+    # NOT_MEASURED (строка ``FAIL drain``, код 1). Это честно: момент завершения известен с точностью до
+    # 0.122 с, а нижняя граница ничего не доказывает — бэклог паузы при 5.3 уходит маркерами, которые
+    # cycles не пишут, и цель +backlog+1 набирают свежие кадры (раунд 2c, P10_1: backlog 3, Δcycles 10).
     assert pause["drain_poll_period_s"] >= 0.12, pause
-    assert pause["drain_lower_s"] > 0.1, pause
+    assert pause["drain_lower_s"] == pytest.approx(0.14, abs=1e-9), pause  # НАЧАЛО второго опроса
     check = A._drain_check(res["pause"])
-    assert check.status == A.FAIL and "NOT_MEASURED" not in check.line(), check.line()
-    assert check.line().startswith("FAIL drain"), check.line()
+    assert check.status == A.NOT_MEASURED, check.line()
+    assert check.line().startswith("FAIL drain: NOT_MEASURED"), check.line()
     assert drv.status_calls, "дренаж обязан опрашивать introspect_status (cycles), а не очередь"
 
 
-def test_r2b_lower_bound_rule_runs_first_and_absent_key_keeps_old_behaviour():
+def test_r2c_drain_lower_is_a_report_number_and_never_changes_the_verdict():
     slow_poll = {"drain_s": 0.3, "drain_poll_period_s": 0.25}
-    assert A._drain_check(slow_poll).status == A.NOT_MEASURED  # старые JSON: без drain_lower_s как раньше
-    assert A._drain_check({**slow_poll, "drain_lower_s": 0.11}).status == A.FAIL  # доказано: до NOT_MEASURED
-    assert A._drain_check({**slow_poll, "drain_lower_s": 0.1}).status == A.NOT_MEASURED  # граница строгая
-    assert A._drain_check({"drain_s": 0.05, "drain_poll_period_s": 0.02, "drain_lower_s": 0.0}).status == A.PASS
+    assert A._drain_check(slow_poll).status == A.NOT_MEASURED
+    assert A._drain_check({**slow_poll, "drain_lower_s": 0.2}).status == A.NOT_MEASURED
+    fast = {"drain_s": 0.05, "drain_poll_period_s": 0.02}
+    assert A._drain_check({**fast, "drain_lower_s": 0.5}).status == A.PASS
+    assert A._drain_check({"drain_s": 0.2, "drain_poll_period_s": 0.02, "drain_lower_s": 0.0}).status == A.FAIL
 
 
 def test_r2b_drain_lower_is_zero_when_the_first_poll_already_shows_completion():
@@ -315,4 +317,31 @@ def test_r2b_drain_lower_is_zero_when_the_first_poll_already_shows_completion():
 
 def test_r2b_drain_lower_is_the_last_poll_below_target():
     out, _, _ = _drain([100, 101, 103, 104], call_cost=0.003)
-    assert out["drain_lower_s"] == pytest.approx(0.043, abs=1e-9)  # третий опрос: 2 шага по 0.02 + 0.003
+    assert out["drain_lower_s"] == pytest.approx(0.04, abs=1e-9)  # НАЧАЛО третьего опроса: 2 шага по 0.02
+
+
+def test_r2c_drain_lower_is_the_start_of_the_last_poll_below_target():
+    """Вход ревьюера: опрос длится 0.06 с, цель достигнута на 0.07 с (значение снимается в начале
+    опроса). Опросы: [0, 0.06) ниже, [0.06, 0.12) ниже (снят в 0.06), [0.12, 0.18) — цель. Нижняя
+    граница — 0.06 (начало второго), а не 0.12 (его конец)."""
+    clock = _Clock()
+
+    def poll():
+        value = 104 if clock.t >= 0.07 else 100
+        clock.t += 0.06
+        return value
+
+    out = R.measure_drain(poll, 104, 0.0, step_s=0.02, cap_s=5.0, clock=clock, sleep=clock.sleep)
+    assert out["drain_lower_s"] == pytest.approx(0.06, abs=1e-9), out
+    assert out["drain_s"] == pytest.approx(0.18, abs=1e-9), out
+
+
+def test_r2c_lock_with_more_than_one_holder_is_a_conflict(tmp_path):
+    lock = tmp_path / "stand.lock"
+    lock.write_text(
+        "inspector-bottles-79 | 2026-10-03 15:00 | measure | abc | 8775\n"
+        "otel-lead | 2026-10-03 15:01 | measure | def | 8776\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(R.StandRunError, match="держателей замка 2"):
+        R.check_stand_lock(lock, "inspector-bottles-79")

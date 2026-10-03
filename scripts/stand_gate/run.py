@@ -83,7 +83,7 @@ def default_lock_path(tree: Path) -> Path:
 def check_stand_lock(lock: Path, token: str | None) -> None:
     """Замок протокола: строки ``сессия | время | режим | SHA | порты``. Код 2 (:class:`StandRunError`),
     если токена нет, файла нет, ни одна строка не принадлежит сессии ``token`` (сравнение поля, не
-    подстроки) или режим этой строки не ``measure``."""
+    подстроки), режим этой строки не ``measure`` или непустых строк больше одной (конфликт держателей)."""
     if not token:
         raise StandRunError("живой режим требует --lock-token <сессия>")
     if not lock.is_file():
@@ -93,6 +93,8 @@ def check_stand_lock(lock: Path, token: str | None) -> None:
         for line in lock.read_text(encoding="utf-8", errors="replace").splitlines()
         if line.strip()
     ]
+    if len(rows) > 1:
+        raise StandRunError(f"замок {lock}: конфликт: держателей замка {len(rows)}")
     ours = [r for r in rows if r and r[0] == token]
     if not ours:
         raise StandRunError(f"замок {lock} чужой: нет строки сессии {token!r}")
@@ -202,8 +204,9 @@ def measure_drain(
 
     ``t0`` — момент ДО отправки ``worker.start`` (ред. 4): задержка ответа на команду входит в дренаж.
     ``drain_s`` — от ``t0`` до конца опроса, увидевшего ``target`` (верхняя граница; ``None`` — не дошёл
-    за ``cap_s``). ``drain_lower_s`` — от ``t0`` до конца последнего опроса, где ``target`` ещё не
-    достигнут (нижняя граница; ``0.0``, если первый же опрос показал завершение).
+    за ``cap_s``). ``drain_lower_s`` — от ``t0`` до НАЧАЛА последнего опроса, где ``target`` ещё не
+    достигнут (число для отчёта, без порога: маркеры не пишут ``cycles``, поэтому
+    нижней границей дренажа оно не является; ``0.0``, если первый же опрос показал завершение).
     ``drain_poll_period_s`` — наибольший интервал между соседними опросами, первый
     интервал считается от ``t0``: это неопределённость момента, по ней судится доказуемость порога.
     Часы — ``time.perf_counter`` модуля на момент вызова (подменяемы в тестах).
@@ -212,7 +215,7 @@ def measure_drain(
     sleep = sleep or time.sleep
     last = t0
     period = 0.0
-    lower = 0.0  # от t0 до последнего опроса, где цель ещё НЕ достигнута (0.0 — первый же показал её)
+    lower = 0.0  # от t0 до НАЧАЛА последнего опроса без цели (0.0 — первый же опрос показал её)
     trace: list[tuple[float, int | None]] = []
     while True:
         t_call = clock()
@@ -229,7 +232,7 @@ def measure_drain(
                 "drain_poll_period_s": round(period, 4),
                 "drain_trace": trace[:200],
             }
-        lower = elapsed
+        lower = t_call - t0  # НАЧАЛО опроса, который ещё не увидел цель
         if elapsed >= cap_s:
             return {
                 "drain_s": None,

@@ -13,7 +13,7 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 - `--no-throughput-gate` — выключает ТОЛЬКО порог lag processor (число остаётся в отчёте). Окно lag@inspector проверяется всегда.
 - Дополнительно (живой режим): `--port` (драйвер, по умолчанию 8775), `--lock` (путь замка, по умолчанию `<git-common-dir>/../../stand.lock` — родитель основного дерева, один файл на все worktree; сегодня `D:\PROJECT_INNOTECH\Inspector_vision\stand.lock`), `--lock-token <сессия>` (**обязателен** в живом режиме), `--json-dir` (куда класть JSON кейсов, по умолчанию `--out-dir`).
 
-Замок держит лид руками; строка файла — `сессия | время | режим | SHA | порты`. Живой прогон выходит с кодом 2, если нет `--lock-token`, нет файла, нет строки, у которой поле «сессия» равно токену (сравнение поля, не подстроки), или режим этой строки не `measure`.
+Замок держит лид руками; строка файла — `сессия | время | режим | SHA | порты`. Живой прогон выходит с кодом 2, если нет `--lock-token`, нет файла, нет строки, у которой поле «сессия» равно токену (сравнение поля, не подстроки), режим этой строки не `measure` или в файле больше одной непустой строки (конфликт держателей).
 
 ## Коды выхода
 
@@ -40,7 +40,7 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 | `verdicts V` | `V ≥ 0.9 × (F − N)` | D100 |
 | `lag@inspector window s1-s0` | `Σ not_inspected_lag(inspector, s1) − то же на s0 ≤ 100` | D100 |
 | `pause rss growth` | `pause.rss1 − pause.rss0 ≤ 1048576` байт | P10 |
-| `drain` | по порядку: `pause.drain_lower_s > 0.1` → FAIL (превышение доказано); `pause.drain_poll_period_s > 0.1` → `NOT_MEASURED` (код 1); `pause.drain_s ≤ 0.1` → PASS; иначе FAIL. Без `drain_lower_s` (старые JSON) первое правило не действует | P10 |
+| `drain` | `pause.drain_poll_period_s > 0.1` → `NOT_MEASURED` (код 1); иначе `pause.drain_s ≤ 0.1` → PASS, больше — FAIL. `drain_lower_s` на вердикт не влияет | P10 |
 | `start frame_stale_drops[P]` | `s0 rs.frame_stale_drops == 0` у процессов под every (processor, inspector); остальные — REPORT | все |
 
 Числа в отчёте без порога: `actuation_fired_items/missed_items/late_fires/unscheduled_items` (5.2), `start_s`, `first_frame_after_ready_s` (5.4), lag processor, строки отпуска фидеров (живой режим).
@@ -50,7 +50,7 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 ## Живой прогон: как снимаются числа
 
 - Журнал — только файлы `messages.log`; `observability.db` не читается (бинарный SQLite даёт ложные дубли). Одинаковые строки в нескольких `messages.log` — не дубли: берётся самый полный файл.
-- Дренаж P10 (ред. 4): `pause.backlog` = `chain_queue.size` в снимке `pause_mid`; `t0` берётся ДО отправки `worker.start`; опрос — один вызов `introspect_status(processor)`, шаг ≤ 20 мс, до роста `cycles` исполнителя на `backlog + 1` относительно `pause_mid`. В JSON: `drain_s` — от `t0` до опроса, увидевшего рост (верхняя граница); `drain_lower_s` — от `t0` до последнего опроса без роста (нижняя граница, `0.0`, если первый же опрос показал завершение); `drain_poll_period_s` — наибольший интервал между опросами, первый — от `t0` (включает ответ на команду). Заказанная пауза, которая не состоялась, — код 2.
+- Дренаж P10 (ред. 4): `pause.backlog` = `chain_queue.size` в снимке `pause_mid`; `t0` берётся ДО отправки `worker.start`; опрос — один вызов `introspect_status(processor)`, шаг ≤ 20 мс, до роста `cycles` исполнителя на `backlog + 1` относительно `pause_mid`. В JSON: `drain_s` — от `t0` до опроса, увидевшего рост (верхняя граница); `drain_lower_s` — от `t0` до НАЧАЛА последнего опроса без роста (число для отчёта без порога: бэклог паузы при 5.3 уходит маркерами, которые `cycles` не пишут, поэтому нижней границей дренажа оно не является; `0.0`, если первый же опрос показал завершение); `drain_poll_period_s` — наибольший интервал между опросами, первый — от `t0` (включает ответ на команду). Заказанная пауза, которая не состоялась, — код 2.
 - После `worker.pause_all` камера на `introspect` не отвечает — `F` снимается до паузы (`camera_before_pause`).
 
 ## Фикстуры тестов

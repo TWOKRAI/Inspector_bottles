@@ -284,13 +284,8 @@ def analyze(data: Any, *, label: str = "case", throughput_gate: bool = True) -> 
 
 def _drain_check(pause: dict) -> Check:
     period, drain = pause["drain_poll_period_s"], pause["drain_s"]
-    lower = pause.get("drain_lower_s")
-    # Нижняя граница выше порога — превышение доказано при любом шаге опроса; правило идёт ПЕРВЫМ.
-    # Ключа нет (старые JSON, фикстуры) — поведение прежнее.
-    if lower is not None and float(lower) > T.DRAIN_MAX_S:
-        return Check(
-            "drain", FAIL, f"lower bound {lower} s, drain_s={drain} (poll {period} s)", f"<= {T.DRAIN_MAX_S} s"
-        )
+    # pause.drain_lower_s на вердикт не влияет (раунд 2c): маркеры не пишут cycles, и нижней границей
+    # дренажа это число не является — оно идёт в отчёт без порога.
     if period is None or float(period) > T.DRAIN_POLL_PERIOD_MAX_S:
         return Check(
             "drain", NOT_MEASURED, f"poll period {period} s, drain_s={drain}", f"poll <= {T.DRAIN_POLL_PERIOD_MAX_S} s"
