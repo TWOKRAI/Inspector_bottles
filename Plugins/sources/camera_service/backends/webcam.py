@@ -118,7 +118,7 @@ class WebcamBackend:
                     return True
                 # Не открылся — освободить и попробовать снова
                 self._release_cap()
-            except RuntimeError:  # no-health: retry-петля открытия (DSHOW не отпустил устройство), отказ виден по start()→_running=False
+            except RuntimeError:  # no-health: retry-петля открытия (DSHOW), отказ виден по start()→_running=False
                 self._release_cap()
 
             if attempt < self._OPEN_RETRIES - 1:

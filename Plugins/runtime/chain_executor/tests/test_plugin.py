@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from multiprocess_framework.modules.process_module.plugins import PluginContext
 from Plugins.runtime.chain_executor.plugin import ChainExecutorPlugin
@@ -15,6 +13,7 @@ from Plugins.runtime.chain_executor.plugin import ChainExecutorPlugin
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:
     """Создать mock PluginContext для тестов."""
@@ -64,6 +63,7 @@ def _flip_step(name: str = "flip") -> dict:
 # TestConfigure
 # ---------------------------------------------------------------------------
 
+
 class TestConfigure:
     def test_configure_empty(self):
         """Конфигурация без шагов — цепочка пустая, параметры по умолчанию."""
@@ -79,9 +79,11 @@ class TestConfigure:
     def test_configure_with_steps(self):
         """Конфигурация с шагами из config — шаги инициализированы."""
         plugin = ChainExecutorPlugin()
-        ctx = _make_mock_ctx({
-            "steps": [_grayscale_step("gray1")],
-        })
+        ctx = _make_mock_ctx(
+            {
+                "steps": [_grayscale_step("gray1")],
+            }
+        )
         plugin.configure(ctx)
 
         assert len(plugin._steps) == 1
@@ -90,11 +92,13 @@ class TestConfigure:
     def test_configure_parallel_params(self):
         """parallel=True, max_workers=2, on_error=fail — параметры применены."""
         plugin = ChainExecutorPlugin()
-        ctx = _make_mock_ctx({
-            "parallel": True,
-            "max_workers": 2,
-            "on_error": "fail",
-        })
+        ctx = _make_mock_ctx(
+            {
+                "parallel": True,
+                "max_workers": 2,
+                "on_error": "fail",
+            }
+        )
         plugin.configure(ctx)
 
         assert plugin._reg.parallel is True
@@ -104,9 +108,11 @@ class TestConfigure:
     def test_configure_invalid_plugin_class(self):
         """Шаг с несуществующим классом — логируется ошибка, шаг пропускается."""
         plugin = ChainExecutorPlugin()
-        ctx = _make_mock_ctx({
-            "steps": [{"plugin_class": "nonexistent.module.BadPlugin", "plugin_name": "bad"}],
-        })
+        ctx = _make_mock_ctx(
+            {
+                "steps": [{"plugin_class": "nonexistent.module.BadPlugin", "plugin_name": "bad"}],
+            }
+        )
         # Не должно бросать исключение
         plugin.configure(ctx)
 
@@ -117,6 +123,7 @@ class TestConfigure:
 # ---------------------------------------------------------------------------
 # TestSequentialProcess
 # ---------------------------------------------------------------------------
+
 
 class TestSequentialProcess:
     def test_empty_chain(self):
@@ -134,9 +141,13 @@ class TestSequentialProcess:
     def test_single_step_grayscale(self):
         """Один шаг (grayscale) — кадр стал серым (все каналы одинаковые)."""
         plugin = ChainExecutorPlugin()
-        plugin.configure(_make_mock_ctx({
-            "steps": [_grayscale_step()],
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "steps": [_grayscale_step()],
+                }
+            )
+        )
 
         frame = _make_color_frame()
         result = plugin.process(_make_items(frame))
@@ -151,9 +162,13 @@ class TestSequentialProcess:
     def test_two_steps_grayscale_negative(self):
         """Два шага (grayscale → negative) — оба применены последовательно."""
         plugin = ChainExecutorPlugin()
-        plugin.configure(_make_mock_ctx({
-            "steps": [_grayscale_step(), _negative_step()],
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "steps": [_grayscale_step(), _negative_step()],
+                }
+            )
+        )
 
         frame = _make_color_frame()
         result = plugin.process(_make_items(frame))
@@ -181,9 +196,8 @@ class TestSequentialProcess:
 
         # Добавляем рабочий шаг после сломанного
         import importlib
-        mod = importlib.import_module(
-            "Plugins.processing.grayscale.plugin"
-        )
+
+        mod = importlib.import_module("Plugins.processing.grayscale.plugin")
         gray_plugin = mod.GrayscalePlugin()
         mock_ctx = MagicMock(spec=PluginContext)
         mock_ctx.config = {}
@@ -230,9 +244,13 @@ class TestSequentialProcess:
     def test_multiple_items(self):
         """Несколько items в батче — все обработаны."""
         plugin = ChainExecutorPlugin()
-        plugin.configure(_make_mock_ctx({
-            "steps": [_grayscale_step()],
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "steps": [_grayscale_step()],
+                }
+            )
+        )
 
         frames = [_make_color_frame() for _ in range(3)]
         items = [{"frame": f} for f in frames]
@@ -249,15 +267,20 @@ class TestSequentialProcess:
 # TestParallelProcess
 # ---------------------------------------------------------------------------
 
+
 class TestParallelProcess:
     def test_parallel_execution(self):
         """parallel=True — все шаги выполнены, результаты собраны."""
         plugin = ChainExecutorPlugin()
-        plugin.configure(_make_mock_ctx({
-            "parallel": True,
-            "max_workers": 2,
-            "steps": [_grayscale_step("gray"), _negative_step("neg")],
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "parallel": True,
+                    "max_workers": 2,
+                    "steps": [_grayscale_step("gray"), _negative_step("neg")],
+                }
+            )
+        )
         plugin.start(_make_mock_ctx())
 
         frame = _make_color_frame()
@@ -272,10 +295,14 @@ class TestParallelProcess:
     def test_parallel_pool_created(self):
         """start() с parallel=True создаёт ThreadPoolExecutor."""
         plugin = ChainExecutorPlugin()
-        plugin.configure(_make_mock_ctx({
-            "parallel": True,
-            "max_workers": 3,
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "parallel": True,
+                    "max_workers": 3,
+                }
+            )
+        )
 
         assert plugin._pool is None
         plugin.start(_make_mock_ctx())
@@ -286,10 +313,14 @@ class TestParallelProcess:
     def test_parallel_fallback_on_no_pool(self):
         """parallel=True без pool (до start) — использует sequential."""
         plugin = ChainExecutorPlugin()
-        plugin.configure(_make_mock_ctx({
-            "parallel": True,
-            "steps": [_grayscale_step()],
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "parallel": True,
+                    "steps": [_grayscale_step()],
+                }
+            )
+        )
         # pool не создан (start не вызван)
         assert plugin._pool is None
 
@@ -303,6 +334,7 @@ class TestParallelProcess:
 # ---------------------------------------------------------------------------
 # TestCommands
 # ---------------------------------------------------------------------------
+
 
 class TestCommands:
     def _configured_plugin(self, extra_cfg: dict | None = None) -> ChainExecutorPlugin:
@@ -326,19 +358,23 @@ class TestCommands:
     def test_cmd_add_step_invalid(self):
         """cmd_add_step с несуществующим классом — status=error."""
         plugin = self._configured_plugin()
-        response = plugin.cmd_add_step({
-            "plugin_class": "bad.module.BadPlugin",
-            "plugin_name": "bad",
-        })
+        response = plugin.cmd_add_step(
+            {
+                "plugin_class": "bad.module.BadPlugin",
+                "plugin_name": "bad",
+            }
+        )
 
         assert response["status"] == "error"
         assert response["steps_count"] == 0
 
     def test_cmd_remove_step(self):
         """cmd_remove_step удаляет шаг по имени."""
-        plugin = self._configured_plugin({
-            "steps": [_grayscale_step("g1"), _negative_step("n1")],
-        })
+        plugin = self._configured_plugin(
+            {
+                "steps": [_grayscale_step("g1"), _negative_step("n1")],
+            }
+        )
         assert len(plugin._steps) == 2
 
         response = plugin.cmd_remove_step({"name": "g1"})
@@ -350,9 +386,11 @@ class TestCommands:
 
     def test_cmd_remove_step_not_found(self):
         """cmd_remove_step с несуществующим именем — removed=0."""
-        plugin = self._configured_plugin({
-            "steps": [_grayscale_step("g1")],
-        })
+        plugin = self._configured_plugin(
+            {
+                "steps": [_grayscale_step("g1")],
+            }
+        )
 
         response = plugin.cmd_remove_step({"name": "no_such_step"})
 
@@ -362,13 +400,15 @@ class TestCommands:
 
     def test_cmd_reorder_steps(self):
         """cmd_reorder_steps меняет порядок шагов."""
-        plugin = self._configured_plugin({
-            "steps": [
-                _grayscale_step("g1"),
-                _negative_step("n1"),
-                _flip_step("f1"),
-            ],
-        })
+        plugin = self._configured_plugin(
+            {
+                "steps": [
+                    _grayscale_step("g1"),
+                    _negative_step("n1"),
+                    _flip_step("f1"),
+                ],
+            }
+        )
         assert [s["name"] for s in plugin._steps] == ["g1", "n1", "f1"]
 
         response = plugin.cmd_reorder_steps({"order": ["f1", "g1", "n1"]})
@@ -378,13 +418,15 @@ class TestCommands:
 
     def test_cmd_reorder_steps_partial(self):
         """cmd_reorder_steps с частичным списком — остаток добавляется в конец."""
-        plugin = self._configured_plugin({
-            "steps": [
-                _grayscale_step("g1"),
-                _negative_step("n1"),
-                _flip_step("f1"),
-            ],
-        })
+        plugin = self._configured_plugin(
+            {
+                "steps": [
+                    _grayscale_step("g1"),
+                    _negative_step("n1"),
+                    _flip_step("f1"),
+                ],
+            }
+        )
 
         response = plugin.cmd_reorder_steps({"order": ["n1"]})
 
@@ -394,9 +436,11 @@ class TestCommands:
 
     def test_cmd_get_steps(self):
         """cmd_get_steps возвращает список имён и конфигов шагов."""
-        plugin = self._configured_plugin({
-            "steps": [_grayscale_step("g1"), _negative_step("n1")],
-        })
+        plugin = self._configured_plugin(
+            {
+                "steps": [_grayscale_step("g1"), _negative_step("n1")],
+            }
+        )
 
         response = plugin.cmd_get_steps({})
 
@@ -411,6 +455,7 @@ class TestCommands:
 # ---------------------------------------------------------------------------
 # TestShutdown
 # ---------------------------------------------------------------------------
+
 
 class TestShutdown:
     def test_shutdown_cleans_pool(self):
