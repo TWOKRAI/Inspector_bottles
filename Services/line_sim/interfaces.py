@@ -1,115 +1,37 @@
-"""Публичный контракт line_sim: слой, аугментация слоя, паспорт объекта, Protocol сцены.
+"""Публичный контракт line_sim: паспорт объекта, Protocol сцены; слой и аугментация слоя — реэкспорт.
 
-Единицы — пиксели (`offset_px`); миллиметры придут вместе с редактором Ф7.
-
-Конвенция поворота (одна на весь модуль): угол в градусах, положительный —
-против часовой стрелки (CCW) на экране, ось Y направлена вниз, как в OpenCV
-(`cv2.getRotationMatrix2D`, `Services.dataset_gen.core.compose.rotate_expand`).
-Пример-литерал: метка справа от центра (+5, 0) при повороте объекта на +90°
-оказывается сверху (0, -5).
+Слой (`LayerSpec`, `LayerAugment`, `LayerMode`, `RangeF`, `SpriteSource`, `AUGMENT_FIELDS`) живёт в
+`Services.layer_render.layers` (Task 2.3) и реэкспортируется отсюда тем же объектом. Конвенция поворота
+(угол CCW, ось Y вниз, пример-литерал) и единицы — в докстринге `Services.layer_render.layers`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
-LayerMode = Literal["static", "augmented", "defect"]
-RangeF = tuple[float, float]
+from Services.layer_render.layers import (
+    AUGMENT_FIELDS,
+    LayerAugment,
+    LayerMode,
+    LayerSpec,
+    RangeF,
+    SpriteSource,
+)
+from Services.layer_render.layers import json_safe as _json_safe
 
-# Источник спрайта: сырой RGBA-массив, callable без аргументов (зовётся один раз
-# на объект) или строка-идентификатор (форма на dict-границе; загрузку по id делает
-# `ObjectFactory`, Services.line_sim.core.factory).
-SpriteSource = str | np.ndarray | Callable[[], np.ndarray]
-
-AUGMENT_FIELDS: tuple[str, ...] = ("offset_x_px", "offset_y_px", "angle_deg", "scale", "hue_shift_deg")
-
-
-class LayerAugment(BaseModel):
-    """Диапазоны вариации слоя `(lo, hi)`; дефолт каждого — «нет вариации».
-
-    Значения добавляются к базовому трансформу слоя, `scale` — умножается.
-    Порядок `lo <= hi` проверяет `LayerSpec` (там известно имя слоя для текста ошибки).
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    offset_x_px: RangeF = (0.0, 0.0)
-    offset_y_px: RangeF = (0.0, 0.0)
-    angle_deg: RangeF = (0.0, 0.0)
-    scale: RangeF = (1.0, 1.0)
-    hue_shift_deg: RangeF = (0.0, 0.0)
-
-
-class LayerSpec(BaseModel):
-    """Слой объекта: спрайт + трансформ относительно центра объекта.
-
-    Режимы: `static` — всегда рисуется как есть; `augmented` — трансформ
-    варьируется по `augment` (выборка один раз при создании объекта);
-    `defect` — рисуется с вероятностью `defect_probability`.
-
-    Трансформ применяется в порядке: заливка цветом (`color_rgb`, RGB спрайта := цвет,
-    альфа не трогается) -> `scale` -> поворот (`angle_deg`, CCW, ось Y вниз, конвенция
-    `rotate_expand`, см. докстринг модуля) -> сдвиг тона (`augment.hue_shift_deg`).
-    `offset_px` — от центра объекта до центра холста спрайта.
-
-    Pre:
-      - `augment` задан только при `mode == "augmented"`
-      - в каждом диапазоне `augment` lo <= hi; scale > 0 (и нижняя граница диапазона scale)
-      - `defect_probability` в [0, 1]
-      - `color_rgb`, если задан — тройка `int` в диапазоне [0, 255]
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
-
-    name: str = Field(min_length=1)
-    mode: LayerMode
-    sprite_source: SpriteSource
-    offset_px: RangeF = (0.0, 0.0)
-    angle_deg: float = 0.0
-    scale: float = Field(default=1.0, gt=0.0)
-    augment: LayerAugment | None = None
-    defect_probability: float = Field(default=0.0, ge=0.0, le=1.0)
-    color_rgb: tuple[int, int, int] | None = None
-
-    @field_validator("color_rgb", mode="before")
-    @classmethod
-    def _check_color_rgb(cls, value: Any, info: ValidationInfo) -> Any:
-        """До типовой проверки pydantic: длина тройки и диапазон каналов — с именем слоя
-        в тексте ошибки (стандартная ошибка pydantic на `tuple[int, int, int]` для
-        значения неверной длины имя слоя не несёт)."""
-        if value is None:
-            return None
-        name = info.data.get("name", "?")
-        try:
-            r, g, b = value
-        except (TypeError, ValueError):
-            raise ValueError(f"слой '{name}': color_rgb должен быть тройкой (r, g, b), получено {value!r}") from None
-        for channel, v in zip("rgb", (r, g, b), strict=True):
-            if not isinstance(v, int) or isinstance(v, bool) or not (0 <= v <= 255):
-                raise ValueError(f"слой '{name}': color_rgb.{channel}={v!r} — должен быть int в диапазоне [0, 255]")
-        return (r, g, b)
-
-    @model_validator(mode="after")
-    def _check_augment(self) -> LayerSpec:
-        if self.augment is None:
-            return self
-        if self.mode != "augmented":
-            raise ValueError(
-                f"слой '{self.name}': augment задан при mode='{self.mode}' — "
-                "диапазоны допустимы только у слоя mode='augmented'"
-            )
-        for fname in AUGMENT_FIELDS:
-            lo, hi = getattr(self.augment, fname)
-            if lo > hi:
-                raise ValueError(f"слой '{self.name}': augment.{fname}: lo={lo} > hi={hi}")
-        if self.augment.scale[0] <= 0:
-            raise ValueError(f"слой '{self.name}': augment.scale: нижняя граница должна быть > 0")
-        return self
+__all__ = [
+    "AUGMENT_FIELDS",
+    "LayerAugment",
+    "LayerMode",
+    "LayerSpec",
+    "ObjectPassport",
+    "RangeF",
+    "SceneCompositorProtocol",
+    "SpriteSource",
+]
 
 
 @dataclass(frozen=True)
@@ -161,18 +83,6 @@ class ObjectPassport:
             layer_params=dict(data.get("layer_params") or {}),
             lateral_px=float(data.get("lateral_px", 0.0)),
         )
-
-
-def _json_safe(value: Any) -> Any:
-    """Рекурсивно привести numpy-скаляры (`np.float32`/`np.bool_`/…) к нативным типам
-    через `.item()` — контейнеры (`dict`/`list`) обходятся, остальное не трогается."""
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(v) for v in value]
-    return value
 
 
 class SceneCompositorProtocol(Protocol):

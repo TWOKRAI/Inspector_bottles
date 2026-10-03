@@ -1,6 +1,6 @@
 ---
 name: feedback-git-main-merge-hook-traps
-description: "git/hook грабли при merge в main и коммитах: git merge -F - не читает stdin; protect-branch блокирует git commit на main (в т.ч. compound-команду checkout+commit); git add на удалённом пути фаталит и не стейджит; проверять staged перед commit"
+description: "единый формат merge-коммита (merge: суть + Why/Layer/Refs, решение владельца 2026-10-03); git/hook грабли при merge в main и коммитах: git merge -F - не читает stdin; protect-branch блокирует git commit на main (в т.ч. compound-команду checkout+commit); git add на удалённом пути фаталит и не стейджит; проверять staged перед commit"
 metadata:
   node_type: memory
   type: feedback
@@ -25,3 +25,18 @@ metadata:
 **How to apply:** merge в main = `git merge --no-ff <branch> -m ... -m ...` отдельным вызовом; коммит на защищённую ветку — только через отдельную feature-ветку двумя вызовами Bash (checkout, затем commit); после kill-коммитов сверяй `git show --stat`. Связано: [[feedback_commit_msg_format]] (trailers Why/Layer строго однострочные — та же семья hook-грабель).
 
 **Открытый вопрос (нужно решать):** protect-branch стоило бы дополнить исключением для merge/cherry-pick, чтобы docs/handoff на main не требовали ветку-обёртку (ранее правку хука блокировал auto-классификатор как self-modification — обсудить с владельцем вне auto-режима).
+
+## Единый формат коммита слияния (решение владельца 2026-10-03)
+
+Владелец: «нужен единый формат у всех». Каждый merge-коммит — в `main` и синхронизация `main` → ветка — пишется так:
+`merge: <что вошло>` (синхронизация: `merge: main (<sha>) в <ветка> — <зачем>`), затем `Why:`, `Layer:`, `Refs:` (если из
+плана), `Co-Authored-By:`. Делать `git merge --no-ff <ветка> -F <файл>`; при конфликте — `git commit -F <тот же файл>`.
+Сообщение git по умолчанию («Merge branch …») не оставлять. Хук сейчас merge-коммиты НЕ проверяет
+(`validate_commit.py` `SKIP_PREFIXES`, `COMMIT_GUIDE.md:225`) — это не нарушение «правила», а разнобой: 2 из 13 слияний
+в `main` (608d609c6, 48a753eb4). Проверено: git 2.50 вызывает `commit-msg` на `git merge`, отказ хука → «Not committing
+merge» — значит, формат можно закрепить хуком. Предложение (хук + обе копии `validate_commit` + COMMIT_GUIDE) отправлено
+соседям 5a и f4 2026-10-03; кто делает — по их ответу.
+
+**Why:** `git log --first-parent main` — журнал изменений; «Merge branch 'red/deps-31'» не говорит, что вошло.
+**How to apply:** любой свой merge — в этом формате, включая синхронизацию трека с `main`; пока хук не закреплён, чужой
+merge по умолчанию — сказать соседу числом, без переписывания истории `main`.

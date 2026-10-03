@@ -5,7 +5,7 @@
 обучения) сцена держит НЕСКОЛЬКО объектов на непрерывно движущейся ленте.
 
 Зависимости: numpy, opencv, pydantic, pyyaml. Без torch и PySide6 (сверяется тестом в подпроцессе). Транзитивно: `Services.robot_comm` (pymodbus) через импорт констант из `robot_comm.core.registers` — около 0.3 с на холодный импорт; перенос констант — отдельный follow-up.
-Геометрия слоя переиспользует `Services.dataset_gen.core.compose` (`rotate_expand`, `composite`).
+Розыгрыш и композиция слоёв — `Services.layer_render.layers` (`compose_layers`, `transform_layer`; геометрия — `Services.layer_render.compose`, Task 2.3); `Services.dataset_gen.core.compose` остался только у `core/scene_compositor.py`.
 
 ## Публичный контракт
 
@@ -19,14 +19,14 @@ from Services.line_sim import (
 
 | Символ | Где | Что |
 |---|---|---|
-| `LayerSpec` | `interfaces.py` | слой: `name`, `mode` (`static`/`augmented`/`defect`), `sprite_source`, `offset_px`, `angle_deg`, `scale`, `augment`, `defect_probability` |
-| `LayerAugment` | `interfaces.py` | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
+| `LayerSpec` | `interfaces.py` (реэкспорт; определён в `Services.layer_render.layers`, Task 2.3) | слой: `name`, `mode` (`static`/`augmented`/`defect`), `sprite_source`, `offset_px`, `angle_deg`, `scale`, `augment`, `defect_probability` |
+| `LayerAugment` | `interfaces.py` (реэкспорт из `Services.layer_render.layers`) | диапазоны `(lo, hi)`: `offset_x_px`, `offset_y_px`, `angle_deg`, `scale`, `hue_shift_deg`; дефолт — «нет вариации» |
 | `ObjectPassport` | `interfaces.py` | `object_id`, `class_name`, `angle_deg`, `defect`, `spawn_encoder`, `layer_params`; `to_dict()`/`from_dict()` — Dict at Boundary (Task 3.4) |
 | `SceneCompositorProtocol` | `interfaces.py` | Protocol сцены: `spawn`, `despawn_stale`, `render(now_encoder, camera_rect)` (переименован из `SceneCompositor` при подключении конкретного класса, LS-009) |
 | `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), belt_direction=1, entry_x_px=0.0, background_layers=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; `background_layers` — стек слоёв фона из `Services/layer_render` (цвета RGB), единственный способ положить тайл под объекты; `belt_direction`/`entry_x_px` — Task 5.3b |
-| `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `render()` без аргументов |
-| `ScenePreset` | `core/preset.py` | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
-| `ObjectFactory` | `core/factory.py` | `ObjectFactory(preset)`: `num_classes`, `class_names`, `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()` — Task 3.2 |
+| `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `LayeredObject.from_rendered(rendered, *, object_id, spawn_encoder)` — паспорт из `RenderedObject` без нового розыгрыша (Task 2.4b); `render()` без аргументов |
+| `ScenePreset` | `core/preset.py` (реэкспорт; определён в `Services/layer_render/preset.py`, Task 2.4a; в `core/preset.py` остался блок стенда: `REPO_ROOT`, `resolve_repo_path`, `apply_defect_override`, `load_scene_preset`) | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
+| `ObjectFactory` | `core/factory.py` | подкласс `Services.layer_render.factory.ObjectFactory` (Task 2.4b): `render(rng, ...) -> RenderedObject` и `nominal_layers` — в базе; здесь `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()`, `force_defect_pending` — Task 3.2 |
 | `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200, lateral_offset_px=(0.0, 0.0))` — ровно один из `interval_s`/`spacing_mm` (Task 3.3a, LS-010): `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3; `set_flow(*, interval_s=None, spacing_mm=None)`, `paused`/`flow` (read-only) — Task 6.1 |
 | `validate_flow` | `core/spawner.py` | `validate_flow(interval_s, spacing_mm) -> None` — проверка режима отсчёта спавна (ровно один задан, `0 < lo <= hi`), вынесена из `ObjectSpawner.__init__` и звана также из `set_flow` (Task 6.1) — не экспортирован через `Services.line_sim`/`Services.line_sim.core`, импорт напрямую из `core.spawner` |
 | `encoder_to_offset_mm` | `core/belt.py` | `(enc_now - spawn_enc) * FACTOR_MM`; константы — из `Services.robot_comm.core.registers` |
@@ -94,8 +94,10 @@ YAML пишется `yaml.safe_dump` — комментарии не сохра�
 
 ## ObjectFactory (Task 3.2)
 
+С Task 2.4b база фабрики (`render(rng, ...) -> RenderedObject`, `nominal_layers`) живёт в `Services/layer_render/factory.py`; `Services.line_sim.ObjectFactory` — её подкласс: `make()` = флаг оператора `force_defect_next()` + `render` + `LayeredObject.from_rendered` (паспорт ленты). `core/preview.py` и `core/catalog_bridge.py` — реэкспорт из `layer_render`.
+
 `ObjectFactory(preset)` — единственное место, которое знает про `SpriteCatalog`
-(`core/catalog_bridge.py`, тонкая обёртка над `dataset_gen.core.catalog`): если задан
+(`load_catalog` в `Services/layer_render/catalog.py`; `core/catalog_bridge.py` — реэкспорт): если задан
 `catalog_dir`, каталог грузится СРАЗУ в конструкторе (eager — `num_classes` доступен
 немедленно), ошибки каталога — как есть от `SpriteCatalog`, не переписываются. Доп. слои
 пресета резолвятся туда же (id → RGBA) один раз при конструкции.
@@ -270,11 +272,23 @@ float}` — read-only свойства для `scene.status`, чтобы не л
 
 Центр объекта: `cx = entry_x_px + belt_direction * encoder_to_offset_mm(now_encoder,
 passport.spawn_encoder) * px_per_mm - x_px`, `cy = belt_y_px + passport.lateral_px - y_px`; рисуется альфа-композицией
-(`dataset_gen.core.compose.composite`, тот же примитив, что `LayeredObject`). Возвращаются
+(`layer_render.composite` через `render_scene`, тот же примитив, что `LayeredObject`). Возвращаются
 паспорта объектов, чей bbox пересекается с `camera_rect` (частично видимый — считается видимым,
 отрисовывается только видимая часть); порядок — спавна (`spawner.active_objects()`). bbox,
 касающийся края РОВНО (нулевая полоса пересечения), — невидим (строгие неравенства, решение
 автора).
+
+**Кадр рисует `render_scene` (layer-render Task 2.5, LR-003).** `render()` делегирует: считает геометрию, отсекает
+объекты по bbox, собирает паспорта и список `PlacedObject`, затем зовёт
+`layer_render.render_scene(SceneBackground(...), placed, (), None)`. Фон, порядок объектов и композиция — там; импорт
+`composite` из `dataset_gen` ушёл. Кадры и паспорта побайтно прежние. **Сужение `background_bgr`:** без
+`background_layers` фон — `[SolidFill]`, цвет проверяет `SolidFill` в `__init__` — три `int` 0..255 (B, G, R), иначе
+`ValueError` (прежде `(300, 0, 0)`, `(-1, 0, 0)` падали `OverflowError` в `render()`, `(60.5, 60, 60)` усекался молча,
+`(np.int64(60), 60, 60)` и `(60.0, 60.0, 60.0)` работали). Вход не тройкой — ошибка распаковки, тоже в `__init__`; `bool` (например `(True, 0, 0)`) тоже отклоняется.
+Ещё два сужения: спрайт спавнера не RGBA `uint8` (float32, uint16, RGB) — `ValueError` из `PlacedObject` (прежде кадр);
+элемент `background_layers` не `SolidFill`/`ScrollingTile` — `ValueError` `SceneBackground.layers[i]`, где `i` — индекс
+СВЁРНУТОГО стека (прежде `AttributeError` или кадр). Со стеком `belt_y_px` NaN/inf даёт ту же ошибку, но после чтения
+спавнера и `render()` объектов (прежде до).
 
 **Направление ленты и точка входа (Task 5.3b, контракт §4.2.1).** `belt_direction: int = 1`
 (только `±1`, иначе `ValueError`) и `entry_x_px: float = 0.0` — обобщение формулы центра под
@@ -404,14 +418,14 @@ RGBA-PNG: альфа 0 там, где виден стол, 255 на звенья
 
 ```bash
 python -m Services.line_sim.tools.make_seamless_texture belt_photo_full.png --out belt_tile_rgba.png \
-    --force-period --gap-alpha [--gap-hue 25,85] [--gap-sat-min 40] [--rails-px 22,22]
+    --force-period --gap-alpha [--gap-hue 25,85] [--gap-sat-min 40] [--rails-px 22,22] [--gap-min-area 8]
 ```
 
-`--gap-hue`, `--gap-sat-min`, `--rails-px` без `--gap-alpha` — ошибка (`--gap-hue требует --gap-alpha`).
+`--gap-hue`, `--gap-sat-min`, `--rails-px`, `--gap-min-area` без `--gap-alpha` — ошибка (`--gap-hue требует --gap-alpha`).
 Зелёные борта (тон 66–76, S 54–137 — внутри порога) вырезаются зоной `--rails-px TOP,BOTTOM`: строки
 `[0, TOP)` и `[h−BOTTOM, h)` всегда непрозрачны. Зона задаётся в пикселях **тайла** и **не пересчитывается**
 с `--scene-px-per-mm`: при другом масштабе подберите значения под итоговую высоту борта. Кривые значения
-(`LO > HI`, вне 0..179 / 0..255, отрицательные, `TOP+BOTTOM >= h`) — ошибка с именем флага; в итоговой
+(`LO > HI`, вне 0..179 / 0..255, отрицательные, нецелое в `--gap-min-area`, `TOP+BOTTOM >= h`) — ошибка с именем флага; в итоговой
 строке добавляется `transparent_frac=`.
 
 **Замер на реальном тайле** (`belt_photo_full.png`, `--force-period`: `period_px=205`, 410×484). Мера
@@ -423,10 +437,23 @@ python -m Services.line_sim.tools.make_seamless_texture belt_photo_full.png --ou
 | Пороги (H, S ≥) | покрыто видимого стола | ложно прозрачно (V < 100), % тайла | всего прозрачно, % тайла |
 |---|---|---|---|
 | 55–95, 45 (первый вариант) | 47.4 % | 0.22 | 0.58 |
-| **25–85, 40 (дефолт)** | **72.4 %** | **0.28** | **0.87** |
+| 25–85, 40, без фильтра (`--gap-min-area 0`) | 72.4 % | 0.28 | 0.87 |
+| **25–85, 40 + `--gap-min-area 8` (дефолт с 1.4)** | **69.9 %** | **0.09** | **0.54** |
 
 Выбор — перебор сетки (H_lo 0..65, H_hi 85..115, S 15..65) под потолок «ложно ≤ 0.3 % тайла» на
 этом одном тайле.
 Остаток непокрытого стола (≈28 %) не разбирался по причинам; одна из них — тон у слабонасыщенных
-пикселей шумит (у звена H p5..p95 = 45..150). Рассыпь на звеньях при дефолте — порядка 0.3 % тайла
-(дырки по одному пикселю).
+пикселей шумит (у звена H p5..p95 = 45..150). Рассыпь на звеньях без фильтра (`--gap-min-area 0`) — порядка 0.3 % тайла
+(дырки по одному пикселю); строка с `--gap-min-area 8` в таблице выше — после фильтра. Строки таблицы с 72.4 % и 0.28 % сняты
+без фильтра, строка с 69.9 % — с ним (тот же прокси, то же фото, sha256 `4444f158…`). Прозрачных компонент < 8 px: 523 → 0,
+остаётся 14 компонент / 1080 px.
+
+**`--gap-min-area N` — фильтр «перца» (Task 1.4).** Рассыпь из одиночных прозрачных точек на звеньях даёт на сцене
+чёрные крапинки. Фильтр: после зоны бортов прозрачные связные компоненты (8-связность) площадью **строго меньше N px**
+становятся непрозрачными (255); трогает только альфу, RGB тот же. По умолчанию с `--gap-alpha` порог **8**, `0` —
+выключить (выход как до задачи); без `--gap-alpha` и при `N < 0` / нецелом — ошибка с именем флага. У функции
+`gap_alpha_mask(..., min_area=0)` фильтр по умолчанию **выключен**: порог 8 приходит из инструмента. Края тайла по x
+не склеиваются (компонента на шве считается двумя половинами, решение «не усложнять»); обратная операция (закрыть
+непрозрачные точки внутри просвета) не делается. Почему 8: замер 2026-10-02 на `data/line_sim/belt_tile.png`
+(RGBA 410×484): прозрачных 1735 px в 537 компонентах; < 8 px — 523 (655 px), ≥ 8 px — 14 (1080 px); между 7 и 12 px
+нет ни одной компоненты — порог стоит в естественном разрыве.

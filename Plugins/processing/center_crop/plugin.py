@@ -16,7 +16,6 @@ Stateless относительно кадров (вся темпоральная
 
 from __future__ import annotations
 
-import cv2
 import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -25,6 +24,8 @@ from multiprocess_framework.modules.process_module.plugins import (
     ProcessModulePlugin,
     register_plugin,
 )
+
+from Services.layer_render.crop import resize_square, side_from_radius, square_crop
 
 from .registers import CenterCropRegisters
 
@@ -100,14 +101,9 @@ class CenterCropPlugin(ProcessModulePlugin):
     def _resize_output(self, crop: np.ndarray) -> np.ndarray:
         """Ресайз выреза к output_size×output_size (если задан) — единый размер для ML.
 
-        output_size=0 → как вырезано (размер под круг). INTER_AREA при уменьшении
-        (антиалиасинг), INTER_LINEAR при увеличении.
+        output_size=0 → как вырезано (размер под круг). Логика — Services.layer_render.crop.resize_square.
         """
-        out = int(self._reg.output_size)
-        if out <= 0 or (crop.shape[0] == out and crop.shape[1] == out):
-            return crop
-        interp = cv2.INTER_AREA if crop.shape[0] > out else cv2.INTER_LINEAR
-        return cv2.resize(crop, (out, out), interpolation=interp)
+        return resize_square(crop, int(self._reg.output_size))
 
     def _resolve_side(self, radius: int | None) -> int:
         """Сторона квадрата по режиму размера.
@@ -118,8 +114,7 @@ class CenterCropPlugin(ProcessModulePlugin):
         чтобы вырез всё равно состоялся.
         """
         if self._reg.size_mode == "radius" and radius and radius > 0:
-            side = int(round(2 * radius * float(self._reg.radius_scale))) + 2 * int(self._reg.margin_px)
-            return max(2, side)
+            return side_from_radius(radius, self._reg.radius_scale, self._reg.margin_px)
         return int(self._reg.side_px)
 
     @staticmethod
@@ -135,48 +130,19 @@ class CenterCropPlugin(ProcessModulePlugin):
     # --- Вырез квадрата с учётом границ кадра ---
 
     def _crop_square(self, frame: np.ndarray, cx: int, cy: int, side: int) -> np.ndarray | None:
-        """Квадрат side×side вокруг (cx, cy). Поведение у границы — по register.
+        """Квадрат side×side вокруг (cx, cy). Поведение у границы — по register (см. _oob_mode).
 
-        Возвращает ndarray (копию) или None, если drop_partial и вырез частично вне кадра.
+        Возвращает ndarray (копию) или None (drop_partial и вырез частично вне кадра; clamp без пересечения).
         """
-        half = side // 2
-        x0, y0 = cx - half, cy - half
-        x1, y1 = x0 + side, y0 + side  # ширина/высота ровно = side
-        h, w = frame.shape[:2]
+        return square_crop(frame, cx, cy, side, self._oob_mode(), pad_value=self._reg.pad_color_bgr)
 
-        if x0 >= 0 and y0 >= 0 and x1 <= w and y1 <= h:
-            return frame[y0:y1, x0:x1].copy()  # copy: отвязать от SHM-буфера
-
-        # Частично (или полностью) вне кадра.
+    def _oob_mode(self) -> str:
+        """Регистр → режим square_crop: drop_partial побеждает pad_if_oob; оба выключены → clamp."""
         if self._reg.drop_partial:
-            return None
-
-        # Перекрытие выреза с кадром.
-        sx0, sy0 = max(0, x0), max(0, y0)
-        sx1, sy1 = min(w, x1), min(h, y1)
-
+            return "drop"
         if self._reg.pad_if_oob:
-            canvas = self._pad_canvas(side, frame)
-            if sx1 > sx0 and sy1 > sy0:
-                dx0, dy0 = sx0 - x0, sy0 - y0
-                canvas[dy0 : dy0 + (sy1 - sy0), dx0 : dx0 + (sx1 - sx0)] = frame[sy0:sy1, sx0:sx1]
-            return canvas
-
-        # clamp: вырез обрезан к границам (меньше стороны).
-        if sx1 <= sx0 or sy1 <= sy0:
-            return None  # центр вне кадра целиком — выреза нет
-        return frame[sy0:sy1, sx0:sx1].copy()
-
-    def _pad_canvas(self, side: int, frame: np.ndarray) -> np.ndarray:
-        """side×side холст, залитый pad_color (под формат/каналы кадра)."""
-        color = [int(c) for c in self._reg.pad_color_bgr]
-        if frame.ndim == 3:
-            c = frame.shape[2]
-            canvas = np.zeros((side, side, c), dtype=frame.dtype)
-            canvas[:] = (color + [0, 0, 0])[:c]
-        else:  # grayscale
-            canvas = np.full((side, side), color[0] if color else 0, dtype=frame.dtype)
-        return canvas
+            return "pad"
+        return "clamp"
 
     # --- Радиус для sidecar: сопоставить xy с detection-кругом ---
 

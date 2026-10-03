@@ -1,6 +1,6 @@
-# layer_render — стек слоёв фона
+# layer_render — слои сцены: фон, объект, пресет, каталог классов
 
-Слой Services. Механизм «стопка слоёв снизу вверх -> кадр фона». Ничего не знает про энкодер, ленту,
+Слой Services. Механизмы: «стопка слоёв снизу вверх -> кадр фона», стек слоёв объекта, пресет сцены (`ScenePreset`), каталог классов (`SpriteCatalog`), фабрика объекта (`ObjectFactory`), превью пресета. Ничего не знает про энкодер, ленту,
 `line_sim`, `dataset_gen`, `ml_train`, плагины и прототип: вызывающий отдаёт готовый сдвиг `scroll_px` числом.
 
 ## Контракт (`Services.layer_render`)
@@ -15,9 +15,30 @@
 | `rotate_expand(sprite_rgba, angle_deg)`, `crop_to_alpha(sprite_rgba)`, `fit_longest_side(sprite, target_px)` | (`compose`, Task 2.1) геометрия спрайта: поворот CCW с расширением холста, обрезка по alpha > 0, масштаб длинной стороны |
 | `cast_contact_shadow(background_rgb, sprite_rgba, center_xy, opacity, blur_px, offset_xy)`, `composite(background_rgb, sprite_rgba, center_xy)` | (`compose`, Task 2.1) контактная тень и альфа-композиция спрайта на фон; обе возвращают копию, фон не меняют |
 | `imread_unicode(path, flags)`, `imwrite_unicode(path, image_bgr)` | (`io`, Task 2.1) чтение/запись изображений с non-ASCII путями (Windows-safe); `ValueError` при нечитаемом файле / сбое кодирования |
+| `EFFECTS`, `EFFECT_PARAMS` | (`effects`, Task 2.2) упорядоченный реестр фотометрических эффектов `name -> fn(x_float32, params, rng) -> x` (кроме `jpeg`: он принимает и возвращает uint8; `apply_effects` сам делает clip→uint8 и обратно) (12 шт., порядок вставки = порядок прохода: блик, тень, окклюзия, расфокус, смаз, виньетка, яркость/контраст, gamma, температура, сдвиг каналов, шум, JPEG) и литералы дефолтов параметров |
+| `EffectSpec(name, prob=1.0, params={})` | (`effects`) шаг списка; `ValueError` на неизвестное имя / ключ параметра / prob вне 0..1; `params` — глубокая копия под `MappingProxyType` (read-only только верхний уровень, вложенные списки изменяемы), недостающие ключи из `EFFECT_PARAMS`; сравнение по идентичности |
+| `apply_effects(frame_u8, specs, rng)` | (`effects`) прогон списка по порядку; вентиль `rng.random() < prob` тянется всегда; пустой список — копия кадра без розыгрышей; вход не меняется |
+| `apply_glare`, `apply_shadow`, `apply_occlusion`, `apply_motion_blur`, `make_motion_kernel`, `apply_vignette`, `apply_brightness_contrast`, `apply_gamma`, `apply_color_temperature`, `apply_channel_shift`, `apply_jpeg` | (`effects`, Task 2.2) функции эффектов, перенесены из `dataset_gen.core.augment` без изменений |
+| `side_from_radius(radius, radius_scale, margin_px)` | (`crop`, Task 6.1) сторона квадрата: `max(2, int(round(2·r·scale)) + 2·int(margin))` |
+| `square_crop(frame, cx, cy, side, oob, pad_value=(0,0,0))` | (`crop`, Task 6.1) квадрат `side`×`side`, угол `(cx - side//2, cy - side//2)`; **всегда копия**, не view кадра. `oob` у границы: `drop` -> `None`; `pad` -> холст `pad_value`; `clamp` -> обрезка по кадру (нет пересечения -> `None`); `replicate` -> репликация края (нет пересечения -> `ValueError`; **потребителей нет с Task 6.4**, режим оставлен как контракт, закреплённый тестами 6.1).  Неизвестный `oob` -> `ValueError` |
+| `resize_square(crop, out)` | (`crop`, Task 6.1) ресайз к `out`×`out`: `out <= 0` или уже готово -> тот же объект; иначе INTER_AREA при `crop.shape[0] > out`, INTER_LINEAR иначе |
+| `LayerMode`, `RangeF`, `SpriteSource`, `AUGMENT_FIELDS`, `LayerAugment`, `LayerSpec` | (`layers`, Task 2.3) слой объекта и диапазоны его аугментации (pydantic, frozen); перенесены из `line_sim.interfaces` дословно, поля не менялись. Поворот CCW, ось Y вниз |
+| `load_layer_sprite(layer)` | (`layers`) RGBA uint8 спрайт слоя; callable-провайдер зовётся один раз; строковый id -> `TypeError`, не RGBA -> `ValueError` |
+| `transform_layer(sprite, scale, angle_deg, hue_deg, color_rgb=None)` | (`layers`) заливка -> scale -> поворот (кратные 90° — `rot90`) -> сдвиг тона; без трансформа возвращает **сам** `sprite` (не копию) |
+| `canvas_size(placed)` | (`layers`) размер `(w, h)` симметричной канвы под `[(RGBA, offset_x, offset_y)]` без рендера |
+| `compose_layers(layers, rng, object_angle_deg=0.0, forced_defects=(), *, label="")` -> `ComposedLayers(rgba, layer_params, active_defects)` | (`layers`) розыгрыш и композиция стека: слой i берёт `rng.spawn(len(layers))[i]`; `rgba` — новый **записываемый** массив; `active_defects` — в порядке слоёв. Ошибки по порядку: `forced_defects` строкой -> `TypeError`; пустой список -> спрайты -> дубли имён -> неизвестный `forced_defects` -> прозрачный итог (`ValueError`). Все с префиксом `LayeredObject '<label>':`, кроме ошибок спрайта (`load_layer_sprite`: `TypeError`/`ValueError` с именем слоя, без префикса). Известное старое поведение (follow-up, не исправлено): стек, где на канву не попал ни один слой (только defect-слои, ни один не активен), падает сырым `ValueError` из `max()` на пустой последовательности |
+| `ScenePreset`, `CLASS_SPRITE_SOURCE` | (`preset`, Task 2.4a) пресет сцены (pydantic, frozen): `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers`, `base_dir`; `from_dict`/`to_dict`/`from_yaml`/`to_yaml`/`resolve_path`. Перенесён из `line_sim.core.preset` дословно. Блок конфига стенда (`REPO_ROOT`, `resolve_repo_path`, `apply_defect_override`, `load_scene_preset`) остался в `line_sim.core.preset`: здесь `REPO_ROOT` нет |
+| `SpriteCatalog(config, background_cache_size=64)`, `ClassEntry`, `CatalogConfig(classes_dir, backgrounds_dir=None)` | (`catalog`, Task 2.4a) каталог классов: лист = папка со спрайтами RGBA, индекс по пути; `get_sprite(i, rng)`, `get_background(rng, size_hw)` (фон из папки или процедурный). Перенесены из `dataset_gen.core.catalog` и `dataset_gen.core.config` дословно |
+| `ClassMeta`, `load_meta(directory)`, `write_meta(directory, meta)`, `SymmetryType`, `META_FILENAMES` | (`metadata`, Task 2.4a) разметка узла каталога (`meta.yaml`/`.yml`/`.json`), наследуется сверху вниз. Перенесены из `dataset_gen.core.metadata` и `dataset_gen.core.config` |
+| `procedural_background(rng, size_hw)` | (`procedural_backgrounds`, Task 2.4a) случайный процедурный фон из 4 текстур (`gradient_bg`, `brushed_metal_bg`, `conveyor_belt_bg`, `speckled_bg`, реестр `_GENERATORS`). Имя модуля не `backgrounds`: рядом `background.py` (стек слоёв фона) |
+| `ObjectFactory(preset)`, `RenderedObject(rgba, class_name, angle_deg, defect, layer_params)` | (`factory`, Task 2.4b) фабрика объекта из слоёв: `num_classes`, `class_names`, `defect_probability`, `nominal_layers(rng)`, `render(rng, *, force_defect=False, label="") -> RenderedObject`. `rgba` — RGBA uint8, **read-only**; `defect` — имена активных defect-слоёв через запятую или `None`. `render` тратит `rng` в порядке: класс, угол, спрайт, `compose_layers`; `label` попадает в тексты ошибок (`LayeredObject '<label>': ...`). Флага оператора и паспорта нет: они у наследника `Services.line_sim.ObjectFactory` (`make`). `RenderedObject` — `frozen`, `eq=False` |
+| `render_preview_grid(preset, seeds, tile_px)`, `render_layout(preset, seed)`, `validate_preview_request`, `confine_preset_paths`, `PreviewLimitError`, `OUTSIDE_ROOTS_MESSAGE` | (`preview`, Task 2.4b) PNG-сетка объектов по сидам, номинальная раскладка слоёв, пределы запроса, ограда путей картинок. Перенесены из `line_sim.core.preview` дословно; плитка строится через `render`, `layer_params` — через `json_safe` |
+| `load_catalog(classes_dir)` (`catalog`), `load_image_rgba(path)` (`io`), `json_safe(value)` (`layers`) | (Task 2.4b) загрузка каталога без фонов, одиночный RGBA-слой, приведение numpy-скаляров к нативным типам. Из `line_sim.core.catalog_bridge` и `line_sim.interfaces._json_safe` |
+
+Карта зоны выреза: `docs/maps/crop.md`.
 
 Старые места импорта работают (реэкспорт, тот же объект): `Services.dataset_gen.core.compose.*` и
-`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`. Код функций перенесён без изменений.
+`Services.dataset_gen.core.catalog.imread_unicode` / `imwrite_unicode`, `Services.dataset_gen.core.augment.apply_*` (11 функций), `Services.line_sim.interfaces.LayerSpec` и ещё пять типов слоя, `Services.line_sim.core.preset.{ScenePreset, CLASS_SPRITE_SOURCE}` (Task 2.4a), `Services.line_sim.core.preview.*`, `Services.line_sim.core.catalog_bridge.*`, `Services.line_sim.interfaces._json_safe` (Task 2.4b; `Services.line_sim.ObjectFactory` — подкласс базы `layer_render`, не реэкспорт), `Services.dataset_gen.core.catalog.{SpriteCatalog, ClassEntry, SPRITE_SUFFIXES, BACKGROUND_SUFFIXES, imread_unicode, imwrite_unicode}`, `Services.dataset_gen.core.metadata.{ClassMeta, load_meta, write_meta, META_FILENAMES}`, `Services.dataset_gen.core.backgrounds.{procedural_background, gradient_bg, brushed_metal_bg, conveyor_belt_bg, speckled_bg, _GENERATORS}` — только эти имена; `_cover_crop`, `_low_freq` и транзитные имена старых модулей (`catalog.CatalogConfig`, `catalog.ClassMeta`, `catalog.load_meta`, `catalog.procedural_background`, `metadata.SymmetryType`) не реэкспортируются (потребителей 0, AST-скан ревью 2026-10-02); `CatalogConfig` и `SymmetryType` из `Services.dataset_gen.core.config`, `Services.line_sim.core.layered_object.canvas_size`, `LayeredObject._transform` (= `transform_layer`). `LayeredObject` — обёртка: разбор `passport.defect`, `compose_layers`, паспорт, read-only кэш. Код функций перенесён без изменений. `apply_photometric(frame, cfg, rng)` остался в `dataset_gen` и стал одной строкой над `apply_effects(frame, augment_config_to_effects(cfg), rng)`.
 
 ## Схема YAML `background_layers`
 
@@ -40,10 +61,33 @@ CTO 2026-10-01 (`plans/layer-render/cto-verdict-2026-10-01.md`) фон пере�
 
 ## Порядок сцены
 
-Снизу вверх: чёрный (под всеми слоями) -> слои фона по порядку -> активные объекты (рисует компоновщик).
+Снизу вверх: чёрный (под всеми слоями) -> слои фона по порядку -> активные объекты -> эффекты кадра. С Task 2.5 весь
+порядок исполняет одна функция — [`render_scene`](#сцена-render_scene); компоновщик `line_sim` только собирает ей вход.
 Тайл индексируется циклически по ширине: `cols = (arange(w) + origin_x - scroll_px) % tw`; по высоте кладётся
 симметрично `center_y` (`top = round(center_y - th/2)`), строки кадра вне полосы тайла не трогаются — виден слой
 ниже. Положительный `scroll_px` двигает содержимое тайла вправо.
+
+## Сцена (`render_scene`)
+
+`render_scene(background, placed, effects, rng) -> np.ndarray` (`scene.py`, Task 2.5) — единственная функция кадра:
+сегодня её зовёт только `SceneCompositor` (сим); превью редактора (4.2) и генератор обучения (6.2) будут звать её же.
+
+| Имя | Что |
+|-----|-----|
+| `SceneBackground(layers, size_wh, center_y, scroll_px=0, origin_xy=(0, 0))` | фон: стек `SolidFill`/`ScrollingTile` снизу вверх (хранится tuple, пусто — чёрный кадр), размер `(w, h)` — `tuple`/`list` из двух целых >= 0 (bool, float — `ValueError`; хранится парой Python `int`). `center_y`, `scroll_px`, `origin_xy` не проверяются |
+| `PlacedObject(rgba, center_xy)` | RGBA-спрайт `(h, w, 4)` uint8 (иначе `ValueError` с shape и dtype) и центр в координатах КАДРА, дробный. Массив не копируется, read-only принимается |
+
+Порядок: `np.empty((h, w, 3))` -> `render_background` -> `composite` для каждого `placed` по порядку (поздний перекрывает
+ранний) -> `apply_effects` только при непустом `effects`. Выход — новый RGB uint8 `(h, w, 3)`.
+
+- **Отсечения нет.** Объект вне кадра ничего не рисует (так ведёт себя `composite`); функция видимость не сообщает.
+  Отсечение по bbox и список паспортов — дело вызывающего (в симе — `SceneCompositor`): паспорта — понятие ленты.
+- **Свёртка фона — у вызывающего.** Стек рисуется как дан; свёрнутый и несвёрнутый стеки дают один кадр (Task 1.1).
+- **Контракт rng.** Пустой `effects` — ноль розыгрышей, `rng` может быть `None`, копия кадра не делается. Порядок
+  проверок до любого рисования: элемент `placed` не `PlacedObject` -> элемент `effects` не `EffectSpec` -> непустой
+  `effects` при `rng=None` (все `ValueError`, первые два с индексом). Свой `rng` функция не создаёт: поток эффектов
+  принадлежит вызывающему (LR-001; в симе — `[seed, 1]`, Task 3.1).
+- Границы пакета: модуль импортирует только `background`, `compose`, `effects`, `interfaces` и `numpy`. Решение — LR-003.
 
 ## Свёртка (`fold_background`)
 
@@ -61,3 +105,12 @@ CTO 2026-10-01 (`plans/layer-render/cto-verdict-2026-10-01.md`) фон пере�
 
 `SceneCompositor(background_layers=...)` (`Services/line_sim`) и ключ `background_layers` плагина `scene_source`.
 Миграция (layer-render 1.3): параметр компоновщика `background_tile` и ключ плагина `background_texture` удалены (ключ в конфиге — `ValueError`); вместо них `background_layers: [{solid: [R, G, B]}, {tile: <путь>}]`.
+
+## Как добавить эффект
+
+1. Функция `apply_<имя>(frame, ...)` в `effects.py` (float32 0–255 на входе и выходе; кодек-эффекту нужен uint8 — добавить имя в `_U8_EFFECTS`).
+2. Запись в `EFFECTS` — функция-шаг `(x, params, rng) -> x` без вентиля вероятности, значения тянет из `rng` в фиксированном порядке; место записи в словаре = место в проходе.
+3. Запись в `EFFECT_PARAMS` — дефолты параметров литералами (без `enabled`/`prob`); `layer_render` не импортирует `dataset_gen`, равенство полям `AugmentConfig` держит `test_a4_*`.
+4. Мост `augment_config_to_effects` (`dataset_gen/core/augment.py`) делает `getattr(cfg, имя)` для КАЖДОГО ключа `EFFECTS`: каждый ключ `EFFECTS` обязан быть полем `AugmentConfig` — добавить поле `*Aug` в `dataset_gen/core/config.py` и литерал в `test_a4_*` (`test_augment_equivalence.py`). Иначе `apply_photometric(frame, AugmentConfig(), rng)` падает с `AttributeError`. (Учесть в 4.1 и Ф3.)
+
+`EFFECTS` и `EFFECT_PARAMS` — точка расширения на этапе импорта; во время работы их менять нельзя (каждый новый `EffectSpec` читает их заново).

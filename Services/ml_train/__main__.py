@@ -10,8 +10,47 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
+import re
 import sys
 from pathlib import Path
+
+
+def _pad_color_bgr(text: str) -> tuple[int, int, int]:
+    """Разбор `B,G,R` → кортеж из трёх int в 0..255; иначе ArgumentTypeError (введённое не повторяем)."""
+    error = argparse.ArgumentTypeError("ожидается формат B,G,R: три целых числа 0..255 через запятую")
+    parts = text.split(",")
+    # Только ASCII-цифры: int() терпит пробелы, «1_0», полноширинные цифры — регистр их не примет.
+    if len(parts) != 3 or not all(re.fullmatch(r"[0-9]{1,3}", p) for p in parts):
+        raise error
+    values = tuple(int(p) for p in parts)
+    if not all(v <= 255 for v in values):
+        raise error
+    return values  # type: ignore[return-value]
+
+
+def _radius_scale(text: str) -> float:
+    """Конечное число > 0 (0, <0, nan, inf отвергаются); регистр `center_crop` строже — 0.1..5.0. Эха нет."""
+    error = argparse.ArgumentTypeError("ожидается конечное число больше 0")
+    try:
+        value = float(text)
+    except ValueError:
+        raise error from None
+    if not math.isfinite(value) or value <= 0:
+        raise error
+    return value
+
+
+def _non_negative_int(text: str) -> int:
+    """Целое >= 0 (0 допустим: для `--output-size` это «без ресайза»). Введённое не повторяем."""
+    error = argparse.ArgumentTypeError("ожидается целое число не меньше 0")
+    try:
+        value = int(text)
+    except ValueError:
+        raise error from None
+    if value < 0:
+        raise error
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,6 +81,17 @@ def main(argv: list[str] | None = None) -> int:
     p_eval.add_argument("holdout_dir", help="папка hold-out: <буква>/<угол>.jpg")
     p_eval.add_argument("--models-dir", default="data/models")
     p_eval.add_argument("--device", default="cpu")
+    # Параметры выреза: default=None — дефолты живут только в сигнатуре evaluate_holdout.
+    p_eval.add_argument(
+        "--radius-scale", type=_radius_scale, default=None, help="масштаб радиуса диска (дефолт в evaluate_holdout)"
+    )
+    p_eval.add_argument(
+        "--margin-px", type=_non_negative_int, default=None, help="поля вокруг диска, px (дефолт в evaluate_holdout)"
+    )
+    p_eval.add_argument(
+        "--output-size", type=_non_negative_int, default=None, help="сторона выхода, px; 0 — без ресайза"
+    )
+    p_eval.add_argument("--pad-color-bgr", type=_pad_color_bgr, default=None, help="цвет заливки у края кадра: B,G,R")
 
     sub.add_parser("archs", help="доступные архитектуры")
 
@@ -116,7 +166,14 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
     from Services.ml_train.holdout_eval import evaluate_holdout
 
-    summary = evaluate_holdout(args.model_id, args.holdout_dir, models_dir=args.models_dir, device=args.device)
+    crop_kwargs = {
+        key: value
+        for key in ("radius_scale", "margin_px", "output_size", "pad_color_bgr")
+        if (value := getattr(args, key)) is not None
+    }
+    summary = evaluate_holdout(
+        args.model_id, args.holdout_dir, models_dir=args.models_dir, device=args.device, **crop_kwargs
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     within_key = next((k for k in summary if k.startswith("angle_within_")), None)
     within = summary.get(within_key) if within_key else None
