@@ -5,7 +5,7 @@
 
 ### Task 2.5 — `render_scene(background, placed, effects, rng)`: одна функция кадра; `SceneCompositor` делегирует
 
-- **Статус:** [PENDING] волна 6; ревью спеки ит.1 — CHANGES REQUESTED (M1, m1–m10 внесены), ит.2 — APPROVED, два нита внесены (2026-10-03) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (свежий) → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-03 — `0fbb79e33` + правки ревью `c04299285`] волна 6; ревью спеки ит.1 — CHANGES REQUESTED (M1, m1–m10 внесены), ит.2 — APPROVED, два нита внесены (2026-10-03) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (свежий) → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает модуль `scene`: `render_scene`, `SceneBackground`,
   `PlacedObject`; сигнатура `SceneCompositor` не меняется, поведение на валидных входах — тоже; невалидный
   `background_bgr` — `ValueError` в `__init__`, LR-003)

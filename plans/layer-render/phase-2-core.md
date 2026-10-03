@@ -11,7 +11,7 @@
 
 ### Task 2.1 — `compose.py` + `io.py` переезжают, старые модули — реэкспорт (бывш. 3.1)
 
-- **Статус:** [IN PROGRESS] волна 2 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `c9d56b11`] волна 2 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает `compose`, `io`; `dataset_gen.core.compose` и
   `imread_unicode`/`imwrite_unicode` в `dataset_gen.core.catalog` — реэкспорт)
 - **CHAIN:** `tester`(RED, worktree до кода) → `developer`(GREEN) → инъекции лида → `reviewer`
@@ -57,7 +57,7 @@
 
 ### Task 2.2 — `effects.py` + `EFFECT_PARAMS`; `apply_photometric` = список эффектов (бывш. 3.3)
 
-- **Статус:** [PENDING] волна 3 · **Level:** Middle+ (Sonnet 5.5, решение владельца 2026-10-02: dev-effects) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `8665d7b7`] волна 3 · **Level:** Middle+ (Sonnet 5.5, решение владельца 2026-10-02: dev-effects) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render.effects`: `EFFECTS`, `EFFECT_PARAMS`, `EffectSpec`, `apply_effects`;
   функции эффектов `dataset_gen.core.augment` — реэкспорт)
 - **CHAIN:** `tester`(RED: оракул — дословная копия старого `apply_photometric` в тесте) → `developer`(GREEN) → инъекции лида → `reviewer`
@@ -138,7 +138,7 @@
 
 ### Task 2.3 — `layers.py`: `LayerSpec`/`LayerAugment`/`compose_layers` в `layer_render`, `LayeredObject` — обёртка (бывш. 3.2)
 
-- **Статус:** [PENDING] волна 4 · **Level:** Senior+ (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
+- **Статус:** [DONE — `ca0e6203a`] волна 4 · **Level:** Senior+ (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render.layers`: `LayerMode`, `RangeF`, `SpriteSource`, `AUGMENT_FIELDS`,
   `LayerAugment`, `LayerSpec`, `ComposedLayers`, `load_layer_sprite`, `transform_layer`, `canvas_size`, `compose_layers` — все 11
   в `Services.layer_render.__all__`; в `line_sim` — реэкспорт шести типов в `interfaces.py`, `canvas_size` и алиас

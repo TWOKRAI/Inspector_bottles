@@ -4,7 +4,7 @@
 
 ### Task 2.4b — `ObjectFactory` и превью переезжают в `layer_render`, фабрика отдаёт `RenderedObject` (часть бывш. 2.4)
 
-- **Статус:** [PENDING] волна 5; ревью спеки ит.1 — CHANGES REQUESTED (B1–B2, M1–M3, m1–m6 внесены), ит.2 — APPROVED, две мелкие правки внесены (2026-10-02) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-03 — `bb085a9ee` + правки ревью `548144ef4`] волна 5; ревью спеки ит.1 — CHANGES REQUESTED (B1–B2, M1–M3, m1–m6 внесены), ит.2 — APPROVED, две мелкие правки внесены (2026-10-02) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает `factory`, `preview`, `load_catalog`, `load_image_rgba`,
   `json_safe`; `line_sim.ObjectFactory` становится наследником `layer_render.factory.ObjectFactory`;
   `LayeredObject` получает второй конструктор; `line_sim.core.{preview,catalog_bridge}` — реэкспорт)

@@ -4,7 +4,7 @@
 
 ### Task 2.4a — `ScenePreset` и каталог классов переезжают в `layer_render`, старые места — реэкспорт (часть бывш. 2.4)
 
-- **Статус:** [PENDING] волна 5 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `6c242c9e5`] волна 5 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает `preset`, `catalog`, `metadata`, `procedural_backgrounds`;
   `line_sim.core.preset.ScenePreset`, `dataset_gen.core.{catalog,metadata,backgrounds}` и `CatalogConfig`/`SymmetryType` из
   `dataset_gen.core.config` — реэкспорт)
