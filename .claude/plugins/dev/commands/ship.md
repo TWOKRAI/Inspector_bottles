@@ -15,7 +15,8 @@ Run the final check before shipping the code:
    uv run pyright src   # same scope as CI; bare `pyright` pulls in tests/, where type debt usually piles up
    uv run pytest -q
    ```
-   Plans format check (always — `make gate` does not run `scripts/validate.py`):
+   Plans format check — if `scripts/plans_progress/plans_progress.py` exists (`make gate` does not run
+   `scripts/validate.py`); otherwise skip this step without error (the script is project-specific):
    ```bash
    python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
    ```
@@ -123,13 +124,14 @@ If the plan is found and every Task = [DONE] (the remainder is only backlog / a 
    a new session reads an archived plan through its `SUMMARY.md` only.
 3. **Refresh, then check the ledger:** `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`, then `python3 scripts/plans_ledger.py status` — no findings for the closed plan
    (show other `WARN`s to the owner, but don't fix them silently).
-4. **Progress check (plans_progress):** the plan format and the `ORDER.md` progress block must be clean:
+4. **Progress check (plans_progress):** if `scripts/plans_progress/plans_progress.py` exists, the plan format must be
+   clean; otherwise skip this step without error:
    ```bash
    python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
    ```
-   Exit 1 = a new blocking finding (or, on `main` only, a stale `progress:begin`/`progress:end` block in
-   `plans/queue/ORDER.md` — the lead refreshes it at the merge point, see `scripts/plans_progress/README.md`) —
-   **STOP**, fix the plan, don't extend the baseline silently. Exit 2 = the check could not run (no `plans/`, no baseline file).
+   Exit 1 = a new blocking finding — **STOP**, fix the plan, don't extend the baseline silently. A stale
+   `progress:begin`/`progress:end` block in `plans/queue/ORDER.md` is only an info line: the lead refreshes it at
+   the merge point (see `scripts/plans_progress/README.md`). Exit 2 = the check could not run (no `plans/`, no baseline file).
 5. Commit:
    ```bash
    git add plans/

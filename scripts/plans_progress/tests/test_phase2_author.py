@@ -159,7 +159,7 @@ def test_root_nested_in_foreign_repo_on_main_is_not_main(tmp_path):
     # контроль достижимости: сам root как репозиторий на main с тем же деревом краснеет
     _init_main(root)
     control = _check(root, ceiling=None)
-    assert control.returncode == 1 and "ORDER_BLOCK_STALE" in control.stdout, control.stdout + control.stderr
+    assert control.returncode == 0 and "ORDER_BLOCK_STALE " in control.stdout, control.stdout + control.stderr
 
 
 # ---------------------------------------------------------------- ревью: тег main, атомарная запись, хвост stderr
@@ -179,7 +179,7 @@ def test_tag_named_main_does_not_hide_the_main_branch(tmp_path):
     root = _stale_root(tmp_path, "tagged")
     _git(root, "tag", "main")
     cp = _check(root, ceiling=None)
-    assert cp.returncode == 1 and "ORDER_BLOCK_STALE" in cp.stdout, cp.stdout + cp.stderr
+    assert cp.returncode == 0 and "ORDER_BLOCK_STALE " in cp.stdout, cp.stdout + cp.stderr
 
 
 def test_tag_named_main_on_detached_head_is_not_main(tmp_path):

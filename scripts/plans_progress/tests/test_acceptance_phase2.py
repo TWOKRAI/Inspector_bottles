@@ -425,8 +425,8 @@ def test_b7_stale_block_on_main_fails_check(make_root, progress):
     root = make_root(_sync_files(_compose("\n", HEAD, STALE, TAIL)))
     _init_git_main(root)
     cp = _check(root)
-    assert cp.returncode == 1, f"exit {cp.returncode}\n{_out(cp)[-500:]}"
-    assert "ORDER_BLOCK_STALE" in _out(cp)
+    assert cp.returncode == 0, f"exit {cp.returncode}\n{_out(cp)[-500:]}"  # Task 2.5: блок — info
+    assert any(ln.startswith("ORDER_BLOCK_STALE ") and " info " in ln for ln in _out(cp).splitlines()), _out(cp)[-500:]
 
 
 def test_b7_fresh_block_on_main_passes_check(make_root, progress):
@@ -448,8 +448,8 @@ def test_b7_status_change_after_sync_makes_block_stale(make_root, progress):
     plan = root / "plans" / "2026-10-02_x.md"
     plan.write_bytes(plan.read_bytes().replace(b"Task 1.2: b [PENDING]", b"Task 1.2: b [DONE]"))
     cp = _check(root)
-    assert cp.returncode == 1, f"exit {cp.returncode}\n{_out(cp)[-500:]}"
-    assert "ORDER_BLOCK_STALE" in _out(cp)
+    assert cp.returncode == 0, f"exit {cp.returncode}\n{_out(cp)[-500:]}"  # Task 2.5: блок — info
+    assert any(ln.startswith("ORDER_BLOCK_STALE ") and " info " in ln for ln in _out(cp).splitlines()), _out(cp)[-500:]
 
 
 def test_b7_text_outside_the_block_is_not_drift(make_root, progress):
@@ -468,8 +468,10 @@ def test_b7_missing_markers_on_main_fail_check(make_root, progress):
     root = make_root(_sync_files("\n".join([*HEAD, *TAIL]) + "\n"))
     _init_git_main(root)
     cp = _check(root)
-    assert cp.returncode == 1, f"exit {cp.returncode}\n{_out(cp)[-500:]}"
-    assert "ORDER_BLOCK_MISSING" in _out(cp)
+    assert cp.returncode == 0, f"exit {cp.returncode}\n{_out(cp)[-500:]}"  # Task 2.5: блок — info
+    assert any(ln.startswith("ORDER_BLOCK_MISSING ") and " info " in ln for ln in _out(cp).splitlines()), _out(cp)[
+        -500:
+    ]
 
 
 _BLOCK_STATES = {
@@ -504,5 +506,5 @@ def test_b8_off_main_does_not_check_the_block(make_root, progress, where, state)
     else:
         _git(root, "checkout", "-q", "main")
     control = _check(root)
-    assert control.returncode == 1, f"контроль на main exit {control.returncode}\n{_out(control)[-500:]}"
-    assert code in _out(control)
+    assert control.returncode == 0, f"контроль на main exit {control.returncode}\n{_out(control)[-500:]}"
+    assert any(ln.startswith(code + " ") and " info " in ln for ln in _out(control).splitlines()), _out(control)[-500:]

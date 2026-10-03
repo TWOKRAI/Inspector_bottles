@@ -41,8 +41,8 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 
 Находки: `NO_TASKS` и `UNKNOWN_STATUS` блокируют только для планов §4.1 `ORDER.md`; `DUP_ID` блокирует всегда;
 `UNCLOSED_FENCE` (нечётное число ограждений кода) блокирует так же, как `NO_TASKS`, — только для §4.1;
-`DUP_HEADING`, `STATUS_CONFLICT`, `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
-`ORDER_BLOCK_STALE` (блок устарел) и `ORDER_BLOCK_MISSING` (нет пары маркеров) блокируют, но только на ветке `main`
+`DUP_HEADING`, `STATUS_CONFLICT`, `HEADER_STATUS_CONFLICT` (шапка плана done/superseded, а задачи не все закрыты), `NO_DATE_IN_NAME`, `ALL_DONE_NOT_ARCHIVED`, `NO_STATUS_MARK`, `TASK_ID_UNPARSED`, `NOT_UTF8` — информационные.
+`ORDER_BLOCK_STALE` (блок устарел) и `ORDER_BLOCK_MISSING` (нет пары маркеров) — тоже информационные (чужое слияние в `main` не должно краснить `main`); печатаются только на ветке `main`
 в корне git-репозитория (`--root` равен `git rev-parse --show-toplevel`); в ветках, при detached HEAD, вне git и в корне,
 вложенном в чужой репозиторий, блок не проверяется. Писатель блока — лид в `main`, в точке слияния.
 `--check` без `plans/`, без живых планов или с отсутствующим `--baseline` завершается кодом 2.
@@ -77,3 +77,14 @@ git merge --continue
 ```
 python -m pytest scripts/plans_progress/tests/test_acceptance_progress.py scripts/plans_progress/tests/test_author_hazards.py -q
 ```
+
+## Доверие к цифрам
+
+- `header_status` в `--json` — слово набора из первой строки `Статус:` в первых 30 строках плана (`null`, если нет).
+  Закрытый план (§4.3 или шапка done/superseded) на странице показывает чип «закрыт»/«снят» вместо полосы,
+  числа `N из M` остаются; план из очереди §4.1/§4.2 с шапкой DONE и незакрытыми задачами — чип «⚠ шапка: DONE».
+- Строки блока и сводки CLI получают хвост `· без статуса K` (пункты без слова набора) и `· без отметки K`
+  (задачи из заголовков без признаков статуса) — только при K > 0.
+- Статус в строке заголовка вне `[...]`: латиница `DONE`/`SUPERSEDED`/`DEFERRED` только верхним регистром, перед
+  словом — разделитель (начало, `—`, `(`, `✅`, `**`, `]`, `:`); `PARTIAL`/`ЧАСТИЧНО` обрезают разбор.
+- Нумерованные `1. Task 1.1:` вне эталона не молчат: находка `TASK_ID_UNPARSED`.
