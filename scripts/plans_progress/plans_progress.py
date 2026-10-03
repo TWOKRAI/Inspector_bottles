@@ -1685,6 +1685,57 @@ def _dep_chips(p: Plan, in_use: bool) -> list[str]:
     return chips
 
 
+def _branch_label(branch: str) -> str:
+    return branch or "(detached)"
+
+
+def _signal_label(entry: dict) -> str:
+    """`2026-10-03T20:31:37` -> `2026-10-03 20:31`: первые 16 символов строки журнала, без округления."""
+    return str(entry["last_signal"])[:16].replace("T", " ")
+
+
+def _counters_label(entry: dict) -> str:
+    return f"сессий {entry['sessions']} · агентов {entry['agents']} · сигнал {_signal_label(entry)}"
+
+
+def _active_chip(e: dict) -> str:
+    """Чип «в работе» для одной записи `Plan.active`; пустая ветка (detached) — пустой `data-active`."""
+    return (
+        f'<span class="chip" data-chip="active" data-active="{_e(e["branch"])}" title="{_e(e["worktree"])}">'
+        f"в работе: {_e(_branch_label(e['branch']))} · {_e(_counters_label(e))}</span>"
+    )
+
+
+WHO_NOTES = (
+    "Агенты, запущенные из главного дерева, видны как активность main.",
+    "Сессия без субагентов и без события SessionStart не видна.",
+)
+
+
+def _who_html(active: list[tuple[str, dict]], orphans: list[dict], window_text: str) -> list[str]:
+    """Секция `#who`: активные, затем сироты (по `worktree`); `K = 0` -> строка про окно; две пометки в конце."""
+    by_path = lambda e: e["worktree"]  # noqa: E731
+    parts = ['<section id="who">', f"<h2>Кто где · {len(active) + len(orphans)}</h2>"]
+    if active or orphans:
+        parts.append("<ul>")
+        for name, e in sorted(active, key=lambda ne: by_path(ne[1])):
+            parts.append(
+                f'<li data-worktree="{_e(e["worktree"])}" data-branch="{_e(e["branch"])}" data-who-plan="{_e(name)}">'
+                f"{_e(_branch_label(e['branch']))} → {_e(name)} · {_e(_counters_label(e))}</li>"
+            )
+        for e in sorted(orphans, key=by_path):
+            parts.append(
+                f'<li data-worktree="{_e(e["worktree"])}" data-branch="{_e(e["branch"])}" data-orphan="1">'
+                f"{_e(_branch_label(e['branch']))} — план не найден · {_e(_counters_label(e))}</li>"
+            )
+        parts.append("</ul>")
+    else:
+        parts.append(f"<p>свежих сигналов нет (окно {_e(window_text)})</p>")
+    parts.extend(f'<p class="note">{_e(note)}</p>' for note in WHO_NOTES)
+    parts.append("</section>")
+    return parts
+
+
 def _plan_html(p: Plan, in_use: bool) -> str:
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
     if startable(p, in_use):
@@ -1727,6 +1778,7 @@ def _plan_html(p: Plan, in_use: bool) -> str:
         s.append(f'<span class="chip" data-chip="closed" title="план закрыт или поглощён">{word}{counts}</span>')
     if not plan_closed(p):
         s.extend(_dep_chips(p, in_use))
+    s.extend(_active_chip(e) for e in p.active)  # после всех прочих чипов; закрытым и архивным тоже
     s.append("</summary>")
     s.append('<div class="body">')
     s.append(f'<div class="info">{_e(p.rel)}</div>')
@@ -1767,8 +1819,18 @@ def git_sha(root: Path) -> str:
     return sha if cp.returncode == 0 and sha else "—"
 
 
-def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
-    """Страница: очередь §4.1, `#waiting` §4.2, `#unlisted` (нет в ORDER.md), `#archive` (архив + закрытые §4.3)."""
+def to_html(
+    live: list[Plan],
+    archive: list[Plan],
+    root: Path,
+    orphans: list[dict] | tuple = (),
+    window_text: str = DEFAULT_WINDOW,
+) -> str:
+    """Страница: `#who`, очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md), `#archive` (архив + закрытые §4.3).
+
+    Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
+    `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
+    """
     queue, waiting, unlisted, closed = queue_scope(live)
     shelved = closed + archive
     lanes: dict[str, list[int]] = {}
@@ -1800,6 +1862,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
             f'<span class="tally">{_e(_tally(done, total))}</span></div>'
         )
     parts.append("</section>")
+    parts.extend(_who_html([(p.name, e) for p in live + archive for e in p.active], list(orphans), window_text))
     parts.append('<section id="queue">')
     parts.extend(_plan_html(p, in_use) for p in queue)
     parts.append("</section>")
@@ -1889,7 +1952,9 @@ def main(argv: list[str] | None = None) -> int:
     live, archive = page_order(plans, rows)
     ordered = live + archive
     code = 0
-    if args.json or args.who:
+    active: list[tuple[Plan, dict]] = []
+    orphans: list[dict] = []
+    if args.json or args.who or args.html is not None:
         active, orphans = collect_active(root, ordered, now, window)
         attach_active(ordered, active)
     if args.who:
@@ -1911,7 +1976,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(to_html(live, archive, root), encoding="utf-8")
+        target.write_text(to_html(live, archive, root, orphans, args.active_window), encoding="utf-8")
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
         baseline = load_baseline(args.baseline) if args.baseline else set()
