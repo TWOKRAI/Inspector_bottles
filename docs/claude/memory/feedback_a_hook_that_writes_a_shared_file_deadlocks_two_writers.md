@@ -62,3 +62,5 @@ pathspec**. Файла журнала в pathspec нет, значит в это
 [[feedback_precommit_rollback_drops_unstaged_edits]],
 [[feedback_a_peer_session_shares_the_tree]],
 [[feedback_commit_takes_the_whole_index]].
+
+**Статус 2026-10-03:** хук `session-log` снят с pre-commit (Task 1.1 плана commit-mechanism, слияние `8b0eeac41`). Журнал пишет и коммитит `/core:team:wrap-up` (шаг 7, один явный путь). Урок остаётся в силе для любого хука, который стейджит общий файл; в ветках со старым `main` хук ещё работает.

@@ -54,3 +54,5 @@ were the hook's own record of a failed attempt — worthless, but keep a copy be
 Line endings (CRLF in tree vs LF in index) were the wrong hypothesis; ruled out by the
 `autocrlf=false` diff being empty and the fourth failure. See also
 [[feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers]].
+
+**Статус 2026-10-03:** хук `session-log` снят с pre-commit (Task 1.1 плана commit-mechanism, слияние `8b0eeac41`). Журнал пишет и коммитит `/core:team:wrap-up` (шаг 7, один явный путь). Урок остаётся в силе для любого хука, который стейджит общий файл; в ветках со старым `main` хук ещё работает.

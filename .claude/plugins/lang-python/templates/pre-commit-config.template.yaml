@@ -52,7 +52,7 @@ repos:
 
   # ─── Ruff: lint + format (fast, runs on every commit) ──────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.15.14
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
@@ -84,7 +84,7 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^(tests/|\.claude/|scripts/)
+        exclude: ^(tests/|\.claude/|scripts/|docs/reviews/)
 
   # ─── Sentrux: architectural rule check (pre-push, after pyright) ───────────
   # Runs `sentrux check` against .sentrux/rules.toml. If sentrux binary is

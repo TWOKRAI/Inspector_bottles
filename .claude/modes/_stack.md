@@ -70,8 +70,8 @@ keys/values freely (see `.claude/CLAUDE.md`).
 
 ```ini
 # Tests-discipline commit gate — read by scripts/validate_commit/validate_commit.py.
-# Every key is optional; the values below are also what applies with no block at all.
-tests_gate = on                      # on | off — off restores the free-form `Tested:` trailer
+# Every key is optional; the values below are also the defaults, except `tests_gate` (default `on`, set `off` here).
+tests_gate = off                     # on | off — OFF by owner's decision 2026-10-03, see the paragraph below the block
 tests_gate_code = src/**/*.py        # staged paths the gate applies to (comma-separated globs)
 tests_gate_exclude = **/template/**  # subtracted from tests_gate_code before the gate fires
 
@@ -112,3 +112,10 @@ the runner-coverage guard does not know about), so it would red the gate on day 
 reason this task did not touch. `pre_report_gate_base = main` pins the diff scope to the
 owner's main branch (today's seed 1.2.0 rollout landed there). Every other key above keeps the
 template's default value — no behaviour change from before this block existed.
+
+`tests_gate = off` (owner's decision 2026-10-03, plan `commit-mechanism` Task 1.3): the gate never fired here
+(`tests_gate_code = src/**/*.py`, there is no `src/`), and pointing it at the real code would reject almost every
+code commit: it counts only a top-level `tests/**` as tests (0 files — tests live in `<module>/tests/`) and accepts
+`Tested:` only as `tests/<path>` | `skip (<reason>)`, while project practice is `scope/N passed`. Test discipline is
+held by roles (blind tester before the code, lead's break-injection, reviewer by running). Revisit after the
+Task 3.2 measurement; turning it back on needs the test-dir glob and the `Tested:` grammar changed first.
