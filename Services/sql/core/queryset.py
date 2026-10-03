@@ -8,6 +8,7 @@ Usage:
     qs = QuerySet(adapter, UserSchema, mapper, "users")
     users = qs.filter(age__gte=18).order_by("-score").limit(10).all()
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Generic, List, Optional, Tuple, Type, TypeVar
@@ -26,9 +27,19 @@ class QuerySet(Generic[T]):
         all(), first(), count(), values(), delete(), update()
     """
 
-    _LOOKUPS = frozenset({
-        "eq", "ne", "gt", "gte", "lt", "lte", "in", "like", "isnull",
-    })
+    _LOOKUPS = frozenset(
+        {
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "in",
+            "like",
+            "isnull",
+        }
+    )
 
     _OP_MAP = {
         "eq": "=",
@@ -148,7 +159,10 @@ class QuerySet(Generic[T]):
     def _clone(self) -> QuerySet[T]:
         """Deep copy для immutability."""
         qs = QuerySet(
-            self._adapter, self._schema_class, self._mapper, self._table_name,
+            self._adapter,
+            self._schema_class,
+            self._mapper,
+            self._table_name,
         )
         qs._filters = list(self._filters)
         qs._excludes = list(self._excludes)
@@ -162,7 +176,8 @@ class QuerySet(Generic[T]):
     def _validate_column(name: str) -> str:
         """Валидировать, что имя колонки — безопасный SQL идентификатор."""
         import re
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
             raise ValueError(f"Invalid column name: {name!r}")
         return name
 
@@ -206,7 +221,10 @@ class QuerySet(Generic[T]):
         return where, params
 
     def _render_condition(
-        self, col: str, op: str, val: Any,
+        self,
+        col: str,
+        op: str,
+        val: Any,
     ) -> Tuple[str, Dict[str, Any]]:
         """Отрендерить одно условие в SQL фрагмент + params dict."""
         params: Dict[str, Any] = {}
@@ -233,7 +251,7 @@ class QuerySet(Generic[T]):
     def _build_select(self) -> Tuple[str, Dict[str, Any]]:
         """Построить полное SELECT выражение."""
         where, params = self._build_where()
-        sql = f'SELECT * FROM "{self._table_name}"'
+        sql = f'SELECT * FROM "{self._table_name}"'  # nosec B608 — колонки через _validate_column, limit/offset int(), значения bind-параметрами
         if where:
             sql += f" WHERE {where}"
         if self._order_fields:
@@ -255,7 +273,7 @@ class QuerySet(Generic[T]):
     def _build_count(self) -> Tuple[str, Dict[str, Any]]:
         """Построить SELECT COUNT(*) выражение."""
         where, params = self._build_where()
-        sql = f'SELECT COUNT(*) as count FROM "{self._table_name}"'
+        sql = f'SELECT COUNT(*) as count FROM "{self._table_name}"'  # nosec B608 — колонки через _validate_column, limit/offset int(), значения bind-параметрами
         if where:
             sql += f" WHERE {where}"
         return sql, params
@@ -263,7 +281,7 @@ class QuerySet(Generic[T]):
     def _build_delete(self) -> Tuple[str, Dict[str, Any]]:
         """Построить DELETE выражение."""
         where, params = self._build_where()
-        sql = f'DELETE FROM "{self._table_name}"'
+        sql = f'DELETE FROM "{self._table_name}"'  # nosec B608 — колонки через _validate_column, limit/offset int(), значения bind-параметрами
         if where:
             sql += f" WHERE {where}"
         return sql, params
@@ -277,7 +295,7 @@ class QuerySet(Generic[T]):
             p = self._next_param()
             params[p] = val
             set_parts.append(f'"{col}" = :{p}')
-        sql = f'UPDATE "{self._table_name}" SET {", ".join(set_parts)}'
+        sql = f'UPDATE "{self._table_name}" SET {", ".join(set_parts)}'  # nosec B608 — колонки через _validate_column, limit/offset int(), значения bind-параметрами
         if where:
             sql += f" WHERE {where}"
         return sql, params
