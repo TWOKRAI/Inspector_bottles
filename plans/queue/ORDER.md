@@ -253,7 +253,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 - framework-architecture-rework — 0 из 11 · 0% · без отметки 10
 - dataset-annotation — 0 из 17 · 0% · без отметки 1
 - code-reader-sdk — 2 из 3 · 67%
-- layer-render — 5 из 20 · 25%
+- layer-render — 13 из 22 · 59%
 - letters-retrain — 2 из 3 · 67% · без отметки 1
 - qr-code-reader — 0 из 19 · 0% · без отметки 6
 - robot-place-pose — 0 из 0
@@ -263,6 +263,6 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 - word-layout — 0 из 0
 - storage-stack-embedded-first — 0 из 11 · 0%
 - 2026-07-06_constructor-master — 0 из 0
-- 2026-10-02_plans-progress-dashboard — 12 из 25 · 48%
+- 2026-10-02_plans-progress-dashboard — 13 из 25 · 52%
 в архиве: 119
 <!-- progress:end -->
