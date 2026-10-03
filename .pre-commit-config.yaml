@@ -60,4 +60,4 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^(tests/|\.claude/|docs/claude/frozen/)
+        exclude: ^(tests/|\.claude/|docs/claude/frozen/|docs/reviews/)
