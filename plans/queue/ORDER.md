@@ -18,6 +18,22 @@
 >
 > `plans/QUEUE.md` оставлен указателем сюда: на него ссылаются 83 файла.
 
+## 0. Первый приоритет — решение владельца 2026-10-03
+
+**Ж — жизненный цикл, [`lifecycle-owner-scope`](../2026-10-03_lifecycle-owner-scope/plan.md)** стоит перед всеми полосами ниже. Владелец 2026-10-03:
+«переделать так, чтобы подобных проблем не было», «универсальный механизм у всех», «план в приоритете в очереди».
+Причина числом: гейт `run_framework_tests` аварийно падает ~1 прогон из 4 (abort интерпретатора, не тест) — правило
+`/dev:ship` «красный гейт отказывает» срабатывает случайно для ВСЕХ полос; плюс 5-секундный ханг останова ребёнка
+и утечки GUI. Архитектура принята CTO с условиями (три раунда), [`DESIGN.md`](../2026-10-03_lifecycle-owner-scope/DESIGN.md).
+Лимит WIP Р и С не отменяется: Ж — полоса фреймворка, идёт вместо задач Ф, пока не закрыта Ф5 плана (гейт abort).
+
+**Ж и [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) — две половины останова, не дубль** (П1–П4 вердикта
+CTO 2026-10-03). stop-ownership — **между** процессами: PM решает, кто остановлен, метка ReaderGone, сироты, бюджеты
+PM/спавнера (ADR-PMM-031). Ж — **внутри** процесса: подписки, потоки, окна, порядок останова ребёнка. Ж забирает
+внутрипроцессную половину их Task 3.1 и хук `_before_observability_teardown` (Ж1, Task 1.2), оборачивает их эскалацию
+в `ChildProcessStop` и сводит формулу бюджета в один `stop_budget.py` (Ж1, Task 1.1) — семантика и ADR остаются у
+stop-ownership. Их Task 3.1 сужена до межпроцессного quiesce → ack; их Ф2-перемер идёт **после Ж1**.
+
 ## 1. Приоритеты — решение владельца 2026-09-26
 
 **Мерило — практическая польза:** что можно запустить, показать или измерить. Архитектура — когда её
@@ -38,6 +54,15 @@ GUI (шаг С5). Ф — одна задача в паузе между прод
 ## 2. Очередь задач
 
 `▶` — можно начинать сейчас. `⛔` — ждёт условия (указано). `🔧` — нужно железо. Номера — задачи планов.
+
+### Ж — жизненный цикл ([`lifecycle-owner-scope`](../2026-10-03_lifecycle-owner-scope/plan.md)) — первый приоритет
+
+| Шаг | Задачи | Условие | Польза |
+|---|---|---|---|
+| Ж0 ▶ | **Ф0**: 0.1 ADR и интерфейсы → 0.2 `Scope` + G1 → 0.3 `Subscribers` ∥ 0.4 `qt_lifetime` → 0.5 стражи и база пробы abort | начата 2026-10-03 (спек 0.1 `41f2822c0`, worktree `lifecycle`) | один механизм владения вместо 12 списков подписчиков и 59 сырых потоков |
+| Ж1 ⛔ | **Ф1** останов процесса: один корень с барьерами, `stop_budget`, воркеры и плагины в областях; забирает внутрипроцессную половину stop-ownership 3.1 и её долги (ADR-PM-045 → ADR-PMM-033, п.4 ADR-PMM-033) | Ж0 | 5-с ханг останова, воскрешение воркера, ложный «остановлен»; **разблокирует Ф2-перемер stop-ownership (Ф4 ниже)** |
+| Ж2 ⛔ | **Ф2** регистры и контролы GUI → **Ф5** вкладки, формы, окна, рестарт UI | Ж1 | **гейт fw-тестов без abort** (in-suite проба 3× + Qt-мусор = 0) |
+| Ж3 ⛔ | **Ф3** остальные издатели → **Ф4** потоки → **Ф6** финал | Ж2; Ф3 — после задач closure Ф4 по `observability_wiring.py` | утечки подписок, потоки без владельца |
 
 ### Р — робот ([`robot-protocol-v2`](../robot-protocol-v2/plan.md) ред. 2, брифы — [`tasks.md`](../robot-protocol-v2/tasks.md) + [`tasks-2.md`](../robot-protocol-v2/tasks-2.md))
 
@@ -110,14 +135,14 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 
 | # | Задача | План | Для чего |
 |---|---|---|---|
-| Ф1 | Ф4: **4.0** разведка ✅ → **4.1** claim check ✅ (`dd1491e3`, 4.1-fix `e70c05df`, 09-29) → 4.4, 4.5, 4.6, 4.8a, 4.7a, 4.7c в `main`; дальше **4.7b** один режим shm → **4.7d** overflow → живой A/B (4.7c — `375bbb4b2`, ADR-173, 10-01) | [`transport-single-policy`](../transport-single-policy/plan.md) Ф4 | С: симулятор — второй поставщик кадров; разблокирует lifecycle Ф2 |
+| Ф1 | Ф4: **4.0** разведка ✅ → **4.1** claim check ✅ (`dd1491e3`, 4.1-fix `e70c05df`, 09-29) → 4.4, 4.5, 4.6, 4.8a, 4.7a, 4.7c в `main`; дальше **4.7b** один режим shm → **4.7d** overflow → живой A/B (4.7c — `375bbb4b2`, ADR-173, 10-01) | [`transport-single-policy`](../transport-single-policy/plan.md) Ф4 | С: симулятор — второй поставщик кадров; условие L-6 для Ф2 lifecycle-stop-ownership выполнено 4.1 (второе условие — Ж1) |
 | Ф2 | **4.5** `ServiceContext`; миграция `robot_comm`, `vfd_comm`, `modbus` названа в задаче | [`observability-closure`](../observability-closure/plan.md) | Р: `robot_comm` дал 0 записей ошибок на 2336 строк журнала |
 | Ф3 | **2.1** развести глаголы `record_metric` (counter/gauge по сборке) | [`framework-architecture-rework`](../framework-architecture-rework/plan.md) | Р: до того, как `client_v2` начнёт публиковать метрики; от codemod не зависит |
-| Ф4 | Условия CTO: ~~юнит-тест severity~~ (DONE 09-29, `97bdcf9b`), флейк `children_exit_hook`, прогон `--backend-live`; **ещё два флейка graceful stop на Windows** (давние, замер 09-29: база 6/12 и 5/12, main 1/8 и 1/8) — `test_graceful_stop_acceptance::…test_message_to_live_reader_is_delivered_before_exit`, `test_pm_marks_gone_reader_hazards::test_stop_many_unblocks_writer_of_dead_reader_gracefully`; затем Ф2 перемер | [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) | Ф2 перемер ⛔ Ф1 |
+| Ф4 | Условия CTO: ~~юнит-тест severity~~ (DONE 09-29, `97bdcf9b`), флейк `children_exit_hook`, прогон `--backend-live`; **ещё два флейка graceful stop на Windows** (давние, замер 09-29: база 6/12 и 5/12, main 1/8 и 1/8) — `test_graceful_stop_acceptance::…test_message_to_live_reader_is_delivered_before_exit`, `test_pm_marks_gone_reader_hazards::test_stop_many_unblocks_writer_of_dead_reader_gracefully`; затем Ф2 перемер | [`lifecycle-stop-ownership`](../lifecycle-stop-ownership.md) | условия CTO ▶ сейчас; Ф2 перемер ⛔ **Ж1** (lifecycle-owner-scope Ф1 меняет путь и время стопа ребёнка) и D1; Task 3.1 сужена до межпроцессной половины |
 | Ф5 | Ф1 — четыре P0 «правда не агрегируется» | [`backend-ctl-review-remediation`](../backend-ctl-review-remediation.md) | Р: отладка mailbox/ACK инструментом, который не прячет потери |
 | Ф6 | остаток closure: 4.3b → 4.6 нейтральный словарь → 4.15 хоп-лаг → 4.14 ретенция по байтам; 4.3, 4.12, 4.16; Ф5 | observability-closure | С: сим как второе приложение не наследует словарь инспектора |
 | Ф7 | 2.5, Ф3–Ф4 | [`otel-export`](../otel-export.md) | после closure 4.3b |
-| Ф8 🔧 | D1: проверка lifecycle 1.5 на Linux/Orin; gui-service на Linux не проверялся; **L-7** (`defects.md`) — сторож смерти родителя на Windows не срабатывает никогда, на редкой ветке шлёт Ctrl+C — чинить вместе с D1 (один механизм, две ОС), железо для Windows-части не нужно | lifecycle-stop-ownership | Р и линия, если хост — Orin (О-6) |
+| Ф8 🔧 | D1: проверка lifecycle-stop-ownership 1.5 на Linux/Orin; gui-service на Linux не проверялся; **L-7** (`defects.md`) — сторож смерти родителя на Windows не срабатывает никогда, на редкой ветке шлёт Ctrl+C — чинить вместе с D1 (один механизм, две ОС), железо для Windows-части не нужно | lifecycle-stop-ownership | Р и линия, если хост — Orin (О-6) |
 | — | Окно codemod (rework Ф3–Ф6) → frontend-constructor Блок В | rework | ⛔ решение Р-1 rework и естественная пауза; условия входа — [`history.md`](history.md), «Жёсткие условия» |
 
 ### Д — датасет ([`dataset-annotation`](../dataset-annotation/plan.md)) — в паузах
@@ -142,13 +167,14 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 
 ## 4. Контроль планов — все 58 планов `plans/`
 
-Колонка **Полоса** — буква из §2. **Статус** сверен git'ом 2026-09-26; строки Р и С — 2026-09-29; строки, тронутые 2026-10-01, — по `main` = `23f872bce`.
+Колонка **Полоса** — буква из §2. **Статус** сверен git'ом 2026-09-26; строки Р и С — 2026-09-29; строки, тронутые 2026-10-01, — по `main` = `23f872bce`; строки Ж и lifecycle-stop-ownership — 2026-10-03, `main` = `8b0eeac41`.
 Счёт: `ls plans/` без `queue/`, `_archive/`, `README.md`, `QUEUE.md` (файлы и каталоги планов).
 
 ### 4.1 Активные — в работе или следующие
 
 | План | Полоса | Статус | Следующий шаг |
 |---|---|---|---|
+| [lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) | Ж | Ф0 начата 2026-10-03 (архитектура принята CTO с условиями; спек 0.1 `41f2822c0`), ветка `feat/lifecycle-owner-scope` | 0.1: ревью спека → тестер → реализация |
 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Р | T0.1–T2.W в `main` (`0dcffc5e`), T1.2/T1.3 в `main` (`4fd912ccd`); GATE-0 не оформлен ⚠ шапка «ждёт ревью» | О-10 → T2.3 |
 | [line-sim-layer-editor](../line-sim-layer-editor/plan.md) | С | APPROVED 09-27; 1.0, 1.1b, 1.2a, 1.2h, 1.3h-a…d в `main` (`79dda66a9`, `c2a3b876a`); осталось 1.2b → 1.3 (Qt, ждёт И3), 1.1 DEFERRED, 2.1 необязательно | 1.2b после И3 |
 | [line-sim](../line-sim/plan.md) | С | Ф0–Ф3, Ф5 DONE в `main`; Ф6: 6.1 в `main`, 6.2 DONE 09-27; Ф4 на переписывание; 5.5 DEFERRED. Метка `[BLOCKED]` у 1.1 устарела | 6.3 ROI мышью: условие ORDER «после 1.3h-b» снято (`79dda66a9`), но шапка `phase-6-pult-gui.md` держит 6.3 DEFERRED до GUI-загрузки generic-приложений — расхождение, снять при постановке |
@@ -158,7 +184,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | [transport-single-policy](../transport-single-policy/plan.md) | Ф | Ф4: 4.0, 4.1, 4.4, 4.5, 4.6, 4.8a (`95093b966`), 4.7a, 4.7c (`375bbb4b2`, ADR-173) в `main`; 4.8c (бенч из GUI, спека `d3a1c3d11`) — кода нет, владельцем не подтверждена | 4.7b → 4.7d → живой A/B |
 | [pipeline-node-timing](../pipeline-node-timing.md) | И | заведён 09-30 (владелец): время узлов в GUI; дефекты PC-1..4; T1 DONE (`b611e7a7`, слияние `5a83c232` 10-01) | T2 — время узла на графе |
 | [observability-closure](../observability-closure/plan.md) | Ф | Ф0–Ф3 DONE, Ф4: 4.4, 4.11, 4.13 DONE; ветка в `main` | 4.5 / 4.3b |
-| [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Ф | Ф1 DONE (merge `ae0eebde`), CTO с условиями | юнит-тест severity |
+| [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Ф | Ф1 DONE (merge `ae0eebde`), CTO с условиями; severity DONE 09-29; 3.1 сужена 10-03 (внутрипроцессное → Ж) | условия CTO: флейк `children_exit_hook`, `--backend-live`, два флейка graceful stop; Ф2 ⛔ Ж1 и D1 |
 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Ф | не начат; Ф3 сделана в gui-service 1.3a, 3.2 = `8fae4034` | Ф1 |
 | [otel-export](../otel-export.md) | Ф | Ф0–Ф2 почти целиком, Ф3 наполовину; в `main` | 2.5 |
 | [framework-architecture-rework](../framework-architecture-rework/plan.md) | Ф | DRAFT ред. 3, ревью 7/10, решения Ф0 не приняты | 2.1 отдельно; остальное ⛔ Р-1 |
@@ -238,6 +264,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 В блоке и на странице — только очередь: планы §4.1, §4.2 и те, которых нет в таблицах §4; закрытые §4.3 и `_archive/` скрыты и считаются в строке `в архиве`.
 
 <!-- progress:begin -->
+- 2026-10-03_lifecycle-owner-scope — 0 из 25 · 0%
 - robot-protocol-v2 — 5 из 21 · 24%
 - line-sim-layer-editor — 0 из 9 · 0% · без отметки 1
 - line-sim — 24 из 28 · 86%
