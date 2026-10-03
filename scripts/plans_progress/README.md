@@ -15,7 +15,7 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 |---|---|
 | `--root DIR` | каталог с `plans/` (по умолчанию корень репозитория) |
 | `--order PATH` | `ORDER.md` (по умолчанию `<root>/plans/queue/ORDER.md`); нет файла — полосы `null` |
-| `--json` | список планов: `plan`, `path`, `archived`, `lane`, `tier`, `done`, `total`, `dropped`, `unknown`, `tasks` |
+| `--json` | список планов: `plan`, `path`, `archived`, `lane`, `tier`, `done`, `total`, `dropped`, `unknown`, `unmarked`, `header_status`, `tasks` (`id`, `title`, `status`, `ref`, `after`, `ready`), затем `after`, `after_reason`, `waiting_on`, `ready`, `dep_unknown`, `dep_cycle` (новые ключи — в конце объекта, порядок старых не менялся) |
 | `--html [PATH]` | страница без внешних ресурсов; по умолчанию `data/plans_progress.html` |
 | `--check` | печатает находки линта; exit 1 при новой блокирующей находке |
 | `--baseline PATH` | известные блокирующие находки (`<план>:<КОД>[:<id>]`); из базы не блокируют |
@@ -48,6 +48,34 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 `--check` без `plans/`, без живых планов или с отсутствующим `--baseline` завершается кодом 2.
 Архивные планы линт не смотрит.
 
+## Порядок между планами: поле `После:`
+
+Поле плана — строка в первых 30 строках `plan.md`: `- **После:** A, B — причина` (`After`, без жирного, маркер `*`/`+`
+или цитата `>` допустимы). Первая подходящая строка выигрывает; строки внутри ограждения кода (```` ``` ````, `~~~`) пропускаются.
+
+| Часть значения | Куда попадает |
+|---|---|
+| Текст справа от первого ` — ` или ` – ` | `after_reason` |
+| Элемент слева (через запятую) с `⛔` | условие: текст после знака → `waiting_on`; не имя плана |
+| Остальные элементы | имя плана → `after`: `A`, `A.md`, `` `A` ``, `plans/A/plan.md`, `[A](../A/plan.md)`; повтор хранится один раз |
+
+Задача: `(после 1.1, 1.0)` / `(after 1.1)` в тексте пункта (код-спаны не читаются) → `tasks[].after`. Регистр различается
+только у слова. Читаются id сразу за словом через запятую, до первого токена не-id: `(после 1b.2b-pre; до 1b.3)` даёт
+`["1b.2b-pre"]`, `1.2B` и `1.2.3` id не считаются. Связь только у пунктов списка; у задач из заголовков, таблиц и
+`tasks/<id>.md` `after` пуст.
+
+**Закрыт** план: в архиве, в §4.3, с шапкой `Статус:` done/superseded или с задачами, среди которых нет
+`unknown`/`pending`/`in_progress`/`blocked`. Имя плана ищется среди всех планов; при живой и архивной копии решает архивная.
+
+- План `ready` = не закрыт, нет `waiting_on`, каждое имя из `after` найдено и закрыто, план не в цикле.
+  Ненайденное имя держит план (`ready: false`) и попадает в `dep_unknown`. `dep_cycle` — участники цикла,
+  в котором стоит план (план, который лишь ждёт участника, в него не входит); закрытый план цикл разрывает.
+- Задача `ready` = её план `ready`, статус `pending`, каждый id из `after` есть в этом плане со статусом
+  done/deferred/superseded, задача не в цикле.
+- Находки (живые планы; архив не смотрится): `DEP_UNKNOWN` — одна на пару (ссылка, отсутствующее имя:
+  `нет плана <имя>` или `нет задачи <id>`), `DEP_CYCLE` — одна на участника (`<план>` или `<план>:<id>`).
+  Блокируют только у планов §4.1, иначе информационные; ключ базы — `<план>:<КОД>`.
+
 ## Что показывает страница и блок
 
 Страница `--html`: основной список — планы §4.1 `ORDER.md` (порядок таблицы); `<details id="waiting">` — §4.2
@@ -76,6 +104,7 @@ git merge --continue
 
 ```
 python -m pytest scripts/plans_progress/tests/test_acceptance_progress.py scripts/plans_progress/tests/test_author_hazards.py -q
+python -m pytest scripts/plans_progress/tests/test_acceptance_deps.py scripts/plans_progress/tests/test_deps_author.py -q
 ```
 
 ## Доверие к цифрам
