@@ -13,7 +13,7 @@
 | 5.5c | **готова, ждёт ревью.** Ветка `fix/t55c-gate-green` (`.claude/worktrees/t55c-impl`), HEAD `f3b913751`. Гейт: ruff 0, pyright 0 errors, bandit -ll exit 0, корневой pytest 10607 passed / 0 failed, run_framework_tests 10750 / 0, docs_verify 36. Инъекции лида 4/4 пойманы (`inject_55c.json` в scratchpad — перенести). Найдена реальная дыра: `GenericRepository.find_by` — ключи kwargs в SQL без проверки → закрыта |
 
 ## Что открыто
-- **Радиус слитой ветки фазы** (process/process_manager/router + stand_gate + backend + robot_control) — запущен в фоне в конце сессии, результат не прочитан. Первое действие новой сессии: прогнать заново и прочитать.
+- ~~Радиус слитой ветки фазы~~ — **зелёный** на `fd906e4ee`: process+process_manager+router 5218 passed / 0 failed; stand_gate+backend+robot_control 361 passed. Корневой pytest и run_framework_tests на ветке фазы — после вливания main с 5.5c.
 - **5.5c:** синхронный reviewer (фокус: 44 тега `no-health` в Plugins — законная разметка или маскировка; 15 `nosec B608`; ruff-format переформатировал целые файлы — смотреть `git diff -w`; 2 xpassed не разобраны). Затем слияние в main **раньше** ветки фазы, SHA соседям f0 и 5a, потом main → `feat/transport-f5`.
 - **Инъекция «/dev:ship отказывает при красном гейте»** — только владелец.
 - **5.4 на `multi_camera.yaml`** (теперь стартует) — короткий замер после окна соседа f0.
@@ -39,7 +39,7 @@
 | testers 5.6 / 5.9a / 5.5c | `aeb38b2d344849a7f` / `ae0ff6ae34d2bd137` / `ae0df4bf34400f234` | сдали |
 
 ## Дальше (порядок)
-1. Радиус ветки фазы → прочитать.
+1. ~~Радиус ветки фазы~~ — зелёный.
 2. Свежий reviewer 5.5c (синхронно) → правки автору → слияние в main, SHA соседям.
 3. main → `feat/transport-f5`, корневой pytest на ветке фазы.
 4. После окна f0: 5.4 на `multi_camera.yaml` + повтор `stand_gate --runs 3` (дренаж).
