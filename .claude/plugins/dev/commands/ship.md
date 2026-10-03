@@ -9,12 +9,31 @@ Run the final check before shipping the code:
    ```bash
    make gate        # if there is a Makefile (lint + types + tests)
    ```
-   Fallback (if make is unavailable):
+   Fallback (if make is unavailable — e.g. Windows without GNU make):
    ```bash
    uv run ruff check .
    uv run pyright src   # same scope as CI; bare `pyright` pulls in tests/, where type debt usually piles up
    uv run pytest -q
    ```
+   **The fallback must cover every component of the project's `gate` target, not this
+   generic list.** Read the `gate:` line of the Makefile and run each recipe it expands
+   to. Example: if `gate: check test test-fw` and `test-fw` runs
+   `scripts/run_framework_tests.py`, the fallback without that script is blind to every
+   test outside the root testpaths (measured in Inspector_bottles, 2026-10-02: ~6.5k
+   framework tests).
+
+   **A red gate refuses the ship. No exceptions, no "pre-existing failure".** Any
+   failed / error / segfault in any gate component → stop, report the failing ids, do
+   not continue to the next step. The only legal quarantine is
+   `pytest.mark.xfail(strict=True, reason="<issue or OPEN_QUESTIONS link>")` committed
+   before the ship — never a skip without a reason, never "known red, ship anyway".
+
+   Plans format check — if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists
+   (`make gate` does not run `scripts/validate.py`); otherwise skip this step without error (project-specific):
+   ```bash
+   python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
+   ```
+   Exit 1 = a new blocking finding in a plan, exit 2 = the check could not run — **STOP**, fix before shipping.
 
 2. **Change summary:**
    ```bash
@@ -118,7 +137,15 @@ If the plan is found and every Task = [DONE] (the remainder is only backlog / a 
    a new session reads an archived plan through its `SUMMARY.md` only.
 3. **Refresh, then check the ledger:** `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`, then `python3 scripts/plans_ledger.py status` — no findings for the closed plan
    (show other `WARN`s to the owner, but don't fix them silently).
-4. Commit:
+4. **Progress check (plans_progress):** if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists,
+   the plan format must be clean; otherwise skip this step without error:
+   ```bash
+   python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
+   ```
+   Exit 1 = a new blocking finding — **STOP**, fix the plan, don't extend the baseline silently. A stale
+   `progress:begin`/`progress:end` block in `plans/queue/ORDER.md` is only an info line: the lead refreshes it at
+   the merge point (see `scripts/plans_progress/README.md`). Exit 2 = the check could not run (no `plans/`, no baseline file).
+5. Commit:
    ```bash
    git add plans/
    git commit -m "docs(plans): архив <slug> (план выполнен)

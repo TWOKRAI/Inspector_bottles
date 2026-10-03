@@ -150,9 +150,7 @@ PLAN_REFS_LOG_LIMIT = 200
 ALLOWED_RISK = {"low", "medium", "high"}
 ALLOWED_REVERSIBLE = {"yes", "no", "migration-needed"}
 
-SUBJECT_RE = re.compile(
-    r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$"
-)
+SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$")
 TRAILER_RE = re.compile(r"^([A-Z][A-Za-z\-]*): (.+)$")
 
 # `Tested:` grammar enforced ONLY while the tests-discipline gate fires (see
@@ -211,9 +209,7 @@ def _split_globs(raw: str) -> list[str]:
     Empty items are dropped. Returns [] when nothing usable is left, which
     callers treat as "key absent" and fall back to the default.
     """
-    return [
-        g for g in (part.strip().strip("`").strip() for part in raw.split(",")) if g
-    ]
+    return [g for g in (part.strip().strip("`").strip() for part in raw.split(",")) if g]
 
 
 REQUIRED_BASE_TRAILERS = {"Why"}
@@ -255,9 +251,7 @@ class TestsGateConfig:
 
     enabled: bool = True
     code_globs: list[str] = field(default_factory=lambda: [TESTS_GATE_CODE_DEFAULT])
-    exclude_globs: list[str] = field(
-        default_factory=lambda: [TESTS_GATE_EXCLUDE_DEFAULT]
-    )
+    exclude_globs: list[str] = field(default_factory=lambda: [TESTS_GATE_EXCLUDE_DEFAULT])
 
 
 def find_repo_root() -> Path | None:
@@ -364,11 +358,7 @@ def active_plan_files(repo_root: Path) -> list[str]:
         return []
     out = [p for p in plans_dir.glob("*.md") if p.is_file()]
     out += [p for p in plans_dir.glob("*/plan.md") if p.is_file()]
-    return sorted(
-        p.relative_to(repo_root).as_posix()
-        for p in out
-        if "_archive" not in p.relative_to(repo_root).parts
-    )
+    return sorted(p.relative_to(repo_root).as_posix() for p in out if "_archive" not in p.relative_to(repo_root).parts)
 
 
 def plans_declaring_branch(repo_root: Path, branch: str) -> list[str]:
@@ -415,14 +405,10 @@ def plan_by_slug(repo_root: Path, branch: str) -> str | None:
     plans_dir = repo_root / "plans"
     if plans_dir.is_dir():
         dated = re.compile(r"^\d{4}-\d{2}-\d{2}_" + re.escape(slug) + r"$")
-        single = sorted(
-            p for p in plans_dir.glob(f"*_{slug}.md") if dated.match(p.stem)
-        )
+        single = sorted(p for p in plans_dir.glob(f"*_{slug}.md") if dated.match(p.stem))
         if single:
             return single[-1].relative_to(repo_root).as_posix()
-        multi = sorted(
-            p for p in plans_dir.glob(f"*_{slug}/plan.md") if dated.match(p.parent.name)
-        )
+        multi = sorted(p for p in plans_dir.glob(f"*_{slug}/plan.md") if dated.match(p.parent.name))
         if multi:
             return multi[-1].relative_to(repo_root).as_posix()
     return None
@@ -523,9 +509,7 @@ def plan_from_refs_log(repo_root: Path, base: str | None = None) -> str | None:
     return None
 
 
-def resolve_plan(
-    repo_root: Path, branch: str | None, base: str | None = None
-) -> PlanResolution:
+def resolve_plan(repo_root: Path, branch: str | None, base: str | None = None) -> PlanResolution:
     """The one answer to "which plan is this branch working on".
 
     Pre:
@@ -570,9 +554,7 @@ def resolve_plan(
     return PlanResolution(None, "none")
 
 
-def plan_for_branch(
-    repo_root: Path, branch: str | None, base: str | None = None
-) -> str | None:
+def plan_for_branch(repo_root: Path, branch: str | None, base: str | None = None) -> str | None:
     """`resolve_plan().plan`, with any ambiguity warned about on stderr.
 
     Pre / Post — as `resolve_plan()`. This is the form both shipped gates and
@@ -602,11 +584,7 @@ def load_allowed_layers() -> set[str] | None:
             config = parent / LAYERS_CONFIG_REL
             if config.exists():
                 lines = config.read_text(encoding="utf-8").splitlines()
-                layers = {
-                    line.strip()
-                    for line in lines
-                    if line.strip() and not line.strip().startswith("#")
-                }
+                layers = {line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
                 return layers  # may be empty → Layer trailer optional
             break
     return set(DEFAULT_LAYERS)
@@ -689,9 +667,7 @@ def _scan_ini_block(lines: list[str]) -> tuple[int, int, list[str]] | None:
         while j < len(lines) and not lines[j].strip().startswith(closing):
             body.append(lines[j])
             j += 1
-        if any(
-            _GATE_KEY_RE.match(b) for b in body if not b.strip().startswith("#")
-        ):
+        if any(_GATE_KEY_RE.match(b) for b in body if not b.strip().startswith("#")):
             close_idx = j if j < len(lines) else len(lines) - 1
             return i, close_idx, body
         i = j + 1
@@ -849,12 +825,19 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
     trailers: dict[str, list[str]] = {}
     while paragraphs:
         last = paragraphs[-1]
-        if all(TRAILER_RE.match(line) for line in last):
+        # Git-style folding: a paragraph is a trailer block when it STARTS with a
+        # trailer line. Non-matching lines inside the block fold into the previous
+        # trailer's value, so a wrapped Why:/Layer: value does not drop the whole
+        # block into the body (false "Missing required trailers").
+        if TRAILER_RE.match(last[0]):
+            current_key: str | None = None
             for line in last:
                 m = TRAILER_RE.match(line)
                 if m:
-                    key, val = m.group(1), m.group(2).strip()
-                    trailers.setdefault(key, []).append(val)
+                    current_key, val = m.group(1), m.group(2).strip()
+                    trailers.setdefault(current_key, []).append(val)
+                elif current_key is not None:
+                    trailers[current_key][-1] = f"{trailers[current_key][-1]} {line.strip()}"
             paragraphs.pop()
         else:
             break
@@ -949,8 +932,7 @@ def validate(
         if "Layer" in missing:
             hint += f"\n    Layer: {' | '.join(sorted(layers))}"
         result.errors.append(
-            f"Missing required trailers: {sorted(missing)}.\n"
-            f"  Add at end of message (after blank line):\n{hint}"
+            f"Missing required trailers: {sorted(missing)}.\n  Add at end of message (after blank line):\n{hint}"
         )
 
     # 4. Trailer value validation
@@ -968,31 +950,23 @@ def validate(
         for val in trailers["Risk"]:
             level = val.split("—")[0].split("-")[0].strip().lower()
             if level not in ALLOWED_RISK:
-                result.warnings.append(
-                    f"Risk: '{val}'. Expected to start with low/medium/high"
-                )
+                result.warnings.append(f"Risk: '{val}'. Expected to start with low/medium/high")
 
     if "Reversible" in trailers:
         for val in trailers["Reversible"]:
             level = val.split("—")[0].strip().lower()
             if level not in ALLOWED_REVERSIBLE:
-                result.warnings.append(
-                    f"Reversible: '{val}'. Expected: yes | no | migration-needed"
-                )
+                result.warnings.append(f"Reversible: '{val}'. Expected: yes | no | migration-needed")
 
     # 5. Unknown trailers — warning (don't block, extensible)
     for key in trailers:
         if key not in KNOWN_TRAILERS:
-            result.warnings.append(
-                f"Unknown trailer '{key}:'. Known: {sorted(KNOWN_TRAILERS)}"
-            )
+            result.warnings.append(f"Unknown trailer '{key}:'. Known: {sorted(KNOWN_TRAILERS)}")
 
     if "Why" in trailers:
         for val in trailers["Why"]:
             if len(val) < 5:
-                result.warnings.append(
-                    f"Why: too brief ('{val}'). Describe motivation in at least one phrase"
-                )
+                result.warnings.append(f"Why: too brief ('{val}'). Describe motivation in at least one phrase")
 
     # 6. Plan-driven workflow: if branch has a plan, require matching Refs trailer.
     if plan_path:
@@ -1022,10 +996,7 @@ def validate(
             exclude_res = [_glob_to_regex(g) for g in gate_cfg.exclude_globs]
             tests_re = _glob_to_regex(TESTS_DIR_GLOB)
             gated_paths = [
-                p
-                for p in staged
-                if any(r.match(p) for r in code_res)
-                and not any(r.match(p) for r in exclude_res)
+                p for p in staged if any(r.match(p) for r in code_res) and not any(r.match(p) for r in exclude_res)
             ]
             tests_staged = any(tests_re.match(p) for p in staged)
             if gated_paths and not tests_staged:
@@ -1043,9 +1014,7 @@ def validate(
                     if not TESTED_PATH_VALUE_RE.match(val):
                         continue
                     in_staged = val in staged
-                    in_head = bool(gate_repo_root) and _path_exists_in_head(
-                        gate_repo_root, val
-                    )
+                    in_head = bool(gate_repo_root) and _path_exists_in_head(gate_repo_root, val)
                     if in_staged or in_head:
                         satisfied = True
                         break
@@ -1123,9 +1092,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("\nERROR: Commit message is invalid:\n")
         for e in result.errors:
             sys.stderr.write(f"  - {e}\n")
-        sys.stderr.write(
-            "\nGuide: .claude/COMMIT_GUIDE.md\nBypass (merge/rebase only): git commit --no-verify\n"
-        )
+        sys.stderr.write("\nGuide: .claude/COMMIT_GUIDE.md\nBypass (merge/rebase only): git commit --no-verify\n")
         return 1
 
     return 0

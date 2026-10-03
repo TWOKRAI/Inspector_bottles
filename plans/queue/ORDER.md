@@ -3,6 +3,9 @@
 > **Единственное место порядка.** Сверено по git 2026-10-01 (`main` = `23f872bce`); прежние сверки — 2026-09-26
 > (`main` = `76cfa48f`), полосы Р и С — 2026-09-29 (`main` = `3fd359d1`); статусы планов — по
 > `git merge-base --is-ancestor`, не по шапкам (шапки врали минимум в пяти планах — см. таблицу).
+> **Как смотреть прогресс:** `python scripts/plans_progress/plans_progress.py --html` → `data/plans_progress.html` (шкала и ячейка на задачу по каждому плану;
+> формат строки задачи — [`plans/README.md`](../README.md#формат-задачи-и-прогресс)). Счётчики считает скрипт из самих планов, здесь их вручную не пишем.
+>
 > Прочее в папке — справочники, порядок в них не пишется:
 >
 > | Файл | Что там |
@@ -228,3 +231,38 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | О-7 | `data/devices.yaml`: удалять (device-tree Фаза E) или хранить там состояние v2 | Р7 | хранить; Фазу E сузить |
 | О-8 | Перенос ~25 закрытых планов в `_archive/` (расширение №9); ссылки чинить скриптом | нет, гигиена | да, одним коммитом через `plans_ledger.py close` |
 | О-9 | Поправить корневой `CLAUDE.md`: Ultralytics не установлен и не в `pyproject.toml` | нет | да |
+
+## Прогресс планов (генерирует скрипт)
+
+Блок между маркерами пишет только `python scripts/plans_progress/plans_progress.py --sync-order` (лид, в `main`, в точке слияния); руками не править. На `main` `--check` краснеет, если блок устарел. Порядок лида при слиянии: `git merge --no-ff --no-commit <ветка>` → `--sync-order` → `git add plans/queue/ORDER.md` → `git merge --continue` (на ветках `--sync-order` не запускать).
+В блоке и на странице — только очередь: планы §4.1, §4.2 и те, которых нет в таблицах §4; закрытые §4.3 и `_archive/` скрыты и считаются в строке `в архиве`.
+
+<!-- progress:begin -->
+- robot-protocol-v2 — 5 из 21 · 24%
+- line-sim-layer-editor — 0 из 9 · 0% · без отметки 1
+- line-sim — 24 из 28 · 86%
+- gui-constructor — 0 из 21 · 0%
+- 2026-09-22_gui-service — 10 из 21 · 48%
+- frontend-constructor — 0 из 24 · 0%
+- transport-single-policy — 1 из 31 · 3% · без отметки 6
+- pipeline-node-timing — 0 из 4 · 0% · без отметки 4
+- observability-closure — 26 из 52 · 50% · без отметки 1
+- lifecycle-stop-ownership — 6 из 9 · 67% · без отметки 3
+- backend-ctl-review-remediation — 0 из 16 · 0%
+- otel-export — 9 из 21 · 43%
+- framework-architecture-rework — 0 из 11 · 0% · без отметки 10
+- dataset-annotation — 0 из 17 · 0% · без отметки 1
+- code-reader-sdk — 2 из 3 · 67%
+- layer-render — 5 из 20 · 25%
+- letters-retrain — 2 из 3 · 67% · без отметки 1
+- qr-code-reader — 0 из 19 · 0% · без отметки 6
+- robot-place-pose — 0 из 0
+- robot-calibration — 0 из 0
+- camera-robot-calibration — 0 из 0
+- device-tree-recipe — 0 из 0
+- word-layout — 0 из 0
+- storage-stack-embedded-first — 0 из 11 · 0%
+- 2026-07-06_constructor-master — 0 из 0
+- 2026-10-02_plans-progress-dashboard — 11 из 25 · 44%
+в архиве: 119
+<!-- progress:end -->

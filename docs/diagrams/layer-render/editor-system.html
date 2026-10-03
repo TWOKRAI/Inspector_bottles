@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Копия артефакта https://claude.ai/artifact/2K3PQc8BqtrCAghdgg2ppp (версия 4, 2026-10-03, тёмная тема).
+     В артефакте mermaid рисует сам claude.ai; здесь библиотека грузится с CDN — нужен интернет. -->
+<title>Сервис слоёв layer_render</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: одна колонка ~72ch, схемы и макет экрана — на всю ширину колонки; акцент — мятный цвет просвета ленты */
+:root {
+  /* Тёмная тема всегда (просьба владельца 2026-10-03): одна палитра, без светлого варианта */
+  --bg: #141917;
+  --surface: #1c2320;
+  --fg: #e3e9e6;
+  --muted: #9aa7a2;
+  --line: #2e3833;
+  --accent: #5cc8b3;
+  --accent-soft: #1d3530;
+  --warn: #e0a35a;
+  --warn-soft: #3a2c1a;
+  --done: #8fcf86;
+  --done-soft: #1f3320;
+  --code-bg: #222b27;
+  --canvas: #0d100f;
+  --canvas-fg: #a9dccf;
+  --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--f-body); padding-inline: 16px; padding-block: 32px 64px; }
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 44px; }
+header { display: grid; gap: 12px; }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { font: 700 clamp(26px, 5vw, 38px)/1.15 var(--f-display); margin: 0; text-wrap: balance; }
+h2 { font: 500 21px/1.3 var(--f-display); margin: 0; text-wrap: balance; }
+h3 { font: 600 16px/1.4 var(--f-body); margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.lead { font-size: 18px; }
+section { display: grid; gap: 14px; }
+.muted { color: var(--muted); }
+code, pre.yaml { font-family: var(--f-mono); font-size: 13.5px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+.frame { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+pre.mermaid { margin: 0; background: transparent; text-align: center; }
+pre.yaml { margin: 0; background: var(--code-bg); border-radius: 10px; padding: 16px; overflow-x: auto; line-height: 1.55; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 68ch; }
+.answer { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 14px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 8px; }
+.note { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: 14px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 8px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.3 var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.pill { display: inline-block; font: 500 12px/1 var(--f-mono); padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.done { background: var(--done-soft); color: var(--done); }
+.pill.now { background: var(--warn-soft); color: var(--warn); }
+.pill.next { background: var(--accent-soft); color: var(--accent); }
+.pill.later { background: var(--code-bg); color: var(--muted); }
+.nums { font-variant-numeric: tabular-nums; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.two > div { min-width: 0; display: grid; gap: 8px; align-content: start; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13.5px; color: var(--muted); align-items: center; }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+
+/* Макет экрана редактора */
+.editor { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.ed-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); font: 500 12.5px/1.2 var(--f-mono); color: var(--muted); }
+.ed-bar b { color: var(--fg); font-weight: 600; }
+.ed-bar .tab { padding: 5px 9px; border-radius: 6px; border: 1px solid var(--line); }
+.ed-bar .tab.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.ed-grid { display: grid; grid-template-columns: 190px minmax(0, 1fr) 200px; grid-template-areas: "layers canvas props" "layers preview fx"; }
+.panel { padding: 12px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.panel h4 { margin: 0; font: 600 11.5px/1.2 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; align-items: center; flex-wrap: wrap; }
+.p-layers { grid-area: layers; }
+.p-canvas { grid-area: canvas; }
+.p-props { grid-area: props; border-right: 0; }
+.p-preview { grid-area: preview; border-bottom: 0; }
+.p-fx { grid-area: fx; border-right: 0; border-bottom: 0; }
+.p-layers { border-bottom: 0; }
+.row { font-size: 13.5px; padding: 5px 8px; border-radius: 6px; background: var(--bg); display: flex; justify-content: space-between; gap: 6px; }
+.row.sel { background: var(--accent-soft); color: var(--fg); }
+.row small { font: 11px/1.4 var(--f-mono); color: var(--muted); }
+.grp { font: 500 11px/1.2 var(--f-mono); color: var(--muted); margin-top: 4px; }
+.cv { background: var(--canvas); border-radius: 8px; aspect-ratio: 4 / 3; max-width: 100%; position: relative; overflow: hidden;
+  background-image: linear-gradient(rgba(127,200,180,.13) 1px, transparent 1px), linear-gradient(90deg, rgba(127,200,180,.13) 1px, transparent 1px);
+  background-size: 20px 20px; }
+.cv .disk { position: absolute; left: 50%; top: 50%; width: 42%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #f0ede4, #c9c3b4); border: 2px dashed var(--accent); }
+.cv .glyph { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%) rotate(-8deg); font: 700 clamp(28px, 6vw, 46px)/1 var(--f-display); color: #2a2622; }
+.cv .bbox { position: absolute; left: 22%; top: 14%; width: 56%; height: 72%; border: 1.5px solid #e0a35a; border-radius: 2px; }
+.cv .bbox::after { content: "класс: А"; position: absolute; top: -18px; left: -1px; font: 500 10.5px/1 var(--f-mono); color: #e0a35a; white-space: nowrap; }
+.cv .tag { position: absolute; left: 8px; bottom: 8px; font: 500 11px/1.3 var(--f-mono); color: var(--canvas-fg); }
+.field { display: grid; gap: 2px; font-size: 13px; }
+.field span { font: 11px/1.3 var(--f-mono); color: var(--muted); }
+.field div { background: var(--bg); border-radius: 6px; padding: 4px 8px; font-family: var(--f-mono); font-size: 12.5px; }
+.strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.strip i { aspect-ratio: 4 / 3; border-radius: 6px; background: var(--canvas); display: grid; place-items: center; font: normal 700 15px/1 var(--f-display); color: #d8d2c2; }
+.chip { display: inline-block; font: 12px/1.3 var(--f-mono); padding: 3px 7px; border-radius: 6px; background: var(--bg); margin: 0 4px 4px 0; }
+@media (max-width: 640px) {
+  .ed-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "canvas" "layers" "props" "preview" "fx"; }
+  .panel { border-right: 0; border-bottom: 1px solid var(--line); }
+  .p-fx { border-bottom: 0; }
+}
+footer { color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Inspector_bottles · план layer-render · обновлено 3 октября 2026</div>
+    <h1>Один механизм слоёв для симулятора, обучения и редактора</h1>
+    <p class="lead">Картинку объекта и фона будет собирать одна библиотека. Симулятор, генератор обучения и редактор зовут её одинаково. Что видно в редакторе, то поедет по ленте и попадёт в обучение. Ниже — вся система редактора целиком: экран, процессы, модули и планы, которые в этом участвуют.</p>
+  </header>
+
+  <section>
+    <h2>Где мы сейчас</h2>
+    <div class="two">
+      <div>
+        <h3>Сделано, волны 1–6</h3>
+        <ul class="nums">
+          <li>Фон из слоёв: чёрный стол, плитка ленты с прозрачными просветами, фильтр «перца» (1.1–1.4).</li>
+          <li>Ядро сервиса: склейка, эффекты, стек слоёв объекта переехали в <code>layer_render</code> (2.1–2.3).</li>
+          <li>Канва редактора: сетка, привязка, мультивыбор, горячие клавиши, видимость и замок слоя (5.3).</li>
+          <li>Одна формула выреза для конвейера и проверки модели (6.1, 6.4).</li>
+          <li>Ядро сервиса закончено: пресет, каталог классов, фабрика объектов, превью и одна функция кадра <code>render_scene</code> (2.4a, 2.4b, 2.5). Кадры сима побайтно прежние — проверено на конфиге стенда и живым стендом.</li>
+          <li>Последние прогоны: <code>layer_render</code> 1613 тестов, <code>line_sim</code> 581 — зелёные.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Дальше</h3>
+        <ul>
+          <li><b>3.1</b> — пресет v2: фон, эффекты и вид слоя в пресете; эффекты сцены в симе пойдут через <code>render_scene</code>. Рекомендация — брать первой.</li>
+          <li><b>6.2</b> — генератор обучения на том же механизме. Разблокирован, от 3.1 не зависит.</li>
+          <li>Затем бэкенд редактора (Ф4): схема полей, каталог эффектов, превью кадра.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Система редактора целиком</h2>
+    <p>Редактор — это клиент. Он ничего не рисует сам: шлёт команды процессам приложения <code>apps/line_sim</code>, а картинку для всех собирает сервис <code>layer_render</code>. Пресет хранится в одном месте, его читают и сим, и обучение.</p>
+    <div class="frame">
+<pre class="mermaid">
+flowchart TB
+  subgraph CL["Клиенты"]
+    WEB["Веб-редактор · pult_web<br/>канва 5.3 · панели Ф5"]
+    QT["Qt-вкладка · Ф8<br/>те же команды"]
+  end
+  subgraph APP["Процессы приложения apps/line_sim"]
+    LY["layers · layer_preview<br/>превью, раскладка слоёв,<br/>схема полей, каталог эффектов"]
+    SC["scene_source<br/>кадры сима, пресет живьём"]
+    RB["robot_host<br/>Modbus-робот"]
+    MJ["mjpeg_sink<br/>видео в браузер"]
+  end
+  ST[("Пресет сцены · YAML<br/>preset_store: ревизия, атомарно")]
+  subgraph LR["Сервис слоёв · Services/layer_render"]
+    direction LR
+    M1["фон · склейка · эффекты<br/>слои · вырез"]
+    M2["пресет · каталог<br/>фабрика · превью"]
+    M3(["render_scene<br/>одна функция кадра"])
+  end
+  subgraph USE["Потребители механизма"]
+    LS["line_sim<br/>лента, спавн, паспорт"]
+    DG["dataset_gen<br/>метки, экспорт датасета"]
+    ML["ml_train<br/>обучение, проверка модели"]
+  end
+  WEB -- команды --> LY
+  QT -. Ф8 .-> LY
+  WEB -- сохранить --> ST
+  ST --> SC
+  ST --> DG
+  LY --> LR
+  SC --> LS --> LR
+  DG --> LR
+  ML -- вырез --> LR
+  SC --> MJ --> WEB
+  SC --> RB
+</pre>
+    </div>
+    <div class="legend"><span>Сплошная линия — уже есть или в плане ближайших фаз.</span><span>Пунктир — Qt-вкладка, ждёт конструктор интерфейса.</span></div>
+  </section>
+
+  <section>
+    <h2>Как будет выглядеть экран</h2>
+    <p>Набросок экрана веб-редактора. На каждой панели — задача, которая её делает, и статус. Qt-вкладка повторит тот же экран на тех же командах.</p>
+    <div class="editor" role="img" aria-label="Набросок экрана редактора слоёв: слева список слоёв, в центре канва, справа свойства, снизу превью кадров и эффекты">
+      <div class="ed-bar">
+        <b>Редактор слоёв</b>
+        <span class="tab on">Объект</span><span class="tab">Фон</span><span class="tab">Разметка · Ф9</span>
+        <span style="margin-left:auto">пример: пресет · ревизия 14</span>
+      </div>
+      <div class="ed-grid">
+        <div class="panel p-layers">
+          <h4>Слои <span class="pill done">5.3</span></h4>
+          <div class="grp">ОБЪЕКТ, сверху вниз</div>
+          <div class="row sel">буква <small>class://</small></div>
+          <div class="row">пятно брака <small>defect</small></div>
+          <div class="row">диск <small>png</small></div>
+          <div class="grp">ФОН · панель 5.1</div>
+          <div class="row">плитка ленты <small>tile</small></div>
+          <div class="row">чёрный стол <small>solid</small></div>
+        </div>
+        <div class="panel p-canvas">
+          <h4>Канва <span class="pill done">5.3 сделано</span></h4>
+          <div class="cv">
+            <div class="disk"></div><div class="glyph">А</div><div class="bbox"></div>
+            <div class="tag">сетка 20 px · привязка · вписать</div>
+          </div>
+        </div>
+        <div class="panel p-props">
+          <h4>Свойства слоя <span class="pill later">4.1</span></h4>
+          <div class="field"><span>смещение, px</span><div>0, −4</div></div>
+          <div class="field"><span>угол, ° · разброс</span><div>0 · [−5, 5]</div></div>
+          <div class="field"><span>масштаб</span><div>1.00</div></div>
+          <div class="field"><span>цвет</span><div>200, 40, 40</div></div>
+          <p class="muted" style="font-size:12.5px">Поля строятся из схемы пресета.</p>
+        </div>
+        <div class="panel p-preview">
+          <h4>Превью кадров, seed 0–3 <span class="pill later">4.2</span></h4>
+          <div class="strip"><i>А</i><i>К</i><i>Р</i><i>Х</i></div>
+          <p class="muted" style="font-size:12.5px">Тот же код, что кадр сима: побайтно.</p>
+        </div>
+        <div class="panel p-fx">
+          <h4>Эффекты <span class="pill later">5.2</span></h4>
+          <div><span class="chip">шум</span><span class="chip">блик</span><span class="chip">размытие</span><span class="chip">тень</span></div>
+          <p class="muted" style="font-size:12.5px">Для слоя и для всего кадра.</p>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="pill done">сделано</i></span>
+      <span><i class="pill later">номер задачи</i> — в плане</span>
+      <span>Оранжевая рамка на канве — регион разметки из режима Ф9.</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Путь одной правки</h2>
+    <p>Вы двигаете слой — превью меняется сразу. Нажимаете «Сохранить» — сим подхватывает пресет без перезапуска, а обучение возьмёт тот же файл.</p>
+    <div class="frame">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as Вы
+  participant W as Редактор
+  participant L as Процесс layers
+  participant R as layer_render
+  participant S as preset_store
+  participant C as scene_source
+  U->>W: сдвинуть слой, добавить эффект
+  W->>L: раскладка и превью кадра
+  L->>R: render_scene
+  R-->>W: картинка
+  U->>W: Сохранить
+  W->>S: commit, ревизия 14
+  S-->>W: ревизия 15 или конфликт
+  S->>C: новый пресет
+  C->>R: кадры ленты по новому пресету
+  Note over S: генератор обучения (6.2) читает тот же YAML
+</pre>
+    </div>
+    <p class="muted">Ревизия защищает от двух окон: если пресет успели изменить, сохранение вернёт конфликт, а не затрёт чужую правку.</p>
+  </section>
+
+  <section>
+    <h2>Модули и кто за что отвечает</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Модуль</th><th>Что делает</th><th>Задача</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr><td><code>background</code></td><td>фон снизу вверх: заливка, плитка с прозрачностью</td><td>1.1</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>compose</code>, <code>io</code></td><td>склейка с альфой, поворот, чтение файлов с кириллицей</td><td>2.1</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>effects</code></td><td>шум, свет, размытие, блик: упорядоченный список</td><td>2.2</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>layers</code></td><td>стек слоёв объекта, розыгрыш вариаций</td><td>2.3</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>crop</code></td><td>одна формула квадратного выреза</td><td>6.1</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>preset</code>, <code>catalog</code></td><td>пресет сцены, каталог классов, мета, процедурные фоны</td><td>2.4a</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>factory</code>, <code>preview</code></td><td>объект без паспорта ленты, сетка превью</td><td>2.4b</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>scene</code></td><td><code>render_scene</code> — кадр для сима, обучения и превью</td><td>2.5</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>preset_store</code></td><td>хранение пресета с ревизией и атомарной записью</td><td>3.2</td><td><span class="pill later">Ф3</span></td></tr>
+          <tr><td><code>sources</code></td><td>откуда берётся спрайт: файл, класс, заливка, шрифт, вырез из фото</td><td>Ф7</td><td><span class="pill later">можно начинать</span></td></tr>
+          <tr><td>экспорт разметки</td><td>YOLO txt, COCO — функции в реестре</td><td>Ф9</td><td><span class="pill later">идея</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Режим разметки для обучения</h2>
+    <p>Ваш запрос от 2 октября: один редактор, а не несколько. Разметка — это режим того же редактора на той же канве. Регион хранится в пресете как ещё один вид слоя.</p>
+    <div class="two">
+      <div>
+        <h3>Что можно будет разметить</h3>
+        <ul>
+          <li>прямоугольник;</li>
+          <li>повёрнутый прямоугольник;</li>
+          <li>полигон;</li>
+          <li>маску кистью — той же кистью, что правит просветы плитки.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Откуда кадры и куда разметка</h3>
+        <ul>
+          <li>Кадры: запись со стенда, папка с файлами, синтетика сима.</li>
+          <li>В синтетике сима разметка готова сразу: позиции объектов известны. Человек только проверяет.</li>
+          <li>Экспорт: YOLO txt и COCO, свой формат хранится в пресете.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="answer">
+      <h3>Что это меняет уже сейчас</h3>
+      <p>Пресет v2 (Task 3.1) сразу получает поле «вид слоя»: спрайт, заливка или регион. Тогда слой-регион не потребует миграции формата. Регион не рисуется в кадр сима и в обучающую картинку, он только экспортируется. Спека Ф9 — после Ф5, когда канва устоится.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Какие планы участвуют</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>План</th><th>Роль в системе редактора</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr><td><code>layer-render</code></td><td>главный: сервис слоёв, пресет, бэкенд и веб-редактор, обучение на том же механизме, разметка</td><td><span class="pill now">Ф2 закрыта, дальше Ф3</span></td></tr>
+          <tr><td><code>line-sim</code></td><td>виртуальная линия: процессы сима, лента, робот, видео, веб-пульт</td><td><span class="pill now">идёт, Ф6</span></td></tr>
+          <tr><td><code>line-sim-layer-editor</code></td><td>первый редактор слоёв объекта: с него начался веб-редактор и процесс <code>layers</code></td><td><span class="pill done">в main</span></td></tr>
+          <tr><td><code>line-sim-belt-look</code></td><td>кадр сима как кадр камеры: плитка ленты из фото</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td><code>letters-retrain</code></td><td>первый продукт: буквы на дисках. Дообучение ждёт экспорт датасета (6.3)</td><td><span class="pill now">Ф0 идёт</span></td></tr>
+          <tr><td><code>gui-constructor</code></td><td>конструктор интерфейса; Qt-вкладка редактора (Ф8) ждёт его</td><td><span class="pill later">черновик</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Как собирается кадр</h2>
+    <p>Порядок один и тот же везде: в симе, в обучении и в превью редактора.</p>
+    <div class="frame">
+<pre class="mermaid">
+flowchart LR
+  A["Чёрный"] --> B["Плитка ленты<br/>просветы прозрачны"]
+  B --> C["Объект: слои снизу вверх<br/>диск → буква"]
+  C --> D["Эффекты сцены<br/>шум, блик, размытие"]
+  D --> E["Вырез вокруг объекта"]
+  E --> F["Вход модели 128×128"]
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>Один пресет на всё</h2>
+    <p>Фон, слои объекта, эффекты и разметка описаны в одном файле. Редактор правит именно его. Старые пресеты без новых полей грузятся как есть.</p>
+<pre class="yaml">schema_version: 2
+background:                # фон снизу вверх
+  layers:
+    - solid: [0, 0, 0]       # чёрный стол
+    - tile: data/line_sim/belt_tile.png   # лента с прозрачными просветами
+layers:                    # объект снизу вверх
+  - name: disk
+    kind: sprite
+    sprite_source: data/line_sim/letters_ink_disk.png
+    effects: [{name: noise, std: [1, 3]}]    # эффект материала слоя
+  - name: letter
+    kind: sprite
+    sprite_source: "class://"                # буква из каталога классов
+    augment: {angle_deg: [-5, 5]}
+  - name: letter_box                         # Ф9: регион, в кадр не рисуется
+    kind: region
+    shape: obb
+    class: "А"
+effects:                   # на весь кадр
+  - {name: gaussian_blur, prob: 0.5, sigma: [0.4, 1.8]}
+train:                     # читает только обучение
+  crop: {size_mode: radius, margin_px: 14, output_size: 128}</pre>
+    <p class="muted">Поля <code>kind</code> и регион — набросок для Ф3 и Ф9. Точные имена задаст спека 3.1.</p>
+  </section>
+
+  <section>
+    <h2>Порядок работ</h2>
+    <div class="frame">
+<pre class="mermaid">
+flowchart LR
+  F1["Ф1 Фон слоями ✓"] --> F2["Ф2 Ядро сервиса ✓"]
+  F2 --> F3["Ф3 Пресет v2"] --> F4["Ф4 Бэкенд редактора"] --> F5["Ф5 Веб-редактор"]
+  F5 --> F9["Ф9 Разметка"]
+  F2 --> F6["Ф6 Обучение"]
+  F2 --> F7["Ф7 Источники спрайтов"]
+  F5 -.-> F8["Ф8 Qt-вкладка"]
+  F6 --> R["Дообучение букв"]
+</pre>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Фаза</th><th>Что даёт вам</th><th>Статус</th></tr></thead>
+        <tbody>
+          <tr><td>Ф1 Фон слоями</td><td>чёрный стол под лентой, просветы плитки прозрачные</td><td><span class="pill done">сделано</span></td></tr>
+          <tr><td>Ф2 Ядро сервиса</td><td>весь рисующий код в одном месте, одна функция кадра</td><td><span class="pill done">сделано, 6 из 6</span></td></tr>
+          <tr><td>Ф3 Пресет v2</td><td>фон, эффекты и вид слоя в пресете; применяются в симе сразу</td><td><span class="pill now">следующая</span></td></tr>
+          <tr><td>Ф4 Бэкенд редактора</td><td>схема полей, каталог эффектов, превью кадра</td><td><span class="pill later">после Ф3</span></td></tr>
+          <tr><td>Ф5 Веб-редактор</td><td>панель фона, эффекты с превью, удобная канва</td><td><span class="pill now">канва сделана</span></td></tr>
+          <tr><td>Ф6 Обучение</td><td>датасет из того же пресета; открывает дообучение букв</td><td><span class="pill now">2 из 5 задач</span></td></tr>
+          <tr><td>Ф7 Источники</td><td>шрифт, вырез из фото, картинка — один механизм</td><td><span class="pill later">можно начинать</span></td></tr>
+          <tr><td>Ф8 Qt-вкладка</td><td>редактор внутри приложения</td><td><span class="pill later">ждёт конструктор</span></td></tr>
+          <tr><td>Ф9 Разметка</td><td>регионы для YOLO и других сетей на той же канве</td><td><span class="pill later">после Ф5</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Что выяснилось по дороге</h2>
+    <div class="note">
+      <h3>Число точности на старых фото — не вид робота</h3>
+      <p>Проверка модели теперь режет кадр как конвейер (6.4). На 8 уже вырезанных фото ошибка угла выросла с 8.6° до 37.7°. Причина в заливке краёв: фото меньше выреза, и края чем-то заполняются. Повтор краевых пикселей давал хорошее число, любая постоянная заливка — 20–42°. На полном кадре камеры край не нужен. Честное число даст только отложенная выборка полных кадров со стенда.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ваши решения</h2>
+    <h3>1 октября</h3>
+    <ul>
+      <li>Главное — хороший редактор слоёв; один сервис для фона, объектов и аугментации.</li>
+      <li>Старый генератор датасета свести к тому же пресету.</li>
+      <li>Эффекты сцены из редактора сохраняются в пресет.</li>
+      <li>Просветы плитки — без усложнений, универсальным правилом.</li>
+    </ul>
+    <h3>2 октября</h3>
+    <ul>
+      <li>Разметка — режим того же редактора: свой формат и экспорт, четыре типа регионов, сначала веб.</li>
+      <li>Каталог классов переезжает в сервис целиком, вместе с метой и фонами.</li>
+      <li>Задача 2.4 режется на две: пресет и каталог, потом фабрика и превью.</li>
+      <li>Тесты переезда, которые сверяют старый и новый путь, остаются в сервисе.</li>
+    </ul>
+  </section>
+
+  <footer>Источник: plans/layer-render/plan.md, phase-2-core.md и вердикт архитектора cto-verdict-2026-10-01.md, ветка feat/layer-render (67bca9cf). Макет экрана — набросок по задачам плана, не снимок. Числа — замеры этой сессии на одной машине.</footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+</script>
+</body>
+</html>

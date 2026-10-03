@@ -34,6 +34,11 @@ from typing import Any
 
 import pytest
 
+from multiprocess_framework.modules.observability_declarations import restore, snapshot
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+    ensure_framework_producers,
+)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def forbid_real_sdk_in_process() -> Any:
@@ -49,3 +54,18 @@ def forbid_real_sdk_in_process() -> Any:
 
     OtlpHttpExporter._build_sdk_exporter = _forbidden
     yield
+
+
+@pytest.fixture(autouse=True)
+def declarations_snapshot() -> Any:
+    """Снимок реестра объявлений до теста, возврат к нему после.
+
+    Тесты task22 поднимают настоящий `OtelExportPlugin`, а он зовёт
+    `ctx.declare_metric(...)` в configure(): без возврата 8 счётчиков остаются в
+    процессном реестре, и сессионный сторож каталога метрик краснеет в teardown
+    чужого теста (ERROR test_ci_smoke) только в полном наборе.
+    """
+    ensure_framework_producers()
+    state = snapshot()
+    yield
+    restore(state)

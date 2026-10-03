@@ -24,6 +24,9 @@ from multiprocess_framework.modules.registers_module.core.field_info import Fiel
 from multiprocess_prototype.frontend.forms.factory.kinds import _resolve_kind
 
 
+CATALOG_FIELDS_SNAPSHOT = Path(__file__).parent / "snapshots" / "catalog_register_fields.txt"
+
+
 def _repo_root() -> Path:
     # tests/ -> forms -> frontend -> multiprocess_prototype -> repo root
     return Path(__file__).resolve().parents[4]
@@ -48,6 +51,7 @@ def test_resolve_kind_stable_across_json_roundtrip_for_all_register_fields() -> 
         assert entries, "локальный discover(Plugins/+Services/) не нашёл ни одного плагина — фикстура сломана"
 
         checked = 0
+        found: list[str] = []
         mismatches: list[str] = []
         for entry in entries:
             if not entry.register_classes:
@@ -57,17 +61,23 @@ def test_resolve_kind_stable_across_json_roundtrip_for_all_register_fields() -> 
                 roundtripped = FieldInfo.from_dict(json.loads(json.dumps(fi.to_dict())))
                 kind_after = _resolve_kind(roundtripped)
                 checked += 1
+                found.append(f"{fi.plugin_name}.{fi.field_name}")
                 if kind_before != kind_after:
                     mismatches.append(f"{fi.plugin_name}.{fi.field_name}: {kind_before!r} -> {kind_after!r}")
 
-        # Литерал, не "> 0" (ревью 2): "> 0" остаётся зелёным, даже если discover()
-        # потеряет Services/ целиком (62 плагина -> меньше, но всё ещё > 0) — пин
-        # РОВНО числа делает такую потерю видимой падением теста, а не тишиной.
-        # Переустановить при изменении регистров Plugins/Services (новое/удалённое поле).
-        assert checked == 449, (
-            f"ожидали 449 register-полей (Plugins+Services), получили {checked} — "
+        # Снимок, не "> 0" (ревью 2) и не число (Task 5.5: число 449 перепинивали
+        # трижды за два дня, а падение «450 != 449» не называет поле). "> 0" остаётся
+        # зелёным, даже если discover() потеряет Services/ целиком; снимок делает такую
+        # потерю видимой падением С ИМЕНАМИ полей. Обновлять при изменении регистров
+        # Plugins/Services (новое/удалённое поле) — осознанно, причина в том же коммите.
+        expected = sorted(CATALOG_FIELDS_SNAPSHOT.read_text(encoding="utf-8").split())
+        extra = sorted(set(found) - set(expected))
+        missing = sorted(set(expected) - set(found))
+        assert sorted(found) == expected, (
+            f"register-поля Plugins+Services разошлись со снимком {CATALOG_FIELDS_SNAPSHOT.name}: "
+            f"появились {extra}, пропали {missing} (было {len(expected)}, стало {checked}) — "
             f"либо discover() что-то потерял (напр. Services/), либо регистры менялись "
-            f"(тогда пере-пин числа осознанно)"
+            f"(тогда обновите снимок осознанно)"
         )
         assert not mismatches, f"{len(mismatches)}/{checked} расхождений kind после round-trip: {mismatches}"
     finally:

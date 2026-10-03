@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from Plugins.runtime.worker_pool.plugin import WorkerPoolPlugin
 
@@ -13,6 +12,7 @@ from Plugins.runtime.worker_pool.plugin import WorkerPoolPlugin
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_ctx(config: dict | None = None) -> MagicMock:
     """Создать mock PluginContext с нужными атрибутами."""
@@ -41,9 +41,7 @@ def _grayscale_config() -> dict:
         "pool_size": 2,
         "queue_timeout": 5.0,
         "balancing": "round_robin",
-        "worker_plugin_class": (
-            "Plugins.processing.grayscale.plugin.GrayscalePlugin"
-        ),
+        "worker_plugin_class": ("Plugins.processing.grayscale.plugin.GrayscalePlugin"),
         "worker_plugin_config": {},
     }
 
@@ -54,9 +52,7 @@ def _negative_config(pool_size: int = 2) -> dict:
         "pool_size": pool_size,
         "queue_timeout": 5.0,
         "balancing": "round_robin",
-        "worker_plugin_class": (
-            "Plugins.processing.negative.plugin.NegativePlugin"
-        ),
+        "worker_plugin_class": ("Plugins.processing.negative.plugin.NegativePlugin"),
         "worker_plugin_config": {},
     }
 
@@ -73,6 +69,7 @@ def _make_started_plugin(config: dict) -> WorkerPoolPlugin:
 # ---------------------------------------------------------------------------
 # TestConfigure
 # ---------------------------------------------------------------------------
+
 
 class TestConfigure:
     def test_configure_defaults(self):
@@ -91,13 +88,17 @@ class TestConfigure:
     def test_configure_custom_params(self):
         """configure() парсит все параметры из ctx.config."""
         plugin = WorkerPoolPlugin()
-        plugin.configure(_make_mock_ctx({
-            "pool_size": 8,
-            "queue_timeout": 2.5,
-            "balancing": "shortest_queue",
-            "worker_plugin_class": "",
-            "worker_plugin_config": {"key": "val"},
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "pool_size": 8,
+                    "queue_timeout": 2.5,
+                    "balancing": "shortest_queue",
+                    "worker_plugin_class": "",
+                    "worker_plugin_config": {"key": "val"},
+                }
+            )
+        )
 
         assert plugin._reg.pool_size == 8
         assert plugin._reg.queue_timeout == 2.5
@@ -115,9 +116,13 @@ class TestConfigure:
     def test_configure_invalid_worker_class(self):
         """Невалидный worker_plugin_class → _worker_plugins пустой, нет исключения."""
         plugin = WorkerPoolPlugin()
-        plugin.configure(_make_mock_ctx({
-            "worker_plugin_class": "non.existent.module.SomePlugin",
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "worker_plugin_class": "non.existent.module.SomePlugin",
+                }
+            )
+        )
 
         assert plugin._worker_plugins == []
 
@@ -125,6 +130,7 @@ class TestConfigure:
 # ---------------------------------------------------------------------------
 # TestProcess
 # ---------------------------------------------------------------------------
+
 
 class TestProcess:
     def test_empty_items(self):
@@ -151,7 +157,7 @@ class TestProcess:
         plugin = _make_started_plugin(_grayscale_config())
         # Цветной кадр: R≠G≠B
         frame = np.zeros((50, 50, 3), dtype=np.uint8)
-        frame[:, :, 0] = 50   # B
+        frame[:, :, 0] = 50  # B
         frame[:, :, 1] = 100  # G
         frame[:, :, 2] = 150  # R
         items = [{"frame": frame}]
@@ -177,8 +183,7 @@ class TestProcess:
             for i, item in enumerate(result):
                 expected_fill = 255 - fill_values[i]
                 assert np.all(item["frame"] == expected_fill), (
-                    f"item[{i}]: ожидался fill={expected_fill}, "
-                    f"получен {item['frame'][0, 0, 0]}"
+                    f"item[{i}]: ожидался fill={expected_fill}, получен {item['frame'][0, 0, 0]}"
                 )
         finally:
             plugin._pool.shutdown(wait=False)
@@ -196,9 +201,7 @@ class TestProcess:
             for i, (item, orig_fill) in enumerate(zip(result, fill_values)):
                 expected = 255 - orig_fill
                 actual = int(item["frame"][0, 0, 0])
-                assert actual == expected, (
-                    f"Нарушен порядок: result[{i}]={actual}, ожидался={expected}"
-                )
+                assert actual == expected, f"Нарушен порядок: result[{i}]={actual}, ожидался={expected}"
         finally:
             plugin._pool.shutdown(wait=False)
 
@@ -244,14 +247,19 @@ class TestProcess:
 # TestBalancing
 # ---------------------------------------------------------------------------
 
+
 class TestBalancing:
     def test_round_robin_distribution(self):
         """Round-robin распределяет items последовательно по worker'ам."""
         plugin = WorkerPoolPlugin()
-        plugin.configure(_make_mock_ctx({
-            "pool_size": 3,
-            "balancing": "round_robin",
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "pool_size": 3,
+                    "balancing": "round_robin",
+                }
+            )
+        )
 
         # Добавить 3 mock worker-плагина
         workers = [MagicMock() for _ in range(3)]
@@ -273,10 +281,14 @@ class TestBalancing:
     def test_shortest_queue_fallback_to_round_robin(self):
         """shortest_queue — нет очередей у ThreadPoolExecutor, fallback позиционный."""
         plugin = WorkerPoolPlugin()
-        plugin.configure(_make_mock_ctx({
-            "pool_size": 3,
-            "balancing": "shortest_queue",
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "pool_size": 3,
+                    "balancing": "shortest_queue",
+                }
+            )
+        )
         workers = [MagicMock() for _ in range(3)]
         plugin._worker_plugins = workers
 
@@ -290,6 +302,7 @@ class TestBalancing:
 # ---------------------------------------------------------------------------
 # TestCommands
 # ---------------------------------------------------------------------------
+
 
 class TestCommands:
     def test_cmd_resize_pool_increases_size(self):
@@ -363,6 +376,7 @@ class TestCommands:
 # ---------------------------------------------------------------------------
 # TestShutdown
 # ---------------------------------------------------------------------------
+
 
 class TestShutdown:
     def test_shutdown_closes_pool(self):

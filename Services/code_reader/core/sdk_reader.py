@@ -16,17 +16,17 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.code_reader.core.result import ReadStatus
 from Services.code_reader.core.sdk_frame import SdkFrame, frame_from_raw
 from Services.code_reader.sdk.errors import E_ACCESS_DENIED, SdkError
 
-_log = logging.getLogger(__name__)
+_log = get_std_logger(__name__)
 
 # Столько ошибок get_frame подряд (E_NODATA не в счёт) переводят сессию в "error".
 MAX_CONSECUTIVE_ERRORS = 3

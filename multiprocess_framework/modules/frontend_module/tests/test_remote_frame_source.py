@@ -261,10 +261,14 @@ def _segment_alive(name: str) -> bool:
 
 
 def test_r2_external_reader_with_track_false_keeps_backend_segment_alive() -> None:
-    """R2 (RED): подпроцесс читает через ``ShmFrameReader(track=False)`` и выходит →
+    """R2: подпроцесс читает через ``ShmFrameReader(track=False)`` и выходит →
     сегмент бэкенда в родителе по-прежнему открывается по имени. Сейчас RED: ``track``
     сохраняется в ``self._track``, но ``resource_tracker.unregister`` нигде не зовётся —
-    поведение при track=False пока идентично track=True (см. докстринг ``track``)."""
+    поведение при track=False пока идентично track=True (см. докстринг ``track``).
+
+    На Windows тест пуст: resource_tracker там нет, ``unregister`` стоит под
+    ``os.name == "posix"`` (shm_frame_reader.py:139) — зелёный с фиксом и без
+    (ревью Task 5.5, наблюдение Н1). Свойство проверяется только на POSIX."""
     frame = _corner_frame()
     name = _shm_name("r2a")
     shm = _write_frame(name, frame)
@@ -282,6 +286,13 @@ def test_r2_external_reader_with_track_false_keeps_backend_segment_alive() -> No
             shm.close()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "хазард — эффект POSIX resource_tracker: SharedMemory регистрирует сегмент в нём только в ветке "
+        "_USE_POSIX (multiprocessing/shared_memory.py), на Windows сегмент живёт, пока открыт чей-то handle"
+    ),
+)
 def test_r2_control_external_reader_with_track_true_still_deletes_segment() -> None:
     """R2 (контроль, ожидаемо GREEN уже сейчас): track=True — прежнее поведение,
     хазард воспроизводится и ДО, и ПОСЛЕ фикса (внутри задачи не меняется)."""
