@@ -70,7 +70,7 @@ keys/values freely (see `.claude/CLAUDE.md`).
 
 ```ini
 # Tests-discipline commit gate — read by scripts/validate_commit/validate_commit.py.
-# Every key is optional; the values below are also what applies with no block at all.
+# Every key is optional; the values below are also the defaults, except `tests_gate` (default `on`, set `off` here).
 tests_gate = off                     # on | off — OFF by owner's decision 2026-10-03, see the paragraph below the block
 tests_gate_code = src/**/*.py        # staged paths the gate applies to (comma-separated globs)
 tests_gate_exclude = **/template/**  # subtracted from tests_gate_code before the gate fires
