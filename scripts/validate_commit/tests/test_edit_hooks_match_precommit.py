@@ -332,6 +332,51 @@ def test_autoformat_prefers_venv_ruff_over_path(tmp_path: Path) -> None:
     assert target.read_bytes() == b"x = 1\ny = 2\n"
 
 
+def test_autoformat_respects_force_exclude(tmp_path: Path) -> None:
+    """`extend-exclude = [".claude/"]` из настоящего pyproject.toml действует на явно переданный файл."""
+    repo = _init_repo(tmp_path / "repo", configs=True)
+    target = repo / ".claude" / "x.py"
+    target.parent.mkdir()
+    original = b'x=1;y=2\nx = "' + b"a" * 130 + b'"\n'
+    target.write_bytes(original)
+
+    rc, out, err = _run_hook(AUTOFORMAT_HOOK, repo, target, tool_name="Write")
+
+    assert rc == 0, f"hook rc={rc}\n{err}"
+    assert target.read_bytes() == original
+    assert out == "", f"hook reported on an excluded file: {out!r}"
+
+
+def test_autoformat_finds_main_venv_from_worktree(tmp_path: Path) -> None:
+    """CLAUDE_PROJECT_DIR = worktree без своего .venv: ruff берётся из .venv главного дерева, не из PATH."""
+    repo = _init_repo(tmp_path / "repo", configs=True)
+    exe = "ruff.exe" if IS_WINDOWS else "ruff"
+    real_ruff = Path(sys.executable).parent / exe
+    if not real_ruff.is_file():
+        found = shutil.which("ruff")
+        assert found, "no real ruff to copy"
+        real_ruff = Path(found)
+    venv_bin = repo / ".venv" / ("Scripts" if IS_WINDOWS else "bin")
+    venv_bin.mkdir(parents=True)
+    shutil.copy(real_ruff, venv_bin / exe)
+    _git_ok(repo, "add", "pyproject.toml")
+    _git_ok(repo, "commit", "-q", "-m", "init")
+    worktree = tmp_path / "wt"
+    _git_ok(repo, "worktree", "add", "-q", str(worktree), "-b", "wt-branch")
+    assert not (worktree / ".venv").exists(), "the worktree must not have its own .venv"
+
+    fake_dir = tmp_path / "fakebin"
+    fake_dir.mkdir()
+    shutil.copy(sys.executable, fake_dir / exe)  # на PATH первый "ruff", который ruff не умеет
+
+    target = worktree / "w.py"
+    target.write_bytes(b"x=1;y=2\n")
+    rc, _out, err = _run_hook(AUTOFORMAT_HOOK, worktree, target, tool_name="Write", first_in_path=fake_dir)
+
+    assert rc == 0, f"hook rc={rc}\n{err}"
+    assert target.read_bytes() == b"x = 1\ny = 2\n"
+
+
 # --------------------------------------------------------------------------- 7: oracle for autofix-text
 
 _ORACLE_CASES: list[tuple[str, bytes]] = [
