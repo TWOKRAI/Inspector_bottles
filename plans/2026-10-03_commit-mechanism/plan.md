@@ -53,7 +53,7 @@
 Порядок: 1.1 → 1.3 → 1.2 → 1.4 — все три правят `.pre-commit-config.yaml` и шаблон сида; параллельно не вести.
 
 - [x] Task 1.1: снять хук `session-log` с pre-commit; журнал сессий пишет и коммитит `/wrap-up` [DONE d8ee11c2d, ревью APPROVED r2]
-- Task 1.2: хук правки живой на Windows (причина A1 — `\r` в пути) и видит то же, что pre-commit: остаток ruff, пробелы/EOF текста, rev = uv.lock [PENDING]
+- [x] Task 1.2: хук правки живой на Windows (причина A1 — `\r` в пути) и видит то же, что pre-commit: остаток ruff, пробелы/EOF текста, rev = uv.lock [DONE 696b33d3b, ревью APPROVED r2; стенд после слияния]
 - Task 1.4: три соседних хука правки (check-imports, typecheck, semgrep) мертвы тем же `\r` — замер цены, затем оживить или снять (решение владельца) [PENDING] (после 1.2)
 - [x] Task 1.3: bandit не сканирует скрипты инъекций `docs/reviews/**`; гейт тестов `_stack.md` выключен честно [DONE f3649b248, ревью APPROVED] (после 1.1: общий конфиг pre-commit)
 
