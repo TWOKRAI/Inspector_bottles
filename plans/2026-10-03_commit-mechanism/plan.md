@@ -54,7 +54,7 @@
 
 - [x] Task 1.1: снять хук `session-log` с pre-commit; журнал сессий пишет и коммитит `/wrap-up` [DONE d8ee11c2d, ревью APPROVED r2]
 - Task 1.2: одна версия `ruff` в хуке и при правке; `.md` чинится при правке; E501 виден при правке [PENDING] (после 1.3: общий конфиг pre-commit)
-- Task 1.3: bandit не сканирует скрипты инъекций `docs/reviews/**`; гейт тестов `_stack.md` выключен честно [PENDING] (после 1.1: общий конфиг pre-commit)
+- [x] Task 1.3: bandit не сканирует скрипты инъекций `docs/reviews/**`; гейт тестов `_stack.md` выключен честно [DONE f3649b248, ревью APPROVED] (после 1.1: общий конфиг pre-commit)
 
 ### Phase 2: Формат v2 в режиме предупреждений
 
