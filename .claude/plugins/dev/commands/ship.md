@@ -28,6 +28,13 @@ Run the final check before shipping the code:
    `pytest.mark.xfail(strict=True, reason="<issue or OPEN_QUESTIONS link>")` committed
    before the ship — never a skip without a reason, never "known red, ship anyway".
 
+   Plans format check — if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists
+   (`make gate` does not run `scripts/validate.py`); otherwise skip this step without error (project-specific):
+   ```bash
+   python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
+   ```
+   Exit 1 = a new blocking finding in a plan, exit 2 = the check could not run — **STOP**, fix before shipping.
+
 2. **Change summary:**
    ```bash
    git diff --stat
@@ -130,7 +137,15 @@ If the plan is found and every Task = [DONE] (the remainder is only backlog / a 
    a new session reads an archived plan through its `SUMMARY.md` only.
 3. **Refresh, then check the ledger:** `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`, then `python3 scripts/plans_ledger.py status` — no findings for the closed plan
    (show other `WARN`s to the owner, but don't fix them silently).
-4. Commit:
+4. **Progress check (plans_progress):** if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists,
+   the plan format must be clean; otherwise skip this step without error:
+   ```bash
+   python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
+   ```
+   Exit 1 = a new blocking finding — **STOP**, fix the plan, don't extend the baseline silently. A stale
+   `progress:begin`/`progress:end` block in `plans/queue/ORDER.md` is only an info line: the lead refreshes it at
+   the merge point (see `scripts/plans_progress/README.md`). Exit 2 = the check could not run (no `plans/`, no baseline file).
+5. Commit:
    ```bash
    git add plans/
    git commit -m "docs(plans): архив <slug> (план выполнен)
