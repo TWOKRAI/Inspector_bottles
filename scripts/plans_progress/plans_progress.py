@@ -1364,18 +1364,29 @@ def _tally(done: int, total: int) -> str:
     return f"{done} из {total} · {int(100 * done / total + 0.5)}%"
 
 
-def startable(p: Plan) -> bool:
-    """Можно начинать: план очереди §4.1, `ready` и есть хотя бы одна незавершённая задача.
+READY_UNDEFINED = "не определено (поле «После:» не заполнено ни у одного плана)"
 
-    Только §4.1: поле `После:` пока не пишет ни один план, и `ready` стоит у планов §4.2 тоже.
+
+def deps_in_use(plans: list[Plan]) -> bool:
+    """Хоть у одного НЕзакрытого плана непустой `after` или `waiting_on` (план с одним `⛔ …` считается).
+
+    Пока ложно, `ready` у всех планов верен «по умолчанию», и страница не называет планы готовыми.
     """
-    return p.tier == "4.1" and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+    return any((p.after or p.waiting_on) and not plan_closed(p) for p in plans)
 
 
-def _dep_chips(p: Plan) -> list[str]:
+def startable(p: Plan, in_use: bool) -> bool:
+    """Можно начинать: поле `После:` кем-то заполнено, план очереди §4.1, `ready`, есть незавершённая задача.
+
+    Только §4.1: `ready` стоит и у планов §4.2, а очередь они не занимают.
+    """
+    return in_use and p.tier == "4.1" and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+
+
+def _dep_chips(p: Plan, in_use: bool) -> list[str]:
     """Чипы `ready`, `after`, `waiting`, `cycle` незакрытого плана, в этом порядке."""
     chips: list[str] = []
-    if startable(p):
+    if startable(p, in_use):
         chips.append('<span class="chip ok" data-chip="ready">можно начинать</span>')
     title = f' title="{_e(p.after_reason)}"' if p.after_reason else ""
     for name in p.after:
@@ -1390,9 +1401,9 @@ def _dep_chips(p: Plan) -> list[str]:
     return chips
 
 
-def _plan_html(p: Plan) -> str:
+def _plan_html(p: Plan, in_use: bool) -> str:
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
-    if startable(p):
+    if startable(p, in_use):
         attrs += ' data-ready="true"'
     s = [f"<details {attrs}>", "<summary>", f'<span class="name">{_e(p.name)}</span>']
     if p.lane:
@@ -1431,7 +1442,7 @@ def _plan_html(p: Plan) -> str:
         counts = f" · задачи {p.done} из {p.total}" if p.tasks and unfinished else ""
         s.append(f'<span class="chip" data-chip="closed" title="план закрыт или поглощён">{word}{counts}</span>')
     if not plan_closed(p):
-        s.extend(_dep_chips(p))
+        s.extend(_dep_chips(p, in_use))
     s.append("</summary>")
     s.append('<div class="body">')
     s.append(f'<div class="info">{_e(p.rel)}</div>')
@@ -1482,7 +1493,8 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         agg[0] += p.done
         agg[1] += p.total
         agg[2] += 1
-    ready_names = _e(", ".join(p.name for p in queue if startable(p)) or "нет")
+    in_use = deps_in_use(live + archive)
+    ready_names = _e(", ".join(p.name for p in queue if startable(p, in_use)) or "нет") if in_use else READY_UNDEFINED
     built = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M UTC%z")
     parts = [
         "<!doctype html>",
@@ -1505,16 +1517,16 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         )
     parts.append("</section>")
     parts.append('<section id="queue">')
-    parts.extend(_plan_html(p) for p in queue)
+    parts.extend(_plan_html(p, in_use) for p in queue)
     parts.append("</section>")
     parts.append('<details id="waiting">')
     parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
-    parts.extend(_plan_html(p) for p in waiting)
+    parts.extend(_plan_html(p, in_use) for p in waiting)
     parts.append("</details>")
     if unlisted:
         parts.append('<section id="unlisted">')
         parts.append(f"<h2>Нет в ORDER.md · {len(unlisted)}</h2>")
-        parts.extend(_plan_html(p) for p in unlisted)
+        parts.extend(_plan_html(p, in_use) for p in unlisted)
         parts.append("</section>")
     a_done = sum(p.done for p in shelved)
     a_total = sum(p.total for p in shelved)
@@ -1523,7 +1535,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         f"<summary>Закрыто и в архиве · {len(shelved)} планов (§4.3 и _archive/) · "
         f"итого {_e(_tally(a_done, a_total))}</summary>"
     )
-    parts.extend(_plan_html(p) for p in shelved)
+    parts.extend(_plan_html(p, in_use) for p in shelved)
     parts.append("</details>")
     parts.append("</main></body></html>")
     return "\n".join(parts) + "\n"

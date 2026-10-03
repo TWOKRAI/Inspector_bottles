@@ -14,6 +14,7 @@ import re
 import pytest
 
 READY_RE = re.compile(r'<div class="meta" id="ready">(.*?)</div>', re.S)
+UNDEFINED = "можно начинать: не определено (поле «После:» не заполнено ни у одного плана)"
 
 
 def _plan(after: str | None = None, tasks: tuple[str, ...] = ("PENDING",), head: str | None = None) -> str:
@@ -26,6 +27,10 @@ def _plan(after: str | None = None, tasks: tuple[str, ...] = ("PENDING",), head:
     lines += [f"- Task 1.{i}: x [{s}]" for i, s in enumerate(tasks, 1)]
     lines.append("")
     return "\n".join(lines)
+
+
+# Незакрытый план вне ORDER.md с полем `После:`: включает чипы «можно начинать» на странице.
+FIELD = {"p-field": _plan(after="ghost")}
 
 
 @pytest.fixture
@@ -98,7 +103,7 @@ def test_title_is_absent_not_empty_when_there_is_no_reason(page_of):
 
 def test_plan_name_with_amp_and_apostrophe_is_escaped_in_attribute_and_summary(page_of):
     name = "p&q'r"
-    raw = page_of({name: _plan()}, tier41=[name])
+    raw = page_of({name: _plan(), **FIELD}, tier41=[name])
     assert 'data-plan="p&amp;q&#x27;r"' in raw
     assert _ready_text(raw) == "можно начинать: p&q'r"
     assert "можно начинать: p&amp;q&#x27;r</div>" in raw
@@ -137,7 +142,7 @@ def test_header_done_plan_gets_closed_chip_and_no_dependency_chips(page_of):
 
 
 def test_same_shape_plan_in_queue_is_ready_and_in_waiting_is_not(page_of):
-    raw = page_of({"p-q": _plan(), "p-w": _plan()}, tier41=["p-q"], tier42=["p-w"])
+    raw = page_of({"p-q": _plan(), "p-w": _plan(), **FIELD}, tier41=["p-q"], tier42=["p-w"])
     assert 'data-plan="p-q" data-tier="4.1" data-lane="С" data-ready="true"' in raw
     assert "data-ready" not in _summary(raw, "p-w")
     assert 'data-chip="ready"' not in _summary(raw, "p-w")
@@ -154,7 +159,7 @@ def test_waiting_plan_keeps_its_after_chip_without_ready_attribute(page_of):
 
 
 def test_ready_summary_follows_queue_order_not_alphabet(page_of):
-    raw = page_of({"aa-early": _plan(), "zz-late": _plan()}, tier41=["zz-late", "aa-early"])
+    raw = page_of({"aa-early": _plan(), "zz-late": _plan(), **FIELD}, tier41=["zz-late", "aa-early"])
     assert _ready_text(raw) == "можно начинать: zz-late, aa-early"
 
 
@@ -176,7 +181,7 @@ def test_prefix_named_plan_does_not_inherit_data_ready_from_its_prefix(page_of):
 
 def test_ready_summary_skips_header_done_plan_with_open_task(page_of):
     raw = page_of(
-        {"p-hdr": _plan(head="- **Статус:** DONE"), "p-ok": _plan()},
+        {"p-hdr": _plan(head="- **Статус:** DONE"), "p-ok": _plan(), **FIELD},
         tier41=["p-hdr", "p-ok"],
     )
     assert _ready_text(raw) == "можно начинать: p-ok"
@@ -185,3 +190,58 @@ def test_ready_summary_skips_header_done_plan_with_open_task(page_of):
 def test_ready_summary_sits_between_meta_rows_and_lanes(page_of):
     raw = page_of({"p-a": _plan()}, tier41=["p-a"])
     assert raw.index('class="meta">в очереди') < raw.index('id="ready"') < raw.index('<section class="lanes">')
+
+
+# ----------------------------------------------------------------------------- «не определено» (Q9)
+
+
+def test_undefined_summary_has_the_exact_text_when_no_plan_has_the_field(page_of):
+    raw = page_of({"p-a": _plan()}, tier41=["p-a"])
+    assert _ready_text(raw) == UNDEFINED
+
+
+def test_undefined_page_has_no_data_ready_and_no_ready_chip(page_of):
+    raw = page_of({"p-a": _plan(), "p-b": _plan()}, tier41=["p-a", "p-b"])
+    assert "data-ready" not in raw
+    assert 'data-chip="ready"' not in raw
+
+
+def test_field_with_only_a_waiting_condition_counts_as_in_use(page_of):
+    raw = page_of({"p-a": _plan(after="⛔ hw"), "p-b": _plan()}, tier41=["p-a", "p-b"])
+    assert _ready_text(raw) == "можно начинать: p-b"
+
+
+def test_field_only_in_a_4_3_plan_does_not_count(page_of):
+    raw = page_of({"p-c": _plan(after="ghost"), "p-b": _plan()}, tier41=["p-b"], tier43=["p-c"])
+    assert _ready_text(raw) == UNDEFINED
+
+
+def test_field_only_in_a_header_done_plan_does_not_count(page_of):
+    raw = page_of(
+        {"p-h": _plan(after="ghost", head="- **Статус:** DONE"), "p-b": _plan()},
+        tier41=["p-h", "p-b"],
+    )
+    assert _ready_text(raw) == UNDEFINED
+
+
+def test_field_only_in_a_plan_with_all_tasks_done_does_not_count(page_of):
+    raw = page_of({"p-d": _plan(after="ghost", tasks=("DONE",)), "p-b": _plan()}, tier41=["p-d", "p-b"])
+    assert _ready_text(raw) == UNDEFINED
+
+
+def test_field_in_an_open_plan_outside_order_flips_the_page_to_defined(page_of):
+    raw = page_of({"p-b": _plan(), **FIELD}, tier41=["p-b"])
+    assert _ready_text(raw) == "можно начинать: p-b"
+
+
+def test_real_tree_prints_undefined_and_no_data_ready_while_nobody_writes_the_field(progress, tmp_path):
+    """Живое дерево на 2026-10-03: поле `После:` не пишет ни один план. Станет красным, когда его запишут (Task 3.3)."""
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    out = tmp_path / "real.html"
+    cp = progress(repo, "--html", str(out))
+    assert cp.returncode == 0, cp.stderr[:400]
+    raw = out.read_text(encoding="utf-8")
+    assert _ready_text(raw) == UNDEFINED
+    assert "data-ready" not in raw
