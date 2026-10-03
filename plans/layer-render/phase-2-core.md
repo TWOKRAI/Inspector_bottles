@@ -232,3 +232,7 @@
 ### Task 2.4b — `ObjectFactory` и превью переезжают в `layer_render`, фабрика отдаёт `RenderedObject` (часть бывш. 2.4)
 
 Спека — в [phase-2-core-2.4b.md](phase-2-core-2.4b.md) (файл фазы у бюджета 32 КБ).
+
+### Task 2.5 — `render_scene(background, placed, effects, rng)`: одна функция кадра; `SceneCompositor` делегирует
+
+Спека — в [phase-2-core-2.5.md](phase-2-core-2.5.md) (файл фазы у бюджета 32 КБ).
