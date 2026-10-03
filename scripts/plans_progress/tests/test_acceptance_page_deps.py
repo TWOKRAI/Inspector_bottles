@@ -204,11 +204,11 @@ def _plan(after: str | None = None, tasks: list[str] | None = ("PENDING",), head
 
 # §4.1 в порядке очереди: (имя, После, задачи, шапка)
 _M41: list[tuple[str, str | None, list[str] | None, str | None]] = [
-    ("q-free", None, ["PENDING"], None),
+    ("q-free", "—", ["PENDING"], None),  # собственное поле `—` = «зависимостей нет» -> можно начинать
     ("q-dep", "z-closed", ["PENDING"], None),
-    ("q-blocked", None, ["BLOCKED"], None),
-    ("q-prog", None, ["IN_PROGRESS", "DONE"], None),
-    ("q-notasks", None, None, None),
+    ("q-blocked", "—", ["BLOCKED"], None),
+    ("q-prog", "—", ["IN_PROGRESS", "DONE"], None),
+    ("q-notasks", "—", None, None),  # поле есть, задач нет -> не «можно начинать» по задачам
     ("q-hw", "⛔ железо", ["PENDING"], None),
     ("q-hw2", "⛔ железо, ⛔ API", ["PENDING"], None),
     ("q-wait", "q-free", ["PENDING"], None),
@@ -222,6 +222,10 @@ _M41: list[tuple[str, str | None, list[str] | None, str | None]] = [
     ("q-self", "q-self", ["PENDING"], None),
     ("q-hdr", "q-free, ⛔ железо", ["PENDING"], "- **Статус:** DONE"),
     ("q-alldone", "q-free, ⛔ железо", ["DONE", "DONE"], None),
+    # БЕЗ собственного поля: открытая задача, без блокеров (3.1 `ready`), но НЕ «можно начинать»; считается в K
+    ("q-nofield", None, ["PENDING"], None),
+    # БЕЗ собственного поля и закрыт (все DONE): по моему прочтению всё равно план §4.1 -> входит в N и в K
+    ("q-done-nf", None, ["DONE"], None),
 ]
 _M42 = [("w-free", None), ("w-dep", "q-free")]
 _M43 = [("z-closed", None, ["DONE"]), ("c-43", "q-free, ⛔ железо", ["PENDING"]), ("c-self", "c-self", ["PENDING"])]
@@ -236,8 +240,10 @@ _MATRIX_SECTIONS = (
     | {ARCH: "archive"}
 )
 
-# Ожидание: «можно начинать» (в порядке очереди)
+# Ожидание: «можно начинать» (в порядке очереди): свои поля `—` / `z-closed`, открытая задача, ready
 _STARTABLE = ["q-free", "q-dep", "q-blocked", "q-prog"]
+# Сводка: K планов §4.1 без своего поля (q-nofield, q-done-nf) из N = 20 планов §4.1
+_MATRIX_READY_TEXT = "можно начинать: q-free, q-dep, q-blocked, q-prog · поле не заполнено у 2 из 20 планов очереди"
 # Закрытые планы (с После: q-free[, ⛔ железо] и открытой задачей, кроме q-alldone)
 _CLOSED = ["c-43", "c-self", ARCH, "q-hdr", "q-alldone"]
 
@@ -322,6 +328,7 @@ def test_sanity_matrix_page_builds_and_every_plan_sits_in_its_section(matrix):
     page, _raw, _root = matrix
     assert {n: page.plans[n].section for n in page.order} == _MATRIX_SECTIONS
     assert len(page.order) == len(_MATRIX_SECTIONS)
+    assert len([n for n, *_ in _M41]) == 20  # N в литерале сводки Q4
     # очередь в порядке ORDER.md
     assert [n for n in page.order if page.plans[n].section == "queue"] == [n for n, *_ in _M41]
 
@@ -441,9 +448,10 @@ def test_waiting_chip_per_condition_in_written_order_with_reason_as_title(matrix
 
 
 def test_data_ready_exactly_on_queue_plans_with_open_task_and_ready(matrix):
-    """Q3 (+ Q1: B после открытого A не готов): data-ready="true" ровно у q-free, q-dep (После: закрытый),
-    q-blocked (одни BLOCKED), q-prog; нет у: все DONE, без задач, §4.2, вне ORDER.md, архив, §4.3,
-    ⛔, После: открытый, неизвестное имя, цикл."""
+    """Q3 (+ Q1: B после открытого A не готов): data-ready="true" ровно у планов §4.1 с СОБСТВЕННЫМ полем,
+    открытой задачей и ready: q-free, q-blocked, q-prog (`После: —`), q-dep (После: закрытый); нет у:
+    q-nofield (открытая задача, ready, но без своей строки), все DONE, без задач (даже с `—`), §4.2, вне ORDER.md,
+    архив, §4.3, ⛔, После: открытый, неизвестное имя, цикл."""
     page, _raw, _root = matrix
     got = page.ready_pairs()
     want = [(n, "true") for n in _STARTABLE]
@@ -482,14 +490,15 @@ def test_ready_chip_text_class_count_order_and_css(matrix):
 
 
 def test_ready_summary_text_and_placement_before_queue(matrix):
-    """Q4: `<div class="meta" id="ready">можно начинать: <имена data-ready-планов в порядке очереди через ', '></div>`;
-    стоит после двух строк .meta, до `<section class="lanes">` и до #queue."""
+    """Q4: `<div class="meta" id="ready">можно начинать: <имена data-ready-планов в порядке очереди через ', '>
+    + ' · поле не заполнено у K из N планов очереди'</div>` (K=2 планов §4.1 без поля из N=20 планов §4.1, закрытые
+    считаются); стоит после двух строк .meta, до `<section class="lanes">` и до #queue."""
     page, _raw, _root = matrix
     problems: list[str] = []
     _diff(problems, "число элементов #ready", len(page.ready_nodes), 1)
     if page.ready_nodes:
         node = page.ready_nodes[0]
-        _diff(problems, "текст #ready", node.text, "можно начинать: q-free, q-dep, q-blocked, q-prog")
+        _diff(problems, "текст #ready", node.text, _MATRIX_READY_TEXT)
         _diff(problems, "тег #ready", node.tag, "div")
         _diff(problems, "классы #ready содержат meta", "meta" in node.classes, True)
         pos = page.ready_pos[0]
@@ -503,23 +512,35 @@ def test_ready_summary_text_and_placement_before_queue(matrix):
     assert not problems, "\n".join(problems)
 
 
-def test_ready_summary_text_for_zero_and_for_single_startable_plan(make_root, progress, tmp_path, order_md):
-    """Q4: при нуле планов (поле в дереве есть) `можно начинать: нет`; при одном — имя без запятой."""
+def test_ready_summary_text_for_zero_single_and_closed_plan_without_field(make_root, progress, tmp_path, order_md):
+    """Q4: при нуле (поле в дереве есть, у всех планов §4.1 оно есть) `можно начинать: нет` БЕЗ хвоста; при одном —
+    имя без запятой и без хвоста (K=0); закрытый план §4.1 без поля входит в N и K (мое прочтение)."""
     zero = {
-        "plans/z-done/plan.md": _plan(None, ["DONE"]),  # §4.1, всё закрыто
-        "plans/z-wait/plan.md": _plan("z-done"),  # §4.2, открыт; поле в дереве есть (иначе «не определено», Q9)
+        "plans/z-done/plan.md": _plan("—", ["DONE"]),  # §4.1, всё закрыто, поле есть
+        "plans/z-wait/plan.md": _plan("z-done"),  # §4.2, открыт; поле у НЕзакрытого плана (иначе «не определено», Q9)
         "plans/z-free/plan.md": _plan(None),  # вне ORDER.md
         "plans/queue/ORDER.md": order_md(tier41=["z-done"], tier42=["z-wait"]),
     }
     single = {
-        "plans/s-one/plan.md": _plan(None),
+        "plans/s-one/plan.md": _plan("—"),
         "plans/s-after/plan.md": _plan("s-one"),
         "plans/queue/ORDER.md": order_md(tier41=["s-one", "s-after"]),
+    }
+    closed_nf = {
+        "plans/s-one/plan.md": _plan("—"),
+        "plans/s-done/plan.md": _plan(None, ["DONE"]),  # §4.1, все DONE, поля нет
+        "plans/queue/ORDER.md": order_md(tier41=["s-one", "s-done"]),
     }
     problems: list[str] = []
     for label, files, want_text, want_ready in (
         ("ноль", zero, "можно начинать: нет", []),
         ("один", single, "можно начинать: s-one", [("s-one", "true")]),
+        (
+            "закрытый §4.1 без поля",
+            closed_nf,
+            "можно начинать: s-one · поле не заполнено у 1 из 2 планов очереди",
+            [("s-one", "true")],
+        ),
     ):
         page, _raw, _root = _build(make_root, progress, tmp_path, files)
         _diff(
@@ -538,53 +559,76 @@ def test_ready_summary_text_for_zero_and_for_single_startable_plan(make_root, pr
     assert not problems, "\n".join(problems)
 
 
-def _q9_files(order_md, *, archived_field: bool = False, live_field: str | None = None) -> dict[str, str]:
-    """База Q9: два плана §4.1 (PENDING и BLOCKED), один §4.2, один вне ORDER.md; поля нет ни у кого.
-
-    archived_field — поле `После:` только у архивного плана; live_field — куда добавить поле у НЕархивного
-    плана: "4.2" (поле у w-wait), "unlisted" (у u-free), "4.1" (у нового §4.1-плана u-three).
-    """
+def _q9_files(
+    order_md,
+    *,
+    fields: dict[str, str] | None = None,
+    extra_41: tuple[str, str] | None = None,
+    archived: str | None = None,
+    closed_43: str | None = None,
+) -> dict[str, str]:
+    """База Q9: два плана §4.1 (u-one PENDING, u-two BLOCKED), один §4.2 (w-wait), один вне ORDER.md (u-free);
+    поля `После:` нет ни у кого. fields — имя плана -> текст поля; extra_41 — (имя, поле) нового плана §4.1;
+    archived — поле у архивного плана; closed_43 — поле у плана §4.3 (закрыт)."""
+    fields = fields or {}
     files = {
-        "plans/u-one/plan.md": _plan(None, ["PENDING"]),
-        "plans/u-two/plan.md": _plan(None, ["BLOCKED"]),
-        "plans/w-wait/plan.md": _plan("u-one" if live_field == "4.2" else None),
-        "plans/u-free/plan.md": _plan("u-one" if live_field == "unlisted" else None),
+        "plans/u-one/plan.md": _plan(fields.get("u-one"), ["PENDING"]),
+        "plans/u-two/plan.md": _plan(fields.get("u-two"), ["BLOCKED"]),
+        "plans/w-wait/plan.md": _plan(fields.get("w-wait")),
+        "plans/u-free/plan.md": _plan(fields.get("u-free")),
     }
-    tier41 = ["u-one", "u-two"]
-    if live_field == "4.1":
-        files["plans/u-three/plan.md"] = _plan("u-one")
-        tier41.append("u-three")
-    if archived_field:
-        files[f"plans/_archive/2026-Q4/{ARCH}/plan.md"] = _plan("u-one")
-    files["plans/queue/ORDER.md"] = order_md(tier41=tier41, tier42=["w-wait"])
+    tier41, tier43 = ["u-one", "u-two"], []
+    if extra_41:
+        files[f"plans/{extra_41[0]}/plan.md"] = _plan(extra_41[1])
+        tier41.append(extra_41[0])
+    if archived is not None:
+        files[f"plans/_archive/2026-Q4/{ARCH}/plan.md"] = _plan(archived)
+    if closed_43 is not None:
+        files["plans/c-x/plan.md"] = _plan(closed_43, ["PENDING"])
+        tier43.append("c-x")
+    files["plans/queue/ORDER.md"] = order_md(tier41=tier41, tier42=["w-wait"], tier43=tier43)
     return files
 
 
-def test_ready_is_undefined_until_a_live_plan_has_the_field(make_root, progress, tmp_path, order_md):
-    """Q9: пока ни у одного НЕархивного плана нет `После:` (поле только у архивного не считается) — нет data-ready,
-    нет чипов ready, `#ready` = `можно начинать: не определено (...)`; поле у любого живого плана (§4.2, вне ORDER.md,
-    §4.1) возвращает поведение Q3/Q4: u-one и u-two (одни BLOCKED) снова data-ready."""
+def test_ready_is_undefined_until_an_unclosed_plan_has_its_own_field_line(make_root, progress, tmp_path, order_md):
+    """Q9 + «своё поле»: пока у НЕзакрытого плана нет строки `После:` (закрытый, архивный, §4.3 не считаются) — нет
+    data-ready и чипов ready, `#ready` = `не определено (...)` без хвоста K/N. Строка `—` или один `⛔ x` у живого
+    плана переводит страницу в «определено»; «можно начинать» тогда только плану с СОБСТВЕННОЙ строкой."""
     undefined = "можно начинать: не определено (поле «После:» не заполнено ни у одного плана)"
+    tail = " · поле не заполнено у {k} из {n} планов очереди"
     scenarios = (
         ("поля нет нигде", dict(), [], undefined),
-        ("поле только у архивного плана", dict(archived_field=True), [], undefined),
+        ("поле только у архивного плана", dict(archived="u-one"), [], undefined),
+        ("поле только у закрытого плана §4.3", dict(closed_43="u-one"), [], undefined),
         (
-            "поле у плана §4.2",
-            dict(live_field="4.2"),
-            [("u-one", "true"), ("u-two", "true")],
-            "можно начинать: u-one, u-two",
+            "строка `—` у u-one (§4.1)",
+            dict(fields={"u-one": "—"}),
+            [("u-one", "true")],
+            "можно начинать: u-one" + tail.format(k=1, n=2),
         ),
         (
-            "поле у плана вне ORDER.md",
-            dict(live_field="unlisted"),
-            [("u-one", "true"), ("u-two", "true")],
-            "можно начинать: u-one, u-two",
+            "строка `⛔ железо` у плана §4.2",
+            dict(fields={"w-wait": "⛔ железо"}),
+            [],
+            "можно начинать: нет" + tail.format(k=2, n=2),
         ),
         (
-            "поле у плана §4.1",
-            dict(live_field="4.1"),
-            [("u-one", "true"), ("u-two", "true")],
-            "можно начинать: u-one, u-two",
+            "строка `u-one` у плана §4.2: чужое поле не делает u-one готовым",
+            dict(fields={"w-wait": "u-one"}),
+            [],
+            "можно начинать: нет" + tail.format(k=2, n=2),
+        ),
+        (
+            "строка `u-one` у плана вне ORDER.md",
+            dict(fields={"u-free": "u-one"}),
+            [],
+            "можно начинать: нет" + tail.format(k=2, n=2),
+        ),
+        (
+            "строка `—` у нового плана §4.1 u-three",
+            dict(extra_41=("u-three", "—")),
+            [("u-three", "true")],
+            "можно начинать: u-three" + tail.format(k=2, n=3),
         ),
     )
     problems: list[str] = []
