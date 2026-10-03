@@ -3,8 +3,9 @@
 # data/agent-journal.jsonl ("who started / finished what, and when"), so the lead and the
 # owner can replay a session without opening every transcript. data/ is gitignored.
 #
-# Every record carries session_id and branch (git branch of the event's cwd; empty on a
-# detached HEAD or outside a git repo). SessionStart gives "which session sits where" even
+# Every record carries session_id, branch (git branch of the event's cwd; empty on a
+# detached HEAD or outside a git repo) and source (SessionStart only: startup / resume /
+# clear / compact, so a reader can tell a new session from a compaction). SessionStart gives "which session sits where" even
 # for a lead that never spawns a subagent. The journal stays per worktree: no shared file.
 #
 # Lives in `observability` (default-on), not in `agent-teams`: every subagent this
@@ -37,7 +38,7 @@ if cwd:
     try:
         branch = subprocess.run(
             ["git", "-C", cwd, "branch", "--show-current"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=3,
         ).stdout.strip()
     except Exception:
         branch = ""
@@ -47,6 +48,7 @@ rec = {
     "agent_type": d.get("agent_type", ""),
     "agent_id": d.get("agent_id", ""),
     "session_id": d.get("session_id", ""),
+    "source": d.get("source", ""),
     "cwd": cwd,
     "branch": branch,
     "tail": msg[-300:],
