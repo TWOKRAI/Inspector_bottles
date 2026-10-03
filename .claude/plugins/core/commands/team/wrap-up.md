@@ -89,7 +89,7 @@ The same text that was written. No extra preambles or markdown wrappers — just
 
 Run the checks in this order:
 
-1. **Protected branch → do not commit.** Read the branch with `git rev-parse --abbrev-ref HEAD`. If it matches a pattern in `.claude/protected-branches` (one anchored regex per line), or — when that file does not exist — one of the defaults `main`, `master`, `develop`, `dev`, `release/.*`, `production`, `prod`, skip the commit. Tell the user: "the session log docs/sessions/<YYYY-MM-DD>.md is written but not committed — protected branch". The `protect-branch.sh` hook blocks `git commit` there (exit 2).
+1. **Protected branch → do not commit.** Read the branch with `git rev-parse --abbrev-ref HEAD`. If it matches a pattern in `.claude/protected-branches` (one anchored regex per line; lines starting with `#` and blank lines are ignored), or — when that file does not exist — one of the defaults `main`, `master`, `develop`, `dev`, `release/.*`, `production`, `prod`, skip the commit. Tell the user: "the session log docs/sessions/<YYYY-MM-DD>.md is written but not committed — protected branch". The `protect-branch.sh` hook blocks `git commit` there (exit 2).
 2. **Nothing to commit → skip.** If `git status --short -- docs/sessions/<YYYY-MM-DD>.md` prints nothing, skip the step.
 3. **New file → add it first.** If the status line starts with `??` (the first wrap-up of the day created the file), run `git add -- docs/sessions/<YYYY-MM-DD>.md`. A pathspec commit of an untracked file fails with "pathspec did not match any file(s) known to git".
 4. **Commit one explicit path, nothing else.** Write the message to a file, then run:

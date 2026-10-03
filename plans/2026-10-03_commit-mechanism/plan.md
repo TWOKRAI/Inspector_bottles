@@ -2,7 +2,7 @@
 
 - **Slug:** commit-mechanism
 - **Дата:** 2026-10-03
-- **Статус:** DRAFT
+- **Статус:** IN PROGRESS
 - **Plan review:** CHANGES REQUESTED → правки внесены 2026-10-03 (ревьюер `a18b7e92489a5cebb`; Task 1.1 — ред. 2)
 - **Ветка:** `feat/commit-mechanism`
 
@@ -52,7 +52,7 @@
 
 Порядок: 1.1 → 1.3 → 1.2 — все три правят `.pre-commit-config.yaml` и шаблон сида; параллельно не вести.
 
-- Task 1.1: снять хук `session-log` с pre-commit; журнал сессий пишет и коммитит `/wrap-up` [PENDING]
+- [x] Task 1.1: снять хук `session-log` с pre-commit; журнал сессий пишет и коммитит `/wrap-up` [DONE d8ee11c2d, ревью APPROVED r2]
 - Task 1.2: одна версия `ruff` в хуке и при правке; `.md` чинится при правке; E501 виден при правке [PENDING] (после 1.3: общий конфиг pre-commit)
 - Task 1.3: bandit не сканирует скрипты инъекций `docs/reviews/**`; гейт тестов `_stack.md` смотрит на реальные пути [PENDING] (после 1.1: общий конфиг pre-commit)
 
