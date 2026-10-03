@@ -160,3 +160,82 @@ def test_root_nested_in_foreign_repo_on_main_is_not_main(tmp_path):
     _init_main(root)
     control = _check(root, ceiling=None)
     assert control.returncode == 1 and "ORDER_BLOCK_STALE" in control.stdout, control.stdout + control.stderr
+
+
+# ---------------------------------------------------------------- ревью: тег main, атомарная запись, хвост stderr
+
+
+def _stale_root(tmp_path: Path, name: str) -> Path:
+    root = tmp_path / name
+    _write(root, "plans/2026-10-02_p.md", _plan(3, 5).encode("utf-8"))
+    _write(root, "plans/queue/ORDER.md", f"{BEGIN}\nустарело\n{END}\n".encode())
+    _write(root, "plans/queue/progress-baseline.txt", b"")
+    _init_main(root)
+    return root
+
+
+def test_tag_named_main_does_not_hide_the_main_branch(tmp_path):
+    # `rev-parse --abbrev-ref HEAD` при ветке и теге main отвечает `heads/main` -> проверка блока молча пропускалась
+    root = _stale_root(tmp_path, "tagged")
+    _git(root, "tag", "main")
+    cp = _check(root, ceiling=None)
+    assert cp.returncode == 1 and "ORDER_BLOCK_STALE" in cp.stdout, cp.stdout + cp.stderr
+
+
+def test_tag_named_main_on_detached_head_is_not_main(tmp_path):
+    root = _stale_root(tmp_path, "detached")
+    _git(root, "tag", "main")
+    _git(root, "checkout", "-q", "--detach")
+    cp = _check(root, ceiling=None)
+    assert cp.returncode == 0, cp.stdout + cp.stderr
+    assert "ORDER_BLOCK_" not in cp.stdout + cp.stderr
+
+
+def _load(name: str, path: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_sync_is_atomic_when_replace_fails(tmp_path, monkeypatch):
+    import pytest
+
+    pp = _load("pp_author_atomic", PROGRESS)
+    raw = f"до\r\n{BEGIN}\r\nстарое\r\n{END}\r\nпосле\r\n".encode()
+    root, order = _order_root(tmp_path, raw)
+    plans = pp.discover(root)
+    before = sorted(p.name for p in order.parent.iterdir())
+
+    def boom(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(pp.os, "replace", boom)
+    with pytest.raises(OSError, match="replace failed"):
+        pp.sync_order(order, plans, [])
+    assert order.read_bytes() == raw
+    assert sorted(p.name for p in order.parent.iterdir()) == before, "остался временный файл"
+
+
+def test_sync_leaves_no_temp_file_on_success(tmp_path):
+    root, order = _order_root(tmp_path, f"{BEGIN}\n{END}\n".encode())
+    assert _sync(root).returncode == 0
+    assert sorted(p.name for p in order.parent.iterdir()) == ["ORDER.md"]
+
+
+def test_validate_prints_stderr_tail_when_script_crashes(capsys, monkeypatch):
+    from types import SimpleNamespace
+
+    validate = _load("validate_author_tail", Path(__file__).resolve().parents[2] / "validate.py")
+    stderr = "\n".join(f"Traceback строка {i}" for i in range(30)) + "\nRuntimeError: упал"
+    fake = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr=stderr)
+    monkeypatch.setattr(validate, "subprocess", SimpleNamespace(run=lambda *a, **k: fake))
+    monkeypatch.setattr(validate, "errors", [])
+    validate.check_plans_progress()
+    out = capsys.readouterr().out
+    assert "[FAIL]" in out and len(validate.errors) == 1
+    assert "RuntimeError: упал" in out and "Traceback строка 29" in out
+    assert "Traceback строка 5" not in out, "печатается весь stderr, а не хвост"

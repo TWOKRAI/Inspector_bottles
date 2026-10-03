@@ -4,7 +4,7 @@
 Интерфейс (CLI, только stdlib)::
 
     python scripts/plans_progress/plans_progress.py [--root DIR] [--order PATH]
-        [--json] [--html [PATH]] [--check] [--baseline PATH]
+        [--json] [--html [PATH]] [--check] [--baseline PATH] [--sync-order]
 
 * ``--root DIR``   каталог с ``plans/`` и ``plans/_archive/`` (по умолчанию корень репозитория);
 * ``--order PATH`` ``ORDER.md`` (по умолчанию ``<root>/plans/queue/ORDER.md``); файла нет -> полосы
@@ -20,8 +20,11 @@
 ``unknown`` (``?``) бывает только у пункта списка без слова набора.
 
 Pre:  ``root/plans`` читается как каталог планов; файлы — UTF-8 (BOM и CRLF допустимы).
-Post: файлы планов не пишутся; ``--html`` пишет только по заданному пути. ``done`` — число задач
-      ``done``; ``total`` = всего - ``dropped`` (deferred + superseded) - ``unknown``.
+Post: файлы планов не пишутся. Пишут только два флага: ``--html`` — страницу по заданному пути
+      (по умолчанию ``data/plans_progress.html``), ``--sync-order`` — строки между маркерами
+      ``progress:begin``/``progress:end`` в ORDER.md (атомарно, остальные байты не меняются; писатель — лид
+      на ``main``). ``done`` — число задач ``done``; ``total`` = всего - ``dropped`` (deferred +
+      superseded) - ``unknown``.
 
 Правила разбора (эталон) — ``plans/2026-10-02_plans-progress-dashboard.md``, «Формат задачи».
 """
@@ -862,7 +865,14 @@ def sync_order(order: Path, live: list[Plan], archive: list[Plan]) -> tuple[int,
     new_text = "\n".join(new_lines)
     if new_text == text:
         return 0, f"ORDER уже актуален: {order}"
-    order.write_bytes(new_text.encode("utf-8", errors="surrogateescape"))
+    # атомарно: временный файл рядом + os.replace; при сбое ORDER не тронут, временный файл удалён
+    tmp = order.with_name(f".{order.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(new_text.encode("utf-8", errors="surrogateescape"))
+        os.replace(tmp, order)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return 0, f"ORDER обновлён: {order}"
 
 
@@ -876,7 +886,8 @@ def on_main_branch(root: Path) -> bool:
             return None
         return cp.stdout.strip() if cp.returncode == 0 else None
 
-    top, branch = git("rev-parse", "--show-toplevel"), git("rev-parse", "--abbrev-ref", "HEAD")
+    # `branch --show-current`, а не `rev-parse --abbrev-ref HEAD`: тег `main` на detached HEAD даёт `heads/main`
+    top, branch = git("rev-parse", "--show-toplevel"), git("branch", "--show-current")
     if not top or branch != "main":
         return False
     try:

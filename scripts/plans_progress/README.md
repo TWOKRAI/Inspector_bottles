@@ -48,6 +48,21 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 `--check` без `plans/`, без живых планов или с отсутствующим `--baseline` завершается кодом 2.
 Архивные планы линт не смотрит.
 
+## Слияние ветки в main (порядок лида)
+
+Блок прогресса в `ORDER.md` пишет один человек — лид на `main`. Блок читает **рабочее** дерево, поэтому
+`--sync-order` идёт после слияния и до коммита. Хук `protect-branch` блокирует прямой коммит на `main`,
+поэтому коммит делает `git merge --continue`:
+
+```
+git merge --no-ff --no-commit <ветка>
+python scripts/plans_progress/plans_progress.py --sync-order
+git add plans/queue/ORDER.md
+git merge --continue
+```
+
+На ветках `--sync-order` не запускают: два писателя блока дают конфликт в одном hunk.
+
 ## Тесты
 
 ```

@@ -15,6 +15,11 @@ Run the final check before shipping the code:
    uv run pyright src   # same scope as CI; bare `pyright` pulls in tests/, where type debt usually piles up
    uv run pytest -q
    ```
+   Plans format check (always — `make gate` does not run `scripts/validate.py`):
+   ```bash
+   python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
+   ```
+   Exit 1 = a new blocking finding in a plan, exit 2 = the check could not run — **STOP**, fix before shipping.
 
 2. **Change summary:**
    ```bash
@@ -123,8 +128,8 @@ If the plan is found and every Task = [DONE] (the remainder is only backlog / a 
    python3 scripts/plans_progress/plans_progress.py --check --baseline plans/queue/progress-baseline.txt
    ```
    Exit 1 = a new blocking finding (or, on `main` only, a stale `progress:begin`/`progress:end` block in
-   `plans/queue/ORDER.md` — refresh it with `--sync-order`) — **STOP**, fix the plan, don't extend the baseline
-   silently. Exit 2 = the check could not run (no `plans/`, no baseline file).
+   `plans/queue/ORDER.md` — the lead refreshes it at the merge point, see `scripts/plans_progress/README.md`) —
+   **STOP**, fix the plan, don't extend the baseline silently. Exit 2 = the check could not run (no `plans/`, no baseline file).
 5. Commit:
    ```bash
    git add plans/

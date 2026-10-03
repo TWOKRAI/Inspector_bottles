@@ -10,6 +10,7 @@
 5a. README.md в каждом модуле
 5b. Структура Services/ (__init__.py, interfaces.py, STATUS.md, README.md)
 6. ADR-документация синхронизирована (python -m scripts.sync --check)
+7. Планы: новых блокирующих находок нет (scripts/plans_progress --check --baseline)
 
 Архитектурные границы между слоями (framework → Services → Plugins → app) — sentrux check.
 
@@ -271,6 +272,10 @@ def check_plans_progress() -> None:
         print(msg)
         for line in (result.stdout + result.stderr).splitlines():
             if " blocking " in line or line.startswith(("Итог", "ошибка")):
+                print(f"    {line}")
+        if result.returncode not in (0, 1):
+            # скрипт упал или отказался (exit 2, traceback): без хвоста stderr причина не видна
+            for line in result.stderr.splitlines()[-10:]:
                 print(f"    {line}")
         errors.append(msg)
 

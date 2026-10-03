@@ -234,7 +234,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 
 ## Прогресс планов (генерирует скрипт)
 
-Блок между маркерами пишет только `python scripts/plans_progress/plans_progress.py --sync-order` (лид, в `main`, в точке слияния); руками не править. На `main` `--check` краснеет, если блок устарел.
+Блок между маркерами пишет только `python scripts/plans_progress/plans_progress.py --sync-order` (лид, в `main`, в точке слияния); руками не править. На `main` `--check` краснеет, если блок устарел. Порядок лида при слиянии: `git merge --no-ff --no-commit <ветка>` → `--sync-order` → `git add plans/queue/ORDER.md` → `git merge --continue` (на ветках `--sync-order` не запускать).
 
 <!-- progress:begin -->
 - robot-protocol-v2 — 5 из 21 · 24%
