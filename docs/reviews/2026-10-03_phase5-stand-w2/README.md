@@ -10,6 +10,7 @@
 | `predictions.md` | предсказания до замера |
 | `raw/*.json` | сырьё: `D100_{1,2,3}` (`transit_ms=100`), `P10_{1,2}` (пауза исполнителя processor 10 с), `E0_<sha>_{1,2}` (контроль, `transit_ms=0`) |
 | `fixtures/green_D100.json`, `fixtures/red_E0_old.json` | фикстуры для тестов `scripts/stand_gate` (Task 5.6): `raw/D100_3` и `raw/E0_003264912_1` с ключом `journal`, пересчитанным по `messages.log`; старый ключ сохранён как `journal_raw_stand5_buggy` |
+| `fixtures/green_P10.json` | **синтетика**: `raw/P10_2` + журнал по `messages.log` + вписанные лидом `pause.drain_s: 0.05`, `pause.drain_poll_period_s: 0.02` (старым способом дренаж не измерим; замеренное — в `pause.drain_s_measured_old_method`) |
 
 Запуск кейса: cwd = PYTHONPATH = меряемое дерево, `PYTHONIOENCODING=utf-8 QT_QPA_PLATFORM=offscreen`, интерпретатор проекта: `python stand5.py --overflow every --secs 30 [--transit-ms 100] [--pause-secs 10] --out case.json`.
 
