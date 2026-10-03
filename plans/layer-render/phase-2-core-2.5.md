@@ -5,7 +5,7 @@
 
 ### Task 2.5 — `render_scene(background, placed, effects, rng)`: одна функция кадра; `SceneCompositor` делегирует
 
-- **Статус:** [PENDING] волна 6; ревью спеки ит.1 — CHANGES REQUESTED (M1, m1–m10 внесены, 2026-10-03) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (свежий) → инъекции лида → reviewer
+- **Статус:** [PENDING] волна 6; ревью спеки ит.1 — CHANGES REQUESTED (M1, m1–m10 внесены), ит.2 — APPROVED, два нита внесены (2026-10-03) · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (свежий) → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render` получает модуль `scene`: `render_scene`, `SceneBackground`,
   `PlacedObject`; сигнатура `SceneCompositor` не меняется, поведение на валидных входах — тоже; невалидный
   `background_bgr` — `ValueError` в `__init__`, LR-003)
@@ -79,17 +79,18 @@ def render_scene(background: SceneBackground, placed: Sequence[PlacedObject],
   `ValueError` в `__init__`. `SceneCompositor` перевыбрасывает ошибку `SolidFill` своим текстом:
   `ValueError("SceneCompositor.background_bgr: ожидались три целых 0..255 (B, G, R)") from exc` (у `SolidFill` в тексте
   чужое имя и каналы в обратном порядке). Причина сужения: правила цвета — в одном месте, `SolidFill`. Производитель
-  один — `_BACKGROUND_BGR = (60, 60, 60)` (`plugin.py:138`), регрессии нет. Три `int` 0..255 дают тот же кадр. Записать
+  один — `_BACKGROUND_BGR = (60, 60, 60)` (`plugin.py:138`), регрессии нет. Вход не тройкой (`(1, 2, 3, 4)`, `60`) — ошибка
+  распаковки (`ValueError`/`TypeError`), как и прежде, но теперь в `__init__`. Три `int` 0..255 дают тот же кадр. Записать
   в LR-003 и в README `line_sim`.
 - `scene.py` импортирует только `background`, `compose`, `effects`, `interfaces` пакета и `numpy`.
 
 #### Acceptance
 
-##### Функция (A1–A6, тестер)
-
 RED и GREEN на коде до задачи (M1 ревью спеки): **A7 и A9 п.1–2 зелёные до задачи** — тестер прогоняет их в своём
 worktree и цитирует вывод. Импорт `Services.layer_render.scene` — только внутри тестов A1–A6 и A8, не в шапке файла:
 иначе весь файл падает при сборе. Ожидаемый RED: A1–A6, A8, A9 п.3.
+
+##### Функция (A1–A6, тестер)
 
 - [ ] **A1 имена и граница.** `from Services.layer_render import render_scene, SceneBackground, PlacedObject` и те же имена
   из `Services.layer_render.scene`. Чистый процесс `python -c "import Services.layer_render.scene"`: код возврата `0`,
