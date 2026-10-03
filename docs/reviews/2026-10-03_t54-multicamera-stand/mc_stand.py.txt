@@ -1,0 +1,93 @@
+"""Task 5.4 — стенд multi_camera.yaml: s0 через 10 с после ready, s1 через 40 с.
+
+Запуск из корня worktree: python <этот файл> <tag> <out_dir>
+Снятие — функции stand_gate.run (snap/_payload), без порогов stand.yaml (там имена processor/inspector).
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+TREE = Path.cwd()
+sys.path.insert(0, str(TREE))
+
+from scripts.stand_gate.run import _payload, snap  # noqa: E402
+
+RECIPE = TREE / "multiprocess_prototype/backend/topology/multi_camera.yaml"
+PROCS = ["camera_0", "camera_1", "processor_0", "processor_1", "compositor", "gui"]
+CAMS = ["camera_0", "camera_1"]
+WARMUP_S = 10
+WINDOW_S = 30
+
+
+def cycles(drv, name: str) -> int:
+    try:
+        st = _payload(drv.introspect_status(name)) or {}
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(int(ws.get("cycles") or 0) for ws in (st.get("workers") or {}).values() if isinstance(ws, dict))
+
+
+def main() -> int:
+    tag, out_dir = sys.argv[1], Path(sys.argv[2])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for k in [k for k in os.environ if k.startswith("FW_SHM_")]:
+        del os.environ[k]
+    from backend_ctl.harness import BackendHarness
+
+    case_dir = Path(tempfile.mkdtemp(prefix=f"t54mc_{tag}_"))
+    log_dir = case_dir / "logs"
+    log_dir.mkdir()
+    res: dict = {"tag": tag, "recipe": str(RECIPE), "case_dir": str(case_dir)}
+    harness = BackendHarness(recipe=RECIPE, port=8775, ready_timeout=90, log_dir=log_dir)
+    t_boot = time.perf_counter()
+    drv = harness.start()
+    res["start_s"] = round(time.perf_counter() - t_boot, 2)
+    try:
+        t_ready = time.perf_counter()
+        first: dict = {c: None for c in CAMS}
+        while time.perf_counter() - t_ready < 5 and any(v is None for v in first.values()):
+            for c in CAMS:
+                if first[c] is None and cycles(drv, c) > 0:
+                    first[c] = round(time.perf_counter() - t_ready, 3)
+            time.sleep(0.02)
+        res["first_frame_after_ready_s"] = first
+        time.sleep(max(0.0, WARMUP_S - (time.perf_counter() - t_ready)))
+        res["s0"] = snap(drv, PROCS)
+        res["s0_cycles"] = {p: cycles(drv, p) for p in PROCS}
+        time.sleep(WINDOW_S)
+        res["s1"] = snap(drv, PROCS)
+        res["s1_cycles"] = {p: cycles(drv, p) for p in PROCS}
+    finally:
+        harness.stop()
+    hits = []
+    for f in log_dir.rglob("*.log"):
+        try:
+            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "preroll" in line:
+                    hits.append(f"{f.name}: {line[:200]}")
+        except OSError:
+            pass
+    res["preroll_lines"] = hits
+    (out_dir / f"{tag}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    # краткая сводка
+    print(f"{tag} start_s={res['start_s']} first={first}")
+    for s in ("s0", "s1"):
+        for p in PROCS:
+            rs = res[s][p].get("rs", {})
+            err = res[s][p].get("error")
+            print(
+                f"  {s} {p:12} evicted={rs.get('queue_data_evicted')} stale={rs.get('frame_stale_drops')}"
+                f" door={rs.get('door_drops')} deliv_fail={rs.get('errors_delivery_failed')}"
+                f" cycles={res[s + '_cycles'][p]}" + (f" ERROR={err}" if err else "")
+            )
+    print(f"  preroll_lines={len(hits)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
