@@ -795,6 +795,9 @@ class SystemBlueprint(SchemaBase):
         # одноимённые input/output порты (e.g. "frame" → "frame")
         input_map: dict[str, Port] = {}  # address → Port
         output_map: dict[str, Port] = {}  # address → Port
+        # address → (процесс, плагин, порт): имена берём отсюда, а не разбором адреса по «.»
+        # (имя процесса может содержать точку: «proc» и «proc.a» — разные процессы).
+        input_origin: dict[str, tuple[str, str, str]] = {}
 
         for proc in self.processes:
             for pdict in proc.plugins:
@@ -809,6 +812,7 @@ class SystemBlueprint(SchemaBase):
                 for port in entry.inputs:
                     addr = f"{proc.process_name}.{plugin_name}.{port.name}"
                     input_map[addr] = port
+                    input_origin[addr] = (proc.process_name, plugin_name, port.name)
 
                 for port in entry.outputs:
                     addr = f"{proc.process_name}.{plugin_name}.{port.name}"
@@ -837,16 +841,18 @@ class SystemBlueprint(SchemaBase):
                 wired_inputs.add(wire.target)
 
         # Ф4.3 (C-4) + 5.9a: validate_chain_detailed — детальная диагностика ВНУТРИпроцессной
-        # цепочки. Рантайм несёт между плагинами один dict, поэтому вход узла покрыт,
-        # если ИМЯ порта есть среди имён проводов процесса (wired_names) ∪ выходов узлов
-        # выше (available_keys). Входы, покрытые явным Wire по адресу, исключаем из
+        # цепочки. Модель доступности: вход узла покрыт, если ИМЯ порта есть среди имён
+        # проводов процесса (wired_names) ∪ выходов узлов выше (available_keys).
+        # Граница модели: плагин, возвращающий свежий dict, сбрасывает ключи; валидатор
+        # этого не видит (OPEN_QUESTIONS 2026-10-03, решение CTO; ADR-PM-052).
+        # Входы, покрытые явным Wire по адресу, исключаем из
         # chain_inputs: они не обязаны совпадать с выходом узла выше (fan-in).
         # Адрес процесса вставляем в текст «ключа нет» здесь: validate_chain его не знает.
         reported: set[str] = set()  # адреса, уже названные ошибкой цепочки — один вход, одна ошибка
         wired_names_by_process: dict[str, list[str]] = {}  # процесс -> имена портов, пришедшие проводом
         for target in wired_inputs:
-            proc_name, _, rest = target.partition(".")
-            wired_names_by_process.setdefault(proc_name, []).append(rest.rsplit(".", 1)[-1])
+            origin_proc, _, origin_port = input_origin[target]
+            wired_names_by_process.setdefault(origin_proc, []).append(origin_port)
         for proc in self.processes:
             wired_names = wired_names_by_process.get(proc.process_name, [])
             chain: list[tuple[str, list[Port], list[Port]]] = []
@@ -869,16 +875,15 @@ class SystemBlueprint(SchemaBase):
         # Проверяем обязательные входы
         for addr, port in input_map.items():
             if not port.optional and addr not in wired_inputs and addr not in reported:
-                # Входы внутри процесса могут быть покрыты auto-wiring
-                # (ключ несёт провод процесса или узел выше), пропускаем такие
-                parts = addr.split(".")
-                if len(parts) == 3:
-                    proc_name = parts[0]
-                    proc_cfg = next((p for p in self.processes if p.process_name == proc_name), None)
-                    if proc_cfg and _is_covered_by_auto_wiring(
-                        proc_cfg, parts[1], port, wired_names_by_process.get(proc_name, [])
-                    ):
-                        continue
+                # Сюда доходят только входы, которых цепочка НЕ назвала ошибкой, то есть уже
+                # покрытые ею; _is_covered_by_auto_wiring вернёт False лишь при двух
+                # одноимённых плагинах в процессе (index() берёт первый) — тогда ошибка нужна.
+                proc_name, plugin_name, _ = input_origin[addr]
+                proc_cfg = next((p for p in self.processes if p.process_name == proc_name), None)
+                if proc_cfg and _is_covered_by_auto_wiring(
+                    proc_cfg, plugin_name, port, wired_names_by_process.get(proc_name, [])
+                ):
+                    continue
                 errors.append(f"Вход '{addr}' ({port.dtype}) не подключен")
 
         return errors
