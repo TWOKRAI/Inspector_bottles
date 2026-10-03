@@ -235,6 +235,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 ## Прогресс планов (генерирует скрипт)
 
 Блок между маркерами пишет только `python scripts/plans_progress/plans_progress.py --sync-order` (лид, в `main`, в точке слияния); руками не править. На `main` `--check` краснеет, если блок устарел. Порядок лида при слиянии: `git merge --no-ff --no-commit <ветка>` → `--sync-order` → `git add plans/queue/ORDER.md` → `git merge --continue` (на ветках `--sync-order` не запускать).
+В блоке и на странице — только очередь: планы §4.1, §4.2 и те, которых нет в таблицах §4; закрытые §4.3 и `_archive/` скрыты и считаются в строке `в архиве`.
 
 <!-- progress:begin -->
 - robot-protocol-v2 — 5 из 21 · 24%
@@ -262,39 +263,6 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 - word-layout — 0 из 0
 - storage-stack-embedded-first — 0 из 11 · 0%
 - 2026-07-06_constructor-master — 0 из 0
-- lifecycle-graceful-stop — 1 из 2 · 50%
-- observability-roadmap — 0 из 0
-- observability-unified-routing — 21 из 32 · 66%
-- observability-review-remediation — 7 из 20 · 35%
-- observability-f1-hardening — 0 из 16 · 0%
-- observation-port — 22 из 24 · 92%
-- observability-dx — 0 из 0
-- telemetry-stage6 — 11 из 13 · 85%
-- telemetry-coherence-remediation — 11 из 12 · 92%
-- telemetry-dashboard — 6 из 6 · 100%
-- telemetry-publish-control — 10 из 10 · 100%
-- telemetry-delivery-simplification — 2 из 6 · 33%
-- telemetry-pull-on-demand — 0 из 0
-- gui-telemetry-read-model — 11 из 11 · 100%
-- truth-holes-closure — 14 из 15 · 93%
-- backend-ctl-proof-discipline — 8 из 16 · 50%
-- supervisor-alerting — 0 из 0
-- supervisor-backoff-jitter — 0 из 0
-- supervisor-strategies — 0 из 0
-- depends-on-readiness — 0 из 0
-- framework-layer-grouping — 0 из 0
-- 2026-06-05_sql-insert-many-atomic — 0 из 5 · 0%
-- 2026-05-29_constructor-maturity — 0 из 1 · 0%
-- current-path — 0 из 0
-- pipeline-color-inspection — 0 из 0
-- proto-frontend-carve — 0 из 6 · 0%
-- pult-control-panel — 0 из 0
-- line-sim-belt-look — 0 из 3 · 0%
-- sim-lateral-offset — 1 из 1 · 100%
-- undo-restores-selection — 1 из 1 · 100%
-- letter-robot-cycle — 0 из 6 · 0%
-- draw-mode-rework — 0 из 0
-- dataset-circle-capture — 0 из 0
 - 2026-10-02_plans-progress-dashboard — 4 из 10 · 40%
-в архиве: 86
+в архиве: 119
 <!-- progress:end -->

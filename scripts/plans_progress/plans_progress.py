@@ -824,9 +824,24 @@ BEGIN_MARK = "<!-- progress:begin -->"
 END_MARK = "<!-- progress:end -->"
 
 
+def queue_scope(live: list[Plan]) -> tuple[list[Plan], list[Plan], list[Plan], list[Plan]]:
+    """Живые планы по секциям страницы: (очередь §4.1, ждут §4.2, не в ORDER, закрытые §4.3). Порядок сохраняется."""
+    return (
+        [p for p in live if p.tier == "4.1"],
+        [p for p in live if p.tier == "4.2"],
+        [p for p in live if p.tier is None],
+        [p for p in live if p.tier == "4.3"],
+    )
+
+
 def block_lines(live: list[Plan], archive: list[Plan]) -> list[str]:
-    """Строки блока: по строке на живой план (порядок страницы) и счётчик архива. Шкала — та же `_tally`."""
-    return [f"- {p.name} — {_tally(p.done, p.total)}" for p in live] + [f"в архиве: {len(archive)}"]
+    """Строки блока: планы §4.1, §4.2 и без яруса (порядок страницы) и счётчик `в архиве`.
+
+    `в архиве` = архивные планы + закрытые §4.3. Шкала — та же `_tally`, что у страницы.
+    """
+    queue, waiting, unlisted, closed = queue_scope(live)
+    shown = queue + waiting + unlisted
+    return [f"- {p.name} — {_tally(p.done, p.total)}" for p in shown] + [f"в архиве: {len(archive) + len(closed)}"]
 
 
 def locate_block(lines: list[str]) -> tuple[int, int] | str:
@@ -983,9 +998,10 @@ h1{font-size:1.4rem;margin:0 0 4px}
 .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:16px}
 .lane{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .lane b{display:block;margin-bottom:2px}
-details.plan,details#archive{background:var(--card);border:1px solid var(--line);border-radius:8px;
+details.plan,details#archive,details#waiting{background:var(--card);border:1px solid var(--line);border-radius:8px;
 margin-bottom:8px;padding:0 12px}
-details#archive>details.plan{margin:8px 0}
+details#archive>details.plan,details#waiting>details.plan{margin:8px 0}
+h2{font-size:1.05rem;margin:16px 0 8px}
 summary{cursor:pointer;padding:9px 0;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 summary .name{font-weight:600}
 .badge{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 7px}
@@ -1097,8 +1113,11 @@ def git_sha(root: Path) -> str:
 
 
 def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
+    """Страница: очередь §4.1, `#waiting` §4.2, `#unlisted` (нет в ORDER.md), `#archive` (архив + закрытые §4.3)."""
+    queue, waiting, unlisted, closed = queue_scope(live)
+    shelved = closed + archive
     lanes: dict[str, list[int]] = {}
-    for p in live:
+    for p in queue + waiting + unlisted:
         agg = lanes.setdefault(p.lane or "—", [0, 0, 0])
         agg[0] += p.done
         agg[1] += p.total
@@ -1111,8 +1130,9 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         "<title>Прогресс планов</title>",
         f"<style>{CSS}</style></head><body><main>",
         "<h1>Прогресс планов</h1>",
-        f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))} · живых планов {len(live)}, '
-        f"в архиве {len(archive)}</div>",
+        f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))}</div>',
+        f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
+        f"закрыто и в архиве {len(shelved)}</div>",
         '<section class="lanes">',
     ]
     for lane, (done, total, n) in lanes.items():
@@ -1122,12 +1142,26 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
             f'<span class="tally">{_e(_tally(done, total))}</span></div>'
         )
     parts.append("</section>")
-    parts.extend(_plan_html(p) for p in live)
-    a_done = sum(p.done for p in archive)
-    a_total = sum(p.total for p in archive)
+    parts.append('<section id="queue">')
+    parts.extend(_plan_html(p) for p in queue)
+    parts.append("</section>")
+    parts.append('<details id="waiting">')
+    parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
+    parts.extend(_plan_html(p) for p in waiting)
+    parts.append("</details>")
+    if unlisted:
+        parts.append('<section id="unlisted">')
+        parts.append(f"<h2>Нет в ORDER.md · {len(unlisted)}</h2>")
+        parts.extend(_plan_html(p) for p in unlisted)
+        parts.append("</section>")
+    a_done = sum(p.done for p in shelved)
+    a_total = sum(p.total for p in shelved)
     parts.append('<details id="archive">')
-    parts.append(f"<summary>Архив · {len(archive)} планов · итого {_e(_tally(a_done, a_total))}</summary>")
-    parts.extend(_plan_html(p) for p in archive)
+    parts.append(
+        f"<summary>Закрыто и в архиве · {len(shelved)} планов (§4.3 и _archive/) · "
+        f"итого {_e(_tally(a_done, a_total))}</summary>"
+    )
+    parts.extend(_plan_html(p) for p in shelved)
     parts.append("</details>")
     parts.append("</main></body></html>")
     return "\n".join(parts) + "\n"
