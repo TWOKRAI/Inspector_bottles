@@ -32,8 +32,8 @@ _DEFECT_OFFSET_FRAC = 0.15  # смещение пятна к верхнему л
 
 
 def _read_only_view(arr: np.ndarray) -> np.ndarray:
-    """Read-only вид без копии: `_transform` без трансформа возвращает сам кэш фабрики,
-    запись через ответ испортила бы все следующие `make()`."""
+    """Read-only вид без копии: `transform_layer` без трансформа возвращает сам кэш фабрики,
+    запись через ответ испортила бы все следующие `render()`."""
     view = arr.view()
     view.flags.writeable = False
     return view

@@ -9,7 +9,7 @@
   (хост отвечает `bad_request`): 1..16 сидов >= 0, `tile_px` 16..256 и бюджет
   `len(seeds) * tile_px**2 <= 8 * 160**2`.
 - `render_preview_grid(preset, seeds, tile_px)` — `(png_bytes, tiles)`; объект —
-  `make(f"preview-{seed}", 0.0, default_rng(seed))`, вписан в квадрат `tile_px` на сером
+  `render(default_rng(seed), label=f"preview-{seed}")`, вписан в квадрат `tile_px` на сером
   (90,90,90) с сохранением пропорций, тайлы в одну строку. `ObjectFactory` кэшируется на
   одну запись по каноническому JSON пресета (файлы картинок кэш не версирует).
 - `render_layout(preset, seed)` — каждый слой пресета отдельной RGBA-картинкой в номинале

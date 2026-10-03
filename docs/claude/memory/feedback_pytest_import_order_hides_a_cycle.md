@@ -17,6 +17,8 @@ metadata:
 воспроизвёл: `import Services.layer_render` первым → `ImportError ... partially initialized module
 'Services.layer_render.catalog'`; `import Services.dataset_gen` первым → ok. Сторожат такое только тесты-подпроцессы.
 
+Второй случай (2.4b i11, 2026-10-03). Заплата `layer_render.factory` → `dataset_gen.core.augment` не дала `ImportError` ни в одном порядке, и я записал «цикла нет». Ревьюер: цикл пакетов есть (`factory → dataset_gen.core.augment → layer_render.effects`), молчит лишь потому, что `dataset_gen` импортирует из `layer_render` одни подмодули. **Отсутствие `ImportError` ≠ отсутствие цикла**: цикл ищут по рёбрам импорта (сканер границ, `sentrux`), а падение — его частный случай.
+
 **Why:** неверная причина в отчёте инъекций переживает задачу (правило «объяснение без воспроизведения»); второй раз
 подряд за день ревьюер опроверг моё объяснение расхождения прогноза.
 

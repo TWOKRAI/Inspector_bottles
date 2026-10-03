@@ -20,7 +20,7 @@ from Services.layer_render.factory import RenderedObject
 from Services.layer_render.layers import LayerSpec, canvas_size, compose_layers, transform_layer
 from Services.line_sim.interfaces import ObjectPassport
 
-# `canvas_size` — реэкспорт для `core/preview.py`; в `__all__`, иначе ruff F401 снимет импорт.
+# `canvas_size` — в `__all__` ради старого пути импорта (test_acceptance_2_3_layers.py:1153); иначе ruff F401 снимет.
 __all__ = ["LayeredObject", "canvas_size"]
 
 
@@ -68,6 +68,7 @@ class LayeredObject:
             layer_params=rendered.layer_params,
         )
         obj._rgba = rendered.rgba
+        obj._rgba.flags.writeable = False  # без копии: render() is rendered.rgba; read-only, как в __init__
         return obj
 
     def render(self) -> np.ndarray:
