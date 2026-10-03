@@ -15,11 +15,14 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 |---|---|
 | `--root DIR` | каталог с `plans/` (по умолчанию корень репозитория) |
 | `--order PATH` | `ORDER.md` (по умолчанию `<root>/plans/queue/ORDER.md`); нет файла — полосы `null` |
-| `--json` | список планов: `plan`, `path`, `archived`, `lane`, `tier`, `done`, `total`, `dropped`, `unknown`, `unmarked`, `header_status`, `tasks` (`id`, `title`, `status`, `ref`, `after`, `ready`), затем `after`, `after_reason`, `waiting_on`, `ready`, `dep_unknown`, `dep_cycle` (новые ключи — в конце объекта, порядок старых не менялся) |
+| `--json` | список планов: `plan`, `path`, `archived`, `lane`, `tier`, `done`, `total`, `dropped`, `unknown`, `unmarked`, `header_status`, `tasks` (`id`, `title`, `status`, `ref`, `after`, `ready`), затем `after`, `after_reason`, `waiting_on`, `ready`, `dep_unknown`, `dep_cycle`, `active` (новые ключи — в конце объекта, порядок старых не менялся) |
 | `--html [PATH]` | страница без внешних ресурсов; по умолчанию `data/plans_progress.html` |
 | `--check` | печатает находки линта; exit 1 при новой блокирующей находке |
 | `--baseline PATH` | известные блокирующие находки (`<план>:<КОД>[:<id>]`); из базы не блокируют |
 | `--sync-order` | переписать блок прогресса между `<!-- progress:begin -->` и `<!-- progress:end -->` в `ORDER.md`; вне блока байты и EOL не меняются; нет файла или маркеров — exit 2, файл не трогается |
+| `--who` | на stdout только объект `{"active": [...], "orphans": [...]}` (см. «Активные worktree»); с `--json`/`--html`/`--check`/`--sync-order` — exit 2 |
+| `--now ISO` | «сейчас» для окна: местное время без пояса (по умолчанию — часы машины); иное — exit 2 |
+| `--active-window N[mhd]` | окно свежести сигнала: минуты, часы, дни (по умолчанию `6h`, не измерено); иное — exit 2 |
 
 Без флагов печатает сводную таблицу.
 
@@ -103,6 +106,19 @@ python scripts/plans_progress/plans_progress.py --check --baseline plans/queue/p
 Сводка `<div class="meta" id="ready">` стоит перед карточками полос: `можно начинать: A, B` (порядок очереди) или
 `можно начинать: нет`; если у K из N планов §4.1 (закрытые считаются) строки нет, в конец дописано
 ` · поле не заполнено у K из N планов очереди`.
+
+## Активные worktree: `active` и `--who`
+
+Корни — worktree из `git worktree list --porcelain` (главное дерево тоже), но только если `--root` — верхний каталог
+своего репозитория; вне git, внутри чужого репозитория или в его подкаталоге корней нет: `active: []`, `--who` пуст,
+exit 0. Сигнал — свежие строки `<worktree>/data/agent-journal.jsonl` (`now - ts <=` окно, будущее тоже свежее; битые
+строки и `ts` с поясом не считаются). Корень без свежей строки в выдачу не попадает, git для него не запускается.
+План корня — первый успешный шаг: `plan_ref` (`git config --worktree plan.ref`), `refs` (самый новый коммит
+`main..<ветка>` с токеном `plans/…` в `Refs:`; неизвестное имя плана — шаг не дал плана), `header` (строка
+`Ветка:` / `Branch:` в первых 30 строках плана); шаг записан в `via`. Нет плана — корень в `orphans`. У плана в `--json`
+последний ключ `active`: `[{"branch", "worktree", "via", "sessions", "agents", "last_signal"}]` по `worktree`
+по возрастанию; `--who` добавляет `"plan"` (имя плана) и выдаёт `orphans` без `plan` и `via`. Резолвер
+`resolve_plan(branch, worktree | None, repo_root, plans)` годится и для ветки без каталога (шаг `plan_ref` пропущен).
 
 ## Слияние ветки в main (порядок лида)
 
