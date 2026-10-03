@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
-import pytest
 
 from Plugins.processing.blob_detector.plugin import BlobDetectorPlugin
 
@@ -24,9 +23,12 @@ def _make_mock_ctx(config: dict | None = None) -> MagicMock:
 def _white_blob_config(**kwargs) -> dict:
     """Конфиг для детекции белых областей (s_min=0, v_min=200)."""
     base = {
-        "h_min": 0, "h_max": 180,
-        "s_min": 0, "s_max": 255,
-        "v_min": 200, "v_max": 255,
+        "h_min": 0,
+        "h_max": 180,
+        "s_min": 0,
+        "s_max": 255,
+        "v_min": 200,
+        "v_max": 255,
         "min_area": 10,
         "max_area": 0,
         "draw_contours": False,
@@ -44,16 +46,21 @@ class TestConfigure:
     def test_configure(self):
         """plugin.configure() парсит все параметры из ctx.config."""
         plugin = BlobDetectorPlugin()
-        ctx = _make_mock_ctx({
-            "h_min": 10, "h_max": 170,
-            "s_min": 30, "s_max": 200,
-            "v_min": 40, "v_max": 220,
-            "min_area": 50,
-            "max_area": 5000,
-            "draw_contours": True,
-            "contour_color_bgr": [255, 0, 0],
-            "contour_thickness": 3,
-        })
+        ctx = _make_mock_ctx(
+            {
+                "h_min": 10,
+                "h_max": 170,
+                "s_min": 30,
+                "s_max": 200,
+                "v_min": 40,
+                "v_max": 220,
+                "min_area": 50,
+                "max_area": 5000,
+                "draw_contours": True,
+                "contour_color_bgr": [255, 0, 0],
+                "contour_thickness": 3,
+            }
+        )
 
         plugin.configure(ctx)
 
@@ -85,13 +92,20 @@ class TestProcess:
         """Чёрный кадр при s_min=50 → detections пустой."""
         plugin = BlobDetectorPlugin()
         # Чёрный кадр имеет s=0, v=0 → не попадёт под s_min=50
-        plugin.configure(_make_mock_ctx({
-            "h_min": 0, "h_max": 180,
-            "s_min": 50, "s_max": 255,
-            "v_min": 50, "v_max": 255,
-            "min_area": 10,
-            "max_area": 0,
-        }))
+        plugin.configure(
+            _make_mock_ctx(
+                {
+                    "h_min": 0,
+                    "h_max": 180,
+                    "s_min": 50,
+                    "s_max": 255,
+                    "v_min": 50,
+                    "v_max": 255,
+                    "min_area": 10,
+                    "max_area": 0,
+                }
+            )
+        )
 
         frame = _make_black_frame(100, 100)
         result = plugin.process([{"frame": frame}])
@@ -193,9 +207,9 @@ class TestProcess:
     def test_draw_contours(self):
         """draw_contours=True → кадр изменён по сравнению с оригиналом."""
         plugin = BlobDetectorPlugin()
-        plugin.configure(_make_mock_ctx(_white_blob_config(
-            min_area=10, draw_contours=True, contour_color_bgr=[0, 0, 255]
-        )))
+        plugin.configure(
+            _make_mock_ctx(_white_blob_config(min_area=10, draw_contours=True, contour_color_bgr=[0, 0, 255]))
+        )
 
         frame = _make_black_frame(200, 200)
         cv2.rectangle(frame, (50, 50), (80, 80), (255, 255, 255), -1)
@@ -229,11 +243,16 @@ class TestCommands:
         plugin = BlobDetectorPlugin()
         plugin.configure(_make_mock_ctx({}))
 
-        response = plugin.set_color_range({
-            "h_min": 20, "h_max": 160,
-            "s_min": 40, "s_max": 210,
-            "v_min": 60, "v_max": 230,
-        })
+        response = plugin.set_color_range(
+            {
+                "h_min": 20,
+                "h_max": 160,
+                "s_min": 40,
+                "s_max": 210,
+                "v_min": 60,
+                "v_max": 230,
+            }
+        )
 
         assert response["status"] == "ok"
         assert plugin._reg.h_min == 20

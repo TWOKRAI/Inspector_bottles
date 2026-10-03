@@ -6,6 +6,8 @@ Uses mock adapter/mapper to test SQL generation and immutability.
 
 from typing import Any, Dict, List, Optional, Type
 
+import pytest
+
 from Services.sql.core.queryset import QuerySet
 
 
@@ -404,3 +406,11 @@ class TestParameterization:
         qs = _make_qs().filter(user_name="test")
         sql, _ = qs._build_select()
         assert '"user_name"' in sql
+
+
+class TestColumnValidation:
+    """Имя колонки в filter — SQL-идентификатор целиком, без хвостов."""
+
+    def test_filter_rejects_trailing_newline_in_column_name(self):
+        with pytest.raises(ValueError, match="Invalid column name"):
+            _make_qs().filter(**{"name\n": "Alice"})

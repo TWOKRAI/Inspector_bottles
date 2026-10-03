@@ -1886,7 +1886,7 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            except (BrokenPipeError, ConnectionResetError, OSError):  # no-health: клиент HTTP отвалился, штатно
                 return
 
         def _dispatch(self, command: str, args: dict, client: DeviceHubClient, timeout: float | None = None) -> None:
@@ -1964,7 +1964,7 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                     if not chunk:
                         return
                     remaining -= len(chunk)
-            except OSError:
+            except OSError:  # no-health: клиент HTTP отвалился, штатно
                 return
 
         def _read_command_body(self, max_bytes: int = _MAX_BODY_BYTES) -> tuple[dict | None, tuple[int, dict] | None]:
@@ -2014,7 +2014,7 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                 return {}, None
             try:
                 args = json.loads(raw.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError):  # no-health: ошибка уходит вызывающему в ответе команды
                 return None, (400, {"ok": False, "error": "bad_json"})
             if not isinstance(args, dict):
                 return None, (400, {"ok": False, "error": "bad_json"})
@@ -2031,7 +2031,7 @@ def _build_handler(pult: "PultWebPlugin") -> type[http.server.BaseHTTPRequestHan
                     self.send_header("Content-Length", str(len(pult._page_bytes)))
                     self.end_headers()
                     self.wfile.write(pult._page_bytes)
-                except (BrokenPipeError, ConnectionResetError, OSError):
+                except (BrokenPipeError, ConnectionResetError, OSError):  # no-health: клиент HTTP отвалился, штатно
                     return
                 return
             if self.path == "/api/status":
@@ -2161,7 +2161,7 @@ class PultWebPlugin(ProcessModulePlugin):
         try:
             handler_cls = _build_handler(self)
             server = _PultHTTPServer((self._host, self._port), handler_cls)
-        except OSError as exc:  # noqa: BLE001 - деградация, не отказ (см. докстринг модуля)
+        except OSError as exc:  # noqa: BLE001 - деградация, не отказ (см. докстринг модуля)  # no-health: отказ старта уходит в self._fail (health/лог)
             self._fail(ctx, exc)
             return
 

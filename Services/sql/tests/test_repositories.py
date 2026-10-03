@@ -138,3 +138,14 @@ class TestReadonlyAndBulkRepository:
         )
         found = person_repo.find_by()
         assert len(found) == 2
+
+    def test_find_by_rejects_unsafe_column_name(self, person_repo):
+        """Имя колонки в find_by — идентификатор SQL; кавычка в ключе не должна попасть в запрос."""
+        person_repo.insert(PersonSchema(name="Alice", age=30))
+        with pytest.raises(ValueError, match="Invalid column name"):
+            person_repo.find_by(**{'name" OR 1=1 --': "x"})
+
+    def test_find_by_rejects_trailing_newline_in_column_name(self, person_repo):
+        """`$` в регулярке пропускает завершающий перевод строки; имя колонки обязано совпасть целиком."""
+        with pytest.raises(ValueError, match="Invalid column name"):
+            person_repo.find_by(**{"name\n": "Alice"})
