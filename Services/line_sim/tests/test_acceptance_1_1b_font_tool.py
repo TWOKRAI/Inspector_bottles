@@ -36,13 +36,17 @@ def _fonts_exist() -> None:
 
 
 def _run_tool(args: list[str]) -> subprocess.CompletedProcess:
-    env = {**__import__("os").environ, "PYTHONPATH": str(WORKTREE_ROOT)}
+    # Ребёнок пишет UTF-8, родитель читает UTF-8: иначе при PYTHONIOENCODING=utf-8 в окружении
+    # кириллица в stderr декодируется локалью (cp1251) и «А» из сообщения не находится.
+    env = {**__import__("os").environ, "PYTHONPATH": str(WORKTREE_ROOT), "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
         [sys.executable, "-m", "Services.line_sim.tools.make_font_letters", *args],
         cwd=str(WORKTREE_ROOT),
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
 

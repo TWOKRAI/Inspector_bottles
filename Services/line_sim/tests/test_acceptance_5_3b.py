@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -181,8 +182,12 @@ def _run_tool(src: Path, letters: str, diameter_px: int, out: Path) -> subproces
             str(out),
         ],
         cwd=str(_REPO_ROOT),
+        # Ребёнок пишет UTF-8, родитель читает UTF-8 (иначе кириллица в stderr зависит от локали).
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=20,
     )
 
