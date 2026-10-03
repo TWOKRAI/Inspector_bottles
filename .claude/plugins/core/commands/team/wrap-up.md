@@ -2,7 +2,7 @@
 description: Semantic session close — summary in docs/sessions/ + (optional) memory update
 ---
 
-Deliberate close of a work session. Complements the automatic Stop hooks with semantics: writes **what was done / what remains / next step**.
+Deliberate close of a work session. No Stop or pre-commit hook writes the session log: wrap-up is the only writer of `docs/sessions/`. It writes **what was done / what remains / next step**, then commits the log file.
 
 ## When to use
 
@@ -85,8 +85,28 @@ If this session changed **module-level knowledge** (a new decision, a gotcha, an
 
 The same text that was written. No extra preambles or markdown wrappers — just a clean wrap-up.
 
+### 7. Commit the session log
+
+Run the checks in this order:
+
+1. **Protected branch → do not commit.** Read the branch with `git rev-parse --abbrev-ref HEAD`. If it matches a pattern in `.claude/protected-branches` (one anchored regex per line; lines starting with `#` and blank lines are ignored), or — when that file does not exist — one of the defaults `main`, `master`, `develop`, `dev`, `release/.*`, `production`, `prod`, skip the commit. Tell the user: "the session log docs/sessions/<YYYY-MM-DD>.md is written but not committed — protected branch". The `protect-branch.sh` hook blocks `git commit` there (exit 2).
+2. **Nothing to commit → skip.** If `git status --short -- docs/sessions/<YYYY-MM-DD>.md` prints nothing, skip the step.
+3. **New file → add it first.** If the status line starts with `??` (the first wrap-up of the day created the file), run `git add -- docs/sessions/<YYYY-MM-DD>.md`. A pathspec commit of an untracked file fails with "pathspec did not match any file(s) known to git".
+4. **Commit one explicit path, nothing else.** Write the message to a file, then run:
+
+   ```
+   git commit -F <msg-file> -- docs/sessions/<YYYY-MM-DD>.md
+   ```
+
+   The pathspec keeps other staged or unstaged work out of this commit. If a pre-commit fixer changed the file and aborted the commit, run the same command once more.
+
+Message format:
+- Subject: `docs(sessions): <YYYY-MM-DD> — <gist>`
+- Trailers: `Why:` (one line) and `Layer: docs`
+- Add `Refs: plans/<slug>.md` when `python scripts/validate_commit/validate_commit.py --resolve-plan` prints a plan for the current branch. The command prints nothing when the branch has no plan.
+
 ## What NOT to do
 
 - Don't run `make gate` / tests automatically — that's the user's decision
-- Don't do `git commit` — wrap-up is **logging**, not an operation on the repo
+- Don't commit anything except the session log file (step 7), and never on a protected branch
 - Don't write "today we discussed..." — write results, not process

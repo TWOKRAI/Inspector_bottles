@@ -1,14 +1,13 @@
 #!/bin/bash
 # Stop hook: append a per-session git summary to docs/sessions/YYYY-MM-DD.md.
 #
-# ⚠️ FALLBACK SINCE seed v0.4.0. The primary mechanism is now a pre-commit
-# hook: ${CLAUDE_PLUGIN_ROOT}/hooks/git/pre-commit-session-log.sh. That hook writes the
-# journal entry INTO the commit (instead of leaving it as an untracked
-# file after `git commit`, which was the old behaviour).
+# ⚠️ NOT REGISTERED BY DEFAULT. The pre-commit session-log hook was removed on
+# 2026-10-03 (docs/audits/2026-10-03_commit-mechanism.md, A3); the session log
+# is written and committed by /core:team:wrap-up. The old pre-commit script
+# ${CLAUDE_PLUGIN_ROOT}/hooks/git/pre-commit-session-log.sh is FROZEN.
 #
-# Use this Stop-hook only if:
-#   - your project doesn't run pre-commit (no .pre-commit-config.yaml), or
-#   - you want a per-session entry in addition to per-commit ones.
+# Use this Stop-hook only if you want a mechanical per-session entry in addition
+# to the wrap-up one.
 #
 # To enable: add to .claude/settings.json under "hooks":
 #   "Stop": [
@@ -16,8 +15,7 @@
 #                   "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-end-daily-log.sh",
 #                   "timeout": 10 }] }
 #   ]
-# The default seed settings.json does not register this — pre-commit hook
-# is the primary path.
+# The default seed settings.json does not register this.
 #
 # Pairs with /core:team:wrap-up command:
 #   - this hook writes the mechanical part (git status, diff stat)

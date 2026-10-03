@@ -209,10 +209,10 @@ Lifecycle per isolated agent: **create → work → commit → merge-back → cl
 - **Shared `.git/hooks`:** every worktree of a repo shares the parent `.git/hooks`. A commit
   inside any worktree used to fire the same post-commit qex reindex in every worktree (lock
   race on `~/.qex` + fragmented indexes); the guard now lives in the core dispatcher
-  `hooks/git/post-commit.sh` — parts never run from a linked worktree. The same session-log
-  pre-commit hook still stages `docs/sessions/<today>.md` into each commit — this is by design,
-  not a race: `docs/sessions/*.md merge=union` in `.gitattributes` resolves the append-only file
-  on merge-back without a conflict.
+  `hooks/git/post-commit.sh` — parts never run from a linked worktree. The session-log
+  pre-commit hook was removed on 2026-10-03; the session log is written and committed by
+  `/core:team:wrap-up`. `docs/sessions/*.md merge=union` in `.gitattributes` still resolves the
+  append-only file on merge-back without a conflict.
 - **venv (false-green / false-red):** see "What you need to handle manually" above — the most
   confirmed fan-out footgun on this project, confirmed in both directions.
 - **Failed merge-back / orphaned worktree:** clean up deterministically before escalating —
