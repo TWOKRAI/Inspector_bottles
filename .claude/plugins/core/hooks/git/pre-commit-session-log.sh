@@ -1,4 +1,7 @@
 #!/bin/bash
+# FROZEN 2026-10-03: not wired into pre-commit. Reason: it appends to and stages the tracked session log while
+# pre-commit holds unstaged changes in a stash; the stash restore fails and unstaged edits are lost.
+# See docs/audits/2026-10-03_commit-mechanism.md (A3). The session log is written and committed by /core:team:wrap-up.
 # pre-commit hook: append a per-commit summary to docs/sessions/YYYY-MM-DD.md
 # and stage the daily log so it becomes part of the commit being made.
 #

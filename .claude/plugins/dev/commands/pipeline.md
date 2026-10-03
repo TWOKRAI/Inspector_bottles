@@ -369,9 +369,9 @@ covers only test-fail / review loops, not worktree failures).
 **Hook races (worktrees share a common `.git/hooks`):**
 - **qex post-commit reindex** — the hook itself detects a linked worktree and doesn't reindex from it;
   nothing needs to be disabled manually anymore (`_WORKTREE_PATTERN.md` → "Shared .git/hooks").
-- **session-log pre-commit hook** stages `docs/sessions/<today>.md` into every commit — that's by
-  design, not a race: `docs/sessions/*.md merge=union` in `.gitattributes` resolves the append-only
-  journal on merge-back without a conflict.
+- **session-log pre-commit hook** — removed from pre-commit on 2026-10-03; the session log is
+  written and committed by `/core:team:wrap-up`. `docs/sessions/*.md merge=union` in `.gitattributes`
+  still resolves the append-only journal on merge-back without a conflict.
 
 ## Transport `--workflow` — the `dev-pipeline` script
 

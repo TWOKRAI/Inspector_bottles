@@ -353,7 +353,7 @@ tokens — that's what `caveman` is for, trigger-based, user-facing only).
 | Tests | `<module>/tests/` | tester |
 | Scripts / commit validator | `scripts/`, `scripts/validate_commit/` | developer / seed (autocopy) |
 | Commit guide | `.claude/COMMIT_GUIDE.md` | seed (autocopy) |
-| Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up`, pre-commit-session-log hook |
+| Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up` (writes and commits the log; the pre-commit hook was removed on 2026-10-03) |
 | Task plans | `plans/YYYY-MM-DD_<slug>.md` (single) or `.../plan.md`+`phase-N.md` (multi-phase) | `/dev:plan` (Manager) |
 | Long-term memory | `.claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
 | Layer enum | `.claude/commit-layers.txt` | project (manual) |

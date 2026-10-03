@@ -111,10 +111,10 @@ FORBIDDEN_ALLOW: list[tuple[str, str]] = [
 ]
 
 # Required hooks — (lifecycle event, substring match on command field).
-# NOTE: Stop-хук session-end-daily-log.sh убран как required с seed v0.4.0 —
-# журналирование переведено на pre-commit (hooks/git/pre-commit-session-log.sh),
-# чтобы запись попадала в коммит, а не висела как untracked. Stop-вариант
-# остался как fallback для проектов без pre-commit (см. docstring файла).
+# NOTE: Stop-хук session-end-daily-log.sh убран как required с seed v0.4.0.
+# Pre-commit-хук session-log снят 2026-10-03 (docs/audits/2026-10-03_commit-mechanism.md, A3):
+# журнал сессий пишет и коммитит /core:team:wrap-up. Stop-вариант остался
+# незарегистрированным fallback (см. docstring файла).
 REQUIRED_HOOKS: list[tuple[str, str]] = [
     ("PreToolUse", "validate-safe-command.sh"),
     ("PreToolUse", "protect-readonly.sh"),

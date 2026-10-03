@@ -2,7 +2,7 @@
 description: Semantic session close — summary in docs/sessions/ + (optional) memory update
 ---
 
-Deliberate close of a work session. Complements the automatic Stop hooks with semantics: writes **what was done / what remains / next step**.
+Deliberate close of a work session. No Stop or pre-commit hook writes the session log: wrap-up is the only writer of `docs/sessions/`. It writes **what was done / what remains / next step**, then commits the log file.
 
 ## When to use
 
@@ -85,8 +85,25 @@ If this session changed **module-level knowledge** (a new decision, a gotcha, an
 
 The same text that was written. No extra preambles or markdown wrappers — just a clean wrap-up.
 
+### 7. Commit the session log
+
+Skip this step when `git status --short -- docs/sessions/<YYYY-MM-DD>.md` shows no changes.
+
+Otherwise write the message to a file and commit **one explicit path, nothing else**:
+
+```
+git commit -F <msg-file> -- docs/sessions/<YYYY-MM-DD>.md
+```
+
+Message format:
+- Subject: `docs(sessions): <YYYY-MM-DD> — <gist>`
+- Trailers: `Why:` (one line) and `Layer: docs`
+- Add `Refs: plans/<slug>.md` when the current branch runs a plan
+
+The pathspec keeps other staged or unstaged work out of this commit.
+
 ## What NOT to do
 
 - Don't run `make gate` / tests automatically — that's the user's decision
-- Don't do `git commit` — wrap-up is **logging**, not an operation on the repo
+- Don't commit anything except the session log file (step 7)
 - Don't write "today we discussed..." — write results, not process
