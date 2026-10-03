@@ -30,7 +30,7 @@ MODE: red | regression
 INTERFACE: <path to interface.py | 'none' for impl-only/legacy without contract>
 MODULE_CONTRACT: new-full | new-lite | public-api-change | impl-only | n/a
 TASK: <X.Y>
-PLAN: <path to plans/YYYY-MM-DD_<slug>.md or .../phase-N.md>
+PLAN: <path to plans/YYYY-MM-DD_<slug>.md or .../plan.md (legacy: phase-N.md)>
 ---
 <free-form task context follows>
 ```

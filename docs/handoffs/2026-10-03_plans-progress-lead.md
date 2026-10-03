@@ -39,6 +39,15 @@
 | tester (слепой, Tasks 2.2+2.3) | `aaeab216994575d9e` | завершён; для Фазы 3 нужен СВЕЖИЙ слепой тестер |
 | teamlead (Task 1.0, ledger) | `ae4f14740888447dc` | завершён |
 
+## Состояние после ревью Fable и рассылки (2026-10-03, вечер)
+- `main` = `354703451` (мой последний слив). Образец формата — `plans/2026-10-02_plans-progress-dashboard/` (layout v2), оба парсера: 10 из 25, ledger без находок, `plans_progress` 440 passed.
+- Ревью Fable (`cto`, agentId `aa901c89dc065c3a9`, 170k токенов): отчёт `plans/2026-10-02_plans-progress-dashboard/reports/review-fable-2026-10-03.md`. Главное: Task 5.1 чинила не тот хук (живой — `.claude/plugins/observability/hooks/agent-journal.sh`, журнал `data/agent-journal.jsonl`); карта «ветка → план по шапке» работает у 3 веток из 71. Все правки внесены в план.
+- Сделано после ревью: 3.5 (шаблоны, `3763a1b47`, тест `8284084dd`), 3.6 (README, сноска «Хранение», `dev.md`/`tester.md`/`executor-brief.md`, `4440e0a22`); тест-контракт `scripts/plans_progress/tests/test_templates_contract.py` — 13 тестов, 16 инъекций, все предсказания совпали. Новые задачи 5.5 (прогресс актуальных веток против `main`) и 5.6 (радар пересечений).
+- Рассылка отправлена `inspector-bottles-f0` и `inspector-bottles-f4`. Ответы: f0 взял только `layer-render` (правок не нужно). f4 взял `transport-single-policy`: правка плана `31f846e92` на `feat/transport-f5`, в `main` придёт со слиянием ветки фазы. После этого слияния: `--sync-order` и сверка (ожидаемо 18 из 22 = 34 − 7 DEFERRED − 5 SUPERSEDED).
+- Планы без владельца (сессий нет): `line-sim*`, `letters-retrain`, `observability-*`, `telemetry-*`, `observation-port`, `otel`, `pult-control-panel`, `draw-mode-rework`, `dataset-circle-capture`, `proto-frontend-carve`, `sim-lateral-offset` и `undo-restores-selection` (оба ALL_DONE_NOT_ARCHIVED).
+- Ждут решения владельца: внести образец в ledger (`plans_ledger.py add`) и в `ORDER.md` §4.1; путь к репозиторию claude-kit (Фаза 4, задачи 4.2–4.4); судьба ветки `red/plans-progress`; второй Fable — только перед Фазой 4 и только по вопросу владельцу (лимит).
+- Актуальная ветка (решение владельца): есть коммиты сверх `main` и последний не старше порога; замер 71 ветка → 31 с коммитами сверх `main`, 19 за двое суток.
+
 ## Дальше (в порядке)
 1. Слияние Фазы 2 (выше).
 2. Страница глазами в браузере: секции, чипы «закрыт/снят/⚠ шапка», тёмная тема, узкий экран (Chrome не даёт `file://` — `python -m http.server` на `data/`, порт 8765; остановить по PID).
@@ -54,3 +63,8 @@
 - Тесты в tmp_path лежат внутри git-репозитория `C:\Users\INNOTECH` на ветке main: для теста «не main» нужен `GIT_CEILING_DIRECTORIES`.
 - Просьбы соседних сессий придержать pytest на время замеров стенда (f4) выполнять; их писать в тот же канал.
 - pre-commit (ruff-format, trailing-whitespace) отклоняет первый коммит — `git add` заново, проверить `git log -1`.
+- Python через heredoc в Bash портит `\n` и `\r\n` в строковых литералах (три раза за день): скрипты с такими строками писать инструментом Write и запускать файлом; для одиночной правки литерала — `chr(92)`, `chr(13)`, `chr(10)`.
+- `git add` с несколькими путями падает целиком, если один путь уже не существует (после `git mv`/`git rm`): коммит получается неполным. Стейджить `git add -A <каталог>` и проверять `git show --stat`.
+- `git worktree remove` из каталога внутри worktree даёт «Permission denied» или «Device or resource busy»: перейти в корень `main`, затем `prune`, `branch -d`, `rmdir` (иногда со второго вызова).
+- `rm -rf` в Bash отклоняется правилами: создавать свежий каталог (`mkdir -p "$TEMP/x_$$"`).
+- Рекурсивный `grep -r` по всему репозиторию (в нём около 70 worktree) уходит в таймаут: искать инструментом Grep с `glob` и узким `path`, не трогать `.claude/worktrees`.

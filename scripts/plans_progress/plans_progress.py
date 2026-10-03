@@ -10,7 +10,11 @@
 * ``--order PATH`` ``ORDER.md`` (по умолчанию ``<root>/plans/queue/ORDER.md``); файла нет -> полосы
   и ярусы ``null``, не ошибка;
 * ``--json``       stdout: список планов ``{plan, path, archived, lane, tier, done, total,
-  dropped, unknown, tasks:[{id, title, status, ref}]}``;
+  dropped, unknown, unmarked, header_status, tasks:[{id, title, status, ref, after, ready}],
+  after, after_reason, waiting_on, ready, dep_unknown, dep_cycle}``; новые ключи — в конце объекта:
+  поле плана ``После:`` / ``After:`` -> ``after`` (имена планов), ``waiting_on`` (условия ``⛔``),
+  ``after_reason`` (текст после `` — ``); ``(после N.M)`` у пункта -> ``tasks[].after``;
+  ``ready`` — можно брать в работу (см. README); ``dep_unknown``/``dep_cycle`` — имена планов;
 * ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``);
 * ``--check``      печатает находки линта; exit 1, если есть блокирующая находка вне базы;
 * ``--baseline P`` файл строк ``<план>:<КОД>`` (``<план>:<КОД>:<id>`` для UNKNOWN_STATUS и
@@ -108,6 +112,8 @@ class Task:
     status: str
     ref: str | None = None
     unmarked: bool = False  # задача из заголовка без признаков статуса: pending «по умолчанию»
+    after: list[str] = field(default_factory=list)  # id задач того же плана из `(после N.M)`
+    ready: bool = False  # можно брать в работу: заполняет resolve_deps
 
 
 @dataclass
@@ -127,6 +133,14 @@ class Plan:
     tier: str | None = None
     header_status: str | None = None  # слово набора из строки `Статус:` в шапке плана
     info: list[tuple[str, str]] = field(default_factory=list)  # из ORDER.md: (метка, текст)
+    after: list[str] = field(default_factory=list)  # имена планов из поля `После:`
+    after_reason: str = ""  # текст после ` — ` в поле `После:`
+    waiting_on: list[str] = field(default_factory=list)  # условия `⛔ …` из поля `После:`
+    ready: bool = False  # заполняет resolve_deps
+    dep_unknown: list[str] = field(default_factory=list)  # имена из `after`, которых нет среди планов
+    dep_cycle: list[str] = field(default_factory=list)  # участники цикла, в котором стоит этот план
+    task_dep_unknown: list[tuple[str, str]] = field(default_factory=list)  # (id задачи, id, которого нет в плане)
+    task_dep_cycle: list[str] = field(default_factory=list)  # id задач — участников цикла
 
     def count(self, status: str) -> int:
         return sum(1 for t in self.tasks if t.status == status)
@@ -355,6 +369,49 @@ def find_header_status(text: str) -> str | None:
     return None
 
 
+_AFTER_LINE_RE = re.compile(r"^\s*(?:>\s*)*(?:[-*+]\s+)?(?:\*\*)?(?:После|After)(?:\*\*)?\s*:(?:\*\*)?\s*(?P<rest>.*)$")
+_AFTER_REASON_RE = re.compile(r" [—–] ")
+
+
+def find_after(text: str) -> tuple[list[str], list[str], str]:
+    """Поле `После:` / `After:` в первых 30 строках -> (имена планов, условия `⛔`, причина).
+
+    Первая подходящая строка выигрывает; строки внутри ограждения кода пропускаются. Значение режется по первому
+    ` — ` / ` – `: слева список через запятую, справа причина. Элемент с `⛔` — условие (текст после знака),
+    остальные — имена планов: href markdown-ссылки или имя в обратных кавычках, через `_name_from_href`;
+    повтор хранится один раз.
+    """
+    in_fence = False
+    value = None
+    for line in text.split("\n")[:30]:
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        m = None if in_fence else _AFTER_LINE_RE.match(line)
+        if m:
+            value = m.group("rest").strip()
+            break
+    if value is None:
+        return [], [], ""
+    parts = _AFTER_REASON_RE.split(value, maxsplit=1)
+    reason = parts[1].strip() if len(parts) > 1 else ""
+    plans: list[str] = []
+    conditions: list[str] = []
+    for raw in parts[0].split(","):
+        item = raw.strip()
+        if not item or item in ("—", "-", "–"):
+            continue
+        if "⛔" in item:
+            conditions.append(item.split("⛔", 1)[1].strip() or "⛔")
+            continue
+        link = _LINK_RE.search(item)
+        target = link.group(1) if link else item.replace("`", "").strip()
+        name = _name_from_href(target) or target
+        if name not in plans:
+            plans.append(name)
+    return plans, conditions, reason
+
+
 def find_bare_word(text: str) -> str | None:
     """Слово набора где угодно в тексте (для строки `**Статус:** BLOCKED`)."""
     m = _WORD_RE.search(mask_code(text))
@@ -372,6 +429,26 @@ class Item:
     ref: str | None
     indent: int
     conflict: bool = False
+    after: list[str] = field(default_factory=list)
+
+
+# `(после 1.1, 1.0)` / `(after 1.1)`: регистр не важен только у слова, id — по эталону; после id не должно
+# стоять символа id (`1.2B` — не id `1.2`) и `.символ` (`1.2.3`, `1.2.a`, `T2.W` — не id); дата `2026-09-25` — не id.
+_AFTER_ID = r"(?!\d{4}-\d{2}-\d{2})" + ID_PATTERN + r"(?![\w-]|\.\w)"
+TASK_AFTER_RE = re.compile(r"\((?i:после|after)[ \t]+(" + _AFTER_ID + r"(?:[ \t]*,[ \t]*" + _AFTER_ID + r")*)")
+
+
+def find_task_after(text: str) -> list[str]:
+    """`(после N.M, K.L; …)` в тексте пункта (код-спаны не читаются) -> id по порядку, без повторов."""
+    m = TASK_AFTER_RE.search(mask_code(text))
+    if not m:
+        return []
+    ids: list[str] = []
+    for raw in m.group(1).split(","):
+        tid = raw.strip()
+        if tid not in ids:
+            ids.append(tid)
+    return ids
 
 
 def is_section_title(title: str) -> bool:
@@ -414,6 +491,7 @@ def _finish_item(m: re.Match, cont: list[str]) -> Item:
         ref=ref,
         indent=len(m.group("indent").expandtabs(4)),
         conflict=conflict,
+        after=find_task_after(text),
     )
 
 
@@ -631,6 +709,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     plan = Plan(name=name, rel=rel, archived=archived)
     main_text = read_text(main, plan.bad_encoding) if main.is_file() else ""
     plan.header_status = find_header_status(main_text)
+    plan.after, plan.waiting_on, plan.after_reason = find_after(main_text)
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
@@ -661,7 +740,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
 
     items, had_items = parse_items(main_text, plan.unparsed, plan.numbered)
     if had_items:
-        plan.tasks = [Task(it.id, it.title, it.status, it.ref) for it in items]
+        plan.tasks = [Task(it.id, it.title, it.status, it.ref, after=it.after) for it in items]
         seen: dict[str, int] = {}
         for it in items:
             seen[it.id] = seen.get(it.id, 0) + 1
@@ -812,6 +891,124 @@ def apply_order(plans: list[Plan], rows: list[OrderRow]) -> None:
             p.tier, p.lane, p.info = r.tier, r.lane, r.info
 
 
+# ----------------------------------------------------------------------------- порядок между планами
+
+TASK_CLOSED = ("done", "deferred", "superseded")
+TASK_OPEN = ("unknown", "pending", "in_progress", "blocked")
+
+
+def plan_closed(p: Plan) -> bool:
+    """Закрыт: архив, §4.3, шапка done/superseded или есть задачи и ни одной незавершённой."""
+    if p.archived or p.tier == "4.3" or p.header_status in ("done", "superseded"):
+        return True
+    return bool(p.tasks) and not any(t.status in TASK_OPEN for t in p.tasks)
+
+
+def cycle_groups(edges: list[list[int]]) -> dict[int, list[int]]:
+    """Узлы в цикле (включая ссылку на себя) -> все участники их цикла, по возрастанию номера.
+
+    Итеративный Тарьян: цепочка из тысяч узлов не упирается в лимит рекурсии.
+    """
+    n = len(edges)
+    order = [-1] * n
+    low = [0] * n
+    on_stack = [False] * n
+    stack: list[int] = []
+    groups: dict[int, list[int]] = {}
+    counter = 0
+    for root in range(n):
+        if order[root] != -1:
+            continue
+        order[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack[root] = True
+        work = [(root, 0)]
+        while work:
+            v, i = work[-1]
+            if i < len(edges[v]):
+                work[-1] = (v, i + 1)
+                w = edges[v][i]
+                if order[w] == -1:
+                    order[w] = low[w] = counter
+                    counter += 1
+                    stack.append(w)
+                    on_stack[w] = True
+                    work.append((w, 0))
+                elif on_stack[w]:
+                    low[v] = min(low[v], order[w])
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[v])
+            if low[v] == order[v]:
+                comp = []
+                while True:
+                    w = stack.pop()
+                    on_stack[w] = False
+                    comp.append(w)
+                    if w == v:
+                        break
+                if len(comp) > 1 or v in edges[v]:
+                    comp.sort()
+                    for w in comp:
+                        groups[w] = comp
+    return groups
+
+
+def resolve_deps(plans: list[Plan]) -> None:
+    """Заполняет `ready`, `dep_unknown`, `dep_cycle` у планов и `ready` у задач; нужен `tier` (после apply_order).
+
+    Имя плана ищется среди ВСЕХ планов; при живой и архивной копии решает архивная. Граф циклов строится
+    только по незакрытым планам (задачам): закрытый узел цикл разрывает.
+    """
+    closed = {id(p): plan_closed(p) for p in plans}
+    by_name: dict[str, Plan] = {}
+    for p in plans:
+        cur = by_name.get(p.name)
+        if cur is None or (p.archived and not cur.archived):
+            by_name[p.name] = p
+    nodes = [p for p in plans if not closed[id(p)]]
+    pos = {id(p): i for i, p in enumerate(nodes)}
+    edges = [[pos[id(q)] for n in p.after if (q := by_name.get(n)) is not None and id(q) in pos] for p in nodes]
+    groups = cycle_groups(edges)
+    for p in plans:
+        p.dep_unknown = [n for n in p.after if n not in by_name]
+        p.dep_cycle = [nodes[j].name for j in groups.get(pos.get(id(p), -1), [])]
+        p.ready = (
+            not closed[id(p)]
+            and not p.waiting_on
+            and not p.dep_unknown
+            and not p.dep_cycle
+            and all(closed[id(by_name[n])] for n in p.after)
+        )
+        _resolve_task_deps(p)
+
+
+def _resolve_task_deps(p: Plan) -> None:
+    by_id: dict[str, Task] = {}
+    for t in p.tasks:
+        by_id.setdefault(t.id, t)
+    p.task_dep_unknown = [(t.id, i) for t in p.tasks if t.status not in TASK_CLOSED for i in t.after if i not in by_id]
+    nodes = [t for t in p.tasks if t.status not in TASK_CLOSED]
+    pos = {id(t): i for i, t in enumerate(nodes)}
+    edges = [[pos[id(q)] for i in t.after if (q := by_id.get(i)) is not None and id(q) in pos] for t in nodes]
+    groups = cycle_groups(edges)
+    p.task_dep_cycle = []
+    for j in sorted(groups):
+        if nodes[j].id not in p.task_dep_cycle:
+            p.task_dep_cycle.append(nodes[j].id)
+    in_cycle = {id(nodes[j]) for j in groups}
+    for t in p.tasks:
+        t.ready = (
+            p.ready
+            and t.status == "pending"
+            and id(t) not in in_cycle
+            and all(i in by_id and by_id[i].status in TASK_CLOSED for i in t.after)
+        )
+
+
 def page_order(plans: list[Plan], rows: list[OrderRow]) -> tuple[list[Plan], list[Plan]]:
     """(живые в порядке страницы, архив): §4.1 -> §4.2 -> §4.3 по строкам, затем вне ORDER.md по имени."""
     live = [p for p in plans if not p.archived]
@@ -883,6 +1080,16 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
         st = {t.status for t in p.tasks}
         if p.tasks and not (st & {"unknown", "pending", "in_progress", "blocked"}) and "done" in st:
             out.append(Finding("ALL_DONE_NOT_ARCHIVED", p.name, None, False, "все задачи закрыты, план не в архиве"))
+        # закрытый план ничего не ждёт: ключ `dep_unknown` в --json остаётся, находка по нему — шум
+        for n in [] if plan_closed(p) else p.dep_unknown:
+            out.append(Finding("DEP_UNKNOWN", p.name, None, in_41, f"нет плана {clean_md(n, 80)}"))
+        if p.dep_cycle:
+            text = f"цикл ожидания между планами: {', '.join(clean_md(n, 80) for n in p.dep_cycle)}"
+            out.append(Finding("DEP_CYCLE", p.name, None, in_41, text))
+        for tid, missing in p.task_dep_unknown:
+            out.append(Finding("DEP_UNKNOWN", p.name, tid, in_41, f"нет задачи {clean_md(missing, 80)}"))
+        for tid in p.task_dep_cycle:
+            out.append(Finding("DEP_CYCLE", p.name, tid, in_41, f"задача {clean_md(tid, 80)} в цикле ожидания"))
     return out
 
 
@@ -1064,7 +1271,23 @@ def to_json(plans: list[Plan]) -> str:
             "unknown": p.unknown,
             "unmarked": p.unmarked,
             "header_status": p.header_status,
-            "tasks": [{"id": t.id, "title": t.title, "status": t.status, "ref": t.ref} for t in p.tasks],
+            "tasks": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "ref": t.ref,
+                    "after": t.after,
+                    "ready": t.ready,
+                }
+                for t in p.tasks
+            ],
+            "after": p.after,
+            "after_reason": p.after_reason,
+            "waiting_on": p.waiting_on,
+            "ready": p.ready,
+            "dep_unknown": p.dep_unknown,
+            "dep_cycle": p.dep_cycle,
         }
         for p in plans
     ]
@@ -1313,6 +1536,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     rows = parse_order(order_path)
     apply_order(plans, rows)
+    resolve_deps(plans)
     live, archive = page_order(plans, rows)
     ordered = live + archive
     code = 0

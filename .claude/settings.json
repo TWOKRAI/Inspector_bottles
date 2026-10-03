@@ -234,6 +234,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/observability/hooks/agent-journal.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreToolUse": [

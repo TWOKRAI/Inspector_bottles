@@ -12,13 +12,15 @@
 | Что | Где живёт | Почему |
 |---|---|---|
 | Контракт: цель, задачи одной строкой, гейты, бюджет | `plan.md`, ≤ 16 KB (однофайловый план — ≤ 32 KB) | лид читает его каждую сессию |
-| Тело задачи | `tasks/<id>.md`, ≤ 8 KB (или инлайн в `plan.md` для малого плана — см. ниже) | исполнитель читает только свою задачу |
+| Тело задачи | `tasks/<id>.md`, ≤ 8 KB (или инлайн в `plan.md` для малого плана — см. ниже) | исполнитель читает только свою задачу; статуса в теле нет |
 | Итог задачи | `tasks/<id>.result.md`, ≤ 2 KB | SHA, числа приёмки, отступления — не план и не контракт |
+| Спецификация формата, интерфейса, решения, риски | `design.md` рядом с `plan.md` | тестер и исполнитель читают её как ТЗ; в `plan.md` она не растёт |
+| Длинный отчёт о задаче | `reports/<id>.md` | в `tasks/` допустимы только `<id>.md` и `<id>.result.md`: любой другой `tasks/<id>.*.md` ledger читает как тело задачи |
 | Изменения после approve | `amendments.md`, нумерованные, только дописывание | рост области виден числом, бюджет пересчитывается в той же записи |
-| Статус | леджер `plans/README.md` + маркеры в «Порядке выполнения» | данные, не проза |
+| Статус | строка задачи в «Порядке выполнения» — один раз | данные, не проза; таблица ledger и блок `ORDER.md` строятся скриптом |
 | Итог плана (при закрытии) | `SUMMARY.md`, пишет `close` | архивный план читают через него, не открывая каталог |
 | Журнал, замеры, handoff | `docs/sessions/<дата>.md` | в план не пишется |
-| Долг вне задач | `plans/_backlog.md` | в план не пишется |
+| Долг вне задач | `docs/claude/OPEN_QUESTIONS.md` (если его нет в проекте — `plans/_backlog.md`) | в план не пишется |
 
 Бюджеты размера выше проверяет `python3 scripts/plans_ledger.py status --check` — план не может
 незаметно вырасти в журнал.
@@ -121,8 +123,9 @@
 
 > **Хранение**: дата ISO всегда в имени.
 > - Single (без фаз, < 50 строк ТЗ): `plans/YYYY-MM-DD_<slug>.md` — тела задач инлайн (см. «Малый план» выше).
-> - Plan layout v2 (по умолчанию для всего остального): `plans/YYYY-MM-DD_<slug>/plan.md` + `tasks/<id>.md` + `amendments.md`.
-> - Multi-phase (legacy, без `tasks/`): `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md`.
+> - Plan layout v2 (по умолчанию для всего остального): `plans/YYYY-MM-DD_<slug>/plan.md` + `design.md` (если нужна спецификация) + `tasks/<id>.md` + `tasks/<id>.result.md` + `reports/` + `amendments.md`.
+> - Multi-phase (legacy, новые не создаём): `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md`; существующие читаются как раньше.
+> - Архив: `plans_ledger.py close <plan>` переносит закрытый план в `plans/_archive/<YYYY-Qn>/` (квартал по дате в имени). План не удаляется никогда — от него зависит история `Refs:`; с открытыми задачами не архивируется.
 >
-> Workflow: `/dev:plan` создаёт файл/папку → `git checkout -b <type>/<slug>` → `python3 scripts/plans_ledger.py approve <plan>` (для каталога) → `/dev:implement <id>` (v2: первый шаг — `plans_ledger.py brief <id>`) → commit с `Refs: plans/YYYY-MM-DD_<slug>/plan.md` → `/dev:ship` закрывает план, когда все задачи `[DONE]`/`[SKIPPED]`/`[CANCELLED]`, командой `python3 scripts/plans_ledger.py close <plan>` (пишет `SUMMARY.md`).
+> Workflow: `/dev:plan` создаёт файл/папку → `git checkout -b <type>/<slug>` → `python3 scripts/plans_ledger.py approve <plan>` (для каталога) → `/dev:implement <id>` (v2: первый шаг — `plans_ledger.py brief <id>`) → commit с `Refs: plans/YYYY-MM-DD_<slug>/plan.md` → `/dev:ship` закрывает план, когда все задачи `[DONE]`/`[DEFERRED]`/`[SUPERSEDED]`, командой `python3 scripts/plans_ledger.py close <plan>` (пишет `SUMMARY.md`).
 > Подробнее: [`.claude/plugins/dev/commands/plan.md`](../.claude/commands/dev/plan.md), [`.claude/COMMIT_GUIDE.md`](../.claude/COMMIT_GUIDE.md), [`.claude/plugins/core/templates/plans-readme.template.md`](plans-readme.template.md), [`.claude/plugins/core/templates/TASK.template.md`](TASK.template.md).

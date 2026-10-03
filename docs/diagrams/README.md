@@ -10,6 +10,7 @@ Diagrams-as-code: все схемы хранятся как текст, верс
 |------|-----|---------------|
 | [`architecture.mmd`](architecture.mmd) | C4 Container-level — общая архитектура проекта | Mermaid Preview (VS Code) |
 | [`modules-overview.mmd`](modules-overview.mmd) | **Связи между модулями фреймворка** (6 слоёв) | Mermaid Preview (VS Code) |
+| [`layer-render/editor-system.html`](layer-render/editor-system.html) | **Система редактора слоёв**: процессы, модули `layer_render`, путь правки, пресет, порядок фаз (план layer-render) | браузер (mermaid с CDN) |
 
 ### Авто-генерируемые (не в git)
 
