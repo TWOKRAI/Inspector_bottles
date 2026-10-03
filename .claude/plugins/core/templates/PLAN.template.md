@@ -123,8 +123,9 @@
 
 > **Хранение**: дата ISO всегда в имени.
 > - Single (без фаз, < 50 строк ТЗ): `plans/YYYY-MM-DD_<slug>.md` — тела задач инлайн (см. «Малый план» выше).
-> - Plan layout v2 (по умолчанию для всего остального): `plans/YYYY-MM-DD_<slug>/plan.md` + `tasks/<id>.md` + `amendments.md`.
-> - Multi-phase (legacy, без `tasks/`): `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md`.
+> - Plan layout v2 (по умолчанию для всего остального): `plans/YYYY-MM-DD_<slug>/plan.md` + `design.md` (если нужна спецификация) + `tasks/<id>.md` + `tasks/<id>.result.md` + `reports/` + `amendments.md`.
+> - Multi-phase (legacy, новые не создаём): `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md`; существующие читаются как раньше.
+> - Архив: `plans_ledger.py close <plan>` переносит закрытый план в `plans/_archive/<YYYY-Qn>/` (квартал по дате в имени). План не удаляется никогда — от него зависит история `Refs:`; с открытыми задачами не архивируется.
 >
 > Workflow: `/dev:plan` создаёт файл/папку → `git checkout -b <type>/<slug>` → `python3 scripts/plans_ledger.py approve <plan>` (для каталога) → `/dev:implement <id>` (v2: первый шаг — `plans_ledger.py brief <id>`) → commit с `Refs: plans/YYYY-MM-DD_<slug>/plan.md` → `/dev:ship` закрывает план, когда все задачи `[DONE]`/`[DEFERRED]`/`[SUPERSEDED]`, командой `python3 scripts/plans_ledger.py close <plan>` (пишет `SUMMARY.md`).
 > Подробнее: [`.claude/plugins/dev/commands/plan.md`](../.claude/commands/dev/plan.md), [`.claude/COMMIT_GUIDE.md`](../.claude/COMMIT_GUIDE.md), [`.claude/plugins/core/templates/plans-readme.template.md`](plans-readme.template.md), [`.claude/plugins/core/templates/TASK.template.md`](TASK.template.md).

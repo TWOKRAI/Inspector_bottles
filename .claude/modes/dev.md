@@ -205,7 +205,7 @@ keeps long-term context flowing into `.claude/memory/` **during** work, not only
 
 Where plans are stored — see `.claude/modes/_stack.md` (section "Plans"). Typical templates:
 
-- **Single root:** `plans/YYYY-MM-DD_<slug>.md` (single) or `plans/YYYY-MM-DD_<slug>/plan.md` + `phase-N.md` (multi-phase) — see `manager.md` "Plan naming convention"
+- **Single root:** `plans/YYYY-MM-DD_<slug>.md` (single) or `plans/YYYY-MM-DD_<slug>/plan.md` + `tasks/<id>.md` (layout v2; legacy multi-phase: `phase-N.md`) — see `manager.md` "Plan naming convention"
 - **By scope:** `apps/{app}/plans/` (per-app in monorepo), `projects/{slug}/plans/` (per-project in multi-zone repo)
 
 Manager at `/dev:plan` picks the correct location based on task context and `_stack.md`.

@@ -18,7 +18,7 @@ written; two allowed files — 98k, 25 calls, done. The lead's reply to a runnin
 ten reds is the cap that keeps a run under the soft budget.
 
 ```
-TASK: <X.Y> — <one sentence>                 PLAN: <plans/…/phase-N.md>
+TASK: <X.Y> — <one sentence>                 PLAN: <plans/<date>_<slug>/plan.md>
 ROLE: <developer | teamlead | tester | junior | debugger>
   (a separate tester RED run only for a new module or an unclear contract; a review fix, a change
    to an existing module or wiring is one developer with REDS below — Д47)
