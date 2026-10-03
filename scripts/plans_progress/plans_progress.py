@@ -1339,6 +1339,7 @@ code{font-size:.8rem;color:var(--muted)}
 .chip{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 7px}
 .chip.warn{font-size:.75rem;color:var(--in_progress);border:1px solid var(--in_progress);
 border-radius:10px;padding:0 7px}
+.chip.ok{color:var(--done);border-color:var(--done)}
 .cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
 """
 
@@ -1363,8 +1364,36 @@ def _tally(done: int, total: int) -> str:
     return f"{done} из {total} · {int(100 * done / total + 0.5)}%"
 
 
+def startable(p: Plan) -> bool:
+    """Можно начинать: план очереди §4.1, `ready` и есть хотя бы одна незавершённая задача.
+
+    Только §4.1: поле `После:` пока не пишет ни один план, и `ready` стоит у планов §4.2 тоже.
+    """
+    return p.tier == "4.1" and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+
+
+def _dep_chips(p: Plan) -> list[str]:
+    """Чипы `ready`, `after`, `waiting`, `cycle` незакрытого плана, в этом порядке."""
+    chips: list[str] = []
+    if startable(p):
+        chips.append('<span class="chip ok" data-chip="ready">можно начинать</span>')
+    title = f' title="{_e(p.after_reason)}"' if p.after_reason else ""
+    for name in p.after:
+        if name in p.dep_unknown:
+            chips.append(f'<span class="chip warn" data-chip="after" data-unknown="1"{title}>после: {_e(name)}</span>')
+        else:
+            chips.append(f'<span class="chip" data-chip="after"{title}>после: {_e(name)}</span>')
+    for cond in p.waiting_on:
+        chips.append(f'<span class="chip" data-chip="waiting"{title}>ждёт: {_e(cond)}</span>')
+    if p.dep_cycle:
+        chips.append(f'<span class="chip warn" data-chip="cycle">⚠ цикл: {_e(", ".join(p.dep_cycle))}</span>')
+    return chips
+
+
 def _plan_html(p: Plan) -> str:
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
+    if startable(p):
+        attrs += ' data-ready="true"'
     s = [f"<details {attrs}>", "<summary>", f'<span class="name">{_e(p.name)}</span>']
     if p.lane:
         s.append(f'<span class="badge">полоса {_e(p.lane)}</span>')
@@ -1401,6 +1430,8 @@ def _plan_html(p: Plan) -> str:
         word = "снят" if p.header_status == "superseded" else "закрыт"
         counts = f" · задачи {p.done} из {p.total}" if p.tasks and unfinished else ""
         s.append(f'<span class="chip" data-chip="closed" title="план закрыт или поглощён">{word}{counts}</span>')
+    if not plan_closed(p):
+        s.extend(_dep_chips(p))
     s.append("</summary>")
     s.append('<div class="body">')
     s.append(f'<div class="info">{_e(p.rel)}</div>')
@@ -1451,6 +1482,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         agg[0] += p.done
         agg[1] += p.total
         agg[2] += 1
+    ready_names = _e(", ".join(p.name for p in queue if startable(p)) or "нет")
     built = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M UTC%z")
     parts = [
         "<!doctype html>",
@@ -1462,6 +1494,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))}</div>',
         f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
         f"закрыто и в архиве {len(shelved)}</div>",
+        f'<div class="meta" id="ready">можно начинать: {ready_names}</div>',
         '<section class="lanes">',
     ]
     for lane, (done, total, n) in lanes.items():
