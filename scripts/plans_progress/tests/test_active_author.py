@@ -385,6 +385,46 @@ def test_find_header_branch_first_label_line_decides_even_without_a_token():
     assert pp.find_header_branch("Ветка: feat/x.") == "feat/x"
 
 
+@pytest.mark.parametrize(
+    ("line", "branch"),
+    [
+        ("- **Ветка:** feat/x+y", "feat/x+y"),
+        ("- **Ветка:** `feat/a@b#1`", "feat/a@b#1"),
+        ("- **Ветка:** feat/x+y (от main)", "feat/x+y"),
+        ("- **Ветка:** `feat/x+y` — трек", "feat/x+y"),
+        ("- **Ветка:** feat/x+y, затем fix/z", "feat/x+y"),
+        ("- **Ветка:** feat/x+y; поправить", "feat/x+y"),
+    ],
+)
+def test_find_header_branch_keeps_git_legal_characters_and_cuts_the_tail(line, branch):
+    assert pp.find_header_branch(line) == branch
+
+
+def test_real_git_branch_with_plus_at_and_hash_resolves_via_header(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    (repo / "plans").mkdir(parents=True)
+    body = "\n## Порядок выполнения\n\n- Task 1.1: x [PENDING]\n"
+    (repo / "plans" / "P.md").write_text("# P\n\n- **Ветка:** feat/x+y\n" + body, encoding="utf-8")
+    (repo / "plans" / "Q.md").write_text("# Q\n\n- **Ветка:** `feat/a@b#1` — трек\n" + body, encoding="utf-8")
+    _git_ok(repo, "init", "-q", "-b", "main")
+    for k, v in (("user.name", "t"), ("user.email", "t@example.invalid"), ("commit.gpgsign", "false")):
+        _git_ok(repo, "config", k, v)
+    _git_ok(repo, "add", "-A")
+    _git_ok(repo, "commit", "-q", "-m", "init")
+    wts = {}
+    for name, branch in (("p", "feat/x+y"), ("q", "feat/a@b#1")):
+        wts[name] = tmp_path / f"wt_{name}"
+        _git_ok(repo, "worktree", "add", "-q", "-b", branch, str(wts[name]), "main")
+        write_journal(wts[name], rec("2026-10-03T11:30:00"))
+    code, out, _ = _run_main(["--root", str(repo), "--who", "--now", "2026-10-03T12:00:00"], capsys)
+    who = json.loads(out)
+    assert code == 0 and who["orphans"] == []
+    assert sorted((e["plan"], e["branch"], e["via"]) for e in who["active"]) == [
+        ("P", "feat/x+y", "header"),
+        ("Q", "feat/a@b#1", "header"),
+    ]
+
+
 def test_find_header_branch_ignores_fenced_lines_and_lines_past_30():
     assert pp.find_header_branch("```\nВетка: feat/in-fence\n```\nВетка: feat/after") == "feat/after"
     assert pp.find_header_branch("\n" * 30 + "Ветка: feat/x") == ""
@@ -552,6 +592,13 @@ def test_main_flag_errors_exit_2_before_any_work_and_before_any_write(tmp_path, 
         code, out, err = _run_main(["--root", str(root), *argv], capsys)
         assert code == 2 and out == "" and err.strip(), argv
     assert not page.exists() and not (root / "data").exists()
+
+
+def test_main_window_with_more_digits_than_int_allows_exits_2_without_echo(tmp_path, capsys):
+    value = "9" * 4301 + "h"  # int() на 4301 цифре — ValueError «Exceeds the limit»: был exit 1 вместо 2
+    code, out, err = _run_main(["--root", str(_plain_root(tmp_path)), "--who", "--active-window", value], capsys)
+    assert code == 2 and out == "" and err.strip()
+    assert "9999" not in err
 
 
 def test_main_html_and_check_do_not_touch_git_for_the_active_resolver(tmp_path, monkeypatch, capsys):

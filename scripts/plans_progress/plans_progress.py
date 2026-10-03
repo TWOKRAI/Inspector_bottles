@@ -432,7 +432,7 @@ def find_after(text: str) -> tuple[list[str], list[str], str]:
 _BRANCH_LINE_RE = re.compile(
     r"^\s*(?:>\s*)*(?:[-*+]\s+)?(?:\*\*)?(?:Ветка|Branch)(?:\*\*)?\s*:(?:\*\*)?\s*(?P<rest>.*)$"
 )
-_BRANCH_TOKEN_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)+")
+_BRANCH_TOKEN_RE = re.compile(r"[^\s`,;()]+(?:/[^\s`,;()]+)+")
 
 
 def find_header_branch(text: str) -> str:
@@ -1301,7 +1301,7 @@ def run_check(plans: list[Plan], baseline: set[str], out, extra: list[Finding] |
 
 GIT_TIMEOUT = 10  # секунд на один вызов git: зависший git не вешает страницу
 DEFAULT_WINDOW = "6h"  # не измерено: окно «свежести» сигнала журнала
-_WINDOW_RE = re.compile(r"([0-9]+)([mhd])")
+_WINDOW_RE = re.compile(r"([0-9]{1,9})([mhd])")  # не больше 9 цифр: int() не упрётся в лимит длины строки
 _WINDOW_UNITS = {"m": "minutes", "h": "hours", "d": "days"}
 _GIT_ENV_DROP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")  # хук коммита выставляет их сам
 _REFS_TOKEN_RE = re.compile(r"plans/[^\s,;)]+")
