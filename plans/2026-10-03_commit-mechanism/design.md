@@ -45,7 +45,7 @@ Co-Authored-By: … для агентов; хук не проверяет
 - `commit-msg` — единственный валидатор, fail closed; код v2 одинаков в `scripts/validate_commit/` и в шаблоне сида
   `.claude/plugins/lang-python/templates/validate_commit/`; правка в каждую копию отдельно, без `cp`; тест сравнивает копии.
 - `pre-commit` — ruff, ruff-format, whitespace, EOF, bandit; без `session-log`. Версия ruff в хуке = версии в `.venv`.
-- Хук правки (`autoformat-python.sh` и аналог для `.md`) — чинит то, что чинится, и печатает остаток (E501) в stderr;
+- Хук правки (`autoformat-python.sh` и аналог для `.md`) — чинит то, что чинится, и печатает остаток (E501) JSON-ом `additionalContext` на stdout;
   fail open.
 - Привычка агентов (Task 2.2): сообщение пишется файлом и передаётся `-F`; в коммит — явный список путей; без
   `| grep` после `git commit` (код выхода).

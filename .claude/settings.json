@@ -310,6 +310,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/doc-size-guard.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/autofix-text.sh",
+            "timeout": 10
           }
         ]
       },
