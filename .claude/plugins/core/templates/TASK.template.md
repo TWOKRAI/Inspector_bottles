@@ -1,8 +1,8 @@
 # Task <X.Y>: <one sentence>
 
-- **Статус:** [PENDING] · **Level:** <…> · **Assignee:** <role> <!-- lint-language: allow -->
+- **Level:** <…> · **Assignee:** <role> <!-- lint-language: allow -->
 
-TASK: <X.Y> — <one sentence>                 PLAN: <plans/…/phase-N.md>
+TASK: <X.Y> — <one sentence>                 PLAN: <plans/<дата>_<slug>/plan.md>
 ROLE: <developer | teamlead | tester | junior | debugger>
   (a separate tester RED run only for a new module or an unclear contract; a review fix, a change
    to an existing module or wiring is one developer with REDS below — Д47) <!-- lint-language: allow -->
