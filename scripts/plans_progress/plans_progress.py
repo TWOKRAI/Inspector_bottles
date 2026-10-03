@@ -399,7 +399,7 @@ def find_after(text: str) -> tuple[list[str], list[str], str]:
     conditions: list[str] = []
     for raw in parts[0].split(","):
         item = raw.strip()
-        if not item:
+        if not item or item in ("—", "-", "–"):
             continue
         if "⛔" in item:
             conditions.append(item.split("⛔", 1)[1].strip() or "⛔")
@@ -433,8 +433,8 @@ class Item:
 
 
 # `(после 1.1, 1.0)` / `(after 1.1)`: регистр не важен только у слова, id — по эталону; после id не должно
-# стоять символа id (`1.2B` — не id `1.2`) и `.цифра` (`1.2.3` — не id `1`). Дальше id идёт проза.
-_AFTER_ID = ID_PATTERN + r"(?![\w-]|\.\d)"
+# стоять символа id (`1.2B` — не id `1.2`) и `.символ` (`1.2.3`, `1.2.a`, `T2.W` — не id); дата `2026-09-25` — не id.
+_AFTER_ID = r"(?!\d{4}-\d{2}-\d{2})" + ID_PATTERN + r"(?![\w-]|\.\w)"
 TASK_AFTER_RE = re.compile(r"\((?i:после|after)[ \t]+(" + _AFTER_ID + r"(?:[ \t]*,[ \t]*" + _AFTER_ID + r")*)")
 
 
@@ -990,7 +990,7 @@ def _resolve_task_deps(p: Plan) -> None:
     by_id: dict[str, Task] = {}
     for t in p.tasks:
         by_id.setdefault(t.id, t)
-    p.task_dep_unknown = [(t.id, i) for t in p.tasks for i in t.after if i not in by_id]
+    p.task_dep_unknown = [(t.id, i) for t in p.tasks if t.status not in TASK_CLOSED for i in t.after if i not in by_id]
     nodes = [t for t in p.tasks if t.status not in TASK_CLOSED]
     pos = {id(t): i for i, t in enumerate(nodes)}
     edges = [[pos[id(q)] for i in t.after if (q := by_id.get(i)) is not None and id(q) in pos] for t in nodes]
@@ -1080,7 +1080,8 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
         st = {t.status for t in p.tasks}
         if p.tasks and not (st & {"unknown", "pending", "in_progress", "blocked"}) and "done" in st:
             out.append(Finding("ALL_DONE_NOT_ARCHIVED", p.name, None, False, "все задачи закрыты, план не в архиве"))
-        for n in p.dep_unknown:
+        # закрытый план ничего не ждёт: ключ `dep_unknown` в --json остаётся, находка по нему — шум
+        for n in [] if plan_closed(p) else p.dep_unknown:
             out.append(Finding("DEP_UNKNOWN", p.name, None, in_41, f"нет плана {clean_md(n, 80)}"))
         if p.dep_cycle:
             text = f"цикл ожидания между планами: {', '.join(clean_md(n, 80) for n in p.dep_cycle)}"

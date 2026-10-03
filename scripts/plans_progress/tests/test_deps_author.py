@@ -6,8 +6,13 @@
 `(после …)`, разные пути значения поля, находки задач плана, чьё поле указывает в пустоту.
 
 Часть тестов импортирует модуль напрямую (нужны `cycle_groups`, `resolve_deps`, `find_after`); остальные идут
-через CLI и дают проводку целиком. Каждое утверждение — в отдельном тесте: поломка одной гарантии не должна
-красить соседние.
+через CLI и дают проводку целиком. Почти каждое утверждение — в отдельном тесте. Четыре теста держат по две ветки,
+и инъекция одной ветки красит весь тест: `test_task_ready_requires_plan_ready_and_pending_status`,
+`test_plan_ready_needs_the_awaited_plan_closed_not_merely_present`,
+`test_archived_copy_decides_when_a_live_and_an_archived_copy_share_a_name` (два порядка записей) и
+`test_task_finding_in_tier_41_blocks_and_the_baseline_key_has_no_task_id` (без базы и с базой).
+Условия `id(t) not in in_cycle` и `not p.dep_cycle` в `resolve_deps` страховочные: цикл и так состоит из
+незакрытых узлов, которые не проходят проверку `after`, поэтому ни один тест их не изолирует. Условия не удалять.
 """
 
 from __future__ import annotations
@@ -195,6 +200,7 @@ def test_a_plan_name_in_a_task_clause_is_a_missing_task_not_a_plan(make_root, pr
         ("(After 1.1)", ["1.1"]),
         ("(AFTER 1.1, 1.0)", ["1.1", "1.0"]),
         ("(после T1)", ["T1"]),
+        ("(после 1b.2b-pre; до 1b.3; решение 2026-09-25)", ["1b.2b-pre"]),
     ],
 )
 def test_id_forms_and_word_case_in_task_clause(clause, expected):
@@ -203,7 +209,17 @@ def test_id_forms_and_word_case_in_task_clause(clause, expected):
 
 @pytest.mark.parametrize(
     "clause",
-    ["(после 1.2B)", "(после 1.2.3)", "(после 1.1-Foo)", "(после 1.2_x)", "(после 1.2b3)", "(после  )"],
+    [
+        "(после 1.2B)",
+        "(после 1.2.3)",
+        "(после 1.1-Foo)",
+        "(после 1.2_x)",
+        "(после 1.2b3)",
+        "(после  )",
+        "(после T2.W)",
+        "(после 1.2.a)",
+        "(после 2026-09-25)",
+    ],
 )
 def test_not_an_id_is_not_read(clause):
     assert task_after(clause) == [], clause
@@ -259,6 +275,19 @@ def test_find_after_empty_value_first_line_wins_over_a_later_one():
     assert pp.find_after(field("") + "\n" + field("A")) == ([], [], "")
 
 
+@pytest.mark.parametrize("dash", ["—", "–", "-"])
+def test_find_after_a_lone_dash_is_no_dependency(dash):
+    assert pp.find_after(field(dash)) == ([], [], "")
+    assert pp.find_after(field(f"A, {dash}")) == (["A"], [], "")
+
+
+def test_lone_dash_field_leaves_the_plan_ready_and_silent(make_root, one_plan, progress):
+    root = make_root({"plans/B.md": plan_text(field("—"))})
+    rec = one_plan(root, "B")
+    assert (rec["after"], rec["waiting_on"], rec["dep_unknown"], rec["ready"]) == ([], [], [], True)
+    assert lines_of(progress(root, "--check"), "DEP_") == []
+
+
 def test_find_after_link_with_anchor_resolves_to_the_plan_name():
     assert pp.find_after(field("[план](../A/plan.md#фаза-2)"))[0] == ["A"]
 
@@ -310,9 +339,10 @@ def test_missing_name_in_finding_text_is_cut_to_80_characters(make_root, progres
 
 
 def test_markdown_noise_in_a_missing_name_is_cleaned_in_finding_text(make_root, progress):
-    root = make_root({"plans/B.md": plan_text(field("[подпись](../ghost/plan.md)"))})
+    # имя доходит до находки с разметкой (`_name_from_href` её не трогает): чистит только `clean_md`
+    root = make_root({"plans/B.md": plan_text(field("**ghost**"))})
     (line,) = lines_of(progress(root, "--check"), "DEP_UNKNOWN")
-    assert "нет плана ghost" in line and "](" not in line
+    assert "нет плана ghost" in line and "*" not in line
 
 
 def test_archived_plan_with_unknown_name_gets_no_finding_but_still_resolves(make_root, progress, plans_json):
@@ -368,3 +398,57 @@ def test_live_copy_of_an_archived_name_does_not_create_a_cycle_edge():
     b = mem_plan("B", ["A"])
     pp.resolve_deps([live_a, arch_a, b])
     assert b.dep_cycle == [] and live_a.dep_cycle == []
+
+
+# ------------------------------------------------------------------ DEP_UNKNOWN только у открытого
+
+
+T41 = "2026-10-03_b"
+
+
+def _tier41_root(make_root, order_md, header: str, items: str):
+    files = {f"plans/{T41}/plan.md": plan_text(header, items), "plans/queue/ORDER.md": order_md(tier41=[T41])}
+    return make_root(files)
+
+
+def test_closed_task_with_a_missing_id_gives_no_finding(make_root, order_md, progress):
+    items = "- Task 1.1: x [DONE] (после 9.9)\n- Task 1.2: y [PENDING]\n"
+    cp = progress(_tier41_root(make_root, order_md, "", items), "--check")
+    assert lines_of(cp, "DEP_UNKNOWN") == []
+    assert cp.returncode == 0, cp.stdout
+
+
+def test_open_task_with_a_missing_id_still_blocks_in_tier_41(make_root, order_md, progress):
+    items = "- Task 1.1: x [PENDING] (после 9.9)\n"
+    cp = progress(_tier41_root(make_root, order_md, "", items), "--check")
+    assert [ln for ln in lines_of(cp, "DEP_UNKNOWN") if f" {T41}:1.1 blocking" in ln]
+    assert cp.returncode == 1
+
+
+def test_closed_plan_with_an_unknown_name_gives_no_finding_but_keeps_the_json_key(
+    make_root, order_md, progress, plans_json
+):
+    root = _tier41_root(make_root, order_md, field("renamed-plan"), DONE_ITEM)
+    cp = progress(root, "--check")
+    assert lines_of(cp, "DEP_UNKNOWN") == []
+    assert cp.returncode == 0, cp.stdout
+    assert plans_json(root)[T41]["dep_unknown"] == ["renamed-plan"]
+
+
+def test_open_plan_with_an_unknown_name_still_blocks_in_tier_41(make_root, order_md, progress):
+    cp = progress(_tier41_root(make_root, order_md, field("renamed-plan"), OPEN_ITEM), "--check")
+    assert [ln for ln in lines_of(cp, "DEP_UNKNOWN") if f" {T41} blocking" in ln and "нет плана renamed-plan" in ln]
+    assert cp.returncode == 1
+
+
+# ------------------------------------------------------------------ закрытие шапкой
+
+
+def test_header_superseded_with_open_tasks_closes_the_plan_for_its_dependants(make_root, plans_json):
+    files = {
+        "plans/A/plan.md": plan_text("- **Статус:** SUPERSEDED", OPEN_ITEM),
+        "plans/B/plan.md": plan_text(field("A")),
+    }
+    plans = plans_json(make_root(files))
+    assert plans["A"]["ready"] is False, "снятый план сам не берут в работу"
+    assert plans["B"]["ready"] is True
