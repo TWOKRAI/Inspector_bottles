@@ -1538,4 +1538,15 @@ dict, получено {'correlation_id': '…'}`; драйвер `send_command(
 `SceneSourcePlugin.cmd_defect_now` (`Plugins/sim/scene_source/plugin.py:643`) требует `data in (None, {})`. Тесты 6.1 зовут команду
 напрямую и `correlation_id` не передают — красного нет. 2.4b ни framework, ни Plugins не трогала (diff пуст). Решить: хендлер
 игнорирует служебные ключи (`correlation_id`) или роутер не пишет их в data; плюс тест «через `router.request`». Владелец — трек
-line-sim (scene_source) или transport (router). Рядом: `system_command shutdown` драйвером на 8766 — timeout, система не встала.
+line-sim (scene_source): поиск по Plugins/Services/framework/apps (`data != {}`, «пустой dict», отказ по лишним ключам) находит
+строгую проверку только у `scene.defect_now` — это дефект приёмника, не контракта router (сосед f4: router в Files 5.6, в ветке
+фазы не править). Правка: хендлер игнорирует служебный `correlation_id`; тест — вызов через `router.request`.
+
+## backend_ctl: `system_command shutdown` на `apps/line_sim` — timeout, система не останавливается (2026-10-03)
+
+Стенд 2.4b, 14:50: `BackendDriver(port=8766).system_command('shutdown')` → `{'success': False, 'error': 'timeout',
+'correlation_id': 'bad29a40-…'}`. Через ~1 мин живы все четыре слушателя: `8766` PID 21540, `5021` PID 16268, `8091` PID 24924,
+`8092` PID 34408; лог `camera` продолжал писать (`StateProxy … resync`). Остановлено `TaskStop` фоновой задачи запуска — после
+него все четыре PID исчезли. Гипотеза — известная ловушка «ложный timeout» backend_ctl (`project_backend_ctl_signal_integrity`),
+но здесь система не встала вовсе, а не «встала, но ответ не дошёл» — не проверено. Репродукция: поднять `apps/line_sim/run.py`
+с `BACKEND_CTL=1 BACKEND_CTL_PORT=8766`, через ~5 мин `system_command('shutdown')`, смотреть `netstat` по четырём портам.
