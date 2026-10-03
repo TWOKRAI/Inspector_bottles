@@ -11,9 +11,9 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 - `--profile quick` — три кейса на `scripts/capacity_bench/recipes/stand.yaml`, 1080p@100, `extras.overflow: every` на `processor` и `inspector`, окно 30 с, прогрев 10 с: `E` (`transit_ms=0`), `D100` (`transit_ms=100`), `P10` (`transit_ms=0`, пауза `pipeline_executor` у processor на 10 с через 5 с после начала окна).
 - `--from-json PATH ...` — стенд не поднимать, проверить готовые JSON (несколько путей через пробел). Отчёт тоже пишется в `--out-dir`.
 - `--no-throughput-gate` — выключает ТОЛЬКО порог lag processor (число остаётся в отчёте). Окно lag@inspector проверяется всегда.
-- Дополнительно (живой режим): `--port` (драйвер, по умолчанию 8775), `--lock` (путь `stand.lock`, по умолчанию `<основной checkout>/.claude/stand.lock`), `--lock-token` (подстрока, которой замок помечен как наш), `--json-dir` (куда класть JSON кейсов, по умолчанию `--out-dir`).
+- Дополнительно (живой режим): `--port` (драйвер, по умолчанию 8775), `--lock` (путь замка, по умолчанию `<git-common-dir>/../../stand.lock` — родитель основного дерева, один файл на все worktree; сегодня `D:\PROJECT_INNOTECH\Inspector_vision\stand.lock`), `--lock-token <сессия>` (**обязателен** в живом режиме), `--json-dir` (куда класть JSON кейсов, по умолчанию `--out-dir`).
 
-Живой прогон требует, чтобы `stand.lock` уже был взят (замок держит лид руками). Нет файла или в нём нет `--lock-token` → код 2.
+Замок держит лид руками; строка файла — `сессия | время | режим | SHA | порты`. Живой прогон выходит с кодом 2, если нет `--lock-token`, нет файла, нет строки, у которой поле «сессия» равно токену (сравнение поля, не подстроки), или режим этой строки не `measure`.
 
 ## Коды выхода
 
@@ -21,7 +21,7 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 |---|---|
 | 0 | все пороги зелёные |
 | 1 | нарушен хотя бы один порог; в stdout строка `FAIL <имя порога>: <факт> vs <порог>`. Дренаж с шагом опроса > 0.1 с — `FAIL drain: NOT_MEASURED ...` |
-| 2 | сбой прогона: стенд не поднялся, файл не читается / не JSON, нет обязательного ключа (`s0`, `s1`, `s2`, `rc_s2`, `camera_before_pause`, `journal`; у P10 — `pause.{rss0,rss1,drain_s,drain_poll_period_s,after}`), замок не взят или чужой |
+| 2 | сбой прогона: стенд не поднялся; файл не читается / не JSON; нет обязательного ключа (`s0`, `s1`, `s2`, `rc_s2`, `camera_before_pause`, `journal`; у P10 — `pause.{rss0,rss1,drain_s,drain_poll_period_s,after}`); замок (см. выше); заказанная пауза не состоялась (`pause_error` в JSON или `tag: P10` без `pause`); снимок процесса с ключом `error` на `s0` / `s2` / `pause.after` |
 
 ## Пороги (литералы в `thresholds.py`)
 
@@ -40,7 +40,7 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 | `verdicts V` | `V ≥ 0.9 × (F − N)` | D100 |
 | `lag@inspector window s1-s0` | `Σ not_inspected_lag(inspector, s1) − то же на s0 ≤ 100` | D100 |
 | `pause rss growth` | `pause.rss1 − pause.rss0 ≤ 1048576` байт | P10 |
-| `drain` | `pause.drain_s ≤ 0.1`; `pause.drain_poll_period_s > 0.1` → `NOT_MEASURED` (код 1) | P10 |
+| `drain` | по порядку: `pause.drain_lower_s > 0.1` → FAIL (превышение доказано); `pause.drain_poll_period_s > 0.1` → `NOT_MEASURED` (код 1); `pause.drain_s ≤ 0.1` → PASS; иначе FAIL. Без `drain_lower_s` (старые JSON) первое правило не действует | P10 |
 | `start frame_stale_drops[P]` | `s0 rs.frame_stale_drops == 0` у процессов под every (processor, inspector); остальные — REPORT | все |
 
 Числа в отчёте без порога: `actuation_fired_items/missed_items/late_fires/unscheduled_items` (5.2), `start_s`, `first_frame_after_ready_s` (5.4), lag processor, строки отпуска фидеров (живой режим).
@@ -50,7 +50,7 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 ## Живой прогон: как снимаются числа
 
 - Журнал — только файлы `messages.log`; `observability.db` не читается (бинарный SQLite даёт ложные дубли). Одинаковые строки в нескольких `messages.log` — не дубли: берётся самый полный файл.
-- Дренаж P10 — `introspect_queues(processor).chain_queue.size` вернулся к медиане трёх опросов до паузы; один вызов драйвера на опрос, шаг ≤ 20 мс; `drain_poll_period_s` — наибольший интервал между соседними опросами.
+- Дренаж P10 (ред. 4): `pause.backlog` = `chain_queue.size` в снимке `pause_mid`; `t0` берётся ДО отправки `worker.start`; опрос — один вызов `introspect_status(processor)`, шаг ≤ 20 мс, до роста `cycles` исполнителя на `backlog + 1` относительно `pause_mid`. В JSON: `drain_s` — от `t0` до опроса, увидевшего рост (верхняя граница); `drain_lower_s` — от `t0` до последнего опроса без роста (нижняя граница, `0.0`, если первый же опрос показал завершение); `drain_poll_period_s` — наибольший интервал между опросами, первый — от `t0` (включает ответ на команду). Заказанная пауза, которая не состоялась, — код 2.
 - После `worker.pause_all` камера на `introspect` не отвечает — `F` снимается до паузы (`camera_before_pause`).
 
 ## Фикстуры тестов

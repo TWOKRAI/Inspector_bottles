@@ -289,9 +289,30 @@ def test_r2_drain_is_timed_from_sending_worker_start_and_counts_cycles(monkeypat
     pause = {k: v for k, v in res["pause"].items() if k not in ("after", "drain_trace")}
     assert pause.get("drain_s") is not None and pause["drain_s"] >= 0.15, pause
     assert pause["backlog"] == 3
-    # Первый интервал считается от t0 и включает ответ на команду (0.12 с) — период > 0.1, поэтому
-    # вердикт NOT_MEASURED; это тоже строка ``FAIL drain`` и код 1, как требует ред. 4.
+    # Первый интервал считается от t0 и включает ответ на команду (0.12 с) — период > 0.1. Но последний
+    # опрос, где цель ещё НЕ достигнута, был на 0.142 с: превышение доказано нижней границей, и вердикт —
+    # измеренный FAIL, а не NOT_MEASURED (решение лида, раунд 2b).
     assert pause["drain_poll_period_s"] >= 0.12, pause
+    assert pause["drain_lower_s"] > 0.1, pause
     check = A._drain_check(res["pause"])
-    assert check.failed and check.line().startswith("FAIL drain"), check.line()
+    assert check.status == A.FAIL and "NOT_MEASURED" not in check.line(), check.line()
+    assert check.line().startswith("FAIL drain"), check.line()
     assert drv.status_calls, "дренаж обязан опрашивать introspect_status (cycles), а не очередь"
+
+
+def test_r2b_lower_bound_rule_runs_first_and_absent_key_keeps_old_behaviour():
+    slow_poll = {"drain_s": 0.3, "drain_poll_period_s": 0.25}
+    assert A._drain_check(slow_poll).status == A.NOT_MEASURED  # старые JSON: без drain_lower_s как раньше
+    assert A._drain_check({**slow_poll, "drain_lower_s": 0.11}).status == A.FAIL  # доказано: до NOT_MEASURED
+    assert A._drain_check({**slow_poll, "drain_lower_s": 0.1}).status == A.NOT_MEASURED  # граница строгая
+    assert A._drain_check({"drain_s": 0.05, "drain_poll_period_s": 0.02, "drain_lower_s": 0.0}).status == A.PASS
+
+
+def test_r2b_drain_lower_is_zero_when_the_first_poll_already_shows_completion():
+    out, _, _ = _drain([104], call_cost=0.003)
+    assert out["drain_lower_s"] == 0.0
+
+
+def test_r2b_drain_lower_is_the_last_poll_below_target():
+    out, _, _ = _drain([100, 101, 103, 104], call_cost=0.003)
+    assert out["drain_lower_s"] == pytest.approx(0.043, abs=1e-9)  # третий опрос: 2 шага по 0.02 + 0.003

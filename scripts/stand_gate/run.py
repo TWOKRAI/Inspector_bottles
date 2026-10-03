@@ -202,7 +202,9 @@ def measure_drain(
 
     ``t0`` — момент ДО отправки ``worker.start`` (ред. 4): задержка ответа на команду входит в дренаж.
     ``drain_s`` — от ``t0`` до конца опроса, увидевшего ``target`` (верхняя граница; ``None`` — не дошёл
-    за ``cap_s``). ``drain_poll_period_s`` — наибольший интервал между соседними опросами, первый
+    за ``cap_s``). ``drain_lower_s`` — от ``t0`` до конца последнего опроса, где ``target`` ещё не
+    достигнут (нижняя граница; ``0.0``, если первый же опрос показал завершение).
+    ``drain_poll_period_s`` — наибольший интервал между соседними опросами, первый
     интервал считается от ``t0``: это неопределённость момента, по ней судится доказуемость порога.
     Часы — ``time.perf_counter`` модуля на момент вызова (подменяемы в тестах).
     """
@@ -210,6 +212,7 @@ def measure_drain(
     sleep = sleep or time.sleep
     last = t0
     period = 0.0
+    lower = 0.0  # от t0 до последнего опроса, где цель ещё НЕ достигнута (0.0 — первый же показал её)
     trace: list[tuple[float, int | None]] = []
     while True:
         t_call = clock()
@@ -220,9 +223,20 @@ def measure_drain(
         elapsed = t_done - t0
         trace.append((round(elapsed, 4), cycles))
         if cycles is not None and cycles >= target:
-            return {"drain_s": round(elapsed, 4), "drain_poll_period_s": round(period, 4), "drain_trace": trace[:200]}
+            return {
+                "drain_s": round(elapsed, 4),
+                "drain_lower_s": round(lower, 4),
+                "drain_poll_period_s": round(period, 4),
+                "drain_trace": trace[:200],
+            }
+        lower = elapsed
         if elapsed >= cap_s:
-            return {"drain_s": None, "drain_poll_period_s": round(period, 4), "drain_trace": trace[:200]}
+            return {
+                "drain_s": None,
+                "drain_lower_s": round(lower, 4),
+                "drain_poll_period_s": round(period, 4),
+                "drain_trace": trace[:200],
+            }
         sleep(max(0.0, step_s - (clock() - t_call)))
 
 
