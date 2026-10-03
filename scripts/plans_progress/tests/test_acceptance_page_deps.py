@@ -504,10 +504,10 @@ def test_ready_summary_text_and_placement_before_queue(matrix):
 
 
 def test_ready_summary_text_for_zero_and_for_single_startable_plan(make_root, progress, tmp_path, order_md):
-    """Q4: при нуле планов `можно начинать: нет`; при одном — имя без запятой."""
+    """Q4: при нуле планов (поле в дереве есть) `можно начинать: нет`; при одном — имя без запятой."""
     zero = {
         "plans/z-done/plan.md": _plan(None, ["DONE"]),  # §4.1, всё закрыто
-        "plans/z-wait/plan.md": _plan(None),  # §4.2, открыт, поля нет
+        "plans/z-wait/plan.md": _plan("z-done"),  # §4.2, открыт; поле в дереве есть (иначе «не определено», Q9)
         "plans/z-free/plan.md": _plan(None),  # вне ORDER.md
         "plans/queue/ORDER.md": order_md(tier41=["z-done"], tier42=["z-wait"]),
     }
@@ -535,6 +535,69 @@ def test_ready_summary_text_for_zero_and_for_single_startable_plan(make_root, pr
             [" ".join("".join(n.parts).split()) for n in page.ready_nodes],
             [want_text],
         )
+    assert not problems, "\n".join(problems)
+
+
+def _q9_files(order_md, *, archived_field: bool = False, live_field: str | None = None) -> dict[str, str]:
+    """База Q9: два плана §4.1 (PENDING и BLOCKED), один §4.2, один вне ORDER.md; поля нет ни у кого.
+
+    archived_field — поле `После:` только у архивного плана; live_field — куда добавить поле у НЕархивного
+    плана: "4.2" (поле у w-wait), "unlisted" (у u-free), "4.1" (у нового §4.1-плана u-three).
+    """
+    files = {
+        "plans/u-one/plan.md": _plan(None, ["PENDING"]),
+        "plans/u-two/plan.md": _plan(None, ["BLOCKED"]),
+        "plans/w-wait/plan.md": _plan("u-one" if live_field == "4.2" else None),
+        "plans/u-free/plan.md": _plan("u-one" if live_field == "unlisted" else None),
+    }
+    tier41 = ["u-one", "u-two"]
+    if live_field == "4.1":
+        files["plans/u-three/plan.md"] = _plan("u-one")
+        tier41.append("u-three")
+    if archived_field:
+        files[f"plans/_archive/2026-Q4/{ARCH}/plan.md"] = _plan("u-one")
+    files["plans/queue/ORDER.md"] = order_md(tier41=tier41, tier42=["w-wait"])
+    return files
+
+
+def test_ready_is_undefined_until_a_live_plan_has_the_field(make_root, progress, tmp_path, order_md):
+    """Q9: пока ни у одного НЕархивного плана нет `После:` (поле только у архивного не считается) — нет data-ready,
+    нет чипов ready, `#ready` = `можно начинать: не определено (...)`; поле у любого живого плана (§4.2, вне ORDER.md,
+    §4.1) возвращает поведение Q3/Q4: u-one и u-two (одни BLOCKED) снова data-ready."""
+    undefined = "можно начинать: не определено (поле «После:» не заполнено ни у одного плана)"
+    scenarios = (
+        ("поля нет нигде", dict(), [], undefined),
+        ("поле только у архивного плана", dict(archived_field=True), [], undefined),
+        (
+            "поле у плана §4.2",
+            dict(live_field="4.2"),
+            [("u-one", "true"), ("u-two", "true")],
+            "можно начинать: u-one, u-two",
+        ),
+        (
+            "поле у плана вне ORDER.md",
+            dict(live_field="unlisted"),
+            [("u-one", "true"), ("u-two", "true")],
+            "можно начинать: u-one, u-two",
+        ),
+        (
+            "поле у плана §4.1",
+            dict(live_field="4.1"),
+            [("u-one", "true"), ("u-two", "true")],
+            "можно начинать: u-one, u-two",
+        ),
+    )
+    problems: list[str] = []
+    for label, kw, want_ready, want_text in scenarios:
+        page, _raw, _root = _build(make_root, progress, tmp_path, _q9_files(order_md, **kw))
+        _diff(problems, f"[{label}] data-ready", page.ready_pairs(), want_ready)
+        _diff(
+            problems,
+            f"[{label}] планы с чипом ready",
+            [n for n in page.order if page.chips(n, "ready")],
+            [n for n, _v in want_ready],
+        )
+        _diff(problems, f"[{label}] тексты #ready", [n.text for n in page.ready_nodes], [want_text])
     assert not problems, "\n".join(problems)
 
 
