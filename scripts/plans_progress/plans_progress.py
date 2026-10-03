@@ -136,6 +136,7 @@ class Plan:
     after: list[str] = field(default_factory=list)  # имена планов из поля `После:`
     after_reason: str = ""  # текст после ` — ` в поле `После:`
     waiting_on: list[str] = field(default_factory=list)  # условия `⛔ …` из поля `После:`
+    has_after_field: bool = False  # в первых 30 строках есть строка `После:`, даже `—`; в --json не выводится
     ready: bool = False  # заполняет resolve_deps
     dep_unknown: list[str] = field(default_factory=list)  # имена из `after`, которых нет среди планов
     dep_cycle: list[str] = field(default_factory=list)  # участники цикла, в котором стоит этот план
@@ -373,24 +374,31 @@ _AFTER_LINE_RE = re.compile(r"^\s*(?:>\s*)*(?:[-*+]\s+)?(?:\*\*)?(?:После|A
 _AFTER_REASON_RE = re.compile(r" [—–] ")
 
 
-def find_after(text: str) -> tuple[list[str], list[str], str]:
-    """Поле `После:` / `After:` в первых 30 строках -> (имена планов, условия `⛔`, причина).
+def after_field_value(text: str) -> str | None:
+    """Значение первой строки `После:` / `After:` в первых 30 строках; нет строки — None.
 
-    Первая подходящая строка выигрывает; строки внутри ограждения кода пропускаются. Значение режется по первому
-    ` — ` / ` – `: слева список через запятую, справа причина. Элемент с `⛔` — условие (текст после знака),
-    остальные — имена планов: href markdown-ссылки или имя в обратных кавычках, через `_name_from_href`;
-    повтор хранится один раз.
+    Пустое значение (`- **После:**`) — тоже строка. Строки внутри ограждения кода пропускаются.
     """
     in_fence = False
-    value = None
     for line in text.split("\n")[:30]:
         if FENCE_RE.match(line):
             in_fence = not in_fence
             continue
         m = None if in_fence else _AFTER_LINE_RE.match(line)
         if m:
-            value = m.group("rest").strip()
-            break
+            return m.group("rest").strip()
+    return None
+
+
+def find_after(text: str) -> tuple[list[str], list[str], str]:
+    """Поле `После:` / `After:` в первых 30 строках -> (имена планов, условия `⛔`, причина).
+
+    Первая подходящая строка выигрывает (`after_field_value`). Значение режется по первому
+    ` — ` / ` – `: слева список через запятую, справа причина. Элемент с `⛔` — условие (текст после знака),
+    остальные — имена планов: href markdown-ссылки или имя в обратных кавычках, через `_name_from_href`;
+    повтор хранится один раз.
+    """
+    value = after_field_value(text)
     if value is None:
         return [], [], ""
     parts = _AFTER_REASON_RE.split(value, maxsplit=1)
@@ -710,6 +718,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     main_text = read_text(main, plan.bad_encoding) if main.is_file() else ""
     plan.header_status = find_header_status(main_text)
     plan.after, plan.waiting_on, plan.after_reason = find_after(main_text)
+    plan.has_after_field = after_field_value(main_text) is not None
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
@@ -1368,19 +1377,29 @@ READY_UNDEFINED = "не определено (поле «После:» не за
 
 
 def deps_in_use(plans: list[Plan]) -> bool:
-    """Хоть у одного НЕзакрытого плана непустой `after` или `waiting_on` (план с одним `⛔ …` считается).
+    """Хоть у одного НЕзакрытого плана есть строка `После:` (`has_after_field`; `—`, пустая и `⛔ …` считаются).
 
     Пока ложно, `ready` у всех планов верен «по умолчанию», и страница не называет планы готовыми.
     """
-    return any((p.after or p.waiting_on) and not plan_closed(p) for p in plans)
+    return any(p.has_after_field and not plan_closed(p) for p in plans)
 
 
 def startable(p: Plan, in_use: bool) -> bool:
-    """Можно начинать: поле `После:` кем-то заполнено, план очереди §4.1, `ready`, есть незавершённая задача.
+    """Можно начинать: поле кем-то заполнено, у плана §4.1 своё поле, `ready`, есть незавершённая задача.
 
-    Только §4.1: `ready` стоит и у планов §4.2, а очередь они не занимают.
+    Только §4.1: `ready` стоит и у планов §4.2, а очередь они не занимают. План без собственной строки `После:`
+    не называется готовым: `ready` у него «по умолчанию».
     """
-    return in_use and p.tier == "4.1" and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+    return in_use and p.tier == "4.1" and p.has_after_field and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+
+
+def ready_summary(queue: list[Plan], in_use: bool) -> str:
+    """Текст после `можно начинать: ` в `#ready` (уже экранированный)."""
+    if not in_use:
+        return READY_UNDEFINED
+    names = _e(", ".join(p.name for p in queue if startable(p, in_use)) or "нет")
+    without = sum(1 for p in queue if not p.has_after_field)
+    return f"{names} · поле не заполнено у {without} из {len(queue)} планов очереди" if without else names
 
 
 def _dep_chips(p: Plan, in_use: bool) -> list[str]:
@@ -1390,10 +1409,10 @@ def _dep_chips(p: Plan, in_use: bool) -> list[str]:
         chips.append('<span class="chip ok" data-chip="ready">можно начинать</span>')
     title = f' title="{_e(p.after_reason)}"' if p.after_reason else ""
     for name in p.after:
-        if name in p.dep_unknown:
-            chips.append(f'<span class="chip warn" data-chip="after" data-unknown="1"{title}>после: {_e(name)}</span>')
-        else:
-            chips.append(f'<span class="chip" data-chip="after"{title}>после: {_e(name)}</span>')
+        unknown = name in p.dep_unknown
+        cls = "chip warn" if unknown else "chip"
+        mark = ' data-unknown="1"' if unknown else ""
+        chips.append(f'<span class="{cls}" data-chip="after"{mark}{title}>после: {_e(name)}</span>')
     for cond in p.waiting_on:
         chips.append(f'<span class="chip" data-chip="waiting"{title}>ждёт: {_e(cond)}</span>')
     if p.dep_cycle:
@@ -1494,7 +1513,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         agg[1] += p.total
         agg[2] += 1
     in_use = deps_in_use(live + archive)
-    ready_names = _e(", ".join(p.name for p in queue if startable(p, in_use)) or "нет") if in_use else READY_UNDEFINED
+    ready_text = ready_summary(queue, in_use)
     built = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M UTC%z")
     parts = [
         "<!doctype html>",
@@ -1506,7 +1525,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))}</div>',
         f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
         f"закрыто и в архиве {len(shelved)}</div>",
-        f'<div class="meta" id="ready">можно начинать: {ready_names}</div>',
+        f'<div class="meta" id="ready">можно начинать: {ready_text}</div>',
         '<section class="lanes">',
     ]
     for lane, (done, total, n) in lanes.items():
