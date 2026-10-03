@@ -1,0 +1,89 @@
+{
+ "BASE": {
+  "collected": 55,
+  "failed": []
+ },
+ "I1_first_producer_wins": {
+  "pred": "passthrough::test_last_producer_of_a_name_decides_compatibility, ::test_available_keys_last_producer_of_a_name_wins",
+  "collected": 55,
+  "failed": [
+   "process_module/tests/test_validate_chain_passthrough.py::test_available_keys_last_producer_of_a_name_wins",
+   "process_module/tests/test_validate_chain_passthrough.py::test_last_producer_of_a_name_decides_compatibility"
+  ]
+ },
+ "I2_match_by_dtype": {
+  "pred": "passthrough::test_required_key_is_matched_by_name_not_by_dtype_alone (+ возможно key_absent тесты)",
+  "collected": 55,
+  "failed": [
+   "process_module/plugins/tests/test_port_validate_items.py::test_validate_chain_incompatible_dtype_reports_error",
+   "process_module/tests/test_blueprint_chain_validation.py::test_incompatible_linear_chain_reports_detailed_error",
+   "process_module/tests/test_validate_chain_passthrough.py::test_key_present_but_incompatible_keeps_the_old_error_format",
+   "process_module/tests/test_validate_chain_passthrough.py::test_last_producer_of_a_name_decides_compatibility",
+   "process_module/tests/test_validate_chain_passthrough.py::test_required_key_is_matched_by_name_not_by_dtype_alone",
+   "process_module/tests/test_validate_chain_passthrough.py::test_two_unsatisfied_inputs_give_exactly_two_errors_one_per_input"
+  ]
+ },
+ "I3_wires_ignored": {
+  "pred": "passthrough: wired_name_covers..., wired_inputs_accepts_any_iterable; recipes: inspection_basic и multi_camera (assemble/check) — если вход узла 0 не исключён адресным Wire",
+  "collected": 55,
+  "failed": [
+   "process_module/tests/test_validate_chain_passthrough.py::test_wired_inputs_accepts_any_iterable_of_names[frozenset]",
+   "process_module/tests/test_validate_chain_passthrough.py::test_wired_inputs_accepts_any_iterable_of_names[generator]",
+   "process_module/tests/test_validate_chain_passthrough.py::test_wired_inputs_accepts_any_iterable_of_names[list]",
+   "process_module/tests/test_validate_chain_passthrough.py::test_wired_inputs_accepts_any_iterable_of_names[set]",
+   "process_module/tests/test_validate_chain_passthrough.py::test_wired_name_covers_required_input_without_producer_above"
+  ]
+ },
+ "I4_incompatible_uses_text_a": {
+  "pred": "passthrough::test_key_present_but_incompatible_keeps_the_old_error_format; test_port_validate_items несовместим-тесты; test_blueprint_chain_validation:115",
+  "collected": 55,
+  "failed": [
+   "process_module/plugins/tests/test_port_validate_items.py::test_validate_chain_incompatible_dtype_reports_error",
+   "process_module/tests/test_blueprint_chain_validation.py::test_incompatible_linear_chain_reports_detailed_error",
+   "process_module/tests/test_validate_chain_passthrough.py::test_key_present_but_incompatible_keeps_the_old_error_format",
+   "process_module/tests/test_validate_chain_passthrough.py::test_last_producer_of_a_name_decides_compatibility"
+  ]
+ },
+ "I5_no_dedup": {
+  "pred": "recipes::node-0 exactly one error; passthrough two_unsatisfied — нет (это validate_chain, не check)",
+  "collected": 55,
+  "failed": [
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_node_zero_without_wire_gives_exactly_one_error_for_that_address"
+  ]
+ },
+ "I6_optional_errors": {
+  "pred": "passthrough::test_optional_input_absent_upstream_is_not_an_error; возможно рецепты с optional входами",
+  "collected": 55,
+  "failed": [
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_multi_camera_compositor_collector_mode_is_fanin",
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_recipe_assembles_without_blueprint_invalid[multi_camera.yaml]",
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_recipe_check_is_empty[multi_camera.yaml]",
+   "process_module/plugins/tests/test_port_validate_items.py::test_validate_chain_optional_input_never_errors",
+   "process_module/tests/test_validate_chain_passthrough.py::test_optional_input_absent_upstream_is_not_an_error"
+  ]
+ },
+ "I7_no_fanin": {
+  "pred": "recipes::compositor fanin — ровно 1",
+  "collected": 55,
+  "failed": [
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_multi_camera_compositor_collector_mode_is_fanin"
+  ]
+ },
+ "I8_no_frame_wires_basic": {
+  "pred": "recipes: inspection_basic assemble + check + wire-removal (копия без проводов) — 3",
+  "collected": 55,
+  "failed": [
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_inspection_basic_without_processor_frame_wires_fails_naming_color_mask",
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_recipe_assembles_without_blueprint_invalid[inspection_basic.yaml]",
+   "multiprocess_prototype/backend/tests/test_topology_recipes_check.py::test_recipe_check_is_empty[inspection_basic.yaml]"
+  ]
+ },
+ "I9_positional_allowed": {
+  "pred": "passthrough::test_wired_inputs_passed_positionally_is_a_type_error, ::test_validate_chain_wired_inputs_is_keyword_only_with_empty_default",
+  "collected": 55,
+  "failed": [
+   "process_module/tests/test_validate_chain_passthrough.py::test_validate_chain_wired_inputs_is_keyword_only_with_empty_default",
+   "process_module/tests/test_validate_chain_passthrough.py::test_wired_inputs_passed_positionally_is_a_type_error"
+  ]
+ }
+}

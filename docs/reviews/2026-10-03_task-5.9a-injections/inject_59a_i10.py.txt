@@ -1,0 +1,30 @@
+# ruff: noqa  # артефакт замера/инъекций 2026-10-03, код сохранён как есть
+"""I10 (лид, 5.9a): check() не передаёт имена проводов — ни в validate_chain_detailed, ни в
+_is_covered_by_auto_wiring. Предсказание ДО прогона: 0 упавших (ветка не охранена на уровне check)."""
+
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import inject_59a as m  # noqa: E402
+
+m.INJ = {}
+p = m.ROOT / m.BP
+s = p.read_text(encoding="utf-8")
+a = "validate_chain_detailed(chain, wired_inputs=wired_names)"
+c = "proc_cfg, parts[1], port, wired_names_by_process.get(proc_name, [])"
+assert s.count(a) == 1 and s.count(c) == 1
+p.write_text(
+    s.replace(a, "validate_chain_detailed(chain, wired_inputs=[])").replace(c, "proc_cfg, parts[1], port, []"),
+    encoding="utf-8",
+)
+try:
+    m.FW_TESTS = m.FW_TESTS + ["process_manager_module"]
+    m.ROOT_TESTS = ["multiprocess_prototype/backend/tests"]
+    col, failed = m.run()
+finally:
+    subprocess.run(["git", "checkout", "--", m.BP], cwd=m.ROOT)
+print("I10 collected", col, "failed", len(failed))
+for f in failed:
+    print("  ", f)
