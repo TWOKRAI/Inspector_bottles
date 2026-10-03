@@ -656,6 +656,13 @@ class FrameShmMiddleware:
         return getattr(self._reader, "torn_reads", 0)
 
     @property
+    def deferred_closes(self) -> int:
+        """Task 5.6: handle'ов, чьё закрытие отложено из-за живого view (``ShmFrameReader.deferred_closes``,
+        4.7b2) — read-only проекция счётчика reader'а. Не потеря, а health-сигнал моста/читателя: растёт,
+        когда отставленный handle ещё держат view. Подменный reader без счётчика → 0."""
+        return int(getattr(self._reader, "deferred_closes", 0) or 0)
+
+    @property
     def frame_handle_cache_size(self) -> int:
         """Ф7 G.7 (0.5): размер reader-кэша SHM-handle — read-only проекция reader'а.
 

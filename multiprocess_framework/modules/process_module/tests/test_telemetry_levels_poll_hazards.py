@@ -95,6 +95,10 @@ SHM_KEYS = {
     "bytes_read",
     "bytes_mapped",
     "restore_failures",
+    # Task 5.6: дверь отправки, отложенные закрытия, проваленные доставки (not_inspected_door — только every).
+    "door_drops",
+    "deferred_closes",
+    "errors_delivery_failed",
 }
 
 
