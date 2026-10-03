@@ -19,8 +19,13 @@ tmp_path: tmp у pytest может лежать внутри чужого реп
 ставят `pre-commit install`. Конфиг НЕ правится.
 
 Окружение:
-  * CRLF -> LF только при копировании трёх файлов: checkout на Windows отдаёт CRLF,
-    а `bash script.sh` с CRLF падает по причине, не связанной с контрактом.
+  * CRLF -> LF только при копировании файлов: checkout на Windows отдаёт CRLF, а во
+    временном репозитории файлы должны выглядеть как при checkout на Linux/macOS
+    (единый вид независимо от машины). Что CRLF ломает хук — НЕ утверждается:
+    ревьюер прогнал CRLF-копию, и хук отработал.
+  * stdout/stderr git и pre-commit пишутся во временные ФАЙЛЫ, не в pipe: при таймауте
+    `subprocess.run` убивает только `git`, а внуки (pre-commit, ruff, bandit) держат
+    унаследованные pipe, и `communicate()` мог бы ждать EOF бесконечно.
   * Глобальный/системный git-конфиг отключён (GIT_CONFIG_GLOBAL/NOSYSTEM), чтобы
     `core.hooksPath` пользователя не мешал `pre-commit install`; GIT_DIR/GIT_INDEX_FILE
     и подобные из окружения вычищены (тест может запускаться изнутри хука git).
@@ -35,6 +40,7 @@ import datetime
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -113,17 +119,27 @@ def _clean_env() -> dict[str, str]:
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        cwd=cwd,
-        env=_clean_env(),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=TIMEOUT,
-        check=False,
-    )
+    # Вывод — во временные файлы, не в pipe (см. докстринг модуля): таймаут не зависает
+    # на внуках, держащих pipe. TimeoutExpired пробрасывается — тест падает, а не висит.
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=_clean_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=err,
+            timeout=TIMEOUT,
+            check=False,
+        )
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(
+            cmd,
+            proc.returncode,
+            out.read().decode("utf-8", errors="replace"),
+            err.read().decode("utf-8", errors="replace"),
+        )
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -155,15 +171,7 @@ def _copy_real(src: Path, dst: Path) -> None:
 @pytest.fixture(scope="module", autouse=False)
 def _pre_commit_available() -> None:
     try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "pre_commit", "--version"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=TIMEOUT,
-            check=False,
-        )
+        proc = _run([sys.executable, "-m", "pre_commit", "--version"], REPO_ROOT)
     except (OSError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment
         pytest.fail(f"pre-commit is not runnable: {exc!r}")
     if proc.returncode != 0:
@@ -189,11 +197,15 @@ def _make_repo(tmp_path: Path, *, journal_in_first_commit: bool) -> tuple[Path, 
 
     _copy_real(PROJECT_CONFIG, repo / ".pre-commit-config.yaml")
     _copy_real(REPO_ROOT / "pyproject.toml", repo / "pyproject.toml")
-    _copy_real(REPO_ROOT / HOOK_SCRIPT_REL, repo / HOOK_SCRIPT_REL)
+    to_add = [".pre-commit-config.yaml", "pyproject.toml", "a.py", "b.py"]
+    # Скрипт — замороженный артефакт: копируем, только если он ещё есть (FREEZE -> KILL
+    # не должен ронять тесты 5-7 по причине, не связанной со свойством).
+    if (REPO_ROOT / HOOK_SCRIPT_REL).exists():
+        _copy_real(REPO_ROOT / HOOK_SCRIPT_REL, repo / HOOK_SCRIPT_REL)
+        to_add.append(HOOK_SCRIPT_REL.as_posix())
     _write(repo / "a.py", "x = 1\n")
     _write(repo / "b.py", "y = 1\n")
     journal = repo / "docs" / "sessions" / f"{today}.md"
-    to_add = [".pre-commit-config.yaml", "pyproject.toml", HOOK_SCRIPT_REL.as_posix(), "a.py", "b.py"]
     if journal_in_first_commit:
         _write(journal, f"# {today}\n\nfirst entry\n")
         to_add.append(journal.relative_to(repo).as_posix())
@@ -267,7 +279,9 @@ def test_pathspec_commit_with_staged_journal_keeps_unstaged_edits(tmp_path: Path
     proc = _git(repo, "commit", "-m", "x", "a.py")
 
     assert proc.returncode == 0, f"commit rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+    assert _git_ok(repo, "rev-list", "--count", "HEAD").strip() == "2"
     assert _UNSTAGED_EDIT in (repo / "b.py").read_text(encoding="utf-8")
+    assert _WRAPUP_TEXT in journal.read_text(encoding="utf-8")  # журнал не потерян
 
 
 @pytest.mark.usefixtures("_pre_commit_available")
