@@ -15,9 +15,9 @@ branch: feat/layer-render
 - Проверки 2.4b: слепые 369 RED → 659 GREEN; радиус layer_render 1470, line_sim 580, dataset_gen 188, ml_train 141,
   Plugins/sim 743, apps/line_sim 26, sentrux и validate чисто; инъекции 14/15 (i9 — ось пуста, зонд); ревью кода ит.1
   APPROVED (6 minor внесены). Отчёты: `docs/reviews/2026-10-03_task-2.4b-{developer,lead-injections,code-review}.md`.
-- Живой стенд: процессный не поднимался; A/B плагина `scene_source` на конфиге стенда (80 кадров, p=0.25) — sha кадров и
-  паспортов старый = новый. Довод «процессы/IPC не менялись» — не проверка; если владелец требует процессный стенд —
-  брать `.claude/stand.lock` и предупреждать соседа f4.
+- Процессный стенд прогнан 14:41–14:50 (лента, объекты, MJPEG, превью `layers` PNG = старый код); форс-брак вживую не проверить — дефект `scene.defect_now` × `correlation_id` (OPEN_QUESTIONS, до 2.4b). Раньше — A/B плагина `scene_source` на конфиге стенда (80 кадров, p=0.25) — sha кадров и
+  паспортов старый = новый. Замок стенда — `D:\PROJECT_INNOTECH\Inspector_vision\stand.lock` (строка `сессия | время |
+  режим | SHA | порты`), соседа f4 предупреждать. Данные стенда скопированы в `data/line_sim` этого worktree (gitignored).
 - `main` не двигался. Worktree тестера `lr24b-tester` и ветка `red/layer-render-2.4b` удалены.
 - agentId трека: developer `a7aa8eddb36a6a74f` (2.4a + 2.4b + правки), reviewer спеки `ad12e5fcbddf2455c`, tester 2.4b
   `addf347f17f49d021`, reviewer кода 2.4b `a884396ad986ca28a`. Developer уже ~260k — на следующей задаче лучше свежий.

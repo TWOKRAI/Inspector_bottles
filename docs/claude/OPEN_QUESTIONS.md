@@ -1529,3 +1529,13 @@ Skill требует `src/<package>/<module>/` + `interface.py` + `_impl/` + `te
 center_crop+sim/*). Отдельно — 5/5 passed, файл целиком — 17/17. Слияние `main` `pult_web` не трогало (diff пуст). Текст ошибки не
 сохранён (`--tb=line` вывел только имя). Гипотеза — время/порядок в node:vm-харнессе под нагрузкой (тест из 5.3, проверял выделение после
 «Отмены»), не подтверждена. Следующий прогон с `--tb=short` — сохранить вывод; два падения подряд — `investigator`.
+
+## line_sim: `scene.defect_now` отвергает `correlation_id` роутера — «Брак сейчас» не работает вживую (2026-10-03)
+
+Стенд 2.4b (`apps/line_sim`, 8766): `POST /api/scene/defect_now {}` пульта → HTTP 400 `scene.defect_now: ожидается None или пустой
+dict, получено {'correlation_id': '…'}`; драйвер `send_command('camera', 'scene.defect_now')` — тот же `invalid`. Причина:
+`RouterManager.request` делает `data.setdefault("correlation_id", cid)` (`router_manager.py:1071`, с `1a1b6b9b` 2026-05-31), а
+`SceneSourcePlugin.cmd_defect_now` (`Plugins/sim/scene_source/plugin.py:643`) требует `data in (None, {})`. Тесты 6.1 зовут команду
+напрямую и `correlation_id` не передают — красного нет. 2.4b ни framework, ни Plugins не трогала (diff пуст). Решить: хендлер
+игнорирует служебные ключи (`correlation_id`) или роутер не пишет их в data; плюс тест «через `router.request`». Владелец — трек
+line-sim (scene_source) или transport (router). Рядом: `system_command shutdown` драйвером на 8766 — timeout, система не встала.
