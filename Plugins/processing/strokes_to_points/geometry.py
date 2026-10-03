@@ -139,7 +139,7 @@ try:  # Numba опциональна: без неё работает тот же
     from numba import njit as _njit
 
     _HAS_NUMBA = True
-except ImportError:  # pragma: no cover — окружение без numba
+except ImportError:  # pragma: no cover — окружение без numba  # no-health: optional-импорт
     _HAS_NUMBA = False
 
 

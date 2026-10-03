@@ -381,7 +381,7 @@ class OtelExportPlugin(ProcessModulePlugin):
         try:
             self._reg = self._init_register(ctx)
             self._cfg = OtelExportConfig(**self._reg.model_dump())
-        except ValidationError as exc:
+        except ValidationError as exc:  # no-health: отказ старта уходит в self._fail (health/лог)
             self._fail(f"конфиг отвергнут: {format_validation_error(exc)}")
             return
 

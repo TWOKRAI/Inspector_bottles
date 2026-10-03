@@ -128,7 +128,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         tile_px = data.get("tile_px", PREVIEW_DEFAULT_TILE_PX)
         try:
             validate_preview_request(seeds, tile_px)
-        except PreviewLimitError as exc:
+        except PreviewLimitError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
             return _bad_request(str(exc))
         preset_dict = data.get("preset")
         if preset_dict is not None and not isinstance(preset_dict, dict):
@@ -136,7 +136,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         try:
             preset = self._client_preset(preset_dict) if preset_dict is not None else self._configured_preset()
             png, tiles = render_preview_grid(preset, seeds, tile_px)
-        except Exception as exc:  # noqa: BLE001 — любой сбой сборки превью -> invalid с текстом
+        except Exception as exc:  # noqa: BLE001 — любой сбой сборки превью -> invalid с текстом  # no-health: ошибка уходит вызывающему в ответе команды
             return {"status": "error", "code": "invalid", "message": str(exc)}
         return {"status": "ok", "png_b64": base64.b64encode(png).decode("ascii"), "tiles": tiles}
 
@@ -154,7 +154,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         try:
             preset = self._client_preset(preset_dict) if preset_dict is not None else self._configured_preset()
             layout = render_layout(preset, seed)
-        except Exception as exc:  # noqa: BLE001 — любой сбой сборки раскладки -> invalid с текстом
+        except Exception as exc:  # noqa: BLE001 — любой сбой сборки раскладки -> invalid с текстом  # no-health: ошибка уходит вызывающему в ответе команды
             return {"status": "error", "code": "invalid", "message": str(exc)}
         return {"status": "ok", **layout}
 
@@ -182,7 +182,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
                     if not _inside(file.resolve(), roots):
                         continue  # симлинк наружу: preset.commit такой путь отверг бы
                     entries.append(sprite_entry(file, sprites_dir, base_dir))
-                except (OSError, RuntimeError, ValueError):
+                except (OSError, RuntimeError, ValueError):  # no-health: файл пропущен при листинге
                     continue  # петля симлинков / relpath между дисками — файл вне ограды
         entries.sort(key=lambda entry: entry["path"])
         return {
@@ -208,7 +208,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
             return _bad_request(f"preset.sprite_put: PNG больше {SPRITE_PUT_MAX_BYTES} байт")
         try:
             raw = base64.b64decode(png_b64, validate=True)
-        except (binascii.Error, ValueError):
+        except (binascii.Error, ValueError):  # no-health: ошибка уходит вызывающему в ответе команды
             return _bad_request("preset.sprite_put: png_b64 — не base64")
         if len(raw) > SPRITE_PUT_MAX_BYTES:
             return _bad_request(f"preset.sprite_put: PNG больше {SPRITE_PUT_MAX_BYTES} байт")
@@ -233,14 +233,14 @@ class LayerPreviewPlugin(ProcessModulePlugin):
         # дисках) после os.link оставил бы опубликованный файл без ответа.
         try:
             entry = sprite_entry(final, sprites_dir, self._preset_dir() or REPO_ROOT)
-        except ValueError as exc:
+        except ValueError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
             return _bad_request(f"preset.sprite_put: слой не сошлётся на sprites_dir ({exc})")
         # ОДНА попытка O_EXCL, не mkstemp: тот на Windows повторяет попытки при PermissionError (ACL deny, а
         # os.access(W_OK) при этом True) до TMP_MAX = 2^31 — поток команды не возвращался.
         tmp = sprites_dir / f"{secrets.token_hex(8)}.uploading"
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
-        except OSError as exc:
+        except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
             return _io_error(f"preset.sprite_put: временный файл не создан: {exc}")
         try:
             try:
@@ -248,22 +248,22 @@ class LayerPreviewPlugin(ProcessModulePlugin):
                     fh.write(raw)
                     fh.flush()
                     os.fsync(fh.fileno())
-            except OSError as exc:
+            except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
                 return _io_error(f"preset.sprite_put: запись не удалась: {exc}")
             try:
                 load_image_rgba(tmp)
-            except Exception as exc:  # noqa: BLE001 — не PNG/битый/без альфы: cv2.error и AttributeError (imread -> None)
+            except Exception as exc:  # noqa: BLE001 — не PNG/битый/без альфы: cv2.error и AttributeError (imread -> None)  # no-health: ошибка уходит вызывающему в ответе команды
                 return _invalid(f"preset.sprite_put: не RGBA-картинка ({exc})")
             try:
                 os.link(tmp, final)  # не os.replace: тот перезаписал бы файл внешнего писателя (см. докстринг модуля)
-            except FileExistsError:
+            except FileExistsError:  # no-health: ошибка уходит вызывающему в ответе команды
                 return _conflict(f"preset.sprite_put: файл уже есть: {clean}")
-            except OSError as exc:
+            except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
                 return _io_error(f"preset.sprite_put: публикация файла не удалась: {exc}")
         finally:
             try:
                 os.unlink(tmp)
-            except OSError:
+            except OSError:  # no-health: best-effort удаление tmp-файла (Windows держит handle), см. комментарий ниже
                 # ponytail: занятый tmp (антивирус на Windows) остаётся сиротой `.uploading` — `preset.sprites`
                 # его не показывает; сбой здесь не должен отнять ответ у опубликованного файла. Уборка сирот —
                 # если накопятся.
@@ -283,7 +283,7 @@ class LayerPreviewPlugin(ProcessModulePlugin):
             if not sprites_dir.is_dir():
                 return sprites_dir, _io_error(f"{label}: не каталог или отсутствует: {sprites_dir}")
             os.listdir(sprites_dir)  # нечитаемый каталог -> OSError; os.walk молча пропустил бы его
-        except OSError as exc:
+        except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
             return sprites_dir, _io_error(f"{label}: каталог не читается: {sprites_dir} ({exc})")
         return sprites_dir, None
 

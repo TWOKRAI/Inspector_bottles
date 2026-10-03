@@ -112,7 +112,7 @@ def _build_handler(sink: "MjpegSinkPlugin") -> type[http.server.BaseHTTPRequestH
                 self.send_response(200)
                 self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={_BOUNDARY}")
                 self.end_headers()
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            except (BrokenPipeError, ConnectionResetError, OSError):  # no-health: клиент HTTP отвалился, штатно
                 return
 
             last_seq = -1
@@ -132,7 +132,7 @@ def _build_handler(sink: "MjpegSinkPlugin") -> type[http.server.BaseHTTPRequestH
                     self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii"))
                     self.wfile.write(frame)
                     self.wfile.write(b"\r\n")
-                except (BrokenPipeError, ConnectionResetError, OSError):
+                except (BrokenPipeError, ConnectionResetError, OSError):  # no-health: клиент HTTP отвалился, штатно
                     return
 
     return _MjpegHandler
@@ -221,7 +221,7 @@ class MjpegSinkPlugin(ProcessModulePlugin):
             return
         try:
             ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
-        except cv2.error:
+        except cv2.error:  # no-health: кадр не кодируется — пропускается, поток живёт
             return
         if not ok:
             return
@@ -245,7 +245,7 @@ class MjpegSinkPlugin(ProcessModulePlugin):
         try:
             handler_cls = _build_handler(self)
             server = http.server.ThreadingHTTPServer((self._host, self._port), handler_cls)
-        except OSError as exc:  # noqa: BLE001 - деградация, не отказ (см. докстринг модуля)
+        except OSError as exc:  # noqa: BLE001 - деградация, не отказ (см. докстринг модуля)  # no-health: отказ старта уходит в self._fail (health/лог)
             self._fail(ctx, exc)
             return
 

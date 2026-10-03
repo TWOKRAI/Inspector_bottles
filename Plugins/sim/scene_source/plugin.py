@@ -338,7 +338,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 entry_x_px=entry_x_px,
             )
             self._live_factory = factory
-        except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()
+        except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()  # no-health: ошибка в ctx.log_error, деградация на пустую фабрику
             ctx.log_error(
                 f"scene_source: движок сцены недоступен (preset_path={preset_path!r}): {exc!r} — "
                 "кадры будут только фоном"
@@ -378,7 +378,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 raise ValueError(f"ожидался uint8 (H, W, 3|4), получено dtype={image.dtype} shape={image.shape}")
             code = cv2.COLOR_BGRA2RGBA if image.shape[2] == 4 else cv2.COLOR_BGR2RGB
             return cv2.cvtColor(image, code)
-        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — слой выбрасывается, не падение
+        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — слой выбрасывается, не падение  # no-health: ошибка в ctx.log_error, плитка деградирует
             ctx.log_error(f"scene_source: тайл слоя фона недоступен (tile={resolved!r}): {exc!r} — слой выброшен")
             return None
 
@@ -446,7 +446,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 before_ids = {obj.passport.object_id for obj in self._spawner.active_objects()}
                 try:
                     self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)
-                except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл
+                except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл  # no-health: ошибка в _warn_factory_error, тик продолжается
                     self._warn_factory_error(exc)
                 after_passports = {obj.passport.object_id: obj.passport for obj in self._spawner.active_objects()}
                 self._update_truth_belt(before_ids, after_passports)
@@ -485,7 +485,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         Спавнер отсюда НЕ трогается — разбор в начале следующего `produce()`."""
         try:
             job = JobDone.from_dict(data or {})
-        except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ, не исключение
+        except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ, не исключение  # no-health: ошибка уходит вызывающему в ответе команды
             return {"status": "error", "message": f"scene.job_done: кривые аргументы {data!r}: {exc!r}"}
         self._jobs.append(job)
         return {"status": "ok"}
@@ -596,7 +596,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 spacing_mm = (float(raw_spacing[0]), float(raw_spacing[1]))
                 interval_s = None
             validate_flow(interval_s, spacing_mm)
-        except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ с кодом, не исключение
+        except Exception as exc:  # noqa: BLE001 — кривые аргументы -> ответ с кодом, не исключение  # no-health: ошибка уходит вызывающему в ответе команды
             return self._invalid(f"scene.flow: {exc!r}")
         kwargs = {"interval_s": interval_s} if interval_s is not None else {"spacing_mm": spacing_mm}
         if self._spawner is None:
@@ -677,9 +677,9 @@ class SceneSourcePlugin(ProcessModulePlugin):
             with self._preset_lock:
                 rev = self._file_rev()
                 preset_dict = ScenePreset.from_yaml(self._preset_path).to_dict()
-        except OSError as exc:
+        except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
             return {"status": "error", "code": "io_error", "message": f"preset.get: {exc}"}
-        except Exception as exc:  # noqa: BLE001 — битый файл на диске -> ответ, не исключение
+        except Exception as exc:  # noqa: BLE001 — битый файл на диске -> ответ, не исключение  # no-health: ошибка уходит вызывающему в ответе команды
             return {"status": "error", "code": "invalid", "message": f"preset.get: {exc}"}
         return {
             "status": "ok",
@@ -720,7 +720,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         try:
             preset = self._preset_from_client(data["preset"])
             factory = ObjectFactory(apply_defect_override(preset, self._defect_override))
-        except Exception as exc:  # noqa: BLE001 — любой сбой проверки -> invalid с текстом
+        except Exception as exc:  # noqa: BLE001 — любой сбой проверки -> invalid с текстом  # no-health: ошибка уходит вызывающему в ответе команды
             return {"status": "error", "code": "invalid", "message": str(exc)}
         new_dict = preset.to_dict()
         new_dict.pop("base_dir", None)
@@ -730,7 +730,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         with self._preset_lock:
             try:
                 raw = path.read_bytes()
-            except OSError as exc:
+            except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
                 return {"status": "error", "code": "io_error", "message": f"preset.commit: {exc}"}
             current_rev = compute_rev(raw)
             if current_rev != data["base_rev"]:
@@ -753,7 +753,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
             try:
                 update_yaml_preserving(path, changed)
                 new_rev = self._file_rev()
-            except OSError as exc:
+            except OSError as exc:  # no-health: ошибка уходит вызывающему в ответе команды
                 return {"status": "error", "code": "io_error", "message": f"preset.commit: {exc}"}
             # Ф1 (ревью итерация 2): без этого self._preset остаётся тем, что собрал
             # configure() -- любой ПОСЛЕДУЮЩИЙ scene.defect_rate пересобирает фабрику из
@@ -776,7 +776,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
             return
         try:
             factory = self._pending_factory.popleft()
-        except IndexError:
+        except IndexError:  # no-health: пустая очередь фабрик — control-flow
             return
         self._spawner.set_factory(factory)
         self._live_factory = factory
@@ -801,7 +801,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         try:
             data = yaml.safe_load(raw.decode("utf-8"))
             normalized = ScenePreset.from_dict({**data, "base_dir": str(path.parent.resolve())}).to_dict()
-        except Exception:  # noqa: BLE001 — битый файл на диске — сравнивать не с чем
+        except Exception:  # noqa: BLE001 — битый файл на диске — сравнивать не с чем  # no-health: битый пресет → пустой словарь, вызывающий решает
             return {}
         normalized.pop("base_dir", None)
         return normalized
