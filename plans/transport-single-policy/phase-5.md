@@ -257,20 +257,9 @@
 - [ ] Task 1.1 в `phase-0-1.md` помечена «устарело (loan удалён, ADR-…)» либо переведена в фазу 6.
 **Out of scope:** вытеснение у владельца очереди (отдельная задача по итогам замера).
 
-### Task 5.8 — Пропускная способность: пул исполнителя и batch-commit
-**Level:** Senior+ · **Assignee:** teamlead (пул), developer (storage), tester, reviewer · **Layer:** framework + plugins
-**Goal:** выжать из тракта максимум. Цель владельца (2026-10-02): 1080p при 60 кадрах/с — без потерь у processor и storage; 60–100 — «уже хорошо». Сейчас при 100 кадрах/с: processor теряет 105–316 из ~3000 за 30 с, storage ≈ 670.
-**Files:** `multiprocess_framework/modules/chain_module/worker_pool/dispatcher.py` (reuse `WorkerPoolDispatcher`), `multiprocess_framework/modules/process_module/generic/pipeline_executor.py` (`_execute_chain` через пул при `executor_workers > 1`), `multiprocess_framework/modules/process_module/generic/generic_process_config.py`, `multiprocess_framework/modules/process_manager_module/topology/blueprint.py` (`_pick("executor_workers")`, extras-only как `overflow`), `Plugins/io/database/plugin.py`, `Plugins/io/database/config.py` (batch: `commit_every_rows`, `commit_every_ms`), тесты `process_module/tests/test_pipeline_executor*.py`, `Plugins/io/database/tests/`.
-**Первый шаг — факт:** даёт ли `WorkerPoolDispatcher` сохранение порядка выходов и как он ведёт себя с read-only view и тикетами `_shm_views` (проверка поколения ДО и ПОСЛЕ цепочки должна остаться на входах батча). Если порядок не держится — вместо пула второй процесс `processor_1` с чётными/нечётными кадрами и join по `frame_id` у inspector (решение лида после факта, в этом же файле).
-**Steps:** 1. Факт. 2. tester до кода (оба механизма — свои тестеры, файлы не пересекаются: пул ∥ storage). 3. Код. 4. Инъекции (порядок; stale после пула; batch не сбрасывается по времени; потеря хвоста на стопе). 5. Ревью. 6. Стенд-гейт.
-**Намеренно меняемые тесты:** `test_pipeline_executor_characterization.py` — если пул оборачивает `_execute_chain`; тесты database-плагина, проверяющие коммит на каждую строку.
-**Acceptance criteria:**
-- [ ] `executor_workers: 2` в extras доходит до `PipelineExecutor` (реальная сборка); без ключа — 1, поведение прежнее бит-в-бит (характеризационные тесты зелёные).
-- [ ] Пул: 100 батчей, выходы в порядке входов; stale-проверка на входах батча работает (риг 4.7d-2 pre/post-chain даёт те же счётчики).
-- [ ] Storage: `commit_every_rows=50`/`commit_every_ms=50` — за 1000 строк ≤ 25 коммитов (spy на `commit`); на стопе хвост дописан (строк в БД = отправлено).
-- [ ] **Стенд-гейт (цель владельца):** `stand.yaml` 1080p@60, `executor_workers: 2`, 3 прогона: lag-дропы processor = 0, storage `lag_dropped_items = 0`. При 1080p@100 — те же числа в отчёте; максимальная частота без потерь (ступени 60/75/90/100) — число.
-- [ ] Справочно 1080p@100, медиана: lag-дропы processor ≤ 1 % кадров за 30 с; `plugin_ms` и ядра processor — числа до/после; storage `lag_dropped_items = 0`, строк в БД = кадров камеры − потерь; renderer под `latest` — без изменений (дропы ≈ 1800/30 с остаются по замыслу, число в отчёте).
-**Out of scope:** `render_overlay` ROI; B-7 per-target; `color_mask` (OWNER-7); GPU.
+### Task 5.8 — Пропускная способность: storage первым, пул по замеру → [`task-5.8.md`](task-5.8.md)
+
+Ред. 2 (2026-10-03, ревью спеки стадии 0 + решение владельца «storage первым»): 5.8s (профиль `throughput` стенд-гейта) ∥ 5.8a (storage: транзакция на пакет, сброс вне исполнителя) → базовый замер лида → 5.8b (пул `WorkerPoolExecutor` — по правилу решения). Ред. 1 (`WorkerPoolDispatcher`) снята.
 
 ### Task 5.9 — Несколько камер живьём (остаток 4.7e) и кэп моста
 **Level:** Middle+ (Sonnet) · **Assignee:** developer (мост, рецепт), лид (стенд) · **Layer:** framework + prototype
@@ -319,14 +308,9 @@
 - [ ] Стенд-гейт зелёный после правки; `sent_via_channel_policy > 0` на data, если kind-каналы для data есть.
 **Out of scope:** богатое самоописание канала; опрос сообщением.
 
-### Task 5.11 — Индикатор потерь в карточке процесса (остаток 2.1)
-**Level:** Middle+ (Sonnet) · **Assignee:** developer, reviewer (qt-mcp смоук) · **Layer:** prototype
-**Goal:** оператор видит потери без чтения счётчиков: кадров/с потеряно и записей `not_inspected`/с, подсветка при > 0 в установившемся режиме.
-**Files:** виджет карточки процесса в `multiprocess_prototype/frontend/` (точный путь — по `docs/refactors/2026-04_widgets_reorg.md`, домен `pipeline/`), чтение из дерева телеметрии (после 5.6), тесты pytest-qt + qt-mcp смоук.
-**Acceptance criteria:**
-- [ ] На `stand.yaml` под `every` карточка inspector показывает `not_inspected/с` ≈ (`born` за окно)/30 ± 10 %; processor — `lag/с`; под `latest` — `lag/с` и 0 маркеров.
-- [ ] qt-mcp: `qt_snapshot` содержит индикатор, `qt_messages` без новых warning'ов; Dict at Boundary.
-**Out of scope:** дашборды, алертинг.
+### Task 5.11 — Слоты потерь в карточке процесса → [`task-5.11.md`](task-5.11.md)
+
+Ред. 2 (2026-10-03, ревью спеки стадии 0): слот только при наличии листа телеметрии, единицы фреймворка — согласовано с решением владельца 2026-08-17 (`process_card.py:66-74`).
 
 ---
 
