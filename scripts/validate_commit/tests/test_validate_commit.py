@@ -28,7 +28,7 @@ def _no_plan_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest (красный на feat/<slug> с plans/<slug>.md, зелёный на detached HEAD).
     Валидатор не ослаблен: подменяется только поиск плана в этом файле.
     """
-    monkeypatch.setattr(validate_commit, "plan_for_branch", lambda repo, branch: None)
+    monkeypatch.setattr(validate_commit, "plan_for_branch", lambda *a, **k: None)
 
 
 _BASE = "docs(memory): пример темы\n\n- буллет\n"

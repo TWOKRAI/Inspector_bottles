@@ -177,7 +177,7 @@ class QuerySet(Generic[T]):
         """Валидировать, что имя колонки — безопасный SQL идентификатор."""
         import re
 
-        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
+        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", name):
             raise ValueError(f"Invalid column name: {name!r}")
         return name
 

@@ -338,7 +338,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 entry_x_px=entry_x_px,
             )
             self._live_factory = factory
-        except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()  # no-health: ошибка в ctx.log_error, деградация на пустую фабрику
+        except Exception as exc:  # noqa: BLE001 — любой сбой сборки движка не должен ронять configure()  # no-health: ДОЛГ — отказ движка виден только в log_error, health не видит (OPEN_QUESTIONS, Task 5.5c)
             ctx.log_error(
                 f"scene_source: движок сцены недоступен (preset_path={preset_path!r}): {exc!r} — "
                 "кадры будут только фоном"
@@ -378,7 +378,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 raise ValueError(f"ожидался uint8 (H, W, 3|4), получено dtype={image.dtype} shape={image.shape}")
             code = cv2.COLOR_BGRA2RGBA if image.shape[2] == 4 else cv2.COLOR_BGR2RGB
             return cv2.cvtColor(image, code)
-        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — слой выбрасывается, не падение  # no-health: ошибка в ctx.log_error, плитка деградирует
+        except Exception as exc:  # noqa: BLE001 — файл не найден/битый — слой выбрасывается, не падение  # no-health: ДОЛГ — выброшенный слой виден только в log_error, health не видит (OPEN_QUESTIONS, Task 5.5c)
             ctx.log_error(f"scene_source: тайл слоя фона недоступен (tile={resolved!r}): {exc!r} — слой выброшен")
             return None
 
@@ -446,7 +446,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 before_ids = {obj.passport.object_id for obj in self._spawner.active_objects()}
                 try:
                     self._spawner.tick(now_encoder=now_encoder, now_wall_s=time.monotonic(), rng=self._rng)
-                except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл  # no-health: ошибка в _warn_factory_error, тик продолжается
+                except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл  # no-health: ДОЛГ — вечный отказ фабрики виден только в log_error, health не видит (OPEN_QUESTIONS, Task 5.5c)
                     self._warn_factory_error(exc)
                 after_passports = {obj.passport.object_id: obj.passport for obj in self._spawner.active_objects()}
                 self._update_truth_belt(before_ids, after_passports)

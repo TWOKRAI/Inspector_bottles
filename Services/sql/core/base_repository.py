@@ -114,7 +114,7 @@ class GenericRepository:
         conditions = []
         params: Dict[str, Any] = {}
         for i, (col, val) in enumerate(kwargs.items()):
-            if not _IDENTIFIER_RE.match(col):
+            if not _IDENTIFIER_RE.fullmatch(col):
                 raise ValueError(f"Invalid column name: {col!r}")
             param_name = f"_fb{i}"
             conditions.append(f'"{col}" = :{param_name}')
