@@ -43,7 +43,7 @@ via `ToolSearch`. Mutating/index-building MCP ops — who, where:
   open a PR, never `git add -A` (stage explicit paths; the tree may be shared).
 - Conventional Commits + mandatory `Why:`/`Layer:` trailers, `Refs: plans/<slug>.md` from a
   plan; `commit-msg` hook rejects anything else. Guide: `.claude/COMMIT_GUIDE.md`.
-- After committing, `git show --stat HEAD` — the pre-commit hook may also stage the session log.
+- After committing, `git show --stat HEAD` — confirm the commit carries only the paths you staged.
 
 ## 5. Subagents and scope
 

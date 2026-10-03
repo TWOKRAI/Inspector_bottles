@@ -286,17 +286,15 @@ Example use cases: protect `data/raw/`, `data/corpus.db`, applied DB migrations,
 
 After saving, any Claude `Edit`/`Write` whose path matches a pattern is blocked with exit 2.
 
-### B. Daily session log (active by default via pre-commit)
+### B. Daily session log (written and committed by `/core:team:wrap-up`)
 
-Pre-commit hook `.claude/hooks/git/pre-commit-session-log.sh` appends a `[HH:MM] pre-commit | branch=…` block to `docs/sessions/YYYY-MM-DD.md` and **stages it into the same commit**, so the journal never sits as an untracked file after `git commit`. Registered in `.pre-commit-config.yaml` (see "Журнал коммитов" block). Pairs with the `/wrap-up` command (semantic summary).
+The session log `docs/sessions/YYYY-MM-DD.md` has one writer: the `/core:team:wrap-up` command. It appends a semantic summary and commits that single file (`git commit -F <msg-file> -- docs/sessions/<date>.md`).
 
-**Active by default** since seed v0.4.0. Quiet: hook always exits 0, never blocks the commit even on edge cases (disk full, permissions).
+The pre-commit hook `session-log` (`.claude/hooks/git/pre-commit-session-log.sh`) was **removed from `.pre-commit-config.yaml` on 2026-10-03**: it staged the journal while pre-commit held unstaged changes in a stash, and the stash restore failed and lost those edits (`docs/audits/2026-10-03_commit-mechanism.md`, A3). The script stays on disk, marked FROZEN.
 
-To **disable**, remove the `session-log` `repo: local` hook from `.pre-commit-config.yaml` (or point `SESSIONS_DIR` env var to a throwaway path).
+**Mechanical per-session entry (optional):** the Stop-hook `.claude/hooks/core/session-end-daily-log.sh` can be wired into `.claude/settings.json` under `"Stop"` (see docstring inside the file). Default seed does NOT register it.
 
-**Fallback for projects without pre-commit:** the older Stop-hook `.claude/hooks/core/session-end-daily-log.sh` still exists and can be wired into `.claude/settings.json` under `"Stop"` (see docstring inside the file). Default seed does NOT register it — the pre-commit path is preferred because it captures changes per-commit, not per-session.
-
-Customization via env vars:
+Customization of the Stop-hook via env vars:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
