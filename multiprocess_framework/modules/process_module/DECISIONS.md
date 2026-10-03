@@ -4032,3 +4032,27 @@ test_storeless_mode_get_returns_default_and_process_lives`.
 **Refs:** `plans/transport-single-policy/phase-5.md` (Task 5.2), `docs/reviews/2026-10-02_phase5-design-cto.md`,
 `docs/reviews/2026-10-02_phase5-spec-review-w2.md`, `generic/actuation_scheduler.py`, `plugins/base.py`
 (`PluginContext.scheduler`), `Plugins/control/robot_control/plugin.py`.
+
+### ADR-PM-052 — Граница модели доступности ключей: валидатор считает «имя есть», рантайм может сбросить ключ (2026-10-03, Task 5.9a)
+
+**Контекст.** После T1 `color_mask` отдаёт только `mask`, а `validate_chain` смотрел лишь предыдущий узел,
+поэтому `inspection_basic.yaml` падал на `check()`. Task 5.9a ввела модель «проход ключа»: валидатор считает, что
+между плагинами едет один dict, поэтому вход узла i покрыт, если ИМЯ его порта есть среди имён проводов процесса ∪ выходов
+узлов 0…i-1 (`available_keys`, последний производитель выигрывает). Спека — `plans/transport-single-policy/phase-5.md`.
+
+**Решение.** Модель принята как есть, с известной границей.
+1. Валидатор считает ключ живым, пока его не перезаписал выход узла. Он НЕ знает, что плагин вернул СВЕЖИЙ dict.
+2. Рантайм такие ключи теряет: `line_filter`, `center_crop`, `stitcher`, `renderer_compositor` возвращают
+   новый dict, а `plugin_runner.py:55-59` переносит только системные поля.
+3. Следствие: процесс `proc = [blob_detector, line_filter, color_mask]` с проводом `cam…frame → proc.blob_detector.frame`
+   даёт `check() == []`, хотя `frame` до `color_mask` не доходит.
+4. Дыра зафиксирована характеризационным тестом `process_manager_module/tests/test_t59a_review_author.py`
+   (`test_model_boundary_fresh_dict_plugin_in_the_middle_is_invisible_to_check`): он фиксирует дыру, не одобряет её.
+   Он покраснеет, только если новая модель по умолчанию считает, что плагин без объявления ключи НЕ переносит;
+   при умолчании «переносит» тест надо переписать вместе с объявлением у `_FreshDictLike`.
+
+**Не решено.** Вопрос модели («плагин объявляет, какие ключи переносит» против «валидатор знает про свежий dict»)
+передан CTO — `docs/claude/OPEN_QUESTIONS.md`, запись 2026-10-03, решение при приёмке фазы 5.
+
+**Refs:** `plans/transport-single-policy/phase-5.md` (Task 5.9a), `plugins/port.py` (`available_keys`,
+`validate_chain_detailed`), `process_manager_module/topology/blueprint.py` (`SystemBlueprint.check`).
