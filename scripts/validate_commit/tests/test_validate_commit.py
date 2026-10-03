@@ -11,9 +11,25 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import validate_commit  # noqa: E402
 from validate_commit import parse_message, validate  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_plan_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тесты разбора не зависят от ветки: гейт «ветка с планом требует Refs» отключён.
+
+    `validate()` без явного `plan_path` ищет репозиторий по CWD и план по слагу
+    текущей ветки. Без изоляции результат зависит от того, на какой ветке запущен
+    pytest (красный на feat/<slug> с plans/<slug>.md, зелёный на detached HEAD).
+    Валидатор не ослаблен: подменяется только поиск плана в этом файле.
+    """
+    monkeypatch.setattr(validate_commit, "plan_for_branch", lambda repo, branch: None)
+
 
 _BASE = "docs(memory): пример темы\n\n- буллет\n"
 
