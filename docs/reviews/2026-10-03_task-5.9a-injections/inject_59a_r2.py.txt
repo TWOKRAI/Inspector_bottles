@@ -1,0 +1,24 @@
+"""Раунд 2, 5.9a. J1: wired_names снова разбираются строкой (partition) вместо input_origin.
+Предсказание ДО прогона: падает ровно test_dotted_process_name_wire_does_not_cover_the_shorter_named_process."""
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import inject_59a as m  # noqa: E402
+
+p = m.ROOT / m.BP
+s = p.read_text(encoding="utf-8")
+a = "            origin_proc, _, origin_port = input_origin[target]\n"
+b = '            origin_proc, _, _rest = target.partition(".")\n            origin_port = _rest.rsplit(".", 1)[-1]\n'
+assert s.count(a) == 1, s.count(a)
+p.write_text(s.replace(a, b), encoding="utf-8")
+try:
+    m.FW_TESTS = m.FW_TESTS + ["process_manager_module"]
+    m.ROOT_TESTS = ["multiprocess_prototype/backend/tests"]
+    col, failed = m.run()
+finally:
+    subprocess.run(["git", "checkout", "--", m.BP], cwd=m.ROOT)
+print("J1 collected", col, "failed", len(failed))
+for f in failed:
+    print("  ", f)
