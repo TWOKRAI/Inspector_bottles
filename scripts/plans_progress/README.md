@@ -1,7 +1,7 @@
 # plans_progress — прогресс планов по единому эталону
 
 Читает планы из `plans/` и `plans/_archive/`, считает `N из M` по задачам и строит страницу.
-Только stdlib. План: [`plans/2026-10-02_plans-progress-dashboard.md`](../../plans/2026-10-02_plans-progress-dashboard.md).
+Только stdlib. План: [`plans/2026-10-02_plans-progress-dashboard/plan.md`](../../plans/2026-10-02_plans-progress-dashboard/plan.md).
 
 ## Команды
 

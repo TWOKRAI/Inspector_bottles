@@ -1,5 +1,5 @@
 # ruff: noqa: E501  -- литералы-фикстуры планов и ожидания в одну строку, форматтер их не переносит
-"""Приёмка Task 2.2 + 2.3 (слепые тесты) по плану plans/2026-10-02_plans-progress-dashboard.md.
+"""Приёмка Task 2.2 + 2.3 (слепые тесты) по плану plans/2026-10-02_plans-progress-dashboard/plan.md.
 
 (A) scripts/validate.py: шаг `check_plans_progress()` — запуск `plans_progress.py --check --baseline`.
 (B) `plans_progress.py --sync-order`: блок прогресса между маркерами в ORDER.md и находки

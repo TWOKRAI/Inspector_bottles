@@ -26,7 +26,7 @@ Post: файлы планов не пишутся. Пишут только дв�
       на ``main``). ``done`` — число задач ``done``; ``total`` = всего - ``dropped`` (deferred +
       superseded) - ``unknown``.
 
-Правила разбора (эталон) — ``plans/2026-10-02_plans-progress-dashboard.md``, «Формат задачи».
+Правила разбора (эталон) — ``plans/2026-10-02_plans-progress-dashboard/design.md``, «Формат задачи».
 """
 
 from __future__ import annotations

@@ -1,6 +1,13 @@
 # Handoff лида: plans-progress-dashboard (2026-10-03)
 
-План: `plans/2026-10-02_plans-progress-dashboard.md`. Ветка `feat/plans-progress-p2` (worktree `.claude/worktrees/team-plans-p2-impl`), поверх Фазы 1, которая уже в `main` (`3e79b264a`, ff). Прежний handoff: `2026-10-02_plans-progress-lead.md` (Фаза 1).
+План (layout v2 с 2026-10-03): `plans/2026-10-02_plans-progress-dashboard/plan.md`, формат и интерфейс — `design.md` рядом, тела задач — `tasks/<id>.md`. Ветка `feat/plans-progress-p2` (worktree `.claude/worktrees/team-plans-p2-impl`), поверх Фазы 1, которая уже в `main` (`3e79b264a`, ff). Прежний handoff: `2026-10-02_plans-progress-lead.md` (Фаза 1).
+
+## Раскладка плана (2026-10-03)
+- Файл плана (46 КБ, бюджет 32 КБ) разложен в layout v2: `plan.md` 9,7 КБ, `design.md`, `tasks/<id>.md` ×20, `tasks/<id>.result.md`, `reports/` (длинные отчёты 1.0 и 1.1).
+- Оба парсера дают на нём 8 из 19; `plans_ledger.py status --check --plan` без находок; `brief` собирается для всех задач.
+- Добавлена Фаза 5 «Доска сессий» (журнал агентов → `active` в `--json` → чип и секция «Кто где»); `claim` отложен (5.4).
+- Первый план проекта в layout v2: образец формата. Остальные планы приводят их владельцы; сообщение соседним сессиям не отправлено, ждёт отработки образца.
+- Fable на ревью формата, плана и идеи — только после вопроса владельцу (лимит был 94%).
 
 ## Решения владельца (2026-10-03), которых нет в коде
 - Страница и блок `ORDER.md` показывают только очередь и актуальное по `ORDER.md`: §4.1 основной список, §4.2 свёрнуто, «Нет в ORDER.md» видно, §4.3 и архив свёрнуты вместе.
