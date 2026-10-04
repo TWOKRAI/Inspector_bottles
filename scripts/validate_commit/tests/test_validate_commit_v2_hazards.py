@@ -639,3 +639,19 @@ def test_h21_a_non_utf8_byte_in_the_body_does_not_crash_the_validator(
     rc, text = _driven(copy, repo, tmp_path, message, mode="raw", fault="none", strict=strict)
     assert rc == 0, text
     assert "Traceback" not in text and "trailers git does not see" not in text, text
+
+
+# --------------------------------------------------------------------------- H22
+#   H22  Python делит строку по FF, NEL, LS (`str.splitlines`), git — только по LF. Невидимый разделитель внутри
+#        значения трейлера не должен превращать правильный блок в «git не видит» (ревью раунда 2, S3).
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("sep", ["\x0c", "\x85", "\u2028"], ids=["FF", "NEL", "LS"])
+def test_h22_a_unicode_line_separator_inside_a_value_is_not_a_split(
+    copy: str, sep: str, repo: Path, tmp_path: Path
+) -> None:
+    message = f"feat(x): y\n\nWhy: значение с{sep}разделителем внутри\nLayer: docs\nRefs: {PLAN}\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert (rc, rc_strict) == (0, 0), text
+    assert "trailers git does not see" not in text, text

@@ -976,7 +976,8 @@ def _git_trailer_keys(text: str) -> tuple[set[str] | None, str]:
     that cannot be started (any OSError), a timeout and a non-zero exit all come back as `(None, reason)` -
     the caller reports "cannot check", and must not read an empty answer as "git sees no trailers".
     """
-    stdin = ("\n".join(text.splitlines()) + "\n").encode("utf-8", "surrogateescape")
+    # Только LF и CRLF — граница строки, как у git; str.splitlines() режет ещё по FF, NEL, LS (ревью S3).
+    stdin = (text.replace("\r\n", "\n").rstrip("\n") + "\n").encode("utf-8", "surrogateescape")
     try:
         out = subprocess.run(
             ["git", "interpret-trailers", "--parse", "--no-divider"],
