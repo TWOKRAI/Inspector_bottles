@@ -545,6 +545,19 @@ def test_h16_cyrillic_task_value_is_a_format_warning_and_under_strict_an_error(
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("value", ["commit-mechanism#２.１", "commit-mechanism#٢.١"])
+def test_h16_non_ascii_digits_in_task_id_are_a_format_warning(
+    copy: str, value: str, repo: Path, tmp_path: Path
+) -> None:
+    # `\d` без re.ASCII принимает любые цифры Unicode (полноширинные, арабско-индийские) — id задачи только ASCII.
+    message = f"feat(x): y\n\n{FULL}Task: {value}\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert rc == 0, text
+    assert "Task is not <slug>#<id>" in text, text
+    assert rc_strict == 1
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
 def test_h16_control_ascii_task_value_is_silent(copy: str, repo: Path, tmp_path: Path) -> None:
     message = f"feat(x): y\n\n{FULL}Task: commit-mechanism#2.1\n"
     rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)

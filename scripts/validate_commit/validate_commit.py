@@ -240,7 +240,7 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
 
 # `Task:` value (rev. 6): `<slug>#<id>` - plan slug without the date, `#`, task id (`2.1`, `1.3a`, `K1.1`).
 # One id per line; several tasks mean several `Task:` lines. Existence of slug/id is NOT checked here.
-TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#[A-Z]{0,3}\d+(?:\.\d+)*[a-z]?$")
+TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#[A-Z]{0,3}\d+(?:\.\d+)*[a-z]?$", re.ASCII)
 GIT_TRAILERS_TIMEOUT = 5
 
 # `Merge ` and `merge: ` are NOT here any more (v2): merges are validated, see MERGE_DEFAULT_RE.
