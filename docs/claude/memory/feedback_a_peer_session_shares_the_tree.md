@@ -1,6 +1,7 @@
 ---
 name: feedback-a-peer-session-shares-the-tree
-description: "Вторая интерактивная сессия Claude может работать в том же репозитории — git add -A затянет её незакоммиченную работу в твой коммит; сверять ListAgents перед массовым стейджем"
+description: "Вторая интерактивная сессия Claude может работать в том же репозитории — git add -A затянет её незакоммиченную работу в твой коммит; сверять ListAgents перед массовым стейджем; также: общее дерево делает инъекции флейками; правка того же файла, что держит чужая незакоммиченная работа; `git stash pop` берёт чужой stash@{0}; stash общий на все worktree"
+merged_from: [feedback_shared_tree_makes_injections_look_like_flakes, feedback_worktree_for_parallel_samefile, feedback_git_stash_pop_wrong_stash]
 metadata:
   type: feedback
 ---
@@ -32,3 +33,17 @@ docs/claude/memory/MEMORY.md` — путь один, мой, я дописал �
 `M`, — сначала `git diff -- <путь>` и решение, что делать с чужой частью. Если она верная, как
 здесь, — назвать её в сообщении коммита, а не умолчать. Раскрытие отдельным коммитом дешевле
 `amend`'а: в общем дереве `amend` при сдвинувшемся HEAD переписывает чужой коммит.
+
+## Слито из feedback_shared_tree_makes_injections_look_like_flakes (_archive/feedback_shared_tree_makes_injections_look_like_flakes.md)
+
+Ф4 (задача 4.1, 2026-08-16): инъекции циклом «покалечить файл → прогон → восстановить из бэкапа» шли, пока в том же дереве работал агент-исполнитель. Два ложных факта: находка «строка сверки исхода ИСЧЕЗЛА из `write_event`» оказалась моим `restore` поверх правки агента (бэкап снят до неё); «мигающие тесты» (пять разных красных за шесть прогонов) агент объяснил хэшированием исходников в потоке: прогоны в окне инъекции шли с `base=CHANGED`, а `diff` после прогона показывал «идентичны». Два «нуля» таблицы инъекций были файлом сторожей, который агент дописывал во время прогона (перепрогон: 2 и 1 красный).
+Правило: параллельные инъекции и чужие прогоны только в разных worktree; нет worktree: дождаться завершения агента. Перед «зелёный в компании, красный в одиночку» проверить стабильность дерева (хэш файла до и после прогона).
+
+## Слито из feedback_worktree_for_parallel_samefile (_archive/feedback_worktree_for_parallel_samefile.md)
+
+Параллельные агенты держат НЕзакоммиченные правки в файле, который нужен и тебе (2026-07: `backend_ctl/driver.py`, телеметрия Task 1.4 против Phase 0 backend-ctl-hardening). Нельзя `git checkout -b` в том же дереве: он утащит их работу на твою ветку. Делать `git worktree add -b <branch> ../<dir> HEAD`: копия от committed HEAD; main-venv python импортирует пакет из worktree (cwd на sys.path). Мерж 3-way разведёт непересекающиеся хунки одного файла. Обычных субагентов (Agent tool) для таких правок не спавнить: они работают в ОСНОВНОМ дереве. При коллизии по ФАЙЛУ worktree обязателен (расширяет правило «макс 2 писателя без worktree»).
+
+## Слито из feedback_git_stash_pop_wrong_stash (_archive/feedback_git_stash_pop_wrong_stash.md)
+
+Проверка «красные тесты были до меня»: `git stash -u` → `git checkout <base>` → прогон → `git checkout <branch>` → `git stash pop`. На ЧИСТОМ дереве `stash -u` не прячет ничего, а `pop` берёт `stash@{0}`, то есть чужой stash `f2.2-wip` с другой ветки; в `process_module/health`, `generic/*`, `test_health_live.py` легли маркеры `<<<<<<<`, всплыло SyntaxError'ом pytest.
+Правила: `git stash` общий на ВСЕ worktree и сессии (знание constructor_master); для «было ли красным до меня» брать `isolation: worktree` или временный `git worktree add` на base SHA, не stash+checkout на рабочей ветке. Если stash неизбежен: `git stash list` ПЕРВЫМ, `pop` только по ссылке, подтверждённой как своя; после любого pop `grep -rl '<<<<<<< '`. Восстановление: `git checkout HEAD -- <файлы>`, `rm` untracked из stash, чужую запись не трогать. Агентам `git stash` запрещён в промптах.

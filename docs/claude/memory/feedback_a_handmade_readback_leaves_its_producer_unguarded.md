@@ -1,6 +1,7 @@
 ---
 name: feedback-a-handmade-readback-leaves-its-producer-unguarded
-description: "Тест, собирающий наблюдаемую сторону руками, оставляет её ПРОИЗВОДИТЕЛЯ без сторожа: 145 зелёных при снятой строке readback"
+description: "Тест, собирающий наблюдаемую сторону руками, оставляет её ПРОИЗВОДИТЕЛЯ без сторожа: 145 зелёных при снятой строке readback; также: сторож ниже заявления охраняет слой, а не заявление"
+merged_from: [feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim]
 metadata:
   node_type: memory
   type: feedback
@@ -26,3 +27,8 @@ readback» — не сторожилась ничем, при том что за
 это две разные дороги, зелёная одна не говорит ничего о второй. Родня:
 [[feedback_a_fake_harness_test_proves_the_harness]], [[feedback_two_tests_enter_from_both_sides_and_miss_the_connector]],
 [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].
+
+## Слито из feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim (_archive/feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim.md)
+
+Заявление «счётчик виден в readback»; сторож читал `voice_counters()` напрямую, мимо публикатора. Ревью 2026-08-31: заплата `base_stats.update(voice_counters())` → `pass` в `logger_module/core/logger_core.py:2002` не убила ни одного теста из 350. Второй сторож («ключ в `PLANE_COUNTER_KEYS`») охранял членство в белом списке, а не публикацию: оба зелёные, оба мимо. Своя матрица ломала механику (рост величины), не дорогу наружу.
+Правило: прочитать заявление вслух и найти его последнюю точку (readback, файл, оператор). Заявление про readback: тест ходит через реальный публикатор (`manager.get_stats()`), не через функцию-источник; про файл: читать файл. Инъекция ломает ДОРОГУ (снять публикацию), а не только вычисление. Минимум один тест берёт `effective` у настоящего производителя.
