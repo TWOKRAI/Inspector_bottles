@@ -27,3 +27,7 @@ metadata:
 двух `monotonic` — отображать абсолютное время на сетку. Если разность неизбежна, брать
 `time.perf_counter`. Часы держать инжектируемой зависимостью (`clock=` в конструкторе), а
 не читать глобально, иначе тест не сможет задать их без патча всего процесса.
+
+## Дополнение A12 (аудит 2026-10-04, из telemetry_self_publish)
+
+`cycle_metrics.effective_hz = 1/cycle_duration` на `time.monotonic()` давал FPS=0 у consumer-воркеров; фикс `b6ce2bb8` — интервал между `record()` на `perf_counter`.

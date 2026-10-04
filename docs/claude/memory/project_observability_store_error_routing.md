@@ -18,3 +18,7 @@ metadata:
 **How to apply:** любой перехват логов/ошибок в этом проекте — помнить, что error-записи текут по ДВУМ каналам (logger + error менеджеры). Валидировать через `backend_ctl` live-boot, не только юнитами. [[feedback-backend-ctl-for-agents]] [[project-hardware-recipes-no-headless-boot]]
 
 **Также замечено live:** stats-канал стора пуст — воркерные метрики идут `_publish_metrics_to_tree` (state-дерево, Ф5.7), мимо hub-stats-слота; в стор попадают только явные `ObservableMixin.record_metric`.
+
+## Дополнение A2 (аудит 2026-10-04, из constructor_master)
+
+`health.report` логирует на WARNING, forward-tap с min ERROR его не ловит; настоящий ERROR даёт `start_capture` (live 2026-07-10).
