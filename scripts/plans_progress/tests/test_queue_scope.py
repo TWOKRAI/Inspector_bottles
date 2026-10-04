@@ -143,7 +143,7 @@ def test_block_has_queue_waiting_unlisted_and_archive_counter(make_root, progres
 def test_json_still_lists_every_plan_with_its_tier(make_root, plans_json, order_md):
     root = make_root(_files(order_md))
     recs = plans_json(root)
-    assert {n: r["tier"] for n, r in recs.items()} == {Q: "4.1", W: "4.2", C: "4.3", F: None, A: None}
+    assert {n: r["tier"] for n, r in recs.items()} == {Q: "queue", W: "waiting", C: "closed", F: None, A: None}
     assert recs[A]["archived"] is True
 
 

@@ -351,9 +351,9 @@ def test_sanity_matrix_json_confirms_what_the_fixture_means(make_root, plans_jso
     assert recs["q-hdr"]["header_status"] == "done"
     assert recs[ARCH]["archived"] is True
     assert {n: recs[n]["tier"] for n in ("q-free", "w-dep", "z-closed", "u-dep", ARCH)} == {
-        "q-free": "4.1",
-        "w-dep": "4.2",
-        "z-closed": "4.3",
+        "q-free": "queue",
+        "w-dep": "waiting",
+        "z-closed": "closed",
         "u-dep": None,
         ARCH: None,
     }
@@ -732,9 +732,9 @@ def test_real_tree_page_has_ready_summary_and_only_queue_plans_are_startable(pro
         text = page.ready_nodes[0].text
         if not text.startswith("можно начинать: "):
             problems.append(f"текст #ready не начинается с 'можно начинать: ': {text!r}")
-    tier42 = [n for n in page.order if page.plans[n].attrs.get("data-tier") == "4.2"]
+    tier42 = [n for n in page.order if page.plans[n].attrs.get("data-tier") == "waiting"]
     assert tier42, "якорь: на реальной странице нет планов §4.2 (data-tier=4.2) — проверять нечего"
     _diff(problems, "планы §4.2 с data-ready", [n for n in tier42 if "data-ready" in page.plans[n].attrs], [])
-    not_queue = [n for n, _v in page.ready_pairs() if page.plans[n].attrs.get("data-tier") != "4.1"]
+    not_queue = [n for n, _v in page.ready_pairs() if page.plans[n].attrs.get("data-tier") != "queue"]
     _diff(problems, "data-ready у планов не из §4.1", not_queue, [])
     assert not problems, "\n".join(problems)

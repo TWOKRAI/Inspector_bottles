@@ -204,7 +204,7 @@ def test_order_row_without_cells_or_links_is_skipped_and_header_row_too(tmp_path
         encoding="utf-8",
     )
     rows = pp.parse_order(f)
-    assert [(r.name, r.tier, r.lane) for r in rows] == [("a", "4.1", "Р")]
+    assert [(r.name, r.tier, r.lane) for r in rows] == [("a", "queue", "Р")]
 
 
 def test_order_escaped_pipe_does_not_shift_columns(tmp_path):
@@ -219,7 +219,7 @@ def test_order_multiple_links_in_one_cell_and_flat_file_links(tmp_path):
     f.write_text(
         "### 4.3 Закрыты\n\n| [a](../a.md) · [b](../b/plan.md) · [web](https://x.y/z.md) | DONE |\n", encoding="utf-8"
     )
-    assert [(r.name, r.tier, r.lane) for r in pp.parse_order(f)] == [("a", "4.3", None), ("b", "4.3", None)]
+    assert [(r.name, r.tier, r.lane) for r in pp.parse_order(f)] == [("a", "closed", None), ("b", "closed", None)]
 
 
 def test_order_tables_outside_the_three_tiers_are_ignored(tmp_path):
@@ -237,7 +237,7 @@ def test_same_plan_in_two_tiers_takes_the_first(tmp_path):
         "### 4.1 A\n\n| [a](../a/plan.md) | Р | s | n |\n\n### 4.3 C\n\n| [a](../a/plan.md) | DONE |\n",
         encoding="utf-8",
     )
-    assert [(r.name, r.tier) for r in pp.parse_order(f)] == [("a", "4.1")]
+    assert [(r.name, r.tier) for r in pp.parse_order(f)] == [("a", "queue")]
 
 
 # ------------------------------------------------------------------ набор, находки, HTML
