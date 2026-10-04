@@ -18,7 +18,7 @@ Context is about to be compacted. Before that happens, audit what
 **must survive** compaction and is NOT yet persisted on disk:
 
 1. **Decisions taken this session** that aren't yet in:
-   - `.claude/memory/` (long-term rules / feedback / project facts)
+   - the memory dir: `memory_dir` in `.claude/modes/_stack.md`, default `.claude/memory/` (long-term rules / feedback / project facts)
    - `plans/<slug>.md` (current task plan)
    - `docs/sessions/YYYY-MM-DD.md` (session journal, via `/core:team:wrap-up`)
 
