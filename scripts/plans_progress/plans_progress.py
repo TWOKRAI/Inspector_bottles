@@ -1783,10 +1783,13 @@ def merge_branch_numbers(base: Plan | None, tip: Plan, disk: Plan) -> tuple[int,
     Задача с диска: вершина = база -> статус диска; иначе диск = база -> статус вершины (отсутствие на вершине —
     задача выпадает); иначе (изменили обе стороны) -> `done`, если он на вершине или на диске, иначе статус диска.
     Задачи вершины, которых нет ни в базе, ни на диске, добавляются. Считают те же правила, что у плана.
+    Повтор id: диск перебирается по всем вхождениям (как `Plan.done`), у каждого свой статус диска; база и вершина
+    берутся по id, первая запись. Ветка меняет задачу — все вхождения получают статус вершины.
     """
     on_base, on_tip, on_disk = _status_by_id(base), _status_by_id(tip), _status_by_id(disk)
     merged: list[Task] = []
-    for tid, disk_status in on_disk.items():
+    for disk_task in disk.tasks:  # каждое вхождение, как считает `Plan.done`; база и вершина — по id (первая запись)
+        tid, disk_status = disk_task.id, disk_task.status
         tip_status, base_status = on_tip.get(tid), on_base.get(tid)  # None — задачи в разборе нет
         if tip_status == base_status:
             status: str | None = disk_status

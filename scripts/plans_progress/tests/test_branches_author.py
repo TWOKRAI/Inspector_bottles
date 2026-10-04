@@ -316,11 +316,13 @@ def mem_plan(*pairs: tuple[str, str]) -> pp.Plan:
     return pp.Plan(name="P", rel="plans/P/plan.md", archived=False, tasks=[pp.Task(i, "", s) for i, s in pairs])
 
 
-def test_duplicate_task_id_first_record_wins_on_every_side_and_counts_once():
+def test_duplicate_task_id_first_record_wins_on_base_and_tip_and_disk_counts_every_occurrence():
+    """База и вершина — по id (первая запись); диск — каждое вхождение, как `Plan.done`/`Plan.total` (total = 2).
+    Если бы вершина брала последнюю запись (done), оба вхождения диска стали бы done: (2, 2)."""
     base = mem_plan(("1.1", "pending"))
     tip = mem_plan(("1.1", "pending"), ("1.1", "done"))  # первая — pending, вторая (должна игнорироваться) — done
     disk = mem_plan(("1.1", "pending"), ("1.1", "pending"))
-    assert pp.merge_branch_numbers(base, tip, disk) == (0, 1)
+    assert pp.merge_branch_numbers(base, tip, disk) == (0, 2)
 
 
 def test_task_removed_by_the_branch_and_rewritten_by_main_takes_the_disk_status():
@@ -419,3 +421,66 @@ def test_repository_without_main_costs_two_calls(tmp_path, monkeypatch):
     calls = spy_run(monkeypatch)
     assert repo.collect()["P"] == []
     assert [c[1] for c in calls] == ["rev-parse", "for-each-ref"], [c[:3] for c in calls]
+
+
+# =========================================================================== повтор id: числа диска считают каждое вхождение
+
+
+DUP_PLAN = (
+    "# План\n\n## Порядок выполнения\n\n- Task 1.1: a [DONE]\n- Task 1.1: a again [DONE]\n- Task 1.2: b [PENDING]\n"
+)
+
+
+def _chips_of(repo: Repo, plan: str) -> list[str]:
+    """Тексты чипов ветки у плана на странице, собранной настоящим `to_html` по тем же планам."""
+    plans = pp.discover(repo.root)
+    pp.collect_branches(repo.root, plans, NOW, WINDOW)
+    live, archive = pp.page_order(plans, [])
+    page = pp.to_html(live, archive, repo.root)
+    block = page.split(f'data-plan="{plan}"', 1)[1].split("</summary>", 1)[0]
+    return re.findall(r'data-chip="branch"[^>]*>([^<]*)<', block)
+
+
+def test_duplicate_id_on_disk_and_branch_that_changes_no_status_gives_disk_numbers_and_no_chip(tmp_path):
+    """Диск: `1.1` дважды DONE, `1.2` PENDING -> `Plan.done` = 2 из 3. Ветка лишь дописывает строку-заметку.
+    Запись обязана совпасть с диском (2 из 3), чипа нет. Раньше диск перебирался по id (дубль схлопнут): 1 из 2."""
+    repo = Repo(tmp_path, {"plans/P/plan.md": DUP_PLAN})
+    disk = pp.discover(repo.root)[0]
+    assert (disk.done, disk.total) == (2, 3), "предусловие: диск считает оба вхождения"
+    repo.edit_on("feat/x", {"plans/P/plan.md": DUP_PLAN + "заметка ветки без статуса\n"})
+    assert repo.collect()["P"] == [{"branch": "feat/x", "done": 2, "total": 3}]
+    assert _chips_of(repo, "P") == []
+
+
+def test_duplicate_id_branch_changes_that_task_both_occurrences_take_the_tip_status(tmp_path):
+    """Ветка меняет `1.1` (первая запись: DONE -> PENDING): база и вершина берутся по id, диск = база, поэтому ОБА
+    вхождения диска получают статус вершины. Закрепляет то, что делает код: 0 из 3 (1.1 дважды PENDING, 1.2 PENDING)."""
+    repo = Repo(tmp_path, {"plans/P/plan.md": DUP_PLAN})
+    reopened = DUP_PLAN.replace("- Task 1.1: a [DONE]", "- Task 1.1: a [PENDING]")
+    repo.edit_on("feat/x", {"plans/P/plan.md": reopened})
+    assert repo.collect()["P"] == [{"branch": "feat/x", "done": 0, "total": 3}]
+    assert _chips_of(repo, "P") == ["в ветке feat/x: 0 из 3, в main: 2"]
+
+
+# =========================================================================== тег `main` на более старом коммите
+
+
+def test_tag_named_main_on_an_older_commit_does_not_change_the_answer(tmp_path):
+    """Тег `main` стоит на `init`, ветка `main` ушла вперёд (закрыла Q). Голое `main` читается как ТЕГ
+    (`git rev-parse main` -> init), и тогда ветка `main` для `--no-merged` становится «сверх main»: в `Q` появляется
+    запись с `branch == "main"` (её diff от тега правит Q), а у `feat/x` родителем становится ветка `main`.
+    Различимое наблюдаемое: список веток у Q. Корень на detached HEAD — иначе ветка корня (`main`) скрывает запись."""
+    repo = Repo(
+        tmp_path,
+        {
+            "plans/P/plan.md": items("DONE", "PENDING", "PENDING"),
+            "plans/Q/plan.md": items("DONE", "PENDING", "PENDING"),
+        },
+    )
+    repo.git("tag", "main")  # на init
+    repo.write("plans/Q/plan.md", items("DONE", "DONE", "PENDING"))
+    repo.commit("main closes Q 1.2")
+    repo.edit_on("feat/x", {"plans/P/plan.md": items("DONE", "DONE", "PENDING")})
+    repo.git("checkout", "-q", "--detach", "refs/heads/main")
+    assert repo.git("rev-parse", "main").strip() != repo.git("rev-parse", "refs/heads/main").strip(), "предусловие"
+    assert repo.collect() == {"P": [{"branch": "feat/x", "done": 2, "total": 3}], "Q": []}
