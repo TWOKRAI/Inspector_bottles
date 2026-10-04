@@ -640,7 +640,7 @@ def family_reading(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
     ids = [r.get("id") for r in (rows_ or []) if isinstance(r, dict)]
     verified = 0
     for rid in ids:
-        if rid is not None and sql(db, f"SELECT 1 FROM records WHERE id=? AND kind='log' AND process='{CAM}'", (rid,)):
+        if rid is not None and sql(db, "SELECT 1 FROM records WHERE id=? AND kind='log' AND process=?", (rid, CAM)):
             verified += 1
     row(
         "R3",
@@ -1125,7 +1125,7 @@ def family_knobs(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
     # (дедуп дорог). Поэтому INFO-источник здесь — audit-строки самого `config.reload`
     # (`[observability-audit] …`, INFO, модуль `observability`), считаемые в сторе по kind/severity.
     def _info_rows() -> int:
-        return sql(db, f"SELECT COUNT(*) FROM records WHERE kind='log' AND severity='info' AND process='{CAM}'")[0][0]
+        return sql(db, "SELECT COUNT(*) FROM records WHERE kind='log' AND severity='info' AND process=?", (CAM,))[0][0]
 
     def _info_file() -> int:
         return file_count(LOG_DIR / CAM / "messages.log", "[INFO]")
@@ -1338,7 +1338,7 @@ def family_latency(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
         "успешных 20/20 у каждого; медиана в единицах мс; PM быстрее детей (без второго хопа)",
         f"{CAM}={s}; {NB}={LAT[f'L1_rtt_introspect_status_{NB}']}; PM={LAT['L1_rtt_introspect_status_ProcessManager']}",
         "PASS" if all(LAT[f"L1_rtt_introspect_status_{t}"]["n"] == 20 for t in (CAM, NB, PM)) else "PARTIAL",
-        "memory project_honest_verdict_2026_09 (шина ~0.3/0.6 мс на хоп — это кадр по SHM, не команда)",
+        "memory docs/claude/memory/_archive/project_honest_verdict_2026_09.md (шина ~0.3/0.6 мс на хоп — это кадр по SHM, не команда)",
     )
 
     # L2/L3: эмиссия → стор и → живой хвост
