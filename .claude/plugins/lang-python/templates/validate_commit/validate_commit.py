@@ -32,6 +32,10 @@ Usage:
 Used as git commit-msg hook (see scripts/validate_commit/install_hook.sh).
 Exit 0 — OK, exit 1 — validation failed.
 
+Task rule (rev. 6): a `Task:` trailer, when present, must read `<slug>#<id>` (W-TASK-FORMAT); it is never required.
+One-block rule (rev. 6): every known trailer must be seen by `git interpret-trailers --parse`, i.e. all trailers
+sit in ONE block at the end (W-TRAILERS-SPLIT); if git cannot be asked, W-TRAILERS-UNCHECKED (a plain warning).
+
 Skipped: reverts, fixup!/squash!/amend!. Merge commits are validated (v2): `merge: <gist>` with
 Why/Layer/Refs. ANY first line that starts with `Merge ` (capital M: branch, remote-tracking, pull
 request, tag, commit, ...) is git's default text and only a warning.
@@ -235,7 +239,13 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
     "Co-Authored-By",
     "Signed-off-by",
     "Reviewed-by",
+    "Task",
 }
+
+# `Task:` value (rev. 6): `<slug>#<id>` - plan slug without the date, `#`, task id (`2.1`, `1.3a`, `K1.1`).
+# One id per line; several tasks mean several `Task:` lines. Existence of slug/id is NOT checked here.
+TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#[A-Z]{0,3}\d+(?:\.\d+)*[a-z]?$")
+GIT_TRAILERS_TIMEOUT = 5
 
 # `Merge ` and `merge: ` are NOT here any more (v2): merges are validated, see MERGE_DEFAULT_RE.
 SKIP_PREFIXES = ("Revert ", "fixup!", "squash!", "amend!")
@@ -955,6 +965,35 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
 # ────────────────────────── Validation ──────────────────────────
 
 
+def _git_trailer_keys(text: str) -> tuple[set[str] | None, str]:
+    """Trailer keys that `git interpret-trailers --parse` sees in `text`: `(keys, "")`, or `(None, reason)`.
+
+    git is the oracle for "one trailer block": it ignores a trailer paragraph that is not the last one and
+    a block that holds a non-trailer line. Lines starting with `#` are dropped first (git strips them from a
+    commit message). Line endings go to LF, so CRLF text is read as git would read it. Never raises:
+    a missing binary, a timeout and a non-zero exit all come back as `(None, reason)` - the caller reports
+    "cannot check", and must not read an empty answer as "git sees no trailers".
+    """
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    stdin = ("\n".join(lines) + "\n").encode("utf-8")
+    try:
+        out = subprocess.run(
+            ["git", "interpret-trailers", "--parse"],
+            input=stdin,
+            capture_output=True,
+            timeout=GIT_TRAILERS_TIMEOUT,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, "git not found"
+    except subprocess.TimeoutExpired:
+        return None, f"git interpret-trailers timed out after {GIT_TRAILERS_TIMEOUT}s"
+    if out.returncode != 0:
+        return None, f"git interpret-trailers exited with {out.returncode}"
+    answer = out.stdout.decode("utf-8", errors="replace")
+    return {ln.split(":", 1)[0].strip() for ln in answer.splitlines() if ":" in ln}, ""
+
+
 def validate(
     text: str,
     allowed_layers: set[str] | None = None,
@@ -1093,6 +1132,24 @@ def validate(
                 result.warnings.append(
                     f"Reversible: '{val}'. Expected: yes | no | migration-needed"
                 )
+
+    # 4b. `Task:` format and the one-block rule (rev. 6). Both are phase-3 rules; the check that git could
+    # not be asked is a plain warning in every mode.
+    for value in trailers.get("Task", []):
+        if not TASK_VALUE_RE.fullmatch(value.strip()):
+            _phase3(result, f"Task is not <slug>#<id>: '{value}' - e.g. commit-mechanism#2.1")
+
+    known = {key for key in trailers if key in KNOWN_TRAILERS}
+    if known:  # no known trailer, nothing to ask git about
+        seen, reason = _git_trailer_keys(text)
+        if seen is None:
+            result.warnings.append(f"cannot check trailer block: {reason}")
+        elif known - seen:
+            _phase3(
+                result,
+                f"trailers git does not see: {', '.join(sorted(known - seen))} - put all trailers in one "
+                "block at the end, no blank line inside, indent wrapped values",
+            )
 
     # 5. Unknown trailers — warning (don't block, extensible)
     for key in trailers:

@@ -398,3 +398,166 @@ def test_h12_wrapped_refs_with_the_valid_plan_on_the_continuation_line(
     rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
     assert (rc, rc_strict) == (0, 0), text
     assert "Refs names no existing plan" not in text and "merge commit without" not in text, text
+
+
+# --------------------------------------------------------------------------- H13-H17 (ред. 6: Task, один блок)
+#
+# Механизм «один блок» зовёт `git interpret-trailers` подпроцессом из validate(). Опасные места:
+#   H13  git не отвечает (нет бинаря, таймаут): W-TRAILERS-UNCHECKED, rc 0 в ОБОИХ режимах, и НЕ ложный
+#        W-TRAILERS-SPLIT — пропуск проверки без слова был бы «ошибка проглочена».
+#   H14  git отвечает отказом (rc != 0): то же самое. Пустой stdout отказа нельзя читать как «git не видит
+#        ни одного трейлера» — иначе каждое сообщение получило бы ложное «трейлеры не видны».
+#   H15  CRLF в самом сообщении (validate() вызван напрямую, а не через main(), который читает stdin в текстовом
+#        режиме и сам сводит CRLF к LF): сообщение одним блоком не должно получить W-TRAILERS-SPLIT.
+#   H16  Кириллица в значении Task: — W-TASK-FORMAT, а не исключение и не молчание; под STRICT — отказ.
+#   H17  Дыра инъекции ред. 5 (I3 дала 0 красных): `merge:` + Why + Layer + `Refs: ADR-12` (не путь `plans/`)
+#        на ветке с планом — предупреждение при STRICT False, отказ при STRICT True.
+#
+# Механизм для H13/H14: подпроцесс-обёртка. Она грузит копию валидатора по пути, ставит STRICT, подменяет
+# `subprocess.run` ТОЛЬКО для вызова с `interpret-trailers` (остальной git — настоящий) и вызывает настоящий
+# `main()`. Почему не поддельный `git` первым в PATH: на Windows `subprocess` по имени `git` находит лишь
+# `git.exe`, шим `git.cmd` не подхватится, а собирать exe ради теста нечем. Почему не monkeypatch внутри
+# pytest: нужны настоящие rc и stderr из `main()` и изоляция от процесса pytest. Контроль «без отказа» в той же
+# обёртке доказывает, что виновата не она.
+
+DRIVER = r"""
+import importlib.util
+import subprocess
+import sys
+
+path, mode, fault, strict = sys.argv[1:5]
+spec = importlib.util.spec_from_file_location("vc_under_test", path)
+mod = importlib.util.module_from_spec(spec)
+sys.modules["vc_under_test"] = mod
+spec.loader.exec_module(mod)
+mod.STRICT = strict == "1"
+real_run = subprocess.run
+
+
+def fake_run(cmd, *args, **kwargs):
+    if isinstance(cmd, (list, tuple)) and "interpret-trailers" in cmd:
+        if fault == "missing":
+            raise FileNotFoundError(2, "git not found")
+        if fault == "timeout":
+            raise subprocess.TimeoutExpired(cmd, 5)
+        if fault == "exit":
+            return subprocess.CompletedProcess(cmd, 128, "", "fatal: boom")
+    return real_run(cmd, *args, **kwargs)
+
+
+subprocess.run = fake_run
+if mode == "main":
+    sys.exit(mod.main(["validate_commit.py", "-"]))
+text = sys.stdin.buffer.read().decode("utf-8")
+result = mod.validate(text)
+for line in result.warnings:
+    sys.stderr.write("WARNING: " + line + "\n")
+for line in result.errors:
+    sys.stderr.write("ERROR: " + line + "\n")
+sys.exit(1 if result.errors else 0)
+"""
+
+
+def _driven(
+    copy: str, repo: Path, tmp_path: Path, message: bytes, *, mode: str, fault: str, strict: bool
+) -> tuple[int, str]:
+    driver = tmp_path / "driver.py"
+    driver.write_text(DRIVER, encoding="utf-8", newline="\n")
+    cmd = [sys.executable, str(driver), str(COPIES[copy]), mode, fault, "1" if strict else "0"]
+    return _run(cmd, repo, stdin_data=message)
+
+
+ONE_BLOCK = f"feat(x): y\n\n{FULL}Co-Authored-By: Claude <noreply@anthropic.com>\n"
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h13_control_the_driver_without_a_fault_is_silent_on_one_block(copy: str, repo: Path, tmp_path: Path) -> None:
+    rc, text = _driven(copy, repo, tmp_path, ONE_BLOCK.encode("utf-8"), mode="main", fault="none", strict=True)
+    assert rc == 0, text
+    assert "WARNING" not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("fault", ["missing", "timeout"])
+@pytest.mark.parametrize("strict", [False, True])
+def test_h13_git_unavailable_is_a_plain_warning_never_an_error_never_a_split(
+    copy: str, fault: str, strict: bool, repo: Path, tmp_path: Path
+) -> None:
+    rc, text = _driven(copy, repo, tmp_path, ONE_BLOCK.encode("utf-8"), mode="main", fault=fault, strict=strict)
+    assert rc == 0, text
+    assert "cannot check trailer block" in text, text
+    assert "trailers git does not see" not in text, text
+    assert PHASE3 not in text, text  # a plain warning: no phase-3 suffix, not an error under STRICT
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("strict", [False, True])
+def test_h14_git_refusal_is_not_read_as_an_empty_trailer_block(
+    copy: str, strict: bool, repo: Path, tmp_path: Path
+) -> None:
+    rc, text = _driven(copy, repo, tmp_path, ONE_BLOCK.encode("utf-8"), mode="main", fault="exit", strict=strict)
+    assert rc == 0, text
+    assert "cannot check trailer block" in text, text
+    assert "trailers git does not see" not in text, text
+    assert PHASE3 not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h14_a_message_without_known_trailers_never_calls_git(copy: str, repo: Path, tmp_path: Path) -> None:
+    # `Note:` is not a known trailer; even with git broken there must be no "cannot check" warning,
+    # because the oracle is not asked at all.
+    message = "feat(x): y\n\nNote: просто текст\n"
+    _rc, text = _driven(copy, repo, tmp_path, message.encode("utf-8"), mode="main", fault="exit", strict=False)
+    assert "cannot check trailer block" not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("strict", [False, True])
+def test_h15_crlf_message_in_one_block_gets_no_split_warning(
+    copy: str, strict: bool, repo: Path, tmp_path: Path
+) -> None:
+    crlf = ONE_BLOCK.replace("\n", "\r\n").encode("utf-8")
+    rc, text = _driven(copy, repo, tmp_path, crlf, mode="raw", fault="none", strict=strict)
+    assert rc == 0, text
+    assert "trailers git does not see" not in text, text
+    assert "cannot check trailer block" not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h15_crlf_message_with_a_real_split_is_still_reported(copy: str, repo: Path, tmp_path: Path) -> None:
+    # control: CRLF normalisation must not hide a genuine blank line before the last trailer
+    split = f"feat(x): y\n\n{FULL}\nCo-Authored-By: Claude <noreply@anthropic.com>\n".replace("\n", "\r\n")
+    rc, text = _driven(copy, repo, tmp_path, split.encode("utf-8"), mode="raw", fault="none", strict=False)
+    assert rc == 0, text
+    assert "trailers git does not see" in text and "Why" in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h16_cyrillic_task_value_is_a_format_warning_and_under_strict_an_error(
+    copy: str, repo: Path, tmp_path: Path
+) -> None:
+    message = f"feat(x): y\n\n{FULL}Task: коммит-механизм#2.1\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert rc == 0, text
+    assert "Task is not <slug>#<id>" in text and "коммит-механизм#2.1" in text, text
+    assert PHASE3 in text, text
+    assert rc_strict == 1
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h16_control_ascii_task_value_is_silent(copy: str, repo: Path, tmp_path: Path) -> None:
+    message = f"feat(x): y\n\n{FULL}Task: commit-mechanism#2.1\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert (rc, rc_strict) == (0, 0), text
+    assert "WARNING" not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h17_merge_with_a_refs_that_is_not_a_plan_path_on_a_branch_with_a_plan(
+    copy: str, repo: Path, tmp_path: Path
+) -> None:
+    message = f"merge: x\n\n{WHY}\nLayer: docs\nRefs: ADR-12\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert rc == 0, text
+    assert "WARNING" in text and PHASE3 in text, text
+    assert rc_strict == 1
