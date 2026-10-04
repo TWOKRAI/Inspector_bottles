@@ -67,7 +67,7 @@
 ### Task 0.2 — Scope и Handle: примитив и контракт-тесты G1
 **Level:** Senior+ · **Assignee:** teamlead · **Layer:** framework
 **Goal:** `base_manager/core/lifetime.py` (только stdlib) реализует `IScope`/`IHandle` с барьерами, тремя фазами, отчётом, `unclosed_roots()`.
-**Files:** `base_manager/core/lifetime.py`, `base_manager/__init__.py` (фабрика `open_scope` + `unclosed_roots`, класс `Scope` не экспортируется — решение CTO 2026-10-04, [`task-0.1.md`](task-0.1.md) «Дверь»), `base_manager/tests/test_lifetime_*.py`, `BaseManager.scope` + шаблонный `shutdown()` (`base_manager/core/base_manager.py`).
+**Files:** `base_manager/core/lifetime.py`, `base_manager/__init__.py` (фабрика `open_scope` + `unclosed_roots`, класс `Scope` не экспортируется — решение CTO 2026-10-04, [`task-0.1.md`](task-0.1.md) «Дверь»), `base_manager/tests/test_lifetime_*.py`, `interfaces.py` (три правки DTO из код-ревью 0.1). Полный спек — [`task-0.2.md`](task-0.2.md). `BaseManager.scope` + шаблонный `shutdown()` перенесены в Task 1.2 (корня процесса до 1.2 нет; шаблон меняет 30 подклассов — миграция).
 **Acceptance (G1, литералами):**
 - [ ] (a) цикл «презентер ↔ издатель» освобождается refcount'ом после `close()` — `gc.disable()`, `unreachable == 0`.
 - [ ] (b) поток игнорирует стоп 3 с при бюджете 1 с: `close()` возвращается за ≤ 1.2 с, `survivors` содержит путь, `live()` показывает `survivor`.
@@ -79,7 +79,7 @@
 - [ ] `Handle.close()` идёт тем же путём, что и область (одноэлементный сегмент), отцепление не оставляет цикла.
 - [ ] `unclosed_roots()` видит брошенный незакрытый корень после gc (recorder держит только weakref на флаг — совет 9) и не красит закрытый.
 - [ ] `pickle.dumps(scope)` / `(handle)` → `TypeError` с понятным текстом.
-- [ ] Инъекции ведущего (предсказание до прогона): без проверки `active` → (d) красный; без проверки состояния в `own` → (c) красный; без барьера → тест стока красный.
+- [ ] Инъекции ведущего (предсказание до прогона; полный список — `task-0.2.md`): без проверки `active` → (d) красный — **перенесено в 0.3** (флаг `active` — деталь `Subscribers`); без проверки состояния в `own` → (c) красный; без барьера → тест стока красный.
 **Out of scope:** Subscribers (0.3), Qt (0.4).
 
 ### Task 0.3 — Subscribers в event_module
@@ -99,7 +99,7 @@
 **Acceptance:** каждый страж краснеет на своей инъекции из DESIGN §3; режим отчёта не меняет код возврата гейта, но печатает список.
 
 ## Ф1 — путь останова процесса (закрывает 5-секундный ханг)
-Задачи 1.1–1.5 по DESIGN §2.2–2.3 и П1–П3: один `stop_budget.py` (пять чисел, четыре места чтения `"shutdown_timeout"` мигрируют), `ChildProcessStop` с меткой ReaderGone, корень процесса `planes | transport | work` с барьерами, `stop()` = `cancel()`, один `close()` в раннере, `os._exit` при выживших, golden G7 (включая два инварианта приёмки stop-ownership 09-26), WorkerManager с перезапуском в том же потоке и STOPPED по отчёту, `PluginContext.scope` (камера и воркер в одной области), G8 < 1.5 с; ручной порядок `app_module/orchestrator.py:85` и `state_store_manager.py:134` — регистрацией в области. Task 1.2 закрывает долги stop-ownership «до старта Task 3.1»: указатель ADR-PM-045 → ADR-PMM-033 и формулировку п.4 ADR-PMM-033. Детализация спеков — на входе фазы, ревью спека до тестера.
+Задачи 1.1–1.5 по DESIGN §2.2–2.3 и П1–П3: один `stop_budget.py` (пять чисел, четыре места чтения `"shutdown_timeout"` мигрируют), `ChildProcessStop` с меткой ReaderGone, корень процесса `planes | transport | work` с барьерами, `stop()` = `cancel()`, один `close()` в раннере, `os._exit` при выживших, golden G7 (включая два инварианта приёмки stop-ownership 09-26), `BaseManager.scope` + шаблонный `shutdown()` (из 0.2), WorkerManager с перезапуском в том же потоке и STOPPED по отчёту, `PluginContext.scope` (камера и воркер в одной области), G8 < 1.5 с; ручной порядок `app_module/orchestrator.py:85` и `state_store_manager.py:134` — регистрацией в области. Task 1.2 закрывает долги stop-ownership «до старта Task 3.1»: указатель ADR-PM-045 → ADR-PMM-033 и формулировку п.4 ADR-PMM-033. Детализация спеков — на входе фазы, ревью спека до тестера.
 
 ## Ф2 — регистры и контролы GUI
 `RegistersManager`/`SyncTrait`/`RegisterAdapter` на `Subscribers` с обязательным `owner`; `NumericControl.create(..., owner)` и все контролы; `DebounceTrait` и 8 `QTimer()` без родителя; `BaseConfigurableWidget`; G5 fail в `components/`. Необходима для abort, не достаточна.
