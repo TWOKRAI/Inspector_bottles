@@ -26,6 +26,29 @@
 | `context(name, enabled)` | Контекстный менеджер для временного отключения |
 | **`BaseAdapter`** | Базовый класс адаптеров |
 
+### Контракт владения (ADR-BM-008)
+
+`Stability: partial` — контракт и его тесты есть, реализации нет до Task 0.2.
+
+Один универсальный владелец для подписок, потоков, процессов и виджетов. В `interfaces.py` сейчас только контракт:
+
+| Имя | Что это |
+|---|---|
+| `Stoppable` | `@runtime_checkable` Protocol: `request_stop()` (фаза 1, не блокирует) + `join_until(deadline)` (фаза 2, абсолютный `time.monotonic()`, `True` = остановлен). Необязательные `kill()` (не блокирует) и `close()` описаны в docstring |
+| `Resource` | `Stoppable \| Callable[[], object]` — то, что берёт во владение `IScope.own` |
+| `CloseReport` | замороженный DTO отчёта о закрытии; `ok` не учитывает `emits_after_close`; `to_dict`/`from_dict` со строгим краем |
+| `Reporter` | `Callable[[CloseReport], None]` — получатель отчёта, один вызов на закрытие |
+| `IHandle` | запись области: `path`, `kind`, `close(budget_s=None)` |
+| `IScope` | область: `own`, `child`, `barrier`, `spawn`, `cancel`, `close(budget_s=None, *, deadline=None)`, `live()` |
+| `ScopeClosedError` | `RuntimeError`: `own`/`spawn`/`child` у закрытой или закрывающейся области |
+
+Где что будет:
+- Реализация `Scope`/`Handle` — `core/lifetime.py`, Task 0.2.
+- Корень создаёт только фабрика пакета `open_scope(path, *, budget_s, kill_reserve_s=0.0, reporter=None)` — Task 0.2. Класс `Scope` не экспортируется; снаружи аннотация — только `IScope`/`IHandle`.
+- `unclosed_roots()` — Task 0.2. `Subscribers` — Task 0.3. Qt-адаптеры — Task 0.4.
+
+`interfaces.py` импортирует только stdlib. Пример потребителя — [`docs/INTERFACES_USAGE.md`](docs/INTERFACES_USAGE.md#контракт-владения-iscope--ihandle).
+
 ---
 
 ## 2. Быстрый старт

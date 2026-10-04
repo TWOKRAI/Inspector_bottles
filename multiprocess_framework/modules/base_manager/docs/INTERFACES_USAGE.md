@@ -225,6 +225,45 @@ if validate_manager(manager):
 
 ---
 
+## Контракт владения: `IScope` / `IHandle`
+
+ADR-BM-008. Компонент **не создаёт** корень области: он принимает готового владельца `owner: IScope` и отдаёт ему всё, что открыл. Корень создаёт раннер процесса фабрикой `open_scope` (Task 0.2).
+
+```python
+import threading
+
+from multiprocess_framework.modules.base_manager.interfaces import CloseReport, IHandle, IScope
+
+
+class FrameGrabber:
+    """Поток захвата кадров. Остановку и срок держит владелец, не сам компонент."""
+
+    def __init__(self, owner: IScope, bus) -> None:
+        # Здесь bus.subscribe возвращает функцию отписки (вызываемое без аргументов):
+        # владелец позовёт её один раз при закрытии.
+        self._sub: IHandle = owner.own(bus.subscribe("frames", self._on_frame), name="frames-sub")
+        # Поток — запись вида "thread"; stop_event взводится фазой 1 закрытия.
+        self._loop: IHandle = owner.spawn(self._run, name="grab-loop")
+
+    def _run(self, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            stop_event.wait(0.01)
+
+    def _on_frame(self, frame) -> None: ...
+
+    def unsubscribe_early(self) -> CloseReport:
+        # Досрочное освобождение одной записи; идемпотентно. Отчёт уходит и в reporter корня.
+        return self._sub.close()
+```
+
+Что важно:
+- Аннотация владельца — только `IScope`, записи — `IHandle`. Класс `Scope` не экспортируется.
+- `name` — непустая строка без `/` и без суффикса `" (self)"`; повтор среди незакрытых записей — `ValueError`.
+- Свой класс-ресурс удовлетворяет `Stoppable` формой: `request_stop()` + `join_until(deadline)`. Метод `join(timeout)` для этого **не годится** — срок абсолютный.
+- `own`/`spawn`/`child` у закрытой области бросают `ScopeClosedError`.
+
+---
+
 ## TYPE_CHECKING для статической проверки типов
 
 **Текущая проблема:** TYPE_CHECKING закомментирован в interfaces.py
