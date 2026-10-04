@@ -6,8 +6,8 @@
 # findings through JSON `hookSpecificOutput.additionalContext` on stdout.
 # PostToolUse (OPT-IN): run Semgrep SAST on a just-edited file.
 # NOT registered in plugin.json by default — per-edit Semgrep is slow/noisy.
-# Wire it manually in .claude/settings.json (PostToolUse, matcher "Edit|Write")
-# when you want per-edit SAST. Always exits 0 — advisory, never blocks the edit.
+# (Pre-freeze text said "wire it manually in .claude/settings.json"; the FROZEN header above overrides it.)
+# Always exits 0 — advisory, never blocks the edit.
 
 # Resolve Python interpreter (python3 on Linux/macOS, python on Windows).
 # Resolve python-bin.sh across both template layouts (kept byte-identical by

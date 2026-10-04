@@ -14,8 +14,9 @@ not in `read` from process substitution. Probe: `read x < <(python -c 'print("a.
 Measured 2026-10-03/04 (plans/2026-10-03_commit-mechanism, Tasks 1.2 and 1.4): `autoformat-python.sh`
 was dead from `3dbb2985a` (2026-05-15) — all 68 pre-commit ruff rejections in a month happened under
 the dead hook; `check-imports.sh`, `typecheck-changed.sh`, `semgrep-scan.sh` had the same line.
-`typecheck-changed.sh` was dead on every platform anyway: `OUT=$(pyright ...) || exit 0` exits exactly
-when pyright found errors (rc=1).
+`typecheck-changed.sh` never ran on any platform: its gate `CLAUDE_TYPECHECK_ON_EDIT` was set nowhere.
+Behind the gate a second defect waited: `OUT=$(pyright ...) || exit 0` exits exactly when pyright found
+errors (rc=1).
 
 **Why:** the hook looked registered and reviewed for months; nothing surfaces a PostToolUse hook that
 does nothing. A plain-text stdout or a stderr line at exit 0 is also invisible to the agent — only the

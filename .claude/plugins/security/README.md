@@ -17,8 +17,8 @@ projects and CI stay green until you add the binary.
 ## Hooks (opt-in — NOT registered by default)
 
 The plugin ships hook scripts but does **not** wire them in `plugin.json`
-(per-edit Semgrep is slow/noisy; CVE-on-every-edit is overkill). Opt in by adding
-them to your project `.claude/settings.json`:
+(per-edit Semgrep is slow/noisy; CVE-on-every-edit is overkill). `osv-scan.sh` is opt-in
+via your project `.claude/settings.json` or a pre-push / CI gate; `semgrep-scan.sh` is FROZEN (2026-10-04):
 
 - `hooks/semgrep-scan.sh` — FROZEN 2026-10-04, not wired (plans/2026-10-03_commit-mechanism/tasks/1.4.md); wire it only after parsing the input in Python as in autoformat-python (1.2).
 - `hooks/osv-scan.sh` — lockfile CVE scan, suitable for a pre-push / CI gate.
