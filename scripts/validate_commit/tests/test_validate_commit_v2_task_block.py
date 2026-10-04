@@ -277,10 +277,12 @@ def test_t_table_non_strict(row: Row, copy: str, v_repo: Path) -> None:
 def test_split_warning_names_the_keys_git_does_not_see(row: Row, copy: str, v_repo: Path) -> None:
     _rc, err = _run_validator(COPIES[copy], v_repo, row.message)
 
-    tail, _line = _split_listing(err)
+    tail, line = _split_listing(err)
     assert tail, f"{_SPLIT!r} not in stderr:\n{err}"
     for key in row.split_keys:
-        assert key in tail, f"key {key!r} not listed after {_SPLIT!r}:\n{err}"
+        # Только строка предупреждения: в хвосте stderr ключ встречается и в чужих строках
+        # («Unknown trailer 'Task:'») — ассерт по хвосту пустой (инъекция лида J1).
+        assert key in line, f"key {key!r} not listed on the split line {line!r}:\n{err}"
 
 
 @pytest.mark.parametrize(("row", "copy"), [p for p in _SPLIT_PARAMS if p.values[0].not_listed])
