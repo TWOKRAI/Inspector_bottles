@@ -1,0 +1,107 @@
+"""Инъекции лида, Task 5.6. Одна заплата — одно свойство; после — git checkout файла.
+Предсказания (PRED) записаны ДО прогона. cwd = worktree t56-impl. Наборы: тестер (A, B) + авторский.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd()
+PY = r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Scripts\python.exe"
+ENV = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+TH = "scripts/stand_gate/thresholds.py"
+AN = "scripts/stand_gate/analyze.py"
+TEL = "multiprocess_framework/modules/process_module/heartbeat/telemetry.py"
+
+RUNS = [
+    (ROOT, ["scripts/stand_gate/tests"]),
+    (ROOT / "multiprocess_framework/modules", [
+        "process_module/tests/test_t56_telemetry_keys_acceptance.py",
+        "router_module/tests/test_shm_stats_narrow.py",
+    ]),
+]
+
+INJ = {
+    "T1_ledger_upper": (TH, "LEDGER_UPPER_FRACTION: float = 0.005", "LEDGER_UPPER_FRACTION: float = 0.006"),
+    "T2_stale_restore": (TH, "STALE_RESTORE_FRACTION: float = 0.001", "STALE_RESTORE_FRACTION: float = 0.002"),
+    "T3_processor_lag": (TH, "PROCESSOR_LAG_FRACTION: float = 0.01", "PROCESSOR_LAG_FRACTION: float = 0.02"),
+    "T4_verdict_floor": (TH, "VERDICT_FLOOR_FRACTION: float = 0.9", "VERDICT_FLOOR_FRACTION: float = 0.8"),
+    "T5_window_lag": (TH, "INSPECTOR_WINDOW_LAG_MAX: int = 100", "INSPECTOR_WINDOW_LAG_MAX: int = 101"),
+    "T6_rss": (TH, "PAUSE_RSS_GROWTH_MAX_BYTES: int = 1048576", "PAUSE_RSS_GROWTH_MAX_BYTES: int = 1048577"),
+    "T7_drain": (TH, "DRAIN_MAX_S: float = 0.1\n", "DRAIN_MAX_S: float = 0.11\n"),
+    "T8_poll_period": (TH, "DRAIN_POLL_PERIOD_MAX_S: float = 0.1", "DRAIN_POLL_PERIOD_MAX_S: float = 0.11"),
+    "T9_every_plus_storage": (TH, 'EVERY_PROCESSES: tuple[str, ...] = ("processor", "inspector")',
+                              'EVERY_PROCESSES: tuple[str, ...] = ("processor", "inspector", "storage")'),
+    "T10_neighbors_no_renderer": (TH, 'NEIGHBOR_PROCESSES: tuple[str, ...] = ("inspector", "renderer")',
+                                  'NEIGHBOR_PROCESSES: tuple[str, ...] = ("inspector",)'),
+    "T11_formula_no_inspector": (TH, 'FORMULA_PROCESSES: tuple[str, ...] = ("processor", "inspector")',
+                                 'FORMULA_PROCESSES: tuple[str, ...] = ("processor",)'),
+    "T12_dup_ignored": (AN, "PASS if dup <= T.JOURNAL_DUP_MAX else FAIL", "PASS"),
+    "T13_evicted_unchecked": (AN, '    checks.append(_zero_counter("queue_data_evicted", sites))\n', ""),
+    "T14_no_not_measured": (AN, '            "drain", NOT_MEASURED, f"poll period', '            "drain", PASS, f"poll period'),
+    "T15_tel_no_delivery_failed": (TEL, '        "errors_delivery_failed": _n("errors_delivery_failed"),\n', ""),
+    "T16_tel_door_always": (TEL, '    if "not_inspected_door" in rs:\n        shm["not_inspected_door"]',
+                            '    if True:\n        shm["not_inspected_door"]'),
+    "T17_tel_zero_when_absent": (TEL, "    counter_sums: dict[str, int | float] = {}\n    counters_wanted = [c for c in PROCESS_COUNTER_SUMS if _ok(c)]\n",
+                                 "    counters_wanted = [c for c in PROCESS_COUNTER_SUMS if _ok(c)]\n    counter_sums: dict[str, int | float] = {c: 0 for c in counters_wanted}\n"),
+}
+
+PRED = {
+    "T1_ledger_upper": "A: тест границы учёта сверху (488/489) — >=1",
+    "T2_stale_restore": "A: граница stale_restore 3/4 — >=1",
+    "T3_processor_lag": "A: граница lag 39/40 — >=1; green без --no-throughput-gate остаётся красным (464 > 79) — не умирает",
+    "T4_verdict_floor": "A: граница вердиктов 3147/3148 — >=1",
+    "T5_window_lag": "A: граница lag@inspector 100/101 — >=1",
+    "T6_rss": "A: граница RSS +-1 байт — >=1",
+    "T7_drain": "A: граница drain 0.1/0.11 — >=1",
+    "T8_poll_period": "A: граница poll 0.1/0.11 (NOT_MEASURED) — >=1",
+    "T9_every_plus_storage": "A: все тесты 'green -> код 0' на обеих зелёных фикстурах (storage s0 stale 9 и 8) — много",
+    "T10_neighbors_no_renderer": "A: тесты соседа renderer — >=1",
+    "T11_formula_no_inspector": "A: тест формулы inspector — >=1 (если тестер мутирует inspector отдельно)",
+    "T12_dup_ignored": "A: тест dup — >=1",
+    "T13_evicted_unchecked": "A: тесты evicted (s0/s2/pause.after) + red_E0_old FAIL по evicted — >=2",
+    "T14_no_not_measured": "A: NOT_MEASURED тесты — >=1",
+    "T15_tel_no_delivery_failed": "B: лист shm.errors_delivery_failed (значение и присутствие) — >=1",
+    "T16_tel_door_always": "B: отсутствие shm.not_inspected_door у latest — 1",
+    "T17_tel_zero_when_absent": "B: отсутствие not_inspected_* у latest (4) и ipc_queue_depth до замера (1) — >=5",
+}
+
+
+def run():
+    failed, total = set(), 0
+    for cwd, tests in RUNS:
+        r = subprocess.run([PY, "-m", "pytest", *tests, "-q", "-p", "no:cacheprovider", "-rf", "--tb=no"],
+                           cwd=cwd, env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+        failed |= {m.group(1) for m in re.finditer(r"^FAILED (\S+)", r.stdout, re.M)}
+        for key in ("passed", "failed"):
+            m = re.search(rf"(\d+) {key}", r.stdout)
+            total += int(m.group(1)) if m else 0
+    return total, sorted(failed)
+
+
+def main():
+    res = {}
+    base = run()
+    res["BASE"] = {"collected": base[0], "failed": base[1]}
+    print("BASE", base[0], len(base[1]), flush=True)
+    for name, (path, a, b) in INJ.items():
+        p = ROOT / path
+        s = p.read_text(encoding="utf-8")
+        if s.count(a) != 1:
+            res[name] = {"error": f"anchor count {s.count(a)}"}
+            print(name, "ANCHOR", s.count(a), flush=True)
+            continue
+        p.write_text(s.replace(a, b), encoding="utf-8")
+        try:
+            col, fl = run()
+        finally:
+            subprocess.run(["git", "checkout", "--", path], cwd=ROOT)
+        res[name] = {"pred": PRED[name], "collected": col, "failed": fl}
+        print(name, col, len(fl), flush=True)
+    Path(sys.argv[1]).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

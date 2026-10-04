@@ -104,7 +104,9 @@
 | Н10 | hot-reload не видит `Services/*/gui` | `design-boot.md` §5 (`reload_prefixes` списком); Task 1.4 |
 | Идея f | правило двух потребителей ≠ право резать по нулю | `phase-5-split-and-promote.md` шапка; риски ниже |
 
-## Фазы и задачи
+## Порядок выполнения — фазы и задачи
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Плана касались только docs-коммиты (`3e5f67a6c`, `2d6a7f64d`, `e08bb1c71`, 2026-09-26); реализации нет: в дереве нет `ConnectionRegistry`, `GuiHostRuntime`, `GuiBootstrap`, `WidgetContext`, `KnobAddress`, каталогов `frontend_module/host|bootstrap`, `examples/minimal_gui`, теста «Services без Qt», правила sentrux `examples ↛ Services/Plugins`; веток `*gui-constructor*` нет.
 
 Канон запуска каждой задачи с механизмом (`.claude/CLAUDE.md`): tester до кода в worktree на пред-коммите →
 исполнитель → break-injection лида с предсказаниями по обоим наборам → живой стенд → reviewer синхронно.

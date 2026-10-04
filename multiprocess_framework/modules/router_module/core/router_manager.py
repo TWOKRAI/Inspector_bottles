@@ -1743,8 +1743,9 @@ class RouterManager(ChannelRoutingManager):
     def get_shm_stats(self) -> Dict[str, int]:
         """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
 
-        Восемнадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои восстановления, 4.5c,
-        + ``door_drops``, 4.7d-3; при ``overflow: every`` девятнадцатое — ``not_inspected_door``),
+        Двадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои восстановления, 4.5c,
+        + ``door_drops``, 4.7d-3, + ``deferred_closes`` и ``errors_delivery_failed``, 5.6; при
+        ``overflow: every`` двадцать первое — ``not_inspected_door``),
         что телеметрия публикует в ``processes.<name>.state.shm``,
         но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
         ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
@@ -1782,6 +1783,7 @@ class RouterManager(ChannelRoutingManager):
         # middleware и дешёвые property реестра очередей.
         with self._stats_lock:
             delivery_failed = int(self._stats.get("observability_delivery_failed", 0) or 0)
+            errors_delivery_failed = int(self._stats.get("errors_delivery_failed", 0) or 0)
 
         stats = {
             "frame_pickle_fallbacks": _mw("frame_pickle_fallbacks"),
@@ -1804,6 +1806,11 @@ class RouterManager(ChannelRoutingManager):
             "observability_delivery_failed": delivery_failed,
             # 4.7d-3: дропы двери отправки — всегда; рождённые ею маркеры — только у узла с политикой every.
             "door_drops": _mw("door_drops"),
+            # Task 5.6: отложенные закрытия handle'ов reader'а (живой view, 4.7b2) и проваленные
+            # доставки найденному адресату — оба нужны стенд-гейту фазы 5 в дереве телеметрии,
+            # а не только в полном get_stats(). Тот же ключ, что у get_stats() (splice ниже).
+            "deferred_closes": _mw("deferred_closes"),
+            "errors_delivery_failed": errors_delivery_failed,
         }
         if any(getattr(mw, "overflow", "latest") == "every" for mw in mws):
             stats["not_inspected_door"] = _mw("not_inspected_door")

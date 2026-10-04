@@ -1,0 +1,74 @@
+"""Инъекции 5.2: по одной заплате, прогон двух наборов, откат через git checkout файла."""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+W = Path(r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/team-t52")
+PY = r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/python.exe"
+MOD = W / "multiprocess_framework/modules"
+AS = "multiprocess_framework/modules/process_module/generic/actuation_scheduler.py"
+BASE = "multiprocess_framework/modules/process_module/plugins/base.py"
+GUARD = "multiprocess_framework/modules/process_module/tests/test_no_blocking_in_plugin_process.py"
+RC = "Plugins/control/robot_control/plugin.py"
+INJ = {
+    "M1": [(AS, '                self._missed_items += count\n                return "missed"\n', "                self._missed_items += count\n")],
+    "M2": [(AS, "        for _fire_at, _seq, count, payload, _tol in due:", "        for _fire_at, _seq, count, payload, _tol in due + due:")],
+    "M3": [(AS, "        tol = self._tolerance_s if tolerance_s is None else float(tolerance_s)", "        tol = 0.020")],
+    "M4": [(AS, "                self._fired_items += count", "                self._fired_items += 1")],
+    "M5": [(RC, "            front = not self._rejecting", "            front = True")],
+    "M6a": [(RC, "            capture_ts = item.get(\"capture_ts\")\n            actuation = self._actuate(1, capture_ts, capture_ts)",
+             "            capture_ts = item.get(\"capture_ts\")\n            __import__(\"time\").sleep(self._transit_ms() / 1000.0)\n            actuation = self._actuate(1, capture_ts, capture_ts)")],
+    "M6b": [(RC, "        transit_ms = self._transit_ms()\n        if transit_ms <= 0:",
+             "        transit_ms = self._transit_ms()\n        __import__(\"time\").sleep(transit_ms / 1000.0)\n        if transit_ms <= 0:")],
+    "M7": [(AS, "        with self._cond:\n            return len(self._heap)", "        with self._cond:\n            return 0")],
+    "M8": [(BASE, "                    auto_start=True,", "                    auto_start=False,")],
+    "M9": [(BASE, "            setattr(self.services, _ACTUATION_SCHEDULER_ATTR, scheduler)", "            setattr(self, _ACTUATION_SCHEDULER_ATTR, scheduler)")],
+    "M10": [(BASE, "        with _ACTUATION_SCHEDULER_LOCK:", "        if True:")],
+    "M11": [(RC, "        if first_ts is None or last_ts is None:", "        if False:")],
+    # раунд 2 (79a923432)
+    "M12": [(GUARD, "                    for callee in _self_calls(methods[chain[-1]], methods):", "                    for callee in []:")],
+    "M13": [(RC, "        self._sched_baseline = self._ctx.scheduler.stats() if self._scheduler_used else {}", "        self._sched_baseline = {}")],
+    "M14": [(RC, "        if not self._reject_delay_warned and self._reg.reject_delay_ms:\n            self._warn_deprecated_alias()\n", "")],
+}
+F_TESTS = [
+    "process_module/tests/test_actuation_scheduler.py",
+    "process_module/tests/test_t52_plugin_context_scheduler.py",
+    "process_module/tests/test_no_blocking_in_plugin_process.py",
+    "process_module/tests/test_actuation_scheduler_hazards.py",
+]
+env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+
+
+def run_one(cwd, tests):
+    r = subprocess.run(
+        [PY, "-m", "pytest", *tests, "-q", "--tb=no", "-p", "no:cacheprovider", "-rfE"],
+        cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+    )
+    fails = sorted(set(re.findall(r"(?:FAILED|ERROR) (\S+)::(\S+)", r.stdout)))
+    summary = [ln for ln in r.stdout.splitlines() if " passed" in ln or " failed" in ln or " error" in ln][-1:]
+    by_file = {}
+    for f, t in fails:
+        by_file.setdefault(f.split("/")[-1], []).append(t)
+    return summary, {k: len(v) for k, v in by_file.items()}, [t for _, t in fails][:8]
+
+
+for name in sys.argv[1:]:
+    patches = INJ.get(name, [])
+    for f, a, b in patches:
+        p = W / f
+        with open(p, encoding="utf-8", newline="") as fh:
+            s = fh.read()
+        nl = "\r\n" if "\r\n" in s else "\n"
+        a2, b2 = a.replace("\n", nl), b.replace("\n", nl)
+        assert s.count(a2) == 1, (name, f, s.count(a2))
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write(s.replace(a2, b2))
+    try:
+        print(name, "F", *run_one(MOD, F_TESTS), flush=True)
+        print(name, "P", *run_one(W, ["Plugins/control/robot_control/tests"]), flush=True)
+    finally:
+        for f in {f for f, *_ in patches}:
+            subprocess.run(["git", "checkout", "--", f], cwd=W)

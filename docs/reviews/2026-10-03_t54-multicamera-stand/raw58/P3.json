@@ -1,0 +1,555 @@
+{
+ "tag": "P3",
+ "case_dir": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\probe58_P3_wivbpnaw",
+ "samples": [
+  {
+   "t": 0.09,
+   "proc_cycle_ms": 7.98,
+   "proc_cycles": 896,
+   "stor_cycle_ms": 0.65,
+   "stor_cycles": 690,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 14.1
+   }
+  },
+  {
+   "t": 1.04,
+   "proc_cycle_ms": 12.89,
+   "proc_cycles": 969,
+   "stor_cycle_ms": 1.06,
+   "stor_cycles": 762,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.9
+   }
+  },
+  {
+   "t": 2.06,
+   "proc_cycle_ms": 12.37,
+   "proc_cycles": 1039,
+   "stor_cycle_ms": 0.99,
+   "stor_cycles": 816,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 1.1
+   }
+  },
+  {
+   "t": 3.03,
+   "proc_cycle_ms": 12.26,
+   "proc_cycles": 1110,
+   "stor_cycle_ms": 0.93,
+   "stor_cycles": 857,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 14.9
+   }
+  },
+  {
+   "t": 4.06,
+   "proc_cycle_ms": 26.17,
+   "proc_cycles": 1184,
+   "stor_cycle_ms": 1.66,
+   "stor_cycles": 914,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 4.7
+   }
+  },
+  {
+   "t": 5.04,
+   "proc_cycle_ms": 11.66,
+   "proc_cycles": 1261,
+   "stor_cycle_ms": 1.04,
+   "stor_cycles": 973,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 6.2
+   }
+  },
+  {
+   "t": 6.05,
+   "proc_cycle_ms": 12.75,
+   "proc_cycles": 1334,
+   "stor_cycle_ms": 0.91,
+   "stor_cycles": 1030,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 14.7
+   }
+  },
+  {
+   "t": 7.05,
+   "proc_cycle_ms": 14.01,
+   "proc_cycles": 1406,
+   "stor_cycle_ms": 0.95,
+   "stor_cycles": 1093,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.9
+   }
+  },
+  {
+   "t": 8.03,
+   "proc_cycle_ms": 13.03,
+   "proc_cycles": 1476,
+   "stor_cycle_ms": 1.05,
+   "stor_cycles": 1153,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.9
+   }
+  },
+  {
+   "t": 9.04,
+   "proc_cycle_ms": 6.94,
+   "proc_cycles": 1564,
+   "stor_cycle_ms": 0.96,
+   "stor_cycles": 1221,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.7
+   }
+  },
+  {
+   "t": 10.04,
+   "proc_cycle_ms": 7.48,
+   "proc_cycles": 1657,
+   "stor_cycle_ms": 0.69,
+   "stor_cycles": 1293,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.8
+   }
+  },
+  {
+   "t": 11.05,
+   "proc_cycle_ms": 22.92,
+   "proc_cycles": 1751,
+   "stor_cycle_ms": 1.94,
+   "stor_cycles": 1366,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 1.2
+   }
+  },
+  {
+   "t": 12.11,
+   "proc_cycle_ms": 25.89,
+   "proc_cycles": 1851,
+   "stor_cycle_ms": 1.03,
+   "stor_cycles": 1442,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 2.5
+   }
+  },
+  {
+   "t": 13.04,
+   "proc_cycle_ms": 8.96,
+   "proc_cycles": 1935,
+   "stor_cycle_ms": 1.28,
+   "stor_cycles": 1503,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.8
+   }
+  },
+  {
+   "t": 14.07,
+   "proc_cycle_ms": 9.71,
+   "proc_cycles": 2027,
+   "stor_cycle_ms": 0.67,
+   "stor_cycles": 1593,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.8
+   }
+  },
+  {
+   "t": 15.04,
+   "proc_cycle_ms": 7.83,
+   "proc_cycles": 2121,
+   "stor_cycle_ms": 0.57,
+   "stor_cycles": 1663,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.8
+   }
+  },
+  {
+   "t": 16.08,
+   "proc_cycle_ms": 18.66,
+   "proc_cycles": 2193,
+   "stor_cycle_ms": 1.09,
+   "stor_cycles": 1715,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 2.2
+   }
+  },
+  {
+   "t": 17.04,
+   "proc_cycle_ms": 6.87,
+   "proc_cycles": 2268,
+   "stor_cycle_ms": 0.92,
+   "stor_cycles": 1763,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 23.5
+   }
+  },
+  {
+   "t": 18.05,
+   "proc_cycle_ms": 14.54,
+   "proc_cycles": 2365,
+   "stor_cycle_ms": 2.11,
+   "stor_cycles": 1839,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 8.6
+   }
+  },
+  {
+   "t": 19.03,
+   "proc_cycle_ms": 7.67,
+   "proc_cycles": 2463,
+   "stor_cycle_ms": 1.02,
+   "stor_cycles": 1914,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 16.7
+   }
+  },
+  {
+   "t": 20.04,
+   "proc_cycle_ms": 6.93,
+   "proc_cycles": 2557,
+   "stor_cycle_ms": 0.5,
+   "stor_cycles": 2000,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.6
+   }
+  },
+  {
+   "t": 21.03,
+   "proc_cycle_ms": 6.25,
+   "proc_cycles": 2651,
+   "stor_cycle_ms": 0.54,
+   "stor_cycles": 2080,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.6
+   }
+  },
+  {
+   "t": 22.04,
+   "proc_cycle_ms": 6.68,
+   "proc_cycles": 2746,
+   "stor_cycle_ms": 1.1,
+   "stor_cycles": 2153,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.7
+   }
+  },
+  {
+   "t": 23.05,
+   "proc_cycle_ms": 5.96,
+   "proc_cycles": 2840,
+   "stor_cycle_ms": 0.99,
+   "stor_cycles": 2227,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 1.1
+   }
+  },
+  {
+   "t": 24.03,
+   "proc_cycle_ms": 9.3,
+   "proc_cycles": 2929,
+   "stor_cycle_ms": 0.58,
+   "stor_cycles": 2294,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 12.3
+   }
+  },
+  {
+   "t": 25.06,
+   "proc_cycle_ms": 17.18,
+   "proc_cycles": 3028,
+   "stor_cycle_ms": 1.19,
+   "stor_cycles": 2378,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.8
+   }
+  },
+  {
+   "t": 26.04,
+   "proc_cycle_ms": 6.36,
+   "proc_cycles": 3123,
+   "stor_cycle_ms": 0.98,
+   "stor_cycles": 2465,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.7
+   }
+  },
+  {
+   "t": 27.04,
+   "proc_cycle_ms": 17.47,
+   "proc_cycles": 3215,
+   "stor_cycle_ms": 0.91,
+   "stor_cycles": 2532,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 0.9
+   }
+  },
+  {
+   "t": 28.04,
+   "proc_cycle_ms": 6.87,
+   "proc_cycles": 3284,
+   "stor_cycle_ms": 0.69,
+   "stor_cycles": 2581,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 9.2
+   }
+  },
+  {
+   "t": 29.03,
+   "proc_cycle_ms": 6.98,
+   "proc_cycles": 3378,
+   "stor_cycle_ms": 0.98,
+   "stor_cycles": 2653,
+   "stor_lag_dropped": null,
+   "plugin_ms": {
+    "result.resolved.plugin_ms.interval_sec": 1.0,
+    "result.resolved.plugin_ms.effective_interval_sec": 5.0,
+    "result.levels.state.plugin_ms.database": 15.0
+   }
+  }
+ ],
+ "plugins_raw_first": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "storage",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "0d38d556-d80c-45f9-bae1-a2473afc04ca",
+  "success": true,
+  "result": {
+   "success": true,
+   "process": "storage",
+   "plugins": {
+    "database": "sink"
+   },
+   "manifest": {
+    "database": {
+     "category": "sink",
+     "version": "0.0.0",
+     "api_version": "1.0",
+     "requires": []
+    }
+   },
+   "count": 1,
+   "failed_imports": {}
+  },
+  "_fence": {
+   "sender": "storage",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791051609.27232
+  }
+ },
+ "storage_workers_first": {
+  "db_flush_worker": {
+   "name": "db_flush_worker",
+   "status": "running",
+   "priority": "NORMAL",
+   "protected": false,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 13.2,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051596.1514752,
+    "uptime": 13.2
+   }
+  },
+  "data_receiver": {
+   "name": "data_receiver",
+   "status": "running",
+   "priority": "REALTIME",
+   "protected": false,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 13.197,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051596.1540093,
+    "uptime": 13.197
+   },
+   "cycle_duration_ms": 0.18,
+   "effective_hz": 100.33,
+   "target_interval_ms": 0.0,
+   "cycles": 990,
+   "transport_ms": 2.08,
+   "ipc_queue_depth": 0,
+   "transit_over_budget": 0,
+   "lag_dropped_items": 209
+  },
+  "pipeline_executor": {
+   "name": "pipeline_executor",
+   "status": "running",
+   "priority": "REALTIME",
+   "protected": false,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 13.197,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051596.1540093,
+    "uptime": 13.197
+   },
+   "cycle_duration_ms": 0.52,
+   "effective_hz": 72.24,
+   "target_interval_ms": 0.0,
+   "cycles": 694,
+   "queue_wait_ms": 1.43,
+   "not_inspected_handled": 97
+  },
+  "message_processor": {
+   "name": "message_processor",
+   "status": "running",
+   "priority": "NORMAL",
+   "protected": true,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 13.196,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051596.1549904,
+    "uptime": 13.196
+   }
+  },
+  "heartbeat_sender": {
+   "name": "heartbeat_sender",
+   "status": "running",
+   "priority": "BACKGROUND",
+   "protected": true,
+   "worker_type": "system",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 13.144,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051596.2070177,
+    "uptime": 13.144
+   }
+  }
+ }
+}

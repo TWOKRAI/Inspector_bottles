@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import numpy as np
-import pytest
+
 
 from Plugins.control.robot_control.plugin import RobotControlPlugin
 
@@ -250,40 +250,46 @@ class TestVerdictsAreNotDiagnosticLogLines:
         assert len(ctx.documents) == 1
 
 
-def test_verdict_is_written_before_the_mechanism_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verdict_is_written_before_the_mechanism_fires() -> None:
     """Документ несёт время РЕШЕНИЯ, а не время механизма.
 
-    Задержка отбраковки бывает в сотни миллисекунд (синхронизация с толкателем), и
-    вердикт, записанный ПОСЛЕ неё, датировался бы моментом механизма. Проверяется
-    порядком двух событий, а не фактом вызова: шпион на имя метода сторожил бы имя.
+    Транзит до толкателя бывает в сотни миллисекунд, и вердикт, записанный по
+    выстрелу привода, датировался бы моментом механизма. Проверяется порядком двух
+    событий, а не фактом вызова: шпион на имя метода сторожил бы имя.
 
-    ``time`` подменяется в пространстве имён модуля плагина, а не глобально: патч
-    самого ``time`` действовал бы на весь процесс и на соседние тесты.
+    Task 5.2: сна в ``process()`` больше нет — прежняя редакция теста пинила
+    ``time.sleep`` (спека 5.2 называла этот файл «без изменений» ошибочно).
+    Механизм теперь — планировщик на подменных часах, выстрел — ``tick()`` руками.
     """
+    from multiprocess_framework.modules.process_module.generic.actuation_scheduler import ActuationScheduler
+
     order: List[str] = []
-
-    class _FakeTime:
-        @staticmethod
-        def sleep(seconds: float) -> None:
-            order.append(f"slept:{seconds}")
-
-    import Plugins.control.robot_control.plugin as plugin_mod
-
-    monkeypatch.setattr(plugin_mod, "time", _FakeTime)
-
-    ctx = _Ctx({"min_defect_area": 500, "reject_delay_ms": 200})
+    now = [1000.0]
+    ctx = _Ctx({"min_defect_area": 500, "transit_ms": 200})
+    ctx.scheduler = ActuationScheduler(lambda payload, count: payload(count), clock=lambda: now[0])  # type: ignore[attr-defined]
     plugin = _plugin(ctx)
-    original = ctx.write_document
+    original_write = ctx.write_document
+    original_fire = plugin._on_actuation_fire
 
-    def _spy(kind: str, summary: str = "", /, **fields: Any) -> bool:
+    def _spy_write(kind: str, summary: str = "", /, **fields: Any) -> bool:
         order.append("wrote")
-        return original(kind, summary, **fields)
+        return original_write(kind, summary, **fields)
 
-    ctx.write_document = _spy  # type: ignore[assignment]
+    def _spy_fire(count: int) -> None:
+        order.append("fired")
+        original_fire(count)
 
-    _feed(plugin, [_defect()])
+    ctx.write_document = _spy_write  # type: ignore[assignment]
+    plugin._on_actuation_fire = _spy_fire  # type: ignore[method-assign]
 
-    assert order == ["wrote", "slept:0.2"]
+    plugin.process([{"frame": _frame(), "detections": [_defect()], "capture_ts": now[0]}])
+    assert order == ["wrote"]  # решение вынесено, привод ещё не сработал
+
+    now[0] += 0.200
+    assert ctx.scheduler.tick() == 1
+
+    assert order == ["wrote", "fired"]
+    assert len(ctx.documents) == 1  # выстрел документов не добавляет
 
 
 # ---------------------------------------------------------------------------

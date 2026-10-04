@@ -391,9 +391,13 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 - Фазы 4 и 6 написаны под ред. 1; дельта — в шапке каждого файла, полная спека — перед
   стартом фазы.
 
-## Execution order
+## Порядок выполнения
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — строкой списка. Тела задач и фазовые файлы статус не повторяют.
 
 ### Phase 0: Фундамент — перенос готовой работы
+
+- Task 0.1: Закоммитить незакоммиченное из worktree `sim-monitor` [DONE 2026-08-31 — `dfdb1891` (cherry-pick `b0940f94`), в `main`]
 
 #### Task 0.1 — Закоммитить незакоммиченное из worktree `sim-monitor`
 
@@ -488,7 +492,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   **Module contract:** impl-only
 - Task 1.1: **[VERTICAL SLICE]** `apps/line_sim/` — второе приложение на `run_app`,
   процесс `robot` с хостом `SimRobotServer`; инспектор подключается без правок
-  [BLOCKED, частично] — реализация готова (модуль плагина + приложение, `sentrux
+  [DONE 2026-09-21 — `d0d391b2b` (2026-09-20, код), блокеры сняты Task 1.0 `eecba231`, 1.4, 1.5; `pytest apps/line_sim/tests` на `main` 2026-10-03: 26 passed, 6 skipped. Метка «BLOCKED, частично» ниже устарела] — реализация была готова (модуль плагина + приложение, `sentrux
   check .` 37/37, `Services/robot_comm` 127 passed, 4 авторских hazard-теста
   зелёные), но 4 из 6 приёмочных тестов независимого тестера красные по причинам вне
   файлов задачи (генерик-оркестратор без `state.get_subtree`, стор истории не тапает
@@ -530,6 +534,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   гейт уже активен, не хватает только push'а уровней через прокси) — **Module contract:** impl-only
 - Task 2.1: Модель ленты `BeltDrive`: команда ПЧ → скорость → энкодер; контракт-тест карты
   регистров ПЧ [DONE 2026-09-21: robot_comm 141 passed; инъекции 8/8 + 2 фикса ревью; литерал тестера 692→6922; CLI без `--belt-mm-s` = старое поведение] — **Module contract:** new-lite
+- Task 2.1b: Лента по реальному времени: `tick(dt_s)` с измеренным dt [DONE 2026-09-21 — `df5a27d1f` (merge), ревью-фикс `86accfee0`]
 - Task 2.2: Энкодер в общем мире: `robot` публикует, `SceneSourcePlugin` в процессе
   `camera` рисует по нему спрайт [DONE 2026-09-22: живьём 5/5 (стоп ПЧ по Modbus морозит энкодер и спрайт, пуск возобновляет; belt_mm_s 101.1 → 0.0); инъекции K1–K6 + L1–L3, две дыры закрыты сторожами; ревью 2 итерации] (зависит от 1.2, 2.0, 2.1) — **Module
   contract:** new-lite
@@ -563,6 +568,8 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   живой стенд: рисунок ленты и диски расходятся ≤ 1.1 px; реальное фото ленты ещё не прогонялось
 
 ### Phase 4: Виртуальная камера
+
+> Сверено 2026-10-03: коммитов Ф4 в `main` нет; по `plans/queue/ORDER.md` файл фазы написан под ред. 1 и требует переписывания перед исполнением — до этого 4.1–4.3 остаются PENDING.
 
 Файл: [`phase-4-virtual-camera.md`](phase-4-virtual-camera.md) — **написан под ред. 1**,
 дельта в шапке файла; полная спека — перед стартом фазы.

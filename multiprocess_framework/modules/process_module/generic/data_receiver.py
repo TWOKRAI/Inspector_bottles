@@ -305,14 +305,37 @@ class DataReceiver:
         self._note_lag_drops(dropped)
         return True
 
+    def _merge_into_tail(self, markers: _MarkerBatch) -> bool:
+        """Дописать маркер-коллекцию в хвост очереди, если хвост — тоже ``_MarkerBatch`` (Task 5.3, оба режима).
+
+        Зачем. ``_bound_lag`` на маркер-коллекции не срабатывает (она не кадровая), поэтому поток маркеров и
+        записей о разрыве без кадров занимал ``chain_queue`` по слоту на сообщение и упирался в блокирующий
+        ``put``. Слияние держит такой поток в одном слоте; исполнитель схлопнет его ``build_gap``.
+
+        Только хвост: запись после кадровой коллекции открывает новую маркер-коллекцию — порядок очереди
+        не меняется. Под ``chain.mutex``: ``get()`` исполнителя снимает голову под тем же замком, поэтому
+        коллекция, которую исполнитель уже забрал, в ``pending`` не лежит и дописана быть не может.
+        ``enq_ts`` хвоста сохраняется (он старше). ``not_empty.notify`` не нужен: очередь и так непуста.
+
+        Returns:
+            True — дописано (вызывающему делать нечего); False — хвоста-маркера нет, идти обычным ``put``.
+        """
+        chain = self._chain_queue
+        with chain.mutex:
+            pending = chain.queue
+            if not pending or not isinstance(pending[-1], _MarkerBatch):
+                return False
+            pending[-1].extend(markers)
+        return True
+
     @staticmethod
     def _coalesce_markers(pending) -> int:
         """Склеить соседние ``_MarkerBatch`` в ту, что раньше (её ``enq_ts`` и тип сохраняются).
 
-        Склейка происходит ТОЛЬКО здесь, то есть только внутри ``_bound_lag`` сразу после замены кадра
-        маркерами: маркер-коллекция, пришедшая в очередь обычным ``put`` (IPC-маркер, stale_restore), с
-        соседями не склеивается, пока потолок не сработает. Зовётся под ``chain.mutex``; проверка — по типу
-        (O(1)), не по содержимому. Возвращает, сколько коллекций убрано из очереди.
+        Склейка СОСЕДЕЙ в середине очереди происходит только здесь, внутри ``_bound_lag`` сразу после замены кадра
+        маркерами. Маркер-коллекция, пришедшая на вход (IPC-маркер, запись о разрыве, stale_restore), с 5.3
+        дописывается в хвост, если хвост — ``_MarkerBatch`` (``_merge_into_tail``). Зовётся под ``chain.mutex``;
+        проверка — по типу (O(1)), не по содержимому. Возвращает, сколько коллекций убрано из очереди.
         """
         freed = 0
         j = 0
@@ -372,6 +395,8 @@ class DataReceiver:
         if not isinstance(items, _MarkerBatch):  # _MarkerBatch уже штампованный список: тип не теряем
             items = _StampedBatch(items)
         items.enq_ts = time.perf_counter()
+        if isinstance(items, _MarkerBatch) and self._merge_into_tail(items):
+            return
         if self._max_lag_items and self._bound_lag(items):
             return
         try:

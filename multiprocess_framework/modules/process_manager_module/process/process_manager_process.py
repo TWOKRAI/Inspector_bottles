@@ -152,6 +152,9 @@ class ProcessManagerProcess(ProcessModule):
             shared_resources=self.shared_resources,
             system_stop_event=self._system_stop_event,
             routing_meta_fn=self._routing_meta_snapshot,
+            # Task 5.4 (ADR-PMM-034): то же событие, что PM взводит в _announce_ready,
+            # уезжает детям на чтение — источники ждут его перед первым produce().
+            system_ready_event=self._system_ready_event,
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)

@@ -1,0 +1,128 @@
+# ruff: noqa  # артефакт замера/инъекций 2026-10-03, код сохранён как есть
+"""Инъекции лида, Task 5.9a. Каждая заплата — одно свойство; после — git checkout файла.
+
+Предсказания записаны ДО прогона (PRED). Запуск: cwd = worktree t59a-impl.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd()
+PY = r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Scripts\python.exe"
+ENV = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+PORT = "multiprocess_framework/modules/process_module/plugins/port.py"
+BP = "multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+IB = "multiprocess_prototype/backend/topology/inspection_basic.yaml"
+MC = "multiprocess_prototype/backend/topology/multi_camera.yaml"
+
+FW_TESTS = [
+    "process_module/tests/test_validate_chain_passthrough.py",
+    "process_module/plugins/tests/test_port_validate_items.py",
+    "process_module/tests/test_blueprint_chain_validation.py",
+]
+ROOT_TESTS = ["multiprocess_prototype/backend/tests/test_topology_recipes_check.py"]
+
+INJ = {
+    "I1_first_producer_wins": (
+        PORT,
+        "            keys[out.name] = out\n",
+        "            keys.setdefault(out.name, out)\n",
+    ),
+    "I2_match_by_dtype": (
+        PORT,
+        "            producer_port = keys.get(inp.name)\n",
+        "            producer_port = next((p for p in keys.values() if are_ports_compatible(p, inp)), None)\n",
+    ),
+    "I3_wires_ignored": (
+        PORT,
+        "    wired = tuple(wired_inputs)  # итератор читается ровно один раз\n",
+        "    wired = ()  # INJECT\n",
+    ),
+    "I4_incompatible_uses_text_a": (
+        PORT,
+        "            elif not are_ports_compatible(producer_port, inp):\n",
+        "            elif False:\n",
+    ),
+    "I5_no_dedup": (BP, "and addr not in wired_inputs and addr not in reported:", "and addr not in wired_inputs:"),
+    "I6_optional_errors": (
+        PORT,
+        "            if inp.optional:\n                continue\n\n            producer_port",
+        "            producer_port",
+    ),
+    "I7_no_fanin": (MC, "    collector:\n      mode: fanin\n", ""),
+    "I8_no_frame_wires_basic": (
+        IB,
+        "  - source: camera_0.camera_service.frame\n    target: processor.color_mask.frame\n  - source: camera_0.camera_service.frame\n    target: processor.blob_detector.frame\n",
+        "",
+    ),
+    "I9_positional_allowed": (
+        PORT,
+        "def validate_chain(\n    plugins_with_ports: list[tuple[str, list[Port], list[Port]]],\n    *,\n",
+        "def validate_chain(\n    plugins_with_ports: list[tuple[str, list[Port], list[Port]]],\n",
+    ),
+}
+
+PRED = {
+    "I1_first_producer_wins": "passthrough::test_last_producer_of_a_name_decides_compatibility, ::test_available_keys_last_producer_of_a_name_wins",
+    "I2_match_by_dtype": "passthrough::test_required_key_is_matched_by_name_not_by_dtype_alone (+ возможно key_absent тесты)",
+    "I3_wires_ignored": "passthrough: wired_name_covers..., wired_inputs_accepts_any_iterable; recipes: inspection_basic и multi_camera (assemble/check) — если вход узла 0 не исключён адресным Wire",
+    "I4_incompatible_uses_text_a": "passthrough::test_key_present_but_incompatible_keeps_the_old_error_format; test_port_validate_items несовместим-тесты; test_blueprint_chain_validation:115",
+    "I5_no_dedup": "recipes::node-0 exactly one error; passthrough two_unsatisfied — нет (это validate_chain, не check)",
+    "I6_optional_errors": "passthrough::test_optional_input_absent_upstream_is_not_an_error; возможно рецепты с optional входами",
+    "I7_no_fanin": "recipes::compositor fanin — ровно 1",
+    "I8_no_frame_wires_basic": "recipes: inspection_basic assemble + check + wire-removal (копия без проводов) — 3",
+    "I9_positional_allowed": "passthrough::test_wired_inputs_passed_positionally_is_a_type_error, ::test_validate_chain_wired_inputs_is_keyword_only_with_empty_default",
+}
+
+
+def run():
+    failed = set()
+    collected = 0
+    for cwd, tests in ((ROOT / "multiprocess_framework/modules", FW_TESTS), (ROOT, ROOT_TESTS)):
+        r = subprocess.run(
+            [PY, "-m", "pytest", *tests, "-q", "-p", "no:cacheprovider", "-rf", "--tb=no"],
+            cwd=cwd,
+            env=ENV,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+        out = r.stdout
+        failed |= {m.group(1) for m in re.finditer(r"^FAILED (\S+)", out, re.M)}
+        m = re.search(r"(\d+) passed", out)
+        f = re.search(r"(\d+) failed", out)
+        collected += (int(m.group(1)) if m else 0) + (int(f.group(1)) if f else 0)
+    return collected, sorted(failed)
+
+
+def main():
+    res = {}
+    base = run()
+    res["BASE"] = {"collected": base[0], "failed": base[1]}
+    print("BASE", base[0], len(base[1]), flush=True)
+    for name, (path, a, b) in INJ.items():
+        p = ROOT / path
+        s = p.read_text(encoding="utf-8")
+        if s.count(a) != 1:
+            res[name] = {"error": f"anchor count {s.count(a)}"}
+            print(name, "ANCHOR", s.count(a), flush=True)
+            continue
+        p.write_text(s.replace(a, b), encoding="utf-8")
+        try:
+            col, fl = run()
+        finally:
+            subprocess.run(["git", "checkout", "--", path], cwd=ROOT)
+        res[name] = {"pred": PRED[name], "collected": col, "failed": fl}
+        print(name, col, len(fl), flush=True)
+    out = Path(sys.argv[1])
+    out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

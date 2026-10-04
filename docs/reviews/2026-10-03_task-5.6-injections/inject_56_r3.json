@@ -1,0 +1,30 @@
+{
+ "BASE": {
+  "collected": 98,
+  "failed": []
+ },
+ "L1_lower_from_poll_end": {
+  "pred": "author: тест подменённых часов (lower 0.06, не 0.12) — 1",
+  "collected": 98,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_drain_is_timed_from_sending_worker_start_and_counts_cycles",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2b_drain_lower_is_the_last_poll_below_target",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2c_drain_lower_is_the_start_of_the_last_poll_below_target"
+  ]
+ },
+ "L2_lock_conflict_allowed": {
+  "pred": "author: тест конфликта держателей замка — 1",
+  "collected": 98,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2c_lock_with_more_than_one_holder_is_a_conflict"
+  ]
+ },
+ "L3_lower_rule_back": {
+  "pred": "author: поддельный стенд ждёт NOT_MEASURED, получит FAIL — >=1",
+  "collected": 98,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_drain_is_timed_from_sending_worker_start_and_counts_cycles",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2c_drain_lower_is_a_report_number_and_never_changes_the_verdict"
+  ]
+ }
+}

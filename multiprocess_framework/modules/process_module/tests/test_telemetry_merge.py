@@ -196,6 +196,10 @@ class TestH8RouterShmStatsPublish:
             "bytes_read": 0,
             "bytes_mapped": 0,
             "restore_failures": 0,
+            # Task 5.6: дверь отправки, отложенные закрытия, проваленные доставки.
+            "door_drops": 0,
+            "deferred_closes": 0,
+            "errors_delivery_failed": 0,
         }
 
     def test_publishes_when_only_cache_size_nonzero(self) -> None:

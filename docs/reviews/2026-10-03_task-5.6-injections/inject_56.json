@@ -1,0 +1,162 @@
+{
+ "BASE": {
+  "collected": 118,
+  "failed": []
+ },
+ "T1_ledger_upper": {
+  "pred": "A: тест границы учёта сверху (488/489) — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_solver_ledger_boundaries[upper_20_fails]"
+  ]
+ },
+ "T2_stale_restore": {
+  "pred": "A: граница stale_restore 3/4 — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_stale_restore_4_exceeds_0_001_F"
+  ]
+ },
+ "T3_processor_lag": {
+  "pred": "A: граница lag 39/40 — >=1; green без --no-throughput-gate остаётся красным (464 > 79) — не умирает",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_processor_lag_40_exceeds_0_01_F_with_throughput_gate"
+  ]
+ },
+ "T4_verdict_floor": {
+  "pred": "A: граница вердиктов 3147/3148 — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_verdicts_3147_are_below_the_90_percent_floor"
+  ]
+ },
+ "T5_window_lag": {
+  "pred": "A: граница lag@inspector 100/101 — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_inspector_window_lag_101_exceeds_limit",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_inspector_window_lag_101_over_s0_baseline_exceeds_limit"
+  ]
+ },
+ "T6_rss": {
+  "pred": "A: граница RSS +-1 байт — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_pause_rss_growth_of_1_mib_plus_1_byte_exceeds_limit"
+  ]
+ },
+ "T7_drain": {
+  "pred": "A: граница drain 0.1/0.11 — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_drain_of_0_11_s_exceeds_limit"
+  ]
+ },
+ "T8_poll_period": {
+  "pred": "A: граница poll 0.1/0.11 (NOT_MEASURED) — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_poll_period_above_0_1_s_is_not_measured_and_exits_1"
+  ]
+ },
+ "T9_every_plus_storage": {
+  "pred": "A: все тесты 'green -> код 0' на обеих зелёных фикстурах (storage s0 stale 9 и 8) — много",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_drain_of_exactly_0_1_s_is_within_limit",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_green_D100_exits_0_with_no_throughput_gate",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_green_P10_exits_0_with_no_throughput_gate",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_inspector_window_lag_100_is_within_limit",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_inspector_window_lag_is_not_applied_to_case_E",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_inspector_window_lag_subtracts_s0_baseline",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_pause_rss_growth_of_exactly_1_mib_is_within_limit",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_poll_period_of_exactly_0_1_s_is_still_measured",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_processor_lag_39_is_within_0_01_F_with_throughput_gate",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_report_file_carries_lag_and_actuation_numbers",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_solver_ledger_boundaries[lower_edge_0_ok]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_solver_ledger_boundaries[upper_19_ok]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_solver_ledger_finds_the_nested_dict_with_total_inspected",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_solver_ledger_ignores_camera_after_pause",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_stale_restore_3_is_within_0_001_F",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_start_stale_drops_under_latest_are_report_only[renderer]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_start_stale_drops_under_latest_are_report_only[storage]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_two_green_files_in_one_call_exit_0",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_verdict_floor_is_not_applied_to_case_E",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_verdicts_3148_meet_the_90_percent_floor"
+  ]
+ },
+ "T10_neighbors_no_renderer": {
+  "pred": "A: тесты соседа renderer — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_neighbor_formula_violation_exits_1[renderer_handled_minus1]"
+  ]
+ },
+ "T11_formula_no_inspector": {
+  "pred": "A: тест формулы inspector — >=1 (если тестер мутирует inspector отдельно)",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_per_process_formula_violation_exits_1[inspector_door_term_removed_from_born]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_per_process_formula_violation_exits_1[inspector_lag_dropped_items_plus5]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_per_process_formula_violation_exits_1[inspector_restore_failures_added_to_drops]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_per_process_formula_violation_exits_1[inspector_stale_drops_term_removed_from_drops]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_per_process_formula_violation_exits_1[inspector_torn_reads_added_to_drops]"
+  ]
+ },
+ "T12_dup_ignored": {
+  "pred": "A: тест dup — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_duplicate_trace_id_in_journal_exits_1"
+  ]
+ },
+ "T13_evicted_unchecked": {
+  "pred": "A: тесты evicted (s0/s2/pause.after) + red_E0_old FAIL по evicted — >=2",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_green_plus_red_file_in_one_call_exits_1_and_names_evicted",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_queue_data_evicted_nonzero_exits_1_D100[s0.camera_0]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_queue_data_evicted_nonzero_exits_1_D100[s0.processor]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_queue_data_evicted_nonzero_exits_1_D100[s2.inspector]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_queue_data_evicted_nonzero_exits_1_D100[s2.storage]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_queue_data_evicted_nonzero_in_pause_after_exits_1_P10[pause.after.processor]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_queue_data_evicted_nonzero_in_pause_after_exits_1_P10[pause.after.renderer]",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_red_E0_old_names_queue_data_evicted"
+  ]
+ },
+ "T14_no_not_measured": {
+  "pred": "A: NOT_MEASURED тесты — >=1",
+  "collected": 118,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_slow_poll_is_not_measured_not_green",
+   "scripts/stand_gate/tests/test_t56_thresholds_acceptance.py::test_poll_period_above_0_1_s_is_not_measured_and_exits_1"
+  ]
+ },
+ "T15_tel_no_delivery_failed": {
+  "pred": "B: лист shm.errors_delivery_failed (значение и присутствие) — >=1",
+  "collected": 118,
+  "failed": [
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_every_process_exports_shm_leaf_with_the_routers_value[errors_delivery_failed-2]",
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_latest_process_still_exports_the_three_common_shm_leaves_as_zero[errors_delivery_failed]"
+  ]
+ },
+ "T16_tel_door_always": {
+  "pred": "B: отсутствие shm.not_inspected_door у latest — 1",
+  "collected": 118,
+  "failed": [
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_latest_process_has_no_not_inspected_door_leaf"
+  ]
+ },
+ "T17_tel_zero_when_absent": {
+  "pred": "B: отсутствие not_inspected_* у latest (4) и ipc_queue_depth до замера (1) — >=5",
+  "collected": 118,
+  "failed": [
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_ipc_queue_depth_is_absent_until_the_first_measurement",
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_latest_process_state_has_no_not_inspected_leaf[not_inspected_handled]",
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_latest_process_state_has_no_not_inspected_leaf[not_inspected_lag]",
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_latest_process_state_has_no_not_inspected_leaf[not_inspected_stale_exec]",
+   "process_module/tests/test_t56_telemetry_keys_acceptance.py::test_latest_process_state_has_no_not_inspected_leaf[not_inspected_stale_restore]"
+  ]
+ }
+}

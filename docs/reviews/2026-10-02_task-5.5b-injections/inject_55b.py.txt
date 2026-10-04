@@ -1,0 +1,68 @@
+"""Инъекции 5.5B: по одной заплате, прогон набора, откат через git checkout файла."""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+W = Path(r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/t55-green")
+PY = r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/python.exe"
+SETS = {
+    "P": (W, [
+        "multiprocess_prototype/backend/tests/test_hot_rebuild_provenance_acceptance.py",
+        "multiprocess_prototype/frontend/forms/tests/test_catalog_kind_roundtrip.py",
+    ]),
+    "F": (W / "multiprocess_framework/modules", [
+        "router_module/tests/test_socket_channel_hol_hazards.py",
+        "tests/test_declarations_leak_session_catalogue_guard.py",
+    ]),
+}
+SNAP_HR = "multiprocess_prototype/backend/tests/snapshots/hot_rebuild_framework_keys.txt"
+SNAP_CAT = "multiprocess_prototype/frontend/forms/tests/snapshots/catalog_register_fields.txt"
+F_SOCK = "multiprocess_framework/modules/router_module/channels/socket_channel.py"
+F_HOLT = "multiprocess_framework/modules/router_module/tests/test_socket_channel_hol_hazards.py"
+F_GUARD = "multiprocess_framework/modules/tests/_declarations_catalogue_guard.py"
+F_DECL = "multiprocess_framework/modules/tests/test_declarations_leak_session_catalogue_guard.py"
+INJ = {
+    "J1": ("P", [(SNAP_HR, "compress_rotated\n", "")]),
+    "J2": ("P", [(SNAP_CAT, "blob_detector.contour_thickness\n", "")]),
+    "J3": ("F", [(F_SOCK, "if sock in self._dead or sock.fileno() == -1:", "if sock.fileno() == -1:")]),
+    "J3b": ("F", [(F_HOLT, "            warnings.clear()\n", "")]),
+    "J4": ("F", [(F_GUARD, '    "pacer_late",\n', "")]),
+    "J4b": ("F", [(F_DECL, '    "pacer_late",\n', "")]),
+}
+env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+
+
+def run(set_name):
+    cwd, tests = SETS[set_name]
+    r = subprocess.run(
+        [PY, "-m", "pytest", *tests, "-q", "--tb=line", "-p", "no:cacheprovider", "-rfE"],
+        cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=400,
+    )
+    fails = sorted(set(re.findall(r"(?:FAILED|ERROR) \S+::(\S+)", r.stdout)))
+    summary = [ln for ln in r.stdout.splitlines() if " passed" in ln or " failed" in ln or " error" in ln][-1:]
+    lines = [ln for ln in r.stdout.splitlines() if "AssertionError" in ln or "assert" in ln][:3]
+    return fails, summary, lines
+
+
+for name in sys.argv[1:]:
+    if name.startswith("BASE"):
+        print(name, run(name.split("_")[1]), flush=True)
+        continue
+    set_name, patches = INJ[name]
+    for f, a, b in patches:
+        p = W / f
+        with open(p, encoding="utf-8", newline="") as fh:
+            s = fh.read()
+        nl = "\r\n" if "\r\n" in s else "\n"
+        a2, b2 = a.replace("\n", nl), b.replace("\n", nl)
+        assert s.count(a2) == 1, (name, f, s.count(a2))
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write(s.replace(a2, b2))
+    try:
+        print(name, run(set_name), flush=True)
+    finally:
+        for f, *_ in patches:
+            subprocess.run(["git", "checkout", "--", f], cwd=W)

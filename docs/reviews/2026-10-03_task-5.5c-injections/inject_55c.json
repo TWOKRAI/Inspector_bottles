@@ -1,0 +1,38 @@
+{
+ "BASE": {
+  "collected": 113,
+  "failed": []
+ },
+ "C1_no_folding": {
+  "pred": "test_wrapped_why_value_still_parses, test_wrapped_layer_value_parses — 2",
+  "collected": 113,
+  "failed": [
+   "scripts/validate_commit/tests/test_validate_commit.py::test_wrapped_layer_value_parses",
+   "scripts/validate_commit/tests/test_validate_commit.py::test_wrapped_why_value_still_parses"
+  ]
+ },
+ "C2_no_plan_isolation": {
+  "pred": "blind test_validator_suite_green_on_branch_with_plan — 1 (дерево t55c-impl на ветке fix/t55c-gate-green: плана с таким слагом нет — сами тесты validate_commit могут остаться зелёными)",
+  "collected": 113,
+  "failed": [
+   "scripts/validate_commit/tests/test_t55c_branch_independence.py::test_validator_suite_green_on_branch_with_plan",
+   "scripts/validate_commit/tests/test_validate_commit.py::test_body_paragraph_not_swallowed_as_trailers",
+   "scripts/validate_commit/tests/test_validate_commit.py::test_single_line_trailers_ok",
+   "scripts/validate_commit/tests/test_validate_commit.py::test_wrapped_why_value_still_parses"
+  ]
+ },
+ "C3_find_by_unchecked": {
+  "pred": "тест идентификатора find_by в Services/sql/tests — 1",
+  "collected": 113,
+  "failed": [
+   "Services/sql/tests/test_repositories.py::TestReadonlyAndBulkRepository::test_find_by_rejects_unsafe_column_name"
+  ]
+ },
+ "C4_drop_one_no_health_tag": {
+  "pred": "test_no_silent_swallows — 1",
+  "collected": 113,
+  "failed": [
+   "Plugins/tests/test_no_silent_swallows.py::test_no_silent_swallows_in_plugins"
+  ]
+ }
+}

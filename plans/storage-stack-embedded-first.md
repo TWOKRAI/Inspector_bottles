@@ -48,6 +48,31 @@
 - **Этап 4 ни от чего не зависит** — можно отдать второму исполнителю сразу.
 - Внутри Этапа 1: 1.1, 1.3, 1.4 независимы друг от друга; 1.2 — отдельная ветка работы (см. родительский план).
 
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. План DRAFT, ветка `feat/storage-stack-embedded-first` не создана, коммитов с `Refs: plans/storage-stack-embedded-first` в `main` нет (только создание плана `da28f51f`).
+
+### Этап 1 — гигиена существующего
+
+- Task 1.1: `data` в JSON вместо Python-repr [PENDING] — `Plugins/io/database/plugin.py:125` по-прежнему `"data": str(data)`
+- Task 1.2: Атомарный `insert_many` [PENDING] — `Services/sql/core/base_repository.py:82` вставляет циклом `execute`, транзакции нет
+- Task 1.3: WAL + `synchronous=NORMAL` опцией конфига [PENDING] — `journal_mode`/`synchronous` в `Services/sql/core/engine_factory.py` и `configs/` нет
+- Task 1.4: Дефолт ретенции телеметрии 0 → 14 дней [PENDING] — `retention_days` по-прежнему `= 0` (`Plugins/io/telemetry_sink/registers.py:46`), purge при старте не вызывается
+
+### Этап 2 — консервация опциона PostgreSQL
+
+- Task 2.1: CI-тест диалектной совместимости схем [PENDING] (после 1.1) — `Services/sql/tests/test_dialect_compat.py` нет
+- Task 2.2: Правило «никакого сырого SQL мимо адаптера» [PENDING] (после 1.1) — раздела «Правила для потребителей» в `Services/sql/README.md` и комментария над `_cmd_purge_old` нет
+- Task 2.3: Пути к файлам в БД только относительные [PENDING] (после 1.1) — `Services/sql/paths.py` нет
+
+### Этап 3 — снапшоты и кэш отрисовки
+
+- Task 3.1: Вертикальный срез — снапшот кадра end-to-end [PENDING] (после 1.2) — `Plugins/io/snapshot_store/` нет
+- Task 3.2: Полный снапшот — несколько кадров, manifest, `.npz` [PENDING] (после 3.1)
+- Task 3.3: Ретенция снапшотов [PENDING] (после 3.2)
+
+### Этап 4 — SCADA-endpoint
+
+- Task 4.1: `sim_server` → постоянная Modbus-нода с картой регистров в YAML [PENDING] — `Services/modbus/server/sim_server.py` принимает `size`, карты из YAML нет
+
 ---
 
 ## Этап 1 — гигиена существующего (ПРИОРИТЕТ, делать первым)

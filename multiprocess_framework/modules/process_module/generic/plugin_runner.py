@@ -57,7 +57,19 @@ PostHook = Callable[["ProcessModulePlugin", str, "list[dict] | None", "list[dict
 # если плагин строит СВЕЖИЙ выходной dict вместо мутации входного (stitcher,
 # renderer_compositor, line_filter, center_crop и т.п.). Плагин может их
 # переопределить (setdefault-семантика — плагин выигрывает), но не может потерять.
-_CARRIED_SYSTEM_FIELDS = ("trace_id", "capture_ts", "frame_hops")
+# Task 5.3: поля записи о разрыве. Плагин с ``accepts_markers``, вернувший свежий dict, иначе превратил бы запись
+# count=1078 в «один кадр». Перенос — только если поле есть у донора: кадр без них ничего нового не получает.
+_CARRIED_SYSTEM_FIELDS = (
+    "trace_id",
+    "capture_ts",
+    "frame_hops",
+    "count",
+    "trace_ids",
+    "first_capture_ts",
+    "last_capture_ts",
+    "reasons",
+    "sources",
+)
 
 
 def _carry_system_fields(inputs: "list[dict] | None", outputs: "list[dict]") -> None:

@@ -11,6 +11,7 @@ Diagrams-as-code: все схемы хранятся как текст, верс
 | [`architecture.mmd`](architecture.mmd) | C4 Container-level — общая архитектура проекта | Mermaid Preview (VS Code) |
 | [`modules-overview.mmd`](modules-overview.mmd) | **Связи между модулями фреймворка** (6 слоёв) | Mermaid Preview (VS Code) |
 | [`layer-render/editor-system.html`](layer-render/editor-system.html) | **Система редактора слоёв**: процессы, модули `layer_render`, путь правки, пресет, порядок фаз (план layer-render) | браузер (mermaid с CDN) |
+| [`lifecycle/lifecycle-system.html`](lifecycle/lifecycle-system.html) | **Единый жизненный цикл**: почему падают тесты и висит останов, одна область-владелец для подписок, потоков, процессов и виджетов, кто за что отвечает, порядок фаз (план lifecycle-owner-scope) | браузер (mermaid с CDN) |
 
 ### Авто-генерируемые (не в git)
 

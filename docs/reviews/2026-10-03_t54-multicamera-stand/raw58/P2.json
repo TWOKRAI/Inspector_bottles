@@ -1,0 +1,435 @@
+{
+ "tag": "P2",
+ "case_dir": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\probe58_P2_11hyktni",
+ "samples": [
+  {
+   "t": 0.11,
+   "proc_cycle_ms": 6.75,
+   "proc_cycles": 924,
+   "stor_cycle_ms": 0.72,
+   "stor_cycles": 740,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 1.04,
+   "proc_cycle_ms": 6.54,
+   "proc_cycles": 1020,
+   "stor_cycle_ms": 0.69,
+   "stor_cycles": 815,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 2.04,
+   "proc_cycle_ms": 5.54,
+   "proc_cycles": 1117,
+   "stor_cycle_ms": 0.48,
+   "stor_cycles": 894,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 3.05,
+   "proc_cycle_ms": 38.3,
+   "proc_cycles": 1204,
+   "stor_cycle_ms": 0.52,
+   "stor_cycles": 944,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 4.05,
+   "proc_cycle_ms": 16.21,
+   "proc_cycles": 1293,
+   "stor_cycle_ms": 1.01,
+   "stor_cycles": 1007,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 5.06,
+   "proc_cycle_ms": 19.06,
+   "proc_cycles": 1387,
+   "stor_cycle_ms": 0.5,
+   "stor_cycles": 1086,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 6.06,
+   "proc_cycle_ms": 25.24,
+   "proc_cycles": 1466,
+   "stor_cycle_ms": 1.2,
+   "stor_cycles": 1156,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 7.07,
+   "proc_cycle_ms": 16.31,
+   "proc_cycles": 1528,
+   "stor_cycle_ms": 1.11,
+   "stor_cycles": 1199,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 8.04,
+   "proc_cycle_ms": 14.3,
+   "proc_cycles": 1600,
+   "stor_cycle_ms": 1.21,
+   "stor_cycles": 1251,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 9.03,
+   "proc_cycle_ms": 10.68,
+   "proc_cycles": 1682,
+   "stor_cycle_ms": 0.86,
+   "stor_cycles": 1310,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 10.03,
+   "proc_cycle_ms": 9.12,
+   "proc_cycles": 1767,
+   "stor_cycle_ms": 0.96,
+   "stor_cycles": 1374,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 11.06,
+   "proc_cycle_ms": 15.07,
+   "proc_cycles": 1853,
+   "stor_cycle_ms": 0.79,
+   "stor_cycles": 1437,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 12.08,
+   "proc_cycle_ms": 14.67,
+   "proc_cycles": 1922,
+   "stor_cycle_ms": 0.98,
+   "stor_cycles": 1490,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 13.05,
+   "proc_cycle_ms": 17.62,
+   "proc_cycles": 1982,
+   "stor_cycle_ms": 1.21,
+   "stor_cycles": 1538,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 14.09,
+   "proc_cycle_ms": 21.54,
+   "proc_cycles": 2049,
+   "stor_cycle_ms": 1.07,
+   "stor_cycles": 1588,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 15.07,
+   "proc_cycle_ms": 15.59,
+   "proc_cycles": 2102,
+   "stor_cycle_ms": 1.03,
+   "stor_cycles": 1634,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 16.04,
+   "proc_cycle_ms": 20.98,
+   "proc_cycles": 2154,
+   "stor_cycle_ms": 1.37,
+   "stor_cycles": 1667,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 17.03,
+   "proc_cycle_ms": 14.89,
+   "proc_cycles": 2208,
+   "stor_cycle_ms": 1.07,
+   "stor_cycles": 1702,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 18.05,
+   "proc_cycle_ms": 15.59,
+   "proc_cycles": 2275,
+   "stor_cycle_ms": 0.85,
+   "stor_cycles": 1750,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 19.07,
+   "proc_cycle_ms": 16.08,
+   "proc_cycles": 2339,
+   "stor_cycle_ms": 1.04,
+   "stor_cycles": 1795,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 20.12,
+   "proc_cycle_ms": 33.54,
+   "proc_cycles": 2395,
+   "stor_cycle_ms": 1.15,
+   "stor_cycles": 1838,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 21.04,
+   "proc_cycle_ms": 7.74,
+   "proc_cycles": 2453,
+   "stor_cycle_ms": 1.21,
+   "stor_cycles": 1888,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 22.06,
+   "proc_cycle_ms": 13.18,
+   "proc_cycles": 2520,
+   "stor_cycle_ms": 0.99,
+   "stor_cycles": 1934,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 23.04,
+   "proc_cycle_ms": 14.38,
+   "proc_cycles": 2576,
+   "stor_cycle_ms": 0.99,
+   "stor_cycles": 1970,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 24.03,
+   "proc_cycle_ms": 12.67,
+   "proc_cycles": 2644,
+   "stor_cycle_ms": 1.17,
+   "stor_cycles": 2020,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 25.06,
+   "proc_cycle_ms": 12.23,
+   "proc_cycles": 2715,
+   "stor_cycle_ms": 0.93,
+   "stor_cycles": 2072,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 26.05,
+   "proc_cycle_ms": 10.32,
+   "proc_cycles": 2795,
+   "stor_cycle_ms": 1.19,
+   "stor_cycles": 2128,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 27.04,
+   "proc_cycle_ms": 19.57,
+   "proc_cycles": 2888,
+   "stor_cycle_ms": 1.12,
+   "stor_cycles": 2196,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 28.05,
+   "proc_cycle_ms": 10.39,
+   "proc_cycles": 2977,
+   "stor_cycle_ms": 1.1,
+   "stor_cycles": 2261,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 29.08,
+   "proc_cycle_ms": 31.28,
+   "proc_cycles": 3050,
+   "stor_cycle_ms": 1.07,
+   "stor_cycles": 2313,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  }
+ ],
+ "plugins_raw_first": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "storage",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "daf9fbc2-41c3-4489-8430-e6f09aaa46ac",
+  "success": true,
+  "result": {
+   "success": true,
+   "process": "storage",
+   "plugins": {
+    "database": "sink"
+   },
+   "manifest": {
+    "database": {
+     "category": "sink",
+     "version": "0.0.0",
+     "api_version": "1.0",
+     "requires": []
+    }
+   },
+   "count": 1,
+   "failed_imports": {}
+  },
+  "_fence": {
+   "sender": "storage",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791051519.21494
+  }
+ },
+ "storage_workers_first": {
+  "db_flush_worker": {
+   "name": "db_flush_worker",
+   "status": "running",
+   "priority": "NORMAL",
+   "protected": false,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 12.896,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051506.4171154,
+    "uptime": 12.896
+   }
+  },
+  "data_receiver": {
+   "name": "data_receiver",
+   "status": "running",
+   "priority": "REALTIME",
+   "protected": false,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 12.894,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051506.4197595,
+    "uptime": 12.894
+   },
+   "cycle_duration_ms": 0.24,
+   "effective_hz": 104.38,
+   "target_interval_ms": 0.0,
+   "cycles": 1000,
+   "transport_ms": 2.33,
+   "ipc_queue_depth": 0,
+   "transit_over_budget": 0,
+   "lag_dropped_items": 184
+  },
+  "pipeline_executor": {
+   "name": "pipeline_executor",
+   "status": "running",
+   "priority": "REALTIME",
+   "protected": false,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 12.894,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051506.4197595,
+    "uptime": 12.894
+   },
+   "cycle_duration_ms": 0.52,
+   "effective_hz": 97.21,
+   "target_interval_ms": 0.0,
+   "cycles": 748,
+   "queue_wait_ms": 0.13,
+   "not_inspected_handled": 77
+  },
+  "message_processor": {
+   "name": "message_processor",
+   "status": "running",
+   "priority": "NORMAL",
+   "protected": true,
+   "worker_type": "application",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 12.894,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051506.4197595,
+    "uptime": 12.894
+   }
+  },
+  "heartbeat_sender": {
+   "name": "heartbeat_sender",
+   "status": "running",
+   "priority": "BACKGROUND",
+   "protected": true,
+   "worker_type": "system",
+   "execution_mode": "loop",
+   "is_alive": true,
+   "restart_count": 0,
+   "last_error": null,
+   "metrics": {
+    "total_runtime": 12.844,
+    "last_run_duration": 0.0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "restart_count": 0,
+    "avg_run_time": 0,
+    "start_time": 1791051506.4695926,
+    "uptime": 12.844
+   }
+  }
+ }
+}
