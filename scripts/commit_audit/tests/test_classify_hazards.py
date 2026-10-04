@@ -294,3 +294,23 @@ def test_dash_a_commit_takes_the_py_written_after_the_previous_attempt(tmp_path)
     lines = [edit("e1", PY), use("c1", "git commit -q -a -m x"), res("c1", RUFF_FORMAT_FAILED)]
     out = run(make_root(tmp_path, lines))[0]
     assert "A1-Edit/Write" in out["attempts"]["c1"]["classes"]
+
+
+# ----------------------------------------------------------------------------------------------
+# якорь ^ у сигнатур: цитата посреди строки (вывод cat документа, лог в тексте) — не класс
+# (инъекция лида L10: снятый якорь у A3 не краснил ни один тест)
+# ----------------------------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "quoted",
+    [
+        "> error: docs/sessions/x.md: patch does not apply",
+        "see:   - Branch has a plan (plans/x.md) but commit is missing matching `Refs:` trailer.",
+        "note:   - Unknown type 'merge'.",
+        "quote: bash: line 3: unexpected EOF while looking for matching `''",
+        "> error: could not read file '-'",
+    ],
+    ids=["A3", "B1", "B2", "C2", "C4"],
+)
+def test_a_signature_quoted_mid_line_is_not_a_class(tmp_path, quoted):
+    out = one(tmp_path, "git commit -q -m x", result=f"doc line\n{quoted}\n{OK_COMMIT}")
+    assert out["attempts"]["t1"]["classes"] == [], out["attempts"]["t1"]
