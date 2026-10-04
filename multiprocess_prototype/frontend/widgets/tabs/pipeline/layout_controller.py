@@ -285,7 +285,7 @@ class LayoutController:
         Layout — GUI-метаданные: пишем ТОЧЕЧНО ``blueprint.metadata.{gui_positions,
         locked_nodes}`` через store.save_layout (ruamel, не перезаписывая весь blueprint)
         — комментарии рецепта целы, processes/wires не тронуты (editor↔runtime decoupling,
-        [[project_pipeline_editor_runtime_decoupled]]). blueprint.metadata переживает
+        docs/claude/memory/_archive/project_pipeline_editor_runtime_decoupled.md). blueprint.metadata переживает
         cold-start (unwrap_recipe сохраняет blueprint; load_topology_from_config читает
         оттуда). Без активного рецепта / ошибки записи — только лог, без QMessageBox
         (авто-сохранение не должно дёргать пользователя).

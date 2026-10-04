@@ -369,8 +369,8 @@ trailer → `/dev:ship` checks `--grep="Refs:"` and closes the plan → `/core:t
 
 ## Memory (OVERRIDE)
 
-**Canonical path:** `.claude/memory/` (project-local, git-tracked; `autoMemoryDirectory` in
-`.claude/settings.local.json`, fixed by `plugin doctor --fix`). Index `- [Title](file.md) — hook`;
+**Canonical path:** `docs/claude/memory/` (git-tracked, shared by both machines); the machine-local
+auto-memory folder (`autoMemoryDirectory` in `.claude/settings.local.json`) is a cache refreshed from it by diff. Index `- [Title](file.md) — hook`;
 an entry is a separate `.md` with frontmatter `name`/`description`/`metadata.type` ∈
 `user`/`feedback`/`project`/`reference`. Lint: `.claude/plugins/core/scripts/memory_lint.py`.
 Commands: `/core:memory:status`, `:search <query>`, `:remember [lesson]`, `:init` (new project).

@@ -62,6 +62,17 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 9. **Слои импортов:** `multiprocess_framework → Services → Plugins → multiprocess_prototype` (composition root). Обратные импорты запрещены и enforced через `.sentrux/rules.toml` (boundaries `framework → prototype/Services/Plugins`, `Services → prototype/Plugins`, `Plugins → prototype`). Плагин знает только `PluginContext` и не должен импортировать `multiprocess_prototype.*` — см. ADR-120.
 10. **Commit-сообщения:** Conventional Commits + обязательные trailers `Why:` и `Layer:`. Опциональные — `Refs:`, `Risk:`, `Reversible:`, `Tested:`, `Rejected:`. Шаблон в `.gitmessage`, гайд в [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md), валидирует hook `.git/hooks/commit-msg` (установка `bash scripts/validate_commit/install_hook.sh`). Агенты обязаны генерировать trailers — иначе commit будет отклонён.
 
+## Принципы владельца
+
+Постоянные решения владельца. Их не пересматривают в каждой задаче; причины и замеры — в памяти по ссылке.
+
+1. **Framework универсален, прототип расходный.** Спорное решение оценивают по тому, что делает framework универсальнее, а не по удобству прототипа ([память](docs/claude/memory/feedback_framework_first.md)).
+2. **Framework чинят улучшением (fix forward).** Правка не удаляет функциональность; найденный баг в framework правят, а не обходят ([память](docs/claude/memory/feedback_framework_first.md)).
+3. **Мёртвый код замораживают, не удаляют (FREEZE, не KILL).** Дремлющий путь остаётся контрактом ([память](docs/claude/memory/feedback_framework_first.md)).
+4. **Меньше слоёв строго лучше.** При той же функциональности меньше уровней косвенности выигрывает ([память](docs/claude/memory/feedback_framework_first.md)).
+5. **Каждый компонент подключаемый, тестируемый, компонуемый.** Сбой одного модуля, процесса или плагина не валит соседей ([память](docs/claude/memory/feedback_framework_first.md)).
+6. **GUI формирует топологию, бэкенд исполняет headless (STRICT).** Топологию применяет оркестратор из выбора рецепта; GUI ничего не запускает сам ([память](docs/claude/memory/project_pipeline_recipe_driven_launch.md)).
+
 ## Формат commit-сообщений (для агентов)
 
 Каждый коммит:
@@ -95,21 +106,13 @@ Co-Authored-By: ...
 
 Подробности — в [`plans/` конвенциях](.claude/commands/dev/plan.md) и промптах агентов.
 
-## Memory (dual-write)
+## Память
 
-Проектная память хранится в **двух местах** — локальном (Claude Code) и git-tracked (между машинами):
-
-| Место | Путь | Git | Что хранить |
-|-------|------|-----|-------------|
-| **Локальная (Claude Code)** | У каждой машины своя. Windows: `~/.claude/projects/<hash>/memory/` (в Windows-копии `.claude/settings.local.json` нет `autoMemoryDirectory`, файл скрыт `git update-index --skip-worktree`). Mac: `.claude/memory/` (`autoMemoryDirectory` в `settings.local.json`) | Windows — нет, Mac — да | Всё: project, feedback, user, reference |
-| **Git-tracked** | `docs/claude/memory/` | **Да** | project + feedback (без личных user-записей) |
-
-**Правило dual-write:** при создании/обновлении memory — писать в **оба** места. MEMORY.md индекс — тоже в обоих.
-**Правило владельца (2026-10-02):** на Windows пишем в Windows-папку, на Mac — в Mac-папку; общее едет через `docs/claude/memory/`.
-
-- `docs/claude/memory/` — проектная (project, feedback), синхронизируется через git
-- локальная — + личное (user, reference); на Windows остаётся вне репозитория
-- `.claude/memory/` — каталог памяти проекта (рабочий на Mac); остальной `.claude/` — универсальная конфигурация, портируется между проектами
+- **Канон — `docs/claude/memory/`** (git, общий для обеих машин). Индекс `MEMORY.md` ≤ 8 КБ; уроки лежат в `CRAFT-*.md` и читаются по триггеру; архив — [`docs/claude/memory/_archive/INDEX.md`](docs/claude/memory/_archive/INDEX.md).
+- **Локальная папка Claude Code — кэш**, не источник. Обновляется из канона через `diff`; никогда не `robocopy /MIR` и не `cp` без `diff`: копия затирает правки другой стороны молча.
+- **Ручного dual-write больше нет.** Новый или обновлённый урок пишут в канон; локальная копия догоняет его.
+- **Личное (`user`) и машинное (`reference`, local-only)** живут только в локальной папке и в git не попадают.
+- **Mac** переходит на эту схему позже, по решению владельца; до тех пор `.claude/memory/` на Mac — рабочая папка Mac.
 
 ## MCP: qex (семантический поиск)
 
