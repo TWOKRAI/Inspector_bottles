@@ -919,7 +919,7 @@ def test_a7_old_json_keys_and_their_order_are_unchanged_and_active_is_last(tmp_p
     repo.fresh(repo.worktree("x", "feat/x"))
     plans = get_plans(repo.root)
     for name, p in plans.items():
-        assert list(p) == [*OLD_PLAN_KEYS, "active"], f"{name}: {list(p)}"
+        assert list(p) == [*OLD_PLAN_KEYS, "active", "branches"], f"{name}: {list(p)}"
         for t in p["tasks"]:
             assert list(t) == OLD_TASK_KEYS, f"{name}: {list(t)}"
 
@@ -930,4 +930,4 @@ def test_a7_active_is_an_empty_list_for_plans_without_any_worktree(tmp_path):
     plans = get_plans(repo.root)
     assert_control(plans)
     assert plans["X"]["active"] == []
-    assert list(plans["X"])[-1] == "active"
+    assert list(plans["X"])[-2:] == ["active", "branches"]
