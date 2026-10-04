@@ -14,10 +14,16 @@ from .mixins.observable_mixin import ObservableMixin
 from .configs.base_manager_config import BaseManagerConfig
 from .types import ProcessStatus
 
+# Контракт владения (ADR-BM-008): только дверь и сторож корней.
+# Классы Scope/Handle не экспортируются — снаружи аннотация IScope/IHandle.
+from .core.lifetime import open_scope, unclosed_roots
+
 __all__ = [
-    'BaseManager',
-    'BaseAdapter',
-    'ObservableMixin',
-    'BaseManagerConfig',
-    'ProcessStatus',
+    "BaseManager",
+    "BaseAdapter",
+    "ObservableMixin",
+    "BaseManagerConfig",
+    "ProcessStatus",
+    "open_scope",
+    "unclosed_roots",
 ]

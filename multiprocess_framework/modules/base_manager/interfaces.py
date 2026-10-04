@@ -311,11 +311,20 @@ def _sequence_as_tuple(field_name: str, value: object) -> tuple:
     """Привести последовательность поля ``CloseReport`` к кортежу.
 
     Строка на месте последовательности — ``TypeError``: ``tuple("proc/x")``
-    молча режет строку на символы.
+    молча режет строку на символы. ``set``/``frozenset`` — ``TypeError``:
+    порядок путей в отчёте значим. ``None`` и прочее неитерируемое —
+    ``TypeError`` с именем поля (Task 0.2, код-ревью 0.1 р2).
     """
-    if isinstance(value, (str, bytes)):
-        raise TypeError(f"CloseReport.{field_name}: ожидается последовательность, получено {type(value).__name__}")
-    return tuple(value)  # type: ignore[arg-type]
+    if isinstance(value, (str, bytes, set, frozenset)) or value is None:
+        raise TypeError(
+            f"CloseReport.{field_name}: ожидается упорядоченная последовательность, получено {type(value).__name__}"
+        )
+    try:
+        return tuple(value)  # type: ignore[call-overload]
+    except TypeError:
+        raise TypeError(
+            f"CloseReport.{field_name}: ожидается последовательность, получено {type(value).__name__}"
+        ) from None
 
 
 def _str_tuple(field_name: str, value: object) -> tuple[str, ...]:
@@ -396,6 +405,11 @@ class CloseReport:
     def __post_init__(self) -> None:
         _require_type("path", self.path, str, "str")
         _require_type("elapsed_s", self.elapsed_s, (int, float), "int | float")
+        # NaN/inf дали бы нестрогий JSON (`NaN`) на границе процесса. Без `math`:
+        # interfaces.py импортирует только литеральный список stdlib (Task 0.1).
+        # NaN не равен себе; x - x не ноль ровно для NaN и ±inf.
+        if self.elapsed_s - self.elapsed_s != 0:
+            raise ValueError(f"CloseReport.elapsed_s: ожидается конечное число, получено {self.elapsed_s!r}")
         _require_type("emits_after_close", self.emits_after_close, int, "int")
         _require_type("complete", self.complete, bool, "bool")
         object.__setattr__(self, "survivors", _str_tuple("survivors", self.survivors))
