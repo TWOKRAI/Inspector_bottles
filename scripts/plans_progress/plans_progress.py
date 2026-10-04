@@ -1701,7 +1701,11 @@ def _checked_out_branch(root: Path) -> str:
 
 
 def _own_commits(root: Path, branch: str) -> set[str]:
-    """Коммиты `main..<ветка>`; git не ответил — пусто (ветка не станет ничьим родителем)."""
+    """Коммиты `main..<ветка>`; git не ответил — пусто.
+
+    Такая ветка сама остаётся без родителя (корень стека) и проигрывает при выборе родителя по счёту `main..A`,
+    но как кандидат в родители другим веткам не исключается: их собственные множества не пострадали.
+    """
     out = _git(["rev-list", f"{MAIN_REF}..refs/heads/{branch}", "--"], root)
     return {line.strip() for line in (out or "").split("\n") if line.strip()}
 
@@ -1744,11 +1748,19 @@ def _touches(paths: list[str], plan_rel: str) -> bool:
     return any(path == plan_rel or path.startswith(plan_rel + "/") for path in paths)
 
 
+class PlanExportError(Exception):
+    """`git archive` отдал архив, а плана из него получить не удалось (в отличие от «плана в коммите нет»)."""
+
+
 def analyze_plan_at(root: Path, commit: str, plan_rel: str, name: str, archived: bool) -> Plan | None:
-    """План `plan_rel` в коммите, разобранный `analyze_plan`; плана в коммите нет или выгрузка не удалась — None.
+    """План `plan_rel` в коммите, разобранный `analyze_plan`; плана в коммите нет (`git archive` отказал) — None.
+
+    Архив получен, но не распаковался, цели нет или каталог плана пуст (`export-ignore` скрыл все файлы) —
+    `PlanExportError`: это не «плана нет», молча пропускать нельзя.
 
     `git archive -o <файл>` через `_git` (stdout пуст) и `tarfile` с `filter="data"`: tar из stdout в текстовом
-    режиме теряет файлы при `core.autocrlf=true`. Временный каталог удаляется при любом исходе.
+    режиме теряет файлы при `core.autocrlf=true`. Удаление временного каталога пробуется при любом исходе;
+    ошибка удаления глушится.
     """
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         archive = Path(tmp) / "x.tar"
@@ -1759,14 +1771,16 @@ def analyze_plan_at(root: Path, commit: str, plan_rel: str, name: str, archived:
         try:
             with tarfile.open(archive) as tar:
                 tar.extractall(tree, filter="data")
-        except (tarfile.TarError, OSError, ValueError):
-            return None
+        except (tarfile.TarError, OSError, ValueError) as exc:
+            raise PlanExportError(f"{type(exc).__name__}: {exc}") from exc
         target = tree / plan_rel
         if target.is_dir():
+            if not any(p.is_file() for p in target.rglob("*")):  # git пустых каталогов не хранит: файлы скрыты
+                raise PlanExportError("в выгрузке нет файлов плана")
             return analyze_plan(name, target / "plan.md", target, plan_rel, archived)
         if target.is_file():
             return analyze_plan(name, target, None, plan_rel, archived)
-        return None
+        raise PlanExportError("в выгрузке нет пути плана")
 
 
 def _status_by_id(plan: Plan | None) -> dict[str, str]:
@@ -1784,15 +1798,21 @@ def merge_branch_numbers(base: Plan | None, tip: Plan, disk: Plan) -> tuple[int,
     задача выпадает); иначе (изменили обе стороны) -> `done`, если он на вершине или на диске, иначе статус диска.
     Задачи вершины, которых нет ни в базе, ни на диске, добавляются. Считают те же правила, что у плана.
     Повтор id: диск перебирается по всем вхождениям (как `Plan.done`), у каждого свой статус диска; база и вершина
-    берутся по id, первая запись. Ветка меняет задачу — все вхождения получают статус вершины.
+    берутся по id, первая запись, и слияние применяется к первому вхождению; остальные вхождения id остаются
+    со статусом диска.
     """
     on_base, on_tip, on_disk = _status_by_id(base), _status_by_id(tip), _status_by_id(disk)
     merged: list[Task] = []
+    seen: set[str] = set()
     for disk_task in disk.tasks:  # каждое вхождение, как считает `Plan.done`; база и вершина — по id (первая запись)
         tid, disk_status = disk_task.id, disk_task.status
         tip_status, base_status = on_tip.get(tid), on_base.get(tid)  # None — задачи в разборе нет
-        if tip_status == base_status:
-            status: str | None = disk_status
+        first = tid not in seen
+        seen.add(tid)
+        if not first:
+            status: str | None = disk_status  # слияние относится к первой записи id; повторы остаются как на диске
+        elif tip_status == base_status:
+            status = disk_status
         elif disk_status == base_status:
             status = tip_status
         else:
@@ -1824,11 +1844,14 @@ def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timed
     tips = {name: unmerged[name][0] for name in sorted(candidates)}
     own = {name: _own_commits(root, name) for name in tips}
     plan_roots = [(p, _plan_root_rel(root, p)) for p in plans]
-    parsed: dict[tuple[str, str], Plan | None] = {}  # (коммит, путь плана): база общая у нескольких веток
+    parsed: dict[tuple[str, str], Plan | PlanExportError | None] = {}  # (коммит, путь плана): база общая у веток
 
-    def plan_at(commit: str, plan_rel: str, p: Plan) -> Plan | None:
+    def plan_at(commit: str, plan_rel: str, p: Plan) -> Plan | PlanExportError | None:
         if (commit, plan_rel) not in parsed:
-            parsed[commit, plan_rel] = analyze_plan_at(root, commit, plan_rel, p.name, p.archived)
+            try:
+                parsed[commit, plan_rel] = analyze_plan_at(root, commit, plan_rel, p.name, p.archived)
+            except PlanExportError as exc:
+                parsed[commit, plan_rel] = exc
         return parsed[commit, plan_rel]
 
     for name in actual:
@@ -1839,13 +1862,27 @@ def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timed
             continue
         parent = _stack_parent(name, tips, own)
         touched = _touched_paths(root, tips[parent] if parent else base, name)
+        if parent:
+            # ветка могла влить свежий `main`: diff от родителя тогда несёт и чужие правки `main`; свои правки ветки
+            # видны и от merge-base (у корня стека это тот же вызов, второй diff не нужен)
+            own_touched = set(_touched_paths(root, base, name))
+            touched = [path for path in touched if path in own_touched]
         for p, plan_rel in plan_roots:
             if not _touches(touched, plan_rel):
                 continue
             tip_plan = plan_at(tips[name], plan_rel, p)
-            if tip_plan is None:
+            if tip_plan is None:  # плана на вершине нет (удалён, перенесён): записи нет, молча
                 continue
-            done, total = merge_branch_numbers(plan_at(base, plan_rel, p), tip_plan, p)
+            base_plan = plan_at(base, plan_rel, p)  # None — плана на базе нет: база пуста
+            failed = next((x for x in (tip_plan, base_plan) if isinstance(x, PlanExportError)), None)
+            if failed is not None:
+                reason = " ".join(str(failed).split())[:120]
+                print(
+                    f"предупреждение: ветка {name}, план {plan_rel}: выгрузка есть, разбор не удался ({reason})",
+                    file=sys.stderr,
+                )
+                continue
+            done, total = merge_branch_numbers(base_plan, tip_plan, p)
             p.branches.append({"branch": name, "done": done, "total": total})
 
 

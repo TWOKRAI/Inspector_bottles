@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -174,9 +175,10 @@ def _fake_git_writing_tar(payload: bytes):
     return fake
 
 
-def test_corrupt_tar_gives_none_and_leaves_no_tempdir(tmp_area, monkeypatch):
+def test_corrupt_tar_raises_export_error_and_leaves_no_tempdir(tmp_area, monkeypatch):
     monkeypatch.setattr(pp, "_git", _fake_git_writing_tar(b"not a tar at all" * 100))
-    assert pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False) is None
+    with pytest.raises(pp.PlanExportError):
+        pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False)
     assert list(tmp_area.iterdir()) == []
 
 
@@ -189,20 +191,22 @@ def test_hostile_tar_member_outside_the_target_is_refused_and_nothing_is_written
         info.size = len(data)
         tar.addfile(info, io.BytesIO(data))
     monkeypatch.setattr(pp, "_git", _fake_git_writing_tar(buf.getvalue()))
-    assert pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False) is None
+    with pytest.raises(pp.PlanExportError):
+        pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False)
     assert not (tmp_area / "evil.txt").exists() and not (tmp_area.parent / "evil.txt").exists()
     assert list(tmp_area.iterdir()) == []
 
 
-def test_tar_without_the_plan_path_gives_none(tmp_path, tmp_area, monkeypatch):
-    """git ответил успехом, но в архиве другого пути нет — не исключение и не пустой план."""
+def test_tar_without_the_plan_path_raises_export_error(tmp_path, tmp_area, monkeypatch):
+    """git ответил успехом, но в архиве другого пути нет: это сбой выгрузки (предупреждение), не «плана нет»."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
         info = tarfile.TarInfo("plans/OTHER/plan.md")
         info.size = 1
         tar.addfile(info, io.BytesIO(b"x"))
     monkeypatch.setattr(pp, "_git", _fake_git_writing_tar(buf.getvalue()))
-    assert pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False) is None
+    with pytest.raises(pp.PlanExportError):
+        pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False)
 
 
 # =========================================================================== имена веток и пути
@@ -452,14 +456,25 @@ def test_duplicate_id_on_disk_and_branch_that_changes_no_status_gives_disk_numbe
     assert _chips_of(repo, "P") == []
 
 
-def test_duplicate_id_branch_changes_that_task_both_occurrences_take_the_tip_status(tmp_path):
-    """Ветка меняет `1.1` (первая запись: DONE -> PENDING): база и вершина берутся по id, диск = база, поэтому ОБА
-    вхождения диска получают статус вершины. Закрепляет то, что делает код: 0 из 3 (1.1 дважды PENDING, 1.2 PENDING)."""
+def test_duplicate_id_branch_changes_that_task_only_the_first_occurrence_takes_the_tip_status(tmp_path):
+    """Ветка меняет `1.1` (первая запись: DONE -> PENDING). База и вершина берутся по id, диск = база, слияние
+    применяется к ПЕРВОМУ вхождению id; второе остаётся как на диске (DONE). Итог 1 из 3 (вершина считает 0 из 3:
+    повтор диска — собственная запись диска, не вершины)."""
     repo = Repo(tmp_path, {"plans/P/plan.md": DUP_PLAN})
     reopened = DUP_PLAN.replace("- Task 1.1: a [DONE]", "- Task 1.1: a [PENDING]")
     repo.edit_on("feat/x", {"plans/P/plan.md": reopened})
-    assert repo.collect()["P"] == [{"branch": "feat/x", "done": 0, "total": 3}]
-    assert _chips_of(repo, "P") == ["в ветке feat/x: 0 из 3, в main: 2"]
+    assert repo.collect()["P"] == [{"branch": "feat/x", "done": 1, "total": 3}]
+    assert _chips_of(repo, "P") == ["в ветке feat/x: 1 из 3, в main: 2"]
+
+
+def test_duplicate_id_branch_closes_the_first_occurrence_the_second_keeps_its_disk_status(tmp_path):
+    """Диск = база: `1.1` PENDING дважды, `1.2` PENDING. Ветка закрывает первую `1.1`: вершина считает 1 из 3.
+    Запись обязана быть 1 из 3 (раньше оба вхождения брали DONE вершины и выходило 2 из 3 при 1 из 3 на вершине)."""
+    plan = "# План\n\n## Порядок выполнения\n\n- Task 1.1: a [PENDING]\n- Task 1.1: a again [PENDING]\n- Task 1.2: b [PENDING]\n"
+    repo = Repo(tmp_path, {"plans/P/plan.md": plan})
+    repo.edit_on("feat/x", {"plans/P/plan.md": plan.replace("- Task 1.1: a [PENDING]", "- Task 1.1: a [DONE]")})
+    assert repo.collect()["P"] == [{"branch": "feat/x", "done": 1, "total": 3}]
+    assert _chips_of(repo, "P") == ["в ветке feat/x: 1 из 3, в main: 0"]
 
 
 # =========================================================================== тег `main` на более старом коммите
@@ -484,3 +499,99 @@ def test_tag_named_main_on_an_older_commit_does_not_change_the_answer(tmp_path):
     repo.git("checkout", "-q", "--detach", "refs/heads/main")
     assert repo.git("rev-parse", "main").strip() != repo.git("rev-parse", "refs/heads/main").strip(), "предусловие"
     assert repo.collect() == {"P": [{"branch": "feat/x", "done": 2, "total": 3}], "Q": []}
+
+
+# =========================================================================== ветка влила свежий main: чужие правки main не её
+
+
+def _stack_with_merged_main(tmp_path: Path, child_edits_p: bool) -> Repo:
+    """feat/x правит P; feat/x2 — от feat/x (родитель по правилу стека); main закрывает задачу в Q; feat/x2 вливает main."""
+    repo = Repo(
+        tmp_path,
+        {"plans/P/plan.md": items("DONE", "PENDING", "PENDING"), "plans/Q/plan.md": items("PENDING", "PENDING")},
+    )
+    repo.edit_on("feat/x", {"plans/P/plan.md": items("DONE", "DONE", "PENDING")})
+    child = {"plans/P/plan.md": items("DONE", "DONE", "DONE")} if child_edits_p else {"NOTES.txt": "child"}
+    repo.edit_on("feat/x2", child, frm="feat/x")
+    repo.git("checkout", "-q", "main")
+    repo.write("plans/Q/plan.md", items("DONE", "PENDING"))
+    repo.commit("main closes Q 1.1")
+    repo.git("checkout", "-q", "feat/x2")
+    repo.git("merge", "-q", "--no-edit", "main")
+    repo.git("checkout", "-q", "main")
+    return repo
+
+
+def test_child_that_merged_main_gets_no_entry_in_a_plan_only_main_changed(tmp_path):
+    """Диск Q: main закрыл 1.1 (1 из 2). Правки Q пришли в feat/x2 только слиянием main; diff от вершины родителя
+    feat/x их показывает, diff от merge-base с main (= вершина main) — нет. Q: [] ; в P у feat/x2 своих правок нет."""
+    repo = _stack_with_merged_main(tmp_path, child_edits_p=False)
+    assert repo.collect() == {"P": [{"branch": "feat/x", "done": 2, "total": 3}], "Q": []}
+
+
+def test_child_that_merged_main_and_edits_p_itself_has_entry_in_p_only(tmp_path):
+    repo = _stack_with_merged_main(tmp_path, child_edits_p=True)
+    assert repo.collect() == {
+        "P": [{"branch": "feat/x", "done": 2, "total": 3}, {"branch": "feat/x2", "done": 3, "total": 3}],
+        "Q": [],
+    }
+
+
+def test_stack_root_costs_one_diff_and_child_costs_two(tmp_path, monkeypatch):
+    repo = _stack_with_merged_main(tmp_path, child_edits_p=False)
+    calls = spy_run(monkeypatch)
+    repo.collect()
+    assert verbs(calls)["diff"] == 3, "feat/x — корень: 1 diff; feat/x2 — потомок: от родителя и от merge-base"
+
+
+# =========================================================================== выгрузка есть, разбор не удался: предупреждение
+
+
+def test_failed_extraction_prints_one_stderr_line_and_gives_no_entry(tmp_path, capsys, monkeypatch):
+    repo = Repo(tmp_path, {"plans/P/plan.md": items("DONE", "PENDING", "PENDING")})
+    repo.edit_on("feat/x", {"plans/P/plan.md": items("DONE", "DONE", "PENDING")})
+
+    def boom(self, *a, **kw):
+        raise tarfile.ReadError("boom")
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", boom)
+    assert repo.collect()["P"] == []
+    assert capsys.readouterr().err == (
+        "предупреждение: ветка feat/x, план plans/P: выгрузка есть, разбор не удался (ReadError: boom)\n"
+    )
+
+
+def test_plan_absent_at_the_tip_stays_silent(tmp_path, capsys, monkeypatch):
+    repo = Repo(tmp_path, {"plans/P/plan.md": items("DONE", "PENDING", "PENDING")})
+    repo.edit_on("feat/x", {"plans/P/plan.md": items("DONE", "DONE", "PENDING")})
+    spy_run(monkeypatch, fail={"archive": "nonzero"})
+    assert repo.collect()["P"] == []
+    assert capsys.readouterr().err == ""
+
+
+def test_export_ignore_hides_the_plan_warns_on_stderr_and_keeps_json_valid(tmp_path):
+    """`export-ignore` в .gitattributes: архив пуст (только каталоги). Запись у P не делается, stderr — одна строка,
+    stdout `--json` — целый JSON; контроль: план Q без export-ignore получил запись."""
+    repo = Repo(
+        tmp_path,
+        {
+            ".gitattributes": "plans/P/* export-ignore\n",
+            "plans/P/plan.md": items("DONE", "PENDING", "PENDING"),
+            "plans/Q/plan.md": items("DONE", "PENDING", "PENDING"),
+        },
+    )
+    repo.edit_on(
+        "feat/x",
+        {"plans/P/plan.md": items("DONE", "DONE", "PENDING"), "plans/Q/plan.md": items("DONE", "DONE", "PENDING")},
+    )
+    cp = subprocess.run(
+        [sys.executable, str(_MOD_PATH), "--root", str(repo.root), "--json", "--now", "2026-10-03T12:00:00"],
+        capture_output=True, encoding="utf-8", errors="replace", timeout=60, env=_env({"PYTHONIOENCODING": "utf-8"}),
+    )  # fmt: skip
+    assert cp.returncode == 0, cp.stderr
+    plans = {p["plan"]: p for p in json.loads(cp.stdout)}
+    assert plans["P"]["branches"] == []
+    assert plans["Q"]["branches"] == [{"branch": "feat/x", "done": 2, "total": 3}]
+    assert cp.stderr.splitlines() == [
+        "предупреждение: ветка feat/x, план plans/P: выгрузка есть, разбор не удался (в выгрузке нет файлов плана)"
+    ]
