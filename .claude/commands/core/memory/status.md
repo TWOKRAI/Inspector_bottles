@@ -1,5 +1,5 @@
 ---
-description: Project long-term memory status — what's in <memory_dir>/
+description: Show what the project memory directory holds. Call before adding or pruning memory entries.
 ---
 
 **Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.

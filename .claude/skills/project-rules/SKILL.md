@@ -1,13 +1,6 @@
 ---
 name: project-rules
-description: >
-  Standing rules shared by every dev agent in this project — qex freshness
-  check, honesty over plausibility, MCP availability, commit trailers,
-  subagent and language discipline, the escalation ladder (junior →
-  developer → teamlead → cto → owner), and the explanation style (STE-80:
-  short, plain, verdict first). Preloaded into agents through
-  `skills:` in their frontmatter; read it manually if it is not already
-  in your context.
+description: "Standing rules for every dev agent: qex freshness, honesty, MCP availability, commit trailers, scope, escalation ladder, STE-80 style. Preloaded via skills:; read it manually if absent."
 ---
 
 # Project rules (apply on top of your role)

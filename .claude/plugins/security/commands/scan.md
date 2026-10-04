@@ -1,5 +1,5 @@
 ---
-description: Run Semgrep SAST (deterministic code-vuln gate) — injection, deserialization, unsafe crypto, hardcoded secrets
+description: "Run Semgrep SAST: injection, deserialization, unsafe crypto, hardcoded secrets. Call before merging code that handles untrusted input."
 ---
 
 Запусти детерминированный SAST-скан (Semgrep) — дополняет LLM-ревью `/security-review`

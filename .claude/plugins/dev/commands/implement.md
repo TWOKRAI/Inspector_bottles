@@ -1,5 +1,5 @@
 ---
-description: Implement one Task per spec with contract-first TDD by default (interface → red → green)
+description: Implement one Task X.Y per the spec, contract-first (interface, red, green). Call with a task id from an approved plan.
 ---
 
 Implement **one** Task X.Y from the plan (or from $ARGUMENTS) following **contract-first TDD**

@@ -1,13 +1,6 @@
 ---
 name: systematic-debugging
-description: >
-  Disciplined root-cause debugging for a failing test or a reproduced
-  regression — reproduce first, form at least two hypotheses, test the
-  most-likely one first, fix the cause (not the symptom) or escalate.
-  Activates when a test is red, a regression is reproduced, a runtime
-  error is unclear, or before /dev:debug runs — NOT on every mention of
-  a bug. Triggers: "why is this failing", "root cause", "test keeps
-  failing", "regression after", "systematic debugging", "/systematic-debugging".
+description: "Root-cause debugging for a red test or reproduced regression: reproduce, two hypotheses, test the likelier, fix the cause or escalate. Use before /dev:debug, not on every mention of a bug."
 ---
 
 # Systematic debugging

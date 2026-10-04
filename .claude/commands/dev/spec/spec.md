@@ -1,5 +1,5 @@
 ---
-description: Create or update the living spec (docs/direction/) for the app — a product specification from the user's point of view
+description: Create or update the living product spec in docs/direction/, written from the user's point of view. Call when product behaviour is defined or changes.
 ---
 
 Launch the **spec-writer** agent (subagent_type: "spec-writer").

@@ -1,5 +1,5 @@
 ---
-description: Semantic session close — summary in docs/sessions/ + (optional) memory update
+description: "Close the session: write docs/sessions/<date>.md and optionally update memory. Call at the end of a work session."
 ---
 
 Deliberate close of a work session. No Stop or pre-commit hook writes the session log: wrap-up is the only writer of `docs/sessions/`. It writes **what was done / what remains / next step**, then commits the log file.

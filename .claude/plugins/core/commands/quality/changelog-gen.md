@@ -1,5 +1,6 @@
 ---
 description: Generate a changelog from Conventional Commits between two refs
+disable-model-invocation: true
 ---
 
 Generate a changelog from the git history (Conventional Commits):

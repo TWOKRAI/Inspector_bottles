@@ -1,5 +1,6 @@
 ---
 description: Install a plugin — consume form <plugin>@<marketplace> (α, delegated to Claude Code) OR git source <git-url> (β, our git-clone + wire)
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin install*)
 ---
 

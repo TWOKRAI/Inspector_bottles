@@ -1,5 +1,5 @@
 ---
-description: Incremental qex index update (Merkle-diff, seconds-minutes). For a full reindex — /mcp-qex:qex-rebuild
+description: Incremental qex index update (seconds to minutes). Call when get_indexing_status shows a stale index; a full rebuild is qex-rebuild.
 ---
 
 Incremental indexing: qex compares the Merkle snapshot from `~/.qex/projects/<hash>/snapshot.json`

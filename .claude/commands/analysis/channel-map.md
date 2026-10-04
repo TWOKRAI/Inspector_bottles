@@ -1,5 +1,5 @@
 ---
-description: Карта IPC-каналов (FieldRouting / send_message / subscribe)
+description: "Карта IPC-каналов: кто что шлёт и на что подписан (FieldRouting, send_message, subscribe). Звать при правке роутинга или IPC-контракта."
 ---
 
 Запусти AST-сканер IPC:

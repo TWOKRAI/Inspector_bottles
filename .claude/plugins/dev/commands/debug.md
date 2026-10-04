@@ -1,5 +1,5 @@
 ---
-description: Run the Debugger agent (Sonnet) — diagnose failing tests, regressions, puzzling errors
+description: Run the debugger agent (Sonnet) on a failing test, regression or puzzling error. Call when a test is red and the cause is unknown.
 ---
 
 Run the **debugger** agent (Sonnet) to diagnose the problem.

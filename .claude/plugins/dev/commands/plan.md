@@ -1,5 +1,5 @@
 ---
-description: Run the Manager agent (Opus) — decompose a task and write the spec
+description: "Run the manager agent (Opus): decompose a task and write the spec plans/<slug>.md. Call to start any non-trivial task."
 ---
 
 > Before decomposing, consider `/core:quality:dashboard` first — a one-command

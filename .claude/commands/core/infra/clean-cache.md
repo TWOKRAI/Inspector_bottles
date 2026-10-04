@@ -1,5 +1,6 @@
 ---
-description: Clean Python caches (__pycache__, .pytest_cache, *.pyc, .coverage) — dry-run by default
+description: Delete Python caches (__pycache__, .pytest_cache, *.pyc, .coverage); dry-run by default. Call when stale bytecode or cache causes odd test behaviour.
+disable-model-invocation: true
 ---
 
 Show which Python caches and tool artifacts sit in the project:

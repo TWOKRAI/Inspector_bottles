@@ -1,5 +1,5 @@
 ---
-description: Check agent .md files for consistency (frontmatter, model, tools, cross-ref with CLAUDE.md)
+description: Check agent .md files for consistency (frontmatter, model, tools, cross-refs with CLAUDE.md). Call after editing any agent file.
 ---
 
 # /quality:lint-agents — agent definition linter

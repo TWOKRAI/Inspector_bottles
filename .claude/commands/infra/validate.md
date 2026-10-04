@@ -1,5 +1,5 @@
 ---
-description: Валидация структуры проекта (scripts/validate.py)
+description: Проверка структуры проекта (scripts/validate.py). Звать перед коммитом и после правок DECISIONS.md.
 ---
 
 Запусти валидацию структуры проекта:

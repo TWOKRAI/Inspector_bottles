@@ -1,5 +1,5 @@
 ---
-description: Write a session handoff to docs/handoffs/ for cross-machine context transfer
+description: Write a session handoff to docs/handoffs/ so another machine or session can continue. Call at a context boundary.
 ---
 
 Create a session handoff document for cross-machine context transfer.

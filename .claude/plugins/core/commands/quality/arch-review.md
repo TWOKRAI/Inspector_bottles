@@ -1,5 +1,5 @@
 ---
-description: Comprehensive architecture review — sentrux health, DSM, test gaps, optional diagrams
+description: "Full architecture review: sentrux health, DSM, test gaps, optional diagrams. Call before a refactor or at a phase boundary."
 ---
 
 Comprehensive architecture review of the project.

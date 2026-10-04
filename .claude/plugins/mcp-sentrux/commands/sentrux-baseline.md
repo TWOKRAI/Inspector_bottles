@@ -1,5 +1,5 @@
 ---
-description: Record a quality baseline before refactoring (session_start)
+description: Record a quality baseline (session_start). Call before a refactor, then compare with sentrux-diff.
 ---
 
 Record the reference point before starting a refactor/changes:

@@ -1,12 +1,6 @@
 ---
 name: verify-done
-description: >
-  Verification gate before declaring a task complete. Forces the agent
-  to prove the change actually works — not just "tests are green" or
-  "code compiles". Activates when the agent is about to say "done",
-  "finished", "ready", "ship it", or before /dev:ship / /dev:pipeline closes a
-  task. Triggers: "verify", "is it really done", "/verify-done",
-  agent's own self-check before completion claim.
+description: "Verification gate before saying 'done': run the change end to end, not just tests. Use before /dev:ship or any completion claim."
 ---
 
 # Verification before completion
