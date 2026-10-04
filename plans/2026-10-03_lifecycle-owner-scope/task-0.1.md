@@ -33,15 +33,21 @@ Task 0.3. Причина: зависимость появится только �
 
 ### `Stoppable` — `typing.Protocol`, `@runtime_checkable`
 - `request_stop(self) -> None` — фаза 1. Не блокирует, идемпотентен, вызывается из любого потока.
-- `join(self, deadline: float) -> bool` — фаза 2. `deadline` — абсолютное значение `time.monotonic()`.
-  `True` = остановлен. На таймауте возвращает `False`, не бросает.
-  **⏳ CTO (Q1):** имя `join` совпадает со stdlib `Thread.join(timeout)` / `Process.join(timeout)` — относительный
-  таймаут, возврат `None`. Ревью спека, проба H1: наследник `Thread` с `request_stop` проходит `isinstance`,
-  `join(monotonic()+0.1)` ждал 2.00 с и вернул `None`. Варианты: `join_until(deadline)` или запрет в docstring.
-  Строка уточняется по вердикту, до тестера.
+- `join_until(self, deadline: float) -> bool` — фаза 2. `deadline` — абсолютное значение `time.monotonic()`.
+  `True` = остановлен. На таймауте возвращает `False`, не бросает. **Имя намеренно не `join`** (вердикт CTO
+  2026-10-04, Q1): у `threading.Thread`, `multiprocessing.Process`, `QThread` есть `join(timeout)` с ОТНОСИТЕЛЬНЫМ
+  таймаутом и без результата — подкласс с добавленным `request_stop` проходил бы `isinstance(…, Stoppable)` и ждал
+  абсолютное значение как секунды (зонд: 2.00 с при бюджете 0.1 с, возврат `None`). С `join_until` такой объект не
+  Stoppable и не вызываемый → `TypeError` в `own()` до регистрации. Keyword-only `join(*, deadline)` не спасает:
+  `isinstance` остаётся `True`.
 - `kill()` и `close()` — **не** члены протокола (Protocol не умеет «необязательный метод»). Они описаны в docstring
   протокола как необязательные; `Scope` (0.2) ищет их через `getattr`. Причина `@runtime_checkable`: `Scope.own`
   в 0.2 различает `Stoppable` и вызываемое через `isinstance`.
+  - `kill()` — фаза 3, только после `join_until() == False`. **Не блокирует**: отправить сигнал (terminate /
+    `cancel_futures`) и вернуться; ожидание смерти — повторный `join_until` к сроку резерва. Причина (зонд CTO):
+    `kill()`, блокирующий 0.3 с, при двух застрявших дал 0.80 с = бюджет + 2 × 0.3 — резерв умножается на N;
+    неблокирующий — 0.22 с.
+  - `close()` — освобождение после успешного `join_until`/`kill`.
 - Порядок различения в 0.2 фиксируется здесь в docstring: сначала `isinstance(res, Stoppable)`, иначе `callable(res)`,
   иначе `TypeError`. Объект, который одновременно `Stoppable` и вызываемый, считается `Stoppable`. Причина: так он
   получает фазу 2 к сроку; ветка «вызываемое» её пропустила бы.
@@ -87,21 +93,56 @@ Task 0.3. Причина: зависимость появится только �
 ### `IHandle` — `typing.Protocol`
 `path -> str`, `kind -> str` (property), `close(self, budget_s: float | None = None) -> CloseReport`. Семантика —
 docstring из DESIGN §2.1 (досрочное освобождение одной записи тем же путём, что и область; идемпотентно).
+`budget_s=None` — `budget_s` области-владельца; резерв kill — её `kill_reserve_s`, правила те же, что у `IScope.close`.
 
 ### `IScope` — `typing.Protocol`
 Члены и docstring — как в DESIGN §2.1:
 - `path -> str`, `closed -> bool`, `parent -> IScope | None` — property.
 - `own(self, res: Resource, *, name: str, kind: str = "resource") -> IHandle`
-- `child(self, name: str, *, budget_s: float | None = None) -> IScope` — **⏳ CTO (Q3):** слот `kill_reserve_s`
-  (DESIGN §2.2: у области `children` PM резерв = `TERMINATE_GRACE_S + KILL_CONFIRM_S`), смысл `None`, правило
-  «заданы и `budget_s`, и `deadline` в `close`», резерв kill сверх срока или внутри — сверка с ADR-PMM-031 / П2.
+- `child(self, name: str, *, budget_s: float | None = None, kill_reserve_s: float | None = None) -> IScope` —
+  `None` = значение родителя, копируется при создании. Пример (Task 1.1): `children = work.child("children",
+  budget_s=budget["pm_graceful_s"], kill_reserve_s=budget["pm_total_s"] - budget["pm_graceful_s"])`.
 - `barrier(self) -> None`
 - `spawn(self, target: Callable[[threading.Event], None], *, name: str) -> IHandle`
 - `cancel(self) -> None`
-- `close(self, budget_s: float | None = None, *, deadline: float | None = None) -> CloseReport`
+- `close(self, budget_s: float | None = None, *, deadline: float | None = None) -> CloseReport` — docstring
+  (вердикт CTO 2026-10-04, Q3):
+  - Срок фазы 2: `deadline`, если задан; иначе `now + budget_s`; иначе `now + self.budget_s`. **Оба заданы →
+    `ValueError` до любого действия** (два источника одного числа — тот же класс дефекта, что две копии формулы
+    бюджета).
+  - Дочерняя область, закрываемая родителем, получает срок **`min(срок родителя, now + child.budget_s)`**: ребёнок не
+    переживёт родителя и не растянет свой сегмент (прототип без `min`: `work` с бюджетом 0.2 под корнем 1.0 ждал
+    1.00 с — застрявший `work` съел бы время `transport`/`planes`).
+  - Фаза 3 (kill) выполняет та область, которой принадлежит запись, после СВОЕГО срока фазы 2, в пределах СВОЕГО
+    `kill_reserve_s`. **Срок родителя резерв не обрезает** — бюджет родителя обязан его включать (у PM:
+    `pm_total = pm_graceful + kill_reserve`, `outer = pm_total + margin`, одна функция `stop_budget`, ADR-PMM-031).
+    Обрезка оставила бы опоздавшего ребёнка-процесс живым — сироты, против которых писалась stop-ownership Task 1.4.
+  - Ожидание убитых — `join_until(now + kill_reserve_s)` по всем убитым разом.
+  - Отчёт: `elapsed_s` ≤ `budget + kill_reserve_s`, если резерв потребовался; ≤ `budget`, если нет.
 - `live(self) -> list[dict]`
 
 Keyword-only там, где в DESIGN стоит `*`. Имена параметров — ровно такие (вызывающие пишут их по имени).
+
+### Дверь создания корня — решение CTO 2026-10-04 (Q2)
+Корень области создаётся ТОЛЬКО фабрикой пакета; в 0.1 — текст ADR, код и тест сигнатуры — Task 0.2:
+```python
+from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots
+def open_scope(path: str, *, budget_s: float, kill_reserve_s: float = 0.0,
+               reporter: Reporter | None = None) -> IScope
+```
+- `budget_s` обязателен: число приходит из `stop_budget` (Dict at Boundary); в `base_manager` числа бюджета не живут.
+- `kill_reserve_s = 0.0` по умолчанию: «резерва нет» — не бюджетное число; второй копии `TERMINATE_GRACE_S` /
+  `KILL_CONFIRM_S` в `base_manager` не появляется. Корень PM получает резерв из `stop_budget`.
+- `Scope`, `Handle` в `__all__` пакета НЕ входят; снаружи аннотация — только `IScope` / `IHandle`. Наследовать
+  `Scope` снаружи нельзя — второго владельца через `class X(Scope)` не написать.
+- `unclosed_roots() -> list[dict]` реэкспортируется для G3.
+- DESIGN §2.3: строка `root = Scope(f"proc/{name}", ...)` читается как
+  `root = open_scope(f"proc/{name}", budget_s=..., kill_reserve_s=..., reporter=lifecycle.report)`.
+- Отвергнуто (в ADR, внутри решения): фабрика в `interfaces.py` (интерфейс импортировал бы реализацию — инверсия
+  направления, ломает «только stdlib»); исключение в allowlist G6 для `process_module` (второе место, где известен
+  класс); экспорт класса `Scope` (наследование = второй владелец).
+- G2 (Task 0.5) сравнивает **текст** аннотации с `IScope`, а не полагается на отсутствие экспорта:
+  `type(open_scope(...))` класс всё равно отдаёт.
 
 ### Семантика в docstring (алгоритм — блокировки, сегменты, LIFO — остаётся за 0.2)
 - **Reporter.** Задаётся корню; дети наследуют. Вызывается **ровно один раз на каждое закрытие, начатое не изнутри
@@ -143,13 +184,14 @@ Keyword-only там, где в DESIGN стоит `*`. Имена парамет�
      останова — ADR-PMM-031 / ADR-SRM-016, BM-008 его не повторяет.
    - **Решает сам:** D1 (дом), D2 (один `Stoppable` + вызываемое), D3 (без слабых ссылок), `ok` без
      `emits_after_close`, Protocol вместо ABC (адаптеры потоков, процессов, пулов не наследуют базу фреймворка),
-     дверь создания корня (⏳ CTO Q2). **Только упоминает:** D4 — ADR модуля process в Task 1.2; D5 — frontend в 0.4/0.5;
-     D6 — политика плана.
-   - **Отвергнутое — семь пунктов, каждый отдельным пунктом списка с жирным именем и причиной:** **отдельный
+     дверь создания корня `open_scope` (Q2), `join_until` вместо `join` (Q1), сроки и резерв kill (Q3: `min`,
+     резерв сверху, `kill()` не блокирует, «оба заданы» → `ValueError`) — вердикт CTO 2026-10-04 со ссылками на зонды.
+     **Только упоминает:** D4 — ADR модуля process в Task 1.2; D5 — frontend в 0.4/0.5; D6 — политика плана.
+   - **Отвергнутое — восемь пунктов, каждый отдельным пунктом списка с жирным именем и причиной:** **отдельный
      `lifetime_module`**; **`WeakMethod` / слабые ссылки** (D3); **три корня процесса** вместо одного с барьерами;
      **передача `close` потоку-владельцу**; **список обёрток совместимости** вместо атомарной миграции (D6);
      **несколько протоколов по видам ресурса** (D2); **проверка `hasattr`, как в прототипе** (`__getattr__` прокси и
-     `Mock()` проходят как Stoppable).
+     `Mock()` проходят как Stoppable); **`join` + запрет в docstring** (правило в прозе против ловушки в типах, Q1).
    - Раздел «Открыто» — ссылка на DESIGN §6.
 3. `python -m scripts.sync` → сводные разделы `multiprocess_framework/DECISIONS.md`.
 4. README (раздел «Контракт владения» + маркер `Stability:`; устаревшие §6/§9 про «ADR-114…117» — не трогать, отдельная
@@ -172,9 +214,13 @@ Keyword-only там, где в DESIGN стоит `*`. Имена парамет�
       параметров, значения по умолчанию, keyword-only.
 - [ ] `IScope.path`, `IScope.closed`, `IScope.parent`, `IHandle.path`, `IHandle.kind` — объекты `property` в
       `__dict__` своего протокола, у каждого `fset is None`.
-- [ ] `isinstance(obj, Stoppable)`: `True` для объекта с `request_stop` и `join`; `False`, если нет `join`;
-      `False` для голой функции; `False` для `threading.Thread(target=f)`; `False` для
-      `multiprocessing.Process(target=f)` (не запущенных).
+- [ ] `inspect.signature(IScope.child)` — параметры ровно `(self, name, *, budget_s=None, kill_reserve_s=None)`;
+      `inspect.signature(IScope.close)` — `(self, budget_s=None, *, deadline=None)`;
+      `inspect.signature(Stoppable.join_until)` — `(self, deadline)`; у `Stoppable` нет атрибута `join`.
+- [ ] `isinstance(obj, Stoppable)`: `True` для объекта с `request_stop` и `join_until`; `False`, если нет
+      `join_until`; `False` для объекта с `request_stop` и `join` (без `join_until`); `False` для подкласса
+      `threading.Thread` с добавленным `request_stop`; `False` для голой функции; `False` для
+      `threading.Thread(target=f)` и `multiprocessing.Process(target=f)` (не запущенных).
 - [ ] `CloseReport` заморожен: присваивание поля → `dataclasses.FrozenInstanceError`.
 - [ ] `CloseReport(..., survivors=["a"], killed=[], errors=[["p", "e"]])` → поля — кортежи; `hash()` не бросает;
       отчёт равен такому же, собранному из кортежей.
@@ -190,26 +236,35 @@ Keyword-only там, где в DESIGN стоит `*`. Имена парамет�
 - [ ] `pickle.loads(pickle.dumps(r)) == r`.
 - [ ] `ScopeClosedError` — подкласс `RuntimeError`.
 - [ ] `interfaces.py` импортирует только модули из списка «Ограничения файла» (проверка по AST).
-- [ ] ADR-BM-008 содержит семь отвергнутых альтернатив из Step 2, каждую отдельным пунктом с жирным именем и причиной;
+- [ ] ADR-BM-008 содержит восемь отвергнутых альтернатив из Step 2, каждую отдельным пунктом с жирным именем и причиной;
       `multiprocess_framework/DECISIONS.md` пересобран `scripts.sync` (проверяет ревьюер, не тестер).
 - [ ] `python scripts/validate.py` зелёный; тесты `base_manager` зелёные (число passed — в отчёте).
 
 ## Out of scope
-- Реализация `Scope`/`Handle`, `unclosed_roots()`, `BaseManager.scope` — Task 0.2.
+- Реализация `Scope`/`Handle`, `unclosed_roots()`, `BaseManager.scope`, фабрика `open_scope` и её экспорт из
+  `base_manager/__init__.py` — Task 0.2.
 - `Subscribers`, строка `MODULE_TIERS` про `event_module` — Task 0.3.
 - Qt-адаптеры — Task 0.4. Стражи G2–G10 — Task 0.5.
 - Миграция любых потребителей; правка существующих ABC.
 
-## Ждёт вердикта CTO (эскалация ревьюера спека, итерация 1, 2026-10-04)
-1. **Q1** — `join` против `join_until` (см. `Stoppable`).
-2. **Q2** — дверь создания корня при запрете G6 на импорт `base_manager.core.lifetime` вне `base_manager`.
-   Рекомендация ревьюера: фабрика `open_scope(...)` + `unclosed_roots()` в `base_manager/__init__.py`, класс `Scope`
-   не экспортируется; решение — в ADR-BM-008 этой задачи, код — в 0.2 (Files 0.2 получает `base_manager/__init__.py`).
-3. **Q3** — сроки в сигнатуре (`kill_reserve_s`, `budget_s=None`, `budget_s` + `deadline`, резерв сверх срока).
+## Решения CTO 2026-10-04 (эскалация ревьюера спека, итерация 1)
+Q1 = `join_until`; Q2 = `open_scope` в пакете, `Scope` не экспортируется; Q3 = сигнатура ревьюера + `min` для срока
+ребёнка + неблокирующий `kill()` + «оба заданы» → `ValueError`. Все три меняют DESIGN §2.1/§2.3 — DESIGN поправлен
+тем же коммитом (ред. 3.1). Зонды CTO: `scratchpad/cto01/q1_join.py`, `q3_reserve.py` (сессия 08888c98, вне репозитория).
 
-До вердикта тестер не запускается: его `inspect.signature`-тесты заморозят форму.
-
-## Для спека 0.2 (найдено ревью спека 0.1)
-- `tests/test_base_manager.py:183` пиклит менеджер: `BaseManager.scope` — ленивое или вне `__getstate__`.
-- `Mock()` — не Stoppable, но вызываемый: фейки тестера — настоящие классы или `Mock(spec=...)`.
-- Класс вместо экземпляра в `own`: `isinstance(Fake, Stoppable) is True` (проба H3) — решить, отклонять ли.
+## Для следующих спеков (найдено ревью спека 0.1 и CTO)
+- **0.2:** `tests/test_base_manager.py:183` пиклит менеджер — `BaseManager.scope` ленивое или вне `__getstate__`.
+- **0.2:** `Mock()` — не Stoppable, но вызываемый: фейки тестера — настоящие классы или `Mock(spec=...)`.
+- **0.2:** класс вместо экземпляра в `own`: `isinstance(Fake, Stoppable) is True` (проба H3) — решить, отклонять ли.
+- **0.2:** сигнатура `open_scope` пинится тестом только в 0.2 — тестер 0.2 получает её литералом из раздела «Дверь».
+- **0.2:** `kill_reserve_s = 0.0`: `kill()` зовётся, `join_until(now)` сразу → убитый попадёт в `survivors`; не
+  прогнано. Если 0.2 решит «при 0.0 kill не звать» — записать почему.
+- **0.2:** правило `min` и «фаза 3 у владельца записи с его резервом» в прототипе отсутствуют — доказать инъекциями:
+  срок родителя без `min` → красный тест сегмента с меньшим бюджетом; блокирующий `kill()` в фейке → красный тест
+  «`elapsed_s` ≤ budget + reserve при двух застрявших».
+- **0.2:** `IHandle.close(None)` → бюджет владельца — принято без прогона.
+- **1.1:** `ChildProcessStop.kill()` обязан не блокировать (Q3), а DESIGN П1 описывает его как terminate →
+  `TERMINATE_GRACE_S` → kill — форму неблокирующей эскалации решает спек 1.1.
+- **1.1:** резерв области детей — шестое число `stop_budget` или `pm_total − pm_graceful`; литеральный тест
+  `stop_budget(5.0)`: `pm_graceful 5.0`, `pm_total 7.0`, `outer 8.5`, `outer > pm_total > pm_graceful`.
+- **0.5:** G2 сравнивает текст аннотации с `IScope`.

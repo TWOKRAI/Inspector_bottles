@@ -1,8 +1,10 @@
-# lifecycle-owner-scope — архитектура (ред. 3, финальная до ADR)
+# lifecycle-owner-scope — архитектура (ред. 3.1)
 
 **Дата:** 2026-10-03 · **Статус:** принята CTO с условиями — раунд 2: ACCEPT WITH CONDITIONS ★1,3,4,5,6; раунд 3
 (соседство с `lifecycle-stop-ownership`, наблюдаемость, аудит модулей): ACCEPT WITH CONDITIONS П1–П4. Все условия
-вписаны ниже.
+вписаны ниже. **Ред. 3.1 (2026-10-04)** — поправки CTO по эскалации ревью спека Task 0.1: Q1 `join` →
+`join_until`, Q2 корень через фабрику `open_scope`, Q3 сроки (`kill_reserve_s` у `child`, `min` для срока ребёнка,
+резерв сверху, `kill()` не блокирует). Полный текст — [`task-0.1.md`](task-0.1.md).
 **Путь решения:** три отчёта investigator'ов → черновик лида → CTO р1 (ACCEPT WITH CONDITIONS) → ревьюер ред. 1 (своя
 архитектура, прототип) → ревьюер ред. 2 (по вердикту CTO) + раздел «Ответственность и интерфейсы» → CTO р2 (оценки
 ред. 1 / ред. 2, условия) → эта ред. 3 (лид, ред. 2 + условия CTO). Третий раунд ревьюера не проводился: лимит
@@ -42,11 +44,13 @@ class Stoppable(Protocol):
     """Ресурс со своим потоком управления: поток, процесс, QThread, пул, блокирующее устройство, сток."""
     def request_stop(self) -> None:
         """Фаза 1. Не блокирует, идемпотентно, любой поток. Прерывает блокирующие вызовы.
-        Для стока: закрыть вход; дренирование и выход — его дело до join (★5б)."""
-    def join(self, deadline: float) -> bool:
-        """Фаза 2. Ждать до абсолютного time.monotonic(). True = остановлен. На таймауте не бросает."""
-    # необязательно: kill() -> None — фаза 3, только после join()==False (процесс terminate→kill; пул — отмена очереди)
-    # необязательно: close() -> None — освобождение после успешного join/kill
+        Для стока: закрыть вход; дренирование и выход — его дело до join_until (★5б)."""
+    def join_until(self, deadline: float) -> bool:
+        """Фаза 2. Ждать до абсолютного time.monotonic(). True = остановлен. На таймауте не бросает.
+        Не `join`: у Thread/Process/QThread join(timeout) относительный и без результата (Q1, ред. 3.1)."""
+    # необязательно: kill() -> None — фаза 3, только после join_until()==False. НЕ блокирует: послать сигнал
+    #   и вернуться; ожидание — join_until к сроку резерва (Q3, ред. 3.1)
+    # необязательно: close() -> None — освобождение после успешного join_until/kill
 
 Resource = Stoppable | Callable[[], object]          # подписка, сокет, файл, хук плагина — вызываемое
 
@@ -78,7 +82,8 @@ class IScope(Protocol):
     parent: "IScope | None"                        # только чтение
     def own(self, res: Resource, *, name: str, kind: str = "resource") -> IHandle:
         """После закрытия: освободить res СРАЗУ и бросить ScopeClosedError."""
-    def child(self, name: str, *, budget_s: float | None = None) -> "IScope": ...
+    def child(self, name: str, *, budget_s: float | None = None,
+              kill_reserve_s: float | None = None) -> "IScope": ...   # None = значение родителя
     def barrier(self) -> None:
         """★1. Граница сегментов: всё, зарегистрированное ДО барьера, получает фазу 1 только после того,
         как закрыто всё, зарегистрированное ПОСЛЕ него."""
@@ -87,8 +92,10 @@ class IScope(Protocol):
     def cancel(self) -> None:
         """Фаза 1 по поддереву верхнего сегмента. Не блокирует, любой поток, идемпотентно."""
     def close(self, budget_s: float | None = None, *, deadline: float | None = None) -> CloseReport:
-        """По сегментам сверху вниз: фаза 1 по поддереву сегмента → фаза 2 LIFO вне лока (дети к тому же
-        дедлайну) → фаза 3 kill() параллельно в резерве → следующий сегмент. Выживший — в reporter сразу.
+        """По сегментам сверху вниз: фаза 1 по поддереву сегмента → фаза 2 LIFO вне лока (ребёнок к сроку
+        min(срок родителя, now + child.budget_s)) → фаза 3 kill() владельцем записи в СВОЁМ kill_reserve_s, сверх
+        срока, родитель резерв не обрезает → следующий сегмент. Срок: deadline | now+budget_s | now+self.budget_s;
+        заданы оба → ValueError. Выживший — в reporter сразу.
         Ошибки собираются, close не бросает. Повтор: закрыта → тот же отчёт; этот же поток или её spawn-поток →
         complete=False; чужой поток → ждёт первого закрывающего до своего срока."""
     def live(self) -> list[dict]: ...
@@ -101,7 +108,7 @@ class IScope(Protocol):
 | Примитив области | `base_manager/core/lifetime.py`: `Scope`, `Handle`, `unclosed_roots()` (только stdlib) | `IScope`, `IHandle`, `Stoppable`, `CloseReport`, `Reporter` | поля `thread`/`stop_event` в `WorkerRegistry`; реестр `ThreadManager`; `BindingHandle`; пары `wire_/unwire_`; `close_all_taps`; `weakref.finalize` в `store_tap.py:293` |
 | Список подписчиков | `event_module/subscribers.py`: `Subscribers` (★3); `EventBus` — типизированная обёртка над ним | издатель отдаёт свой `subscribe(..., *, owner: IScope) -> IHandle` в своём `interfaces.py`; `Subscribers` — деталь издателя | 12 самописных списков; `RegisterAdapter._subscriptions` по `id()`; корзины `EventBus`; Protocol `Subscription` (`event_module/interfaces.py:23`) |
 | Потоки | `IScope.spawn` (★4: публичен всем); воркер с политикой — `IWorkerManager.create_worker(..., owner=)` | — | сырой `threading.Thread(` (39 мест); `_restart_worker_internal`; `ThreadManager.terminate()` |
-| Эскалация останова процесса | `ChildProcessStop` (Stoppable) в `process_manager_module` — внутрипроцессная форма существующих фаз `_stop_many` (`process_registry.py:413-490`; семантика — план `lifecycle-stop-ownership`, ADR-SRM-016, ADR-PMM-031). П1: `request_stop` = сигнал стопа; `join` = ожидание к общему сроку; `kill()` = terminate → `TERMINATE_GRACE_S` → kill; `kill_reserve_s` области детей = `TERMINATE_GRACE_S + KILL_CONFIRM_S`; `close()` = `_mark_confirmed_dead` (метка ReaderGone, Task 1.2 stop-ownership). Имя `ProcessHandle` занято (`shared_resources_module/handles/process_handle.py:147`, доступ к ресурсам процесса, 12 ссылок) | `children.close()`; `ProcessRegistry` — клиент | цепочка terminate→kill и метка существуют один раз |
+| Эскалация останова процесса | `ChildProcessStop` (Stoppable) в `process_manager_module` — внутрипроцессная форма существующих фаз `_stop_many` (`process_registry.py:413-490`; семантика — план `lifecycle-stop-ownership`, ADR-SRM-016, ADR-PMM-031). П1: `request_stop` = сигнал стопа; `join_until` = ожидание к общему сроку; `kill()` = terminate → `TERMINATE_GRACE_S` → kill (**ред. 3.1: `kill()` обязан не блокировать — форма неблокирующей эскалации terminate→kill решается в спеке Task 1.1**); `kill_reserve_s` области детей = `TERMINATE_GRACE_S + KILL_CONFIRM_S`; `close()` = `_mark_confirmed_dead` (метка ReaderGone, Task 1.2 stop-ownership). Имя `ProcessHandle` занято (`shared_resources_module/handles/process_handle.py:147`, доступ к ресурсам процесса, 12 ссылок) | `children.close()`; `ProcessRegistry` — клиент | цепочка terminate→kill и метка существуют один раз |
 | Связь с Qt | `frontend_module/core/qt_lifetime.py`: `attach_qt`, `flush_deferred_deletes`, `QThreadHandle` | `frontend_module/interfaces.py` | автоотвязка `bindings.py:266` (утечка: замыкание держит виджет); отписка в `closeEvent` `BaseConfigurableWidget`; три имени уборки presenter; `QTimer()` без родителя (`debounce_trait.py:19`, 8 мест) |
 | Бюджет останова | `process_manager_module/.../stop_budget.py` (П2): одна функция `stop_budget(shutdown_timeout)` и пять чисел — `work`, `infra`, `pm_graceful`, `pm_total`, `outer`; spawner и PM импортируют её; константы `process_registry.py:21-25` переезжают туда. Продолжение «одно число на оба уровня» ADR-PMM-031 на уровень ребёнка | ребёнку словарь в конфиге `{"stop_budget": {...}}` (Dict at Boundary, импорта PM у ребёнка нет) | сегодня ДВЕ копии формулы: `outer_stop_budget` (`spawner.py:27-34`) и `_pm_graceful_budget` (`spawner.py:160-170`); `get_config("shutdown_timeout") or 5.0` (`process_manager_process.py:3529,3667`); чтение `spawner.py:102,165`; `stop_all_workers(timeout=5.0)`; 18 `join(N)`. Эти четыре места чтения `"shutdown_timeout"` мигрируют в Ф1, иначе G6 красный в день 1 |
 | Приёмник отчётов | `ProcessLifecycle` — `reporter` корня процесса: живой логгер, после закрытия сегмента логов — `emergency_log` | `IProcessServices.lifetime_snapshot() -> dict` для `introspect.lifetime` | строки «не остановился за …» в `worker_lifecycle.py`, `process_registry.py` → записи отчёта |
@@ -110,7 +117,8 @@ class IScope(Protocol):
 ### 2.3 Процесс: один корень, три сегмента
 
 ```python
-root = Scope(f"proc/{name}", budget_s=budget["work_s"] + budget["infra_s"], reporter=lifecycle.report)
+root = open_scope(f"proc/{name}", budget_s=budget["work_s"] + budget["infra_s"], reporter=lifecycle.report)
+# open_scope — единственная дверь создания корня, из пакета base_manager; класс Scope не экспортируется (Q2)
 planes = root.child("planes")        # logger → error/stats/observation (сток дренирует при request_stop, ★5б)
 root.barrier()
 transport = root.child("transport")  # SRM → router → command/console: чинит инверсию :143/:197
@@ -141,7 +149,7 @@ work = root.child("work")            # hooks → plugins (камера и её �
 
 `BatchDrainWorker` уже соблюдает ★5б кодом (`batch_drain.py:343-346, 399-430`: вход закрыт под локом, выход только при
 пустом канале, недописанное считается); адаптер расщепляет его `close()`: `request_stop` = закрыть вход + wake,
-`join` = join потока, `close()` = дожим и итог. `ObservabilityBroker.subscribe_all` — удалённый реестр по имени
+`join_until` = join потока, `close()` = дожим и итог. `ObservabilityBroker.subscribe_all` — удалённый реестр по имени
 процесса, остаётся; ручкой становится его локальный форвард-tap. otel Task 2.4 («otel flush: N дожато, M потеряно» до
 снятия форвардеров) под этой схемой — `plugin.shutdown(ctx)` в `work`, закрывается до `transport` и `planes`: та же
 гарантия барьером, конфликта нет. Прототип CTO

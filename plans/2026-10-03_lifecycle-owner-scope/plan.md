@@ -67,7 +67,7 @@
 ### Task 0.2 — Scope и Handle: примитив и контракт-тесты G1
 **Level:** Senior+ · **Assignee:** teamlead · **Layer:** framework
 **Goal:** `base_manager/core/lifetime.py` (только stdlib) реализует `IScope`/`IHandle` с барьерами, тремя фазами, отчётом, `unclosed_roots()`.
-**Files:** `base_manager/core/lifetime.py`, `base_manager/tests/test_lifetime_*.py`, `BaseManager.scope` + шаблонный `shutdown()` (`base_manager/core/base_manager.py`).
+**Files:** `base_manager/core/lifetime.py`, `base_manager/__init__.py` (фабрика `open_scope` + `unclosed_roots`, класс `Scope` не экспортируется — решение CTO 2026-10-04, [`task-0.1.md`](task-0.1.md) «Дверь»), `base_manager/tests/test_lifetime_*.py`, `BaseManager.scope` + шаблонный `shutdown()` (`base_manager/core/base_manager.py`).
 **Acceptance (G1, литералами):**
 - [ ] (a) цикл «презентер ↔ издатель» освобождается refcount'ом после `close()` — `gc.disable()`, `unreachable == 0`.
 - [ ] (b) поток игнорирует стоп 3 с при бюджете 1 с: `close()` возвращается за ≤ 1.2 с, `survivors` содержит путь, `live()` показывает `survivor`.
