@@ -28,4 +28,4 @@ metadata:
 
 Итог 2026-10-03: план `plans/2026-10-03_lifecycle-owner-scope/` (plan.md + DESIGN.md ред. 3, CTO ACCEPT WITH CONDITIONS три раунда), ветка `feat/lifecycle-owner-scope`, **первый приоритет очереди** (ORDER.md §0, полоса Ж — решение владельца). Механизм: `IScope` в `base_manager`, один корень процесса с барьерами (planes | transport | work), `Subscribers` в `event_module`, `qt_lifetime` во `frontend_module`; abort закрывает Ф5, 5-с ханг — Ф1. Соседний живой план `lifecycle-stop-ownership` = межпроцессная половина; первые разведки и два раунда CTO его не увидели — проверять `plans/` на одноимённые треки ДО проектирования. Страница: `docs/diagrams/lifecycle/lifecycle-system.html`.
 
-Связано: [[feedback_all_components_base_manager]], [[project_graceful_stop_debt]], [[feedback_fix_framework_forward]].
+Связано: [[feedback_logger_error_stats_managers]], [[project_graceful_stop_debt]], [[feedback_framework_first]].

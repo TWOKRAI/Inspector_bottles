@@ -33,4 +33,4 @@ metadata:
 приёмочном файле не должно быть ни одного теста, где ВСЕ assert'ы — отрицания (`not in`, `!=`,
 «отсутствует»); это ловится грепом. Смежное —
 [[feedback_injection_generator_must_differ_from_criteria_author]],
-[[feedback_unconnected_driver_reads_as_a_clean_zero]], [[feedback_a_zero_under_injection_has_three_readings]].
+[[feedback_unconnected_driver_reads_as_a_clean_zero]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].

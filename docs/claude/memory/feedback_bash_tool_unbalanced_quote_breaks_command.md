@@ -26,7 +26,7 @@ metadata:
 - Перед отправкой команды Bash с текстом — пересчитать `'`: число должно быть чётным.
 - Симптом «unexpected EOF ... matching `''» на первой же строке вывода = транспорт, не скрипт.
 
-См. [[feedback_ru_output_encoding_and_wc]], [[feedback_commit_msg_format]].
+См. [[feedback_ru_output_encoding_and_wc]], [[feedback_commit_takes_the_whole_index]].
 
 ## Слито из feedback_bash_heredoc_collapses_backslashes (_archive/feedback_bash_heredoc_collapses_backslashes.md)
 

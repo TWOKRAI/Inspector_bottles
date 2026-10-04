@@ -34,4 +34,4 @@ metadata:
 годится ли политика отказа механизма для этой работы. Отказ от механизма
 записывать в план явно, иначе таблица «Открыто» его воскресит
 ([[feedback_a_plans_premise_expires]], [[feedback_one_active_plan_per_tool]]).
-Родня: [[feedback_fewer_layers]], [[feedback_zero_reds_can_mean_a_useless_layer]].
+Родня: [[feedback_framework_first]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].

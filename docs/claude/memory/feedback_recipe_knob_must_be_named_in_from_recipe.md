@@ -51,5 +51,5 @@ metadata:
 которая УЖЕ доезжает туда, куда нужно, и чей смысл ключ разделяет. Если да, класть внутрь
 неё и добавлять поле в её Pydantic-схему (без поля `model_dump(exclude_unset=True)`
 **молча выбросит** ключ — extra-ключи схема принимает, но не хранит). Смежное:
-[[feedback-defect-fixed-on-one-path-only]], [[feedback-config-delivery-shape-differs]],
+[[feedback-defect-fixed-on-one-path-only]], [[feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible]],
 [[feedback-model-copy-does-not-validate]].

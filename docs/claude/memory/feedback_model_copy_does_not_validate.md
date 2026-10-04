@@ -29,7 +29,7 @@ metadata:
 один раз на входе потребителя — как `NameHierarchy` приводит `Mapping` в
 конструкторе. На форму ставить страж-тест (`isinstance` по составу), иначе
 гарантия держится на внимательности. Связано:
-[[feedback_config_delivery_shape_differs]], [[feedback_merge_changes_the_form]].
+[[feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible]], [[feedback_merge_changes_the_form]].
 
 ## Слито из feedback_pydantic_assignment_keeps_rejected_value (_archive/feedback_pydantic_assignment_keeps_rejected_value.md)
 

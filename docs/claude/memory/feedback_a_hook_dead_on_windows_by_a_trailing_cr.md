@@ -28,4 +28,4 @@ JSON `hookSpecificOutput.additionalContext` reaches it.
 - Parse hook input inside Python and print with `sys.stdout.write` (no newline), then `| tr -d '\r'`;
   never `read < <(...)` from Windows Python.
 - Agent-facing output goes through `additionalContext` JSON; anything else is for the debug log.
-- Related: [[feedback_silent_detector_proves_nothing]], [[feedback_zero_observations_looks_like_a_result]].
+- Related: [[feedback_zero_observations_looks_like_a_result]], [[feedback_zero_observations_looks_like_a_result]].

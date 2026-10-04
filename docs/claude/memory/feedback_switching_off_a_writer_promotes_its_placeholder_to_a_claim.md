@@ -34,4 +34,4 @@ metadata:
 ноль, и только его. Гасишь писателя — пройди по его полям и переведи заглушки в `None`
 тем же коммитом; иначе цена флипа окажется не в том, что числа исчезли, а в том, что
 они стали неверными. Родня: [[feedback_unconnected_driver_reads_as_a_clean_zero]],
-[[feedback_plausible_is_not_verified]], [[feedback_a_zero_under_injection_has_three_readings]].
+[[feedback_plausible_is_not_verified]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].

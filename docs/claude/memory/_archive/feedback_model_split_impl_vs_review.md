@@ -1,7 +1,7 @@
 ---
 name: model-split-impl-vs-review
 description: "Исполнители: Sonnet 5 — дефолт (near-Opus, ~2.5x дешевле), Opus 4.8 — только верхний край (конкурентность/длинные автономные заходы); Fable — план/ревью-свод/merge; брифы под Sonnet 5 — с явным охватом"
-metadata: 
+metadata:
   node_type: memory
   type: feedback
   originSessionId: 768c4056-8d38-4ee3-a3f1-d58bf502abff

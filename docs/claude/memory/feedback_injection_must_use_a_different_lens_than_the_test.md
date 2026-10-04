@@ -35,4 +35,4 @@ payload. Оба зелены, свойство держится — и оба с
 только одна точка — сказать это в отчёте: свойство проверено частично. Ноль красных там, где
 ожидались красные, и полный набор зелёных при выключенном механизме — оба симптома одного класса:
 объектив не туда. См. [[feedback_prove_test_red_without_fix]],
-[[feedback_three_lenses_three_defect_classes]], [[feedback_silent_detector_proves_nothing]].
+[[feedback_three_lenses_three_defect_classes]], [[feedback_zero_observations_looks_like_a_result]].

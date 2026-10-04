@@ -20,7 +20,7 @@ Plugins для карточки выбранной ноды — НЕ дубли�
 - В `NodeInspectorPanel.show_plugin_node` передавать `plugin_name` (из `plugins[0]`),
   значения — из `PluginInstance.config`; `_current_process` остаётся process_name
   (цель `SetPluginConfig`).
-- Связано: [[feedback-mvp-pattern]], [[feedback-constructor-modularity]].
+- Связано: [[feedback-mvp-pattern]], [[feedback_framework_first]].
 
 Также по Pipeline-редактору (та же сессия): граф НЕ показывает protected-процессы
 (`gui` из base.yaml — фильтр в `presenter._topology_to_graph`); auto-layout

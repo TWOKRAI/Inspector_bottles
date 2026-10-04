@@ -13,7 +13,7 @@ User wants per-worker cycle timing:
 
 **Why:** Allows fine-tuning system load, debugging timing issues, and preventing CPU-hogging workers.
 
-**How to apply:** 
+**How to apply:**
 - Add `target_interval_ms` to worker config dict in ProcessEditorModel
 - ProcessMonitorModel receives `cycle_duration_ms` and `effective_hz` in worker heartbeat data
 - ProcessDetailPanel (WorkerInfoForm) shows both monitored timing and editable target interval

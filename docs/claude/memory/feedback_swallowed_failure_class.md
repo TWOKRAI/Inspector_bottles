@@ -43,4 +43,4 @@ metadata:
   считается подключённым.
 
 Связано: [[project-live-findings-webcam-2026-07]] (где найдено),
-[[project-state-topology-gate]] (первый экземпляр), [[feedback-fix-framework-forward]].
+[[project-state-topology-gate]] (первый экземпляр), [[feedback_framework_first]].

@@ -11,7 +11,7 @@ metadata:
 теста были виновны, и ни один из них не был красным.
 
 **Why:** ожидание неотличимо от «ещё считает», поэтому дефект не виден вовсе — это тот же класс, что
-[[feedback_tests_invisible_to_testpaths]] и [[feedback_swallowed_failure_class]], только вместо
+[[feedback_zone_guard_never_closes_the_class]] и [[feedback_swallowed_failure_class]], только вместо
 тишины — пауза. Виноват при этом не всегда предмет теста: две точки из трёх открывали диалог в
 **teardown** (qtbot закрывает окно → `closeEvent` → «несохранённые правки»), то есть дефект жил
 далеко от того, что тест проверял.

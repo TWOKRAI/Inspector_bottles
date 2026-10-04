@@ -24,7 +24,7 @@ metadata:
 
 **Why:** каждая из этих грабель стоила отдельной итерации/отладки; они системные (хук + git-семантика), повторятся в любой сессии с merge в main.
 
-**How to apply:** merge в main = `git merge --no-ff <branch> -m ... -m ...` отдельным вызовом; коммит на защищённую ветку — только через отдельную feature-ветку двумя вызовами Bash (checkout, затем commit); после kill-коммитов сверяй `git show --stat`. Связано: [[feedback_commit_msg_format]] (trailers Why/Layer строго однострочные — та же семья hook-грабель).
+**How to apply:** merge в main = `git merge --no-ff <branch> -m ... -m ...` отдельным вызовом; коммит на защищённую ветку — только через отдельную feature-ветку двумя вызовами Bash (checkout, затем commit); после kill-коммитов сверяй `git show --stat`. Связано: [[feedback_commit_takes_the_whole_index]] (trailers Why/Layer строго однострочные — та же семья hook-грабель).
 
 **Открытый вопрос (нужно решать):** protect-branch стоило бы дополнить исключением для merge/cherry-pick, чтобы docs/handoff на main не требовали ветку-обёртку (ранее правку хука блокировал auto-классификатор как self-modification — обсудить с владельцем вне auto-режима).
 

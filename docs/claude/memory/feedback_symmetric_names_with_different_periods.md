@@ -29,4 +29,4 @@ metadata:
 смотреть» по нему слепла бы к прошлым потерям.
 
 Родня: [[feedback_one_function_two_positions]], [[feedback_named_mechanism_is_not_a_commitment]],
-[[feedback_guard_on_existence_is_not_a_guard_on_content]].
+[[feedback_zone_guard_never_closes_the_class]].

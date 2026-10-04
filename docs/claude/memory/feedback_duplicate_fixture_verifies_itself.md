@@ -21,4 +21,4 @@ HEAD**, и они жили красными достаточно долго, ч�
 conftest — и брать оттуда, а не копировать. Расширяя контракт (`protocol.py`, схема
 ответа), grep-ом найти ВСЕ перечни его полей, не только тот, что рядом. Красный, живущий
 дольше одного захода, разбирать до причины: «не наш» почти всегда означает «наш, но из
-соседней фазы». См. [[feedback-check-red-on-main-first]], [[feedback-tests-invisible-to-testpaths]].
+соседней фазы». См. [[feedback-check-red-on-main-first]], [[feedback_zone_guard_never_closes_the_class]].

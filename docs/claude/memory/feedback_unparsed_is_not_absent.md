@@ -29,7 +29,7 @@ metadata:
 дальше вся цепочка (сводка, гейт, вердикт) честно рапортует об успехе.
 
 Тот же класс, что [[feedback-zero-observations-looks-like-a-result]] и
-[[feedback-checked-true-answers-for-the-call-not-the-coverage]], только этажом
+[[feedback_a_control_reproduces_the_defect_it_was_built_to_catch]], только этажом
 ниже — в разборе текста, а не в наблюдении за системой. Проверять на своих
 парсерах: сколько строк-кандидатов встретилось и сколько из них разобрано;
 расхождение — ошибка, а не статистика.

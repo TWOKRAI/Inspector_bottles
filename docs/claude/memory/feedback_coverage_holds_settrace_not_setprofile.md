@@ -28,4 +28,4 @@ metadata:
 вложенный `coverage.Coverage()` рискует срубить настоящие цифры покрытия прогона; честная замена —
 поставить свой no-op `settrace` и сравнить с базой, сказав об этом вслух. Родня:
 [[feedback_global_clock_patch_flake]], [[feedback_pytest_owns_threading_excepthook_for_the_session]],
-[[feedback_tests_invisible_to_testpaths]].
+[[feedback_zone_guard_never_closes_the_class]].

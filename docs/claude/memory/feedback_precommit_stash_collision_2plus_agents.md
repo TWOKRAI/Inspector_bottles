@@ -114,7 +114,7 @@ pathspec**. Файла журнала в pathspec нет, значит в это
    4.13 шла в `.claude/worktrees/t413-impl` и ни во что не упёрлась.
 
 Связано с [[feedback_precommit_stash_collision_2plus_agents]],
-[[feedback_precommit_rollback_drops_unstaged_edits]],
+[[feedback_commit_takes_the_whole_index]],
 [[feedback_a_peer_session_shares_the_tree]],
 [[feedback_commit_takes_the_whole_index]].
 

@@ -26,4 +26,4 @@ metadata:
 стороны») или вырожденный сторож (переписать). Обратный признак тоже считать: у заявленного
 свойства обязана быть заплата, красящая ≥ 1 тест. Связано с
 [[feedback_prove_test_red_without_fix]], [[feedback_two_patches_one_red_set_means_one_assert]] и
-[[feedback_silent_detector_proves_nothing]].
+[[feedback_zero_observations_looks_like_a_result]].

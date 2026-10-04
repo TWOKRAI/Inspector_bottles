@@ -37,7 +37,7 @@ metadata:
 идут от лица (`test_writer_*`), и предметный фильтр их теряет.
 
 Родня: [[feedback_zero_observations_looks_like_a_result]],
-[[feedback_prove_test_red_without_fix]], [[feedback_silent_detector_proves_nothing]],
+[[feedback_prove_test_red_without_fix]], [[feedback_zero_observations_looks_like_a_result]],
 [[project_root_gate_misses_framework_modules]].
 
 ## Поворот 2026-08-26 (Ф5): ноль может означать СЛОМАННЫЙ ПРОГОН, а не пройденную проверку

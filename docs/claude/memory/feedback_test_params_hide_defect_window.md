@@ -53,5 +53,5 @@ metadata:
 отличающееся от дефолта в разы**, и проверять диапазон, в который дефолт НЕ попадает.
 Обнаруживается только инъекцией «зашить дефолт константой»; зелёный тест об этом не
 скажет. Третий случай того же класса за одну фазу — родня:
-[[feedback_fake_that_always_succeeds_mutes_the_gate]],
-[[feedback_two_safeguards_hide_which_one_holds]].
+[[feedback_a_faithful_fake_still_lacks_the_protocol]],
+[[feedback_test_reddens_only_under_a_paired_injection]].

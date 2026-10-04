@@ -30,4 +30,4 @@ metadata:
   Мерить надо на том конце провода, куда трафик приходит, а не на том, откуда уходит.
 
 Родня: [[feedback_measure_delta_not_file_size]], [[feedback_gate_off_zeroes_deltas_not_messages]],
-[[feedback_silent_detector_proves_nothing]], [[feedback_probe_liveness_is_not_render]].
+[[feedback_zero_observations_looks_like_a_result]], [[feedback_probe_liveness_is_not_render]].

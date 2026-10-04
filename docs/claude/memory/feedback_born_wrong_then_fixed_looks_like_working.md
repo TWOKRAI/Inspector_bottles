@@ -20,4 +20,4 @@ metadata:
 конфигом, — это не шум, а сообщение о порядке инициализации. Чинить в точке создания, а не
 глушить. Признак брать структурный («секция пуста»), не по имени процесса — иначе почините
 одного адресата. Связано с [[feedback_false_alarm_traded_for_silent_loss]],
-[[feedback_materialized_default_hides_absence]], [[feedback_config_delivery_shape_differs]].
+[[feedback_materialized_default_hides_absence]], [[feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible]].

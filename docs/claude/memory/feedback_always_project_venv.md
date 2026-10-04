@@ -14,4 +14,4 @@ metadata:
 - MCP-серверы в `.mcp.json`, запускаемые через uv: добавлять `uv run --no-sync` — берёт существующий `.venv` без пересборки (фикс qt-mcp применён 2026-06-15).
 - `qt_mcp` 0.1.0 установлен именно в проектном `.venv`; probe-хук в [app.py](multiprocess_prototype/frontend/app.py) активируется `QT_MCP_PROBE=1` (порт 9142).
 
-Связано: [[reference_qt_mcp_launch]], [[feedback_qt_mcp_always_probe]].
+Связано: [[reference_qt_mcp_launch]], [[feedback_qt_mcp_flag_value_is_compared_verbatim]].

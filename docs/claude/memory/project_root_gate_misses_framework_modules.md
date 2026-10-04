@@ -22,7 +22,7 @@ metadata:
 **How to apply:** при правке модуля фреймворка снимать **оба** гейта и называть оба числа.
 Проверять покрытие не глазами, а сбором: `pytest --collect-only -qq` до и после — прирост обязан
 совпасть с числом новых тестов; расхождение = часть корпуса не гоняется. Ср. [[feedback_prove_test_red_without_fix]],
-[[feedback_silent_detector_proves_nothing]].
+[[feedback_zero_observations_looks_like_a_result]].
 
 
 ## Зеркальная половина, найденная 2026-09-03 (Ф2, при слиянии `main`)

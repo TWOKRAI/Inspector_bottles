@@ -37,5 +37,5 @@ metadata:
 - заглушка приёмника, принимающая всё, — не приёмник, а зеркало. Если она нужна для темпа
   (быстрый отказ, 401), пусть будет, но вердикт о доставке выносит настоящий арбитр.
 
-Связано: [[feedback_plausible_is_not_verified]], [[feedback_an_injection_must_prove_its_axis_is_live]],
+Связано: [[feedback_plausible_is_not_verified]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know]]

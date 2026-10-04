@@ -16,7 +16,7 @@ metadata:
 пинил ветку обработки. Без срока зависший git подвесил бы инициализацию процесса,
 и ни один тест бы не заметил.
 
-**Why:** это ровно тот класс, что и [[feedback_silent_detector_proves_nothing]] и
+**Why:** это ровно тот класс, что и [[feedback_zero_observations_looks_like_a_result]] и
 [[feedback_prove_test_red_without_fix]], но с другой стороны: детектор не молчит —
 он сторожит не то. Зелёный набор выглядит полным.
 

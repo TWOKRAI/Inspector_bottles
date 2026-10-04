@@ -1,7 +1,7 @@
 ---
 name: project_telemetry_coherence_remediation
 description: "План telemetry-coherence-remediation ЗАКРЫТ (Fable 24→47/60); Фазы 1/2/3 + qt-smoke; ветка feat/telemetry-coherence-phase2 СЛИТА и ЗАПУШЕНА в main/origin (merge 13623920); follow-up W1-W5 + pre-existing P1/P2"
-metadata: 
+metadata:
   node_type: memory
   type: project
   originSessionId: 12f5cd70-fe43-46ae-9504-c5547e3b89fe

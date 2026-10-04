@@ -22,4 +22,4 @@ metadata:
 - Сначала добавить код-использование, потом импорт (или наоборот, но проверить `git diff`/re-Read перед прогоном тестов).
 - Системный reminder «PostToolUse hook modified <file> (likely a formatter)» — сигнал перечитать import-блок перед следующим шагом.
 
-Смежное: [[feedback-commit-msg-format]] (тот же слой хуков — commit-msg валидация trailers).
+Смежное: [[feedback_commit_takes_the_whole_index]] (тот же слой хуков — commit-msg валидация trailers).

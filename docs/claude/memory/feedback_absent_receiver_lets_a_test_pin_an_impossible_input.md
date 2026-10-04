@@ -20,5 +20,5 @@ metadata:
 **How to apply:** если фикстура ставит адресата в `None`, форму входа брать из схемы
 получателя (или из живого конфига), а не сочинять короткую. Проверка дешёвая: прогнать тот
 же вход через `Model.model_validate` — если он не проходит, тест зелен по отсутствию, а не
-по правильности. Связано с [[feedback_fake_that_always_succeeds_mutes_the_gate]],
-[[feedback_test_authorship_three_roles]], [[feedback_plan_spec_can_lie]].
+по правильности. Связано с [[feedback_a_faithful_fake_still_lacks_the_protocol]],
+[[feedback_test_authorship_three_roles]], [[feedback_the_plans_stated_cause_is_a_hypothesis]].

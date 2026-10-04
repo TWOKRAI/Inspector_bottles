@@ -36,6 +36,6 @@ metadata:
    появления: приватная копия такую запись не увидит.
 
 И не переноси в тексты фразу «приёмка это ловит», пока не поставил заплату: имя теста —
-не доказательство, [[feedback-silent-detector-proves-nothing]]. Связано:
+не доказательство, [[feedback_zero_observations_looks_like_a_result]]. Связано:
 [[feedback-injection-must-use-a-different-lens-than-the-test]],
 [[feedback-prove-test-red-without-fix]], [[feedback-tester-once-per-mechanism-before-the-code]].

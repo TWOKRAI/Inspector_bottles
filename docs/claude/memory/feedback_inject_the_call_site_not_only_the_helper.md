@@ -26,7 +26,7 @@ metadata:
   исключения (`except Exception` + лог), при поломке харнесса даст ту же
   картину «алерта нет». Фильтровать лог по строке обрыва («Error in monitoring
   loop»), а не по факту любой записи — соседние ловят своё сами.
-- Смежное: [[feedback-silent-detector-proves-nothing]],
+- Смежное: [[feedback_zero_observations_looks_like_a_result]],
   [[feedback-port-wire-is-not-a-process-route]],
   [[feedback-injection-generator-must-differ-from-criteria-author]] — генератор
   этой инъекции был слепым агентом, и именно он её предложил.

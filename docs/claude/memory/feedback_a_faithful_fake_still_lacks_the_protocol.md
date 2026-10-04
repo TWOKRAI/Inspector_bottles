@@ -41,8 +41,8 @@ def track_error(self, error, context=None):
 тело приёмника и выписать его служебные ключи: их набор — часть контракта, а не деталь.
 
 Связано: [[feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible]] (там дублёр
-неверен ФОРМЕ, здесь — протоколу), [[feedback_one_door_two_roads_needs_two_guards]],
-[[feedback_silent_detector_proves_nothing]], [[feedback_plausible_is_not_verified]].
+неверен ФОРМЕ, здесь — протоколу), [[feedback_property_unchecked_at_the_second_party]],
+[[feedback_zero_observations_looks_like_a_result]], [[feedback_plausible_is_not_verified]].
 
 ## Слито из feedback_a_stub_silences_the_names_it_is_read_for (_archive/feedback_a_stub_silences_the_names_it_is_read_for.md)
 

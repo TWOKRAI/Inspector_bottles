@@ -33,7 +33,7 @@ metadata:
 числом**: число красных зависит от способа инъекции (текстовая правка файла до импорта дала 7,
 плагин после импорта тест-модулей — 9), и без рецепта следующий читатель не поймёт, кто прав.
 
-Связано: [[feedback-test-survived-its-own-break]], [[feedback-zero-reds-can-mean-a-useless-layer]],
+Связано: [[feedback-test-survived-its-own-break]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback-predict-injections-after-writing-tests]],
 [[feedback-injection-prediction-on-a-shared-corpus]], [[feedback-two-safeguards-hide-which-one-holds]].
 
@@ -51,6 +51,6 @@ metadata:
 **How to apply:** в стенде **снять все предохранители, кроме проверяемого** (поднять порог,
 отключить кэш, убрать дефолт), чтобы красным становился ровно тот механизм, о котором
 говорит докстринг. Обнаруживается это только инъекцией: зелёный тест сам о втором
-предохранителе не расскажет. Родня: [[feedback_zero_reds_can_mean_a_useless_layer]],
+предохранителе не расскажет. Родня: [[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback_test_survived_its_own_break]],
-[[feedback_fake_that_always_succeeds_mutes_the_gate]].
+[[feedback_a_faithful_fake_still_lacks_the_protocol]].

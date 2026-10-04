@@ -29,4 +29,4 @@ metadata:
 промпты проверять замером — прогнать и запрещённую комбинацию, и заявленную безопасную. Если
 запрещённая зелёная, правило не «на всякий случай», а ложное: переписать под замер и назвать
 долг, который оно прятало. Связано с [[feedback_a_plans_premise_expires]],
-[[feedback_plan_spec_can_lie]], [[project_root_gate_misses_framework_modules]].
+[[feedback_the_plans_stated_cause_is_a_hypothesis]], [[project_root_gate_misses_framework_modules]].

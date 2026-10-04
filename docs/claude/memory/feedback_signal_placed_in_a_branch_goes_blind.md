@@ -18,7 +18,7 @@ metadata:
 веток (у нас — промах кэша маршрута в `log()`), и называть в сообщении фактический
 исход, а не предполагаемый. Проверка на состоятельность: «какая ещё ветка может
 выиграть, и промолчит ли тогда сигнал». Родня: [[feedback_defect_fixed_on_one_path_only]],
-[[feedback_silent_detector_proves_nothing]], [[feedback_seam_must_fire_on_full_release]].
+[[feedback_zero_observations_looks_like_a_result]], [[feedback_test_survived_its_own_break]].
 
 **Рецидив 2026-08-13 (Task 2.1 telemetry-stage6), другая форма — РАННИЙ ВЫХОД.**
 Такт бизнес-метрик `CapturePlugin` стоял в ветке успешного кадра, после `if not ret:

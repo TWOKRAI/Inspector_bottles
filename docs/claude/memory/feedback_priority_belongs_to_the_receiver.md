@@ -43,5 +43,5 @@ merge поверх текущего эффективного) — у него **
 воспроизведением, а не исполнять по авторитету. В этой задаче teamlead отверг мою правку дважды,
 оба раза числами, и оба раза был прав. Отвергнутую рекомендацию оставлять в плане, а не стирать.
 
-Родня: [[feedback_a_plans_premise_expires]], [[feedback_plan_spec_can_lie]],
+Родня: [[feedback_a_plans_premise_expires]], [[feedback_the_plans_stated_cause_is_a_hypothesis]],
 [[feedback_property_unchecked_at_the_second_party]], [[feedback_plausible_is_not_verified]].

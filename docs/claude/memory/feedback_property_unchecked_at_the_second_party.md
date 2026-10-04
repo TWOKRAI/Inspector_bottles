@@ -36,7 +36,7 @@ metadata:
 пересчитывать **предпосылку** (кого перезапускаем) и **форму контроля** (утечка чужого ключа — это
 его ОТСУТСТВИЕ, а не значение). Обе ошибки дали красный на верной реализации.
 
-Родня: [[feedback_silent_detector_proves_nothing]], [[feedback_prove_test_red_without_fix]],
+Родня: [[feedback_zero_observations_looks_like_a_result]], [[feedback_prove_test_red_without_fix]],
 [[feedback_unconnected_driver_reads_as_a_clean_zero]], [[feedback_priority_belongs_to_the_receiver]].
 
 ## Слито из feedback_one_door_two_roads_needs_two_guards (_archive/feedback_one_door_two_roads_needs_two_guards.md)

@@ -48,5 +48,5 @@ grep "Creating process 'gui' from" logs/<прогон>/ProcessManager/system.log
 диагноз до `app.py:61` при том, что класс был назван в журнале на каждом прогоне с 11.08
 (174 headless-строки против 6 Qt).
 
-Родня: [[feedback_diagnose_live_system_with_backend_ctl]],
+Родня: [[feedback_backend_ctl_for_agents]],
 [[feedback_modal_dialog_waits_instead_of_failing]], [[project_backend_ctl_framework_module]].

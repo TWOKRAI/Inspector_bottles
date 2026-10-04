@@ -41,4 +41,4 @@ searcher, которых в контексте **не было**. В `~/.claude/
 и сверить состав. Экономию заявлять только после прогона в НОВОЙ сессии: список формируется
 на старте, в текущей он старый и подтвердить в ней ничего нельзя.
 
-**Related:** [[project_devseed_overwrites_claude_dir]], [[feedback_freeze_over_kill]].
+**Related:** [[project_devseed_overwrites_claude_dir]], [[feedback_framework_first]].

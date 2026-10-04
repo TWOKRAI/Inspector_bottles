@@ -31,4 +31,4 @@ metadata:
 
 Связано: [[feedback_zero_observations_looks_like_a_result]],
 [[feedback_a_control_can_exist_and_be_dead]],
-[[feedback_shared_tree_makes_injections_look_like_flakes]].
+[[feedback_a_peer_session_shares_the_tree]].

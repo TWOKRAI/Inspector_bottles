@@ -27,4 +27,4 @@ TypeError: _noop_stat() got an unexpected keyword argument 'duration'
 (1) оракул `inspect.signature` против эталона — **по всем** реализациям контракта, не только по
 главной; (2) вызов **именованными** аргументами. Инъекция «вернуть прежнюю форму» обязана красить
 поимённо. Связано: [[feedback_test_authorship_three_roles]],
-[[feedback_zone_guard_never_closes_the_class]], [[feedback_fake_that_always_succeeds_mutes_the_gate]].
+[[feedback_zone_guard_never_closes_the_class]], [[feedback_a_faithful_fake_still_lacks_the_protocol]].

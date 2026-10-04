@@ -25,4 +25,4 @@ metadata:
 его. Либо два прогона стенда с разным конфигом НА СТАРТЕ, либо «до» берётся из архивных
 логов и это называется вслух. Проверять годность метода отдельно: если у пары до/после
 совпали не только байты, но и `count`, — сначала подозревай метод, а не механизм. Родня —
-[[feedback-double-must-block-like-the-original]], [[feedback-plausible-is-not-verified]].
+[[feedback_a_faithful_fake_still_lacks_the_protocol]], [[feedback-plausible-is-not-verified]].

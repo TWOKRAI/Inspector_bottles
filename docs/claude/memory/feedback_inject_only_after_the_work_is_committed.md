@@ -21,7 +21,7 @@ metadata:
 
 **Why:** запрет коммитить реализатору и восстановление через `git checkout` — по отдельности
 правильные решения, вместе — уничтожение работы. Тот же класс, что
-[[feedback_precommit_rollback_drops_unstaged_edits]]: потеря выглядит как чистое состояние.
+[[feedback_commit_takes_the_whole_index]]: потеря выглядит как чистое состояние.
 
 **Повторено 2026-08-29, Ф0.1 `observability-closure` — и там восстановить было НЕЧЕМ.** Тот же
 `git checkout` по незакоммиченному файлу стёр `snapshot()`/`restore()` (+92 строки), которые
@@ -37,7 +37,7 @@ pre-implementation коммите. Реализацию пришлось пис�
 базовый прогон, и **красная база останавливает матрицу**: инъекции против красной базы не значат
 ничего. Отдельно: погибший агент = работа только в рабочем дереве, других копий НЕТ — коммитить
 её первым действием, до любой проверки. Родственное:
-[[feedback_shared_tree_makes_injections_look_like_flakes]],
+[[feedback_a_peer_session_shares_the_tree]],
 [[feedback-scripted-patch-needs-a-unique-anchor]].
 
 ## Слито из feedback_injection_rollback_by_restore_not_replace (_archive/feedback_injection_rollback_by_restore_not_replace.md)
@@ -65,5 +65,5 @@ pre-implementation коммите. Реализацию пришлось пис�
 сверять не «нет ли маркеров инъекции», а **объём диффа против HEAD** и наличие ожидаемых
 строк поимённо. Если файл правился — сначала обновить эталон, потом инъецировать.
 
-Родня: [[feedback_broken_injection_is_not_a_vacuous_test]],
+Родня: [[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback_prove_test_red_without_fix]], [[feedback_check_red_on_main_first]].

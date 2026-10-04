@@ -31,5 +31,5 @@ metadata:
    которой никто не мерил.
 
 Родня: [[feedback_measure_delta_not_file_size]] (дельта, а не абсолют),
-[[feedback_guard_threshold_hides_partial_blindness]] (сумма прячет слепоту),
+[[feedback_a_guard_that_counts_at_least_once_is_blind]] (сумма прячет слепоту),
 [[feedback_single_marker_verdict_lies]] (пара маркеров вместо одного).

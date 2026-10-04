@@ -27,7 +27,7 @@ metadata:
 
 **How to apply:** перед серией коммитов — `git status --short`; стейджить
 группу, коммитить, немедленно `git show --stat`. Форматирование — до `git add`.
-Родня: [[feedback_commit_msg_format]], [[feedback_parallel_agents_commit_race]].
+Родня: [[feedback_commit_msg_format]], [[feedback_precommit_stash_collision_2plus_agents]].
 
 ## Слито из feedback_commit_msg_format (_archive/feedback_commit_msg_format.md)
 

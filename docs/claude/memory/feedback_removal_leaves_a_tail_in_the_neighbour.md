@@ -32,5 +32,5 @@ CRITICAL чистила обе карты решений логгера, обн�
   ломается тремя разными способами, поэтому и тестов три
   ([[feedback_defect_fixed_on_one_path_only]]).
 
-Родня: [[feedback_review_finds_the_seam_between_own_pieces]],
+Родня: [[feedback_three_lenses_three_defect_classes]],
 [[feedback_measure_delta_not_file_size]], [[project_f4_processors_closed]].
