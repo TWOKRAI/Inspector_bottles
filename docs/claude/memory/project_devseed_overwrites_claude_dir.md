@@ -9,6 +9,8 @@ metadata:
   modified: 2026-08-15T21:22:30.382Z
 ---
 
+Правило перенесено в `.claude/CLAUDE.md` («Standing rules») (2026-10-04).
+
 `.claude/` этого проекта собран claude-kit (devseed, `enabled.yaml` schema 2, seed_version 1.0.0).
 `claude-kit upgrade --apply` **перетирает** часть дерева, и молча: ошибки нет, правило просто
 перестаёт действовать.
