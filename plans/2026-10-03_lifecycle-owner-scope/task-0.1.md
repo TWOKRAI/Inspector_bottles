@@ -79,6 +79,9 @@ Task 0.3. Причина: зависимость появится только �
 - `from_dict(cls, d: dict) -> CloseReport` (classmethod) — обратное преобразование. Правило проекта «Dict at Boundary»
   требует пару `to_dict`/`from_dict`. Строгий край:
   - ключ `"ok"` игнорируется (вычисляемое): пустой отчёт с `"ok": False` даёт `.ok is True`;
+  - вход — та же форма, что отдаёт `to_dict`: `errors` — список `{"path", "error"}`; типы значений проверяет
+    `__post_init__` (строка на месте `survivors`/`killed`/`errors` → `TypeError`), отдельной проверки у `from_dict` нет
+    (находка тестера 0.1: форма входа не была записана);
   - нет `emits_after_close` / `complete` → `0` / `True`;
   - нет `path`, `elapsed_s`, `survivors`, `killed` или `errors` → `ValueError` с именем ключа;
   - лишний ключ (кроме `"ok"`) → `ValueError` с именем ключа. Причина: обе стороны — один код одной версии; лишний
