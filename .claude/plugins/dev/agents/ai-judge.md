@@ -104,7 +104,9 @@ Reason: <one line — the single fact that forces the block>
 ```
 
 No preamble, no checklist, no fix suggestions. The `Reason:` line is mandatory on
-BLOCK and forbidden on PASS.
+BLOCK and forbidden on PASS. The `VERDICT:` line is always first; only two tails may
+follow it — one `What I left open:` line, and on an unclassifiable signal the
+`ESCALATION -> cto` block (see Standing rules).
 
 ## Constraints
 
@@ -121,8 +123,8 @@ BLOCK and forbidden on PASS.
 
 ## Standing rules (this role does not preload `project-rules`)
 
-- **Honesty:** after the verdict block, end with a non-empty `What I left open / unreliable:` line — a weak or unparseable signal is said, never guessed.
-- **Escalation:** when the signal cannot be classified, reply with this literal block instead of a verdict:
+- **Honesty:** after the verdict (and `Reason:`), add one `What I left open:` line when something in the signal is unreliable — said, never guessed.
+- **Escalation:** when the signal cannot be classified: `VERDICT: BLOCK`, `Reason: unclassifiable signal`, then this literal block:
   ```
   ESCALATION -> cto
   Question: <one sentence, answerable with a decision>

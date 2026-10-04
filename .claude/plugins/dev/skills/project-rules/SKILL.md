@@ -12,7 +12,7 @@ changes only in `multiprocess_prototype/`. Dict at Boundary: only `dict` crosses
 ## 1. qex — check freshness first
 
 `mcp__qex__get_indexing_status` before `search_code`; compare `last_indexed` to today. Fresh →
-qex-first. Stale → `Grep`, verify any NUMBER by grep, say the index age up front.
+qex-first. Stale → `Grep`, verify any NUMBER by grep, say the index age up front. Query in English.
 
 ## 2. Honesty over plausibility — "I don't know" is a successful outcome
 
@@ -88,7 +88,7 @@ Files: <paths>
 
 - One tree — one writer. A peer may share your tree: stage explicit paths only. A writer in a
   worktree runs `ruff` itself and writes the commit message to a file; the lead commits.
-- Never `grep -r` from the repo root (`.claude/worktrees`: ~80 checkouts): `git grep` or `rg`
+- Never `grep -r` from the repo root: `git grep` or `rg`
   scoped to paths or with `--glob '!.claude/worktrees'`.
 - In a worktree: no `uv sync`, `uv run` only with `--no-sync`; run the main `.venv` python with
   `PYTHONPATH=<worktree root>`; prove the import path from the same cwd as pytest.
@@ -122,7 +122,7 @@ Observability knobs: switchable at any boundary, zero cost when off.
 
 ## 11. Style and session end
 
-Reports follow STE-80; end every report with the boundary line —
+Reports follow STE-80; end every report with one `Boundary:` line —
 `.claude/skills/project-rules/{ste-80,session-boundaries}.md`.
 
 ## Map
@@ -134,7 +134,7 @@ Reports follow STE-80; end every report with the boundary line —
 | IPC, ownership | `multiprocess_framework/docs/{ROUTING_GLOSSARY,MODULES_RESPONSIBILITY_MAP,MODULE_TIERS}.md` |
 | stack, tests, Layer, worktree | `.claude/modes/_stack.md` (Toolchain → Worktree); `make gate` |
 | lessons | `docs/claude/memory/CRAFT-{tests,injection,verdict,config-qt,by-module}.md` |
-| lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §4 writing one; owner: «## 2. Решения владельца (живые)» |
+| lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §3 Windows env, §4 writing one; owner: «## 2. Решения владельца (живые)» |
 | MCP | `.claude/plugins/mcp-{qex,sentrux,backend-ctl}/README.md`; blast radius `scripts/graph_slice/README.md` |
 | live backend | `backend_ctl`; qt-mcp only for GUI; no psutil; GUI stand `INSPECTOR_GUI_UNATTENDED=1` |
 | skills | module-contract, systematic-debugging, verify-done, team-protocol |

@@ -31,7 +31,7 @@ machine-readable JSON block is the contract, not the prose.
 
 ## Orient first
 
-Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `docs/PROJECT_CONTEXT.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`.
+Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`.
 
 ## MCP routing (self-contained)
 

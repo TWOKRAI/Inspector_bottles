@@ -17,7 +17,7 @@ You are the Manager (department lead). Director gives you a phase or feature. Yo
 
 ## Orient first
 
-`/core:quality:dashboard` first for a one-shot snapshot (plans/architecture/tests/map/recent activity/memory). Then the project map top-down, cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `docs/PROJECT_CONTEXT.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`. If module-level knowledge changed while you worked, flag it for `/core:quality:sync-context`.
+`/core:quality:dashboard` first for a one-shot snapshot (plans/architecture/tests/map/recent activity/memory). Then the project map top-down, cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`. If module-level knowledge changed while you worked, flag it for `/core:quality:sync-context`.
 
 ## Before starting
 

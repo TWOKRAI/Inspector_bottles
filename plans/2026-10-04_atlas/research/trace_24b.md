@@ -18,7 +18,7 @@
 | 3 | Архитектура | PR Map «architecture, key paths» → root `CLAUDE.md`: Архитектура |
 | 4 | Ключевые пути | PR Map «architecture, key paths»; «правки только в `multiprocess_prototype/`» — PR преамбула |
 | 5 | История версий и архив | только лид — исторический факт, правил нет (git log) |
-| 6 | Стек | PR Map «stack…» → `.claude/modes/_stack.md` |
+| 6 | Стек | команды и Python — Map «stack…» → `.claude/modes/_stack.md`; версии библиотек — root `CLAUDE.md` «Стек» через Map «architecture, key paths» (аудит лида: в `_stack.md` версий нет) |
 | 7 | Правила проекта: инварианты п.1,2,5,6,9 | PR преамбула (слои, Dict at Boundary); остальное (`interfaces.py`, логи через ObservableMixin) — Map «editing an area» → `.rules/{framework,logging,…}.md` |
 | 8 | ADR и автосинхронизация п.3,7,8 | `teamlead.md` Code rules и `tech-writer.md` Before starting п.2: `python -m scripts.sync`, индекс `multiprocess_framework/DECISIONS.md` |
 | 9 | команды тестов п.4 | PR Map «stack, tests…» → `_stack.md` Toolchain |
@@ -28,7 +28,7 @@
 | 13 | Plan-Driven: Refs | PR §4 (`Refs: plans/<slug>.md` из плана) |
 | 14 | Plan-Driven: slug, ветка, статус | `manager.md` Before starting п.1: `.claude/commands/dev/plan.md`, `plans/queue/ORDER.md`, executor-brief |
 | 15 | Память (канон) | только лид — субагент пишет память через harness роли; как писать урок — PR Map «lessons index» (MEMORY.md §4) |
-| 16 | qex: свежесть и EN-запросы | PR §1 (свежесть); EN-запросы — Map «MCP» → `.claude/plugins/mcp-qex/README.md` |
+| 16 | qex: свежесть и EN-запросы | PR §1 (свежесть; «Query in English.» — в README mcp-qex такого правила нет, grep → 0) |
 | 17 | qex: стоимость, модель, реиндекс | только лид — обслуживание индекса |
 | 18 | sentrux: таблица выбора | PR Map «MCP» → `.claude/plugins/mcp-sentrux/README.md`; кого заденет — `scripts/graph_slice/README.md` |
 | 19 | sentrux: check_rules ложный зелёный | PR §3 (CLI `sentrux check .`; MCP — quick signal, not a verdict); `reviewer.md` (2 строки), `teamlead.md` Express review, `verify-done/SKILL.md` §5 |
@@ -76,7 +76,7 @@
 | 56 | Project layout: где писать | только лид; manager — Before starting п.1 |
 | 57 | Project layout: Thread | только лид |
 | 58 | Memory OVERRIDE: канон | только лид (см. №15) |
-| 59 | Memory: capture rail | PR Map «lessons index» (MEMORY.md §4 «Как писать»); harness роли |
+| 59 | Memory: capture rail | `.claude/commands/core/memory/remember.md` (гейт «когда писать», grep дублей, near-match → UPDATE; стр. 22, 28, 43); MEMORY.md §4 — только формат; переделка — 2.4g |
 
 ## 3. rules_map §1a — ~/.claude/CLAUDE.md и context7 (10)
 
@@ -166,7 +166,7 @@
 |---|---|
 | venv держит MCP | только лид — переустановку пакетов делает лид |
 | CUDA torch cu124 | PR §8 (в worktree без `uv sync`, `uv run` только `--no-sync`) |
-| monotonic 15.6 мс | PR Map «lessons index» |
+| monotonic 15.6 мс | PR Map «lessons index» (MEMORY.md §3 Windows env) |
 | qex runbook | только лид — реиндекс |
 | graphify MCP | только лид — установка |
 | Запуск qt-mcp | PR Map «MCP»/«live backend» + MEMORY.md |
@@ -181,3 +181,7 @@
 | `.claude/CLAUDE.md:280` | `project-rules` §6 | верна (§6 язык) |
 | `.claude/CLAUDE.md:287` | `project-rules` §9 (STE-80) | **неверна**: §9 теперь тесты; заменить на `project-rules/ste-80.md` |
 | `.claude/CLAUDE.md:333` | `project-rules` §8 (границы сессии) | **неверна**: §8 теперь дерево и поиск; заменить на `project-rules/session-boundaries.md` |
+
+Ещё две передачи в 2.4c:
+- Строка карты «architecture, key paths» ссылается на заголовки root `CLAUDE.md` «Архитектура» / «Ключевые пути». 2.4c сохраняет эти заголовки или правит карту.
+- `team-protocol/SKILL.md:90–92` всё ещё называет `docs/sessions/<today>.md` для открытых вопросов; ядро §2 — `docs/claude/OPEN_QUESTIONS.md`. Развести в 2.4c.

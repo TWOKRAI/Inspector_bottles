@@ -42,7 +42,7 @@ Verdict: `APPROVED` or `CHANGES REQUESTED` with a list of `checklist item → Ta
 
 ## Orient first
 
-Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `docs/PROJECT_CONTEXT.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`. If module-level knowledge changed, flag it for `/core:quality:sync-context` (update it yourself only if you also wrote code).
+Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`. If module-level knowledge changed, flag it for `/core:quality:sync-context` (update it yourself only if you also wrote code).
 
 ## Before starting
 
