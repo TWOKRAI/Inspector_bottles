@@ -25,7 +25,7 @@
 
 ## Порядок выполнения
 
-- Task 0.1: ADR и интерфейсы владения в base_manager [PENDING]
+- Task 0.1: ADR и интерфейсы владения в base_manager [DONE 2026-10-04 — dad6ef9c9]
 - Task 0.2: Scope и Handle — примитив и контракт-тесты G1 [PENDING] (после 0.1)
 - Task 0.3: Subscribers в event_module [PENDING] (после 0.2)
 - Task 0.4: qt_lifetime — attach_qt, flush_deferred_deletes, QThreadHandle [PENDING] (после 0.2)

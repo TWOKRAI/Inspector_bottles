@@ -284,6 +284,17 @@ Q1 = `join_until`; Q2 = `open_scope` в пакете, `Scope` не экспор�
 - **1.1:** резерв области детей — шестое число `stop_budget` или `pm_total − pm_graceful`; литеральный тест
   `stop_budget(5.0)`: `pm_graceful 5.0`, `pm_total 7.0`, `outer 8.5`, `outer > pm_total > pm_graceful`.
 - **0.5:** G2 сравнивает текст аннотации с `IScope`.
+- **0.2 (код-ревью 0.1 р2, не блокеры):** `survivors=None` / `errors=None` → `TypeError: 'NoneType' object is not
+  iterable` без имени поля — `_sequence_as_tuple` должен называть поле; `elapsed_s=float("nan")` проходит и даёт
+  нестрогий JSON `NaN`; `errors=frozenset()` принимается как последовательность. Страж фраз docstring не держит
+  «тот же отчёт», «чужой поток → ждёт», «освободить res СРАЗУ» — их проверяет G1 поведением.
+
+## Итог (2026-10-04)
+DONE: реализация `b4f24c58a` + правки ревью `dad6ef9c9` (teamlead), уточнение docstring `close` ведущим — коммит
+закрытия. Тесты: тестер вслепую 97/97 (`c2be6dc81`), автор 46, весь `base_manager` 305 passed / 2 skipped,
+`validate.py` чисто. Инъекции: 19/19 живых ([отчёт](../../docs/reviews/2026-10-04_task-0.1-injections.md)).
+Ревью: спек — CHANGES REQUESTED → эскалация CTO (Q1–Q3) → APPROVED р2; код — CHANGES REQUESTED (docstring'и потеряли
+§2.1) → APPROVED р2. Solo ведущего — одна фраза docstring `close` (замечание р2 №2), без нового механизма.
 - **0.2:** ключи словарей `unclosed_roots() -> list[dict]` (потребитель G3) — задать литералами.
 - **0.2 / 1.2 — следствия чтения reporter'а (ревью р2):** (1) выжившие сегмента `work` при закрытии корня доходят
   до reporter только после закрытия `planes` → всегда в `emergency_log`, не в живой логгер; ветка DESIGN «живой
