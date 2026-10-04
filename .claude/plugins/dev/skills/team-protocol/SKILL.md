@@ -88,7 +88,7 @@ format (question / tried / blocked on / files). Two protocol clarifications:
   question arrived and the answer came back to whoever asked. It answers by itself
   only on what the owner decides — and then it asks the owner first.
 - **A question that outlives the task** (needs the owner, a stand, an access) is a
-  line in the "Open questions" section of `docs/sessions/<today>.md`. An unrecorded
+  line in `docs/claude/OPEN_QUESTIONS.md`. An unrecorded
   question is a lost question.
 
 In a live team a teammate cannot spawn subagents: it escalates by `SendMessage` to
@@ -152,7 +152,7 @@ place — `core/agents/_WORKTREE_PATTERN.md`; read it there, do not restate it.
 | **R** read / search | `qex:search_code`, `sentrux:dsm/health/scan/rescan`, `serena:find_*`, `codegraph:explore` | all | any tree | `scan`/`rescan` are computation, not state: `integrator`, `investigator` and the `sentrux-*` commands run them normally — one at a time, cache in `.sentrux/cache/` |
 | **D** documentation | `context7:query-docs` | all | — | external libraries only; never stdlib or the core stack |
 | **M** mutating edits | `serena:rename_symbol`, `replace_symbol_body`, `ast-grep:rewrite` | writer roles only | own worktree, or mode A | read-only roles are denied these by `disallowedTools` |
-| **I** state, not computation | `qex:index_codebase`, `sentrux:session_start/session_end` (baseline), graphify build | **lead only** | **main tree only** | one at a time; the qex post-commit hook has no `git-common-dir` guard before Task 6.5, so in fan-out the lead disables it by hand (`/mcp-qex:install-reindex-hook` → "Worktree / lock race") |
+| **I** state, not computation | `qex:index_codebase`, `sentrux:session_start/session_end` (baseline), graphify build | **lead only** | **main tree only** | one at a time; the installed `.git/hooks/post-commit` (legacy qex + graphify hook, checked 2026-10-04) has no `git-common-dir` guard: in a linked worktree it runs `graphify update .` and qex `index_codebase` on that worktree's toplevel, so in fan-out the lead disables it by hand (renames the file; the hook's own `chmod -x` advice is unverified on Windows). The plugin dispatcher `.claude/plugins/core/hooks/git/post-commit.sh` skips linked worktrees, but it is not the installed hook |
 | **X** external drivers | `playwright:*`, `qt-mcp:*`, `github:*` | `tester` / `reviewer` / `cto`, per task | shared tree | one application instance per session; GUI tests are never parallel |
 
 - Fallback is mandatory: a server disabled in `enabled.yaml` → take the `Grep`/`Read`

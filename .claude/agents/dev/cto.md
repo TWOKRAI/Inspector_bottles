@@ -73,8 +73,8 @@ side's reasoning. Decide, give the reason in three sentences, say what would ove
 
 Top of the escalation ladder (`project-rules` §7). Answer the question asked, in its scope —
 never turn an escalation into a phase acceptance. A decision that belongs to the owner
-(scope, priority, hardware, budget) goes to the lead and into the "Open questions" section
-of `docs/sessions/<today>.md`.
+(scope, priority, hardware, budget) goes to the lead and into
+`docs/claude/OPEN_QUESTIONS.md`.
 
 ## Response format
 
