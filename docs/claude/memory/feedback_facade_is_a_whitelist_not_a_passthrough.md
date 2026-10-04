@@ -1,6 +1,8 @@
 ---
 name: feedback-facade-is-a-whitelist-not-a-passthrough
 description: "Поле в схеме менеджера не делает ручку управляемой — конфиг идёт через фасад-белый-список, и чужой ключ он отбрасывает молча"
+module: "process_module (observability_config, expand_observability)"
+mechanism: "config-facade"
 metadata:
   node_type: memory
   type: feedback
@@ -28,5 +30,5 @@ metadata:
 схема менеджера → фасад `Observability*Config` + `expand_observability` → readback. Тест
 проводки писать на `expand_observability`, а не на менеджере. Сверять живым
 `config_reload_verified`: `failed` тут означает «ключ отброшен», а не «значение не то».
-Родня — [[feedback-read-the-key-from-the-section-already-travelling]],
-[[feedback-config-delivery-shape-differs]], [[feedback-port-wire-is-not-a-process-route]].
+Родня — [[feedback_recipe_knob_must_be_named_in_from_recipe]],
+[[feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible]], [[feedback-port-wire-is-not-a-process-route]].

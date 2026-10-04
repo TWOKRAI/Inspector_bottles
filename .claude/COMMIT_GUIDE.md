@@ -43,6 +43,8 @@ Breaking change → `!` suffix: `feat(api)!: drop legacy endpoint`.
 
 - ❌ Дублировать body и `Why:` — body = что, Why = почему
 - ❌ `--no-verify` для обхода валидации (только merge/rebase fixes)
+- Коммиты `backend_ctl` — `Layer: mixed` (договорённость проекта). Валидатор значение не проверяет: `.claude/commit-layers.txt` содержит только комментарии, поэтому `Layer:` сейчас необязателен и любое значение проходит
+- ❌ Merge в `main` без формата: тема `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`; `git merge -F -` не читает stdin — сообщение из файла
 - ❌ Переводить ключи trailers (`Зачем:`, `Слой:`) — parser expects Latin
 - ❌ `Tested:` в body — должен быть отдельный trailer для `git log --grep`
 

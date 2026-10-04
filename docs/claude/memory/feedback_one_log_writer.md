@@ -32,5 +32,5 @@ metadata:
 сняты уже сейчас — путь к файлу резолвится без конфига (env/temp), цикл импорта
 снимается импортом внутри метода (так уже делает `FallbackLogger._lm()`).
 
-Связано: [[feedback_fewer_layers]], [[feedback_three_managers_share_base]],
-[[project_std_facade_unused]], [[feedback_all_components_base_manager]].
+Связано: [[feedback_framework_first]], [[feedback_logger_error_stats_managers]],
+[[project_std_facade_unused]], [[feedback_logger_error_stats_managers]].

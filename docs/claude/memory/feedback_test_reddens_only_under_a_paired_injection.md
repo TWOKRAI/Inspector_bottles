@@ -1,6 +1,8 @@
 ---
 name: feedback-test-reddens-only-under-a-paired-injection
-description: Тест, переживший ОДИНОЧНУЮ инъекцию, не обязательно вакуумен — он может сторожить композицию и краснеть только от пары изломов
+description: "Тест, переживший ОДИНОЧНУЮ инъекцию, не обязательно вакуумен — он может сторожить композицию и краснеть только от пары изломов; также: Когда свойство держат два независимых предохранителя, тест сторожит совпадение — снимай второй в стенде"
+merged_from: [feedback_two_safeguards_hide_which_one_holds]
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---
@@ -32,6 +34,24 @@ metadata:
 числом**: число красных зависит от способа инъекции (текстовая правка файла до импорта дала 7,
 плагин после импорта тест-модулей — 9), и без рецепта следующий читатель не поймёт, кто прав.
 
-Связано: [[feedback-test-survived-its-own-break]], [[feedback-zero-reds-can-mean-a-useless-layer]],
+Связано: [[feedback-test-survived-its-own-break]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback-predict-injections-after-writing-tests]],
 [[feedback-injection-prediction-on-a-shared-corpus]], [[feedback-two-safeguards-hide-which-one-holds]].
+
+## Слито из feedback_two_safeguards_hide_which_one_holds (_archive/feedback_two_safeguards_hide_which_one_holds.md)
+
+Ф7.5: гарантию «сэмплинг не трогает трассу кадра» держали ДВА независимых механизма —
+трасса идёт мимо цепочки процессоров И пишется уровнем INFO, до которого дефолтный потолок
+дросселя (`sampling_max_level: DEBUG`) не достаёт. Инъекция «завести трассу в полную цепочку»
+дала **0 красных вместо 1**: второй предохранитель молча подхватывал свойство.
+
+**Why:** тест зелёный по причине, которую автор не выбирал. Пока предохранителей два, он
+сторожит их дизъюнкцию, а не заявленный механизм — снос механизма проходит незамеченным,
+и «проверено» превращается в «совпало».
+
+**How to apply:** в стенде **снять все предохранители, кроме проверяемого** (поднять порог,
+отключить кэш, убрать дефолт), чтобы красным становился ровно тот механизм, о котором
+говорит докстринг. Обнаруживается это только инъекцией: зелёный тест сам о втором
+предохранителе не расскажет. Родня: [[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
+[[feedback_test_survived_its_own_break]],
+[[feedback_a_faithful_fake_still_lacks_the_protocol]].

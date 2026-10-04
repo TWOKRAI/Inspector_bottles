@@ -1,6 +1,8 @@
 ---
 name: project-gui-system-queue-storm
 description: "gui слеп для команд — PM топит его system-очередь per-delta пушами state.changed; дренаж gui ~18 сообщ/с, очередь вечно 85-94/100"
+module: "gui, router, state_store"
+mechanism: "never-drop queue"
 metadata:
   node_type: memory
   type: project

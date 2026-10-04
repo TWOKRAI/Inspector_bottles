@@ -1,6 +1,7 @@
 ---
 name: project-cuda-torch-setup
 description: Стенд RTX 3050 4GB; torch для ml_train должен быть cu124-колесом, не +cpu
+module: "ml_train, gpu"
 metadata:
   type: project
 ---

@@ -1,6 +1,8 @@
 ---
 name: project-kind-channels-dead-evict-branch
 description: При FW_USE_KIND_CHANNELS=1 кадры не идут через QueueRegistry — вытеснение, data_evicted и on_evict для них мертвы; QueueChannel.send блокирует на 1с вместо drop_oldest
+module: "router, frame_pool"
+mechanism: "dead-branch-behind-flag"
 metadata:
   type: project
 ---

@@ -1,6 +1,8 @@
 ---
 name: feedback_barrier_at_entry_does_not_reproduce_the_race
 description: Барьер на ВХОДЕ в метод гонку не воспроизводит — GIL отдаёт первому потоку весь короткий проход; синхронизировать надо вход в саму спорную операцию
+module: "state_store_module (_make_room)"
+mechanism: "concurrency-tests, break-injection"
 metadata:
   type: feedback
 ---

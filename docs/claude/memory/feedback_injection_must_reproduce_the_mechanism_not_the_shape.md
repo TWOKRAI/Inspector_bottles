@@ -1,6 +1,8 @@
 ---
 name: feedback-injection-must-reproduce-the-mechanism-not-the-shape
 description: Инъекция-реплика прошлого дефекта обязана воспроизводить его МЕХАНИЗМ — похожая по форме правка может не ломать ничего
+module: "plugin_module (write_document)"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---

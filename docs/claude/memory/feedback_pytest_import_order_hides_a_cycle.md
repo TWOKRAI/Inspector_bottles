@@ -1,6 +1,7 @@
 ---
 name: feedback_pytest_import_order_hides_a_cycle
 description: "Зелёный pytest не доказывает отсутствие цикла импорта: conftest'ы и соседние тесты грузят пакеты раньше, цикл виден только в чистом процессе с нужным пакетом ПЕРВЫМ"
+mechanism: "import-cycles"
 metadata:
   node_type: memory
   type: feedback
@@ -24,4 +25,4 @@ metadata:
 
 **How to apply:** расхождение прогноза инъекции объяснять только после прогона, который это объяснение проверяет; для
 импортов — чистый процесс в обоих порядках. Связано: [[feedback_one_control_proves_sufficiency_not_exclusivity]],
-[[feedback_plausible_is_not_verified]], [[feedback_an_injection_must_prove_its_axis_is_live]].
+[[feedback_plausible_is_not_verified]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].

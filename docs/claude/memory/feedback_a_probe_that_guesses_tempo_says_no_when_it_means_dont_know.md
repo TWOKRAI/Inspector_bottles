@@ -1,6 +1,8 @@
 ---
 name: feedback-a-probe-that-guesses-tempo-says-no-when-it-means-dont-know
 description: Пять ложных опровержений подряд на ИСПРАВНОМ механизме — все от догадки о темпе, форме или готовности вместо замера рядом
+module: "otel-export"
+mechanism: "probe-design"
 metadata:
   type: feedback
 ---
@@ -20,7 +22,7 @@ metadata:
 
 **Why:** ложное опровержение дороже пропущенного дефекта: оно закрывает исправный механизм
 как сломанный и отправляет чинить то, что работает. Пятый случай — тот же класс, что
-[[feedback_an_injection_must_prove_its_axis_is_live]] и
+[[feedback_injection_zero_may_mean_the_guards_were_not_collected]] и
 [[feedback_injection_zero_may_mean_the_guards_were_not_collected]]: сторож проходит, не
 увидев предмета. Дополняет с другой стороны наблюдение «детекторов много и они не умеют
 говорить нет»: они ещё и говорят «нет» тогда, когда не знают.

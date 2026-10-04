@@ -1,7 +1,7 @@
 ---
 name: project-all-process-autorestart
 description: "Авто-рестарт ВСЕХ процессов + уведомления упал/восстановился + chain-health. МЕХАНИЗМ-ЧАСТЬ ИСПОЛНЕНА Ф4-добор (8ac43361, ADR-PMM-015): default-on + supervisor-события. Хаб+chain-health → Ф5."
-metadata: 
+metadata:
   node_type: memory
   type: project
   originSessionId: 82ad289c-65e8-4577-b5ec-2891866a2fd0

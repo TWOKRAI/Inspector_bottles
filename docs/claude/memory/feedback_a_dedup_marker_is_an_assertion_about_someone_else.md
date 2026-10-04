@@ -1,6 +1,8 @@
 ---
 name: a-dedup-marker-is-an-assertion-about-someone-else
 description: Маркер «эту запись уже сохранил другой» ставится безусловно и становится ложным, когда другого нет
+module: "logger_module, error_module"
+mechanism: "dedup"
 metadata:
   type: feedback
 ---
@@ -38,5 +40,5 @@ error-tap нет» проходит молча.
 Тест, пришпиливший `pytest.raises`, обесточивается любым `try/except`; тест, требующий «факт
 записан И breaker продвинулся И голоса нет», остаётся различающим при любом решении о пробросе.
 Родственное: [[feedback_a_control_can_exist_and_be_dead]],
-[[feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim]],
+[[feedback_a_handmade_readback_leaves_its_producer_unguarded]],
 [[feedback_zero_observations_looks_like_a_result]].

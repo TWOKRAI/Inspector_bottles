@@ -1,6 +1,7 @@
 ---
 name: feedback_red_tests_manufacture_the_appearance_of_new_diagnostics
 description: pytest печатает захваченный stderr только у УПАВШИХ тестов — «0 предупреждений до правки, 12 после» может быть артефактом появления красных, а не находкой
+mechanism: "measurement, pytest"
 metadata:
   type: feedback
 ---

@@ -1,6 +1,8 @@
 ---
 name: project_fencing_test_race
 description: test_stale_dropped_after_instance_replace_green требует исхода гонки — механизм fencing исправен, стейла к моменту бампа обычно уже нет
+module: "topology fencing"
+mechanism: "test-asserts-race-outcome"
 metadata:
   type: project
 ---

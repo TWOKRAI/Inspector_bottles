@@ -1,6 +1,7 @@
 ---
 name: feedback-ru-output-encoding-and-wc
 description: Русский вывод CLI в системной кодировке Windows выглядит как «инструмент молчал»; wc -w врёт на кириллице
+mechanism: "encoding"
 metadata:
   node_type: memory
   type: feedback

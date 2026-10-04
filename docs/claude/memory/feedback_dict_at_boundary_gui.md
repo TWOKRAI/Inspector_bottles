@@ -3,6 +3,7 @@ name: Dict at Boundary for GUI widgets
 description: GUI widgets must work with plain dicts, never touch live SchemaBase/Pydantic objects from RegistersManager
 type: feedback
 originSessionId: 1223cca6-a6d2-4550-a4ca-364f8450e68a
+module: "frontend_module"
 ---
 Dict at Boundary applies to GUI layer too — widgets work only with `dict`, never with live `SchemaBase` instances.
 

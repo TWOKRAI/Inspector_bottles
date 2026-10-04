@@ -1,6 +1,7 @@
 ---
 name: project_memory_module_consolidation
 description: "Владелец хочет память ОДНИМ модулем (фасад/интерфейс/взаимозаменяемость, напр. Rust/iceoryx2), не размазанной по framework; директива на ревью Fable G.5"
+module: "memory_module"
 metadata:
   node_type: memory
   type: feedback
@@ -20,4 +21,4 @@ metadata:
 
 **Вердикт Fable по памяти (2026-07-14, ревью G.5):** консолидировать ДА, отдельная **H-задача сразу после must-fix, ДО flip G.7** (не блокер merge). Логика памяти сейчас в 4 локусах: (1) `shared_resources_module/memory` (формат/seqlock/mmap — легитимно); (2) `FrameShmMiddleware` (free-list/refcount/released/loan-cursor/reclaim + handle-кэш — ~200 строк семантики владения в транспортном модуле); (3) `PipelineExecutor` (pending_releases/порог/флаш); (4) `GenericProcess` (проводка handler'ов). При этом `IMemoryManager` УЖЕ объявляет `release_memory/find_free_index`, а `index_usage` лежит МЁРТВЫМ — G.5 построил ВТОРОЙ учёт занятости рядом с недоделанным первым. **План (3 этапа):** Этап 1 (S/M, ~1-2 дня + перенос ~15 тестов): Protocol `FramePool`/`SlotLedger` в `shared_resources_module/memory` (`acquire/commit(idx,n)/release(tickets)/reclaim(reader)/snapshot_stats`) — сигнатуры 1:1 на `_acquire_loan_slot/release_slots/reclaim_reader`; реализация `LoanLedger` туда; middleware держит pool через DI и делегирует; мёртвый `index_usage` поглотить или снести с ADR. Этап 2: reader-side (handle-кэш + `frame_view_valid`) за фасад `FrameReader/ViewLease` → middleware = чистый транспортный адаптер; ЗАОДНО чинит гонку кэша (синхронизация — внутреннее дело объекта) и приватный `_loan_protocol`. Этап 3 (по триггеру TECH_STACK §7): замена на Rust-библиотеку = новая реализация под тем же Protocol, middleware/executor не трогаются. Оформить module-contract (README+Protocol+contract-тесты). Риск низкий — всё за флагами.
 
-Связано: [[project_g5_ownership_decision]] (В1+В3, iceoryx2 loan/publish/release контракт), [[feedback_fewer_layers]], [[feedback_unused_paths_are_contracts]].
+Связано: [[project_g5_ownership_decision]] (В1+В3, iceoryx2 loan/publish/release контракт), [[feedback_framework_first]], [[feedback_unused_paths_are_contracts]].

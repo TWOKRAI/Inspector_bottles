@@ -1,6 +1,7 @@
 ---
 name: feedback-suffix-rename-is-a-blind-injection
 description: "Переименование суффиксом (foo → foo_RENAMED) непригодно как инъекция, если имя вызывается внутри себя: старое остаётся ПРЕФИКСОМ нового и подстрочные сторожа молчат"
+mechanism: "break-injection tooling"
 metadata:
   node_type: memory
   type: feedback
@@ -32,6 +33,6 @@ metadata:
 2. Любая проверка присутствия имени в тексте исходников — по границе слова, не подстрокой.
    Подстрока в сторожах имён = ложный зелёный на всём классе переименований.
 
-Связано: [[feedback_a_stub_silences_the_names_it_is_read_for]],
-[[feedback_a_zero_under_injection_has_three_readings]],
+Связано: [[feedback_a_faithful_fake_still_lacks_the_protocol]],
+[[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback_injection_must_reproduce_the_mechanism_not_the_shape]].

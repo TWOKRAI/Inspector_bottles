@@ -1,6 +1,8 @@
 ---
 name: feedback-docs-assert-what-registration-never-set
 description: Три докстринга утверждали, что воркер SYSTEM и потому не паузится, а создавался он без типа — оба предохранителя стояли на одной непроверенной вере
+module: "worker_module (heartbeat_sender, worker_type)"
+mechanism: "docs-vs-code"
 metadata:
   type: feedback
 ---
@@ -24,5 +26,5 @@ metadata:
 **How to apply:** увидев в докстринге «потому что X является Y», найти строку, где Y
 ПРИСВАИВАЕТСЯ, и сверить. Тест писать на наблюдаемый эффект («воркер не на паузе»), а не на
 имя типа — тогда переименование механизма не создаст зелёного вранья. Родня:
-[[feedback-named-mechanism-is-not-a-commitment]], [[feedback-two-safeguards-hide-which-one-holds]],
+[[feedback-named-mechanism-is-not-a-commitment]], [[feedback_test_reddens_only_under_a_paired_injection]],
 [[feedback-base-guard-dead-in-heir]].

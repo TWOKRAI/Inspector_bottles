@@ -1,6 +1,8 @@
 ---
 name: project_runtime_knob_expires_in_300s
 description: Рантайм-правка телеметрии живёт 300 с и умирает молча — посылка «гейт закрыт» имеет срок годности
+module: "telemetry, observability"
+mechanism: "session-TTL"
 metadata:
   node_type: memory
   type: project
@@ -61,4 +63,4 @@ publisher-гейта — то есть подрывало все живые до
 Истечение умеет только СНЯТЬ гейт (метрика пойдёт каждый тик), поэтому наблюдение «в дереве
 заморожено» им не объясняется — а вот «неожиданно поехало» объясняется. См.
 [[feedback_a_knob_can_be_applied_and_unverifiable]], [[project_backend_ctl_signal_integrity]],
-[[feedback_diagnose_live_system_with_backend_ctl]].
+[[feedback_backend_ctl_for_agents]].

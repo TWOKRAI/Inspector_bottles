@@ -1,6 +1,9 @@
 ---
 name: feedback_an_absence_assertion_needs_a_reachability_check
-description: Тест «X отсутствует в списке» зелен вхолостую, если X не может попасть в список по формату — нужна парная проверка достижимости
+description: "Тест «X отсутствует в списке» зелен вхолостую, если X не может попасть в список по формату — нужна парная проверка достижимости; также: утверждение об отсутствии при `extra='ignore'` истинно всегда"
+merged_from: [feedback_absence_assertion_under_extra_ignore_is_vacuous]
+module: "scripts static guards"
+mechanism: "absence-assertion"
 metadata:
   type: feedback
 ---
@@ -35,3 +38,7 @@ metadata:
 Родня: [[feedback_a_control_can_exist_and_be_dead]],
 [[feedback_a_guard_that_counts_at_least_once_is_blind]],
 [[feedback_zero_observations_looks_like_a_result]].
+
+## Слито из feedback_absence_assertion_under_extra_ignore_is_vacuous (_archive/feedback_absence_assertion_under_extra_ignore_is_vacuous.md)
+
+Частный случай pydantic `extra="ignore"`: «лишнего ключа в модели нет» истинно всегда, схема выбрасывает неизвестный ключ до всякой логики. D4, 2026-08-10: `test_legacy_key_does_not_survive_as_extra_field` проверял `not hasattr(cfg, "inspector")` и остался ЗЕЛЁНЫМ при полностью снятом before-валидаторе алиаса (инъекция I-8). Переписан на `model_fields_set` (различает «поле задано» и «поле пустое по умолчанию»; на этом стоит приоритет typed-поля над `extras` в `as_generic_config._pick`): та же инъекция убивает 4 теста вместо 3. Сторожить не отсутствие, а положительный наблюдаемый след механизма.

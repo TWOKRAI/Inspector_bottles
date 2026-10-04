@@ -1,6 +1,8 @@
 ---
 name: feedback-classify-a-leaf-by-the-difference-of-two-values
 description: "Зонд «потребляется ли ключ» по ОДНОМУ значению путает «не потребляется» с «равно дефолту»; отпечаток брать ПЕРЕСЕЧЕНИЕМ полюсов, не объединением"
+module: "process_module (expand_observability)"
+mechanism: "probe-design"
 metadata:
   node_type: memory
   type: feedback
@@ -31,3 +33,7 @@ metadata:
 свойство одного; при сборе отпечатка различать «значение другое» и «пути нет» — второе никогда не
 основание для вердикта. Родня: [[feedback_model_copy_does_not_validate]],
 [[feedback_facade_is_a_whitelist_not_a_passthrough]], [[feedback_a_knob_can_be_applied_and_unverifiable]].
+
+## Дополнение A8 (аудит 2026-10-04, из observability_closure)
+
+Раскладка от частичного запроса частична: один лист называется в одиночку и сверяется внутри полной секции (38 сверено / 14 названо на 52 листьях).

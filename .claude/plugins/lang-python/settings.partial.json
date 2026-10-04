@@ -7,7 +7,6 @@
       "Bash(python *)",
       "Bash(python3 *)",
       "Bash(uv run *)",
-      "Bash(uv sync*)",
       "Bash(uv lock*)",
       "Bash(pip list*)",
       "Bash(pip show *)",
@@ -16,6 +15,7 @@
     ],
     "ask": [
       "Bash(uv add *)",
+      "Bash(uv sync*)",
       "Bash(uv remove *)",
       "Bash(uv pip install *)",
       "Bash(pip install *)",

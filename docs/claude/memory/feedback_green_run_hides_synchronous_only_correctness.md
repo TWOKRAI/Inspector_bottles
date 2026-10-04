@@ -1,6 +1,8 @@
 ---
 name: feedback-green-run-hides-synchronous-only-correctness
 description: Зелёный прогон не отличает «работает» от «работает, пока вызов синхронный» — мину нашёл линтер, а не 30 тестов и четыре живых прогона
+module: "router_module (_log_debug)"
+mechanism: "lazy-eval"
 metadata:
   type: feedback
 ---

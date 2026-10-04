@@ -1,6 +1,8 @@
 ---
 name: feedback-a-diagnostic-answer-must-be-computed-last
 description: Диагностический ответ, посчитанный в середине ленты стадий, отвечает по состоянию ДО правки — два одинаковых вызова дают разные ответы, и первый лжёт
+module: "process_module (config.reload)"
+mechanism: "stage-ordering"
 metadata:
   type: feedback
 ---
@@ -37,5 +39,5 @@ tick_sec)`, и вторую половину правит ТЕЛЕМЕТРИЙН
 **How to apply:** трогая поле диагностики в многостадийной команде — сначала выписать ленту стадий
 и спросить, какие из них правят ВХОД этого поля; сторож обязателен и формулируется как
 «два одинаковых вызова подряд дают одинаковый ответ», литералами. Связано с
-[[feedback_checked_true_answers_for_the_call_not_the_coverage]] и
+[[feedback_a_control_reproduces_the_defect_it_was_built_to_catch]] и
 [[feedback_zero_observations_looks_like_a_result]].

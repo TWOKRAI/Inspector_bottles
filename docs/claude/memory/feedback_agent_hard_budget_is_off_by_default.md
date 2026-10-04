@@ -1,6 +1,8 @@
 ---
 name: agent-hard-budget-is-off-by-default
 description: Subagent context ceiling — soft warning only (100k) unless the lead sets a hard cap per agent (.budget file) or via env; developer ran to 401k on 2026-09-20
+module: "hooks (agent_context_ceiling)"
+mechanism: "agents"
 metadata:
   type: feedback
 ---

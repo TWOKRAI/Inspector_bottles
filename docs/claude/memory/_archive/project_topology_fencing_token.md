@@ -1,7 +1,7 @@
 ---
 name: project-topology-fencing-token
 description: "Требование владельца: message-fencing — старый инстанс не вкидывает stale в новую топологию. ИСПОЛНЕНО Ф4.2 (e16e2ea8): дроп по per-sender incarnation, НЕ epoch (ADR-PMM-014)."
-metadata: 
+metadata:
   node_type: memory
   type: project
   originSessionId: 82ad289c-65e8-4577-b5ec-2891866a2fd0

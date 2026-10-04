@@ -4,6 +4,9 @@ description: Always mark completed tasks [x] in plan.md after each phase/task, i
 type: feedback
 originSessionId: 94232869-20f7-4636-b47b-ddae61570b64
 ---
+
+Правило перенесено в `.claude/commands/dev/implement.md` (§4) (2026-10-04). Ниже — доказательная база урока.
+
 After completing each task or phase from a plan, IMMEDIATELY update the plan file:
 - `- [ ]` → `- [x]` for each completed task
 - Add commit hash next to the phase commit line

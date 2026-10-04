@@ -70,4 +70,4 @@ inspector/пульт → domain SetPluginConfig → PluginConfigChanged
 - **№4:** удалить мёртвую цепочку set_config (base.py generic-регистрация + cmd_set_config; FieldSetHandler FIELD_SET-ветка; on_field_set/resolve_field_command set_config-конвенция) — снимает boot-warning'и и упрощает.
 - **№3:** пометить «reload-поля» в register_schema + дёргать reload-команду из инспектора; зафиксировать инвариант «live-тюнингуемый плагин обязан иметь register_class».
 
-Связано: [[project_switch_routing_stale]], [[project_graceful_stop_debt]], транспортный хаб (RouterManager), `project_recipe_hotswap`, `project_command_result_bridge`.
+Связано: [[project_switch_routing_stale]], [[project_graceful_stop_debt]], транспортный хаб (RouterManager), `docs/claude/memory/_archive/project_recipe_hotswap.md`, `docs/claude/memory/_archive/project_command_result_bridge.md`.

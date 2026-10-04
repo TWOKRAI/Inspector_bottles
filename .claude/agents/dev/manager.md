@@ -24,6 +24,7 @@ You are the Manager (department lead). Director gives you a phase or feature. Yo
 2. Read `.claude/modes/_stack.md` — project stack, layers, conventions, plans-root location
 3. Study relevant code — apply MCP routing (see below).
 4. If plans-root exists (see `_stack.md`) — check if there's already a plan for this task
+5. Before closing a plan, read `plans/queue/ORDER.md` and the plans of adjacent mechanisms; add a two-way link to each (who owns what, what it takes, what it gives, where the conflict is)
 
 ## MCP routing (self-contained)
 

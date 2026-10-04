@@ -689,7 +689,7 @@ def run_gui(process: "GuiProcess") -> None:
     # чистой. Save/Apply/Load помечают презентеры (mark_saved/applied/loaded). Загрузка
     # из файла и стартовая load_topology_from_config идут МИМО store (не публикуют
     # TopologyReplaced) — поэтому старт остаётся чистым, а load-from-file презентер
-    # помечает сам. [[project_topology_fencing_token]] сюда не относится (это редактор, не IPC).
+    # помечает сам. ADR-PMM-014 (fencing-token топологии) сюда не относится (это редактор, не IPC).
     from multiprocess_prototype.domain import TopologySession
     from multiprocess_prototype.domain.events import RecipeActivated as _RecipeActivated
 

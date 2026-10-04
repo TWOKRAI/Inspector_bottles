@@ -4,6 +4,9 @@ description: Developer agents produce poor commit messages — Director must ver
 type: feedback
 originSessionId: 94232869-20f7-4636-b47b-ddae61570b64
 ---
+
+Правило перенесено в `.claude/skills/project-rules/SKILL.md` §4 (2026-10-04). Ниже — доказательная база урока.
+
 Developer (Sonnet) agents produce commit messages with transliterated Russian (`navigaciya v presentere`) instead of proper Russian or English. This violates the commit guide.
 
 **Why:** Observed in Phase 1 of settings-mvp — developer used Latin transliteration of Russian words in commit subject. The commit hook checks trailers but not language quality.

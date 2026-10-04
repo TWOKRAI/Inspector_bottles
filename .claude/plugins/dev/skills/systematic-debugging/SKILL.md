@@ -36,6 +36,7 @@ If you cannot yet reproduce it, your first job is to make it reproducible — se
    `pytest <path>::<test> -v -x`, or a minimal manual scenario. If you cannot
    reproduce it → STOP and report exactly what is needed to reproduce. Do not
    theorize about a bug you cannot trigger.
+   Before calling a red test a regression, run it on `main` (a worktree, not a stash).
 2. **Gather evidence.** Stack trace (which line, which error type), variable values
    at the failure point (`pytest -s`, `print`, `--pdb`), recent history
    (`git log -5`, `git diff HEAD~1`), and `git blame <file> <line>`. Use the

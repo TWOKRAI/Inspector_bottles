@@ -1,6 +1,8 @@
 ---
 name: project_root_gate_misses_framework_modules
 description: Корневой pytest НЕ покрывает тесты модулей фреймворка — из 81 нового теста в него попали 6; второй гейт обязателен
+module: "tests, pytest"
+mechanism: "coverage-of-the-gate"
 metadata:
   type: project
 ---
@@ -22,7 +24,7 @@ metadata:
 **How to apply:** при правке модуля фреймворка снимать **оба** гейта и называть оба числа.
 Проверять покрытие не глазами, а сбором: `pytest --collect-only -qq` до и после — прирост обязан
 совпасть с числом новых тестов; расхождение = часть корпуса не гоняется. Ср. [[feedback_prove_test_red_without_fix]],
-[[feedback_silent_detector_proves_nothing]].
+[[feedback_zero_observations_looks_like_a_result]].
 
 
 ## Зеркальная половина, найденная 2026-09-03 (Ф2, при слиянии `main`)

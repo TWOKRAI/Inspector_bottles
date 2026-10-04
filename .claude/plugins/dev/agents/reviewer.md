@@ -86,6 +86,7 @@ instead: **a setting introduced but never read** — too false-positive-prone fo
 ### 4. Side effects
 - [ ] Other modules not broken — **ALWAYS use `search_code`** (MCP qex) first for dependency search across the codebase, then Grep for exact symbol matches. Never skip semantic search.
 - [ ] Public APIs not changed without necessity
+- [ ] A public path with no live caller is a contract: fix it, or reject it loudly in the review
 
 ---
 

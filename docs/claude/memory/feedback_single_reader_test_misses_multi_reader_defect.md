@@ -1,6 +1,8 @@
 ---
 name: feedback-single-reader-test-misses-multi-reader-defect
 description: "Тест, читающий метрику в одиночку, не видит дефекта общей базы отсчёта между потребителями"
+module: "observability readback"
+mechanism: "shared-baseline"
 metadata:
   node_type: memory
   type: feedback

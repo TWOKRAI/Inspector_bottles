@@ -1,6 +1,8 @@
 ---
 name: feedback-injection-must-cover-all-check-sites
 description: Слом-инъекция обязана снимать ВСЕ точки исполнения правила — частичная даёт ложное «зелено под инъекцией»
+module: "still_relevant ready-gate"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---

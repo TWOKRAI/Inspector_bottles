@@ -81,6 +81,9 @@ pre_report_gate_tests = multiprocess_framework/modules/state_store_module/tests 
 pre_report_gate_base = main                     # merge-base ref for the gate's diff scope; empty = @{upstream} → origin/HEAD → main → master
 report_status = on                              # on | off — off skips the STATUS: line check entirely; independent of pre_report_gate
 
+# Project memory — read by /core:memory:* commands.
+memory_dir = docs/claude/memory                # canonical memory (git, both machines); the local auto-memory folder is a cache
+
 # Subagent context budget — read by hooks/agent-context-ceiling.sh (PreToolUse).
 agent_context_budget = 100000                   # soft: start + N -> checkpoint (finish or hand off), repeated every +50000; off = none
 agent_context_hard_budget = off                 # hard: start + N -> deny all but commit / handoff / report; off (default) = never deny

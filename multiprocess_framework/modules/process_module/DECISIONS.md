@@ -360,7 +360,7 @@ error «используй process=all»): отвергнут — не разб�
 троттл (`build_throttle_rules`) был de-facto no-op на телеметрию — `ThrottleMiddleware.before_merge`
 не был переопределён, а телеметрия едет через `proxy.merge` (heartbeat self-publish), не `before_set`;
 (2) телеметрия НЕ идёт через `StatsManager` — тот пишет в локальные каналы, remote-транспорта в
-дерево StateStore у него нет (см. [[project_telemetry_self_publish]]) — публикация fps/latency/hz
+дерево StateStore у него нет (см. docs/claude/memory/_archive/project_telemetry_self_publish.md) — публикация fps/latency/hz
 всегда шла self-publish'ом из heartbeat; (3) следовательно «управлять через stats manager» не может
 означать «пустить данные через stats manager» — это дублировало бы уже работающий канал доставки;
 управлять нужно было ДРУГИМ — плоскостью конфигурации, размещённой рядом со stats/observability-

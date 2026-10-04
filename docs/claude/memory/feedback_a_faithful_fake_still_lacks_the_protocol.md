@@ -1,6 +1,9 @@
 ---
 name: feedback_a_faithful_fake_still_lacks_the_protocol
-description: Дублёр приёмника может быть верен ФОРМЕ и неверен ПРОТОКОЛУ — настоящая дверь pop-ает служебные ключи, и сторож зеленеет на отсутствующем свойстве
+description: "Дублёр приёмника может быть верен ФОРМЕ и неверен ПРОТОКОЛУ — настоящая дверь pop-ает служебные ключи, и сторож зеленеет на отсутствующем свойстве; также: дублёр глушит имена, которые код ЧИТАЕТ; дублёр обязан воспроизводить ТЕМП оригинала; дублёр, который всегда успешен, глушит гейт (форма ОТКАЗА)"
+merged_from: [feedback_a_stub_silences_the_names_it_is_read_for, feedback_double_must_block_like_the_original, feedback_fake_that_always_succeeds_mutes_the_gate]
+module: "error_module"
+mechanism: "test-doubles"
 metadata:
   node_type: memory
   type: feedback
@@ -40,5 +43,18 @@ def track_error(self, error, context=None):
 тело приёмника и выписать его служебные ключи: их набор — часть контракта, а не деталь.
 
 Связано: [[feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible]] (там дублёр
-неверен ФОРМЕ, здесь — протоколу), [[feedback_one_door_two_roads_needs_two_guards]],
-[[feedback_silent_detector_proves_nothing]], [[feedback_plausible_is_not_verified]].
+неверен ФОРМЕ, здесь — протоколу), [[feedback_property_unchecked_at_the_second_party]],
+[[feedback_zero_observations_looks_like_a_result]], [[feedback_plausible_is_not_verified]].
+
+## Слито из feedback_a_stub_silences_the_names_it_is_read_for (_archive/feedback_a_stub_silences_the_names_it_is_read_for.md)
+
+Дублёр глушит ровно те имена, которые код у него ЧИТАЕТ; имена, которые код ему ПИШЕТ, продолжают падать громко, и это создаёт ложное чувство честной гарнитуры. S-26, 2026-08-18: И6 (`_full_replace_planner`, хук ПИШЕТ имя на оркестратор): все 5 тестов упали ошибкой фикстуры. И10 (`live_process_config`, хук ЧИТАЕТ имя у оркестратора): 69 тестов каталога зелены, дефект невидим. Сила молчания: живых вызывающих 1, копий в дублёрах 5.
+Приём: к каждому дублёру продакшн-объекта контракт-тест на ИМЕНА: `hasattr(РеальныйКласс, имя)` плюс поиск `self.<имя> =` по исходникам всей иерархии (часть имён атрибуты экземпляра). Список имён брать грепом `orchestrator\.[_a-zA-Z]*` по файлу-потребителю, включая имена через `getattr(..., default)`.
+
+## Слито из feedback_double_must_block_like_the_original (_archive/feedback_double_must_block_like_the_original.md)
+
+D8, 2026-08-10: `_Router.receive` в тесте возвращал `[]` мгновенно, настоящий `RouterManager.receive(timeout=0.1)` ждёт на пустой очереди. На здоровом коде разницы нет; под инъекцией «цикл не слышит `stop_event`» (`while True`) поток закрутился без сна, список вызовов рос безостановочно, прогон дал исчерпание памяти вместо красного, и одна инъекция осталась применённой в дереве. Если оригинал где-то ЖДЁТ, дублёр ждёт столько же (`time.sleep(kwargs.get("timeout") or 0)`); проверять до инъекций, что цикл на дублёре крутится с той же частотой, что на живом объекте.
+
+## Слито из feedback_fake_that_always_succeeds_mutes_the_gate (_archive/feedback_fake_that_always_succeeds_mutes_the_gate.md)
+
+Фальшивый `queue_registry` возвращал `True` на отправку в ЛЮБУЮ очередь, включая несуществующую; настоящий `QueueRegistry` отвечает `False`. Страж на гейт релея (Ф7.3) остался зелёным при подменённом гейте: билет доезжал прямым путём. Инъекция I-12 дала 0 красных вместо 1. Дубль копируют по форме УСПЕШНОГО вызова и забывают форму ОТКАЗА; воспроизводить условие отказа настоящего объекта (нет очереди, нет клиента, переполнено), даже если тест про успешный путь. Проверка: сломай гейт перед дублём; зелёный тест = врёт дубль.

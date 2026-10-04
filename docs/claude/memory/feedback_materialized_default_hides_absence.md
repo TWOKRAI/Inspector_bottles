@@ -1,6 +1,8 @@
 ---
 name: feedback-materialized-default-hides-absence
 description: Машинная раскладка материализует дефолт схемы — «ключ не задан» перестаёт быть выразимым, и проверка на пустоту ключа чинит ноль
+module: "config_module"
+mechanism: "schema-defaults"
 metadata:
   type: feedback
 ---
@@ -20,6 +22,6 @@ metadata:
 (`Model.model_fields["x"].default`), а не литералом; тест писать на той форме, что
 приезжает НА СТЕНДЕ (`managers_payload_for_proc`), а не на удобном словаре. Если ценность
 «не названо» выше ценности «названо ровно дефолтом» — сказать это вслух в комментарии,
-потому что это ослабление правила [[feedback-test-values-near-defaults-test-the-default]]
+потому что это ослабление правила [[feedback_test_params_hide_defect_window]]
 и соседа [[feedback-env-knob-reads-its-own-write]]. Связано с
 [[feedback-guard-must-be-reachable]] и [[feedback-three-lenses-three-defect-classes]].

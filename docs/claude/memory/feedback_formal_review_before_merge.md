@@ -1,11 +1,13 @@
 ---
 name: formal-review-before-merge
 description: "Merge в main блокируется классификатором, пока в транскрипте нет ОФОРМЛЕННОГО ревью — гонять /code-review (finders → verify → ReportFindings), а не неформальные проверки"
-metadata: 
+metadata:
   node_type: memory
   type: feedback
   originSessionId: 768c4056-8d38-4ee3-a3f1-d58bf502abff
 ---
+
+Правило перенесено в `.claude/commands/dev/ship.md` (шаг 4) (2026-10-04). Ниже — доказательная база урока.
 
 Правило владельца «код-задачи через Fable-ревью до merge» enforce'ится авто-классификатором: `git merge` в main отклоняется (и даже соседние git-команды), если ревью не видно в транскрипте как процесс. Неформального чтения диффа + прогона тестов недостаточно.
 
