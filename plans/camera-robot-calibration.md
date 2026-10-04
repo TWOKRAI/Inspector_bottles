@@ -85,6 +85,18 @@ H по **4 углам** (точное), центр — только для repro
 ### Ф7 — Железо (последняя)
 Реальный робот/плата/Hikvision. Тюнинг hsv_mask/circle_detector по дисплею "mask"; подбор `reproj_threshold_mm`; сквозная проверка прод-формулы (`project_to_pick` → робот пикает известную точку).
 
+## Порядок выполнения
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Id `F1`–`F7` — это Ф1–Ф7 (кириллическая «Ф» в id не допускается). Всё сделано одним коммитом `37d4fc28` (WIP checkpoint, 2026-06-14), дальнейшие правки — `b37cf8896`, `3f984acd7` (3-шаговый визард).
+
+- Task F1: `geometry.py` + pytest [DONE 2026-06-14 — `37d4fc28`; `Plugins/calibration/camera_robot/geometry.py`, `tests/test_geometry.py`]
+- Task F2: `store.py` [DONE 2026-06-14 — `37d4fc28`; `store.py`, `tests/test_store.py`]
+- Task F3: Плагин `camera_robot_calibration` [DONE 2026-06-14 — `37d4fc28`; `plugin.py`, `tests/test_plugin.py`] (после F1, F2)
+- Task F4: Рецепт `camera_robot_calibration.yaml` + wrap-around в `hsv_mask` [DONE 2026-06-14 — `37d4fc28`; рецепт в `multiprocess_prototype/recipes/`, правка `Plugins/processing/hsv_mask/`] (после F3)
+- Task F5: Отладка на симуляторе [DONE 2026-06-14 — `37d4fc28`; автотест `tests/test_sim_integration.py`; ручной прогон визарда на `sim_robot` по записям не подтверждён] (после F4)
+- Task F6: UI под-вкладка «Калибровка» в Robot [DONE 2026-06-14 — `37d4fc28`; `multiprocess_prototype/frontend/widgets/tabs/services/robot/calibration/`; qt-mcp smoke не подтверждён] (после F3)
+- Task F7: Железо — реальный робот, плата, Hikvision [BLOCKED] — ждёт стенд; по примечанию плана — после Ф7 `robot-protocol-v2`
+
 ## Зависимости фаз
 `Ф1∥Ф2 → Ф3 → Ф4(+hsv_mask wrap-fix) → Ф5 → Ф6 → Ф7`. Ф6 можно начинать после Ф3 (контракт команд зафиксирован), интегрировать после Ф5. **Приоритет: Ф1→Ф5 (математика+симулятор) полностью до железа.**
 

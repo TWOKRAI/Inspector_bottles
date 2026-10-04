@@ -418,6 +418,17 @@ API в `RobotClient` (`vfd_*`) уже готов из Фазы 0, подключ
 
 ---
 
+## Порядок выполнения
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Id `F0`–`F5` — это Фазы 0–5 (кириллическая «Ф» в id не допускается). Калибровочная часть (Фаза 2 и 3) поставлена планом [`camera-robot-calibration`](camera-robot-calibration.md) под другими путями.
+
+- Task F0: Сервис `Services/robot_comm` [DONE 2026-06-11 — `85c5186c`; план `robot-vfd-services`, поверх `Services/modbus`; симулятор `sim_robot` там же]
+- Task F1: Плагин `Plugins/processing/circle_detector` [DONE 2026-06-13 — `45000ea4`; правки ревью `afd82554`] (после F0)
+- Task F2: Калибровка: math + персистентность per-camera [DONE 2026-06-14 — `37d4fc28`; план `camera-robot-calibration`, Ф1–Ф3; путь `Plugins/calibration/camera_robot/`, а не `Plugins/control/calibration`] (после F1)
+- Task F3: UI-вкладка калибровки [DONE 2026-06-14 — `37d4fc28`; план `camera-robot-calibration`, Ф6; `multiprocess_prototype/frontend/widgets/tabs/services/robot/calibration/`] (после F2)
+- Task F4: Расширение `robot_io` — reject → `image_to_robot` → `send_job`, телеметрия в state, флаг «калибровка активна» [PENDING] (после F2) — `robot_io` стал тонким job-форвардером в `devices` (`robot_enqueue_job`, план `robot-vfd-services`); `image_to_robot` по reject, телеметрия в `state` и флаг P2.5 в нём не найдены
+- Task F5: Интеграция в прототип + полировка, 2+ камеры, автомиграция файла калибровки [PENDING] (после F4) — рецепт `camera_robot_calibration.yaml` есть (`37d4fc28`), мульти-камерного рецепта и автомиграции при переименовании камеры нет
+
 ## Верификация (E2E)
 
 1. **Без железа:** `python -c "import Services.robot_comm"` (graceful без pymodbus);

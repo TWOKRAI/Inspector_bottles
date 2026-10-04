@@ -369,6 +369,173 @@ P3.2 StateChannel остаётся DEFERRED. Ничего из анти-карг
 
 ---
 
+## Порядок выполнения
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Статус `[x]` из таблиц фаз ниже сверен с коммитами: у каждой строки DONE указан хеш — предок `main`.
+> Id приведены к эталону: `F.n`→`Fn`, `AU-n`→`AUn`, `RS-n`→`RSn`, `G.n`→`Gn`, `G.F`→`G10`, `G.H`→`G11`, Фаза 8 `H.n`→`F8-n` (чтобы не пересекаться с `H1`–`H8` Ф4-добора), «5.14опц»→`5.14s`. Задачи 4.5/4.6 отмечены `[ ]` в таблице, но закрыты как C2 — здесь DONE по C2. GATE-ы G0–G4 и «живой прогон» LP-1…LP-5 — решения и находки, не задачи; здесь не перечислены.
+
+
+### Ф0 — фундамент
+
+- Task 0.1: Merge `fix/topology-switch-hardening` в main [DONE 2026-07-06 — `9a5f4b8f`]
+- Task 0.2: Починить 3 красных теста [DONE 2026-07-06 — `08a4e6e4`]
+- Task 0.3: sentrux baseline + временный порог min_depth [DONE 2026-07-06 — `ca84f286`]
+- Task 0.4: FPS/CPU baseline (headless-probe) [DONE 2026-07-06 — `003e45f7`]
+- Task 0.5: GATE G0 — ярусы и вердикты [DONE 2026-07-06 — `0e37948a`]
+- Task 0.6: Доки: QUEUE → governing, триаж аудита [DONE 2026-07-06 — `a6926764`]
+
+### Ф1 — backend_ctl v2
+
+- Task 1.1: Событийный канал driver [DONE 2026-07-07 — `88373724`; слияние Ф1]
+- Task 1.1b: Мост push→SocketChannel для внешних подписчиков [DONE 2026-07-07 — `8283205d`]
+- Task 1.2: Типизированные обёртки introspect [DONE 2026-07-07 — `8b5fbe26`]
+- Task 1.3: BackendHarness — pytest-фикстура headless-бэкенда [DONE 2026-07-07 — `72329d2e`]
+- Task 1.4: IPC `config.reload` и `logger.sink.enable|disable` [DONE 2026-07-07 — `09a359d9`]
+- Task 1.5: Tail логов процесса через driver [DONE 2026-07-07 — `0e102895`]
+- Task 1.6: verify-probe: write → readback → diff [DONE 2026-07-07 — `9ef0b12a`]
+- Task 1.7: MCP-обёртка backend_ctl [DONE 2026-07-07 — `e4f787a0`]
+- Task 1.8: record/replay (P4) [DEFERRED] — опц.; решение GATE G3 2026-07 — отложено
+- Task 1.10: UI-tap — отладка фронтенда агентами [DONE 2026-07-07 — `89ab5797`]
+- Task 1.11: Debug-plane v1 [DONE 2026-07-07 — `bf06f1ba`]
+- Task 1.9: Контактная книжка v0 [DONE 2026-07-07 — `cb77ed26`]
+
+### Ф2 — наблюдаемость отказов
+
+- Task 2.1: `ctx.health` — единый на процесс [DONE 2026-07-07 — `23829b75`; закрытие Ф2 (handoff); отдельного коммита задачи не найдено]
+- Task 2.2: Breaker честный [DONE 2026-07-07 — `abfea5a9`]
+- Task 2.3: Discovery честный [DONE 2026-07-07 — `a4d86595`]
+- Task 2.4: Волна C ч.1 — M-err-1/M-err-2 [DONE 2026-07-07 — `c4e182e6`]
+- Task 2.5: Волна C ч.2 — 31 `report_error` и AST-гейт [DONE 2026-07-07 — `c4e182e6`]
+- Task 2.6: JSONL-sink в logger_module [DEFERRED] — опц.
+
+### Ф3 — Supervisor v2
+
+- Task 3.1: routing-epoch [DONE 2026-07-08 — `dce270fe`; ADR-PMM-010]
+- Task 3.2: Self-reported ready [DONE 2026-07-08 — `cb8eadd8`; ADR-PMM-011]
+- Task 3.3: Guard system-очереди [DONE 2026-07-08 — `7cc690bf`]
+- Task 3.4: M-race-1 (device_hub) [DONE 2026-07-08 — `1b614fc9`]
+- Task 3.5: Wire-статусы first-class [DONE 2026-07-08 — `77a3d374`; ADR-PMM-012]
+- Task 3.6: Supervisor v2 policy: RestartPolicy на процесс [DONE 2026-07-08 — `94f09bc5`; ADR-PMM-013]
+- Task 3.7: Fault-injection фикстура на BackendHarness [DONE 2026-07-08 — `87b94315`; закрытие Ф3 3.1–3.8]
+- Task 3.8: GATE G1 — RestartPolicy включена (владелец: ДА) [DONE 2026-07-08 — `87b94315`]
+- Task 3.9: `depends_on` — порядок старта [DEFERRED] — опц.; отложено в Ф8
+- Task 3.10: pipeline-live-control Task 3.1+3.2 [DEFERRED] — опц.
+
+### Трек F — god-split (id `F1`–`F7` — это F.1–F.7)
+
+- Task F1: `graph/data.py` — data-классы графа без Qt [DONE 2026-07-06 — `74245b62`]
+- Task F2: `graph_codec.py` + `recipe_io` из presenter [DONE 2026-07-07 — `084ace42`]
+- Task F3: `wire_validation.py` + `runtime_control` [DONE 2026-07-07 — `72eed298`]
+- Task F4: `layout_controller.py` + mutations [DONE 2026-07-07 — `448ef414`]
+- Task F5: `forms/factory.py` → пакет [DONE 2026-07-07 — `da7c9a5d`]
+- Task F6: `inspector_panel.py` → секции [DONE 2026-07-07 — `1cf80006`; слияние трека F, MERGE-GATE F]
+- Task F7: Перенос владения GUI-состоянием presenter → слои [DONE 2026-07-11 — `5488f8aa`]
+
+### Ф4 — контракты и версии
+
+- Task 4.1: Multi-register fix [DONE 2026-07-10 — `117182d2`]
+- Task 4.2: Реестр контрактов сообщений + fencing-token [DONE 2026-07-09 — `28118017`]
+- Task 4.3: Payload-валидатор PluginRunner по Port-декларациям [DONE 2026-07-11 — `634e6473`]
+- Task 4.4: Манифест плагина [DONE 2026-07-11 — `a6b4f128`]
+- Task 4.5: Движок миграций dict-документов [DONE 2026-07-11 — `a717aef3`; закрыта как C2 (модуль `recipe`)]
+- Task 4.6: Единая READ-точка рецептов [DONE 2026-07-11 — `a717aef3`; закрыта как C2]
+- Task 4.7: join/inspector из wires при assembly [DONE 2026-07-12 — `7345dd4f`]
+- Task 4.8: mini-GATE — канонизация записи рецепта [DONE 2026-07-11 — `d4e29943`]
+- Task 4.9: StateStore — ревизии [DONE 2026-07-11 — `ccf82606`]
+- Task 4.10: driver watch-from-revision [DEFERRED] — опц.
+
+### Ф4-добор — Pre-Ф5 hardening (id `H1`–`H8`)
+
+- Task H1: breaker прод-путь источников [DONE 2026-07-09 — `209fa7bc`]
+- Task H2: stale incarnation на рестарте [DONE 2026-07-09 — `49d1fced`]
+- Task H3: тихий провал рестарта [DONE 2026-07-09 — `1a9f83c6`]
+- Task H4: health-based restart [DONE 2026-07-09 — `a811eb12`]
+- Task H5: контракты не no-op [DONE 2026-07-09 — `f2a5115e`]
+- Task H6: KILL `Operation_crop` [DONE 2026-07-09 — `c6bac008`]
+- Task H7: KILL topology-editor-виджет [DONE 2026-07-09 — `ece8de67`]
+- Task H8: Governance — pytest 0 красных на ветке [DONE 2026-07-09 — `b083b086`]
+
+### Ф5 — конструктор: carve E + Phase 5
+
+- Task 5.1: Характеризационный тест `build` [DONE 2026-07-09 — `6936706a`]
+- Task 5.2: Вынос шва `SystemLauncher` [DONE 2026-07-09 — `2cd811cd`]
+- Task 5.3: recipe-orchestrator: Assembler/Planner [DONE 2026-07-11 — `c61dd6d5`; закрыта как C3]
+- Task 5.4: E1: `plugin_register_resolver` → framework [DONE 2026-07-09 — `c431ca38`]
+- Task 5.5: E2: `qt_event_bus` → frontend_module [DONE 2026-07-09 — `8176f05b`]
+- Task 5.6: E4: diff-отчёт 4 механизмов форм [DONE 2026-07-10 — `64ce533a`]
+- Task 5.7: E6: телеметрия helper/mixin [DONE 2026-07-09 — `5b42638d`]
+- Task 5.8: RuntimeDeps → двухслойный контракт [DONE 2026-07-10 — `71a1cbee`]
+- Task 5.9: GUI state-plane: полный Delta до GUI [DONE 2026-07-09 — `3a868a1d`]
+- Task 5.10: TabSpec/TabRegistry [DEFERRED] — опц.
+- Task 5.11: `app_module` skeleton [DONE 2026-07-12 — `22f68cbc`]
+- Task 5.12: `AppOrchestrator` generic + хук-точки [DONE 2026-07-12 — `fd0ff1ee`]
+- Task 5.13: `examples/minimal_app` + CI-smoke [DONE 2026-07-12 — `6f4fdf0a`]
+- Task 5.14s: scaffold-генератор (в плане «5.14опц») [DEFERRED] — опц.
+- Task 5.14: CRM-развязка + канонизация error-гнезда [DONE 2026-07-09 — `76087f1d`]
+- Task 5.15: ObservabilityHub core [DONE 2026-07-09 — `6b242256`]
+- Task 5.16: Wiring в composition root [DONE 2026-07-09 — `ce2f6069`]
+- Task 5.17: Разделение hub↔health [DONE 2026-07-09 — `c731ab0f`]
+- Task 5.18: Depth-reduction [DEFERRED] — порог 0.57; долг H8, решение отложено
+- Task 5.19: Фронт: вкладки Логи / Ошибки / Статистика [DONE 2026-07-10 — `ef07e3d3`]
+- Task 5.20: Плумбинг наблюдаемости: persistent-стор + hub [DONE 2026-07-09 — `9e7cfc44`]
+- Task 5.21: Наблюдаемость — добор после код-ревью [DONE 2026-07-10 — `67af7fb2`]
+
+### Ф5-добор — границы и дубли модулей (id `C1`–`C8`)
+
+- Task C1: Модуль `recipe` [DONE 2026-07-11 — `574e3b4c`]
+- Task C2: D5/D6 в модуле recipe — реестр миграций, READ-точка [DONE 2026-07-11 — `a717aef3`]
+- Task C3: Carve в модуль recipe (=5.3) [DONE 2026-07-11 — `c61dd6d5`]
+- Task C4: Единый CRM-нормализатор config-shape [DONE 2026-07-11 — `574e3b4c`]
+- Task C5: Один канонический deep-merge [DONE 2026-07-11 — `839b045c`]
+- Task C6: Единый pipeline-движок [DONE 2026-07-13 — `c01b552e`; (d)/(e) закрыты слиянием C-волны]
+- Task C7: Границы/именование [DONE 2026-07-11 — `a8d69ca2`]
+- Task C8: Docs-sync [DONE 2026-07-12 — `cb566c2f`]
+
+### Follow-up аудита В1 (id `AU1`–`AU7` — это AU-1…AU-7)
+
+- Task AU1: Снять write-путь top-level `gui_positions` [DONE 2026-07-12 — `7526a7bc`]
+- Task AU2: Escape-hatch `inspector` в GUI round-trip [DONE 2026-07-12 — `7526a7bc`]
+- Task AU3: Вывод join: источник с двумя разными data_type [DONE 2026-07-12 — `a1150d26`]
+- Task AU4: `infer_missing_inspectors`: lookup плагина [DONE 2026-07-12 — `cbf13080`]
+- Task AU5: Публичный `PluginRegistry.snapshot()/restore()` [DONE 2026-07-12 — `cbf13080`]
+- Task AU6: `test_blueprint_wire_inspector.py` → из `process_manager` [PENDING] — идёт с физпереносом assembler/planner (ADR-RCP-005); по плану блок закрыт, кроме AU-6
+- Task AU7: Гигиена шимов recipe-оси [DONE 2026-07-12 — `5f5d6b60`]
+
+### RS-волна — система рецептов (id `RS1`–`RS8`; `RS8` = «RS→Ф7»)
+
+- Task RS1: Единый Save-механизм [DONE 2026-07-12 — `ad3c03ca`]
+- Task RS2: Честный state после switch [DONE 2026-07-13 — `71d3b479`]
+- Task RS3: Громкий/честный switch [DONE 2026-07-13 — `cb003c46`]
+- Task RS4: Dirty-контур редактора [DONE 2026-07-13 — `a42747be`]
+- Task RS5: Валидация на записи + устойчивость DisplayManager [DONE 2026-07-13 — `7e77e9aa`]
+- Task RS6: Контракт фейков [DONE 2026-07-13 — `554fa9df`]
+- Task RS7: Honest-схема рецепта [DONE 2026-07-13 — `78ce74ae`]
+- Task RS8: Дополнить G.3/G.4 находками B-6..B-9 [DONE 2026-07-13 — запись в плане GATE G3] — внесено в суть/acceptance G.3/G.4 на GATE G3 2026-07-13 — запись в самом плане, отдельного коммита не найдено
+
+### Ф7 — hot-path G (id `G1`–`G9`, `G10`, `G11` — это G.1–G.9, G.F, G.H)
+
+- Task G1: Снять 7 TRACE из on_receive + perf-пробы [DONE 2026-07-13 — `4f1152fc`]
+- Task G2: Характеризационные тесты доставки (kind-каналы за флагом) [DONE 2026-07-14 — `8cce529c`]
+- Task G3: Унификация двух стратегий записи FrameShm [DONE 2026-07-14 — `b54b4689`]
+- Task G4: QoS-профили kind [DONE 2026-07-14 — `91337e1b`]
+- Task G5: Zero-copy тракт (a→e, флаги default-off) [DONE 2026-07-14 — `0a1cd566`]
+- Task G6: trace_id / OTel-совместимые ID [DONE 2026-07-13 — `9bf829fd`]
+- Task G7: Флип флагов по плану g7-flip-plan.md [IN PROGRESS] — `[~]` в плане; шаги 5–7 в main `76ad4d5b`, `83d7d48a`
+- Task G8: pipeline-live-control Task 3.3: drain→detach→swap [DONE 2026-07-14 — `c3050f1b`]
+- Task G9: GC-дисциплина + аллокации per-frame пути [DONE 2026-07-14 — `9a381900`]
+- Task G10: Закрытие Ф7 (G.F) — реестр feature_flags [DONE 2026-07-15 — `c078fbc2`]
+- Task G11: Консолидация памяти в один модуль (G.H) [DONE 2026-07-14 — `4bf21346`]
+
+### Ф8 — фокус H (id `F8-1`–`F8-6` — это H.1–H.6)
+
+- Task F8-1: Ярусы core/optional/frozen + NEW-10 [DONE 2026-07-26 — `e83b0bf6`]
+- Task F8-2: GATE G4 — удаления per-item (владелец, 2026-07-26) [DONE 2026-07-26 — `6ef985e7`]
+- Task F8-3: Registers⇄StateStore merge [PENDING] — ADR не написан
+- Task F8-4: Один стандарт логирования прототипа [PENDING]
+- Task F8-5: Ужесточение sentrux: min_depth ≥ 0.65 [PENDING] — порог временно 0.60 с Ф0.3
+- Task F8-6: Финальная сверка: QUEUE, session_end, сводная таблица [PENDING]
+
+
 ## Gates (точки решения владельца, с рекомендациями)
 
 | Gate | Когда | Решение | Рекомендация |

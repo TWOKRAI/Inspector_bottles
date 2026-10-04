@@ -221,6 +221,43 @@ max-line-length в обоих `_read_loop` (drop+log вместо безгран
 - **`telemetry-pull-on-demand`** — при принятии того плана решить путь level-метрик драйвера (poll как GUI или своя подписка) и readback обеих плоскостей каскада. Блокер записан там.
 - **Рефактор `_TransportMixin`/`_EventChannelMixin` → композиция** и **вынос telemetry-блока (~320 строк) из фасада** — при следующем росте фасада; вместе с ними снять test-only re-export'ы `driver.py:44,68,70,658-666`.
 
+## Порядок выполнения
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Хеши — предки `main`. Часть задач закрыта коммитами ДРУГИХ планов — план-источник назван в строке.
+
+### Фаза 0 — baseline «до»
+
+- Task 0.1: Live-чек-лист аудита (7 пунктов) [PENDING] — нового audit-файла с исходами ПОДТВЕРЖДЁН/ОПРОВЕРГНУТ нет
+
+### Фаза 1 — P0: правда агрегации
+
+- Task 1.1: `system_overview` читает счётчики потерь [IN PROGRESS] (после 0.1) — 2 из 3 видов в `main`: `queue_data_loss`, `control_plane_loss` — `54ec677a` 2026-08-24, план `observation-port`; вид для `queue_system_evict_blocked` не эмитится (поле разбирает `protocol.py:204`, `overview.py` его не читает); live-пары нет
+- Task 1.2: Контракт `full=true` — подсказка не советует невозможное [DONE 2026-08-29 — `5226045a`, план `observability-closure` Ф0, задачи 0.2-0.4; `_declare_full_param` + тест `test_mcp_full_autoschema_hazards.py`] (после 0.1)
+- Task 1.3: Детекция разрывов в read-model драйвера [PENDING] (после 0.1) — `gap_count` в `backend_ctl/` нет
+- Task 1.4: Атрибуция вытеснений в `queue_senders` [PENDING] (после 0.1) — вида `evicted` в `_count_sender` нет (только `put`/`lost`)
+
+### Фаза 2 — контракт ответов
+
+- Task 2.1: Golden-фикстура форм ответов сервера [PENDING] (после 1.1–1.4) — `contract_fixtures` / golden-файла нет
+- Task 2.2: Live `missing==[]` для всех типизированных обёрток [PENDING] (после 2.1) — `TestWrappersLive` покрывает 5 тестов, `introspect_memory`/`telemetry`/`status`/`supervision_status` нет
+- Task 2.3: Конформанс схем инструментов против dispatch [PENDING] (после 2.1) — `test_schema_conformance.py` нет, схема `system_command` плоская (`command: object`)
+
+### Фаза 3 — транспорт SocketChannel (передана в `gui-service`)
+
+- Task 3.1: Убрать head-of-line [DONE 2026-09-24 — `44bbbb60`; слияние `4cb0e6df` 2026-09-25; план `2026-09-22_gui-service`, Task 1.3a]
+- Task 3.2: Изоляция второго клиента [DONE 2026-08-12 — `8fae4034`; ADR-PMM-026; `session_isolation` по умолчанию ON, вариант «одна дверь» отвергнут; Refs `observability-roadmap`]
+- Task 3.3: Ограничить `sendall` + границы кадров [DONE 2026-09-24 — `44bbbb60`; слияние `4cb0e6df`; план `2026-09-22_gui-service`, Task 1.3a: `max_line_bytes`, байт-кап EventHub, судьба медленного клиента в докстринге `send()`]
+
+### Фаза 4 — гигиена доверия
+
+- Task 4.1: `record_start`/`record_dump` — честная классификация [PENDING] — оба остаются `SAFETY_READ` (`mcp_tools.py:1502,1507`)
+- Task 4.2: Счётчик отказов durable-аудита [PENDING] — `file_write_failures` в `backend_ctl/` нет
+- Task 4.3: Покрытие `logger_sink_enable/disable` + стейл в тестах [PENDING] — упоминание инструмента только в `test_batch_addressing.py`; стейл `queue_type='system'`/`xfail` в `tests/test_harness.py` на месте
+- Task 4.4: Эфемерный порт live-фикстуры [PENDING] — в `harness.py`/`conftest.py` привязки к `:0` нет
+- Task 4.5: Доки и границы [PENDING] — `STATUS.md` пишет «47 инструментов», `test_backend_ctl_endpoint.py` лежит в `process_manager_module/tests/`
+
+---
+
 ## Verification (гейт плана)
 
 1. Unit: `python -m pytest backend_ctl -q` зелёный; framework-сьюты задетых модулей (`shared_resources`, `router_module`, `process_module`) зелёные; `python scripts/validate.py` чист.

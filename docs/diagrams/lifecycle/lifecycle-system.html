@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Копия артефакта https://claude.ai/artifact/JJcjxRywjNACNU3xS8vdXc (2026-10-03, тёмная тема). В артефакте mermaid
+     рисует сам claude.ai; здесь библиотека грузится с CDN — нужен интернет. План: plans/2026-10-03_lifecycle-owner-scope/. -->
+<title>Жизненный цикл фреймворка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: одна колонка ~72ch, схемы на всю ширину колонки; акцент — холодный синий «владельца», красный — только для дыр */
+:root {
+  /* Тёмная тема всегда (просьба владельца 2026-10-03, как у страницы layer-render) */
+  --bg: #13161b;
+  --surface: #1b2027;
+  --fg: #e4e8ee;
+  --muted: #9aa4b2;
+  --line: #2c333d;
+  --accent: #7fb0f0;
+  --accent-soft: #1c2a3d;
+  --bad: #ec7a72;
+  --bad-soft: #3a2020;
+  --warn: #e0a35a;
+  --warn-soft: #3a2c1a;
+  --done: #8fcf86;
+  --done-soft: #1f3320;
+  --code-bg: #232932;
+  --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.6 var(--f-body); margin: 0; }
+main { max-width: 860px; margin: 0 auto; padding: 40px 16px 56px; display: grid; gap: 44px; }
+header { display: grid; gap: 14px; }
+.eyebrow { font: 500 12px/1.2 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { font: 700 clamp(26px, 4.6vw, 38px)/1.15 var(--f-display); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+h2 { font: 500 clamp(19px, 3vw, 24px)/1.25 var(--f-display); margin: 0; text-wrap: balance; }
+h3 { font: 600 16px/1.4 var(--f-body); margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.lead { font-size: 18px; }
+section { display: grid; gap: 14px; }
+.muted { color: var(--muted); }
+code { font-family: var(--f-mono); font-size: 13.5px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+.frame { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+pre.mermaid { margin: 0; background: transparent; text-align: center; }
+.cap { font-size: 14px; color: var(--muted); max-width: 68ch; }
+ul, ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 68ch; }
+.answer { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 14px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 8px; }
+.note { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: 14px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 8px; }
+.alarm { background: var(--bad-soft); border-left: 3px solid var(--bad); padding: 14px 16px; border-radius: 0 8px 8px 0; display: grid; gap: 8px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.3 var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.nums { font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; font: 500 12px/1 var(--f-mono); padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.ok { background: var(--done-soft); color: var(--done); }
+.pill.wait { background: var(--warn-soft); color: var(--warn); }
+.pill.next { background: var(--accent-soft); color: var(--accent); }
+.pill.later { background: var(--code-bg); color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 4px; min-width: 0; }
+.stat b { font: 700 26px/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13.5px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13.5px; color: var(--muted); align-items: center; }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.sw { width: 18px; height: 10px; border-radius: 3px; display: inline-block; }
+.sw.bad { background: var(--bad-soft); border: 1.5px dashed var(--bad); }
+.sw.ok { background: var(--done-soft); border: 1.5px solid var(--done); }
+.sw.core { background: var(--accent-soft); border: 1.5px solid var(--accent); }
+.sw.part { background: var(--warn-soft); border: 1.5px dashed var(--warn); }
+.tabpanel { display: grid; gap: 12px; margin-top: 10px; }
+footer { color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Фреймворк · жизненный цикл · проект на 3 октября</div>
+    <h1>Один владелец для всего, что нужно закрыть</h1>
+    <p class="lead">Подписки, потоки, процессы, окна и виджеты сейчас закрываются каждый по-своему, а многие не закрываются вовсе. Отсюда падения тестов, зависание останова на 5 секунд и утечки в GUI. План: дать каждому ресурсу владельца, который закрывает всё сразу и докладывает, что не закрылось.</p>
+    <p class="muted">Решение владельца от 3 октября: один универсальный механизм для всех областей, чинить причину, а не симптом.</p>
+  </header>
+
+  <section>
+    <h2>Что сломалось</h2>
+    <p>Примерно в одном прогоне тестов фреймворка из четырёх процесс Python аварийно завершается: <code>Fatal Python error: Aborted</code>. Тесты при этом не падают, падает сам интерпретатор. Поэтому гейт перед слиянием то зелёный, то красный, и от кода это не зависит.</p>
+    <ol>
+      <li>Контрол GUI (слайдер, поле ввода) подписывается на регистр и никогда не отписывается.</li>
+      <li>Регистр держит контрол, контрол держит виджет, и всё это замыкается в кольцо ссылок.</li>
+      <li>Кольцо освобождает только сборщик мусора Python. Он запускается в случайный момент и на любом потоке.</li>
+      <li>Виджет Qt можно удалять только на главном потоке. Если сборщик попал на фоновый поток, Qt вызывает <code>abort()</code>.</li>
+    </ol>
+    <div class="answer">
+      <p><b>Короче:</b> у ресурса нет владельца, который его закроет. Ресурс доживает до случайного момента и умирает в неправильном месте.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Где мы сейчас</h2>
+    <div class="stats">
+      <div class="stat"><b class="nums">12</b><span>механизмов подписки, ручки — у 6, формы ручек разные</span></div>
+      <div class="stat"><b class="nums">39</b><span>мест, где создаются потоки, у каждого свой стоп</span></div>
+      <div class="stat"><b class="nums">18</b><span>таймаутов, зашитых числами, общего срока нет</span></div>
+      <div class="stat"><b class="nums">3 из 31</b><span>презентер GUI умеет за собой убирать</span></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw bad"></i>нет уборки или утечка</span>
+      <span><i class="sw part"></i>убирается по-своему, без общего срока</span>
+      <span><i class="sw ok"></i>убирается правильно</span>
+      <span><i class="sw core"></i>новый механизм</span>
+    </div>
+    <div class="tabpanel">
+      <h3>Подписки</h3>
+      <div class="frame"><pre class="mermaid">
+flowchart LR
+  classDef bad fill:#3a2020,stroke:#ec7a72,stroke-dasharray:5 4,color:#f3dcda
+  classDef ok fill:#1f3320,stroke:#8fcf86,color:#e4f2e2
+  RM["Регистры GUI"]
+  BUS["Шина событий"]
+  SP["Прокси состояния"]
+  RT["Роутер: обработчики"]
+  TAP["Отводы логов"]
+  BND["Привязки GUI"]
+  PRES["Презентеры: число, список, флажок"]:::bad
+  BCW["Базовый виджет настройки"]
+  TABS["Вкладки Процессы, Сервисы"]:::bad
+  TABP["Вкладка Пайплайн"]:::ok
+  ADP["Адаптеры состояния"]:::ok
+  PLG["Плагины: телеметрия, сцена, otel"]:::bad
+  OBS["Наблюдаемость процесса"]:::ok
+  DEV["Панели устройств, робота, ПЧ"]:::ok
+  PRES -.->|"нет отписки"| RM
+  BCW -->|"отписка только при закрытии окна"| RM
+  TABS -.->|"ручка есть, отписки нет"| BUS
+  TABP -->|"отписка в dispose"| BUS
+  ADP -->|"отписка по sub_id"| SP
+  PLG -.->|"снимает процесс, не плагин"| SP
+  PLG -.->|"снять нельзя: API нет"| RT
+  OBS -->|"снятие при останове"| TAP
+  DEV -->|"авто по уничтожению виджета"| BND
+</pre></div>
+      <p class="cap">Шесть издателей, у каждого свой способ отписки. Красным отмечены подписчики, которые не отписываются. Обработчик роутера снять нельзя совсем: такого вызова нет.</p>
+    </div>
+
+    <div class="tabpanel">
+      <h3>Потоки и процессы</h3>
+      <div class="frame"><pre class="mermaid">
+flowchart TD
+  classDef bad fill:#3a2020,stroke:#ec7a72,stroke-dasharray:5 4,color:#f3dcda
+  classDef part fill:#3a2c1a,stroke:#e0a35a,stroke-dasharray:3 3,color:#f2e3cf
+  SL["Запускатель"] -->|"порождает"| PM["Менеджер процессов"]
+  SL --> GRD["Сторож дерева процессов"]
+  PM -->|"порождает"| CH["Дочерний процесс"]
+  PM --> RG["Потоки ready-gate"]:::bad
+  CH --> WM["Менеджер воркеров"]
+  WM --> WRK["Воркеры плагинов"]
+  WM --> HB["Heartbeat"]
+  CH --> RT["Роутер: приём и отправка"]
+  CH --> OBS["Писатель журнала ошибок"]:::bad
+  CH --> SST["Сброс состояния"]
+  CH --> PLG["Плагины: пулы и HTTP"]:::part
+  CH --> SVC["Сервисы: аудит, SQL, шлюз"]:::part
+  CH --> SVH["Потоки старта сервисов"]:::bad
+  GUI["GUI-процесс"] --> QTH["QThread генерации"]:::bad
+  WRK -->|"держит"| CAM["Камера в produce"]
+</pre></div>
+      <p class="cap">Красные узлы никто не дожидается при останове или они утекают. Оранжевые останавливаются каждый по-своему, без общего срока.</p>
+      <div class="frame"><pre class="mermaid">
+sequenceDiagram
+  participant PM as Менеджер процессов
+  participant CH as Дочерний процесс
+  participant WM as Менеджер воркеров
+  participant PL as Плагины
+  PM->>CH: стоп
+  PM->>PM: ждёт до 5 с
+  CH->>WM: остановить воркеров, раз 1, до 5 с
+  Note over WM: воркер висит в камере и не видит стоп
+  Note over WM: живому потоку пишется «остановлен»
+  CH->>PL: закрыть плагины, камера отпускается только здесь
+  CH->>WM: остановить воркеров, раз 2, до 5 с
+  PM-->>CH: 5 с истекли, terminate, затем kill
+  Note over CH: не выполнены закрытие плагинов, памяти, логгера
+  CH->>CH: finally, остановить воркеров, раз 3
+</pre></div>
+      <p class="cap">Путь останова сейчас. Родитель даёт ребёнку 5 секунд, а ребёнок может потратить 15 ещё до того, как отпустит камеру.</p>
+    </div>
+
+    <div class="tabpanel">
+      <h3>GUI</h3>
+      <div class="frame"><pre class="mermaid">
+flowchart TB
+  classDef bad fill:#3a2020,stroke:#ec7a72,stroke-dasharray:5 4,color:#f3dcda
+  subgraph GUI["Процесс GUI"]
+    MW["Главное окно"] --> TAB["Вкладки"] --> FORM["Формы"] --> CTRL["Контрол: вид и презентер"]
+    RM["Зеркало регистров"]
+    BR["Мост в главный поток"]
+    T1["Поток приёма данных"]
+    T2["Потоки роутера"]
+    T3["Логгер, статистика"]
+    GC["Сборщик мусора на любом потоке"]:::bad
+    CTRL -. "подписка без отписки" .-> RM
+    BR -. "3 слушателя не снимаются при рестарте" .-> TAB
+    T1 --> BR
+    T2 --> BR
+    T1 -. "запускает" .-> GC
+    T3 -. "запускает" .-> GC
+    GC -. "удаляет Qt-объекты" .-> CTRL
+    GC -. "удаляет старое окно" .-> MW
+  end
+  ROUTER["Роутер"]
+  BACK["Бэкенд-процессы"]
+  TAB -. "прямой доступ к процессу и роутеру" .-> ROUTER
+  RM -- "запись регистра" --> ROUTER
+  ROUTER --> BACK
+  BACK --> ROUTER
+  class MW,TAB,CTRL bad
+</pre></div>
+      <p class="cap">GUI-процесс. Сам Qt вызывается только с главного потока, это проверено. Опасность в другом: сборщик мусора срабатывает на фоновом потоке и удаляет Qt-объекты там.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Кольцо, из-за которого падают тесты</h2>
+    <div class="frame"><pre class="mermaid">
+flowchart LR
+  classDef bad fill:#3a2020,stroke:#ec7a72,stroke-dasharray:5 4,color:#f3dcda
+  P["Презентер"] --> S["Синхронизация с регистром"]
+  S --> A["Адаптер регистра"]
+  A --> M["Регистры GUI"]
+  M -->|"список подписчиков"| B["метод презентера"]:::bad
+  B -->|"self"| P
+  P -->|"держит"| V["Виджет, которым владеет Python"]:::bad
+  V -->|"сигнал Qt"| P
+</pre></div>
+    <p class="cap">Регистры держат метод презентера, презентер держит виджет. Освободить виджет может только сборщик мусора.</p>
+    <div class="frame"><pre class="mermaid">
+sequenceDiagram
+  participant F as Форма
+  participant P as Презентер
+  participant V as Виджет
+  participant R as Регистры
+  participant G as Сборщик мусора
+  F->>P: создать контрол
+  P->>R: подписаться, ручки нет
+  F->>V: показать
+  Note over F,V: вкладку перестроили
+  F->>V: удалить виджет
+  Note over P,R: отписки нет, презентер жив
+  R->>P: поле изменилось
+  P->>V: обновить
+  V-->>R: ошибка, ушла в warning, запись «успешна»
+  Note over R,G: если регистры тоже уходят: кольцо целиком в мусоре
+  G->>V: удаление на том потоке, где сработала сборка
+</pre></div>
+    <p class="cap">Жизнь одного контрола. Уборка пропущена между удалением виджета и списком подписчиков.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Проверено прогоном</th><th>Что показал</th></tr></thead>
+      <tbody>
+        <tr><td>Удалили вкладку с контролом</td><td>Презентер жив, подписка осталась. Запись в поле отвечает «успешно», а ошибка уходит в warning.</td></tr>
+        <tr><td>Отписка по тому же методу</td><td>Не срабатывает: подписка ищется по <code>id</code> метода, а метод каждый раз новый объект.</td></tr>
+        <tr><td>Регистры ушли вместе с формой</td><td>В мусоре 42–46 объектов кольца. Освобождает только сборщик.</td></tr>
+        <tr><td>Сборщик на чужом потоке</td><td>Падение 3 из 3 в зонде диагноза и 3 из 3 у ревьюера. Синтетика GUI-разведки — 0 из 9: точное условие не найдено.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Как будет</h2>
+    <p>У каждого владельца — процесса, менеджера, плагина, окна, вкладки, формы, контрола — есть своя «область». Любой ресурс, который владелец открыл, записывается в эту область как ручка. Закрыть владельца значит закрыть все его ручки к одному сроку и получить отчёт о тех, кто не закрылся.</p>
+    <div class="frame"><pre class="mermaid">
+flowchart TB
+  classDef core fill:#1c2a3d,stroke:#7fb0f0,color:#e4ecf8
+  classDef h fill:#1b2027,stroke:#4a5566,color:#e4e8ee
+  classDef bar fill:#3a2c1a,stroke:#e0a35a,color:#f2e3cf
+  ROOT["Корень процесса: один close, один срок, один отчёт"]:::core
+  ROOT --> WORK["Сегмент «работа»: хуки, плагины, воркеры"]:::core
+  WORK --> B2["барьер"]:::bar
+  B2 --> TR["Сегмент «транспорт»: память, роутер, команды"]:::core
+  TR --> B1["барьер"]:::bar
+  B1 --> PLN["Сегмент «логи»: логгер, ошибки, статистика, отводы"]:::core
+  WORK --> H1["камера и её воркер в одной области"]:::h
+  WORK --> H2["дочерние процессы, только у менеджера процессов"]:::h
+  TR --> H3["форвардеры наблюдаемости после роутера"]:::h
+  PLN --> H4["писатель журнала: дочитать очередь, потом выйти"]:::h
+</pre></div>
+    <p class="cap">Останов процесса. Сегменты закрываются сверху вниз: сначала работа, потом транспорт, последними логи — чтобы отчёт об останове было куда записать. Порядок задаёт порядок регистрации, а не проза.</p>
+    <div class="frame"><pre class="mermaid">
+flowchart TB
+  classDef core fill:#1c2a3d,stroke:#7fb0f0,color:#e4ecf8
+  classDef h fill:#1b2027,stroke:#4a5566,color:#e4e8ee
+  UI["Корень GUI"] --> WIN["Окно"] --> TAB["Вкладка"] --> FRM["Форма"] --> CT["Контрол: закрывается по destroyed"]
+  class UI,WIN,TAB,FRM,CT core
+  CT --> S1["подписка на регистр"]:::h
+  CT --> S2["таймер с Qt-родителем"]:::h
+  TAB --> S3["подписка на шину"]:::h
+  UI --> S4["слушатели моста: снимаются при рестарте UI"]:::h
+</pre></div>
+    <p class="cap">GUI. Удаление виджета закрывает его область, область снимает подписки и таймеры. Закрыть область можно с любого потока: сами Qt-объекты всё равно удаляются на главном.</p>
+    <div class="frame"><pre class="mermaid">
+flowchart LR
+  classDef core fill:#1c2a3d,stroke:#7fb0f0,color:#e4ecf8
+  A["Закрыть владельца"]:::core ==> B["Этап 1: всем «стоп», отпустить то, на чём висят"]:::core
+  B ==> C["Этап 2: дождаться всех к одному сроку"]:::core
+  C ==> D["Этап 3: добить упрямых — процесс, пул"]:::core
+  D ==> E["Отчёт: выжившие, добитые, ошибки, время"]:::core
+</pre></div>
+    <p class="cap">Три этапа к одному сроку. Поток добить нельзя — он попадает в отчёт по имени. Если у корня процесса есть выжившие, процесс выходит сразу после записи отчёта, не дожидаясь их.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Ручка</th><th>Этап 1: стоп</th><th>Этап 2: ожидание</th><th>Этап 3</th></tr></thead>
+      <tbody>
+        <tr><td>Подписка, хук, сокет</td><td colspan="3">просто вызов «закрыть»</td></tr>
+        <tr><td>Поток</td><td>флаг стопа, закрыть его ресурс</td><td>join до общего срока</td><td>нет — выживший в отчёте</td></tr>
+        <tr><td>Пул потоков</td><td>запретить новые задачи</td><td>дождаться до срока</td><td>отменить очередь</td></tr>
+        <tr><td>Дочерний процесс</td><td>сигнал стопа</td><td>ожидание</td><td>terminate, затем kill, метка «читатель ушёл»</td></tr>
+        <tr><td>Писатель журнала</td><td>закрыть вход</td><td>дочитать очередь и выйти</td><td>—</td></tr>
+        <tr><td>Виджет, окно</td><td colspan="3">удаление на главном потоке</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li>Ресурс, добавленный к уже закрытому владельцу, закрывается сразу, а вызов падает с ошибкой. Воркер не воскреснет во время останова.</li>
+      <li>Подписаться без владельца нельзя: это обязательный параметр, его проверяет тест сигнатур.</li>
+      <li>Событие, пришедшее в закрытого владельца, не теряется молча — оно считается и попадает в отчёт.</li>
+      <li>Срок останова — одна ручка <code>shutdown_timeout</code>. Спавнер, менеджер процессов и ребёнок получают свои числа из одной функции, а не каждый своё.</li>
+      <li>Живые ручки видно в <code>backend_ctl</code>. Тест, после которого остался незакрытый владелец, падает.</li>
+      <li>Страж Qt-мусора сначала только докладывает, а падать начинает по каталогам, как только каталог очищен. Убирать мусор вместо кода он не будет.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Кто за что отвечает</h2>
+    <p>Требование владельца: у каждой функции один владелец, без дублей, связь только через интерфейсы. Интерфейсы лежат в одном месте — <code>base_manager/interfaces.py</code>.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Функция</th><th>Единственный владелец</th><th>Что исчезает как дубль</th></tr></thead>
+      <tbody>
+        <tr><td>Область и ручки</td><td><code>base_manager</code></td><td>реестр потоков в менеджере воркеров, реестр QThread, три вида ручек, пары «подключить / отключить»</td></tr>
+        <tr><td>Список подписчиков</td><td><code>event_module</code></td><td>12 самописных списков, отписка по <code>id</code> метода, пять разных классов «подписка»</td></tr>
+        <tr><td>Создание потоков</td><td>метод области <code>spawn</code>; воркер с политикой — менеджер воркеров</td><td>59 мест с сырым <code>threading.Thread</code>, перезапуск воркера новым потоком</td></tr>
+        <tr><td>Добивание дочернего процесса</td><td><code>process_manager_module</code> (поверх уже принятой эскалации)</td><td>второй экземпляр terminate → kill</td></tr>
+        <tr><td>Связь с Qt</td><td><code>frontend_module/core/qt_lifetime.py</code></td><td>ручная уборка в виджетах, три имени уборки у презентеров, таймеры без родителя</td></tr>
+        <tr><td>Срок останова</td><td>одна функция в <code>process_manager_module</code></td><td>две копии формулы в спавнере, четыре чтения <code>shutdown_timeout</code>, 18 таймаутов числами</td></tr>
+        <tr><td>Порядок останова и отчёт</td><td><code>ProcessLifecycle</code></td><td>три пути останова процесса, 120 строк прозы, ручной порядок в <code>app_module</code> и <code>state_store</code></td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">Остаются как есть: удалённые реестры по имени процесса или клиента (подписки state_store, брокер наблюдаемости, watch/tail в backend_ctl) и каталоги ресурсов (разделяемая память, очереди, сервисы). Это учёт, а не жизненный цикл.</p>
+  </section>
+
+  <section>
+    <h2>Порядок работ</h2>
+    <div class="answer"><p><b>План стоит первым в очереди</b> (решение владельца 3 октября): гейт тестов фреймворка сейчас случайно краснеет для всех полос.</p></div>
+    <p class="muted">Принят CTO. Объёмы — оценка разведки и грепа, не замер. План: <code>plans/2026-10-03_lifecycle-owner-scope/plan.md</code>.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Фаза</th><th>Что делаем</th><th>Что закрывает</th><th>Статус</th></tr></thead>
+      <tbody>
+        <tr><td>Ф0</td><td>Решение (ADR), интерфейсы, область, список подписчиков, связь с Qt, стражи</td><td>основу для всех фаз</td><td><span class="pill next">следующая</span></td></tr>
+        <tr><td>Ф1</td><td>Останов процесса: один корень с барьерами, срок из одной ручки, воркеры и плагины в областях</td><td>зависание на 5 с, воскрешение воркера, ложный «остановлен», порядок памяти и роутера</td><td><span class="pill later">потом</span></td></tr>
+        <tr><td>Ф2</td><td>Регистры и контролы GUI</td><td>кольцо презентеров</td><td><span class="pill later">потом</span></td></tr>
+        <tr><td>Ф5</td><td>Вкладки, формы, окна, рестарт UI</td><td><b>падение тестов фреймворка</b> — проверка: зонд в наборе 3 раза без падения и ноль Qt-мусора</td><td><span class="pill later">потом</span></td></tr>
+        <tr><td>Ф3</td><td>Остальные подписки: шина, состояние, роутер, отводы логов, команды, backend_ctl</td><td>утечки подписок плагинов и вкладок</td><td><span class="pill later">потом</span></td></tr>
+        <tr><td>Ф4</td><td>Потоки фреймворка, сервисов, плагинов и backend_ctl</td><td>потоки без владельца</td><td><span class="pill later">потом</span></td></tr>
+        <tr><td>Ф6</td><td>Убрать единственную обёртку совместимости, все стражи — только «падать»</td><td>следы переходного периода</td><td><span class="pill later">потом</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="note"><p>Пока Ф5 не закрыта, гейт тестов фреймворка падает примерно в одном прогоне из четырёх. Падение громкое, причина известна. Прежняя правка 5.5d (сборка мусора в тестах) не вливается: это была бы маскировка.</p></div>
+  </section>
+
+  <section>
+    <h2>Как решили</h2>
+    <p>Путь решения: три разведки → черновик → CTO → ревьюер предложил свою архитектуру → ревьюер учёл вердикт CTO → CTO оценил обе редакции → CTO проверил соседний план, наблюдаемость и остальные модули.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Вопрос</th><th>Решение</th><th>Почему</th></tr></thead>
+      <tbody>
+        <tr><td>Где живёт механизм</td><td><code>base_manager</code></td><td>его импортируют все; отдельный модуль ничего не изолирует — любой импорт фреймворка уже тянет всё ядро</td></tr>
+        <tr><td>Порядок останова процесса</td><td>один корень с барьерами</td><td>три отдельных корня возвращали порядок в прозу раннера</td></tr>
+        <tr><td>Слабые ссылки как страховка</td><td>нет</td><td>они молча перестают доставлять события; вместо них — обязательный владелец и счётчик</td></tr>
+        <tr><td>Старые вызовы отписки</td><td>менять атомарно, одна обёртка — только для чужой ветки otel</td><td>обёртка — тот же флаг, а флаг закрыт, только когда удалён</td></tr>
+        <tr><td>Где список подписчиков</td><td><code>event_module</code></td><td><code>base_manager</code> — владение, <code>event_module</code> — рассылка</td></tr>
+        <tr><td>Можно ли плагину создать поток</td><td>да, через область</td><td>публичный метод, запрещённый правилом, — это обман интерфейса</td></tr>
+      </tbody>
+    </table></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Оценка CTO по вашей планке</th><th>Ред. 1</th><th>Ред. 2</th></tr></thead>
+      <tbody class="nums">
+        <tr><td>Один модуль — одна функция</td><td>7</td><td>8</td></tr>
+        <tr><td>Без дублей</td><td>7</td><td>8</td></tr>
+        <tr><td>Через интерфейсы</td><td>5</td><td>8</td></tr>
+        <tr><td>Без костылей</td><td>8</td><td>6</td></tr>
+        <tr><td>Лаконично</td><td>8</td><td>7</td></tr>
+        <tr><td>Эффективно</td><td>8</td><td>8</td></tr>
+        <tr><td>Надёжно</td><td>7</td><td>7</td></tr>
+      </tbody>
+    </table></div>
+    <p class="cap">Финальная редакция — вторая плюс условия CTO, которые снимают её минусы: барьеры вместо трёх корней, атомарная смена API, разрешённый <code>spawn</code>, проверка «один владелец» правилом по коду.</p>
+    <div class="answer"><p><b>Отделить GUI от бэкенда</b> — тоже нужно, и план уже есть: <code>plans/2026-09-22_gui-service</code>. Он идёт после Ф5 на новом механизме: иначе отдельный клиент унаследует те же утечки, а переподключения умножат подписки.</p></div>
+  </section>
+
+  <section>
+    <h2>Что выяснилось по дороге</h2>
+    <ul>
+      <li>Живой план <code>lifecycle-stop-ownership</code> уже сделал межпроцессную половину: менеджер процессов владеет остановкой, сирот нет, «одно число на оба уровня». Новый план берёт внутрипроцессную половину и продолжает его решения, а не повторяет их.</li>
+      <li>Мусор в точке падения тестов — в основном вкладки, а не презентеры. Поэтому падение закрывает Ф5, а не Ф2.</li>
+      <li>Привязку виджета в <code>bindings.py</code> считали образцом, а она сама течёт: замыкание держит виджет вечно (3 из 3).</li>
+      <li>Разделяемая память снимается раньше остановки роутера, хотя поток приёма может её ещё читать.</li>
+      <li>Последняя строка лога теряется в 1 прогоне из 5, если писатель выходит по флагу, не дочитав очередь, — а отчёт при этом «всё хорошо».</li>
+      <li>Ребёнок не читает срок останова, который ему передаёт менеджер процессов, и берёт свои 5 секунд.</li>
+      <li>При каждом рестарте UI мост получает ещё 3 слушателя, а снимать их некому.</li>
+      <li>Сам Qt с фоновых потоков не вызывается — все переходы идут через сигналы. Чинить нужно владение, а не потоки.</li>
+    </ul>
+  </section>
+
+  <footer>Источник: три отчёта разведки, три вердикта CTO и две редакции ревьюера 3 октября; проект — <code>plans/2026-10-03_lifecycle-owner-scope/DESIGN.md</code>, ветка <code>feat/lifecycle-owner-scope</code> от main <code>8b0eeac41</code>. Числа — grep и прогоны воспроизведений и прототипов на одной машине.</footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+</script>
+</body>
+</html>
