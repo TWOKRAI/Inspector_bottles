@@ -91,6 +91,7 @@ class _Entry:
         "state",
         "stop_requested",
         "claimed",
+        "releaser",
         "finished",
         "done",
         "thread",
@@ -111,6 +112,7 @@ class _Entry:
         self.state = "open"
         self.stop_requested = False
         self.claimed = False  # взята закрывающим (close области или IHandle.close)
+        self.releaser: int | None = None  # поток, который освобождает запись
         self.finished = False  # spawn-поток вышел и сам отцепился
         self.done = threading.Event()  # исход записи известен
         self.thread: threading.Thread | None = None
@@ -202,6 +204,8 @@ class Handle:
         self._kind = entry.kind
         self._lock = threading.Lock()
         self._report: CloseReport | None = None
+        self._closing_by: int | None = None  # поток, который сейчас закрывает ручку
+        self._done = threading.Event()
 
     @property
     def path(self) -> str:
@@ -212,17 +216,47 @@ class Handle:
         return self._kind
 
     def close(self, budget_s: float | None = None) -> CloseReport:
+        """Контракт — ``IHandle.close``.
+
+        Под локом ручки — только решение «кто закрывает»; ресурс освобождается
+        вне лока (ресурс может позвать ``close`` своей же ручки). Реентрантный
+        вызов тем потоком, который сейчас освобождает запись, сразу возвращает
+        ``complete=False`` — то же правило, что у реентрантного ``close`` области.
+        """
+        start = time.monotonic()
         if budget_s is not None:
             budget_s = _seconds("budget_s", budget_s)
+        me = threading.get_ident()
         with self._lock:
             if self._report is not None:
                 return self._report
             scope, entry = self._scope, self._entry
             assert scope is not None and entry is not None
+            if self._closing_by is not None:
+                if self._closing_by == me:
+                    return _incomplete(self._path, start)
+                waiting = True
+            else:
+                waiting = False
+                self._closing_by = me
+        if waiting:
+            deadline = start + (scope._budget_s if budget_s is None else budget_s)
+            if self._done.wait(max(0.0, deadline - time.monotonic())) and self._report is not None:
+                return self._report
+            return _incomplete(self._path, start)
+        report = None
+        try:
             report = scope._close_entry_early(entry, budget_s)
-            self._report = report
-            self._scope = None
-            self._entry = None
+        finally:
+            with self._lock:
+                self._closing_by = None
+                if report is not None:
+                    self._report = report
+                    self._scope = None
+                    self._entry = None
+                    self._done.set()
+        if report is None:  # запись освобождает этот же поток (идёт close области)
+            return _incomplete(self._path, start)
         return report
 
     def __reduce_ex__(self, protocol: object) -> Any:
@@ -348,6 +382,7 @@ class Scope:
         start = time.monotonic()
         acc = _Acc()
         entry.claimed = True
+        entry.releaser = threading.get_ident()
         if state == "closing":
             deadline = min(self._deadline, start + self._budget_s)
             limit = min(deadline + self._kill_reserve_s, self._limit)
@@ -667,6 +702,7 @@ class Scope:
                     entries = [entry for entry in segment if not entry.claimed]
                     for entry in entries:
                         entry.claimed = True
+                        entry.releaser = me
                 self._close_entries(entries, deadline, limit, acc)
         finally:
             with self._lock:
@@ -700,8 +736,12 @@ class Scope:
                         entry.done.set()
                         return
 
-    def _close_entry_early(self, entry: _Entry, budget_s: float | None) -> CloseReport:
-        """``IHandle.close``: отцепить запись, затем закрыть тем же кодом, что и область."""
+    def _close_entry_early(self, entry: _Entry, budget_s: float | None) -> CloseReport | None:
+        """``IHandle.close``: отцепить запись, затем закрыть тем же кодом, что и область.
+
+        ``None`` — запись сейчас освобождает этот же поток (ресурс в своей фазе
+        зовёт свою ручку): ждать себя до срока нельзя, ответ — ``complete=False``.
+        """
         start = time.monotonic()
         deadline = start + (self._budget_s if budget_s is None else budget_s)
         limit = deadline + self._kill_reserve_s
@@ -711,10 +751,13 @@ class Scope:
                 mine, wait = False, False
                 acc.errors.extend(self._drain_thread_errors_locked(entry))
             elif entry.claimed:
+                if entry.releaser == threading.get_ident() and not entry.done.is_set():
+                    return None
                 mine, wait = False, True
             else:
                 mine, wait = True, False
                 entry.claimed = True
+                entry.releaser = threading.get_ident()
                 self._remove_locked(entry)
         if mine:
             self._close_entries([entry], deadline, limit, acc)

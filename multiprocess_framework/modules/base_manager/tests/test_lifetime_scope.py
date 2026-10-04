@@ -300,3 +300,108 @@ def test_package_does_not_export_classes(name):
 
     assert hasattr(base_manager, name) is False
     assert name not in base_manager.__all__
+
+
+# ---------------------------------------------------------------------------
+# Итерация 2 (матрица инъекций ведущего): реентрантная ручка, ссылки, захват записи
+# ---------------------------------------------------------------------------
+
+
+class _ClosesOwnHandle:
+    """Вызываемое: при освобождении зовёт ``close()`` своей же ручки и запоминает ответ."""
+
+    def __init__(self) -> None:
+        self.handle = None
+        self.inner: list = []
+        self.calls = 0
+
+    def __call__(self) -> None:
+        self.calls += 1
+        start = time.monotonic()
+        report = self.handle.close()
+        self.inner.append((report, time.monotonic() - start))
+
+
+def test_reentrant_handle_close_from_its_own_release_returns_incomplete_at_once():
+    """Дефект 1: Handle.close держал лок ручки на вызовах ресурса — вечный дедлок."""
+    root = open_scope(_path(), budget_s=1.0)
+    res = _ClosesOwnHandle()
+    res.handle = root.own(res, name="x")
+    outer = _bounded(res.handle.close, timeout=3.0)
+    assert res.calls == 1
+    ((inner, inner_s),) = res.inner
+    assert inner.complete is False
+    assert inner_s <= 0.1
+    assert outer.complete is True
+    assert outer.errors == ()
+    _bounded(root.close)
+
+
+def test_handle_close_from_phase2_of_scope_close_returns_incomplete_at_once():
+    """Дефект 2: поток закрывающего ждал сам себя до срока (0.31 с при бюджете 0.3)."""
+    root = open_scope(_path(), budget_s=1.0)
+    res = _ClosesOwnHandle()
+    res.handle = root.own(res, name="x")
+    report = _bounded(root.close, timeout=3.0)
+    assert res.calls == 1
+    ((inner, inner_s),) = res.inner
+    assert inner.complete is False
+    assert inner_s <= 0.1
+    assert report.elapsed_s <= 0.1
+    assert report.complete is True
+
+
+class _Res:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> None:
+        self.calls += 1
+
+
+def test_released_entry_does_not_hold_resource_while_handle_lives():
+    """J12b: после close области живая ручка не держит ресурс (refcount, без gc)."""
+    import gc
+    import weakref
+
+    root = open_scope(_path(), budget_s=1.0)
+    res = _Res()
+    handle = root.own(res, name="x")
+    ref = weakref.ref(res)
+    gc.disable()
+    try:
+        _bounded(root.close)
+        assert res.calls == 1
+        del res
+        assert ref() is None, "освобождённая запись держит ресурс"
+        assert handle.path.endswith("/x")  # ручка жива до конца проверки
+    finally:
+        gc.enable()
+
+
+def test_scope_close_does_not_touch_entry_taken_by_handle_close():
+    """J13+J31: вызываемое блокируется внутри handle.close(); close области не зовёт его второй раз."""
+    root = open_scope(_path(), budget_s=1.0)
+    gate = threading.Event()
+    entered = threading.Event()
+    calls = _Counter()
+
+    def release() -> None:
+        calls()
+        entered.set()
+        gate.wait(5.0)
+
+    handle = root.own(release, name="x")
+    reports: list = []
+    a = threading.Thread(target=lambda: reports.append(handle.close()), daemon=True)
+    a.start()
+    assert entered.wait(3.0)
+    b = threading.Thread(target=lambda: reports.append(root.close()), daemon=True)
+    b.start()
+    time.sleep(0.1)  # B успевает войти в close области, пока A держит вызываемое
+    gate.set()
+    for t in (a, b):
+        t.join(5.0)
+        assert not t.is_alive()
+    assert calls.n == 1
+    assert [report.errors for report in reports] == [(), ()]
