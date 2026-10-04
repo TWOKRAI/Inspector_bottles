@@ -15,6 +15,7 @@
 | Разбор отказов (каталог, числа, опыты в commitlab) | [`docs/audits/2026-10-03_commit-mechanism.md`](../../docs/audits/2026-10-03_commit-mechanism.md) |
 | Тело задачи | `tasks/<id>.md` |
 | Итог задачи | `tasks/<id>.result.md` |
+| Поправки по ходу, бюджет факт | [`amendments.md`](amendments.md) |
 
 ## Контекст
 
@@ -62,7 +63,7 @@
 **Цель фазы:** валидатор знает весь формат, но новые правила пока только предупреждают.
 
 - Task 2.1: валидатор v2 в обеих копиях; `merge:` и `Merge branch …`, `Layer`, длина — предупреждения; `Refs` — любой план; сторожа копий и списка слоёв [PENDING] (после фазы 1)
-- Task 2.2: документы — обе копии COMMIT_GUIDE, `.gitmessage`, корневой CLAUDE.md, `project-rules`, `_stack.md`, правило «сообщение файлом `-F`, пути явно» [PENDING] (после 2.1)
+- Task 2.2: документы — обе копии COMMIT_GUIDE, `.gitmessage`, корневой CLAUDE.md, `project-rules`, `_stack.md`, правило «сообщение файлом `-F`, пути явно», «ruff на файлах, записанных мимо Edit/Write, до коммита» [PENDING] (после 2.1)
 
 ### Phase 3: Строгий режим и замер
 
@@ -72,4 +73,8 @@
 ## Открытые вопросы
 
 - [ ] Перезаписывает ли upgrade claude-kit `.claude/commit-layers.txt` — сторож в 2.1 ответит.
+- [ ] Перенос правок фазы 1 (`.claude/plugins/` — хуки 1.2 и 1.4) в сид `devseed` на Mac, иначе upgrade их откатит —
+  владелец; см. `docs/claude/OPEN_QUESTIONS.md`.
+- [ ] Приёмка фазы 1 и ревью плана фаз 2–3 агентом `cto` — заказаны владельцем 2026-10-04. Итог фазы и бюджет —
+  [`amendments.md`](amendments.md).
 - [x] Гейт тестов `_stack.md` (`src/**` нет в репо) — решение владельца 2026-10-03: выключить честно (`tests_gate = off`), см. design.md #6.
