@@ -5,6 +5,10 @@ metadata:
   type: feedback
 ---
 
-Правило перенесено в `docs/claude/COMMIT_GUIDE.md` и `.claude/COMMIT_GUIDE.md` (2026-10-04).
+Правило перенесено в `docs/claude/COMMIT_GUIDE.md` и `.claude/COMMIT_GUIDE.md` (2026-10-04). Ниже — доказательная база урока.
+
+План backend-ctl-debug-console помечает задачи `**Layer:** tools`, но commit-msg hook (`scripts/validate_commit`) отклоняет `Layer: tools` — allowlist: docs/framework/infra/mixed/plugins/prototype/scripts/services/tests.
 
 **Why:** backend_ctl — dev-инструмент вне слоёв framework/Services/Plugins; в whitelist «tools» нет. Прецедент прошлых backend_ctl-коммитов — `Layer: mixed` (11×) или `framework` (4×).
+
+**How to apply:** для backend_ctl-коммитов (код драйвера + его тесты) ставить `Layer: mixed`, игнорируя «tools» из плана. Если владелец захочет — можно добавить `tools` в allowlist `scripts/validate_commit/validate_commit.py`, но это отдельное решение по конвенции.
