@@ -58,7 +58,7 @@
 **Goal:** в `base_manager/interfaces.py` живут `Stoppable`, `CloseReport`, `Reporter`, `IHandle`, `IScope`, `ScopeClosedError`; ADR фиксирует решения DESIGN §4.
 **Files:** `multiprocess_framework/modules/base_manager/interfaces.py`, `base_manager/DECISIONS.md` (новый ADR-BM-xxx), `multiprocess_framework/DECISIONS.md` (индекс через `python -m scripts.sync`), `base_manager/README.md`, `STATUS.md`, `base_manager/docs/INTERFACES_USAGE.md`. Полный спек — [`task-0.1.md`](task-0.1.md).
 **Acceptance:**
-- [ ] Протоколы и DTO — ровно как в DESIGN §2.1 (имена, сигнатуры, keyword-only).
+- [ ] Протоколы и DTO — как в DESIGN §2.1 ред. 3.1 (имена, сигнатуры, keyword-only); уточнения (property, `from_dict`, семантика, тексты ошибок) — [`task-0.1.md`](task-0.1.md).
 - [ ] `CloseReport.to_dict()` — только примитивы (Dict at Boundary); `Scope`/`Handle` не пиклятся (проверяется в 0.2).
 - [ ] ADR перечисляет отвергнутое с причиной: отдельный `lifetime_module`, WeakMethod, три корня процесса, передача close владельцу-потоку, shim-список.
 - [ ] `python scripts/validate.py` зелёный (sync разделов DECISIONS).

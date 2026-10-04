@@ -9,7 +9,8 @@
 ## Goal
 
 В `base_manager/interfaces.py` появляется контракт владения: `Stoppable`, `Resource`, `CloseReport`, `Reporter`,
-`IHandle`, `IScope`, `ScopeClosedError`. ADR-BM-008 фиксирует решения DESIGN §4 и отвергнутые альтернативы.
+`IHandle`, `IScope`, `ScopeClosedError`. ADR-BM-008 фиксирует решения D1–D3 DESIGN §4, решения CTO 2026-10-04 и
+отвергнутые альтернативы; D4–D6 только упоминает (Step 2).
 Реализации в задаче нет — только контракт, DTO и документ.
 
 ## Files
@@ -64,6 +65,9 @@ Task 0.3. Причина: зависимость появится только �
 - `__post_init__` приводит `survivors`, `killed`, `errors` (и каждую пару внутри) к кортежам. Причина: отчёт с
   `survivors=["a"]` иначе не хэшируется (`TypeError: unhashable type: 'list'`, проба H6) и не равен такому же с
   кортежами. Инвариант держит один владелец — сам DTO, а не каждый вызывающий.
+  Строка на месте последовательности (`survivors`, `killed`, `errors`) или на месте пары внутри `errors` →
+  `TypeError`; пара не из двух элементов → `TypeError`. Причина (ревью р2, проба R2): `tuple("proc/x")` молча
+  режет строку на символы — `survivors=h.path` вместо `(h.path,)` дал бы 15 «выживших».
 - `ok` (property): `complete and not survivors and not killed and not errors`. **`emits_after_close` в `ok` не входит.**
   Причина: доставка в закрытого владельца подавляется и считается (★5а «никогда молча»); это сигнал для отчёта, не
   провал закрытия. Решение записать в ADR. Docstring поля: счётчик видит доставки только до сборки отчёта; отчёт
@@ -118,7 +122,9 @@ docstring из DESIGN §2.1 (досрочное освобождение одн�
     `pm_total = pm_graceful + kill_reserve`, `outer = pm_total + margin`, одна функция `stop_budget`, ADR-PMM-031).
     Обрезка оставила бы опоздавшего ребёнка-процесс живым — сироты, против которых писалась stop-ownership Task 1.4.
   - Ожидание убитых — `join_until(now + kill_reserve_s)` по всем убитым разом.
-  - Отчёт: `elapsed_s` ≤ `budget + kill_reserve_s`, если резерв потребовался; ≤ `budget`, если нет.
+  - Отчёт: `elapsed_s` ≤ `budget + kill_reserve_s` своей области, если резерв потребовался; ≤ `budget`, если нет.
+    Оценка верна для области, в бюджет которой входят резервы её детей (так строится `stop_budget`); область,
+    чей ребёнок держит свой резерв сверх её бюджета, может закрываться дольше на этот резерв.
 - `live(self) -> list[dict]`
 
 Keyword-only там, где в DESIGN стоит `*`. Имена параметров — ровно такие (вызывающие пишут их по имени).
@@ -158,8 +164,10 @@ def open_scope(path: str, *, budget_s: float, kill_reserve_s: float = 0.0,
 - **`kind`.** Зарезервированы `"scope"` (запись `child`) и `"thread"` (запись `spawn`); по умолчанию `"resource"`;
   остальное — свободная строка.
 - **Пометка потока, закрывающего свою область** (DESIGN §2.1, совет 8) — в `survivors` литерал `"<path> (self)"`.
-- **`name`** — непустая строка без `/`, иначе `ValueError`. Повтор имени в одной области → `ValueError`. Причина:
-  путь — идентичность записи в отчёте и в переписи потоков G4; два одинаковых пути неразличимы.
+- **`name`** — непустая строка без `/` и без суффикса ` (self)` (иначе неотличима от пометки выше), иначе
+  `ValueError`. Повтор имени среди **незакрытых** записей области → `ValueError`; после `Handle.close()` или
+  закрытия ребёнка имя свободно. Причина: путь — идентичность записи в отчёте и в переписи потоков G4; два
+  одинаковых живых пути неразличимы. `Subscribers` (0.3) и `attach_qt` (0.4) генерируют уникальные имена сами.
 
 ### `ScopeClosedError(RuntimeError)`
 Бросается `own`/`spawn`/`child` закрытой (или закрывающейся) области. Docstring: ресурс, переданный в `own`, к моменту
@@ -224,6 +232,8 @@ def open_scope(path: str, *, budget_s: float, kill_reserve_s: float = 0.0,
 - [ ] `CloseReport` заморожен: присваивание поля → `dataclasses.FrozenInstanceError`.
 - [ ] `CloseReport(..., survivors=["a"], killed=[], errors=[["p", "e"]])` → поля — кортежи; `hash()` не бросает;
       отчёт равен такому же, собранному из кортежей.
+- [ ] `CloseReport(..., survivors="a", ...)` → `TypeError`; `errors=["pe"]` → `TypeError`;
+      `errors=[("p", "e", "x")]` → `TypeError`.
 - [ ] `CloseReport.ok` литералами: `True` для пустого отчёта; `False` при одном survivor, при одном killed, при одной
       ошибке, при `complete=False`; `True` при `emits_after_close=5` и прочем пустом.
 - [ ] `to_dict()`: `set(r.to_dict()) == {"path", "elapsed_s", "survivors", "killed", "errors", "emits_after_close",
@@ -268,3 +278,17 @@ Q1 = `join_until`; Q2 = `open_scope` в пакете, `Scope` не экспор�
 - **1.1:** резерв области детей — шестое число `stop_budget` или `pm_total − pm_graceful`; литеральный тест
   `stop_budget(5.0)`: `pm_graceful 5.0`, `pm_total 7.0`, `outer 8.5`, `outer > pm_total > pm_graceful`.
 - **0.5:** G2 сравнивает текст аннотации с `IScope`.
+- **0.2:** ключи словарей `unclosed_roots() -> list[dict]` (потребитель G3) — задать литералами.
+- **0.2 / 1.2 — следствия чтения reporter'а (ревью р2):** (1) выжившие сегмента `work` при закрытии корня доходят
+  до reporter только после закрытия `planes` → всегда в `emergency_log`, не в живой логгер; ветка DESIGN «живой
+  логгер» работает только для досрочных закрытий. (2) каждый досрочный `Handle.close()` (каждая отписка) зовёт
+  reporter — 0.2 решает: reporter молчит при `ok and emits_after_close == 0`, или досрочные закрытия зовут его
+  только для не-`ok`. Причина: строка на диске стоит 745 Б (замер closure).
+- **1.2:** фрагмент DESIGN §2.3 создаёт `child("work")` без `budget_s` → по правилу `None` `work` получает бюджет
+  корня, а с `min` и резервом сверху `transport`/`planes` получат истёкший срок (сток дренирует 0 с). Task 1.2
+  обязана дать `work` явный `budget_s=work_s`, и его резерв — уместить в бюджет корня.
+- **1.1:** эскалацию terminate → kill в `ChildProcessStop` отсчитывать от момента `kill()`, не от `join_until`:
+  `join_until` по детям последовательны, иначе grace ребёнка k сдвигается ожиданием детей 1…k−1 (вывод ревьюера
+  р2 рассуждением, не прогоном). Совместимая с контрактом форма одна — повторный `join_until` адаптера после
+  `kill()`; поток-таймер вне области ловит G4, блокирующий `kill()` запрещён Q3. Арифметика: 1.0 + 1.0 =
+  `pm_total − pm_graceful` = 2.0.
