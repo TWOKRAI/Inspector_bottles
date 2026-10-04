@@ -33,7 +33,8 @@ Used as git commit-msg hook (see scripts/validate_commit/install_hook.sh).
 Exit 0 — OK, exit 1 — validation failed.
 
 Skipped: reverts, fixup!/squash!/amend!. Merge commits are validated (v2): `merge: <gist>` with
-Why/Layer/Refs, the default git text `Merge branch ...` is a warning.
+Why/Layer/Refs. ANY first line that starts with `Merge ` (capital M: branch, remote-tracking, pull
+request, tag, commit, ...) is git's default text and only a warning.
 
 v2 mode (plans/2026-10-03_commit-mechanism, Task 2.1): the module constant STRICT picks what the
 phase-3 rules do. Off: they land in `warnings` (stderr, rc 0) with the suffix
@@ -262,8 +263,8 @@ def _plan_ref_problem(repo_root: Path | None, ref: str) -> str | None:
     plan that exists only in another worktree does not count. `plans/queue/` and `*.result.md` are
     files under the plans directory that are not plans.
     """
-    if ".." in ref.split("/"):
-        return f"{ref}: '..' in the path"
+    if any(segment in ("..", ".") for segment in ref.split("/")):
+        return f"{ref}: '..' or '.' segment in the path"
     if ref.startswith(PLANS_QUEUE_PREFIX):
         return f"{ref}: plans/queue/ holds queued items, not plans"
     if ".result" in ref.rsplit("/", 1)[-1]:
@@ -273,10 +274,15 @@ def _plan_ref_problem(repo_root: Path | None, ref: str) -> str | None:
     return None
 
 
-def _refs_problem(repo_root: Path | None, plan_path: str, refs: list[str]) -> str | None:
-    """Error text when no `Refs:` value names an existing plan; None when one does (any plan will do)."""
+def _refs_problem(repo_root: Path | None, plan_path: str, refs: list[str]) -> tuple[bool, str] | None:
+    """None when some `Refs:` value names an existing plan (any plan will do).
+
+    Otherwise `(hard, text)`. `hard` is True for what v1 already refused: no `Refs:` at all, or no value
+    holds a `plans/....md` path. It is False when paths exist but none is a plan (queue, .result, no such
+    file, '..' or '.' segment): that is a phase-3 rule, see W-REFS-INVALID.
+    """
     if not refs:
-        return (
+        return True, (
             f"Branch has a plan ({plan_path}) but commit is missing matching "
             f"`Refs:` trailer.\n"
             f"  Add: Refs: {plan_path}\n"
@@ -284,18 +290,18 @@ def _refs_problem(repo_root: Path | None, plan_path: str, refs: list[str]) -> st
         )
     problems: list[str] = []
     for value in refs:
-        candidates = PLAN_PATH_RE.findall(value)
-        if not candidates:
-            problems.append(f"{value!r}: no plans/....md path")
-        for ref in candidates:
+        for ref in PLAN_PATH_RE.findall(value):
             problem = _plan_ref_problem(repo_root, ref)
             if problem is None:
                 return None
             problems.append(problem)
-    return (
-        f"Branch has a plan ({plan_path}) but no `Refs:` value names an existing plan.\n"
-        f"  Problems: {'; '.join(problems)}\n"
-        f"  Add: Refs: {plan_path}"
+    if not problems:
+        return True, (
+            f"Branch has a plan ({plan_path}) but no `Refs:` value contains a plans/....md path.\n"
+            f"  Add: Refs: {plan_path}"
+        )
+    return False, (
+        f"Refs names no existing plan (branch plan: {plan_path}) - {'; '.join(problems)}. Add: Refs: {plan_path}"
     )
 
 
@@ -1072,12 +1078,18 @@ def validate(
     # 6. Plan-driven workflow: if branch has a plan, require matching Refs trailer.
     # v2: ANY existing plan file satisfies it (not only the branch's own); a merge with no Refs at
     # all is reported by the merge warning in 2b instead.
+    # A plain commit keeps v1's refusal when Refs is absent or holds no plan path; every other Refs
+    # problem, and every Refs problem of a merge, is a phase-3 rule (W-REFS-INVALID).
     if plan_path:
         refs = trailers.get("Refs", [])
         if refs or not is_merge:
-            problem = _refs_problem(find_repo_root(), plan_path, refs)
-            if problem:
-                result.errors.append(problem)
+            found = _refs_problem(find_repo_root(), plan_path, refs)
+            if found is not None:
+                hard, text = found
+                if hard and not is_merge:
+                    result.errors.append(text)
+                else:
+                    _phase3(result, text)
 
     # 7. Tests-discipline gate (Task 6.2): fires only when a staged path
     # matches tests_gate_code minus tests_gate_exclude. When it fires, the

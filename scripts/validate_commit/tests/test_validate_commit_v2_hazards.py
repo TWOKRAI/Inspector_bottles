@@ -12,13 +12,21 @@
       в W-MERGE-TRAILERS (абзац выпал бы из трейлеров, `Why` «исчез»). Это ровно тот дефект шаблонной копии,
       которой фолдинга не хватало: проверяем ОБЕ копии.
   H3  Корень проверки `Refs:`. Файл плана ищется от корня ТОГО worktree, где делается коммит, а не от
-      главного дерева и не от каталога скрипта. План, существующий только в соседнем дереве, не считается.
+      главного дерева и не от каталога скрипта. План, существующий только в соседнем дереве, не считается
+      (ред. 5: это W-REFS-INVALID — предупреждение, под STRICT отказ).
   H4  Обход каталогов. `Refs: plans/../README.md` по регулярке похож на путь плана, а файл существует.
-      Без отдельной проверки `..` такой Refs принимался бы.
+      Без отдельной проверки `..` такой Refs принимался бы. Ред. 5: сегмент `.` отвергается так же
+      (`plans/./queue/...` обходил исключение очереди); причина — W-REFS-INVALID, под STRICT отказ.
   H5  Несколько значений в одном `Refs:`: достаточно ОДНОГО существующего плана, плохие соседи не мешают;
-      если же хорошего нет — отказ называет причину по каждому.
-  H6  Слияние на ветке с планом: `Refs` на очередь по-прежнему отказ (правило 6 действует и для `merge`),
-      а слияние без `Refs` вовсе — только предупреждение (его выдаёт блок слияния, не правило 6).
+      если же хорошего нет — W-REFS-INVALID называет причину по каждому (под STRICT это отказ).
+  H6  Слияние на ветке с планом: `Refs` на очередь — ПРЕДУПРЕЖДЕНИЕ (ред. 5: у `merge` любая проблема Refs
+      — фаза 3, не прямая ошибка; в ред. 4 тут был rc 1 — ожидание изменено намеренно), под STRICT — отказ;
+      слияние без `Refs` вовсе — тоже только предупреждение (его выдаёт блок слияния, не правило 6).
+  H12 Перенесённый `Refs:`: единственный годный план стоит на строке-продолжении. Это НАБЛЮДАЕМАЯ защита
+      фолдинга: проверка h2 ловит лишь присутствие трейлера, потому что validate() подбирает известные
+      трейлеры из любого места сообщения, а строка с отступом под TRAILER_RE не подпадает — значит, годный
+      план виден только если абзац сфолжен. Без фолдинга (старая шаблонная копия) было бы W-REFS-INVALID.
+      Проверяем и обычный коммит, и путь `merge:`.
   H7  Гейт тестов не должен срабатывать на слиянии: индекс слияния несёт чужие коммиты, и без исключения
       каждое слияние ветки с кодом без тестов в индексе упиралось бы в «Gated code staged without tests».
       Контроль в том же прогоне: обычный коммит с тем же индексом — отказ (гейт жив).
@@ -120,6 +128,14 @@ def _validate(copy: str, repo: Path, message: str) -> tuple[int, str]:
     return _run([sys.executable, str(COPIES[copy]), "-"], repo, stdin_data=message.encode("utf-8"))
 
 
+def _validate_both(copy: str, repo: Path, message: str, tmp_path: Path) -> tuple[int, str, int]:
+    """(rc, stderr) with STRICT off, and rc with STRICT on (textual copy of the validator)."""
+    strict = _strict_copy(copy, tmp_path / "strict")
+    rc_off, text_off = _validate(copy, repo, message)
+    rc_on, _text_on = _run([sys.executable, str(strict), "-"], repo, stdin_data=message.encode("utf-8"))
+    return rc_off, text_off, rc_on
+
+
 @pytest.fixture(scope="module")
 def repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = _init(tmp_path_factory.mktemp("hazard"), BRANCH)
@@ -193,10 +209,11 @@ def test_h3_refs_are_looked_up_in_the_worktree_of_the_commit(copy: str, tmp_path
     elsewhere = f"feat(x): y\n\n{WHY}\nLayer: docs\nRefs: plans/2026-10-08_main-only/plan.md\n"
 
     rc_here, text_here = _validate(copy, worktree, here)
-    rc_elsewhere, text_elsewhere = _validate(copy, worktree, elsewhere)
+    rc_elsewhere, text_elsewhere, rc_elsewhere_strict = _validate_both(copy, worktree, elsewhere, tmp_path)
 
-    assert rc_here == 0, text_here
-    assert rc_elsewhere == 1, text_elsewhere
+    assert rc_here == 0 and "Refs names no existing plan" not in text_here, text_here
+    assert rc_elsewhere == 0 and rc_elsewhere_strict == 1, text_elsewhere
+    assert "Refs names no existing plan" in text_elsewhere
     assert "no such file in the working tree" in text_elsewhere
 
 
@@ -204,11 +221,17 @@ def test_h3_refs_are_looked_up_in_the_worktree_of_the_commit(copy: str, tmp_path
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
-def test_h4_dotdot_in_refs_is_refused_although_the_file_exists(copy: str, repo: Path) -> None:
-    rc, text = _validate(copy, repo, f"feat(x): y\n\n{WHY}\nLayer: docs\nRefs: plans/../README.md\n")
-    assert (repo / "plans" / ".." / "README.md").is_file()  # premise: the traversal target is real
-    assert rc == 1
-    assert "'..' in the path" in text
+@pytest.mark.parametrize(
+    "ref", ["plans/../README.md", "plans/./2026-10-05_other-plan/plan.md", "plans/./queue/2026-10-06_queued.md"]
+)
+def test_h4_dot_segments_in_refs_are_flagged_although_the_file_exists(
+    copy: str, ref: str, repo: Path, tmp_path: Path
+) -> None:
+    assert (repo / ref).is_file()  # premise: the path really resolves to a file
+    message = f"feat(x): y\n\n{WHY}\nLayer: docs\nRefs: {ref}\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert rc == 0 and rc_strict == 1, text
+    assert "Refs names no existing plan" in text and "segment in the path" in text
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
@@ -219,10 +242,11 @@ def test_h5_one_good_plan_among_bad_values_is_enough(copy: str, repo: Path) -> N
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
-def test_h5_all_bad_values_are_named_in_the_refusal(copy: str, repo: Path) -> None:
+def test_h5_all_bad_values_are_named_in_the_warning(copy: str, repo: Path, tmp_path: Path) -> None:
     message = f"feat(x): y\n\n{WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md, plans/nonexistent.md\n"
-    rc, text = _validate(copy, repo, message)
-    assert rc == 1
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert rc == 0 and rc_strict == 1, text
+    assert "Refs names no existing plan" in text and PHASE3 in text
     assert "plans/queue/ holds queued items" in text
     assert "plans/nonexistent.md: no such file" in text
 
@@ -231,11 +255,11 @@ def test_h5_all_bad_values_are_named_in_the_refusal(copy: str, repo: Path) -> No
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
-def test_h6_merge_with_queue_refs_is_refused(copy: str, repo: Path) -> None:
+def test_h6_merge_with_queue_refs_is_a_warning_and_under_strict_an_error(copy: str, repo: Path, tmp_path: Path) -> None:
     message = f"merge: слияние\n\n{WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md\n"
-    rc, text = _validate(copy, repo, message)
-    assert rc == 1
-    assert "plans/queue/ holds queued items" in text
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert rc == 0 and rc_strict == 1, text
+    assert "Refs names no existing plan" in text and "plans/queue/ holds queued items" in text
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
@@ -360,3 +384,17 @@ def test_h11_any_merge_text_is_a_warning_and_under_strict_an_error(
 
     assert rc_off == 0 and "default git merge text" in text_off and PHASE3 in text_off, text_off
     assert rc_on == 1 and "default git merge text" in text_on, text_on
+
+
+# --------------------------------------------------------------------------- H12
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("subject", ["feat(x): y", "merge: слияние"])
+def test_h12_wrapped_refs_with_the_valid_plan_on_the_continuation_line(
+    copy: str, subject: str, repo: Path, tmp_path: Path
+) -> None:
+    message = f"{subject}\n\n{WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md,\n  {OTHER_PLAN}\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert (rc, rc_strict) == (0, 0), text
+    assert "Refs names no existing plan" not in text and "merge commit without" not in text, text
