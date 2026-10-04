@@ -55,6 +55,7 @@
 - [Атрибутируй источник до реза](feedback_attribute_the_source_before_cutting.md) — агенты/команды с ДВУХ уровней (.claude/ и ~/.claude/); сверять состав множеств; экономию заявлять после прогона
 - [Спасение патчем теряет untracked](feedback_a_diff_based_rescue_omits_untracked_files.md) — «патчи сохранены» умолчало о тесте на 454 строки; спасать веткой от HEAD, пересечение считать числом
 - [Хук, пишущий в общий файл, блокирует двух писателей](feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers.md) — три коммита подряд отбиты; pathspec строит ВРЕМЕННЫЙ индекс из HEAD, и пустой git diff этого не видит; MM = обе стороны есть, а не обе целы
+- [Хук мёртв на Windows из-за ](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md) — `read < <(...)` оставляет ``, `$(...)` снимает; autoformat молчал с 2026-05-15; живость хука доказывать настоящим входом, вывод агенту — только `additionalContext`
 - [Dual-write разъехался по содержимому](feedback_dual_write_by_copy_destroys_the_other_side.md) — правды нет ни в одной копии; **правку вносить в обе копии отдельно, `cp` затирает молча**, diff ДО записи
 - [devseed перетирает .claude/](project_devseed_overwrites_claude_dir.md) — preserved: CLAUDE.md, modes/_stack.md, settings.local · [миграция на claude-kit](project_claude_kit_migration.md)
 
