@@ -52,6 +52,7 @@ BRANCH = "feat/commit-mechanism"
 PLAN = "plans/2026-10-03_commit-mechanism/plan.md"
 LAYERS = ["framework", "services", "plugins", "prototype", "docs", "scripts", "tests", "infra", "mixed"]
 
+_REFS_INVALID = "Refs names no existing plan"
 _WHY = "Why: проверка того, что валидатор принимает полное сообщение"
 _FULL = f"{_WHY}\nLayer: docs\nRefs: {PLAN}\n"
 _NO_LAYER = f"{_WHY}\nRefs: {PLAN}\n"
@@ -184,14 +185,49 @@ ROWS = [
     Row("V10", f"{_subject(73)}\n\n{_FULL}", 0, ("subject longer than 72",), ("subject longer than 100",), 0),
     Row("V11", f"{_subject(101)}\n\n{_FULL}", 0, ("subject longer than 100",), rc_true=0),
     Row("V12", f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/2026-10-05_other-plan/plan.md\n", 0, rc_true=0),
-    Row("V13", f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md\n", 1, rc_true=1),
+    Row(
+        "V13",
+        f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md\n",
+        0,
+        (_REFS_INVALID,),
+        rc_true=1,
+    ),
     Row(
         "V14",
         f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/2026-10-03_commit-mechanism/tasks/2.1.result.md\n",
-        1,
+        0,
+        (_REFS_INVALID,),
         rc_true=1,
     ),
-    Row("V15", f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/nonexistent.md\n", 1, rc_true=1),
+    Row(
+        "V15",
+        f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/nonexistent.md\n",
+        0,
+        (_REFS_INVALID,),
+        rc_true=1,
+    ),
+    Row("V18", f"feat(x): y\n\n{_WHY}\nLayer: docs\n", 1, rc_true=1),
+    Row(
+        "V19",
+        f"merge: слияние ветки\n\n{_WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md\n",
+        0,
+        ("WARNING",),
+        rc_true=1,
+    ),
+    Row(
+        "V20",
+        f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/queue/2026-10-06_queued.md,\n    {PLAN}\n",
+        0,
+        absent_false=(_REFS_INVALID,),
+        rc_true=0,
+    ),
+    Row(
+        "V21",
+        f"feat(x): y\n\n{_WHY}\nLayer: docs\nRefs: plans/./queue/2026-10-06_queued.md\n",
+        0,
+        (_REFS_INVALID,),
+        rc_true=1,
+    ),
     Row("V16a", 'Revert "feat: x"\n', 0, rc_true=0),
     Row("V16b", "fixup! feat: x\n", 0, rc_true=0),
     Row("V17", f"wip: x\n\n{_FULL}", 1, rc_true=1),
