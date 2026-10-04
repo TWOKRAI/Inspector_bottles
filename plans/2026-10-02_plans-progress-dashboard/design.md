@@ -63,7 +63,7 @@ Log4brains, towncrier, git-cliff, `mdbook-goals`; в проекте так же 
 
 - `--root DIR` — каталог с `plans/` и `plans/_archive/` (фикстура без записи в репозиторий); по умолчанию корень репозитория.
 - `--order PATH` — `ORDER.md`; по умолчанию `<root>/plans/queue/ORDER.md`; нет файла → полосы «—», не ошибка.
-- `--json` → stdout, список: `{"plan": "<basename>", "path": "<rel>", "archived": bool, "lane": str|null, "tier": "4.1"|"4.2"|"4.3"|null, "done": int, "total": int, "dropped": int, "unknown": int, "tasks": [{"id","title","status","ref"}]}`.
+- `--json` → stdout, список: `{"plan": "<basename>", "path": "<rel>", "archived": bool, "lane": str|null, "tier": "queue"|"waiting"|"closed"|null (до Task 3.4 — "4.1"|"4.2"|"4.3"), "done": int, "total": int, "dropped": int, "unknown": int, "tasks": [{"id","title","status","ref"}]}`.
   `total` — после вычета `dropped` (DEFERRED+SUPERSEDED) и `unknown`; `ref` — первый хеш в обратных кавычках из хвоста пункта или `null`.
 - `--html PATH` — по умолчанию `data/plans_progress.html`. Разметка: `<details class="plan" data-plan="<basename>">`, внутри `<summary>` с названием и `<progress value max>`; ячейка на задачу — `<span class="cell" data-status="done|pending|in_progress|blocked|deferred|superseded|unknown">`; архив — `<details id="archive">`.
 - `--check` — печатает находки; exit 1 при блокирующих, не вошедших в базу; иначе 0. `--baseline PATH` — файл строк `<план>:<КОД>` (для `UNKNOWN_STATUS` и `DUP_ID` — `<план>:<КОД>:<id>`, чтобы новая находка внутри уже известного плана не пряталась); находка из базы не блокирует (храповик: база только убывает).
