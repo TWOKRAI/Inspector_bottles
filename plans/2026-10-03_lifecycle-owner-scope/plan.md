@@ -56,7 +56,7 @@
 ### Task 0.1 — ADR и интерфейсы владения в base_manager
 **Level:** Senior · **Assignee:** teamlead · **Layer:** framework
 **Goal:** в `base_manager/interfaces.py` живут `Stoppable`, `CloseReport`, `Reporter`, `IHandle`, `IScope`, `ScopeClosedError`; ADR фиксирует решения DESIGN §4.
-**Files:** `multiprocess_framework/modules/base_manager/interfaces.py`, `base_manager/DECISIONS.md` (новый ADR-BM-xxx), `multiprocess_framework/DECISIONS.md` (индекс через `python -m scripts.sync`), `multiprocess_framework/docs/MODULE_TIERS.md` (строка `event_module → base_manager.interfaces`), `base_manager/README.md`, `STATUS.md`.
+**Files:** `multiprocess_framework/modules/base_manager/interfaces.py`, `base_manager/DECISIONS.md` (новый ADR-BM-xxx), `multiprocess_framework/DECISIONS.md` (индекс через `python -m scripts.sync`), `base_manager/README.md`, `STATUS.md`, `base_manager/docs/INTERFACES_USAGE.md`. Полный спек — [`task-0.1.md`](task-0.1.md).
 **Acceptance:**
 - [ ] Протоколы и DTO — ровно как в DESIGN §2.1 (имена, сигнатуры, keyword-only).
 - [ ] `CloseReport.to_dict()` — только примитивы (Dict at Boundary); `Scope`/`Handle` не пиклятся (проверяется в 0.2).
@@ -85,7 +85,7 @@
 ### Task 0.3 — Subscribers в event_module
 **Level:** Senior · **Assignee:** teamlead · **Layer:** framework
 **Goal:** один список подписчиков для всех издателей: `add(cb, *, owner: IScope) -> IHandle`, `emit` по снимку вне лока, `errors`, `emits_after_close` в отчёт владельца.
-**Files:** `event_module/subscribers.py`, `event_module/interfaces.py`, `event_module/tests/`, README/STATUS.
+**Files:** `event_module/subscribers.py`, `event_module/interfaces.py`, `event_module/tests/`, README/STATUS, `multiprocess_framework/docs/MODULE_TIERS.md` (строка `event_module`: leaf → зависит от `base_manager.interfaces`; перенесено из 0.1 — зависимость появляется здесь).
 **Acceptance:** реентрантная отписка во время `emit`; исключение подписчика изолировано и посчитано; доставка в закрытого владельца не происходит и посчитана; ручка держит издателя слабо (короткоживущий издатель не удерживается); `EventBus` пока не мигрирует (Ф3).
 
 ### Task 0.4 — qt_lifetime
