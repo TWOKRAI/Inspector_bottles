@@ -334,7 +334,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - gui-constructor — 0 из 21 · 0%
 - 2026-09-22_gui-service — 10 из 21 · 48%
 - frontend-constructor — 15 из 33 · 45%
-- transport-single-policy — 1 из 31 · 3% · без отметки 6
+- transport-single-policy — 19 из 24 · 79%
 - pipeline-node-timing — 1 из 4 · 25%
 - observability-closure — 33 из 46 · 72%
 - lifecycle-stop-ownership — 6 из 9 · 67% · без отметки 3
