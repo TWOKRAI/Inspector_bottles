@@ -112,6 +112,7 @@ Measurements: `docs/claude/LEAD_RULES.md` → «Persistent agents».
 | Chat responses to user | **Russian** | User is Russian-speaking |
 | Code comments | **Russian** | Readability for the user |
 | Documentation (README, STATUS, descriptions) | **Russian** | User reads these |
+| Reports, handoffs, session logs | **Russian** | User reads these |
 | Plans (workspace/plans/, apps/*/plans/, projects/*/plans/) | **Russian** | User reviews and edits plans |
 | Wiki articles | **Russian** | Target audience is Russian |
 | Technical terms (pipeline, frontmatter, RAG, etc.) | English as-is | Standard terminology |

@@ -34,7 +34,7 @@
 | Нарратив «конструктор» | `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` |
 | Настройка qex | [`.claude/plugins/mcp-qex/README.md`](.claude/plugins/mcp-qex/README.md) (quick-start), [`SETUP_GUIDE.md`](.claude/plugins/mcp-qex/SETUP_GUIDE.md) (полный) |
 | Гайд по sentrux | [`.claude/plugins/mcp-sentrux/README.md`](.claude/plugins/mcp-sentrux/README.md) (метрики, slash-команды, сценарии) |
-| Path-scoped правила | [`.rules/`](.rules/) — загружаются при работе с соответствующими файлами |
+| Path-scoped правила | [`.rules/`](.rules/) — читать по строке карты ядра; загрузчика у них нет |
 
 ## История версий и архив
 
