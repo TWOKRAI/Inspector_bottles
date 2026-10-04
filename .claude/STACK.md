@@ -282,7 +282,7 @@ uv run pyright src
 
 **В pre-commit:** на **pre-push** (не блокирует каждый commit, но блокирует push).
 
-**Опциональный hook на Edit:** `hooks/python/typecheck-changed.sh` — non-blocking pyright на изменённый файл. Активация: `export CLAUDE_TYPECHECK_ON_EDIT=1`. По умолчанию выключен (cold-start латентен).
+**Хук на Edit `hooks/python/typecheck-changed.sh`** — снят 2026-10-04 (FROZEN), см. tasks/1.4.md. pyright остаётся в pre-commit и в `make check`.
 
 **Future option:** [`ty`](https://github.com/astral-sh/ty) от Astral — новый type checker написанный на Rust. На альфа-стадии в 2026. Когда стабилизируется — заменит pyright (та же роль, быстрее).
 
