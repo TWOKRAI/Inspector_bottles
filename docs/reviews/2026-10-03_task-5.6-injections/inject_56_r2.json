@@ -1,0 +1,59 @@
+{
+ "BASE": {
+  "collected": 3440,
+  "failed": []
+ },
+ "K1_lock_substring": {
+  "pred": "author: тест токена inspector-bottles-7 против строки -79 — 1",
+  "collected": 3440,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_lock_with_our_session_in_measure_passes"
+  ]
+ },
+ "K2_lock_no_token_ok": {
+  "pred": "author: тест «живой режим без --lock-token -> код 2» — 1",
+  "collected": 3440,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_lock_missing_or_foreign_is_a_run_error",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_lock_without_token_is_a_run_error_even_when_the_file_exists"
+  ]
+ },
+ "K3_pause_not_required": {
+  "pred": "author: require_pause тесты — >=1",
+  "collected": 3440,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_ordered_pause_that_did_not_happen_is_a_run_error"
+  ]
+ },
+ "K4_snapshot_error_zeroed": {
+  "pred": "author: 3 теста «снимок с error -> код 2»",
+  "collected": 3440,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_snapshot_with_error_is_input_error_not_zeros[green_D100-s0.processor]",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_snapshot_with_error_is_input_error_not_zeros[green_D100-s2.inspector]",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_snapshot_with_error_is_input_error_not_zeros[green_P10-pause.after.renderer]"
+  ]
+ },
+ "K5_drain_t0_after_reply": {
+  "pred": "author: поддельный стенд (ответ 0.12 с) — FAIL drain превращается в PASS/NOT_MEASURED — >=1",
+  "collected": 3440,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_drain_is_timed_from_sending_worker_start_and_counts_cycles"
+  ]
+ },
+ "K6_lower_rule_off": {
+  "pred": "author: поддельный стенд -> NOT_MEASURED вместо FAIL, + тест правила нижней границы — >=1",
+  "collected": 3440,
+  "failed": [
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2_drain_is_timed_from_sending_worker_start_and_counts_cycles",
+   "scripts/stand_gate/tests/test_t56_author_hazards.py::test_r2b_lower_bound_rule_runs_first_and_absent_key_keeps_old_behaviour"
+  ]
+ },
+ "K7_counters_need_hz": {
+  "pred": "process_module: тест п.6 «state есть без hz>0» — 1 (возможно + тестерские B на latest/zero)",
+  "collected": 3440,
+  "failed": [
+   "process_module/tests/test_t56_counters_without_hz.py::test_counters_are_published_when_no_worker_runs_with_positive_hz"
+  ]
+ }
+}

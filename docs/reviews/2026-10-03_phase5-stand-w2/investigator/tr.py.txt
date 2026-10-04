@@ -1,0 +1,18 @@
+# ruff: noqa  # артефакт замера/инъекций 2026-10-03, код сохранён как есть
+import json, sys, statistics as st, os
+
+for f in sys.argv[1:]:
+    d = json.load(open(f, encoding="utf-8"))
+    tr = d.get("trace_proc", [])
+    cd = [r[2] for r in tr if r[2] is not None]
+    qw = [r[3] for r in tr if r[3] is not None]
+    rates = []
+    for a, b in zip(tr, tr[1:]):
+        if a[1] is not None and b[1] is not None and b[0] > a[0]:
+            rates.append((b[1] - a[1]) / (b[0] - a[0]))
+    print(
+        os.path.basename(f),
+        f"n={len(tr)} cycle_ms med={st.median(cd):.2f} p90={sorted(cd)[int(0.9 * len(cd))]:.2f} | qw med={st.median(qw):.2f} max={max(qw):.2f} | rate med={st.median(rates):.1f} min={min(rates):.1f}",
+    )
+    print("   rates:", " ".join(f"{r:.0f}" for r in rates))
+    print("   cyc_ms:", " ".join(f"{c:.1f}" for c in cd))

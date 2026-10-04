@@ -1,0 +1,2904 @@
+{
+ "tag": "P10",
+ "overflow": "every",
+ "secs": 30,
+ "reject_delay_ms": 0,
+ "transit_ms": 0,
+ "case_dir": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\stand_gate_P10_1al3nn9z",
+ "start_s": 5.66,
+ "first_frame_after_ready_s": 0.023,
+ "s0": {
+  "camera_0": {
+   "workers": {
+    "source_producer_camera_service": {
+     "effective_hz": 100.04,
+     "cycles": 1001,
+     "_keys": []
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 20,
+    "sent_attempted": 1029,
+    "sent_ok": 1029,
+    "received": 17,
+    "sent_via_targets": 1029,
+    "sent_via_targets.system": 5,
+    "sent_via_targets.state": 20,
+    "sent_via_targets.data": 1004,
+    "frame_boundary_crossings": 1004,
+    "shm_bytes_written": 6245683200
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "camera_0",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "028e560d-e4f3-4c57-8bea-0a56432b2a31",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "camera_0",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "camera_0",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018894.3163753
+    }
+   }
+  },
+  "processor": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 11,
+     "not_inspected_lag": 11,
+     "not_inspected_stale_restore": 0,
+     "effective_hz": 91.45,
+     "cycles": 1008,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 0,
+     "not_inspected_handled": 11,
+     "queue_wait_ms": 10.0,
+     "effective_hz": 89.19,
+     "cycles": 994,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 42,
+    "sent_attempted": 2060,
+    "sent_ok": 2060,
+    "received": 1025,
+    "sent_via_targets": 2060,
+    "sent_via_targets.system": 4,
+    "sent_via_targets.state": 42,
+    "sent_via_targets.data": 2014,
+    "frame_boundary_crossings": 1990,
+    "frame_handle_cache_size": 8,
+    "shm_bytes_written": 8252928000,
+    "shm_bytes_mapped": 6276787200
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "processor",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "c142aa05-ff0f-4d73-a025-1b31c2128150",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "processor",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 3,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "processor",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018894.4573543
+    }
+   }
+  },
+  "renderer": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 625,
+     "effective_hz": 85.6,
+     "cycles": 1014,
+     "_keys": [
+      "lag_dropped_items"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_handled": 11,
+     "queue_wait_ms": 32.3,
+     "effective_hz": 29.19,
+     "cycles": 369,
+     "_keys": [
+      "not_inspected_handled"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 19,
+    "sent_attempted": 405,
+    "sent_ok": 405,
+    "received": 1032,
+    "sent_via_targets": 405,
+    "sent_via_targets.system": 4,
+    "sent_via_targets.state": 19,
+    "sent_via_targets.data": 382,
+    "frame_boundary_crossings": 370,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_written": 5370624000,
+    "shm_bytes_mapped": 8269516800
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "renderer",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "3cd5dc8c-f3d0-4a12-80de-062519deb7ad",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "renderer",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 3,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "renderer",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018894.5996802
+    }
+   }
+  },
+  "inspector": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 2,
+     "not_inspected_lag": 2,
+     "not_inspected_stale_restore": 0,
+     "effective_hz": 83.28,
+     "cycles": 1028,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 0,
+     "not_inspected_handled": 28,
+     "queue_wait_ms": 0.17,
+     "effective_hz": 74.49,
+     "cycles": 1005,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 20,
+    "sent_attempted": 2082,
+    "sent_ok": 2082,
+    "received": 1046,
+    "sent_via_targets": 2082,
+    "sent_via_targets.system": 4,
+    "sent_via_targets.state": 20,
+    "sent_via_targets.data": 2058,
+    "frame_boundary_crossings": 2014,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_written": 8352460800,
+    "shm_bytes_mapped": 8369049600
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "inspector",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "8ea32eac-e8af-405f-8887-4fe4db8d910e",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "inspector",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 2,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "inspector",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018894.7287726
+    }
+   }
+  },
+  "storage": {
+   "workers": {
+    "db_flush_worker": {
+     "_keys": []
+    },
+    "data_receiver": {
+     "lag_dropped_items": 244,
+     "effective_hz": 82.19,
+     "cycles": 1039,
+     "_keys": [
+      "lag_dropped_items"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_handled": 34,
+     "queue_wait_ms": 0.92,
+     "effective_hz": 54.11,
+     "cycles": 770,
+     "_keys": [
+      "not_inspected_handled"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 11,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 19,
+    "sent_attempted": 23,
+    "sent_ok": 23,
+    "received": 1059,
+    "sent_via_targets": 23,
+    "sent_via_targets.state": 19,
+    "sent_via_targets.system": 4,
+    "frame_stale_drops": 11,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_mapped": 8443699200
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "storage",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "9e5e0abf-17eb-45fa-9642-b8335c4e4370",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "storage",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "storage",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018894.8586617
+    }
+   }
+  },
+  "gui": {
+   "workers": {
+    "data_drain": {
+     "_keys": []
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 2,
+    "recv_middleware_count": 2,
+    "sent_attempted": 4,
+    "sent_ok": 4,
+    "received": 1460,
+    "sent_via_targets": 4,
+    "sent_via_targets.system": 4
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "gui",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "e07e1957-d2d6-4de5-a797-fe870deca908",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "gui",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": null
+    },
+    "_fence": {
+     "sender": "gui",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018894.9656465
+    }
+   }
+  }
+ },
+ "pause_worker_names": [
+  "data_receiver",
+  "pipeline_executor",
+  "message_processor",
+  "heartbeat_sender"
+ ],
+ "pause_stop": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "processor",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "4b16f64d-7790-43c9-b13b-b1180ff25a0f",
+  "success": true,
+  "result": {
+   "success": true,
+   "worker_name": "pipeline_executor"
+  },
+  "_fence": {
+   "sender": "processor",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791018901.8515534
+  }
+ },
+ "pause_mid": {
+  "processor": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 1083,
+     "not_inspected_lag": 1083,
+     "not_inspected_stale_restore": 4,
+     "effective_hz": 100.08,
+     "cycles": 2732,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 4,
+     "not_inspected_handled": 91,
+     "queue_wait_ms": 0.36,
+     "effective_hz": 96.73,
+     "cycles": 1646,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 8,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 67,
+    "sent_attempted": 3527,
+    "sent_ok": 3527,
+    "received": 2776,
+    "sent_via_targets": 3527,
+    "sent_via_targets.system": 28,
+    "sent_via_targets.state": 67,
+    "sent_via_targets.data": 3432,
+    "frame_boundary_crossings": 3286,
+    "frame_stale_drops": 8,
+    "frame_handle_cache_size": 8,
+    "shm_bytes_written": 13627699200,
+    "shm_bytes_mapped": 17007667200
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "processor",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "83ed949c-1b77-4151-a3d5-0cf98773e23d",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "processor",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 3,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "processor",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018911.9302006
+    }
+   }
+  }
+ },
+ "pause_start": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "processor",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "e717b94d-3cc2-4d77-b7db-0433f0d74231",
+  "success": true,
+  "result": {
+   "success": true,
+   "worker_name": "pipeline_executor"
+  },
+  "_fence": {
+   "sender": "processor",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791018911.9507892
+  }
+ },
+ "pause": {
+  "worker": "pipeline_executor",
+  "stopped_s": 10.1,
+  "rss0": 229912576,
+  "rss1": 226000896,
+  "backlog": 3,
+  "cycles_mid": 1646,
+  "drain_s": 0.1038,
+  "drain_lower_s": 0.0632,
+  "drain_poll_period_s": 0.0348,
+  "drain_trace": [
+   [
+    0.0348,
+    1646
+   ],
+   [
+    0.0592,
+    1648
+   ],
+   [
+    0.0824,
+    1649
+   ],
+   [
+    0.1038,
+    1651
+   ]
+  ],
+  "after": {
+   "camera_0": {
+    "workers": {
+     "source_producer_camera_service": {
+      "effective_hz": 99.99,
+      "cycles": 2754,
+      "_keys": []
+     },
+     "message_processor": {
+      "_keys": []
+     },
+     "heartbeat_sender": {
+      "_keys": []
+     }
+    },
+    "rs": {
+     "frame_stale_drops": 0,
+     "frame_torn_reads": 0,
+     "frame_restore_failures": 0,
+     "door_drops": 0,
+     "queue_data_evicted": 0,
+     "frame_loan_exhausted": 0,
+     "errors_delivery_failed": 0,
+     "deferred_closes": 0
+    },
+    "rs_all": {
+     "is_initialized": true,
+     "sender_alive": true,
+     "channels_count": 29,
+     "send_middleware_count": 3,
+     "recv_middleware_count": 2,
+     "message_handlers": 3,
+     "queued_async": 41,
+     "sent_attempted": 2824,
+     "sent_ok": 2824,
+     "received": 37,
+     "sent_via_targets": 2824,
+     "sent_via_targets.system": 27,
+     "sent_via_targets.state": 41,
+     "sent_via_targets.data": 2756,
+     "frame_boundary_crossings": 2756,
+     "shm_bytes_written": 17144524800
+    },
+    "queues": {
+     "type": "response",
+     "command": "command.response",
+     "sender": "camera_0",
+     "targets": [
+      "ProcessManager"
+     ],
+     "queue_type": "system",
+     "request_id": "f0c426cc-313f-4943-94c4-40b93b88eed6",
+     "success": true,
+     "result": {
+      "success": true,
+      "process": "camera_0",
+      "queue_sizes": {
+       "system": 0,
+       "data": 0,
+       "state": 0,
+       "observability": 0
+      },
+      "queues": {
+       "system": {
+        "size": 0,
+        "maxsize": 100
+       },
+       "data": {
+        "size": 0,
+        "maxsize": 50
+       },
+       "state": {
+        "size": 0,
+        "maxsize": 8
+       },
+       "observability": {
+        "size": 0,
+        "maxsize": 256
+       }
+      },
+      "chain_queue": {
+       "size": 0,
+       "maxsize": 64
+      }
+     },
+     "_fence": {
+      "sender": "camera_0",
+      "inc": 0,
+      "epoch": 0
+     },
+     "_source_channel": "ProcessManager_system",
+     "_receive_info": {
+      "router_id": "router_ProcessManager",
+      "receive_time": 1791018912.1294086
+     }
+    }
+   },
+   "processor": {
+    "workers": {
+     "data_receiver": {
+      "lag_dropped_items": 1095,
+      "not_inspected_lag": 1095,
+      "not_inspected_stale_restore": 4,
+      "effective_hz": 95.34,
+      "cycles": 2755,
+      "_keys": [
+       "lag_dropped_items",
+       "not_inspected_lag",
+       "not_inspected_stale_restore"
+      ]
+     },
+     "pipeline_executor": {
+      "not_inspected_stale_exec": 4,
+      "not_inspected_handled": 1103,
+      "queue_wait_ms": 6.83,
+      "effective_hz": 64.26,
+      "cycles": 1658,
+      "_keys": [
+       "not_inspected_handled",
+       "not_inspected_stale_exec"
+      ]
+     },
+     "message_processor": {
+      "_keys": []
+     },
+     "heartbeat_sender": {
+      "_keys": []
+     }
+    },
+    "rs": {
+     "frame_stale_drops": 8,
+     "frame_torn_reads": 0,
+     "frame_restore_failures": 0,
+     "door_drops": 0,
+     "not_inspected_door": 0,
+     "queue_data_evicted": 0,
+     "frame_loan_exhausted": 0,
+     "errors_delivery_failed": 0,
+     "deferred_closes": 0
+    },
+    "rs_all": {
+     "is_initialized": true,
+     "sender_alive": true,
+     "channels_count": 29,
+     "send_middleware_count": 3,
+     "recv_middleware_count": 2,
+     "message_handlers": 3,
+     "queued_async": 70,
+     "sent_attempted": 3575,
+     "sent_ok": 3574,
+     "received": 2806,
+     "sent_via_targets": 3574,
+     "sent_via_targets.system": 36,
+     "sent_via_targets.state": 70,
+     "sent_via_targets.data": 3468,
+     "frame_boundary_crossings": 3312,
+     "frame_stale_drops": 8,
+     "frame_handle_cache_size": 8,
+     "shm_bytes_written": 13741747200,
+     "shm_bytes_mapped": 17144524800
+    },
+    "queues": {
+     "type": "response",
+     "command": "command.response",
+     "sender": "processor",
+     "targets": [
+      "ProcessManager"
+     ],
+     "queue_type": "system",
+     "request_id": "777e753a-7523-4be5-adef-803465bf2197",
+     "success": true,
+     "result": {
+      "success": true,
+      "process": "processor",
+      "queue_sizes": {
+       "system": 0,
+       "data": 0,
+       "state": 0,
+       "observability": 0
+      },
+      "queues": {
+       "system": {
+        "size": 0,
+        "maxsize": 100
+       },
+       "data": {
+        "size": 0,
+        "maxsize": 50
+       },
+       "state": {
+        "size": 0,
+        "maxsize": 8
+       },
+       "observability": {
+        "size": 0,
+        "maxsize": 256
+       }
+      },
+      "chain_queue": {
+       "size": 2,
+       "maxsize": 64
+      }
+     },
+     "_fence": {
+      "sender": "processor",
+      "inc": 0,
+      "epoch": 0
+     },
+     "_source_channel": "ProcessManager_system",
+     "_receive_info": {
+      "router_id": "router_ProcessManager",
+      "receive_time": 1791018912.182965
+     }
+    }
+   },
+   "renderer": {
+    "workers": {
+     "data_receiver": {
+      "lag_dropped_items": 1083,
+      "effective_hz": 83.33,
+      "cycles": 1737,
+      "_keys": [
+       "lag_dropped_items"
+      ]
+     },
+     "pipeline_executor": {
+      "not_inspected_handled": 1103,
+      "queue_wait_ms": 22.44,
+      "effective_hz": 32.78,
+      "cycles": 573,
+      "_keys": [
+       "not_inspected_handled"
+      ]
+     },
+     "message_processor": {
+      "_keys": []
+     },
+     "heartbeat_sender": {
+      "_keys": []
+     }
+    },
+    "rs": {
+     "frame_stale_drops": 1,
+     "frame_torn_reads": 0,
+     "frame_restore_failures": 0,
+     "door_drops": 0,
+     "queue_data_evicted": 0,
+     "frame_loan_exhausted": 0,
+     "errors_delivery_failed": 0,
+     "deferred_closes": 0
+    },
+    "rs_all": {
+     "is_initialized": true,
+     "sender_alive": true,
+     "channels_count": 29,
+     "send_middleware_count": 3,
+     "recv_middleware_count": 2,
+     "message_handlers": 3,
+     "queued_async": 32,
+     "sent_attempted": 700,
+     "sent_ok": 700,
+     "received": 1776,
+     "sent_via_targets": 700,
+     "sent_via_targets.system": 26,
+     "sent_via_targets.state": 32,
+     "sent_via_targets.data": 642,
+     "frame_boundary_crossings": 572,
+     "frame_stale_drops": 1,
+     "frame_handle_cache_size": 16,
+     "shm_bytes_written": 8302694400,
+     "shm_bytes_mapped": 13785292800
+    },
+    "queues": {
+     "type": "response",
+     "command": "command.response",
+     "sender": "renderer",
+     "targets": [
+      "ProcessManager"
+     ],
+     "queue_type": "system",
+     "request_id": "394fb5a1-70b6-401f-8987-f166a0e44b1c",
+     "success": true,
+     "result": {
+      "success": true,
+      "process": "renderer",
+      "queue_sizes": {
+       "system": 0,
+       "data": 1,
+       "state": 0,
+       "observability": 0
+      },
+      "queues": {
+       "system": {
+        "size": 0,
+        "maxsize": 100
+       },
+       "data": {
+        "size": 1,
+        "maxsize": 50
+       },
+       "state": {
+        "size": 0,
+        "maxsize": 8
+       },
+       "observability": {
+        "size": 0,
+        "maxsize": 256
+       }
+      },
+      "chain_queue": {
+       "size": 2,
+       "maxsize": 64
+      }
+     },
+     "_fence": {
+      "sender": "renderer",
+      "inc": 0,
+      "epoch": 0
+     },
+     "_source_channel": "ProcessManager_system",
+     "_receive_info": {
+      "router_id": "router_ProcessManager",
+      "receive_time": 1791018912.3028975
+     }
+    }
+   },
+   "inspector": {
+    "workers": {
+     "data_receiver": {
+      "lag_dropped_items": 5,
+      "not_inspected_lag": 5,
+      "not_inspected_stale_restore": 0,
+      "effective_hz": 87.46,
+      "cycles": 1748,
+      "_keys": [
+       "lag_dropped_items",
+       "not_inspected_lag",
+       "not_inspected_stale_restore"
+      ]
+     },
+     "pipeline_executor": {
+      "not_inspected_stale_exec": 0,
+      "not_inspected_handled": 1109,
+      "queue_wait_ms": 0.14,
+      "effective_hz": 74.15,
+      "cycles": 1664,
+      "_keys": [
+       "not_inspected_handled",
+       "not_inspected_stale_exec"
+      ]
+     },
+     "message_processor": {
+      "_keys": []
+     },
+     "heartbeat_sender": {
+      "_keys": []
+     }
+    },
+    "rs": {
+     "frame_stale_drops": 0,
+     "frame_torn_reads": 0,
+     "frame_restore_failures": 0,
+     "door_drops": 0,
+     "not_inspected_door": 0,
+     "queue_data_evicted": 0,
+     "frame_loan_exhausted": 0,
+     "errors_delivery_failed": 0,
+     "deferred_closes": 0
+    },
+    "rs_all": {
+     "is_initialized": true,
+     "sender_alive": true,
+     "channels_count": 29,
+     "send_middleware_count": 3,
+     "recv_middleware_count": 2,
+     "message_handlers": 3,
+     "queued_async": 32,
+     "sent_attempted": 3550,
+     "sent_ok": 3550,
+     "received": 1785,
+     "sent_via_targets": 3550,
+     "sent_via_targets.system": 26,
+     "sent_via_targets.state": 32,
+     "sent_via_targets.data": 3492,
+     "frame_boundary_crossings": 3330,
+     "frame_handle_cache_size": 16,
+     "shm_bytes_written": 13810176000,
+     "shm_bytes_mapped": 13851648000
+    },
+    "queues": {
+     "type": "response",
+     "command": "command.response",
+     "sender": "inspector",
+     "targets": [
+      "ProcessManager"
+     ],
+     "queue_type": "system",
+     "request_id": "f131c279-402e-4ead-b9a2-bf99e467527b",
+     "success": true,
+     "result": {
+      "success": true,
+      "process": "inspector",
+      "queue_sizes": {
+       "system": 0,
+       "data": 0,
+       "state": 0,
+       "observability": 0
+      },
+      "queues": {
+       "system": {
+        "size": 0,
+        "maxsize": 100
+       },
+       "data": {
+        "size": 0,
+        "maxsize": 50
+       },
+       "state": {
+        "size": 0,
+        "maxsize": 8
+       },
+       "observability": {
+        "size": 0,
+        "maxsize": 256
+       }
+      },
+      "chain_queue": {
+       "size": 1,
+       "maxsize": 64
+      }
+     },
+     "_fence": {
+      "sender": "inspector",
+      "inc": 0,
+      "epoch": 0
+     },
+     "_source_channel": "ProcessManager_system",
+     "_receive_info": {
+      "router_id": "router_ProcessManager",
+      "receive_time": 1791018912.4124784
+     }
+    }
+   },
+   "storage": {
+    "workers": {
+     "db_flush_worker": {
+      "_keys": []
+     },
+     "data_receiver": {
+      "lag_dropped_items": 407,
+      "effective_hz": 87.19,
+      "cycles": 1754,
+      "_keys": [
+       "lag_dropped_items"
+      ]
+     },
+     "pipeline_executor": {
+      "not_inspected_handled": 1114,
+      "queue_wait_ms": 1.22,
+      "effective_hz": 68.88,
+      "cycles": 1262,
+      "_keys": [
+       "not_inspected_handled"
+      ]
+     },
+     "message_processor": {
+      "_keys": []
+     },
+     "heartbeat_sender": {
+      "_keys": []
+     }
+    },
+    "rs": {
+     "frame_stale_drops": 17,
+     "frame_torn_reads": 0,
+     "frame_restore_failures": 0,
+     "door_drops": 0,
+     "queue_data_evicted": 0,
+     "frame_loan_exhausted": 0,
+     "errors_delivery_failed": 0,
+     "deferred_closes": 0
+    },
+    "rs_all": {
+     "is_initialized": true,
+     "sender_alive": true,
+     "channels_count": 29,
+     "send_middleware_count": 3,
+     "recv_middleware_count": 2,
+     "message_handlers": 3,
+     "queued_async": 31,
+     "sent_attempted": 57,
+     "sent_ok": 57,
+     "received": 1792,
+     "sent_via_targets": 57,
+     "sent_via_targets.state": 31,
+     "sent_via_targets.system": 26,
+     "frame_stale_drops": 17,
+     "frame_handle_cache_size": 16,
+     "shm_bytes_mapped": 13859942400
+    },
+    "queues": {
+     "type": "response",
+     "command": "command.response",
+     "sender": "storage",
+     "targets": [
+      "ProcessManager"
+     ],
+     "queue_type": "system",
+     "request_id": "3dc9b8eb-b9a0-44a3-b7af-eef0f8318685",
+     "success": true,
+     "result": {
+      "success": true,
+      "process": "storage",
+      "queue_sizes": {
+       "system": 0,
+       "data": 0,
+       "state": 0,
+       "observability": 0
+      },
+      "queues": {
+       "system": {
+        "size": 0,
+        "maxsize": 100
+       },
+       "data": {
+        "size": 0,
+        "maxsize": 50
+       },
+       "state": {
+        "size": 0,
+        "maxsize": 8
+       },
+       "observability": {
+        "size": 0,
+        "maxsize": 256
+       }
+      },
+      "chain_queue": {
+       "size": 0,
+       "maxsize": 64
+      }
+     },
+     "_fence": {
+      "sender": "storage",
+      "inc": 0,
+      "epoch": 0
+     },
+     "_source_channel": "ProcessManager_system",
+     "_receive_info": {
+      "router_id": "router_ProcessManager",
+      "receive_time": 1791018912.528871
+     }
+    }
+   },
+   "gui": {
+    "workers": {
+     "data_drain": {
+      "_keys": []
+     },
+     "message_processor": {
+      "_keys": []
+     },
+     "heartbeat_sender": {
+      "_keys": []
+     }
+    },
+    "rs": {
+     "frame_stale_drops": 0,
+     "frame_torn_reads": 0,
+     "frame_restore_failures": 0,
+     "door_drops": 0,
+     "queue_data_evicted": 0,
+     "frame_loan_exhausted": 0,
+     "errors_delivery_failed": 0,
+     "deferred_closes": 0
+    },
+    "rs_all": {
+     "is_initialized": true,
+     "sender_alive": true,
+     "channels_count": 29,
+     "send_middleware_count": 2,
+     "recv_middleware_count": 2,
+     "sent_attempted": 26,
+     "sent_ok": 26,
+     "received": 2460,
+     "sent_via_targets": 26,
+     "sent_via_targets.system": 26
+    },
+    "queues": {
+     "type": "response",
+     "command": "command.response",
+     "sender": "gui",
+     "targets": [
+      "ProcessManager"
+     ],
+     "queue_type": "system",
+     "request_id": "b0993516-3282-4898-ac5f-b5aeb2827977",
+     "success": true,
+     "result": {
+      "success": true,
+      "process": "gui",
+      "queue_sizes": {
+       "system": 0,
+       "data": 0,
+       "state": 0,
+       "observability": 0
+      },
+      "queues": {
+       "system": {
+        "size": 0,
+        "maxsize": 100
+       },
+       "data": {
+        "size": 0,
+        "maxsize": 50
+       },
+       "state": {
+        "size": 0,
+        "maxsize": 8
+       },
+       "observability": {
+        "size": 0,
+        "maxsize": 256
+       }
+      },
+      "chain_queue": null
+     },
+     "_fence": {
+      "sender": "gui",
+      "inc": 0,
+      "epoch": 0
+     },
+     "_source_channel": "ProcessManager_system",
+     "_receive_info": {
+      "router_id": "router_ProcessManager",
+      "receive_time": 1791018912.6270034
+     }
+    }
+   }
+  }
+ },
+ "window_s": 31.13,
+ "s1": {
+  "camera_0": {
+   "workers": {
+    "source_producer_camera_service": {
+     "effective_hz": 100.0,
+     "cycles": 4111,
+     "_keys": []
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 57,
+    "sent_attempted": 4233,
+    "sent_ok": 4232,
+    "received": 71,
+    "sent_via_targets": 4232,
+    "sent_via_targets.system": 62,
+    "sent_via_targets.state": 57,
+    "sent_via_targets.data": 4113,
+    "frame_boundary_crossings": 4113,
+    "shm_bytes_written": 25586150400
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "camera_0",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "7783bd3b-6ac4-48fa-9aa6-b51b9eda66eb",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "camera_0",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "camera_0",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018926.171206
+    }
+   }
+  },
+  "processor": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 1169,
+     "not_inspected_lag": 1169,
+     "not_inspected_stale_restore": 4,
+     "effective_hz": 97.93,
+     "cycles": 4114,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 4,
+     "not_inspected_handled": 1177,
+     "queue_wait_ms": 0.4,
+     "effective_hz": 96.8,
+     "cycles": 2944,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 8,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 114,
+    "sent_attempted": 6353,
+    "sent_ok": 6353,
+    "received": 4200,
+    "sent_via_targets": 6353,
+    "sent_via_targets.system": 71,
+    "sent_via_targets.state": 114,
+    "sent_via_targets.data": 6168,
+    "frame_boundary_crossings": 5886,
+    "frame_stale_drops": 8,
+    "frame_handle_cache_size": 8,
+    "shm_bytes_written": 24410419200,
+    "shm_bytes_mapped": 25604812800
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "processor",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "d4bf859f-0281-4cb8-8d3e-61df66e6b8e8",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "processor",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 2,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "processor",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018926.2468052
+    }
+   }
+  },
+  "renderer": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 1932,
+     "effective_hz": 96.46,
+     "cycles": 3088,
+     "_keys": [
+      "lag_dropped_items"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_handled": 1177,
+     "queue_wait_ms": 18.4,
+     "effective_hz": 34.49,
+     "cycles": 1012,
+     "_keys": [
+      "not_inspected_handled"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 4,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 1,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 47,
+    "sent_attempted": 1251,
+    "sent_ok": 1250,
+    "received": 3159,
+    "middleware_dropped": 1,
+    "sent_via_targets": 1250,
+    "sent_via_targets.system": 61,
+    "sent_via_targets.state": 47,
+    "sent_via_targets.data": 1142,
+    "frame_boundary_crossings": 1010,
+    "frame_stale_drops": 4,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_written": 14660352000,
+    "shm_bytes_mapped": 24451891200,
+    "door_drops": 1
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "renderer",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "2b4dd457-1336-42c8-a27d-538fd8c1f92c",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "renderer",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 2,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "renderer",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018926.3105733
+    }
+   }
+  },
+  "inspector": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 7,
+     "not_inspected_lag": 7,
+     "not_inspected_stale_restore": 0,
+     "effective_hz": 98.3,
+     "cycles": 3095,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 0,
+     "not_inspected_handled": 1184,
+     "queue_wait_ms": 0.1,
+     "effective_hz": 97.28,
+     "cycles": 2947,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 48,
+    "sent_attempted": 6294,
+    "sent_ok": 6293,
+    "received": 3167,
+    "sent_via_targets": 6293,
+    "sent_via_targets.system": 61,
+    "sent_via_targets.state": 48,
+    "sent_via_targets.data": 6184,
+    "frame_boundary_crossings": 5896,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_written": 24458112000,
+    "shm_bytes_mapped": 24518246400
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "inspector",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "d354c63f-a005-4a8a-98eb-faaed54b4bea",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "inspector",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "inspector",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018926.3966515
+    }
+   }
+  },
+  "storage": {
+   "workers": {
+    "db_flush_worker": {
+     "_keys": []
+    },
+    "data_receiver": {
+     "lag_dropped_items": 716,
+     "effective_hz": 97.75,
+     "cycles": 3098,
+     "_keys": [
+      "lag_dropped_items"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_handled": 1184,
+     "queue_wait_ms": 0.1,
+     "effective_hz": 98.98,
+     "cycles": 2238,
+     "_keys": [
+      "not_inspected_handled"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 29,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 46,
+    "sent_attempted": 107,
+    "sent_ok": 107,
+    "received": 3171,
+    "sent_via_targets": 107,
+    "sent_via_targets.state": 46,
+    "sent_via_targets.system": 61,
+    "frame_stale_drops": 29,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_mapped": 24526540800
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "storage",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "c382794e-0959-4310-883b-a45f8439fe31",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "storage",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "storage",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018926.482956
+    }
+   }
+  },
+  "gui": {
+   "workers": {
+    "data_drain": {
+     "_keys": []
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 2,
+    "recv_middleware_count": 2,
+    "sent_attempted": 62,
+    "sent_ok": 62,
+    "received": 4326,
+    "sent_via_targets": 62,
+    "sent_via_targets.system": 62
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "gui",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "b2b96795-bcec-4c4f-9a6f-ff2f8a7bc011",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "gui",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": null
+    },
+    "_fence": {
+     "sender": "gui",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018926.5917618
+    }
+   }
+  }
+ },
+ "rc_s1": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "inspector",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "1777a732-fbad-41ed-8e5a-e7ce3c9177a5",
+  "success": true,
+  "result": {
+   "status": "ok",
+   "actuation_fired_items": 4157,
+   "actuation_missed_items": 0,
+   "actuation_late_fires": 0,
+   "actuation_unscheduled_items": 0,
+   "actuation_unfired_on_stop_items": 0,
+   "total_inspected": 2973,
+   "total_rejected": 2973,
+   "reject_rate": 1.0,
+   "total_not_inspected": 1184,
+   "verdicts_written": 1,
+   "verdicts_unwritten": 0
+  },
+  "_fence": {
+   "sender": "inspector",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791018926.602761
+  }
+ },
+ "hz_median": {
+  "camera_0": 100.0,
+  "processor": 99.82,
+  "renderer": 98.57,
+  "inspector": 98.75,
+  "storage": 99.18,
+  "gui": null
+ },
+ "camera_before_pause": {
+  "workers": {
+   "source_producer_camera_service": {
+    "effective_hz": 97.89,
+    "cycles": 4161,
+    "_keys": []
+   },
+   "message_processor": {
+    "_keys": []
+   },
+   "heartbeat_sender": {
+    "_keys": []
+   }
+  },
+  "rs": {
+   "frame_stale_drops": 0,
+   "frame_torn_reads": 0,
+   "frame_restore_failures": 0,
+   "door_drops": 0,
+   "queue_data_evicted": 0,
+   "frame_loan_exhausted": 0,
+   "errors_delivery_failed": 0,
+   "deferred_closes": 0
+  },
+  "rs_all": {
+   "is_initialized": true,
+   "sender_alive": true,
+   "channels_count": 29,
+   "send_middleware_count": 3,
+   "recv_middleware_count": 2,
+   "message_handlers": 3,
+   "queued_async": 59,
+   "sent_attempted": 4288,
+   "sent_ok": 4288,
+   "received": 74,
+   "sent_via_targets": 4288,
+   "sent_via_targets.system": 66,
+   "sent_via_targets.state": 59,
+   "sent_via_targets.data": 4163,
+   "frame_boundary_crossings": 4163,
+   "shm_bytes_written": 25897190400
+  },
+  "queues": {
+   "type": "response",
+   "command": "command.response",
+   "sender": "camera_0",
+   "targets": [
+    "ProcessManager"
+   ],
+   "queue_type": "system",
+   "request_id": "d7ff92df-67a8-41c7-8a3b-6ba5610a26a4",
+   "success": true,
+   "result": {
+    "success": true,
+    "process": "camera_0",
+    "queue_sizes": {
+     "system": 0,
+     "data": 0,
+     "state": 0,
+     "observability": 0
+    },
+    "queues": {
+     "system": {
+      "size": 0,
+      "maxsize": 100
+     },
+     "data": {
+      "size": 0,
+      "maxsize": 50
+     },
+     "state": {
+      "size": 0,
+      "maxsize": 8
+     },
+     "observability": {
+      "size": 0,
+      "maxsize": 256
+     }
+    },
+    "chain_queue": {
+     "size": 0,
+     "maxsize": 64
+    }
+   },
+   "_fence": {
+    "sender": "camera_0",
+    "inc": 0,
+    "epoch": 0
+   },
+   "_source_channel": "ProcessManager_system",
+   "_receive_info": {
+    "router_id": "router_ProcessManager",
+    "receive_time": 1791018926.7296927
+   }
+  }
+ },
+ "camera_pause": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "camera_0",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "1a426489-c06a-4889-927a-7ca40828cb10",
+  "success": true,
+  "result": {
+   "success": true,
+   "status": "paused"
+  },
+  "_fence": {
+   "sender": "camera_0",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791018926.7512457
+  }
+ },
+ "s2": {
+  "camera_0": {
+   "workers": {},
+   "rs": {},
+   "rs_all": {},
+   "queues": {
+    "success": false,
+    "error": "timeout",
+    "correlation_id": "6f141509-8d21-445b-810e-e008196bf2c0"
+   }
+  },
+  "processor": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 1169,
+     "not_inspected_lag": 1169,
+     "not_inspected_stale_restore": 4,
+     "effective_hz": 91.73,
+     "cycles": 4165,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 4,
+     "not_inspected_handled": 1177,
+     "queue_wait_ms": 4.69,
+     "effective_hz": 91.59,
+     "cycles": 2995,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 8,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 120,
+    "sent_attempted": 6469,
+    "sent_ok": 6469,
+    "received": 4268,
+    "sent_via_targets": 6469,
+    "sent_via_targets.system": 83,
+    "sent_via_targets.state": 120,
+    "sent_via_targets.data": 6266,
+    "frame_boundary_crossings": 5984,
+    "frame_stale_drops": 8,
+    "frame_handle_cache_size": 8,
+    "shm_bytes_written": 24816844800,
+    "shm_bytes_mapped": 25909632000
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "processor",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "6026a651-00e6-43d4-8279-83a6d321c1a6",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "processor",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "processor",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018956.2380567
+    }
+   }
+  },
+  "renderer": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 1963,
+     "effective_hz": 91.64,
+     "cycles": 3133,
+     "_keys": [
+      "lag_dropped_items"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_handled": 1177,
+     "queue_wait_ms": 21.55,
+     "effective_hz": 33.02,
+     "cycles": 1029,
+     "_keys": [
+      "not_inspected_handled"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 4,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 1,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 54,
+    "sent_attempted": 1286,
+    "sent_ok": 1285,
+    "received": 3222,
+    "middleware_dropped": 1,
+    "sent_via_targets": 1285,
+    "sent_via_targets.system": 73,
+    "sent_via_targets.state": 54,
+    "sent_via_targets.data": 1158,
+    "frame_boundary_crossings": 1026,
+    "frame_stale_drops": 4,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_written": 14892595200,
+    "shm_bytes_mapped": 24816844800,
+    "door_drops": 1
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "renderer",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "58f60537-ad2c-4383-952e-eccef5f517d8",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "renderer",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "renderer",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018956.3245285
+    }
+   }
+  },
+  "inspector": {
+   "workers": {
+    "data_receiver": {
+     "lag_dropped_items": 7,
+     "not_inspected_lag": 7,
+     "not_inspected_stale_restore": 0,
+     "effective_hz": 91.57,
+     "cycles": 3133,
+     "_keys": [
+      "lag_dropped_items",
+      "not_inspected_lag",
+      "not_inspected_stale_restore"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_stale_exec": 0,
+     "not_inspected_handled": 1184,
+     "queue_wait_ms": 0.15,
+     "effective_hz": 91.6,
+     "cycles": 2985,
+     "_keys": [
+      "not_inspected_handled",
+      "not_inspected_stale_exec"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "not_inspected_door": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 54,
+    "sent_attempted": 6386,
+    "sent_ok": 6386,
+    "received": 3224,
+    "sent_via_targets": 6386,
+    "sent_via_targets.system": 74,
+    "sent_via_targets.state": 54,
+    "sent_via_targets.data": 6258,
+    "frame_boundary_crossings": 5970,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_written": 24758784000,
+    "shm_bytes_mapped": 24816844800
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "inspector",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "f09d57f3-7d13-4ca8-9ff5-d0ab0dd9f184",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "inspector",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "inspector",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018956.3993964
+    }
+   }
+  },
+  "storage": {
+   "workers": {
+    "db_flush_worker": {
+     "_keys": []
+    },
+    "data_receiver": {
+     "lag_dropped_items": 736,
+     "effective_hz": 91.59,
+     "cycles": 3129,
+     "_keys": [
+      "lag_dropped_items"
+     ]
+    },
+    "pipeline_executor": {
+     "not_inspected_handled": 1184,
+     "queue_wait_ms": 5.25,
+     "effective_hz": 69.35,
+     "cycles": 2249,
+     "_keys": [
+      "not_inspected_handled"
+     ]
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 30,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 3,
+    "recv_middleware_count": 2,
+    "message_handlers": 3,
+    "queued_async": 52,
+    "sent_attempted": 125,
+    "sent_ok": 125,
+    "received": 3220,
+    "sent_via_targets": 125,
+    "sent_via_targets.state": 52,
+    "sent_via_targets.system": 73,
+    "frame_stale_drops": 30,
+    "frame_handle_cache_size": 16,
+    "shm_bytes_mapped": 24758784000
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "storage",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "a9aba8dc-29cd-491f-b033-072a3b400d39",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "storage",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": {
+      "size": 0,
+      "maxsize": 64
+     }
+    },
+    "_fence": {
+     "sender": "storage",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018956.4955456
+    }
+   }
+  },
+  "gui": {
+   "workers": {
+    "data_drain": {
+     "_keys": []
+    },
+    "message_processor": {
+     "_keys": []
+    },
+    "heartbeat_sender": {
+     "_keys": []
+    }
+   },
+   "rs": {
+    "frame_stale_drops": 0,
+    "frame_torn_reads": 0,
+    "frame_restore_failures": 0,
+    "door_drops": 0,
+    "queue_data_evicted": 0,
+    "frame_loan_exhausted": 0,
+    "errors_delivery_failed": 0,
+    "deferred_closes": 0
+   },
+   "rs_all": {
+    "is_initialized": true,
+    "sender_alive": true,
+    "channels_count": 29,
+    "send_middleware_count": 2,
+    "recv_middleware_count": 2,
+    "sent_attempted": 74,
+    "sent_ok": 74,
+    "received": 4378,
+    "sent_via_targets": 74,
+    "sent_via_targets.system": 74
+   },
+   "queues": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "gui",
+    "targets": [
+     "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "60ec8bbf-e6a6-4fe6-886a-eab0aa96a25f",
+    "success": true,
+    "result": {
+     "success": true,
+     "process": "gui",
+     "queue_sizes": {
+      "system": 0,
+      "data": 0,
+      "state": 0,
+      "observability": 0
+     },
+     "queues": {
+      "system": {
+       "size": 0,
+       "maxsize": 100
+      },
+      "data": {
+       "size": 0,
+       "maxsize": 50
+      },
+      "state": {
+       "size": 0,
+       "maxsize": 8
+      },
+      "observability": {
+       "size": 0,
+       "maxsize": 256
+      }
+     },
+     "chain_queue": null
+    },
+    "_fence": {
+     "sender": "gui",
+     "inc": 0,
+     "epoch": 0
+    },
+    "_source_channel": "ProcessManager_system",
+    "_receive_info": {
+     "router_id": "router_ProcessManager",
+     "receive_time": 1791018956.560448
+    }
+   }
+  }
+ },
+ "rc_s2": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "inspector",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "655fe8c4-d51e-405d-8ff7-61f6a051ba7a",
+  "success": true,
+  "result": {
+   "status": "ok",
+   "actuation_fired_items": 4169,
+   "actuation_missed_items": 0,
+   "actuation_late_fires": 0,
+   "actuation_unscheduled_items": 0,
+   "actuation_unfired_on_stop_items": 0,
+   "total_inspected": 2985,
+   "total_rejected": 2985,
+   "reject_rate": 1.0,
+   "total_not_inspected": 1184,
+   "verdicts_written": 1,
+   "verdicts_unwritten": 0
+  },
+  "_fence": {
+   "sender": "inspector",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791018956.5708852
+  }
+ },
+ "journal": {
+  "files": {
+   "inspector\\messages.log": 3111
+  },
+  "file": "inspector\\messages.log",
+  "rows": 3111,
+  "distinct": 3111,
+  "dup": 0,
+  "markers": 126,
+  "verdicts": 2985,
+  "feeder_release_lines": 0
+ },
+ "feeder_release_lines": 0
+}

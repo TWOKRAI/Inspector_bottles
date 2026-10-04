@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from ..plugins.base import ProcessModulePlugin
 from ..health import IHealthReporter
@@ -25,6 +25,14 @@ from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 #: мёртвом источнике спим дольше, отдавая CPU. Держим отзывчивость на stop_event
 #: порциями внутри smart-sleep.
 DEFAULT_BREAKER_BACKOFF_SEC = 1.0
+
+#: Task 5.4: срок ожидания готовности системы перед первым produce() (сек). Истёк →
+#: WARNING «preroll» и старт: сломанный PM не должен держать источник вечно. Читается в
+#: момент ожидания (глобал модуля), не зашит дефолтом параметра — тесты подменяют.
+DEFAULT_PREROLL_TIMEOUT_S = 10.0
+
+#: Кусок ожидания готовности: между кусками проверяются stop_event и срок.
+_PREROLL_SLICE_S = 0.05
 
 
 class SourceProducer:
@@ -42,6 +50,11 @@ class SourceProducer:
             breaker (report_error), успех — record_success. None → no-op (юниты/
             обратная совместимость): поведение как раньше, только без наблюдаемости.
         breaker_backoff_sec: сон при открытом breaker (вместо target_interval).
+        ready_event: событие готовности системы (Task 5.4, ADR-PMM-034). Не None →
+            ``run_loop`` до первого ``produce()`` ждёт его (кусками, срок
+            ``DEFAULT_PREROLL_TIMEOUT_S``); None → без ожидания, поведение прежнее.
+            Источник событие только читает — взводит его один PM.
+        log_warning: callback предупреждения (срок preroll истёк). None → строка не пишется.
     """
 
     def __init__(
@@ -58,6 +71,8 @@ class SourceProducer:
         plugin_runner: PluginRunner | None = None,
         health: IHealthReporter | None = None,
         breaker_backoff_sec: float = DEFAULT_BREAKER_BACKOFF_SEC,
+        ready_event: Any | None = None,
+        log_warning: Callable[[str], None] | None = None,
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
@@ -71,6 +86,10 @@ class SourceProducer:
         self._target_interval = 1.0 / max(target_fps, 1.0)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
+        self._log_warning = log_warning or (lambda msg: None)
+        self._ready_event = ready_event
+        # Preroll отрабатывает один раз за жизнь продюсера (повторный run_loop — не ждём).
+        self._preroll_done = ready_event is None
         # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
         # ProcessModule._log_debug тоже kwargs-safe (несёт trace_id=... как extra
         # для LogRecord, Ф7 G.6). Периодический per-frame TRACE снят в Ф7 G.1 —
@@ -118,6 +137,9 @@ class SourceProducer:
         ``[]`` при отсутствии кадра). Иначе worker не остановится за дедлайн
         ``stop_all_workers`` → ``terminate()`` (5с-лаг switch + утечка ресурса).
         """
+        if not self._wait_preroll(stop_event):
+            return
+
         while not stop_event.is_set():
             if pause_event.is_set():
                 self._pacer.reset()  # после паузы расписание — от «сейчас»
@@ -211,6 +233,33 @@ class SourceProducer:
 
             # Полный цикл (produce + send + sleep) → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)
+
+    def _wait_preroll(self, stop_event: threading.Event) -> bool:
+        """Task 5.4: ждать готовности системы до первого ``produce()``.
+
+        Кусками ``_PREROLL_SLICE_S`` с проверкой ``stop_event`` и срока между ними.
+        Возвращает ``False`` — стоп пришёл во время ожидания (выйти без ``produce()`` и без
+        WARNING); ``True`` — можно крутить цикл: событие взведено, истёк срок (ровно одна
+        строка ``log_warning``) или ожидания не было (``ready_event is None``).
+        """
+        if self._preroll_done:
+            return not stop_event.is_set()
+        timeout_s = DEFAULT_PREROLL_TIMEOUT_S  # читаем в момент ожидания, см. константу
+        deadline = time.perf_counter() + timeout_s
+        ready = self._ready_event
+        while not ready.is_set():
+            if stop_event.is_set():
+                return False
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                self._log_warning(
+                    f"SourceProducer: {self._plugin.name} — preroll: событие готовности системы "
+                    f"не пришло за {timeout_s}s, источник стартует без него"
+                )
+                break
+            ready.wait(min(_PREROLL_SLICE_S, remaining))
+        self._preroll_done = True
+        return not stop_event.is_set()
 
     def _sleep_cooperative(self, sleep_time: float, stop_event: threading.Event) -> None:
         """Сон порциями с проверкой stop_event (отзывчивость на остановку).

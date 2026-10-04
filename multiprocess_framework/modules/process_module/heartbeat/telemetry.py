@@ -64,6 +64,24 @@ METRIC_QUEUE_WAIT_MS = declare_metric("queue_wait_ms", owner=__name__)
 METRIC_TRANSPORT_MS = declare_metric("transport_ms", owner=__name__)
 METRIC_PACER_LATE = declare_metric("pacer_late", owner=__name__)
 
+#: Task 5.6: счётчики тракта процесса — СУММЫ по воркерам (``processes.<P>.state.<имя>``).
+#: Объявлены тем же способом, что ``queue_wait_ms``/``pacer_late`` (метрики воркеров, Task 4.5a):
+#: без объявления гейт прототипа не выдал бы имя в ``allowed`` никогда. Кортеж — единственный
+#: список имён для сборщика ниже: объявление и вычисление не могут разойтись.
+PROCESS_COUNTER_SUMS: tuple[str, ...] = (
+    "lag_dropped_items",
+    "not_inspected_lag",
+    "not_inspected_stale_restore",
+    "not_inspected_stale_exec",
+    "not_inspected_handled",
+    # gauge: размер data-очереди на тике публикации (ключ статуса DataReceiver); сумма по
+    # воркерам совпадает со значением единственного воркера, который его несёт.
+    "ipc_queue_depth",
+)
+for _counter in PROCESS_COUNTER_SUMS:
+    declare_metric(_counter, owner=__name__)
+del _counter
+
 
 def build_worker_telemetry(
     workers: dict,
@@ -95,7 +113,10 @@ def build_worker_telemetry(
       - агрегат ``state``: ``fps`` = max(hz) по running-воркерам с hz>0 (если ``fps``
         разрешён); ``latency_ms`` = max(cycle_duration_ms) среди них (если ``latency_ms``
         разрешён); нет hz>0 → без агрегата;
-      - округление до 1 знака сохранено (fps/hz/latency).
+      - округление до 1 знака сохранено (fps/hz/latency);
+      - Task 5.6: ``state.<счётчик>`` для имён :data:`PROCESS_COUNTER_SUMS` — сумма по воркерам,
+        несущим ключ (включая 0, если разрешён); ни один воркер не несёт → листа нет. Публикуется
+        и без агрегата частоты.
 
     Publisher-gate (PC 1.2): ``allowed_metrics`` — множество суффиксов, которым
     разрешено попасть в payload на этом тике. Выключенная/зажатая частотой метрика
@@ -148,10 +169,18 @@ def build_worker_telemetry(
     workers_payload: dict[str, dict] = {}
     hz_values: list[float] = []
     latency_values: list[float] = []
+    # Task 5.6: суммы счётчиков тракта. Ключ появляется, только если хоть один воркер его несёт:
+    # у процесса без счётчика (camera, процесс под latest для not_inspected_*) листа нет, а не ноль.
+    counter_sums: dict[str, int | float] = {}
+    counters_wanted = [c for c in PROCESS_COUNTER_SUMS if _ok(c)]
 
     for wname, w in workers.items():
         if not isinstance(w, dict):
             continue
+        for counter in counters_wanted:
+            value = w.get(counter)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                counter_sums[counter] = counter_sums.get(counter, 0) + value
         status = w.get("status")
         hz = w.get("effective_hz")
         lat = w.get("cycle_duration_ms")
@@ -194,14 +223,17 @@ def build_worker_telemetry(
     data: dict = {}
     if workers_payload:
         data["workers"] = workers_payload
+    state: dict = {}
     if hz_values:
-        state: dict = {}
         if fps_ok:
             state["fps"] = round(max(hz_values), 1)
         if plat_ok and latency_values:
             state["latency_ms"] = round(max(latency_values), 1)
-        if state:
-            data["state"] = state
+    # Счётчики — не агрегат частоты: публикуются и без running-воркера с hz>0 (накопленное
+    # число не перестаёт быть показанием, когда воркер встал). Ноль — показание (Task 4.5a).
+    state.update(counter_sums)
+    if state:
+        data["state"] = state
 
     if not data:
         return None
@@ -237,7 +269,8 @@ def build_router_shm_telemetry(router: Any) -> dict:
             фолбэком, по ``get_stats()``).
 
     Returns:
-        dict ``{счётчик: int}`` — всегда ПОЛНЫЙ набор ключей (нули включительно).
+        dict ``{счётчик: int}`` — всегда ПОЛНЫЙ набор ключей (нули включительно); исключение —
+        ``not_inspected_door`` (Task 5.6): лист есть, только если router его отдаёт (узел под every).
 
     Raises:
         Пробрасывает исключения аксессора router'а — оба вызывающих ловят сами
@@ -253,7 +286,7 @@ def build_router_shm_telemetry(router: Any) -> dict:
     def _n(key: str) -> int:
         return int(rs.get(key, 0) or 0)
 
-    return {
+    shm = {
         "pickle_fallbacks": _n("frame_pickle_fallbacks"),
         "torn_reads": _n("frame_torn_reads"),
         "boundary_crossings": _n("frame_boundary_crossings"),
@@ -293,7 +326,17 @@ def build_router_shm_telemetry(router: Any) -> dict:
         "bytes_read": _n("shm_bytes_read"),
         "bytes_mapped": _n("shm_bytes_mapped"),
         "restore_failures": _n("frame_restore_failures"),
+        # Task 5.6: счётчики двери отправки (4.7d-3), отложенных закрытий handle'ов reader'а (4.7b2) и
+        # проваленных доставок найденному адресату — для стенд-гейта фазы 5 из дерева, не из status.
+        "door_drops": _n("door_drops"),
+        "deferred_closes": _n("deferred_closes"),
+        "errors_delivery_failed": _n("errors_delivery_failed"),
     }
+    # Маркеры двери рождаются только у узла под ``overflow: every``: router отдаёт ключ лишь там.
+    # Нет ключа → нет листа (ноль у latest читался бы как «замерено, потерь нет»).
+    if "not_inspected_door" in rs:
+        shm["not_inspected_door"] = _n("not_inspected_door")
+    return shm
 
 
 # ---------------------------------------------------------------------------

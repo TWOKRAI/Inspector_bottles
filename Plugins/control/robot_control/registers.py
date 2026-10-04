@@ -37,12 +37,38 @@ class RobotControlRegisters(SchemaBase):
         ),
     ] = 500
 
-    # Задержка отбраковки
+    # Task 5.2: время пути изделия от камеры до толкателя. Цель привода —
+    # capture_ts + transit_ms; 0 — привод срабатывает сразу на решении.
+    transit_ms: Annotated[
+        int,
+        FieldMeta(
+            "Transit",
+            info="Время пути изделия от кадра до толкателя (0 — срабатывание сразу на решении)",
+            unit="ms",
+            min=0,
+        ),
+    ] = 0
+
+    # Task 5.2: допуск окна привода. Цель, чьё окно закрылось раньше чем
+    # tolerance назад, не стреляет (missed); выстрел позже fire_at + tolerance
+    # считается опозданием (late_fires).
+    actuation_tolerance_ms: Annotated[
+        int,
+        FieldMeta(
+            "Actuation Tolerance",
+            info="Допуск окна привода: позже — missed / late_fires",
+            unit="ms",
+            min=0,
+        ),
+    ] = 20
+
+    # Устарело (Task 5.2): прежний сон в process(). Алиас transit_ms —
+    # действует, только если transit_ms == 0; при ненулевом значении WARNING.
     reject_delay_ms: Annotated[
         int,
         FieldMeta(
-            "Reject Delay",
-            info="Задержка отбраковки",
+            "Reject Delay (deprecated)",
+            info="Устарело: алиас transit_ms (действует при transit_ms = 0)",
             unit="ms",
             min=0,
         ),

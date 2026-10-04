@@ -223,14 +223,18 @@ class TestCommands:
         assert plugin._reg.enabled is True
 
     def test_cmd_set_delay(self):
-        """set_delay обновляет reject_delay_ms."""
+        """Task 5.2: set_delay устарела — пишет transit_ms и предупреждает WARNING."""
         plugin = RobotControlPlugin()
-        plugin.configure(_make_mock_ctx({}))
+        ctx = _make_mock_ctx({})
+        plugin.configure(ctx)
 
         resp = plugin.cmd_set_delay({"delay_ms": 150})
         assert resp["status"] == "ok"
         assert resp["delay_ms"] == 150
-        assert plugin._reg.reject_delay_ms == 150
+        assert plugin._reg.transit_ms == 150
+        assert plugin._reg.reject_delay_ms == 0  # устаревший регистр не трогается
+        warnings = [c.args[0] for c in ctx.log_warning.call_args_list]
+        assert any("set_delay" in w and "transit_ms" in w for w in warnings), warnings
 
     def test_cmd_set_delay_negative_clamped(self):
         """Отрицательная задержка зажимается до 0."""
@@ -239,7 +243,7 @@ class TestCommands:
 
         resp = plugin.cmd_set_delay({"delay_ms": -100})
         assert resp["delay_ms"] == 0
-        assert plugin._reg.reject_delay_ms == 0
+        assert plugin._reg.transit_ms == 0
 
     def test_cmd_reset_counters(self):
         """reset_counters обнуляет счётчики."""

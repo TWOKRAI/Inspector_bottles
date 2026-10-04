@@ -39,6 +39,7 @@ SHAPES = {"frame": (48, 64, 3)}  # >= 8192 Б -> уходит в кольцо с
 META = {"trace_id": "tr-1", "capture_ts": 12.5, "frame_id": 7, "camera_id": "cam0"}
 
 # Маркер двери, как его ждёт читатель: литерал из контракта 4.7d-1 + reason="door", source = имя отправителя.
+# Task 5.3 (намеренно): дверь рожает запись о разрыве count=1 = маркер + count/trace_ids/first/last/reasons/sources.
 MARKER = {
     "inspection_status": "not_inspected",
     "overflow_marker": True,
@@ -48,6 +49,12 @@ MARKER = {
     "capture_ts": 12.5,
     "frame_id": 7,
     "camera_id": "cam0",
+    "count": 1,
+    "trace_ids": ["tr-1"],
+    "first_capture_ts": 12.5,
+    "last_capture_ts": 12.5,
+    "reasons": {"door": 1},
+    "sources": {"B": 1},
 }
 FORBIDDEN_KEYS = ("frame", "_shm_refs", "_shm_views", "_shm_dropped")
 

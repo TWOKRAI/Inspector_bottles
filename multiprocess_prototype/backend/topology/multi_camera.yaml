@@ -103,6 +103,10 @@ processes:
     priority: normal
     chain_targets:
       - gui
+    # Два источника с одним ключом `frame`: без явного fanin провода вывели бы join
+    # с ОДНИМ элементом inputs (ADR-PMM-017), и второй кадр потерялся бы.
+    collector:
+      mode: fanin
     plugins:
       - plugin_class: Plugins.render.renderer_compositor.plugin.RendererCompositorPlugin
         plugin_name: renderer_compositor
@@ -112,3 +116,17 @@ processes:
         grid_rows: 1
         output_width: 1280
         output_height: 480
+
+# Port-level разводка (SystemBlueprint.check() считает ключи по ИМЕНИ порта на уровне
+# процесса). Образец — inspection_full.yaml.
+wires:
+  # Камеры → процессоры
+  - source: camera_0.camera_service.frame
+    target: processor_0.color_mask.frame
+  - source: camera_1.camera_service.frame
+    target: processor_1.blob_detector.frame
+  # Процессоры → compositor (fan-in: два источника в один вход `frame`)
+  - source: processor_0.mask_to_frame.frame
+    target: compositor.renderer_compositor.frame
+  - source: processor_1.blob_detector.frame
+    target: compositor.renderer_compositor.frame

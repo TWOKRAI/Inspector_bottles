@@ -1,0 +1,22 @@
+# ruff: noqa  # артефакт замера/инъекций 2026-10-03, код сохранён как есть
+import json, glob, os, sys
+
+
+def g(d, s, p, w, k):
+    return d[s].get(p, {}).get("workers", {}).get(w, {}).get(k) or 0
+
+
+for f in sorted(glob.glob(sys.argv[1])):
+    d = json.load(open(f, encoding="utf-8"))
+    W = d.get("window_s") or 30
+    cam = g(d, "s1", "camera_0", "source_producer_camera_service", "cycles") - g(
+        d, "s0", "camera_0", "source_producer_camera_service", "cycles"
+    )
+    out = [os.path.basename(f), f"W={W} cam/s={cam / W:.1f}"]
+    for p in ("processor", "inspector", "renderer"):
+        ex = g(d, "s1", p, "pipeline_executor", "cycles") - g(d, "s0", p, "pipeline_executor", "cycles")
+        rc = g(d, "s1", p, "data_receiver", "cycles") - g(d, "s0", p, "data_receiver", "cycles")
+        lag = g(d, "s1", p, "data_receiver", "lag_dropped_items") - g(d, "s0", p, "data_receiver", "lag_dropped_items")
+        out.append(f"{p[:4]} ex/s={ex / W:.1f} rc/s={rc / W:.1f} lag={lag}")
+    out.append(f"hzmed={ {k: round(v, 1) if v else v for k, v in (d.get('hz_median') or {}).items()} }")
+    print(" | ".join(out))
