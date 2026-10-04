@@ -131,20 +131,51 @@ def _norm_key(name: str) -> str:
     return name[:-3] if name.endswith(".md") else name
 
 
+def _install_parser(root: Path) -> Path:
+    """Копия НАСТОЯЩЕГО plans_progress.py в `<root>/scripts/plans_progress/` -> путь копии."""
+    dst = root / "scripts" / "plans_progress" / "plans_progress.py"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(PROGRESS, dst)
+    return dst
+
+
+# Прежние тесты ledger прогоняются в обоих режимах `summarize_plan` (Task 4.1):
+#   pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+# «legacy» — корень без scripts/plans_progress (прежний код ledger), «adapter» — с копией парсера.
+
+
 @pytest.fixture
-def real_root(tmp_path: Path) -> Path:
+def parser_mode(request) -> bool:
+    """«С парсером» по умолчанию для make_root / real_root: False, если тест не параметризует его косвенно."""
+    return bool(getattr(request, "param", False))
+
+
+@pytest.fixture
+def install_parser():
+    """install_parser(root) -> путь копии настоящего plans_progress.py в корне (режим «адаптер» ledger)."""
+    return _install_parser
+
+
+@pytest.fixture
+def real_root(tmp_path: Path, parser_mode: bool) -> Path:
     """Корень с реальными снимками: layer-render, 2026-09-22_gui-service, queue/ORDER.md."""
     root = tmp_path / "real_root"
     shutil.copytree(REAL_FIXTURES / "plans", root / "plans")
+    if parser_mode:
+        _install_parser(root)
     return root
 
 
 @pytest.fixture
-def make_root(tmp_path: Path):
-    """make_root({"plans/x/plan.md": text, ...}, name="r") -> Path корня (файлы utf-8, LF)."""
+def make_root(tmp_path: Path, parser_mode: bool):
+    """make_root({"plans/x/plan.md": text, ...}, name="r", parser=None) -> Path корня (файлы utf-8, LF).
+
+    parser=True кладёт копию настоящего plans_progress.py в `<корень>/scripts/plans_progress/`
+    (ledger считает «адаптером»), False — не кладёт («прежний»); None — по фикстуре `parser_mode`.
+    """
     counter = {"n": 0}
 
-    def _make(files: dict[str, str], name: str | None = None) -> Path:
+    def _make(files: dict[str, str], name: str | None = None, parser: bool | None = None) -> Path:
         counter["n"] += 1
         root = tmp_path / (name or f"root{counter['n']}")
         (root / "plans").mkdir(parents=True, exist_ok=True)
@@ -152,6 +183,8 @@ def make_root(tmp_path: Path):
             p = root / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(text.encode("utf-8"))
+        if parser_mode if parser is None else parser:
+            _install_parser(root)
         return root
 
     return _make
@@ -161,8 +194,8 @@ def make_root(tmp_path: Path):
 def make_git_root(make_root):
     """То же, что make_root, плюс `git init` и коммит (для `close`: он делает git mv)."""
 
-    def _make(files: dict[str, str], name: str | None = None) -> Path:
-        root = make_root(files, name)
+    def _make(files: dict[str, str], name: str | None = None, parser: bool | None = None) -> Path:
+        root = make_root(files, name, parser)
         _git(root, "init", "-q")
         _git(root, "config", "user.email", "t@example.invalid")
         _git(root, "config", "user.name", "tester")

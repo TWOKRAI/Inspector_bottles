@@ -37,6 +37,18 @@ def _load_ledger():
 
 L = _load_ledger()
 
+# Task 4.1: каждый тест — в обоих режимах summarize_plan (корень без парсера / с копией парсера).
+pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+
+
+@pytest.fixture(autouse=True)
+def _parser_in_tmp_roots(parser_mode, tmp_path, install_parser):
+    """«Адаптер»: копия парсера в оба корня, которые строят тесты ниже (`tmp_path` и `tmp_path/repo`)."""
+    if parser_mode:
+        install_parser(tmp_path)
+        install_parser(tmp_path / "repo")
+
+
 TODAY = "2026-10-02"
 AMENDMENTS = (
     "| # | дата | почему | Δ задач | Δ бюджета |\n|---|---|---|---|---|\n| — | 2026-10-01 | открытие | — | — |\n"
