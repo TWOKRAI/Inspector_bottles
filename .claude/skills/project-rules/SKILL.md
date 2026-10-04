@@ -32,7 +32,7 @@ A server in your role prompt exists only if enabled in `.claude/enabled.yaml`; e
 `Grep`/`Read`. First use: `Read` `.claude/plugins/<id>/README.md`, load the schema via `ToolSearch`.
 Layer boundaries: only CLI `sentrux check .`; MCP `check_rules` is a quick signal, not a verdict.
 graphify community names are hints, not facts.
-Mutating/index-building MCP ops — who, where: `team-protocol` §7.
+Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead only, main tree.
 
 ## 4. Commits, pushes and pull requests
 
@@ -63,7 +63,7 @@ Mutating/index-building MCP ops — who, where: `team-protocol` §7.
 
 ## 6. Language
 
-Replies to the owner, code comments and docs (README, STATUS, plans): **Russian**. Agent prompts,
+Replies to the owner, reports, code comments and docs (README, STATUS, plans): **Russian**. Agent prompts,
 skills, settings and memory: English. Don't mix languages in one file.
 
 ## 7. Escalation ladder — one level up, never sideways, never a guess
@@ -108,7 +108,7 @@ Files: <paths>
 - A verdict without input → observed output is advice: reproduce by running and quote the output.
 - A plan's premise and its stated cause are hypotheses: reproduce the blocker; the symptom holds to
   the number.
-- Live tests run synchronously; at the second stall the lead takes over.
+- Live tests run synchronously.
 
 ## 10. Owner principles
 
@@ -120,10 +120,9 @@ Files: <paths>
 6. GUI forms the topology, backend runs headless; GUI starts nothing.
 Observability knobs: switchable at any boundary, zero cost when off.
 
-## 11. Style and session end
+## 11. Style
 
-Reports follow STE-80; end every report with one `Boundary:` line —
-`.claude/skills/project-rules/{ste-80,session-boundaries}.md`.
+Reports follow STE-80: `.claude/skills/project-rules/ste-80.md`.
 
 ## Map
 

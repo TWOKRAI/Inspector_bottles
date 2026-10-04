@@ -50,6 +50,7 @@ Read the project map top-down before searching code — cheaper and more accurat
 2. Read the task spec (from plan or Director)
 3. Get the diff: `git diff` or `git diff main...HEAD`
 4. Determine which specializations are needed (see below)
+5. Verdict and injection lessons: `docs/claude/memory/CRAFT-verdict.md`, `docs/claude/memory/CRAFT-injection.md`
 
 ## MCP routing (self-contained)
 
