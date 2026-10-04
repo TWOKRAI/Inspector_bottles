@@ -69,6 +69,8 @@ nothing errors, the guarantee just stops holding.
 | A finished background agent **commits, pushes, and opens a draft PR** on its own — it no longer asks | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
 | Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
 
+Roles → models (all 14): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` = Haiku.
+
 `/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
 the background** — for a verdict this project's rules will accept, drive `reviewer` directly instead.
 
@@ -85,7 +87,7 @@ Subagent rules live in `project-rules`; change a rule in the skill, never in an 
 
 Protocol: `.claude/commands/dev/team.md`. Fable (`cto`) — only phase acceptance / merge gate / arbitration / escalation, never per task.
 Only the lead merges; one worktree per writer, at most three writers at once. No role without a task: spawn the minimal roster.
-Escalation: the asker messages the higher role by name; outside a team it ends with `ESCALATION -> <role>`; the lead relays, never answers in place of the higher role.
+Escalation: the asker messages the higher role by name; outside a team it ends with `ESCALATION -> <role>` (question / tried / blocked on / files) and the lead spawns that role; the lead relays, never answers in place of the higher role.
 Engine limits: re-check them after a Claude Code upgrade.
 Roles, hooks, git, engine limits: `docs/claude/LEAD_RULES.md` → «Team mode».
 
@@ -146,7 +148,7 @@ Servers with docs: `docs/claude/LEAD_RULES.md` → «MCP routing».
 
 ## Token discipline (baseline & tool output)
 
-Never trade reasoning quality for tokens. Lean output at the source (`pytest -q --tb=short`, `ruff check -q`); read the 3 files that matter, not 20 (qex / targeted `Grep`); don't force `ENABLE_TOOL_SEARCH=true`; CLI over MCP for one-off ops; disable unused servers in `enabled.yaml`, audit with `/context`. Unavoidable `/compact` → focus files + tests + plan path; at a boundary prefer `/clear` + handoff. Details: `docs/claude/LEAD_RULES.md` → «Token discipline».
+Never trade reasoning quality for tokens. Lean output at the source (`pytest -q --tb=short`, `ruff check -q`); debugger/tester get full output; read the 3 files that matter, not 20 (qex / targeted `Grep`); don't force `ENABLE_TOOL_SEARCH=true` (behind a proxy/Vertex); CLI over MCP for one-off ops; disable unused servers in `enabled.yaml`, audit with `/context`. Unavoidable `/compact` → focus files + tests + plan path; at a boundary prefer `/clear` + handoff. Details: `docs/claude/LEAD_RULES.md` → «Token discipline».
 
 ## Project layout — where to write and where to read
 

@@ -49,7 +49,7 @@
 
 ## Справка, вынесенная из корневого CLAUDE.md
 
-Дословно; одна правка — `uv sync` → `uv sync --inexact` (простой `uv sync` сносит необъявленные пакеты). Правила из этих абзацев остались строками в корневом `CLAUDE.md`; канон шаблона коммита — `.claude/COMMIT_GUIDE.md`, копия ниже — старый текст корневого файла. Относительные ссылки в копии не пересчитаны.
+Дословно; одна правка — `uv sync` → `uv sync --inexact` (простой `uv sync` сносит необъявленные пакеты). Правила из этих абзацев остались строками в корневом `CLAUDE.md`; канон шаблона коммита — `.claude/COMMIT_GUIDE.md`, копия ниже — старый текст корневого файла. Относительные ссылки пересчитаны от `docs/claude/`; ссылки на `docs/claude/COMMIT_GUIDE.md` ведут на канон `.claude/COMMIT_GUIDE.md`.
 
 ### История версий и архив
 
@@ -64,7 +64,7 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 
 ### Правила проекта, п.10 (полный текст)
 
-10. **Commit-сообщения:** Conventional Commits + обязательные trailers `Why:` и `Layer:`. Опциональные — `Refs:`, `Risk:`, `Reversible:`, `Tested:`, `Rejected:`. Шаблон в `.gitmessage`, гайд в [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md), валидирует hook `.git/hooks/commit-msg` (установка `bash scripts/validate_commit/install_hook.sh`). Агенты обязаны генерировать trailers — иначе commit будет отклонён.
+10. **Commit-сообщения:** Conventional Commits + обязательные trailers `Why:` и `Layer:`. Опциональные — `Refs:`, `Risk:`, `Reversible:`, `Tested:`, `Rejected:`. Шаблон в `.gitmessage`, гайд в [`docs/claude/COMMIT_GUIDE.md`](../../.claude/COMMIT_GUIDE.md), валидирует hook `.git/hooks/commit-msg` (установка `bash scripts/validate_commit/install_hook.sh`). Агенты обязаны генерировать trailers — иначе commit будет отклонён.
 
 ### Формат commit-сообщений (для агентов)
 
@@ -86,7 +86,7 @@ Rejected: альтернатива X — отвергнута, потому чт
 Co-Authored-By: ...
 ```
 
-**Обязательны:** `Why:` и `Layer:`. Без них hook отклонит коммит. Полный гайд — [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md). Whitelist'ы значений в [`scripts/validate_commit/validate_commit.py`](scripts/validate_commit/validate_commit.py).
+**Обязательны:** `Why:` и `Layer:`. Без них hook отклонит коммит. Полный гайд — [`docs/claude/COMMIT_GUIDE.md`](../../.claude/COMMIT_GUIDE.md). Whitelist'ы значений в [`scripts/validate_commit/validate_commit.py`](../../scripts/validate_commit/validate_commit.py).
 
 ### Plan-Driven Development
 
@@ -98,11 +98,11 @@ Co-Authored-By: ...
 - **Статус:** `/plan-status` — прогресс по текущей ветке
 - **Один активный план на инструмент или модуль:** новую работу добавляют фазой в него, не новым файлом
 
-Подробности — в [`plans/` конвенциях](.claude/commands/dev/plan.md) и промптах агентов.
+Подробности — в [`plans/` конвенциях](../../.claude/commands/dev/plan.md) и промптах агентов.
 
 ### Память
 
-- **Канон — `docs/claude/memory/`** (git, общий для обеих машин). Индекс `MEMORY.md` ≤ 8 КБ; уроки лежат в `CRAFT-*.md` и читаются по триггеру; архив — [`docs/claude/memory/_archive/INDEX.md`](docs/claude/memory/_archive/INDEX.md).
+- **Канон — `docs/claude/memory/`** (git, общий для обеих машин). Индекс `MEMORY.md` ≤ 8 КБ; уроки лежат в `CRAFT-*.md` и читаются по триггеру; архив — [`docs/claude/memory/_archive/INDEX.md`](memory/_archive/INDEX.md).
 - **Локальная папка Claude Code — кэш**, не источник. Обновляется из канона через `diff`; никогда не `robocopy /MIR` и не `cp` без `diff`: копия затирает правки другой стороны молча.
 - **Ручного dual-write больше нет.** Новый или обновлённый урок пишут в канон; локальная копия догоняет его.
 - **Личное (`user`) и машинное (`reference`, local-only)** живут только в локальной папке и в git не попадают.
@@ -114,7 +114,7 @@ Co-Authored-By: ...
 
 | Категория | Ключевые команды |
 |-----------|------------------|
-| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/team` (живая команда агентов, [руководство](docs/claude/AGENT_TEAMS_GUIDE.md)), `/adr`, `/plan-status` |
+| **dev/** | `/plan`, `/implement`, `/test`, `/review`, `/debug`, `/ship`, `/pipeline`, `/team` (живая команда агентов, [руководство](AGENT_TEAMS_GUIDE.md)), `/adr`, `/plan-status` |
 | **quality/** | `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review`, `/doctor`, `/lint-agents`, `/lint-settings` |
 | **analysis/** | `/channel-map`, `/message-contracts`, `/todo-inventory`, `/graph-slice` |
 | **memory/** | `/memory:init`, `/memory:search`, `/memory:status` |
@@ -122,7 +122,7 @@ Co-Authored-By: ...
 | **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams` |
 | **team/** | `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up` |
 
-Гайд по sentrux: [`.claude/plugins/mcp-sentrux/README.md`](.claude/plugins/mcp-sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
+Гайд по sentrux: [`.claude/plugins/mcp-sentrux/README.md`](../../.claude/plugins/mcp-sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](../../scripts/README.md).
 
 ### Makefile
 
@@ -139,7 +139,7 @@ Co-Authored-By: ...
 
 ### Diagrams-as-Code
 
-Визуализация архитектуры хранится в [`docs/diagrams/`](docs/diagrams/):
+Визуализация архитектуры хранится в [`docs/diagrams/`](../diagrams/):
 - `architecture.mmd` — C4 Container-level (Mermaid, ручная)
 - `classes/` — UML классов (авто: `pyreverse`)
 - `deps/` — граф зависимостей (авто: `pydeps`)

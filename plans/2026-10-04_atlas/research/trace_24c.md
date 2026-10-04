@@ -26,11 +26,11 @@
 | `CLAUDE.md:76` | Формат commit-сообщений (для агентов) | `CLAUDE.md` → «Формат commit-сообщений» | заголовок сохранён целиком | Формат commit-сообщений |
 | `CLAUDE.md:80` | Формат commit-сообщений (для агентов) | `docs/claude/TOOLING_NOTES.md` → «Формат commit-сообщений (для агентов)» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Формат commit-сообщений» | <type>(<scope>): краткое описание в императиве (кратко, без длинных пр |
 | `CLAUDE.md:85` | Формат commit-сообщений (для агентов) | `docs/claude/TOOLING_NOTES.md` → «Формат commit-сообщений (для агентов)» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Формат commit-сообщений» | Refs: plans/<slug>.md, ADR-XXX, PR#NN  (ОБЯЗАТЕЛЬНО если задача из пла |
-| `CLAUDE.md:96` | Формат commit-сообщений (для агентов) | `docs/claude/TOOLING_NOTES.md` → «Формат commit-сообщений (для агентов)» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Формат commit-сообщений» | ](docs/claude/COMMIT_GUIDE.md). Whitelist'ы значений в [ |
+| `CLAUDE.md:96` | Формат commit-сообщений (для агентов) | `docs/claude/TOOLING_NOTES.md` → «Формат commit-сообщений (для агентов)» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Формат commit-сообщений» | . Без них hook отклонит коммит. Полный гайд — [ |
 | `CLAUDE.md:98` | Формат commit-сообщений (для агентов) | `CLAUDE.md` → «Формат commit-сообщений (для агентов)» | правило, остаётся на месте | не читает stdin — сообщение берут из файла. |
 | `CLAUDE.md:100` | Plan-Driven Development | `CLAUDE.md` → «Plan-Driven Development» | заголовок сохранён целиком | Plan-Driven Development |
 | `CLAUDE.md:102` | Plan-Driven Development | `docs/claude/TOOLING_NOTES.md` → «Plan-Driven Development» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Plan-Driven Development» | Один активный план на инструмент или модуль:** новую работу добавляют |
-| `CLAUDE.md:110` | Plan-Driven Development | `docs/claude/TOOLING_NOTES.md` → «Plan-Driven Development» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Plan-Driven Development» | конвенциях](.claude/commands/dev/plan.md) и промптах агентов. |
+| `CLAUDE.md:110` | Plan-Driven Development | `docs/claude/TOOLING_NOTES.md` → «Plan-Driven Development» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Plan-Driven Development» | Подробности — в [ |
 | `CLAUDE.md:112` | Память | `CLAUDE.md` → «Память» | заголовок сохранён целиком | Память |
 | `CLAUDE.md:114` | Память | `docs/claude/TOOLING_NOTES.md` → «Память» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Память» | Локальная папка Claude Code — кэш**, не источник. Обновляется из канон |
 | `CLAUDE.md:120` | MCP: qex (семантический поиск) | `CLAUDE.md` → «MCP: qex» | заголовок сохранён целиком | MCP: qex |
@@ -50,8 +50,8 @@
 | `CLAUDE.md:161` | MCP: sentrux (архитектурный анализ) | `docs/claude/TOOLING_NOTES.md` → «graphify и цена `--backend=claude-cli`» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «MCP: sentrux» | ⚠ Имена сообществ graphify — подсказка, а не факт.** Они **переносятся |
 | `CLAUDE.md:163` | Slash-команды | `CLAUDE.md` → «Slash-команды» | заголовок сохранён целиком | Slash-команды |
 | `CLAUDE.md:165` | Slash-команды | `docs/claude/TOOLING_NOTES.md` → «Slash-команды» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Slash-команды» | . Ключевые по семи основным категориям: |
-| `CLAUDE.md:167` | Slash-команды | `docs/claude/TOOLING_NOTES.md` → «Slash-команды» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Slash-команды» | (живая команда агентов, [руководство](docs/claude/AGENT_TEAMS_GUIDE.md |
-| `CLAUDE.md:177` | Slash-команды | `docs/claude/TOOLING_NOTES.md` → «Slash-команды» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Slash-команды» | ](.claude/plugins/mcp-sentrux/README.md). Гайд по скриптам: [ |
+| `CLAUDE.md:167` | Slash-команды | `docs/claude/TOOLING_NOTES.md` → «Slash-команды» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Slash-команды» | Ключевые команды |
+| `CLAUDE.md:177` | Slash-команды | `docs/claude/TOOLING_NOTES.md` → «Slash-команды» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Slash-команды» | .claude/plugins/mcp-sentrux/README.md |
 | `CLAUDE.md:179` | Makefile | `CLAUDE.md` → «Makefile» | заголовок сохранён целиком | Makefile |
 | `CLAUDE.md:183` | Makefile | `docs/claude/TOOLING_NOTES.md` → «Makefile» | обоснование/замер/история; правило — строкой в `CLAUDE.md` → «Makefile» | ruff + pyright + bandit (быстрая проверка) |
 | `CLAUDE.md:192` | Diagrams-as-Code | `CLAUDE.md` → «Diagrams-as-Code» | заголовок сохранён целиком | Diagrams-as-Code |
