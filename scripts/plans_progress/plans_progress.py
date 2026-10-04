@@ -5,7 +5,7 @@
 
     python scripts/plans_progress/plans_progress.py [--root DIR] [--order PATH]
         [--json] [--html [PATH]] [--check] [--baseline PATH] [--sync-order]
-        [--who] [--now ISO] [--active-window N[mhd]]
+        [--who] [--now ISO] [--active-window N[mhd]] [--branch-window N[mhd]]
 
 * ``--root DIR``   каталог с ``plans/`` и ``plans/_archive/`` (по умолчанию корень репозитория);
 * ``--order PATH`` ``ORDER.md`` (по умолчанию ``<root>/plans/queue/ORDER.md``); файла нет -> полосы
@@ -17,11 +17,14 @@
   ``after_reason`` (текст после `` — ``); ``(после N.M)`` у пункта -> ``tasks[].after``;
   ``ready`` — можно брать в работу (см. README); ``dep_unknown``/``dep_cycle`` — имена планов;
   ``active`` — worktree со свежим сигналом журнала, привязанные к плану: ``{branch, worktree, via,
-  sessions, agents, last_signal}``;
+  sessions, agents, last_signal}``; ``branches`` (последний ключ) — актуальные локальные ветки сверх ``main``,
+  тронувшие план: ``[{branch, done, total}]`` по имени ветки, числа — слияние по задачам (см. README);
 * ``--who``       stdout: только ``{"active": [...], "orphans": [...]}`` (активные с ``plan`` и без плана);
   не сочетается с ``--json``/``--html``/``--check``/``--sync-order`` (exit 2);
 * ``--now ISO``   «сейчас» для окна (местное, без пояса); ``--active-window N[mhd]`` — окно свежести (``6h``);
   неверное значение -> exit 2;
+* ``--branch-window N[mhd]`` окно свежести вершины ветки для ``branches`` (``3d``); неверное -> exit 2 в любом режиме;
+  ветки считаются только для ``--json`` и ``--html``;
 * ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``);
 * ``--check``      печатает находки линта; exit 1, если есть блокирующая находка вне базы;
 * ``--baseline P`` файл строк ``<план>:<КОД>`` (``<план>:<КОД>:<id>`` для UNKNOWN_STATUS и
@@ -49,6 +52,8 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -146,6 +151,7 @@ class Plan:
     has_after_field: bool = False  # в первых 30 строках есть строка `После:`, даже `—`; в --json не выводится
     header_branch: str = ""  # ветка из строки `Ветка:` / `Branch:` шапки; в --json не выводится
     active: list[dict] = field(default_factory=list)  # worktree со свежим сигналом, привязанные к плану
+    branches: list[dict] = field(default_factory=list)  # актуальные ветки, тронувшие план: {branch, done, total}
     priority: int | None = None  # наименьший `#` из таблицы «Снимок» ORDER.md; в --json не выводится
     priority_row: SnapRow | None = None  # строка таблицы с этим `#`
     ready: bool = False  # заполняет resolve_deps
@@ -1471,19 +1477,24 @@ def _git(args: list[str], cwd: Path | str) -> str | None:
     return cp.stdout if cp.returncode == 0 else None
 
 
+def _is_repo_top(root: Path) -> bool:
+    """`root` — верхний каталог своего git-репозитория (`os.path.samefile`); вне git и подкаталог — нет."""
+    top = _git(["rev-parse", "--show-toplevel"], root)
+    if not top or not top.strip():
+        return False
+    try:
+        return os.path.samefile(top.strip(), root)
+    except OSError:
+        return False
+
+
 def git_worktrees(root: Path) -> list[tuple[str, str]]:
     """[(путь worktree как в porcelain, ветка)]; ветка `""` на detached HEAD.
 
     Корни есть только если `root` — верхний каталог своего репозитория (`os.path.samefile`): корень внутри
     чужого репозитория, вне git или подкаталог репозитория дают пустой список. Главное дерево — тоже корень.
     """
-    top = _git(["rev-parse", "--show-toplevel"], root)
-    if not top or not top.strip():
-        return []
-    try:
-        if not os.path.samefile(top.strip(), root):
-            return []
-    except OSError:
+    if not _is_repo_top(root):
         return []
     listing = _git(["worktree", "list", "--porcelain"], root)
     out: list[tuple[str, str]] = []
@@ -1653,6 +1664,188 @@ def attach_active(plans: list[Plan], active: list[tuple[Plan, dict]]) -> None:
         plan.active.append(entry)
 
 
+# ----------------------------------------------------------------------------- ветки против main
+
+DEFAULT_BRANCH_WINDOW = "3d"  # окно свежести вершины ветки (решение владельца 2026-10-03; не измерено)
+MAIN_REF = "refs/heads/main"  # всегда полное имя: тег `main` ломает голое
+
+
+def _unmerged_branches(root: Path) -> dict[str, tuple[str, str]]:
+    """{ветка: (sha вершины, committerdate unix)} локальных веток, у которых `main..<ветка>` не пуст.
+
+    Один вызов `for-each-ref --no-merged`. Нет `refs/heads/main` или git не ответил — пустой словарь.
+    """
+    fmt = "%(refname)%09%(objectname)%09%(committerdate:unix)"  # %09 — табуляция: в имени ссылки её быть не может
+    out = _git(["for-each-ref", f"--no-merged={MAIN_REF}", f"--format={fmt}", "refs/heads/"], root)
+    found: dict[str, tuple[str, str]] = {}
+    for line in (out or "").split("\n"):
+        parts = line.rstrip("\r").split("\t")
+        if len(parts) == 3 and parts[0].startswith("refs/heads/"):
+            found[parts[0][len("refs/heads/") :]] = (parts[1], parts[2])
+    return found
+
+
+def _is_fresh(unix_time: str, now: datetime, window: timedelta) -> bool:
+    """`now - t <= окно` по местному времени; будущее — свежее; дату не разобрать — не свежая."""
+    try:
+        when = datetime.fromtimestamp(int(unix_time))
+    except (ValueError, OverflowError, OSError):
+        return False
+    return now - when <= window
+
+
+def _checked_out_branch(root: Path) -> str:
+    """Ветка, взятая в корне; `""` на detached HEAD."""
+    ref = (_git(["symbolic-ref", "-q", "HEAD"], root) or "").strip()
+    return ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ""
+
+
+def _own_commits(root: Path, branch: str) -> set[str]:
+    """Коммиты `main..<ветка>`; git не ответил — пусто (ветка не станет ничьим родителем)."""
+    out = _git(["rev-list", f"{MAIN_REF}..refs/heads/{branch}", "--"], root)
+    return {line.strip() for line in (out or "").split("\n") if line.strip()}
+
+
+def _merge_base(root: Path, branch: str) -> str | None:
+    out = (_git(["merge-base", MAIN_REF, f"refs/heads/{branch}"], root) or "").strip()
+    return out or None
+
+
+def _stack_parent(branch: str, tips: dict[str, str], own: dict[str, set[str]]) -> str | None:
+    """Родитель ветки среди кандидатов `tips` или None (корень стека).
+
+    A — родитель B, если вершина A входит в `main..B`; при равных вершинах родитель — меньшее имя.
+    Из нескольких родителей — с наибольшим `main..A`, при равенстве — меньшее имя.
+    """
+    parents = [
+        a for a in tips if a != branch and tips[a] in own.get(branch, ()) and (tips[a] != tips[branch] or a < branch)
+    ]
+    return min(parents, key=lambda a: (-len(own.get(a, ())), a)) if parents else None
+
+
+def _touched_paths(root: Path, frm: str, branch: str) -> list[str]:
+    """Пути под `plans/`, изменённые между `frm` и вершиной ветки (без поиска переименований)."""
+    out = _git(["diff", "--name-only", "-z", "--no-renames", frm, f"refs/heads/{branch}", "--", "plans/"], root)
+    return [path for path in (out or "").split("\0") if path]
+
+
+def _plan_root_rel(root: Path, p: Plan) -> str:
+    """Путь плана в репозитории: файл однофайлового плана или каталог (у плана `<имя>/plan.md` — каталог)."""
+    path = root / p.rel
+    if path.is_dir():
+        return p.rel
+    if path.name == "plan.md" and path.parent.name == p.name:
+        return path.parent.relative_to(root).as_posix()
+    return p.rel
+
+
+def _touches(paths: list[str], plan_rel: str) -> bool:
+    """Путь равен плану или лежит в его каталоге (`plans/P2/...` не относится к `plans/P`)."""
+    return any(path == plan_rel or path.startswith(plan_rel + "/") for path in paths)
+
+
+def analyze_plan_at(root: Path, commit: str, plan_rel: str, name: str, archived: bool) -> Plan | None:
+    """План `plan_rel` в коммите, разобранный `analyze_plan`; плана в коммите нет или выгрузка не удалась — None.
+
+    `git archive -o <файл>` через `_git` (stdout пуст) и `tarfile` с `filter="data"`: tar из stdout в текстовом
+    режиме теряет файлы при `core.autocrlf=true`. Временный каталог удаляется при любом исходе.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        archive = Path(tmp) / "x.tar"
+        if _git(["archive", "--format=tar", "-o", str(archive), commit, "--", plan_rel], root) is None:
+            return None
+        tree = Path(tmp) / "tree"
+        tree.mkdir()
+        try:
+            with tarfile.open(archive) as tar:
+                tar.extractall(tree, filter="data")
+        except (tarfile.TarError, OSError, ValueError):
+            return None
+        target = tree / plan_rel
+        if target.is_dir():
+            return analyze_plan(name, target / "plan.md", target, plan_rel, archived)
+        if target.is_file():
+            return analyze_plan(name, target, None, plan_rel, archived)
+        return None
+
+
+def _status_by_id(plan: Plan | None) -> dict[str, str]:
+    """{id задачи: статус}; повтор id — первая запись; плана нет — пусто."""
+    out: dict[str, str] = {}
+    for t in plan.tasks if plan is not None else ():
+        out.setdefault(t.id, t.status)
+    return out
+
+
+def merge_branch_numbers(base: Plan | None, tip: Plan, disk: Plan) -> tuple[int, int]:
+    """(done, total) ветки: слияние по задачам трёх разборов плана — база (merge-base с main), вершина, диск.
+
+    Задача с диска: вершина = база -> статус диска; иначе диск = база -> статус вершины (отсутствие на вершине —
+    задача выпадает); иначе (изменили обе стороны) -> `done`, если он на вершине или на диске, иначе статус диска.
+    Задачи вершины, которых нет ни в базе, ни на диске, добавляются. Считают те же правила, что у плана.
+    """
+    on_base, on_tip, on_disk = _status_by_id(base), _status_by_id(tip), _status_by_id(disk)
+    merged: list[Task] = []
+    for tid, disk_status in on_disk.items():
+        tip_status, base_status = on_tip.get(tid), on_base.get(tid)  # None — задачи в разборе нет
+        if tip_status == base_status:
+            status: str | None = disk_status
+        elif disk_status == base_status:
+            status = tip_status
+        else:
+            status = "done" if "done" in (tip_status, disk_status) else disk_status
+        if status is not None:
+            merged.append(Task(tid, "", status))
+    merged.extend(Task(tid, "", st) for tid, st in on_tip.items() if tid not in on_base and tid not in on_disk)
+    counted = Plan(disk.name, disk.rel, disk.archived, tasks=merged)
+    return counted.done, counted.total
+
+
+def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timedelta) -> None:
+    """Заполняет `Plan.branches` актуальными ветками, тронувшими план; записи по имени ветки.
+
+    Актуальная ветка: локальная `refs/heads/<B>` (не `main`), `main..B` не пуст, вершина не старше окна.
+    Ветка, взятая в корне, — кандидат в родители, но не выводится. Нет git, `root` не верхний каталог
+    репозитория, нет `refs/heads/main` — ничего не заполняется. Репозиторий не меняется.
+    """
+    if not _is_repo_top(root):
+        return
+    unmerged = _unmerged_branches(root)
+    if not unmerged:
+        return
+    root_branch = _checked_out_branch(root)
+    actual = sorted(name for name, (_sha, when) in unmerged.items() if _is_fresh(when, now, window))
+    candidates = set(actual)
+    if root_branch in unmerged:
+        candidates.add(root_branch)  # кандидат в родители, даже если вершина не свежая
+    tips = {name: unmerged[name][0] for name in sorted(candidates)}
+    own = {name: _own_commits(root, name) for name in tips}
+    plan_roots = [(p, _plan_root_rel(root, p)) for p in plans]
+    parsed: dict[tuple[str, str], Plan | None] = {}  # (коммит, путь плана): база общая у нескольких веток
+
+    def plan_at(commit: str, plan_rel: str, p: Plan) -> Plan | None:
+        if (commit, plan_rel) not in parsed:
+            parsed[commit, plan_rel] = analyze_plan_at(root, commit, plan_rel, p.name, p.archived)
+        return parsed[commit, plan_rel]
+
+    for name in actual:
+        if name == root_branch:
+            continue
+        base = _merge_base(root, name)
+        if base is None:
+            continue
+        parent = _stack_parent(name, tips, own)
+        touched = _touched_paths(root, tips[parent] if parent else base, name)
+        for p, plan_rel in plan_roots:
+            if not _touches(touched, plan_rel):
+                continue
+            tip_plan = plan_at(tips[name], plan_rel, p)
+            if tip_plan is None:
+                continue
+            done, total = merge_branch_numbers(plan_at(base, plan_rel, p), tip_plan, p)
+            p.branches.append({"branch": name, "done": done, "total": total})
+
+
 # ----------------------------------------------------------------------------- JSON
 
 
@@ -1687,7 +1880,8 @@ def to_json(plans: list[Plan]) -> str:
             "ready": p.ready,
             "dep_unknown": p.dep_unknown,
             "dep_cycle": p.dep_cycle,
-            "active": p.active,  # новые ключи — только в конец (README)
+            "active": p.active,
+            "branches": p.branches,  # новые ключи — только в конец (README)
         }
         for p in plans
     ]
@@ -1832,6 +2026,14 @@ def _active_chip(e: dict) -> str:
     )
 
 
+def _branch_chip(e: dict, disk_done: int) -> str:
+    """Чип «в ветке» для одной записи `Plan.branches`; «в main» — `done` плана на диске."""
+    return (
+        f'<span class="chip" data-chip="branch" data-branch="{_e(e["branch"])}">'
+        f"в ветке {_e(e['branch'])}: {_e(e['done'])} из {_e(e['total'])}, в main: {_e(disk_done)}</span>"
+    )
+
+
 WHO_NOTES = (
     "Агенты, запущенные из главного дерева, видны как активность main.",
     "Сессия без субагентов и без события SessionStart не видна.",
@@ -1921,6 +2123,7 @@ def _plan_html(p: Plan, in_use: bool) -> str:
         s.append(f'<span class="chip" data-chip="closed" title="план закрыт или поглощён">{word}{counts}</span>')
     if not plan_closed(p):
         s.extend(_dep_chips(p, in_use))
+    s.extend(_branch_chip(e, p.done) for e in p.branches if (e["done"], e["total"]) != (p.done, p.total))
     s.extend(_active_chip(e) for e in p.active)  # после всех прочих чипов; закрытым и архивным тоже
     s.append("</summary>")
     s.append('<div class="body">')
@@ -2063,6 +2266,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N[mhd]",
         help=f"окно свежести сигнала (по умолчанию {DEFAULT_WINDOW})",
     )
+    ap.add_argument(
+        "--branch-window",
+        default=DEFAULT_BRANCH_WINDOW,
+        metavar="N[mhd]",
+        help=f"окно свежести вершины ветки для `branches` (по умолчанию {DEFAULT_BRANCH_WINDOW})",
+    )
     return ap
 
 
@@ -2077,6 +2286,10 @@ def main(argv: list[str] | None = None) -> int:
     window = parse_window(args.active_window)
     if window is None:
         print("ошибка: --active-window — число и единица измерения (минуты, часы, дни)", file=sys.stderr)
+        return 2
+    branch_window = parse_window(args.branch_window)
+    if branch_window is None:
+        print("ошибка: --branch-window — число и единица измерения (минуты, часы, дни)", file=sys.stderr)
         return 2
     now = datetime.now() if args.now is None else parse_now(args.now)
     if now is None:
@@ -2112,6 +2325,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.json or args.who or args.html is not None:
         active, orphans = collect_active(root, ordered, now, window)
         attach_active(ordered, active)
+    if args.json or args.html is not None:
+        collect_branches(root, ordered, now, branch_window)
     if args.who:
         by_path = lambda e: e["worktree"]  # noqa: E731
         who = {

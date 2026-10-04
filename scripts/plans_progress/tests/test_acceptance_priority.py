@@ -38,7 +38,7 @@ NO_TABLE = "в ORDER.md нет таблицы «Снимок»"
 DEFAULT_COLS = ["#", "Полоса", "План", "Сейчас", "Следующий шаг", "Чего ждёт"]
 OLD_JSON_KEYS = [
     "plan", "path", "archived", "lane", "tier", "done", "total", "dropped", "unknown", "unmarked",
-    "header_status", "tasks", "after", "after_reason", "waiting_on", "ready", "dep_unknown", "dep_cycle", "active",
+    "header_status", "tasks", "after", "after_reason", "waiting_on", "ready", "dep_unknown", "dep_cycle", "active", "branches",
 ]  # fmt: skip
 
 _counter = itertools.count(1)
