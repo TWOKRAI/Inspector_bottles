@@ -1523,7 +1523,7 @@ def _git(args: list[str], cwd: Path | str) -> str | None:
 
 
 def _is_repo_top(root: Path) -> bool:
-    """`root` — верхний каталог своего git-репозитория (`os.path.samefile`); вне git и в подкаталоге — нет."""
+    """`root` — верхний каталог своего git-репозитория (`os.path.samefile`); вне git и подкаталог — нет."""
     top = _git(["rev-parse", "--show-toplevel"], root)
     if not top or not top.strip():
         return False
