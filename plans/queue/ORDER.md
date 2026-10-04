@@ -346,7 +346,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - layer-render — 13 из 22 · 59%
 - letters-retrain — 2 из 3 · 67%
 - qr-code-reader — 3 из 17 · 18%
-- 2026-10-02_plans-progress-dashboard — 14 из 25 · 56%
+- 2026-10-02_plans-progress-dashboard — 15 из 25 · 60%
 - 2026-10-03_commit-mechanism — 3 из 8 · 38%
 - robot-place-pose — 2 из 3 · 67%
 - robot-calibration — 4 из 6 · 67%
