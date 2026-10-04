@@ -1,6 +1,8 @@
 ---
 name: project-live-findings-webcam-2026-07
 description: Живой прогон webcam_sketch 2026-07-21 дал три находки одного класса — сбой есть, счётчик растёт, причина проглочена
+module: "backend_ctl"
+mechanism: "swallowed-cause"
 metadata:
   type: project
 ---
@@ -89,3 +91,7 @@ live-пара: DEBUG → 100 DEBUG-записей в хвосте, INFO → ти
 Диагноз gui дополнен: дренаж ~18 сообщ/с, команды НЕ МОГУТ ВОЙТИ в полную очередь —
 см. [[project-gui-system-queue-storm]]. Полный отчёт:
 `docs/audits/2026-07-22_backend-ctl-deep-live-analysis.md`.
+
+## Дополнение A11 (аудит 2026-10-04, из observability_closure)
+
+Живой отказ открытия камеры воспроизводится НЕСУЩЕСТВУЮЩИМ `device_id=7`, а не занятым устройством (MSMF пускает второго открывателя).

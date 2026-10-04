@@ -1,6 +1,7 @@
 ---
 name: feedback_zero_mentions_criterion_erases_the_reason
 description: "Критерий приёмки «упоминаний снятого механизма = 0» стирает причину решения — судить надо описания настоящего времени, а не имя"
+mechanism: "acceptance-criteria"
 metadata:
   node_type: memory
   type: feedback

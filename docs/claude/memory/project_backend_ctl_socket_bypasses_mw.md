@@ -1,6 +1,8 @@
 ---
 name: project_backend_ctl_socket_bypasses_mw
 description: Команды через сокет backend_ctl не проходят receive-мидлварь роутера (ни fence, ни контракты) — драйвером нельзя проверять фильтры приёма
+module: "backend_ctl, router_module"
+mechanism: "receive-middleware"
 metadata:
   type: project
 ---

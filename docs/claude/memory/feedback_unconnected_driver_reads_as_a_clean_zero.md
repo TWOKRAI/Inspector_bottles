@@ -1,6 +1,8 @@
 ---
 name: feedback-unconnected-driver-reads-as-a-clean-zero
 description: "Неподключённый BackendDriver отдаёт success=False, а .get(key, default) превращает это в ровный ноль — замер выглядит как доказательство"
+module: "backend_ctl driver"
+mechanism: "measurement"
 metadata:
   node_type: memory
   type: feedback
@@ -30,4 +32,4 @@ metadata:
   Мерить надо на том конце провода, куда трафик приходит, а не на том, откуда уходит.
 
 Родня: [[feedback_measure_delta_not_file_size]], [[feedback_gate_off_zeroes_deltas_not_messages]],
-[[feedback_silent_detector_proves_nothing]], [[feedback_probe_liveness_is_not_render]].
+[[feedback_zero_observations_looks_like_a_result]], [[feedback_probe_liveness_is_not_render]].

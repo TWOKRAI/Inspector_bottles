@@ -15,6 +15,9 @@ paths:
 - **setFlags** с осторожностью — может вызвать рекурсию (ItemChanged → setFlags → ItemChanged)
 - **EditTriggers** — отключать на деревьях/списках если не нужно inline-редактирование
 - Новые табы — **полный MVP** (presenter + view Protocol)
+- Диалог несохранённых изменений: **Сохранить** (по умолчанию) / **Не сохранять** / **Отмена**
+- Инспектор узла pipeline переиспользует виджеты вкладки Plugins; поля разрешаются по `plugin_name`
+- После задачи на Qt: запустить прототип с `QT_MCP_PROBE=1` и снять `qt_snapshot` до отчёта
 
 ## Dict at Boundary для GUI
 - Виджеты работают **только с dict**, никогда с live SchemaBase

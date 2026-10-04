@@ -1,6 +1,8 @@
 ---
 name: feedback-ctypes-setattr-unknown-field-is-silent
 description: setattr on a ctypes Structure with a wrong field name silently creates a Python attribute — tests fill zeros and stay green; guard with a `_fields_` check
+module: "Services/code_reader (ctypes)"
+mechanism: "test-data"
 metadata:
   type: feedback
   last-verified: 2026-09-29

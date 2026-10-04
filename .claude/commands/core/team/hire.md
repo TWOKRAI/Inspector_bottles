@@ -1,5 +1,5 @@
 ---
-description: Create a new agent from the template — the "HR function"
+description: Create a new agent from the template. Call when a role is missing from the roster.
 ---
 
 Create a new agent for the development team.

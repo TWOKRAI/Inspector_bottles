@@ -1,5 +1,5 @@
 ---
-description: Sync the living spec (docs/direction/) with the code — spec-writer + manager → a new plan with Task X.Y
+description: "Sync the living spec (docs/direction/) with the code: spec-writer plus manager produce a plan with Task X.Y. Call after the code drifted from the spec."
 ---
 
 **SYNC** mode: the user edited `docs/direction/*.md` → we determine the discrepancies with the

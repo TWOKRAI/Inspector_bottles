@@ -1,7 +1,7 @@
 ---
 name: review-economy-tiers
 description: "Ревью трёхуровневое ради экономии токенов: полное 8-угловое — только рисковые вскрытия; лёгкое (reviewer-Opus, 2-3 угла) — S/механика; смежные S-задачи — группой на одной ветке с одним ревью перед одним merge"
-metadata: 
+metadata:
   node_type: memory
   type: feedback
   originSessionId: 0930f3cb-ce11-4c8b-94d5-186f9a19db5e

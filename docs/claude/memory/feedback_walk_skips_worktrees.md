@@ -1,6 +1,7 @@
 ---
 name: feedback_walk_skips_worktrees
 description: Скрипты, переписывающие файлы по всему проекту (os.walk/grep-replace), обязаны исключать .claude/worktrees/
+mechanism: "worktrees, bulk-replace"
 metadata:
   type: feedback
 ---
@@ -9,4 +10,4 @@ metadata:
 
 **Why:** worktrees gitignored из основного дерева (в `git status` их правок не видно), но физически на диске они есть — скрипт их модифицирует, засоряя чужую незакоммиченную зону.
 
-**How to apply:** в любом walk/replace по проекту явно скипать `.claude/worktrees` (и `.git`): `if "/.claude/worktrees" in root or "/.git" in root: continue`. Откат чужих worktree — реверс-заменой строки (git checkout на worktree отклоняется классификатором), проверив `git -C <wt> status` что там были ТОЛЬКО мои правки. Связано с [[feedback_git_stash_pop_wrong_stash]] и worktree-ловушками.
+**How to apply:** в любом walk/replace по проекту явно скипать `.claude/worktrees` (и `.git`): `if "/.claude/worktrees" in root or "/.git" in root: continue`. Откат чужих worktree — реверс-заменой строки (git checkout на worktree отклоняется классификатором), проверив `git -C <wt> status` что там были ТОЛЬКО мои правки. Связано с [[feedback_a_peer_session_shares_the_tree]] и worktree-ловушками.

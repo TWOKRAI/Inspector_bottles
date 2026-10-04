@@ -1,7 +1,7 @@
 ---
 name: git-stash-pop-grabs-unrelated-stash
 description: verifying pre-existing failures via stash+checkout can pop an UNRELATED pre-existing stash and pollute the tree with conflict markers
-metadata: 
+metadata:
   node_type: memory
   type: feedback
   originSessionId: 7e9a7cc4-c9bd-4c06-b1fc-c94b66b87684

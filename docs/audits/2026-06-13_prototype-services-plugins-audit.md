@@ -240,7 +240,7 @@
 ---
 
 ## Связанные документы
-- Метрики baseline: memory `project_sentrux_baseline_2026_05.md`
+- Метрики baseline: memory `docs/claude/memory/_archive/project_sentrux_baseline_2026_05.md`
 - Hikvision аспект: memory `project_hikvision_aspect_ratio.md` (H2)
 - Конвенция слоёв: корневой `CLAUDE.md` правило №9, ADR-120
 - Правила логирования: memory `feedback_logger_error_stats_managers.md` (тема M-err-*)

@@ -1,5 +1,5 @@
 ---
-description: Focused contract-first RED → GREEN → [REFACTOR] loop for one unit (TDD) — standalone extract of /dev:pipeline §2
+description: Contract-first RED, GREEN, REFACTOR loop for one unit. Call for a single small unit, not a whole plan.
 ---
 
 A narrow **TDD cycle for one unit/behavior**: **RED → GREEN → [REFACTOR]**. This is the

@@ -1,5 +1,6 @@
 ---
 description: Opt-in weekly dependency bump — uv lock --upgrade, run the suite, ai-judge gate on green, open a DRAFT PR (human merges). Falls back to gh CLI / stdout diff. Never auto-runs, never merges.
+disable-model-invocation: true
 ---
 
 **Opt-in weekly dep-bump.** The command updates locked dependencies, runs the tests,

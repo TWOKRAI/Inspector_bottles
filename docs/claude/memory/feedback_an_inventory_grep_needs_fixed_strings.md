@@ -5,6 +5,8 @@ metadata:
   type: feedback
 ---
 
+Правило перенесено в `.claude/skills/project-rules/SKILL.md` §2 (2026-10-04). Ниже — доказательная база урока.
+
 Правило: любое ЧИСЛО «сколько вхождений имени» считается `grep -F`, а не `grep`.
 Имена метрик, модулей и ключей конфига содержат точки, а точка в regex — любой символ,
 поэтому счёт по такому паттерну молча завышается за счёт соседнего имени с подчёркиванием.
@@ -29,4 +31,8 @@ metadata:
 
 Смежное: [[feedback_check_qex_freshness_before_use]] (числа считаются грепом, а не индексом),
 [[feedback_the_sentence_is_wider_than_the_command_it_quotes]] (прогон настоящий, а фраза о нём
-шире), [[feedback_an_injection_must_prove_its_axis_is_live]].
+шире), [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].
+
+## Дополнение A9 (аудит 2026-10-04, из observability_closure)
+
+Инвентарь по одному написанию пропускает семейство: «226» мерило `_log_error`, пропустив 66 вызовов `.log_error` (верно 315). Считать по перечисленным написаниям.

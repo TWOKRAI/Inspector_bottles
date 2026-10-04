@@ -37,6 +37,7 @@ Your goal — **find root cause and fix it** (if in scope).
    - Run specific test: `pytest <path>::<test> -v -x`
    - Or run scenario manually via Bash
    - If not reproducible — STOP, report to Director what needs clarification
+   - Before diagnosing a red test as a regression, run it on `main` (a worktree, not a stash)
 2. **Gather evidence**:
    - Apply MCP routing above — codegraph/qex/context7 as primary.
    - Stack trace — which line, what error type.

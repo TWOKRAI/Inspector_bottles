@@ -1,5 +1,5 @@
 ---
-description: Implement one Task per spec with contract-first TDD by default (interface → red → green)
+description: Implement one Task X.Y per the spec, contract-first (interface, red, green). Call with a task id from an approved plan.
 ---
 
 Implement **one** Task X.Y from the plan (or from $ARGUMENTS) following **contract-first TDD**
@@ -93,6 +93,8 @@ For the `n/a` branch — the stages above don't apply: implement directly (devel
 
 - Verify that **every** stage commit carries the `Refs:` trailer and the Task status in the plan is updated `[PENDING]` → `[DONE]`, then refresh the ledger row: `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`. For a plan with `tasks/`, write `tasks/<id>.result.md` (<= 2 KB): the commit SHAs from `git rev-parse`, every acceptance number with the command that produced it, deviations from DESIGN — nothing else.
 - developer commits on its own; in the subagent brief repeat: never push, never open a PR.
+- Plan status with the hash: write the status word, then the hash in backticks: [DONE] `abc1234` — `plans_progress` reads the hash only in backticks after the status word; a bare `[x]` or an unquoted hash loses it.
+- After a Qt task: run the prototype with `QT_MCP_PROBE=1` and take a `qt_snapshot` before reporting.
 - Remind about the regression run (`/dev:test` in `MODE: regression`) and review (`/dev:review`) — in standalone they don't run automatically (that's `/dev:pipeline`'s job).
 
 Task: $ARGUMENTS

@@ -1,7 +1,7 @@
 ---
 name: work-order-2026-09-22-line-sim-then-pult
 description: "Owner-approved work order (2026-09-22) — merge feat/line-sim at the Ф2 boundary first; line-sim Ф3 engine → Ф5 truth (P-1 numbers); gui-service 1.1 inventory anytime → Ф1 → Ф3 (two backends side by side); defer gui-service Ф2 (network), Qt parts of line-sim (Ф6-in-Pult, Ф7.3) and Ф4 camera until the numbers exist. The truth of line-sim lives on the branch (ред. 3), not in main's working tree."
-metadata: 
+metadata:
   node_type: memory
   type: project
   last-verified: 2026-09-26

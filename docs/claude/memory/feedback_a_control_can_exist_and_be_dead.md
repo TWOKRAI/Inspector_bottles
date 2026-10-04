@@ -1,6 +1,8 @@
 ---
 name: a-control-can-exist-and-be-dead
 description: Критерий «строка/ручка есть» зелен и у холостого контрола — спрашивать «что меняется, когда её трогают»
+module: "telemetry, config.reload"
+mechanism: "acceptance-criteria"
 metadata:
   type: feedback
 ---
@@ -29,4 +31,4 @@ metadata:
 сформулирован через наличие — дописать половину про действие ДО реализации, иначе она не
 появится. Тот же класс, что [[feedback_a_knob_can_be_applied_and_unverifiable]] («применено»
 ≠ «подтверждено»), но на ступень раньше: там ручка применена и непроверяема, здесь она
-существует и мертва. Родственно [[feedback_silent_detector_proves_nothing]].
+существует и мертва. Родственно [[feedback_zero_observations_looks_like_a_result]].

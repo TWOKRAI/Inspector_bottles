@@ -1,6 +1,8 @@
 ---
 name: feedback-probe-liveness-is-not-render
 description: "Три маркера живости qt-mcp-зонда доказывают дорогу, а не рендер — окно стенда «невидимо», рендер берётся только ref-грабом"
+module: "frontend_module"
+mechanism: "qt-mcp"
 metadata:
   node_type: memory
   type: feedback

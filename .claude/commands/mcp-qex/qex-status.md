@@ -1,5 +1,5 @@
 ---
-description: qex index status (file count, chunks, index date, languages)
+description: "Show the qex index state: files, chunks, last_indexed, languages. Call first, before any qex search, to check freshness."
 ---
 
 Call the tool `mcp__qex__get_indexing_status` with the parameter `path` = absolute path to the current project root.

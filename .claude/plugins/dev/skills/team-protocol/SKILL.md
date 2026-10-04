@@ -1,10 +1,6 @@
 ---
 name: team-protocol
-description: >
-  One protocol on three transports — stages S0–S8, roles, handoff chains,
-  escalation, gates, sandbox modes and the MCP regulation by operation class.
-  Triggers: "team", "pipeline", "handoff", "escalation", "which transport",
-  running a phase with more than one agent.
+description: "Team protocol: stages S0-S8, roles, handoff chains, escalation, gates, sandbox modes, MCP rules by operation class. Use when running a phase with more than one agent."
 ---
 
 # Team protocol — one protocol, three transports

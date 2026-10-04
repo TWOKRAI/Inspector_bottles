@@ -5,6 +5,8 @@ metadata:
   type: feedback
 ---
 
+Правило перенесено в `.claude/skills/project-rules/SKILL.md` §5 и `.claude/plugins/dev/templates/team-brief.md` (2026-10-04). Ниже — доказательная база урока.
+
 Subagents (tester, developer) working in `../Inspector_bottles--<task>` worktrees cannot `git commit`: the protect-branch hook
 reads the branch from the main tree's cwd (`main`), not from the worktree. Measured 2026-10-02, layer-render wave 3: 5 of 5
 writers blocked. The lead's own `cd <worktree> && git commit` passes.

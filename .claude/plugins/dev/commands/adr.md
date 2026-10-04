@@ -1,5 +1,5 @@
 ---
-description: Create a new ADR (Architectural Decision Record) in docs/claude/DECISIONS/
+description: Create an ADR in docs/claude/DECISIONS/. Call when a decision outlives its task and needs a record.
 ---
 
 # /dev:adr — create an ADR via tech-writer

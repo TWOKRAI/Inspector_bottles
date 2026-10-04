@@ -34,6 +34,8 @@ qex index date: <YYYY-MM-DD> (<N> days old). Counts come from Grep, not from qex
   (readers: you work in the shared tree and change no files)
 - Commits: <"commit on your branch — Why:/Layer:/Refs: trailers, stage explicit paths"
   | "do not commit; report the paths">. Never push, never open a PR, never `git add -A`.
+- A writer in a worktree stages explicit paths, runs `ruff` itself and writes the commit message to a file;
+  the lead commits (the protect-branch hook reads main).
 - Apply every instruction to every listed file, not only the first one.
 - If the task is ambiguous, implement the reading its wording and the surrounding code most
   directly support, state that assumption in your report, and do not build for the others.

@@ -1,5 +1,6 @@
 ---
 description: Check plugin configuration integrity — report missing/broken/available plugins without changing files
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin doctor*)
 ---
 

@@ -1,5 +1,5 @@
 ---
-description: Run the project's entry point — via pyproject [project.scripts], make run, or python -m <package>
+description: Start the application entry point (pyproject scripts, make run or python -m). Call to see a change working in the live app.
 ---
 
 Run the project's main entry point. Determine it by priority:

@@ -1,6 +1,8 @@
 ---
 name: feedback-base-guard-dead-in-heir
 description: Защита, поднятая в базовый класс, может быть мертва у наследника, который резолвит своё сам — проверять на каждом, не по коду базы
+module: "channel_routing_module (Logger/Error/Stats/Router)"
+mechanism: "inheritance"
 metadata:
   type: feedback
 ---
@@ -35,5 +37,5 @@ P5 — два слома пустые, значит два свойства (х�
 если нет — это не защита, а комментарий. Слом-инъекция ставится на КАЖДОГО наследника
 отдельно, иначе проверяется только тот, у кого механизм и так живой.
 
-Родня: [[feedback-three-managers-share-base]], [[feedback-default-path-must-match-publisher]],
+Родня: [[feedback_logger_error_stats_managers]], [[feedback-default-path-must-match-publisher]],
 [[feedback-prove-test-red-without-fix]], [[feedback-swallowed-failure-class]].

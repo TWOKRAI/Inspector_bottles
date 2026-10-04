@@ -1,5 +1,6 @@
 ---
 description: Show a detailed card for plugin <id> — version, description, category, status, MCP servers, hooks
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin info*)
 ---
 

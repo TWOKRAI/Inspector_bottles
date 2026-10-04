@@ -1,12 +1,6 @@
 ---
 name: ponytail-audit
-description: >
-  Whole-repo audit for over-engineering. Like ponytail-review, but scans the
-  entire codebase instead of a diff: a ranked list of what to delete, simplify,
-  or replace with stdlib/native equivalents. Use when the user says "audit this
-  codebase", "audit for over-engineering", "what can I delete from this repo",
-  "find bloat", "ponytail-audit", or "/ponytail-audit". One-shot report, does
-  not apply fixes.
+description: "Whole-repo over-engineering audit: a ranked list of what to delete or replace with stdlib. One-shot report, no fixes. Use for 'audit for bloat', /ponytail-audit."
 ---
 
 ponytail-review, repo-wide. Scan the whole tree instead of a diff. Rank

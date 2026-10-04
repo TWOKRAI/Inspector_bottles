@@ -1,6 +1,8 @@
 ---
 name: feedback_default_path_must_match_publisher
 description: Дефолтный путь/ключ в конфиге фичи сверять с РЕАЛЬНЫМ публикатором — тест на синтетическом сторе оставляет фичу мёртвой при зелёных тестах
+module: "alerts, Plugins/sources/capture"
+mechanism: "config-defaults"
 metadata:
   type: feedback
 ---

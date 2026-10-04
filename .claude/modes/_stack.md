@@ -18,6 +18,7 @@
   `uv sync` сносит необъявленное → только `--inexact`
 - **Test:** `python scripts/run_framework_tests.py` / `python scripts/validate.py` / `make test`.
   Ручной pytest — из корня проекта, иначе `ModuleNotFoundError`. НЕ `uv run pytest -q`
+- **Worktree:** без `uv sync` и без `uv run` без `--no-sync` (CUDA torch → CPU) — `<основное дерево>/.venv/Scripts/python.exe` + `PYTHONPATH=<корень worktree>`; пруф — путь импорта `multiprocess_framework` из того же cwd, что pytest. Переопределяет рецепт `core/agents/_WORKTREE_PATTERN.md`
 - **Gate:** `make gate` (= `make check` + `make test`); `make check` = ruff + pyright + bandit
 - **Агентские прогоны:** всегда `QT_QPA_PLATFORM=offscreen` — Qt-окно вешает агента
 
@@ -80,6 +81,9 @@ pre_report_gate = on                            # on | off — off allows withou
 pre_report_gate_tests = multiprocess_framework/modules/state_store_module/tests multiprocess_framework/modules/router_module/tests  # space-separated test paths passed to pre_report_gate.py --tests
 pre_report_gate_base = main                     # merge-base ref for the gate's diff scope; empty = @{upstream} → origin/HEAD → main → master
 report_status = on                              # on | off — off skips the STATUS: line check entirely; independent of pre_report_gate
+
+# Project memory — read by /core:memory:* commands.
+memory_dir = docs/claude/memory                # canonical memory (git, both machines); the local auto-memory folder is a cache
 
 # Subagent context budget — read by hooks/agent-context-ceiling.sh (PreToolUse).
 agent_context_budget = 100000                   # soft: start + N -> checkpoint (finish or hand off), repeated every +50000; off = none

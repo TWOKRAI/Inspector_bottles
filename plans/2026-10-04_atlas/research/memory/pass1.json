@@ -1,0 +1,3033 @@
+[
+{
+"file": "ARCHIVE.md",
+"status": "same",
+"newer": null,
+"type": null,
+"chars": 8225
+},
+{
+"file": "CRAFT.md",
+"status": "differ",
+"newer": "local",
+"type": null,
+"chars": 27239
+},
+{
+"file": "MEMORY.md",
+"status": "differ",
+"newer": "git",
+"type": null,
+"chars": 24067
+},
+{
+"file": "feedback_a_budget_belongs_to_a_path_not_to_a_mechanism.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2880
+},
+{
+"file": "feedback_a_control_can_exist_and_be_dead.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1887
+},
+{
+"file": "feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2149
+},
+{
+"file": "feedback_a_criterion_that_transforms_observes_the_library.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1706
+},
+{
+"file": "feedback_a_decision_orphans_what_encoded_the_previous_one.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2324
+},
+{
+"file": "feedback_a_dedup_marker_is_an_assertion_about_someone_else.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2400
+},
+{
+"file": "feedback_a_degenerate_value_is_not_zero_it_is_unknown.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2276
+},
+{
+"file": "feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2480
+},
+{
+"file": "feedback_a_diagnostic_answer_must_be_computed_last.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2361
+},
+{
+"file": "feedback_a_diff_based_rescue_omits_untracked_files.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2301
+},
+{
+"file": "feedback_a_faithful_fake_still_lacks_the_protocol.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2520
+},
+{
+"file": "feedback_a_fix_on_a_finding_must_not_outgrow_it.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2057
+},
+{
+"file": "feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1927
+},
+{
+"file": "feedback_a_guard_that_counts_at_least_once_is_blind.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2433
+},
+{
+"file": "feedback_a_handmade_readback_leaves_its_producer_unguarded.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1731
+},
+{
+"file": "feedback_a_hook_dead_on_windows_by_a_trailing_cr.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2048
+},
+{
+"file": "feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 3792
+},
+{
+"file": "feedback_a_knob_can_be_applied_and_unverifiable.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2855
+},
+{
+"file": "feedback_a_list_walking_guard_cannot_see_a_removed_item.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1736
+},
+{
+"file": "feedback_a_lock_patch_can_hang_the_exit_not_the_test.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1399
+},
+{
+"file": "feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2039
+},
+{
+"file": "feedback_a_migration_fixture_built_by_todays_writer_tests_the_writer.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2445
+},
+{
+"file": "feedback_a_new_guard_can_weaken_an_old_one.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1416
+},
+{
+"file": "feedback_a_new_plan_must_be_placed_among_its_neighbours.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 2143
+},
+{
+"file": "feedback_a_number_without_spread_across_repeats_is_an_observation.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 3122
+},
+{
+"file": "feedback_a_pass_through_block_is_not_a_fork.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2319
+},
+{
+"file": "feedback_a_peer_session_shares_the_tree.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2390
+},
+{
+"file": "feedback_a_plans_premise_expires.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2031
+},
+{
+"file": "feedback_a_probe_must_enumerate_before_it_asks.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1396
+},
+{
+"file": "feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2137
+},
+{
+"file": "feedback_a_process_wide_throttle_turns_neighbours_vacuous.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1777
+},
+{
+"file": "feedback_a_shared_throttle_swallows_the_record_not_the_line.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2028
+},
+{
+"file": "feedback_a_shortened_interval_waits_out_the_old_deadline.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2540
+},
+{
+"file": "feedback_a_stand_with_a_verdict_is_also_a_harness.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2389
+},
+{
+"file": "feedback_a_stub_silences_the_names_it_is_read_for.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1839
+},
+{
+"file": "feedback_a_test_that_pins_a_hole_is_green_both_ways.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1862
+},
+{
+"file": "feedback_a_zero_under_injection_has_three_readings.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2563
+},
+{
+"file": "feedback_absence_assertion_under_extra_ignore_is_vacuous.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1405
+},
+{
+"file": "feedback_absent_receiver_lets_a_test_pin_an_impossible_input.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1384
+},
+{
+"file": "feedback_acceptance_criterion_needs_a_live_trigger.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1931
+},
+{
+"file": "feedback_agent_commit_quality.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1452
+},
+{
+"file": "feedback_agent_hard_budget_is_off_by_default.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1451
+},
+{
+"file": "feedback_agent_resume_ghost.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1311
+},
+{
+"file": "feedback_alias_keeps_the_object_alive.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1428
+},
+{
+"file": "feedback_all_components_base_manager.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1342
+},
+{
+"file": "feedback_always_latest_models.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1243
+},
+{
+"file": "feedback_always_project_venv.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1256
+},
+{
+"file": "feedback_an_absence_assertion_needs_a_reachability_check.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2135
+},
+{
+"file": "feedback_an_applying_command_cannot_measure_what_it_reapplies.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1549
+},
+{
+"file": "feedback_an_avoidance_rule_can_be_a_false_safety_catch.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1957
+},
+{
+"file": "feedback_an_injection_must_prove_its_axis_is_live.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2441
+},
+{
+"file": "feedback_an_inventory_grep_needs_fixed_strings.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1876
+},
+{
+"file": "feedback_attribute_the_source_before_cutting.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2744
+},
+{
+"file": "feedback_backend_ctl_for_agents.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 977
+},
+{
+"file": "feedback_backend_ctl_layer_mixed.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 854
+},
+{
+"file": "feedback_background_reviewer_loses_the_verdict.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 2484
+},
+{
+"file": "feedback_barrier_at_entry_does_not_reproduce_the_race.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1634
+},
+{
+"file": "feedback_base_guard_dead_in_heir.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2343
+},
+{
+"file": "feedback_baseline_taken_after_the_act_proves_nothing.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2166
+},
+{
+"file": "feedback_bash_heredoc_collapses_backslashes.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1135
+},
+{
+"file": "feedback_bash_tool_unbalanced_quote_breaks_command.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1611
+},
+{
+"file": "feedback_born_wrong_then_fixed_looks_like_working.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1421
+},
+{
+"file": "feedback_broad_except_in_frame_loop_hides_dead_mechanism.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1592
+},
+{
+"file": "feedback_broken_injection_is_not_a_vacuous_test.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2706
+},
+{
+"file": "feedback_cache_hides_the_once_only_property.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 993
+},
+{
+"file": "feedback_check_qex_freshness_before_use.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 3163
+},
+{
+"file": "feedback_check_red_on_main_first.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1396
+},
+{
+"file": "feedback_checked_true_answers_for_the_call_not_the_coverage.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2932
+},
+{
+"file": "feedback_classify_a_leaf_by_the_difference_of_two_values.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2072
+},
+{
+"file": "feedback_claude_cli_backend_costs_a_full_session.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2917
+},
+{
+"file": "feedback_cleanup_must_survive_abnormal_disconnect.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1173
+},
+{
+"file": "feedback_coinciding_constants_hide_opposite_implementations.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1536
+},
+{
+"file": "feedback_commit_msg_format.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2061
+},
+{
+"file": "feedback_commit_takes_the_whole_index.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1625
+},
+{
+"file": "feedback_compare_validated_values_not_raw_config.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2096
+},
+{
+"file": "feedback_config_delivery_shape_differs.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1767
+},
+{
+"file": "feedback_config_reload_ttl_addressing_guard.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2382
+},
+{
+"file": "feedback_config_update_dead_with_handler.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1296
+},
+{
+"file": "feedback_constant_from_domain_physics_not_measured.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2063
+},
+{
+"file": "feedback_constructor_modularity.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2522
+},
+{
+"file": "feedback_coverage_holds_settrace_not_setprofile.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1840
+},
+{
+"file": "feedback_coverage_per_check_is_not_coverage_per_claim.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1757
+},
+{
+"file": "feedback_ctypes_setattr_unknown_field_is_silent.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1123
+},
+{
+"file": "feedback_deep_merge_is_not_associative.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2081
+},
+{
+"file": "feedback_default_path_must_match_publisher.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1549
+},
+{
+"file": "feedback_defect_fixed_on_one_path_only.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1294
+},
+{
+"file": "feedback_detector_comparing_representation_fires_always.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1715
+},
+{
+"file": "feedback_diagnose_live_system_with_backend_ctl.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1727
+},
+{
+"file": "feedback_dialog_conventions.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1096
+},
+{
+"file": "feedback_dict_at_boundary_gui.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1111
+},
+{
+"file": "feedback_discriminator_switch_must_be_verified.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1420
+},
+{
+"file": "feedback_docs_assert_what_registration_never_set.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1652
+},
+{
+"file": "feedback_double_must_block_like_the_original.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1493
+},
+{
+"file": "feedback_drop_oldest_reports_success.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1888
+},
+{
+"file": "feedback_dual_write_by_copy_destroys_the_other_side.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2242
+},
+{
+"file": "feedback_duplicate_fixture_verifies_itself.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1535
+},
+{
+"file": "feedback_emergency_log_reaches_stderr_not_the_log_files.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2026
+},
+{
+"file": "feedback_env_knob_reads_its_own_write.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1217
+},
+{
+"file": "feedback_explicit_model_per_agent_role.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1008
+},
+{
+"file": "feedback_facade_is_a_whitelist_not_a_passthrough.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1858
+},
+{
+"file": "feedback_fake_that_always_succeeds_mutes_the_gate.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1320
+},
+{
+"file": "feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2819
+},
+{
+"file": "feedback_false_alarm_traded_for_silent_loss.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1782
+},
+{
+"file": "feedback_fewer_layers.md",
+"status": "differ",
+"newer": "local",
+"type": "feedback",
+"chars": 1348
+},
+{
+"file": "feedback_fix_framework_forward.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1431
+},
+{
+"file": "feedback_flags_must_not_become_crutches.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1547
+},
+{
+"file": "feedback_formal_review_before_merge.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1190
+},
+{
+"file": "feedback_framework_first.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1934
+},
+{
+"file": "feedback_freeze_over_kill.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1404
+},
+{
+"file": "feedback_gate_criterion_can_contradict_an_owner_decision.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2142
+},
+{
+"file": "feedback_gate_off_zeroes_deltas_not_messages.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1605
+},
+{
+"file": "feedback_gate_signature_lives_on_a_head.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1205
+},
+{
+"file": "feedback_git_main_merge_hook_traps.md",
+"status": "differ",
+"newer": "local",
+"type": "feedback",
+"chars": 4617
+},
+{
+"file": "feedback_git_stash_pop_wrong_stash.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1602
+},
+{
+"file": "feedback_global_clock_patch_flake.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1749
+},
+{
+"file": "feedback_green_run_hides_synchronous_only_correctness.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1667
+},
+{
+"file": "feedback_guard_must_be_reachable.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1628
+},
+{
+"file": "feedback_guard_on_existence_is_not_a_guard_on_content.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2097
+},
+{
+"file": "feedback_guard_threshold_hides_partial_blindness.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1393
+},
+{
+"file": "feedback_gui_save_strips_yaml_comments.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1424
+},
+{
+"file": "feedback_hot_path_hook_must_be_priced.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2549
+},
+{
+"file": "feedback_idempotent_is_not_monotonic.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1795
+},
+{
+"file": "feedback_inject_only_after_the_work_is_committed.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2544
+},
+{
+"file": "feedback_inject_the_call_site_not_only_the_helper.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1789
+},
+{
+"file": "feedback_injection_base_needs_a_collected_count.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1687
+},
+{
+"file": "feedback_injection_generator_must_differ_from_criteria_author.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2578
+},
+{
+"file": "feedback_injection_green_when_the_substitute_equals_the_fact.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1937
+},
+{
+"file": "feedback_injection_must_cover_all_check_sites.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1130
+},
+{
+"file": "feedback_injection_must_reproduce_the_mechanism_not_the_shape.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1546
+},
+{
+"file": "feedback_injection_must_use_a_different_lens_than_the_test.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2288
+},
+{
+"file": "feedback_injection_prediction_on_a_shared_corpus.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1951
+},
+{
+"file": "feedback_injection_rollback_by_restore_not_replace.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1937
+},
+{
+"file": "feedback_injection_too_coarse_proves_nothing_specific.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1468
+},
+{
+"file": "feedback_injection_zero_may_mean_the_guards_were_not_collected.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 5088
+},
+{
+"file": "feedback_logger_error_stats_managers.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2754
+},
+{
+"file": "feedback_materialized_agents_drift_from_plugin_source.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2299
+},
+{
+"file": "feedback_materialized_default_hides_absence.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1570
+},
+{
+"file": "feedback_mcp_tool_api_drift.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1453
+},
+{
+"file": "feedback_measure_delta_not_file_size.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1670
+},
+{
+"file": "feedback_merge_changes_the_form.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1284
+},
+{
+"file": "feedback_mirror_check_never_reads_the_original.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1597
+},
+{
+"file": "feedback_modal_dialog_waits_instead_of_failing.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1839
+},
+{
+"file": "feedback_model_copy_does_not_validate.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1538
+},
+{
+"file": "feedback_model_economy_scheme.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 3917
+},
+{
+"file": "feedback_model_split_impl_vs_review.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1423
+},
+{
+"file": "feedback_mp_queue_is_async_in_tests.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1170
+},
+{
+"file": "feedback_mvp_pattern.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 765
+},
+{
+"file": "feedback_named_main_cause_may_be_a_minor_share.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2173
+},
+{
+"file": "feedback_named_mechanism_is_not_a_commitment.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1978
+},
+{
+"file": "feedback_negative_criterion_needs_an_existence_anchor.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2217
+},
+{
+"file": "feedback_no_global_taskkill.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1548
+},
+{
+"file": "feedback_no_qt_popups_offscreen.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1008
+},
+{
+"file": "feedback_no_regression_proved_by_identical_build.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1541
+},
+{
+"file": "feedback_no_shm_hacks.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 842
+},
+{
+"file": "feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1657
+},
+{
+"file": "feedback_observability_knobs_switchable_at_any_boundary_zero_cost_off.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2798
+},
+{
+"file": "feedback_one_active_plan_per_tool.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2237
+},
+{
+"file": "feedback_one_control_proves_sufficiency_not_exclusivity.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1717
+},
+{
+"file": "feedback_one_door_two_roads_needs_two_guards.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2195
+},
+{
+"file": "feedback_one_function_two_positions.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1534
+},
+{
+"file": "feedback_one_log_writer.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1788
+},
+{
+"file": "feedback_one_owner_blinds_the_shared_state_test.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2550
+},
+{
+"file": "feedback_package_install_by_user.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 828
+},
+{
+"file": "feedback_parallel_agents_commit_race.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 5367
+},
+{
+"file": "feedback_parametrization_built_from_the_subject_collapses_with_it.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1339
+},
+{
+"file": "feedback_pipeline_reuse_plugins_widgets.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1423
+},
+{
+"file": "feedback_plan_checkboxes.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1207
+},
+{
+"file": "feedback_plan_dual_save.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1865
+},
+{
+"file": "feedback_plan_spec_can_lie.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1843
+},
+{
+"file": "feedback_plausible_is_not_verified.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 7249
+},
+{
+"file": "feedback_port_wire_is_not_a_process_route.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1562
+},
+{
+"file": "feedback_positional_call_hides_parameter_name_drift.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1704
+},
+{
+"file": "feedback_post_publication_mark_breaks_collapsing.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1565
+},
+{
+"file": "feedback_precommit_rollback_drops_unstaged_edits.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 3203
+},
+{
+"file": "feedback_precommit_stash_collision_2plus_agents.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 4315
+},
+{
+"file": "feedback_predict_injections_after_writing_tests.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1178
+},
+{
+"file": "feedback_priority_belongs_to_the_receiver.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2563
+},
+{
+"file": "feedback_probe_liveness_is_not_render.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1553
+},
+{
+"file": "feedback_process_counter_is_not_per_key.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1936
+},
+{
+"file": "feedback_property_unchecked_at_the_second_party.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2299
+},
+{
+"file": "feedback_protect_branch_blocks_worktree_subagents.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1278
+},
+{
+"file": "feedback_protect_the_unit_of_contention.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1702
+},
+{
+"file": "feedback_prototype_the_guard_before_fixing_its_wording.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2440
+},
+{
+"file": "feedback_prove_test_red_without_fix.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1785
+},
+{
+"file": "feedback_pydantic_assignment_keeps_rejected_value.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1187
+},
+{
+"file": "feedback_pytest_import_order_hides_a_cycle.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2123
+},
+{
+"file": "feedback_pytest_owns_threading_excepthook_for_the_session.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2365
+},
+{
+"file": "feedback_qex_full_rebuild_runbook.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 4263
+},
+{
+"file": "feedback_qex_query_english_code_bias.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2475
+},
+{
+"file": "feedback_qex_reindex_budget.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 5428
+},
+{
+"file": "feedback_qt_mcp_always_probe.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 950
+},
+{
+"file": "feedback_qt_mcp_flag_value_is_compared_verbatim.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1641
+},
+{
+"file": "feedback_qt_mcp_smoke_verification.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2430
+},
+{
+"file": "feedback_read_the_key_from_the_section_already_travelling.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1813
+},
+{
+"file": "feedback_read_timestamp_is_not_data_freshness.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2228
+},
+{
+"file": "feedback_ready_signal_meant_less_than_read.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1833
+},
+{
+"file": "feedback_recipe_knob_must_be_named_in_from_recipe.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1891
+},
+{
+"file": "feedback_red_tests_manufacture_the_appearance_of_new_diagnostics.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2324
+},
+{
+"file": "feedback_refusal_after_the_write_poisons_the_neighbour.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1590
+},
+{
+"file": "feedback_register_routing_hang.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 973
+},
+{
+"file": "feedback_removal_leaves_a_tail_in_the_neighbour.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1918
+},
+{
+"file": "feedback_removing_waste_reddens_tests_that_measured_it.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2171
+},
+{
+"file": "feedback_review_economy_tiers.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1393
+},
+{
+"file": "feedback_review_finds_the_seam_between_own_pieces.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1735
+},
+{
+"file": "feedback_row_count_never_catches_the_loop.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1843
+},
+{
+"file": "feedback_ru_output_encoding_and_wc.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1697
+},
+{
+"file": "feedback_ruff_strips_unused_import.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1419
+},
+{
+"file": "feedback_runtime_config_dies_with_the_process.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1589
+},
+{
+"file": "feedback_safeguard_can_be_a_noop_with_green_units.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1536
+},
+{
+"file": "feedback_scripted_patch_needs_a_unique_anchor.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1670
+},
+{
+"file": "feedback_seam_must_fire_on_full_release.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1244
+},
+{
+"file": "feedback_second_consumer_reveals_the_defect.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1440
+},
+{
+"file": "feedback_sentrux_depth_opaque.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1422
+},
+{
+"file": "feedback_sentrux_gate_narrowed.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2149
+},
+{
+"file": "feedback_shared_tree_makes_injections_look_like_flakes.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1817
+},
+{
+"file": "feedback_side_effect_must_not_undo_the_transaction.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1573
+},
+{
+"file": "feedback_signal_placed_in_a_branch_goes_blind.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1869
+},
+{
+"file": "feedback_silent_detector_proves_nothing.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1768
+},
+{
+"file": "feedback_single_marker_verdict_lies.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1745
+},
+{
+"file": "feedback_single_reader_test_misses_multi_reader_defect.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1421
+},
+{
+"file": "feedback_spawn_child_inherits_parent_sys_path.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1635
+},
+{
+"file": "feedback_spec_review_needs_independent_agent.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1918
+},
+{
+"file": "feedback_sqlite_pragma_fails_silently.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1521
+},
+{
+"file": "feedback_stepwise_statement_needs_draining.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2224
+},
+{
+"file": "feedback_subagent_live_test_monitor_hang.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1778
+},
+{
+"file": "feedback_substring_assert_passes_on_the_wrong_branch.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1554
+},
+{
+"file": "feedback_suffix_rename_is_a_blind_injection.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2059
+},
+{
+"file": "feedback_swallowed_failure_class.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2657
+},
+{
+"file": "feedback_switching_off_a_writer_promotes_its_placeholder_to_a_claim.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2195
+},
+{
+"file": "feedback_symmetric_names_with_different_periods.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1803
+},
+{
+"file": "feedback_tab_order.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 594
+},
+{
+"file": "feedback_test_authorship_three_roles.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1632
+},
+{
+"file": "feedback_test_params_hide_defect_window.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1272
+},
+{
+"file": "feedback_test_raising_the_error_itself_guards_the_branch.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1476
+},
+{
+"file": "feedback_test_reddens_only_under_a_paired_injection.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2227
+},
+{
+"file": "feedback_test_setting_one_handle_of_a_pair_measures_priority.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1405
+},
+{
+"file": "feedback_test_survived_its_own_break.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1816
+},
+{
+"file": "feedback_test_values_near_defaults_test_the_default.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1276
+},
+{
+"file": "feedback_tester_always_and_inject_against_it.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1808
+},
+{
+"file": "feedback_tester_blindness_needs_a_worktree.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1382
+},
+{
+"file": "feedback_tester_once_per_mechanism_before_the_code.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1340
+},
+{
+"file": "feedback_tests_invisible_to_testpaths.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2295
+},
+{
+"file": "feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2152
+},
+{
+"file": "feedback_the_plans_stated_cause_is_a_hypothesis.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1678
+},
+{
+"file": "feedback_the_sentence_is_wider_than_the_command_it_quotes.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2082
+},
+{
+"file": "feedback_think_en_speak_ru.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 962
+},
+{
+"file": "feedback_thread_target_pins_its_owner.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1780
+},
+{
+"file": "feedback_three_lenses_three_defect_classes.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1860
+},
+{
+"file": "feedback_three_managers_share_base.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 2600
+},
+{
+"file": "feedback_tool_features_before_validation.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1602
+},
+{
+"file": "feedback_transitive_gui_backend_in_tests.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1578
+},
+{
+"file": "feedback_transport_arbitrates_what_it_cannot_understand.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 3143
+},
+{
+"file": "feedback_two_green_gates_can_hide_a_red_pair.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2204
+},
+{
+"file": "feedback_two_patches_one_red_set_means_one_assert.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1694
+},
+{
+"file": "feedback_two_safeguards_hide_which_one_holds.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1331
+},
+{
+"file": "feedback_two_tests_enter_from_both_sides_and_miss_the_connector.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2523
+},
+{
+"file": "feedback_unblocking_signal_at_the_moment_of_fact.md",
+"status": "only_git",
+"newer": null,
+"type": "feedback",
+"chars": 1892
+},
+{
+"file": "feedback_unconnected_driver_reads_as_a_clean_zero.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1909
+},
+{
+"file": "feedback_unkillable_fix_needs_a_hand_set_state.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1618
+},
+{
+"file": "feedback_unparsed_is_not_absent.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1784
+},
+{
+"file": "feedback_unused_paths_are_contracts.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1166
+},
+{
+"file": "feedback_upper_layer_default_disables_the_guard_below.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2940
+},
+{
+"file": "feedback_use_graph_semantic_tools.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1324
+},
+{
+"file": "feedback_uv_sync_prunes_venv.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1652
+},
+{
+"file": "feedback_walk_skips_worktrees.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1069
+},
+{
+"file": "feedback_wallclock_threshold_measures_the_heap.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2944
+},
+{
+"file": "feedback_widget_qt_patterns.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1385
+},
+{
+"file": "feedback_worktree_for_parallel_samefile.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1499
+},
+{
+"file": "feedback_worktree_stale_base.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 2739
+},
+{
+"file": "feedback_zero_mentions_criterion_erases_the_reason.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1753
+},
+{
+"file": "feedback_zero_observations_looks_like_a_result.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 3435
+},
+{
+"file": "feedback_zero_reds_can_mean_a_useless_layer.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 985
+},
+{
+"file": "feedback_zone_guard_never_closes_the_class.md",
+"status": "differ",
+"newer": "git",
+"type": "feedback",
+"chars": 1567
+},
+{
+"file": "handoff_sources_widget_refactor.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1476
+},
+{
+"file": "project_all_process_autorestart.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3956
+},
+{
+"file": "project_app_module_windows_test_debt.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2318
+},
+{
+"file": "project_arch_boundaries_plan.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2207
+},
+{
+"file": "project_archives_removed.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1327
+},
+{
+"file": "project_backend_control_mcp.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 6728
+},
+{
+"file": "project_backend_ctl_d1_session_isolation.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 13276
+},
+{
+"file": "project_backend_ctl_framework_module.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 5805
+},
+{
+"file": "project_backend_ctl_gaps_2026_07.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2639
+},
+{
+"file": "project_backend_ctl_missing_contract.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2142
+},
+{
+"file": "project_backend_ctl_recorder_kept.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1599
+},
+{
+"file": "project_backend_ctl_signal_integrity.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2445
+},
+{
+"file": "project_backend_ctl_socket_bypasses_mw.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1350
+},
+{
+"file": "project_backend_ctl_ultra_review.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2830
+},
+{
+"file": "project_calibration_gui_progress.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3548
+},
+{
+"file": "project_camera_settings_feature.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2926
+},
+{
+"file": "project_claude_kit_migration.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3111
+},
+{
+"file": "project_comm_system_p0.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 4124
+},
+{
+"file": "project_command_bus_p4_4.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 4620
+},
+{
+"file": "project_command_engine_audit.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2443
+},
+{
+"file": "project_command_result_bridge.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1676
+},
+{
+"file": "project_component_scoped_styles.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1580
+},
+{
+"file": "project_concurrent_backends_trap.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1913
+},
+{
+"file": "project_config_driven_arch.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2168
+},
+{
+"file": "project_config_voice_belongs_to_the_apply_stage.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1809
+},
+{
+"file": "project_constructor_master_progress.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 29412
+},
+{
+"file": "project_constructor_phase5.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1440
+},
+{
+"file": "project_constructor_phase6.md",
+"status": "differ",
+"newer": "local",
+"type": "project",
+"chars": 2694
+},
+{
+"file": "project_cross_tab_phase_b.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3816
+},
+{
+"file": "project_cross_tab_phase_c.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 5654
+},
+{
+"file": "project_cross_tab_phase_d.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 4373
+},
+{
+"file": "project_cross_tab_phase_e.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 6329
+},
+{
+"file": "project_cross_tab_phase_f.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 6699
+},
+{
+"file": "project_cross_tab_phase_g.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 27412
+},
+{
+"file": "project_cuda_torch_setup.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1521
+},
+{
+"file": "project_dataset_gen_service.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1697
+},
+{
+"file": "project_device_hub.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2899
+},
+{
+"file": "project_devseed_overwrites_claude_dir.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2137
+},
+{
+"file": "project_display_registry.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1320
+},
+{
+"file": "project_draw_mode_rework.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2704
+},
+{
+"file": "project_f2_4_scope_is_a_string.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1777
+},
+{
+"file": "project_f2_closed_2026_08.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1376
+},
+{
+"file": "project_f3_external_review.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1756
+},
+{
+"file": "project_f4_processors_closed.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2948
+},
+{
+"file": "project_f5_cross_review.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2118
+},
+{
+"file": "project_f6x_review_basket.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1834
+},
+{
+"file": "project_f7_cross_review.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3176
+},
+{
+"file": "project_f7_g3_handoff.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2544
+},
+{
+"file": "project_f7_g4_done.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3871
+},
+{
+"file": "project_f7_g7_flip_ladder.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 4513
+},
+{
+"file": "project_f7_g7_num_consumers.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1989
+},
+{
+"file": "project_f8_review_and_stitching.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 4056
+},
+{
+"file": "project_feature_flags_registry.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3940
+},
+{
+"file": "project_fencing_test_race.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1842
+},
+{
+"file": "project_fw_version_from_git.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1682
+},
+{
+"file": "project_g5_ownership_decision.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 4639
+},
+{
+"file": "project_generic_process_vision.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1793
+},
+{
+"file": "project_gorynych_pypi_deferred.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1190
+},
+{
+"file": "project_graceful_stop_debt.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2533
+},
+{
+"file": "project_graphify_mcp_setup.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2462
+},
+{
+"file": "project_gui_constructor_layers_2026_09_26.md",
+"status": "only_git",
+"newer": null,
+"type": "project",
+"chars": 3983
+},
+{
+"file": "project_gui_stand_production_entry_only.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2722
+},
+{
+"file": "project_gui_system_queue_storm.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2962
+},
+{
+"file": "project_gui_telemetry_read_model.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 5556
+},
+{
+"file": "project_hardware_roles_2026_09_23.md",
+"status": "only_git",
+"newer": null,
+"type": "project",
+"chars": 2161
+},
+{
+"file": "project_hierarchical_addressing.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2050
+},
+{
+"file": "project_hikvision_aspect_ratio.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1172
+},
+{
+"file": "project_hikvision_letter_robot.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2639
+},
+{
+"file": "project_honest_verdict_2026_09.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2928
+},
+{
+"file": "project_kind_channels_dead_evict_branch.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2286
+},
+{
+"file": "project_knobs_universal_manager.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2066
+},
+{
+"file": "project_letter_angle_training.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2276
+},
+{
+"file": "project_line_filter_feature.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3214
+},
+{
+"file": "project_line_sim_vision.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 7028
+},
+{
+"file": "project_live_findings_webcam_2026_07.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 5826
+},
+{
+"file": "project_live_verification_2026_07_21.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1802
+},
+{
+"file": "project_macos_shm.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 779
+},
+{
+"file": "project_memory_module_consolidation.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 3922
+},
+{
+"file": "project_ml_train_service.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1797
+},
+{
+"file": "project_monotonic_resolution_windows.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1617
+},
+{
+"file": "project_observability_audit.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1815
+},
+{
+"file": "project_observability_closure_progress.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 35358
+},
+{
+"file": "project_observability_config_layers.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1627
+},
+{
+"file": "project_observability_consumer_acceptance.md",
+"status": "differ",
+"newer": "local",
+"type": "project",
+"chars": 3920
+},
+{
+"file": "project_observability_control_plane.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2697
+},
+{
+"file": "project_observability_namespace_symmetry.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1938
+},
+{
+"file": "project_observability_session_ttl.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1932
+},
+{
+"file": "project_observability_stdlib_migration.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2120
+},
+{
+"file": "project_observability_store_error_routing.md",
+"status": "same",
+"newer": null,
+"type": "feedback",
+"chars": 1910
+},
+{
+"file": "project_observability_subscription_broker.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2687
+},
+{
+"file": "project_observability_tail_repair.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2209
+},
+{
+"file": "project_observation_port_progress.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2883
+},
+{
+"file": "project_otel_export_plan_state.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 5206
+},
+{
+"file": "project_phase5_data_pipeline.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 895
+},
+{
+"file": "project_phase5_progress.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1772
+},
+{
+"file": "project_phase_g_final_review.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 5858
+},
+{
+"file": "project_phone_gateway_service.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 8616
+},
+{
+"file": "project_pipeline_demo.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1472
+},
+{
+"file": "project_pipeline_editor_runtime_decoupled.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2966
+},
+{
+"file": "project_pipeline_live_control_stage1.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2654
+},
+{
+"file": "project_pipeline_live_control_stage2.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2931
+},
+{
+"file": "project_pipeline_live_incremental_vision.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1738
+},
+{
+"file": "project_pipeline_node_plugin_containers.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1861
+},
+{
+"file": "project_pipeline_node_process_worker.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1670
+},
+{
+"file": "project_pipeline_recipe_driven_launch.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 4164
+},
+{
+"file": "project_plan_driven_dev.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1175
+},
+{
+"file": "project_plugin_system_phase6.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1619
+},
+{
+"file": "project_priority_engine_first.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2462
+},
+{
+"file": "project_processes_tab.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3611
+},
+{
+"file": "project_processes_workers_runtime.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 5592
+},
+{
+"file": "project_prototype_audit_2026_06.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1717
+},
+{
+"file": "project_prototype_carveout.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1705
+},
+{
+"file": "project_pult_control_panel.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 5983
+},
+{
+"file": "project_qex_model.md",
+"status": "only_git",
+"newer": null,
+"type": "project",
+"chars": 2055
+},
+{
+"file": "project_qex_reindex_timeout.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2687
+},
+{
+"file": "project_recipe_hotswap.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3058
+},
+{
+"file": "project_recipe_inspector_join_key.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1933
+},
+{
+"file": "project_recipe_save_load_arch.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3954
+},
+{
+"file": "project_recipes_manager.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1560
+},
+{
+"file": "project_robot_vfd_services.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3227
+},
+{
+"file": "project_root_gate_misses_framework_modules.md",
+"status": "differ",
+"newer": "local",
+"type": "project",
+"chars": 4546
+},
+{
+"file": "project_runtime_knob_expires_in_300s.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 4204
+},
+{
+"file": "project_sentrux_baseline_2026_05.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1393
+},
+{
+"file": "project_sequencing_observability_then_audit.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1295
+},
+{
+"file": "project_service_registry.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1228
+},
+{
+"file": "project_services_vs_plugins.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1098
+},
+{
+"file": "project_settings_mvp_refactor.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1273
+},
+{
+"file": "project_sketch_robot_draw.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3784
+},
+{
+"file": "project_source_topology.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1585
+},
+{
+"file": "project_state_topology_gate.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1194
+},
+{
+"file": "project_std_facade_unused.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 1843
+},
+{
+"file": "project_strokes_points_perf.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 3150
+},
+{
+"file": "project_switch_delivers_layer.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1974
+},
+{
+"file": "project_switch_routing_stale.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 2188
+},
+{
+"file": "project_system_topology_phase1.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2059
+},
+{
+"file": "project_team_mode_agent_teams.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3625
+},
+{
+"file": "project_telemetry_coherence_remediation.md",
+"status": "differ",
+"newer": "local",
+"type": "project",
+"chars": 2622
+},
+{
+"file": "project_telemetry_dashboard.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3922
+},
+{
+"file": "project_telemetry_db_sink.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 5405
+},
+{
+"file": "project_telemetry_gui_controls.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2371
+},
+{
+"file": "project_telemetry_publish_control.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 2964
+},
+{
+"file": "project_telemetry_self_publish.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 6504
+},
+{
+"file": "project_telemetry_subscription_bug.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 7604
+},
+{
+"file": "project_topology_fencing_token.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3394
+},
+{
+"file": "project_transport_router_hub.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 6468
+},
+{
+"file": "project_universal_lifecycle_decision.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 3156
+},
+{
+"file": "project_universal_object_generator.md",
+"status": "only_git",
+"newer": null,
+"type": "project",
+"chars": 2125
+},
+{
+"file": "project_venv_locked_by_mcp.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1651
+},
+{
+"file": "project_vfd_bridge_robot_reboot.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1242
+},
+{
+"file": "project_webcam_sketch_freeze.md",
+"status": "differ",
+"newer": "git",
+"type": "project",
+"chars": 4247
+},
+{
+"file": "project_work_order_2026_09_22_line_sim_then_pult.md",
+"status": "only_git",
+"newer": null,
+"type": "project",
+"chars": 3826
+},
+{
+"file": "project_worker_cycle_timing.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1284
+},
+{
+"file": "project_workers_architecture.md",
+"status": "same",
+"newer": null,
+"type": "project",
+"chars": 1241
+},
+{
+"file": "reference_gpu_monitoring_windows.md",
+"status": "only_local",
+"newer": null,
+"type": "reference",
+"chars": 1676
+},
+{
+"file": "reference_qt_mcp_launch.md",
+"status": "same",
+"newer": null,
+"type": "reference",
+"chars": 1554
+},
+{
+"file": "reference_tech_stack_2026.md",
+"status": "same",
+"newer": null,
+"type": "reference",
+"chars": 1101
+},
+{
+"file": "user_career_goal.md",
+"status": "only_local",
+"newer": null,
+"type": "user",
+"chars": 1890
+}
+]

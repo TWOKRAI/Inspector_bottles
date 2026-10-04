@@ -1,12 +1,6 @@
 ---
 name: grill-me
-description: >
-  Interview the user relentlessly about an existing plan or design until reaching
-  shared understanding ("design concept" in Brooks' sense). One question at a time,
-  each with your recommended answer. Resolve each branch of the decision tree
-  before moving on. Distinct from `brainstorm` (no plan yet — generate options);
-  grill-me attacks an EXISTING plan or proposal. Triggers: "grill me", "stress-test
-  this plan", "challenge this design", "interview me", "find holes in this", "/grill-me".
+description: Interview the owner one question at a time, with a recommended answer, to stress-test an existing plan or design. Use for 'grill me', 'find holes'; with no plan yet use brainstorm.
 ---
 
 # Grill Me — relentless interview to shared understanding

@@ -1,6 +1,7 @@
 ---
 name: feedback-no-regression-proved-by-identical-build
 description: «Не деградировало» доказывается идентичностью сборки ключ-в-ключ, а не сравнением двух шумных прогонов
+mechanism: "acceptance-proof"
 metadata:
   type: feedback
 ---
@@ -18,7 +19,7 @@ metadata:
 
 **Why:** шумная метрика отвечает «похоже на прежнее», структурное сравнение — «то же
 самое». Второе не требует порога, взятого с потолка, и не краснеет от посторонней
-нагрузки (ср. [[feedback_test_values_near_defaults_test_the_default]]).
+нагрузки (ср. [[feedback_test_params_hide_defect_window]]).
 
 **How to apply:** `git worktree add /d/<короткий-путь> HEAD` (в длинный путь Windows
 падает с «Filename too long»), собрать артефакт в обоих деревьях одним и тем же

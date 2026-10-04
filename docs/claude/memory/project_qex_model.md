@@ -1,7 +1,8 @@
 ---
 name: qex-embedding-model-by-platform
 description: "qex embedding per platform — macOS qwen3-embedding:8b-qex/4096 since 2026-09-13 (was 4b), Windows 0.6b/1024; independent indexes; Ollama silent-CPU trap"
-metadata: 
+module: "qex, ollama"
+metadata:
   node_type: memory
   type: project
   originSessionId: 8e123388-1fab-41a2-84bc-01f9efc1477d

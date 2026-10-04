@@ -1,6 +1,8 @@
 ---
 name: feedback_a_new_guard_can_weaken_an_old_one
 description: "Слой проверки, который ПРИВОДИТ значение, снимает более строгую защиту, стоявшую за ним"
+module: "process_module commands"
+mechanism: "guard-design, type-coercion"
 metadata:
   node_type: memory
   type: feedback
@@ -22,5 +24,5 @@ metadata:
 **How to apply:** к любому слою, который нормализует/приводит вход, добавлять вопрос
 «какие проверки стоят ЗА мной и что они увидят после приведения». Прогон полной сьюты
 здесь не роскошь: соседний старый тест — единственный, кто помнит прежнюю строгость.
-Связано с [[feedback_two_safeguards_hide_which_one_holds]],
-[[feedback_defect_fixed_on_one_path_only]], [[feedback_zero_reds_can_mean_a_useless_layer]].
+Связано с [[feedback_test_reddens_only_under_a_paired_injection]],
+[[feedback_defect_fixed_on_one_path_only]], [[feedback_injection_zero_may_mean_the_guards_were_not_collected]].

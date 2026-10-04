@@ -1,13 +1,6 @@
 ---
 name: project-rules
-description: >
-  Standing rules shared by every dev agent in this project — qex freshness
-  check, honesty over plausibility, MCP availability, commit trailers,
-  subagent and language discipline, the escalation ladder (junior →
-  developer → teamlead → cto → owner), and the explanation style (STE-80:
-  short, plain, verdict first). Preloaded into agents through
-  `skills:` in their frontmatter; read it manually if it is not already
-  in your context.
+description: "Standing rules for every dev agent: qex freshness, honesty, MCP availability, commit trailers, scope, escalation ladder, STE-80 style. Preloaded via skills:; read it manually if absent."
 ---
 
 # Project rules (apply on top of your role)
@@ -30,6 +23,9 @@ a green run as proof over a known-weak test; "impossible"/"guaranteed" without a
 unresolved questions go to `docs/sessions/<today>.md` Open questions; a weak check says how it's
 weak and what real proof looks like.
 
+Inventory counts (metrics, modules, dotted config keys) use `grep -F` only, over every spelling of the
+family; show a non-zero hit as the matching line.
+
 ## 3. MCP availability follows `enabled.yaml`
 
 A server named in your role prompt exists only if enabled in `.claude/enabled.yaml`; otherwise
@@ -44,6 +40,8 @@ via `ToolSearch`. Mutating/index-building MCP ops — who, where:
 - Conventional Commits + mandatory `Why:`/`Layer:` trailers, `Refs: plans/<slug>.md` from a
   plan; `commit-msg` hook rejects anything else. Guide: `.claude/COMMIT_GUIDE.md`.
 - After committing, `git show --stat HEAD` — confirm the commit carries only the paths you staged.
+- A developer brief states: commit subject in English or Russian, never transliterated Latin; run
+  `git log --oneline -1` before any push.
 
 ## 5. Subagents and scope
 
@@ -63,6 +61,17 @@ change (registry, model tier, index format) — the suite is the radius.
 RED set, break-injection output, preflight paths). **Don't chain unrelated `Bash` commands** —
 one unmatched piece sends the whole chain to the owner; fix = an allow rule or a shorter chain,
 never a gate-skipping flag.
+
+- Model names: tier aliases (`opus`/`sonnet`/`haiku`/`fable`) in agent files and prose; a version pin only
+  with a stated reason. Pass `model` explicitly on every Agent call — reviewer/teamlead `opus`,
+  developer/tester/debugger `sonnet`, cto `fable` — and state it in the brief.
+- A writer in a worktree stages explicit paths, runs `ruff` itself and writes the commit message to a
+  file; the lead commits when the protect-branch hook reads main.
+- Run live tests synchronously; at the second stall the lead takes the check over.
+- Bring up the live GUI stand only through the production entry with `INSPECTOR_GUI_UNATTENDED=1` and
+  real windows.
+- A public path with no live caller is a contract: fix it, or reject it loudly in review.
+- Every observability knob switches on/off at any boundary and costs zero load when off.
 
 ## 6. Language
 

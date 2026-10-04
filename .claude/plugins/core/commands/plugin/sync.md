@@ -1,5 +1,6 @@
 ---
 description: Recompose the project configuration from the current enabled.yaml — update .mcp.json and settings.json
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin sync*)
 ---
 

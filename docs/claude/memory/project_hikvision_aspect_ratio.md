@@ -1,6 +1,7 @@
 ---
 name: project_hikvision_aspect_ratio
 description: Hikvision plugin resizes native frame anamorphically; set resolution to sensor aspect (4:3) or round objects become ellipses
+module: "Services/hikvision_camera"
 metadata:
   node_type: memory
   type: project

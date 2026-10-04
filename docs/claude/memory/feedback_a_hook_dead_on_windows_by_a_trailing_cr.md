@@ -1,6 +1,7 @@
 ---
 name: feedback_a_hook_dead_on_windows_by_a_trailing_cr
 description: Git Bash strips \r in $(...) but NOT in `read < <(...)` — four Edit hooks silently exited for months; prove a hook alive by feeding it a real payload, not by reading it
+mechanism: "hooks"
 metadata:
   type: feedback
 ---
@@ -28,4 +29,4 @@ JSON `hookSpecificOutput.additionalContext` reaches it.
 - Parse hook input inside Python and print with `sys.stdout.write` (no newline), then `| tr -d '\r'`;
   never `read < <(...)` from Windows Python.
 - Agent-facing output goes through `additionalContext` JSON; anything else is for the debug log.
-- Related: [[feedback_silent_detector_proves_nothing]], [[feedback_zero_observations_looks_like_a_result]].
+- Related: [[feedback_zero_observations_looks_like_a_result]], [[feedback_zero_observations_looks_like_a_result]].

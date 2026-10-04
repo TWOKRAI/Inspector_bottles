@@ -1,6 +1,7 @@
 ---
 name: project_graphify_mcp_setup
 description: graphify-MCP настройка — mcp вшивать через `uv tool install --with mcp`, единый граф по 5 каталогам, рантайм --with даёт таймаут коннекта
+module: "graphify"
 metadata:
   type: project
 ---

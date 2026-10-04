@@ -1,6 +1,8 @@
 ---
 name: feedback-detector-comparing-representation-fires-always
 description: Детектор расхождения, сравнивающий целые dict'ы, горит всегда — и потому доказывает ровно столько же, сколько молчащий
+module: "prototype backend/assembly (planner)"
+mechanism: "detectors"
 metadata:
   type: feedback
 ---
@@ -18,7 +20,7 @@ metadata:
 - `devices` — значения совпадают, написание нет: фундамент задаёт параметр плагина
   плоско (`registry_path: …`), рецепт под `config:`, normalize оставляет обе записи.
 
-**Why:** это зеркало [[feedback_silent_detector_proves_nothing]]. Всегда включённый
+**Why:** это зеркало [[feedback_zero_observations_looks_like_a_result]]. Всегда включённый
 сигнал неотличим от выключенного: настоящее расхождение protected-процесса в этом
 шуме не видно, а текст «изменения НЕ будут применены» читается как факт.
 

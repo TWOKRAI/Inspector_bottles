@@ -1,5 +1,6 @@
 ---
 description: Disable plugin <id> — remove it from enabled.yaml and recompose the configuration (the plugin's files stay on disk)
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin disable*)
 ---
 

@@ -1,5 +1,5 @@
 ---
-description: Regenerate diagrams from code (pyreverse + pydeps, optionally mermaid)
+description: Regenerate architecture diagrams from code (pyreverse, pydeps, optional mermaid). Call when the diagrams in docs/diagrams/ are stale.
 ---
 
 Regenerate diagrams from the source code.

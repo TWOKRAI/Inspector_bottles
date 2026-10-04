@@ -5,6 +5,8 @@ metadata:
   type: feedback
 ---
 
+Правило перенесено в `.claude/skills/project-rules/SKILL.md` §5 (2026-10-04). Ниже — доказательная база урока.
+
 Always take the latest Claude models: as of 2026-10-02 that is Opus 5.5, Sonnet 5.5, Haiku 4.5, Fable 5.1. When newer ones ship, move to them.
 
 **Why:** owner's correction during the `prompt-audit` run (2026-10-02). Pinned versions in prompts, templates and lint allow-lists (`claude-opus-4-8`, `Sonnet 4.6`, `Sonnet 5`, `Opus 5`) had already gone stale while agent frontmatter used aliases and stayed current.

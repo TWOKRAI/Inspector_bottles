@@ -1,6 +1,8 @@
 ---
 name: feedback_wallclock_threshold_measures_the_heap
 description: "Тест с порогом по стенным часам в общем процессе меряет размер чужой кучи, а не свой код — краснеет от состава прогона"
+module: "state_store_module"
+mechanism: "flaky-tests"
 metadata:
   node_type: memory
   type: feedback
@@ -44,5 +46,5 @@ Task 3.2).** `test_bucket_record_does_not_grow_with_observations` меряет �
 долгом K-10 плана `telemetry-stage6`.
 
 Родня: [[feedback_global_clock_patch_flake]], [[project_monotonic_resolution_windows]],
-[[feedback_zero_reds_can_mean_a_useless_layer]],
+[[feedback_injection_zero_may_mean_the_guards_were_not_collected]],
 [[feedback_constant_from_domain_physics_not_measured]].

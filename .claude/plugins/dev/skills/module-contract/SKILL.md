@@ -1,12 +1,6 @@
 ---
 name: module-contract
-description: >
-  Activates when creating a new public module, package, or class with a
-  public API. Enforces contract-first discipline: README + Protocol
-  interface (or module docstring for lite) + Design-by-Contract pre/post
-  + contract tests. Two levels: full (package module) / lite (single file).
-  Triggers: "create module", "new module", "new package", "new public class",
-  "design module", "contract-first", "module boundary", "/module-contract".
+description: "Contract-first discipline for a new public module, package or class: README, Protocol interface, pre/post conditions, contract tests. Use when creating a module or changing its public API."
 ---
 
 # Contract-first module design

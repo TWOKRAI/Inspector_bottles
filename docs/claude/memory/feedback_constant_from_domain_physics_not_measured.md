@@ -1,6 +1,8 @@
 ---
 name: feedback_constant_from_domain_physics_not_measured
 description: "Границы/пороги, выведенные из физики предметной области, надо сверить с тем, что система эмитит на самом деле, ДО фиксации константы"
+module: "telemetry histograms"
+mechanism: "constants-vs-emission"
 metadata:
   node_type: memory
   type: feedback
@@ -30,6 +32,6 @@ metadata:
 проходит на удачно расставленных границах. Менять сетку дёшево до записи в долгий стор и
 дорого после — записи живут ~93 ч и везут границы с собой.
 
-Родня: [[feedback_test_values_near_defaults_test_the_default]],
+Родня: [[feedback_test_params_hide_defect_window]],
 [[feedback_named_main_cause_may_be_a_minor_share]], [[feedback_a_plans_premise_expires]],
 [[feedback_plausible_is_not_verified]].

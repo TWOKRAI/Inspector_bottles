@@ -1,6 +1,8 @@
 ---
 name: feedback_mirror_check_never_reads_the_original
 description: "Сверка двух рукописных копий не видит оригинал — drift-guard обещал ловить дрейф framework, а framework в сверке не участвовал"
+module: "recipe/blueprint"
+mechanism: "drift-guard"
 metadata:
   node_type: memory
   type: feedback
@@ -26,4 +28,4 @@ metadata:
 
 Родня: [[feedback_named_mechanism_is_not_a_commitment]],
 [[feedback_docs_assert_what_registration_never_set]],
-[[feedback_broken_injection_is_not_a_vacuous_test]].
+[[feedback_injection_zero_may_mean_the_guards_were_not_collected]].

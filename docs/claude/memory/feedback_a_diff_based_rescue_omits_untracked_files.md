@@ -1,6 +1,7 @@
 ---
 name: a-diff-based-rescue-omits-untracked-files
 description: Saving an abandoned worktree as a git diff patch silently omits every untracked file — rescue with a branch from its HEAD instead, and never say "saved" without counting the overlap with the target branch
+mechanism: "git, worktree"
 metadata:
   type: feedback
 ---

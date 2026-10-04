@@ -1,6 +1,8 @@
 ---
 name: feedback-injection-too-coarse-proves-nothing-specific
 description: Инъекция, ломающая механизм целиком, не доказывает частное свойство — красный приходит по другой причине
+module: "state_store (throttle)"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---

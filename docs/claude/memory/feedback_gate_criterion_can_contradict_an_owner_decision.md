@@ -1,6 +1,8 @@
 ---
 name: feedback_gate_criterion_can_contradict_an_owner_decision
 description: "Проваленный пункт гейта — не всегда дефект: критерий может спорить с решением владельца, и тогда чинить надо критерий"
+module: "telemetry gate"
+mechanism: "acceptance"
 metadata:
   type: feedback
 ---

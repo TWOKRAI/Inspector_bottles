@@ -1,6 +1,8 @@
 ---
-description: Search project memory (.claude/memory/ + docs/sessions/) — grep + optional qex
+description: Search project memory and docs/sessions/ by keyword (grep, optional qex). Call to recall a past decision or a recurring trap.
 ---
+
+**Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.
 
 Search the project's long-term memory and session logs.
 
@@ -13,7 +15,7 @@ If empty — ask the user what to search for.
 
 1. **Lexical layer (primary).** This is the main mechanism — always works, needs no index:
    ```bash
-   grep -rinl --include='*.md' "$ARGUMENTS" .claude/memory/ docs/sessions/ 2>/dev/null
+   grep -rinl --include='*.md' "$ARGUMENTS" <memory_dir>/ docs/sessions/ 2>/dev/null
    ```
    For each hit file, pull 2-3 lines of context around the match.
 
@@ -23,7 +25,7 @@ If empty — ask the user what to search for.
    - **don't** pass `extension_filter` — markdown has no tree-sitter AST chunking,
      the extension filter here only cuts valid hits, giving nothing back in return.
 
-   Then filter the results: keep only paths under `.claude/memory/` or `docs/sessions/`.
+   Then filter the results: keep only paths under `<memory_dir>/` or `docs/sessions/`.
 
    **Caveat:** qex is tuned for code (tree-sitter chunking) and may not index Markdown under `.claude/`. **Empty is normal**, not an error — grep (step 1) already covers the corpus. Don't suggest `/mcp-qex:qex-reindex` for this command.
 

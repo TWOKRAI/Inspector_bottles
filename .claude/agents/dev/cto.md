@@ -60,6 +60,9 @@ The same lenses at lower depth, plus: a commit message that doesn't match its di
 uncommitted worktree, a plan status lagging the code, a missing `DECISIONS.md` entry for
 an architectural change — any of these blocks the merge.
 
+A gate result is valid only for the HEAD it ran on: at acceptance, run the gate yourself on the HEAD
+you accept.
+
 ### Mode: Arbitration
 
 Read both positions, then reproduce the disputed behaviour yourself before reading either

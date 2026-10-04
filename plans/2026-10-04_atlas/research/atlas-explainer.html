@@ -1,0 +1,504 @@
+<title>Атлас Inspector_bottles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: одна колонка-«лист атласа» шириной ~72ch; диаграммы и таблицы выходят на всю ширину в своих прокручиваемых рамках */
+:root{
+  --bg:#F3F6F7; --surface:#FFFFFF; --fg:#13202A; --muted:#566874; --line:#D5DDE2;
+  --accent:#0D6874; --accent-soft:#DCEEF0; --warn:#A8650A; --warn-soft:#F7EBD8; --ok:#2F7A3E; --bad:#A63A2E;
+  --display:"Unbounded", "Segoe UI", system-ui, sans-serif;
+  --body:"Golos Text", "Segoe UI", system-ui, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D141A; --surface:#141E26; --fg:#E2EAEF; --muted:#94A5B2; --line:#25333D;
+  --accent:#4DBFCB; --accent-soft:#163238; --warn:#E3A341; --warn-soft:#3A2B14; --ok:#6CC27C; --bad:#E07A6C; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D141A; --surface:#141E26; --fg:#E2EAEF; --muted:#94A5B2; --line:#25333D;
+  --accent:#4DBFCB; --accent-soft:#163238; --warn:#E3A341; --warn-soft:#3A2B14; --ok:#6CC27C; --bad:#E07A6C; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 var(--body);padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:56px}
+.prose{max-width:72ch}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:clamp(2rem,5vw,3.2rem);font-weight:700;letter-spacing:-.01em}
+h2{font-size:clamp(1.25rem,2.6vw,1.6rem);font-weight:500}
+h3{font-family:var(--body);font-size:1.05rem;font-weight:600}
+p{margin:0}
+section{display:grid;gap:18px}
+.eyebrow{font:600 .75rem/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.muted{color:var(--muted)}
+code,.mono{font-family:var(--mono);font-size:.88em}
+code{background:var(--accent-soft);padding:.05em .35em;border-radius:4px}
+
+/* hero */
+header.hero{padding-block:48px 8px;display:grid;gap:20px;border-bottom:1px solid var(--line);padding-bottom:36px}
+.verdict{display:inline-flex;gap:10px;align-items:center;flex-wrap:wrap;font:500 .85rem/1.3 var(--mono)}
+.chip{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--accent);color:var(--accent);background:var(--accent-soft)}
+.chip.warn{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+.thesis{font-size:1.18rem;line-height:1.55;max-width:66ch}
+
+/* числа */
+.figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.fig{background:var(--surface);padding:18px 18px 16px;display:grid;gap:6px;align-content:start}
+.fig b{font:600 1.7rem/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--fg)}
+.fig b.warn{color:var(--warn)}
+.fig span{font-size:.9rem;color:var(--muted);line-height:1.4}
+
+/* принципы */
+ol.principles{list-style:none;margin:0;padding:0;display:grid;gap:0;counter-reset:p;border-top:1px solid var(--line)}
+ol.principles li{counter-increment:p;display:grid;grid-template-columns:3rem 1fr;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+ol.principles li::before{content:counter(p);font:700 1.2rem/1.4 var(--display);color:var(--accent)}
+ol.principles li strong{display:block;font-weight:600}
+
+/* диаграммы */
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;overflow-x:auto}
+.diagram pre.mermaid{margin:0;background:transparent;text-align:center;min-width:560px}
+.caption{font-size:.88rem;color:var(--muted)}
+.cols>.diagram pre.mermaid{min-width:300px}
+.ba-head{font:600 .75rem/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.ba-head.before{color:var(--warn)}
+.ba-head.after{color:var(--ok)}
+
+/* таблицы */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.92rem;min-width:620px}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{font:600 .72rem/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{font:600 .72rem/1 var(--mono);padding:3px 7px;border-radius:4px;white-space:nowrap}
+.tag.yes{color:var(--ok);border:1px solid var(--ok)}
+.tag.idea{color:var(--accent);border:1px solid var(--accent)}
+.tag.no{color:var(--bad);border:1px solid var(--bad)}
+
+/* две колонки */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+.cols>*{min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:grid;gap:10px;align-content:start}
+.panel ul{margin:0;padding-left:1.1em;display:grid;gap:6px}
+.quote{border-left:3px solid var(--accent);padding:4px 0 4px 16px;font-size:1.05rem}
+.kill{border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px;padding:16px 18px;display:grid;gap:8px}
+.kill strong{color:var(--warn)}
+footer{border-top:1px solid var(--line);padding-top:20px;font-size:.88rem;color:var(--muted);display:grid;gap:6px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <span class="eyebrow">Inspector_bottles · система знаний · 2026-10-04</span>
+  <h1>Атлас проекта</h1>
+  <p class="thesis">Правда проекта — файлы в git. Доверие к модулю строится не на прочитанном коде, а на доказательствах, которые код пережил: тест на каждое публичное имя, инъекция, показавшая, что тест умеет краснеть, мутационный балл из CI. Атлас собирает эти доказательства с планов, коммитов и тестов в один реестр. Реестр он показывает двумя способами: страницей для владельца и карточкой для агента перед работой. Что выводится, не пишется руками. Что написано руками, имеет один дом. Старое помечено один раз и не переделывается.</p>
+  <div class="verdict">
+    <span class="chip">CTO: принято с поправками</span>
+    <span class="chip">качество в центре системы</span>
+    <span class="chip warn">kill-проверка через 3 недели после ядра</span>
+    <span class="muted">основа: main = 03952a020</span>
+  </div>
+</header>
+
+<section>
+  <span class="eyebrow">Зачем</span>
+  <h2>Что сейчас стоит денег и внимания</h2>
+  <div class="figures">
+    <div class="fig"><b>112 КБ</b><span>правил грузится в каждую сессию из шести файлов</span></div>
+    <div class="fig"><b>107–228k</b><span>токенов тратит свежий агент только на вход в задачу</span></div>
+    <div class="fig"><b class="warn">300 / 596</b><span>закрытых задач не связаны ни с одним коммитом</span></div>
+    <div class="fig"><b class="warn">18 / 57</b><span>модулей: код новее документа больше чем на 30 дней</span></div>
+    <div class="fig"><b class="warn">0 / 200</b><span>коммитов, где git сам видит трейлер <code>Refs:</code></span></div>
+    <div class="fig"><b>3 · 3 · 2</b><span>копии памяти · дома ADR · парсера планов</span></div>
+  </div>
+  <p class="prose muted">Числа сняты агентами и перепроверены CTO запуском. Исключение — 107–228k: это замер пилота «Компания v2» (2026-10-02), здесь не перемерен. Худший модуль — <code>config_module</code>: документ отстаёт на 154 дня и 22 коммита кода. Матрицы инъекций, главное доказательство качества, есть в 39 из 364 файлов <code>docs/reviews</code> и нигде не индексируются.</p>
+</section>
+
+<section>
+  <span class="eyebrow">До и после</span>
+  <h2>Как работа выглядит сегодня и как станет</h2>
+  <div class="cols">
+    <div class="diagram">
+      <p class="ba-head before">Сегодня: агент входит в задачу</p>
+<pre class="mermaid">
+flowchart TB
+  T1["Задача из плана"] --> R1["читает CLAUDE.md ×3<br/>и MEMORY.md — 112 КБ"]
+  R1 --> R2["ищет модуль:<br/>README, STATUS, DECISIONS,<br/>interfaces.py, карту"]
+  R2 --> R3["не знает, свежий ли документ<br/>config_module: −154 дня"]
+  R3 --> R4["git log, grep, соседние модули<br/>чтобы понять, что менялось"]
+  R4 --> E1["первая правка<br/>после 107–228k токенов"]
+</pre>
+    </div>
+    <div class="diagram">
+      <p class="ba-head after">После: агент входит в задачу</p>
+<pre class="mermaid">
+flowchart TB
+  T2["Задача из плана"] --> P2["atlas pack slug#id"]
+  P2 --> C2["карточки тронутых модулей:<br/>назначение, API, ADR,<br/>открытые задачи, 5 коммитов"]
+  C2 --> Q2["доказанность модуля:<br/>имена с тестом, инъекции,<br/>мутационный балл"]
+  Q2 --> F2["долг свежести числом<br/>«документ отстал на 22 коммита»"]
+  F2 --> E2["первая правка<br/>гипотеза: −20…35 %<br/>замер на 10+ задачах"]
+</pre>
+    </div>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Ситуация</th><th>Было</th><th>Станет</th><th>Почему лучше</th></tr></thead>
+    <tbody>
+      <tr><td>Доверие к модулю</td><td>В голове ревьюера и в 39 матрицах инъекций, которые никто не индексирует</td><td>Строка карточки: «интерфейс 12/15 имён с тестом · гарантий 7, инъекцией доказано 5 · мутационный балл 0.82 (CI)». Где данных нет — <code>n/a</code></td><td>Видно, насколько модулю можно верить, до того как его трогать</td></tr>
+      <tr><td>Публичная поверхность</td><td><code>interfaces.py</code> меняется без теста, и никто этого не замечает</td><td>Два гейта CI блокируют слияние: <code>SURFACE_CHANGED_WITHOUT_TEST</code> и <code>PRE_POST_MISSING</code></td><td>Контракт нельзя сломать молча</td></tr>
+      <tr><td>Агент входит в задачу</td><td>Читает 10+ файлов и не знает, каким верить. 107–228k токенов до первой правки (замер пилота v2)</td><td>Одна карточка модуля или пакет на задачу</td><td>Меньше контекста, значит дешевле. Гипотеза: −20…35 %, проверим замером</td></tr>
+      <tr><td>Документ устарел</td><td>Молчит. Агент верит обзору пятимесячной давности так же, как коду</td><td>Карточка показывает долг: «отстал на 22 коммита»</td><td>Устаревание видно до того, как на нём построят решение</td></tr>
+      <tr><td>Что менялось в модуле</td><td>Ручной <code>git log</code> по путям, коммиты разбросаны по планам</td><td><code>atlas log &lt;модуль&gt;</code> — лента по задачам</td><td>Вид по области без долгих веток и дрейфа от main</td></tr>
+      <tr><td>Статус плана</td><td>Шапки врут в 9+ планах, счётчик не видит задачи в 8 планах</td><td>Шапка и прогресс генерируются из git при слиянии</td><td>Нечему врать: статус выводится, а не пишется</td></tr>
+      <tr><td>Коммит → задача</td><td>Git не видит <code>Refs:</code> (0 из 200). Номер задачи в 21–37 % коммитов. 300 задач закрыты без коммита</td><td>Трейлеры одним блоком, <code>Task:</code>, модуль по путям</td><td>Цепь «коммит → задача → план → модуль» строится сама</td></tr>
+      <tr><td>Один факт в нескольких местах</td><td>Число модулей: 25, 27, 25. Torch: 2.11 в CLAUDE.md против 2.6 в <code>.venv</code> (одна машина, не CI). Три копии памяти, 156 файлов разошлись</td><td>Один дом на факт, остальное — генерируемые блоки</td><td>Противоречия исчезают вместе с копиями</td></tr>
+      <tr><td>Правила в каждой сессии</td><td>112 КБ из шести файлов при каждом старте</td><td>Цель для CLAUDE.md: 25 → меньше 12 КБ. Таблицы уходят в карточки</td><td>Каждая сессия и каждый агент платят меньше</td></tr>
+      <tr><td>Проверка в облаке</td><td>Git-хуков нет, CI формат коммитов не смотрит. «Обязательный» <code>Layer:</code> пропускается</td><td>CI проверяет коммиты и <code>atlas check</code></td><td>Облачные сессии не ломают формат и связи</td></tr>
+      <tr><td>Параллельные агенты</td><td>Пишут общие файлы, конфликтуют на хуках, ORDER отстаёт от git</td><td>Реестр не коммитится, каждый worktree строит его сам. На main пишет один лид</td><td>Нет записи — нет конфликта</td></tr>
+      <tr><td>Новый проект из seed</td><td>Едет старый парсер планов, два счётчика расходятся с первого дня</td><td>Ядро Атласа без адаптеров Inspector</td><td>Новый проект стартует с той же системой</td></tr>
+    </tbody>
+  </table></div>
+  <div class="panel">
+    <h3>Почему это станет лучше, а не просто больше</h3>
+    <ul>
+      <li><strong>Контроль через доказательства, а не через чтение.</strong> Агент пишет код быстрее, чем его можно прочитать. Атлас показывает, что код пережил: тесты, инъекции, мутационный балл. Слабое место видно числом.</li>
+      <li><strong>Генерируемое не стареет.</strong> Половина фактов, которые сегодня расходятся, выводится из кода и git. Когда их перестанут писать руками, расхождения исчезнут.</li>
+      <li><strong>Система сжимается.</strong> Уходят три копии памяти, два COMMIT_GUIDE, три дома ADR, два парсера планов, мёртвые скрипты и таблицы из CLAUDE.md. Фаза принимается, только если удалила больше, чем добавила: в каждой приёмке есть ведомость удалений.</li>
+      <li><strong>Есть способ проверить и остановиться.</strong> Через 3 недели после ядра. Если ни одно ревью не сослалось на находку Атласа, или мутационный гейт флапает больше 20 % прогонов, или строка доказанности не изменила ни одного решения — карточка и HTML снимаются. Остаются два гейта CI и генерируемые блоки.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Правила</span>
+  <h2>Пять принципов</h2>
+  <ol class="principles">
+    <li><div><strong>Истина — файлы в git.</strong>Реестр производный, его не коммитит никто.</div></li>
+    <li><div><strong>Что выводится, руками не пишется.</strong>Что пишется руками, имеет один дом.</div></li>
+    <li><div><strong>Свежесть — число коммитов в зоне документа.</strong>Не отметка и не дата.</div></li>
+    <li><div><strong>На main пишет один.</strong>Лид в точке слияния. CI проверяет, но не пишет.</div></li>
+    <li><div><strong>Фаза принята, если удалила больше, чем добавила.</strong>Система должна сжиматься, а не расти.</div></li>
+    <li><div><strong>Старое помечается один раз и не переделывается.</strong>Отсечка <code>legacy_before: &lt;SHA слияния А1&gt;</code>: находки по старому только информационные, база-храповик пишется один раз. Строгие проверки — для нового.</div></li>
+  </ol>
+</section>
+
+<section>
+  <span class="eyebrow">Диаграмма 1</span>
+  <h2>Как знание течёт от коммита к читателю</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  C["git commit<br/>в короткой ветке"] --> H["commit-msg<br/>формат · Refs · Task"]
+  H --> M["merge в main"]
+  M --> B["atlas build → check"]
+  B --> R[("реестр<br/>узлы и связи<br/>не в git")]
+  R --> V1["HTML-атлас<br/>для владельца"]
+  R --> V2["atlas card / pack / log<br/>для агента"]
+  R --> V3["блоки между маркерами<br/>в README, STATUS, шапках планов"]
+  G["graphify"] -. "импорты кода<br/>необязательно" .-> B
+  W["worktree агента"] -. "ленивая сборка<br/>от своего HEAD, ~1 с" .-> R
+</pre>
+  </div>
+  <p class="caption">Хук в ветке только проверяет. Производное собирается на main. Агент в worktree строит реестр сам, если SHA разошёлся.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Диаграмма 2</span>
+  <h2>Цепь знаний: ни одно ребро не набирается руками</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  CM["Коммит"] -- "Refs:" --> PL["План"]
+  CM -- "Task: slug#id" --> TK["Задача"]
+  TK --> PL
+  CM -- "пути × modules.yaml" --> MO["Модуль"]
+  DOC["Документ<br/>README · STATUS · карта"] -- "папка модуля<br/>или covers:" --> MO
+  TS["Тест"] -- "расположение<br/>и импорты" --> MO
+  ADR["Решение ADR"] -- "DECISIONS.md модуля" --> MO
+  MO -- "AST-импорты" --> MO2["Модуль-сосед"]
+  HO["Handoff"] -- "Refs" --> PL
+</pre>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Один дом</span>
+  <h2>Откуда берётся каждый факт</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Факт</th><th>Единственный источник</th><th>Что генерируется</th></tr></thead>
+    <tbody>
+      <tr><td>Модуль: путь, слой, ярус, документы</td><td><code>modules.yaml</code> — новый, из MODULE_TIERS и правил sentrux</td><td>таблицы модулей в CLAUDE.md, MODULES_STATUS, обзоры</td></tr>
+      <tr><td>Статус задачи</td><td>строка задачи в <code>plan.md</code></td><td>прогресс, шапка плана, блок ORDER, страница планов</td></tr>
+      <tr><td>Коммит → план и задача</td><td>трейлеры <code>Refs:</code> и <code>Task:</code></td><td>«задача без коммита», «коммит без задачи»</td></tr>
+      <tr><td>Коммит → модуль</td><td>пути коммита × <code>modules.yaml</code></td><td>область в заголовке, лента модуля</td></tr>
+      <tr><td>Документ → модуль</td><td>папка модуля, для карт — <code>covers:</code></td><td>долг свежести</td></tr>
+      <tr><td>Решение</td><td><code>DECISIONS.md</code> модуля или фреймворка</td><td>реестр ADR (уже работает: <code>scripts.sync</code>)</td></tr>
+      <tr><td>Правила агентов</td><td><code>.claude/plugins/&lt;id&gt;/</code></td><td>зеркала в <code>.claude/agents</code>, проверка дрейфа</td></tr>
+      <tr><td>Память</td><td><code>docs/claude/memory</code> в git</td><td>локальная копия как кэш</td></tr>
+      <tr><td>Живая система</td><td>backend-ctl, sentry</td><td>ничего: это рантайм</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <span class="eyebrow">Диаграмма 3</span>
+  <h2>Вся связка: seed, git, MCP, фреймворк, прототип</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  subgraph SEED["claude_seed · .claude"]
+    AG["агенты · skills · команды"]
+    HK["хуки"]
+    CO["Компания v3<br/>лид · тестер · ревьюер"]
+  end
+  subgraph GIT["git"]
+    PLN["планы · формат задачи"]
+    CMT["коммиты · трейлеры"]
+    BR["короткие ветки на задачу"]
+  end
+  subgraph CODE["код"]
+    FW["multiprocess_framework"]
+    SV["Services · Plugins"]
+    PR["прототип — composition root"]
+    IF["интерфейсы<br/>interfaces.py · Pre/Post"]
+    TS["тесты · инъекции<br/>доказано, что краснеют"]
+  end
+  AT[("АТЛАС<br/>реестр")]
+  QG{{"гейт качества в CI<br/>интерфейс без теста — стоп"}}
+  MUT["CI Linux<br/>мутационный балл"]
+  subgraph MCP["инструменты"]
+    QX["qex — где"]
+    SE["serena — точный символ"]
+    GR["graphify — кого заденет"]
+    SX["sentrux — насколько здорово"]
+    BC["backend-ctl — живая правда"]
+    SN["sentry — ошибки"]
+  end
+  DB["дашборд планов"]
+  PLN --> AT
+  CMT --> AT
+  FW --> AT
+  SV --> AT
+  PR --> AT
+  IF --> AT
+  TS --> AT
+  MUT -- "балл по модулю" --> AT
+  AT --> DB
+  AT --> AG
+  AT --> QG
+  CO -- "atlas pack / card" --> AT
+  HK -- "atlas check" --> AT
+  GR -. "импорты" .-> AT
+  AT -. "ответ: что это, чьё, свежо ли, насколько доказано" .- MCP
+</pre>
+  </div>
+  <p class="caption">Атлас отвечает на один новый вопрос: «что это, чьё, какие планы, решения и тесты, насколько свежо и насколько доказано». На остальные отвечают уже существующие инструменты. Дубли: на «кто ссылается на X» сегодня отвечают пять инструментов. Оставить три: serena, qex, graphify. codegraph — кандидат на отключение после замера.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Диаграмма 3б</span>
+  <h2>Цепь доказанности: агент доказывает, что его тесты могут упасть</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  MOD["Модуль<br/>framework · Services · Plugins · прототип"] -- "выставляет" --> IF["Интерфейс<br/>interfaces.py, Pre/Post"]
+  IF -- "заявляет" --> G["Гарантия<br/>G-MOD-NNN"]
+  TEST["Тест"] -- "сторожит" --> G
+  TEST -- "проверяет" --> MOD
+  INJ["Инъекция<br/>из result.md задачи"] -- "ломает: красный доказан" --> TEST
+  CI["CI Linux<br/>mutation_gate"] -- "балл" --> MOD
+  GIT["Коммит"] -- "Refs / Task / пути" --> PLAN["План → задача → result.md"]
+  PLAN -- "таблица инъекций" --> INJ
+  REG[("Реестр Атласа")]
+  MOD --> REG
+  IF --> REG
+  G --> REG
+  TEST --> REG
+  INJ --> REG
+  PLAN --> REG
+  REG --> CARD["карточка агенту<br/>«интерфейс 12/15 · доказано 5 из 7 · балл 0.82»"]
+  REG --> GATE{{"гейт CI:<br/>SURFACE_CHANGED_WITHOUT_TEST<br/>PRE_POST_MISSING"}}
+</pre>
+  </div>
+  <p class="caption">Это подход «контроль через тесты, а не через чтение кода». В проекте он уже есть как культура: слепой тестер до кода, инъекция на каждое свойство, ревьюер запуском. Атлас делает его видимым и проверяемым. Свидетельство пишет тот, кто его уже производит: лид — таблицу инъекций, тестер — маркер гарантии, CI — балл. Второго документа нет. Мутационный балл берётся только из CI Linux: на Windows <code>mutation_gate.py</code> пропускается.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Ваш вопрос</span>
+  <h2>Ветки деревом по модулям?</h2>
+  <div class="cols">
+    <div class="panel">
+      <h3>Что показали числа</h3>
+      <ul>
+        <li>72 % слияний задевают 2+ модулей, 43 % — 3+.</li>
+        <li>Задача плана в медиане трогает 5 модулей.</li>
+        <li>Влитая ветка живёт около часа, 91 % — меньше суток.</li>
+        <li>Долгая ветка <code>feat/lifecycle-owner-scope</code> отстала от main на 118 коммитов при 18 своих.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Что делаем вместо веток</h3>
+      <ul>
+        <li><code>atlas log &lt;модуль&gt;</code> — лента изменений области по main, сгруппированная по задачам.</li>
+        <li>Карточка модуля: последние коммиты, открытые задачи, ветки, которые его сейчас трогают.</li>
+        <li>Область в заголовке коммита подставляется сама по путям.</li>
+        <li>Долгая ветка области — только исключение: один владелец, main вливается ежедневно, срок до 7 дней.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="quote">Дерево уже есть — это история коммитов в main. Не хватает вида по области, и его даст лента модуля без долгих веток и дрейфа.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Компания v3</span>
+  <h2>Параллельная работа и экономия контекста</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Стадия</th><th>Вход сегодня</th><th>Гипотеза (замер: токены до первой правки)</th><th>За счёт чего</th></tr></thead>
+    <tbody>
+      <tr><td>Вход писателя (S3)</td><td class="num">107–228k</td><td class="num">−20…35 %</td><td><code>atlas card</code> + <code>atlas pack</code> вместо разведки по 10 файлам</td></tr>
+      <tr><td>Ревью спеки (S0)</td><td class="num">199–210k</td><td class="num">−10…20 %</td><td>факты модуля из карточки</td></tr>
+      <tr><td>RED слепого тестера (S1)</td><td class="num">163–236k</td><td class="num">−10 %</td><td>карточка из коммита до реализации: только <code>interfaces.py</code>, слепота сохраняется</td></tr>
+      <tr><td>Повторный вызов агента</td><td class="num">+3…56k</td><td class="num">≈ 0</td><td>контекст уже есть</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose muted">Это гипотезы, не замеры. Мерить токены до первой правки на 10+ задачах до и после. Остаются без изменений: таблица agentId в handoff лида, повторный вызов по agentId, слепой тестер в worktree, не больше трёх писателей. Убираются: ручная генерируемая часть карт, <code>plan_file_map.py</code>, три резолвера «ветка → план», мёртвые <code>aggregate_context</code> и <code>session-project-map.sh</code>.</p>
+  <div class="cols">
+    <div class="panel">
+      <h3>Память: одна, сжатая, без потерь</h3>
+      <ul>
+        <li>Канон — <code>docs/claude/memory</code> в git. Локальная папка — кэш, наполняется скриптом.</li>
+        <li>Проход 1, скрипт без LLM: 160 одинаковых и 100 отличающихся только переводами строк сливаются сами. Остаётся 156 реально разных.</li>
+        <li>Проход 2, Sonnet в облаке: раскладывает 431 файл по видам и присылает PR с таблицей «файл → действие → причина».</li>
+        <li>Правило, которое должно сработать само, уходит в хук или <code>project-rules</code>. Урок с числами остаётся и привязывается к модулю. Состояние работ заменяется ссылкой на план.</li>
+        <li>Ничего не удаляется: всё уходит в <code>_archive/</code> со ссылкой. <code>MEMORY.md</code> — до 8 КБ. Цена $25–35.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Handoff: короткий результат на задачу</h3>
+      <ul>
+        <li>Свободный handoff от каждого агента — нет. В <code>handoffs</code> уже 77 файлов, их читают несистемно.</li>
+        <li>Вместо него обязателен <code>tasks/&lt;id&gt;.result.md</code> до 2 КБ: сделано, осталось, не проверено, файлы, SHA, таблица инъекций, кому передано.</li>
+        <li>Один файл — один писатель, поэтому конфликтов нет.</li>
+        <li>Атлас показывает «осталось» и «не проверено» в пакете следующей задачи и в карточке модуля. Так следующий агент реально видит чужой результат.</li>
+        <li>Уроки роли по-прежнему пишутся в <code>agent-memory</code>, таблица agentId — в handoff лида.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Диаграмма 4</span>
+  <h2>Фазы и бюджет облачного кредита</h2>
+  <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  A0["А0 · локально · 0 $<br/>трейлеры одним блоком, Task:<br/>commit-layers, CI для коммитов<br/>один парсер планов, modules.yaml v0<br/>отсечка legacy, базовые метрики"]
+  P["Пилот · 5–10 $<br/>Linux-прогон,<br/>mutation_gate, цена сессии"]
+  A1["А1 · 40–55 $<br/>ядро + слой качества<br/>интерфейсы, тесты, инъекции,<br/>мутации · atlas card<br/>2 гейта CI"]
+  A2["А2 · 30–45 $<br/>сведение: память, ADR,<br/>COMMIT_GUIDE, блоки<br/>result.md обязателен"]
+  K{"kill-проверка<br/>3 недели"}
+  A3["А3 · 10–15 $<br/>HTML: индекс, модуль,<br/>устаревшее, доказанность"]
+  A4["А4 · 25–35 $<br/>4–6 горячих модулей<br/>каждый — PR"]
+  A5["А5 · локально<br/>пороги после калибровки<br/>пакет для seed"]
+  STOP["стоп на минимуме:<br/>2 гейта CI<br/>+ генерируемые блоки"]
+  A0 --> P --> A1 --> A2 --> K
+  K -- "окупается" --> A3 --> A4 --> A5
+  K -- "не окупается" --> STOP
+</pre>
+  </div>
+  <div class="cols">
+    <div class="panel">
+      <h3>Бюджет: $145–205 из $250</h3>
+      <ul>
+        <li>Кредит действует только для облачных сессий, до 4 ноября.</li>
+        <li>Слой качества идёт в ядро (А1), HTML — после kill-проверки.</li>
+        <li>Три бесплатных <code>/code-review ultra</code> — на router, shared_resources, state_store, config.</li>
+        <li>CTO на приёмку фаз: $10–20. Запас: $25.</li>
+        <li>Остаток не тратить на мета-систему. Кандидат — Python-задачи продукта.</li>
+        <li>Оценки до калибровки: первая облачная сессия — пилот с замером.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Вычеркнуто CTO</h3>
+      <ul>
+        <li>Рёбра документов в graphify пост-обработкой.</li>
+        <li>Поиск по фрагментам (<code>chunks.jsonl</code>, BM25) — пока хватает карточки и <code>git grep</code>.</li>
+        <li>Массовый тираж документов по 15–18 модулям.</li>
+        <li>«Пульт владельца» (Фаза 6 дашборда) до kill-проверки.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="kill">
+    <strong>Критерий остановки</strong>
+    <p>Через 3 недели после ядра. Останавливаемся на минимуме, если выполнено хотя бы одно: ни одно ревью или вердикт не сослались на находку Атласа; мутационный гейт флапает больше 20 % прогонов; строка доказанности не изменила ни одного решения лида. Тогда карточка и HTML снимаются, остаются два гейта CI и генерируемые блоки. Условие на каждую фазу: коммиты Атласа — не больше 25 % влитых за неделю, и есть ведомость удалений.</p>
+    <p>Метрики: доказанность по модулю (имена с тестом, гарантии с инъекцией, мутационный балл); слияния, изменившие интерфейс без теста, → 0; дефекты, найденные живым стендом уже после ревью, → вниз; цена входа агента; мест на один факт; <code>MEMORY.md</code> ≤ 8 КБ.</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Ревизия планов</span>
+  <h2>61 план → 24 в работе, 37 в архив</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Группа</th><th>Шт.</th><th>Что внутри</th></tr></thead>
+    <tbody>
+      <tr><td>Живые сейчас</td><td class="num">7</td><td>lifecycle-owner-scope, layer-render, robot-protocol-v2, transport 5.8s, дашборд до 5.6, коммиты до 2.2, затем letters-retrain</td></tr>
+      <tr><td>Ждут условия</td><td class="num">11</td><td>визит к роботу, железо, закрытие Ж, окно codemod, одобрение dataset-annotation</td></tr>
+      <tr><td>Отложены вами</td><td class="num">6</td><td>интерфейс (О-16), наблюдаемость за Ж</td></tr>
+      <tr><td>В архив</td><td class="num">37</td><td>26 сделаны, 11 поглощены. Перед архивом — перенести хвосты в backlog</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose muted">Попутные находки, которые чинит Атлас: шапки врут как минимум в 9 планах, счётчик не видит задачи-заголовки в 8 планах, блок прогресса в ORDER отстаёт от git.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Готовые решения</span>
+  <h2>Что нашли снаружи</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Кандидат</th><th>Решение</th><th>Почему</th></tr></thead>
+    <tbody>
+      <tr><td><code>git interpret-trailers</code></td><td><span class="tag yes">взять</span></td><td>разбор трейлеров даром, после переноса их в один блок</td></tr>
+      <tr><td>graphify <code>--code-only</code></td><td><span class="tag yes">взять</span></td><td>уже стоит; только связи кода</td></tr>
+      <tr><td>knowledge-apps: правило sci-librarian, шаблоны HTML</td><td><span class="tag yes">взять</span></td><td>«сводный файл пишет один», скелет страниц</td></tr>
+      <tr><td>codocia, Swimm auto-sync, g3doc freshness</td><td><span class="tag idea">идея</span></td><td>подтверждают направление: <code>covers:</code>, гейт на привязанный код, напоминание по сроку</td></tr>
+      <tr><td>Backstage</td><td><span class="tag no">нет</span></td><td>Node + Docker, 6 ГБ RAM, чужая модель сущностей</td></tr>
+      <tr><td>Sourcegraph, DeepWiki, Mintlify, Cortex, CodeSee</td><td><span class="tag no">нет</span></td><td>SaaS, нет связей с планами и коммитами</td></tr>
+      <tr><td>MkDocs, Hugo, Docusaurus</td><td><span class="tag no">пока нет</span></td><td>свой генератор на stdlib уже работает офлайн</td></tr>
+      <tr><td>Маркетплейс плагинов Claude Code</td><td><span class="tag no">нет</span></td><td>ни одного плагина про документацию и карты</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">Вывод CTO: готовой замены нет ни одному компоненту. Новизна Атласа — в интеграции трёх вещей. Первая — цепь «коммит → задача → план → модуль → документ» без ручного набора. Вторая — свежесть как число коммитов. Третья — один реестр с двумя лицами.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Что дальше</span>
+  <h2>Ближайшие шаги</h2>
+  <div class="cols">
+    <div class="panel">
+      <h3>Сейчас, локально</h3>
+      <ul>
+        <li>Ваши решения по вопросам сводки: архив планов, старые решения, ветки.</li>
+        <li>Правка формата коммита в commit-mechanism 2.1 и 2.2: трейлеры одним блоком, <code>Task:</code>.</li>
+        <li>Один парсер планов (дашборд 4.1), <code>modules.yaml</code> v0, отсечка legacy.</li>
+        <li>Базовые метрики до любых изменений: цена входа, доказанность модулей, мест на факт.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Потом, в облаке</h3>
+      <ul>
+        <li>План <code>atlas</code> и инструкция для облачных сессий.</li>
+        <li>Пилот с замером расхода кредита.</li>
+        <li>Ядро и карточка, затем сведение дублей.</li>
+        <li>Через 3 недели — kill-проверка по метрикам.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>Источники: ревизия 61 плана и три анализа системы (шесть агентов Sonnet), вердикт и дополнение CTO (Fable). Всё только чтением и запусками, репозиторий не менялся.</span>
+  <span>Ненадёжно: облако и Linux не прогонялись, <code>mutation_gate</code> на Linux не запускался; бюджет не откалиброван, цена сведения памяти — расчёт по байтам; экономия по стадиям — гипотезы; форматы маркера гарантии и таблицы инъекций — предложение; вердикты примерно по 10 планам средней надёжности.</span>
+</footer>
+
+</div>

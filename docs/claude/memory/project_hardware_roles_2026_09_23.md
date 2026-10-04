@@ -1,7 +1,8 @@
 ---
 name: project_hardware_roles_2026_09_23
 description: "Железо владельца и роли машин — ноутбук Windows с RTX 3050 4 ГБ, Jetson Orin Nano 8 ГБ, Orin NX 16 ГБ"
-metadata: 
+module: "hardware"
+metadata:
   node_type: memory
   type: project
   originSessionId: 44804680-1a4c-4c7b-891a-d85a99177346

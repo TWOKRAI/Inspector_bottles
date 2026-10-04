@@ -1,5 +1,6 @@
 ---
 description: List the project's plugins with their statuses (enabled/disabled/available/broken/missing/external)
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin list*)
 ---
 

@@ -33,7 +33,7 @@ Rules:
   mismatch is a finding either way. A test that stays green under its own break does not
   exist. A test that **hangs** instead of failing is worse than absent — it hides the
   regression behind a timeout, so any test that can block must run the call in a daemon
-  thread with a join deadline.
+  thread with a join deadline. Name the expected failing set AFTER the last test is written.
 - **Author writes hazard tests for the mechanism.** Most of the value arrives while writing
   the docstring — "what can break in *this* mechanism, given how it is built" — not from the
   run. Author's tests are additional, never a replacement.
@@ -190,6 +190,9 @@ the mirror, or run the materializer).
 
 Language of agent files: English end to end. Commands, guides and reports: Russian.
 
+`claude-kit upgrade --apply` silently overwrites `.claude/`: keep valuable text only in preserved places
+(`.claude/CLAUDE.md`, `modes/_stack.md`, `settings.local.json`, `commit-layers.txt`, everything outside `.claude/`), and `diff` before an upgrade.
+
 ## Team mode — agents that live in the session (`/dev:team`, since 2026-09-02)
 
 Agent Teams is enabled: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in the `env` of `.claude/settings.json`
@@ -308,6 +311,7 @@ Available MCP servers — composed from `enabled.yaml` (a disabled plugin is abs
 - `github-mcp` — GitHub state: PR / Issues / Actions; docs: `.claude/plugins/mcp-github/README.md`
 - `qt-mcp` — runtime inspection for PyQt5/PySide6 GUI apps; docs: `.claude/plugins/mcp-qt/README.md`
 - `backend-ctl` — live backend control via `backend_ctl` driver (requires `BACKEND_CTL=1`); docs: `.claude/plugins/mcp-backend-ctl/README.md`
+  Debug and test the backend through `backend_ctl` (the same router messages as the GUI); `qt-mcp` only to test the GUI itself; no ad-hoc psutil.
 - `sentry` — error-monitoring MCP (marketplace consume plugin, needs Sentry auth via `/mcp`; no local `.claude/plugins/` docs)
 
 Before first using an MCP tool — `Read` its README (`.claude/plugins/<id>/README.md`): setup, usage, rules.
@@ -355,7 +359,7 @@ tokens — that's what `caveman` is for, trigger-based, user-facing only).
 | Commit guide | `.claude/COMMIT_GUIDE.md` | seed (autocopy) |
 | Session logs | `docs/sessions/YYYY-MM-DD.md` | `/core:team:wrap-up` (writes and commits the log; the pre-commit hook was removed on 2026-10-03) |
 | Task plans | `plans/YYYY-MM-DD_<slug>.md` (single) or `.../plan.md`+`phase-N.md` (multi-phase) | `/dev:plan` (Manager) |
-| Long-term memory | `.claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
+| Long-term memory | `docs/claude/memory/MEMORY.md` + `*.md` | agent (auto-memory rules) |
 | Layer enum | `.claude/commit-layers.txt` | project (manual) |
 | Commands/Agents/Skills | `.claude/{commands,agents,skills}/…` (materialized copies, git-tracked: edit the source in `plugins/<id>/…`, then copy) | `plugin sync` from `plugins/<id>/…` |
 | Hooks | composed in `.claude/settings.json` | `plugin sync` from `plugin.json.hooks` |
@@ -365,12 +369,12 @@ tokens — that's what `caveman` is for, trigger-based, user-facing only).
 **Thread:** `/dev:plan` → plan + branch → `/dev:implement Task X.Y` → commit with a `Refs: plans/<slug>.md`
 trailer → `/dev:ship` checks `--grep="Refs:"` and closes the plan → `/core:team:wrap-up` writes
 `docs/sessions/<today>.md`. A new session restores context: branch → plan → commits' `Refs:`
-→ latest `docs/sessions/` → `.claude/memory/`.
+→ latest `docs/sessions/` → `docs/claude/memory/`.
 
 ## Memory (OVERRIDE)
 
-**Canonical path:** `.claude/memory/` (project-local, git-tracked; `autoMemoryDirectory` in
-`.claude/settings.local.json`, fixed by `plugin doctor --fix`). Index `- [Title](file.md) — hook`;
+**Canonical path:** `docs/claude/memory/` (git-tracked, shared by both machines); the machine-local
+auto-memory folder (`autoMemoryDirectory` in `.claude/settings.local.json`) is a cache refreshed from it by diff. Index `- [Title](file.md) — hook`;
 an entry is a separate `.md` with frontmatter `name`/`description`/`metadata.type` ∈
 `user`/`feedback`/`project`/`reference`. Lint: `.claude/plugins/core/scripts/memory_lint.py`.
 Commands: `/core:memory:status`, `:search <query>`, `:remember [lesson]`, `:init` (new project).
@@ -381,7 +385,7 @@ CC injects the role's `MEMORY.md` into the system prompt + Read/Write/Edit. `pro
 dev-write agents, see `memory:` in their frontmatter) → `.claude/agent-memory/<name>/`, under git;
 `local` → `.claude/agent-memory-local/<name>/`, gitignored; `user` → `~/.claude/agent-memory/<name>/`,
 machine-local. Isolated per role (reviewer — review patterns, tester — flaky tests); cross-role
-rules stay in `.claude/memory/`.
+rules stay in `docs/claude/memory/`.
 
 **Capture rail — when to write.** WHEN: the fix took more than one attempt; a recurring trap;
 the user gave a rule/correction; a non-trivial decision outside code/git/plan. FORBID: what

@@ -124,6 +124,7 @@ those — link here instead.
 
 - **Local indexes per worktree:** qex/codegraph each maintain `~/.qex/<hash>` or `.codegraph/codegraph.db`. In a worktree they may re-index from scratch. Acceptable for short tasks, expensive for long ones. Mitigation: have the orchestrator pre-warm the index in the main tree, or accept the overhead.
 - **`.env` / secrets:** if your agent needs `.env`, it's in the worktree only if `.env` is **tracked** (it shouldn't be). Either copy via a setup step or pass via env vars.
+- **A project may override the venv recipe below in `.claude/modes/_stack.md` (Toolchain / Worktree line) — read that line first; it wins over this section.**
 - **uv / venv / `VIRTUAL_ENV` / `uv run pytest` (false-green / false-red trap) — read this before trusting any test run in a worktree:** *(the env-var name is spelled out here on purpose: on 2026-09-10 three agents hit this within one hour and none of them found this section, because they grepped for `VIRTUAL_ENV` and the heading said only "uv / venv")*
   a fresh worktree starts without `.venv/` and without a dev-extra install. `uv run <anything>`
   can silently fall back to the **main tree's** `.venv` (`which pytest` resolves outside your

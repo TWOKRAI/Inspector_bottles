@@ -1,5 +1,5 @@
 ---
-description: Run the Manager agent (Opus) — decompose a task and write the spec
+description: "Run the manager agent (Opus): decompose a task and write the spec plans/<slug>.md. Call to start any non-trivial task."
 ---
 
 > Before decomposing, consider `/core:quality:dashboard` first — a one-command
@@ -12,6 +12,7 @@ Pass it:
 1. The user's task: $ARGUMENTS
 2. Context: "Read CLAUDE.md, study the relevant code, create a plan in `plans/`"
 3. If there are existing plans — point to the path
+4. Before closing a plan, read `plans/queue/ORDER.md` and the plans of adjacent mechanisms; add a two-way link to each (who owns what, what it takes, what it gives, where the conflict is)
 
 **Slug convention (mandatory for Manager):**
 - Format: `kebab-case`, `<domain>-<gist>`, max 40 characters

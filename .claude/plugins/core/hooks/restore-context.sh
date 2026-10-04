@@ -20,7 +20,7 @@ cat <<'CONTEXT'
 2. Commits MUST trail `Refs: plans/<slug>.md` when a plan exists for the branch.
 3. Commit format: `<type>(<scope>): subject` + `Why:` (required) + `Layer:` (required if `.claude/commit-layers.txt` is non-empty). Hook: `scripts/validate_commit/validate_commit.py`.
 4. Session journal: `docs/sessions/YYYY-MM-DD.md` (via `/core:team:wrap-up`).
-5. Long-term memory: `.claude/memory/MEMORY.md` (per "auto memory" rules).
+5. Long-term memory: `<memory_dir>/MEMORY.md` — `memory_dir` in `.claude/modes/_stack.md`, default `.claude/memory` (per "auto memory" rules).
 
 **Safety:**
 - Never `git push --force`, `git reset --hard`, or `--no-verify` (except merge/rebase).

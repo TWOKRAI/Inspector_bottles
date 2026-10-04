@@ -1,6 +1,8 @@
 ---
 name: config-reload-ttl-addressing-guard
 description: config.reload refuses ttl on a throttle-only payload for an unrelated pre-existing reason — don't mistake that refusal for the property under test
+module: "process_module (config.reload)"
+mechanism: "test-writing"
 metadata:
   type: feedback
 ---

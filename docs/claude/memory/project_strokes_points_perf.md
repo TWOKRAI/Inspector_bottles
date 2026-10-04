@@ -1,6 +1,8 @@
 ---
 name: project_strokes_points_perf
 description: webcam_sketch FPS-просадка на детальных кадрах = O(n²) sort + пересчёт каждый кадр; NumPy не векторизует trace_skeleton
+module: "Plugins, numpy"
+mechanism: "O(n^2)-per-frame"
 metadata:
   node_type: memory
   type: project

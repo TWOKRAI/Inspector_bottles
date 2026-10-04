@@ -1,5 +1,6 @@
 ---
-description: Generate a single Russian catalog of this project's factory (agents, commands, skills, modes) into docs/ru/. For a Russian-speaking owner — regenerable, so a manual translator is never needed.
+description: Generate one Russian catalog of the factory (agents, commands, skills, modes) into docs/ru/. Owner-run; the output is regenerable.
+disable-model-invocation: true
 ---
 
 <!-- lint-language: allow -->

@@ -1,6 +1,7 @@
 ---
 name: feedback-removing-waste-reddens-tests-that-measured-it
 description: Убрал лишнюю работу — покраснели тесты, которые её и мерили; красный тут вопрос «что он сторожил», а не сигнал откатиться
+mechanism: "test-resolution"
 metadata:
   type: feedback
 ---
@@ -32,4 +33,4 @@ metadata:
 ставка — штатная процедура, а не авария.
 
 Связано: [[feedback-test-authorship-three-roles]], [[feedback-prove-test-red-without-fix]],
-[[feedback-plausible-is-not-verified]], [[feedback-silent-detector-proves-nothing]].
+[[feedback-plausible-is-not-verified]], [[feedback_zero_observations_looks_like_a_result]].

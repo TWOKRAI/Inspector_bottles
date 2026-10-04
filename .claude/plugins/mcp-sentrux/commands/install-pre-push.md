@@ -1,5 +1,6 @@
 ---
 description: Install the sentrux pre-push hook (blocks push on rule violations/regression)
+disable-model-invocation: true
 ---
 
 Install a git pre-push hook that runs structural checks before every `git push`:

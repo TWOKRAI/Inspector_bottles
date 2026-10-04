@@ -1,6 +1,8 @@
 ---
 name: feedback-emergency-log-reaches-stderr-not-the-log-files
 description: emergency_log пишет в stdlib напрямую и доезжает только до stderr через lastResort; FallbackLogger буферизует до подъёма менеджера и сливает в файл — адрес голоса проверять запуском, а не счётом
+module: "logger_module (_fallback)"
+mechanism: "voice-address"
 metadata:
   type: feedback
 ---

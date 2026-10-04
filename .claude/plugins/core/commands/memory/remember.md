@@ -1,6 +1,8 @@
 ---
-description: Capture a lesson into memory now (Karpathy format) — gate → grep-dedup → file → line in MEMORY.md
+description: "Write a lesson into memory now: gate, grep for duplicates, file, index line. Call after a red-to-green fix or a decision that code, git and the plan do not record."
 ---
+
+**Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.
 
 Manual lesson capture **at the moment of a verified transition** (red→green, fix confirmed,
 decision made) or **at a Task boundary** (X.Y done → X.Y+1 in a multi-phase plan).
@@ -36,13 +38,13 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    for individual words from the lesson AND 1-2 synonyms via `-e`, targeting the
    `description:` lines of existing entries:
    ```bash
-   grep -rinl --include='*.md' -e 'word1' -e 'synonym1' -e 'word2' .claude/memory/ 2>/dev/null
+   grep -rinl --include='*.md' -e 'word1' -e 'synonym1' -e 'word2' <memory_dir>/ 2>/dev/null
    ```
    Even one hit → open the file, decide near-match: yes → **UPDATE** (add the nuance /
    repeat / escalation), fix the line in `MEMORY.md`, **stop here** (don't
    multiply duplicates). Zero hits across **all** variants → a new file (step 3).
 
-3. **No match → new file** `.claude/memory/<kebab-slug>.md` in Karpathy format:
+3. **No match → new file** `<memory_dir>/<kebab-slug>.md` in Karpathy format:
    ```markdown
    ---
    name: <kebab-slug>
@@ -64,7 +66,7 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    older than 90 days (or `memory_stale_days` from `_stack.md`) — update the date at
    the next check/UPDATE, not only when the file is created.
 
-4. **Index.** Add one line to the right section of `.claude/memory/MEMORY.md`:
+4. **Index.** Add one line to the right section of `<memory_dir>/MEMORY.md`:
    ```
    - [Title](slug.md) — <short hook>
    ```
