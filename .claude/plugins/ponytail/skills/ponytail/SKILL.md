@@ -1,6 +1,6 @@
 ---
 name: ponytail
-description: "Pick the laziest working solution: question the need, prefer stdlib and platform features over code or dependencies. Use for new code, a new dependency or a \"make it generic\" ask; not mechanism work."
+description: "Pick the laziest working solution: question the need, prefer stdlib and platform features over code or dependencies. Use for new code, a new dependency or a \"make it generic\" ask (yagni, do less, be lazy); not mechanism work."
 argument-hint: "[lite|full|ultra]"
 license: MIT
 ---

@@ -25,10 +25,11 @@ Lead: the main session. Peers you may message by name — only the roles on this
 - Protocol: `team-protocol` is preloaded for you; if it is not in your context, read
   `.claude/skills/team-protocol/SKILL.md`. Peers you may ask are only those on your
   `Handoff:` chain.
-- Worktree (writers only): you work in `<path beside the repo>` on branch `<branch>`. First
-  command there: `env -u VIRTUAL_ENV uv sync --extra dev`; every later command as
-  `env -u VIRTUAL_ENV uv run …`; run the worktree preflight and paste its output before any
-  test claim. (readers: you work in the shared tree and change no files)
+- Worktree (writers only): you work in `<path beside the repo>` on branch `<branch>`. Never
+  `uv sync`, never `uv run` without `--no-sync` (it swaps the CUDA torch wheel for the CPU one):
+  run `<main checkout>/.venv/Scripts/python.exe` with `PYTHONPATH=<worktree root>`; before any
+  test claim paste `python -c "import multiprocess_framework as m; print(m.__file__)"` run from the
+  same cwd as pytest (path inside the worktree). (readers: you work in the shared tree and change no files)
 - The `DESIGN: … / FILES: … / starting edits` message goes to the lead by name; do not wait
   for an answer.
 - Cannot finish (a decision you may not make, spec contradicts the code, two failed

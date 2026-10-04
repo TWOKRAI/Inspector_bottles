@@ -48,7 +48,7 @@ Always → `qex:search_code` to find usages/callers before modifying a symbol. C
 3. Read all listed files + files discovered via search.
 4. Implement steps strictly in order. When working with a library — consult `context7` (if connected).
 5. After each logical block — smoke-test:
-   - `uv run python -m compileall -q <changed_files>` (syntax check)
+   - `python -m compileall -q <changed_files>` (syntax check)
    - If tests specified: `pytest <path> -x -q`
 6. Verify acceptance criteria from the spec.
 7. Commit with a meaningful message.
@@ -80,4 +80,4 @@ If the spec is incomplete, contradicts code, or is infeasible:
 
 > Project rules preloaded via `skills:`; if absent from context, read `.claude/skills/project-rules/SKILL.md`.
 
-**If spawned with `isolation: "worktree"`** — read `core/agents/_WORKTREE_PATTERN.md` **before your first test run**, in particular the `VIRTUAL_ENV` / `uv run pytest` false-green trap: a worktree inherits the main checkout's `VIRTUAL_ENV`, and `uv run pytest` can silently execute the **main tree's** code instead of yours, making every red/green result meaningless. In THIS project never `uv sync` in a worktree (it swaps the CUDA torch wheel for the CPU one): run the main checkout's `.venv` Python with `PYTHONPATH=<worktree root>` (the package is not an editable install, so the worktree's code wins); prove it with `python -c "import multiprocess_framework as m; print(m.__file__)"` — the path must lie inside the worktree — and put that output in your report (`worktree_preflight.py` is red by design here: pytest lives in the main `.venv`) — a test result without it is not evidence. Measured 2026-09-10: three agents lost time to this in one hour because no pointer to that file existed here.
+**If spawned with `isolation: "worktree"`** — read `core/agents/_WORKTREE_PATTERN.md` **before your first test run**, in particular the `VIRTUAL_ENV` / `uv run pytest` false-green trap: a worktree inherits the main checkout's `VIRTUAL_ENV`, and `uv run pytest` can silently execute the **main tree's** code instead of yours, making every red/green result meaningless. In THIS project never `uv sync` in a worktree and never `uv run` without `--no-sync` (both swap the CUDA torch wheel for the CPU one): run `<main checkout>/.venv/Scripts/python.exe` with `PYTHONPATH=<worktree root>` (the package is not an editable install, so the worktree's code wins); prove it with `python -c "import multiprocess_framework as m; print(m.__file__)"` run from the same cwd as pytest — the path must lie inside the worktree — and put that output in your report (`worktree_preflight.py` is red by design here: pytest lives in the main `.venv`) — a test result without it is not evidence. Measured 2026-09-10: three agents lost time to this in one hour because no pointer to that file existed here.

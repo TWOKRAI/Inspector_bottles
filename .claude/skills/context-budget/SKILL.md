@@ -1,6 +1,6 @@
 ---
 name: context-budget
-description: Read-only audit of what fills the context window in this .claude/ setup; returns a prioritized prune list. Use for 'what is eating my context', token budget, baseline size.
+description: Read-only audit of what fills the context window in this .claude/ setup; returns a prioritized prune list. Use for 'what is eating my context', token budget, baseline size, reducing token usage of the setup (not output style — that is caveman).
 ---
 
 # Context budget audit

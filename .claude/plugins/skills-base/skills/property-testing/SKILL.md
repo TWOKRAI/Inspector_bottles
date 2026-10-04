@@ -1,6 +1,6 @@
 ---
 name: property-testing
-description: Hypothesis property-based tests for round-trips, invariants, oracles and idempotence over a class of inputs. Use for parsers, serializers, numeric code, pure functions with a clear contract.
+description: Hypothesis property-based tests for round-trips, invariants, oracles and idempotence over a class of inputs. Use for parsers, serializers, numeric code, pure functions with a clear contract; to fuzz and find edge cases.
 ---
 
 # Property-based testing (Hypothesis)

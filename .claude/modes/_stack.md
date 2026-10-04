@@ -18,6 +18,7 @@
   `uv sync` сносит необъявленное → только `--inexact`
 - **Test:** `python scripts/run_framework_tests.py` / `python scripts/validate.py` / `make test`.
   Ручной pytest — из корня проекта, иначе `ModuleNotFoundError`. НЕ `uv run pytest -q`
+- **Worktree:** без `uv sync` и без `uv run` без `--no-sync` (CUDA torch → CPU) — `<основное дерево>/.venv/Scripts/python.exe` + `PYTHONPATH=<корень worktree>`; пруф — путь импорта `multiprocess_framework` из того же cwd, что pytest. Переопределяет рецепт `core/agents/_WORKTREE_PATTERN.md`
 - **Gate:** `make gate` (= `make check` + `make test`); `make check` = ruff + pyright + bandit
 - **Агентские прогоны:** всегда `QT_QPA_PLATFORM=offscreen` — Qt-окно вешает агента
 
