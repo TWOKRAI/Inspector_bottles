@@ -146,6 +146,8 @@ class Plan:
     has_after_field: bool = False  # в первых 30 строках есть строка `После:`, даже `—`; в --json не выводится
     header_branch: str = ""  # ветка из строки `Ветка:` / `Branch:` шапки; в --json не выводится
     active: list[dict] = field(default_factory=list)  # worktree со свежим сигналом, привязанные к плану
+    priority: int | None = None  # наименьший `#` из таблицы «Снимок» ORDER.md; в --json не выводится
+    priority_row: SnapRow | None = None  # строка таблицы с этим `#`
     ready: bool = False  # заполняет resolve_deps
     dep_unknown: list[str] = field(default_factory=list)  # имена из `after`, которых нет среди планов
     dep_cycle: list[str] = field(default_factory=list)  # участники цикла, в котором стоит этот план
@@ -932,6 +934,130 @@ def apply_order(plans: list[Plan], rows: list[OrderRow]) -> None:
         r = by_name.get(p.name)
         if r:
             p.tier, p.lane, p.info = r.tier, r.lane, r.info
+
+
+# ----------------------------------------------------------------------------- «Снимок» ORDER.md
+
+
+@dataclass
+class SnapRow:
+    n: int
+    lane: str
+    plan_text: str  # ячейка «План» как простой текст (для строки секции)
+    next_step: str
+    waits: str
+    slugs: list[str] = field(default_factory=list)  # части ячейки «План» вида слага
+
+
+_SNAP_HEAD_RE = re.compile(r"^##[ \t]+Снимок")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9.-]*")
+_SNAP_COLUMNS = {"#": "n", "полоса": "lane", "план": "plan", "следующий шаг": "next", "чего ждёт": "waits"}
+
+
+def _cells(line: str) -> list[str]:
+    cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip())]
+    return cells[1:-1] if cells and cells[0] == "" and cells[-1] == "" else cells
+
+
+def snapshot_slugs(raw_cell: str) -> list[str]:
+    """Имена планов из сырой ячейки «План»: части через `,`; ссылка — имя из пути, иначе текст; только слаги."""
+    out: list[str] = []
+    for part in raw_cell.split(","):
+        part = part.strip()
+        link = _LINK_RE.search(part)
+        name = (_name_from_href(link.group(1)) if link else part.replace("`", "").replace("*", "").strip()) or ""
+        if _SLUG_RE.fullmatch(name) and name not in out:
+            out.append(name)
+    return out
+
+
+def parse_snapshot(path: Path) -> tuple[str, list[SnapRow]]:
+    """Раздел `## Снимок <дата> — …` ORDER.md -> (дата, строки первой таблицы раздела).
+
+    Колонки ищутся по тексту шапки, не по позиции. Строка без целого в `#` пропускается. Нет файла, раздела
+    или колонок `#` / `План` -> строк нет (дата раздела остаётся, если раздел есть).
+    """
+    if not path.is_file():
+        return "", []
+    lines = read_text(path).split("\n")
+    start = next((i for i, ln in enumerate(lines) if _SNAP_HEAD_RE.match(ln)), None)
+    if start is None:
+        return "", []
+    date_m = _DATE_RE.search(lines[start])
+    date = date_m.group(0) if date_m else ""
+    table: list[str] = []
+    for ln in lines[start + 1 :]:
+        if ln.startswith("## "):
+            break
+        if ln.lstrip().startswith("|"):
+            table.append(ln)
+        elif table:
+            break
+    if len(table) < 2:
+        return date, []
+    cols: dict[str, int] = {}
+    for i, c in enumerate(_cells(table[0])):
+        key = _SNAP_COLUMNS.get(clean_md(c).casefold())
+        if key and key not in cols:
+            cols[key] = i
+    if "n" not in cols or "plan" not in cols:
+        return date, []
+    rows: list[SnapRow] = []
+    for ln in table[1:]:
+        cells = _cells(ln)
+
+        def raw(key: str) -> str:
+            i = cols.get(key)
+            return cells[i] if i is not None and i < len(cells) else ""
+
+        number = clean_md(raw("n"))
+        if not re.fullmatch(r"[0-9]+", number):
+            continue
+        rows.append(
+            SnapRow(
+                n=int(number),
+                lane=clean_md(raw("lane")),
+                plan_text=clean_md(raw("plan")),
+                next_step=clean_md(raw("next")),
+                waits=clean_md(raw("waits")),
+                slugs=snapshot_slugs(raw("plan")),
+            )
+        )
+    return date, rows
+
+
+def find_by_slug(plans: list[Plan], slug: str) -> Plan | None:
+    """Точное имя раньше имени с датой `<ГГГГ-ММ-ДД>_<слаг>`; живой раньше архивного; из нескольких — поздняя дата."""
+    dated = re.compile(r"\d{4}-\d{2}-\d{2}_" + re.escape(slug))
+    for matches in (lambda p: p.name == slug, lambda p: bool(dated.fullmatch(p.name))):
+        for archived in (False, True):
+            hits = sorted((p for p in plans if p.archived is archived and matches(p)), key=lambda p: p.name)
+            if hits:
+                return hits[-1]
+    return None
+
+
+def apply_snapshot(plans: list[Plan], rows: list[SnapRow]) -> list[str]:
+    """Приоритет плана = наименьший `#` среди строк, где он назван. Возвращает слаги без плана (без повторов)."""
+    unknown: list[str] = []
+    for row in rows:
+        for slug in row.slugs:
+            plan = find_by_slug(plans, slug)
+            if plan is None:
+                if slug not in unknown:
+                    unknown.append(slug)
+            elif plan.priority is None or row.n < plan.priority:
+                plan.priority, plan.priority_row = row.n, row
+    return unknown
+
+
+def snapshot_findings(unknown: list[str]) -> list[Finding]:
+    """`SNAPSHOT_UNKNOWN` (не блокирует): слаг из «Снимка», которому не нашёлся план."""
+    return [
+        Finding("SNAPSHOT_UNKNOWN", "ORDER.md", None, False, f"в «Снимке» назван план {clean_md(slug, 80)}, его нет")
+        for slug in unknown
+    ]
 
 
 # ----------------------------------------------------------------------------- порядок между планами
@@ -1736,11 +1862,28 @@ def _who_html(active: list[tuple[str, dict]], orphans: list[dict], window_text: 
     return parts
 
 
+def _priority_html(date: str, rows: list[SnapRow]) -> list[str]:
+    """Секция `#priority`: по строке на строку таблицы «Снимок» в её порядке; строк нет — одна пометка."""
+    parts = ['<section id="priority">', f"<h2>{_e('Приоритеты · снимок ' + date if date else 'Приоритеты')}</h2>"]
+    if rows:
+        parts.append("<ol>")
+        for r in rows:
+            text = f"#{r.n} · полоса {r.lane} · {r.plan_text} — дальше: {r.next_step} · ждёт: {r.waits}"
+            parts.append(f'<li data-priority="{r.n}">{_e(text)}</li>')
+        parts.append("</ol>")
+    else:
+        parts.append("<p>в ORDER.md нет таблицы «Снимок»</p>")
+    parts.append("</section>")
+    return parts
+
+
 def _plan_html(p: Plan, in_use: bool) -> str:
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
     if startable(p, in_use):
         attrs += ' data-ready="true"'
     s = [f"<details {attrs}>", "<summary>", f'<span class="name">{_e(p.name)}</span>']
+    if p.priority is not None:
+        s.append(f'<span class="chip" data-chip="priority" data-priority="{p.priority}">#{p.priority}</span>')
     if p.lane:
         s.append(f'<span class="badge">полоса {_e(p.lane)}</span>')
     if p.tier:
@@ -1781,6 +1924,11 @@ def _plan_html(p: Plan, in_use: bool) -> str:
     s.extend(_active_chip(e) for e in p.active)  # после всех прочих чипов; закрытым и архивным тоже
     s.append("</summary>")
     s.append('<div class="body">')
+    if p.priority_row is not None:
+        row = p.priority_row
+        s.append(
+            f'<div class="info"><b>Приоритет #{row.n}:</b> дальше — {_e(row.next_step)}; ждёт — {_e(row.waits)}</div>'
+        )
     s.append(f'<div class="info">{_e(p.rel)}</div>')
     for label, text in p.info:
         s.append(f'<div class="info"><b>{_e(label)}:</b> {_e(text)}</div>')
@@ -1825,6 +1973,8 @@ def to_html(
     root: Path,
     orphans: list[dict] | tuple = (),
     window_text: str = DEFAULT_WINDOW,
+    snapshot_date: str = "",
+    snapshot_rows: list[SnapRow] | tuple = (),
 ) -> str:
     """Страница: `#who`, очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md), `#archive` (архив + закрытые §4.3).
 
@@ -1840,7 +1990,9 @@ def to_html(
         agg[1] += p.total
         agg[2] += 1
     in_use = deps_in_use(live + archive)
-    ready_text = ready_summary(queue, in_use)
+    # очередь на странице: сначала планы с приоритетом по возрастанию `#`, затем остальные в прежнем порядке
+    queue_view = sorted(queue, key=lambda p: (p.priority is None, p.priority or 0))
+    ready_text = ready_summary(queue_view, in_use)
     built = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M UTC%z")
     parts = [
         "<!doctype html>",
@@ -1853,6 +2005,7 @@ def to_html(
         f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
         f"закрыто и в архиве {len(shelved)}</div>",
         f'<div class="meta" id="ready">можно начинать: {ready_text}</div>',
+        *_priority_html(snapshot_date, list(snapshot_rows)),
         '<section class="lanes">',
     ]
     for lane, (done, total, n) in lanes.items():
@@ -1864,7 +2017,7 @@ def to_html(
     parts.append("</section>")
     parts.extend(_who_html([(p.name, e) for p in live + archive for e in p.active], list(orphans), window_text))
     parts.append('<section id="queue">')
-    parts.extend(_plan_html(p, in_use) for p in queue)
+    parts.extend(_plan_html(p, in_use) for p in queue_view)
     parts.append("</section>")
     parts.append('<details id="waiting">')
     parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
@@ -1949,6 +2102,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = parse_order(order_path)
     apply_order(plans, rows)
     resolve_deps(plans)
+    snap_date, snap_rows = parse_snapshot(order_path)
+    snap_unknown = apply_snapshot(plans, snap_rows)
     live, archive = page_order(plans, rows)
     ordered = live + archive
     code = 0
@@ -1976,11 +2131,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(to_html(live, archive, root, orphans, args.active_window), encoding="utf-8")
+        target.write_text(
+            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows), encoding="utf-8"
+        )
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
         baseline = load_baseline(args.baseline) if args.baseline else set()
-        extra = order_block_findings(order_path, live, archive, root)
+        extra = order_block_findings(order_path, live, archive, root) + snapshot_findings(snap_unknown)
         code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout, extra)
     if not (args.json or args.html is not None or args.check or args.sync_order):
         for p in ordered:
