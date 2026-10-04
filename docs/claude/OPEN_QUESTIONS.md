@@ -1671,3 +1671,11 @@ line-sim (scene_source): поиск по Plugins/Services/framework/apps (`data 
 **Что я проверил и чем:** ревьюер стадии 0 Task 1.4: композер `plugin sync` берёт хуки только из `plugin.json` (`merge.py:_merge_hooks`) и сам их не вернёт; upgrade разворачивает из сида — по коду, вживую не проверено. Как upgrade поступит при расхождении хеша в `.seed-manifest.json` (перезапишет или сохранит), не знаю.
 **Чем это грозит, если не разобраться:** хук правки снова умрёт молча, вернутся ~0,3 с мёртвого `check-imports` на каждой правке.
 **Что нужно, чтобы закрыть:** перенести правки Task 1.2 и 1.4 в `devseed` на Mac; до этого после каждого upgrade сверять `git diff .claude/plugins/lang-python .claude/plugins/core/hooks .claude/settings.json`.
+
+## Откуда запускать ручной pytest: два ответа (2026-10-04, ревью спеки Атлас 2.4c)
+
+Корневой `CLAUDE.md`, «Правила проекта» п.4: ручной pytest — из `multiprocess_framework/modules` (там `pytest.ini`). `.claude/modes/_stack.md:20`: из корня проекта, иначе `ModuleNotFoundError`. Оба конфига (`pytest.ini` и `[tool.pytest]`) существуют. Какой ответ верен — не проверено запуском. Решить до правки п.4 (Атлас 2.4c его не трогает по смыслу).
+
+## Seed-файлы спорят с «одним домом» (2026-10-04, ревью спеки Атлас 2.4c)
+
+`memory_lint.py:115` ссылается на несуществующий заголовок «Subagent-memory (нативная CC)»; `precompact-context-save.sh` шлёт открытые вопросы в `docs/sessions/`, а ядро `project-rules` §2 и оба `CLAUDE.md` — в `docs/claude/OPEN_QUESTIONS.md`. Файлы из сида (`.claude/plugins/core/`), вне FILES 2.4c. Править в источнике сида, иначе upgrade вернёт старое.
