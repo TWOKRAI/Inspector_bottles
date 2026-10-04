@@ -28,9 +28,9 @@
 
 ### Контракт владения (ADR-BM-008)
 
-`Stability: partial` — контракт и его тесты есть, реализации нет до Task 0.2.
+`Stability: contract` — контракт, реализация (`core/lifetime.py`, Task 0.2) и тесты.
 
-Один универсальный владелец для подписок, потоков, процессов и виджетов. В `interfaces.py` сейчас только контракт:
+Один универсальный владелец для подписок, потоков, процессов и виджетов. Контракт — в `interfaces.py`:
 
 | Имя | Что это |
 |---|---|
@@ -43,9 +43,10 @@
 | `ScopeClosedError` | `RuntimeError`: `own`/`spawn`/`child` у закрытой или закрывающейся области |
 
 Где что будет:
-- Реализация `Scope`/`Handle` — `core/lifetime.py`, Task 0.2.
-- Корень создаёт только фабрика пакета `open_scope(path, *, budget_s, kill_reserve_s=0.0, reporter=None)` — Task 0.2. Класс `Scope` не экспортируется; снаружи аннотация — только `IScope`/`IHandle`.
-- `unclosed_roots()` — Task 0.2. `Subscribers` — Task 0.3. Qt-адаптеры — Task 0.4.
+- Реализация `Scope`/`Handle` — `core/lifetime.py` (Task 0.2): сегменты и барьер, три фазы, сроки Q3 с общим пределом `K = D + kill_reserve_s`, reporter, `live()`.
+- Дверь — `from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots`. `open_scope(path, *, budget_s, kill_reserve_s=0.0, reporter=None)` — единственный способ создать корень. Классы `Scope`/`Handle` не экспортируются; снаружи аннотация — только `IScope`/`IHandle`.
+- `unclosed_roots()` — корни без начатого `close`: `{"path", "state"}`, `state` ∈ {`open`, `abandoned`}.
+- `BaseManager.scope` — Task 1.2. `Subscribers` — Task 0.3. Qt-адаптеры — Task 0.4.
 
 `interfaces.py` импортирует только stdlib. Пример потребителя — [`docs/INTERFACES_USAGE.md`](docs/INTERFACES_USAGE.md#контракт-владения-iscope--ihandle).
 

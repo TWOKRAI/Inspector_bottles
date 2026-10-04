@@ -10,6 +10,10 @@
 Три допуска остались тихими: слота нет / менеджер `None` / слот выключен. Успешный путь не
 подорожал. Подробности и контракт слота — в [`README.md`](README.md) и [`DECISIONS.md`](DECISIONS.md).
 
+**Реализация владения (Task 0.2, 2026-10-04):** `core/lifetime.py` — `Scope`/`Handle`, дверь `open_scope` и
+`unclosed_roots` в пакете. Тесты: `tests/test_lifetime_scope_acceptance.py` (слепой тестер, 235) +
+`tests/test_lifetime_scope.py` (автор, 11). `BaseManager.scope` — Task 1.2.
+
 **Контракт владения (ADR-BM-008, 2026-10-04, Task 0.1 плана `lifecycle-owner-scope`):** в
 `interfaces.py` добавлены `Stoppable`, `Resource`, `CloseReport`, `Reporter`, `IHandle`, `IScope`,
 `ScopeClosedError` — только контракт и DTO, реализации нет. `Scope`/`Handle`/`open_scope`/`unclosed_roots` —

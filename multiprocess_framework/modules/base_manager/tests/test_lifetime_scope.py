@@ -128,9 +128,10 @@ def test_race_handle_close_against_scope_close_releases_exactly_once():
         cb = _Counter()
         handle = root.own(cb, name="x")
         gate = threading.Barrier(2)
+        reports: list = []
         threads = [
-            threading.Thread(target=lambda: (gate.wait(), handle.close()), daemon=True),
-            threading.Thread(target=lambda: (gate.wait(), root.close()), daemon=True),
+            threading.Thread(target=lambda: (gate.wait(), reports.append(handle.close())), daemon=True),
+            threading.Thread(target=lambda: (gate.wait(), reports.append(root.close())), daemon=True),
         ]
         for t in threads:
             t.start()
@@ -138,6 +139,9 @@ def test_race_handle_close_against_scope_close_releases_exactly_once():
             t.join(5.0)
             assert not t.is_alive()
         assert cb.n == 1
+        # Второй освобождающий без захвата записи не зовёт ресурс повторно (res уже None),
+        # но оставил бы ошибку «NoneType is not callable» — её быть не должно.
+        assert [report.errors for report in reports] == [(), ()]
 
 
 def test_race_failed_thread_pair_lands_in_exactly_one_report():
