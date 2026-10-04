@@ -32,7 +32,13 @@ Usage:
 Used as git commit-msg hook (see scripts/validate_commit/install_hook.sh).
 Exit 0 — OK, exit 1 — validation failed.
 
-Skipped: merge commits (Merge ..., merge: ...), reverts, fixup!/squash!/amend!.
+Skipped: reverts, fixup!/squash!/amend!. Merge commits are validated (v2): `merge: <gist>` with
+Why/Layer/Refs, the default git text `Merge branch ...` is a warning.
+
+v2 mode (plans/2026-10-03_commit-mechanism, Task 2.1): the module constant STRICT picks what the
+phase-3 rules do. Off: they land in `warnings` (stderr, rc 0) with the suffix
+' (error from phase 3)'. On: they land in `errors` (rc 1). Task 3.1 flips the constant;
+there is no environment switch on purpose.
 """
 
 from __future__ import annotations
@@ -57,6 +63,7 @@ ALLOWED_TYPES = {
     "ci",
     "style",
     "revert",
+    "merge",
 }
 
 # Generic defaults. Override by writing layers (one per line) to
@@ -151,7 +158,7 @@ ALLOWED_RISK = {"low", "medium", "high"}
 ALLOWED_REVERSIBLE = {"yes", "no", "migration-needed"}
 
 SUBJECT_RE = re.compile(
-    r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$"
+    r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_./,\-\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$"
 )
 TRAILER_RE = re.compile(r"^([A-Z][A-Za-z\-]*): (.+)$")
 
@@ -229,7 +236,70 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
     "Reviewed-by",
 }
 
-SKIP_PREFIXES = ("Merge ", "merge: ", "Revert ", "fixup!", "squash!", "amend!")
+# `Merge ` and `merge: ` are NOT here any more (v2): merges are validated, see MERGE_DEFAULT_RE.
+SKIP_PREFIXES = ("Revert ", "fixup!", "squash!", "amend!")
+
+# v2 mode switch (Task 2.1). Edit the value, never read it from the environment.
+STRICT = False
+
+# What git itself writes into MERGE_MSG. Only these two shapes count as "default merge text".
+MERGE_DEFAULT_RE = re.compile(r"^Merge (remote-tracking )?branch |^Merge pull request ")
+PHASE3_SUFFIX = " (error from phase 3)"
+SUBJECT_WARN_LEN = 72
+SUBJECT_LONG_LEN = 100
+PLANS_QUEUE_PREFIX = "plans/queue/"
+
+
+def _phase3(result: "ValidationResult", message: str) -> None:
+    """A rule that becomes an error in phase 3: a warning now, an error when STRICT is on."""
+    if STRICT:
+        result.errors.append(message)
+    else:
+        result.warnings.append(message + PHASE3_SUFFIX)
+
+
+def _plan_ref_problem(repo_root: Path | None, ref: str) -> str | None:
+    """Why `ref` (a `plans/....md` path taken from a Refs value) is not an existing plan; None when it is.
+
+    The file is looked up under `repo_root` - the root of the worktree the commit is made in, so a
+    plan that exists only in another worktree does not count. `plans/queue/` and `*.result.md` are
+    files under the plans directory that are not plans.
+    """
+    if ".." in ref.split("/"):
+        return f"{ref}: '..' in the path"
+    if ref.startswith(PLANS_QUEUE_PREFIX):
+        return f"{ref}: plans/queue/ holds queued items, not plans"
+    if ".result" in ref.rsplit("/", 1)[-1]:
+        return f"{ref}: a .result file is a task report, not a plan"
+    if repo_root is None or not (repo_root / ref).is_file():
+        return f"{ref}: no such file in the working tree"
+    return None
+
+
+def _refs_problem(repo_root: Path | None, plan_path: str, refs: list[str]) -> str | None:
+    """Error text when no `Refs:` value names an existing plan; None when one does (any plan will do)."""
+    if not refs:
+        return (
+            f"Branch has a plan ({plan_path}) but commit is missing matching "
+            f"`Refs:` trailer.\n"
+            f"  Add: Refs: {plan_path}\n"
+            f"  (any existing plan file is accepted)"
+        )
+    problems: list[str] = []
+    for value in refs:
+        candidates = PLAN_PATH_RE.findall(value)
+        if not candidates:
+            problems.append(f"{value!r}: no plans/....md path")
+        for ref in candidates:
+            problem = _plan_ref_problem(repo_root, ref)
+            if problem is None:
+                return None
+            problems.append(problem)
+    return (
+        f"Branch has a plan ({plan_path}) but no `Refs:` value names an existing plan.\n"
+        f"  Problems: {'; '.join(problems)}\n"
+        f"  Add: Refs: {plan_path}"
+    )
 
 
 # ────────────────────────── Structures ──────────────────────────
@@ -849,12 +919,19 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
     trailers: dict[str, list[str]] = {}
     while paragraphs:
         last = paragraphs[-1]
-        if all(TRAILER_RE.match(line) for line in last):
+        # Git-style folding: a paragraph is a trailer block when it STARTS with a
+        # trailer line. Non-matching lines inside the block fold into the previous
+        # trailer's value, so a wrapped Why:/Layer: value does not drop the whole
+        # block into the body (false "Missing required trailers").
+        if TRAILER_RE.match(last[0]):
+            current_key: str | None = None
             for line in last:
                 m = TRAILER_RE.match(line)
                 if m:
-                    key, val = m.group(1), m.group(2).strip()
-                    trailers.setdefault(key, []).append(val)
+                    current_key, val = m.group(1), m.group(2).strip()
+                    trailers.setdefault(current_key, []).append(val)
+                elif current_key is not None:
+                    trailers[current_key][-1] = f"{trailers[current_key][-1]} {line.strip()}"
             paragraphs.pop()
         else:
             break
@@ -885,11 +962,17 @@ def validate(
 
     first_line = text.splitlines()[0]
     if any(first_line.startswith(p) for p in SKIP_PREFIXES):
-        return result  # merge/revert/fixup — skip validation
+        return result  # revert/fixup/squash/amend — skip validation
+
+    if MERGE_DEFAULT_RE.match(first_line):
+        # The text git writes on its own: not Conventional Commits, no room for trailers.
+        _phase3(result, "default git merge text - write `merge: <gist>` with Why/Layer/Refs trailers")
+        return result
 
     layers = allowed_layers if allowed_layers is not None else load_allowed_layers()
     layer_required = bool(layers)
-    required = REQUIRED_BASE_TRAILERS | ({"Layer"} if layer_required else set())
+    # Only Why is a hard requirement; Layer and Refs are phase-3 rules (see "2b" below).
+    required = set(REQUIRED_BASE_TRAILERS)
 
     # Resolve plan for current branch (if not explicitly provided).
     if plan_path is ...:
@@ -937,10 +1020,42 @@ def validate(
     if t not in ALLOWED_TYPES:
         result.errors.append(f"Unknown type '{t}'. Allowed: {sorted(ALLOWED_TYPES)}")
 
+    is_merge = t == "merge"
+    if is_merge:
+        required = set()  # a merge's trailers are phase-3 warnings, see "2b"
+        if m.group("scope"):
+            result.errors.append("Type 'merge' takes no scope: write `merge: <gist>`")
+
+    # A long first line is advice, never a refusal in any mode (owner's decision).
+    if len(subject) > SUBJECT_LONG_LEN:
+        result.warnings.append(f"subject longer than {SUBJECT_LONG_LEN} characters ({len(subject)})")
+    elif len(subject) > SUBJECT_WARN_LEN:
+        result.warnings.append(f"subject longer than {SUBJECT_WARN_LEN} characters ({len(subject)})")
+
     # 2. Blank line between subject and body
     full_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
     if len(full_lines) >= 2 and full_lines[1].strip():
         result.errors.append("Missing blank line between subject and body")
+
+    # 2b. Phase-3 trailer rules: a warning while STRICT is off, an error once it is on.
+    unknown_layers: set[str] = set()
+    if layer_required:
+        for val in trailers.get("Layer", []):
+            unknown_layers |= {x.strip() for x in val.split(",") if x.strip()} - layers
+    layer_missing = layer_required and "Layer" not in trailers
+    if is_merge:
+        # One warning for any of the three; Refs is required on a merge whether or not the branch has a plan.
+        if "Why" not in trailers or layer_missing or unknown_layers or "Refs" not in trailers:
+            _phase3(result, "merge commit without Why/Layer/Refs - a merge needs all three trailers")
+    else:
+        if layer_missing:
+            _phase3(result, f"Layer missing - add `Layer: <one of {sorted(layers)}>`")
+        if unknown_layers:
+            _phase3(
+                result,
+                f"Layer not in list: {sorted(unknown_layers)}. "
+                f"Allowed: {sorted(layers)} (configure via {LAYERS_CONFIG_REL})",
+            )
 
     # 3. Required trailers
     missing = required - set(trailers.keys())
@@ -953,17 +1068,7 @@ def validate(
             f"  Add at end of message (after blank line):\n{hint}"
         )
 
-    # 4. Trailer value validation
-    if "Layer" in trailers and layer_required:
-        for val in trailers["Layer"]:
-            given = {x.strip() for x in val.split(",") if x.strip()}
-            unknown = given - layers
-            if unknown:
-                result.errors.append(
-                    f"Layer: unknown values {sorted(unknown)}. Allowed: {sorted(layers)}\n"
-                    f"  (configure via {LAYERS_CONFIG_REL})"
-                )
-
+    # 4. Trailer value validation (Layer values: see 2b)
     if "Risk" in trailers:
         for val in trailers["Risk"]:
             level = val.split("—")[0].split("-")[0].strip().lower()
@@ -995,18 +1100,14 @@ def validate(
                 )
 
     # 6. Plan-driven workflow: if branch has a plan, require matching Refs trailer.
+    # v2: ANY existing plan file satisfies it (not only the branch's own); a merge with no Refs at
+    # all is reported by the merge warning in 2b instead.
     if plan_path:
         refs = trailers.get("Refs", [])
-        # Plan path without extension: `plans/<slug>` (works for both
-        # `plans/<slug>.md` and `plans/<slug>/plan.md` / `phase-N.md`).
-        plan_prefix = plan_path.rsplit("/plan.md", 1)[0].rsplit(".md", 1)[0]
-        if not any(plan_prefix in val for val in refs):
-            result.errors.append(
-                f"Branch has a plan ({plan_path}) but commit is missing matching "
-                f"`Refs:` trailer.\n"
-                f"  Add: Refs: {plan_path}\n"
-                f"  (or for multi-phase plans, ref the specific phase file)"
-            )
+        if refs or not is_merge:
+            problem = _refs_problem(find_repo_root(), plan_path, refs)
+            if problem:
+                result.errors.append(problem)
 
     # 7. Tests-discipline gate (Task 6.2): fires only when a staged path
     # matches tests_gate_code minus tests_gate_exclude. When it fires, the
@@ -1014,7 +1115,7 @@ def validate(
     # trailer matching `tests/<path>` | `skip (<reason>)`. Degrades silently
     # (never fires) if staged paths can't be determined — see staged_files().
     gate_cfg = load_tests_gate_config()
-    if gate_cfg.enabled:
+    if gate_cfg.enabled and not is_merge:  # the merged branch's own commits were gated already
         gate_repo_root = find_repo_root()
         staged = staged_files(gate_repo_root) if gate_repo_root else None
         if staged:
