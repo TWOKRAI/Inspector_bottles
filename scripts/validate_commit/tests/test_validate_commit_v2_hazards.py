@@ -26,6 +26,11 @@
       второе; предупреждения о длине НЕ несут суффикс «error from phase 3» (отказа нет ни в каком режиме).
   H9  Scope с точкой не ослабил остальное: заглавная буква в scope по-прежнему отказ; `merge` со scope —
       отказ даже при полных трейлерах.
+  H10 Refs у слияния — только при плане ветки. Реализация требовала Refs у `merge:` всегда: слияние на ветке
+      без плана (`main`) с Why+Layer получало W-MERGE-TRAILERS. Закрепляем: без плана — тишина и rc 0 в
+      ОБОИХ режимах; контроль в том же тесте — без Why предупреждение остаётся.
+  H11 Любой текст `Merge ...` — текст git (`Merge tag`, `Merge commit`): v1 их пропускал, поэтому фаза 2
+      даёт rc 0 + предупреждение; под STRICT — rc 1. Узкий regex отклонял их как «не Conventional Commits».
 
 Метод: валидатор запускается ПОДПРОЦЕССОМ (`python <копия> -`, сообщение на stdin) в tmp-репозитории; сверяются
 rc и литеральные подстроки stderr. Окружение: git без глобального конфига, `GIT_*` вычищены.
@@ -302,3 +307,56 @@ def test_h9_merge_with_a_scope_is_refused_even_with_full_trailers(copy: str, rep
     rc, text = _validate(copy, repo, f"merge(x): слияние\n\n{FULL}")
     assert rc == 1
     assert "takes no scope" in text
+
+
+# --------------------------------------------------------------------------- H10, H11 (both modes)
+
+
+def _strict_copy(copy: str, target_dir: Path) -> Path:
+    text = COPIES[copy].read_bytes().decode("utf-8")
+    assert text.count("STRICT = False") == 1
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / "validate_commit.py"
+    target.write_bytes(text.replace("STRICT = False", "STRICT = True").encode("utf-8"))
+    return target
+
+
+@pytest.fixture
+def no_plan_repo(tmp_path: Path) -> Path:
+    root = _init(tmp_path / "noplan", "main")
+    _write(root / ".claude" / "commit-layers.txt", LAYERS)
+    _write(root / "README.md", "x\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h10_merge_without_refs_on_a_branch_without_a_plan_is_silent_in_both_modes(
+    copy: str, no_plan_repo: Path, tmp_path: Path
+) -> None:
+    message = f"merge: feat/x в main — что вошло\n\n{WHY}\nLayer: docs\n"
+    strict = _strict_copy(copy, tmp_path / "strict")
+
+    rc_off, text_off = _validate(copy, no_plan_repo, message)
+    rc_on, text_on = _run([sys.executable, str(strict), "-"], no_plan_repo, stdin_data=message.encode("utf-8"))
+
+    assert (rc_off, rc_on) == (0, 0), f"{text_off}\n{text_on}"
+    assert "WARNING" not in text_off and "merge commit without" not in text_on, f"{text_off}\n{text_on}"
+    # control: the warning is still alive when Why is missing
+    rc_ctl, text_ctl = _validate(copy, no_plan_repo, "merge: feat/x в main\n\nLayer: docs\n")
+    assert rc_ctl == 0 and "merge commit without Why/Layer/Refs" in text_ctl
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("message", ["Merge tag 'v1.0'\n", "Merge commit 'abc123'\n"])
+def test_h11_any_merge_text_is_a_warning_and_under_strict_an_error(
+    copy: str, message: str, no_plan_repo: Path, tmp_path: Path
+) -> None:
+    strict = _strict_copy(copy, tmp_path / "strict")
+
+    rc_off, text_off = _validate(copy, no_plan_repo, message)
+    rc_on, text_on = _run([sys.executable, str(strict), "-"], no_plan_repo, stdin_data=message.encode("utf-8"))
+
+    assert rc_off == 0 and "default git merge text" in text_off and PHASE3 in text_off, text_off
+    assert rc_on == 1 and "default git merge text" in text_on, text_on

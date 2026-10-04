@@ -238,8 +238,9 @@ SKIP_PREFIXES = ("Revert ", "fixup!", "squash!", "amend!")
 # v2 mode switch (Task 2.1). Edit the value, never read it from the environment.
 STRICT = False
 
-# What git itself writes into MERGE_MSG. Only these two shapes count as "default merge text".
-MERGE_DEFAULT_RE = re.compile(r"^Merge (remote-tracking )?branch |^Merge pull request ")
+# What git itself writes into MERGE_MSG: ANY first line that starts with "Merge " (branch, remote-tracking,
+# pull request, tag, commit, ...). v1 skipped them all, so phase 2 must not refuse any of them.
+MERGE_DEFAULT_RE = re.compile(r"^Merge ")
 PHASE3_SUFFIX = " (error from phase 3)"
 SUBJECT_WARN_LEN = 72
 SUBJECT_LONG_LEN = 100
@@ -1020,8 +1021,10 @@ def validate(
             unknown_layers |= {x.strip() for x in val.split(",") if x.strip()} - layers
     layer_missing = layer_required and "Layer" not in trailers
     if is_merge:
-        # One warning for any of the three; Refs is required on a merge whether or not the branch has a plan.
-        if "Why" not in trailers or layer_missing or unknown_layers or "Refs" not in trailers:
+        # One warning for any of the three. Refs counts only when the branch resolves to a plan, as for a
+        # plain commit (rule 6).
+        refs_missing = bool(plan_path) and "Refs" not in trailers
+        if "Why" not in trailers or layer_missing or unknown_layers or refs_missing:
             _phase3(result, "merge commit without Why/Layer/Refs - a merge needs all three trailers")
     else:
         if layer_missing:
