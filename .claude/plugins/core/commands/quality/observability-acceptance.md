@@ -15,6 +15,9 @@ description: Приёмка наблюдаемости глазами потре
 3. Ollama не нужна; MCP `backend-ctl` не нужен (зонд идёт голым `BackendDriver`), но если MCP-сессия
    параллельно держит соединение — её `self_cost` сдвигает счётчики строк.
 
+Живой GUI-стенд, если приёмке он нужен, поднимать только боевым входом `multiprocess_prototype/run.py` с
+`INSPECTOR_GUI_UNATTENDED=1` и настоящими окнами (не `offscreen`).
+
 ```bash
 PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m backend_ctl.probes.probe_observability_consumer_acceptance
 ```

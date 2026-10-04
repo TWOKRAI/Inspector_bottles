@@ -95,6 +95,8 @@ Co-Authored-By: ...
 
 **Обязательны:** `Why:` и `Layer:`. Без них hook отклонит коммит. Полный гайд — [`docs/claude/COMMIT_GUIDE.md`](docs/claude/COMMIT_GUIDE.md). Whitelist'ы значений в [`scripts/validate_commit/validate_commit.py`](scripts/validate_commit/validate_commit.py).
 
+**Merge в `main`:** тема `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`; `git merge -F -` не читает stdin — сообщение берут из файла.
+
 ## Plan-Driven Development
 
 Новые планы создаются через `/plan` с единой конвенцией:
@@ -103,6 +105,7 @@ Co-Authored-By: ...
 - **Refs:** коммит из плана **обязан** содержать `Refs: plans/<slug>.md` (enforce на уровне агентов)
 - **Коммиты плана:** создание/закрытие — отдельный `docs(plans):` коммит. Статусы задач — допустимо в коммите кода
 - **Статус:** `/plan-status` — прогресс по текущей ветке
+- **Один активный план на инструмент или модуль:** новую работу добавляют фазой в него, не новым файлом
 
 Подробности — в [`plans/` конвенциях](.claude/commands/dev/plan.md) и промптах агентов.
 

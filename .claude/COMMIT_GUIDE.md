@@ -43,6 +43,8 @@ Breaking change → `!` suffix: `feat(api)!: drop legacy endpoint`.
 
 - ❌ Дублировать body и `Why:` — body = что, Why = почему
 - ❌ `--no-verify` для обхода валидации (только merge/rebase fixes)
+- ❌ `Layer: tools` для `backend_ctl` — в whitelist нет `tools`; коммиты `backend_ctl` идут с `Layer: mixed`
+- ❌ Merge в `main` без формата: тема `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`; `git merge -F -` не читает stdin — сообщение из файла
 - ❌ Переводить ключи trailers (`Зачем:`, `Слой:`) — parser expects Latin
 - ❌ `Tested:` в body — должен быть отдельный trailer для `git log --grep`
 

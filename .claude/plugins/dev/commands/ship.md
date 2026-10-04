@@ -28,6 +28,9 @@ Run the final check before shipping the code:
    `pytest.mark.xfail(strict=True, reason="<issue or OPEN_QUESTIONS link>")` committed
    before the ship — never a skip without a reason, never "known red, ship anyway".
 
+   **A gate result is valid only for the HEAD it ran on.** A commit after the run means a re-run;
+   at acceptance, run the gate yourself — do not quote another run.
+
    Plans format check — if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists
    (`make gate` does not run `scripts/validate.py`); otherwise skip this step without error (project-specific):
    ```bash
@@ -45,6 +48,8 @@ Run the final check before shipping the code:
      an independent test was written and the reviewer ran a break-injection, or the
      test skip is explicitly recorded in the plan AND in the commit body. Neither one —
      **do not ship**, go back to tester/reviewer.
+   - **Dark-launch flags:** a task that introduced a flag is closed only when the flag and its OFF
+     branch are deleted. A flag still in the code is an open item — do not ship it as done.
    - **Injection record (Task 6.2):** if the branch changed `tests/**` — its plan
      must contain a **filled-in** `property | predicted red | observed red` row
      (the "Injections" section in the plan or `plans/<slug>/injections.md`). The table
@@ -112,6 +117,8 @@ fi
    - If everything is green — propose a commit message in the correct format
      (see below) and ask permission to push
    - If there are errors — show them and propose a fix
+   - **Formal review before a merge into `main`:** a `/code-review` (or a `reviewer` verdict with
+     reproductions) must be in the transcript. Without it, the merge is blocked.
    - **Phase gates are not waived by transport:** phase closed → `cto` acceptance (S7);
      merge into `main` → `cto` merge gate → owner. Rows —
      [`team-protocol`](../skills/team-protocol/SKILL.md) §5. `/dev:ship` is a quality
