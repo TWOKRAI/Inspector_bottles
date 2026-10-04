@@ -1,5 +1,5 @@
 ---
-description: Dependency Structure Matrix — module relationships and cycles
+description: "Dependency Structure Matrix: module relations and cycles. Call to find coupling and import cycles."
 ---
 
 Run the DSM analysis:

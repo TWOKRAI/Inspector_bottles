@@ -1,5 +1,6 @@
 ---
 description: Turn ON the qex post-commit auto-reindex (OFF by default — the index is rebuilt only by /mcp-qex:qex-reindex; no-ops when Ollama/qex is down)
+disable-model-invocation: true
 ---
 
 The qex reindex is a **PART** (`hooks/git/post-commit.d/qex-reindex.sh`) run by the core

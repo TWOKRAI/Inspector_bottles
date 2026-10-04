@@ -1,5 +1,5 @@
 ---
-description: Test-to-code volume ratio per module (LOC-based)
+description: Test-to-code LOC ratio per module. Call to find under-tested modules.
 ---
 
 Run the test-ratio count:

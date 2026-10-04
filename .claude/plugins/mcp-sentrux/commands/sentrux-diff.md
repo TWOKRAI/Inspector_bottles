@@ -1,5 +1,5 @@
 ---
-description: Compare current state against the recorded baseline (session_end)
+description: Compare the current state with the recorded baseline (session_end). Call after a refactor.
 ---
 
 Compare the current quality against the baseline saved via `/mcp-sentrux:sentrux-baseline`:

@@ -1,5 +1,6 @@
 ---
 description: Check .claude/settings.json — are critical deny/ask/allow and hooks in place?
+disable-model-invocation: true
 ---
 
 Run the `settings.json` invariant check:

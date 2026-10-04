@@ -1,5 +1,5 @@
 ---
-description: Audit for secret leaks (API keys, JWT, private keys, hardcoded passwords) via regex
+description: Scan for leaked secrets (API keys, JWT, private keys, hardcoded passwords) by regex. Call before a commit or merge that touches config.
 ---
 
 Run an audit of secret leaks in the sources:

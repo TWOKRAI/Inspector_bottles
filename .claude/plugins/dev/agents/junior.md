@@ -56,7 +56,7 @@ question "what is the intended fix?".
 1. Apply the changes file by file, in the order listed, with targeted edits, not rewrites.
 2. After the last file, run exactly the verification the task names. If it names none:
    `ruff check <files you touched>`, and for each test file you touched
-   `uv run python -m pytest <file> -q` from the repository root, per the run command in
+   `python -m pytest <file> -q` from the repository root, per the run command in
    `.claude/modes/_stack.md`.
 3. Paste the last lines of the real output into the report. A green run you did not execute
    is not a result.

@@ -1,5 +1,5 @@
 ---
-description: Rebuild docs/PROJECT_CONTEXT.md from per-module CONTEXT.md and DECISIONS.md
+description: Rebuild docs/PROJECT_CONTEXT.md from per-module CONTEXT.md and DECISIONS.md. Call after module context or ADR changes.
 ---
 
 # /core:quality:sync-context — update the project-wide context registry

@@ -1,5 +1,5 @@
 ---
-description: Check architectural invariants from .sentrux/rules.toml
+description: Run the MCP check_rules on .sentrux/rules.toml (partial on the free tier; sentrux-check is the full verdict). Call as a quick signal after cross-layer changes.
 ---
 
 Run the `.sentrux/rules.toml` rule check:

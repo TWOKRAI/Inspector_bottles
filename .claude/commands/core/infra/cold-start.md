@@ -1,5 +1,5 @@
 ---
-description: Cold start the environment — Ollama serve + venv check (cross-platform)
+description: "Start the environment: ollama serve plus venv check. Call before qex or any session that needs embeddings."
 ---
 
 Prepare the project environment after a reboot or from scratch.

@@ -1,5 +1,5 @@
 ---
-description: Snapshot of project architectural health (scan + health), metrics and bottleneck
+description: "Snapshot of architectural health (scan plus health): metrics and the main bottleneck. Call for a quick overall check."
 ---
 
 Run the sentrux project health check:

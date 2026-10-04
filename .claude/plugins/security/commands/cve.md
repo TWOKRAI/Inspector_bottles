@@ -1,5 +1,5 @@
 ---
-description: Scan dependencies for known CVEs via OSV-Scanner (lockfile → OSV.dev advisories)
+description: Scan dependencies for known CVEs with OSV-Scanner (lockfile to OSV.dev advisories). Call before a release or after a dependency bump.
 ---
 
 Просканируй зависимости проекта на известные уязвимости (CVE/GHSA) через OSV-Scanner —

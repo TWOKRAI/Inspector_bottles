@@ -1,5 +1,6 @@
 ---
-description: Initialize <memory_dir>/ for a new project — skeleton MEMORY.md
+description: Create the memory directory skeleton (MEMORY.md) for a new project. Owner-run, once per project.
+disable-model-invocation: true
 ---
 
 **Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.

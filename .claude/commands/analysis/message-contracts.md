@@ -1,5 +1,5 @@
 ---
-description: Дамп Message / SchemaBase / BaseModel классов с полями (AST)
+description: Дамп классов Message / SchemaBase / BaseModel с полями (AST). Звать при смене IPC-контракта или схемы, чтобы увидеть, что идёт через границу процессов.
 ---
 
 Запусти AST-дамп контрактов:

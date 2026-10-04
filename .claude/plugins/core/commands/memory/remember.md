@@ -1,5 +1,5 @@
 ---
-description: Capture a lesson into memory now (Karpathy format) — gate → grep-dedup → file → line in MEMORY.md
+description: "Write a lesson into memory now: gate, grep for duplicates, file, index line. Call after a red-to-green fix or a decision that code, git and the plan do not record."
 ---
 
 **Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.

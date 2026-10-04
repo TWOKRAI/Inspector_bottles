@@ -1,5 +1,6 @@
 ---
 description: Precise LOC count via tokei (shares the TOML with /core:quality:code-stats)
+disable-model-invocation: true
 ---
 
 Run the tokei wrapper:

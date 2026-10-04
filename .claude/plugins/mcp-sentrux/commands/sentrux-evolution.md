@@ -1,5 +1,5 @@
 ---
-description: Historical project quality dynamics (metric trends)
+description: Historical trend of project quality metrics. Call to see whether health improves or decays over time.
 ---
 
 Show how the project's quality changed over time:

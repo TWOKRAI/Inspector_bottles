@@ -1,5 +1,5 @@
 ---
-description: Inventory of TODO/FIXME/HACK with git blame (author, age)
+description: List TODO/FIXME/HACK markers with git blame (author, age). Call to find stale deferred work or before a cleanup pass.
 ---
 
 Run a tech-debt inventory:

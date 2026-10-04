@@ -1,5 +1,5 @@
 ---
-description: Search project memory (<memory_dir>/ + docs/sessions/) — grep + optional qex
+description: Search project memory and docs/sessions/ by keyword (grep, optional qex). Call to recall a past decision or a recurring trap.
 ---
 
 **Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.

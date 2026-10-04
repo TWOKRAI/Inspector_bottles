@@ -1,5 +1,5 @@
 ---
-description: Show the current development team — agents, models, roles
+description: "Show the current development team: agents, models, roles. Call to check who can take a task."
 ---
 
 Show the project's current agent roster (auto-discovery).

@@ -1,12 +1,6 @@
 ---
 name: context-budget
-description: >
-  Audit what consumes the context window in THIS project's .claude/ setup and
-  report a prioritized prune list. Read-only diagnostic — makes no changes.
-  Use when the user asks "what's eating my context", "audit token budget",
-  "why is the baseline so big", "context cost", "which plugins/MCP to disable",
-  "reduce token usage", or invokes "/context-budget". Distinct from `caveman`
-  (compresses live output) — this audits the always-loaded baseline.
+description: Read-only audit of what fills the context window in this .claude/ setup; returns a prioritized prune list. Use for 'what is eating my context', token budget, baseline size, reducing token usage of the setup (not output style — that is caveman).
 ---
 
 # Context budget audit

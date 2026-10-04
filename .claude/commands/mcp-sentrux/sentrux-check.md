@@ -1,5 +1,5 @@
 ---
-description: CI-friendly architecture rule check (sentrux check, exit 0/1)
+description: Run the sentrux check CLI against .sentrux/rules.toml (exit 0/1). Call for the layer-boundary verdict; the MCP check_rules covers only part of the rules.
 ---
 
 Run the `sentrux check` CLI validator — it fits CI and pre-commit, exits with code 0 (all clear) or 1 (violations found).

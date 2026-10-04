@@ -1,5 +1,5 @@
 ---
-description: Generate a CycloneDX SBOM (Software Bill of Materials) via syft/cdxgen — Trivy avoided
+description: Generate a CycloneDX SBOM with syft or cdxgen. Call when a bill of materials is requested.
 ---
 
 Сгенерируй SBOM (Software Bill of Materials) в формате CycloneDX JSON — машинный

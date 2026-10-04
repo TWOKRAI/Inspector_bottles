@@ -1,5 +1,6 @@
 ---
 description: Update a pinned plugin <id> — consume (re-pin version/sha) OR git β (re-clone to a new ref + atomic swap + recompose)
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin update*)
 ---
 

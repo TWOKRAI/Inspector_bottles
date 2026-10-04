@@ -1,5 +1,5 @@
 ---
-description: Count files/lines/characters per a TOML config (scripts/code_stats/)
+description: Count files, lines and characters per a TOML config (scripts/code_stats/). Call for codebase size metrics.
 ---
 
 Run the code stats counter:
