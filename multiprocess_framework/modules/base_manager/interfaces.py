@@ -237,12 +237,15 @@ class IObservableMixin(ABC):
 
 @runtime_checkable
 class Stoppable(Protocol):
-    """Ресурс с двухфазным остановом: запрос → ожидание к абсолютному сроку.
+    """Ресурс со своим потоком управления: поток, процесс, QThread, пул, блокирующее устройство, сток.
+
+    Останов в две обязательные фазы: запрос → ожидание к абсолютному сроку.
 
     Обязательные члены:
 
-    - ``request_stop()`` — фаза 1. Не блокирует, идемпотентен, вызывается
-      из любого потока.
+    - ``request_stop()`` — фаза 1. Не блокирует, идемпотентно, любой поток.
+      Прерывает блокирующие вызовы. Для стока: закрыть вход; дренирование и
+      выход — его дело до ``join_until`` (★5б).
     - ``join_until(deadline)`` — фаза 2. ``deadline`` — абсолютное значение
       ``time.monotonic()``, а не относительный таймаут. ``True`` = ресурс
       остановлен. На таймауте возвращает ``False`` и не бросает.
@@ -277,14 +280,17 @@ class Stoppable(Protocol):
     """
 
     def request_stop(self) -> None:
-        """Фаза 1: попросить остановиться. Не блокирует, идемпотентен."""
+        """Фаза 1. Не блокирует, идемпотентно, любой поток. Прерывает блокирующие вызовы.
+
+        Для стока: закрыть вход; дренирование и выход — его дело до join_until (★5б).
+        """
         ...
 
     def join_until(self, deadline: float) -> bool:
-        """Фаза 2: ждать остановки до абсолютного ``time.monotonic()``.
+        """Фаза 2. Ждать до абсолютного time.monotonic(). True = остановлен. На таймауте не бросает.
 
-        Возвращает ``True``, если ресурс остановлен; ``False`` на таймауте.
-        Не бросает на таймауте.
+        На таймауте возвращает ``False``. Не ``join``: у Thread/Process/QThread
+        join(timeout) относительный и без результата (Q1, ред. 3.1).
         """
         ...
 
@@ -292,8 +298,12 @@ class Stoppable(Protocol):
 Resource = Stoppable | Callable[[], object]
 """Что принимает ``IScope.own``: ``Stoppable`` или вызываемое без аргументов.
 
-Вызываемое — функция освобождения (например, отписка): её зовут один раз при
-закрытии, фазы 2 у неё нет.
+Вызываемое — подписка, сокет, файл, хук плагина: функция освобождения, её
+зовут один раз при закрытии, фазы 2 у неё нет.
+
+Псевдоним только для аннотаций, не для ``isinstance``: ``isinstance(x, Resource)``
+бросает ``TypeError`` (parameterized generic). Различать через ``Stoppable`` /
+``callable`` — в этом порядке.
 """
 
 
@@ -308,12 +318,36 @@ def _sequence_as_tuple(field_name: str, value: object) -> tuple:
     return tuple(value)  # type: ignore[arg-type]
 
 
-def _error_pair(value: object) -> tuple[str, str]:
-    """Привести одну пару ``errors`` к кортежу ровно из двух элементов."""
-    pair = _sequence_as_tuple("errors[i]", value)
+def _str_tuple(field_name: str, value: object) -> tuple[str, ...]:
+    """Последовательность строк → кортеж; элемент не ``str`` — ``TypeError`` с именем поля."""
+    items = _sequence_as_tuple(field_name, value)
+    for index, item in enumerate(items):
+        _require_type(f"{field_name}[{index}]", item, str, "str")
+    return items
+
+
+def _error_pair(index: int, value: object) -> tuple[str, str]:
+    """Привести одну пару ``errors`` к кортежу ровно из двух строк."""
+    field_name = f"errors[{index}]"
+    pair = _sequence_as_tuple(field_name, value)
     if len(pair) != 2:
-        raise TypeError(f"CloseReport.errors[i]: ожидается пара (путь, текст ошибки), получено элементов: {len(pair)}")
+        raise TypeError(
+            f"CloseReport.{field_name}: ожидается пара (путь, текст ошибки), получено элементов: {len(pair)}"
+        )
+    _require_type(f"{field_name}[0]", pair[0], str, "str")
+    _require_type(f"{field_name}[1]", pair[1], str, "str")
     return pair  # type: ignore[return-value]
+
+
+def _require_type(field_name: str, value: object, expected: type | tuple[type, ...], label: str) -> None:
+    """``TypeError`` с именем поля, если ``value`` не того типа.
+
+    ``bool`` — подкласс ``int``, поэтому для числовых полей он отвергается
+    явно: ``emits_after_close=True`` или ``elapsed_s=False`` — ошибка вызывающего.
+    """
+    is_bool_in_number = isinstance(value, bool) and expected is not bool
+    if is_bool_in_number or not isinstance(value, expected):
+        raise TypeError(f"CloseReport.{field_name}: ожидается {label}, получено {type(value).__name__}")
 
 
 @dataclass(frozen=True)
@@ -341,6 +375,13 @@ class CloseReport:
     не равен такому же с кортежами. Строка на месте последовательности или
     пары — ``TypeError``; пара не из двух элементов — ``TypeError``.
 
+    Он же проверяет типы, ``TypeError`` называет поле: ``path`` — ``str``;
+    ``elapsed_s`` — ``int``/``float``, не ``bool``; элементы ``survivors``,
+    ``killed`` и обе части каждой пары ``errors`` — ``str``;
+    ``emits_after_close`` — ``int``, не ``bool``; ``complete`` — ``bool``.
+    Иначе ``survivors=(b"x",)`` уронил бы ``json.dumps(to_dict())``, а
+    ``complete=""`` дал бы ``ok == ""``.
+
     Граница процесса — ``to_dict`` / ``from_dict`` (правило Dict at Boundary).
     """
 
@@ -353,10 +394,14 @@ class CloseReport:
     complete: bool = True
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "survivors", _sequence_as_tuple("survivors", self.survivors))
-        object.__setattr__(self, "killed", _sequence_as_tuple("killed", self.killed))
+        _require_type("path", self.path, str, "str")
+        _require_type("elapsed_s", self.elapsed_s, (int, float), "int | float")
+        _require_type("emits_after_close", self.emits_after_close, int, "int")
+        _require_type("complete", self.complete, bool, "bool")
+        object.__setattr__(self, "survivors", _str_tuple("survivors", self.survivors))
+        object.__setattr__(self, "killed", _str_tuple("killed", self.killed))
         errors = _sequence_as_tuple("errors", self.errors)
-        object.__setattr__(self, "errors", tuple(_error_pair(item) for item in errors))
+        object.__setattr__(self, "errors", tuple(_error_pair(i, item) for i, item in enumerate(errors)))
 
     @property
     def ok(self) -> bool:
@@ -390,9 +435,12 @@ class CloseReport:
     def from_dict(cls, d: dict) -> CloseReport:
         """Обратное к ``to_dict`` преобразование. Строгий край.
 
+        - Вход не ``dict`` → ``TypeError`` с ``type(d).__name__``.
         - Ключ ``"ok"`` игнорируется: он вычисляется.
         - Вход — та же форма, что отдаёт ``to_dict``: ``errors`` — список
-          ``{"path", "error"}``. Типы значений проверяет ``__post_init__``.
+          словарей с ключами ровно ``{"path", "error"}``. Элемент не ``dict``,
+          без ключа или с лишним ключом → ``ValueError`` с ``errors[i]`` и
+          именем ключа. Типы значений проверяет ``__post_init__``.
         - Нет ``emits_after_close`` / ``complete`` → ``0`` / ``True``.
         - Нет ``path``, ``elapsed_s``, ``survivors``, ``killed`` или
           ``errors`` → ``ValueError`` с именем ключа.
@@ -401,9 +449,11 @@ class CloseReport:
 
         Текст ошибки называет ключ и не печатает словарь.
         """
+        if not isinstance(d, dict):
+            raise TypeError(f"CloseReport.from_dict: ожидается dict, получено {type(d).__name__}")
         for key in d:
             if key not in _CLOSE_REPORT_KNOWN_KEYS:
-                raise ValueError(f"CloseReport.from_dict: лишний ключ {key!r}")
+                raise ValueError(f"CloseReport.from_dict: лишний ключ {_key_label(key)}")
         for key in _CLOSE_REPORT_REQUIRED_KEYS:
             if key not in d:
                 raise ValueError(f"CloseReport.from_dict: нет обязательного ключа {key!r}")
@@ -418,15 +468,40 @@ class CloseReport:
         )
 
 
+def _key_label(key: object) -> str:
+    """Имя ключа для текста ошибки: строку — ``repr``, иное — только имя типа (не данные)."""
+    return repr(key) if isinstance(key, str) else f"<{type(key).__name__}>"
+
+
+_ERROR_ENTRY_KEYS = frozenset(("path", "error"))
+
+
 def _errors_from_wire(value: Any) -> Any:
     """Список ``{"path", "error"}`` из ``to_dict`` → список пар для ``__post_init__``.
 
-    Строку на месте ``errors`` не разбираем: её отвергнет ``__post_init__``
-    (``TypeError``); иначе строка развалилась бы на символы раньше проверки.
+    Не-список (строку в том числе) не разбираем: его отвергнет
+    ``__post_init__`` (``TypeError``); иначе строка развалилась бы на символы
+    раньше проверки. Элемент — ``dict`` с ключами ровно ``{"path", "error"}``,
+    иначе ``ValueError`` с ``errors[i]`` и именем ключа: лишний ключ молча
+    терять нельзя (тот же довод, что у ключей верхнего уровня).
     """
-    if isinstance(value, (str, bytes)):
+    if not isinstance(value, (list, tuple)):
         return value
-    return [(entry["path"], entry["error"]) for entry in value]
+    pairs = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"CloseReport.from_dict: errors[{index}] — ожидается dict с ключами 'path', 'error', "
+                f"получено {type(entry).__name__}"
+            )
+        for key in entry:
+            if key not in _ERROR_ENTRY_KEYS:
+                raise ValueError(f"CloseReport.from_dict: errors[{index}] — лишний ключ {_key_label(key)}")
+        for key in ("path", "error"):
+            if key not in entry:
+                raise ValueError(f"CloseReport.from_dict: errors[{index}] — нет ключа {key!r}")
+        pairs.append((entry["path"], entry["error"]))
+    return pairs
 
 
 _CLOSE_REPORT_REQUIRED_KEYS = ("path", "elapsed_s", "survivors", "killed", "errors")
@@ -473,9 +548,10 @@ class IHandle(Protocol):
         ...
 
     def close(self, budget_s: float | None = None) -> CloseReport:
-        """Досрочно освободить одну запись тем же путём, что и область.
+        """Досрочно освободить одну запись: отцепить от владельца, затем закрыть тем же кодом, что и область.
 
-        Идемпотентно: повторный вызов не освобождает ресурс второй раз.
+        Одноэлементный сегмент (совет 7). Идемпотентно: повторный вызов не
+        освобождает ресурс второй раз.
         ``budget_s=None`` — ``budget_s`` области-владельца; резерв kill — её
         ``kill_reserve_s``; правила сроков те же, что у ``IScope.close``.
         Reporter вызывается один раз с отчётом этой записи. После закрытия
@@ -487,10 +563,8 @@ class IHandle(Protocol):
 class IScope(Protocol):
     """Область владения: владеет ресурсами, потоками и дочерними областями.
 
-    Закрытие области останавливает всё, чем она владеет: фаза 1
-    (``request_stop`` всем), фаза 2 (``join_until`` к сроку), фаза 3
-    (``kill`` застрявшим в пределах резерва), затем ``close``. Алгоритм
-    (блокировки, сегменты, порядок LIFO) — Task 0.2.
+    Закрытие идёт по сегментам (``barrier``) сверху вниз; порядок фаз —
+    в docstring ``close``. Реализация (блокировки, LIFO) — Task 0.2.
 
     Корень создаёт только фабрика пакета ``open_scope``; снаружи область
     аннотируется как ``IScope``.
@@ -511,7 +585,12 @@ class IScope(Protocol):
 
     @property
     def closed(self) -> bool:
-        """``True`` после завершения ``close``."""
+        """``True`` с НАЧАЛА ``close()``: состояния «закрывается» и «закрыта».
+
+        Как в прототипе (``state != "open"``): ``own``/``spawn``/``child`` в
+        закрывающейся области уже отклоняются, и ``closed`` обязан совпадать
+        с отказом.
+        """
         ...
 
     @property
@@ -520,7 +599,7 @@ class IScope(Protocol):
         ...
 
     def own(self, res: Resource, *, name: str, kind: str = "resource") -> IHandle:
-        """Взять ресурс во владение.
+        """Взять ресурс во владение. После закрытия: освободить res СРАЗУ и бросить ScopeClosedError.
 
         ``res`` — ``Stoppable`` или вызываемое без аргументов. Различение:
         сначала ``isinstance(res, Stoppable)``, иначе ``callable(res)``, иначе
@@ -550,12 +629,17 @@ class IScope(Protocol):
         ...
 
     def barrier(self) -> None:
-        """Граница сегмента: записи до барьера закрываются после записей за ним."""
+        """★1. Граница сегментов.
+
+        Всё, зарегистрированное ДО барьера, получает фазу 1 только после того,
+        как закрыто всё, зарегистрированное ПОСЛЕ него.
+        """
         ...
 
     def spawn(self, target: Callable[[threading.Event], None], *, name: str) -> IHandle:
-        """Запустить поток во владении области (запись вида ``"thread"``).
+        """Поток '<path>/<name>'. В закрытой области не стартует и бросает. Публичен для всех слоёв (★4).
 
+        Запись вида ``"thread"``; бросает ``ScopeClosedError``.
         ``target`` получает ``threading.Event`` — сигнал остановки фазы 1.
         Поток, закрывающий свою же область, попадает в ``survivors`` с
         пометкой ``"<path> (self)"``.
@@ -563,11 +647,28 @@ class IScope(Protocol):
         ...
 
     def cancel(self) -> None:
-        """Запросить остановку всех записей (фаза 1) без ожидания."""
+        """Фаза 1 по поддереву верхнего сегмента. Не блокирует, любой поток, идемпотентно.
+
+        Верхний сегмент — записи после последнего ``barrier``. Нижние сегменты
+        фазу 1 не получают: их останавливает ``close`` по порядку сегментов
+        (``stop()`` = ``root.cancel()`` задевает только ``work``).
+        """
         ...
 
     def close(self, budget_s: float | None = None, *, deadline: float | None = None) -> CloseReport:
-        """Закрыть область и всё, чем она владеет. Возвращает отчёт.
+        """По сегментам сверху вниз: фаза 1 по поддереву сегмента → фаза 2 LIFO вне лока → фаза 3 → следующий сегмент.
+
+        Порядок (DESIGN §2.1): фаза 1 по поддереву сегмента → фаза 2 LIFO вне
+        лока (ребёнок к сроку ``min(срок родителя, now + child.budget_s)``) →
+        фаза 3 ``kill()`` владельцем записи в СВОЁМ ``kill_reserve_s``, сверх
+        срока, родитель резерв не обрезает → следующий сегмент. Выживший — в
+        reporter сразу.
+
+        Ошибки собираются, close не бросает. Единственное исключение —
+        ``ValueError``, когда заданы оба ``budget_s`` и ``deadline``.
+
+        Повтор: закрыта → тот же отчёт; этот же поток или её spawn-поток →
+        complete=False; чужой поток → ждёт первого закрывающего до своего срока.
 
         Сроки (вердикт CTO 2026-10-04, Q3):
 
@@ -575,8 +676,9 @@ class IScope(Protocol):
           задан; иначе ``now + budget_s``; иначе ``now + self.budget_s``.
           **Оба заданы → ``ValueError`` до любого действия.**
         - Дочерняя область, закрываемая родителем, получает срок
-          ``min(срок родителя, now + child.budget_s)``: ребёнок не переживёт
-          родителя и не растянет свой сегмент.
+          ``min(срок родителя, now + child.budget_s)``: срок фазы 2 ребёнка
+          не позже срока фазы 2 родителя, ребёнок не растянет свой сегмент.
+          Фаза 3 ребёнка в его резерве может идти после срока родителя.
         - Фазу 3 (kill) выполняет та область, которой принадлежит запись,
           после СВОЕГО срока фазы 2, в пределах СВОЕГО ``kill_reserve_s``.
           Срок родителя резерв не обрезает: бюджет родителя обязан его

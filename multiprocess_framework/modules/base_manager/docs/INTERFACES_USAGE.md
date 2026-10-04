@@ -233,15 +233,22 @@ ADR-BM-008. Компонент **не создаёт** корень област
 import threading
 
 from multiprocess_framework.modules.base_manager.interfaces import CloseReport, IHandle, IScope
+from multiprocess_framework.modules.event_module.event_bus import EventBus
+
+
+class FrameReady:
+    """Тип события шины."""
 
 
 class FrameGrabber:
     """Поток захвата кадров. Остановку и срок держит владелец, не сам компонент."""
 
-    def __init__(self, owner: IScope, bus) -> None:
-        # Здесь bus.subscribe возвращает функцию отписки (вызываемое без аргументов):
-        # владелец позовёт её один раз при закрытии.
-        self._sub: IHandle = owner.own(bus.subscribe("frames", self._on_frame), name="frames-sub")
+    def __init__(self, owner: IScope, bus: EventBus) -> None:
+        # Сегодняшний API: EventBus.subscribe возвращает _Subscription с идемпотентным
+        # .unsubscribe(). Владельцу отдаём bound method — вызываемое без аргументов;
+        # владелец позовёт его один раз при закрытии.
+        sub = bus.subscribe(FrameReady, self._on_frame)
+        self._sub: IHandle = owner.own(sub.unsubscribe, name="frames-sub")
         # Поток — запись вида "thread"; stop_event взводится фазой 1 закрытия.
         self._loop: IHandle = owner.spawn(self._run, name="grab-loop")
 
@@ -249,12 +256,15 @@ class FrameGrabber:
         while not stop_event.is_set():
             stop_event.wait(0.01)
 
-    def _on_frame(self, frame) -> None: ...
+    def _on_frame(self, event: FrameReady) -> None: ...
 
     def unsubscribe_early(self) -> CloseReport:
         # Досрочное освобождение одной записи; идемпотентно. Отчёт уходит и в reporter корня.
         return self._sub.close()
 ```
+
+Целевая форма (Ф3 плана, не сегодняшний API): шина сама отдаёт запись владельцу —
+`bus.subscribe(FrameReady, self._on_frame, *, owner=owner) -> IHandle`. Тогда строка с `own(sub.unsubscribe, ...)` исчезает.
 
 Что важно:
 - Аннотация владельца — только `IScope`, записи — `IHandle`. Класс `Scope` не экспортируется.

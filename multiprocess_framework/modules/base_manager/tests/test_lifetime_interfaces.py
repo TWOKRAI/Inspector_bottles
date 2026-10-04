@@ -184,3 +184,102 @@ def test_import_guard_catches_a_forbidden_import():
     """Сторож выше не вакуумен: на тексте с запрещённым импортом он видит его."""
     tree = ast.parse("from typing import Protocol\nimport logging\nfrom . import base_manager\n")
     assert _imported_modules(tree) - _ALLOWED_IMPORTS == {"logging", "."}
+
+
+# ---------------------------------------------------------------------------
+# Docstring — носитель контракта для Task 0.2 (ревью р1, блокер 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("owner", "member", "phrase"),
+    [
+        ("IScope", "cancel", "верхнего сегмента"),
+        ("IScope", "spawn", "<path>/<name>"),
+        ("Stoppable", "request_stop", "★5б"),
+        ("IScope", "close", "complete=False"),
+        ("IScope", "close", "close не бросает"),
+        ("IScope", "close", "не позже срока фазы 2 родителя"),
+        ("IScope", "barrier", "только после того, как закрыто"),
+        ("IScope", "closed", "НАЧАЛА"),
+    ],
+)
+def test_docstring_carries_design_phrase(owner, member, phrase):
+    from multiprocess_framework.modules.base_manager import interfaces
+
+    attr = vars(getattr(interfaces, owner))[member]
+    doc = (attr.fget if isinstance(attr, property) else attr).__doc__ or ""
+    # Перенос строки внутри фразы — не нарушение контракта: сравниваем по словам.
+    assert phrase in " ".join(doc.split())
+
+
+def test_close_docstring_has_no_outlive_phrase():
+    """«ребёнок не переживёт родителя» неверно: фаза 3 ребёнка идёт после срока родителя."""
+    from multiprocess_framework.modules.base_manager.interfaces import IScope
+
+    assert "не переживёт" not in (IScope.close.__doc__ or "")
+
+
+# ---------------------------------------------------------------------------
+# __post_init__: типы полей, TypeError называет поле (ревью р1, п.2)
+# ---------------------------------------------------------------------------
+
+_BASE = {"path": "p", "elapsed_s": 0.0, "survivors": (), "killed": (), "errors": ()}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("path", b"p"),
+        ("elapsed_s", True),
+        ("elapsed_s", "0.1"),
+        ("survivors", (b"x",)),
+        ("killed", (1,)),
+        ("errors", (("p", 1),)),
+        ("errors", ((b"p", "e"),)),
+        ("emits_after_close", True),
+        ("emits_after_close", 1.0),
+        ("complete", ""),
+        ("complete", 1),
+    ],
+)
+def test_post_init_rejects_wrong_type_naming_the_field(field, value):
+    with pytest.raises(TypeError, match=field):
+        CloseReport(**{**_BASE, field: value})
+
+
+def test_post_init_accepts_int_elapsed():
+    assert CloseReport(**{**_BASE, "elapsed_s": 2}).elapsed_s == 2
+
+
+# ---------------------------------------------------------------------------
+# from_dict: строгий край внутри errors и на не-dict (ревью р1, п.3–4)
+# ---------------------------------------------------------------------------
+
+
+def _wire(**over):
+    return {**_full_report().to_dict(), **over}
+
+
+@pytest.mark.parametrize(
+    ("errors", "needle"),
+    [
+        ([{"path": "a", "error": "e", "trace": "tb"}], "trace"),
+        ([{"path": "a"}], "error"),
+        ([{"error": "e"}], "path"),
+        ([["a", "e"]], "list"),
+    ],
+)
+def test_from_dict_errors_entry_shape_is_strict(errors, needle):
+    with pytest.raises(ValueError, match=r"errors\[0\]") as info:
+        CloseReport.from_dict(_wire(errors=errors))
+    assert needle in str(info.value)
+
+
+@pytest.mark.parametrize("payload", [[("path", 1)], "path", None])
+def test_from_dict_non_dict_raises_type_error_without_data(payload):
+    with pytest.raises(TypeError, match=type(payload).__name__) as info:
+        CloseReport.from_dict(payload)  # type: ignore[arg-type]
+    # Префикс отличает нашу проверку от случайного TypeError итерации по None.
+    assert str(info.value).startswith("CloseReport.from_dict: ожидается dict")
+    assert "('path', 1)" not in str(info.value)

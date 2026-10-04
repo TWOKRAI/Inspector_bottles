@@ -14,7 +14,7 @@
 `interfaces.py` добавлены `Stoppable`, `Resource`, `CloseReport`, `Reporter`, `IHandle`, `IScope`,
 `ScopeClosedError` — только контракт и DTO, реализации нет. `Scope`/`Handle`/`open_scope`/`unclosed_roots` —
 Task 0.2. Тесты: `tests/test_lifetime_interfaces_acceptance.py` (слепой тестер, 97) +
-`tests/test_lifetime_interfaces.py` (автор, 18).
+`tests/test_lifetime_interfaces.py` (автор, 46; ревью р1 — docstring-фразы DESIGN §2.1, типы полей, строгий `from_dict`).
 
 **Рефакторинг:** ✅ Завершён (Шаги 4.0–4.6)  
 **Документация:** ✅ Завершена (Шаг 5)  
