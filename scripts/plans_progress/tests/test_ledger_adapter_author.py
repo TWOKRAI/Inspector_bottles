@@ -235,3 +235,28 @@ def test_duplicate_open_id_is_counted_twice_but_listed_once(ledger_mod, tmp_path
     root = _root(tmp_path, "r", {"2026-07-10_dup.md": text}, _parser_text())
     s = _summ(ledger_mod, root / "plans" / "2026-07-10_dup.md")
     assert (s.done, s.total, s.counted, s.open_tasks) == (0, 2, 2, ["1.1"])
+
+
+# --------------------------------------------------------------------------- фаза: пункты раздела порядка главнее заголовков
+
+
+@pytest.mark.parametrize("with_parser", [False, True], ids=["legacy", "adapter"])
+def test_phase_heading_outside_order_section_is_ignored_when_items_exist(ledger_mod, tmp_path, with_parser):
+    # у плана есть пункты раздела порядка -> фаза только из пункта (здесь её нет): None в обоих режимах.
+    # `## Phase 1` над заголовком задачи прежний ledger не читает (живой план line-sim-layer-editor).
+    text = "# P\n\n## Порядок выполнения\n\n- Task 1.1: a [PENDING]\n\n## Phase 1\n\n### Task 1.1: a\n"
+    root = _root(tmp_path, "r", {"2026-07-14_ph/plan.md": text}, _parser_text() if with_parser else None)
+    s = _summ(ledger_mod, root / "plans" / "2026-07-14_ph")
+    assert (s.done, s.counted, s.open_tasks, s.phase) == (0, 1, ["1.1"], None)
+
+
+def test_ledger_side_error_after_analyze_plan_is_not_swallowed(ledger_mod, tmp_path, monkeypatch, capsys):
+    # try охватывает только вызовы парсера: ошибка в разборе результата — дефект ledger, она идёт наружу
+    def boom(*a, **kw):
+        raise RuntimeError("ledger-side")
+
+    monkeypatch.setattr(ledger_mod, "_summary_from_plan", boom)
+    root = _root(tmp_path, "r", {"2026-07-02_tail.md": TAIL}, _parser_text())
+    with pytest.raises(RuntimeError, match="ledger-side"):
+        _summ(ledger_mod, root / "plans" / "2026-07-02_tail.md")
+    assert "analyze_plan failed" not in capsys.readouterr().err

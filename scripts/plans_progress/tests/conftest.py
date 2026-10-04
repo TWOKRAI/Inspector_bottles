@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -131,12 +132,37 @@ def _norm_key(name: str) -> str:
     return name[:-3] if name.endswith(".md") else name
 
 
+# Строки stderr ledger, после которых план посчитан «прежним» кодом, хотя парсер лежит в корне.
+LEDGER_FALLBACK_MARKERS = ("load failed", "analyze_plan failed")
+
+
 def _install_parser(root: Path) -> Path:
-    """Копия НАСТОЯЩЕГО plans_progress.py в `<root>/scripts/plans_progress/` -> путь копии."""
+    """Копия НАСТОЯЩЕГО plans_progress.py в `<root>/scripts/plans_progress/` -> путь копии.
+
+    Копия сразу импортируется: битая копия роняет фикстуру, а не уводит тест молча в «прежний».
+    """
     dst = root / "scripts" / "plans_progress" / "plans_progress.py"
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(PROGRESS, dst)
+    name = f"_conftest_parser_check_{abs(hash(str(dst)))}"
+    spec = importlib.util.spec_from_file_location(name, dst)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # @dataclass ищет модуль по имени
+    try:
+        spec.loader.exec_module(module)
+        assert callable(module.analyze_plan), f"в копии {dst} нет analyze_plan"
+    finally:
+        sys.modules.pop(name, None)
     return dst
+
+
+def _assert_no_fallback(cp: subprocess.CompletedProcess, parser_mode: bool) -> subprocess.CompletedProcess:
+    """В режиме «адаптер» ledger обязан считать парсером: строка отката в stderr — провал теста."""
+    if parser_mode:
+        bad = [m for m in LEDGER_FALLBACK_MARKERS if m in (cp.stderr or "")]
+        assert not bad, f"режим «адаптер», но ledger откатился в «прежний»: {cp.stderr[-600:]!r}"
+    return cp
 
 
 # Прежние тесты ledger прогоняются в обоих режимах `summarize_plan` (Task 4.1):
@@ -154,6 +180,12 @@ def parser_mode(request) -> bool:
 def install_parser():
     """install_parser(root) -> путь копии настоящего plans_progress.py в корне (режим «адаптер» ledger)."""
     return _install_parser
+
+
+@pytest.fixture
+def ledger_fallback_markers():
+    """Подстроки stderr ledger об откате в «прежний» режим (для тестов, что зовут ledger в процессе)."""
+    return LEDGER_FALLBACK_MARKERS
 
 
 @pytest.fixture
@@ -280,14 +312,17 @@ def norm_key():
 
 
 @pytest.fixture
-def ledger():
-    """Фасад над CLI plans_ledger.py: status/close; counts() читает `N/M` из текста status."""
+def ledger(parser_mode: bool):
+    """Фасад над CLI plans_ledger.py: status/close; counts() читает `N/M` из текста status.
+
+    При parser_mode=True (прежние тесты в режиме «адаптер») строка отката в stderr роняет тест.
+    """
 
     def status(root: Path, *flags: str) -> subprocess.CompletedProcess:
-        return _run([str(LEDGER), "status", "--root", str(root), *flags])
+        return _assert_no_fallback(_run([str(LEDGER), "status", "--root", str(root), *flags]), parser_mode)
 
     def close(root: Path, plan: str, *flags: str) -> subprocess.CompletedProcess:
-        return _run([str(LEDGER), "close", plan, "--root", str(root), *flags])
+        return _assert_no_fallback(_run([str(LEDGER), "close", plan, "--root", str(root), *flags]), parser_mode)
 
     def counts(root: Path, plan_prefix: str) -> tuple[int, int]:
         """(done, total) из строки `<plan_prefix>...: N/M, ...` вывода `status`."""

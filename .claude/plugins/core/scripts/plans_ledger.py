@@ -1007,15 +1007,21 @@ def _analyze_args(
     return name, main, plan_dir, rel, archived
 
 
-def _legacy_phases(paths: list[Path]) -> tuple[dict[str, str], dict[str, str]]:
-    """Task id -> phase number by the ledger's own rule, as two maps: the
-    «Порядок выполнения» item's phase (``### Phase N`` inside the section), and
-    the ``## Phase N`` heading / ``phase-N.md`` file of the task's heading."""
+def _legacy_phases(paths: list[Path]) -> dict[str, str]:
+    """Task id -> phase number by the ledger's own rule. A plan WITH
+    «Порядок выполнения» items takes the phase only from the item
+    (``### Phase N`` inside the section) — a ``## Phase N`` heading elsewhere
+    never counts, exactly as :func:`_summarize_plan_legacy`. A plan without
+    items takes the ``## Phase N`` heading / ``phase-N.md`` file of the
+    task's heading."""
     texts = [(Path(p), _read(Path(p))) for p in paths]
-    by_item: dict[str, str] = {}
-    for item in _section_task_items(texts):
-        if item.phase:
-            by_item.setdefault(item.task_id, item.phase)
+    items = _section_task_items(texts)
+    if items:
+        by_item: dict[str, str] = {}
+        for item in items:
+            if item.phase:
+                by_item.setdefault(item.task_id, item.phase)
+        return by_item
     by_heading: dict[str, str] = {}
     for path, text in texts:
         file_match = _PHASE_FILE_RE.match(path.name)
@@ -1033,7 +1039,7 @@ def _legacy_phases(paths: list[Path]) -> tuple[dict[str, str], dict[str, str]]:
                 m = _TASK_H1_HEADER_RE.match(line)
             if m and current_phase is not None:
                 by_heading.setdefault(m.group(1), current_phase)
-    return by_item, by_heading
+    return by_heading
 
 
 def _summary_from_plan(
@@ -1044,8 +1050,8 @@ def _summary_from_plan(
     ``total`` = every task (a duplicate id counts twice, as on the page);
     ``counted`` then equals ``plan.total``. ``open_tasks`` = ids not done and
     not dropped, in task order, each id once. ``phase`` = the phase (ledger
-    rule) of the first open task whose status is not ``unknown`` and whose
-    phase is known."""
+    rule, :func:`_legacy_phases`) of the first open task whose status is
+    not ``unknown`` and whose phase is known."""
     tasks = list(plan.tasks)  # type: ignore[attr-defined]
     open_tasks: list[str] = []
     first_known: list[str] = []
@@ -1058,9 +1064,9 @@ def _summary_from_plan(
             first_known.append(task.id)
     phase: str | None = None
     if first_known:
-        by_item, by_heading = _legacy_phases(paths)
+        phases = _legacy_phases(paths)
         for task_id in first_known:
-            number = by_item.get(task_id) or by_heading.get(task_id)
+            number = phases.get(task_id)
             if number:
                 phase = f"phase {number}"
                 break
@@ -1090,6 +1096,11 @@ def summarize_plan(paths: list[Path]) -> PlanSummary:
       the page knows, or ``analyze_plan`` raised on THIS plan (one stderr line
       per plan): :func:`_summarize_plan_legacy`, unchanged.
 
+    Trust: the parser is CODE of the tree being counted. ``status``/``close``/
+    ``add`` with ``--root X`` execute ``X/scripts/plans_progress/plans_progress.py``
+    (an ``exec_module``; ``SystemExit`` from it ends the ledger) — do not run
+    them on a tree you do not trust.
+
     Empty *paths* -> ``PlanSummary(0, 0, None)`` in both modes."""
     paths = [Path(p) for p in paths]
     if not paths:
@@ -1107,7 +1118,6 @@ def summarize_plan(paths: list[Path]) -> PlanSummary:
     try:
         plan = module.analyze_plan(*args)  # type: ignore[attr-defined]
         dropped = tuple(module.DROPPED)  # type: ignore[attr-defined]
-        return _summary_from_plan(plan, dropped, paths)
     except Exception as exc:  # noqa: BLE001 — this plan only -> «прежний»
         failure = (str(module_path), args[3])
         if failure not in _PARSER_PLAN_FAILURES:
@@ -1118,6 +1128,8 @@ def summarize_plan(paths: list[Path]) -> PlanSummary:
                 file=sys.stderr,
             )
         return _summarize_plan_legacy(paths)
+    # Outside the try: an error here is a ledger defect, not the parser's.
+    return _summary_from_plan(plan, dropped, paths)
 
 
 def _plan_branch(paths: list[Path]) -> str | None:
