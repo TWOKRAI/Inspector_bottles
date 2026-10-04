@@ -18,7 +18,7 @@
 | 3 | Архитектура | PR Map «architecture, key paths» → root `CLAUDE.md`: Архитектура |
 | 4 | Ключевые пути | PR Map «architecture, key paths»; «правки только в `multiprocess_prototype/`» — PR преамбула |
 | 5 | История версий и архив | только лид — исторический факт, правил нет (git log) |
-| 6 | Стек | команды и Python — Map «stack…» → `.claude/modes/_stack.md`; версии библиотек — root `CLAUDE.md` «Стек» через Map «architecture, key paths» (аудит лида: в `_stack.md` версий нет) |
+| 6 | Стек | команды и Python — Map «stack…» → `.claude/modes/_stack.md`; версии библиотек (PySide6, OpenCV, NumPy, ML, БД) — **только лид** в root `CLAUDE.md` «Стек»; 2.4c переносит их в `_stack.md` (единственный дом стека, `rules_map` §6 п.13), ядро не трогает — запас 11 Б |
 | 7 | Правила проекта: инварианты п.1,2,5,6,9 | PR преамбула (слои, Dict at Boundary); остальное (`interfaces.py`, логи через ObservableMixin) — Map «editing an area» → `.rules/{framework,logging,…}.md` |
 | 8 | ADR и автосинхронизация п.3,7,8 | `teamlead.md` Code rules и `tech-writer.md` Before starting п.2: `python -m scripts.sync`, индекс `multiprocess_framework/DECISIONS.md` |
 | 9 | команды тестов п.4 | PR Map «stack, tests…» → `_stack.md` Toolchain |
@@ -182,6 +182,7 @@
 | `.claude/CLAUDE.md:287` | `project-rules` §9 (STE-80) | **неверна**: §9 теперь тесты; заменить на `project-rules/ste-80.md` |
 | `.claude/CLAUDE.md:333` | `project-rules` §8 (границы сессии) | **неверна**: §8 теперь дерево и поиск; заменить на `project-rules/session-boundaries.md` |
 
-Ещё две передачи в 2.4c:
+Ещё три передачи в 2.4c:
+- Версии стека из root `CLAUDE.md` «Стек» перенести в `.claude/modes/_stack.md` (строка 6 трассы); после этого Map «stack…» покрывает их.
 - Строка карты «architecture, key paths» ссылается на заголовки root `CLAUDE.md` «Архитектура» / «Ключевые пути». 2.4c сохраняет эти заголовки или правит карту.
 - `team-protocol/SKILL.md:90–92` всё ещё называет `docs/sessions/<today>.md` для открытых вопросов; ядро §2 — `docs/claude/OPEN_QUESTIONS.md`. Развести в 2.4c.
