@@ -54,7 +54,7 @@
 
 - [x] Task 1.1: снять хук `session-log` с pre-commit; журнал сессий пишет и коммитит `/wrap-up` [DONE d8ee11c2d, ревью APPROVED r2]
 - [x] Task 1.2: хук правки живой на Windows (причина A1 — `\r` в пути) и видит то же, что pre-commit: остаток ruff, пробелы/EOF текста, rev = uv.lock [DONE 696b33d3b, ревью APPROVED r2; стенд после слияния]
-- Task 1.4: три соседних хука правки (check-imports, typecheck, semgrep) мертвы тем же `\r` — замер цены, затем оживить или снять (решение владельца) [PENDING] (после 1.2)
+- [x] Task 1.4: три соседних хука правки (check-imports, typecheck, semgrep) мертвы тем же `\r` — замерены; по решению владельца check-imports и typecheck-changed сняты (FREEZE), semgrep-scan — FREEZE-шапка [DONE d917df68e, ревью APPROVED; инъекции 17/17]
 - [x] Task 1.3: bandit не сканирует скрипты инъекций `docs/reviews/**`; гейт тестов `_stack.md` выключен честно [DONE f3649b248, ревью APPROVED] (после 1.1: общий конфиг pre-commit)
 
 ### Phase 2: Формат v2 в режиме предупреждений
