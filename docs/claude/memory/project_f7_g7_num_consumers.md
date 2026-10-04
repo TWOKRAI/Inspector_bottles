@@ -1,6 +1,8 @@
 ---
 name: project-f7-g7-num-consumers
 description: G.7 num_consumers проведён из топологии + разнос двух ролей loan-протокола (fix fe0f4d41)
+module: "frame_pool, process_module/generic"
+mechanism: "loan-protocol"
 metadata:
   type: project
 ---

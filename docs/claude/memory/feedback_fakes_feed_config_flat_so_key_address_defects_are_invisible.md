@@ -2,6 +2,8 @@
 name: feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible
 description: "Дублёры подают конфиг ПЛОСКИМ словарём, а прод — вложенным; целый класс дефектов «ключ по неверному адресу» тестам структурно невидим; также: Оркестратор получает конфиг плоским, ребёнок — весь proc_dict; одно и то же get_config работает у одного и молчит у другого"
 merged_from: [feedback_config_delivery_shape_differs]
+module: "process_module config"
+mechanism: "test-doubles, config-delivery"
 metadata:
   node_type: memory
   type: feedback

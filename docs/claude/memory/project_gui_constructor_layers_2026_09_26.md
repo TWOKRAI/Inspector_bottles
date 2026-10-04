@@ -1,6 +1,7 @@
 ---
 name: gui-constructor-layers-2026-09-26
 description: "Owner's decision 2026-09-26 on the GUI constructor — framework = constructor (shell, connections, widget contract, layout), Services = application slices with widget packs, prototype = thin inspection layer assembled via recipe topology; reference apps examples/minimal_app (exists) + examples/minimal_gui (to create); unit = widget, windows belong to the shell (T4.1 Р-E flipped)."
+module: "gui-constructor"
 metadata:
   node_type: memory
   type: project

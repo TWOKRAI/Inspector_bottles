@@ -1,6 +1,8 @@
 ---
 name: a-control-can-exist-and-be-dead
 description: Критерий «строка/ручка есть» зелен и у холостого контрола — спрашивать «что меняется, когда её трогают»
+module: "telemetry, config.reload"
+mechanism: "acceptance-criteria"
 metadata:
   type: feedback
 ---

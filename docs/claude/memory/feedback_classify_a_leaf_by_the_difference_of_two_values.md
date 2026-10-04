@@ -1,6 +1,8 @@
 ---
 name: feedback-classify-a-leaf-by-the-difference-of-two-values
 description: "Зонд «потребляется ли ключ» по ОДНОМУ значению путает «не потребляется» с «равно дефолту»; отпечаток брать ПЕРЕСЕЧЕНИЕМ полюсов, не объединением"
+module: "process_module (expand_observability)"
+mechanism: "probe-design"
 metadata:
   node_type: memory
   type: feedback

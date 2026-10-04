@@ -1,6 +1,8 @@
 ---
 name: feedback_row_count_never_catches_the_loop
 description: Счёт строк не ловит петлю обратной подачи — судить надо серии внутри записи
+module: "telemetry"
+mechanism: "feedback-loop"
 metadata:
   node_type: memory
   type: feedback

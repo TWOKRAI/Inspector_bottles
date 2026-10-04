@@ -1,6 +1,8 @@
 ---
 name: feedback_drop_oldest_reports_success
 description: "Кольцо с drop_oldest отвечает «success», вытеснив чужую запись — судить по приросту счётчика, а не по статусу"
+module: "observability hub (BoundedChannel)"
+mechanism: "success-value-vs-fact"
 metadata:
   node_type: memory
   type: feedback

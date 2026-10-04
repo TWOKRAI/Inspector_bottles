@@ -2,6 +2,8 @@
 name: feedback-bash-tool-unbalanced-quote-breaks-command
 description: "Инструмент Bash на этой машине падает с «unexpected EOF while looking for matching `''», если в команде непарный апостроф — даже внутри quoted-heredoc; скрипты с прозой писать через Write и запускать файлом; также: Bash tool collapses `\\\\` to `\\` even inside a quoted heredoc — generated Python gets real control bytes; write such files with Write/Edit"
 merged_from: [feedback_bash_heredoc_collapses_backslashes]
+module: "local-only (Windows Bash tool)"
+mechanism: "tooling"
 metadata:
   node_type: memory
   type: feedback

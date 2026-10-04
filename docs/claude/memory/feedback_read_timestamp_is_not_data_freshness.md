@@ -1,6 +1,8 @@
 ---
 name: feedback-read-timestamp-is-not-data-freshness
 description: Штамп времени, взятый в момент ЧТЕНИЯ, ничего не говорит о свежести прочитанных чисел — замерший источник отдаёт старое значение со свежим штампом
+module: "telemetry"
+mechanism: "freshness"
 metadata:
   type: feedback
 ---

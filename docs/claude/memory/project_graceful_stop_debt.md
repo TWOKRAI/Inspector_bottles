@@ -1,6 +1,8 @@
 ---
 name: project_graceful_stop_debt
 description: PM 5 s stop hang (L-2) — real cause is interpreter exit waiting on mp.Queue feeders; two sources, one fixed (EventManager), one open (writer outlives reader); what is refuted and what was rejected
+module: "process_manager"
+mechanism: "mp.Queue feeder at exit"
 metadata:
   type: project
   last-verified: 2026-09-23

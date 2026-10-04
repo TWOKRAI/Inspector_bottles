@@ -1,6 +1,8 @@
 ---
 name: a-stand-with-a-verdict-is-also-a-harness
 description: "Живой стенд, чей приёмник — наш собственный код, доказывает оснастку, а не предмет; хоть раз пройти через настоящего потребителя"
+module: "otel-export"
+mechanism: "live-stand, test-doubles"
 metadata:
   node_type: memory
   type: feedback

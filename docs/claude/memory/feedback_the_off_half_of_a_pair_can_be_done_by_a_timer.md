@@ -1,6 +1,8 @@
 ---
 name: feedback_the_off_half_of_a_pair_can_be_done_by_a_timer
 description: Вторую половину пары ON/OFF мог сделать таймер, а не твоя команда — success этого не различает
+module: "backend_ctl, config L3 TTL"
+mechanism: "ON/OFF-proof"
 metadata:
   node_type: memory
   type: feedback

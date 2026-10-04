@@ -1,6 +1,7 @@
 ---
 name: discriminator-switch-must-be-verified
 description: pytest --ignore не выключил testpaths-зону — «прогон без Qt» шёл с 2411 Qt-тестами; выключатель дискриминатора проверять счётчиком собранного
+mechanism: "experiment-control, pytest testpaths"
 metadata:
   node_type: memory
   type: feedback

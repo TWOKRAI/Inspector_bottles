@@ -1,6 +1,8 @@
 ---
 name: feedback_injection_must_use_a_different_lens_than_the_test
 description: "Инъекция, смотрящая тем же объективом, что тест, не доказывает свойство — она подтверждает согласие двух копий одной модели"
+module: "telemetry"
+mechanism: "break-injection, independence"
 metadata:
   node_type: memory
   type: feedback

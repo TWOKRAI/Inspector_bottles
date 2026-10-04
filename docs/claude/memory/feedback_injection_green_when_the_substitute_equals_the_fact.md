@@ -1,6 +1,8 @@
 ---
 name: feedback_injection_green_when_the_substitute_equals_the_fact
 description: Инъекция «зашить константу вместо прочитанного значения» зелёная, если на всех фикстурах константа совпадает с фактом — нужен третий вариант
+module: "process_module (voice class)"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---

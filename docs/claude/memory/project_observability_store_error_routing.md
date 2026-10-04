@@ -1,6 +1,8 @@
 ---
 name: project-observability-store-error-routing
 description: "ObservabilityStore (5.20a): ошибки приложения идут в logger_manager (logger.error/ctx.log_error), НЕ в error_manager — store-tap нужен на ОБА; live-boot вскрыл, юниты прятали"
+module: "observability_store, logger_module"
+mechanism: "tap-on-both-managers"
 metadata:
   type: feedback
 ---

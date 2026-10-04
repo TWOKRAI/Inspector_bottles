@@ -1,6 +1,7 @@
 ---
 name: feedback-ruff-strips-unused-import
 description: "PostToolUse-форматтер (ruff --fix) удаляет только что добавленный импорт, если он ещё не используется в этом же Edit — добавлять импорт и его использование ОДНИМ Edit"
+mechanism: "PostToolUse formatter hook"
 metadata:
   node_type: memory
   type: feedback

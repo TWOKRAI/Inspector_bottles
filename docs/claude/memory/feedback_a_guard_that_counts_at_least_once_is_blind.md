@@ -2,6 +2,7 @@
 name: feedback-a-guard-that-counts-at-least-once-is-blind
 description: "Сторож, проверяющий «механизм сработал хотя бы раз», зелен и при точечной поломке — соседний хелпер срабатывает за него; считать литералами по дорогам; также: сторож-обходчик реестра не видит удалённого элемента; покрытие на ПРОВЕРКУ не равно покрытию на УТВЕРЖДЕНИЕ; страж с порогом по сумме слеп к частичной потере; параметризация из испытуемого исчезает вместе с ним (59 → 47)"
 merged_from: [feedback_a_list_walking_guard_cannot_see_a_removed_item, feedback_coverage_per_check_is_not_coverage_per_claim, feedback_guard_threshold_hides_partial_blindness, feedback_parametrization_built_from_the_subject_collapses_with_it]
+mechanism: "guard-design, lock-discipline"
 metadata:
   type: feedback
 ---

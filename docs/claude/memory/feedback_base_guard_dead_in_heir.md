@@ -1,6 +1,8 @@
 ---
 name: feedback-base-guard-dead-in-heir
 description: Защита, поднятая в базовый класс, может быть мертва у наследника, который резолвит своё сам — проверять на каждом, не по коду базы
+module: "channel_routing_module (Logger/Error/Stats/Router)"
+mechanism: "inheritance"
 metadata:
   type: feedback
 ---

@@ -1,6 +1,8 @@
 ---
 name: project_switch_routing_stale
 description: После switch рецепта параметры молча не доходят — стейл-PSR GUI (старые очереди); фикс через PM-хаб
+module: "recipe switch, process_state_registry"
+mechanism: "stale-copy-after-switch"
 metadata:
   type: project
 ---

@@ -2,6 +2,8 @@
 name: feedback-model-copy-does-not-validate
 description: "model_copy(update=) кладёт dict вместо схемы молча — потребитель читает атрибуты и получает «молчу»; также: validate_assignment + model_validator(after) rejects but leaves the value stored; full revalidation is not the fix"
 merged_from: [feedback_pydantic_assignment_keeps_rejected_value]
+module: "data_schema_module"
+mechanism: "pydantic-v2"
 metadata:
   node_type: memory
   type: feedback

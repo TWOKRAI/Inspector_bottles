@@ -2,6 +2,8 @@
 name: feedback-the-plans-stated-cause-is-a-hypothesis
 description: "План называет не только симптом, но и причину — причина может быть неверной при верном симптоме; тянуть нить до замера, иначе построишь предписанный планом механизм вокруг несуществующего дефекта; также: Спека плана может врать в именах полей — сверять с кодом, а не реализовывать буквально"
 merged_from: [feedback_plan_spec_can_lie]
+module: "process_manager"
+mechanism: "spec-review"
 metadata:
   type: feedback
 ---

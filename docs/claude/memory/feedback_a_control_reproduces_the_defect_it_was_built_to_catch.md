@@ -2,6 +2,8 @@
 name: feedback-a-control-reproduces-the-defect-it-was-built-to-catch
 description: "Контрол, заведённый ловить «значение успеха, не зависящее от факта», сам получает то же свойство — проверять новый счётчик тем же вопросом, что и старый; также: Поле «сверено» подтверждает факт вызова сверщика, а не охват входа — пустой список рядом с ним читается как факт"
 merged_from: [feedback_checked_true_answers_for_the_call_not_the_coverage]
+module: "observation_port"
+mechanism: "success-value-vs-fact"
 metadata:
   type: feedback
 ---

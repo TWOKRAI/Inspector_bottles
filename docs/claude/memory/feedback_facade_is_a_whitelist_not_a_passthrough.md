@@ -1,6 +1,8 @@
 ---
 name: feedback-facade-is-a-whitelist-not-a-passthrough
 description: "Поле в схеме менеджера не делает ручку управляемой — конфиг идёт через фасад-белый-список, и чужой ключ он отбрасывает молча"
+module: "process_module (observability_config, expand_observability)"
+mechanism: "config-facade"
 metadata:
   node_type: memory
   type: feedback

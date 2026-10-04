@@ -1,6 +1,8 @@
 ---
 name: feedback-detector-comparing-representation-fires-always
 description: Детектор расхождения, сравнивающий целые dict'ы, горит всегда — и потому доказывает ровно столько же, сколько молчащий
+module: "prototype backend/assembly (planner)"
+mechanism: "detectors"
 metadata:
   type: feedback
 ---

@@ -1,6 +1,7 @@
 ---
 name: feedback_injection_prediction_on_a_shared_corpus
 description: "Когда тестов много, предсказание инъекции — не равенство множеств, а «MUST поимённо + потолок красных»"
+mechanism: "break-injection, prediction"
 metadata:
   node_type: memory
   type: feedback

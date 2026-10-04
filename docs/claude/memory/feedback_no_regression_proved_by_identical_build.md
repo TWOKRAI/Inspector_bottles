@@ -1,6 +1,7 @@
 ---
 name: feedback-no-regression-proved-by-identical-build
 description: «Не деградировало» доказывается идентичностью сборки ключ-в-ключ, а не сравнением двух шумных прогонов
+mechanism: "acceptance-proof"
 metadata:
   type: feedback
 ---

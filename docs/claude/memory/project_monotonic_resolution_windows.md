@@ -1,6 +1,8 @@
 ---
 name: project-monotonic-resolution-windows
 description: time.monotonic на Windows — GetTickCount64() с шагом 15.625 мс; любое сравнение РАЗНОСТИ показаний ниже ~100 мс недостоверно
+module: "tests, windows"
+mechanism: "clock-resolution"
 metadata:
   type: project
 ---

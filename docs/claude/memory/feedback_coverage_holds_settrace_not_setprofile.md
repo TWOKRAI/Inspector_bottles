@@ -1,6 +1,8 @@
 ---
 name: feedback-coverage-holds-settrace-not-setprofile
 description: "coverage.py занимает sys.settrace, а sys.getprofile под --cov пуст: счётчик вызовов на setprofile с покрытием не конфликтует, а ассерт `gettrace() is None` даёт ложный красный"
+module: "framework tests (_road_cost.py)"
+mechanism: "coverage, tracing"
 metadata:
   node_type: memory
   type: feedback

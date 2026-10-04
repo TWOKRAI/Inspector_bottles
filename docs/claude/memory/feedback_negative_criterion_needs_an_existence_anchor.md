@@ -1,6 +1,7 @@
 ---
 name: feedback_negative_criterion_needs_an_existence_anchor
 description: "Критерий, сформулированный как отсутствие, передаёт тестеру свою вырожденную точку — пустота удовлетворяет его целиком; выдавать критерий только парой «при X есть литерал / при Y нет»"
+mechanism: "tester-brief"
 metadata:
   node_type: memory
   type: feedback

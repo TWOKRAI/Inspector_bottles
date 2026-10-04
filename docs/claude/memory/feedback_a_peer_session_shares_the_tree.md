@@ -2,6 +2,7 @@
 name: feedback-a-peer-session-shares-the-tree
 description: "Вторая интерактивная сессия Claude может работать в том же репозитории — git add -A затянет её незакоммиченную работу в твой коммит; сверять ListAgents перед массовым стейджем; также: общее дерево делает инъекции флейками; правка того же файла, что держит чужая незакоммиченная работа; `git stash pop` берёт чужой stash@{0}; stash общий на все worktree"
 merged_from: [feedback_shared_tree_makes_injections_look_like_flakes, feedback_worktree_for_parallel_samefile, feedback_git_stash_pop_wrong_stash]
+mechanism: "git, parallel-sessions"
 metadata:
   type: feedback
 ---

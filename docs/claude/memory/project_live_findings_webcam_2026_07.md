@@ -1,6 +1,8 @@
 ---
 name: project-live-findings-webcam-2026-07
 description: Живой прогон webcam_sketch 2026-07-21 дал три находки одного класса — сбой есть, счётчик растёт, причина проглочена
+module: "backend_ctl"
+mechanism: "swallowed-cause"
 metadata:
   type: project
 ---

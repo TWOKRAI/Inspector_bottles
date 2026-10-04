@@ -1,6 +1,7 @@
 ---
 name: feedback-claude-cli-backend-costs-a-full-session
 description: Инструмент с --backend=claude-cli платит полной сессией Claude Code за КАЖДЫЙ вызов — считать вызовы × ~50k до запуска, и мельчить батчи нельзя
+mechanism: "cost, graphify"
 metadata:
   type: feedback
 ---

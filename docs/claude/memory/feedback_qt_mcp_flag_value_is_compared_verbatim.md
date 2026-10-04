@@ -2,6 +2,7 @@
 name: qt-mcp-flag-value-is-compared-verbatim
 description: "QT_MCP_PROBE сверяется дословно с «1»; порт — отдельная ручка. Значение «1:9142» промолчало, и рендер GUI не проверялся три раунда; также: Always launch prototype/smoke with QT_MCP_PROBE=1 so qt-mcp can attach (port 9142)"
 merged_from: [feedback_qt_mcp_always_probe]
+mechanism: "qt-mcp, env-flags"
 metadata:
   node_type: memory
   type: feedback

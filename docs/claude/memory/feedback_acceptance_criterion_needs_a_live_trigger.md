@@ -1,6 +1,8 @@
 ---
 name: feedback_acceptance_criterion_needs_a_live_trigger
 description: "Критерий вида «на живом стенде наблюдать X» бесполезен, если в проде нет ручки, которая X вызывает — достижимость триггера проверяется до записи критерия в план, поиском вызывающих"
+module: "observation_port (plugin shutdown)"
+mechanism: "acceptance-criteria"
 metadata:
   node_type: memory
   type: feedback

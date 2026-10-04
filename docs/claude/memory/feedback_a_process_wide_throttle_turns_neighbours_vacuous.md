@@ -1,6 +1,8 @@
 ---
 name: feedback-a-process-wide-throttle-turns-neighbours-vacuous
 description: Дроссель голоса на процессном синглтоне делает соседние тесты порядко-зависимыми, и худший исход не красный, а вакуумный зелёный
+module: "logger_module (windowed_voice)"
+mechanism: "test-isolation"
 metadata:
   type: feedback
 ---

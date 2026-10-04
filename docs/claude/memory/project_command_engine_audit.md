@@ -1,6 +1,7 @@
 ---
 name: project-command-engine-audit
 description: P1.1 command-engine audit verdict (2026-05-29) — ActionBus dead in prod, domain-dispatch is the only live engine; "two engines" premise false. Owner keeps actions_module (2026-07-08), ADR-COMM-002 removal not executed
+module: "actions_module, command_manager"
 metadata:
   type: project
 ---

@@ -1,6 +1,8 @@
 ---
 name: gate-off-zeroes-deltas-not-messages
 description: Закрытый publisher-гейт обнуляет дельты state.changed, но НЕ число IPC-сообщений — always-on поля идут мимо гейта; мерить дельты, иначе рабочая фича читается как несработавшая
+module: "state_store/telemetry (publisher gate)"
+mechanism: "measurement"
 metadata:
   type: feedback
 ---

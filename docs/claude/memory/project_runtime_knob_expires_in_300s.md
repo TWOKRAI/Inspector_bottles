@@ -1,6 +1,8 @@
 ---
 name: project_runtime_knob_expires_in_300s
 description: Рантайм-правка телеметрии живёт 300 с и умирает молча — посылка «гейт закрыт» имеет срок годности
+module: "telemetry, observability"
+mechanism: "session-TTL"
 metadata:
   node_type: memory
   type: project

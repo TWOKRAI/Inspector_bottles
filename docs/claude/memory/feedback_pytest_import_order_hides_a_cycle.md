@@ -1,6 +1,7 @@
 ---
 name: feedback_pytest_import_order_hides_a_cycle
 description: "Зелёный pytest не доказывает отсутствие цикла импорта: conftest'ы и соседние тесты грузят пакеты раньше, цикл виден только в чистом процессе с нужным пакетом ПЕРВЫМ"
+mechanism: "import-cycles"
 metadata:
   node_type: memory
   type: feedback

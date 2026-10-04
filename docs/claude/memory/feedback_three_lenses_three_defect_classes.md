@@ -2,6 +2,7 @@
 name: feedback-three-lenses-three-defect-classes
 description: "Тесты ловят механику, живой прогон — проводку, ревью — связки; ни один не заменяет другой; также: Ревью ловит связку между двумя кусками ОДНОЙ задачи — каждый верен, вместе дают дефект"
 merged_from: [feedback_review_finds_the_seam_between_own_pieces]
+mechanism: "test/live/review"
 metadata:
   type: feedback
 ---

@@ -2,6 +2,7 @@
 name: feedback-commit-takes-the-whole-index
 description: "git commit забирает ВЕСЬ индекс — ранний `git rm` уезжает в чужой коммит; а сорванный pre-commit прячет несохранённые правки в свой патч; также: commit-msg hook: trailer предпочтительно одной строкой, но с 2026-07-14 хук ТЕРПИТ перенос (git-стиль фолдинг); pre-commit ruff-format → re-stage + re-commit (не amend); Откат pre-commit при конфликте авто-фиксов молча теряет НЕзастейдженные правки в посторонних файлах — перед коммитом дерево должно быть без незастейдженных хвостов"
 merged_from: [feedback_commit_msg_format, feedback_precommit_rollback_drops_unstaged_edits]
+mechanism: "git, pre-commit"
 metadata:
   type: feedback
 ---

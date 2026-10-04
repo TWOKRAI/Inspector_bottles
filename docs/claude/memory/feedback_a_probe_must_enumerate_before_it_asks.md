@@ -1,6 +1,8 @@
 ---
 name: feedback-a-probe-must-enumerate-before-it-asks
 description: Пустой ответ справочника на несуществующее имя читается как «у этой сущности ничего нет» — зонд обязан сперва перечислить, что вообще существует
+module: "config_module (defaults_for_category)"
+mechanism: "probe-design"
 metadata:
   type: feedback
 ---

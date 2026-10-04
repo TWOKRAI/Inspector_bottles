@@ -1,6 +1,8 @@
 ---
 name: feedback-merge-changes-the-form
 description: Машинная запись всегда в одной форме; домерженная в секцию другой формы она переключает парсер и глушит человеческие ключи
+module: "config_module/recipe"
+mechanism: "config-forms"
 metadata:
   type: feedback
 ---

@@ -1,6 +1,8 @@
 ---
 name: port-wire-is-not-a-process-route
 description: Провод портов в рецепте не создаёт маршрута между процессами — плагин молча не вызывается ни разу
+module: "chain_module/recipe"
+mechanism: "wiring"
 metadata:
   type: project
 ---

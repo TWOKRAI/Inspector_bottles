@@ -2,6 +2,7 @@
 name: feedback_property_unchecked_at_the_second_party
 description: "Свойство, проверенное у правленого объекта и на одном call-site, не проверено у соседа и на втором; также: У одной двери конфига бывает две дороги входа — запрет ставить на обеих, и тест на каждой отдельно"
 merged_from: [feedback_one_door_two_roads_needs_two_guards]
+mechanism: "break-injection, call-sites"
 metadata:
   node_type: memory
   type: feedback

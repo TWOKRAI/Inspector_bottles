@@ -1,7 +1,8 @@
 ---
 name: tech-stack-2026
 description: При любых улучшениях стека/перфа/зависимостей сверяться с docs/direction/TECH_STACK_2026.md — живой стратегический документ владельца
-metadata: 
+module: "stack"
+metadata:
   node_type: memory
   type: reference
   originSessionId: 768c4056-8d38-4ee3-a3f1-d58bf502abff

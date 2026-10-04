@@ -2,6 +2,8 @@
 name: feedback_an_absence_assertion_needs_a_reachability_check
 description: "Тест «X отсутствует в списке» зелен вхолостую, если X не может попасть в список по формату — нужна парная проверка достижимости; также: утверждение об отсутствии при `extra='ignore'` истинно всегда"
 merged_from: [feedback_absence_assertion_under_extra_ignore_is_vacuous]
+module: "scripts static guards"
+mechanism: "absence-assertion"
 metadata:
   type: feedback
 ---

@@ -2,6 +2,7 @@
 name: feedback-test-survived-its-own-break
 description: "Тест, переживший свой слом, не существует — два способа поставить шов не туда; также: Заплата на дисциплину лока даёт честный красный внутри прогона и вешает ВЫХОД процесса через logging.shutdown на atexit; Шов на реентерабельном локе обязан считать глубину — иначе он стреляет на вложенном выходе и тест зеленеет при любой реализации"
 merged_from: [feedback_a_lock_patch_can_hang_the_exit_not_the_test, feedback_seam_must_fire_on_full_release]
+mechanism: "break-injection, concurrency"
 metadata:
   type: feedback
 ---

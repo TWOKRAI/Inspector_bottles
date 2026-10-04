@@ -1,6 +1,7 @@
 ---
 name: feedback-measure-delta-not-file-size
 description: "Объём логов мерить дельтой размеров, а не размером файла — «изменён во время прогона» ≠ «записан во время прогона»"
+mechanism: "measurement"
 metadata:
   node_type: memory
   type: feedback

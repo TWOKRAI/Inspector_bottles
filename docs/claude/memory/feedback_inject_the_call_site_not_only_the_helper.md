@@ -1,6 +1,8 @@
 ---
 name: feedback-inject-the-call-site-not-only-the-helper
 description: Снять единственный боевой вызов — тридцать сторожей звали хелпер напрямую и остались зелёными
+module: "process_module (process_monitor)"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---

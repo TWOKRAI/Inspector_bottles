@@ -1,6 +1,7 @@
 ---
 name: feedback_walk_skips_worktrees
 description: Скрипты, переписывающие файлы по всему проекту (os.walk/grep-replace), обязаны исключать .claude/worktrees/
+mechanism: "worktrees, bulk-replace"
 metadata:
   type: feedback
 ---

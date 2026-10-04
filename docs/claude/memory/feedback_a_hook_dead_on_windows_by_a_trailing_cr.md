@@ -1,6 +1,7 @@
 ---
 name: feedback_a_hook_dead_on_windows_by_a_trailing_cr
 description: Git Bash strips \r in $(...) but NOT in `read < <(...)` — four Edit hooks silently exited for months; prove a hook alive by feeding it a real payload, not by reading it
+mechanism: "hooks"
 metadata:
   type: feedback
 ---

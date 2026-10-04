@@ -1,6 +1,8 @@
 ---
 name: feedback-a-diagnostic-answer-must-be-computed-last
 description: Диагностический ответ, посчитанный в середине ленты стадий, отвечает по состоянию ДО правки — два одинаковых вызова дают разные ответы, и первый лжёт
+module: "process_module (config.reload)"
+mechanism: "stage-ordering"
 metadata:
   type: feedback
 ---

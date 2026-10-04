@@ -1,6 +1,8 @@
 ---
 name: feedback-a-budget-belongs-to-a-path-not-to-a-mechanism
 description: Бюджет производительности написан на КОНКРЕТНУЮ дорогу; перенеся его на соседнюю, можно отвергнуть верное решение — проверять, по какому пути идут данные, а не по какому идёт похожий код
+module: "telemetry/observability"
+mechanism: "perf-budget"
 metadata:
   type: feedback
 ---

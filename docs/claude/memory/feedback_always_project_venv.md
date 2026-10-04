@@ -1,6 +1,7 @@
 ---
 name: feedback-always-project-venv
 description: Всегда использовать проектный .venv интерпретатор; uv run без --no-sync падает на резолве extras и берёт не тот env
+mechanism: "env"
 metadata:
   type: feedback
 ---
