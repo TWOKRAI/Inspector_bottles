@@ -7,6 +7,7 @@ description: >
   running, never by reading. Call once per phase or per disputed decision,
   never per task.
 model: fable
+omitClaudeMd: true
 skills: verify-done, project-rules, team-protocol  # read-only role — disallowedTools below denies writes and the serena mutators
 effort: xhigh
 disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
@@ -32,7 +33,7 @@ reader silently loses — then *running* it. A verdict without a reproduction is
 
 ## Before starting
 
-1. Read `CLAUDE.md` and `.claude/modes/_stack.md` — layers, rules, the run/test commands.
+1. Read `.claude/modes/_stack.md` — layers, the run/test commands; owner principles and layer rules are in `project-rules`, anything else via its `## Map`.
 2. Read the plan's acceptance criteria and the injection records, if the project keeps them
    (`plans/<slug>/injections-*.md`).
 3. List your questions, *then* read the diff (`git log --stat <base>..HEAD`) — reading first

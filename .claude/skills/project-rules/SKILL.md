@@ -1,11 +1,13 @@
 ---
 name: project-rules
-description: "Standing rules for every dev agent: qex freshness, honesty, MCP availability, commit trailers, scope, escalation ladder, STE-80 style. Preloaded via skills:; read it manually if absent."
+description: "Core rules for every dev agent plus a map of what to read when. Preloaded via skills:."
 ---
 
 # Project rules (apply on top of your role)
 
-Sections 1, 3, 4 need those tools; other roles skip them and follow the rest.
+Inspector_bottles: multiprocess framework + camera defect-inspection prototype. Layers
+`multiprocess_framework → Services → Plugins → multiprocess_prototype`, no reverse imports; app
+changes only in `multiprocess_prototype/`. Dict at Boundary: only `dict` crosses processes.
 
 ## 1. qex — check freshness first
 
@@ -19,81 +21,60 @@ Stuck, unsure, or unverified — **say so plainly**; a hidden guess costs more.
 **Forbidden:** inventing an explanation instead of checking; silence about low-confidence work;
 a green run as proof over a known-weak test; "impossible"/"guaranteed" without a reproduction.
 
-**Required:** a non-empty **"What I left open / unreliable"** section in every report;
-unresolved questions go to `docs/sessions/<today>.md` Open questions; a weak check says how it's
-weak and what real proof looks like.
-
-Inventory counts (metrics, modules, dotted config keys) use `grep -F` only, over every spelling of the
-family; show a non-zero hit as the matching line.
+**Required:** a non-empty **"What I left open / unreliable"** section in every report; questions
+that outlive the task go to `docs/claude/OPEN_QUESTIONS.md`; a weak check says how it's weak and
+what real proof looks like. Inventory counts use `grep -F` only, over every spelling of the family;
+show a non-zero hit as the matching line.
 
 ## 3. MCP availability follows `enabled.yaml`
 
-A server named in your role prompt exists only if enabled in `.claude/enabled.yaml`; otherwise
-fall back to `Grep`/`Read`. First use: `Read` `.claude/plugins/<id>/README.md`, load its schema
-via `ToolSearch`. Mutating/index-building MCP ops — who, where:
-`team-protocol` §7.
+A server in your role prompt exists only if enabled in `.claude/enabled.yaml`; else
+`Grep`/`Read`. First use: `Read` `.claude/plugins/<id>/README.md`, load the schema via `ToolSearch`.
+Layer boundaries: only CLI `sentrux check .`; MCP `check_rules` is a quick signal, not a verdict.
+graphify community names are hints, not facts.
+Mutating/index-building MCP ops — who, where: `team-protocol` §7.
 
 ## 4. Commits, pushes and pull requests
 
-- Commit only if your role commits **and** the brief didn't say otherwise. Never push, never
-  open a PR, never `git add -A` (stage explicit paths; the tree may be shared).
-- Conventional Commits + mandatory `Why:`/`Layer:` trailers, `Refs: plans/<slug>.md` from a
-  plan; `commit-msg` hook rejects anything else. Guide: `.claude/COMMIT_GUIDE.md`.
-- After committing, `git show --stat HEAD` — confirm the commit carries only the paths you staged.
-- A developer brief states: commit subject in English or Russian, never transliterated Latin; run
-  `git log --oneline -1` before any push.
+- Commit only if your role commits **and** the brief didn't say otherwise. Never push, never open a
+  PR, never `--no-verify`, never `git add -A` — stage explicit paths.
+- Conventional Commits + mandatory `Why:`/`Layer:` trailers, each on one line; `Refs: plans/<slug>.md`
+  from a plan (the `commit-msg` hook checks). Guide: `.claude/COMMIT_GUIDE.md`.
+- After a commit, `git show --stat HEAD` — only the paths you staged.
+- Commit subject in English or Russian, never transliterated Latin.
 
 ## 5. Subagents and scope
 
-- Spawn a subagent only for a sizeable, independent track, never to verify your own work;
-  `run_in_background: false` only when the answer blocks you.
-- Apply every instruction to every listed file; keep changes to what the task names — a
-  pre-existing bug or improvement is a follow-up line in your report, not a change here.
-  Targeted edits, not whole-file rewrites.
-
-**Brief = form** (`dev/templates/executor-brief.md`: DESIGN / FILES / REDS): first edit within 5
-tool calls, never re-derive DESIGN, a file outside FILES → stop and ask.
-**Test radius, not the whole suite:** blast-radius tests + `ruff check` + type checker, in the
-foreground; the full suite runs once, at the lead, on the merge point. Exception: a shared-infra
-change (registry, model tier, index format) — the suite is the radius.
-**Environment finding** (venv, shared file, tool) → `SendMessage` to `main` now, keep working.
-**Evidence or nothing:** every "green"/"red"/"fixed" carries the command and its output (predicted
-RED set, break-injection output, preflight paths). **Don't chain unrelated `Bash` commands** —
-one unmatched piece sends the whole chain to the owner; fix = an allow rule or a shorter chain,
-never a gate-skipping flag.
-
-- Model names: tier aliases (`opus`/`sonnet`/`haiku`/`fable`) in agent files and prose; a version pin only
-  with a stated reason. Pass `model` explicitly on every Agent call — reviewer/teamlead `opus`,
-  developer/tester/debugger `sonnet`, cto `fable` — and state it in the brief.
-- A writer in a worktree stages explicit paths, runs `ruff` itself and writes the commit message to a
-  file; the lead commits when the protect-branch hook reads main.
-- Run live tests synchronously; at the second stall the lead takes the check over.
-- Bring up the live GUI stand only through the production entry with `INSPECTOR_GUI_UNATTENDED=1` and
-  real windows.
-- A public path with no live caller is a contract: fix it, or reject it loudly in review.
-- Every observability knob switches on/off at any boundary and costs zero load when off.
+- Default output: a report, no commit, no push.
+- Spawning an agent: `model` explicitly as a tier alias (reviewer/teamlead `opus`, developer/tester
+  `sonnet`, cto `fable`), `run_in_background: false` for reviewer/tester, and its prompt says: do not
+  commit, do not push. Only for a sizeable independent track, never to verify your own work.
+- **Brief = form** (DESIGN / FILES / REDS): first edit within 5 tool calls, never re-derive DESIGN,
+  a file outside FILES → stop and ask. Apply every instruction to every listed file; targeted edits,
+  not whole-file rewrites. A pre-existing bug is a report line, not a change.
+- Several readings → list them; turn the task into a verifiable goal (repro → green).
+- **Test radius, not the whole suite** (blast-radius tests + `ruff check` + type checker); the full
+  suite runs at the lead, unless the change is shared infra (registry, model tier, index format). Lean output: `pytest -q --tb=short`, `ruff check -q`.
+- **Evidence or nothing:** every "green"/"red"/"fixed" carries the command and its output.
+- Environment finding (venv, shared file) → `SendMessage` to `main`, keep working.
+- Don't chain unrelated Bash commands (one unmatched piece goes to the owner); never a gate-skipping flag.
+- `ponytail` never cancels tests, docs or trailers. Secrets only in env; no `rm -rf`, no `curl | sh`,
+  no new dependency without a reason. Log errors, never swallow them.
 
 ## 6. Language
 
-User replies follow the native `language` key (`.claude/settings.json`). Agent prompts, skills,
-settings and memory stay English regardless; don't mix languages in one file.
+Replies to the owner, code comments and docs (README, STATUS, plans): **Russian**. Agent prompts,
+skills, settings and memory: English. Don't mix languages in one file.
 
 ## 7. Escalation ladder — one level up, never sideways, never a guess
 
-Escalate one level (junior → developer → teamlead → cto → owner) when **blocked**, after a
-third failed iteration, on spec-vs-code conflict, or when a decision **outlives your task**
-(narrows an owner's decision, inherited architecture, changed acceptance, a defect outside
-`Files:`) — say so **before** you act.
-
-| You are | Escalate to | Typical reason |
-|---|---|---|
-| `junior`, `docs-writer` | `developer` / `tech-writer` | change needs a choice the task didn't specify |
-| `developer`, `tester`, `debugger`, `tech-writer`, `spec-writer` | `teamlead` | design question, spec vs. code, two failed iterations (`debugger` → `investigator` first) |
-| `teamlead`, `reviewer`, `investigator`, `manager`, `integrator`, `ai-judge` | `cto` | architecture/ownership/invariant decision, or `teamlead`/`reviewer` disagree after two iterations |
-| `cto` | owner, via the lead | scope/priority/hardware/budget — record in `docs/sessions/<today>.md` Open questions |
-
-**Team:** `SendMessage` to the higher role or lead; mark your task blocked. **Subagent:** the
-moment the fork appears, send the block below to `main`, and repeat it in your final report.
+Escalate when **blocked**, after a third failed iteration (2 per loop), on spec-vs-code conflict, or
+when a decision **outlives your task** (narrows an owner's decision, inherited architecture, changed
+acceptance, a defect outside FILES) — say so **before** you act. Ladder: `junior`/`docs-writer` →
+`developer`/`tech-writer` → `teamlead` → `cto` → owner (via the lead). `tester`, `debugger`,
+`spec-writer` → `teamlead` (`debugger` → `investigator` first); `reviewer`, `investigator`, `manager`,
+`integrator`, `ai-judge` → `cto`. Team: `SendMessage` to the higher role. Subagent: send this block
+to `main` at the fork and repeat it in your final report:
 
 ```
 ESCALATION -> <role>
@@ -103,42 +84,57 @@ Blocked on: <the decision or information you need>
 Files: <paths>
 ```
 
-## 8. Session boundaries — offer the reset, don't wait to be asked
+## 8. Tree, search and shell
 
-A finished task is the cheapest moment to shed context. End your report with exactly one line:
+- One tree — one writer. A peer may share your tree: stage explicit paths only. A writer in a
+  worktree runs `ruff` itself and writes the commit message to a file; the lead commits.
+- Never `grep -r` from the repo root (`.claude/worktrees`: ~80 checkouts): `git grep` or `rg`
+  scoped to paths or with `--glob '!.claude/worktrees'`.
+- In a worktree: no `uv sync`, `uv run` only with `--no-sync`; run the main `.venv` python with
+  `PYTHONPATH=<worktree root>`; prove the import path from the same cwd as pytest.
+- `uv sync` elsewhere only with `--inexact`. No global `taskkill` — `TaskStop` or a PID.
+- `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
+- Add an import and its use in one Edit (ruff strips an unused import).
 
-| Situation | The line you end with |
+## 9. Tests and verdicts
+
+- Logic changed → tests changed. Authors add hazard tests (races, reentrancy, ordering, locks); an
+  independent tester writes acceptance tests blind, before the code.
+- Expected values are literals, never derived from the code under test.
+- Assert the observable effect, not an implementation API name.
+- A test that can hang runs the call in a daemon thread with a join deadline. A fake-harness suite
+  needs one test that wires the real objects.
+- Green without a red under break-injection proves nothing.
+- A verdict without input → observed output is advice: reproduce by running and quote the output.
+- A plan's premise and its stated cause are hypotheses: reproduce the blocker; the symptom holds to
+  the number.
+- Live tests run synchronously; at the second stall the lead takes over.
+
+## 10. Owner principles
+
+1. Framework universal, prototype expendable.
+2. Fix the framework forward: never route around its bug or remove function.
+3. Freeze dead code, never kill it; a public path with no live caller is a contract.
+4. Fewer layers win at equal function.
+5. Every component pluggable and testable; one failure never drops a neighbour.
+6. GUI forms the topology, backend runs headless; GUI starts nothing.
+Observability knobs: switchable at any boundary, zero cost when off.
+
+## 11. Style and session end
+
+Reports follow STE-80; end every report with the boundary line —
+`.claude/skills/project-rules/{ste-80,session-boundaries}.md`.
+
+## Map
+
+| when | read |
 |---|---|
-| More of the same task, context still modest | nothing — keep working |
-| Task closed, next task same plan/area | `Boundary: task closed. /compact (focus: files + tests + plan path).` |
-| Phase closed, feature merged, or next task elsewhere | `Boundary: <what closed>. Better: new chat — branch <b>, plan <path>, SHA <sha>, state "<line>".` |
-
-## 9. Explanation style — STE-80
-
-For prose that explains: reports, ADR text, handoffs, answers to the owner. Not for code, commands,
-logs, quoted output, commit trailers. Source: ASD-STE100 (Simplified Technical English), relaxed for
-readability. "STE-80" means exactly the 8 hard rules plus the relaxations below; nothing else from
-ASD-STE100 applies (no 900-word dictionary, no approved-verb list). The rules are about structure, so they hold in any language — the owner
-still gets Russian (§6).
-
-**Hard rules**
-1. One idea per sentence. Description ≤25 words, instruction ≤20.
-2. Instruction = imperative, one action per sentence, in execution order. A `Warning:` goes
-   before the step it protects.
-3. Active voice, simple tense. Name the actor: "the router drops the message", not "the message is dropped".
-4. One word, one meaning. Pick one term per thing and keep it through the whole text
-   (process ≠ channel — see `ROUTING_GLOSSARY.md`). Never vary a term for style.
-5. Repeat the noun instead of "it / this / that" when the referent is not in the same sentence.
-6. Answer first, reason after. No filler: no intro recap, no "it is worth noting", no closing summary
-   of what the text just said.
-7. Literals, not adjectives: "3 of 40 tests fail", not "some tests fail".
-8. Paragraph ≤6 sentences. Lists for steps and parallel facts.
-
-**Relaxations**
-- Project terms and identifiers stay as they are (`SchemaBase`, `ProcessModule`); no dictionary check.
-- One `because` clause is fine when the reason is the point of the sentence.
-- Noun clusters up to 3 words; perfect tense when it states a result ("already merged").
-- Quotes, ADR wording fixed by the owner, and the owner's own text are not rewritten.
-
-**Check before sending:** delete every sentence that changes neither the reader's understanding nor
-their next action. STE is clarity, not compression — if the owner asks for `caveman`, `caveman` wins.
+| editing an area | `.rules/{gui,framework,module-state,logging,plugins,services,prototype}.md` |
+| architecture, key paths | root `CLAUDE.md`: Архитектура, Ключевые пути |
+| IPC, ownership | `multiprocess_framework/docs/{ROUTING_GLOSSARY,MODULES_RESPONSIBILITY_MAP,MODULE_TIERS}.md` |
+| stack, tests, Layer, worktree | `.claude/modes/_stack.md` (Toolchain → Worktree); `make gate` |
+| lessons | `docs/claude/memory/CRAFT-{tests,injection,verdict,config-qt,by-module}.md` |
+| lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §4 writing one; owner: «## 2. Решения владельца (живые)» |
+| MCP | `.claude/plugins/mcp-{qex,sentrux,backend-ctl}/README.md`; blast radius `scripts/graph_slice/README.md` |
+| live backend | `backend_ctl`; qt-mcp only for GUI; no psutil; GUI stand `INSPECTOR_GUI_UNATTENDED=1` |
+| skills | module-contract, systematic-debugging, verify-done, team-protocol |

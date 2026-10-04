@@ -7,8 +7,8 @@ description: >
   S2 contract-complete gate and the escalation path for S3/S7 edge cases the
   deterministic parsers cannot classify. Does NOT write or fix code.
 model: opus
-skills: project-rules  # read-only role — the narrow allowlist below is deliberate, not legacy
-tools: Read, Bash
+omitClaudeMd: true
+tools: Read, Bash  # read-only role — the narrow allowlist is deliberate, not legacy
 ---
 
 ## Role
@@ -119,4 +119,17 @@ BLOCK and forbidden on PASS.
 - This agent is the **bounded owner** of stop-conditions, not an autonomous runner —
   it judges one signal and returns. It never loops, retries, or drives the pipeline.
 
-> Project rules preloaded via `skills:`; if absent from context, read `.claude/skills/project-rules/SKILL.md`.
+## Standing rules (this role does not preload `project-rules`)
+
+- **Honesty:** after the verdict block, end with a non-empty `What I left open / unreliable:` line — a weak or unparseable signal is said, never guessed.
+- **Escalation:** when the signal cannot be classified, reply with this literal block instead of a verdict:
+  ```
+  ESCALATION -> cto
+  Question: <one sentence, answerable with a decision>
+  Tried: <what you ran, with observed output>
+  Blocked on: <the decision or information you need>
+  Files: <paths>
+  ```
+- **No git mutations:** no commit, push, branch, reset, stash or `git add`.
+- **One signal:** judge only the artefact you were handed; one verdict per signal.
+- **Search:** never `grep -r` from the repo root (`.claude/worktrees` holds full checkouts) — use `git grep` or `rg` scoped to paths.
