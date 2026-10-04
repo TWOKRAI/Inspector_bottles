@@ -224,7 +224,7 @@ def test_branch_name_with_slashes_goes_through_full_refs_and_commits_get_hashes(
     assert archives
     for c in archives:
         assert SHA40.fullmatch(c[c.index("--") - 1]), f"коммит в archive не sha: {c}"
-        assert c[c.index("--") + 1] == "plans/P"
+        assert c[c.index("--") + 1] == ":(literal)plans/P"
     assert all("feat/deep/name" not in a or a.endswith("refs/heads/feat/deep/name") for c in calls for a in c)
 
 
@@ -595,3 +595,83 @@ def test_export_ignore_hides_the_plan_warns_on_stderr_and_keeps_json_valid(tmp_p
     assert cp.stderr.splitlines() == [
         "предупреждение: ветка feat/x, план plans/P: выгрузка есть, разбор не удался (в выгрузке нет файлов плана)"
     ]
+
+
+# =========================================================================== раунд 2 ревью: база, шаблоны в имени, причина
+
+
+def run_json_cli(root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(_MOD_PATH), "--root", str(root), "--json", "--now", "2026-10-03T12:00:00"],
+        capture_output=True, encoding="utf-8", errors="replace", timeout=60, env=_env({"PYTHONIOENCODING": "utf-8"}),
+    )  # fmt: skip
+
+
+def test_export_failure_on_the_base_only_warns_and_gives_no_entry_without_crash(tmp_path):
+    """База (merge-base) лежит под `export-ignore` -> её выгрузка пуста; вершина без `.gitattributes` выгружается
+    нормально. Раньше проверялась только вершина: база-ошибка уходила в `merge_branch_numbers` и падала
+    `AttributeError: 'PlanExportError' object has no attribute 'tasks'`. Ждём: exit 0, одна строка stderr, `[]`, JSON цел."""
+    repo = Repo(
+        tmp_path,
+        {".gitattributes": "plans/** export-ignore\n", "plans/P/plan.md": items("PENDING", "PENDING")},
+    )
+    repo.git("checkout", "-q", "-b", "feat/x", "refs/heads/main")
+    (repo.root / ".gitattributes").unlink()
+    repo.write("plans/P/plan.md", items("DONE", "PENDING"))
+    repo.commit("drop attributes, close 1.1")
+    repo.git("checkout", "-q", "main")
+    cp = run_json_cli(repo.root)
+    assert cp.returncode == 0, cp.stderr
+    plans = {p["plan"]: p for p in json.loads(cp.stdout)}
+    assert plans["P"]["branches"] == []
+    assert cp.stderr.splitlines() == [
+        "предупреждение: ветка feat/x, план plans/P: выгрузка есть, разбор не удался (в выгрузке нет файлов плана)"
+    ]
+
+
+@pytest.mark.parametrize("name", ["G[1]", "G1"])
+def test_glob_characters_in_the_plan_name_are_literal_and_an_absent_base_is_an_empty_base(tmp_path, name):
+    """`git archive` с обычным pathspec `plans/G[1]` читает `[1]` как шаблон, ничего не находит и отвечает кодом 0
+    с пустым tar (ложное предупреждение, запись потеряна). С `:(literal)` базы без плана — код 128, база пуста.
+    Диск (main) `1.1`, `1.2` PENDING; вершина закрывает `1.1`; базы нет -> 1 из 2. `G1` — контроль без шаблона."""
+    repo = Repo(tmp_path, {"plans/Z/plan.md": items("PENDING")})
+    repo.edit_on("feat/x", {f"plans/{name}/plan.md": items("DONE", "PENDING")})
+    repo.write(f"plans/{name}/plan.md", items("PENDING", "PENDING"))
+    repo.commit("main adds the plan")
+    assert repo.collect()[name] == [{"branch": "feat/x", "done": 1, "total": 2}]
+
+
+def test_archive_pathspec_is_literal(tmp_path, monkeypatch):
+    repo = Repo(tmp_path, {"plans/P/plan.md": items("DONE", "PENDING")})
+    repo.edit_on("feat/x", {"plans/P/plan.md": items("DONE", "DONE")})
+    calls = spy_run(monkeypatch)
+    repo.collect()
+    specs = [c[c.index("--") + 1] for c in calls if c[1] == "archive"]
+    assert specs and set(specs) == {":(literal)plans/P"}, specs
+
+
+def test_empty_archive_gives_a_readable_reason(tmp_area, monkeypatch):
+    """Пустой tar (10240 нулевых байт) открывается как несжатый и без членов: причина — «нет пути плана»,
+    а не `ReadError: file could not be opened successfully: ... method gz`."""
+    monkeypatch.setattr(pp, "_git", _fake_git_writing_tar(b"\0" * 10240))
+    with pytest.raises(pp.PlanExportError) as info:
+        pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False)
+    assert str(info.value) == "в выгрузке нет пути плана"
+
+
+def test_non_tar_archive_reason_does_not_mention_other_compression_methods(tmp_area, monkeypatch):
+    monkeypatch.setattr(pp, "_git", _fake_git_writing_tar(b"\x1f\x8b" + b"garbage" * 100))
+    with pytest.raises(pp.PlanExportError) as info:
+        pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False)
+    assert str(info.value).startswith("ReadError: ") and "method gz" not in str(info.value), str(info.value)
+
+
+def test_archive_with_only_a_pax_header_reads_as_no_plan_files(tmp_area, monkeypatch):
+    """Так выглядит выгрузка, когда `export-ignore` скрыл всё: pax-шапка и нулевые блоки, ни одной записи."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "abc"}):
+        pass
+    monkeypatch.setattr(pp, "_git", _fake_git_writing_tar(buf.getvalue()))
+    with pytest.raises(pp.PlanExportError) as info:
+        pp.analyze_plan_at(Path("."), "abc", "plans/P", "P", False)
+    assert str(info.value) == "в выгрузке нет файлов плана"

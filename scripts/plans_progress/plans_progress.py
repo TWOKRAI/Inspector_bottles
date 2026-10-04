@@ -1764,13 +1764,20 @@ def analyze_plan_at(root: Path, commit: str, plan_rel: str, name: str, archived:
     """
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         archive = Path(tmp) / "x.tar"
-        if _git(["archive", "--format=tar", "-o", str(archive), commit, "--", plan_rel], root) is None:
+        # `:(literal)`: `[`, `*`, `?` в имени плана не шаблон; обычный pathspec без совпадений даёт код 0 и пустой tar
+        if _git(["archive", "--format=tar", "-o", str(archive), commit, "--", f":(literal){plan_rel}"], root) is None:
             return None
         tree = Path(tmp) / "tree"
         tree.mkdir()
         try:
-            with tarfile.open(archive) as tar:
+            with tarfile.open(archive, "r:") as tar:  # только несжатый tar: другой мы не пишем
                 tar.extractall(tree, filter="data")
+        except tarfile.ReadError as exc:
+            if str(exc) in ("empty file", "end of file header"):  # tarfile так сообщает об архиве без единой записи
+                raise PlanExportError(
+                    "в выгрузке нет файлов плана"
+                ) from exc  # git при export-ignore пишет только pax-шапку
+            raise PlanExportError(f"{type(exc).__name__}: {exc}") from exc
         except (tarfile.TarError, OSError, ValueError) as exc:
             raise PlanExportError(f"{type(exc).__name__}: {exc}") from exc
         target = tree / plan_rel
