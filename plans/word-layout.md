@@ -130,6 +130,15 @@ Plugins/processing/word_layout/
 - Smoke: headless-прогон рецепта (предсказания → jobs с координатами слотов), при наличии —
   qt-mcp дашборд (поля плагина правятся вживую).
 
+## Порядок выполнения
+
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Id `P1`–`P4` — это Phase 1–4 раздела «Фазы» выше.
+
+- Task P1: Чистое ядро — `geometry.py` + `assembler.py` + тесты [DONE 2026-06-16 — `23a65d8b`; `Plugins/processing/word_layout/`]
+- Task P2: Плагин `word_layout` — регистры, конфиг, `process()` [DONE 2026-06-16 — `23a65d8b`; позже правки `5ed21461`, `87d50a0f` (2026-10-01, порог уверенности)] (после P1)
+- Task P3: Проводка + рецепт [IN PROGRESS] (после P2) — рецепт `hikvision_letter_robot.yaml` с `word_layout` в `main` (`5196ab3b`); не найдено: проброс `angle_deg` в `robot_io` (`Plugins/io/robot_io/plugin.py` слова `angle` не содержит), live-smoke на стенде
+- Task P4: Docs + memory + smoke [IN PROGRESS] (после P3) — `README.md`/`STATUS.md` плагина есть (`23a65d8b`); записи в `docs/claude/memory/` про `word_layout` нет, smoke не подтверждён
+
 ## Открытые вопросы / follow-up
 
 - **Мост слова из телефона:** `phone.state.word` → порт `word_layout`. Варианты: телефон

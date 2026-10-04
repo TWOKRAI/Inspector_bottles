@@ -94,6 +94,77 @@ Diff вычитан поштучно — **дрейф оказался из ДВ
 
 ## Порядок выполнения (сводный, пошагово)
 
+> Сверено по git 2026-10-03; статус задачи пишется один раз — здесь. Хеши — коммиты в `main` (проверено `git log main --grep="Refs: plans/frontend-constructor"`). Задачи, ушедшие в [`gui-constructor`](../gui-constructor/plan.md), — `SUPERSEDED` с указанием цели. Блок В (Ф3, Ф6) ждёт окно codemod [`framework-architecture-rework`](../framework-architecture-rework/plan.md).
+
+### Ф0 — реконсиляция планов и доков
+
+- Task T0.1: Патч layer-grouping (27-й модуль, заметка backend_ctl) [DONE 2026-07-18 — `5307a2c2c`]
+- Task T0.2: Счётчики модулей 25→27 [DONE 2026-07-18 — `5307a2c2c`]
+- Task T0.3: proto-frontend-carve → SUPERSEDED, регистрация в current-path/QUEUE [DONE 2026-07-18 — `5307a2c2c`]
+- Task T0.4: Создать план frontend-constructor с решениями Р1–Р6 [DONE 2026-07-18 — `4154e08e9`]
+- Task T0.5: Пограничный список Р6 поимённо [DONE 2026-07-18 — `5307a2c2c`]
+
+### Ф1 — гигиена frontend_module
+
+- Task T1.1: Инвентарь Gen-1/Gen-2 с grep-доказательствами [DONE 2026-07-19 — `8161a3d32`]
+- Task T1.2: Фасад-флип `__init__.py` на живое поколение [DONE 2026-07-19 — `7d4c29acd`; правка MED-1 `faccbdea3`]
+- Task T1.3: README/STATUS под Gen-2 [DONE 2026-07-19 — `f6c05dddb`]
+- Task T1.4: Убрать инверсию тестов (framework → prototype) [DONE 2026-07-19 — `c8e8046d1`]
+- Task T1.5: Фикс докстринга `descriptor_meta.py` [DONE 2026-07-19 — `0b9692ec8`]
+
+### Ф2 — граница фронт/бэк
+
+- Task T2.0: Boundary-inventory + sentrux baseline [PENDING] — отдельного коммита/документа нет; вероятно поглощена T2.1, решение лида
+- Task T2.1: `gui` из `base.yaml` в `presentation.yaml`, `frontend/run.py` [DONE 2026-07-19 — `d6faaa80e`; снапшоты досинхронизированы `8f814b00b`]
+- Task T2.2: Headless-флаг основного входа [DONE 2026-07-19 — `d6faaa80e`]
+- Task T2.3: Де-хардкод `manifest.py` (styles опционален) [DONE 2026-07-19 — `d6faaa80e`]
+- Task T2.4: sentrux boundary `backend/* → frontend/*` [DONE 2026-07-19 — `d6faaa80e`]
+- Task T2.5: Реконсиляция 5 рецептов с инлайн-`gui` [DEFERRED] — опциональная, пропущена (шапка плана)
+- Task T2.6: STATUS/README прототипа: режимы запуска [DONE 2026-07-19 — `d6faaa80e`]
+
+### Ф3 — промоушен универсального из прототипа (Блок В)
+
+- Task T3.0: Пофайловый инвентарь-свип `multiprocess_prototype/frontend/` [BLOCKED] — окно codemod rework
+- Task T3.1: `DataReceiverBridge` + `IDeltaSource` [BLOCKED] — окно codemod; в конце фазы
+- Task T3.2: `RequestRunner` [BLOCKED] — окно codemod; в конце фазы
+- Task T3.3: `glob_match` + `GuiStateBindings` [BLOCKED] — окно codemod
+- Task T3.4: `qt_event_bus`, `wheel_guard`, `prefs/` [BLOCKED] — окно codemod
+- Task T3.5: Реализации-примитивы ×6 + dialogs-helper [BLOCKED] — окно codemod
+- Task T3.6: Forms-движок (T3.6b опц.) [BLOCKED] — окно codemod
+- Task T3.7: `FrameworkRuntime` [BLOCKED] — окно codemod
+- Task T3.8: Удаление 13 шимов-реэкспортов [BLOCKED] — окно codemod
+
+### Ф4 — GuiBootstrap (перенесена в gui-constructor 2026-09-26)
+
+- Task T4.1: Дизайн-док GuiBootstrap/GuiAppSpec [SUPERSEDED] — черновик `6e01d1995` остался; дальше — `design-*.md` и Ф1 gui-constructor
+- Task T4.2: Механическая разборка `run_gui` на стадии [SUPERSEDED] — gui-constructor 1.1–1.2
+- Task T4.3: `GuiBootstrap` + `GuiAppSpec` [SUPERSEDED] — gui-constructor 1.4
+- Task T4.4: `GuiHostRuntime` вместо `process._*` [SUPERSEDED] — gui-constructor 1.3
+- Task T4.5: Колбэки и таймеры в стадии [SUPERSEDED] — gui-constructor 1.2
+- Task T4.6: `GuiHostWindow` [SUPERSEDED] — gui-constructor 2.1 (вне Блока В)
+
+### Ф5 — examples/minimal_gui (перенесена в gui-constructor 2026-09-26)
+
+- Task T5.1: `examples/minimal_gui`, 3 вкладки + туториал [SUPERSEDED] — gui-constructor 2.4
+- Task T5.2: CI-job `gui-smoke` [SUPERSEDED] — gui-constructor 2.4
+
+### Ф6 — enforcement и доки (Блок В)
+
+- Task T6.1: import-linter public-interface для frontend [BLOCKED] — после Ф3, окно codemod
+- Task T6.2: Добивка deep-импортов [BLOCKED] — после Ф3, окно codemod
+- Task T6.3: sentrux `framework/* → prototype/*` [BLOCKED] — после Ф3, окно codemod
+- Task T6.4: BLUEPRINT/ADR/STATUS/WIDGET_COOKBOOK [BLOCKED] — после Ф3, окно codemod
+
+### Ф7–Ф8 — опциональные волны (объём — открытый вопрос 4 владельцу)
+
+- Task T7.1: device-kit (`DevicePresenterBase`, `StateBoundController`) [PENDING] (после T3.8)
+- Task T7.2: Пилот vfd + robot с wire-характеризацией [PENDING] (после T7.1)
+- Task T7.3: Остальные устройства по одному PR [PENDING] (после T7.2)
+- Task T8: MVP-унификация презентеров по вкладкам [PENDING] (после T7.3)
+
+### Прежний текст раздела (история)
+
+
 **Блок А — сейчас, ДО codemod layer-grouping** (каждая фаза = своя ветка от свежего main, merge по завершении):
 1. **Ф0** — ветка `docs/fc-f0-recon`: T0.1 патч layer-grouping (27-й модуль → `state/telemetry_readmodel`, заметка backend_ctl→tooling/, precondition «влить feat/backend-ctl-debug-console») → T0.2 счётчики 25→27 → T0.3 SUPERSEDED для proto-frontend-carve + регистрация в current-path/QUEUE → T0.4 этот план в `plans/frontend-constructor/plan.md` → T0.5 пограничный список Р6 поимённо. Гейт: link-check.
 2. **Ф1** — ветка `refactor/fc-f1-facade-flip`: T1.1 инвентарь Gen-1 → T1.2 фасад-флип → T1.3 README/STATUS → T1.4 перенос 2 тестов-инверсий → T1.5 фикс докстринга. Гейт: fw+proto сьюты offscreen, sentrux, qt-smoke.
