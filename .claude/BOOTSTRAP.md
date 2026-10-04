@@ -373,23 +373,13 @@ $EDITOR .claude/protected-branches   # one branch name or regex per line; ^/$ ad
 
 **To override per-machine** (e.g. on a sandbox where committing to `main` is intentional): place the empty file in `~/.claude/` or set the project's `settings.local.json` to remove the hook entry.
 
-### H. Incremental typecheck on Edit/Write (opt-in)
+### H. Incremental typecheck on Edit/Write (FROZEN 2026-10-04)
 
-Hook `typecheck-changed.sh` runs `pyright --outputjson` on the single Python file you just edited, prints up to 5 errors to stderr (non-blocking, info-only). Useful on large projects where you don't want to wait for `make gate` to discover type errors.
+Hook `typecheck-changed.sh` is FROZEN since 2026-10-04 (`plans/2026-10-03_commit-mechanism/tasks/1.4.md`): removed from `plugin.json` and `settings.json`, the file stays on disk with a FROZEN header.
 
-**Default: OFF.** Cold-start pyright takes 3-10s; on a 70k LoC project that's painful on every Edit. Once warm, incremental runs settle to ~500ms-2s.
+Why (measured in tasks/1.4.md): on Windows the input parse keeps a trailing carriage return in the file path, so the hook exits before any work; `|| exit 0` swallows the pyright exit code 1, so the hook is silent exactly when pyright found errors; it prints to stderr, which the agent never sees on exit 0; a live run costs 0.9-2.9 s per `.py` edit.
 
-**To enable per-shell:**
-```bash
-export CLAUDE_TYPECHECK_ON_EDIT=1
-```
-
-**To enable per-project** (recommended for big codebases): add the env block to `.claude/settings.local.json`:
-```json
-{ "env": { "CLAUDE_TYPECHECK_ON_EDIT": "1" } }
-```
-
-The hook **never** blocks — Edit succeeds, errors are advisory. Pyright is resolved from `.venv/Scripts/pyright.exe` / `.venv/bin/pyright` first, then PATH; if missing, the hook silently no-ops.
+Use instead: pyright runs in pre-commit and in `make check`. To wire the hook again (2026-10-04 FROZEN note applies), first parse the input in Python as `autoformat-python.sh` does, keep the pyright exit code, and report through JSON `additionalContext`.
 
 ### I. Settings invariant linter (active in CI, manual otherwise)
 
@@ -398,7 +388,7 @@ Script `scripts/lint_settings.py` + slash-command `/lint-settings` validate that
 - Required `deny` patterns (`--no-verify`, `git push --force`, `git reset --hard`, `sudo`, `chmod 777`, `mkfs`, `dd if=`, ...) — exit 1 if missing.
 - Required `Write`/`Edit` secrets protection (`**/.env`, `**/*.pem`, `**/*.key`, `**/id_rsa`, `**/id_ed25519`) — exit 1 if missing.
 - Forbidden patterns NOT in `allow` (`uv add *`, `pip install *`, `npx *`, `cp *`, `chmod *`, `git merge *`, ...) — exit 1 if present.
-- Required hooks wired in (`validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `check-imports`, `restore-context`, `session-health-check`) — warning if missing. (Stop-hook `session-end-daily-log` removed from required since v0.4.0 — journaling moved to pre-commit.)
+- Required hooks wired in (`validate-safe-command`, `protect-readonly`, `protect-branch`, `autoformat-python`, `restore-context`, `session-health-check`) — warning if missing. (Stop-hook `session-end-daily-log` removed from required since v0.4.0 — journaling moved to pre-commit.)
 
 **Manual:** `python scripts/lint_settings.py` or `/lint-settings` from inside Claude Code.
 

@@ -1,4 +1,9 @@
 #!/bin/bash
+# FROZEN 2026-10-04: never wired; do not wire it as it stands. Measured in
+# plans/2026-10-03_commit-mechanism/tasks/1.4.md. Defects: (1) on Windows the `read -r TOOL FILE < <($PY ...)` parse
+# keeps a trailing \r in FILE and the hook exits early; (2) it prints to stderr, which the agent never sees on
+# exit 0. Whoever wires it must first parse the input in Python like autoformat-python.sh (Task 1.2) and report the
+# findings through JSON `hookSpecificOutput.additionalContext` on stdout.
 # PostToolUse (OPT-IN): run Semgrep SAST on a just-edited file.
 # NOT registered in plugin.json by default — per-edit Semgrep is slow/noisy.
 # Wire it manually in .claude/settings.json (PostToolUse, matcher "Edit|Write")

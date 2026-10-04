@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# FROZEN 2026-10-04: removed from plugin.json and settings.json; do not wire it back. Measured in
+# plans/2026-10-03_commit-mechanism/tasks/1.4.md. Defects: (1) on Windows the `read -r TOOL FILE < <($PY ...)` parse
+# keeps a trailing \r in FILE and the hook exits early; (2) `OUT=$(timeout 30 pyright ...) || exit 0` swallows the
+# pyright rc=1, so the hook goes silent exactly when there are errors; (3) it prints to stderr, which the agent never
+# sees on exit 0. Alive, it costs 0.9-2.9 s per .py edit. Use instead: pyright stays in pre-commit and in `make check`.
 # PostToolUse(Edit|Write) — non-blocking incremental pyright on changed .py.
 #
 # Default: OFF. Enable per-shell or in settings.local.json env block:

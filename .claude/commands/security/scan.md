@@ -29,6 +29,6 @@ uv run --no-project python .claude/plugins/security/scripts/sast_scan.py
 **Замечания:**
 - Inline-suppression: добавь `# sast: ignore` в строке с находкой для разовых исключений (рядом с нативным `# nosemgrep`).
 - Нужен бинарь `semgrep` (`pipx install semgrep`). Без него скан — no-op (exit 0), проект остаётся зелёным.
-- Per-edit вариант (PostToolUse-хук `hooks/semgrep-scan.sh`) по умолчанию **выключен** — медленный/шумный, opt-in через `.claude/settings.json`.
+- Per-edit вариант (PostToolUse-хук `hooks/semgrep-scan.sh`) снят 2026-10-04 (FROZEN), см. tasks/1.4.md; подключать только после разбора входа как в autoformat-python (1.2).
 
 $ARGUMENTS

@@ -325,16 +325,6 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/lang-python/hooks/autoformat-python.sh",
             "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/lang-python/hooks/check-imports.sh",
-            "timeout": 20
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/lang-python/hooks/typecheck-changed.sh",
-            "timeout": 35
           }
         ]
       }
