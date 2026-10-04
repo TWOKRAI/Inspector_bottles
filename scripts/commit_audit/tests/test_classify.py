@@ -26,9 +26,9 @@ attempts() / table() / counter() ниже; при другой форме пра
 ЧТО ТЕСТЕР СЧИТАЕТ НЕОДНОЗНАЧНЫМ (вынесено в отдельные тесты, чтобы лид правил один литерал; подробности — в отчёте):
     * hidden для пунктов 6, 10, 19 (разметка молчит, правило (h) говорит «скрыто»:
       `2>&1 | tail` или `| grep` у самой команды);
-    * writer-split пункта 4: разметка — A1-undecided, прямое чтение (g) даёт A1-Bash
-      (cp в цикле с именами в том же вызове);
-    * outcome пунктов 14 и 15: разметка «success», правило (e) без `[ветка sha]` даёт unknown;
+    * (решено лидом, Ред. 3) writer-split пункта 4 — A1-Bash: `cp` в цикле с именами в том же вызове;
+      примечание разметки про «ранний A1-повтор» неверно;
+    * (решено лидом, Ред. 3) outcome пунктов 14 и 15 — строго unknown (правило (e), нет `[ветка sha]`);
     * any_failure: считаю вызовы (commit или merge) хоть с одним классом; «только commit» дало бы 12, а не 13;
     * дедупликация по tool_use.id между файлами (в спеке — «по tool_use.id», про файлы ничего).
 """
@@ -176,8 +176,8 @@ BASE_CLASSES = {
     16: set(),
     19: set(),
 }
-# последний писатель .py перед попыткой (g): 1, 2 — Bash (cat >, sed -i); 3 — Edit; 4 — см. «неоднозначно»
-WRITER_SPLIT_EXPECT = {1: "A1-Bash", 2: "A1-Bash", 3: "A1-Edit/Write", 4: "A1-undecided"}
+# последний писатель .py перед попыткой (g): 1, 2 — Bash (cat >, sed -i); 3 — Edit; 4 — Bash (cp-цикл)
+WRITER_SPLIT_EXPECT = {1: "A1-Bash", 2: "A1-Bash", 3: "A1-Edit/Write", 4: "A1-Bash"}
 KINDS = {i: ["commit"] for i in ATTEMPT_ITEMS}
 KINDS[9] = ["merge"]  # `git merge --no-ff -q -F - feat/t45`
 FAILING_ITEMS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
@@ -263,11 +263,11 @@ def test_a1_writer_split_follows_the_last_writer_of_the_staged_py(item):
     assert got == {WRITER_SPLIT_EXPECT[item]}
 
 
-def test_a1_writer_split_of_item_4_is_undecided_by_the_label():
-    """Разметка: A1-undecided. Прямое чтение (g) — `cp "$W/$f" "$f"` в цикле с тремя именами в том же вызове —
-    даёт A1-Bash. Лид решает, какая из двух моделей верна."""
+def test_a1_writer_split_of_item_4_is_bash_because_of_the_cp_loop_naming_the_files():
+    """Пункт 4: `for f in <3 имени>; do cp "$W/$f" "$f"; done` в вызове перед попыткой — писатель Bash (g).
+    Решение лида (Ред. 3): A1-Bash; прежняя метка A1-undecided и её примечание были неверны."""
     got = classes_of(real(), ID[4]) & WRITER_SPLIT
-    assert got == {"A1-undecided"}
+    assert got == {"A1-Bash"}
 
 
 def test_attempts_without_a1_have_no_writer_split_label():
@@ -312,11 +312,10 @@ def test_outcome_unknown_for_an_attempt_without_class_and_without_success_line()
 
 
 @pytest.mark.parametrize("item", [14, 15])
-def test_quiet_commit_without_a_branch_sha_line_is_not_a_failure(item):
-    """Разметка: success (виден только через git show --stat / git log). Правило (e) без `[ветка sha]` даёт unknown.
-    Закреплено общее: не failure, класса нет."""
+def test_quiet_commit_without_a_branch_sha_line_has_outcome_unknown(item):
+    """`-q` прячет `[ветка sha]`; правило (e) без неё даёт unknown (решение лида, Ред. 3). Класса нет."""
     got = attempts(real())[ID[item]]
-    assert got["outcome"] in ("success", "unknown")
+    assert got["outcome"] == "unknown"
     assert classes_of(real(), ID[item]) == set()
 
 
@@ -328,8 +327,8 @@ TABLE = {
     "A1": (4, 25.0, 0, 0.0),  # 1, 2, 3, 4
     "A1-Edit/Write": (1, 6.25, 0, 0.0),  # 3
     "A1-F401": (1, 6.25, 0, 0.0),  # 4
-    "A1-Bash": (2, 12.5, 0, 0.0),  # 1, 2
-    "A1-undecided": (1, 6.25, 0, 0.0),  # 4 (по разметке)
+    "A1-Bash": (3, 18.75, 0, 0.0),  # 1, 2, 4
+    "A1-undecided": (0, 0.0, 0, 0.0),  # никто: пункт 4 — A1-Bash
     "A2": (2, 12.5, 0, 0.0),  # 5, 13
     "A3": (1, 6.25, 0, 0.0),  # 6
     "C1": (3, 18.75, 0, 0.0),  # 2, 4, 7
