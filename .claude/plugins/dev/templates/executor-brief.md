@@ -38,15 +38,18 @@ REDS (predicted red tests, <= 10, `path::test_name`; "n/a — <why>" for docs / 
 ACCEPTANCE: numbers the lead will check by running <command>
 
 FIRST EDIT: within your first 5 tool calls. Do not re-derive DESIGN; do not open files
-  outside FILES. Before your first edit under src/, send ONE message upward (<= 300 tokens,
+  outside FILES. Read narrowly: a file over ~400 lines — `grep -n` the anchor, then Read with
+  offset/limit; the plan — only your Task section plus the files in FILES and HANDOFF IN; read
+  each file once unless it changed; never re-read CLAUDE.md, project-rules or this brief. Before your first edit under src/, send ONE message upward (<= 300 tokens,
   do not wait for an answer):  DESIGN: <3 lines> / FILES: <list> / starting edits
 
 TESTS: <exact pytest command for the task radius>
 
 TEST RULES: foreground, `timeout: 300000`, never in the background, never the full suite
   (the lead runs it at the merge point); tests/e2e only when the task is about e2e. In a
-  worktree: `env -u VIRTUAL_ENV uv sync --extra dev` once, then `env -u VIRTUAL_ENV uv run …`;
-  paste the preflight output before any test claim.
+  worktree: never `uv sync` (it swaps the CUDA torch wheel for the CPU one) — run the main
+  checkout's `.venv` Python with `PYTHONPATH=<worktree root>`; before any test claim paste the output of
+  `python -c "import multiprocess_framework as m; print(m.__file__)"` (path inside the worktree).
 
 OUT OF SCOPE: <what not to touch, what not to "improve">
 TRAPS: <1–3 lines from memory, the plan, or the previous agent's handoff>
