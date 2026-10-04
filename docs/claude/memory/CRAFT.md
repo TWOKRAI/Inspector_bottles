@@ -16,6 +16,7 @@
 
 - [Три роли авторства](feedback_test_authorship_three_roles.md) — tester от acceptance, ревьюер запуском · [тестер всегда + инъекции против него](feedback_tester_always_and_inject_against_it.md) — его зелёный не результат
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
+- [Стенд с вердиктом — тоже оснастка](feedback_a_stand_with_a_verdict_is_also_a_harness.md) — приёмником был наш `http.server`, отвечавший 200 на любой путь; настоящий otelcol дал 404, 102 теста из 214 пинили форму, не доставившую ничего
 - [Верный ФОРМЕ дублёр неверен ПРОТОКОЛУ](feedback_a_faithful_fake_still_lacks_the_protocol.md) — настоящая дверь pop-ает служебные ключи; чем проще дублёр, тем надёжнее прячет; одно имя, две двери, два симптома
 - [Прототипируй страж до фиксации формулировки](feedback_prototype_the_guard_before_fixing_its_wording.md) — «в одной функции» было методом инвентаря и пережило основание: красно по построению, выход только whitelist
 - [Ревью ловит стык своих кусков](feedback_review_finds_the_seam_between_own_pieces.md) · [ревью спеки — независимым](feedback_spec_review_needs_independent_agent.md) — автор находит карту, не форму

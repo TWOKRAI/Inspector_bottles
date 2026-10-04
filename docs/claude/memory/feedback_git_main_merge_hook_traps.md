@@ -4,6 +4,8 @@ description: "единый формат merge-коммита (merge: суть + 
 metadata:
   node_type: memory
   type: feedback
+  originSessionId: d875e08d-a524-4e41-9207-8671a6945b06
+  modified: 2026-10-04T06:59:54.182Z
 ---
 
 Набор воспроизведённых грабель git-workflow этого проекта (2026-07-09, Pre-Ф5 hardening). Тратил на них итерации — держать в голове.
@@ -25,6 +27,12 @@ metadata:
 **How to apply:** merge в main = `git merge --no-ff <branch> -m ... -m ...` отдельным вызовом; коммит на защищённую ветку — только через отдельную feature-ветку двумя вызовами Bash (checkout, затем commit); после kill-коммитов сверяй `git show --stat`. Связано: [[feedback_commit_msg_format]] (trailers Why/Layer строго однострочные — та же семья hook-грабель).
 
 **Открытый вопрос (нужно решать):** protect-branch стоило бы дополнить исключением для merge/cherry-pick, чтобы docs/handoff на main не требовали ветку-обёртку (ранее правку хука блокировал auto-классификатор как self-modification — обсудить с владельцем вне auto-режима).
+
+6. **Слияние с `--no-commit` (нужно для `--sync-order`) завершается без строки `git commit`** (проверено 2026-10-04,
+   `14aa47ab6`): `git merge --no-ff --no-commit <ветка>` → `--sync-order` → `git add plans/queue/ORDER.md` →
+   ОДНИМ вызовом Bash записать сообщение в `$(git rev-parse --git-dir)/MERGE_MSG` и `GIT_EDITOR=true git merge --continue`.
+   Хук блокирует вызов целиком, поэтому heredoc в заблокированной команде с `git commit` не выполняется вовсе —
+   файл сообщения не появляется, а слияние так и висит подготовленным (это не потеря, просто повторить).
 
 ## Единый формат коммита слияния (решение владельца 2026-10-03)
 

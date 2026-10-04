@@ -1,43 +1,41 @@
 ---
 name: Constructor Phase 6 status
-description: Phase 6 done — DisplayTargetNode + WireMetricsBadge overlay + ShmDashboardPanel + display combo + metrics polling
+description: DEPRECATED — Phase 6 компоненты удалены 2026-05 в коммите 261b90f. Сохранены ИДЕИ паттернов (raw code reference в git show 9885bb88).
 type: project
 originSessionId: 15a3fe08-0b68-4a3b-9799-f43234b0e0d8
 ---
-Constructor Phase 6 — DONE (2026-05-04).
 
-**Wire Metrics Infrastructure:**
-- WireMetrics dataclass (fps, latency_ms, buffer_fill) in WireDataBridge
-- Separate metrics_changed signal (dict payload), independent from statuses_changed
-- Dedicated _metrics_timer (1000ms) for wire.metrics polling (fire-and-forget)
-- set_metrics_interval(ms) for configurable polling rate
+# Constructor Phase 6 — УДАЛЕНО (2026-05)
 
-**Wire Monitoring Overlay:**
-- WireMetricsBadge(QGraphicsRectItem) — overlay on pipe midpoint
-- Compact badge "30fps | 5.0ms | 50%" with semi-transparent background
-- Auto-hidden when all metrics zero (wire inactive)
-- Integrated in PluginGraphAdapter._rebuild_badges() — created per pipe on load_scene
+**Status:** Все компоненты Constructor-слоя удалены в коммите `261b90f` ("chore: remove obsolete hikvision drafts and archived prototype").
 
-**DisplayTargetNode:**
-- Custom NodeGraphQt node (pattern: ShmRouteNode) — green background #3a5a3a
-- One input port "frame", properties: display_key, display_name, fps_limit
-- Generated from SECTION_DISPLAYS in GraphBuilder.build() (4-tuple now)
-- Wire connect to display → auto-creates wire with target "ui_process.{key}.frame"
-- Wire disconnect → auto-removes wire
+**Last commit before deletion:** `9885bb88` — для просмотра raw code использовать `git show 9885bb88:<path>`.
 
-**Display Combo (WireInspectorPanel):**
-- QComboBox "Display:" with available displays from topology
-- Selection emits wire_changed with {"display_target": key}
-- Updates DisplayDefinition.source_ref in topology editor
+## Удалённые файлы (все ~3300 строк)
 
-**SHM Dashboard:**
-- ShmDashboardPanel: QScrollArea with _WireMetricsRow per wire
-- QProgressBar with color coding: green (<60%), yellow (60-85%), red (>=85%)
-- Page index 3 in QStackedWidget, toggle via checkable "SHM" button in toolbar
-- When active — selection-based page switching is paused
+| Файл | Строк | Путь (на 9885bb88) |
+|------|-------|--------------------|
+| DisplayTargetNode | 193 | `multiprocess_prototype/frontend/widgets/tabs_setting/constructor_tab/canvas/display_target_node.py` |
+| WireMetricsBadge | 149 | `.../canvas/wire_metrics_badge.py` |
+| WireInspectorPanel | 269 | `.../panels/wire_inspector.py` |
+| ShmDashboardPanel | 201 | `.../panels/shm_dashboard_panel.py` |
+| PluginGraphAdapter | 1118 | `.../canvas/plugin_graph_adapter.py` |
+| GraphBuilder | 460 | `.../canvas/graph_builder.py` |
 
-**Tests:** 26 new tests (Phase 6), total 172 Phase 2-6 (all green)
-**Plan:** multiprocess_prototype/plans/phase6_display_monitoring.md (DONE)
+## Сохранённые ИДЕИ (стоит унаследовать при переделке)
 
-**Why:** Constructor Phase 6 completes the visual monitoring layer — users see live metrics on wires and can assign streams to display windows directly from canvas.
-**How to apply:** GraphBuilder.build() now returns 4-tuple (node_map, addr_wire_map, route_nodes, display_nodes). All callers updated. Master plan complete through Phase 6.
+1. **Раздельная телеметрия wire**: `WireStatus` (ACTIVE/BROKEN/IDLE/PENDING, медленный таймер ~2с) и `WireMetrics` (fps/latency_ms/buffer_fill, быстрый таймер ~1с) — два независимых канала. Не смешивать.
+2. **Display = узел canvas первого класса** с одним input-портом `frame` и properties (display_key, display_name, fps_limit). Wire → display = визуальный граф.
+3. **Adapter pattern**: canvas = view, topology editor = source of truth. Signal suppression context (`_block_signals()`) — для предотвращения циклов sync.
+4. **Route nodes** для fan-out >= 2 — опциональная визуальная фича, не обязательная для MVP.
+5. **Metrics badge** позиционируется в midpoint QPainterPath, обновляется при re-layout.
+
+## Что НЕ переносить слепо
+
+- **NodeGraphQt** как базу — текущий PipelineTab уже на нативном QGraphicsScene со Schema-Driven Ports (PortSchema). Не возвращаться к NodeGraphQt.
+- **SECTION_DISPLAYS** как абстракцию — была экспериментальной, может быть проще через node properties.
+- **PluginGraphAdapter** целиком (1118 строк) — это прототип, переписать с нуля с правильными абстракциями.
+- **Auto-layout** — был базовый ярусный, может потребоваться другой алгоритм.
+
+**Why:** Memory прямо вводила в заблуждение — план эволюции прототипа опирался на «готовый Phase 6», которого нет.
+**How to apply:** При планировании любых работ с PipelineTab/DisplaysTab — НЕ ссылаться на «готовый DisplayTargetNode/WireMetricsBadge». Изучать `git show 9885bb88:<path>` как reference, но реализовывать заново на нативном QGraphicsScene.
