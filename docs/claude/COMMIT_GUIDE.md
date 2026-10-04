@@ -173,7 +173,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - ❌ Не дублируй body и `Why:` — body про реализацию, Why про мотивацию.
 - ❌ Не пиши в Why «added X to fix Y». Пиши **почему нужно было X**.
 - ❌ Не используй `--no-verify` для обхода hook — это для merge/rebase.
-- ❌ `Layer: tools` для `backend_ctl` — в whitelist нет `tools`; коммиты `backend_ctl` идут с `Layer: mixed`
+- Коммиты `backend_ctl` — `Layer: mixed` (договорённость проекта). Валидатор значение не проверяет: `.claude/commit-layers.txt` содержит только комментарии, поэтому `Layer:` сейчас необязателен и любое значение проходит
 - ❌ Merge в `main` без формата: тема `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`; `git merge -F -` не читает stdin — сообщение из файла
 - ❌ Не пиши Russian-trailers (`Зачем:`, `Слой:`) — парсеры ждут латиницу.
 - ❌ Не пиши Tested в body — отдельным trailer, чтобы grep работал.

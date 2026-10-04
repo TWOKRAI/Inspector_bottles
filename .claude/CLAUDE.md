@@ -191,7 +191,7 @@ the mirror, or run the materializer).
 Language of agent files: English end to end. Commands, guides and reports: Russian.
 
 `claude-kit upgrade --apply` silently overwrites `.claude/`: keep valuable text only in preserved places
-(root `CLAUDE.md`, `modes/_stack.md`, `settings.local.json`), and `diff` before an upgrade.
+(`.claude/CLAUDE.md`, `modes/_stack.md`, `settings.local.json`, `commit-layers.txt`, everything outside `.claude/`), and `diff` before an upgrade.
 
 ## Team mode — agents that live in the session (`/dev:team`, since 2026-09-02)
 

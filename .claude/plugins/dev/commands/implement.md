@@ -93,7 +93,7 @@ For the `n/a` branch — the stages above don't apply: implement directly (devel
 
 - Verify that **every** stage commit carries the `Refs:` trailer and the Task status in the plan is updated `[PENDING]` → `[DONE]`, then refresh the ledger row: `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`. For a plan with `tasks/`, write `tasks/<id>.result.md` (<= 2 KB): the commit SHAs from `git rev-parse`, every acceptance number with the command that produced it, deviations from DESIGN — nothing else.
 - developer commits on its own; in the subagent brief repeat: never push, never open a PR.
-- Plan checkboxes: after the task, `[ ]` → `[x]` with the commit hash next to it.
+- Plan status with the hash: write `[DONE] <sha>` — `plans_progress` reads the hash only after the status word; a bare `[x]` loses it.
 - After a Qt task: run the prototype with `QT_MCP_PROBE=1` and take a `qt_snapshot` before reporting.
 - Remind about the regression run (`/dev:test` in `MODE: regression`) and review (`/dev:review`) — in standalone they don't run automatically (that's `/dev:pipeline`'s job).
 

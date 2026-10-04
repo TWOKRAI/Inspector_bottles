@@ -1,21 +1,23 @@
 ---
-description: Project long-term memory status — what's in .claude/memory/
+description: Project long-term memory status — what's in <memory_dir>/
 ---
+
+**Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.
 
 Show the current state of project memory.
 
 ## Steps
 
-1. Check that `.claude/memory/` exists. If not — suggest `/core:memory:init`, stop.
-2. Read `.claude/memory/MEMORY.md` (if present). Index line format:
+1. Check that `<memory_dir>/` exists. If not — suggest `/core:memory:init`, stop.
+2. Read `<memory_dir>/MEMORY.md` (if present). Index line format:
    `- [Title](file.md) — hook`.
-3. `ls .claude/memory/*.md` — collect the list of memory files other than `MEMORY.md`.
+3. `ls <memory_dir>/*.md` — collect the list of memory files other than `MEMORY.md`.
 4. For each file extract the frontmatter (`name`, `description`,
    `metadata.type`, optionally `metadata.last-verified`).
 5. Group by type: `user`, `feedback`, `project`, `reference`, `other` (if type isn't specified).
 6. Run the mechanical lint:
    ```bash
-   uv run --no-project python .claude/plugins/core/scripts/memory_lint.py .claude/memory --repo-root .
+   uv run --no-project python .claude/plugins/core/scripts/memory_lint.py <memory_dir> --repo-root .
    ```
    Show each WARN (`dead-link` / `orphan` / `oversized` / `broken-body-ref`
    / `stale`) on its own line — this is exactly the "out of sync" case below that
@@ -31,7 +33,7 @@ Show the current state of project memory.
 ## Output
 
 ```
-Memory: .claude/memory/
+Memory: <memory_dir>/
 Index:  MEMORY.md (N lines)
 Files:  M entries
 

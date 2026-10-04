@@ -48,8 +48,9 @@ Run the final check before shipping the code:
      an independent test was written and the reviewer ran a break-injection, or the
      test skip is explicitly recorded in the plan AND in the commit body. Neither one —
      **do not ship**, go back to tester/reviewer.
-   - **Dark-launch flags:** a task that introduced a flag is closed only when the flag and its OFF
-     branch are deleted. A flag still in the code is an open item — do not ship it as done.
+   - **Dark-launch flags:** a task may add a default-OFF flag (OFF → measure → ON → delete is the
+     cycle). The PLAN is closed only when the flag and its OFF branch are deleted — the plan carries
+     a flag-removal phase whose acceptance is `git grep FW_<NAME>` → empty.
    - **Injection record (Task 6.2):** if the branch changed `tests/**` — its plan
      must contain a **filled-in** `property | predicted red | observed red` row
      (the "Injections" section in the plan or `plans/<slug>/injections.md`). The table
