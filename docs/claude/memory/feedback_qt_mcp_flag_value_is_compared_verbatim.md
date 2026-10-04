@@ -1,6 +1,7 @@
 ---
 name: qt-mcp-flag-value-is-compared-verbatim
-description: "QT_MCP_PROBE сверяется дословно с «1»; порт — отдельная ручка. Значение «1:9142» промолчало, и рендер GUI не проверялся три раунда"
+description: "QT_MCP_PROBE сверяется дословно с «1»; порт — отдельная ручка. Значение «1:9142» промолчало, и рендер GUI не проверялся три раунда; также: Always launch prototype/smoke with QT_MCP_PROBE=1 so qt-mcp can attach (port 9142)"
+merged_from: [feedback_qt_mcp_always_probe]
 metadata:
   node_type: memory
   type: feedback
@@ -25,3 +26,11 @@ metadata:
 обязана быть проверена признаком жизни, а не верой в то, что «переменную же выставили».
 Связано: [[named-mechanism-is-not-a-commitment]], [[swallowed-failure-class]],
 [[gui-stand-production-entry-only]], [[observability-tail-repair]].
+
+## Слито из feedback_qt_mcp_always_probe (_archive/feedback_qt_mcp_always_probe.md)
+
+Владелец (2026-06-13): при любом запуске прототипа для smoke/проверки ВСЕГДА выставлять `QT_MCP_PROBE=1` — `QT_MCP_PROBE=1 python multiprocess_prototype/run.py <recipe>` (run.py сам re-exec в .venv). Это поднимает qt-mcp probe на порту 9142, чтобы делать qt_snapshot/qt_screenshot реального GUI.
+
+**Why:** без probe нельзя визуально верифицировать сборку (а pytest-qt юнит-тесты не доказывают реальный pipeline). Связано с [[feedback_qt_mcp_smoke_verification]] и [[reference_qt_mcp_launch]].
+
+**How to apply:** smoke делегировать tester-агенту (у него есть qt_screenshot/qt_snapshot), запуск в фоне с QT_MCP_PROBE=1, остановка по конкретному PID (не глобальный taskkill — [[feedback_no_global_taskkill]]).
