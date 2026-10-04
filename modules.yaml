@@ -4,7 +4,7 @@
 version: 1
 
 # Что законно остаётся без модуля (резолвится в "other"). Корни слоёв сюда не попадают.
-other_allowed: ["run.py", "conftest.py", ".claude/", "docs/"]
+other_allowed: ["run.py", "conftest.py", ".claude/", "docs/", "plans/"]
 
 modules:
   - id: "actions_module"

@@ -30,7 +30,8 @@ def load_modules(path: str | Path = "modules.yaml") -> list[dict]:
     if not file.is_absolute():
         file = _REPO_ROOT / file
     data = yaml.safe_load(file.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("version") != 1:
+    version = data.get("version") if isinstance(data, dict) else None
+    if type(version) is not int or version != 1:  # bool (True == 1) не годится
         raise ValueError(f"{file.name}: ключ 'version' должен быть равен 1")
     rows = data.get("modules")
     if not isinstance(rows, list):
@@ -47,7 +48,10 @@ def load_modules(path: str | Path = "modules.yaml") -> list[dict]:
 
 
 def resolve(rel_path: str, modules: list[dict]) -> str:
-    """id строки с самым длинным совпавшим элементом `paths`, иначе "other". Не бросает."""
+    """id строки с самым длинным совпавшим элементом `paths`, иначе "other". Не бросает.
+
+    `modules` — список, который вернул load_modules.
+    """
     path = str(rel_path).replace("\\", "/")
     best_id, best_len = OTHER, 0
     for row in modules:
