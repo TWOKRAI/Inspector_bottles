@@ -440,6 +440,8 @@ def fake_run(cmd, *args, **kwargs):
             raise FileNotFoundError(2, "git not found")
         if fault == "timeout":
             raise subprocess.TimeoutExpired(cmd, 5)
+        if fault == "denied":
+            raise PermissionError(13, "Access is denied")
         if fault == "exit":
             return subprocess.CompletedProcess(cmd, 128, "", "fatal: boom")
     return real_run(cmd, *args, **kwargs)
@@ -448,7 +450,7 @@ def fake_run(cmd, *args, **kwargs):
 subprocess.run = fake_run
 if mode == "main":
     sys.exit(mod.main(["validate_commit.py", "-"]))
-text = sys.stdin.buffer.read().decode("utf-8")
+text = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
 result = mod.validate(text)
 for line in result.warnings:
     sys.stderr.write("WARNING: " + line + "\n")
@@ -478,7 +480,7 @@ def test_h13_control_the_driver_without_a_fault_is_silent_on_one_block(copy: str
 
 
 @pytest.mark.parametrize("copy", list(COPIES))
-@pytest.mark.parametrize("fault", ["missing", "timeout"])
+@pytest.mark.parametrize("fault", ["missing", "timeout", "denied"])
 @pytest.mark.parametrize("strict", [False, True])
 def test_h13_git_unavailable_is_a_plain_warning_never_an_error_never_a_split(
     copy: str, fault: str, strict: bool, repo: Path, tmp_path: Path
@@ -574,3 +576,66 @@ def test_h17_merge_with_a_refs_that_is_not_a_plan_path_on_a_branch_with_a_plan(
     assert rc == 0, text
     assert "WARNING" in text and PHASE3 in text, text
     assert rc_strict == 1
+
+
+# --------------------------------------------------------------------------- H18-H21 (ред. 6.1: ревью aa490a3)
+#
+#   H18  Запуск git невозможен по другой причине, чем «нет бинаря» (PermissionError: каталог `git.exe` первым
+#        в PATH, нет прав): тоже W-TRAILERS-UNCHECKED с rc 0 в обоих режимах; «Never raises» — правда. Случай
+#        "denied" входит в параметризацию H13 (fault=denied).
+#   H19  Текст `git commit -v` (ножницы `# ---- >8 ----` и кусок diff ниже): блок правильный, W-TRAILERS-SPLIT
+#        быть не должно. Снятие строк `#` перед git убирало ножницы и склеивало diff с блоком.
+#   H20  Строка `---` в теле: без `--no-divider` git читает её как разделитель патча и прячет блок под ней.
+#   H21  Не-UTF-8 байт в сообщении (после decode с surrogateescape это суррогат): validate() не бросает.
+
+GIT_V_TAIL = (
+    "# ------------------------ >8 ------------------------\n"
+    "# Do not modify or remove the line above.\n"
+    "# Everything below it will be ignored.\n"
+    "diff --git a/x b/x\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/x\n"
+    "+++ b/x\n"
+    "@@ -1 +1 @@\n"
+    "-a\n"
+    "+b\n"
+)
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h19_git_commit_v_template_with_scissors_and_diff_gets_no_split_warning(
+    copy: str, repo: Path, tmp_path: Path
+) -> None:
+    message = ONE_BLOCK + GIT_V_TAIL
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert (rc, rc_strict) == (0, 0), text
+    assert "trailers git does not see" not in text and "cannot check trailer block" not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h19_control_scissors_without_a_block_still_reports_the_split(copy: str, repo: Path, tmp_path: Path) -> None:
+    # a real split above the scissors line must still be reported
+    split = f"feat(x): y\n\n{FULL}\nCo-Authored-By: Claude <noreply@anthropic.com>\n" + GIT_V_TAIL
+    rc, text, rc_strict = _validate_both(copy, repo, split, tmp_path)
+    assert rc == 0 and "trailers git does not see" in text, text
+    assert rc_strict == 1
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h20_a_divider_line_in_the_body_does_not_hide_the_block(copy: str, repo: Path, tmp_path: Path) -> None:
+    body = "Таблица результатов:\n---\nстрока один\n"
+    message = f"feat(x): y\n\n{body}\n{FULL}Co-Authored-By: Claude <noreply@anthropic.com>\n"
+    rc, text, rc_strict = _validate_both(copy, repo, message, tmp_path)
+    assert (rc, rc_strict) == (0, 0), text
+    assert "trailers git does not see" not in text, text
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+@pytest.mark.parametrize("strict", [False, True])
+def test_h21_a_non_utf8_byte_in_the_body_does_not_crash_the_validator(
+    copy: str, strict: bool, repo: Path, tmp_path: Path
+) -> None:
+    message = "feat(x): y\n\nтело с байтом \xff".encode("utf-8")[:-2] + b"\xff\n\n" + FULL.encode("utf-8")
+    rc, text = _driven(copy, repo, tmp_path, message, mode="raw", fault="none", strict=strict)
+    assert rc == 0, text
+    assert "Traceback" not in text and "trailers git does not see" not in text, text

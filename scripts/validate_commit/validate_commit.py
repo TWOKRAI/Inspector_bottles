@@ -945,23 +945,24 @@ def _git_trailer_keys(text: str) -> tuple[set[str] | None, str]:
     """Trailer keys that `git interpret-trailers --parse` sees in `text`: `(keys, "")`, or `(None, reason)`.
 
     git is the oracle for "one trailer block": it ignores a trailer paragraph that is not the last one and
-    a block that holds a non-trailer line. Lines starting with `#` are dropped first (git strips them from a
-    commit message). Line endings go to LF, so CRLF text is read as git would read it. Never raises:
-    a missing binary, a timeout and a non-zero exit all come back as `(None, reason)` - the caller reports
-    "cannot check", and must not read an empty answer as "git sees no trailers".
+    a block that holds a non-trailer line. The text goes to git as it is: git skips `#` comment lines itself
+    and cuts at the `# --- >8 ---` scissors line of `git commit -v`; `--no-divider` stops a `---` line in the
+    body from being read as a patch divider. Line endings go to LF, so CRLF text is read as git would read it;
+    non-UTF-8 bytes (surrogates from a lossless decode) go through `surrogateescape`. Never raises: a git
+    that cannot be started (any OSError), a timeout and a non-zero exit all come back as `(None, reason)` -
+    the caller reports "cannot check", and must not read an empty answer as "git sees no trailers".
     """
-    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
-    stdin = ("\n".join(lines) + "\n").encode("utf-8")
+    stdin = ("\n".join(text.splitlines()) + "\n").encode("utf-8", "surrogateescape")
     try:
         out = subprocess.run(
-            ["git", "interpret-trailers", "--parse"],
+            ["git", "interpret-trailers", "--parse", "--no-divider"],
             input=stdin,
             capture_output=True,
             timeout=GIT_TRAILERS_TIMEOUT,
             check=False,
         )
-    except FileNotFoundError:
-        return None, "git not found"
+    except OSError as exc:  # FileNotFoundError, PermissionError, ...
+        return None, f"git cannot be started: {exc}"
     except subprocess.TimeoutExpired:
         return None, f"git interpret-trailers timed out after {GIT_TRAILERS_TIMEOUT}s"
     if out.returncode != 0:
