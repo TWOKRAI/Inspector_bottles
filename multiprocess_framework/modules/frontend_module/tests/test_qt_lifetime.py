@@ -530,6 +530,38 @@ print("waited=%s" % t.wait(5000), flush=True)
 )
 
 
+_CLOSE_RUNNING_SOLE_HOLDER_SCRIPT = (
+    _THREAD_SCRIPT_HEAD
+    + """
+import gc, time
+t = Coop()
+t.start()
+h = QThreadHandle(t)
+del t  # ручка — единственный держатель работающего потока
+h.close()
+gc.collect()
+flush_deferred_deletes()
+print("after close alive", flush=True)
+h.request_stop()
+print("joined=%s" % h.join_until(time.monotonic() + 5.0), flush=True)
+h.close()
+flush_deferred_deletes()
+print("closed after finish", flush=True)
+"""
+)
+
+
+def test_qthread_handle_close_running_keeps_sole_reference():
+    """Ревью 0.4 р2 (4c): ``close()`` на работающем потоке не отпускает ссылку ручки —
+    иначе последняя ссылка на работающий ``QThread`` умирает и процесс падает (abort)."""
+    _ = _door().QThreadHandle
+    proc = _run_script(_CLOSE_RUNNING_SOLE_HOLDER_SCRIPT)
+    assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    assert "after close alive" in proc.stdout
+    assert "joined=True" in proc.stdout
+    assert "closed after finish" in proc.stdout
+
+
 def test_qthread_started_after_close_not_deleted():
     """Р1-1а: ручка закрыта при незапущенном потоке, поток запущен потом — flush его не удаляет (нет abort)."""
     _ = _door().QThreadHandle

@@ -31,7 +31,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
   Stability: lite`.
 
 ### Реестр области (правило C, вердикт CTO)
-- `_reg: weakref.WeakKeyDictionary[IScope, set[int]]` — C++ адреса всех живых объектов, привязанных к области.
+- `_reg` (ред. р1: `dict[id(scope), set[int]]` + `finalize`, без лока — см. строку «Ревью р1» ниже) — C++ адреса всех живых объектов, привязанных к области.
   Добавление — в `attach_qt`; удаление — **только** в `_on_destroyed`, после `scope.close()` (не в `_QtRelease`).
   Порядок привязки не важен, `anchor` нет. **Ревью р1:** реестр — `dict[id(scope), set[int]]`, запись снимает `weakref.finalize(scope, _reg.pop, id, None)`; чтение и запись — по одному вызову C-уровня без лока (атомарны под GIL); цепочка предков собирается до снимка. Лок `threading.RLock` — только вокруг `_posted`, без вызовов: точка gc под локом закрыла бы чужую область под ним.
 
@@ -46,7 +46,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
 2. Имя: `name` или `f"{type(obj).__name__}#{n}"`, `n` из одного `itertools.count(1)` на процесс. `kind="qobject"`.
 3. `scope.own(_QtRelease(_Att(obj, scope_ref, destroyed=False)), name=…, kind="qobject")`. Закрытая область →
    `own` сразу освобождает (`deleteLater`) и бросает `ScopeClosedError`; имя занято → `ValueError` (0.2). Наружу.
-4. `addr = getCppPointer(obj)[0]`; под локом `_reg.setdefault(scope, set()).add(addr)`.
+4. `addr = getCppPointer(obj)[0]`; `_reg.setdefault(id(scope), set()).add(addr)` (один вызов C-уровня, без лока; первый раз — `finalize`).
 5. `obj.destroyed.connect(functools.partial(_on_destroyed, weakref.ref(att), weakref.ref(scope), addr))`.
 - Причина: при `ScopeClosedError`/`ValueError` нет ни записи в реестре, ни подключения.
 - **Обработчик не держит `obj`** (ни замыкание, ни связанный метод): связь живёт в C++, gc её не видит — обёртка
@@ -58,7 +58,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
 3. `att is None` (освобождён нами) или `scope.closed` (истинно с начала `close`) → `close` не звать: повторный
    `close` ждёт первого до срока — flush висит (проба freeze: 0.704 с); на `QThread` — нарушение ADR-BM-008.
 4. Иначе `scope.close()` синхронно (DESIGN §2.4: Qt удалил объект первым — область без него не нужна).
-5. В конце, во всех ветках с живой `scope`: под локом `_reg.get(scope, set()).discard(addr)` — после `close` шага 4.
+5. В конце, во всех ветках с живой `scope`: `_reg.get(id(scope))` → `.discard(addr)` (без лока) — после `close` шага 4.
 - `Exception` внутри → строка `logging.warning`, наружу не идёт.
 
 ### `_QtRelease` — фаза 2 области, на потоке закрывающего (любом)
@@ -73,7 +73,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
 
 ### Проверка Qt-предка («qt-tree mismatch»), правило C
 - Только когда `QThread.currentThread() == obj.thread()`; иначе проверки нет (**best-effort**, см. «Риски»).
-- `me = addr(obj)`; под локом снимок: `above = ∪ _reg[s]` по строгим предкам (`scope.parent, …`);
+- `me = addr(obj)`; цепочка предков собирается до снимка (код Python — не под локом), снимок без лока: `above = ∪ _reg[s]` по строгим предкам (`scope.parent, …`);
   `owned = above ∪ (_reg[scope] − {me})`. Вызовы Qt — вне лока.
 - `above` пусто → проверки нет (правило миграции: выше никто ничего не привязал).
 - `obj.parent() is None` → совпадение (верхний объект; так у каждого `QTimer()` без родителя).
@@ -99,7 +99,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
 - `kill` **нет** (`terminate()` запрещён G6): не остановившийся `QThread` — выживший, объект не удаляется (нет abort
   «Destroyed while thread is still running»). Закрытие своей области изнутри `run` → `join_until` `False` (проба g5:
   0.031 с) → выживший `"r/qt"` **без** `" (self)"`: суффикс только у `spawn`-потоков (0.2).
-- `close()` (после остановки): `deleteLater()` и `_posted += 1` **только** если обёртка жива и `isFinished()`; иначе (работает или запущен после закрытия) — объект остаётся прежнему владельцу, одна строка `logging.warning` (удаление работающего `QThread` — abort, ревью р1). Ссылка отпускается; повтор — no-op.
+- `close()` (после остановки): `deleteLater()` и `_posted += 1` **только** если обёртка жива и `isFinished()`; иначе (работает или запущен после закрытия) — объект остаётся прежнему владельцу, одна строка `logging.warning` (удаление работающего `QThread` — abort, ревью р1), и ручка **держит** ссылку (ревью р2: ручка может быть единственным держателем — отпущенная ссылка убила бы работающий поток); повторный `close()` после завершения удаляет. Завершённый или мёртвый — ссылка отпускается, повтор — no-op.
 
 Всё, кроме flush, вызываемо с любого потока; объект удаляется на своём потоке.
 

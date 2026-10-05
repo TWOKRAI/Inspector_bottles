@@ -290,23 +290,27 @@ class QThreadHandle:
         return bool(th.wait(QDeadlineTimer(ms)))
 
     def close(self) -> None:
-        """``deleteLater`` только завершённому потоку; иначе объект остаётся прежнему владельцу.
+        """``deleteLater`` только завершённому потоку; иначе объект не удаляется.
 
         Удаление работающего (или запущенного после закрытия) ``QThread`` — abort
-        «Destroyed while thread is still running» (ревью р1). Ссылка ручки
-        отпускается в обоих случаях; повтор — no-op.
+        «Destroyed while thread is still running» (ревью р1). Незавершённый поток:
+        строка warning, ручка ДЕРЖИТ ссылку (ревью р2: если ручка — единственный
+        держатель, отпущенная ссылка убила бы работающий поток); повторный ``close()``
+        после завершения удаляет. Завершённый или мёртвый — ссылка отпускается, повтор — no-op.
         """
         th = self._thread
-        self._thread = None
         if th is None:
             return
-        if shiboken6.isValid(th):
-            if th.isFinished():
-                th.deleteLater()
-                _note_posted()
-            else:
-                _log.warning(
-                    "QThreadHandle.close: поток не завершён (%s) — объект не удаляется, остаётся прежнему владельцу",
-                    type(th).__name__,
-                )
+        if not shiboken6.isValid(th):
+            self._thread = None
+            return
+        if not th.isFinished():
+            _log.warning(
+                "QThreadHandle.close: поток не завершён (%s) — объект не удаляется, ручка держит ссылку",
+                type(th).__name__,
+            )
+            return
+        self._thread = None
+        th.deleteLater()
+        _note_posted()
         del th
