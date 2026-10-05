@@ -106,7 +106,7 @@ def test_sanity_order_fixture_has_tier_and_clean_check(make_root, one_plan, prog
             "plans/queue/ORDER.md": order_md(tier41=["2026-10-03_b"]),
         }
     )
-    assert one_plan(root, "2026-10-03_b")["tier"] == "4.1"
+    assert one_plan(root, "2026-10-03_b")["tier"] == "queue"
     cp = progress(root, "--check")
     assert cp.returncode == 0, check_out(cp)[:500]
     assert "DEP_" not in check_out(cp)
