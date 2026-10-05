@@ -207,3 +207,40 @@ def test_name_validation() -> None:
     for bad in ("", "a/b"):
         with pytest.raises(ValueError, match="непустая строка без '/'"):
             Subscribers(bad)
+
+
+class _OwnOnly:
+    """Есть ``own``, ``path``, ``closed`` — нет ``note_emits_after_close``."""
+
+    def __init__(self, scope) -> None:
+        self._scope = scope
+        self.path = scope.path
+
+    @property
+    def closed(self) -> bool:
+        return self._scope.closed
+
+    def own(self, res, *, name, kind="resource"):
+        return self._scope.own(res, name=name, kind=kind)
+
+
+class _NoPath:
+    def own(self, res, *, name, kind="resource"):
+        raise AssertionError("add не должен дойти до own")
+
+    closed = False
+
+    def note_emits_after_close(self, n: int) -> None:
+        pass
+
+
+@pytest.mark.parametrize("shape", ["own_only", "no_path"])
+def test_add_rejects_incomplete_owner_up_front(shape: str) -> None:
+    """Ревью 0.3 р1 п.5: владелец без части IScope отвергается в ``add``, а не падает в ``emit``."""
+    scope = open_scope(f"shape-{shape}", budget_s=1.0)
+    owner = _OwnOnly(scope) if shape == "own_only" else _NoPath()
+    pub = Subscribers("pub")
+    with pytest.raises(TypeError, match=f"owner — ожидается IScope, получено {type(owner).__name__}"):
+        pub.add(_noop, owner=owner)
+    assert len(pub) == 0
+    assert scope.close().ok is True

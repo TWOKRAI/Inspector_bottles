@@ -682,3 +682,40 @@ def test_note_after_whole_chain_closed_reporter_raising_does_not_escape() -> Non
     c = root.child("c")
     root.close()
     c.note_emits_after_close(1)  # третий вид: исключение reporter'а ловится
+
+
+def test_third_kind_report_on_hand_off_does_not_delay_waiters_of_child_close() -> None:
+    """Ревью 0.3 р1 п.3: reporter третьего вида из передачи родителю — после ``_done.set()``.
+
+    Корень закрыт изнутри ``c.close()``: к передаче цепочка закрыта, счётчик 7 уходит
+    reporter'у третьим видом. Reporter спит 1 с; T3 ждёт ``c.close()`` с бюджетом 0.3 с —
+    обязан получить готовый отчёт, а не ``complete=False`` по сроку.
+    """
+
+    def reporter(report) -> None:
+        if report.elapsed_s == 0.0 and report.emits_after_close == 7:
+            time.sleep(1.0)
+
+    root = open_scope(_path(), budget_s=1.0, reporter=reporter)
+    c = root.child("c", budget_s=0.3)
+    c.note_emits_after_close(7)
+    inside, go = threading.Event(), threading.Event()
+
+    def res() -> None:
+        inside.set()
+        go.wait(5.0)
+        root.close()
+
+    c.own(res, name="res")
+    out: dict = {}
+    t2 = threading.Thread(target=lambda: out.__setitem__("t2", c.close()), daemon=True)
+    t2.start()
+    assert inside.wait(5.0)
+    t3 = threading.Thread(target=lambda: out.__setitem__("t3", c.close()), daemon=True)
+    t3.start()
+    time.sleep(0.05)  # T3 уже ждёт c._done
+    go.set()
+    t3.join(5.0)
+    t2.join(5.0)
+    assert not t2.is_alive() and not t3.is_alive()
+    assert out["t3"].complete is True
