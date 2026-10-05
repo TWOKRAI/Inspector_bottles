@@ -137,7 +137,7 @@ Full list in the corresponding mode file. Key commands (recount: `find .claude/c
 
 ## MCP routing (orchestrator + subagents)
 
-The server list is `.claude/enabled.yaml`. Before first use `Read` `.claude/plugins/<id>/README.md`; a server absent from `.mcp.json` → `Grep`/`Read`; one server answered → don't re-check another.
+Servers per role: `docs/claude/LEAD_RULES.md` → «MCP routing». Before first use `Read` `.claude/plugins/<id>/README.md`; a server absent from `.mcp.json` → `Grep`/`Read`; one server answered → don't re-check another.
 Debug and test the backend through `backend_ctl` (`BACKEND_CTL=1`; the same router messages as the GUI); `qt-mcp` only to test the GUI itself; no ad-hoc psutil.
 Servers with docs: `docs/claude/LEAD_RULES.md` → «MCP routing».
 

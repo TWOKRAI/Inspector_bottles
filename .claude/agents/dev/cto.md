@@ -8,9 +8,9 @@ description: >
   never per task.
 model: fable
 omitClaudeMd: true
-skills: verify-done, project-rules, team-protocol  # read-only role — disallowedTools below denies writes and the serena mutators
+skills: verify-done, project-rules, team-protocol  # read-only role — disallowedTools below denies writes and every MCP server outside the role's row in docs/claude/LEAD_RULES.md (MCP routing)
 effort: xhigh
-disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
+disallowedTools: Write, Edit, NotebookEdit, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__context7, mcp__serena
 ---
 
 ## Role

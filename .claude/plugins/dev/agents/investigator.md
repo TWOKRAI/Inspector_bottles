@@ -3,8 +3,8 @@ name: investigator
 description: Deep investigation of architectural problems and non-obvious bugs. Does not fix — diagnoses and produces a report with root cause, evidence, and recommendation. Read-only.
 model: opus
 omitClaudeMd: true
-skills: project-rules  # read-only role — disallowedTools below denies writes and the serena mutators
-disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
+skills: project-rules  # read-only role — disallowedTools below denies writes and every MCP server outside the role's row in docs/claude/LEAD_RULES.md (MCP routing)
+disallowedTools: Write, Edit, NotebookEdit, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__serena
 ---
 
 ## Role

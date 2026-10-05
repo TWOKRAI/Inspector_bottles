@@ -249,16 +249,39 @@ trailers. `caveman` overrides it on request.
 
 ## MCP routing — server list
 
-Available MCP servers — composed from `enabled.yaml` (a disabled plugin is absent; the list is the source of truth for subagents too):
+Servers this machine runs (measured 2026-10-05). A subagent sees only the servers of its row below; `enabled.yaml` and `.mcp.json` disagree on graphify and serena — owner question.
 
 - `qex` — semantic / fuzzy code search; docs: `.claude/plugins/mcp-qex/README.md`
 - `sentrux` — architecture metrics, DSM, cycles, health-gate; docs: `.claude/plugins/mcp-sentrux/README.md`
 - `context7` — up-to-date docs for external libraries; docs: `.claude/plugins/mcp-context7/README.md`
-- `github-mcp` — GitHub state: PR / Issues / Actions; docs: `.claude/plugins/mcp-github/README.md`
+- `github` — GitHub state: PR / Issues / Actions; docs: `.claude/plugins/mcp-github/README.md` (no tools without a token)
 - `qt-mcp` — runtime inspection for PyQt5/PySide6 GUI apps; docs: `.claude/plugins/mcp-qt/README.md`
 - `backend-ctl` — live backend control via `backend_ctl` driver (requires `BACKEND_CTL=1`); docs: `.claude/plugins/mcp-backend-ctl/README.md`
   Debug and test the backend through `backend_ctl` (the same router messages as the GUI); `qt-mcp` only to test the GUI itself; no ad-hoc psutil.
+- `graphify` — code graph (read-only; the graph is the main checkout's, not the branch's); docs: `.claude/plugins/mcp-graphify/README.md`
+- `serena` — LSP symbol tools; denied to every role: bound to the main checkout, a mutator writes into the wrong tree
+- `claude-in-chrome`, `claude-vscode`, `claude_ai_Claude_Docs` — the owner's environment (Chrome, IDE, claude.ai), not the project; denied to every role
 - `sentry` — error-monitoring MCP (marketplace consume plugin, needs Sentry auth via `/mcp`; no local `.claude/plugins/` docs)
+
+| role | servers kept |
+|---|---|
+| developer | qex, context7, qt-mcp, backend-ctl, graphify |
+| debugger | qex, context7, qt-mcp, backend-ctl |
+| tester | qex, context7, qt-mcp, backend-ctl |
+| teamlead | qex, context7, qt-mcp, backend-ctl, sentrux, graphify |
+| reviewer | qex, context7, qt-mcp, backend-ctl, sentrux |
+| investigator | qex, context7, qt-mcp, backend-ctl, sentrux, graphify |
+| cto | qex, qt-mcp, backend-ctl, sentrux, graphify |
+| integrator | qex, sentrux, graphify |
+| manager | qex, context7, sentrux |
+| tech-writer | qex, context7, sentrux, graphify |
+| spec-writer | qex, qt-mcp |
+| junior | none |
+| docs-writer | none |
+| ai-judge | none |
+
+New MCP server → decide its row here and add a `mcp__<server>` deny to every role that does not keep it; until then every role sees it.
+A role without a row (`general-purpose`, a new hire) inherits every server, serena included — add its row and deny line before use.
 
 Before first using an MCP tool — `Read` its README (`.claude/plugins/<id>/README.md`): setup, usage, rules.
 
