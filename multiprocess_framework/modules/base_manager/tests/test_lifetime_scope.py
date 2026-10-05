@@ -719,3 +719,44 @@ def test_third_kind_report_on_hand_off_does_not_delay_waiters_of_child_close() -
     t2.join(5.0)
     assert not t2.is_alive() and not t3.is_alive()
     assert out["t3"].complete is True
+
+
+def test_hand_off_to_parent_happens_before_done_set_deterministic() -> None:
+    """Ревью 0.3 р1 п.1: передача родителю — ДО ``_done.set()``, без опоры на гонку.
+
+    Перекрытие N5: ``c.close()`` идёт, ``root.close()`` ждёт ``c._done``. Приём передачи
+    у корня (``_absorb_emits`` на экземпляре) замедлен на 50 мс: если ``_done.set()``
+    раньше передачи, корень успевает закрыть отчёт — счётчик 0 вместо 3.
+    """
+    bad: list = []
+    for i in range(20):
+        root = open_scope(_path(), budget_s=2.0)
+        c = root.child("c")
+        c.note_emits_after_close(3)
+        orig = root._absorb_emits
+
+        def slow_absorb(n: int, orig=orig) -> bool:
+            time.sleep(0.05)
+            return orig(n)
+
+        root._absorb_emits = slow_absorb  # экземпляр, не класс
+        inside, go = threading.Event(), threading.Event()
+        c.own(lambda inside=inside, go=go: (inside.set(), go.wait(5.0)), name="hold")
+        out: dict = {}
+        t2 = threading.Thread(target=lambda c=c, out=out: out.__setitem__("c", c.close()), daemon=True)
+        t2.start()
+        assert inside.wait(5.0)
+        t1 = threading.Thread(target=lambda root=root, out=out: out.__setitem__("root", root.close()), daemon=True)
+        t1.start()
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end and not any(
+            e["path"].endswith("/c") and e["state"] == "stopping" for e in root.live()
+        ):
+            time.sleep(0.001)
+        go.set()
+        t1.join(5.0)
+        t2.join(5.0)
+        assert not t1.is_alive() and not t2.is_alive(), f"итерация {i}: завис"
+        if out["root"].emits_after_close != 3:
+            bad.append((i, out["root"].emits_after_close))
+    assert bad == []

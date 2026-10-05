@@ -730,13 +730,19 @@ class Scope:
                 # иначе самоотцепление выжившего потока промахнётся мимо области.
                 self._report = report
                 self._state = "closed"
+            parent_scope = self._parent
+            absorbed = True
             if hand_off:
                 # Вне лока и ДО _done.set(): ждущий нас close родителя ещё не
                 # закрыл свой отчёт — прибавка попадёт в него, а не в третий вид.
-                parent_scope = self._parent
                 assert parent_scope is not None
-                parent_scope.note_emits_after_close(hand_off)
+                absorbed = parent_scope._absorb_emits(hand_off)
             self._done.set()
+            if not absorbed:
+                # Третий вид — ПОСЛЕ _done.set(): медленный reporter не держит ждущих
+                # этот close (ревью 0.3 р1 п.3).
+                assert parent_scope is not None
+                parent_scope._report_emits_after_chain(hand_off)
         if not from_parent:
             parent = self._parent
             if parent is not None:
@@ -821,6 +827,11 @@ class Scope:
             raise TypeError(f"note_emits_after_close: n — ожидается int, получено {type(n).__name__}")
         if n < 1:
             raise ValueError("note_emits_after_close: n — нужно int ≥ 1")
+        if not self._absorb_emits(n):
+            self._report_emits_after_chain(n)
+
+    def _absorb_emits(self, n: int) -> bool:
+        """``+n`` в первую незакрытую область цепочки; ``False`` — вся цепочка закрыта."""
         scope: Scope | None = self
         while scope is not None:
             with scope._lock:
@@ -828,8 +839,12 @@ class Scope:
                 # попадёт в отчёт, либо область уже closed — идём к родителю.
                 if scope._state != "closed":
                     scope._extra.emits += n
-                    return
+                    return True
             scope = scope._parent
+        return False
+
+    def _report_emits_after_chain(self, n: int) -> None:
+        """Третий вид вызова reporter'а: цепочка закрыта, ``n`` отклонённых доставок."""
         report = CloseReport(path=self._path, elapsed_s=0.0, survivors=(), killed=(), errors=(), emits_after_close=n)
         if self._reporter is None:
             _log.warning("область %s: %d доставок после закрытия цепочки, reporter'а нет", self._path, n)

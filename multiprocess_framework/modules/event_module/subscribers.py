@@ -8,6 +8,12 @@ Purpose: список подписчиков издателя, где кажда
 ``dict.pop(seq, None)`` — gc-финализатор (``_Release``) может войти в этот же
 поток посреди секции под локом, а ``pop`` не теряет параллельную вставку.
 Под локом нет чужого кода: ``cb``, ``own``, ``note``, ``logging`` — вне лока.
+
+Public API:
+    - Subscribers — ``add(cb, *, owner)``, ``emit(*args, **kwargs)``, ``errors``,
+      ``error_count``, ``emits_after_close``, ``len()``
+
+Stability: lite
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ __all__ = ["Subscribers"]
 _log = logging.getLogger(__name__)
 
 _ERRORS_CAP = 20
+_OWNER_METHODS = ("own", "note_emits_after_close")
+_OWNER_ATTRS = ("path", "closed")
 
 # Один счётчик на процесс: два издателя с одним name не займут одно имя записи.
 _seq = itertools.count(1)
@@ -129,7 +137,11 @@ class Subscribers:
         owner_error = TypeError(
             f"Subscribers '{self._name}': owner — ожидается IScope, получено {type(owner).__name__}"
         )
-        if not callable(getattr(owner, "own", None)):
+        # Проверка вперёд (ревью 0.3 р1 п.5): emit зовёт note без try, path и closed
+        # читаются в add/emit — неполный владелец отвергается здесь, а не в рассылке.
+        if not all(callable(getattr(owner, m, None)) for m in _OWNER_METHODS) or not all(
+            hasattr(owner, a) for a in _OWNER_ATTRS
+        ):
             raise owner_error
         try:
             owner_ref = weakref.ref(owner)  # без колбэка: собранный владелец виден в emit
