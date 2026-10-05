@@ -39,6 +39,43 @@ Same file, same commit, read from a sibling worktree — **+3 410** tokens, zero
 `.claude/worktrees/` — **+17 123** with three. The team gates judge "this project" by the main
 repository's `git-common-dir`, so a sibling worktree stays gated.
 
+## Bind the worktree to its plan — `plan.ref`
+
+A worktree made for plan work carries its plan in its own git config, one line, set by whoever
+creates it:
+
+```
+git -C <worktree> config --worktree plan.ref plans/<date>_<slug>
+```
+
+- **Who writes it.** Manual `git worktree add` (the live team, a script) — the lead, right after
+  creating it. `isolation: "worktree"` — the orchestrator puts the line into the brief as the
+  agent's first call (no brief template carries it yet). `EnterWorktree` — the session itself.
+  The last two are unverified for the board — see the last bullet.
+- **Value.** The plan directory (`plans/<date>_<slug>`), the bare plan name, or any path inside
+  the plan. An unknown value is not an error: the reader falls through to its next step. A plan
+  that exists only on the branch is unknown until it reaches `main` (the reader lists plans from
+  the main tree).
+- **Where it lives.** `git -C <worktree> rev-parse --git-path config.worktree` (for a linked
+  worktree `.git/worktrees/<name>/config.worktree`) — no shared file, no merge conflict;
+  `git worktree remove` deletes the binding with the worktree.
+- **Precondition.** `git config --get extensions.worktreeConfig` prints `true`. Otherwise
+  enable it once per repository with `git config extensions.worktreeConfig true`; if the common
+  config holds `core.worktree` (or `core.bare = true`), move it to the main tree's
+  `config.worktree` first (`git help worktree`, "CONFIGURATION FILE"). Older Git versions refuse
+  a repository with this extension.
+- **Who reads it.** `plans_progress.py` (Task 5.2 resolver): `plan.ref` is the first step,
+  before `Refs:` trailers and the plan header. A worktree without it falls back to those.
+- **The binding shows on the board only for a session started in the worktree.** The board
+  calls the resolver only for a worktree with a fresh line in its own
+  `data/agent-journal.jsonl`. The journal hook writes to `data/` at the top of the git tree of
+  the **session's** directory (`AGENT_JOURNAL_DIR` overrides) — not the agent's `cwd`, not the
+  brief. Verified way: start the `claude` session itself from the worktree (one writer, one
+  session). Agents spawned with `Agent` from a session in the main tree log into the main
+  journal, and their worktree does not appear as active (measured 2026-10-05, Task 5.4 review).
+  Unverified: an `isolation: "worktree"` agent, a session after `EnterWorktree`, an Agent Teams
+  teammate — one live run each, then `tail` both journals.
+
 ## When to enable on an agent
 
 Add `isolation: "worktree"` to an agent's frontmatter when **all** of:
