@@ -21,8 +21,11 @@ Public API:
 
 Stability: lite
 
-Правила (DESIGN §2.4, ADR-BM-008): вызовы Qt — никогда под локом модуля; под
-локом только множества адресов и счётчик ``_posted``. Обработчик ``destroyed``
+Правила (DESIGN §2.4, ADR-BM-008): под локом модуля — только счётчик ``_posted``
+(операции над ``int``: ни вызова, ни точки gc). Реестр адресов — ``dict`` по
+``id(scope)``; каждое чтение и запись — один вызов C-уровня (атомарен под GIL),
+без лока: финализатор gc, закрывающий чужую область, не может оказаться под
+локом внешнего кадра (ревью р1). Обработчик ``destroyed``
 не держит объект (только слабые ссылки и адрес C++). Реестр адресов чистит
 только ``_on_destroyed``, после ``scope.close()``. Это единственный файл
 нового кода с вызовом ``deleteLater`` (G6).
@@ -56,9 +59,11 @@ _log = logging.getLogger(__name__)
 
 _FLUSH_MAX_PASSES = 16
 
-# Под _lock — только _reg и _posted; вызовов Qt под ним нет.
+# Под _lock — только _posted, без вызовов (точка gc под локом = чужой close под локом).
 _lock = threading.RLock()
-_reg: weakref.WeakKeyDictionary[IScope, set[int]] = weakref.WeakKeyDictionary()
+# id(scope) -> C++ адреса привязанных объектов; запись снимает weakref.finalize области.
+_reg: dict[int, set[int]] = {}
+_EMPTY: frozenset[int] = frozenset()
 _posted = 0
 _counter = itertools.count(1)
 
@@ -99,13 +104,14 @@ def _tree_mismatch(scope: IScope, obj: QObject) -> str | None:
     Звать только на потоке объекта (TOCTOU: ``parent()`` чужого потока небезопасен).
     """
     me = _addr(obj)
-    with _lock:
-        above: set[int] = set()
-        anc = scope.parent
-        while anc is not None:
-            above |= _reg.get(anc, set())
-            anc = anc.parent
-        own = _reg.get(scope, set()) - {me}
+    ids: list[int] = []
+    anc = scope.parent  # код Python (свойство) — до снимка, не под локом
+    while anc is not None:
+        ids.append(id(anc))
+        anc = anc.parent
+    # Снимок: каждое выражение — один вызов C-уровня над int, атомарен под GIL.
+    above = set().union(*map(_reg.get, ids, itertools.repeat(_EMPTY, len(ids))))
+    own = _reg.get(id(scope), _EMPTY) - {me}
     if not above:
         return None  # правило миграции: выше никто ничего не привязал
     owned = above | own
@@ -171,8 +177,9 @@ def _on_destroyed(att_ref: weakref.ref, scope_ref: weakref.ref, addr: int, *args
             if att is not None and not scope.closed:
                 scope.close()
         finally:
-            with _lock:
-                _reg.get(scope, set()).discard(addr)
+            addrs = _reg.get(id(scope))
+            if addrs is not None:
+                addrs.discard(addr)
     except Exception as exc:  # noqa: BLE001 - сигнал Qt не должен ронять поток
         _log.warning("qt_lifetime: ошибка в обработчике destroyed: %s: %s", type(exc).__name__, exc)
 
@@ -200,8 +207,10 @@ def attach_qt(scope: IScope, obj: QObject, *, name: str | None = None) -> IHandl
     att = _Att(obj, scope_ref, destroyed=False)
     handle = scope.own(_QtRelease(att), name=entry_name, kind="qobject")
     addr = _addr(obj)
-    with _lock:
-        _reg.setdefault(scope, set()).add(addr)
+    sid = id(scope)
+    if sid not in _reg:
+        weakref.finalize(scope, _reg.pop, sid, None)  # гонка даст второй finalize — pop с None безвреден
+    _reg.setdefault(sid, set()).add(addr)
     obj.destroyed.connect(functools.partial(_on_destroyed, weakref.ref(att), scope_ref, addr))
     return handle
 
@@ -212,6 +221,10 @@ def flush_deferred_deletes() -> None:
     Повторяет проход, пока за проход модуль поставил новые ``deleteLater``
     (каскад: удаление ``a`` закрывает область, её ``_QtRelease`` ставит ``b``).
     Доставляется только ``DeferredDelete``: таймеры и сигналы — нет.
+
+    Pre: поток ``QCoreApplication``, не из цикла событий (``loopLevel() == 0``):
+    внутри цикла удаление отправителя посреди его сигнала роняет вызывающий кадр,
+    а отложенные удаления там доставит сам цикл.
     """
     app = QCoreApplication.instance()
     if app is None:
@@ -220,6 +233,8 @@ def flush_deferred_deletes() -> None:
         raise RuntimeError(
             f"flush_deferred_deletes: только поток QCoreApplication, вызван из {threading.current_thread().name}"
         )
+    if QThread.currentThread().loopLevel() > 0:
+        raise RuntimeError("flush_deferred_deletes: вызван из работающего цикла событий — удаления доставит цикл")
     for _ in range(_FLUSH_MAX_PASSES):
         with _lock:
             before = _posted
@@ -275,12 +290,23 @@ class QThreadHandle:
         return bool(th.wait(QDeadlineTimer(ms)))
 
     def close(self) -> None:
-        """После подтверждённой остановки: ``deleteLater`` (если обёртка жива), ссылка отпускается."""
+        """``deleteLater`` только завершённому потоку; иначе объект остаётся прежнему владельцу.
+
+        Удаление работающего (или запущенного после закрытия) ``QThread`` — abort
+        «Destroyed while thread is still running» (ревью р1). Ссылка ручки
+        отпускается в обоих случаях; повтор — no-op.
+        """
         th = self._thread
         self._thread = None
         if th is None:
             return
         if shiboken6.isValid(th):
-            th.deleteLater()
-            _note_posted()
+            if th.isFinished():
+                th.deleteLater()
+                _note_posted()
+            else:
+                _log.warning(
+                    "QThreadHandle.close: поток не завершён (%s) — объект не удаляется, остаётся прежнему владельцу",
+                    type(th).__name__,
+                )
         del th

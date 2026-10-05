@@ -33,7 +33,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
 ### Реестр области (правило C, вердикт CTO)
 - `_reg: weakref.WeakKeyDictionary[IScope, set[int]]` — C++ адреса всех живых объектов, привязанных к области.
   Добавление — в `attach_qt`; удаление — **только** в `_on_destroyed`, после `scope.close()` (не в `_QtRelease`).
-  Порядок привязки не важен, `anchor` нет. Лок — `threading.RLock`, под ним только множества, без вызовов Qt.
+  Порядок привязки не важен, `anchor` нет. **Ревью р1:** реестр — `dict[id(scope), set[int]]`, запись снимает `weakref.finalize(scope, _reg.pop, id, None)`; чтение и запись — по одному вызову C-уровня без лока (атомарны под GIL); цепочка предков собирается до снимка. Лок `threading.RLock` — только вокруг `_posted`, без вызовов: точка gc под локом закрыла бы чужую область под ним.
 
 ### `attach_qt` — порядок обязателен
 1. Проверки: `obj` не `QObject` → `TypeError(f"attach_qt: ожидается QObject, получено {type(obj).__name__}")`;
@@ -82,6 +82,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
   (без `objectName` — вводное значение; объект называет путь `errors[0][0]`).
 
 ### `flush_deferred_deletes`
+- Pre (ревью р1): не из цикла событий — `QThread.currentThread().loopLevel() > 0` → `RuntimeError` (удаление отправителя посреди сигнала).
 - Нет `QCoreApplication` → возврат. Поток не `app.thread()` → `RuntimeError(f"flush_deferred_deletes: только поток
   QCoreApplication, вызван из {threading.current_thread().name}")` (с чужого потока — молча только свои объекты).
 - Цикл: `before = _posted`; `sendPostedEvents(None, QEvent.Type.DeferredDelete)`; `_posted == before` → стоп.
@@ -98,7 +99,7 @@ class QThreadHandle:                        # Stoppable (base_manager.interfaces
 - `kill` **нет** (`terminate()` запрещён G6): не остановившийся `QThread` — выживший, объект не удаляется (нет abort
   «Destroyed while thread is still running»). Закрытие своей области изнутри `run` → `join_until` `False` (проба g5:
   0.031 с) → выживший `"r/qt"` **без** `" (self)"`: суффикс только у `spawn`-потоков (0.2).
-- `close()` (после остановки): `deleteLater()` и `_posted += 1`, если обёртка жива; ссылка отпускается; повтор — no-op.
+- `close()` (после остановки): `deleteLater()` и `_posted += 1` **только** если обёртка жива и `isFinished()`; иначе (работает или запущен после закрытия) — объект остаётся прежнему владельцу, одна строка `logging.warning` (удаление работающего `QThread` — abort, ревью р1). Ссылка отпускается; повтор — no-op.
 
 Всё, кроме flush, вызываемо с любого потока; объект удаляется на своём потоке.
 
