@@ -1,7 +1,4 @@
 {
-  "env": {
-    "CLAUDE_PYTHON_BIN": "python"
-  },
   "permissions": {
     "allow": [
       "mcp__qex__index_codebase",
