@@ -8,6 +8,7 @@ description: >
   routing, concurrency, schemas, config facades or public APIs. Does NOT
   commit.
 model: haiku
+omitClaudeMd: true
 skills: project-rules
 effort: low
 maxTurns: 30

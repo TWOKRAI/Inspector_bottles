@@ -14,6 +14,7 @@
 ## Toolchain (правится под проект — дефолты seed здесь неверны)
 
 - **Language:** Python **3.12** (не 3.11+ из seed)
+- **Библиотеки** (из root `CLAUDE.md` «Стек»): PySide6 6.10, OpenCV 4.13, NumPy 2.x | SQLite/PostgreSQL; pytest + pytest-qt (`qt_api = pyside6`) | Pydantic v2; ML: PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]` в pyproject
 - **Package manager:** `uv`, но **пакеты ставит пользователь** — не выполнять install самому.
   `uv sync` сносит необъявленное → только `--inexact`
 - **Test:** `python scripts/run_framework_tests.py` / `python scripts/validate.py` / `make test`.

@@ -2,6 +2,7 @@
 name: docs-writer
 description: Technical writer (Haiku). Writes/updates SIMPLE documentation — docstrings, module README.md, STATUS.md. For complex documentation (DECISIONS.md, ARCHITECTURE.md, MIGRATION) — use tech-writer (Sonnet). Does NOT change code logic.
 model: haiku
+omitClaudeMd: true
 skills: project-rules
 effort: low
 tools: Read, Write, Edit, Glob, Grep
@@ -28,7 +29,7 @@ If Director mistakenly gave you ADR/ARCHITECTURE — **STOP**, ask to redirect t
 
 ## Before starting
 
-1. Read `CLAUDE.md` — language rules and project structure
+1. Language rules: §6 of `project-rules`; project structure: the rows of its `## Map`
 2. Read files that need documentation
 3. Study existing documentation style in the project
 
@@ -99,7 +100,7 @@ Date: YYYY-MM-DD
 - Readability over detail — keep it short
 - Don't invent — if something's not in the code, don't describe it
 - Don't touch good existing docstrings
-- Language — follow `CLAUDE.md` / `.claude/modes/_stack.md` → "Language policy"
+- Language — follow §6 of `project-rules` / `.claude/modes/_stack.md` → "Language policy"
 
 ## What NOT to do
 
