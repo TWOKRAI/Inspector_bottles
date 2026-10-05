@@ -1,30 +1,44 @@
-# Хендофф лида lifecycle-owner-scope — Task 0.2 после правок ревью р1 (2026-10-05, пауза по слову владельца)
+# Хендофф лида lifecycle-owner-scope — после перестройки, спек T1 написан (2026-10-05, пауза по слову владельца)
 
 ## Где
-- Ветка `feat/lifecycle-owner-scope`, worktree `.claude/worktrees/lifecycle`. `main` влит (`9d8e5dfcc`, без конфликтов).
-  В `main` ветка НЕ влита — только по слову владельца.
-- venv основной, `PYTHONPATH=<worktree>`, pytest из `multiprocess_framework/modules`. Grep-инструмент не видит worktree — `git grep`.
+- Ветка `feat/lifecycle-owner-scope`, worktree `.claude/worktrees/lifecycle`; `main` влит (`92fd0450f`, после Атласа 0.8 —
+  spawn на всех ОС). В `main` НЕ влита, не запушена. Слияние — после T1, по слову владельца.
+- venv основной, `PYTHONPATH=<worktree>`, pytest из `multiprocess_framework/modules`; Qt — `QT_QPA_PLATFORM=offscreen`.
+  Grep-инструмент не видит worktree — `git grep`. Копии дерева для прогонов — по КОРОТКОМУ пути (`C:/tmpab/...`):
+  путь scratchpad > MAX_PATH ломает сбор тестов.
+- Состояние на слитом дереве: `base_manager event_module frontend_module process_module` → 4716 passed, 3 skipped, 1 xfailed.
 
-## Сделано в этой сессии
-- Ревью кода 0.2 р1 (reviewer `a51db4da46fc92690`): CHANGES REQUESTED, 3 major с воспроизведениями
-  (скрипты `scratchpad/rev02/` сессии aab3cfb2): F1 вечная самоблокировка `unclosed_roots()` под финализатором gc;
-  F2 взаимное ожидание и ложный выживший в `IHandle.close` из потока поддерева; F3 `__del__` ресурса под локом области.
-  Находка 4 (один выживший в двух отчётах reporter'а) — без кода, записана в `task-0.2.md` для спека 1.2.
-- Правки teamlead `a1882e8f4a10d6b8c`: `e75d19b81` RED, `324ad1170` фикс, `b7410e9f2` отчёт, `bf7b27d6e` тесты по инъекциям.
-  `pytest base_manager` → 559 passed / 2 skipped.
-- Инъекции ведущего: `docs/reviews/2026-10-05_task-0.2-fix-injections.md` — 6/6 совпали с предсказаниями
-  (итерация 1 вскрыла вакуумный F1-тест — исправлен).
+## Сделано за 2026-10-05
+- Ф0: 0.1–0.4 DONE (`dbd0d7b23` 0.2, `a3fddf721`/`db8a10cd6` 0.3, `41fc28c29`/`6b3a08a35` 0.4); ревью, слепые тестеры,
+  инъекции — `docs/reviews/2026-10-05_task-0.{2,3,4}-*`. Вердикт CTO (b) `CloseReport.kind`.
+- Расследование abort: корень — сборка мусора на не-главном потоке разрушает Python-владеемые Qt-объекты.
+  `docs/reviews/2026-10-05_lifecycle-abort-root-cause-cto.md` (вердикт CTO, нативные стеки, репродуктор).
+- План перестроен (`c42e7de9a`): одна задача T1 «политика памяти GUI-процесса»; 0.1–0.3, Ф1, Ф3, Ф4 — FREEZE;
+  Ф2/Ф5 — требования в будущий мегаплан GUI (GUI — сервис-клиент по транспорту, локально и по Ethernet).
+- Спек T1: `plans/2026-10-03_lifecycle-owner-scope/task-T1.md` (manager, 22.5 КБ) — ЕЩЁ НЕ РЕВЬЮИРОВАН.
 
 ## Следующее
-1. Ревью кода 0.2 р2 — тот же reviewer `a51db4da46fc92690` (повторный вызов по agentId), синхронно; дать ему SHA
-   `bf7b27d6e` и отчёт инъекций. APPROVED → в `plan.md` Task 0.2 `[DONE 2026-10-?? — <sha>]` + галочки, коммит `docs(plans):`.
-2. Task 0.3 `Subscribers` ∥ 0.4 `qt_lifetime` по конвенции: спек → reviewer MODE: plan → слепой tester в worktree на
-   коммите спека → teamlead → инъекции ведущего → reviewer.
+1. Ревью спека T1 (reviewer MODE: plan, синхронно, один круг). Вопросы спека: В1 корневой conftest прототипа в T1
+   (рек. да), В2 полная сборка на границе теста при цене гейта > 1.30× — CTO, В3 `FW_GC_FREEZE`.
+   **Противоречие для ревью:** manager нашёл `GuiProcess(ProcessModule)` с heartbeat и `GcDiscipline` в GUI-процессе —
+   CTO писал «ProcessModule в GUI нет» (`multiprocess_prototype/frontend/app.py:461`). Сверить прогоном; спек закрывает
+   это правилом «`collect_scheduled` уступает слот владельцу».
+2. Слепой тестер T1 в отдельном worktree (короткий путь) на коммите спека → teamlead → инъекции ведущего → одно ревью
+   кода → приёмка CTO с числами (цепочка 0/20 native+offscreen, обратный порядок 0/5, полный гейт 0/5 native,
+   нарушений gc 0, четыре потока 0/20) → слияние в `main` по слову владельца.
+3. Задача больше порога: Brief C — 10 файлов (17 вызовов `gc.enable` в 8 тестовых файлах, не 12 как у CTO).
+   Резать на два брифа при ревью спека.
+
+## agentId (повторный вызов дешевле нового)
+| Роль | agentId | Видел |
+|---|---|---|
+| cto (вердикты 0.3 kind, 0.4 якорь, архитектура abort) | `a24323001502ee35d` / `a170928d9286b35e1` | весь трек; второй — расследование и T1 |
+| manager (спек T1) | `af68e367b963b0b71` | спек T1 |
+| teamlead 0.4 | `a3b451355449b6752` | qt_lifetime (~185k — свежий на T1) |
 
 ## Открыто / ненадёжно
-- J5 ловится только белым ящиком (`root._close_entry_early` напрямую); через публичный API ветка недостижима.
-- Тайминговые пороги F2 (≤ 0.1 с) и G3 (`sleep(0.3)`, `dt >= 0.2`) на загруженной машине не мерились.
-- Ревьюер р1 не воспроизводил: гонку `child.close()` против close родителя, reporter для отказа `own` в гонке с концом close.
-- В дереве не закоммичены файлы памяти teamlead (`.claude/agent-memory/teamlead/MEMORY.md` + новый
-  `feedback_gc_finalizer_test_needs_gen0_pin.md`) — их судьбу решить при слиянии (в main их держит сессия-владелец памяти).
-- Хук subagent-stop-gate в worktree пишет «pytest cannot be imported, run uv sync» — ложный: venv основной, `uv sync` запрещён.
+- Пороги T1 (пауза ≤ 50 мс, RSS ≤ 1.15×, гейт ≤ 1.30×) — гипотезы; полный гейт под политикой не прогонялся.
+- Нативный стек без PDB; Linux CI без abort — причина не выяснена.
+- `tests/test_module_tiers.py::test_no_test_dir_is_invisible_to_every_runner` красный на копиях дерева — не разобран.
+- Незакоммичены файлы памяти teamlead/tester в `.claude/agent-memory/` этого дерева — решить при слиянии.
+- Пустые заблокированные папки `.claude/worktrees/lc-inj`, `lc04-tester` (в git не зарегистрированы) — удалить вручную.
