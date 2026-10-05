@@ -401,6 +401,7 @@ class CloseReport:
     errors: tuple[tuple[str, str], ...]
     emits_after_close: int = 0
     complete: bool = True
+    kind: str = "close"
 
     def __post_init__(self) -> None:
         _require_type("path", self.path, str, "str")
@@ -412,6 +413,11 @@ class CloseReport:
             raise ValueError(f"CloseReport.elapsed_s: ожидается конечное число, получено {self.elapsed_s!r}")
         _require_type("emits_after_close", self.emits_after_close, int, "int")
         _require_type("complete", self.complete, bool, "bool")
+        # Вид отчёта (ADR-BM-008, вердикт CTO по ревью 0.3 р1 п.2): явный различитель
+        # вместо формы отчёта. Значение в текст не идёт — строгий край, как у полей выше.
+        _require_type("kind", self.kind, str, "str")
+        if self.kind not in _CLOSE_REPORT_KINDS:
+            raise ValueError('CloseReport.kind: ожидается "close" или "late_emits"')
         object.__setattr__(self, "survivors", _str_tuple("survivors", self.survivors))
         object.__setattr__(self, "killed", _str_tuple("killed", self.killed))
         errors = _sequence_as_tuple("errors", self.errors)
@@ -442,6 +448,7 @@ class CloseReport:
             "errors": [{"path": entry_path, "error": text} for entry_path, text in self.errors],
             "emits_after_close": self.emits_after_close,
             "complete": self.complete,
+            "kind": self.kind,
             "ok": self.ok,
         }
 
@@ -479,6 +486,7 @@ class CloseReport:
             errors=_errors_from_wire(d["errors"]),
             emits_after_close=d.get("emits_after_close", 0),
             complete=d.get("complete", True),
+            kind=d.get("kind", "close"),
         )
 
 
@@ -519,7 +527,8 @@ def _errors_from_wire(value: Any) -> Any:
 
 
 _CLOSE_REPORT_REQUIRED_KEYS = ("path", "elapsed_s", "survivors", "killed", "errors")
-_CLOSE_REPORT_KNOWN_KEYS = frozenset((*_CLOSE_REPORT_REQUIRED_KEYS, "emits_after_close", "complete", "ok"))
+_CLOSE_REPORT_KNOWN_KEYS = frozenset((*_CLOSE_REPORT_REQUIRED_KEYS, "emits_after_close", "complete", "kind", "ok"))
+_CLOSE_REPORT_KINDS = frozenset(("close", "late_emits"))
 
 
 Reporter = Callable[[CloseReport], None]
@@ -536,8 +545,14 @@ Reporter = Callable[[CloseReport], None]
 1. закрытие области — итоговый отчёт ``close()``;
 2. досрочное ``IHandle.close()`` — отчёт этой записи;
 3. «после закрытия цепочки» — ``IScope.note_emits_after_close(n)`` пришёл,
-   когда закрыты область и все её предки: ``elapsed_s == 0.0``, пустые
-   ``survivors``/``killed``/``errors``, ``emits_after_close == n`` (≥ 1).
+   когда закрыты область и все её предки: ``kind == "late_emits"``,
+   ``emits_after_close == n`` (≥ 1). Виды 1 и 2 — ``kind == "close"``.
+
+Различитель вида — только ``kind``; ``elapsed_s == 0.0`` ничего не означает
+(разрешение monotonic на Windows — 15.6 мс). Вызовы reporter'а могут идти из
+двух потоков сразу и раньше возврата ``root.close()``; отчёт вида 2 (позднее
+``IHandle.close``) может прийти после возврата корня. Reporter обязан быть
+потокобезопасным и реентрантным.
 
 Отчёт досрочно закрытой некорневой области несёт ``emits_after_close == 0``:
 её счётчик передан родителю и входит в его отчёт. Полный счётчик — в

@@ -845,7 +845,9 @@ class Scope:
 
     def _report_emits_after_chain(self, n: int) -> None:
         """Третий вид вызова reporter'а: цепочка закрыта, ``n`` отклонённых доставок."""
-        report = CloseReport(path=self._path, elapsed_s=0.0, survivors=(), killed=(), errors=(), emits_after_close=n)
+        report = CloseReport(
+            path=self._path, elapsed_s=0.0, survivors=(), killed=(), errors=(), emits_after_close=n, kind="late_emits"
+        )
         if self._reporter is None:
             _log.warning("область %s: %d доставок после закрытия цепочки, reporter'а нет", self._path, n)
             return

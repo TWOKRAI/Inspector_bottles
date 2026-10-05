@@ -760,3 +760,30 @@ def test_hand_off_to_parent_happens_before_done_set_deterministic() -> None:
         if out["root"].emits_after_close != 3:
             bad.append((i, out["root"].emits_after_close))
     assert bad == []
+
+
+# ---- Task 0.3, вердикт CTO по ревью р1 п.2: CloseReport.kind ----------------
+
+
+def test_close_report_kind_is_close_for_ordinary_close() -> None:
+    root = open_scope(_path(), budget_s=1.0)
+    assert root.close().to_dict()["kind"] == "close"
+
+
+def test_close_report_kind_is_late_emits_for_third_kind() -> None:
+    got: list = []
+    root = open_scope(_path(), budget_s=1.0, reporter=got.append)
+    root.close()
+    root.note_emits_after_close(1)
+    assert [r.to_dict()["kind"] for r in got] == ["close", "late_emits"]
+
+
+def test_close_report_kind_from_dict_default_and_strict_edge() -> None:
+    from multiprocess_framework.modules.base_manager.interfaces import CloseReport
+
+    wire = {"path": "p", "elapsed_s": 0.0, "survivors": [], "killed": [], "errors": []}
+    assert CloseReport.from_dict(wire).kind == "close"
+    with pytest.raises(ValueError):
+        CloseReport.from_dict({**wire, "kind": "late"})
+    with pytest.raises(ValueError):
+        CloseReport(path="p", elapsed_s=0.0, survivors=(), killed=(), errors=(), kind="x")
