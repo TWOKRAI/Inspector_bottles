@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import ast
+import gc
 import threading
 import time
 import uuid
@@ -25,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from multiprocess_framework.modules.base_manager import open_scope
+from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
 
 _LIFETIME_PY = Path(__file__).resolve().parent.parent / "core" / "lifetime.py"
@@ -405,3 +406,106 @@ def test_scope_close_does_not_touch_entry_taken_by_handle_close():
         assert not t.is_alive()
     assert calls.n == 1
     assert [report.errors for report in reports] == [(), ()]
+
+
+# ============================================================ ревью Task 0.2, итерация 1
+
+
+def test_unclosed_roots_survives_gc_finalizer_under_lock():
+    """F1: сборщик мусора срабатывает внутри ``unclosed_roots()`` и зовёт финализатор
+    брошенного корня в том же потоке. Финализатор берёт лок сторожа — повторный вход
+    не должен зависнуть. 800 живых корней — столько аллокаций, чтобы gen0 сработал
+    внутри списка (порог по умолчанию — 700).
+    """
+    keep = [open_scope(f"{_path()}/live{i}", budget_s=0.1) for i in range(800)]
+    abandoned = _path()
+    box: dict = {}
+
+    def worker() -> None:
+        root = open_scope(abandoned, budget_s=0.1)
+        root.own(lambda: None, name="x")  # цикл Scope <-> запись: соберёт только gc
+        del root
+        box["n"] = len(unclosed_roots())
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(3.0)
+    assert not thread.is_alive(), "unclosed_roots() завис под финализатором корня"
+    gc.collect()
+    assert {"path": abandoned, "state": "abandoned"} in unclosed_roots()
+    _bounded(lambda: [root.close() for root in keep], timeout=10.0)
+
+
+class _Dev:
+    """Ресурс со стопом: ``request_stop`` / ``join_until``."""
+
+    def __init__(self) -> None:
+        self.stopped = threading.Event()
+
+    def request_stop(self) -> None:
+        self.stopped.set()
+
+    def join_until(self, deadline: float) -> bool:
+        return self.stopped.wait(max(0.0, deadline - time.monotonic()))
+
+
+def _close_with_handle_closing_worker(budget_s):
+    root = open_scope(_path(), budget_s=1.0)
+    dev = _Dev()
+    h_dev = root.own(dev, name="dev")
+    inner: dict = {}
+
+    def loop(ev: threading.Event) -> None:
+        try:
+            ev.wait()
+        finally:
+            t0 = time.monotonic()
+            report = h_dev.close()
+            inner["dt"] = time.monotonic() - t0
+            inner["complete"] = report.complete
+
+    root.spawn(loop, name="w")
+    if budget_s is None:
+        report = _bounded(root.close, timeout=3.0)
+    else:
+        report = _bounded(lambda: root.close(budget_s=budget_s), timeout=3.0)
+    return report, inner
+
+
+def test_handle_close_from_subtree_thread_does_not_wait_for_scope_close():
+    """F2: spawn-поток в ``finally`` закрывает ручку ресурса, запись которого уже взял
+    идущий ``close`` области. Поток не ждёт close, close не ждёт поток: ответ ручки —
+    ``complete=False`` сразу, выживших нет. Срок области по умолчанию и короткий срок.
+    """
+    report, inner = _close_with_handle_closing_worker(None)
+    assert report.survivors == ()
+    assert report.elapsed_s <= 0.1
+    assert inner["complete"] is False
+    assert inner["dt"] <= 0.1
+
+    report, inner = _close_with_handle_closing_worker(0.5)
+    assert report.survivors == ()
+    assert inner["complete"] is False
+    assert inner["dt"] <= 0.1
+
+
+def test_resource_finalizer_does_not_run_under_scope_lock():
+    """F3: последняя ссылка на ресурс рвётся при освобождении записи. Финализатор
+    ресурса не идёт под локом области: чужой поток в это время читает ``live()``.
+    """
+    root = open_scope(_path(), budget_s=1.0)
+    seen: dict = {}
+
+    class _Res:
+        def __call__(self) -> None:
+            pass
+
+        def __del__(self) -> None:
+            reader = threading.Thread(target=root.live, daemon=True)
+            reader.start()
+            reader.join(0.5)
+            seen["reader_blocked"] = reader.is_alive()
+
+    root.own(_Res(), name="r")  # вызывающий ссылку не держит: владелец — область
+    _bounded(root.close, timeout=3.0)
+    assert seen == {"reader_blocked": False}

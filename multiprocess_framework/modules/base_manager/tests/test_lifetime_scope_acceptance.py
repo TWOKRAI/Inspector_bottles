@@ -1767,13 +1767,13 @@ def _paths(entries):
 
 def test_unclosed_roots_lists_live_open_root(rp):
     root = _open(rp, budget_s=1.0)
-    assert {"path": rp, "state": "open"} in _unclosed()
+    assert {"path": rp, "state": "open"} in _run(_unclosed, _what="unclosed_roots()")[0]
     assert root.closed is False  # корень жив до конца проверки
 
 
 def test_unclosed_roots_dict_keys_are_exactly_path_and_state(rp):
     root = _open(rp, budget_s=1.0)
-    entries = _unclosed()
+    entries = _run(_unclosed, _what="unclosed_roots()")[0]
     assert {"path": rp, "state": "open"} in entries
     assert all(set(d) == {"path", "state"} for d in entries)
     assert root is not None
@@ -1782,8 +1782,8 @@ def test_unclosed_roots_dict_keys_are_exactly_path_and_state(rp):
 def test_unclosed_roots_never_lists_child_scope(rp):
     root = _open(rp, budget_s=1.0)
     root.child("c")
-    assert f"{rp}/c" not in _paths(_unclosed())
-    assert rp in _paths(_unclosed())
+    assert f"{rp}/c" not in _paths(_run(_unclosed, _what="unclosed_roots()")[0])
+    assert rp in _paths(_run(_unclosed, _what="unclosed_roots()")[0])
 
 
 def _create_and_drop(path):
@@ -1794,7 +1794,7 @@ def _create_and_drop(path):
 def test_unclosed_roots_reports_dropped_root_as_abandoned(rp):
     ref = _create_and_drop(rp)
     gc.collect()
-    assert {"path": rp, "state": "abandoned"} in _unclosed()
+    assert {"path": rp, "state": "abandoned"} in _run(_unclosed, _what="unclosed_roots()")[0]
     assert ref() is None
 
 
@@ -1813,7 +1813,7 @@ def _create_close_and_drop(path):
 def test_closed_root_is_not_listed_while_alive(rp):
     root = _open(rp, budget_s=1.0)
     _close(root)
-    assert rp not in _paths(_unclosed())
+    assert rp not in _paths(_run(_unclosed, _what="unclosed_roots()")[0])
     assert root.closed is True
 
 
@@ -1821,13 +1821,13 @@ def test_closed_root_is_not_listed_after_drop_and_gc(rp):
     ref = _create_close_and_drop(rp)
     gc.collect()
     assert ref() is None
-    assert rp not in _paths(_unclosed())
+    assert rp not in _paths(_run(_unclosed, _what="unclosed_roots()")[0])
 
 
 def test_root_with_started_close_is_not_listed_during_close(rp):
     seen = {}
     root = _open(rp, budget_s=1.0)
-    root.own(lambda: seen.setdefault("paths", _paths(_unclosed())), name="probe")
+    root.own(lambda: seen.setdefault("paths", _paths(_run(_unclosed, _what="unclosed_roots()")[0])), name="probe")
     _close(root)
     assert "paths" in seen
     assert rp not in seen["paths"]
@@ -1842,7 +1842,7 @@ def test_root_with_started_close_is_not_abandoned_after_drop(rp):
     del root
     gc.collect()
     assert ref() is None
-    assert rp not in _paths(_unclosed())
+    assert rp not in _paths(_run(_unclosed, _what="unclosed_roots()")[0])
 
 
 # ======================================================================== прочее
