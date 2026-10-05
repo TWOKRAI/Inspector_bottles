@@ -366,6 +366,12 @@ _RUNNERLESS_BY_DECISION: dict[str, str] = {
         "test_ratio). Переименование инструмента не делаем — на путь ссылается slash-команда"
     ),
     ".claude/plugins/lang-python/templates/scripts/test_ratio": "шаблон того же инструмента, та же причина",
+    "robot/pc_platform_probe": "lupa вне зависимостей проекта; запуск — командой из докстринга каталога",
+    "scripts/plans_progress/tests": (
+        "свой прогон плана plans-progress-dashboard: `pytest scripts/plans_progress/tests` — 1553 теста за 387 с "
+        "(замер 2026-10-05), каждый тест строит временный git-репозиторий. validate.py шаг 7 гоняет только "
+        "`--check --baseline`, не тесты"
+    ),
 }
 
 
@@ -373,7 +379,9 @@ def _dirs_with_test_files(repo_root: Path) -> set[str]:
     """Каталоги репозитория, где физически лежит хотя бы один `test_*.py`."""
     found: set[str] = set()
     for path in repo_root.rglob("test_*.py"):
-        if _INFRA_DIRS & set(path.parts):
+        # Относительные части: абсолютный путь внутри `.claude/worktrees/<имя>` содержал бы
+        # `worktrees` и скрывал бы от стража ВСЁ дерево рабочей копии.
+        if _INFRA_DIRS & set(path.relative_to(repo_root).parts):
             continue
         found.add(path.parent.relative_to(repo_root).as_posix())
     return found

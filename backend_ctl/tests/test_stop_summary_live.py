@@ -144,6 +144,7 @@ def test_normal_stop_writes_one_stop_summary_record(monkeypatch, tmp_path) -> No
     )
 
 
+@pytest.mark.harness_smoke
 def test_stop_summary_numbers_match_stderr_lines(capfd, monkeypatch, tmp_path) -> None:
     """Числа сводки по каждому ребёнку равны числам его stderr-строки (или 0,0 без строки).
 
@@ -194,6 +195,7 @@ def test_stop_summary_numbers_match_stderr_lines(capfd, monkeypatch, tmp_path) -
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX-only: os.kill(SIGKILL) на реальный pid ребёнка")
+@pytest.mark.harness_smoke
 def test_killed_child_is_reported_false_and_warning(capfd, monkeypatch, tmp_path) -> None:
     """Убитый до стопа ребёнок -> reported=false, released/buffered_dropped=0, severity WARNING.
 
@@ -252,8 +254,7 @@ def test_killed_child_is_reported_false_and_warning(capfd, monkeypatch, tmp_path
     for m in _STDERR_LINE_RE.finditer(combined):
         stderr_numbers[m.group(1)] = (int(m.group(2)), int(m.group(3)))
     assert any(n[0] > 0 for n in stderr_numbers.values()), (
-        f"убитый renderer не дал ни одной строки потерь в stderr — сверка чисел была бы пустой; "
-        f"сводка: {summary!r}"
+        f"убитый renderer не дал ни одной строки потерь в stderr — сверка чисел была бы пустой; сводка: {summary!r}"
     )
     for name in _CHILDREN:
         expected = stderr_numbers.get(name, (0, 0))

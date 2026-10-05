@@ -348,6 +348,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[3].parent)
 
 _H8_SCRIPT = f"""
 import multiprocessing, time
+multiprocessing.set_start_method("spawn")
 from multiprocess_framework.modules.process_manager_module.runner.process_runner import run_process_function
 from multiprocess_framework.modules.shared_resources_module.queues.core.manager import QueueRegistry
 ctx = multiprocessing.get_context("spawn")
