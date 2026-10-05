@@ -6,6 +6,7 @@
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
 - [Стенд с вердиктом — тоже оснастка](feedback_a_stand_with_a_verdict_is_also_a_harness.md) — приёмником был наш `http.server`, отвечавший 200 на любой путь; настоящий otelcol дал 404, 102 теста из 214 пинили форму, не доставившую ничего
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) · [вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — пара маркеров + признак жизни
+- [elementsFromPoint не видит псевдоэлементы](feedback_elements_from_point_misses_pseudo_elements.md) — артефакт стенда списан на курсор, рисовал `::details-content` закрытого `<details>`
 - [Зонд, гадающий о темпе, говорит «нет» вместо «не знаю»](feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know.md) — пять ложных опровержений подряд на ИСПРАВНОМ механизме: форма, темп, темп, готовность, вакуум; недобор фактов = «не доказано»
 - [Subagent live = синхронно](feedback_subagent_live_test_monitor_hang.md)
 - [Красный — сперва на main](feedback_check_red_on_main_first.md) · [подпись гейта живёт на HEAD](feedback_gate_signature_lives_on_a_head.md) — коммит после подписи = пере-прогон
