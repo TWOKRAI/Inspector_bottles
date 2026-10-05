@@ -174,9 +174,9 @@ def test_malformed_jsonl_lines_are_skipped_counted_and_reported_on_stderr(tmp_pa
     assert "3 malformed JSONL line" in err
 
 
-def test_a_clean_transcript_stays_silent_on_stderr(tmp_path):
+def test_a_clean_transcript_prints_only_the_files_summary_on_stderr(tmp_path):
     _, err, _ = run(make_root(tmp_path, [use("t1", "git commit -q -m x"), res("t1", B1_TEXT)]))
-    assert err == ""
+    assert err == "classify: 1 file(s) read, 0 skipped (mtime before --since)\n"
 
 
 # ----------------------------------------------------------------------------------------------
@@ -314,3 +314,132 @@ def test_dash_a_commit_takes_the_py_written_after_the_previous_attempt(tmp_path)
 def test_a_signature_quoted_mid_line_is_not_a_class(tmp_path, quoted):
     out = one(tmp_path, "git commit -q -m x", result=f"doc line\n{quoted}\n{OK_COMMIT}")
     assert out["attempts"]["t1"]["classes"] == [], out["attempts"]["t1"]
+
+
+# ----------------------------------------------------------------------------------------------
+# Ред. 4: писатель — по ЦЕЛЯМ записи (ревью r1)
+# ----------------------------------------------------------------------------------------------
+def _split_with(tmp_path: Path, before: list[str], commit_cmd: str) -> list[str]:
+    """Метки разбивки A1 для коммит-вызова `commit_cmd` после событий `before` (Edit/Write — id e*, Bash — b*)."""
+    lines = [*before, use("c1", commit_cmd), res("c1", RUFF_FORMAT_FAILED)]
+    out = run(make_root(tmp_path, lines))[0]
+    return [c for c in out["attempts"]["c1"]["classes"] if c.startswith("A1-") and c != "A1-F401"]
+
+
+def _bash(tid: str, command: str, minute: int = 30) -> str:
+    return use(tid, command, ts=f"2026-09-10T11:{minute:02d}:00.000Z")
+
+
+def test_python_open_w_inside_a_heredoc_is_a_bash_write_of_the_py_it_names(tmp_path):
+    """Реальный случай toolu_01Fu9ZJy…: Write .py, затем `python - <<'EOF'` с open(p,'w').write(...), затем A1."""
+    body = 'python - <<\'EOF\'\np = "mod/a.py"\nopen(p, "w").write("x = 1\n")\nEOF'
+    got = _split_with(tmp_path, [edit("e1", PY), _bash("b1", body)], "git add mod/a.py && git commit -q -m x")
+    assert got == ["A1-Bash"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            "python -c \"from pathlib import Path; Path('mod/a.py').write_text('x')\"", id="write_text-in-quotes"
+        ),
+        pytest.param("python - <<'EOF'\nf = open('mod/a.py', 'a')\nf.write('y')\nEOF", id="open-a-then-dot-write"),
+    ],
+)
+def test_python_write_forms_in_raw_text_are_bash_writes(tmp_path, body):
+    got = _split_with(tmp_path, [edit("e1", PY), _bash("b1", body)], "git add mod/a.py && git commit -q -m x")
+    assert got == ["A1-Bash"]
+
+
+def test_python_that_only_reads_the_py_is_not_a_writer(tmp_path):
+    body = "python - <<'EOF'\ntext = open('mod/a.py').read()\nprint(len(text))\nEOF"
+    got = _split_with(tmp_path, [edit("e1", PY), _bash("b1", body)], "git add mod/a.py && git commit -q -m x")
+    assert got == ["A1-Edit/Write"]
+
+
+def test_sed_i_on_another_file_in_the_commit_call_does_not_make_the_staged_py_a_bash_write(tmp_path):
+    cmd = "sed -i 's/x/y/' notes.md; git add mod/a.py && git commit -q -m x"
+    assert _split_with(tmp_path, [edit("e1", PY)], cmd) == ["A1-Edit/Write"]
+
+
+def test_tee_of_a_log_after_pytest_naming_the_py_is_not_a_write_of_that_py(tmp_path):
+    before = [edit("e1", PY), _bash("b1", "pytest mod/a.py -q | tee /tmp/log.txt")]
+    assert _split_with(tmp_path, before, "git add mod/a.py && git commit -q -m x") == ["A1-Edit/Write"]
+
+
+def test_heredoc_to_a_tmp_py_writes_only_that_file_not_the_py_that_is_read_afterwards(tmp_path):
+    body = "cat > /tmp/tag.py <<'EOF'\nprint(1)\nEOF\npython /tmp/tag.py; sed -n 1,5p mod/a.py"
+    assert _split_with(tmp_path, [edit("e1", PY), _bash("b1", body)], "git add mod/a.py && git commit -q -m x") == [
+        "A1-Edit/Write"
+    ]
+    # а сама цель записи — писатель Bash
+    tag = "git add /tmp/tag.py && git commit -q -m x"
+    assert _split_with(tmp_path / "t", [_bash("b1", body)], tag) == ["A1-Bash"]
+
+
+def test_redirect_target_py_is_a_bash_write(tmp_path):
+    before = [edit("e1", PY), _bash("b1", "python gen.py > mod/a.py")]
+    assert _split_with(tmp_path, before, "git add mod/a.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_cp_writes_its_last_argument_not_the_source(tmp_path):
+    src = REPO + "\\mod\\src.py"
+    before = [edit("e1", src), _bash("b1", "cp mod/src.py mod/dst.py")]
+    assert _split_with(tmp_path / "s", before, "git add mod/src.py && git commit -q -m x") == ["A1-Edit/Write"]
+    assert _split_with(tmp_path / "d", before, "git add mod/dst.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_cp_into_a_directory_writes_the_py_sources(tmp_path):
+    before = [edit("e1", PY), _bash("b1", "cp mod/a.py /tmp/backup_dir/")]
+    assert _split_with(tmp_path, before, "git add mod/a.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_mv_install_rsync_write_their_last_argument(tmp_path):
+    for i, verb in enumerate(
+        ("mv mod/old.py mod/a.py", "install -m 644 mod/old.py mod/a.py", "rsync -a mod/old.py mod/a.py")
+    ):
+        before = [edit("e1", PY), _bash("b1", verb)]
+        assert _split_with(tmp_path / str(i), before, "git add mod/a.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_tee_argument_py_is_a_bash_write(tmp_path):
+    before = [edit("e1", PY), _bash("b1", "echo x | tee mod/a.py")]
+    assert _split_with(tmp_path, before, "git add mod/a.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_git_checkout_and_restore_of_the_py_are_bash_writes(tmp_path):
+    for i, verb in enumerate(("git checkout abc123 -- mod/a.py", "git restore mod/a.py")):
+        before = [edit("e1", PY), _bash("b1", verb)]
+        assert _split_with(tmp_path / str(i), before, "git add mod/a.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_for_loop_list_elements_are_write_targets_when_the_body_copies_the_loop_variable(tmp_path):
+    loop = 'for f in mod/a.py mod/b.py; do cp "/tmp/w/$f" "$f"; done'
+    got = _split_with(tmp_path / "cp", [edit("e1", PY), _bash("b1", loop)], "git add mod/a.py && git commit -q -m x")
+    assert got == ["A1-Bash"]
+    reader = 'for f in mod/a.py mod/b.py; do cat "$f"; done'
+    got = _split_with(tmp_path / "cat", [edit("e1", PY), _bash("b1", reader)], "git add mod/a.py && git commit -q -m x")
+    assert got == ["A1-Edit/Write"]
+
+
+def test_git_add_variable_with_several_words_is_split_into_paths(tmp_path):
+    before = [edit("e1", PY), _bash("b1", "cat > mod/b.py <<'EOF'\nx = 1\nEOF")]
+    cmd = 'F="mod/b.py mod/a.py"; git add $F && git commit -q -m x'
+    assert _split_with(tmp_path, before, cmd) == ["A1-Bash"]  # b.py — писал Bash; без разбиения оба пути не находятся
+
+
+def test_stderr_summary_lists_the_skipped_things_and_is_never_empty(tmp_path):
+    lines = [
+        use("o1", "cd C:\\Users\\x\\AppData\\Local\\Temp\\lab && git commit -q -m x"),
+        res("o1", B1_TEXT),
+        use("d1", "git commit --dry-run -m x"),
+        res("d1", ""),
+        use("d2", "git merge --abort"),
+        res("d2", ""),
+        use("n1", "git commit -q -m x"),  # без tool_result
+    ]
+    _, err, _ = run(make_root(tmp_path, lines))
+    assert "1 attempt(s) outside the repo" in err
+    assert "2 git commit/merge invocation(s) skipped" in err
+    assert "1 attempt(s) without tool_result" in err
+    assert "file(s) read" in err

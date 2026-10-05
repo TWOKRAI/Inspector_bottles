@@ -104,10 +104,15 @@ C4_RE = re.compile(
 # ----------------------------------------------------------------------------------------------
 TOOL_WRITERS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 PY_TOKEN_RE = re.compile(r"""[^\s"'`;&|<>()=]+\.py\b""")
-WRITE_OP_RE = re.compile(
-    r"(?<![\w-])(?:cp|mv|install|tee|rsync)(?![\w-])|\bsed[ \t]+(?:-[A-Za-z]*i\b|--in-place)|"
-    r"\bwrite_text\(|\.write\(|\bgit[ \t]+(?:checkout|restore)\b"
-)
+# запись python ищется в СЫРОМ тексте команды (код python — в кавычках или heredoc, маска его прячет)
+PYWRITE_RE = re.compile(r"""write_text\(|\.write\(|\bopen\([^)\n]*['"][wa]\+?b?['"]""")
+# команды с целями записи: у каждой цели записи свой разбор аргументов (write_targets)
+CP_RE = re.compile(SEG + r"(?:cp|mv|install|rsync)(?![\w-])(?P<args>[^\n;&|]*)", re.MULTILINE)
+SED_RE = re.compile(SEG + r"sed(?![\w-])(?P<args>[^\n;&|]*)", re.MULTILINE)
+TEE_RE = re.compile(SEG + r"tee(?![\w-])(?P<args>[^\n;&|]*)", re.MULTILINE)
+RESTORE_RE = re.compile(SEG + GITOPTS + r"(?:checkout|restore)(?![-\w])(?P<args>[^\n;&|]*)", re.MULTILINE)
+FOR_RE = re.compile(SEG + r"for[ \t]+(?P<var>[A-Za-z_]\w*)[ \t]+in[ \t]+(?P<items>[^\n;&|]*)", re.MULTILINE)
+REDIRECT_RE = re.compile(r"(?<![>&])>>?(?!F\d)[ \t]*")
 RUFF_FORMAT_RE = re.compile(r"\bruff[ \t]+format\b")
 # слова, при которых разбор вообще имеет смысл: остальные команды (ls, cat...) не трогаем
 INTEREST_RE = re.compile(
@@ -185,21 +190,24 @@ class Invocation:
     pipeline: str  # от аргументов до конца конвейера
 
 
-def find_invocations(masked: str) -> list[Invocation]:
-    """Все `git … commit|merge` команды (кроме `--dry-run`, `--abort`, `--quit`), по порядку в тексте."""
+def find_invocations(masked: str) -> tuple[list[Invocation], int]:
+    """Все `git … commit|merge` (кроме `--dry-run`, `--abort`, `--quit`) по порядку в тексте и число пропущенных."""
     found: list[Invocation] = []
+    skipped = 0
     for kind, regex in (("commit", COMMIT_RE), ("merge", MERGE_RE)):
         for m in regex.finditer(masked):
             args = m.group("args")
             if kind == "commit" and "--dry-run" in args:
+                skipped += 1
                 continue
             if kind == "merge" and re.search(r"--(?:abort|quit)(?![-\w])", args):
+                skipped += 1
                 continue
             start = m.start("args")
             pipeline = PIPELINE_RE.match(masked, start).group(0)  # type: ignore[union-attr]
             found.append(Invocation(kind, start, args, pipeline))
     found.sort(key=lambda inv: inv.args_start)
-    return found
+    return found, skipped
 
 
 @dataclass
@@ -238,9 +246,11 @@ def expand_vars(word: str, text: str) -> str:
 
 def parse_add(args: str, text: str = "") -> AddSpec:
     spec = AddSpec()
+    words: list[str] = []
     for word in _words(args):
-        if "$" in word:
-            word = expand_vars(word, text)
+        # `F="a.py b.py"; git add $F` — раскрытая переменная даёт несколько слов, как в оболочке
+        words.extend(expand_vars(word, text).split() if "$" in word else [word])
+    for word in words:
         if word == "--":
             continue
         if word.startswith("-"):
@@ -249,7 +259,7 @@ def parse_add(args: str, text: str = "") -> AddSpec:
         elif word in (".", "./"):
             spec.everything = True
         elif "$" in word or any(c in word for c in "*?["):
-            continue  # переменную и шаблон без оболочки не раскрыть
+            continue  # нераскрытую переменную и шаблон без оболочки не раскрыть
         elif word.lower().endswith(".py"):
             spec.files.append(normalise_path(word))
         else:
@@ -446,22 +456,73 @@ def same_file(tool_path: str, staged: str) -> bool:
     return tool_path == staged or tool_path.endswith("/" + staged) or staged.endswith("/" + tool_path)
 
 
-def command_events(text: str, masked: str) -> list[Event]:
-    """События команды: `git add|rm`, писатели Bash, `ruff format`. Порядок в тексте не важен."""
+def _is_py(word: str) -> bool:
+    return "$" not in word and word.lower().endswith(".py")
+
+
+def _base(path: str) -> str:
+    return posixpath.basename(path.replace("\\", "/")).lower()
+
+
+def _args_words(text: str, m: re.Match[str]) -> list[str]:
+    """Слова аргументов без флагов (слова берём из текста: пути в кавычках в маске — это `Q`)."""
+    return [w for w in _words(text[m.start("args") : m.end("args")]) if not w.startswith("-")]
+
+
+def write_targets(raw: str, text: str, masked: str) -> frozenset[str]:
+    """Имена `.py`, в которые команда ПИШЕТ (нижний регистр, без каталога).
+
+    Цели записи: `>`/`>>`; последний аргумент `cp|mv|install|rsync` (каталог — тогда `.py`-источники);
+    файлы `sed -i`; аргументы `tee`; пути `git checkout|restore`; элементы списка `for X in …; do … cp … $X`;
+    python (`write_text(`, `.write(`, `open(…,'w'|'a')`) — по сырому тексту (с телами heredoc), имена — все
+    `.py`-токены сырого текста. Аргументы `git add|rm|commit` и чтения именами записи не считаются.
+    """
+    names: set[str] = set()
+    if PYWRITE_RE.search(raw):
+        names.update(_base(t) for t in PY_TOKEN_RE.findall(raw))
+    for m in REDIRECT_RE.finditer(masked):
+        if m.end() < len(text):
+            word = _read_word(text, m.end())
+            if _is_py(word):
+                names.add(_base(word))
+    loops = {
+        m.group("var"): [w for w in _words(text[m.start("items") : m.end("items")]) if _is_py(w)]
+        for m in FOR_RE.finditer(masked)
+    }
+    for m in CP_RE.finditer(masked):
+        words = _args_words(text, m)
+        if not words:
+            continue
+        if _is_py(words[-1]):
+            names.add(_base(words[-1]))
+        else:
+            names.update(_base(w) for w in words[:-1] if _is_py(w))
+        args = text[m.start("args") : m.end("args")]
+        for var, items in loops.items():
+            if re.search(rf"\${{?{var}(?!\w)", args):
+                names.update(_base(w) for w in items)
+    for m in SED_RE.finditer(masked):
+        if any(re.match(r"-[A-Za-z]*i|--in-place", w) for w in _words(text[m.start("args") : m.end("args")])):
+            names.update(_base(w) for w in _args_words(text, m) if _is_py(w))
+    for regex in (TEE_RE, RESTORE_RE):
+        for m in regex.finditer(masked):
+            names.update(_base(w) for w in _args_words(text, m) if _is_py(w))
+    return frozenset(names)
+
+
+def command_events(raw: str, text: str, masked: str) -> list[Event]:
+    """События команды: `git add|rm`, писатели Bash (по целям записи), `ruff format`."""
     events: list[Event] = []
     for m in ADD_RE.finditer(masked):
         events.append(Event("add", add=parse_add(text[m.start("args") : m.end("args")], text)))
-    names = frozenset(posixpath.basename(t.replace("\\", "/")).lower() for t in PY_TOKEN_RE.findall(text))
     if GLOBAL_WRITER_RE.search(masked):
         events.append(Event("bash", everything=True))
-    if names:
-        redirected = any(re.search(r">>?[ \t]*[\"']?[^\s;&|]*" + re.escape(n), text, re.I) for n in names)
-        if WRITE_OP_RE.search(masked) or redirected:
-            events.append(Event("bash", names=names))
-        if RUFF_FORMAT_RE.search(masked):
-            events.append(Event("fmt", names=names))
-    elif RUFF_FORMAT_RE.search(masked):
-        events.append(Event("fmt", everything=True))
+    written = write_targets(raw, text, masked)
+    if written:
+        events.append(Event("bash", names=written))
+    if RUFF_FORMAT_RE.search(masked):
+        named = frozenset(_base(t) for t in PY_TOKEN_RE.findall(text))
+        events.append(Event("fmt", names=named, everything=not named))
     return events
 
 
@@ -539,6 +600,8 @@ class ScanStats:
     not_executed: int = 0
     files: int = 0
     files_skipped_by_mtime: int = 0
+    outside_repo: int = 0
+    skipped_invocations: int = 0
 
 
 class FileState:
@@ -635,13 +698,15 @@ class TranscriptScanner:
         text = strip_heredocs(command)
         masked = normalise_redirects(mask_quotes(text))
         call_start = len(state.events)
-        state.events.extend(command_events(text, masked))
-        invocations = find_invocations(masked)
+        state.events.extend(command_events(command, text, masked))
+        invocations, skipped = find_invocations(masked)
+        self.stats.skipped_invocations += skipped
         if not invocations:
             return
         first = invocations[0]
         cwd = record["cwd"] if isinstance(record.get("cwd"), str) else state.cwd
         if not in_repo(attempt_directory(text, masked, cwd, first.args_start)):
+            self.stats.outside_repo += 1
             return
         day = local_date(record.get("timestamp"))
         if day is None:
@@ -697,7 +762,7 @@ class TranscriptScanner:
         self.pending.clear()
 
 
-def transcript_files(root: Path, project_substr: str, since: date) -> Iterator[Path]:
+def transcript_files(root: Path, project_substr: str, since: date, stats: ScanStats) -> Iterator[Path]:
     """`*.jsonl` каталогов проекта (включая `subagents/`); файлы с mtime раньше окна пропущены."""
     since_ts = datetime.combine(since, time.min).timestamp()
     for entry in sorted(os.scandir(root), key=lambda e: e.name):
@@ -705,11 +770,13 @@ def transcript_files(root: Path, project_substr: str, since: date) -> Iterator[P
             for path in sorted(Path(entry.path).rglob("*.jsonl")):
                 if path.stat().st_mtime >= since_ts:
                     yield path
+                else:
+                    stats.files_skipped_by_mtime += 1
 
 
 def iter_attempts(root: Path, project_substr: str, since: date, until: date, stats: ScanStats) -> list[Attempt]:
     scanner = TranscriptScanner(since, until, stats)
-    for path in transcript_files(root, project_substr, since):
+    for path in transcript_files(root, project_substr, since, stats):
         scanner.scan_file(path)
     scanner.finish_all()
     return scanner.attempts
@@ -765,11 +832,17 @@ def render_markdown(report: dict) -> str:
 
 
 def report_stats(stats: ScanStats) -> None:
-    """Всё, что скрипт пропустил или додумал, — в stderr: молча не пропускаем."""
+    """Сводка пропусков и допущений — всегда в stderr; ненулевые пункты по строке. Пустой stderr не бывает."""
+    print(
+        f"classify: {stats.files} file(s) read, {stats.files_skipped_by_mtime} skipped (mtime before --since)",
+        file=sys.stderr,
+    )
     notes = [
         (stats.malformed_lines, "malformed JSONL line(s) skipped"),
         (stats.no_timestamp, "attempt(s) without a parsable timestamp (not counted in the window)"),
         (stats.no_result, "attempt(s) without tool_result (counted, outcome unknown)"),
+        (stats.outside_repo, "attempt(s) outside the repo (cwd/cd outside it, or scratch/tmp/commitlab; not counted)"),
+        (stats.skipped_invocations, "git commit/merge invocation(s) skipped (--dry-run, --abort, --quit)"),
     ]
     for count, text in notes:
         if count:
