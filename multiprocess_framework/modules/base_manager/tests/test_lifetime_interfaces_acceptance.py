@@ -279,6 +279,7 @@ def test_closereport_field_order_is_contract_order():
         "errors",
         "emits_after_close",
         "complete",
+        "kind",  # поправка DTO, вердикт CTO 2026-10-05 (ADR-BM-008 «Канал счётчика»)
     ]
 
 
@@ -401,6 +402,7 @@ TO_DICT_KEYS = {
     "errors",
     "emits_after_close",
     "complete",
+    "kind",  # поправка DTO, вердикт CTO 2026-10-05 (ADR-BM-008 «Канал счётчика»)
     "ok",
 }
 
@@ -430,6 +432,7 @@ def test_to_dict_full_report_equals_literal():
         "errors": [{"path": "d", "error": "boom"}],
         "emits_after_close": 3,
         "complete": False,
+        "kind": "close",
         "ok": False,
     }
 
