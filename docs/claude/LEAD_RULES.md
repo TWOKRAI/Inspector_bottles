@@ -282,6 +282,7 @@ Servers this machine runs (measured 2026-10-05). A subagent sees only the server
 
 New MCP server → decide its row here and add a `mcp__<server>` deny to every role that does not keep it; until then every role sees it.
 A role without a row (`general-purpose`, a new hire) inherits every server, serena included — add its row and deny line before use.
+Built-in agents (`Explore`, `Plan`, `claude`, `general-purpose`) keep the serena mutators: until the owner settles the serena drift (`docs/claude/OPEN_QUESTIONS.md`), do not spawn them while writers work in a worktree.
 
 Before first using an MCP tool — `Read` its README (`.claude/plugins/<id>/README.md`): setup, usage, rules.
 
