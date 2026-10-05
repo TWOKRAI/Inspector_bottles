@@ -106,7 +106,7 @@ def test_sanity_order_fixture_has_tier_and_clean_check(make_root, one_plan, prog
             "plans/queue/ORDER.md": order_md(tier41=["2026-10-03_b"]),
         }
     )
-    assert one_plan(root, "2026-10-03_b")["tier"] == "4.1"
+    assert one_plan(root, "2026-10-03_b")["tier"] == "queue"
     cp = progress(root, "--check")
     assert cp.returncode == 0, check_out(cp)[:500]
     assert "DEP_" not in check_out(cp)
@@ -126,7 +126,7 @@ def test_json_dependency_keys_are_appended_in_documented_order(make_root, one_pl
     root = make_root({"plans/A/plan.md": plan_text(field("ghost"), items)})
     rec = one_plan(root, "A")
     keys = list(rec)
-    assert keys[-8:] == ["tasks", *NEW_PLAN_KEYS, "active"], f"ключи плана: {keys}"
+    assert keys[-9:] == ["tasks", *NEW_PLAN_KEYS, "active", "branches"], f"ключи плана: {keys}"
     for t in rec["tasks"]:
         assert list(t)[-3:] == ["ref", "after", "ready"], f"ключи задачи: {list(t)}"
 

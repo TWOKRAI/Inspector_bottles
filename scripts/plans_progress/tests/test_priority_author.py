@@ -42,7 +42,7 @@ def snapshot_text(
     return "\n".join(["# ORDER", "", heading, "", "Пояснение.", "", head, sep, *rows, "", "## 4. Контроль", ""])
 
 
-def mem_plan(name: str, archived: bool = False, tier: str | None = "4.1") -> pp.Plan:
+def mem_plan(name: str, archived: bool = False, tier: str | None = "queue") -> pp.Plan:
     p = pp.Plan(name=name, rel=f"plans/{name}/plan.md", archived=archived, tier=tier)
     p.tasks = [pp.Task("1.1", "x", "pending")]
     return p
@@ -319,7 +319,7 @@ def test_queue_sort_is_stable_for_equal_numbers_and_puts_unprioritised_last_in_o
 
 
 def test_only_the_queue_is_reordered_waiting_unlisted_and_archive_keep_order():
-    waiting = [mem_plan("w-a", tier="4.2"), mem_plan("w-b", tier="4.2")]
+    waiting = [mem_plan("w-a", tier="waiting"), mem_plan("w-b", tier="waiting")]
     unlisted = [mem_plan("u-a", tier=None), mem_plan("u-b", tier=None)]
     arch = [mem_plan("z-a", archived=True), mem_plan("z-b", archived=True)]
     for p in (waiting[1], unlisted[1], arch[1]):

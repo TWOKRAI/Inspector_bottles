@@ -1,40 +1,42 @@
-# <type>(<scope>): краткое описание в императиве (≤72 симв)
+# <type>(<scope>): краткое описание в императиве (ориентир 72 символа)
 #
-# Types: feat | fix | refactor | docs | test | chore | perf | build | ci
-# Scope: модуль или подсистема (auth, framework, data_schema, plugins, …)
+# Types: feat | fix | refactor | docs | test | chore | perf | build | ci | style | revert | merge
+# Scope: модуль или подсистема (auth, framework, data_schema, plugins, …); у merge scope нет.
 #
 # Body — что сделано (буллетами). Имена файлов, классы, числа тестов.
-# Перенос на 72 символа. Связывать с реализацией, не мотивацией.
+# Связывать с реализацией, не с мотивацией.
 #
 # ────────────────────────────────────────────────────────────────────
 # Trailers (machine-readable, агентам и git interpret-trailers)
-# Обязательные: Why, Layer.
-# Опциональные: Refs, Risk, Reversible, Tested, Rejected.
+# Все трейлеры — ОДИН абзац в самом конце: пустая строка между телом и
+# блоком, внутри блока пустых строк нет, Co-Authored-By — в этом же блоке.
+# Перенос длинного значения — со строки с отступом.
+# Обязательные: Why, Layer. Из плана — Refs.
+# Опциональные: Task, Risk, Reversible, Tested, Rejected.
 # ────────────────────────────────────────────────────────────────────
 #
 # Why: одна-две строки про мотивацию (не реализацию)
-# Layer: framework | services | plugins | prototype | docs | scripts | tests
-# Refs: docs/plans/.../*.md, ADR-XXX, PR#NN, issue#NN  (через запятую)
+# Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
+# Refs: plans/<…>/plan.md, ADR-XXX, PR#NN, issue#NN  (через запятую)
+# Task: <slug>#<id>  (по желанию, например commit-mechanism#2.2)
 # Risk: low | medium | high — короткое почему
 # Reversible: yes | migration-needed | no
 # Tested: scope/N passed, например auth/120, framework/2587
 # Rejected: альтернатива X — отвергнута, потому что Y
-#
 # Co-Authored-By: ... (если применимо)
 #
+# Сообщение — файлом: git commit -F <файл> -- <пути>. Гайд: .claude/COMMIT_GUIDE.md
+#
 # ──── ПРИМЕР ────
-# feat(auth): добавить wildcard-permission в has_permission
+# docs(claude): формат коммита v2 в одной копии гайда
 #
-# - AccessContext.has_permission учитывает "*" в permissions
-# - AdministrationSection использует has_permission вместо in
-# - 4 новых теста (wildcard, empty, exact, partial)
+# - .claude/COMMIT_GUIDE.md: шаблон, правило блока, привычки коммита
+# - docs/claude/COMMIT_GUIDE.md: заглушка со ссылкой на единственную копию
+# - 7 сторожей на документы (test_commit_docs.py)
 #
-# Why: dev-роль должна получать все права без перечисления
-# Layer: services
-# Refs: docs/plans/auth-rbac/03-pr3-permissions.md, ADR-Auth-005
-# Risk: low — изменение в одной функции, покрыто тестами
-# Reversible: yes
-# Tested: auth/120, framework/2587
-# Rejected: hardcoded role-check — отвергнут, негибко для custom-ролей
-#
-# Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+# Why: две копии гайда расходились, а шаблон учил разрывать блок трейлеров
+# Layer: docs
+# Refs: plans/2026-10-03_commit-mechanism/plan.md
+# Task: commit-mechanism#2.2
+# Tested: validate_commit/45 passed
+# Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
