@@ -584,7 +584,8 @@ def test_p6_json_keeps_old_keys_and_record_order_without_priority(tmp_path):
     data = json.loads(cp.stdout)
     assert [r["plan"].removesuffix(".md") for r in data] == ["a-plan", "b-plan"]
     for r in data:
-        assert list(r) == OLD_JSON_KEYS, list(r)
+        # Task 7.1: ключ anchor дописан в конец (контракт append-only)
+        assert list(r) in (OLD_JSON_KEYS, [*OLD_JSON_KEYS, "anchor"]), list(r)
         assert "priority" not in r
     assert len(render(root, tmp_path).chips("b-plan")) == 1  # контроль: на странице приоритет есть
 
