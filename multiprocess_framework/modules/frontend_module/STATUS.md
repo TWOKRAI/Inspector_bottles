@@ -220,6 +220,7 @@ layout_composer}`, `schemas.{widget_descriptor,window_config}`, `configs`,
   Границы: `stop()` терминален; потеря фокуса окна опрос НЕ гасит (гасят
   скрытие/сворачивание/закрытие)
 - `AppIdentity`/`get_app_identity`/`set_app_identity` — идентичность приложения (Gen-2, живое, в фасаде)
+- `attach_qt`/`flush_deferred_deletes`/`QThreadHandle`/`QtTreeMismatch` — владение Qt-объектами через область (`core/qt_lifetime.py`, Task 0.4 lifecycle-owner-scope, lite; потребители не мигрированы)
 - Controls: SliderControl, CheckboxControl, SpinBoxControl, NumericControl, CompoundControl (Gen-2, живое)
 - Widgets: BaseWidget[TModel], HeaderWidget, TabWidget, ImagePanelWidget (Gen-2, живое); LoadingWindow (LEGACY Gen-1)
 - TelemetryChart, SeriesSpec — конструкторный многосерийный live-график (PyQtGraph) (Gen-2, живое)
