@@ -755,7 +755,8 @@ class Scope:
         """``IHandle.close``: отцепить запись, затем закрыть тем же кодом, что и область.
 
         ``None`` — запись сейчас освобождает этот же поток (ресурс в своей фазе
-        зовёт свою ручку): ждать себя до срока нельзя, ответ — ``complete=False``.
+        зовёт свою ручку) или идущий ``close`` области, который ждёт поток поддерева
+        (вызывающий): ждать нельзя, ответ — ``complete=False`` без reporter'а и кэша.
         """
         start = time.monotonic()
         deadline = start + (self._budget_s if budget_s is None else budget_s)
@@ -776,9 +777,9 @@ class Scope:
                 ):
                     # Запись взял идущий close этой области, а он ждёт поток поддерева —
                     # этот. Ждать его нельзя (взаимное ожидание до срока): то же правило,
-                    # что у реентрантного close области — сразу ``complete=False``.
-                    mine, wait = False, False
-                    acc.complete = False
+                    # что у реентрантного close области — сразу ``complete=False``, без
+                    # reporter'а и без кэша в ручке (отчёт о записи даст close области).
+                    return None
                 else:
                     mine, wait = False, True
             else:

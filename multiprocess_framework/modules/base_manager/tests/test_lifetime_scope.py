@@ -462,8 +462,9 @@ class _Dev:
         return self.stopped.wait(max(0.0, deadline - time.monotonic()))
 
 
-def _close_with_handle_closing_worker(budget_s):
-    root = open_scope(_path(), budget_s=1.0)
+def _close_with_handle_closing_worker(path, budget_s):
+    calls: list = []
+    root = open_scope(path, budget_s=1.0, reporter=lambda r: calls.append((r.path, r.ok)))
     dev = _Dev()
     h_dev = root.own(dev, name="dev")
     inner: dict = {}
@@ -482,6 +483,8 @@ def _close_with_handle_closing_worker(budget_s):
         report = _bounded(root.close, timeout=3.0)
     else:
         report = _bounded(lambda: root.close(budget_s=budget_s), timeout=3.0)
+    inner["calls"] = list(calls)  # снимок до позднего close ручки: тот зовёт reporter сам
+    inner["after_close_complete"] = _bounded(h_dev.close, timeout=3.0).complete
     return report, inner
 
 
@@ -489,17 +492,25 @@ def test_handle_close_from_subtree_thread_does_not_wait_for_scope_close():
     """F2: spawn-поток в ``finally`` закрывает ручку ресурса, запись которого уже взял
     идущий ``close`` области. Поток не ждёт close, close не ждёт поток: ответ ручки —
     ``complete=False`` сразу, выживших нет. Срок области по умолчанию и короткий срок.
+
+    Неполный ответ ручки — как реентрантный ``close`` области: без reporter'а и без
+    кэша. Reporter зовётся один раз — отчётом корня; ``close`` ручки после закрытия
+    области отвечает ``complete=True`` (ревью 0.2 р2).
     """
-    report, inner = _close_with_handle_closing_worker(None)
+    report, inner = _close_with_handle_closing_worker("t02r2/handle-default", None)
     assert report.survivors == ()
     assert report.elapsed_s <= 0.1
     assert inner["complete"] is False
     assert inner["dt"] <= 0.1
+    assert inner["calls"] == [("t02r2/handle-default", True)]
+    assert inner["after_close_complete"] is True
 
-    report, inner = _close_with_handle_closing_worker(0.5)
+    report, inner = _close_with_handle_closing_worker("t02r2/handle-budget", 0.5)
     assert report.survivors == ()
     assert inner["complete"] is False
     assert inner["dt"] <= 0.1
+    assert inner["calls"] == [("t02r2/handle-budget", True)]
+    assert inner["after_close_complete"] is True
 
 
 def test_resource_finalizer_does_not_run_under_scope_lock():
