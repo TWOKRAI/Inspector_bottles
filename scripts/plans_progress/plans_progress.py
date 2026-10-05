@@ -2125,12 +2125,9 @@ def to_json(plans: list[Plan], anchors: dict[int, str] | None = None) -> str:
 # ----------------------------------------------------------------------------- HTML
 
 CSS = """
-:root{--bg:#f6f7f9;--fg:#1d2024;--muted:#5d6670;--card:#fff;--line:#d9dde2;--accent:#2f6fdb;--on:#fff;
---done:#2e9d56;--pending:#c3c9d1;--in_progress:#e0a21a;--blocked:#d6453d;--deferred:#8d96a3;
---superseded:#b9a6c9;--unknown:#e68a00}
-@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e4e7ea;--muted:#98a2ad;--card:#1d2126;
---line:#323841;--accent:#6ea0ff;--on:#0b1220;--done:#43b56c;--pending:#4a525d;--in_progress:#e6b13a;
---blocked:#e5645c;--deferred:#76808d;--superseded:#8d7ba0;--unknown:#f0a030}}
+:root{color-scheme:dark;--bg:#14171a;--fg:#e4e7ea;--muted:#98a2ad;--card:#1d2126;--line:#323841;--accent:#6ea0ff;--on:#0b1220;
+--done:#43b56c;--pending:#4a525d;--in_progress:#e6b13a;--blocked:#e5645c;--deferred:#76808d;
+--superseded:#8d7ba0;--unknown:#f0a030}
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);
 font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}

@@ -191,4 +191,6 @@ def test_every_hiding_css_rule_selector_contains_has():
 
 def test_css_keeps_ok_chip_rule_and_dark_theme():
     assert ".chip.ok{color:var(--done);border-color:var(--done)}" in pp.CSS
-    assert "prefers-color-scheme: dark" in pp.CSS
+    # Task 7.1 ред. 4: только тёмная тема — решение владельца 2026-10-05
+    assert "prefers-color-scheme" not in pp.CSS
+    assert re.search(r":root\{color-scheme:dark;--bg:#14171a;", pp.CSS)

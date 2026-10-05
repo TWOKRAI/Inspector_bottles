@@ -890,6 +890,8 @@ def test_html_has_no_external_resources(make_root, progress, parse_html, tmp_pat
 
 
 def test_html_has_light_and_dark_theme(make_root, progress, parse_html, tmp_path):
-    # ИНТЕРПРЕТАЦИЯ тестера: «светлая и тёмная тема» = media-запрос prefers-color-scheme в <style>
+    # Task 7.1 ред. 4: только тёмная тема — решение владельца 2026-10-05
     raw = _html(progress, make_root({"plans/2026-10-02_t/plan.md": plan_text("- Task 1.1: a [DONE]\n")}), tmp_path)
-    assert "prefers-color-scheme" in "".join(parse_html(raw).style_text)
+    style = "".join(parse_html(raw).style_text)
+    assert "prefers-color-scheme" not in style
+    assert re.search(r":root\{[^}]*color-scheme:\s*dark[^}]*--bg:#14171a", style)
