@@ -28,7 +28,7 @@
 - Task 0.1: ADR и интерфейсы владения в base_manager [DONE 2026-10-04 — dad6ef9c9]
 - Task 0.2: Scope и Handle — примитив и контракт-тесты G1 [DONE 2026-10-05 — dbd0d7b23] (после 0.1)
 - Task 0.3: Subscribers в event_module [DONE 2026-10-05 — a3fddf721] (после 0.2)
-- Task 0.4: qt_lifetime — attach_qt, flush_deferred_deletes, QThreadHandle [PENDING] (после 0.2)
+- Task 0.4: qt_lifetime — attach_qt, flush_deferred_deletes, QThreadHandle [DONE 2026-10-05 — 41fc28c29] (после 0.2)
 - Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [PENDING] (после 0.3, 0.4)
 - Task 1.1: stop_budget и ChildProcessStop поверх эскалации PM [PENDING] (после 0.5)
 - Task 1.2: корень процесса с барьерами, один close в раннере, G7 [PENDING] (после 1.1)
@@ -94,6 +94,7 @@
 **Level:** Senior · **Assignee:** teamlead · **Layer:** framework
 **Goal:** `frontend_module/core/qt_lifetime.py`: `attach_qt`, `flush_deferred_deletes`, `QThreadHandle` (DESIGN §2.4).
 **Acceptance:** закрытие области с Qt-объектом из чужого потока → `destroyed` на главном, `ownedByPython == False`, обёртка мертва после flush; без цикла событий и после `exec()` — то же после `flush_deferred_deletes()`; обработчик `destroyed` не держит объект (обёртка не бессмертна — проба CTO `cto_l6_probe2`); проверка Qt-предка при освобождении пишет `qt-tree mismatch` в `errors`.
+**Итог (2026-10-05):** спек ред. 3 (ревью р1–р2, вердикт CTO — правило C без якоря), слепой тестер 10 тестов, код-ревью р1 (3 находки: abort QThread, gc под локом, flush в цикле) и р2 APPROVED; `frontend_module` 684 passed / 1 skipped; инъекции ведущего 16/16 — [`docs/reviews/2026-10-05_task-0.4-injections.md`](../../docs/reviews/2026-10-05_task-0.4-injections.md).
 
 ### Task 0.5 — стражи и база пробы
 **Level:** Middle+ · **Assignee:** developer · **Layer:** tests/scripts
