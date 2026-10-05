@@ -32,7 +32,18 @@ Usage:
 Used as git commit-msg hook (see scripts/validate_commit/install_hook.sh).
 Exit 0 — OK, exit 1 — validation failed.
 
-Skipped: merge commits (Merge ..., merge: ...), reverts, fixup!/squash!/amend!.
+Task rule (rev. 6): a `Task:` trailer, when present, must read `<slug>#<id>` (W-TASK-FORMAT); it is never required.
+One-block rule (rev. 6): every known trailer must be seen by `git interpret-trailers --parse`, i.e. all trailers
+sit in ONE block at the end (W-TRAILERS-SPLIT); if git cannot be asked, W-TRAILERS-UNCHECKED (a plain warning).
+
+Skipped: reverts, fixup!/squash!/amend!. Merge commits are validated (v2): `merge: <gist>` with
+Why/Layer/Refs. ANY first line that starts with `Merge ` (capital M: branch, remote-tracking, pull
+request, tag, commit, ...) is git's default text and only a warning.
+
+v2 mode (plans/2026-10-03_commit-mechanism, Task 2.1): the module constant STRICT picks what the
+phase-3 rules do. Off: they land in `warnings` (stderr, rc 0) with the suffix
+' (error from phase 3)'. On: they land in `errors` (rc 1). Task 3.1 flips the constant;
+there is no environment switch on purpose.
 """
 
 from __future__ import annotations
@@ -57,6 +68,7 @@ ALLOWED_TYPES = {
     "ci",
     "style",
     "revert",
+    "merge",
 }
 
 # Generic defaults. Override by writing layers (one per line) to
@@ -150,7 +162,7 @@ PLAN_REFS_LOG_LIMIT = 200
 ALLOWED_RISK = {"low", "medium", "high"}
 ALLOWED_REVERSIBLE = {"yes", "no", "migration-needed"}
 
-SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_\-/,\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$")
+SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9_./,\-\s]+)\))?(?P<breaking>!)?: (?P<subject>.+)$")
 TRAILER_RE = re.compile(r"^([A-Z][A-Za-z\-]*): (.+)$")
 
 # `Tested:` grammar enforced ONLY while the tests-discipline gate fires (see
@@ -223,9 +235,84 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
     "Co-Authored-By",
     "Signed-off-by",
     "Reviewed-by",
+    "Task",
 }
 
-SKIP_PREFIXES = ("Merge ", "merge: ", "Revert ", "fixup!", "squash!", "amend!")
+# `Task:` value (rev. 6): `<slug>#<id>` - plan slug without the date, `#`, task id (`2.1`, `1.3a`, `K1.1`).
+# One id per line; several tasks mean several `Task:` lines. Existence of slug/id is NOT checked here.
+TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#[A-Z]{0,3}\d+(?:\.\d+)*[a-z]?$", re.ASCII)
+GIT_TRAILERS_TIMEOUT = 5
+
+# `Merge ` and `merge: ` are NOT here any more (v2): merges are validated, see MERGE_DEFAULT_RE.
+SKIP_PREFIXES = ("Revert ", "fixup!", "squash!", "amend!")
+
+# v2 mode switch (Task 2.1). Edit the value, never read it from the environment.
+STRICT = False
+
+# What git itself writes into MERGE_MSG: ANY first line that starts with "Merge " (branch, remote-tracking,
+# pull request, tag, commit, ...). v1 skipped them all, so phase 2 must not refuse any of them.
+MERGE_DEFAULT_RE = re.compile(r"^Merge ")
+PHASE3_SUFFIX = " (error from phase 3)"
+SUBJECT_WARN_LEN = 72
+SUBJECT_LONG_LEN = 100
+PLANS_QUEUE_PREFIX = "plans/queue/"
+
+
+def _phase3(result: "ValidationResult", message: str) -> None:
+    """A rule that becomes an error in phase 3: a warning now, an error when STRICT is on."""
+    if STRICT:
+        result.errors.append(message)
+    else:
+        result.warnings.append(message + PHASE3_SUFFIX)
+
+
+def _plan_ref_problem(repo_root: Path | None, ref: str) -> str | None:
+    """Why `ref` (a `plans/....md` path taken from a Refs value) is not an existing plan; None when it is.
+
+    The file is looked up under `repo_root` - the root of the worktree the commit is made in, so a
+    plan that exists only in another worktree does not count. `plans/queue/` and `*.result.md` are
+    files under the plans directory that are not plans.
+    """
+    if any(segment in ("..", ".") for segment in ref.split("/")):
+        return f"{ref}: '..' or '.' segment in the path"
+    if ref.startswith(PLANS_QUEUE_PREFIX):
+        return f"{ref}: plans/queue/ holds queued items, not plans"
+    if ".result" in ref.rsplit("/", 1)[-1]:
+        return f"{ref}: a .result file is a task report, not a plan"
+    if repo_root is None or not (repo_root / ref).is_file():
+        return f"{ref}: no such file in the working tree"
+    return None
+
+
+def _refs_problem(repo_root: Path | None, plan_path: str, refs: list[str]) -> tuple[bool, str] | None:
+    """None when some `Refs:` value names an existing plan (any plan will do).
+
+    Otherwise `(hard, text)`. `hard` is True for what v1 already refused: no `Refs:` at all, or no value
+    holds a `plans/....md` path. It is False when paths exist but none is a plan (queue, .result, no such
+    file, '..' or '.' segment): that is a phase-3 rule, see W-REFS-INVALID.
+    """
+    if not refs:
+        return True, (
+            f"Branch has a plan ({plan_path}) but commit is missing matching "
+            f"`Refs:` trailer.\n"
+            f"  Add: Refs: {plan_path}\n"
+            f"  (any existing plan file is accepted)"
+        )
+    problems: list[str] = []
+    for value in refs:
+        for ref in PLAN_PATH_RE.findall(value):
+            problem = _plan_ref_problem(repo_root, ref)
+            if problem is None:
+                return None
+            problems.append(problem)
+    if not problems:
+        return True, (
+            f"Branch has a plan ({plan_path}) but no `Refs:` value contains a plans/....md path.\n"
+            f"  Add: Refs: {plan_path}"
+        )
+    return False, (
+        f"Refs names no existing plan (branch plan: {plan_path}) - {'; '.join(problems)}. Add: Refs: {plan_path}"
+    )
 
 
 # ────────────────────────── Structures ──────────────────────────
@@ -854,6 +941,37 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
 # ────────────────────────── Validation ──────────────────────────
 
 
+def _git_trailer_keys(text: str) -> tuple[set[str] | None, str]:
+    """Trailer keys that `git interpret-trailers --parse` sees in `text`: `(keys, "")`, or `(None, reason)`.
+
+    git is the oracle for "one trailer block": it ignores a trailer paragraph that is not the last one and
+    a block that holds a non-trailer line. The text goes to git as it is: git skips `#` comment lines itself
+    and cuts at the `# --- >8 ---` scissors line of `git commit -v`; `--no-divider` stops a `---` line in the
+    body from being read as a patch divider. Line endings go to LF, so CRLF text is read as git would read it;
+    non-UTF-8 bytes (surrogates from a lossless decode) go through `surrogateescape`. Never raises: a git
+    that cannot be started (any OSError), a timeout and a non-zero exit all come back as `(None, reason)` -
+    the caller reports "cannot check", and must not read an empty answer as "git sees no trailers".
+    """
+    # Только LF и CRLF — граница строки, как у git; str.splitlines() режет ещё по FF, NEL, LS (ревью S3).
+    stdin = (text.replace("\r\n", "\n").rstrip("\n") + "\n").encode("utf-8", "surrogateescape")
+    try:
+        out = subprocess.run(
+            ["git", "interpret-trailers", "--parse", "--no-divider"],
+            input=stdin,
+            capture_output=True,
+            timeout=GIT_TRAILERS_TIMEOUT,
+            check=False,
+        )
+    except OSError as exc:  # FileNotFoundError, PermissionError, ...
+        return None, f"git cannot be started: {exc}"
+    except subprocess.TimeoutExpired:
+        return None, f"git interpret-trailers timed out after {GIT_TRAILERS_TIMEOUT}s"
+    if out.returncode != 0:
+        return None, f"git interpret-trailers exited with {out.returncode}"
+    answer = out.stdout.decode("utf-8", errors="replace")
+    return {ln.split(":", 1)[0].strip() for ln in answer.splitlines() if ":" in ln}, ""
+
+
 def validate(
     text: str,
     allowed_layers: set[str] | None = None,
@@ -868,11 +986,17 @@ def validate(
 
     first_line = text.splitlines()[0]
     if any(first_line.startswith(p) for p in SKIP_PREFIXES):
-        return result  # merge/revert/fixup — skip validation
+        return result  # revert/fixup/squash/amend — skip validation
+
+    if MERGE_DEFAULT_RE.match(first_line):
+        # The text git writes on its own: not Conventional Commits, no room for trailers.
+        _phase3(result, "default git merge text - write `merge: <gist>` with Why/Layer/Refs trailers")
+        return result
 
     layers = allowed_layers if allowed_layers is not None else load_allowed_layers()
     layer_required = bool(layers)
-    required = REQUIRED_BASE_TRAILERS | ({"Layer"} if layer_required else set())
+    # Only Why is a hard requirement; Layer and Refs are phase-3 rules (see "2b" below).
+    required = set(REQUIRED_BASE_TRAILERS)
 
     # Resolve plan for current branch (if not explicitly provided).
     if plan_path is ...:
@@ -920,10 +1044,44 @@ def validate(
     if t not in ALLOWED_TYPES:
         result.errors.append(f"Unknown type '{t}'. Allowed: {sorted(ALLOWED_TYPES)}")
 
+    is_merge = t == "merge"
+    if is_merge:
+        required = set()  # a merge's trailers are phase-3 warnings, see "2b"
+        if m.group("scope"):
+            result.errors.append("Type 'merge' takes no scope: write `merge: <gist>`")
+
+    # A long first line is advice, never a refusal in any mode (owner's decision).
+    if len(subject) > SUBJECT_LONG_LEN:
+        result.warnings.append(f"subject longer than {SUBJECT_LONG_LEN} characters ({len(subject)})")
+    elif len(subject) > SUBJECT_WARN_LEN:
+        result.warnings.append(f"subject longer than {SUBJECT_WARN_LEN} characters ({len(subject)})")
+
     # 2. Blank line between subject and body
     full_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
     if len(full_lines) >= 2 and full_lines[1].strip():
         result.errors.append("Missing blank line between subject and body")
+
+    # 2b. Phase-3 trailer rules: a warning while STRICT is off, an error once it is on.
+    unknown_layers: set[str] = set()
+    if layer_required:
+        for val in trailers.get("Layer", []):
+            unknown_layers |= {x.strip() for x in val.split(",") if x.strip()} - layers
+    layer_missing = layer_required and "Layer" not in trailers
+    if is_merge:
+        # One warning for any of the three. Refs counts only when the branch resolves to a plan, as for a
+        # plain commit (rule 6).
+        refs_missing = bool(plan_path) and "Refs" not in trailers
+        if "Why" not in trailers or layer_missing or unknown_layers or refs_missing:
+            _phase3(result, "merge commit without Why/Layer/Refs - a merge needs all three trailers")
+    else:
+        if layer_missing:
+            _phase3(result, f"Layer missing - add `Layer: <one of {sorted(layers)}>`")
+        if unknown_layers:
+            _phase3(
+                result,
+                f"Layer not in list: {sorted(unknown_layers)}. "
+                f"Allowed: {sorted(layers)} (configure via {LAYERS_CONFIG_REL})",
+            )
 
     # 3. Required trailers
     missing = required - set(trailers.keys())
@@ -935,17 +1093,7 @@ def validate(
             f"Missing required trailers: {sorted(missing)}.\n  Add at end of message (after blank line):\n{hint}"
         )
 
-    # 4. Trailer value validation
-    if "Layer" in trailers and layer_required:
-        for val in trailers["Layer"]:
-            given = {x.strip() for x in val.split(",") if x.strip()}
-            unknown = given - layers
-            if unknown:
-                result.errors.append(
-                    f"Layer: unknown values {sorted(unknown)}. Allowed: {sorted(layers)}\n"
-                    f"  (configure via {LAYERS_CONFIG_REL})"
-                )
-
+    # 4. Trailer value validation (Layer values: see 2b)
     if "Risk" in trailers:
         for val in trailers["Risk"]:
             level = val.split("—")[0].split("-")[0].strip().lower()
@@ -958,6 +1106,24 @@ def validate(
             if level not in ALLOWED_REVERSIBLE:
                 result.warnings.append(f"Reversible: '{val}'. Expected: yes | no | migration-needed")
 
+    # 4b. `Task:` format and the one-block rule (rev. 6). Both are phase-3 rules; the check that git could
+    # not be asked is a plain warning in every mode.
+    for value in trailers.get("Task", []):
+        if not TASK_VALUE_RE.fullmatch(value.strip()):
+            _phase3(result, f"Task is not <slug>#<id>: '{value}' - e.g. commit-mechanism#2.1")
+
+    known = {key for key in trailers if key in KNOWN_TRAILERS}
+    if known:  # no known trailer, nothing to ask git about
+        seen, reason = _git_trailer_keys(text)
+        if seen is None:
+            result.warnings.append(f"cannot check trailer block: {reason}")
+        elif known - seen:
+            _phase3(
+                result,
+                f"trailers git does not see: {', '.join(sorted(known - seen))} - put all trailers in one "
+                "block at the end, no blank line inside, indent wrapped values",
+            )
+
     # 5. Unknown trailers — warning (don't block, extensible)
     for key in trailers:
         if key not in KNOWN_TRAILERS:
@@ -969,18 +1135,20 @@ def validate(
                 result.warnings.append(f"Why: too brief ('{val}'). Describe motivation in at least one phrase")
 
     # 6. Plan-driven workflow: if branch has a plan, require matching Refs trailer.
+    # v2: ANY existing plan file satisfies it (not only the branch's own); a merge with no Refs at
+    # all is reported by the merge warning in 2b instead.
+    # A plain commit keeps v1's refusal when Refs is absent or holds no plan path; every other Refs
+    # problem, and every Refs problem of a merge, is a phase-3 rule (W-REFS-INVALID).
     if plan_path:
         refs = trailers.get("Refs", [])
-        # Plan path without extension: `plans/<slug>` (works for both
-        # `plans/<slug>.md` and `plans/<slug>/plan.md` / `phase-N.md`).
-        plan_prefix = plan_path.rsplit("/plan.md", 1)[0].rsplit(".md", 1)[0]
-        if not any(plan_prefix in val for val in refs):
-            result.errors.append(
-                f"Branch has a plan ({plan_path}) but commit is missing matching "
-                f"`Refs:` trailer.\n"
-                f"  Add: Refs: {plan_path}\n"
-                f"  (or for multi-phase plans, ref the specific phase file)"
-            )
+        if refs or not is_merge:
+            found = _refs_problem(find_repo_root(), plan_path, refs)
+            if found is not None:
+                hard, text = found
+                if hard and not is_merge:
+                    result.errors.append(text)
+                else:
+                    _phase3(result, text)
 
     # 7. Tests-discipline gate (Task 6.2): fires only when a staged path
     # matches tests_gate_code minus tests_gate_exclude. When it fires, the
@@ -988,7 +1156,7 @@ def validate(
     # trailer matching `tests/<path>` | `skip (<reason>)`. Degrades silently
     # (never fires) if staged paths can't be determined — see staged_files().
     gate_cfg = load_tests_gate_config()
-    if gate_cfg.enabled:
+    if gate_cfg.enabled and not is_merge:  # the merged branch's own commits were gated already
         gate_repo_root = find_repo_root()
         staged = staged_files(gate_repo_root) if gate_repo_root else None
         if staged:
