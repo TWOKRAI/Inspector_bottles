@@ -57,8 +57,11 @@ class ProcessSpawner:
         orchestrator_class_path: str = PROCESS_MANAGER_CLASS_PATH,
         orchestrator_config: Optional[Dict[str, Any]] = None,
     ) -> None:
-        self._processes_config = processes_config or {}
         self._platform = platform_adapter or get_platform_adapter()
+        # ПЕРВЫМ: ``Event()`` ниже фиксирует метод запуска по умолчанию (на Linux — fork) раньше,
+        # чем ``launch_orchestrator`` выставил бы spawn. Вызов там остаётся — идемпотентен (Атлас 0.8b).
+        self._platform.setup_multiprocessing()
+        self._processes_config = processes_config or {}
         self._stop_event = Event()
         self._process: Optional[Process] = None
         self._shared_resources: Optional[SharedResourcesManager] = None

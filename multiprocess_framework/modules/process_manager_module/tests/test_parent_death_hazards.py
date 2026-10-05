@@ -276,6 +276,8 @@ class SlowInitChild:
 
 _SLOW_HOST_CODE = f"""
 import json, time
+from multiprocess_framework.modules.process_manager_module.platforms import get_platform_adapter
+get_platform_adapter().setup_multiprocessing()
 from multiprocess_framework.modules.process_manager_module.core.process_registry import ProcessRegistry
 reg = ProcessRegistry(logger=None)
 p = reg.create_and_register("slow", {SLOW_INIT_CHILD_CLASS_PATH!r}, {{}}, "normal")
