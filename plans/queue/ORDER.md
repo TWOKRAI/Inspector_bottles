@@ -255,6 +255,7 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | [qr-code-reader](../qr-code-reader.md) | — | Шаг 0 (ingest мануалов) DONE; правка по документам закрыта. Вне полос §2 — новое железо | Ф0 на стенде: IDMVS → ModBus Mode, три Space/Offset/Size, версия прошивки |
 | [2026-10-02_plans-progress-dashboard](../2026-10-02_plans-progress-dashboard/plan.md) | М | ACTIVE; Фазы 1–2, 3.1, 3.2, 3.5, 3.6, 5.1, 5.2 в `main` (`01656f382`); 5.3 — спека в `docs/task-5-3-spec` | 5.3 → 5.5 → 5.6 → 3.3, 3.4, 5.4 |
 | [2026-10-03_commit-mechanism](../2026-10-03_commit-mechanism/plan.md) | М | IN PROGRESS; фазы 1–2 в `main` (`30f8335c9`, 10-05) | 3.2 замер до 10-12; 3.1 — решение владельца |
+| [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | М | IN PROGRESS; Ф0: 0.1–0.4, 0.6 и 0.2 (CI-гейт коммитов, `8f8dca963`, 10-05) в `main`; 2.4b/c/e в `main` | 0.8 CI зелёный → P1.1 облачный пилот; 2.4g → 2.4h → 2.4i |
 
 ### 4.2 Ждут триггера — не трогать до условия
 
