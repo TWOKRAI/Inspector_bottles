@@ -25,6 +25,17 @@
 #
 # Exit code ALWAYS 0 - never blocks work.
 
+# Cheap cut before ANY Python launch (Task 1.5): the hook fires on every Edit/Write, and
+# both python-bin.sh (`python3 -c "import sys"`) and the payload parser start Python -
+# ~280 ms on a .md edit. A .py path in the JSON payload always ends in `.py"`; a payload
+# without that substring cannot name a .py file. A false pass (`.py"` elsewhere in the
+# payload) is harmless: the full check below still runs.
+INPUT="$(cat)"
+case "$INPUT" in
+    *'.py"'*) ;;
+    *) exit 0 ;;
+esac
+
 # Resolve python-bin.sh across both template layouts (kept byte-identical by
 # mirror_template.py): the plugin tree co-locates _lib/ next to the hook; the
 # legacy horizontal tree keeps _lib/ one level up (sibling of the category dir).
@@ -84,7 +95,7 @@ if rel.startswith(('robot/', 'docs/claude/frozen/')):
 sys.stdout.write(path)
 PYEOF
 
-FILE="$(printf '%s' "$(cat)" | PROJECT="$PROJECT" PYTHONIOENCODING=utf-8 $PY -c "$PARSE_PY" 2>/dev/null | tr -d '\r')"
+FILE="$(printf '%s' "$INPUT" | PROJECT="$PROJECT" PYTHONIOENCODING=utf-8 $PY -c "$PARSE_PY" 2>/dev/null | tr -d '\r')"
 [ -n "$FILE" ] || exit 0
 
 # --- 2. find ruff: repo venv (also from a worktree) > project venv > PATH --------------------
