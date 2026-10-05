@@ -2079,7 +2079,8 @@ def find_overlaps(root: Path, plans: list[Plan], branch_pass: BranchPass | None)
 # ----------------------------------------------------------------------------- JSON
 
 
-def to_json(plans: list[Plan]) -> str:
+def to_json(plans: list[Plan], anchors: dict[int, str] | None = None) -> str:
+    """Список планов в JSON; `anchors` (из `assign_anchors`) -> ключ `anchor` последним в объекте каждого плана."""
     data = [
         {
             "plan": p.name,
@@ -2115,33 +2116,58 @@ def to_json(plans: list[Plan]) -> str:
         }
         for p in plans
     ]
+    if anchors is not None:
+        for rec, p in zip(data, plans, strict=True):
+            rec["anchor"] = anchors[id(p)]
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 # ----------------------------------------------------------------------------- HTML
 
 CSS = """
-:root{--bg:#fafafa;--fg:#1d2024;--muted:#5d6670;--card:#fff;--line:#d9dde2;--accent:#2f6fdb;
+:root{--bg:#f6f7f9;--fg:#1d2024;--muted:#5d6670;--card:#fff;--line:#d9dde2;--accent:#2f6fdb;--on:#fff;
 --done:#2e9d56;--pending:#c3c9d1;--in_progress:#e0a21a;--blocked:#d6453d;--deferred:#8d96a3;
 --superseded:#b9a6c9;--unknown:#e68a00}
 @media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e4e7ea;--muted:#98a2ad;--card:#1d2126;
---line:#323841;--accent:#6ea0ff;--done:#43b56c;--pending:#4a525d;--in_progress:#e6b13a;
+--line:#323841;--accent:#6ea0ff;--on:#0b1220;--done:#43b56c;--pending:#4a525d;--in_progress:#e6b13a;
 --blocked:#e5645c;--deferred:#76808d;--superseded:#8d7ba0;--unknown:#f0a030}}
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);
 font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:1000px;margin:0 auto}
-h1{font-size:1.4rem;margin:0 0 4px}
-.meta{color:var(--muted);font-size:.85rem;margin-bottom:16px}
+main{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+main>*{flex:1 1 100%;min-width:0}
+header.topbar{display:contents}
+h1{order:-5;flex:1 1 auto;font-size:1.4rem;margin:0}
+.switcher{order:-4;flex:0 0 auto;position:relative}
+a.back{order:-4;flex:0 0 auto;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
+background:var(--card);color:var(--accent);text-decoration:none;font-size:.85rem}
+.meta{order:-3;flex:0 1 auto;color:var(--muted);font-size:.8rem}
+nav.tabs{order:-2;position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0;
+background:var(--bg);border-bottom:1px solid var(--line)}
+nav.tabs input{position:absolute;opacity:0;pointer-events:none}
+nav.tabs label{flex:none;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
+background:var(--card);color:var(--muted);font-size:.85rem;cursor:pointer;user-select:none}
+nav.tabs input:checked+label{background:var(--accent);border-color:var(--accent);color:var(--on)}
+nav.tabs input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+.switcher>summary{display:block;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
+background:var(--card);font-size:.85rem}
+.switcher::details-content{position:absolute;right:0;top:100%;z-index:6;width:min(440px,calc(100vw - 32px));
+max-height:70vh;overflow:auto;margin-top:4px;padding:6px 12px;background:var(--card);
+border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px #0004}
+.sw-group{display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin:6px 0}
+.sw-group b{grid-column:1/-1;font-size:.75rem;color:var(--muted)}
+.sw-group a{color:var(--accent);text-decoration:none;overflow-wrap:anywhere}
+.sw-group small{color:var(--muted);font-variant-numeric:tabular-nums}
 .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:16px}
-.lane{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.lane{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 .lane b{display:block;margin-bottom:2px}
-details.plan,details#archive,details#waiting{background:var(--card);border:1px solid var(--line);border-radius:8px;
+details.plan,details#archive,details#waiting{background:var(--card);border:1px solid var(--line);border-radius:10px;
 margin-bottom:8px;padding:0 12px}
 details#archive>details.plan,details#waiting>details.plan{margin:8px 0}
 h2{font-size:1.05rem;margin:16px 0 8px}
 summary{cursor:pointer;padding:9px 0;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
-summary .name{font-weight:600}
+summary .name{font-weight:600;overflow-wrap:anywhere}
+.plan-link{color:var(--accent);text-decoration:none}
 .badge{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 7px}
 progress{width:140px;height:10px;accent-color:var(--accent)}
 .tally{font-variant-numeric:tabular-nums;font-size:.85rem}
@@ -2156,6 +2182,7 @@ text-align:center;color:#fff;background:var(--pending)}
 .cell[data-status="deferred"]{background:var(--deferred)}
 .cell[data-status="superseded"]{background:var(--superseded)}
 .cell[data-status="unknown"]{background:var(--unknown)}
+details.tasklist>summary{display:block;padding:2px 0;color:var(--muted);font-size:.82rem}
 ul.tasks{margin:0;padding-left:0;list-style:none;font-size:.88rem}
 ul.tasks li{padding:2px 0;border-top:1px solid var(--line)}
 .st{display:inline-block;min-width:92px;color:var(--muted);font-size:.78rem}
@@ -2165,6 +2192,18 @@ code{font-size:.8rem;color:var(--muted)}
 border-radius:10px;padding:0 7px}
 .chip.ok{color:var(--done);border-color:var(--done)}
 .cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
+main:has(#tab-queue:checked)>:not(header,#queue),main:has(#tab-waiting:checked)>:not(header,#waiting),
+main:has(#tab-unlisted:checked)>:not(header,#unlisted),main:has(#tab-archive:checked)>:not(header,#archive),
+main:has(#tab-who:checked)>:not(header,#who),main:has(#tab-overlaps:checked)>:not(header,#overlaps),
+main:has(#tab-priority:checked)>:not(header,#priority),main:has(#tab-lanes:checked)>:not(header,.lanes){display:none}
+main:has(#tab-waiting:checked)>#waiting::details-content,main:has(#tab-archive:checked)>#archive::details-content{
+content-visibility:visible}
+main:not(:has(.anchor:target)) a.back,main:has(.anchor:target) nav.tabs{display:none}
+main:has(.anchor:target)>:not(header,:has(.anchor:target)){display:none!important}
+main:has(.anchor:target)>:has(.anchor:target){display:block!important;border:0;background:none;padding:0}
+main:has(.anchor:target) :is(#queue,#waiting,#unlisted,#archive)>:not(:has(.anchor:target)){display:none}
+main:has(.anchor:target) details:has(.anchor:target)::details-content,
+details.plan:has(>.anchor:target) .tasklist::details-content{content-visibility:visible}
 """
 
 STATUS_RU = {
@@ -2331,11 +2370,80 @@ def _priority_html(date: str, rows: list[SnapRow]) -> list[str]:
     return parts
 
 
-def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0) -> str:
+def card_groups(live: list[Plan], archive: list[Plan]) -> tuple[list[Plan], list[Plan], list[Plan], list[Plan]]:
+    """Карточки страницы по секциям: (очередь §4.1 по приоритету, ждут §4.2, вне ORDER, закрытые §4.3 + архив).
+
+    Единственное место порядка карточек: его берут и `to_html`, и `--json` (через `card_order`).
+    Очередь: сначала планы с приоритетом по возрастанию `#`, затем остальные в прежнем порядке.
+    """
+    queue, waiting, unlisted, closed = queue_scope(live)
+    queue_view = sorted(queue, key=lambda p: (p.priority is None, p.priority or 0))
+    return queue_view, waiting, unlisted, closed + archive
+
+
+def card_order(live: list[Plan], archive: list[Plan]) -> list[Plan]:
+    """Все карточки в том порядке, в каком `to_html` их печатает (живые выше архивных)."""
+    return [p for group in card_groups(live, archive) for p in group]
+
+
+def assign_anchors(cards: list[Plan]) -> dict[int, str]:
+    """Якорь карточки `plan-<slug>` по `id(plan)`; `cards` — в порядке страницы (`card_order`).
+
+    slug — имя плана, символы вне `[A-Za-z0-9_-]` -> `-`. Имя занято карточкой выше: у архивного плана
+    `plan-<slug>-archive`; если и оно занято, или план живой — первый свободный `plan-<slug>-2`, `-3`, …
+    """
+    taken: set[str] = set()
+    out: dict[int, str] = {}
+    for p in cards:
+        base = "plan-" + re.sub(r"[^A-Za-z0-9_-]", "-", p.name)
+        options = [base, f"{base}-archive"] if p.archived else [base]
+        anchor = next((o for o in options if o not in taken), None)
+        n = 2
+        while anchor is None:
+            if f"{base}-{n}" not in taken:
+                anchor = f"{base}-{n}"
+            n += 1
+        taken.add(anchor)
+        out[id(p)] = anchor
+    return out
+
+
+def _switcher_html(groups: list[tuple[str, list[Plan]]], anchors: dict[int, str]) -> list[str]:
+    """`details.switcher`: по группе на секцию (пустых нет), в группе пара `<a>` + `<small>` на карточку."""
+    parts = ['<details class="switcher">', "<summary>Планы ▾</summary>"]
+    for title, plans in groups:
+        if not plans:
+            continue
+        items = [f"<b>{_e(title)}</b>"]
+        items += [
+            f'<a href="#{anchors[id(p)]}">{_e(p.name)}</a> <small>{_e(_tally(p.done, p.total))}</small>' for p in plans
+        ]
+        parts.append(f'<div class="sw-group">{" ".join(items)}</div>')
+    parts.append("</details>")
+    return parts
+
+
+def _tabs_html(tabs: list[tuple[str, str, int]]) -> list[str]:
+    """`nav.tabs`: радиокнопка + метка `Название · N` на вкладку; отмечена только `queue`."""
+    parts = ['<nav class="tabs">']
+    for key, label, n in tabs:
+        checked = " checked" if key == "queue" else ""
+        parts.append(
+            f'<input type="radio" name="tab" id="tab-{key}"{checked}><label for="tab-{key}">{_e(label)} · {n}</label>'
+        )
+    parts.append("</nav>")
+    return parts
+
+
+def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0, anchor: str | None = None) -> str:
+    """Карточка плана. `anchor` (из `assign_anchors`): ссылка `↗` после имени и пустой `span.anchor` после `</summary>`;
+    без него (прямой вызов в тестах) ни ссылки, ни якоря."""
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
     if startable(p, in_use):
         attrs += ' data-ready="true"'
     s = [f"<details {attrs}>", "<summary>", f'<span class="name">{_e(p.name)}</span>']
+    if anchor:
+        s.append(f'<a class="plan-link" href="#{anchor}" title="страница плана">↗</a>')
     if p.priority is not None:
         s.append(f'<span class="chip" data-chip="priority" data-priority="{p.priority}">#{p.priority}</span>')
     if p.lane:
@@ -2380,6 +2488,8 @@ def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0) -> str:
         s.append(_overlap_chip(overlap_branches))  # после чипов веток, перед «в работе»
     s.extend(_active_chip(e) for e in p.active)  # после всех прочих чипов; закрытым и архивным тоже
     s.append("</summary>")
+    if anchor:
+        s.append(f'<span class="anchor" id="{anchor}"></span>')
     s.append('<div class="body">')
     if p.priority_row is not None:
         row = p.priority_row
@@ -2396,6 +2506,7 @@ def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0) -> str:
             mark = ' data-unmarked="1"' if t.unmarked else ""
             s.append(f'<span class="cell" data-status="{t.status}"{mark} title="{_e(tip)}">{_e(t.id)}</span>')
         s.append("</div>")
+        s.append(f'<details class="tasklist"><summary>Задачи · {len(p.tasks)}</summary>')
         s.append('<ul class="tasks">')
         for t in p.tasks:
             ref = f" <code>{_e(t.ref)}</code>" if t.ref else ""
@@ -2404,6 +2515,7 @@ def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0) -> str:
                 f"<b>{_e(t.id)}</b> {_e(t.title)}{ref}</li>"
             )
         s.append("</ul>")
+        s.append("</details>")
     s.append("</div>")
     s.append("</details>")
     return "\n".join(s)
@@ -2445,10 +2557,11 @@ def to_html(
     for o in overlaps:
         overlap_names.setdefault(o.plan_rel, set()).update(o.branches)
 
-    queue, waiting, unlisted, closed = queue_scope(live)
-    shelved = closed + archive
+    queue_view, waiting, unlisted, shelved = card_groups(live, archive)
+    anchors = assign_anchors(card_order(live, archive))
     lanes: dict[str, list[int]] = {}
-    for p in queue + waiting + unlisted:
+    # полосы: прежний порядок очереди, без перестановки по приоритету
+    for p in queue_scope(live)[0] + waiting + unlisted:
         agg = lanes.setdefault(p.lane or "—", [0, 0, 0])
         agg[0] += p.done
         agg[1] += p.total
@@ -2456,11 +2569,20 @@ def to_html(
     in_use = deps_in_use(live + archive)
 
     def card(p: Plan) -> str:
-        return _plan_html(p, in_use, len(overlap_names.get(p.rel, ())))
+        return _plan_html(p, in_use, len(overlap_names.get(p.rel, ())), anchors[id(p)])
 
-    # очередь на странице: сначала планы с приоритетом по возрастанию `#`, затем остальные в прежнем порядке
-    queue_view = sorted(queue, key=lambda p: (p.priority is None, p.priority or 0))
     ready_text = ready_summary(queue_view, in_use)
+    active = [(p.name, e) for p in live + archive for e in p.active]
+    tabs = [("queue", "Очередь", len(queue_view)), ("waiting", "Ждут", len(waiting))]
+    if unlisted:
+        tabs.append(("unlisted", "Нет в ORDER", len(unlisted)))
+    tabs += [("archive", "Архив", len(shelved)), ("who", "Кто где", len(active) + len(orphans))]
+    if overlaps:
+        tabs.append(("overlaps", "⚠ Пересечения", len(overlaps)))
+    if snapshot_rows:
+        tabs.append(("priority", "Приоритеты", len(snapshot_rows)))
+    tabs.append(("lanes", "Полосы", len(lanes)))
+    switcher = [("Очередь", queue_view), ("Ждут", waiting), ("Нет в ORDER", unlisted), ("Архив", shelved)]
     built = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M UTC%z")
     parts = [
         "<!doctype html>",
@@ -2468,11 +2590,16 @@ def to_html(
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         "<title>Прогресс планов</title>",
         f"<style>{CSS}</style></head><body><main>",
+        '<header class="topbar">',
         "<h1>Прогресс планов</h1>",
         f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))}</div>',
-        f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
+        f'<div class="meta">в очереди {len(queue_view)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
         f"закрыто и в архиве {len(shelved)}</div>",
         f'<div class="meta" id="ready">можно начинать: {ready_text}</div>',
+        *_switcher_html(switcher, anchors),
+        '<a class="back" href="#">← все планы</a>',
+        *_tabs_html(tabs),
+        "</header>",
         *_priority_html(snapshot_date, list(snapshot_rows)),
         '<section class="lanes">',
     ]
@@ -2483,7 +2610,7 @@ def to_html(
             f'<span class="tally">{_e(_tally(done, total))}</span></div>'
         )
     parts.append("</section>")
-    parts.extend(_who_html([(p.name, e) for p in live + archive for e in p.active], list(orphans), window_text))
+    parts.extend(_who_html(active, list(orphans), window_text))
     parts.extend(_overlaps_html(list(overlaps)))
     parts.append('<section id="queue">')
     parts.extend(card(p) for p in queue_view)
@@ -2612,7 +2739,7 @@ def main(argv: list[str] | None = None) -> int:
         if code:
             return code
     if args.json:
-        print(to_json(ordered))
+        print(to_json(ordered, assign_anchors(card_order(live, archive))))
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
