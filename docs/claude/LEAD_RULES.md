@@ -158,7 +158,7 @@ the mirror, or run the materializer).
    and what I know is unreliable in my own work"; questions that outlive the task go to
    [`docs/claude/OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md).
 
-Language of agent files: English end to end. Commands, guides and reports: Russian.
+Language of agent files: English end to end. Commands and skills: English too (owner, 2026-10-05). Guides and reports for the owner: Russian.
 
 `claude-kit upgrade --apply` silently overwrites `.claude/`: keep valuable text only in preserved places
 (`.claude/CLAUDE.md`, `modes/_stack.md`, `settings.local.json`, `commit-layers.txt`, everything outside `.claude/`), and `diff` before an upgrade.
