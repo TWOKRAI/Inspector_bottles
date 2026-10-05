@@ -4,6 +4,7 @@ description: Planning manager. Receives a phase from Director, decomposes it int
 model: opus
 omitClaudeMd: true
 skills: project-rules, team-protocol
+disallowedTools: mcp__backend-ctl, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__graphify, mcp__qt-mcp, mcp__serena
 memory: project
 ---
 

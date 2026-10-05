@@ -27,7 +27,7 @@
 
 - **Validator:** [x] enabled (`.git/hooks/commit-msg`)
 - **Required trailers:** `Why:` **и** `Layer:` — оба обязательны (seed по умолчанию считает
-  `Layer:` выключённым; здесь это неверно, хук отклонит коммит)
+  `Layer:` выключённым; здесь это неверно: сейчас (фаза 2) — предупреждение, отказ — со строгого режима (Task 3.1))
 - **Layer values:** framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
 - **Refs:** обязателен, если задача из плана — `Refs: plans/<slug>.md`
 
@@ -43,12 +43,9 @@
 - **Specs root:** `docs/direction/` — живые спеки продукта
 - **Branch:** `<type>/<slug>`, стандарт `feat/`, не `feature/`
 
-## MCP — фактическое состояние (сверено с `.claude/enabled.yaml`)
+## MCP — фактическое состояние
 
-Включены: **qex** (семантический поиск), **sentrux** (DSM/метрики), **serena** (LSP-символы),
-**context7** (доки библиотек), **graphify** (граф кода), **qt-mcp** (инспекция PySide6),
-**ast-grep** (структурный поиск), **codegraph**, **backend-ctl** (живой бэкенд),
-**github**, **sequential-thinking**, **sentry**.
+Серверы по ролям — `docs/claude/LEAD_RULES.md` → «MCP routing» (замер 2026-10-05).
 Выключены: **playwright** (проект не веб), **hello-world**, **knowledge**.
 
 Схемы MCP-инструментов отложены (ToolSearch) — держать сервер включённым дёшево.

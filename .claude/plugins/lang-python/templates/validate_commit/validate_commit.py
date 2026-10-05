@@ -242,9 +242,13 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
     "Task",
 }
 
-# `Task:` value (rev. 6): `<slug>#<id>` - plan slug without the date, `#`, task id (`2.1`, `1.3a`, `K1.1`).
+# `Task:` value (rev. 7): `<slug>#<id>` - plan slug without the date, `#`, task id (`2.1`, `1.3a`, `K1.1`,
+# `1b.2d`, `1b.2b-pre`, `T2-k`, `1.2.3`). The id grammar is TASK_ID_PATTERN: one string shared by five carriers
+# (this module, its seed copy, plans_progress.ID_PATTERN, two plans_ledger._TASK_ID); each module is autonomous,
+# so the string is copied, not imported - a contract test pins all five to the same literal.
 # One id per line; several tasks mean several `Task:` lines. Existence of slug/id is NOT checked here.
-TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#[A-Z]{0,3}\d+(?:\.\d+)*[a-z]?$", re.ASCII)
+TASK_ID_PATTERN = r"[A-Z]{0,3}[0-9]{1,3}[a-z]?(?:\.[0-9]+[a-z]?)*(?:-[a-z0-9]+)*"
+TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#(?:" + TASK_ID_PATTERN + r")$", re.ASCII)
 GIT_TRAILERS_TIMEOUT = 5
 
 # `Merge ` and `merge: ` are NOT here any more (v2): merges are validated, see MERGE_DEFAULT_RE.

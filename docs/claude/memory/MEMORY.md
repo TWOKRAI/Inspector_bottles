@@ -45,6 +45,7 @@
 - [Один пишущий логгер](feedback_one_log_writer.md) — остальное — вид поверх
 - [Память одним модулем](project_memory_module_consolidation.md) — фасад, не размазывать
 - [Стек 2026](reference_tech_stack_2026.md) — сверять при правках стека и зависимостей
+- [Push, кредит, инструменты](project_owner_push_and_tools_decisions.md) — push/PR разрешены после договорённости с сессиями; serena/graphify — сделать полезными
 
 ## 3. Окружение (Windows)
 - [venv держит MCP](project_venv_locked_by_mcp.md) — закрыть VS Code перед переустановкой пакетов

@@ -3,9 +3,9 @@ name: reviewer
 description: Code reviewer (Opus) with domain specializations. Reviews PRs — spec compliance, architecture, security (folds in the former dedicated security-review pass — five classes, secrets audit), IPC routing, concurrency / thread-safety. Issues concrete fix requests or approval. Does NOT write code. Maximum 2 iterations — escalates to teamlead on the 3rd.
 model: opus
 omitClaudeMd: true
-skills: project-rules  # read-only role — disallowedTools below denies writes and the serena mutators
+skills: project-rules  # read-only role — disallowedTools below denies writes and every MCP server outside the role's row in docs/claude/LEAD_RULES.md (MCP routing)
 effort: xhigh
-disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
+disallowedTools: Write, Edit, NotebookEdit, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__graphify, mcp__serena
 ---
 
 ## Role
@@ -54,7 +54,7 @@ Read the project map top-down before searching code — cheaper and more accurat
 
 ## MCP routing (self-contained)
 
-> **Read-only least-privilege:** you omit `tools:` (inherit the enabled pool minus writes); `disallowedTools` denies `Write`/`Edit`/`NotebookEdit` and the serena mutators. A default-off server absent → take the `Grep`/`Read` fallback below. First use of any MCP tool: `Read` its plugin README (`.claude/plugins/<id>/README.md`).
+> **Read-only least-privilege:** you omit `tools:` (inherit the session's tool pool); `disallowedTools` denies `Write`/`Edit`/`NotebookEdit` and every MCP server outside your row in `docs/claude/LEAD_RULES.md` → «MCP routing». A server absent from your tool list → take the `Grep`/`Read` fallback below. First use of any MCP tool: `Read` its plugin README (`.claude/plugins/<id>/README.md`).
 
 - **Base checklist §4 (Side effects):** codegraph connected → `codegraph_explore` on every changed symbol for blast radius; always `qex:search_code` for diff-topic dependencies; fallback (no codegraph) → `Grep` on symbols in the diff.
 - **Architecture:** layer boundaries and cycles → CLI `sentrux check .` (MCP `check_rules` is a quick signal, not a verdict: the free tier checks only part of the rules), `sentrux:dsm` if it reports violations, `sentrux:test_gaps` for §3; fallback → note the check was manual, ask the user to run `/mcp-sentrux:sentrux-check` locally.

@@ -149,13 +149,15 @@ place — `core/agents/_WORKTREE_PATTERN.md`; read it there, do not restate it.
 
 | Class | Examples | Who | Where | Rule |
 |---|---|---|---|---|
-| **R** read / search | `qex:search_code`, `sentrux:dsm/health/scan/rescan`, `serena:find_*`, `codegraph:explore` | all | any tree | `scan`/`rescan` are computation, not state: `integrator`, `investigator` and the `sentrux-*` commands run them normally — one at a time, cache in `.sentrux/cache/` |
+| **R** read / search | `qex:search_code`, `sentrux:dsm/health/scan/rescan`, `codegraph:explore` | all | any tree | `scan`/`rescan` are computation, not state: `integrator`, `investigator` and the `sentrux-*` commands run them normally — one at a time, cache in `.sentrux/cache/` |
 | **D** documentation | `context7:query-docs` | all | — | external libraries only; never stdlib or the core stack |
-| **M** mutating edits | `serena:rename_symbol`, `replace_symbol_body`, `ast-grep:rewrite` | writer roles only | own worktree, or mode A | read-only roles are denied these by `disallowedTools` |
+| **M** mutating edits | `ast-grep:rewrite` | writer roles only | own worktree, or mode A | `serena:*` is denied to every role (server bound to the main checkout) |
 | **I** state, not computation | `qex:index_codebase`, `sentrux:session_start/session_end` (baseline), graphify build | **lead only** | **main tree only** | one at a time; the installed `.git/hooks/post-commit` has no worktree guard but does nothing in a linked worktree: graphify needs the gitignored `graphify-out/graph.json`, the qex stdio call fails the MCP handshake (`ExpectedInitializeRequest`, 0 successful runs in `.qex-reindex.log`). Do not rename it: in the main tree it keeps the graph current. The plugin dispatcher `.claude/plugins/core/hooks/git/post-commit.sh` skips worktrees but is not installed |
-| **X** external drivers | `playwright:*`, `qt-mcp:*`, `github:*` | `tester` / `reviewer` / `cto`, per task | shared tree | one application instance per session; GUI tests are never parallel |
+| **X** external drivers | `playwright:*`, `qt-mcp:*`, `github:*` | per `docs/claude/LEAD_RULES.md` → «MCP routing» | shared tree | one application instance per session; GUI tests are never parallel |
 
-- Fallback is mandatory: a server disabled in `enabled.yaml` → take the `Grep`/`Read`
+Who = which roles may run the class; which servers a role has — `docs/claude/LEAD_RULES.md` → «MCP routing».
+
+- Fallback is mandatory: a server absent from your tool list → take the `Grep`/`Read`
   path your own role prompt names (`project-rules` §3).
 - Ollama is one local embedding server — the lead caps concurrent qex searchers at 3.
 - Grant notation is `mcp__server__tool` only; the colon form in `tools:` is dead.

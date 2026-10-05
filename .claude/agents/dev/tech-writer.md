@@ -4,6 +4,7 @@ description: Senior technical writer. Writes complex technical documentation —
 model: sonnet
 omitClaudeMd: true
 skills: project-rules
+disallowedTools: mcp__backend-ctl, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__qt-mcp, mcp__serena
 memory: project
 ---
 

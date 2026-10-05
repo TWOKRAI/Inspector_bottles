@@ -116,7 +116,7 @@ Measurements: `docs/claude/LEAD_RULES.md` → «Persistent agents».
 | Plans (workspace/plans/, apps/*/plans/, projects/*/plans/) | **Russian** | User reviews and edits plans |
 | Wiki articles | **Russian** | Target audience is Russian |
 | Technical terms (pipeline, frontmatter, RAG, etc.) | English as-is | Standard terminology |
-| `.claude/` files: CLAUDE.md, agent prompts, skills, memory, settings.json | English | Token efficiency, system-only files (root `CLAUDE.md` is Russian: the owner reads it) |
+| `.claude/` files: CLAUDE.md, agent prompts, skills, commands, memory, settings.json | English | Token efficiency, model-read files (owner 2026-10-05: everything a model reads is English) (root `CLAUDE.md` is Russian: the owner reads it) |
 
 - the native `language` key in `.claude/settings.json` reinforces this (`project-rules` §6)
 - Internal reasoning can be in any language — only output matters
@@ -137,7 +137,7 @@ Full list in the corresponding mode file. Key commands (recount: `find .claude/c
 
 ## MCP routing (orchestrator + subagents)
 
-The server list is `.claude/enabled.yaml`. Before first use `Read` `.claude/plugins/<id>/README.md`; a server absent from `.mcp.json` → `Grep`/`Read`; one server answered → don't re-check another.
+Servers per role: `docs/claude/LEAD_RULES.md` → «MCP routing». Before first use `Read` `.claude/plugins/<id>/README.md`; a server absent from `.mcp.json` → `Grep`/`Read`; one server answered → don't re-check another.
 Debug and test the backend through `backend_ctl` (`BACKEND_CTL=1`; the same router messages as the GUI); `qt-mcp` only to test the GUI itself; no ad-hoc psutil.
 Servers with docs: `docs/claude/LEAD_RULES.md` → «MCP routing».
 
