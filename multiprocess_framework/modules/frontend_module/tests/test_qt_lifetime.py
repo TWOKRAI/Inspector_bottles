@@ -366,7 +366,10 @@ def test_flush_during_foreign_close_returns_fast(env):
     rr.own(Slow(), name="slow")
     closer = threading.Thread(target=rr.close, daemon=True, name="t04-closer")
     closer.start()
-    time.sleep(0.1)
+    poll_until = time.monotonic() + 2.0
+    while not rr.closed and time.monotonic() < poll_until:
+        time.sleep(0.005)
+    assert rr.closed is True, "rr.close() не начался за 2 с"
     p.deleteLater()
     t0 = time.monotonic()
     flush()
@@ -477,3 +480,216 @@ def test_concurrent_attach_from_four_threads(env):
     flush()
     alive = sum(1 for o in objs if shiboken6.isValid(o))
     assert alive == 0, f"после close + flush живы {alive} из 200"
+
+
+# ======================================================================== ревью р1
+
+
+_THREAD_SCRIPT_HEAD = """
+import os, time
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QApplication
+app = QApplication.instance() or QApplication([])
+from multiprocess_framework.modules.base_manager import open_scope
+from multiprocess_framework.modules.frontend_module.interfaces import QThreadHandle, flush_deferred_deletes
+class Coop(QThread):
+    def run(self):
+        t0 = time.monotonic()
+        while not self.isInterruptionRequested() and time.monotonic() - t0 < 3.0:
+            time.sleep(0.01)
+"""
+
+_START_AFTER_CLOSE_SCRIPT = (
+    _THREAD_SCRIPT_HEAD
+    + """
+r = open_scope("r", budget_s=0.3)
+t = Coop()
+r.own(QThreadHandle(t), name="qt", kind="qthread")
+rep = r.close()
+t.start()
+flush_deferred_deletes()
+print("flushed ok=%s" % rep.ok, flush=True)
+t.requestInterruption()
+print("waited=%s" % t.wait(5000), flush=True)
+"""
+)
+
+_CLOSE_RUNNING_SCRIPT = (
+    _THREAD_SCRIPT_HEAD
+    + """
+t = Coop()
+t.start()
+h = QThreadHandle(t)
+h.close()
+flush_deferred_deletes()
+print("flushed running=%s" % t.isRunning(), flush=True)
+t.requestInterruption()
+print("waited=%s" % t.wait(5000), flush=True)
+"""
+)
+
+
+def test_qthread_started_after_close_not_deleted():
+    """Р1-1а: ручка закрыта при незапущенном потоке, поток запущен потом — flush его не удаляет (нет abort)."""
+    _ = _door().QThreadHandle
+    proc = _run_script(_START_AFTER_CLOSE_SCRIPT)
+    assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    assert "flushed ok=True" in proc.stdout
+    assert "waited=True" in proc.stdout
+    assert "поток не завершён" in proc.stderr, proc.stderr
+
+
+def test_qthread_handle_close_running_not_deleted():
+    """Р1-1б: публичный ``close()`` ручки на работающем потоке — объект не удаляется, строка warning."""
+    _ = _door().QThreadHandle
+    proc = _run_script(_CLOSE_RUNNING_SCRIPT)
+    assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    assert "flushed running=True" in proc.stdout
+    assert "waited=True" in proc.stdout
+    assert "поток не завершён" in proc.stderr, proc.stderr
+
+
+_GC_REENTRY_SCRIPT = """
+import os, gc, threading
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtCore import QObject
+from PySide6.QtWidgets import QApplication
+app = QApplication.instance() or QApplication([])
+from multiprocess_framework.modules.base_manager import open_scope
+from multiprocess_framework.modules.frontend_module.core import qt_lifetime as ql
+gc.disable()
+gc.collect()
+rec = []
+
+def other_thread_gets_lock():
+    box = {}
+    def grab():
+        box["got"] = ql._lock.acquire(timeout=0.2)
+        if box["got"]:
+            ql._lock.release()
+    th = threading.Thread(target=grab)
+    th.start()
+    th.join()
+    return box["got"]
+
+class P(QObject):
+    pass
+
+p = P()
+p.me = p  # цикл: соберёт только gc
+c = QObject(p)
+s2 = open_scope("s2", budget_s=1.0)
+s2.own(lambda: rec.append((ql._lock._is_owned(), other_thread_gets_lock())), name="rec")
+ql.attach_qt(s2, c, name="c")
+
+root = open_scope("root", budget_s=1.0)
+ql.attach_qt(root, QObject(), name="W")
+tab = root.child("tab")
+
+class HookScope:
+    # IScope поверх настоящей области; parent — точка gc, которой управляет тест
+    def __init__(self, real, parent):
+        self._real, self._parent, self.armed = real, parent, False
+    @property
+    def path(self):
+        return self._real.path
+    @property
+    def closed(self):
+        return self._real.closed
+    @property
+    def parent(self):
+        if self.armed:
+            self.armed = False
+            gc.collect()
+        return self._parent
+    def own(self, res, *, name, kind="resource"):
+        return self._real.own(res, name=name, kind=kind)
+    def close(self, *a, **k):
+        return self._real.close(*a, **k)
+
+hs = HookScope(tab, root)
+x = QObject()
+ql.attach_qt(hs, x, name="x")
+del p
+hs.armed = True
+tab.close()
+print("rec=%r s2closed=%s" % (rec, s2.closed), flush=True)
+root.close()
+ql.flush_deferred_deletes()
+"""
+
+
+def test_gc_finalizer_close_not_under_module_lock():
+    """Р1-2: gc на проверке дерева закрывает чужую область — лок модуля в этот момент не занят."""
+    _ = _door().attach_qt
+    proc = _run_script(_GC_REENTRY_SCRIPT)
+    assert "rec=[(False, True)] s2closed=True" in proc.stdout, (
+        f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
+    )
+
+
+def test_lock_sections_have_no_calls():
+    """Р1-2 (белый ящик): под ``_lock`` нет вызовов — ни точки gc, ни кода Python."""
+    import ast
+
+    from multiprocess_framework.modules.frontend_module.core import qt_lifetime
+
+    tree = ast.parse(Path(qt_lifetime.__file__).read_text(encoding="utf-8"))
+    sections = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.With) and any(
+            isinstance(it.context_expr, ast.Name) and it.context_expr.id == "_lock" for it in node.items
+        ):
+            sections += 1
+            calls = [ast.unparse(n) for st in node.body for n in ast.walk(st) if isinstance(n, ast.Call)]
+            assert calls == [], f"вызовы под _lock (строка {node.lineno}): {calls}"
+    assert sections >= 1
+
+
+_FLUSH_IN_LOOP_SCRIPT = """
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtWidgets import QApplication
+app = QApplication.instance() or QApplication([])
+from multiprocess_framework.modules.base_manager import open_scope
+from multiprocess_framework.modules.frontend_module.interfaces import attach_qt, flush_deferred_deletes
+class Em(QObject):
+    sig = Signal()
+    def fire(self):
+        self.sig.emit()
+        return self.objectName()
+r = open_scope("r", budget_s=1.0)
+e = Em()
+e.setObjectName("em")
+attach_qt(r, e, name="em")
+out = []
+def slot():
+    r.close()
+    try:
+        flush_deferred_deletes()
+        out.append("no-raise")
+    except RuntimeError as exc:
+        out.append("raised:" + str(exc))
+e.sig.connect(slot)
+def go():
+    try:
+        out.append("fire=" + e.fire())
+    except RuntimeError as exc:
+        out.append("fire-raised:" + str(exc))
+    app.quit()
+QTimer.singleShot(0, go)
+QTimer.singleShot(3000, app.quit)
+app.exec()
+print(repr(out), flush=True)
+"""
+
+
+def test_flush_inside_event_loop_raises():
+    """Р1-3: flush из слота работающего цикла — ``RuntimeError``, отправитель сигнала жив."""
+    _ = _door().flush_deferred_deletes
+    proc = _run_script(_FLUSH_IN_LOOP_SCRIPT)
+    out = proc.stdout
+    assert "raised:flush_deferred_deletes" in out, f"rc={proc.returncode}\nstdout={out!r}\nstderr={proc.stderr!r}"
+    assert "fire=em" in out, out
