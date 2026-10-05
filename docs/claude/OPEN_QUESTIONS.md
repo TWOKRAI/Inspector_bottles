@@ -1711,3 +1711,14 @@ line-sim (scene_source): поиск по Plugins/Services/framework/apps (`data 
 ## CI-гейт коммитов (Атлас 0.2): `Refs:` не проверяется, job правится самим PR (2026-10-05)
 
 В job `commits` HEAD отсоединён: `resolve_plan` = `detached-head`, правило «ветка с планом требует `Refs:`» не срабатывает. Кандидат (f7): при отсоединённом HEAD брать ветку из `GITHUB_HEAD_REF`; задача commit-mechanism или Атласа. Второе: для `pull_request` workflow берётся из merge-коммита PR — PR может удалить job или ослабить `exit 1`; валидатор и слои уже из базы, сам `ci.yml` — нет. Решение владельца: CODEOWNERS на `.github/workflows/**`, `scripts/validate_commit/**` + обязательный ревью владельца (или ruleset), либо ручной разбор лидом (правило в `plans/2026-10-04_atlas/plan.md`, «Правила исполнения»).
+
+## Нестабильный тест на Linux CI: `test_hot_reload_reconfigures_logger` (2026-10-05, Атлас 0.8)
+
+`process_module/tests/test_observability_hot_reload.py::test_hot_reload_reconfigures_logger` упал внутри
+`tests/test_declarations_leak_order_independence.py::test_statistics_then_process_module_order_matches_the_reverse_order`
+(прямой порядок: `1 failed, 3719 passed`, `AssertionError: _decision_cache`) в прогоне PR #4 на `de716c23c`; в том же job
+основной прогон этого теста — зелёный; перезапуск всех job того же коммита — зелёный. Код фреймворка между прогонами не
+менялся. Наблюдение 1 из 2 на коммите, не замер. Гипотеза (не проверена): тест ждёт срабатывания наблюдателя файла
+(watchdog/inotify на Linux) — зависит от времени. Нужна отдельная задача: воспроизвести повтором на Linux (`--count`
+или цикл в CI), затем сделать ожидание детерминированным. Для облачных сессий важно: нестабильный тест в CI
+неотличим от их поломки.
