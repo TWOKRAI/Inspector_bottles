@@ -200,6 +200,10 @@ from multiprocess_framework.modules.process_manager_module.tests._no_orphans_hel
 )
 
 def _main():
+    # Метод запуска — ДО ProcessSpawner: его __init__ создаёт Event(), а на Linux он зафиксировал бы fork,
+    # и launch_orchestrator бросил бы RuntimeError (Атлас 0.8b; через SystemLauncher это делает его __init__).
+    from multiprocess_framework.modules.process_manager_module.platforms import get_platform_adapter
+    get_platform_adapter().setup_multiprocessing()
     spawner = ProcessSpawner(processes_config={"hung": {"class": HUNG_CHILD_CLASS_PATH}}, stop_timeout=5.0)
     spawner.launch_orchestrator()
     proc = spawner.get_process()
