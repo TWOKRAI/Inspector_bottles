@@ -1,232 +1,179 @@
-# Commit message format — TL;DR
+# Inspector_bottles — формат commit-сообщений (v2)
 
-Hook `commit-msg` валидирует автоматически. Полная справка с примерами,
-edge-cases и history queries — в `<details>` блоке внизу.
+Единственная копия гайда. Старый путь `docs/claude/COMMIT_GUIDE.md` — заглушка со ссылкой сюда.
+Читают люди и агенты (developer, teamlead, lead). Hook `commit-msg` проверяет формат сам:
+`scripts/validate_commit/validate_commit.py`; установка — `bash scripts/validate_commit/install_hook.sh`
+(один раз на репо, `.git/hooks` не версионируется).
 
 ## Шаблон
 
 ```
-<type>(<scope>): краткое imperative описание
+<type>(<scope>): краткое описание в императиве
 
-- bullets: что сделано (файлы, классы, числа тестов)
-- describe implementation, not motivation
+- буллетами: что сделано (файлы, классы, числа тестов)
+- акцент на реализации, не на мотивации
 
 Why: одна-две строки про мотивацию
-Layer: <one or many from .claude/commit-layers.txt>
-Refs: plans/<slug>.md, ADR-XXX, PR#NN
-Risk: low|medium|high — короткое почему
+Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
+Refs: plans/<slug>/plan.md, ADR-XXX, PR#NN
+Task: <slug>#<id>
+Risk: low | medium | high — короткое почему
 Reversible: yes | migration-needed | no
 Tested: scope/N passed
-Rejected: alternative X — rejected because Y
-
-Co-Authored-By: ...
+Rejected: альтернатива X — отвергнута, потому что Y
+Co-Authored-By: Claude <модель> <noreply@anthropic.com>
 ```
 
-## Обязательные поля
+**Правило блока.** Все трейлеры — один абзац в самом конце сообщения:
 
-| Trailer | Когда | Что |
-|---|---|---|
-| **subject** | всегда | `<type>(<scope>): description` (Conventional Commits) |
-| **`Why:`** | всегда | мотивация (не реализация). Одна-две строки. |
-| **`Layer:`** | если `.claude/commit-layers.txt` непустой | значение из whitelist |
-| **`Refs:`** | если есть `plans/<slug>.md` для текущей ветки `<type>/<slug>` | путь к плану (+ ADR, PR опционально) |
+- между телом и блоком — одна пустая строка;
+- внутри блока пустых строк нет, `Co-Authored-By` стоит в том же блоке (не отдельным абзацем);
+- перенос длинного значения — со строки с отступом (пробел в начале).
 
-Остальные trailers (`Risk:`, `Reversible:`, `Tested:`, `Rejected:`) — opt-in, но добавляй когда есть что сказать. Особенно `Rejected:` — самое ценное поле через год.
+Зачем: если блок разорван, `git interpret-trailers` и `git log --format=%(trailers)` не видят `Why`/`Layer`/`Refs`.
+До 2026-10-04 так не видел ни один из 200 коммитов. Валидатор предупреждает (`W-TRAILERS-SPLIT`), если git не видит
+трейлер.
 
-## Types
+## Пример
 
-`feat` · `fix` · `refactor` · `docs` · `test` · `chore` · `perf` · `build` · `ci` · `revert`
+<!-- commit-example -->
+```
+docs(claude): формат коммита v2 в одной копии гайда
 
-Breaking change → `!` suffix: `feat(api)!: drop legacy endpoint`.
+- .claude/COMMIT_GUIDE.md: шаблон, правило блока, привычки коммита
+- docs/claude/COMMIT_GUIDE.md: заглушка со ссылкой на единственную копию
+- 7 сторожей на документы (test_commit_docs.py)
 
-## Don'ts
+Why: две копии гайда расходились, а шаблон учил разрывать блок трейлеров
+Layer: docs
+Refs: plans/2026-10-03_commit-mechanism/plan.md
+Task: commit-mechanism#2.2
+Tested: validate_commit/45 passed
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+```
 
-- ❌ Дублировать body и `Why:` — body = что, Why = почему
-- ❌ `--no-verify` для обхода валидации (только merge/rebase fixes)
-- Коммиты `backend_ctl` — `Layer: mixed` (договорённость проекта). Валидатор значение не проверяет: `.claude/commit-layers.txt` содержит только комментарии, поэтому `Layer:` сейчас необязателен и любое значение проходит
-- ❌ Merge в `main` без формата: тема `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`; `git merge -F -` не читает stdin — сообщение из файла
-- ❌ Переводить ключи trailers (`Зачем:`, `Слой:`) — parser expects Latin
-- ❌ `Tested:` в body — должен быть отдельный trailer для `git log --grep`
+## Тема
 
----
-
-<details>
-<summary><strong>Полная справка</strong> — обоснование формата, field-by-field, edge cases, history queries (~180 строк)</summary>
-
-## Why bother (обоснование формата)
-
-A commit is the only place in the project where knowledge is **irrevocably bound to code**. Wikis and ADRs drift; commit messages do not. Structured trailers let:
-
-- **Agents** (Claude in a new session) slice history via `git log --grep`, `git log --trailer=Refs`, without reading prose.
-- **You** a year from now understand "why we did this" and "what we rejected".
-- **Tools** (sentrux/qex/etc.) link commit ↔ ADR ↔ plan.
-
-ROI: ~5–10% на типовой задаче, до 30% на археологии / миграциях.
-
----
-
-## Field-by-field
-
-### Subject (first line)
-
-Conventional Commits: `<type>(<scope>): <subject>`.
+`<type>(<scope>): <описание>`. Ориентир — 72 символа; после 72 и после 100 валидатор только предупреждает, отказа нет.
+Описание — в императиве, по-русски или по-английски, не транслитом.
 
 | `type` | Когда |
 |---|---|
-| `feat` | новая функциональность |
-| `fix` | исправление бага |
+| `feat` | новая фича |
+| `fix` | багфикс |
 | `refactor` | переработка без изменения поведения |
 | `docs` | только документация |
 | `test` | только тесты |
 | `chore` | техдолг, рутина, follow-ups |
 | `perf` | оптимизация |
-| `build` / `ci` | build / CI |
-| `revert` | revert |
+| `build` / `ci` | сборка / CI |
+| `style` | форматирование без смысла |
+| `revert` | откат |
+| `merge` | слияние (без scope), см. «Слияния» |
 
-**Scope** — модуль или подсистема (`auth`, `api`, `cli`, …). Множественные через запятую.
+**Scope** — модуль или подсистема (`auth`, `framework`, `data_schema`, `plugins`, `claude`, `task-5.5`). Допустимые
+символы: `[a-z0-9_./,-]`; несколько — через запятую. **Breaking change** — суффикс `!`: `feat(api)!: drop legacy endpoint`.
 
-**Breaking change** — `!` suffix: `feat(api)!: drop legacy endpoint`.
+**Body** — буллеты: имена файлов, классы, числа тестов. Описывает реализацию; мотивация — в `Why:`.
 
-### Body
+## Трейлеры
 
-- Bullets, имена файлов, классов, методов, числа тестов.
-- Описывает **implementation**, не мотивацию. Мотивация → `Why:`.
+### `Why:` — обязателен
 
-### `Why:` — обязательный
+Одна-две строки про **мотивацию**: «зачем», не «что».
+`Why: dev-роль должна получать все права без явного списка` — да; `Why: добавлен wildcard` — нет, это «что».
 
-Одна-две строки про **мотивацию**. Отвечает "почему", не "что".
+### `Layer:` — обязателен
 
-```
-Why: dev role should get all permissions without listing each one
-```
+Значения — из `.claude/commit-layers.txt` (9 слоёв); несколько — через запятую: `Layer: framework, services`.
 
-- ❌ `Why: added wildcard` — это что, не почему.
-- ✅ `Why: dev role needs all permissions without an explicit list`.
-
-### `Layer:` — три режима поведения
-
-Архитектурный слой. Allowed values — из `.claude/commit-layers.txt`.
-
-| Состояние `.claude/commit-layers.txt` | Поведение `Layer:` trailer |
+| Значение | Где |
 |---|---|
-| Файл отсутствует | **required**, fallback к generic defaults: `app, lib, tests, docs, scripts, infra, build, ci, mixed` |
-| Файл есть с значениями | **required**, whitelist = содержимое файла |
-| Файл есть, но пустой / только комментарии | **OPTIONAL** — validator не требует |
+| `framework` | `multiprocess_framework/` |
+| `services` | `Services/` |
+| `plugins` | `Plugins/` |
+| `prototype` | `multiprocess_prototype/` |
+| `docs` | `docs/`, `*.md`, планы |
+| `scripts` | `scripts/` |
+| `tests` | только тесты |
+| `infra` | `.sentrux/`, CI, hooks, `pyproject.toml`, `.claude/` |
+| `mixed` | затрагивает 3+ слоя сразу |
 
-Множественные через запятую: `Layer: app, tests`.
+Коммиты `backend_ctl` — `Layer: mixed` (договорённость проекта).
 
-Чтобы кастомизировать под проект — редактируй `.claude/commit-layers.txt` (одно значение на строку, `#` для комментариев). Чтобы выключить enforcement — удали все non-comment строки.
+### `Refs:` — связь с планом
 
-### `Refs:` — связь с планом / ADR / PR
+Через запятую: путь плана, `ADR-XXX`, `PR#12`, `issue#34`, хеш коммита.
 
-Через запятую. Любое из:
+На ветке, которая разрешается в план (заголовок плана `Ветка:`, каталог `plans/YYYY-MM-DD_<slug>`), `Refs:` на план
+обязателен. Подходит любой существующий план; не подходят `plans/queue/…` и `*.result.md`.
 
-- путь плана: `plans/auth-rbac.md` или `plans/auth-rbac/phase-2.md`
-- ADR код: `ADR-005`
-- PR / issue: `PR#12`, `issue#34`
-- commit hash: `b073abe`
+### `Task: <slug>#<id>` — по желанию
 
-```
-Refs: plans/auth-rbac/phase-3.md, ADR-005, PR#12
-```
+`slug` — поле Slug плана без даты, `id` — номер задачи. Примеры: `commit-mechanism#2.1`, `atlas#1.3a`, `atlas#K1.1`.
+Только ASCII. Нужен, чтобы по `git log --grep` собрать все коммиты одной задачи.
 
-**Hook enforcement:** если текущая ветка матчится `<conv-type>/<slug>` (например `feat/auth-rbac`) И существует `plans/<slug>.md` (или `plans/<slug>/plan.md`), коммит ОБЯЗАН содержать `Refs:` trailer на этот план. Hook отклоняет коммиты без него.
+### Остальные (необязательные)
 
-**Skip cases:**
-- Hotfix / experiment branches (`tmp/spike`, `wip-debug`) — не триггерят проверку, только Conventional Commits типы веток.
-- Detached HEAD — skipped (нет ветки → нет привязки к плану).
+- `Risk:` — `low | medium | high` и короткое почему.
+- `Reversible:` — `yes` (`git revert` чисто) / `migration-needed` / `no`.
+- `Tested:` — скоупы и числа: `Tested: auth/120, framework/2587`. Отдельным трейлером, не в body.
+- `Rejected:` — отвергнутая альтернатива и причина. Самое ценное поле через год; пиши, когда был реальный выбор.
 
-### `Risk:` — оценка риска
+Ключи — латиницей (`Why`, не `Зачем`): парсеры ждут её.
 
-`low | medium | high` + короткое почему.
+## Слияния
 
-```
-Risk: medium — changes shared lifecycle, regression possible in IPC
-```
+Слияние валидируется так же, как коммит: `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`.
+Синхронизация ветки с main: `merge: main (<sha>) в <ветка> — <зачем>`. Текст git по умолчанию (`Merge branch …`) —
+предупреждение. Слияние в `main` без формата — частая ошибка; команда — в разделе «Привычки».
 
-### `Reversible:` — обратимость
+## Привычки
 
-- `yes` — `git revert` работает чисто
-- `migration-needed` — требуется обратная миграция (DB schema, формат данных)
-- `no` — данные / контракт изменены необратимо
+Эти срывы повторялись; привычка закрывает каждый.
 
-### `Tested:` — что зелёное
+- **Сообщение — файлом.** Напиши файл инструментом Write, затем:
+  `git commit -F <файл> -- <пути>`. Явные пути вместо `git add -A`. Heredoc с прозой не используй: апостроф ломает
+  кавычки.
+- **Слияние — `git merge --no-ff <ветка> -F <файл>`.** Файл с сообщением пиши и сливай ОДНИМ вызовом Bash. `-F -`
+  не читает stdin.
+- **`.py`, записанный мимо хука правки** (через Bash, `cp`, `sed`, слияние): до `git add` запусти
+  `ruff format <пути> && ruff check --fix <пути>`. F401 (неиспользуемый импорт) чинится руками.
+- **После `git commit` не ставь `| grep` и `| tail`.** Конвейер прячет отказ хука и подменяет код выхода. Смотри
+  `git show --stat HEAD` отдельным вызовом — в коммит вошли только твои пути.
 
-Scopes и числа.
+## Фаза
 
-```
-Tested: auth/120, core/2587, ui/1064
-```
+Новые правила v2 (трейлер `Task`, блок трейлеров, слой из списка, длина темы, слияния) сейчас — предупреждения
+(`STRICT = False`, stderr, rc 0, пометка «error from phase 3»). Строгий режим включает Task 3.1 плана
+`plans/2026-10-03_commit-mechanism/plan.md`.
 
-### `Rejected:` — отвергнутые альтернативы (opt-in, но ценно)
+## Зачем всё это
 
-```
-Rejected: hardcoded role-check — rejected, inflexible for custom roles
-Rejected: separate wildcard_grant() — rejected, extra API surface
-```
+Коммит — единственное место, где знание необратимо привязано к коду. Структурированные трейлеры дают агенту срез
+истории через `git log --grep` и `--format=%(trailers)` без чтения прозы; тебе — ответ «почему» и «что отвергли» через
+год; `sentrux`/`qex` — связь коммит ↔ ADR ↔ план.
 
-Самое ценное поле через год. Не пропускай, когда было реальное сравнение вариантов.
-
----
-
-## Полный пример
-
-```
-feat(auth): declarative permission fields in BaseControlConfig
-
-- BaseControlConfig: required_view_permission and required_edit_permission fields
-- NumericPresenter/CheckboxPresenter read fields from view_config
-- presenter.set_access_context(AccessContext) applies full context
-- 7 new tests on BaseControlConfig.permissions and AccessTrait flow
-
-Why: remove manual permission checks from tab code, unify with trait-based gating
-Layer: app
-Refs: plans/auth-rbac/phase-3.md, ADR-005
-Risk: low — changes are local to config + presenter
-Reversible: yes
-Tested: auth/120, core/2587
-Rejected: setattr-runtime on widget — rejected, loses config typing
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-```
-
----
-
-## Use by agents
-
-Промпты в `.claude/agents/*.md` знают про эти trailers. Slash-команды `/ship` и `/pipeline` показывают шаблон в выводе. Если агент забыл — hook отклоняет коммит и просит исправить.
-
----
-
-## History queries cheat-sheet
+## Запросы к истории
 
 ```bash
-# Все коммиты с упоминанием ADR-005
+# Все коммиты, упоминающие ADR-005
 git log --grep="Refs:.*ADR-005"
 
-# Все изменения в слое `app`
-git log --grep="^Layer: app" --all-match
+# Все коммиты одной задачи
+git log --grep="^Task: commit-mechanism#2"
+
+# Все изменения в слое framework
+git log --grep="^Layer: framework" --all-match
 
 # Все high-risk коммиты за месяц
 git log --since=1.month --grep="^Risk: high"
 
-# Все отвергнутые альтернативы (для ретроспектив)
-git log --grep="^Rejected:" --pretty=format:"%h %s%n%b" | grep -A1 "Rejected:"
-
-# Через git interpret-trailers напрямую
+# Трейлеры через git (работает, только если блок не разорван)
 git log --pretty=format:"%H%n%(trailers:key=Refs,valueonly)"
 ```
 
----
+## Обход
 
-## Bypass
-
-Validator пропускает:
-
-- `Merge ...` коммиты
-- `Revert ...` коммиты
-- `fixup!` / `squash!` / `amend!` (interactive rebase)
-
-Полный bypass — `git commit --no-verify`. Использовать **только** для исправления уже закоммиченной истории, не для нормальных коммитов.
-
-</details>
+Валидатор пропускает `Revert …` и `fixup!` / `squash!` / `amend!` (interactive rebase). Полный обход —
+`git commit --no-verify` — только для исправления уже закоммиченной истории, не для обычных коммитов.

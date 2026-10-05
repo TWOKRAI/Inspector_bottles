@@ -38,8 +38,9 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
 
 - Commit only if your role commits **and** the brief didn't say otherwise. Never push, never open a
   PR, never `--no-verify`, never `git add -A` — stage explicit paths.
-- Conventional Commits + mandatory `Why:`/`Layer:` trailers, each on one line; `Refs: plans/<slug>.md`
-  from a plan (the `commit-msg` hook checks). Guide: `.claude/COMMIT_GUIDE.md`.
+- Conventional Commits; `Why:`/`Layer:` mandatory, `Refs:` from a plan — one last paragraph with
+  `Co-Authored-By`, no blank lines. Message file: `git commit -F <file> -- <paths>`.
+  Habits: `.claude/COMMIT_GUIDE.md`.
 - After a commit, `git show --stat HEAD` — only the paths you staged.
 - Commit subject in English or Russian, never transliterated Latin.
 
