@@ -7,6 +7,8 @@
 #                interfaces.py, README/STATUS, синхронизация ADR).
 #   * tests    — тесты фреймворка через scripts/run_framework_tests.py (blocking, зелёный
 #                headless: ~3800 тестов за ~90 c под QT_QPA_PLATFORM=offscreen).
+#   * commits  — только pull_request: каждый коммит PR (base..head) через валидатор
+#                scripts/validate_commit/validate_commit.py из БАЗЫ PR (Атлас 0.2).
 #
 #   * backend-ctl-nightly — каталог backend_ctl/tests без live-тестов (590 из 633),
 #                ТОЛЬКО по расписанию/кнопке (D2.4). Там живёт наблюдаемостная часть
@@ -183,3 +185,41 @@ jobs:
       # локально: `make test-ctl`.
       - name: backend_ctl/tests без live
         run: uv run python -m pytest backend_ctl/tests -m "not harness_smoke" -q -p no:cacheprovider
+
+  # Атлас 0.2: облачные сессии сдают работу только PR, git-хуков там нет — гейт формата
+  # коммитов только здесь. Строгость задаёт константа STRICT в валидаторе (commit-mechanism
+  # 3.1), своего флага у job нет. Спека: plans/2026-10-04_atlas/tasks/0.2.md.
+  commits:
+    name: commits (validate_commit, PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth 0: без полной истории base.sha нет в клоне и диапазон не строится.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Валидатор — только stdlib, uv sync не нужен.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Валидатор и слои — из базы PR: иначе PR ослабил бы собственный гейт.
+      # Диапазон base..head, не HEAD: при pull_request HEAD — синтетический merge GitHub.
+      # rev-list — в переменную, не в `for`: там его ошибка теряется и job зеленеет.
+      # python -I: каталог скрипта не попадает в sys.path, файл из PR не подменит stdlib.
+      - name: Проверка коммитов PR
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEADSHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git checkout "$BASE" -- scripts/validate_commit/validate_commit.py .claude/commit-layers.txt
+          shas=$(git rev-list --reverse "$BASE..$HEADSHA")
+          if [ -z "$shas" ]; then echo "ERROR: пустой диапазон $BASE..$HEADSHA"; exit 1; fi
+          echo "commits to check: $(printf '%s\n' "$shas" | wc -l)"
+          fail=0
+          for sha in $shas; do
+            git log -1 --format='%h %s' "$sha"
+            if ! git log -1 --format=%B "$sha" | python -I -X utf8 scripts/validate_commit/validate_commit.py -; then fail=1; fi
+          done
+          if [ "$fail" -ne 0 ]; then exit 1; fi
