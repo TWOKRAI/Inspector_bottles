@@ -3,7 +3,8 @@
 Единственная копия гайда. Старый путь `docs/claude/COMMIT_GUIDE.md` — заглушка со ссылкой сюда.
 Читают люди и агенты (developer, teamlead, lead). Hook `commit-msg` проверяет формат сам:
 `scripts/validate_commit/validate_commit.py`; установка — `bash scripts/validate_commit/install_hook.sh`
-(один раз на репо, `.git/hooks` не версионируется).
+(один раз на репо, `.git/hooks` не версионируется). CI-проверка для PR — тот же скрипт на каждом коммите ветки,
+см. `scripts/validate_commit/README.md`.
 
 ## Шаблон
 
@@ -133,10 +134,12 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Эти срывы повторялись; привычка закрывает каждый.
 
 - **Сообщение — файлом.** Напиши файл инструментом Write, затем:
-  `git commit -F <файл> -- <пути>`. Явные пути вместо `git add -A`. Heredoc с прозой не используй: апостроф ломает
-  кавычки.
-- **Слияние — `git merge --no-ff <ветка> -F <файл>`.** Файл с сообщением пиши и сливай ОДНИМ вызовом Bash. `-F -`
-  не читает stdin.
+  `git commit -F <файл> -- <пути>`. Явные пути вместо `git add -A`. Новые (неотслеживаемые) файлы сначала
+  `git add <пути>`, иначе `pathspec … did not match`. Heredoc с прозой не используй: апостроф ломает кавычки.
+- **Слияние — `git merge --no-ff <ветка> -F <файл>`.** `-F -` не читает stdin. Файл пиши инструментом Write либо
+  в том же вызове Bash, что и слияние: файл во временной папке может пропасть между вызовами Bash.
+- **Конфликт при слиянии:** разреши, `git add <пути>`, затем `git commit -F <тот же файл>` без `-- <пути>`. С путями
+  git отказывает: `fatal: cannot do a partial commit during a merge`.
 - **`.py`, записанный мимо хука правки** (через Bash, `cp`, `sed`, слияние): до `git add` запусти
   `ruff format <пути> && ruff check --fix <пути>`. F401 (неиспользуемый импорт) чинится руками.
 - **После `git commit` не ставь `| grep` и `| tail`.** Конвейер прячет отказ хука и подменяет код выхода. Смотри
@@ -144,8 +147,11 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 
 ## Фаза
 
-Новые правила v2 (трейлер `Task`, блок трейлеров, слой из списка, длина темы, слияния) сейчас — предупреждения
-(`STRICT = False`, stderr, rc 0, пометка «error from phase 3»). Строгий режим включает Task 3.1 плана
+Новые правила v2 сейчас — предупреждения (`STRICT = False`, stderr, rc 0, пометка «error from phase 3»):
+нет `Layer`; `Layer` не из списка; `Refs` на `plans/queue/`, `*.result.md` или несуществующий файл; трейлер `Task`
+неверной формы; разорванный блок трейлеров; тема длиннее 72 и 100; слияние без трейлеров или с текстом git по умолчанию.
+Отказ (rc 1) в обоих режимах — только: нет `Why`; нет `Refs` вовсе (или без пути `plans/…md`) на ветке с планом;
+сломана грамматика темы или типа (например, `merge(scope)`). Строгий режим включает Task 3.1 плана
 `plans/2026-10-03_commit-mechanism/plan.md`.
 
 ## Зачем всё это
@@ -168,6 +174,9 @@ git log --grep="^Layer: framework" --all-match
 
 # Все high-risk коммиты за месяц
 git log --since=1.month --grep="^Risk: high"
+
+# Все отвергнутые альтернативы (для ретроспективы)
+git log --grep="^Rejected:" --pretty=format:"%h %s%n%b" | grep -A1 "Rejected:"
 
 # Трейлеры через git (работает, только если блок не разорван)
 git log --pretty=format:"%H%n%(trailers:key=Refs,valueonly)"

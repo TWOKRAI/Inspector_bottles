@@ -12,6 +12,7 @@
   D6  пример из `.gitmessage` и помеченный пример из гайда: валидатор rc 0 без `WARNING`, git видит
       Why, Layer, Refs, Task, Co-Authored-By;
   D7  в `project-rules` §4 есть `git commit -F` и `Co-Authored-By`.
+  D8  гайд: коммит слияния — `git commit -F <файл>` без `-- <пути>` (иначе partial commit during a merge).
 
 Ожидаемые значения — литералы, не читаются из проверяемого кода. Валидатор запускается подпроцессом
 с таймаутом из временного git-репозитория (ветка, разрешающаяся в план).
@@ -214,3 +215,10 @@ def test_d7_project_rules_section_4_names_habit_and_block(path: Path) -> None:
     section = _skill_section_4(path)
     assert "git commit -F" in section, "project-rules §4: нет 'git commit -F'"
     assert "Co-Authored-By" in section, "project-rules §4: нет 'Co-Authored-By'"
+
+
+def test_d8_guide_names_merge_commit_without_pathspec() -> None:
+    """Слияние с конфликтом: `git commit -F <файл>` БЕЗ `-- <пути>`, иначе `partial commit during a merge`."""
+    text = _read(GUIDE)
+    assert "без `-- <пути>`" in text, "в гайде нет правила 'без `-- <пути>`' для коммита слияния"
+    assert "partial commit during a merge" in text, "в гайде нет текста ошибки 'partial commit during a merge'"
