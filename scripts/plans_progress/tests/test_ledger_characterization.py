@@ -11,6 +11,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
+# Task 4.1: каждый тест — в обоих режимах summarize_plan (корень без парсера / с копией парсера).
+pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+
 CATALOG_PLAN = """# Каталожный план
 
 ## Phase 1
