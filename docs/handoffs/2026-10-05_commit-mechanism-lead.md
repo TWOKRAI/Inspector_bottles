@@ -1,54 +1,42 @@
 ---
 date: 2026-10-05
-topic: commit-mechanism — фазы 1–2 в main; дальше замер 3.2 и решение владельца по 3.1
+topic: commit-mechanism — 9 из 11; осталось 3.2 (замер до 10-12) и 3.1 (не раньше 10-13)
 machine: Windows
-branch: feat/commit-mechanism (worktree .claude/worktrees/commit-mech), = main 30f8335c9 + этот коммит
+branch: feat/commit-mechanism (worktree .claude/worktrees/commit-mech) = main
 ---
 
 ## Состояние
 
-- В `main`: 2.1 валидатор v2 предупреждениями + `Task: <slug>#<id>` + проверка «трейлеры одним блоком» (`06a70f7e6`);
-  2.2 документы v2 (одна копия `.claude/COMMIT_GUIDE.md`, `.gitmessage`, `project-rules` §4) и 2.3 классификатор
-  `scripts/commit_audit/classify.py` (`30f8335c9`). План — 7 из 10.
-- База замера 3.2 — `plans/2026-10-03_commit-mechanism/amendments.md`, «База замера 3.2» (таблица по классам на 100 вызовов);
-  правило CTO A1-Bash + C2 + C4 = **4,89 на 100 коммитов** (порог 3).
-- Итоги задач: `tasks/2.1.result.md`, `tasks/2.3.result.md`; 2.2 — ревью APPROVED r2, итог в коммите `ce31ab4ae`.
+- В `main`: фазы 1–2; Task 3.0 — единая грамматика id в пяти носителях (`2e4877a6e`); Task 1.5 — хук форматирования
+  не запускает Python на не-`.py` (`d267dc89e`). План — 9 из 11.
+- Решения владельца 2026-10-05 и согласия сессий (Атлас, dashboard) — `plans/2026-10-03_commit-mechanism/amendments.md`.
+- `~/.claude/settings.json` этой машины: `cleanupPeriodDays: 365`, `env.CLAUDE_PYTHON_BIN = python` (хуки не пробуют
+  заглушку `python3` Microsoft Store, минус ~95 мс на запуск хука). В `.claude/settings.local.json` НЕ класть: файл общий
+  с Mac и на Windows скрыт `skip-worktree` — слияние с его правкой упирается в флаг (OPEN_QUESTIONS:1497).
+  Проверить в новой сессии: `echo $CLAUDE_PYTHON_BIN` → `python`.
 
 ## Next step
 
-1. **3.2 замер:** окно 2026-10-05 (слияние 2.2) … 2026-10-12. Запуск:
-   `python scripts/commit_audit/classify.py --root C:\Users\INNOTECH\.claude\projects --since 2026-10-05 --until 2026-10-12`.
-   Делать дёшево — прогон + сверка лида, без агентов (предложение владельцу 2026-10-04). Сравнивать с базой по классам;
-   строки A1-Edit/Write (ожидание ≈ 0 после живого хука 1.2), A1-Bash, C2, C4, A3 (ожидание 0).
-2. **3.1 строгий режим — решение владельца.** Лид предложил: снять или сузить до слияний (строгий режим добавляет отказы,
-   то есть работает против цели «меньше срывов»). До 3.1 — решить грамматику `Task:` (S2 ревью 2.1: 17 из 144 id активных
-   планов не проходят — `1b.2d`, `2б.1`, `Т.1`, `5.10.g`).
-3. 1.5 — мелочь (`autoformat-python.sh` проверяет расширение до запуска Python), лид соло.
+1. **3.2 замер** после 2026-10-12: `python scripts/commit_audit/classify.py --root C:\Users\INNOTECH\.claude\projects
+   --since 2026-10-05 --until 2026-10-12`; сравнить с базой (amendments.md, «База замера 3.2»); решение о `commit.py`
+   по правилу CTO (A1-Bash + C2 + C4 на 100 commit, база 4,89, порог 3).
+2. **3.1** не раньше 2026-10-13: спека `tasks/3.1.md` ред. 3 прошла стадию 0 (2 раунда); дальше слепой тестер (только
+   склейка) → developer → инъекции → ревью. Перед слиянием — сообщение соседям по `ListAgents` (правило `-F`).
+   CI Атласа 0.2 читает ту же константу `STRICT` (валидатор из базы PR).
 
 ## Open
 
-- `cleanupPeriodDays` не задан: транскрипты старше 30 дней удаляются — для 3.2 окно короткое, но для любых пересчётов базы
-  данных за 09-04…09-09 скоро не будет. Предложено `365` в `~/.claude/settings.json` — решение владельца.
-- `claude-kit upgrade` перезапишет `.claude/COMMIT_GUIDE.md` из сида: сторожа `test_commit_docs.py` покраснеют. Перенос в сид
-  `devseed` — на Mac, владелец.
-- Шаблон attribution в system-reminder Claude Code сам по себе подталкивает к пустой строке перед `Co-Authored-By`; правило
-  блока стоит в `project-rules` §4, но агенты могут его нарушать — W-TRAILERS-SPLIT это покажет (на 30 коммитах `main` 10-04 — 5).
-- `core.commentChar` ≠ `#`, `commit.cleanup=scissors`, `merge.log` с живым конфигом не проверены.
+- Открытые вопросы плана (раздел «Открытые вопросы» plan.md): пункты порядка `plans_ledger` без тестов на новых формах id;
+  устаревшие хеши манифестов; хук форматирования переформатирует сид-копию валидатора; видимый выигрыш 1.5 на `.md`.
+- Сид-копии (`.claude/plugins/…`: валидатор, `plans_ledger`, хук 1.5) — перенести в devseed на Mac, иначе
+  `claude-kit upgrade` откатит.
+- CI: в detached HEAD правило Refs не срабатывает — кандидат `GITHUB_HEAD_REF`; чья задача — с Атласом.
 
-## Соседи (стыки — `plans/queue/ORDER.md`, «Стыки М»)
+## agentId (сессия 2026-10-05)
 
-- Атлас: стыки 1–3 закрыты; Атлас 0.1 закрыт на `Task:` (`60cd0518e`); дальше Атлас 0.2 (валидатор в CI, `commit-layers.txt`
-  уже 9 слоёв) и 1.6/1.7 (`atlas log` и гейты по `Task:`/`Refs:`) — опираются на формат v2, грамматику `Task:` не менять
-  без сессии Атласа.
-- plans-progress-dashboard: от формата коммитов не зависит; общий только `main` — перед слиянием проверять `MERGE_HEAD`.
-
-## agentId (по треку, сессия 82c41798)
-
-| Роль | agentId | Где |
+| Роль | agentId | Что знает |
 |---|---|---|
-| reviewer 2.1 r1/r2 и 2.2 r1/r2 | `aa490a3fb91e11310` | знает валидатор и гайд |
-| reviewer 2.3 r1/r2 | `a642040b6dc4cc860` | знает классификатор и транскрипты |
-| developer 2.1 ред. 6 | `a60878d0622038100` | |
-| developer 2.3 | `a073096b876e43386` | |
-| developer 2.2 | `ad9bf7f374c3a1bfe` | |
-| investigator 2.3 стадия 0 | `a7dee124946ce5bbd` | определения классов, разметка |
+| reviewer 3.0 (стадия 0 + код) | `a1e0ad0ae5022a5bf` | грамматика, замеры корпуса |
+| reviewer 3.1 (стадия 0) | `a6ced34f42c065efb` | склейка, git interpret-trailers, раскладки редактора |
+| developer 3.0 | `a1a6fa6d4efc8e80b` | пять носителей грамматики |
+| reviewer 1.5 | `a2b3ffe8a5aece30a` | хук, payload, тайминги |
