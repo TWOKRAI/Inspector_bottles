@@ -1,6 +1,8 @@
 ---
 name: feedback-safeguard-can-be-a-noop-with-green-units
 description: Юнит на синтетическом входе не доказывает, что предохранитель вообще срабатывает на реальной конфигурации
+module: "backend_ctl (harness.strip_gui)"
+mechanism: "synthetic-input"
 metadata:
   type: feedback
 ---

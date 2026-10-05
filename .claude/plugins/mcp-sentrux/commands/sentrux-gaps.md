@@ -1,5 +1,5 @@
 ---
-description: Test gaps — modules and areas without test coverage
+description: List modules and areas without test coverage. Call before /dev:ship or when planning tests.
 ---
 
 Run the analysis of modules not covered by tests:

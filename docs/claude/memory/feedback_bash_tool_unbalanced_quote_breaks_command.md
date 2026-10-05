@@ -1,6 +1,9 @@
 ---
 name: feedback-bash-tool-unbalanced-quote-breaks-command
-description: "Инструмент Bash на этой машине падает с «unexpected EOF while looking for matching `''», если в команде непарный апостроф — даже внутри quoted-heredoc; скрипты с прозой писать через Write и запускать файлом"
+description: "Инструмент Bash на этой машине падает с «unexpected EOF while looking for matching `''», если в команде непарный апостроф — даже внутри quoted-heredoc; скрипты с прозой писать через Write и запускать файлом; также: Bash tool collapses `\\\\` to `\\` even inside a quoted heredoc — generated Python gets real control bytes; write such files with Write/Edit"
+merged_from: [feedback_bash_heredoc_collapses_backslashes]
+module: "local-only (Windows Bash tool)"
+mechanism: "tooling"
 metadata:
   node_type: memory
   type: feedback
@@ -25,4 +28,19 @@ metadata:
 - Перед отправкой команды Bash с текстом — пересчитать `'`: число должно быть чётным.
 - Симптом «unexpected EOF ... matching `''» на первой же строке вывода = транспорт, не скрипт.
 
-См. [[feedback_ru_output_encoding_and_wc]], [[feedback_commit_msg_format]].
+См. [[feedback_ru_output_encoding_and_wc]], [[feedback_commit_takes_the_whole_index]].
+
+## Слито из feedback_bash_heredoc_collapses_backslashes (_archive/feedback_bash_heredoc_collapses_backslashes.md)
+
+Text passed to the Bash tool loses one level of backslashes, even inside `<<'EOF'`. A Python
+heredoc that writes `b"\\xff"` or `"\\n"` into a file produces the actual byte / newline, not the
+escape: ruff then reports `bytes can only contain ASCII`, or a generated script dies with
+`unterminated string literal`.
+
+**Why:** hit three times on 2026-09-29 (code_reader Ф6): a test fixture byte literal, an
+injection script with `"\n"` anchors, a second injection script — each cost a retry.
+
+**How to apply:** any file or snippet that must contain a literal backslash goes through the
+Write/Edit tools, not a Bash heredoc. Inside a Bash-run Python snippet, build it with `chr(92)`
+or `NL = "\n"`-free concatenation (`"a" + chr(10) + "b"`). State this trap in subagent briefs
+(TRAPS line) — agents hit it too. Related: [[feedback-bash-tool-unbalanced-quote-breaks-command]].

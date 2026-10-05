@@ -1,0 +1,79 @@
+"""Инъекции 5.3: по одной заплате, прогон набора, откат через git checkout файла."""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+W = Path(r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/team-t53")
+PY = r"D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/python.exe"
+MOD = W / "multiprocess_framework/modules"
+NIM = "multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py"
+DR = "multiprocess_framework/modules/process_module/generic/data_receiver.py"
+PE = "multiprocess_framework/modules/process_module/generic/pipeline_executor.py"
+PR = "multiprocess_framework/modules/process_module/generic/plugin_runner.py"
+FSM = "multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py"
+INJ = {
+    "L1": [(NIM, '        "count": sum(_count(item) for item in inputs),', '        "count": len(inputs),')],
+    "L2": [(NIM, "        trace_ids.extend(_trace_ids(item))", "        trace_ids[:0] = _trace_ids(item)")],
+    "L3": [(NIM, '        "first_capture_ts": min(known) if known else None,\n        "last_capture_ts": max(known) if known else None,',
+            '        "first_capture_ts": max(known) if known else None,\n        "last_capture_ts": min(known) if known else None,')],
+    "L4": [(NIM, "    known = [ts for ts in stamps if ts is not None]", "    known = list(stamps)")],
+    "L5": [(NIM, '    return item.get("overflow_marker") is True and item.get("inspection_status") == NOT_INSPECTED',
+            '    return item.get("overflow_marker") is True and item.get("inspection_status") == NOT_INSPECTED and int(item.get("count", 1)) == 1')],
+    "L6": [(FSM, 'marker = build_gap([build_marker(meta_from_msg(msg), reason="door", source=self._owner)])[0]',
+            'marker = build_marker(meta_from_msg(msg), reason="door", source=self._owner)')],
+    "L7": [(PE, "        out = self._execute_chain(build_gap(items))\n        self._not_inspected_handled += lost",
+            "        records = build_gap(items)\n        out = self._execute_chain(records)\n        self._not_inspected_handled += len(records)")],
+    "L8": [(NIM, "            reasons[name] = reasons.get(name, 0) + n", "            reasons[name] = n")],
+    "L9": [(NIM, "        if chunk and chunk_count + n > GAP_CHUNK:", "        if chunk and chunk_count + n >= GAP_CHUNK:")],
+    "L10": [(DR, "        with chain.mutex:\n            pending = chain.queue\n            if not pending or not isinstance(pending[-1], _MarkerBatch):",
+             "        if True:\n            pending = chain.queue\n            if not pending or not isinstance(pending[-1], _MarkerBatch):")],
+    "L11": [(DR, "        if isinstance(items, _MarkerBatch) and self._merge_into_tail(items):\n            return\n", "")],
+    "L12": [(PE, "self._send_results(build_gap(stale_markers))", "self._send_results(stale_markers)")],
+    "L13": [(NIM, '    marker["count"] = 1  #', "    pass  #")],
+    # раунд 2 (4a2d27e0a): поля записи через PluginRunner
+    "L14": [(PR, '    "frame_hops",\n    "count",\n', '    "frame_hops",\n')],
+    "L15": [(PR, '    "count",\n    "trace_ids",\n', '    "count",\n')],
+}
+env = dict(os.environ, PYTHONPATH=str(W), PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="offscreen")
+
+
+def tests():
+    out = []
+    for pat in ("process_module/tests/test_t53_*.py", "router_module/tests/test_t53_*.py",
+                "process_module/tests/test_t47d*.py", "router_module/tests/test_t47d*.py"):
+        out += [str(p.relative_to(MOD)).replace("\\", "/") for p in sorted(MOD.glob(pat))]
+    return out
+
+
+def run():
+    r = subprocess.run(
+        [PY, "-m", "pytest", *tests(), "-q", "--tb=no", "-p", "no:cacheprovider", "-rfE"],
+        cwd=MOD, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+    )
+    fails = sorted(set(re.findall(r"(?:FAILED|ERROR) (\S+)::(\S+)", r.stdout)))
+    summary = [ln for ln in r.stdout.splitlines() if " passed" in ln or " failed" in ln or " error" in ln][-1:]
+    by_file = {}
+    for f, t in fails:
+        by_file.setdefault(f.split("/")[-1], []).append(t)
+    return summary, {k: len(v) for k, v in by_file.items()}, [t for _, t in fails][:12]
+
+
+for name in sys.argv[1:]:
+    patches = INJ.get(name, [])
+    for f, a, b in patches:
+        p = W / f
+        with open(p, encoding="utf-8", newline="") as fh:
+            s = fh.read()
+        nl = "\r\n" if "\r\n" in s else "\n"
+        a2, b2 = a.replace("\n", nl), b.replace("\n", nl)
+        assert s.count(a2) == 1, (name, f, s.count(a2))
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write(s.replace(a2, b2))
+    try:
+        print(name, *run(), flush=True)
+    finally:
+        for f in {f for f, *_ in patches}:
+            subprocess.run(["git", "checkout", "--", f], cwd=W)

@@ -1,5 +1,5 @@
 ---
-description: System test-drive — one command to check MCP, agents, skills, hooks, indexes. After `claude-kit new` and periodically.
+description: "Check the whole setup in one run: MCP, agents, skills, hooks, indexes, plans. Call after setup changes or when a tool misbehaves."
 ---
 
 Run a health check of the whole Claude-Kit system. This is a **read-only diagnostic** — it fixes nothing, it only reports what works, what doesn't, and what needs attention.

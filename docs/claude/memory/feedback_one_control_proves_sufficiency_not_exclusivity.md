@@ -1,6 +1,7 @@
 ---
 name: feedback_one_control_proves_sufficiency_not_exclusivity
 description: "Контроль, вернувший старое число сменой фактора A, доказывает «A достаточно», но не «B не влияет» — для «не B» нужен перекрёстный контроль (B меняется при плохом A)"
+mechanism: "controls"
 metadata:
   node_type: memory
   type: feedback

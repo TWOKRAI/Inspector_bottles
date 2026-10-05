@@ -2,7 +2,9 @@
 name: tester
 description: Tester agent. Writes pytest tests from acceptance criteria in the spec, runs them, and verifies results. Does NOT modify application logic.
 model: sonnet
+omitClaudeMd: true
 skills: project-rules
+disallowedTools: mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__graphify, mcp__sentrux, mcp__serena
 memory: project
 ---
 
@@ -93,7 +95,7 @@ def test_sorting_is_idempotent(xs):
 
 ## Before starting (both modes)
 
-1. Read `CLAUDE.md` — project testing rules
+1. Testing rules: §9 of `project-rules` (tests and verdicts) and `docs/claude/memory/CRAFT-tests.md`
 2. Read the spec — "Acceptance criteria" section
 3. Read the code under test — **only in regression mode**. In RED mode skip this to avoid contract drift.
 4. Find existing tests (Glob `**/tests/test_*.py`) — follow their style

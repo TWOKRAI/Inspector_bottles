@@ -1,0 +1,314 @@
+{
+ "tag": "P1",
+ "case_dir": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\probe58_P1_9kzg72ch",
+ "samples": [
+  {
+   "t": 0.04,
+   "proc_cycle_ms": 5.58,
+   "proc_cycles": 1000,
+   "stor_cycle_ms": 0.5,
+   "stor_cycles": 786,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 1.03,
+   "proc_cycle_ms": 7.97,
+   "proc_cycles": 1099,
+   "stor_cycle_ms": 0.85,
+   "stor_cycles": 847,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 2.03,
+   "proc_cycle_ms": 6.14,
+   "proc_cycles": 1200,
+   "stor_cycle_ms": 0.69,
+   "stor_cycles": 928,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 3.04,
+   "proc_cycle_ms": 7.71,
+   "proc_cycles": 1299,
+   "stor_cycle_ms": 0.53,
+   "stor_cycles": 1006,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 4.03,
+   "proc_cycle_ms": 7.09,
+   "proc_cycles": 1399,
+   "stor_cycle_ms": 0.49,
+   "stor_cycles": 1086,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 5.06,
+   "proc_cycle_ms": 7.07,
+   "proc_cycles": 1499,
+   "stor_cycle_ms": 0.54,
+   "stor_cycles": 1163,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 6.03,
+   "proc_cycle_ms": 9.16,
+   "proc_cycles": 1590,
+   "stor_cycle_ms": 0.56,
+   "stor_cycles": 1233,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 7.04,
+   "proc_cycle_ms": 13.16,
+   "proc_cycles": 1679,
+   "stor_cycle_ms": 0.97,
+   "stor_cycles": 1302,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 8.03,
+   "proc_cycle_ms": 6.5,
+   "proc_cycles": 1780,
+   "stor_cycle_ms": 0.49,
+   "stor_cycles": 1377,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 9.06,
+   "proc_cycle_ms": 7.53,
+   "proc_cycles": 1880,
+   "stor_cycle_ms": 1.1,
+   "stor_cycles": 1458,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 10.04,
+   "proc_cycle_ms": 8.41,
+   "proc_cycles": 1980,
+   "stor_cycle_ms": 0.49,
+   "stor_cycles": 1527,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 11.03,
+   "proc_cycle_ms": 9.06,
+   "proc_cycles": 2079,
+   "stor_cycle_ms": 0.53,
+   "stor_cycles": 1606,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 12.04,
+   "proc_cycle_ms": 6.27,
+   "proc_cycles": 2178,
+   "stor_cycle_ms": 0.98,
+   "stor_cycles": 1683,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 13.04,
+   "proc_cycle_ms": 14.18,
+   "proc_cycles": 2268,
+   "stor_cycle_ms": 0.92,
+   "stor_cycles": 1748,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 14.06,
+   "proc_cycle_ms": 13.68,
+   "proc_cycles": 2348,
+   "stor_cycle_ms": 0.91,
+   "stor_cycles": 1811,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 15.04,
+   "proc_cycle_ms": 13.01,
+   "proc_cycles": 2429,
+   "stor_cycle_ms": 0.92,
+   "stor_cycles": 1872,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 16.04,
+   "proc_cycle_ms": 14.98,
+   "proc_cycles": 2508,
+   "stor_cycle_ms": 1.0,
+   "stor_cycles": 1937,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 17.04,
+   "proc_cycle_ms": 7.68,
+   "proc_cycles": 2591,
+   "stor_cycle_ms": 1.14,
+   "stor_cycles": 2005,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 18.03,
+   "proc_cycle_ms": 7.02,
+   "proc_cycles": 2691,
+   "stor_cycle_ms": 1.13,
+   "stor_cycles": 2079,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 19.06,
+   "proc_cycle_ms": 7.5,
+   "proc_cycles": 2790,
+   "stor_cycle_ms": 0.71,
+   "stor_cycles": 2152,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 20.04,
+   "proc_cycle_ms": 14.0,
+   "proc_cycles": 2871,
+   "stor_cycle_ms": 1.81,
+   "stor_cycles": 2205,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 21.03,
+   "proc_cycle_ms": 5.63,
+   "proc_cycles": 2967,
+   "stor_cycle_ms": 0.47,
+   "stor_cycles": 2283,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 22.06,
+   "proc_cycle_ms": 5.7,
+   "proc_cycles": 3067,
+   "stor_cycle_ms": 0.62,
+   "stor_cycles": 2365,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 23.02,
+   "proc_cycle_ms": 5.77,
+   "proc_cycles": 3167,
+   "stor_cycle_ms": 0.5,
+   "stor_cycles": 2444,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 24.04,
+   "proc_cycle_ms": 5.66,
+   "proc_cycles": 3267,
+   "stor_cycle_ms": 0.47,
+   "stor_cycles": 2527,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 25.04,
+   "proc_cycle_ms": 5.65,
+   "proc_cycles": 3368,
+   "stor_cycle_ms": 0.55,
+   "stor_cycles": 2604,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 26.04,
+   "proc_cycle_ms": 6.24,
+   "proc_cycles": 3468,
+   "stor_cycle_ms": 1.03,
+   "stor_cycles": 2684,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 27.04,
+   "proc_cycle_ms": 5.77,
+   "proc_cycles": 3567,
+   "stor_cycle_ms": 0.53,
+   "stor_cycles": 2763,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 28.05,
+   "proc_cycle_ms": 7.24,
+   "proc_cycles": 3667,
+   "stor_cycle_ms": 0.5,
+   "stor_cycles": 2828,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  },
+  {
+   "t": 29.04,
+   "proc_cycle_ms": 5.82,
+   "proc_cycles": 3767,
+   "stor_cycle_ms": 0.59,
+   "stor_cycles": 2910,
+   "stor_lag_dropped": null,
+   "plugin_ms": {}
+  }
+ ],
+ "plugins_raw_first": {
+  "type": "response",
+  "command": "command.response",
+  "sender": "storage",
+  "targets": [
+   "ProcessManager"
+  ],
+  "queue_type": "system",
+  "request_id": "26feec08-8dd9-4e89-b09f-e9a1cbba8711",
+  "success": true,
+  "result": {
+   "success": true,
+   "process": "storage",
+   "plugins": {
+    "database": "sink"
+   },
+   "manifest": {
+    "database": {
+     "category": "sink",
+     "version": "0.0.0",
+     "api_version": "1.0",
+     "requires": []
+    }
+   },
+   "count": 1,
+   "failed_imports": {}
+  },
+  "_fence": {
+   "sender": "storage",
+   "inc": 0,
+   "epoch": 0
+  },
+  "_source_channel": "ProcessManager_system",
+  "_receive_info": {
+   "router_id": "router_ProcessManager",
+   "receive_time": 1791051418.8012364
+  }
+ }
+}

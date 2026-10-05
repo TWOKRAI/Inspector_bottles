@@ -1,6 +1,8 @@
 ---
 name: feedback_a_decision_orphans_what_encoded_the_previous_one
 description: "Сознательная правка конфига оставляет артефакты, кодировавшие прежнее решение — и они молчат, пока кто-то не прогонит гейт"
+module: "telemetry config, golden snapshots"
+mechanism: "decision-change checklist"
 metadata:
   type: feedback
 ---

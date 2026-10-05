@@ -1,0 +1,233 @@
+[
+  {
+    "plan": "2026-01-01_a",
+    "path": "plans/2026-01-01_a/plan.md",
+    "archived": false,
+    "lane": "С",
+    "tier": "queue",
+    "done": 1,
+    "total": 3,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [
+      {
+        "id": "1.1",
+        "title": "x1",
+        "status": "done",
+        "ref": null,
+        "after": [],
+        "ready": false
+      },
+      {
+        "id": "1.2",
+        "title": "x2",
+        "status": "pending",
+        "ref": null,
+        "after": [],
+        "ready": true
+      },
+      {
+        "id": "1.3",
+        "title": "x3",
+        "status": "pending",
+        "ref": null,
+        "after": [],
+        "ready": true
+      }
+    ],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": true,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  },
+  {
+    "plan": "2026-01-02_b",
+    "path": "plans/2026-01-02_b/plan.md",
+    "archived": false,
+    "lane": "С",
+    "tier": "queue",
+    "done": 0,
+    "total": 1,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [
+      {
+        "id": "1.1",
+        "title": "x1",
+        "status": "pending",
+        "ref": null,
+        "after": [],
+        "ready": true
+      }
+    ],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": true,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  },
+  {
+    "plan": "2026-01-03_w",
+    "path": "plans/2026-01-03_w/plan.md",
+    "archived": false,
+    "lane": null,
+    "tier": "waiting",
+    "done": 0,
+    "total": 0,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": true,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  },
+  {
+    "plan": "2026-01-06_c",
+    "path": "plans/2026-01-06_c/plan.md",
+    "archived": false,
+    "lane": null,
+    "tier": "closed",
+    "done": 1,
+    "total": 1,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [
+      {
+        "id": "1.1",
+        "title": "x1",
+        "status": "done",
+        "ref": null,
+        "after": [],
+        "ready": false
+      }
+    ],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": false,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  },
+  {
+    "plan": "2026-01-04_u",
+    "path": "plans/2026-01-04_u/plan.md",
+    "archived": false,
+    "lane": null,
+    "tier": null,
+    "done": 1,
+    "total": 2,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [
+      {
+        "id": "1.1",
+        "title": "x1",
+        "status": "pending",
+        "ref": null,
+        "after": [],
+        "ready": true
+      },
+      {
+        "id": "1.2",
+        "title": "x2",
+        "status": "done",
+        "ref": null,
+        "after": [],
+        "ready": false
+      }
+    ],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": true,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  },
+  {
+    "plan": "2026-01-01_a",
+    "path": "plans/_archive/2026-Q1/2026-01-01_a/plan.md",
+    "archived": true,
+    "lane": "С",
+    "tier": "queue",
+    "done": 2,
+    "total": 2,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [
+      {
+        "id": "1.1",
+        "title": "x1",
+        "status": "done",
+        "ref": null,
+        "after": [],
+        "ready": false
+      },
+      {
+        "id": "1.2",
+        "title": "x2",
+        "status": "done",
+        "ref": null,
+        "after": [],
+        "ready": false
+      }
+    ],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": false,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  },
+  {
+    "plan": "2026-01-05_z",
+    "path": "plans/_archive/2026-Q1/2026-01-05_z/plan.md",
+    "archived": true,
+    "lane": null,
+    "tier": null,
+    "done": 0,
+    "total": 0,
+    "dropped": 0,
+    "unknown": 0,
+    "unmarked": 0,
+    "header_status": null,
+    "tasks": [],
+    "after": [],
+    "after_reason": "",
+    "waiting_on": [],
+    "ready": false,
+    "dep_unknown": [],
+    "dep_cycle": [],
+    "active": [],
+    "branches": []
+  }
+]

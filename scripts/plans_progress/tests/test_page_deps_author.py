@@ -158,7 +158,7 @@ def test_header_done_plan_gets_header_conflict_chip_and_no_dependency_chips(page
 
 def test_same_shape_plan_in_queue_is_ready_and_in_waiting_is_not(page_of):
     raw = page_of({"p-q": _plan(after="—"), "p-w": _plan(after="—")}, tier41=["p-q"], tier42=["p-w"])
-    assert 'data-plan="p-q" data-tier="4.1" data-lane="С" data-ready="true"' in raw
+    assert 'data-plan="p-q" data-tier="queue" data-lane="С" data-ready="true"' in raw
     assert "data-ready" not in _summary(raw, "p-w")
     assert 'data-chip="ready"' not in _summary(raw, "p-w")
 
@@ -324,4 +324,4 @@ def test_real_tree_summary_and_data_ready_agree(progress, tmp_path):
     if _ready_text(raw) == UNDEFINED:
         assert ready == []
     else:
-        assert all('data-tier="4.1"' in tag for tag in ready)
+        assert all('data-tier="queue"' in tag for tag in ready)

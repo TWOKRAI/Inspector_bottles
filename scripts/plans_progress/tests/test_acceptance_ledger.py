@@ -10,6 +10,11 @@ Task 1.0 плана. Ожидаемые числа — литералы из п�
 
 from __future__ import annotations
 
+import pytest
+
+# Task 4.1: каждый тест — в обоих режимах summarize_plan (корень без парсера / с копией парсера).
+pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+
 
 # --------------------------------------------------------------------------- фикстуры a/b/c/d
 

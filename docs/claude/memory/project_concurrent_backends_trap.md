@@ -1,7 +1,9 @@
 ---
 name: concurrent-backends-shared-resources-trap
 description: "Два бэкенда в одном тест-прогоне конфликтуют через глобальные ресурсы — PID-реестр (исправлено в harness, Ф1.9) и SHM-cleanup при старте (латентно)"
-metadata: 
+module: "process_manager, shm"
+mechanism: "global-resource-in-tests"
+metadata:
   node_type: memory
   type: project
   originSessionId: b684f924-d860-4625-928f-7923c5c9b43f
@@ -29,3 +31,7 @@ metadata:
 уникальность порта И что не появилось новых глобальных ресурсов (PID-файл, SHM, лог-пути,
 env: BACKEND_CTL_PORT/INSPECTOR_PID_FILE мутируются каждым harness.start()).
 Связь: [[feedback-backend-ctl-for-agents]].
+
+## Дополнение A5 (аудит 2026-10-04, из constructor_master)
+
+Живые пробники с BackendHarness — только файлом (spawn не работает из stdin); свой порт >= 8770, свой `INSPECTOR_PID_FILE`; `app.yaml` — артефакт лаунчера, в коммит не брать.

@@ -1,6 +1,8 @@
 ---
 name: feedback-ready-signal-meant-less-than-read
 description: "Сигнал «готов» означал «инициализирован», а читали его как «умеет принимать команды» — команда в окно терялась молча"
+module: "process_module"
+mechanism: "readiness"
 metadata:
   node_type: memory
   type: feedback

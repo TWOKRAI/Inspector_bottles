@@ -1,6 +1,8 @@
 ---
 name: feedback-second-consumer-reveals-the-defect
 description: Дефект общего механизма может быть невидим, пока у него один-два потребителя; подключение третьего вскрывает его — и это довод подключать, а не откладывать
+module: "logger_module"
+mechanism: "singleton lifecycle"
 metadata:
   type: feedback
 ---

@@ -1,0 +1,111 @@
+"""Зонды волны 4 на stand.yaml 1080p@100 (every на processor/inspector, transit 0).
+
+5.8s: cycle_duration_ms исполнителя processor, 30 отсчётов шагом 1 с -> медиана (сверка с investigator «cycle med»).
+5.8a: plugin_ms плагина database (introspect_plugins storage) и cycle_duration_ms исполнителя storage, 30 отсчётов.
+Запуск из корня worktree: python <файл> <tag> <out_dir>
+"""
+from __future__ import annotations
+
+import json
+import os
+import statistics
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+TREE = Path.cwd()
+sys.path.insert(0, str(TREE))
+
+from scripts.stand_gate.run import _payload, render  # noqa: E402
+
+
+def executor(drv, proc: str) -> dict:
+    st = _payload(drv.introspect_status(proc)) or {}
+    return (st.get("workers") or {}).get("pipeline_executor") or {}
+
+
+def find_plugin_ms(obj, path=""):
+    """Все числовые ключи, содержащие 'ms', на любой глубине, с путём (формат ответа заранее неизвестен)."""
+    out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{path}.{k}" if path else str(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and "ms" in p:
+                out[p] = v
+            else:
+                out.update(find_plugin_ms(v, p))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out.update(find_plugin_ms(v, f"{path}[{i}]"))
+    return out
+
+
+def main() -> int:
+    tag, out_dir = sys.argv[1], Path(sys.argv[2])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for k in [k for k in os.environ if k.startswith("FW_SHM_")]:
+        del os.environ[k]
+    from backend_ctl.harness import BackendHarness
+
+    case_dir = Path(tempfile.mkdtemp(prefix=f"probe58_{tag}_"))
+    (case_dir / "logs").mkdir()
+    recipe = render(TREE, case_dir, 0)
+    res: dict = {"tag": tag, "case_dir": str(case_dir), "samples": []}
+    h = BackendHarness(recipe=recipe, port=8775, ready_timeout=90, log_dir=case_dir / "logs")
+    drv = h.start()
+    try:
+        time.sleep(10)
+        raw = drv.introspect_plugins("storage")
+        res["plugins_raw_first"] = raw
+        t0 = time.perf_counter()
+        for i in range(30):
+            t_s = t0 + i * 1.0
+            time.sleep(max(0.0, t_s - time.perf_counter()))
+            pe_p, pe_s = executor(drv, "processor"), executor(drv, "storage")
+            try:
+                lv = drv.introspect_telemetry("storage")
+                ms = find_plugin_ms(lv)
+                ms = {k: v for k, v in ms.items() if "plugin_ms" in k}
+            except Exception as exc:  # noqa: BLE001
+                ms = {"error": str(exc)}
+            if i == 0:
+                res["storage_workers_first"] = (_payload(drv.introspect_status("storage")) or {}).get("workers")
+            res["samples"].append(
+                {
+                    "t": round(time.perf_counter() - t0, 2),
+                    "proc_cycle_ms": pe_p.get("cycle_duration_ms"),
+                    "proc_cycles": pe_p.get("cycles"),
+                    "stor_cycle_ms": pe_s.get("cycle_duration_ms"),
+                    "stor_cycles": pe_s.get("cycles"),
+                    "stor_lag_dropped": pe_s.get("lag_dropped_items"),
+                    "plugin_ms": ms,
+                }
+            )
+    finally:
+        h.stop()
+    (out_dir / f"{tag}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    s = res["samples"]
+    pc = [x["proc_cycle_ms"] for x in s if isinstance(x["proc_cycle_ms"], (int, float))]
+    pc2 = pc[::2]
+    sc = [x["stor_cycle_ms"] for x in s if isinstance(x["stor_cycle_ms"], (int, float))]
+    print(f"{tag}: processor cycle_ms n={len(pc)} med={statistics.median(pc) if pc else None}"
+          f" | шаг 2 с n={len(pc2)} med={statistics.median(pc2) if pc2 else None}")
+    print(f"  storage cycle_ms n={len(sc)} med={statistics.median(sc) if sc else None}")
+    dp = s[-1]["proc_cycles"] - s[0]["proc_cycles"] if s and s[0]["proc_cycles"] is not None else None
+    print(f"  processor Δcycles/окно={dp} за {s[-1]['t'] - s[0]['t'] if s else 0} с;"
+          f" storage lag_dropped {s[0]['stor_lag_dropped']} -> {s[-1]['stor_lag_dropped']}")
+    print("  plugin_ms keys (sample 0):", json.dumps(s[0]["plugin_ms"], ensure_ascii=False)[:600])
+    db = [v for x in s for k, v in x["plugin_ms"].items() if k.endswith("database") and isinstance(v, (int, float))]
+    if db and sc:
+        print(f"  database plugin_ms n={len(db)} med={statistics.median(db)}"
+              f" -> доля медиан {statistics.median(db) / statistics.median(sc):.0%}")
+    sw = res.get("storage_workers_first") or {}
+    for wn, ws in sw.items():
+        if isinstance(ws, dict):
+            print(f"  storage worker {wn}: " + ", ".join(f"{k}={ws[k]}" for k in sorted(ws) if "lag" in k or "drop" in k or k in ("cycles", "effective_hz")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

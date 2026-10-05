@@ -1,6 +1,8 @@
 ---
 name: feedback-a-number-without-spread-across-repeats-is-an-observation
 description: Замер без разброса по >=3 повторам — наблюдение, а не число; три прогона одного кода дали 118.7, 48.8 и 0.5 мкс, и «дефект» не существовал
+module: "BoundedChannel/telemetry"
+mechanism: "perf-measurement"
 metadata:
   type: feedback
 ---

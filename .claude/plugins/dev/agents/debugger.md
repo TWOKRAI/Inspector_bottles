@@ -2,7 +2,9 @@
 name: debugger
 description: Diagnose failing tests and runtime errors. Reproduces the bug, finds root cause, fixes within scope (1-5 lines). For cross-module architectural issues → investigator (Opus).
 model: sonnet
+omitClaudeMd: true
 skills: project-rules, verify-done, systematic-debugging
+disallowedTools: mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__graphify, mcp__sentrux, mcp__serena
 memory: project
 ---
 
@@ -20,7 +22,7 @@ Your goal — **find root cause and fix it** (if in scope).
 
 ## Before starting
 
-1. Read `CLAUDE.md` — project architecture and rules
+1. Open the rows of the `project-rules` `## Map` your task triggers — architecture, key paths, rules of the area you edit
 2. Read `.claude/modes/_stack.md` — test framework, layers, project conventions
 3. Get input data: bug description, stack trace, reproduction command, recent changes (`git log -5`, `git diff HEAD~1`)
 4. Read the code under test and related test
@@ -37,6 +39,7 @@ Your goal — **find root cause and fix it** (if in scope).
    - Run specific test: `pytest <path>::<test> -v -x`
    - Or run scenario manually via Bash
    - If not reproducible — STOP, report to Director what needs clarification
+   - Before diagnosing a red test as a regression, run it on `main` (a worktree, not a stash)
 2. **Gather evidence**:
    - Apply MCP routing above — codegraph/qex/context7 as primary.
    - Stack trace — which line, what error type.

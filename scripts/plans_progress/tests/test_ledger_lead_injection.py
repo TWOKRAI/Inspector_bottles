@@ -7,6 +7,11 @@ L10: «имя плана проверяется раньше "готов"» де
 
 from __future__ import annotations
 
+import pytest
+
+# Task 4.1: каждый тест — в обоих режимах summarize_plan (корень без парсера / с копией парсера).
+pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+
 SECTION = "## Порядок выполнения\n\n"
 
 

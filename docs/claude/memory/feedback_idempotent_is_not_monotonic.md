@@ -1,6 +1,8 @@
 ---
 name: feedback-idempotent-is-not-monotonic
 description: Идемпотентность защищает от дубля, но не от «стейл после свежего» — второй путь доставки обязан иметь дисциплину порядка
+module: "process_module (fan-out delivery)"
+mechanism: "ordering"
 metadata:
   type: feedback
 ---

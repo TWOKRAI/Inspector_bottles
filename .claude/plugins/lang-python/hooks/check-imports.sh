@@ -1,4 +1,10 @@
 #!/bin/bash
+# FROZEN 2026-10-04: removed from plugin.json and settings.json; do not wire it back. Measured in
+# plans/2026-10-03_commit-mechanism/tasks/1.4.md. On Windows the `read -r TOOL FILE < <($PY ...)` parse keeps a
+# trailing \r in FILE, so the `*.py` test fails and the hook exits before it does any work. Alive, it only runs
+# py_compile (it checks no imports) and prints plain text to stdout, which the agent never sees; it duplicates the
+# ruff `invalid-syntax` report of autoformat-python.sh, except under .claude/, robot/ and docs/claude/frozen/, where
+# pre-commit `debug-statements` catches the syntax error at commit. It costs 0.2-0.33 s on every edit of any file.
 # PostToolUse hook: проверка синтаксиса Python после Edit/Write
 # Неблокирующий (exit 0 всегда)
 

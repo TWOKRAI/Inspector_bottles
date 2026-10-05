@@ -1,6 +1,7 @@
 ---
 name: project-pipeline-recipe-driven-launch
 description: "Owner direction — editor produces topology, backend runs it recipe-driven, must work headless without GUI"
+module: "pipeline/recipes"
 metadata:
   node_type: memory
   type: project

@@ -1,5 +1,5 @@
 ---
-description: One-command project status snapshot — plans, architecture, tests, map, recent activity, memory.
+description: "One-shot project status: plans, architecture, tests, map, recent activity, memory. Call first when picking up a project or a plan."
 ---
 
 Assemble a compact, single-screen snapshot of project state for the orchestrator

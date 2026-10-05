@@ -1,6 +1,8 @@
 ---
 name: feedback_symmetric_names_with_different_periods
 description: "Одноимённые величины с РАЗНЫМИ периодами хуже названной асимметрии: первое читается неверно молча"
+module: "telemetry (get_stats)"
+mechanism: "naming"
 metadata:
   node_type: memory
   type: feedback
@@ -29,4 +31,4 @@ metadata:
 смотреть» по нему слепла бы к прошлым потерям.
 
 Родня: [[feedback_one_function_two_positions]], [[feedback_named_mechanism_is_not_a_commitment]],
-[[feedback_guard_on_existence_is_not_a_guard_on_content]].
+[[feedback_zone_guard_never_closes_the_class]].

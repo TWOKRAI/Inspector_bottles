@@ -1,5 +1,5 @@
 ---
-description: Slice the graphify graph at a module boundary — who depends on the module, what it depends on, and whether the snapshot is stale
+description: "Slice the graphify graph at a module boundary: who depends on the module and what it depends on; says if the snapshot is stale. Call before refactoring a module."
 ---
 
 A slice of the `graphify-out/graph.json` graph at a module boundary — before a refactor, so you

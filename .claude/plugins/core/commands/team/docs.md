@@ -1,5 +1,5 @@
 ---
-description: Run the Docs-Writer agent (Haiku) — write/update documentation
+description: "Run the docs-writer agent (Haiku) for simple docs: docstrings, README, STATUS. Call for routine documentation."
 ---
 
 Launch the **docs-writer** agent (subagent_type: "docs-writer", model: haiku).

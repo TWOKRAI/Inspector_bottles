@@ -1,14 +1,6 @@
 ---
 name: property-testing
-description: >
-  Property-based testing with Hypothesis. Activates when a test would assert a
-  *property* that must hold across a whole class of inputs — round-trips
-  (encode/decode, save/load), invariants (sorted output stays ordered), oracles
-  (a fast impl agrees with a slow reference), or idempotence — rather than a
-  handful of hand-picked examples. Use to harden parsers, serializers, numeric
-  code, data-structure logic, and any pure function with a clear contract.
-  Triggers: "property test", "property-based", "Hypothesis", "@given", "fuzz
-  this function", "generate random inputs", "find edge cases".
+description: Hypothesis property-based tests for round-trips, invariants, oracles and idempotence over a class of inputs. Use for parsers, serializers, numeric code, pure functions with a clear contract; to fuzz and find edge cases.
 ---
 
 # Property-based testing (Hypothesis)

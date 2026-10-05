@@ -1,6 +1,8 @@
 ---
 name: feedback_refusal_after_the_write_poisons_the_neighbour
 description: "Отказ, пришедший ПОСЛЕ записи в общий слой, ломает не свою плоскость, а соседнюю — и надолго"
+module: "telemetry/config layers"
+mechanism: "layer-L3"
 metadata:
   node_type: memory
   type: feedback

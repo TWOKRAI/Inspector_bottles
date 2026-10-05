@@ -1,5 +1,5 @@
 ---
-description: Show plan status — task completion progress
+description: Show task completion progress of the current plan. Call to see what is done and what is next.
 ---
 
 Show progress across plans:

@@ -1,6 +1,8 @@
 ---
 name: project_switch_routing_stale
 description: После switch рецепта параметры молча не доходят — стейл-PSR GUI (старые очереди); фикс через PM-хаб
+module: "recipe switch, process_state_registry"
+mechanism: "stale-copy-after-switch"
 metadata:
   type: project
 ---
@@ -13,4 +15,4 @@ metadata:
 
 **How to apply:** фикс — маршрутизировать GUI-исходящие live-команды (register_update + action-команды плагинов) ЧЕРЕЗ PM-хаб (GUI→PM→target по свежему PSR PM), reuse `reply_to_request` (ADR-COMM-005, видимая ошибка вместо тихого дропа). НЕ костыли: не «переиспользовать очереди» (небезопасно при terminate — залоченный rlock), не «требовать перезапуск». Доработка существующего транспортного хаба. Полный диагноз: docs/audits/2026-06-16_switch-routing-stale.md.
 
-Связано: [[project_graceful_stop_debt]] (отдельная проблема — лаг switch; стейл-PSR возникает и при чистом стопе), [[project_recipe_hotswap]], [[project_command_result_bridge]], [[feedback_fix_framework_forward]].
+Связано: [[project_graceful_stop_debt]] (отдельная проблема — лаг switch; стейл-PSR возникает и при чистом стопе), [[project_recipe_hotswap]], [[project_command_result_bridge]], [[feedback_framework_first]].

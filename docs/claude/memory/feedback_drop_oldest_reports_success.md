@@ -1,6 +1,8 @@
 ---
 name: feedback_drop_oldest_reports_success
 description: "Кольцо с drop_oldest отвечает «success», вытеснив чужую запись — судить по приросту счётчика, а не по статусу"
+module: "observability hub (BoundedChannel)"
+mechanism: "success-value-vs-fact"
 metadata:
   node_type: memory
   type: feedback
@@ -33,4 +35,4 @@ metadata:
 - Формулируя приёмочную арифметику, спрашивать: «а если приёмник вытеснил — какое
   слагаемое это покажет?». Если никакое — арифметика сойдётся при потере.
 - Родня: [[feedback_false_alarm_traded_for_silent_loss]],
-  [[feedback_fake_that_always_succeeds_mutes_the_gate]], [[project_kind_channels_dead_evict_branch]].
+  [[feedback_a_faithful_fake_still_lacks_the_protocol]], [[project_kind_channels_dead_evict_branch]].

@@ -3,6 +3,8 @@ name: Qt widget editing patterns
 description: Critical Qt/PySide6 patterns for inline editing in QTreeWidget — setFlags recursion, blockSignals, EditTriggers
 type: feedback
 originSessionId: 1223cca6-a6d2-4550-a4ca-364f8450e68a
+module: "frontend_module"
+mechanism: "QTreeWidget"
 ---
 ## QTreeWidget inline editing — три ловушки
 

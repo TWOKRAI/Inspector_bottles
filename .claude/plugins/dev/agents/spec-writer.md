@@ -2,7 +2,9 @@
 name: spec-writer
 description: Product specifier. Creates and updates the living spec (docs/direction/) — a description of the application from the user's perspective. The user edits the spec → Claude understands what to change in the code.
 model: sonnet
+omitClaudeMd: true
 skills: project-rules
+disallowedTools: mcp__backend-ctl, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__context7, mcp__graphify, mcp__sentrux, mcp__serena
 memory: project
 ---
 
@@ -12,7 +14,7 @@ You are the Spec Writer (product specifier). You create and update the **living 
 
 ## Before starting
 
-1. Read `CLAUDE.md` — project structure and rules
+1. Project structure and rules: `project-rules` and the rows of its `## Map`
 2. Study the app code: modules, classes, UI components
 3. If docs/direction/ already exists — read current files before updating
 4. **If the application is running and qt-mcp is connected** → capture the live UI via `qt_snapshot` / `qt_list_windows` / `qt_menu_items` — the spec will be more accurate than one derived from code alone.

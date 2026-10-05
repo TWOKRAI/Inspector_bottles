@@ -1,5 +1,6 @@
 ---
 description: Meta-audit of .claude/ — agent/command frontmatter, orphaned slash scripts, MEMORY links, hooks
+disable-model-invocation: true
 ---
 
 Run an audit of the `.claude/` infrastructure:

@@ -5,7 +5,7 @@
 
     python scripts/plans_progress/plans_progress.py [--root DIR] [--order PATH]
         [--json] [--html [PATH]] [--check] [--baseline PATH] [--sync-order]
-        [--who] [--now ISO] [--active-window N[mhd]]
+        [--who] [--now ISO] [--active-window N[mhd]] [--branch-window N[mhd]]
 
 * ``--root DIR``   каталог с ``plans/`` и ``plans/_archive/`` (по умолчанию корень репозитория);
 * ``--order PATH`` ``ORDER.md`` (по умолчанию ``<root>/plans/queue/ORDER.md``); файла нет -> полосы
@@ -17,11 +17,14 @@
   ``after_reason`` (текст после `` — ``); ``(после N.M)`` у пункта -> ``tasks[].after``;
   ``ready`` — можно брать в работу (см. README); ``dep_unknown``/``dep_cycle`` — имена планов;
   ``active`` — worktree со свежим сигналом журнала, привязанные к плану: ``{branch, worktree, via,
-  sessions, agents, last_signal}``;
+  sessions, agents, last_signal}``; ``branches`` (последний ключ) — актуальные локальные ветки сверх ``main``,
+  тронувшие план: ``[{branch, done, total}]`` по имени ветки, числа — слияние по задачам (см. README);
 * ``--who``       stdout: только ``{"active": [...], "orphans": [...]}`` (активные с ``plan`` и без плана);
   не сочетается с ``--json``/``--html``/``--check``/``--sync-order`` (exit 2);
 * ``--now ISO``   «сейчас» для окна (местное, без пояса); ``--active-window N[mhd]`` — окно свежести (``6h``);
   неверное значение -> exit 2;
+* ``--branch-window N[mhd]`` окно свежести вершины ветки для ``branches`` (``3d``); неверное -> exit 2 в любом режиме;
+  ветки считаются только для ``--json`` и ``--html``;
 * ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``);
 * ``--check``      печатает находки линта; exit 1, если есть блокирующая находка вне базы;
 * ``--baseline P`` файл строк ``<план>:<КОД>`` (``<план>:<КОД>:<id>`` для UNKNOWN_STATUS и
@@ -49,6 +52,8 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -74,11 +79,13 @@ DROPPED = ("deferred", "superseded")
 _WORD_RE = re.compile(r"(?<![\w-])(IN[ _]PROGRESS|DONE|PENDING|BLOCKED|DEFERRED|SUPERSEDED|SKIPPED|CANCELLED)(?![\w-])")
 _SNYATA_RE = re.compile(r"(?<![\w-])СНЯТА(?![\w-])")
 
-# Id задачи (эталон): 1.3, 1.3a, 1b.2a, 1b.2b-pre, 1.3h-c-fix, T1.
-ID_PATTERN = r"[A-Z]{0,2}[0-9]+[a-z]?(?:\.[0-9]+[a-z]*)?(?:-[a-z0-9]+)*"
+# Id задачи (эталон): 1.3, 1.3a, 1.2.3, 1b.2a, 1b.2b-pre, 1.3h-c-fix, T1, ABC1. Та же строка — в validate_commit
+# (`TASK_ID_PATTERN`) и plans_ledger (`_TASK_ID`): модули автономны, строку копируют, контракт-тест сверяет пять копий.
+ID_PATTERN = r"[A-Z]{0,3}[0-9]{1,3}[a-z]?(?:\.[0-9]+[a-z]?)*(?:-[a-z0-9]+)*"
 ID_RE = re.compile(ID_PATTERN)
-# Конец id: пробел или `: ~ * , ;`, точка не перед цифрой (`1.4.`), конец строки.
-_ID_END = r"(?=[\s:~*,;]|\.(?!\d)|$)"
+# Конец id: пробел или `: ~ * , ;`, точка не перед символом id (`1.4.` в конце фразы — id `1.4`; `T2.K`, `5.10.g`
+# не усекаются до `T2` и `5.10`, а дают TASK_ID_UNPARSED), конец строки.
+_ID_END = r"(?=[\s:~*,;]|\.(?!\w)|$)"
 
 ITEM_RE = re.compile(
     r"^(?P<indent>[ \t]*)[-*+][ \t]+(?P<cb>\[[ xX]\][ \t]+)?(?P<pre>(?:\*\*|~~|__)*)"
@@ -93,7 +100,7 @@ UNPARSED_ITEM_RE = re.compile(
     r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?(?:\*\*|~~|__)*Task[ \t]+(?P<tok>\S*\d\S*)"
 )
 UNPARSED_HEAD_RE = re.compile(r"^(?:\*\*)?Task[ \t]+(?P<tok>\S*\d\S*)")
-STATUS_LINE_RE = re.compile(r"\*\*Статус:?\*\*:?[ \t]*(?P<rest>.*)$")
+STATUS_LINE_RE = re.compile(r"\*\*(?:Статус|Status):?\*\*:?[ \t]*(?P<rest>.*)$")
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[(?P<mark>[ xX])\]")
 HASH_RE = re.compile(r"`([0-9a-f]{7,40})`")
 PHASE_FILE_RE = re.compile(r"^phase-(\d+)[a-z]?(?:-[^.]*)?\.md$")
@@ -145,7 +152,11 @@ class Plan:
     waiting_on: list[str] = field(default_factory=list)  # условия `⛔ …` из поля `После:`
     has_after_field: bool = False  # в первых 30 строках есть строка `После:`, даже `—`; в --json не выводится
     header_branch: str = ""  # ветка из строки `Ветка:` / `Branch:` шапки; в --json не выводится
+    branch_claim: str = ""  # ветка для находки BRANCH_MISSING (значение поля начинается с `тип/имя`); в --json нет
     active: list[dict] = field(default_factory=list)  # worktree со свежим сигналом, привязанные к плану
+    branches: list[dict] = field(default_factory=list)  # актуальные ветки, тронувшие план: {branch, done, total}
+    priority: int | None = None  # наименьший `#` из таблицы «Снимок» ORDER.md; в --json не выводится
+    priority_row: SnapRow | None = None  # строка таблицы с этим `#`
     ready: bool = False  # заполняет resolve_deps
     dep_unknown: list[str] = field(default_factory=list)  # имена из `after`, которых нет среди планов
     dep_cycle: list[str] = field(default_factory=list)  # участники цикла, в котором стоит этот план
@@ -435,12 +446,8 @@ _BRANCH_LINE_RE = re.compile(
 _BRANCH_TOKEN_RE = re.compile(r"[^\s`,;()]+(?:/[^\s`,;()]+)+")
 
 
-def find_header_branch(text: str) -> str:
-    """Ветка из первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет — `""`.
-
-    Разметка `- **…:**` и обратные кавычки допустимы; берётся первый токен вида `тип/имя`, хвост
-    (`— трек`, `(от main)`) отброшен.
-    """
+def _header_branch_value(text: str) -> str | None:
+    """Значение первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет строки — `None`."""
     in_fence = False
     for line in text.split("\n")[:30]:
         if FENCE_RE.match(line):
@@ -448,9 +455,37 @@ def find_header_branch(text: str) -> str:
             continue
         m = None if in_fence else _BRANCH_LINE_RE.match(line)
         if m:
-            tok = _BRANCH_TOKEN_RE.search(m.group("rest").replace("`", ""))
-            return tok.group(0).rstrip(".") if tok else ""
-    return ""
+            return m.group("rest")
+    return None
+
+
+def find_header_branch(text: str) -> str:
+    """Ветка из первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет — `""`.
+
+    Разметка `- **…:**` и обратные кавычки допустимы; берётся первый токен вида `тип/имя`, хвост
+    (`— трек`, `(от main)`) отброшен.
+    """
+    rest = _header_branch_value(text)
+    if rest is None:
+        return ""
+    tok = _BRANCH_TOKEN_RE.search(rest.replace("`", ""))
+    return tok.group(0).rstrip(".") if tok else ""
+
+
+def find_branch_claim(text: str) -> str:
+    """Ветка, которую план называет своей для находки BRANCH_MISSING; нет — `""`.
+
+    Строже `find_header_branch`: значение поля после снятия `` ` `` и `**` должно НАЧИНАТЬСЯ с токена `тип/имя`.
+    `main — короткие ветки (docs/…)` ветки не называет, токен с `<`, `>`, `…`, `*` — шаблон.
+    """
+    rest = _header_branch_value(text)
+    if rest is None:
+        return ""
+    tok = _BRANCH_TOKEN_RE.match(rest.replace("`", "").replace("**", "").lstrip())
+    if not tok:
+        return ""
+    name = tok.group(0).rstrip(".")
+    return "" if any(c in name for c in "<>…*") else name
 
 
 def find_bare_word(text: str) -> str | None:
@@ -474,7 +509,8 @@ class Item:
 
 
 # `(после 1.1, 1.0)` / `(after 1.1)`: регистр не важен только у слова, id — по эталону; после id не должно
-# стоять символа id (`1.2B` — не id `1.2`) и `.символ` (`1.2.3`, `1.2.a`, `T2.W` — не id); дата `2026-09-25` — не id.
+# стоять символа id (`1.2B` — не id `1.2`) и `.символ` (`T2.W`, `5.10.g` — не id; `(после 1.2.3)` — id `1.2.3`);
+# дата `2026-09-25` — не id.
 _AFTER_ID = r"(?!\d{4}-\d{2}-\d{2})" + ID_PATTERN + r"(?![\w-]|\.\w)"
 TASK_AFTER_RE = re.compile(r"\((?i:после|after)[ \t]+(" + _AFTER_ID + r"(?:[ \t]*,[ \t]*" + _AFTER_ID + r")*)")
 
@@ -753,6 +789,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     plan.after, plan.waiting_on, plan.after_reason = find_after(main_text)
     plan.has_after_field = after_field_value(main_text) is not None
     plan.header_branch = find_header_branch(main_text)
+    plan.branch_claim = find_branch_claim(main_text)
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
@@ -867,6 +904,9 @@ class OrderRow:
 
 
 _TIER_HEAD_RE = re.compile(r"^#{2,6}[ \t]+4\.([123])(?!\d)")
+# раздел ORDER.md -> значение `tier` (--json, страница); обратная таблица строится из той же — адрес для бейджа и списка
+TIER_BY_SECTION = {"4.1": "queue", "4.2": "waiting", "4.3": "closed"}
+SECTION_BY_TIER = {tier: section for section, tier in TIER_BY_SECTION.items()}
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
 
@@ -894,7 +934,7 @@ def parse_order(path: Path) -> list[OrderRow]:
         hm = HEADING_RE.match(line)
         if hm:
             tm = _TIER_HEAD_RE.match(line)
-            tier = f"4.{tm.group(1)}" if tm else None
+            tier = TIER_BY_SECTION[f"4.{tm.group(1)}"] if tm else None
             continue
         if tier is None or not line.lstrip().startswith("|"):
             continue
@@ -911,11 +951,11 @@ def parse_order(path: Path) -> list[OrderRow]:
         def cell(i: int) -> str:
             return clean_md(cells[i]) if len(cells) > i else ""
 
-        if tier == "4.1":
+        if tier == "queue":
             lane_raw = cell(1)
             lane = None if lane_raw in ("", "—", "-", "–") else lane_raw
             info = [("Статус", cell(2)), ("Следующий шаг", cell(3))]
-        elif tier == "4.2":
+        elif tier == "waiting":
             info = [("Остаток", cell(1)), ("Триггер", cell(2))]
         else:
             info = [("Факт", cell(1))]
@@ -934,6 +974,130 @@ def apply_order(plans: list[Plan], rows: list[OrderRow]) -> None:
             p.tier, p.lane, p.info = r.tier, r.lane, r.info
 
 
+# ----------------------------------------------------------------------------- «Снимок» ORDER.md
+
+
+@dataclass
+class SnapRow:
+    n: int
+    lane: str
+    plan_text: str  # ячейка «План» как простой текст (для строки секции)
+    next_step: str
+    waits: str
+    slugs: list[str] = field(default_factory=list)  # части ячейки «План» вида слага
+
+
+_SNAP_HEAD_RE = re.compile(r"^##[ \t]+Снимок")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9.-]*")
+_SNAP_COLUMNS = {"#": "n", "полоса": "lane", "план": "plan", "следующий шаг": "next", "чего ждёт": "waits"}
+
+
+def _cells(line: str) -> list[str]:
+    cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip())]
+    return cells[1:-1] if cells and cells[0] == "" and cells[-1] == "" else cells
+
+
+def snapshot_slugs(raw_cell: str) -> list[str]:
+    """Имена планов из сырой ячейки «План»: части через `,`; ссылка — имя из пути, иначе текст; только слаги."""
+    out: list[str] = []
+    for part in raw_cell.split(","):
+        part = part.strip()
+        link = _LINK_RE.search(part)
+        name = (_name_from_href(link.group(1)) if link else part.replace("`", "").replace("*", "").strip()) or ""
+        if _SLUG_RE.fullmatch(name) and name not in out:
+            out.append(name)
+    return out
+
+
+def parse_snapshot(path: Path) -> tuple[str, list[SnapRow]]:
+    """Раздел `## Снимок <дата> — …` ORDER.md -> (дата, строки первой таблицы раздела).
+
+    Колонки ищутся по тексту шапки, не по позиции. Строка без целого в `#` пропускается. Нет файла, раздела
+    или колонок `#` / `План` -> строк нет (дата раздела остаётся, если раздел есть).
+    """
+    if not path.is_file():
+        return "", []
+    lines = read_text(path).split("\n")
+    start = next((i for i, ln in enumerate(lines) if _SNAP_HEAD_RE.match(ln)), None)
+    if start is None:
+        return "", []
+    date_m = _DATE_RE.search(lines[start])
+    date = date_m.group(0) if date_m else ""
+    table: list[str] = []
+    for ln in lines[start + 1 :]:
+        if ln.startswith("## "):
+            break
+        if ln.lstrip().startswith("|"):
+            table.append(ln)
+        elif table:
+            break
+    if len(table) < 2:
+        return date, []
+    cols: dict[str, int] = {}
+    for i, c in enumerate(_cells(table[0])):
+        key = _SNAP_COLUMNS.get(clean_md(c).casefold())
+        if key and key not in cols:
+            cols[key] = i
+    if "n" not in cols or "plan" not in cols:
+        return date, []
+    rows: list[SnapRow] = []
+    for ln in table[1:]:
+        cells = _cells(ln)
+
+        def raw(key: str) -> str:
+            i = cols.get(key)
+            return cells[i] if i is not None and i < len(cells) else ""
+
+        number = clean_md(raw("n"))
+        if not re.fullmatch(r"[0-9]+", number):
+            continue
+        rows.append(
+            SnapRow(
+                n=int(number),
+                lane=clean_md(raw("lane")),
+                plan_text=clean_md(raw("plan")),
+                next_step=clean_md(raw("next")),
+                waits=clean_md(raw("waits")),
+                slugs=snapshot_slugs(raw("plan")),
+            )
+        )
+    return date, rows
+
+
+def find_by_slug(plans: list[Plan], slug: str) -> Plan | None:
+    """Точное имя раньше имени с датой `<ГГГГ-ММ-ДД>_<слаг>`; живой раньше архивного; из нескольких — поздняя дата."""
+    dated = re.compile(r"\d{4}-\d{2}-\d{2}_" + re.escape(slug))
+    for matches in (lambda p: p.name == slug, lambda p: bool(dated.fullmatch(p.name))):
+        for archived in (False, True):
+            hits = sorted((p for p in plans if p.archived is archived and matches(p)), key=lambda p: p.name)
+            if hits:
+                return hits[-1]
+    return None
+
+
+def apply_snapshot(plans: list[Plan], rows: list[SnapRow]) -> list[str]:
+    """Приоритет плана = наименьший `#` среди строк, где он назван. Возвращает слаги без плана (без повторов)."""
+    unknown: list[str] = []
+    for row in rows:
+        for slug in row.slugs:
+            plan = find_by_slug(plans, slug)
+            if plan is None:
+                if slug not in unknown:
+                    unknown.append(slug)
+            elif plan.priority is None or row.n < plan.priority:
+                plan.priority, plan.priority_row = row.n, row
+    return unknown
+
+
+def snapshot_findings(unknown: list[str]) -> list[Finding]:
+    """`SNAPSHOT_UNKNOWN` (не блокирует): слаг из «Снимка», которому не нашёлся план."""
+    return [
+        Finding("SNAPSHOT_UNKNOWN", "ORDER.md", None, False, f"в «Снимке» назван план {clean_md(slug, 80)}, его нет")
+        for slug in unknown
+    ]
+
+
 # ----------------------------------------------------------------------------- порядок между планами
 
 TASK_CLOSED = ("done", "deferred", "superseded")
@@ -942,7 +1106,7 @@ TASK_OPEN = ("unknown", "pending", "in_progress", "blocked")
 
 def plan_closed(p: Plan) -> bool:
     """Закрыт: архив, §4.3, шапка done/superseded или есть задачи и ни одной незавершённой."""
-    if p.archived or p.tier == "4.3" or p.header_status in ("done", "superseded"):
+    if p.archived or p.tier == "closed" or p.header_status in ("done", "superseded"):
         return True
     return bool(p.tasks) and not any(t.status in TASK_OPEN for t in p.tasks)
 
@@ -1076,7 +1240,7 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
     for p in plans:
         if p.archived:
             continue
-        in_41 = p.tier == "4.1"
+        in_41 = p.tier == "queue"
         if not p.tasks:
             out.append(Finding("NO_TASKS", p.name, None, in_41, "в плане не найдено ни одной задачи"))
         if p.unclosed_fence:
@@ -1165,10 +1329,10 @@ def trust_suffix(p: Plan) -> str:
 def queue_scope(live: list[Plan]) -> tuple[list[Plan], list[Plan], list[Plan], list[Plan]]:
     """Живые планы по секциям страницы: (очередь §4.1, ждут §4.2, не в ORDER, закрытые §4.3). Порядок сохраняется."""
     return (
-        [p for p in live if p.tier == "4.1"],
-        [p for p in live if p.tier == "4.2"],
+        [p for p in live if p.tier == "queue"],
+        [p for p in live if p.tier == "waiting"],
         [p for p in live if p.tier is None],
-        [p for p in live if p.tier == "4.3"],
+        [p for p in live if p.tier == "closed"],
     )
 
 
@@ -1249,6 +1413,28 @@ def on_main_branch(root: Path) -> bool:
         return os.path.samefile(top, root)
     except OSError:
         return False
+
+
+def branch_findings(plans: list[Plan], root: Path) -> list[Finding]:
+    """BRANCH_MISSING (информационная): живой план называет ветку `тип/имя`, локальной ветки с таким именем нет.
+
+    Зависит от локальных веток машины. Git не зовётся, если ни один живой план не называет ветку; нет git,
+    `root` не верхний каталог репозитория или `git for-each-ref` не ответил — находок нет. Имена веток — из
+    `%(refname)` с снятым `refs/heads/`: `%(refname:short)` при одноимённом теге даёт `heads/<имя>`.
+    """
+    claimed = [p for p in plans if p.branch_claim and not plan_closed(p)]
+    if not claimed or not _is_repo_top(root):
+        return []
+    listing = _git(["for-each-ref", "--format=%(refname)", "refs/heads"], root)
+    if listing is None:
+        return []
+    prefix = "refs/heads/"
+    local = {ln.strip()[len(prefix) :] for ln in listing.splitlines() if ln.strip().startswith(prefix)}
+    return [
+        Finding("BRANCH_MISSING", p.name, None, False, f"ветки {clean_md(p.branch_claim, 80)} нет среди локальных")
+        for p in claimed
+        if p.branch_claim not in local
+    ]
 
 
 def order_block_findings(order: Path, live: list[Plan], archive: list[Plan], root: Path) -> list[Finding]:
@@ -1345,19 +1531,24 @@ def _git(args: list[str], cwd: Path | str) -> str | None:
     return cp.stdout if cp.returncode == 0 else None
 
 
+def _is_repo_top(root: Path) -> bool:
+    """`root` — верхний каталог своего git-репозитория (`os.path.samefile`); вне git и подкаталог — нет."""
+    top = _git(["rev-parse", "--show-toplevel"], root)
+    if not top or not top.strip():
+        return False
+    try:
+        return os.path.samefile(top.strip(), root)
+    except OSError:
+        return False
+
+
 def git_worktrees(root: Path) -> list[tuple[str, str]]:
     """[(путь worktree как в porcelain, ветка)]; ветка `""` на detached HEAD.
 
-    Корни есть только если `root` — верхний каталог своего репозитория (`os.path.samefile`): корень внутри
+    Корни есть только если `root` — верхний каталог своего репозитория (`_is_repo_top`): корень внутри
     чужого репозитория, вне git или подкаталог репозитория дают пустой список. Главное дерево — тоже корень.
     """
-    top = _git(["rev-parse", "--show-toplevel"], root)
-    if not top or not top.strip():
-        return []
-    try:
-        if not os.path.samefile(top.strip(), root):
-            return []
-    except OSError:
+    if not _is_repo_top(root):
         return []
     listing = _git(["worktree", "list", "--porcelain"], root)
     out: list[tuple[str, str]] = []
@@ -1527,10 +1718,369 @@ def attach_active(plans: list[Plan], active: list[tuple[Plan, dict]]) -> None:
         plan.active.append(entry)
 
 
+# ----------------------------------------------------------------------------- ветки против main
+
+DEFAULT_BRANCH_WINDOW = "3d"  # окно свежести вершины ветки (решение владельца 2026-10-03; не измерено)
+MAIN_REF = "refs/heads/main"  # всегда полное имя: тег `main` ломает голое
+
+
+def _unmerged_branches(root: Path) -> dict[str, tuple[str, str]]:
+    """{ветка: (sha вершины, committerdate unix)} локальных веток, у которых `main..<ветка>` не пуст.
+
+    Один вызов `for-each-ref --no-merged`. Нет `refs/heads/main` или git не ответил — пустой словарь.
+    """
+    fmt = "%(refname)%09%(objectname)%09%(committerdate:unix)"  # %09 — табуляция: в имени ссылки её быть не может
+    out = _git(["for-each-ref", f"--no-merged={MAIN_REF}", f"--format={fmt}", "refs/heads/"], root)
+    found: dict[str, tuple[str, str]] = {}
+    for line in (out or "").split("\n"):
+        parts = line.rstrip("\r").split("\t")
+        if len(parts) == 3 and parts[0].startswith("refs/heads/"):
+            found[parts[0][len("refs/heads/") :]] = (parts[1], parts[2])
+    return found
+
+
+def _is_fresh(unix_time: str, now: datetime, window: timedelta) -> bool:
+    """`now - t <= окно` по местному времени; будущее — свежее; дату не разобрать — не свежая."""
+    try:
+        when = datetime.fromtimestamp(int(unix_time))
+    except (ValueError, OverflowError, OSError):
+        return False
+    return now - when <= window
+
+
+def _checked_out_branch(root: Path) -> str:
+    """Ветка, взятая в корне; `""` на detached HEAD."""
+    ref = (_git(["symbolic-ref", "-q", "HEAD"], root) or "").strip()
+    return ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ""
+
+
+def _own_commits(root: Path, branch: str) -> set[str]:
+    """Коммиты `main..<ветка>`; git не ответил — пусто.
+
+    Такая ветка сама остаётся без родителя (корень стека) и проигрывает при выборе родителя по счёту `main..A`,
+    но как кандидат в родители другим веткам не исключается: их собственные множества не пострадали.
+    """
+    out = _git(["rev-list", f"{MAIN_REF}..refs/heads/{branch}", "--"], root)
+    return {line.strip() for line in (out or "").split("\n") if line.strip()}
+
+
+def _merge_base(root: Path, branch: str) -> str | None:
+    out = (_git(["merge-base", MAIN_REF, f"refs/heads/{branch}"], root) or "").strip()
+    return out or None
+
+
+def _stack_parent(branch: str, tips: dict[str, str], own: dict[str, set[str]]) -> str | None:
+    """Родитель ветки среди кандидатов `tips` или None (корень стека).
+
+    A — родитель B, если вершина A входит в `main..B`; при равных вершинах родитель — меньшее имя.
+    Из нескольких родителей — с наибольшим `main..A`, при равенстве — меньшее имя.
+    """
+    parents = [
+        a for a in tips if a != branch and tips[a] in own.get(branch, ()) and (tips[a] != tips[branch] or a < branch)
+    ]
+    return min(parents, key=lambda a: (-len(own.get(a, ())), a)) if parents else None
+
+
+def _touched_paths(root: Path, frm: str, branch: str) -> list[str]:
+    """Пути под `plans/`, изменённые между `frm` и вершиной ветки (без поиска переименований)."""
+    out = _git(["diff", "--name-only", "-z", "--no-renames", frm, f"refs/heads/{branch}", "--", "plans/"], root)
+    return [path for path in (out or "").split("\0") if path]
+
+
+def _plan_root_rel(root: Path, p: Plan) -> str:
+    """Путь плана в репозитории: файл однофайлового плана или каталог (у плана `<имя>/plan.md` — каталог)."""
+    path = root / p.rel
+    if path.is_dir():
+        return p.rel
+    if path.name == "plan.md" and path.parent.name == p.name:
+        return path.parent.relative_to(root).as_posix()
+    return p.rel
+
+
+def _touches(paths: list[str], plan_rel: str) -> bool:
+    """Путь равен плану или лежит в его каталоге (`plans/P2/...` не относится к `plans/P`)."""
+    return any(path == plan_rel or path.startswith(plan_rel + "/") for path in paths)
+
+
+class PlanExportError(Exception):
+    """`git archive` отдал архив, а плана из него получить не удалось (в отличие от «плана в коммите нет»)."""
+
+
+def analyze_plan_at(root: Path, commit: str, plan_rel: str, name: str, archived: bool) -> Plan | None:
+    """План `plan_rel` в коммите, разобранный `analyze_plan`; плана в коммите нет (`git archive` отказал) — None.
+
+    Архив получен, но не распаковался, цели нет или каталог плана пуст (`export-ignore` скрыл все файлы) —
+    `PlanExportError`: это не «плана нет», молча пропускать нельзя.
+
+    `git archive -o <файл>` через `_git` (stdout пуст) и `tarfile` с `filter="data"`: tar из stdout в текстовом
+    режиме теряет файлы при `core.autocrlf=true`. Удаление временного каталога пробуется при любом исходе;
+    ошибка удаления глушится.
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        archive = Path(tmp) / "x.tar"
+        # `:(literal)`: `[`, `*`, `?` в имени плана не шаблон; обычный pathspec без совпадений даёт код 0 и пустой tar
+        if _git(["archive", "--format=tar", "-o", str(archive), commit, "--", f":(literal){plan_rel}"], root) is None:
+            return None
+        tree = Path(tmp) / "tree"
+        tree.mkdir()
+        try:
+            with tarfile.open(archive, "r:") as tar:  # только несжатый tar: другой мы не пишем
+                tar.extractall(tree, filter="data")
+        except tarfile.ReadError as exc:
+            if str(exc) in ("empty file", "end of file header"):  # tarfile так сообщает об архиве без единой записи
+                raise PlanExportError(
+                    "в выгрузке нет файлов плана"
+                ) from exc  # git при export-ignore пишет только pax-шапку
+            raise PlanExportError(f"{type(exc).__name__}: {exc}") from exc
+        except (tarfile.TarError, OSError, ValueError) as exc:
+            raise PlanExportError(f"{type(exc).__name__}: {exc}") from exc
+        target = tree / plan_rel
+        if target.is_dir():
+            if not any(p.is_file() for p in target.rglob("*")):  # git пустых каталогов не хранит: файлы скрыты
+                raise PlanExportError("в выгрузке нет файлов плана")
+            return analyze_plan(name, target / "plan.md", target, plan_rel, archived)
+        if target.is_file():
+            return analyze_plan(name, target, None, plan_rel, archived)
+        raise PlanExportError("в выгрузке нет пути плана")
+
+
+def _status_by_id(plan: Plan | None) -> dict[str, str]:
+    """{id задачи: статус}; повтор id — первая запись; плана нет — пусто."""
+    out: dict[str, str] = {}
+    for t in plan.tasks if plan is not None else ():
+        out.setdefault(t.id, t.status)
+    return out
+
+
+def merge_branch_numbers(base: Plan | None, tip: Plan, disk: Plan) -> tuple[int, int]:
+    """(done, total) ветки: слияние по задачам трёх разборов плана — база (merge-base с main), вершина, диск.
+
+    Задача с диска: вершина = база -> статус диска; иначе диск = база -> статус вершины (отсутствие на вершине —
+    задача выпадает); иначе (изменили обе стороны) -> `done`, если он на вершине или на диске, иначе статус диска.
+    Задачи вершины, которых нет ни в базе, ни на диске, добавляются. Считают те же правила, что у плана.
+    Повтор id: диск перебирается по всем вхождениям (как `Plan.done`), у каждого свой статус диска; база и вершина
+    берутся по id, первая запись, и слияние применяется к первому вхождению; остальные вхождения id остаются
+    со статусом диска.
+    """
+    on_base, on_tip, on_disk = _status_by_id(base), _status_by_id(tip), _status_by_id(disk)
+    merged: list[Task] = []
+    seen: set[str] = set()
+    for disk_task in disk.tasks:  # каждое вхождение, как считает `Plan.done`; база и вершина — по id (первая запись)
+        tid, disk_status = disk_task.id, disk_task.status
+        tip_status, base_status = on_tip.get(tid), on_base.get(tid)  # None — задачи в разборе нет
+        first = tid not in seen
+        seen.add(tid)
+        if not first:
+            status: str | None = disk_status  # слияние относится к первой записи id; повторы остаются как на диске
+        elif tip_status == base_status:
+            status = disk_status
+        elif disk_status == base_status:
+            status = tip_status
+        else:
+            status = "done" if "done" in (tip_status, disk_status) else disk_status
+        if status is not None:
+            merged.append(Task(tid, "", status))
+    merged.extend(Task(tid, "", st) for tid, st in on_tip.items() if tid not in on_base and tid not in on_disk)
+    counted = Plan(disk.name, disk.rel, disk.archived, tasks=merged)
+    return counted.done, counted.total
+
+
+@dataclass
+class BranchPass:
+    """Один проход по веткам против `main`: им пользуются числа 5.5 (`fill_branch_numbers`) и радар (`find_overlaps`).
+
+    `touched` — пути `plans/` каждой ветки, у которой найден merge-base: свежие ветки и ветка корня (окно к ней
+    не применяется). `tips` и `own` — по кандидатам: те же ветки; `own` пуст, если `git rev-list` не ответил.
+    """
+
+    root_branch: str
+    tips: dict[str, str] = field(default_factory=dict)
+    own: dict[str, set[str]] = field(default_factory=dict)
+    bases: dict[str, str] = field(default_factory=dict)
+    touched: dict[str, list[str]] = field(default_factory=dict)
+
+
+def run_branch_pass(root: Path, now: datetime, window: timedelta) -> BranchPass | None:
+    """Проход по веткам или None: нет git, `root` не верхний каталог репозитория, нет `refs/heads/main`, веток нет.
+
+    Актуальная ветка: локальная `refs/heads/<B>` (не `main`), `main..B` не пуст, вершина не старше окна.
+    Ветка, взятая в корне, участвует всегда (кандидат в родители и радар), даже со старой вершиной.
+    Репозиторий не меняется.
+    """
+    if not _is_repo_top(root):
+        return None
+    unmerged = _unmerged_branches(root)
+    if not unmerged:
+        return None
+    root_branch = _checked_out_branch(root)
+    names = {name for name, (_sha, when) in unmerged.items() if _is_fresh(when, now, window)}
+    if root_branch in unmerged:
+        names.add(root_branch)
+    tips = {name: unmerged[name][0] for name in sorted(names)}
+    result = BranchPass(root_branch, tips, {name: _own_commits(root, name) for name in tips})
+    for name in tips:
+        base = _merge_base(root, name)
+        if base is None:
+            continue
+        parent = _stack_parent(name, tips, result.own)
+        touched = _touched_paths(root, tips[parent] if parent else base, name)
+        if parent:
+            # ветка могла влить свежий `main`: diff от родителя тогда несёт и чужие правки `main`; свои правки ветки
+            # видны и от merge-base (у корня стека это тот же вызов, второй diff не нужен)
+            own_touched = set(_touched_paths(root, base, name))
+            touched = [path for path in touched if path in own_touched]
+        result.bases[name] = base
+        result.touched[name] = touched
+    return result
+
+
+def fill_branch_numbers(root: Path, plans: list[Plan], branch_pass: BranchPass | None) -> None:
+    """Заполняет `Plan.branches` актуальными ветками, тронувшими план; записи по имени ветки.
+
+    Ветка, взятая в корне, не выводится. Нет прохода — ничего не заполняется.
+    """
+    if branch_pass is None:
+        return
+    plan_roots = [(p, _plan_root_rel(root, p)) for p in plans]
+    parsed: dict[tuple[str, str], Plan | PlanExportError | None] = {}  # (коммит, путь плана): база общая у веток
+
+    def plan_at(commit: str, plan_rel: str, p: Plan) -> Plan | PlanExportError | None:
+        if (commit, plan_rel) not in parsed:
+            try:
+                parsed[commit, plan_rel] = analyze_plan_at(root, commit, plan_rel, p.name, p.archived)
+            except PlanExportError as exc:
+                parsed[commit, plan_rel] = exc
+        return parsed[commit, plan_rel]
+
+    for name in sorted(branch_pass.touched):
+        if name == branch_pass.root_branch:
+            continue
+        base, touched, tip = branch_pass.bases[name], branch_pass.touched[name], branch_pass.tips[name]
+        for p, plan_rel in plan_roots:
+            if not _touches(touched, plan_rel):
+                continue
+            tip_plan = plan_at(tip, plan_rel, p)
+            if tip_plan is None:  # плана на вершине нет (удалён, перенесён): записи нет, молча
+                continue
+            base_plan = plan_at(base, plan_rel, p)  # None — плана на базе нет: база пуста
+            failed = next((x for x in (tip_plan, base_plan) if isinstance(x, PlanExportError)), None)
+            if failed is not None:
+                reason = " ".join(str(failed).split())[:120]
+                print(
+                    f"предупреждение: ветка {name}, план {plan_rel}: выгрузка есть, разбор не удался ({reason})",
+                    file=sys.stderr,
+                )
+                continue
+            done, total = merge_branch_numbers(base_plan, tip_plan, p)
+            p.branches.append({"branch": name, "done": done, "total": total})
+
+
+def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timedelta) -> None:
+    """Заполняет `Plan.branches` актуальными ветками, тронувшими план (проход `run_branch_pass` + числа).
+
+    Ветка, взятая в корне, — кандидат в родители, но не выводится. Нет git, `root` не верхний каталог
+    репозитория, нет `refs/heads/main` — ничего не заполняется. Репозиторий не меняется.
+    """
+    fill_branch_numbers(root, plans, run_branch_pass(root, now, window))
+
+
+@dataclass
+class Overlap:
+    """Файл плана, который меняют две и более независимые ветки: `branches` — по имени."""
+
+    path: str
+    plan: str
+    plan_rel: str  # `Plan.rel` плана: по нему чип находит свою карточку (имя плана у живого и архивного может совпасть)
+    branches: tuple[str, ...]
+
+
+def _independent(branch_pass: BranchPass, a: str, b: str) -> bool:
+    """Ни одна вершина не входит в `main..<другая>`: ветки не в одном стеке."""
+    tips, own = branch_pass.tips, branch_pass.own
+    return tips[a] not in own[b] and tips[b] not in own[a]
+
+
+def _pair_counts_for(
+    root: Path,
+    branch_pass: BranchPass,
+    a: str,
+    b: str,
+    path: str,
+    bases: dict[tuple[str, str], str | None],
+    diffs: dict[tuple[str, str], set[str]],
+) -> bool:
+    """Независимая пара `a`/`b` засчитывается за `path` (правило 3: общий невлитый предок не в счёт).
+
+    Без общих коммитов `main..a` ∩ `main..b` — засчитывается по вершинам, git не вызывается. С общими:
+    `path` должен быть в diff от `merge-base a b` у обеих веток (правка общего предка до этой точки,
+    ушедшего вперёд или выпавшего из окна, лежит в `touched` обеих, но слияние пары её не несёт).
+    `merge-base` пары не получен — засчитывается (радар лишь предупреждает).
+    Кэш: `merge-base` по паре, diff по (база, ветка).
+    """
+    if not branch_pass.own[a] & branch_pass.own[b]:
+        return True
+    pair = (a, b) if a < b else (b, a)
+    if pair not in bases:
+        out = (_git(["merge-base", f"refs/heads/{pair[0]}", f"refs/heads/{pair[1]}"], root) or "").strip()
+        bases[pair] = out or None
+    base = bases[pair]
+    if base is None:
+        return True
+    for branch in pair:
+        if (base, branch) not in diffs:
+            diffs[(base, branch)] = set(_touched_paths(root, base, branch))
+        if path not in diffs[(base, branch)]:
+            return False
+    return True
+
+
+def find_overlaps(root: Path, plans: list[Plan], branch_pass: BranchPass | None) -> list[Overlap]:
+    """Пересечения по файлам планов, найденных на диске `root`; строки по пути.
+
+    Файл — под `plans/`, равен однофайловому плану или лежит в каталоге плана (`_touches`); служебные файлы
+    (`plans/queue/…`, README, QUEUE) под правило не подходят: их нет среди планов. В радаре участвуют ветки
+    прохода, у которых `main..<ветка>` получен и не пуст. В строке — все ветки, тронувшие файл и имеющие
+    засчитанную независимую пару среди тронувших его (`_pair_counts_for`). Считаются ветки, не корни стеков.
+    """
+    if branch_pass is None:
+        return []
+    plan_roots = [(p, _plan_root_rel(root, p)) for p in plans]
+    by_path: dict[str, set[str]] = {}
+    for name, touched in branch_pass.touched.items():
+        if branch_pass.own.get(name):
+            for path in touched:
+                by_path.setdefault(path, set()).add(name)
+    bases: dict[tuple[str, str], str | None] = {}
+    diffs: dict[tuple[str, str], set[str]] = {}
+    found: list[Overlap] = []
+    for path, names in sorted(by_path.items()):
+        if len(names) < 2:
+            continue
+        owner = next((p for p, rel in plan_roots if _touches([path], rel)), None)
+        if owner is None:
+            continue
+        listed = tuple(
+            sorted(
+                a
+                for a in names
+                if any(
+                    b != a
+                    and _independent(branch_pass, a, b)
+                    and _pair_counts_for(root, branch_pass, a, b, path, bases, diffs)
+                    for b in names
+                )
+            )
+        )
+        if listed:
+            found.append(Overlap(path, owner.name, owner.rel, listed))
+    return found
+
+
 # ----------------------------------------------------------------------------- JSON
 
 
-def to_json(plans: list[Plan]) -> str:
+def to_json(plans: list[Plan], anchors: dict[int, str] | None = None) -> str:
+    """Список планов в JSON; `anchors` (из `assign_anchors`) -> ключ `anchor` последним в объекте каждого плана."""
     data = [
         {
             "plan": p.name,
@@ -1561,37 +2111,61 @@ def to_json(plans: list[Plan]) -> str:
             "ready": p.ready,
             "dep_unknown": p.dep_unknown,
             "dep_cycle": p.dep_cycle,
-            "active": p.active,  # новые ключи — только в конец (README)
+            "active": p.active,
+            "branches": p.branches,  # новые ключи — только в конец (README)
         }
         for p in plans
     ]
+    if anchors is not None:
+        for rec, p in zip(data, plans, strict=True):
+            rec["anchor"] = anchors[id(p)]
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 # ----------------------------------------------------------------------------- HTML
 
 CSS = """
-:root{--bg:#fafafa;--fg:#1d2024;--muted:#5d6670;--card:#fff;--line:#d9dde2;--accent:#2f6fdb;
---done:#2e9d56;--pending:#c3c9d1;--in_progress:#e0a21a;--blocked:#d6453d;--deferred:#8d96a3;
---superseded:#b9a6c9;--unknown:#e68a00}
-@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e4e7ea;--muted:#98a2ad;--card:#1d2126;
---line:#323841;--accent:#6ea0ff;--done:#43b56c;--pending:#4a525d;--in_progress:#e6b13a;
---blocked:#e5645c;--deferred:#76808d;--superseded:#8d7ba0;--unknown:#f0a030}}
+:root{color-scheme:dark;--bg:#14171a;--fg:#e4e7ea;--muted:#98a2ad;--card:#1d2126;--line:#323841;--accent:#6ea0ff;--on:#0b1220;
+--done:#43b56c;--pending:#4a525d;--in_progress:#e6b13a;--blocked:#e5645c;--deferred:#76808d;
+--superseded:#8d7ba0;--unknown:#f0a030}
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);
 font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:1000px;margin:0 auto}
-h1{font-size:1.4rem;margin:0 0 4px}
-.meta{color:var(--muted);font-size:.85rem;margin-bottom:16px}
+main{max-width:1100px;margin:0 auto;position:relative;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+main>*{flex:1 1 100%;min-width:0}
+header.topbar{display:contents}
+h1{order:-5;flex:1 1 auto;font-size:1.4rem;margin:0}
+.switcher{order:-4;flex:0 0 auto}
+a.back{order:-4;flex:0 0 auto;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
+background:var(--card);color:var(--accent);text-decoration:none;font-size:.85rem}
+.meta{order:-3;flex:0 1 auto;color:var(--muted);font-size:.8rem}
+nav.tabs{order:-2;position:sticky;top:0;z-index:5;display:flex;gap:6px;overflow-x:auto;padding:8px 0;
+background:var(--bg);border-bottom:1px solid var(--line)}
+nav.tabs input{position:absolute;opacity:0;pointer-events:none}
+nav.tabs label{flex:none;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
+background:var(--card);color:var(--muted);font-size:.85rem;cursor:pointer;user-select:none}
+nav.tabs input:checked+label{background:var(--accent);border-color:var(--accent);color:var(--on)}
+nav.tabs input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+.switcher>summary{display:block;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
+background:var(--card);font-size:.85rem}
+.switcher::details-content{position:absolute;left:0;z-index:6;box-sizing:border-box;width:min(440px,calc(100vw - 32px));
+max-height:70vh;overflow:auto;margin-top:4px}
+.switcher[open]::details-content{padding:6px 12px;background:var(--card);
+border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px #0004}
+.sw-group{display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin:6px 0}
+.sw-group b{grid-column:1/-1;font-size:.75rem;color:var(--muted)}
+.sw-group a{color:var(--accent);text-decoration:none;overflow-wrap:anywhere}
+.sw-group small{color:var(--muted);font-variant-numeric:tabular-nums}
 .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:16px}
-.lane{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.lane{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 .lane b{display:block;margin-bottom:2px}
-details.plan,details#archive,details#waiting{background:var(--card);border:1px solid var(--line);border-radius:8px;
+details.plan,details#archive,details#waiting{background:var(--card);border:1px solid var(--line);border-radius:10px;
 margin-bottom:8px;padding:0 12px}
 details#archive>details.plan,details#waiting>details.plan{margin:8px 0}
 h2{font-size:1.05rem;margin:16px 0 8px}
 summary{cursor:pointer;padding:9px 0;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
-summary .name{font-weight:600}
+summary .name{font-weight:600;overflow-wrap:anywhere}
+.plan-link{color:var(--accent);text-decoration:none}
 .badge{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:0 7px}
 progress{width:140px;height:10px;accent-color:var(--accent)}
 .tally{font-variant-numeric:tabular-nums;font-size:.85rem}
@@ -1606,6 +2180,7 @@ text-align:center;color:#fff;background:var(--pending)}
 .cell[data-status="deferred"]{background:var(--deferred)}
 .cell[data-status="superseded"]{background:var(--superseded)}
 .cell[data-status="unknown"]{background:var(--unknown)}
+details.tasklist>summary{display:block;padding:2px 0;color:var(--muted);font-size:.82rem}
 ul.tasks{margin:0;padding-left:0;list-style:none;font-size:.88rem}
 ul.tasks li{padding:2px 0;border-top:1px solid var(--line)}
 .st{display:inline-block;min-width:92px;color:var(--muted);font-size:.78rem}
@@ -1615,6 +2190,19 @@ code{font-size:.8rem;color:var(--muted)}
 border-radius:10px;padding:0 7px}
 .chip.ok{color:var(--done);border-color:var(--done)}
 .cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
+main:has(#tab-queue:checked)>:not(header,#queue),main:has(#tab-waiting:checked)>:not(header,#waiting),
+main:has(#tab-unlisted:checked)>:not(header,#unlisted),main:has(#tab-archive:checked)>:not(header,#archive),
+main:has(#tab-who:checked)>:not(header,#who),main:has(#tab-overlaps:checked)>:not(header,#overlaps),
+main:has(#tab-priority:checked)>:not(header,#priority),main:has(#tab-lanes:checked)>:not(header,.lanes){display:none}
+main:has(#tab-waiting:checked)>#waiting::details-content,main:has(#tab-archive:checked)>#archive::details-content{
+content-visibility:visible}
+main:not(:has(.anchor:target)) a.back,main:has(.anchor:target) nav.tabs{display:none}
+main:has(.anchor:target)>:not(header,:has(.anchor:target)){display:none!important}
+main:has(.anchor:target)>:has(.anchor:target){display:block!important}
+main:has(.anchor:target)>:is(#waiting,#archive):has(.anchor:target){border:0;background:none;padding:0}
+main:has(.anchor:target) :is(#queue,#waiting,#unlisted,#archive)>:not(:has(.anchor:target)){display:none}
+main:has(.anchor:target) details:has(.anchor:target)::details-content,
+details.plan:has(>.anchor:target) .tasklist::details-content{content-visibility:visible}
 """
 
 STATUS_RU = {
@@ -1655,7 +2243,9 @@ def startable(p: Plan, in_use: bool) -> bool:
     Только §4.1: `ready` стоит и у планов §4.2, а очередь они не занимают. План без собственной строки `После:`
     не называется готовым: `ready` у него «по умолчанию».
     """
-    return in_use and p.tier == "4.1" and p.has_after_field and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+    return (
+        in_use and p.tier == "queue" and p.has_after_field and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+    )
 
 
 def ready_summary(queue: list[Plan], in_use: bool) -> str:
@@ -1685,19 +2275,184 @@ def _dep_chips(p: Plan, in_use: bool) -> list[str]:
     return chips
 
 
-def _plan_html(p: Plan, in_use: bool) -> str:
+def _branch_label(branch: str) -> str:
+    return branch or "(detached)"
+
+
+def _signal_label(entry: dict) -> str:
+    """`2026-10-03T20:31:37` -> `2026-10-03 20:31`: первые 16 символов строки журнала, без округления."""
+    return str(entry["last_signal"])[:16].replace("T", " ")
+
+
+def _counters_label(entry: dict) -> str:
+    return f"сессий {entry['sessions']} · агентов {entry['agents']} · сигнал {_signal_label(entry)}"
+
+
+def _active_chip(e: dict) -> str:
+    """Чип «в работе» для одной записи `Plan.active`; пустая ветка (detached) — пустой `data-active`."""
+    return (
+        f'<span class="chip" data-chip="active" data-active="{_e(e["branch"])}" title="{_e(e["worktree"])}">'
+        f"в работе: {_e(_branch_label(e['branch']))} · {_e(_counters_label(e))}</span>"
+    )
+
+
+def _branch_chip(e: dict, disk_done: int) -> str:
+    """Чип «в ветке» для одной записи `Plan.branches`; «в main» — `done` плана на диске."""
+    return (
+        f'<span class="chip" data-chip="branch" data-branch="{_e(e["branch"])}">'
+        f"в ветке {_e(e['branch'])}: {_e(e['done'])} из {_e(e['total'])}, в main: {_e(disk_done)}</span>"
+    )
+
+
+def _overlap_chip(branches: int) -> str:
+    """Чип «пересечение» плана: число разных веток по всем его пересечённым файлам."""
+    return f'<span class="chip" data-chip="overlap" data-overlap="{branches}">⚠ пересечение, веток: {branches}</span>'
+
+
+WHO_NOTES = (
+    "Агенты, запущенные из главного дерева, видны как активность main.",
+    "Сессия без субагентов и без события SessionStart не видна.",
+)
+
+
+def _who_html(active: list[tuple[str, dict]], orphans: list[dict], window_text: str) -> list[str]:
+    """Секция `#who`: активные, затем сироты (по `worktree`); `K = 0` -> строка про окно; две пометки в конце."""
+    by_path = lambda e: e["worktree"]  # noqa: E731
+    parts = ['<section id="who">', f"<h2>Кто где · {len(active) + len(orphans)}</h2>"]
+    if active or orphans:
+        parts.append("<ul>")
+        for name, e in sorted(active, key=lambda ne: by_path(ne[1])):
+            parts.append(
+                f'<li data-worktree="{_e(e["worktree"])}" data-branch="{_e(e["branch"])}" data-who-plan="{_e(name)}">'
+                f"{_e(_branch_label(e['branch']))} → {_e(name)} · {_e(_counters_label(e))}</li>"
+            )
+        for e in sorted(orphans, key=by_path):
+            parts.append(
+                f'<li data-worktree="{_e(e["worktree"])}" data-branch="{_e(e["branch"])}" data-orphan="1">'
+                f"{_e(_branch_label(e['branch']))} — план не найден · {_e(_counters_label(e))}</li>"
+            )
+        parts.append("</ul>")
+    else:
+        parts.append(f"<p>свежих сигналов нет (окно {_e(window_text)})</p>")
+    parts.extend(f'<p class="note">{_e(note)}</p>' for note in WHO_NOTES)
+    parts.append("</section>")
+    return parts
+
+
+def _overlaps_html(overlaps: list[Overlap]) -> list[str]:
+    """Секция `#overlaps`: по строке на файл, по пути; пересечений нет — секции нет."""
+    if not overlaps:
+        return []
+    parts = ['<section id="overlaps">', f"<h2>Пересечения · {len(overlaps)}</h2>", "<ul>"]
+    for o in sorted(overlaps, key=lambda o: o.path):
+        names = ", ".join(o.branches)
+        parts.append(
+            f'<li data-path="{_e(o.path)}" data-overlap-plan="{_e(o.plan)}" data-branches="{_e(",".join(o.branches))}">'
+            f"{_e(o.path)} — {_e(o.plan)} · ветки: {_e(names)}</li>"
+        )
+    parts.extend(["</ul>", "</section>"])
+    return parts
+
+
+def _priority_html(date: str, rows: list[SnapRow]) -> list[str]:
+    """Секция `#priority`: по строке на строку таблицы «Снимок» в её порядке; строк нет — одна пометка."""
+    parts = ['<section id="priority">', f"<h2>{_e('Приоритеты · снимок ' + date if date else 'Приоритеты')}</h2>"]
+    if rows:
+        parts.append("<ol>")
+        for r in rows:
+            text = f"#{r.n} · полоса {r.lane} · {r.plan_text} — дальше: {r.next_step} · ждёт: {r.waits}"
+            parts.append(f'<li data-priority="{r.n}">{_e(text)}</li>')
+        parts.append("</ol>")
+    else:
+        parts.append("<p>в ORDER.md нет таблицы «Снимок»</p>")
+    parts.append("</section>")
+    return parts
+
+
+def card_groups(live: list[Plan], archive: list[Plan]) -> tuple[list[Plan], list[Plan], list[Plan], list[Plan]]:
+    """Карточки страницы по секциям: (очередь §4.1 по приоритету, ждут §4.2, вне ORDER, закрытые §4.3 + архив).
+
+    Единственное место порядка карточек: его берут и `to_html`, и `--json` (через `card_order`).
+    Очередь: сначала планы с приоритетом по возрастанию `#`, затем остальные в прежнем порядке.
+    """
+    queue, waiting, unlisted, closed = queue_scope(live)
+    queue_view = sorted(queue, key=lambda p: (p.priority is None, p.priority or 0))
+    return queue_view, waiting, unlisted, closed + archive
+
+
+def card_order(live: list[Plan], archive: list[Plan]) -> list[Plan]:
+    """Все карточки в том порядке, в каком `to_html` их печатает (живые выше архивных)."""
+    return [p for group in card_groups(live, archive) for p in group]
+
+
+def assign_anchors(cards: list[Plan]) -> dict[int, str]:
+    """Якорь карточки `plan-<slug>` по `id(plan)`; `cards` — в порядке страницы (`card_order`).
+
+    slug — имя плана, символы вне `[A-Za-z0-9_-]` -> `-`. Имя занято карточкой выше: у архивного плана
+    `plan-<slug>-archive`; если и оно занято, или план живой — первый свободный `plan-<slug>-2`, `-3`, …
+    """
+    taken: set[str] = set()
+    out: dict[int, str] = {}
+    for p in cards:
+        base = "plan-" + re.sub(r"[^A-Za-z0-9_-]", "-", p.name)
+        options = [base, f"{base}-archive"] if p.archived else [base]
+        anchor = next((o for o in options if o not in taken), None)
+        n = 2
+        while anchor is None:
+            if f"{base}-{n}" not in taken:
+                anchor = f"{base}-{n}"
+            n += 1
+        taken.add(anchor)
+        out[id(p)] = anchor
+    return out
+
+
+def _switcher_html(groups: list[tuple[str, list[Plan]]], anchors: dict[int, str]) -> list[str]:
+    """`details.switcher`: по группе на секцию (пустых нет), в группе пара `<a>` + `<small>` на карточку."""
+    parts = ['<details class="switcher">', "<summary>Планы ▾</summary>"]
+    for title, plans in groups:
+        if not plans:
+            continue
+        items = [f"<b>{_e(title)}</b>"]
+        items += [
+            f'<a href="#{anchors[id(p)]}">{_e(p.name)}</a> <small>{_e(_tally(p.done, p.total))}</small>' for p in plans
+        ]
+        parts.append(f'<div class="sw-group">{" ".join(items)}</div>')
+    parts.append("</details>")
+    return parts
+
+
+def _tabs_html(tabs: list[tuple[str, str, int]]) -> list[str]:
+    """`nav.tabs`: радиокнопка + метка `Название · N` на вкладку; отмечена только `queue`."""
+    parts = ['<nav class="tabs">']
+    for key, label, n in tabs:
+        checked = " checked" if key == "queue" else ""
+        parts.append(
+            f'<input type="radio" name="tab" id="tab-{key}"{checked}><label for="tab-{key}">{_e(label)} · {n}</label>'
+        )
+    parts.append("</nav>")
+    return parts
+
+
+def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0, anchor: str | None = None) -> str:
+    """Карточка плана. `anchor` (из `assign_anchors`): ссылка `↗` после имени и пустой `span.anchor` после `</summary>`;
+    без него (прямой вызов в тестах) ни ссылки, ни якоря."""
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
     if startable(p, in_use):
         attrs += ' data-ready="true"'
     s = [f"<details {attrs}>", "<summary>", f'<span class="name">{_e(p.name)}</span>']
+    if anchor:
+        s.append(f'<a class="plan-link" href="#{anchor}" title="страница плана">↗</a>')
+    if p.priority is not None:
+        s.append(f'<span class="chip" data-chip="priority" data-priority="{p.priority}">#{p.priority}</span>')
     if p.lane:
         s.append(f'<span class="badge">полоса {_e(p.lane)}</span>')
     if p.tier:
-        s.append(f'<span class="badge">§{_e(p.tier)}</span>')
+        s.append(f'<span class="badge">§{_e(SECTION_BY_TIER.get(p.tier, p.tier))}</span>')
     unknown, unmarked = trust_counts(p)
     unfinished = p.total > p.done
-    warn = p.header_status == "done" and p.tier in ("4.1", "4.2") and unfinished
-    shelved = not warn and (p.tier == "4.3" or p.header_status in ("done", "superseded"))
+    warn = p.header_status == "done" and p.tier in ("queue", "waiting") and unfinished
+    shelved = not warn and (p.tier == "closed" or p.header_status in ("done", "superseded"))
     if p.tasks:
         if not shelved:
             s.append(f'<progress value="{p.done}" max="{max(p.total, 1)}"></progress>')
@@ -1727,8 +2482,19 @@ def _plan_html(p: Plan, in_use: bool) -> str:
         s.append(f'<span class="chip" data-chip="closed" title="план закрыт или поглощён">{word}{counts}</span>')
     if not plan_closed(p):
         s.extend(_dep_chips(p, in_use))
+    s.extend(_branch_chip(e, p.done) for e in p.branches if (e["done"], e["total"]) != (p.done, p.total))
+    if overlap_branches:
+        s.append(_overlap_chip(overlap_branches))  # после чипов веток, перед «в работе»
+    s.extend(_active_chip(e) for e in p.active)  # после всех прочих чипов; закрытым и архивным тоже
     s.append("</summary>")
+    if anchor:
+        s.append(f'<span class="anchor" id="{anchor}"></span>')
     s.append('<div class="body">')
+    if p.priority_row is not None:
+        row = p.priority_row
+        s.append(
+            f'<div class="info"><b>Приоритет #{row.n}:</b> дальше — {_e(row.next_step)}; ждёт — {_e(row.waits)}</div>'
+        )
     s.append(f'<div class="info">{_e(p.rel)}</div>')
     for label, text in p.info:
         s.append(f'<div class="info"><b>{_e(label)}:</b> {_e(text)}</div>')
@@ -1739,6 +2505,7 @@ def _plan_html(p: Plan, in_use: bool) -> str:
             mark = ' data-unmarked="1"' if t.unmarked else ""
             s.append(f'<span class="cell" data-status="{t.status}"{mark} title="{_e(tip)}">{_e(t.id)}</span>')
         s.append("</div>")
+        s.append(f'<details class="tasklist"><summary>Задачи · {len(p.tasks)}</summary>')
         s.append('<ul class="tasks">')
         for t in p.tasks:
             ref = f" <code>{_e(t.ref)}</code>" if t.ref else ""
@@ -1747,6 +2514,7 @@ def _plan_html(p: Plan, in_use: bool) -> str:
                 f"<b>{_e(t.id)}</b> {_e(t.title)}{ref}</li>"
             )
         s.append("</ul>")
+        s.append("</details>")
     s.append("</div>")
     s.append("</details>")
     return "\n".join(s)
@@ -1767,18 +2535,57 @@ def git_sha(root: Path) -> str:
     return sha if cp.returncode == 0 and sha else "—"
 
 
-def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
-    """Страница: очередь §4.1, `#waiting` §4.2, `#unlisted` (нет в ORDER.md), `#archive` (архив + закрытые §4.3)."""
-    queue, waiting, unlisted, closed = queue_scope(live)
-    shelved = closed + archive
+def to_html(
+    live: list[Plan],
+    archive: list[Plan],
+    root: Path,
+    orphans: list[dict] | tuple = (),
+    window_text: str = DEFAULT_WINDOW,
+    snapshot_date: str = "",
+    snapshot_rows: list[SnapRow] | tuple = (),
+    overlaps: list[Overlap] | tuple = (),
+) -> str:
+    """Страница: `#who`, `#overlaps` (только если есть), очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md),
+    `#archive` (архив + закрытые §4.3).
+
+    Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
+    `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
+    `overlaps` — из `find_overlaps`: секция `#overlaps` сразу после `#who` и чип `overlap` у планов с пересечением.
+
+    Шапка `header.topbar`: `h1`, три `div.meta`, переключатель `details.switcher`, ссылка `a.back` и `nav.tabs`
+    (вкладки — радиокнопки, вид без JS). У каждой карточки якорь `plan-<slug>` (`assign_anchors`, порядок печати —
+    `card_order`): ссылка `↗` в `<summary>` и страница плана по `:target`.
+    """
+    overlap_names: dict[str, set[str]] = {}
+    for o in overlaps:
+        overlap_names.setdefault(o.plan_rel, set()).update(o.branches)
+
+    queue_view, waiting, unlisted, shelved = card_groups(live, archive)
+    anchors = assign_anchors(card_order(live, archive))
     lanes: dict[str, list[int]] = {}
-    for p in queue + waiting + unlisted:
+    # полосы: прежний порядок очереди, без перестановки по приоритету
+    for p in queue_scope(live)[0] + waiting + unlisted:
         agg = lanes.setdefault(p.lane or "—", [0, 0, 0])
         agg[0] += p.done
         agg[1] += p.total
         agg[2] += 1
     in_use = deps_in_use(live + archive)
-    ready_text = ready_summary(queue, in_use)
+
+    def card(p: Plan) -> str:
+        return _plan_html(p, in_use, len(overlap_names.get(p.rel, ())), anchors[id(p)])
+
+    ready_text = ready_summary(queue_view, in_use)
+    active = [(p.name, e) for p in live + archive for e in p.active]
+    tabs = [("queue", "Очередь", len(queue_view)), ("waiting", "Ждут", len(waiting))]
+    if unlisted:
+        tabs.append(("unlisted", "Нет в ORDER", len(unlisted)))
+    tabs += [("archive", "Архив", len(shelved)), ("who", "Кто где", len(active) + len(orphans))]
+    if overlaps:
+        tabs.append(("overlaps", "⚠ Пересечения", len(overlaps)))
+    if snapshot_rows:
+        tabs.append(("priority", "Приоритеты", len(snapshot_rows)))
+    tabs.append(("lanes", "Полосы", len(lanes)))
+    switcher = [("Очередь", queue_view), ("Ждут", waiting), ("Нет в ORDER", unlisted), ("Архив", shelved)]
     built = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M UTC%z")
     parts = [
         "<!doctype html>",
@@ -1786,11 +2593,17 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         "<title>Прогресс планов</title>",
         f"<style>{CSS}</style></head><body><main>",
+        '<header class="topbar">',
         "<h1>Прогресс планов</h1>",
         f'<div class="meta">собрано {_e(built)} · SHA {_e(git_sha(root))}</div>',
-        f'<div class="meta">в очереди {len(queue)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
+        f'<div class="meta">в очереди {len(queue_view)} · ждут {len(waiting)} · не в ORDER {len(unlisted)} · '
         f"закрыто и в архиве {len(shelved)}</div>",
         f'<div class="meta" id="ready">можно начинать: {ready_text}</div>',
+        *_switcher_html(switcher, anchors),
+        '<a class="back" href="#">← все планы</a>',
+        *_tabs_html(tabs),
+        "</header>",
+        *_priority_html(snapshot_date, list(snapshot_rows)),
         '<section class="lanes">',
     ]
     for lane, (done, total, n) in lanes.items():
@@ -1800,17 +2613,19 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
             f'<span class="tally">{_e(_tally(done, total))}</span></div>'
         )
     parts.append("</section>")
+    parts.extend(_who_html(active, list(orphans), window_text))
+    parts.extend(_overlaps_html(list(overlaps)))
     parts.append('<section id="queue">')
-    parts.extend(_plan_html(p, in_use) for p in queue)
+    parts.extend(card(p) for p in queue_view)
     parts.append("</section>")
     parts.append('<details id="waiting">')
     parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
-    parts.extend(_plan_html(p, in_use) for p in waiting)
+    parts.extend(card(p) for p in waiting)
     parts.append("</details>")
     if unlisted:
         parts.append('<section id="unlisted">')
         parts.append(f"<h2>Нет в ORDER.md · {len(unlisted)}</h2>")
-        parts.extend(_plan_html(p, in_use) for p in unlisted)
+        parts.extend(card(p) for p in unlisted)
         parts.append("</section>")
     a_done = sum(p.done for p in shelved)
     a_total = sum(p.total for p in shelved)
@@ -1819,7 +2634,7 @@ def to_html(live: list[Plan], archive: list[Plan], root: Path) -> str:
         f"<summary>Закрыто и в архиве · {len(shelved)} планов (§4.3 и _archive/) · "
         f"итого {_e(_tally(a_done, a_total))}</summary>"
     )
-    parts.extend(_plan_html(p, in_use) for p in shelved)
+    parts.extend(card(p) for p in shelved)
     parts.append("</details>")
     parts.append("</main></body></html>")
     return "\n".join(parts) + "\n"
@@ -1847,6 +2662,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N[mhd]",
         help=f"окно свежести сигнала (по умолчанию {DEFAULT_WINDOW})",
     )
+    ap.add_argument(
+        "--branch-window",
+        default=DEFAULT_BRANCH_WINDOW,
+        metavar="N[mhd]",
+        help=f"окно свежести вершины ветки для `branches` (по умолчанию {DEFAULT_BRANCH_WINDOW})",
+    )
     return ap
 
 
@@ -1861,6 +2682,10 @@ def main(argv: list[str] | None = None) -> int:
     window = parse_window(args.active_window)
     if window is None:
         print("ошибка: --active-window — число и единица измерения (минуты, часы, дни)", file=sys.stderr)
+        return 2
+    branch_window = parse_window(args.branch_window)
+    if branch_window is None:
+        print("ошибка: --branch-window — число и единица измерения (минуты, часы, дни)", file=sys.stderr)
         return 2
     now = datetime.now() if args.now is None else parse_now(args.now)
     if now is None:
@@ -1886,12 +2711,22 @@ def main(argv: list[str] | None = None) -> int:
     rows = parse_order(order_path)
     apply_order(plans, rows)
     resolve_deps(plans)
+    snap_date, snap_rows = parse_snapshot(order_path)
+    snap_unknown = apply_snapshot(plans, snap_rows)
     live, archive = page_order(plans, rows)
     ordered = live + archive
     code = 0
-    if args.json or args.who:
+    active: list[tuple[Plan, dict]] = []
+    orphans: list[dict] = []
+    if args.json or args.who or args.html is not None:
         active, orphans = collect_active(root, ordered, now, window)
         attach_active(ordered, active)
+    overlaps: list[Overlap] = []
+    if args.json or args.html is not None:
+        branch_pass = run_branch_pass(root, now, branch_window)  # один проход: числа 5.5 и радар
+        fill_branch_numbers(root, ordered, branch_pass)
+        if args.html is not None:
+            overlaps = find_overlaps(root, ordered, branch_pass)
     if args.who:
         by_path = lambda e: e["worktree"]  # noqa: E731
         who = {
@@ -1907,19 +2742,25 @@ def main(argv: list[str] | None = None) -> int:
         if code:
             return code
     if args.json:
-        print(to_json(ordered))
+        print(to_json(ordered, assign_anchors(card_order(live, archive))))
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(to_html(live, archive, root), encoding="utf-8")
+        target.write_text(
+            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps), encoding="utf-8"
+        )
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
         baseline = load_baseline(args.baseline) if args.baseline else set()
-        extra = order_block_findings(order_path, live, archive, root)
+        extra = (
+            order_block_findings(order_path, live, archive, root)
+            + snapshot_findings(snap_unknown)
+            + branch_findings(ordered, root)
+        )
         code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout, extra)
     if not (args.json or args.html is not None or args.check or args.sync_order):
         for p in ordered:
-            tag = "архив" if p.archived else (p.tier or "—")
+            tag = "архив" if p.archived else (SECTION_BY_TIER.get(p.tier, p.tier) if p.tier else "—")
             print(f"{p.name:48} {tag:6} {_tally(p.done, p.total)}{trust_suffix(p)}")
     return code
 

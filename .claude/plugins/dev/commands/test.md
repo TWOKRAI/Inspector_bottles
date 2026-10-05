@@ -1,5 +1,5 @@
 ---
-description: Run the Tester agent (Sonnet) — write and run tests
+description: Run the tester agent (Sonnet) to write tests from acceptance criteria and run them. Call before the implementation, once per mechanism.
 ---
 
 Launch the **tester** agent (subagent_type: "tester", model: sonnet, `run_in_background: false` — the result is needed in this same turn).

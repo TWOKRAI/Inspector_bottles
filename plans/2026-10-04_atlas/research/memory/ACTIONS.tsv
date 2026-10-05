@@ -1,0 +1,434 @@
+file	kind	action	target	tags
+ARCHIVE.md	INDEX	KEEP+EXTEND	раздел «Перенесено 2026-10-04»	-
+CRAFT.md	INDEX	SPLIT	CRAFT-injection/tests/verdict/config-qt (CRAFT.md → заглушка)	-
+MEMORY.md	INDEX	REPLACE	MEMORY.new.md	-
+feedback_a_budget_belongs_to_a_path_not_to_a_mechanism.md	LESSON	KEEP	-	mod: telemetry/observability; mech: perf-budget
+feedback_a_control_can_exist_and_be_dead.md	LESSON	KEEP	-	mod: telemetry, config.reload; mech: acceptance-criteria
+feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md	LESSON	KEEP	-	mod: observation_port; mech: success-value-vs-fact
+feedback_a_criterion_that_transforms_observes_the_library.md	LESSON	KEEP	-	mod: config_module (pydantic); mech: acceptance-criteria, tester
+feedback_a_decision_orphans_what_encoded_the_previous_one.md	LESSON	KEEP	-	mod: telemetry config, golden snapshots; mech: decision-change checklist
+feedback_a_dedup_marker_is_an_assertion_about_someone_else.md	LESSON	KEEP	-	mod: logger_module, error_module; mech: dedup
+feedback_a_degenerate_value_is_not_zero_it_is_unknown.md	LESSON	KEEP	-	mod: process_module telemetry; mech: validation-at-consumer
+feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md	LESSON	KEEP	-	mod: observation_port; mech: perf-measurement, test-doubles
+feedback_a_diagnostic_answer_must_be_computed_last.md	LESSON	KEEP	-	mod: process_module (config.reload); mech: stage-ordering
+feedback_a_diff_based_rescue_omits_untracked_files.md	LESSON	KEEP	-	mech: git, worktree
+feedback_a_faithful_fake_still_lacks_the_protocol.md	LESSON	KEEP	-	mech: test-doubles; mod: error_module
+feedback_a_fix_on_a_finding_must_not_outgrow_it.md	LESSON	KEEP	-	mod: pipeline/plugin_module; mech: review-fix scope
+feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim.md	DUP	MERGE→	a_handmade_readback_leaves_its_producer_unguarded	mod: logger_module; mech: guard-layer
+feedback_a_guard_that_counts_at_least_once_is_blind.md	LESSON	KEEP	-	mech: guard-design, lock-discipline
+feedback_a_handmade_readback_leaves_its_producer_unguarded.md	LESSON	KEEP	-	mod: observability_wiring; mech: guard-layer, hand-built-fixture
+feedback_a_hook_dead_on_windows_by_a_trailing_cr.md	LESSON	KEEP	local-only (Windows/Git Bash)	mech: hooks
+feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers.md	STALE	MERGE→	precommit_stash_collision_2plus_agents	mech: git, pre-commit
+feedback_a_knob_can_be_applied_and_unverifiable.md	LESSON	KEEP	-	mod: process_module (observability_verified); mech: config_reload_verified
+feedback_a_list_walking_guard_cannot_see_a_removed_item.md	DUP	MERGE→	a_guard_that_counts_at_least_once_is_blind	mod: backend_ctl protocol; mech: guard-design
+feedback_a_lock_patch_can_hang_the_exit_not_the_test.md	DUP	MERGE→	inject_only_after_the_work_is_committed	mod: logger_module; mech: break-injection harness
+feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md	LESSON	KEEP	-	mod: backend_ctl (history_query); mech: probe-design
+feedback_a_migration_fixture_built_by_todays_writer_tests_the_writer.md	DUP	KEEP	-	mod: observability store; mech: migration-test
+feedback_a_new_guard_can_weaken_an_old_one.md	LESSON	KEEP	-	mod: process_module commands; mech: guard-design, type-coercion
+feedback_a_new_plan_must_be_placed_among_its_neighbours.md	RULE	MOVE-RULE	команда /dev:plan + агент manager	mech: plans
+feedback_a_number_without_spread_across_repeats_is_an_observation.md	LESSON	KEEP	-	mod: BoundedChannel/telemetry; mech: perf-measurement
+feedback_a_pass_through_block_is_not_a_fork.md	LESSON	KEEP	-	mod: scripts static guards (AST); mech: AST-rules
+feedback_a_peer_session_shares_the_tree.md	LESSON	KEEP	-	mech: git, parallel-sessions
+feedback_a_plans_premise_expires.md	LESSON	KEEP	-	mech: plans, deferred-tasks
+feedback_a_probe_must_enumerate_before_it_asks.md	LESSON	KEEP	-	mod: config_module (defaults_for_category); mech: probe-design
+feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know.md	LESSON	KEEP	-	mod: otel-export; mech: probe-design
+feedback_a_process_wide_throttle_turns_neighbours_vacuous.md	LESSON	KEEP	-	mod: logger_module (windowed_voice); mech: test-isolation
+feedback_a_shared_throttle_swallows_the_record_not_the_line.md	LESSON	KEEP	-	mod: process_module/health, error_module; mech: throttle
+feedback_a_shortened_interval_waits_out_the_old_deadline.md	LESSON	KEEP	-	mod: observability_wiring (history purge); mech: live-stand
+feedback_a_stand_with_a_verdict_is_also_a_harness.md	LESSON	KEEP	-	mod: otel-export; mech: live-stand, test-doubles
+feedback_a_stub_silences_the_names_it_is_read_for.md	DUP	MERGE→	a_faithful_fake_still_lacks_the_protocol	mech: test-doubles
+feedback_a_test_that_pins_a_hole_is_green_both_ways.md	LESSON	KEEP	-	mod: backend_ctl (history_query); mech: break-injection
+feedback_a_zero_under_injection_has_three_readings.md	DUP	MERGE→	injection_zero_may_mean_the_guards_were_not_collected	mech: break-injection
+feedback_absence_assertion_under_extra_ignore_is_vacuous.md	DUP	MERGE→	an_absence_assertion_needs_a_reachability_check	mod: config_module (pydantic extra=ignore); mech: absence-assertion
+feedback_absent_receiver_lets_a_test_pin_an_impossible_input.md	LESSON	KEEP	-	mod: config_module (MetricRule); mech: test-doubles
+feedback_acceptance_criterion_needs_a_live_trigger.md	LESSON	KEEP	-	mod: observation_port (plugin shutdown); mech: acceptance-criteria
+feedback_agent_commit_quality.md	RULE	MOVE-RULE	skill project-rules §4 (одна строка)	mech: agents, commits
+feedback_agent_hard_budget_is_off_by_default.md	REFERENCE	KEEP	-	mod: hooks (agent_context_ceiling); mech: agents
+feedback_agent_resume_ghost.md	LESSON	KEEP	-	mech: agents, SendMessage
+feedback_alias_keeps_the_object_alive.md	LESSON	KEEP	-	mod: channel_routing_module/router_module; mech: dead-code grep
+feedback_all_components_base_manager.md	DUP	MERGE→	logger_error_stats_managers	mod: base_manager; mech: ObservableMixin
+feedback_always_latest_models.md	RULE	MOVE-RULE	skill project-rules §5 + lint-agents allow-list	mech: agents, models
+feedback_always_project_venv.md	REFERENCE	KEEP	local-only (Windows, пути .venv)	mech: env
+feedback_an_absence_assertion_needs_a_reachability_check.md	LESSON	KEEP	-	mod: scripts static guards; mech: absence-assertion
+feedback_an_applying_command_cannot_measure_what_it_reapplies.md	LESSON	KEEP	-	mod: process_module (config.reload); mech: probe-design
+feedback_an_avoidance_rule_can_be_a_false_safety_catch.md	LESSON	KEEP	-	mod: scripts/run_framework_tests.py; mech: inherited-rules
+feedback_an_injection_must_prove_its_axis_is_live.md	DUP	MERGE→	injection_zero_may_mean_the_guards_were_not_collected	mod: otel-export; mech: break-injection
+feedback_an_inventory_grep_needs_fixed_strings.md	RULE	MOVE-RULE	skill project-rules §1/§2 (одна строка: счёт имён только grep -F)	mech: grep, inventory
+feedback_attribute_the_source_before_cutting.md	LESSON	KEEP	local-only (два уровня .claude/ и ~/.claude/)	mech: context-audit
+feedback_backend_ctl_for_agents.md	RULE	MOVE-RULE	CLAUDE.md, раздел MCP routing, строка backend-ctl	mod: backend_ctl; mech: agents, live-stand
+feedback_backend_ctl_layer_mixed.md	RULE	MOVE-RULE	skill project-rules §4 или docs/claude/COMMIT_GUIDE.md	mod: backend_ctl; mech: commits
+feedback_background_reviewer_loses_the_verdict.md	REDUNDANT	ARCHIVE	.claude/CLAUDE.md «Subagents are background by default»	mech: agents, review
+feedback_barrier_at_entry_does_not_reproduce_the_race.md	LESSON	KEEP	-	mod: state_store_module (_make_room); mech: concurrency-tests, break-injection
+feedback_base_guard_dead_in_heir.md	LESSON	KEEP	-	mod: channel_routing_module (Logger/Error/Stats/Router); mech: inheritance
+feedback_baseline_taken_after_the_act_proves_nothing.md	LESSON	KEEP	-	mod: backend_ctl BuiltinCommands; mech: acceptance-tests
+feedback_bash_heredoc_collapses_backslashes.md	DUP	MERGE→	bash_tool_unbalanced_quote_breaks_command	local-only (Windows Bash tool); mech: tooling
+feedback_bash_tool_unbalanced_quote_breaks_command.md	LESSON	KEEP	-	local-only (Windows Bash tool); mech: tooling
+feedback_born_wrong_then_fixed_looks_like_working.md	LESSON	KEEP	-	mod: stats_module, orchestrator L0; mech: config-layers
+feedback_broad_except_in_frame_loop_hides_dead_mechanism.md	LESSON	KEEP	-	mod: line_sim (SceneSourcePlugin), frame loops; mech: live-run
+feedback_broken_injection_is_not_a_vacuous_test.md	DUP	MERGE→	injection_zero_may_mean_the_guards_were_not_collected	mech: break-injection
+feedback_cache_hides_the_once_only_property.md	LESSON	KEEP	-	mod: logger_module (gate dedup); mech: test-data
+feedback_check_qex_freshness_before_use.md	REDUNDANT	ARCHIVE	root CLAUDE.md раздел qex + project-rules §1 + .claude/CLAUDE.md	mech: qex
+feedback_check_red_on_main_first.md	RULE	MOVE-RULE	агент debugger + skill systematic-debugging	mech: debugging, git
+feedback_checked_true_answers_for_the_call_not_the_coverage.md	DUP	MERGE→	a_control_reproduces_the_defect_it_was_built_to_catch	mod: process_module (detect_throttle_caps); mech: success-value-vs-fact
+feedback_classify_a_leaf_by_the_difference_of_two_values.md	LESSON	KEEP	-	mod: process_module (expand_observability); mech: probe-design
+feedback_claude_cli_backend_costs_a_full_session.md	REDUNDANT	KEEP	-	mech: cost, graphify
+feedback_cleanup_must_survive_abnormal_disconnect.md	LESSON	KEEP	-	mod: backend_ctl (SocketChannel); mech: resource-cleanup
+feedback_coinciding_constants_hide_opposite_implementations.md	LESSON	KEEP	-	mod: state_store_module (throttle prune); mech: test-data
+feedback_commit_msg_format.md	DUP	MERGE→	commit_takes_the_whole_index	mech: git, pre-commit
+feedback_commit_takes_the_whole_index.md	LESSON	KEEP	-	mech: git, pre-commit
+feedback_compare_validated_values_not_raw_config.md	LESSON	KEEP	-	mod: config_module; mech: defaults-audit
+feedback_config_delivery_shape_differs.md	DUP	MERGE→	fakes_feed_config_flat_so_key_address_defects_are_invisible	mod: process_module (spawner, process_runner); mech: config-delivery
+feedback_config_reload_ttl_addressing_guard.md	LESSON	KEEP	-	mod: process_module (config.reload); mech: test-writing
+feedback_config_update_dead_with_handler.md	LESSON	KEEP	-	mod: process_module (Config.update); mech: test-doubles
+feedback_constant_from_domain_physics_not_measured.md	LESSON	KEEP	-	mod: telemetry histograms; mech: constants-vs-emission
+feedback_constructor_modularity.md	RULE	MERGE→	framework_first	mech: architecture
+feedback_coverage_holds_settrace_not_setprofile.md	LESSON	KEEP	-	mod: framework tests (_road_cost.py); mech: coverage, tracing
+feedback_coverage_per_check_is_not_coverage_per_claim.md	DUP	MERGE→	a_guard_that_counts_at_least_once_is_blind	mod: scripts/docs_verify; mech: guard-design
+feedback_ctypes_setattr_unknown_field_is_silent.md	LESSON	KEEP	-	mod: Services/code_reader (ctypes); mech: test-data
+feedback_deep_merge_is_not_associative.md	LESSON	KEEP	-	mod: config layers (deep_merge); mech: property-testing
+feedback_default_path_must_match_publisher.md	LESSON	KEEP	-	mod: alerts, Plugins/sources/capture; mech: config-defaults
+feedback_defect_fixed_on_one_path_only.md	LESSON	KEEP	-	mod: process_module (config.reload, telemetry.reconfigure); mech: review
+feedback_detector_comparing_representation_fires_always.md	LESSON	KEEP	-	mod: prototype backend/assembly (planner); mech: detectors
+feedback_diagnose_live_system_with_backend_ctl.md	DUP	MERGE→	backend_ctl_for_agents	mod: backend_ctl; mech: live-stand
+feedback_dialog_conventions.md	RULE	MOVE-RULE	path-scoped .rules/gui.md	mod: frontend; mech: GUI conventions
+feedback_dict_at_boundary_gui.md	REDUNDANT	ARCHIVE	.rules/gui.md и корневой CLAUDE.md правило 1 (Dict at Boundary)	mod: frontend
+feedback_discriminator_switch_must_be_verified.md	LESSON	KEEP	-	mech: experiment-control, pytest testpaths
+feedback_docs_assert_what_registration_never_set.md	LESSON	KEEP	-	mod: worker_module (heartbeat_sender, worker_type); mech: docs-vs-code
+feedback_double_must_block_like_the_original.md	DUP	MERGE→	a_faithful_fake_still_lacks_the_protocol	mech: test-doubles
+feedback_drop_oldest_reports_success.md	LESSON	KEEP	-	mod: observability hub (BoundedChannel); mech: success-value-vs-fact
+feedback_dual_write_by_copy_destroys_the_other_side.md	RULE	MOVE-RULE	раздел Memory в .claude/CLAUDE.md + скрипт сверки diff перед записью	mech: memory, git
+feedback_duplicate_fixture_verifies_itself.md	LESSON	KEEP	-	mod: backend_ctl tests (conftest); mech: fixtures
+feedback_emergency_log_reaches_stderr_not_the_log_files.md	LESSON	KEEP	-	mod: logger_module (_fallback); mech: voice-address
+feedback_env_knob_reads_its_own_write.md	LESSON	KEEP	-	mod: prototype build(); mech: env-config
+feedback_explicit_model_per_agent_role.md	RULE	MOVE-RULE	skill project-rules §5 + одна строка в .claude/CLAUDE.md	mech: agents, models
+feedback_facade_is_a_whitelist_not_a_passthrough.md	LESSON	KEEP	-	mod: process_module (observability_config, expand_observability); mech: config-facade
+feedback_fake_that_always_succeeds_mutes_the_gate.md	DUP	MERGE→	a_faithful_fake_still_lacks_the_protocol	mod: queue_registry; mech: test-doubles
+feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible.md	LESSON	KEEP	-	mod: process_module config; mech: test-doubles, config-delivery
+feedback_false_alarm_traded_for_silent_loss.md	LESSON	KEEP	-	mod: observability (sink.disable, config.reload); mech: operator-sequence
+feedback_fewer_layers.md	RULE	MERGE→	framework_first	mech: architecture
+feedback_fix_framework_forward.md	RULE	MERGE→	framework_first	mech: architecture
+feedback_flags_must_not_become_crutches.md	RULE	MOVE-RULE	команда /dev:ship + шаблон Task (критерий «флаг удалён»)	mech: feature-flags
+feedback_formal_review_before_merge.md	RULE	MOVE-RULE	команда /dev:ship (проверка артефакта /code-review)	mech: review, git
+feedback_framework_first.md	RULE	MOVE-RULE	root CLAUDE.md «Принципы владельца» (5 строк)	mech: architecture
+feedback_freeze_over_kill.md	RULE	MERGE→	framework_first	mech: architecture, dead-code
+feedback_gate_criterion_can_contradict_an_owner_decision.md	LESSON	KEEP	-	mod: telemetry gate; mech: acceptance
+feedback_gate_off_zeroes_deltas_not_messages.md	LESSON	KEEP	-	mod: state_store/telemetry (publisher gate); mech: measurement
+feedback_gate_signature_lives_on_a_head.md	RULE	MOVE-RULE	команда /dev:ship + агент cto (приёмка гоняет гейт сама)	mech: gates, acceptance
+feedback_git_main_merge_hook_traps.md	RULE	MOVE-RULE	единый формат merge -> docs/claude/COMMIT_GUIDE.md и корневой CLAUDE.md; грабли 1-6 остаются LESSON	mech: git, hooks, merge
+feedback_git_stash_pop_wrong_stash.md	DUP	MERGE→	a_peer_session_shares_the_tree	mech: git
+feedback_global_clock_patch_flake.md	LESSON	KEEP	-	mod: state_store_module (throttle tests); mech: test-flake, clock-injection
+feedback_green_run_hides_synchronous_only_correctness.md	LESSON	KEEP	-	mod: router_module (_log_debug); mech: lazy-eval
+feedback_guard_must_be_reachable.md	LESSON	KEEP	-	mod: plugin_module (PluginContext.write_document); mech: guard-design
+feedback_guard_on_existence_is_not_a_guard_on_content.md	DUP	MERGE→	zone_guard_never_closes_the_class	mod: pytest testpaths; mech: guard-design
+feedback_guard_threshold_hides_partial_blindness.md	DUP	MERGE→	a_guard_that_counts_at_least_once_is_blind	mod: tests (thread deadlines); mech: guard-design
+feedback_gui_save_strips_yaml_comments.md	LESSON	KEEP	-	mod: frontend settings (yaml_io.py); mech: config files
+feedback_hot_path_hook_must_be_priced.md	LESSON	KEEP	-	mod: logger_module (redaction); mech: perf-measurement
+feedback_idempotent_is_not_monotonic.md	LESSON	KEEP	-	mod: process_module (fan-out delivery); mech: ordering
+feedback_inject_only_after_the_work_is_committed.md	LESSON	KEEP	-	mech: break-injection harness, git
+feedback_inject_the_call_site_not_only_the_helper.md	LESSON	KEEP	-	mod: process_module (process_monitor); mech: break-injection
+feedback_injection_base_needs_a_collected_count.md	DUP	MERGE→	injection_zero_may_mean_the_guards_were_not_collected	mech: break-injection
+feedback_injection_generator_must_differ_from_criteria_author.md	LESSON	KEEP	-	mech: break-injection, independence
+feedback_injection_green_when_the_substitute_equals_the_fact.md	LESSON	KEEP	-	mod: process_module (voice class); mech: break-injection
+feedback_injection_must_cover_all_check_sites.md	LESSON	KEEP	-	mod: still_relevant ready-gate; mech: break-injection
+feedback_injection_must_reproduce_the_mechanism_not_the_shape.md	LESSON	KEEP	-	mod: plugin_module (write_document); mech: break-injection
+feedback_injection_must_use_a_different_lens_than_the_test.md	LESSON	KEEP	-	mod: telemetry; mech: break-injection, independence
+feedback_injection_prediction_on_a_shared_corpus.md	LESSON	KEEP	-	mech: break-injection, prediction
+feedback_injection_rollback_by_restore_not_replace.md	DUP	MERGE→	inject_only_after_the_work_is_committed	mech: break-injection harness
+feedback_injection_too_coarse_proves_nothing_specific.md	LESSON	KEEP	-	mod: state_store (throttle); mech: break-injection
+feedback_injection_zero_may_mean_the_guards_were_not_collected.md	LESSON	KEEP	-	mech: break-injection, harness
+feedback_logger_error_stats_managers.md	RULE	POINTER	root CLAUDE.md правило 6 + .rules/logging.md	mod: logger_module, error_module, statistics_module; mech: ObservableMixin
+feedback_materialized_agents_drift_from_plugin_source.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Standing rules» (абзац History)	mech: materialized-mirror
+feedback_materialized_default_hides_absence.md	LESSON	KEEP	—	mod: config_module; mech: schema-defaults
+feedback_mcp_tool_api_drift.md	STALE	ARCHIVE	-	mech: mcp-routing
+feedback_measure_delta_not_file_size.md	LESSON	KEEP	—	mech: measurement
+feedback_merge_changes_the_form.md	LESSON	KEEP	—	mod: config_module/recipe; mech: config-forms
+feedback_mirror_check_never_reads_the_original.md	LESSON	KEEP	—	mod: recipe/blueprint; mech: drift-guard
+feedback_modal_dialog_waits_instead_of_failing.md	LESSON	KEEP	—	mod: frontend_module; mech: qt-tests
+feedback_model_copy_does_not_validate.md	LESSON	KEEP	см. группу G-pydantic	mod: data_schema_module; mech: pydantic-v2
+feedback_model_economy_scheme.md	STALE	ARCHIVE	.claude/CLAUDE.md «Roles → models»	mech: model-selection
+feedback_model_split_impl_vs_review.md	DUP	MERGE→	explicit_model_per_agent_role	mech: model-selection
+feedback_mp_queue_is_async_in_tests.md	LESSON	KEEP	—	mod: shared_resources_module/queues; mech: flaky-tests
+feedback_mvp_pattern.md	RULE	POINTER	.rules/gui.md:17 (правило уже есть)	mod: frontend_module
+feedback_named_main_cause_may_be_a_minor_share.md	LESSON	KEEP	—	mech: measurement
+feedback_named_mechanism_is_not_a_commitment.md	LESSON	KEEP	—	mech: spec-review
+feedback_negative_criterion_needs_an_existence_anchor.md	LESSON	KEEP	—	mech: tester-brief
+feedback_no_global_taskkill.md	RULE	MOVE-RULE	.claude/settings.json permissions.deny (РЕШЕНИЕ ВЛАДЕЛЬЦА)	mech: process-kill
+feedback_no_qt_popups_offscreen.md	RULE	MOVE-RULE	conftest корня тестов (setdefault QT_QPA_PLATFORM=offscreen); РЕШЕНИЕ ВЛАДЕЛЬЦА	mod: frontend_module; mech: qt-tests
+feedback_no_regression_proved_by_identical_build.md	LESSON	KEEP	—	mech: acceptance-proof
+feedback_no_shm_hacks.md	RULE	POINTER	.rules/plugins.md:15 (правило уже есть)	mod: Plugins; mech: layering
+feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub.md	LESSON	KEEP	—	mod: Plugins (trace_skeleton); mech: break-injection
+feedback_observability_knobs_switchable_at_any_boundary_zero_cost_off.md	RULE	MOVE-RULE	`docs/direction/` или DECISIONS модуля observability + строка в `project-rules`	mod: observability; mech: knobs
+feedback_one_active_plan_per_tool.md	RULE	MOVE-RULE	`.claude/CLAUDE.md` «Plan-Driven Development» (одна строка)	mech: planning
+feedback_one_control_proves_sufficiency_not_exclusivity.md	LESSON	KEEP	—	mech: controls
+feedback_one_door_two_roads_needs_two_guards.md	DUP	MERGE→	property_unchecked_at_the_second_party	mod: config_module; mech: config.reload
+feedback_one_function_two_positions.md	LESSON	KEEP	—	mod: channel_routing_module (levels.py); mech: coinciding-constants
+feedback_one_log_writer.md	RULE	MOVE-RULE	`channel_routing_module/DECISIONS.md` + `logger_module` ADR (проверить есть ли), в памяти одна строка	mod: logger_module; mech: architecture
+feedback_one_owner_blinds_the_shared_state_test.md	LESSON	KEEP	—	mech: test-resolution
+feedback_package_install_by_user.md	REDUNDANT	ARCHIVE	.claude/settings.json ask: pip install, uv pip install, uv add	mech: deps
+feedback_parallel_agents_commit_race.md	STALE	MERGE→	precommit_stash_collision_2plus_agents	mech: parallel-commits
+feedback_parametrization_built_from_the_subject_collapses_with_it.md	DUP	MERGE→	a_guard_that_counts_at_least_once_is_blind	mech: break-injection
+feedback_pipeline_reuse_plugins_widgets.md	RULE	MOVE-RULE	`.rules/` (путь `frontend/.../pipeline/`)	mod: frontend_module (pipeline); mech: DRY
+feedback_plan_checkboxes.md	RULE	MOVE-RULE	команда `/dev:implement` / `/dev:ship` (шаг «отметить [x] + hash»)	mech: plan-driven
+feedback_plan_dual_save.md	REDUNDANT	ARCHIVE	`.claude/commands/dev/plan.md`, CLAUDE.md «Plan-Driven Development»	mech: plan-driven
+feedback_plan_spec_can_lie.md	DUP	MERGE→	the_plans_stated_cause_is_a_hypothesis	mech: spec-review
+feedback_plausible_is_not_verified.md	LESSON	KEEP	—	mech: verification
+feedback_port_wire_is_not_a_process_route.md	LESSON	KEEP	—	mod: chain_module/recipe; mech: wiring
+feedback_positional_call_hides_parameter_name_drift.md	LESSON	KEEP	—	mod: Plugins (SubPluginContext); mech: stubs
+feedback_post_publication_mark_breaks_collapsing.md	LESSON	KEEP	—	mod: observability (ObservabilityAudit); mech: dedup
+feedback_precommit_rollback_drops_unstaged_edits.md	DUP	MERGE→	commit_takes_the_whole_index	mech: pre-commit
+feedback_precommit_stash_collision_2plus_agents.md	LESSON	KEEP	—	mech: pre-commit, parallel-commits
+feedback_predict_injections_after_writing_tests.md	RULE	MOVE-RULE	`.claude/CLAUDE.md`, bullet «Break-injection is the proof» (+ одна фраза)	mech: break-injection
+feedback_priority_belongs_to_the_receiver.md	LESSON	KEEP	—	mod: telemetry/config layers; mech: replay-order
+feedback_probe_liveness_is_not_render.md	LESSON	KEEP	G-qtmcp	mod: frontend_module; mech: qt-mcp
+feedback_process_counter_is_not_per_key.md	LESSON	KEEP	—	mod: observability; mech: measurement
+feedback_property_unchecked_at_the_second_party.md	LESSON	KEEP	—	mech: break-injection, call-sites
+feedback_protect_branch_blocks_worktree_subagents.md	DUP	MOVE-RULE	project-rules §5 + .claude/plugins/dev/templates/team-brief.md	mech: protect-branch hook
+feedback_protect_the_unit_of_contention.md	LESSON	KEEP	—	mod: logger_module (FileChannel); mech: backpressure
+feedback_prototype_the_guard_before_fixing_its_wording.md	LESSON	KEEP	—	mech: spec-review, guards
+feedback_prove_test_red_without_fix.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Break-injection is the proof»	mech: break-injection
+feedback_pydantic_assignment_keeps_rejected_value.md	LESSON	MERGE→	model_copy_does_not_validate	mod: data_schema_module, config_module; mech: pydantic-v2
+feedback_pytest_import_order_hides_a_cycle.md	LESSON	KEEP	—	mech: import-cycles
+feedback_pytest_owns_threading_excepthook_for_the_session.md	LESSON	KEEP	—	mech: pytest-internals
+feedback_qex_full_rebuild_runbook.md	REFERENCE	KEEP	`.claude/plugins/mcp-qex/` команда	mod: qex; mech: runbook
+feedback_qex_query_english_code_bias.md	REDUNDANT	ARCHIVE	корневой `CLAUDE.md` раздел «MCP: qex»	mech: qex
+feedback_qex_reindex_budget.md	STALE	MERGE→	qex_full_rebuild_runbook	mech: qex, VRAM
+feedback_qt_mcp_always_probe.md	DUP	MERGE→	qt_mcp_flag_value_is_compared_verbatim	mod: frontend_module; mech: qt-mcp
+feedback_qt_mcp_flag_value_is_compared_verbatim.md	LESSON	KEEP	—	mech: qt-mcp, env-flags
+feedback_qt_mcp_smoke_verification.md	RULE	MOVE-RULE	`.rules/` путь `frontend/` + шаг в `/dev:implement` чек-листе	mod: frontend_module; mech: smoke
+feedback_read_the_key_from_the_section_already_travelling.md	DUP	MERGE→	recipe_knob_must_be_named_in_from_recipe	mod: recipe/blueprint; mech: config-delivery
+feedback_read_timestamp_is_not_data_freshness.md	LESSON	KEEP	—	mod: telemetry; mech: freshness
+feedback_ready_signal_meant_less_than_read.md	LESSON	KEEP	—	mod: process_module; mech: readiness
+feedback_recipe_knob_must_be_named_in_from_recipe.md	LESSON	KEEP	—	mod: recipe, process_module; mech: config-delivery
+feedback_red_tests_manufacture_the_appearance_of_new_diagnostics.md	LESSON	KEEP	—	mech: measurement, pytest
+feedback_refusal_after_the_write_poisons_the_neighbour.md	LESSON	KEEP	—	mod: telemetry/config layers; mech: layer-L3
+feedback_register_routing_hang.md	LESSON	KEEP	-	mod: frontend_module/registers; mech: FieldRouting
+feedback_removal_leaves_a_tail_in_the_neighbour.md	LESSON	KEEP	—	mod: logger_module; mech: deletion-refactor
+feedback_removing_waste_reddens_tests_that_measured_it.md	LESSON	KEEP	—	mech: test-resolution
+feedback_review_economy_tiers.md	STALE	ARCHIVE	.claude/CLAUDE.md «Task launch convention»	mech: review
+feedback_review_finds_the_seam_between_own_pieces.md	DUP	MERGE→	three_lenses_three_defect_classes	mech: review
+feedback_row_count_never_catches_the_loop.md	LESSON	KEEP	—	mod: telemetry; mech: feedback-loop
+feedback_ru_output_encoding_and_wc.md	REFERENCE	KEEP	—	mech: encoding
+feedback_ruff_strips_unused_import.md	LESSON	KEEP	—	mech: PostToolUse formatter hook
+feedback_runtime_config_dies_with_the_process.md	LESSON	KEEP	—	mod: config_module (config.reload); mech: measurement
+feedback_safeguard_can_be_a_noop_with_green_units.md	LESSON	KEEP	—	mod: backend_ctl (harness.strip_gui); mech: synthetic-input
+feedback_scripted_patch_needs_a_unique_anchor.md	LESSON	KEEP	—	mech: break-injection tooling
+feedback_seam_must_fire_on_full_release.md	DUP	MERGE→	test_survived_its_own_break	mech: break-injection, RLock
+feedback_second_consumer_reveals_the_defect.md	LESSON	KEEP	—	mod: logger_module; mech: singleton lifecycle
+feedback_sentrux_depth_opaque.md	REFERENCE	KEEP	—	mod: sentrux
+feedback_sentrux_gate_narrowed.md	REDUNDANT	ARCHIVE	`scripts/hooks/pre-push` (git-tracked), `.claude/plugins/mcp-sentrux/README.md`	mod: sentrux
+feedback_shared_tree_makes_injections_look_like_flakes.md	DUP	MERGE→	a_peer_session_shares_the_tree	mech: shared-tree, break-injection
+feedback_side_effect_must_not_undo_the_transaction.md	LESSON	KEEP	—	mod: recipe/orchestrator (switch); mech: transactions
+feedback_signal_placed_in_a_branch_goes_blind.md	LESSON	KEEP	—	mod: logger_module; mech: detector-placement
+feedback_silent_detector_proves_nothing.md	DUP	MERGE→	zero_observations_looks_like_a_result	mech: detectors
+feedback_single_marker_verdict_lies.md	LESSON	KEEP	—	mod: backend_ctl (process_restart_verified); mech: verdicts
+feedback_single_reader_test_misses_multi_reader_defect.md	LESSON	KEEP	—	mod: observability readback; mech: shared-baseline
+feedback_spawn_child_inherits_parent_sys_path.md	LESSON	KEEP	—	mod: process_module (SystemLauncher/BackendHarness); mech: spawn
+feedback_spec_review_needs_independent_agent.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Task launch convention», стадия 0	mech: spec-review
+feedback_sqlite_pragma_fails_silently.md	LESSON	KEEP	—	mod: Services/sql, observability store; mech: sqlite
+feedback_stepwise_statement_needs_draining.md	DUP	MERGE→	sqlite_pragma_fails_silently	mod: Services/sql; mech: sqlite
+feedback_subagent_live_test_monitor_hang.md	DUP	MOVE-RULE	project-rules §5 (одна строка: live-тест синхронно; 2-я заминка — лид берёт проверку)	mech: subagent-sync
+feedback_substring_assert_passes_on_the_wrong_branch.md	LESSON	KEEP	—	mod: observability; mech: test-assert
+feedback_suffix_rename_is_a_blind_injection.md	LESSON	KEEP	—	mech: break-injection tooling
+feedback_swallowed_failure_class.md	LESSON	KEEP	—	mod: process_module/middleware; mech: swallowed-exceptions
+feedback_switching_off_a_writer_promotes_its_placeholder_to_a_claim.md	LESSON	KEEP	—	mod: telemetry; mech: placeholders
+feedback_symmetric_names_with_different_periods.md	LESSON	KEEP	—	mod: telemetry (get_stats); mech: naming
+feedback_tab_order.md	RULE	POINTER	.rules/gui.md:27 (правило уже есть)	mod: frontend_module
+feedback_test_authorship_three_roles.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Test authorship»	mech: test-authorship
+feedback_test_params_hide_defect_window.md	LESSON	KEEP	—	mech: test-params
+feedback_test_raising_the_error_itself_guards_the_branch.md	LESSON	KEEP	—	mod: code_version; mech: test-mechanism
+feedback_test_reddens_only_under_a_paired_injection.md	LESSON	KEEP	—	mech: break-injection
+feedback_test_setting_one_handle_of_a_pair_measures_priority.md	DUP	MERGE→	test_params_hide_defect_window	mod: config_module; mech: legacy-alias
+feedback_test_survived_its_own_break.md	LESSON	KEEP	—	mech: break-injection, concurrency
+feedback_test_values_near_defaults_test_the_default.md	DUP	MERGE→	test_params_hide_defect_window	mod: logger_module; mech: test-params
+feedback_tester_always_and_inject_against_it.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Independent tester — on every task»	mech: test-authorship
+feedback_tester_blindness_needs_a_worktree.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Blindness is enforced by the worktree»	mech: tester
+feedback_tester_once_per_mechanism_before_the_code.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Stage 1 refined 2026-08-20»	mech: tester
+feedback_tests_invisible_to_testpaths.md	DUP	MERGE→	zone_guard_never_closes_the_class	mod: framework tests (pytest.ini); mech: testpaths
+feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md	LESSON	KEEP	—	mod: backend_ctl, config L3 TTL; mech: ON/OFF-proof
+feedback_the_plans_stated_cause_is_a_hypothesis.md	LESSON	KEEP	—	mod: process_manager; mech: spec-review
+feedback_the_sentence_is_wider_than_the_command_it_quotes.md	LESSON	KEEP	—	mech: report-honesty
+feedback_think_en_speak_ru.md	REDUNDANT	ARCHIVE	`.claude/CLAUDE.md` «Language policy»	mech: language
+feedback_thread_target_pins_its_owner.md	LESSON	KEEP	—	mod: state_store_module, app_module; mech: thread-GC
+feedback_three_lenses_three_defect_classes.md	LESSON	KEEP	—	mech: test/live/review
+feedback_three_managers_share_base.md	DUP	MERGE→	logger_error_stats_managers	mod: channel_routing_module, base_manager; mech: inheritance
+feedback_tool_features_before_validation.md	LESSON	KEEP	—	mod: backend_ctl; mech: scope-discipline
+feedback_transitive_gui_backend_in_tests.md	LESSON	KEEP	-	mech: qt-in-tests
+feedback_transport_arbitrates_what_it_cannot_understand.md	LESSON	KEEP	—	mod: telemetry (ThrottleMiddleware); mech: single-owner leaf
+feedback_two_green_gates_can_hide_a_red_pair.md	LESSON	KEEP	—	mod: framework tests (declarations); mech: testpaths
+feedback_two_patches_one_red_set_means_one_assert.md	LESSON	KEEP	—	mech: break-injection
+feedback_two_safeguards_hide_which_one_holds.md	DUP	MERGE→	test_reddens_only_under_a_paired_injection	mod: observability (frame trace); mech: break-injection
+feedback_two_tests_enter_from_both_sides_and_miss_the_connector.md	LESSON	KEEP	—	mod: observation_port; mech: connector-test
+feedback_unblocking_signal_at_the_moment_of_fact.md	LESSON	KEEP	—	mod: process_manager (stop_many); mech: lifecycle
+feedback_unconnected_driver_reads_as_a_clean_zero.md	LESSON	KEEP	—	mod: backend_ctl driver; mech: measurement
+feedback_unkillable_fix_needs_a_hand_set_state.md	LESSON	KEEP	—	mod: observation_port; mech: white-box pin
+feedback_unparsed_is_not_absent.md	LESSON	KEEP	—	mod: scripts/sync, validate.py; mech: silent-parser
+feedback_unused_paths_are_contracts.md	RULE	MOVE-RULE	agent `reviewer` (чек-лист) + `project-rules`	mech: review
+feedback_upper_layer_default_disables_the_guard_below.md	LESSON	KEEP	—	mod: logger_module (log_paths); mech: defaults-materialization
+feedback_use_graph_semantic_tools.md	REDUNDANT	ARCHIVE	корневой `CLAUDE.md` «qex-first / sentrux-first»	mech: mcp-routing
+feedback_uv_sync_prunes_venv.md	RULE	MOVE-RULE	.claude/settings.json permissions.ask uv sync* (РЕШЕНИЕ ВЛАДЕЛЬЦА) + строка в project-rules	mech: env, local-only
+feedback_walk_skips_worktrees.md	LESSON	KEEP	—	mech: worktrees, bulk-replace
+feedback_wallclock_threshold_measures_the_heap.md	LESSON	KEEP	—	mod: state_store_module; mech: flaky-tests
+feedback_widget_qt_patterns.md	LESSON	KEEP	`.rules/gui.md`	mod: frontend_module; mech: QTreeWidget
+feedback_worktree_for_parallel_samefile.md	DUP	MERGE→	a_peer_session_shares_the_tree	mech: worktrees
+feedback_worktree_stale_base.md	LESSON	KEEP	—	mech: worktrees
+feedback_zero_mentions_criterion_erases_the_reason.md	LESSON	KEEP	—	mech: acceptance-criteria
+feedback_zero_observations_looks_like_a_result.md	LESSON	KEEP	—	mech: detectors, measurement
+feedback_zero_reds_can_mean_a_useless_layer.md	DUP	MERGE→	injection_zero_may_mean_the_guards_were_not_collected	mech: break-injection
+feedback_zone_guard_never_closes_the_class.md	LESSON	KEEP	—	mod: framework tests; mech: testpaths
+handoff_sources_widget_refactor.md	STALE	ARCHIVE	git; docs/refactors/2026-04_widgets_reorg.md	frontend/sources
+project_all_process_autorestart.md	STATE	ARCHIVE	ADR-PMM-015 в process_manager_module/DECISIONS.md; флаг FW_AUTORESTART в config_module/feature_flags.py	process_manager
+project_app_module_windows_test_debt.md	STATE	KEEP	-	app_module; windows
+project_arch_boundaries_plan.md	REDUNDANT	ARCHIVE	plans/2026-07-06_constructor-master/plan.md (Ф5-добор C1-C8); ADR-RCP-001	recipe
+project_archives_removed.md	REDUNDANT	ARCHIVE	корневой CLAUDE.md, раздел "История версий"	repo
+project_backend_control_mcp.md	STALE	ARCHIVE	plans/_archive/2026-05-31_backend-control-mcp	backend_ctl
+project_backend_ctl_d1_session_isolation.md	STATE	ARCHIVE	plans/_archive/2026-07-19_backend-ctl-d1-session-isolation.md	backend_ctl; router
+project_backend_ctl_framework_module.md	STATE	ARCHIVE	plans/_archive/2026-07-21_backend-ctl-framework-module.md	backend_ctl
+project_backend_ctl_gaps_2026_07.md	STALE	ARCHIVE	коммиты 857ed851, 6b9d4e1f	backend_ctl
+project_backend_ctl_missing_contract.md	LESSON	MERGE→	project_backend_ctl_signal_integrity	backend_ctl; mechanism: missing-vs-zero
+project_backend_ctl_recorder_kept.md	STATE	ARCHIVE	backend_ctl/DECISIONS.md:191 (вердикт 2026-07-22)	backend_ctl
+project_backend_ctl_signal_integrity.md	LESSON	KEEP	-	backend_ctl; mechanism: false-signal
+project_backend_ctl_socket_bypasses_mw.md	LESSON	KEEP	-	backend_ctl; router_module; mechanism: receive-middleware
+project_backend_ctl_ultra_review.md	STATE	ARCHIVE	plans/_archive/2026-07-20_backend-ctl-hardening.md	backend_ctl
+project_calibration_gui_progress.md	LESSON	KEEP	-	gui_process; state_store; mechanism: state-root subscribe
+project_camera_settings_feature.md	STATE	ARCHIVE	код Services/camera_service	camera_service
+project_claude_kit_migration.md	REFERENCE	MERGE→	project_devseed_overwrites_claude_dir	claude-kit
+project_comm_system_p0.md	STATE	ARCHIVE	plans/_archive/comm-system-*.md	router; message_module
+project_command_bus_p4_4.md	STATE	ARCHIVE	plans/_archive/2026-05-31_transport-router-hub	command_manager
+project_command_engine_audit.md	LESSON	KEEP	-	actions_module; command_manager
+project_command_result_bridge.md	STATE	ARCHIVE	plans/_archive/2026-06-06_command-result-bridge	command_manager; gui
+project_component_scoped_styles.md	STATE	ARCHIVE	multiprocess_prototype/plans/component_scoped_styles.md	frontend/styles
+project_concurrent_backends_trap.md	LESSON	KEEP	-	process_manager; shm; mechanism: global-resource-in-tests
+project_config_driven_arch.md	STALE	ARCHIVE	-	generic_process
+project_config_voice_belongs_to_the_apply_stage.md	LESSON	KEEP	-	config_module; mechanism: IO-in-parser
+project_constructor_master_progress.md	STATE	ARCHIVE	plans/2026-07-06_constructor-master/plan.md; docs/handoffs/2026-07-11_constructor-waves-handoff.md	constructor-master
+project_constructor_phase5.md	STALE	ARCHIVE	git	prototype/constructor
+project_constructor_phase6.md	STALE	ARCHIVE	git show 9885bb88	prototype/constructor
+project_cross_tab_phase_b.md	STATE	ARCHIVE	plans/_archive/2026-05-27_cross-tab-architecture	domain layer
+project_cross_tab_phase_c.md	STATE	ARCHIVE	то же	adapters
+project_cross_tab_phase_d.md	STATE	ARCHIVE	то же	AppServices DI
+project_cross_tab_phase_e.md	STATE	ARCHIVE	то же	per-tab migration
+project_cross_tab_phase_f.md	STATE	ARCHIVE	то же	legacy removal
+project_cross_tab_phase_g.md	STATE	ARCHIVE	то же	ActionBus; AppContext
+project_cuda_torch_setup.md	REFERENCE	KEEP	-	ml_train; gpu
+project_dataset_gen_service.md	REDUNDANT	ARCHIVE	Services/dataset_gen/STATUS.md:58	dataset_gen
+project_device_hub.md	STATE	ARCHIVE	plans/_archive/device-hub.md; plans/device-tree-recipe.md	device_hub
+project_devseed_overwrites_claude_dir.md	RULE	MOVE-RULE	.claude/CLAUDE.md (одна строка про claude-kit upgrade)	claude-kit
+project_display_registry.md	REDUNDANT	ARCHIVE	display_module ADR-DM-001	display_module
+project_draw_mode_rework.md	STATE	ARCHIVE	plans/draw-mode-rework/plan.md (A,C,D DONE)	robot draw
+project_f2_4_scope_is_a_string.md	STATE	ARCHIVE	plans/observability-unified-routing.md	logger_module
+project_f2_closed_2026_08.md	STATE	ARCHIVE	то же	observability
+project_f3_external_review.md	STATE	ARCHIVE	docs/reviews/2026-08-05_f3_review.md	observability
+project_f4_processors_closed.md	STATE	ARCHIVE	plans/observability-unified-routing.md	observability
+project_f5_cross_review.md	STATE	ARCHIVE	docs/reviews/2026-08-01_f5-cross-review.md	observability
+project_f6x_review_basket.md	STATE	ARCHIVE	коммиты 7e3eabae..f258a200	observability
+project_f7_cross_review.md	STATE	ARCHIVE	docs/reviews/2026-08-06_f7-cross-review.md	observability
+project_f7_g3_handoff.md	STATE	ARCHIVE	plans/2026-07-06_constructor-master/g3-review-2026-07-14.md	shm; frame
+project_f7_g4_done.md	STATE	ARCHIVE	plans/2026-07-06_constructor-master/g4-execution-plan.md	frame_pool; shm
+project_f7_g7_flip_ladder.md	STATE	ARCHIVE	plans/2026-07-06_constructor-master/g7-flip-plan.md, baseline.md	shm; feature_flags
+project_f7_g7_num_consumers.md	LESSON	KEEP	-	frame_pool; process_module/generic; mechanism: loan-protocol
+project_f8_review_and_stitching.md	STATE	ARCHIVE	ADR-PM-028 (process_module/DECISIONS.md); docs/reviews/2026-08-08_f8-review.md	process_module
+project_feature_flags_registry.md	REDUNDANT	ARCHIVE	config_module/feature_flags.py + README	config_module
+project_fencing_test_race.md	LESSON	KEEP	-	topology fencing; mechanism: test-asserts-race-outcome
+project_fw_version_from_git.md	REDUNDANT	ARCHIVE	multiprocess_framework/version.py (docstring про .dirty)	framework
+project_g5_ownership_decision.md	STATE	ARCHIVE	plans/2026-07-06_constructor-master/g5-execution-plan.md	frame_pool
+project_generic_process_vision.md	STALE	ARCHIVE	git (GenericProcess реализован)	generic_process
+project_gorynych_pypi_deferred.md	REFERENCE	KEEP	-	packaging
+project_graceful_stop_debt.md	LESSON	KEEP	plans/lifecycle-stop-ownership.md	process_manager; mechanism: mp.Queue feeder at exit
+project_graphify_mcp_setup.md	REFERENCE	KEEP	-	graphify
+project_gui_constructor_layers_2026_09_26.md	LESSON	KEEP	plans/gui-constructor/plan.md (DRAFT)	gui-constructor
+project_gui_stand_production_entry_only.md	RULE	MOVE-RULE	команда core:quality:observability-acceptance + project-rules	gui; backend_ctl; mechanism: live-stand
+project_gui_system_queue_storm.md	LESSON	KEEP	-	gui; router; state_store; mechanism: never-drop queue
+project_gui_telemetry_read_model.md	STATE	ARCHIVE	plans/gui-telemetry-read-model.md; ADR-136	telemetry_readmodel
+project_hardware_roles_2026_09_23.md	REFERENCE	KEEP	-	hardware
+project_hierarchical_addressing.md	REDUNDANT	ARCHIVE	message_module/addressing/address.py; ADR-COMM	message_module; router
+project_hikvision_aspect_ratio.md	LESSON	KEEP	-	Services/hikvision_camera
+project_hikvision_letter_robot.md	REDUNDANT	ARCHIVE	multiprocess_prototype/recipes/hikvision_letter_robot.yaml	recipes
+project_honest_verdict_2026_09.md	STATE	ARCHIVE	docs/audits/2026-09-04_honest-verdict-bus-and-niche.md; plans/queue/decisions.md №12	product
+project_kind_channels_dead_evict_branch.md	LESSON	KEEP	survivor: этот файл	router; frame_pool; mechanism: dead-branch-behind-flag
+project_knobs_universal_manager.md	STATE	ARCHIVE	plans/observability-closure/plan.md Task 4.9	observability; knobs
+project_letter_angle_training.md	STATE	ARCHIVE	plans/letters-retrain/plan.md	ml_train
+project_line_filter_feature.md	STATE	ARCHIVE	plans/_archive/2026-06-08_line-filter-virtual.md	line_filter
+project_line_sim_vision.md	STATE	ARCHIVE	plans/line-sim/vision.md, plans/line-sim/plan.md	line_sim
+project_live_findings_webcam_2026_07.md	LESSON	KEEP	-	backend_ctl; mechanism: swallowed-cause
+project_live_verification_2026_07_21.md	STATE	ARCHIVE	docs/audits/2026-07-20_bug-hunt.md §9-10	audit
+project_macos_shm.md	STATE	ARCHIVE	plans/_archive/framework_assessment_2026_05_07.md	memory_module; macos
+project_memory_module_consolidation.md	RULE	KEEP	-	memory_module
+project_ml_train_service.md	REDUNDANT	ARCHIVE	Services/ml_train/STATUS.md	ml_train
+project_monotonic_resolution_windows.md	LESSON	KEEP	-	tests; windows; mechanism: clock-resolution
+project_observability_audit.md	STATE	ARCHIVE	plans/observability-unified-routing.md	observability
+project_observability_closure_progress.md	STATE	ARCHIVE	plans/observability-closure/plan.md; docs/claude/OPEN_QUESTIONS.md	observability
+project_observability_config_layers.md	STATE	ARCHIVE	plans/observability-unified-routing.md; ADR	observability
+project_observability_consumer_acceptance.md	REDUNDANT	ARCHIVE	.claude/commands core:quality:observability-acceptance	observability
+project_observability_control_plane.md	STATE	ARCHIVE	plans/_archive/2026-06-03_observability-control-plane	observability
+project_observability_namespace_symmetry.md	STATE	ARCHIVE	plans/observability-unified-routing.md	logger_module
+project_observability_session_ttl.md	STATE	ARCHIVE	ADR наблюдаемости	observability
+project_observability_stdlib_migration.md	STATE	ARCHIVE	plans/observability-unified-routing.md	logger_module
+project_observability_store_error_routing.md	LESSON	KEEP	-	observability_store; logger_module; mechanism: tap-on-both-managers
+project_observability_subscription_broker.md	STATE	ARCHIVE	plans/observability-unified-routing.md	observability
+project_observability_tail_repair.md	STATE	ARCHIVE	docs/reviews/2026-08-12_observability-hard-review.md	observability
+project_observation_port_progress.md	STATE	ARCHIVE	plans/observation-port/plan.md	observation_port
+project_otel_export_plan_state.md	STATE	ARCHIVE	plans/otel-export.md; docs/reviews/2026-09-05_otel-export-plan-review.md	otel
+project_phase5_data_pipeline.md	STALE	ARCHIVE	git	generic_process
+project_phase5_progress.md	STALE	ARCHIVE	git	generic_process
+project_phase_g_final_review.md	STATE	ARCHIVE	docs/reviews	constructor-master
+project_phone_gateway_service.md	REDUNDANT	ARCHIVE	Services/phone_gateway/README.md, STATUS.md	phone_gateway
+project_pipeline_demo.md	STALE	ARCHIVE	git	pipeline_tab
+project_pipeline_editor_runtime_decoupled.md	STALE	ARCHIVE	plans/_archive/2026-05-31_pipeline-live-control	pipeline
+project_pipeline_live_control_stage1.md	STATE	ARCHIVE	то же	pipeline
+project_pipeline_live_control_stage2.md	STATE	ARCHIVE	то же	pipeline
+project_pipeline_live_incremental_vision.md	STALE	ARCHIVE	то же	pipeline
+project_pipeline_node_plugin_containers.md	STALE	ARCHIVE	git	pipeline_tab
+project_pipeline_node_process_worker.md	STALE	ARCHIVE	git	pipeline_tab
+project_pipeline_recipe_driven_launch.md	REDUNDANT	ARCHIVE	plans/_archive/2026-05-31_pipeline-live-control	pipeline; recipes
+project_plan_driven_dev.md	REDUNDANT	ARCHIVE	корневой CLAUDE.md, раздел Plan-Driven Development	process
+project_plugin_system_phase6.md	STALE	ARCHIVE	git	processes_tab
+project_priority_engine_first.md	RULE	POINTER	plans/queue/ORDER.md (строка про маятник)	priorities
+project_processes_tab.md	STALE	ARCHIVE	git	processes_tab
+project_processes_workers_runtime.md	STATE	ARCHIVE	git	processes_tab; worker_module
+project_prototype_audit_2026_06.md	STALE	ARCHIVE	docs/audits/2026-06-13_prototype-services-plugins-audit.md	audit
+project_prototype_carveout.md	STALE	ARCHIVE	plans/_archive/prototype-carveout.md; корневой CLAUDE.md (Phase 4/5 carve-out)	framework; Services; Plugins
+project_pult_control_panel.md	STATE	ARCHIVE	plans/pult-control-panel.md (Phase 1-3 DONE)	Services tab; SectionProtocol
+project_qex_model.md	REFERENCE	KEEP	-	qex; ollama
+project_qex_reindex_timeout.md	LESSON	MERGE→	qex_full_rebuild_runbook	qex; windows
+project_recipe_hotswap.md	STATE	ARCHIVE	plans/_archive/2026-06-06_replace-blueprint-hotswap.md	recipe; process_manager
+project_recipe_inspector_join_key.md	LESSON	ARCHIVE	blueprint.py infer_missing_collectors (Ф4.7); process_manager_module/DECISIONS.md	recipes; mechanism: silent-disable
+project_recipe_save_load_arch.md	STATE	ARCHIVE	plans/_archive/2026-06-06_recipe-orchestrator-unify.md	recipe
+project_recipes_manager.md	REDUNDANT	ARCHIVE	ADR-131; multiprocess_prototype/recipes/manager.py	recipes
+project_robot_vfd_services.md	STATE	ARCHIVE	ADR-MB-001/002; plans/_archive/robot-vfd-services.md	Services/modbus
+project_root_gate_misses_framework_modules.md	LESSON	KEEP	Makefile gate	tests; pytest; mechanism: coverage-of-the-gate
+project_runtime_knob_expires_in_300s.md	LESSON	KEEP	-	telemetry; observability; mechanism: session-TTL
+project_sentrux_baseline_2026_05.md	STALE	ARCHIVE	mcp__sentrux__evolution	sentrux
+project_sequencing_observability_then_audit.md	STATE	ARCHIVE	plans/observability-closure/review-phase-2-cto.md:208	ponytail-audit
+project_service_registry.md	REDUNDANT	ARCHIVE	service_module ADR-SVC-001	service_module
+project_services_vs_plugins.md	REDUNDANT	ARCHIVE	ADR-120; корневой CLAUDE.md (Слои импортов)	Services; Plugins
+project_settings_mvp_refactor.md	STALE	ARCHIVE	plans/_archive/settings-mvp	settings tab
+project_sketch_robot_draw.md	STATE	ARCHIVE	multiprocess_prototype/recipes/webcam_sketch.yaml	robot draw
+project_source_topology.md	STALE	ARCHIVE	код registers/	sources; processing
+project_state_topology_gate.md	LESSON	KEEP	ADR-SS-019	state_store; mechanism: topology-gate
+project_std_facade_unused.md	STALE	ARCHIVE	git grep get_std_logger -- *.py = 142 файла	logger_module
+project_strokes_points_perf.md	LESSON	KEEP	-	Plugins; numpy; mechanism: O(n^2)-per-frame
+project_switch_delivers_layer.md	LESSON	KEEP	-	recipe switch; observability L2; mechanism: switch-redelivers-state
+project_switch_routing_stale.md	LESSON	KEEP	-	recipe switch; process_state_registry; mechanism: stale-copy-after-switch
+project_system_topology_phase1.md	STALE	ARCHIVE	git	system_topology
+project_team_mode_agent_teams.md	REDUNDANT	ARCHIVE	.claude/CLAUDE.md, раздел Team mode	team
+project_telemetry_coherence_remediation.md	STATE	ARCHIVE	plans/telemetry-coherence-remediation.md (DONE)	telemetry
+project_telemetry_dashboard.md	STATE	ARCHIVE	plans/telemetry-dashboard.md (DONE)	telemetry; pyqtgraph
+project_telemetry_db_sink.md	STATE	ARCHIVE	plans/_archive/2026-06-04_telemetry-db-sink.md	telemetry; Services/sql
+project_telemetry_gui_controls.md	STATE	ARCHIVE	plans/telemetry-publish-control.md (DONE)	telemetry; gui
+project_telemetry_publish_control.md	STATE	ARCHIVE	ADR-PM-018	telemetry
+project_telemetry_self_publish.md	STATE	ARCHIVE	plans/_archive/telemetry-self-publish-redesign.md	telemetry; monotonic
+project_telemetry_subscription_bug.md	STATE	ARCHIVE	git (16e14084)	telemetry; state_store
+project_topology_fencing_token.md	STATE	ARCHIVE	ADR-PMM-014, ADR-MSG-009	message_module/fencing
+project_transport_router_hub.md	STATE	ARCHIVE	plans/_archive/2026-05-31_transport-router-hub; plans/transport-single-policy	router
+project_universal_lifecycle_decision.md	RULE	KEEP	-	lifecycle; subscriptions; mechanism: scope-owner
+project_universal_object_generator.md	STATE	ARCHIVE	plans/layer-render/plan.md	layer_render
+project_venv_locked_by_mcp.md	LESSON	KEEP	-	venv; backend_ctl MCP; windows
+project_vfd_bridge_robot_reboot.md	LESSON	KEEP	-	Services/vfd; robot; mechanism: bridge-carrier
+project_webcam_sketch_freeze.md	STATE	ARCHIVE	ADR-136; plans/gui-telemetry-read-model.md	gui; telemetry
+project_work_order_2026_09_22_line_sim_then_pult.md	STATE	ARCHIVE	plans/queue/ORDER.md ("единственное место порядка")	priorities
+project_worker_cycle_timing.md	STALE	ARCHIVE	worker_module (effective_hz в system_overview, 6b9d4e1f)	worker_module
+project_workers_architecture.md	REDUNDANT	ARCHIVE	worker_module/README.md	worker_module
+reference_gpu_monitoring_windows.md	REFERENCE	KEEP	-	gpu; ollama; windows
+reference_qt_mcp_launch.md	REFERENCE	KEEP	.claude/plugins/mcp-qt/SETUP_GUIDE.md	qt-mcp
+reference_tech_stack_2026.md	REFERENCE	KEEP	docs/direction/TECH_STACK_2026.md	stack
+user_career_goal.md	REFERENCE	KEEP	-	owner

@@ -37,35 +37,52 @@ Outputs:  frame (image/bgr), inspection_result (dict)
   регистру not_inspected_action: reject (по умолчанию, «непроверенное = брак») или pass.
   inspection_result маркера: action, reason="not_inspected", origin (причина маркера),
   source. Выключенный плагин пропускает маркер (action=pass, reason=disabled).
-  Задержка reject_delay_ms применяется только к reject-маркеру.
+  Привод ставится только для reject-маркера (pass-маркер в очередь не ставится).
   Маркер считается ТОЛЬКО в total_not_inspected: total_inspected и total_rejected не
   растут, вердикт-документ не пишется, фронт решения не меняется.
   Широкая запись — одна на маркер, не решающая, текст "<action>: не проверен
   (<origin>@<source>)" — находим поиском по тексту.
 
-Задержка и устаревшие маркеры (ADR-174, вердикт CTO 4.7d):
-  reject_delay_ms при reject-маркере отрабатывается КАЖДЫЙ раз, как на обычном браке.
-  После стоянки исполнителя в голове накапливаются тысячи маркеров (20 тыс. x 100 мс
-  ~ 33 мин отбраковки давно ушедших бутылок); старить маркеры по capture_ts плагин
-  пока не умеет - вопрос владельцу в docs/claude/OPEN_QUESTIONS.md, запись
-  "4.7d: отбраковщик отрабатывает задержку на каждый маркер".
+Контракт привода (Task 5.2, ADR-PM-051): конвейер не ждёт механизма.
+  В process() нет сна. Решение reject ставит цель в планировщик процесса
+  (ctx.scheduler, один на процесс, воркер "actuation"):
+    fire_at = capture_ts + transit_ms, окно до last_capture_ts + transit_ms.
+  Значение actuation в широкой записи (рядом fire_at и transit_ms):
+    scheduled   - цель поставлена, выстрелит воркер;
+    missed      - окно закрылось раньше чем actuation_tolerance_ms назад: не стреляет,
+                  считается в actuation_missed_items (по count, не по записям);
+    unscheduled - у единицы нет capture_ts: не ставится, actuation_unscheduled_items;
+    immediate   - transit 0 (умолчание): выстрел сразу на решении, планировщика нет;
+    none        - pass (и pass-маркер): привода нет.
+  Вердикт-документ пишется на РЕШЕНИИ; выстрел пишет только счётчики.
+  Запись о разрыве (5.3: count, first/last_capture_ts, trace_ids, reasons, sources) -
+  ОДНА постановка на окно, total_not_inspected += count; широкая запись несёт count и
+  список trace_ids (trace_id пуст). Маркер старой формы - count = 1.
+  Это снимает проблему ADR-174 «задержка на каждый маркер»: устаревшие маркеры
+  больше не держат линию, а уходят в missed.
   Маркер с source=inspector при строке журнала у того же trace_id - надгробие кадра
   (осмотрен, копия кадра испорчена), а не второй исход: исход кадра - широкая запись
-  этого плагина. При reject_delay_ms >= ring_depth / fps маркером становится каждый
-  брак (риг CTO: кольцо 3, задержка 30 мс - 10 из 10); умолчание 0 - редкая гонка.
-  Решение и формулы - multiprocess_framework/DECISIONS.md, ADR-174.
+  этого плагина.
 
 Команды:
   - enable             — включить отбраковку
   - disable            — выключить
-  - set_delay          — задержка отбраковки (мс)
+  - set_delay          — УСТАРЕЛА: пишет transit_ms (мс), WARNING в журнал
   - reset_counters     — обнулить счётчики (фронт решения не трогают)
-  - get_stats          — текущая статистика + total_not_inspected, verdicts_written/verdicts_unwritten
+  - get_stats          — текущая статистика + total_not_inspected, verdicts_written/verdicts_unwritten,
+                         actuation_fired_items, actuation_missed_items, actuation_unscheduled_items
+                         (свои), actuation_late_fires, actuation_unfired_on_stop_items (счёт
+                         планировщика ПРОЦЕССА: он один на процесс; reset_counters
+                         не трогает его, а запоминает базу — get_stats отдаёт прирост;
+                         база снимается, только если плагин уже ставил цели)
 
 Config:
   - enabled (bool, True)
   - min_defect_area (int, 500)
-  - reject_delay_ms (int, 0)
+  - transit_ms (int, 0) — путь изделия от кадра до толкателя, мс; 0 — привод сразу
+  - actuation_tolerance_ms (int, 20) — допуск окна: позже — missed / late_fires
+  - reject_delay_ms (int, 0) — УСТАРЕЛ: алиас transit_ms (действует при transit_ms = 0),
+    ненулевое значение даёт один WARNING на экземпляр плагина (на первом process(), при любом исходе)
   - max_detections_for_reject (int, 0)
   - not_inspected_action (reject|pass, reject) — реакция на маркер not_inspected
 

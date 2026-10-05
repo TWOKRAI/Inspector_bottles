@@ -1,6 +1,8 @@
 ---
 name: feedback-coinciding-constants-hide-opposite-implementations
 description: Тест на числах, при которых две противоположные реализации совпадают поэлементно, не отличает их — подбирать константы, на которых они расходятся
+module: "state_store_module (throttle prune)"
+mechanism: "test-data"
 metadata:
   type: feedback
 ---
@@ -22,4 +24,4 @@ metadata:
 шагу часов, и время, не кратное интервалу. Если инъекция не покраснила ожидаемый тест,
 первой гипотезой ставить совпадение констант, а не слабость теста.
 Родня: [[feedback-one-function-two-positions]] (то же совпадение, но в проде),
-[[feedback-test-values-near-defaults-test-the-default]].
+[[feedback_test_params_hide_defect_window]].

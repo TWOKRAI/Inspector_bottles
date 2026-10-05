@@ -6,6 +6,8 @@ metadata:
   last-verified: 2026-09-22
 ---
 
+Правило перенесено в `.claude/commands/dev/plan.md` (шаг 4) и агент `manager` (2026-10-04). Ниже — доказательная база урока.
+
 Writing `plans/2026-09-22_gui-service/` I listed frontend-constructor / rework as "neighbouring
 plans" in one bullet and moved on. The owner stopped me: "it should be connected somehow with
 frontend-constructor, framework-layer-grouping, framework-architecture-rework — whatever is in the

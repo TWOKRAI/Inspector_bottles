@@ -1,5 +1,5 @@
 ---
-description: Run a focused read-only security audit of the diff (deserialization/IPC/injection/secret-leak) — drives the reviewer agent in security-only mode
+description: Read-only security audit of the diff (deserialization, IPC, injection, secret leaks) via the reviewer in security-only mode. Call before merging IPC or serialization changes.
 ---
 
 Run the **reviewer** agent (subagent_type: "reviewer", model: opus) in

@@ -1,6 +1,7 @@
 ---
 name: feedback-plausible-is-not-verified
 description: "Мои косяки 2026-07-21/22 — принятие правдоподобного за проверенное; вкл. гейт-документ доказательности, сам нарушивший её (слабый предикат = OK на error-dict), пойманный ревью Fable"
+mechanism: "verification"
 metadata:
   node_type: memory
   type: feedback

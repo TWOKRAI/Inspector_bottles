@@ -1,6 +1,8 @@
 ---
 name: feedback_gui_save_strips_yaml_comments
 description: GUI Settings-Save round-trips system.yaml через yaml.safe_dump(model_dump) → сносит ВСЕ комментарии; не коммитить system.yaml после запуска прототипа не глядя
+module: "frontend settings (yaml_io.py)"
+mechanism: "config files"
 metadata:
   type: feedback
 ---

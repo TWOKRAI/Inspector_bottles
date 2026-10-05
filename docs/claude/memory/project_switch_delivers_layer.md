@@ -1,6 +1,8 @@
 ---
 name: project-switch-delivers-layer
 description: R6 — switch рецепта обязан раздать слой L2 (адрес + содержимое) всем, кто его пережил; четыре живых дефекта
+module: "recipe switch, observability L2"
+mechanism: "switch-redelivers-state"
 metadata:
   type: project
 ---

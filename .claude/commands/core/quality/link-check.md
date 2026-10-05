@@ -1,5 +1,6 @@
 ---
 description: Check Markdown links (relative paths, anchors, optionally HTTP)
+disable-model-invocation: true
 ---
 
 Run a check of Markdown links in the project:

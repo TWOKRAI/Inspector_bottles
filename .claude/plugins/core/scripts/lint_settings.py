@@ -115,12 +115,13 @@ FORBIDDEN_ALLOW: list[tuple[str, str]] = [
 # Pre-commit-хук session-log снят 2026-10-03 (docs/audits/2026-10-03_commit-mechanism.md, A3):
 # журнал сессий пишет и коммитит /core:team:wrap-up. Stop-вариант остался
 # незарегистрированным fallback (см. docstring файла).
+# check-imports.sh снят 2026-10-04 (FROZEN, plans/2026-10-03_commit-mechanism/tasks/1.4.md): мёртв на Windows,
+# дублирует ruff `invalid-syntax` из autoformat-python.sh; без снятия из списка /lint-settings давал бы `hook missing`.
 REQUIRED_HOOKS: list[tuple[str, str]] = [
     ("PreToolUse", "validate-safe-command.sh"),
     ("PreToolUse", "protect-readonly.sh"),
     ("PreToolUse", "protect-branch.sh"),
     ("PostToolUse", "autoformat-python.sh"),
-    ("PostToolUse", "check-imports.sh"),
     ("PostCompact", "restore-context.sh"),
     ("SessionStart", "session-health-check.sh"),
 ]

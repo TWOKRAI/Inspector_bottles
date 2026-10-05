@@ -1,6 +1,8 @@
 ---
 name: cleanup-must-survive-abnormal-disconnect
 description: "уборку клиентских ресурсов проверять и аварийным разрывом (RST/kill), не только вежливым close — «редкая гонка» может оказаться непокрытой веткой"
+module: "backend_ctl (SocketChannel)"
+mechanism: "resource-cleanup"
 metadata:
   node_type: memory
   type: feedback

@@ -1,6 +1,7 @@
 ---
 name: feedback-attribute-the-source-before-cutting
 description: "одно имя в контексте может приходить из двух мест (проект и ~/.claude) — сверять СОСТАВ множеств, а не факт присутствия, иначе режешь не тот источник и заявляешь экономию, которой нет"
+mechanism: "context-audit"
 metadata:
   node_type: memory
   type: feedback
@@ -41,4 +42,4 @@ searcher, которых в контексте **не было**. В `~/.claude/
 и сверить состав. Экономию заявлять только после прогона в НОВОЙ сессии: список формируется
 на старте, в текущей он старый и подтвердить в ней ничего нельзя.
 
-**Related:** [[project_devseed_overwrites_claude_dir]], [[feedback_freeze_over_kill]].
+**Related:** [[project_devseed_overwrites_claude_dir]], [[feedback_framework_first]].

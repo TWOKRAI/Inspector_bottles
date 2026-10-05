@@ -1,5 +1,5 @@
 ---
-description: Run the project's tests (pytest or make test)
+description: Run the project's tests (pytest or make test). Call for a full-suite run.
 ---
 
 Run the project's tests.

@@ -1,6 +1,8 @@
 ---
 name: baseline-taken-after-the-act-proves-nothing
 description: Сторож, снимающий «до» ПОСЛЕ охраняемого действия, доказывает идемпотентность повтора, а не само действие
+module: "backend_ctl BuiltinCommands"
+mechanism: "acceptance-tests"
 metadata:
   type: feedback
 ---

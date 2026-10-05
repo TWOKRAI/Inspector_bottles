@@ -1,6 +1,7 @@
 ---
 name: project_camera_settings_feature
 description: Настройки камеры РЕАЛИЗОВАНЫ — унифицированный путь через плагин camera_service (live + actual + MJPG)
+module: "camera_settings"
 metadata:
   type: project
 ---

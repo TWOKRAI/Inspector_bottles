@@ -67,7 +67,20 @@ class _Ctx:
 
     def log_info(self, message: str, **kwargs: Any) -> None: ...
 
+    def log_warning(self, message: str, **kwargs: Any) -> None: ...
+
     def log_error(self, message: str, **kwargs: Any) -> None: ...
+
+    @property
+    def scheduler(self) -> Any:
+        """Task 5.2: планировщик привода — настоящий класс фреймворка, ленивый, как у ctx."""
+        if not hasattr(self, "_scheduler"):
+            from multiprocess_framework.modules.process_module.generic.actuation_scheduler import (
+                ActuationScheduler,
+            )
+
+            self._scheduler = ActuationScheduler(lambda payload, count: payload(count))
+        return self._scheduler
 
 
 def _plugin(config: Dict[str, Any] | None = None) -> tuple[RobotControlPlugin, _Ctx]:
@@ -271,20 +284,31 @@ def test_action_pass_lets_marker_through_but_keeps_reason_and_origin() -> None:
 # --- Задержка отбраковки -------------------------------------------------------------------------
 
 
-def test_reject_delay_applies_to_a_rejected_marker() -> None:
-    p, _ = _plugin({"reject_delay_ms": 50})
+def test_reject_delay_schedules_a_rejected_marker_without_waiting() -> None:
+    """Task 5.2: маркер с исходом reject ставится в планировщик, а не ждёт механизм.
+
+    Было (acceptance 4.7d-4): ``process`` длится >= 50 мс при ``reject_delay_ms=50``.
+    Стало: ``process`` < 1 мс, цель в планировщике ровно одна. ``capture_ts`` — свежий:
+    литерал ``12.5`` из ``_marker()`` на шкале ``time.time()`` давно в прошлом (missed).
+    """
+    p, ctx = _plugin({"reject_delay_ms": 50})
+    marker = _marker()
+    marker["capture_ts"] = time.time()
+    # Разовое создание планировщика (импорт модуля) — цена первого обращения, а не
+    # ожидание в process(): снимается до замера. Сам замер — p99 в test_t52_actuation_contract.
+    assert ctx.scheduler.pending() == 0
     box: dict = {}
 
     def call() -> None:
         t0 = time.perf_counter()
-        box["out"] = p.process([_marker()])
+        box["out"] = p.process([marker])
         box["elapsed"] = time.perf_counter() - t0
 
     _bounded(call)
 
     assert _result(box["out"]).get("action") == "reject"
-    # 49 мс, а не 50: допуск 1 мс на расхождение часов time.sleep и perf_counter.
-    assert box["elapsed"] >= 0.049, f"process занял {box['elapsed'] * 1000:.1f} мс при reject_delay_ms=50"
+    assert box["elapsed"] < 0.001, f"process занял {box['elapsed'] * 1000:.3f} мс при reject_delay_ms=50"
+    assert ctx.scheduler.pending() == 1
 
 
 def test_no_delay_when_marker_action_is_pass() -> None:

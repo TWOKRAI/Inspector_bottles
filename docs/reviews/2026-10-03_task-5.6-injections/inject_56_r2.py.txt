@@ -1,0 +1,40 @@
+"""Раунд 2, Task 5.6: свойства правок ревью. Предсказания ДО прогона (PRED). cwd = t56-impl."""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import inject_56 as m  # noqa: E402
+
+RUN = "scripts/stand_gate/run.py"
+m.RUNS = [
+    (m.ROOT, ["scripts/stand_gate/tests"]),
+    (m.ROOT / "multiprocess_framework/modules", [
+        "process_module/tests/test_t56_telemetry_keys_acceptance.py",
+        "process_module/tests",  # тест п.6 лежит где-то здесь — берём весь каталог
+    ]),
+]
+
+m.INJ = {
+    "K1_lock_substring": (RUN, "    ours = [r for r in rows if r and r[0] == token]\n",
+                          "    ours = [r for r in rows if r and token in r[0]]\n"),
+    "K2_lock_no_token_ok": (RUN, '    if not token:\n        raise StandRunError("живой режим требует --lock-token <сессия>")\n',
+                            "    if not token:\n        return\n"),
+    "K3_pause_not_required": (RUN, "    if ordered and paused is not True:\n", "    if False:\n"),
+    "K4_snapshot_error_zeroed": (m.AN, "    if broken:\n        raise GateInputError(f\"снимок с ошибкой: {broken}\")\n", ""),
+    "K5_drain_t0_after_reply": (RUN,
+        '    t0 = time.perf_counter()  # ДО отправки: задержка ответа на worker.start входит в дренаж\n    res["pause_start"] = drv.send_command("processor", "worker.start", {"worker_name": worker}, timeout=10)\n',
+        '    res["pause_start"] = drv.send_command("processor", "worker.start", {"worker_name": worker}, timeout=10)\n    t0 = time.perf_counter()\n'),
+    "K6_lower_rule_off": (m.AN, "    if lower is not None and float(lower) > T.DRAIN_MAX_S:\n", "    if False:\n"),
+    "K7_counters_need_hz": (m.TEL, "    state.update(counter_sums)\n", "    if hz_values:\n        state.update(counter_sums)\n"),
+}
+m.PRED = {
+    "K1_lock_substring": "author: тест токена inspector-bottles-7 против строки -79 — 1",
+    "K2_lock_no_token_ok": "author: тест «живой режим без --lock-token -> код 2» — 1",
+    "K3_pause_not_required": "author: require_pause тесты — >=1",
+    "K4_snapshot_error_zeroed": "author: 3 теста «снимок с error -> код 2»",
+    "K5_drain_t0_after_reply": "author: поддельный стенд (ответ 0.12 с) — FAIL drain превращается в PASS/NOT_MEASURED — >=1",
+    "K6_lower_rule_off": "author: поддельный стенд -> NOT_MEASURED вместо FAIL, + тест правила нижней границы — >=1",
+    "K7_counters_need_hz": "process_module: тест п.6 «state есть без hz>0» — 1 (возможно + тестерские B на latest/zero)",
+}
+m.main()

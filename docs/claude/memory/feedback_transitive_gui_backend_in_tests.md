@@ -1,6 +1,7 @@
 ---
 name: transitive-gui-backend-poisons-the-test-process
 description: "matplotlib при живом PySide6 резолвит qtagg — мина в тестовом процессе; в деле AV 2026-08-12 оказалась НЕ причиной (проба: matplotlib в гейте не импортируется)"
+mechanism: "qt-in-tests"
 metadata:
   node_type: memory
   type: feedback

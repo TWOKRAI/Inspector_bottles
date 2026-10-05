@@ -1,5 +1,6 @@
 ---
 description: Opt-in bounded test-suite triage — run the suite, diagnose failures, propose fixes (human approves). Hard cap 3 iterations / 50k tokens; ai-judge owns the stop-condition. Never auto-runs.
+disable-model-invocation: true
 ---
 
 **Opt-in bounded triage** of the full test suite. The command **diagnoses** failures and

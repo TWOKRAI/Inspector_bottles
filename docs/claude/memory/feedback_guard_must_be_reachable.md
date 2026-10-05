@@ -1,6 +1,8 @@
 ---
 name: guard-must-be-reachable
 description: Защита от подмены поля была верной и НЕДОСТИЖИМОЙ — одноимённый параметр давал TypeError раньше, теряя запись исключением
+module: "plugin_module (PluginContext.write_document)"
+mechanism: "guard-design"
 metadata:
   type: feedback
 ---
@@ -25,4 +27,4 @@ metadata:
 словаря, а не аккуратный именованный аргумент). Если у механизма есть «конверт» и
 «нагрузка», написать тест, который кладёт в нагрузку ключ конверта — и посмотреть, что
 именно происходит: подмена (дефект), TypeError (дефект хуже) или спокойное разделение.
-См. [[feedback_plausible_is_not_verified]], [[feedback_silent_detector_proves_nothing]].
+См. [[feedback_plausible_is_not_verified]], [[feedback_zero_observations_looks_like_a_result]].

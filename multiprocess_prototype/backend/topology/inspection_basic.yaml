@@ -76,3 +76,20 @@ processes:
         category: processing
         mask_alpha: 0.5
         draw_detections: true
+
+# Port-level разводка (SystemBlueprint.check() считает ключи по ИМЕНИ порта на уровне
+# процесса: имя из провода или выход узла выше). Образец — inspection_full.yaml.
+wires:
+  # Камера → обработка. color_mask кладёт mask(gray) в item внутри процесса processor;
+  # blob_detector берёт её оттуда (на графе провода нет), кадр — напрямую с камеры.
+  - source: camera_0.camera_service.frame
+    target: processor.color_mask.frame
+  - source: camera_0.camera_service.frame
+    target: processor.blob_detector.frame
+  # Детекция → overlay (кадр + маска + детекции)
+  - source: processor.blob_detector.frame
+    target: renderer.render_overlay.frame
+  - source: processor.blob_detector.mask
+    target: renderer.render_overlay.mask
+  - source: processor.blob_detector.detections
+    target: renderer.render_overlay.detections

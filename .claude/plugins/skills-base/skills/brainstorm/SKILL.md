@@ -1,13 +1,6 @@
 ---
 name: brainstorm
-description: >
-  Pre-plan brainstorming. Activates BEFORE /dev:plan when the user has a fuzzy
-  idea, multiple competing approaches, or hasn't decided on direction yet.
-  Generates a small set of distinct options with trade-offs and forces a
-  pick before any planning starts. Distinct from `grill-me` (which attacks
-  an EXISTING plan); brainstorm is for when there is no plan yet.
-  Triggers: "what could we do about", "how should we approach", "give me
-  options for", "I'm not sure how to", "brainstorm", "/brainstorm".
+description: Generate a few distinct options with trade-offs and force a pick, before /dev:plan. Use when the idea is fuzzy or approaches compete; to attack an existing plan use grill-me.
 ---
 
 # Pre-plan brainstorming

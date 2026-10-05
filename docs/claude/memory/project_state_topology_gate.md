@@ -1,6 +1,8 @@
 ---
 name: project_state_topology_gate
 description: Гейт FW_STATE_TOPOLOGY_GATE отбрасывает записи в processes.<name>.* для процессов вне текущей топологии — закрыл воскрешение призраков после switch
+module: "state_store"
+mechanism: "topology-gate"
 metadata:
   type: project
 ---

@@ -6,8 +6,9 @@ description: >
   Does NOT write code. Hard-blocks on new dependency cycles, god-node growth,
   or coverage drop > 5%. Advisory-only when MCP unavailable.
 model: opus
-skills: project-rules  # read-only role — disallowedTools below denies writes and the serena mutators
-disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
+omitClaudeMd: true
+skills: project-rules  # read-only role — disallowedTools below denies writes and every MCP server outside the role's row in docs/claude/LEAD_RULES.md (MCP routing)
+disallowedTools: Write, Edit, NotebookEdit, mcp__backend-ctl, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__context7, mcp__qt-mcp, mcp__serena
 ---
 
 ## Role
@@ -30,7 +31,7 @@ machine-readable JSON block is the contract, not the prose.
 
 ## Orient first
 
-Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: root `CLAUDE.md` (auto-loaded) → `docs/PROJECT_CONTEXT.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`.
+Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`.
 
 ## MCP routing (self-contained)
 

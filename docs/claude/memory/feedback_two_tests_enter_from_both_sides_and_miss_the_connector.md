@@ -1,6 +1,8 @@
 ---
 name: two-tests-enter-from-both-sides-and-miss-the-connector
 description: Приёмка входит со стороны источника, авторский тест — со стороны приёмника; сам разъём между ними не сторожит никто
+module: "observation_port"
+mechanism: "connector-test"
 metadata:
   type: feedback
 ---

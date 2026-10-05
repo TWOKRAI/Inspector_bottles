@@ -1,12 +1,6 @@
 ---
 name: verify-done
-description: >
-  Verification gate before declaring a task complete. Forces the agent
-  to prove the change actually works — not just "tests are green" or
-  "code compiles". Activates when the agent is about to say "done",
-  "finished", "ready", "ship it", or before /dev:ship / /dev:pipeline closes a
-  task. Triggers: "verify", "is it really done", "/verify-done",
-  agent's own self-check before completion claim.
+description: "Verification gate before saying 'done': run the change end to end, not just tests. Use before /dev:ship or any completion claim."
 ---
 
 # Verification before completion
@@ -60,7 +54,7 @@ Pick 2–3 concrete ones, not "various edge cases".
 
 ### 5. Architectural sanity (если MCP подключены)
 
-- **Если sentrux подключён** → `sentrux:check_rules` на свежие правки. Цель: нет новых нарушений архитектурных правил (cycles, layer violations). Если ругается — verdict не "done".
+- **Если sentrux установлен** → CLI `sentrux check .` на свежие правки (MCP `check_rules` — quick signal, not a verdict: free tier проверяет только часть правил). Цель: нет новых нарушений архитектурных правил (cycles, layer violations). Если CLI ругается — verdict не "done".
 - **Если codegraph подключён** → `codegraph_explore` на изменённые символы. Цель: blast radius не пропущен (нет ли неучтённых call sites).
 - **Если playwright подключён И проект веб** → `browser_navigate` к golden-path URL + `screenshot`. Проверка визуально, не только HTTP-status.
 - **Если qt-mcp подключён И проект PyQt/PySide** → поднять приложение (`/core:infra:run-proto` или эквивалент), затем:

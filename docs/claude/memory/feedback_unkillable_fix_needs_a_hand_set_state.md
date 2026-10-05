@@ -1,6 +1,8 @@
 ---
 name: unkillable-fix-needs-a-hand-set-state
 description: Правка, которую соседняя правка того же пакета делает недостижимой, инъекцией не убивается — пинить её белым ящиком, ставя недостижимое состояние руками
+module: "observation_port"
+mechanism: "white-box pin"
 metadata:
   type: feedback
 ---

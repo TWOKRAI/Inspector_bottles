@@ -54,8 +54,8 @@ def test_real_order_md_gives_tier_and_lane(real_root, one_plan):
     # layer-render: §4.1, полоса «С»; gui-service: §4.1, полоса «И» (литералы из ORDER.md на коммите снимка)
     lr = one_plan(real_root, "layer-render")
     gs = one_plan(real_root, "2026-09-22_gui-service")
-    assert (lr["tier"], lr["lane"]) == ("4.1", "С")
-    assert (gs["tier"], gs["lane"]) == ("4.1", "И")
+    assert (lr["tier"], lr["lane"]) == ("queue", "С")
+    assert (gs["tier"], gs["lane"]) == ("queue", "И")
 
 
 def test_real_check_reports_status_conflicts_of_layer_render(real_root, progress):
@@ -567,7 +567,7 @@ def test_explicit_order_option_is_used(make_root, one_plan, order_md):
         }
     )
     rec = one_plan(root, "2026-10-02_ord", "--order", str(root / "elsewhere" / "MY_ORDER.md"))
-    assert rec["tier"] == "4.2"
+    assert rec["tier"] == "waiting"
 
 
 def test_order_md_tiers_by_basename(make_root, plans_json, order_md):
@@ -581,7 +581,12 @@ def test_order_md_tiers_by_basename(make_root, plans_json, order_md):
         }
     )
     plans = plans_json(root)
-    assert {n: plans[n]["tier"] for n in plans} == {"p-one": "4.1", "p-two": "4.2", "p-three": "4.3", "p-none": None}
+    assert {n: plans[n]["tier"] for n in plans} == {
+        "p-one": "queue",
+        "p-two": "waiting",
+        "p-three": "closed",
+        "p-none": None,
+    }
 
 
 # =========================================================================== --check: блокирующие и информационные
@@ -884,7 +889,9 @@ def test_html_has_no_external_resources(make_root, progress, parse_html, tmp_pat
     assert not re.search(r"""(?:src|href)\s*=\s*["']?\s*https?://""", raw)
 
 
-def test_html_has_light_and_dark_theme(make_root, progress, parse_html, tmp_path):
-    # ИНТЕРПРЕТАЦИЯ тестера: «светлая и тёмная тема» = media-запрос prefers-color-scheme в <style>
+def test_html_has_dark_theme_only(make_root, progress, parse_html, tmp_path):
+    # Task 7.1 ред. 4: только тёмная тема — решение владельца 2026-10-05
     raw = _html(progress, make_root({"plans/2026-10-02_t/plan.md": plan_text("- Task 1.1: a [DONE]\n")}), tmp_path)
-    assert "prefers-color-scheme" in "".join(parse_html(raw).style_text)
+    style = "".join(parse_html(raw).style_text)
+    assert "prefers-color-scheme" not in style
+    assert re.search(r":root\{[^}]*color-scheme:\s*dark[^}]*--bg:#14171a", style)

@@ -1,0 +1,24 @@
+"""Раунд 3, Task 5.6 (правки 2c). Предсказания ДО прогона. cwd = t56-impl."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import inject_56 as m  # noqa: E402
+
+RUN = "scripts/stand_gate/run.py"
+m.RUNS = [(m.ROOT, ["scripts/stand_gate/tests"])]
+m.INJ = {
+    "L1_lower_from_poll_end": (RUN, "        lower = t_call - t0  # НАЧАЛО опроса, который ещё не увидел цель\n",
+                               "        lower = clock() - t0\n"),
+    "L2_lock_conflict_allowed": (RUN, "    if len(rows) > 1:\n", "    if False:\n"),
+    "L3_lower_rule_back": (m.AN, "    if period is None or float(period) > T.DRAIN_POLL_PERIOD_MAX_S:\n",
+                           "    if pause.get(\"drain_lower_s\") is not None and float(pause[\"drain_lower_s\"]) > T.DRAIN_MAX_S:\n"
+                           "        return Check(\"drain\", FAIL, \"lower\", \"x\")\n"
+                           "    if period is None or float(period) > T.DRAIN_POLL_PERIOD_MAX_S:\n"),
+}
+m.PRED = {
+    "L1_lower_from_poll_end": "author: тест подменённых часов (lower 0.06, не 0.12) — 1",
+    "L2_lock_conflict_allowed": "author: тест конфликта держателей замка — 1",
+    "L3_lower_rule_back": "author: поддельный стенд ждёт NOT_MEASURED, получит FAIL — >=1",
+}
+m.main()

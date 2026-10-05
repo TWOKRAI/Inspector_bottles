@@ -1,6 +1,8 @@
 ---
 name: feedback_injection_green_when_the_substitute_equals_the_fact
 description: Инъекция «зашить константу вместо прочитанного значения» зелёная, если на всех фикстурах константа совпадает с фактом — нужен третий вариант
+module: "process_module (voice class)"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---
@@ -28,5 +30,5 @@ metadata:
 это вслух. Проверка дешёвая: подставь заведомо чужое значение — если ни один тест не
 покраснел, фикстур не хватает, а не «всё защищено».
 
-Родня: [[feedback_prove_test_red_without_fix]], [[feedback_silent_detector_proves_nothing]],
+Родня: [[feedback_prove_test_red_without_fix]], [[feedback_zero_observations_looks_like_a_result]],
 [[feedback_test_authorship_three_roles]], [[feedback_plausible_is_not_verified]].

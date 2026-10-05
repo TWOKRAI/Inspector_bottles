@@ -1,6 +1,8 @@
 ---
 name: feedback-global-clock-patch-flake
 description: Глобальный patch(time.monotonic) с конечным side_effect = флейк от чужих потоков; часы делать зависимостью объекта
+module: "state_store_module (throttle tests)"
+mechanism: "test-flake, clock-injection"
 metadata:
   node_type: memory
   type: feedback

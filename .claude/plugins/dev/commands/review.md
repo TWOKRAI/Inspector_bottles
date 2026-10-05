@@ -1,5 +1,5 @@
 ---
-description: Run the Reviewer agent (Opus) — review the implementation after Developer
+description: Run the reviewer agent (Opus) on the finished implementation. Call after every task.
 ---
 
 Launch the **reviewer** agent (subagent_type: "reviewer", model: opus, `run_in_background: false` — the result is needed in this same turn).

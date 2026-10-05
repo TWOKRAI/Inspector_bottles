@@ -1,6 +1,8 @@
 ---
 name: project_graceful_stop_debt
 description: PM 5 s stop hang (L-2) — real cause is interpreter exit waiting on mp.Queue feeders; two sources, one fixed (EventManager), one open (writer outlives reader); what is refuted and what was rejected
+module: "process_manager"
+mechanism: "mp.Queue feeder at exit"
 metadata:
   type: project
   last-verified: 2026-09-23
@@ -34,4 +36,4 @@ orphan keeps the caller's stdout open, so wrapper scripts look "hung > 300 s".
 
 **How to apply:** when a stop takes ~5 s, dump Python stacks at stop+2.5 s (SIGUSR1 + faulthandler via a
 `sitecustomize` on PYTHONPATH) and look for `_finalize_join`; find which queue's feeder is stuck and who
-should be reading it. Related: [[project_switch_routing_stale]], [[feedback_fix_framework_forward]].
+should be reading it. Related: [[project_switch_routing_stale]], [[feedback_framework_first]].

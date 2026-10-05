@@ -36,6 +36,7 @@ class ProcessRegistry:
         shared_resources=None,
         system_stop_event: Optional[Event] = None,
         routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = None,
+        system_ready_event: Optional[Event] = None,
     ) -> None:
         self.logger = logger
         self.queue_registry = queue_registry
@@ -56,6 +57,11 @@ class ProcessRegistry:
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
         self._system_stop_event: Optional[Event] = system_stop_event
+        # Task 5.4 (ADR-PMM-034): событие готовности системы — его взводит ТОЛЬКО PM
+        # (_announce_ready). Ребёнок получает то же событие и только читает: источники
+        # (SourceProducer) ждут его перед первым produce(). Едет Process-kwargs
+        # (inheritance при spawn), не в bundle custom и не позиционно.
+        self._system_ready_event: Optional[Event] = system_ready_event
         # Ф3.1 (routing-epoch): поставщик routing_meta для bundle нового ребёнка
         # ({"epoch": N, "incarnations": {...}}). None → пустой meta (совместимость).
         self._routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = routing_meta_fn
@@ -248,7 +254,13 @@ class ProcessRegistry:
                 # ADR-PMM-032: единственная точка, взводящая сторожа смерти родителя.
                 # os.getpid() здесь — pid PM (Process() создаётся в нём при любом потоке).
                 # ADR-PMM-033: exit_report — тем же путём (inheritance), что и parent_pid.
-                kwargs={"parent_pid": os.getpid(), "exit_report": exit_report_slot},
+                # Task 5.4 (ADR-PMM-034): system_ready_event — тем же путём; в bundle custom
+                # его нет (см. pop-фильтр выше), позиционно нельзя (шестой — new_session).
+                kwargs={
+                    "parent_pid": os.getpid(),
+                    "exit_report": exit_report_slot,
+                    "system_ready_event": self._system_ready_event,
+                },
                 name=name,
             )
             if self.logger:

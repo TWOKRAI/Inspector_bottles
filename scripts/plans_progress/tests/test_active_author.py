@@ -548,7 +548,7 @@ def test_to_json_active_is_a_fresh_list_per_plan_and_last_key():
     p.active.append({"worktree": "x"})
     data = json.loads(pp.to_json([p, q]))
     assert data[0]["active"] == [{"worktree": "x"}] and data[1]["active"] == []
-    assert list(data[0])[-1] == "active" and list(data[1])[-1] == "active"
+    assert list(data[0])[-2:] == ["active", "branches"] and list(data[1])[-2:] == ["active", "branches"]
 
 
 # =========================================================================== CLI: проводка
@@ -601,10 +601,18 @@ def test_main_window_with_more_digits_than_int_allows_exits_2_without_echo(tmp_p
     assert "9999" not in err
 
 
-def test_main_html_and_check_do_not_touch_git_for_the_active_resolver(tmp_path, monkeypatch, capsys):
+def test_main_html_calls_the_active_resolver_but_check_and_plain_list_do_not(tmp_path, monkeypatch, capsys):
     root = _plain_root(tmp_path)
-    monkeypatch.setattr(pp, "collect_active", lambda *a, **k: pytest.fail("резолвер вызван вне --json/--who"))
+    calls = []
+
+    def spy(*a, **k):
+        calls.append(a)
+        return [], []
+
+    monkeypatch.setattr(pp, "collect_active", spy)
     assert _run_main(["--root", str(root), "--html", str(tmp_path / "p.html")], capsys)[0] == 0
+    assert len(calls) == 1, "страница (Task 5.3) берёт активные из резолвера"
+    monkeypatch.setattr(pp, "collect_active", lambda *a, **k: pytest.fail("резолвер вызван для --check / списка"))
     assert _run_main(["--root", str(root), "--check"], capsys)[0] in (0, 1)
     assert _run_main(["--root", str(root)], capsys)[0] == 0
 

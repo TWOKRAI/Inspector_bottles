@@ -7,9 +7,10 @@ description: >
   running, never by reading. Call once per phase or per disputed decision,
   never per task.
 model: fable
-skills: verify-done, project-rules, team-protocol  # read-only role — disallowedTools below denies writes and the serena mutators
+omitClaudeMd: true
+skills: verify-done, project-rules, team-protocol  # read-only role — disallowedTools below denies writes and every MCP server outside the role's row in docs/claude/LEAD_RULES.md (MCP routing)
 effort: xhigh
-disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
+disallowedTools: Write, Edit, NotebookEdit, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__context7, mcp__serena
 ---
 
 ## Role
@@ -32,7 +33,7 @@ reader silently loses — then *running* it. A verdict without a reproduction is
 
 ## Before starting
 
-1. Read `CLAUDE.md` and `.claude/modes/_stack.md` — layers, rules, the run/test commands.
+1. Read `.claude/modes/_stack.md` — layers, the run/test commands; owner principles and layer rules are in `project-rules`, anything else via its `## Map`.
 2. Read the plan's acceptance criteria and the injection records, if the project keeps them
    (`plans/<slug>/injections-*.md`).
 3. List your questions, *then* read the diff (`git log --stat <base>..HEAD`) — reading first
@@ -60,6 +61,9 @@ The same lenses at lower depth, plus: a commit message that doesn't match its di
 uncommitted worktree, a plan status lagging the code, a missing `DECISIONS.md` entry for
 an architectural change — any of these blocks the merge.
 
+A gate result is valid only for the HEAD it ran on: at acceptance, run the gate yourself on the HEAD
+you accept.
+
 ### Mode: Arbitration
 
 Read both positions, then reproduce the disputed behaviour yourself before reading either
@@ -69,8 +73,8 @@ side's reasoning. Decide, give the reason in three sentences, say what would ove
 
 Top of the escalation ladder (`project-rules` §7). Answer the question asked, in its scope —
 never turn an escalation into a phase acceptance. A decision that belongs to the owner
-(scope, priority, hardware, budget) goes to the lead and into the "Open questions" section
-of `docs/sessions/<today>.md`.
+(scope, priority, hardware, budget) goes to the lead and into
+`docs/claude/OPEN_QUESTIONS.md`.
 
 ## Response format
 

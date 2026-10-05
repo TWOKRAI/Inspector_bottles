@@ -1,6 +1,8 @@
 ---
 name: feedback-a-test-that-pins-a-hole-is-green-both-ways
 description: Тест, закрепляющий ДОКУМЕНТИРУЕМУЮ ДЫРУ, зелен и до, и после снятия свойства — он документация, а не сторож, и в покрытие не идёт
+module: "backend_ctl (history_query)"
+mechanism: "break-injection"
 metadata:
   type: feedback
 ---
@@ -26,4 +28,4 @@ metadata:
 стороны») или вырожденный сторож (переписать). Обратный признак тоже считать: у заявленного
 свойства обязана быть заплата, красящая ≥ 1 тест. Связано с
 [[feedback_prove_test_red_without_fix]], [[feedback_two_patches_one_red_set_means_one_assert]] и
-[[feedback_silent_detector_proves_nothing]].
+[[feedback_zero_observations_looks_like_a_result]].

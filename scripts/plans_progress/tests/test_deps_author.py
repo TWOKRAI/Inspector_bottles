@@ -200,6 +200,7 @@ def test_a_plan_name_in_a_task_clause_is_a_missing_task_not_a_plan(make_root, pr
         ("(After 1.1)", ["1.1"]),
         ("(AFTER 1.1, 1.0)", ["1.1", "1.0"]),
         ("(после T1)", ["T1"]),
+        ("(после 1.2.3)", ["1.2.3"]),
         ("(после 1b.2b-pre; до 1b.3; решение 2026-09-25)", ["1b.2b-pre"]),
     ],
 )
@@ -211,7 +212,6 @@ def test_id_forms_and_word_case_in_task_clause(clause, expected):
     "clause",
     [
         "(после 1.2B)",
-        "(после 1.2.3)",
         "(после 1.1-Foo)",
         "(после 1.2_x)",
         "(после 1.2b3)",

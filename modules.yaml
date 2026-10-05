@@ -1,0 +1,924 @@
+# Карта «путь -> модуль» (Task 0.3, plans/2026-10-04_atlas). Ведётся руками.
+# Формат и правила — plans/2026-10-04_atlas/tasks/0.3.md; потребитель — scripts/atlas/modules.py.
+# paths: элемент с «/» на конце — префикс каталога, без «/» — точный файл. Самый длинный элемент побеждает.
+version: 1
+
+# Что законно остаётся без модуля (резолвится в "other"). Корни слоёв сюда не попадают.
+other_allowed: ["run.py", "conftest.py", ".claude/", "docs/", "plans/"]
+
+modules:
+  - id: "actions_module"
+    paths: [
+      "multiprocess_framework/modules/actions_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/actions_module/README.md",
+      "multiprocess_framework/modules/actions_module/STATUS.md",
+      "multiprocess_framework/modules/actions_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "app_module"
+    paths: [
+      "multiprocess_framework/modules/app_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/app_module/README.md",
+      "multiprocess_framework/modules/app_module/STATUS.md",
+      "multiprocess_framework/modules/app_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "base_manager"
+    paths: [
+      "multiprocess_framework/modules/base_manager/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/base_manager/README.md",
+      "multiprocess_framework/modules/base_manager/STATUS.md",
+      "multiprocess_framework/modules/base_manager/DECISIONS.md",
+    ]
+    parent: null
+  - id: "chain_module"
+    paths: [
+      "multiprocess_framework/modules/chain_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/chain_module/README.md",
+      "multiprocess_framework/modules/chain_module/STATUS.md",
+      "multiprocess_framework/modules/chain_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "channel_routing_module"
+    paths: [
+      "multiprocess_framework/modules/channel_routing_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/channel_routing_module/README.md",
+      "multiprocess_framework/modules/channel_routing_module/STATUS.md",
+      "multiprocess_framework/modules/channel_routing_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "command_module"
+    paths: [
+      "multiprocess_framework/modules/command_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/command_module/README.md",
+      "multiprocess_framework/modules/command_module/STATUS.md",
+      "multiprocess_framework/modules/command_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "config_module"
+    paths: [
+      "multiprocess_framework/modules/config_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/config_module/README.md",
+      "multiprocess_framework/modules/config_module/STATUS.md",
+      "multiprocess_framework/modules/config_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "console_module"
+    paths: [
+      "multiprocess_framework/modules/console_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/console_module/README.md",
+      "multiprocess_framework/modules/console_module/STATUS.md",
+      "multiprocess_framework/modules/console_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "data_schema_module"
+    paths: [
+      "multiprocess_framework/modules/data_schema_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/data_schema_module/README.md",
+      "multiprocess_framework/modules/data_schema_module/STATUS.md",
+      "multiprocess_framework/modules/data_schema_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "dispatch_module"
+    paths: [
+      "multiprocess_framework/modules/dispatch_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/dispatch_module/README.md",
+      "multiprocess_framework/modules/dispatch_module/STATUS.md",
+      "multiprocess_framework/modules/dispatch_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "display_module"
+    paths: [
+      "multiprocess_framework/modules/display_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/display_module/README.md",
+      "multiprocess_framework/modules/display_module/STATUS.md",
+      "multiprocess_framework/modules/display_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "error_module"
+    paths: [
+      "multiprocess_framework/modules/error_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/error_module/README.md",
+      "multiprocess_framework/modules/error_module/STATUS.md",
+      "multiprocess_framework/modules/error_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "event_module"
+    paths: [
+      "multiprocess_framework/modules/event_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/event_module/README.md",
+      "multiprocess_framework/modules/event_module/STATUS.md",
+      "multiprocess_framework/modules/event_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "frontend_module"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/frontend_module/README.md",
+      "multiprocess_framework/modules/frontend_module/STATUS.md",
+      "multiprocess_framework/modules/frontend_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "logger_module"
+    paths: [
+      "multiprocess_framework/modules/logger_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/logger_module/README.md",
+      "multiprocess_framework/modules/logger_module/STATUS.md",
+      "multiprocess_framework/modules/logger_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "message_module"
+    paths: [
+      "multiprocess_framework/modules/message_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/message_module/README.md",
+      "multiprocess_framework/modules/message_module/STATUS.md",
+      "multiprocess_framework/modules/message_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "process_manager_module"
+    paths: [
+      "multiprocess_framework/modules/process_manager_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/process_manager_module/README.md",
+      "multiprocess_framework/modules/process_manager_module/STATUS.md",
+      "multiprocess_framework/modules/process_manager_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "process_module"
+    paths: [
+      "multiprocess_framework/modules/process_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/process_module/README.md",
+      "multiprocess_framework/modules/process_module/STATUS.md",
+      "multiprocess_framework/modules/process_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "recipe"
+    paths: [
+      "multiprocess_framework/modules/recipe/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/recipe/README.md",
+      "multiprocess_framework/modules/recipe/STATUS.md",
+      "multiprocess_framework/modules/recipe/DECISIONS.md",
+    ]
+    parent: null
+  - id: "registers_module"
+    paths: [
+      "multiprocess_framework/modules/registers_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/registers_module/README.md",
+      "multiprocess_framework/modules/registers_module/STATUS.md",
+      "multiprocess_framework/modules/registers_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "router_module"
+    paths: [
+      "multiprocess_framework/modules/router_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/router_module/README.md",
+      "multiprocess_framework/modules/router_module/STATUS.md",
+      "multiprocess_framework/modules/router_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "service_module"
+    paths: [
+      "multiprocess_framework/modules/service_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/service_module/README.md",
+      "multiprocess_framework/modules/service_module/STATUS.md",
+      "multiprocess_framework/modules/service_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "shared_resources_module"
+    paths: [
+      "multiprocess_framework/modules/shared_resources_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/shared_resources_module/README.md",
+      "multiprocess_framework/modules/shared_resources_module/STATUS.md",
+      "multiprocess_framework/modules/shared_resources_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "state_store_module"
+    paths: [
+      "multiprocess_framework/modules/state_store_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/state_store_module/README.md",
+      "multiprocess_framework/modules/state_store_module/STATUS.md",
+      "multiprocess_framework/modules/state_store_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "statistics_module"
+    paths: [
+      "multiprocess_framework/modules/statistics_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/statistics_module/README.md",
+      "multiprocess_framework/modules/statistics_module/STATUS.md",
+      "multiprocess_framework/modules/statistics_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "telemetry_readmodel_module"
+    paths: [
+      "multiprocess_framework/modules/telemetry_readmodel_module/",
+    ]
+    layer: framework
+    tier: optional
+    docs: [
+      "multiprocess_framework/modules/telemetry_readmodel_module/README.md",
+      "multiprocess_framework/modules/telemetry_readmodel_module/STATUS.md",
+      "multiprocess_framework/modules/telemetry_readmodel_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "worker_module"
+    paths: [
+      "multiprocess_framework/modules/worker_module/",
+    ]
+    layer: framework
+    tier: core
+    docs: [
+      "multiprocess_framework/modules/worker_module/README.md",
+      "multiprocess_framework/modules/worker_module/STATUS.md",
+      "multiprocess_framework/modules/worker_module/DECISIONS.md",
+    ]
+    parent: null
+  - id: "framework_meta"
+    paths: [
+      "multiprocess_framework/__init__.py",
+      "multiprocess_framework/version.py",
+      "multiprocess_framework/modules/__init__.py",
+      "multiprocess_framework/modules/_fallback.py",
+      "multiprocess_framework/modules/conftest.py",
+      "multiprocess_framework/modules/observability_declarations.py",
+      "multiprocess_framework/docs/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/README.md",
+      "multiprocess_framework/DECISIONS.md",
+      "multiprocess_framework/docs/README.md",
+    ]
+    parent: null
+  - id: "services/auth"
+    paths: [
+      "Services/auth/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/auth/README.md",
+      "Services/auth/STATUS.md",
+      "Services/auth/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/code_reader"
+    paths: [
+      "Services/code_reader/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/code_reader/README.md",
+      "Services/code_reader/STATUS.md",
+      "Services/code_reader/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/control_panel"
+    paths: [
+      "Services/control_panel/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/control_panel/README.md",
+      "Services/control_panel/STATUS.md",
+    ]
+    parent: null
+  - id: "services/dataset_gen"
+    paths: [
+      "Services/dataset_gen/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/dataset_gen/README.md",
+      "Services/dataset_gen/STATUS.md",
+    ]
+    parent: null
+  - id: "services/device_hub"
+    paths: [
+      "Services/device_hub/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/device_hub/README.md",
+      "Services/device_hub/STATUS.md",
+      "Services/device_hub/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/documents"
+    paths: [
+      "Services/documents/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/documents/README.md",
+      "Services/documents/STATUS.md",
+    ]
+    parent: null
+  - id: "services/hikvision_camera"
+    paths: [
+      "Services/hikvision_camera/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/hikvision_camera/README.md",
+      "Services/hikvision_camera/STATUS.md",
+    ]
+    parent: null
+  - id: "services/layer_render"
+    paths: [
+      "Services/layer_render/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/layer_render/README.md",
+      "Services/layer_render/STATUS.md",
+      "Services/layer_render/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/line_sim"
+    paths: [
+      "Services/line_sim/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/line_sim/README.md",
+      "Services/line_sim/STATUS.md",
+      "Services/line_sim/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/ml_inference"
+    paths: [
+      "Services/ml_inference/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/ml_inference/README.md",
+      "Services/ml_inference/STATUS.md",
+    ]
+    parent: null
+  - id: "services/ml_train"
+    paths: [
+      "Services/ml_train/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/ml_train/README.md",
+      "Services/ml_train/STATUS.md",
+    ]
+    parent: null
+  - id: "services/modbus"
+    paths: [
+      "Services/modbus/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/modbus/README.md",
+      "Services/modbus/STATUS.md",
+      "Services/modbus/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/otel_export"
+    paths: [
+      "Services/otel_export/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/otel_export/README.md",
+      "Services/otel_export/STATUS.md",
+      "Services/otel_export/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/phone_gateway"
+    paths: [
+      "Services/phone_gateway/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/phone_gateway/README.md",
+      "Services/phone_gateway/STATUS.md",
+    ]
+    parent: null
+  - id: "services/robot_comm"
+    paths: [
+      "Services/robot_comm/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/robot_comm/README.md",
+      "Services/robot_comm/STATUS.md",
+      "Services/robot_comm/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/sql"
+    paths: [
+      "Services/sql/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/sql/README.md",
+      "Services/sql/STATUS.md",
+      "Services/sql/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services/vfd_comm"
+    paths: [
+      "Services/vfd_comm/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/vfd_comm/README.md",
+      "Services/vfd_comm/STATUS.md",
+      "Services/vfd_comm/DECISIONS.md",
+    ]
+    parent: null
+  - id: "services_shared"
+    paths: [
+      "Services/__init__.py",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/STATUS.md",
+    ]
+    parent: null
+  - id: "plugins/calibration"
+    paths: [
+      "Plugins/calibration/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/control"
+    paths: [
+      "Plugins/control/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/filter"
+    paths: [
+      "Plugins/filter/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/hub"
+    paths: [
+      "Plugins/hub/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/io"
+    paths: [
+      "Plugins/io/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/processing"
+    paths: [
+      "Plugins/processing/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/render"
+    paths: [
+      "Plugins/render/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/runtime"
+    paths: [
+      "Plugins/runtime/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/sim"
+    paths: [
+      "Plugins/sim/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/sinks"
+    paths: [
+      "Plugins/sinks/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/sources"
+    paths: [
+      "Plugins/sources/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins/utility"
+    paths: [
+      "Plugins/utility/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "plugins_shared"
+    paths: [
+      "Plugins/__init__.py",
+      "Plugins/_shared/",
+    ]
+    layer: plugins
+    tier: null
+    docs: []
+    parent: null
+  - id: "prototype/adapters"
+    paths: [
+      "multiprocess_prototype/adapters/",
+    ]
+    layer: prototype
+    tier: null
+    docs: [
+      "multiprocess_prototype/adapters/README.md",
+    ]
+    parent: null
+  - id: "prototype/backend"
+    paths: [
+      "multiprocess_prototype/backend/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: null
+  - id: "prototype/domain"
+    paths: [
+      "multiprocess_prototype/domain/",
+    ]
+    layer: prototype
+    tier: null
+    docs: [
+      "multiprocess_prototype/domain/README.md",
+      "multiprocess_prototype/domain/DECISIONS.md",
+    ]
+    parent: null
+  - id: "prototype/frontend"
+    paths: [
+      "multiprocess_prototype/frontend/",
+    ]
+    layer: prototype
+    tier: null
+    docs: [
+      "multiprocess_prototype/frontend/README.md",
+    ]
+    parent: null
+  - id: "prototype/recipes"
+    paths: [
+      "multiprocess_prototype/recipes/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: null
+  - id: "prototype/registers"
+    paths: [
+      "multiprocess_prototype/registers/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: null
+  - id: "prototype_root"
+    paths: [
+      "multiprocess_prototype/ARCHITECTURE.md",
+      "multiprocess_prototype/README.md",
+      "multiprocess_prototype/STATUS.md",
+      "multiprocess_prototype/__init__.py",
+      "multiprocess_prototype/app.yaml",
+      "multiprocess_prototype/generic_process_app.py",
+      "multiprocess_prototype/main.py",
+      "multiprocess_prototype/orchestrator.py",
+      "multiprocess_prototype/run.py",
+    ]
+    layer: prototype
+    tier: null
+    docs: [
+      "multiprocess_prototype/ARCHITECTURE.md",
+      "multiprocess_prototype/README.md",
+      "multiprocess_prototype/STATUS.md",
+    ]
+    parent: null
+  - id: "tools/backend_ctl"
+    paths: [
+      "backend_ctl/",
+    ]
+    layer: tools
+    tier: null
+    docs: [
+      "backend_ctl/README.md",
+      "backend_ctl/STATUS.md",
+      "backend_ctl/DECISIONS.md",
+    ]
+    parent: null
+  - id: "prototype/apps"
+    paths: [
+      "apps/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: null
+  - id: "tools/tools"
+    paths: [
+      "tools/",
+    ]
+    layer: tools
+    tier: null
+    docs: []
+    parent: null
+  - id: "scripts"
+    paths: [
+      "scripts/",
+    ]
+    layer: scripts
+    tier: null
+    docs: [
+      "scripts/README.md",
+    ]
+    parent: null
+  - id: "tools/utils"
+    paths: [
+      "Utils/",
+    ]
+    layer: tools
+    tier: null
+    docs: []
+    parent: null
+  - id: "prototype/robot"
+    paths: [
+      "robot/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: null
+  - id: "docs/examples"
+    paths: [
+      "examples/",
+    ]
+    layer: docs
+    tier: null
+    docs: []
+    parent: null
+  - id: "tools/backend_ctl/probes"
+    paths: [
+      "backend_ctl/probes/",
+    ]
+    layer: tools
+    tier: null
+    docs: []
+    parent: "tools/backend_ctl"
+  - id: "frontend_module/components"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/components/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/modules/frontend_module/components/README.md",
+    ]
+    parent: "frontend_module"
+  - id: "frontend_module/components/_examples"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/components/_examples/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/modules/frontend_module/components/_examples/README.md",
+    ]
+    parent: "frontend_module/components"
+  - id: "frontend_module/components/base"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/components/base/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/modules/frontend_module/components/base/README.md",
+    ]
+    parent: "frontend_module/components"
+  - id: "frontend_module/core"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/core/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/modules/frontend_module/core/README.md",
+    ]
+    parent: "frontend_module"
+  - id: "frontend_module/widgets"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/widgets/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/modules/frontend_module/widgets/README.md",
+    ]
+    parent: "frontend_module"
+  - id: "frontend_module/widgets/chrome"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/widgets/chrome/",
+    ]
+    layer: framework
+    tier: null
+    docs: []
+    parent: "frontend_module/widgets"
+  - id: "frontend_module/widgets/tabs"
+    paths: [
+      "multiprocess_framework/modules/frontend_module/widgets/tabs/",
+    ]
+    layer: framework
+    tier: null
+    docs: [
+      "multiprocess_framework/modules/frontend_module/widgets/tabs/README.md",
+    ]
+    parent: "frontend_module/widgets"
+  - id: "process_module/generic"
+    paths: [
+      "multiprocess_framework/modules/process_module/generic/",
+    ]
+    layer: framework
+    tier: null
+    docs: []
+    parent: "process_module"
+  - id: "prototype/frontend/widgets"
+    paths: [
+      "multiprocess_prototype/frontend/widgets/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: "prototype/frontend"
+  - id: "prototype/frontend/widgets/tabs"
+    paths: [
+      "multiprocess_prototype/frontend/widgets/tabs/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: "prototype/frontend/widgets"
+  - id: "prototype/frontend/widgets/tabs/pipeline"
+    paths: [
+      "multiprocess_prototype/frontend/widgets/tabs/pipeline/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: "prototype/frontend/widgets/tabs"
+  - id: "prototype/frontend/widgets/tabs/services"
+    paths: [
+      "multiprocess_prototype/frontend/widgets/tabs/services/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: "prototype/frontend/widgets/tabs"
+  - id: "prototype/frontend/widgets/tabs/settings"
+    paths: [
+      "multiprocess_prototype/frontend/widgets/tabs/settings/",
+    ]
+    layer: prototype
+    tier: null
+    docs: []
+    parent: "prototype/frontend/widgets/tabs"

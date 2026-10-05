@@ -14,10 +14,12 @@
 ## Toolchain (правится под проект — дефолты seed здесь неверны)
 
 - **Language:** Python **3.12** (не 3.11+ из seed)
+- **Библиотеки** (из root `CLAUDE.md` «Стек»): PySide6 6.10, OpenCV 4.13, NumPy 2.x | SQLite/PostgreSQL; pytest + pytest-qt (`qt_api = pyside6`) | Pydantic v2; ML: PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]` в pyproject
 - **Package manager:** `uv`, но **пакеты ставит пользователь** — не выполнять install самому.
   `uv sync` сносит необъявленное → только `--inexact`
 - **Test:** `python scripts/run_framework_tests.py` / `python scripts/validate.py` / `make test`.
   Ручной pytest — из корня проекта, иначе `ModuleNotFoundError`. НЕ `uv run pytest -q`
+- **Worktree:** без `uv sync` и без `uv run` без `--no-sync` (CUDA torch → CPU) — `<основное дерево>/.venv/Scripts/python.exe` + `PYTHONPATH=<корень worktree>`; пруф — путь импорта `multiprocess_framework` из того же cwd, что pytest. Переопределяет рецепт `core/agents/_WORKTREE_PATTERN.md`
 - **Gate:** `make gate` (= `make check` + `make test`); `make check` = ruff + pyright + bandit
 - **Агентские прогоны:** всегда `QT_QPA_PLATFORM=offscreen` — Qt-окно вешает агента
 
@@ -25,7 +27,7 @@
 
 - **Validator:** [x] enabled (`.git/hooks/commit-msg`)
 - **Required trailers:** `Why:` **и** `Layer:` — оба обязательны (seed по умолчанию считает
-  `Layer:` выключённым; здесь это неверно, хук отклонит коммит)
+  `Layer:` выключённым; здесь это неверно: сейчас (фаза 2) — предупреждение, отказ — со строгого режима (Task 3.1))
 - **Layer values:** framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
 - **Refs:** обязателен, если задача из плана — `Refs: plans/<slug>.md`
 
@@ -41,12 +43,9 @@
 - **Specs root:** `docs/direction/` — живые спеки продукта
 - **Branch:** `<type>/<slug>`, стандарт `feat/`, не `feature/`
 
-## MCP — фактическое состояние (сверено с `.claude/enabled.yaml`)
+## MCP — фактическое состояние
 
-Включены: **qex** (семантический поиск), **sentrux** (DSM/метрики), **serena** (LSP-символы),
-**context7** (доки библиотек), **graphify** (граф кода), **qt-mcp** (инспекция PySide6),
-**ast-grep** (структурный поиск), **codegraph**, **backend-ctl** (живой бэкенд),
-**github**, **sequential-thinking**, **sentry**.
+Серверы по ролям — `docs/claude/LEAD_RULES.md` → «MCP routing» (замер 2026-10-05).
 Выключены: **playwright** (проект не веб), **hello-world**, **knowledge**.
 
 Схемы MCP-инструментов отложены (ToolSearch) — держать сервер включённым дёшево.
@@ -80,6 +79,9 @@ pre_report_gate = on                            # on | off — off allows withou
 pre_report_gate_tests = multiprocess_framework/modules/state_store_module/tests multiprocess_framework/modules/router_module/tests  # space-separated test paths passed to pre_report_gate.py --tests
 pre_report_gate_base = main                     # merge-base ref for the gate's diff scope; empty = @{upstream} → origin/HEAD → main → master
 report_status = on                              # on | off — off skips the STATUS: line check entirely; independent of pre_report_gate
+
+# Project memory — read by /core:memory:* commands.
+memory_dir = docs/claude/memory                # canonical memory (git, both machines); the local auto-memory folder is a cache
 
 # Subagent context budget — read by hooks/agent-context-ceiling.sh (PreToolUse).
 agent_context_budget = 100000                   # soft: start + N -> checkpoint (finish or hand off), repeated every +50000; off = none

@@ -360,7 +360,7 @@ error «используй process=all»): отвергнут — не разб�
 троттл (`build_throttle_rules`) был de-facto no-op на телеметрию — `ThrottleMiddleware.before_merge`
 не был переопределён, а телеметрия едет через `proxy.merge` (heartbeat self-publish), не `before_set`;
 (2) телеметрия НЕ идёт через `StatsManager` — тот пишет в локальные каналы, remote-транспорта в
-дерево StateStore у него нет (см. [[project_telemetry_self_publish]]) — публикация fps/latency/hz
+дерево StateStore у него нет (см. docs/claude/memory/_archive/project_telemetry_self_publish.md) — публикация fps/latency/hz
 всегда шла self-publish'ом из heartbeat; (3) следовательно «управлять через stats manager» не может
 означать «пустить данные через stats manager» — это дублировало бы уже работающий канал доставки;
 управлять нужно было ДРУГИМ — плоскостью конфигурации, размещённой рядом со stats/observability-
@@ -3970,3 +3970,89 @@ test_storeless_mode_get_returns_default_and_process_lives`.
 **Refs:** `plans/transport-single-policy/task-4.5.md`, `docs/reviews/2026-09-30_task-4.5-review.md`
 (находки 1, 3, 4, 5), `heartbeat/cpu_clock.py`, `heartbeat/process_heartbeat.py`,
 `generic/data_receiver.py`.
+
+
+### ADR-PM-051 — Планировщик привода `ActuationScheduler`: один на процесс, `fire` — диспетчер вызываемого payload, допуск на запись (2026-10-02, Task 5.2)
+
+**Контекст.** Решатель `robot_control` ждал механизм прямо в `process()`: `time.sleep(reject_delay_ms)` на
+каждом браке и на каждом reject-маркере. Сон останавливал исполнитель процесса на время транзита изделия до
+толкателя. После стоянки в голове копились тысячи маркеров, и каждый отрабатывал задержку заново (ADR-174:
+20 тыс. × 100 мс ≈ 33 мин отбраковки давно ушедших бутылок). Решения дизайна — `docs/reviews/2026-10-02_phase5-design-cto.md`
+(решения 1, 6, 8), вход `ctx.scheduler` — решение владельца 2026-10-02, спека — `plans/transport-single-policy/phase-5.md`, Task 5.2.
+
+**Решение.**
+1. **Класс фреймворка** `generic/actuation_scheduler.py`: куча целей под `threading.Condition`.
+   `schedule(fire_at, window_end, count, payload, *, tolerance_s=None)` → `"scheduled"` | `"missed"`
+   (`now > window_end + tolerance` — в кучу не ставится, `missed_items += count`; иначе `fire_at = max(fire_at, now)`).
+   `tick()` стреляет все `fire_at <= now`, `late_fires += 1` на запись при `now − fire_at > tolerance`.
+   `run_loop(stop_event, pause_event)` — цель воркера `ExecutionMode.LOOP`; на стопе невыстреленное не стреляет,
+   `unfired_on_stop_items += count`.
+2. **`fire` вызывается ВНЕ `Condition`.** Медленный привод не держит `schedule()` в потоке исполнителя, и
+   `fire` может сам звать `schedule()` (следующий шаг привода) без дедлока.
+3. **Исключение из `fire` не убивает цикл.** Оно считается (`stats()["fire_errors"]`) и уходит в `on_error`;
+   у планировщика процесса это `ctx.health.report_error(exc, context="actuation.fire")` — одна дверь инцидента.
+4. **Один планировщик на процесс — на `services._actuation_scheduler`.** `PluginContext` у каждого плагина
+   свой (`with_config` создаёт новый), поэтому объект хранится на сервисах процесса и создаётся под модульным
+   замком (get-or-create с двойной проверкой). Первое обращение при `worker_manager is not None` создаёт воркер
+   `actuation` с **`auto_start=True` явно**: у настоящих `WorkerAdapter`/`WorkerManager` умолчание `False`.
+   Импорт класса — внутри свойства (цикл `generic/__init__` → `generic_process` → `plugins`).
+5. **`fire` планировщика процесса — диспетчер `payload(count)`** (решение лида по пробелу спеки, найденному
+   слепым тестером). Общий планировщик не знает плагинов; плагин передаёт вызываемый payload — у `robot_control`
+   это его `_on_actuation_fire`, который пишет только счётчики (решение 6: вердикт пишется на решении).
+6. **Допуск — на запись** (`schedule(..., tolerance_s=...)`, `None` — допуск конструктора). Регистр
+   `actuation_tolerance_ms` принадлежит плагину, а планировщик один на процесс: два плагина с разными допусками
+   не должны делить один. Запись хранит свой допуск и для `missed`, и для `late_fires`. Пробел спеки закрыт
+   решением исполнителя, принятым лидом 2026-10-02.
+7. **`robot_control`:** `effective_transit = transit_ms or reject_delay_ms`; `0` → `immediate`, выстрел синхронно,
+   планировщик не создаётся. Нет `capture_ts` → `unscheduled`, без постановки. Запись о разрыве (5.3) — одна
+   постановка с окном `[first + transit, last + transit]`. `fired`/`missed`/`unscheduled` в `cmd_get_stats` —
+   счёт плагина; `late_fires`/`unfired_on_stop_items` — счёт планировщика процесса.
+
+**Отвергнуто.**
+* **Свой планировщик и воркер у каждого плагина** (первоначальное решение 1 CTO) — перевёрнуто решением владельца:
+  два решателя одного процесса дали бы два потока на одну работу и две разные шкалы опозданий.
+* **`fire` пишет вердикт-документ.** Документ датировался бы моментом механизма, а не решения, и выстрел по
+  записи о разрыве на 1078 кадров дал бы 1078 документов.
+* **Допуск — свойство планировщика, плагин ставит его при первом обращении.** Последний обратившийся плагин молча
+  менял бы допуск соседу; ошибка без симптома.
+* **`fire` под замком** (проще счёт) — медленный привод блокировал бы `schedule()` исполнителя, то есть вернул бы
+  ровно ту остановку конвейера, которую задача снимает.
+* **`threading.Timer` на каждую цель** — поток на брак; на записи о разрыве и сериях брака это сотни потоков.
+
+**Последствия и границы.**
+* `actuation_late_fires` и `actuation_unfired_on_stop_items` у плагина — числа ВСЕГО процесса: при двух
+  плагинах-решателях в одном процессе они общие. Плагин не видит, опоздал ли его выстрел.
+* Точность выстрела живьём ограничена сеткой часов: `time.time()` на Windows — 15.6 мс; критерий
+  «в `[fire_at, fire_at + 0.002]`» проверен только на подменных часах. Живьём — `late_fires` и p99 опоздания.
+* `PLUGIN_API_VERSION` не поднят (аддитивное свойство, политика — minor); вопрос вынесен лидом в открытые.
+* Если `create_worker` вернул `False`, планировщик живёт без воркера: цели копятся (видно в `pending()`),
+  причина звучит одним WARNING.
+* Стоп воркера очищает кучу; цели, поставленные после стопа, остаются в куче до перезапуска.
+
+**Refs:** `plans/transport-single-policy/phase-5.md` (Task 5.2), `docs/reviews/2026-10-02_phase5-design-cto.md`,
+`docs/reviews/2026-10-02_phase5-spec-review-w2.md`, `generic/actuation_scheduler.py`, `plugins/base.py`
+(`PluginContext.scheduler`), `Plugins/control/robot_control/plugin.py`.
+
+### ADR-PM-052 — Граница модели доступности ключей: валидатор считает «имя есть», рантайм может сбросить ключ (2026-10-03, Task 5.9a)
+
+**Контекст.** После T1 `color_mask` отдаёт только `mask`, а `validate_chain` смотрел лишь предыдущий узел,
+поэтому `inspection_basic.yaml` падал на `check()`. Task 5.9a ввела модель «проход ключа»: валидатор считает, что
+между плагинами едет один dict, поэтому вход узла i покрыт, если ИМЯ его порта есть среди имён проводов процесса ∪ выходов
+узлов 0…i-1 (`available_keys`, последний производитель выигрывает). Спека — `plans/transport-single-policy/phase-5.md`.
+
+**Решение.** Модель принята как есть, с известной границей.
+1. Валидатор считает ключ живым, пока его не перезаписал выход узла. Он НЕ знает, что плагин вернул СВЕЖИЙ dict.
+2. Рантайм такие ключи теряет: `line_filter`, `center_crop`, `stitcher`, `renderer_compositor` возвращают
+   новый dict, а `plugin_runner.py:55-59` переносит только системные поля.
+3. Следствие: процесс `proc = [blob_detector, line_filter, color_mask]` с проводом `cam…frame → proc.blob_detector.frame`
+   даёт `check() == []`, хотя `frame` до `color_mask` не доходит.
+4. Дыра зафиксирована характеризационным тестом `process_manager_module/tests/test_t59a_review_author.py`
+   (`test_model_boundary_fresh_dict_plugin_in_the_middle_is_invisible_to_check`): он фиксирует дыру, не одобряет её.
+   Он покраснеет, только если новая модель по умолчанию считает, что плагин без объявления ключи НЕ переносит;
+   при умолчании «переносит» тест надо переписать вместе с объявлением у `_FreshDictLike`.
+
+**Не решено.** Вопрос модели («плагин объявляет, какие ключи переносит» против «валидатор знает про свежий dict»)
+передан CTO — `docs/claude/OPEN_QUESTIONS.md`, запись 2026-10-03, решение при приёмке фазы 5.
+
+**Refs:** `plans/transport-single-policy/phase-5.md` (Task 5.9a), `plugins/port.py` (`available_keys`,
+`validate_chain_detailed`), `process_manager_module/topology/blueprint.py` (`SystemBlueprint.check`).

@@ -1,6 +1,8 @@
 ---
 name: feedback-commit-takes-the-whole-index
-description: git commit забирает ВЕСЬ индекс — ранний `git rm` уезжает в чужой коммит; а сорванный pre-commit прячет несохранённые правки в свой патч
+description: "git commit забирает ВЕСЬ индекс — ранний `git rm` уезжает в чужой коммит; а сорванный pre-commit прячет несохранённые правки в свой патч; также: commit-msg hook: trailer предпочтительно одной строкой, но с 2026-07-14 хук ТЕРПИТ перенос (git-стиль фолдинг); pre-commit ruff-format → re-stage + re-commit (не amend); Откат pre-commit при конфликте авто-фиксов молча теряет НЕзастейдженные правки в посторонних файлах — перед коммитом дерево должно быть без незастейдженных хвостов"
+merged_from: [feedback_commit_msg_format, feedback_precommit_rollback_drops_unstaged_edits]
+mechanism: "git, pre-commit"
 metadata:
   type: feedback
 ---
@@ -26,4 +28,67 @@ metadata:
 
 **How to apply:** перед серией коммитов — `git status --short`; стейджить
 группу, коммитить, немедленно `git show --stat`. Форматирование — до `git add`.
-Родня: [[feedback_commit_msg_format]], [[feedback_parallel_agents_commit_race]].
+Родня: [[feedback_commit_msg_format]], [[feedback_precommit_stash_collision_2plus_agents]].
+
+## Слито из feedback_commit_msg_format (_archive/feedback_commit_msg_format.md)
+
+**pre-commit ruff-format модифицирует свежие файлы → коммит падает.**
+Хук `ruff format` переформатирует только что отредактированные файлы (часто схлопывает многострочные вызовы/lambda в одну строку) → pre-commit «files were modified by this hook» → коммит НЕ создан.
+**How to apply:** после такого падения — повторно `git add` изменённых файлов + НОВЫЙ commit (НЕ amend, т.к. коммита ещё не было). Это же касается hook'а end-of-files/trailing-whitespace для md-файлов (память/планы) и авто-дописывания `docs/sessions/<date>.md` (его тоже добавлять в commit).
+
+Пункт 1 исходной записи («trailer одной строкой») УСТАРЕЛ и не перенесён: с 2026-07-14 хук `validate_commit` терпит перенос `Why:`/`Layer:` (git-стиль фолдинг, регресс-тест `scripts/validate_commit/tests/test_validate_commit.py`); одна строка на trailer — лишь предпочтение для чистого diff.
+
+## Слито из feedback_precommit_rollback_drops_unstaged_edits (_archive/feedback_precommit_rollback_drops_unstaged_edits.md)
+
+Если хук pre-commit что-то авто-исправил (`ruff format`) **и** в дереве есть незастейдженные
+правки, pre-commit пытается наложить свой патч поверх возвращаемого стеша, получает конфликт и
+делает «Rolling back fixes». Откат **не сообщает о потере**: коммит не создаётся, а
+незастейдженная правка в постороннем файле исчезает.
+
+**Живьём (2026-08-14, Task 3.1).** Коммит кода упал так:
+
+```
+ruff format .......... Failed  - files were modified by this hook
+[WARNING] Stashed changes conflicted with hook auto-fixes... Rolling back fixes...
+error: patch failed: docs/claude/memory/MEMORY.md:61
+error: docs/claude/memory/MEMORY.md: patch does not apply
+```
+
+После этого `MEMORY.md` пропал из `git status` вовсе — строка индекса, дописанная агентом,
+откатилась к HEAD. Файл записи при этом остался untracked, то есть потеря была ЧАСТИЧНОЙ и
+незаметной: запись есть, ссылки на неё нет.
+
+Отдельный участник конфликта — хук `append session log to docs/sessions/`: он дописывает файл на
+каждом коммите, и этот же файл почти всегда висит в состоянии `MM` (застейджен и снова изменён).
+
+**Как применять.** Перед `git commit`:
+
+1. `git status --porcelain` — не должно остаться строк с изменением во ВТОРОЙ колонке
+   (` M`, `MM`); `git add` их или отложи явно;
+2. если хук всё же переформатировал — `git add` затронутые файлы и повторить коммит
+   ([[feedback-commit-msg-format]]);
+3. после падения коммита **проверить соседние файлы**, а не только те, что коммитил: откат мог
+   съесть чужую правку. Дешёвая проверка — `grep` по ожидаемой строке, а не взгляд на `git status`
+   (в статусе потеря выглядит как чистота).
+
+Связано: [[feedback-commit-msg-format]], [[feedback-commit-takes-the-whole-index]],
+[[feedback-plan-dual-save]].
+
+#### Второй случай, 2026-09-03 — и он показывает, как это выглядит изнутри
+
+Правка теста (`test_road_cost_hazards.py`, привязка подставных часов к своему потоку) была
+применена и **проверена прогоном** — «2 passed», затем красный 2/2 на заплате. Через несколько
+шагов файл вернулся к прежнему виду: `grep -c threading.get_ident` дал **0**, и в `git status`
+файла не было вовсе. Между правкой и потерей своего коммита я не делал — стеш-цикл `pre-commit`
+крутила **чужая сессия**, которая в это время перелопачивала `.claude/` (новые агенты, скиллы,
+`.gitattributes`).
+
+**Чем это опасно именно так:** зелёный прогон уже был, и память говорит «сделано». Ни одного
+сигнала о потере нет — статус чист, тесты (старые) зелены. Заметил только потому, что перед
+коммитом сверил `git diff --cached --stat` со списком файлов, которые собирался внести, и одного
+не хватило.
+
+**Правило, которое из этого следует:** в общем дереве коммитить правку СРАЗУ после того, как она
+проверена, а не копить несколько правок до конца задачи. И перед коммитом сверять состав
+`--cached` со своим списком поимённо, а не глазами по диффу. Родня:
+[[feedback_precommit_stash_collision_2plus_agents]], [[feedback_a_peer_session_shares_the_tree]].

@@ -1,5 +1,6 @@
 ---
 description: Full qex reindex from scratch (force=true, 30-60 min on a large repo). Use only when changing the embedding model or when the index is corrupted
+disable-model-invocation: true
 ---
 
 Full reindex — **slow** (dozens of minutes on a large repo). By default use `/mcp-qex:qex-reindex` (incremental).

@@ -1,5 +1,6 @@
 ---
 description: Run the reviewer eval — grade the code-reviewer agent's output against golden cases (offline deterministic floor; LLM-judge deferred).
+disable-model-invocation: true
 ---
 
 Run the reviewer golden-task eval. The harness lives at

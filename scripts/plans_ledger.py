@@ -181,6 +181,7 @@ import contextlib
 import datetime as _dt
 import difflib
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -319,12 +320,14 @@ _ARCHIVE_STEMS = ("архив", "archive")
 
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
-# Task id (plans-progress-dashboard, «Формат задачи»): `1.3`, `1.3a`, `1b.2a`,
-# `1b.2b-pre`, `1.3h-c-fix`, `T1`. The id ends at whitespace, `:~*,;.` or the
-# end of the line. The group is atomic: an id that fails the end check never
+# Task id (plans-progress-dashboard, «Формат задачи»): `1.3`, `1.3a`, `1.2.3`, `1b.2a`,
+# `1b.2b-pre`, `1.3h-c-fix`, `T1`, `ABC1`. The same string is validate_commit.TASK_ID_PATTERN and
+# plans_progress.ID_PATTERN (modules are autonomous: copied, pinned by a contract test). The id ends at
+# whitespace, `:~*,;`, a dot not followed by a word character (`Task 1.4.` is `1.4`; `T2.K` and `5.10.g`
+# are not ids) or the end of the line. The group is atomic: an id that fails the end check never
 # backtracks into its own prefix (`Task 1.3a)` is not read as `Task 1`).
-_TASK_ID = r"[A-Z]{0,2}[0-9]+[a-z]?(?:\.[0-9]+[a-z]*)?(?:-[a-z0-9]+)*"
-_TASK_ID_END = r"(?=[\s:~*,;.]|$)"
+_TASK_ID = r"[A-Z]{0,3}[0-9]{1,3}[a-z]?(?:\.[0-9]+[a-z]?)*(?:-[a-z0-9]+)*"
+_TASK_ID_END = r"(?=[\s:~*,;]|\.(?!\w)|$)"
 _TASK_REF = r"Task\s+(?>(" + _TASK_ID + r"))" + _TASK_ID_END
 _TASK_HEADER_RE = re.compile(r"^#{2,6}\s+" + _TASK_REF)
 _TASK_H1_HEADER_RE = re.compile(r"^#\s+" + _TASK_REF)
@@ -814,7 +817,12 @@ def is_task_closed(
     return totals is not None and totals[0] == totals[1]
 
 
-def summarize_plan(paths: list[Path]) -> PlanSummary:
+def _summarize_plan_legacy(paths: list[Path]) -> PlanSummary:
+    """The ledger's own parser — FROZEN until Task 4.4 (plans-progress-dashboard).
+
+    Used as is when the project has no ``scripts/plans_progress/plans_progress.py``
+    (a seed project without the dashboard has no second truth to agree with), when
+    that module fails to load, and for one plan whose ``analyze_plan`` raised."""
     texts = [(Path(p), _read(Path(p))) for p in paths]
     all_text = "\n".join(text for _, text in texts)
     # A task id's own tasks/<id>.md text, when it has one — threaded into
@@ -890,6 +898,240 @@ def summarize_plan(paths: list[Path]) -> PlanSummary:
         open_tasks=open_tasks,
         dropped=dropped,
     )
+
+
+# ---------------------------------------------------------------------------
+# One parser: summarize_plan over plans_progress.analyze_plan (Task 4.1)
+# ---------------------------------------------------------------------------
+
+# Where the dashboard's parser lives, relative to the PROJECT root (the parent
+# of the plan's nearest `plans` ancestor) — never relative to this script: a
+# seed copy of the ledger must count the host project's plans with the host
+# project's parser, and a tmp root without the parser must stay «прежний».
+_PARSER_REL = ("scripts", "plans_progress", "plans_progress.py")
+# Module path (absolute, as a string) -> the loaded module, or None when the
+# load failed. Both outcomes are cached: a failing module is executed once per
+# process, and its one stderr line is printed once per process and root.
+_PARSER_CACHE: dict[str, object | None] = {}
+# (module path, plan) pairs whose analyze_plan already raised — one stderr
+# line per pair, however many commands ask for the same plan.
+_PARSER_PLAN_FAILURES: set[tuple[str, str]] = set()
+_ARCHIVE_DIR = "_archive"
+_QUARTER_DIR_RE = re.compile(r"^\d{4}-Q[1-4]$")
+
+
+def _plans_ancestor(path: Path) -> Path | None:
+    """The nearest ancestor of *path* named ``plans`` (absolute), or ``None``."""
+    for parent in Path(os.path.abspath(path)).parents:
+        if parent.name == "plans":
+            return parent
+    return None
+
+
+def _load_parser(module_path: Path) -> object | None:
+    """The ``plans_progress`` module at *module_path*, loaded once per process.
+
+    No file -> ``None``, silently, and not cached (a cheap stat; a module that
+    appears later is seen). A load that raises -> ``None``, cached, and one
+    stderr line with the path and the exception CLASS only — the text of a
+    ``SyntaxError`` carries a line of the source. The module is registered in
+    ``sys.modules`` under a name unique to its path BEFORE ``exec_module``:
+    ``@dataclass`` looks its module up by name, and two roots must never share
+    one loaded module."""
+    key = str(module_path)
+    if key in _PARSER_CACHE:
+        return _PARSER_CACHE[key]
+    if not module_path.is_file():
+        return None
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    name = f"_plans_ledger_parser_{digest}"
+    try:
+        spec = importlib.util.spec_from_file_location(name, module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(name)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        for attr in ("analyze_plan", "DROPPED"):
+            getattr(module, attr)
+    except Exception as exc:  # noqa: BLE001 — any load failure -> «прежний»
+        sys.modules.pop(name, None)
+        _PARSER_CACHE[key] = None
+        print(
+            f"plans_ledger: {module_path}: load failed ({type(exc).__name__}); "
+            "counting with the built-in parser",
+            file=sys.stderr,
+        )
+        return None
+    _PARSER_CACHE[key] = module
+    return module
+
+
+def _analyze_args(
+    paths: list[Path], plans_dir: Path
+) -> tuple[str, Path, Path | None, str, bool] | None:
+    """``analyze_plan(name, main, plan_dir, rel, archived)`` rebuilt from the
+    plan's files, or ``None`` when the shape is not a plan the page knows.
+
+    ``tasks/<id>.md`` -> ``plan_dir`` is the parent of ``tasks/``; ``plan.md``
+    and ``phase-N*.md`` -> their directory; ``main`` = ``plan_dir/plan.md``
+    (may not exist). One file whose parent is ``plans/``, ``plans/_archive/``
+    or ``plans/_archive/<quarter>/`` -> a single-file plan: ``main`` = it,
+    ``plan_dir`` = ``None``."""
+    first = Path(os.path.abspath(paths[0]))
+    plan_dir: Path | None
+    if first.parent.name == "tasks":
+        plan_dir = first.parent.parent
+    elif first.name == "plan.md" or _PHASE_FILE_RE.match(first.name):
+        plan_dir = first.parent
+    elif len(paths) == 1 and (
+        first.parent == plans_dir
+        or first.parent == plans_dir / _ARCHIVE_DIR
+        or (
+            first.parent.parent == plans_dir / _ARCHIVE_DIR
+            and _QUARTER_DIR_RE.match(first.parent.name)
+        )
+    ):
+        plan_dir = None
+    else:
+        return None
+    main = plan_dir / "plan.md" if plan_dir is not None else first
+    anchor = plan_dir if plan_dir is not None else main
+    try:
+        rel_parts = anchor.relative_to(plans_dir).parts
+    except ValueError:
+        return None
+    archived = bool(rel_parts) and rel_parts[0] == _ARCHIVE_DIR
+    name = plan_dir.name if plan_dir is not None else main.stem
+    root = plans_dir.parent
+    rel_target = main if main.is_file() else anchor
+    rel = rel_target.relative_to(root).as_posix()
+    return name, main, plan_dir, rel, archived
+
+
+def _legacy_phases(paths: list[Path]) -> dict[str, str]:
+    """Task id -> phase number by the ledger's own rule. A plan WITH
+    «Порядок выполнения» items takes the phase only from the item
+    (``### Phase N`` inside the section) — a ``## Phase N`` heading elsewhere
+    never counts, exactly as :func:`_summarize_plan_legacy`. A plan without
+    items takes the ``## Phase N`` heading / ``phase-N.md`` file of the
+    task's heading."""
+    texts = [(Path(p), _read(Path(p))) for p in paths]
+    items = _section_task_items(texts)
+    if items:
+        by_item: dict[str, str] = {}
+        for item in items:
+            if item.phase:
+                by_item.setdefault(item.task_id, item.phase)
+        return by_item
+    by_heading: dict[str, str] = {}
+    for path, text in texts:
+        file_match = _PHASE_FILE_RE.match(path.name)
+        current_phase = file_match.group(1) if file_match else None
+        in_task_file = path.parent.name == "tasks"
+        for line, fenced in _unfenced_lines(text):
+            if fenced:
+                continue
+            phase_heading = _PHASE_HEADING_RE.match(line)
+            if phase_heading:
+                current_phase = phase_heading.group(1)
+                continue
+            m = _TASK_HEADER_RE.match(line)
+            if m is None and in_task_file:
+                m = _TASK_H1_HEADER_RE.match(line)
+            if m and current_phase is not None:
+                by_heading.setdefault(m.group(1), current_phase)
+    return by_heading
+
+
+def _summary_from_plan(
+    plan: object, dropped_statuses: tuple, paths: list[Path]
+) -> PlanSummary:
+    """``PlanSummary`` from an ``analyze_plan`` result.
+
+    ``total`` = every task (a duplicate id counts twice, as on the page);
+    ``counted`` then equals ``plan.total``. ``open_tasks`` = ids not done and
+    not dropped, in task order, each id once. ``phase`` = the phase (ledger
+    rule, :func:`_legacy_phases`) of the first open task whose status is
+    not ``unknown`` and whose phase is known."""
+    tasks = list(plan.tasks)  # type: ignore[attr-defined]
+    open_tasks: list[str] = []
+    first_known: list[str] = []
+    for task in tasks:
+        if task.status == "done" or task.status in dropped_statuses:
+            continue
+        if task.id not in open_tasks:
+            open_tasks.append(task.id)
+        if task.status != "unknown" and task.id not in first_known:
+            first_known.append(task.id)
+    phase: str | None = None
+    if first_known:
+        phases = _legacy_phases(paths)
+        for task_id in first_known:
+            number = phases.get(task_id)
+            if number:
+                phase = f"phase {number}"
+                break
+    return PlanSummary(
+        done=plan.done,  # type: ignore[attr-defined]
+        total=len(tasks),
+        phase=phase,
+        open_tasks=open_tasks,
+        dropped=plan.dropped,  # type: ignore[attr-defined]
+        unknown=plan.unknown,  # type: ignore[attr-defined]
+    )
+
+
+def summarize_plan(paths: list[Path]) -> PlanSummary:
+    """Counts of one plan; *paths* are its files (:func:`discover_plan_files`).
+
+    Two modes (Task 4.1, plans-progress-dashboard: one parser for ``close`` and
+    the page):
+
+    * «адаптер» — the project root (parent of the plan's nearest ``plans``
+      ancestor) has ``scripts/plans_progress/plans_progress.py`` and it loads.
+      Then *paths* only LOCATE the plan (and feed the ledger's phase rule):
+      ``analyze_plan`` reads the plan's files itself, so a file missing from
+      *paths* still counts, and the numbers are the page's.
+    * «прежний» — no such module, no ``plans`` ancestor, the module failed to
+      load (one stderr line per process and root), the files are not a shape
+      the page knows, or ``analyze_plan`` raised on THIS plan (one stderr line
+      per plan): :func:`_summarize_plan_legacy`, unchanged.
+
+    Trust: the parser is CODE of the tree being counted. ``status``/``close``/
+    ``add`` with ``--root X`` execute ``X/scripts/plans_progress/plans_progress.py``
+    (an ``exec_module``; ``SystemExit`` from it ends the ledger) — do not run
+    them on a tree you do not trust.
+
+    Empty *paths* -> ``PlanSummary(0, 0, None)`` in both modes."""
+    paths = [Path(p) for p in paths]
+    if not paths:
+        return PlanSummary(done=0, total=0, phase=None)
+    plans_dir = _plans_ancestor(paths[0])
+    if plans_dir is None:
+        return _summarize_plan_legacy(paths)
+    module_path = plans_dir.parent.joinpath(*_PARSER_REL)
+    module = _load_parser(module_path)
+    if module is None:
+        return _summarize_plan_legacy(paths)
+    args = _analyze_args(paths, plans_dir)
+    if args is None:
+        return _summarize_plan_legacy(paths)
+    try:
+        plan = module.analyze_plan(*args)  # type: ignore[attr-defined]
+        dropped = tuple(module.DROPPED)  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001 — this plan only -> «прежний»
+        failure = (str(module_path), args[3])
+        if failure not in _PARSER_PLAN_FAILURES:
+            _PARSER_PLAN_FAILURES.add(failure)
+            print(
+                f"plans_ledger: analyze_plan failed on {args[3]} "
+                f"({type(exc).__name__}); counting it with the built-in parser",
+                file=sys.stderr,
+            )
+        return _summarize_plan_legacy(paths)
+    # Outside the try: an error here is a ledger defect, not the parser's.
+    return _summary_from_plan(plan, dropped, paths)
 
 
 def _plan_branch(paths: list[Path]) -> str | None:

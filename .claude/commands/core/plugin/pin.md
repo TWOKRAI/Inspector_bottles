@@ -1,5 +1,6 @@
 ---
 description: Pin plugin <id> to a marketplace source (consume) in enabled.yaml and recompose the configuration — source in the form <plugin>@<marketplace>
+disable-model-invocation: true
 allowed-tools: Bash(claude-kit-claude plugin pin*)
 ---
 
