@@ -125,19 +125,21 @@ class _Entry:
 class _Acc:
     """Накопитель одного отчёта."""
 
-    __slots__ = ("survivors", "killed", "errors", "complete")
+    __slots__ = ("survivors", "killed", "errors", "complete", "emits")
 
     def __init__(self) -> None:
         self.survivors: list[str] = []
         self.killed: list[str] = []
         self.errors: list[tuple[str, str]] = []
         self.complete = True
+        self.emits = 0  # отклонённые доставки (канал note_emits_after_close)
 
     def merge(self, report: CloseReport) -> None:
         self.survivors.extend(report.survivors)
         self.killed.extend(report.killed)
         self.errors.extend(report.errors)
         self.complete = self.complete and report.complete
+        self.emits += report.emits_after_close
 
     def report(self, path: str, start: float) -> CloseReport:
         return CloseReport(
@@ -146,6 +148,7 @@ class _Acc:
             survivors=tuple(self.survivors),
             killed=tuple(self.killed),
             errors=tuple(self.errors),
+            emits_after_close=self.emits,
             complete=self.complete,
         )
 
@@ -712,9 +715,14 @@ class Scope:
                         entry.releaser = me
                 self._close_entries(entries, deadline, limit, acc)
         finally:
+            hand_off = 0
             with self._lock:
                 acc.merge(self._extra.report(self._path, start))
                 acc.errors.extend(self._drain_thread_errors_locked(None))
+                if not from_parent and self._parent is not None:
+                    # Закрыта не родителем: счётчик уходит родителю (в его отчёт),
+                    # в своём отчёте — 0. Корень держит счётчик сам.
+                    hand_off, acc.emits = acc.emits, 0
                 report = acc.report(self._path, start)
                 self._extra = _Acc()
                 # Сегменты не пересобираются: освобождённые записи уже удалены, остались
@@ -722,6 +730,12 @@ class Scope:
                 # иначе самоотцепление выжившего потока промахнётся мимо области.
                 self._report = report
                 self._state = "closed"
+            if hand_off:
+                # Вне лока и ДО _done.set(): ждущий нас close родителя ещё не
+                # закрыл свой отчёт — прибавка попадёт в него, а не в третий вид.
+                parent_scope = self._parent
+                assert parent_scope is not None
+                parent_scope.note_emits_after_close(hand_off)
             self._done.set()
         if not from_parent:
             parent = self._parent
@@ -801,6 +815,26 @@ class Scope:
         report = acc.report(entry.path, start)
         self._call_reporter(report)
         return report
+
+    def note_emits_after_close(self, n: int) -> None:
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise TypeError(f"note_emits_after_close: n — ожидается int, получено {type(n).__name__}")
+        if n < 1:
+            raise ValueError("note_emits_after_close: n — нужно int ≥ 1")
+        scope: Scope | None = self
+        while scope is not None:
+            with scope._lock:
+                # Та же секция лока, что финальный блок _close: либо прибавка
+                # попадёт в отчёт, либо область уже closed — идём к родителю.
+                if scope._state != "closed":
+                    scope._extra.emits += n
+                    return
+            scope = scope._parent
+        report = CloseReport(path=self._path, elapsed_s=0.0, survivors=(), killed=(), errors=(), emits_after_close=n)
+        if self._reporter is None:
+            _log.warning("область %s: %d доставок после закрытия цепочки, reporter'а нет", self._path, n)
+            return
+        self._call_reporter(report)
 
     def _call_reporter(self, report: CloseReport) -> None:
         reporter = self._reporter

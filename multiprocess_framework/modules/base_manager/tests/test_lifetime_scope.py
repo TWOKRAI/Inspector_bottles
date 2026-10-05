@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import gc
+import sys
 import threading
 import time
 import uuid
@@ -581,3 +582,103 @@ def test_subtree_thread_waits_for_entry_taken_by_foreign_handle_close():
     assert inner["dt"] >= 0.2
     assert [r.complete for r in a_reports] == [True]
     assert [r.survivors for r in root_reports] == [()]
+
+
+# ---- Task 0.3: канал note_emits_after_close ---------------------------------
+
+
+def test_note_storm_into_child_during_root_close_sums_to_8000() -> None:
+    """8 потоков × 1000 ``note`` в ребёнка при ``root.close()``: отчёт корня + отчёты третьего вида = 8000."""
+    got: list = []
+    root = open_scope(_path(), budget_s=2.0, reporter=got.append)
+    c = root.child("c")
+    start = threading.Barrier(9)
+    errors: list = []
+
+    def noter() -> None:
+        try:
+            start.wait(5.0)
+            for _ in range(1000):
+                c.note_emits_after_close(1)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=noter, daemon=True) for _ in range(8)]
+    for th in threads:
+        th.start()
+    start.wait(5.0)
+    report = _bounded(root.close)
+    for th in threads:
+        th.join(10.0)
+        assert not th.is_alive()
+    assert errors == []
+    third = [r for r in got if r is not report]
+    assert all(r.elapsed_s == 0.0 and r.survivors == () and r.emits_after_close >= 1 for r in third)
+    assert report.emits_after_close + sum(r.emits_after_close for r in third) == 8000
+
+
+def test_child_close_races_root_close_root_always_counts_3() -> None:
+    """Гонка ``c.close()`` / ``root.close()`` × 100: возврат ``root.close()`` всегда 3, отчёт ``c`` — 0.
+
+    ``root.close()`` стартует, когда ``c`` уже закрывается: корень ждёт ``c._done`` —
+    передача счётчика обязана успеть до ``_done.set()``.
+    """
+    bad: list = []
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # больше переключений GIL; чистую перестановку «после _done.set()» ловит редко
+    try:
+        _race_child_root(bad)
+    finally:
+        sys.setswitchinterval(old_interval)
+    assert bad == []
+
+
+def _race_child_root(bad: list) -> None:
+    for i in range(100):
+        got: list = []
+        root = open_scope(_path(), budget_s=2.0, reporter=got.append)
+        c = root.child("c")
+        c.own(lambda: time.sleep(0.002), name="slow")
+        c.note_emits_after_close(3)
+        barrier = threading.Barrier(2)
+        out: dict = {}
+
+        def close_child(c=c, barrier=barrier, out=out) -> None:
+            barrier.wait(5.0)
+            out["c"] = c.close()
+
+        def close_root(root=root, c=c, barrier=barrier, out=out) -> None:
+            barrier.wait(5.0)
+            end = time.monotonic() + 5.0
+            while not c.closed and time.monotonic() < end:  # c.close() идёт первым — перекрытие
+                time.sleep(0)
+            out["root"] = root.close()
+
+        threads = [threading.Thread(target=close_child, daemon=True), threading.Thread(target=close_root, daemon=True)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(5.0)
+            assert not th.is_alive(), f"итерация {i}: завис"
+        child_reports = [r.emits_after_close for r in got if r.path.endswith("/c")]
+        if out["root"].emits_after_close != 3 or any(child_reports):
+            bad.append((i, out["root"].emits_after_close, child_reports))
+
+
+def test_note_into_open_scope_lands_in_next_close() -> None:
+    got: list = []
+    root = open_scope(_path(), budget_s=1.0, reporter=got.append)
+    root.note_emits_after_close(2)
+    root.note_emits_after_close(5)
+    assert root.close().emits_after_close == 7
+    assert [r.emits_after_close for r in got] == [7]
+
+
+def test_note_after_whole_chain_closed_reporter_raising_does_not_escape() -> None:
+    def boom(report) -> None:
+        raise RuntimeError("reporter")
+
+    root = open_scope(_path(), budget_s=1.0, reporter=boom)
+    c = root.child("c")
+    root.close()
+    c.note_emits_after_close(1)  # третий вид: исключение reporter'а ловится
