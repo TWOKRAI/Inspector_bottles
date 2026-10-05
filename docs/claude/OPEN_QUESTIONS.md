@@ -1679,3 +1679,7 @@ line-sim (scene_source): поиск по Plugins/Services/framework/apps (`data 
 ## Seed-файлы спорят с «одним домом» (2026-10-04, ревью спеки Атлас 2.4c)
 
 `memory_lint.py:115` ссылается на несуществующий заголовок «Subagent-memory (нативная CC)»; `precompact-context-save.sh` шлёт открытые вопросы в `docs/sessions/`, а ядро `project-rules` §2 и оба `CLAUDE.md` — в `docs/claude/OPEN_QUESTIONS.md`. Файлы из сида (`.claude/plugins/core/`), вне FILES 2.4c. Править в источнике сида, иначе upgrade вернёт старое.
+
+## Песочница Claude Code на нативной Windows отсутствует (2026-10-05, разбор инструментов Атласа)
+
+По документации (https://code.claude.com/docs/en/sandboxing) песочница есть на macOS, Linux и WSL2; на нативной Windows команды идут без неё. У нас агенты сами коммитят и гоняют Bash. Риск: команда агента вне скоупа (удаление, сеть) ничем, кроме разрешений и хуков, не остановлена. Варианты: работа агентов из WSL2; ужесточить deny-правила; оставить как есть. Решает владелец. Не проверено: как WSL2 уживётся с CUDA torch и путями `D:\`.
