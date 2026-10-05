@@ -79,11 +79,13 @@ DROPPED = ("deferred", "superseded")
 _WORD_RE = re.compile(r"(?<![\w-])(IN[ _]PROGRESS|DONE|PENDING|BLOCKED|DEFERRED|SUPERSEDED|SKIPPED|CANCELLED)(?![\w-])")
 _SNYATA_RE = re.compile(r"(?<![\w-])СНЯТА(?![\w-])")
 
-# Id задачи (эталон): 1.3, 1.3a, 1b.2a, 1b.2b-pre, 1.3h-c-fix, T1.
-ID_PATTERN = r"[A-Z]{0,2}[0-9]+[a-z]?(?:\.[0-9]+[a-z]*)?(?:-[a-z0-9]+)*"
+# Id задачи (эталон): 1.3, 1.3a, 1.2.3, 1b.2a, 1b.2b-pre, 1.3h-c-fix, T1, ABC1. Та же строка — в validate_commit
+# (`TASK_ID_PATTERN`) и plans_ledger (`_TASK_ID`): модули автономны, строку копируют, контракт-тест сверяет пять копий.
+ID_PATTERN = r"[A-Z]{0,3}[0-9]{1,3}[a-z]?(?:\.[0-9]+[a-z]?)*(?:-[a-z0-9]+)*"
 ID_RE = re.compile(ID_PATTERN)
-# Конец id: пробел или `: ~ * , ;`, точка не перед цифрой (`1.4.`), конец строки.
-_ID_END = r"(?=[\s:~*,;]|\.(?!\d)|$)"
+# Конец id: пробел или `: ~ * , ;`, точка не перед символом id (`1.4.` в конце фразы — id `1.4`; `T2.K`, `5.10.g`
+# не усекаются до `T2` и `5.10`, а дают TASK_ID_UNPARSED), конец строки.
+_ID_END = r"(?=[\s:~*,;]|\.(?!\w)|$)"
 
 ITEM_RE = re.compile(
     r"^(?P<indent>[ \t]*)[-*+][ \t]+(?P<cb>\[[ xX]\][ \t]+)?(?P<pre>(?:\*\*|~~|__)*)"
@@ -507,7 +509,8 @@ class Item:
 
 
 # `(после 1.1, 1.0)` / `(after 1.1)`: регистр не важен только у слова, id — по эталону; после id не должно
-# стоять символа id (`1.2B` — не id `1.2`) и `.символ` (`1.2.3`, `1.2.a`, `T2.W` — не id); дата `2026-09-25` — не id.
+# стоять символа id (`1.2B` — не id `1.2`) и `.символ` (`T2.W`, `5.10.g` — не id; `(после 1.2.3)` — id `1.2.3`);
+# дата `2026-09-25` — не id.
 _AFTER_ID = r"(?!\d{4}-\d{2}-\d{2})" + ID_PATTERN + r"(?![\w-]|\.\w)"
 TASK_AFTER_RE = re.compile(r"\((?i:после|after)[ \t]+(" + _AFTER_ID + r"(?:[ \t]*,[ \t]*" + _AFTER_ID + r")*)")
 
@@ -1882,25 +1885,62 @@ def merge_branch_numbers(base: Plan | None, tip: Plan, disk: Plan) -> tuple[int,
     return counted.done, counted.total
 
 
-def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timedelta) -> None:
-    """Заполняет `Plan.branches` актуальными ветками, тронувшими план; записи по имени ветки.
+@dataclass
+class BranchPass:
+    """Один проход по веткам против `main`: им пользуются числа 5.5 (`fill_branch_numbers`) и радар (`find_overlaps`).
+
+    `touched` — пути `plans/` каждой ветки, у которой найден merge-base: свежие ветки и ветка корня (окно к ней
+    не применяется). `tips` и `own` — по кандидатам: те же ветки; `own` пуст, если `git rev-list` не ответил.
+    """
+
+    root_branch: str
+    tips: dict[str, str] = field(default_factory=dict)
+    own: dict[str, set[str]] = field(default_factory=dict)
+    bases: dict[str, str] = field(default_factory=dict)
+    touched: dict[str, list[str]] = field(default_factory=dict)
+
+
+def run_branch_pass(root: Path, now: datetime, window: timedelta) -> BranchPass | None:
+    """Проход по веткам или None: нет git, `root` не верхний каталог репозитория, нет `refs/heads/main`, веток нет.
 
     Актуальная ветка: локальная `refs/heads/<B>` (не `main`), `main..B` не пуст, вершина не старше окна.
-    Ветка, взятая в корне, — кандидат в родители, но не выводится. Нет git, `root` не верхний каталог
-    репозитория, нет `refs/heads/main` — ничего не заполняется. Репозиторий не меняется.
+    Ветка, взятая в корне, участвует всегда (кандидат в родители и радар), даже со старой вершиной.
+    Репозиторий не меняется.
     """
     if not _is_repo_top(root):
-        return
+        return None
     unmerged = _unmerged_branches(root)
     if not unmerged:
-        return
+        return None
     root_branch = _checked_out_branch(root)
-    actual = sorted(name for name, (_sha, when) in unmerged.items() if _is_fresh(when, now, window))
-    candidates = set(actual)
+    names = {name for name, (_sha, when) in unmerged.items() if _is_fresh(when, now, window)}
     if root_branch in unmerged:
-        candidates.add(root_branch)  # кандидат в родители, даже если вершина не свежая
-    tips = {name: unmerged[name][0] for name in sorted(candidates)}
-    own = {name: _own_commits(root, name) for name in tips}
+        names.add(root_branch)
+    tips = {name: unmerged[name][0] for name in sorted(names)}
+    result = BranchPass(root_branch, tips, {name: _own_commits(root, name) for name in tips})
+    for name in tips:
+        base = _merge_base(root, name)
+        if base is None:
+            continue
+        parent = _stack_parent(name, tips, result.own)
+        touched = _touched_paths(root, tips[parent] if parent else base, name)
+        if parent:
+            # ветка могла влить свежий `main`: diff от родителя тогда несёт и чужие правки `main`; свои правки ветки
+            # видны и от merge-base (у корня стека это тот же вызов, второй diff не нужен)
+            own_touched = set(_touched_paths(root, base, name))
+            touched = [path for path in touched if path in own_touched]
+        result.bases[name] = base
+        result.touched[name] = touched
+    return result
+
+
+def fill_branch_numbers(root: Path, plans: list[Plan], branch_pass: BranchPass | None) -> None:
+    """Заполняет `Plan.branches` актуальными ветками, тронувшими план; записи по имени ветки.
+
+    Ветка, взятая в корне, не выводится. Нет прохода — ничего не заполняется.
+    """
+    if branch_pass is None:
+        return
     plan_roots = [(p, _plan_root_rel(root, p)) for p in plans]
     parsed: dict[tuple[str, str], Plan | PlanExportError | None] = {}  # (коммит, путь плана): база общая у веток
 
@@ -1912,23 +1952,14 @@ def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timed
                 parsed[commit, plan_rel] = exc
         return parsed[commit, plan_rel]
 
-    for name in actual:
-        if name == root_branch:
+    for name in sorted(branch_pass.touched):
+        if name == branch_pass.root_branch:
             continue
-        base = _merge_base(root, name)
-        if base is None:
-            continue
-        parent = _stack_parent(name, tips, own)
-        touched = _touched_paths(root, tips[parent] if parent else base, name)
-        if parent:
-            # ветка могла влить свежий `main`: diff от родителя тогда несёт и чужие правки `main`; свои правки ветки
-            # видны и от merge-base (у корня стека это тот же вызов, второй diff не нужен)
-            own_touched = set(_touched_paths(root, base, name))
-            touched = [path for path in touched if path in own_touched]
+        base, touched, tip = branch_pass.bases[name], branch_pass.touched[name], branch_pass.tips[name]
         for p, plan_rel in plan_roots:
             if not _touches(touched, plan_rel):
                 continue
-            tip_plan = plan_at(tips[name], plan_rel, p)
+            tip_plan = plan_at(tip, plan_rel, p)
             if tip_plan is None:  # плана на вершине нет (удалён, перенесён): записи нет, молча
                 continue
             base_plan = plan_at(base, plan_rel, p)  # None — плана на базе нет: база пуста
@@ -1942,6 +1973,107 @@ def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timed
                 continue
             done, total = merge_branch_numbers(base_plan, tip_plan, p)
             p.branches.append({"branch": name, "done": done, "total": total})
+
+
+def collect_branches(root: Path, plans: list[Plan], now: datetime, window: timedelta) -> None:
+    """Заполняет `Plan.branches` актуальными ветками, тронувшими план (проход `run_branch_pass` + числа).
+
+    Ветка, взятая в корне, — кандидат в родители, но не выводится. Нет git, `root` не верхний каталог
+    репозитория, нет `refs/heads/main` — ничего не заполняется. Репозиторий не меняется.
+    """
+    fill_branch_numbers(root, plans, run_branch_pass(root, now, window))
+
+
+@dataclass
+class Overlap:
+    """Файл плана, который меняют две и более независимые ветки: `branches` — по имени."""
+
+    path: str
+    plan: str
+    plan_rel: str  # `Plan.rel` плана: по нему чип находит свою карточку (имя плана у живого и архивного может совпасть)
+    branches: tuple[str, ...]
+
+
+def _independent(branch_pass: BranchPass, a: str, b: str) -> bool:
+    """Ни одна вершина не входит в `main..<другая>`: ветки не в одном стеке."""
+    tips, own = branch_pass.tips, branch_pass.own
+    return tips[a] not in own[b] and tips[b] not in own[a]
+
+
+def _pair_counts_for(
+    root: Path,
+    branch_pass: BranchPass,
+    a: str,
+    b: str,
+    path: str,
+    bases: dict[tuple[str, str], str | None],
+    diffs: dict[tuple[str, str], set[str]],
+) -> bool:
+    """Независимая пара `a`/`b` засчитывается за `path` (правило 3: общий невлитый предок не в счёт).
+
+    Без общих коммитов `main..a` ∩ `main..b` — засчитывается по вершинам, git не вызывается. С общими:
+    `path` должен быть в diff от `merge-base a b` у обеих веток (правка общего предка до этой точки,
+    ушедшего вперёд или выпавшего из окна, лежит в `touched` обеих, но слияние пары её не несёт).
+    `merge-base` пары не получен — засчитывается (радар лишь предупреждает).
+    Кэш: `merge-base` по паре, diff по (база, ветка).
+    """
+    if not branch_pass.own[a] & branch_pass.own[b]:
+        return True
+    pair = (a, b) if a < b else (b, a)
+    if pair not in bases:
+        out = (_git(["merge-base", f"refs/heads/{pair[0]}", f"refs/heads/{pair[1]}"], root) or "").strip()
+        bases[pair] = out or None
+    base = bases[pair]
+    if base is None:
+        return True
+    for branch in pair:
+        if (base, branch) not in diffs:
+            diffs[(base, branch)] = set(_touched_paths(root, base, branch))
+        if path not in diffs[(base, branch)]:
+            return False
+    return True
+
+
+def find_overlaps(root: Path, plans: list[Plan], branch_pass: BranchPass | None) -> list[Overlap]:
+    """Пересечения по файлам планов, найденных на диске `root`; строки по пути.
+
+    Файл — под `plans/`, равен однофайловому плану или лежит в каталоге плана (`_touches`); служебные файлы
+    (`plans/queue/…`, README, QUEUE) под правило не подходят: их нет среди планов. В радаре участвуют ветки
+    прохода, у которых `main..<ветка>` получен и не пуст. В строке — все ветки, тронувшие файл и имеющие
+    засчитанную независимую пару среди тронувших его (`_pair_counts_for`). Считаются ветки, не корни стеков.
+    """
+    if branch_pass is None:
+        return []
+    plan_roots = [(p, _plan_root_rel(root, p)) for p in plans]
+    by_path: dict[str, set[str]] = {}
+    for name, touched in branch_pass.touched.items():
+        if branch_pass.own.get(name):
+            for path in touched:
+                by_path.setdefault(path, set()).add(name)
+    bases: dict[tuple[str, str], str | None] = {}
+    diffs: dict[tuple[str, str], set[str]] = {}
+    found: list[Overlap] = []
+    for path, names in sorted(by_path.items()):
+        if len(names) < 2:
+            continue
+        owner = next((p for p, rel in plan_roots if _touches([path], rel)), None)
+        if owner is None:
+            continue
+        listed = tuple(
+            sorted(
+                a
+                for a in names
+                if any(
+                    b != a
+                    and _independent(branch_pass, a, b)
+                    and _pair_counts_for(root, branch_pass, a, b, path, bases, diffs)
+                    for b in names
+                )
+            )
+        )
+        if listed:
+            found.append(Overlap(path, owner.name, owner.rel, listed))
+    return found
 
 
 # ----------------------------------------------------------------------------- JSON
@@ -2134,6 +2266,11 @@ def _branch_chip(e: dict, disk_done: int) -> str:
     )
 
 
+def _overlap_chip(branches: int) -> str:
+    """Чип «пересечение» плана: число разных веток по всем его пересечённым файлам."""
+    return f'<span class="chip" data-chip="overlap" data-overlap="{branches}">⚠ пересечение, веток: {branches}</span>'
+
+
 WHO_NOTES = (
     "Агенты, запущенные из главного дерева, видны как активность main.",
     "Сессия без субагентов и без события SessionStart не видна.",
@@ -2164,6 +2301,21 @@ def _who_html(active: list[tuple[str, dict]], orphans: list[dict], window_text: 
     return parts
 
 
+def _overlaps_html(overlaps: list[Overlap]) -> list[str]:
+    """Секция `#overlaps`: по строке на файл, по пути; пересечений нет — секции нет."""
+    if not overlaps:
+        return []
+    parts = ['<section id="overlaps">', f"<h2>Пересечения · {len(overlaps)}</h2>", "<ul>"]
+    for o in sorted(overlaps, key=lambda o: o.path):
+        names = ", ".join(o.branches)
+        parts.append(
+            f'<li data-path="{_e(o.path)}" data-overlap-plan="{_e(o.plan)}" data-branches="{_e(",".join(o.branches))}">'
+            f"{_e(o.path)} — {_e(o.plan)} · ветки: {_e(names)}</li>"
+        )
+    parts.extend(["</ul>", "</section>"])
+    return parts
+
+
 def _priority_html(date: str, rows: list[SnapRow]) -> list[str]:
     """Секция `#priority`: по строке на строку таблицы «Снимок» в её порядке; строк нет — одна пометка."""
     parts = ['<section id="priority">', f"<h2>{_e('Приоритеты · снимок ' + date if date else 'Приоритеты')}</h2>"]
@@ -2179,7 +2331,7 @@ def _priority_html(date: str, rows: list[SnapRow]) -> list[str]:
     return parts
 
 
-def _plan_html(p: Plan, in_use: bool) -> str:
+def _plan_html(p: Plan, in_use: bool, overlap_branches: int = 0) -> str:
     attrs = f'class="plan" data-plan="{_e(p.name)}" data-tier="{_e(p.tier or "")}" data-lane="{_e(p.lane or "")}"'
     if startable(p, in_use):
         attrs += ' data-ready="true"'
@@ -2224,6 +2376,8 @@ def _plan_html(p: Plan, in_use: bool) -> str:
     if not plan_closed(p):
         s.extend(_dep_chips(p, in_use))
     s.extend(_branch_chip(e, p.done) for e in p.branches if (e["done"], e["total"]) != (p.done, p.total))
+    if overlap_branches:
+        s.append(_overlap_chip(overlap_branches))  # после чипов веток, перед «в работе»
     s.extend(_active_chip(e) for e in p.active)  # после всех прочих чипов; закрытым и архивным тоже
     s.append("</summary>")
     s.append('<div class="body">')
@@ -2278,12 +2432,19 @@ def to_html(
     window_text: str = DEFAULT_WINDOW,
     snapshot_date: str = "",
     snapshot_rows: list[SnapRow] | tuple = (),
+    overlaps: list[Overlap] | tuple = (),
 ) -> str:
-    """Страница: `#who`, очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md), `#archive` (архив + закрытые §4.3).
+    """Страница: `#who`, `#overlaps` (только если есть), очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md),
+    `#archive` (архив + закрытые §4.3).
 
     Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
     `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
+    `overlaps` — из `find_overlaps`: секция `#overlaps` сразу после `#who` и чип `overlap` у планов с пересечением.
     """
+    overlap_names: dict[str, set[str]] = {}
+    for o in overlaps:
+        overlap_names.setdefault(o.plan_rel, set()).update(o.branches)
+
     queue, waiting, unlisted, closed = queue_scope(live)
     shelved = closed + archive
     lanes: dict[str, list[int]] = {}
@@ -2293,6 +2454,10 @@ def to_html(
         agg[1] += p.total
         agg[2] += 1
     in_use = deps_in_use(live + archive)
+
+    def card(p: Plan) -> str:
+        return _plan_html(p, in_use, len(overlap_names.get(p.rel, ())))
+
     # очередь на странице: сначала планы с приоритетом по возрастанию `#`, затем остальные в прежнем порядке
     queue_view = sorted(queue, key=lambda p: (p.priority is None, p.priority or 0))
     ready_text = ready_summary(queue_view, in_use)
@@ -2319,17 +2484,18 @@ def to_html(
         )
     parts.append("</section>")
     parts.extend(_who_html([(p.name, e) for p in live + archive for e in p.active], list(orphans), window_text))
+    parts.extend(_overlaps_html(list(overlaps)))
     parts.append('<section id="queue">')
-    parts.extend(_plan_html(p, in_use) for p in queue_view)
+    parts.extend(card(p) for p in queue_view)
     parts.append("</section>")
     parts.append('<details id="waiting">')
     parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
-    parts.extend(_plan_html(p, in_use) for p in waiting)
+    parts.extend(card(p) for p in waiting)
     parts.append("</details>")
     if unlisted:
         parts.append('<section id="unlisted">')
         parts.append(f"<h2>Нет в ORDER.md · {len(unlisted)}</h2>")
-        parts.extend(_plan_html(p, in_use) for p in unlisted)
+        parts.extend(card(p) for p in unlisted)
         parts.append("</section>")
     a_done = sum(p.done for p in shelved)
     a_total = sum(p.total for p in shelved)
@@ -2338,7 +2504,7 @@ def to_html(
         f"<summary>Закрыто и в архиве · {len(shelved)} планов (§4.3 и _archive/) · "
         f"итого {_e(_tally(a_done, a_total))}</summary>"
     )
-    parts.extend(_plan_html(p, in_use) for p in shelved)
+    parts.extend(card(p) for p in shelved)
     parts.append("</details>")
     parts.append("</main></body></html>")
     return "\n".join(parts) + "\n"
@@ -2425,8 +2591,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.json or args.who or args.html is not None:
         active, orphans = collect_active(root, ordered, now, window)
         attach_active(ordered, active)
+    overlaps: list[Overlap] = []
     if args.json or args.html is not None:
-        collect_branches(root, ordered, now, branch_window)
+        branch_pass = run_branch_pass(root, now, branch_window)  # один проход: числа 5.5 и радар
+        fill_branch_numbers(root, ordered, branch_pass)
+        if args.html is not None:
+            overlaps = find_overlaps(root, ordered, branch_pass)
     if args.who:
         by_path = lambda e: e["worktree"]  # noqa: E731
         who = {
@@ -2447,7 +2617,7 @@ def main(argv: list[str] | None = None) -> int:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
-            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows), encoding="utf-8"
+            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps), encoding="utf-8"
         )
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:

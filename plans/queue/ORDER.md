@@ -362,8 +362,8 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - layer-render — 13 из 22 · 59%
 - letters-retrain — 2 из 3 · 67%
 - qr-code-reader — 3 из 17 · 18%
-- 2026-10-02_plans-progress-dashboard — 20 из 31 · 65%
-- 2026-10-03_commit-mechanism — 7 из 10 · 70%
+- 2026-10-02_plans-progress-dashboard — 21 из 31 · 68%
+- 2026-10-03_commit-mechanism — 8 из 11 · 73%
 - robot-place-pose — 2 из 3 · 67%
 - robot-calibration — 4 из 6 · 67%
 - camera-robot-calibration — 6 из 7 · 86%
@@ -371,6 +371,6 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - word-layout — 2 из 4 · 50%
 - storage-stack-embedded-first — 0 из 11 · 0%
 - 2026-07-06_constructor-master — 107 из 113 · 95%
-- 2026-10-04_atlas — 3 из 28 · 11%
+- 2026-10-04_atlas — 4 из 28 · 14%
 в архиве: 119
 <!-- progress:end -->
