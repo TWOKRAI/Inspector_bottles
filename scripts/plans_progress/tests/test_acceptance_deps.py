@@ -126,7 +126,11 @@ def test_json_dependency_keys_are_appended_in_documented_order(make_root, one_pl
     root = make_root({"plans/A/plan.md": plan_text(field("ghost"), items)})
     rec = one_plan(root, "A")
     keys = list(rec)
-    assert keys[-9:] == ["tasks", *NEW_PLAN_KEYS, "active", "branches"], f"ключи плана: {keys}"
+    # Task 7.1: ключ anchor дописан в конец (контракт append-only)
+    expected = ["tasks", *NEW_PLAN_KEYS, "active", "branches"]
+    assert keys[-len(expected) :] == expected or keys[-len(expected) - 1 :] == [*expected, "anchor"], (
+        f"ключи плана: {keys}"
+    )
     for t in rec["tasks"]:
         assert list(t)[-3:] == ["ref", "after", "ready"], f"ключи задачи: {list(t)}"
 
