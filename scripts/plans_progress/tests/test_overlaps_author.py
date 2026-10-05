@@ -287,6 +287,85 @@ def test_no_git_gives_no_overlaps(tmp_path, monkeypatch):
     assert pp.find_overlaps(plain, plans, None) == []
 
 
+# =========================================================================== общая история пары (ред. 2: правило 3)
+
+
+def _advance(repo: Repo, branch: str, path: str, ago: timedelta = D1) -> None:
+    """Ещё один коммит на существующей ветке (правка `path`); возврат на `main`."""
+    repo.git("checkout", "-q", branch)
+    repo.write(path, f"# {branch} advance" + chr(10))
+    repo.commit(f"{branch} advance", ago)
+    repo.git("checkout", "-q", "main")
+
+
+def _ancestor_with_children(repo: Repo, b1: tuple[str, ...], b2: tuple[str, ...], p_ago: timedelta = D1) -> None:
+    """`feat/p` правит X (p1); от неё `feat/b1` и `feat/b2` правят каждая свои файлы."""
+    repo.touch("feat/p", X, ago=p_ago)
+    repo.touch("feat/b1", *b1, frm="feat/p")
+    repo.touch("feat/b2", *b2, frm="feat/p")
+
+
+def _html(repo: Repo, tmp_path: Path) -> str:
+    out = tmp_path / "page.html"
+    assert pp.main(["--root", str(repo.root), "--now", NOW.isoformat(), "--html", str(out)]) == 0
+    return out.read_text(encoding="utf-8")
+
+
+def test_ancestor_moved_on_children_not_touching_x_give_no_section(repo, tmp_path):
+    """P правила X (p1), от p1 `b1` правит только Y, `b2` — только не-план; P ушла вперёд (p2, не план): P больше
+    не родитель в стеке, правка p1 лежит в `touched` обеих дочерних, но X они не меняли — слияние b1+b2 чистое."""
+    _ancestor_with_children(repo, (Y,), ("src.txt",))
+    _advance(repo, "feat/p", "p2.txt")
+    assert repo.radar() == []
+    page = _html(repo, tmp_path)
+    assert 'id="overlaps"' not in page and 'data-chip="overlap"' not in page
+
+
+def test_ancestor_moved_on_children_editing_x_list_only_the_children(repo, tmp_path):
+    """То же, но `b1` и `b2` обе правят X: строка — только дети; P (правка p1 до общей точки) в неё не входит."""
+    _ancestor_with_children(repo, (X,), (X,))
+    _advance(repo, "feat/p", "p2.txt")
+    assert repo.radar() == [(X, ("feat/b1", "feat/b2"))]
+    page = _html(repo, tmp_path)
+    assert 'data-branches="feat/b1,feat/b2"' in page
+    assert 'data-overlap="2">⚠ пересечение, веток: 2<' in page
+
+
+def test_stale_ancestor_children_not_touching_x_give_no_section(repo, tmp_path):
+    """P старше окна (10 суток), не двигалась; дети свежие и X не трогали: в окне P нет, но её p1 лежит в `touched`."""
+    _ancestor_with_children(repo, (Y,), ("src.txt",), p_ago=D10)
+    assert repo.radar() == []
+    page = _html(repo, tmp_path)
+    assert 'id="overlaps"' not in page and 'data-chip="overlap"' not in page
+
+
+def test_pair_with_shared_history_costs_one_merge_base_and_two_diffs(repo, tmp_path):
+    """Единственная пара `b1`/`b2` с общим коммитом (P вне окна): +1 `merge-base` и +2 `diff` к числам 5.5."""
+    _ancestor_with_children(repo, (X,), (X,), p_ago=D10)
+    plans = pp.discover(repo.root)
+    base = Counter(c[1] for c in _spy(lambda: pp.collect_branches(repo.root, plans, NOW, WINDOW)))
+    out = tmp_path / "page.html"
+    full = Counter(
+        c[1] for c in _spy(lambda: pp.main(["--root", str(repo.root), "--now", NOW.isoformat(), "--html", str(out)]))
+    )
+    assert (full["merge-base"] - base["merge-base"], full["diff"] - base["diff"]) == (1, 2)
+    assert (full["rev-list"] - base["rev-list"], full["for-each-ref"] - base["for-each-ref"]) == (0, 0)
+
+
+def test_three_independent_pairs_with_shared_history_cost_one_merge_base_each_and_diffs_are_cached(repo, tmp_path):
+    """P жива в окне и ушла вперёд: пар три (P-b1, P-b2, b1-b2), общая база одна (p1) — 3 `merge-base`, 3 `diff`
+    (по одному на ветку от базы: кэш по (база, ветка), а не по паре)."""
+    _ancestor_with_children(repo, (X,), (X,))
+    _advance(repo, "feat/p", "p2.txt")
+    plans = pp.discover(repo.root)
+    base = Counter(c[1] for c in _spy(lambda: pp.collect_branches(repo.root, plans, NOW, WINDOW)))
+    out = tmp_path / "page.html"
+    full = Counter(
+        c[1] for c in _spy(lambda: pp.main(["--root", str(repo.root), "--now", NOW.isoformat(), "--html", str(out)]))
+    )
+    assert (full["merge-base"] - base["merge-base"], full["diff"] - base["diff"]) == (3, 3)
+
+
 # =========================================================================== страница: экранирование и привязка чипа
 
 

@@ -1997,13 +1997,47 @@ def _independent(branch_pass: BranchPass, a: str, b: str) -> bool:
     return tips[a] not in own[b] and tips[b] not in own[a]
 
 
+def _pair_counts_for(
+    root: Path,
+    branch_pass: BranchPass,
+    a: str,
+    b: str,
+    path: str,
+    bases: dict[tuple[str, str], str | None],
+    diffs: dict[tuple[str, str], set[str]],
+) -> bool:
+    """Независимая пара `a`/`b` засчитывается за `path` (правило 3: общий невлитый предок не в счёт).
+
+    Без общих коммитов `main..a` ∩ `main..b` — засчитывается по вершинам, git не вызывается. С общими:
+    `path` должен быть в diff от `merge-base a b` у обеих веток (правка общего предка до этой точки,
+    ушедшего вперёд или выпавшего из окна, лежит в `touched` обеих, но слияние пары её не несёт).
+    `merge-base` пары не получен — засчитывается (радар лишь предупреждает).
+    Кэш: `merge-base` по паре, diff по (база, ветка).
+    """
+    if not branch_pass.own[a] & branch_pass.own[b]:
+        return True
+    pair = (a, b) if a < b else (b, a)
+    if pair not in bases:
+        out = (_git(["merge-base", f"refs/heads/{pair[0]}", f"refs/heads/{pair[1]}"], root) or "").strip()
+        bases[pair] = out or None
+    base = bases[pair]
+    if base is None:
+        return True
+    for branch in pair:
+        if (base, branch) not in diffs:
+            diffs[(base, branch)] = set(_touched_paths(root, base, branch))
+        if path not in diffs[(base, branch)]:
+            return False
+    return True
+
+
 def find_overlaps(root: Path, plans: list[Plan], branch_pass: BranchPass | None) -> list[Overlap]:
     """Пересечения по файлам планов, найденных на диске `root`; строки по пути.
 
     Файл — под `plans/`, равен однофайловому плану или лежит в каталоге плана (`_touches`); служебные файлы
     (`plans/queue/…`, README, QUEUE) под правило не подходят: их нет среди планов. В радаре участвуют ветки
     прохода, у которых `main..<ветка>` получен и не пуст. В строке — все ветки, тронувшие файл и имеющие
-    независимую пару среди тронувших его. Считаются ветки, не корни стеков.
+    засчитанную независимую пару среди тронувших его (`_pair_counts_for`). Считаются ветки, не корни стеков.
     """
     if branch_pass is None:
         return []
@@ -2013,6 +2047,8 @@ def find_overlaps(root: Path, plans: list[Plan], branch_pass: BranchPass | None)
         if branch_pass.own.get(name):
             for path in touched:
                 by_path.setdefault(path, set()).add(name)
+    bases: dict[tuple[str, str], str | None] = {}
+    diffs: dict[tuple[str, str], set[str]] = {}
     found: list[Overlap] = []
     for path, names in sorted(by_path.items()):
         if len(names) < 2:
@@ -2020,7 +2056,18 @@ def find_overlaps(root: Path, plans: list[Plan], branch_pass: BranchPass | None)
         owner = next((p for p, rel in plan_roots if _touches([path], rel)), None)
         if owner is None:
             continue
-        listed = tuple(sorted(a for a in names if any(b != a and _independent(branch_pass, a, b) for b in names)))
+        listed = tuple(
+            sorted(
+                a
+                for a in names
+                if any(
+                    b != a
+                    and _independent(branch_pass, a, b)
+                    and _pair_counts_for(root, branch_pass, a, b, path, bases, diffs)
+                    for b in names
+                )
+            )
+        )
         if listed:
             found.append(Overlap(path, owner.name, owner.rel, listed))
     return found
@@ -2395,9 +2442,6 @@ def to_html(
     for o in overlaps:
         overlap_names.setdefault(o.plan_rel, set()).update(o.branches)
 
-    def card(p: Plan) -> str:
-        return _plan_html(p, in_use, len(overlap_names.get(p.rel, ())))
-
     queue, waiting, unlisted, closed = queue_scope(live)
     shelved = closed + archive
     lanes: dict[str, list[int]] = {}
@@ -2407,6 +2451,10 @@ def to_html(
         agg[1] += p.total
         agg[2] += 1
     in_use = deps_in_use(live + archive)
+
+    def card(p: Plan) -> str:
+        return _plan_html(p, in_use, len(overlap_names.get(p.rel, ())))
+
     # очередь на странице: сначала планы с приоритетом по возрастанию `#`, затем остальные в прежнем порядке
     queue_view = sorted(queue, key=lambda p: (p.priority is None, p.priority or 0))
     ready_text = ready_summary(queue_view, in_use)
