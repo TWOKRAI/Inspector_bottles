@@ -366,6 +366,21 @@ def test_three_independent_pairs_with_shared_history_cost_one_merge_base_each_an
     assert (full["merge-base"] - base["merge-base"], full["diff"] - base["diff"]) == (3, 3)
 
 
+def test_pair_with_shared_history_whose_merge_base_fails_still_counts_by_tips(repo, monkeypatch):
+    """`git merge-base` пары (два `refs/heads/<ветка>`, не `merge-base main <ветка>` из 5.5) не ответил: пара
+    засчитывается по вершинам — радар лишь предупреждает. P вне окна, `b1` и `b2` правят X после общей истории."""
+    _ancestor_with_children(repo, (X,), (X,), p_ago=D10)
+    real = pp._git
+
+    def git_without_pair_merge_base(args, cwd):
+        if args[:1] == ["merge-base"] and pp.MAIN_REF not in args:
+            return None
+        return real(args, cwd)
+
+    monkeypatch.setattr(pp, "_git", git_without_pair_merge_base)
+    assert repo.radar() == [(X, ("feat/b1", "feat/b2"))]
+
+
 # =========================================================================== страница: экранирование и привязка чипа
 
 
