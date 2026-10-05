@@ -27,7 +27,7 @@
 
 - Task 0.1: ADR и интерфейсы владения в base_manager [DONE 2026-10-04 — dad6ef9c9]
 - Task 0.2: Scope и Handle — примитив и контракт-тесты G1 [DONE 2026-10-05 — dbd0d7b23] (после 0.1)
-- Task 0.3: Subscribers в event_module [PENDING] (после 0.2)
+- Task 0.3: Subscribers в event_module [DONE 2026-10-05 — a3fddf721] (после 0.2)
 - Task 0.4: qt_lifetime — attach_qt, flush_deferred_deletes, QThreadHandle [PENDING] (после 0.2)
 - Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [PENDING] (после 0.3, 0.4)
 - Task 1.1: stop_budget и ChildProcessStop поверх эскалации PM [PENDING] (после 0.5)
@@ -88,6 +88,7 @@
 **Goal:** один список подписчиков для всех издателей: `add(cb, *, owner: IScope) -> IHandle`, `emit` по снимку вне лока, `errors`, `emits_after_close` в отчёт владельца.
 **Files:** `event_module/subscribers.py`, `event_module/interfaces.py`, `event_module/tests/`, README/STATUS, `multiprocess_framework/docs/MODULE_TIERS.md` (строка `event_module`: leaf → зависит от `base_manager.interfaces`; перенесено из 0.1 — зависимость появляется здесь).
 **Acceptance:** реентрантная отписка во время `emit`; исключение подписчика изолировано и посчитано; доставка в закрытого владельца не происходит и посчитана; ручка держит издателя слабо (короткоживущий издатель не удерживается); `EventBus` пока не мигрирует (Ф3).
+**Итог (2026-10-05):** спек ред. 3 (ревью р1–р2, исправление «A»), слепой тестер 26 тестов, ревью кода р1–р2 + вердикт CTO (b) `CloseReport.kind`; `event_module`+`base_manager` 610 passed / 2 skipped; инъекции ведущего 17/17 — [`docs/reviews/2026-10-05_task-0.3-injections.md`](../../docs/reviews/2026-10-05_task-0.3-injections.md).
 
 ### Task 0.4 — qt_lifetime
 **Level:** Senior · **Assignee:** teamlead · **Layer:** framework
