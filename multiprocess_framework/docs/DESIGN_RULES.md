@@ -167,7 +167,7 @@ def my_worker(stop_event, pause_event):
 
 **Запрещено:** lambdas, closures, методы инстансов, динамически созданные классы.
 
-**Почему:** Windows `spawn` mode требует pickle. На Linux fork работает по-другому, но кросс-платформенность — обязательна.
+**Почему:** `spawn` требует pickle, и с Атлас 0.8b (2026-10-05) это метод запуска на ВСЕХ ОС, включая Linux (`setup_multiprocessing()`); кросс-платформенность обязательна.
 
 **Проверка:** `pickle.dumps(payload)` в тесте.
 

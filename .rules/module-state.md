@@ -10,7 +10,7 @@ paths:
 
 ## Факт, из которого следует всё остальное
 
-`multiprocessing.set_start_method("spawn")` — [`process_manager_module/platforms/base.py`](../multiprocess_framework/modules/process_manager_module/platforms/base.py).
+`multiprocessing.set_start_method("spawn")` на ВСЕХ ОС, включая Linux (с Атлас 0.8b, 2026-10-05; `setup_multiprocessing()` зовёт и `SystemLauncher.__init__`, и `ProcessSpawner`, а при уже выставленном другом методе бросает `RuntimeError`) — [`process_manager_module/platforms/base.py`](../multiprocess_framework/modules/process_manager_module/platforms/base.py).
 
 При **spawn** ребёнок не наследует память родителя: он импортирует модули заново и
 получает **свои** модульные переменные, с нуля. Отсюда два следствия, и оба важны:
