@@ -320,12 +320,14 @@ _ARCHIVE_STEMS = ("архив", "archive")
 
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
-# Task id (plans-progress-dashboard, «Формат задачи»): `1.3`, `1.3a`, `1b.2a`,
-# `1b.2b-pre`, `1.3h-c-fix`, `T1`. The id ends at whitespace, `:~*,;.` or the
-# end of the line. The group is atomic: an id that fails the end check never
+# Task id (plans-progress-dashboard, «Формат задачи»): `1.3`, `1.3a`, `1.2.3`, `1b.2a`,
+# `1b.2b-pre`, `1.3h-c-fix`, `T1`, `ABC1`. The same string is validate_commit.TASK_ID_PATTERN and
+# plans_progress.ID_PATTERN (modules are autonomous: copied, pinned by a contract test). The id ends at
+# whitespace, `:~*,;`, a dot not followed by a word character (`Task 1.4.` is `1.4`; `T2.K` and `5.10.g`
+# are not ids) or the end of the line. The group is atomic: an id that fails the end check never
 # backtracks into its own prefix (`Task 1.3a)` is not read as `Task 1`).
-_TASK_ID = r"[A-Z]{0,2}[0-9]+[a-z]?(?:\.[0-9]+[a-z]*)?(?:-[a-z0-9]+)*"
-_TASK_ID_END = r"(?=[\s:~*,;.]|$)"
+_TASK_ID = r"[A-Z]{0,3}[0-9]{1,3}[a-z]?(?:\.[0-9]+[a-z]?)*(?:-[a-z0-9]+)*"
+_TASK_ID_END = r"(?=[\s:~*,;]|\.(?!\w)|$)"
 _TASK_REF = r"Task\s+(?>(" + _TASK_ID + r"))" + _TASK_ID_END
 _TASK_HEADER_RE = re.compile(r"^#{2,6}\s+" + _TASK_REF)
 _TASK_H1_HEADER_RE = re.compile(r"^#\s+" + _TASK_REF)
