@@ -139,13 +139,7 @@ jobs:
       # в CI не попадали и RED мог гнить молча (был красным на main после merge G.3/G.4).
       # Headless, без железа; Qt-offscreen уже настроен в env этого job.
       - name: Характеризация прод-рецептов прототипа (backend/tests)
-        if: always()  # ВРЕМЕННО 0.8: удалить до слияния
         run: uv run python -m pytest multiprocess_prototype/backend/tests -q -p no:cacheprovider
-
-      # ВРЕМЕННО 0.8: удалить до слияния. Замер fork/forkserver/spawn на раннере (Атлас 0.8a).
-      - name: Замер способов старта процессов (диагностика)
-        if: always()  # ВРЕМЕННО 0.8: удалить до слияния
-        run: uv run python scripts/start_method_probe.py
 
   examples-smoke:
     name: examples-smoke (minimal_app, live headless boot + IPC)
