@@ -311,6 +311,11 @@ def test_r2_control_external_reader_with_track_true_still_deletes_segment() -> N
     shm = _write_frame(name, frame)
     try:
         _external_read(name, track=True)
+        # Сегмент удаляет resource_tracker ребёнка — отдельный процесс, уже ПОСЛЕ выхода ребёнка:
+        # мгновенная проверка ловит гонку (Linux CI, Атлас 0.8). Ждём исчезновения с дедлайном.
+        deadline = time.monotonic() + 10.0
+        while _segment_alive(name) and time.monotonic() < deadline:
+            time.sleep(0.05)
         assert not _segment_alive(name), "track=True должен по-прежнему терять сегмент — это и есть хазард"
     finally:
         if _segment_alive(name):
