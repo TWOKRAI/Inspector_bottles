@@ -164,7 +164,11 @@ def _incomplete(path: str, start: float) -> CloseReport:
 # Сторож корней (G3)
 # =============================================================================
 
-_roots_lock = threading.Lock()
+# RLock, не Lock: ``_mark_abandoned`` — колбэк ``weakref.finalize``, его зовёт gc в том
+# потоке, который аллоцирует. Любой ``with _roots_lock`` с аллокацией внутри (список в
+# ``unclosed_roots``) может войти в финализатор этим же потоком — обычный Lock там виснет.
+# Финализатор меняет только ``record["state"]``, не размер ``_roots``: обход внутри безопасен.
+_roots_lock = threading.RLock()
 _roots: dict[int, dict[str, str]] = {}
 _root_keys = itertools.count()
 
@@ -506,13 +510,16 @@ class Scope:
         entry.done.set()
 
     def _release(self, entry: _Entry) -> None:
+        # Ссылки выносятся из-под лока: последняя ссылка на ресурс может рваться здесь,
+        # а ``__del__``/weakref-колбэк ресурса не должен идти под локом области.
         with self._lock:
             self._remove_locked(entry)
-            entry.res = None
-            entry.scope = None
-            entry.thread = None
+            res, entry.res = entry.res, None
+            scope, entry.scope = entry.scope, None
+            thread, entry.thread = entry.thread, None
             entry.event = None
             entry.state = "closed"
+        del res, scope, thread
         entry.done.set()
 
     def _finish_stoppable(self, entry: _Entry, acc: _Acc) -> None:
@@ -725,16 +732,24 @@ class Scope:
 
     def _detach_child(self, child: Scope) -> None:
         """Досрочный ``child.close()``: отцепить запись ребёнка, если её не взял идущий close."""
+        found: _Entry | None = None
         with self._lock:
             for segment in self._segments:
                 for entry in segment:
                     if entry.res is child and not entry.claimed:
-                        self._remove_locked(entry)
-                        entry.res = None
-                        entry.scope = None
-                        entry.state = "closed"
-                        entry.done.set()
-                        return
+                        found = entry
+                        break
+                if found is not None:
+                    break
+            if found is None:
+                return
+            self._remove_locked(found)
+            # Ссылки — вне лока: сборка ребёнка не должна идти под локом родителя.
+            res, found.res = found.res, None
+            scope, found.scope = found.scope, None
+            found.state = "closed"
+        del res, scope
+        found.done.set()
 
     def _close_entry_early(self, entry: _Entry, budget_s: float | None) -> CloseReport | None:
         """``IHandle.close``: отцепить запись, затем закрыть тем же кодом, что и область.
@@ -753,7 +768,19 @@ class Scope:
             elif entry.claimed:
                 if entry.releaser == threading.get_ident() and not entry.done.is_set():
                     return None
-                mine, wait = False, True
+                if (
+                    self._state == "closing"
+                    and entry.releaser == self._closer
+                    and not entry.done.is_set()
+                    and self._is_subtree_thread()
+                ):
+                    # Запись взял идущий close этой области, а он ждёт поток поддерева —
+                    # этот. Ждать его нельзя (взаимное ожидание до срока): то же правило,
+                    # что у реентрантного close области — сразу ``complete=False``.
+                    mine, wait = False, False
+                    acc.complete = False
+                else:
+                    mine, wait = False, True
             else:
                 mine, wait = True, False
                 entry.claimed = True
