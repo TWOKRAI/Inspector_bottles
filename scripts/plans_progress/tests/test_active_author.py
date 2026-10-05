@@ -548,7 +548,7 @@ def test_to_json_active_is_a_fresh_list_per_plan_and_last_key():
     p.active.append({"worktree": "x"})
     data = json.loads(pp.to_json([p, q]))
     assert data[0]["active"] == [{"worktree": "x"}] and data[1]["active"] == []
-    assert list(data[0])[-1] == "active" and list(data[1])[-1] == "active"
+    assert list(data[0])[-2:] == ["active", "branches"] and list(data[1])[-2:] == ["active", "branches"]
 
 
 # =========================================================================== CLI: проводка
