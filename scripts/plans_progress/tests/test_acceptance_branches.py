@@ -315,7 +315,9 @@ def test_a01_branches_is_the_last_plan_key_right_after_active(tmp_path):
     fx = Fx(tmp_path, {"plans/P/plan.md": three("DONE")})
     fx.edit_on("feat/x", {"plans/P/plan.md": three("DONE", "DONE")})
     plans = get_plans(fx.root)
-    assert list(plans["P"])[-2:] == PLAN_KEYS_TAIL, list(plans["P"])
+    # Task 7.1: ключ anchor дописан в конец (контракт append-only)
+    keys = list(plans["P"])
+    assert keys[-2:] == PLAN_KEYS_TAIL or keys[-3:] == [*PLAN_KEYS_TAIL, "anchor"], keys
 
 
 def test_a01_plan_untouched_by_any_branch_has_empty_list_while_touched_plan_has_entry(tmp_path):

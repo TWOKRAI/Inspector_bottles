@@ -479,7 +479,8 @@ def test_json_plan_key_order_unchanged(matrix_root):
     for rec in _json_list(matrix_root):
         keys = list(rec)
         assert keys[: len(EXPECTED_PLAN_KEYS)] == EXPECTED_PLAN_KEYS, keys
-        assert keys[len(EXPECTED_PLAN_KEYS) :] in ([], ["branches"]), keys
+        # Task 7.1: ключ anchor дописан в конец (контракт append-only)
+        assert keys[len(EXPECTED_PLAN_KEYS) :] in ([], ["branches"], ["branches", "anchor"]), keys
 
 
 def test_json_task_key_order_unchanged(matrix_root):
