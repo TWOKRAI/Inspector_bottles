@@ -17,10 +17,12 @@ Generic typed in-proc pub/sub событий-фактов. Pure Python, 0 Qt, 0 
 | _Subscription | event_bus.py | Готов | Управление подпиской: unsubscribe (идемпотентный) + context-manager |
 | EventBusProtocol | interfaces.py (Protocol) | Готов | Контракт pub/sub для DI и Qt-обёрток |
 | Subscription | interfaces.py (Protocol) | Готов | Контракт управления подпиской |
+| Subscribers | subscribers.py | Готов (Task 0.3) | Подписчики с владельцем-`IScope`: подписка — запись владельца, счётчики ошибок и отклонённых доставок (EVT-003) |
 
 ## Внешние зависимости
 
-Нет (только stdlib: logging, threading, types, typing). Самодостаточный модуль.
+- stdlib (itertools, logging, threading, types, typing, weakref).
+- `base_manager.interfaces` (`IScope`, `IHandle`) — только `subscribers.py` (EVT-003).
 
 ## Потребители
 
@@ -32,3 +34,5 @@ Generic typed in-proc pub/sub событий-фактов. Pure Python, 0 Qt, 0 
 
 - `tests/test_event_bus.py` — контракт на generic-событиях (subscribe/publish, порядок,
   exception-isolation, custom error_handler, unsubscribe ctx/explicit, no-op, тип-точность, no-Qt).
+- `tests/test_subscribers_acceptance.py` — слепая приёмка S1–S15 (Task 0.3).
+- `tests/test_subscribers.py` — опасности: `add` против `owner.close()`, `_Release` из финализатора под локом.

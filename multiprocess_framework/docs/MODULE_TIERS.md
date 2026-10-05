@@ -45,7 +45,7 @@
 | `frontend_module` | optional | PySide6-слой. Headless-приложение (`minimal_app`, BACKEND_CTL) живёт без него. Флагман Gen-1 заморожен как фича (§3). |
 | `recipe` | optional | Крыша над рецептами (RecipeEngine/RecipeManager/миграции); приложение без рецептов её не подключает. |
 | `actions_module` | optional | Building-blocks undo/redo (ActionBus PATCH + SnapshotHistory). Прод-undo прототипа идёт мимо — через domain-диспетчер (решение владельца 2026-07-08). |
-| `event_module` | optional | Generic in-proc pub/sub (`EventBus` по `type(event)`); leaf-узел без зависимостей. |
+| `event_module` | optional | Generic in-proc pub/sub (`EventBus` по `type(event)`) и `Subscribers` с владельцем-областью; зависит от `base_manager.interfaces` (EVT-003). |
 | `telemetry_readmodel_module` | optional | Read-model телеметрии для GUI (ADR-136): запись всегда, чтение локально. Нужен потребителям телеметрии. |
 
 **Итого:** core — 17, optional — 10, frozen — 0 (см. §2/§3).

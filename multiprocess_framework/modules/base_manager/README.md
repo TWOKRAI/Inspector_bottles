@@ -39,11 +39,12 @@
 | `CloseReport` | замороженный DTO отчёта о закрытии; `ok` не учитывает `emits_after_close`; `to_dict`/`from_dict` со строгим краем |
 | `Reporter` | `Callable[[CloseReport], None]` — получатель отчёта, один вызов на закрытие |
 | `IHandle` | запись области: `path`, `kind`, `close(budget_s=None)` |
-| `IScope` | область: `own`, `child`, `barrier`, `spawn`, `cancel`, `close(budget_s=None, *, deadline=None)`, `live()` |
+| `IScope` | область: `own`, `child`, `barrier`, `spawn`, `cancel`, `close(budget_s=None, *, deadline=None)`, `live()`, `note_emits_after_close(n)` |
 | `ScopeClosedError` | `RuntimeError`: `own`/`spawn`/`child` у закрытой или закрывающейся области |
 
 Где что будет:
 - Реализация `Scope`/`Handle` — `core/lifetime.py` (Task 0.2): сегменты и барьер, три фазы, сроки Q3 с общим пределом `K = D + kill_reserve_s`, reporter, `live()`.
+- Канал счётчика (Task 0.3, ADR-BM-008): `note_emits_after_close(n)` — `+n` в отчёт первой незакрытой области цепочки; вся цепочка закрыта — reporter получает отчёт третьего вида (`elapsed_s == 0.0`). Досрочно закрытая некорневая область отдаёт счётчик родителю, её отчёт несёт 0; полный счётчик — в возврате `root.close()`.
 - Дверь — `from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots`. `open_scope(path, *, budget_s, kill_reserve_s=0.0, reporter=None)` — единственный способ создать корень. Классы `Scope`/`Handle` не экспортируются; снаружи аннотация — только `IScope`/`IHandle`.
 - `unclosed_roots()` — корни без начатого `close`: `{"path", "state"}`, `state` ∈ {`open`, `abandoned`}.
 - `BaseManager.scope` — Task 1.2. `Subscribers` — Task 0.3. Qt-адаптеры — Task 0.4.
