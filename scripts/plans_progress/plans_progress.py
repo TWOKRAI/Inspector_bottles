@@ -2148,7 +2148,7 @@ nav.tabs input:checked+label{background:var(--accent);border-color:var(--accent)
 nav.tabs input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
 .switcher>summary{display:block;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
 background:var(--card);font-size:.85rem}
-.switcher::details-content{position:absolute;left:0;z-index:6;width:min(440px,calc(100vw - 32px));
+.switcher::details-content{position:absolute;left:0;z-index:6;box-sizing:border-box;width:min(440px,calc(100vw - 32px));
 max-height:70vh;overflow:auto;margin-top:4px}
 .switcher[open]::details-content{padding:6px 12px;background:var(--card);
 border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px #0004}
