@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import pytest
 
+# Task 4.1: каждый тест — в обоих режимах summarize_plan (корень без парсера / с копией парсера).
+pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+
 ITEMS = "- Task 1.1: a [DONE]\n- Task 1.2: b [PENDING]\n"
 
 CASES = [
