@@ -2131,11 +2131,11 @@ CSS = """
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);
 font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+main{max-width:1100px;margin:0 auto;position:relative;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 main>*{flex:1 1 100%;min-width:0}
 header.topbar{display:contents}
 h1{order:-5;flex:1 1 auto;font-size:1.4rem;margin:0}
-.switcher{order:-4;flex:0 0 auto;position:relative}
+.switcher{order:-4;flex:0 0 auto}
 a.back{order:-4;flex:0 0 auto;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
 background:var(--card);color:var(--accent);text-decoration:none;font-size:.85rem}
 .meta{order:-3;flex:0 1 auto;color:var(--muted);font-size:.8rem}
@@ -2148,8 +2148,9 @@ nav.tabs input:checked+label{background:var(--accent);border-color:var(--accent)
 nav.tabs input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
 .switcher>summary{display:block;padding:3px 12px;border:1px solid var(--line);border-radius:16px;
 background:var(--card);font-size:.85rem}
-.switcher::details-content{position:absolute;right:0;top:100%;z-index:6;width:min(440px,calc(100vw - 32px));
-max-height:70vh;overflow:auto;margin-top:4px;padding:6px 12px;background:var(--card);
+.switcher::details-content{position:absolute;left:0;z-index:6;width:min(440px,calc(100vw - 32px));
+max-height:70vh;overflow:auto;margin-top:4px}
+.switcher[open]::details-content{padding:6px 12px;background:var(--card);
 border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px #0004}
 .sw-group{display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin:6px 0}
 .sw-group b{grid-column:1/-1;font-size:.75rem;color:var(--muted)}
@@ -2197,7 +2198,8 @@ main:has(#tab-waiting:checked)>#waiting::details-content,main:has(#tab-archive:c
 content-visibility:visible}
 main:not(:has(.anchor:target)) a.back,main:has(.anchor:target) nav.tabs{display:none}
 main:has(.anchor:target)>:not(header,:has(.anchor:target)){display:none!important}
-main:has(.anchor:target)>:has(.anchor:target){display:block!important;border:0;background:none;padding:0}
+main:has(.anchor:target)>:has(.anchor:target){display:block!important}
+main:has(.anchor:target)>:is(#waiting,#archive):has(.anchor:target){border:0;background:none;padding:0}
 main:has(.anchor:target) :is(#queue,#waiting,#unlisted,#archive)>:not(:has(.anchor:target)){display:none}
 main:has(.anchor:target) details:has(.anchor:target)::details-content,
 details.plan:has(>.anchor:target) .tasklist::details-content{content-visibility:visible}
@@ -2549,6 +2551,10 @@ def to_html(
     Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
     `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
     `overlaps` — из `find_overlaps`: секция `#overlaps` сразу после `#who` и чип `overlap` у планов с пересечением.
+
+    Шапка `header.topbar`: `h1`, три `div.meta`, переключатель `details.switcher`, ссылка `a.back` и `nav.tabs`
+    (вкладки — радиокнопки, вид без JS). У каждой карточки якорь `plan-<slug>` (`assign_anchors`, порядок печати —
+    `card_order`): ссылка `↗` в `<summary>` и страница плана по `:target`.
     """
     overlap_names: dict[str, set[str]] = {}
     for o in overlaps:

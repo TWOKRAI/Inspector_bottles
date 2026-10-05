@@ -889,7 +889,7 @@ def test_html_has_no_external_resources(make_root, progress, parse_html, tmp_pat
     assert not re.search(r"""(?:src|href)\s*=\s*["']?\s*https?://""", raw)
 
 
-def test_html_has_light_and_dark_theme(make_root, progress, parse_html, tmp_path):
+def test_html_has_dark_theme_only(make_root, progress, parse_html, tmp_path):
     # Task 7.1 ред. 4: только тёмная тема — решение владельца 2026-10-05
     raw = _html(progress, make_root({"plans/2026-10-02_t/plan.md": plan_text("- Task 1.1: a [DONE]\n")}), tmp_path)
     style = "".join(parse_html(raw).style_text)
