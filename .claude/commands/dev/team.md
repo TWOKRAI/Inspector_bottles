@@ -82,6 +82,9 @@ Don't spawn "just in case": an idle participant costs the same as a busy one.
    `git worktree add ../<repo>--team-<task> -b <type>/<slug>-<task>` (under `.claude/worktrees/`
    the first read costs +19…28k in nested `CLAUDE.md` tax — Д45). Two or more writers at <!-- lint-language: allow -->
    once — otherwise a shared tree (`team-protocol` §6, mode A).
+   Right after creating it, bind it to the plan:
+   `git -C <worktree> config --worktree plan.ref plans/<date>_<slug>` (`_WORKTREE_PATTERN.md`,
+   "Bind the worktree to its plan"); start the teammate with that worktree as its working dir.
    Creation/base/venv trap/how to check tests see your code — single source of truth
    `core/agents/_WORKTREE_PATTERN.md` (the "Live team" row in the transport table); the
    participant prints that check's result in their report before claiming a test result.
