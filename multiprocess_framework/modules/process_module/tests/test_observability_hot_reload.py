@@ -72,6 +72,11 @@ def test_hot_reload_reconfigures_logger(tmp_path: Path) -> None:
     цена штатного прогона не изменилась (те же ~0.5 с), а под нагрузкой тест
     судит механизм, а не планировщик. Ждать МЕНЬШЕ здесь нечего: не перестроился
     вовсе — красное придёт всё равно, просто позже.
+
+    Кэш решений напрямую не проверяется: ``default_level`` меняется в ``logger_core.py:987``, а
+    ``invalidate_decision_cache()`` зовётся лишь в ``:1012`` (~1 мс позже, в потоке watchdog) —
+    утверждение «кэш пуст» попадало в это окно (Атлас 0.8, Linux CI: 2 прогона из 3). Проверяется
+    наблюдаемое следствие: ответ ``should_log``, закэшенный до смены уровня, после reload верен.
     """
     yaml_path = tmp_path / "system.yaml"
     _write_yaml(yaml_path, "INFO")
@@ -91,18 +96,20 @@ def test_hot_reload_reconfigures_logger(tmp_path: Path) -> None:
         # Прогреть кэш решений should_log, затем сменить уровень файлом.
         from multiprocess_framework.modules.logger_module.core.log_config import LogLevel, LogScope
 
-        logger.should_log(LogScope.SYSTEM, LogLevel.INFO, "probe")
+        # Ключ, ответ которого зависит от уровня: под INFO DEBUG-запись отвергнута, и этот False
+        # закэширован — переживи он reload, тест краснеет.
+        assert logger.should_log(LogScope.DEBUG, LogLevel.DEBUG, "probe") is False
         time.sleep(0.3)  # выйти за дебаунс
         _write_yaml(yaml_path, "DEBUG")
 
         deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline:
-            if logger.config.default_level == "DEBUG":
+            if logger.should_log(LogScope.DEBUG, LogLevel.DEBUG, "probe") is True:
                 break
             time.sleep(0.1)
 
+        assert logger.should_log(LogScope.DEBUG, LogLevel.DEBUG, "probe") is True, "закэшированный False пережил reload"
         assert logger.config.default_level == "DEBUG", "watcher не перестроил logger из файла"
-        assert len(logger._decision_cache) == 0, "_decision_cache не инвалидирован при reconfigure"
     finally:
         watcher.stop()
         logger.shutdown()
