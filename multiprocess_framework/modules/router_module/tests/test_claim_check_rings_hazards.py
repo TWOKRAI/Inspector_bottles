@@ -261,7 +261,12 @@ def test_non_image_array_travels_inline_and_arrives_intact(made, key):
     # на 3.12) приводит big-endian к нативному, протокол 5 сохраняет. Сравнение — без порядка.
     native = lambda a: a if a.dtype.isnative else a.astype(a.dtype.newbyteorder("="))  # noqa: E731
     assert type(got) is type(value) and native(got).dtype == native(value).dtype and got.shape == value.shape
-    assert native(got).tobytes() == native(value).tobytes()
+    if value.dtype.kind == "O":
+        # object-массив: tobytes() отдаёт адреса объектов, не значения — равные строки в разных
+        # объектах дают разные байты (на Linux CI, Атлас 0.8c); сравниваем значения.
+        assert got.tolist() == value.tolist()
+    else:
+        assert native(got).tobytes() == native(value).tobytes()
     if isinstance(value, np.ma.MaskedArray):
         assert (np.ma.getmaskarray(got) == np.ma.getmaskarray(value)).all(), "маска потеряна"
 

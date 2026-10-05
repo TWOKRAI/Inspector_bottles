@@ -20,12 +20,14 @@ GREEN, а не то, что сейчас реально исполняется. 
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
 import time
 import uuid
 from multiprocessing import shared_memory
+from pathlib import Path
 from queue import Queue
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List
@@ -245,10 +247,18 @@ _R2_SCRIPT = (
 )
 
 
+# Корень репозитория от места файла, а не от cwd: `python -c` должен найти пакет
+# multiprocess_framework при запуске через run_framework_tests.py (cwd=modules, в .venv нет
+# editable-установки). tests -> frontend_module -> modules -> multiprocess_framework -> корень.
+_REPO_ROOT = str(Path(__file__).resolve().parents[3].parent)
+
+
 def _external_read(name: str, *, track: bool) -> None:
     """Читает сегмент ``name`` в НАСТОЯЩЕМ внешнем процессе (``python -c``, не fork/spawn
     внутри дерева — внутри дерева хазард не воспроизводится, дети делят tracker родителя)."""
-    subprocess.run([sys.executable, "-c", _R2_SCRIPT, name, "1" if track else "0"], check=True, timeout=10)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [_REPO_ROOT, env.get("PYTHONPATH", "")]))
+    subprocess.run([sys.executable, "-c", _R2_SCRIPT, name, "1" if track else "0"], check=True, timeout=10, env=env)
 
 
 def _segment_alive(name: str) -> bool:
@@ -301,6 +311,11 @@ def test_r2_control_external_reader_with_track_true_still_deletes_segment() -> N
     shm = _write_frame(name, frame)
     try:
         _external_read(name, track=True)
+        # Сегмент удаляет resource_tracker ребёнка — отдельный процесс, уже ПОСЛЕ выхода ребёнка:
+        # мгновенная проверка ловит гонку (Linux CI, Атлас 0.8). Ждём исчезновения с дедлайном.
+        deadline = time.monotonic() + 10.0
+        while _segment_alive(name) and time.monotonic() < deadline:
+            time.sleep(0.05)
         assert not _segment_alive(name), "track=True должен по-прежнему терять сегмент — это и есть хазард"
     finally:
         if _segment_alive(name):

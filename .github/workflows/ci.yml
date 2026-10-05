@@ -80,8 +80,19 @@ jobs:
   validate:
     name: validate (structure)
     runs-on: ubuntu-latest
+    env:
+      # PySide6 без дисплея: offscreen-платформа Qt.
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
+
+      # Системные Qt-рантайм-библиотеки: validate/examples-smoke импортируют PySide6
+      # (Атлас 0.8a) — без них на голом ubuntu-latest падает libEGL/libGL.
+      - name: Установка системных Qt-зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3
 
       - name: Установка uv
         uses: astral-sh/setup-uv@v5
@@ -133,8 +144,19 @@ jobs:
   examples-smoke:
     name: examples-smoke (minimal_app, live headless boot + IPC)
     runs-on: ubuntu-latest
+    env:
+      # PySide6 без дисплея: offscreen-платформа Qt.
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
+
+      # Системные Qt-рантайм-библиотеки: validate/examples-smoke импортируют PySide6
+      # (Атлас 0.8a) — без них на голом ubuntu-latest падает libEGL/libGL.
+      - name: Установка системных Qt-зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3
 
       - name: Установка uv
         uses: astral-sh/setup-uv@v5

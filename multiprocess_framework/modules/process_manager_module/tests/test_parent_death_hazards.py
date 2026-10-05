@@ -32,12 +32,17 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, List, Optional
 
 import pytest
 
 from ..runner import process_runner as pr
 from ._no_orphans_helpers import HUNG_CHILD_CLASS_PATH, QUICK_CHILD_CLASS_PATH, kill_and_reap
+
+# Корень репозитория от места файла, а не от cwd (run_framework_tests.py запускает pytest из modules/,
+# в .venv нет editable-установки). tests -> process_manager_module -> modules -> multiprocess_framework -> корень.
+_REPO_ROOT = str(Path(__file__).resolve().parents[3].parent)
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only: getppid-сторож — no-op на Windows")
 
@@ -271,6 +276,8 @@ class SlowInitChild:
 
 _SLOW_HOST_CODE = f"""
 import json, time
+from multiprocess_framework.modules.process_manager_module.platforms import get_platform_adapter
+get_platform_adapter().setup_multiprocessing()
 from multiprocess_framework.modules.process_manager_module.core.process_registry import ProcessRegistry
 reg = ProcessRegistry(logger=None)
 p = reg.create_and_register("slow", {SLOW_INIT_CHILD_CLASS_PATH!r}, {{}}, "normal")
@@ -291,7 +298,7 @@ def test_parent_sigkill_during_child_initialize(tmp_path):
 
     marker = tmp_path / "in_init"
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [os.getcwd(), env.get("PYTHONPATH", "")]))
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [_REPO_ROOT, env.get("PYTHONPATH", "")]))
     env[_MARKER_ENV] = str(marker)
     host = subprocess.Popen(
         [sys.executable, "-c", _SLOW_HOST_CODE], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env

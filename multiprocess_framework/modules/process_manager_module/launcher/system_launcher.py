@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any, List, Tuple, Callable
 
 from ...logger_module.utils import FallbackLogger
 from ...data_schema_module import merge_with_defaults
+from ..platforms import get_platform_adapter
 from .schema import DEFAULT_PROCESS_SCHEMA
 from .spawner import ProcessSpawner
 
@@ -91,6 +92,9 @@ class SystemLauncher:
         orchestrator_class_path: Optional[str] = None,
         orchestrator_config: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # ПЕРВОЙ строкой: ``multiprocessing.Event()`` ниже фиксирует метод запуска по умолчанию
+        # (на Linux — fork) раньше, чем его выставил бы ``spawner.launch_orchestrator`` (Атлас 0.8b).
+        get_platform_adapter().setup_multiprocessing()
         self._config = config
         self._processes: List[Tuple[str, Dict[str, Any]]] = []
         self._spawner: Optional[ProcessSpawner] = None

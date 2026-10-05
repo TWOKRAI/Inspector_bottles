@@ -13,6 +13,18 @@ import threading
 import pytest
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Прогон на ``spawn`` — как прод (Атлас 0.8b, группа A).
+
+    Тесты строят процессы и ``multiprocessing``-примитивы, не проходя через
+    ``spawner.launch_orchestrator``; без явного метода на Linux первый же ``Event()`` фиксирует
+    ``fork``, и ``spawn``-процесс с таким объектом падает («SemLock … fork context»).
+    """
+    from .process_manager_module.platforms import StubPlatformAdapter
+
+    StubPlatformAdapter().setup_multiprocessing()
+
+
 @pytest.fixture(autouse=True)
 def _reset_early_log_buffer() -> None:
     """Ф6.4а: буфер ранних записей — ПРОЦЕССНОЕ состояние, и оно течёт между тестами.
