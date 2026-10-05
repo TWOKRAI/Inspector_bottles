@@ -443,3 +443,18 @@ def test_stderr_summary_lists_the_skipped_things_and_is_never_empty(tmp_path):
     assert "2 git commit/merge invocation(s) skipped" in err
     assert "1 attempt(s) without tool_result" in err
     assert "file(s) read" in err
+
+
+# (g): git merge|cherry-pick|rebase|pull|apply|stash pop|reset --hard переписывают рабочее дерево целиком —
+# писатель Bash для любого .py (инъекция лида M4: без этого правила 0 красных из 188).
+@pytest.mark.parametrize(
+    "verb", ["git stash pop", "git merge feat/x", "git cherry-pick abc123", "git reset --hard HEAD~1", "git pull"]
+)
+def test_tree_rewriting_git_verbs_make_every_py_a_bash_write(tmp_path, verb):
+    before = [edit("e1", PY), _bash("b1", verb)]
+    assert _split_with(tmp_path, before, "git add mod/a.py && git commit -q -m x") == ["A1-Bash"]
+
+
+def test_control_without_a_tree_rewriting_verb_the_edit_stays_the_writer(tmp_path):
+    before = [edit("e1", PY), _bash("b1", "git status && git stash list")]
+    assert _split_with(tmp_path, before, "git add mod/a.py && git commit -q -m x") == ["A1-Edit/Write"]
