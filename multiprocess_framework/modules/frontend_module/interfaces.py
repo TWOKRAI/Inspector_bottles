@@ -268,6 +268,21 @@ from multiprocess_framework.modules.frontend_module.core.app_identity import (  
     set_app_identity,
 )
 
+# ---------------------------------------------------------------------------
+# Владение Qt-объектами через область (Task 0.4) — публичный API.
+# ---------------------------------------------------------------------------
+#
+# Связь ``IScope`` (base_manager) с ``QObject``/``QThread``: привязка объекта к
+# области, отложенные удаления без цикла событий, ``Stoppable`` над ``QThread``.
+# Реэкспорт здесь — чтобы контракт модуля был виден из единого interfaces.py;
+# импортировать можно и напрямую из ``frontend_module.core.qt_lifetime``.
+from multiprocess_framework.modules.frontend_module.core.qt_lifetime import (  # noqa: E402
+    QThreadHandle,
+    QtTreeMismatch,
+    attach_qt,
+    flush_deferred_deletes,
+)
+
 __all__ = [
     # Протоколы контракта модуля (объявлены выше в этом файле).
     "SupportsCommandMessage",
@@ -294,4 +309,9 @@ __all__ = [
     "AppIdentity",
     "get_app_identity",
     "set_app_identity",
+    # Владение Qt-объектами (Task 0.4, реэкспорт из frontend_module.core.qt_lifetime).
+    "attach_qt",
+    "flush_deferred_deletes",
+    "QThreadHandle",
+    "QtTreeMismatch",
 ]

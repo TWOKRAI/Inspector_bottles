@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
     QChildEvent,
+    QCoreApplication,
+    QDeadlineTimer,
     QEvent,
     QObject,
     QPropertyAnimation,
@@ -105,7 +107,9 @@ __all__ = [
     "QCloseEvent",
     "QColor",
     "QComboBox",
+    "QCoreApplication",
     "QCursor",
+    "QDeadlineTimer",
     "QDoubleSpinBox",
     "QDoubleValidator",
     "QEvent",
