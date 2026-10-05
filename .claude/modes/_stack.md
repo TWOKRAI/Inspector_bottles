@@ -27,7 +27,7 @@
 
 - **Validator:** [x] enabled (`.git/hooks/commit-msg`)
 - **Required trailers:** `Why:` **и** `Layer:` — оба обязательны (seed по умолчанию считает
-  `Layer:` выключённым; здесь это неверно, хук отклонит коммит)
+  `Layer:` выключённым; здесь это неверно: сейчас (фаза 2) — предупреждение, отказ — со строгого режима (Task 3.1))
 - **Layer values:** framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
 - **Refs:** обязателен, если задача из плана — `Refs: plans/<slug>.md`
 

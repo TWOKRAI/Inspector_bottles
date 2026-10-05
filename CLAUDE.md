@@ -76,6 +76,8 @@ v1/v2 и `multiprocess_prototype_backup/` удалены (e128b930), см. git l
 
 **Merge в `main`:** тема `merge: <что вошло>` + `Why:`/`Layer:`/`Refs:`; `git merge -F -` не читает stdin — сообщение берут из файла.
 
+Трейлеры — одним абзацем в конце, без пустой строки перед `Co-Authored-By`; `Task: <slug>#<id>` по желанию.
+
 ## Plan-Driven Development
 
 `/dev:plan`: slug `<домен>-<суть>` (≤ 40), `plans/<slug>.md` или `…/plan.md`, ветка `<type>/<slug>`. Создание и закрытие плана — отдельный `docs(plans):` коммит. Один активный план на модуль; новая работа — фазой. Детали — `.claude/commands/dev/plan.md`.
