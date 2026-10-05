@@ -37,6 +37,26 @@ def _load_ledger():
 
 L = _load_ledger()
 
+# Task 4.1: каждый тест — в обоих режимах summarize_plan (корень без парсера / с копией парсера).
+pytestmark = pytest.mark.parametrize("parser_mode", [False, True], ids=["legacy", "adapter"], indirect=True)
+
+
+@pytest.fixture(autouse=True)
+def _parser_in_tmp_roots(parser_mode, tmp_path, install_parser, capsys, ledger_fallback_markers):
+    """«Адаптер»: копия парсера в оба корня, которые строят тесты ниже (`tmp_path` и `tmp_path/repo`).
+
+    После теста: строка отката ledger в stderr (копия не загрузилась, analyze_plan упал) — провал.
+    """
+    if parser_mode:
+        install_parser(tmp_path)
+        install_parser(tmp_path / "repo")
+    yield
+    if parser_mode:
+        err = capsys.readouterr().err
+        bad = [m for m in ledger_fallback_markers if m in err]
+        assert not bad, f"режим «адаптер», но ledger откатился в «прежний»: {err[-600:]!r}"
+
+
 TODAY = "2026-10-02"
 AMENDMENTS = (
     "| # | дата | почему | Δ задач | Δ бюджета |\n|---|---|---|---|---|\n| — | 2026-10-01 | открытие | — | — |\n"

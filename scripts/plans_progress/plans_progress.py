@@ -98,7 +98,7 @@ UNPARSED_ITEM_RE = re.compile(
     r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?(?:\*\*|~~|__)*Task[ \t]+(?P<tok>\S*\d\S*)"
 )
 UNPARSED_HEAD_RE = re.compile(r"^(?:\*\*)?Task[ \t]+(?P<tok>\S*\d\S*)")
-STATUS_LINE_RE = re.compile(r"\*\*Статус:?\*\*:?[ \t]*(?P<rest>.*)$")
+STATUS_LINE_RE = re.compile(r"\*\*(?:Статус|Status):?\*\*:?[ \t]*(?P<rest>.*)$")
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[(?P<mark>[ xX])\]")
 HASH_RE = re.compile(r"`([0-9a-f]{7,40})`")
 PHASE_FILE_RE = re.compile(r"^phase-(\d+)[a-z]?(?:-[^.]*)?\.md$")
@@ -150,6 +150,7 @@ class Plan:
     waiting_on: list[str] = field(default_factory=list)  # условия `⛔ …` из поля `После:`
     has_after_field: bool = False  # в первых 30 строках есть строка `После:`, даже `—`; в --json не выводится
     header_branch: str = ""  # ветка из строки `Ветка:` / `Branch:` шапки; в --json не выводится
+    branch_claim: str = ""  # ветка для находки BRANCH_MISSING (значение поля начинается с `тип/имя`); в --json нет
     active: list[dict] = field(default_factory=list)  # worktree со свежим сигналом, привязанные к плану
     branches: list[dict] = field(default_factory=list)  # актуальные ветки, тронувшие план: {branch, done, total}
     priority: int | None = None  # наименьший `#` из таблицы «Снимок» ORDER.md; в --json не выводится
@@ -443,12 +444,8 @@ _BRANCH_LINE_RE = re.compile(
 _BRANCH_TOKEN_RE = re.compile(r"[^\s`,;()]+(?:/[^\s`,;()]+)+")
 
 
-def find_header_branch(text: str) -> str:
-    """Ветка из первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет — `""`.
-
-    Разметка `- **…:**` и обратные кавычки допустимы; берётся первый токен вида `тип/имя`, хвост
-    (`— трек`, `(от main)`) отброшен.
-    """
+def _header_branch_value(text: str) -> str | None:
+    """Значение первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет строки — `None`."""
     in_fence = False
     for line in text.split("\n")[:30]:
         if FENCE_RE.match(line):
@@ -456,9 +453,37 @@ def find_header_branch(text: str) -> str:
             continue
         m = None if in_fence else _BRANCH_LINE_RE.match(line)
         if m:
-            tok = _BRANCH_TOKEN_RE.search(m.group("rest").replace("`", ""))
-            return tok.group(0).rstrip(".") if tok else ""
-    return ""
+            return m.group("rest")
+    return None
+
+
+def find_header_branch(text: str) -> str:
+    """Ветка из первой строки `Ветка:` / `Branch:` в первых 30 строках (вне ограждений кода); нет — `""`.
+
+    Разметка `- **…:**` и обратные кавычки допустимы; берётся первый токен вида `тип/имя`, хвост
+    (`— трек`, `(от main)`) отброшен.
+    """
+    rest = _header_branch_value(text)
+    if rest is None:
+        return ""
+    tok = _BRANCH_TOKEN_RE.search(rest.replace("`", ""))
+    return tok.group(0).rstrip(".") if tok else ""
+
+
+def find_branch_claim(text: str) -> str:
+    """Ветка, которую план называет своей для находки BRANCH_MISSING; нет — `""`.
+
+    Строже `find_header_branch`: значение поля после снятия `` ` `` и `**` должно НАЧИНАТЬСЯ с токена `тип/имя`.
+    `main — короткие ветки (docs/…)` ветки не называет, токен с `<`, `>`, `…`, `*` — шаблон.
+    """
+    rest = _header_branch_value(text)
+    if rest is None:
+        return ""
+    tok = _BRANCH_TOKEN_RE.match(rest.replace("`", "").replace("**", "").lstrip())
+    if not tok:
+        return ""
+    name = tok.group(0).rstrip(".")
+    return "" if any(c in name for c in "<>…*") else name
 
 
 def find_bare_word(text: str) -> str | None:
@@ -761,6 +786,7 @@ def analyze_plan(name: str, main: Path, plan_dir: Path | None, rel: str, archive
     plan.after, plan.waiting_on, plan.after_reason = find_after(main_text)
     plan.has_after_field = after_field_value(main_text) is not None
     plan.header_branch = find_header_branch(main_text)
+    plan.branch_claim = find_branch_claim(main_text)
 
     head_files: list[tuple[str, str]] = [(main.name, main_text)] if main.is_file() else []
     table_texts: list[str] = [main_text] if main.is_file() else []
@@ -875,6 +901,9 @@ class OrderRow:
 
 
 _TIER_HEAD_RE = re.compile(r"^#{2,6}[ \t]+4\.([123])(?!\d)")
+# раздел ORDER.md -> значение `tier` (--json, страница); обратная таблица строится из той же — адрес для бейджа и списка
+TIER_BY_SECTION = {"4.1": "queue", "4.2": "waiting", "4.3": "closed"}
+SECTION_BY_TIER = {tier: section for section, tier in TIER_BY_SECTION.items()}
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
 
@@ -902,7 +931,7 @@ def parse_order(path: Path) -> list[OrderRow]:
         hm = HEADING_RE.match(line)
         if hm:
             tm = _TIER_HEAD_RE.match(line)
-            tier = f"4.{tm.group(1)}" if tm else None
+            tier = TIER_BY_SECTION[f"4.{tm.group(1)}"] if tm else None
             continue
         if tier is None or not line.lstrip().startswith("|"):
             continue
@@ -919,11 +948,11 @@ def parse_order(path: Path) -> list[OrderRow]:
         def cell(i: int) -> str:
             return clean_md(cells[i]) if len(cells) > i else ""
 
-        if tier == "4.1":
+        if tier == "queue":
             lane_raw = cell(1)
             lane = None if lane_raw in ("", "—", "-", "–") else lane_raw
             info = [("Статус", cell(2)), ("Следующий шаг", cell(3))]
-        elif tier == "4.2":
+        elif tier == "waiting":
             info = [("Остаток", cell(1)), ("Триггер", cell(2))]
         else:
             info = [("Факт", cell(1))]
@@ -1074,7 +1103,7 @@ TASK_OPEN = ("unknown", "pending", "in_progress", "blocked")
 
 def plan_closed(p: Plan) -> bool:
     """Закрыт: архив, §4.3, шапка done/superseded или есть задачи и ни одной незавершённой."""
-    if p.archived or p.tier == "4.3" or p.header_status in ("done", "superseded"):
+    if p.archived or p.tier == "closed" or p.header_status in ("done", "superseded"):
         return True
     return bool(p.tasks) and not any(t.status in TASK_OPEN for t in p.tasks)
 
@@ -1208,7 +1237,7 @@ def build_findings(plans: list[Plan]) -> list[Finding]:
     for p in plans:
         if p.archived:
             continue
-        in_41 = p.tier == "4.1"
+        in_41 = p.tier == "queue"
         if not p.tasks:
             out.append(Finding("NO_TASKS", p.name, None, in_41, "в плане не найдено ни одной задачи"))
         if p.unclosed_fence:
@@ -1297,10 +1326,10 @@ def trust_suffix(p: Plan) -> str:
 def queue_scope(live: list[Plan]) -> tuple[list[Plan], list[Plan], list[Plan], list[Plan]]:
     """Живые планы по секциям страницы: (очередь §4.1, ждут §4.2, не в ORDER, закрытые §4.3). Порядок сохраняется."""
     return (
-        [p for p in live if p.tier == "4.1"],
-        [p for p in live if p.tier == "4.2"],
+        [p for p in live if p.tier == "queue"],
+        [p for p in live if p.tier == "waiting"],
         [p for p in live if p.tier is None],
-        [p for p in live if p.tier == "4.3"],
+        [p for p in live if p.tier == "closed"],
     )
 
 
@@ -1381,6 +1410,28 @@ def on_main_branch(root: Path) -> bool:
         return os.path.samefile(top, root)
     except OSError:
         return False
+
+
+def branch_findings(plans: list[Plan], root: Path) -> list[Finding]:
+    """BRANCH_MISSING (информационная): живой план называет ветку `тип/имя`, локальной ветки с таким именем нет.
+
+    Зависит от локальных веток машины. Git не зовётся, если ни один живой план не называет ветку; нет git,
+    `root` не верхний каталог репозитория или `git for-each-ref` не ответил — находок нет. Имена веток — из
+    `%(refname)` с снятым `refs/heads/`: `%(refname:short)` при одноимённом теге даёт `heads/<имя>`.
+    """
+    claimed = [p for p in plans if p.branch_claim and not plan_closed(p)]
+    if not claimed or not _is_repo_top(root):
+        return []
+    listing = _git(["for-each-ref", "--format=%(refname)", "refs/heads"], root)
+    if listing is None:
+        return []
+    prefix = "refs/heads/"
+    local = {ln.strip()[len(prefix) :] for ln in listing.splitlines() if ln.strip().startswith(prefix)}
+    return [
+        Finding("BRANCH_MISSING", p.name, None, False, f"ветки {clean_md(p.branch_claim, 80)} нет среди локальных")
+        for p in claimed
+        if p.branch_claim not in local
+    ]
 
 
 def order_block_findings(order: Path, live: list[Plan], archive: list[Plan], root: Path) -> list[Finding]:
@@ -1491,7 +1542,7 @@ def _is_repo_top(root: Path) -> bool:
 def git_worktrees(root: Path) -> list[tuple[str, str]]:
     """[(путь worktree как в porcelain, ветка)]; ветка `""` на detached HEAD.
 
-    Корни есть только если `root` — верхний каталог своего репозитория (`os.path.samefile`): корень внутри
+    Корни есть только если `root` — верхний каталог своего репозитория (`_is_repo_top`): корень внутри
     чужого репозитория, вне git или подкаталог репозитория дают пустой список. Главное дерево — тоже корень.
     """
     if not _is_repo_top(root):
@@ -2022,7 +2073,9 @@ def startable(p: Plan, in_use: bool) -> bool:
     Только §4.1: `ready` стоит и у планов §4.2, а очередь они не занимают. План без собственной строки `После:`
     не называется готовым: `ready` у него «по умолчанию».
     """
-    return in_use and p.tier == "4.1" and p.has_after_field and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+    return (
+        in_use and p.tier == "queue" and p.has_after_field and p.ready and any(t.status in TASK_OPEN for t in p.tasks)
+    )
 
 
 def ready_summary(queue: list[Plan], in_use: bool) -> str:
@@ -2136,11 +2189,11 @@ def _plan_html(p: Plan, in_use: bool) -> str:
     if p.lane:
         s.append(f'<span class="badge">полоса {_e(p.lane)}</span>')
     if p.tier:
-        s.append(f'<span class="badge">§{_e(p.tier)}</span>')
+        s.append(f'<span class="badge">§{_e(SECTION_BY_TIER.get(p.tier, p.tier))}</span>')
     unknown, unmarked = trust_counts(p)
     unfinished = p.total > p.done
-    warn = p.header_status == "done" and p.tier in ("4.1", "4.2") and unfinished
-    shelved = not warn and (p.tier == "4.3" or p.header_status in ("done", "superseded"))
+    warn = p.header_status == "done" and p.tier in ("queue", "waiting") and unfinished
+    shelved = not warn and (p.tier == "closed" or p.header_status in ("done", "superseded"))
     if p.tasks:
         if not shelved:
             s.append(f'<progress value="{p.done}" max="{max(p.total, 1)}"></progress>')
@@ -2399,11 +2452,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
         baseline = load_baseline(args.baseline) if args.baseline else set()
-        extra = order_block_findings(order_path, live, archive, root) + snapshot_findings(snap_unknown)
+        extra = (
+            order_block_findings(order_path, live, archive, root)
+            + snapshot_findings(snap_unknown)
+            + branch_findings(ordered, root)
+        )
         code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout, extra)
     if not (args.json or args.html is not None or args.check or args.sync_order):
         for p in ordered:
-            tag = "архив" if p.archived else (p.tier or "—")
+            tag = "архив" if p.archived else (SECTION_BY_TIER.get(p.tier, p.tier) if p.tier else "—")
             print(f"{p.name:48} {tag:6} {_tally(p.done, p.total)}{trust_suffix(p)}")
     return code
 
