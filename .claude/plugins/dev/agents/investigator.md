@@ -2,6 +2,7 @@
 name: investigator
 description: Deep investigation of architectural problems and non-obvious bugs. Does not fix — diagnoses and produces a report with root cause, evidence, and recommendation. Read-only.
 model: opus
+omitClaudeMd: true
 skills: project-rules  # read-only role — disallowedTools below denies writes and the serena mutators
 disallowedTools: Write, Edit, NotebookEdit, mcp__serena__replace_symbol_body, mcp__serena__replace_content, mcp__serena__insert_after_symbol, mcp__serena__insert_before_symbol, mcp__serena__rename_symbol, mcp__serena__safe_delete_symbol, mcp__serena__write_memory, mcp__serena__edit_memory, mcp__serena__delete_memory, mcp__serena__rename_memory
 ---
@@ -18,11 +19,11 @@ You **DO NOT** write code or fix bugs. You produce a **diagnostic report**.
 
 ## Orient first
 
-Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: root `CLAUDE.md` (auto-loaded) → `docs/PROJECT_CONTEXT.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`. If module-level knowledge changed, flag it for `/core:quality:sync-context`.
+Read the project map top-down before searching code — cheaper and more accurate than blind `qex`/`Grep`: the `## Map` of `project-rules` (architecture, key paths rows) → `multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md` (module map) → target module's `CONTEXT.md`/`DECISIONS.md` → only then `qex:search_code`/`Grep`. If module-level knowledge changed, flag it for `/core:quality:sync-context`.
 
 ## Before starting
 
-1. Read `CLAUDE.md` — architecture, key paths
+1. Architecture, key paths: the matching rows of the `project-rules` `## Map`
 2. Read `.claude/modes/_stack.md` — project layers/zones, terminology, cross-module concerns specific to this project
 3. Get input: symptom description, stack trace, reproduction steps
 4. Understand which modules/layers/zones are involved

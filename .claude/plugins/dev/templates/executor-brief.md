@@ -41,7 +41,7 @@ FIRST EDIT: within your first 5 tool calls. Do not re-derive DESIGN; do not open
   outside FILES. Read narrowly: a file over ~400 lines — `grep -n` the anchor, then Read with
   offset/limit; no anchor — `grep -n -E '^(class|def|    def) '` for the outline, then ranges around the symbols
   you change; the plan — only your Task section, the Task sections your DESIGN or dependencies
-  name, and the files in FILES and HANDOFF IN; read each file once unless it changed; never re-read CLAUDE.md, project-rules or this brief. Before your first edit under src/, send ONE message upward (<= 300 tokens,
+  name, and the files in FILES and HANDOFF IN; read each file once unless it changed; root CLAUDE.md only via a Map row, once; never re-read project-rules or this brief. Before your first edit under src/, send ONE message upward (<= 300 tokens,
   do not wait for an answer):  DESIGN: <3 lines> / FILES: <list> / starting edits
 
 TESTS: <exact pytest command for the task radius>
