@@ -414,18 +414,31 @@ def test_scope_close_does_not_touch_entry_taken_by_handle_close():
 def test_unclosed_roots_survives_gc_finalizer_under_lock():
     """F1: сборщик мусора срабатывает внутри ``unclosed_roots()`` и зовёт финализатор
     брошенного корня в том же потоке. Финализатор берёт лок сторожа — повторный вход
-    не должен зависнуть. 800 живых корней — столько аллокаций, чтобы gen0 сработал
-    внутри списка (порог по умолчанию — 700).
+    не должен зависнуть.
+
+    gc выключен от создания корня до вызова: цикл корня гарантированно в gen0, и
+    порог 1 собирает его на первой аллокации внутри списка — под локом сторожа.
+    Без этого цикл уходит в gen1 при сборке во время ``open_scope``/``own``, и тест
+    вакуумен в полном прогоне (инъекция лида J1).
     """
     keep = [open_scope(f"{_path()}/live{i}", budget_s=0.1) for i in range(800)]
     abandoned = _path()
     box: dict = {}
 
     def worker() -> None:
-        root = open_scope(abandoned, budget_s=0.1)
-        root.own(lambda: None, name="x")  # цикл Scope <-> запись: соберёт только gc
-        del root
-        box["n"] = len(unclosed_roots())
+        old = gc.get_threshold()
+        gc.collect()
+        gc.disable()
+        try:
+            root = open_scope(abandoned, budget_s=0.1)
+            root.own(lambda: None, name="x")  # цикл Scope <-> запись: соберёт только gc
+            del root
+            gc.set_threshold(1)
+            gc.enable()
+            box["n"] = len(unclosed_roots())
+        finally:
+            gc.set_threshold(*old)
+            gc.enable()
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
@@ -509,3 +522,51 @@ def test_resource_finalizer_does_not_run_under_scope_lock():
     root.own(_Res(), name="r")  # вызывающий ссылку не держит: владелец — область
     _bounded(root.close, timeout=3.0)
     assert seen == {"reader_blocked": False}
+
+
+def test_subtree_thread_waits_for_entry_taken_by_foreign_handle_close():
+    """F2, граница правила: запись взял не close области, а ``IHandle.close`` чужого
+    потока A (вне поддерева). Поток поддерева во время ``close`` области ждёт A и
+    получает полный отчёт, а не ``complete=False`` сразу.
+
+    Белый ящик: ``_close_entry_early`` зовётся напрямую — через ту же ручку поток
+    ждёт на уровне ``Handle`` и до проверки ``releaser == _closer`` не доходит.
+    """
+    root = open_scope(_path(), budget_s=3.0)
+    entered = threading.Event()
+    gate = threading.Event()
+
+    def slow() -> None:
+        entered.set()
+        gate.wait(5.0)
+
+    handle = root.own(slow, name="slow")
+    entry = handle._entry
+    inner: dict = {}
+
+    def loop(ev: threading.Event) -> None:
+        try:
+            ev.wait()
+        finally:
+            t0 = time.monotonic()
+            report = root._close_entry_early(entry, 3.0)
+            inner["dt"] = time.monotonic() - t0
+            inner["complete"] = report.complete
+
+    root.spawn(loop, name="w")
+    a_reports: list = []
+    a = threading.Thread(target=lambda: a_reports.append(handle.close()), daemon=True)
+    a.start()
+    assert entered.wait(3.0)
+    root_reports: list = []
+    c = threading.Thread(target=lambda: root_reports.append(root.close()), daemon=True)
+    c.start()
+    time.sleep(0.3)  # close области идёт, поток w уже ждёт запись, взятую A
+    gate.set()
+    for t in (a, c):
+        t.join(5.0)
+        assert not t.is_alive()
+    assert inner["complete"] is True
+    assert inner["dt"] >= 0.2
+    assert [r.complete for r in a_reports] == [True]
+    assert [r.survivors for r in root_reports] == [()]
