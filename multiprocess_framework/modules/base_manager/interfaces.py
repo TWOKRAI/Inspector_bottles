@@ -387,7 +387,8 @@ class CloseReport:
     Он же проверяет типы, ``TypeError`` называет поле: ``path`` — ``str``;
     ``elapsed_s`` — ``int``/``float``, не ``bool``; элементы ``survivors``,
     ``killed`` и обе части каждой пары ``errors`` — ``str``;
-    ``emits_after_close`` — ``int``, не ``bool``; ``complete`` — ``bool``.
+    ``emits_after_close`` — ``int``, не ``bool``; ``complete`` — ``bool``;
+    ``kind`` — ``str`` из {``"close"``, ``"late_emits"``}, иначе ``ValueError``.
     Иначе ``survivors=(b"x",)`` уронил бы ``json.dumps(to_dict())``, а
     ``complete=""`` дал бы ``ok == ""``.
 
@@ -436,7 +437,7 @@ class CloseReport:
         """Словарь только из ``dict``/``list``/``str``/``int``/``float``/``bool``.
 
         Ключи ровно: ``path``, ``elapsed_s``, ``survivors``, ``killed``,
-        ``errors``, ``emits_after_close``, ``complete``, ``ok``. ``errors`` —
+        ``errors``, ``emits_after_close``, ``complete``, ``kind``, ``ok``. ``errors`` —
         список ``{"path": ..., "error": ...}``: потребитель читает по ключу.
         Результат проходит ``json.dumps`` без ``default=``.
         """
@@ -462,7 +463,7 @@ class CloseReport:
           словарей с ключами ровно ``{"path", "error"}``. Элемент не ``dict``,
           без ключа или с лишним ключом → ``ValueError`` с ``errors[i]`` и
           именем ключа. Типы значений проверяет ``__post_init__``.
-        - Нет ``emits_after_close`` / ``complete`` → ``0`` / ``True``.
+        - Нет ``emits_after_close`` / ``complete`` / ``kind`` → ``0`` / ``True`` / ``"close"``.
         - Нет ``path``, ``elapsed_s``, ``survivors``, ``killed`` или
           ``errors`` → ``ValueError`` с именем ключа.
         - Лишний ключ → ``ValueError`` с именем ключа. Обе стороны — один код

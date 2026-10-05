@@ -613,7 +613,7 @@ def test_note_storm_into_child_during_root_close_sums_to_8000() -> None:
         assert not th.is_alive()
     assert errors == []
     third = [r for r in got if r is not report]
-    assert all(r.elapsed_s == 0.0 and r.survivors == () and r.emits_after_close >= 1 for r in third)
+    assert all(r.kind == "late_emits" and r.survivors == () and r.emits_after_close >= 1 for r in third)
     assert report.emits_after_close + sum(r.emits_after_close for r in third) == 8000
 
 
@@ -692,8 +692,11 @@ def test_third_kind_report_on_hand_off_does_not_delay_waiters_of_child_close() -
     обязан получить готовый отчёт, а не ``complete=False`` по сроку.
     """
 
+    got: list = []
+
     def reporter(report) -> None:
-        if report.elapsed_s == 0.0 and report.emits_after_close == 7:
+        got.append(report)
+        if report.kind == "late_emits":
             time.sleep(1.0)
 
     root = open_scope(_path(), budget_s=1.0, reporter=reporter)
@@ -719,6 +722,9 @@ def test_third_kind_report_on_hand_off_does_not_delay_waiters_of_child_close() -
     t2.join(5.0)
     assert not t2.is_alive() and not t3.is_alive()
     assert out["t3"].complete is True
+    # Ревью 0.3 р2: отчёт третьего вида обязан прийти — иначе счётчик теряется молча.
+    late = [(r.path, r.emits_after_close) for r in got if r.kind == "late_emits"]
+    assert late == [(root.path, 7)]
 
 
 def test_hand_off_to_parent_happens_before_done_set_deterministic() -> None:
