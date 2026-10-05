@@ -26,10 +26,10 @@ that outlive the task go to `docs/claude/OPEN_QUESTIONS.md`; a weak check says h
 what real proof looks like. Inventory counts use `grep -F` only, over every spelling of the family;
 show a non-zero hit as the matching line.
 
-## 3. MCP availability follows `enabled.yaml`
+## 3. MCP — your tool list is the truth
 
-A server in your role prompt exists only if enabled in `.claude/enabled.yaml`; else
-`Grep`/`Read`. First use: `Read` `.claude/plugins/<id>/README.md`, load the schema via `ToolSearch`.
+Your MCP servers are the ones in your tool list; the role table is `docs/claude/LEAD_RULES.md` → «MCP routing». A server named in your role prompt but absent from your tools → `Grep`/`Read`.
+First use: `Read` `.claude/plugins/<id>/README.md`, load the schema via `ToolSearch`.
 Layer boundaries: only CLI `sentrux check .`; MCP `check_rules` is a quick signal, not a verdict.
 graphify community names are hints, not facts.
 Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead only, main tree.
