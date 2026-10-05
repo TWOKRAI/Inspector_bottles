@@ -194,7 +194,12 @@ def test_child_scope_before_object_no_mismatch(env):
 
 
 def test_second_toplevel_no_mismatch(env):
-    """S6: в области два верхних объекта; родитель — второй из них."""
+    """S6: в области два верхних объекта; родитель — второй из них.
+
+    Две части: верхние объекты в области-предке (``tab``) и в своей области (``comp``).
+    Вторая часть сторожит ``owned`` со своей областью: верхние ``tab`` уже делают ``above``
+    непустым, поэтому первая часть к такой поломке слепа (инъекция Q2 ведущего).
+    """
     attach_qt = _door().attach_qt
     t = QObject()
     attach_qt(env.tab, t)
@@ -202,8 +207,26 @@ def test_second_toplevel_no_mismatch(env):
     attach_qt(env.tab, dock)
     c = QObject(dock)
     attach_qt(env.comp, c, name="c")
+    t2 = QObject()
+    attach_qt(env.comp, t2, name="t2")
+    dock2 = QObject()
+    attach_qt(env.comp, dock2, name="dock2")
+    c2 = QObject(dock2)
+    attach_qt(env.comp, c2, name="c2")
     rep = env.comp.close()
     assert rep.errors == ()
+    assert rep.ok is True
+
+
+def test_no_registered_ancestor_skips_tree_check(env):
+    """Правило миграции: выше области ничего не привязано — проверки дерева нет, чужой родитель не ошибка."""
+    attach_qt = _door().attach_qt
+    f = QObject()  # не привязан никуда; в root и tab тоже ничего не привязано
+    c = QObject(f)
+    attach_qt(env.comp, c, name="c")
+    rep = env.comp.close()
+    assert rep.errors == ()
+    assert rep.ok is True
 
 
 def test_offthread_close_skips_tree_check(env):
