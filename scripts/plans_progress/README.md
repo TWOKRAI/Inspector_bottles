@@ -192,6 +192,10 @@ DONE ветки не теряется. План выгружается `git arch
 порядке. `#waiting`, `#unlisted`, `#archive`, `--json` (набор и порядок записей), блок `--sync-order` и `--check`, кроме
 `SNAPSHOT_UNKNOWN`, не меняются: переставляет только `to_html`.
 
+## ledger считает через `analyze_plan`, если найдёт его
+
+`scripts/plans_ledger.py` (`status`, `close`, `add`, `approve`/`amend`, `check_ledger`) берёт счёт задач плана у этого парсера (Task 4.1). Модуль ищется от пути плана: первый предок с именем `plans`, его родитель — корень, модуль — `<корень>/scripts/plans_progress/plans_progress.py`. Нашёлся и загрузился — режим «адаптер»: `done`, `counted`, `dropped`, `unknown` равны полям `analyze_plan`, фаза — по прежнему правилу ledger. Модуля нет — режим «прежний» (свой парсер ledger, заморожен до 4.4), stderr пуст. Модуль не загрузился — «прежний» и одна строка stderr на процесс и корень: путь и класс исключения. `analyze_plan` упал на одном плане — этот план «прежним», одна строка stderr. Гейты `check_plan_gate`, `build_summary` и `contract.lock` по-прежнему читают набор своим кодом. Доверие: `status`/`close`/`add` с `--root X` исполняют `X/scripts/plans_progress/plans_progress.py`; на чужом дереве не запускать. Тесты: `test_acceptance_ledger_adapter.py`, `test_ledger_adapter_author.py`; прежние тесты ledger идут в обоих режимах (`-k legacy` / `-k adapter`).
+
 ## Слияние ветки в main (порядок лида)
 
 Блок прогресса в `ORDER.md` пишет один человек — лид на `main`. Блок читает **рабочее** дерево, поэтому

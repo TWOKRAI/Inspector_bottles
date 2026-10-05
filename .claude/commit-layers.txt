@@ -34,3 +34,14 @@
 #   ports
 #   infrastructure
 #   tests
+
+# Active layers (Task 2.1 of plans/2026-10-03_commit-mechanism, 2026-10-04):
+framework
+services
+plugins
+prototype
+docs
+scripts
+tests
+infra
+mixed
