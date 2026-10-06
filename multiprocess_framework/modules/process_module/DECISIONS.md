@@ -4056,3 +4056,48 @@ test_storeless_mode_get_returns_default_and_process_lives`.
 
 **Refs:** `plans/transport-single-policy/phase-5.md` (Task 5.9a), `plugins/port.py` (`available_keys`,
 `validate_chain_detailed`), `process_manager_module/topology/blueprint.py` (`SystemBlueprint.check`).
+
+### ADR-PM-053 — Сборкой владеет поток-исполнитель: слот процесса в `gc_discipline`, в GUI — главный поток Qt (2026-10-06, T1)
+
+**Статус:** принято
+**Refs:** `plans/2026-10-03_lifecycle-owner-scope/task-T1.md`, `docs/reviews/2026-10-05_lifecycle-abort-root-cause-cto.md`
+
+**Проблема.** Автосборка CPython запускается на том потоке, который перешёл порог поколения. В
+GUI-процессе это рабочий поток: финализаторы Qt-обёрток (и закрытие областей владения из
+финализатора) исполняются не на потоке `QCoreApplication`. Итог — abort/AV в GUI-процессе и в
+прогоне тестов (разбор CTO).
+
+**Решение.** В `process_module/lifecycle/gc_discipline.py` — **слот процесса** (один: `gc`
+глобален). `collect_on(executor)` занимает слот: автосборка выключена (`prior` запомнен), сборку
+зовёт тик исполнителя на ЕГО потоке — по порогам поколений, как CPython. `release()` возвращает
+ровно `prior`, снимает свою заморозку и хук. Повтор с тем же исполнителем — тот же объект, с
+другим — `RuntimeError`. `enforce()` лечит автосборку, включённую извне, и считает нарушения.
+Наблюдаемость (`observe`) за флагом, выкл. — ноль цены (нет хука, нет `perf_counter`).
+Qt-адаптер `frontend_module/core/qt_gc_policy.py` даёт исполнитель на `QTimer(parent=app)` и
+`collect_now()` (полная сборка + `flush_deferred_deletes` вне цикла событий). Точки включения:
+`run_gui` прототипа сразу после `QApplication`, фикстуры `_gui_memory_policy` /
+`_gui_memory_boundary` в `modules/conftest.py` и корневом `conftest.py`.
+
+**`GcDiscipline` — две правки.** `collect_scheduled` первой строкой уступает занятому слоту
+(`False`, без исключения — heartbeat глотает исключения); `freeze_after_startup` с чужого потока
+при занятом слоте отказывает со строкой лога. Слот пуст — бит-в-бит как раньше: не-GUI процессы
+не меняются.
+
+**Правила потоков.** Под локом модуля — только чтение/запись ссылки слота; владелец создаётся до
+лока (аллокация под локом при живой автосборке → финализатор входит в лок → взаимоблокировка,
+прецедент `qt_lifetime.py`). Хук `gc.callbacks` — только `+= 1`. Кроме `stats()`,
+`collection_owner()`, `paused_gc()` — только поток владельца.
+
+**Отвергнуто.**
+- *Сборка в heartbeat-потоке (`collect_scheduled`) для GUI.* Это и есть «не тот поток»:
+  финализаторы Qt-обёрток ушли бы на поток heartbeat.
+- *Точечные исключения (`gc.disable` вокруг опасных мест).* Порог переходит любой поток в любой
+  момент; список мест не закрывается.
+- *Ядро внутри `frontend_module` (Qt).* Механизм нужен и без Qt (тесты механизма, будущий
+  `apps/gui_client`); Qt — тонкий адаптер. Где жить ядру для `apps/gui_client` — открытый
+  вопрос В4 к CTO (импорт тянет ядро `ProcessModule`).
+
+**Цена и риск.** Пауза сборки — на главном потоке (≈ каденции CPython; `gen2` — десятки мс, мерит
+стенд). `gc.unfreeze()` глобален: `rearm_freeze`/`release` снимают и стартовую заморозку.
+Сторонний `gc.enable()` (site-packages) лечит `enforce`, чужие сборки видит `foreign_collections`.
+Free-threaded Python — пересмотреть.

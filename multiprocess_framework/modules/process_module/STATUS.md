@@ -4,6 +4,13 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-10-06 (T1 — сборкой владеет поток-исполнитель, ADR-PM-053):** в `lifecycle/gc_discipline.py`
+  слот процесса `collect_on` / `collection_owner` / `paused_gc` / `suspend_collection_owner`, `GcCollectionOwner`,
+  `GcOwnerStats` (Stability: lite). `GcDiscipline` — две правки: `collect_scheduled` уступает занятому слоту,
+  `freeze_after_startup` с чужого потока при занятом слоте отказывает. Слот пуст — бит-в-бит. Qt-адаптер —
+  `frontend_module/core/qt_gc_policy.py`. Приёмка: `tests/test_gc_collection_owner.py` 13/13,
+  `frontend_module/tests/test_qt_gc_policy.py` 5/5. `test_gc_discipline.py` под сессионной политикой
+  красен до Brief C2 (фикстура `suspend_collection_owner`).
 - **2026-10-02 (Task 4.7d — политика переполнения `overflow` и маркер `not_inspected`, ADR-174):**
   `overflow: latest|every` (только `extras`, по умолчанию `latest`) прошёл через `generic_process_config`, `blueprint.as_generic_config`
   и `GenericProcess._init_data_pipeline` в `DataReceiver`, `PipelineExecutor`, `FrameShmMiddleware`. Под `every` потерянный кадр
