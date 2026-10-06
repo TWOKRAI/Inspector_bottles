@@ -75,11 +75,30 @@ def test_invalid_modules_yaml_exits_2(repo: GitRepo, atlas: Any) -> None:
     assert res.err == "modules.yaml: ключ 'version' должен быть равен 1\n"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'version: 1\nmodules:\n  - id: a\n    paths: ["a/"\n    layer: SECRET_VALUE_42\n',
+        b"version: 1\nmodules:\n  - id: a\xff\n",
+    ],
+    ids=["yaml-syntax", "non-utf8"],
+)
+def test_unparseable_modules_yaml_exits_2(repo: GitRepo, atlas: Any, payload: bytes) -> None:
+    (repo.path / "modules.yaml").write_bytes(payload)
+    repo.commit("broken modules")
+    res = atlas(repo, "build")
+    assert res.code == 2
+    assert res.err == "modules.yaml: файл не разобран как YAML в UTF-8\n"
+    assert "SECRET_VALUE_42" not in res.err
+
+
 def test_parse_modules_matches_load_modules() -> None:
-    from scripts.atlas.modules import load_modules, parse_modules
+    import yaml
+
+    from scripts.atlas.modules import parse_modules
 
     text = (_ROOT / "modules.yaml").read_text(encoding="utf-8")
-    assert parse_modules(text) == load_modules(_ROOT / "modules.yaml")
+    assert parse_modules(text) == yaml.safe_load(text)["modules"]
     with pytest.raises(ValueError):
         parse_modules("version: 2\nmodules: []\n")
 

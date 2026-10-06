@@ -24,8 +24,8 @@ _ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = _ROOT / "scripts" / "plans_progress" / "plans_progress.py"
 
 _ALPHA = (
-    "# Alpha\n\n## Порядок выполнения\n\n"
-    "- Task 1.1: first [DONE 2026-10-02 — `abc1234`; ok]\n"
+    "# Alpha\n\n**Статус:** IN PROGRESS\n\n## Порядок выполнения\n\n"
+    "- Task 1.1: первая задача [DONE 2026-10-02 — `abc1234`; ok]\n"
     "- Task 1.2: second [PENDING] (после 1.1)\n"
 )
 _BETA = "# Beta\n\n## Порядок выполнения\n\n- Task 1.1: only [PENDING]\n"
@@ -67,6 +67,7 @@ def test_plan_and_task_nodes_and_in_plan_edges(repo: GitRepo, atlas: Any) -> Non
     assert plans["alpha"]["path"] == "plans/2026-10-01_alpha/plan.md"
     assert plans["beta"]["path"] == "plans/beta.md"
     assert sorted(tasks) == ["alpha#1.1", "alpha#1.2", "beta#1.1"]
+    assert plans["alpha"]["status"] == "in_progress"
     assert tasks["alpha#1.1"]["status"] == "done"
     assert tasks["alpha#1.2"]["status"] == "pending"
     assert tasks["beta#1.1"]["status"] == "pending"
@@ -105,10 +106,16 @@ def test_nodes_follow_the_build_ref_not_the_working_tree(repo: GitRepo, atlas: A
 
 def test_plans_value_equals_live_plans_progress(repo: GitRepo, repo_factory: Any, atlas: Any) -> None:
     _seed(repo)
+    # не закоммичено: рабочее дерево отличается от HEAD
+    repo.write("plans/beta.md", _BETA + "- Task 1.2: добавленная позже [PENDING]\n")
     res = atlas(repo, "--json")
     assert res.code == 0, res.err
-    plans = json.loads(res.out)["plans"]
+    doc = json.loads(res.out)
+    plans = doc["plans"]
     assert plans is not None
+    beta = next(p for p in plans if p["plan"] == "beta")
+    assert [t["id"] for t in beta["tasks"]] == ["1.1", "1.2"]
+    assert "task:beta#1.2" not in {f"{n['kind']}:{n['id']}" for n in doc["nodes"]}
     live = _live(repo.path)
     assert live.returncode == 0, live.stderr
     expected = live.stdout.decode("utf-8").rstrip("\n")
