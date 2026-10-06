@@ -24,4 +24,9 @@
 - [config.reload inline rejects unknown observability keys](feedback_config_reload_inline_rejects_unknown_observability_keys.md) — session door only: clean success=False + "did you mean", not silent extra=ignore drop
 - [import-guard needs AST, not substring](feedback_import_guard_substring_vs_ast.md) — a docstring naming the other module fails a text-grep guard with zero real import
 - [angle boundary rounds outward at raw precision](feedback_angle_boundary_rounds_outward_at_raw_precision.md) — recompute atan2 from ROUNDED raw ints, not the float formula, before pinning accept/reject
+- [null stub proves red on literals for a missing CLI](feedback_null_stub_proves_red_on_literals_for_missing_cli.md) — throwaway stub turns file-not-found reds into literal reds and exposes null-passing negatives; delete + disclose
 - [control-script tmp inside repo defeats confinement](feedback_control_script_tmp_inside_repo_defeats_confinement.md) — use OS temp (C:), REPO_ROOT is an allowed root so outside-control returns ok
+- [tmp dir is inside a git repo on main](feedback_tmp_dir_is_inside_a_git_repo_on_main.md) — "non-git" tmp_path is not; GIT_CEILING_DIRECTORIES; pytest-timeout not installed
+- [new CLI flag RED = argparse exit 2](feedback_new_cli_flag_red_is_all_argparse_exit2.md) — prove fixtures with a throwaway reference impl; anchor exit-2 tests with a valid-value run
+- [negative UI case needs same-fixture control row](feedback_negative_ui_case_needs_same_fixture_control_row.md) — second pair in same fixture, assert full row set; verify red set with a scratch stub + mutations
+- [sys.platform patch before import breaks watchdog](feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows.md) — import framework first, patch platform right before the call; print platform in RESULT

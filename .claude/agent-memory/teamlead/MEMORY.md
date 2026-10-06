@@ -1,5 +1,6 @@
 # Memory Index
 
+- [зеркало сида против форматтера хоста](feedback_seed_mirror_vs_host_formatter.md) — scripts/-копия сида переформатируется pre-commit (120 vs 88); `# fmt: off` перед `from __future__` в обеих копиях
 - [LIVE-2 release-on-evict](project_live2_release_on_evict.md) — фикс корректен, но на боевой раскладке kind-каналов НЕ исполняется (две двери в очередь); «блокер снят» опровергнуто; план transport-single-policy
 
 - [флаг идемпотентности на результате успеха](feedback_idempotence_flag_on_the_success_result.md) — падающий подъём повторяется на каждой записи (5→5, 3 осиротевших менеджера); `stop()` без своего флага воскрешает журнал, и на этом воскрешении держится СОСЕДНЕЕ свойство «закрывается последним»
