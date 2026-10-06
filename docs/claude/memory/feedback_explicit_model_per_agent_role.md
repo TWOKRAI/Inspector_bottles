@@ -1,7 +1,7 @@
 ---
 name: explicit-model-per-agent-role
 description: "Правило владельца (owner rule): всегда явно передавать model при запуске агентов — reviewer и teamlead на opus, developer и tester на sonnet, cto на fable; Sonnet 5 — дефолт исполнителя, брифы с явным охватом"
-mechanism: [owner-decision]
+mechanism: [owner-decision, agents]
 merged_from: [feedback_model_split_impl_vs_review]
 metadata:
   type: feedback

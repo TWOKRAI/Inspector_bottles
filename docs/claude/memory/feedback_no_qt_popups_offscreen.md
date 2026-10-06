@@ -1,7 +1,7 @@
 ---
 name: no-qt-popups-offscreen
 description: "Все агентские/фоновые прогоны тестов и харнесса — с QT_QPA_PLATFORM=offscreen: всплывающие Qt-окна (LoginDialog и т.п.) вешают агентов и мешают владельцу (popup windows, headless, owner rule)"
-mechanism: [owner-decision]
+mechanism: [owner-decision, qt]
 metadata:
   node_type: memory
   type: feedback

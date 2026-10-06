@@ -1,7 +1,7 @@
 ---
 name: feedback-flags-must-not-become-crutches
 description: "FW_*-флаги (flags) — временные леса; план не закрыт, пока флаг не УДАЛЁН, а не только флипнут в default-ON (owner decision)"
-mechanism: [owner-decision]
+mechanism: [owner-decision, dead-code]
 metadata:
   node_type: memory
   type: feedback

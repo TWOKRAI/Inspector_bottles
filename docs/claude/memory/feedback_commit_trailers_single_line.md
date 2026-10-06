@@ -6,7 +6,7 @@ mechanism: [hooks]
 role: teamlead
 metadata:
   type: feedback
-merged_from: [feedback_commit_trailers_single_line]
+merged_from: [_archive/feedback_commit_trailers_single_line (was tech-writer/)]
 ---
 
 Trailers `Why:`/`Layer:`/`Refs:`/`Risk:`/... must each be on a SINGLE line. A

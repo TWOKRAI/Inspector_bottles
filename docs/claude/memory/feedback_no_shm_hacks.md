@@ -2,7 +2,7 @@
 name: No SHM hacks in plugins
 description: "Plugins must NOT read SHM directly — use framework middleware and managers only (плагины не читают разделяемую память напрямую, только через фреймворк)"
 module: [plugins_shared]
-mechanism: [owner-decision]
+mechanism: [owner-decision, architecture]
 type: feedback
 originSessionId: 7bde3598-7b2e-4498-8c8b-09d76cc85d95
 ---

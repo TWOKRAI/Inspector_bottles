@@ -1,7 +1,7 @@
 ---
 name: unused-paths-are-contracts
 description: "Конструктор универсален: «путь сейчас не используется» ≠ «не нужен» — публичные API / contracts без живых вызывающих квалифицировать в ревью как контракты (чинить или отклонять громко); правило владельца"
-mechanism: [owner-decision]
+mechanism: [owner-decision, dead-code]
 metadata:
   node_type: memory
   type: feedback

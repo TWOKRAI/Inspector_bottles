@@ -1,7 +1,7 @@
 ---
 name: Framework-first decision rule
 description: "Правило владельца (owner rule): framework — мощный и универсальный, prototype — одноразовый тонкий потребитель; конструктор модулей и изоляция сбоев (fault isolation), меньше слоёв (fewer layers), fix-forward, FREEZE вместо KILL"
-mechanism: [owner-decision]
+mechanism: [owner-decision, architecture]
 merged_from: [feedback_constructor_modularity, feedback_fewer_layers, feedback_fix_framework_forward, feedback_freeze_over_kill]
 metadata:
   type: feedback

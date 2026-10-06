@@ -2,7 +2,7 @@
 name: gui-constructor-layers-2026-09-26
 description: "Решение владельца 2026-09-26 по GUI-конструктору — framework = конструктор (shell, виджеты, layout), Services = прикладные слайсы, prototype = тонкий слой через рецепт; GUI constructor layers, widget contract, Pult"
 module: [frontend_module, services/control_panel]
-mechanism: [owner-decision]
+mechanism: [owner-decision, architecture]
 metadata:
   node_type: memory
   type: project

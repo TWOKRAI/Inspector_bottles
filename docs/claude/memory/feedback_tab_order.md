@@ -2,7 +2,7 @@
 name: GUI tab ordering preference
 description: "Порядок вкладок GUI / tab order: Settings first, then Recipes, then functional tabs — admin/config → presets → operational (предпочтение владельца)"
 module: [prototype/frontend/widgets/tabs]
-mechanism: [owner-decision]
+mechanism: [owner-decision, qt]
 type: feedback
 originSessionId: 055294d4-05c9-45fb-bfe0-e822fa1bedc1
 ---

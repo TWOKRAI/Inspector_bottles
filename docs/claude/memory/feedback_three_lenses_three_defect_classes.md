@@ -1,7 +1,7 @@
 ---
 name: feedback-three-lenses-three-defect-classes
 description: "Тесты ловят механику, живой прогон — проводку, ревью — связки (seams); ни один не заменяет другой — три объектива / three lenses стандарт КАЖДОЙ задачи (решение владельца 2026-07-28)"
-mechanism: [owner-decision]
+mechanism: [owner-decision, review-verdicts]
 merged_from: [feedback_review_finds_the_seam_between_own_pieces]
 metadata:
   type: feedback

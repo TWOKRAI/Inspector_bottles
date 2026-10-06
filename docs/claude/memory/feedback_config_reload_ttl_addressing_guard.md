@@ -5,7 +5,7 @@ module: [process_module]
 mechanism: [test-assertions, config]
 metadata:
   type: feedback
-merged_from: [feedback_config_reload_ttl_addressing_guard]
+merged_from: [_archive/feedback_config_reload_ttl_addressing_guard (was tester/)]
 ---
 
 `config.reload` has a pre-existing, unrelated guard: if the inline payload carries

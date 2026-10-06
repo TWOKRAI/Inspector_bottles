@@ -4,7 +4,7 @@ description: "Правка, которую соседняя правка тог�
 mechanism: [break-injection, test-assertions]
 metadata:
   type: feedback
-merged_from: [feedback_unkillable_fix_needs_a_hand_set_state]
+merged_from: [_archive/feedback_unkillable_fix_needs_a_hand_set_state (was teamlead/)]
 ---
 
 Когда пакет закрывает ОДИН класс дефекта несколькими точками, часть правок

@@ -2,7 +2,7 @@
 name: MVP pattern preference
 description: "User prefers full MVP (presenter + view protocol) for GUI tabs — consistency over simplicity (предпочтение владельца: полный MVP / presenter / вкладки GUI)"
 module: [prototype/frontend/widgets/tabs]
-mechanism: [owner-decision]
+mechanism: [owner-decision, qt]
 type: feedback
 originSessionId: 8df591d7-a341-42e1-8969-5444903c41a4
 ---
