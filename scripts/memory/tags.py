@@ -2,6 +2,8 @@
 
 Контракт — plans/2026-10-04_atlas/tasks/2.4g.md, раздел «2.4g.1». Строка на ошибку:
 `<путь от DIR>: <код>: <repr(значения)[:80]>`; выход 1 при любой ошибке, иначе 0.
+
+Stability: lite
 """
 
 from __future__ import annotations

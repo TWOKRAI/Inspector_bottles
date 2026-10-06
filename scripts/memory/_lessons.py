@@ -22,25 +22,51 @@ SCALAR_KEYS = ("name", "description")
 KEYS = ("name", "description", *LIST_KEYS)
 
 _KEY_LINE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[A-Za-z_][\w-]*):(?P<value>.*)$")
+_BARE_DQUOTE = re.compile(r'(?<!\\)"')  # `"` без экранирующего `\` перед ним
+_ESCAPED = re.compile(r'\\(["\\])')  # `\"` и `\\` внутри "..."
+
+
+def _is_quoted(value: str) -> bool:
+    """Всё значение — один скаляр в кавычках (внутри нет такой же кавычки без экранирования)."""
+    if len(value) < 2 or value[0] != value[-1] or value[0] not in "\"'":
+        return False
+    inner = value[1:-1]
+    if value[0] == '"':
+        return _BARE_DQUOTE.search(inner) is None
+    return "'" not in inner.replace("''", "")
 
 
 def _unquote(value: str) -> str:
     value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1].strip()
-    return value
+    return value[1:-1].strip() if _is_quoted(value) else value
+
+
+def _unquote_scalar(value: str) -> str:
+    r"""Скаляр `name`/`description`: в `"..."` снимаются `\"` и `\\`, в `'...'` — `''`."""
+    value = value.strip()
+    if not _is_quoted(value):
+        return value
+    inner = value[1:-1]
+    if value[0] == '"':
+        return _ESCAPED.sub(r"\1", inner).strip()
+    return inner.replace("''", "'").strip()
 
 
 def _split_list(raw: str) -> list[str]:
-    """`a`, `"a"`, `a, b`, `[a, b]`, `["a", "b"]` -> список значений; пустое значение -> []."""
+    """`a`, `"a"`, `"a, b"`, `a, b`, `[a, b]`, `["a", "b"]` -> список значений; пустое значение -> [].
+
+    Значение целиком в кавычках (не `[...]`) сначала снимает кавычки, потом режется по запятым.
+    """
     raw = raw.strip()
     if raw.startswith("[") and raw.endswith("]"):
         raw = raw[1:-1]
+    else:
+        raw = _unquote(raw)
     return [v for v in (_unquote(part) for part in raw.split(",")) if v]
 
 
 def _add(out: dict[str, list[str]], key: str, raw: str) -> None:
-    values = [v for v in [_unquote(raw)] if v] if key in SCALAR_KEYS else _split_list(raw)
+    values = [v for v in [_unquote_scalar(raw)] if v] if key in SCALAR_KEYS else _split_list(raw)
     for v in values:
         if v not in out[key]:  # один ключ в двух местах — объединение, без дублей
             out[key].append(v)

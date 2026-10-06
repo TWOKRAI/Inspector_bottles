@@ -3,6 +3,8 @@
 
 Контракт — plans/2026-10-04_atlas/tasks/2.4g.md, раздел «2.4g.1» и Р1/Р4. Строка вывода:
 `<абсолютный путь> — <description>`; нет совпадений — ровно `none`.
+
+Stability: lite
 """
 
 from __future__ import annotations
@@ -14,6 +16,13 @@ from pathlib import Path
 import _lessons
 
 DEFAULT_LIMIT = 8
+
+
+def _positive_int(raw: str) -> int:
+    n = int(raw)  # ValueError -> argparse: "invalid _positive_int value", exit 2
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"--limit must be >= 1, got {n}")
+    return n
 
 
 def _module_matches(values: list[str], wanted: str) -> bool:
@@ -62,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--module")
     parser.add_argument("--mechanism")
     parser.add_argument("--role")
-    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument("--limit", type=_positive_int, default=DEFAULT_LIMIT)
     parser.add_argument("--list", action="store_true", help="print all lessons, ignore --limit")
     parser.add_argument("--root", type=Path, default=None, help="repo root (default: main checkout)")
     args = parser.parse_args(argv)
