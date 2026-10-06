@@ -296,7 +296,10 @@ def check_memory_tags() -> None:
         msg = "  [FAIL] память: ошибки тегов или проверка не запустилась"
         print(msg)
         # stdout — строки ошибок (по одной на файл), stderr — отказ (exit 2: нет словаря); хвост обоих
-        for line in (result.stdout + result.stderr).splitlines()[-20:]:
+        lines = (result.stdout + result.stderr).splitlines()
+        if len(lines) > 20:
+            print(f"    … всего строк {len(lines)}, последние 20; полный список: python scripts/memory/tags.py --check")
+        for line in lines[-20:]:
             print(f"    {line}")
         errors.append(msg)
 

@@ -559,7 +559,8 @@ def test_a1_12_validate_main_fails_on_memory_tag_error(tmp_path, monkeypatch, ca
         assert hasattr(validate, name), f"validate.py потерял {name}: обнови список пустышек"
         monkeypatch.setattr(validate, name, lambda *a, **k: None)
     assert validate.main() == 1
-    capsys.readouterr()
+    # код 1 бывает и когда tags.py не запустился (нет файла) — нужна строка самой ошибки тега (ревью 2.4g.3)
+    assert "no-such-mech" in capsys.readouterr().out
 
 
 # =========================================================================== search.py
