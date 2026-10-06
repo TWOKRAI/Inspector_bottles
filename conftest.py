@@ -76,6 +76,44 @@ def _refuse(name: str):
     return _raise
 
 
+# ---------------------------------------------------------------------------
+# Политика памяти GUI (T1): сборкой gc владеет главный поток, граница каждого теста
+# ---------------------------------------------------------------------------
+# Те же имена и тела — в корневом conftest.py и в multiprocess_framework/modules/conftest.py
+# (в modules/ эти перекрывают корневые; из modules/ корень не грузится). Спека —
+# plans/2026-10-03_lifecycle-owner-scope/task-T1.md, «Точки включения» 2–3.
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _gui_memory_policy(pytestconfig: pytest.Config):
+    """Сессия: автосборка выключена, сборка — тиком QTimer и на границах тестов."""
+    from multiprocess_framework.modules.frontend_module.core.qt_gc_policy import (
+        gui_memory_policy,
+        install_gui_memory_policy,
+    )
+
+    pre = gui_memory_policy()
+    policy = pre or install_gui_memory_policy(None, freeze=True, freeze_after_s=0.0, observe=True)
+    yield policy
+    pytestconfig.gc_policy_stats = policy.stats()
+    if pre is None:
+        policy.uninstall()
+
+
+@pytest.fixture(autouse=True)
+def _gui_memory_boundary(_gui_memory_policy):
+    """Граница теста: автосборку не оставили включённой; мусор теста собран на главном потоке.
+
+    Определена ПЕРВОЙ из function-autouse: её teardown идёт последним.
+    """
+    yield
+    policy = _gui_memory_policy
+    violated = policy.enforce()
+    policy.collect_now()
+    if violated:
+        pytest.fail("Тест оставил автосборку gc включённой: восстановите прежнее состояние через paused_gc()")
+
+
 @pytest.fixture(autouse=True)
 def no_blocking_modals(monkeypatch):
     """Модалка в тесте — падение с именем вызова, а не ожидание клика."""

@@ -62,6 +62,14 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # Политика памяти GUI (T1): сборкой gc владеет главный поток — автосборка выключена,
+    # сборка по тику QTimer. Сразу после QApplication: финализаторы Qt-обёрток не должны
+    # исполняться на рабочих потоках. INSPECTOR_GUI_GC_POLICY=0 — выключить (A/B на стенде).
+    if os.environ.get("INSPECTOR_GUI_GC_POLICY") != "0":
+        from multiprocess_framework.modules.frontend_module.core.qt_gc_policy import install_gui_memory_policy
+
+        install_gui_memory_policy(app, observe=os.environ.get("INSPECTOR_GC_OBSERVE") == "1", log=process._log_info)
+
     # Режим без присмотра (env INSPECTOR_GUI_UNATTENDED=1): живой стенд с настоящими
     # окнами, где кликать некому. Ставится ПЕРВЫМ делом и до всех стартовых диалогов —
     # StartupBlockingDialog при отсутствии хранилища пользователей и LoginDialog при
