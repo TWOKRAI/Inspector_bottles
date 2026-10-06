@@ -202,7 +202,8 @@ class GcCollectionOwner:
     этом потоке). Страж CPython для gen2 (``long_lived_pending``) из Python недоступен — вместо
     него ограничение по времени: gen2 не чаще ``full_interval_s`` с последней полной сборки
     владельца любого происхождения (gen2 тиком, ``collect(full=True)``, сборка перед заморозкой),
-    иначе собирается gen1. ``full_interval_s == 0`` — без ограничения.
+    иначе — как ``continue`` CPython: gen1, если его счётчик выше порога, иначе gen0.
+    ``full_interval_s == 0`` — без ограничения.
     Post ``release()``: исполнитель остановлен, хук снят, своя заморозка снята,
     ``gc.isenabled()`` ровно как до ``collect_on``.
     """
@@ -251,6 +252,16 @@ class GcCollectionOwner:
 
     # ── публичное ──
 
+    @property
+    def released(self) -> bool:
+        """Владелец снят (``release`` или выход ``suspend`` снял его) — в слот не вернётся."""
+        return self._released
+
+    @property
+    def suspended(self) -> bool:
+        """Владелец приостановлен ``suspend_collection_owner`` — на выходе блока вернётся в слот."""
+        return self._suspended
+
     def tick(self) -> int:
         """Тик исполнителя: ``enforce()``, затем сборка поколения по порогам. Вернёт собранное."""
         self._check_thread()
@@ -269,7 +280,9 @@ class GcCollectionOwner:
                 gen = older
                 break
         if gen == 2 and not self._full_allowed():
-            gen = 1  # страж long_lived недоступен — полная сборка не чаще full_interval_s
+            # страж long_lived недоступен — полная сборка не чаще full_interval_s; дальше как
+            # continue CPython: gen1, только если он сам перешёл порог, иначе gen0
+            gen = 1 if counts[1] > thresholds[1] else 0
         return self._collect(gen)
 
     def collect(self, *, full: bool = False, refreeze: bool = False) -> int:

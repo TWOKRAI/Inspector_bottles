@@ -408,3 +408,58 @@ def test_attach_refusal_logged():
         "APP-GONE True",
         "ATTACH-DONE",
     ], out
+
+
+def test_install_inside_suspend_keeps_registry():
+    out = _run_script(
+        """
+        from PySide6.QtWidgets import QApplication
+
+        from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (
+            collect_on,
+            suspend_collection_owner,
+        )
+
+
+        class Ex:
+            def start(self, tick, *, interval_s):
+                pass
+
+            def stop(self):
+                pass
+
+
+        app = QApplication([])
+        p1 = install_gui_memory_policy(app)
+        for variant in ("leave", "clean"):
+            with suspend_collection_owner():
+                try:
+                    install_gui_memory_policy(app)
+                except RuntimeError as exc:
+                    print(variant, "IN-BLOCK", exc)
+                else:
+                    print(variant, "IN-BLOCK NO-RAISE")
+                print(variant, "REG-IN-BLOCK", gui_memory_policy() is p1)
+                if variant == "clean":
+                    collect_on(Ex()).release()  # блок сам пользуется пустым слотом и убирает за собой
+            again = install_gui_memory_policy(app)
+            print(variant, "AFTER", gui_memory_policy() is p1, p1.stats()["active"], again is p1)
+        p1.uninstall()
+        print("UNINSTALLED", collection_owner() is None, gui_memory_policy() is None)
+        done("SUSPEND-DONE")
+        """
+    )
+    raised = (
+        "IN-BLOCK install_gui_memory_policy: политика приостановлена suspend_collection_owner"
+        " — внутри блока не ставится"
+    )
+    assert out.splitlines() == [
+        "leave " + raised,
+        "leave REG-IN-BLOCK True",
+        "leave AFTER True True True",
+        "clean " + raised,
+        "clean REG-IN-BLOCK True",
+        "clean AFTER True True True",
+        "UNINSTALLED True True",
+        "SUSPEND-DONE",
+    ], out

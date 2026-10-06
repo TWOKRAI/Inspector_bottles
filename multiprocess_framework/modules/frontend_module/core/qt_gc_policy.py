@@ -54,6 +54,9 @@ __all__ = ["GuiMemoryPolicy", "gui_memory_policy", "install_gui_memory_policy"]
 
 _THREAD_ERROR = "install_gui_memory_policy: только поток QCoreApplication"
 _DEAD_ERROR = "GuiMemoryPolicy: владелец сборки снят — политика не действует"
+_SUSPENDED_ERROR = (
+    "install_gui_memory_policy: политика приостановлена suspend_collection_owner — внутри блока не ставится"
+)
 
 _policy: Optional["GuiMemoryPolicy"] = None
 
@@ -235,8 +238,9 @@ def install_gui_memory_policy(
     может не быть (тесты) — тогда таймер подключится позже.
     Post: автосборка выключена, слот процесса занят исполнителем на ``QTimer``.
     Повтор: живая политика — тот же объект, ``rearm_freeze()``, таймер подключён, если
-    приложение есть. Мёртвая (её владельца сняли мимо ``uninstall``) — строка лога в её
-    приёмник, она забыта, ставится новая (новый объект).
+    приложение есть. Мёртвая (её владелец снят — ``released``, мимо ``uninstall``) — строка
+    лога в её приёмник, она забыта, ставится новая (новый объект). Приостановленная
+    (``suspend_collection_owner``, владелец вернётся) — ``RuntimeError``, реестр не тронут.
     """
     global _policy
     if app is None:
@@ -248,7 +252,8 @@ def install_gui_memory_policy(
         if existing._alive():
             existing._reinstall()
             return existing
-        # владельца не трогаем: он уже снят (или приостановлен suspend — вернётся сам)
+        if not existing._owner.released:
+            raise RuntimeError(_SUSPENDED_ERROR)  # приостановлена: на выходе блока вернётся сама
         existing._log("gc-policy: прежняя политика мертва (владелец сборки снят) — ставится новая")
         existing._installed = False
         _policy = None

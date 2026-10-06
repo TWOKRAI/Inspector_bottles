@@ -22,7 +22,8 @@
 - **D1, тик.** Вход — только `count[0] > threshold[0]`; поколение — старшее с `count > threshold` (строго, было `>=`).
   Страж long_lived из Python недоступен — вместо него ограничение по времени: gen2 тиком не чаще `full_interval_s`
   (новый параметр `collect_on`/`install_gui_memory_policy`, 60.0, конечный, `>= 0`, 0 — без ограничения) с последней
-  полной сборки владельца любого происхождения, иначе gen1; отсчёт — от установки. `collect(full=True)` — без ограничения.
+  полной сборки владельца любого происхождения, иначе как `continue` CPython: gen1, если его счётчик выше порога,
+  иначе gen0 (ревью р2); отсчёт — от установки. `collect(full=True)` — без ограничения.
   Текст `ValueError` границ — новый (ниже).
 - **D2, наблюдаемость.** `GcOwnerStats` — 17 полей (+ `full_collections`, `max_pause_ms_gen0`, `max_pause_ms_gen1`,
   `max_pause_ms_full`); A1 стр. 10: литерал 13 → 17. Строка раз в 60 с + `full=… max_gen0=… max_gen1=… max_full=…`.
@@ -30,6 +31,8 @@
   `collect_now(refreeze=True)`. Прод — никогда.
 - **Ревью №1, мёртвая политика.** Граница первой проверкой — `pytest.fail("Политику памяти сняли посреди сессии: …")`;
   `collect_now`/`enforce` мёртвой политики — строка лога + `RuntimeError`; `install` вместо мёртвой ставит новую.
+  Ревью р2: мертва = владелец снят (`released`); приостановлен (`suspended`) — `install` бросает, реестр не тронут.
+  Тесты р2: A1 `test_gen2_limited_falls_back_like_cpython`, A2 `test_install_inside_suspend_keeps_registry`.
 - **Ревью №5.** Отказ `attach` с чужого потока — одна строка лога с именем потока.
 - **Ревью №3, авторские тесты** (не слепые): A1 — `test_bounds_rejected`, `test_freeze_none_reads_flag`,
   `test_gen2_not_more_often_than_full_interval`, `test_tick_enters_only_above_gen0_threshold_strict`,
@@ -112,7 +115,8 @@ Docstring модуля и новых публичных имён — `Stability:
 - **`tick()`** (ред. 4, D1): `enforce()`; вход только при `count[0] > threshold[0]` (иначе 0, `collections` не растёт);
   `gc.collect(gen)` старшего поколения с `count > threshold` (строго). По порогам как CPython; страж long_lived из Python
   недоступен — вместо него ограничение по времени: gen2 не чаще `full_interval_s` с последней полной сборки владельца
-  (gen2 тиком, `collect(full=True)`, сборка перед заморозкой; отсчёт — от установки), иначе gen1.
+  (gen2 тиком, `collect(full=True)`, сборка перед заморозкой; отсчёт — от установки), иначе как `continue` CPython:
+  gen1, если `count[1] > threshold[1]`, иначе gen0.
   `collect(full=True)` — `gc.collect()`, по времени не ограничен.
 - **`collect(full=True, refreeze=True)`** (ред. 4, D3): после полной сборки `gc.freeze()`, владелец «морозил» — снимают
   `release`/`rearm_freeze`/выход `suspend`. `refreeze` без `full` — `ValueError`. Только граница теста; прод — никогда
@@ -152,8 +156,10 @@ class GuiMemoryPolicy:  # collect_now(*, refreeze=False) -> int; enforce() -> bo
 - `app is None` → `QCoreApplication.instance()` (в тестах может не быть). Поток ≠ `app.thread()` →
   `RuntimeError("install_gui_memory_policy: только поток QCoreApplication")` — первой проверкой, и при повторе.
 - Повтор — тот же объект + `owner.rearm_freeze()` + подключить таймер, если приложение есть, а таймера нет.
-  Прежняя политика мертва (её владельца нет в слоте: сняли мимо `uninstall`) — строка лога, она забыта, ставится новая
-  (новый объект; ред. 4).
+  Прежняя политика мертва — владелец снят (`GcCollectionOwner.released`, мимо `uninstall`): строка лога, она забыта,
+  ставится новая (новый объект; ред. 4). Владелец приостановлен `suspend_collection_owner` (`suspended`, вернётся) —
+  `RuntimeError("install_gui_memory_policy: политика приостановлена suspend_collection_owner — внутри блока не ставится")`,
+  реестр не тронут (ревью р2).
 - Мёртвая политика: `collect_now()`/`enforce()` — строка лога и
   `RuntimeError("GuiMemoryPolicy: владелец сборки снят — политика не действует")` (ред. 4, ревью №1).
 - Один приёмник строк на политику: `log` или `get_std_logger(__name__).info`; его получают ядро и исполнитель.

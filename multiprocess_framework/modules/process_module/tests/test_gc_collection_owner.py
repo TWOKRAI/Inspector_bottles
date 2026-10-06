@@ -485,3 +485,27 @@ def test_collect_full_refreeze(ex):
     assert owner.stats().full_collections == 1
     owner.release()
     assert gc.get_freeze_count() == 0  # release снимает и заморозку границы
+
+
+def test_gen2_limited_falls_back_like_cpython(ex):
+    door = _door()
+    old = gc.get_threshold()
+    try:
+        owner = door.collect_on(ex, full_interval_s=3600)
+        owner.collect(full=True)
+        gc.collect(1)
+        gc.collect(1)  # счётчик gen2 = 2: gen2 «готов», но ограничен по времени
+        gc.set_threshold(1, 10**9, 1)  # gen1 порога не перешёл → как continue CPython: gen0
+        gen1_before, gen2_before = _gen_collections()
+        _ticks_with_garbage(owner, 1)
+        gen1_after, gen2_after = _gen_collections()
+        assert (gen1_after, gen2_after) == (gen1_before, gen2_before)
+        assert owner.stats().collections == 2  # collect(full=True) + тик gen0
+
+        gc.set_threshold(1, 0, 1)  # gen1 перешёл порог (1 > 0) → gen1
+        _ticks_with_garbage(owner, 1)
+        gen1_last, gen2_last = _gen_collections()
+        assert gen1_last == gen1_after + 1
+        assert gen2_last == gen2_after
+    finally:
+        gc.set_threshold(*old)
