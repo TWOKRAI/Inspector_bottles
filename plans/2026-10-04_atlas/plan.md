@@ -142,7 +142,7 @@ commit-mechanism 2.1/2.2 (валидатор v2, документы), plans-prog
 
 **Цель фазы:** узнать цену облачной сессии и что работает на Linux до трат на ядро.
 
-- Task P1.1: облачная сессия — прогон `plans_progress --json/--check`, `validate.py`, `mutation_gate.py` на `router_module`, `graphify --code-only`, поведение Claude-хуков; приёмка: 5 строк «работает/нет» с выводом, цена сессии в $ и `subagent_tokens`, время `mutmut` и число выживших мутантов [PENDING] (после 0.2 и 0.8)
+- Task P1.1: облачная сессия — прогон `plans_progress --json/--check`, `validate.py`, `mutation_gate.py` на `router_module`, `graphify --code-only`, поведение Claude-хуков; приёмка: 5 строк «работает/нет» с выводом, цена сессии в $ и `subagent_tokens`, время `mutmut` и число выживших мутантов [PENDING] (готово к запуску 2026-10-06: 0.2 и 0.8 DONE; бриф `tasks/P1.1.md`, окружение `scripts/cloud/setup.sh`, план облака `CLOUD.md`)
 
 ### Phase 1: Ядро и слой качества
 

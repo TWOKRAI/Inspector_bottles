@@ -1732,3 +1732,11 @@ line-sim (scene_source): поиск по Plugins/Services/framework/apps (`data 
 правки: счётчик поколений кэша (инкремент под коротким lock в `invalidate_decision_cache`, запись в кэш только при
 неизменном поколении), ~8 строк + hazard-тест с барьером. Окно `:987→:1012` правка не закрывает (только lock на гейте —
 цена на горячем пути). Задача — владельцу/плану observability.
+
+## Хук `protect-branch.sh` не ловит составную команду и push (2026-10-06, Атлас, подготовка облака)
+
+Regex `^\s*git\s+commit` срабатывает только на команде, которая начинается с `git commit`: `git add x && git commit …` на
+`main` проходит (прямой вызов хука с `git commit -m x` → rc 2; коммиты лида вида `git add … && git commit` в `main` шли
+без блока). `git push` хук не проверяет. Хук — сид claude-kit (`.claude/plugins/core/hooks/`), правка — upstream или
+локальный слой. Для облака защита — ruleset GitHub на `main` (`plans/2026-10-04_atlas/CLOUD.md`). Лиду в `main` блок не
+нужен (слияния — его работа): правка хука должна различать лида и исполнителя, иначе ломает слияния.
