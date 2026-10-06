@@ -2387,8 +2387,10 @@ border-radius:10px;padding:0 7px}
 #owner-queue li{padding:3px 0;overflow-wrap:anywhere}
 #owner-queue s,#owner-queue .q-note{color:var(--muted)}
 #owner-queue .st{min-width:0;margin-left:6px}
-@media(min-width:932px){#queue{flex:1 1 0}
-#owner-queue{order:0;flex:0 0 310px;align-self:flex-start;position:sticky;top:56px}}
+@media(min-width:932px){#queue:has(+#owner-queue){flex:1 1 calc(100% - 322px);align-self:flex-start}
+main:has(.anchor:target) #queue{flex-basis:100%}
+#owner-queue{order:0;flex:0 0 310px;align-self:flex-start;position:sticky;top:56px;
+max-height:calc(100vh - 68px);overflow:auto}}
 main:has(#tab-queue:checked)>:not(header,#queue,#owner-queue){display:none}
 main:has(#tab-waiting:checked)>:not(header,#waiting),
 main:has(#tab-unlisted:checked)>:not(header,#unlisted),main:has(#tab-archive:checked)>:not(header,#archive),
