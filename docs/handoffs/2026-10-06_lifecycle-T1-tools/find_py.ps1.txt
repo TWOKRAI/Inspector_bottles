@@ -1,0 +1,7 @@
+param([string]$Pattern = "stand_")
+$all = Get-CimInstance Win32_Process -Filter "name='python.exe'"
+"total python.exe: $($all.Count)"
+$all | Where-Object { $_.CommandLine -like "*$Pattern*" } | ForEach-Object {
+    $cl = ($_.CommandLine -replace '\s+', ' ')
+    "{0} parent={1} {2}" -f $_.ProcessId, $_.ParentProcessId, $cl.Substring(0, [Math]::Min(150, $cl.Length))
+}

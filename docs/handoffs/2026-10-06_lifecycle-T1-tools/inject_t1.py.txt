@@ -1,0 +1,254 @@
+"""Матрица инъекций ведущего для T1: одна правка → прогон → восстановление файла.
+
+Запуск из корня дерева lifecycle:  python <this> [ID ...]   (без ID — все).
+Ожидания записаны ДО прогона (EXPECT); печать — фактический набор красных и совпадение.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd()
+MF = ROOT / "multiprocess_framework" / "modules"
+GCD = MF / "process_module/lifecycle/gc_discipline.py"
+QGP = MF / "frontend_module/core/qt_gc_policy.py"
+CONF = MF / "conftest.py"
+
+A1 = "process_module/tests/test_gc_collection_owner.py"
+A2 = "frontend_module/tests/test_qt_gc_policy.py"
+HZ = "frontend_module/tests/test_gc_policy_boundary_hazard.py"
+TARGETS = [A1, A2, HZ]
+
+# id: (file, old, new, expected failing test names)
+INJ: dict[str, tuple[Path, str, str, set[str]]] = {
+    "1-release-enables": (
+        GCD,
+        "                if self._prior:\n                    gc.enable()\n                else:\n                    gc.disable()\n\n    def _rearm",
+        "                gc.enable()\n\n    def _rearm",
+        {"test_collect_on_disables_and_release_restores_prior"},
+    ),
+    "2-replace-owner": (
+        GCD,
+        "        if executor is not self._executor:\n            raise RuntimeError(_OTHER_OWNER_ERROR)",
+        "        if executor is not self._executor:\n            return self",
+        {"test_same_executor_idempotent_other_rejected"},
+    ),
+    "3-no-thread-check": (
+        GCD,
+        "        if threading.get_ident() != self.thread_ident:\n            raise RuntimeError(_THREAD_ERROR)",
+        "        return",
+        {"test_foreign_thread_calls_raise"},
+    ),
+    "4-enforce-no-disable": (
+        GCD,
+        "        self._enabled_violations += 1\n        gc.disable()",
+        "        self._enabled_violations += 1",
+        {"test_enforce_heals_and_counts_once", "test_boundary_catches_violation_healed_by_timer_tick"},
+    ),
+    "5-tick-full": (
+        GCD,
+        "        counts = gc.get_count()\n        thresholds = gc.get_threshold()",
+        "        return self._collect(None)\n        counts = gc.get_count()\n        thresholds = gc.get_threshold()",
+        {"test_tick_generation_aware"},
+    ),
+    "6-sched-no-slot": (
+        GCD,
+        "        if _slot is not None:\n            return False\n        if not self._scheduled:",
+        "        if not self._scheduled:",
+        {"test_scheduled_collect_yields_to_owner"},
+    ),
+    "7-hook-always": (
+        GCD,
+        "    owner._activate()\n    if observe:\n        owner._hook_on()",
+        "    owner._activate()\n    owner._hook_on()",
+        {"test_observe_off_zero_cost_on_counts_foreign"},
+    ),
+    "8-paused-exit-enable": (
+        GCD,
+        "    try:\n        yield\n    finally:\n        if prior:\n            gc.enable()\n        else:\n            gc.disable()",
+        "    try:\n        yield\n    finally:\n        gc.enable()",
+        {"test_paused_gc_restores_exact_state"},
+    ),
+    "9-release-no-unfreeze": (
+        GCD,
+        "            if self._froze:\n                gc.unfreeze()\n                self._froze = False\n            if restore_gc:",
+        "            if restore_gc:",
+        {"test_freeze_deadline_and_rearm"},
+    ),
+    "10-stats-object": (
+        GCD,
+        "            max_pause_ms_full=float(self._max_pause_ms_full),\n        )",
+        "            max_pause_ms_full=[self._max_pause_ms_full],\n        )",
+        {"test_stats_dict_primitives"},
+    ),
+    "11-suspend-no-leftover-check": (
+        GCD,
+        "        if leftover is not None:\n            raise RuntimeError(_LEFTOVER_ERROR)",
+        "        pass",
+        {"test_suspend_requires_empty_slot"},
+    ),
+    "12-freeze-startup-no-thread": (
+        GCD,
+        "        if owner is not None and owner.thread_ident != threading.get_ident():",
+        "        if False:",
+        {"test_freeze_after_startup_foreign_thread_refused"},
+    ),
+    "13-suspend-no-rearm": (
+        GCD,
+        "            if previous._froze:\n                previous._rearm()",
+        "            pass",
+        {"test_suspend_exit_rearms_freeze"},
+    ),
+    "Q1-check-after-return": (
+        QGP,
+        "    if app is not None and not _on_app_thread(app):\n        raise RuntimeError(_THREAD_ERROR)\n"
+        "    existing = _policy\n    if existing is not None:\n        if existing._alive():\n"
+        "            existing._reinstall()\n            return existing",
+        "    existing = _policy\n    if existing is not None:\n        if existing._alive():\n"
+        "            existing._reinstall()\n            return existing\n"
+        "    if app is not None and not _on_app_thread(app):\n        raise RuntimeError(_THREAD_ERROR)",
+        {"test_install_off_app_thread_raises"},
+    ),
+    "Q2-no-timer": (
+        QGP,
+        "        timer.start()\n        self._timer = timer",
+        "        self._timer = timer",
+        {"test_timer_collects_qwidget_cycle_on_main", "test_boundary_catches_violation_healed_by_timer_tick"},
+    ),
+    "Q3-no-flush": (
+        QGP,
+        "            flush_deferred_deletes()\n        return collected",
+        "            pass\n        return collected",
+        {"test_collect_now_flushes_outside_loop"},
+    ),
+    "Q4-flush-always": (
+        QGP,
+        "        if app is not None and _on_app_thread(app) and QThread.currentThread().loopLevel() == 0:\n            flush_deferred_deletes()",
+        "        if app is not None and _on_app_thread(app):\n            flush_deferred_deletes()",
+        {"test_collect_now_inside_loop_no_flush_no_error"},
+    ),
+    "B-boundary-instant": (
+        CONF,
+        '    policy.enforce()\n    policy.collect_now(refreeze=True)\n    violated = policy.stats()["enabled_violations"] > mark',
+        "    violated = policy.enforce()\n    policy.collect_now(refreeze=True)",
+        {"test_boundary_catches_violation_healed_by_timer_tick"},
+    ),
+    # ── раунд 2 (D1–D3, ревью р1 №1/№3/№5) — прогнозы записаны до прогона ──
+    "N1-gen2-no-time-limit": (
+        GCD,
+        "        if gen == 2 and not self._full_allowed():",
+        "        if False:",
+        {"test_gen2_not_more_often_than_full_interval"},
+    ),
+    "N2-older-ge": (
+        GCD,
+        "            if counts[older] > thresholds[older]:",
+        "            if counts[older] >= thresholds[older]:",
+        {"test_tick_enters_only_above_gen0_threshold_strict"},
+    ),
+    "N3-no-gen0-entry": (
+        GCD,
+        "        if not (thresholds[0] > 0 and counts[0] > thresholds[0]):",
+        "        if False:",
+        {"test_tick_enters_only_above_gen0_threshold_strict", "test_tick_generation_aware"},
+    ),
+    "N4-refreeze-ignored": (GCD, "        if refreeze:", "        if False:", {"test_collect_full_refreeze"}),
+    "N5-bounds-full-interval": (GCD, " and full_interval_s >= 0)", ")", {"test_bounds_rejected"}),
+    "N6-freeze-none-ignores-flag": (
+        GCD,
+        'GcDiscipline._flag("FW_GC_FREEZE") if freeze is None',
+        "False if freeze is None",
+        {"test_freeze_none_reads_flag"},
+    ),
+    "N7-dead-collect-no-raise": (
+        QGP,
+        "        if not self._alive():",
+        "        if False:",
+        {"test_collect_now_on_dead_policy_raises"},
+    ),
+    "N8-install-returns-corpse": (
+        QGP,
+        "        if existing._alive():",
+        "        if True:",
+        {"test_install_replaces_dead_policy"},
+    ),
+    "N9-attach-silent": (
+        QGP,
+        "            if not self._refusal_logged:",
+        "            if False:",
+        {"test_attach_refusal_logged"},
+    ),
+    "N10-uninstall-keeps-owner": (
+        QGP,
+        "        self._owner.release()",
+        "        pass",
+        {"test_uninstall_restores_and_reinstall_same"},
+    ),
+    "N11-boundary-no-active-check": (
+        CONF,
+        '    if not policy.stats()["active"]:',
+        "    if False:",
+        {"test_boundary_fails_when_policy_released"},
+    ),
+    "R2a-suspended-treated-dead": (
+        QGP,
+        "        if not existing._owner.released:",
+        "        if False:",
+        {"test_install_inside_suspend_keeps_registry"},
+    ),
+    "R2b-gen1-fallback-unconditional": (
+        GCD,
+        "gen = 1 if counts[1] > thresholds[1] else 0",
+        "gen = 1",
+        {"test_gen2_limited_falls_back_like_cpython"},
+    ),
+    "N12-boundary-no-refreeze": (CONF, "    policy.collect_now(refreeze=True)", "    policy.collect_now()", set()),
+}
+
+_NODE = re.compile(r"^(?:FAILED|ERROR) \S+::(?:\w+::)?(\w+)", re.M)
+
+
+def run(inj_id: str) -> bool:
+    path, old, new, expect = INJ[inj_id]
+    original = path.read_bytes()
+    text = original.decode("utf-8")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    old_n, new_n = old.replace("\n", nl), new.replace("\n", nl)
+    if text.count(old_n) != 1:
+        print(f"[{inj_id}] АНКЕР НЕ НАЙДЕН РОВНО 1 РАЗ (найдено {text.count(old_n)}) — пропуск")
+        return False
+    try:
+        path.write_bytes(text.replace(old_n, new_n).encode("utf-8"))
+        env = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONUTF8="1", QT_QPA_PLATFORM="offscreen")
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-rfE", "--tb=no", "-p", "no:cacheprovider", *TARGETS],
+            cwd=MF,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+        )
+    finally:
+        path.write_bytes(original)
+    out = proc.stdout + proc.stderr
+    got = set(_NODE.findall(out))
+    last = out.strip().splitlines()[-1] if out.strip() else "<нет вывода>"
+    ok = expect <= got and not (got - expect)
+    extra = sorted(got - expect)
+    print(
+        f"[{inj_id}] {'СОВПАЛО' if ok else 'РАСХОЖДЕНИЕ'} expect={sorted(expect)} got={sorted(got)} extra={extra} | {last}",
+        flush=True,
+    )
+    return ok
+
+
+if __name__ == "__main__":
+    ids = sys.argv[1:] or list(INJ)
+    results = {i: run(i) for i in ids}
+    print(f"ИТОГ: совпало {sum(results.values())}/{len(results)}")

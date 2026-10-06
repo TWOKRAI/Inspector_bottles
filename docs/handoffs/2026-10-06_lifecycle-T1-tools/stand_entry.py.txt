@@ -1,0 +1,18 @@
+"""Боевой вход GUI (multiprocess_prototype/frontend/run.py::launch) без venv-guard — для worktree.
+
+Повторяет шаги launch() после проверки venv: корень дерева в sys.path, прошитый overlay
+презентации, multiprocess_prototype.main.main(None, headless=None).
+"""
+
+import os
+import sys
+from pathlib import Path
+
+TREE = Path(r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lifecycle")
+sys.path.insert(0, str(TREE))
+os.environ["INSPECTOR_PRESENTATION"] = str(TREE / "multiprocess_prototype" / "frontend" / "presentation.yaml")
+
+if __name__ == "__main__":
+    from multiprocess_prototype.main import main as app_main
+
+    sys.exit(app_main(None, headless=None))

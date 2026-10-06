@@ -1,0 +1,134 @@
+"""Стенд T1: боевой вход GUI на N секунд, RSS GUI-процесса (Get-Process), строки gc-policy из логов.
+
+python stand_t1.py <label> <seconds> [ENV=VAL ...]
+Процессы — строго дерево от PID лаунчера; остановка — taskkill /PID <лаунчер> /T /F (только своё дерево).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+TREE = Path(r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lifecycle")
+PY = r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Scripts\python.exe"
+OUT = Path(r"C:\tmpstand")
+
+_PS_TREE = r"""
+$root = {root}
+$all = Get-CimInstance Win32_Process
+$ids = New-Object System.Collections.Generic.List[int]; $ids.Add($root)
+$i = 0
+while ($i -lt $ids.Count) {{ $p = $ids[$i]; $all | Where-Object {{ $_.ParentProcessId -eq $p }} | ForEach-Object {{ $ids.Add([int]$_.ProcessId) }}; $i++ }}
+$rows = foreach ($id in $ids) {{
+  $gp = Get-Process -Id $id -ErrorAction SilentlyContinue
+  if ($gp) {{
+    $qt = $false; try {{ $qt = [bool]($gp.Modules | Where-Object {{ $_.ModuleName -eq 'Qt6Core.dll' }}) }} catch {{}}
+    [pscustomobject]@{{ pid = $id; name = $gp.ProcessName; ws_mb = [math]::Round($gp.WorkingSet64/1MB,1); priv_mb = [math]::Round($gp.PrivateMemorySize64/1MB,1); qt = $qt }}
+  }}
+}}
+$rows | ConvertTo-Json -Compress
+"""
+
+
+def tree_rss(root: int) -> list[dict]:
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", _PS_TREE.format(root=root)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    ).stdout.strip()
+    if not out:
+        return []
+    data = json.loads(out)
+    return data if isinstance(data, list) else [data]
+
+
+def main() -> None:
+    label, seconds = sys.argv[1], int(sys.argv[2])
+    extra = dict(kv.split("=", 1) for kv in sys.argv[3:])
+    log_dir = OUT / label
+    log_dir.mkdir(parents=True, exist_ok=True)
+    env = dict(
+        os.environ,
+        PYTHONPATH=str(TREE),
+        PYTHONUTF8="1",
+        BACKEND_CTL="1",
+        INSPECTOR_GUI_UNATTENDED="1",
+        INSPECTOR_LOG_DIR=str(log_dir),
+        **extra,
+    )
+    env.pop("QT_QPA_PLATFORM", None)
+    stdout = open(log_dir / "stdout.txt", "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [PY, str(Path(__file__).with_name("stand_entry.py"))],
+        cwd=TREE,
+        env=env,
+        stdout=stdout,
+        stderr=subprocess.STDOUT,
+    )
+    print(f"[{label}] launcher pid={proc.pid} env={extra}", flush=True)
+    samples = []
+    t0 = time.monotonic()
+    try:
+        while time.monotonic() - t0 < seconds:
+            time.sleep(30)
+            if proc.poll() is not None:
+                print(f"[{label}] ЛАУНЧЕР ВЫШЕЛ code={proc.returncode} на {time.monotonic() - t0:.0f} с", flush=True)
+                break
+            rows = tree_rss(proc.pid)
+            gui = [r for r in rows if r.get("qt")]
+            samples.append({"t": round(time.monotonic() - t0), "gui": gui, "n": len(rows)})
+            g = gui[0] if gui else {}
+            print(
+                f"[{label}] t={samples[-1]['t']}s procs={len(rows)} gui_ws_mb={g.get('ws_mb')} gui_priv_mb={g.get('priv_mb')}",
+                flush=True,
+            )
+    finally:
+        alive = proc.poll() is None
+        if alive:
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+        stdout.close()
+    (log_dir / "samples.json").write_text(json.dumps(samples, ensure_ascii=False, indent=1), encoding="utf-8")
+    lines = []
+    for f in log_dir.rglob("*"):
+        if f.is_file() and f.suffix in (".log", ".txt", ".jsonl"):
+            try:
+                lines += [
+                    ln.strip()
+                    for ln in f.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if "gc-policy" in ln or "Fatal Python" in ln
+                ]
+            except OSError:
+                pass
+    pauses = [float(m) for ln in lines for m in re.findall(r"max_pause_ms=([\d.]+)", ln)]
+    ws = [s["gui"][0]["ws_mb"] for s in samples if s["gui"]]
+    priv = [s["gui"][0]["priv_mb"] for s in samples if s["gui"]]
+    print(f"[{label}] gc-policy lines={len(lines)} max_pause_ms={max(pauses) if pauses else 'n/a'}", flush=True)
+    # Без дублей (одна запись попадает в лог процесса и в общий): ключ — время и текст после «gc-policy».
+    seen = set()
+    for ln in lines:
+        stamp = re.search(r"\d\d:\d\d:\d\d", ln)
+        key = (stamp.group(0) if stamp else "", ln[ln.find("gc-policy") :])
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"    {key[0]} {key[1][:260]}", flush=True)
+    if ws:
+        tail = ws[len(ws) // 2 :]
+        print(
+            f"[{label}] SUMMARY gui_ws_mb last={ws[-1]} max={max(ws)} median_2nd_half={sorted(tail)[len(tail) // 2]} priv_last={priv[-1]} samples={len(ws)}",
+            flush=True,
+        )
+    else:
+        print(f"[{label}] SUMMARY нет GUI-процесса с Qt6Core.dll в дереве — стенд не поднялся?", flush=True)
+
+
+if __name__ == "__main__":
+    main()
