@@ -59,4 +59,4 @@
 
 ## 4. Как писать
 Урок = ловушка + замер (вход→выход) + триггер; теги `module:` и `mechanism:` во frontmatter; `/core:memory:remember`.
-Состояние плана — в plan.md, не сюда. Поиск: `grep -l "module: X" docs/claude/memory/*.md`.
+Состояние плана — в plan.md, не сюда. Поиск (364 урока, роли тоже здесь): `python scripts/memory/search.py <3-5 слов> [--module id] [--mechanism id]`; словарь механизмов — `TAGS.yaml`.

@@ -358,3 +358,5 @@ machine-local. Isolated per role (reviewer — review patterns, tester — flaky
 rules stay in `docs/claude/memory/`.
 
 The capture rail (when to write a lesson) stays in `.claude/CLAUDE.md` → «Memory (OVERRIDE)»: `/core:memory:remember` reads it from there.
+
+Before closing a task: every `MEMORY LESSON` block from agent reports → file in `docs/claude/memory/` (main checkout) → `scripts/memory/tags.py --check` → `docs(memory):` commit (may batch per task).
