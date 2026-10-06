@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 from scripts.atlas import store
@@ -25,11 +26,13 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--main-ref", default=argparse.SUPPRESS, help="ref main-правил (по умолчанию main, иначе origin/main)"
     )
-    top = argparse.ArgumentParser(prog="atlas", parents=[common])
-    top.set_defaults(main_ref=None)
-    top.add_argument("--json", action="store_true", help="напечатать реестр HEAD в формате --json")
+    with_ref = argparse.ArgumentParser(add_help=False)
+    with_ref.add_argument("--ref", default=argparse.SUPPRESS, help="ревизия сборки (по умолчанию HEAD)")
+    # SUPPRESS и никаких set_defaults: общий Action с default=None затирал бы флаг, данный до подкоманды
+    top = argparse.ArgumentParser(prog="atlas", parents=[common, with_ref])
+    top.add_argument("--json", action="store_true", help="напечатать реестр --ref (по умолчанию HEAD) как JSON")
     sub = top.add_subparsers(dest="command")
-    sub.add_parser("build", parents=[common], help="собрать реестр").add_argument("--ref", default="HEAD")
+    sub.add_parser("build", parents=[common, with_ref], help="собрать реестр")
     sub.add_parser("check", parents=[common], help="гейт против merge-base").add_argument("--base", default=None)
     return top
 
@@ -44,12 +47,15 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 2
-    if not args.json and args.command is None:
+    ref = getattr(args, "ref", None) or "HEAD"
+    # верна ровно одна форма: --json без подкоманды либо подкоманда без --json; `check` не знает --ref
+    if args.json == (args.command is not None) or (args.command == "check" and hasattr(args, "ref")):
         parser.print_usage(sys.stderr)
+        print("atlas: нужна ровно одна форма: build [--ref], check [--base] или --json [--ref]", file=sys.stderr)
         return 2
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
-        main_ref = args.main_ref or _default_main_ref(root)
+        main_ref = getattr(args, "main_ref", None) or _default_main_ref(root)
         con = store.connect(root / "data" / "atlas.sqlite")
         try:
             if args.command == "check":
@@ -57,16 +63,20 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(lines))
                 return code
             if args.command == "build":
-                build_id = build(con, root, args.ref, main_ref)
+                build_id = build(con, root, ref, main_ref)
                 print(f"atlas build: {store.build_row(con, build_id)[0]} main_ref={main_ref} build_id={build_id}")
                 return 0
             legacy = legacy_before(root, main_ref)  # только --json; build и check его не считают
-            print(to_json(con, build(con, root, "HEAD", main_ref), legacy))
+            print(to_json(con, build(con, root, ref, main_ref), legacy))
             return 0
         finally:
             con.close()
     except AtlasError as exc:
         print(exc, file=sys.stderr)
+        return 2
+    except Exception as exc:  # noqa: BLE001 - любой сбой окружения -> 2, код 1 только у находки check
+        print(f"atlas: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        traceback.print_exc()
         return 2
 
 

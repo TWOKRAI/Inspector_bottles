@@ -54,9 +54,13 @@ def write_build(con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: s
     if existing is not None:
         return existing
     with con:
-        build_id = con.execute(
-            "INSERT INTO builds (sha, main_ref, fingerprint) VALUES (?, ?, ?)", (sha, main_ref, fingerprint)
-        ).lastrowid
+        try:
+            build_id = con.execute(
+                "INSERT INTO builds (sha, main_ref, fingerprint) VALUES (?, ?, ?)", (sha, main_ref, fingerprint)
+            ).lastrowid
+        except sqlite3.IntegrityError:  # параллельная сборка записала тот же ключ раньше -> берём её id
+            con.rollback()
+            return find_build(con, sha, main_ref, fingerprint)  # type: ignore[return-value]
         con.executemany(
             "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?)",
             [(build_id, n.kind, n.id, n.path, n.status, n.time) for n in out.nodes],

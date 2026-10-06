@@ -2,7 +2,7 @@
 
 Purpose: блокирует только новая blocking-находка против `<ref>` (merge-base или `--base`);
     перенос файла (строки `R` git diff -M) не делает старую находку новой.
-Public API: check, legacy_before, translate_node.
+Public API: BASELINE_PATH, check, legacy_before, translate_node.
 Stability: lite
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from scripts.atlas import store
 from scripts.atlas.build import build
-from scripts.atlas.tree import AtlasError, Tree, git, git_z, run_git
+from scripts.atlas.tree import AtlasError, Tree, git, git_z, resolve, run_git
 
 __all__ = ["BASELINE_PATH", "check", "legacy_before", "translate_node"]
 
@@ -28,7 +28,11 @@ def legacy_before(root: str | Path, main_ref: str) -> str | None:
         return None
     if git(root, "rev-parse", "--is-shallow-repository") == "true":
         raise AtlasError(SHALLOW_MSG)
-    proc = run_git(root, "log", "--first-parent", "--diff-filter=A", "--format=%H", main_ref, "--", BASELINE_PATH)
+    try:
+        tip = resolve(root, main_ref)
+    except AtlasError:
+        raise AtlasError(NOT_FOUND_MSG) from None
+    proc = run_git(root, "log", "--first-parent", "--diff-filter=A", "--format=%H", tip, "--", BASELINE_PATH)
     lines = proc.stdout.decode("utf-8").split() if proc.returncode == 0 else []
     if not lines:
         raise AtlasError(NOT_FOUND_MSG)
@@ -60,7 +64,7 @@ def translate_node(node: str, renames: dict[str, str]) -> str:
 
 def check(con: sqlite3.Connection, root: str | Path, main_ref: str, base: str | None = None) -> tuple[int, list[str]]:
     """(код выхода, строки вывода): 1 — есть новая blocking-находка, иначе 0."""
-    ref = git(root, "rev-parse", f"{base}^{{commit}}") if base else git(root, "merge-base", main_ref, "HEAD")
+    ref = resolve(root, base) if base else git(root, "merge-base", resolve(root, main_ref), "HEAD")
     ref_id = build(con, root, ref, main_ref)
     head_id = build(con, root, "HEAD", main_ref, base=Tree(root, ref))
     renames = _renames(root, ref)

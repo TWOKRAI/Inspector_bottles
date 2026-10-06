@@ -1,7 +1,7 @@
 """Дерево ревизии git: список файлов, чтение, распаковка во временный каталог (Task 1.2).
 
 Purpose: сборка читает ревизию (ref), а не рабочий каталог; git вызывается подпроцессом.
-Public API: AtlasError, Tree, git, git_z, run_git.
+Public API: AtlasError, Tree, git, git_z, resolve, run_git.
 Stability: lite
 """
 
@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-__all__ = ["AtlasError", "Tree", "git", "git_z", "run_git"]
+__all__ = ["AtlasError", "Tree", "git", "git_z", "resolve", "run_git"]
 
 
 class AtlasError(Exception):
@@ -41,6 +41,14 @@ def git_z(root: str | Path, *args: str) -> list[str]:
     if proc.returncode != 0:
         raise AtlasError(f"atlas: git {' '.join(args)} failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
     return [item.decode("utf-8") for item in proc.stdout.split(b"\0") if item]
+
+
+def resolve(root: str | Path, ref: str) -> str:
+    """SHA коммита по пользовательскому ref; нет такого коммита, опция или диапазон -> AtlasError."""
+    proc = run_git(root, "rev-parse", "--verify", "-q", "--end-of-options", f"{ref}^{{commit}}")
+    if proc.returncode != 0:
+        raise AtlasError(f"atlas: ref not found: {ref}")
+    return proc.stdout.decode("utf-8").strip()
 
 
 class Tree:

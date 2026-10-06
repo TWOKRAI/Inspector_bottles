@@ -2,7 +2,7 @@
 
 Purpose: build() зовёт адаптеры по ключу кэша (sha, main_ref, отпечаток адаптеров); to_json() —
     детерминированный JSON: списки отсортированы, ensure_ascii=False, без времени сборки.
-Public API: ADAPTERS, CORE_VERSION, build, fingerprint, to_json.
+Public API: ADAPTERS, CORE_VERSION, SCHEMA_VERSION, build, fingerprint, to_json.
 Stability: lite
 """
 
@@ -16,7 +16,7 @@ from typing import Any
 
 from scripts.atlas import store
 from scripts.atlas.schema import Adapter, AdapterOutput, BuildContext
-from scripts.atlas.tree import Tree, git
+from scripts.atlas.tree import Tree, resolve
 
 __all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "fingerprint", "to_json"]
 
@@ -33,7 +33,7 @@ def fingerprint() -> str:
 
 def build(con: sqlite3.Connection, root: str | Path, ref: str, main_ref: str, base: Tree | None = None) -> int:
     """Собрать реестр на ревизии `ref`; ключ уже в базе -> вернуть его id, адаптеры не зовутся."""
-    sha = git(root, "rev-parse", f"{ref}^{{commit}}")
+    sha = resolve(root, ref)
     key = fingerprint()
     cached = store.find_build(con, sha, main_ref, key)
     if cached is not None:
