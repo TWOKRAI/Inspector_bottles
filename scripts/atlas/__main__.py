@@ -14,9 +14,10 @@ import traceback
 from pathlib import Path
 
 from scripts.atlas import store
+from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
-from scripts.atlas.tree import AtlasError, git, run_git
+from scripts.atlas.tree import AtlasError, git, resolve, run_git
 
 __all__ = ["main"]
 
@@ -67,7 +68,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"atlas build: {store.build_row(con, build_id)[0]} main_ref={main_ref} build_id={build_id}")
                 return 0
             legacy = legacy_before(root, main_ref)  # только --json; build и check его не считают
-            print(to_json(con, build(con, root, ref, main_ref), legacy))
+            build_id = build(con, root, ref, main_ref)
+            # живое значение описывает checkout: только для HEAD и только если в корне есть plans/
+            is_head = resolve(root, ref) == resolve(root, "HEAD")
+            live = live_plans(root) if is_head and (root / "plans").is_dir() else None
+            print(to_json(con, build_id, legacy, live))
             return 0
         finally:
             con.close()
