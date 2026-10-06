@@ -279,6 +279,7 @@ Servers this machine runs (measured 2026-10-05). A subagent sees only the server
 | junior | none |
 | docs-writer | none |
 | ai-judge | none |
+| memory-classifier | none (`tools: Read`) |
 
 New MCP server → decide its row here and add a `mcp__<server>` deny to every role that does not keep it; until then every role sees it.
 A role without a row (`general-purpose`, a new hire) inherits every server, serena included — add its row and deny line before use.
