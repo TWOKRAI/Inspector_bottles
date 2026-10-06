@@ -339,13 +339,16 @@ def test_suspend_requires_empty_slot(ex):
 def test_freeze_after_startup_foreign_thread_refused(ex, monkeypatch):
     door = _door()
     monkeypatch.setenv("FW_GC_FREEZE", "1")
+    # чистая постоянная генерация: замороженные объекты, освобождённые по refcount, покидают её,
+    # так что равенство «до/после» дрейфует под сессионной заморозкой (выход suspend — rearm)
+    gc.unfreeze()
+    assert gc.get_freeze_count() == 0
     door.collect_on(ex)  # главный поток — владелец
     got: list[str] = []
-    frozen_before = gc.get_freeze_count()
     box = _in_daemon(lambda: door.GcDiscipline(log=got.append).freeze_after_startup())
     assert box.get("r") is False, box
     assert got == ["GcDiscipline: freeze_after_startup пропущен — сборкой владеет другой поток"]
-    assert gc.get_freeze_count() == frozen_before
+    assert gc.get_freeze_count() == 0  # настоящая заморозка дала бы > 0
 
 
 # 13 --------------------------------------------------------------------------------------------
