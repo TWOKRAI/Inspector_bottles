@@ -542,7 +542,6 @@ _EXISTING_CHECKS = (
 )
 
 
-@pytest.mark.xfail(strict=True, reason="wired in 2.4g.3")
 def test_a1_12_validate_main_fails_on_memory_tag_error(tmp_path, monkeypatch, capsys):
     root = make_repo(tmp_path / "repo")
     lesson(root, "bad.md", "mechanism: no-such-mech")
