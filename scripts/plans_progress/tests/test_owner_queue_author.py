@@ -121,6 +121,93 @@ def test_task_word_prefix_is_stripped_in_any_case(tmp_path, word):
     assert findings == []
 
 
+def test_task_word_is_stripped_only_at_the_start_of_the_cell(tmp_path):
+    """Охраняет якорь `\\A` у `_QUEUE_TASK_WORD_RE`: слово `task ` снимается только в начале ячейки.
+
+    В плане есть задачи `1.2`, `12` и `B1.1`: без якоря `1task 2` превратилось бы в известную `12`, а
+    `1.2 (task 1.3)` — в `1.2 (1.3)`; по задаче обе ячейки — не id (`OWNER_QUEUE_BAD`).
+    """
+    plan = mem_plan("a-plan", tasks=(("1.2", "pending"), ("12", "pending"), ("B1.1", "pending")))
+    rows = ["| 1 | a-plan | 1task 2 | |", "| 2 | a-plan | 1.2 (task 1.3) | |", "| 3 | a-plan | Task 12 | |"]
+    items, findings = queue_of(tmp_path, block(*rows), [plan])
+    assert items == [
+        item(1, "task", "a-plan", "1task 2", "", False, False),
+        item(2, "task", "a-plan", "1.2 (task 1.3)", "", False, False),
+        item(3, "task", "a-plan", "12", "", True, False),
+    ]
+    assert [f.code for f in findings] == ["OWNER_QUEUE_BAD", "OWNER_QUEUE_BAD"]
+
+
+def test_task_word_followed_by_a_tab_is_still_stripped(tmp_path):
+    """Охраняет порядок в `_queue_item`: `clean_md` (пробельные символы -> один пробел) раньше снятия `Task `."""
+    items, findings = queue_of(tmp_path, block("| 1 | a-plan | Task\t1.1 | |"))
+    assert items == [item(1, "task", "a-plan", "1.1", "", True, False)]
+    assert findings == []
+
+
+@pytest.mark.parametrize("dash", ["—", "–", "-"])
+def test_dash_in_task_cell_means_plan_item(tmp_path, dash):
+    """Охраняет кортеж `_QUEUE_NO_TASK`: длинное тире, среднее тире и дефис — пункт-план (`task: null`)."""
+    items, findings = queue_of(tmp_path, block(f"| 1 | a-plan | {dash} | |"))
+    assert items == [item(1, "plan", "a-plan", None, "", True, False)]
+    assert findings == []
+
+
+def test_deferred_and_superseded_tasks_are_closed(tmp_path):
+    """Охраняет `task.status in TASK_CLOSED` в `closed` у `_queue_item`: не только `done`.
+
+    Незавершённая `1.3` держит план открытым, так что закрытость `1.1` и `1.2` идёт от самих задач.
+    """
+    plan = mem_plan("a-plan", tasks=(("1.1", "deferred"), ("1.2", "superseded"), ("1.3", "pending")))
+    items, findings = queue_of(tmp_path, block(*[f"| {n} | a-plan | 1.{n} | |" for n in (1, 2, 3)]), [plan])
+    assert [(i["task"], i["known"], i["closed"]) for i in items] == [
+        ("1.1", True, True),
+        ("1.2", True, True),
+        ("1.3", True, False),
+    ]
+    assert [f.code for f in findings] == ["OWNER_QUEUE_CLOSED", "OWNER_QUEUE_CLOSED"]
+
+
+# =========================================================================== пустые строки, разделитель, шапка
+
+
+def test_row_with_only_the_hash_cell_filled_is_a_bad_item(tmp_path):
+    """Охраняет `any(clean_md(c) for c in cells)` в `parse_queue_block`: пустота строки считается по ВСЕМ ячейкам.
+
+    Строка с одной заполненной `#` — пункт (`n` растёт, `OWNER_QUEUE_BAD`); полностью пустая — нет.
+    """
+    items, findings = queue_of(tmp_path, block("| 7 |  |  |  |", "|  |  |  |  |", "| 9 | a-plan | | |"))
+    assert items == [
+        item(1, "plan", "", None, "", False, False),
+        item(2, "plan", "a-plan", None, "", True, False),
+    ]
+    assert [f.code for f in findings] == ["OWNER_QUEUE_BAD"]
+
+
+def test_separator_with_alignment_colons_is_not_an_item(tmp_path):
+    """Охраняет `:?-+:?` в `_QUEUE_SEPARATOR_RE`: двоеточия выравнивания допустимы в разделителе."""
+    text = "\n".join([BEGIN, HEAD, "|:-:|:--|--:|---|", "| 1 | a-plan | | |", END])
+    items, _ = queue_of(tmp_path, text)
+    assert items == [item(1, "plan", "a-plan", None, "", True, False)]
+
+
+def test_duplicate_plan_header_reads_the_first_column(tmp_path):
+    """Охраняет `key not in cols` в `parse_queue_block`: из двух колонок `План` читается первая."""
+    items, findings = queue_of(
+        tmp_path,
+        block("| 1 | a-plan | zz-plan |", head="| # | План | План |", sep="|---|---|---|"),
+    )
+    assert items == [item(1, "plan", "a-plan", None, "", True, False)]
+    assert findings == []
+
+
+def test_bad_plan_is_reported_before_bad_task(tmp_path):
+    """Охраняет порядок ветвей в `_queue_item`: BAD плана раньше BAD задачи (одна находка на пункт)."""
+    items, findings = queue_of(tmp_path, block("| 1 | a-plan, zz-plan | abc | |"))
+    assert items == [item(1, "task", "a-plan, zz-plan", "abc", "", False, False)]
+    assert len(findings) == 1 and findings[0].code == "OWNER_QUEUE_BAD" and "«План»" in findings[0].text
+
+
 def test_equal_names_in_one_cell_collapse_to_one_name():
     """Охраняет `name not in out` в `queue_names`: повтор имени в ячейке — одно имя, не «больше одного» (чтение автора:
     как `snapshot_slugs`; в тексте задачи не оговорено)."""

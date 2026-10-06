@@ -1146,7 +1146,7 @@ _QUEUE_COLUMNS = {"#": "n", "план": "plan", "задача": "task", "зам�
 _QUEUE_FULL_NAME_RE = re.compile(r"\d{4}-\d{2}-\d{2}_" + _SLUG_RE.pattern)
 _QUEUE_SEPARATOR_RE = re.compile(r":?-+:?")
 _QUEUE_NO_TASK = ("", "—", "–", "-")
-_QUEUE_TASK_WORD_RE = re.compile(r"task ", re.IGNORECASE)
+_QUEUE_TASK_WORD_RE = re.compile(r"\Atask ", re.IGNORECASE)
 QUEUE_FINDING_PLAN = "ORDER.md"
 
 
