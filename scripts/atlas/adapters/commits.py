@@ -45,16 +45,16 @@ def _plan_slug(value: str) -> str:
     return _DATE_PREFIX.sub("", rest.split("/", 1)[0].removesuffix(".md"))
 
 
-def _resolve_hashes(root: object, hashes: list[str]) -> dict[str, str | None]:
-    """Хеш как написан -> полный SHA коммита или None (missing/ambiguous); один вызов cat-file."""
+def _resolve_hashes(root: object, hashes: list[str]) -> dict[str, str]:
+    """Хеш как написан -> полный SHA коммита или причина отказа (`missing`/`ambiguous`); один вызов cat-file."""
     if not hashes:
         return {}
     out = _stdout(root, ("cat-file", "--batch-check"), "".join(f"{h}^{{commit}}\n" for h in hashes))
-    result: dict[str, str | None] = {}
+    result: dict[str, str] = {}
     for hash_, line in zip(hashes, out.decode("utf-8", "replace").splitlines()):
         parts = line.split(" ")
         ok = len(parts) == 3 and parts[1] == "commit" and _SHA.match(parts[0]) is not None
-        result[hash_] = parts[0] if ok else None
+        result[hash_] = parts[0] if ok else ("ambiguous" if parts[-1] == "ambiguous" else "missing")
     return result
 
 
@@ -112,8 +112,8 @@ class CommitsAdapter:
         tasks = {f"{slug}#{t['id']}": (plan["path"], t) for slug, plan in plans for t in plan["tasks"]}
         done = {tid: (path, (t.get("ref") or "").strip()) for tid, (path, t) in tasks.items() if t["status"] == "done"}
         resolved = _resolve_hashes(root, sorted({ref for _, ref in done.values() if ref}))
-        order.update(dict.fromkeys(s for s in resolved.values() if s))
-        ancestors = set(_lines(root, "rev-list", sha)) if any(resolved.values()) else set()
+        order.update(dict.fromkeys(s for s in resolved.values() if _SHA.match(s)))
+        ancestors = set(_lines(root, "rev-list", sha)) if any(_SHA.match(s) for s in resolved.values()) else set()
 
         shas = list(order)
         meta = _meta(root, shas)
@@ -149,11 +149,13 @@ class CommitsAdapter:
                         )
                     )
                 continue
-            target = resolved[ref]
+            found = resolved[ref]
+            target = found if _SHA.match(found) else None
             if target is not None:
                 out.edges.append(Edge("done_by", f"task:{tid}", f"commit:{target}", "plan-line"))
             if target is None or target not in ancestors:
-                reason = "не найден или неоднозначен" if target is None else "не предок ревизии сборки"
+                reasons = {"missing": "не найден", "ambiguous": "неоднозначен"}
+                reason = reasons.get(found, "не предок ревизии сборки")
                 msg = f"Хеш в строке DONE задачи {tid}: коммит {reason}"
                 out.findings.append(Finding("DONE_HASH_NOT_IN_MAIN", "blocking", f"task:{tid}", ref, msg, path))
 
