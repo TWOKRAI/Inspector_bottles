@@ -18,8 +18,13 @@ if ! command -v uv >/dev/null 2>&1; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Окружение проекта по uv.lock — как `uv sync` в CI (Python 3.12, без extras).
-uv sync
+# Клон облака неглубокий: без истории `mutation_gate --base <sha>^` и `git log` по старым коммитам падают (P1.1).
+if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+    git fetch --unshallow origin || echo "git: unshallow failed (история неполная)"
+fi
+
+# Окружение проекта по uv.lock (Python 3.12, без extras). --frozen: голый `uv sync` в облаке переписал uv.lock (P1.1).
+uv sync --frozen
 
 # Инструменты пилота P1.1: граф кода (mcp вшит, см. docs/claude/memory/project_graphify_mcp_setup.md).
 uv tool install graphifyy --with mcp --quiet || echo "graphify: install failed (P1.1 записывает это как результат)"

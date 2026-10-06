@@ -1741,3 +1741,7 @@ Regex `^\s*git\s+commit` срабатывает только на команде
 без блока). `git push` хук не проверяет. Хук — сид claude-kit (`.claude/plugins/core/hooks/`), правка — upstream или
 локальный слой. Для облака защита — ruleset GitHub на `main` (`plans/2026-10-04_atlas/CLOUD.md`). Лиду в `main` блок не
 нужен (слияния — его работа): правка хука должна различать лида и исполнителя, иначе ломает слияния.
+
+## `mutation_gate` не даёт мутантов на модулях фреймворка (2026-10-06, Атлас P1.1, облако Linux)
+
+`--source …/router_module` → `ImportError: attempted relative import beyond top-level package` (`from ...channel_routing_module` выходит за копию `mutants/`); `--source multiprocess_framework` → `modules/conftest.py` `setup_multiprocessing()` требует `spawn`, а mutmut уже выставил `fork` (`RuntimeError`); в обеих попытках мутантов 0. Решение — в задаче 1.5b плана Атласа (`plans/2026-10-04_atlas/tasks/P1.1.result.md`).
