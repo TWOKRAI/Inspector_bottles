@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +61,7 @@ def _live(root: Path) -> subprocess.CompletedProcess[bytes]:
 
 def test_plan_and_task_nodes_and_in_plan_edges(repo: GitRepo, atlas: Any) -> None:
     _seed(repo)
-    doc = _json(repo, atlas)
+    doc = _json(repo, atlas, "--ref", repo.head, "--main-ref", "main")
     plans = _by_key(doc, "plan")
     tasks = _by_key(doc, "task")
     assert sorted(plans) == ["alpha", "beta"]
@@ -81,7 +82,10 @@ def test_plan_and_task_nodes_and_in_plan_edges(repo: GitRepo, atlas: Any) -> Non
         ("task:alpha#1.2", "plan:alpha", "plan-line"),
         ("task:beta#1.1", "plan:beta", "plan-line"),
     ]
-    assert doc["findings"] == []
+    # `abc1234` в строке DONE — несуществующий объект: единственная находка (1.3b, перенос из 1.3a)
+    assert [(f["code"], f["severity"], f["node"], f["detail"], f["source"]) for f in doc["findings"]] == [
+        ("DONE_HASH_NOT_IN_MAIN", "blocking", "task:alpha#1.1", "abc1234", "plans/2026-10-01_alpha/plan.md")
+    ]
 
 
 def test_nodes_follow_the_build_ref_not_the_working_tree(repo: GitRepo, atlas: Any) -> None:
@@ -149,13 +153,54 @@ def test_plans_progress_failure_exits_2_without_the_value(
     assert res.err == "atlas: plans_progress --json failed (exit 0)\n"
 
 
-def test_slug_collision_and_duplicate_task_id_exit_2(repo: GitRepo, repo_factory: Any, atlas: Any) -> None:
+def _explicit(repo: GitRepo, atlas: Any) -> dict[str, Any]:
+    return _json(repo, atlas, "--ref", repo.head, "--main-ref", "main")
+
+
+def _plan_nodes(doc: dict[str, Any]) -> list[tuple[str, str, str | None]]:
+    return [(n["kind"], n["id"], n["path"]) for n in doc["nodes"] if n["kind"] in ("plan", "task")]
+
+
+def test_slug_collision_is_a_finding_and_duplicate_task_id_still_exits_2(
+    repo: GitRepo, repo_factory: Any, atlas: Any
+) -> None:
+    # обе живые: остаётся план с меньшим путём ("plans/2-..." < "plans/x.md")
     repo.write("plans/2026-10-01_x/plan.md", _BETA)
     repo.write("plans/x.md", _BETA)
     repo.commit("two plans, one slug")
-    res = atlas(repo, "build")
-    assert res.code == 2
-    assert res.err == "atlas: two plans share one slug — rename one plan\n"
+    doc = _explicit(repo, atlas)
+    assert [(f["code"], f["severity"], f["node"], f["detail"], f["source"]) for f in doc["findings"]] == [
+        ("PLAN_SLUG_COLLISION", "blocking", "plan:x", "plans/x.md", "plans/x.md")
+    ]
+    assert _plan_nodes(doc) == [
+        ("plan", "x", "plans/2026-10-01_x/plan.md"),
+        ("task", "x#1.1", "plans/2026-10-01_x/plan.md"),
+    ]
+
+    # живой раньше архивного, как бы ни сортировались пути
+    live_first = repo_factory.create("live_first")
+    live_first.write("plans/2026-10-01_y/plan.md", _BETA)
+    live_first.write("plans/_archive/2026-05-01_y/plan.md", _BETA)
+    live_first.commit("live and archived, one slug")
+    doc = _explicit(live_first, atlas)
+    assert [(f["code"], f["node"], f["detail"], f["source"]) for f in doc["findings"]] == [
+        ("PLAN_SLUG_COLLISION", "plan:y", "plans/_archive/2026-05-01_y/plan.md", "plans/_archive/2026-05-01_y/plan.md")
+    ]
+    assert _plan_nodes(doc) == [
+        ("plan", "y", "plans/2026-10-01_y/plan.md"),
+        ("task", "y#1.1", "plans/2026-10-01_y/plan.md"),
+    ]
+
+    # здесь путь архивного ("plans/_archive/...") меньше пути живого ("plans/z.md"): живой всё равно остаётся
+    archive_smaller = repo_factory.create("archive_smaller")
+    archive_smaller.write("plans/z.md", _BETA)
+    archive_smaller.write("plans/_archive/2026-05-01_z/plan.md", _BETA)
+    archive_smaller.commit("live z sorts after archived z")
+    doc = _explicit(archive_smaller, atlas)
+    assert [(f["code"], f["node"], f["detail"], f["source"]) for f in doc["findings"]] == [
+        ("PLAN_SLUG_COLLISION", "plan:z", "plans/_archive/2026-05-01_z/plan.md", "plans/_archive/2026-05-01_z/plan.md")
+    ]
+    assert _plan_nodes(doc) == [("plan", "z", "plans/z.md"), ("task", "z#1.1", "plans/z.md")]
 
     dup = repo_factory.create("dup")
     dup.write(
@@ -164,6 +209,120 @@ def test_slug_collision_and_duplicate_task_id_exit_2(repo: GitRepo, repo_factory
     )
     dup.commit("duplicate task id")
     assert _live(dup.path).returncode == 0  # сам plans_progress дубль принимает
-    res = atlas(dup, "build")
+    res = atlas(dup, "build", "--ref", dup.head, "--main-ref", "main")
     assert res.code == 2
     assert res.err == "atlas: duplicate task id in one plan\n"
+
+
+def test_plans_progress_timeout_exits_2(repo: GitRepo, atlas: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    repo.write("plans/beta.md", _BETA)
+    repo.commit("beta")
+    slow = tmp_path / "fake_slow.py"
+    slow.write_text("import time\ntime.sleep(30)\nprint('[]')\n", encoding="utf-8")
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_PROGRESS", slow)
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_TIMEOUT", 1)
+    started = time.monotonic()
+    res = atlas(repo, "build", "--ref", repo.head, "--main-ref", "main")
+    elapsed = time.monotonic() - started
+    assert res.code == 2
+    assert res.err == "atlas: plans_progress --json timed out\n"
+    assert elapsed < 20, f"вызов вернулся за {elapsed:.1f} с: таймаут не сработал"
+
+
+def test_plans_progress_stderr_is_forwarded_on_failure(
+    repo: GitRepo, atlas: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    repo.write("plans/beta.md", _BETA)
+    repo.commit("beta")
+    # байты через sys.stderr.buffer: текстовый режим дал бы CRLF на Windows
+    failing = tmp_path / "fake_fail.py"
+    failing.write_text(
+        "import sys\nsys.stderr.buffer.write(b'boom\\n')\nsys.stderr.buffer.flush()\nprint('[]')\nsys.exit(3)\n",
+        encoding="utf-8",
+    )
+    noisy = tmp_path / "fake_noisy.py"
+    noisy.write_text(
+        "import sys\nsys.stderr.buffer.write(b'noise\\n')\nsys.stderr.buffer.flush()\nprint('[]')\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_PROGRESS", failing)
+    res = atlas(repo, "build", "--ref", repo.head, "--main-ref", "main")
+    assert res.code == 2
+    assert res.err == "boom\natlas: plans_progress --json failed (exit 3)\n"
+
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_PROGRESS", noisy)
+    res = atlas(repo, "build", "--ref", repo.head, "--main-ref", "main")
+    assert res.code == 0, res.err
+    assert res.err == ""
+
+
+def test_plans_progress_runs_once_per_build(repo: GitRepo, atlas: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    from scripts.atlas.adapters.commits import CommitsAdapter
+    from scripts.atlas.adapters.plans import PlansAdapter
+    from scripts.atlas.build import ADAPTERS
+
+    names = [type(a).__name__ for a in ADAPTERS]
+    assert "CommitsAdapter" in names and "PlansAdapter" in names, names
+    assert any(isinstance(a, CommitsAdapter) for a in ADAPTERS)
+    assert any(isinstance(a, PlansAdapter) for a in ADAPTERS)
+
+    counter = tmp_path / "calls.txt"
+    payload = [
+        {
+            "plan": "2026-10-01_alpha",
+            "path": "plans/2026-10-01_alpha/plan.md",
+            "archived": False,
+            "header_status": None,
+            "tasks": [{"id": "1.1", "status": "pending", "ref": None}],
+        }
+    ]
+    fake = tmp_path / "fake_counting.py"
+    fake.write_text(
+        "import json\n"
+        f"with open({str(counter)!r}, 'a', encoding='utf-8') as fh:\n"
+        "    fh.write('call\\n')\n"
+        f"print(json.dumps({payload!r}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_PROGRESS", fake)
+    repo.write("plans/beta.md", _BETA)
+    first = repo.commit("beta")
+
+    res = atlas(repo, "build", "--ref", first, "--main-ref", "main")
+    assert res.code == 0, res.err
+    assert len(counter.read_text(encoding="utf-8").splitlines()) == 1
+
+    repo.write("README.md", "# second\n")
+    second = repo.commit("second sha")
+    res = atlas(repo, "build", "--ref", second, "--main-ref", "main")
+    assert res.code == 0, res.err
+    assert len(counter.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_adapter_versions_follow_plans_progress_content(tmp_path: Path, monkeypatch: Any) -> None:
+    from scripts.atlas.adapters.commits import CommitsAdapter
+    from scripts.atlas.adapters.modules import ModulesAdapter
+    from scripts.atlas.adapters.plans import PlansAdapter
+    from scripts.atlas.build import fingerprint
+
+    def snapshot() -> tuple[Any, Any, Any]:
+        return PlansAdapter().version, CommitsAdapter().version, fingerprint()
+
+    script = tmp_path / "pp.py"
+    script.write_text("# one", encoding="utf-8")
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_PROGRESS", script)
+    before = snapshot()
+    assert isinstance(before[0], int) and isinstance(before[1], int)
+    assert snapshot() == before
+
+    script.write_text("# two", encoding="utf-8")
+    after = snapshot()
+    assert after[0] != before[0]
+    assert after[1] != before[1]
+    assert after[2] != before[2]
+
+    monkeypatch.setattr("scripts.atlas.adapters.plans.PLANS_PROGRESS", tmp_path / "missing.py")
+    gone = snapshot()  # нет файла -> без исключения
+    assert isinstance(gone[0], int) and isinstance(gone[1], int) and isinstance(gone[2], str)
+    assert ModulesAdapter().version == 1

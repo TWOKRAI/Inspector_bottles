@@ -1,7 +1,7 @@
 """Адаптер `modules`: узлы module из modules.yaml дерева сборки (Task 1.3a).
 
-Purpose: читает modules.yaml из ревизии (не с диска); нет файла — пустой выход; невалидный — ValueError ->
-    AtlasError (exit 2) с текстом parse_modules.
+Purpose: читает modules.yaml из ревизии (не с диска); нет файла — пустой выход; невалидный (в т.ч. пустой,
+    не строковый или повторяющийся id) — AtlasError (exit 2) без значений в тексте.
 Public API: ModulesAdapter, modules_for.
 Stability: lite
 """
@@ -27,12 +27,21 @@ def modules_for(tree: Tree) -> list[dict]:
     except FileNotFoundError:
         return []
     try:
-        return parse_modules(raw.decode("utf-8"), _FILE)
+        rows = parse_modules(raw.decode("utf-8"), _FILE)
     except (yaml.YAMLError, UnicodeDecodeError):
         # Текст ошибки парсера несёт фрагмент файла — отдаём одну константу, без значений.
         raise AtlasError(_UNPARSEABLE) from None
     except ValueError as exc:
+        if not str(exc).startswith(f"{_FILE}:"):  # ValueError самого YAML-конструктора (дата 2026-13-45)
+            raise AtlasError(_UNPARSEABLE) from None
         raise AtlasError(str(exc)) from exc
+    seen: set[str] = set()
+    for index, row in enumerate(rows):
+        row_id = row["id"]
+        if not isinstance(row_id, str) or row_id == "" or row_id in seen:
+            raise AtlasError(f"{_FILE}: в строке {index} ключ 'id' пустой, не строка или повторяется")
+        seen.add(row_id)
+    return rows
 
 
 class ModulesAdapter:

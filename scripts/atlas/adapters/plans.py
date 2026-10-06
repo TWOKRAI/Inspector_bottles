@@ -1,45 +1,63 @@
-"""Адаптер `plans`: узлы plan/task и рёбра in_plan из `plans_progress --json` (Task 1.3a).
+"""Адаптер `plans`: узлы plan/task и рёбра in_plan из `plans_progress --json` (Task 1.3a, 1.3b).
 
 Purpose: распаковывает только `plans/` ревизии сборки и зовёт plans_progress подпроцессом (`--json --root`);
-    `live_plans` — тот же вызов на корне checkout для значения `plans` в `--json`.
-Public API: PLANS_PROGRESS, PlansAdapter, live_plans.
+    `plans_for` отдаёт один разбор адаптерам `plans` и `commits` (lru_cache); `live_plans` — тот же вызов
+    на корне checkout для значения `plans` в `--json`.
+Public API: PLANS_PROGRESS, PLANS_TIMEOUT, PlansAdapter, adapter_version, live_plans, plans_for.
 Stability: lite
-Принятый предел: отпечаток кэша (CORE_VERSION + name:version) не хеширует plans_progress.py; смена его
-    парсера -> поднять PlansAdapter.version, иначе кэш `<ref>` хранит старый разбор.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from scripts.atlas.schema import AdapterOutput, BuildContext, Edge, Node
-from scripts.atlas.tree import AtlasError
+from scripts.atlas.schema import AdapterOutput, BuildContext, Edge, Finding, Node
+from scripts.atlas.tree import AtlasError, Tree
 
-__all__ = ["PLANS_PROGRESS", "PlansAdapter", "live_plans"]
+__all__ = ["PLANS_PROGRESS", "PLANS_TIMEOUT", "PlansAdapter", "adapter_version", "live_plans", "plans_for"]
 
 PLANS_PROGRESS = Path(__file__).resolve().parents[2] / "plans_progress" / "plans_progress.py"
+PLANS_TIMEOUT = 120
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 
 
-def _run(root: Path) -> list[dict[str, Any]]:
-    """`plans_progress --json --root <root>`; сбой процесса или не-JSON на stdout -> AtlasError."""
-    proc = subprocess.run(
-        [sys.executable, str(PLANS_PROGRESS), "--json", "--root", str(root)], capture_output=True, check=False
-    )
-    failed = AtlasError(f"atlas: plans_progress --json failed (exit {proc.returncode})")
-    if proc.returncode != 0:
-        raise failed
+def adapter_version(base: int) -> int:
+    """Версия адаптера: `base` (руками) × 2**48 + 12 hex sha256 файла plans_progress; нет файла -> 0."""
     try:
-        data = json.loads(proc.stdout.decode("utf-8"))
-    except ValueError as exc:  # UnicodeDecodeError и JSONDecodeError — потомки ValueError
-        raise failed from exc
+        stamp = int(hashlib.sha256(PLANS_PROGRESS.read_bytes()).hexdigest()[:12], 16)
+    except OSError:
+        stamp = 0
+    return base * 2**48 + stamp
+
+
+def _run(root: Path) -> list[dict[str, Any]]:
+    """`plans_progress --json --root <root>`; сбой, таймаут или не-JSON на stdout -> AtlasError."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(PLANS_PROGRESS), "--json", "--root", str(root)],
+            capture_output=True,
+            check=False,
+            timeout=PLANS_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise AtlasError("atlas: plans_progress --json timed out") from None
+    data: Any = None
+    if proc.returncode == 0:
+        try:
+            data = json.loads(proc.stdout.decode("utf-8"))
+        except ValueError:  # UnicodeDecodeError и JSONDecodeError — потомки ValueError
+            data = None
     if not isinstance(data, list):
-        raise failed
+        if proc.stderr:  # диагностика самого инструмента — отдельный поток, не текст ошибки
+            sys.stderr.write(proc.stderr.decode("utf-8", "replace"))
+        raise AtlasError(f"atlas: plans_progress --json failed (exit {proc.returncode})")
     return data
 
 
@@ -48,29 +66,50 @@ def live_plans(root: Path) -> list[dict[str, Any]]:
     return _run(Path(root))
 
 
+@lru_cache(maxsize=8)
+def _load(script: str, root: str, ref: str) -> tuple[tuple[tuple[str, dict[str, Any]], ...], tuple[Finding, ...]]:
+    tree = Tree(root, ref)
+    if not any(f.startswith("plans/") for f in tree.files()):
+        return (), ()
+    with tree.materialize("plans") as target:
+        plans = _run(target)
+    kept: dict[str, dict[str, Any]] = {}
+    findings: list[Finding] = []
+    for plan in sorted(plans, key=lambda p: (bool(p.get("archived")), p["path"])):  # живой раньше архивного
+        slug = _DATE_PREFIX.sub("", plan["plan"])
+        if slug in kept:
+            msg = f"План {plan['path']} отброшен: slug «{slug}» уже занят планом {kept[slug]['path']}"
+            findings.append(Finding("PLAN_SLUG_COLLISION", "blocking", f"plan:{slug}", plan["path"], msg, plan["path"]))
+            continue
+        ids: set[str] = set()
+        for task in plan["tasks"]:
+            if task["id"] in ids:
+                raise AtlasError("atlas: duplicate task id in one plan")
+            ids.add(task["id"])
+        kept[slug] = plan
+    return tuple(kept.items()), tuple(findings)
+
+
+def plans_for(tree: Tree) -> tuple[tuple[tuple[str, dict[str, Any]], ...], tuple[Finding, ...]]:
+    """(пары (slug, план), находки PLAN_SLUG_COLLISION) ревизии; один запуск plans_progress на ключ кэша."""
+    return _load(str(PLANS_PROGRESS), str(tree.root), tree.ref)
+
+
 class PlansAdapter:
     name = "plans"
-    version = 1
+    _BASE = 1
+
+    @property
+    def version(self) -> int:
+        return adapter_version(self._BASE)
 
     def collect(self, ctx: BuildContext) -> AdapterOutput:
-        out = AdapterOutput()
-        if not any(f.startswith("plans/") for f in ctx.tree.files()):
-            return out
-        with ctx.tree.materialize("plans") as target:
-            plans = _run(target)
-        seen: set[str] = set()
-        for plan in plans:
-            slug = _DATE_PREFIX.sub("", plan["plan"])
-            if slug in seen:
-                raise AtlasError("atlas: two plans share one slug — rename one plan")
-            seen.add(slug)
+        plans, findings = plans_for(ctx.tree)
+        out = AdapterOutput(findings=list(findings))
+        for slug, plan in plans:
             plan_id = f"plan:{slug}"
             out.nodes.append(Node("plan", slug, plan["path"], plan["header_status"]))
-            ids: set[str] = set()
             for task in plan["tasks"]:
-                if task["id"] in ids:
-                    raise AtlasError("atlas: duplicate task id in one plan")
-                ids.add(task["id"])
                 task_id = f"{slug}#{task['id']}"
                 out.nodes.append(Node("task", task_id, plan["path"], task["status"]))
                 out.edges.append(Edge("in_plan", f"task:{task_id}", plan_id, "plan-line"))

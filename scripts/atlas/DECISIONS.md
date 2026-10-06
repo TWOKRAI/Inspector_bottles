@@ -43,7 +43,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `module` | `id` из `modules.yaml` (`router_module`, `process_module/generic`) | `modules.yaml` | 1.3a |
 | `plan` | slug: имя каталога плана без префикса `YYYY-MM-DD_` (правило `validate_commit`; коллизий 0 из 148) | `plans_progress --json` | 1.3a |
 | `task` | `<slug>#<id>` (`atlas#1.2`) | строка задачи, тот же парсер | 1.3a |
-| `commit` | полный SHA | `git log --first-parent <main-ref>` + коммиты `<main-ref>..HEAD` | 1.3b |
+| `commit` | полный SHA | `git log --first-parent <sha сборки>` + коммиты `<sha сборки> --not <вершина main-ref>` + коммиты, названные хешем в строках DONE (154 из 266 хешей лежат вне first-parent; без их узлов `done_by` ведёт в пустоту) | 1.3b |
 | `doc` | путь `.md` | папка модуля; для карт — `covers:` | 1.4 |
 | `interface` | `<module>:<Имя>` — имена из `__all__` в `interfaces.py`; нет `__all__` — публичные имена верхнего уровня (без `_`) | AST | 1.5a |
 | `guarantee` | `G-<MOD>-NNN` (п. 4) | `interfaces.py` | 1.5a |
@@ -69,7 +69,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `implements` | commit → task | трейлер `Task:` | цепь |
 | `done_by` | task → commit | хеш в строке DONE | цепь |
 | `in_plan` | task → plan | строка задачи | цепь |
-| `touches` | commit → module | пути коммита × `modules.yaml` | цепь |
+| `touches` | commit → module | пути коммита × `modules.yaml`; путь вне модулей даёт ребро в `module:other` **без узла** `other` (число узлов `module` = числу строк `modules.yaml`); потребитель ребра `touches` берёт только `dst` с узлом `module` (`store.modules_without_contract_test`, Task 1.3b, О6) | цепь |
 | `covers` | doc → module | папка модуля или `covers:` | цепь |
 | `exposes` | module → interface | `interfaces.py` модуля | 3б «выставляет» |
 | `declares` | interface → guarantee | `Post: … (G-…)` / `Гарантия G-…:` | 3б «заявляет» |
@@ -98,6 +98,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `REF_TO_MISSING` | commit | цели `Refs:` (путь) или `Task:` (каталог плана по slug) нет ни в дереве сборки, ни в дереве самого коммита (`git ls-tree <sha>`); id задачи из `Task:` ищется только в дереве сборки тем же парсером `plans_progress`, второго парсера нет |
 | `REF_MOVED` | commit | цель `Refs:`/план из `Task:` была в дереве коммита, в дереве сборки её нет (архив, перенос) |
 | `DONE_HASH_NOT_IN_MAIN` | task | хеш в строке DONE не предок `HEAD` сборки (в PR — вершины PR, после слияния — `main`) |
+| `PLAN_SLUG_COLLISION` | plan | два плана с одним slug: сохраняется живой раньше архивного, затем по `path`; отброшенный план уходит целиком вместе с задачами; `detail` и `source` — путь отброшенного (Task 1.3b; прежний `exit 2` ронял `check` всех PR после слияния такого плана) |
 | `DONE_WITHOUT_COMMIT` | task | DONE без хеша и без коммита с `Task:` |
 | `COMMIT_WITHOUT_DONE` | task | есть коммит с `Task:`, задача не DONE |
 | `SURFACE_CHANGED_WITHOUT_TEST` | commit | дифф события меняет `interfaces.py` или `__all__` в `modules/*/__init__.py` и не трогает ни одного файла `tests/`/`test_*.py` — вариант A `research/baseline.md` §2 (1 из 33 за 60 дней). Событие — слияние на first-parent `main` (`git diff <m>^1 <m>`), в PR — весь диапазон `<ref>..HEAD` одним событием, не каждый коммит: коммит интерфейса без тестов — штатный шаг цепи `developer(INTERFACE) → tester(RED)` |
@@ -205,7 +206,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `code` | новое в диффе | уже было на `<ref>` |
 |---|---|---|
 | `PRE_POST_MISSING` (только изменённые методы) | **blocking** | — (по определению только дифф) |
-| `BROKEN_LINK`, `REF_TO_MISSING`, `DONE_HASH_NOT_IN_MAIN` | **blocking** | info |
+| `BROKEN_LINK`, `REF_TO_MISSING`, `DONE_HASH_NOT_IN_MAIN`, `PLAN_SLUG_COLLISION` | **blocking** | info |
 | `SURFACE_CHANGED_WITHOUT_TEST` | **warning** 2 недели после отсечки, затем — решение K1.1 | — (событие диффа) |
 | `REF_MOVED`, `DONE_WITHOUT_COMMIT`, `COMMIT_WITHOUT_DONE`, `INTERFACE_WITHOUT_TEST`, `GUARANTEE_WITHOUT_INJECTION`, `TEST_NEVER_RED`, `DOC_STALE` | info | info |
 | `MUTATION_BELOW` | выключена до калибровки | — |
