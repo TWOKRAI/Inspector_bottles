@@ -368,20 +368,36 @@ def test_install_replaces_dead_policy():
 def test_attach_refusal_logged():
     out = _run_script(
         """
+        import shiboken6
         from PySide6.QtCore import QCoreApplication
 
         lines = []
         p = install_gui_memory_policy(None, log=lines.append)  # приложения ещё нет
-        box = {}
-        maker = threading.Thread(target=lambda: box.setdefault("app", QCoreApplication([])), name="app-maker")
+        made = threading.Event()
+        finish = threading.Event()
+
+
+        def own_app():
+            # Поток владеет приложением всю жизнь: создал, дождался конца проверки, удалил на
+            # СВОЁМ потоке. Иначе QCoreApplication мёртвого потока умирает при выходе процесса
+            # на главном — подпроцесс зависал на выходе (2 из 6 прогонов под нагрузкой).
+            app = QCoreApplication([])
+            made.set()
+            finish.wait(30)
+            shiboken6.delete(app)
+
+
+        maker = threading.Thread(target=own_app, name="app-maker")
         maker.start()
-        maker.join(10)
-        print("APP", "app" in box)
+        print("APP", made.wait(10) and QCoreApplication.instance() is not None)
         p.collect_now()  # главный поток — не поток приложения: таймер не подключить
         p.collect_now()
         print("ATTACHED", p.stats()["timer_attached"])
         refusals = [line for line in lines if "таймер сборки не подключён" in line]
         print("REFUSALS", len(refusals), "NAMES-THREAD", "MainThread" in "".join(refusals))
+        finish.set()
+        maker.join(10)
+        print("APP-GONE", not maker.is_alive() and QCoreApplication.instance() is None)
         done("ATTACH-DONE")
         """
     )
@@ -389,5 +405,6 @@ def test_attach_refusal_logged():
         "APP True",
         "ATTACHED False",
         "REFUSALS 1 NAMES-THREAD True",
+        "APP-GONE True",
         "ATTACH-DONE",
     ], out
