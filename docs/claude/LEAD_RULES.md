@@ -350,12 +350,13 @@ an entry is a separate `.md` with frontmatter `name`/`description`/`metadata.typ
 Commands: `/core:memory:status`, `:search <query>`, `:remember [lesson]`, `:init` (new project).
 Per-project — not shipped in the seed.
 
-**Subagent memory** (CC ≥2.1.59) adds to, does not replace: agent frontmatter `memory: <scope>` →
-CC injects the role's `MEMORY.md` into the system prompt + Read/Write/Edit. `project` (default for
-dev-write agents, see `memory:` in their frontmatter) → `.claude/agent-memory/<name>/`, under git;
-`local` → `.claude/agent-memory-local/<name>/`, gitignored; `user` → `~/.claude/agent-memory/<name>/`,
-machine-local. Isolated per role (reviewer — review patterns, tester — flaky tests); cross-role
-rules stay in `docs/claude/memory/`.
+**Subagent memory** (Atlas 2.4g, 2026-10-06): no role carries `memory:` any more. One canon for every role —
+`docs/claude/memory/` (role lessons moved there with `role:`); `.claude/agent-memory/<name>/MEMORY.md` is a 3-line
+pointer. Why: `memory: project` cost 3 821 input tokens per spawn (probe: 8 157 vs 4 326, Haiku, same agent with and
+without it) and re-grants Read/Write/Edit whatever `disallowedTools` says. Subagents find lessons with
+`scripts/memory/search.py` and hand new ones up as `MEMORY LESSON` blocks (`project-rules` §8). Frontmatter tags:
+`description:` (RU + EN keywords), `module:` ⊆ `modules.yaml`, `mechanism:` ⊆ `docs/claude/memory/TAGS.yaml`,
+`role:` ⊆ agent stems; checked by `scripts/memory/tags.py --check` inside `scripts/validate.py`.
 
 The capture rail (when to write a lesson) stays in `.claude/CLAUDE.md` → «Memory (OVERRIDE)»: `/core:memory:remember` reads it from there.
 
