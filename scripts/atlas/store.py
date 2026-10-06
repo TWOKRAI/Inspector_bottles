@@ -99,6 +99,7 @@ def modules_without_contract_test(con: sqlite3.Connection, build_id: int, since_
         """
         SELECT DISTINCT substr(e.dst, 8) AS module FROM edges e
         JOIN nodes c ON c.build_id = e.build_id AND c.kind = 'commit' AND c.id = substr(e.src, 8)
+        JOIN nodes m ON m.build_id = e.build_id AND m.kind = 'module' AND m.id = substr(e.dst, 8)
         WHERE e.build_id = ? AND e.kind = 'touches' AND c.time >= ?
           AND NOT EXISTS (
             SELECT 1 FROM edges t

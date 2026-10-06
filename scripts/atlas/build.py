@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.atlas import store
+from scripts.atlas.adapters.commits import CommitsAdapter
 from scripts.atlas.adapters.modules import ModulesAdapter
 from scripts.atlas.adapters.plans import PlansAdapter
 from scripts.atlas.schema import Adapter, AdapterOutput, BuildContext
@@ -22,7 +23,7 @@ from scripts.atlas.tree import Tree, resolve
 
 __all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "fingerprint", "to_json"]
 
-ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter())  # commits, docs — задачи 1.3b и далее
+ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter(), CommitsAdapter())  # docs — задачи 1.4 и далее
 CORE_VERSION = "1"
 SCHEMA_VERSION = 1
 
