@@ -82,7 +82,15 @@ class Tree:
         target = Path(tempfile.mkdtemp(prefix="atlas-"))
         try:
             # autocrlf=false: на Windows `git archive` иначе отдаёт CRLF, а read() — байты объекта (LF).
-            proc = run_git(self.root, "-c", "core.autocrlf=false", "archive", "--format=tar", self.ref, *(["--", *paths] if paths else []))
+            proc = run_git(
+                self.root,
+                "-c",
+                "core.autocrlf=false",
+                "archive",
+                "--format=tar",
+                self.ref,
+                *(["--", *paths] if paths else []),
+            )
             if proc.returncode != 0:
                 raise AtlasError(f"atlas: git archive {self.ref} failed: {proc.stderr.decode('utf-8', 'replace')}")
             with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
