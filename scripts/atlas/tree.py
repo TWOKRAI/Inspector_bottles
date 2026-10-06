@@ -74,12 +74,23 @@ class Tree:
         return rest[: int(parts[2])]
 
     @contextmanager
-    def materialize(self) -> Iterator[Path]:
-        """Распаковать ревизию во временный каталог; каталог удаляется при выходе и при исключении."""
+    def materialize(self, *paths: str) -> Iterator[Path]:
+        """Распаковать ревизию (или только `paths`) во временный каталог; удаляется при выходе и при исключении.
+
+        С `paths` вызывающий сам проверяет, что в дереве есть файл под ними: `git archive` иначе упадёт.
+        """
         target = Path(tempfile.mkdtemp(prefix="atlas-"))
         try:
             # autocrlf=false: на Windows `git archive` иначе отдаёт CRLF, а read() — байты объекта (LF).
-            proc = run_git(self.root, "-c", "core.autocrlf=false", "archive", "--format=tar", self.ref)
+            proc = run_git(
+                self.root,
+                "-c",
+                "core.autocrlf=false",
+                "archive",
+                "--format=tar",
+                self.ref,
+                *(["--", *paths] if paths else []),
+            )
             if proc.returncode != 0:
                 raise AtlasError(f"atlas: git archive {self.ref} failed: {proc.stderr.decode('utf-8', 'replace')}")
             with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:

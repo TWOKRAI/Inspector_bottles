@@ -15,12 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from scripts.atlas import store
+from scripts.atlas.adapters.modules import ModulesAdapter
+from scripts.atlas.adapters.plans import PlansAdapter
 from scripts.atlas.schema import Adapter, AdapterOutput, BuildContext
 from scripts.atlas.tree import Tree, resolve
 
 __all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "fingerprint", "to_json"]
 
-ADAPTERS: tuple[Adapter, ...] = ()  # адаптеры подключают задачи 1.3 и далее
+ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter())  # commits, docs — задачи 1.3b и далее
 CORE_VERSION = "1"
 SCHEMA_VERSION = 1
 
@@ -48,8 +50,8 @@ def build(con: sqlite3.Connection, root: str | Path, ref: str, main_ref: str, ba
     return store.write_build(con, sha, main_ref, key, merged)
 
 
-def to_json(con: sqlite3.Connection, build_id: int, legacy_before: str | None) -> str:
-    """Контракт `--json`: ключи верхнего уровня в порядке ADR-ATL-001 §5; `plans` в 1.2 — null."""
+def to_json(con: sqlite3.Connection, build_id: int, legacy_before: str | None, plans: Any = None) -> str:
+    """Контракт `--json`: ключи верхнего уровня в порядке ADR-ATL-001 §5; `plans` — живой вывод или null."""
     sha, main_ref = store.build_row(con, build_id)
     data = store.read_build(con, build_id)
     nodes = sorted(data.nodes, key=lambda n: (n.kind, n.id))
@@ -73,6 +75,6 @@ def to_json(con: sqlite3.Connection, build_id: int, legacy_before: str | None) -
             }
             for f in findings
         ],
-        "plans": None,
+        "plans": plans,
     }
     return json.dumps(doc, ensure_ascii=False, indent=2)
