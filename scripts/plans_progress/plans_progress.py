@@ -25,7 +25,8 @@
   неверное значение -> exit 2;
 * ``--branch-window N[mhd]`` окно свежести вершины ветки для ``branches`` (``3d``); неверное -> exit 2 в любом режиме;
   ветки считаются только для ``--json`` и ``--html``;
-* ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``);
+* ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``); есть блок
+  ``owner-queue`` в ORDER.md -> колонка ``aside#owner-queue`` с очередью владельца (только показ, см. README);
 * ``--check``      печатает находки линта; exit 1, если есть блокирующая находка вне базы;
 * ``--baseline P`` файл строк ``<план>:<КОД>`` (``<план>:<КОД>:<id>`` для UNKNOWN_STATUS и
   DUP_ID); находка из базы не блокирует (храповик: база только убывает).
@@ -1229,8 +1230,9 @@ def queue_names(raw_cell: str) -> list[str]:
     return out
 
 
-def _queue_item(n: int, row: QueueRow, plans: list[Plan]) -> tuple[dict, Finding | None]:
-    """Пункт очереди и его находка (первая по порядку: BAD плана, BAD задачи, UNKNOWN плана, UNKNOWN задачи, CLOSED)."""
+def _queue_item(n: int, row: QueueRow, plans: list[Plan]) -> tuple[dict, Finding | None, Plan | None, Task | None]:
+    """Пункт очереди, его находка (первая по порядку: BAD плана, BAD задачи, UNKNOWN плана, UNKNOWN задачи, CLOSED)
+    и найденные `Plan` и `Task` (для страницы: якорь карточки и название задачи)."""
     names = queue_names(row.plan)
     plan = find_by_slug(plans, names[0]) if len(names) == 1 else None
     task_text = _QUEUE_TASK_WORD_RE.sub("", clean_md(row.task), count=1)
@@ -1263,7 +1265,8 @@ def _queue_item(n: int, row: QueueRow, plans: list[Plan]) -> tuple[dict, Finding
     elif closed:
         what = f"задача {task_80} плана {plan_80} закрыта" if is_task else f"план {plan_80} закрыт"
         found = ("OWNER_QUEUE_CLOSED", f"{what} — уберите пункт из очереди")
-    return item, (Finding(found[0], QUEUE_FINDING_PLAN, None, False, head + found[1]) if found else None)
+    finding = Finding(found[0], QUEUE_FINDING_PLAN, None, False, head + found[1]) if found else None
+    return item, finding, plan, task
 
 
 def build_queue(plans: list[Plan], order: Path) -> tuple[list[dict], list[Finding]]:
@@ -1272,11 +1275,30 @@ def build_queue(plans: list[Plan], order: Path) -> tuple[list[dict], list[Findin
     findings = [Finding("OWNER_QUEUE_BLOCK", QUEUE_FINDING_PLAN, None, False, problem)] if problem else []
     items: list[dict] = []
     for n, row in enumerate(rows, 1):
-        item, finding = _queue_item(n, row, plans)
+        item, finding, _plan, _task = _queue_item(n, row, plans)
         items.append(item)
         if finding:
             findings.append(finding)
     return items, findings
+
+
+def build_queue_view(plans: list[Plan], order: Path) -> dict | None:
+    """Очередь для колонки страницы: `None` — колонки нет (нет `ORDER.md` или в нём нет ни одного маркера блока).
+
+    Иначе `{"problem": текст проблемы блока или "", "entries": [{"item", "plan", "task", "finding"}]}` — пункт как в
+    `--queue`, найденные `Plan` и `Task` и находка пункта. `plans` — те же объекты, что печатают карточки.
+    """
+    if not order.is_file():
+        return None
+    span, begins, ends = locate_queue_block(read_text(order).split("\n"))
+    if span is None and begins == 0 and ends == 0:
+        return None
+    rows, problem = parse_queue_block(order)
+    entries = []
+    for n, row in enumerate(rows, 1):
+        item, finding, plan, task = _queue_item(n, row, plans)
+        entries.append({"item": item, "plan": plan, "task": task, "finding": finding})
+    return {"problem": problem, "entries": entries}
 
 
 def cycle_groups(edges: list[list[int]]) -> dict[int, list[int]]:
@@ -2358,7 +2380,17 @@ code{font-size:.8rem;color:var(--muted)}
 border-radius:10px;padding:0 7px}
 .chip.ok{color:var(--done);border-color:var(--done)}
 .cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
-main:has(#tab-queue:checked)>:not(header,#queue),main:has(#tab-waiting:checked)>:not(header,#waiting),
+#owner-queue{order:-1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0 12px 8px}
+#owner-queue h2{margin:8px 0 4px}
+#owner-queue .note{margin:0 0 6px;color:var(--muted);font-size:.8rem}
+#owner-queue ol{margin:0;padding-left:22px;font-size:.88rem}
+#owner-queue li{padding:3px 0;overflow-wrap:anywhere}
+#owner-queue s,#owner-queue .q-note{color:var(--muted)}
+#owner-queue .st{min-width:0;margin-left:6px}
+@media(min-width:932px){#queue{flex:1 1 0}
+#owner-queue{order:0;flex:0 0 310px;align-self:flex-start;position:sticky;top:56px}}
+main:has(#tab-queue:checked)>:not(header,#queue,#owner-queue){display:none}
+main:has(#tab-waiting:checked)>:not(header,#waiting),
 main:has(#tab-unlisted:checked)>:not(header,#unlisted),main:has(#tab-archive:checked)>:not(header,#archive),
 main:has(#tab-who:checked)>:not(header,#who),main:has(#tab-overlaps:checked)>:not(header,#overlaps),
 main:has(#tab-priority:checked)>:not(header,#priority),main:has(#tab-lanes:checked)>:not(header,.lanes){display:none}
@@ -2703,6 +2735,56 @@ def git_sha(root: Path) -> str:
     return sha if cp.returncode == 0 and sha else "—"
 
 
+def _owner_queue_html(view: dict, anchors: dict[int, str]) -> list[str]:
+    """Колонка `aside#owner-queue` (только показ): заголовок, заметка, затем ровно одно из трёх —
+    проблема блока, «очередь пуста» или `ol`.
+
+    Ссылка на карточку — `anchors[id(plan)]` для `Plan`, который нашёл `find_by_slug` (не карта «имя -> якорь»:
+    у архивного дубля она даст чужую карточку). Ни `id`, ни `span.anchor` внутри колонки нет.
+    """
+    entries = view["entries"]
+    opened = sum(1 for en in entries if not en["item"]["closed"])
+    out = [
+        '<aside id="owner-queue">',
+        f"<h2>Очередь владельца · открыто {opened} из {len(entries)}</h2>",
+        '<p class="note">правка — блок owner-queue в ORDER.md</p>',
+    ]
+    if view["problem"]:
+        out.append(f'<p class="chip warn" data-chip="queue-problem">⚠ {_e(view["problem"])}</p>')
+    elif not entries:
+        out.append("<p>очередь пуста</p>")
+    else:
+        out.append('<ol class="owner-queue">')
+        for en in entries:
+            item, plan, task, finding = en["item"], en["plan"], en["task"], en["finding"]
+            attrs = f'data-n="{_e(item["n"])}" data-kind="{_e(item["kind"])}" data-plan="{_e(item["plan"])}"'
+            if item["kind"] == "task":
+                attrs += f' data-task="{_e(item["task"])}"'
+            attrs += (' data-closed="1"' if item["closed"] else "") + ("" if item["known"] else ' data-known="0"')
+            if plan is not None:
+                head = f'<a href="#{_e(anchors[id(plan)])}">{_e(item["plan"])}</a>'
+            else:
+                head = _e(item["plan"]) or "—"
+            if item["kind"] == "task":
+                head += f" · <b>{_e(item['task'])}</b>"
+                if task is not None:
+                    head += f' {_e(task.title)}<span class="st">{STATUS_RU[task.status]}</span>'
+            elif plan is not None:
+                head += f' · <span class="tally">{_e(_tally(plan.done, plan.total))}</span>'
+            li = f"<s>{head}</s>" if item["closed"] else head
+            if not item["known"] and finding is not None:
+                text = finding.text.removeprefix(f"пункт {item['n']} очереди владельца: ")
+                li += f' <span class="chip warn" data-chip="queue-problem">⚠ {_e(text)}</span>'
+            elif plan is not None and not item["closed"]:
+                li += "".join(" " + _active_chip(e) for e in plan.active)
+            if item["note"]:
+                li += f' <span class="q-note">— {_e(item["note"])}</span>'
+            out.append(f"<li {attrs}>{li}</li>")
+        out.append("</ol>")
+    out.append("</aside>")
+    return out
+
+
 def to_html(
     live: list[Plan],
     archive: list[Plan],
@@ -2712,6 +2794,7 @@ def to_html(
     snapshot_date: str = "",
     snapshot_rows: list[SnapRow] | tuple = (),
     overlaps: list[Overlap] | tuple = (),
+    owner_queue: dict | None = None,
 ) -> str:
     """Страница: `#who`, `#overlaps` (только если есть), очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md),
     `#archive` (архив + закрытые §4.3).
@@ -2719,6 +2802,7 @@ def to_html(
     Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
     `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
     `overlaps` — из `find_overlaps`: секция `#overlaps` сразу после `#who` и чип `overlap` у планов с пересечением.
+    `owner_queue` — из `build_queue_view`: колонка `aside#owner-queue` сразу после `#queue`; `None` — колонки нет.
 
     Шапка `header.topbar`: `h1`, три `div.meta`, переключатель `details.switcher`, ссылка `a.back` и `nav.tabs`
     (вкладки — радиокнопки, вид без JS). У каждой карточки якорь `plan-<slug>` (`assign_anchors`, порядок печати —
@@ -2786,6 +2870,8 @@ def to_html(
     parts.append('<section id="queue">')
     parts.extend(card(p) for p in queue_view)
     parts.append("</section>")
+    if owner_queue is not None:
+        parts.extend(_owner_queue_html(owner_queue, anchors))
     parts.append('<details id="waiting">')
     parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
     parts.extend(card(p) for p in waiting)
@@ -2923,8 +3009,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
+        owner_queue = build_queue_view(ordered, order_path)  # те же планы, что у карточек, после apply_order
         target.write_text(
-            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps), encoding="utf-8"
+            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps, owner_queue),
+            encoding="utf-8",
         )
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
