@@ -53,12 +53,17 @@ def _gui_memory_policy(pytestconfig: pytest.Config):
 def _gui_memory_boundary(_gui_memory_policy):
     """Граница теста: автосборку не оставили включённой; мусор теста собран на главном потоке.
 
-    Определена ПЕРВОЙ из function-autouse: её teardown идёт последним.
+    Определена ПЕРВОЙ из function-autouse: её teardown идёт последним. Нарушение — по
+    РОСТУ счётчика ``enabled_violations`` за тест, а не по ``enforce()`` на teardown: pytest-qt
+    крутит ``processEvents()`` после тела теста, и тик таймера политики успевает вылечить
+    автосборку раньше границы (тогда ``enforce()`` вернул бы ``False``).
     """
-    yield
     policy = _gui_memory_policy
-    violated = policy.enforce()
+    mark = policy.stats()["enabled_violations"]
+    yield
+    policy.enforce()
     policy.collect_now()
+    violated = policy.stats()["enabled_violations"] > mark
     if violated:
         pytest.fail("Тест оставил автосборку gc включённой: восстановите прежнее состояние через paused_gc()")
 

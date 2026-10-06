@@ -131,7 +131,7 @@ class GuiMemoryPolicy:  # collect_now() -> int; enforce() -> bool; set_observe(o
 2. **`multiprocess_framework/modules/conftest.py`**: session autouse `_gui_memory_policy`: `pre = gui_memory_policy()`;
    `policy = pre or install_gui_memory_policy(None, freeze=True, freeze_after_s=0.0, observe=True)`; teardown —
    `config.gc_policy_stats = policy.stats()`, `uninstall()` только при `pre is None`. Function autouse `_gui_memory_boundary`
-   (первым — teardown последним): `violated = policy.enforce()`, `policy.collect_now()`; `violated` →
+   (первым — teardown последним): setup `mark = policy.stats()["enabled_violations"]`; teardown `policy.enforce()`, `policy.collect_now()`, `violated = policy.stats()["enabled_violations"] > mark` (ред. 3: тик таймера в `processEvents()` pytest-qt лечит раньше границы); `violated` →
    `pytest.fail("Тест оставил автосборку gc включённой: восстановите прежнее состояние через paused_gc()")`.
 3. **Корневой `conftest.py`** (прототип, Services, Plugins; В1): **те же имена и тела** фикстур, в `modules/` их перекрывает
    п. 2. Из корня грузятся обе (`pyproject.toml:155` — `state_store_module/tests`), из `modules/` корень — нет (`modules/pytest.ini`).
