@@ -684,26 +684,26 @@ def _journal_line(ts: str) -> dict:
 
 
 P6_ROWS = (
-    "| 1 | X | | план |",
-    "| 2 | X | 1.1 | открытая |",
-    "| 3 | X | 1.2 | закрытая |",
-    "| 4 | X | 9.9 | нет задачи |",
-    "| 5 | Y | | другой план |",
+    "| 1 | x-plan | | план |",
+    "| 2 | x-plan | 1.1 | открытая |",
+    "| 3 | x-plan | 1.2 | закрытая |",
+    "| 4 | x-plan | 9.9 | нет задачи |",
+    "| 5 | y-plan | | другой план |",
 )
 
 
 @pytest.fixture
 def p6(tmp_path):
-    """Настоящий git + worktree по образцу 5.2/5.3; план X с `Ветка: feat/x` и свежим журналом, план Y без worktree."""
+    """Настоящий git + worktree по образцу 5.2/5.3; план x-plan с `Ветка: feat/x` и свежим журналом, план y-plan без worktree."""
     base = tmp_path.resolve()
     root = base / "repo"
     plans = {
-        "plans/X/plan.md": plan_md(
+        "plans/x-plan/plan.md": plan_md(
             ("1.1", "Открытая задача", "PENDING"), ("1.2", "Закрытая задача", "DONE"), header=("- **Ветка:** feat/x",)
         ),
-        "plans/Y/plan.md": plan_md(("1.1", "Чужая задача", "PENDING")),
+        "plans/y-plan/plan.md": plan_md(("1.1", "Чужая задача", "PENDING")),
     }
-    order = order_text(qblock(*P6_ROWS), rows41=("X", "Y"), rows43=())
+    order = order_text(qblock(*P6_ROWS), rows41=("x-plan", "y-plan"), rows43=())
     for rel, text in {**plans, "plans/queue/ORDER.md": order, "NOTES.txt": "fixture"}.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -753,7 +753,7 @@ def _aside_range(html: str) -> tuple[int, int]:
 
 def test_p6_open_found_items_carry_active_chip_of_their_plan_closed_and_unknown_do_not(p6):
     _, page = p6
-    # контроль: у карточки плана X чип «в работе» есть (5.3), т.е. сама фикстура рабочая
+    # контроль: у карточки плана x-plan чип «в работе» есть (5.3), т.е. сама фикстура рабочая
     assert [c.attrs.get("data-active") for c in page.doc.find_all("span", data_chip="active")][:1] == ["feat/x"]
     lis = items_of(page.column())
     assert [li.attrs.get("data-n") for li in lis] == ["1", "2", "3", "4", "5"]
@@ -782,8 +782,8 @@ def test_p6_column_chip_raw_markup_equals_card_chip(p6):
 def test_p6_item_of_other_plan_without_active_has_no_chip_while_neighbour_has(p6):
     _, page = p6
     lis = items_of(page.column())
-    assert len(lis[1].find_all("span", data_chip="active")) == 1, "контроль: соседний пункт плана X с чипом"
-    assert lis[4].attrs.get("data-plan") == "Y"
+    assert len(lis[1].find_all("span", data_chip="active")) == 1, "контроль: соседний пункт плана x-plan с чипом"
+    assert lis[4].attrs.get("data-plan") == "y-plan"
     assert lis[4].find_all("span", data_chip="active") == []
 
 
