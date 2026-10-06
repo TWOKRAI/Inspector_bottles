@@ -10,13 +10,16 @@ Purpose:
 
 Public API:
     install_gui_memory_policy(app=None, *, interval_s=1.0, freeze=None,
-                              freeze_after_s=5.0, observe=False, log=None) -> GuiMemoryPolicy
-        Поставить политику (одна на процесс). Повтор — тот же объект.
+                              freeze_after_s=5.0, full_interval_s=60.0, observe=False,
+                              log=None) -> GuiMemoryPolicy
+        Поставить политику (одна на процесс). Повтор — тот же объект; прежняя мертва
+        (её владельца сборки сняли мимо ``uninstall``) — новая.
     gui_memory_policy() -> GuiMemoryPolicy | None
         Установленная политика или ``None``.
     GuiMemoryPolicy
-        ``collect_now() -> int``, ``enforce() -> bool``, ``set_observe(on)``,
-        ``stats() -> dict``, ``uninstall()``.
+        ``collect_now(*, refreeze=False) -> int``, ``enforce() -> bool``, ``set_observe(on)``,
+        ``stats() -> dict``, ``uninstall()``. Мёртвая политика: ``collect_now``/``enforce`` —
+        строка лога и ``RuntimeError``.
 
 Stability: lite
 
@@ -29,6 +32,7 @@ Stability: lite
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -43,11 +47,13 @@ from multiprocess_framework.modules.frontend_module.core.qt_lifetime import flus
 from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (
     GcCollectionOwner,
     collect_on,
+    collection_owner,
 )
 
 __all__ = ["GuiMemoryPolicy", "gui_memory_policy", "install_gui_memory_policy"]
 
 _THREAD_ERROR = "install_gui_memory_policy: только поток QCoreApplication"
+_DEAD_ERROR = "GuiMemoryPolicy: владелец сборки снят — политика не действует"
 
 _policy: Optional["GuiMemoryPolicy"] = None
 
@@ -56,18 +62,33 @@ def _on_app_thread(app: QCoreApplication) -> bool:
     return QThread.currentThread() == app.thread()
 
 
+def _resolve_log(log: Optional[Callable[[str], None]]) -> Callable[[str], None]:
+    """Один приёмник строк на политику: ядро, исполнитель и сама политика пишут в него.
+
+    ``log=None`` → ``get_std_logger`` (голый stdlib-логгер запрещён стражем); импорт ленивый.
+    """
+    if log is not None:
+        return log
+    from multiprocess_framework.modules.logger_module import get_std_logger
+
+    return get_std_logger(__name__).info
+
+
 class _QtMainThreadExecutor:
     """Исполнитель ядра: ``QTimer(parent=app)`` зовёт тик на потоке приложения.
 
     Без приложения на ``start`` таймер не создаётся — его подключат ``attach``
-    (первый ``collect_now()`` или повторный ``install``).
+    (первый ``collect_now()`` или повторный ``install``). Приложение на чужом потоке →
+    таймер не подключается, одна строка лога (до первого успешного подключения).
     """
 
-    def __init__(self, app: Optional[QCoreApplication]) -> None:
+    def __init__(self, app: Optional[QCoreApplication], log: Callable[[str], None]) -> None:
         self._app = app
+        self._log = log
         self._tick: Optional[Callable[[], int]] = None
         self._interval_ms = 1000
         self._timer: Optional[QTimer] = None
+        self._refusal_logged = False
 
     def start(self, tick: Callable[[], int], *, interval_s: float) -> None:
         self._tick = tick
@@ -91,7 +112,14 @@ class _QtMainThreadExecutor:
         if self._tick is None or self.attached:
             return
         if not _on_app_thread(app):
+            if not self._refusal_logged:
+                self._refusal_logged = True
+                self._log(
+                    f"gc-policy: таймер сборки не подключён — поток {threading.current_thread().name!r} "
+                    "не поток QCoreApplication; сборка только на явных границах"
+                )
             return
+        self._refusal_logged = False
         self._app = app
         timer = QTimer(app)
         timer.setInterval(self._interval_ms)
@@ -110,21 +138,35 @@ class GuiMemoryPolicy:
 
     Stability: lite
 
-    Pre: политика установлена (``uninstall`` ещё не звали).
+    Pre: политика жива — её владелец сборки в слоте процесса. Иначе (``uninstall`` или
+    ``release`` владельца мимо политики) ``collect_now``/``enforce`` — строка лога и
+    ``RuntimeError``: молча мёртвая политика не выдаёт себя за действующую.
     Post ``collect_now()``: автосборка выключена; полная сборка выполнена; вне цикла
     событий доставлены отложенные удаления.
     """
 
-    def __init__(self, owner: GcCollectionOwner, executor: _QtMainThreadExecutor) -> None:
+    def __init__(
+        self,
+        owner: GcCollectionOwner,
+        executor: _QtMainThreadExecutor,
+        log: Callable[[str], None],
+    ) -> None:
         self._owner = owner
         self._executor = executor
+        self._log = log
         self._installed = True
 
-    def collect_now(self) -> int:
-        """Граница: ``enforce()``, таймер (если пора), полная сборка, flush вне цикла событий."""
+    def collect_now(self, *, refreeze: bool = False) -> int:
+        """Граница: ``enforce()``, таймер (если пора), полная сборка, flush вне цикла событий.
+
+        ``refreeze=True`` — после полной сборки ``gc.freeze()`` (``GcCollectionOwner.collect``):
+        только граница теста в фикстуре сессии. Прод (корень GUI, тик) — никогда: объект,
+        замороженный живым и умерший позже, остаётся в памяти до ``gc.unfreeze()``.
+        """
+        self._require_live()
         self._owner.enforce()
         self._attach_timer()
-        collected = self._owner.collect(full=True)
+        collected = self._owner.collect(full=True, refreeze=refreeze)
         app = QCoreApplication.instance()
         if app is not None and _on_app_thread(app) and QThread.currentThread().loopLevel() == 0:
             flush_deferred_deletes()
@@ -132,13 +174,14 @@ class GuiMemoryPolicy:
 
     def enforce(self) -> bool:
         """Автосборку включили извне → выключить снова. True — было нарушение."""
+        self._require_live()
         return self._owner.enforce()
 
     def set_observe(self, on: bool) -> None:
         self._owner.set_observe(on)
 
     def stats(self) -> dict[str, Any]:
-        """Счётчики ядра (13 примитивов) + ``timer_attached``."""
+        """Счётчики ядра (17 примитивов) + ``timer_attached``."""
         data = self._owner.stats().to_dict()
         data["timer_attached"] = self._executor.attached
         return data
@@ -154,6 +197,14 @@ class GuiMemoryPolicy:
             _policy = None
 
     # ── внутреннее ──
+
+    def _alive(self) -> bool:
+        return collection_owner() is self._owner
+
+    def _require_live(self) -> None:
+        if not self._alive():
+            self._log(f"gc-policy: {_DEAD_ERROR}")
+            raise RuntimeError(_DEAD_ERROR)
 
     def _attach_timer(self) -> None:
         app = QCoreApplication.instance()
@@ -171,6 +222,7 @@ def install_gui_memory_policy(
     interval_s: float = 1.0,
     freeze: Optional[bool] = None,
     freeze_after_s: float = 5.0,
+    full_interval_s: float = 60.0,
     observe: bool = False,
     log: Optional[Callable[[str], None]] = None,
 ) -> GuiMemoryPolicy:
@@ -182,7 +234,9 @@ def install_gui_memory_policy(
     иначе ``RuntimeError``). ``app=None`` → ``QCoreApplication.instance()``; приложения
     может не быть (тесты) — тогда таймер подключится позже.
     Post: автосборка выключена, слот процесса занят исполнителем на ``QTimer``.
-    Повтор: тот же объект, ``rearm_freeze()``, таймер подключён, если приложение есть.
+    Повтор: живая политика — тот же объект, ``rearm_freeze()``, таймер подключён, если
+    приложение есть. Мёртвая (её владельца сняли мимо ``uninstall``) — строка лога в её
+    приёмник, она забыта, ставится новая (новый объект).
     """
     global _policy
     if app is None:
@@ -191,18 +245,25 @@ def install_gui_memory_policy(
         raise RuntimeError(_THREAD_ERROR)
     existing = _policy
     if existing is not None:
-        existing._reinstall()
-        return existing
-    executor = _QtMainThreadExecutor(app)
+        if existing._alive():
+            existing._reinstall()
+            return existing
+        # владельца не трогаем: он уже снят (или приостановлен suspend — вернётся сам)
+        existing._log("gc-policy: прежняя политика мертва (владелец сборки снят) — ставится новая")
+        existing._installed = False
+        _policy = None
+    sink = _resolve_log(log)
+    executor = _QtMainThreadExecutor(app, sink)
     owner = collect_on(
         executor,
         interval_s=interval_s,
         freeze=freeze,
         freeze_after_s=freeze_after_s,
+        full_interval_s=full_interval_s,
         observe=observe,
-        log=log,
+        log=sink,
     )
-    policy = GuiMemoryPolicy(owner, executor)
+    policy = GuiMemoryPolicy(owner, executor, sink)
     _policy = policy
     return policy
 

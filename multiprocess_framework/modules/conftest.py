@@ -57,12 +57,21 @@ def _gui_memory_boundary(_gui_memory_policy):
     РОСТУ счётчика ``enabled_violations`` за тест, а не по ``enforce()`` на teardown: pytest-qt
     крутит ``processEvents()`` после тела теста, и тик таймера политики успевает вылечить
     автосборку раньше границы (тогда ``enforce()`` вернул бы ``False``).
+
+    Пустой слот владельца (тест снял его ``release``/``uninstall``) — провал первой проверкой:
+    мёртвая политика ничего не ловит, а её ``collect_now`` бросил бы без этого текста.
+    ``refreeze=True`` — после полной сборки ``gc.freeze()``: следующая граница обходит только
+    объекты, созданные после неё (только здесь; в проде — никогда).
     """
     policy = _gui_memory_policy
     mark = policy.stats()["enabled_violations"]
     yield
+    if not policy.stats()["active"]:
+        pytest.fail(
+            "Политику памяти сняли посреди сессии: слот владельца сборки пуст — тест освободил его (release/uninstall)"
+        )
     policy.enforce()
-    policy.collect_now()
+    policy.collect_now(refreeze=True)
     violated = policy.stats()["enabled_violations"] > mark
     if violated:
         pytest.fail("Тест оставил автосборку gc включённой: восстановите прежнее состояние через paused_gc()")

@@ -311,8 +311,12 @@ def test_stats_dict_primitives(ex):
         "last_pause_ms",
         "max_pause_ms",
         "total_pause_ms",
+        "full_collections",
+        "max_pause_ms_gen0",
+        "max_pause_ms_gen1",
+        "max_pause_ms_full",
     }
-    assert len(d) == 13
+    assert len(d) == 17
     for key, value in d.items():
         assert type(value) in (bool, int, float, str), f"{key}: {type(value).__name__}"
     assert d["active"] is True
@@ -367,3 +371,117 @@ def test_suspend_exit_rearms_freeze(ex):
     assert door.collection_owner() is owner  # владелец вернулся
     owner.collect()
     assert gc.get_freeze_count() > 0
+
+
+# ── Ред. 4 (ревью р1 №3, CTO D1–D3): авторские тесты строк контракта ─────────────────────────
+
+
+def test_bounds_rejected(ex):
+    door = _door()
+    for kwargs in (
+        {"interval_s": 0},
+        {"interval_s": float("inf")},
+        {"interval_s": float("nan")},
+        {"freeze_after_s": -1},
+        {"full_interval_s": -1},
+        {"full_interval_s": float("inf")},
+    ):
+        with pytest.raises(ValueError) as info:
+            door.collect_on(ex, **kwargs)
+        assert "конечные" in str(info.value), kwargs
+    assert door.collection_owner() is None  # отказ границ слот не занял
+    assert ex.events == []
+
+
+def test_freeze_none_reads_flag(ex, monkeypatch):
+    door = _door()
+    gc.unfreeze()
+    monkeypatch.setenv("FW_GC_FREEZE", "1")
+    owner = door.collect_on(ex, freeze_after_s=0)  # freeze=None → флаг
+    owner.collect()
+    assert gc.get_freeze_count() > 0
+    owner.release()
+    assert gc.get_freeze_count() == 0
+
+    monkeypatch.delenv("FW_GC_FREEZE")
+    ex2 = FakeExecutor()
+    owner2 = door.collect_on(ex2, freeze_after_s=0)
+    owner2.collect()
+    assert gc.get_freeze_count() == 0  # флага нет — заморозки нет
+    owner2.release()
+
+
+def _gen_collections() -> tuple[int, int]:
+    stats = gc.get_stats()
+    return stats[1]["collections"], stats[2]["collections"]
+
+
+def _ticks_with_garbage(owner, n: int) -> None:
+    for _ in range(n):
+        for _ in range(200):  # с запасом: освобождения чужих объектов уменьшают счётчик gen0
+            cycle: list = []
+            cycle.append(cycle)  # цикл: счётчик gen0 растёт, освободит только сборщик
+        del cycle
+        owner.tick()
+
+
+def test_gen2_not_more_often_than_full_interval(ex):
+    door = _door()
+    old = gc.get_threshold()
+    try:
+        owner = door.collect_on(ex, full_interval_s=3600)
+        owner.collect(full=True)  # счётчики поколений — с нуля
+        gc.set_threshold(1, 1, 1)
+        gen1_before, gen2_before = _gen_collections()
+        _ticks_with_garbage(owner, 10)  # 10 тиков: без ограничения gen2 случился бы на 7-м
+        gen1_after, gen2_after = _gen_collections()
+        assert gen2_after == gen2_before  # полной сборки тиком не было — рано
+        assert gen1_after > gen1_before  # вместо неё — gen1
+        owner.release()
+
+        ex2 = FakeExecutor()
+        owner2 = door.collect_on(ex2, full_interval_s=0)  # 0 — без ограничения
+        gc.set_threshold(*old)
+        owner2.collect(full=True)
+        gc.set_threshold(1, 1, 1)
+        _, gen2_before = _gen_collections()
+        _ticks_with_garbage(owner2, 10)
+        _, gen2_after = _gen_collections()
+        assert gen2_after > gen2_before
+        assert owner2.stats().full_collections >= 2  # collect(full=True) + gen2 тиком
+    finally:
+        gc.set_threshold(*old)
+
+
+def test_tick_enters_only_above_gen0_threshold_strict(ex):
+    door = _door()
+    old = gc.get_threshold()
+    try:
+        owner = door.collect_on(ex)
+        owner.collect(full=True)
+        owner.collect()
+        owner.collect()  # две сборки gen0 → счётчик gen1 = 2
+        gc.set_threshold(10**6, 1, 1)  # gen1 «готов», но вход — только по gen0 выше порога
+        assert owner.tick() == 0
+        assert owner.stats().collections == 3
+
+        gc.set_threshold(1, 2, 10**9)  # gen1: 2 > 2 — нет (строго, как CPython) → gen0
+        gen1_before, _ = _gen_collections()
+        _ticks_with_garbage(owner, 1)
+        gen1_after, _ = _gen_collections()
+        assert owner.stats().collections == 4
+        assert gen1_after == gen1_before
+    finally:
+        gc.set_threshold(*old)
+
+
+def test_collect_full_refreeze(ex):
+    door = _door()
+    gc.unfreeze()
+    owner = door.collect_on(ex, freeze=False)
+    owner.collect(full=True, refreeze=True)
+    assert gc.get_freeze_count() > 0
+    assert owner.stats().frozen is True
+    assert owner.stats().full_collections == 1
+    owner.release()
+    assert gc.get_freeze_count() == 0  # release снимает и заморозку границы

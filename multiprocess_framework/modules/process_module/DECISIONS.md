@@ -4101,3 +4101,27 @@ Qt-адаптер `frontend_module/core/qt_gc_policy.py` даёт исполни
 стенд). `gc.unfreeze()` глобален: `rearm_freeze`/`release` снимают и стартовую заморозку.
 Сторонний `gc.enable()` (site-packages) лечит `enforce`, чужие сборки видит `foreign_collections`.
 Free-threaded Python — пересмотреть.
+
+**Поправка 2026-10-06 (ревью р1 и арбитраж CTO D1–D3, `docs/reviews/2026-10-06_task-T1-review-r1-and-cto-arbitration.md`).**
+- *Тик (D1).* «Как CPython» было неточно. Вход — только при `count[0] > threshold[0]`; поколение —
+  старшее с `count > threshold` (строго). По порогам как CPython; страж long_lived из Python
+  недоступен (`len(gc.get_objects(2))` на 1,5 млн объектов — 35 мс, не дешевле паузы) — вместо него
+  ограничение по времени `full_interval_s`: gen2 тиком не чаще, чем раз в `full_interval_s` с
+  последней полной сборки владельца любого происхождения (gen2 тиком, `collect(full=True)`, сборка
+  перед заморозкой), иначе gen1. Параметр `collect_on` / `install_gui_memory_policy`: по умолчанию
+  60.0, конечный, `>= 0`, 0 — без ограничения. Отсчёт — от установки. `collect(full=True)` по
+  времени не ограничен.
+- *Наблюдаемость (D2).* `GcOwnerStats` — 17 полей: `full_collections` (int, растёт всегда),
+  `max_pause_ms_gen0`, `max_pause_ms_gen1`, `max_pause_ms_full` (только при `observe`, ноль цены выкл.
+  сохранён). Строка раз в 60 с дополнена `full=… max_gen0=… max_gen1=… max_full=…`.
+- *Граница теста (D3).* `collect(full=True, refreeze=True)` и `collect_now(refreeze=True)`: после
+  полной сборки `gc.freeze()`, владелец помечен как заморозивший — снимают `release`,
+  `rearm_freeze`, выход `suspend`. Только фикстура `_gui_memory_boundary`; прод (тик, корень GUI) —
+  никогда: объект, замороженный живым и умерший позже, резидентен до `gc.unfreeze()`; тест с
+  `gc.unfreeze()` делает следующую границу полной сборкой всей кучи.
+- *Мёртвая политика (ревью №1, №5).* Владельца сняли мимо `uninstall` → `collect_now`/`enforce` —
+  строка лога и `RuntimeError`; граница теста — `pytest.fail` первой проверкой; `install` ставит
+  новую политику вместо мёртвой. Отказ подключить таймер с чужого потока — строка лога.
+- *Отвергнуто.* «gen2 тиком никогда» — течёт (100 000 циклов в gen2 резидентны до `collect(2)`,
+  замер CTO). Страж long_lived через `len(gc.get_objects(2))` — 35 мс на каждый тик. Заморозка в
+  прод-тике — резидентность умерших объектов без границы, которая её снимет.

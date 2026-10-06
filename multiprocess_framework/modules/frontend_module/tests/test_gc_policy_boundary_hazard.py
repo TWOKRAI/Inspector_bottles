@@ -99,3 +99,70 @@ def test_boundary_catches_violation_healed_by_timer_tick(tmp_path):
     assert "PASSED test_inner.py::test_control_no_enable" in out, out
     assert "ERROR test_inner.py::test_control_no_enable" not in out, out
     assert "FAILED" not in out, out
+
+
+# ── Ред. 4 (ревью р1 №1): политика умирает тихо ─────────────────────────────────────────────────
+# Опасность: тест освобождает владельца сборки мимо ``uninstall`` (``collection_owner().release()``).
+# Слот пуст, автосборка — снова как до политики, а сессионная политика «установлена»: граница по
+# ``enabled_violations`` дальше ничего не видит (``enforce`` мёртвого владельца — пустой), и
+# следующий тест включает автосборку безнаказанно. Граница обязана заметить пустой слот.
+
+_DEAD_TEXT = "Политику памяти сняли посреди сессии"
+
+_INNER_DEAD = textwrap.dedent(
+    """
+    import gc
+
+    from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import collection_owner
+
+
+    def test_a_releases_owner():
+        collection_owner().release()
+
+
+    def test_b_enables_gc():
+        gc.enable()
+    """
+)
+
+
+def test_boundary_fails_when_policy_released(tmp_path):
+    (tmp_path / "test_inner.py").write_text(_INNER_DEAD, encoding="utf-8")
+    (tmp_path / "pytest.ini").write_text("[pytest]\nqt_api = pyside6\n", encoding="utf-8")
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = str(_REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-rA",
+            "--tb=line",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "multiprocess_framework.modules.conftest",
+            "-c",
+            str(tmp_path / "pytest.ini"),
+            "--rootdir",
+            str(tmp_path),
+            "test_inner.py",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, f"rc={proc.returncode}\n{out}"
+    assert _DEAD_TEXT in out, out
+    # Нарушитель: тело прошло, граница дала ERROR; следующий тест — тоже (политика мертва).
+    assert "PASSED test_inner.py::test_a_releases_owner" in out, out
+    assert "ERROR test_inner.py::test_a_releases_owner" in out, out
+    assert "ERROR test_inner.py::test_b_enables_gc" in out, out

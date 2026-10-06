@@ -1,6 +1,6 @@
 # Task T1 — политика памяти GUI-процесса
 
-**Ред. 2.** **Level:** Senior+ · **Assignee:** teamlead · **Layer:** framework (+1 строка в корне GUI прототипа)
+**Ред. 4.** **Level:** Senior+ · **Assignee:** teamlead · **Layer:** framework (+1 строка в корне GUI прототипа)
 **Refs:** [`plan.md`](plan.md) «Перестройка 2026-10-05»; [`CTO`](../../docs/reviews/2026-10-05_lifecycle-abort-root-cause-cto.md); [`task-0.4.md`](task-0.4.md)
 **Зависит от:** 0.4 (`flush_deferred_deletes`). **Блокирует:** вливание в `main`, мегаплан GUI.
 **Module contract:** public-api-change (`process_module/lifecycle/gc_discipline.py`) + new-lite (`frontend_module/core/qt_gc_policy.py`).
@@ -13,6 +13,29 @@
 - R-10: «Потоки». R-11: фикстуры корня — те же имена, хук сводки — один. R-12/D-2: шаг 4 — Brief D. R-13/D-1: A4 пишет lead.
 - R-14/D-5: В4 к CTO. R-15/D-4: повтор `collect_on` — лог. R-16: `Stability`/Pre/Post. R-17/D-9: «Стоимость».
 - R-18/D-7: C1 + C2, один developer. D-6: allowlist R2 = 4. D-8: В1–В3 решены. Пробелы: импорты Q3, относительные импорты, лог «раз в 60 с» — со стенда.
+
+## Ред. 4 — что изменено (ревью кода р1 + арбитраж CTO D1–D3, 2026-10-06)
+
+Источник — [`docs/reviews/2026-10-06_task-T1-review-r1-and-cto-arbitration.md`](../../docs/reviews/2026-10-06_task-T1-review-r1-and-cto-arbitration.md).
+Ред. 3 (раздела не было): `log=None` → `get_std_logger`; граница по росту `enabled_violations`.
+
+- **D1, тик.** Вход — только `count[0] > threshold[0]`; поколение — старшее с `count > threshold` (строго, было `>=`).
+  Страж long_lived из Python недоступен — вместо него ограничение по времени: gen2 тиком не чаще `full_interval_s`
+  (новый параметр `collect_on`/`install_gui_memory_policy`, 60.0, конечный, `>= 0`, 0 — без ограничения) с последней
+  полной сборки владельца любого происхождения, иначе gen1; отсчёт — от установки. `collect(full=True)` — без ограничения.
+  Текст `ValueError` границ — новый (ниже).
+- **D2, наблюдаемость.** `GcOwnerStats` — 17 полей (+ `full_collections`, `max_pause_ms_gen0`, `max_pause_ms_gen1`,
+  `max_pause_ms_full`); A1 стр. 10: литерал 13 → 17. Строка раз в 60 с + `full=… max_gen0=… max_gen1=… max_full=…`.
+- **D3, граница.** `collect(*, full=False, refreeze=False)`, `collect_now(*, refreeze=False)`; обе фикстуры границы —
+  `collect_now(refreeze=True)`. Прод — никогда.
+- **Ревью №1, мёртвая политика.** Граница первой проверкой — `pytest.fail("Политику памяти сняли посреди сессии: …")`;
+  `collect_now`/`enforce` мёртвой политики — строка лога + `RuntimeError`; `install` вместо мёртвой ставит новую.
+- **Ревью №5.** Отказ `attach` с чужого потока — одна строка лога с именем потока.
+- **Ревью №3, авторские тесты** (не слепые): A1 — `test_bounds_rejected`, `test_freeze_none_reads_flag`,
+  `test_gen2_not_more_often_than_full_interval`, `test_tick_enters_only_above_gen0_threshold_strict`,
+  `test_collect_full_refreeze`; A2 (подпроцессы) — `test_uninstall_restores_and_reinstall_same`,
+  `test_collect_now_on_dead_policy_raises`, `test_install_replaces_dead_policy`, `test_attach_refusal_logged`;
+  хазард — `test_gc_policy_boundary_hazard.py::test_boundary_fails_when_policy_released`.
 
 ## Goal
 
@@ -46,7 +69,7 @@ class CollectionExecutor(Protocol):   # где и когда зовётся ти
     def start(self, tick: Callable[[], int], *, interval_s: float) -> None: ...
     def stop(self) -> None: ...
 def collect_on(executor, *, interval_s=1.0, freeze: bool | None = None, freeze_after_s=5.0,
-               observe=False, log: Callable[[str], None] | None = None) -> GcCollectionOwner
+               full_interval_s=60.0, observe=False, log: Callable[[str], None] | None = None) -> GcCollectionOwner
 def collection_owner() -> GcCollectionOwner | None
 @contextmanager
 def paused_gc() -> Iterator[None]                 # prev = gc.isenabled(); disable; на выходе ровно prev
@@ -55,17 +78,18 @@ def suspend_collection_owner() -> Iterator[None]  # только тесты ме
 class GcCollectionOwner:
     thread_ident: int
     def tick(self) -> int
-    def collect(self, *, full: bool = False) -> int
+    def collect(self, *, full: bool = False, refreeze: bool = False) -> int  # refreeze — только с full
     def enforce(self) -> bool                     # True: автосборку включили извне, выключена снова
     def rearm_freeze(self) -> None
     def set_observe(self, on: bool) -> None
     def stats(self) -> GcOwnerStats
     def release(self) -> None
 @dataclass(frozen=True)
-class GcOwnerStats:  # 13 полей; to_dict() — только примитивы
+class GcOwnerStats:  # 17 полей (ред. 4); to_dict() — только примитивы
     active: bool; executor: str; owner_thread: str; interval_s: float; observe: bool; frozen: bool
     collections: int; collected_objects: int; enabled_violations: int; foreign_collections: int
     last_pause_ms: float; max_pause_ms: float; total_pause_ms: float
+    full_collections: int; max_pause_ms_gen0: float; max_pause_ms_gen1: float; max_pause_ms_full: float
 ```
 
 Docstring модуля и новых публичных имён — `Stability: lite`, `Pre:`/`Post:` (сейчас `Stability` в файле — 0).
@@ -83,15 +107,25 @@ Docstring модуля и новых публичных имён — `Stability:
 | ACTIVE | `suspend_collection_owner()` | пусто на блок | тик старого → 0; `gc` = `prior`. Выход: слот не пуст → освободить, `RuntimeError("suspend_collection_owner: блок оставил своего владельца")`; владелец вернулся, `gc.disable()`; морозил → `rearm_freeze()` |
 | пусто | `suspend_collection_owner()` | пусто | `gc` не трогается; выход — та же проверка |
 
-- `interval_s > 0`, `freeze_after_s >= 0`, конечные; иначе `ValueError("collect_on: interval_s и freeze_after_s — конечные, interval_s > 0")`.
-- **`tick()`**: `enforce()`, затем `gc.collect(gen)` старшего поколения, чей `gc.get_count()` достиг `gc.get_threshold()`
-  (как CPython, но на этом потоке); ни одно — 0, `collections` не растёт. `collect(full=True)` — `gc.collect()`.
+- `interval_s > 0`, `freeze_after_s >= 0`, `full_interval_s >= 0`, все конечные; иначе
+  `ValueError("collect_on: interval_s, freeze_after_s и full_interval_s — конечные, interval_s > 0, остальные >= 0")` (ред. 4).
+- **`tick()`** (ред. 4, D1): `enforce()`; вход только при `count[0] > threshold[0]` (иначе 0, `collections` не растёт);
+  `gc.collect(gen)` старшего поколения с `count > threshold` (строго). По порогам как CPython; страж long_lived из Python
+  недоступен — вместо него ограничение по времени: gen2 не чаще `full_interval_s` с последней полной сборки владельца
+  (gen2 тиком, `collect(full=True)`, сборка перед заморозкой; отсчёт — от установки), иначе gen1.
+  `collect(full=True)` — `gc.collect()`, по времени не ограничен.
+- **`collect(full=True, refreeze=True)`** (ред. 4, D3): после полной сборки `gc.freeze()`, владелец «морозил» — снимают
+  `release`/`rearm_freeze`/выход `suspend`. `refreeze` без `full` — `ValueError`. Только граница теста; прод — никогда
+  (объект, замороженный живым и умерший позже, резидентен до `unfreeze`; тест с `gc.unfreeze()` → следующая граница —
+  полная сборка всей кучи).
 - **`enforce()`**: `gc.isenabled()` → `enabled_violations += 1`, `gc.disable()`, лог «автосборку включили извне — выключена (нарушений=N)».
 - **Заморозка.** `freeze=None` → флаг `FW_GC_FREEZE`. Вкл. → первый `tick`/`collect` не раньше `freeze_after_s`:
   `gc.collect()` + `gc.freeze()`. `rearm_freeze()`: морозил владелец → `gc.unfreeze()`, отсчёт заново.
-- **Наблюдаемость (ноль цены выкл.).** Выкл.: нет хука и `perf_counter`, растут три счётчика-int. Вкл.: `*_pause_ms`; хук на
+- **Наблюдаемость (ноль цены выкл.).** Выкл.: нет хука и `perf_counter`, растут счётчики-int (`collections`,
+  `collected_objects`, `full_collections`, `enabled_violations`). Вкл.: `*_pause_ms`, в том числе по виду сборки
+  `max_pause_ms_gen0/gen1/full` (full — gen2 тиком, `collect(full=True)`, сборка перед заморозкой); хук на
   `"start"`: поток ≠ владельца → `foreign_collections += 1`; раз в 60 с — строка `gc-policy: collections=… max_pause_ms=…
-  violations=… foreign=…` в `log` (не в приёмке: часы не внедряемы; проверка — стенд).
+  violations=… foreign=… full=… max_gen0=… max_gen1=… max_full=…` в `log` (не в приёмке: часы не внедряемы; проверка — стенд).
 - **`GcDiscipline`, две правки** (слот пуст → бит-в-бит 92fd0450f): `collect_scheduled` — первой строкой слот занят → `False`;
   `freeze_after_startup` при занятом слоте с потока ≠ владельца → `False` + лог ровно
   `GcDiscipline: freeze_after_startup пропущен — сборкой владеет другой поток`; с потока владельца — как было.
@@ -110,17 +144,23 @@ Docstring модуля и новых публичных имён — `Stability:
 
 ```python
 def install_gui_memory_policy(app: QCoreApplication | None = None, *, interval_s=1.0, freeze: bool | None = None,
-                              freeze_after_s=5.0, observe=False, log=None) -> GuiMemoryPolicy
+                              freeze_after_s=5.0, full_interval_s=60.0, observe=False, log=None) -> GuiMemoryPolicy
 def gui_memory_policy() -> GuiMemoryPolicy | None
-class GuiMemoryPolicy:  # collect_now() -> int; enforce() -> bool; set_observe(on); stats() -> dict; uninstall()
+class GuiMemoryPolicy:  # collect_now(*, refreeze=False) -> int; enforce() -> bool; set_observe(on); stats() -> dict; uninstall()
 ```
 
 - `app is None` → `QCoreApplication.instance()` (в тестах может не быть). Поток ≠ `app.thread()` →
   `RuntimeError("install_gui_memory_policy: только поток QCoreApplication")` — первой проверкой, и при повторе.
 - Повтор — тот же объект + `owner.rearm_freeze()` + подключить таймер, если приложение есть, а таймера нет.
+  Прежняя политика мертва (её владельца нет в слоте: сняли мимо `uninstall`) — строка лога, она забыта, ставится новая
+  (новый объект; ред. 4).
+- Мёртвая политика: `collect_now()`/`enforce()` — строка лога и
+  `RuntimeError("GuiMemoryPolicy: владелец сборки снят — политика не действует")` (ред. 4, ревью №1).
+- Один приёмник строк на политику: `log` или `get_std_logger(__name__).info`; его получают ядро и исполнитель.
 - `_QtMainThreadExecutor`: `QTimer(parent=app)`, `round(interval_s*1000)` мс, `timeout → tick`; без приложения — таймер при
-  первом `collect_now()` или повторном `install`. Тик — только сборка: `DeferredDelete` доставит цикл.
-- `collect_now()`: `enforce()`; таймер, если пора; `collect(full=True)`; приложение есть и `loopLevel() == 0` →
+  первом `collect_now()` или повторном `install`. Тик — только сборка: `DeferredDelete` доставит цикл. Приложение на
+  чужом потоке → таймер не подключается, одна строка лога с именем потока до первого успешного подключения (ред. 4, ревью №5).
+- `collect_now(*, refreeze=False)`: `enforce()`; таймер, если пора; `collect(full=True, refreeze=refreeze)`; приложение есть и `loopLevel() == 0` →
   `flush_deferred_deletes()` (`qt_lifetime`); `loopLevel() > 0` — без flush, без ошибки.
 - `uninstall()` повторно — no-op. `stats()` = `owner.stats().to_dict()` + `timer_attached`. Прямых `gc.*` нет.
 
@@ -131,7 +171,10 @@ class GuiMemoryPolicy:  # collect_now() -> int; enforce() -> bool; set_observe(o
 2. **`multiprocess_framework/modules/conftest.py`**: session autouse `_gui_memory_policy`: `pre = gui_memory_policy()`;
    `policy = pre or install_gui_memory_policy(None, freeze=True, freeze_after_s=0.0, observe=True)`; teardown —
    `config.gc_policy_stats = policy.stats()`, `uninstall()` только при `pre is None`. Function autouse `_gui_memory_boundary`
-   (первым — teardown последним): setup `mark = policy.stats()["enabled_violations"]`; teardown `policy.enforce()`, `policy.collect_now()`, `violated = policy.stats()["enabled_violations"] > mark` (ред. 3: тик таймера в `processEvents()` pytest-qt лечит раньше границы); `violated` →
+   (первым — teardown последним): setup `mark = policy.stats()["enabled_violations"]`; teardown — первой проверкой
+   `not policy.stats()["active"]` → `pytest.fail("Политику памяти сняли посреди сессии: слот владельца сборки пуст — тест освободил его (release/uninstall)")`
+   (ред. 4: проверка до `collect_now`, иначе её опередит `RuntimeError` мёртвой политики); `policy.enforce()`,
+   `policy.collect_now(refreeze=True)` (ред. 4, D3), `violated = policy.stats()["enabled_violations"] > mark` (ред. 3: тик таймера в `processEvents()` pytest-qt лечит раньше границы); `violated` →
    `pytest.fail("Тест оставил автосборку gc включённой: восстановите прежнее состояние через paused_gc()")`.
 3. **Корневой `conftest.py`** (прототип, Services, Plugins; В1): **те же имена и тела** фикстур, в `modules/` их перекрывает
    п. 2. Из корня грузятся обе (`pyproject.toml:155` — `state_store_module/tests`), из `modules/` корень — нет (`modules/pytest.ini`).
@@ -211,7 +254,7 @@ TESTS C2: пять файлов + импортёры `_road_cost`: `MF/tests/tes
 | 7 | `test_observe_off_zero_cost_on_counts_foreign` | выкл.: `len(gc.callbacks)` как до, `max_pause_ms == 0.0`; вкл. → `+1`, `gc.collect()` в daemon → `foreign_collections == 1` | хук всегда |
 | 8 | `test_paused_gc_restores_exact_state` | prior выкл. + внутри `gc.enable()` → `False`; prior вкл. → `True` | выход = `gc.enable()` |
 | 9 | `test_freeze_deadline_and_rearm` | `freeze=True, freeze_after_s=0`: `tick()` → `get_freeze_count() > 0`; `rearm_freeze()` → `== 0`; `tick()` → `> 0`; `release()` → `== 0` | `release` без `unfreeze` |
-| 10 | `test_stats_dict_primitives` | ровно 13 ключей; значения `bool/int/float/str` | поле-объект |
+| 10 | `test_stats_dict_primitives` | ровно 17 ключей (ред. 4, было 13); значения `bool/int/float/str` | поле-объект |
 | 11 | `test_suspend_requires_empty_slot` | `collect_on` в блоке без `release` → `RuntimeError`, `"оставил"` | выход без проверки |
 | 12 | `test_freeze_after_startup_foreign_thread_refused` | `FW_GC_FREEZE=1`; `collect_on` на главном; `GcDiscipline(log=got.append).freeze_after_startup()` в daemon → `False`; `got == ["GcDiscipline: freeze_after_startup пропущен — сборкой владеет другой поток"]`; `get_freeze_count()` не изменился | без проверки потока |
 | 13 | `test_suspend_exit_rearms_freeze` | `collect_on(…, freeze=True, freeze_after_s=0)`, `tick()`; блок `suspend` с `gc.unfreeze()`; после выхода `collect()` → `get_freeze_count() > 0` | выход без `rearm_freeze` |

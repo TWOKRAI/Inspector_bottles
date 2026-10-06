@@ -234,3 +234,160 @@ def test_worker_alloc_with_policy_survives_subprocess():
         pytest.fail(f"подпроцесс завис дольше 60 с; stdout={exc.stdout!r} stderr={exc.stderr!r}")
     assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout}\nstderr={proc.stderr}"
     assert "Q5-DONE" in proc.stdout, proc.stdout
+
+
+# ── Ред. 4 (ревью р1 №1, №3, №5): авторские тесты, каждый — в своём подпроцессе ─────────────────
+# Подпроцесс: тесты снимают владельца сборки, а сессионная граница (conftest) считает снятую
+# политику нарушением сессии — внутри общей сессии их не проверить, не уронив соседей.
+
+_SCRIPT_HEAD = textwrap.dedent(
+    """
+    import gc
+    import os
+    import sys
+    import threading
+
+    from multiprocess_framework.modules.frontend_module.core.qt_gc_policy import (
+        gui_memory_policy,
+        install_gui_memory_policy,
+    )
+    from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import collection_owner
+
+
+    def done(marker):
+        print(marker, flush=True)
+        os._exit(0)  # без деструкторов Qt на выходе: предмет теста — строки выше
+    """
+)
+
+
+def _run_script(body: str) -> str:
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = str(_REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-X", "faulthandler", "-c", _SCRIPT_HEAD + textwrap.dedent(body)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            env=env,
+            cwd=str(_REPO_ROOT),
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"подпроцесс завис дольше 60 с; stdout={exc.stdout!r} stderr={exc.stderr!r}")
+    assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout}\nstderr={proc.stderr}"
+    return proc.stdout
+
+
+def test_uninstall_restores_and_reinstall_same():
+    out = _run_script(
+        """
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication([])
+        for prior in (True, False):
+            if prior:
+                gc.enable()
+            else:
+                gc.disable()
+            p = install_gui_memory_policy(app)
+            print("SAME", install_gui_memory_policy(app) is p, "GC-ON", gc.isenabled())
+            p.uninstall()
+            print("OWNER", collection_owner(), "POLICY", gui_memory_policy(), "GC-PRIOR", gc.isenabled() is prior)
+            p.uninstall()  # повтор — no-op
+            print("AGAIN", collection_owner(), "GC-PRIOR", gc.isenabled() is prior)
+        done("UNINSTALL-DONE")
+        """
+    )
+    assert out.splitlines() == [
+        "SAME True GC-ON False",
+        "OWNER None POLICY None GC-PRIOR True",
+        "AGAIN None GC-PRIOR True",
+        "SAME True GC-ON False",
+        "OWNER None POLICY None GC-PRIOR True",
+        "AGAIN None GC-PRIOR True",
+        "UNINSTALL-DONE",
+    ], out
+
+
+def test_collect_now_on_dead_policy_raises():
+    out = _run_script(
+        """
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication([])
+        lines = []
+        p = install_gui_memory_policy(app, log=lines.append)
+        collection_owner().release()  # политику убили мимо uninstall
+        for name in ("collect_now", "enforce"):
+            try:
+                getattr(p, name)()
+            except RuntimeError as exc:
+                print(name, "RAISED", exc)
+            else:
+                print(name, "NO-RAISE")
+        print("LOG-LINES", sum("владелец сборки снят" in line for line in lines))
+        done("DEAD-DONE")
+        """
+    )
+    assert out.splitlines() == [
+        "collect_now RAISED GuiMemoryPolicy: владелец сборки снят — политика не действует",
+        "enforce RAISED GuiMemoryPolicy: владелец сборки снят — политика не действует",
+        "LOG-LINES 2",
+        "DEAD-DONE",
+    ], out
+
+
+def test_install_replaces_dead_policy():
+    out = _run_script(
+        """
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication([])
+        p = install_gui_memory_policy(app)
+        collection_owner().release()
+        q = install_gui_memory_policy(app)
+        print("NEW", q is not p, "CURRENT", gui_memory_policy() is q, "ACTIVE", q.stats()["active"])
+        print("GC-ON", gc.isenabled(), "COLLECTED", q.collect_now() >= 0)
+        print("LIVE-SAME", install_gui_memory_policy(app) is q)
+        done("REPLACE-DONE")
+        """
+    )
+    assert out.splitlines() == [
+        "NEW True CURRENT True ACTIVE True",
+        "GC-ON False COLLECTED True",
+        "LIVE-SAME True",
+        "REPLACE-DONE",
+    ], out
+
+
+def test_attach_refusal_logged():
+    out = _run_script(
+        """
+        from PySide6.QtCore import QCoreApplication
+
+        lines = []
+        p = install_gui_memory_policy(None, log=lines.append)  # приложения ещё нет
+        box = {}
+        maker = threading.Thread(target=lambda: box.setdefault("app", QCoreApplication([])), name="app-maker")
+        maker.start()
+        maker.join(10)
+        print("APP", "app" in box)
+        p.collect_now()  # главный поток — не поток приложения: таймер не подключить
+        p.collect_now()
+        print("ATTACHED", p.stats()["timer_attached"])
+        refusals = [line for line in lines if "таймер сборки не подключён" in line]
+        print("REFUSALS", len(refusals), "NAMES-THREAD", "MainThread" in "".join(refusals))
+        done("ATTACH-DONE")
+        """
+    )
+    assert out.splitlines() == [
+        "APP True",
+        "ATTACHED False",
+        "REFUSALS 1 NAMES-THREAD True",
+        "ATTACH-DONE",
+    ], out

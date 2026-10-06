@@ -128,8 +128,9 @@ class GcDiscipline:
 _THREAD_ERROR = "GcCollectionOwner: вызов не с потока-владельца сборки"
 _OTHER_OWNER_ERROR = "collect_on: сборкой уже владеет другой исполнитель — сначала release()"
 _LEFTOVER_ERROR = "suspend_collection_owner: блок оставил своего владельца"
-_BOUNDS_ERROR = "collect_on: interval_s и freeze_after_s — конечные, interval_s > 0"
-_PARAM_NAMES = ("interval_s", "freeze", "freeze_after_s", "observe")  # порядок сигнатуры
+_BOUNDS_ERROR = "collect_on: interval_s, freeze_after_s и full_interval_s — конечные, interval_s > 0, остальные >= 0"
+_REFREEZE_ERROR = "GcCollectionOwner.collect: refreeze=True — только вместе с full=True"
+_PARAM_NAMES = ("interval_s", "freeze", "freeze_after_s", "full_interval_s", "observe")  # порядок сигнатуры
 _REPORT_EVERY_S = 60.0
 
 # Слот процесса. Лок — ТОЛЬКО чтение/запись этой ссылки (без аллокаций под ним).
@@ -158,7 +159,11 @@ class GcOwnerStats:
 
     Stability: lite.
 
-    Post: ``to_dict()`` — ровно 13 ключей, значения только ``bool/int/float/str``.
+    Post: ``to_dict()`` — ровно 17 ключей, значения только ``bool/int/float/str``.
+
+    ``full_collections`` — полные сборки владельца (gen2 тиком, ``collect(full=True)``, сборка
+    перед заморозкой); растёт всегда. ``max_pause_ms_gen0/gen1/full`` — худшая пауза по виду
+    сборки; растут только при вкл. наблюдаемости, как прочие ``*_pause_ms``.
     """
 
     active: bool
@@ -174,6 +179,10 @@ class GcOwnerStats:
     last_pause_ms: float
     max_pause_ms: float
     total_pause_ms: float
+    full_collections: int
+    max_pause_ms_gen0: float
+    max_pause_ms_gen1: float
+    max_pause_ms_full: float
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -188,8 +197,12 @@ class GcCollectionOwner:
     ``thread_ident`` (иначе ``RuntimeError``).
 
     Pre: владелец в слоте (иначе ``tick``/``collect``/``enforce`` — пустые, возвращают 0/False).
-    Post ``tick()``: автосборка выключена; собрано старшее поколение, чей счётчик достиг
-    порога (как CPython, но на этом потоке), либо ничего (0).
+    Post ``tick()``: автосборка выключена. Вход — только при ``count[0] > threshold[0]``, иначе 0.
+    Собрано старшее поколение, чей счётчик строго больше порога (по порогам как CPython, но на
+    этом потоке). Страж CPython для gen2 (``long_lived_pending``) из Python недоступен — вместо
+    него ограничение по времени: gen2 не чаще ``full_interval_s`` с последней полной сборки
+    владельца любого происхождения (gen2 тиком, ``collect(full=True)``, сборка перед заморозкой),
+    иначе собирается gen1. ``full_interval_s == 0`` — без ограничения.
     Post ``release()``: исполнитель остановлен, хук снят, своя заморозка снята,
     ``gc.isenabled()`` ровно как до ``collect_on``.
     """
@@ -201,6 +214,7 @@ class GcCollectionOwner:
         interval_s: float,
         freeze: bool,
         freeze_after_s: float,
+        full_interval_s: float,
         requested: tuple,
         log: Callable[[str], None],
     ) -> None:
@@ -210,6 +224,8 @@ class GcCollectionOwner:
         self._interval_s = interval_s
         self._freeze = freeze
         self._freeze_after_s = freeze_after_s
+        self._full_interval_s = full_interval_s
+        self._last_full_at = 0.0  # monotonic; ставит _activate — отсчёт gen2 от установки
         self._requested = requested
         self._log = log
         self._prior = True
@@ -220,14 +236,18 @@ class GcCollectionOwner:
         self._observe = False
         self._report_at = 0.0
         self._hook = self._on_gc_phase  # одна ссылка — для append/remove в gc.callbacks
-        # Счётчики. Выкл. наблюдаемость — растут только первые три (int).
+        # Счётчики. Выкл. наблюдаемость — растут только int (паузы — 0.0).
         self._collections = 0
         self._collected_objects = 0
+        self._full_collections = 0
         self._enabled_violations = 0
         self._foreign_collections = 0
         self._last_pause_ms = 0.0
         self._max_pause_ms = 0.0
         self._total_pause_ms = 0.0
+        self._max_pause_ms_gen0 = 0.0
+        self._max_pause_ms_gen1 = 0.0
+        self._max_pause_ms_full = 0.0
 
     # ── публичное ──
 
@@ -241,23 +261,42 @@ class GcCollectionOwner:
             return self._freeze_now()
         counts = gc.get_count()
         thresholds = gc.get_threshold()
-        for gen in range(min(len(counts), len(thresholds)) - 1, -1, -1):
-            limit = thresholds[gen]
-            if limit > 0 and counts[gen] >= limit:
-                return self._collect(gen)
-        return 0
+        if not (thresholds[0] > 0 and counts[0] > thresholds[0]):
+            return 0  # вход как у CPython: только когда gen0 перешёл порог
+        gen = 0
+        for older in (2, 1):
+            if counts[older] > thresholds[older]:
+                gen = older
+                break
+        if gen == 2 and not self._full_allowed():
+            gen = 1  # страж long_lived недоступен — полная сборка не чаще full_interval_s
+        return self._collect(gen)
 
-    def collect(self, *, full: bool = False) -> int:
+    def collect(self, *, full: bool = False, refreeze: bool = False) -> int:
         """Явная сборка на потоке владельца: ``full=True`` — ``gc.collect()``, иначе поколение 0.
 
-        Подошёл срок заморозки → полная сборка + ``gc.freeze()``.
+        Подошёл срок заморозки → полная сборка + ``gc.freeze()``. ``full=True`` по времени не
+        ограничен (``full_interval_s`` — только для тика).
+
+        ``refreeze=True`` (только с ``full=True``, иначе ``ValueError``): после полной сборки —
+        ``gc.freeze()``; заморозку снимут ``release``/``rearm_freeze``/выход ``suspend``. Для
+        границы теста: следующая полная сборка обходит только объекты, созданные после неё.
+        В проде (тики, корень GUI) — никогда. Опасности: объект, замороженный живым и умерший
+        позже, остаётся в памяти до ``gc.unfreeze()`` (циклы в permanent не собираются); тест,
+        позвавший ``gc.unfreeze()``, делает следующую границу полной сборкой всей кучи.
         """
         self._check_thread()
+        if refreeze and not full:
+            raise ValueError(_REFREEZE_ERROR)
         if _slot is not self:
             return 0
         if self._freeze_due():
             return self._freeze_now()
-        return self._collect(None if full else 0)
+        collected = self._collect(None if full else 0)
+        if refreeze:
+            gc.freeze()
+            self._froze = True
+        return collected
 
     def enforce(self) -> bool:
         """Автосборку включили извне → выключить, посчитать, записать в лог. True — лечили."""
@@ -298,6 +337,10 @@ class GcCollectionOwner:
             last_pause_ms=float(self._last_pause_ms),
             max_pause_ms=float(self._max_pause_ms),
             total_pause_ms=float(self._total_pause_ms),
+            full_collections=int(self._full_collections),
+            max_pause_ms_gen0=float(self._max_pause_ms_gen0),
+            max_pause_ms_gen1=float(self._max_pause_ms_gen1),
+            max_pause_ms_full=float(self._max_pause_ms_full),
         )
 
     def release(self) -> None:
@@ -327,6 +370,7 @@ class GcCollectionOwner:
         """Вызывается ``collect_on`` ПОСЛЕ записи в слот, вне лока."""
         self._prior = gc.isenabled()
         gc.disable()
+        self._last_full_at = time.monotonic()
         if self._freeze:
             self._freeze_deadline = time.monotonic() + self._freeze_after_s
         try:
@@ -373,6 +417,11 @@ class GcCollectionOwner:
         if self._freeze:
             self._freeze_deadline = time.monotonic() + self._freeze_after_s
 
+    def _full_allowed(self) -> bool:
+        if self._full_interval_s == 0:
+            return True
+        return time.monotonic() - self._last_full_at >= self._full_interval_s
+
     def _freeze_due(self) -> bool:
         return self._freeze and not self._froze and time.monotonic() >= self._freeze_deadline
 
@@ -384,6 +433,8 @@ class GcCollectionOwner:
         return collected
 
     def _collect(self, generation: Optional[int]) -> int:
+        """``generation=None`` или 2 — полная сборка (gen2 = ``gc.collect()``)."""
+        full = generation is None or generation >= 2
         if self._observe:
             started = time.perf_counter()
             collected = gc.collect() if generation is None else gc.collect(generation)
@@ -392,10 +443,21 @@ class GcCollectionOwner:
             if pause_ms > self._max_pause_ms:
                 self._max_pause_ms = pause_ms
             self._total_pause_ms += pause_ms
+            if full:
+                if pause_ms > self._max_pause_ms_full:
+                    self._max_pause_ms_full = pause_ms
+            elif generation == 1:
+                if pause_ms > self._max_pause_ms_gen1:
+                    self._max_pause_ms_gen1 = pause_ms
+            elif pause_ms > self._max_pause_ms_gen0:
+                self._max_pause_ms_gen0 = pause_ms
         else:
             collected = gc.collect() if generation is None else gc.collect(generation)
         self._collections += 1
         self._collected_objects += collected
+        if full:
+            self._full_collections += 1
+            self._last_full_at = time.monotonic()
         if self._observe:
             self._maybe_report()
         return collected
@@ -407,7 +469,9 @@ class GcCollectionOwner:
         self._report_at = now + _REPORT_EVERY_S
         self._log(
             f"gc-policy: collections={self._collections} max_pause_ms={self._max_pause_ms:.3f} "
-            f"violations={self._enabled_violations} foreign={self._foreign_collections}"
+            f"violations={self._enabled_violations} foreign={self._foreign_collections} "
+            f"full={self._full_collections} max_gen0={self._max_pause_ms_gen0:.3f} "
+            f"max_gen1={self._max_pause_ms_gen1:.3f} max_full={self._max_pause_ms_full:.3f}"
         )
 
     def _hook_on(self) -> None:
@@ -456,6 +520,7 @@ def collect_on(
     interval_s: float = 1.0,
     freeze: Optional[bool] = None,
     freeze_after_s: float = 5.0,
+    full_interval_s: float = 60.0,
     observe: bool = False,
     log: Optional[Callable[[str], None]] = None,
 ) -> GcCollectionOwner:
@@ -463,16 +528,18 @@ def collect_on(
 
     Stability: lite.
 
-    Pre: ``interval_s > 0``, ``freeze_after_s >= 0``, оба конечные (иначе ``ValueError``).
+    Pre: ``interval_s > 0``, ``freeze_after_s >= 0``, ``full_interval_s >= 0``, все конечные
+    (иначе ``ValueError``). ``full_interval_s`` — gen2 тиком не чаще (0 — без ограничения).
     Post (слот был пуст): ``gc.isenabled() is False``; ``executor.start(owner.tick, ...)``
     позван; ``observe`` → хук в ``gc.callbacks``; ``freeze=None`` → флаг ``FW_GC_FREEZE``.
     Post (тот же исполнитель): тот же объект, параметры прежние; отличия — одна строка лога.
     Post (другой исполнитель): ``RuntimeError``, слот не тронут.
     """
-    if not (_finite(interval_s) and _finite(freeze_after_s) and interval_s > 0 and freeze_after_s >= 0):
+    finite = _finite(interval_s) and _finite(freeze_after_s) and _finite(full_interval_s)
+    if not (finite and interval_s > 0 and freeze_after_s >= 0 and full_interval_s >= 0):
         raise ValueError(_BOUNDS_ERROR)
     global _slot
-    requested = (float(interval_s), freeze, float(freeze_after_s), bool(observe))
+    requested = (float(interval_s), freeze, float(freeze_after_s), float(full_interval_s), bool(observe))
     current = _slot
     if current is not None:
         return current._repeat(executor, requested)
@@ -483,6 +550,7 @@ def collect_on(
         interval_s=float(interval_s),
         freeze=resolved_freeze,
         freeze_after_s=float(freeze_after_s),
+        full_interval_s=float(full_interval_s),
         requested=requested,
         log=log or _default_log(),
     )
