@@ -1,0 +1,171 @@
+old	new	uses
+absence-assertion	test-assertions	1
+acceptance	acceptance	1
+acceptance-criteria	acceptance	4
+acceptance-proof	acceptance	1
+acceptance-tests	acceptance	1
+agents	agents	2
+AST-rules	dev-tooling	1
+backpressure	concurrency	1
+break-injection	break-injection	16
+break-injection harness	break-injection	1
+break-injection tooling	break-injection	2
+bridge-carrier	ipc-routing	1
+browser stand	live-stand	1
+bulk-replace	dead-code	1
+call-sites	dead-code	1
+clock-injection	measurement	1
+clock-resolution	measurement	1
+coinciding-constants	test-assertions	1
+concurrency	concurrency	1
+concurrency-tests	concurrency	1
+config files	config	1
+config-defaults	config	1
+config-delivery	config	2
+config-facade	config	1
+config-forms	config	1
+config-layers	config	1
+config_reload_verified	live-stand	1
+connector-test	probes	1
+constants-vs-emission	test-assertions	1
+context-audit	agents	1
+controls	guards	1
+cost	agents	1
+coverage	guards	1
+coverage-of-the-gate	guards	1
+CSS pseudo-elements	qt	1
+dead-branch	dead-code	1
+dead-branch-behind-flag	dead-code	1
+dead-code grep	dead-code	1
+decision-change checklist	docs	1
+dedup	architecture	2
+defaults-audit	config	1
+defaults-materialization	config	1
+deferred-tasks	spec-scope	1
+deletion-refactor	dead-code	1
+detector-placement	guards	1
+detectors	guards	2
+docs-vs-code	docs	1
+drift-guard	guards	1
+encoding	windows-env	1
+env	windows-env	1
+env-config	config	1
+env-flags	config	1
+experiment-control	probes	1
+false-signal	review-verdicts	1
+feedback-loop	probes	1
+FieldRouting	ipc-routing	1
+fixtures	fixtures	1
+flaky-tests	flaky-tests	2
+freshness	docs	1
+getattr-default	config	1
+git	git	4
+global-resource-in-tests	test-infra	1
+graphify	dev-tooling	1
+guard-design	guards	3
+guard-layer	guards	1
+guards	guards	1
+hand-built-fixture	fixtures	1
+harness	test-doubles	1
+hooks	hooks	1
+import-cycles	dev-tooling	1
+independence	acceptance	2
+inheritance	architecture	1
+inherited-rules	architecture	1
+IO-in-parser	performance	1
+layer-L3	architecture	1
+lazy-eval	performance	1
+lifecycle	lifecycle	1
+live-run	live-stand	1
+live-stand	live-stand	2
+loan-protocol	test-doubles	1
+lock-discipline	concurrency	1
+measurement	measurement	8
+migration-test	test-infra	1
+mp.Queue feeder at exit	concurrency	1
+naming	docs	1
+never-drop queue	concurrency	1
+O(n^2)-per-frame	performance	1
+ON/OFF-proof	probes	1
+operator-sequence	spec-scope	1
+ordering	concurrency	1
+owner-decision	owner-decision	1
+parallel-commits	git	1
+parallel-sessions	git	1
+perf-budget	performance	1
+perf-measurement	measurement	3
+placeholders	docs	1
+plans	spec-scope	1
+PostToolUse formatter hook	hooks	1
+pre-commit	git	2
+prediction	measurement	1
+probe-design	probes	5
+property-testing	test-infra	1
+pydantic-v2	config	1
+pytest	test-infra	1
+pytest testpaths	test-infra	1
+pytest-internals	test-infra	1
+qt-in-tests	qt	1
+qt-mcp	qt	2
+qt-tests	qt	1
+QTreeWidget	qt	1
+readiness	live-stand	1
+receive-middleware	ipc-routing	1
+replay-order	concurrency	1
+report-honesty	review-verdicts	1
+resource-cleanup	lifecycle	1
+review	review-verdicts	1
+review-fix scope	spec-scope	1
+runbook	docs	1
+schema-defaults	config	1
+scope-discipline	spec-scope	1
+scope-owner	lifecycle	1
+SendMessage	agents	1
+session-TTL	config	1
+shared-baseline	git	1
+silent-parser	error-handling	1
+single-owner leaf	lifecycle	1
+singleton lifecycle	lifecycle	1
+spawn	lifecycle	1
+spec-review	spec-scope	3
+sqlite	persistence	1
+stage-ordering	concurrency	1
+stale-copy-after-switch	git	1
+state-root subscribe	ipc-routing	1
+stubs	test-doubles	1
+success-value-vs-fact	review-verdicts	2
+swallowed-cause	error-handling	1
+swallowed-exceptions	error-handling	1
+switch-redelivers-state	ipc-routing	1
+synthetic-input	fixtures	1
+tap-on-both-managers	ipc-routing	1
+test-assert	test-assertions	1
+test-asserts-race-outcome	test-assertions	1
+test-data	fixtures	3
+test-doubles	test-doubles	6
+test-entry-point	test-infra	1
+test-flake	flaky-tests	1
+test-isolation	test-infra	1
+test-mechanism	test-infra	1
+test-params	fixtures	1
+test-resolution	flaky-tests	2
+test-writing	test-infra	1
+test/live/review	test-infra	1
+tester	acceptance	1
+tester-brief	acceptance	1
+testpaths	test-infra	2
+thread-GC	concurrency	1
+throttle	concurrency	1
+tooling	agents	1
+topology-gate	architecture	1
+tracing	ipc-routing	1
+transactions	persistence	1
+type-coercion	config	1
+validation-at-consumer	config	1
+verdicts	review-verdicts	1
+verification	review-verdicts	1
+voice-address	ipc-routing	1
+white-box pin	test-assertions	1
+wiring	ipc-routing	1
+worktree	git	1
+worktrees	git	2

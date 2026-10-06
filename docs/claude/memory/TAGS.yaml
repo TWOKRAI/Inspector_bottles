@@ -1,0 +1,63 @@
+# Словарь механизмов памяти (Task 2.4g.2, plans/2026-10-04_atlas). Не больше 30; правит лид.
+# Проверка: python scripts/memory/tags.py --check (код vocab-too-big при > 30).
+mechanisms:
+  - id: break-injection
+    def: "removing a claimed guarantee on purpose to prove the tests go red; injection matrix, predictions"
+  - id: measurement
+    def: "numbers instead of adjectives: timing, spread across repeats, clock resolution, prediction vs observation"
+  - id: test-doubles
+    def: "fakes, stubs, mocks and fake harnesses; what a double keeps and what it loses from the real protocol"
+  - id: acceptance
+    def: "acceptance criteria and blind acceptance tests; tester briefs, independence of the tester"
+  - id: test-assertions
+    def: "what a test asserts: observable effect vs spy, absence assertions, race outcomes, white-box pins"
+  - id: fixtures
+    def: "test data and fixtures: hand-built, synthetic input, parametrisation"
+  - id: test-infra
+    def: "pytest mechanics: collection, testpaths, isolation, global resources, entry points"
+  - id: flaky-tests
+    def: "tests that pass or fail by timing or environment; first runs on a new platform"
+  - id: guards
+    def: "guard and detector design: drift guards, gate coverage, where a detector sits"
+  - id: probes
+    def: "probe and experiment design: controls, ON/OFF proof, connector tests"
+  - id: live-stand
+    def: "live runs on a real stand: backend_ctl, browser or GUI stand, readiness"
+  - id: review-verdicts
+    def: "review and verdict honesty: success value vs fact, false signals, verification, report honesty"
+  - id: spec-scope
+    def: "spec review, task scope, review-fix scope, deferred tasks, plan premises"
+  - id: git
+    def: "git, worktrees, parallel sessions and commits, pre-commit, stash"
+  - id: agents
+    def: "Claude Code agents: subagents, messaging, context and cost, agent tooling"
+  - id: hooks
+    def: "Claude Code hooks and git hooks: what they catch and what they miss"
+  - id: config
+    def: "configuration: defaults, layers, facades, forms, env flags, schemas, pydantic, type coercion"
+  - id: concurrency
+    def: "threads and processes: locks, races, ordering, backpressure, queues, GC on a foreign thread"
+  - id: lifecycle
+    def: "ownership and lifecycle: start/stop, cleanup, scope owners, singletons, spawn"
+  - id: ipc-routing
+    def: "messages and routing between processes: channels, middleware, state subscriptions, delivery"
+  - id: error-handling
+    def: "swallowed exceptions, lost causes, silent parsers"
+  - id: dead-code
+    def: "dead branches, deletion refactors, bulk replace, call-site sweeps"
+  - id: qt
+    def: "Qt and PySide6 widgets, qt-mcp, Qt in tests, styling"
+  - id: performance
+    def: "hot paths: per-frame complexity, perf budgets, lazy evaluation, IO in parsers"
+  - id: windows-env
+    def: "Windows environment: encodings, shells, OS-specific behaviour"
+  - id: dev-tooling
+    def: "developer tools: graphify, sentrux, qex, AST rules, import-cycle checks"
+  - id: docs
+    def: "documentation: docs vs code, freshness, naming, runbooks, placeholders, decision checklists"
+  - id: architecture
+    def: "architecture: layers, inheritance, topology gates, deduplication, inherited rules"
+  - id: persistence
+    def: "storage: sqlite, transactions, migrations"
+  - id: owner-decision
+    def: "a standing decision of the owner"
