@@ -1,7 +1,7 @@
 ---
 name: feedback-one-owner-blinds-the-shared-state-test
-description: Когда все читатели заведены под одного владельца, свойство «обёртка над ОБЩИМ состоянием» становится ненаблюдаемым — тест через владельца согласен и с приватной копией
-mechanism: "test-resolution"
+description: "Когда все читатели заведены под одного владельца, свойство «обёртка над ОБЩИМ состоянием» становится ненаблюдаемым — тест через владельца согласен и с приватной копией (shared state, owner, injection matrix)"
+mechanism: [test-assertions, break-injection]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback_upper_layer_default_disables_the_guard_below
-description: "Дефолт, материализованный слоем ВЫШЕ, отменяет защиту слоя ниже: та получает непустое значение и честно его исполняет"
-module: "logger_module (log_paths)"
-mechanism: "defaults-materialization"
+description: "Дефект: default, материализованный слоем ВЫШЕ (layer), отменяет защиту слоя ниже: та получает непустое значение и честно его исполняет (log_dir, пути логов)"
+module: [logger_module, app_module]
+mechanism: [config]
 metadata:
   node_type: memory
   type: feedback

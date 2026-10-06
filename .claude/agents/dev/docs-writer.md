@@ -6,7 +6,6 @@ omitClaudeMd: true
 skills: project-rules
 effort: low
 tools: Read, Write, Edit, Glob, Grep
-memory: project
 ---
 
 ## Role

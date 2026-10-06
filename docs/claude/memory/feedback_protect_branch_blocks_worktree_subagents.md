@@ -1,6 +1,7 @@
 ---
 name: feedback-protect-branch-blocks-worktree-subagents
-description: protect-branch hook denies git commit for subagents working in sibling worktrees — brief them to stage + write the message file; the lead commits and checks ruff
+description: "protect-branch hook denies git commit for subagents working in sibling worktrees — brief them to stage + write the message file; the lead commits and checks ruff (хук / hook, субагенты, коммит)"
+mechanism: [hooks, agents]
 metadata:
   type: feedback
 ---

@@ -1,5 +1,5 @@
 ---
-description: "Write a lesson into memory now: gate, grep for duplicates, file, index line. Call after a red-to-green fix or a decision that code, git and the plan do not record."
+description: "Lead only — a subagent hands a MEMORY LESSON block instead (project-rules §8). Write a lesson into memory now: gate, grep for duplicates, file, index line. Call after a red-to-green fix or a decision that code, git and the plan do not record."
 ---
 
 **Memory dir** (`<memory_dir>` below): the `memory_dir` key in the ini block of `.claude/modes/_stack.md`; absent → `.claude/memory`. Read it first; never assume `.claude/memory/`.
@@ -40,6 +40,7 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    ```bash
    grep -rinl --include='*.md' -e 'word1' -e 'synonym1' -e 'word2' <memory_dir>/ 2>/dev/null
    ```
+   If `scripts/memory/search.py` exists, run it with the same words first (it ranks by `description:`).
    Even one hit → open the file, decide near-match: yes → **UPDATE** (add the nuance /
    repeat / escalation), fix the line in `MEMORY.md`, **stop here** (don't
    multiply duplicates). Zero hits across **all** variants → a new file (step 3).
@@ -48,7 +49,9 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    ```markdown
    ---
    name: <kebab-slug>
-   description: <one line — recall matches on it>
+   description: "<one line, Russian and English keywords — recall matches on it>"
+   module: [<ids from modules.yaml, or empty>]
+   mechanism: [<1-2 ids from docs/claude/memory/TAGS.yaml>]
    metadata:
      type: feedback | project | user | reference
      last-verified: YYYY-MM-DD

@@ -1,7 +1,7 @@
 ---
 name: feedback_injection_prediction_on_a_shared_corpus
-description: "Когда тестов много, предсказание инъекции — не равенство множеств, а «MUST поимённо + потолок красных»"
-mechanism: "break-injection, prediction"
+description: "Когда тестов много, предсказание инъекции (injection prediction) — не равенство множеств, а «MUST поимённо + потолок красных (ceiling)»"
+mechanism: [break-injection]
 metadata:
   node_type: memory
   type: feedback

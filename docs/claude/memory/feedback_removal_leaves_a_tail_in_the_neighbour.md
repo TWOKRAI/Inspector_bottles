@@ -1,8 +1,8 @@
 ---
 name: feedback_removal_leaves_a_tail_in_the_neighbour
-description: "Снос секции методов оставляет хвост в теле СОСЕДА сверху; дифф этого не показывает, цена показывает"
-module: "logger_module"
-mechanism: "deletion-refactor"
+description: "Снос секции методов оставляет хвост в теле СОСЕДА сверху; дифф этого не показывает, цена показывает (deletion refactor, removal, tail, hot path)"
+module: [logger_module]
+mechanism: [dead-code]
 metadata:
   node_type: memory
   type: feedback

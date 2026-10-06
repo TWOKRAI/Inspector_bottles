@@ -1,7 +1,7 @@
 ---
 name: reference_qt_mcp_launch
-description: qt-mcp probe поднимается ТОЛЬКО с env QT_MCP_PROBE=1 (порт 9142); без неё qt-mcp «не подключается»
-module: "qt-mcp"
+description: "qt-mcp probe поднимается ТОЛЬКО с env QT_MCP_PROBE=1 (порт 9142); без неё qt-mcp «не подключается» / launch, environment variable, orphan processes"
+mechanism: [qt, live-stand]
 metadata:
   type: reference
 ---

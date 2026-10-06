@@ -1,8 +1,8 @@
 ---
 name: feedback_unblocking_signal_at_the_moment_of_fact
-description: "Сигнал, который отпускает соседей, ставь в момент факта, а не в конце пакета — тест «один объект на вызов» порядок не видит, видит только живой стенд"
-module: "process_manager (stop_many)"
-mechanism: "lifecycle"
+description: "Сигнал, который отпускает соседей / unblocking signal, ставь в момент факта, а не в конце пакета (stop_many) — тест «один объект на вызов» порядок не видит, видит только живой стенд"
+module: [process_manager_module]
+mechanism: [lifecycle, live-stand]
 metadata:
   type: feedback
 ---

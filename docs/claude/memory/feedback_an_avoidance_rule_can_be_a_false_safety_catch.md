@@ -1,8 +1,8 @@
 ---
 name: feedback-an-avoidance-rule-can-be-a-false-safety-catch
-description: Записанное правило «не делай X, чтобы не было красных» может быть неверным и уводить от настоящего долга — проверять его замером, а не наследовать
-module: "scripts/run_framework_tests.py"
-mechanism: "inherited-rules"
+description: "Записанное правило «не делай X, чтобы не было красных» может быть неверным и уводить от настоящего долга (false safety catch) — проверять его замером, а не наследовать"
+module: [scripts]
+mechanism: [spec-scope, test-infra]
 metadata:
   type: feedback
 ---

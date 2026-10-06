@@ -1,6 +1,7 @@
 ---
 name: feedback-predict-injections-after-writing-tests
-description: "Ожидаемый набор падений называть ПОСЛЕ того, как дописаны все тесты — иначе арифметика врёт"
+description: "Ожидаемый набор падений называть ПОСЛЕ того, как дописаны все тесты — иначе арифметика врёт (injection prediction, инъекции, красные тесты)"
+mechanism: [break-injection]
 metadata:
   node_type: memory
   type: feedback

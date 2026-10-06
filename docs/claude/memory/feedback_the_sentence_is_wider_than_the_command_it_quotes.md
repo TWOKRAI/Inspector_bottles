@@ -1,7 +1,7 @@
 ---
 name: feedback-the-sentence-is-wider-than-the-command-it-quotes
-description: Проверка настоящая, но проза вокруг неё шире, чем область команды — «фреймворк не тронут ни строкой» на прогоне только по *.py
-mechanism: "report-honesty"
+description: "Проверка настоящая, но проза вокруг неё шире, чем область команды / command scope — «фреймворк не тронут ни строкой» на прогоне только по *.py (report honesty)"
+mechanism: [review-verdicts]
 metadata:
   type: feedback
 ---

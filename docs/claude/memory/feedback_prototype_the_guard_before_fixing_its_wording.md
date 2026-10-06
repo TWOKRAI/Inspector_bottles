@@ -1,7 +1,7 @@
 ---
 name: feedback_prototype_the_guard_before_fixing_its_wording
-description: Формулировка стража в плане может быть красной ПО ПОСТРОЕНИЮ; прототип на 40 строк вскрывает это до старта задачи, а не внутри неё
-mechanism: "spec-review, guards"
+description: "Формулировка стража в плане может быть красной ПО ПОСТРОЕНИЮ; прототип на 40 строк вскрывает это до старта задачи, а не внутри неё (guard, plan wording, prototype)"
+mechanism: [guards, spec-scope]
 metadata:
   node_type: memory
   type: feedback

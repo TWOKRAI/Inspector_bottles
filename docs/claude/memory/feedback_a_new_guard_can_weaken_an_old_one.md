@@ -1,8 +1,8 @@
 ---
 name: feedback_a_new_guard_can_weaken_an_old_one
-description: "Слой проверки, который ПРИВОДИТ значение, снимает более строгую защиту, стоявшую за ним"
-module: "process_module commands"
-mechanism: "guard-design, type-coercion"
+description: "Слой проверки, который ПРИВОДИТ значение (type coercion), снимает более строгую защиту (guard), стоявшую за ним"
+module: [process_module]
+mechanism: [guards, config]
 metadata:
   node_type: memory
   type: feedback

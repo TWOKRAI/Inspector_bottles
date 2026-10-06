@@ -1,6 +1,7 @@
 ---
 name: feedback-git-main-merge-hook-traps
-description: "единый формат merge-коммита (merge: суть + Why/Layer/Refs, решение владельца 2026-10-03); git/hook грабли при merge в main и коммитах: git merge -F - не читает stdin; protect-branch блокирует git commit на main (в т.ч. compound-команду checkout+commit); git add на удалённом пути фаталит и не стейджит; проверять staged перед commit"
+description: "Единый формат merge-коммита (merge: суть + Why/Layer/Refs, решение владельца 2026-10-03); git/hook грабли (traps) при merge в main: git merge -F - не читает stdin, protect-branch блокирует commit на main, git add на удалённом пути фаталит"
+mechanism: [git, hooks]
 metadata:
   node_type: memory
   type: feedback

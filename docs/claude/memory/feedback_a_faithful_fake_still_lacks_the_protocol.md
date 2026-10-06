@@ -1,9 +1,9 @@
 ---
 name: feedback_a_faithful_fake_still_lacks_the_protocol
-description: "Дублёр приёмника может быть верен ФОРМЕ и неверен ПРОТОКОЛУ — настоящая дверь pop-ает служебные ключи, и сторож зеленеет на отсутствующем свойстве; также: дублёр глушит имена, которые код ЧИТАЕТ; дублёр обязан воспроизводить ТЕМП оригинала; дублёр, который всегда успешен, глушит гейт (форма ОТКАЗА)"
+description: "Дублёр (fake) приёмника может быть верен ФОРМЕ и неверен ПРОТОКОЛУ — настоящая дверь pop-ает служебные ключи, и сторож зеленеет на отсутствующем свойстве; также: дублёр глушит имена, которые код ЧИТАЕТ; дублёр обязан воспроизводить ТЕМП оригинала; дублёр, который всегда успешен, глушит гейт (форма ОТКАЗА)"
+module: [error_module]
+mechanism: [test-doubles]
 merged_from: [feedback_a_stub_silences_the_names_it_is_read_for, feedback_double_must_block_like_the_original, feedback_fake_that_always_succeeds_mutes_the_gate]
-module: "error_module"
-mechanism: "test-doubles"
 metadata:
   node_type: memory
   type: feedback

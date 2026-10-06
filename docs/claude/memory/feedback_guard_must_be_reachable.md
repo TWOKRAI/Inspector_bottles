@@ -1,8 +1,7 @@
 ---
 name: guard-must-be-reachable
-description: Защита от подмены поля была верной и НЕДОСТИЖИМОЙ — одноимённый параметр давал TypeError раньше, теряя запись исключением
-module: "plugin_module (PluginContext.write_document)"
-mechanism: "guard-design"
+description: "Защита (guard) от подмены поля была верной и НЕДОСТИЖИМОЙ — одноимённый параметр давал TypeError раньше, теряя запись исключением; проверять вызовом клиентского вида"
+mechanism: [guards, test-assertions]
 metadata:
   type: feedback
 ---

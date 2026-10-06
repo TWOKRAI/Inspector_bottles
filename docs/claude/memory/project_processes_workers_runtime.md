@@ -1,7 +1,8 @@
 ---
 name: Processes workers runtime feature
-description: Вкладка «Процессы» — насыщенные карточки + CRUD воркеров (config-персист + live IPC спавн). Ветка feat/processes-workers-runtime.
-module: "processes_tab, worker_module"
+description: "Вкладка «Процессы» — насыщенные карточки + CRUD воркеров (config-персист + live IPC спавн); workers runtime, StateStore subscription fix, долги / debts"
+module: [worker_module, prototype/frontend]
+mechanism: [architecture, ipc-routing]
 metadata:
   type: project
 ---

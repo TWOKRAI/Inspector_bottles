@@ -1,7 +1,8 @@
 ---
 name: project_camera_settings_feature
-description: Настройки камеры РЕАЛИЗОВАНЫ — унифицированный путь через плагин camera_service (live + actual + MJPG)
-module: "camera_settings"
+description: "Настройки камеры / camera settings РЕАЛИЗОВАНЫ — унифицированный путь через плагин camera_service (live + actual + MJPG)"
+module: [plugins/sources, prototype/frontend/widgets/tabs/services]
+mechanism: [architecture]
 metadata:
   type: project
 ---

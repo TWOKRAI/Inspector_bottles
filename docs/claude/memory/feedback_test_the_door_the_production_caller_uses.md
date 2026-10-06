@@ -1,8 +1,8 @@
 ---
 name: feedback_test_the_door_the_production_caller_uses
-description: "Тест вошёл мимо двери, которой пользуется боевой вызывающий: зелёный, а фича живьём не работала. Входить через router.receive / настоящий key-event / реальную смерть процесса и утверждать эффект, а не факт отправки"
-module: "process_module, router_module, frontend"
-mechanism: "test-entry-point"
+description: "Тест вошёл мимо двери / entry point, которой пользуется боевой вызывающий: зелёный, а фича живьём не работала. Входить через router.receive / настоящий key-event / реальную смерть процесса и утверждать эффект, а не факт отправки"
+module: [router_module, process_module]
+mechanism: [test-doubles, test-assertions]
 metadata:
   type: feedback
 ---

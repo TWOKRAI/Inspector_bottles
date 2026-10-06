@@ -1,8 +1,8 @@
 ---
 name: feedback_protect_the_unit_of_contention
-description: "Предел, поставленный не на ту единицу, защищает первого вошедшего и оставляет остальных без предела вовсе"
-module: "logger_module (FileChannel)"
-mechanism: "backpressure"
+description: "Предел, поставленный не на ту единицу, защищает первого вошедшего и оставляет остальных без предела вовсе (backpressure, lock, file channel, лок / limit)"
+module: [logger_module]
+mechanism: [concurrency]
 metadata:
   node_type: memory
   type: feedback

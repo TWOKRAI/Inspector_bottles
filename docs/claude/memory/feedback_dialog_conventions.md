@@ -1,6 +1,8 @@
 ---
 name: dialog-conventions
-description: "Владелец требует стандартные конвенции диалогов — «Сохранить» (default) / «Не сохранять» / «Отмена», не изобретать формулировки"
+description: "Владелец требует стандартные конвенции диалогов (dialog conventions) — «Сохранить» (default) / «Не сохранять» / «Отмена», не изобретать формулировки"
+module: [prototype/frontend/widgets]
+mechanism: [owner-decision, qt]
 metadata:
   node_type: memory
   type: feedback

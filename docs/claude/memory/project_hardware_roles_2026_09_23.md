@@ -1,7 +1,7 @@
 ---
 name: project_hardware_roles_2026_09_23
-description: "Железо владельца и роли машин — ноутбук Windows с RTX 3050 4 ГБ, Jetson Orin Nano 8 ГБ, Orin NX 16 ГБ"
-module: "hardware"
+description: "Железо владельца и роли машин — ноутбук Windows с RTX 3050 4 ГБ, Jetson Orin Nano 8 ГБ, Orin NX 16 ГБ; hardware roles, simulator and inspector on separate machines"
+mechanism: [architecture, config]
 metadata:
   node_type: memory
   type: project

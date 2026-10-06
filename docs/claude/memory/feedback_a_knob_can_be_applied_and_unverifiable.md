@@ -1,8 +1,8 @@
 ---
 name: feedback-a-knob-can-be-applied-and-unverifiable
-description: Новая под-секция конфига без своего менеджера идёт мимо сверщика — ручка действует, но вердикт её не судит
-module: "process_module (observability_verified)"
-mechanism: "config_reload_verified"
+description: "Новая под-секция конфига без своего менеджера идёт мимо сверщика (verifier) — ручка (knob) действует, но вердикт её не судит"
+module: [process_module]
+mechanism: [config, guards]
 metadata:
   type: feedback
 ---

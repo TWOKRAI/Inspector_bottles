@@ -1,6 +1,7 @@
 ---
 name: gate-signature-lives-on-a-head
-description: "подпись гейта живёт на конкретном HEAD — коммит после подписи требует пере-прогона; приёмка гоняет гейт сама, не берёт число из отчёта"
+description: "Подпись гейта (gate signature) живёт на конкретном HEAD — коммит после подписи требует пере-прогона; приёмка (acceptance) гоняет гейт сама, не берёт число из отчёта"
+mechanism: [acceptance, review-verdicts]
 metadata:
   node_type: memory
   type: feedback

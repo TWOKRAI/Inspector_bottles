@@ -1,8 +1,8 @@
 ---
 name: feedback-modal-dialog-waits-instead-of-failing
-description: Тест, открывший модальный Qt-диалог, не краснеет — он ждёт клика; страж обязан быть BaseException
-module: "frontend_module"
-mechanism: "qt-tests"
+description: "Тест, открывший модальный Qt-диалог, не краснеет — он ждёт клика; страж обязан быть BaseException (modal dialog, conftest guard, teardown)"
+module: [frontend_module]
+mechanism: [qt, guards]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: project-universal-lifecycle-decision
-description: "Решение владельца 2026-10-03 — один универсальный механизм жизненного цикла для подписок, потоков, процессов, окон и виджетов; чинить на корню, не симптом"
-module: "lifecycle, subscriptions"
-mechanism: "scope-owner"
+description: "Решение владельца 2026-10-03 — один универсальный механизм жизненного цикла (scope owner) для подписок, потоков, процессов, окон и виджетов; чинить на корню / lifecycle, subscriptions, dispose"
+module: [base_manager, event_module]
+mechanism: [owner-decision, lifecycle]
 metadata:
   node_type: memory
   type: project

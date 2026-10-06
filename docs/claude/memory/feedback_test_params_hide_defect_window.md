@@ -1,8 +1,8 @@
 ---
 name: test-params-hide-defect-window
-description: "Оба HIGH ревью 2026-07-10 жили под зелёными тестами — параметр теста закрывал окно дефекта (backoff_sec=0.0; INFO+adapter=None); также: Тест, задающий одну ручку из пары «каноничная/легаси», мерит приоритет чтения, а не то, что заявляет; Тест с числами, близкими к дефолту, проверяет дефолт, а не операбельность ручки"
+description: "Оба HIGH ревью жили под зелёными тестами — параметр теста / test params закрывал окно дефекта (backoff_sec=0.0; INFO+adapter=None); пара «каноничная/легаси» ручка меряет приоритет; значения около дефолта / defaults тестируют дефолт"
+mechanism: [fixtures, test-assertions]
 merged_from: [feedback_test_setting_one_handle_of_a_pair_measures_priority, feedback_test_values_near_defaults_test_the_default]
-mechanism: "test-params"
 metadata:
   node_type: memory
   type: feedback

@@ -1,8 +1,8 @@
 ---
 name: feedback_subagents_share_the_leads_scratchpad
-description: "Субагент пишет в тот же scratchpad сессии, что и лид: ревьюер 6.1 сохранил свой inject.py поверх харнесса инъекций лида — у каждого агента своя подпапка"
-mechanism: "session scratchpad, subagents"
-module: plans_progress
+description: "Субагент пишет в тот же scratchpad сессии, что и лид: ревьюер 6.1 сохранил свой inject.py поверх харнесса инъекций лида — у каждого агента своя подпапка / subagents share the lead's session scratchpad, same-name files are silently overwritten — give each agent its own subfolder"
+mechanism: [agents, break-injection]
+module: [scripts]
 metadata:
   node_type: memory
   type: feedback

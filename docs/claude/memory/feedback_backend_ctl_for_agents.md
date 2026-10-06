@@ -1,6 +1,8 @@
 ---
 name: feedback-backend-ctl-for-agents
-description: "Тестировать/отлаживать бэкенд агентам через backend_ctl (имитация фронтенд-сообщений), НЕ через запуск GUI и НЕ через qt-mcp; также: Живую систему диагностировать штатным backend_ctl, а не самописными psutil-скриптами — инструмент для этого и сделан"
+description: "Тестировать/отлаживать бэкенд (backend) агентам через backend_ctl (имитация фронтенд-сообщений), НЕ через запуск GUI и НЕ через qt-mcp; также: живую систему диагностировать штатным backend_ctl, а не самописными psutil-скриптами"
+module: [tools/backend_ctl]
+mechanism: [live-stand]
 merged_from: [feedback_diagnose_live_system_with_backend_ctl]
 metadata:
   node_type: memory

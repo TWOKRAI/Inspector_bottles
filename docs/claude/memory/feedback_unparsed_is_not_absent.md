@@ -1,8 +1,8 @@
 ---
 name: feedback-unparsed-is-not-absent
-description: Парсер, молча пропускающий непонятную строку, превращает «не разобрал» в «данных нет» — и гейт зеленеет при разъехавшемся индексе
-module: "scripts/sync, validate.py"
-mechanism: "silent-parser"
+description: "Парсер / parser, молча пропускающий непонятную строку, превращает «не разобрал» в «данных нет» — и гейт зеленеет при разъехавшемся индексе (ADR)"
+module: [scripts]
+mechanism: [error-handling, guards]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback-deep-merge-is-not-associative
-description: Сложить две дельты в одну можно не всегда — deep_merge не ассоциативен; условие проверяется по самим дельтам, без знания базы
-module: "config layers (deep_merge)"
-mechanism: "property-testing"
+description: "Сложить две дельты (delta) в одну можно не всегда — deep_merge не ассоциативен; условие безопасности проверяется по самим дельтам, без знания базы, перебором"
+module: [config_module]
+mechanism: [config, guards]
 metadata:
   type: feedback
 ---

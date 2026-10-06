@@ -1,8 +1,8 @@
 ---
 name: feedback-transport-arbitrates-what-it-cannot-understand
-description: "Два писателя в один лист дерева — конфликт разрешает троттл по порядку прибытия, вырезая лист МОЛЧА (proceed=true, без rejection_reason)"
-module: "telemetry (ThrottleMiddleware)"
-mechanism: "single-owner leaf"
+description: "Два писателя / writers в один лист дерева — конфликт разрешает троттл / throttle по порядку прибытия, вырезая лист МОЛЧА (proceed=true, без rejection_reason)"
+module: [router_module]
+mechanism: [ipc-routing, error-handling]
 metadata:
   node_type: memory
   type: feedback

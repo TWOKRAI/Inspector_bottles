@@ -1,6 +1,7 @@
 ---
 name: Plan checkboxes must be updated
-description: Always mark completed tasks [x] in plan.md after each phase/task, include commit hashes
+description: "Always mark completed tasks [x] in plan.md after each phase/task, include commit hashes (чекбоксы плана / plan checkboxes, отметки выполнения)"
+mechanism: [docs]
 type: feedback
 originSessionId: 94232869-20f7-4636-b47b-ddae61570b64
 ---

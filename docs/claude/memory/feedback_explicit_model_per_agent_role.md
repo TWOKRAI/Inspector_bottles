@@ -1,6 +1,7 @@
 ---
 name: explicit-model-per-agent-role
-description: "Owner rule — always pass `model` explicitly when launching agents; reviewer and teamlead on opus, developer and tester on sonnet, super-reviewer (cto) on fable; также: Исполнители: Sonnet 5 — дефолт (near-Opus, ~2.5x дешевле), Opus 4.8 — только верхний край (конкурентность/длинные автономные заходы); Fable — план/ревью-свод/merge; брифы под Sonnet 5 — с явным охватом"
+description: "Правило владельца (owner rule): всегда явно передавать model при запуске агентов — reviewer и teamlead на opus, developer и tester на sonnet, cto на fable; Sonnet 5 — дефолт исполнителя, брифы с явным охватом"
+mechanism: [owner-decision, agents]
 merged_from: [feedback_model_split_impl_vs_review]
 metadata:
   type: feedback

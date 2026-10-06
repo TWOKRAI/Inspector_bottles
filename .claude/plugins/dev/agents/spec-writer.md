@@ -5,7 +5,6 @@ model: sonnet
 omitClaudeMd: true
 skills: project-rules
 disallowedTools: mcp__backend-ctl, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__context7, mcp__graphify, mcp__sentrux, mcp__serena
-memory: project
 ---
 
 ## Role

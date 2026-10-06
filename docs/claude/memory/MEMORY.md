@@ -58,5 +58,5 @@
 - [Бэкенд через backend_ctl](feedback_backend_ctl_for_agents.md) — не GUI, не qt-mcp
 
 ## 4. Как писать
-Урок = ловушка + замер (вход→выход) + триггер; теги `module:` и `mechanism:` во frontmatter; `/core:memory:remember`.
-Состояние плана — в plan.md, не сюда. Поиск: `grep -l "module: X" docs/claude/memory/*.md`.
+Урок = ловушка + замер (вход→выход) + триггер; теги `module:` и `mechanism:` во frontmatter; `/core:memory:remember` (только лид; субагент — блок MEMORY LESSON, project-rules §8).
+Состояние плана — в plan.md, не сюда. Поиск (все уроки, и ролей тоже): `python scripts/memory/search.py <3-5 слов> [--module id] [--mechanism id]`; словарь механизмов — `TAGS.yaml`.

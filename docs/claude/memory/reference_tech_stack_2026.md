@@ -1,7 +1,7 @@
 ---
 name: tech-stack-2026
-description: При любых улучшениях стека/перфа/зависимостей сверяться с docs/direction/TECH_STACK_2026.md — живой стратегический документ владельца
-module: "stack"
+description: "При любых улучшениях стека/перфа/зависимостей сверяться с docs/direction/TECH_STACK_2026.md — живой стратегический документ владельца / tech stack strategy, dependencies"
+mechanism: [docs, spec-scope]
 metadata:
   node_type: memory
   type: reference

@@ -1,10 +1,11 @@
 ---
 name: config-reload-ttl-addressing-guard
-description: config.reload refuses ttl on a throttle-only payload for an unrelated pre-existing reason — don't mistake that refusal for the property under test
-module: "process_module (config.reload)"
-mechanism: "test-writing"
+description: "config.reload отказывает на throttle-only payload с ttl по посторонней причине (guard) — отказ не путать с проверяемым свойством / vacuous green test: смотреть живой ответ handler до assert"
+module: [process_module]
+mechanism: [test-assertions, config]
 metadata:
   type: feedback
+merged_from: [_archive/feedback_config_reload_ttl_addressing_guard (was tester/)]
 ---
 
 `config.reload` has a pre-existing, unrelated guard: if the inline payload carries

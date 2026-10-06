@@ -1,7 +1,8 @@
 ---
 name: project_device_hub
-description: "device-hub — always-on процесс устройств, реестр, YAML-протоколы; статус и следующая итерация device-tree-recipe"
-module: "device_hub"
+description: "device-hub — always-on процесс устройств, реестр, YAML-протоколы; статус и следующая итерация device-tree-recipe / device registry, driver contracts"
+module: [services/device_hub, plugins/hub]
+mechanism: [architecture, concurrency]
 metadata:
   node_type: memory
   type: project

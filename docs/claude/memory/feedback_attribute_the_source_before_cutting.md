@@ -1,7 +1,7 @@
 ---
 name: feedback-attribute-the-source-before-cutting
-description: "одно имя в контексте может приходить из двух мест (проект и ~/.claude) — сверять СОСТАВ множеств, а не факт присутствия, иначе режешь не тот источник и заявляешь экономию, которой нет"
-mechanism: "context-audit"
+description: "Одно имя в контексте (context) может приходить из двух мест (проект и ~/.claude) — сверять СОСТАВ множеств, а не факт присутствия, иначе режешь не тот источник и заявляешь экономию, которой нет"
+mechanism: [agents]
 metadata:
   node_type: memory
   type: feedback

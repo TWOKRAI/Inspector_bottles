@@ -1,8 +1,8 @@
 ---
 name: feedback-unconnected-driver-reads-as-a-clean-zero
-description: "Неподключённый BackendDriver отдаёт success=False, а .get(key, default) превращает это в ровный ноль — замер выглядит как доказательство"
-module: "backend_ctl driver"
-mechanism: "measurement"
+description: "Неподключённый BackendDriver (unconnected driver) отдаёт success=False, а .get(key, default) превращает это в ровный ноль — замер выглядит как доказательство; нужен контроль с ненулевым"
+module: [tools/backend_ctl]
+mechanism: [measurement, probes]
 metadata:
   node_type: memory
   type: feedback

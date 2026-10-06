@@ -1,6 +1,8 @@
 ---
 name: feedback_one_active_plan_per_tool
-description: Один инструмент (backend_ctl) — один активный план; раздельные треки дали воскрешение отменённой задачи и простой санкционированного рефакторинга
+description: "Один инструмент (backend_ctl) — один активный план; раздельные треки дали воскрешение отменённой задачи и простой санкционированного рефакторинга (план / plan, tracks, queue)"
+module: [tools/backend_ctl]
+mechanism: [spec-scope, docs]
 metadata:
   type: feedback
 ---

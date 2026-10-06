@@ -1,8 +1,7 @@
 ---
 name: feedback_a_fix_on_a_finding_must_not_outgrow_it
-description: "Правка, добавленная по находке сверх спеки, обязана быть ровно шириной воспроизведения — расширенная на «похожие» случаи снимает соседние предохранители молча"
-module: "pipeline/plugin_module"
-mechanism: "review-fix scope"
+description: "Правка, добавленная по находке сверх спеки (spec), обязана быть ровно шириной воспроизведения — расширенная на «похожие» случаи снимает соседние предохранители молча (review-fix scope)"
+mechanism: [spec-scope]
 metadata:
   node_type: memory
   type: feedback

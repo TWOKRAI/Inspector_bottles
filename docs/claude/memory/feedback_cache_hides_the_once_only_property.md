@@ -1,8 +1,8 @@
 ---
 name: feedback-cache-hides-the-once-only-property
-description: Кэш по ключу сам гасит повторы, поэтому тест «сигнал ровно один раз» вакуумен, если вход не варьируется по ключу кэша
-module: "logger_module (gate dedup)"
-mechanism: "test-data"
+description: "Кэш (cache) по ключу сам гасит повторы, поэтому тест «сигнал ровно один раз» вакуумен, если вход не варьируется по ключу кэша"
+module: [logger_module]
+mechanism: [test-assertions, fixtures]
 metadata:
   type: feedback
 ---

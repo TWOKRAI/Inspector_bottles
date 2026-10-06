@@ -1,10 +1,10 @@
 ---
 name: Register routing causes GUI hang
-description: FieldRouting on new registers without corresponding IPC channels causes GUI freeze on set_field_value
+description: "FieldRouting on new registers without corresponding IPC channels causes GUI freeze on set_field_value (регистры / registers, зависание GUI / hang, канал / channel)"
+module: [frontend_module, registers_module]
+mechanism: [ipc-routing, concurrency]
 type: feedback
 originSessionId: 1223cca6-a6d2-4550-a4ca-364f8450e68a
-module: "frontend_module/registers"
-mechanism: "FieldRouting"
 ---
 Adding `routing=FieldRouting(channel="control_X", process_targets=("Y",))` to register fields triggers automatic IPC dispatch via FrontendRegistersBridge when `set_field_value()` is called. If channel "control_X" has no registered queue, the send blocks indefinitely → GUI hang.
 

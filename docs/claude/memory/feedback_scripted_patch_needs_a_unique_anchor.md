@@ -1,7 +1,7 @@
 ---
 name: feedback-scripted-patch-needs-a-unique-anchor
-description: "Скриптовая замена по якорю обязана падать при count != 1 — неуникальный якорь режет соседнюю функцию молча, и ближайший гейт этого не видит"
-mechanism: "break-injection tooling"
+description: "Скриптовая замена по якорю / scripted patch anchor обязана падать при count != 1 — неуникальный якорь режет соседнюю функцию молча, и ближайший гейт / gate этого не видит"
+mechanism: [break-injection, test-infra]
 metadata:
   node_type: memory
   type: feedback

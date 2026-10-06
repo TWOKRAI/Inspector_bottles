@@ -1,6 +1,7 @@
 ---
 name: an-inventory-grep-needs-fixed-strings
-description: Counting occurrences of dotted names (metrics, modules, config keys) with a regex grep inflates the count silently — the dot matches the underscore variant; inventory numbers must use grep -F
+description: "Counting occurrences of dotted names (metrics, modules, config keys) with a regex grep inflates the count silently — the dot matches the underscore variant; inventory numbers must use grep -F (инвентарь: счёт вхождений только через grep -F)"
+mechanism: [dev-tooling, measurement]
 metadata:
   type: feedback
 ---

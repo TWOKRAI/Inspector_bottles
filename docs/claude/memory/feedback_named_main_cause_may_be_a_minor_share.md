@@ -1,7 +1,7 @@
 ---
 name: feedback_named_main_cause_may_be_a_minor_share
-description: "Находка называет «главный источник» — мерь его ДОЛЮ до правки: 3-8 % против 92-97 %, и гейт этапа оказался недостижим"
-mechanism: "measurement"
+description: "Находка называет «главный источник» — мерь его ДОЛЮ до правки: 3-8 % против 92-97 %, и гейт этапа оказался недостижим (доля / share, gate, план / plan premise)"
+mechanism: [measurement, spec-scope]
 metadata:
   node_type: memory
   type: feedback
