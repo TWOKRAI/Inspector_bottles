@@ -69,7 +69,7 @@ class GcOwnerStats:  # 13 полей; to_dict() — только примити�
 ```
 
 Docstring модуля и новых публичных имён — `Stability: lite`, `Pre:`/`Post:` (сейчас `Stability` в файле — 0).
-`log=None` → `logging.getLogger(__name__).info`.
+`log=None` → `get_std_logger(__name__).info` из `logger_module` (ред. 3: голый `logging.getLogger` запрещён стражем `test_std_logger_guard.py`).
 
 **Слот процесса** (один: `gc` глобален):
 

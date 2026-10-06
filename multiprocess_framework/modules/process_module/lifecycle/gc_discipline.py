@@ -38,7 +38,6 @@ Stability: lite.
 from __future__ import annotations
 
 import gc
-import logging
 import math
 import threading
 import time
@@ -433,6 +432,17 @@ class GcCollectionOwner:
             self._foreign_collections += 1
 
 
+def _default_log() -> Callable[[str], None]:
+    """``log=None`` → ``get_std_logger(__name__).info`` (страж: голый stdlib-логгер запрещён).
+
+    Импорт ленивый, как ``GcDiscipline._flag``: ядро ``process_module`` не тянет
+    ``logger_module`` при импорте модуля.
+    """
+    from ...logger_module import get_std_logger
+
+    return get_std_logger(__name__).info
+
+
 def _finite(value: float) -> bool:
     try:
         return math.isfinite(float(value))
@@ -474,7 +484,7 @@ def collect_on(
         freeze=resolved_freeze,
         freeze_after_s=float(freeze_after_s),
         requested=requested,
-        log=log or logging.getLogger(__name__).info,
+        log=log or _default_log(),
     )
     with _SLOT_LOCK:
         current = _slot
