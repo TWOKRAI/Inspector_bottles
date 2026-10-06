@@ -53,7 +53,7 @@ env-config	config	1
 env-flags	config	1
 experiment-control	probes	1
 false-signal	review-verdicts	1
-feedback-loop	probes	1
+feedback-loop	measurement	1
 FieldRouting	ipc-routing	1
 fixtures	fixtures	1
 flaky-tests	flaky-tests	2
@@ -66,7 +66,7 @@ guard-design	guards	3
 guard-layer	guards	1
 guards	guards	1
 hand-built-fixture	fixtures	1
-harness	test-doubles	1
+harness	test-infra	1
 hooks	hooks	1
 import-cycles	dev-tooling	1
 independence	acceptance	2
@@ -74,7 +74,7 @@ inheritance	architecture	1
 inherited-rules	architecture	1
 IO-in-parser	performance	1
 layer-L3	architecture	1
-lazy-eval	performance	1
+lazy-eval	concurrency	1
 lifecycle	lifecycle	1
 live-run	live-stand	1
 live-stand	live-stand	2
@@ -98,7 +98,7 @@ placeholders	docs	1
 plans	spec-scope	1
 PostToolUse formatter hook	hooks	1
 pre-commit	hooks	2
-prediction	measurement	1
+prediction	break-injection	1
 probe-design	probes	5
 property-testing	test-infra	1
 pydantic-v2	config	1
@@ -148,15 +148,15 @@ test-flake	flaky-tests	1
 test-isolation	test-infra	1
 test-mechanism	test-infra	1
 test-params	fixtures	1
-test-resolution	flaky-tests	2
+test-resolution	test-assertions	2
 test-writing	test-infra	1
-test/live/review	test-infra	1
+test/live/review	review-verdicts	1
 tester	acceptance	1
 tester-brief	acceptance	1
 testpaths	test-infra	2
 thread-GC	concurrency	1
 throttle	concurrency	1
-tooling	agents	1
+tooling	windows-env	1
 topology-gate	architecture	1
 tracing	test-infra	1
 transactions	persistence	1
