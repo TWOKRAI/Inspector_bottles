@@ -182,6 +182,17 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
   эта запись — единственное место со старым именем). Там же: предпосылка 1.4 — фазы gui-constructor вместо T4.1–T4.4,
   докинг Task 3.1 — у оболочки фреймворка, место пакета сервиса — `Services/<x>/gui/`.
 
+## Требование из lifecycle-owner-scope — владение Qt-объектами (черновик, 2026-10-06)
+
+Решение владельца 2026-10-06: политика памяти GUI-процесса (T1 трека
+[`lifecycle-owner-scope`](../2026-10-03_lifecycle-owner-scope/plan.md)) — фундамент и страховочная сетка; лечение корня
+abort — здесь, в мегаплане GUI (`gui-service` + `gui-constructor` + `frontend-constructor`). **Первый пункт мегаплана —
+инвариант, который держится устройством кода:** `QObject` рождается и умирает только на главном потоке; между потоками —
+только данные (сигнал/очередь); время жизни — через scope-владельца без сильных циклов view↔presenter; храповик Qt-мусора
+на тест. `apps/gui_client` ставит `install_gui_memory_policy(app, log=…)` сразу после `QApplication`. Полный черновик
+требований и остаточные пути — в [`plan.md`](../2026-10-03_lifecycle-owner-scope/plan.md) трека, раздел «Решение
+владельца 2026-10-06».
+
 ## Открытые вопросы
 
 - **Сколько in-tree допущений в `frontend_module`/`multiprocess_prototype/frontend`** — не
