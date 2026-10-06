@@ -14,7 +14,7 @@ bridge-carrier	ipc-routing	1
 browser stand	live-stand	1
 bulk-replace	dead-code	1
 call-sites	dead-code	1
-clock-injection	measurement	1
+clock-injection	test-doubles	1
 clock-resolution	measurement	1
 coinciding-constants	test-assertions	1
 concurrency	concurrency	1
@@ -29,11 +29,11 @@ config_reload_verified	live-stand	1
 connector-test	probes	1
 constants-vs-emission	test-assertions	1
 context-audit	agents	1
-controls	guards	1
+controls	probes	1
 cost	agents	1
-coverage	guards	1
+coverage	test-infra	1
 coverage-of-the-gate	guards	1
-CSS pseudo-elements	qt	1
+CSS pseudo-elements	live-stand	1
 dead-branch	dead-code	1
 dead-branch-behind-flag	dead-code	1
 dead-code grep	dead-code	1
@@ -58,7 +58,7 @@ FieldRouting	ipc-routing	1
 fixtures	fixtures	1
 flaky-tests	flaky-tests	2
 freshness	docs	1
-getattr-default	config	1
+getattr-default	dead-code	1
 git	git	4
 global-resource-in-tests	test-infra	1
 graphify	dev-tooling	1
@@ -87,7 +87,7 @@ naming	docs	1
 never-drop queue	concurrency	1
 O(n^2)-per-frame	performance	1
 ON/OFF-proof	probes	1
-operator-sequence	spec-scope	1
+operator-sequence	review-verdicts	1
 ordering	concurrency	1
 owner-decision	owner-decision	1
 parallel-commits	git	1
@@ -97,7 +97,7 @@ perf-measurement	measurement	3
 placeholders	docs	1
 plans	spec-scope	1
 PostToolUse formatter hook	hooks	1
-pre-commit	git	2
+pre-commit	hooks	2
 prediction	measurement	1
 probe-design	probes	5
 property-testing	test-infra	1
@@ -122,7 +122,7 @@ scope-discipline	spec-scope	1
 scope-owner	lifecycle	1
 SendMessage	agents	1
 session-TTL	config	1
-shared-baseline	git	1
+shared-baseline	measurement	1
 silent-parser	error-handling	1
 single-owner leaf	lifecycle	1
 singleton lifecycle	lifecycle	1
@@ -130,7 +130,7 @@ spawn	lifecycle	1
 spec-review	spec-scope	3
 sqlite	persistence	1
 stage-ordering	concurrency	1
-stale-copy-after-switch	git	1
+stale-copy-after-switch	ipc-routing	1
 state-root subscribe	ipc-routing	1
 stubs	test-doubles	1
 success-value-vs-fact	review-verdicts	2
@@ -158,7 +158,7 @@ thread-GC	concurrency	1
 throttle	concurrency	1
 tooling	agents	1
 topology-gate	architecture	1
-tracing	ipc-routing	1
+tracing	test-infra	1
 transactions	persistence	1
 type-coercion	config	1
 validation-at-consumer	config	1
