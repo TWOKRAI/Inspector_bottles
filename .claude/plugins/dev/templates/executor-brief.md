@@ -72,7 +72,7 @@ REPORT (final message, <= 25 lines): FIRST LINE 'STATUS: DONE | DONE_WITH_CONCER
   outcome; every acceptance number from the command that produced it; files touched;
   "What I interpreted rather than followed"; "What I left open / unreliable" (non-empty);
   memory hits: <command> -> <paths> | none
-  MEMORY LESSON <name>.md: <full file text> | none
+  MEMORY LESSON <name>.md: <full file text> | none — in the final message itself, outside the 25-line limit
   Put the FULL report (command outputs, reasoning) in
   docs/reviews/<YYYY-MM-DD>_task-<X.Y>-<role>.md and name that path - the lead's context
   is the most expensive one.

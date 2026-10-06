@@ -65,7 +65,7 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
 ## 6. Language
 
 Replies to the owner, reports, code comments and docs (README, STATUS, plans): **Russian**. Agent prompts,
-skills, settings and memory: English. Don't mix languages in one file. A new memory lesson is
+skills, settings and memory: English. Don't mix languages in one file (exception: a lesson's `description:`). A new memory lesson is
 written in English; its `description:` carries Russian and English keywords (search matches both);
 old lessons are not translated.
 
@@ -98,14 +98,16 @@ Files: <paths>
 - `uv sync` elsewhere only with `--inexact`. No global `taskkill` — `TaskStop` or a PID.
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
 - Add an import and its use in one Edit (ruff strips an unused import).
-- Memory search before your first edit (the main checkout's script: worktrees cut before the merge lack it):
+- Memory search before your first edit (read-only roles: before the first finding; the main checkout's script: worktrees cut before the merge lack it):
   `python "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/memory/search.py" <3–5 task words>`
   (add `--module <id>` when the module is known); read the `description:` of each hit. Report
   `memory hits: <command> -> <paths> | none`, or `memory hits: n/a (no Bash)` / `memory hits: n/a (no script)`.
 - A memory lesson is never written by a subagent into any tree — not the main checkout, not
   `.claude/agent-memory/`: put it in your final report as a `MEMORY LESSON <name>.md` block (full file text,
   tags from the vocabularies); the lead writes it into the main checkout's `docs/claude/memory/` and commits
-  `docs(memory):`.
+  `docs(memory):`. Before the block: search the lesson's words — a hit → `merged_from:` in that file, not a
+  new one. Tags: `role:` = your agent name; `module:` ⊆ ids in `modules.yaml`; `mechanism:` ⊆
+  `docs/claude/memory/TAGS.yaml`.
 
 ## 9. Tests and verdicts
 
@@ -144,7 +146,7 @@ Reports follow STE-80: `.claude/skills/project-rules/ste-80.md`.
 | IPC, ownership | `multiprocess_framework/docs/{ROUTING_GLOSSARY,MODULES_RESPONSIBILITY_MAP,MODULE_TIERS}.md` |
 | stack, tests, Layer, worktree | `.claude/modes/_stack.md` (Toolchain → Worktree); `make gate` |
 | lessons | `scripts/memory/search.py <words> [--module M]` (§8); digests `docs/claude/memory/CRAFT-{tests,injection,verdict,config-qt,by-module}.md` |
-| lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §3 Windows env, §4 writing one; owner: «## 2. Решения владельца (живые)»; all lessons: `search.py --list` |
+| lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §3 Windows env, §4 lesson format (a subagent never writes one: §8); owner: «## 2. Решения владельца (живые)»; all lessons: `search.py --list` |
 | MCP | `.claude/plugins/mcp-{qex,sentrux,backend-ctl}/README.md`; blast radius `scripts/graph_slice/README.md` |
 | live backend | `backend_ctl`; qt-mcp only for GUI; no psutil; GUI stand `INSPECTOR_GUI_UNATTENDED=1` |
 | skills | module-contract, systematic-debugging, verify-done, team-protocol |
