@@ -1282,7 +1282,7 @@ def build_queue(plans: list[Plan], order: Path) -> tuple[list[dict], list[Findin
     return items, findings
 
 
-def build_queue_view(plans: list[Plan], order: Path) -> dict | None:
+def _build_queue_view(plans: list[Plan], order: Path) -> dict | None:
     """Очередь для колонки страницы: `None` — колонки нет (нет `ORDER.md` или в нём нет ни одного маркера блока).
 
     Иначе `{"problem": текст проблемы блока или "", "entries": [{"item", "plan", "task", "finding"}]}` — пункт как в
@@ -2804,7 +2804,7 @@ def to_html(
     Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
     `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
     `overlaps` — из `find_overlaps`: секция `#overlaps` сразу после `#who` и чип `overlap` у планов с пересечением.
-    `owner_queue` — из `build_queue_view`: колонка `aside#owner-queue` сразу после `#queue`; `None` — колонки нет.
+    `owner_queue` — из `_build_queue_view`: колонка `aside#owner-queue` сразу после `#queue`; `None` — колонки нет.
 
     Шапка `header.topbar`: `h1`, три `div.meta`, переключатель `details.switcher`, ссылка `a.back` и `nav.tabs`
     (вкладки — радиокнопки, вид без JS). У каждой карточки якорь `plan-<slug>` (`assign_anchors`, порядок печати —
@@ -3011,7 +3011,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
-        owner_queue = build_queue_view(ordered, order_path)  # те же планы, что у карточек, после apply_order
+        owner_queue = _build_queue_view(ordered, order_path)  # те же планы, что у карточек, после apply_order
         target.write_text(
             to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps, owner_queue),
             encoding="utf-8",

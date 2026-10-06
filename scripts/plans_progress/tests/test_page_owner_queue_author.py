@@ -249,9 +249,10 @@ def test_plan_item_tally_has_no_card_tail_for_deferred_task(tmp_path):
 # =========================================================================== чип «в работе»: только открытые пункты
 
 
-def _mem_plan(name: str, status: str, active: list[dict]) -> pp.Plan:
-    p = pp.Plan(name=name, rel=f"plans/{name}/plan.md", archived=False, tier="queue")
-    p.tasks = [pp.Task("1.1", "Шаг", status)]
+def _mem_plan(name: str, tier: str, active: list[dict]) -> pp.Plan:
+    """Живой план с одной ОТКРЫТОЙ задачей 1.1 (pending): закрытым его делает только ярус `tier`."""
+    p = pp.Plan(name=name, rel=f"plans/{name}/plan.md", archived=False, tier=tier)
+    p.tasks = [pp.Task("1.1", "Шаг", "pending")]
     p.active = active
     return p
 
@@ -260,31 +261,34 @@ def _entry(branch: str) -> dict:
     return {"branch": branch, "worktree": "D:/wt", "sessions": 1, "agents": 2, "last_signal": "2026-10-03T11:55:00"}
 
 
-def test_task_item_of_closed_plan_is_struck_and_has_no_active_chip(tmp_path):
+def test_items_of_closed_plan_are_struck_and_have_no_active_chip_even_for_open_task(tmp_path):
     """Охраняет `not item["closed"]` перед `_active_chip` в `_owner_queue_html`.
 
-    Закрытый план `z-plan` с записью `active` на карточке: пункт-задача его закрытой задачи зачёркнут и без чипа
-    «в работе»; пункт открытого плана `y-plan` с такой же записью чип получает (контроль).
+    План `z-plan` закрыт ярусом §4.3, но его задача 1.1 открыта (pending), и у плана есть запись `active`:
+    пункт-задача и пункт-план зачёркнуты и без чипа «в работе». Закрытость задачи тут ни при чём — тест
+    отличает «закрыт план» от «закрыта задача». Пункт открытого `y-plan` с такой же записью чип получает (контроль).
     """
     order = tmp_path / "ORDER.md"
-    order.write_text(
-        "\n".join([BEGIN, HEAD, SEP, "| 1 | z-plan | 1.1 | |", "| 2 | y-plan | | |", END, ""]), encoding="utf-8"
-    )
-    closed, opened = _mem_plan("z-plan", "done", [_entry("feat/z")]), _mem_plan("y-plan", "pending", [_entry("feat/y")])
-    view = pp.build_queue_view([closed, opened], order)
+    rows = ["| 1 | z-plan | 1.1 | |", "| 2 | z-plan | | |", "| 3 | y-plan | | |"]
+    order.write_text("\n".join([BEGIN, HEAD, SEP, *rows, END, ""]), encoding="utf-8")
+    closed, opened = _mem_plan("z-plan", "closed", [_entry("feat/z")]), _mem_plan("y-plan", "queue", [_entry("feat/y")])
+    view = pp._build_queue_view([closed, opened], order)
     page = pp.to_html([closed, opened], [], tmp_path, owner_queue=view)
-    first, second = lis_of(page)
+    first, second, third = lis_of(page)
     assert first.startswith('<li data-n="1" data-kind="task" data-plan="z-plan" data-task="1.1" data-closed="1"><s>')
+    assert second.startswith('<li data-n="2" data-kind="plan" data-plan="z-plan" data-closed="1"><s>')
     assert 'data-chip="active"' not in first
-    assert 'data-chip="active" data-active="feat/y"' in second
-    assert 'data-chip="active" data-active="feat/z"' in page  # чип закрытого плана на его карточке остался
+    assert 'data-chip="active"' not in second
+    assert 'data-chip="active" data-active="feat/y"' in third
+    # контроль: запись `active` живая — на карточке z-plan чип есть (ровно один: в колонке его нет)
+    assert page.count('data-chip="active" data-active="feat/z"') == 1
 
 
 def test_no_order_markers_gives_no_column_and_markers_without_table_give_problem(tmp_path):
-    """Охраняет `build_queue_view`: нет ни одного маркера -> `None`; маркеры без таблицы -> проблема, а не `None`."""
+    """Охраняет `_build_queue_view`: нет ни одного маркера -> `None`; маркеры без таблицы -> проблема, а не `None`."""
     order = tmp_path / "ORDER.md"
     order.write_text("# нет блока\n", encoding="utf-8")
-    assert pp.build_queue_view([], order) is None
-    assert pp.build_queue_view([], tmp_path / "нет-файла.md") is None
+    assert pp._build_queue_view([], order) is None
+    assert pp._build_queue_view([], tmp_path / "нет-файла.md") is None
     order.write_text(f"{BEGIN}\nпусто\n{END}\n", encoding="utf-8")
-    assert pp.build_queue_view([], order) == {"problem": "в блоке нет таблицы с колонкой «План»", "entries": []}
+    assert pp._build_queue_view([], order) == {"problem": "в блоке нет таблицы с колонкой «План»", "entries": []}
