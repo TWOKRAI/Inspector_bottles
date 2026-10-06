@@ -44,18 +44,17 @@ from multiprocess_framework.modules.tests._road_cost import count_calls, timed_p
 # из критериев 2/6/7 может СЛОМАННО оставить их в грязном состоянии — это не
 # должно каскадом ронять СОСЕДНИЕ тесты этого файла или сессионный
 # `framework_metric_catalogue_guard` из conftest.py. Фикстура снимает снимок
-# ДО и возвращает его же ПОСЛЕ, а gc принудительно включает на входе и выходе
-# (это и есть ожидаемое здоровое состояние, если контракт вообще выполняется).
+# ДО и возвращает его же ПОСЛЕ. Состояние gc она не трогает: автосборкой владеет
+# политика сессии, тест включать её обратно не вправе; критерий 2 сверяет gc со
+# снимком, снятым в самом тесте.
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _isolate_debug_hooks():
     prior_profile = sys.getprofile()
     prior_trace = sys.gettrace()
-    gc.enable()
     yield
     sys.setprofile(prior_profile)
     sys.settrace(prior_trace)
-    gc.enable()
 
 
 # --- вспомогательные объекты для критерия 1 (busy-loop с управляемой ценой) -
@@ -146,7 +145,7 @@ def test_timed_pair_returns_per_call_seconds_in_correct_order():
 # Критерий 2
 # ---------------------------------------------------------------------------
 def test_timed_pair_reenables_gc_after_measured_callable_raises():
-    assert gc.isenabled()
+    before = gc.isenabled()
 
     def boom() -> None:
         raise RuntimeError("boom")
@@ -157,7 +156,7 @@ def test_timed_pair_reenables_gc_after_measured_callable_raises():
     with pytest.raises(RuntimeError):
         timed_pair(boom, ok, repeats=3)
 
-    assert gc.isenabled()
+    assert gc.isenabled() is before
 
 
 # ---------------------------------------------------------------------------

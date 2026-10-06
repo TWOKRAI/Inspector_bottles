@@ -9,7 +9,24 @@ from __future__ import annotations
 
 import gc
 
-from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import GcDiscipline
+import pytest
+
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (
+    GcDiscipline,
+    suspend_collection_owner,
+)
+
+
+@pytest.fixture(autouse=True)
+def _slot_is_free_for_the_test():
+    """Слот сессионного владельца сборки освобождён на тест; на выходе владелец и его gc-режим возвращены.
+
+    Тесты ниже сами включают и выключают автосборку через ``GcDiscipline``: пока слот занят политикой
+    сессии, это нарушение владения. ``suspend_collection_owner`` отдаёт слот тесту и сам возвращает
+    состояние gc (и заморозку), поэтому тесту не нужен ``gc.enable()`` в ``finally``.
+    """
+    with suspend_collection_owner():
+        yield
 
 
 class TestFreeze:
@@ -29,7 +46,6 @@ class TestFreeze:
             assert gc.isenabled() is True  # без FW_GC_SCHEDULED авто-GC остаётся включён
         finally:
             gc.unfreeze()  # не течём между тестами
-            gc.enable()
 
     def test_idempotent(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
@@ -39,7 +55,6 @@ class TestFreeze:
             assert d.freeze_after_startup() is False  # второй раз — no-op
         finally:
             gc.unfreeze()
-            gc.enable()
 
     def test_scheduled_disables_auto_gc(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
@@ -50,7 +65,6 @@ class TestFreeze:
             assert gc.isenabled() is False  # авто-GC отключён → сборка по расписанию
         finally:
             gc.unfreeze()
-            gc.enable()
 
     def test_scheduled_without_freeze_warns_loudly(self, monkeypatch):
         """Ф7 ревью фазы G: FW_GC_SCHEDULED без FW_GC_FREEZE — расписание НЕ применяется,
@@ -85,4 +99,3 @@ class TestScheduledCollect:
             assert d.collect_scheduled(now=102.5, interval_s=2.0) is True  # дедлайн прошёл
         finally:
             gc.unfreeze()
-            gc.enable()

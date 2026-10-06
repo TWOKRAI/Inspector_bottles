@@ -27,12 +27,13 @@ python-уровневых и C-уровневых вызовов внутри о
 
 from __future__ import annotations
 
-import gc
 import sys
 import threading
 import time
 import tracemalloc
 from typing import Any, Callable, Tuple
+
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import paused_gc
 
 __all__ = ["count_calls", "count_instructions", "peak_alloc", "report", "timed_pair"]
 
@@ -90,8 +91,7 @@ def timed_pair(new_fn: Callable[[], Any], old_fn: Callable[[], Any], repeats: in
         из пяти окон для каждой стороны, делённое на ``repeats``.
     """
     best_new = best_old = None
-    gc.disable()
-    try:
+    with paused_gc():
         for _ in range(5):
             start = time.perf_counter()
             for _ in range(repeats):
@@ -105,8 +105,6 @@ def timed_pair(new_fn: Callable[[], Any], old_fn: Callable[[], Any], repeats: in
 
             best_new = new_elapsed if best_new is None else min(best_new, new_elapsed)
             best_old = old_elapsed if best_old is None else min(best_old, old_elapsed)
-    finally:
-        gc.enable()
     return best_new / repeats, best_old / repeats
 
 
@@ -228,20 +226,19 @@ def peak_alloc(fn: Callable[[], Any], warm: int = 50, repeats: int = 200) -> int
     """
     for _ in range(warm):
         fn()
-    gc.disable()
-    tracemalloc.start()
-    try:
-        baseline = tracemalloc.get_traced_memory()[0]
-        top = 0
-        for _ in range(repeats):
-            fn()
-            peak = tracemalloc.get_traced_memory()[1]
-            if peak > top:
-                top = peak
-        return top - baseline
-    finally:
-        tracemalloc.stop()
-        gc.enable()
+    with paused_gc():
+        tracemalloc.start()
+        try:
+            baseline = tracemalloc.get_traced_memory()[0]
+            top = 0
+            for _ in range(repeats):
+                fn()
+                peak = tracemalloc.get_traced_memory()[1]
+                if peak > top:
+                    top = peak
+            return top - baseline
+        finally:
+            tracemalloc.stop()
 
 
 def count_calls(fn: Callable[[], Any]) -> Tuple[int, int]:

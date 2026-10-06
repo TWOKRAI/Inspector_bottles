@@ -21,12 +21,12 @@
 
 from __future__ import annotations
 
-import gc
 import weakref
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from multiprocess_framework.modules.frontend_module.core.qt_gc_policy import gui_memory_policy
 from multiprocess_prototype.domain.protocols.plugin_catalog import PluginSpec
 from multiprocess_prototype.domain.tests._fakes import FakePluginCatalog
 from multiprocess_prototype.domain.tests.conftest import make_test_app_services
@@ -86,7 +86,7 @@ def test_build_leaves_no_module_level_state() -> None:
 
     ref_first = _make_section_and_forget(services)
     ref_second = _make_section_and_forget(services)
-    gc.collect()
+    gui_memory_policy().collect_now()
 
     assert ref_first() is None
     assert ref_second() is None
@@ -130,8 +130,8 @@ def test_section_does_not_outlive_its_tab(app: QApplication) -> None:
     ref = weakref.ref(_paths_widget(tab))
 
     del tab
-    gc.collect()
+    gui_memory_policy().collect_now()
     app.processEvents()
-    gc.collect()
+    gui_memory_policy().collect_now()
 
     assert ref() is None

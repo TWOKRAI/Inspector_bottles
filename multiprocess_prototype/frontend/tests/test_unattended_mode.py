@@ -12,13 +12,13 @@
 
 from __future__ import annotations
 
-import gc
 import importlib
 
 import pytest
 from PySide6.QtWidgets import QDialog
 
 from conftest import BlockingModalInTest
+from multiprocess_framework.modules.frontend_module.core.qt_gc_policy import gui_memory_policy
 from multiprocess_prototype.frontend import unattended
 from multiprocess_prototype.frontend.widgets.dialogs import confirm_unsaved_changes
 
@@ -180,7 +180,7 @@ class TestTheWatchdog:
         from PySide6.QtCore import QTimer
 
         unattended.install_modal_watchdog(qapp, interval_ms=20)
-        gc.collect()
+        gui_memory_policy().collect_now()
 
         dialog = QDialog()
         dialog.setWindowTitle("после сборки мусора")
