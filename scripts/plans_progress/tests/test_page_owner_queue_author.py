@@ -160,6 +160,21 @@ def test_unlisted_and_closed_43_plans_link_to_their_own_cards(tmp_path):
     assert page.index('<details id="archive">') < page.index('id="plan-e-plan"')
 
 
+def test_plan_name_with_dot_links_to_sanitized_anchor(tmp_path):
+    """Охраняет `anchors[id(plan)]` в `_owner_queue_html`: якорь не строится из имени плана.
+
+    Слаг очереди допускает `.`, а `assign_anchors` заменяет символы вне `[A-Za-z0-9_-]` на `-`: у плана
+    `v2.1-plan` карточка `plan-v2-1-plan`, ссылка `#plan-v2-1-plan`; `#plan-v2.1-plan` не ведёт никуда.
+    """
+    page = page_of(
+        tmp_path, {"plans/v2.1-plan/plan.md": plan_md(("1.1", "Шаг", "PENDING"))}, order_md(("| 1 | v2.1-plan | | |",))
+    )
+    assert lis_of(page) == [
+        '<li data-n="1" data-kind="plan" data-plan="v2.1-plan"><a href="#plan-v2-1-plan">v2.1-plan</a> · <span class="tally">0 из 1 · 0%</span></li>'
+    ]
+    assert page.count('id="plan-v2-1-plan"') == 1
+
+
 # =========================================================================== экранирование и разбор ячеек
 
 
