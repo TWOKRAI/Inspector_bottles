@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import faulthandler
-import gc
 import os
 import subprocess
 import sys
@@ -40,6 +39,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from shiboken6 import Shiboken  # noqa: E402
 
 from multiprocess_framework.modules.base_manager import open_scope  # noqa: E402
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import paused_gc
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _IFACE = "multiprocess_framework.modules.frontend_module.interfaces"
@@ -175,16 +175,13 @@ def test_close_from_worker_destroys_on_main_after_flush(env):
     attach_qt(env.root, obj)
     r = weakref.ref(obj)
     del obj
-    gc.disable()
-    try:
+    with paused_gc():
         rep, _ = _run(env.root.close, _timeout=5.0, _what="root.close() из daemon-потока")
         assert rep.ok, f"close() не ok: {rep}"
         assert env.dthreads == [], "объект уничтожен до flush (на потоке закрывающего?)"
         flush_deferred_deletes()
         assert env.dthreads == [env.main], f"destroyed не на главном потоке: {env.dthreads} (main={env.main})"
         assert r() is None, "обёртка объекта жива после flush"
-    finally:
-        gc.enable()
 
 
 # ======================================================================== Q2b

@@ -29,6 +29,7 @@ import pytest
 
 from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import paused_gc
 
 _LIFETIME_PY = Path(__file__).resolve().parent.parent / "core" / "lifetime.py"
 
@@ -363,22 +364,18 @@ class _Res:
 
 def test_released_entry_does_not_hold_resource_while_handle_lives():
     """J12b: после close области живая ручка не держит ресурс (refcount, без gc)."""
-    import gc
     import weakref
 
     root = open_scope(_path(), budget_s=1.0)
     res = _Res()
     handle = root.own(res, name="x")
     ref = weakref.ref(res)
-    gc.disable()
-    try:
+    with paused_gc():
         _bounded(root.close)
         assert res.calls == 1
         del res
         assert ref() is None, "освобождённая запись держит ресурс"
         assert handle.path.endswith("/x")  # ручка жива до конца проверки
-    finally:
-        gc.enable()
 
 
 def test_scope_close_does_not_touch_entry_taken_by_handle_close():
@@ -429,17 +426,16 @@ def test_unclosed_roots_survives_gc_finalizer_under_lock():
     def worker() -> None:
         old = gc.get_threshold()
         gc.collect()
-        gc.disable()
         try:
-            root = open_scope(abandoned, budget_s=0.1)
-            root.own(lambda: None, name="x")  # цикл Scope <-> запись: соберёт только gc
-            del root
-            gc.set_threshold(1)
-            gc.enable()
-            box["n"] = len(unclosed_roots())
+            with paused_gc():
+                root = open_scope(abandoned, budget_s=0.1)
+                root.own(lambda: None, name="x")  # цикл Scope <-> запись: соберёт только gc
+                del root
+                gc.set_threshold(1)
+                gc.enable()
+                box["n"] = len(unclosed_roots())
         finally:
             gc.set_threshold(*old)
-            gc.enable()
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()

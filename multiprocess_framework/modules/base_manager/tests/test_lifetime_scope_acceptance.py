@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import paused_gc
+
 PKG = "multiprocess_framework.modules.base_manager"
 IFACE = PKG + ".interfaces"
 
@@ -887,24 +889,23 @@ class _Presenter:
 def _scenario_a(rp):
     """Возвращает (слабая ссылка мертва без gc.collect(), список мусора по типам теста)."""
     gc.collect()
-    gc.disable()
-    try:
-        root = _open(rp, budget_s=1.0)
-        pub = _Pub()
-        presenter = _Presenter(pub, root, "sub")
-        ref = weakref.ref(presenter)
-        report, _ = _close(root)
-        assert report.ok is True
-        del presenter
-        dead = ref() is None
-        gc.set_debug(gc.DEBUG_SAVEALL)
-        gc.collect()
-        junk = [o for o in gc.garbage if isinstance(o, (_Pub, _Presenter))]
-        return dead, junk
-    finally:
-        gc.set_debug(0)
-        gc.garbage.clear()
-        gc.enable()
+    with paused_gc():
+        try:
+            root = _open(rp, budget_s=1.0)
+            pub = _Pub()
+            presenter = _Presenter(pub, root, "sub")
+            ref = weakref.ref(presenter)
+            report, _ = _close(root)
+            assert report.ok is True
+            del presenter
+            dead = ref() is None
+            gc.set_debug(gc.DEBUG_SAVEALL)
+            gc.collect()
+            junk = [o for o in gc.garbage if isinstance(o, (_Pub, _Presenter))]
+            return dead, junk
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
 
 
 def test_a_presenter_is_freed_by_refcount_after_close(rp):
@@ -1631,8 +1632,7 @@ class _CallableObj:
 
 def _scenario_handle_refcount(rp, resource_factory):
     gc.collect()
-    gc.disable()
-    try:
+    with paused_gc():
         root = _open(rp, budget_s=1.0)
         res = resource_factory()
         handle = root.own(res, name="x")
@@ -1640,8 +1640,6 @@ def _scenario_handle_refcount(rp, resource_factory):
         ref = weakref.ref(res)
         del res
         return ref() is None, handle  # handle ещё жив: он не должен держать ресурс
-    finally:
-        gc.enable()
 
 
 def test_handle_does_not_hold_closed_stoppable(rp):

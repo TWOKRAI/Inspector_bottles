@@ -31,6 +31,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import paused_gc
+
 EVT = "multiprocess_framework.modules.event_module"
 BM = "multiprocess_framework.modules.base_manager"
 BM_IFACE = BM + ".interfaces"
@@ -304,16 +306,13 @@ def test_s9_add_to_closed_owner_raises_and_is_not_listed(env):
 
 def test_s10_handle_does_not_keep_publisher_alive(env):
     def body():
-        gc.disable()
-        try:
+        with paused_gc():
             pub = _pub()
             h = pub.add(_cb(env.calls, "A"), owner=env.root)
             r = weakref.ref(pub)
             del pub
             assert r() is None, "издатель жив без gc.collect(): ручка/запись держит его сильно"
             assert h.close().ok is True
-        finally:
-            gc.enable()
 
     _bounded(body)
 
@@ -327,8 +326,7 @@ def test_s11_release_drops_subscriber_so_presenter_dies_without_gc(env):
             pass
 
     def body():
-        gc.disable()
-        try:
+        with paused_gc():
             p = env.root.child("p")
             pub = _pub()
             presenter = Presenter(pub)
@@ -339,8 +337,6 @@ def test_s11_release_drops_subscriber_so_presenter_dies_without_gc(env):
             assert ref() is not None, "контроль: презентер умер до p.close() (подписчик не удерживается записью)"
             p.close()
             assert ref() is None, "презентер жив после p.close(): _Release не убрал подписку из издателя"
-        finally:
-            gc.enable()
 
     _bounded(body)
 

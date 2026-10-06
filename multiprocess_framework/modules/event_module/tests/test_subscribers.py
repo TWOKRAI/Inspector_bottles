@@ -23,6 +23,7 @@ import pytest
 from multiprocess_framework.modules.base_manager import open_scope
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
 from multiprocess_framework.modules.event_module import Subscribers
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import paused_gc
 
 
 def _bounded(fn, timeout: float = 10.0):
@@ -135,16 +136,13 @@ def test_release_from_gc_finalizer_under_publisher_lock_no_deadlock() -> None:
             def __del__(self) -> None:
                 h_b.close()
 
-        gc.disable()
-        try:
+        with paused_gc():
             Cycle()
             with pub._lock:  # посреди секции под локом
                 gc.collect()
                 assert sorted(s.seq for s in pub._store.values()) == sorted(pub._store)
                 assert len(pub._store) == 2
             pub.add(lambda *a, **k: calls.append("D"), owner=root)
-        finally:
-            gc.enable()
         assert pub.emit() == 3
         assert calls == ["A", "C", "D"]
         assert pub.emits_after_close == 0
