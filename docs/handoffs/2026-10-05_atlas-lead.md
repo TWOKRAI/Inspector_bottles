@@ -13,7 +13,7 @@
   - PR #4 на `b5facd8ce` — все job `success` (прогон 37362092835). Windows 11002 passed, Linux 11037 passed. Итог — `tasks/0.8.result.md`.
 - `plans/queue/ORDER.md`: строка стыка 7 и строка Атласа в §4.1.
 
-## Не закрыто: A6 — прогон `main` после слияния
+## A6 — прогон `main` после слияния (закрыт 2026-10-06: попытка 2 — все job `success`)
 
 - Push-прогон 37366975842 на `9ce2101b9`: все 4 job `cancelled` (19:59–20:14 UTC), `commits` и nightly — `skipped` штатно. Аннотация: «The job was not acquired by Runner of type hosted even after multiple attempts». githubstatus: инцидент Actions с 19:50 UTC. На 2026-10-06 Actions — `operational`, прогон не перезапущен.
 - Нужно: «Re-run all jobs» на https://github.com/TWOKRAI/Inspector_bottles/actions/runs/37366975842 (вход под владельцем; API без токена перезапуск не умеет) → все job `success` → строка A6 в `tasks/0.8.result.md`.
