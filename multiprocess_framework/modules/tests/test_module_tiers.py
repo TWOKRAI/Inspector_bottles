@@ -367,6 +367,11 @@ _RUNNERLESS_BY_DECISION: dict[str, str] = {
     ),
     ".claude/plugins/lang-python/templates/scripts/test_ratio": "шаблон того же инструмента, та же причина",
     "robot/pc_platform_probe": "lupa вне зависимостей проекта; запуск — командой из докстринга каталога",
+    "plans/2026-10-04_atlas/research/memory": (
+        "тесты одноразового `apply_2.4g.py` (разметка памяти, задача 2.4g.3): имя файла с точкой требует "
+        "`--import-mode=importlib`, поэтому в testpaths не входят; запуск явным путём — команда в докстринге "
+        "`test_apply_2.4g.py`. Каталог уйдёт вместе с инструментом, когда 2.4g закроется"
+    ),
     "scripts/plans_progress/tests": (
         "свой прогон плана plans-progress-dashboard: `pytest scripts/plans_progress/tests` — 1553 теста за 387 с "
         "(замер 2026-10-05), каждый тест строит временный git-репозиторий. validate.py шаг 7 гоняет только "
