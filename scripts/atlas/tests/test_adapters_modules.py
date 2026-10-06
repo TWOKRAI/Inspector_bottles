@@ -125,10 +125,49 @@ def test_every_tracked_file_resolves_to_a_module_or_other() -> None:
     assert {resolved[p] for p in generic} == {"process_module/generic"}, f"other={others}"
 
 
+def _row(row_id: str) -> str:
+    return f'  - id: {row_id}\n    paths: ["x/"]\n    layer: scripts\n    tier: null\n    docs: []\n    parent: null\n'
+
+
+_BAD_ID = "modules.yaml: в строке {} ключ 'id' пустой, не строка или повторяется\n"
+
+
+def test_bad_module_id_exits_2(repo_factory: Any, atlas: Any) -> None:
+    cases = [
+        (["a", "a"], 1),
+        (["null"], 0),
+        (["7"], 0),
+        (["2026-01-05"], 0),
+        (['""'], 0),
+    ]
+    for n, (ids, index) in enumerate(cases):
+        repo = repo_factory.create(f"bad_id_{n}")
+        repo.write("modules.yaml", "version: 1\nmodules:\n" + "".join(_row(i) for i in ids))
+        repo.commit("bad module id")
+        res = atlas(repo, "build", "--ref", "HEAD", "--main-ref", "main")
+        assert res.code == 2, ids
+        assert res.err == _BAD_ID.format(index), ids
+        assert "Traceback" not in res.err, ids
+
+
+def test_yaml_constructor_error_gets_the_file_prefix(repo: GitRepo, atlas: Any) -> None:
+    repo.write("modules.yaml", "version: 1\nmodules:\n" + _row("2026-13-45"))
+    repo.commit("impossible yaml date")
+    res = atlas(repo, "build", "--ref", "HEAD", "--main-ref", "main")
+    assert res.code == 2
+    assert res.err == "modules.yaml: файл не разобран как YAML в UTF-8\n"
+
+
 def test_adapters_registration() -> None:
+    from scripts.atlas.adapters.commits import CommitsAdapter
+    from scripts.atlas.adapters.plans import PlansAdapter
     from scripts.atlas.build import ADAPTERS
 
-    assert [(type(a).__name__, a.name, a.version) for a in ADAPTERS] == [
-        ("ModulesAdapter", "modules", 1),
-        ("PlansAdapter", "plans", 1),
+    assert [(type(a).__name__, a.name) for a in ADAPTERS] == [
+        ("ModulesAdapter", "modules"),
+        ("PlansAdapter", "plans"),
+        ("CommitsAdapter", "commits"),
     ]
+    assert ADAPTERS[0].version == 1
+    assert isinstance(PlansAdapter().version, int)
+    assert isinstance(CommitsAdapter().version, int)
