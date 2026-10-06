@@ -23,6 +23,15 @@ if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
     git fetch --unshallow origin || echo "git: unshallow failed (история неполная)"
 fi
 
+# atlas берёт --main-ref = локальный main, а в облачном клоне он отстаёт от origin/main на десятки коммитов (бриф 1.3b, О5).
+if git rev-parse --verify -q refs/remotes/origin/main >/dev/null; then
+    if [ "$(git symbolic-ref --short -q HEAD || true)" = "main" ]; then
+        git merge --ff-only origin/main || echo "git: main не ушёл вперёд (ff-only не прошёл)"
+    else
+        git branch -f main origin/main
+    fi
+fi
+
 # Окружение проекта по uv.lock (Python 3.12, без extras). --frozen: голый `uv sync` в облаке переписал uv.lock (P1.1).
 uv sync --frozen
 
