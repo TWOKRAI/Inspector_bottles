@@ -5,6 +5,10 @@
 
 ## Команды
 
+Страницу проще всего открыть из корня проекта: `.\plans` в PowerShell, `plans` в cmd, двойной клик по
+`plans.cmd` или `make plans`. Скрипт собирает `data/plans_progress.html` и открывает её в браузере.
+Аргументы передаются как есть: `.\plans --active-window 12h`.
+
 ```
 python scripts/plans_progress/plans_progress.py --json
 python scripts/plans_progress/plans_progress.py --html data/plans_progress.html

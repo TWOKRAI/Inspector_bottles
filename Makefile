@@ -127,6 +127,11 @@ stats: ## Статистика кода
 run: ## Запустить приложение (опц. PIPELINE=<имя>, напр. make run PIPELINE=inspection_basic)
 	$(PYTHON) $(PROTOTYPE)/run.py $(PIPELINE)
 
+.PHONY: plans
+plans: ## Страница прогресса планов: собрать и открыть (то же — plans.cmd в корне)
+	$(PYTHON) scripts/plans_progress/plans_progress.py --html data/plans_progress.html
+	$(PYTHON) -c "import pathlib, webbrowser; webbrowser.open(pathlib.Path('data/plans_progress.html').resolve().as_uri())"
+
 # ── Очистка ──
 
 .PHONY: clean
