@@ -60,6 +60,18 @@ WHITELIST: dict[str, str] = {
         "мимо него. Проба импорта (Ф6.5) даёт цикл: partially initialized "
         "base_manager."
     ),
+    "multiprocess_framework/modules/base_manager/core/lifetime.py": (
+        "Контракт файла (task-0.2.md, «Ограничения файла»): lifetime.py импортирует "
+        "только stdlib из литерального списка (в нём ``logging``) и ``..interfaces``; "
+        "два теста держат это по AST (test_lifetime_scope.py::"
+        "test_lifetime_imports_only_allowed_modules, test_lifetime_scope_acceptance.py::"
+        "test_lifetime_py_imports_only_allowed_modules). Проба (Ф6.5-стиль): "
+        "``get_std_logger`` из logger_module в lifetime.py цикла НЕ даёт (свежий "
+        "интерпретатор: import base_manager, logger_module, base_manager.core.lifetime "
+        "и все *_module по одному — без ImportError), но оба теста краснеют: "
+        "'multiprocess_framework.modules.logger_module' вне списка. Снять — решение "
+        "владельца о контракте файла, не правка строки."
+    ),
     "multiprocess_framework/modules/data_schema_module/registry/discovery.py": (
         "Ниже слоя логгера: logger_module импортирует data_schema_module, "
         "обратная зависимость даёт цикл (проба Ф6.5: SchemaBase из partially "

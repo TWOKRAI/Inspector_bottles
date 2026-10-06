@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import functools
 import itertools
-import logging
 import math
 import threading
 import time
@@ -52,10 +51,11 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QObject,
     QThread,
 )
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 __all__ = ["QThreadHandle", "QtTreeMismatch", "attach_qt", "flush_deferred_deletes"]
 
-_log = logging.getLogger(__name__)
+_log = get_std_logger(__name__)
 
 _FLUSH_MAX_PASSES = 16
 

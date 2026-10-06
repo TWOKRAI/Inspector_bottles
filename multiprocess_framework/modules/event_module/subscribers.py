@@ -19,16 +19,16 @@ Stability: lite
 from __future__ import annotations
 
 import itertools
-import logging
 import threading
 import weakref
 from collections.abc import Callable
 
 from multiprocess_framework.modules.base_manager.interfaces import IHandle, IScope
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 __all__ = ["Subscribers"]
 
-_log = logging.getLogger(__name__)
+_log = get_std_logger(__name__)
 
 _ERRORS_CAP = 20
 _OWNER_METHODS = ("own", "note_emits_after_close")
