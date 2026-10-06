@@ -105,8 +105,8 @@ Files: <paths>
 - A memory lesson is never written by a subagent into any tree — not the main checkout, not
   `.claude/agent-memory/`: put it in your final report as a `MEMORY LESSON <name>.md` block (full file text,
   tags from the vocabularies); the lead writes it into the main checkout's `docs/claude/memory/` and commits
-  `docs(memory):`. Before the block: search the lesson's words — a hit → `merged_from:` in that file, not a
-  new one. Tags: `role:` = your agent name; `module:` ⊆ ids in `modules.yaml`; `mechanism:` ⊆
+  `docs(memory):`. Before the block: search the lesson's words — a hit → your block is that file's updated text
+  with `merged_from:`, not a new file. Tags: `role:` = your agent name; `module:` ⊆ ids in `modules.yaml`; `mechanism:` ⊆
   `docs/claude/memory/TAGS.yaml`.
 
 ## 9. Tests and verdicts
