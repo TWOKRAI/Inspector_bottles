@@ -8,9 +8,7 @@ Stability: lite
 
 from __future__ import annotations
 
-import os
 import sqlite3
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -107,10 +105,12 @@ def test_readonly_db_exits_2_not_1(repo: Any, atlas: Any) -> None:
     repo.write("README.md", "next\n")
     repo.commit("next")
     db = _db(repo)
-    os.chmod(db, stat.S_IREAD)
+    # каталог на месте файла БД: sqlite не откроет его на запись ни под root, ни на Windows
+    db.unlink()
+    db.mkdir()
     try:
         res = atlas(repo, "check")
     finally:
-        os.chmod(db, stat.S_IWRITE | stat.S_IREAD)
+        db.rmdir()
     assert res.code == 2
     assert res.err.startswith("atlas: internal error:"), res.err

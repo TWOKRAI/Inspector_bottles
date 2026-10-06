@@ -118,8 +118,7 @@ def test_plans_value_equals_live_plans_progress(repo: GitRepo, repo_factory: Any
     assert "task:beta#1.2" not in {f"{n['kind']}:{n['id']}" for n in doc["nodes"]}
     live = _live(repo.path)
     assert live.returncode == 0, live.stderr
-    expected = live.stdout.decode("utf-8").rstrip("\n")
-    assert json.dumps(plans, ensure_ascii=False, indent=2) == expected
+    assert json.loads(live.stdout.decode("utf-8")) == plans
 
     bare = repo_factory.create("bare")
     bare.write("README.md", "# no plans\n")
