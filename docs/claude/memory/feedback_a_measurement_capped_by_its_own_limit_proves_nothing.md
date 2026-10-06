@@ -1,8 +1,8 @@
 ---
 name: feedback-a-measurement-capped-by-its-own-limit-proves-nothing
-description: Замер фильтра, упёршийся в собственный limit, не отличает «сузило» от «не сузило» — признак беды в том, что несколько РАЗНЫХ вызовов вернули одно и то же число
-module: "backend_ctl (history_query)"
-mechanism: "probe-design"
+description: "Замер (measurement) фильтра, упёршийся в собственный limit, не отличает «сузило» от «не сузило» — признак беды в том, что несколько РАЗНЫХ вызовов вернули одно и то же число"
+module: [tools/backend_ctl]
+mechanism: [probes, measurement]
 metadata:
   type: feedback
 ---

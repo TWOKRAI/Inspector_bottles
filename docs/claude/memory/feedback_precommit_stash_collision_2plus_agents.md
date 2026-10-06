@@ -1,8 +1,8 @@
 ---
 name: feedback-precommit-stash-collision-2plus-agents
-description: "pre-commit's staged_files_only isolation (its own patch-based stash, not git stash) collides when 2+ agents commit concurrently in the same non-worktree checkout — reverts unrelated unstaged files tree-wide, blast radius grows with each retry; также: Хук session-log пишет в общий журнал при коммите ЛЮБОГО автора — двум писателям в одном дереве он гарантированно блокирует оба коммита, и MM в статусе не значит «обе стороны целы»; Параллельные developer/teamlead агенты на одной ветке без worktree склеивают коммиты и теряют файлы из-за race condition pre-commit hook"
+description: "pre-commit's staged_files_only isolation (its own patch-based stash, not git stash) collides when 2+ agents commit concurrently in the same non-worktree checkout — reverts unrelated unstaged files tree-wide, blast radius grows with each retry; также: хук session-log, параллельные агенты, гонка коммитов (race, stash)"
+mechanism: [git, hooks]
 merged_from: [feedback_a_hook_that_writes_a_shared_file_deadlocks_two_writers, feedback_parallel_agents_commit_race]
-mechanism: "pre-commit, parallel-commits"
 metadata:
   type: feedback
 ---

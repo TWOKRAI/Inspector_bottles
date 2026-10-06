@@ -1,8 +1,8 @@
 ---
 name: feedback_wallclock_threshold_measures_the_heap
-description: "Тест с порогом по стенным часам в общем процессе меряет размер чужой кучи, а не свой код — краснеет от состава прогона"
-module: "state_store_module"
-mechanism: "flaky-tests"
+description: "Тест с порогом по стенным часам / wall-clock threshold в общем процессе меряет размер чужой кучи (heap, GC), а не свой код — краснеет от состава прогона"
+module: [state_store_module]
+mechanism: [flaky-tests, measurement]
 metadata:
   node_type: memory
   type: feedback

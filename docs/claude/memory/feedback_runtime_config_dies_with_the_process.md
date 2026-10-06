@@ -1,8 +1,8 @@
 ---
 name: feedback-runtime-config-dies-with-the-process
-description: "config.reload живёт в памяти процесса — рестарт поднимает его с конфига с диска, и замер «до/после» через рестарт молча меряет одно и то же"
-module: "config_module (config.reload)"
-mechanism: "measurement"
+description: "config.reload живёт в памяти процесса — рестарт поднимает его с конфига с диска, и замер «до/после» через рестарт молча меряет одно и то же (runtime config, restart, before/after)"
+module: [config_module]
+mechanism: [measurement, config]
 metadata:
   node_type: memory
   type: feedback

@@ -1,8 +1,8 @@
 ---
 name: project-vfd-bridge-robot-reboot
-description: ПЧ vfd_belt висит мостом поверх робота; зависание ПЧ лечится перезагрузкой робота, а не правкой кода ПЧ
-module: "Services/vfd, robot"
-mechanism: "bridge-carrier"
+description: "ПЧ vfd_belt висит мостом поверх робота; зависание ПЧ лечится перезагрузкой робота, а не правкой кода ПЧ / VFD bridge carrier, robot reboot"
+module: [services/vfd_comm, services/robot_comm]
+mechanism: [architecture, live-stand]
 metadata:
   type: project
 ---

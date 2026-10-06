@@ -1,8 +1,8 @@
 ---
 name: feedback_a_pass_through_block_is_not_a_fork
-description: В статическом правиле «на одном пути исполнения» тело try/with/цикла — продолжение ветки, а не развилка; ошибка модели даёт ТИХИЙ ложный зелёный
-module: "scripts static guards (AST)"
-mechanism: "AST-rules"
+description: "В статическом правиле «на одном пути исполнения» тело try/with/цикла — продолжение ветки, а не развилка; ошибка модели даёт ТИХИЙ ложный зелёный (AST rule, static guard)"
+module: [scripts]
+mechanism: [dev-tooling, guards]
 metadata:
   type: feedback
 ---

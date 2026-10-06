@@ -1,8 +1,7 @@
 ---
 name: feedback-a-delta-benchmark-hides-what-sits-on-both-sides
-description: Тест цены как разность двух дорог не видит механизм, который есть у обеих — бюджет, обоснованный «ценой прохода через X», может X вообще не мерить
-module: "observation_port"
-mechanism: "perf-measurement, test-doubles"
+description: "Тест цены как разность двух дорог (delta benchmark) не видит механизм, который есть у обеих — бюджет, обоснованный «ценой прохода через X», может X вообще не мерить; двойник (fake) вместо боевой дороги"
+mechanism: [measurement, test-doubles]
 metadata:
   type: feedback
 ---

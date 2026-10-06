@@ -1,6 +1,7 @@
 ---
 name: feedback-no-global-taskkill
-description: Запрещено убивать процессы по имени образа (taskkill /IM python.exe, pkill python) — это убьёт сторонние процессы на машине. Только TaskStop или kill по конкретному PID.
+description: "Запрещено убивать процессы по имени образа (taskkill /IM python.exe, pkill python) — это убьёт сторонние процессы на машине. Только TaskStop или kill по конкретному PID. (process kill, PID, shell)"
+mechanism: [windows-env, agents]
 metadata:
   type: feedback
 ---

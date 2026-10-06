@@ -1,8 +1,7 @@
 ---
 name: feedback-swallowed-failure-class
-description: Повторяющийся класс дефекта — сбой происходит, счётчик растёт, причина проглочена молча; искать по except/pass и по _log_debug на отказе
-module: "process_module/middleware"
-mechanism: "swallowed-exceptions"
+description: "Повторяющийся класс дефекта — сбой происходит, счётчик растёт, причина проглочена молча (swallowed exception); искать по except/pass и по _log_debug на отказе"
+mechanism: [error-handling]
 metadata:
   type: feedback
 ---

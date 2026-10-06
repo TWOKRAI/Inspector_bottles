@@ -1,6 +1,7 @@
 ---
 name: project-priority-engine-first
-description: "Priority is a PENDULUM tied to free time, not a fixed order — 2026-08-18: swing back to the stand/prototype for visible results; engine work continues as a second lane"
+description: "Priority is a PENDULUM tied to free time, not a fixed order — 2026-08-18: приоритет стенд/прототип vs движок (engine first), вторая полоса фреймворка / product vs engine lanes"
+mechanism: [owner-decision]
 metadata:
   type: project
 ---

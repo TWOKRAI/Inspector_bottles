@@ -1,6 +1,8 @@
 ---
 name: feedback-one-log-writer
-description: "Владелец: пишущий логгер-менеджер должен быть ОДИН; всё остальное — вид поверх него или доказанное исключение"
+description: "Владелец: пишущий логгер-менеджер должен быть ОДИН; всё остальное — вид поверх него или доказанное исключение (logger writer, single writer)"
+module: [logger_module]
+mechanism: [owner-decision]
 metadata:
   node_type: memory
   type: feedback

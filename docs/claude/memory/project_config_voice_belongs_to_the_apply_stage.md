@@ -1,8 +1,8 @@
 ---
 name: project-config-voice-belongs-to-the-apply-stage
-description: Голос оператору из валидатора конфига звучит по разу на КАЖДЫЙ разбор (шесть на один config.reload) — корень в том, что это ввод-вывод внутри парсера; дом голоса — стадия «применяю». Task 4.11
-module: "config_module"
-mechanism: "IO-in-parser"
+description: "Голос оператору из валидатора конфига / config validator звучит по разу на КАЖДЫЙ разбор (шесть на один config.reload) — корень: ввод-вывод внутри парсера; дом голоса — стадия «применяю» (apply stage). Task 4.11"
+module: [config_module]
+mechanism: [architecture, config]
 metadata:
   type: project
 ---

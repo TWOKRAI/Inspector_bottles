@@ -1,6 +1,8 @@
 ---
 name: feedback-logger-error-stats-managers
-description: "Логирование через logger_manager, ошибки через error_manager, статистика через statistics_manager — все три заложены в base_manager через ObservableMixin. Никаких print/logging.getLogger/local counters.; также: Owner prefers ALL components inherit BaseManager+ObservableMixin (uniformity over minimalism); logger/error/stats — братья-близнецы: общее поднимать в ChannelRoutingManager, а не дописывать третью копию"
+description: "Логирование через logger_manager, ошибки через error_manager, статистика через statistics_manager — заложены в base_manager через ObservableMixin (inheritance / наследование); общее поднимать в ChannelRoutingManager, не писать третью копию"
+module: [base_manager, logger_module]
+mechanism: [architecture]
 merged_from: [feedback_all_components_base_manager, feedback_three_managers_share_base]
 metadata:
   type: feedback

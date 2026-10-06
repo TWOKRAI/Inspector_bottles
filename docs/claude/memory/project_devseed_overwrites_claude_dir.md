@@ -1,6 +1,7 @@
 ---
 name: project-devseed-overwrites-claude-dir
-description: "claude-kit upgrade (devseed) перетирает часть .claude/ — ценное класть только в preserved-места; _stack.md был шаблоном с плейсхолдерами и врал про Layer-trailer; также: .claude helper system migrated to claude-kit v1.0.0 native plugin format; how to update it"
+description: "claude-kit upgrade (devseed) перетирает часть .claude/ — ценное класть только в preserved-места; _stack.md был шаблоном с плейсхолдерами; миграция на claude-kit v1.0.0 / upgrade overwrites settings"
+mechanism: [config, docs]
 merged_from: [project_claude_kit_migration]
 metadata:
   node_type: memory

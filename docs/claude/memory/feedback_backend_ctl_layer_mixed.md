@@ -1,6 +1,8 @@
 ---
 name: feedback_backend_ctl_layer_mixed
-description: backend_ctl-коммиты используют Layer:mixed (не tools) — commit-hook не знает значения tools
+description: "backend_ctl-коммиты используют Layer:mixed (не tools) — commit-hook не знает значения tools"
+module: [tools/backend_ctl]
+mechanism: [hooks, git]
 metadata:
   type: feedback
 ---

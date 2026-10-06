@@ -1,8 +1,7 @@
 ---
 name: feedback-test-raising-the-error-itself-guards-the-branch
-description: Тест, сам поднимающий исключение, сторожит ветку обработки — не механизм, который её порождает
-module: "code_version"
-mechanism: "test-mechanism"
+description: "Тест, сам поднимающий исключение / exception (raise), сторожит ветку обработки — не механизм (timeout), который её порождает; утверждать параметр на границе ОС"
+mechanism: [test-assertions, test-doubles]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback-positional-call-hides-parameter-name-drift
-description: Тест, зовущий испытуемого позиционно, не видит расхождения ИМЁН параметров — заглушка падала на именованном вызове по эталонной сигнатуре
-module: "Plugins (SubPluginContext)"
-mechanism: "stubs"
+description: "Тест, зовущий испытуемого позиционно, не видит расхождения ИМЁН параметров — заглушка падала на именованном вызове по эталонной сигнатуре (stub, signature, keyword argument)"
+module: [plugins_shared]
+mechanism: [test-doubles, test-assertions]
 metadata:
   type: feedback
 ---

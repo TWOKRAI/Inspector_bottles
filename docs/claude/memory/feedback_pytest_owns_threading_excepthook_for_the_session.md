@@ -1,7 +1,7 @@
 ---
 name: pytest-owns-threading-excepthook-for-the-session
-description: "Under pytest, threading.excepthook is pytest's own collector for the whole session and prints NOTHING to stderr — an acceptance anchor \"the previous hook printed a Traceback to stderr\" is unreachable by any implementation; restore the precondition (threading.__excepthook__) inside the test, don't weaken the criterion"
-mechanism: "pytest-internals"
+description: "Under pytest, threading.excepthook is pytest's own collector for the whole session and prints NOTHING to stderr — an acceptance anchor \"the previous hook printed a Traceback to stderr\" is unreachable by any implementation; restore the precondition (threading.__excepthook__) inside the test, don't weaken the criterion (хук исключений потоков, критерий приёмки)"
+mechanism: [test-infra, test-assertions]
 metadata:
   node_type: memory
   type: feedback

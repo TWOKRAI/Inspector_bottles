@@ -1,7 +1,7 @@
 ---
 name: feedback-a-plans-premise-expires
-description: Условие разблокировки, записанное в плане, устаревает — проверять его ЗАПУСКОМ перед исполнением отложенной задачи
-mechanism: "plans, deferred-tasks"
+description: "Условие разблокировки, записанное в плане (plan premise), устаревает — проверять его ЗАПУСКОМ перед исполнением отложенной задачи (deferred task)"
+mechanism: [spec-scope]
 metadata:
   type: feedback
 ---

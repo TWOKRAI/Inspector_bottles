@@ -1,8 +1,8 @@
 ---
 name: feedback-a-probe-that-guesses-tempo-says-no-when-it-means-dont-know
-description: Пять ложных опровержений подряд на ИСПРАВНОМ механизме — все от догадки о темпе, форме или готовности вместо замера рядом
-module: "otel-export"
-mechanism: "probe-design"
+description: "Пять ложных опровержений подряд на ИСПРАВНОМ механизме — все от догадки о темпе, форме или готовности вместо замера рядом (probe, tempo guess)"
+module: [services/otel_export]
+mechanism: [probes]
 metadata:
   type: feedback
 ---

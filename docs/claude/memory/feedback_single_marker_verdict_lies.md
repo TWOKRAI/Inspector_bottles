@@ -1,8 +1,8 @@
 ---
 name: feedback-single-marker-verdict-lies
-description: Вердикт по ОДНОМУ маркеру врёт в обе стороны — доказывать парой маркеров + признаком жизни
-module: "backend_ctl (process_restart_verified)"
-mechanism: "verdicts"
+description: "Вердикт / verdict по ОДНОМУ маркеру врёт в обе стороны — доказывать парой маркеров + признаком жизни (pid, alive)"
+module: [tools/backend_ctl]
+mechanism: [review-verdicts]
 metadata:
   node_type: memory
   type: feedback

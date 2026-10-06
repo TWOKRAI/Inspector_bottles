@@ -1,8 +1,8 @@
 ---
 name: feedback_absent_receiver_lets_a_test_pin_an_impossible_input
-description: "Харнесс без получателя не судит форму входа — тест годами зелёный на данных, которые прод отвергает"
-module: "config_module (MetricRule)"
-mechanism: "test-doubles"
+description: "Харнесс без получателя (absent receiver) не судит форму входа — тест годами зелёный на данных, которые прод отвергает"
+module: [config_module]
+mechanism: [test-doubles, fixtures]
 metadata:
   node_type: memory
   type: feedback

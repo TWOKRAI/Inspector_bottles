@@ -1,8 +1,7 @@
 ---
 name: feedback-a-shortened-interval-waits-out-the-old-deadline
-description: Укороченный период фоновой работы не действует, пока не истечёт срок, назначенный по СТАРОМУ периоду — ручка при этом отвечает success
-module: "observability_wiring (history purge)"
-mechanism: "live-stand"
+description: "Укороченный период фоновой работы (interval) не действует, пока не истечёт срок, назначенный по СТАРОМУ периоду — ручка при этом отвечает success"
+mechanism: [live-stand, config]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,7 @@
 ---
 name: feedback-process-counter-is-not-per-key
-description: Процессный счётчик считает ВЕСЬ процесс — вычитать его как «мой» нельзя: атрибуцию давать эмитентом и журналом, фон гасить порогом или называть числом
-module: "observability"
-mechanism: "measurement"
+description: "Процессный счётчик считает ВЕСЬ процесс — вычитать его как «мой» нельзя: атрибуцию давать эмитентом и журналом, фон гасить порогом или называть числом (counter, background noise, attribution)"
+mechanism: [measurement, probes]
 metadata:
   type: feedback
 ---

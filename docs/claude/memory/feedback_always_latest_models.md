@@ -1,6 +1,7 @@
 ---
 name: always-latest-models
-description: Owner rule — always use the newest Claude models (Opus 5.5, Sonnet 5.5 as of 2026-10-02) and switch to new ones when released; prefer tier aliases over version pins
+description: "Owner rule — always use the newest Claude models (Opus 5.5, Sonnet 5.5 as of 2026-10-02) and switch to new ones when released; prefer tier aliases over version pins (правило владельца: всегда последние модели)"
+mechanism: [owner-decision]
 metadata:
   type: feedback
 ---

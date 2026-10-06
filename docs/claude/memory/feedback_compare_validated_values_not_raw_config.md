@@ -1,8 +1,8 @@
 ---
 name: feedback-compare-validated-values-not-raw-config
-description: "To ask 'is this config key equal to the schema default', compare VALIDATED model fields — raw YAML vs a default model_dump answers a different question and undercounts"
-module: "config_module"
-mechanism: "defaults-audit"
+description: "Вопрос «равен ли ключ дефолту схемы / schema default» задавать ВАЛИДИРОВАННЫМ полям модели (validated model fields), а не сырому YAML: сравнение с model_dump занижает ответ"
+module: [config_module]
+mechanism: [config]
 metadata:
   node_type: memory
   type: feedback

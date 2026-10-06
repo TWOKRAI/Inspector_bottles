@@ -1,7 +1,8 @@
 ---
 name: project-gorynych-pypi-deferred
-description: "Идея публикации multiprocess_framework на PyPI под именем \"gorynych\" отложена (2026-07-20) — условия возврата к ней"
-module: "packaging"
+description: "Идея публикации multiprocess_framework на PyPI под именем \"gorynych\" отложена (2026-07-20) — условия возврата к ней / publish package deferred, triggers"
+module: [framework_meta]
+mechanism: [spec-scope]
 metadata:
   node_type: memory
   type: project

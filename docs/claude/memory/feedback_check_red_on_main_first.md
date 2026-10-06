@@ -1,6 +1,7 @@
 ---
 name: feedback_check_red_on_main_first
-description: "Красный тест — сперва проверить на main переключением веток, потом чинить"
+description: "Красный тест (red test) — сперва проверить на main переключением веток, потом чинить"
+mechanism: [git, test-infra]
 metadata:
   node_type: memory
   type: feedback

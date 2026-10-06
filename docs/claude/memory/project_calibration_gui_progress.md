@@ -1,8 +1,8 @@
 ---
 name: project-calibration-gui-progress
-description: Калибровка камера↔робот — WIP-баг прогресса визарда (GUI не подписан на calibration.**) ПОЧИНЕН; урок про новые state-корни
-module: "gui_process, state_store"
-mechanism: "state-root subscribe"
+description: "Калибровка камера↔робот — баг прогресса визарда (GUI не подписан на calibration.**, state subscribe) ПОЧИНЕН; урок про новые state-корни / roots"
+module: [plugins/calibration, prototype/frontend]
+mechanism: [ipc-routing]
 metadata:
   type: project
 ---

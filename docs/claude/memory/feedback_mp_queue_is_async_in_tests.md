@@ -1,8 +1,8 @@
 ---
 name: feedback-mp-queue-is-async-in-tests
-description: multiprocessing.Queue наполняется фидер-потоком асинхронно — full()/put сразу после get дают плавающий результат; в тестах учёта брать stdlib queue.Queue
-module: "shared_resources_module/queues"
-mechanism: "flaky-tests"
+description: "multiprocessing.Queue наполняется фидер-потоком асинхронно — full()/put сразу после get дают плавающий результат; в тестах учёта брать stdlib queue.Queue (очередь / queue, флейк / flaky)"
+module: [shared_resources_module]
+mechanism: [flaky-tests, concurrency]
 metadata:
   type: feedback
 ---

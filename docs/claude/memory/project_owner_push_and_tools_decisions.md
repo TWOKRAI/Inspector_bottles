@@ -1,10 +1,9 @@
 ---
 name: project-owner-push-and-tools-decisions
-description: "Owner 2026-10-05: push to origin and test PRs are standing-approved once the other sessions agree; credit first to Atlas; serena and graphify stay but must earn their keep / push PR origin serena graphify credit"
+description: "Owner 2026-10-05: push to origin and test PRs are standing-approved once the other sessions agree; credit first to Atlas; serena and graphify stay but must earn their keep / решения владельца: push, кредит, инструменты"
+mechanism: [owner-decision]
 metadata:
   type: project
-  module: workflow
-  mechanism: owner-decision
 ---
 
 Решения владельца 2026-10-05 (сессия лида Атласа, после слияния 2.4e `a040b55f6`).

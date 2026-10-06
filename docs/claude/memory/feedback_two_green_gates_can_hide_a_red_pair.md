@@ -1,8 +1,7 @@
 ---
 name: feedback-two-green-gates-can-hide-a-red-pair
-description: Нарушитель и жертва в разных testpaths — оба гейта зелены, пара красна; так живёт красная база под матрицей инъекций
-module: "framework tests (declarations)"
-mechanism: "testpaths"
+description: "Нарушитель и жертва в разных testpaths — оба гейта / gates зелены, пара красна; так живёт красная база под матрицей инъекций (глобальный реестр объявлений)"
+mechanism: [test-infra, break-injection]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback-alias-keeps-the-object-alive
-description: Слот «мёртв» по грепу имён методов, но жив через присваивание — у объекта и метода разная судьба
-module: "channel_routing_module/router_module"
-mechanism: "dead-code grep"
+description: "Слот «мёртв» по грепу имён методов, но жив через присваивание (alias) — у объекта и метода разная судьба; dead code sweep"
+module: [channel_routing_module, router_module]
+mechanism: [dead-code, architecture]
 metadata:
   type: feedback
 ---

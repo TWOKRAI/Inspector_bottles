@@ -1,8 +1,7 @@
 ---
 name: project_root_gate_misses_framework_modules
-description: Корневой pytest НЕ покрывает тесты модулей фреймворка — из 81 нового теста в него попали 6; второй гейт обязателен
-module: "tests, pytest"
-mechanism: "coverage-of-the-gate"
+description: "Корневой pytest НЕ покрывает тесты модулей фреймворка — из 81 нового теста в него попали 6; второй гейт обязателен / testpaths, collect-only, golden snapshot, gate coverage"
+mechanism: [test-infra, guards]
 metadata:
   type: project
 ---

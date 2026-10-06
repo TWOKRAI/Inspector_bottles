@@ -1,7 +1,7 @@
 ---
 name: feedback-removing-waste-reddens-tests-that-measured-it
-description: Убрал лишнюю работу — покраснели тесты, которые её и мерили; красный тут вопрос «что он сторожил», а не сигнал откатиться
-mechanism: "test-resolution"
+description: "Убрал лишнюю работу — покраснели тесты, которые её и мерили; красный тут вопрос «что он сторожил», а не сигнал откатиться (test resolution, red tests, effect vs cost)"
+mechanism: [test-assertions]
 metadata:
   type: feedback
 ---

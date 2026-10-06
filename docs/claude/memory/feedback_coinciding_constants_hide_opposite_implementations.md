@@ -1,8 +1,8 @@
 ---
 name: feedback-coinciding-constants-hide-opposite-implementations
-description: Тест на числах, при которых две противоположные реализации совпадают поэлементно, не отличает их — подбирать константы, на которых они расходятся
-module: "state_store_module (throttle prune)"
-mechanism: "test-data"
+description: "Тест на числах (константы / constants), при которых две противоположные реализации совпадают поэлементно, не отличает их — подбирать константы, на которых они расходятся"
+module: [state_store_module]
+mechanism: [fixtures, break-injection]
 metadata:
   type: feedback
 ---

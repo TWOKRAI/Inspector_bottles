@@ -1,7 +1,7 @@
 ---
 name: feedback-two-patches-one-red-set-means-one-assert
-description: Две разные заплаты, давшие ОДИНАКОВЫЙ набор красных, — сигнал, что два заявленных свойства стережёт один ассерт, и одно из них без сторожа
-mechanism: "break-injection"
+description: "Две разные заплаты / patches, давшие ОДИНАКОВЫЙ набор красных, — сигнал, что два заявленных свойства стережёт один ассерт / assert, и одно из них без сторожа"
+mechanism: [break-injection, test-assertions]
 metadata:
   type: feedback
 ---

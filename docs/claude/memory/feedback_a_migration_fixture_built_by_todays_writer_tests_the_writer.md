@@ -1,8 +1,7 @@
 ---
 name: feedback-a-migration-fixture-built-by-todays-writer-tests-the-writer
-description: Тест миграции, чей «легаси-файл» строится СЕГОДНЯШНИМ писателем, проверяет писателя, а не миграцию — и остаётся зелёным, когда миграцию выключают целиком
-module: "observability store"
-mechanism: "migration-test"
+description: "Тест миграции (migration test), чей «легаси-файл» строится СЕГОДНЯШНИМ писателем, проверяет писателя, а не миграцию — и остаётся зелёным, когда миграцию выключают целиком (fixture)"
+mechanism: [fixtures, persistence]
 metadata:
   type: feedback
 ---

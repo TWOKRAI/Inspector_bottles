@@ -1,7 +1,7 @@
 ---
 name: feedback-worktree-stale-base
-description: worktree-изоляция агентов может создаться от стейл-HEAD (76 коммитов позади main) — проверять базу каждого агент-worktree до старта работы
-mechanism: "worktrees"
+description: "worktree-изоляция агентов может создаться от стейл-HEAD (stale base, 76 коммитов позади main) — проверять базу каждого агент-worktree до старта работы; координатор создаёт worktree вручную"
+mechanism: [git, agents]
 metadata:
   node_type: memory
   type: feedback

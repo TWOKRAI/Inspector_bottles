@@ -1,6 +1,8 @@
 ---
 name: project_gui_stand_production_entry_only
-description: GUI-стенд поднимается только боевой точкой входа + INSPECTOR_GUI_UNATTENDED=1; через BackendHarness процесс gui виснет
+description: "GUI-стенд поднимается только боевой точкой входа + INSPECTOR_GUI_UNATTENDED=1; через BackendHarness процесс gui виснет / live stand entry point, headless vs Qt"
+module: [prototype/frontend]
+mechanism: [live-stand]
 metadata:
   node_type: memory
   type: project

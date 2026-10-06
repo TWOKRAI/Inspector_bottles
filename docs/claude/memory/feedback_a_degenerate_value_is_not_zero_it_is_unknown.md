@@ -1,8 +1,8 @@
 ---
 name: feedback-a-degenerate-value-is-not-zero-it-is-unknown
-description: Ноль может быть законной настройкой у источника и вырожденным у потребителя — страж ставится у потребителя, иначе отменишь операторское решение
-module: "process_module telemetry"
-mechanism: "validation-at-consumer"
+description: "Ноль может быть законной настройкой у источника и вырожденным у потребителя — страж (guard) ставится у потребителя, иначе отменишь операторское решение; degenerate value is unknown, not zero"
+module: [process_module]
+mechanism: [config, guards]
 metadata:
   type: feedback
 ---

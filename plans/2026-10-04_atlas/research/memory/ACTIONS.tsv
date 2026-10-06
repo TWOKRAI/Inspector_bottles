@@ -432,3 +432,6 @@ reference_gpu_monitoring_windows.md	REFERENCE	KEEP	-	gpu; ollama; windows
 reference_qt_mcp_launch.md	REFERENCE	KEEP	.claude/plugins/mcp-qt/SETUP_GUIDE.md	qt-mcp
 reference_tech_stack_2026.md	REFERENCE	KEEP	docs/direction/TECH_STACK_2026.md	stack
 user_career_goal.md	REFERENCE	KEEP	-	owner
+tester/feedback_config_reload_ttl_addressing_guard.md	LESSON	ARCHIVE	_archive/ (2.4g.3 collision; winner canon same name, body identical; merged_from)	-
+teamlead/feedback_unkillable_fix_needs_a_hand_set_state.md	LESSON	ARCHIVE	_archive/ (2.4g.3 collision; winner canon same name, body identical; merged_from)	-
+tech-writer/feedback_commit_trailers_single_line.md	LESSON	ARCHIVE	_archive/ (2.4g.3 collision; winner teamlead/ same name, EN, + feedback_commit_validator_trailers.md covers detail; merged_from)	-

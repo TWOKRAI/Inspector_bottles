@@ -1,8 +1,8 @@
 ---
 name: concurrent-backends-shared-resources-trap
-description: "Два бэкенда в одном тест-прогоне конфликтуют через глобальные ресурсы — PID-реестр (исправлено в harness, Ф1.9) и SHM-cleanup при старте (латентно)"
-module: "process_manager, shm"
-mechanism: "global-resource-in-tests"
+description: "Два бэкенда / backends в одном тест-прогоне конфликтуют через глобальные ресурсы — PID-реестр (исправлено в harness, Ф1.9) и SHM-cleanup при старте (латентно); env-порт"
+module: [process_manager_module, shared_resources_module]
+mechanism: [test-infra, live-stand]
 metadata:
   node_type: memory
   type: project

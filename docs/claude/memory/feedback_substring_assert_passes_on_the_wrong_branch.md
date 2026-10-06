@@ -1,8 +1,7 @@
 ---
 name: feedback_substring_assert_passes_on_the_wrong_branch
-description: "Ассерт по общей подстроке зеленеет на чужой ветке кода — сверять текст ПРИЧИНЫ, а не слово, которое есть у обоих путей"
-module: "observability"
-mechanism: "test-assert"
+description: "Ассерт / assert по общей подстроке (substring) зеленеет на чужой ветке кода — сверять текст ПРИЧИНЫ, а не слово, которое есть у обоих путей"
+mechanism: [test-assertions, break-injection]
 metadata:
   node_type: memory
   type: feedback

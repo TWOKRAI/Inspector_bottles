@@ -1,10 +1,10 @@
 ---
 name: unkillable-fix-needs-a-hand-set-state
-description: Правка, которую соседняя правка того же пакета делает недостижимой, инъекцией не убивается — пинить её белым ящиком, ставя недостижимое состояние руками
-module: "observation_port"
-mechanism: "white-box pin"
+description: "Правка, которую соседняя правка того же пакета делает недостижимой, инъекцией / injection не убивается — пинить её белым ящиком (white-box pin), ставя недостижимое состояние руками"
+mechanism: [break-injection, test-assertions]
 metadata:
   type: feedback
+merged_from: [feedback_unkillable_fix_needs_a_hand_set_state]
 ---
 
 Когда пакет закрывает ОДИН класс дефекта несколькими точками, часть правок

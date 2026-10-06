@@ -1,9 +1,8 @@
 ---
 name: feedback-a-handmade-readback-leaves-its-producer-unguarded
-description: "Тест, собирающий наблюдаемую сторону руками, оставляет её ПРОИЗВОДИТЕЛЯ без сторожа: 145 зелёных при снятой строке readback; также: сторож ниже заявления охраняет слой, а не заявление"
+description: "Тест, собирающий наблюдаемую сторону руками (hand-built fixture), оставляет её ПРОИЗВОДИТЕЛЯ без сторожа (guard): 145 зелёных при снятой строке readback; также: сторож ниже заявления охраняет слой, а не заявление"
+mechanism: [guards, fixtures]
 merged_from: [feedback_a_guard_below_the_claim_guards_the_layer_not_the_claim]
-module: "observability_wiring"
-mechanism: "guard-layer, hand-built-fixture"
 metadata:
   node_type: memory
   type: feedback

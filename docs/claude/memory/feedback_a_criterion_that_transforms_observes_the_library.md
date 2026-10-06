@@ -1,8 +1,8 @@
 ---
 name: feedback-a-criterion-that-transforms-observes-the-library
-description: Критерий, в котором тест сам выполняет преобразование, наблюдает библиотеку, а не систему — и неисполним ни одной реализацией
-module: "config_module (pydantic)"
-mechanism: "acceptance-criteria, tester"
+description: "Критерий, в котором тест сам выполняет преобразование, наблюдает библиотеку (library), а не систему — и неисполним ни одной реализацией (acceptance criterion, pydantic)"
+module: [config_module]
+mechanism: [acceptance, test-assertions]
 metadata:
   type: feedback
 ---

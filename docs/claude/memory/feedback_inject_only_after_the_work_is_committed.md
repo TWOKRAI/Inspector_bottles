@@ -1,8 +1,8 @@
 ---
 name: feedback_inject_only_after_the_work_is_committed
-description: "Харнесс инъекций восстанавливает файлы git checkout'ом и тем съедает незакоммиченную работу — коммитить ДО инъекций, не после; также: Откат слом-инъекции — восстановлением сохранённого текста файла, никогда обратной заменой"
+description: "Харнесс инъекций (injection harness) восстанавливает файлы git checkout'ом и тем съедает незакоммиченную работу — коммитить ДО инъекций; откат — восстановлением сохранённого текста файла, не обратной заменой (replace)"
+mechanism: [break-injection, git]
 merged_from: [feedback_injection_rollback_by_restore_not_replace]
-mechanism: "break-injection harness, git"
 metadata:
   node_type: memory
   type: feedback

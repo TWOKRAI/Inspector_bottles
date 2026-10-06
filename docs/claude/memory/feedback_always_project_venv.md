@@ -1,7 +1,7 @@
 ---
 name: feedback-always-project-venv
-description: Всегда использовать проектный .venv интерпретатор; uv run без --no-sync падает на резолве extras и берёт не тот env
-mechanism: "env"
+description: "Всегда использовать проектный .venv интерпретатор (interpreter); uv run без --no-sync падает на резолве extras и берёт не тот env"
+mechanism: [windows-env]
 metadata:
   type: feedback
 ---

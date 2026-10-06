@@ -1,8 +1,8 @@
 ---
 name: a-shared-throttle-swallows-the-record-not-the-line
-description: Общий дроссель лога и плоскости роняет САМУ запись, а не голос; счётчик компенсирует только число
-module: "process_module/health, error_module"
-mechanism: "throttle"
+description: "Общий дроссель (throttle) лога и плоскости роняет САМУ запись, а не голос; счётчик компенсирует только число (lost record)"
+module: [process_module, error_module]
+mechanism: [error-handling]
 metadata:
   type: feedback
 ---
