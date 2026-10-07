@@ -437,7 +437,7 @@ def test_tests_do_not_touch_freeze_outside_own_interpreter():
     """R4: файл под ``tests/`` не трогает заморозку gc и слот владельца, если он не в ``collect_ignore``."""
     _assert_scan_is_not_vacuous(_scan_repo())
     scan = _r4_scan_repo()
-    assert scan.files > 500, f"R4 просканировал {scan.files} файлов под tests/"
+    assert scan.files > 500, f"R4 просканировал {scan.files} тест-файлов (ожидалось больше 500)"
     assert not scan.unparsable, f"R4: не разобраны AST: {scan.unparsable}"
     # якорь: изоляция двух файлов механизма прочитана из conftest.py пакета
     # сначала список нарушений: выпавшее из collect_ignore имя видно как путь:строка, не как diff множеств
