@@ -5,7 +5,8 @@
 Purpose: разбор argv, проводка видов card/pack/log (views.py) и ref/index (reference.py);
     корень репозитория = git toplevel (не cwd),
     база `data/atlas.sqlite` в корне.
-    Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку, 2 — ошибка окружения или ввода.
+    Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку,
+    1 — `index --check`: INDEX.md отстал, 2 — ошибка окружения или ввода.
 Public API: main.
 Stability: lite
 """

@@ -156,9 +156,9 @@ def _pre_post(fn: ast.AST) -> str | None:
     return " / ".join(found) or None
 
 
-def _scan(root: Path, sha: str, path: str) -> tuple[dict[str, tuple[str, ast.AST]], dict[str, int]]:
+def _scan(raw: bytes | None) -> tuple[dict[str, tuple[str, ast.AST]], dict[str, int]]:
     """Имя верхнего уровня interfaces.py -> (вид, оператор); строка элемента `__all__` у имени."""
-    text = (_read(root, sha, [path])[path] or b"").decode("utf-8", "replace").removeprefix("﻿")
+    text = (raw or b"").decode("utf-8", "replace").removeprefix("\ufeff")
     try:
         body = ast.parse(text).body
     except (SyntaxError, ValueError):
@@ -223,7 +223,7 @@ def ref(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: st
         return [f"Справочник модуля {module} — интерфейсов нет"]
     path = min(p for _, p in rows)
     names = sorted(i[len(prefix) :] for i, _ in rows)
-    defs, listed = _scan(root, sha, path)
+    defs, listed = _scan(_read(root, sha, [path])[path])
     tests = _tests(con, root, sha, bid, module, names)
     lines = [f"Справочник модуля {module} — {path}, интерфейсов {len(names)}"]
     for name in names:
@@ -258,7 +258,8 @@ def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[
         module, _, name = node_id.rpartition(":")
         found.setdefault(module, []).append(name)
         paths[module] = path
-    scanned = {p: _scan(root, sha, p)[0] for p in sorted(set(paths.values()))}
+    blobs = _read(root, sha, sorted(set(paths.values())))
+    scanned = {p: _scan(raw)[0] for p, raw in blobs.items()}
     lines = [_HEADER]
     for row in modules:
         lines.append(f"{row['id']} — {purpose(row)}")
