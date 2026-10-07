@@ -112,7 +112,10 @@ def test_layer_matches_row_class():
     assert {"services/sql", "tools/backend_ctl", "framework_meta", "prototype_root"} <= set(by_id)
 
 
-_GOOD_ROW = '  - id: {id}\n    paths: ["{id}/"]\n    layer: scripts\n    tier: null\n    docs: []\n    parent: null\n'
+_GOOD_ROW = (
+    '  - id: {id}\n    paths: ["{id}/"]\n    layer: scripts\n    tier: null\n    docs: []\n    parent: null\n'
+    '    purpose: "тестовое назначение строки"\n'
+)
 _KEYS = ("id", "paths", "layer", "tier", "docs", "parent")
 
 
@@ -131,6 +134,7 @@ def _row_without(key: str, id_: str = "cc") -> str:
         "tier": "tier: null",
         "docs": "docs: []",
         "parent": "parent: null",
+        "purpose": 'purpose: "тестовое назначение строки"',
     }
     kept = [text for name, text in fields.items() if name != key]
     return "  - " + "\n    ".join(kept) + "\n"
@@ -157,6 +161,7 @@ def test_error_text_does_not_echo_values(tmp_path):
         assert "777777" not in str(exc.value)
     empty_path = (
         f'  - id: {marker}\n    paths: [""]\n    layer: scripts\n    tier: null\n    docs: []\n    parent: null\n'
+        '    purpose: "тестовое назначение строки"\n'
     )
     with pytest.raises(ValueError) as exc:
         load_modules(_yaml(tmp_path, empty_path))
