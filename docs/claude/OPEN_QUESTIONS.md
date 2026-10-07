@@ -1774,6 +1774,10 @@ CUDA/PyTorch, а может утечка. Нужен прогон 3–4 ч с и
 политики памяти (`collections`, `max_pause_ms`, `violations`, `foreign`) выходят только строкой `gc-policy` в лог. Предложение
 (c8): метрики `gui.gc.*` с ручкой вкл/выкл (ноль цены выключенной) — отдельная задача после T1.
 
+## T1 lifecycle: разморозка кучи в боевом API не видна стражу R4 (2026-10-07, ревью T1-iso)
+
+Страж R4 ловит вызовы `gc.freeze`/`gc.unfreeze`/`suspend_collection_owner` в тест-файлах. Не видит публичные пути, которые тоже размораживают кучу процесса: `collection_owner().rearm_freeze()` (замер ревьюера: счётчик 117038 → 0) и повторный `install_gui_memory_policy(None)`; не видит формы через `importlib`/`__import__`/`sys.modules`/`exec` и `del collect_ignore`. Случайно достижим только публичный API. Защита на уровне причины — проверка счётчика заморозки на границе в рантайме (боевая правка `gc_discipline.py`, новая задача, ревью заново). Пока: R4 + изоляция + пауза границы в гейте.
+
 ## T1 lifecycle: решено CTO 2026-10-07 — старт вне порогов D2; задачи после merge
 
 Приёмка T1: ACCEPTED WITH CONDITIONS ([`docs/reviews/2026-10-07_task-T1-cto-acceptance.md`](../reviews/2026-10-07_task-T1-cto-acceptance.md)).

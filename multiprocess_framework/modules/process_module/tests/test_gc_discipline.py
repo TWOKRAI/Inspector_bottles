@@ -13,20 +13,20 @@ import pytest
 
 from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (
     GcDiscipline,
+    suspend_collection_owner,
 )
 
 
 @pytest.fixture(autouse=True)
-def _slot_is_free_for_the_test(gc_slot_suspended):
+def _slot_is_free_for_the_test():
     """Слот сессионного владельца сборки освобождён на тест; на выходе владелец и его gc-режим возвращены.
 
     Тесты ниже сами включают и выключают автосборку через ``GcDiscipline``: пока слот занят политикой
-    сессии, это нарушение владения. ``suspend_collection_owner`` (внутри ``gc_slot_suspended``) отдаёт
-    слот тесту и сам возвращает состояние gc, поэтому тесту не нужен ``gc.enable()`` в ``finally``.
-    Заморозку (свою из ``freeze_after_startup`` и сессионную, которую снимает выход suspend)
-    ``gc_slot_suspended`` возвращает снаружи suspend — тесту не нужен ``gc.unfreeze()`` в ``finally``.
+    сессии, это нарушение владения. ``suspend_collection_owner`` отдаёт слот тесту и сам возвращает
+    состояние gc (и заморозку), поэтому тесту не нужен ``gc.enable()`` в ``finally``.
     """
-    yield
+    with suspend_collection_owner():
+        yield
 
 
 class TestFreeze:
@@ -38,25 +38,33 @@ class TestFreeze:
     def test_freezes_with_flag(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
         monkeypatch.delenv("FW_GC_SCHEDULED", raising=False)
-        # заморозку теста снимает gc_slot_suspended (через autouse-фикстуру слота)
-        d = GcDiscipline()
-        assert d.freeze_after_startup() is True
-        # startup-объекты переехали в permanent-поколение (не сканируются далее).
-        assert gc.get_freeze_count() > 0
-        assert gc.isenabled() is True  # без FW_GC_SCHEDULED авто-GC остаётся включён
+        try:
+            d = GcDiscipline()
+            assert d.freeze_after_startup() is True
+            # startup-объекты переехали в permanent-поколение (не сканируются далее).
+            assert gc.get_freeze_count() > 0
+            assert gc.isenabled() is True  # без FW_GC_SCHEDULED авто-GC остаётся включён
+        finally:
+            gc.unfreeze()  # не течём между тестами
 
     def test_idempotent(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
-        d = GcDiscipline()
-        assert d.freeze_after_startup() is True
-        assert d.freeze_after_startup() is False  # второй раз — no-op
+        try:
+            d = GcDiscipline()
+            assert d.freeze_after_startup() is True
+            assert d.freeze_after_startup() is False  # второй раз — no-op
+        finally:
+            gc.unfreeze()
 
     def test_scheduled_disables_auto_gc(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
         monkeypatch.setenv("FW_GC_SCHEDULED", "1")
-        d = GcDiscipline()
-        d.freeze_after_startup()
-        assert gc.isenabled() is False  # авто-GC отключён → сборка по расписанию
+        try:
+            d = GcDiscipline()
+            d.freeze_after_startup()
+            assert gc.isenabled() is False  # авто-GC отключён → сборка по расписанию
+        finally:
+            gc.unfreeze()
 
     def test_scheduled_without_freeze_warns_loudly(self, monkeypatch):
         """Ф7 ревью фазы G: FW_GC_SCHEDULED без FW_GC_FREEZE — расписание НЕ применяется,
@@ -82,9 +90,12 @@ class TestScheduledCollect:
     def test_collects_by_deadline(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
         monkeypatch.setenv("FW_GC_SCHEDULED", "1")
-        d = GcDiscipline()
-        d.freeze_after_startup()
-        # первый вызов собирает (дедлайн 0), затем throttle до now+interval.
-        assert d.collect_scheduled(now=100.0, interval_s=2.0) is True
-        assert d.collect_scheduled(now=101.0, interval_s=2.0) is False  # рано
-        assert d.collect_scheduled(now=102.5, interval_s=2.0) is True  # дедлайн прошёл
+        try:
+            d = GcDiscipline()
+            d.freeze_after_startup()
+            # первый вызов собирает (дедлайн 0), затем throttle до now+interval.
+            assert d.collect_scheduled(now=100.0, interval_s=2.0) is True
+            assert d.collect_scheduled(now=101.0, interval_s=2.0) is False  # рано
+            assert d.collect_scheduled(now=102.5, interval_s=2.0) is True  # дедлайн прошёл
+        finally:
+            gc.unfreeze()
