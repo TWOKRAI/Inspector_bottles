@@ -2,8 +2,9 @@
 
 Purpose: `card` и `pack` читают SQLite реестра по build_id (ленивая сборка через build) и git ревизии;
     `log` реестра не строит: modules.yaml ревизии main-ref и `git log`. Вид возвращает список строк;
-    соединение приходит от вызывающего, `store.connect` здесь не зовётся.
-Public API: TASK_ID_PATTERN, card, log, pack.
+    соединение приходит от вызывающего, `store.connect` здесь не зовётся. `purpose` — назначение
+    модуля из поля `purpose` строки modules.yaml, общее для `card` и `index` (README не читается).
+Public API: TASK_ID_PATTERN, card, log, pack, purpose.
 Stability: lite
 """
 
@@ -21,13 +22,12 @@ from scripts.atlas.modules import OTHER, resolve as module_of
 from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 from scripts.validate_commit.validate_commit import TASK_ID_PATTERN
 
-__all__ = ["TASK_ID_PATTERN", "card", "log", "pack"]
+__all__ = ["TASK_ID_PATTERN", "card", "log", "pack", "purpose"]
 
 _OPEN = ("pending", "in_progress", "blocked")
 _SEVERITY = {"blocking": 0, "warning": 1, "info": 2}
-_NO_README = "нет README в docs: modules.yaml"
+_NO_PURPOSE = "нет purpose в modules.yaml"
 _TASK_LINE = re.compile(r"Task:[ \t]*([a-z0-9][a-z0-9-]*#(?:" + TASK_ID_PATTERN + r"))[ \t]*", re.ASCII)
-_SKIP = ("#", "---", "|", ">", "<", "!", "-", "*", "[")
 
 
 def _natural(text: str) -> list[tuple[int, int, str]]:
@@ -62,20 +62,10 @@ def _module_row(rows: list[dict], module: str) -> dict:
     raise AtlasError("atlas: module not found")
 
 
-def _purpose(tree: Tree, row: dict) -> str:
-    readme = next((d for d in row["docs"] if isinstance(d, str) and d.endswith("README.md")), None)
-    try:
-        text = tree.read(readme).decode("utf-8", "replace") if readme else ""
-    except FileNotFoundError:
-        return _NO_README
-    fenced = False
-    for line in text.split("\n"):
-        line = line.strip()
-        if line.startswith("```"):
-            fenced = not fenced
-        elif line and not fenced and not line.startswith(_SKIP):
-            return line if len(line) <= 160 else line[:159] + "…"
-    return _NO_README
+def purpose(row: dict) -> str:
+    """Назначение строки modules.yaml как есть; нет ключа, не строка или пусто -> `нет purpose в modules.yaml`."""
+    value = row.get("purpose")
+    return value if isinstance(value, str) and value.strip() else _NO_PURPOSE
 
 
 def _open_tasks(con: sqlite3.Connection, bid: int, shas: set[str]) -> list[str]:
@@ -143,7 +133,7 @@ def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: s
     tier = row["tier"] if row["tier"] is not None else "—"
     lines = [
         f"Модуль {module} — {row['layer']}, ярус {tier}",
-        f"Назначение: {_purpose(tree, row)}",
+        f"Назначение: {purpose(row)}",
         f"API ({len(names)}): {api}",
         *_open_tasks(con, bid, {s for s, _ in commits}),
         f"Коммиты ({len(commits)} всего, последние {len(last)}):",
