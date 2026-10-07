@@ -1,6 +1,6 @@
 """Сборка реестра и вывод `--json` (Task 1.2, ADR-ATL-001 §5).
 
-Purpose: build() зовёт адаптеры по ключу кэша (sha, main_ref, отпечаток адаптеров); to_json() —
+Purpose: build() зовёт адаптеры по ключу кэша (sha, main_ref, отпечаток адаптеров, дерево base); to_json() —
     детерминированный JSON: списки отсортированы, ensure_ascii=False, без времени сборки.
 Public API: ADAPTERS, CORE_VERSION, SCHEMA_VERSION, build, fingerprint, to_json.
 Stability: lite
@@ -15,15 +15,16 @@ from pathlib import Path
 from typing import Any
 
 from scripts.atlas import store
+from scripts.atlas.adapters.code import CodeAdapter
 from scripts.atlas.adapters.commits import CommitsAdapter
 from scripts.atlas.adapters.modules import ModulesAdapter
 from scripts.atlas.adapters.plans import PlansAdapter
 from scripts.atlas.schema import Adapter, AdapterOutput, BuildContext
-from scripts.atlas.tree import Tree, resolve
+from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 
 __all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "fingerprint", "to_json"]
 
-ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter(), CommitsAdapter())  # docs — задачи 1.4 и далее
+ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter(), CommitsAdapter(), CodeAdapter())  # docs — 1.4+
 CORE_VERSION = "1"
 SCHEMA_VERSION = 1
 
@@ -38,7 +39,15 @@ def build(con: sqlite3.Connection, root: str | Path, ref: str, main_ref: str, ba
     """Собрать реестр на ревизии `ref`; ключ уже в базе -> вернуть его id, адаптеры не зовутся."""
     sha = resolve(root, ref)
     key = fingerprint()
-    cached = store.find_build(con, sha, main_ref, key)
+    # Ключ — SHA дерева base, не коммита: адаптеры читают base по содержимому. Адаптер, которому важен сам
+    # коммит base (git log base..HEAD), получил бы сборку другого коммита с тем же деревом.
+    base_tree = ""
+    if base is not None:
+        proc = run_git(root, "rev-parse", "--verify", "-q", "--end-of-options", f"{base.ref}^{{tree}}")
+        if proc.returncode != 0:
+            raise AtlasError("atlas: base tree not found")
+        base_tree = proc.stdout.decode("utf-8").strip()
+    cached = store.find_build(con, sha, main_ref, key, base_tree)
     if cached is not None:
         return cached
     ctx = BuildContext(tree=Tree(root, sha), base=base, main_ref=main_ref)
@@ -48,7 +57,7 @@ def build(con: sqlite3.Connection, root: str | Path, ref: str, main_ref: str, ba
         merged.nodes += out.nodes
         merged.edges += out.edges
         merged.findings += out.findings
-    return store.write_build(con, sha, main_ref, key, merged)
+    return store.write_build(con, sha, main_ref, key, merged, base_tree)
 
 
 def to_json(con: sqlite3.Connection, build_id: int, legacy_before: str | None, plans: Any = None) -> str:

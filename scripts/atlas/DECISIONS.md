@@ -45,9 +45,9 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `task` | `<slug>#<id>` (`atlas#1.2`) | строка задачи, тот же парсер | 1.3a |
 | `commit` | полный SHA | `git log --first-parent <sha сборки>` + коммиты `<sha сборки> --not <вершина main-ref>` + коммиты, названные хешем в строках DONE (154 из 266 хешей лежат вне first-parent; без их узлов `done_by` ведёт в пустоту) | 1.3b |
 | `doc` | путь `.md` | папка модуля; для карт — `covers:` | 1.4 |
-| `interface` | `<module>:<Имя>` — имена из `__all__` в `interfaces.py`; нет `__all__` — публичные имена верхнего уровня (без `_`) | AST | 1.5a |
+| `interface` | `<module>:<Имя>` — только корневой `<путь модуля>interfaces.py` (по одному на модуль; вложенные пакеты не читаются): имена из `__all__` без дублей; нет `__all__` — определённые в файле `class`/`def` верхнего уровня без `_` (импорты и константы не в счёт); повтор имени — один узел | AST | 1.5a |
 | `guarantee` | `G-<MOD>-NNN` (п. 4) | `interfaces.py` | 1.5a |
-| `test` | pytest nodeid без параметров (`path::Class::test`) | AST тестов | 1.5a |
+| `test` | pytest nodeid без параметров, по одному на функцию (`path::Class::test`); повтор nodeid в файле — один узел | построчный разбор текста (regex; множество nodeid сверено с AST на всех 1641 файлах) | 1.5a |
 | `injection` | `<slug>#<id>/inj-<n>` — номер строки таблицы | `tasks/<id>.result.md` (форма Task 0.7) | 1.5b |
 | `result` | `<slug>#<id>` | `tasks/<id>.result.md` | 1.5b |
 | `handoff` | путь файла | `docs/handoffs/*.md` (путь плана в тексте) | 1.4 |
@@ -71,9 +71,9 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `in_plan` | task → plan | строка задачи | цепь |
 | `touches` | commit → module | пути коммита × `modules.yaml`; путь вне модулей даёт ребро в `module:other` **без узла** `other` (число узлов `module` = числу строк `modules.yaml`); потребитель ребра `touches` берёт только `dst` с узлом `module` (`store.modules_without_contract_test`, Task 1.3b, О6) | цепь |
 | `covers` | doc → module | папка модуля или `covers:` | цепь |
-| `exposes` | module → interface | `interfaces.py` модуля | 3б «выставляет» |
+| `exposes` | module → interface | `interfaces.py` модуля, `via` `path` | 3б «выставляет» |
 | `declares` | interface → guarantee | `Post: … (G-…)` / `Гарантия G-…:` | 3б «заявляет» |
-| `tests` | test → module | расположение + AST-импорты | 3б «проверяет» |
+| `tests` | test → module | расположение (`via` `path`) + импорты (`via` `ast-import`, разбор регулярными выражениями); одно ребро на пару (тест, модуль), `path` вытесняет `ast-import` | 3б «проверяет» |
 | `guards` | test → guarantee | `@pytest.mark.guards("G-…")` | 3б «сторожит» |
 | `breaks` | injection → test | колонка «тест» таблицы инъекций | 3б «ломает» |
 | `reports` | result → task | имя файла | 3б «план → result.md» |
@@ -102,7 +102,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `DONE_WITHOUT_COMMIT` | task | DONE без хеша и без коммита с `Task:` |
 | `COMMIT_WITHOUT_DONE` | task | есть коммит с `Task:`, задача не DONE |
 | `SURFACE_CHANGED_WITHOUT_TEST` | commit | дифф события меняет `interfaces.py` или `__all__` в `modules/*/__init__.py` и не трогает ни одного файла `tests/`/`test_*.py` — вариант A `research/baseline.md` §2 (1 из 33 за 60 дней). Событие — слияние на first-parent `main` (`git diff <m>^1 <m>`), в PR — весь диапазон `<ref>..HEAD` одним событием, не каждый коммит: коммит интерфейса без тестов — штатный шаг цепи `developer(INTERFACE) → tester(RED)` |
-| `INTERFACE_WITHOUT_TEST` | interface | у публичного имени нет теста (AST-импорт или имя в тестах модуля) |
+| `INTERFACE_WITHOUT_TEST` | interface | у имени нет теста: слово `\bИмя\b` не встречается в тексте ни одного тестового файла (с узлами `test`), связанного с модулем ребром `tests` — по расположению или по импорту (1.5a; слово в комментарии тоже засчитывается) |
 | `GUARANTEE_WITHOUT_INJECTION` | guarantee | ни один тест с `guards` на гарантию не сломан инъекцией |
 | `TEST_NEVER_RED` | test | тест назван в таблице, но ни одна его строка не дала «наблюдалось > 0» |
 | `MUTATION_BELOW` | module | балл ниже порога — выключена до калибровки |
@@ -110,8 +110,8 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 
 «Дифф» для `PRE_POST_MISSING` — `git diff <merge-base(main_ref, head)> <head>`; на самом `main` (head == merge-base)
 множество пусто по построению. Считает его адаптер интерфейсов: ядро передаёт адаптеру `BuildContext{tree, base}`,
-где `base` — дерево merge-base (при явном `--base` — дерево `<ref>`, ADR-ATL-002 «Последствия») или `None` при обычной сборке (тогда находка не вычисляется). Отсутствие `Pre:/Post:`
-у неизменённых методов — не находка, а метрика модуля в `snapshots` (`prepost_covered`, `prepost_total`; от 1.5a):
+где `base` — дерево merge-base (при явном `--base` — дерево `<ref>`, ADR-ATL-002 «Последствия») или `None` при обычной сборке (тогда находка не вычисляется). Ключ кэша сборки включает SHA **дерева** `base` (не коммита): адаптер читает `base` по содержимому, поэтому два коммита с одним деревом дают одну сборку; адаптер, которому важен сам коммит `base` (`git log <base>..HEAD`), этим ключом получил бы сборку другого коммита — такой адаптер правит ключ (1.5a, О13). Отсутствие `Pre:/Post:`
+у неизменённых методов — не находка, а метрика модуля в `snapshots` (`prepost_covered`, `prepost_total`; **не строится в 1.5a** — писатель метрики решает лид, О12):
 сегодня маркеров нет у 746 из 756 публичных методов (ревью стадии 0, `s2_gate` по 65 файлам), находка на каждый — шум.
 
 #### 4. Гарантия и маркер `guards`
@@ -123,9 +123,9 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
   `Post:` без id учитывается в `PRE_POST_MISSING`, узлом-гарантией не становится.
 - Маркер `@pytest.mark.guards("G-…", …)`, аргументы — только строковые литералы (Атлас читает AST, pytest не
   импортирует). Регистрация — в обоих конфигах: `multiprocess_framework/modules/pytest.ini` (`markers =`) и
-  `pyproject.toml` (`[tool.pytest.ini_options].markers`). `--strict-markers` не включён ни в одном — 1.5a добавляет
-  контракт-тест «`guards` зарегистрирован в обоих».
-- 1.5a выносит из `scripts/s2_gate.py` публичную функцию «методы без `Pre:/Post:` в файле» (сегодня только приватные
+  `pyproject.toml` (`[tool.pytest.ini_options].markers`). `--strict-markers` не включён ни в одном — **1.5b** (не 1.5a, `amendments.md` п. 10) добавляет
+  регистрацию и контракт-тест «`guards` зарегистрирован в обоих».
+- 1.5a выносит из `scripts/s2_gate.py` публичную функцию `contract_gaps(text) -> list[(qualname, первая строка с декораторами, последняя строка, отсутствующие маркеры)]` (сегодня только приватные
   `_collect_public_functions`/`_missing_markers`); единица проверки — `Class.method`, узел — имя верхнего уровня.
 
 #### 5. Контракт `--json`
@@ -150,7 +150,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 
 - 1.2: пустые адаптеры дают пустые списки, а не отсутствие ключа; `plans: null`; `BuildContext{tree, base}`; параметр
   `--main-ref` (п. 3 ADR-ATL-002).
-- 1.5a: `guards` в двух конфигах + контракт-тест; публичная функция в `s2_gate.py`.
+- 1.5a: узлы `interface`/`test`, рёбра `exposes`/`tests`, находки `PRE_POST_MISSING`/`INTERFACE_WITHOUT_TEST`; ключ кэша с деревом `base`, версия схемы базы (`PRAGMA user_version`: не совпала — таблицы пересоздаются внутри файла, не удалением файла); публичная `contract_gaps` в `s2_gate.py`. `guards` в двух конфигах + контракт-тест — 1.5b.
 - 1.7: job CI с `fetch-depth: 0`; облако — `setup.sh` уже делает `--unshallow` (P1.1).
 
 ### Отклонённые альтернативы

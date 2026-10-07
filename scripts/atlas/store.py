@@ -1,6 +1,6 @@
 """SQLite-хранилище реестра: сборки, узлы, рёбра, находки, снимки (Task 1.2, ADR-ATL-001 §5).
 
-Purpose: одна строка `builds` на ключ (sha, main_ref, fingerprint); остальные таблицы — по build_id.
+Purpose: одна строка `builds` на ключ (sha, main_ref, fingerprint, base_tree); остальные таблицы — по build_id.
     Журнал по умолчанию (без WAL): повторная сборка с тем же ключом не меняет байты файла.
 Public API: connect, find_build, write_build, read_build, build_row, modules_without_contract_test.
 Stability: lite
@@ -18,7 +18,7 @@ __all__ = ["build_row", "connect", "find_build", "modules_without_contract_test"
 _DDL = """
 CREATE TABLE IF NOT EXISTS builds (
     build_id INTEGER PRIMARY KEY, sha TEXT NOT NULL, main_ref TEXT NOT NULL, fingerprint TEXT NOT NULL,
-    UNIQUE (sha, main_ref, fingerprint));
+    base_tree TEXT NOT NULL DEFAULT '', UNIQUE (sha, main_ref, fingerprint, base_tree));
 CREATE TABLE IF NOT EXISTS nodes (
     build_id INTEGER NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, path TEXT, status TEXT, time INTEGER,
     PRIMARY KEY (build_id, kind, id));
@@ -31,36 +31,58 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE TABLE IF NOT EXISTS snapshots (
     build_id INTEGER NOT NULL, node TEXT NOT NULL, metric TEXT NOT NULL, value REAL, time INTEGER);
 """
+_SCHEMA = 2  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
+_TABLES = ("builds", "nodes", "edges", "findings", "snapshots")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    """Открыть (создав каталог и таблицы) базу реестра."""
+    """Открыть (создав каталог и таблицы) базу реестра; версия схемы не совпала -> таблицы пересоздаются.
+
+    Файл не удаляется (параллельный `atlas build` держит его открытым): сброс — одна транзакция IMMEDIATE.
+    """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
-    con.executescript(_DDL)
+    con = sqlite3.connect(path, isolation_level=None)
+    if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:  # другой процесс мог успеть раньше
+                for table in _TABLES:
+                    con.execute(f"DROP TABLE IF EXISTS {table}")
+                for statement in filter(str.strip, _DDL.split(";")):  # executescript сам делает COMMIT
+                    con.execute(statement)
+                con.execute(f"PRAGMA user_version = {_SCHEMA}")
+            con.execute("COMMIT")
+        except BaseException:
+            con.close()
+            raise
+    con.isolation_level = ""  # дальше — обычный режим транзакций, как у остального кода
     return con
 
 
-def find_build(con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str) -> int | None:
+def find_build(con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, base_tree: str = "") -> int | None:
     row = con.execute(
-        "SELECT build_id FROM builds WHERE sha = ? AND main_ref = ? AND fingerprint = ?", (sha, main_ref, fingerprint)
+        "SELECT build_id FROM builds WHERE sha = ? AND main_ref = ? AND fingerprint = ? AND base_tree = ?",
+        (sha, main_ref, fingerprint, base_tree),
     ).fetchone()
     return None if row is None else row[0]
 
 
-def write_build(con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, out: AdapterOutput) -> int:
+def write_build(
+    con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, out: AdapterOutput, base_tree: str = ""
+) -> int:
     """Записать сборку одной транзакцией; ключ уже есть -> id существующей, ничего не пишется."""
-    existing = find_build(con, sha, main_ref, fingerprint)
+    existing = find_build(con, sha, main_ref, fingerprint, base_tree)
     if existing is not None:
         return existing
     with con:
         try:
             build_id = con.execute(
-                "INSERT INTO builds (sha, main_ref, fingerprint) VALUES (?, ?, ?)", (sha, main_ref, fingerprint)
+                "INSERT INTO builds (sha, main_ref, fingerprint, base_tree) VALUES (?, ?, ?, ?)",
+                (sha, main_ref, fingerprint, base_tree),
             ).lastrowid
         except sqlite3.IntegrityError:  # параллельная сборка записала тот же ключ раньше -> берём её id
             con.rollback()
-            return find_build(con, sha, main_ref, fingerprint)  # type: ignore[return-value]
+            return find_build(con, sha, main_ref, fingerprint, base_tree)  # type: ignore[return-value]
         con.executemany(
             "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?)",
             [(build_id, n.kind, n.id, n.path, n.status, n.time) for n in out.nodes],
