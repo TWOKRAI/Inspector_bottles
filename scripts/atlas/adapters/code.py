@@ -100,8 +100,8 @@ def _imported_paths(text: str) -> set[str]:
     return found
 
 
-def _import_module(spec: str, folder: str, modules: list[dict]) -> str:
-    """id модуля по строке импорта (`other` — нет); `<путь>.py`, затем `<путь>/__init__.py`."""
+def _import_module(spec: str, folder: str, modules: list[dict], present: set[str]) -> str:
+    """id модуля по строке импорта (`other` — нет); `<путь>/__init__.py` раньше `<путь>.py` (первый из `present`)."""
     if spec.startswith("."):
         rest = spec.lstrip(".")
         parts = folder.split("/") if folder else []
@@ -111,7 +111,9 @@ def _import_module(spec: str, folder: str, modules: list[dict]) -> str:
         path = "/".join([*parts[: len(parts) - up], *([rest.replace(".", "/")] if rest else [])])
     else:
         path = spec.replace(".", "/")
-    for candidate in (f"{path}.py", f"{path}/__init__.py") if path else ():
+    candidates = (f"{path}/__init__.py", f"{path}.py") if path else ()
+    first = next((c for c in candidates if c in present), None)  # как Python: пакет раньше модуля, если он есть
+    for candidate in [first] if first else candidates:
         found = resolve(candidate, modules)
         if found != OTHER:
             return found
@@ -146,7 +148,7 @@ def _pre_post(mid: str, path: str, text: str, names: set[str], base_raw: bytes |
 
 class CodeAdapter:
     name = "code"
-    _BASE = 1
+    _BASE = 2
 
     @property
     def version(self) -> int:
@@ -194,7 +196,7 @@ class CodeAdapter:
                 via[here] = "path"
             folder = path.rpartition("/")[0]
             for spec in _imported_paths(text):
-                found = _import_module(spec, folder, modules)
+                found = _import_module(spec, folder, modules, present)
                 if found != OTHER:
                     via.setdefault(found, "ast-import")
             for test_id in ids:

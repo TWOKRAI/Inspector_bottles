@@ -75,7 +75,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `covers` | doc → module | папка модуля или `covers:` | цепь |
 | `exposes` | module → interface | `interfaces.py` модуля, `via` `path` | 3б «выставляет» |
 | `declares` | interface → guarantee | `Post: … (G-…)` / `Гарантия G-…:` | 3б «заявляет» |
-| `tests` | test → module | расположение (`via` `path`) + импорты (`via` `ast-import`, разбор регулярными выражениями); одно ребро на пару (тест, модуль), `path` вытесняет `ast-import` | 3б «проверяет» |
+| `tests` | test → module | расположение (`via` `path`) + импорты (`via` `ast-import`, разбор регулярными выражениями); одно ребро на пару (тест, модуль), `path` вытесняет `ast-import`; разбор импорта: пакет `<путь>/__init__.py` раньше модуля `<путь>.py` (1.6) | 3б «проверяет» |
 | `guards` | test → guarantee | `@pytest.mark.guards("G-…")` | 3б «сторожит» |
 | `breaks` | injection → test | колонка «тест» таблицы инъекций | 3б «ломает» |
 | `reports` | result → task | имя файла | 3б «план → result.md» |
@@ -146,13 +146,14 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
   1.3a); живой вызов или снимок при сборке — решает 1.3a. Значение **вне** гарантии детерминизма: оно зависит
   от текущего времени, живых worktree и веток (`plans_progress.py:2898-2903`). Узлы `plan`/`task` строятся только из
   статичных полей (slug, id, статус, хеш) — их детерминизм сохраняется.
-- SQLite — внутреннее хранилище, не контракт: таблицы меняются без `schema_version`, пока `--json` прежний.
+- SQLite — внутреннее хранилище, не контракт: таблицы меняются без `schema_version`, пока `--json` прежний. Виды `card`/`pack`/`log` (1.6) читают SQLite напрямую (`--json` на тёплой базе — 17,8 МБ и 1,5–2 с против предела вида 1 с); контракт видов — их вывод, а не схема таблиц; SQLite по-прежнему не контракт.
 
 ### Последствия
 
 - 1.2: пустые адаптеры дают пустые списки, а не отсутствие ключа; `plans: null`; `BuildContext{tree, base}`; параметр
   `--main-ref` (п. 3 ADR-ATL-002).
 - 1.5a: узлы `interface`/`test`, рёбра `exposes`/`tests`, находки `PRE_POST_MISSING`/`INTERFACE_WITHOUT_TEST`; ключ кэша с деревом `base`, версия схемы базы (`PRAGMA user_version`: не совпала — таблицы пересоздаются внутри файла, не удалением файла); публичная `contract_gaps` в `s2_gate.py`. `guards` в двух конфигах + контракт-тест — 1.5b.
+- 1.6: виды `card`/`pack` читают SQLite реестра, `log` реестра не строит (git и `modules.yaml` ревизии `main-ref`); `pack` берёт коммиты задачи из git (`git log --no-merges --grep '^Task: <slug>#'`), а не из рёбер `implements`: рёбра идут только по first-parent и целям DONE, а first-parent `main` после слияния ветки lifecycle идёт не по слияниям PR (замер 1.6: 9 рёбер против 142 коммитов с `Task: atlas#…`). Порядок разбора импорта: `<путь>/__init__.py` проверяется раньше `<путь>.py`, берётся первый кандидат, присутствующий в дереве (так ищет Python); `CodeAdapter._BASE` 1 → 2.
 - 1.7: job CI с `fetch-depth: 0`; облако — `setup.sh` уже делает `--unshallow` (P1.1).
 
 ### Отклонённые альтернативы
