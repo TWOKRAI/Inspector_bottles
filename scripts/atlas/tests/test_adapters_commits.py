@@ -1,7 +1,9 @@
-"""Приёмочные тесты адаптера `commits` (Task 1.3b, RED до кода).
+"""Приёмочные тесты адаптера `commits` (Task 1.3b, 1.3c и правки 1.3c после слияния PR #16; RED до кода).
 
-Purpose: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_* и COMMIT_WITHOUT_DONE на
-    временных репозиториях и на реальном checkout (пины 4aee917c6); запрос ядра про модули без узла.
+Purpose: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_*, COMMIT_WITHOUT_DONE и REF_* на
+    временных репозиториях и на реальном checkout (пины 4aee917c6, 712ce64a1, a5ae9657a); запрос ядра про
+    модули без узла. Правки 1.3c: левая граница токена Refs (О10), служебные имена не планы (О11),
+    трейлеры ВСЕХ коммитов-предков без слияний (трейлеры слияний игнорируются).
 Public API: тесты test_*; публичных имён нет.
 Stability: lite
 
@@ -28,7 +30,30 @@ __all__: list[str] = []
 _ROOT = Path(__file__).resolve().parents[3]
 _PIN = "4aee917c6"
 _PIN_FULL = "712ce64a1a39723ddadf9a6acd3e7d40ff326d11"
+_PIN_A5 = "a5ae9657a5bc3aacea61deaa01c1ac212e310ae5"
 _OLD_PIN = "06a70f7e6"
+# (SHA, значение Task) — находки REF_TO_MISSING «в плане нет задачи»: одни и те же на пинах 712ce64a1 и a5ae9657a
+_TASK_MISSING = [
+    ("184c6cc55bb9a0fe487c38b60ec086f98f5832e3", "atlas#2.4e"),
+    ("1b99f74bab33a27728598d9e02801983012f46eb", "atlas#2.4g"),
+    ("1cdd69294cd6a247f9aff4e402baae5bdfb54a97", "atlas#2.4g"),
+    ("25883b241e9207428b8e6a24626c56b1a2772dba", "atlas#2.4g"),
+    ("26daa292ee70a7b6a1173c94d3375d27578a336a", "atlas#2.4e"),
+    ("3187699f903f875af7e0ed71f6043ba517f9fea3", "atlas#2.4g"),
+    ("327c210571bd82cbbfe0e39ff8b7dfde0aa38e9c", "atlas#2.4g"),
+    ("39780cb43811a969597e14b6c0cc57dc7abb86fc", "atlas#2.4b"),
+    ("39df3e8dd666aea90d127303a1efc7a6896d0669", "atlas#2.4g"),
+    ("3eae81af5d54601cd80d17e8b72c1357fccb5356", "atlas#2.4e"),
+    ("51d6f1c269cf784926b5d23eb864ba0c5752bb94", "atlas#2.4g"),
+    ("6fbf8a102c400e08998ae6e480ee550d5be03f17", "atlas#2.4c"),
+    ("878d485c7f95f8f5c508551c5b141c9029f0fa51", "atlas#2.4g"),
+    ("971719f99afaa8f106cb60a27750f7bfdc7c9d42", "atlas#2.4g"),
+    ("9e6ae3c29e378ce123fdcdb377682cf877a171fe", "atlas#2.4g"),
+    ("9f7bb8b83cdb78267d14797a7171d8e5eafb1e5a", "atlas#2.4g"),
+    ("a52c4241d749efbb6b713fc22bd019d491842487", "atlas#2.4g"),
+    ("aeeb471f3192f10c9b755ca4b5accbc5538837e8", "atlas#2.4g"),
+    ("dd9835f071556b07c3026aa081bcf1f963323702", "atlas#2.4g"),
+]
 _CO = "Co-Authored-By: Test <test@example.invalid>"
 _PLAN_ALPHA = "plans/2026-10-01_alpha/plan.md"
 _MODULES = """version: 1
@@ -332,8 +357,47 @@ def _real_doc(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pin: 
     checkout = GitRepo(_ROOT)
     shallow = checkout.git("rev-parse", "--is-shallow-repository")
     assert shallow == "false", "checkout неглубокий: выполнить `git fetch --unshallow`"
-    assert checkout.git("rev-parse", "--verify", f"{pin}^{{commit}}"), f"в клоне нет коммита {pin}"
+    probe = run_with_deadline(
+        lambda: subprocess.run(
+            ["git", "cat-file", "-t", pin], cwd=_ROOT, capture_output=True, text=True, encoding="utf-8", check=False
+        )
+    )
+    assert probe.stdout.strip() == "commit", f"в клоне нет коммита {pin} (нужен полный клон: git fetch --unshallow)"
     return _doc(checkout, atlas, pin, pin)
+
+
+def _sha_set(args: list[str]) -> set[str]:
+    return set(GitRepo(_ROOT).git(*args).split())
+
+
+def _no_bad_chars_in_refs(doc: dict[str, Any]) -> list[str]:
+    return [dst for _, dst, _ in _edges(doc, "refs") if any(ch in dst for ch in ", ;()")]
+
+
+def _dangling_refs(doc: dict[str, Any]) -> int:
+    plan_nodes = {f"plan:{pid}" for pid in _ids(doc, "plan")}
+    return sum(1 for _, dst, _ in _edges(doc, "refs") if dst not in plan_nodes)
+
+
+def _assert_task_findings_missing(doc: dict[str, Any]) -> None:
+    found = sorted(
+        (f["code"], f["severity"], f["node"], f["detail"], f["source"], f["message"])
+        for f in doc["findings"]
+        if f["code"] == "REF_TO_MISSING" and "#" in f["detail"]
+    )
+    expected = sorted(
+        (
+            "REF_TO_MISSING",
+            "blocking",
+            f"commit:{sha}",
+            value,
+            sha,
+            f"Task: в плане atlas нет задачи {value.split('#', 1)[1]}",
+        )
+        for sha, value in _TASK_MISSING
+    )
+    assert len(expected) == 19
+    assert found == expected
 
 
 def test_pinned_counts_on_this_checkout(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -341,17 +405,17 @@ def test_pinned_counts_on_this_checkout(atlas: Any, monkeypatch: pytest.MonkeyPa
     counts = {kind: len(_ids(doc, kind)) for kind in ("commit", "module", "plan", "task")}
     assert counts == {"commit": 2229, "module": 87, "plan": 148, "task": 1240}
     edge_counts = {kind: len(_edges(doc, kind)) for kind in ("refs", "implements", "touches", "done_by")}
-    assert edge_counts == {"refs": 1829, "implements": 33, "touches": 5152, "done_by": 312}
+    assert edge_counts == {"refs": 4053, "implements": 145, "touches": 5152, "done_by": 312}
     assert sum(1 for _, dst, _ in _edges(doc, "touches") if dst == "module:other") == 2002
-    refs = _edges(doc, "refs")
-    assert not [dst for _, dst, _ in refs if any(ch in dst for ch in ", ;()")]
-    plan_nodes = {f"plan:{pid}" for pid in _ids(doc, "plan")}
-    assert sum(1 for _, dst, _ in refs if dst not in plan_nodes) == 131
+    assert _no_bad_chars_in_refs(doc) == []
+    assert _dangling_refs(doc) == 140
     codes = [f["code"] for f in doc["findings"]]
     assert codes.count("DONE_WITHOUT_COMMIT") == 310
     assert codes.count("COMMIT_WITHOUT_DONE") == 3
     assert codes.count("DONE_HASH_NOT_IN_MAIN") == 0
     assert codes.count("PLAN_SLUG_COLLISION") == 0
+    assert codes.count("REF_TO_MISSING") == 58
+    assert codes.count("REF_MOVED") == 1076
     assert sorted(f["node"] for f in doc["findings"] if f["code"] == "COMMIT_WITHOUT_DONE") == [
         "task:atlas#1.3a",
         "task:atlas#2.4",
@@ -399,17 +463,26 @@ def test_thirty_day_touches_and_trailer_oracle(atlas: Any, monkeypatch: pytest.M
         refs.setdefault(src.removeprefix("commit:"), set()).add(dst)
     entries = [entry for entry in raw.split(sep) if entry.strip()]
     assert len(entries) == 39
+    merges = _sha_set(["log", "--first-parent", "--merges", "--format=%H", f"{_OLD_PIN}..{_PIN}"])
+    assert len(merges) == 23  # все 23 слияния диапазона несут трейлеры Refs/Task — и обязаны их потерять
+    for sha in merges:
+        assert implements.get(sha, set()) == set(), sha
+        assert refs.get(sha, set()) == set(), sha
     with_task = with_refs = 0
+    checked = 0
     for entry in entries:
         sha, task_text, refs_text = entry.split("\x02")
         sha = sha.strip()
+        if sha in merges:
+            continue
+        checked += 1
         tasks = {f"task:{line.strip()}" for line in task_text.splitlines() if line.strip()}
         slugs = {f"plan:{_slug(line.strip())}" for line in refs_text.splitlines() if _slug(line.strip())}
         with_task += bool(tasks)
         with_refs += bool(slugs)
         assert implements.get(sha, set()) == tasks, sha
         assert refs.get(sha, set()) == slugs, sha
-    assert (with_task, with_refs) == (21, 39)
+    assert (checked, with_task, with_refs) == (16, 9, 16)
 
 
 def test_modules_without_contract_test_skips_module_without_node(tmp_path: Path) -> None:
@@ -747,8 +820,8 @@ def test_ref_findings_pinned_on_origin_main(atlas: Any, monkeypatch: pytest.Monk
         "task": 1242,
     }
     assert {kind: len(_edges(doc, kind)) for kind in ("refs", "implements", "touches", "done_by")} == {
-        "refs": 1830,
-        "implements": 34,
+        "refs": 4071,
+        "implements": 163,
         "touches": 5160,
         "done_by": 313,
     }
@@ -767,39 +840,19 @@ def test_ref_findings_pinned_on_origin_main(atlas: Any, monkeypatch: pytest.Monk
         )
     } == {
         "DONE_WITHOUT_COMMIT": 310,
-        "COMMIT_WITHOUT_DONE": 3,
+        "COMMIT_WITHOUT_DONE": 5,
         "DONE_HASH_NOT_IN_MAIN": 0,
         "PLAN_SLUG_COLLISION": 0,
-        "REF_TO_MISSING": 47,
-        "REF_MOVED": 623,
+        "REF_TO_MISSING": 59,
+        "REF_MOVED": 1076,
     }
     missing = [f for f in findings if f["code"] == "REF_TO_MISSING"]
     moved = [f for f in findings if f["code"] == "REF_MOVED"]
     assert {f["severity"] for f in missing} == {"blocking"}
     assert {f["severity"] for f in moved} == {"info"}
-    assert len({(f["node"], f["detail"]) for f in missing}) == 47
-    assert len({(f["node"], f["detail"]) for f in moved}) == 623
-    assert len({f["detail"] for f in moved}) == 88
-    assert len({f["detail"] for f in missing}) == 22
-    assert sorted((f["node"], f["detail"], f["source"]) for f in missing if "#" in f["detail"]) == sorted(
-        [
-            (
-                "commit:25883b241e9207428b8e6a24626c56b1a2772dba",
-                "atlas#2.4g",
-                "25883b241e9207428b8e6a24626c56b1a2772dba",
-            ),
-            (
-                "commit:878d485c7f95f8f5c508551c5b141c9029f0fa51",
-                "atlas#2.4g",
-                "878d485c7f95f8f5c508551c5b141c9029f0fa51",
-            ),
-            (
-                "commit:a040b55f69c835fad77329efd8937ff11c4239c7",
-                "atlas#2.4e",
-                "a040b55f69c835fad77329efd8937ff11c4239c7",
-            ),
-        ]
-    )
+    assert len({f["detail"] for f in moved}) == 101
+    assert len({f["detail"] for f in missing}) == 20
+    _assert_task_findings_missing(doc)
     pairs = {(f["code"], f["node"], f["detail"]) for f in findings}
     assert (
         "REF_TO_MISSING",
@@ -811,13 +864,219 @@ def test_ref_findings_pinned_on_origin_main(atlas: Any, monkeypatch: pytest.Monk
         "commit:00781adb4157ac425ef2624bd57564905a201cf4",
         "plans/2026-06-06_command-result-bridge/plan.md",
     ) in pairs
-    first_parent = set(GitRepo(_ROOT).git("rev-list", "--first-parent", _PIN_FULL).splitlines())
-    assert sum(1 for f in moved if f["node"].removeprefix("commit:") not in first_parent) == 11
+    first_parent = _sha_set(["rev-list", "--first-parent", _PIN_FULL])
+    assert sum(1 for f in moved if f["node"].removeprefix("commit:") not in first_parent) == 511
+
+
+def test_refs_left_boundary(repo_factory: RepoFactory, atlas: Any) -> None:
+    repo = _new_repo(repo_factory, "left_boundary")
+    repo.write(_PLAN_ALPHA, _plan("1.1: first [PENDING]"))
+    repo.write("plans/beta.md", _plan("1.1: only [PENDING]"))
+    repo.commit("plans")
+    repo.write("README.md", "c\n")
+    c = repo.commit(
+        _msg(
+            "chore: left boundary",
+            "Refs: docs/plans/x.md",
+            "Refs: multiprocess_prototype/plans/y.md, ~/.claude/plans/z.md",
+            "Refs: a plans/beta.md",
+            "Refs: (plans/gamma.md)",
+            "Refs: k,plans/delta.md",
+            "Refs: k;plans/eps.md",
+            "Refs: plans/beta.md,plans/zeta.md",
+            "Refs: x/plans/w.md plans/v.md",
+        )
+    )
+
+    doc = _doc(repo, atlas, "main")
+    src = f"commit:{c}"
+    assert _edges(doc, "refs", src) == [
+        (src, f"plan:{slug}", "trailer:Refs") for slug in ("beta", "delta", "eps", "gamma", "v", "zeta")
+    ]
+    assert _ref_findings(doc) == [
+        ("REF_TO_MISSING", "blocking", src, path, c, _PATH_GONE.format(path))
+        for path in ("plans/delta.md", "plans/eps.md", "plans/gamma.md", "plans/v.md", "plans/zeta.md")
+    ]
+
+
+def test_task_service_names_are_not_plans(repo_factory: RepoFactory, atlas: Any) -> None:
+    repo = _new_repo(repo_factory, "service_names")
+    one = _plan("1.1: x [PENDING]")
+    repo.write("plans/README.md", "# index\n")
+    repo.write("plans/QUEUE.md", "# queue\n")
+    repo.write("plans/queue/x.md", one)
+    repo.write("plans/_archive/README.md", "# archive index\n")
+    repo.write("plans/2026-09-01_old/plan.md", one)
+    repo.commit("plans")
+    shas: dict[str, str] = {}
+    for n, (key, slug) in enumerate(
+        (("README", "README"), ("QUEUE", "QUEUE"), ("queue", "queue"), ("archive", "_archive"), ("old", "old"))
+    ):
+        repo.write("f.txt", f"{n}\n")
+        shas[key] = repo.commit(_msg(f"feat: {key}", f"Task: {slug}#1.1"))
+    repo.git("rm", "-q", "-r", "plans/2026-09-01_old")
+    repo.commit("R remove old")
+
+    doc = _doc(repo, atlas, "main")
+    expected = [
+        ("REF_TO_MISSING", "blocking", f"commit:{shas[key]}", f"{slug}#1.1", shas[key], _PLAN_GONE.format(slug))
+        for key, slug in (("README", "README"), ("QUEUE", "QUEUE"), ("queue", "queue"), ("archive", "_archive"))
+    ]
+    expected.append(("REF_MOVED", "info", f"commit:{shas['old']}", "old#1.1", shas["old"], _PLAN_MOVED.format("old")))
+    assert _ref_findings(doc) == sorted(expected)
+
+
+def test_trailers_of_non_merge_ancestors_only(repo_factory: RepoFactory, atlas: Any) -> None:
+    repo = _new_repo(repo_factory, "non_merge_only")
+    repo.write(_PLAN_ALPHA, _plan("1.1: first [PENDING]", "1.2: second [PENDING]"))
+    repo.commit("plan")
+    repo.git("checkout", "-q", "-b", "side")
+    repo.write("s.txt", "S\n")
+    s = repo.commit(_msg("feat: side", "Task: alpha#1.1", "Refs: plans/typo.md"))
+    repo.git("checkout", "-q", "main")
+    repo.git("merge", "-q", "--no-ff", "-m", _msg("Merge side", "Task: alpha#1.2", "Refs: plans/typo2.md"), "side")
+    m = repo.head
+    assert len(repo.git("rev-list", "--parents", "-n", "1", m).split()) == 3  # M — слияние (2 родителя)
+
+    doc = _doc(repo, atlas, "main", "main")
+    assert s not in _ids(doc, "commit")  # узел commit по-прежнему только first-parent
+    assert _edges(doc, "implements") == [(f"commit:{s}", "task:alpha#1.1", "trailer:Task")]
+    assert _edges(doc, "refs") == [(f"commit:{s}", "plan:typo", "trailer:Refs")]
+    assert _ref_findings(doc) == [
+        ("REF_TO_MISSING", "blocking", f"commit:{s}", "plans/typo.md", s, _PATH_GONE.format("plans/typo.md"))
+    ]
+    assert _edges(doc, "implements", f"commit:{m}") == []
+    assert _edges(doc, "refs", f"commit:{m}") == []
+
+
+def test_fast_forward_onto_merge_main_into_branch_keeps_side_trailers(repo_factory: RepoFactory, atlas: Any) -> None:
+    repo = _new_repo(repo_factory, "ff_merge_main")
+    repo.write(_PLAN_ALPHA, _plan("1.1: a [PENDING]", "1.2: b [PENDING]", "1.3: c [PENDING]"))
+    repo.write("f.txt", "0\n")
+    repo.write("g.txt", "0\n")
+    repo.commit("m0")
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write("f.txt", "1\n")
+    f1 = repo.commit(_msg("feat: f1", "Task: alpha#1.1", "Refs: plans/typo.md"))
+    repo.write("f.txt", "2\n")
+    f2 = repo.commit("feat: f2")
+    repo.git("checkout", "-q", "main")
+    repo.write("g.txt", "1\n")
+    m1 = repo.commit(_msg("feat: m1", "Task: alpha#1.2", "Refs: plans/typo3.md"))
+    repo.git("checkout", "-q", "feat")
+    repo.git("merge", "-q", "-m", _msg("Merge main into feat", "Task: alpha#1.3", "Refs: plans/typo4.md"), "main")
+    mf = repo.head
+    repo.git("checkout", "-q", "main")
+    repo.git("merge", "-q", "--ff-only", "feat")
+    assert repo.head == mf
+    first_parent = repo.git("rev-list", "--first-parent", "main").split()
+    assert first_parent[:3] == [mf, f2, f1]
+    assert m1 not in first_parent  # оракул: m1 остался на втором родителе Mf
+
+    doc = _doc(repo, atlas, "main", "main")
+    assert m1 not in _ids(doc, "commit")
+    assert _edges(doc, "implements") == sorted(
+        [
+            (f"commit:{m1}", "task:alpha#1.2", "trailer:Task"),
+            (f"commit:{f1}", "task:alpha#1.1", "trailer:Task"),
+        ]
+    )
+    assert _edges(doc, "refs") == sorted(
+        [
+            (f"commit:{m1}", "plan:typo3", "trailer:Refs"),
+            (f"commit:{f1}", "plan:typo", "trailer:Refs"),
+        ]
+    )
+    assert _ref_findings(doc) == sorted(
+        [
+            ("REF_TO_MISSING", "blocking", f"commit:{m1}", "plans/typo3.md", m1, _PATH_GONE.format("plans/typo3.md")),
+            ("REF_TO_MISSING", "blocking", f"commit:{f1}", "plans/typo.md", f1, _PATH_GONE.format("plans/typo.md")),
+        ]
+    )
+    assert _edges(doc, "touches", f"commit:{m1}") == []
+    for key in (mf,):
+        assert _edges(doc, "implements", f"commit:{key}") == []
+        assert _edges(doc, "refs", f"commit:{key}") == []
+
+
+def test_pinned_on_a5ae9657a(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    doc = _real_doc(atlas, monkeypatch, tmp_path, _PIN_A5)
+    assert {kind: len(_ids(doc, kind)) for kind in ("commit", "module", "plan", "task")} == {
+        "commit": 2251,
+        "module": 87,
+        "plan": 148,
+        "task": 1242,
+    }
+    assert {kind: len(_edges(doc, kind)) for kind in ("refs", "implements", "touches", "done_by")} == {
+        "refs": 4158,
+        "implements": 176,
+        "touches": 5205,
+        "done_by": 313,
+    }
+    assert sum(1 for _, dst, _ in _edges(doc, "touches") if dst == "module:other") == 2008
+    assert _no_bad_chars_in_refs(doc) == []
+    assert _dangling_refs(doc) == 140
+    findings = doc["findings"]
+    codes = [f["code"] for f in findings]
+    assert {
+        c: codes.count(c)
+        for c in (
+            "DONE_WITHOUT_COMMIT",
+            "COMMIT_WITHOUT_DONE",
+            "DONE_HASH_NOT_IN_MAIN",
+            "PLAN_SLUG_COLLISION",
+            "REF_TO_MISSING",
+            "REF_MOVED",
+        )
+    } == {
+        "DONE_WITHOUT_COMMIT": 314,
+        "COMMIT_WITHOUT_DONE": 6,
+        "DONE_HASH_NOT_IN_MAIN": 0,
+        "PLAN_SLUG_COLLISION": 0,
+        "REF_TO_MISSING": 59,
+        "REF_MOVED": 1076,
+    }
+    missing = [f for f in findings if f["code"] == "REF_TO_MISSING"]
+    moved = [f for f in findings if f["code"] == "REF_MOVED"]
+    assert {f["severity"] for f in missing} == {"blocking"}
+    assert {f["severity"] for f in moved} == {"info"}
+    assert len({f["detail"] for f in moved}) == 101
+    assert len({f["detail"] for f in missing}) == 20
+    _assert_task_findings_missing(doc)
+    pairs = {(f["code"], f["node"], f["detail"]) for f in findings}
+    assert (
+        "REF_TO_MISSING",
+        "commit:06d8789cd9d12b1361b11c3c3f910181026fa19e",
+        "plans/processes-workers-runtime.md",
+    ) in pairs
+    assert (
+        "REF_MOVED",
+        "commit:00781adb4157ac425ef2624bd57564905a201cf4",
+        "plans/2026-06-06_command-result-bridge/plan.md",
+    ) in pairs
+    first_parent = _sha_set(["rev-list", "--first-parent", _PIN_A5])
+    assert sum(1 for f in moved if f["node"].removeprefix("commit:") not in first_parent) == 511
+    assert sum(1 for f in missing if "#" not in f["detail"] and f["source"] not in first_parent) == 4
+
+    # оракул implements: различные (коммит, значение Task) среди коммитов без слияний, значение с `#`
+    raw = GitRepo(_ROOT).git("log", "--no-merges", "--format=\x01%H\x02%B", _PIN_A5)
+    oracle: set[tuple[str, str]] = set()
+    for entry in raw.split("\x01"):
+        if not entry.strip():
+            continue
+        sha, body = entry.split("\x02", 1)
+        for value in re.findall(r"^Task:[ \t]*(\S.*?)[ \t\r]*$", body, re.MULTILINE):
+            left, hash_sign, right = value.partition("#")
+            if hash_sign and left and right:
+                oracle.add((sha.strip(), value))
+    implements = _edges(doc, "implements")
+    assert len(implements) == len(oracle) == 176
+    assert sum(1 for sha, _ in oracle if sha not in first_parent) > 100
 
 
 def test_commits_adapter_version_is_bumped() -> None:
     from scripts.atlas.adapters.commits import CommitsAdapter
     from scripts.atlas.adapters.plans import PlansAdapter
 
-    assert CommitsAdapter().version >> 48 == 2
+    assert CommitsAdapter().version >> 48 == 3
     assert PlansAdapter().version >> 48 == 1
