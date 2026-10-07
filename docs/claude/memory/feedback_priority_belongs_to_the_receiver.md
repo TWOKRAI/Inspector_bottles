@@ -1,8 +1,8 @@
 ---
 name: feedback_priority_belongs_to_the_receiver
-description: "Приоритет определяет ПРИЁМНИК, а не отправитель; воспроизводить надо порядок записи, а не модель уровней"
-module: "telemetry/config layers"
-mechanism: "replay-order"
+description: "Приоритет определяет ПРИЁМНИК, а не отправитель; воспроизводить надо порядок записи, а не модель уровней (priority, receiver, replay order, layers)"
+module: [config_module]
+mechanism: [ipc-routing, config]
 metadata:
   node_type: memory
   type: feedback

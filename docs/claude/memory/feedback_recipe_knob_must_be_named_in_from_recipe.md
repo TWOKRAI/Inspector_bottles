@@ -1,9 +1,9 @@
 ---
 name: feedback_recipe_knob_must_be_named_in_from_recipe
-description: "Ключ рецепта доезжает до процесса только если назван в ProcessConfig._from_recipe и лежит в extras; metadata читается лишь ради легаси-коллектора; также: Новый ключ конфига читать из секции, которая УЖЕ едет к процессу, а не заводить свой — иначе его надо класть в каждой дороге сборки"
+description: "Ключ рецепта доезжает до процесса только если назван в ProcessConfig._from_recipe и лежит в extras; metadata читается лишь ради легаси-коллектора; также: Новый ключ конфига читать из секции, которая УЖЕ едет к процессу, а не заводить свой — иначе его надо класть в каждой дороге сборки (recipe knob, ручка, delivery)"
+module: [recipe, process_module]
+mechanism: [config]
 merged_from: [feedback_read_the_key_from_the_section_already_travelling]
-module: "recipe, process_module"
-mechanism: "config-delivery"
 metadata:
   type: feedback
 ---

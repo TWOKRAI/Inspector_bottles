@@ -1,6 +1,7 @@
 ---
 name: observability-knobs-switchable-at-any-boundary-zero-cost-off
-description: Owner's standing rule 2026-09-08 — every observability parameter must be switchable on/off at any boundary (process, hop, sink, metric) at runtime for debugging, viewable on demand, and cost nothing when off; measured gaps — sink disable still pays emission, frame_trace is import-time only
+description: "Owner's standing rule 2026-09-08 — every observability parameter must be switchable on/off at any boundary (process, hop, sink, metric) at runtime for debugging, viewable on demand, and cost nothing when off; measured gaps — sink disable still pays emission, frame_trace is import-time only (правило владельца: наблюдаемость, ручки вкл/выкл)"
+mechanism: [owner-decision, performance]
 metadata:
   type: feedback
 ---

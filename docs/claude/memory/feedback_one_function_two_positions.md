@@ -1,8 +1,8 @@
 ---
 name: feedback-one-function-two-positions
-description: Одна функция на две позиции держится на совпадении констант — переномерация вскрывает
-module: "channel_routing_module (levels.py)"
-mechanism: "coinciding-constants"
+description: "Одна функция на две позиции держится на совпадении констант — переномерация вскрывает (function, constants, default, уровни / levels)"
+module: [channel_routing_module]
+mechanism: [architecture]
 metadata:
   node_type: memory
   type: feedback

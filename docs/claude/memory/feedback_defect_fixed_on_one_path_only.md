@@ -1,8 +1,8 @@
 ---
 name: feedback-defect-fixed-on-one-path-only
-description: Дефект, закрытый в одной ветке, воскресает на соседней с той же развилкой — проверять все пути, а не тот, где нашли
-module: "process_module (config.reload, telemetry.reconfigure)"
-mechanism: "review"
+description: "Дефект, закрытый в одной ветке, воскресает на соседней с той же развилкой (same fork / path) — проверять все пути (grep по всем местам), а не тот, где нашли"
+module: [process_module]
+mechanism: [spec-scope, dead-code]
 metadata:
   type: feedback
 ---

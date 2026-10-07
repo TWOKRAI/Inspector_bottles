@@ -1,7 +1,8 @@
 ---
 name: project-cuda-torch-setup
-description: Стенд RTX 3050 4GB; torch для ml_train должен быть cu124-колесом, не +cpu
-module: "ml_train, gpu"
+description: "Стенд RTX 3050 4GB; torch для ml_train должен быть cu124-колесом, не +cpu; uv sync удаляет torch / CUDA wheel, GPU training setup"
+module: [services/ml_train]
+mechanism: [windows-env]
 metadata:
   type: project
 ---

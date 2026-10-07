@@ -1,8 +1,8 @@
 ---
 name: feedback-broad-except-in-frame-loop-hides-dead-mechanism
-description: Широкий except в кадровом цикле превращает новый дефект в «стенд просто не работает» — проверять новые пути прогоном, а не чтением
-module: "line_sim (SceneSourcePlugin), frame loops"
-mechanism: "live-run"
+description: "Широкий except (broad except) в кадровом цикле превращает новый дефект в «стенд просто не работает» — проверять новые пути прогоном, а не чтением"
+module: [services/line_sim]
+mechanism: [error-handling, test-assertions]
 metadata:
   type: feedback
 ---

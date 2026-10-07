@@ -25,7 +25,8 @@
   неверное значение -> exit 2;
 * ``--branch-window N[mhd]`` окно свежести вершины ветки для ``branches`` (``3d``); неверное -> exit 2 в любом режиме;
   ветки считаются только для ``--json`` и ``--html``;
-* ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``);
+* ``--html [PATH]`` самодостаточная страница (по умолчанию ``<root>/data/plans_progress.html``); есть блок
+  ``owner-queue`` в ORDER.md -> колонка ``aside#owner-queue`` с очередью владельца (только показ, см. README);
 * ``--check``      печатает находки линта; exit 1, если есть блокирующая находка вне базы;
 * ``--baseline P`` файл строк ``<план>:<КОД>`` (``<план>:<КОД>:<id>`` для UNKNOWN_STATUS и
   DUP_ID); находка из базы не блокирует (храповик: база только убывает).
@@ -923,6 +924,35 @@ def _name_from_href(href: str) -> str | None:
     return last[:-3] if last.endswith(".md") else last
 
 
+QUEUE_BEGIN = "<!-- owner-queue:begin -->"
+QUEUE_END = "<!-- owner-queue:end -->"
+
+
+def locate_queue_block(lines: list[str]) -> tuple[tuple[int, int] | None, int, int]:
+    """(индексы строк маркеров или None, число begin, число end). Корректно — ровно begin, затем end.
+
+    Маркер — строка целиком (пробелы по краям не в счёт); маркер внутри строки с другим текстом — не маркер.
+    """
+    marks = [(i, ln.strip()) for i, ln in enumerate(lines) if ln.strip() in (QUEUE_BEGIN, QUEUE_END)]
+    kinds = [m[1] for m in marks]
+    span = (marks[0][0], marks[1][0]) if kinds == [QUEUE_BEGIN, QUEUE_END] else None
+    return span, kinds.count(QUEUE_BEGIN), kinds.count(QUEUE_END)
+
+
+def cut_queue_block(text: str) -> str:
+    """Блок `owner-queue`, корректный по маркерам, вместе с маркерами -> пустые строки (номера строк не сдвигаются)."""
+    lines = text.split("\n")
+    span = locate_queue_block(lines)[0]
+    if span is None:
+        return text
+    return "\n".join(lines[: span[0]] + [""] * (span[1] - span[0] + 1) + lines[span[1] + 1 :])
+
+
+def read_order(path: Path) -> str:
+    """Текст `ORDER.md` для `parse_order` и `parse_snapshot`: блок очереди владельца им не виден."""
+    return cut_queue_block(read_text(path))
+
+
 def parse_order(path: Path) -> list[OrderRow]:
     """Таблицы §4.1/4.2/4.3 `ORDER.md`: порядок строк, полоса (только §4.1), связь по basename плана."""
     if not path.is_file():
@@ -930,7 +960,7 @@ def parse_order(path: Path) -> list[OrderRow]:
     rows: list[OrderRow] = []
     seen: set[str] = set()
     tier: str | None = None
-    for line in read_text(path).split("\n"):
+    for line in read_order(path).split("\n"):
         hm = HEADING_RE.match(line)
         if hm:
             tm = _TIER_HEAD_RE.match(line)
@@ -1018,7 +1048,7 @@ def parse_snapshot(path: Path) -> tuple[str, list[SnapRow]]:
     """
     if not path.is_file():
         return "", []
-    lines = read_text(path).split("\n")
+    lines = read_order(path).split("\n")
     start = next((i for i, ln in enumerate(lines) if _SNAP_HEAD_RE.match(ln)), None)
     if start is None:
         return "", []
@@ -1109,6 +1139,166 @@ def plan_closed(p: Plan) -> bool:
     if p.archived or p.tier == "closed" or p.header_status in ("done", "superseded"):
         return True
     return bool(p.tasks) and not any(t.status in TASK_OPEN for t in p.tasks)
+
+
+# ----------------------------------------------------------------------------- очередь владельца в ORDER.md
+
+_QUEUE_COLUMNS = {"#": "n", "план": "plan", "задача": "task", "заметка": "note"}
+_QUEUE_FULL_NAME_RE = re.compile(r"\d{4}-\d{2}-\d{2}_" + _SLUG_RE.pattern)
+_QUEUE_SEPARATOR_RE = re.compile(r":?-+:?")
+_QUEUE_NO_TASK = ("", "—", "–", "-")
+_QUEUE_TASK_WORD_RE = re.compile(r"\Atask ", re.IGNORECASE)
+QUEUE_FINDING_PLAN = "ORDER.md"
+
+
+@dataclass
+class QueueRow:
+    plan: str  # сырая ячейка «План» (ссылки целы)
+    task: str  # сырая ячейка «Задача»
+    note: str  # сырая ячейка «Заметка»
+
+
+def _queue_cells(line: str) -> list[str]:
+    """Ячейки строки таблицы блока: пустая часть до ведущей `|` и после замыкающей отбрасывается каждая отдельно.
+
+    Строка без замыкающей `|` колонки не сдвигает (в отличие от `_cells` «Снимка», тот не меняется).
+    """
+    cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip())]
+    if cells and cells[0] == "":
+        cells = cells[1:]
+    if cells and cells[-1] == "":
+        cells = cells[:-1]
+    return cells
+
+
+def parse_queue_block(path: Path) -> tuple[list[QueueRow], str]:
+    """Блок `owner-queue` в `ORDER.md` -> (строки-пункты по порядку, текст проблемы блока; `""` — блока нет или он цел).
+
+    Нет файла, нет ни одного маркера — пусто и без проблемы. Маркеры не пара «begin, end», нет таблицы или колонки
+    «План» — пусто и проблема. Таблица — первая непрерывная серия строк, начинающихся с `|`; не бросает исключений.
+    """
+    if not path.is_file():
+        return [], ""
+    lines = read_text(path).split("\n")
+    span, begins, ends = locate_queue_block(lines)
+    if span is None:
+        if begins == 0 and ends == 0:
+            return [], ""
+        return [], (
+            f"нужна ровно одна пара маркеров {QUEUE_BEGIN} / {QUEUE_END} отдельными строками, "
+            f"найдено: owner-queue:begin {begins}, owner-queue:end {ends}"
+            + ("; owner-queue:end стоит раньше owner-queue:begin" if begins == 1 == ends else "")
+        )
+    table: list[str] = []
+    for ln in lines[span[0] + 1 : span[1]]:
+        if ln.lstrip().startswith("|"):
+            table.append(ln)
+        elif table:
+            break
+    cols: dict[str, int] = {}
+    for i, c in enumerate(_queue_cells(table[0]) if table else []):
+        key = _QUEUE_COLUMNS.get(clean_md(c).casefold())
+        if key and key not in cols:
+            cols[key] = i
+    if "plan" not in cols:
+        return [], "в блоке нет таблицы с колонкой «План»"
+    rows: list[QueueRow] = []
+    for ln in table[1:]:
+        cells = _queue_cells(ln)
+        if cells and all(_QUEUE_SEPARATOR_RE.fullmatch(c) for c in cells):
+            continue
+        if not any(clean_md(c) for c in cells):
+            continue
+
+        def raw(key: str) -> str:
+            i = cols.get(key)
+            return cells[i] if i is not None and i < len(cells) else ""
+
+        rows.append(QueueRow(raw("plan"), raw("task"), raw("note")))
+    return rows, ""
+
+
+def queue_names(raw_cell: str) -> list[str]:
+    """Имена планов из сырой ячейки «План»: части через `,`; ссылка — имя из пути, иначе текст; слаг или полное имя."""
+    out: list[str] = []
+    for part in raw_cell.split(","):
+        part = part.strip()
+        link = _LINK_RE.search(part)
+        name = (_name_from_href(link.group(1)) if link else part.replace("`", "").replace("*", "").strip()) or ""
+        if (_SLUG_RE.fullmatch(name) or _QUEUE_FULL_NAME_RE.fullmatch(name)) and name not in out:
+            out.append(name)
+    return out
+
+
+def _queue_item(n: int, row: QueueRow, plans: list[Plan]) -> tuple[dict, Finding | None, Plan | None, Task | None]:
+    """Пункт очереди, его находка (первая по порядку: BAD плана, BAD задачи, UNKNOWN плана, UNKNOWN задачи, CLOSED)
+    и найденные `Plan` и `Task` (для страницы: якорь карточки и название задачи)."""
+    names = queue_names(row.plan)
+    plan = find_by_slug(plans, names[0]) if len(names) == 1 else None
+    task_text = _QUEUE_TASK_WORD_RE.sub("", clean_md(row.task), count=1)
+    is_task = task_text not in _QUEUE_NO_TASK
+    bad_task = is_task and re.fullmatch(ID_PATTERN, task_text) is None
+    task = next((t for t in plan.tasks if t.id == task_text), None) if is_task and not bad_task and plan else None
+    known = plan is not None and not bad_task and (task is not None or not is_task)
+    closed = known and (plan_closed(plan) or (is_task and task.status in TASK_CLOSED))
+    plan_value = plan.name if plan else (names[0] if len(names) == 1 else clean_md(row.plan))
+    item = {
+        "n": n,
+        "kind": "task" if is_task else "plan",
+        "plan": plan_value,
+        "task": task_text if is_task else None,
+        "note": clean_md(row.note),
+        "known": known,
+        "closed": closed,
+    }
+    plan_80, task_80 = clean_md(plan_value, 80), clean_md(task_text, 80)
+    head = f"пункт {n} очереди владельца: "
+    found: tuple[str, str] | None = None
+    if len(names) != 1:
+        found = ("OWNER_QUEUE_BAD", f"в ячейке «План» нужно ровно одно имя плана, сейчас: {plan_80 or '—'}")
+    elif bad_task:
+        found = ("OWNER_QUEUE_BAD", f"в ячейке «Задача» не номер задачи: {task_80}")
+    elif plan is None:
+        found = ("OWNER_QUEUE_UNKNOWN", f"плана {plan_80} нет")
+    elif is_task and task is None:
+        found = ("OWNER_QUEUE_UNKNOWN", f"в плане {plan_80} нет задачи {task_80}")
+    elif closed:
+        what = f"задача {task_80} плана {plan_80} закрыта" if is_task else f"план {plan_80} закрыт"
+        found = ("OWNER_QUEUE_CLOSED", f"{what} — уберите пункт из очереди")
+    finding = Finding(found[0], QUEUE_FINDING_PLAN, None, False, head + found[1]) if found else None
+    return item, finding, plan, task
+
+
+def build_queue(plans: list[Plan], order: Path) -> tuple[list[dict], list[Finding]]:
+    """Очередь владельца: (пункты для `--queue`, находки `OWNER_QUEUE_*` для `--check`). Звать после `apply_order`."""
+    rows, problem = parse_queue_block(order)
+    findings = [Finding("OWNER_QUEUE_BLOCK", QUEUE_FINDING_PLAN, None, False, problem)] if problem else []
+    items: list[dict] = []
+    for n, row in enumerate(rows, 1):
+        item, finding, _plan, _task = _queue_item(n, row, plans)
+        items.append(item)
+        if finding:
+            findings.append(finding)
+    return items, findings
+
+
+def _build_queue_view(plans: list[Plan], order: Path) -> dict | None:
+    """Очередь для колонки страницы: `None` — колонки нет (нет `ORDER.md` или в нём нет ни одного маркера блока).
+
+    Иначе `{"problem": текст проблемы блока или "", "entries": [{"item", "plan", "task", "finding"}]}` — пункт как в
+    `--queue`, найденные `Plan` и `Task` и находка пункта. `plans` — те же объекты, что печатают карточки.
+    """
+    if not order.is_file():
+        return None
+    span, begins, ends = locate_queue_block(read_text(order).split("\n"))
+    if span is None and begins == 0 and ends == 0:
+        return None
+    rows, problem = parse_queue_block(order)
+    entries = []
+    for n, row in enumerate(rows, 1):
+        item, finding, plan, task = _queue_item(n, row, plans)
+        entries.append({"item": item, "plan": plan, "task": task, "finding": finding})
+    return {"problem": problem, "entries": entries}
 
 
 def cycle_groups(edges: list[list[int]]) -> dict[int, list[int]]:
@@ -2190,7 +2380,19 @@ code{font-size:.8rem;color:var(--muted)}
 border-radius:10px;padding:0 7px}
 .chip.ok{color:var(--done);border-color:var(--done)}
 .cell[data-unmarked="1"]{outline:2px dashed var(--in_progress);outline-offset:-2px}
-main:has(#tab-queue:checked)>:not(header,#queue),main:has(#tab-waiting:checked)>:not(header,#waiting),
+#owner-queue{order:-1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0 12px 8px}
+#owner-queue h2{margin:8px 0 4px}
+#owner-queue .note{margin:0 0 6px;color:var(--muted);font-size:.8rem}
+#owner-queue ol{margin:0;padding-left:22px;font-size:.88rem}
+#owner-queue li{padding:3px 0;overflow-wrap:anywhere}
+#owner-queue s,#owner-queue .q-note{color:var(--muted)}
+#owner-queue .st{min-width:0;margin-left:6px}
+@media(min-width:932px){#queue:has(+#owner-queue){flex:1 1 calc(100% - 322px);align-self:flex-start}
+main:has(.anchor:target) #queue{flex-basis:100%}
+#owner-queue{order:0;flex:0 0 310px;align-self:flex-start;position:sticky;top:56px;
+max-height:calc(100vh - 68px);overflow:auto}}
+main:has(#tab-queue:checked)>:not(header,#queue,#owner-queue){display:none}
+main:has(#tab-waiting:checked)>:not(header,#waiting),
 main:has(#tab-unlisted:checked)>:not(header,#unlisted),main:has(#tab-archive:checked)>:not(header,#archive),
 main:has(#tab-who:checked)>:not(header,#who),main:has(#tab-overlaps:checked)>:not(header,#overlaps),
 main:has(#tab-priority:checked)>:not(header,#priority),main:has(#tab-lanes:checked)>:not(header,.lanes){display:none}
@@ -2535,6 +2737,56 @@ def git_sha(root: Path) -> str:
     return sha if cp.returncode == 0 and sha else "—"
 
 
+def _owner_queue_html(view: dict, anchors: dict[int, str]) -> list[str]:
+    """Колонка `aside#owner-queue` (только показ): заголовок, заметка, затем ровно одно из трёх —
+    проблема блока, «очередь пуста» или `ol`.
+
+    Ссылка на карточку — `anchors[id(plan)]` для `Plan`, который нашёл `find_by_slug` (не карта «имя -> якорь»:
+    у архивного дубля она даст чужую карточку). Ни `id`, ни `span.anchor` внутри колонки нет.
+    """
+    entries = view["entries"]
+    opened = sum(1 for en in entries if not en["item"]["closed"])
+    out = [
+        '<aside id="owner-queue">',
+        f"<h2>Очередь владельца · открыто {opened} из {len(entries)}</h2>",
+        '<p class="note">правка — блок owner-queue в ORDER.md</p>',
+    ]
+    if view["problem"]:
+        out.append(f'<p class="chip warn" data-chip="queue-problem">⚠ {_e(view["problem"])}</p>')
+    elif not entries:
+        out.append("<p>очередь пуста</p>")
+    else:
+        out.append('<ol class="owner-queue">')
+        for en in entries:
+            item, plan, task, finding = en["item"], en["plan"], en["task"], en["finding"]
+            attrs = f'data-n="{_e(item["n"])}" data-kind="{_e(item["kind"])}" data-plan="{_e(item["plan"])}"'
+            if item["kind"] == "task":
+                attrs += f' data-task="{_e(item["task"])}"'
+            attrs += (' data-closed="1"' if item["closed"] else "") + ("" if item["known"] else ' data-known="0"')
+            if plan is not None:
+                head = f'<a href="#{_e(anchors[id(plan)])}">{_e(item["plan"])}</a>'
+            else:
+                head = _e(item["plan"]) or "—"
+            if item["kind"] == "task":
+                head += f" · <b>{_e(item['task'])}</b>"
+                if task is not None:
+                    head += f' {_e(task.title)}<span class="st">{STATUS_RU[task.status]}</span>'
+            elif plan is not None:
+                head += f' · <span class="tally">{_e(_tally(plan.done, plan.total))}</span>'
+            li = f"<s>{head}</s>" if item["closed"] else head
+            if not item["known"] and finding is not None:
+                text = finding.text.removeprefix(f"пункт {item['n']} очереди владельца: ")
+                li += f' <span class="chip warn" data-chip="queue-problem">⚠ {_e(text)}</span>'
+            elif plan is not None and not item["closed"]:
+                li += "".join(" " + _active_chip(e) for e in plan.active)
+            if item["note"]:
+                li += f' <span class="q-note">— {_e(item["note"])}</span>'
+            out.append(f"<li {attrs}>{li}</li>")
+        out.append("</ol>")
+    out.append("</aside>")
+    return out
+
+
 def to_html(
     live: list[Plan],
     archive: list[Plan],
@@ -2544,6 +2796,7 @@ def to_html(
     snapshot_date: str = "",
     snapshot_rows: list[SnapRow] | tuple = (),
     overlaps: list[Overlap] | tuple = (),
+    owner_queue: dict | None = None,
 ) -> str:
     """Страница: `#who`, `#overlaps` (только если есть), очередь §4.1, `#waiting` §4.2, `#unlisted` (не в ORDER.md),
     `#archive` (архив + закрытые §4.3).
@@ -2551,6 +2804,7 @@ def to_html(
     Активные для `#who` берутся из `Plan.active` всех планов; `orphans` — из `collect_active`;
     `window_text` — значение `--active-window` как передано (попадает в строку «свежих сигналов нет»).
     `overlaps` — из `find_overlaps`: секция `#overlaps` сразу после `#who` и чип `overlap` у планов с пересечением.
+    `owner_queue` — из `_build_queue_view`: колонка `aside#owner-queue` сразу после `#queue`; `None` — колонки нет.
 
     Шапка `header.topbar`: `h1`, три `div.meta`, переключатель `details.switcher`, ссылка `a.back` и `nav.tabs`
     (вкладки — радиокнопки, вид без JS). У каждой карточки якорь `plan-<slug>` (`assign_anchors`, порядок печати —
@@ -2618,6 +2872,8 @@ def to_html(
     parts.append('<section id="queue">')
     parts.extend(card(p) for p in queue_view)
     parts.append("</section>")
+    if owner_queue is not None:
+        parts.extend(_owner_queue_html(owner_queue, anchors))
     parts.append('<details id="waiting">')
     parts.append(f"<summary>Ждут триггера · {len(waiting)} планов (ORDER.md §4.2)</summary>")
     parts.extend(card(p) for p in waiting)
@@ -2655,6 +2911,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--baseline", type=Path, default=None, help="файл известных блокирующих находок")
     ap.add_argument("--sync-order", action="store_true", help="переписать блок прогресса между маркерами в ORDER.md")
     ap.add_argument("--who", action="store_true", help="активные worktree и сироты: объект JSON на stdout")
+    ap.add_argument(
+        "--queue", action="store_true", help="очередь владельца из блока owner-queue: объект JSON на stdout"
+    )
     ap.add_argument("--now", default=None, metavar="ISO", help="текущее время для окна: местное, без пояса")
     ap.add_argument(
         "--active-window",
@@ -2691,6 +2950,9 @@ def main(argv: list[str] | None = None) -> int:
     if now is None:
         print("ошибка: --now — время ISO местное, без пояса", file=sys.stderr)
         return 2
+    if args.queue and (args.json or args.html is not None or args.check or args.sync_order or args.who):
+        print("ошибка: --queue не сочетается с другими режимами вывода", file=sys.stderr)
+        return 2
     if args.who and (args.json or args.html is not None or args.check or args.sync_order):
         print("ошибка: --who не сочетается с другими режимами вывода", file=sys.stderr)
         return 2
@@ -2710,6 +2972,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     rows = parse_order(order_path)
     apply_order(plans, rows)
+    if args.queue:  # после apply_order: ярус §4.3 закрывает план; git и активные worktree не нужны
+        print(json.dumps({"items": build_queue(plans, order_path)[0]}, ensure_ascii=False, indent=2))
+        return 0
     resolve_deps(plans)
     snap_date, snap_rows = parse_snapshot(order_path)
     snap_unknown = apply_snapshot(plans, snap_rows)
@@ -2746,8 +3011,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.html is not None:
         target = Path(args.html) if args.html else root / "data" / "plans_progress.html"
         target.parent.mkdir(parents=True, exist_ok=True)
+        owner_queue = _build_queue_view(ordered, order_path)  # те же планы, что у карточек, после apply_order
         target.write_text(
-            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps), encoding="utf-8"
+            to_html(live, archive, root, orphans, args.active_window, snap_date, snap_rows, overlaps, owner_queue),
+            encoding="utf-8",
         )
         print(f"страница записана: {target}", file=sys.stderr if args.json else sys.stdout)
     if args.check:
@@ -2755,6 +3022,7 @@ def main(argv: list[str] | None = None) -> int:
         extra = (
             order_block_findings(order_path, live, archive, root)
             + snapshot_findings(snap_unknown)
+            + build_queue(ordered, order_path)[1]
             + branch_findings(ordered, root)
         )
         code = run_check(ordered, baseline, sys.stderr if args.json else sys.stdout, extra)

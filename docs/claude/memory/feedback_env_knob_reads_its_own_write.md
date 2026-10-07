@@ -1,8 +1,8 @@
 ---
 name: env-knob-reads-its-own-write
-description: Ручка-из-env, которую код сам же и материализует в env, на втором чтении принимает свою запись за волю оператора — снимать env один раз на старте
-module: "prototype build()"
-mechanism: "env-config"
+description: "Ручка-из-env (environment variable), которую код сам же и материализует в env, на втором чтении принимает свою запись за волю оператора — снимать env один раз на старте"
+module: [prototype/backend]
+mechanism: [config, lifecycle]
 metadata:
   type: feedback
 ---

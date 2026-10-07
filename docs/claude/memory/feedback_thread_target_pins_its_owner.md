@@ -1,8 +1,8 @@
 ---
 name: thread-target-pins-its-owner
-description: Поток с bound-method в target держит владельца — «утёкший» стенд бессмертен для GC; 23 такие утечки закрыты — access violation гейта прекратился (5/5)
-module: "state_store_module, app_module"
-mechanism: "thread-GC"
+description: "Поток / thread с bound-method в target держит владельца — «утёкший» стенд бессмертен для GC; 23 такие утечки закрыты — access violation гейта прекратился (5/5); autouse-страж в conftest"
+module: [state_store_module, app_module]
+mechanism: [concurrency, test-infra]
 metadata:
   node_type: memory
   type: feedback

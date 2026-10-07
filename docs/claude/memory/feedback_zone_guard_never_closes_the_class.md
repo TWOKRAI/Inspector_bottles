@@ -1,9 +1,8 @@
 ---
 name: feedback_zone_guard_never_closes_the_class
-description: "Страж, поставленный на свою зону, не закрывает класс дефекта — следующий экземпляр заводится там, куда не смотрит ни один страж; также: Страж проверял, что путь СУЩЕСТВУЕТ — пустой каталог его устраивал, и ложь о покрытии прожила три месяца; Каталог tests/ на диске, но не в testpaths — 58 зелёных тестов не гонялись; покрытие сверять с конфигом прогона, а не со списком файлов"
+description: "Страж / guard, поставленный на свою зону, не закрывает класс дефекта; страж «путь существует» пропустил пустой каталог; каталог tests/ не в testpaths — тесты-невидимки не гонялись"
+mechanism: [guards, test-infra]
 merged_from: [feedback_guard_on_existence_is_not_a_guard_on_content, feedback_tests_invisible_to_testpaths]
-module: "framework tests"
-mechanism: "testpaths"
 metadata:
   node_type: memory
   type: feedback

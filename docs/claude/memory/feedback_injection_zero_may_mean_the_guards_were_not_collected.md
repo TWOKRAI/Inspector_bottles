@@ -1,8 +1,8 @@
 ---
 name: feedback_injection_zero_may_mean_the_guards_were_not_collected
-description: "Ноль красных в инъекции может означать, что сторожа не попали в сбор — сверять collected до, а не читать ноль как «свойства нет»; также: ноль красных: плохая реплика, промах выборки, незастережённая ветка; заплата легла туда, где свойство не может измениться (пятое прочтение нуля); инъекция ломает сбор, подделывает похожее действие или целится в алиас; база инъекций: «нет упавших» при 0 собранных; ноль красных = код ничего не добавляет"
+description: "Ноль красных (zero reds) в инъекции может означать, что сторожа не попали в сбор (not collected) — сверять collected до; плохая реплика, промах выборки, заплата не туда, сломанный прогон"
+mechanism: [break-injection, test-infra]
 merged_from: [feedback_a_zero_under_injection_has_three_readings, feedback_an_injection_must_prove_its_axis_is_live, feedback_broken_injection_is_not_a_vacuous_test, feedback_injection_base_needs_a_collected_count, feedback_zero_reds_can_mean_a_useless_layer]
-mechanism: "break-injection, harness"
 metadata:
   type: feedback
 ---

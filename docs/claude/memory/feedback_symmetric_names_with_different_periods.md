@@ -1,8 +1,8 @@
 ---
 name: feedback_symmetric_names_with_different_periods
-description: "Одноимённые величины с РАЗНЫМИ периодами хуже названной асимметрии: первое читается неверно молча"
-module: "telemetry (get_stats)"
-mechanism: "naming"
+description: "Одноимённые величины / symmetric names с РАЗНЫМИ периодами (period) хуже названной асимметрии: первое читается неверно молча"
+module: [telemetry_readmodel_module]
+mechanism: [docs, measurement]
 metadata:
   node_type: memory
   type: feedback

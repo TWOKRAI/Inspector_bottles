@@ -1,8 +1,8 @@
 ---
 name: feedback_hot_path_hook_must_be_priced
-description: Перехватчик на точке эмиссии сравнивают с ценой самой эмиссии — иначе «наверное дёшев» удваивает log()
-module: "logger_module (redaction)"
-mechanism: "perf-measurement"
+description: "Перехватчик (hook) на горячем пути (hot path) сравнивают с ценой самой эмиссии — иначе «наверное дёшев» удваивает log(); мерить дельту (delta), в том числе для вызовов «только чтение»"
+module: [logger_module]
+mechanism: [performance, measurement]
 metadata:
   node_type: memory
   type: feedback

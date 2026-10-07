@@ -1,7 +1,7 @@
 ---
 name: feedback_named_mechanism_is_not_a_commitment
-description: «Процессор X» в постановке не обязывает делать X процессором — проверка через политику отказа механизма
-mechanism: "spec-review"
+description: "«Процессор X» в постановке не обязывает делать X процессором — проверка через политику отказа механизма (постановка / spec, mechanism, task scope)"
+mechanism: [spec-scope]
 metadata:
   node_type: memory
   type: feedback

@@ -1,8 +1,7 @@
 ---
 name: feedback-post-publication-mark-breaks-collapsing
-description: Отметка, дописанная в запись ПОСЛЕ публикации, выключает схлопывание повторов — и ровно на отказе, когда повторов больше всего
-module: "observability (ObservabilityAudit)"
-mechanism: "dedup"
+description: "Отметка, дописанная в запись ПОСЛЕ публикации, выключает схлопывание повторов — и ровно на отказе, когда повторов больше всего (dedup, audit ring, repeats)"
+mechanism: [guards]
 metadata:
   type: feedback
 ---

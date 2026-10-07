@@ -1,27 +1,3 @@
-# MEMORY.md — индекс памяти tester
-
-- [config.reload ttl-addressing guard](feedback_config_reload_ttl_addressing_guard.md) — throttle-only+ttl refuses for an unrelated reason; don't mistake it for the receiver check
-- [observability provenance witness keys](feedback_observability_provenance_witness_keys.md) — pick scalar schema leaves, not containers; base.yaml is a safe minimal hot-rebuild fixture
-- [Pydantic extra=ignore hides RED](feedback_pydantic_extra_ignore_hides_red.md) — assert the new attribute directly, a dropped kwarg alone won't fail today
-- [live telemetry gate without full boot](feedback_test_live_telemetry_gate_without_full_boot.md) — ProcessHeartbeat._build_telemetry_gate() + minimal services fake, pair with a green control
-- [framework tests can't import prototype](feedback_framework_tests_cannot_import_prototype.md) — sentrux boundary has no tests/ exception; split into a companion file under multiprocess_prototype/backend/tests/
-- [freeform brief without MODE header](feedback_freeform_brief_without_mode_header.md) — explicit forbidden-paths + red/green framing = RED-equivalent, don't force MODE:regression's git-diff step
-- [negative wording assertion needs an existence anchor](feedback_negative_wording_assertion_needs_an_existence_anchor.md) — "must not falsely claim X" is vacuous if nothing was logged; pair with `assert logs` in the same test
-- [addressing fake needs general dot-notation](feedback_addressing_fake_needs_general_dot_notation.md) — flat dict.get fake proves its own shape, not a nested-key property; copy the real Config._traverse contract + add one real-object test
-- [ownership test needs silent-owner case](feedback_ownership_test_needs_silent_owner_case.md) — live-owner-vs-impostor alone stays green under pure overlay order; add the "owner declared but didn't publish" case to actually test ownership
-- [Read tool can't skip forbidden docstrings](feedback_read_tool_cannot_skip_forbidden_docstrings.md) — use Bash+inspect.signature for "signature OK, docstring not"; disclose loudly if Read already leaked it
-- [reused ProcessHeartbeat required for retraction ticks](feedback_reused_heartbeat_required_for_retraction_ticks.md) — a fresh hb per tick loses per-instance bookkeeping → false RED on retraction propagation
-- [_do_shutdown on unbooted plugin is a silent no-op](feedback_do_shutdown_on_unbooted_plugin_is_a_silent_noop.md) — drive full configure->start->shutdown lifecycle before trusting shutdown-triggered assertions
-- [pytest.raises inverts RED polarity](feedback_pytest_raises_inverts_red_polarity.md) — wrapping a not-yet-built call in pytest.raises(X) PASSES today; assert the real success shape so X propagates unwrapped and fails the test
-- [store kind ignores which manager wrote it](feedback_store_kind_ignores_which_manager_wrote_it.md) — kind=error comes from severity alone; a buggy ctx.log_error path already produces it — pair with errors.log content / health.status instead
-- [breaker threshold confounds throttle tests](feedback_dedicated_breaker_threshold_avoids_confound.md) — N>=5 repeats trip DEFAULT_FAIL_THRESHOLD=5, inject a huge-threshold CircuitBreaker
-- [windowed_voice is a process-wide singleton](feedback_windowed_voice_is_a_process_wide_singleton.md) — reset_process_voices() autouse fixture; windowed_suppressed sums ALL keys, per-key number lives only in voice text
-- [RED without interface.py needs one named guessed hook](feedback_red_without_interface_needs_one_named_guessed_hook.md) — grep-confirm nothing exists, isolate ONE guessed symbol by codebase idiom, everything else on existing APIs; hedge when unsure which object owns a value
-- [review injection patch proves coverage gap, not a live bug](feedback_review_injection_patch_proves_coverage_gap_not_a_live_bug.md) — check whether the review's evidence was a monkeypatch before assuming the missing test must be RED
-- [priority-fallback eviction masks staleness config](feedback_priority_fallback_eviction_masks_staleness_config.md) — one stale victim can't prove config is honored, the capacity fallback picks the same victim regardless; simulate offline first
-- [Cyrillic numeral-word substring collision](feedback_cyrillic_numeral_word_substring_collision.md) — "восемь" contains "семь"; use \b word-boundary regex, not bare `in`, when scanning RU numeral-words
-- [_wired harness misses introspect.*](feedback_wired_harness_missing_introspect_commands.md) — only _register_observability_commands(); need _register_introspect_commands() too, bc not returned so copy the body
-- [config.reload inline rejects unknown observability keys](feedback_config_reload_inline_rejects_unknown_observability_keys.md) — session door only: clean success=False + "did you mean", not silent extra=ignore drop
-- [import-guard needs AST, not substring](feedback_import_guard_substring_vs_ast.md) — a docstring naming the other module fails a text-grep guard with zero real import
-- [angle boundary rounds outward at raw precision](feedback_angle_boundary_rounds_outward_at_raw_precision.md) — recompute atan2 from ROUNDED raw ints, not the float formula, before pinning accept/reject
-- [control-script tmp inside repo defeats confinement](feedback_control_script_tmp_inside_repo_defeats_confinement.md) — use OS temp (C:), REPO_ROOT is an allowed root so outside-control returns ok
+Lessons of every role live in docs/claude/memory/ (main checkout); this directory holds no lessons.
+Search: python "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/memory/search.py" <3-5 words>
+New lesson: a MEMORY LESSON <name>.md block in your final report; the lead files it.

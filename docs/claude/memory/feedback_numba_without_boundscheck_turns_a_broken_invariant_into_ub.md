@@ -1,8 +1,8 @@
 ---
 name: feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub
-description: "numba @njit без boundscheck: нарушенный инвариант пишет за буфер → полный набор тестов ЗЕЛЁНЫЙ, следующий процесс падает 0xC0000374; ядра с буферами по инварианту держать под boundscheck=True + явная сверка"
-module: "Plugins (trace_skeleton)"
-mechanism: "break-injection"
+description: "numba @njit без boundscheck: нарушенный инвариант пишет за буфер → полный набор тестов ЗЕЛЁНЫЙ, следующий процесс падает 0xC0000374; ядра с буферами по инварианту держать под boundscheck=True + явная сверка (инъекция / injection, heap corruption)"
+module: [plugins/processing]
+mechanism: [break-injection, error-handling]
 metadata:
   node_type: memory
   type: feedback

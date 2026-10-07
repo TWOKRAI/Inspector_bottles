@@ -1,7 +1,7 @@
 ---
 name: feedback_injection_generator_must_differ_from_criteria_author
-description: "Инъекции, выведенные из критериев их же автором, ловятся гарантированно и ничего не доказывают — обязателен второй род «нуль/тотал», придуманный другой головой"
-mechanism: "break-injection, independence"
+description: "Инъекции (injections), выведенные из критериев их же автором, ловятся гарантированно и ничего не доказывают — обязателен второй род «нуль/тотал» (null / total), придуманный другой головой"
+mechanism: [break-injection, acceptance]
 metadata:
   node_type: memory
   type: feedback

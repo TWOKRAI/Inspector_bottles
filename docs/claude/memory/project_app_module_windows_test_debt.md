@@ -1,7 +1,8 @@
 ---
 name: app-module-windows-test-debt
-description: "2 app_module-теста красные ТОЛЬКО на Windows (os.replace WinError 5 + endswith прямой слэш) — pre-existing долг, не seqlock/G.3; зелёные на Mac/CI-Linux"
-module: "app_module, windows"
+description: "2 app_module-теста красные ТОЛЬКО на Windows (os.replace WinError 5 + endswith прямой слэш) — pre-existing долг / test debt, не seqlock/G.3; зелёные на Mac/CI-Linux"
+module: [app_module]
+mechanism: [windows-env, flaky-tests]
 metadata:
   node_type: memory
   type: project

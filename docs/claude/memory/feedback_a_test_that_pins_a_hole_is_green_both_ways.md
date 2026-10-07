@@ -1,8 +1,8 @@
 ---
 name: feedback-a-test-that-pins-a-hole-is-green-both-ways
-description: Тест, закрепляющий ДОКУМЕНТИРУЕМУЮ ДЫРУ, зелен и до, и после снятия свойства — он документация, а не сторож, и в покрытие не идёт
-module: "backend_ctl (history_query)"
-mechanism: "break-injection"
+description: "Тест, закрепляющий ДОКУМЕНТИРУЕМУЮ ДЫРУ, зелен и до, и после снятия свойства — он документация, а не сторож (guard), и в покрытие не идёт (injection matrix)"
+module: [tools/backend_ctl]
+mechanism: [break-injection, test-assertions]
 metadata:
   type: feedback
 ---

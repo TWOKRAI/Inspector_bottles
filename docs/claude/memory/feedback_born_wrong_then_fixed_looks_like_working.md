@@ -1,8 +1,8 @@
 ---
 name: feedback_born_wrong_then_fixed_looks_like_working
-description: "Объект, созданный на дефолтах и починенный следующим шагом, работает — но кричит о себе на каждом старте"
-module: "stats_module, orchestrator L0"
-mechanism: "config-layers"
+description: "Объект, созданный на дефолтах (defaults) и починенный следующим шагом, работает — но кричит о себе на каждом старте (startup warning)"
+module: [statistics_module]
+mechanism: [config, lifecycle]
 metadata:
   node_type: memory
   type: feedback

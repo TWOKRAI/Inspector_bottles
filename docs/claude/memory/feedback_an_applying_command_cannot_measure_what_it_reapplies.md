@@ -1,8 +1,8 @@
 ---
 name: feedback-an-applying-command-cannot-measure-what-it-reapplies
-description: "Живость такта нельзя мерить второй ПРИМЕНЯЮЩЕЙ командой: reload переустанавливает слои до чтения и подтверждает собственную запись"
-module: "process_module (config.reload)"
-mechanism: "probe-design"
+description: "Живость такта нельзя мерить второй ПРИМЕНЯЮЩЕЙ командой (applying command): reload переустанавливает слои до чтения и подтверждает собственную запись (readback)"
+module: [process_module]
+mechanism: [probes, test-assertions]
 metadata:
   node_type: memory
   type: feedback

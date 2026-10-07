@@ -1,8 +1,8 @@
 ---
 name: feedback_getattr_default_hides_a_phantom_attribute
-description: "getattr(x, 'name', None) на несуществующем имени даёт вечный тихий None: ветка мертва, ошибки нет. Перед удалением или переездом holder/bridge грепнуть все getattr(..., 'имя', None) против определения класса"
-module: "frontend, process_manager_module"
-mechanism: "dead-branch, getattr-default"
+description: "getattr(x, 'name', None) на несуществующем имени (phantom attribute) даёт вечный тихий None: ветка мертва, ошибки нет — перед удалением holder/bridge грепнуть все getattr против класса"
+module: [frontend_module, process_manager_module]
+mechanism: [dead-code, error-handling]
 metadata:
   type: feedback
 ---

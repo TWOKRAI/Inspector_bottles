@@ -1,8 +1,8 @@
 ---
 name: feedback-tool-features-before-validation
-description: Инструменты отладки надо доказывать реальной задачей до наращивания фич — backend_ctl набрал фазы A–F и получил 4.5/10 на ultra-ревью, потом 36 задач hardening на возврат долга
-module: "backend_ctl"
-mechanism: "scope-discipline"
+description: "Инструменты отладки / debug tools надо доказывать реальной задачей до наращивания фич — backend_ctl набрал фазы A–F и получил 4.5/10 на ultra-ревью, потом 36 задач hardening на возврат долга"
+module: [tools/backend_ctl]
+mechanism: [spec-scope]
 metadata:
   type: feedback
 ---

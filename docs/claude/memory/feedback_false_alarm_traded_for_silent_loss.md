@@ -1,8 +1,8 @@
 ---
 name: feedback_false_alarm_traded_for_silent_loss
-description: "Снимая ложную тревогу, проверяй ПОСЛЕДОВАТЕЛЬНОСТЬ действий оператора — иначе шумный дефект меняется на молчаливый"
-module: "observability (sink.disable, config.reload)"
-mechanism: "operator-sequence"
+description: "Снимая ложную тревогу (false alarm), проверяй ПОСЛЕДОВАТЕЛЬНОСТЬ действий оператора (sequence) — иначе шумный дефект меняется на молчаливый (silent loss)"
+module: [channel_routing_module]
+mechanism: [review-verdicts, lifecycle]
 metadata:
   type: feedback
 ---

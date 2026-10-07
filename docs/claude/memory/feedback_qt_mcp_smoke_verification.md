@@ -1,6 +1,7 @@
 ---
 name: feedback-qt-mcp-smoke-verification
-description: После любой задачи, переписывающей Qt-виджет или вкладку, обязательно запускать прототип и делать qt_snapshot — pytest-qt unit-тесты не доказывают что реальная сборка работает
+description: "После любой задачи, переписывающей Qt-виджет или вкладку, обязательно запускать прототип и делать qt_snapshot — pytest-qt unit-тесты не доказывают что реальная сборка работает (smoke, верификация / verification, qt-mcp)"
+mechanism: [qt, live-stand]
 metadata:
   type: feedback
 ---

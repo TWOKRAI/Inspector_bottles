@@ -1,7 +1,8 @@
 ---
 name: feedback-suffix-rename-is-a-blind-injection
-description: "Переименование суффиксом (foo → foo_RENAMED) непригодно как инъекция, если имя вызывается внутри себя: старое остаётся ПРЕФИКСОМ нового и подстрочные сторожа молчат"
-mechanism: "break-injection tooling"
+description: "Переименование суффиксом (foo → foo_RENAMED) непригодно как инъекция / injection, если имя вызывается внутри себя: старое остаётся ПРЕФИКСОМ нового и подстрочные сторожа / guards молчат"
+module: [process_manager_module]
+mechanism: [break-injection, guards]
 metadata:
   node_type: memory
   type: feedback

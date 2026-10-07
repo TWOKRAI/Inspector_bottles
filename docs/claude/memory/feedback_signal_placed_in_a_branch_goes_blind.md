@@ -1,8 +1,8 @@
 ---
 name: feedback-signal-placed-in-a-branch-goes-blind
-description: Сигнал, поставленный в одну ветку вычисления, слепнет, когда решение забирает соседний механизм — ставить на общий путь, где известен фактический результат
-module: "logger_module"
-mechanism: "detector-placement"
+description: "Сигнал / signal, поставленный в одну ветку вычисления, слепнет, когда решение забирает соседний механизм — ставить на общий путь, где известен фактический результат (детектор / detector, ранний выход)"
+module: [logger_module]
+mechanism: [guards]
 metadata:
   type: feedback
 ---

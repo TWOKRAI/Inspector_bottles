@@ -279,6 +279,7 @@ Servers this machine runs (measured 2026-10-05). A subagent sees only the server
 | junior | none |
 | docs-writer | none |
 | ai-judge | none |
+| memory-classifier | none (`tools: Read`) |
 
 New MCP server → decide its row here and add a `mcp__<server>` deny to every role that does not keep it; until then every role sees it.
 A role without a row (`general-purpose`, a new hire) inherits every server, serena included — add its row and deny line before use.
@@ -350,11 +351,15 @@ an entry is a separate `.md` with frontmatter `name`/`description`/`metadata.typ
 Commands: `/core:memory:status`, `:search <query>`, `:remember [lesson]`, `:init` (new project).
 Per-project — not shipped in the seed.
 
-**Subagent memory** (CC ≥2.1.59) adds to, does not replace: agent frontmatter `memory: <scope>` →
-CC injects the role's `MEMORY.md` into the system prompt + Read/Write/Edit. `project` (default for
-dev-write agents, see `memory:` in their frontmatter) → `.claude/agent-memory/<name>/`, under git;
-`local` → `.claude/agent-memory-local/<name>/`, gitignored; `user` → `~/.claude/agent-memory/<name>/`,
-machine-local. Isolated per role (reviewer — review patterns, tester — flaky tests); cross-role
-rules stay in `docs/claude/memory/`.
+**Subagent memory** (Atlas 2.4g, 2026-10-06): no role carries `memory:` any more. One canon for every role —
+`docs/claude/memory/` (role lessons moved there with `role:`); `.claude/agent-memory/<name>/MEMORY.md` is a 3-line
+pointer. Why: `memory: project` cost up to 3 821 input tokens per spawn (probe: cache_creation 8 147 vs 4 326, Haiku, a `tools: Read` agent with and
+without it; the delta includes the Write/Edit schemas `memory:` adds — roles that already hold them pay less, not
+measured) and re-grants Read/Write/Edit whatever `disallowedTools` says. Subagents find lessons with
+`scripts/memory/search.py` and hand new ones up as `MEMORY LESSON` blocks (`project-rules` §8). Frontmatter tags:
+`description:` (RU + EN keywords), `module:` ⊆ `modules.yaml`, `mechanism:` ⊆ `docs/claude/memory/TAGS.yaml`,
+`role:` ⊆ agent stems; checked by `scripts/memory/tags.py --check` inside `scripts/validate.py`.
 
 The capture rail (when to write a lesson) stays in `.claude/CLAUDE.md` → «Memory (OVERRIDE)»: `/core:memory:remember` reads it from there.
+
+Before closing a task: every `MEMORY LESSON` block from agent reports → file in `docs/claude/memory/` (main checkout) → `scripts/memory/tags.py --check` → `docs(memory):` commit (may batch per task).

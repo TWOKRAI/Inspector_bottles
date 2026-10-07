@@ -1,7 +1,7 @@
 ---
 name: feedback_sentrux_depth_opaque
-description: sentrux depth-метрика непрозрачна — не каталоги и не длина цепочки; не гоняться за числом вслепую
-module: "sentrux"
+description: "sentrux depth-метрика / metric непрозрачна — не каталоги и не длина цепочки; не гоняться за числом вслепую"
+mechanism: [dev-tooling, measurement]
 metadata:
   type: feedback
 ---

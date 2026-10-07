@@ -1,6 +1,7 @@
 ---
 name: Agent commit message quality
-description: Developer agents produce poor commit messages — Director must verify/amend
+description: "Developer agents produce poor commit messages — Director must verify/amend (агенты-разработчики пишут сообщения коммитов транслитом; проверять до push)"
+mechanism: [git, agents]
 type: feedback
 originSessionId: 94232869-20f7-4636-b47b-ddae61570b64
 ---

@@ -1,22 +1,3 @@
-# Memory Index
-
-- [F4.8 diff scope mismatch](project_f48_diff_scope_mismatch.md) — run_migration() touches 4 recipe files, owner only approved 2; blocked, not applied
-- [Commit trailer no-wrap](feedback_commit_trailer_no_wrap.md) — outdated as of 2026-07: parser now tolerates Why:/Layer: wrapping (folds as continuation); single-line still recommended
-- [pre-commit stash collision](feedback_precommit_stash_collision.md) — sibling's own note: 2+ agents committing same non-worktree checkout races pre-commit's global stash, can orphan a patch and lose unstaged edits
-- [pre-commit collision recovery](feedback_precommit_collision_recovery.md) — blast radius grows across retries (8x observed); recover with `git show :path > path` (checkout/restore blocked); cap retries at 2-3
-- [parallel commit sweep](feedback_parallel_commit_sweep.md) — staged-but-uncommitted files get swept into a sibling agent's commit when both commit in the same non-worktree checkout
-- [Commit Layer whitelist source](reference_commit_layer_whitelist_source.md) — real ALLOWED_LAYERS lives in scripts/validate_commit/validate_commit.py, not the all-comments .claude/commit-layers.txt
-- [Verify heuristic fix against golden recipes](feedback_verify_heuristic_fix_against_golden_recipes.md) — before "fixing" a blueprint.py join heuristic, run full prototype suite; an audit-flagged issue may be a documented trade-off
-- [Worktree base drift](feedback_worktree_base_drift.md) — assigned worktree can be many commits behind main; verify freshness before trusting referenced plan/review docs
-- [Observability facade extension](project_observability_facade_extension.md) — 4 touchpoints to add a new observability.* toggle; feature_flags.py explicitly excludes logs/stats/commands
-- [Golden snapshot diff before regen](feedback_golden_snapshot_diff_before_regen.md) — write a field-diff script before UPDATE_BUILD_SNAPSHOTS=1; confirm purely additive, don't rubber-stamp
-- [Silent observability plane](project_silent_observability_plane.md) — `_log_*` = тихий no-op без logger; у QueueRegistry/SRM его нет в проде → счётчик растёт, логов ноль
-- [state_store TestLazyPrune flake](project_state_store_lazy_prune_flake.md) — red only inside full 5150-test run, never isolated; pre-existing, unrelated to logger/command_module work
-- [Rename-injection substring trap](feedback_rename_injection_substring_trap.md) — word-boundary regex fixed the prefix trap, not the sibling comment-text trap; sequel 2026-08-18 replaced the guard with AST (`ast.Attribute`)
-- [Orchestrator stub contract S-29](project_orchestrator_stub_contract_s29.md) — 4 new guards via shared helper; provenance_hazards.py's copy folded in too on 2026-08-18 (review forced touching the guard anyway)
-- [Metrics freeze S-27](project_metrics_freeze_s27.md) — ceiling+voice on MetricsCollector; concurrent-voice hazard test unproven by break-injection (TOCTOU too narrow)
-- [Lazy import for LAYER 0 data_schema files](feedback_lazy_import_for_layer0_data_schema_files.md) — core/*.py can't import get_std_logger at module level, verified circular ImportError
-- [Concurrent agent writes outside git index](feedback_concurrent_agent_writes_outside_git_index.md) — sibling agent wrote memory files mid-task in shared checkout; scope final diff to exact paths, not bare `git status`
-- [Ratio criterion bounded by out-of-scope code](feedback_ratio_criterion_bounded_by_out_of_scope_code.md) — before chasing a cost-ratio target, check if zero-cost on your owned side still misses it; Task 2.4 cache math: 11.8% floor vs 10% target, gap is structural
-- [Readback confirms faster than the mechanism reapplies](feedback_readback_confirms_faster_than_the_mechanism_reapplies.md) — Task 2.2: adding a field to IDENTITY_SECTION_KEYS makes `verdict=confirmed` true for the config layer while a once-registered live tap threshold still runs on the old value; check EACH field's own re-application cadence, not the whole section
-- [Windowed-voice throttle collides with sibling tests](feedback_windowed_voice_throttle_collides_with_sibling_tests.md) — Task 2.12: process-wide window makes 2 pre-existing tests (in 2 different files, one fails even standalone) flake red; check neighbors by running together, not just the new file
+Lessons of every role live in docs/claude/memory/ (main checkout); this directory holds no lessons.
+Search: python "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/memory/search.py" <3-5 words>
+New lesson: a MEMORY LESSON <name>.md block in your final report; the lead files it.

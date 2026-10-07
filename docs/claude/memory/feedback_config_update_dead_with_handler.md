@@ -1,8 +1,8 @@
 ---
 name: feedback-config-update-dead-with-handler
-description: update_config был мёртв при живом config_handler — тест строил объект без него и проверял вторую ветку
-module: "process_module (Config.update)"
-mechanism: "test-doubles"
+description: "update_config был мёртв (dead) при живом config_handler — тест строил объект без обработчика и проверял вторую ветку (stub / заглушка маскирует прод)"
+module: [process_module]
+mechanism: [test-doubles, test-assertions]
 metadata:
   type: feedback
 ---

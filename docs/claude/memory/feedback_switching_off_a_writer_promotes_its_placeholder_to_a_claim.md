@@ -1,8 +1,8 @@
 ---
 name: feedback_switching_off_a_writer_promotes_its_placeholder_to_a_claim
-description: Выключив писателя, ты превращаешь каждую его заглушку в утверждение — посев, который никто не перетирает, становится уверенным враньём
-module: "telemetry"
-mechanism: "placeholders"
+description: "Выключив писателя / writer, ты превращаешь каждую его заглушку (placeholder, посев fps=0) в утверждение — посев, который никто не перетирает, становится уверенным враньём; ноль vs None"
+module: [telemetry_readmodel_module]
+mechanism: [config, review-verdicts]
 metadata:
   node_type: memory
   type: feedback

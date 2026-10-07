@@ -1,6 +1,7 @@
 ---
 name: a-new-plan-must-be-placed-among-its-neighbours
-description: A new plan is not done until it is placed among the existing plans of the same area (QUEUE.md + the plans that own adjacent mechanisms) with a two-way link — who owns what, what it takes, what it gives, where the conflict is. Owner's correction 2026-09-22 on gui-service.
+description: "A new plan is not done until it is placed among the existing plans of the same area (QUEUE.md + the plans that own adjacent mechanisms) with a two-way link — who owns what, what it takes, what it gives, where the conflict is. Owner's correction 2026-09-22 on gui-service (новый план: связать с соседними планами)."
+mechanism: [spec-scope, docs]
 metadata:
   type: feedback
   last-verified: 2026-09-22

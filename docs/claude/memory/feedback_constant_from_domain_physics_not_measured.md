@@ -1,8 +1,8 @@
 ---
 name: feedback_constant_from_domain_physics_not_measured
-description: "Границы/пороги, выведенные из физики предметной области, надо сверить с тем, что система эмитит на самом деле, ДО фиксации константы"
-module: "telemetry histograms"
-mechanism: "constants-vs-emission"
+description: "Границы и пороги (thresholds / buckets), выведенные из физики предметной области, надо сверить с тем, что система эмитит на самом деле, ДО фиксации константы — замер на стенде"
+module: [statistics_module]
+mechanism: [measurement, acceptance]
 metadata:
   node_type: memory
   type: feedback

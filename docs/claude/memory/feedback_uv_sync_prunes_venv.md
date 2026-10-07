@@ -1,6 +1,7 @@
 ---
 name: feedback-uv-sync-prunes-venv
-description: uv sync сносит всё, чего нет в pyproject — в этом venv ходить только через --inexact
+description: "uv sync сносит всё, чего нет в pyproject (prunes venv) — в этом venv ходить только через --inexact"
+mechanism: [windows-env]
 metadata:
   type: feedback
 ---

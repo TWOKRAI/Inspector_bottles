@@ -1,8 +1,8 @@
 ---
 name: a-dedup-marker-is-an-assertion-about-someone-else
-description: Маркер «эту запись уже сохранил другой» ставится безусловно и становится ложным, когда другого нет
-module: "logger_module, error_module"
-mechanism: "dedup"
+description: "Маркер дедупликации (dedup marker) «эту запись уже сохранил другой» ставится безусловно и становится ложным, когда другого нет — инцидент теряется"
+module: [logger_module, error_module]
+mechanism: [architecture, error-handling]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback-materialized-default-hides-absence
-description: Машинная раскладка материализует дефолт схемы — «ключ не задан» перестаёт быть выразимым, и проверка на пустоту ключа чинит ноль
-module: "config_module"
-mechanism: "schema-defaults"
+description: "Машинная раскладка материализует дефолт схемы (materialized default) — «ключ не задан» перестаёт быть выразимым, и проверка на пустоту ключа (absence) чинит ноль"
+module: [config_module]
+mechanism: [config]
 metadata:
   type: feedback
 ---

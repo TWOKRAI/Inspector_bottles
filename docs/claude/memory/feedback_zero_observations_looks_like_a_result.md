@@ -1,8 +1,8 @@
 ---
 name: feedback-zero-observations-looks-like-a-result
-description: "Ноль наблюдений неотличим от результата наблюдения — сторож обязан требовать НЕнулевой знаменатель, а не только нулевой числитель; также: Ноль у детектора ничего не значит, пока детектор не показан стреляющим — иначе тишина поломки неотличима от тишины исправности"
+description: "Ноль наблюдений / zero observations неотличим от результата — сторож (detector) обязан требовать НЕнулевой знаменатель; ноль у детектора ничего не значит, пока детектор не показан стреляющим"
+mechanism: [measurement, guards]
 merged_from: [feedback_silent_detector_proves_nothing]
-mechanism: "detectors, measurement"
 metadata:
   node_type: memory
   type: feedback

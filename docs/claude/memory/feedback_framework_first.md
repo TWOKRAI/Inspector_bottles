@@ -1,6 +1,7 @@
 ---
 name: Framework-first decision rule
-description: "Framework = powerful/universal (contract + impls, get it right once); prototype = disposable (thin consumer). When in doubt optimize the FRAMEWORK, not prototype convenience.; также: Everything must be modular constructor + RUNTIME FAULT ISOLATION — one module/process/worker/plugin failing must not break siblings (blast-radius containment); Owner principle — fewer layers/indirections at the SAME functionality is strictly better; Framework bugs — authorized to fix when blocking; changes must IMPROVE, not delete functionality (fix-forward, don't gut); Владелец предпочитает FREEZE, а не KILL для мёртвого/дремлющего кода — не удалять, замораживать"
+description: "Правило владельца (owner rule): framework — мощный и универсальный, prototype — одноразовый тонкий потребитель; конструктор модулей и изоляция сбоев (fault isolation), меньше слоёв (fewer layers), fix-forward, FREEZE вместо KILL"
+mechanism: [owner-decision, architecture]
 merged_from: [feedback_constructor_modularity, feedback_fewer_layers, feedback_fix_framework_forward, feedback_freeze_over_kill]
 metadata:
   type: feedback

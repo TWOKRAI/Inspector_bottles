@@ -1,8 +1,8 @@
 ---
 name: feedback-side-effect-must-not-undo-the-transaction
-description: Побочный эффект на success-пути транзакции обязан быть в своём try — иначе наблюдаемость откатывает успешный switch
-module: "recipe/orchestrator (switch)"
-mechanism: "transactions"
+description: "Побочный эффект / side effect на success-пути транзакции обязан быть в своём try — иначе наблюдаемость откатывает успешный switch (rollback)"
+module: [recipe]
+mechanism: [error-handling]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback-test-reddens-only-under-a-paired-injection
-description: "Тест, переживший ОДИНОЧНУЮ инъекцию, не обязательно вакуумен — он может сторожить композицию и краснеть только от пары изломов; также: Когда свойство держат два независимых предохранителя, тест сторожит совпадение — снимай второй в стенде"
+description: "Тест, переживший ОДИНОЧНУЮ инъекцию / injection, не обязательно вакуумен — он может сторожить композицию (два предохранителя / safeguards) и краснеть только от пары изломов"
+mechanism: [break-injection, test-assertions]
 merged_from: [feedback_two_safeguards_hide_which_one_holds]
-mechanism: "break-injection"
 metadata:
   type: feedback
 ---

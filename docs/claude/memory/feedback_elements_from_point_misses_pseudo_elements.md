@@ -1,8 +1,7 @@
 ---
 name: feedback_elements_from_point_misses_pseudo_elements
-description: "Артефакт на стенде страницы списан на курсор: elementsFromPoint вернул BODY, а рисовал псевдоэлемент ::details-content закрытого <details> — ответ «элемента нет» не опровергает артефакт"
-mechanism: "browser stand, CSS pseudo-elements"
-module: plans_progress
+description: "Артефакт на стенде страницы (browser stand) списан на курсор: elementsFromPoint вернул BODY, а рисовал псевдоэлемент ::details-content закрытого details — ответ «элемента нет» не опровергает артефакт"
+mechanism: [live-stand, probes]
 metadata:
   node_type: memory
   type: feedback

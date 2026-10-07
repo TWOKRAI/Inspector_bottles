@@ -1,7 +1,7 @@
 ---
 name: project-venv-locked-by-mcp
-description: MCP backend_ctl держит numpy .pyd; Claude Code респавнит его — kill по PID гонку не выигрывает
-module: "venv, backend_ctl MCP, windows"
+description: "MCP backend_ctl держит numpy .pyd; Claude Code респавнит его — kill по PID гонку не выигрывает / venv file locked, package reinstall, os error 32"
+mechanism: [windows-env]
 metadata:
   type: project
 ---

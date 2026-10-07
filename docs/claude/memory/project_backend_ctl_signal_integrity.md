@@ -1,9 +1,9 @@
 ---
 name: project-backend-ctl-signal-integrity
-description: "У backend_ctl была системная болезнь — сигнал не связан с реальностью (ложный success, ложный timeout, ложный ноль); 2026-07-21 починено, 14 красных тестов -> 2; также: Строгий край protocol.py — контракт missing/None у типизированных обёрток backend_ctl; отсутствие ключа, ноль от сервера и явный null — три РАЗНЫХ факта"
+description: "У backend_ctl была системная болезнь — сигнал / signal не связан с реальностью (ложный success, ложный timeout, ложный ноль); починено 2026-07-21; строгий край protocol.py: missing/None/ноль/null — три разных факта"
+module: [tools/backend_ctl]
+mechanism: [review-verdicts, measurement]
 merged_from: [project_backend_ctl_missing_contract]
-module: "backend_ctl"
-mechanism: "false-signal"
 metadata:
   node_type: memory
   type: project

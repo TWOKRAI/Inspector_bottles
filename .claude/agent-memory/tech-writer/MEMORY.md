@@ -1,5 +1,3 @@
-# Memory Index
-
-- [Commit trailers — одной строкой](feedback_commit_trailers_single_line.md) — Why/Layer и др. trailers должны быть каждый ровно одной физической строкой, иначе commit-msg hook их не увидит
-- [Перепроверять бриф до документирования](feedback_verify_briefs_before_documenting.md) — даже лично проверенный координатором механизм трассировать самому по коду; расхождение называть прямо, не сглаживать
-- [Dual-write память может разойтись](feedback_dual_write_memory_can_drift.md) — docs/claude/memory/ и локальный MEMORY.md бывают разной длины при одинаковом хвосте; вставлять по anchor, не по номеру строки
+Lessons of every role live in docs/claude/memory/ (main checkout); this directory holds no lessons.
+Search: python "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/memory/search.py" <3-5 words>
+New lesson: a MEMORY LESSON <name>.md block in your final report; the lead files it.

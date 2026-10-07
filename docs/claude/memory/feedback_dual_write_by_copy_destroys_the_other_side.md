@@ -1,6 +1,7 @@
 ---
 name: feedback-dual-write-by-copy-destroys-the-other-side
-description: Dual-write памяти через `cp` затирает вторую копию целиком — копии расходятся в ОБЕ стороны, поэтому перед копированием обязателен diff, а правка идёт в обе копии отдельно
+description: "Dual-write памяти (memory) через cp затирает вторую копию целиком — копии расходятся в ОБЕ стороны, поэтому перед копированием обязателен diff, а правка идёт в обе копии отдельно"
+mechanism: [docs, agents]
 metadata:
   type: feedback
 ---

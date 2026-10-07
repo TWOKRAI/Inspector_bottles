@@ -1,8 +1,8 @@
 ---
 name: feedback-duplicate-fixture-verifies-itself
-description: Приватная копия общей фикстуры перестаёт проверять контракт и начинает проверять саму себя — расхождение приходит молча и живёт красным
-module: "backend_ctl tests (conftest)"
-mechanism: "fixtures"
+description: "Приватная копия общей фикстуры (fixture) перестаёт проверять контракт и начинает проверять саму себя — расхождение приходит молча и живёт красным (conftest)"
+module: [tools/backend_ctl]
+mechanism: [fixtures]
 metadata:
   type: feedback
 ---

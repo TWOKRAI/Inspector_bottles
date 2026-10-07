@@ -1,9 +1,8 @@
 ---
 name: feedback-qex-full-rebuild-runbook
-description: "Как запускать полный реиндекс qex на Windows без провалов — Ollama вне харнесса, тег -qex, reindex_progress с PYTHONUTF8, проверки до и после; 2026-10-01 первый прогон убит собственным лимитом на 94%; также: Таймауты переиндексации qex — это выгрузка эмбеддера из 4 ГБ VRAM; лечится keep_alive=-1, а не ожиданием; qex-переиндексация падает по таймауту эмбеддингов — ручки нет, лечится циклом повторов; свежесть судить по last_indexed, а не по «indexed: true»"
+description: "Как запускать полный реиндекс qex на Windows без провалов — Ollama вне харнесса, тег -qex, reindex_progress с PYTHONUTF8, проверки до и после; таймауты переиндексации, keep_alive, свежесть индекса по last_indexed (runbook, reindex, timeout, embedder)"
+mechanism: [dev-tooling, windows-env]
 merged_from: [feedback_qex_reindex_budget, project_qex_reindex_timeout]
-module: "qex"
-mechanism: "runbook"
 metadata:
   type: feedback
 ---

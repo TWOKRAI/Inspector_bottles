@@ -1,7 +1,7 @@
 ---
 name: feedback-agent-resume-ghost
-description: Реанимация обор­ванного агента через SendMessage может создать ДВА инстанса — оригинал иногда оживает; проверять mtime зоны перед resume
-mechanism: "agents, SendMessage"
+description: "Реанимация оборванного агента (resume) через SendMessage может создать ДВА инстанса — оригинал иногда оживает; проверять mtime зоны перед resume"
+mechanism: [agents]
 metadata:
   node_type: memory
   type: feedback

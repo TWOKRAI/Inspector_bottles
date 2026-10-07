@@ -1,6 +1,8 @@
 ---
 name: feedback-pipeline-reuse-plugins-widgets
-description: Pipeline node inspector must reuse Plugins-tab per-plugin config widgets (DRY), resolve fields by plugin_name
+description: "Pipeline node inspector must reuse Plugins-tab per-plugin config widgets (DRY), resolve fields by plugin_name (директива владельца: переиспользовать виджеты плагинов)"
+module: [prototype/frontend/widgets/tabs/pipeline]
+mechanism: [owner-decision, qt]
 metadata:
   type: feedback
 ---

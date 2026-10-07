@@ -1,6 +1,7 @@
 ---
 name: formal-review-before-merge
-description: "Merge в main блокируется классификатором, пока в транскрипте нет ОФОРМЛЕННОГО ревью — гонять /code-review (finders → verify → ReportFindings), а не неформальные проверки"
+description: "Merge в main блокируется классификатором (classifier), пока в транскрипте нет ОФОРМЛЕННОГО ревью (formal review) — гонять /code-review (finders → verify → ReportFindings), а не неформальные проверки"
+mechanism: [hooks, agents]
 metadata:
   node_type: memory
   type: feedback

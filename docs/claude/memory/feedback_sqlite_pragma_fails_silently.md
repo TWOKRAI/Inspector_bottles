@@ -1,9 +1,9 @@
 ---
 name: feedback-sqlite-pragma-fails-silently
-description: "Два способа, которыми PRAGMA в sqlite3 не срабатывает МОЛЧА — неверный порядок и недошагнутый оператор; также: Операция, исполняемая шагами, требует вычерпывания курсора: штатный вызов делает ОДИН шаг и молчит об остальных"
+description: "Два способа, которыми PRAGMA в sqlite3 не срабатывает МОЛЧА (silently) — неверный порядок и недошагнутый оператор (курсор / cursor fetchall); читать обратно и проверять измеримый итог"
+module: [services/sql]
+mechanism: [persistence, error-handling]
 merged_from: [feedback_stepwise_statement_needs_draining]
-module: "Services/sql, observability store"
-mechanism: "sqlite"
 metadata:
   type: feedback
 ---

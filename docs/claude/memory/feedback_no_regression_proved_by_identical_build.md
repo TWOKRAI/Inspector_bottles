@@ -1,7 +1,7 @@
 ---
 name: feedback-no-regression-proved-by-identical-build
-description: «Не деградировало» доказывается идентичностью сборки ключ-в-ключ, а не сравнением двух шумных прогонов
-mechanism: "acceptance-proof"
+description: "«Не деградировало» доказывается идентичностью сборки ключ-в-ключ, а не сравнением двух шумных прогонов (регрессия / regression, build snapshot, proc_dict diff)"
+mechanism: [probes]
 metadata:
   type: feedback
 ---

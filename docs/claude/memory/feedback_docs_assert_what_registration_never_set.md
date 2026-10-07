@@ -1,8 +1,8 @@
 ---
 name: feedback-docs-assert-what-registration-never-set
-description: Три докстринга утверждали, что воркер SYSTEM и потому не паузится, а создавался он без типа — оба предохранителя стояли на одной непроверенной вере
-module: "worker_module (heartbeat_sender, worker_type)"
-mechanism: "docs-vs-code"
+description: "Три докстринга (docstrings) утверждали, что воркер (worker) SYSTEM и потому не паузится, а создавался он без типа — оба предохранителя стояли на одной непроверенной вере; тест на наблюдаемый эффект"
+module: [worker_module]
+mechanism: [docs, test-assertions]
 metadata:
   type: feedback
 ---

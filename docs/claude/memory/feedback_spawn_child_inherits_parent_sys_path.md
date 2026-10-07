@@ -1,8 +1,8 @@
 ---
 name: spawn-child-inherits-parent-sys-path
-description: multiprocessing spawn copies the PARENT's sys.path into the child (preparation data) — setting PYTHONPATH inside pytest does not reach child processes; a "run without package X" injection must also touch sys.path of the parent
-module: "process_module (SystemLauncher/BackendHarness)"
-mechanism: "spawn"
+description: "multiprocessing spawn copies the PARENT's sys.path into the child (preparation data) — PYTHONPATH внутри pytest не доходит до дочерних процессов; инъекция «без пакета X» должна менять sys.path родителя"
+module: [process_module]
+mechanism: [lifecycle, break-injection]
 metadata:
   type: feedback
 ---
