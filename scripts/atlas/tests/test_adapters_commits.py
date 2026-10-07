@@ -3,7 +3,9 @@
 Purpose: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_*, COMMIT_WITHOUT_DONE и REF_* на
     временных репозиториях и на реальном checkout (пины 4aee917c6, 712ce64a1, a5ae9657a); запрос ядра про
     модули без узла. Правки 1.3c: левая граница токена Refs (О10), служебные имена не планы (О11),
-    трейлеры ВСЕХ коммитов-предков без слияний (трейлеры слияний игнорируются).
+    трейлеры ВСЕХ коммитов-предков без слияний (трейлеры слияний игнорируются). Правки 1.3c раунд 2: узел commit
+    у каждого коммита без слияний с трейлером Refs:/Task: (у каждого ребра и находки есть узел-источник);
+    константа служебных имён `_SERVICE_NAMES` и `_is_service_name` в адаптере (без импорта plans_progress).
 Public API: тесты test_*; публичных имён нет.
 Stability: lite
 
@@ -15,9 +17,11 @@ Stability: lite
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -403,7 +407,7 @@ def _assert_task_findings_missing(doc: dict[str, Any]) -> None:
 def test_pinned_counts_on_this_checkout(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     doc = _real_doc(atlas, monkeypatch, tmp_path)
     counts = {kind: len(_ids(doc, kind)) for kind in ("commit", "module", "plan", "task")}
-    assert counts == {"commit": 2229, "module": 87, "plan": 148, "task": 1240}
+    assert counts == {"commit": 4580, "module": 87, "plan": 148, "task": 1240}
     edge_counts = {kind: len(_edges(doc, kind)) for kind in ("refs", "implements", "touches", "done_by")}
     assert edge_counts == {"refs": 4053, "implements": 145, "touches": 5152, "done_by": 312}
     assert sum(1 for _, dst, _ in _edges(doc, "touches") if dst == "module:other") == 2002
@@ -814,7 +818,7 @@ def test_done_hash_messages_name_the_reason(repo_factory: RepoFactory, atlas: An
 def test_ref_findings_pinned_on_origin_main(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     doc = _real_doc(atlas, monkeypatch, tmp_path, _PIN_FULL)
     assert {kind: len(_ids(doc, kind)) for kind in ("commit", "module", "plan", "task")} == {
-        "commit": 2235,
+        "commit": 4603,
         "module": 87,
         "plan": 148,
         "task": 1242,
@@ -907,20 +911,39 @@ def test_task_service_names_are_not_plans(repo_factory: RepoFactory, atlas: Any)
     repo.write("plans/queue/x.md", one)
     repo.write("plans/_archive/README.md", "# archive index\n")
     repo.write("plans/2026-09-01_old/plan.md", one)
+    repo.write("plans/.hidden/plan.md", one)  # точечное имя записи — служебное
+    repo.write("plans/old.result-1.1.md", "# result\n")  # итог задачи — не план
     repo.commit("plans")
+    assert repo.git("ls-tree", "--name-only", "HEAD", "plans/").splitlines().count("plans/.hidden") == 1
+    assert repo.git("ls-tree", "--name-only", "HEAD", "plans/").splitlines().count("plans/old.result-1.1.md") == 1
     shas: dict[str, str] = {}
     for n, (key, slug) in enumerate(
-        (("README", "README"), ("QUEUE", "QUEUE"), ("queue", "queue"), ("archive", "_archive"), ("old", "old"))
+        (
+            ("README", "README"),
+            ("QUEUE", "QUEUE"),
+            ("queue", "queue"),
+            ("archive", "_archive"),
+            ("old", "old"),
+            ("hidden", ".hidden"),
+            ("result", "old.result-1.1"),
+        )
     ):
         repo.write("f.txt", f"{n}\n")
         shas[key] = repo.commit(_msg(f"feat: {key}", f"Task: {slug}#1.1"))
-    repo.git("rm", "-q", "-r", "plans/2026-09-01_old")
+    repo.git("rm", "-q", "-r", "plans/2026-09-01_old", "plans/.hidden", "plans/old.result-1.1.md")
     repo.commit("R remove old")
 
     doc = _doc(repo, atlas, "main")
     expected = [
         ("REF_TO_MISSING", "blocking", f"commit:{shas[key]}", f"{slug}#1.1", shas[key], _PLAN_GONE.format(slug))
-        for key, slug in (("README", "README"), ("QUEUE", "QUEUE"), ("queue", "queue"), ("archive", "_archive"))
+        for key, slug in (
+            ("README", "README"),
+            ("QUEUE", "QUEUE"),
+            ("queue", "queue"),
+            ("archive", "_archive"),
+            ("hidden", ".hidden"),
+            ("result", "old.result-1.1"),
+        )
     ]
     expected.append(("REF_MOVED", "info", f"commit:{shas['old']}", "old#1.1", shas["old"], _PLAN_MOVED.format("old")))
     assert _ref_findings(doc) == sorted(expected)
@@ -939,7 +962,8 @@ def test_trailers_of_non_merge_ancestors_only(repo_factory: RepoFactory, atlas: 
     assert len(repo.git("rev-list", "--parents", "-n", "1", m).split()) == 3  # M — слияние (2 родителя)
 
     doc = _doc(repo, atlas, "main", "main")
-    assert s not in _ids(doc, "commit")  # узел commit по-прежнему только first-parent
+    assert s in _ids(doc, "commit")  # коммит с трейлером вне прежнего набора получает узел (1.3c р.2)
+    assert m in _ids(doc, "commit")  # слияние на first-parent: узел как прежний набор, но без рёбер
     assert _edges(doc, "implements") == [(f"commit:{s}", "task:alpha#1.1", "trailer:Task")]
     assert _edges(doc, "refs") == [(f"commit:{s}", "plan:typo", "trailer:Refs")]
     assert _ref_findings(doc) == [
@@ -974,7 +998,9 @@ def test_fast_forward_onto_merge_main_into_branch_keeps_side_trailers(repo_facto
     assert m1 not in first_parent  # оракул: m1 остался на втором родителе Mf
 
     doc = _doc(repo, atlas, "main", "main")
-    assert m1 not in _ids(doc, "commit")
+    assert m1 in _ids(doc, "commit")  # трейлерный коммит вне first-parent получает узел (1.3c р.2)
+    assert mf in _ids(doc, "commit")  # слияние на first-parent: узел есть, рёбер refs/implements нет
+    assert f2 in _ids(doc, "commit")
     assert _edges(doc, "implements") == sorted(
         [
             (f"commit:{m1}", "task:alpha#1.2", "trailer:Task"),
@@ -1002,7 +1028,7 @@ def test_fast_forward_onto_merge_main_into_branch_keeps_side_trailers(repo_facto
 def test_pinned_on_a5ae9657a(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     doc = _real_doc(atlas, monkeypatch, tmp_path, _PIN_A5)
     assert {kind: len(_ids(doc, kind)) for kind in ("commit", "module", "plan", "task")} == {
-        "commit": 2251,
+        "commit": 4656,
         "module": 87,
         "plan": 148,
         "task": 1242,
@@ -1071,7 +1097,8 @@ def test_pinned_on_a5ae9657a(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_pa
                 oracle.add((sha.strip(), value))
     implements = _edges(doc, "implements")
     assert len(implements) == len(oracle) == 176
-    assert sum(1 for sha, _ in oracle if sha not in first_parent) > 100
+    assert sum(1 for sha, _ in oracle if sha not in first_parent) == 176
+    assert len(implements) == 176
 
 
 def test_commits_adapter_version_is_bumped() -> None:
@@ -1080,3 +1107,100 @@ def test_commits_adapter_version_is_bumped() -> None:
 
     assert CommitsAdapter().version >> 48 == 3
     assert PlansAdapter().version >> 48 == 1
+
+
+_NODE_COUNTS = [
+    (_PIN, 4580),
+    (_PIN_FULL, 4603),
+    (_PIN_A5, 4656),
+]
+
+
+@pytest.mark.parametrize(("pin", "expected_nodes"), _NODE_COUNTS)
+def test_every_ref_edge_and_finding_has_a_commit_node(
+    atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pin: str, expected_nodes: int
+) -> None:
+    doc = _real_doc(atlas, monkeypatch, tmp_path, pin)
+    node_ids = set(_ids(doc, "commit"))
+    assert len(node_ids) == expected_nodes
+    ref_edges = _edges(doc, "refs") + _edges(doc, "implements")
+    assert len(ref_edges) > 100  # предусловие осмысленности: рёбра-источники вообще есть
+    assert [src for src, _, _ in ref_edges if src.removeprefix("commit:") not in node_ids] == []
+    ref_findings = [f for f in doc["findings"] if f["code"] in _REF_CODES]
+    assert len(ref_findings) > 100
+    assert [f["node"] for f in ref_findings if f["node"].removeprefix("commit:") not in node_ids] == []
+
+
+def test_commit_nodes_for_trailer_commits_on_temp_repo(repo_factory: RepoFactory, atlas: Any) -> None:
+    repo = _new_repo(repo_factory, "trailer_nodes")
+    repo.write(_PLAN_ALPHA, _plan("1.1: first [PENDING]"))
+    m0 = repo.commit("m0")
+    repo.git("checkout", "-q", "-b", "side")
+    repo.write("s.txt", "1\n")
+    s1 = repo.commit(_msg("feat: s1", "Task: alpha#1.1"))
+    repo.write("s.txt", "2\n")
+    s2 = repo.commit(_msg("feat: s2", "Refs: docs/x.md"))
+    repo.write("s.txt", "3\n")
+    s3 = repo.commit("feat: s3")
+    repo.git("checkout", "-q", "main")
+    repo.git("merge", "-q", "--no-ff", "-m", _msg("Merge side", "Refs: plans/typo.md"), "side")
+    mg = repo.head
+    assert repo.git("rev-list", "--first-parent", "main").split() == [mg, m0]
+
+    doc = _doc(repo, atlas, "main", "main")
+    ids = set(_ids(doc, "commit"))
+    assert {s1, s2, mg, m0} <= ids
+    assert s3 not in ids  # нет трейлера и вне прежнего набора
+    for src, _, _ in _edges(doc, "refs") + _edges(doc, "implements"):
+        assert src.removeprefix("commit:") in ids
+    assert _edges(doc, "implements") == [(f"commit:{s1}", "task:alpha#1.1", "trailer:Task")]
+    assert _edges(doc, "refs") == []  # у S2 значение вне plans/, трейлеры слияния Mg не читаются
+    assert _edges(doc, "touches", f"commit:{s1}") == []
+    node_s1 = next(n for n in doc["nodes"] if n["kind"] == "commit" and n["id"] == s1)
+    assert node_s1["path"] is None
+    assert node_s1["status"] is None
+    assert node_s1["time"] == int(repo.git("log", "-1", "--format=%ct", s1))
+
+
+def _load_plans_progress() -> Any:
+    path = _ROOT / "scripts" / "plans_progress" / "plans_progress.py"
+    name = "_atlas_test_plans_progress"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def test_service_name_constant_matches_plans_progress() -> None:
+    from scripts.atlas.adapters import commits
+
+    plans_progress = _load_plans_progress()
+    listing = GitRepo(_ROOT).git("ls-tree", "--name-only", "HEAD", "plans/", "plans/_archive/")
+    names = {line.rsplit("/", 1)[-1] for line in listing.splitlines() if line}
+    names |= {
+        ".hidden",
+        "x.result-1.1.md",
+        "a.result-.md",
+        "result-1.md",
+        "Readme.md",
+        "readme.md",
+        "queue",
+        "queues",
+        "_archive",
+        "QUEUE.md",
+        "plan.md",
+        "2026-10-01_alpha",
+        "README.md",
+    }
+    assert {"README.md", "QUEUE.md", "queue", "_archive"} <= names
+    for name in sorted(names):
+        assert commits._is_service_name(name) == plans_progress.is_service_name(name), name
+    from_clone = [n for n in names if commits._is_service_name(n)]
+    assert len(set(from_clone) & {"README.md", "QUEUE.md", "queue", "_archive"}) == 4
+    assert commits._SERVICE_NAMES == {"queue", "_archive", "QUEUE.md", "README.md"}
