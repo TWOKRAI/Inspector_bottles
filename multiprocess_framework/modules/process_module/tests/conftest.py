@@ -1,7 +1,36 @@
-"""Pytest: PYTHONPATH к каталогу modules + корень проекта, плюс снимок реестра объявлений."""
+"""Pytest: PYTHONPATH к каталогу modules + корень проекта, снимок реестра объявлений, возврат заморозки gc."""
 
+import gc
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+
+
+@contextmanager
+def freeze_restored():
+    """Блок, после которого заморозка gc возвращена к той, что была до него.
+
+    Зачем: тесты механизма заморозки (и выход ``suspend_collection_owner``, когда сессионный
+    владелец морозил) зовут ``gc.unfreeze()``. Он глобален: все permanent-объекты процесса
+    pytest (сессионная заморозка границы, сотни тысяч объектов) уходят в старшее поколение, и
+    следующая граница теста обходит всю кучу — пауза 170–280 мс на тест.
+
+    Выборочно разморозить нельзя, поэтому на выходе, если ``gc.get_freeze_count()`` изменился:
+    ``gc.unfreeze()`` → ``gc.collect(1)`` (только молодые поколения: мусор блока не уходит в
+    permanent, полной сборки нет) → ``gc.freeze()`` при ``n0 > 0``. ``n0 == 0`` (файл гоняют
+    одиночно, сессионной заморозки нет) — прежнее поведение: только ``gc.unfreeze()``.
+    Мусор, который блок сам успел заморозить, ``collect(1)`` не достаёт (он в старшем поколении).
+    """
+    n0 = gc.get_freeze_count()
+    try:
+        yield
+    finally:
+        if gc.get_freeze_count() != n0:
+            gc.unfreeze()
+            gc.collect(1)
+            if n0 > 0:
+                gc.freeze()
+
 
 _modules = Path(__file__).resolve().parent.parent.parent
 _root = _modules.parent.parent
@@ -41,3 +70,20 @@ def declarations_snapshot():
     state = snapshot()
     yield
     restore(state)
+
+
+@pytest.fixture
+def gc_freeze_restored():
+    """Тест (и фикстуры, зависящие от этой) внутри ``freeze_restored()`` — см. его docstring.
+
+    Фикстуры со ``suspend_collection_owner`` зависят от этой: выход suspend сам зовёт
+    ``gc.unfreeze()`` (``_rearm`` морозившего владельца), и восстановление должно идти ПОСЛЕ него.
+    """
+    with freeze_restored():
+        yield
+
+
+@pytest.fixture
+def freeze_restore_block():
+    """Сам контекст-менеджер ``freeze_restored`` — для тестов на него (без импорта conftest)."""
+    return freeze_restored
