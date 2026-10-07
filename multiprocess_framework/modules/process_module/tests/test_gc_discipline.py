@@ -13,22 +13,20 @@ import pytest
 
 from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (
     GcDiscipline,
-    suspend_collection_owner,
 )
 
 
 @pytest.fixture(autouse=True)
-def _slot_is_free_for_the_test(gc_freeze_restored):
+def _slot_is_free_for_the_test(gc_slot_suspended):
     """Слот сессионного владельца сборки освобождён на тест; на выходе владелец и его gc-режим возвращены.
 
     Тесты ниже сами включают и выключают автосборку через ``GcDiscipline``: пока слот занят политикой
-    сессии, это нарушение владения. ``suspend_collection_owner`` отдаёт слот тесту и сам возвращает
-    состояние gc, поэтому тесту не нужен ``gc.enable()`` в ``finally``. Заморозку (свою из
-    ``freeze_after_startup`` и сессионную, которую снимает выход suspend) возвращает
-    ``gc_freeze_restored`` снаружи — тесту не нужен ``gc.unfreeze()`` в ``finally``.
+    сессии, это нарушение владения. ``suspend_collection_owner`` (внутри ``gc_slot_suspended``) отдаёт
+    слот тесту и сам возвращает состояние gc, поэтому тесту не нужен ``gc.enable()`` в ``finally``.
+    Заморозку (свою из ``freeze_after_startup`` и сессионную, которую снимает выход suspend)
+    ``gc_slot_suspended`` возвращает снаружи suspend — тесту не нужен ``gc.unfreeze()`` в ``finally``.
     """
-    with suspend_collection_owner():
-        yield
+    yield
 
 
 class TestFreeze:
@@ -40,7 +38,7 @@ class TestFreeze:
     def test_freezes_with_flag(self, monkeypatch):
         monkeypatch.setenv("FW_GC_FREEZE", "1")
         monkeypatch.delenv("FW_GC_SCHEDULED", raising=False)
-        # заморозку теста снимает gc_freeze_restored (через autouse-фикстуру слота)
+        # заморозку теста снимает gc_slot_suspended (через autouse-фикстуру слота)
         d = GcDiscipline()
         assert d.freeze_after_startup() is True
         # startup-объекты переехали в permanent-поколение (не сканируются далее).

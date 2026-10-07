@@ -14,6 +14,8 @@ import gc
 
 import pytest
 
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import collection_owner
+
 
 def _tracked(obj) -> bool:
     """``obj`` в поколениях 0..2 (то есть НЕ заморожен)."""
@@ -54,7 +56,9 @@ def test_restore_does_not_unfreeze_session_heap(freeze_restore_block):
 
 def test_restore_without_baseline_freeze_only_unfreezes(freeze_restore_block):
     with freeze_restore_block():
-        gc.unfreeze()  # одиночный прогон файла: сессионной заморозки нет
+        # Искусственное состояние: на практике счётчик не ноль (старт интерпретатора уже даёт
+        # permanent-объекты, в сессии морозит граница). Ветку n0 == 0 проверяет только этот тест.
+        gc.unfreeze()
         assert gc.get_freeze_count() == 0
         with freeze_restore_block():
             gc.freeze()
@@ -71,3 +75,39 @@ def test_restore_runs_when_block_raises(freeze_restore_block):
                 gc.unfreeze()
                 raise RuntimeError("тело упало")
         assert _tracked(session_obj) is False
+
+
+def test_restore_collects_only_young_generations(freeze_restore_block):
+    """Выход помощника — без полной сборки: полная и есть та пауза 170–280 мс, которую он убирает."""
+    gens: list[int] = []
+
+    def on_gc(phase: str, info: dict) -> None:
+        if phase == "start":
+            gens.append(info["generation"])
+
+    with freeze_restore_block():
+        gc.freeze()
+        try:
+            with freeze_restore_block():
+                gc.unfreeze()  # счётчик изменился → путь восстановления
+                gc.callbacks.append(on_gc)
+        finally:
+            if on_gc in gc.callbacks:
+                gc.callbacks.remove(on_gc)
+    assert gens == [1]
+
+
+def test_slot_block_restores_freeze_after_live_owner_suspend_exit(slot_suspended_block):
+    """Живой сессионный владелец морозил → выход suspend сам зовёт gc.unfreeze(); связка возвращает заморозку.
+
+    Обратная вложенность (возврат заморозки ВНУТРИ suspend) оставляет кучу размороженной.
+    """
+    owner = collection_owner()
+    assert owner is not None  # владелец сессии из корневого conftest
+    sentinel = [[]]
+    owner.collect(full=True, refreeze=True)  # как граница теста: полная сборка + gc.freeze()
+    assert _tracked(sentinel) is False
+    with slot_suspended_block():
+        pass
+    assert _tracked(sentinel) is False
+    assert gc.get_freeze_count() > 0

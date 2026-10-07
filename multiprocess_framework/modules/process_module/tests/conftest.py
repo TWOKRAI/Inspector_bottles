@@ -17,8 +17,12 @@ def freeze_restored():
 
     Выборочно разморозить нельзя, поэтому на выходе, если ``gc.get_freeze_count()`` изменился:
     ``gc.unfreeze()`` → ``gc.collect(1)`` (только молодые поколения: мусор блока не уходит в
-    permanent, полной сборки нет) → ``gc.freeze()`` при ``n0 > 0``. ``n0 == 0`` (файл гоняют
-    одиночно, сессионной заморозки нет) — прежнее поведение: только ``gc.unfreeze()``.
+    permanent, полной сборки нет) → ``gc.freeze()`` при ``n0 > 0``.
+
+    ``n0 == 0`` на практике не бывает: уже старт интерпретатора даёт ненулевой счётчик (377 под
+    ``python -I -S``), а в сессии pytest кучу морозит граница теста. Ноль достижим только после
+    явного ``gc.unfreeze()`` до блока; тогда — только ``gc.unfreeze()`` без повторной заморозки.
+    Эту ветку проверяет один тест в искусственно размороженном состоянии.
     Мусор, который блок сам успел заморозить, ``collect(1)`` не достаёт (он в старшем поколении).
     """
     n0 = gc.get_freeze_count()
@@ -48,6 +52,9 @@ from multiprocess_framework.modules.observability_declarations import (  # noqa:
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (  # noqa: E402
     ensure_framework_producers,
 )
+from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (  # noqa: E402
+    suspend_collection_owner,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -72,14 +79,25 @@ def declarations_snapshot():
     restore(state)
 
 
-@pytest.fixture
-def gc_freeze_restored():
-    """Тест (и фикстуры, зависящие от этой) внутри ``freeze_restored()`` — см. его docstring.
+@contextmanager
+def slot_suspended_freeze_restored():
+    """Слот владельца сборки освобождён на блок; заморозка gc возвращена ПОСЛЕ выхода suspend.
 
-    Фикстуры со ``suspend_collection_owner`` зависят от этой: выход suspend сам зовёт
-    ``gc.unfreeze()`` (``_rearm`` морозившего владельца), и восстановление должно идти ПОСЛЕ него.
+    Порядок зафиксирован здесь, в одном месте: выход ``suspend_collection_owner`` сам зовёт
+    ``gc.unfreeze()`` (``_rearm`` морозившего сессионного владельца), поэтому ``freeze_restored``
+    обязан быть СНАРУЖИ. Обратная вложенность пропускает эту разморозку — и следующая граница
+    теста снова обходит всю кучу. Порядок проверяет тест на живом владельце в
+    ``test_gc_freeze_restore.py``.
     """
     with freeze_restored():
+        with suspend_collection_owner():
+            yield
+
+
+@pytest.fixture
+def gc_slot_suspended():
+    """Тест внутри ``slot_suspended_freeze_restored()`` — для autouse-фикстур тестов механизма gc."""
+    with slot_suspended_freeze_restored():
         yield
 
 
@@ -87,3 +105,9 @@ def gc_freeze_restored():
 def freeze_restore_block():
     """Сам контекст-менеджер ``freeze_restored`` — для тестов на него (без импорта conftest)."""
     return freeze_restored
+
+
+@pytest.fixture
+def slot_suspended_block():
+    """Сам контекст-менеджер ``slot_suspended_freeze_restored`` — для теста на порядок."""
+    return slot_suspended_freeze_restored
