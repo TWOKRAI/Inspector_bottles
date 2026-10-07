@@ -162,7 +162,7 @@ def _ref_findings(
 
 class CommitsAdapter:
     name = "commits"
-    _BASE = 3
+    _BASE = 4
 
     @property
     def version(self) -> int:
