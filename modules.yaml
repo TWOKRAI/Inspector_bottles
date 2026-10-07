@@ -844,6 +844,17 @@ modules:
     ]
     parent: null
     purpose: "Каталог утилит проекта; сюда — менять служебные скрипты репозитория"
+  - id: "scripts/atlas"
+    paths: [
+      "scripts/atlas/",
+    ]
+    layer: scripts
+    tier: null
+    docs: [
+      "scripts/atlas/DECISIONS.md",
+    ]
+    parent: "scripts"
+    purpose: "Атлас: реестр доказанности и знаний из git, планов и modules.yaml; сюда — менять сборку карточек и страниц"
   - id: "tools/utils"
     paths: [
       "Utils/",
