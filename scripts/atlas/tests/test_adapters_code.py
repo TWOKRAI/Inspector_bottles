@@ -244,6 +244,33 @@ def test_tests_edges_path_and_import(repo: GitRepo, atlas: Any) -> None:
     }
 
 
+def test_import_prefers_package_over_module(repo: GitRepo, atlas: Any) -> None:
+    rows = [("a", ["lib/x.py"]), ("b", ["lib/x/"]), ("c", ["lib/y.py"]), ("d", ["lib/"])]
+    one = "\n\n\ndef {}():\n    pass\n"
+    sha = _setup(
+        repo,
+        rows,
+        {
+            "lib/x.py": "",
+            "lib/x/__init__.py": "",
+            "lib/y.py": "",
+            "tests/test_t.py": "import lib.x" + one.format("test_t"),
+            "lib/tests/test_u.py": "from ..x import y" + one.format("test_u"),
+            "tests/test_v.py": "import lib.y" + one.format("test_v"),
+        },
+    )
+    got = sorted((e["src"], e["dst"], e["via"]) for e in _edges(_doc(atlas, repo, sha), "tests"))
+    assert got == [
+        ("test:lib/tests/test_u.py::test_u", "module:b", "ast-import"),
+        ("test:lib/tests/test_u.py::test_u", "module:d", "path"),
+        ("test:tests/test_t.py::test_t", "module:b", "ast-import"),
+        ("test:tests/test_v.py::test_v", "module:c", "ast-import"),
+    ]
+    from scripts.atlas.adapters.code import CodeAdapter
+
+    assert CodeAdapter().version >> 48 == 2
+
+
 def test_interface_without_test_rules(repo: GitRepo, atlas: Any) -> None:
     rows = [("m", ["m/"]), ("n", ["n/"]), ("p", ["p/"])]
     sha = _setup(
@@ -569,9 +596,9 @@ def test_pinned_counts_on_this_checkout(atlas: Any, monkeypatch: pytest.MonkeyPa
     assert len(exposes) == 187
     assert {e["via"] for e in exposes} == {"path"}
     tests = _edges(doc, "tests")
-    assert len(tests) == 34851
+    assert len(tests) == 34968
     assert sum(1 for e in tests if e["via"] == "path") == 20272
-    assert sum(1 for e in tests if e["via"] == "ast-import") == 14579
+    assert sum(1 for e in tests if e["via"] == "ast-import") == 14696
     without_test = _findings(doc, "INTERFACE_WITHOUT_TEST")
     assert len(without_test) == 96
     assert {f["severity"] for f in without_test} == {"info"}
