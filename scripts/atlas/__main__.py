@@ -1,6 +1,7 @@
-"""CLI atlas: `build`, `check`, `--json` (Task 1.2). Запуск: `python -m scripts.atlas`.
+"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `--json` (Tasks 1.2, 1.6). Запуск: `python -m scripts.atlas`.
 
-Purpose: разбор argv, корень репозитория = git toplevel (не cwd), база `data/atlas.sqlite` в корне.
+Purpose: разбор argv, проводка видов card/pack/log (views.py); корень репозитория = git toplevel (не cwd),
+    база `data/atlas.sqlite` в корне.
     Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку, 2 — ошибка окружения или ввода.
 Public API: main.
 Stability: lite
@@ -13,7 +14,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import store
+from scripts.atlas import store, views
 from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
@@ -35,6 +36,13 @@ def _parser() -> argparse.ArgumentParser:
     sub = top.add_subparsers(dest="command")
     sub.add_parser("build", parents=[common, with_ref], help="собрать реестр")
     sub.add_parser("check", parents=[common], help="гейт против merge-base").add_argument("--base", default=None)
+    sub.add_parser("card", parents=[common, with_ref], help="карточка модуля").add_argument("module")
+    pack = sub.add_parser("pack", parents=[common, with_ref], help="бриф задачи <slug>#<id>")
+    pack.add_argument("task")
+    pack.add_argument("--module", action="append", default=[], help="модуль задачи (повторяемый)")
+    log = sub.add_parser("log", parents=[common], help="first-parent лог модуля по main-ref")
+    log.add_argument("module")
+    log.add_argument("-n", type=int, default=30)
     return top
 
 
@@ -50,19 +58,32 @@ def main(argv: list[str] | None = None) -> int:
         return exc.code if isinstance(exc.code, int) else 2
     ref = getattr(args, "ref", None) or "HEAD"
     # верна ровно одна форма: --json без подкоманды либо подкоманда без --json; `check` не знает --ref
-    if args.json == (args.command is not None) or (args.command == "check" and hasattr(args, "ref")):
+    if args.json == (args.command is not None) or (args.command in ("check", "log") and hasattr(args, "ref")):
         parser.print_usage(sys.stderr)
-        print("atlas: нужна ровно одна форма: build [--ref], check [--base] или --json [--ref]", file=sys.stderr)
+        print("atlas: нужна ровно одна форма: build, check, card, pack, log или --json", file=sys.stderr)
         return 2
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
         main_ref = getattr(args, "main_ref", None) or _default_main_ref(root)
+        if args.command == "log":  # реестр не читает и не строит: соединения нет
+            if args.n < 1:
+                raise AtlasError("atlas: -n must be a positive integer")
+            print("\n".join(views.log(root, main_ref, args.module, args.n)))
+            return 0
         con = store.connect(root / "data" / "atlas.sqlite")
         try:
             if args.command == "check":
                 code, lines = check(con, root, main_ref, args.base)
                 print("\n".join(lines))
                 return code
+            if args.command in ("card", "pack"):
+                lines = (
+                    views.card(con, root, ref, main_ref, args.module)
+                    if args.command == "card"
+                    else views.pack(con, root, ref, main_ref, args.task, args.module)
+                )
+                print("\n".join(lines))
+                return 0
             if args.command == "build":
                 build_id = build(con, root, ref, main_ref)
                 print(f"atlas build: {store.build_row(con, build_id)[0]} main_ref={main_ref} build_id={build_id}")
