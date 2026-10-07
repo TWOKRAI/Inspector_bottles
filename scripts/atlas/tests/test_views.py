@@ -580,3 +580,133 @@ def test_cli_forms_errors_lazy_build_and_task_pattern(
 
     assert views.TASK_ID_PATTERN is validate_commit.TASK_ID_PATTERN
     assert "{0,3}[0-9]{1,3}" not in Path(views.__file__).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- ревью р.1: тай-брейки, hash seed, дубли --module
+
+_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _pack_in_subprocess(repo: GitRepo, seed: str, *argv: str) -> list[str]:
+    import os
+    import subprocess
+    import sys
+
+    from scripts.atlas.tests.conftest import run_with_deadline
+
+    env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": str(_ROOT), "PYTHONUTF8": "1"}
+    proc = run_with_deadline(
+        lambda: subprocess.run(
+            [sys.executable, "-m", "scripts.atlas", *argv],
+            cwd=repo.path,
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    return proc.stdout.decode("utf-8").splitlines()
+
+
+def test_pack_order_is_total_under_hash_seeds(repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _new_repo(repo_factory, "seeds")
+    repo.write("modules.yaml", _modules([("m", ["m/"], None, [])]))
+    repo.write("plans/2026-10-01_alpha/plan.md", _plan("1.1: first [PENDING]"))
+    ids = ("1.2", "1.02", "01.2")
+    for ident in ids:
+        repo.write(f"plans/2026-10-01_alpha/tasks/{ident}.result.md", f"## Осталось\n- хвост {ident}\n")
+    _commit(repo, monkeypatch, "2026-09-30", "init")
+    for day, ident in (("2026-10-01", "01.2"), ("2026-10-02", "1.02"), ("2026-10-03", "1.2")):
+        repo.write("m/a.py", f"x = '{day}'\n")
+        _commit(repo, monkeypatch, day, f"t {ident}", f"Task: alpha#{ident}")
+    expected = [
+        "Задача alpha#1.1 — статус pending, план plans/2026-10-01_alpha/plan.md",
+        "Модули: m (последняя задача плана с модулями — 1.2)",
+        "Файлы-кандидаты в FILES (1):",
+        "  m/a.py — 01.2, 1.02, 1.2",
+        "Хвосты прошлых задач плана (3 задач):",
+        "  alpha#01.2 (—):",
+        "    Осталось:",
+        "      - хвост 01.2",
+        "  alpha#1.02 (—):",
+        "    Осталось:",
+        "      - хвост 1.02",
+        "  alpha#1.2 (—):",
+        "    Осталось:",
+        "      - хвост 1.2",
+    ]
+    outputs = {
+        seed: _pack_in_subprocess(repo, seed, "pack", "alpha#1.1", *_REFS) for seed in ("0", "1", "2", "3")
+    }
+    assert outputs == {seed: expected for seed in outputs}
+
+
+def test_card_commit_tie_breaks_by_sha_ascending(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _new_repo(repo_factory, "tie_card")
+    repo.write("modules.yaml", _modules([("m", ["m/"], None, [])]))
+    _commit(repo, monkeypatch, "2026-10-01", "init")
+    created: dict[str, str] = {}
+    for k in range(1, 6):
+        repo.write(f"m/f{k}.py", "x = 1\n")
+        created[_commit(repo, monkeypatch, "2026-10-02", f"m: tie {k}")] = f"m: tie {k}"
+    assert list(created) != sorted(created), "порядок создания совпал с порядком SHA: тест не различает тай-брейк"
+    lines = _lines(atlas(repo, "card", "m", *_REFS))
+    start = lines.index("Коммиты (5 всего, последние 5):")
+    assert lines[start + 1 : start + 6] == [f"  {_s7(sha)} 2026-10-02 {created[sha]}" for sha in sorted(created)]
+
+
+def test_log_group_tie_uses_natural_order(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _new_repo(repo_factory, "tie_log")
+    repo.write("modules.yaml", _modules([("o", ["o/"], None, [])]))
+    _commit(repo, monkeypatch, "2026-10-01", "init")
+    shas = {}
+    for ident in ("1.10", "1.9"):
+        repo.write(f"o/t{ident}.py", "x = 1\n")
+        shas[ident] = _commit(repo, monkeypatch, "2026-10-02", f"o: t{ident}", f"Task: alpha#{ident}")
+    assert _lines(atlas(repo, "log", "o", "--main-ref", "main")) == [
+        "Лог модуля o — first-parent main, записей 2",
+        "Task alpha#1.9 (1):",
+        f"  {_s7(shas['1.9'])} 2026-10-02 o: t1.9",
+        "Task alpha#1.10 (1):",
+        f"  {_s7(shas['1.10'])} 2026-10-02 o: t1.10",
+    ]
+
+
+def test_pack_latest_task_tie_uses_larger_natural_id(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _new_repo(repo_factory, "tie_pack")
+    repo.write("modules.yaml", _modules([("m", ["m/"], None, []), ("n", ["n/"], None, [])]))
+    repo.write(
+        "plans/2026-10-01_alpha/plan.md",
+        _plan("1.5: five [PENDING]", "1.9: nine [PENDING]", "1.10: ten [PENDING]"),
+    )
+    _commit(repo, monkeypatch, "2026-09-30", "init")
+    repo.write("m/x.py", "x = 1\n")
+    _commit(repo, monkeypatch, "2026-10-02", "t9", "Task: alpha#1.9")
+    repo.write("n/y.py", "x = 1\n")
+    _commit(repo, monkeypatch, "2026-10-02", "t10", "Task: alpha#1.10")
+    assert _lines(atlas(repo, "pack", "alpha#1.5", *_REFS)) == [
+        "Задача alpha#1.5 — статус pending, план plans/2026-10-01_alpha/plan.md",
+        "Модули: n (последняя задача плана с модулями — 1.10)",
+        "Файлы-кандидаты в FILES (1):",
+        "  n/y.py — 1.10",
+        "Хвосты прошлых задач плана (0 задач):",
+    ]
+
+
+def test_pack_duplicate_module_flags_collapse(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _f3_repo(repo_factory, monkeypatch)
+    assert _lines(atlas(repo, "pack", "alpha#1.4", "--module", "n", "--module", "n", *_REFS)) == [
+        _alpha_head("1.4"),
+        "Модули: n (--module)",
+        "Файлы-кандидаты в FILES (1):",
+        "  n/b.py — 1.1",
+        "Хвосты прошлых задач плана (0 задач):",
+    ]
