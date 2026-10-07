@@ -1,8 +1,12 @@
-"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `--json` (Tasks 1.2, 1.6). Запуск: `python -m scripts.atlas`.
+"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `--json` (Tasks 1.2, 1.6, 1.6b).
 
-Purpose: разбор argv, проводка видов card/pack/log (views.py); корень репозитория = git toplevel (не cwd),
+Запуск: `python -m scripts.atlas`.
+
+Purpose: разбор argv, проводка видов card/pack/log (views.py) и ref/index (reference.py);
+    корень репозитория = git toplevel (не cwd),
     база `data/atlas.sqlite` в корне.
-    Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку, 2 — ошибка окружения или ввода.
+    Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку,
+    1 — `index --check`: INDEX.md отстал, 2 — ошибка окружения или ввода.
 Public API: main.
 Stability: lite
 """
@@ -14,7 +18,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import store, views
+from scripts.atlas import reference, store, views
 from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
@@ -40,6 +44,10 @@ def _parser() -> argparse.ArgumentParser:
     pack = sub.add_parser("pack", parents=[common, with_ref], help="бриф задачи <slug>#<id>")
     pack.add_argument("task")
     pack.add_argument("--module", action="append", default=[], help="модуль задачи (повторяемый)")
+    sub.add_parser("ref", parents=[common, with_ref], help="справочник интерфейсов модуля").add_argument("module")
+    index = sub.add_parser("index", parents=[common, with_ref], help="индекс проекта (docs/atlas/INDEX.md)")
+    index.add_argument("--write", action="store_true", help="записать docs/atlas/INDEX.md")
+    index.add_argument("--check", action="store_true", help="сверить docs/atlas/INDEX.md с индексом (код 1 — отстал)")
     log = sub.add_parser("log", parents=[common], help="first-parent лог модуля по main-ref")
     log.add_argument("module")
     log.add_argument("-n", type=int, default=30)
@@ -58,9 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         return exc.code if isinstance(exc.code, int) else 2
     ref = getattr(args, "ref", None) or "HEAD"
     # верна ровно одна форма: --json без подкоманды либо подкоманда без --json; `check` не знает --ref
-    if args.json == (args.command is not None) or (args.command in ("check", "log") and hasattr(args, "ref")):
+    both = getattr(args, "write", False) and getattr(args, "check", False)  # только у `index`
+    if args.json == (args.command is not None) or both or (args.command in ("check", "log") and hasattr(args, "ref")):
         parser.print_usage(sys.stderr)
-        print("atlas: нужна ровно одна форма: build, check, card, pack, log или --json", file=sys.stderr)
+        print("atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index или --json", file=sys.stderr)
         return 2
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
@@ -82,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
                     if args.command == "card"
                     else views.pack(con, root, ref, main_ref, args.task, args.module)
                 )
+                print("\n".join(lines))
+                return 0
+            if args.command == "ref":
+                print("\n".join(reference.ref(con, root, ref, main_ref, args.module)))
+                return 0
+            if args.command == "index":
+                lines = reference.index(con, root, ref, main_ref)
+                if args.write or args.check:
+                    return reference.index_file(root, lines, args.write)
                 print("\n".join(lines))
                 return 0
             if args.command == "build":

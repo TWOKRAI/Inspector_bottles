@@ -118,7 +118,7 @@ def test_every_tracked_file_resolves_to_a_module_or_other() -> None:
     others = sum(1 for value in resolved.values() if value == OTHER)
     stray = [p for p, v in resolved.items() if v != OTHER and v not in ids]
     assert stray == [], f"other={others}"
-    assert resolved["scripts/atlas/build.py"] == "scripts", f"other={others}"
+    assert resolved["scripts/atlas/build.py"] == "scripts/atlas", f"other={others}"
     assert resolved["README.md"] == "other", f"other={others}"
     generic = [p for p in files if p.startswith("multiprocess_framework/modules/process_module/generic/")]
     assert generic, "нет отслеживаемых файлов под process_module/generic/ — проверка пуста"

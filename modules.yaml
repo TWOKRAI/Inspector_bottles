@@ -19,6 +19,7 @@ modules:
       "multiprocess_framework/modules/actions_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Action-шина с undo/redo и объединением правок для GUI; сюда — менять откат и повтор действий"
   - id: "app_module"
     paths: [
       "multiprocess_framework/modules/app_module/",
@@ -31,6 +32,7 @@ modules:
       "multiprocess_framework/modules/app_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Шаблон приложения (composition root): общая сборка многопроцессного приложения; сюда — менять каркас запуска"
   - id: "base_manager"
     paths: [
       "multiprocess_framework/modules/base_manager/",
@@ -43,6 +45,7 @@ modules:
       "multiprocess_framework/modules/base_manager/DECISIONS.md",
     ]
     parent: null
+    purpose: "Базовый менеджер: жизненный цикл, адаптеры, наблюдаемость; сюда — менять фундамент всех менеджеров"
   - id: "chain_module"
     paths: [
       "multiprocess_framework/modules/chain_module/",
@@ -55,6 +58,7 @@ modules:
       "multiprocess_framework/modules/chain_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Движок исполнения цепочек и DAG-pipeline, в т.ч. между процессами; сюда — менять порядок и шаги исполнения"
   - id: "channel_routing_module"
     paths: [
       "multiprocess_framework/modules/channel_routing_module/",
@@ -67,6 +71,7 @@ modules:
       "multiprocess_framework/modules/channel_routing_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Базовая маршрутизация по каналам для роутера, логгера и ошибок; сюда — менять общую логику каналов"
   - id: "command_module"
     paths: [
       "multiprocess_framework/modules/command_module/",
@@ -79,6 +84,7 @@ modules:
       "multiprocess_framework/modules/command_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Менеджер команд над dispatch_module: регистрация обработчиков по имени; сюда — менять приём команд"
   - id: "config_module"
     paths: [
       "multiprocess_framework/modules/config_module/",
@@ -91,6 +97,7 @@ modules:
       "multiprocess_framework/modules/config_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Управление конфигурациями в рантайме: схемы, контейнер, менеджер; сюда — менять загрузку и хранение конфигов"
   - id: "console_module"
     paths: [
       "multiprocess_framework/modules/console_module/",
@@ -103,6 +110,7 @@ modules:
       "multiprocess_framework/modules/console_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Менеджер терминальных окон процесса: показ, перехват вывода, ввод; сюда — менять консоль процесса"
   - id: "data_schema_module"
     paths: [
       "multiprocess_framework/modules/data_schema_module/",
@@ -115,6 +123,7 @@ modules:
       "multiprocess_framework/modules/data_schema_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Ядро описания структур данных на Pydantic: схемы, поля, маршрутизация; сюда — менять схемы и валидацию"
   - id: "dispatch_module"
     paths: [
       "multiprocess_framework/modules/dispatch_module/",
@@ -127,6 +136,7 @@ modules:
       "multiprocess_framework/modules/dispatch_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Диспетчеризация входящих сообщений к обработчикам внутри процесса; сюда — менять стратегии обработки"
   - id: "display_module"
     paths: [
       "multiprocess_framework/modules/display_module/",
@@ -139,6 +149,7 @@ modules:
       "multiprocess_framework/modules/display_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Реестр именованных SHM-каналов для вывода кадров; сюда — менять каналы отображения кадров"
   - id: "error_module"
     paths: [
       "multiprocess_framework/modules/error_module/",
@@ -151,6 +162,7 @@ modules:
       "multiprocess_framework/modules/error_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Менеджер ошибок на базе логгера: каналы по уровням, traceback; сюда — менять обработку и запись ошибок"
   - id: "event_module"
     paths: [
       "multiprocess_framework/modules/event_module/",
@@ -163,6 +175,7 @@ modules:
       "multiprocess_framework/modules/event_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Типизированная шина событий-фактов внутри процесса; сюда — менять подписки и публикацию событий"
   - id: "frontend_module"
     paths: [
       "multiprocess_framework/modules/frontend_module/",
@@ -175,6 +188,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "UI-фреймворк: конструктор PySide6-приложений из виджетов и регистров; сюда — менять GUI-каркас"
   - id: "logger_module"
     paths: [
       "multiprocess_framework/modules/logger_module/",
@@ -187,6 +201,7 @@ modules:
       "multiprocess_framework/modules/logger_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Менеджер логирования: каналы записи, сбор логов процессов; сюда — менять вывод и хранение логов"
   - id: "message_module"
     paths: [
       "multiprocess_framework/modules/message_module/",
@@ -199,6 +214,7 @@ modules:
       "multiprocess_framework/modules/message_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Транспортный протокол сообщений между менеджерами и процессами; сюда — менять формат сообщений"
   - id: "process_manager_module"
     paths: [
       "multiprocess_framework/modules/process_manager_module/",
@@ -211,6 +227,7 @@ modules:
       "multiprocess_framework/modules/process_manager_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Оркестратор процессов: запуск системы, реестр, приоритеты, мониторинг; сюда — менять управление процессами"
   - id: "process_module"
     paths: [
       "multiprocess_framework/modules/process_module/",
@@ -223,6 +240,7 @@ modules:
       "multiprocess_framework/modules/process_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Базовый класс процесса: создание, инициализация, управление, мониторинг; сюда — менять жизнь процесса"
   - id: "recipe"
     paths: [
       "multiprocess_framework/modules/recipe/",
@@ -235,6 +253,7 @@ modules:
       "multiprocess_framework/modules/recipe/DECISIONS.md",
     ]
     parent: null
+    purpose: "Управление рецептами: снимки конфигурации, определение формата, миграции, CRUD; сюда — менять рецепты"
   - id: "registers_module"
     paths: [
       "multiprocess_framework/modules/registers_module/",
@@ -247,6 +266,7 @@ modules:
       "multiprocess_framework/modules/registers_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Рантайм именованных регистров: подписки на поля, карта маршрутов, отправка; сюда — менять регистры"
   - id: "router_module"
     paths: [
       "multiprocess_framework/modules/router_module/",
@@ -259,6 +279,7 @@ modules:
       "multiprocess_framework/modules/router_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Маршрутизация сообщений между процессами через RouterManager; сюда — менять каналы и правила доставки"
   - id: "service_module"
     paths: [
       "multiprocess_framework/modules/service_module/",
@@ -271,6 +292,7 @@ modules:
       "multiprocess_framework/modules/service_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Реестр и жизненный цикл долгоживущих сервисов (камеры, БД, auth); сюда — менять учёт сервисов"
   - id: "shared_resources_module"
     paths: [
       "multiprocess_framework/modules/shared_resources_module/",
@@ -283,6 +305,7 @@ modules:
       "multiprocess_framework/modules/shared_resources_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Pickle-safe реестр общих ресурсов для межпроцессного обмена; сюда — менять передачу ресурсов процессам"
   - id: "state_store_module"
     paths: [
       "multiprocess_framework/modules/state_store_module/",
@@ -295,6 +318,7 @@ modules:
       "multiprocess_framework/modules/state_store_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Реактивное иерархическое дерево состояния: сервер и клиентский кэш с подписками; сюда — менять общее состояние"
   - id: "statistics_module"
     paths: [
       "multiprocess_framework/modules/statistics_module/",
@@ -307,6 +331,7 @@ modules:
       "multiprocess_framework/modules/statistics_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Менеджер статистики и метрик, третья плоскость наблюдаемости; сюда — менять сбор и вывод метрик"
   - id: "telemetry_readmodel_module"
     paths: [
       "multiprocess_framework/modules/telemetry_readmodel_module/",
@@ -319,6 +344,7 @@ modules:
       "multiprocess_framework/modules/telemetry_readmodel_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Qt-free ядро read-model телеметрии: проекция значений и кольцевая история; сюда — менять чтение телеметрии"
   - id: "worker_module"
     paths: [
       "multiprocess_framework/modules/worker_module/",
@@ -331,6 +357,7 @@ modules:
       "multiprocess_framework/modules/worker_module/DECISIONS.md",
     ]
     parent: null
+    purpose: "Менеджер потоков-воркеров внутри процесса: старт, стоп, пауза, перезапуск; сюда — менять управление потоками"
   - id: "framework_meta"
     paths: [
       "multiprocess_framework/__init__.py",
@@ -349,6 +376,7 @@ modules:
       "multiprocess_framework/docs/README.md",
     ]
     parent: null
+    purpose: "Корневые файлы пакета фреймворка и его документация; сюда — менять версию, общие импорты, доки фреймворка"
   - id: "services/auth"
     paths: [
       "Services/auth/",
@@ -361,6 +389,7 @@ modules:
       "Services/auth/DECISIONS.md",
     ]
     parent: null
+    purpose: "Аутентификация и RBAC: хеши паролей, пользователи, роли; сюда — менять вход и права доступа"
   - id: "services/code_reader"
     paths: [
       "Services/code_reader/",
@@ -373,6 +402,7 @@ modules:
       "Services/code_reader/DECISIONS.md",
     ]
     parent: null
+    purpose: "Сервис считывателя кодов Hikrobot ID3000: приём результатов по TCP, разбор; сюда — менять чтение кодов"
   - id: "services/control_panel"
     paths: [
       "Services/control_panel/",
@@ -384,6 +414,7 @@ modules:
       "Services/control_panel/STATUS.md",
     ]
     parent: null
+    purpose: "Сервис Пульт: GUI-контролы выдают значения на порты pipeline; сюда — менять контролы и их сигналы"
   - id: "services/dataset_gen"
     paths: [
       "Services/dataset_gen/",
@@ -395,6 +426,7 @@ modules:
       "Services/dataset_gen/STATUS.md",
     ]
     parent: null
+    purpose: "Генератор синтетического датасета методом cut-and-paste; сюда — менять создание обучающих данных"
   - id: "services/device_hub"
     paths: [
       "Services/device_hub/",
@@ -407,6 +439,7 @@ modules:
       "Services/device_hub/DECISIONS.md",
     ]
     parent: null
+    purpose: "Центральный реестр устройств и менеджер соединений; сюда — менять учёт и подключение устройств"
   - id: "services/documents"
     paths: [
       "Services/documents/",
@@ -418,6 +451,7 @@ modules:
       "Services/documents/STATUS.md",
     ]
     parent: null
+    purpose: "Хранилище документов: аудит смен наблюдаемости и вердикты по детали; сюда — менять аудит и вердикты"
   - id: "services/hikvision_camera"
     paths: [
       "Services/hikvision_camera/",
@@ -429,6 +463,7 @@ modules:
       "Services/hikvision_camera/STATUS.md",
     ]
     parent: null
+    purpose: "Сервис промышленной камеры Hikvision: SDK, логика, плагин; сюда — менять работу с камерой"
   - id: "services/layer_render"
     paths: [
       "Services/layer_render/",
@@ -441,6 +476,7 @@ modules:
       "Services/layer_render/DECISIONS.md",
     ]
     parent: null
+    purpose: "Слои сцены: фон, объект, пресет, каталог классов; сюда — менять сборку кадра из слоёв"
   - id: "services/line_sim"
     paths: [
       "Services/line_sim/",
@@ -453,6 +489,7 @@ modules:
       "Services/line_sim/DECISIONS.md",
     ]
     parent: null
+    purpose: "Объект-агностичный движок сцены лента с объектами; сюда — менять симуляцию ленты"
   - id: "services/ml_inference"
     paths: [
       "Services/ml_inference/",
@@ -464,6 +501,7 @@ modules:
       "Services/ml_inference/STATUS.md",
     ]
     parent: null
+    purpose: "Инференс нейросетей для pipeline: кадр на входе, классы и confidence на выходе; сюда — менять инференс"
   - id: "services/ml_train"
     paths: [
       "Services/ml_train/",
@@ -475,6 +513,7 @@ modules:
       "Services/ml_train/STATUS.md",
     ]
     parent: null
+    purpose: "Обучение классификаторов и выбор лучшей модели по метрикам; сюда — менять обучение и сравнение прогонов"
   - id: "services/modbus"
     paths: [
       "Services/modbus/",
@@ -487,6 +526,7 @@ modules:
       "Services/modbus/DECISIONS.md",
     ]
     parent: null
+    purpose: "Драйвер Modbus-TCP и RS485 для связи с PLC; сюда — менять обмен по Modbus"
   - id: "services/otel_export"
     paths: [
       "Services/otel_export/",
@@ -499,6 +539,7 @@ modules:
       "Services/otel_export/DECISIONS.md",
     ]
     parent: null
+    purpose: "Экспорт записей наблюдаемости наружу по OTLP; сюда — менять маппинг и отправку данных наблюдаемости"
   - id: "services/phone_gateway"
     paths: [
       "Services/phone_gateway/",
@@ -510,6 +551,7 @@ modules:
       "Services/phone_gateway/STATUS.md",
     ]
     parent: null
+    purpose: "Приём фото и слов с телефона по WiFi через браузер; сюда — менять приём данных с телефона"
   - id: "services/robot_comm"
     paths: [
       "Services/robot_comm/",
@@ -522,6 +564,7 @@ modules:
       "Services/robot_comm/DECISIONS.md",
     ]
     parent: null
+    purpose: "Сервис робота Delta поверх Modbus: карта регистров, доменные методы; сюда — менять управление роботом"
   - id: "services/sql"
     paths: [
       "Services/sql/",
@@ -534,6 +577,7 @@ modules:
       "Services/sql/DECISIONS.md",
     ]
     parent: null
+    purpose: "Универсальный SQL-менеджер на SQLAlchemy: PostgreSQL, MySQL, SQLite; сюда — менять доступ к БД"
   - id: "services/vfd_comm"
     paths: [
       "Services/vfd_comm/",
@@ -546,6 +590,7 @@ modules:
       "Services/vfd_comm/DECISIONS.md",
     ]
     parent: null
+    purpose: "Сервис частотного преобразователя INVT GD20, не зависит от транспорта; сюда — менять управление ПЧ"
   - id: "services_shared"
     paths: [
       "Services/__init__.py",
@@ -556,6 +601,7 @@ modules:
       "Services/STATUS.md",
     ]
     parent: null
+    purpose: "Корневой пакет Services и его STATUS; общий уровень сервисов"
   - id: "plugins/calibration"
     paths: [
       "Plugins/calibration/",
@@ -564,6 +610,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины калибровки (камера и робот и др.); сюда — менять калибровочные плагины"
   - id: "plugins/control"
     paths: [
       "Plugins/control/",
@@ -572,6 +619,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины управления внешними устройствами: роботы, IO, реле; сюда — менять управляющие плагины"
   - id: "plugins/filter"
     paths: [
       "Plugins/filter/",
@@ -580,6 +628,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины фильтрации и анализа координат (виртуальная линия и др.); сюда — менять фильтры координат"
   - id: "plugins/hub"
     paths: [
       "Plugins/hub/",
@@ -588,6 +637,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины категории hub в каталоге Plugins; описания в источниках нет"
   - id: "plugins/io"
     paths: [
       "Plugins/io/",
@@ -596,6 +646,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины ввода-вывода: запись в БД, выгрузка кадров, экспорт; сюда — менять ввод-вывод"
   - id: "plugins/processing"
     paths: [
       "Plugins/processing/",
@@ -604,6 +655,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины обработки кадров: фильтры, детекторы, преобразования; сюда — менять обработку кадров"
   - id: "plugins/render"
     paths: [
       "Plugins/render/",
@@ -612,6 +664,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины отрисовки overlay и композитинга кадров для GUI; сюда — менять отрисовку"
   - id: "plugins/runtime"
     paths: [
       "Plugins/runtime/",
@@ -620,6 +673,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины-исполнители pipeline: chain executor, пулы воркеров; сюда — менять исполнение pipeline"
   - id: "plugins/sim"
     paths: [
       "Plugins/sim/",
@@ -628,6 +682,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины-хосты симулятора линии; сервис держит логику, плагин жизненный цикл; сюда — менять хост симуляции"
   - id: "plugins/sinks"
     paths: [
       "Plugins/sinks/",
@@ -636,6 +691,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины-приёмники: вывод и экспорт данных из конца цепочки; сюда — менять приёмники данных"
   - id: "plugins/sources"
     paths: [
       "Plugins/sources/",
@@ -644,6 +700,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Плагины источников данных: камеры, файлы, генераторы; сюда — менять источники"
   - id: "plugins/utility"
     paths: [
       "Plugins/utility/",
@@ -652,6 +709,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Служебные и тестовые плагины (heartbeat, pilot_widgets и др.); сюда — менять служебные плагины"
   - id: "plugins_shared"
     paths: [
       "Plugins/__init__.py",
@@ -661,6 +719,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Общие доменные утилиты нескольких плагинов, сами не плагины; сюда — менять общий код плагинов"
   - id: "prototype/adapters"
     paths: [
       "multiprocess_prototype/adapters/",
@@ -671,6 +730,7 @@ modules:
       "multiprocess_prototype/adapters/README.md",
     ]
     parent: null
+    purpose: "Adapter-слой между domain Protocols и реестрами фреймворка; сюда — менять привязку domain к реестрам"
   - id: "prototype/backend"
     paths: [
       "multiprocess_prototype/backend/",
@@ -679,6 +739,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Backend прототипа: конфигурация системы и топология процессов и плагинов; сюда — менять wiring системы"
   - id: "prototype/domain"
     paths: [
       "multiprocess_prototype/domain/",
@@ -690,6 +751,7 @@ modules:
       "multiprocess_prototype/domain/DECISIONS.md",
     ]
     parent: null
+    purpose: "Изолированный типизированный domain-слой: frozen-сущности и исключения; сюда — менять доменные сущности"
   - id: "prototype/frontend"
     paths: [
       "multiprocess_prototype/frontend/",
@@ -700,6 +762,7 @@ modules:
       "multiprocess_prototype/frontend/README.md",
     ]
     parent: null
+    purpose: "GUI-пакет прототипа: Qt-презентация PySide6 поверх бэкенда; сюда — менять экраны и GUI прототипа"
   - id: "prototype/recipes"
     paths: [
       "multiprocess_prototype/recipes/",
@@ -708,6 +771,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Управление рецептами прототипа: RecipeManager и миграции форматов; сюда — менять рецепты прототипа"
   - id: "prototype/registers"
     paths: [
       "multiprocess_prototype/registers/",
@@ -716,6 +780,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Общие регистры прототипа между плагинами и RegistersManager; сюда — менять shared-регистры"
   - id: "prototype_root"
     paths: [
       "multiprocess_prototype/ARCHITECTURE.md",
@@ -736,6 +801,7 @@ modules:
       "multiprocess_prototype/STATUS.md",
     ]
     parent: null
+    purpose: "Корень прототипа инспекции дефектов: запуск, оркестратор, app.yaml, документы; сюда — менять запуск прототипа"
   - id: "tools/backend_ctl"
     paths: [
       "backend_ctl/",
@@ -748,6 +814,7 @@ modules:
       "backend_ctl/DECISIONS.md",
     ]
     parent: null
+    purpose: "Headless-драйвер бэкенда по TCP, GUI по сокету, dev-инструмент; сюда — менять управление бэкендом"
   - id: "prototype/apps"
     paths: [
       "apps/",
@@ -756,6 +823,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Каталог apps в корне репозитория; описания в источниках нет"
   - id: "tools/tools"
     paths: [
       "tools/",
@@ -764,6 +832,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Каталог tools в корне репозитория; описания в источниках нет"
   - id: "scripts"
     paths: [
       "scripts/",
@@ -774,6 +843,18 @@ modules:
       "scripts/README.md",
     ]
     parent: null
+    purpose: "Каталог утилит проекта; сюда — менять служебные скрипты репозитория"
+  - id: "scripts/atlas"
+    paths: [
+      "scripts/atlas/",
+    ]
+    layer: scripts
+    tier: null
+    docs: [
+      "scripts/atlas/DECISIONS.md",
+    ]
+    parent: "scripts"
+    purpose: "Атлас: реестр доказанности и знаний из git, планов и modules.yaml; сюда — менять сборку карточек и страниц"
   - id: "tools/utils"
     paths: [
       "Utils/",
@@ -782,6 +863,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Каталог Utils в корне репозитория; описания в источниках нет"
   - id: "prototype/robot"
     paths: [
       "robot/",
@@ -790,6 +872,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Каталог robot в корне репозитория; описания в источниках нет"
   - id: "docs/examples"
     paths: [
       "examples/",
@@ -798,6 +881,7 @@ modules:
     tier: null
     docs: []
     parent: null
+    purpose: "Пример приложения minimal_app, рыба-шаблон; сюда — смотреть образец использования фреймворка"
   - id: "tools/backend_ctl/probes"
     paths: [
       "backend_ctl/probes/",
@@ -806,6 +890,7 @@ modules:
     tier: null
     docs: []
     parent: "tools/backend_ctl"
+    purpose: "Ручные live-пробники backend_ctl, не входят в обычный прогон тестов; сюда — менять пробники"
   - id: "frontend_module/components"
     paths: [
       "multiprocess_framework/modules/frontend_module/components/",
@@ -816,6 +901,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/components/README.md",
     ]
     parent: "frontend_module"
+    purpose: "Примитивы контролов: Traits, Presenter, View, Facade; сюда — менять базовые контролы GUI"
   - id: "frontend_module/components/_examples"
     paths: [
       "multiprocess_framework/modules/frontend_module/components/_examples/",
@@ -826,6 +912,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/components/_examples/README.md",
     ]
     parent: "frontend_module/components"
+    purpose: "Учебные схемы и адаптеры к контролам; сюда — смотреть пример адаптера, не боевой код"
   - id: "frontend_module/components/base"
     paths: [
       "multiprocess_framework/modules/frontend_module/components/base/",
@@ -836,6 +923,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/components/base/README.md",
     ]
     parent: "frontend_module/components"
+    purpose: "Базовый слой контролов: контракты, конфиг, мост к регистрам, traits; сюда — менять основу контролов"
   - id: "frontend_module/core"
     paths: [
       "multiprocess_framework/modules/frontend_module/core/",
@@ -846,6 +934,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/core/README.md",
     ]
     parent: "frontend_module"
+    purpose: "Базовые классы frontend_module без Qt: маршрутизация команд, мост регистров; сюда — менять ядро GUI-фреймворка"
   - id: "frontend_module/widgets"
     paths: [
       "multiprocess_framework/modules/frontend_module/widgets/",
@@ -856,6 +945,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/widgets/README.md",
     ]
     parent: "frontend_module"
+    purpose: "Составные UI-компоненты: вкладки, таблицы, шапка, клавиатура; сюда — менять составные виджеты"
   - id: "frontend_module/widgets/chrome"
     paths: [
       "multiprocess_framework/modules/frontend_module/widgets/chrome/",
@@ -864,6 +954,7 @@ modules:
     tier: null
     docs: []
     parent: "frontend_module/widgets"
+    purpose: "Заголовок приложения, боковые панели и оверлеи; сюда — менять обрамление окна"
   - id: "frontend_module/widgets/tabs"
     paths: [
       "multiprocess_framework/modules/frontend_module/widgets/tabs/",
@@ -874,6 +965,7 @@ modules:
       "multiprocess_framework/modules/frontend_module/widgets/tabs/README.md",
     ]
     parent: "frontend_module/widgets"
+    purpose: "Вкладки: TabWidget, BaseTab, MVP-база, привязка к регистрам; сюда — менять каркас вкладок"
   - id: "process_module/generic"
     paths: [
       "multiprocess_framework/modules/process_module/generic/",
@@ -882,6 +974,7 @@ modules:
     tier: null
     docs: []
     parent: "process_module"
+    purpose: "GenericProcess: конфиг-драйвен процесс с загрузкой плагинов из конфига; сюда — менять универсальный процесс"
   - id: "prototype/frontend/widgets"
     paths: [
       "multiprocess_prototype/frontend/widgets/",
@@ -890,6 +983,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend"
+    purpose: "Каталог widgets GUI прототипа; описания в источниках нет"
   - id: "prototype/frontend/widgets/tabs"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/",
@@ -898,6 +992,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend/widgets"
+    purpose: "Вкладки приложения: реестр фабрик вкладок из единого списка TABS; сюда — менять состав вкладок"
   - id: "prototype/frontend/widgets/tabs/pipeline"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/pipeline/",
@@ -906,6 +1001,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend/widgets/tabs"
+    purpose: "Вкладка pipeline GUI прототипа; описания в источниках нет"
   - id: "prototype/frontend/widgets/tabs/services"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/services/",
@@ -914,6 +1010,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend/widgets/tabs"
+    purpose: "Вкладка services GUI прототипа; описания в источниках нет"
   - id: "prototype/frontend/widgets/tabs/settings"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/settings/",
@@ -922,3 +1019,4 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend/widgets/tabs"
+    purpose: "Пилотная вкладка Settings, сквозной пример таба; сюда — менять вкладку настроек"

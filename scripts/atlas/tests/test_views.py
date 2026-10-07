@@ -128,7 +128,7 @@ def _f1_repo(factory: RepoFactory, mp: pytest.MonkeyPatch, name: str = "f1") -> 
 def _f1_expected(shas: dict[str, str]) -> list[str]:
     return [
         "Модуль m — framework, ярус core",
-        "Назначение: Первая строка назначения модуля m.",
+        "Назначение: нет purpose в modules.yaml",
         "API (2): Alpha, Beta",
         "Открытые задачи (2 планов, 5 задач):",
         "  beta — 1: 1.1",
@@ -156,7 +156,7 @@ def test_card_shape_links_and_order(repo_factory: RepoFactory, atlas: Any, monke
 
 _EMPTY_CARD = [
     "Модуль {id} — scripts, ярус —",
-    "Назначение: нет README в docs: modules.yaml",
+    "Назначение: нет purpose в modules.yaml",
     "API (0): —",
     "Открытые задачи: нет",
     "Коммиты (0 всего, последние 0):",
@@ -207,7 +207,7 @@ def test_card_edges_caps_and_unknown_kinds(
     repo, shas = _f2_repo(repo_factory, monkeypatch, "f2")
     assert _lines(atlas(repo, "card", "a_b", *_REFS)) == [
         "Модуль a_b — scripts, ярус —",
-        "Назначение: нет README в docs: modules.yaml",
+        "Назначение: нет purpose в modules.yaml",
         "API (1): P",
         "Открытые задачи: нет",
         "Коммиты (1 всего, последние 1):",
@@ -218,7 +218,7 @@ def test_card_edges_caps_and_unknown_kinds(
     assert "API (1): Q" in _lines(atlas(repo, "card", "axb", *_REFS))
     assert _lines(atlas(repo, "card", "big", *_REFS)) == [
         "Модуль big — scripts, ярус —",
-        "Назначение: Настоящее назначение " + "я" * 138 + "…",
+        "Назначение: нет purpose в modules.yaml",
         "API (22): " + ", ".join(f"N{i:02d}" for i in range(1, 21)) + ", … ещё 2",
         "Открытые задачи (6 планов, 12 задач):",
         "  p1 — 7: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, … ещё 1",

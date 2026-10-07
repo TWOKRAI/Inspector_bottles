@@ -343,7 +343,10 @@ def test_windows_separators():
     assert mods.resolve("Services/sql/x.py", rows) == "services/sql"
 
 
-_VALID_ROW = "  - id: {id}\n    paths: [{paths}]\n    layer: {layer}\n    tier: null\n    docs: []\n    parent: null\n"
+_VALID_ROW = (
+    "  - id: {id}\n    paths: [{paths}]\n    layer: {layer}\n    tier: null\n    docs: []\n    parent: null\n"
+    '    purpose: "тестовое назначение строки"\n'
+)
 
 
 def _write_yaml(path: Path, rows: str, version: int = 1) -> Path:
@@ -375,6 +378,7 @@ def test_load_errors(tmp_path):
         _VALID_ROW.format(id="aa", paths='"aa/"', layer="scripts")
         + _VALID_ROW.format(id="bb", paths='"bb/"', layer="scripts")
         + '  - id: cc\n    paths: ["cc/"]\n    tier: null\n    docs: []\n    parent: null\n'
+        + '    purpose: "тестовое назначение строки"\n'
     )
     with pytest.raises(ValueError) as exc:
         mods.load_modules(_write_yaml(tmp_path / "no_layer.yaml", no_layer))
@@ -385,3 +389,52 @@ def test_load_errors(tmp_path):
     empty_path = _VALID_ROW.format(id="aa", paths='""', layer="scripts")
     with pytest.raises(ValueError):
         mods.load_modules(_write_yaml(tmp_path / "empty_path.yaml", empty_path))
+
+
+_NO_PURPOSE_ROWS = (
+    '  - id: aa\n    paths: ["aa/"]\n    layer: scripts\n    tier: null\n    docs: []\n    parent: null\n'
+    '    purpose: "первое назначение"\n'
+    '  - id: bb\n    paths: ["bb/"]\n    layer: scripts\n    tier: null\n    docs: []\n    parent: null\n'
+    '    purpose: "второе назначение"\n'
+    '  - id: SECRET_ID_X\n    paths: ["SECRET_PATH_Y/"]\n    layer: scripts\n    tier: null\n'
+    '    docs: ["SECRET_DOC_Z"]\n    parent: null\n'
+)
+
+
+def test_load_modules_requires_purpose_and_real_file_is_guarded(tmp_path):
+    # сторож на реальном файле — ПЕРВЫМ: красный, пока у строк нет purpose
+    rows = _atlas().load_modules()
+    assert len(rows) >= 87, f"modules.yaml: {len(rows)} строк, ожидалось >= 87"
+    bad = [
+        r["id"]
+        for r in rows
+        if not (
+            isinstance(r.get("purpose"), str)
+            and r["purpose"].strip() != ""
+            and len(r["purpose"]) <= 120
+            and "\n" not in r["purpose"]
+        )
+    ]
+    assert not bad, f"{len(bad)} строк без годного purpose, например {bad[:5]}"
+
+    mods = _atlas()
+    text = f"version: 1\nother_allowed: []\nmodules:\n{_NO_PURPOSE_ROWS}"
+    file = tmp_path / "nopurpose.yaml"
+    file.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError) as exc:
+        mods.load_modules(file)
+    message = str(exc.value)
+    assert "purpose" in message
+    assert re.search(r"\b2\b", message), f"в тексте нет индекса строки 2: {message!r}"
+    for value in ("SECRET_ID_X", "SECRET_PATH_Y", "SECRET_DOC_Z", "первое назначение"):
+        assert value not in message
+
+    parsed = mods.parse_modules(text)  # без требования: читатель ревизий не падает
+    assert [r["id"] for r in parsed] == ["aa", "bb", "SECRET_ID_X"]
+
+    full = text + '    purpose: "назначение"\n'  # третья строка получает purpose
+    full_rows = mods.parse_modules(full)
+    assert all("purpose" in r for r in full_rows)
+    file_ok = tmp_path / "withpurpose.yaml"
+    file_ok.write_text(full, encoding="utf-8")
+    assert [r["id"] for r in mods.load_modules(file_ok)] == ["aa", "bb", "SECRET_ID_X"]

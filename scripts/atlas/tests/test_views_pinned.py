@@ -68,9 +68,7 @@ def _ok(res: Any) -> list[str]:
 def test_card_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     lines = _ok(atlas(pinned, "card", "router_module", *_PINNED))
     assert lines[0] == "Модуль router_module — framework, ярус core"
-    assert lines[1] == (
-        "Назначение: Единая точка маршрутизации сообщений между процессами. Каждый процесс создаёт **один по дефолту**"
-    )
+    assert lines[1] == "Назначение: нет purpose в modules.yaml"
     assert lines[2] == "API (2): IMessageChannel, IRouterManager"
     assert lines[3].startswith("Открытые задачи")
     start = lines.index("Коммиты (79 всего, последние 5):")
