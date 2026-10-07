@@ -1,25 +1,23 @@
 """Адаптер `commits`: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_* и REF_* (Tasks 1.3b, 1.3c).
 
-Purpose: узлы commit — коммиты сборки (first-parent, коммиты PR сверх main-ref, цели хешей DONE). Рёбра
+Purpose: узлы commit — коммиты сборки (first-parent, коммиты PR сверх main-ref, цели хешей DONE) и коммиты
+    без слияний с трейлером Refs/Task (любое значение). Рёбра
     refs/implements и находки REF_* берутся из трейлеров Refs/Task (regex по %B; токен `plans/…` начинается
     в начале значения или после пробела , ; ( ) всех предков сборки без слияний (`rev-list --no-merges`),
-    в том числе коммитов без узла; коммиты-слияния трейлеров не дают. Служебные имена plans/ (README.md,
-    queue, …) не считаются планами в дереве коммита. Модули по путям (touches) и done_by из строк DONE планов
-    — только для узлов.
+    в том числе коммитов без узла; коммиты-слияния трейлеров не дают. Служебные имена plans/ (константа
+    _SERVICE_NAMES, зеркало plans_progress.is_service_name) не считаются планами в дереве коммита.
+    Модули по путям (touches) и done_by из строк DONE планов — только для узлов сборки (не для добавленных трейлерных).
 Public API: CommitsAdapter.
 Stability: lite
 """
 
 from __future__ import annotations
 
-import importlib.util
 import re
-import sys
 from collections import defaultdict
-from functools import lru_cache
 
 from scripts.atlas.adapters.modules import modules_for
-from scripts.atlas.adapters.plans import PLANS_PROGRESS, adapter_version, plans_for
+from scripts.atlas.adapters.plans import adapter_version, plans_for
 from scripts.atlas.modules import resolve as resolve_module
 from scripts.atlas.schema import AdapterOutput, BuildContext, Edge, Finding, Node
 from scripts.atlas.tree import AtlasError, git, resolve, run_git
@@ -31,6 +29,8 @@ _TASK = re.compile(r"^Task:[ \t]*(\S.*?)[ \t\r]*$", re.M)
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 _TOKEN = re.compile(r"(?:^|(?<=[\s,;(]))plans/[^\s,;)]+")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+_SERVICE_NAMES = frozenset({"queue", "_archive", "QUEUE.md", "README.md"})
+_RESULT = re.compile(r"\.result-.+\.md$")
 _FAIL = "atlas: git {} failed: {}"
 
 
@@ -72,29 +72,17 @@ def _batch_check(root: object, queries: list[str]) -> list[str]:
     return out.decode("utf-8", "replace").splitlines()
 
 
-@lru_cache(maxsize=1)
-def _is_service_name() -> object:
-    """`is_service_name` из plans_progress.py (файл — тот же PLANS_PROGRESS, что запускает адаптер plans)."""
-    name = "_atlas_plans_progress"
-    spec = importlib.util.spec_from_file_location(name, PLANS_PROGRESS)
-    if spec is None or spec.loader is None:
-        raise AtlasError("atlas: plans_progress not loadable")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(name, None)
-        raise AtlasError("atlas: plans_progress not loadable") from None
-    return module.is_service_name
+def _is_service_name(name: str) -> bool:
+    """Служебное имя в `plans/` (не план). Дубль правила plans_progress.is_service_name: plans_progress для атласа —
+    источник данных через --json, а не донор кода; синхронность с ним проверяет тест."""
+    return name.startswith(".") or name in _SERVICE_NAMES or bool(_RESULT.search(name))
 
 
 def _plans_in_tree(root: object, sha: str) -> set[str]:
     """slug планов в `plans/` и `plans/_archive/` дерева коммита (имя без каталога, `.md` и даты)."""
     raw = _stdout(root, ("ls-tree", "-z", "--name-only", sha, "plans/", "plans/_archive/"), "")
-    is_service = _is_service_name()
     names = (n.decode("utf-8", "replace").rsplit("/", 1)[-1] for n in raw.split(b"\0") if n)
-    return {_DATE_PREFIX.sub("", n.removesuffix(".md")) for n in names if not is_service(n)}  # type: ignore[operator]
+    return {_DATE_PREFIX.sub("", n.removesuffix(".md")) for n in names if not _is_service_name(n)}
 
 
 def _meta(root: object, shas: list[str]) -> dict[str, tuple[int, str]]:
@@ -203,7 +191,8 @@ class CommitsAdapter:
         shas = list(order)
         authors = _lines(root, "rev-list", "--no-merges", sha)  # трейлеры: все предки без слияний
         meta = _meta(root, list(dict.fromkeys([*shas, *authors])))
-        out.nodes = [Node("commit", s, None, None, meta[s][0]) for s in shas]
+        trailered = [s for s in authors if s not in order and (_REFS.search(meta[s][1]) or _TASK.search(meta[s][1]))]
+        out.nodes = [Node("commit", s, None, None, meta[s][0]) for s in [*shas, *trailered]]
 
         implements: dict[str, list[str]] = defaultdict(list)  # task id -> SHA коммитов, как есть в сообщениях
         tokens: dict[str, list[str]] = {}  # SHA -> токены `plans/…` из Refs, без повторов
