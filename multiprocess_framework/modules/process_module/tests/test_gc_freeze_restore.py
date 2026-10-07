@@ -29,6 +29,19 @@ def _make_cyclic_garbage(n: int) -> None:
         a.append(a)
 
 
+def _assert_freeze_count_near(n0: int) -> None:
+    """Счётчик заморозки вернулся к базе ``n0``: допуск 100 объектов в ОБЕ стороны.
+
+    Вниз счётчик тянет смерть по refcount: замороженный объект, умерший в блоке, вычитается из
+    ``gc.get_freeze_count()`` без всякого ``gc.unfreeze()`` (Linux CI, CPython 3.12: дельта -6;
+    50 вложенных списков и внешний — ровно -51). Вверх — объекты, рождённые в блоке и живые к
+    повторной заморозке. Свойство «мусор блока не заморожен» допуск не прячет: 10 000
+    замороженных циклов дали бы дельту около +10 000.
+    """
+    delta = gc.get_freeze_count() - n0
+    assert abs(delta) < 100, f"дельта счётчика заморозки {delta}"
+
+
 def test_restore_returns_freeze_count_to_baseline(freeze_restore_block):
     with freeze_restore_block():
         gc.freeze()  # «сессионная заморозка» — база помощника
@@ -39,7 +52,26 @@ def test_restore_returns_freeze_count_to_baseline(freeze_restore_block):
             gc.unfreeze()  # то, что делал teardown тестов gc до правки
             assert gc.get_freeze_count() == 0
         # база вернулась; мусор блока собран collect(1), а не заморожен
-        assert 0 <= gc.get_freeze_count() - n0 < 100
+        _assert_freeze_count_near(n0)
+
+
+def test_restore_tolerates_frozen_objects_dying_by_refcount(freeze_restore_block):
+    """Замороженные объекты, умершие по refcount в блоке, уводят счётчик ниже базы — это не провал.
+
+    Падение CI на Linux: 669835 - 669841 = -6 при нижней границе 0. Здесь тот же дрейф задан явно.
+    """
+    with freeze_restore_block():
+        doomed = [[] for _ in range(50)]  # 51 объект: внешний список и 50 вложенных
+        gc.freeze()
+        n0 = gc.get_freeze_count()
+        with freeze_restore_block():
+            del doomed  # умирают по refcount, будучи замороженными
+            # предпосылка: CPython вычел умерших из счётчика (между del и проверкой нет freeze)
+            assert gc.get_freeze_count() - n0 <= -51
+            _make_cyclic_garbage(10_000)
+            gc.unfreeze()
+        # дельта около -51: граница «0 <=» дала бы здесь ложный провал
+        _assert_freeze_count_near(n0)
 
 
 def test_restore_does_not_unfreeze_session_heap(freeze_restore_block):
