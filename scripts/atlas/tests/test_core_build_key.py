@@ -165,3 +165,63 @@ def test_db_with_another_schema_version_is_recreated(repo: GitRepo, atlas: Any, 
     res = atlas(repo, "build", "--ref", y, "--main-ref", "main")
     assert res.code == 0, res.err
     assert path.read_bytes() == before
+
+
+_LAUNCHER = """
+import pathlib, sys, time
+from scripts.atlas.__main__ import main
+gate, ready = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+ready.write_text("1")
+while not gate.exists():
+    time.sleep(0.0005)
+sys.exit(main(sys.argv[3:]))
+"""
+
+
+def test_concurrent_first_builds_do_not_fail(repo: GitRepo, tmp_path: Path) -> None:
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import time
+
+    repo.write(".gitignore", "data/\n")
+    sha = _commit_files(repo, "x")
+    root = Path(__file__).resolve().parents[3]
+    env = {**os.environ, "PYTHONPATH": str(root)}
+    path = _db(repo)
+    failures: list[tuple[int, str]] = []
+    bad_rows: list[Any] = []
+    procs_per_round, rounds = 8, 15
+
+    def round_(n: int) -> None:
+        gate = tmp_path / f"gate{n}"
+        readies = [tmp_path / f"ready{n}_{i}" for i in range(procs_per_round)]
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", _LAUNCHER, str(gate), str(ready), "build", "--ref", sha, "--main-ref", "main"],
+                cwd=repo.path,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            for ready in readies
+        ]
+        deadline = time.monotonic() + 60
+        while not all(r.exists() for r in readies) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        gate.write_text("go")  # все процессы стартуют одновременно
+        for proc in procs:
+            _out, err = proc.communicate(timeout=90)
+            if proc.returncode != 0:
+                failures.append((proc.returncode, err.decode("utf-8", "replace").strip()[-200:]))
+
+    for n in range(rounds):
+        shutil.rmtree(path.parent, ignore_errors=True)
+        run_with_deadline(lambda n=n: round_(n), 150)
+        rows = _query(path, "SELECT sha FROM builds")
+        if rows != [(sha,)]:
+            bad_rows.append(rows)
+    total = procs_per_round * rounds
+    assert failures == [], f"{len(failures)} из {total} процессов упали: {failures[:3]}"
+    assert bad_rows == []  # в builds ровно одна строка на ключ после каждого раунда

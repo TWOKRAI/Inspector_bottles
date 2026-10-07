@@ -627,3 +627,54 @@ def test_test_nodes_match_ast_oracle(atlas: Any, monkeypatch: pytest.MonkeyPatch
     assert len(oracle) == 20393
     assert len(got) == 20393
     assert got == oracle, (sorted(got - oracle)[:5], sorted(oracle - got)[:5])
+
+
+def test_cat_file_header_with_a_space_in_the_path_is_missing_not_error(repo: GitRepo, atlas: Any) -> None:
+    _setup(repo, [("mm", ["my mod/"])], {"README.md": "x\n"})
+    repo.git("checkout", "-q", "-b", "feat")
+    repo.write("my mod/interfaces.py", '__all__ = ["I"]\n\n\nclass I:\n    def a(self):\n        pass\n')
+    repo.commit("add interface in a path with a space")
+    res = atlas(repo, "check", "--main-ref", "main")
+    assert res.code == 1, res.out + res.err
+    assert res.err == ""
+    assert "blocking PRE_POST_MISSING interface:mm:I I.a" in res.out.splitlines()
+
+
+_BOM_TEXT = b"\xef\xbb\xbfclass I:\n    def a(self):\n        pass\n"
+
+
+def _commit_bytes(repo: GitRepo, rel: str, data: bytes, message: str) -> str:
+    target = repo.path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return repo.commit(message)
+
+
+def test_interfaces_file_with_utf8_bom(repo: GitRepo, repo_factory: Any, atlas: Any) -> None:
+    # (а) файл с BOM разбирается: сборка проходит, узел есть
+    solo = repo_factory.create("solo")
+    solo.write(".gitignore", "data/\n")
+    solo.write("modules.yaml", _modules_yaml([("m", ["m/"])]))
+    sha = _commit_bytes(solo, "m/interfaces.py", _BOM_TEXT, "bom")
+    res = atlas(solo, "build", "--ref", sha, "--main-ref", "main")
+    assert res.code == 0, res.err
+    assert [n["id"] for n in _nodes(_doc(atlas, solo, sha), "interface")] == ["m:I"]
+
+    # (б) BOM есть только на base; тот же текст метода на HEAD без BOM -> метод не изменён
+    repo.write(".gitignore", "data/\n")
+    repo.write("modules.yaml", _modules_yaml([("m", ["m/"])]))
+    _commit_bytes(repo, "m/interfaces.py", _BOM_TEXT, "main with bom")
+    repo.git("checkout", "-q", "-b", "nobom")
+    _commit_bytes(repo, "m/interfaces.py", _BOM_TEXT[3:], "drop bom")
+    res = atlas(repo, "check", "--main-ref", "main")
+    assert res.code == 0, res.out + res.err
+    assert "PRE_POST_MISSING" not in res.out
+
+    # BOM на обоих, дифф — посторонний файл
+    repo.git("checkout", "-q", "main")
+    repo.git("checkout", "-q", "-b", "bothbom")
+    repo.write("README.md", "x\n")
+    repo.commit("unrelated")
+    res = atlas(repo, "check", "--main-ref", "main")
+    assert res.code == 0, res.out + res.err
+    assert "PRE_POST_MISSING" not in res.out
