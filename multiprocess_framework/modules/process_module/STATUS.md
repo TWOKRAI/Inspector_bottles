@@ -8,9 +8,12 @@
   слот процесса `collect_on` / `collection_owner` / `paused_gc` / `suspend_collection_owner`, `GcCollectionOwner`,
   `GcOwnerStats` (Stability: lite). `GcDiscipline` — две правки: `collect_scheduled` уступает занятому слоту,
   `freeze_after_startup` с чужого потока при занятом слоте отказывает. Слот пуст — бит-в-бит. Qt-адаптер —
-  `frontend_module/core/qt_gc_policy.py`. Приёмка: `tests/test_gc_collection_owner.py` 13/13,
-  `frontend_module/tests/test_qt_gc_policy.py` 5/5. `test_gc_discipline.py` под сессионной политикой
-  красен до Brief C2 (фикстура `suspend_collection_owner`).
+  `frontend_module/core/qt_gc_policy.py`. Приёмка: `frontend_module/tests/test_qt_gc_policy.py` 5/5;
+  тесты механизма (`tests/test_gc_collection_owner.py` 19, `tests/test_gc_discipline.py` 7) исполняются в СВОЁМ
+  интерпретаторе (`collect_ignore` в `tests/conftest.py` + обёртка `tests/test_gc_mechanism_own_interpreter.py`):
+  `gc.freeze`/`gc.unfreeze` глобальны, в общем прогоне они размораживали сессионную кучу (паузы 170–282 мс).
+  Страж R4 (`modules/tests/test_gc_policy_guard.py`) не пускает такие вызовы в тест-файлы вне `collect_ignore`.
+  План: `plans/2026-10-03_lifecycle-owner-scope/task-T1-gc-isolation.md`.
 - **2026-10-02 (Task 4.7d — политика переполнения `overflow` и маркер `not_inspected`, ADR-174):**
   `overflow: latest|every` (только `extras`, по умолчанию `latest`) прошёл через `generic_process_config`, `blueprint.as_generic_config`
   и `GenericProcess._init_data_pipeline` в `DataReceiver`, `PipelineExecutor`, `FrameShmMiddleware`. Под `every` потерянный кадр

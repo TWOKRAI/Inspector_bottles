@@ -71,9 +71,9 @@ def _in_daemon(fn):
 
 
 @pytest.fixture(autouse=True)
-def _owner_slot_suspended(gc_slot_suspended):
-    # suspend + возврат заморозки снаружи него — одной связкой из conftest (порядок там).
-    yield
+def _owner_slot_suspended():
+    with _door().suspend_collection_owner():
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -87,9 +87,8 @@ def _gc_state_and_flags(monkeypatch, _owner_slot_suspended):
         finally:
             leftover = door.collection_owner()
             if leftover is not None:
-                leftover.release()  # морозивший владелец сам снимает заморозку
-            # Голый gc.unfreeze() здесь размораживал сессионную кучу pytest; заморозку
-            # к исходной возвращает gc_slot_suspended после выхода suspend.
+                leftover.release()
+            gc.unfreeze()
 
 
 @pytest.fixture

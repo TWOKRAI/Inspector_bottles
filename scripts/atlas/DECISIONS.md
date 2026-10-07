@@ -65,7 +65,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 
 | `kind` | `src → dst` | вывод | звено |
 |---|---|---|---|
-| `refs` | commit → plan | трейлер `Refs:` | цепь |
+| `refs` | commit → plan | трейлер `Refs:`: по ребру на каждую пару (коммит, slug) из токенов `plans/[^\s,;)]+` значения (после `rstrip(".")`); значения вне `plans/` рёбер не дают | цепь |
 | `implements` | commit → task | трейлер `Task:` | цепь |
 | `done_by` | task → commit | хеш в строке DONE | цепь |
 | `in_plan` | task → plan | строка задачи | цепь |
@@ -95,8 +95,8 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 |---|---|---|
 | `PRE_POST_MISSING` | interface | у публичного метода, изменённого в диффе, нет `Pre:`/`Post:` (парсер `scripts/s2_gate.py`; `detail` — `Class.method`) |
 | `BROKEN_LINK` | doc, test | относительная ссылка `.md` или `guards` ведёт в несуществующее |
-| `REF_TO_MISSING` | commit | цели `Refs:` (путь) или `Task:` (каталог плана по slug) нет ни в дереве сборки, ни в дереве самого коммита (`git ls-tree <sha>`); id задачи из `Task:` ищется только в дереве сборки тем же парсером `plans_progress`, второго парсера нет |
-| `REF_MOVED` | commit | цель `Refs:`/план из `Task:` была в дереве коммита, в дереве сборки её нет (архив, перенос) |
+| `REF_TO_MISSING` | commit | цели `Refs:` (токен пути `plans/…`; `detail` — токен как найден, `source` — полный SHA коммита) или `Task:` (план по slug; `detail` — значение `<slug>#<id>` как написано) нет ни в дереве сборки, ни в дереве самого коммита; путь проверяется одним `git cat-file --batch-check` по парам `<sha>:<путь>` (сборка и коммит), план по slug — `git ls-tree -z --name-only <sha> plans/ plans/_archive/` только для коммитов, чьего slug нет среди планов сборки; id задачи из `Task:` ищется только в дереве сборки тем же парсером `plans_progress`, второго парсера нет (план есть, id нет — `REF_TO_MISSING` без проверки дерева коммита) |
+| `REF_MOVED` | commit | цель `Refs:`/план из `Task:` была в дереве коммита, в дереве сборки её нет (архив, перенос); поля — как у `REF_TO_MISSING` |
 | `DONE_HASH_NOT_IN_MAIN` | task | хеш в строке DONE не предок `HEAD` сборки (в PR — вершины PR, после слияния — `main`) |
 | `PLAN_SLUG_COLLISION` | plan | два плана с одним slug: сохраняется живой раньше архивного, затем по `path`; отброшенный план уходит целиком вместе с задачами; `detail` и `source` — путь отброшенного (Task 1.3b; прежний `exit 2` ронял `check` всех PR после слияния такого плана) |
 | `DONE_WITHOUT_COMMIT` | task | DONE без хеша и без коммита с `Task:` |
@@ -212,7 +212,9 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `MUTATION_BELOW` | выключена до калибровки | — |
 
 `GUARANTEE_WITHOUT_INJECTION` и `TEST_NEVER_RED` на старом не срабатывают сами: в репозитории 0 идентификаторов
-`G-…` и 0 итогов с таблицей инъекций из 37 (ревью стадии 0) — исключать нечего. Повышение `info` → `warning`/`blocking`
+`G-…` и 0 итогов с таблицей инъекций из 37 (ревью стадии 0) — исключать нечего.
+
+Строки задач в плане не удаляют и не перенумеровывают, а ставят `[SUPERSEDED]` (формат планов, `plans/README.md`): PR, который удаляет или перенумеровывает строку задачи, делает каждый старый коммит с `Task: <slug>#<старый id>` новой находкой `REF_TO_MISSING` `blocking` (ключ `check` — (`code`, `node`, `detail`)). Для удалённого файла плана находка — `REF_MOVED` (`info`). Повышение `info` → `warning`/`blocking`
 — только решением K1.1 или владельца, строкой в этом ADR.
 
 #### 3. `main`-правила и ref

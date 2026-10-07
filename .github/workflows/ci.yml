@@ -113,7 +113,12 @@ jobs:
       # PySide6 без дисплея: offscreen-платформа Qt.
       QT_QPA_PLATFORM: offscreen
     steps:
+      # fetch-depth 0: тесты-сторожа зовут git diff от спек-коммита (SPEC_COMMIT в
+      # event_module/tests/test_subscribers_acceptance.py); в поверхностном клоне его нет —
+      # fatal: bad revision. Скип при отсутствии коммита не делаем: сторож исчез бы молча.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Системные Qt-рантайм-библиотеки для offscreen-плагина PySide6.
       - name: Установка системных Qt-зависимостей

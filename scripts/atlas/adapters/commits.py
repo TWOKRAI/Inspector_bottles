@@ -1,7 +1,8 @@
-"""Адаптер `commits`: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_* (Task 1.3b).
+"""Адаптер `commits`: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_* и REF_* (Tasks 1.3b, 1.3c).
 
 Purpose: коммиты сборки (first-parent, коммиты PR сверх main-ref, цели хешей DONE) и всё, что выводится из их
-    текста и диффа: трейлеры Refs/Task (regex по %B), модули по путям, done_by из строк DONE планов.
+    текста и диффа: трейлеры Refs/Task (regex по %B, токены `plans/…`), модули по путям, done_by из строк DONE
+    планов, находки REF_TO_MISSING / REF_MOVED по путям Refs и планам/задачам Task.
 Public API: CommitsAdapter.
 Stability: lite
 """
@@ -22,6 +23,7 @@ __all__ = ["CommitsAdapter"]
 _REFS = re.compile(r"^Refs:[ \t]*(\S.*?)[ \t\r]*$", re.M)
 _TASK = re.compile(r"^Task:[ \t]*(\S.*?)[ \t\r]*$", re.M)
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}_")
+_TOKEN = re.compile(r"plans/[^\s,;)]+")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _FAIL = "atlas: git {} failed: {}"
 
@@ -49,13 +51,26 @@ def _resolve_hashes(root: object, hashes: list[str]) -> dict[str, str]:
     """Хеш как написан -> полный SHA коммита или причина отказа (`missing`/`ambiguous`); один вызов cat-file."""
     if not hashes:
         return {}
-    out = _stdout(root, ("cat-file", "--batch-check"), "".join(f"{h}^{{commit}}\n" for h in hashes))
+    lines = _batch_check(root, [x for h in hashes for x in (h, f"{h}^{{commit}}")])
     result: dict[str, str] = {}
-    for hash_, line in zip(hashes, out.decode("utf-8", "replace").splitlines()):
-        parts = line.split(" ")
+    for hash_, bare, full in zip(hashes, lines[0::2], lines[1::2]):
+        parts = full.split(" ")
         ok = len(parts) == 3 and parts[1] == "commit" and _SHA.match(parts[0]) is not None
-        result[hash_] = parts[0] if ok else ("ambiguous" if parts[-1] == "ambiguous" else "missing")
+        result[hash_] = parts[0] if ok else ("ambiguous" if bare.endswith(" ambiguous") else "missing")
     return result
+
+
+def _batch_check(root: object, queries: list[str]) -> list[str]:
+    """Ответы одного `cat-file --batch-check` по одному на строку запроса (по позиции)."""
+    out = _stdout(root, ("cat-file", "--batch-check"), "".join(f"{q}\n" for q in queries))
+    return out.decode("utf-8", "replace").splitlines()
+
+
+def _plans_in_tree(root: object, sha: str) -> set[str]:
+    """slug планов в `plans/` и `plans/_archive/` дерева коммита (имя без каталога, `.md` и даты)."""
+    raw = _stdout(root, ("ls-tree", "-z", "--name-only", sha, "plans/", "plans/_archive/"), "")
+    names = (n.decode("utf-8", "replace").rsplit("/", 1)[-1] for n in raw.split(b"\0") if n)
+    return {_DATE_PREFIX.sub("", n.removesuffix(".md")) for n in names}
 
 
 def _meta(root: object, shas: list[str]) -> dict[str, tuple[int, str]]:
@@ -87,9 +102,55 @@ def _paths(root: object, shas: list[str]) -> dict[str, list[str]]:
     return paths
 
 
+_PLACE = {
+    ("Refs", "missing"): "Refs: путь {x} не найден ни в дереве сборки, ни в дереве коммита",
+    ("Refs", "moved"): "Refs: путь {x} есть в дереве коммита, но не в дереве сборки (перенос или архив)",
+    ("Task", "missing"): "Task: план {x} не найден ни в дереве сборки, ни в дереве коммита",
+    ("Task", "moved"): "Task: план {x} есть в дереве коммита, но не в дереве сборки (перенос или архив)",
+}
+
+
+def _ref_findings(
+    root: object,
+    build: str,
+    shas: list[str],
+    tokens: dict[str, list[str]],
+    values: dict[str, list[str]],
+    slugs: set[str],
+    tasks: set[str],
+) -> list[Finding]:
+    """REF_TO_MISSING (blocking) / REF_MOVED (info) по путям Refs и значениям Task; один вызов cat-file."""
+    distinct = sorted({t for ts in tokens.values() for t in ts})
+    pairs = [(s, t) for s in shas for t in tokens[s]]
+    answers = _batch_check(root, [f"{build}:{t}" for t in distinct] + [f"{s}:{t}" for s, t in pairs])
+    in_build = {t: not a.endswith(" missing") for t, a in zip(distinct, answers)}
+    in_commit = {pair: not a.endswith(" missing") for pair, a in zip(pairs, answers[len(distinct) :])}
+
+    def make(sha: str, kind: str, state: str, detail: str, subject: str) -> Finding:
+        code, level = ("REF_MOVED", "info") if state == "moved" else ("REF_TO_MISSING", "blocking")
+        return Finding(code, level, f"commit:{sha}", detail, _PLACE[(kind, state)].format(x=subject), sha)
+
+    found: list[Finding] = []
+    for s in shas:
+        for t in tokens[s]:
+            if not in_build[t]:
+                found.append(make(s, "Refs", "moved" if in_commit[(s, t)] else "missing", t, t))
+        local: set[str] | None = None
+        for value in values[s]:
+            slug, _, _ = value.partition("#")
+            if slug in slugs:
+                if value not in tasks:
+                    msg = f"Task: в плане {slug} нет задачи {value.partition('#')[2]}"
+                    found.append(Finding("REF_TO_MISSING", "blocking", f"commit:{s}", value, msg, s))
+                continue
+            local = _plans_in_tree(root, s) if local is None else local
+            found.append(make(s, "Task", "moved" if slug in local else "missing", value, slug))
+    return found
+
+
 class CommitsAdapter:
     name = "commits"
-    _BASE = 1
+    _BASE = 2
 
     @property
     def version(self) -> int:
@@ -120,16 +181,22 @@ class CommitsAdapter:
         out.nodes = [Node("commit", s, None, None, meta[s][0]) for s in shas]
 
         implements: dict[str, list[str]] = defaultdict(list)  # task id -> SHA коммитов, как есть в сообщениях
+        tokens: dict[str, list[str]] = {}  # SHA -> токены `plans/…` из Refs, без повторов
+        values: dict[str, list[str]] = {}  # SHA -> значения Task с `#` и непустыми частями, без повторов
         for s in shas:
             message = meta[s][1]
-            plan_ids = dict.fromkeys(_plan_slug(v) for v in _REFS.findall(message))
-            for slug in filter(None, plan_ids):
+            found = (t.rstrip(".") for v in _REFS.findall(message) for t in _TOKEN.findall(v))
+            tokens[s] = list(dict.fromkeys(found))
+            for slug in filter(None, dict.fromkeys(_plan_slug(t) for t in tokens[s])):
                 out.edges.append(Edge("refs", f"commit:{s}", f"plan:{slug}", "trailer:Refs"))
+            values[s] = []
             for value in dict.fromkeys(_TASK.findall(message)):
                 slug_part, sep, id_part = value.partition("#")
                 if sep and slug_part and id_part:
                     out.edges.append(Edge("implements", f"commit:{s}", f"task:{value}", "trailer:Task"))
                     implements[value].append(s)
+                    values[s].append(value)
+        out.findings.extend(_ref_findings(root, sha, shas, tokens, values, {slug for slug, _ in plans}, set(tasks)))
 
         modules = modules_for(ctx.tree)
         paths = _paths(root, shas)
