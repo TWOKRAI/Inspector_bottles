@@ -686,10 +686,10 @@ def test_pack_latest_task_tie_uses_larger_natural_id(
         _plan("1.5: five [PENDING]", "1.9: nine [PENDING]", "1.10: ten [PENDING]"),
     )
     _commit(repo, monkeypatch, "2026-09-30", "init")
-    repo.write("m/x.py", "x = 1\n")
-    _commit(repo, monkeypatch, "2026-10-02", "t9", "Task: alpha#1.9")
     repo.write("n/y.py", "x = 1\n")
     _commit(repo, monkeypatch, "2026-10-02", "t10", "Task: alpha#1.10")
+    repo.write("m/x.py", "x = 1\n")
+    _commit(repo, monkeypatch, "2026-10-02", "t9", "Task: alpha#1.9")
     assert _lines(atlas(repo, "pack", "alpha#1.5", *_REFS)) == [
         "Задача alpha#1.5 — статус pending, план plans/2026-10-01_alpha/plan.md",
         "Модули: n (последняя задача плана с модулями — 1.10)",
