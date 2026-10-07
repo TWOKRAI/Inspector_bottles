@@ -637,7 +637,7 @@ modules:
     tier: null
     docs: []
     parent: null
-    purpose: "Плагины категории hub в каталоге Plugins; описания в источниках нет"
+    purpose: "Плагины-хабы (always-on сервисы устройств, device_hub); сюда — менять хаб устройств и его IPC-клиент"
   - id: "plugins/io"
     paths: [
       "Plugins/io/",
@@ -823,7 +823,7 @@ modules:
     tier: null
     docs: []
     parent: null
-    purpose: "Каталог apps в корне репозитория; описания в источниках нет"
+    purpose: "Готовые приложения на фреймворке (line_sim: симулятор линии); сюда — менять запуск и конфиги приложений"
   - id: "tools/tools"
     paths: [
       "tools/",
@@ -832,7 +832,7 @@ modules:
     tier: null
     docs: []
     parent: null
-    purpose: "Каталог tools в корне репозитория; описания в источниках нет"
+    purpose: "Внешние стенды и вспомогательные инструменты (otel_stand: арбитр OTLP); сюда — менять стенды проверки"
   - id: "scripts"
     paths: [
       "scripts/",
@@ -863,7 +863,7 @@ modules:
     tier: null
     docs: []
     parent: null
-    purpose: "Каталог Utils в корне репозитория; описания в источниках нет"
+    purpose: "Мелкие общие утилиты: таймер, профилирование, fps_module, file_comments; сюда — менять отладочные помощники"
   - id: "prototype/robot"
     paths: [
       "robot/",
@@ -872,7 +872,7 @@ modules:
     tier: null
     docs: []
     parent: null
-    purpose: "Каталог robot в корне репозитория; описания в источниках нет"
+    purpose: "Lua-программы и ПК-скрипты робота Delta SCARA (DRAStudio, Modbus); сюда — менять прошивку и пробы робота"
   - id: "docs/examples"
     paths: [
       "examples/",
@@ -983,7 +983,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend"
-    purpose: "Каталог widgets GUI прототипа; описания в источниках нет"
+    purpose: "Виджеты GUI прототипа по доменам: вкладки, дисплеи, диалоги, камера; сюда — менять экраны и компоненты UI"
   - id: "prototype/frontend/widgets/tabs"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/",
@@ -1001,7 +1001,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend/widgets/tabs"
-    purpose: "Вкладка pipeline GUI прототипа; описания в источниках нет"
+    purpose: "Вкладка визуального конструктора pipeline: граф, палитра плагинов, инспектор; сюда — менять редактор pipeline"
   - id: "prototype/frontend/widgets/tabs/services"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/services/",
@@ -1010,7 +1010,7 @@ modules:
     tier: null
     docs: []
     parent: "prototype/frontend/widgets/tabs"
-    purpose: "Вкладка services GUI прототипа; описания в источниках нет"
+    purpose: "Вкладка управления сервисами: секции из реестра, запуск/остановка, пути; сюда — менять экран сервисов"
   - id: "prototype/frontend/widgets/tabs/settings"
     paths: [
       "multiprocess_prototype/frontend/widgets/tabs/settings/",
