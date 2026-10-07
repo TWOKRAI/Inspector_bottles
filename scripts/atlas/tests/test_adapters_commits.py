@@ -532,20 +532,26 @@ def test_task_ref_findings_missing_plan_and_missing_id(repo_factory: RepoFactory
     repo.commit(_msg("feat: t4", "Task: nohash", "Task: #5", "Task: x#"))
 
     doc = _doc(repo, atlas, "main")
-    assert _findings(doc) == [
-        ("COMMIT_WITHOUT_DONE", "info", "task:alpha#1.1", "", t1),
-        ("REF_TO_MISSING", "blocking", f"commit:{t2}", "alpha#9.9", t2),
-        ("REF_TO_MISSING", "blocking", f"commit:{t3}", "ghost#1.1", t3),
-    ]
-    assert _ref_findings(doc) == [
-        ("REF_TO_MISSING", "blocking", f"commit:{t2}", "alpha#9.9", t2, "Task: в плане alpha нет задачи 9.9"),
-        ("REF_TO_MISSING", "blocking", f"commit:{t3}", "ghost#1.1", t3, _PLAN_GONE.format("ghost")),
-    ]
-    assert _edges(doc, "implements") == [
-        (f"commit:{t1}", "task:alpha#1.1", "trailer:Task"),
-        (f"commit:{t2}", "task:alpha#9.9", "trailer:Task"),
-        (f"commit:{t3}", "task:ghost#1.1", "trailer:Task"),
-    ]
+    assert _findings(doc) == sorted(
+        [
+            ("COMMIT_WITHOUT_DONE", "info", "task:alpha#1.1", "", t1),
+            ("REF_TO_MISSING", "blocking", f"commit:{t2}", "alpha#9.9", t2),
+            ("REF_TO_MISSING", "blocking", f"commit:{t3}", "ghost#1.1", t3),
+        ]
+    )
+    assert _ref_findings(doc) == sorted(
+        [
+            ("REF_TO_MISSING", "blocking", f"commit:{t2}", "alpha#9.9", t2, "Task: в плане alpha нет задачи 9.9"),
+            ("REF_TO_MISSING", "blocking", f"commit:{t3}", "ghost#1.1", t3, _PLAN_GONE.format("ghost")),
+        ]
+    )
+    assert _edges(doc, "implements") == sorted(
+        [
+            (f"commit:{t1}", "task:alpha#1.1", "trailer:Task"),
+            (f"commit:{t2}", "task:alpha#9.9", "trailer:Task"),
+            (f"commit:{t3}", "task:ghost#1.1", "trailer:Task"),
+        ]
+    )
 
 
 def test_task_ref_moved_when_plan_was_in_commit_tree(repo_factory: RepoFactory, atlas: Any) -> None:
