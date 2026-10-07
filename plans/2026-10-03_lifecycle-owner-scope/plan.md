@@ -23,7 +23,9 @@ abort» — abort закрывает политика памяти GUI-проц�
 
 **Что остаётся в этом плане — одна задача:**
 
-- **Task T1 — политика памяти GUI-процесса** (teamlead; облегчённый конвейер: одно ревью спека, слепой тестер,
+- **Task T1 — политика памяти GUI-процесса** [DONE 2026-10-07 — 4c82e0167; приёмка CTO ACCEPTED WITH CONDITIONS,
+  [`docs/reviews/2026-10-07_task-T1-cto-acceptance.md`](../../docs/reviews/2026-10-07_task-T1-cto-acceptance.md); merge — по слову владельца]
+  (teamlead; облегчённый конвейер: одно ревью спека, слепой тестер,
   инъекции, одно ревью кода; CTO — на приёмке). Расширить `process_module/lifecycle/gc_discipline.py` исполнителем
   сборки (`collect_on`) — один механизм, без второго; тонкий Qt-адаптер в `frontend_module` (тик `QTimer` на главном:
   `gc.collect` + `flush_deferred_deletes` при `loopLevel()==0`); включение — одной функцией в корне композиции GUI;
