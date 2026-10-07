@@ -1,8 +1,12 @@
 """Адаптер `commits`: узлы commit, рёбра refs/implements/touches/done_by, находки DONE_* и REF_* (Tasks 1.3b, 1.3c).
 
-Purpose: коммиты сборки (first-parent, коммиты PR сверх main-ref, цели хешей DONE) и всё, что выводится из их
-    текста и диффа: трейлеры Refs/Task (regex по %B, токены `plans/…`), модули по путям, done_by из строк DONE
-    планов, находки REF_TO_MISSING / REF_MOVED по путям Refs и планам/задачам Task.
+Purpose: узлы commit — коммиты сборки (first-parent, коммиты PR сверх main-ref, цели хешей DONE) и коммиты
+    без слияний с трейлером Refs/Task (любое значение). Рёбра
+    refs/implements и находки REF_* берутся из трейлеров Refs/Task (regex по %B; токен `plans/…` начинается
+    в начале значения или после пробела , ; ( ) всех предков сборки без слияний (`rev-list --no-merges`),
+    в том числе коммитов без узла; коммиты-слияния трейлеров не дают. Служебные имена plans/ (константа
+    _SERVICE_NAMES, зеркало plans_progress.is_service_name) не считаются планами в дереве коммита.
+    Модули по путям (touches) и done_by из строк DONE планов — только для узлов сборки (не для добавленных трейлерных).
 Public API: CommitsAdapter.
 Stability: lite
 """
@@ -23,8 +27,10 @@ __all__ = ["CommitsAdapter"]
 _REFS = re.compile(r"^Refs:[ \t]*(\S.*?)[ \t\r]*$", re.M)
 _TASK = re.compile(r"^Task:[ \t]*(\S.*?)[ \t\r]*$", re.M)
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}_")
-_TOKEN = re.compile(r"plans/[^\s,;)]+")
+_TOKEN = re.compile(r"(?:^|(?<=[\s,;(]))plans/[^\s,;)]+")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+_SERVICE_NAMES = frozenset({"queue", "_archive", "QUEUE.md", "README.md"})
+_RESULT = re.compile(r"\.result-.+\.md$")
 _FAIL = "atlas: git {} failed: {}"
 
 
@@ -66,11 +72,17 @@ def _batch_check(root: object, queries: list[str]) -> list[str]:
     return out.decode("utf-8", "replace").splitlines()
 
 
+def _is_service_name(name: str) -> bool:
+    """Служебное имя в `plans/` (не план). Дубль правила plans_progress.is_service_name: plans_progress для атласа —
+    источник данных через --json, а не донор кода; синхронность с ним проверяет тест."""
+    return name.startswith(".") or name in _SERVICE_NAMES or bool(_RESULT.search(name))
+
+
 def _plans_in_tree(root: object, sha: str) -> set[str]:
     """slug планов в `plans/` и `plans/_archive/` дерева коммита (имя без каталога, `.md` и даты)."""
     raw = _stdout(root, ("ls-tree", "-z", "--name-only", sha, "plans/", "plans/_archive/"), "")
     names = (n.decode("utf-8", "replace").rsplit("/", 1)[-1] for n in raw.split(b"\0") if n)
-    return {_DATE_PREFIX.sub("", n.removesuffix(".md")) for n in names}
+    return {_DATE_PREFIX.sub("", n.removesuffix(".md")) for n in names if not _is_service_name(n)}
 
 
 def _meta(root: object, shas: list[str]) -> dict[str, tuple[int, str]]:
@@ -150,7 +162,7 @@ def _ref_findings(
 
 class CommitsAdapter:
     name = "commits"
-    _BASE = 2
+    _BASE = 4
 
     @property
     def version(self) -> int:
@@ -177,13 +189,15 @@ class CommitsAdapter:
         ancestors = set(_lines(root, "rev-list", sha)) if any(_SHA.match(s) for s in resolved.values()) else set()
 
         shas = list(order)
-        meta = _meta(root, shas)
-        out.nodes = [Node("commit", s, None, None, meta[s][0]) for s in shas]
+        authors = _lines(root, "rev-list", "--no-merges", sha)  # трейлеры: все предки без слияний
+        meta = _meta(root, list(dict.fromkeys([*shas, *authors])))
+        trailered = [s for s in authors if s not in order and (_REFS.search(meta[s][1]) or _TASK.search(meta[s][1]))]
+        out.nodes = [Node("commit", s, None, None, meta[s][0]) for s in [*shas, *trailered]]
 
         implements: dict[str, list[str]] = defaultdict(list)  # task id -> SHA коммитов, как есть в сообщениях
         tokens: dict[str, list[str]] = {}  # SHA -> токены `plans/…` из Refs, без повторов
         values: dict[str, list[str]] = {}  # SHA -> значения Task с `#` и непустыми частями, без повторов
-        for s in shas:
+        for s in authors:
             message = meta[s][1]
             found = (t.rstrip(".") for v in _REFS.findall(message) for t in _TOKEN.findall(v))
             tokens[s] = list(dict.fromkeys(found))
@@ -196,7 +210,7 @@ class CommitsAdapter:
                     out.edges.append(Edge("implements", f"commit:{s}", f"task:{value}", "trailer:Task"))
                     implements[value].append(s)
                     values[s].append(value)
-        out.findings.extend(_ref_findings(root, sha, shas, tokens, values, {slug for slug, _ in plans}, set(tasks)))
+        out.findings.extend(_ref_findings(root, sha, authors, tokens, values, {slug for slug, _ in plans}, set(tasks)))
 
         modules = modules_for(ctx.tree)
         paths = _paths(root, shas)
