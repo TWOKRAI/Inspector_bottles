@@ -65,8 +65,10 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 
 | `kind` | `src → dst` | вывод | звено |
 |---|---|---|---|
-| `refs` | commit → plan | трейлер `Refs:`: по ребру на каждую пару (коммит, slug) из токенов `plans/[^\s,;)]+` значения (после `rstrip(".")`); значения вне `plans/` рёбер не дают | цепь |
-| `implements` | commit → task | трейлер `Task:` | цепь |
+| `refs` | commit → plan | трейлер `Refs:` **всех предков сборки без слияний** (`git log --no-merges <sha>`; трейлеры коммитов-слияний не читаются): по ребру на каждую пару (коммит, slug) из токенов `(?:^|(?<=[\s,;(]))plans/[^\s,;)]+` значения (левая граница — начало значения или пробел `,` `;` `(`; после `rstrip(".")`); значения вне `plans/` и `plans/` внутри чужого пути (`docs/plans/x.md`) рёбер не дают | цепь |
+| `implements` | commit → task | трейлер `Task:` всех предков сборки без слияний (как у `refs`) | цепь |
+
+Причина «все предки без слияний» (2026-10-07): fast-forward `main` на коммит «merge main в ветку» (`a5ae9657a`, lifecycle T1) перевернул first-parent историю — слияния PR #5–#14 оказались на втором родителе, на пине `a5ae9657a` в first-parent 0 строк `Task:` и 9 рёбер `implements` вместо 176. Историю не переписывают. Узлы `commit` и рёбра `touches` строятся как прежде (first-parent, PR, цели DONE): источник ребра `refs`/`implements` и узел находки `REF_*` — коммит, у которого может не быть узла `commit`. Принятый предел: опечатка только в `Refs:` коммита-слияния в гейт не попадает.
 | `done_by` | task → commit | хеш в строке DONE | цепь |
 | `in_plan` | task → plan | строка задачи | цепь |
 | `touches` | commit → module | пути коммита × `modules.yaml`; путь вне модулей даёт ребро в `module:other` **без узла** `other` (число узлов `module` = числу строк `modules.yaml`); потребитель ребра `touches` берёт только `dst` с узлом `module` (`store.modules_without_contract_test`, Task 1.3b, О6) | цепь |
@@ -95,7 +97,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 |---|---|---|
 | `PRE_POST_MISSING` | interface | у публичного метода, изменённого в диффе, нет `Pre:`/`Post:` (парсер `scripts/s2_gate.py`; `detail` — `Class.method`) |
 | `BROKEN_LINK` | doc, test | относительная ссылка `.md` или `guards` ведёт в несуществующее |
-| `REF_TO_MISSING` | commit | цели `Refs:` (токен пути `plans/…`; `detail` — токен как найден, `source` — полный SHA коммита) или `Task:` (план по slug; `detail` — значение `<slug>#<id>` как написано) нет ни в дереве сборки, ни в дереве самого коммита; путь проверяется одним `git cat-file --batch-check` по парам `<sha>:<путь>` (сборка и коммит), план по slug — `git ls-tree -z --name-only <sha> plans/ plans/_archive/` только для коммитов, чьего slug нет среди планов сборки; id задачи из `Task:` ищется только в дереве сборки тем же парсером `plans_progress`, второго парсера нет (план есть, id нет — `REF_TO_MISSING` без проверки дерева коммита) |
+| `REF_TO_MISSING` | commit | цели `Refs:` (токен пути `plans/…`; `detail` — токен как найден, `source` — полный SHA коммита) или `Task:` (план по slug; `detail` — значение `<slug>#<id>` как написано) нет ни в дереве сборки, ни в дереве самого коммита; путь проверяется одним `git cat-file --batch-check` по парам `<sha>:<путь>` (сборка и коммит), план по slug — `git ls-tree -z --name-only <sha> plans/ plans/_archive/` только для коммитов, чьего slug нет среди планов сборки; служебные имена (`queue`, `_archive`, `QUEUE.md`, `README.md`, имена на точку, `*.result-*.md` — `is_service_name` из `plans_progress`) в дереве коммита не считаются планами (`Task: README#1.1` — `REF_TO_MISSING`, не `REF_MOVED`); id задачи из `Task:` ищется только в дереве сборки тем же парсером `plans_progress`, второго парсера нет (план есть, id нет — `REF_TO_MISSING` без проверки дерева коммита) |
 | `REF_MOVED` | commit | цель `Refs:`/план из `Task:` была в дереве коммита, в дереве сборки её нет (архив, перенос); поля — как у `REF_TO_MISSING` |
 | `DONE_HASH_NOT_IN_MAIN` | task | хеш в строке DONE не предок `HEAD` сборки (в PR — вершины PR, после слияния — `main`) |
 | `PLAN_SLUG_COLLISION` | plan | два плана с одним slug: сохраняется живой раньше архивного, затем по `path`; отброшенный план уходит целиком вместе с задачами; `detail` и `source` — путь отброшенного (Task 1.3b; прежний `exit 2` ронял `check` всех PR после слияния такого плана) |
