@@ -28,10 +28,10 @@ PLANS_TIMEOUT = 120
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 
 
-def adapter_version(base: int) -> int:
-    """Версия адаптера: `base` (руками) × 2**48 + 12 hex sha256 файла plans_progress; нет файла -> 0."""
+def adapter_version(base: int, path: Path | None = None) -> int:
+    """Версия адаптера: `base` (руками) × 2**48 + 12 hex sha256 файла `path` (None = plans_progress); нет файла -> 0."""
     try:
-        stamp = int(hashlib.sha256(PLANS_PROGRESS.read_bytes()).hexdigest()[:12], 16)
+        stamp = int(hashlib.sha256((PLANS_PROGRESS if path is None else path).read_bytes()).hexdigest()[:12], 16)
     except OSError:
         stamp = 0
     return base * 2**48 + stamp

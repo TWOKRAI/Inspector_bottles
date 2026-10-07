@@ -65,6 +65,21 @@ def _collect_public_functions(tree: ast.Module) -> list[tuple[str, ast.AST]]:
     return found
 
 
+def contract_gaps(text: str) -> list[tuple[str, int, int, tuple[str, ...]]]:
+    """Public functions/methods of *text* lacking ``Pre:`` and/or ``Post:`` in the docstring.
+
+    Returns (qualname, first line incl. decorators, last line, missing markers) in source
+    order; markers come in the order ``Pre:``, ``Post:``. ``SyntaxError`` is not caught.
+    """
+    gaps: list[tuple[str, int, int, tuple[str, ...]]] = []
+    for qualname, node in _collect_public_functions(ast.parse(text)):
+        missing = _missing_markers(ast.get_docstring(node))
+        if missing:
+            first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+            gaps.append((qualname, first, node.end_lineno or node.lineno, tuple(missing)))
+    return gaps
+
+
 def _classify(text: str) -> tuple[str, str]:
     """Classify interface source into PASS or BLOCK with a reason string.
 

@@ -159,15 +159,14 @@ def test_yaml_constructor_error_gets_the_file_prefix(repo: GitRepo, atlas: Any) 
 
 
 def test_adapters_registration() -> None:
-    from scripts.atlas.adapters.commits import CommitsAdapter
-    from scripts.atlas.adapters.plans import PlansAdapter
     from scripts.atlas.build import ADAPTERS
 
     assert [(type(a).__name__, a.name) for a in ADAPTERS] == [
         ("ModulesAdapter", "modules"),
         ("PlansAdapter", "plans"),
         ("CommitsAdapter", "commits"),
+        ("CodeAdapter", "code"),
     ]
     assert ADAPTERS[0].version == 1
-    assert isinstance(PlansAdapter().version, int)
-    assert isinstance(CommitsAdapter().version, int)
+    for adapter in ADAPTERS[1:]:
+        assert isinstance(adapter.version, int), adapter.name
