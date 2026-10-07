@@ -31,7 +31,8 @@ Linux дельта −6, замер на 50 объектах: −51); на CPyth
    - проверки: `returncode == 0` (в сообщении хвост 30 строк вывода — имена упавших видны) и итоговая строка (последняя непустая) `startswith("26 passed")` — строка может быть «26 passed, 1 warning in …».
 3. `test_gc_collection_owner.py` и `test_gc_discipline.py` вернуть к виду `1e647d579` (`git show 1e647d579:<путь>`): автофикстура
    `with _door().suspend_collection_owner(): yield`, в teardown `gc.unfreeze()`, в 4 тестах дисциплины `try/finally gc.unfreeze()`. Тела тестов не менять.
-4. `tests/test_gc_policy_guard.py`, новое правило R4 (AST, без allowlist): ни один файл под `tests/`-каталогами (включая `conftest.py` и хелперы) не вызывает `gc.freeze`,
+4. `tests/test_gc_policy_guard.py`, новое правило R4 (AST, без allowlist): ни один тест-файл по `_is_test_path` (тот же отбор, что у R1–R3: файлы под `tests/`, хелперы,
+   `test_*.py` и `conftest.py`, включая сессионный `modules/conftest.py` вне `tests/`; ред. 3 по ревью кода р1) не вызывает `gc.freeze`,
    `gc.unfreeze`, `suspend_collection_owner` — кроме файлов, чьё имя стоит в `collect_ignore` соседнего `conftest.py` (читается AST-разбором; `collect_ignore` не литерал
    списка строк → нарушение). Сканер ловит формы: `gc.unfreeze()`, `import gc as g; g.unfreeze()`, `from gc import freeze/unfreeze` (и `as`), `getattr(gc, "unfreeze")()`,
    присваивание `f = gc.unfreeze`, `suspend_collection_owner` как `Name` и как `Attribute` (`_door().suspend_collection_owner()`). Вывод нарушений — `путь:строка`.

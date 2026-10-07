@@ -244,16 +244,16 @@ def r4_violations(path: str, source: str, isolated: frozenset[str]) -> list[str]
     return [f"{path}:{line}" for line in sorted(_r4_lines(ast.parse(source, filename=path)))]
 
 
-def _is_under_tests_dir(path: str) -> bool:
-    return "/tests/" in f"/{path}"
-
-
 @dataclass(frozen=True)
 class R4Scan:
     violations: list[str]
-    files: int
+    scanned: frozenset[str]  # просканированные пути от корня репо
     isolated: dict[str, frozenset[str]]  # каталог -> имена из collect_ignore его conftest.py
     unparsable: list[str]
+
+    @property
+    def files(self) -> int:
+        return len(self.scanned)
 
 
 @functools.cache
@@ -264,11 +264,12 @@ def _r4_scan_repo() -> R4Scan:
         capture_output=True,
         check=True,
     ).stdout.decode("utf-8")
-    paths = sorted(p for p in out.split("\0") if p.endswith(".py") and _is_under_tests_dir(p))
+    # тест-файлы те же, что у R1–R3: в том числе сессионный modules/conftest.py вне tests/
+    paths = sorted(p for p in out.split("\0") if p.endswith(".py") and _is_test_path(p))
     isolated_by_dir: dict[str, frozenset[str]] = {}
     violations: list[str] = []
     unparsable: list[str] = []
-    files = 0
+    scanned: set[str] = set()
 
     def isolated_for(directory: str) -> frozenset[str]:
         if directory not in isolated_by_dir:
@@ -288,13 +289,13 @@ def _r4_scan_repo() -> R4Scan:
         file = _REPO_ROOT / path
         if not file.is_file():  # удалён в рабочем дереве, но ещё в индексе
             continue
-        files += 1
+        scanned.add(path)
         directory = path.rsplit("/", 1)[0]
         try:
             violations.extend(r4_violations(path, file.read_text(encoding="utf-8"), isolated_for(directory)))
         except (SyntaxError, UnicodeDecodeError, ValueError):
             unparsable.append(path)
-    return R4Scan(violations, files, isolated_by_dir, unparsable)
+    return R4Scan(violations, frozenset(scanned), isolated_by_dir, unparsable)
 
 
 @dataclass(frozen=True)
@@ -439,8 +440,11 @@ def test_tests_do_not_touch_freeze_outside_own_interpreter():
     assert scan.files > 500, f"R4 просканировал {scan.files} файлов под tests/"
     assert not scan.unparsable, f"R4: не разобраны AST: {scan.unparsable}"
     # якорь: изоляция двух файлов механизма прочитана из conftest.py пакета
-    assert scan.isolated[_PM_TESTS] == frozenset({"test_gc_collection_owner.py", "test_gc_discipline.py"})
+    # сначала список нарушений: выпавшее из collect_ignore имя видно как путь:строка, не как diff множеств
     assert not scan.violations, f"R4: {len(scan.violations)} нарушений:\n  " + "\n  ".join(scan.violations)
+    assert scan.isolated[_PM_TESTS] == frozenset({"test_gc_collection_owner.py", "test_gc_discipline.py"})
+    # сессионный conftest вне tests/ тоже в скане (он грузится в каждый процесс сессии)
+    assert "multiprocess_framework/modules/conftest.py" in scan.scanned
 
 
 def test_r4_isolated_files_really_touch_freeze():
@@ -488,3 +492,11 @@ def test_r4_scanner_forms_beyond_contract():
     # имя из isolated гасит только сам файл, не соседний conftest.py
     conf = "multiprocess_framework/modules/synthetic/tests/conftest.py"
     assert r4_violations(conf, "import gc\ngc.freeze()\n", frozenset({"conftest.py"})) == [f"{conf}:2"]
+
+
+def test_r4_covers_session_conftest_outside_tests_dir():
+    """Сессионный conftest.py вне ``tests/`` — тест-файл для R4 (грузится в каждый процесс сессии)."""
+    session_conftest = "multiprocess_framework/modules/conftest.py"
+    assert _is_test_path(session_conftest)  # отбор файлов скана R4 — тот же, что у R1–R3
+    source = "import gc\n\n\ndef _injected():\n    gc.unfreeze()\n"
+    assert r4_violations(session_conftest, source, frozenset()) == [f"{session_conftest}:5"]

@@ -29,6 +29,28 @@ def _tail(text: str | bytes | None, lines: int = 30) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
+def _child_env(parent: dict[str, str]) -> dict[str, str]:
+    """Окружение ребёнка: копия родительского (без PATH ребёнок падает INTERNALERROR) и три ключа поверх.
+
+    ``PYTEST_ADDOPTS`` родителя ребёнку не передаётся: ``-v`` меняет итоговую строку на
+    «=== 26 passed … ===», ``-k`` — на «25 passed, 1 deselected», и обёртка краснела бы от чужих опций.
+    """
+    env = dict(parent, PYTHONUTF8="1", QT_QPA_PLATFORM="offscreen", **{_CHILD_FLAG: "1"})
+    env.pop("PYTEST_ADDOPTS", None)
+    return env
+
+
+def test_child_env_drops_parent_pytest_addopts():
+    parent = {"PATH": "/bin", "PYTEST_ADDOPTS": "-v -k owner", "PYTHONUTF8": "0"}
+    assert _child_env(parent) == {
+        "PATH": "/bin",
+        "PYTHONUTF8": "1",
+        "QT_QPA_PLATFORM": "offscreen",
+        "FW_GC_OWN_INTERPRETER_CHILD": "1",
+    }
+    assert parent["PYTEST_ADDOPTS"] == "-v -k owner"  # родительское окружение не тронуто
+
+
 def test_gc_mechanism_in_own_interpreter(own_interpreter_files):
     files = own_interpreter_files
     # пустой список: pytest без путей собрал бы весь каталог, включая эту обёртку (рекурсия)
@@ -38,8 +60,7 @@ def test_gc_mechanism_in_own_interpreter(own_interpreter_files):
         pytest.fail(f"обёртка запущена в дочернем интерпретаторе ({_CHILD_FLAG} выставлен): рекурсия")
 
     cmd = [sys.executable, "-m", "pytest", *map(str, files), "-q", "-rfE", "-p", "no:cacheprovider"]
-    # env наследуется целиком (без PATH ребёнок падает INTERNALERROR), поверх — три ключа
-    env = dict(os.environ, PYTHONUTF8="1", QT_QPA_PLATFORM="offscreen", **{_CHILD_FLAG: "1"})
+    env = _child_env(dict(os.environ))
     try:
         proc = subprocess.run(
             cmd,
