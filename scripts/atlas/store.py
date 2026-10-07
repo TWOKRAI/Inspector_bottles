@@ -31,20 +31,31 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE TABLE IF NOT EXISTS snapshots (
     build_id INTEGER NOT NULL, node TEXT NOT NULL, metric TEXT NOT NULL, value REAL, time INTEGER);
 """
-_SCHEMA = 2  # PRAGMA user_version; база — производный кэш: другая версия -> файл пересоздаётся, миграций нет
+_SCHEMA = 2  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
+_TABLES = ("builds", "nodes", "edges", "findings", "snapshots")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    """Открыть (создав каталог и таблицы) базу реестра; версия схемы не совпала -> файл пересоздаётся."""
+    """Открыть (создав каталог и таблицы) базу реестра; версия схемы не совпала -> таблицы пересоздаются.
+
+    Файл не удаляется (параллельный `atlas build` держит его открытым): сброс — одна транзакция IMMEDIATE.
+    """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, isolation_level=None)
     if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:
-        con.close()
-        if Path(path).is_file():
-            Path(path).unlink()
-        con = sqlite3.connect(path)
-        con.executescript(_DDL)
-        con.execute(f"PRAGMA user_version = {_SCHEMA}")
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:  # другой процесс мог успеть раньше
+                for table in _TABLES:
+                    con.execute(f"DROP TABLE IF EXISTS {table}")
+                for statement in filter(str.strip, _DDL.split(";")):  # executescript сам делает COMMIT
+                    con.execute(statement)
+                con.execute(f"PRAGMA user_version = {_SCHEMA}")
+            con.execute("COMMIT")
+        except BaseException:
+            con.close()
+            raise
+    con.isolation_level = ""  # дальше — обычный режим транзакций, как у остального кода
     return con
 
 

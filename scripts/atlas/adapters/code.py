@@ -45,10 +45,12 @@ def _read(root: Path, ref: str, paths: list[str], strict: bool = True) -> dict[s
             raise ValueError
         for path in paths:
             end = proc.stdout.index(b"\n", pos)
-            parts = proc.stdout[pos:end].split(b" ")
-            size = int(parts[2]) if len(parts) == 3 else -1
-            out[path] = proc.stdout[end + 1 : end + 1 + size] if len(parts) == 3 and parts[1] == b"blob" else None
-            pos = end + 1 + max(size, 0) + (1 if size >= 0 else 0)
+            header, pos = proc.stdout[pos:end], end + 1
+            out[path] = None
+            if not header.endswith(b" missing"):  # путь с пробелом даёт заголовок из 3+ частей
+                _, kind, size = header.split(b" ")
+                out[path] = proc.stdout[pos : pos + int(size)] if kind == b"blob" else None
+                pos += int(size) + 1
             if strict and out[path] is None:
                 raise ValueError
     except ValueError:
@@ -121,7 +123,7 @@ def _pre_post(mid: str, path: str, text: str, names: set[str], base_raw: bytes |
     gaps = contract_gaps(text)
     old: dict[str, set[str]] | None = None
     if gaps and base_raw is not None:
-        base_text = base_raw.decode("utf-8", "replace")
+        base_text = base_raw.decode("utf-8", "replace").removeprefix("\ufeff")
         base_lines = _NEWLINE.split(base_text)
         try:
             old = {}
@@ -168,7 +170,7 @@ class CodeAdapter:
         base_blobs = _read(root, ctx.base.ref, list(iface.values()), strict=False) if ctx.base is not None else {}
         names_of: dict[str, list[str]] = {}
         for mid, path in iface.items():
-            text = (blobs[path] or b"").decode("utf-8", "replace")
+            text = (blobs[path] or b"").decode("utf-8", "replace").removeprefix("\ufeff")
             try:
                 names = names_of[mid] = _interface_names(ast.parse(text))
             except (SyntaxError, ValueError):
