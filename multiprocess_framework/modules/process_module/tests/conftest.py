@@ -1,40 +1,18 @@
-"""Pytest: PYTHONPATH к каталогу modules + корень проекта, снимок реестра объявлений, возврат заморозки gc."""
+"""Pytest: PYTHONPATH к каталогу modules + корень проекта, снимок реестра объявлений, изоляция тестов механизма gc.
 
-import gc
+Тесты механизма заморозки gc (``collect_ignore`` ниже) зовут настоящие ``gc.freeze``/``gc.unfreeze``
+и ``suspend_collection_owner``. Это глобальное состояние процесса: в общем прогоне они размораживали
+бы сессионную кучу pytest, и вернуть её точно нельзя (``gc.get_freeze_count()`` не монотонен).
+Поэтому эти файлы здесь не собираются, а идут в своём интерпретаторе через
+``test_gc_mechanism_own_interpreter.py``. Спек: plans/2026-10-03_lifecycle-owner-scope/task-T1-gc-isolation.md.
+"""
+
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 
-
-@contextmanager
-def freeze_restored():
-    """Блок, после которого заморозка gc возвращена к той, что была до него.
-
-    Зачем: тесты механизма заморозки (и выход ``suspend_collection_owner``, когда сессионный
-    владелец морозил) зовут ``gc.unfreeze()``. Он глобален: все permanent-объекты процесса
-    pytest (сессионная заморозка границы, сотни тысяч объектов) уходят в старшее поколение, и
-    следующая граница теста обходит всю кучу — пауза 170–280 мс на тест.
-
-    Выборочно разморозить нельзя, поэтому на выходе, если ``gc.get_freeze_count()`` изменился:
-    ``gc.unfreeze()`` → ``gc.collect(1)`` (только молодые поколения: мусор блока не уходит в
-    permanent, полной сборки нет) → ``gc.freeze()`` при ``n0 > 0``.
-
-    ``n0 == 0`` на практике не бывает: уже старт интерпретатора даёт ненулевой счётчик (377 под
-    ``python -I -S``), а в сессии pytest кучу морозит граница теста. Ноль достижим только после
-    явного ``gc.unfreeze()`` до блока; тогда — только ``gc.unfreeze()`` без повторной заморозки.
-    Эту ветку проверяет один тест в искусственно размороженном состоянии.
-    Мусор, который блок сам успел заморозить, ``collect(1)`` не достаёт (он в старшем поколении).
-    """
-    n0 = gc.get_freeze_count()
-    try:
-        yield
-    finally:
-        if gc.get_freeze_count() != n0:
-            gc.unfreeze()
-            gc.collect(1)
-            if n0 > 0:
-                gc.freeze()
-
+#: Файлы, которые общий прогон не собирает: их гоняет дочерний интерпретатор.
+#: Единственный источник списка (литерал: его читает AST-страж R4 в tests/test_gc_policy_guard.py).
+collect_ignore = ["test_gc_collection_owner.py", "test_gc_discipline.py"]
 
 _modules = Path(__file__).resolve().parent.parent.parent
 _root = _modules.parent.parent
@@ -51,9 +29,6 @@ from multiprocess_framework.modules.observability_declarations import (  # noqa:
 )
 from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (  # noqa: E402
     ensure_framework_producers,
-)
-from multiprocess_framework.modules.process_module.lifecycle.gc_discipline import (  # noqa: E402
-    suspend_collection_owner,
 )
 
 
@@ -79,35 +54,8 @@ def declarations_snapshot():
     restore(state)
 
 
-@contextmanager
-def slot_suspended_freeze_restored():
-    """Слот владельца сборки освобождён на блок; заморозка gc возвращена ПОСЛЕ выхода suspend.
-
-    Порядок зафиксирован здесь, в одном месте: выход ``suspend_collection_owner`` сам зовёт
-    ``gc.unfreeze()`` (``_rearm`` морозившего сессионного владельца), поэтому ``freeze_restored``
-    обязан быть СНАРУЖИ. Обратная вложенность пропускает эту разморозку — и следующая граница
-    теста снова обходит всю кучу. Порядок проверяет тест на живом владельце в
-    ``test_gc_freeze_restore.py``.
-    """
-    with freeze_restored():
-        with suspend_collection_owner():
-            yield
-
-
 @pytest.fixture
-def gc_slot_suspended():
-    """Тест внутри ``slot_suspended_freeze_restored()`` — для autouse-фикстур тестов механизма gc."""
-    with slot_suspended_freeze_restored():
-        yield
-
-
-@pytest.fixture
-def freeze_restore_block():
-    """Сам контекст-менеджер ``freeze_restored`` — для тестов на него (без импорта conftest)."""
-    return freeze_restored
-
-
-@pytest.fixture
-def slot_suspended_block():
-    """Сам контекст-менеджер ``slot_suspended_freeze_restored`` — для теста на порядок."""
-    return slot_suspended_freeze_restored
+def own_interpreter_files() -> list[Path]:
+    """Абсолютные пути файлов из ``collect_ignore`` — их запускает дочерний интерпретатор."""
+    here = Path(__file__).resolve().parent
+    return [here / name for name in collect_ignore]
