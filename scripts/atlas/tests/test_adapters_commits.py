@@ -5,7 +5,9 @@ Purpose: узлы commit, рёбра refs/implements/touches/done_by, наход
     модули без узла. Правки 1.3c: левая граница токена Refs (О10), служебные имена не планы (О11),
     трейлеры ВСЕХ коммитов-предков без слияний (трейлеры слияний игнорируются). Правки 1.3c раунд 2: узел commit
     у каждого коммита без слияний с трейлером Refs:/Task: (у каждого ребра и находки есть узел-источник);
-    константа служебных имён `_SERVICE_NAMES` и `_is_service_name` в адаптере (без импорта plans_progress).
+    константа служебных имён `_SERVICE_NAMES` и `_is_service_name` в адаптере (без импорта plans_progress;
+    литеральные пины SERVICE_NAMES/RESULT_FILE_RE источника); версия адаптера 4; проверка узла-источника
+    у рёбер и находок — внутри пин-тестов на реальном checkout.
 Public API: тесты test_*; публичных имён нет.
 Stability: lite
 
@@ -404,6 +406,17 @@ def _assert_task_findings_missing(doc: dict[str, Any]) -> None:
     assert found == expected
 
 
+def _assert_no_orphan_refs(doc: dict[str, Any]) -> None:
+    """0 рёбер refs/implements без узла-источника и 0 находок REF_* без узла commit."""
+    node_ids = set(_ids(doc, "commit"))
+    ref_edges = _edges(doc, "refs") + _edges(doc, "implements")
+    assert len(ref_edges) > 100  # предусловие осмысленности: рёбра-источники вообще есть
+    assert [src for src, _, _ in ref_edges if src.removeprefix("commit:") not in node_ids] == []
+    ref_findings = [f for f in doc["findings"] if f["code"] in _REF_CODES]
+    assert len(ref_findings) > 100
+    assert [f["node"] for f in ref_findings if f["node"].removeprefix("commit:") not in node_ids] == []
+
+
 def test_pinned_counts_on_this_checkout(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     doc = _real_doc(atlas, monkeypatch, tmp_path)
     counts = {kind: len(_ids(doc, kind)) for kind in ("commit", "module", "plan", "task")}
@@ -425,6 +438,7 @@ def test_pinned_counts_on_this_checkout(atlas: Any, monkeypatch: pytest.MonkeyPa
         "task:atlas#2.4",
         "task:commit-mechanism#3.1",
     ]
+    _assert_no_orphan_refs(doc)
 
 
 def _slug(value: str) -> str | None:
@@ -870,6 +884,7 @@ def test_ref_findings_pinned_on_origin_main(atlas: Any, monkeypatch: pytest.Monk
     ) in pairs
     first_parent = _sha_set(["rev-list", "--first-parent", _PIN_FULL])
     assert sum(1 for f in moved if f["node"].removeprefix("commit:") not in first_parent) == 511
+    _assert_no_orphan_refs(doc)
 
 
 def test_refs_left_boundary(repo_factory: RepoFactory, atlas: Any) -> None:
@@ -1098,37 +1113,15 @@ def test_pinned_on_a5ae9657a(atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_pa
     implements = _edges(doc, "implements")
     assert len(implements) == len(oracle) == 176
     assert sum(1 for sha, _ in oracle if sha not in first_parent) == 176
-    assert len(implements) == 176
+    _assert_no_orphan_refs(doc)
 
 
 def test_commits_adapter_version_is_bumped() -> None:
     from scripts.atlas.adapters.commits import CommitsAdapter
     from scripts.atlas.adapters.plans import PlansAdapter
 
-    assert CommitsAdapter().version >> 48 == 3
+    assert CommitsAdapter().version >> 48 == 4
     assert PlansAdapter().version >> 48 == 1
-
-
-_NODE_COUNTS = [
-    (_PIN, 4580),
-    (_PIN_FULL, 4603),
-    (_PIN_A5, 4656),
-]
-
-
-@pytest.mark.parametrize(("pin", "expected_nodes"), _NODE_COUNTS)
-def test_every_ref_edge_and_finding_has_a_commit_node(
-    atlas: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pin: str, expected_nodes: int
-) -> None:
-    doc = _real_doc(atlas, monkeypatch, tmp_path, pin)
-    node_ids = set(_ids(doc, "commit"))
-    assert len(node_ids) == expected_nodes
-    ref_edges = _edges(doc, "refs") + _edges(doc, "implements")
-    assert len(ref_edges) > 100  # предусловие осмысленности: рёбра-источники вообще есть
-    assert [src for src, _, _ in ref_edges if src.removeprefix("commit:") not in node_ids] == []
-    ref_findings = [f for f in doc["findings"] if f["code"] in _REF_CODES]
-    assert len(ref_findings) > 100
-    assert [f["node"] for f in ref_findings if f["node"].removeprefix("commit:") not in node_ids] == []
 
 
 def test_commit_nodes_for_trailer_commits_on_temp_repo(repo_factory: RepoFactory, atlas: Any) -> None:
@@ -1182,7 +1175,10 @@ def test_service_name_constant_matches_plans_progress() -> None:
 
     plans_progress = _load_plans_progress()
     listing = GitRepo(_ROOT).git("ls-tree", "--name-only", "HEAD", "plans/", "plans/_archive/")
-    names = {line.rsplit("/", 1)[-1] for line in listing.splitlines() if line}
+    clone_names = {line.rsplit("/", 1)[-1] for line in listing.splitlines() if line}
+    names = set(clone_names)
+    # предусловие осмысленности: хотя бы одно имя из `git ls-tree` клона (до синтетики) служебное (README.md)
+    assert any(commits._is_service_name(n) for n in clone_names)
     names |= {
         ".hidden",
         "x.result-1.1.md",
@@ -1198,9 +1194,9 @@ def test_service_name_constant_matches_plans_progress() -> None:
         "2026-10-01_alpha",
         "README.md",
     }
-    assert {"README.md", "QUEUE.md", "queue", "_archive"} <= names
     for name in sorted(names):
         assert commits._is_service_name(name) == plans_progress.is_service_name(name), name
-    from_clone = [n for n in names if commits._is_service_name(n)]
-    assert len(set(from_clone) & {"README.md", "QUEUE.md", "queue", "_archive"}) == 4
+    # литеральные пины источника: добавление имени в plans_progress краснит тест, даже если файла в plans/ нет
+    assert plans_progress.SERVICE_NAMES == {"queue", "_archive", "QUEUE.md", "README.md"}
+    assert plans_progress.RESULT_FILE_RE.pattern == r"\.result-.+\.md$"
     assert commits._SERVICE_NAMES == {"queue", "_archive", "QUEUE.md", "README.md"}
