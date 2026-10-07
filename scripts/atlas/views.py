@@ -32,7 +32,7 @@ _SKIP = ("#", "---", "|", ">", "<", "!", "-", "*", "[")
 
 def _natural(text: str) -> list[tuple[int, int, str]]:
     """Ключ натурального порядка: числа < слова, числа по значению, остальное как строки."""
-    return [(0, int(c), "") if c.isdecimal() else (1, 0, c) for c in re.findall(r"\d+|[A-Za-z]+|[^\dA-Za-z]+", text)]
+    return [(0, int(c), c) if c.isdecimal() else (1, 0, c) for c in re.findall(r"\d+|[A-Za-z]+|[^\dA-Za-z]+", text)]
 
 
 def _git(root: Path, *args: str, input: bytes | None = None) -> bytes:
@@ -316,7 +316,7 @@ def pack(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, task: str
             for p in paths.get(s, []):
                 owners[p].add(t)
     if modules:
-        chosen, source = sorted(modules), "--module"
+        chosen, source = sorted(set(modules)), "--module"
     elif mods.get(tid):
         chosen, source = sorted(mods[tid]), "коммиты задачи"
     elif latest:
