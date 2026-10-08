@@ -99,8 +99,8 @@
   "id": "A10",
   "prop": "5 структурная: «хотя бы один» вместо «все»",
   "file": "scripts/atlas/rules.py",
-  "old": "        return not missing\n",
-  "new": "        return len(missing) < len(need)\n",
+  "old": "                    missing.discard(t.attr)\n        return not missing\n",
+  "new": "                    missing.discard(t.attr)\n        return len(missing) < len(need)\n",
   "forecast": [
    "test_card_on_the_pin_for_config_module",
    "test_exam_row_is_closed",
@@ -173,8 +173,8 @@
   "id": "A16",
   "prop": "7 тесты: засчитывается по слову в docstring",
   "file": "scripts/atlas/codemap.py",
-  "old": "sum(bool(local & t) for t in self.test_names(path))",
-  "new": "sum(bool(local & (t | self.words(path))) for t in self.test_names(path))",
+  "old": "count += any(n in segment for n in local) and bool(local & _names(fn))",
+  "new": "count += any(n in segment for n in local) and bool(local & (_names(fn) | self.words(path)))",
   "forecast": [
    "test_exam_row_is_closed",
    "test_exam_score_is_at_least_eight_of_ten",
