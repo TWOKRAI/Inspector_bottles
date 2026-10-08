@@ -127,4 +127,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(newline="\n")  # type: ignore[union-attr]  # LF и на Windows: вывод байт в байт
+    except AttributeError:  # поток без reconfigure (подмена stdout)
+        pass
     sys.exit(main())

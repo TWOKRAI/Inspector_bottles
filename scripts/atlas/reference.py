@@ -20,7 +20,8 @@ from typing import Any
 
 from scripts.atlas.adapters.code import _read
 from scripts.atlas.adapters.modules import modules_for
-from scripts.atlas.build import build
+from scripts.atlas import store
+from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import DUNDERS, USAGE_UNKNOWN, Code, checkout, dotted, is_test
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.rules import Scan, all_of
@@ -282,6 +283,9 @@ def ref(
 ) -> list[str]:
     """Справочник модуля: интерфейсы (вид, члены, реализации), «Код модуля», «Кто использует»; `symbol` сужает всё."""
     sha = resolve(root, ref)
+    key = (sha, main_ref, fingerprint(), code_fingerprint(), "ref", f"{module}\0{symbol or ''}")
+    if (hit := store.get_view(con, *key)) is not None:
+        return hit
     tree = Tree(root, sha)
     rows = modules_for(tree)
     if all(r["id"] != module for r in rows):
@@ -363,7 +367,9 @@ def ref(
         lines += _cap([head, *block], 150, module)
     elif symbol not in names:
         lines += [code[symbol][0], *_code_node(code[symbol][1])]
-    return lines + _usage_lines(module, use, shown)
+    lines += _usage_lines(module, use, shown)
+    store.put_view(con, *key, lines)
+    return lines
 
 
 def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[str]:

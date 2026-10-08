@@ -2,18 +2,29 @@
 
 Purpose: одна строка `builds` на ключ (sha, main_ref, fingerprint, base_tree); остальные таблицы — по build_id.
     Журнал по умолчанию (без WAL): повторная сборка с тем же ключом не меняет байты файла.
-Public API: connect, find_build, write_build, read_build, build_row, modules_without_contract_test.
+Public API: connect, find_build, write_build, read_build, build_row, modules_without_contract_test, get_view, put_view.
+    Таблица view_cache — готовый вывод `ref`/`card` (список строк) по ключу ревизии, отпечатков адаптеров и кода.
 Stability: lite
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 from scripts.atlas.schema import AdapterOutput, Edge, Finding, Node
 
-__all__ = ["build_row", "connect", "find_build", "modules_without_contract_test", "read_build", "write_build"]
+__all__ = [
+    "build_row",
+    "connect",
+    "find_build",
+    "get_view",
+    "modules_without_contract_test",
+    "put_view",
+    "read_build",
+    "write_build",
+]
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS builds (
@@ -30,9 +41,12 @@ CREATE TABLE IF NOT EXISTS findings (
     detail TEXT NOT NULL, message TEXT NOT NULL, source TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots (
     build_id INTEGER NOT NULL, node TEXT NOT NULL, metric TEXT NOT NULL, value REAL, time INTEGER);
+CREATE TABLE IF NOT EXISTS view_cache (
+    sha TEXT NOT NULL, main_ref TEXT NOT NULL, fingerprint TEXT NOT NULL, code TEXT NOT NULL, view TEXT NOT NULL,
+    arg TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (sha, main_ref, fingerprint, code, view, arg));
 """
-_SCHEMA = 2  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
-_TABLES = ("builds", "nodes", "edges", "findings", "snapshots")
+_SCHEMA = 3  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
+_TABLES = ("builds", "nodes", "edges", "findings", "snapshots", "view_cache")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -133,3 +147,26 @@ def modules_without_contract_test(con: sqlite3.Connection, build_id: int, since_
         (build_id, since_ts),
     )
     return [r[0] for r in rows]
+
+
+def get_view(
+    con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, code: str, view: str, arg: str
+) -> list[str] | None:
+    """Готовые строки вида по полному ключу или None; `code` — отпечаток исходников atlas."""
+    row = con.execute(
+        "SELECT body FROM view_cache WHERE sha = ? AND main_ref = ? AND fingerprint = ? AND code = ? "
+        "AND view = ? AND arg = ?",
+        (sha, main_ref, fingerprint, code, view, arg),
+    ).fetchone()
+    return None if row is None else json.loads(row[0])
+
+
+def put_view(
+    con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, code: str, view: str, arg: str, lines: list[str]
+) -> None:
+    """Запомнить строки вида (только успешный результат); тот же ключ перезаписывается."""
+    with con:
+        con.execute(
+            "INSERT OR REPLACE INTO view_cache VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sha, main_ref, fingerprint, code, view, arg, json.dumps(lines, ensure_ascii=False)),
+        )
