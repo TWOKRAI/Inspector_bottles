@@ -470,7 +470,7 @@ def test_module_code_scope_header_counts_and_symbols(
         "    __call__(key: str) -> None  :59",
     ):
         assert row in section, row
-    text = "\n".join(section)
+    text = "\n".join(section[1:])  # заголовок раздела сам содержит «interfaces.py»
     for absent in ("_Internal", "hidden", "Fake", "FakeY", "IA —", "IBase", "interfaces.py"):
         assert absent not in text, absent
 

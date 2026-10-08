@@ -244,8 +244,8 @@ def f2_repo(factory: RepoFactory, mp: pytest.MonkeyPatch, name: str = "f2") -> G
     return repo
 
 
-def _p_findings(atlas: Any, repo: GitRepo) -> list[tuple[str, str, str, str, str]]:
-    res = atlas(repo, "--json", *REFS)
+def _p_findings(atlas: Any, repo: GitRepo, refs: tuple[str, ...] = REFS) -> list[tuple[str, str, str, str, str]]:
+    res = atlas(repo, "--json", *refs)
     assert res.code == 0, res.err
     rows = [
         (f["code"], f["severity"], f["node"], f["detail"], f["source"])
@@ -326,7 +326,7 @@ def test_code_shift_keeps_the_key_and_check_shows_nothing_new(
     put(repo, "f/io.py", "# сдвиг на одну строку\n" + F_IO)
     put(repo, "f/impls.py", "# сдвиг на одну строку\n" + F_IMPLS)
     commit(repo, monkeypatch, "2026-10-02", "shift")
-    shifted = _p_findings(atlas, repo)
+    shifted = _p_findings(atlas, repo, ("--ref", "HEAD", "--main-ref", "main"))  # сдвиг закоммичен в ветке feat
     assert [(c, n, d) for c, _s, n, d, _src in shifted] == [(c, n, d) for c, _s, n, d, _src in F_EXPECTED]
     assert ("P4_DIRECT_WRITE", "warning", "module:f", "f/io.py::write_plain", "f/io.py:8") in shifted
     res = atlas(repo, "check")

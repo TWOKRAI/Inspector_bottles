@@ -83,7 +83,9 @@ def test_card_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     ]
     findings = lines[start + 6 :]
     assert findings[0].startswith("Находки (")
-    assert "  info INTERFACE_WITHOUT_TEST interface:router_module:IRouterManager -" in findings
+    # лимит 10 строк и порядок blocking > warning > info: 17 warning П-правил вытесняют info из вывода
+    assert any(line.startswith("  warning P") for line in findings)
+    assert not any(line.startswith("  info INTERFACE_WITHOUT_TEST") for line in findings)
     assert any(line.startswith("Кто использует модуль (") for line in findings)
     assert "Правила ADR-175 (храповик; framework — находки, services/plugins — рекомендация):" in findings
     assert len(lines) <= 60

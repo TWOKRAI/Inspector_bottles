@@ -120,7 +120,11 @@ def test_honest_test_count_in_headers_on_f1(
 ) -> None:
     repo = f1_repo(repo_factory, monkeypatch)
     lines = lines_of(atlas(repo, "ref", "m", *REFS))
-    headers = {line.split(" — ")[0]: line for line in lines if line and not line.startswith(" ") and " — " in line}
+    headers = {
+        line.split(" — ")[0]: line
+        for line in lines
+        if line and not line.startswith(" ") and " — " in line and " — вне модуля " not in line
+    }  # строки раздела «Кто использует» (`IA — вне модуля …`) не затирают заголовки
     # IA: две тестовые функции в двух файлах, «пример» — наименьший путь
     assert headers["IA"] == "IA — Контракт A — m/interfaces.py:10 — тестов 2, пример m/tests/test_x.py"
     # IP: слово только в docstring и комментарии теста — по слову было бы 1, честно 0
