@@ -23,6 +23,7 @@ ConfigFileWatcher — hot-reload конфигов при изменении фа
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional, TYPE_CHECKING
@@ -52,6 +53,9 @@ class _ConfigReloadHandler(FileSystemEventHandler):
         self._debounce = debounce_seconds
         self._log_error = log_error
         self._last_reload: float = 0.0
+        self._lock = threading.RLock()
+        self._timer: Optional[threading.Timer] = None
+        self._stopped = False
 
     def on_modified(self, event: FileModifiedEvent) -> None:
         """Запись НА МЕСТЕ, а также пересоздание файла (remove + write).
@@ -91,12 +95,63 @@ class _ConfigReloadHandler(FileSystemEventHandler):
         if Path(raw_path).resolve() != self._target:
             return
 
-        now = time.monotonic()
-        if now - self._last_reload < self._debounce:
-            return
-        self._last_reload = now
+        with self._lock:
+            if self._stopped:
+                return
+            now = time.monotonic()
+            if now - self._last_reload < self._debounce:
+                self._schedule_delayed(self._last_reload + self._debounce - now)
+                return
+            self._last_reload = now
+            self._reload()
 
-        self._reload()
+    def _schedule_delayed(self, delay: float) -> None:
+        """Событие, отброшенное окном, не пропадает: ставим ОДИН отложенный повтор.
+
+        Запись «на месте» (медленная, кусками) даёт первое событие, когда файл
+        ещё пуст или записан не до конца, а второе — с итоговым содержимым — окно
+        отбрасывало. Итог терялся: конфиг навсегда оставался на промежуточном
+        состоянии. Повтор читает файл на момент ``_last_reload + debounce``,
+        то есть уже после всей серии. Вызывать под ``self._lock``.
+        """
+        if self._timer is not None:
+            return
+        timer = threading.Timer(max(delay, 0.0), self._delayed_reload)
+        timer.daemon = True
+        self._timer = timer
+        timer.start()
+
+    def _delayed_reload(self) -> None:
+        """Колбэк таймера: флаг «повтор ожидается» снимается ДО чтения файла.
+
+        Запись, пришедшая во время чтения, увидит снятый флаг и поставит новый
+        повтор; иначе она была бы потеряна. ``_reload`` идёт под замком: его
+        зовут и поток таймера, и поток watchdog, а у ``on_reload`` замка нет.
+        """
+        with self._lock:
+            self._timer = None
+            if self._stopped:
+                return
+            self._last_reload = time.monotonic()
+            self._reload()
+
+    def cancel(self) -> None:
+        """Отменить отложенный повтор и дождаться уже идущего колбэка.
+
+        Таймер берётся под замком, но отмена и ``join`` — ПОСЛЕ его отпускания:
+        колбэку нужен тот же замок, и удержание его на время ``join`` дало бы
+        перезагрузку уже после возврата ``stop()``. ``Timer.cancel()`` не
+        останавливает колбэк, который уже запущен, поэтому нужен ``join``.
+        """
+        with self._lock:
+            self._stopped = True
+            timer = self._timer
+            self._timer = None
+        if timer is None:
+            return
+        timer.cancel()
+        if timer is not threading.current_thread():
+            timer.join(timeout=5)
 
     def _reload(self) -> None:
         """Перезагрузить конфиг из файла.
@@ -143,6 +198,11 @@ class ConfigFileWatcher:
     Hot-reload: следит за файлом, обновляет Config при изменении.
 
     Запускает фоновый daemon-поток через watchdog Observer.
+
+    Контракт ``on_reload``: вызывается в потоке watchdog или в потоке отложенного
+    повтора (Timer), всегда под замком обработчика, и не должен звать ``stop()``
+    этого же watcher: ``stop()`` берёт замок Observer, поток watchdog ждёт замок
+    обработчика — взаимная блокировка.
     """
 
     def __init__(
@@ -159,13 +219,14 @@ class ConfigFileWatcher:
         self._debounce = debounce_seconds
         self._log_error = log_error
         self._observer: Optional[Observer] = None
+        self._handler: Optional[_ConfigReloadHandler] = None
 
     def start(self) -> None:
         """Начать наблюдение в фоновом потоке."""
         if self._observer is not None:
             return
 
-        handler = _ConfigReloadHandler(
+        self._handler = _ConfigReloadHandler(
             self._path,
             self._config,
             self._on_reload,
@@ -174,7 +235,7 @@ class ConfigFileWatcher:
         )
         self._observer = Observer()
         self._observer.daemon = True
-        self._observer.schedule(handler, str(self._path.parent), recursive=False)
+        self._observer.schedule(self._handler, str(self._path.parent), recursive=False)
         self._observer.start()
 
     def stop(self) -> None:
@@ -183,6 +244,9 @@ class ConfigFileWatcher:
             self._observer.stop()
             self._observer.join(timeout=5)
             self._observer = None
+        if self._handler is not None:
+            self._handler.cancel()
+            self._handler = None
 
     @property
     def is_running(self) -> bool:

@@ -191,16 +191,19 @@ def test_recreate_without_rename_also_reloads(tmp_path):
         watcher.stop()
 
 
-def test_rapid_edits_collapse_into_one_reload(tmp_path):
-    """Дебаунс: серия быстрых правок = ОДНА перезагрузка.
+def test_rapid_edits_collapse_into_first_and_one_delayed_reload(tmp_path):
+    """Дебаунс: серия быстрых правок = первая перезагрузка + ОДИН отложенный повтор.
 
     **Уточнение после слом-инъекции W3.** Первая редакция этого теста утверждала,
     что атомарная подмена даёт три события на целевой файл и без дебаунса
     перечитывала бы конфиг трижды. Это неверно: для целевого пути приходит РОВНО
     одно событие (``moved``), а ``created``/``modified`` относятся к временному
-    файлу. Инъекция «дебаунса нет» не убила тест — то есть он сторожил
-    несуществующее свойство. Дебаунс защищает от другого: от СЕРИИ правок,
-    которую даёт ползунок пульта или редактор, сохраняющий по каждому нажатию.
+    файлу. Дебаунс защищает от СЕРИИ правок, которую даёт ползунок пульта или
+    редактор, сохраняющий по каждому нажатию.
+
+    Прежняя редакция закрепляла потерю: серия ``v0…v4`` давала ``['v0']``, а
+    итог ``v4`` отбрасывался окном. Теперь первая запись применяется сразу, а
+    остальные схлопываются в один повтор на ``_last_reload + debounce``.
     """
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps({"value": "original"}))
@@ -219,10 +222,70 @@ def test_rapid_edits_collapse_into_one_reload(tmp_path):
         for i in range(5):
             _atomic_write(config_file, {"value": f"v{i}"})
             time.sleep(0.1)
-        time.sleep(1.5)
-        assert len(reloads) == 1, f"серия из 5 правок дала {len(reloads)} перезагрузок вместо одной"
+        deadline = time.monotonic() + 5.0
+        while len(reloads) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert len(reloads) == 2, f"серия из 5 правок дала {len(reloads)} перезагрузок вместо двух"
+        assert reloads[-1] == "v4"
+        assert cfg.get("value") == "v4"
     finally:
         watcher.stop()
+
+
+def test_dropped_event_gets_one_delayed_reload_with_last_content(tmp_path):
+    """Событие, отброшенное окном, не теряет итоговую запись."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"v": "original"}))
+
+    cfg = Config(initial_data={"v": "original"})
+    reloads = []
+    watcher = ConfigFileWatcher(
+        path=config_file,
+        config=cfg,
+        on_reload=lambda c: reloads.append(c.get("v")),
+        debounce_seconds=1.0,
+    )
+    watcher.start()
+    try:
+        time.sleep(0.4)
+        for i in range(5):
+            _atomic_write(config_file, {"v": f"v{i}"})
+            time.sleep(0.05)
+        deadline = time.monotonic() + 5.0
+        while cfg.get("v") != "v4" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert cfg.get("v") == "v4"
+        time.sleep(1.5)  # лишний повтор взвёл бы себя после окна — ждём дольше окна
+        assert len(reloads) <= 2, f"отложенных повторов больше одного: {reloads}"
+    finally:
+        watcher.stop()
+
+
+def test_stop_cancels_the_pending_delayed_reload(tmp_path):
+    """После ``stop()`` отложенный повтор не срабатывает."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"v": "original"}))
+
+    cfg = Config(initial_data={"v": "original"})
+    reloads = []
+    watcher = ConfigFileWatcher(
+        path=config_file,
+        config=cfg,
+        on_reload=lambda c: reloads.append(c.get("v")),
+        debounce_seconds=1.0,
+    )
+    watcher.start()
+    try:
+        time.sleep(0.4)
+        _atomic_write(config_file, {"v": "first"})
+        time.sleep(0.05)
+        _atomic_write(config_file, {"v": "second"})
+        time.sleep(0.2)
+    finally:
+        watcher.stop()
+    count = len(reloads)
+    time.sleep(2.0)
+    assert len(reloads) == count, f"после stop() пришла перезагрузка: {reloads}"
 
 
 def test_foreign_file_in_the_same_directory_is_ignored(tmp_path):
