@@ -1,0 +1,370 @@
+[
+ {
+  "id": "A01",
+  "prop": "1 ревизия на диск",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            specs = [f\":(glob){r}/**/*.py\" for r in roots]\n            proc = run_git(tree.root, \"-c\", \"core.autocrlf=false\", \"archive\", \"--format=tar\", tree.ref, \"--\", *specs)\n            if proc.returncode != 0:\n                raise AtlasError(\"atlas: git archive failed\")\n            tar = shutil.which(\"tar\")\n            if (\n                not tar\n                or subprocess.run([tar, \"-x\", \"-C\", str(base)], input=proc.stdout, capture_output=True).returncode\n            ):\n                with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as archive:\n                    archive.extractall(base, filter=\"data\")",
+  "new": "            for r in roots:\n                shutil.copytree(tree.root / r, base / r, dirs_exist_ok=True)",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_output_follows_the_revision_not_the_working_tree"
+  ]
+ },
+ {
+  "id": "A03",
+  "prop": "3 вид: Protocol как класс",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            if \"Protocol\" in bases:",
+  "new": "            if False:",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations"
+  ]
+ },
+ {
+  "id": "A04",
+  "prop": "3 абстрактные: унаследованные не учитываются",
+  "file": "scripts/atlas/codemap.py",
+  "old": "                names |= got",
+  "new": "                pass",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_symbol_narrows_every_section_for_an_interface"
+  ]
+ },
+ {
+  "id": "A05",
+  "prop": "3 строка унаследованных не печатается",
+  "file": "scripts/atlas/reference.py",
+  "old": "                for b, ns in (desc[1] if desc else [])",
+  "new": "                for b, ns in []",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_symbol_narrows_every_section_for_an_interface"
+  ]
+ },
+ {
+  "id": "A06",
+  "prop": "4 dunder: __call__ скрыт",
+  "file": "scripts/atlas/codemap.py",
+  "old": "\"__init__ __call__ __enter__",
+  "new": "\"__init__ __enter__",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_module_code_scope_header_counts_and_symbols",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_ref_private_and_other_dunders_are_hidden"
+  ]
+ },
+ {
+  "id": "A07",
+  "prop": "4 dunder: __len__ скрыт",
+  "file": "scripts/atlas/codemap.py",
+  "old": "__setitem__ __len__ \"",
+  "new": "__setitem__ \"",
+  "forecast": [
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_ref_private_and_other_dunders_are_hidden"
+  ]
+ },
+ {
+  "id": "A08",
+  "prop": "5 явная: транзитивный предок не учитывается",
+  "file": "scripts/atlas/rules.py",
+  "old": "                for part, acc in zip(self._ancestors(target), (keys, ext)):\n                    acc |= part",
+  "new": "                pass",
+  "forecast": [
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations"
+  ]
+ },
+ {
+  "id": "A09",
+  "prop": "5 структурная: порог >= 2 снят",
+  "file": "scripts/atlas/rules.py",
+  "old": "len(need) >= 2 and self.has_all(key, need)",
+  "new": "len(need) >= 1 and self.has_all(key, need)",
+  "forecast": [
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_single_member_matches_are_not_implementations"
+  ]
+ },
+ {
+  "id": "A10",
+  "prop": "5 структурная: «хотя бы один» вместо «все»",
+  "file": "scripts/atlas/rules.py",
+  "old": "        return not missing\n",
+  "new": "        return len(missing) < len(need)\n",
+  "forecast": [
+   "test_card_on_the_pin_for_config_module",
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_single_member_matches_are_not_implementations"
+  ]
+ },
+ {
+  "id": "A11",
+  "prop": "5 Qt: пометка не ставится, находка P1 поднимается",
+  "file": "scripts/atlas/rules.py",
+  "old": "kind = \"структурно (Qt)\" if any(e.startswith(_QT) for e in ext) else \"структурно\"",
+  "new": "kind = \"структурно\"",
+  "forecast": [
+   "test_findings_p1_p4_on_the_framework_layer_are_exact",
+   "test_qt_structural_implementation_is_not_a_p1_finding",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations"
+  ]
+ },
+ {
+  "id": "A12",
+  "prop": "6 код модуля: вложенный tests/ не исключается",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    return \"/tests/\" in f\"/{path}\" or bool(_TEST_FILE.search(path))",
+  "new": "    return bool(_TEST_FILE.search(path))",
+  "forecast": [
+   "test_p4_direct_write_count_on_the_pin"
+  ]
+ },
+ {
+  "id": "A13",
+  "prop": "6 код модуля: __all__ не учитывается",
+  "file": "scripts/atlas/reference.py",
+  "old": "and (listed is None or n.name in listed)",
+  "new": "and True",
+  "forecast": [
+   "test_module_code_scope_header_counts_and_symbols"
+  ]
+ },
+ {
+  "id": "A14",
+  "prop": "7 usage: строка оператора вместо алиаса",
+  "file": "scripts/atlas/codemap.py",
+  "old": "imports += [(mod, a.name, a.asname or a.name, a.lineno) for a in node.names]",
+  "new": "imports += [(mod, a.name, a.asname or a.name, node.lineno) for a in node.names]",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_multiline_import_uses_the_alias_line_not_the_statement_line",
+   "test_symbol_narrows_every_section_for_a_code_symbol",
+   "test_usage_section_on_f1_is_exact"
+  ]
+ },
+ {
+  "id": "A15",
+  "prop": "7 usage: цепочка реэкспорта отключена",
+  "file": "scripts/atlas/codemap.py",
+  "old": "                chain |= grown",
+  "new": "                break",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_module_own_files_and_reexport_chain",
+   "test_symbol_narrows_every_section_for_a_code_symbol",
+   "test_usage_section_on_f1_is_exact"
+  ]
+ },
+ {
+  "id": "A16",
+  "prop": "7 тесты: засчитывается по слову в docstring",
+  "file": "scripts/atlas/codemap.py",
+  "old": "sum(bool(local & t) for t in self.test_names(path))",
+  "new": "sum(bool(local & (t | self.words(path))) for t in self.test_names(path))",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_honest_test_count_in_headers_on_f1",
+   "test_symbol_narrows_every_section_for_a_code_symbol",
+   "test_tests_group_counts_functions_not_docstring_mentions"
+  ]
+ },
+ {
+  "id": "A17",
+  "prop": "7 usage: файлы модуля попадают в «вне модуля»",
+  "file": "scripts/atlas/codemap.py",
+  "old": "if (module_of(path, self.rows) == module and not test) or not (hits",
+  "new": "if False or not (hits",
+  "forecast": [
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_module_own_files_and_reexport_chain",
+   "test_symbol_narrows_every_section_for_an_interface",
+   "test_usage_section_on_f1_is_exact"
+  ]
+ },
+ {
+  "id": "A18",
+  "prop": "8 --symbol сужает только usage",
+  "file": "scripts/atlas/reference.py",
+  "old": "for name in [n for n in names if symbol in (None, n)]:",
+  "new": "for name in names:",
+  "forecast": [
+   "test_symbol_narrows_every_section_for_a_code_symbol",
+   "test_symbol_narrows_every_section_for_an_interface"
+  ]
+ },
+ {
+  "id": "A19",
+  "prop": "9 П1: находка и для Qt",
+  "file": "scripts/atlas/rules.py",
+  "old": "plain = [(i, c) for i, c in pairs if c[3] == \"структурно\"]",
+  "new": "plain = [(i, c) for i, c in pairs if c[3].startswith(\"структурно\")]",
+  "forecast": [
+   "test_findings_p1_p4_on_the_framework_layer_are_exact",
+   "test_qt_structural_implementation_is_not_a_p1_finding"
+  ]
+ },
+ {
+  "id": "A20",
+  "prop": "9 П2: NumPy-подчёркивание не нарушение",
+  "file": "scripts/atlas/rules.py",
+  "old": "|^\\s*(Parameters|Returns|Raises)\\s*\\n\\s*-{3,}",
+  "new": "",
+  "forecast": [
+   "test_findings_p1_p4_on_the_framework_layer_are_exact"
+  ]
+ },
+ {
+  "id": "A21",
+  "prop": "9 П4: атомарная функция тоже помечается",
+  "file": "scripts/atlas/rules.py",
+  "old": "            if not atomic:\n                add(\n                    \"P4_DIRECT_WRITE\"",
+  "new": "            if True:\n                add(\n                    \"P4_DIRECT_WRITE\"",
+  "forecast": [
+   "test_card_f2_framework_findings_and_shares",
+   "test_findings_p1_p4_on_the_framework_layer_are_exact",
+   "test_p4_direct_write_count_on_the_pin"
+  ]
+ },
+ {
+  "id": "A22",
+  "prop": "9 detail: номер строки",
+  "file": "scripts/atlas/rules.py",
+  "old": "f\"{path}::{label}\",\n                    f\"Запись файла",
+  "new": "f\"{path}::{label}:{line}\",\n                    f\"Запись файла",
+  "forecast": [
+   "test_card_f2_framework_findings_and_shares",
+   "test_code_shift_keeps_the_key_and_check_shows_nothing_new",
+   "test_detail_has_no_line_numbers",
+   "test_findings_p1_p4_on_the_framework_layer_are_exact"
+  ]
+ },
+ {
+  "id": "A23",
+  "prop": "9 охват: находки и для services",
+  "file": "scripts/atlas/rules.py",
+  "old": "framework = sorted(r[\"id\"] for r in rows if r[\"layer\"] == \"framework\")",
+  "new": "framework = sorted(r[\"id\"] for r in rows if r[\"layer\"] in (\"framework\", \"services\"))",
+  "forecast": [
+   "test_card_f2_services_share_without_findings_and_prototype_out_of_scope",
+   "test_findings_p1_p4_on_the_framework_layer_are_exact",
+   "test_p4_direct_write_count_on_the_pin",
+   "test_services_and_prototype_get_no_findings"
+  ]
+ },
+ {
+  "id": "A24",
+  "prop": "10 card: блок «Правила» для prototype",
+  "file": "scripts/atlas/views.py",
+  "old": "        if layer in (\"framework\", \"services\", \"plugins\"):",
+  "new": "        if True:",
+  "forecast": [
+   "test_card_f2_services_share_without_findings_and_prototype_out_of_scope"
+  ]
+ },
+ {
+  "id": "A25",
+  "prop": "11 pack: текст раньше коммитов",
+  "file": "scripts/atlas/views.py",
+  "old": "    elif mods.get(tid):\n        chosen, source = sorted(mods[tid]), \"коммиты задачи\"\n    elif (text := _text_sources(tree, node[1], tid, rows)) and text[0]:\n        (chosen, text_paths), source = text, \"из текста задачи\"",
+  "new": "    elif (text := _text_sources(tree, node[1], tid, rows)) and text[0]:\n        (chosen, text_paths), source = text, \"из текста задачи\"\n    elif mods.get(tid):\n        chosen, source = sorted(mods[tid]), \"коммиты задачи\"",
+  "forecast": [
+   "test_pack_source_order_module_flag_commits_text_fallback"
+  ]
+ },
+ {
+  "id": "A26",
+  "prop": "11 pack: токен-путь не ищется по суффиксу",
+  "file": "scripts/atlas/views.py",
+  "old": "for f in files if f == token or f.endswith(\"/\" + token)",
+  "new": "for f in files if f == token",
+  "forecast": [
+   "test_pack_on_the_pin_for_a_task_without_commits",
+   "test_pack_text_tokens_id_ambiguous_path_and_continuation"
+  ]
+ },
+ {
+  "id": "A27",
+  "prop": "2 grimp: без вставки sys.path",
+  "file": "scripts/atlas/codemap.py",
+  "old": "        sys.path.insert(0, str(self.base))\n",
+  "new": "        pass\n",
+  "forecast": [
+   "test_card_f1_keeps_old_lines_and_adds_usage_and_rules_blocks",
+   "test_card_f2_framework_findings_and_shares",
+   "test_card_f2_services_share_without_findings_and_prototype_out_of_scope",
+   "test_card_of_an_imported_module_lists_the_importing_files",
+   "test_card_on_the_pin_for_config_module",
+   "test_exam_row_is_closed",
+   "test_exam_score_is_at_least_eight_of_ten",
+   "test_honest_test_count_in_headers_on_f1",
+   "test_honest_test_count_on_the_pin",
+   "test_implementations_cap_eight_total_order_and_rest",
+   "test_module_code_method_cap_is_twelve",
+   "test_module_code_scope_header_counts_and_symbols",
+   "test_module_code_section_is_capped_at_150_lines",
+   "test_module_own_files_and_reexport_chain",
+   "test_multiline_import_uses_the_alias_line_not_the_statement_line",
+   "test_no_uses_outside_the_module_is_one_line_with_a_name_cap",
+   "test_output_follows_the_revision_not_the_working_tree",
+   "test_ref_card_pack_are_byte_equal_twice_and_under_hash_seeds",
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_ref_private_and_other_dunders_are_hidden",
+   "test_rows_cap_is_five_and_tests_cap_is_three",
+   "test_single_member_matches_are_not_implementations",
+   "test_symbol_narrows_every_section_for_a_code_symbol",
+   "test_symbol_narrows_every_section_for_an_interface",
+   "test_tests_group_counts_functions_not_docstring_mentions",
+   "test_unparsable_sources_give_one_line_and_other_sections_stay",
+   "test_unresolvable_base_gives_undefined_kind_and_syntax_error_is_skipped",
+   "test_usage_limitation_line_is_verbatim",
+   "test_usage_section_is_capped_at_120_lines",
+   "test_usage_section_on_f1_is_exact"
+  ]
+ },
+ {
+  "id": "A28",
+  "prop": "2 вид: неразрешимая база роняет вывод",
+  "file": "scripts/atlas/codemap.py",
+  "old": "        except Exception:  # noqa: BLE001 - LookupError (база не разрешена) и любой сбой griffe: вид не определён",
+  "new": "        except ZeroDivisionError:",
+  "forecast": [
+   "test_unresolvable_base_gives_undefined_kind_and_syntax_error_is_skipped"
+  ]
+ },
+ {
+  "id": "A29",
+  "prop": "детерминизм: итерация по set в usage",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            for path in sorted(self._importers(chain)):",
+  "new": "            for path in self._importers(chain):",
+  "forecast": [
+   "test_ref_card_pack_are_byte_equal_twice_and_under_hash_seeds"
+  ]
+ },
+ {
+  "id": "A30",
+  "prop": "index не меняется: в index попадает вид",
+  "file": "scripts/atlas/reference.py",
+  "old": "shown = [f\"{n} ({k})\" if",
+  "new": "shown = [f\"{n} ({k}) ABC\" if",
+  "forecast": [
+   "test_index_output_and_check_are_unchanged"
+  ]
+ }
+]
