@@ -137,7 +137,7 @@ def _module_blocks(tree: Tree, rows: list[dict], row: dict) -> list[str]:
         users = code.module_users(module)
         shares = None
         if layer in ("framework", "services", "plugins"):
-            scan = Scan({p: code.text(p) for p in [*code.own(module), *(u for u, _ in users or [])]}, rows)
+            scan = Scan.of_module(code, module, users)
             shares = scan.check(module)[1]
     if users is None:
         lines = [USAGE_UNKNOWN]

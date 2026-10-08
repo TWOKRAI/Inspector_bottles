@@ -16,6 +16,7 @@ import sqlite3
 import sys
 from functools import reduce
 from pathlib import Path
+from typing import Any
 
 from scripts.atlas.adapters.code import _read
 from scripts.atlas.adapters.modules import modules_for
@@ -307,13 +308,14 @@ def ref(
     shown = [symbol] if symbol else sorted({*names, *code})
     with checkout(tree, rows) as base:
         cm = Code(base, rows)
-        where = {n: dotted(path) for n in names if path} | {
-            n: dotted(p) for n, (p, _) in code.items() if n not in names
-        }
+        iface = dotted(path) if path else ""
+        where: dict[str, Any] = {n: dotted(p) for n, (p, _) in code.items() if n not in names}
+        for n in names:  # цепочка реэкспорта идёт от модуля определения; interfaces.py входит в неё как реэкспортёр
+            where[n] = (cm.defined_in(iface, n), iface)
         use = cm.usage(module, {n: where[n] for n in shown})
         wide = bool(names) and symbol in (None, *names)  # реализации нужны только интерфейсам
         users = cm.module_users(module) if wide else []
-        scan = Scan({p: cm.text(p) for p in [*cm.own(module), *(u for u, _ in users or [])]}, rows) if names else None
+        scan = Scan.of_module(cm, module, users) if wide else None
         impls = scan.implementations(module) if scan else {}
         lines = (
             [f"Справочник модуля {module} — символ {symbol}"]

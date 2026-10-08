@@ -12,6 +12,7 @@ Stability: lite
 from __future__ import annotations
 
 import ast
+import builtins
 import importlib
 import importlib.util
 import io
@@ -39,7 +40,7 @@ DUNDERS = frozenset(
     "__init__ __call__ __enter__ __exit__ __aenter__ __aexit__ __iter__ __next__ __getitem__ __setitem__ __len__ "
     "__contains__".split()
 )
-_STD = sys.stdlib_module_names | {"typing_extensions"}
+_STD = sys.stdlib_module_names | {"typing_extensions"} | set(dir(builtins))
 
 
 def is_test(path: str) -> bool:
@@ -86,7 +87,15 @@ def _short(base: Any) -> str:
 
 
 def _marked(m: Any) -> bool:
-    return not m.is_alias and m.is_function and any(d.callable_path.endswith("abstractmethod") for d in m.decorators)
+    """Член с abstractmethod: у `@property` + `@abstractmethod` griffe даёт Attribute с меткой, без decorators."""
+    return not m.is_alias and "abstractmethod" in m.labels
+
+
+def _defines(node: ast.stmt, name: str) -> bool:
+    if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+        return node.name == name
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+    return any(isinstance(t, ast.Name) and t.id == name for t in targets)
 
 
 def _names(fn: ast.AST) -> set[str]:
@@ -207,17 +216,28 @@ class Code:
 
         return self._memo(f"i:{path}", make)
 
-    def test_names(self, path: str) -> list[set[str]]:
-        """Локальные имена по тест-функциям файла (`test*` верхнего уровня и в `Test*`)."""
+    def count_tests(self, path: str, local: set[str]) -> int:
+        """Число тест-функций файла (`test*` верхнего уровня и в `Test*`), в теле которых есть локальное имя."""
+        body = self.info(path)["tree"].body  # type: ignore[index]
+        funcs = [n for n in body if isinstance(n, _DEFS)]
+        for cls in (n for n in body if isinstance(n, ast.ClassDef) and n.name.startswith("Test")):
+            funcs += [n for n in cls.body if isinstance(n, _DEFS)]
+        lines = self._memo(f"l:{path}", lambda: self.text(path).split("\n"))
+        count = 0
+        for fn in (f for f in funcs if f.name.startswith("test")):
+            segment = "\n".join(lines[fn.lineno - 1 : fn.end_lineno])
+            # текстовый отсев (docstring и комментарии не считаются — решает AST)
+            count += any(n in segment for n in local) and bool(local & _names(fn))
+        return count
 
-        def make() -> list[set[str]]:
-            body = self.info(path)["tree"].body  # type: ignore[index]
-            funcs = [n for n in body if isinstance(n, _DEFS)]
-            for cls in (n for n in body if isinstance(n, ast.ClassDef) and n.name.startswith("Test")):
-                funcs += [n for n in cls.body if isinstance(n, _DEFS)]
-            return [_names(fn) for fn in funcs if fn.name.startswith("test")]
-
-        return self._memo(f"n:{path}", make)
+    def defined_in(self, module: str, name: str, depth: int = 0) -> str:
+        """Модуль, где `name` определён (class/def/присваивание): импорты `module` прослеживаются до определения."""
+        file = self.path_of.get(module)
+        tree = (self.info(file) or {}).get("tree") if file else None
+        if tree is None or depth > 6 or any(_defines(n, name) for n in tree.body):
+            return module
+        target = self._imported(file).get(name)
+        return self.defined_in(target.rpartition(".")[0], name, depth + 1) if target else module
 
     def _hits(self, path: str, mods: set[str], name: str) -> list[tuple[str, int]]:
         """(локальное имя, строка) импортов `name` из любого модуля `mods` в файле."""
@@ -234,15 +254,15 @@ class Code:
     def usage(self, module: str, defs: dict[str, str]) -> dict[str, dict] | None:
         """Имя -> {rows: [(путь, строка, 'импорт'|'вызов')], tests: [(путь, строка импорта, число тестов)]}.
 
-        `defs`: имя -> точечное имя модуля определения. Символ без использований вне модуля и без тестов не попадает
-        в итог. None — граф не строится (синтаксическая ошибка в исходниках).
+        `defs`: имя -> модуль определения (или кортеж: определение и реэкспортёры). Символ без использований и тестов
+        не попадает в итог. None — граф не строится (синтаксическая ошибка в исходниках).
         """
         self.graph()
         if not self.parsable:
             return None
         out: dict[str, dict] = {}
         for name in sorted(defs):
-            chain = {defs[name]}
+            chain = {defs[name]} if isinstance(defs[name], str) else set(defs[name])
             while grown := {  # реэкспорт: пакеты, чей __init__.py импортирует символ из цепочки
                 dotted(p)
                 for p in self._importers(chain)
@@ -257,7 +277,7 @@ class Code:
                     continue
                 local, info = {n for n, _ in hits}, self.info(path)
                 if test:
-                    tests.append((path, min(ln for _, ln in hits), sum(bool(local & t) for t in self.test_names(path))))  # type: ignore[index]
+                    tests.append((path, min(ln for _, ln in hits), self.count_tests(path, local)))  # type: ignore[index]
                 else:
                     rows += [(path, ln, "импорт") for _, ln in hits]
                     rows += [(path, ln, "вызов") for n, ln in info["calls"] if n in local]  # type: ignore[index]
@@ -294,9 +314,23 @@ class Code:
             f"g:{file}", lambda: griffe.visit(".".join(head), filepath=self.base / file, code=self.text(file))
         )
         obj = mod.members.get(last)
-        if obj is not None and obj.is_alias:
-            return None if path in seen else self._class(obj.target_path, seen | {path})
+        if obj is not None and obj.is_alias:  # griffe.visit по одному файлу неверно считает относительные импорты
+            target = self._imported(file).get(last, obj.target_path)
+            return None if path in seen else self._class(target, seen | {path})
         return obj if obj is not None and obj.is_class else None
+
+    def _imported(self, file: str) -> dict[str, str]:
+        """Локальное имя -> абсолютное имя цели импорта файла (относительные уровни разрешены разбором AST)."""
+        info = self.info(file) or {"imports": []}
+        return {n: f"{m}.{s}" if s else m for m, s, n, _ in info["imports"] if s or "." not in n}
+
+    def _base_path(self, cls: Any, base: Any) -> str:
+        """Абсолютный путь базы: голова имени — по импортам файла класса, иначе (локальный класс) путь griffe."""
+        text = str(base).split("[")[0]
+        head, _, rest = text.partition(".")
+        file = Path(cls.filepath).relative_to(self.base).as_posix()
+        target = self._imported(file).get(head)
+        return f"{target}.{rest}" if target and rest else target or getattr(base, "canonical_path", text)
 
     def _abstract(
         self, cls: Any, seen: frozenset[str] = frozenset()
@@ -315,7 +349,7 @@ class Code:
         }
         names, per_base = set(own), []
         for base in cls.bases:
-            path = getattr(base, "canonical_path", str(base))
+            path = self._base_path(cls, base)
             if (target := self._class(path)) is None:
                 if path.split(".")[0] not in _STD:
                     raise LookupError

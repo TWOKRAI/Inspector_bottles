@@ -97,9 +97,11 @@ def _is_write(call: ast.Call) -> bool:
         isinstance(func, ast.Name) and func.id == "open" or isinstance(func, ast.Attribute) and func.attr == "open"
     ):
         return False
-    mode = call.args[1].value if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant) else None
-    mode = next((k.value.value for k in call.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)), mode)
-    return isinstance(mode, str) and bool(_MODE.fullmatch(mode))
+    # Name-вызов: режим — args[1]; метод `.open(...)`: Path.open("w") — args[0], io.open(path, "w") — args[1]
+    slots = call.args[:2] if isinstance(func, ast.Attribute) else call.args[1:2]
+    modes = [a.value for a in slots if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+    modes += [k.value.value for k in call.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)]
+    return any(isinstance(m, str) and _MODE.fullmatch(m) for m in modes)
 
 
 class _File:
@@ -138,9 +140,12 @@ class _File:
 class Scan:
     """Разбор набора исходников `{путь: текст|байты}`: реестр классов, реализации интерфейсов, находки и доли."""
 
-    def __init__(self, sources: dict[str, Any], rows: list[dict], structural_only: bool = False) -> None:
+    def __init__(
+        self, sources: dict[str, Any], rows: list[dict], structural_only: bool = False, focus: set[str] | None = None
+    ) -> None:
         """`structural_only` (сборка): классы разбираются сразу лишь у модулей с интерфейсом из >= 2 абстрактных членов
-        (иначе структурных реализаций там нет), явные вне модуля не ищутся; остальные файлы — по требованию."""
+        (иначе структурных реализаций там нет), явные вне модуля не ищутся. `focus` (виды): классы сразу лишь
+        в этих файлах (модуль и его импортёры); остальные исходники framework — предки по цепочке, по требованию."""
         self.rows, self.structural_only = rows, structural_only
         self.sources = {
             p: (r if isinstance(r, str) else (r or b"").decode("utf-8", "replace").removeprefix("﻿"))
@@ -166,12 +171,19 @@ class Scan:
                     self.iface_names[row["id"]].append((name, path))
         wide = {m for key, m in self.ifaces.items() if len(self.abstract(key)) >= 2}
         for path, text in self.sources.items():
-            if path.rsplit("/", 1)[-1] in _API or (
-                (not structural_only or self.mod[path] in wide) and _CLASS.search(text)
+            if _CLASS.search(text) and (
+                (self.mod[path] in wide) if structural_only else (focus is None or path in focus)
             ):
                 self.file(path)
-            elif self._writes(text):
-                self.file(path)
+
+    @classmethod
+    def of_module(cls, code: Any, module: str, users: list[tuple[str, int]] | None) -> Scan:
+        """Scan для видов `ref`/`card`: исходники framework выгрузки (предки по цепочке — лениво) плюс модуль и его
+        импортёры (разбираются сразу); множество реализаций то же, что у адаптера."""
+        framework = tuple(e for r in code.rows if r["layer"] == "framework" for e in r["paths"])
+        focus = {*code.own(module), *(u for u, _ in users or [])}
+        paths = sorted({f for f in code.files if f.startswith(framework)} | focus)
+        return cls({p: code.text(p) for p in paths}, code.rows, focus=focus)
 
     @staticmethod
     def _writes(text: str) -> bool:

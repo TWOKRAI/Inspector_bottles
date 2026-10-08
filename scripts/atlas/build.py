@@ -25,13 +25,7 @@ from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 
 __all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "fingerprint", "to_json"]
 
-ADAPTERS: tuple[Adapter, ...] = (
-    ModulesAdapter(),
-    PlansAdapter(),
-    CommitsAdapter(),
-    CodeAdapter(),
-    RulesAdapter(),
-)  # docs — 1.4+
+ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter(), CommitsAdapter(), CodeAdapter(), RulesAdapter())
 CORE_VERSION = "1"
 SCHEMA_VERSION = 1
 
