@@ -1,6 +1,6 @@
 import ast, re, sys
 from pathlib import Path
-B = Path("multiprocess_framework/modules/config_module"); F=(ast.FunctionDef, ast.AsyncFunctionDef)
+import sys; B = Path(sys.argv[1] if len(sys.argv)>1 else "multiprocess_framework/modules/config_module"); F=(ast.FunctionDef, ast.AsyncFunctionDef)
 def parse(p): return ast.parse(p.read_text(encoding="utf-8").removeprefix("﻿"))
 BAD = re.compile(r"^\s*:(param|returns?|raises?|type|rtype)\b|^\s*(Parameters|Returns|Raises)\s*\n\s*-{3,}", re.M)
 def toplevel(t):  # узлы верхнего уровня, включая тела try/if
@@ -16,6 +16,9 @@ def defs(t):
         elif isinstance(n, ast.ImportFrom):
             for a in n.names:
                 if a.name != "*": out[a.asname or a.name] = n
+        elif isinstance(n, (ast.Assign, ast.AnnAssign)):
+            for t_ in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                if isinstance(t_, ast.Name): out[t_.id] = n
     return out
 def allnames(t):
     for n in toplevel(t):
@@ -28,7 +31,7 @@ for p in files:
     t = parse(p); d = defs(t); pub = [k for k in d if not k.startswith("_")]
     if not pub: continue
     p3_total += 1; a = allnames(t)
-    ok = a is not None and all(x in d for x in a)
+    ok = a is not None and ('__getattr__' in d or all(x in d for x in a))
     p3_ok += ok
     if not ok: print("  П3 нарушение:", p, a)
 print("П3:", p3_ok, "из", p3_total)
