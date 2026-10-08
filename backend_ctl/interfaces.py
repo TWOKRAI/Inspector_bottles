@@ -78,12 +78,14 @@ class IEventSource(Protocol):
         Args:
             plane: имя плоскости или ``None``/``"all"`` — все события в порядке прихода.
             cursor: ``next_cursor``/``bookmark`` прошлой страницы; ``None`` — с самого старого доступного.
-            limit: максимум событий в странице (по умолчанию 100, потолок 500).
+            limit: размер страницы (по умолчанию 100, потолок 500, минимум 1).
 
         Returns:
             dict ``{"success": True, "items", "count", "next_cursor", "dropped", "bookmark", ...}``.
-            Ошибка курсора → ``success: False`` с ``reset_required`` (начать заново с ``cursor=None``);
-            неизвестная плоскость или нецелый ``limit`` → ``success: False`` с текстом ``error``."""
+            Ошибка курсора → ``success: False`` с ``reset_required``: продолжить с ``resume_cursor``,
+            если он есть в ответе, иначе начать заново с ``cursor=None``.
+            Неизвестная плоскость или ``limit``, не приводимый через ``int()`` → ``success: False`` с ``error``.
+            Дробный ``limit`` усекается; итоговый размер зажимается в диапазон [1, 500]."""
         ...
 
 
@@ -110,10 +112,13 @@ class IBackendClient(Protocol):
         ...
 
     def request(self, message: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Отправить сообщение и дождаться ответа по ``request_id`` (блокирует); вернуть ответ-dict.
+        """Отправить сообщение и дождаться ответа по ``request_id`` (блокирует); вернуть ``result`` ответа.
 
-        Таймаут, «не подключён» и намеренный ``close`` — error-dict ``{"success": False, "error": ...}``.
-        Смерть соединения — исключение (в ``BackendDriver`` — ``BackendUnavailable``).
+        Возвращается поле ``result`` ответа хоста (любой JSON-тип), а если его нет — весь ответ.
+        Таймаут, «не подключён», намеренный ``close`` и отказ send-middleware (``dropped``) —
+        error-dict ``{"success": False, "error": ...}``.
+        Смерть соединения — исключение (``BackendUnavailable`` в ``BackendDriver``,
+        ``SocketConnectionLost`` в базовом ``SocketClient``).
         Вызов из reader-потока отклоняется error-dict (защита от дедлока)."""
         ...
 
@@ -127,7 +132,8 @@ class IBackendClient(Protocol):
     ) -> Dict[str, Any]:
         """Отправить команду ``command`` процессу ``target`` с аргументами ``args`` и вернуть ответ.
 
-        Собирает сообщение команды и отправляет через ``request``; ошибки — как у ``request``."""
+        Собирает сообщение команды и отправляет через ``request``; ошибки — как у ``request``.
+        Реализован только в ``BackendDriver`` (как и методы ``*_subscriptions`` ниже)."""
         ...
 
     def export_subscriptions(self) -> List[Dict[str, Any]]:
