@@ -10,6 +10,7 @@ Stability: lite
 from __future__ import annotations
 
 import json
+import sys
 import sqlite3
 from pathlib import Path
 
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS view_cache (
     sha TEXT NOT NULL, main_ref TEXT NOT NULL, adapters_fp TEXT NOT NULL, code TEXT NOT NULL, view TEXT NOT NULL,
     arg TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (sha, main_ref, adapters_fp, code, view, arg));
 """
-_SCHEMA = 3  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
+_SCHEMA = 4  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
 _TABLES = ("builds", "nodes", "edges", "findings", "snapshots", "view_cache")
 
 
@@ -158,15 +159,24 @@ def get_view(
         "AND view = ? AND arg = ?",
         (sha, main_ref, fingerprint, code, view, arg),
     ).fetchone()
-    return None if row is None else json.loads(row[0])
+    if row is None:
+        return None
+    try:
+        lines = json.loads(row[0])
+    except ValueError:  # битая строка кэша — промах, put_view её перезапишет
+        return None
+    return lines if isinstance(lines, list) and all(isinstance(x, str) for x in lines) else None
 
 
 def put_view(
     con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, code: str, view: str, arg: str, lines: list[str]
 ) -> None:
     """Запомнить строки вида (только успешный результат); тот же ключ перезаписывается."""
-    with con:
-        con.execute(
-            "INSERT OR REPLACE INTO view_cache VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (sha, main_ref, fingerprint, code, view, arg, json.dumps(lines, ensure_ascii=False)),
-        )
+    try:
+        with con:
+            con.execute(
+                "INSERT OR REPLACE INTO view_cache VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (sha, main_ref, fingerprint, code, view, arg, json.dumps(lines, ensure_ascii=False)),
+            )
+    except sqlite3.OperationalError as exc:  # база занята читателем: кэш — оптимизация, вид уже посчитан
+        print(f"atlas: кэш вида не записан: {exc}", file=sys.stderr)

@@ -43,7 +43,7 @@ def code_fingerprint() -> str:
     """sha256 от (относительный путь, байты) всех *.py пакета atlas без tests: правка исходника сбрасывает кэш видов."""
     pkg = _PKG
     h = hashlib.sha256()
-    for path in sorted(p for p in pkg.rglob("*.py") if "tests" not in p.relative_to(pkg).parts):
+    for path in sorted(p for p in pkg.rglob("*.py") if p.is_file() and "tests" not in p.relative_to(pkg).parts):
         h.update(path.relative_to(pkg).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
     return h.hexdigest()
 

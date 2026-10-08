@@ -168,7 +168,7 @@ def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: s
     tree = Tree(root, sha)
     rows = modules_for(tree)
     row = _module_row(rows, module)
-    bid = build(con, root, ref, main_ref)
+    bid = build(con, root, sha, main_ref)
     prefix = f"{module}:"
     names = sorted(
         i[len(prefix) :]
@@ -200,7 +200,8 @@ def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: s
         *(f"  {sev} {code} {node} {detail or '-'}" for sev, code, node, detail in found[:10]),
     ]
     lines += ([f"  … ещё {len(found) - 10}"] if len(found) > 10 else []) + _module_blocks(tree, rows, row)
-    store.put_view(con, *key, lines)
+    if USAGE_UNKNOWN not in lines:  # «не определено» — сбой разбора, не результат: не кэшируем
+        store.put_view(con, *key, lines)
     return lines
 
 

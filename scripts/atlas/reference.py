@@ -283,14 +283,21 @@ def ref(
 ) -> list[str]:
     """Справочник модуля: интерфейсы (вид, члены, реализации), «Код модуля», «Кто использует»; `symbol` сужает всё."""
     sha = resolve(root, ref)
-    key = (sha, main_ref, fingerprint(), code_fingerprint(), "ref", f"{module}\0{symbol or ''}")
+    key = (
+        sha,
+        main_ref,
+        fingerprint(),
+        code_fingerprint(),
+        "ref",
+        f"{module}\0{'' if symbol is None else '=' + symbol}",
+    )
     if (hit := store.get_view(con, *key)) is not None:
         return hit
     tree = Tree(root, sha)
     rows = modules_for(tree)
     if all(r["id"] != module for r in rows):
         raise AtlasError("atlas: module not found")
-    bid = build(con, root, ref, main_ref)
+    bid = build(con, root, sha, main_ref)
     prefix = f"{module}:"
     found = con.execute(
         "SELECT id, path FROM nodes WHERE build_id = ? AND kind = 'interface' AND substr(id, 1, ?) = ?",
@@ -368,7 +375,8 @@ def ref(
     elif symbol not in names:
         lines += [code[symbol][0], *_code_node(code[symbol][1])]
     lines += _usage_lines(module, use, shown)
-    store.put_view(con, *key, lines)
+    if USAGE_UNKNOWN not in lines:  # «не определено» — сбой разбора, не результат: не кэшируем
+        store.put_view(con, *key, lines)
     return lines
 
 
