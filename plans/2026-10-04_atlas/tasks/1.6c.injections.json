@@ -366,5 +366,16 @@
   "forecast": [
    "test_index_output_and_check_are_unchanged"
   ]
+ },
+ {
+  "id": "A10b",
+  "prop": "5 структурная: «хотя бы один» вместо «все» (после A10: сняты оба барьера — текстовый предфильтр и AST)",
+  "file": "scripts/atlas/rules.py",
+  "old": "        if missing and any(not any(f\"self.{n}\" in src for src in sources) for n in missing):\n            return False\n        for node in (n for k in chain for n in ast.walk(self._node(k)) if missing):\n            for t in _targets(node):\n                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == \"self\":\n                    missing.discard(t.attr)\n        return not missing\n",
+  "new": "        return len(missing) < len(need)\n",
+  "forecast": [
+   "test_ref_interface_blocks_kind_members_inherited_and_implementations",
+   "test_single_member_matches_are_not_implementations"
+  ]
  }
 ]
