@@ -94,11 +94,11 @@ class IRouterManager(ABC):
         """Зарегистрировать канал. При повторной регистрации — замена с предупреждением."""
 
     @abstractmethod
-    def unregister_channel(self, channel_name: str) -> bool:
+    def unregister_channel(self, name: str) -> bool:
         """Удалить канал по имени. Вернуть False если не найден."""
 
     @abstractmethod
-    def get_channel(self, channel_name: str) -> Optional["IMessageChannel"]:
+    def get_channel(self, name: str) -> Optional["IMessageChannel"]:
         """Получить канал по имени или None."""
 
     @abstractmethod
