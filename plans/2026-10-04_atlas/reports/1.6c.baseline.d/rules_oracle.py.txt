@@ -1,0 +1,63 @@
+import ast, re, sys
+from pathlib import Path
+B = Path("multiprocess_framework/modules/config_module"); F=(ast.FunctionDef, ast.AsyncFunctionDef)
+def parse(p): return ast.parse(p.read_text(encoding="utf-8").removeprefix("﻿"))
+BAD = re.compile(r"^\s*:(param|returns?|raises?|type|rtype)\b|^\s*(Parameters|Returns|Raises)\s*\n\s*-{3,}", re.M)
+def toplevel(t):  # узлы верхнего уровня, включая тела try/if
+    for n in t.body:
+        yield n
+        if isinstance(n, (ast.Try, ast.If)):
+            for blk in [n.body, n.orelse, *(h.body for h in getattr(n, "handlers", [])), *([n.finalbody] if hasattr(n,"finalbody") else [])]:
+                for m in blk: yield m
+def defs(t):
+    out = {}
+    for n in toplevel(t):
+        if isinstance(n, (ast.ClassDef, *F)): out[n.name] = n
+        elif isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                if a.name != "*": out[a.asname or a.name] = n
+    return out
+def allnames(t):
+    for n in toplevel(t):
+        if isinstance(n, ast.Assign) and any(isinstance(x, ast.Name) and x.id=="__all__" for x in n.targets) and isinstance(n.value,(ast.List,ast.Tuple)):
+            return [e.value for e in n.value.elts if isinstance(e, ast.Constant)]
+# П3
+files = [p for p in sorted(B.rglob("*.py")) if "/tests/" not in p.as_posix() and (p.name in ("interfaces.py","__init__.py"))]
+p3_total = p3_ok = 0
+for p in files:
+    t = parse(p); d = defs(t); pub = [k for k in d if not k.startswith("_")]
+    if not pub: continue
+    p3_total += 1; a = allnames(t)
+    ok = a is not None and all(x in d for x in a)
+    p3_ok += ok
+    if not ok: print("  П3 нарушение:", p, a)
+print("П3:", p3_ok, "из", p3_total)
+# П2: interfaces.py + классы/функции из __all__ корневого __init__ (цепочка from .x import)
+def find_def(pkg_dir, name, seen=()):
+    t = parse(pkg_dir/"__init__.py") if (pkg_dir/"__init__.py").exists() else None
+    for f in sorted(pkg_dir.glob("*.py")):
+        if f.name=="__init__.py": continue
+        d = defs(parse(f)); 
+        if name in d and not isinstance(d[name], ast.ImportFrom): return f, d[name]
+    for sub in sorted(x for x in pkg_dir.iterdir() if x.is_dir() and x.name!="tests" and (x/"__init__.py").exists()):
+        r = find_def(sub, name)
+        if r: return r
+    return None
+syms = {}
+def add_class(f, n):
+    syms[(f.as_posix(), n.name)] = n
+    for m in n.body:
+        if isinstance(m, F) and not m.name.startswith("_"): syms[(f.as_posix(), n.name+"."+m.name)] = m
+ti = parse(B/"interfaces.py")
+for n in ti.body:
+    if isinstance(n, ast.ClassDef) and not n.name.startswith("_"): add_class(B/"interfaces.py", n)
+    elif isinstance(n, F) and not n.name.startswith("_"): syms[("interfaces.py", n.name)] = n
+for name in allnames(parse(B/"__init__.py")):
+    if any(k[1]==name for k in syms): continue
+    r = find_def(B, name)
+    if r is None: print("  не найдено определение", name); continue
+    f, n = r
+    if isinstance(n, ast.ClassDef): add_class(f, n)
+    else: syms[(f.as_posix(), n.name)] = n
+bad = [k for k,n in syms.items() if not (ast.get_docstring(n) or "").strip() or BAD.search(ast.get_docstring(n) or "")]
+print("П2:", len(syms)-len(bad), "из", len(syms), [k[1] for k in bad])
