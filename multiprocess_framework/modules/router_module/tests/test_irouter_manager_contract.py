@@ -59,6 +59,9 @@ def test_router_manager_signature_drift_is_exactly_the_two_known_names():
     router = RouterManager(manager_name="contract_router")
     mismatch = {}
     for name, iface in _IFACE_PARAMS.items():
+        # сторона интерфейса: литерал не заменяет её, а сверяется с ней
+        iface_actual = list(inspect.signature(getattr(IRouterManager, name)).parameters)[1:]
+        assert iface_actual == iface, name
         params = list(inspect.signature(getattr(router, name)).parameters.values())
         impl = [p.name for p in params]
         extras_ok = all(
