@@ -3,7 +3,7 @@
 > Ссылки: [`../../DECISIONS.md`](../../DECISIONS.md)
 
 **Глобальный контекст:** решение о роли модуля как тонкой обёртки зафиксировано в главном [`DECISIONS.md`](../../DECISIONS.md) — раздел **ADR-023: config_module — тонкая обёртка над data_schema_module**.  
-Ниже — уточнения, специфичные для `config_module` (модульные **ADR-CFG-001…004**, ранее ADR-143…146; глобальные **ADR-024…027** относятся к router / prototype / SharedMemory / rendered_frame).
+Ниже — уточнения, специфичные для `config_module` (модульные **ADR-CFG-001…005**, ранее ADR-143…146; глобальные **ADR-024…027** относятся к router / prototype / SharedMemory / rendered_frame).
 
 ---
 
@@ -72,4 +72,5 @@
 **Статус:** принято  
 **Дата:** 2026-10-08  
 **Решение:** событие, отброшенное окном дебаунса, не теряется: `_ConfigReloadHandler` ставит один отложенный `_reload` (`threading.Timer`, daemon, один на watcher) на момент `_last_reload + debounce`; `ConfigFileWatcher.stop()` отменяет его и ждёт идущий колбэк (дедлайн 5 с).  
+**Контракт `on_reload`:** вызывается в потоке watchdog или Timer под замком обработчика и не зовёт `stop()` того же watcher (взаимная блокировка замков Observer и обработчика, ревью 1.2 р.1). Живых вызывающих с `stop()` внутри `on_reload` нет; замена на два замка — решение лида, не принято.  
 **Для lifecycle-owner-scope:** новый поток Timer в ConfigFileWatcher — поток вне учтённой описи владельцев жизненного цикла.

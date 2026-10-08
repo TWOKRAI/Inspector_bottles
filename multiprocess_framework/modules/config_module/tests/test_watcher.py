@@ -255,6 +255,7 @@ def test_dropped_event_gets_one_delayed_reload_with_last_content(tmp_path):
         while cfg.get("v") != "v4" and time.monotonic() < deadline:
             time.sleep(0.05)
         assert cfg.get("v") == "v4"
+        time.sleep(1.5)  # лишний повтор взвёл бы себя после окна — ждём дольше окна
         assert len(reloads) <= 2, f"отложенных повторов больше одного: {reloads}"
     finally:
         watcher.stop()
