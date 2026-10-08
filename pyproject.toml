@@ -71,6 +71,7 @@ dev = [
     "import-linter>=2.13",
     "libcst>=1.8.6",
     "pydeps>=3.0.6",
+    "griffe>=2.3",
 ]
 diagrams = [
     "pylint>=3.3",      # pyreverse для UML-диаграмм классов
