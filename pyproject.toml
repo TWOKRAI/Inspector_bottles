@@ -342,6 +342,7 @@ reportIndexIssue = "warning"
 reportAssignmentType = "warning"
 reportGeneralTypeIssues = "warning"
 reportUnboundVariable = "warning"
+reportIncompatibleMethodOverride = "warning"  # ADR-175 П1: дрейф сигнатуры реализации интерфейса (О1 брифа 1.6c)
 
 # ── bandit ──
 [tool.bandit]
