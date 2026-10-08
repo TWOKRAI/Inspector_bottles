@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE TABLE IF NOT EXISTS snapshots (
     build_id INTEGER NOT NULL, node TEXT NOT NULL, metric TEXT NOT NULL, value REAL, time INTEGER);
 CREATE TABLE IF NOT EXISTS view_cache (
-    sha TEXT NOT NULL, main_ref TEXT NOT NULL, fingerprint TEXT NOT NULL, code TEXT NOT NULL, view TEXT NOT NULL,
-    arg TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (sha, main_ref, fingerprint, code, view, arg));
+    sha TEXT NOT NULL, main_ref TEXT NOT NULL, adapters_fp TEXT NOT NULL, code TEXT NOT NULL, view TEXT NOT NULL,
+    arg TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (sha, main_ref, adapters_fp, code, view, arg));
 """
 _SCHEMA = 3  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
 _TABLES = ("builds", "nodes", "edges", "findings", "snapshots", "view_cache")
@@ -154,7 +154,7 @@ def get_view(
 ) -> list[str] | None:
     """Готовые строки вида по полному ключу или None; `code` — отпечаток исходников atlas."""
     row = con.execute(
-        "SELECT body FROM view_cache WHERE sha = ? AND main_ref = ? AND fingerprint = ? AND code = ? "
+        "SELECT body FROM view_cache WHERE sha = ? AND main_ref = ? AND adapters_fp = ? AND code = ? "
         "AND view = ? AND arg = ?",
         (sha, main_ref, fingerprint, code, view, arg),
     ).fetchone()
