@@ -171,9 +171,12 @@ def make(size: int = 1) -> "Alpha":
 LIMIT = 5
 '''
 
+_KIND_PLAIN = "  вид: класс; базы: —; абстрактных 0 (своих 0)"
+_NO_IMPL = "  реализации (0): нет"
 _F1_REF_M = [
     "Справочник модуля m — m/interfaces.py, интерфейсов 6",
-    "Alpha — Контракт альфа — m/interfaces.py:9 — тестов 4, пример m/tests/test_b.py",
+    "Alpha — Контракт альфа — m/interfaces.py:9 — тестов 3, пример m/tests/test_m.py",
+    _KIND_PLAIN,
     "  name -> str  :16",
     "    Имя альфа",
     "  send(message: Msg | Dict[str, Any], priority: str = 'normal', *, retry: int | None = None) -> Msg | None  :19",
@@ -188,14 +191,31 @@ _F1_REF_M = [
     "  checked() -> bool  :45",
     "    Проверить",
     "    Post: всегда True.",
+    _NO_IMPL,
     "Beta — нет описания — m/interfaces.py:55 — тестов 0",
+    _KIND_PLAIN,
     "  only() -> None  :56",
     "    Один",
+    _NO_IMPL,
     "Impl — реэкспорт из .core — m/interfaces.py:4 — тестов 0",
     "LIMIT — нет описания — m/interfaces.py:68 — тестов 0",
     "Quiet — Тихий интерфейс — m/interfaces.py:60 — тестов 1, пример n/tests/test_n.py",
+    _KIND_PLAIN,
+    _NO_IMPL,
     "make(size: int = 1) -> Alpha — Фабрика — m/interfaces.py:64 — тестов 0",
 ]
+
+
+def _interface_part(lines: list[str]) -> list[str]:
+    """Строки вывода `ref` до раздела «Код модуля» (интерфейсная часть, формат 1.6b + вид и реализации 1.6c)."""
+    stop = next((i for i, line in enumerate(lines) if line.startswith("Код модуля")), len(lines))
+    return lines[:stop]
+
+
+def _has_new_sections(lines: list[str]) -> bool:
+    return any(line.startswith("Код модуля (без tests/ и interfaces.py): ") for line in lines) and any(
+        line.startswith("Кто использует") for line in lines
+    )
 
 
 def _f1_files(repo: GitRepo) -> None:
@@ -223,7 +243,9 @@ def test_ref_signatures_types_docs_and_tests(
 ) -> None:
     repo = _f1_repo(repo_factory, monkeypatch)
     first = _lines(atlas(repo, "ref", "m", *_REFS))
-    assert first == _F1_REF_M
+    assert _interface_part(first) == _F1_REF_M
+    assert _has_new_sections(first)
+    assert "Код модуля (без tests/ и interfaces.py): файлов 0, классов 0, функций 0" in first
     assert _lines(atlas(repo, "ref", "m", *_REFS)) == first
 
 
@@ -240,14 +262,18 @@ _F2_REF_R = [
 _F2_REF_AB = [
     "Справочник модуля a_b — a_b/interfaces.py, интерфейсов 1",
     "P — Пэ — a_b/interfaces.py:4 — тестов 0",
+    _KIND_PLAIN,
     "  go() -> None  :7",
     "    Идти",
+    _NO_IMPL,
 ]
 _F2_REF_AXB = [
     "Справочник модуля axb — axb/interfaces.py, интерфейсов 1",
     "Q — нет описания — axb/interfaces.py:4 — тестов 0",
+    _KIND_PLAIN,
     "  stop() -> None  :5",
     "    нет описания",
+    _NO_IMPL,
 ]
 
 
@@ -262,7 +288,7 @@ def test_ref_edges_reexport_function_assign_and_empty(
     _put(
         repo,
         "r/interfaces.py",
-        'from .core.base import Engine, Tool as Worker\nfrom . import helpers\nimport os.path as osp\n\n'
+        "from .core.base import Engine, Tool as Worker\nfrom . import helpers\nimport os.path as osp\n\n"
         '__all__ = ["Engine", "Worker", "helpers", "osp", "Ghost"]\n',
     )
     _put(repo, "idle/x.py", "x = 1\n")
@@ -273,10 +299,14 @@ def test_ref_edges_reexport_function_assign_and_empty(
     )
     _put(repo, "axb/interfaces.py", '__all__ = ["Q"]\n\n\nclass Q:\n    def stop(self) -> None:\n        pass\n')
     _commit(repo, monkeypatch, "2026-10-01", "init")
-    assert _lines(atlas(repo, "ref", "r", *_REFS)) == _F2_REF_R
-    assert _lines(atlas(repo, "ref", "idle", *_REFS)) == ["Справочник модуля idle — интерфейсов нет"]
-    assert _lines(atlas(repo, "ref", "a_b", *_REFS)) == _F2_REF_AB
-    assert _lines(atlas(repo, "ref", "axb", *_REFS)) == _F2_REF_AXB
+    ref_r = _lines(atlas(repo, "ref", "r", *_REFS))
+    assert _interface_part(ref_r) == _F2_REF_R  # реэкспорты, функции и присваивания: строк вида и реализаций нет
+    assert _has_new_sections(ref_r)
+    ref_idle = _lines(atlas(repo, "ref", "idle", *_REFS))
+    assert ref_idle[0] == "Справочник модуля idle — интерфейсов 0"
+    assert _has_new_sections(ref_idle)
+    assert _interface_part(_lines(atlas(repo, "ref", "a_b", *_REFS))) == _F2_REF_AB
+    assert _interface_part(_lines(atlas(repo, "ref", "axb", *_REFS))) == _F2_REF_AXB
 
 
 # ---------------------------------------------------------------- Ф3: index
@@ -500,10 +530,13 @@ def test_ref_index_output_is_stable_under_hash_seeds(
     _f1_files(repo)
     _f3_files(repo)
     _commit(repo, monkeypatch, "2026-10-01", "init")
-    got: dict[str, tuple[list[str], list[str]]] = {}
+    got: dict[str, tuple[list[str], list[str]]] = {}  # (весь вывод ref, index)
     for seed in ("0", "1", "2", "3", "4"):
         shutil.rmtree(repo.path / "data", ignore_errors=True)  # каждый процесс — на свежей базе
         ref_m = _run_cli(repo, seed, "ref", "m", *_REFS)  # ref — ПЕРВЫЙ вызов
         index = _run_cli(repo, seed, "index", *_REFS)
         got[seed] = (ref_m, index)
-    assert got == {seed: (_F1_REF_M, _F5_INDEX) for seed in got}
+    reference = got["0"][0]
+    assert _interface_part(reference) == _F1_REF_M
+    assert _has_new_sections(reference)
+    assert got == {seed: (reference, _F5_INDEX) for seed in got}  # ref байт-в-байт одинаков, index не изменился

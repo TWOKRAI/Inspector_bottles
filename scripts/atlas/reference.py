@@ -16,10 +16,14 @@ import sqlite3
 import sys
 from functools import reduce
 from pathlib import Path
+from typing import Any
 
 from scripts.atlas.adapters.code import _read
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas.build import build
+from scripts.atlas.codemap import DUNDERS, USAGE_UNKNOWN, Code, checkout, dotted, is_test
+from scripts.atlas.modules import resolve as module_of
+from scripts.atlas.rules import Scan, all_of
 from scripts.atlas.tree import AtlasError, Tree, resolve
 from scripts.atlas.views import purpose
 
@@ -35,6 +39,11 @@ _MARKDOWN = (
     (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),
 )
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+USAGE_HEADER = (
+    "Кто использует (статика: импорты и вызовы по имени; getattr, реестры, patch по строке,"
+    " методы объектов и каналы роутера не видны):"
+)
+CODE_PREFIX = "Код модуля (без tests/ и interfaces.py): "
 
 
 def _flat(node: ast.expr) -> list[ast.expr]:
@@ -184,67 +193,177 @@ def _scan(raw: bytes | None) -> tuple[dict[str, tuple[str, ast.AST]], dict[str, 
     return defs, listed
 
 
-def _methods(cls: ast.AST) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
-    return [m for m in cls.body if isinstance(m, _FUNCS) and not m.name.startswith("_")]  # type: ignore[attr-defined]
+def _methods(cls: ast.AST, dunders: bool = True) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Публичные методы и значимые dunder (DESIGN п. 4) в порядке исходника."""
+    body = cls.body  # type: ignore[attr-defined]
+    return [
+        m for m in body if isinstance(m, _FUNCS) and (not m.name.startswith("_") or (dunders and m.name in DUNDERS))
+    ]
 
 
-def _tests(
-    con: sqlite3.Connection, root: Path, sha: str, bid: int, module: str, names: list[str]
-) -> dict[str, tuple[int, str | None]]:
-    """Имя -> (число узлов test в файлах, где есть слово имени; наименьший путь). Одно выражение на файл."""
-    files = con.execute(
-        "SELECT n.path, COUNT(DISTINCT n.id) FROM edges e JOIN nodes n ON n.build_id = e.build_id AND n.kind = 'test' "
-        "AND n.id = substr(e.src, 6) WHERE e.build_id = ? AND e.kind = 'tests' AND e.dst = ? "
-        "GROUP BY n.path ORDER BY n.path",
-        (bid, f"module:{module}"),
-    ).fetchall()
-    pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, names)) + r")\b")
-    count: dict[str, int] = {}
-    first: dict[str, str] = {}
-    for (path, nodes), raw in zip(files, _read(root, sha, [p for p, _ in files]).values()):
-        for name in set(pattern.findall((raw or b"").decode("utf-8", "replace"))):
-            count[name] = count.get(name, 0) + nodes
-            first.setdefault(name, path)  # файлы идут по возрастанию пути
-    return {n: (count.get(n, 0), first.get(n)) for n in names}
+def _member_lines(cls: ast.AST, indent: str, cap: int | None = None) -> list[str]:
+    lines: list[str] = []
+    methods = _methods(cls)
+    for m in methods[:cap]:
+        static = "staticmethod" in {_tag(d) for d in m.decorator_list}
+        lines += [f"{indent}{_sig(m, not static)}  :{m.lineno}", f"{indent}  {_phrase(m)}"]
+        if (extra := _pre_post(m)) is not None:
+            lines.append(f"{indent}  {extra}")
+    return lines + ([f"{indent}… ещё {len(methods) - cap}"] if cap is not None and len(methods) > cap else [])
 
 
-def ref(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: str) -> list[str]:
-    """Справочник модуля: интерфейсы по имени, у класса — публичные методы в порядке файла."""
+def _code_symbols(root: Path, sha: str, paths: list[str]) -> list[tuple[str, list[ast.AST]]]:
+    """Файлы с публичными классами и функциями (при `__all__` — перечисленные); битые файлы пропускаются."""
+    found = []
+    for path, raw in _read(root, sha, paths).items():
+        try:
+            tree = ast.parse((raw or b"").decode("utf-8", "replace").removeprefix("\ufeff"))
+        except (SyntaxError, ValueError):
+            continue
+        listed = all_of(tree)
+        nodes = [
+            n
+            for n in tree.body
+            if isinstance(n, (ast.ClassDef, *_FUNCS))
+            and not n.name.startswith("_")
+            and (listed is None or n.name in listed)
+        ]
+        if nodes:
+            found.append((path, nodes))
+    return found
+
+
+def _code_node(node: ast.AST) -> list[str]:
+    """Класс (с базами и методами на отступе 4, не более 12) или функция «Кода модуля»."""
+    if isinstance(node, ast.ClassDef):
+        bases = ", ".join(ast.unparse(b) for b in node.bases)
+        head = f"  {node.name}{f'({bases})' if bases else ''} — {_phrase(node)} — :{node.lineno}"
+        return [head, *_member_lines(node, "    ", 12)]
+    return [f"  {_sig(node, False)} — {_phrase(node)} — :{node.lineno}"]  # type: ignore[arg-type]
+
+
+def _cap(lines: list[str], limit: int, module: str) -> list[str]:
+    if len(lines) <= limit:
+        return lines
+    return [*lines[: limit - 1], f"… ещё {len(lines) - limit + 1} строк, сузить: ref {module} --symbol ИМЯ"]
+
+
+def _usage_lines(module: str, use: dict[str, dict] | None, names: list[str]) -> list[str]:
+    """Раздел «Кто использует» по символам `names` (по возрастанию имени); None — исходники не разбираются."""
+    if use is None:
+        return [USAGE_UNKNOWN]
+    lines, unused = [USAGE_HEADER], []
+    for name in names:
+        item = use.get(name)
+        if item is None:
+            unused.append(name)
+            continue
+        rows, tests = item["rows"], item["tests"]
+        lines.append(
+            f"{name} — вне модуля {len(rows)}, тестов {sum(c for *_, c in tests)}, файлов {len({r[0] for r in rows})}"
+        )
+        lines += [f"  {p}:{n}  {kind}" for p, n, kind in rows[:5]] + (
+            [f"  … ещё {len(rows) - 5}"] if len(rows) > 5 else []
+        )
+        if tests:
+            lines += ["  тесты:", *(f"    {p}:{n}  импорт, тестов {c}" for p, n, c in tests[:3])]
+            lines += [f"    … ещё {len(tests) - 3}"] if len(tests) > 3 else []
+    if unused:
+        lines.append(
+            "без использований вне модуля: "
+            + ", ".join(unused[:20])
+            + (f", … ещё {len(unused) - 20}" if len(unused) > 20 else "")
+        )
+    return _cap(lines, 120, module)
+
+
+def ref(
+    con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: str, symbol: str | None = None
+) -> list[str]:
+    """Справочник модуля: интерфейсы (вид, члены, реализации), «Код модуля», «Кто использует»; `symbol` сужает всё."""
     sha = resolve(root, ref)
-    if all(r["id"] != module for r in modules_for(Tree(root, sha))):
+    tree = Tree(root, sha)
+    rows = modules_for(tree)
+    if all(r["id"] != module for r in rows):
         raise AtlasError("atlas: module not found")
     bid = build(con, root, ref, main_ref)
     prefix = f"{module}:"
-    rows = con.execute(
+    found = con.execute(
         "SELECT id, path FROM nodes WHERE build_id = ? AND kind = 'interface' AND substr(id, 1, ?) = ?",
         (bid, len(prefix), prefix),
     ).fetchall()
-    if not rows:
-        return [f"Справочник модуля {module} — интерфейсов нет"]
-    path = min(p for _, p in rows)
-    names = sorted(i[len(prefix) :] for i, _ in rows)
-    defs, listed = _scan(_read(root, sha, [path])[path])
-    tests = _tests(con, root, sha, bid, module, names)
-    lines = [f"Справочник модуля {module} — {path}, интерфейсов {len(names)}"]
-    for name in names:
-        kind, node = defs.get(name, ("none", None))
-        label, text, line = name, _NO_DOC, listed.get(name, 1)
-        if node is not None:
-            line = node.lineno  # type: ignore[attr-defined]
-        if kind == "func":
-            label, text = _sig(node, False), _phrase(node)  # type: ignore[arg-type]
-        elif kind == "class":
-            text = _phrase(node)  # type: ignore[arg-type]
-        elif kind == "from":
-            text = f"реэкспорт из {'.' * node.level}{node.module or ''}"  # type: ignore[attr-defined]
-        total, example = tests[name]
-        lines.append(f"{label} — {text} — {path}:{line} — тестов {total}" + (f", пример {example}" if total else ""))
-        for m in _methods(node) if kind == "class" else []:
-            static = "staticmethod" in {_tag(d) for d in m.decorator_list}
-            lines += [f"  {_sig(m, not static)}  :{m.lineno}", f"    {_phrase(m)}"]
-            if (extra := _pre_post(m)) is not None:
-                lines.append(f"    {extra}")
-    return lines
+    path = min((p for _, p in found), default=None)
+    names = sorted(i[len(prefix) :] for i, _ in found)
+    defs, listed = _scan(_read(root, sha, [path])[path]) if path else ({}, {})
+    own = [
+        f for f in tree.files() if f.endswith(".py") and not is_test(f) and module_of(f, rows) == module and f != path
+    ]
+    code_files = _code_symbols(root, sha, own)
+    code: dict[str, tuple[str, ast.AST]] = {}
+    for p, nodes in code_files:
+        for n in nodes:
+            code.setdefault(n.name, (p, n))  # type: ignore[attr-defined]  # первое по пути определение побеждает
+    if symbol is not None and symbol not in {*names, *code}:
+        raise AtlasError("atlas: symbol not found")
+    shown = [symbol] if symbol else sorted({*names, *code})
+    with checkout(tree, rows) as base:
+        cm = Code(base, rows)
+        iface = dotted(path) if path else ""
+        where: dict[str, Any] = {n: dotted(p) for n, (p, _) in code.items() if n not in names}
+        for n in names:  # цепочка реэкспорта идёт от модуля определения; interfaces.py входит в неё как реэкспортёр
+            where[n] = (cm.defined_in(iface, n), iface)
+        use = cm.usage(module, {n: where[n] for n in shown})
+        wide = bool(names) and symbol in (None, *names)  # реализации нужны только интерфейсам
+        users = cm.module_users(module) if wide else []
+        scan = Scan.of_module(cm, module, users) if wide else None
+        impls = scan.implementations(module) if scan else {}
+        lines = (
+            [f"Справочник модуля {module} — символ {symbol}"]
+            if symbol
+            else [
+                f"Справочник модуля {module} — {path}, интерфейсов {len(names)}"
+                if path
+                else f"Справочник модуля {module} — интерфейсов 0"
+            ]
+        )
+        for name in [n for n in names if symbol in (None, n)]:
+            kind, node = defs.get(name, ("none", None))
+            label, text, line = name, _NO_DOC, listed.get(name, 1)
+            if node is not None:
+                line = node.lineno  # type: ignore[attr-defined]
+            if kind == "func":
+                label, text = _sig(node, False), _phrase(node)  # type: ignore[arg-type]
+            elif kind == "class":
+                text = _phrase(node)  # type: ignore[arg-type]
+            elif kind == "from":
+                text = f"реэкспорт из {'.' * node.level}{node.module or ''}"  # type: ignore[attr-defined]
+            tests = (use or {}).get(name, {"tests": []})["tests"]
+            total = sum(c for *_, c in tests)
+            example = min((p for p, _, c in tests if c), default=None)
+            lines.append(
+                f"{label} — {text} — {path}:{line} — тестов {total}" + (f", пример {example}" if total else "")
+            )
+            if kind != "class":
+                continue
+            desc = cm.describe(path, name)
+            lines += ["  вид: " + (desc[0] if desc else "не определён"), *_member_lines(node, "  ")]  # type: ignore[arg-type]
+            lines += [
+                f"  унаследованные абстрактные от {b} ({len(ns)}): {', '.join(ns)}"
+                for b, ns in (desc[1] if desc else [])
+            ]
+            items = impls.get(name, [])
+            lines.append(f"  реализации ({len(items)}):" if items else "  реализации (0): нет")
+            lines += [f"    {c} — {k} — {p}:{n}" for c, p, n, k in items[:8]]
+            lines += [f"    … ещё {len(items) - 8}"] if len(items) > 8 else []
+    if symbol is None:
+        block = [line for p, nodes in code_files for line in [p, *(x for n in nodes for x in _code_node(n))]]
+        classes = sum(isinstance(n, ast.ClassDef) for _, nodes in code_files for n in nodes)
+        total = sum(len(nodes) for _, nodes in code_files)
+        head = f"{CODE_PREFIX}файлов {len(code_files)}, классов {classes}, функций {total - classes}"
+        lines += _cap([head, *block], 150, module)
+    elif symbol not in names:
+        lines += [code[symbol][0], *_code_node(code[symbol][1])]
+    return lines + _usage_lines(module, use, shown)
 
 
 def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[str]:
@@ -268,7 +387,7 @@ def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[
             continue
         defs = scanned[paths[row["id"]]]
         sized = sorted(
-            ((len(_methods(defs[n][1])) if defs.get(n, ("",))[0] == "class" else 0, n) for n in names),
+            ((len(_methods(defs[n][1], False)) if defs.get(n, ("",))[0] == "class" else 0, n) for n in names),
             key=lambda t: (-t[0], t[1]),
         )
         shown = [f"{n} ({k})" if defs.get(n, ("",))[0] == "class" else n for k, n in sized[:5]]

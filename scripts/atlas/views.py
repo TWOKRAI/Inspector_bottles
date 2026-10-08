@@ -18,7 +18,9 @@ from pathlib import Path
 
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas.build import build
+from scripts.atlas.codemap import USAGE_UNKNOWN, Code, checkout, is_test
 from scripts.atlas.modules import OTHER, resolve as module_of
+from scripts.atlas.rules import Scan
 from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 from scripts.validate_commit.validate_commit import TASK_ID_PATTERN
 
@@ -26,6 +28,16 @@ __all__ = ["TASK_ID_PATTERN", "card", "log", "pack", "purpose"]
 
 _OPEN = ("pending", "in_progress", "blocked")
 _SEVERITY = {"blocking": 0, "warning": 1, "info": 2}
+_RULES_HEAD = {
+    True: "Правила ADR-175 (храповик; framework — находки, services/plugins — рекомендация):",
+    False: "Правила ADR-175 (рекомендация; находки не поднимаются):",
+}
+_RULES_NAMES = (
+    "реализации с явным наследованием",
+    "docstring Google у публичного API",
+    "__all__ у interfaces.py и __init__.py",
+    "записи файла в функции с атомарным вызовом (форма записи, не назначение файла)",
+)
 _NO_PURPOSE = "нет purpose в modules.yaml"
 _TASK_LINE = re.compile(r"Task:[ \t]*([a-z0-9][a-z0-9-]*#(?:" + TASK_ID_PATTERN + r"))[ \t]*", re.ASCII)
 
@@ -68,8 +80,8 @@ def purpose(row: dict) -> str:
     return value if isinstance(value, str) and value.strip() else _NO_PURPOSE
 
 
-def _open_tasks(con: sqlite3.Connection, bid: int, shas: set[str]) -> list[str]:
-    """Строки секции «Открытые задачи»: связь плана с модулем — коммит `touches` + `refs` на план или `implements`."""
+def _open_plans(con: sqlite3.Connection, bid: int, shas: set[str]) -> tuple[list[str], dict[str, list[str]]]:
+    """Планы с открытыми задачами, связанными с модулем (коммит `touches` + `refs` на план или `implements`)."""
     plan_of: dict[str, str] = {}
     pairs: list[tuple[str, str, str]] = []
     for kind, src, dst in con.execute(
@@ -91,21 +103,66 @@ def _open_tasks(con: sqlite3.Connection, bid: int, shas: set[str]) -> list[str]:
     ):
         if plan_of.get(task) in linked:
             open_ids[plan_of[task]].append(task.partition("#")[2])
+    return sorted(open_ids, key=lambda s: (-len(linked[s]), s)), open_ids
+
+
+def _ids(ids: list[str]) -> str:
+    ids = sorted(ids, key=_natural)
+    return ", ".join(ids[:6]) + (f", … ещё {len(ids) - 6}" if len(ids) > 6 else "")
+
+
+def _open_tasks(con: sqlite3.Connection, bid: int, shas: set[str]) -> list[str]:
+    """Строки секции «Открытые задачи»."""
+    plans, open_ids = _open_plans(con, bid, shas)
     if not open_ids:
         return ["Открытые задачи: нет"]
-    plans = sorted(open_ids, key=lambda s: (-len(linked[s]), s))
     lines = [f"Открытые задачи ({len(plans)} планов, {sum(map(len, open_ids.values()))} задач):"]
-    for slug in plans[:5]:
-        ids = sorted(open_ids[slug], key=_natural)
-        more = f", … ещё {len(ids) - 6}" if len(ids) > 6 else ""
-        lines.append(f"  {slug} — {len(ids)}: {', '.join(ids[:6])}{more}")
+    lines += [f"  {slug} — {len(open_ids[slug])}: {_ids(open_ids[slug])}" for slug in plans[:5]]
     return lines + ([f"  … ещё {len(plans) - 5} планов"] if len(plans) > 5 else [])
+
+
+def _findings_of(con: sqlite3.Connection, bid: int, module: str) -> list[tuple[str, str, str, str]]:
+    found = con.execute(
+        "SELECT severity, code, node, detail FROM findings WHERE build_id = ? AND (node = ? OR substr(node, 1, ?) = ?)",
+        (bid, f"module:{module}", len(module) + 11, f"interface:{module}:"),
+    ).fetchall()
+    return sorted(found, key=lambda f: (_SEVERITY.get(f[0], 3), f[1], f[2], f[3]))
+
+
+def _module_blocks(tree: Tree, rows: list[dict], row: dict) -> list[str]:
+    """«Кто использует модуль» и доли правил ADR-175 (по выгрузке ревизии; общая AST-функция с адаптером `rules`)."""
+    module, layer = row["id"], row["layer"]
+    with checkout(tree, rows) as base:
+        code = Code(base, rows)
+        users = code.module_users(module)
+        shares = None
+        if layer in ("framework", "services", "plugins"):
+            scan = Scan.of_module(code, module, users)
+            shares = scan.check(module)[1]
+    if users is None:
+        lines = [USAGE_UNKNOWN]
+    else:
+        tests = [p for p, _ in users if is_test(p)]
+        plain = [f"  {p}:{n}" for p, n in users if not is_test(p)]
+        lines = [
+            "Кто использует модуль (статика: импорты модуля целиком вне модуля; getattr, реестры, patch по строке и"
+            f" каналы роутера не видны): файлов {len(users)}, из них тестов {len(tests)}",
+            *plain[:10],
+            *([f"  … ещё {len(plain) - 10}"] if len(plain) > 10 else []),
+            f"  тесты: {len(tests)} файлов, первые 3: {', '.join(tests[:3])}" if tests else "  тесты: 0 файлов",
+        ]
+    if shares is None:
+        return [*lines, f"Правила ADR-175: вне охвата (слой {layer})"]
+    head = _RULES_HEAD[layer == "framework"]
+    names = dict(zip(("П1", "П2", "П3", "П4"), _RULES_NAMES))
+    return [*lines, head, *(f"  {k} {names[k]}: {a} из {b}" for k, (a, b) in shares.items())]
 
 
 def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: str) -> list[str]:
     """Карточка модуля: назначение, API, открытые задачи, последние коммиты, находки (без доказанности)."""
     tree = Tree(root, resolve(root, ref))
-    row = _module_row(modules_for(tree), module)
+    rows = modules_for(tree)
+    row = _module_row(rows, module)
     bid = build(con, root, ref, main_ref)
     prefix = f"{module}:"
     names = sorted(
@@ -125,11 +182,7 @@ def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: s
     last = commits[:5]
     subjects = _by_sha(root, [s for s, _ in last], "-z", "--format=%s") if last else b""
     topics = [t.decode("utf-8", "replace") for t in subjects.split(b"\0")]
-    found = con.execute(
-        "SELECT severity, code, node, detail FROM findings WHERE build_id = ? AND (node = ? OR substr(node, 1, ?) = ?)",
-        (bid, f"module:{module}", len(module) + 11, f"interface:{module}:"),
-    ).fetchall()
-    found.sort(key=lambda f: (_SEVERITY.get(f[0], 3), f[1], f[2], f[3]))
+    found = _findings_of(con, bid, module)
     tier = row["tier"] if row["tier"] is not None else "—"
     lines = [
         f"Модуль {module} — {row['layer']}, ярус {tier}",
@@ -141,7 +194,7 @@ def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: s
         f"Находки ({len(found)}):",
         *(f"  {sev} {code} {node} {detail or '-'}" for sev, code, node, detail in found[:10]),
     ]
-    return lines + ([f"  … ещё {len(found) - 10}"] if len(found) > 10 else [])
+    return lines + ([f"  … ещё {len(found) - 10}"] if len(found) > 10 else []) + _module_blocks(tree, rows, row)
 
 
 def _plan_commits(root: Path, sha: str, slug: str) -> tuple[dict[str, list[str]], dict[str, int], dict[str, list[str]]]:
@@ -277,6 +330,53 @@ def _tails(
     ]
 
 
+def _text_sources(tree: Tree, plan_path: str, tid: str, rows: list[dict]) -> tuple[list[str], list[str]]:
+    """(модули, пути) из строки задачи `- Task {id}:` плана: токены — id модуля либо путь (точный или суффикс)."""
+    lines = _text(tree, plan_path).split("\n")
+    start = next((i for i, line in enumerate(lines) if line.startswith(f"- Task {tid}:")), None)
+    text = []
+    for line in lines[start:] if start is not None else []:
+        if text and (line.startswith(("- Task", "## "))):
+            break
+        text.append(line)
+    files = tree.files()
+    ids = {r["id"] for r in rows}
+    found: set[str] = set()
+    paths: set[str] = set()
+    for token in re.findall(r"[A-Za-z0-9_./-]+", "\n".join(text)):
+        token = token.strip("./-")
+        if token in ids:
+            found.add(token)
+        if "/" in token or token.endswith(".py"):
+            for path in (f for f in files if f == token or f.endswith("/" + token)):
+                if module_of(path, rows) != OTHER:
+                    found.add(module_of(path, rows))
+                    paths.add(path)
+    return sorted(found), sorted(paths)
+
+
+def _text_blocks(con: sqlite3.Connection, bid: int, chosen: list[str], own_slug: str) -> list[str]:
+    """«Находки по модулям» и «Другие планы по модулям» (ветка «из текста задачи»)."""
+    per = {m: _findings_of(con, bid, m) for m in chosen}
+    lines = [f"Находки по модулям ({sum(map(len, per.values()))}):"]
+    for found in per.values():
+        lines += [f"  {sev} {code} {node} {detail or '-'}" for sev, code, node, detail in found[:5]]
+        lines += [f"  … ещё {len(found) - 5}"] if len(found) > 5 else []
+    lines.append("Другие планы по модулям:")
+    for module in chosen:
+        shas = {
+            r[0]
+            for r in con.execute(
+                "SELECT substr(src, 8) FROM edges WHERE build_id = ? AND kind = 'touches' AND dst = ?",
+                (bid, f"module:{module}"),
+            )
+        }
+        plans, open_ids = _open_plans(con, bid, shas)
+        parts = [f"{slug} — {len(open_ids[slug])}: {_ids(open_ids[slug])}" for slug in plans if slug != own_slug]
+        lines.append(f"  {module}: {'; '.join(parts) or '—'}")
+    return lines
+
+
 def pack(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, task: str, modules: list[str]) -> list[str]:
     """Бриф задачи: модули, файлы-кандидаты в FILES (из git), хвосты прошлых задач плана."""
     slug, sep, tid = task.partition("#")
@@ -309,13 +409,16 @@ def pack(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, task: str
         chosen, source = sorted(set(modules)), "--module"
     elif mods.get(tid):
         chosen, source = sorted(mods[tid]), "коммиты задачи"
+    elif (text := _text_sources(tree, node[1], tid, rows)) and text[0]:
+        (chosen, text_paths), source = text, "из текста задачи"
     elif latest:
         newest = max(latest, key=lambda t: (latest[t], _natural(t)))
         chosen, source = sorted(mods[newest]), f"последняя задача плана с модулями — {newest}"
     else:
         chosen, source = [], ""
     present = set(tree.files())
-    files = sorted(p for p in owners if p in present and module_of(p, rows) in chosen)
+    from_text = source == "из текста задачи"
+    files = text_paths if from_text else sorted(p for p in owners if p in present and module_of(p, rows) in chosen)
     head = f"{slug}#"
     status_of = {
         i[len(head) :]: st
@@ -328,8 +431,9 @@ def pack(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, task: str
         f"Задача {task} — статус {node[0]}, план {node[1]}",
         f"Модули: {', '.join(chosen)} ({source})" if chosen else "Модули: — (у плана нет коммитов с модулями)",
         f"Файлы-кандидаты в FILES ({len(files)}):",
-        *(f"  {p} — {', '.join(sorted(owners[p], key=_natural))}" for p in files),
+        *(f"  {p} — {'из текста задачи' if from_text else ', '.join(sorted(owners[p], key=_natural))}" for p in files),
         *_tails(tree, slug, node[1], tid, status_of, mods, chosen),
+        *(_text_blocks(con, bid, chosen, slug) if from_text else []),
     ]
 
 

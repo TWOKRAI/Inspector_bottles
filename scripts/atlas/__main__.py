@@ -44,7 +44,9 @@ def _parser() -> argparse.ArgumentParser:
     pack = sub.add_parser("pack", parents=[common, with_ref], help="бриф задачи <slug>#<id>")
     pack.add_argument("task")
     pack.add_argument("--module", action="append", default=[], help="модуль задачи (повторяемый)")
-    sub.add_parser("ref", parents=[common, with_ref], help="справочник интерфейсов модуля").add_argument("module")
+    ref = sub.add_parser("ref", parents=[common, with_ref], help="справочник интерфейсов и кода модуля")
+    ref.add_argument("module")
+    ref.add_argument("--symbol", default=None, help="сузить вывод до одного символа")
     index = sub.add_parser("index", parents=[common, with_ref], help="индекс проекта (docs/atlas/INDEX.md)")
     index.add_argument("--write", action="store_true", help="записать docs/atlas/INDEX.md")
     index.add_argument("--check", action="store_true", help="сверить docs/atlas/INDEX.md с индексом (код 1 — отстал)")
@@ -94,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(lines))
                 return 0
             if args.command == "ref":
-                print("\n".join(reference.ref(con, root, ref, main_ref, args.module)))
+                print("\n".join(reference.ref(con, root, ref, main_ref, args.module, args.symbol)))
                 return 0
             if args.command == "index":
                 lines = reference.index(con, root, ref, main_ref)

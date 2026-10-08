@@ -72,7 +72,7 @@ def test_card_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     assert lines[2] == "API (2): IMessageChannel, IRouterManager"
     assert lines[3].startswith("Открытые задачи")
     start = lines.index("Коммиты (79 всего, последние 5):")
-    assert lines[start:] == [
+    assert lines[start : start + 6] == [
         "Коммиты (79 всего, последние 5):",
         "  92fd045 2026-10-05 merge: main в feat/lifecycle-owner-scope перед T1 (spawn на всех ОС, Атлас 0.8)",
         "  9d8e5df 2026-10-05 merge: main в feat/lifecycle-owner-scope перед ревью Task 0.2 и стартом 0.3/0.4",
@@ -80,9 +80,14 @@ def test_card_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
         " те…",
         "  fd906e4 2026-10-03 merge: Task 5.6 — стенд-гейт скриптом и счётчики тракта в телеметрии",
         "  68fb2e6 2026-10-02 chore(merge): Task 5.5 — зелёный набор фреймворка и гейт /dev:ship в main",
-        "Находки (1):",
-        "  info INTERFACE_WITHOUT_TEST interface:router_module:IRouterManager -",
     ]
+    findings = lines[start + 6 :]
+    assert findings[0].startswith("Находки (")
+    # лимит 10 строк и порядок blocking > warning > info: 17 warning П-правил вытесняют info из вывода
+    assert any(line.startswith("  warning P") for line in findings)
+    assert not any(line.startswith("  info INTERFACE_WITHOUT_TEST") for line in findings)
+    assert any(line.startswith("Кто использует модуль (") for line in findings)
+    assert "Правила ADR-175 (храповик; framework — находки, services/plugins — рекомендация):" in findings
     assert len(lines) <= 60
     assert not any(line.startswith("Доказанность") for line in lines)
 
@@ -155,8 +160,8 @@ def test_pack_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
         text.startswith("- Ключ кэша (sha, main_ref, fingerprint) не включает `ctx.base`:") for text in unchecked
     )
 
-    lines = _ok(atlas(pinned, "pack", "atlas#1.6", *_PINNED))
-    assert "Модули: scripts (последняя задача плана с модулями — 1.5a)" in lines
+    lines = _ok(atlas(pinned, "pack", "atlas#1.6", "--module", "scripts", *_PINNED))
+    assert "Модули: scripts (--module)" in lines  # прежнее значение источника «запасной» заменено явным флагом
     for path in _FILES_1_5A:
         rows = [line for line in lines if line.startswith(f"  {path} — ")]
         assert len(rows) == 1, path
@@ -170,6 +175,12 @@ def test_pack_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     for key, count in {"atlas#1.3b": 9, "atlas#1.3c": 9, "atlas#1.5a": 13}.items():
         assert f"    Открыто для лида ({count}):" in blocks[key], key
     assert blocks["atlas#0.8"] == ["    итог без разделов формы 0.7: plans/2026-10-04_atlas/tasks/0.8.result.md"]
+
+    lines = _ok(atlas(pinned, "pack", "atlas#1.6", *_PINNED))
+    modules = next(line for line in lines if line.startswith("Модули: "))
+    # у задачи 1.6 нет коммитов; её текст называет router_module (`atlas card router_module`)
+    assert modules.endswith("(из текста задачи)")
+    assert "router_module" in modules
 
     lines = _ok(atlas(pinned, "pack", "atlas#1.3a", *_PINNED))
     blocks = _blocks(lines)

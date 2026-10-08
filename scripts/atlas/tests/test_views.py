@@ -82,6 +82,24 @@ def _lines(res: Any) -> list[str]:
     return res.out.splitlines()
 
 
+# ---------------------------------------------------------------- блоки 1.6c в конце карточки
+
+_USAGE_PREFIX = "Кто использует модуль ("
+_RULES_FRAMEWORK = "Правила ADR-175 (храповик; framework — находки, services/plugins — рекомендация):"
+
+
+def _after(lines: list[str], expected: list[str]) -> list[str]:
+    """Вывод карточки начинается с expected (старые строки 1.6 / находки); возвращает хвост — новые блоки 1.6c."""
+    assert lines[: len(expected)] == expected
+    return lines[len(expected) :]
+
+
+def _scope_tail(tail: list[str], layer: str) -> None:
+    """Хвост карточки модуля вне охвата правил: блок «Кто использует модуль» и одна строка про слой."""
+    assert any(line.startswith("Кто использует") for line in tail)
+    assert tail[-1] == f"Правила ADR-175: вне охвата (слой {layer})"
+
+
 # ---------------------------------------------------------------- Ф1
 
 
@@ -140,7 +158,9 @@ def _f1_expected(shas: dict[str, str]) -> list[str]:
         f"  {_s7(shas['c6'])} 2026-10-06 m: d",
         f"  {_s7(shas['c4'])} 2026-10-04 m: c",
         f"  {_s7(shas['c3'])} 2026-10-03 m: b",
-        "Находки (1):",
+        "Находки (3):",
+        "  warning P2_DOCSTRING module:m Alpha",
+        "  warning P2_DOCSTRING module:m Beta",
         "  info INTERFACE_WITHOUT_TEST interface:m:Beta -",
     ]
 
@@ -148,7 +168,18 @@ def _f1_expected(shas: dict[str, str]) -> list[str]:
 def test_card_shape_links_and_order(repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, shas = _f1_repo(repo_factory, monkeypatch)
     first = _lines(atlas(repo, "card", "m", *_REFS))
-    assert first == _f1_expected(shas)
+    tail = _after(first, _f1_expected(shas))
+    # m — слой framework: блок «Кто использует модуль» (нет файлов-импортёров вне модуля) и четыре доли правил
+    assert tail[0].startswith(_USAGE_PREFIX)
+    assert tail[0].endswith(": файлов 0, из них тестов 0")
+    assert tail[1:] == [
+        "  тесты: 0 файлов",
+        _RULES_FRAMEWORK,
+        "  П1 реализации с явным наследованием: 0 из 0",
+        "  П2 docstring Google у публичного API: 0 из 2",
+        "  П3 __all__ у interfaces.py и __init__.py: 1 из 1",
+        "  П4 записи файла в функции с атомарным вызовом (форма записи, не назначение файла): 0 из 0",
+    ]
     assert _lines(atlas(repo, "card", "m", *_REFS)) == first
 
 
@@ -205,40 +236,50 @@ def test_card_edges_caps_and_unknown_kinds(
     repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch, set_adapters: Any
 ) -> None:
     repo, shas = _f2_repo(repo_factory, monkeypatch, "f2")
-    assert _lines(atlas(repo, "card", "a_b", *_REFS)) == [
-        "Модуль a_b — scripts, ярус —",
-        "Назначение: нет purpose в modules.yaml",
-        "API (1): P",
-        "Открытые задачи: нет",
-        "Коммиты (1 всего, последние 1):",
-        f"  {_s7(shas['init'])} 2026-10-01 init",
-        "Находки (1):",
-        "  info INTERFACE_WITHOUT_TEST interface:a_b:P -",
-    ]
+    tail = _after(
+        _lines(atlas(repo, "card", "a_b", *_REFS)),
+        [
+            "Модуль a_b — scripts, ярус —",
+            "Назначение: нет purpose в modules.yaml",
+            "API (1): P",
+            "Открытые задачи: нет",
+            "Коммиты (1 всего, последние 1):",
+            f"  {_s7(shas['init'])} 2026-10-01 init",
+            "Находки (1):",
+            "  info INTERFACE_WITHOUT_TEST interface:a_b:P -",
+        ],
+    )
+    _scope_tail(tail, "scripts")
     assert "API (1): Q" in _lines(atlas(repo, "card", "axb", *_REFS))
-    assert _lines(atlas(repo, "card", "big", *_REFS)) == [
-        "Модуль big — scripts, ярус —",
-        "Назначение: нет purpose в modules.yaml",
-        "API (22): " + ", ".join(f"N{i:02d}" for i in range(1, 21)) + ", … ещё 2",
-        "Открытые задачи (6 планов, 12 задач):",
-        "  p1 — 7: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, … ещё 1",
-        "  p2 — 1: 1.1",
-        "  p3 — 1: 1.1",
-        "  p4 — 1: 1.1",
-        "  p5 — 1: 1.1",
-        "  … ещё 1 планов",
-        "Коммиты (7 всего, последние 5):",
-        f"  {_s7(shas['f6'])} 2026-10-07 big f6",
-        f"  {_s7(shas['f5'])} 2026-10-06 big f5",
-        f"  {_s7(shas['f4'])} 2026-10-05 big f4",
-        f"  {_s7(shas['f3'])} 2026-10-04 big f3",
-        f"  {_s7(shas['f2'])} 2026-10-03 big f2",
-        "Находки (22):",
-        *[f"  info INTERFACE_WITHOUT_TEST interface:big:N{i:02d} -" for i in range(1, 11)],
-        "  … ещё 12",
-    ]
+    tail = _after(
+        _lines(atlas(repo, "card", "big", *_REFS)),
+        [
+            "Модуль big — scripts, ярус —",
+            "Назначение: нет purpose в modules.yaml",
+            "API (22): " + ", ".join(f"N{i:02d}" for i in range(1, 21)) + ", … ещё 2",
+            "Открытые задачи (6 планов, 12 задач):",
+            "  p1 — 7: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, … ещё 1",
+            "  p2 — 1: 1.1",
+            "  p3 — 1: 1.1",
+            "  p4 — 1: 1.1",
+            "  p5 — 1: 1.1",
+            "  … ещё 1 планов",
+            "Коммиты (7 всего, последние 5):",
+            f"  {_s7(shas['f6'])} 2026-10-07 big f6",
+            f"  {_s7(shas['f5'])} 2026-10-06 big f5",
+            f"  {_s7(shas['f4'])} 2026-10-05 big f4",
+            f"  {_s7(shas['f3'])} 2026-10-04 big f3",
+            f"  {_s7(shas['f2'])} 2026-10-03 big f2",
+            "Находки (22):",
+            *[f"  info INTERFACE_WITHOUT_TEST interface:big:N{i:02d} -" for i in range(1, 11)],
+            "  … ещё 12",
+        ],
+    )
+    _scope_tail(tail, "scripts")
     for name in ("ghost", "idle"):
-        assert _lines(atlas(repo, "card", name, *_REFS)) == [line.format(id=name) for line in _EMPTY_CARD]
+        _scope_tail(
+            _after(_lines(atlas(repo, "card", name, *_REFS)), [line.format(id=name) for line in _EMPTY_CARD]), "scripts"
+        )
 
     from scripts.atlas.build import ADAPTERS
     from scripts.atlas.schema import AdapterOutput, Edge, Finding, Node
@@ -261,14 +302,18 @@ def test_card_edges_caps_and_unknown_kinds(
 
     set_adapters(*ADAPTERS, FixedAdapter(fixed))
     repo2, _ = _f2_repo(repo_factory, monkeypatch, "f2_fixed")
-    assert _lines(atlas(repo2, "card", "idle", *_REFS)) == [
-        *[line.format(id="idle") for line in _EMPTY_CARD[:5]],
-        "Находки (4):",
-        "  blocking A_CODE module:idle -",
-        "  blocking Z_CODE module:idle d2",
-        "  warning M_CODE module:idle -",
-        "  info FUTURE_CODE module:idle -",
-    ]
+    tail = _after(
+        _lines(atlas(repo2, "card", "idle", *_REFS)),
+        [
+            *[line.format(id="idle") for line in _EMPTY_CARD[:5]],
+            "Находки (4):",
+            "  blocking A_CODE module:idle -",
+            "  blocking Z_CODE module:idle d2",
+            "  warning M_CODE module:idle -",
+            "  info FUTURE_CODE module:idle -",
+        ],
+    )
+    _scope_tail(tail, "scripts")
 
 
 # ---------------------------------------------------------------- Ф3
@@ -635,9 +680,7 @@ def test_pack_order_is_total_under_hash_seeds(repo_factory: RepoFactory, monkeyp
         "    Осталось:",
         "      - хвост 1.2",
     ]
-    outputs = {
-        seed: _pack_in_subprocess(repo, seed, "pack", "alpha#1.1", *_REFS) for seed in ("0", "1", "2", "3")
-    }
+    outputs = {seed: _pack_in_subprocess(repo, seed, "pack", "alpha#1.1", *_REFS) for seed in ("0", "1", "2", "3")}
     assert outputs == {seed: expected for seed in outputs}
 
 

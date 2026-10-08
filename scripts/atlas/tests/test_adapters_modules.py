@@ -166,6 +166,7 @@ def test_adapters_registration() -> None:
         ("PlansAdapter", "plans"),
         ("CommitsAdapter", "commits"),
         ("CodeAdapter", "code"),
+        ("RulesAdapter", "rules"),
     ]
     assert ADAPTERS[0].version == 1
     for adapter in ADAPTERS[1:]:

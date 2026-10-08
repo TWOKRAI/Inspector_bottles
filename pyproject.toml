@@ -71,6 +71,7 @@ dev = [
     "import-linter>=2.13",
     "libcst>=1.8.6",
     "pydeps>=3.0.6",
+    "griffe>=2.3",
 ]
 diagrams = [
     "pylint>=3.3",      # pyreverse для UML-диаграмм классов
@@ -341,6 +342,7 @@ reportIndexIssue = "warning"
 reportAssignmentType = "warning"
 reportGeneralTypeIssues = "warning"
 reportUnboundVariable = "warning"
+reportIncompatibleMethodOverride = "warning"  # ADR-175 П1: дрейф сигнатуры реализации интерфейса (О1 брифа 1.6c)
 
 # ── bandit ──
 [tool.bandit]
