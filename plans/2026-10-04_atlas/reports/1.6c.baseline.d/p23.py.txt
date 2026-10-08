@@ -1,0 +1,26 @@
+import ast, re
+from pathlib import Path
+FW = Path("multiprocess_framework/modules"); F = (ast.FunctionDef, ast.AsyncFunctionDef)
+p3_files = p3_bad = 0; p3_dangling = []
+sym = ok = nodoc = bad_style = 0
+for p in sorted(FW.glob("*/interfaces.py")) + sorted(FW.glob("*/__init__.py")):
+    t = ast.parse(p.read_text(encoding="utf-8").removeprefix("﻿"))
+    pub = [n for n in t.body if isinstance(n, (ast.ClassDef, *F)) and not n.name.startswith("_")] + [a for n in t.body if isinstance(n, ast.ImportFrom) for a in n.names if not a.name.startswith("_") and a.name != "*"]
+    allv = None
+    for n in t.body:
+        if isinstance(n, ast.Assign) and any(isinstance(x, ast.Name) and x.id == "__all__" for x in n.targets) and isinstance(n.value, (ast.List, ast.Tuple)):
+            allv = [e.value for e in n.value.elts if isinstance(e, ast.Constant)]
+    if pub:
+        p3_files += 1
+        if allv is None: p3_bad += 1
+    if p.name == "interfaces.py":
+        for n in t.body:
+            if isinstance(n, ast.ClassDef) and not n.name.startswith("_"):
+                items = [n] + [m for m in n.body if isinstance(m, F) and not m.name.startswith("_")]
+                for it in items:
+                    sym += 1; d = ast.get_docstring(it)
+                    if not d: nodoc += 1
+                    elif re.search(r"^\s*:(param|returns?|raises?)\b|^\s*(Parameters|Returns)\n\s*-{3,}", d, re.M): bad_style += 1
+                    else: ok += 1
+print(f"П3: файлов interfaces.py/__init__.py с публичными именами {p3_files}, без __all__ {p3_bad}")
+print(f"П2: символов интерфейсов (класс + публичные методы) {sym}: с docstring не-Sphinx/NumPy {ok}, без docstring {nodoc}, :param/NumPy {bad_style}")

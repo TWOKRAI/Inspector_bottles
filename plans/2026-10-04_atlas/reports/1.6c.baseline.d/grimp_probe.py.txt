@@ -1,0 +1,14 @@
+import time, grimp, sys
+t = time.perf_counter()
+g = grimp.build_graph("multiprocess_framework", "multiprocess_prototype", "Services", "Plugins", include_external_packages=False)
+print(f"build_graph (4 пакета, с диска, холодно): {time.perf_counter()-t:.2f} с; модулей: {len(g.modules)}")
+W = "multiprocess_framework.modules.config_module.tools.watcher"
+P = "multiprocess_framework.modules.config_module.tools"
+M = "multiprocess_framework.modules.config_module"
+for target in (W, P, M):
+    t = time.perf_counter(); who = sorted(g.find_modules_that_directly_import(target)); dt = time.perf_counter() - t
+    print(f"\nпрямые импортёры {target}: {len(who)} за {dt:.3f} с")
+    for imp in who:
+        for d in g.get_import_details(importer=imp, imported=target):
+            if "ConfigFileWatcher" in d["line_contents"] or target == W:
+                print(f'   {imp}:{d["line_number"]}  {d["line_contents"].strip()[:110]}')

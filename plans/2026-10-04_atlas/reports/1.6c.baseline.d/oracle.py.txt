@@ -1,0 +1,60 @@
+"""Оракул «Кто использует» для замеров брифа 1.6c (независимо от будущего кода Атласа)."""
+import ast, re, sys
+from pathlib import Path
+ROOTS = ["multiprocess_framework", "Services", "Plugins", "multiprocess_prototype"]
+files = [p for r in ROOTS for p in Path(r).rglob("*.py")]
+def dotted(p):
+    parts = list(p.with_suffix("").parts)
+    if parts[-1] == "__init__": parts = parts[:-1]
+    return ".".join(parts)
+trees = {}
+for p in files:
+    try: trees[p] = ast.parse(p.read_text(encoding="utf-8", errors="replace").removeprefix("﻿"))
+    except SyntaxError: pass
+def resolve(p, node):
+    if node.level == 0: return node.module or ""
+    base = dotted(p).split(".")
+    if p.name != "__init__.py": base = base[:-1]
+    base = base[: len(base) - (node.level - 1)]
+    return ".".join(base + ([node.module] if node.module else []))
+def is_test(p):
+    s = p.as_posix(); return "/tests/" in s or bool(re.search(r"(^|/)test_[^/]*\.py$|_test\.py$", s))
+def usage(D, S, module_dir):
+    R = {D}; changed = True
+    while changed:
+        changed = False
+        for p, t in trees.items():
+            if p.name != "__init__.py": continue
+            pd = dotted(p)
+            if pd in R: continue
+            for n in ast.walk(t):
+                if isinstance(n, ast.ImportFrom) and resolve(p, n) in R and any(a.name == S for a in n.names):
+                    R.add(pd); changed = True; break
+    out, tests = [], {}
+    for p, t in trees.items():
+        locals_ = set()
+        for n in ast.walk(t):
+            if isinstance(n, ast.ImportFrom) and resolve(p, n) in R:
+                for a in n.names:
+                    if a.name == S: locals_.add(a.asname or S); out.append((p, a.lineno, "импорт"))
+        if not locals_: continue
+        for n in ast.walk(t):
+            if isinstance(n, ast.Call):
+                f = n.func; nm = f.id if isinstance(f, ast.Name) else None
+                if nm in locals_: out.append((p, n.lineno, "вызов"))
+        if is_test(p):
+            c = 0
+            for fn in ast.walk(t):
+                if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name.startswith("test"):
+                    if any(isinstance(x, ast.Name) and x.id in locals_ for x in ast.walk(fn)): c += 1
+            tests[p] = c
+    inside = lambda p: p.as_posix().startswith(module_dir + "/")
+    outside = sorted((p.as_posix(), l, k) for p, l, k in out if not is_test(p) and not inside(p))
+    tst = sorted((p.as_posix(), min(l for q, l, k in out if q == p), c) for p, c in tests.items())
+    return sorted(R), outside, tst
+for D, S, M in [("multiprocess_framework.modules.config_module.tools.watcher", "ConfigFileWatcher", "multiprocess_framework/modules/config_module"),
+                ("multiprocess_framework.modules.process_module.managers.observability_reload", "start_observability_watcher", "multiprocess_framework/modules/process_module")]:
+    R, outside, tst = usage(D, S, M)
+    print("==", S, "реэкспорт-цепочка:", R)
+    for o in outside: print("  вне модуля:", *o)
+    for t in tst: print("  тесты:", *t)

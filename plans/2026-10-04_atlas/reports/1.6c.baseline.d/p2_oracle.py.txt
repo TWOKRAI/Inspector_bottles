@@ -1,0 +1,29 @@
+import re, sys
+from griffe import GriffeLoader
+MODS = "/home/user/Inspector_bottles/multiprocess_framework/modules"
+mod = sys.argv[1]
+loader = GriffeLoader(search_paths=[MODS], allow_inspection=False); m = loader.load(mod); loader.resolve_aliases(implicit=False, external=False)
+BAD = re.compile(r"^\s*:(param|returns?|raises?|type|rtype)\b|^\s*(Parameters|Returns|Raises)\s*\n\s*-{3,}", re.M)
+syms = {}
+def add(obj):
+    if obj.is_alias: obj = obj.final_target
+    syms[obj.path] = obj
+    if obj.is_class:
+        for k, v in obj.members.items():
+            if not k.startswith("_") and not v.is_alias and v.is_function: syms[v.path] = v
+for k, v in m["interfaces"].members.items():
+    if not k.startswith("_") and not v.is_alias and (v.is_class or v.is_function): add(v)
+for name in (m.exports or []):
+    name = str(name)
+    try: obj = m[name]
+    except KeyError: continue
+    try:
+        t = obj.final_target if obj.is_alias else obj
+        if t.is_class or t.is_function: add(t)
+    except Exception as e: pass
+ok = bad = 0; lines = []
+for path, o in sorted(syms.items()):
+    d = o.docstring.value if o.docstring else None
+    good = bool(d and d.strip() and not BAD.search(d))
+    ok += good; lines.append((path.split(mod + ".")[-1], good))
+print(mod, "П2: символов", len(syms), "соответствуют", ok); print([p for p, g in lines if not g])

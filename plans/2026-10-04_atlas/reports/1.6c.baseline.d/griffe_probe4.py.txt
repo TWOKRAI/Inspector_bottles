@@ -1,0 +1,17 @@
+import time, griffe
+from griffe import GriffeLoader, Parser
+ROOT = "/home/user/Inspector_bottles"
+def run(label, fn):
+    t = time.perf_counter(); r = fn(); print(f"{label}: {time.perf_counter()-t:.2f} с"); return r
+def n_files(m):
+    return 1 + sum(n_files(v) for v in m.members.values() if not v.is_alias and v.is_module)
+l = GriffeLoader(search_paths=[ROOT], allow_inspection=False)
+top = run("load multiprocess_framework (submodules=False)", lambda: l.load("multiprocess_framework", submodules=False))
+print(" модулей в top:", n_files(top))
+l2 = GriffeLoader(search_paths=[ROOT], allow_inspection=False)
+c = run("load ...config_module (submodules=True)", lambda: l2.load("multiprocess_framework.modules.config_module"))
+print(" корень коллекции:", list(l2.modules_collection.members), "| модулей:", n_files(l2.modules_collection["multiprocess_framework"]))
+import cProfile, pstats, io
+pr = cProfile.Profile(); l3 = GriffeLoader(search_paths=[ROOT], allow_inspection=False)
+pr.enable(); l3.load("multiprocess_framework.modules.config_module"); pr.disable()
+s = io.StringIO(); pstats.Stats(pr, stream=s).sort_stats("cumulative").print_stats(14); print("\n".join(s.getvalue().splitlines()[6:26]))
