@@ -31,8 +31,8 @@ _IFACE_PARAMS = {
     "send_async": ["message", "priority"], "receive": ["timeout", "return_messages"],
     "start_listening": ["poll_interval"], "stop_listening": ["timeout"],
     "add_message_callback": ["callback"], "remove_message_callback": ["callback"],
-    "register_channel": ["channel"], "unregister_channel": ["channel_name"],
-    "get_channel": ["channel_name"], "get_all_channels": [],
+    "register_channel": ["channel"], "unregister_channel": ["name"],
+    "get_channel": ["name"], "get_all_channels": [],
     "register_route": ["key", "channel_name", "strategy", "efficiency", "tags"],
     "register_broadcast_route": ["key", "channel_names", "tags"],
     "register_message_handler": ["key", "handler", "expects_full_message", "metadata", "efficiency", "tags"],
@@ -55,7 +55,8 @@ def test_router_manager_instance_has_every_irouter_manager_member():
         assert callable(getattr(router, name, None)), name
 
 
-def test_router_manager_signature_drift_is_exactly_the_two_known_names():
+def test_router_manager_signatures_match_irouter_manager_without_drift():
+    assert set(_IFACE_PARAMS) == _MEMBERS - {"manager_name"}
     router = RouterManager(manager_name="contract_router")
     mismatch = {}
     for name, iface in _IFACE_PARAMS.items():
@@ -70,7 +71,4 @@ def test_router_manager_signature_drift_is_exactly_the_two_known_names():
         )  # fmt: skip
         if impl[: len(iface)] != iface or not extras_ok:
             mismatch[name] = (iface, impl)
-    assert mismatch == {
-        "get_channel": (["channel_name"], ["name"]),
-        "unregister_channel": (["channel_name"], ["name"]),
-    }
+    assert mismatch == {}
