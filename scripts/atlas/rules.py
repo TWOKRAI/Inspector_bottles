@@ -423,7 +423,12 @@ class RulesAdapter:
         tree = ctx.tree
         rows = modules_for(tree)
         framework = sorted(r["id"] for r in rows if r["layer"] == "framework")
-        paths = [p for p in tree.files() if p.endswith(".py") and not is_test(p) and module_of(p, rows) in framework]
+        near = tuple(e for r in rows if r["layer"] == "framework" for e in r["paths"])  # префильтр: resolve дорог
+        paths = [
+            p
+            for p in tree.files()
+            if p.endswith(".py") and p.startswith(near) and not is_test(p) and module_of(p, rows) in framework
+        ]
         out = AdapterOutput()
         was_enabled = gc.isenabled()
         gc.disable()  # тысячи узлов AST без циклов: сборщик мусора только тормозит разбор
