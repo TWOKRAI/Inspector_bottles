@@ -1,0 +1,37 @@
+import time, griffe, collections
+from griffe import GriffeLoader, Parser
+ROOT = "/home/user/Inspector_bottles"
+MODS = ROOT + "/multiprocess_framework/modules"
+t = time.perf_counter()
+loader = GriffeLoader(search_paths=[MODS], allow_inspection=False, docstring_parser=Parser.google)
+cfg = loader.load("config_module"); base = loader.load("base_manager")
+loader.resolve_aliases(implicit=False, external=False)
+print(f"раздельная загрузка config_module+base_manager по путю modules/: {time.perf_counter()-t:.2f} с")
+ci = cfg["interfaces.IConfigManager"]
+print("inherited_members:", len(ci.inherited_members), "| bases resolved:", [b.canonical_path if hasattr(b,'canonical_path') else str(b) for b in ci.resolved_bases])
+cw = cfg["tools.watcher.ConfigFileWatcher"]
+print("ConfigFileWatcher line", cw.lineno)
+# Google-разбор docstring: сколько публичных функций config_module/router_module имеют секции Args/Returns
+def funcs(m, seen=None):
+    for k, v in m.members.items():
+        if v.is_alias: continue
+        if v.is_function: yield v
+        elif v.is_class or v.is_module:
+            yield from funcs(v)
+rt = loader.load("router_module")
+for name, root in (("config_module", cfg), ("router_module", rt)):
+    c = collections.Counter(); 
+    for f in funcs(root):
+        if f.name.startswith("_") or "tests" in f.path.split("."): continue
+        doc = f.docstring
+        if not doc: c["без docstring"] += 1; continue
+        kinds = {s.kind.value for s in doc.parse(Parser.google)}
+        c["с секцией params"] += "parameters" in kinds
+        c["с секцией returns"] += "returns" in kinds
+        c["только текст"] += kinds <= {"text"}
+        c["всего"] += 1
+    print(name, dict(c))
+# разбор одного docstring целиком
+f = [x for x in funcs(cfg) if x.name == "deep_merge"]
+if f and f[0].docstring:
+    print("пример deep_merge:", [(s.kind.value, getattr(s.value,'__len__',lambda:0)()) for s in f[0].docstring.parse(Parser.google)])

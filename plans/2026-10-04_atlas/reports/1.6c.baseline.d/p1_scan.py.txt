@@ -1,0 +1,80 @@
+"""Замер 3 (П1): реализации интерфейсов без явного наследования. Разовый скрипт замера, не часть репозитория."""
+import ast, sys, json, re, collections
+from pathlib import Path
+ROOT = Path(sys.argv[1]); FW = ROOT / "multiprocess_framework" / "modules"
+FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+def bname(b):
+    if isinstance(b, ast.Subscript): b = b.value
+    return b.id if isinstance(b, ast.Name) else b.attr if isinstance(b, ast.Attribute) else None
+classes = collections.defaultdict(list)   # имя -> [(файл, узел)]
+for p in FW.rglob("*.py"):
+    rel = p.relative_to(FW).as_posix()
+    if "/tests/" in "/" + rel or rel.split("/")[0].startswith(".") or "/tests/" in rel: continue
+    try: tree = ast.parse(p.read_text(encoding="utf-8", errors="replace").removeprefix("﻿"))
+    except SyntaxError: continue
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ClassDef): classes[n.name].append((rel, n))
+def selfattrs(n):
+    out = set()
+    for x in ast.walk(n):
+        if isinstance(x, (ast.Assign, ast.AnnAssign)):
+            for t in (x.targets if isinstance(x, ast.Assign) else [x.target]):
+                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == "self" and not t.attr.startswith("_"): out.add(t.attr)
+    return out
+def own(n, abstract_only=False):
+    out = set() if abstract_only else selfattrs(n)
+    for m in n.body:
+        if isinstance(m, FUNCS) and not m.name.startswith("_"):
+            if not abstract_only or any(bname(d) == "abstractmethod" for d in m.decorator_list): out.add(m.name)
+    return out
+memo = {}
+def anc(name, seen=()):
+    if name in memo: return memo[name]
+    res = set()
+    for _, n in classes.get(name, []):
+        for b in n.bases:
+            bn = bname(b)
+            if bn and bn not in seen: res |= {bn} | anc(bn, seen + (name,))
+    memo[name] = res; return res
+def methods(name):
+    s = set()
+    for _, n in classes.get(name, []): s |= own(n)
+    for a in anc(name):
+        for _, n in classes.get(a, []): s |= own(n)
+    return s
+# интерфейсы: классы корневых interfaces.py
+ifaces = {}
+for p in sorted(FW.glob("*/interfaces.py")):
+    mod = p.parent.name
+    tree = ast.parse(p.read_text(encoding="utf-8", errors="replace").removeprefix("﻿"))
+    for n in tree.body:
+        if isinstance(n, ast.ClassDef) and not n.name.startswith("_"): ifaces[(mod, n.name)] = n
+def abstract_set(name, n):
+    isproto = "Protocol" in {bname(b) for b in n.bases}
+    s = own(n, abstract_only=not isproto)
+    for a in anc(name):
+        for _, an in classes.get(a, []):
+            ap = "Protocol" in {bname(b) for b in an.bases}
+            s |= own(an, abstract_only=not ap)
+    return s
+rows = []
+per_mod = collections.defaultdict(lambda: [0,0,0])  # интерфейсов, явных реализаций, структурных без наследования
+all_iface_names = {n for (_, n) in ifaces}
+for (mod, name), n in ifaces.items():
+    ab = abstract_set(name, n)
+    explicit, structural = [], []
+    for cname, lst in classes.items():
+        if cname == name or cname in all_iface_names: continue
+        for rel, c in lst:
+            if name in anc(cname) | {bname(b) for b in c.bases}:
+                explicit.append(f"{rel}::{cname}")
+            elif rel.split("/")[0] == mod and len(ab) >= 2 and ab <= methods(cname):
+                structural.append(f"{rel}::{cname}")
+    per_mod[mod][0] += 1; per_mod[mod][1] += len(explicit); per_mod[mod][2] += len(structural)
+    rows.append((mod, name, len(ab), len(explicit), structural))
+json.dump({"rows": rows}, open(sys.argv[2], "w"), ensure_ascii=False, indent=0)
+tot = [sum(v[i] for v in per_mod.values()) for i in range(3)]
+print("интерфейсов (классов в корневых interfaces.py):", tot[0], "| явных реализаций:", tot[1], "| структурных без наследования:", tot[2])
+print("модулей с интерфейсами:", len(per_mod), "| с хотя бы одной структурной реализацией:", sum(1 for v in per_mod.values() if v[2]))
+for m, v in sorted(per_mod.items(), key=lambda kv: -kv[1][2]):
+    if v[2]: print(f"  {m}: интерфейсов {v[0]}, явных {v[1]}, структурных {v[2]}")

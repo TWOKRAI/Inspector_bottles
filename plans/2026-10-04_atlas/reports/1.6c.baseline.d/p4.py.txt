@@ -1,0 +1,31 @@
+import ast, re, collections
+from pathlib import Path
+FW = Path("multiprocess_framework")
+ATOMIC = {"replace", "rename", "move"}
+hits = []; atomic_fn = []
+for p in sorted(FW.rglob("*.py")):
+    s = p.as_posix()
+    if "/tests/" in s or re.search(r"(^|/)test_[^/]*\.py$", s): continue
+    try: t = ast.parse(p.read_text(encoding="utf-8", errors="replace").removeprefix("﻿"))
+    except SyntaxError: continue
+    for fn in [n for n in ast.walk(t) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))] + [t]:
+        body_nodes = list(ast.walk(fn)) if fn is not t else [x for n in t.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for x in ast.walk(n)]
+        has_atomic = any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr in ATOMIC for c in body_nodes)
+        for c in body_nodes:
+            if not isinstance(c, ast.Call): continue
+            f = c.func; kind = None
+            if isinstance(f, ast.Name) and f.id == "open" or (isinstance(f, ast.Attribute) and f.attr == "open"):
+                mode = None
+                if len(c.args) >= 2 and isinstance(c.args[1], ast.Constant): mode = c.args[1].value
+                for k in c.keywords:
+                    if k.arg == "mode" and isinstance(k.value, ast.Constant): mode = k.value.value
+                if isinstance(mode, str) and re.fullmatch(r"[wx]b?\+?|[wx]\+?b?", mode): kind = f"open({mode})"
+            elif isinstance(f, ast.Attribute) and f.attr in ("write_text", "write_bytes"): kind = f.attr
+            if kind:
+                (atomic_fn if has_atomic else hits).append((s, c.lineno, kind, getattr(fn, "name", "<module>")))
+seen=set(); hits=[h for h in hits if not (h[:2] in seen or seen.add(h[:2]))]
+seen=set(); atomic_fn=[h for h in atomic_fn if not (h[:2] in seen or seen.add(h[:2]))]
+print("записей без os.replace в той же функции:", len(hits), "| в функциях с os.replace/rename/move:", len(atomic_fn))
+print(collections.Counter(h[0].split("/")[2] for h in hits).most_common(12))
+for h in hits[:6]: print("  ", h)
+print("атомарные:"); [print("  ",h) for h in atomic_fn]

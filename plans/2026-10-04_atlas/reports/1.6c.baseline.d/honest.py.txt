@@ -1,0 +1,26 @@
+import ast, json, re, collections
+d = json.load(open("/tmp/claude-0/-home-user-Inspector-bottles/1a87af8a-87f0-58ac-8bf5-18f8d9cdab33/scratchpad/reg.json"))
+tests = {n["id"]: n["path"] for n in d["nodes"] if n["kind"] == "test"}
+files = sorted({tests[e["src"][5:]] for e in d["edges"] if e["kind"] == "tests" and e["dst"] == "module:config_module" and e["src"][5:] in tests})
+print("тестовых файлов, связанных с config_module:", len(files))
+NAMES = ["IConfig", "IConfigManager", "IConfigObserver", "ConfigFileWatcher"]
+def uses(node, name):
+    for x in ast.walk(node):
+        if isinstance(x, ast.Name) and x.id == name: return True
+        if isinstance(x, ast.Attribute) and x.attr == name: return True
+        if isinstance(x, ast.alias) and (x.name == name or x.asname == name): return True
+    return False
+res = {n: collections.defaultdict(int) for n in NAMES}; word = {n: 0 for n in NAMES}
+for f in files:
+    src = open(f, encoding="utf-8", errors="replace").read().removeprefix("﻿")
+    t = ast.parse(src)
+    funcs = []
+    for n in t.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test"): funcs.append(n)
+        elif isinstance(n, ast.ClassDef) and n.name.startswith("Test"): funcs += [m for m in n.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name.startswith("test")]
+    for name in NAMES:
+        if re.search(rf"\b{name}\b", src): word[name] += len(funcs)
+        for fn in funcs:
+            if uses(fn, name): res[name][f] += 1
+for name in NAMES:
+    print(name, "честно:", sum(res[name].values()), "в файлах:", {k.split('modules/')[1]: v for k, v in sorted(res[name].items())}, "| по слову (старый счёт):", word[name])

@@ -1,0 +1,30 @@
+import time, griffe
+from griffe import GriffeLoader, Parser
+MODS = "/home/user/Inspector_bottles/multiprocess_framework/modules"
+PFX = "multiprocess_framework.modules."
+t0 = time.perf_counter()
+loader = GriffeLoader(search_paths=[MODS], allow_inspection=False)
+loaded = {}
+def mod(name):
+    if name not in loaded: loaded[name] = loader.load(name)
+    return loaded[name]
+def lookup(path):               # "multiprocess_framework.modules.base_manager.interfaces.IBaseManager"
+    if not path.startswith(PFX): return None
+    head, _, rest = path[len(PFX):].partition(".")
+    try: return mod(head)[rest]
+    except Exception: return None
+def abstract_members(cls, seen=()):
+    own = {k: v for k, v in cls.members.items() if not v.is_alias and v.is_function and not k.startswith("_") and "abstractmethod" in v.labels}
+    out = dict(own); 
+    for b in cls.bases:
+        p = getattr(b, "canonical_path", None) or str(b)
+        base = lookup(p)
+        if base is not None and base.path not in seen:
+            for k, v in abstract_members(base, seen + (cls.path,))[0].items(): out.setdefault(k, v)
+    return out, own
+cfg = mod("config_module")
+ci = cfg["interfaces.IConfigManager"]
+print("bases exprs:", [(type(b).__name__, getattr(b, "canonical_path", None)) for b in ci.bases])
+allm, own = abstract_members(ci)
+print(f"абстрактных {len(allm)} (своих {len(own)}) за {time.perf_counter()-t0:.2f} с; загружено пакетов: {sorted(loaded)}")
+print(sorted(set(allm) - set(own)))
