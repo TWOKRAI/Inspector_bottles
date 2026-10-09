@@ -109,6 +109,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `TEST_NEVER_RED` | test | тест назван в таблице, но ни одна его строка не дала «наблюдалось > 0» |
 | `MUTATION_BELOW` | module | балл ниже порога — выключена до калибровки |
 | `DOC_STALE` | doc | долг свежести выше порога (порог — 1.4 по замеру) |
+| `RESULT_FORM` | result | итог `tasks/<id>.result.md` не по форме 0.7: нет раздела `## T` из семи обязательных, раздел абзацем `**T:**` / `**T.**`, пустой раздел или `## Не проверено` со словом «нет» (`scripts/atlas/result_form.py`); **warning**; узел `result:<slug>#<id>`, `detail` — имена нарушенных разделов через `,`, `source` — путь итога (Task 1.9a) |
 
 «Дифф» для `PRE_POST_MISSING` — `git diff <merge-base(main_ref, head)> <head>`; на самом `main` (head == merge-base)
 множество пусто по построению. Считает его адаптер интерфейсов: ядро передаёт адаптеру `BuildContext{tree, base}`,

@@ -1,4 +1,5 @@
-"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `--json` (Tasks 1.2, 1.6, 1.6b).
+"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `--json`
+(Tasks 1.2, 1.6, 1.6b, 1.9a).
 
 Запуск: `python -m scripts.atlas`.
 
@@ -6,7 +7,8 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     корень репозитория = git toplevel (не cwd),
     база `data/atlas.sqlite` в корне.
     Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку,
-    1 — `index --check`: INDEX.md отстал, 2 — ошибка окружения или ввода.
+    1 — `index --check`: INDEX.md отстал, 1 — `lint-result`: итог не по форме 0.7, 2 — ошибка окружения или ввода.
+    `lint-result <файл>` не знает git и базу: ветка стоит до определения корня репозитория.
 Public API: main.
 Stability: lite
 """
@@ -18,7 +20,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import reference, store, views
+from scripts.atlas import reference, result_form, store, views
 from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
@@ -53,11 +55,24 @@ def _parser() -> argparse.ArgumentParser:
     log = sub.add_parser("log", parents=[common], help="first-parent лог модуля по main-ref")
     log.add_argument("module")
     log.add_argument("-n", type=int, default=30)
+    sub.add_parser("lint-result", help="проверить итог задачи по форме 0.7 (без git и базы)").add_argument("file")
     return top
 
 
 def _default_main_ref(root: Path) -> str:
     return "main" if run_git(root, "rev-parse", "--verify", "-q", "main").returncode == 0 else "origin/main"
+
+
+def _lint_result(file: str) -> int:
+    """Строки `result_form.lint` и итог `lint-result: нарушений N`; нет файла или не читается -> 2."""
+    try:
+        text = Path(file).read_bytes().decode("utf-8-sig", "replace")  # байты как есть: CRLF разбирает парсер
+    except OSError:
+        print(f"lint-result: нет файла {file}", file=sys.stderr)
+        return 2
+    found = result_form.lint(text)
+    print("\n".join([*(f"  {line}" for line in found), f"lint-result: нарушений {len(found)}"]))
+    return 1 if found else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,10 +84,19 @@ def main(argv: list[str] | None = None) -> int:
     ref = getattr(args, "ref", None) or "HEAD"
     # верна ровно одна форма: --json без подкоманды либо подкоманда без --json; `check` не знает --ref
     both = getattr(args, "write", False) and getattr(args, "check", False)  # только у `index`
-    if args.json == (args.command is not None) or both or (args.command in ("check", "log") and hasattr(args, "ref")):
+    if (
+        args.json == (args.command is not None)
+        or both
+        or (args.command in ("check", "log", "lint-result") and hasattr(args, "ref"))
+    ):
         parser.print_usage(sys.stderr)
-        print("atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index или --json", file=sys.stderr)
+        print(
+            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index, lint-result или --json",
+            file=sys.stderr,
+        )
         return 2
+    if args.command == "lint-result":  # до корня репозитория: работает и вне git-репо
+        return _lint_result(args.file)
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
         main_ref = getattr(args, "main_ref", None) or _default_main_ref(root)

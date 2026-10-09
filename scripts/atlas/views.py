@@ -21,6 +21,7 @@ from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import USAGE_UNKNOWN, Code, checkout, is_test
 from scripts.atlas.modules import OTHER, resolve as module_of
+from scripts.atlas.result_form import TAILS, is_none, section
 from scripts.atlas.rules import Scan
 from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 from scripts.validate_commit.validate_commit import TASK_ID_PATTERN
@@ -238,27 +239,6 @@ def _plan_commits(root: Path, sha: str, slug: str) -> tuple[dict[str, list[str]]
     return tasks, times, paths
 
 
-def _section(lines: list[str], title: str) -> list[str] | None:
-    """Строки раздела `## title` либо абзаца `**title.**` (после strip, непустые); None — раздела нет."""
-    marker = f"**{title}.**"
-    for i, line in enumerate(lines):
-        if line.rstrip() == f"## {title}":
-            body = []
-            for nxt in lines[i + 1 :]:
-                if nxt.startswith("## "):
-                    break
-                body.append(nxt.strip())
-            return [b for b in body if b]
-        if line.strip().startswith(marker):
-            body = [line.strip()[len(marker) :].strip()]
-            for nxt in lines[i + 1 :]:
-                if not nxt.strip() or nxt.strip().startswith("**"):
-                    break
-                body.append(nxt.strip())
-            return [" ".join(b for b in body if b)] if any(body) else []
-    return None
-
-
 def _cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
@@ -270,12 +250,12 @@ def _text(tree: Tree, path: str) -> str:
 def _result_parts(path: str, text: str) -> list[str]:
     lines = text.split("\n")
     parts: list[str] = []
-    sections = {title: _section(lines, title) for title in ("Осталось", "Не проверено")}
-    if all(s is None for s in sections.values()):
+    sections = {title: section(lines, title) for title in TAILS}
+    if all(found is None for found in sections.values()):
         parts.append(f"    итог без разделов формы 0.7: {path}")
-    for title, body in sections.items():
-        if body and not (len(body) == 1 and re.sub(r"^[-*]\s+", "", body[0]) == "нет"):
-            parts += [f"    {title}:", *(f"      {b}" for b in body)]
+    for title, found in sections.items():
+        if found and found[1] and not is_none(found[1]):
+            parts += [f"    {title}:", *(f"      {b}" for b in found[1])]
     rows: list[str] = []
     in_table = False
     for line in lines:

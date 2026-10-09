@@ -1,0 +1,255 @@
+[
+ {
+  "legend": "T1..T7 = scripts/atlas/tests/test_result_form_1_9a.py по порядку REDS (tester); H1..H10 = test_result_form_hazards_1_9a.py по порядку в файле (developer); база без -k: 17 collected, 17 passed; после ред. 3 (330c07b91): 19 collected, 19 passed, матрица 17 инъекций перепрогнана — каждая краснит ≥ 1 тест, git diff после пуст"
+ },
+ {
+  "id": "inj-1",
+  "prop": "section принимает форму **T:**",
+  "file": "scripts/atlas/result_form.py",
+  "old": "    paragraphs = (f\"**{title}:**\", f\"**{title}.**\")",
+  "new": "    paragraphs = (f\"**{title}.**\",)",
+  "forecast": [
+   "T2",
+   "T3",
+   "T4",
+   "T5"
+  ],
+  "observed": [
+   "H1",
+   "H4",
+   "H5",
+   "T2",
+   "T3",
+   "T4",
+   "T5"
+  ]
+ },
+ {
+  "id": "inj-2",
+  "prop": "pack печатает хвост ## Для следующего брифа",
+  "file": "scripts/atlas/result_form.py",
+  "old": "TAILS = (\"Осталось\", \"Не проверено\", \"Для следующего брифа\")",
+  "new": "TAILS = (\"Осталось\", \"Не проверено\")",
+  "forecast": [
+   "T4"
+  ],
+  "observed": [
+   "H4",
+   "T4"
+  ]
+ },
+ {
+  "id": "inj-3",
+  "prop": "«итог без разделов» — только если нет ни одного из TAILS",
+  "file": "scripts/atlas/views.py",
+  "old": "    if all(found is None for found in sections.values()):",
+  "new": "    if all(sections[t] is None for t in (\"Осталось\", \"Не проверено\")):",
+  "forecast": [
+   "T4"
+  ],
+  "observed": [
+   "T4"
+  ]
+ },
+ {
+  "id": "inj-4",
+  "prop": "lint: пустой раздел — нарушение",
+  "file": "scripts/atlas/result_form.py",
+  "old": "        elif not found[1]:\n",
+  "new": "        elif False:\n",
+  "forecast": [
+   "T5"
+  ],
+  "observed": [
+   "T5"
+  ]
+ },
+ {
+  "id": "inj-5",
+  "prop": "lint: «## Не проверено» = нет — нарушение",
+  "file": "scripts/atlas/result_form.py",
+  "old": "        elif title == \"Не проверено\" and is_none(found[1]):",
+  "new": "        elif False:",
+  "forecast": [
+   "T5"
+  ],
+  "observed": [
+   "T5"
+  ]
+ },
+ {
+  "id": "inj-6",
+  "prop": "lint-result: exit 1 при нарушениях",
+  "file": "scripts/atlas/__main__.py",
+  "old": "    return 1 if found else 0",
+  "new": "    return 0",
+  "forecast": [
+   "T2",
+   "T5",
+   "T7",
+   "H7"
+  ],
+  "observed": [
+   "H2",
+   "H7",
+   "T2",
+   "T5",
+   "T7"
+  ]
+ },
+ {
+  "id": "inj-7",
+  "prop": "--ref с lint-result отвергается",
+  "file": "scripts/atlas/__main__.py",
+  "old": "        or (args.command in (\"check\", \"log\", \"lint-result\") and hasattr(args, \"ref\"))",
+  "new": "        or (args.command in (\"check\", \"log\") and hasattr(args, \"ref\"))",
+  "forecast": [
+   "T5"
+  ],
+  "observed": [
+   "T5"
+  ]
+ },
+ {
+  "id": "inj-8",
+  "prop": "RESULT_FORM — warning, check не краснеет",
+  "file": "scripts/atlas/adapters/plans.py",
+  "old": "Finding(\"RESULT_FORM\", \"warning\",",
+  "new": "Finding(\"RESULT_FORM\", \"blocking\",",
+  "forecast": [
+   "T6"
+  ],
+  "observed": [
+   "T6"
+  ]
+ },
+ {
+  "id": "inj-9",
+  "prop": "узел RESULT_FORM — result:<slug>#<id>",
+  "file": "scripts/atlas/adapters/plans.py",
+  "old": "            node = f\"result:{slug}#{file.name.removesuffix('.result.md')}\"",
+  "new": "            node = f\"doc:{rel.as_posix()}\"",
+  "forecast": [
+   "T6"
+  ],
+  "observed": [
+   "T6"
+  ]
+ },
+ {
+  "id": "inj-10",
+  "prop": "версия PlansAdapter хеширует result_form.py",
+  "file": "scripts/atlas/adapters/plans.py",
+  "old": "        return adapter_version(self._BASE, PLANS_PROGRESS, RESULT_FORM_PY)",
+  "new": "        return adapter_version(self._BASE)",
+  "forecast": [
+   "H6"
+  ],
+  "observed": [
+   "H6"
+  ]
+ },
+ {
+  "id": "inj-11",
+  "prop": "хук: второй прогон после паузы",
+  "file": ".claude/plugins/dev/hooks/lint-result.sh",
+  "old": "sleep 0.3\nrun_lint\nis_violation || exit 0\n[ \"$OUT\" = \"$FIRST\" ] || exit 0\n",
+  "new": "",
+  "forecast": [
+   "H9",
+   "H10"
+  ],
+  "observed": [
+   "H10",
+   "H9"
+  ]
+ },
+ {
+  "id": "inj-12",
+  "prop": "хук: нарушение = exit 1 И строка «нарушений N»",
+  "file": ".claude/plugins/dev/hooks/lint-result.sh",
+  "old": "  [ \"$RC\" -eq 1 ] && [[ \"${OUT##*$'\\n'}\" =~ $violation_re ]]",
+  "new": "  [ \"$RC\" -eq 1 ]",
+  "forecast": [
+   "H8"
+  ],
+  "observed": [
+   "H8"
+  ]
+ },
+ {
+  "id": "inj-13",
+  "prop": "хук: обратные слэши пути → /",
+  "file": ".claude/plugins/dev/hooks/lint-result.sh",
+  "old": "FILE=\"${FILE//\\\\//}\"\n",
+  "new": "",
+  "forecast": [
+   "H7"
+  ],
+  "observed": [
+   "H7"
+  ]
+ },
+ {
+  "id": "inj-14",
+  "prop": "хук: сообщение агенту — exit 2",
+  "file": ".claude/plugins/dev/hooks/lint-result.sh",
+  "old": "\"$FILE\" \"$OUT\" >&2\nexit 2",
+  "new": "\"$FILE\" \"$OUT\" >&2\nexit 0",
+  "forecast": [
+   "T7",
+   "H7"
+  ],
+  "note": "old исправлен после прогона: в первой редакции лишняя кавычка — не приложилась",
+  "observed": [
+   "H7",
+   "T7"
+  ]
+ },
+ {
+  "id": "inj-15",
+  "prop": "CRLF = LF в заголовке ## T",
+  "file": "scripts/atlas/result_form.py",
+  "old": "        if line.rstrip() == heading:",
+  "new": "        if line == heading:",
+  "forecast": [
+   "H1",
+   "H2",
+   "H4"
+  ],
+  "observed": [
+   "H1",
+   "H2",
+   "H4",
+   "T1",
+   "T5",
+   "T7"
+  ]
+ },
+ {
+  "id": "inj-16",
+  "prop": "## T выигрывает у абзаца, где бы тот ни стоял (ред. 3)",
+  "file": "scripts/atlas/result_form.py",
+  "old": "            return heading, [b for b in body if b]\n    for i, line in enumerate(lines):\n",
+  "new": "            return heading, [b for b in body if b]\n",
+  "forecast": [
+   "test_heading_wins_over_an_earlier_paragraph"
+  ],
+  "observed": [
+   "test_heading_wins_over_an_earlier_paragraph"
+  ]
+ },
+ {
+  "id": "inj-17",
+  "prop": "хук: путь вне plans/**/tasks/ не линтуется",
+  "file": ".claude/plugins/dev/hooks/lint-result.sh",
+  "old": "[[ \"$FILE\" =~ $result_re ]] || exit 0\n",
+  "new": "",
+  "forecast": [
+   "test_hook_ignores_a_result_file_outside_plans_tasks"
+  ],
+  "observed": [
+   "test_hook_ignores_a_result_file_outside_plans_tasks"
+  ]
+ }
+]

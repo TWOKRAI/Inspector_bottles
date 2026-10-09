@@ -1121,7 +1121,7 @@ def test_commits_adapter_version_is_bumped() -> None:
     from scripts.atlas.adapters.plans import PlansAdapter
 
     assert CommitsAdapter().version >> 48 == 4
-    assert PlansAdapter().version >> 48 == 1
+    assert PlansAdapter().version >> 48 == 2
 
 
 def test_commit_nodes_for_trailer_commits_on_temp_repo(repo_factory: RepoFactory, atlas: Any) -> None:
