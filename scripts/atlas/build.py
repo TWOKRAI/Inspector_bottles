@@ -2,7 +2,7 @@
 
 Purpose: build() зовёт адаптеры по ключу кэша (sha, main_ref, отпечаток адаптеров, дерево base); to_json() —
     детерминированный JSON: списки отсортированы, ensure_ascii=False, без времени сборки.
-Public API: ADAPTERS, CORE_VERSION, SCHEMA_VERSION, build, fingerprint, to_json.
+Public API: ADAPTERS, CORE_VERSION, SCHEMA_VERSION, build, code_fingerprint, fingerprint, to_json.
 Stability: lite
 """
 
@@ -23,7 +23,7 @@ from scripts.atlas.rules import RulesAdapter
 from scripts.atlas.schema import Adapter, AdapterOutput, BuildContext
 from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 
-__all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "fingerprint", "to_json"]
+__all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "code_fingerprint", "fingerprint", "to_json"]
 
 ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter(), CommitsAdapter(), CodeAdapter(), RulesAdapter())
 CORE_VERSION = "1"
@@ -34,6 +34,18 @@ def fingerprint() -> str:
     """sha256 от CORE_VERSION и отсортированных `name:version` адаптеров: смена набора -> новый ключ кэша."""
     parts = [CORE_VERSION, *sorted(f"{a.name}:{a.version}" for a in ADAPTERS)]
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+_PKG = Path(__file__).resolve().parent
+
+
+def code_fingerprint() -> str:
+    """sha256 от (относительный путь, байты) всех *.py пакета atlas без tests: правка исходника сбрасывает кэш видов."""
+    pkg = _PKG
+    h = hashlib.sha256()
+    for path in sorted(p for p in pkg.rglob("*.py") if p.is_file() and "tests" not in p.relative_to(pkg).parts):
+        h.update(path.relative_to(pkg).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    return h.hexdigest()
 
 
 def build(con: sqlite3.Connection, root: str | Path, ref: str, main_ref: str, base: Tree | None = None) -> int:

@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.atlas.adapters.modules import modules_for
-from scripts.atlas.build import build
+from scripts.atlas import store
+from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import USAGE_UNKNOWN, Code, checkout, is_test
 from scripts.atlas.modules import OTHER, resolve as module_of
 from scripts.atlas.rules import Scan
@@ -160,10 +161,14 @@ def _module_blocks(tree: Tree, rows: list[dict], row: dict) -> list[str]:
 
 def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: str) -> list[str]:
     """Карточка модуля: назначение, API, открытые задачи, последние коммиты, находки (без доказанности)."""
-    tree = Tree(root, resolve(root, ref))
+    sha = resolve(root, ref)
+    key = (sha, main_ref, fingerprint(), code_fingerprint(), "card", module)
+    if (hit := store.get_view(con, *key)) is not None:
+        return hit
+    tree = Tree(root, sha)
     rows = modules_for(tree)
     row = _module_row(rows, module)
-    bid = build(con, root, ref, main_ref)
+    bid = build(con, root, sha, main_ref)
     prefix = f"{module}:"
     names = sorted(
         i[len(prefix) :]
@@ -194,7 +199,10 @@ def card(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, module: s
         f"Находки ({len(found)}):",
         *(f"  {sev} {code} {node} {detail or '-'}" for sev, code, node, detail in found[:10]),
     ]
-    return lines + ([f"  … ещё {len(found) - 10}"] if len(found) > 10 else []) + _module_blocks(tree, rows, row)
+    lines += ([f"  … ещё {len(found) - 10}"] if len(found) > 10 else []) + _module_blocks(tree, rows, row)
+    if USAGE_UNKNOWN not in lines:  # «не определено» — сбой разбора, не результат: не кэшируем
+        store.put_view(con, *key, lines)
+    return lines
 
 
 def _plan_commits(root: Path, sha: str, slug: str) -> tuple[dict[str, list[str]], dict[str, int], dict[str, list[str]]]:
