@@ -2,7 +2,10 @@
 
 Atlas parses this file (ADR-ATL-001: nodes `result`, `injection`; edges `reports`, `lists`, `breaks`), so the
 headings and the table header below are a contract: keep them literally, in this order; an empty section says
-`нет` (except `## Не проверено`, which is never empty).
+`нет` (except `## Не проверено`, which is never empty). Required — the seven from `## Сделано` to `## Кому передано`
+(`atlas lint-result <file>`, the PostToolUse hook `lint-result.sh`, finding `RESULT_FORM`); `## Для следующего брифа`
+and `## Память` are optional. `atlas pack` of the next task prints `## Осталось`, `## Не проверено` and
+`## Для следующего брифа` as tails (Task 1.9a).
 
 Writers, in order, one at a time: the executor writes the file before its report; the lead then appends rows to
 `## Инъекции` (its own break-injection) and fills `слияние:` after the merge. Nobody else edits it.
@@ -39,6 +42,9 @@ Language: Russian prose (the owner reads it); headings, codes, paths, commands a
 
 ## Кому передано
 - <role / session / next task id | нет>
+
+## Для следующего брифа
+- <what the next brief on these modules must know: a wrong fact, a trap, an open lead question | нет>
 
 ## Память
 memory hits: <command> -> <paths> | none
