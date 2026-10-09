@@ -9,6 +9,8 @@
 #                headless: ~3800 тестов за ~90 c под QT_QPA_PLATFORM=offscreen).
 #   * commits  — только pull_request: каждый коммит PR (base..head) через валидатор
 #                scripts/validate_commit/validate_commit.py из БАЗЫ PR (Атлас 0.2).
+#   * atlas    — тесты scripts/atlas/tests (с ATLAS_SLOW=1: и медленные на пинах),
+#                `atlas check` и `atlas index --check` (Атлас 1.7a, blocking).
 #
 #   * backend-ctl-nightly — каталог backend_ctl/tests без live-тестов (590 из 633),
 #                ТОЛЬКО по расписанию/кнопке (D2.4). Там живёт наблюдаемостная часть
@@ -42,9 +44,10 @@ on:
     - cron: "17 2 * * *"
   workflow_dispatch:
 
-# Отменяем предыдущие прогоны для той же ветки/PR.
+# Отменяем предыдущие прогоны для той же ветки/PR. Push в main — своя группа на каждый коммит:
+# отменённый прогон push оставил бы коммиты push без `atlas check --base <до push>` (Атлас 1.7a).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'run' }}
   cancel-in-progress: true
 
 env:
@@ -145,6 +148,65 @@ jobs:
       # Headless, без железа; Qt-offscreen уже настроен в env этого job.
       - name: Характеризация прод-рецептов прототипа (backend/tests)
         run: uv run python -m pytest multiprocess_prototype/backend/tests -q -p no:cacheprovider
+
+  atlas:
+    name: atlas (tests, check, index --check)
+    runs-on: ubuntu-latest
+    # ≈ 1,6× локального полного прогона на Windows (1651 с); время на ubuntu не замерено.
+    timeout-minutes: 45
+    env:
+      # Тест atlas импортирует frontend_module (PySide6) — offscreen-платформа Qt.
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      # fetch-depth 0: пиновым тестам нужны полный клон и разрешимые пины
+      # (test_views_pinned.py), шагу check — origin/main и merge-base.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Системные Qt-рантайм-библиотеки для offscreen-плагина PySide6.
+      - name: Установка системных Qt-зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3
+
+      - name: Установка uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      - name: Синхронизация зависимостей
+        run: uv sync
+
+      # В CI гоняется всё, включая тесты с маркером slow (локально они пропускаются).
+      - name: Тесты atlas (включая slow)
+        env:
+          ATLAS_SLOW: "1"
+        run: uv run python -m pytest scripts/atlas/tests -q -p no:cacheprovider
+
+      # База зависит от события. push в main: вершина main до push (с 1.6e в main
+      # попадают локальные слияния лида push'ем — без --base сравнение шло бы с самим
+      # собой). Иначе (pull_request, расписание, кнопка): без --base — merge-base с
+      # main, как требует scripts/atlas/DECISIONS.md; на PR-checkout это HEAD^1 синтетического
+      # слияния. `--base origin/main` давал бы ложный красный при повторе старого прогона.
+      # !cancelled(): красные тесты не прячут новую blocking-находку и устаревший INDEX.md.
+      - name: atlas check
+        if: ${{ !cancelled() }}
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            uv run python -m scripts.atlas check --base "$BEFORE"
+          else
+            uv run python -m scripts.atlas check
+          fi
+
+      - name: atlas index --check
+        if: ${{ !cancelled() }}
+        run: uv run python -m scripts.atlas index --check
 
   examples-smoke:
     name: examples-smoke (minimal_app, live headless boot + IPC)

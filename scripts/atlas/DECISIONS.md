@@ -201,6 +201,12 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
   `atlas check --base origin/main` (HEAD = результат слияния — то же сравнение, что CI).
 - Предупреждение: на самом `main` с `--main-ref main` merge-base = HEAD, дифф пуст — `check` никогда не блокирует.
   Это не проверка `main`, а отсутствие диффа; проверка слитого — строкой выше.
+- С 1.7a (2026-10-09) — job `atlas` в `ci.yml`: на `pull_request`, расписании и кнопке — `check` без `--base`
+  (merge-base выше); на push в `main` — `check --base <github.event.before>`, вершина `main` до push. С 1.6e в `main`
+  попадают локальные слияния лида push'ем, а без `--base` на `main` merge-base = HEAD — пустое сравнение. Без force
+  push `before` — предок HEAD, то есть та же база, что у чек-листа слияния выше. Прогоны push в `main` друг друга не
+  отменяют (своя группа `concurrency`), иначе коммиты отменённого push остались бы без проверки. Force push или
+  `before` из нулей → `atlas: ref not found`, exit 2 — громко.
 - В CI — job 1.7; лид перед локальным слиянием — `atlas check` в `pre_report_gate.py` (1.7). Цена — две сборки;
   время — оценка: нижняя граница ~1,1 с на сборку (`plans_progress --json`, вердикт CTO), число даёт REDS 1.2;
   приёмка 1.7 «≤ 5 с на горячем модуле» его включает.

@@ -65,6 +65,7 @@ def _ok(res: Any) -> list[str]:
     return res.out.splitlines()
 
 
+@pytest.mark.slow
 def test_card_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     lines = _ok(atlas(pinned, "card", "router_module", *_PINNED))
     assert lines[0] == "Модуль router_module — framework, ярус core"

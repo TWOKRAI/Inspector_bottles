@@ -297,6 +297,7 @@ def test_pin_abstract_counts_and_resolved_bases(pinned: GitRepo, atlas: Any) -> 
     assert "  вид: ABC; базы: IBaseManager, ABC; абстрактных 19 (своих 10)" in block(console, "IConsoleManager — ")
 
 
+@pytest.mark.slow
 def test_pin_p1_findings_are_visible_in_ref_and_card(pinned: GitRepo, atlas: Any) -> None:  # noqa: F811
     res = atlas(pinned, "--json", *_PINNED)
     assert res.code == 0, res.err
