@@ -2,8 +2,9 @@
 
 Purpose: распаковывает только `plans/` ревизии сборки и зовёт plans_progress подпроцессом (`--json --root`);
     `plans_for` отдаёт один разбор адаптерам `plans` и `commits` (lru_cache); `live_plans` — тот же вызов
-    на корне checkout для значения `plans` в `--json`.
-Public API: PLANS_PROGRESS, PLANS_TIMEOUT, PlansAdapter, adapter_version, live_plans, plans_for.
+    на корне checkout для значения `plans` в `--json`. Находка RESULT_FORM (Task 1.9a) считается там же по
+    распакованным `plans/**/tasks/*.result.md` и уходит только в `plans`; версия адаптера хеширует и result_form.py.
+Public API: PLANS_PROGRESS, PLANS_TIMEOUT, PlansAdapter, RESULT_FORM_PY, adapter_version, live_plans, plans_for.
 Stability: lite
 """
 
@@ -18,20 +19,36 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from scripts.atlas import result_form
 from scripts.atlas.schema import AdapterOutput, BuildContext, Edge, Finding, Node
 from scripts.atlas.tree import AtlasError, Tree
 
-__all__ = ["PLANS_PROGRESS", "PLANS_TIMEOUT", "PlansAdapter", "adapter_version", "live_plans", "plans_for"]
+__all__ = [
+    "PLANS_PROGRESS",
+    "PLANS_TIMEOUT",
+    "RESULT_FORM_PY",
+    "PlansAdapter",
+    "adapter_version",
+    "live_plans",
+    "plans_for",
+]
 
 PLANS_PROGRESS = Path(__file__).resolve().parents[2] / "plans_progress" / "plans_progress.py"
 PLANS_TIMEOUT = 120
+RESULT_FORM_PY = Path(result_form.__file__).resolve()
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 
 
-def adapter_version(base: int, path: Path | None = None) -> int:
-    """Версия адаптера: `base` (руками) × 2**48 + 12 hex sha256 файла `path` (None = plans_progress); нет файла -> 0."""
+def adapter_version(base: int, path: Path | None = None, *more: Path) -> int:
+    """Версия адаптера: `base` (руками) × 2**48 + 12 hex sha256 байт файлов `path` (None = plans_progress) и `more`.
+
+    Нет любого из файлов -> 0 вместо хеша.
+    """
+    digest = hashlib.sha256()
     try:
-        stamp = int(hashlib.sha256((PLANS_PROGRESS if path is None else path).read_bytes()).hexdigest()[:12], 16)
+        for file in (PLANS_PROGRESS if path is None else path, *more):
+            digest.update(file.read_bytes())
+        stamp = int(digest.hexdigest()[:12], 16)
     except OSError:
         stamp = 0
     return base * 2**48 + stamp
@@ -66,6 +83,22 @@ def live_plans(root: Path) -> list[dict[str, Any]]:
     return _run(Path(root))
 
 
+def _result_findings(target: Path) -> list[Finding]:
+    """RESULT_FORM по `plans/**/tasks/*.result.md` распакованного `plans/`; узел `result:<slug>#<id>` (ADR-ATL-001)."""
+    out: list[Finding] = []
+    for file in sorted((target / "plans").rglob("tasks/*.result.md")):
+        rel = file.relative_to(target)
+        if rel.parent.parent == Path("plans"):  # `plans/tasks/` — каталога плана над tasks/ нет
+            continue
+        found = result_form.violations(file.read_bytes().decode("utf-8-sig", "replace"))
+        if found:
+            slug = _DATE_PREFIX.sub("", rel.parent.parent.name)
+            node = f"result:{slug}#{file.name.removesuffix('.result.md')}"
+            message = "Итог не по форме 0.7: " + "; ".join(text for _, text in found)
+            out.append(Finding("RESULT_FORM", "warning", node, ",".join(t for t, _ in found), message, rel.as_posix()))
+    return out
+
+
 @lru_cache(maxsize=8)
 def _load(script: str, root: str, ref: str) -> tuple[tuple[tuple[str, dict[str, Any]], ...], tuple[Finding, ...]]:
     tree = Tree(root, ref)
@@ -73,6 +106,7 @@ def _load(script: str, root: str, ref: str) -> tuple[tuple[tuple[str, dict[str, 
         return (), ()
     with tree.materialize("plans") as target:
         plans = _run(target)
+        result_findings = _result_findings(target)
     kept: dict[str, dict[str, Any]] = {}
     findings: list[Finding] = []
     for plan in sorted(plans, key=lambda p: (bool(p.get("archived")), p["path"])):  # живой раньше архивного
@@ -87,7 +121,7 @@ def _load(script: str, root: str, ref: str) -> tuple[tuple[tuple[str, dict[str, 
                 raise AtlasError("atlas: duplicate task id in one plan")
             ids.add(task["id"])
         kept[slug] = plan
-    return tuple(kept.items()), tuple(findings)
+    return tuple(kept.items()), (*findings, *result_findings)
 
 
 def plans_for(tree: Tree) -> tuple[tuple[tuple[str, dict[str, Any]], ...], tuple[Finding, ...]]:
@@ -97,11 +131,11 @@ def plans_for(tree: Tree) -> tuple[tuple[tuple[str, dict[str, Any]], ...], tuple
 
 class PlansAdapter:
     name = "plans"
-    _BASE = 1
+    _BASE = 2
 
     @property
     def version(self) -> int:
-        return adapter_version(self._BASE)
+        return adapter_version(self._BASE, PLANS_PROGRESS, RESULT_FORM_PY)
 
     def collect(self, ctx: BuildContext) -> AdapterOutput:
         plans, findings = plans_for(ctx.tree)

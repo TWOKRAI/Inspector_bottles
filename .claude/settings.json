@@ -330,6 +330,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/lint-result.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreCompact": [
