@@ -335,7 +335,7 @@ Ref задаётся параметром `--main-ref` (по умолчанию 
 
 | формат | файл | шаблон (`.claude/plugins/dev/templates/`) | писатели | читатели | тест-контракт | с какой задачи |
 |---|---|---|---|---|---|---|
-| бриф | `tasks/<id>.md`, `tasks/<id>.<role>.md` | `task-brief.md` | лид; блок FACTS — `atlas brief` (1.9b) | `plans_ledger.build_brief`; хук `lint-brief.sh`; гейт плана `TASK_INCOMPLETE`; `views._lead_parts`; `atlas brief --check` (1.9b); `atlas lint-brief` (1.9c) | `scripts/atlas/tests/test_formats_1_9d.py` (бриф, файл роли, грамматика строк, `_lead_parts`, хук) | 1.9d; 1.9b и 1.9c добавляют свой читатель в тот же тест |
+| бриф | `tasks/<id>.md`, `tasks/<id>.<role>.md` | `task-brief.md` | лид; блок FACTS — `atlas brief` (1.9b) | `plans_ledger.build_brief`; хук `lint-brief.sh`; гейт плана `TASK_INCOMPLETE` и `TASK_TOO_BIG` (8 КБ на файл `tasks/*.md`, не блокирует); `views._lead_parts`; `atlas brief --check` (1.9b); `atlas lint-brief` (1.9c) | `scripts/atlas/tests/test_formats_1_9d.py` (бриф, файл роли, грамматика строк, `_lead_parts`, хук) | 1.9d; 1.9b и 1.9c добавляют свой читатель в тот же тест |
 | инъекции | `tasks/<id>.injections.json` | `injections.md` | лид (до прогона); `atlas inject run` — `observed` (1.9e) | `atlas lint-brief` (1.9c: `old` в `file`); `atlas inject` (1.9e); `pack` — «предсказано ≠ наблюдалось» (читатель JSON — 1.9e, см. §4); узлы и рёбра ADR-ATL-001 (1.5b, DEFERRED) | `test_formats_1_9d.py::test_injections_example_schema` — пример против литералов §3; 1.9e: `inject summary` на тот же пример | грамматика 1.9d; читатель 1.9e |
 | итог | `tasks/<id>.result.md` | `task-result.md` | исполнитель, лид | `result_form.section`/`lint` (`pack`, `lint-result`, `RESULT_FORM`); `views._result_parts` (таблица старых итогов); `plans_ledger` `RESULT_TOO_BIG` | `test_result_form_1_9a.py::test_template_parses_to_seven_required_sections` | 1.9a |
 | отчёт ревью | `reports/<id>.review-r<N>.md`, `reports/<id>.review-code-r<N>.md` | `review-report.md` | reviewer (лид сохраняет дословно) | `atlas metrics` (1.9f: M2, M3); `atlas lint-review` (ревизия CTO §1) в строках плана нет | `test_formats_1_9d.py::test_review_example_counts_match_header` — пример против литералов §5; 1.9f: `metrics` на тот же пример | грамматика 1.9d; читатель 1.9f |
@@ -359,17 +359,17 @@ Ref задаётся параметром `--main-ref` (по умолчанию 
 |---|---|---|---|
 | `TASK` | да | да | `build_brief` |
 | `ROLE` | да | да | `build_brief`; хук линтует по `subagent_type` спавна, не по этой строке |
-| `CHAIN` | да | да | гейт плана `TASK_INCOMPLETE` (Handoff: `handoff`/`chain`) |
+| `CHAIN` | да | да | гейт плана `TASK_INCOMPLETE` — главный бриф: `CHAIN` или `HANDOFF IN`; файлы роли гейт плана не читает |
 | `FACTS` | да | нет | `atlas lint-brief` (1.9c) |
 | `DESIGN` | да | да | `build_brief`; хук — ≥ 3 непустых строк |
-| `FILES` | да | да | `build_brief`; хук — ≤ `brief_max_files` (6) пунктов; гейт плана (Files) |
+| `FILES` | да | да | `build_brief`; хук — ≤ `brief_max_files` (6) пунктов; гейт плана (Files) — главный бриф |
 | `REDS` | да | да | `build_brief`; хук — ≤ 10 пунктов или первая строка `n/a` |
-| `ACCEPTANCE` | да | нет | гейт плана (Acceptance); `atlas lint-brief` (1.9c) |
+| `ACCEPTANCE` | да | нет | гейт плана (Acceptance) — главный бриф; `atlas lint-brief` (1.9c) |
 | `TESTS` | да | да | `build_brief` |
 | `OUT OF SCOPE` | да | да | `build_brief` |
 | `TRAPS`, `HANDOFF IN` | рекомендуется | рекомендуется | — |
 
-Допустимые сверх таблицы: `FORBIDDEN PATHS`, `GUARDS`, `PROBE`, `COMMIT` и `REPORT` (перекрывают постоянные блоки `executor-brief.md`), `BRIEF-OVERRIDE`. Иная метка — предупреждение `lint-brief`, не ошибка.
+Размер: шапка лида и FACTS растят файл, `TASK_TOO_BIG` (8 КБ, `plans_ledger`) — предупреждение, превышение брифом принято (1.9a — 20 КБ, 1.9d — 11 КБ); долгое — в `reports/<id>.*.md`. Допустимые сверх таблицы: `FORBIDDEN PATHS`, `GUARDS`, `PROBE`, `COMMIT` и `REPORT` (перекрывают постоянные блоки `executor-brief.md`), `BRIEF-OVERRIDE`. Иная метка — предупреждение `lint-brief`, не ошибка.
 
 **2.4. Тело метки** — строки до следующей метки. Строка тела — пункт списка (`- `, `N. `, с отступом или без), продолжение с отступом ≥ 2 пробела или строка fenced-блока. Запрещены строки, которые откроют чужую метку:
 - ловит `_BRIEF_LABEL_RE` (только латиница, с отступом тоже): `  API: x` → метка `API`, `  NOTE (see: y) z` → `NOTE`;
@@ -412,7 +412,7 @@ nodeid — `^[^\s:]+\.py::\S+$` (класс `::Class::test` и параметр�
 
 #### 4. Итог — `tasks/<id>.result.md`
 
-Форма 1.9a: только `## `-заголовки, семь обязательных разделов и необязательные `## Для следующего брифа`, `## Память`; читатель — `result_form`. `## Инъекции`: при `injections.json` — строка `- N инъекций, совпало M, расхождений K — tasks/<id>.injections.json`, каждое расхождение — ещё строкой в `## Не проверено`; без JSON — таблица прежней формы (её читает `views._result_parts`) или `- нет`. Таблица не обязательна: итог упирается в 2 КБ (прецедент 1.9a).
+Форма 1.9a: только `## `-заголовки, семь обязательных разделов и необязательные `## Для следующего брифа`, `## Память`; читатель — `result_form`. `## Инъекции`: при `injections.json` — строка `- N инъекций, совпало M, расхождений K — tasks/<id>.injections.json` (`, не прогнано L` перед ` — ` при L > 0, как в §3), каждое расхождение — ещё строкой в `## Не проверено`; без JSON — таблица прежней формы (её читает `views._result_parts`) или `- нет`. Таблица не обязательна: итог упирается в 2 КБ (прецедент 1.9a).
 
 **Принятая потеря до 1.9e.** `pack` не печатает «предсказано ≠ наблюдалось» для итогов со сводкой — у 1.9a 4 расхождения не видны. Читатель JSON в `pack` — обязанность, предложенная строке 1.9e (итог 1.9d, `## Для следующего брифа`); до неё расхождения видны только строками `## Не проверено`.
 
@@ -427,7 +427,7 @@ nodeid — `^[^\s:]+\.py::\S+$` (класс `::Class::test` и параметр�
 Классы: fact <n>, dryrun <n>, form <n>, context <n>, design <n>, scope <n>, process <n>
 ```
 
-Строки 2–4 — ровно `^Вердикт: (APPROVED|CHANGES REQUESTED)$`, `^Итог: blocker (\d+), major (\d+), minor (\d+), nit (\d+)$`, `^Классы: fact (\d+), dryrun (\d+), form (\d+), context (\d+), design (\d+), scope (\d+), process (\d+)$`: все семь классов в этом порядке, нули пишутся, после чисел ничего. Раздел `## Замечания`: замечание — пункт `^- \[(blocker|major|minor|nit)/(fact|dryrun|form|context|design|scope|process)\] \S`, продолжение — строки с отступом 2 пробела; у замечания одна степень и один класс. Число пунктов по каждой степени равно `Итог`, по каждому классу — `Классы`; строка с `- [` вне грамматики — нарушение. Замечание несёт `вход → наблюдение`, без него — слово «совещательно». Прочие разделы свободны; `## Что я оставил открытым / ненадёжным` обязателен и непуст (правило проекта).
+Строки 2–4 — ровно `^Вердикт: (APPROVED|CHANGES REQUESTED)$`, `^Итог: blocker (\d+), major (\d+), minor (\d+), nit (\d+)$`, `^Классы: fact (\d+), dryrun (\d+), form (\d+), context (\d+), design (\d+), scope (\d+), process (\d+)$`: все семь классов в этом порядке, нули пишутся, после чисел ничего. Раздел `## Замечания`: замечание — пункт `^- \[(blocker|major|minor|nit)/(fact|dryrun|form|context|design|scope|process)\] \S`, продолжение — строки с отступом 2 пробела; у замечания одна степень и один класс. Счёт — по всему файлу: число пунктов по каждой степени равно `Итог`, по каждому классу — `Классы`; строка с `- [` вне грамматики — нарушение. Заголовок `## Замечания` сравнивается целой строкой (`## Замечания р.1` — другой раздел); статусы прошлых раундов пишутся пунктами без `- [`. Замечание несёт `вход → наблюдение`, без него — слово «совещательно». Прочие разделы свободны; `## Что я оставил открытым / ненадёжным` обязателен и непуст (правило проекта).
 
 **Классы** — в порядке старшинства; подходят несколько — берётся первый:
 
