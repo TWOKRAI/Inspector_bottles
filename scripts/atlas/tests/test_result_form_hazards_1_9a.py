@@ -139,6 +139,18 @@ def test_crlf_result_prints_the_same_tails_as_lf_in_pack(
     assert _tail_block(lines, "alpha#1.2") == expected
 
 
+# ---------------------------------------------------------------- заголовок `## T` выигрывает у абзаца
+
+
+def test_heading_wins_over_an_earlier_paragraph() -> None:
+    text = "## Сделано\n- x\n**Осталось:** ничего по DESIGN 3\n\n## Осталось\n- хук в plugin.json (О4)\n"
+    assert result_form.section(text.split("\n"), "Осталось") == ("## Осталось", ["- хук в plugin.json (О4)"])
+    assert not [m for m in result_form.lint(text) if "Осталось" in m]
+    # среди абзацев выигрывает первый
+    two = ["**Осталось:** первый", "", "**Осталось.** второй"]
+    assert result_form.section(two, "Осталось") == ("**Осталось:**", ["первый"])
+
+
 # ---------------------------------------------------------------- маркер в середине строки — не раздел
 
 
@@ -217,6 +229,16 @@ def test_hook_accepts_a_backslash_path(tmp_path: Path) -> None:
     err = proc.stderr.decode("utf-8", "replace")
     assert proc.returncode == 2, err
     assert "нет раздела «## Осталось»" in err
+
+
+def test_hook_ignores_a_result_file_outside_plans_tasks(tmp_path: Path) -> None:
+    """`*.result.md` вне `plans/**/tasks/`: предфильтр `case` пропускает, отсекает только регулярка пути."""
+    folder = tmp_path / "notes"
+    folder.mkdir()
+    bad = folder / "bad.result.md"
+    bad.write_bytes(_BAD.encode("utf-8"))
+    proc = _run_hook(_HOOK, bad.as_posix(), {"CLAUDE_PYTHON_BIN": sys.executable}, tmp_path)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
 
 
 def test_hook_stays_silent_on_exit_1_without_the_violation_line(tmp_path: Path) -> None:

@@ -19,8 +19,9 @@ TAILS = ("Осталось", "Не проверено", "Для следующе
 
 
 def section(lines: list[str], title: str) -> tuple[str, list[str]] | None:
-    """(маркер как в файле, тело раздела `title`); None — раздела нет. Выигрывает первая найденная форма.
+    """(маркер как в файле, тело раздела `title`); None — раздела нет.
 
+    Заголовок `## T` выигрывает у абзаца, где бы тот ни стоял; среди абзацев выигрывает первый.
     `## T` (строка после rstrip): тело — до следующей строки `## `, непустые строки после strip. Абзац `**T:**` или
     `**T.**` (строка после strip НАЧИНАЕТСЯ с маркера; в середине строки маркер — не раздел): тело — одна строка из
     остатка и следующих строк до пустой строки или строки на `**`; пустой остаток и пустые строки дают `[]`.
@@ -36,6 +37,7 @@ def section(lines: list[str], title: str) -> tuple[str, list[str]] | None:
                     break
                 body.append(nxt.strip())
             return heading, [b for b in body if b]
+    for i, line in enumerate(lines):
         text = line.strip()
         marker = next((m for m in paragraphs if text.startswith(m)), None)
         if marker:
