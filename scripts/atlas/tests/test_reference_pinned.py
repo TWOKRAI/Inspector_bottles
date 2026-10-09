@@ -92,6 +92,7 @@ _ROUTER_ORDER = [
 ]
 
 
+@pytest.mark.slow
 def test_ref_on_origin_main_pin(pinned: GitRepo, atlas: Any, pin_db: Path) -> None:
     lines = _ok(atlas(pinned, "ref", "router_module", *_PINNED))
     assert len(lines) > 63, "к выводу 1.6b добавлены вид, реализации, «Код модуля» и «Кто использует»"

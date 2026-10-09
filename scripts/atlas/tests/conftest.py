@@ -6,16 +6,29 @@ Purpose: временный git-репозиторий, запуск main() в �
     каждом тесте, а не одну ошибку сбора.
 Public API: GitRepo, RepoFactory, Result, MarkerAdapter, CountingAdapter,
     FixedAdapter, run_with_deadline; фикстуры repo_factory, repo, atlas,
-    set_adapters.
+    set_adapters; хуки pytest_addoption, pytest_collection_modifyitems
+    (флаг --atlas-slow).
 Stability: lite
 
 Маркерный адаптер читает из дерева сборки строки `@@finding <severity> <code>
 <node> [<detail>]` в файлах `.md` и `.py`; `{path}` в `<node>` заменяется путём
 файла — так находка «переезжает» вместе с файлом при `git mv`.
+
+Медленные тесты (Task 1.7a). Три теста на пинах (> 60 с каждый) помечены
+`@pytest.mark.slow`; по умолчанию они ПРОПУСКАЮТСЯ с причиной (строка
+`3 skipped` в отчёте), а не вырезаются. Локально:
+    python -m pytest scripts/atlas/tests -q            # slow — skipped с причиной
+    ATLAS_SLOW=1 python -m pytest scripts/atlas/tests  # полный набор (так гонит CI)
+`-m "not slow"` — ТОЛЬКО вместе с путём `scripts/atlas/tests`: из корня явный `-m`
+снимает и пропуск 44 живых тестов backend_ctl (~10 мин). Флаг `--atlas-slow`
+распознаётся только в прогоне, где загружен этот conftest
+(`pytest backend_ctl/tests --atlas-slow` -> «unrecognized arguments»); env
+`ATLAS_SLOW` действует везде.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -40,6 +53,40 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 DEADLINE_S = 60.0
+
+SLOW_OPTION = "--atlas-slow"
+SLOW_ENV_KEY = "ATLAS_SLOW"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Объявить флаг полного прогона: виден в `pytest --help`, а не местное знание."""
+    parser.addoption(
+        SLOW_OPTION,
+        action="store_true",
+        default=bool(os.environ.get(SLOW_ENV_KEY)),
+        help=(
+            "гнать медленные тесты atlas (маркер slow, > 60 с каждый). "
+            f"Алиас — env {SLOW_ENV_KEY} (любое непустое значение, `0` тоже включает)"
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
+    """Тесты с маркером `slow` по умолчанию ПРОПУСКАЮТСЯ с причиной, а не удаляются.
+
+    `N skipped` в отчёте видна, «не собрали» неотличимо от «тестов нет». Флаг или
+    непустой `-m` у оператора сильнее умолчания — не вмешиваемся. Отбор — по
+    собственному маркеру (`get_closest_marker`), не по `item.keywords`: там лежат id
+    параметризации и имена родительских узлов.
+    """
+    if config.getoption(SLOW_OPTION, default=False):
+        return
+    if config.getoption("-m", default=""):
+        return  # набор выбран оператором явно — не вмешиваемся
+    skip_slow = pytest.mark.skip(reason=f"медленный тест (> 60 с): полный набор — {SLOW_ENV_KEY}=1 или {SLOW_OPTION}")
+    for item in items:
+        if item.get_closest_marker("slow") is not None:
+            item.add_marker(skip_slow)
 
 
 def run_with_deadline(fn: Callable[[], Any], seconds: float = DEADLINE_S) -> Any:
