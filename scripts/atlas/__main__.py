@@ -128,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     try:
-        sys.stdout.reconfigure(newline="\n")  # type: ignore[union-attr]  # LF и на Windows: вывод байт в байт
+        # LF и UTF-8 и на Windows: без encoding вывод в канал идёт в cp1251, читатели UTF-8 получают мусор
+        sys.stdout.reconfigure(newline="\n", encoding="utf-8")  # type: ignore[union-attr]
     except AttributeError:  # поток без reconfigure (подмена stdout)
         pass
     sys.exit(main())
