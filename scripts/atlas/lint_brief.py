@@ -38,7 +38,9 @@ _OPEN = re.compile(r"^<!-- atlas:facts ([0-9a-f]{7}) -->$")
 _CLOSE = "<!-- /atlas:facts -->"
 _ITEM = re.compile(r"^[ \t]*(?:- |\d+\. )")
 _FACT = re.compile(r"^[ \t]*- (?P<what>.+?) — `(?P<cmd>[^`]+)` → (?:`(?P<lit>[^`]+)`|exit (?P<code>\d+))$")
-_TIMING = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)? ?(?:с|сек|s|ms|мс)(?!\w)|\bin \d+(?:[.,]\d+)?s(?!\w)")
+_TIMING = re.compile(
+    r"(?<![\w.])\d+(?:[.,]\d+)? ?(?:(?:с|сек)(?![ \t]+[а-яёa-z])|s|ms|мс)(?!\w)|\bin \d+(?:[.,]\d+)?s(?!\w)"
+)
 _RED = re.compile(_ENTRY.pattern + r"(\S+\.py)::(\S+)")
 _NODEID = re.compile(r"^[^\s:]+\.py::\S+$")
 _INJ_KEYS = {"id", "prop", "file", "old", "new", "forecast", "observed", "test"}
@@ -97,14 +99,18 @@ def _na(lines: list[str]) -> bool:  # первая непустая строка
 
 def _limits(blocks: dict[str, list[str]], max_files: int, spawn: bool) -> list[tuple[str, str]]:
     """(код, текст) нарушений лимитов; `blocks` — тела без строки метки; `spawn` добавляет «блока нет» и REPORT."""
-    out = [(f"{n}_MISSING", f"{n} block missing") for n in ("DESIGN", "FILES", "REDS") if spawn and n not in blocks]
-    if "DESIGN" in blocks and (n := sum(1 for ln in blocks["DESIGN"] if ln.strip())) < 3:
-        out.append(("DESIGN_SHORT", f"DESIGN has {n} non-empty line(s) (need >= 3)"))
-    if (n := sum(1 for ln in blocks.get("FILES", []) if _ENTRY.match(ln))) > max_files:
-        out.append(("FILES_TOO_MANY", f"FILES lists {n} paths (max {max_files})"))
-    reds = blocks.get("REDS", [])
-    if not _na(reds) and (n := sum(1 for ln in reds if _ENTRY.match(ln))) > 10:
-        out.append(("REDS_TOO_MANY", f"REDS lists {n} tests (max 10, or 'n/a')"))
+    out: list[tuple[str, str]] = []
+    for name in ("DESIGN", "FILES", "REDS"):  # порядок хука до 1.9c: поблочно, затем REPORT
+        body = blocks.get(name, [])
+        n = sum(1 for ln in body if (ln.strip() if name == "DESIGN" else _ENTRY.match(ln)))
+        if name not in blocks:
+            out += [(f"{name}_MISSING", f"{name} block missing")] if spawn else []
+        elif name == "DESIGN" and n < 3:
+            out.append(("DESIGN_SHORT", f"DESIGN has {n} non-empty line(s) (need >= 3)"))
+        elif name == "FILES" and n > max_files:
+            out.append(("FILES_TOO_MANY", f"FILES lists {n} paths (max {max_files})"))
+        elif name == "REDS" and n > 10 and not _na(body):
+            out.append(("REDS_TOO_MANY", f"REDS lists {n} tests (max 10, or 'n/a')"))
     return out + ([("REPORT_MISSING", "REPORT block missing")] if spawn and "REPORT" not in blocks else [])
 
 

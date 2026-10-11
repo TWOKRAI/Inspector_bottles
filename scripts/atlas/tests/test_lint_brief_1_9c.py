@@ -1105,3 +1105,87 @@ def test_spawn_hook_uses_the_same_function(tmp_path: Path, repo: GitRepo, atlas:
     failing_src = "def spawn_violations(prompt, max_files=6):\n    raise RuntimeError('boom')\n"
     proc = _run_hook(bash, project_with("failing", failing_src), _prompt(reds=11))
     assert proc.returncode == 0 and proc.stdout == "", f"сбой внутри функции — fail open: {proc.stdout!r}"
+
+
+# --- тесты автора по ревью кода р.1 (1.9c): записаны ДО правки кода, красные -----------------------------------------
+
+
+def test_allow_list_option_spellings(repo: GitRepo, slow_atlas: Any) -> None:
+    """Каждое написание запрещённой опции (склейка, сокращение, @файл) — вне списка и ничего не запускает."""
+    _replay_repo(repo)
+    _put(repo, "args.txt", "--junitxml=made_by_argfile\n")
+    off_cmds = [
+        r"git grep -nOtouch\ made_by_nO alpha",
+        r"git grep --op=touch\ made_by_op alpha",
+        r"git grep --open-f=touch\ made_by_openf alpha",
+        r"git grep --open-files-in-pager=touch\ made_by_full alpha",
+        "git log --ext-diff -1",
+        "git diff --textconv HEAD~1 HEAD",
+        "git cat-file --batch",
+        "git grep --follow-symlinks alpha",
+        "python -m pytest --collect-only -q @args.txt",
+        "python -m pytest --collect-only -q -p other_plugin tests/test_ok.py",
+        "python -m pytest --collect-only -q -o addopts=x tests/test_ok.py",
+        "python -m pytest --collect-only -q -c other.ini tests/test_ok.py",
+        "wc -l ../outside.txt",
+        "python -m scripts.atlas brief 1.2 --write",
+        "python -m scripts.atlas index --w",
+    ]
+    facts = [_fact(f"вне {i}", cmd, exit_code=0) for i, cmd in enumerate(off_cmds)]
+    _put(repo, _REL, _Brief().set_facts(*facts, sha="abcdef0").text())
+
+    res = slow_atlas(repo, "lint-brief", _REL, "--no-fresh")
+    run = _parse(res)
+
+    assert run.code == 0, run.where()
+    assert sorted(run.off_list) == sorted(off_cmds), run.off_list
+    assert (
+        run.last == f"lint-brief: ошибок 0, предупреждений 0, сверено 1, вне allow-list {len(off_cmds)}"
+    )  # +1: ACCEPTANCE по умолчанию, run.last
+    for made in ("made_by_nO", "made_by_op", "made_by_openf", "made_by_full", "made_by_argfile"):
+        assert not (repo.path / made).exists(), f"команда вне allow-list запущена: создан {made}"
+
+
+def test_bad_replay_timeout_values_fall_back(repo: GitRepo, slow_atlas: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Нулевой, отрицательный, нечисловой, бесконечный таймаут — умолчание, а не ложный FACT_TIMEOUT или трассировка."""
+    _, c2 = _replay_repo(repo)
+    _put(repo, _REL, _Brief().set_facts(_fact("sha", "git rev-parse HEAD", lit=c2[:7]), sha=c2[:7]).text())
+    for value in ("0", "-5", "nan", "inf", "1e400", "abc", ""):
+        monkeypatch.setenv("ATLAS_REPLAY_TIMEOUT", value)
+        run = _parse(slow_atlas(repo, "lint-brief", _REL, "--no-fresh"))
+        assert run.code == 0, (value, run.where())
+        assert run.of("FACT_TIMEOUT") == [], (value, run.out)
+        assert run.last == "lint-brief: ошибок 0, предупреждений 0, сверено 2, вне allow-list 0", (value, run.last)
+
+
+def test_russian_preposition_after_a_number_is_not_a_duration(repo: GitRepo, slow_atlas: Any) -> None:
+    """Литерал из русского вывода («2 с ошибкой») — не время; «8 с» в конце литерала — время."""
+    _replay_repo(repo)
+    _put(repo, "note.txt", "x\n")
+    repo.commit("fix: 2 с ошибкой")
+    facts = [
+        _fact("тема", "git log -1 --format=%s", lit="2 с ошибкой"),
+        _fact("замер", "git log -1 --format=%s", lit="прогон 8 с"),
+    ]
+    _put(repo, _REL, _Brief().set_facts(*facts, sha="abcdef0").text())
+    run = _parse(slow_atlas(repo, "lint-brief", _REL, "--no-fresh"))
+    assert [f.text for f in run.of("LITERAL_TIMING")] == ["литерал со временем не воспроизводится: прогон 8 с"], run.out
+    assert run.of("FACT_MISMATCH") == [], run.out
+    assert run.last == "lint-brief: ошибок 1, предупреждений 0, сверено 2, вне allow-list 0", run.last
+
+
+def test_hook_reason_order_matches_the_legacy_copy(tmp_path: Path) -> None:
+    """Порядок нескольких отказов один у общей функции и у запасной копии (и у хука до 1.9c)."""
+    bash = _git_bash()
+    if bash is None:
+        pytest.skip("нет Git Bash: хук lint-brief.sh не запустить")
+    lines = ["TASK: 1.2 — проба", "DESIGN (decided by the lead):", "  1. шаг 1", "  2. шаг 2"]
+    lines += ["REDS (predicted red tests):", *[f"  - tests/test_a.py::test_{i}" for i in range(1, 12)]]
+    lines += ["TESTS: python -m pytest tests -q"]  # FILES и REPORT нет
+    prompt = "\n".join(lines) + "\n"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    live = _deny_reason(_run_hook(bash, _ROOT, prompt))
+    legacy = _deny_reason(_run_hook(bash, empty, prompt))
+    assert live is not None and legacy is not None
+    assert live == legacy, (live, legacy)

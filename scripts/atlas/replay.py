@@ -12,6 +12,7 @@ Stability: lite
 
 from __future__ import annotations
 
+import math
 import os
 import shlex
 import signal
@@ -28,8 +29,15 @@ _PKG_ROOT = Path(__file__).resolve().parents[2]  # каталог пакета `
 
 _ATLAS_VIEWS = {"pack", "card", "ref", "log", "brief", "index"}
 _GIT_READ = {"grep", "log", "diff", "cat-file", "rev-parse", "ls-files", "ls-tree", "show"}
-_GIT_BAD_PREFIX = ("--output", "-O", "--open-files-in-pager", "--exec", "--batch")
-_GIT_BAD_EXACT = {"--ext-diff", "--textconv", "--follow-symlinks"}
+_GIT_BAD_LONG = (
+    "--output",
+    "--open-files-in-pager",
+    "--exec",
+    "--batch",
+    "--ext-diff",
+    "--textconv",
+    "--follow-symlinks",
+)
 _PYTEST_FLAGS = {"-q", "--collect-only"}
 
 
@@ -46,9 +54,10 @@ def _timeout(value: float | None) -> float:
     if value is not None:
         return value
     try:
-        return float(os.environ.get("ATLAS_REPLAY_TIMEOUT", ""))
-    except ValueError:
+        seconds = float(os.environ.get("ATLAS_REPLAY_TIMEOUT", ""))
+    except (ValueError, OverflowError):
         return _DEFAULT_TIMEOUT
+    return seconds if math.isfinite(seconds) and seconds > 0 else _DEFAULT_TIMEOUT
 
 
 def _atlas_ok(args: list[str]) -> bool:
@@ -71,7 +80,7 @@ def _pytest_ok(args: list[str]) -> bool:
             i += 1
             if i >= len(args) or not args[i].startswith("no:"):
                 return False
-        elif arg.startswith("-") and arg not in _PYTEST_FLAGS:
+        elif arg.startswith("@") or (arg.startswith("-") and arg not in _PYTEST_FLAGS):  # @файл — argfile pytest
             return False
         i += 1
     return True
@@ -80,7 +89,16 @@ def _pytest_ok(args: list[str]) -> bool:
 def _git_ok(args: list[str]) -> bool:
     if not args or args[0] not in _GIT_READ:
         return False  # `git -c …` и прочие глобальные опции — вне списка
-    return not any(a in _GIT_BAD_EXACT or a.startswith(_GIT_BAD_PREFIX) for a in args[1:])
+    for arg in args[1:]:
+        if arg == "--":  # дальше — пути, не опции
+            break
+        name = arg.split("=")[0]
+        if name.startswith("--"):  # само имя или его сокращение: `--op=…` — это `--open-files-in-pager`
+            if len(name) > 2 and any(bad.startswith(name) or name.startswith(bad) for bad in _GIT_BAD_LONG):
+                return False
+        elif arg.startswith("-") and "O" in arg:  # склейка коротких: `-nOtouch`
+            return False
+    return True
 
 
 def _allowed(argv: list[str]) -> bool:
