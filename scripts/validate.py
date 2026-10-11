@@ -11,6 +11,7 @@
 5b. Структура Services/ (__init__.py, interfaces.py, STATUS.md, README.md)
 6. ADR-документация синхронизирована (python -m scripts.sync --check)
 7. Планы: новых блокирующих находок нет (scripts/plans_progress --check --baseline)
+9. Индекс уроков BY-MODULE*.md свежий (scripts/memory/search.py --by-module --check)
 
 Архитектурные границы между слоями (framework → Services → Plugins → app) — sentrux check.
 
@@ -304,6 +305,31 @@ def check_memory_tags() -> None:
         errors.append(msg)
 
 
+def check_memory_index() -> None:
+    check_header("9. Индекс уроков по модулям (scripts/memory/search.py --by-module --check)")
+    script = Path(__file__).parent / "memory" / "search.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--by-module", "--check", "--root", str(BASE)],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(BASE),
+    )
+    if result.returncode == 0:
+        print("  [OK] память: индекс BY-MODULE*.md свежий")
+    else:
+        msg = "  [FAIL] память: индекс BY-MODULE*.md устарел или проверка не запустилась"
+        print(msg)
+        # stdout — строки stale/missing/extra, stderr — отказ (exit 2: too big, нет git); хвост обоих
+        lines = (result.stdout + result.stderr).splitlines()
+        if len(lines) > 20:
+            print(f"    … всего строк {len(lines)}, последние 20")
+        for line in lines[-20:]:
+            print(f"    {line}")
+        print("    обновить: python scripts/memory/search.py --by-module --write")
+        errors.append(msg)
+
+
 def main() -> int:
     print("\nMULTIPROCESS FRAMEWORK — Валидация")
     print(f"Base: {BASE}")
@@ -318,6 +344,7 @@ def main() -> int:
     check_adr_sync()
     check_plans_progress()
     check_memory_tags()
+    check_memory_index()
 
     print(f"\n{'=' * 60}")
     print("  ИТОГ")

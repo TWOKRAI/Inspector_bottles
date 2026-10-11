@@ -5,3 +5,4 @@ robot/v2/main_v2.lua text eol=lf
 robot/v2/src/*.lua text eol=lf
 docs/handoffs/2026-10-06_lifecycle-T1-tools/*.sh text eol=lf
 docs/atlas/INDEX.md text eol=lf
+docs/claude/memory/BY-MODULE*.md text eol=lf
