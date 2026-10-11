@@ -1,0 +1,52 @@
+backend_ctl/events.py	EventHub.subscribe	pending:Ф3
+backend_ctl/events.py	_EventChannelMixin.subscribe	pending:Ф3
+backend_ctl/interfaces.py	IEventSource.subscribe	pending:Ф3
+multiprocess_framework/modules/actions_module/bus.py	ActionBus.register_handler	pending:Ф3
+multiprocess_framework/modules/actions_module/bus.py	ActionBus.add_post_execute_callback	pending:Ф3
+multiprocess_framework/modules/actions_module/bus.py	ActionBus.add_change_callback	pending:Ф3
+multiprocess_framework/modules/channel_routing_module/core/channel_routing_manager.py	ChannelRoutingManager.add_tap	pending:Ф3
+multiprocess_framework/modules/config_module/core/config.py	Config.subscribe	pending:Ф3
+multiprocess_framework/modules/config_module/interfaces.py	IConfig.subscribe	pending:Ф3
+multiprocess_framework/modules/dispatch_module/core/base_dispatcher.py	BaseDispatcher.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/core/dispatcher.py	Dispatcher.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/interfaces.py	IDispatcher.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/strategies/base_strategy.py	BaseStrategy.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/strategies/chain_match.py	ChainMatchStrategy.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/strategies/exact_match.py	ExactMatchStrategy.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/strategies/fallback_match.py	FallbackMatchStrategy.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/dispatch_module/strategies/pattern_match.py	PatternMatchStrategy.register_handler	exempt:таблица обработчиков диспетчера, жизнь равна процессу, в DESIGN §2.6 не названа (решение лида)
+multiprocess_framework/modules/display_module/interfaces.py	IDisplayChannel.subscribe	exempt:каталог входов дисплея по consumer_id, удалённый реестр (DESIGN §2.6)
+multiprocess_framework/modules/event_module/event_bus.py	EventBus.subscribe	pending:Ф3
+multiprocess_framework/modules/event_module/interfaces.py	EventBusProtocol.subscribe	pending:Ф3
+multiprocess_framework/modules/frontend_module/bridge/remote_frame_source.py	RemoteFrameSource.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/bridge/remote_state_proxy.py	_ClientRouter.register_message_handler	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/bridge/remote_state_proxy.py	RemoteStateProxy.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/components/base/infrastructure/register_adapter.py	RegisterAdapter.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/components/base/interfaces.py	IRegisterPort.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/components/base/traits/sync_trait.py	SyncTrait.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/core/registers_bridge.py	FrontendRegistersBridge.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/qt_event_bridge.py	QtEventBus.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/widgets/entity_editor/base_editor_model.py	BaseEditorModel.add_change_callback	pending:мегаплан-GUI
+multiprocess_framework/modules/frontend_module/widgets/tabs/tab_layout_protocol.py	UndoRedoController.add_change_callback	pending:мегаплан-GUI
+multiprocess_framework/modules/process_module/plugins/interfaces.py	IPluginRouter.register_message_handler	pending:Ф3
+multiprocess_framework/modules/registers_module/core/manager.py	RegistersManager.subscribe	pending:Ф3
+multiprocess_framework/modules/registers_module/interfaces.py	IRegistersManager.subscribe	pending:Ф3
+multiprocess_framework/modules/router_module/adapters/router_adapter.py	RouterAdapter.add_callback	pending:Ф3
+multiprocess_framework/modules/router_module/channels/socket_client.py	SocketClient.add_push_listener	pending:Ф3
+multiprocess_framework/modules/router_module/core/_receiver.py	AsyncReceiver.add_callback	pending:Ф3
+multiprocess_framework/modules/router_module/core/router_manager.py	RouterManager.register_message_handler	pending:Ф3
+multiprocess_framework/modules/router_module/interfaces.py	IRouterManager.register_message_handler	pending:Ф3
+multiprocess_framework/modules/shared_resources_module/events/core/manager.py	EventManager.subscribe	pending:Ф3
+multiprocess_framework/modules/shared_resources_module/events/interfaces.py	IEventManager.subscribe	pending:Ф3
+multiprocess_framework/modules/state_store_module/core/subscription_manager.py	SubscriptionManager.subscribe	exempt:удалённый реестр по sub_id подписчика (DESIGN §2.6)
+multiprocess_framework/modules/state_store_module/interfaces.py	IRouter.register_message_handler	pending:Ф3
+multiprocess_framework/modules/state_store_module/interfaces.py	IStateProxy.subscribe	pending:Ф3
+multiprocess_framework/modules/state_store_module/proxy/state_proxy.py	StateProxy.subscribe	pending:Ф3
+multiprocess_prototype/adapters/dispatch/command_dispatcher.py	CommandDispatcherOrchestrator.add_change_callback	pending:мегаплан-GUI
+multiprocess_prototype/adapters/stores/config_store.py	ConfigStoreFromManager.subscribe	pending:Ф3
+multiprocess_prototype/backend/state/adapters/camera_state_adapter.py	CameraStateAdapter.add_callback	pending:Ф3
+multiprocess_prototype/domain/protocols/command_dispatcher.py	CommandDispatcher.add_change_callback	pending:мегаплан-GUI
+multiprocess_prototype/domain/protocols/config_store.py	ConfigStore.subscribe	pending:Ф3
+multiprocess_prototype/domain/topology_session.py	TopologySession.add_change_callback	pending:мегаплан-GUI
+multiprocess_prototype/frontend/widgets/displays/preview_window.py	PreviewWindow.subscribe	pending:мегаплан-GUI
+multiprocess_framework/modules/event_module/subscribers.py	Subscribers.add	migrated
