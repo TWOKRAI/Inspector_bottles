@@ -103,7 +103,7 @@ GUI-процесса (виден как `foreign_collections`, в `chain` = 1); 
 - Task 0.2: Scope и Handle — примитив и контракт-тесты G1 [DONE 2026-10-05 — dbd0d7b23] (после 0.1)
 - Task 0.3: Subscribers в event_module [DONE 2026-10-05 — a3fddf721] (после 0.2)
 - Task 0.4: qt_lifetime — attach_qt, flush_deferred_deletes, QThreadHandle [DONE 2026-10-05 — 41fc28c29] (после 0.2)
-- Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [DONE 2026-10-11 — 0.5a и 0.5b на ветке, слияние по слову владельца; G5 вынесен] (после 0.3, 0.4)
+- Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [DONE 2026-10-11 — 0.5a, 0.5b, слияние 5d13d6bc3; G5 вынесен] (после 0.3, 0.4)
 - Task 1.1: stop_budget и ChildProcessStop поверх эскалации PM [PENDING] (после 0.5)
 - Task 1.2: корень процесса с барьерами, один close в раннере, G7 [PENDING] (после 1.1)
 - Task 1.3: WorkerManager и PluginContext на области, G8 [PENDING] (после 1.2)
