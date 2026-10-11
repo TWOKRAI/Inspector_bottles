@@ -282,5 +282,110 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_usage_errors"
     ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-19",
+    "prop": "--check: пути модулей из команд блока — входы (DESIGN 10; своя инъекция ревьюера own-D)",
+    "file": "scripts/atlas/brief.py",
+    "old": "inputs.update(p for mod in mods for p in by_id.get(mod, []))",
+    "new": "inputs.update([])",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-20",
+    "prop": "объект из файлов текста задачи при --module и у задачи с коммитами (F1)",
+    "file": "scripts/atlas/brief.py",
+    "old": "text_files = views._text_sources(tree, plan[1], tid, rows)[1]",
+    "new": "text_files = [x.strip().split(\" — \")[0] for x in first if x.endswith(\" — из текста задачи\")]",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_symbol_and_module_flags",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_task_with_commits_keeps_object_and_skips_own_files"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-21",
+    "prop": "кандидаты из прошлой задачи — без строк своей задачи (F2)",
+    "file": "scripts/atlas/brief.py",
+    "old": "set(line.strip().split(\" — \")[-1].split(\", \")) - {tid}",
+    "new": "set(line.strip().split(\" — \")[-1].split(\", \"))",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_task_with_commits_keeps_object_and_skips_own_files"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-22",
+    "prop": "--symbol вне модулей → exit 2 (DESIGN 6)",
+    "file": "scripts/atlas/brief.py",
+    "old": "if symbol and symbol not in names:",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_symbol_and_module_flags"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-23",
+    "prop": "--check против коммита маркера, не HEAD (эквивалент inj-5 после F6)",
+    "file": "scripts/atlas/brief.py",
+    "old": "\"-z\", sha, \"--\"",
+    "new": "\"-z\", \"HEAD\", \"--\"",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-24",
+    "prop": "--check: файлы из литералов — входы (эквивалент inj-6 после F5)",
+    "file": "scripts/atlas/brief.py",
+    "old": "if \"/\" in item and item in present:",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-25",
+    "prop": "--write проверяет путь файла до сборки (F3)",
+    "file": "scripts/atlas/__main__.py",
+    "old": "                path = brief.task_file(root, args.task) if args.write else None  # плохой путь — до сборки\n                block = brief.brief(con, root, ref, main_ref, args.task, args.module, args.symbol, \"main_ref\" in args)\n",
+    "new": "                block = brief.brief(con, root, ref, main_ref, args.task, args.module, args.symbol, \"main_ref\" in args)\n                path = brief.task_file(root, args.task) if args.write else None  # плохой путь — до сборки\n",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-26",
+    "prop": "ошибка ref объекта — пропуск, не exit 2 (F7)",
+    "file": "scripts/atlas/brief.py",
+    "old": "print(f\"brief: символ {name} пропущен — {exc}\", file=sys.stderr)\n            continue",
+    "new": "raise",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-27",
+    "prop": "у объекта-интерфейса нет строки «файл объекта» (DESIGN 5)",
+    "file": "scripts/atlas/brief.py",
+    "old": "2 if lines[1] in files else 1",
+    "new": "2",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_interface_object"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   }
 ]
