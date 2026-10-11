@@ -180,6 +180,17 @@ def test_facts_and_acceptance_lines_follow_grammar() -> None:
     assert bad_items == [], f"пункты ACCEPTANCE вне грамматики §2.5: {bad_items}"
 
 
+def test_brief_marker_reads_template_example() -> None:
+    # читатель маркера FACTS (Task 1.9b): пример шаблона -> sha7 открывающего маркера; без закрывающего -> None
+    from scripts.atlas.brief import marker
+
+    lines = _main_brief()
+    assert marker("\n".join(lines)) == "24a229e"
+    without_close = [ln for ln in lines if ln != _FACTS_CLOSE]
+    assert len(without_close) == len(lines) - 1, "в примере должна быть ровно одна закрывающая строка FACTS"
+    assert marker("\n".join(without_close)) is None
+
+
 def test_lead_parts_reads_open_questions() -> None:
     from scripts.atlas.views import _lead_parts
 
