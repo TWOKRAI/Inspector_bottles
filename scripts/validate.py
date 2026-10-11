@@ -11,6 +11,7 @@
 5b. Структура Services/ (__init__.py, interfaces.py, STATUS.md, README.md)
 6. ADR-документация синхронизирована (python -m scripts.sync --check)
 7. Планы: новых блокирующих находок нет (scripts/plans_progress --check --baseline)
+8. Стражи жизненного цикла G2/G6/G10 (python -m scripts.lifecycle_guards check)
 
 Архитектурные границы между слоями (framework → Services → Plugins → app) — sentrux check.
 
@@ -304,6 +305,18 @@ def check_memory_tags() -> None:
         errors.append(msg)
 
 
+def check_lifecycle_guards() -> None:
+    check_header("8. Стражи жизненного цикла G2/G6/G10 (scripts/lifecycle_guards)")
+    from scripts.lifecycle_guards.__main__ import format_finding, run_all, summary_line
+
+    findings = run_all(BASE)
+    for finding in findings:
+        msg = f"  [FAIL] {format_finding(finding)}"
+        print(msg)
+        errors.append(msg)
+    print(f"  {summary_line(findings, BASE)}")
+
+
 def main() -> int:
     print("\nMULTIPROCESS FRAMEWORK — Валидация")
     print(f"Base: {BASE}")
@@ -318,6 +331,7 @@ def main() -> int:
     check_adr_sync()
     check_plans_progress()
     check_memory_tags()
+    check_lifecycle_guards()
 
     print(f"\n{'=' * 60}")
     print("  ИТОГ")
