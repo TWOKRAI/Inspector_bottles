@@ -25,7 +25,14 @@
 #
 # Checks on tool_input.prompt: DESIGN block >= 3 non-empty lines; FILES block's
 # numbered/bulleted entry count <= brief_max_files (default 6); REDS block's entry
-# count <= 10, or its first non-empty line starts with "n/a"; REPORT label present. A
+# count <= 10, or its first non-empty line starts with "n/a"; REPORT label present.
+# The checks live in ONE place, scripts/atlas/lint_brief.py (`spawn_violations`, Task
+# 1.9c) -- the function `python -m scripts.atlas lint-brief` also runs on a task file.
+# The hook imports it from CLAUDE_PROJECT_DIR (or cwd). `_legacy_violations` below is a
+# copy of the former embedded checks, kept only for a project without scripts/atlas
+# (the import raises ModuleNotFoundError on `scripts`, `scripts.atlas` or
+# `scripts.atlas.lint_brief`); any other failure, including one inside
+# `spawn_violations`, exits silently (fail open). A
 # violation denies via the SAME JSON PreToolUse decision shape
 # agent_context_ceiling.py's hard-budget deny uses (permissionDecision /
 # permissionDecisionReason on hookSpecificOutput) -- exit code stays 0, the JSON on
@@ -71,43 +78,84 @@ HOOK_INPUT="$INPUT" BRIEF_MAX_FILES="$BRIEF_MAX_FILES" BRIEF_LINT_ROLES="$BRIEF_
 import json
 import os
 import re
+import sys
 
-LABEL_RE = re.compile(r"^[ \t]*([A-Z][A-Z \-/]{2,})(?:[ \t]*\(.*)?:", re.MULTILINE)
-ENTRY_RE = re.compile(r"^[ \t]*(?:\d+\.|[-*])[ \t]+")
 OVERRIDE_RE = re.compile(r"^[ \t]*BRIEF-OVERRIDE:[ \t]*\S+", re.MULTILINE)
-BULLET_STRIP_RE = re.compile(r"^(?:\d+\.|[-*])[ \t]+")
 
 
-def label_blocks(text):
-    """Map each FIRST-seen label name -> its block: the lines after the label line,
-    up to (not including) the next label line, or the end of the text."""
-    matches = list(LABEL_RE.finditer(text))
-    lines = text.splitlines()
-    blocks = {}
-    for idx, m in enumerate(matches):
-        name = m.group(1).strip()
-        if name in blocks:
-            continue
-        label_line_no = text.count("\n", 0, m.start())
-        end_line_no = (
-            text.count("\n", 0, matches[idx + 1].start())
-            if idx + 1 < len(matches)
-            else len(lines)
-        )
-        blocks[name] = lines[label_line_no + 1 : end_line_no]
-    return blocks
+def _legacy_violations(prompt, max_files):
+    """For projects without scripts/atlas: the checks this hook embedded before Task 1.9c
+    (copy; the live source is scripts/atlas/lint_brief.py)."""
+    LABEL_RE = re.compile(r"^[ \t]*([A-Z][A-Z \-/]{2,})(?:[ \t]*\(.*)?:", re.MULTILINE)
+    ENTRY_RE = re.compile(r"^[ \t]*(?:\d+\.|[-*])[ \t]+")
+    BULLET_STRIP_RE = re.compile(r"^(?:\d+\.|[-*])[ \t]+")
+
+    def label_blocks(text):
+        """Map each FIRST-seen label name -> its block: the lines after the label line,
+        up to (not including) the next label line, or the end of the text."""
+        matches = list(LABEL_RE.finditer(text))
+        lines = text.splitlines()
+        blocks = {}
+        for idx, m in enumerate(matches):
+            name = m.group(1).strip()
+            if name in blocks:
+                continue
+            label_line_no = text.count("\n", 0, m.start())
+            end_line_no = text.count("\n", 0, matches[idx + 1].start()) if idx + 1 < len(matches) else len(lines)
+            blocks[name] = lines[label_line_no + 1 : end_line_no]
+        return blocks
+
+    def first_nonempty(block_lines):
+        for line in block_lines:
+            stripped = line.strip()
+            if stripped:
+                return stripped
+        return ""
+
+    blocks = label_blocks(prompt)
+    violations = []
+
+    design = blocks.get("DESIGN")
+    if design is None:
+        violations.append("DESIGN block missing")
+    else:
+        nonempty = [ln for ln in design if ln.strip()]
+        if len(nonempty) < 3:
+            violations.append(f"DESIGN has {len(nonempty)} non-empty line(s) (need >= 3)")
+
+    files = blocks.get("FILES")
+    if files is None:
+        violations.append("FILES block missing")
+    else:
+        count = sum(1 for ln in files if ENTRY_RE.match(ln))
+        if count > max_files:
+            violations.append(f"FILES lists {count} paths (max {max_files})")
+
+    reds = blocks.get("REDS")
+    if reds is None:
+        violations.append("REDS block missing")
+    else:
+        first = BULLET_STRIP_RE.sub("", first_nonempty(reds)).strip().lower()
+        if not first.startswith("n/a"):
+            count = sum(1 for ln in reds if ENTRY_RE.match(ln))
+            if count > 10:
+                violations.append(f"REDS lists {count} tests (max 10, or 'n/a')")
+
+    if "REPORT" not in blocks:
+        violations.append("REPORT block missing")
+    return violations
 
 
-def first_nonempty(block_lines):
-    for line in block_lines:
-        stripped = line.strip()
-        if stripped:
-            return stripped
-    return ""
-
-
-def strip_bullet(text):
-    return BULLET_STRIP_RE.sub("", text).strip()
+def _violations(prompt, max_files):
+    """The shared check (scripts/atlas/lint_brief.py); the legacy copy only for a project without that module."""
+    sys.path.insert(0, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    try:
+        from scripts.atlas.lint_brief import spawn_violations
+    except ModuleNotFoundError as e:
+        if e.name not in ("scripts", "scripts.atlas", "scripts.atlas.lint_brief"):
+            raise
+        return _legacy_violations(prompt, max_files)
+    return spawn_violations(prompt, max_files)
 
 
 def main():
@@ -145,39 +193,7 @@ def main():
     except (TypeError, ValueError):
         max_files = 6
 
-    blocks = label_blocks(prompt)
-    violations = []
-
-    design = blocks.get("DESIGN")
-    if design is None:
-        violations.append("DESIGN block missing")
-    else:
-        nonempty = [ln for ln in design if ln.strip()]
-        if len(nonempty) < 3:
-            violations.append(
-                f"DESIGN has {len(nonempty)} non-empty line(s) (need >= 3)"
-            )
-
-    files = blocks.get("FILES")
-    if files is None:
-        violations.append("FILES block missing")
-    else:
-        count = sum(1 for ln in files if ENTRY_RE.match(ln))
-        if count > max_files:
-            violations.append(f"FILES lists {count} paths (max {max_files})")
-
-    reds = blocks.get("REDS")
-    if reds is None:
-        violations.append("REDS block missing")
-    else:
-        first = strip_bullet(first_nonempty(reds)).lower()
-        if not first.startswith("n/a"):
-            count = sum(1 for ln in reds if ENTRY_RE.match(ln))
-            if count > 10:
-                violations.append(f"REDS lists {count} tests (max 10, or 'n/a')")
-
-    if "REPORT" not in blocks:
-        violations.append("REPORT block missing")
+    violations = _violations(prompt, max_files)
 
     if not violations:
         return

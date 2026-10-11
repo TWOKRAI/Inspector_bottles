@@ -1,5 +1,5 @@
-"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `brief`, `--json`
-(Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b).
+"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `lint-brief`, `brief`, `--json`
+(Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b, 1.9c).
 
 Запуск: `python -m scripts.atlas`.
 
@@ -9,7 +9,8 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку,
     1 — `index --check`: INDEX.md отстал, 1 — `lint-result`: итог не по форме 0.7, 1 — `brief --check`: блок FACTS
     отстал от своего маркера, 2 — ошибка окружения или ввода (у `brief` и `--write` вместе с `--check`, нет файла
-    или маркеров, метка FACTS без маркеров, нет DESIGN, задача или символ не найдены).
+    или маркеров, метка FACTS без маркеров, нет DESIGN, задача или символ не найдены), 1 — `lint-brief`: в брифе есть
+    ошибка (предупреждения кода не меняют), 2 — `lint-brief`: нет файла, имя не по форме, файл вне репозитория.
     `lint-result <файл>` не знает git и базу: ветка стоит до определения корня репозитория.
 Public API: main.
 Stability: lite
@@ -22,7 +23,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import brief, reference, result_form, store, views
+from scripts.atlas import brief, lint_brief, reference, result_form, store, views
 from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
@@ -64,6 +65,10 @@ def _parser() -> argparse.ArgumentParser:
     blk.add_argument("--write", action="store_true", help="записать блок в tasks/<id>.md плана")
     blk.add_argument("--check", action="store_true", help="сверить рабочее дерево с маркером (код 1 — отстал)")
     sub.add_parser("lint-result", help="проверить итог задачи по форме 0.7 (без git и базы)").add_argument("file")
+    lb = sub.add_parser("lint-brief", help="проверить бриф tasks/<id>[.<роль>].md (форма, повтор команд, REDS)")
+    lb.add_argument("file")
+    lb.add_argument("--no-replay", action="store_true", help="не запускать команды строк факта и сбор тестов")
+    lb.add_argument("--no-fresh", action="store_true", help="не сверять FACTS со свежестью маркера")
     return top
 
 
@@ -95,11 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     if (
         args.json == (args.command is not None)
         or both
-        or (args.command in ("check", "log", "lint-result") and hasattr(args, "ref"))
+        or (args.command in ("check", "log", "lint-result", "lint-brief") and hasattr(args, "ref"))
     ):
         parser.print_usage(sys.stderr)
         print(
-            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index, lint-result, brief или --json",
+            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index, lint-result, lint-brief, "
+            "brief или --json",
             file=sys.stderr,
         )
         return 2
@@ -108,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
         main_ref = getattr(args, "main_ref", None) or _default_main_ref(root)
+        if args.command == "lint-brief":  # реестр не читает и не строит: соединения нет
+            code, lines = lint_brief.run(root, args.file, replay=not args.no_replay, fresh=not args.no_fresh)
+            print("\n".join(lines))
+            return code
         if args.command == "log":  # реестр не читает и не строит: соединения нет
             if args.n < 1:
                 raise AtlasError("atlas: -n must be a positive integer")
