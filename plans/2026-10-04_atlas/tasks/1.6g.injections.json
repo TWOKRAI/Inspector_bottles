@@ -1,0 +1,168 @@
+[
+ {
+  "id": "inj-1",
+  "prop": "tar -x -f - в cwd (DESIGN 2): на Windows форма -C падает, откат на tarfile",
+  "file": "scripts/atlas/codemap.py",
+  "old": "subprocess.run([tar, \"-x\", \"-f\", \"-\"], input=tar_input, cwd=target, capture_output=True)",
+  "new": "subprocess.run([tar, \"-x\", \"-C\", str(target)], input=tar_input, capture_output=True)",
+  "forecast": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_tar_unpacks_without_tarfile_fallback",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_warm_output_is_byte_equal_to_cold",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[ref]",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[card]",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[ref-symbol]"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "откат на tarfile — с предупреждением в stderr (DESIGN 2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "        print(f\"atlas: tar failed (rc={rc}), fallback to tarfile\", file=sys.stderr)\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_tar_failure_falls_back_with_warning"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "выгрузка на диске — попадание без git archive (DESIGN 1)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    try:\n        os.utime(final)\n        return final\n",
+  "new": "    try:\n        raise FileNotFoundError\n",
+  "forecast": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_survives_the_process",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_second_module_in_process_reuses_code"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "хранятся 3 выгрузки (DESIGN 1, 3)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "KEEP = 3\n",
+  "new": "KEEP = 99\n",
+  "forecast": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_keeps_three_revisions",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_four_revisions_keep_three_newest"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "Code ревизии переиспользуется в процессе (DESIGN 4)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if code is not None and code.parsable:\n        return code\n",
+  "new": "    if False:\n        return code\n",
+  "forecast": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_second_module_in_process_reuses_code"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "Code с parsable=False не переиспользуется (DESIGN 4)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if code is not None and code.parsable:\n",
+  "new": "    if code is not None:\n",
+  "forecast": [
+   "scripts/atlas/tests/test_cache_1_6e_code.py::test_unparsable_result_is_not_cached"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "распаковка во временный каталог и rename — частичное дерево не видно под итоговым именем (DESIGN 2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            _unpack(proc.stdout, tmp)\n",
+  "new": "            final.mkdir()\n            _unpack(proc.stdout, final)\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_two_threads_same_key_get_one_complete_checkout",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tar-raises]",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tarfile-raises]"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "rename на занятое имя — берётся выгрузка другого процесса (DESIGN 2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            if not final.exists():\n                raise\n",
+  "new": "            raise\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_two_threads_same_key_get_one_complete_checkout"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "prune переименовывает в .del-* до rmtree, открытый файл — запись целиком (DESIGN 3)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            os.rename(entry, doomed)\n",
+  "new": "            shutil.rmtree(entry, ignore_errors=True)\n            continue\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_pruned_checkout_with_open_file_is_whole_or_gone"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "кэш grimp рядом с выгрузкой (DESIGN 5) — только время",
+  "file": "scripts/atlas/codemap.py",
+  "old": "cache_dir=str(self.base / \".grimp_cache\")",
+  "new": "cache_dir=None",
+  "forecast": [],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "prune не трогает текущую выгрузку (DESIGN 3)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "        if entry.name == current:\n            continue\n",
+  "new": "",
+  "forecast": [],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-12",
+  "prop": "непустые корни при пустой выгрузке — AtlasError, не вид (DESIGN 4)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if not code.files and _roots(tree, rows):\n        raise AtlasError(\"atlas: empty checkout\")\n",
+  "new": "",
+  "forecast": [],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "ключ памяти Code включает rows (DESIGN 4)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    key = (str(base), json.dumps(rows, sort_keys=True, default=str))\n",
+  "new": "    key = (str(base), \"\")\n",
+  "forecast": [],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "попадание обновляет mtime выгрузки (LRU, DESIGN 1)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    try:\n        os.utime(final)\n        return final\n",
+  "new": "    try:\n        final.stat()\n        return final\n",
+  "forecast": [],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ }
+]
