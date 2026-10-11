@@ -68,7 +68,7 @@ def test_latest_generation_is_known_and_current():
     """Литералы, не константы линтера: ID нового поколения обязаны проходить гейт."""
     linter = _load_linter()
     for model in ("opus", "sonnet", "haiku", "fable", "claude-opus-5-5", "claude-sonnet-5-5",
-                  "claude-fable-5-1", "claude-haiku-4-5"):
+                  "claude-fable-5-1", "claude-haiku-5-5"):
         assert model in linter.KNOWN_MODELS, f"{model} не известен линтеру"
         assert model in linter.CURRENT_MODELS, f"{model} не считается текущим"
 

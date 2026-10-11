@@ -68,6 +68,7 @@ KNOWN_MODELS = {
     "claude-sonnet-5-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
+    "claude-haiku-5-5",
     "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",
     "inherit",  # special — use parent agent's model
@@ -78,7 +79,7 @@ KNOWN_MODELS = {
 # valid yet stale → soft WARNING here. The HARD gate that every *bundled* seed
 # agent is on a CURRENT model lives in tests/test_lint_agents_models.py.
 # Update both when a new model ships (source of truth: claude-api skill).
-#   Opus → claude-opus-5-5 · Sonnet → claude-sonnet-5-5 · Haiku → claude-haiku-4-5 · Fable → claude-fable-5-1
+#   Opus → claude-opus-5-5 · Sonnet → claude-sonnet-5-5 · Haiku → claude-haiku-5-5 · Fable → claude-fable-5-1
 CURRENT_MODELS = {
     # Aliases can never be stale — they always point at the tier's latest.
     "opus",
@@ -88,8 +89,7 @@ CURRENT_MODELS = {
     "claude-fable-5-1",
     "claude-opus-5-5",
     "claude-sonnet-5-5",
-    "claude-haiku-4-5",
-    "claude-haiku-4-5-20251001",  # dated alias of the current Haiku
+    "claude-haiku-5-5",
     "inherit",
 }
 
