@@ -204,11 +204,20 @@ def test_g6_entry_with_count_zero_is_dead(tmp_path: Path) -> None:
 
 
 def test_g6_entry_with_negative_count_is_dead_and_does_not_hide_violations(tmp_path: Path) -> None:
-    _write(tmp_path, "pkg/a.py", "a.deleteLater()\n")
+    _write(tmp_path, "pkg/a.py", "a.deleteLater()\nb.deleteLater()\nc.deleteLater()\n")
 
     findings = check_g6(tmp_path, {("R6", "pkg/a.py"): AllowEntry(-1, "legacy shim until 0.6")})
 
-    assert sorted("мертва" in f.message for f in findings) == [False, True]
+    # без max(count, 0) срез hits[-1:] спрятал бы два нарушения из трёх
+    assert sorted(("мертва" in f.message, f.line) for f in findings) == [(False, 1), (False, 2), (False, 3), (True, 0)]
+
+
+def test_g10_non_positive_entry_is_dead_and_does_not_hide_markers(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/a.py", "# lifecycle-shim: one\n# lifecycle-shim: two\n")
+
+    findings = check_g10(tmp_path, {"pkg/a.py": -1})
+
+    assert sorted(("мертва" in f.message, f.line) for f in findings) == [(False, 1), (False, 2), (True, 0)]
 
 
 def test_g10_shims_path_missing_from_tree_is_rotten(tmp_path: Path) -> None:

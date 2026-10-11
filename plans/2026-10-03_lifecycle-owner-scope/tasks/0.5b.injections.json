@@ -1,18 +1,261 @@
 [
-  {"id": "inj-1", "prop": "G4: имя без / — запись, с / — не запись", "file": "scripts/lifecycle_guards/pytest_plugin.py", "old": "    return \"/\" not in name", "new": "    return True", "forecast": ["test_g4_unowned_thread_report_and_fail"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-2", "prop": "режим fail переводит код возврата в 1", "file": "scripts/lifecycle_guards/pytest_plugin.py", "old": "if failing and session.exitstatus == 0:", "new": "if False:", "forecast": ["test_g3_unclosed_root_report_and_fail", "test_g4_unowned_thread_report_and_fail"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-3", "prop": "G4: ждём завершения потоков до 0,2 с", "file": "scripts/lifecycle_guards/pytest_plugin.py", "old": "_G4_WAIT_S = 0.2", "new": "_G4_WAIT_S = 0.0", "forecast": [], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-4", "prop": "неизвестное значение ручки читается как report", "file": "scripts/lifecycle_guards/pytest_plugin.py", "old": "    return _DEFAULT\n\n\ndef pytest_configure", "new": "    return \"off\"\n\n\ndef pytest_configure", "forecast": ["test_report_mode_keeps_exit_code"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-5", "prop": "при обеих ручках off раздела отчёта нет", "file": "scripts/lifecycle_guards/pytest_plugin.py", "old": "if _state[\"g3\"] == \"off\" and _state[\"g4\"] == \"off\":", "new": "if False:", "forecast": ["no_section_when_both_off"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-6", "prop": "G3: gc.collect перед выпиской корней (брошенный корень виден как abandoned)", "file": "scripts/lifecycle_guards/pytest_plugin.py", "old": "def _collect_roots() -> None:\n    gc.collect()\n", "new": "def _collect_roots() -> None:\n", "forecast": [], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-7", "prop": "код 134 — падение", "file": "scripts/lifecycle_guards/probe/run.py", "old": "CRASH_CODES = frozenset({134, 139,", "new": "CRASH_CODES = frozenset({139,", "forecast": ["134"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-8", "prop": "not-triggered — отдельный исход", "file": "scripts/lifecycle_guards/probe/run.py", "old": "if f\"[{mode}] at first logger test\" not in log_text:", "new": "if False:", "forecast": ["test_probe_not_triggered_is_not_survived"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-9", "prop": "failed — ненулевой код без признака падения", "file": "scripts/lifecycle_guards/probe/run.py", "old": "    if returncode != 0:\n        return \"failed\"", "new": "    if False:\n        return \"failed\"", "forecast": ["failed"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-10", "prop": "в прогонах пробы плагин lifecycle молчит (env G3/G4 off) — дыра названа заранее", "file": "scripts/lifecycle_guards/probe/run.py", "old": "                \"LIFECYCLE_G3\": \"off\",\n                \"LIFECYCLE_G4\": \"off\",\n", "new": "", "forecast": [], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-11", "prop": "раннер пробы кладёт корень репозитория в PYTHONPATH дочернего pytest — дыра названа заранее", "file": "scripts/lifecycle_guards/probe/run.py", "old": "                \"PYTHONPATH\": str(REPO_ROOT),\n", "new": "", "forecast": [], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-12", "prop": "мёртвая ось даёт код 2 в axis", "file": "scripts/lifecycle_guards/probe/run.py", "old": "        return 2 if alive is False else 0", "new": "        return 0", "forecast": ["dead"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-13", "prop": "run проверяет ось первой", "file": "scripts/lifecycle_guards/probe/run.py", "old": "    if not args.skip_axis:", "new": "    if False:", "forecast": ["axis"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-14", "prop": "ось: main обязан выжить", "file": "scripts/lifecycle_guards/probe/run.py", "old": "main_survived += rc == 0 and \"SURVIVED main\" in out and not _is_crash(rc, out)", "new": "main_survived += 1", "forecast": ["dead-main"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-15", "prop": "прогонщик модулей без PYTHONPATH подгружает плагин (pythonpath в modules/pytest.ini)", "file": "multiprocess_framework/modules/pytest.ini", "old": "pythonpath = ../..", "new": "", "forecast": ["test_runner_works_without_pythonpath"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"},
-  {"id": "inj-16", "prop": "корневой pytest подгружает плагин (addopts в pyproject)", "file": "pyproject.toml", "old": " -p scripts.lifecycle_guards.pytest_plugin\"", "new": "\"", "forecast": ["pyproject"], "observed": null, "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"}
+ {
+  "id": "inj-1",
+  "prop": "G4: имя без / — запись, с / — не запись",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "    return \"/\" not in name",
+  "new": "    return True",
+  "forecast": [
+   "test_g4_unowned_thread_report_and_fail"
+  ],
+  "observed": [
+   "test_g4_unowned_thread_report_and_fail[clean-fail]",
+   "test_g4_unowned_thread_report_and_fail[clean-report]",
+   "test_g4_unowned_thread_report_and_fail[rogue-default-is-report]",
+   "test_g4_unowned_thread_report_and_fail[rogue-fail]",
+   "test_g4_unowned_thread_report_and_fail[rogue-report]",
+   "test_g4_unowned_thread_report_and_fail[rogue-unknown-is-report]",
+   "test_report_mode_keeps_exit_code[fail-fail-clean-session-keeps-0]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "режим fail переводит код возврата в 1",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "if failing and session.exitstatus == 0:",
+  "new": "if False:",
+  "forecast": [
+   "test_g3_unclosed_root_report_and_fail",
+   "test_g4_unowned_thread_report_and_fail"
+  ],
+  "observed": [
+   "test_g3_unclosed_root_report_and_fail[dropped-fail]",
+   "test_g3_unclosed_root_report_and_fail[leak-fail]",
+   "test_g4_unowned_thread_report_and_fail[rogue-fail]",
+   "test_report_mode_keeps_exit_code[both-violations-fail-gives-1]",
+   "test_report_mode_keeps_exit_code[g3-fail-g4-report-g3-decides]",
+   "test_report_mode_keeps_exit_code[g3-report-g4-fail-g4-decides]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "G4: ждём завершения потоков до 0,2 с",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "_G4_WAIT_S = 0.2",
+  "new": "_G4_WAIT_S = 0.0",
+  "forecast": [],
+  "observed": [
+   "test_g4_ignores_dummy_threads_and_threads_that_die_within_the_wait"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "неизвестное значение ручки читается как report",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "    return _DEFAULT\n\n\ndef pytest_configure",
+  "new": "    return \"off\"\n\n\ndef pytest_configure",
+  "forecast": [
+   "test_report_mode_keeps_exit_code"
+  ],
+  "observed": [
+   "test_g3_unclosed_root_report_and_fail[leak-unknown-is-report]",
+   "test_g4_unowned_thread_report_and_fail[rogue-unknown-is-report]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "при обеих ручках off раздела отчёта нет",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "if _state[\"g3\"] == \"off\" and _state[\"g4\"] == \"off\":",
+  "new": "if False:",
+  "forecast": [
+   "no_section_when_both_off"
+  ],
+  "observed": [
+   "test_g3_off_has_no_g3_output_and_no_section_when_both_off",
+   "test_g4_off_has_no_g4_output"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "G3: gc.collect перед выпиской корней (брошенный корень виден как abandoned)",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "def _collect_roots() -> None:\n    gc.collect()\n",
+  "new": "def _collect_roots() -> None:\n",
+  "forecast": [],
+  "observed": [],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "код 134 — падение",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "CRASH_CODES = frozenset({134, 139,",
+  "new": "CRASH_CODES = frozenset({139,",
+  "forecast": [
+   "134"
+  ],
+  "observed": [
+   "test_classify_run_table[134--[offmain_gc] at first logger test: gc-tracked QWidget/QWindow wrappers alive-or-garbage = 5\\n-crashed]",
+   "test_probe_runner_classification[crashed-code-134]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "not-triggered — отдельный исход",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "if f\"[{mode}] at first logger test\" not in log_text:",
+  "new": "if False:",
+  "forecast": [
+   "test_probe_not_triggered_is_not_survived"
+  ],
+  "observed": [
+   "test_classify_run_table[0---not-triggered]",
+   "test_classify_run_table[1---not-triggered]",
+   "test_classify_run_trigger_line_is_mode_specific",
+   "test_probe_not_triggered_is_not_survived"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "failed — ненулевой код без признака падения",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "    if returncode != 0:\n        return \"failed\"",
+  "new": "    if False:\n        return \"failed\"",
+  "forecast": [
+   "failed"
+  ],
+  "observed": [
+   "test_classify_run_table[1--[offmain_gc] at first logger test: gc-tracked QWidget/QWindow wrappers alive-or-garbage = 5\\n-failed]",
+   "test_classify_run_table[3--[offmain_gc] at first logger test: gc-tracked QWidget/QWindow wrappers alive-or-garbage = 5\\n-failed]",
+   "test_classify_run_table[None-[timeout 900s]-[offmain_gc] at first logger test: gc-tracked QWidget/QWindow wrappers alive-or-garbage = 5\\n-failed]",
+   "test_probe_runner_classification[failed-assertion]",
+   "test_probe_runner_classification[failed-rc1-no-text]",
+   "test_probe_runner_classification[failed-rc3-internal-error]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "в прогонах пробы плагин lifecycle молчит (env G3/G4 off) — дыра названа заранее",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "                \"LIFECYCLE_G3\": \"off\",\n                \"LIFECYCLE_G4\": \"off\",\n",
+  "new": "",
+  "forecast": [],
+  "observed": [],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "раннер пробы кладёт корень репозитория в PYTHONPATH дочернего pytest — дыра названа заранее",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "                \"PYTHONPATH\": str(REPO_ROOT),\n",
+  "new": "",
+  "forecast": [],
+  "observed": [],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-12",
+  "prop": "мёртвая ось даёт код 2 в axis",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "        return 2 if alive is False else 0",
+  "new": "        return 0",
+  "forecast": [
+   "dead"
+  ],
+  "observed": [
+   "test_probe_axis_alive_and_dead[dead-main-crashes]",
+   "test_probe_axis_alive_and_dead[dead-main-rc0-without-survived-text]",
+   "test_probe_axis_alive_and_dead[dead-main-survived-text-but-rc1]",
+   "test_probe_axis_alive_and_dead[dead-thread-crashes-only-once]",
+   "test_probe_axis_alive_and_dead[dead-thread-does-not-crash]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "run проверяет ось первой",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "    if not args.skip_axis:",
+  "new": "    if False:",
+  "forecast": [
+   "axis"
+  ],
+  "observed": [],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "ось: main обязан выжить",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "main_survived += rc == 0 and \"SURVIVED main\" in out and not _is_crash(rc, out)",
+  "new": "main_survived += 1",
+  "forecast": [
+   "dead-main"
+  ],
+  "observed": [
+   "test_probe_axis_alive_and_dead[dead-main-crashes]",
+   "test_probe_axis_alive_and_dead[dead-main-rc0-without-survived-text]",
+   "test_probe_axis_alive_and_dead[dead-main-survived-text-but-rc1]"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "прогонщик модулей без PYTHONPATH подгружает плагин (pythonpath в modules/pytest.ini)",
+  "file": "multiprocess_framework/modules/pytest.ini",
+  "old": "\npythonpath = ../..\n",
+  "new": "\n",
+  "forecast": [
+   "test_runner_works_without_pythonpath"
+  ],
+  "observed": "OLD-NOT-UNIQUE(2)",
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "корневой pytest подгружает плагин (addopts в pyproject)",
+  "file": "pyproject.toml",
+  "old": " -p scripts.lifecycle_guards.pytest_plugin\"",
+  "new": "\"",
+  "forecast": [
+   "pyproject"
+  ],
+  "observed": [
+   "test_configs_carry_plugin_keys"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "(повтор inj-6 после теста лида) G3: итоговый gc.collect делает брошенный корень abandoned",
+  "file": "scripts/lifecycle_guards/pytest_plugin.py",
+  "old": "def _collect_roots() -> None:\n    gc.collect()\n",
+  "new": "def _collect_roots() -> None:\n",
+  "forecast": [
+   "test_g3_final_collect_turns_a_dropped_root_into_abandoned"
+  ],
+  "observed": null,
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ },
+ {
+  "id": "inj-18",
+  "prop": "(повтор inj-13 после теста лида) run проверяет ось первой",
+  "file": "scripts/lifecycle_guards/probe/run.py",
+  "old": "    if not args.skip_axis:",
+  "new": "    if False:",
+  "forecast": [
+   "test_run_refuses_the_suite_when_the_axis_is_dead"
+  ],
+  "observed": null,
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
+ }
 ]

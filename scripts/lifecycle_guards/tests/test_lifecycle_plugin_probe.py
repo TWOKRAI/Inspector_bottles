@@ -163,3 +163,83 @@ def test_g4_ignores_dummy_threads_and_threads_that_die_within_the_wait(tmp_path:
     assert "Dummy-" not in section, out
     assert "quick-1" not in section, out
     assert rc == 0, out
+
+
+# ---------------------------------------------------------------------------
+# Дыры, найденные инъекциями ведущего (0.5b.injections.json: inj-6, inj-13)
+# ---------------------------------------------------------------------------
+
+G3_DROPPED_IN_CYCLE = """
+    from multiprocess_framework.modules.base_manager import open_scope
+
+    def test_drop_cyclic_root():
+        holder = {}
+        holder["self"] = holder
+        holder["root"] = open_scope("cyc", budget_s=1.0)
+        del holder
+"""
+
+
+def test_g3_final_collect_turns_a_dropped_root_into_abandoned(tmp_path: Path) -> None:
+    """Итоговый ``gc.collect()`` плагина: брошенный в цикле корень виден как ``abandoned``, не ``open``."""
+    rc, out = _run_plugin_project(tmp_path, {"test_g3_cycle.py": G3_DROPPED_IN_CYCLE}, g3="report", g4="off")
+    section = _section(out)
+    assert "G3 unclosed roots: 1" in section, out
+    assert "cyc (abandoned)" in section, out
+    assert rc == 0, out
+
+
+_FAKE_AXIS = """
+import os, signal, sys
+mode = sys.argv[1]
+if mode == "thread" and {crash}:
+    if sys.platform == "win32":
+        os._exit(-1073741819)
+    os.kill(os.getpid(), signal.SIGSEGV)
+print("SURVIVED main" if mode == "main" else "thread survived")
+"""
+
+
+def _probe_run(tmp_path: Path, crash_thread: bool) -> tuple[int, str]:
+    fake = tmp_path / "fake_axis.py"
+    fake.write_text(_FAKE_AXIS.format(crash=crash_thread), encoding="utf-8")
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.lifecycle_guards.probe",
+            "run",
+            "--runs",
+            "1",
+            "--axis-script",
+            str(fake),
+            "--cwd",
+            str(tmp_path),
+            "--targets",
+            "test_ok.py",
+        ],  # fmt: skip
+        cwd=REPO_ROOT,
+        env=_base_env(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def test_run_refuses_the_suite_when_the_axis_is_dead(tmp_path: Path) -> None:
+    rc, out = _probe_run(tmp_path, crash_thread=False)
+    assert rc == 2, out
+    assert "ось не живая" in out, out
+    assert "run 1/1" not in out, out  # набор не запускался
+
+
+def test_run_proceeds_to_the_suite_when_the_axis_is_alive(tmp_path: Path) -> None:
+    rc, out = _probe_run(tmp_path, crash_thread=True)
+    assert "axis: alive" in out, out
+    assert "run 1/1" in out, out  # набор запущен (исход — not-triggered: приманки logger_module нет)
+    assert rc == 1, out

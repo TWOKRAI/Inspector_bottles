@@ -42,6 +42,8 @@ def check_g10(root: Path, allowed: dict[str, int] = SHIMS, files: list[tuple[str
     for rel in sorted(allowed):
         if not (root / rel).is_file():
             findings.append(Finding("G10", "table-row", rel, 0, "запись гнилая: пути нет в дереве"))
+        if allowed[rel] <= 0:
+            findings.append(Finding("G10", "table-row", rel, 0, "запись мертва (число <= 0), удали"))
 
     for rel, text in files if files is not None else production_files(root):
         if MARKER not in text:
@@ -51,7 +53,7 @@ def check_g10(root: Path, allowed: dict[str, int] = SHIMS, files: list[tuple[str
         except (tokenize.TokenError, SyntaxError) as exc:
             findings.append(Finding("G10", "tokenize", rel, 1, f"файл с маркером не токенизируется: {exc}"))
             continue
-        budget = allowed.get(rel, 0)
+        budget = max(allowed.get(rel, 0), 0)
         for line in lines[budget:]:
             where = "в файле вне таблицы SHIMS" if budget == 0 else f"сверх разрешённых {budget}"
             findings.append(Finding("G10", "shim", rel, line, f"маркер {MARKER} {where}"))

@@ -322,5 +322,41 @@
    "test_real_tree_passes_every_guard"
   ],
   "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-20",
+  "prop": "G10: отрицательное значение SHIMS не прячет маркеры",
+  "file": "scripts/lifecycle_guards/g10.py",
+  "old": "budget = max(allowed.get(rel, 0), 0)",
+  "new": "budget = allowed.get(rel, 0)",
+  "forecast": [
+   "test_g10_non_positive_entry_is_dead_and_does_not_hide_markers"
+  ],
+  "observed": null,
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py scripts/lifecycle_guards/tests/test_lifecycle_static_acceptance.py"
+ },
+ {
+  "id": "inj-21",
+  "prop": "G10: запись со значением <= 0 мертва",
+  "file": "scripts/lifecycle_guards/g10.py",
+  "old": "if allowed[rel] <= 0:",
+  "new": "if False:",
+  "forecast": [
+   "test_g10_non_positive_entry_is_dead_and_does_not_hide_markers"
+  ],
+  "observed": null,
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py scripts/lifecycle_guards/tests/test_lifecycle_static_acceptance.py"
+ },
+ {
+  "id": "inj-22",
+  "prop": "G6: max(count, 0) — отрицательный count не прячет нарушения",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "max(",
+  "new": "min(",
+  "forecast": [
+   "test_g6_entry_with_negative_count_is_dead_and_does_not_hide_violations"
+  ],
+  "observed": null,
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py scripts/lifecycle_guards/tests/test_lifecycle_static_acceptance.py"
  }
 ]
