@@ -1,5 +1,5 @@
-"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `--json`
-(Tasks 1.2, 1.6, 1.6b, 1.9a).
+"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `brief`, `--json`
+(Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b).
 
 Запуск: `python -m scripts.atlas`.
 
@@ -7,7 +7,9 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     корень репозитория = git toplevel (не cwd),
     база `data/atlas.sqlite` в корне.
     Коды выхода: 0 — успех, 1 — check нашёл новую blocking-находку,
-    1 — `index --check`: INDEX.md отстал, 1 — `lint-result`: итог не по форме 0.7, 2 — ошибка окружения или ввода.
+    1 — `index --check`: INDEX.md отстал, 1 — `lint-result`: итог не по форме 0.7, 1 — `brief --check`: блок FACTS
+    отстал от своего маркера, 2 — ошибка окружения или ввода (у `brief` и `--write` вместе с `--check`, нет файла
+    или маркеров, метка FACTS без маркеров, нет DESIGN, задача или символ не найдены).
     `lint-result <файл>` не знает git и базу: ветка стоит до определения корня репозитория.
 Public API: main.
 Stability: lite
@@ -20,7 +22,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import reference, result_form, store, views
+from scripts.atlas import brief, reference, result_form, store, views
 from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
@@ -55,6 +57,12 @@ def _parser() -> argparse.ArgumentParser:
     log = sub.add_parser("log", parents=[common], help="first-parent лог модуля по main-ref")
     log.add_argument("module")
     log.add_argument("-n", type=int, default=30)
+    blk = sub.add_parser("brief", parents=[common, with_ref], help="блок FACTS брифа задачи <slug>#<id>")
+    blk.add_argument("task")
+    blk.add_argument("--module", action="append", default=[], help="модуль задачи (повторяемый)")
+    blk.add_argument("--symbol", default=None, help="объект задачи (по умолчанию из текста задачи)")
+    blk.add_argument("--write", action="store_true", help="записать блок в tasks/<id>.md плана")
+    blk.add_argument("--check", action="store_true", help="сверить рабочее дерево с маркером (код 1 — отстал)")
     sub.add_parser("lint-result", help="проверить итог задачи по форме 0.7 (без git и базы)").add_argument("file")
     return top
 
@@ -83,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         return exc.code if isinstance(exc.code, int) else 2
     ref = getattr(args, "ref", None) or "HEAD"
     # верна ровно одна форма: --json без подкоманды либо подкоманда без --json; `check` не знает --ref
-    both = getattr(args, "write", False) and getattr(args, "check", False)  # только у `index`
+    both = getattr(args, "write", False) and getattr(args, "check", False)  # только у `index` и `brief`
     if (
         args.json == (args.command is not None)
         or both
@@ -91,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.print_usage(sys.stderr)
         print(
-            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index, lint-result или --json",
+            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index, lint-result, brief или --json",
             file=sys.stderr,
         )
         return 2
@@ -105,6 +113,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise AtlasError("atlas: -n must be a positive integer")
             print("\n".join(views.log(root, main_ref, args.module, args.n)))
             return 0
+        if args.command == "brief" and args.check:  # без сборки и SQLite
+            code, lines = brief.check(root, brief.task_file(root, args.task))
+            print("\n".join(lines))
+            return code
         con = store.connect(root / "data" / "atlas.sqlite")
         try:
             if args.command == "check":
@@ -121,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.command == "ref":
                 print("\n".join(reference.ref(con, root, ref, main_ref, args.module, args.symbol)))
+                return 0
+            if args.command == "brief":
+                block = brief.brief(con, root, ref, main_ref, args.task, args.module, args.symbol, "main_ref" in args)
+                print(brief.write(root, brief.task_file(root, args.task), block) if args.write else "\n".join(block))
                 return 0
             if args.command == "index":
                 lines = reference.index(con, root, ref, main_ref)
