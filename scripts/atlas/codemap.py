@@ -1,11 +1,13 @@
 """Карта кода ревизии: выгрузка на диск, классы через griffe, «кто использует» (Task 1.6c, ADR-ATL-001 §1-3).
 
-Purpose: griffe и grimp читают файлы с диска, а `--ref` — ревизия: `checkout` выгружает .py корней modules.yaml;
+Purpose: griffe и grimp читают файлы с диска, а `--ref` — ревизия: `checkout` выгружает .py корней modules.yaml
+    в `data/atlas/checkout/<ключ>` (переживает процесс, хранятся 3 новейших;
+    кэш grimp лежит рядом), `code_of` отдаёт `Code` по выгрузке и держит его в памяти процесса;
     `Code` строит по выгрузке граф grimp и отвечает видам `ref`/`card`: `describe` (вид, базы, абстрактные члены
     класса интерфейса; griffe.visit по файлам), `usage` (кто использует символ: импорты и вызовы по имени),
     `module_users` (файлы, импортирующие модуль целиком). Граф не строится (синтаксическая ошибка в исходниках) ->
     `usage`/`module_users` возвращают None, вид печатает одну строку USAGE_UNKNOWN.
-Public API: DUNDERS, USAGE_UNKNOWN, Code, checkout, dotted, is_test.
+Public API: DUNDERS, USAGE_UNKNOWN, Code, checkout, code_of, dotted, forget, is_test.
 Stability: lite
 """
 
@@ -13,9 +15,11 @@ from __future__ import annotations
 
 import ast
 import builtins
+import hashlib
 import importlib
 import importlib.util
 import io
+import json
 import logging
 import os
 import re
@@ -24,14 +28,21 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from contextlib import contextmanager
+import time
+import uuid
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from scripts.atlas.modules import resolve as module_of
-from scripts.atlas.tree import AtlasError, Tree, run_git
+from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 
-__all__ = ["DUNDERS", "USAGE_UNKNOWN", "Code", "checkout", "dotted", "is_test"]
+__all__ = ["DUNDERS", "USAGE_UNKNOWN", "Code", "checkout", "code_of", "dotted", "forget", "is_test"]
+
+CHECKOUT_DIR = Path("data/atlas/checkout")
+KEEP = 3
+_STALE_SECONDS = 3600
+_CODES_MAX = 3
+_CODES: dict[tuple[str, str], Code] = {}
 
 USAGE_UNKNOWN = "Кто использует: не определено (исходники не разбираются)"
 _TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
@@ -54,32 +65,121 @@ def dotted(path: str) -> str:
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
 
 
-@contextmanager
-def checkout(tree: Tree, rows: list[dict]) -> Iterator[Path]:
+def _roots(tree: Tree, rows: list[dict]) -> list[str]:
+    """Верхние каталоги `paths` строк modules.yaml, в которых в ревизии есть .py (отсортированы)."""
+    present = {f.split("/")[0] for f in tree.files() if f.endswith(".py") and "/" in f}
+    return sorted({e.split("/")[0] for r in rows for e in r["paths"]} & present)
+
+
+def _unpack(tar_input: bytes, target: Path) -> None:
+    """Распаковка tar-потока в `target`: системный `tar -f -` в cwd, при сбое — tarfile (строка в stderr)."""
+    tar = shutil.which("tar")
+    if not tar:
+        print("atlas: tar not found, fallback to tarfile", file=sys.stderr)
+    else:
+        rc = subprocess.run([tar, "-x", "-f", "-"], input=tar_input, cwd=target, capture_output=True).returncode
+        if not rc:
+            return
+        print(f"atlas: tar failed (rc={rc}), fallback to tarfile", file=sys.stderr)
+    with tarfile.open(fileobj=io.BytesIO(tar_input)) as archive:
+        archive.extractall(target, filter="data")
+
+
+def _prune(cache: Path, current: str) -> None:
+    """Оставить KEEP новейших выгрузок; лишние сперва переименовать в `.del-*` (полу-удалённое не должно читаться
+    как попадание), потом удалить. Залежавшиеся `.tmp-*`/`.del-*` старше часа удаляются."""
+    now = time.time()
+    entries: list[tuple[float, Path]] = []
+    for entry in cache.iterdir():
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            continue
+        if entry.name.startswith("."):
+            if now - mtime > _STALE_SECONDS:
+                shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entries.append((mtime, entry))
+    entries.sort(key=lambda e: e[0], reverse=True)
+    for _, entry in entries[KEEP:]:
+        if entry.name == current:
+            continue
+        doomed = cache / f".del-{entry.name}-{uuid.uuid4().hex[:8]}"
+        try:
+            os.rename(entry, doomed)
+        except OSError:  # внутри открытый файл (Windows PermissionError 5) или другой процесс уже убрал запись
+            continue
+        shutil.rmtree(doomed, ignore_errors=True)
+
+
+def checkout(tree: Tree, rows: list[dict]) -> Path:
     """Выгрузка .py ревизии под верхние каталоги `paths` строк modules.yaml (только существующие в дереве).
 
-    Каталог — в /dev/shm, если он есть (создание тысяч файлов на диске в разы дольше); распаковка системным `tar`,
-    без него — tarfile с фильтром `data`, как Tree.materialize.
+    Каталог `<repo>/data/atlas/checkout/<sha[:12]>-<хэш корней>` живёт между процессами (хранятся KEEP новейших):
+    есть каталог — это попадание, `git archive` не запускается. Распаковка идёт во временный каталог и одним
+    `rename` встаёт под итоговое имя — недораспакованное дерево под итоговым именем не видно никому.
     """
-    present = {f.split("/")[0] for f in tree.files() if f.endswith(".py") and "/" in f}
-    roots = sorted({e.split("/")[0] for r in rows for e in r["paths"]} & present)
-    base = Path(tempfile.mkdtemp(prefix="atlas-", dir="/dev/shm" if os.access("/dev/shm", os.W_OK) else None))
+    roots = _roots(tree, rows)
+    digest = hashlib.sha256("\n".join(roots).encode()).hexdigest()[:8]
+    key = f"{resolve(tree.root, tree.ref)[:12]}-{digest}"
+    cache = tree.root / CHECKOUT_DIR
+    final = cache / key
+    try:
+        os.utime(final)
+        return final
+    except FileNotFoundError:
+        pass  # нет выгрузки (или её только что убрали): промах
+    cache.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{key}-", dir=cache))
     try:
         if roots:  # `git archive` без путей выгрузил бы всё дерево
             specs = [f":(glob){r}/**/*.py" for r in roots]
             proc = run_git(tree.root, "-c", "core.autocrlf=false", "archive", "--format=tar", tree.ref, "--", *specs)
             if proc.returncode != 0:
                 raise AtlasError("atlas: git archive failed")
-            tar = shutil.which("tar")
-            if (
-                not tar
-                or subprocess.run([tar, "-x", "-C", str(base)], input=proc.stdout, capture_output=True).returncode
-            ):
-                with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as archive:
-                    archive.extractall(base, filter="data")
-        yield base
-    finally:
-        shutil.rmtree(base, ignore_errors=True)
+            _unpack(proc.stdout, tmp)
+        try:
+            os.rename(tmp, final)
+        except OSError:
+            if not final.exists():
+                raise
+            shutil.rmtree(tmp, ignore_errors=True)  # другой процесс успел раньше — берём его выгрузку
+            return final
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    try:
+        os.utime(final)  # tar мог восстановить время каталога из архива; для _prune нужно «сейчас»
+    except OSError:
+        pass
+    _prune(cache, key)
+    return final
+
+
+def forget() -> None:
+    """Сбросить память процесса о разобранных ревизиях (тесты имитируют так новый процесс)."""
+    _CODES.clear()
+
+
+def code_of(tree: Tree, rows: list[dict]) -> Code:
+    """`Code` выгрузки ревизии; повторный вызов в процессе берёт уже разобранный `Code` из памяти (до 3 штук).
+
+    Запись с `parsable=False` пересобирается (сбой разбора не залипает, как в 1.6e). Непустые корни при пустой
+    выгрузке — `AtlasError`: пустое дерево иначе закэшировалось бы видом «файлов 0».
+    """
+    base = checkout(tree, rows)
+    key = (str(base), json.dumps(rows, sort_keys=True, default=str))
+    code = _CODES.get(key)
+    if code is not None and code.parsable:
+        return code
+    code = Code(base, rows)
+    if not code.files and _roots(tree, rows):
+        raise AtlasError("atlas: empty checkout")
+    _CODES.pop(key, None)
+    _CODES[key] = code
+    while len(_CODES) > _CODES_MAX:
+        del _CODES[next(iter(_CODES))]
+    return code
 
 
 def _short(base: Any) -> str:
@@ -171,7 +271,9 @@ class Code:
                 spec = importlib.util.find_spec(top)
                 if spec is None or not str(spec.origin or "").startswith(str(self.base)):
                     raise AtlasError("atlas: package found outside the checkout")
-            self._graph = grimp.build_graph(*tops, include_external_packages=False, cache_dir=None)
+            self._graph = grimp.build_graph(
+                *tops, include_external_packages=False, cache_dir=str(self.base / ".grimp_cache")
+            )
         except AtlasError:
             raise
         except Exception:  # noqa: BLE001 - SourceSyntaxError и любой сбой разбора: вид печатает USAGE_UNKNOWN

@@ -19,7 +19,7 @@ from pathlib import Path
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
-from scripts.atlas.codemap import USAGE_UNKNOWN, Code, checkout, is_test
+from scripts.atlas.codemap import USAGE_UNKNOWN, code_of, is_test
 from scripts.atlas.modules import OTHER, resolve as module_of
 from scripts.atlas.result_form import TAILS, is_none, section
 from scripts.atlas.rules import Scan
@@ -134,13 +134,12 @@ def _findings_of(con: sqlite3.Connection, bid: int, module: str) -> list[tuple[s
 def _module_blocks(tree: Tree, rows: list[dict], row: dict) -> list[str]:
     """«Кто использует модуль» и доли правил ADR-175 (по выгрузке ревизии; общая AST-функция с адаптером `rules`)."""
     module, layer = row["id"], row["layer"]
-    with checkout(tree, rows) as base:
-        code = Code(base, rows)
-        users = code.module_users(module)
-        shares = None
-        if layer in ("framework", "services", "plugins"):
-            scan = Scan.of_module(code, module, users)
-            shares = scan.check(module)[1]
+    code = code_of(tree, rows)
+    users = code.module_users(module)
+    shares = None
+    if layer in ("framework", "services", "plugins"):
+        scan = Scan.of_module(code, module, users)
+        shares = scan.check(module)[1]
     if users is None:
         lines = [USAGE_UNKNOWN]
     else:
