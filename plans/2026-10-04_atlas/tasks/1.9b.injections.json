@@ -1,0 +1,234 @@
+[
+  {
+    "id": "inj-1",
+    "prop": "литерал строки вида — подстрока вывода её команды (DESIGN 3)",
+    "file": "scripts/atlas/brief.py",
+    "old": "return lit if len(lit) >= 8 else None",
+    "new": "return lit + \"x\" if len(lit) >= 8 else None",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-2",
+    "prop": "строка факта по грамматике §2.5: стрелка U+2192 (DESIGN 4)",
+    "file": "scripts/atlas/brief.py",
+    "old": "`{c}` → `{x}`",
+    "new": "`{c}` -> `{x}`",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_head_live_lines"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-3",
+    "prop": "второе звено потребителей (DESIGN 7)",
+    "file": "scripts/atlas/brief.py",
+    "old": "for path, line in uses:",
+    "new": "for path, line in uses[:0]:",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-4",
+    "prop": "хвосты прошлых задач плана (DESIGN 5)",
+    "file": "scripts/atlas/brief.py",
+    "old": "sum(f[0] == TAILS for f in facts) < 10",
+    "new": "sum(f[0] == TAILS for f in facts) < 0",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-5",
+    "prop": "--check сравнивает рабочее дерево с ревизией маркера, не с HEAD (DESIGN 10)",
+    "file": "scripts/atlas/brief.py",
+    "old": "\"-z\", sha7, \"--\"",
+    "new": "\"-z\", \"HEAD\", \"--\"",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-6",
+    "prop": "--check: процитированные в литералах пути — входы (DESIGN 10)",
+    "file": "scripts/atlas/brief.py",
+    "old": "inputs.update([item] * (\"/\" in item and item in present))",
+    "new": "inputs.update([item] * 0)",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-7",
+    "prop": "--write не трогает текст вне блока (DESIGN 9)",
+    "file": "scripts/atlas/brief.py",
+    "old": "lines[start : end + 1] = block",
+    "new": "lines[:] = block",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-8",
+    "prop": "литерал без обратных кавычек — элемент split по ним (DESIGN 3)",
+    "file": "scripts/atlas/brief.py",
+    "old": "lit = max((part.strip() for part in line.strip().split(\"`\")), key=len)",
+    "new": "lit = line.strip()",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-9",
+    "prop": "объект — публичные символы файлов из текста задачи (DESIGN 6)",
+    "file": "scripts/atlas/brief.py",
+    "old": "if not objects and not symbol:",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-10",
+    "prop": "живые строки только на HEAD (DESIGN 8)",
+    "file": "scripts/atlas/brief.py",
+    "old": "if sha == resolve(root, \"HEAD\") and chosen:",
+    "new": "if chosen:",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-11",
+    "prop": "всё под plans/ — не вход --check (DESIGN 10)",
+    "file": "scripts/atlas/brief.py",
+    "old": "paths = sorted(p for p in inputs if not p.startswith(\"plans/\"))",
+    "new": "paths = sorted(inputs)",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-12",
+    "prop": "--write сохраняет концы строк CRLF (DESIGN 9)",
+    "file": "scripts/atlas/brief.py",
+    "old": "eol = \"\\r\\n\" if old and \"\\r\\n\" in old else \"\\n\"",
+    "new": "eol = \"\\n\"",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-13",
+    "prop": "точные дубли строк — один раз (DESIGN 3)",
+    "file": "scripts/atlas/brief.py",
+    "old": "if lit and (row := (stage, what, cmd, lit)) not in facts:",
+    "new": "if lit and (row := (stage, what, cmd, lit)):",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-14",
+    "prop": "порог 8 знаков для литерала строки вида (DESIGN 3)",
+    "file": "scripts/atlas/brief.py",
+    "old": "return lit if len(lit) >= 8 else None",
+    "new": "return lit or None",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-15",
+    "prop": "marker() — sha7 только при закрывающем маркере (DESIGN 1)",
+    "file": "scripts/atlas/brief.py",
+    "old": "return opens[0][1] if opens and _CLOSE in lines[opens[0][0] + 1 :] else None",
+    "new": "return opens[0][1] if opens else None",
+    "forecast": [
+      "scripts/atlas/tests/test_formats_1_9d.py::test_brief_marker_reads_template_example"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-16",
+    "prop": "--write заменяет и строку метки FACTS над маркером (DESIGN 9)",
+    "file": "scripts/atlas/brief.py",
+    "old": "start -= 1 if start and lines[start - 1].startswith(\"FACTS\") else 0",
+    "new": "start -= 0",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-17",
+    "prop": "--main-ref, данный явно, записан в команду (DESIGN 3)",
+    "file": "scripts/atlas/brief.py",
+    "old": "tail = f\" --ref {sha[:7]}\" + (f\" --main-ref {main_ref}\" if main_ref_given else \"\")",
+    "new": "tail = f\" --ref {sha[:7]}\"",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-18",
+    "prop": "--check на файле без маркеров → exit 2 (DESIGN 10)",
+    "file": "scripts/atlas/brief.py",
+    "old": "raise AtlasError(\"brief --check: в файле нет маркеров FACTS\")",
+    "new": "return 0, [\"brief --check: свежий\"]",
+    "forecast": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_usage_errors"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
+  }
+]
