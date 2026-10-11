@@ -174,8 +174,8 @@ def test_facts_and_acceptance_lines_follow_grammar() -> None:
 
     blocks = _label_blocks(lines)
     assert "ACCEPTANCE" in blocks, "в главном примере нет метки ACCEPTANCE"
-    items = [ln for ln in blocks["ACCEPTANCE"][1:] if ln.lstrip().startswith("- ")]
-    assert len(items) >= 1, "в блоке ACCEPTANCE нет пунктов `- `"
+    items = [ln for ln in blocks["ACCEPTANCE"][1:] if re.match(r"^[ \t]*(?:- |\d+\. )", ln)]
+    assert len(items) >= 1, "в блоке ACCEPTANCE нет пунктов"
     bad_items = [ln for ln in items if not _FACT_LINE_RE.match(ln)]
     assert bad_items == [], f"пункты ACCEPTANCE вне грамматики §2.5: {bad_items}"
 
@@ -202,16 +202,12 @@ def test_spawn_hook_allows_built_brief(tmp_path: Path) -> None:
     if bash is None:
         pytest.skip("нет Git Bash: хук lint-brief.sh не запустить")
 
-    lines = _role_brief()
-    task_id, role = _role_id_and_role(lines)
-    built = _build(tmp_path, f"{task_id}.{role}", lines)
-
     env = dict(os.environ)
     env["CLAUDE_PYTHON_BIN"] = sys.executable
     env["CLAUDE_PROJECT_DIR"] = str(_ROOT)
 
-    def run_hook(prompt: str) -> subprocess.CompletedProcess[str]:
-        payload = {"tool_name": "Agent", "tool_input": {"subagent_type": "tester", "prompt": prompt}}
+    def run_hook(subagent_type: str, prompt: str) -> subprocess.CompletedProcess[str]:
+        payload = {"tool_name": "Agent", "tool_input": {"subagent_type": subagent_type, "prompt": prompt}}
         return subprocess.run(
             [bash, _HOOK.as_posix()],
             input=json.dumps(payload),
@@ -223,19 +219,38 @@ def test_spawn_hook_allows_built_brief(tmp_path: Path) -> None:
             timeout=60,
         )
 
-    allowed = run_hook(built)
-    assert allowed.returncode == 0, allowed.stderr
-    assert "deny" not in allowed.stdout, allowed.stdout
+    def check(subagent_type: str, built: str, what: str) -> None:
+        allowed = run_hook(subagent_type, built)
+        assert allowed.returncode == 0, f"{what}: {allowed.stderr}"
+        assert "deny" not in allowed.stdout, f"{what}: {allowed.stdout}"
 
-    # парный контроль: тот же текст без блока DESIGN — хук обязан отказать (доказывает, что он отработал)
-    built_lines = built.splitlines()
-    block = _label_blocks(built_lines)["DESIGN"]
-    start = next(i for i, ln in enumerate(built_lines) if (m := _LABEL_RE.match(ln)) and m.group(1).strip() == "DESIGN")
-    control_lines = built_lines[:start] + built_lines[start + len(block) :]
-    assert "DESIGN" not in _label_blocks(control_lines)
-    denied = run_hook("\n".join(control_lines))
-    assert denied.returncode == 0, denied.stderr
-    assert '"permissionDecision": "deny"' in denied.stdout, denied.stdout
+        # парный контроль: тот же текст без блока DESIGN — хук обязан отказать (доказывает, что он отработал)
+        built_lines = built.splitlines()
+        block = _label_blocks(built_lines)["DESIGN"]
+        start = next(
+            i for i, ln in enumerate(built_lines) if (m := _LABEL_RE.match(ln)) and m.group(1).strip() == "DESIGN"
+        )
+        control_lines = built_lines[:start] + built_lines[start + len(block) :]
+        assert "DESIGN" not in _label_blocks(control_lines), what
+        denied = run_hook(subagent_type, "\n".join(control_lines))
+        assert denied.returncode == 0, f"{what}: {denied.stderr}"
+        assert '"permissionDecision": "deny"' in denied.stdout, f"{what}: {denied.stdout}"
+
+    # главный бриф: subagent_type — первое слово значения его строки `ROLE:`
+    main_lines = _main_brief()
+    main_id = _main_id(main_lines)
+    role_line = next((ln for ln in main_lines if (m := _LABEL_RE.match(ln)) and m.group(1).strip() == "ROLE"), None)
+    assert role_line is not None, "в главном примере нет строки `ROLE:`"
+    tokens = role_line[role_line.index(":") + 1 :].split()
+    assert tokens, "в строке `ROLE:` главного примера нет значения"
+    main_built = _build(tmp_path / "main", main_id, main_lines)
+    check(tokens[0].strip(",.;:"), main_built, "главный бриф")
+
+    # файл роли
+    role_lines = _role_brief()
+    role_id, role = _role_id_and_role(role_lines)
+    role_built = _build(tmp_path / "role", f"{role_id}.{role}", role_lines)
+    check("tester", role_built, "файл роли")
 
 
 def test_injections_example_schema() -> None:
@@ -278,6 +293,13 @@ def test_review_example_counts_match_header() -> None:
     assert len(bullets) >= 1, "в примере нет ни одного замечания `- [степень/класс] …`"
     stray = [ln for ln in lines if ln.lstrip().startswith("- [") and not _BULLET_RE.match(ln)]
     assert stray == [], f"строки с `- [` вне грамматики: {stray}"
+
+    assert "## Замечания" in lines, "в примере нет строки `## Замечания`"
+    open_heading = "## Что я оставил открытым / ненадёжным"
+    assert open_heading in lines, f"в примере нет строки `{open_heading}`"
+    after = lines[lines.index(open_heading) + 1 :]
+    section = after[: next((i for i, ln in enumerate(after) if ln.startswith("## ")), len(after))]
+    assert any(ln.strip() for ln in section), f"раздел `{open_heading}` пуст"
 
     by_sev = [sum(1 for m in bullets if m.group(1) == s) for s in _SEVERITIES]
     by_cls = [sum(1 for m in bullets if m.group(2) == c) for c in _CLASSES]
