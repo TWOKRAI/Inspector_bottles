@@ -1124,6 +1124,8 @@ def test_allow_list_option_spellings(repo: GitRepo, slow_atlas: Any) -> None:
         "git cat-file --batch",
         "git grep --follow-symlinks alpha",
         "python -m pytest --collect-only -q @args.txt",
+        "python -m pytest --collect-only -q -k @args.txt tests/test_ok.py",
+        "python -m pytest --collect-only -q -m @args.txt tests/test_ok.py",
         "python -m pytest --collect-only -q -p other_plugin tests/test_ok.py",
         "python -m pytest --collect-only -q -o addopts=x tests/test_ok.py",
         "python -m pytest --collect-only -q -c other.ini tests/test_ok.py",

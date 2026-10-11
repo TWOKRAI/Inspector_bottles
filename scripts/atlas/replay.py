@@ -67,8 +67,8 @@ def _atlas_ok(args: list[str]) -> bool:
 
 
 def _pytest_ok(args: list[str]) -> bool:
-    if "--collect-only" not in args:
-        return False
+    if "--collect-only" not in args or any(a.startswith("@") for a in args):
+        return False  # @файл pytest раскрывает в любой позиции, и в значении -k/-m
     i = 0
     while i < len(args):
         arg = args[i]
@@ -80,7 +80,7 @@ def _pytest_ok(args: list[str]) -> bool:
             i += 1
             if i >= len(args) or not args[i].startswith("no:"):
                 return False
-        elif arg.startswith("@") or (arg.startswith("-") and arg not in _PYTEST_FLAGS):  # @файл — argfile pytest
+        elif arg.startswith("-") and arg not in _PYTEST_FLAGS:
             return False
         i += 1
     return True

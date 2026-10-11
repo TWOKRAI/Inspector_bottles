@@ -340,15 +340,13 @@
     "id": "inj-24",
     "prop": "pytest --junitxml проходит фильтр",
     "file": "scripts/atlas/replay.py",
-    "old": "        elif arg.startswith(\"@\") or (arg.startswith(\"-\") and arg not in _PYTEST_FLAGS):  # @файл — argfile pytest",
-    "new": "        elif arg.startswith(\"@\"):",
+    "old": "        elif arg.startswith(\"-\") and arg not in _PYTEST_FLAGS:",
+    "new": "        elif False:",
     "forecast": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
-    "observed": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings",
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -499,16 +497,14 @@
   },
   {
     "id": "inj-36",
-    "prop": "@файл pytest проходит фильтр",
+    "prop": "@файл pytest проходит фильтр (в любой позиции, и в значении -k/-m)",
     "file": "scripts/atlas/replay.py",
-    "old": "        elif arg.startswith(\"@\") or (arg.startswith(\"-\") and arg not in _PYTEST_FLAGS):  # @файл — argfile pytest",
-    "new": "        elif arg.startswith(\"-\") and arg not in _PYTEST_FLAGS:",
+    "old": "    if \"--collect-only\" not in args or any(a.startswith(\"@\") for a in args):",
+    "new": "    if \"--collect-only\" not in args:",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
