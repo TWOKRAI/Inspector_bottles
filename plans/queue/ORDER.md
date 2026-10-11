@@ -34,7 +34,7 @@
 | 5 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.4 | подзадача **2.4j** — генерируемый `BY-MODULE.md` вместо рукописного `CRAFT-by-module.md` (developer, 0,1–0,15 млн) |
 | 6 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) |  | продуктовый бриф №3 (Ж 1.2, выборка K0b 3/3) |
 | 7 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K0b | таблица «метрика — база — сейчас»; ⚑ владелец: продолжать Атлас (1.10a, 1.10b, 1.9e …) или FREEZE на достигнутом |
-| 8 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) |  | FREEZE; 2026-11-10 — пересчёт повторов скриптами `research/gate0/` (0 токенов агентов) → ⚑ владелец: разморозка или нет |
+| 8 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | FREEZE; 2026-11-10 — пересчёт повторов скриптами `research/gate0/` (0 токенов агентов) → ⚑ владелец: разморозка или нет |
 | 9 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | не раньше 2026-11-10; №6 — тот же полевой счёт |
 <!-- owner-queue:end -->
 
@@ -387,7 +387,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - 2026-10-02_plans-progress-dashboard — 25 из 28 · 89%
 - 2026-10-03_commit-mechanism — 9 из 11 · 82%
 - 2026-10-04_atlas — 24 из 37 · 65%
-- 2026-10-11_memory-rules-delivery — 0 из 1 · 0%
+- 2026-10-11_memory-rules-delivery — 1 из 2 · 50%
 - robot-place-pose — 2 из 3 · 67%
 - robot-calibration — 4 из 6 · 67%
 - camera-robot-calibration — 6 из 7 · 86%
