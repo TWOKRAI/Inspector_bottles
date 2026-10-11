@@ -12,7 +12,14 @@
    "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[card]",
    "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[ref-symbol]"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[card]",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[ref-symbol]",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_cached_output_is_byte_equal_to_first[ref]",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tar-raises]",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_tar_unpacks_without_tarfile_fallback",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_warm_output_is_byte_equal_to_cold"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -24,7 +31,9 @@
   "forecast": [
    "scripts/atlas/tests/test_speed_1_6g.py::test_tar_failure_falls_back_with_warning"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_tar_failure_falls_back_with_warning"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -37,7 +46,10 @@
    "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_survives_the_process",
    "scripts/atlas/tests/test_speed_1_6g.py::test_second_module_in_process_reuses_code"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_survives_the_process",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_second_module_in_process_reuses_code"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -50,7 +62,10 @@
    "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_keeps_three_revisions",
    "scripts/atlas/tests/test_checkout_1_6g.py::test_four_revisions_keep_three_newest"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_four_revisions_keep_three_newest",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_keeps_three_revisions"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -62,7 +77,9 @@
   "forecast": [
    "scripts/atlas/tests/test_speed_1_6g.py::test_second_module_in_process_reuses_code"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_speed_1_6g.py::test_second_module_in_process_reuses_code"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -74,7 +91,9 @@
   "forecast": [
    "scripts/atlas/tests/test_cache_1_6e_code.py::test_unparsable_result_is_not_cached"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_cache_1_6e_code.py::test_unparsable_result_is_not_cached"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -88,7 +107,13 @@
    "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tar-raises]",
    "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tarfile-raises]"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tar-raises]",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_failed_unpack_leaves_no_final_and_no_tmp_directory[tarfile-raises]",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_four_revisions_keep_three_newest",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_two_threads_same_key_get_one_complete_checkout",
+   "scripts/atlas/tests/test_speed_1_6g.py::test_checkout_keeps_three_revisions"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -100,7 +125,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_two_threads_same_key_get_one_complete_checkout"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_two_threads_same_key_get_one_complete_checkout"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -112,7 +139,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_pruned_checkout_with_open_file_is_whole_or_gone"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_pruned_checkout_with_open_file_is_whole_or_gone"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -122,7 +151,7 @@
   "old": "cache_dir=str(self.base / \".grimp_cache\")",
   "new": "cache_dir=None",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -132,7 +161,7 @@
   "old": "        if entry.name == current:\n            continue\n",
   "new": "",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -142,7 +171,7 @@
   "old": "    if not code.files and _roots(tree, rows):\n        raise AtlasError(\"atlas: empty checkout\")\n",
   "new": "",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -152,7 +181,7 @@
   "old": "    key = (str(base), json.dumps(rows, sort_keys=True, default=str))\n",
   "new": "    key = (str(base), \"\")\n",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -162,7 +191,7 @@
   "old": "    try:\n        os.utime(final)\n        return final\n",
   "new": "    try:\n        final.stat()\n        return final\n",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
