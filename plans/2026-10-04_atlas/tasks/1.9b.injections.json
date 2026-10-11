@@ -292,7 +292,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -305,7 +307,10 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_symbol_and_module_flags",
       "scripts/atlas/tests/test_brief_1_9b.py::test_task_with_commits_keeps_object_and_skips_own_files"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_symbol_and_module_flags",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_task_with_commits_keeps_object_and_skips_own_files"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -317,7 +322,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_task_with_commits_keeps_object_and_skips_own_files"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_task_with_commits_keeps_object_and_skips_own_files"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -329,7 +336,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_symbol_and_module_flags"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_symbol_and_module_flags"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -341,7 +350,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -353,7 +364,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -363,7 +376,7 @@
     "old": "                path = brief.task_file(root, args.task) if args.write else None  # плохой путь — до сборки\n                block = brief.brief(con, root, ref, main_ref, args.task, args.module, args.symbol, \"main_ref\" in args)\n",
     "new": "                block = brief.brief(con, root, ref, main_ref, args.task, args.module, args.symbol, \"main_ref\" in args)\n                path = brief.task_file(root, args.task) if args.write else None  # плохой путь — до сборки\n",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -373,7 +386,7 @@
     "old": "print(f\"brief: символ {name} пропущен — {exc}\", file=sys.stderr)\n            continue",
     "new": "raise",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -385,7 +398,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_interface_object"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_interface_object"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   }
 ]
