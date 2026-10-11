@@ -193,5 +193,41 @@
   "forecast": [],
   "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "непустые корни при пустой выгрузке — AtlasError, не вид (DESIGN 4) — повтор после авторского теста",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if not code.files and _roots(tree, rows):\n        raise AtlasError(\"atlas: empty checkout\")\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_empty_checkout_with_roots_raises"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "ключ памяти Code включает rows (DESIGN 4) — повтор после авторского теста",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    key = (str(base), json.dumps(rows, sort_keys=True, default=str))\n",
+  "new": "    key = (str(base), \"\")\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_code_memo_key_includes_rows"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "попадание обновляет mtime выгрузки (LRU, DESIGN 1) — повтор после авторского теста",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    try:\n        os.utime(final)\n        return final\n",
+  "new": "    try:\n        final.stat()\n        return final\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_hit_refreshes_recency"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
