@@ -12,7 +12,13 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay",
       "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -31,7 +37,16 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale",
       "scripts/atlas/tests/test_brief_1_9b.py::test_head_live_lines"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_head_live_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -45,7 +60,11 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert",
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -57,7 +76,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -69,7 +90,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -81,7 +104,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -93,7 +118,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -109,7 +136,13 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task",
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_literals_replay",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_tail_of_previous_task"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -124,7 +157,12 @@
       "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert",
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_consumers_with_lines",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_object_files_and_tests",
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -136,7 +174,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -148,7 +188,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_check_fresh_then_stale"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -160,7 +202,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -170,7 +214,7 @@
     "old": "if lit and (row := (stage, what, cmd, lit)) not in facts:",
     "new": "if lit and (row := (stage, what, cmd, lit)):",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -180,7 +224,7 @@
     "old": "return lit if len(lit) >= 8 else None",
     "new": "return lit or None",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -192,7 +236,9 @@
     "forecast": [
       "scripts/atlas/tests/test_formats_1_9d.py::test_brief_marker_reads_template_example"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_formats_1_9d.py::test_brief_marker_reads_template_example"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -204,7 +250,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_write_skeleton_replace_insert"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -216,7 +264,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_pin_block_has_marker_and_grammar"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -228,7 +278,9 @@
     "forecast": [
       "scripts/atlas/tests/test_brief_1_9b.py::test_usage_errors"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_brief_1_9b.py::test_usage_errors"
+    ],
     "test": "scripts/atlas/tests/test_brief_1_9b.py scripts/atlas/tests/test_formats_1_9d.py"
   }
 ]
