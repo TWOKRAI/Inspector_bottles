@@ -1,6 +1,11 @@
-Preregistration (written 2026-10-11 before running session analysis; investigator 0.2)
+Preregistration (written 2026-10-11 18:32 +03:00, AFTER the M set was computed and BEFORE session_check.py (N check) was run; investigator 0.2)
+Order of work (file mtimes in the scratchpad): pairs.json 18:28, survivors.py 18:29, tx_index.jsonl 18:30, q_lessons.py 18:30
+       -> this file 18:32:57 -> session_check.py 18:33:56. So the M set (pairs, survivors, sessions that wrote the lesson) was
+       computed BEFORE this text was written; only the N check (session_check) came after it. This is not a pure preregistration of M.
 M set: baseline.md pairs (new -> older) where the merged pair's surviving file in docs/claude/memory/ has module: today
-       (8 pairs; literal "older file has module:" gives 3) AND the new lesson was written in a session with a transcript (>= 2026-09-04).
+       (7 pairs by survivors.py, 8 by the plan; the 8th is an_absence_assertion_needs_a_reachability_check, module: [scripts],
+       whose name is misspelled in baseline.md:240 as "a_absence_..." so survivors.py does not find it, found by hand;
+       literal "older file has module:" gives 3) AND the new lesson was written in a session with a transcript (>= 2026-09-04).
        Extra (separate line "added"): baseline.md:232 self-described repeats with module: and a dated repeat event in the window.
 Repeat event: the session (main jsonl + its subagents/) in which the new lesson text was first written
        (first tool_use whose input contains the lesson file name and writes it: Write/Edit/Bash heredoc), or for an appended

@@ -16,9 +16,11 @@
 
 Направление неравенства: N — повторы, где агент до ошибки обращался к файлам модуля; push по `paths:` срабатывает только на касание файла. N/M ≥ 1/3 → push имеет шанс (переход к парам); N/M < 1/3 → FREEZE плана.
 
-## Определение (записано до подсчёта — `research/gate0/PREREG.txt`)
+## Определение (`research/gate0/PREREG.txt`)
 
-- M — пары `baseline.md` (новый урок → старший), у выжившего файла старшего урока сегодня есть `module:` (8 пар, как у CTO). Буквальное «`module:` у файла старшего урока» даёт 3.
+**Порядок работы (правка 2026-10-11 по решению владельца).** Набор M (пары, выжившие, сессии, где записан урок) посчитан ДО записи PREREG; после неё запускался только `session_check` (проверка N). По времени файлов в scratchpad: `pairs.json` 18:28, `survivors.py` 18:29, `tx_index.jsonl` и `q_lessons.py` 18:30 → `PREREG.txt` 18:32:57 → `session_check.py` 18:33:56. Это не чистая предрегистрация M: определение M писалось с уже известным составом; предрегистрирована только проверка N («читал до ошибки»), порог и вердикт гейта.
+
+- M — пары `baseline.md` (новый урок → старший), у выжившего файла старшего урока сегодня есть `module:`: **7 по `survivors.py`, 8 по плану** (CTO). Восьмая — `an_absence_assertion_needs_a_reachability_check` (`module: [scripts]`): в `baseline.md:240` имя искажено («a_absence_…»), `survivors.py` её не находит, найдена вручную. Буквальное «`module:` у файла старшего урока» даёт 3.
 - Событие повтора — сессия, где записан текст нового урока (Write/Edit/Bash-heredoc), вместе с её `subagents/`.
 - Ошибка — первый tool_result с буквальным симптомом из урока либо tool_use, где агент записал ошибочное решение.
 - «Читал до ошибки» — tool_use раньше ошибки с префиксом `paths` модуля из `modules.yaml`.
@@ -40,7 +42,7 @@
 Проверка вторым способом (пара 1): `rg -F "multiprocess_framework/modules/data_schema_module/core/"` по сырому jsonl — совпадения на стр. 87, 91, 96, 185, 192, 194, 200, 213, все раньше 229; tool_use — 91, 185, 192, 200, 213. Совпало со скриптом.
 
 Воспроизвести (из корня репозитория, `PYTHONUTF8=1`, `.venv`):
-`python research/gate0/pairs.py pairs.json && python research/gate0/survivors.py pairs.json` — 8 пар;
+`python research/gate0/pairs.py pairs.json && python research/gate0/survivors.py pairs.json` — 7 пар (8-я — вручную, см. выше);
 `python research/gate0/index_tx.py tx_index.jsonl` — индекс tool_use (32 МБ, в git не кладётся);
 `python research/gate0/session_check.py <session.jsonl> multiprocess_framework/modules/data_schema_module "TS:2026-10-02T08:15:26.2"` — вердикт пары 1.
 
