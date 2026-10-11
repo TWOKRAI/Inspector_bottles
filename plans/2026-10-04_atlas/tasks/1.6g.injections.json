@@ -337,7 +337,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_falls_back_to_short_temp_root"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_falls_back_to_short_temp_root"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -350,7 +352,10 @@
    "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_falls_back_to_short_temp_root",
    "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_and_short_root_raise_and_leave_nothing"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_and_short_root_raise_and_leave_nothing",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_falls_back_to_short_temp_root"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -360,7 +365,7 @@
   "old": "    tmp = Path(tempfile.mkdtemp(prefix=\".tmp-\", dir=cache))",
   "new": "    tmp = Path(tempfile.mkdtemp(prefix=f\".tmp-{key}-{key}-\", dir=cache))",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
