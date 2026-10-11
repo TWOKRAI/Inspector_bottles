@@ -346,7 +346,10 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings",
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -504,7 +507,9 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -558,7 +563,9 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   }
 ]

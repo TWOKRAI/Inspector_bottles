@@ -22,5 +22,5 @@ right and a wrong exit-code line kept the count. The lead's break-injection plus
 **Why:** a deny-list is only as strong as its test; the canonical spelling is the one nobody uses to attack.
 
 **How to apply:** a deny-list check takes the option NAME before `=`, rejects it when any forbidden long option
-starts with that name, rejects short clusters that contain a forbidden letter, and rejects `@`-arguments for
+starts with that name, rejects short clusters that contain a forbidden letter, and rejects `@`-arguments in ANY position (also as the value of `-k`/`-m`) for
 tools that expand them. The test lists every spelling with a marker file and asserts by name, never by count.
