@@ -1,6 +1,6 @@
 # CRAFT-config-qt — читать, когда: правишь конфиг или схему Pydantic; трогаешь Qt-виджет; гоняешь qt-mcp
 Ядро — в [MEMORY.md](MEMORY.md) и в `.claude/CLAUDE.md` «Test authorship»; здесь детали, оплаченные конкретными провалами.
-Соседи: [CRAFT-injection](CRAFT-injection.md) · [CRAFT-tests](CRAFT-tests.md) · [CRAFT-verdict](CRAFT-verdict.md) · [CRAFT-by-module](CRAFT-by-module.md)
+Соседи: [CRAFT-injection](CRAFT-injection.md) · [CRAFT-tests](CRAFT-tests.md) · [CRAFT-verdict](CRAFT-verdict.md) · [BY-MODULE](BY-MODULE.md)
 
 ## Конфиг и схемы
 - [Классифицировать лист по РАЗНИЦЕ двух значений](feedback_classify_a_leaf_by_the_difference_of_two_values.md) — один полюс путает «не потребляется» с «равно дефолту» (24 ложных имени); отпечаток ПЕРЕСЕЧЕНИЕМ полюсов, объединение обвиняет нетронутых соседей

@@ -150,7 +150,7 @@ no drive-by rewrites (a mass rewrite is its own task: 885 files, `plans/2026-10-
 | architecture, key paths | root `CLAUDE.md`: Архитектура, Ключевые пути |
 | IPC, ownership | `multiprocess_framework/docs/{ROUTING_GLOSSARY,MODULES_RESPONSIBILITY_MAP,MODULE_TIERS}.md` |
 | stack, tests, Layer, worktree | `.claude/modes/_stack.md` (Toolchain → Worktree); `make gate` |
-| lessons | `scripts/memory/search.py <words> [--module M]` (§8); digests `docs/claude/memory/CRAFT-{tests,injection,verdict,config-qt,by-module}.md` |
+| lessons | `scripts/memory/search.py <words> [--module M]` (§8); digests `docs/claude/memory/CRAFT-{tests,injection,verdict,config-qt}.md` |
 | lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §3 Windows env, §4 lesson format (a subagent never writes one: §8); owner: «## 2. Решения владельца (живые)»; all lessons: `search.py --list` |
 | MCP | `.claude/plugins/mcp-{qex,sentrux,backend-ctl}/README.md`; blast radius `scripts/graph_slice/README.md` |
 | live backend | `backend_ctl`; qt-mcp only for GUI; no psutil; GUI stand `INSPECTOR_GUI_UNATTENDED=1` |

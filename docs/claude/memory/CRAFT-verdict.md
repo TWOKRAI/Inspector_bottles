@@ -1,6 +1,6 @@
 # CRAFT-verdict — читать, когда: выносишь вердикт ревью или приёмки; пишешь «не может сломаться»; разбираешь живой дефект
 Ядро — в [MEMORY.md](MEMORY.md) и в `.claude/CLAUDE.md` «Test authorship»; здесь детали, оплаченные конкретными провалами.
-Соседи: [CRAFT-injection](CRAFT-injection.md) · [CRAFT-tests](CRAFT-tests.md) · [CRAFT-config-qt](CRAFT-config-qt.md) · [CRAFT-by-module](CRAFT-by-module.md)
+Соседи: [CRAFT-injection](CRAFT-injection.md) · [CRAFT-tests](CRAFT-tests.md) · [CRAFT-config-qt](CRAFT-config-qt.md) · [BY-MODULE](BY-MODULE.md)
 
 ## Канон вердикта
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки

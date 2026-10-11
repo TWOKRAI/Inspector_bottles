@@ -8,7 +8,7 @@
 - [CRAFT-tests](CRAFT-tests.md) — тест, дублёр, фикстура, сторож; гейт зелёный подозрительно
 - [CRAFT-verdict](CRAFT-verdict.md) — вердикт ревью/приёмки, «не может сломаться», живой дефект
 - [CRAFT-config-qt](CRAFT-config-qt.md) — конфиг, схемы Pydantic, Qt-виджеты, qt-mcp
-- [CRAFT-by-module](CRAFT-by-module.md) — остальные уроки, сгруппированы по тегу `module:`
+- [BY-MODULE](BY-MODULE.md) — все уроки по тегу `module:` и `mechanism:` (сгенерирован: `search.py --by-module --write`)
 - [CRAFT](CRAFT.md) — заглушка-указатель на файлы выше
 - [ARCHIVE](ARCHIVE.md) — закрытые треки и перенос 2026-10-04
 
