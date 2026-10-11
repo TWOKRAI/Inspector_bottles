@@ -1,0 +1,35 @@
+# ruff: noqa: E402, E501
+"""Coverage + which sessions Write/Edit each new lesson of the 30 pairs. Usage: q_lessons.py tx_index.jsonl pairs.json"""
+
+import json
+import sys
+import collections
+
+idx, pairs = sys.argv[1], json.load(open(sys.argv[2], encoding="utf-8"))
+names = {p["new"] for p in pairs} | {"an_absence_assertion_needs_a_reachability_check"}
+days = collections.Counter()
+mn = mx = None
+hits = collections.defaultdict(list)
+for ln in open(idx, encoding="utf-8"):
+    o = json.loads(ln)
+    if o["k"] == "span":
+        if o["first"]:
+            mn = min(mn or o["first"], o["first"])
+            mx = max(mx or o["last"], o["last"])
+        continue
+    if o["k"] != "tu":
+        continue
+    if o["ts"]:
+        days[o["ts"][:10]] += 1
+    s = json.dumps(o["in"], ensure_ascii=False)
+    for nm in names:
+        if "feedback_" + nm in s and o["tool"] in ("Write", "Edit", "MultiEdit"):
+            hits[nm].append(
+                (o["ts"], o["tool"], o["f"].split("projects")[-1], o["n"], o["in"].get("file_path", "")[-90:])
+            )
+print("first ts", mn, "last ts", mx, "days with tool_use:", len(days))
+print(sorted(days))
+for nm in sorted(names):
+    print("==", nm, len(hits[nm]))
+    for h in sorted(hits[nm])[:4]:
+        print("   ", h)

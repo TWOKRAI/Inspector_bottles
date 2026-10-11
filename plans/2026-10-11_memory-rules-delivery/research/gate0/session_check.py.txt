@@ -1,0 +1,67 @@
+"""Gate-0 check for one repeat event.
+Usage: session_check.py <session.jsonl> <module_prefix[,prefix2]> <error_literal> [--until-ts ISO]
+Scans main jsonl + <session>/subagents/*.jsonl, orders events by timestamp, prints:
+ - first tool_result containing error_literal (error moment)
+ - all module-path tool_uses before it (primary: any tool; secondary: Read/Edit/Write/MultiEdit)."""
+
+import json
+import sys
+import os
+import glob
+
+LP = chr(92) * 2 + "?" + chr(92)
+sess, prefs, lit = sys.argv[1], [p.lower().rstrip("/") for p in sys.argv[2].split(",")], sys.argv[3]
+files = [sess] + sorted(glob.glob(os.path.join(sess[:-6], "subagents", "*.jsonl")))
+ev = []
+for f in files:
+    with open(LP + os.path.abspath(f), encoding="utf-8", errors="replace") as fh:
+        for i, ln in enumerate(fh, 1):
+            try:
+                o = json.loads(ln)
+            except Exception:
+                continue
+            c = (o.get("message") or {}).get("content")
+            ts = o.get("timestamp") or ""
+            if not isinstance(c, list):
+                continue
+            for b in c:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "tool_use":
+                    inp = b.get("input") or {}
+                    s = " ".join(
+                        str(inp.get(k, ""))
+                        for k in ("file_path", "path", "pattern", "glob", "command", "notebook_path")
+                    )
+                    ev.append((ts, "tu", os.path.basename(f), i, b.get("name"), s.replace("\\", "/").lower(), s))
+                elif b.get("type") == "tool_result":
+                    cc = b.get("content")
+                    cc = (
+                        " ".join(x.get("text", "") for x in cc if isinstance(x, dict))
+                        if isinstance(cc, list)
+                        else str(cc)
+                    )
+                    ev.append((ts, "tr", os.path.basename(f), i, "is_error" if b.get("is_error") else "", cc, cc))
+ev.sort(key=lambda e: e[0])
+err = (
+    next((e for e in ev if e[0] >= lit[3:]), None)
+    if lit.startswith("TS:")
+    else next((e for e in ev if e[1] == "tr" and lit in e[5]), None)
+)
+print("files scanned:", len(files), "events:", len(ev))
+if not err:
+    print("ERROR LITERAL NOT FOUND")
+    cut = "9999"
+else:
+    k = max(err[5].find(lit), 0)
+    print("ERROR MOMENT:", err[0], err[2], "line", err[3], "|", err[5][max(0, k - 150) : k + 150].replace("\n", " "))
+    cut = err[0]
+mod = [e for e in ev if e[1] == "tu" and e[0] < cut and any(p in e[5] for p in prefs)]
+print(
+    "module tool_uses before error (any tool):",
+    len(mod),
+    " | Read/Edit/Write only:",
+    sum(e[4] in ("Read", "Edit", "Write", "MultiEdit") for e in mod),
+)
+for e in mod[:6]:
+    print("  ", e[0], e[2], "line", e[3], e[4], e[6][:200].replace("\n", " "))
