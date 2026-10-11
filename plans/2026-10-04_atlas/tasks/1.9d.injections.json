@@ -181,7 +181,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -193,7 +195,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -205,7 +209,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -217,7 +223,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -229,7 +237,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  }
 ]
