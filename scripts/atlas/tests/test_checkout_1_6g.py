@@ -9,9 +9,12 @@ Stability: lite
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import tarfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +23,7 @@ import pytest
 from scripts.atlas import codemap
 from scripts.atlas.tests.conftest import GitRepo, RepoFactory, run_with_deadline
 from scripts.atlas.tests.test_cache_1_6e import _new_repo
-from scripts.atlas.tree import Tree
+from scripts.atlas.tree import AtlasError, Tree
 
 __all__: list[str] = []
 
@@ -142,3 +145,41 @@ def test_pruned_checkout_with_open_file_is_whole_or_gone(repo_factory: RepoFacto
             assert _files(oldest) == before, "выгрузка под итоговым именем осталась неполной"
     if oldest.exists():  # закрыли файл: следующий вызов вытесняет её окончательно или оставляет целой
         assert _files(oldest) == before
+
+
+def test_empty_checkout_with_roots_raises(repo_factory: RepoFactory) -> None:
+    repo = _new_repo(repo_factory, "empty")
+    tree = Tree(repo.path, "main")
+    base = codemap.checkout(tree, _ROWS)
+    for child in base.iterdir():  # каталог остаётся, содержимое стёрто: как после сбоя диска
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    assert list(base.iterdir()) == []
+    codemap.forget()
+    with pytest.raises(AtlasError, match="empty checkout"):
+        run_with_deadline(lambda: codemap.code_of(Tree(repo.path, "main"), _ROWS), seconds=120)
+
+
+def test_code_memo_key_includes_rows(repo_factory: RepoFactory) -> None:
+    repo = _new_repo(repo_factory, "memo")
+    tree = Tree(repo.path, "main")
+    rows_b = [*_ROWS, {"id": "m2", "paths": ["m/"]}]  # те же корни -> тот же каталог, другие строки
+    first = codemap.code_of(tree, _ROWS)
+    other = codemap.code_of(tree, rows_b)
+    assert first.base == other.base
+    assert first is not other
+    assert codemap.code_of(tree, _ROWS) is first
+
+
+def test_hit_refreshes_recency(repo_factory: RepoFactory) -> None:
+    repo = _new_repo(repo_factory, "recency")
+    shas = _revisions(repo, 4)
+    paths = [codemap.checkout(Tree(repo.path, sha), _ROWS) for sha in shas[:3]]
+    now = time.time()
+    for age, path in zip((300, 200, 100), paths):  # явный порядок: r0 самая старая
+        os.utime(path, (now - age, now - age))
+    assert codemap.checkout(Tree(repo.path, shas[0]), _ROWS) == paths[0]  # попадание: обязано обновить давность
+    last = codemap.checkout(Tree(repo.path, shas[3]), _ROWS)
+    assert sorted(_final_entries(repo)) == sorted([paths[0].name, paths[2].name, last.name])
