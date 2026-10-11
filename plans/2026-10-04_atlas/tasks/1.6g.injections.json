@@ -367,5 +367,17 @@
   "forecast": [],
   "observed": [],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-27",
+  "prop": "имя .del- короче ключа — удаление не упирается в MAX_PATH (ревью кода р.2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    doomed = entry.parent / f\".del-{uuid.uuid4().hex[:8]}\"",
+  "new": "    doomed = entry.parent / f\".del-{entry.name}-{uuid.uuid4().hex[:8]}\"",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_discard_leaves_nothing_even_for_a_259_char_file"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
