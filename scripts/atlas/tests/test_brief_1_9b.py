@@ -213,6 +213,19 @@ def test_pin_literals_replay(pinned: GitRepo, atlas: Any) -> None:  # noqa: F811
     assert len(outputs) >= 3, f"разных атлас-команд {len(outputs)}, нужно >= 3 (pack, ref, card)"
 
 
+def test_pin_interface_object(pinned: GitRepo, atlas: Any) -> None:  # noqa: F811
+    """`--symbol IConfig` (интерфейс): файла объекта нет, есть члены и тест; свой кэш вызова."""
+    if "iconfig" not in _PIN_OUT:
+        res = atlas(pinned, "brief", _TASK, *_PINNED, "--symbol", "IConfig")
+        assert res.code == 0, f"brief --symbol IConfig на пине: код {res.code}, stderr: {res.err!r}"
+        _PIN_OUT["iconfig"] = res.out.splitlines()
+    facts = _facts(_fact_lines(_PIN_OUT["iconfig"]))
+    assert [m for m in facts if m["what"] == "файл объекта IConfig"] == [], "у интерфейса нет файла объекта"
+    assert [m for m in facts if m["what"] == "член IConfig"], "нет ни одной строки `член IConfig`"
+    test_lit = f"{_M}/config_module/tests/test_iconfig_contract.py:11  импорт, тестов 1"
+    assert ("тест объекта IConfig", test_lit) in {(m["what"], m["lit"]) for m in facts}
+
+
 # --- временный репозиторий: --write, --check, ошибки, живые строки --------------------------------------------
 
 _PLAN = """\
@@ -382,7 +395,8 @@ def test_check_fresh_then_stale(repo_factory: RepoFactory, atlas: Any, monkeypat
     fresh = check()
     assert fresh.code == 0, fresh.out + fresh.err
 
-    for rel in ("m/widget.py", "n/use.py", "p/top.py"):
+    # m/__init__.py не назван ни в одном литерале: вход только как файл модуля из аргумента `ref`/`card`/`pack --module`
+    for rel in ("m/widget.py", "n/use.py", "p/top.py", "m/__init__.py"):
         stale = edited_check(rel)
         assert stale.code == 1, f"{rel}: код {stale.code}, stdout {stale.out!r}, stderr {stale.err!r}"
         assert rel in stale.out, f"{rel}: путь не назван в stdout: {stale.out!r}"
@@ -446,3 +460,41 @@ def test_head_live_lines(repo_factory: RepoFactory, atlas: Any, monkeypatch: pyt
     assert "feature-side" in by_lit, f"нет строки ветки: {sorted(by_lit)}"
     assert by_lit["feature-side"]["cmd"].startswith("git log --oneline --source")
     assert "main" not in {m["lit"] for m in facts if m["cmd"].startswith("git log --oneline --source")}
+
+
+def test_symbol_and_module_flags(repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = brief_repo(repo_factory, monkeypatch)
+
+    by_module = atlas(repo, "brief", "alpha#1.1", "--module", "m")
+    assert by_module.code == 0, by_module.err
+    assert ("файл объекта Widget", "m/widget.py") in _pairs(_fact_lines(by_module.out.splitlines()))
+
+    by_symbol = atlas(repo, "brief", "alpha#1.1", "--symbol", "Widget")
+    assert by_symbol.code == 0, by_symbol.err
+    pairs = _pairs(_fact_lines(by_symbol.out.splitlines()))
+    assert any(what == "объект задачи Widget" and lit.startswith("Widget") for what, lit in pairs)
+
+    unknown = atlas(repo, "brief", "alpha#1.1", "--symbol", "Nope")
+    assert unknown.code == 2, f"код {unknown.code}, stdout {unknown.out!r}"
+    assert unknown.err != ""
+    assert "invalid choice" not in unknown.err, "2 дал argparse (подкоманды нет), а не brief"
+
+
+def test_task_with_commits_keeps_object_and_skips_own_files(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = brief_repo(repo_factory, monkeypatch)
+    put(repo, "m/widget.py", _WIDGET + "\n    def stop(self) -> int:\n        return 2\n")
+    commit(repo, monkeypatch, "2026-10-02", "m: stop\n\nTask: alpha#1.1")
+    put(repo, "m/other.py", "x = 1\n")
+    commit(repo, monkeypatch, "2026-10-03", "m: other\n\nTask: alpha#1.3")
+
+    res = atlas(repo, "brief", "alpha#1.1")
+    assert res.code == 0, res.err
+    facts = _facts(_fact_lines(res.out.splitlines()))
+    # у задачи есть коммиты, но объект берётся из текста строки плана, как и без коммитов
+    assert ("файл объекта Widget", "m/widget.py") in {(m["what"], m["lit"]) for m in facts}
+    candidates = [m for m in facts if m["what"].startswith("кандидат в FILES")]
+    own = [m["lit"] for m in candidates if m["lit"] and m["lit"].endswith("— 1.1")]
+    assert own == [], "собственные файлы задачи попали в кандидаты"
+    assert ("кандидат в FILES из прошлой задачи", "m/other.py — 1.3") in {(m["what"], m["lit"]) for m in candidates}
