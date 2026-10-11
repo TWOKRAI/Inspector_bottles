@@ -28,15 +28,16 @@
 | # | План | Задача | Заметка |
 |---|---|---|---|
 | 1 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T2.3 | **робот**: T2.3 + T2.4 одним шагом (О-10, вариант Б), teamlead; **следующий**; бриф через `atlas brief` + `lint-brief` (1.9c в main) — выборка K0b 1/3 |
-| 2 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 1.9f | `atlas metrics` — U1/U2 без журнала 1.10b не считаются |
-| 3 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) |  | Ж 1.1 → 1.2 … до гейта abort (Ф1); бриф Ж 1.1 через `atlas brief` + `lint-brief` — выборка K0b 2/3 |
-| 4 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K0b | таблица «метрика — база — сейчас»; ⚑ владелец: продолжать Атлас или FREEZE на достигнутом |
-| 5 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.1 | робот дальше: T3.1–T3.5 `client_v2` → e2e на ПК против симулятора; визит GATE-1 🔧 — когда удобно владельцу |
-| 6 | [layer-render](../layer-render/plan.md) | Task 6.2 | паузный слот (робот ждёт ревью или железо): генератор обучения из слоёв → 6.3 |
-| 7 | [layer-render](../layer-render/plan.md) | Task 6.3 | паузный слот: экспорт + пресет первого продукта — открывает letters-retrain Ф1 |
-| 8 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | паузный слот: базовая линия сети на симе (условие выполнено 10-02) |
-| 9 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | FREEZE; 2026-11-10 — пересчёт повторов (0 токенов агентов) → ⚑ владелец: разморозка или нет |
-| 10 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | не раньше 2026-11-10; №6 — тот же полевой счёт |
+| 2 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T0.3 | ⚑ **шаг владельца, не чат**: дома — DRAStudio в режиме Virtual Robot + `robot/pc_platform_probe` (`pc_probe.py all`), ~1 ч; если исполняет Lua и отвечает по Modbus TCP — T0.3 по его отчёту, затем T4.0 и T4.6 (прошивка против эмулятора) без визита |
+| 3 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 1.9f | `atlas metrics` — U1/U2 без журнала 1.10b не считаются |
+| 4 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) |  | Ж 1.1 → 1.2 … до гейта abort (Ф1); бриф Ж 1.1 через `atlas brief` + `lint-brief` — выборка K0b 2/3 |
+| 5 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K0b | таблица «метрика — база — сейчас»; ⚑ владелец: продолжать Атлас или FREEZE на достигнутом |
+| 6 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.1 | робот дальше: T3.1–T3.5 `client_v2` → e2e на ПК против симулятора; визит GATE-1 🔧 — когда удобно владельцу |
+| 7 | [layer-render](../layer-render/plan.md) | Task 6.2 | паузный слот (робот ждёт ревью или железо): генератор обучения из слоёв → 6.3 |
+| 8 | [layer-render](../layer-render/plan.md) | Task 6.3 | паузный слот: экспорт + пресет первого продукта — открывает letters-retrain Ф1 |
+| 9 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | паузный слот: базовая линия сети на симе (условие выполнено 10-02) |
+| 10 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | FREEZE; 2026-11-10 — пересчёт повторов (0 токенов агентов) → ⚑ владелец: разморозка или нет |
+| 11 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | не раньше 2026-11-10; №6 — тот же полевой счёт |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
@@ -386,7 +387,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - layer-render — 13 из 22 · 59%
 - letters-retrain — 2 из 3 · 67%
 - qr-code-reader — 3 из 17 · 18%
-- 2026-10-02_plans-progress-dashboard — 25 из 28 · 89%
+- 2026-10-02_plans-progress-dashboard — 25 из 34 · 74%
 - 2026-10-03_commit-mechanism — 9 из 11 · 82%
 - 2026-10-04_atlas — 25 из 37 · 68%
 - 2026-10-11_memory-rules-delivery — 1 из 2 · 50%
