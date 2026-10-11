@@ -64,7 +64,7 @@ def _usage(lines: list[str]) -> list[str]:
 def _enclosing(tree: Tree, path: str, line: int) -> str | None:
     """Публичное определение верхнего уровня, объемлющее строку файла ревизии (AST)."""
     try:
-        body = ast.parse(tree.read(path).decode("utf-8", "replace").removeprefix("﻿")).body
+        body = ast.parse(tree.read(path).decode("utf-8", "replace").removeprefix("\ufeff")).body
     except (FileNotFoundError, SyntaxError, ValueError):
         return None
     return next(
@@ -123,12 +123,15 @@ def brief(
     add(TASK, "модули задачи", cmd0, first[1])
     listed = re.match(r"Модули: (.+) \(", first[1])
     chosen = modules or [m for m in (listed[1].split(", ") if listed else []) if m != "—"]
-    text_files, owner, section = [], None, None
-    for cmd, lines in [(cmd0, first), *([pack(chosen)] if chosen and not modules else [])]:
+    owner, section = None, None
+    mod_pack = (cmd0, first) if modules else (pack(chosen) if chosen else (cmd0, []))
+    for cmd, lines, past in [(cmd0, first, False), (*mod_pack, True)]:
         for line in _body(_from(lines, "Файлы-кандидаты в FILES")):
             from_text = line.endswith(" — из текста задачи")
-            add(CAND, "кандидат в FILES из " + ("текста" if from_text else "прошлой задачи"), cmd, line)
-            text_files += [line.strip().split(" — ")[0]] * from_text
+            if from_text and not past:
+                add(CAND, "кандидат в FILES из текста", cmd, line)
+            elif past and not from_text and set(line.strip().split(" — ")[-1].split(", ")) - {tid}:
+                add(CAND, "кандидат в FILES из прошлой задачи", cmd, line)
     for line in first:  # хвосты прошлых задач: тела разделов, до 10
         owner = m[1] if (m := _TASK_ID.match(line)) else owner
         if m := _SECTION.match(line):
@@ -161,13 +164,18 @@ def brief(
     if symbol and symbol not in names:
         raise AtlasError(f"brief: символ {symbol} не найден в модулях {', '.join(chosen) or '—'}")
     objects = [(names[i], i) for i in wanted if i in names][:3]
-    if not objects and not symbol:  # публичные символы файлов «из текста задачи»
+    if not objects and not symbol:  # публичные символы файлов «из текста задачи» (как их выбирает pack)
+        text_files = views._text_sources(tree, plan[1], tid, rows)[1]
         objects = [(module_of(p, rows), n.name) for p, ns in _symbols(root, sha, text_files) for n in ns][:3]
     if not objects:
         print("brief: объект задачи не найден — задать --symbol", file=sys.stderr)
     seen, uses, test_files = set(objects), [], []
     for module, name in objects:
-        cmd, lines = run(f"ref {module} --symbol {name}", reference.ref, module, name)
+        try:
+            cmd, lines = run(f"ref {module} --symbol {name}", reference.ref, module, name)
+        except AtlasError as exc:
+            print(f"brief: символ {name} пропущен — {exc}", file=sys.stderr)
+            continue
         k, use, end = 2 if lines[1] in files else 1, _usage(lines), len(lines) - len(_from(lines, "Кто использует"))
         if k == 2:
             add(OBJECT, f"файл объекта {name}", cmd, lines[1])
@@ -263,7 +271,8 @@ def check(root: Path, task_path: Path) -> tuple[int, list[str]]:
     text = task_path.read_bytes().decode("utf-8")
     if (sha7 := marker(text)) is None:
         raise AtlasError("brief --check: в файле нет маркеров FACTS")
-    tree = Tree(root, resolve(root, sha7))
+    sha = resolve(root, sha7)
+    tree = Tree(root, sha)
     by_id, present, inputs = {r["id"]: r["paths"] for r in modules_for(tree)}, set(tree.files()), set()
     for line in text.split(_CLOSE)[0].rpartition("<!-- atlas:facts ")[2].splitlines():
         if not (m := _FACT.match(line)) or not m["cmd"].startswith("python -m scripts.atlas "):
@@ -273,9 +282,10 @@ def check(root: Path, task_path: Path) -> tuple[int, list[str]]:
         inputs.update(p for mod in mods for p in by_id.get(mod, []))
         for item in (m["lit"] or "").split():
             item = re.sub(r":\d+$", "", item.strip(",;()"))
-            inputs.update([item] * ("/" in item and item in present))
+            if "/" in item and item in present:
+                inputs.add(item)
     paths = sorted(p for p in inputs if not p.startswith("plans/"))
-    changed = git_z(root, "diff", "--name-only", "-z", sha7, "--", *paths) if paths else []
+    changed = git_z(root, "diff", "--name-only", "-z", sha, "--", *paths) if paths else []
     if not changed:
         return 0, [f"brief --check: свежий ({sha7})"]
     return 1, [f"brief --check: отстал от {sha7}, файлов {len(changed)}", *(f"  {p}" for p in changed[:10])]

@@ -135,8 +135,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(reference.ref(con, root, ref, main_ref, args.module, args.symbol)))
                 return 0
             if args.command == "brief":
+                path = brief.task_file(root, args.task) if args.write else None  # плохой путь — до сборки
                 block = brief.brief(con, root, ref, main_ref, args.task, args.module, args.symbol, "main_ref" in args)
-                print(brief.write(root, brief.task_file(root, args.task), block) if args.write else "\n".join(block))
+                print(brief.write(root, path, block) if path else "\n".join(block))
                 return 0
             if args.command == "index":
                 lines = reference.index(con, root, ref, main_ref)
