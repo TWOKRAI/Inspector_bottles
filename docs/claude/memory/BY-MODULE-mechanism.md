@@ -125,12 +125,13 @@
 - [feedback_unkillable_fix_needs_a_hand_set_state](feedback_unkillable_fix_needs_a_hand_set_state.md)
 - [project_metrics_freeze_s27](project_metrics_freeze_s27.md)
 
-## concurrency (24)
+## concurrency (25)
 
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
 - [feedback_dedup_by_name_loses_content](feedback_dedup_by_name_loses_content.md)
 - [feedback_drop_oldest_reports_success](feedback_drop_oldest_reports_success.md)
 - [feedback_gc_finalizer_test_needs_gen0_pin](feedback_gc_finalizer_test_needs_gen0_pin.md)
+- [feedback_gc_saveall_census_under_a_freezing_boundary_keeps_garbage_forever](feedback_gc_saveall_census_under_a_freezing_boundary_keeps_garbage_forever.md)
 - [feedback_idempotent_is_not_monotonic](feedback_idempotent_is_not_monotonic.md)
 - [feedback_lock_hold_time_claims_need_a_lock_free_control_under_the_gil](feedback_lock_hold_time_claims_need_a_lock_free_control_under_the_gil.md)
 - [feedback_mp_queue_is_async_in_tests](feedback_mp_queue_is_async_in_tests.md)
@@ -345,7 +346,7 @@
 - [feedback_worktree_stale_base](feedback_worktree_stale_base.md)
 - [project_shared_tree_provenance_forensics](project_shared_tree_provenance_forensics.md)
 
-## guards (36)
+## guards (37)
 
 - [feedback_a_control_reproduces_the_defect_it_was_built_to_catch](feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md)
 - [feedback_a_degenerate_value_is_not_zero_it_is_unknown](feedback_a_degenerate_value_is_not_zero_it_is_unknown.md)
@@ -354,6 +355,7 @@
 - [feedback_a_knob_can_be_applied_and_unverifiable](feedback_a_knob_can_be_applied_and_unverifiable.md)
 - [feedback_a_new_guard_can_weaken_an_old_one](feedback_a_new_guard_can_weaken_an_old_one.md)
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
+- [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
 - [feedback_an_absence_assertion_needs_a_reachability_check](feedback_an_absence_assertion_needs_a_reachability_check.md)
 - [feedback_base_guard_dead_in_heir](feedback_base_guard_dead_in_heir.md)
 - [feedback_check_belongs_to_the_seam](feedback_check_belongs_to_the_seam.md)
@@ -384,9 +386,10 @@
 - [project_orchestrator_stub_contract_s29](project_orchestrator_stub_contract_s29.md)
 - [project_root_gate_misses_framework_modules](project_root_gate_misses_framework_modules.md)
 
-## hooks (17)
+## hooks (18)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
+- [feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath](feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath.md)
 - [feedback_agent_hard_budget_is_off_by_default](feedback_agent_hard_budget_is_off_by_default.md)
 - [feedback_backend_ctl_layer_mixed](feedback_backend_ctl_layer_mixed.md)
 - [feedback_commit_takes_the_whole_index](feedback_commit_takes_the_whole_index.md)
@@ -472,12 +475,13 @@
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
-## measurement (35)
+## measurement (36)
 
 - [feedback_a_budget_belongs_to_a_path_not_to_a_mechanism](feedback_a_budget_belongs_to_a_path_not_to_a_mechanism.md)
 - [feedback_a_delta_benchmark_hides_what_sits_on_both_sides](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md)
 - [feedback_a_measurement_capped_by_its_own_limit_proves_nothing](feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md)
 - [feedback_a_number_without_spread_across_repeats_is_an_observation](feedback_a_number_without_spread_across_repeats_is_an_observation.md)
+- [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
 - [feedback_constant_from_domain_physics_not_measured](feedback_constant_from_domain_physics_not_measured.md)
 - [feedback_cumulative_max_hides_steady_state](feedback_cumulative_max_hides_steady_state.md)
@@ -550,9 +554,10 @@
 - [project_storage_stack_verdict](project_storage_stack_verdict.md)
 - [project_store_retention_bounds_rows_not_bytes](project_store_retention_bounds_rows_not_bytes.md)
 
-## probes (21)
+## probes (23)
 
 - [feedback_a_measurement_capped_by_its_own_limit_proves_nothing](feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md)
+- [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
 - [feedback_a_probe_must_enumerate_before_it_asks](feedback_a_probe_must_enumerate_before_it_asks.md)
 - [feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know](feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know.md)
 - [feedback_a_state_predicate_at_a_seam_counts_rebuilds_not_actions](feedback_a_state_predicate_at_a_seam_counts_rebuilds_not_actions.md)
@@ -562,6 +567,7 @@
 - [feedback_control_script_tmp_inside_repo_defeats_confinement](feedback_control_script_tmp_inside_repo_defeats_confinement.md)
 - [feedback_discriminator_switch_must_be_verified](feedback_discriminator_switch_must_be_verified.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
+- [feedback_gc_saveall_census_under_a_freezing_boundary_keeps_garbage_forever](feedback_gc_saveall_census_under_a_freezing_boundary_keeps_garbage_forever.md)
 - [feedback_no_regression_proved_by_identical_build](feedback_no_regression_proved_by_identical_build.md)
 - [feedback_one_control_proves_sufficiency_not_exclusivity](feedback_one_control_proves_sufficiency_not_exclusivity.md)
 - [feedback_plausible_is_not_verified](feedback_plausible_is_not_verified.md)
@@ -719,8 +725,9 @@
 - [project_backend_ctl_fake_fidelity_gap](project_backend_ctl_fake_fidelity_gap.md)
 - [project_orchestrator_stub_contract_s29](project_orchestrator_stub_contract_s29.md)
 
-## test-infra (30)
+## test-infra (31)
 
+- [feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath](feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath.md)
 - [feedback_a_process_wide_throttle_turns_neighbours_vacuous](feedback_a_process_wide_throttle_turns_neighbours_vacuous.md)
 - [feedback_an_avoidance_rule_can_be_a_false_safety_catch](feedback_an_avoidance_rule_can_be_a_false_safety_catch.md)
 - [feedback_check_red_on_main_first](feedback_check_red_on_main_first.md)

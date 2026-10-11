@@ -4,7 +4,7 @@
 
 | слой | файл | модулей | уроков |
 |---|---|---|---|
-| framework | [BY-MODULE-framework.md](BY-MODULE-framework.md) | 26 | 149 |
+| framework | [BY-MODULE-framework.md](BY-MODULE-framework.md) | 26 | 152 |
 | services | [BY-MODULE-services.md](BY-MODULE-services.md) | 11 | 18 |
 | plugins | [BY-MODULE-plugins.md](BY-MODULE-plugins.md) | 6 | 9 |
 | prototype | [BY-MODULE-prototype.md](BY-MODULE-prototype.md) | 9 | 21 |
