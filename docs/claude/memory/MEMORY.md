@@ -51,6 +51,7 @@
 - [venv держит MCP](project_venv_locked_by_mcp.md) — закрыть VS Code перед переустановкой пакетов
 - [CUDA torch cu124](project_cuda_torch_setup.md) — PyPI даёт +cpu
 - [monotonic 15.6 мс](project_monotonic_resolution_windows.md) — разности меньше 100 мс — на сетку
+- [Молчаливый откат прячет сломанный tar](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md) — `tar -x -f -` + `cwd`, откат в stderr
 - [qex runbook](feedback_qex_full_rebuild_runbook.md) — полный реиндекс; [модель по платформам](project_qex_model.md)
 - [graphify MCP](project_graphify_mcp_setup.md) — `uv tool install --with mcp`
 - [Запуск qt-mcp](reference_qt_mcp_launch.md) — зонд только с env
