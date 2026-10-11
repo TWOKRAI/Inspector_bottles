@@ -1119,6 +1119,8 @@ def test_allow_list_option_spellings(repo: GitRepo, slow_atlas: Any) -> None:
         r"git grep --op=touch\ made_by_op alpha",
         r"git grep --open-f=touch\ made_by_openf alpha",
         r"git grep --open-files-in-pager=touch\ made_by_full alpha",
+        r"git grep -e -- -Otouch\ made_by_dd alpha",
+        r"git grep -e -- --open-files-in-pager=touch\ made_by_dd2 alpha",
         "git log --ext-diff -1",
         "git diff --textconv HEAD~1 HEAD",
         "git cat-file --batch",
@@ -1144,7 +1146,15 @@ def test_allow_list_option_spellings(repo: GitRepo, slow_atlas: Any) -> None:
     assert (
         run.last == f"lint-brief: ошибок 0, предупреждений 0, сверено 1, вне allow-list {len(off_cmds)}"
     )  # +1: ACCEPTANCE по умолчанию, run.last
-    for made in ("made_by_nO", "made_by_op", "made_by_openf", "made_by_full", "made_by_argfile"):
+    for made in (
+        "made_by_nO",
+        "made_by_op",
+        "made_by_openf",
+        "made_by_full",
+        "made_by_dd",
+        "made_by_dd2",
+        "made_by_argfile",
+    ):
         assert not (repo.path / made).exists(), f"команда вне allow-list запущена: создан {made}"
 
 

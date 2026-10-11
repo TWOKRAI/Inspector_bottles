@@ -90,8 +90,7 @@ def _git_ok(args: list[str]) -> bool:
     if not args or args[0] not in _GIT_READ:
         return False  # `git -c …` и прочие глобальные опции — вне списка
     for arg in args[1:]:
-        if arg == "--":  # дальше — пути, не опции
-            break
+        # без выхода на `--`: у `git grep -e` значением бывает и `--`, дальше идут опции
         name = arg.split("=")[0]
         if name.startswith("--"):  # само имя или его сокращение: `--op=…` — это `--open-files-in-pager`
             if len(name) > 2 and any(bad.startswith(name) or name.startswith(bad) for bad in _GIT_BAD_LONG):

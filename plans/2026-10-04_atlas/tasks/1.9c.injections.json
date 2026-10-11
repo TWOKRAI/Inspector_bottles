@@ -548,5 +548,17 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_hook_reason_order_matches_the_legacy_copy"
     ],
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-40",
+    "prop": "опции git после `--` не проверяются (`git grep -e -- -O<команда>`)",
+    "file": "scripts/atlas/replay.py",
+    "old": "        # без выхода на `--`: у `git grep -e` значением бывает и `--`, дальше идут опции",
+    "new": "        if arg == \"--\":\n            break",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   }
 ]
