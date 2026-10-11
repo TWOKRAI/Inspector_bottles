@@ -137,6 +137,11 @@ Observability knobs: switchable at any boundary, zero cost when off.
 
 Reports follow STE-80: `.claude/skills/project-rules/ste-80.md`.
 
+**Type syntax in new code (Python 3.12):** `X | None`, never `Optional[X]` or `Union[A, B]`; builtin generics
+`list[x]` / `dict[k, v]`, never `typing.List` / `Dict`; `type Alias = ...` for aliases; PEP 695 generics
+(`class Box[T]`, `def first[T](...)`). Old annotations on lines you do not otherwise change stay as they are:
+no drive-by rewrites (a mass rewrite is its own task: 885 files, `plans/2026-10-07_tooling-py-modernization.md`).
+
 ## Map
 
 | when | read |

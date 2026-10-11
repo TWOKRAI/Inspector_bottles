@@ -1,0 +1,493 @@
+<meta charset="utf-8">
+<title>Modbus TCP или OPC UA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Концепт: чертёж-схема. Один цвет на протокол, везде одинаково:
+   янтарь = Modbus, сине-зелёный = OPC UA. Данные — моноширинным. */
+:root {
+  --bg: #edf0f3;
+  --surface: #ffffff;
+  --surface-2: #e3e8ed;
+  --ink: #14202b;
+  --ink-2: #4a5967;
+  --line: #cbd3db;
+  --modbus: #b4590a;
+  --modbus-ink: #8f4306;
+  --modbus-bg: #fbebda;
+  --opc: #12708a;
+  --opc-ink: #0d5a70;
+  --opc-bg: #d9eef3;
+  --good: #1e7a46;
+  --good-bg: #dcf0e4;
+  --warn: #8a5d00;
+  --warn-bg: #f8ecc8;
+  --bad: #b3261e;
+  --bad-bg: #f8dcd9;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151b;
+    --surface: #16202a;
+    --surface-2: #1e2a35;
+    --ink: #e6ecf1;
+    --ink-2: #9baab8;
+    --line: #2c3a47;
+    --modbus: #f0a05a;
+    --modbus-ink: #f0a05a;
+    --modbus-bg: #33241a;
+    --opc: #5cc3dc;
+    --opc-ink: #5cc3dc;
+    --opc-bg: #12303a;
+    --good: #5bcb8b;
+    --good-bg: #14301f;
+    --warn: #e3b341;
+    --warn-bg: #3a2f10;
+    --bad: #f2796f;
+    --bad-bg: #3c1a17;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151b;
+  --surface: #16202a;
+  --surface-2: #1e2a35;
+  --ink: #e6ecf1;
+  --ink-2: #9baab8;
+  --line: #2c3a47;
+  --modbus: #f0a05a;
+  --modbus-ink: #f0a05a;
+  --modbus-bg: #33241a;
+  --opc: #5cc3dc;
+  --opc-ink: #5cc3dc;
+  --opc-bg: #12303a;
+  --good: #5bcb8b;
+  --good-bg: #14301f;
+  --warn: #e3b341;
+  --warn-bg: #3a2f10;
+  --bad: #f2796f;
+  --bad-bg: #3c1a17;
+  color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.55; }
+.page { max-width: 1040px; margin-inline: auto; padding-inline: 16px; padding-block: 28px 64px; }
+h1, h2, h3 { font-family: var(--font-head); font-weight: 600; line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 6vw, 3.1rem); letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.4rem, 3.4vw, 1.8rem); margin-bottom: 6px; }
+h3 { font-size: 1.1rem; }
+p { margin: 0; max-width: 68ch; }
+section { margin-top: 56px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.lead { font-size: 1.15rem; color: var(--ink-2); margin-top: 14px; max-width: 62ch; }
+.section-sub { color: var(--ink-2); margin-bottom: 20px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
+:focus-visible { outline: 3px solid var(--opc); outline-offset: 2px; }
+
+/* шапка */
+.hero-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+.def { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; min-width: 0; }
+.def .tag { display: inline-block; font-family: var(--font-mono); font-size: 0.8rem; padding: 2px 8px; border-radius: 3px; margin-bottom: 10px; }
+.def.modbus .tag { background: var(--modbus-bg); color: var(--modbus-ink); }
+.def.opc .tag { background: var(--opc-bg); color: var(--opc-ink); }
+.def strong { display: block; font-family: var(--font-head); font-size: 1.25rem; font-weight: 600; line-height: 1.2; margin-bottom: 6px; }
+.def p { color: var(--ink-2); font-size: 0.95rem; }
+
+/* два чтения рядом */
+.versus { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; min-width: 0; overflow: hidden; }
+.panel-head { padding: 10px 16px; font-family: var(--font-mono); font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.panel.modbus .panel-head { background: var(--modbus-bg); color: var(--modbus-ink); }
+.panel.opc .panel-head { background: var(--opc-bg); color: var(--opc-ink); }
+.panel-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.step-label { font-size: 0.82rem; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; display: flex; gap: 8px; align-items: baseline; }
+.step-label .dir { font-family: var(--font-mono); font-weight: 500; }
+.note { font-size: 0.9rem; color: var(--ink-2); }
+.frame { display: flex; flex-wrap: wrap; gap: 6px 4px; }
+.fld { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.fld b { font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem; padding: 3px 7px; border-radius: 3px; border: 1px solid var(--line); background: var(--surface-2); letter-spacing: 0.04em; }
+.fld i { font-style: normal; font-size: 0.66rem; line-height: 1.15; color: var(--ink-2); text-align: center; max-width: 7.5em; }
+.fld.fn b { background: var(--modbus-bg); border-color: var(--modbus); color: var(--modbus-ink); }
+.fld.data b { background: var(--good-bg); border-color: var(--good); color: var(--good); }
+.fld.bare b { background: transparent; border-style: dashed; }
+.verdict { font-size: 0.92rem; padding: 10px 12px; border-radius: 4px; }
+.verdict.you-do { background: var(--warn-bg); color: var(--warn); }
+.verdict.server-does { background: var(--good-bg); color: var(--good); }
+.tree, .kv { font-family: var(--font-mono); font-size: 0.85rem; background: var(--surface-2); border-radius: 4px; padding: 10px 12px; overflow-x: auto; white-space: pre; line-height: 1.5; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; white-space: normal; }
+.kv span:nth-child(odd) { color: var(--ink-2); }
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 0.78rem; padding: 1px 7px; border-radius: 999px; background: var(--good-bg); color: var(--good); }
+
+/* декодер */
+.decoder { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.decoder > * { min-width: 0; }
+.dec-in { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+label { font-size: 0.8rem; font-weight: 600; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
+input, select { font-family: var(--font-mono); font-size: 1rem; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px; }
+input.reg { width: 5.5em; text-transform: uppercase; }
+input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-bg); }
+button { font-family: var(--font-body); font-size: 0.85rem; font-weight: 500; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 7px 11px; cursor: pointer; }
+button:hover { border-color: var(--ink-2); }
+.dec-out { display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+.big { font-family: var(--font-mono); font-size: clamp(1.7rem, 5vw, 2.4rem); font-weight: 500; line-height: 1.1; overflow-wrap: anywhere; }
+.big.ok { color: var(--good); }
+.big.odd { color: var(--bad); }
+.assembled { font-family: var(--font-mono); font-size: 0.9rem; color: var(--ink-2); }
+
+/* таблица */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.93rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+thead th { font-family: var(--font-mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+thead th.m { background: var(--modbus-bg); color: var(--modbus-ink); }
+thead th.o { background: var(--opc-bg); color: var(--opc-ink); }
+tbody th { font-weight: 600; width: 22%; color: var(--ink); }
+td.win::before, td.lose::before { font-family: var(--font-mono); font-weight: 600; margin-right: 6px; }
+td.win::before { content: "+"; color: var(--good); }
+td.lose::before { content: "−"; color: var(--bad); }
+
+/* выбор */
+.choose { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.choose > div { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; min-width: 0; }
+.choose h3 { margin-bottom: 8px; }
+.choose ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; font-size: 0.95rem; }
+.calc { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 18px; font-size: 0.95rem; }
+
+/* схема на фреймворк */
+.flow { display: grid; grid-template-columns: 1fr auto 1.15fr auto 1fr auto 1fr; gap: 8px; align-items: center; }
+.flow .arrow { font-family: var(--font-mono); color: var(--ink-2); text-align: center; }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; min-width: 0; font-size: 0.9rem; }
+.node strong { display: block; font-family: var(--font-head); font-size: 1.05rem; margin-bottom: 4px; }
+.node ul { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.node li { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.chip { font-family: var(--font-mono); font-size: 0.72rem; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.chip.ready { background: var(--good-bg); color: var(--good); }
+.chip.todo { background: var(--warn-bg); color: var(--warn); }
+.chip.unk { background: var(--bad-bg); color: var(--bad); }
+
+/* AS228 */
+.facts { display: flex; flex-direction: column; gap: 8px; }
+.fact { display: grid; grid-template-columns: 9em 1fr; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; align-items: start; }
+.fact > * { min-width: 0; }
+.fact .chip { justify-self: start; }
+.fact p { font-size: 0.93rem; }
+.fact small { display: block; color: var(--ink-2); margin-top: 3px; font-size: 0.8rem; overflow-wrap: anywhere; }
+.fact a { color: var(--opc-ink); }
+
+.foot { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--ink-2); }
+
+@media (max-width: 760px) {
+  .hero-pair, .versus, .decoder, .choose { grid-template-columns: 1fr; }
+  .flow { grid-template-columns: 1fr; }
+  .flow .arrow { transform: rotate(90deg); }
+  .fact { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<main class="page">
+
+<header>
+  <div class="eyebrow">ПЛК Delta AS228 · 30–50 тегов · только чтение</div>
+  <h1>Modbus TCP или OPC UA</h1>
+  <p class="lead">Оба протокола решают одну задачу: достать значения из контроллера по сети. Отличается то, что именно лежит на проводе и кто за что отвечает.</p>
+
+  <div class="hero-pair">
+    <div class="def modbus">
+      <span class="tag">Modbus TCP</span>
+      <strong>Отдаёт ячейки памяти по номеру</strong>
+      <p>Вы просите «дай 2 регистра с адреса 100» и получаете 4 байта. Что это за величина и как её читать, знаете только вы.</p>
+    </div>
+    <div class="def opc">
+      <span class="tag">OPC UA</span>
+      <strong>Отдаёт именованные величины</strong>
+      <p>Вы просите «Line1.Temperature» и получаете число с типом, временем измерения и признаком, что сигналу можно верить.</p>
+    </div>
+  </div>
+</header>
+
+<section id="read">
+  <h2>Как выглядит чтение одного значения</h2>
+  <p class="section-sub">Температура 25,5 °C. Байты Modbus настоящие, имена в OPC UA условные.</p>
+
+  <div class="versus">
+    <div class="panel modbus">
+      <div class="panel-head">Modbus TCP</div>
+      <div class="panel-body">
+        <div>
+          <div class="step-label"><span class="dir">ПК → ПЛК</span> запрос</div>
+          <div class="frame" role="group" aria-label="Кадр запроса Modbus TCP">
+            <div class="fld bare"><b>00 01</b><i>номер запроса</i></div>
+            <div class="fld bare"><b>00 00</b><i>протокол</i></div>
+            <div class="fld bare"><b>00 06</b><i>длина</i></div>
+            <div class="fld bare"><b>01</b><i>адрес устройства</i></div>
+            <div class="fld fn"><b>03</b><i>функция: чтение регистров</i></div>
+            <div class="fld"><b>00 64</b><i>начиная с адреса 100</i></div>
+            <div class="fld"><b>00 02</b><i>2 регистра</i></div>
+          </div>
+        </div>
+        <div>
+          <div class="step-label"><span class="dir">ПЛК → ПК</span> ответ</div>
+          <div class="frame" role="group" aria-label="Кадр ответа Modbus TCP">
+            <div class="fld bare"><b>00 01</b><i>номер запроса</i></div>
+            <div class="fld bare"><b>00 00</b><i>протокол</i></div>
+            <div class="fld bare"><b>00 07</b><i>длина</i></div>
+            <div class="fld bare"><b>01</b><i>адрес устройства</i></div>
+            <div class="fld fn"><b>03</b><i>функция</i></div>
+            <div class="fld"><b>04</b><i>байт далее</i></div>
+            <div class="fld data"><b>41 CC 00 00</b><i>данные: без имени и типа</i></div>
+          </div>
+        </div>
+        <p class="verdict you-do">Дальше на вашей стороне: «адрес 100 это температура», «два регистра это float», «слова идут в таком-то порядке». Это записывается в карту регистров вручную.</p>
+      </div>
+    </div>
+
+    <div class="panel opc">
+      <div class="panel-head">OPC UA</div>
+      <div class="panel-body">
+        <div>
+          <div class="step-label"><span class="dir">1</span> подключение</div>
+          <div class="tree">opc.tcp://192.168.1.5:4840
+политика безопасности → сертификат / логин
+сессия открыта</div>
+        </div>
+        <div>
+          <div class="step-label"><span class="dir">2</span> обзор: клиент сам видит, что есть в контроллере</div>
+          <div class="tree">Objects
+└ PLC
+  └ Line1
+    ├ Temperature   Float
+    └ Pressure      Float</div>
+        </div>
+        <div>
+          <div class="step-label"><span class="dir">3</span> чтение узла <code>ns=2;s=Line1.Temperature</code></div>
+          <div class="kv">
+            <span>Value</span><span>25.5</span>
+            <span>DataType</span><span>Float</span>
+            <span>SourceTimestamp</span><span>2026-10-08 12:00:01.250</span>
+            <span>StatusCode</span><span><span class="pill">Good</span></span>
+          </div>
+        </div>
+        <div>
+          <div class="step-label"><span class="dir">4</span> подписка</div>
+          <p class="note">«Сообщай, если значение изменилось больше чем на 0,1». Сервер присылает новое значение сам, опрашивать не надо.</p>
+        </div>
+        <p class="verdict server-does">Имя, тип, время и качество приходят вместе со значением. Порядок байт библиотека учитывает сама.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="decoder">
+  <h2>Почему в Modbus «всё на вашей стороне»</h2>
+  <p class="section-sub">Четыре байта из ответа выше можно прочитать по-разному. Протокол не говорит, как правильно: порядок слов и байт выбирает производитель контроллера.</p>
+
+  <div class="decoder">
+    <div class="dec-in">
+      <div class="row">
+        <label for="r1">Регистр 1 (hex)<input class="reg" id="r1" value="41CC" maxlength="4" autocomplete="off" spellcheck="false"></label>
+        <label for="r2">Регистр 2 (hex)<input class="reg" id="r2" value="0000" maxlength="4" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <div class="row">
+        <label for="ord">Порядок
+          <select id="ord">
+            <option value="ABCD">ABCD (старшее слово первым)</option>
+            <option value="CDAB">CDAB (слова переставлены)</option>
+            <option value="BADC">BADC (байты переставлены)</option>
+            <option value="DCBA">DCBA (всё наоборот)</option>
+          </select>
+        </label>
+        <label for="typ">Тип
+          <select id="typ">
+            <option value="f32">float32</option>
+            <option value="i32">int32</option>
+            <option value="u32">uint32</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button type="button" id="p1">Ответ ПЛК: 41CC 0000</button>
+        <button type="button" id="p2">Слова наоборот: 0000 41CC</button>
+      </div>
+    </div>
+    <div class="dec-out" aria-live="polite">
+      <div class="assembled" id="asm">—</div>
+      <div class="big" id="res">—</div>
+      <p class="note" id="hint"></p>
+    </div>
+  </div>
+  <p class="note" style="margin-top:10px">Какой порядок у вашего AS228, не знаю: это проверяется по документации Delta и по живому значению, о котором известно, что оно должно быть.</p>
+</section>
+
+<section id="compare">
+  <h2>Сравнение по пунктам</h2>
+  <p class="section-sub">«+» и «−» относятся к вашей задаче: чтение 30–50 значений в локальной сети.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th scope="col"></th><th scope="col" class="m">Modbus TCP</th><th scope="col" class="o">OPC UA</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Что передаёт</th><td>Сырые 16-битные регистры и биты</td><td>Узлы с именем, типом, временем и качеством</td></tr>
+        <tr><th scope="row">Адресация</th><td>Номер регистра. Карта «адрес → смысл» ведётся вручную</td><td>Имя узла. Клиент может обойти дерево и увидеть всё сам</td></tr>
+        <tr><th scope="row">Типы данных</th><td>Float, строки, 32-битные числа собирают из регистров. Порядок байт зависит от производителя</td><td>Типы передаются как есть: Float, Int32, String, структуры</td></tr>
+        <tr><th scope="row">Метка времени и «достоверность»</th><td class="lose">Нет. Обрыв датчика от нуля не отличить</td><td class="win">Есть: время измерения и StatusCode (Good / Bad / Uncertain)</td></tr>
+        <tr><th scope="row">Как приходят данные</th><td>Только опрос по таймеру</td><td class="win">Опрос или подписка: сервер присылает изменения</td></tr>
+        <tr><th scope="row">Безопасность</th><td class="lose">Нет проверки клиента, нет шифрования. Годится для закрытой сети</td><td class="win">Сертификаты, шифрование, логин и пароль</td></tr>
+        <tr><th scope="row">Сложность</th><td class="win">Простой: десятки лет, поддерживается практически везде</td><td class="lose">Сложнее: сертификаты, доверие, политики безопасности. Первая настройка занимает время</td></tr>
+        <tr><th scope="row">Нагрузка на ПЛК</th><td class="win">Небольшая, стек минимальный</td><td>Выше: сервер OPC UA на ПЛК или отдельной карте</td></tr>
+        <tr><th scope="row">Порт</th><td class="mono">502</td><td class="mono">4840</td></tr>
+        <tr><th scope="row">Python-библиотека</th><td class="mono">pymodbus</td><td class="mono">asyncua</td></tr>
+        <tr><th scope="row">В вашем фреймворке</th><td class="win">Готово: <code>Services/modbus</code>, <code>device_hub</code></td><td class="lose">Нет. Нужен новый <code>Services/opcua</code></td></tr>
+        <tr><th scope="row">В Delta AS228</th><td>Основной путь, подробности ниже</td><td>Не подтверждено, подробности ниже</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="choose">
+  <h2>Что это значит для задачи с ПЛК</h2>
+  <p class="section-sub">Выбирает не «лучший» протокол, а тот, который есть на контроллере и подходит под нагрузку.</p>
+  <div class="choose">
+    <div>
+      <h3 style="color:var(--modbus-ink)">Modbus выигрывает, когда</h3>
+      <ul>
+        <li>на контроллере нет сервера OPC UA или нужна лицензия и отдельная карта</li>
+        <li>значений десятки, а не тысячи, опрос раз в секунду-две</li>
+        <li>сеть закрытая, цеховая</li>
+        <li>нужно быстро: драйвер уже есть, остаётся описать карту регистров</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="color:var(--opc-ink)">OPC UA выигрывает, когда</h3>
+      <ul>
+        <li>контроллер отдаёт его «из коробки» (у Delta это линейки AX-3 и AX-8)</li>
+        <li>важны время измерения и признак «сигналу можно верить»</li>
+        <li>значений много или они меняются редко и их проще получать по подписке</li>
+        <li>к ПЛК подключаются несколько систем или нужна защита соединения</li>
+      </ul>
+    </div>
+  </div>
+  <p class="calc"><strong>Арифметика для 50 тегов.</strong> Каждый float занимает 2 регистра, значит 100 регистров. По спецификации Modbus один запрос читает до 125 регистров, так что всё это один запрос в секунду, если теги лежат в памяти подряд. Нагрузка на сеть и ПЛК ничтожная. Лимиты именно AS228 по размеру запроса и числу соединений не подтверждены.</p>
+</section>
+
+<section id="as228">
+  <h2>Что известно про ваш AS228</h2>
+  <p class="section-sub">Первичные документы Delta не открылись. Большая часть ниже взята из описаний в магазинах и выдачи поиска, поэтому у каждого факта стоит пометка.</p>
+  <div class="facts">
+    <div class="fact">
+      <span class="chip todo">сниппет</span>
+      <div>
+        <p><strong>Ethernet-порт встроенный.</strong> В описаниях AS228T-A и AS228R-A указаны Ethernet, два RS-485, USB, CANopen. Отдельная карта для сети не нужна. Сколько именно Ethernet-портов, один или два, источники расходятся.</p>
+        <small><a href="https://deltaacdrives.com/delta-as228t-a-as-series-plc/">deltaacdrives.com, AS228T-A</a> · <a href="https://www.em.co.za/AS228R-A">em.co.za, AS228R-A</a></small>
+      </div>
+    </div>
+    <div class="fact">
+      <span class="chip todo">сниппет</span>
+      <div>
+        <p><strong>Modbus TCP есть.</strong> В списке протоколов AS228T-A: Modbus, Modbus TCP, EtherNet/IP, CANopen.</p>
+        <small><a href="https://deltaacdrives.com/delta-as228t-a-as-series-plc/">deltaacdrives.com, AS228T-A</a></small>
+      </div>
+    </div>
+    <div class="fact">
+      <span class="chip todo">сниппет</span>
+      <div>
+        <p><strong>Адрес регистра D0.</strong> По фрагменту из руководства AS регистры D0–D11999 читаются как holding-регистры, начиная с адреса 4096 (0x1000). Ноль или единица в основе, не подтверждено. Для DVP та же схема встречается на форуме, но блог про DVP называет другое число.</p>
+        <small><a href="https://www.dicomp.com.br/downloads/materiais_apoio/datasheet/18864-2.pdf">dicomp.com.br, даташит</a> · карту сверить с приложением руководства AS</small>
+      </div>
+    </div>
+    <div class="fact">
+      <span class="chip unk">не подтверждено</span>
+      <div>
+        <p><strong>OPC UA на AS228.</strong> Сервер OPC UA Delta даёт карта AS-FOPC02. Написано ли, что она работает только с AS300, прямо ни в одном источнике не нашли. Встроенного OPC UA у AS200 не нашли.</p>
+        <small><a href="https://deltaacdrives.com/delta-as-fopc02-as-series-plc-accessories/">deltaacdrives.com, AS-FOPC02</a></small>
+      </div>
+    </div>
+    <div class="fact">
+      <span class="chip unk">не подтверждено</span>
+      <div>
+        <p><strong>Лимиты.</strong> Сколько регистров ПЛК отдаёт за один запрос, сколько клиентов принимает, порядок байт во float. Порт 502 назван только в стороннем блоге.</p>
+      </div>
+    </div>
+  </div>
+  <p class="calc"><strong>Вывод.</strong> Самый вероятный путь для AS228 — Modbus TCP по встроенному Ethernet, без покупки карт и без нового протокола во фреймворке. Это пока гипотеза. Проверка занимает вечер: подключить ПК к ПЛК, прочитать любым Modbus-клиентом регистр, значение которого вы знаете, и сверить адрес и порядок байт. Если окажется, что нужен OPC UA, решается отдельно: либо карта AS-FOPC02 (если она подходит к AS228), либо заменой линейки.</p>
+</section>
+
+<section id="framework">
+  <h2>Как это ляжет на фреймворк</h2>
+  <p class="section-sub">От протокола зависит только первый блок. Дальше всё одинаково для обоих.</p>
+  <div class="flow">
+    <div class="node"><strong>ПЛК Delta</strong>30–50 тегов</div>
+    <div class="arrow">→</div>
+    <div class="node">
+      <strong>Источник тегов</strong>
+      <ul>
+        <li>Modbus TCP <span class="chip ready">готово</span></li>
+        <li>OPC UA <span class="chip todo">~3–4 дня</span></li>
+      </ul>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>state_store</strong>дерево значений с подписками <span class="chip ready">готово</span></div>
+    <div class="arrow">→</div>
+    <div class="node">
+      <strong>Потребители</strong>
+      <ul>
+        <li>GUI: таблица, тренд <span class="chip todo">~2–3 дня</span></li>
+        <li>SQLite: история <span class="chip todo">~1–2 дня</span></li>
+        <li>HTML для телефона <span class="chip todo">~1–2 дня</span></li>
+      </ul>
+    </div>
+  </div>
+  <p class="note" style="margin-top:12px">Сроки взяты из <code>docs/audits/2026-10-08_plc-opcua-integration-feasibility.md</code>. Это оценки, не замеры.</p>
+</section>
+
+<footer class="foot">
+  Страница сделана 2026-10-08 для проекта Inspector_bottles. Сведения о Delta получены веб-разведкой, официальные PDF производителя не открылись; недоказанные пункты помечены на странице.
+</footer>
+
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var r1 = $('r1'), r2 = $('r2'), ord = $('ord'), typ = $('typ');
+  var hexRe = /^[0-9a-f]{1,4}$/i;
+  var orders = { ABCD: [0, 1, 2, 3], CDAB: [2, 3, 0, 1], BADC: [1, 0, 3, 2], DCBA: [3, 2, 1, 0] };
+
+  function fmt(v) {
+    if (!isFinite(v)) return String(v);
+    if (v !== 0 && (Math.abs(v) < 1e-3 || Math.abs(v) >= 1e7)) return v.toExponential(3).replace('e', ' × 10^').replace('+', '');
+    return String(Number(v.toPrecision(7))).replace('.', ',');
+  }
+  function update() {
+    var ok1 = hexRe.test(r1.value), ok2 = hexRe.test(r2.value);
+    r1.setAttribute('aria-invalid', ok1 ? 'false' : 'true');
+    r2.setAttribute('aria-invalid', ok2 ? 'false' : 'true');
+    var res = $('res'), asm = $('asm'), hint = $('hint');
+    if (!ok1 || !ok2) { res.textContent = '—'; res.className = 'big'; asm.textContent = 'Введите по 1–4 hex-цифры в каждый регистр'; hint.textContent = ''; return; }
+    var a = parseInt(r1.value, 16), b = parseInt(r2.value, 16);
+    var bytes = [a >> 8, a & 255, b >> 8, b & 255];
+    var idx = orders[ord.value];
+    var dv = new DataView(new ArrayBuffer(4));
+    var seq = idx.map(function (i) { return bytes[i]; });
+    seq.forEach(function (x, i) { dv.setUint8(i, x); });
+    var v = typ.value === 'f32' ? dv.getFloat32(0) : typ.value === 'i32' ? dv.getInt32(0) : dv.getUint32(0);
+    asm.textContent = 'байты: ' + seq.map(function (x) { return ('0' + x.toString(16)).slice(-2).toUpperCase(); }).join(' ');
+    res.textContent = fmt(v);
+    var sane = typ.value === 'f32' ? (Math.abs(v) >= 1e-3 && Math.abs(v) < 1e6) : true;
+    res.className = 'big ' + (sane ? 'ok' : 'odd');
+    hint.textContent = sane ? 'Число выглядит правдоподобно. Но это ваше суждение, протокол его не подтверждает.' : 'Те же четыре байта, другой порядок, результат другой. Протокол никак не предупредит.';
+  }
+  [r1, r2].forEach(function (el) { el.addEventListener('input', update); });
+  [ord, typ].forEach(function (el) { el.addEventListener('change', update); });
+  $('p1').addEventListener('click', function () { r1.value = '41CC'; r2.value = '0000'; ord.value = 'ABCD'; typ.value = 'f32'; update(); });
+  $('p2').addEventListener('click', function () { r1.value = '0000'; r2.value = '41CC'; ord.value = 'ABCD'; typ.value = 'f32'; update(); });
+  update();
+})();
+</script>

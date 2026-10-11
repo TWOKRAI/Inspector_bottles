@@ -15,7 +15,9 @@ still gets Russian (§6).
    (process ≠ channel — see `ROUTING_GLOSSARY.md`). Never vary a term for style.
 5. Repeat the noun instead of "it / this / that" when the referent is not in the same sentence.
 6. Answer first, reason after. No filler: no intro recap, no "it is worth noting", no closing summary
-   of what the text just said.
+   of what the text just said, no closing offer ("if you want, I can…"); a real next step is stated as
+   a step or a question. Answer every part of the question: cut repetition, not content
+   (style-bench 2026-10-11: closing offers 19% → 0%, quality unchanged).
 7. Literals, not adjectives: "3 of 40 tests fail", not "some tests fail".
 8. Paragraph ≤6 sentences. Lists for steps and parallel facts.
 
