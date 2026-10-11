@@ -1,0 +1,42 @@
+import sys
+import collections
+import random
+from pathlib import Path
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts/memory"))
+import _lessons
+
+by = collections.defaultdict(list)
+for p in _lessons.iter_lessons(root / _lessons.MEMORY_REL):
+    fm = _lessons.read_lesson(p)
+    for m in fm["module"]:
+        by[m].append((p.stem, " ".join(fm["description"]), " ".join(fm["name"])))
+
+
+def node(rows, cut=None, use_name=False):
+    out = []
+    for s, d, n in sorted(rows):
+        t = n if use_name and n else d
+        if cut and len(t) > cut:
+            t = t[:cut].rstrip() + "…"
+        out.append(f"- {s} — {t}")
+    return "\n".join(out)
+
+
+random.seed(20261011)
+small = sorted(k for k in by if k not in ("process_module", "tools/backend_ctl", "logger_module"))
+pick = ["process_module", "tools/backend_ctl", "logger_module"] + random.sample(small, 3)
+print("module | lines | chars | utf8 bytes | cut120 chars | name-only chars")
+for m in pick:
+    full = node(by[m])
+    c120 = node(by[m], 120)
+    nm = node(by[m], use_name=True)
+    print(f"{m} | {len(by[m])} | {len(full)} | {len(full.encode())} | {len(c120)} | {len(nm)}")
+print("nodes > 40 lines:", [k for k, v in by.items() if len(v) > 40])
+print("nodes > 25 lines:", [(k, len(v)) for k, v in by.items() if len(v) > 25])
+allfull = sum(len(node(v)) for v in by.values())
+all120 = sum(len(node(v, 120)) for v in by.values())
+print("all nodes chars:", allfull, " utf8:", sum(len(node(v).encode()) for v in by.values()), " cut120:", all120)
+names = [len(n) for v in by.values() for _, _, n in v if n]
+print("name: present", len(names), "median len", sorted(names)[len(names) // 2] if names else None)

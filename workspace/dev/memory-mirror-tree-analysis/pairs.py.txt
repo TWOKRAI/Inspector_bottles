@@ -1,0 +1,45 @@
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts/memory"))
+import _lessons
+
+mem = root / "docs/claude/memory"
+text = (root / "plans/2026-10-04_atlas/research/baseline.md").read_text(encoding="utf-8")
+rows = re.findall(r"^\| ([a-z0-9_]+) \(\d\d-\d\d\) \| ([^|]+) \|$", text, re.M)
+print("pairs:", len(rows))
+# survivor map: file whose body mentions the name (merged_from / Слито из)
+alltxt = {p.name: p.read_text(encoding="utf-8", errors="replace") for p in mem.glob("*.md")}
+
+
+def tags(name):
+    fn = "feedback_" + name + ".md"
+    p = mem / fn
+    where = "root"
+    if not p.exists():
+        if (mem / "_archive" / fn).exists():
+            # find survivor in root mentioning the name
+            surv = [n for n, t in alltxt.items() if name in t and n.startswith(("feedback", "project"))]
+            if surv:
+                p = mem / surv[0]
+                where = "surv:" + surv[0][:45]
+            else:
+                p = mem / "_archive" / fn
+                where = "archive"
+        else:
+            return ("missing", [], [])
+    fm = _lessons.read_lesson(p)
+    return (where, fm.get("module", []), fm.get("mechanism", []))
+
+
+code = 0
+for new, olds in rows:
+    olds = [o.strip() for o in olds.split(";")]
+    w, m, mech = tags(new)
+    om = [tags(o) for o in olds]
+    any_mod = bool(m) or any(x[1] for x in om)
+    code += any_mod
+    print(f"{new[:48]:48} mod={m} | olds mod={[x[1] for x in om]}")
+print("pairs where new or old carries module:", code, "of", len(rows))
