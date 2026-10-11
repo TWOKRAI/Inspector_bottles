@@ -1,0 +1,35 @@
+import re
+import subprocess
+from pathlib import Path
+
+text = Path("plans/2026-10-04_atlas/research/baseline.md").read_text(encoding="utf-8")
+rows = re.findall(r"^\| ([a-z0-9_]+) \((\d\d-\d\d)\) \| ([^|]+) \|$", text, re.M)
+files = ["docs/claude/memory/MEMORY.md", ".claude/memory/MEMORY.md"]
+
+
+def first(name):
+    best = None
+    for f in files:
+        out = subprocess.run(
+            ["git", "log", "--all", "--reverse", "--format=%ad", "--date=short", "-S", "feedback_" + name, "--", f],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.split()
+        if out and (best is None or out[0] < best):
+            best = out[0]
+    return best
+
+
+before = 0
+known = 0
+for new, d, olds in rows:
+    newdate = "2026-" + d
+    ds = [first(o.strip()) for o in olds.split(";")]
+    ds = [x for x in ds if x]
+    if ds:
+        known += 1
+    pre = any(x < newdate for x in ds)
+    before += pre
+    print(f"{new[:44]:44} new={newdate} old_in_index_first={min(ds) if ds else None} {'BEFORE' if pre else ''}")
+print("old lesson indexed in MEMORY.md before the repeat:", before, "of", len(rows), "(old ever indexed:", known, ")")

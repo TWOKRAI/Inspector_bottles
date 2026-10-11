@@ -1,0 +1,34 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sp = Path(sys.argv[1])
+repo = Path(sys.argv[2])
+hook = repo / ".claude/plugins/dev/hooks/lint-brief.sh"
+env = dict(os.environ, CLAUDE_PROJECT_DIR=str(repo))
+cases = [("1.1", "tester"), ("2.1", "developer"), ("2.2", "junior")]
+for tid, role in cases:
+    prompt = (sp / f"brief_{tid}.txt").read_text(encoding="utf-8")
+    payload = json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": role, "prompt": prompt}})
+    cp = subprocess.run(
+        ["C:/Program Files/Git/bin/bash.exe", str(hook)], input=payload.encode(), capture_output=True, env=env, cwd=repo
+    )
+    print(
+        tid,
+        role,
+        "exit",
+        cp.returncode,
+        "stdout:",
+        cp.stdout.decode()[:400] or "<empty>",
+        "stderr:",
+        cp.stderr.decode()[:200] or "<empty>",
+    )
+neg = json.dumps(
+    {"tool_name": "Agent", "tool_input": {"subagent_type": "developer", "prompt": "TASK: x\nFILES:\n  1. a\nREPORT: y"}}
+)
+cp = subprocess.run(
+    ["C:/Program Files/Git/bin/bash.exe", str(hook)], input=neg.encode(), capture_output=True, env=env, cwd=repo
+)
+print("negative-control exit", cp.returncode, "stdout:", cp.stdout.decode()[:300] or "<empty>")

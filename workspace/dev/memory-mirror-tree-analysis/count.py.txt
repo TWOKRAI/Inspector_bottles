@@ -1,0 +1,48 @@
+import sys
+import collections
+from pathlib import Path
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts" / "memory"))
+sys.path.insert(0, str(root / "scripts"))
+import _lessons
+from atlas import modules as M
+
+mods = M.load_modules()
+ids = {m["id"] for m in mods}
+lessons = _lessons.iter_lessons(root / _lessons.MEMORY_REL)
+print("lessons (iter_lessons):", len(lessons))
+withmod = [p for p in lessons if _lessons.read_lesson(p).get("module")]
+print("with module:", len(withmod))
+vals = collections.Counter()
+nmods = collections.Counter()
+mech_only = 0
+none_ = 0
+multi = 0
+for p in lessons:
+    fm = _lessons.read_lesson(p)
+    m = fm.get("module", []) if fm else []
+    for v in m:
+        vals[v] += 1
+    nmods[len(m)] += 1
+    if not m and fm and fm.get("mechanism"):
+        mech_only += 1
+    if not m and not (fm and fm.get("mechanism")):
+        none_ += 1
+print("distinct module values:", len(vals))
+print("module count per lesson:", dict(sorted(nmods.items())))
+print("no module but mechanism:", mech_only, " neither:", none_)
+print("unknown module ids:", [v for v in vals if v not in ids])
+print("top 15:", vals.most_common(15))
+print("module ids with 0 lessons:", len(ids - set(vals)), "of", len(ids))
+# description sizes for top modules
+for target in ["process_module", "tools/backend_ctl", "logger_module", "router_module", "scripts", "frontend_module"]:
+    rows = []
+    for p in lessons:
+        fm = _lessons.read_lesson(p)
+        if target in fm.get("module", []):
+            rows.append(f"- {p.relative_to(root).as_posix()} — {' '.join(fm['description'])}")
+    text = "\n".join(rows)
+    print(
+        f"{target}: lessons={len(rows)} lines={len(rows)} chars={len(text)} bytes={len(text.encode())} est_tokens~{len(text) // 3}"
+    )

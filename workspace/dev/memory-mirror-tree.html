@@ -1,0 +1,380 @@
+<title>Зеркальное дерево памяти</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Раскладка: узкая колонка чтения; три схемы друг под другом (сейчас → идея → идея с Atlas), каждая в своём прокручиваемом блоке; в конце сводная таблица. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --ink: #14202b;
+  --muted: #55636e;
+  --line: #c3ccd4;
+  --push: #0b7a75;
+  --pull: #a8620b;
+  --bad: #b3261e;
+  --tint: #e7eef2;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e161c; --surface: #16212a; --ink: #e6edf2; --muted: #9db0bc; --line: #33444f;
+    --push: #3fc7bf; --pull: #e2a34d; --bad: #ff8d84; --tint: #1c2a34; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e161c; --surface: #16212a; --ink: #e6edf2; --muted: #9db0bc; --line: #33444f;
+  --push: #3fc7bf; --pull: #e2a34d; --bad: #ff8d84; --tint: #1c2a34; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; padding-inline: 16px; padding-block: 28px 48px; }
+main { max-width: 880px; margin-inline: auto; display: flex; flex-direction: column; gap: 36px; }
+h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; font-weight: 600; text-wrap: balance; }
+h2 { font-size: 19px; line-height: 1.3; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 65ch; }
+.lead { color: var(--muted); max-width: 65ch; }
+.tag { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 12px; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+svg { display: block; min-width: 680px; width: 100%; height: auto; }
+figcaption { color: var(--muted); font-size: 14px; max-width: 70ch; }
+.hidden-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+.box { fill: var(--surface); stroke: var(--line); stroke-width: 1.4; }
+.box.soft { fill: var(--tint); }
+.box.plan { stroke-dasharray: 5 4; }
+.box.bad { stroke: var(--bad); }
+.box.good { stroke: var(--push); stroke-width: 2; }
+.m { font-family: var(--mono); font-size: 12.5px; fill: var(--ink); }
+.s { font-family: var(--sans); font-size: 12.5px; fill: var(--muted); }
+.lab { font-family: var(--sans); font-size: 12.5px; fill: var(--ink); font-weight: 500; }
+.lab.push { fill: var(--push); }
+.lab.pull { fill: var(--pull); }
+.lab.bad { fill: var(--bad); }
+.ln { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+.ln.push { stroke: var(--push); stroke-width: 2.6; }
+.ln.pull { stroke: var(--pull); stroke-dasharray: 6 4; }
+.ln.bad { stroke: var(--bad); stroke-dasharray: 6 4; }
+.mk-ink { fill: var(--muted); } .mk-push { fill: var(--push); } .mk-pull { fill: var(--pull); } .mk-bad { fill: var(--bad); }
+
+table { border-collapse: collapse; min-width: 640px; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; background: var(--tint); }
+td:first-child { color: var(--muted); font-weight: 500; white-space: nowrap; }
+td code, p code, li code { font-family: var(--mono); font-size: 12.5px; }
+.verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.verdict > div { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+.verdict h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.verdict p { font-size: 14px; color: var(--muted); }
+ul.q { margin: 0; padding-left: 20px; max-width: 70ch; display: flex; flex-direction: column; gap: 6px; }
+:focus-visible { outline: 2px solid var(--push); outline-offset: 2px; }
+</style>
+
+<svg class="hidden-defs" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="mk-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="mk-ink" d="M0 1 L10 5 L0 9 z"/></marker>
+    <marker id="mk-push" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="mk-push" d="M0 1 L10 5 L0 9 z"/></marker>
+    <marker id="mk-pull" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="mk-pull" d="M0 1 L10 5 L0 9 z"/></marker>
+    <marker id="mk-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="mk-bad" d="M0 1 L10 5 L0 9 z"/></marker>
+  </defs>
+</svg>
+
+<main>
+  <header>
+    <div class="tag">черновик для ревью Opus · 2026-10-11</div>
+    <h1>Зеркальное дерево памяти</h1>
+    <p class="lead">Как уроки агента попадают в контекст сейчас, как их доставляло бы зеркальное дерево и что меняется, если собрать его вместе с Atlas. Полный текст: <code>workspace/dev/memory-mirror-tree.md</code>.</p>
+  </header>
+
+  <section>
+    <div class="tag">1 · сейчас</div>
+    <h2>Агент должен сам вспомнить, что урок существует</h2>
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 760 250" role="img" aria-label="Сейчас: агент читает индекс MEMORY.md и сам решает открыть файл урока; если не вспомнил, ошибка повторяется">
+          <rect class="box" x="10" y="80" width="200" height="74" rx="6"/>
+          <text class="s" x="24" y="104">Агент правит</text>
+          <text class="m" x="24" y="126">router_module/manager.py</text>
+          <rect class="box soft" x="290" y="80" width="190" height="74" rx="6"/>
+          <text class="m" x="304" y="104">MEMORY.md</text>
+          <text class="s" x="304" y="124">35 указателей, ~8 КБ</text>
+          <text class="s" x="304" y="142">всегда в контексте</text>
+          <rect class="box" x="560" y="80" width="190" height="74" rx="6"/>
+          <text class="m" x="574" y="104">docs/claude/memory</text>
+          <text class="s" x="574" y="124">~380 файлов плоско</text>
+          <text class="s" x="574" y="142">+ 185 в архиве</text>
+          <path class="ln pull" d="M210 117 H288" marker-end="url(#mk-pull)"/>
+          <text class="lab pull" x="214" y="104">вспомнил?</text>
+          <path class="ln pull" d="M480 117 H558" marker-end="url(#mk-pull)"/>
+          <text class="lab pull" x="486" y="104">открыть сам</text>
+          <rect class="box bad" x="290" y="190" width="190" height="48" rx="6"/>
+          <text class="lab bad" x="304" y="211">урок не прочитан</text>
+          <text class="s" x="304" y="228">ошибка повторяется</text>
+          <path class="ln bad" d="M110 154 V214 H288" marker-end="url(#mk-bad)"/>
+          <text class="lab bad" x="124" y="208">не вспомнил</text>
+        </svg>
+      </div>
+      <figcaption>Это pull: доставка держится на том, что агент вспомнит про урок. Как часто нужный урок доходит сейчас, не измерено. Субагент получает память, только если лид вписал её в промпт.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="tag">2 · идея владельца</div>
+    <h2>Память лежит по адресу кода и приходит при касании файла</h2>
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 800 310" role="img" aria-label="Зеркальное дерево: у файла кода, папки и слоя есть одноимённые узлы памяти; ссылки между узлами идут по id урока">
+          <text class="tag" x="10" y="16" style="font-family:var(--mono);font-size:11px;fill:var(--muted)">КОД</text>
+          <text class="tag" x="450" y="16" style="font-family:var(--mono);font-size:11px;fill:var(--muted)">.claude/rules/memory/ — узел появляется, только когда есть урок</text>
+
+          <rect class="box" x="10" y="30" width="250" height="46" rx="6"/>
+          <text class="m" x="22" y="58">…/router_module/manager.py</text>
+          <rect class="box" x="10" y="110" width="250" height="46" rx="6"/>
+          <text class="m" x="22" y="138">…/router_module/  (папка)</text>
+          <rect class="box" x="10" y="190" width="250" height="46" rx="6"/>
+          <text class="m" x="22" y="218">multiprocess_framework/  (слой)</text>
+
+          <rect class="box good" x="450" y="26" width="340" height="54" rx="6"/>
+          <text class="m" x="462" y="48">…/router_module/manager.md</text>
+          <text class="s" x="462" y="68">paths: manager.py · ## L-router-0007</text>
+          <rect class="box soft" x="450" y="106" width="340" height="54" rx="6"/>
+          <text class="m" x="462" y="128">…/router_module/_module.md</text>
+          <text class="s" x="462" y="148">paths: router_module/** · уроки модуля</text>
+          <rect class="box soft" x="450" y="186" width="340" height="54" rx="6"/>
+          <text class="m" x="462" y="208">…/_layer.md</text>
+          <text class="s" x="462" y="228">paths: multiprocess_framework/** · уроки слоя</text>
+
+          <path class="ln push" d="M260 53 H448" marker-end="url(#mk-push)"/>
+          <text class="lab push" x="282" y="44">тот же адрес, .py → .md</text>
+          <path class="ln push" d="M260 133 H448" marker-end="url(#mk-push)"/>
+          <text class="lab push" x="308" y="124">паспорт папки</text>
+          <path class="ln push" d="M260 213 H448" marker-end="url(#mk-push)"/>
+          <text class="lab push" x="316" y="204">паспорт слоя</text>
+
+          <rect class="box plan" x="450" y="266" width="340" height="34" rx="6"/>
+          <text class="m" x="462" y="287">state_store_module/store.md → L-router-0007</text>
+          <path class="ln" d="M790 283 H796 V53 H792" marker-end="url(#mk-ink)"/>
+          <text class="s" x="270" y="286">в другом месте только ссылка по id, текст один раз</text>
+        </svg>
+      </div>
+      <figcaption>Зелёные стрелки — push: агент читает или правит файл, Claude Code сам подгружает узел с совпавшим <code>paths:</code>. Вживую проверено 2026-10-11 на Windows у субагента: правило пришло только после чтения файла по нужному пути. Минус варианта: ~380 + 185 файлов переносятся, появляется второй id и второй check рядом с Atlas.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="tag">3 · итог ревью · A-lite-min</div>
+    <h2>Уроки остаются на месте, слой доставки генерируется</h2>
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 800 310" role="img" aria-label="A-lite: уроки и modules.yaml читает генератор, он пишет правила по модулям в .claude/rules/memory, Claude Code грузит их агенту сам; Atlas читает тот же frontmatter">
+          <rect class="box" x="10" y="14" width="240" height="64" rx="6"/>
+          <text class="m" x="22" y="38">modules.yaml</text>
+          <text class="s" x="22" y="58">модуль → paths · читает сам генератор</text>
+          <rect class="box good" x="10" y="226" width="240" height="64" rx="6"/>
+          <text class="m" x="22" y="250">docs/claude/memory/*.md</text>
+          <text class="s" x="22" y="270">источник истины · id = имя файла</text>
+
+          <rect class="box plan" x="320" y="6" width="170" height="52" rx="6"/>
+          <text class="m" x="332" y="28">Atlas: card</text>
+          <text class="s" x="332" y="46">читает уроки сам · план 1.10c</text>
+          <rect class="box soft" x="320" y="100" width="170" height="90" rx="6"/>
+          <text class="m" x="332" y="124">генератор</text>
+          <text class="s" x="332" y="144">рядом с tags.py</text>
+          <text class="s" x="332" y="162">rules.py --write / --check</text>
+          <text class="s" x="332" y="180">шаг в validate.py</text>
+          <rect class="box good" x="560" y="100" width="230" height="90" rx="6"/>
+          <text class="m" x="572" y="124">rules/memory/&lt;module&gt;.md</text>
+          <text class="s" x="572" y="144">генерируется, руками не править</text>
+          <text class="s" x="572" y="162">paths: из modules.yaml · в git</text>
+          <text class="s" x="572" y="180">строки «урок — описание»</text>
+          <rect class="box" x="560" y="226" width="230" height="64" rx="6"/>
+          <text class="lab" x="572" y="250">Агент (роли: проба G0)</text>
+          <text class="s" x="572" y="270">читает или правит файл модуля</text>
+
+          <path class="ln" d="M250 46 L318 112" marker-end="url(#mk-ink)"/>
+          <path class="ln" d="M250 240 L318 178" marker-end="url(#mk-ink)"/>
+
+          <path class="ln" d="M490 145 H558" marker-end="url(#mk-ink)"/>
+          <text class="s" x="498" y="136">пишет</text>
+          <path class="ln push" d="M675 190 V224" marker-end="url(#mk-push)"/>
+          <text class="lab push" x="686" y="212">грузится само</text>
+          <path class="ln pull" d="M558 262 H252" marker-end="url(#mk-pull)"/>
+          <text class="lab pull" x="300" y="254">Read тела урока — по требованию</text>
+        </svg>
+      </div>
+      <figcaption>Без БД Atlas в цепочке и без переноса файлов: слой читает те же теги, что <code>tags.py</code>. Один файл на модуль, у которого есть урок (54 из 88). В узле указатели, не тела: медиана тела урока 2,9 КБ, у <code>process_module</code> все тела весят 123 КБ. Сторож: файл-канарейка с несработавшим <code>paths:</code>, и проверка суммарного размера. Если <code>paths:</code> перестанут работать, остаётся сегодняшний <code>search.py</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="tag">итоговая схема · как она работает</div>
+    <h2>Два маленьких шага вместо поиска куска в большом файле</h2>
+    <p>Агент не ищет нужное место в большом файле. Сначала ему приходит узел модуля: короткое оглавление с одной строкой на урок. Потом он читает только тот урок, который подходит, а он лежит в своём отдельном файле.</p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 800 300" role="img" aria-label="Путь урока: агент читает файл модуля, Claude Code сам подгружает узел с указателями, агент читает один нужный урок; в старой схеме вместо шагов 2–4 агент вспоминает про урок сам">
+          <rect class="box" x="10" y="30" width="170" height="74" rx="6"/>
+          <text class="lab" x="22" y="54">1 · Агент читает</text>
+          <text class="m" x="22" y="76">process_module/</text>
+          <text class="m" x="22" y="92">…/process.py</text>
+
+          <rect class="box soft" x="215" y="30" width="170" height="74" rx="6"/>
+          <text class="lab" x="227" y="54">2 · Claude Code</text>
+          <text class="s" x="227" y="76">сверяет путь файла</text>
+          <text class="s" x="227" y="92">с paths: правил</text>
+
+          <rect class="box good" x="420" y="30" width="170" height="74" rx="6"/>
+          <text class="lab push" x="432" y="54">3 · Приходит узел</text>
+          <text class="m" x="432" y="76">process_module.md</text>
+          <text class="s" x="432" y="92">36 строк · 9,9 тыс. знаков</text>
+
+          <rect class="box" x="625" y="30" width="165" height="74" rx="6"/>
+          <text class="lab" x="637" y="54">4 · Агент выбирает</text>
+          <text class="s" x="637" y="76">урок по строкам</text>
+          <text class="s" x="637" y="92">«имя — правило» · гипотеза</text>
+
+          <path class="ln" d="M180 67 H213" marker-end="url(#mk-ink)"/>
+          <path class="ln push" d="M385 67 H418" marker-end="url(#mk-push)"/>
+          <path class="ln" d="M590 67 H623" marker-end="url(#mk-ink)"/>
+          <text class="s" x="14" y="22">Read или Edit файла</text>
+          <text class="lab push" x="262" y="22">грузит сам, без вызова агента</text>
+
+          <rect class="box" x="625" y="190" width="165" height="74" rx="6"/>
+          <text class="lab" x="637" y="214">5 · Read одного урока</text>
+          <text class="s" x="637" y="236">docs/claude/memory/</text>
+          <text class="s" x="637" y="252">медиана ≈ 2,9 КБ</text>
+          <path class="ln pull" d="M707 104 V188" marker-end="url(#mk-pull)"/>
+          <text class="lab pull" x="716" y="152">по требованию</text>
+
+          <rect class="box plan" x="10" y="190" width="580" height="74" rx="6"/>
+          <text class="lab bad" x="22" y="214">Сейчас вместо шагов 2–4</text>
+          <text class="s" x="22" y="236">MEMORY.md 7,7 КБ всегда в контексте, агент должен вспомнить про урок,</text>
+          <text class="s" x="22" y="254">потом дайджест CRAFT-by-module.md (19,6 КБ) или короткий список search.py --module.</text>
+        </svg>
+      </div>
+      <figcaption>Зелёный шаг 3 — главное отличие: узел приходит сам при касании кода модуля. Размер узла держит проверка, а не построение: потолок 40 строк, сегодня максимум 36. У половины из 54 узлов не больше 2 строк, но у <code>process_module</code> 9 868 знаков (13 КБ в байтах, около 2,5–3,9 тысячи токенов). Когда потолок сработает, порядок действий записан заранее: слить родственные уроки, обрезать описания до 120 знаков, делить по подпапкам.</figcaption>
+    </figure>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 800 300" role="img" aria-label="Как строится слой: генератор читает уроки и modules.yaml и пишет файлы правил, проверка validate.py сверяет их с уроками, канарейка и бюджет ловят поломку загрузки">
+          <rect class="box good" x="10" y="20" width="230" height="64" rx="6"/>
+          <text class="m" x="22" y="44">docs/claude/memory/*.md</text>
+          <text class="s" x="22" y="64">теги module: в шапке урока</text>
+          <rect class="box" x="10" y="112" width="230" height="64" rx="6"/>
+          <text class="m" x="22" y="136">modules.yaml</text>
+          <text class="s" x="22" y="156">модуль → его папки (paths)</text>
+
+          <rect class="box soft" x="290" y="50" width="190" height="96" rx="6"/>
+          <text class="m" x="302" y="74">rules.py --write</text>
+          <text class="s" x="302" y="94">~100 строк, без БД Atlas</text>
+          <text class="s" x="302" y="112">файл на модуль с уроками</text>
+          <text class="s" x="302" y="130">сортировка и LF — детерминизм</text>
+
+          <rect class="box good" x="540" y="50" width="250" height="96" rx="6"/>
+          <text class="m" x="552" y="74">.claude/rules/memory/</text>
+          <text class="s" x="552" y="94">54 файла, лежат в git</text>
+          <text class="s" x="552" y="112">paths: из modules.yaml</text>
+          <text class="s" x="552" y="130">руками не править · узел ≤ 40 строк</text>
+
+          <path class="ln" d="M240 52 L288 84" marker-end="url(#mk-ink)"/>
+          <path class="ln" d="M240 144 L288 112" marker-end="url(#mk-ink)"/>
+          <path class="ln push" d="M480 98 H538" marker-end="url(#mk-push)"/>
+          <text class="lab push" x="486" y="88">пишет</text>
+
+          <rect class="box" x="290" y="210" width="500" height="74" rx="6"/>
+          <text class="lab" x="302" y="232">validate.py → rules.py --check</text>
+          <text class="m" x="302" y="254">stale · missing · orphan · dead-path</text>
+          <text class="m" x="302" y="272">no-paths · node-too-big · budget · canary-missing</text>
+          <path class="ln" d="M665 146 V208" marker-end="url(#mk-ink)"/>
+          <text class="s" x="674" y="182">сверяет с уроками</text>
+
+          <rect class="box bad" x="10" y="210" width="240" height="74" rx="6"/>
+          <text class="lab bad" x="22" y="232">файл-канарейка</text>
+          <text class="m" x="22" y="252">paths: __canary__/never</text>
+          <text class="s" x="22" y="270">увидел строку — paths сломан</text>
+
+        </svg>
+      </div>
+      <figcaption>Слой не пишется вручную: его собирает программа из тех же уроков, а проверка краснеет по восьми кодам расхождений. Это отвечает на вопрос, кто поддерживает память: файлы правил ни агент, ни человек не правят. Канарейка работает отдельно от проверки: <code>--check</code> лишь убеждается, что её файл есть, а сигналом служит строка у агента в контексте, если она появилась. Вместе с проверкой суммарного размера она нужна на случай, если Claude Code начнёт загружать все правила разом (+16–26 тысяч токенов в каждой сессии).</figcaption>
+    </figure>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 800 250" role="img" aria-label="Порядок работ: проба G0, тесты вслепую, генератор, замер на десяти парах задач, решение; на пробе и на замере есть условия остановки">
+          <rect class="box" x="10" y="40" width="140" height="80" rx="6"/>
+          <text class="lab" x="22" y="64">G0 · проба</text>
+          <text class="s" x="22" y="84">доходят ли правила</text>
+          <text class="s" x="22" y="102">до ролей и worktree</text>
+          <rect class="box" x="175" y="40" width="140" height="80" rx="6"/>
+          <text class="lab" x="187" y="64">Тесты вслепую</text>
+          <text class="s" x="187" y="84">12 поломок, тестер</text>
+          <text class="s" x="187" y="102">пишет до кода</text>
+          <rect class="box" x="340" y="40" width="140" height="80" rx="6"/>
+          <text class="lab" x="352" y="64">Генератор</text>
+          <text class="s" x="352" y="84">rules.py, ~100 строк</text>
+          <text class="s" x="352" y="102">+ шаг в validate.py</text>
+          <rect class="box" x="505" y="40" width="140" height="80" rx="6"/>
+          <text class="lab" x="517" y="64">Замер</text>
+          <text class="s" x="517" y="84">шаг 0 без агентов,</text>
+          <text class="s" x="517" y="102">потом 10 пар задач</text>
+          <rect class="box good" x="670" y="40" width="120" height="80" rx="6"/>
+          <text class="lab push" x="682" y="64">Решение</text>
+          <text class="s" x="682" y="84">оставить слой</text>
+          <text class="s" x="682" y="102">или удалить</text>
+          <path class="ln push" d="M150 80 H173" marker-end="url(#mk-push)"/>
+          <path class="ln push" d="M315 80 H338" marker-end="url(#mk-push)"/>
+          <path class="ln push" d="M480 80 H503" marker-end="url(#mk-push)"/>
+          <path class="ln push" d="M645 80 H668" marker-end="url(#mk-push)"/>
+
+          <rect class="box bad" x="10" y="170" width="200" height="60" rx="6"/>
+          <text class="lab bad" x="22" y="192">правила не доходят до ролей</text>
+          <text class="s" x="22" y="212">механизм работает только для лида</text>
+          <path class="ln bad" d="M80 120 V168" marker-end="url(#mk-bad)"/>
+          <rect class="box bad" x="505" y="170" width="285" height="72" rx="6"/>
+          <text class="lab bad" x="517" y="192">стоп при любом из трёх</text>
+          <text class="s" x="517" y="212">B лучше A меньше чем в 3 из 10 задач</text>
+          <text class="s" x="517" y="230">хоть одна хуже · прирост &gt; 5k токенов</text>
+          <path class="ln bad" d="M575 120 V168" marker-end="url(#mk-bad)"/>
+          <rect class="box plan" x="250" y="170" width="220" height="60" rx="6"/>
+          <text class="lab pull" x="262" y="192">до слияния: строка в план Atlas</text>
+          <text class="s" x="262" y="212">дата и SHA слияния для K1.1</text>
+        </svg>
+      </div>
+      <figcaption>Красные ветки — остановки. Если проба G0 покажет, что роли правил не получают, решение принимается заново. Если замер не проходит порог, слой и генератор удаляются одним коммитом. Пороги предложил ревьюер, утверждает их владелец.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="tag">сводка</div>
+    <h2>Что меняется</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th></th><th>Сейчас</th><th>Зеркало (идея)</th><th>A-lite-min (вердикт)</th></tr></thead>
+        <tbody>
+          <tr><td>Доставка</td><td>агент вспоминает (pull)</td><td>по касанию файла (push)</td><td>push указателей при чтении файла модуля, тело по требованию</td></tr>
+          <tr><td>Точность адреса</td><td>тег <code>module:</code> у 224 из 371 урока</td><td>файл, папка, слой</td><td>модуль (224 из 371 урока имеют адрес)</td></tr>
+          <tr><td>Перенос файлов</td><td>—</td><td>~380 + 185</td><td>нет, +54 сгенерированных файла, −<code>CRAFT-by-module.md</code></td></tr>
+          <tr><td>Id урока</td><td>имя файла (Atlas)</td><td>второй id <code>L-…</code></td><td>имя файла, один id</td></tr>
+          <tr><td>Проверки</td><td><code>tags.py --check</code></td><td>свой <code>mem_tree check</code> рядом</td><td>новый шаг рядом с <code>tags.py</code>: stale, orphan, dead-path, budget</td></tr>
+          <tr><td>Если <code>paths:</code> сломается</td><td>—</td><td>теряем доставку и перенесённые файлы</td><td>правила не грузятся: возврат к <code>search.py</code>; грузится всё: +16–26k токенов на сессию, ловят канарейка и бюджет</td></tr>
+          <tr><td>Главный риск</td><td>недоставка</td><td>два параллельных механизма</td><td>«указатель был, ошибка повторилась»: в 29 из 30 повторов</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="tag">вердикт ревью Opus · итерация 1 из 2</div>
+    <h2>Строить в урезанном виде, начать с пробы, а не с кода</h2>
+    <div class="verdict">
+      <div><h3>Варианты</h3><p>A, B и C отклонены. Раунд 1: CHANGES REQUESTED для A-lite, убрать <code>anchors:</code>, id вида <code>L-…</code>, <code>sync</code>, <code>new</code>, <code>report</code>, <code>_layer.md</code>.</p></div>
+      <div><h3>Польза не доказана</h3><p>Из 30 измеренных повторов <code>module:</code> есть у 8. Остальные 22 про механизм и адреса в коде не имеют. Потолок эффекта около 27 %.</p></div>
+      <div><h3>Главный риск</h3><p>В 29 из 30 повторов указатель на старший урок уже был в <code>MEMORY.md</code>. Строка в контексте применения не гарантирует.</p></div>
+      <div><h3>Проба G0 до кода</h3><p>У всех 15 ролей стоит <code>omitClaudeMd: true</code>. Моя проба шла на агенте без этого флага. Получают ли роли правила по <code>paths:</code>, не проверено.</p></div>
+      <div><h3>Порядок с Atlas</h3><p>Внедрять до K1.1 и записать дату и SHA слияния в план Atlas: K1.1 посчитает повторы до и после. CTO звать не нужно.</p></div>
+      <div><h3>Замер «стоит ли»</h3><p>10 пар задач, плечо «как сейчас» против «плюс правила», слепой судья. Порог: ≥ 3 лучше, 0 хуже, ≤ 5k токенов прироста.</p></div>
+      <div><h3>Раунд 2 из 2</h3><p>Механизм годен, но пакет к плану не готов: 12 неточностей на этой странице исправлены; нужны шаги пробы G0 и список из 10 задач до генератора. Подробности в файле ревью.</p></div>
+    </div>
+  </section>
+</main>
