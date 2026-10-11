@@ -1,17 +1,17 @@
 # Task result — form for `tasks/<id>.result.md`
 
-Atlas parses this file (ADR-ATL-001: nodes `result`, `injection`; edges `reports`, `lists`, `breaks`), so the
-headings and the table header below are a contract: keep them literally, in this order; an empty section says
+Atlas parses this file (ADR-ATL-001: node `result`, edge `reports`; ADR-ATL-004 §4), so the headings below are a
+contract: keep them literally, in this order; an empty section says
 `нет` (except `## Не проверено`, which is never empty). Required — the seven from `## Сделано` to `## Кому передано`
 (`atlas lint-result <file>`, the PostToolUse hook `lint-result.sh`, finding `RESULT_FORM`); `## Для следующего брифа`
 and `## Память` are optional. `atlas pack` of the next task prints `## Осталось`, `## Не проверено` and
 `## Для следующего брифа` as tails (Task 1.9a).
 
-Writers, in order, one at a time: the executor writes the file before its report; the lead then appends rows to
-`## Инъекции` (its own break-injection) and fills `слияние:` after the merge. Nobody else edits it.
+Writers, in order, one at a time: the executor writes the file before its report; the lead then writes
+`## Инъекции` (its own break-injection, from `tasks/<id>.injections.json`) and fills `слияние:` after the merge.
+Nobody else edits it.
 
-Budget: the prose sections (`## Сделано` … `## Кому передано`, without the injection table) ≤ 2 KB. The table and
-`## Память` are outside it. Command outputs, reasoning, long lists go to
+Budget: the prose sections (`## Сделано` … `## Кому передано`) ≤ 2 KB; `## Память` is outside it. Command outputs, reasoning, long lists go to
 `docs/reviews/<YYYY-MM-DD>_task-<id>-<role>.md` (the path from `executor-brief.md` REPORT); name it under `## Файлы`.
 Language: Russian prose (the owner reads it); headings, codes, paths, commands as below.
 
@@ -36,9 +36,7 @@ Language: Russian prose (the owner reads it); headings, codes, paths, commands a
 - слияние: <merge SHA in main | ещё нет>
 
 ## Инъекции
-| инъекция | предсказано красных | наблюдалось | тест |
-|---|---|---|---|
-| <what was broken, file:line> | <N, written BEFORE the run> | <N> | <pytest nodeid>[, <nodeid>…] |
+- <N> инъекций, совпало <M>, расхождений <K> — tasks/<id>.injections.json | нет
 
 ## Кому передано
 - <role / session / next task id | нет>
@@ -51,17 +49,17 @@ memory hits: <command> -> <paths> | none
 MEMORY LESSON <name>.md: <full file text> | none
 ````
 
-## Rules for the table `## Инъекции`
+## Rules for `## Инъекции` (ADR-ATL-004 §4)
 
-- One row = one injection = one claimed property broken on purpose (`.claude/CLAUDE.md` → «Test authorship»).
-  Row order is the id: `<slug>#<id>/inj-<n>`, n from 1 — never reorder rows once committed.
-- `предсказано красных` is written before the run; a mismatch with `наблюдалось` stays in the row and gets a line
-  under `## Не проверено` — never edit the prediction afterwards.
-- `тест` — full pytest nodeid(s) without parameters, comma-separated. `наблюдалось` > 0 means the named test(s)
-  went red; Atlas raises `TEST_NEVER_RED` on a test named only in rows with 0.
-- A task without injections (docs, plans) keeps the header and one row: `| нет | 0 | 0 | — |`.
+- The matrix lives in `tasks/<id>.injections.json` (form: `injections.md`): one object = one injection = one claimed
+  property broken on purpose (`.claude/CLAUDE.md` → «Test authorship»). The result carries one summary line
+  `- N инъекций, совпало M, расхождений K — tasks/<id>.injections.json` (`, не прогнано L` when L > 0); every
+  mismatch also gets a line under `## Не проверено`. A task without injections (docs, plans) writes `- нет`.
+- Old results keep the table `| инъекция | предсказано красных | наблюдалось | тест |` — `atlas pack` still prints
+  its rows where predicted ≠ observed (`views._result_parts`). For the summary line that tail comes back with the
+  JSON reader of Task 1.9e; until then a mismatch is visible only under `## Не проверено`.
 - Tests that guard a declared guarantee carry `@pytest.mark.guards("G-<module>-NNN")` (ADR-ATL-001 §4); the
-  guarantee link comes from the marker, not from this table.
+  guarantee link comes from the marker, not from the injections.
 
 ## Rules for `## Память`
 

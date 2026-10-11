@@ -1,0 +1,245 @@
+[
+ {
+  "id": "inj-1",
+  "prop": "шапка лида не уходит в спавн",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "Основание: строка Task 1.2 в `plan.md`;",
+  "new": "SEE: x\nОснование: строка Task 1.2 в `plan.md`;",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "файл роли собирается",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "ROLE: tester\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "маркеры FACTS",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "<!-- /atlas:facts -->\n\nDESIGN",
+  "new": "\nDESIGN",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "грамматика строки ACCEPTANCE",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "config_module -q` → exit 0",
+  "new": "config_module -q` -> exit 0",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "## Открыто для лида читается",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "| О1 | debounce 1,0 с оставить? | две записи с паузой 0,05 с — одно событие | оставить; таймер перезапускается на каждое событие |\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_lead_parts_reads_open_questions"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_lead_parts_reads_open_questions"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "хук пропускает бриф роли",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "  3. Each run builds its own watcher on a temp file; `stop()` in `finally`.\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "файл роли невидим плану",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "# 1.2 — бриф tester",
+  "new": "# Task 1.2 — бриф tester",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "восемь ключей",
+  "file": ".claude/plugins/dev/templates/injections.md",
+  "old": "  \"test\": \"multiprocess_framework/modules/config_module/tests/test_watcher.py\"\n",
+  "new": "  \"tests\": \"multiprocess_framework/modules/config_module/tests/test_watcher.py\"\n",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "forecast — nodeid",
+  "file": ".claude/plugins/dev/templates/injections.md",
+  "old": "  \"forecast\": [\n   \"multiprocess_framework/modules/config_module/tests/test_watcher.py::test_second_write_is_reloaded\"",
+  "new": "  \"forecast\": [\n   \"test_second_write_is_reloaded\"",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "суммы шапки ревью",
+  "file": ".claude/plugins/dev/templates/review-report.md",
+  "old": "Итог: blocker 0, major 2, minor 1, nit 1",
+  "new": "Итог: blocker 0, major 3, minor 1, nit 1",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "словарь классов",
+  "file": ".claude/plugins/dev/templates/review-report.md",
+  "old": "- [minor/context] Ещё потребитель",
+  "new": "- [minor/nit] Ещё потребитель",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-12",
+  "prop": "таблица ADR называет тест-контракт",
+  "file": "scripts/atlas/DECISIONS.md",
+  "old": "| `test_result_form_1_9a.py::test_template_parses_to_seven_required_sections` | 1.9a |",
+  "new": "|  | 1.9a |",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_adr_table_names_reader_and_contract"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_adr_table_names_reader_and_contract"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "хук линтует и главный бриф (DESIGN ≥ 3)",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "  3. `stop()` отменяет таймер и ждёт идущий колбэк; публичный API не меняется.\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "пункт ACCEPTANCE `N. ` тоже по грамматике",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "  - тесты модуля — `python -m pytest multiprocess_framework/modules/config_module -q` → exit 0",
+  "new": "  1. тесты модуля — `python -m pytest multiprocess_framework/modules/config_module -q` -> exit 0",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "раздел «Что я оставил открытым» обязателен",
+  "file": ".claude/plugins/dev/templates/review-report.md",
+  "old": "## Что я оставил открытым / ненадёжным\n- Windows не проверялся; прогоны короткие (N = 3).\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "файл роли невидим плану — через читатель extract_task_ids",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "Файл роли: спавн —",
+  "new": "## Task 1.2 — заметка\n\nФайл роли: спавн —",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "заголовок ## Замечания целой строкой",
+  "file": ".claude/plugins/dev/templates/review-report.md",
+  "old": "## Замечания\n- [major/dryrun]",
+  "new": "## Замечания р.1\n- [major/dryrun]",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ }
+]
