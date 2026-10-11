@@ -1,0 +1,194 @@
+{
+ "Q1-K": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q1-L": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q1-M": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q1-N": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q1-O": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q1-P": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q2-K": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q2-L": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q2-M": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q2-N": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q2-O": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q2-P": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q3-K": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q3-L": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q3-M": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q3-N": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q3-O": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q3-P": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q4-K": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q4-L": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q4-M": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q4-N": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q4-O": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q4-P": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q5-K": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q5-L": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q5-M": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q5-N": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q5-O": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q5-P": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q6-K": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q6-L": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q6-M": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q6-N": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q6-O": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q6-P": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q7-K": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q7-L": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q7-M": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q7-N": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q7-O": {
+  "variant": "D",
+  "rep": 1
+ },
+ "Q7-P": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q8-K": {
+  "variant": "C",
+  "rep": 1
+ },
+ "Q8-L": {
+  "variant": "A",
+  "rep": 2
+ },
+ "Q8-M": {
+  "variant": "D",
+  "rep": 2
+ },
+ "Q8-N": {
+  "variant": "A",
+  "rep": 1
+ },
+ "Q8-O": {
+  "variant": "C",
+  "rep": 2
+ },
+ "Q8-P": {
+  "variant": "D",
+  "rep": 1
+ }
+}
