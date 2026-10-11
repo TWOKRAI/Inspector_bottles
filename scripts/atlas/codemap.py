@@ -101,17 +101,31 @@ def _long_paths_enabled() -> bool:
         return False
 
 
-def _check_path_length(tree: Tree, roots: list[str], tmp: Path) -> None:
-    """Windows без длинных путей: самый длинный файл выгрузки не должен выйти за MAX_PATH (tar иначе падает молча)."""
-    if sys.platform != "win32" or _long_paths_enabled():
-        return
+def _cache_dir(tree: Tree, roots: list[str], key: str) -> Path:
+    """Каталог кэша выгрузок: `<repo>/data/atlas/checkout`; Windows без длинных путей и самый длинный файл выгрузки
+    не влезает в MAX_PATH -> короткий корень `<temp>/atlas-checkout/<хэш корня репозитория>` (тоже постоянный);
+    не влезает и он -> AtlasError (tar иначе падает молча)."""
+    primary = tree.root / CHECKOUT_DIR
+    if not roots or sys.platform != "win32" or _long_paths_enabled():
+        return primary
     longest = max((len(f) for f in tree.files() if f.endswith(".py") and f.split("/")[0] in roots), default=0)
-    total = len(os.path.abspath(tmp)) + 1 + longest
-    if total > _WIN_PATH_LIMIT:
-        raise AtlasError(
-            f"atlas: checkout path too long ({total} > {_WIN_PATH_LIMIT}): "
-            "move the repository to a shorter path or enable LongPathsEnabled"
-        )
+
+    def total(cache: Path) -> int:
+        return len(os.path.abspath(cache / key)) + 1 + longest
+
+    if total(primary) <= _WIN_PATH_LIMIT:
+        return primary
+    short = (
+        Path(tempfile.gettempdir())
+        / "atlas-checkout"
+        / hashlib.sha256(str(tree.root.resolve()).encode()).hexdigest()[:8]
+    )
+    if total(short) <= _WIN_PATH_LIMIT:
+        return short
+    raise AtlasError(
+        f"atlas: checkout path too long ({total(primary)} > {_WIN_PATH_LIMIT}): "
+        "move the repository to a shorter path or enable LongPathsEnabled"
+    )
 
 
 def _discard(entry: Path) -> None:
@@ -149,14 +163,14 @@ def _prune(cache: Path, current: str) -> None:
 def checkout(tree: Tree, rows: list[dict]) -> Path:
     """Выгрузка .py ревизии под верхние каталоги `paths` строк modules.yaml (только существующие в дереве).
 
-    Каталог `<repo>/data/atlas/checkout/<sha[:12]>-<хэш корней>` живёт между процессами (хранятся KEEP новейших):
-    есть каталог — это попадание, `git archive` не запускается. Распаковка идёт во временный каталог и одним
-    `rename` встаёт под итоговое имя — недораспакованное дерево под итоговым именем не видно никому.
+    Каталог `<repo>/data/atlas/checkout/<sha[:12]>-<хэш корней>` (`_cache_dir`) живёт между процессами (хранятся
+    KEEP новейших): есть каталог — это попадание, `git archive` не запускается. Распаковка идёт во временный
+    каталог и одним `rename` встаёт под итоговое имя — недораспакованное дерево под итоговым именем не видно никому.
     """
     roots = _roots(tree, rows)
     digest = hashlib.sha256("\n".join(roots).encode()).hexdigest()[:8]
     key = f"{resolve(tree.root, tree.ref)[:12]}-{digest}"
-    cache = tree.root / CHECKOUT_DIR
+    cache = _cache_dir(tree, roots, key)
     final = cache / key
     try:
         os.utime(final)
@@ -167,10 +181,9 @@ def checkout(tree: Tree, rows: list[dict]) -> Path:
             return final
         _discard(final)  # пустая выгрузка при непустых корнях не должна залипнуть: промах
     cache.mkdir(parents=True, exist_ok=True)
-    tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{key}-", dir=cache))
+    tmp = Path(tempfile.mkdtemp(prefix=".tmp-", dir=cache))  # короткое имя: самый длинный путь — итоговый
     try:
         if roots:  # `git archive` без путей выгрузил бы всё дерево
-            _check_path_length(tree, roots, tmp)
             specs = [f":(glob){r}/**/*.py" for r in roots]
             proc = run_git(tree.root, "-c", "core.autocrlf=false", "archive", "--format=tar", tree.ref, "--", *specs)
             if proc.returncode != 0:

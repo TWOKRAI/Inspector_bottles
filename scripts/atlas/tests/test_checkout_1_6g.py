@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -189,20 +190,51 @@ def test_empty_directory_under_final_name_is_a_miss(repo_factory: RepoFactory) -
     assert _all_entries(repo) == [base.name]
 
 
+def _deep(base: Path, length: int) -> Path:
+    """Несозданный путь ровно `length` знаков под `base`."""
+    pad = length - len(str(base)) - 1
+    if pad < 1:
+        pytest.skip("tmp_path слишком длинный для подгонки")
+    return base / ("p" * pad)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="предел MAX_PATH только в Windows")
-def test_too_long_checkout_path_raises_before_unpack(
+def test_too_long_primary_falls_back_to_short_temp_root(
     repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     repo = _new_repo(repo_factory, "long")
-    pad = 208 - len(str(tmp_path)) - 1  # каталог кэша 208 знаков: сам создаётся, а временный + файл выходят за 259
-    if pad < 1:
-        pytest.skip("tmp_path слишком длинный для подгонки")
-    cache = tmp_path / ("p" * pad)
-    monkeypatch.setattr(codemap, "CHECKOUT_DIR", cache)
+    deep = _deep(tmp_path, 250)  # 250 + ключ + файл выходят за 259
+    short_temp = tmp_path / "t"
+    short_temp.mkdir()
+    monkeypatch.setattr(codemap, "CHECKOUT_DIR", deep)
     monkeypatch.setattr(codemap, "_long_paths_enabled", lambda: False)
+    monkeypatch.setattr(tempfile, "tempdir", str(short_temp))
+    base = run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
+    assert short_temp / "atlas-checkout" in base.parents
+    assert (base / "m" / "interfaces.py").is_file()
+    assert not deep.exists(), "под слишком длинным основным путём что-то создано"
+    ino = base.stat().st_ino
+    codemap.forget()
+    spy = _install_spy(monkeypatch)
+    again = run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
+    assert again == base
+    assert spy.archive == 0, "второй вызов распаковал ревизию заново"
+    assert again.stat().st_ino == ino
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="предел MAX_PATH только в Windows")
+def test_too_long_primary_and_short_root_raise_and_leave_nothing(
+    repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _new_repo(repo_factory, "longlong")
+    deep, deep_temp = _deep(tmp_path, 250), tmp_path / ("q" * 240)
+    monkeypatch.setattr(codemap, "CHECKOUT_DIR", deep)
+    monkeypatch.setattr(codemap, "_long_paths_enabled", lambda: False)
+    monkeypatch.setattr(tempfile, "tempdir", str(deep_temp))
     with pytest.raises(AtlasError, match="path too long"):
         run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
-    assert list(cache.iterdir()) == []
+    assert not deep.exists()
+    assert not deep_temp.exists()
 
 
 def test_stale_temp_entries_are_removed_and_fresh_ones_kept(repo_factory: RepoFactory) -> None:
