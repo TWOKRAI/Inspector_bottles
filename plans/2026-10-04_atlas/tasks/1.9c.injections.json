@@ -8,9 +8,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -22,9 +20,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -36,9 +32,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -50,9 +44,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -64,9 +56,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -79,10 +69,7 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -95,10 +82,7 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -110,9 +94,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -120,19 +102,11 @@
     "prop": "CRLF оставляет \\r в строках",
     "file": "scripts/atlas/lint_brief.py",
     "old": "        self.lines = text.splitlines()",
-    "new": "        self.lines = text.split(\"\\n\")",
+    "new": "        self.lines = text.split(\"\\n\")[: len(text.splitlines())]",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -144,9 +118,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -158,9 +130,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -172,9 +142,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -186,9 +154,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -200,9 +166,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -215,11 +179,7 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -232,12 +192,7 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell",
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -249,9 +204,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -263,21 +216,19 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
     "id": "inj-19",
-    "prop": "stdin не закрыт",
+    "prop": "stdin не закрыт (строка убрана)",
     "file": "scripts/atlas/replay.py",
     "old": "            stdin=subprocess.DEVNULL,",
-    "new": "            stdin=subprocess.PIPE,",
+    "new": "",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -289,9 +240,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -303,9 +252,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -317,37 +264,31 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
     "id": "inj-23",
     "prop": "git --output проходит фильтр",
     "file": "scripts/atlas/replay.py",
-    "old": "_GIT_BAD_PREFIX = (\"--output\", \"-O\", \"--open-files-in-pager\", \"--exec\", \"--batch\")",
-    "new": "_GIT_BAD_PREFIX = (\"--open-files-in-pager\", \"--exec\", \"--batch\")",
+    "old": "    \"--output\",",
+    "new": "",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
     "id": "inj-24",
     "prop": "pytest --junitxml проходит фильтр",
     "file": "scripts/atlas/replay.py",
-    "old": "        elif arg.startswith(\"-\") and arg not in _PYTEST_FLAGS:",
-    "new": "        elif False:",
+    "old": "        elif arg.startswith(\"@\") or (arg.startswith(\"-\") and arg not in _PYTEST_FLAGS):  # @файл — argfile pytest",
+    "new": "        elif arg.startswith(\"@\"):",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -357,7 +298,7 @@
     "old": "        _kill_tree(proc)",
     "new": "        pass",
     "forecast": [],
-    "observed": [],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -367,36 +308,31 @@
     "old": "from scripts.atlas import replay",
     "new": "from scripts.atlas import brief, replay  # noqa: F401",
     "forecast": [],
-    "observed": [],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
     "id": "inj-27",
     "prop": "ATLAS_REPLAY_TIMEOUT игнорируется",
     "file": "scripts/atlas/replay.py",
-    "old": "        return float(os.environ.get(\"ATLAS_REPLAY_TIMEOUT\", \"\"))",
-    "new": "        return _DEFAULT_TIMEOUT",
+    "old": "        seconds = float(os.environ.get(\"ATLAS_REPLAY_TIMEOUT\", \"\"))",
+    "new": "        seconds = _DEFAULT_TIMEOUT",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
     "id": "inj-28",
     "prop": "n/a в REDS не освобождает от лимита",
     "file": "scripts/atlas/lint_brief.py",
-    "old": "    if not _na(reds) and (n := sum(1 for ln in reds if _ENTRY.match(ln))) > 10:",
-    "new": "    if (n := sum(1 for ln in reds if _ENTRY.match(ln))) > 10:",
+    "old": "        elif name == \"REDS\" and n > 10 and not _na(body):",
+    "new": "        elif name == \"REDS\" and n > 10:",
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -408,9 +344,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -423,11 +357,7 @@
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks",
       "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks",
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -439,9 +369,7 @@
     "forecast": [
       "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
     ],
-    "observed": [
-      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
-    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -451,7 +379,7 @@
     "old": "            if i >= len(args) or not args[i].startswith(\"no:\"):",
     "new": "            if i >= len(args):",
     "forecast": [],
-    "observed": [],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   },
   {
@@ -461,7 +389,79 @@
     "old": "        if (base != target and base not in target.parents) or target.is_dir():",
     "new": "        if target.is_dir():",
     "forecast": [],
-    "observed": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-34",
+    "prop": "склейка -nO<команда> проходит фильтр git",
+    "file": "scripts/atlas/replay.py",
+    "old": "        elif arg.startswith(\"-\") and \"O\" in arg:  # склейка коротких: `-nOtouch`",
+    "new": "        elif False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-35",
+    "prop": "сокращение длинной опции git проходит фильтр",
+    "file": "scripts/atlas/replay.py",
+    "old": "            if len(name) > 2 and any(bad.startswith(name) or name.startswith(bad) for bad in _GIT_BAD_LONG):",
+    "new": "            if len(name) > 2 and any(name.startswith(bad) for bad in _GIT_BAD_LONG):",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-36",
+    "prop": "@файл pytest проходит фильтр",
+    "file": "scripts/atlas/replay.py",
+    "old": "        elif arg.startswith(\"@\") or (arg.startswith(\"-\") and arg not in _PYTEST_FLAGS):  # @файл — argfile pytest",
+    "new": "        elif arg.startswith(\"-\") and arg not in _PYTEST_FLAGS:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-37",
+    "prop": "нулевой или бесконечный таймаут принимается",
+    "file": "scripts/atlas/replay.py",
+    "old": "    return seconds if math.isfinite(seconds) and seconds > 0 else _DEFAULT_TIMEOUT",
+    "new": "    return seconds",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_bad_replay_timeout_values_fall_back"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-38",
+    "prop": "предлог «с» после числа — время",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "(?:(?:с|сек)(?![ \\t]+[а-яёa-z])|s|ms|мс)",
+    "new": "(?:с|сек|s|ms|мс)",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_russian_preposition_after_a_number_is_not_a_duration"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-39",
+    "prop": "порядок отказов хука: блоки переставлены",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    for name in (\"DESIGN\", \"FILES\", \"REDS\"):  # порядок хука до 1.9c: поблочно, затем REPORT",
+    "new": "    for name in (\"FILES\", \"DESIGN\", \"REDS\"):",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_hook_reason_order_matches_the_legacy_copy"
+    ],
+    "observed": null,
     "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
   }
 ]
