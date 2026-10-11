@@ -19,6 +19,7 @@
 - [Вырожденное значение — «неизвестно», а не ноль](feedback_a_degenerate_value_is_not_zero_it_is_unknown.md) — heartbeat 0 законен («выключен»), поэтому страж ставится у ПОТРЕБИТЕЛЯ такта, не у источника
 - [ttl в config.reload отказывает по своей причине](feedback_config_reload_ttl_addressing_guard.md) — throttle-only + ttl ложно-зелёный
 - [Константа из физики, а не из замера](feedback_constant_from_domain_physics_not_measured.md) — 99.28 % наблюдений ниже первой границы; инъекции такое не ловят
+- [Ручные метки против спеки: каждая неясность — свой тест](feedback_hand_labels_vs_spec_isolate_each_ambiguity.md) — метка молчит или спорит со спекой: отдельный именованный тест на пункт, обе трактовки в отчёте; пояснение к метке — мнение, сверять с транскриптом
 
 ## Предохранители и механизмы
 - [Два предохранителя](feedback_test_reddens_only_under_a_paired_injection.md) — снимай все кроме проверяемого · [новый страж ослабляет старого](feedback_a_new_guard_can_weaken_an_old_one.md)
