@@ -235,5 +235,81 @@
    "scripts/atlas/tests/test_checkout_1_6g.py::test_hit_refreshes_recency"
   ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-18",
+  "prop": "непустые корни и пустая распаковка — AtlasError до rename (ревью р.1)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "            if not _has_py(tmp):\n                raise AtlasError(\"atlas: empty checkout\")\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_unpack_producing_nothing_raises_and_leaves_no_entry"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-19",
+  "prop": "пустой каталог под итоговым именем — промах, не попадание (ревью р.1)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "        if not roots or _has_py(final):\n",
+  "new": "        if True:\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_empty_directory_under_final_name_is_a_miss"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-20",
+  "prop": "Windows без длинных путей: путь выгрузки > 259 — AtlasError до распаковки (ревью р.1)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if total > _WIN_PATH_LIMIT:\n",
+  "new": "    if False:\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_checkout_path_raises_before_unpack"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-21",
+  "prop": "свежий .tmp-* соседа не удаляется, залежавшийся .del-* удаляется (порог 3600 с)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "_STALE_SECONDS = 3600\n",
+  "new": "_STALE_SECONDS = 0\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_stale_temp_entries_are_removed_and_fresh_ones_kept"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-22",
+  "prop": "память Code держит не больше 3 ревизий",
+  "file": "scripts/atlas/codemap.py",
+  "old": "_CODES_MAX = 3\n",
+  "new": "_CODES_MAX = 10\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_code_memory_holds_three_revisions_only"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-23",
+  "prop": "стражи кэша видов 1.6e снова видят промах кэша видов (ревью р.1, major)",
+  "file": "scripts/atlas/store.py",
+  "old": "    if row is None:\n        return None\n",
+  "new": "    if True:\n        return None\n",
+  "forecast": [
+   "scripts/atlas/tests/test_cache_1_6e.py::test_second_ref_and_card_do_no_checkout_and_no_build_graph",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_new_commit_invalidates_and_old_sha_stays_cached",
+   "scripts/atlas/tests/test_cache_1_6e.py::test_core_version_change_invalidates_cache",
+   "scripts/atlas/tests/test_cache_1_6e_code.py::test_source_edit_of_atlas_invalidates_view_cache",
+   "scripts/atlas/tests/test_cache_1_6e_code.py::test_broken_body_is_a_miss_and_failed_write_does_not_lose_the_view"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
