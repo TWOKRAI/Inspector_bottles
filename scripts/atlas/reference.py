@@ -22,7 +22,7 @@ from scripts.atlas.adapters.code import _read
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
-from scripts.atlas.codemap import DUNDERS, USAGE_UNKNOWN, Code, checkout, dotted, is_test
+from scripts.atlas.codemap import DUNDERS, USAGE_UNKNOWN, code_of, dotted, is_test
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.rules import Scan, all_of
 from scripts.atlas.tree import AtlasError, Tree, resolve
@@ -317,55 +317,51 @@ def ref(
     if symbol is not None and symbol not in {*names, *code}:
         raise AtlasError("atlas: symbol not found")
     shown = [symbol] if symbol else sorted({*names, *code})
-    with checkout(tree, rows) as base:
-        cm = Code(base, rows)
-        iface = dotted(path) if path else ""
-        where: dict[str, Any] = {n: dotted(p) for n, (p, _) in code.items() if n not in names}
-        for n in names:  # цепочка реэкспорта идёт от модуля определения; interfaces.py входит в неё как реэкспортёр
-            where[n] = (cm.defined_in(iface, n), iface)
-        use = cm.usage(module, {n: where[n] for n in shown})
-        wide = bool(names) and symbol in (None, *names)  # реализации нужны только интерфейсам
-        users = cm.module_users(module) if wide else []
-        scan = Scan.of_module(cm, module, users) if wide else None
-        impls = scan.implementations(module) if scan else {}
-        lines = (
-            [f"Справочник модуля {module} — символ {symbol}"]
-            if symbol
-            else [
-                f"Справочник модуля {module} — {path}, интерфейсов {len(names)}"
-                if path
-                else f"Справочник модуля {module} — интерфейсов 0"
-            ]
-        )
-        for name in [n for n in names if symbol in (None, n)]:
-            kind, node = defs.get(name, ("none", None))
-            label, text, line = name, _NO_DOC, listed.get(name, 1)
-            if node is not None:
-                line = node.lineno  # type: ignore[attr-defined]
-            if kind == "func":
-                label, text = _sig(node, False), _phrase(node)  # type: ignore[arg-type]
-            elif kind == "class":
-                text = _phrase(node)  # type: ignore[arg-type]
-            elif kind == "from":
-                text = f"реэкспорт из {'.' * node.level}{node.module or ''}"  # type: ignore[attr-defined]
-            tests = (use or {}).get(name, {"tests": []})["tests"]
-            total = sum(c for *_, c in tests)
-            example = min((p for p, _, c in tests if c), default=None)
-            lines.append(
-                f"{label} — {text} — {path}:{line} — тестов {total}" + (f", пример {example}" if total else "")
-            )
-            if kind != "class":
-                continue
-            desc = cm.describe(path, name)
-            lines += ["  вид: " + (desc[0] if desc else "не определён"), *_member_lines(node, "  ")]  # type: ignore[arg-type]
-            lines += [
-                f"  унаследованные абстрактные от {b} ({len(ns)}): {', '.join(ns)}"
-                for b, ns in (desc[1] if desc else [])
-            ]
-            items = impls.get(name, [])
-            lines.append(f"  реализации ({len(items)}):" if items else "  реализации (0): нет")
-            lines += [f"    {c} — {k} — {p}:{n}" for c, p, n, k in items[:8]]
-            lines += [f"    … ещё {len(items) - 8}"] if len(items) > 8 else []
+    cm = code_of(tree, rows)
+    iface = dotted(path) if path else ""
+    where: dict[str, Any] = {n: dotted(p) for n, (p, _) in code.items() if n not in names}
+    for n in names:  # цепочка реэкспорта идёт от модуля определения; interfaces.py входит в неё как реэкспортёр
+        where[n] = (cm.defined_in(iface, n), iface)
+    use = cm.usage(module, {n: where[n] for n in shown})
+    wide = bool(names) and symbol in (None, *names)  # реализации нужны только интерфейсам
+    users = cm.module_users(module) if wide else []
+    scan = Scan.of_module(cm, module, users) if wide else None
+    impls = scan.implementations(module) if scan else {}
+    lines = (
+        [f"Справочник модуля {module} — символ {symbol}"]
+        if symbol
+        else [
+            f"Справочник модуля {module} — {path}, интерфейсов {len(names)}"
+            if path
+            else f"Справочник модуля {module} — интерфейсов 0"
+        ]
+    )
+    for name in [n for n in names if symbol in (None, n)]:
+        kind, node = defs.get(name, ("none", None))
+        label, text, line = name, _NO_DOC, listed.get(name, 1)
+        if node is not None:
+            line = node.lineno  # type: ignore[attr-defined]
+        if kind == "func":
+            label, text = _sig(node, False), _phrase(node)  # type: ignore[arg-type]
+        elif kind == "class":
+            text = _phrase(node)  # type: ignore[arg-type]
+        elif kind == "from":
+            text = f"реэкспорт из {'.' * node.level}{node.module or ''}"  # type: ignore[attr-defined]
+        tests = (use or {}).get(name, {"tests": []})["tests"]
+        total = sum(c for *_, c in tests)
+        example = min((p for p, _, c in tests if c), default=None)
+        lines.append(f"{label} — {text} — {path}:{line} — тестов {total}" + (f", пример {example}" if total else ""))
+        if kind != "class":
+            continue
+        desc = cm.describe(path, name)
+        lines += ["  вид: " + (desc[0] if desc else "не определён"), *_member_lines(node, "  ")]  # type: ignore[arg-type]
+        lines += [
+            f"  унаследованные абстрактные от {b} ({len(ns)}): {', '.join(ns)}" for b, ns in (desc[1] if desc else [])
+        ]
+        items = impls.get(name, [])
+        lines.append(f"  реализации ({len(items)}):" if items else "  реализации (0): нет")
+        lines += [f"    {c} — {k} — {p}:{n}" for c, p, n, k in items[:8]]
+        lines += [f"    … ещё {len(items) - 8}"] if len(items) > 8 else []
     if symbol is None:
         block = [line for p, nodes in code_files for line in [p, *(x for n in nodes for x in _code_node(n))]]
         classes = sum(isinstance(n, ast.ClassDef) for _, nodes in code_files for n in nodes)

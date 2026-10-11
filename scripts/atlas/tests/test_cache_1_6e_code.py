@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from scripts.atlas.tests.conftest import RepoFactory
-from scripts.atlas.tests.test_cache_1_6e import _REFS, _call, _install_spy, _new_repo
+from scripts.atlas.tests.test_cache_1_6e import _REFS, _call, _cold, _install_spy, _new_repo
 
 __all__: list[str] = []
 
@@ -30,12 +30,15 @@ def test_source_edit_of_atlas_invalidates_view_cache(
     repo = _new_repo(repo_factory, "code")
     spy = _install_spy(monkeypatch)
     _call(atlas, spy, repo, "ref", "m", *_REFS)
+    _cold(repo)  # без диска и памяти ответить может только кэш видов
     _, warm = _call(atlas, spy, repo, "ref", "m", *_REFS)
     assert warm == {"build_graph": 0, "checkout": 0}  # без правки — из кэша
     with (pkg / "codemap.py").open("a", encoding="utf-8") as f:
         f.write("\n# правка исходника\n")
+    _cold(repo)
     _, cold = _call(atlas, spy, repo, "ref", "m", *_REFS)
     assert cold["build_graph"] >= 1 and cold["checkout"] >= 1
+    _cold(repo)  # без диска и памяти ответить может только кэш видов
     _, again = _call(atlas, spy, repo, "ref", "m", *_REFS)
     assert again == {"build_graph": 0, "checkout": 0}  # новый отпечаток тоже кэшируется
 
@@ -61,6 +64,7 @@ def test_main_ref_change_is_a_cache_miss(
     repo = _new_repo(repo_factory, "mainref")
     spy = _install_spy(monkeypatch)
     _call(atlas, spy, repo, "ref", "m", "--ref", "main", "--main-ref", "main")
+    _cold(repo)
     _, other = _call(atlas, spy, repo, "ref", "m", "--ref", "main", "--main-ref", repo.head)
     assert other["build_graph"] >= 1
 

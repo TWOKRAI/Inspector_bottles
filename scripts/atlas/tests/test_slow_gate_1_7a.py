@@ -60,8 +60,8 @@ _MODES: dict[str, tuple[tuple[str, ...], str | None]] = {
     "only_slow": (("-m", "slow"), None),
 }
 
+# Task 1.6g: пин `card` снят с slow — 38,4 с на Windows после выгрузки ревизии на диске (было 723–928 с)
 _SLOW_NODE_IDS = {
-    "scripts/atlas/tests/test_views_pinned.py::test_card_on_origin_main_pin",
     "scripts/atlas/tests/test_reference_pinned.py::test_ref_on_origin_main_pin",
     "scripts/atlas/tests/test_review_1_6c.py::test_pin_p1_findings_are_visible_in_ref_and_card",
 }
@@ -241,7 +241,7 @@ def test_a4_param_id_slow_without_marker_is_never_skipped(runs: _Runs, mode: str
 # --------------------------------------------------------------------------- A5
 
 
-def test_a5_slow_marker_is_registered_and_sits_on_exactly_three_tests() -> None:
+def test_a5_slow_marker_is_registered_and_sits_on_the_listed_tests() -> None:
     argv = [
         sys.executable,
         "-m",
