@@ -401,15 +401,15 @@ _ACCESS = "Windows fatal exception: access violation"
 _CLASS_CASES = [
     pytest.param("", None, None, [], (1, 1, 0, 0, 0), True, id="survived"),
     pytest.param(
-        "import os\ndef test_b():\n    os._exit(3221225477)\n",
+        "import os\ndef test_b():\n    os._exit(-1073741819)\n",
         None, None, [], (0, 1, 1, 0, 0), False, id="crashed-code-3221225477-no-text",
     ),
     pytest.param(
-        "import os\ndef test_b():\n    os._exit(3221225725)\n",
+        "import os\ndef test_b():\n    os._exit(-1073741571)\n",
         None, None, [], (0, 1, 1, 0, 0), False, id="crashed-code-3221225725",
     ),
     pytest.param(
-        "import os\ndef test_b():\n    os._exit(3221226505)\n",
+        "import os\ndef test_b():\n    os._exit(-1073740791)\n",
         None, None, [], (0, 1, 1, 0, 0), False, id="crashed-code-3221226505",
     ),
     pytest.param(
@@ -565,7 +565,7 @@ def _axis_script(tmp: Path, thread_body: str, main_body: str, name: str = "repro
     return _write(tmp, name, src)
 
 
-_CRASH_CODE = "os._exit(3221225477)\n"
+_CRASH_CODE = "os._exit(-1073741819)\n"
 _SURVIVE = "print('SURVIVED main')\nsys.exit(0)\n"
 
 _AXIS_CASES = [
@@ -580,7 +580,7 @@ _AXIS_CASES = [
         "axis: dead (thread crashed 0/2, main survived 2/2)", 2, id="dead-thread-does-not-crash",
     ),
     pytest.param(
-        _CRASH_CODE, "os._exit(3221225477)\n",
+        _CRASH_CODE, "os._exit(-1073741819)\n",
         "axis: dead (thread crashed 2/2, main survived 0/2)", 2, id="dead-main-crashes",
     ),
     pytest.param(
@@ -594,7 +594,7 @@ _AXIS_CASES = [
     pytest.param(
         "m = Path(__file__).with_name('thread_seen')\n"
         "if m.exists():\n    sys.exit(0)\n"
-        "m.write_text('1')\nos._exit(3221225477)\n",
+        "m.write_text('1')\nos._exit(-1073741819)\n",
         _SURVIVE,
         "axis: dead (thread crashed 1/2, main survived 2/2)", 2, id="dead-thread-crashes-only-once",
     ),
