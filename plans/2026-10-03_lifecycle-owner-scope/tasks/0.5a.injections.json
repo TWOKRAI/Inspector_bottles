@@ -1,21 +1,326 @@
 [
-  {"id": "inj-1", "prop": "G2 (а): аннотация owner — ровно IScope", "file": "scripts/lifecycle_guards/g2.py", "old": "if text != \"IScope\":", "new": "if not text.endswith(\"Scope\"):", "forecast": ["test_g2_signature_injections[bad-annotation-scope-"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-2", "prop": "G2 (а): owner без умолчания", "file": "scripts/lifecycle_guards/g2.py", "old": "if default is not None:", "new": "if False:", "forecast": ["test_g2_signature_injections[bad-annotation-with-default-"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-3", "prop": "G2 (в): перепись ловит неперечисленный издатель", "file": "scripts/lifecycle_guards/g2.py", "old": "and (rel, qualname) not in listed:", "new": "and False:", "forecast": ["test_g2_census_flags_every_listed_name_when_table_is_empty", "test_g2_census_one_name_missing_from_table_is_exactly_one_finding", "test_g2_census_flags_unlisted_publisher[pkg/a.py-True]", "test_g2_census_flags_unlisted_publisher[Services/a/tools/y.py-True]", "test_g2_census_flags_unlisted_publisher[pkg/tools/z.py-True]", "test_g2_census_flags_unlisted_publisher[pkg/robot/r.py-True]", "test_g2_census_flags_unlisted_publisher[backend_ctl/other.py-True]", "test_cli_exit_codes_and_summary[g2-unlisted-publisher", "test_real_tree_unlisted_publisher_turns_g2_red"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-4", "prop": "G2 (б): гнилая строка таблицы", "file": "scripts/lifecycle_guards/g2.py", "old": "if not matches:", "new": "if False:", "forecast": ["test_g2_table_rows_must_exist[rot-", "test_publisher_row_in_unparsable_file_is_rot_not_crash"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-5", "prop": "G6 R2: QTimer(None) — бесхозный", "file": "scripts/lifecycle_guards/g6.py", "old": " or (node.args and _is_none(node.args[0])):", "new": ":", "forecast": ["test_g6_rule_injections[R2-first-arg-None]"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-6", "prop": "G6 R3: join(timeout=<литерал>)", "file": "scripts/lifecycle_guards/g6.py", "old": "k.arg == \"timeout\" and _is_number(k.value)", "new": "False", "forecast": ["test_g6_rule_injections[R3-keyword-literal]", "test_real_tree_passes_every_guard"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-7", "prop": "G6 R4: исключение child_process_stop.py (файла нет в дереве — дыра названа заранее)", "file": "scripts/lifecycle_guards/g6.py", "old": "        and rel.rsplit(\"/\", 1)[-1] != \"child_process_stop.py\"\n", "new": "", "forecast": [], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-8", "prop": "G6 R5: исключение stop_budget.py (файла нет — дыра названа заранее)", "file": "scripts/lifecycle_guards/g6.py", "old": "and not is_stop_budget:", "new": ":", "forecast": [], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-9", "prop": "G6 R6: исключение qt_lifetime.py", "file": "scripts/lifecycle_guards/g6.py", "old": "if is_attr and name == \"deleteLater\" and rel.rsplit(\"/\", 1)[-1] != \"qt_lifetime.py\":", "new": "if is_attr and name == \"deleteLater\":", "forecast": ["test_real_tree_passes_every_guard"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-10", "prop": "G6 R7: from … import lifetime / from …core.lifetime import", "file": "scripts/lifecycle_guards/g6.py", "old": "_is_lifetime(module) or any(_is_lifetime(f\"{module}.{a.name}\") for a in node.names)", "new": "False", "forecast": ["test_g6_rule_injections[R7-from-import-lifetime]", "test_g6_rule_injections[R7-from-lifetime-import]"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-11", "prop": "G6 R8: из относительных разрешён только ..interfaces", "file": "scripts/lifecycle_guards/g6.py", "old": "(node.level == 2 and node.module == \"interfaces\")", "new": "(node.level >= 1)", "forecast": ["test_g6_rule_injections[R8-relative-not-interfaces]"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-12", "prop": "G6 храповик: запись устарела", "file": "scripts/lifecycle_guards/g6.py", "old": "elif n < entry.count:", "new": "elif False:", "forecast": ["test_g6_allowlist_ratchet[stale-count-too-high-", "test_g6_allowlist_ratchet[stale-other-rule-", "test_real_tree_changed_allowlist_count_turns_g6_red"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-13", "prop": "G6 храповик: reason не короче 10 знаков", "file": "scripts/lifecycle_guards/g6.py", "old": "MIN_REASON_LEN = 10", "new": "MIN_REASON_LEN = 1", "forecast": ["test_g6_allowlist_ratchet[reason-9-", "test_g6_allowlist_ratchet[reason-short-"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-14", "prop": "G6 храповик: гнилой путь записи", "file": "scripts/lifecycle_guards/g6.py", "old": "if not (root / rel).is_file():", "new": "if False:", "forecast": ["test_g6_allowlist_ratchet[rotten-path-"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-15", "prop": "CLI: код возврата 1 при findings", "file": "scripts/lifecycle_guards/__main__.py", "old": "return 1 if findings else 0", "new": "return 0", "forecast": ["test_cli_exit_codes_and_summary[g6-violation", "test_cli_exit_codes_and_summary[g2-unlisted-publisher", "test_cli_exit_codes_and_summary[g10-marker", "test_cli_exit_codes_and_summary[only-g2-g10-runs-both"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-16", "prop": "G10: маркер только в комментарии", "file": "scripts/lifecycle_guards/g10.py", "old": "if tok.type == tokenize.COMMENT and MARKER in tok.string:", "new": "if MARKER in tok.string:", "forecast": ["test_g10_marker_budget[string-literal-is-not-marker-"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-17", "prop": "G10: сумма таблицы не больше 1", "file": "scripts/lifecycle_guards/g10.py", "old": "if sum(allowed.values()) > MAX_SHIMS:", "new": "if sum(allowed.values()) > MAX_SHIMS + 5:", "forecast": ["test_g10_marker_budget[table-sum-over-one-"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-18", "prop": "область: robot/ в корне не производственный код", "file": "scripts/lifecycle_guards/tables.py", "old": "NON_PRODUCTION_ROOT_PREFIXES = (\"backend_ctl/probes/\", \"robot/\", \"tools/\")", "new": "NON_PRODUCTION_ROOT_PREFIXES = (\"backend_ctl/probes/\", \"tools/\")", "forecast": ["test_g6_scope_exclusions[robot/x.py-False]", "test_g2_census_flags_unlisted_publisher[robot/x.py-False]", "test_real_tree_passes_every_guard"], "observed": null, "test": "scripts/lifecycle_guards/tests"},
-  {"id": "inj-19", "prop": "R1 только в Plugins/ и Services/", "file": "scripts/lifecycle_guards/g6.py", "old": "in_layers = rel.startswith((\"Plugins/\", \"Services/\"))", "new": "in_layers = True", "forecast": ["test_real_tree_passes_every_guard"], "observed": null, "test": "scripts/lifecycle_guards/tests"}
+ {
+  "id": "inj-1",
+  "prop": "G2 (а): аннотация owner — ровно IScope",
+  "file": "scripts/lifecycle_guards/g2.py",
+  "old": "if text != \"IScope\":",
+  "new": "if not text.endswith(\"Scope\"):",
+  "forecast": [
+   "test_g2_signature_injections[bad-annotation-scope-"
+  ],
+  "observed": [
+   "test_g2_signature_injections[bad-annotation-scope-class Bus:\\n    def subscribe(self, topic, cb, *, owner: Scope):\\n        pass\\n-Bus.subscribe-1]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-2",
+  "prop": "G2 (а): owner без умолчания",
+  "file": "scripts/lifecycle_guards/g2.py",
+  "old": "if default is not None:",
+  "new": "if False:",
+  "forecast": [
+   "test_g2_signature_injections[bad-annotation-with-default-"
+  ],
+  "observed": [
+   "test_g2_signature_injections[bad-annotation-with-default-class Bus:\\n    def subscribe(self, topic, cb, *, owner: IScope = None):\\n        pass\\n-Bus.subscribe-1]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-3",
+  "prop": "G2 (в): перепись ловит неперечисленный издатель",
+  "file": "scripts/lifecycle_guards/g2.py",
+  "old": "and (rel, qualname) not in listed:",
+  "new": "and False:",
+  "forecast": [
+   "test_g2_census_flags_every_listed_name_when_table_is_empty",
+   "test_g2_census_one_name_missing_from_table_is_exactly_one_finding",
+   "test_g2_census_flags_unlisted_publisher[pkg/a.py-True]",
+   "test_g2_census_flags_unlisted_publisher[Services/a/tools/y.py-True]",
+   "test_g2_census_flags_unlisted_publisher[pkg/tools/z.py-True]",
+   "test_g2_census_flags_unlisted_publisher[pkg/robot/r.py-True]",
+   "test_g2_census_flags_unlisted_publisher[backend_ctl/other.py-True]",
+   "test_cli_exit_codes_and_summary[g2-unlisted-publisher",
+   "test_real_tree_unlisted_publisher_turns_g2_red"
+  ],
+  "observed": [
+   "test_cli_exit_codes_and_summary[g2-unlisted-publisher-files3-extra_args3-1-^G2 \\\\S+ pkg/b\\\\.py:1 \\u2014 .+$-counts3]",
+   "test_cli_exit_codes_and_summary[only-g2-g10-runs-both-files7-extra_args7-1-^G10 \\\\S+ pkg/s\\\\.py:1 \\u2014 .+$-counts7]",
+   "test_g2_census_flags_every_listed_name_when_table_is_empty",
+   "test_g2_census_flags_unlisted_publisher[Services/a/tools/y.py-True]",
+   "test_g2_census_flags_unlisted_publisher[backend_ctl/other.py-True]",
+   "test_g2_census_flags_unlisted_publisher[pkg/a.py-True]",
+   "test_g2_census_flags_unlisted_publisher[pkg/robot/r.py-True]",
+   "test_g2_census_flags_unlisted_publisher[pkg/tools/z.py-True]",
+   "test_g2_census_one_name_missing_from_table_is_exactly_one_finding",
+   "test_g2_table_rows_must_exist[rot-wrong-class-files6-row6-expected_markers6-2]",
+   "test_real_tree_unlisted_publisher_turns_g2_red"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-4",
+  "prop": "G2 (б): гнилая строка таблицы",
+  "file": "scripts/lifecycle_guards/g2.py",
+  "old": "if not matches:",
+  "new": "if False:",
+  "forecast": [
+   "test_g2_table_rows_must_exist[rot-",
+   "test_publisher_row_in_unparsable_file_is_rot_not_crash"
+  ],
+  "observed": [
+   "test_g2_table_rows_must_exist[rot-exempt-no-file-files2-row2-expected_markers2-1]",
+   "test_g2_table_rows_must_exist[rot-exempt-no-method-files5-row5-expected_markers5-1]",
+   "test_g2_table_rows_must_exist[rot-migrated-no-file-files0-row0-expected_markers0-1]",
+   "test_g2_table_rows_must_exist[rot-migrated-no-method-files3-row3-expected_markers3-1]",
+   "test_g2_table_rows_must_exist[rot-pending-no-file-files1-row1-expected_markers1-1]",
+   "test_g2_table_rows_must_exist[rot-pending-no-method-files4-row4-expected_markers4-1]",
+   "test_g2_table_rows_must_exist[rot-wrong-class-files6-row6-expected_markers6-2]",
+   "test_publisher_row_in_unparsable_file_is_rot_not_crash"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-5",
+  "prop": "G6 R2: QTimer(None) — бесхозный",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": " or (node.args and _is_none(node.args[0])):",
+  "new": ":",
+  "forecast": [
+   "test_g6_rule_injections[R2-first-arg-None]"
+  ],
+  "observed": [
+   "test_g6_rule_injections[R2-first-arg-None]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-6",
+  "prop": "G6 R3: join(timeout=<литерал>)",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "k.arg == \"timeout\" and _is_number(k.value)",
+  "new": "False",
+  "forecast": [
+   "test_g6_rule_injections[R3-keyword-literal]",
+   "test_real_tree_passes_every_guard"
+  ],
+  "observed": [
+   "test_g6_rule_injections[R3-keyword-literal]",
+   "test_real_tree_changed_allowlist_count_turns_g6_red",
+   "test_real_tree_empty_allowlist_turns_g6_red",
+   "test_real_tree_passes_every_guard"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-7",
+  "prop": "G6 R4: исключение child_process_stop.py (файла нет в дереве — дыра названа заранее)",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "        and rel.rsplit(\"/\", 1)[-1] != \"child_process_stop.py\"\n",
+  "new": "",
+  "forecast": [],
+  "observed": [
+   "test_g6_rule_injections[R4-kill]",
+   "test_g6_rule_injections[R4-terminate]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-8",
+  "prop": "G6 R5: исключение stop_budget.py (файла нет — дыра названа заранее)",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "and not is_stop_budget:",
+  "new": ":",
+  "forecast": [],
+  "observed": [
+   "test_g6_rule_injections[R5-string-constant]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-9",
+  "prop": "G6 R6: исключение qt_lifetime.py",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "if is_attr and name == \"deleteLater\" and rel.rsplit(\"/\", 1)[-1] != \"qt_lifetime.py\":",
+  "new": "if is_attr and name == \"deleteLater\":",
+  "forecast": [
+   "test_real_tree_passes_every_guard"
+  ],
+  "observed": [
+   "test_g6_rule_injections[R6-deleteLater]",
+   "test_real_tree_changed_allowlist_count_turns_g6_red",
+   "test_real_tree_empty_allowlist_turns_g6_red",
+   "test_real_tree_passes_every_guard"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-10",
+  "prop": "G6 R7: from … import lifetime / from …core.lifetime import",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "_is_lifetime(module) or any(_is_lifetime(f\"{module}.{a.name}\") for a in node.names)",
+  "new": "False",
+  "forecast": [
+   "test_g6_rule_injections[R7-from-import-lifetime]",
+   "test_g6_rule_injections[R7-from-lifetime-import]"
+  ],
+  "observed": [
+   "test_g6_rule_injections[R7-from-import-lifetime]",
+   "test_g6_rule_injections[R7-from-lifetime-import]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-11",
+  "prop": "G6 R8: из относительных разрешён только ..interfaces",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "node.level == 2 and node.module == \"interfaces\"",
+  "new": "node.level >= 1",
+  "forecast": [
+   "test_g6_rule_injections[R8-relative-not-interfaces]"
+  ],
+  "observed": [
+   "test_g6_rule_injections[R8-relative-not-interfaces]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-12",
+  "prop": "G6 храповик: запись устарела",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "elif n < entry.count:",
+  "new": "elif False:",
+  "forecast": [
+   "test_g6_allowlist_ratchet[stale-count-too-high-",
+   "test_g6_allowlist_ratchet[stale-other-rule-",
+   "test_real_tree_changed_allowlist_count_turns_g6_red"
+  ],
+  "observed": [
+   "test_g6_allowlist_ratchet[stale-count-too-high-files6-allow6-1-expected_markers6]",
+   "test_g6_allowlist_ratchet[stale-other-rule-files7-allow7-1-expected_markers7]",
+   "test_real_tree_changed_allowlist_count_turns_g6_red"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-13",
+  "prop": "G6 храповик: reason не короче 10 знаков",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "MIN_REASON_LEN = 10",
+  "new": "MIN_REASON_LEN = 1",
+  "forecast": [
+   "test_g6_allowlist_ratchet[reason-9-",
+   "test_g6_allowlist_ratchet[reason-short-"
+  ],
+  "observed": [
+   "test_g6_allowlist_ratchet[reason-9-files2-allow2-1-expected_markers2]",
+   "test_g6_allowlist_ratchet[reason-short-files4-allow4-1-expected_markers4]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-14",
+  "prop": "G6 храповик: гнилой путь записи",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "if not (root / rel).is_file():",
+  "new": "if False:",
+  "forecast": [
+   "test_g6_allowlist_ratchet[rotten-path-"
+  ],
+  "observed": [
+   "test_g6_allowlist_ratchet[rotten-path-files8-allow8-1-expected_markers8]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-15",
+  "prop": "CLI: код возврата 1 при findings",
+  "file": "scripts/lifecycle_guards/__main__.py",
+  "old": "return 1 if findings else 0",
+  "new": "return 0",
+  "forecast": [
+   "test_cli_exit_codes_and_summary[g6-violation",
+   "test_cli_exit_codes_and_summary[g2-unlisted-publisher",
+   "test_cli_exit_codes_and_summary[g10-marker",
+   "test_cli_exit_codes_and_summary[only-g2-g10-runs-both"
+  ],
+  "observed": [
+   "test_cli_exit_codes_and_summary[g10-marker-files4-extra_args4-1-^G10 \\\\S+ pkg/s\\\\.py:1 \\u2014 .+$-counts4]",
+   "test_cli_exit_codes_and_summary[g2-unlisted-publisher-files3-extra_args3-1-^G2 \\\\S+ pkg/b\\\\.py:1 \\u2014 .+$-counts3]",
+   "test_cli_exit_codes_and_summary[g6-violation-files0-extra_args0-1-^G6 R6 pkg/a\\\\.py:3 \\u2014 .+$-counts0]",
+   "test_cli_exit_codes_and_summary[only-g2-g10-runs-both-files7-extra_args7-1-^G10 \\\\S+ pkg/s\\\\.py:1 \\u2014 .+$-counts7]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-16",
+  "prop": "G10: маркер только в комментарии",
+  "file": "scripts/lifecycle_guards/g10.py",
+  "old": "if tok.type == tokenize.COMMENT and MARKER in tok.string:",
+  "new": "if MARKER in tok.string:",
+  "forecast": [
+   "test_g10_marker_budget[string-literal-is-not-marker-"
+  ],
+  "observed": [
+   "test_g10_marker_budget[string-literal-is-not-marker-files8-allowed8-0]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-17",
+  "prop": "G10: сумма таблицы не больше 1",
+  "file": "scripts/lifecycle_guards/g10.py",
+  "old": "if sum(allowed.values()) > MAX_SHIMS:",
+  "new": "if sum(allowed.values()) > MAX_SHIMS + 5:",
+  "forecast": [
+   "test_g10_marker_budget[table-sum-over-one-"
+  ],
+  "observed": [
+   "test_g10_marker_budget[table-sum-over-one-files6-allowed6-1]",
+   "test_g10_marker_budget[two-files-one-marker-each-files7-allowed7-1]"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-18",
+  "prop": "область: robot/ в корне не производственный код",
+  "file": "scripts/lifecycle_guards/tables.py",
+  "old": "NON_PRODUCTION_ROOT_PREFIXES = (\"backend_ctl/probes/\", \"robot/\", \"tools/\")",
+  "new": "NON_PRODUCTION_ROOT_PREFIXES = (\"backend_ctl/probes/\", \"tools/\")",
+  "forecast": [
+   "test_g6_scope_exclusions[robot/x.py-False]",
+   "test_g2_census_flags_unlisted_publisher[robot/x.py-False]",
+   "test_real_tree_passes_every_guard"
+  ],
+  "observed": [
+   "test_g2_census_flags_unlisted_publisher[robot/x.py-False]",
+   "test_g6_scope_exclusions[robot/x.py-False]",
+   "test_real_tree_changed_allowlist_count_turns_g6_red",
+   "test_real_tree_empty_allowlist_turns_g6_red",
+   "test_real_tree_passes_every_guard"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ },
+ {
+  "id": "inj-19",
+  "prop": "R1 только в Plugins/ и Services/",
+  "file": "scripts/lifecycle_guards/g6.py",
+  "old": "in_layers = rel.startswith((\"Plugins/\", \"Services/\"))",
+  "new": "in_layers = True",
+  "forecast": [
+   "test_real_tree_passes_every_guard"
+  ],
+  "observed": [
+   "test_g6_rule_injections[R1-ThreadPoolExecutor]",
+   "test_g6_rule_injections[R1-Thread]",
+   "test_g6_rule_injections[R1-Timer]",
+   "test_g6_rule_injections[R1-threading.Thread]",
+   "test_g6_rule_injections[R1-threading.Timer]",
+   "test_real_tree_changed_allowlist_count_turns_g6_red",
+   "test_real_tree_empty_allowlist_turns_g6_red",
+   "test_real_tree_passes_every_guard"
+  ],
+  "test": "scripts/lifecycle_guards/tests"
+ }
 ]
