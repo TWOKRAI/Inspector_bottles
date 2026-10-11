@@ -75,7 +75,13 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    ```
    Index ≤200 lines, one line per entry.
 
-5. **Confirm** in one line: create or update, file path, type.
+5. **Regenerate the lesson index** (after the lesson file and the `MEMORY.md` line are written, before the commit):
+   ```bash
+   python scripts/memory/search.py --by-module --write
+   ```
+   Stage the changed `docs/claude/memory/BY-MODULE*.md` with the lesson; otherwise `scripts/validate.py` is red.
+
+6. **Confirm** in one line: create or update, file path, type.
 
 ## Don't
 

@@ -1,6 +1,6 @@
 # CRAFT-tests — читать, когда: пишешь тест, дублёр, фикстуру, сторожа; гейт зелёный подозрительно
 Ядро — в [MEMORY.md](MEMORY.md) и в `.claude/CLAUDE.md` «Test authorship»; здесь детали, оплаченные конкретными провалами.
-Соседи: [CRAFT-injection](CRAFT-injection.md) · [CRAFT-verdict](CRAFT-verdict.md) · [CRAFT-config-qt](CRAFT-config-qt.md) · [CRAFT-by-module](CRAFT-by-module.md)
+Соседи: [CRAFT-injection](CRAFT-injection.md) · [CRAFT-verdict](CRAFT-verdict.md) · [CRAFT-config-qt](CRAFT-config-qt.md) · [BY-MODULE](BY-MODULE.md)
 
 ## Канон тестов
 - [Две заплаты с одинаковым набором красных = один ассерт](feedback_two_patches_one_red_set_means_one_assert.md) — сверять НАБОРЫ попарно, не числа; совпадение значит «у одного свойства сторожа нет»
