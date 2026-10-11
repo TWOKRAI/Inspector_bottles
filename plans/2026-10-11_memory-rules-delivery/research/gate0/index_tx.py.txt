@@ -1,0 +1,78 @@
+# ruff: noqa: E402, E501
+"""Stream all Inspector-bottles transcripts; emit one JSON line per tool_use and per session span.
+Usage: python index_tx.py <out.jsonl>"""
+
+LP = chr(92) * 2 + "?" + chr(92)
+import json
+import sys
+import glob
+import os
+
+home = os.path.expanduser("~/.claude/projects")
+files = [
+    f
+    for d in glob.glob(os.path.join(home, "*Inspector-bottles*"))
+    for f in glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True)
+]
+out = open(sys.argv[1], "w", encoding="utf-8")
+for f in files:
+    first = last = None
+    with open(LP + os.path.abspath(f), encoding="utf-8", errors="replace") as fh:
+        for i, ln in enumerate(fh, 1):
+            try:
+                o = json.loads(ln)
+            except Exception:
+                continue
+            ts = o.get("timestamp")
+            if ts:
+                first = first or ts
+                last = ts
+            msg = o.get("message")
+            if not isinstance(msg, dict):
+                continue
+            c = msg.get("content")
+            if not isinstance(c, list):
+                continue
+            for b in c:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "tool_use":
+                    inp = b.get("input") or {}
+                    s = {
+                        k: (v[:600] if isinstance(v, str) else v)
+                        for k, v in inp.items()
+                        if k
+                        in (
+                            "file_path",
+                            "path",
+                            "pattern",
+                            "command",
+                            "glob",
+                            "notebook_path",
+                            "description",
+                            "subagent_type",
+                        )
+                    }
+                    if b.get("name") in ("Write", "Edit", "MultiEdit"):
+                        s["content_head"] = str(inp.get("content") or inp.get("new_string") or "")[:300]
+                    out.write(
+                        json.dumps(
+                            {"k": "tu", "f": f, "n": i, "ts": ts, "tool": b.get("name"), "id": b.get("id"), "in": s},
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                elif b.get("type") == "tool_result" and b.get("is_error"):
+                    cc = b.get("content")
+                    if isinstance(cc, list):
+                        cc = " ".join(x.get("text", "") for x in cc if isinstance(x, dict))
+                    out.write(
+                        json.dumps(
+                            {"k": "err", "f": f, "n": i, "ts": ts, "id": b.get("tool_use_id"), "txt": str(cc)[:300]},
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+    out.write(json.dumps({"k": "span", "f": f, "first": first, "last": last}, ensure_ascii=False) + "\n")
+out.close()
+print(len(files), "files")

@@ -1,0 +1,33 @@
+# ruff: noqa: E402, E501
+"""Lines in session (main + subagents) containing literal, after ts. Usage: grep_session.py <session.jsonl> <literal> <min_ts> [k]"""
+
+import json
+import sys
+import os
+import glob
+
+LP = chr(92) * 2 + "?" + chr(92)
+sess, lit, mts = sys.argv[1], sys.argv[2], sys.argv[3]
+k = int(sys.argv[4]) if len(sys.argv) > 4 else 8
+files = [sess] + sorted(glob.glob(os.path.join(sess[:-6], "subagents", "*.jsonl")))
+res = []
+for f in files:
+    with open(LP + os.path.abspath(f), encoding="utf-8", errors="replace") as fh:
+        for i, ln in enumerate(fh, 1):
+            if lit not in ln:
+                continue
+            o = json.loads(ln)
+            ts = o.get("timestamp") or ""
+            if ts < mts:
+                continue
+            c = (o.get("message") or {}).get("content")
+            kinds = (
+                [b.get("type") + ":" + str(b.get("name", "")) for b in c if isinstance(b, dict)]
+                if isinstance(c, list)
+                else ["str"]
+            )
+            j = ln.find(lit)
+            res.append((ts, os.path.basename(f), i, o.get("type"), kinds[:2], ln[max(0, j - 160) : j + 100]))
+for r in sorted(res)[:k]:
+    print(r)
+print("hits:", len(res))

@@ -1,0 +1,15 @@
+Preregistration (written 2026-10-11 before running session analysis; investigator 0.2)
+M set: baseline.md pairs (new -> older) where the merged pair's surviving file in docs/claude/memory/ has module: today
+       (8 pairs; literal "older file has module:" gives 3) AND the new lesson was written in a session with a transcript (>= 2026-09-04).
+       Extra (separate line "added"): baseline.md:232 self-described repeats with module: and a dated repeat event in the window.
+Repeat event: the session (main jsonl + its subagents/) in which the new lesson text was first written
+       (first tool_use whose input contains the lesson file name and writes it: Write/Edit/Bash heredoc), or for an appended
+       "second case" the session that appended it.
+Error moment: first tool_result (in that session, main+subagents, ordered by timestamp) whose text contains the literal
+       symptom quoted in the lesson (e.g. a value/exception text); if none, earliest tool_result marked is_error that precedes
+       the fix edit named in the lesson; otherwise manual, described.
+"Read module files before error": >=1 tool_use with timestamp < error moment whose input (file_path/path/pattern/glob/command)
+       contains a modules.yaml path prefix of the older lesson's module. Primary = any of Read/Edit/Write/MultiEdit/Grep/Glob/Bash.
+       Secondary (push-relevant per CTO G0, which proved paths: fires on Read) = Read/Edit/Write/MultiEdit only.
+"Lesson existed": older lesson's git creation date (git log --follow --diff-filter=A) < repeat session date.
+Gate: N/M >= 1/3 -> part B; N/M < 1/3 -> FREEZE; M < 4 -> "not decidable", stop.

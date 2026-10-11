@@ -1,0 +1,52 @@
+"""All merged_from relations (survivor <- absorbed) with creation dates and survivor module. Run from repo root."""
+
+import re
+import subprocess
+import sys
+import json
+from pathlib import Path
+
+MEM = Path("docs/claude/memory")
+
+
+def created(p):
+    out = subprocess.run(
+        ["git", "log", "--follow", "--diff-filter=A", "--format=%ad", "--date=iso-strict", "--", p.as_posix()],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.split()
+    return out[-1] if out else ""
+
+
+def loc(name):
+    for p in (MEM / f"{name}.md", MEM / "_archive" / f"{name}.md"):
+        if p.exists():
+            return p
+
+
+rows = []
+for p in sorted(MEM.glob("*.md")):
+    t = p.read_text(encoding="utf-8", errors="replace").split("\n---", 1)[0]
+    mf = re.search(r"^merged_from:\s*\[(.*)\]", t, re.M)
+    if not mf:
+        continue
+    mod = re.search(r"^module:\s*\[(.*)\]", t, re.M)
+    mods = [m.strip() for m in mod[1].split(",")] if mod else []
+    sc = created(p)
+    for a in [x.strip() for x in mf[1].split(",") if x.strip()]:
+        pa = loc(a)
+        ac = created(pa) if pa else ""
+        rows.append({"survivor": p.stem, "surv_created": sc, "absorbed": a, "abs_created": ac, "module": mods})
+for r in sorted(rows, key=lambda r: max(r["surv_created"], r["abs_created"])):
+    newer = max(r["surv_created"], r["abs_created"])
+    print(
+        ("M " if r["module"] else "- "),
+        r["surv_created"][:16],
+        r["survivor"][9:],
+        "<-",
+        r["abs_created"][:16],
+        r["absorbed"][9:],
+        r["module"],
+    )
+json.dump(rows, open(sys.argv[1], "w", encoding="utf-8"), indent=1)
