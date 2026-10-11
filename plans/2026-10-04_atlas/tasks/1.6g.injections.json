@@ -377,7 +377,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_discard_leaves_nothing_even_for_a_259_char_file"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_discard_leaves_nothing_even_for_a_259_char_file"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
