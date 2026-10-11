@@ -1,6 +1,10 @@
 """CLI стражей жизненного цикла: ``python -m scripts.lifecycle_guards check [--root PATH] [--only g2,g6,g10]``.
 
 Код возврата: 0 при нуле findings, иначе 1. Здесь же ``run_all`` — им пользуется и ``scripts/validate.py``.
+
+Таблицы репозитория (PUBLISHERS, ALLOWLIST, SHIMS) применяются, только если в корне есть
+``multiprocess_framework/modules`` (``has_repo_tables``); на чужом ``--root`` они пусты, иначе каждая
+строка была бы «гнилой». Дыры в гейте нет: ``scripts/validate.py`` передаёт свой ``BASE`` — корень репозитория.
 """
 
 from __future__ import annotations
@@ -28,13 +32,14 @@ def has_repo_tables(root: Path) -> bool:
 
 def run_all(root: Path, only: frozenset[str] = frozenset(GUARDS)) -> list[Finding]:
     real = has_repo_tables(root)
+    files = list(tables.production_files(root))  # один перечень на три стража
     findings: list[Finding] = []
     if "g2" in only:
-        findings += check_g2(root, tables.PUBLISHERS if real else [])
+        findings += check_g2(root, tables.PUBLISHERS if real else [], files)
     if "g6" in only:
-        findings += check_g6(root, tables.ALLOWLIST if real else {})
+        findings += check_g6(root, tables.ALLOWLIST if real else {}, files)
     if "g10" in only:
-        findings += check_g10(root, tables.SHIMS if real else {})
+        findings += check_g10(root, tables.SHIMS if real else {}, files)
     return findings
 
 

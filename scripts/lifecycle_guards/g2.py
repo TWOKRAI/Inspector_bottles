@@ -70,13 +70,15 @@ def _parse(text: str) -> ast.Module | None:
         return None
 
 
-def check_g2(root: Path, publishers: list[Publisher] = PUBLISHERS) -> list[Finding]:
+def check_g2(
+    root: Path, publishers: list[Publisher] = PUBLISHERS, files: list[tuple[str, str]] | None = None
+) -> list[Finding]:
     findings: list[Finding] = []
     listed = {(p.path, p.qualname) for p in publishers}
 
     for pub in publishers:
         file = root / pub.path
-        tree = _parse(file.read_text(encoding="utf-8", errors="replace")) if file.is_file() else None
+        tree = _parse(file.read_text(encoding="utf-8-sig", errors="replace")) if file.is_file() else None
         matches = [f for q, f in iter_defs(tree) if q == pub.qualname] if tree is not None else []
         if not matches:
             findings.append(
@@ -92,7 +94,7 @@ def check_g2(root: Path, publishers: list[Publisher] = PUBLISHERS) -> list[Findi
                     Finding("G2", "signature", pub.path, func.lineno, f"{pub.qualname} (migrated): {problem}")
                 )
 
-    for rel, text in production_files(root):
+    for rel, text in files if files is not None else production_files(root):
         if not any(name in text for name in CENSUS_NAMES):
             continue
         tree = _parse(text)

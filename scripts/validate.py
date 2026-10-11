@@ -11,7 +11,8 @@
 5b. Структура Services/ (__init__.py, interfaces.py, STATUS.md, README.md)
 6. ADR-документация синхронизирована (python -m scripts.sync --check)
 7. Планы: новых блокирующих находок нет (scripts/plans_progress --check --baseline)
-8. Стражи жизненного цикла G2/G6/G10 (python -m scripts.lifecycle_guards check)
+8. Теги памяти (scripts/memory/tags.py --check)
+9. Стражи жизненного цикла G2/G6/G10 (python -m scripts.lifecycle_guards check)
 
 Архитектурные границы между слоями (framework → Services → Plugins → app) — sentrux check.
 
@@ -306,7 +307,7 @@ def check_memory_tags() -> None:
 
 
 def check_lifecycle_guards() -> None:
-    check_header("8. Стражи жизненного цикла G2/G6/G10 (scripts/lifecycle_guards)")
+    check_header("9. Стражи жизненного цикла G2/G6/G10 (scripts/lifecycle_guards)")
     from scripts.lifecycle_guards.__main__ import format_finding, run_all, summary_line
 
     findings = run_all(BASE)

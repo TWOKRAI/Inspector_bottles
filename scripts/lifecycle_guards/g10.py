@@ -25,7 +25,7 @@ def _marker_lines(text: str) -> list[int]:
     return lines
 
 
-def check_g10(root: Path, allowed: dict[str, int] = SHIMS) -> list[Finding]:
+def check_g10(root: Path, allowed: dict[str, int] = SHIMS, files: list[tuple[str, str]] | None = None) -> list[Finding]:
     findings: list[Finding] = []
 
     if sum(allowed.values()) > MAX_SHIMS:
@@ -39,7 +39,11 @@ def check_g10(root: Path, allowed: dict[str, int] = SHIMS) -> list[Finding]:
             )
         )
 
-    for rel, text in production_files(root):
+    for rel in sorted(allowed):
+        if not (root / rel).is_file():
+            findings.append(Finding("G10", "table-row", rel, 0, "запись гнилая: пути нет в дереве"))
+
+    for rel, text in files if files is not None else production_files(root):
         if MARKER not in text:
             continue
         try:

@@ -92,7 +92,7 @@ def production_files(root: Path) -> Iterator[tuple[str, str]]:
     """(относительный путь, текст) каждого производственного .py."""
     for rel in list_py_files(root):
         if is_production(rel):
-            yield rel, (root / rel).read_text(encoding="utf-8", errors="replace")
+            yield rel, (root / rel).read_text(encoding="utf-8-sig", errors="replace")
 
 
 # ---------------------------------------------------------------------------

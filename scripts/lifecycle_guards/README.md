@@ -18,14 +18,16 @@ python -m scripts.lifecycle_guards check [--root PATH] [--only g2,g6,g10]
 | G2 | `table-row` | «гнилая строка таблицы»: метода `путь::Класс.метод` нет в файле |
 | G2 | `census` | `unlisted publisher`: производственное определение `subscribe`, `add_callback`, `add_change_callback`, `add_post_execute_callback`, `add_push_listener`, `add_tap`, `register_message_handler`, `register_handler` вне таблицы |
 | G6 | `R1` | `Thread(`, `Timer(`, `ThreadPoolExecutor(` — только в `Plugins/` и `Services/` |
-| G6 | `R2` | `QTimer(...)` без родителя (нет позиционных и `parent=`, либо первый — `None`) |
+| G6 | `R2` | `QTimer(...)` без родителя (нет позиционных и `parent=`, либо первый позиционный или `parent=` — `None`) |
 | G6 | `R3` | `.join(<число>)` или `.join(timeout=<число>)` |
 | G6 | `R4` | `.terminate()` / `.kill()` без аргументов вне `child_process_stop.py` |
 | G6 | `R5` | строка `"shutdown_timeout"` вне `stop_budget.py` |
 | G6 | `R6` | `.deleteLater(...)` вне `qt_lifetime.py` |
 | G6 | `R7` | импорт `base_manager.core.lifetime` вне `base_manager/` |
 | G6 | `R8` | `lifetime.py` импортирует что-то кроме литерального списка task-0.2 |
-| G10 | `shim` | маркер `lifecycle-shim:` в комментарии вне `SHIMS` или сверх разрешённого; сумма `SHIMS` > 1 |
+| G6 | `R0` | файл не разбирается (`SyntaxError`): страж слеп к нему, поэтому finding |
+| G10 | `shim` | маркер `lifecycle-shim:` в комментарии вне `SHIMS` или сверх разрешённого |
+| G10 | `table-sum`, `table-row` | сумма `SHIMS` > 1; путь из `SHIMS` не существует («запись гнилая») |
 
 Правила R1–R6 — только вызовы-методы/имена из AST: `kill()` как локальное имя (так `lifetime.py`
 зовёт `res.kill` через `getattr`) не считается; строки в комментариях не считаются.
@@ -34,7 +36,7 @@ python -m scripts.lifecycle_guards check [--root PATH] [--only g2,g6,g10]
 
 `ALLOWLIST` в `tables.py`: `(правило, путь) -> AllowEntry(count, reason)`. Больше `count` —
 «новое нарушение»; меньше — «запись устарела, уменьши count»; путь исчез — «запись гнилая»;
-`reason` короче 10 знаков — finding. Запись только уменьшается или удаляется; новая запись —
+`reason` короче 10 знаков или `count` <= 0 («запись мертва») — finding. Запись только уменьшается или удаляется; новая запись —
 решение владельца. Таблицы — литералы; пути с `/`.
 
 ## Что считается производственным кодом
@@ -49,8 +51,14 @@ python -m scripts.lifecycle_guards check [--root PATH] [--only g2,g6,g10]
 
 - Обёртка совместимости без маркера `lifecycle-shim:` не видна G10.
 - Файл, не отслеживаемый git (новый, ещё не `git add`), в перечень не попадает.
-- Табличные записи G2/G6 описывают наше дерево: на корне без `multiprocess_framework/modules`
-  (`--root` чужого каталога) таблицы пусты, иначе каждая строка была бы «гнилой».
+- Табличные записи G2/G6/G10 описывают наше дерево: на корне без `multiprocess_framework/modules`
+  (`--root` чужого каталога, эвристика `has_repo_tables`) таблицы пусты, иначе каждая строка была бы
+  «гнилой». Дыры в гейте нет: `scripts/validate.py` передаёт свой `BASE` — корень репозитория.
+- G2 пропускает файлы, которые не разбираются (`SyntaxError`); G6 сообщает о них правилом `R0`.
+- Псевдонимы не видны: `from threading import Thread as T`, `import threading as th`, `QTimer as Q`.
+- Ссылка на метод без вызова не считается: `QTimer.singleShot(0, w.deleteLater)`, `connect(x.deleteLater)`.
+- Исключения по ИМЕНИ файла в любом каталоге: `qt_lifetime.py` (R6), `child_process_stop.py` (R4),
+  `stop_budget.py` (R5) — одноимённый файл в другом месте тоже освобождён.
 - Это статика: поведение (abort-проба, плагин pytest) — задача 0.5b.
 
 ## Плагин и проба

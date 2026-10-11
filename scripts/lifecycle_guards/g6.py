@@ -82,9 +82,13 @@ def _scan_calls(rel: str, node: ast.Call, in_layers: bool, hits: list[tuple[str,
     ):
         hits.append(("R1", line, f"{name}(...) в слое Plugins/Services — жизнью потока владеет область, не код"))
     if name == "QTimer":
-        has_parent_kw = any(k.arg == "parent" for k in node.keywords)
-        if (not node.args and not has_parent_kw) or (node.args and _is_none(node.args[0])):
-            hits.append(("R2", line, "QTimer без родителя"))
+        parent_kw = [k for k in node.keywords if k.arg == "parent"]
+        if (
+            (not node.args and not parent_kw)
+            or (node.args and _is_none(node.args[0]))
+            or any(_is_none(k.value) for k in parent_kw)
+        ):
+            hits.append(("R2", line, "QTimer без родителя (нет parent, либо parent=None)"))
     if name == "join" and is_attr:
         if any(_is_number(a) for a in node.args) or any(
             k.arg == "timeout" and _is_number(k.value) for k in node.keywords
@@ -141,15 +145,19 @@ def scan_file(rel: str, text: str) -> list[tuple[str, int, str]]:
     return sorted(hits, key=lambda h: (h[1], h[0]))
 
 
-def check_g6(root: Path, allowlist: dict[tuple[str, str], AllowEntry] = ALLOWLIST) -> list[Finding]:
+def check_g6(
+    root: Path,
+    allowlist: dict[tuple[str, str], AllowEntry] = ALLOWLIST,
+    files: list[tuple[str, str]] | None = None,
+) -> list[Finding]:
     findings: list[Finding] = []
     found: dict[tuple[str, str], list[tuple[int, str]]] = defaultdict(list)
-    for rel, text in production_files(root):
+    for rel, text in files if files is not None else production_files(root):
         for rule, line, message in scan_file(rel, text):
             found[(rule, rel)].append((line, message))
 
     for (rule, rel), hits in sorted(found.items()):
-        allowed = allowlist[(rule, rel)].count if (rule, rel) in allowlist else 0
+        allowed = max(allowlist[(rule, rel)].count, 0) if (rule, rel) in allowlist else 0
         for line, message in hits[allowed:]:
             findings.append(Finding("G6", rule, rel, line, f"новое нарушение: {message}"))
 
@@ -161,6 +169,8 @@ def check_g6(root: Path, allowlist: dict[tuple[str, str], AllowEntry] = ALLOWLIS
             findings.append(
                 Finding("G6", rule, rel, 0, f"запись устарела, уменьши count: в таблице {entry.count}, найдено {n}")
             )
+        if entry.count <= 0:
+            findings.append(Finding("G6", rule, rel, 0, "запись мертва (count <= 0), удали"))
         if len(entry.reason.strip()) < MIN_REASON_LEN:
             findings.append(Finding("G6", rule, rel, 0, f"reason пуста или короче {MIN_REASON_LEN} знаков"))
 
