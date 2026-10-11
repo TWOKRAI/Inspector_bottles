@@ -214,12 +214,13 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (11)
+## dev-tooling (12)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
 - [feedback_claude_cli_backend_costs_a_full_session](feedback_claude_cli_backend_costs_a_full_session.md)
 - [feedback_import_guard_substring_vs_ast](feedback_import_guard_substring_vs_ast.md)
+- [feedback_option_denylist_misses_abbreviations_and_argfiles](feedback_option_denylist_misses_abbreviations_and_argfiles.md)
 - [feedback_pytest_import_order_hides_a_cycle](feedback_pytest_import_order_hides_a_cycle.md)
 - [feedback_qex_full_rebuild_runbook](feedback_qex_full_rebuild_runbook.md)
 - [feedback_sentrux_depth_opaque](feedback_sentrux_depth_opaque.md)
@@ -320,7 +321,7 @@
 - [project_fencing_test_race](project_fencing_test_race.md)
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 
-## git (20)
+## git (21)
 
 - [feedback_a_diff_based_rescue_omits_untracked_files](feedback_a_diff_based_rescue_omits_untracked_files.md)
 - [feedback_a_peer_session_shares_the_tree](feedback_a_peer_session_shares_the_tree.md)
@@ -333,6 +334,7 @@
 - [feedback_gui_save_strips_yaml_comments](feedback_gui_save_strips_yaml_comments.md)
 - [feedback_inject_only_after_the_work_is_committed](feedback_inject_only_after_the_work_is_committed.md)
 - [feedback_isolated_subagent_worktree_pin](feedback_isolated_subagent_worktree_pin.md)
+- [feedback_option_denylist_misses_abbreviations_and_argfiles](feedback_option_denylist_misses_abbreviations_and_argfiles.md)
 - [feedback_parallel_commit_sweep](feedback_parallel_commit_sweep.md)
 - [feedback_precommit_collision_recovery](feedback_precommit_collision_recovery.md)
 - [feedback_precommit_stash_collision](feedback_precommit_stash_collision.md)
@@ -343,7 +345,7 @@
 - [feedback_worktree_stale_base](feedback_worktree_stale_base.md)
 - [project_shared_tree_provenance_forensics](project_shared_tree_provenance_forensics.md)
 
-## guards (35)
+## guards (36)
 
 - [feedback_a_control_reproduces_the_defect_it_was_built_to_catch](feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md)
 - [feedback_a_degenerate_value_is_not_zero_it_is_unknown](feedback_a_degenerate_value_is_not_zero_it_is_unknown.md)
@@ -365,6 +367,7 @@
 - [feedback_lazy_import_for_layer0_data_schema_files](feedback_lazy_import_for_layer0_data_schema_files.md)
 - [feedback_mirror_check_never_reads_the_original](feedback_mirror_check_never_reads_the_original.md)
 - [feedback_modal_dialog_waits_instead_of_failing](feedback_modal_dialog_waits_instead_of_failing.md)
+- [feedback_option_denylist_misses_abbreviations_and_argfiles](feedback_option_denylist_misses_abbreviations_and_argfiles.md)
 - [feedback_post_publication_mark_breaks_collapsing](feedback_post_publication_mark_breaks_collapsing.md)
 - [feedback_prototype_the_guard_before_fixing_its_wording](feedback_prototype_the_guard_before_fixing_its_wording.md)
 - [feedback_rename_injection_substring_trap](feedback_rename_injection_substring_trap.md)
