@@ -38,7 +38,8 @@ builds the two examples below.
 
 ## Example — main brief
 
-Illustrative (K0 task 1.2): the shape is the contract; FACTS literals are not re-run against HEAD.
+Illustrative (K0 task 1.2): the shape is the contract; FACTS literals are not re-run against HEAD. Keep a writer role here
+(`developer`): the contract test feeds this example to `lint-brief.sh`, which skips `lead` silently.
 
 ````markdown
 # Task 1.2 — watcher перечитывает конфиг после записи (бриф, ред. 1)
