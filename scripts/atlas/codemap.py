@@ -42,6 +42,7 @@ CHECKOUT_DIR = Path("data/atlas/checkout")
 KEEP = 3
 _STALE_SECONDS = 3600
 _CODES_MAX = 3
+_WIN_PATH_LIMIT = 259  # MAX_PATH без завершающего нуля
 _CODES: dict[tuple[str, str], Code] = {}
 
 USAGE_UNKNOWN = "Кто использует: не определено (исходники не разбираются)"
@@ -85,6 +86,44 @@ def _unpack(tar_input: bytes, target: Path) -> None:
         archive.extractall(target, filter="data")
 
 
+def _has_py(directory: Path) -> bool:
+    return any(directory.rglob("*.py"))
+
+
+def _long_paths_enabled() -> bool:
+    """Windows: включены ли длинные пути (реестр HKLM, LongPathsEnabled == 1); ошибка реестра -> нет."""
+    try:
+        import winreg  # noqa: PLC0415 - модуль есть только в Windows
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            return winreg.QueryValueEx(key, "LongPathsEnabled")[0] == 1
+    except (OSError, ImportError):
+        return False
+
+
+def _check_path_length(tree: Tree, roots: list[str], tmp: Path) -> None:
+    """Windows без длинных путей: самый длинный файл выгрузки не должен выйти за MAX_PATH (tar иначе падает молча)."""
+    if sys.platform != "win32" or _long_paths_enabled():
+        return
+    longest = max((len(f) for f in tree.files() if f.endswith(".py") and f.split("/")[0] in roots), default=0)
+    total = len(os.path.abspath(tmp)) + 1 + longest
+    if total > _WIN_PATH_LIMIT:
+        raise AtlasError(
+            f"atlas: checkout path too long ({total} > {_WIN_PATH_LIMIT}): "
+            "move the repository to a shorter path or enable LongPathsEnabled"
+        )
+
+
+def _discard(entry: Path) -> None:
+    """Убрать запись кэша: сперва `rename` в `.del-*` (полу-удалённое под итоговым именем читалось бы как попадание)."""
+    doomed = entry.parent / f".del-{entry.name}-{uuid.uuid4().hex[:8]}"
+    try:
+        os.rename(entry, doomed)
+    except OSError:  # внутри открытый файл (Windows PermissionError 5) или другой процесс уже убрал запись
+        return
+    shutil.rmtree(doomed, ignore_errors=True)
+
+
 def _prune(cache: Path, current: str) -> None:
     """Оставить KEEP новейших выгрузок; лишние сперва переименовать в `.del-*` (полу-удалённое не должно читаться
     как попадание), потом удалить. Залежавшиеся `.tmp-*`/`.del-*` старше часа удаляются."""
@@ -104,12 +143,7 @@ def _prune(cache: Path, current: str) -> None:
     for _, entry in entries[KEEP:]:
         if entry.name == current:
             continue
-        doomed = cache / f".del-{entry.name}-{uuid.uuid4().hex[:8]}"
-        try:
-            os.rename(entry, doomed)
-        except OSError:  # внутри открытый файл (Windows PermissionError 5) или другой процесс уже убрал запись
-            continue
-        shutil.rmtree(doomed, ignore_errors=True)
+        _discard(entry)
 
 
 def checkout(tree: Tree, rows: list[dict]) -> Path:
@@ -126,18 +160,24 @@ def checkout(tree: Tree, rows: list[dict]) -> Path:
     final = cache / key
     try:
         os.utime(final)
-        return final
     except FileNotFoundError:
         pass  # нет выгрузки (или её только что убрали): промах
+    else:
+        if not roots or _has_py(final):
+            return final
+        _discard(final)  # пустая выгрузка при непустых корнях не должна залипнуть: промах
     cache.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{key}-", dir=cache))
     try:
         if roots:  # `git archive` без путей выгрузил бы всё дерево
+            _check_path_length(tree, roots, tmp)
             specs = [f":(glob){r}/**/*.py" for r in roots]
             proc = run_git(tree.root, "-c", "core.autocrlf=false", "archive", "--format=tar", tree.ref, "--", *specs)
             if proc.returncode != 0:
                 raise AtlasError("atlas: git archive failed")
             _unpack(proc.stdout, tmp)
+            if not _has_py(tmp):
+                raise AtlasError("atlas: empty checkout")
         try:
             os.rename(tmp, final)
         except OSError:

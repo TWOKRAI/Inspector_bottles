@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -22,7 +23,7 @@ import pytest
 
 from scripts.atlas import codemap
 from scripts.atlas.tests.conftest import GitRepo, RepoFactory, run_with_deadline
-from scripts.atlas.tests.test_cache_1_6e import _new_repo
+from scripts.atlas.tests.test_cache_1_6e import _install_spy, _new_repo
 from scripts.atlas.tree import AtlasError, Tree
 
 __all__: list[str] = []
@@ -147,19 +148,95 @@ def test_pruned_checkout_with_open_file_is_whole_or_gone(repo_factory: RepoFacto
         assert _files(oldest) == before
 
 
-def test_empty_checkout_with_roots_raises(repo_factory: RepoFactory) -> None:
-    repo = _new_repo(repo_factory, "empty")
-    tree = Tree(repo.path, "main")
-    base = codemap.checkout(tree, _ROWS)
-    for child in base.iterdir():  # каталог остаётся, содержимое стёрто: как после сбоя диска
+def _empty(base: Path) -> None:
+    """Каталог остаётся, содержимое стёрто: как после сбоя диска."""
+    for child in base.iterdir():
         if child.is_dir():
             shutil.rmtree(child)
         else:
             child.unlink()
     assert list(base.iterdir()) == []
-    codemap.forget()
+
+
+def test_code_of_empty_checkout_with_roots_raises(
+    repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _new_repo(repo_factory, "empty")
+    empty = tmp_path / "empty_checkout"
+    empty.mkdir()
+    monkeypatch.setattr(codemap, "checkout", lambda tree, rows: empty)  # защита `code_of` отдельно от защиты `checkout`
     with pytest.raises(AtlasError, match="empty checkout"):
         run_with_deadline(lambda: codemap.code_of(Tree(repo.path, "main"), _ROWS), seconds=120)
+
+
+def test_unpack_producing_nothing_raises_and_leaves_no_entry(
+    repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _new_repo(repo_factory, "nothing")
+    monkeypatch.setattr(codemap, "_unpack", lambda data, target: None)
+    with pytest.raises(AtlasError, match="empty checkout"):
+        run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
+    assert _all_entries(repo) == []
+
+
+def test_empty_directory_under_final_name_is_a_miss(repo_factory: RepoFactory) -> None:
+    repo = _new_repo(repo_factory, "hollow")
+    base = codemap.checkout(Tree(repo.path, "main"), _ROWS)
+    _empty(base)
+    again = run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
+    assert again == base
+    assert _files(again) == ["m/__init__.py", "m/core.py", "m/interfaces.py"]
+    assert _all_entries(repo) == [base.name]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="предел MAX_PATH только в Windows")
+def test_too_long_checkout_path_raises_before_unpack(
+    repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = _new_repo(repo_factory, "long")
+    pad = 208 - len(str(tmp_path)) - 1  # каталог кэша 208 знаков: сам создаётся, а временный + файл выходят за 259
+    if pad < 1:
+        pytest.skip("tmp_path слишком длинный для подгонки")
+    cache = tmp_path / ("p" * pad)
+    monkeypatch.setattr(codemap, "CHECKOUT_DIR", cache)
+    monkeypatch.setattr(codemap, "_long_paths_enabled", lambda: False)
+    with pytest.raises(AtlasError, match="path too long"):
+        run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
+    assert list(cache.iterdir()) == []
+
+
+def test_stale_temp_entries_are_removed_and_fresh_ones_kept(repo_factory: RepoFactory) -> None:
+    repo = _new_repo(repo_factory, "stale")
+    cache = _cache(repo)
+    cache.mkdir(parents=True)
+    for name in (".tmp-fresh-x", ".tmp-old-x", ".del-y"):
+        (cache / name).mkdir()
+        (cache / name / "f.py").write_text("x = 1", encoding="utf-8")
+    past = time.time() - 7200
+    for name in (".tmp-old-x", ".del-y"):
+        os.utime(cache / name, (past, past))
+    run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
+    assert (cache / ".tmp-fresh-x").is_dir(), "свежий .tmp-* (чужой процесс ещё распаковывает) удалён"
+    assert not (cache / ".tmp-old-x").exists()
+    assert not (cache / ".del-y").exists()
+
+
+def test_code_memory_holds_three_revisions_only(repo_factory: RepoFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _new_repo(repo_factory, "memory")
+    shas = _revisions(repo, 4)
+    spy = _install_spy(monkeypatch)
+
+    def users(sha: str) -> None:
+        codemap.code_of(Tree(repo.path, sha), _ROWS).module_users("m")  # строит граф grimp
+
+    for sha in shas:
+        users(sha)
+    assert spy.build_graph == 4
+    spy.reset()
+    users(shas[3])
+    assert spy.build_graph == 0, "новейшая ревизия должна быть в памяти"
+    users(shas[0])
+    assert spy.build_graph == 1, "самая старая вытеснена из памяти: граф строится заново"
 
 
 def test_code_memo_key_includes_rows(repo_factory: RepoFactory) -> None:

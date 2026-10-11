@@ -227,6 +227,7 @@ def test_second_ref_and_card_do_no_checkout_and_no_build_graph(
         # контроль перехвата: холодный вызов обязан делать работу (зелёный и до правки — это не дыра)
         assert cold["build_graph"] >= 1, f"{argv[0]}: перехват grimp.build_graph не сработал"
         assert cold["checkout"] >= 1, f"{argv[0]}: перехват checkout не сработал"
+        _cold(repo)  # без диска и памяти ответить может только кэш видов
         second, warm = _call(atlas, spy, repo, *argv)
         assert second.code == 0, second.err
         # RED до кэша: сейчас каждый вызов заново выгружает ревизию и строит граф
@@ -275,6 +276,7 @@ def test_new_commit_invalidates_and_old_sha_stays_cached(
     assert cold["build_graph"] >= 1, "новая ревизия не должна браться из кэша старой"
     assert "Gamma" in new.out and new.out != old.out
 
+    _cold(repo)  # без диска и памяти ответить может только кэш видов
     pinned, warm = _call(atlas, spy, repo, "ref", "m", "--ref", old_sha, "--main-ref", "main")
     assert pinned.code == 0, pinned.err
     assert pinned.out == old.out
@@ -292,6 +294,7 @@ def test_core_version_change_invalidates_cache(
     spy = _install_spy(monkeypatch)
     first, _ = _call(atlas, spy, repo, "ref", "m", *_REFS)
     assert first.code == 0, first.err
+    _cold(repo)  # без диска и памяти ответить может только кэш видов
     _, warm = _call(atlas, spy, repo, "ref", "m", *_REFS)
     assert warm["build_graph"] == 0, "предусловие: до смены CORE_VERSION кэш должен работать"  # RED до кэша
 
