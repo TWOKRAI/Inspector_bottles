@@ -212,7 +212,7 @@ def test_too_long_primary_falls_back_to_short_temp_root(
     base = run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
     assert short_temp / "atlas-checkout" in base.parents
     assert (base / "m" / "interfaces.py").is_file()
-    assert not deep.exists(), "под слишком длинным основным путём что-то создано"
+    assert deep.name not in os.listdir(tmp_path), "под слишком длинным основным путём что-то создано"
     ino = base.stat().st_ino
     codemap.forget()
     spy = _install_spy(monkeypatch)
@@ -233,8 +233,26 @@ def test_too_long_primary_and_short_root_raise_and_leave_nothing(
     monkeypatch.setattr(tempfile, "tempdir", str(deep_temp))
     with pytest.raises(AtlasError, match="path too long"):
         run_with_deadline(lambda: codemap.checkout(Tree(repo.path, "main"), _ROWS), seconds=120)
-    assert not deep.exists()
-    assert not deep_temp.exists()
+    # Path.exists() для 300-знакового пути на Windows без длинных путей всегда False: смотрим список родителя
+    names = os.listdir(tmp_path)
+    assert deep.name not in names
+    assert deep_temp.name not in names
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="предел MAX_PATH только в Windows")
+def test_discard_leaves_nothing_even_for_a_259_char_file(tmp_path: Path) -> None:
+    cache = tmp_path / "c"
+    entry = cache / "0123456789ab-01234567"
+    first = len(str(entry)) + 1 + 10  # длина первого вложенного каталога
+    deep_dir = entry / ("p" * 10) / ("q" * (247 - first - 1))  # 247 знаков: каталог ещё создаётся
+    if len(str(deep_dir)) != 247:
+        pytest.skip("tmp_path слишком длинный для подгонки")
+    deep_dir.mkdir(parents=True)
+    victim = deep_dir / ("x" * 8 + ".py")
+    victim.write_text("x = 1", encoding="utf-8")
+    assert len(str(victim)) == 259
+    codemap._discard(entry)
+    assert os.listdir(cache) == [], "после _discard остался каталог (имя .del-* длиннее ключа)"
 
 
 def test_stale_temp_entries_are_removed_and_fresh_ones_kept(repo_factory: RepoFactory) -> None:

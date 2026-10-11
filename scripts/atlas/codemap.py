@@ -130,7 +130,7 @@ def _cache_dir(tree: Tree, roots: list[str], key: str) -> Path:
 
 def _discard(entry: Path) -> None:
     """Убрать запись кэша: сперва `rename` в `.del-*` (полу-удалённое под итоговым именем читалось бы как попадание)."""
-    doomed = entry.parent / f".del-{entry.name}-{uuid.uuid4().hex[:8]}"
+    doomed = entry.parent / f".del-{uuid.uuid4().hex[:8]}"  # короче ключа: путь файлов внутри не растёт
     try:
         os.rename(entry, doomed)
     except OSError:  # внутри открытый файл (Windows PermissionError 5) или другой процесс уже убрал запись
