@@ -36,8 +36,8 @@ DEFAULT_TARGETS = (
     "logger_module/tests/test_console_backpressure.py",
 )
 
-# Windows: access violation, stack buffer overrun и т. п.; POSIX: SIGABRT/SIGSEGV (шелл 128+n и -n).
-CRASH_CODES = frozenset({134, 139, -6, -11, 3221225477, 3221225725, 3221226505})
+# Windows: access violation, stack overrun, куча (0xC0000374), 0xC000041D; POSIX: SIGABRT/SIGSEGV (128+n и -n).
+CRASH_CODES = frozenset({134, 139, -6, -11, 3221225477, 3221225725, 3221226356, 3221226505, 3221226525})
 CRASH_TEXTS = ("fatal python error", "access violation")
 
 AXIS_TIMEOUT_S = 300
