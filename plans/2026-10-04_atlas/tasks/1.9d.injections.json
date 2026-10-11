@@ -8,7 +8,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -21,7 +23,10 @@
    "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds",
    "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -34,7 +39,10 @@
    "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds",
    "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_task_brief_example_builds"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -46,7 +54,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -58,7 +68,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_lead_parts_reads_open_questions"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_lead_parts_reads_open_questions"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -70,7 +82,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -82,7 +96,10 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds",
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -94,7 +111,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -106,7 +125,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -118,7 +139,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -130,7 +153,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  },
  {
@@ -142,7 +167,9 @@
   "forecast": [
    "scripts/atlas/tests/test_formats_1_9d.py::test_adr_table_names_reader_and_contract"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_adr_table_names_reader_and_contract"
+  ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
  }
 ]
