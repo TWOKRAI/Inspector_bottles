@@ -35,7 +35,10 @@ builds the two examples below.
    and `<!-- /atlas:facts -->`, `<sha7>` = the commit the literals came from; a fact that needs an uncommitted file
    goes to ACCEPTANCE. FACTS come from `python -m scripts.atlas brief <slug>#<id>` (`--write` puts the block into
    `tasks/<id>.md`, `--check` exits 1 when module files or cited files changed since `<sha7>`; ADR-ATL-004 §2.5а);
-   a fact the generator does not give is written by hand in the same grammar.
+   a fact the generator does not give is written by hand in the same grammar. Before stage 0 run
+   `python -m scripts.atlas lint-brief tasks/<id>.md` (ADR-ATL-004 §2.5б): form, replay of every command against its literal
+   (a literal that is not a substring of the output, or carries a time, is red), REDS, `injections.json` (`old` found once),
+   `PROBE`; `--no-replay` / `--no-fresh` skip the slow parts.
 6. **REDS** — `<path>::<test>` items, <= 10, or `n/a — <why>`.
 
 ## Example — main brief

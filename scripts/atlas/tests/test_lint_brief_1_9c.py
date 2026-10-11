@@ -588,6 +588,10 @@ def test_replay_allow_list_and_no_shell(repo: GitRepo, slow_atlas: Any, monkeypa
     # вердикт на каждую из двух строк с одной командой: верная строка не названа
     assert not any(t.endswith("литерал не найден в выводе: second commit") for t in texts), texts
     assert sorted(run.codes()) == ["FACT_MISMATCH"] * 4, run.codes()
+    # автор (1.9c, инъекция inj-20): по именам, не по числу — иначе обмен «верная строка красная, неверная зелёная»
+    # не виден: код возврата атласа 2 совпал с ожидаемым (его запустили кодом проекта), 1 — не совпал
+    code_texts = sorted(x[x.index("код возврата") :] for x in texts if "код возврата" in x)
+    assert code_texts == ["код возврата 128, ожидался 0", "код возврата 2, ожидался 1"], texts
 
     # вне allow-list: напечатано, ошибки нет, ничего не запущено
     assert sorted(run.off_list) == sorted(off_cmds), run.off_list
@@ -1085,3 +1089,19 @@ def test_spawn_hook_uses_the_same_function(tmp_path: Path, repo: GitRepo, atlas:
     proc = _run_hook(bash, broken, _prompt(reds=11))
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == "", f"хук отказал при сломанном модуле (запасная проверка): {proc.stdout!r}"
+
+    # автор (1.9c, инъекция inj-21): модуль проекта подменён маркером — хук зовёт ЕГО функцию, не запасную копию
+    def project_with(name: str, body: str) -> Path:
+        proj = tmp_path / name
+        (proj / "scripts" / "atlas").mkdir(parents=True)
+        (proj / "scripts" / "__init__.py").write_text("", encoding="utf-8")
+        (proj / "scripts" / "atlas" / "__init__.py").write_text("", encoding="utf-8")
+        (proj / "scripts" / "atlas" / "lint_brief.py").write_text(body, encoding="utf-8")
+        return proj
+
+    sentinel_src = "def spawn_violations(prompt, max_files=6):\n    return ['SENTINEL-FROM-PROJECT']\n"
+    reason = _deny_reason(_run_hook(bash, project_with("sentinel", sentinel_src), _prompt()))
+    assert reason is not None and "SENTINEL-FROM-PROJECT" in reason, reason
+    failing_src = "def spawn_violations(prompt, max_files=6):\n    raise RuntimeError('boom')\n"
+    proc = _run_hook(bash, project_with("failing", failing_src), _prompt(reds=11))
+    assert proc.returncode == 0 and proc.stdout == "", f"сбой внутри функции — fail open: {proc.stdout!r}"
