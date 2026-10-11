@@ -15,6 +15,7 @@ from pathlib import Path
 MEMORY_REL = "docs/claude/memory"
 NON_LESSONS = ("MEMORY.md", "ARCHIVE.md")
 CRAFT_PREFIX = "CRAFT"
+BY_MODULE_PREFIX = "BY-MODULE"  # сгенерированный индекс (by_module.py), не уроки
 
 # Ключи, которые читаются из frontmatter. `description` и `name` — одна строка, остальные — списки значений.
 LIST_KEYS = ("module", "mechanism", "role")
@@ -112,14 +113,14 @@ def read_lesson(path: Path) -> dict[str, list[str]]:
 
 
 def iter_lessons(memory_dir: Path) -> list[Path]:
-    """`*.md` прямо в каталоге, кроме `MEMORY.md`, `ARCHIVE.md`, `CRAFT*.md`; по имени файла."""
+    """`*.md` прямо в каталоге, кроме `MEMORY.md`, `ARCHIVE.md`, `CRAFT*.md`, `BY-MODULE*.md`; по имени файла."""
     if not memory_dir.is_dir():
         return []
     return sorted(
         (
             p
             for p in memory_dir.glob("*.md")
-            if p.is_file() and p.name not in NON_LESSONS and not p.name.startswith(CRAFT_PREFIX)
+            if p.is_file() and p.name not in NON_LESSONS and not p.name.startswith((CRAFT_PREFIX, BY_MODULE_PREFIX))
         ),
         key=lambda p: p.name,
     )

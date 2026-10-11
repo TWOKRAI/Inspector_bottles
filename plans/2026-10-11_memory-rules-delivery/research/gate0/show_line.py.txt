@@ -1,0 +1,41 @@
+# ruff: noqa: E402, E501
+"""Print tool_use/text blocks of given jsonl lines (truncated). Usage: show_line.py <jsonl> <n1,n2,...|a-b> [maxchars]"""
+
+import json
+import sys
+import os
+
+LP = chr(92) * 2 + "?" + chr(92)
+f = sys.argv[1]
+spec = sys.argv[2]
+mx = int(sys.argv[3]) if len(sys.argv) > 3 else 600
+want = set()
+for part in spec.split(","):
+    if "-" in part:
+        a, b = map(int, part.split("-"))
+        want |= set(range(a, b + 1))
+    else:
+        want.add(int(part))
+with open(LP + os.path.abspath(os.path.expanduser(f)), encoding="utf-8", errors="replace") as fh:
+    for i, ln in enumerate(fh, 1):
+        if i not in want:
+            continue
+        o = json.loads(ln)
+        c = (o.get("message") or {}).get("content")
+        if isinstance(c, str):
+            c = [{"type": "text", "text": c}]
+        for b in c or []:
+            if not isinstance(b, dict):
+                continue
+            t = b.get("type")
+            if t == "tool_use":
+                s = b["name"] + " " + json.dumps(b.get("input"), ensure_ascii=False)
+            elif t == "tool_result":
+                cc = b.get("content")
+                cc = " ".join(x.get("text", "") for x in cc if isinstance(x, dict)) if isinstance(cc, list) else str(cc)
+                s = ("ERR " if b.get("is_error") else "") + cc
+            elif t == "text":
+                s = b.get("text", "")
+            else:
+                continue
+            print(f"[{i} {o.get('type')} {o.get('timestamp', '')[:19]} {t}] {s[:mx]}")

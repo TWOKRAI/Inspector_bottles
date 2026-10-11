@@ -1,0 +1,47 @@
+# ruff: noqa: E402, E501
+"""Lessons (root+_archive) created >= 2026-09-04 with module:, body grepped for self-described repeat phrases. Run from repo root."""
+
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, "scripts/memory")
+import _lessons
+from pathlib import Path
+
+PH = re.compile(
+    r"(second time|again|repeat(ed)?|same (mistake|error|defect|trap)|recurr|once more|повтор|снова|ещё раз|второй раз|той же|тот же)",
+    re.I,
+)
+log = subprocess.run(
+    ["git", "log", "--diff-filter=A", "--name-only", "--format=@%ad", "--date=short", "--", "docs/claude/memory"],
+    capture_output=True,
+    text=True,
+    encoding="utf-8",
+).stdout
+created = {}
+d = None
+for ln in log.splitlines():
+    if ln.startswith("@"):
+        d = ln[1:]
+    elif ln.strip():
+        created[Path(ln).name] = d  # log is newest-first; keep oldest
+names = [n for n in created if n.startswith("feedback_")]
+tot = withmod = 0
+for p in sorted(
+    list(Path("docs/claude/memory").glob("feedback_*.md"))
+    + list(Path("docs/claude/memory/_archive").glob("feedback_*.md"))
+):
+    c = created.get(p.name, "")
+    if c < "2026-09-04":
+        continue
+    fm = _lessons.read_lesson(p)
+    tot += 1
+    if not fm.get("module"):
+        continue
+    withmod += 1
+    body = p.read_text(encoding="utf-8", errors="replace")
+    hits = [m.group(0) for m in PH.finditer(body)]
+    if hits:
+        print(c, p.parent.name, p.stem[9:], fm["module"], hits[:4])
+print("created>=09-04:", tot, "with module:", withmod)

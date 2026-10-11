@@ -1,0 +1,34 @@
+"""Earliest transcript line mentioning a literal. Usage: first_mention.py <literal> [n]"""
+
+import json
+import sys
+import glob
+import os
+
+LP = chr(92) * 2 + "?" + chr(92)
+lit = sys.argv[1]
+k = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+home = os.path.expanduser("~/.claude/projects")
+res = []
+for d in glob.glob(os.path.join(home, "*Inspector-bottles*")):
+    for f in glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True):
+        with open(LP + os.path.abspath(f), encoding="utf-8", errors="replace") as fh:
+            for i, ln in enumerate(fh, 1):
+                if lit in ln:
+                    try:
+                        o = json.loads(ln)
+                    except Exception:
+                        continue
+                    typ = o.get("type")
+                    ts = o.get("timestamp")
+                    c = (o.get("message") or {}).get("content")
+                    kinds = (
+                        [b.get("type") + ":" + str(b.get("name", "")) for b in c if isinstance(b, dict)]
+                        if isinstance(c, list)
+                        else ["text"]
+                    )
+                    res.append((ts or "", f.split("projects")[-1], i, typ, kinds[:3]))
+                    break
+for r in sorted(res)[:k]:
+    print(r)
+print("files:", len(res))

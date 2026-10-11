@@ -1,0 +1,81 @@
+"""Step A1: 30 baseline pairs -> older lesson module tags today + creation dates. Run from repo root."""
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "scripts/memory")
+import _lessons
+
+ROOT = Path(".")
+MEM = ROOT / "docs/claude/memory"
+txt = Path("plans/2026-10-04_atlas/research/baseline.md").read_text(encoding="utf-8").splitlines()
+rows = []
+for ln in txt[235:275]:
+    m = re.match(r"^\| (\S+) \((\d\d-\d\d)\) \| (.+) \|$", ln)
+    if m:
+        rows.append((m[1], m[2], [s.strip() for s in m[3].split(";")]))
+
+
+def loc(name):
+    f = "feedback_" + name + ".md"
+    for p in (MEM / f, MEM / "_archive" / f):
+        if p.exists():
+            return p
+    return None
+
+
+def created(p):
+    out = (
+        subprocess.run(
+            [
+                "git",
+                "log",
+                "--follow",
+                "--diff-filter=A",
+                "--format=%ad %h",
+                "--date=iso-strict",
+                "--",
+                str(p).replace("\\", "/"),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        .stdout.strip()
+        .splitlines()
+    )
+    return out[-1] if out else None
+
+
+res = []
+for new, d, olds in rows:
+    pn = loc(new)
+    item = {
+        "new": new,
+        "baseline_date": d,
+        "new_path": str(pn).replace("\\", "/") if pn else None,
+        "new_created": created(pn) if pn else None,
+        "olds": [],
+    }
+    for o in olds:
+        po = loc(o)
+        fm = _lessons.read_lesson(po) if po else {}
+        item["olds"].append(
+            {
+                "old": o,
+                "path": str(po).replace("\\", "/") if po else None,
+                "module": fm.get("module", []),
+                "created": created(po) if po else None,
+            }
+        )
+    res.append(item)
+print(len(rows), "pairs")
+for r in res:
+    mods = [
+        (o["old"], o["module"], (o["created"] or "")[:10], (o["path"] or "NONE/NONE").split("/")[-2]) for o in r["olds"]
+    ]
+    print(r["new"], (r["new_created"] or "")[:16], (r["new_path"] or "NONE/NONE").split("/")[-2], "->", mods)
+json.dump(res, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
