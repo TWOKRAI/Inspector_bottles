@@ -327,5 +327,40 @@
    "scripts/atlas/tests/test_cache_1_6e_code.py::test_source_edit_of_atlas_invalidates_view_cache"
   ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-24",
+  "prop": "длинный путь под репозиторием — выгрузка в короткий корень %TEMP%/atlas-checkout (р.2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if total(short) <= _WIN_PATH_LIMIT:\n        return short\n",
+  "new": "    if False:\n        return short\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_falls_back_to_short_temp_root"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-25",
+  "prop": "основной каталог берётся только если путь помещается в 259 (р.2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    if total(primary) <= _WIN_PATH_LIMIT:\n        return primary\n",
+  "new": "    if True:\n        return primary\n",
+  "forecast": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_falls_back_to_short_temp_root",
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_too_long_primary_and_short_root_raise_and_leave_nothing"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
+ },
+ {
+  "id": "inj-26",
+  "prop": "временный каталог короче ключа — меряется итоговый путь (р.2)",
+  "file": "scripts/atlas/codemap.py",
+  "old": "    tmp = Path(tempfile.mkdtemp(prefix=\".tmp-\", dir=cache))",
+  "new": "    tmp = Path(tempfile.mkdtemp(prefix=f\".tmp-{key}-{key}-\", dir=cache))",
+  "forecast": [],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
