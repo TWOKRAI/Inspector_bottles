@@ -171,5 +171,65 @@
    "scripts/atlas/tests/test_formats_1_9d.py::test_adr_table_names_reader_and_contract"
   ],
   "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "хук линтует и главный бриф (DESIGN ≥ 3)",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "  3. `stop()` отменяет таймер и ждёт идущий колбэк; публичный API не меняется.\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_spawn_hook_allows_built_brief"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "пункт ACCEPTANCE `N. ` тоже по грамматике",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "  - тесты модуля — `python -m pytest multiprocess_framework/modules/config_module -q` → exit 0",
+  "new": "  1. тесты модуля — `python -m pytest multiprocess_framework/modules/config_module -q` -> exit 0",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_facts_and_acceptance_lines_follow_grammar"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "раздел «Что я оставил открытым» обязателен",
+  "file": ".claude/plugins/dev/templates/review-report.md",
+  "old": "## Что я оставил открытым / ненадёжным\n- Windows не проверялся; прогоны короткие (N = 3).\n",
+  "new": "",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "файл роли невидим плану — через читатель extract_task_ids",
+  "file": ".claude/plugins/dev/templates/task-brief.md",
+  "old": "Файл роли: спавн —",
+  "new": "## Task 1.2 — заметка\n\nФайл роли: спавн —",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_role_file_example_builds"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "заголовок ## Замечания целой строкой",
+  "file": ".claude/plugins/dev/templates/review-report.md",
+  "old": "## Замечания\n- [major/dryrun]",
+  "new": "## Замечания р.1\n- [major/dryrun]",
+  "forecast": [
+   "scripts/atlas/tests/test_formats_1_9d.py::test_review_example_counts_match_header"
+  ],
+  "observed": null,
+  "test": "scripts/atlas/tests/test_formats_1_9d.py"
  }
 ]

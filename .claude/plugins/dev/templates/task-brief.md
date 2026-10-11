@@ -28,7 +28,7 @@ builds the two examples below.
 4. **A label's body** — list items (`- `, `N. `), indented continuations, fenced blocks. Never a line that opens
    another label: an ALL-CAPS Latin word with `:` even when indented (`  API: x`), and for the plan gate also a list
    item or a Cyrillic ALL-CAPS word with `:` or a bold `**…:**` (`  - API: x`, `ВАЖНО: z`, `- **Итог:** x`).
-5. **FACTS and ACCEPTANCE lines:** `- <what> — `command` → `literal``, or `→ exit <N>` for a return code. The dash is
+5. **FACTS and ACCEPTANCE lines** — items with `- ` only (never `N. `): `- <what> — `command` → `literal``, or `→ exit <N>` for a return code. The dash is
    U+2014, the arrow U+2192, both with spaces; no backticks inside the command or the literal. The literal is an exact
    substring of the command's stdout+stderr run from the repo root; two pieces of output — two lines; bytes via
    `git cat-file -s <sha>:<path>`, never `wc -c` (CRLF on Windows). FACTS sit between `<!-- atlas:facts <sha7> -->`

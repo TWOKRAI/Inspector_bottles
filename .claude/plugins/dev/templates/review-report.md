@@ -44,7 +44,7 @@ the example below.
   Исправить: пауза 0,2 с перед `stop()`; с ней красный 3 из 3.
 - [major/design] Флаг ожидания снимается после чтения файла: вторая запись теряется (`CLEAR=after` → `cfg=v1`, файл `v2`).
   Исправить: снимать флаг до чтения; инъекция «флаг после чтения» с прогнозом.
-- [minor/context] Ещё потребитель `_on_reload`: `app_module/tests/test_observability_watcher_events.py:75` — нет в радиусе.
+- [minor/context] Ещё потребитель `_on_reload` вне радиуса: `git grep -n "_on_reload" -- multiprocess_framework/modules/app_module/tests` → `test_observability_watcher_events.py:75`.
 - [nit/fact] `watcher.py:81–96` → факт 82–99 (`git grep -n "def _on_modified"`).
 
 ## Сверено и верно
