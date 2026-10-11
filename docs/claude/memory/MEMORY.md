@@ -44,6 +44,7 @@
 - [Ручки наблюдаемости](feedback_observability_knobs_switchable_at_any_boundary_zero_cost_off.md) — вкл/выкл везде, ноль нагрузки выключенной
 - [Один пишущий логгер](feedback_one_log_writer.md) — остальное — вид поверх
 - [Память одним модулем](project_memory_module_consolidation.md) — фасад, не размазывать
+- [Новейшие модели; Haiku 5.5 на простом](feedback_always_latest_models.md) — алиасы тиров; механику — haiku-агенту
 - [Стек 2026](reference_tech_stack_2026.md) — сверять при правках стека и зависимостей
 - [Push, кредит, инструменты](project_owner_push_and_tools_decisions.md) — push/PR разрешены после договорённости с сессиями; serena/graphify — сделать полезными
 
