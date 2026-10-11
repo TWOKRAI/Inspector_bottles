@@ -1,6 +1,6 @@
 # CRAFT-injection — читать, когда: планируешь инъекции; видишь «0 красных» или «зелёный под заплатой»; пишешь вакуумный ассерт или негатив
 Ядро — в [MEMORY.md](MEMORY.md) и в `.claude/CLAUDE.md` «Test authorship»; здесь детали, оплаченные конкретными провалами.
-Соседи: [CRAFT-tests](CRAFT-tests.md) · [CRAFT-verdict](CRAFT-verdict.md) · [CRAFT-config-qt](CRAFT-config-qt.md) · [CRAFT-by-module](CRAFT-by-module.md)
+Соседи: [CRAFT-tests](CRAFT-tests.md) · [CRAFT-verdict](CRAFT-verdict.md) · [CRAFT-config-qt](CRAFT-config-qt.md) · [BY-MODULE](BY-MODULE.md)
 
 ## Инъекции
 - [Инъектировать место ВЫЗОВА, не только тело](feedback_inject_the_call_site_not_only_the_helper.md) — снял единственный боевой вызов: ноль красных из 4297, тридцать сторожей звали хелпер напрямую

@@ -1,0 +1,571 @@
+[
+  {
+    "id": "inj-1",
+    "prop": "allow-list пропускает любую команду",
+    "file": "scripts/atlas/replay.py",
+    "old": "    return argv[0] == \"git\" and _git_ok(argv[1:])",
+    "new": "    return True",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-2",
+    "prop": "запуск через shell",
+    "file": "scripts/atlas/replay.py",
+    "old": "            stdin=subprocess.DEVNULL,",
+    "new": "            stdin=subprocess.DEVNULL,\n            shell=True,",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-3",
+    "prop": "литерал ищется только в stdout",
+    "file": "scripts/atlas/replay.py",
+    "old": "            stderr=subprocess.STDOUT,",
+    "new": "            stderr=subprocess.DEVNULL,",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-4",
+    "prop": "exit N не сверяется",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    elif not lit and got.code != int(code):",
+    "new": "    elif not lit and False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-5",
+    "prop": "дедуп команд теряет вердикт второй строки",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    cmd, lit, code = m[\"cmd\"], m[\"lit\"], m[\"code\"]",
+    "new": "    cmd, lit, code = m[\"cmd\"], m[\"lit\"], m[\"code\"]\n    if cmd in runs:\n        return",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-6",
+    "prop": "LITERAL_TIMING снят",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        elif m[\"lit\"] and _TIMING.search(m[\"lit\"]):",
+    "new": "        elif False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_russian_preposition_after_a_number_is_not_a_duration"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-7",
+    "prop": "FACT_MISMATCH не называет литерал",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        res.add(\"FACT_MISMATCH\", f\"литерал не найден в выводе: {lit}\\n  вывод: {first}\", i)",
+    "new": "        res.add(\"FACT_MISMATCH\", f\"литерал не найден\\n  вывод: {first}\", i)",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_pin_names_the_wrong_numbers",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-8",
+    "prop": "маркер FACTS не обязателен",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            res.add(\"FACTS_MARKER\", f\"у метки FACTS нет пары маркеров atlas:facts (`{_CLOSE}`)\", doc.first[\"FACTS\"])",
+    "new": "            pass",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-9",
+    "prop": "CRLF оставляет \\r в строках",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        self.lines = text.splitlines()",
+    "new": "        self.lines = text.split(\"\\n\")[: len(text.splitlines())]",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-10",
+    "prop": "новое имя в файле из FILES не разрешено",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            elif rel not in planned and not _has(got, name):",
+    "new": "            elif not _has(got, name):",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-11",
+    "prop": "два вхождения old считаются «найден»",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            elif text.find(old, at + 1) >= 0:",
+    "new": "            elif False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-12",
+    "prop": "многострочный old не находится в файле с CRLF",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            text, old = (s.replace(\"\\r\\n\", \"\\n\") for s in (target.read_bytes().decode(\"utf-8\", \"replace\"), obj[\"old\"]))",
+    "new": "            text, old = target.read_bytes().decode(\"utf-8\", \"replace\"), obj[\"old\"]",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-13",
+    "prop": "forecast не сверяется с REDS и собранными",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            if node not in reds and rel not in planned and not ((root / rel).is_file() and _has(col(rel), name)):",
+    "new": "            if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-14",
+    "prop": "PROBE не проверяется на существование",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        if rel is None or not any((base / rel).is_file() for base in (root, path.parent.parent)):",
+    "new": "        if rel is None:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-15",
+    "prop": "предупреждение даёт код 1",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    return (1 if errors else 0), [*lines, *res.notes, summary]",
+    "new": "    return (1 if res.findings else 0), [*lines, *res.notes, summary]",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-16",
+    "prop": "--no-replay всё равно гонит команды",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        elif do_replay:",
+    "new": "        elif True:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_facts_grammar_marker_timing",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-17",
+    "prop": "блок хука со строкой метки (без среза)",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    blocks = {name: lines[1:] for name, lines in pl._label_blocks(prompt.splitlines()).items()}",
+    "new": "    blocks = dict(pl._label_blocks(prompt.splitlines()))",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_hook_reason_order_matches_the_legacy_copy",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-18",
+    "prop": "неизвестный sha маркера молча пропущен",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            code, out = 1, [str(exc)]",
+    "new": "            code, out = 0, []",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_freshness_flags_and_usage"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-19",
+    "prop": "stdin не закрыт (строка убрана)",
+    "file": "scripts/atlas/replay.py",
+    "old": "            stdin=subprocess.DEVNULL,",
+    "new": "",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-20",
+    "prop": "PYTHONPATH не задан",
+    "file": "scripts/atlas/replay.py",
+    "old": "    env = {**os.environ, \"PYTHONUTF8\": \"1\", \"PYTHONPATH\": str(_PKG_ROOT) + (os.pathsep + old if old else \"\")}",
+    "new": "    env = {**os.environ, \"PYTHONUTF8\": \"1\"}",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-21",
+    "prop": "хук всегда зовёт запасную копию",
+    "file": ".claude/plugins/dev/hooks/lint-brief.sh",
+    "old": "    return spawn_violations(prompt, max_files)",
+    "new": "    return _legacy_violations(prompt, max_files)",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-22",
+    "prop": "e.name сверяется строго",
+    "file": ".claude/plugins/dev/hooks/lint-brief.sh",
+    "old": "        if e.name not in (\"scripts\", \"scripts.atlas\", \"scripts.atlas.lint_brief\"):",
+    "new": "        if e.name != \"scripts.atlas.lint_brief\":",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_hook_reason_order_matches_the_legacy_copy",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-23",
+    "prop": "git --output проходит фильтр",
+    "file": "scripts/atlas/replay.py",
+    "old": "    \"--output\",",
+    "new": "",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-24",
+    "prop": "pytest --junitxml проходит фильтр",
+    "file": "scripts/atlas/replay.py",
+    "old": "        elif arg.startswith(\"-\") and arg not in _PYTEST_FLAGS:",
+    "new": "        elif False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-25",
+    "prop": "дерево процессов не убивается по таймауту",
+    "file": "scripts/atlas/replay.py",
+    "old": "        _kill_tree(proc)",
+    "new": "        pass",
+    "forecast": [],
+    "observed": [],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-26",
+    "prop": "верхний импорт brief в lint_brief.py",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "from scripts.atlas import replay",
+    "new": "from scripts.atlas import brief, replay  # noqa: F401",
+    "forecast": [],
+    "observed": [],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-27",
+    "prop": "ATLAS_REPLAY_TIMEOUT игнорируется",
+    "file": "scripts/atlas/replay.py",
+    "old": "        seconds = float(os.environ.get(\"ATLAS_REPLAY_TIMEOUT\", \"\"))",
+    "new": "        seconds = _DEFAULT_TIMEOUT",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_replay_allow_list_and_no_shell"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-28",
+    "prop": "n/a в REDS не освобождает от лимита",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        elif name == \"REDS\" and n > 10 and not _na(body):",
+    "new": "        elif name == \"REDS\" and n > 10:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_spawn_hook_uses_the_same_function"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-29",
+    "prop": "метка в ограждении даёт BODY_LABEL",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "            if not doc.fenced[i] and pl._ANY_FIELD_LABEL_RE.match(doc.lines[i]):",
+    "new": "            if pl._ANY_FIELD_LABEL_RE.match(doc.lines[i]):",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_form_labels_and_body_rules"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-30",
+    "prop": "FILES файла роли рядом не читаются",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    for other in sorted(path.parent.glob(f\"{ident}.*.md\")):",
+    "new": "    for other in []:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks",
+      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks",
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_reds_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-31",
+    "prop": "id инъекции не по порядку принимается",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "        (obj[\"id\"] == f\"inj-{n}\", f\"id {obj['id']!r} вместо inj-{n}\"),",
+    "new": "        (True, \"\"),",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_injections_and_probe_checks"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-32",
+    "prop": "pytest -p <модуль> проходит фильтр",
+    "file": "scripts/atlas/replay.py",
+    "old": "            if i >= len(args) or not args[i].startswith(\"no:\"):",
+    "new": "            if i >= len(args):",
+    "forecast": [],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-33",
+    "prop": "wc -l за пределами корня",
+    "file": "scripts/atlas/replay.py",
+    "old": "        if (base != target and base not in target.parents) or target.is_dir():",
+    "new": "        if target.is_dir():",
+    "forecast": [],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-34",
+    "prop": "склейка -nO<команда> проходит фильтр git",
+    "file": "scripts/atlas/replay.py",
+    "old": "        elif arg.startswith(\"-\") and \"O\" in arg:  # склейка коротких: `-nOtouch`",
+    "new": "        elif False:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-35",
+    "prop": "сокращение длинной опции git проходит фильтр",
+    "file": "scripts/atlas/replay.py",
+    "old": "            if len(name) > 2 and any(bad.startswith(name) or name.startswith(bad) for bad in _GIT_BAD_LONG):",
+    "new": "            if len(name) > 2 and any(name.startswith(bad) for bad in _GIT_BAD_LONG):",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-36",
+    "prop": "@файл pytest проходит фильтр (в любой позиции, и в значении -k/-m)",
+    "file": "scripts/atlas/replay.py",
+    "old": "    if \"--collect-only\" not in args or any(a.startswith(\"@\") for a in args):",
+    "new": "    if \"--collect-only\" not in args:",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-37",
+    "prop": "нулевой или бесконечный таймаут принимается",
+    "file": "scripts/atlas/replay.py",
+    "old": "    return seconds if math.isfinite(seconds) and seconds > 0 else _DEFAULT_TIMEOUT",
+    "new": "    return seconds",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_bad_replay_timeout_values_fall_back"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_bad_replay_timeout_values_fall_back"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-38",
+    "prop": "предлог «с» после числа — время",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "(?:(?:с|сек)(?![ \\t]+[а-яёa-z])|s|ms|мс)",
+    "new": "(?:с|сек|s|ms|мс)",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_russian_preposition_after_a_number_is_not_a_duration"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_russian_preposition_after_a_number_is_not_a_duration"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-39",
+    "prop": "порядок отказов хука: блоки переставлены",
+    "file": "scripts/atlas/lint_brief.py",
+    "old": "    for name in (\"DESIGN\", \"FILES\", \"REDS\"):  # порядок хука до 1.9c: поблочно, затем REPORT",
+    "new": "    for name in (\"FILES\", \"DESIGN\", \"REDS\"):",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_hook_reason_order_matches_the_legacy_copy"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_hook_reason_order_matches_the_legacy_copy"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  },
+  {
+    "id": "inj-40",
+    "prop": "опции git после `--` не проверяются (`git grep -e -- -O<команда>`)",
+    "file": "scripts/atlas/replay.py",
+    "old": "        # без выхода на `--`: у `git grep -e` значением бывает и `--`, дальше идут опции",
+    "new": "        if arg == \"--\":\n            break",
+    "forecast": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "observed": [
+      "scripts/atlas/tests/test_lint_brief_1_9c.py::test_allow_list_option_spellings"
+    ],
+    "test": "scripts/atlas/tests/test_lint_brief_1_9c.py scripts/atlas/tests/test_formats_1_9d.py::test_lint_brief_reads_template_examples"
+  }
+]
