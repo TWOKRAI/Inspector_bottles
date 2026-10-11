@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 import _lessons
-import by_module
 
 DEFAULT_LIMIT = 8
 
@@ -82,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="with --by-module: exit 1 if the index files are stale")
     args = parser.parse_args(argv)
     if args.by_module:
+        import by_module  # лениво: поиск не зависит от генератора
+
+        if args.words or args.module or args.mechanism or args.role or args.list:
+            parser.error("--by-module takes no WORD, filter or --list")  # exit 2
         if args.write == args.check:
             parser.error("--by-module needs exactly one of --write, --check")  # exit 2
         root = (args.root or _lessons.current_tree_root()).resolve()

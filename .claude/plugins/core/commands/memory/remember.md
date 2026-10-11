@@ -42,7 +42,7 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    ```
    If `scripts/memory/search.py` exists, run it with the same words first (it ranks by `description:`).
    Even one hit → open the file, decide near-match: yes → **UPDATE** (add the nuance /
-   repeat / escalation), fix the line in `MEMORY.md`, **stop here** (don't
+   repeat / escalation), fix the line in `MEMORY.md`, **skip to step 5** (don't
    multiply duplicates). Zero hits across **all** variants → a new file (step 3).
 
 3. **No match → new file** `<memory_dir>/<kebab-slug>.md` in Karpathy format:
@@ -75,7 +75,7 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    ```
    Index ≤200 lines, one line per entry.
 
-5. **Regenerate the lesson index** (after the lesson file and the `MEMORY.md` line are written, before the commit):
+5. **Regenerate the lesson index** (only if `scripts/memory/search.py` exists; after the lesson file and the `MEMORY.md` line are written, before the commit):
    ```bash
    python scripts/memory/search.py --by-module --write
    ```

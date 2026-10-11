@@ -124,3 +124,26 @@ def test_iter_lessons_skips_by_module_prefix(tmp_path):
     for name in ("BY-MODULE.md", "BY-MODULE-x.md", "BY-MODULEfoo.md", "by-module-lower.md", "real.md"):
         _lesson(tmp_path, name, "---\nname: n\n---\n")
     assert [p.name for p in lessons.iter_lessons(tmp_path / MEM)] == ["by-module-lower.md", "real.md"]
+
+
+def test_write_keeps_lesson_named_like_the_index_in_lower_case(tmp_path):
+    # glob на Windows нечувствителен к регистру: урок `by-module-x.md` не должен считаться индексом и удаляться
+    _lesson(tmp_path, "by-module-x.md", "---\nname: x\ndescription: d\nmodule: tools\nmechanism: m\n---\n")
+    assert bm.run(tmp_path, write=True) == 0
+    assert (tmp_path / MEM / "by-module-x.md").is_file()
+    assert bm.run(tmp_path, write=False) == 0
+
+
+def test_cli_by_module_rejects_search_words_and_filters(tmp_path):
+    import subprocess
+
+    for extra in (["foo"], ["--module", "tools"], ["--list"], ["--mechanism", "m"], ["--role", "r"]):
+        cp = subprocess.run(
+            [sys.executable, str(SCRIPTS_MEMORY / "search.py"), "--by-module", "--check", "--root", str(tmp_path)]
+            + extra,
+            capture_output=True,
+            encoding="utf-8",
+            timeout=60,
+        )
+        assert cp.returncode == 2, (extra, cp.stdout, cp.stderr)
+        assert "takes no WORD" in cp.stderr

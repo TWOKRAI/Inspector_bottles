@@ -148,7 +148,12 @@ def run(root: Path, *, write: bool) -> int:
     if _too_big(encoded):
         return 2
     mem = root / _lessons.MEMORY_REL
-    on_disk = {p.name: p for p in mem.glob(GLOB) if p.is_file()} if mem.is_dir() else {}
+    # glob на Windows не различает регистр, а iter_lessons исключает `BY-MODULE` по регистру: фильтр по префиксу
+    on_disk = (
+        {p.name: p for p in mem.glob(GLOB) if p.is_file() and p.name.startswith(_lessons.BY_MODULE_PREFIX)}
+        if mem.is_dir()
+        else {}
+    )
     if write:
         mem.mkdir(parents=True, exist_ok=True)
         for name, path in on_disk.items():
