@@ -1,5 +1,7 @@
 # Контракт генератора `scripts/memory/rules.py`
 
+> **Поправка CTO 2026-10-11 — главнее текста ниже** ([`reports/2026-10-11_cto-verdict.md`](reports/2026-10-11_cto-verdict.md)): C1 — узлы не в git, их пишет SessionStart-хук (условно до R4 в 0.1); коды `stale`/`missing`/`orphan` и `.gitattributes` тогда не нужны. C2 — узел ≤ 10 строк × 120 зн. (порядок `merged_from` ↓, дата ↓), `budget` слоя 40 000 зн., лестница `node-too-big` снята. C7 — режим `--index` → `BY-MODULE.md` с `--index --check`.
+
 Один дом контракта: его читают тестер 1.1 (вслепую), developer 2.1, лид (инъекции) и reviewer. Ред. 2 — по ревью
 `MODE: plan`, итерация 1 (2026-10-11). Тот же текст — в docstring `rules.py` (README в `scripts/memory/` не заводится).
 

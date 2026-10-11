@@ -27,6 +27,19 @@
 <!-- owner-queue:begin -->
 | # | План | Задача | Заметка |
 |---|---|---|---|
+| 1 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.2 | первым: шаг 0 по транскриптам (N из M) + 5 пар; Gate 0: N/M < 1/3 → FREEZE плана ⚑ владелец |
+| 2 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.1 | остаток пробы (worktree, родитель+потомок, Grep, канарейка, R4); ядро `paths:` + `omitClaudeMd` уже подтвердил CTO; решает C1 (узлы не в git) |
+| 3 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 1.9c | `lint-brief` — нужен для K0b |
+| 4 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) | | продуктовый бриф №1 через `atlas brief` + `lint-brief` (выборка K0b 1/3); вместо Ж — robot-protocol-v2 T2.3/T2.4 после О-10 ⚑ владелец |
+| 5 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 1.1 | слепой тестер в worktree, параллельно п. 5; О1/О2 (узел ≤ 10 строк × 120 зн., слой ≤ 40 000 зн.) ⚑ владелец до брифа |
+| 6 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 2.1 | генератор + 2.2, 2.3; + `rules.py --index` → генерируемый `BY-MODULE.md` для человека вместо рукописного `CRAFT-by-module.md`; 2.4 — только если C1 отвергнут; потолок 1,2 млн на этой точке; О5 ⚑ до 2.2 |
+| 7 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 1.9f | `atlas metrics` — до брифа №2 |
+| 8 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) | | продуктовый бриф №2 (выборка K0b 2/3) |
+| 9 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 3.1 | замер на 5 парах, Gate 3 по C3 (стоп — «хуже ≥ 2 из 5»); О3/О4 ⚑ владелец до запуска; потолок плана 3,5 млн |
+| 10 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) | | продуктовый бриф №3 (выборка K0b 3/3) |
+| 11 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K0b | таблица «метрика — база — сейчас»; ⚑ владелец: продолжать Атлас (1.10a, 1.10b, 1.9e …) или FREEZE на достигнутом |
+| 12 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 3.2 | записи; Gate 3 → слой остаётся или удаляется одним коммитом |
+| 13 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | полевой счёт kill №6 до/после SHA memory 2.1; не раньше +21 день от п. 7 |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
@@ -265,7 +278,8 @@ line-sim Ф0–Ф3 и Ф5 закрыты (5.5 DEFERRED), Ф6: 6.1 и 6.2 зак�
 | [qr-code-reader](../qr-code-reader.md) | — | Шаг 0 (ingest мануалов) DONE; правка по документам закрыта. Вне полос §2 — новое железо | Ф0 на стенде: IDMVS → ModBus Mode, три Space/Offset/Size, версия прошивки |
 | [2026-10-02_plans-progress-dashboard](../2026-10-02_plans-progress-dashboard/plan.md) | М | ACTIVE; Фазы 1–2, 3.1, 3.2, 3.5, 3.6, 5.1, 5.2 в `main` (`01656f382`); 5.3 — спека в `docs/task-5-3-spec` | 5.3 → 5.5 → 5.6 → 3.3, 3.4, 5.4 |
 | [2026-10-03_commit-mechanism](../2026-10-03_commit-mechanism/plan.md) | М | IN PROGRESS; фазы 1–2 в `main` (`30f8335c9`, 10-05) | 3.2 замер до 10-12; 3.1 — решение владельца |
-| [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | М | IN PROGRESS; Ф0: 0.1–0.4, 0.6 и 0.2 (CI-гейт коммитов, `8f8dca963`, 10-05) в `main`; 2.4b/c/e в `main` | 0.8 CI зелёный → P1.1 облачный пилот; 2.4g → 2.4h → 2.4i |
+| [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | М | IN PROGRESS; ревизия CTO 2026-10-11: путь до K0b, 8 задач FREEZE, K1.1 — +21 день от слияния memory-rules-delivery 2.1 (`amendments.md` п. 20) | 1.9c → 1.9f → K0b на трёх продуктовых брифах (очередь владельца) |
+| [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | М | APPROVED WITH CONDITIONS (CTO 2026-10-11); дочерний к atlas (ответ на kill №6); опыт, откатываемый одним коммитом; потолок 3,5 млн | 0.2 Gate 0 (N/M по транскриптам) → 0.1 остаток пробы |
 
 ### 4.2 Ждут триггера — не трогать до условия
 
@@ -355,7 +369,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 В блоке и на странице — только очередь: планы §4.1, §4.2 и те, которых нет в таблицах §4; закрытые §4.3 и `_archive/` скрыты и считаются в строке `в архиве`.
 
 <!-- progress:begin -->
-- 2026-10-03_lifecycle-owner-scope — 0 из 25 · 0%
+- 2026-10-03_lifecycle-owner-scope — 4 из 25 · 16%
 - robot-protocol-v2 — 13 из 36 · 36%
 - line-sim-layer-editor — 8 из 10 · 80%
 - line-sim — 27 из 30 · 90%
@@ -376,7 +390,8 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - qr-code-reader — 3 из 17 · 18%
 - 2026-10-02_plans-progress-dashboard — 25 из 28 · 89%
 - 2026-10-03_commit-mechanism — 9 из 11 · 82%
-- 2026-10-04_atlas — 11 из 29 · 38%
+- 2026-10-04_atlas — 24 из 37 · 65%
+- 2026-10-11_memory-rules-delivery — 0 из 9 · 0%
 - robot-place-pose — 2 из 3 · 67%
 - robot-calibration — 4 из 6 · 67%
 - camera-robot-calibration — 6 из 7 · 86%
@@ -384,5 +399,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - word-layout — 2 из 4 · 50%
 - storage-stack-embedded-first — 0 из 11 · 0%
 - 2026-07-06_constructor-master — 107 из 113 · 95%
+- 2026-10-07_k0-framework-quality — 4 из 4 · 100%
+- 2026-10-07_tooling-py-modernization — 0 из 0
 в архиве: 119
 <!-- progress:end -->
