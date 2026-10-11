@@ -332,7 +332,9 @@
   "forecast": [
    "test_g10_non_positive_entry_is_dead_and_does_not_hide_markers"
   ],
-  "observed": null,
+  "observed": [
+   "test_g10_non_positive_entry_is_dead_and_does_not_hide_markers"
+  ],
   "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py scripts/lifecycle_guards/tests/test_lifecycle_static_acceptance.py"
  },
  {
@@ -344,7 +346,9 @@
   "forecast": [
    "test_g10_non_positive_entry_is_dead_and_does_not_hide_markers"
   ],
-  "observed": null,
+  "observed": [
+   "test_g10_non_positive_entry_is_dead_and_does_not_hide_markers"
+  ],
   "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py scripts/lifecycle_guards/tests/test_lifecycle_static_acceptance.py"
  },
  {
@@ -356,7 +360,21 @@
   "forecast": [
    "test_g6_entry_with_negative_count_is_dead_and_does_not_hide_violations"
   ],
-  "observed": null,
+  "observed": [
+   "test_g6_allowlist_ratchet[exact-files0-allow0-0-expected_markers0]",
+   "test_g6_allowlist_ratchet[new-violation-files5-allow5-1-expected_markers5]",
+   "test_g6_allowlist_ratchet[other-file-not-covered-files9-allow9-1-expected_markers9]",
+   "test_g6_allowlist_ratchet[reason-9-files2-allow2-1-expected_markers2]",
+   "test_g6_allowlist_ratchet[reason-empty-files3-allow3-1-expected_markers3]",
+   "test_g6_allowlist_ratchet[reason-exactly-10-files1-allow1-0-expected_markers1]",
+   "test_g6_allowlist_ratchet[reason-short-files4-allow4-1-expected_markers4]",
+   "test_g6_allowlist_ratchet[rotten-path-files8-allow8-1-expected_markers8]",
+   "test_g6_allowlist_ratchet[stale-count-too-high-files6-allow6-1-expected_markers6]",
+   "test_g6_allowlist_ratchet[stale-other-rule-files7-allow7-1-expected_markers7]",
+   "test_g6_entry_with_negative_count_is_dead_and_does_not_hide_violations",
+   "test_real_tree_changed_allowlist_count_turns_g6_red",
+   "test_real_tree_passes_every_guard"
+  ],
   "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py scripts/lifecycle_guards/tests/test_lifecycle_static_acceptance.py"
  }
 ]

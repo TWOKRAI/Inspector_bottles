@@ -217,7 +217,10 @@
   "forecast": [
    "test_runner_works_without_pythonpath"
   ],
-  "observed": "OLD-NOT-UNIQUE(2)",
+  "observed": [
+   "test_configs_carry_plugin_keys",
+   "test_runner_works_without_pythonpath"
+  ],
   "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
  },
  {
@@ -243,7 +246,9 @@
   "forecast": [
    "test_g3_final_collect_turns_a_dropped_root_into_abandoned"
   ],
-  "observed": null,
+  "observed": [
+   "test_g3_final_collect_turns_a_dropped_root_into_abandoned"
+  ],
   "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
  },
  {
@@ -255,7 +260,10 @@
   "forecast": [
    "test_run_refuses_the_suite_when_the_axis_is_dead"
   ],
-  "observed": null,
+  "observed": [
+   "test_run_proceeds_to_the_suite_when_the_axis_is_alive",
+   "test_run_refuses_the_suite_when_the_axis_is_dead"
+  ],
   "test": "scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe_acceptance.py scripts/lifecycle_guards/tests/test_lifecycle_plugin_probe.py"
  }
 ]

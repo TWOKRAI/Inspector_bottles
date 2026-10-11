@@ -43,7 +43,7 @@ abort» — abort закрывает политика памяти GUI-проц�
 |---|---|---|
 | 0.1–0.3 `Scope`/`Handle`, `Subscribers`, канал `emits_after_close` | DONE, заморожены до потребителя | лечат ханг останова и утечки подписок, не abort; потребитель — Ф1 или мегаплан GUI |
 | 0.4 `qt_lifetime` | DONE, используется | правило «Qt-объект умирает на своём потоке» — вход мегаплана GUI |
-| 0.5 стражи | CUT до стража gc (входит в T1) | счётчик Qt-мусора на тест (храповик) — в мегаплан GUI |
+| 0.5 стражи | ВОЗОБНОВЛЕНА 2026-10-11 по слову владельца (очередь п.2): G2, G3, G4, G6, G10 и проба abort сделаны (0.5a, 0.5b); G5 вынесен — в мегаплан GUI | счётчик Qt-мусора на тест (храповик) — в мегаплан GUI; под T1 `SAVEALL`-колбэк делает мусор бессмертным (урок `feedback_gc_saveall_census_under_a_freezing_boundary_keeps_garbage_forever.md`) |
 | Ф1 останов процесса | FROZEN | отдельная проблема (5-с ханг); по приоритету владельца |
 | Ф2, Ф5 GUI | заменены | требования в мегаплан GUI: Qt-объекты создаются и умирают на главном потоке; MVP без сильных циклов view↔presenter; `QTimer` с родителем; без лямбд, держащих виджет, на `destroyed`; `QObject` не создаётся в `QRunnable`; храповик Qt-мусора на тест |
 | Ф3, Ф4, Ф6 | FROZEN | по потребителю |
@@ -103,7 +103,7 @@ GUI-процесса (виден как `foreign_collections`, в `chain` = 1); 
 - Task 0.2: Scope и Handle — примитив и контракт-тесты G1 [DONE 2026-10-05 — dbd0d7b23] (после 0.1)
 - Task 0.3: Subscribers в event_module [DONE 2026-10-05 — a3fddf721] (после 0.2)
 - Task 0.4: qt_lifetime — attach_qt, flush_deferred_deletes, QThreadHandle [DONE 2026-10-05 — 41fc28c29] (после 0.2)
-- Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [PENDING] (после 0.3, 0.4)
+- Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [DONE 2026-10-11 — 0.5a и 0.5b на ветке, слияние по слову владельца; G5 вынесен] (после 0.3, 0.4)
 - Task 1.1: stop_budget и ChildProcessStop поверх эскалации PM [PENDING] (после 0.5)
 - Task 1.2: корень процесса с барьерами, один close в раннере, G7 [PENDING] (после 1.1)
 - Task 1.3: WorkerManager и PluginContext на области, G8 [PENDING] (после 1.2)
@@ -174,6 +174,7 @@ GUI-процесса (виден как `foreign_collections`, в `chain` = 1); 
 **Level:** Middle+ · **Assignee:** developer · **Layer:** tests/scripts
 **Goal:** G2 (сигнатуры, литеральный список издателей из DESIGN §2.6), G3/G4/G5 в режиме отчёта, G6 AST в `scripts/validate.py` с allowlist причин (fail), G10 (счётчик = 1); in-suite проба abort (`crashprobe offmain_gc`) в репозитории как приёмочная, база записана числом (сегодня crash 3/3).
 **Acceptance:** каждый страж краснеет на своей инъекции из DESIGN §3; режим отчёта не меняет код возврата гейта, но печатает список.
+**Итог (2026-10-11):** задача поделена по ревью спека (р.1–р.2): [`0.5a`](tasks/0.5a.md) — G2, G6, G10 в `validate.py` (52 издателя, 71 запись allowlist; итог [`0.5a.result.md`](tasks/0.5a.result.md)), [`0.5b`](tasks/0.5b.md) — плагин G3/G4 и проба abort с живой осью (итог [`0.5b.result.md`](tasks/0.5b.result.md)). G5 не реализован: под политикой T1 колбэк `DEBUG_SAVEALL` держит циклы вечно. «Сегодня crash 3/3» не воспроизводится: проба на наборе 3 из 3 survived (с T1 — 0 обёрток; без conftest — 4853 собранных объекта и тоже нет падения); живая ось — `python -m scripts.lifecycle_guards.probe axis` (`thread` падает 3 из 3, `main` выживает 3 из 3). Отчёты ревью — `reports/0.5.review-r1.md`, `r2.md`, `0.5a.review-code-r1.md`, `0.5b.review-code-r1.md`; инъекции — `tasks/0.5a.injections.json` (22), `tasks/0.5b.injections.json` (18).
 
 ## Ф1 — путь останова процесса (закрывает 5-секундный ханг)
 Задачи 1.1–1.5 по DESIGN §2.2–2.3 и П1–П3: один `stop_budget.py` (пять чисел, четыре места чтения `"shutdown_timeout"` мигрируют), `ChildProcessStop` с меткой ReaderGone, корень процесса `planes | transport | work` с барьерами, `stop()` = `cancel()`, один `close()` в раннере, `os._exit` при выживших, golden G7 (включая два инварианта приёмки stop-ownership 09-26), `BaseManager.scope` + шаблонный `shutdown()` (из 0.2), WorkerManager с перезапуском в том же потоке и STOPPED по отчёту, `PluginContext.scope` (камера и воркер в одной области), G8 < 1.5 с; ручной порядок `app_module/orchestrator.py:85` и `state_store_manager.py:134` — регистрацией в области. Task 1.2 закрывает долги stop-ownership «до старта Task 3.1»: указатель ADR-PM-045 → ADR-PMM-033 и формулировку п.4 ADR-PMM-033. Детализация спеков — на входе фазы, ревью спека до тестера.
