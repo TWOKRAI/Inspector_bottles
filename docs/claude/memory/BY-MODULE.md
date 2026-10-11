@@ -8,7 +8,7 @@
 | services | [BY-MODULE-services.md](BY-MODULE-services.md) | 11 | 18 |
 | plugins | [BY-MODULE-plugins.md](BY-MODULE-plugins.md) | 6 | 9 |
 | prototype | [BY-MODULE-prototype.md](BY-MODULE-prototype.md) | 9 | 21 |
-| tools | [BY-MODULE-tools.md](BY-MODULE-tools.md) | 3 | 44 |
+| tools | [BY-MODULE-tools.md](BY-MODULE-tools.md) | 3 | 45 |
 | other | [BY-MODULE-other.md](BY-MODULE-other.md) | 0 | 147 |
 
 По механизму: [BY-MODULE-mechanism.md](BY-MODULE-mechanism.md)

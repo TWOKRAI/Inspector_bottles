@@ -340,3 +340,28 @@ def test_adr_table_names_reader_and_contract() -> None:
         for at, title in ((readers_at, "читатели"), (contract_at, "тест-контракт")):
             cell = rows[name][at]
             assert cell and cell != "—", f"строка {name!r}: ячейка {title!r} пуста или «—»"
+
+
+# --- читатель 1.9c ------------------------------------------------------------------------------------------------
+
+
+def test_lint_brief_reads_template_examples(repo, atlas) -> None:
+    # `lint-brief` (Task 1.9c): оба примера шаблона проходят без ошибок. REDS_NO_FILE нет: файл REDS главного примера
+    # назван первым словом FILES примера роли (`1.2.tester.md`, §2.5/§2.6 ADR).
+    main_lines = _main_brief()
+    role_lines = _role_brief()
+    main_id = _main_id(main_lines)
+    role_id, role = _role_id_and_role(role_lines)
+    assert (main_id, role_id, role) == ("1.2", "1.2", "tester")
+    main_rel = f"plans/p/tasks/{main_id}.md"
+    role_rel = f"plans/p/tasks/{role_id}.{role}.md"
+    for rel, lines in ((main_rel, main_lines), (role_rel, role_lines)):
+        target = repo.path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+
+    for rel in (main_rel, role_rel):
+        res = atlas(repo, "lint-brief", rel, "--no-replay", "--no-fresh")
+        last = [ln for ln in res.out.splitlines() if ln.strip()][-1:] or [""]
+        assert last[0].startswith("lint-brief: ошибок 0, "), f"{rel}: {res.out!r} / {res.err!r}"
+        assert res.code == 0, f"{rel}: код {res.code}: {res.out!r}"
