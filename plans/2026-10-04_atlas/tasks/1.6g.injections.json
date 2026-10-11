@@ -203,7 +203,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_empty_checkout_with_roots_raises"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_empty_checkout_with_roots_raises"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -215,7 +217,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_code_memo_key_includes_rows"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_code_memo_key_includes_rows"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  },
  {
@@ -227,7 +231,9 @@
   "forecast": [
    "scripts/atlas/tests/test_checkout_1_6g.py::test_hit_refreshes_recency"
   ],
-  "observed": null,
+  "observed": [
+   "scripts/atlas/tests/test_checkout_1_6g.py::test_hit_refreshes_recency"
+  ],
   "test": "scripts/atlas/tests/test_speed_1_6g.py scripts/atlas/tests/test_checkout_1_6g.py scripts/atlas/tests/test_cache_1_6e.py scripts/atlas/tests/test_cache_1_6e_code.py"
  }
 ]
