@@ -70,6 +70,7 @@ nothing errors, the guarantee just stops holding.
 | Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
 
 Roles → models (all 15): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` / `memory-classifier` = Haiku.
+Haiku 5.5 (owner, 2026-10-11): upgraded — use it for simple work whenever it fits: mechanical edits, lookups, greps, format checks, simple docs (`junior` / `docs-writer`, or `model: "haiku"` on an Agent call). Not for design, review verdicts, blind tests or concurrency.
 
 `/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
 the background** — for a verdict this project's rules will accept, drive `reviewer` directly instead.
