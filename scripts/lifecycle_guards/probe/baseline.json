@@ -1,0 +1,54 @@
+{
+  "suite_t1_on": {
+    "runs": 3,
+    "survived": 3,
+    "crashed": 0,
+    "failed": 0,
+    "main": "4381fe9d4",
+    "result": "715 passed, 1 skipped",
+    "secs": [
+      71,
+      68,
+      67
+    ],
+    "wrappers": 0
+  },
+  "suite_no_conftest_offscreen": {
+    "runs": 3,
+    "survived": 3,
+    "wrappers": 1750,
+    "collected_objects": 4853,
+    "secs": [
+      61,
+      57,
+      61
+    ]
+  },
+  "suite_no_conftest_native": {
+    "runs": 3,
+    "survived": 3,
+    "wrappers": 1750,
+    "collected_objects": 4853,
+    "secs": [
+      74,
+      66,
+      61
+    ]
+  },
+  "axis": {
+    "thread": {
+      "crashed": 3,
+      "of": 3
+    },
+    "main": {
+      "survived": 3,
+      "of": 3
+    },
+    "platforms": [
+      "offscreen",
+      "native"
+    ]
+  },
+  "history": "до T1, 2026-10-03: crash 3 из 3, docs/reviews/2026-10-03_task-5.5c-gate3/",
+  "reading": "проба на реальном наборе слепа на этом дереве (0 обёрток при T1; без T1 не падает); живая ось — axis"
+}

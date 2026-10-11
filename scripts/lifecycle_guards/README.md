@@ -52,3 +52,73 @@ python -m scripts.lifecycle_guards check [--root PATH] [--only g2,g6,g10]
 - Табличные записи G2/G6 описывают наше дерево: на корне без `multiprocess_framework/modules`
   (`--root` чужого каталога) таблицы пусты, иначе каждая строка была бы «гнилой».
 - Это статика: поведение (abort-проба, плагин pytest) — задача 0.5b.
+
+## Плагин и проба
+
+Задача 0.5b. Динамические стражи G3 и G4 — pytest-плагин `pytest_plugin.py`; к нему проба abort
+с живой осью — каталог `probe/`.
+
+### Плагин G3/G4
+
+Подключён ключом `-p scripts.lifecycle_guards.pytest_plugin` в `multiprocess_framework/modules/pytest.ini`
+(`addopts`, плюс `pythonpath = ../..`: плагин `-p` импортируется раньше `conftest.py`, а при cwd = `modules`
+корня в `sys.path` нет) и в `pyproject.toml` (`addopts`). На импорте только stdlib: ни `multiprocessing`,
+ни `PySide6`, ни `base_manager` (`conftest.py` ставит `spawn` позже плагина).
+
+| ручка | значения | умолчание | смысл |
+|---|---|---|---|
+| `LIFECYCLE_G3` | `off` / `report` / `fail` | `report` | в конце сессии `gc.collect()` и `base_manager.unclosed_roots()` |
+| `LIFECYCLE_G4` | `off` / `report` / `fail` | `report` | поток, живой после теста, без `/` в имени (имя потока `spawn` — путь области) |
+
+Неизвестное значение читается как `report`; в отчёте строка предупреждения с этим значением.
+`report` код возврата не меняет; `fail` при N > 0 переводит успешный прогон в код 1 (красный тест
+не маскируется ни в одном режиме). При `off`/`off` раздела отчёта нет; если выключен один страж,
+раздел остаётся ради другого.
+
+Формат отчёта (раздел `lifecycle-guards report` в конце сессии):
+
+```
+G3 unclosed roots: N
+  <path> (open|abandoned)
+G4 threads without scope path: N
+  <nodeid> :: <имя потока>
+```
+
+G4: перепись `threading.enumerate()` до и после теста; новый живой поток подождали до 0,2 с на тест;
+`MainThread` и `Dummy-*` не считаются.
+
+### Проба abort
+
+`python -m scripts.lifecycle_guards.probe axis [--runs 3] [--script PATH]` — ось жива, если репродуктор
+(`probe/axis_chain.py`, копия отчёта CTO) в режиме `thread` падает во всех прогонах, а в режиме `main`
+выживает (код 0 и `SURVIVED main`). Вывод: `axis: alive` / `axis: dead (...)` (код 0 / 2);
+не `win32` без `--script` — `axis: unchecked (not win32)`.
+
+`python -m scripts.lifecycle_guards.probe run [--mode offmain_gc] [--runs 3] [--targets ...] [--no-conftest]
+[--cwd DIR] [--skip-axis] [--axis-script PATH]` — сначала ось (мёртвая ось: код 2, набор не запускается),
+затем pytest с плагином `probe/crashprobe.py` `runs` раз. Исход прогона: `crashed` (в выводе
+`Fatal Python error` / `access violation` либо код из `{134, 139, -6, -11, 3221225477, 3221225725,
+3221226505}`), `not-triggered` (в журнале нет строки `at first logger test`), `failed` (иной ненулевой код;
+код 3 pytest — `failed`), `survived`. Код 0 только при `survived == runs`. Подпроцессы пробы идут с
+`LIFECYCLE_G3=off LIFECYCLE_G4=off`: проба меряет abort, а не стражей.
+
+Замеры лида — `probe/baseline.json`. Прочтение: проба на реальном наборе слепа на этом дереве
+(0 обёрток при T1; без T1 не падает); живая ось — `axis`.
+
+### Пределы
+
+- G4 видит только потоки без `/` в имени; поток с путём области, но живой после закрытия корня, ловит G3.
+- G4 ловит поток, начатый внутри теста; поток, начатый в `conftest` вне теста, — нет.
+- G5 (сборка мусора вне главного потока по `gc.callbacks`) в 0.5b не реализован — открытый вопрос О1.
+- Проба на реальном наборе слепа: с T1 в наборе 0 обёрток Qt к первому тесту `logger_module`, нечему падать;
+  доказательная сила — только при мёртвой/живой оси (`axis`) и 0 `not-triggered`.
+- Ось проверена только на `win32` (offscreen и нативная платформа); на Linux — `unchecked`.
+- `crashprobe.py` отличается от `docs/reviews/2026-10-03_task-5.5c-gate3/crashprobe.py.txt` двумя местами:
+  журнал сбрасывается на диск после каждой строки; без загруженного `PySide6` проба молчит.
+
+### Цены (О3)
+
+Замер 2026-10-11, `frontend_module/tests` + `logger_module/tests`, cwd `multiprocess_framework/modules`,
+`QT_QPA_PLATFORM=offscreen`, один прогон на вариант: без плагина (`-o addopts=`) 82,1 с; с плагином
+(G3 и G4 `report`) 77,5 с — разница внутри разброса прогонов, измеримой цены нет. Записей G4 на этом
+наборе: 0; корней G3: 0.
