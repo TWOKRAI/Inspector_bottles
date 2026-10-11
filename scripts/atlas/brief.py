@@ -275,13 +275,14 @@ def check(root: Path, task_path: Path) -> tuple[int, list[str]]:
     tree = Tree(root, sha)
     by_id, present, inputs = {r["id"]: r["paths"] for r in modules_for(tree)}, set(tree.files()), set()
     for line in text.split(_CLOSE)[0].rpartition("<!-- atlas:facts ")[2].splitlines():
-        if not (m := _FACT.match(line)) or not m["cmd"].startswith("python -m scripts.atlas "):
+        if not (m := _FACT.match(line)):
             continue
-        args = m["cmd"].split()[3:]
-        mods = [b for a, b in zip(args, args[1:]) if a == "--module"] if args[0] == "pack" else args[1:2]
-        inputs.update(p for mod in mods for p in by_id.get(mod, []))
-        for item in (m["lit"] or "").split():
-            item = re.sub(r":\d+$", "", item.strip(",;()"))
+        if m["cmd"].startswith("python -m scripts.atlas "):
+            args = m["cmd"].split()[3:]
+            mods = [b for a, b in zip(args, args[1:]) if a == "--module"] if args[0] == "pack" else args[1:2]
+            inputs.update(p for mod in mods for p in by_id.get(mod, []))
+        for item in (m["lit"] or "").split():  # файлы из литералов — у любой команды (ADR §2.5а)
+            item = re.sub(r":\d+$", "", item.strip(",;():"))
             if "/" in item and item in present:
                 inputs.add(item)
     paths = sorted(p for p in inputs if not p.startswith("plans/"))
