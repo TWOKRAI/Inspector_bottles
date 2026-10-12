@@ -19,6 +19,7 @@
 - [Ноль красных](feedback_injection_zero_may_mean_the_guards_were_not_collected.md) — база матрицы без `-k`, collected числом
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без вход→выход = совет
 - [Об ОТСУТСТВИИ](feedback_an_absence_assertion_needs_a_reachability_check.md) — с парной проверкой достижимости
+- [rg от корня слеп](feedback_root_ignore_whitelist_blinds_root_search.md) — явный путь или git grep
 - [Сторож «хоть раз» слеп](feedback_a_guard_that_counts_at_least_once_is_blind.md) — судить поимённо, не суммой
 - [Дублёр верен форме, не протоколу](feedback_a_faithful_fake_still_lacks_the_protocol.md) — одно имя, две двери
 - [Чужая сессия в том же дереве](feedback_a_peer_session_shares_the_tree.md) — один писатель, стейджить явные пути
