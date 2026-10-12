@@ -39,7 +39,7 @@ TCP-сервер (симулятор робота линии) в процесс�
 | `sim_robot_ticker` | `server.tick_once(dt)` каждые `TICK_INTERVAL_S` (0.01 с), `dt` по `perf_counter`; `pause_event` игнорирует — мир линии не встаёт от паузы воркеров |
 | `sim_robot_listener` | `server.serve_until(stop_event, ready)` — asyncio-слушатель Modbus TCP на потоке воркера; блок регистров `REG_SPACE_SIZE_V2` (0x3083) |
 
-- Старт ждёт bind слушателя не дольше 5 с; сбой или таймаут → `_fail`, `state="error"`.
+- Старт ждёт bind слушателя не дольше 5 с, затем живого тикера не дольше 5 с (`_V2_TICKER_TIMEOUT_S`); сбой или таймаут → `_fail`, `state="error"` (причина «тикер v2 не запустился» — отдельная). Худший старт — около 10 с.
 - `shutdown()` гасит тик, ждёт, пока слушатель отпустит порт, и пока оба воркера вернутся.
   Повторный `start` поднимает те же имена: `create_worker` на занятое имя даёт `False`,
   тогда `start_worker`.

@@ -434,7 +434,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         Цели воркеров читают текущий запуск из ``self._v2_*`` — так повторный ``start``
         после ``shutdown`` переиспользует те же имена: ``create_worker`` на занятое имя
         возвращает ``False``, тогда ``start_worker``. Ждёт bind слушателя не дольше
-        ``_V2_READY_TIMEOUT_S``: сбой или таймаут — воркеры гасятся и ``RuntimeError``
+        ``_V2_READY_TIMEOUT_S``, затем живого тикера не дольше ``_V2_TICKER_TIMEOUT_S``:
+        сбой или таймаут — воркеры гасятся и ``RuntimeError``
         (вызывающий уводит её в :meth:`_fail`). Без ожидания сбой bind дал бы воркер
         в ``ERROR`` при ``state == "running"``."""
         self._v2_server = server
