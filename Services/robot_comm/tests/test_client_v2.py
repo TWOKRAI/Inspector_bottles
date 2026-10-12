@@ -101,13 +101,15 @@ class Rig:
             self.transport.connect()
         self.now = 0.0
         self.ticking = ticking
+        self._tick_lock = threading.Lock()
         cfg = ClientV2Config.from_dict(config or {})
         self.client = RobotClientV2(self.transport, cfg, rng=FixedRng(rng), clock=lambda: self.now, sleep=self.sleep)
 
     def sleep(self, dt: float) -> None:
-        self.now += dt
-        if self.ticking:
-            self.core.tick()
+        with self._tick_lock:  # два потока клиента не тикают ядро одновременно
+            self.now += dt
+            if self.ticking:
+                self.core.tick()
 
     def cmds(self) -> list[tuple[int, int, list[int]]]:
         """Команды mailbox из журнала записей: (seq, opcode, args)."""
@@ -855,3 +857,200 @@ def test_real_stack_ping_stop_and_heartbeat_over_tcp() -> None:
     finally:
         device.disconnect()
         server.stop()
+
+
+# ============================================================================================
+# Ревью 1: probe, гонка probe со стопом и пульсом, метка «в полёте», замок стопа, перекрытое событие
+# ============================================================================================
+
+
+def test_failed_probe_leaves_client_unprobed_and_blocks_every_write() -> None:
+    from Services.robot_comm.server.sim_core import RobotSimCore
+
+    rig = Rig()
+    rig.client.probe()
+    rig.transport.core = RobotSimCore()  # на том же адресе теперь прошивка v1
+    with pytest.raises(WrongFirmware):
+        rig.client.probe()
+    for call in (
+        rig.client.kick_heartbeat,
+        rig.client.jog_lease,
+        lambda: rig.client.stop(2),
+        lambda: rig.client.cmd("PING", []),
+    ):
+        with pytest.raises(WrongFirmware):
+            call()
+    assert rig.transport.transactions == []
+
+
+def _once_on_block_read(rig: Rig, action) -> None:
+    """Хук на чтение блока 0x1010/80 (шаг (1) probe): ``action`` выполняется один раз, ПОСЛЕ чтения блока."""
+    fired = []
+
+    def read_filter(address: int, count: int, out: list[int]) -> list[int]:
+        if address == RES_SEQ and count == 80 and not fired:
+            fired.append(1)
+            action()
+        return out
+
+    rig.transport.read_filter = read_filter
+
+
+def test_probe_racing_stop_does_not_roll_stop_seq_back_to_stale_echo() -> None:
+    rig = Rig()
+    rig.client.probe()
+    _once_on_block_read(rig, lambda: rig.client.stop(2))
+    rig.client.probe()  # блок с эхом 0 прочитан, затем во время probe прошёл стоп seq 1
+    rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.client.stop(2)
+    for _ in range(5):
+        rig.core.tick()
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2]  # второе значение иное -> робот его не проигнорирует
+    assert rig.core.regs[TLM_ACTIVITY] == 0
+
+
+def test_probe_racing_heartbeat_does_not_roll_back_heartbeat_value() -> None:
+    rig = Rig()
+    rig.core.regs[HB_PC] = 10
+    rig.client.probe()
+    _once_on_block_read(rig, rig.client.kick_heartbeat)
+    rig.client.probe()
+    rig.client.kick_heartbeat()
+    assert rig.transport.transactions == [[("w", HB_PC, 11)], [("w", HB_PC, 12)]]
+
+
+def test_transport_error_on_cmd_write_keeps_inflight_mark_so_next_cmd_settles_first() -> None:
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    fired = []
+
+    def boom(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops) and not fired:
+            fired.append(1)
+            raise ModbusIOError("обрыв на записи CMD")
+
+    rig.transport.before_tx = boom
+    with pytest.raises(ModbusIOError):
+        rig.client.cmd("PING", [])
+    with pytest.raises(RobotTimeout) as exc:  # робот молчит: досмотр seq 100, своей записи нет
+        rig.client.cmd("PING", [])
+    assert (exc.value.stage, exc.value.seq) == ("response", 100)
+    assert rig.cmds() == []
+
+
+def test_late_ack_of_inflight_done_seq_command_after_stop_reissues_hard_and_aborts_next_cmd() -> None:
+    rig = Rig(ticking=False)
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.ticking = True
+    rig.client.stop(2)  # стоп 1 обрабатывается в одном тике ДО mailbox: ход принят уже после стопа
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PING", [])
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2]
+    assert [c[1] for c in rig.cmds()] == [OP_PTP_MOVE]  # PING не записан
+    for _ in range(3):
+        rig.core.tick()
+    assert rig.core.regs[TLM_ACTIVITY] == 0
+
+
+def test_late_nak_of_inflight_command_after_stop_does_not_abort_next_cmd() -> None:
+    rig = Rig(ticking=False)
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PTP_MOVE", [3000, -2100, -400, -1000, 0, 101])  # spd 101 -> NAK
+    rig.ticking = True
+    rig.client.stop(2)
+    assert rig.client.cmd("PING", []).rvals[0] == 0x0200
+    assert rig.stop_writes() == [1 * 4 + 2]
+
+
+def test_stop_req_is_written_inside_stop_lock() -> None:
+    """Пока первая запись STOP_REQ висит, вторая НЕ начинается; значения записей растут."""
+    rig = Rig()
+    rig.client.probe()
+    in_write = threading.Event()
+    release = threading.Event()
+    first = [True]
+
+    def hang_first_write(ops: list[tuple]) -> None:
+        if ops[0][1] == STOP_REQ and first:
+            first.clear()
+            in_write.set()
+            release.wait(0.3)
+
+    rig.transport.before_tx = hang_first_write
+    _, done1 = in_thread(lambda: rig.client.stop(2), "stop-1")
+    assert in_write.wait(_DEADLINE_S)
+    _, done2 = in_thread(lambda: rig.client.stop(2), "stop-2")
+    time.sleep(0.15)
+    begun = [e for e in rig.transport.log if e[0] == "tx" and e[1][0][1] == STOP_REQ]
+    assert len(begun) == 1, "вторая запись STOP_REQ началась, пока первая висела: выдача seq и запись разошлись"
+    release.set()
+    join(done1, "stop-1")
+    join(done2, "stop-2")
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2]
+
+
+def test_wait_done_ignores_foreign_vfd_event_while_move_is_running() -> None:
+    """Асинхронный E_VFD_LINK посреди хода (ERR_SEQ = 0, ACTIVITY = PTP) не обрывает ожидание: итог — DONE."""
+    rig = Rig()
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    base_sleep = rig.client._sleep
+    ticks = [0]
+
+    def sleep(dt: float) -> None:
+        base_sleep(dt)
+        ticks[0] += 1
+        if ticks[0] == 20:
+            rig.core.inject_vfd_link_fault()
+
+    rig.client._sleep = sleep
+    rig.client.wait_done(move.seq)
+    assert ticks[0] > 20
+    assert rig.core.regs[TLM_ERR_EVT] == 1 and rig.core.regs[TLM_DONE_SEQ] == move.seq
+
+
+def test_wait_done_after_stop_raises_robot_aborted_with_seq_and_errno() -> None:
+    rig = Rig()
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.client.stop(2)
+    with pytest.raises(RobotAborted) as exc:
+        rig.client.wait_done(move.seq)
+    assert (exc.value.seq, exc.value.errno) == (move.seq, E_ABORTED)
+
+
+def test_reconnect_between_calls_reprobes_instead_of_using_stale_error_cursor() -> None:
+    rig = Rig()
+    rig.core.regs[TLM_ERR_EVT] = 10
+    rig.client.probe()
+    rig.transport.disconnect()
+    with pytest.raises(RobotNotConnectedError):
+        rig.client.poll_errors()
+    rig.core.regs[TLM_ERR_EVT] = 4  # робот перезапустился
+    rig.transport.connect()
+    assert rig.client.poll_errors() == []  # без перепроверки: missed = 65530
+
+
+@pytest.mark.parametrize(
+    ("ours_before", "echo_seq", "superseded"),
+    [
+        (16382, 1, True),  # круг 16383 -> 1: «новее» на 1
+        (16382, 8191, True),  # ровно полкруга по модулю 16383 (по модулю 16384 было бы 8192)
+        (16382, 8192, False),  # дальше полкруга — эхо старее
+        (16382, 0, False),  # 0 вне круга (эхо с загрузки) — не новее
+    ],
+)
+def test_stop_superseded_window_is_modulo_16383(ours_before: int, echo_seq: int, superseded: bool) -> None:
+    rig = Rig(ticking=False, config={"stop_echo_timeout_s": 0.3, "poll_interval_s": 0.1})
+    rig.core.regs[TLM_STOP_ACK] = ours_before * 4 + 2
+
+    def echo(ops: list[tuple]) -> None:
+        if ops[0][1] == STOP_REQ:
+            rig.core.regs[TLM_STOP_ACK] = echo_seq * 4 + 3
+
+    rig.transport.after_tx = echo
+    if superseded:
+        assert rig.client.stop(2) is StopResult.SUPERSEDED
+    else:
+        with pytest.raises(RobotTimeout):
+            rig.client.stop(2)
+    assert rig.stop_writes() == [16383 * 4 + 2]

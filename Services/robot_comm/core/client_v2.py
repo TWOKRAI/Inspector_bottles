@@ -76,7 +76,7 @@ _ACTIVITY_FAULT = 5
 _PROTO_MAJOR = 0x02
 _SEQ_MAX = 0xFFFF
 _STOP_SEQ_MAX = 0x3FFF  # STOP_REQ = stop_seq*4 + level, stop_seq 1..16383
-_STOP_HALF_CIRCLE = 0x2000 - 1  # 8191: окно «новее» по кругу из 16384 значений
+_STOP_HALF_CIRCLE = _STOP_SEQ_MAX // 2  # 8191: окно «новее» по кругу из 16383 значений (разность — по модулю 16383)
 _UNKNOWN_ERR_TEXT = "неизвестная ошибка"
 _MASKED_EVENT_TEXT = "событие обрыва перекрыто"
 _HB_PERIOD_DIV = 4000.0  # P_WDG_TIMEOUT_MS / 4000 -> секунды (четверть таймаута сторожа)
@@ -113,7 +113,8 @@ def _encode_word(value: object, what: str) -> int:
 
 
 class ClientV2Config(BaseModel):
-    """Тайминги клиента. ``from_dict`` — граница (Dict at Boundary)."""
+    """Тайминги клиента. Граница — только ``from_dict`` (Dict at Boundary): прямой конструктор
+    ``ClientV2Config(...)`` при ошибке показывает во ``ValidationError`` входные значения."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -181,6 +182,15 @@ class SyncReport:
 
 
 @dataclass(frozen=True, slots=True)
+class _Inflight:
+    """Метка «seq в полёте»: seq, поколение стопа на шаге (2) и признак опкода ``done_seq`` (для О5)."""
+
+    seq: int
+    generation: int
+    done_seq: bool
+
+
+@dataclass(frozen=True, slots=True)
 class _DoneBase:
     """База ожидания завершения: seq команды и ``ERR_EVT`` ДО записи CMD."""
 
@@ -225,11 +235,15 @@ class RobotClientV2:
         self._probe_lock = threading.Lock()
 
         self._probed = False
-        self._inflight: int | None = None  # seq, ответ на который не дождались (только cmd()/probe())
+        self._inflight: _Inflight | None = None  # ответ на этот seq не дождались (только cmd()/probe())
         self._last_done: _DoneBase | None = None
         self._hb_value = 0
         self._jog_value = 0
         self._err_cursor = 0
+        # Счётчики изменений: probe не затирает базу, если пока он читал, её уже сдвинул kick/stop/poll.
+        self._hb_gen = 0
+        self._jog_gen = 0
+        self._err_gen = 0
         self._stop_seq = 0
         self._stop_generation = 0  # растёт ПОСЛЕ записи STOP_REQ, под _stop_lock
         self._last_halt_gen = 0
@@ -243,9 +257,20 @@ class RobotClientV2:
     def probe(self) -> None:
         """Проверить прошивку и снять базу пульса, поводка, стопа и событий. Только чтения.
 
-        Pre: транспорт подключён. Post: клиент «probed»; метка «seq в полёте» снята.
+        Pre: транспорт подключён. Post: успех -> «probed», метка «seq в полёте» снята;
+        любой исход начинается со сброса «probed».
         Raises: ``WrongFirmware`` (TLM_PROTO_VER = 0 или старший байт ≠ 0x02) — дальше ничего не читается.
         """
+        with self._state_lock:
+            self._probed = False  # неудачный probe не оставляет клиента «проверенным»
+        with self._hb_lock:
+            hb_gen = self._hb_gen
+        with self._jog_lock:
+            jog_gen = self._jog_gen
+        with self._err_lock:
+            err_gen = self._err_gen
+        with self._stop_lock:
+            stop_gen = self._stop_generation
         block = self._t.read_registers(_RES_BASE, _BLOCK_COUNT)
         proto = int(block[_off("TLM_PROTO_VER")])
         if proto == 0 or (proto >> 8) != _PROTO_MAJOR:
@@ -253,13 +278,17 @@ class RobotClientV2:
         wdg_raw = self._read_param_slot("P_WDG_TIMEOUT_MS")
         jog_raw = self._read_param_slot("P_JOG_LEASE_MS")
         with self._hb_lock:
-            self._hb_value = int(block[_off("HB_PC")])
+            if self._hb_gen == hb_gen:
+                self._hb_value = int(block[_off("HB_PC")])
         with self._jog_lock:
-            self._jog_value = int(block[_off("JOG_LEASE")])
+            if self._jog_gen == jog_gen:
+                self._jog_value = int(block[_off("JOG_LEASE")])
         with self._err_lock:
-            self._err_cursor = int(block[_off("TLM_ERR_EVT")])
+            if self._err_gen == err_gen:
+                self._err_cursor = int(block[_off("TLM_ERR_EVT")])
         with self._stop_lock:
-            self._stop_seq = int(block[_off("TLM_STOP_ACK")]) >> 2
+            if self._stop_generation == stop_gen:  # стоп, прошедший во время probe, уже сдвинул stop_seq дальше эха
+                self._stop_seq = int(block[_off("TLM_STOP_ACK")]) >> 2
         with self._state_lock:
             self._wdg_raw = wdg_raw
             self._jog_raw = jog_raw
@@ -271,14 +300,15 @@ class RobotClientV2:
 
     def _ensure_probed(self) -> None:
         """Первый вызов любого метода до ``probe()``: проверка прошивки делается сама (только чтения)."""
+        if not self._t.is_connected:
+            with self._state_lock:
+                self._probed = False  # после разрыва базы устарели: следующий вызов проверит прошивку заново
+            raise RobotNotConnectedError("Транспорт робота не подключён")
         if self._probed:
             return
         with self._probe_lock:
-            if self._probed:
-                return
-            if not self._t.is_connected:
-                raise RobotNotConnectedError("Транспорт робота не подключён")
-            self.probe()
+            if not self._probed:
+                self.probe()
 
     @property
     def heartbeat_period_s(self) -> float | None:
@@ -299,17 +329,24 @@ class RobotClientV2:
     def kick_heartbeat(self) -> None:
         """Записать ``HB_PC`` = последнее значение + 1 (по кругу 16 бит). Одна запись FC6, mailbox не берёт.
 
-        Pre: нет (до probe проверка прошивки делается сама). Post: регистр изменён относительно прочитанного в probe.
+        Pre: транспорт подключён (до probe проверка прошивки делается сама). Post: регистр изменён относительно
+        прочитанного в probe. Raises: ``RobotNotConnectedError``, ``WrongFirmware``.
         """
         self._ensure_probed()
         with self._hb_lock:
+            self._hb_gen += 1
             self._hb_value = (self._hb_value + 1) & 0xFFFF  # значение «израсходовано» и при сбое записи
             self._t.transaction([("w", REG["HB_PC"], self._hb_value)])
 
     def jog_lease(self) -> None:
-        """Записать ``JOG_LEASE`` = последнее значение + 1 (по кругу 16 бит). Одна запись FC6, mailbox не берёт."""
+        """Записать ``JOG_LEASE`` = последнее значение + 1 (по кругу 16 бит). Одна запись FC6, mailbox не берёт.
+
+        Pre: транспорт подключён (до probe проверка прошивки делается сама). Post: регистр изменён относительно
+        прочитанного в probe. Raises: ``RobotNotConnectedError``, ``WrongFirmware``.
+        """
         self._ensure_probed()
         with self._jog_lock:
+            self._jog_gen += 1
             self._jog_value = (self._jog_value + 1) & 0xFFFF
             self._t.transaction([("w", REG["JOG_LEASE"], self._jog_value)])
 
@@ -323,7 +360,8 @@ class RobotClientV2:
         Pre: ``op`` ∈ ``OP``; ``len(args) == OP_SPEC[op]["argc"]``; каждый аргумент целый в ``W_MIN``..65535
         (иначе ``ValueError`` без записи). Post: ACK -> ``CmdResult``; для опкодов ``done_seq`` — ещё и база для
         ``wait_done``. Raises: ``RobotNak`` (NAK), ``RobotTimeout("response")`` (после него — ``stop()``),
-        ``RobotAborted`` (команда ``done_seq`` принята уже после стопа, О5; клиент сам повторил стоп).
+        ``RobotAborted`` (команда ``done_seq`` принята уже после стопа, О5; клиент сам повторил стоп; то же при
+        позднем ACK прежней команды «в полёте» — тогда новая команда не пишется).
         """
         spec = OP_SPEC.get(op)
         if spec is None:
@@ -338,13 +376,14 @@ class RobotClientV2:
                 generation = self._stop_generation
             base = self._t.read_registers(_RES_BASE, _BLOCK_COUNT)
             seq = self._issue_seq(base)
+            # Метка — ДО записи: сбой транспорта на записи оставляет её, и следующий cmd() сначала досмотрит seq.
+            self._inflight = _Inflight(seq, generation, spec["result"] == "done_seq")
             self._t.transaction(
                 [
                     ("wm", REG["CMD_SEQ"], [seq, OP[op], len(words), *words]),
                     ("w", REG["CMD_FLAG"], 1),
                 ]
             )
-            self._inflight = seq
             self._wait_res(seq)
             self._inflight = None
             result = self._parse_res(self._t.read_registers(_RES_BASE, _RES_BLOCK_COUNT))
@@ -356,14 +395,25 @@ class RobotClientV2:
             return result
 
     def _settle_inflight(self) -> None:
-        """Досмотреть ответ на прежний seq «в полёте»; метка снимается в любом исходе."""
-        seq = self._inflight
-        if seq is None:
+        """Досмотреть ответ на прежний seq «в полёте»; метка снимается в любом исходе.
+
+        О5 и здесь: поздний ACK команды ``done_seq`` при сменившемся поколении стопа -> повтор стопа и ``RobotAborted``
+        (из этого же ``cmd()``, своя команда не пишется). Поздний NAK — команда не исполнялась, ничего не делаем.
+        """
+        mark = self._inflight
+        if mark is None:
             return
         try:
-            self._wait_res(seq)
+            self._wait_res(mark.seq)
         finally:
             self._inflight = None
+        if not mark.done_seq:
+            return
+        try:
+            self._parse_res(self._t.read_registers(_RES_BASE, _RES_BLOCK_COUNT))
+        except RobotNak:
+            return
+        self._abort_if_overtaken(mark.seq, mark.generation)
 
     def _issue_seq(self, base: Sequence[int]) -> int:
         """Выдать seq: пропустить 0 и текущие ``RES_SEQ`` / ``DONE_SEQ`` / ``ERR_SEQ`` (повтор seq = прежний RES)."""
@@ -453,6 +503,9 @@ class RobotClientV2:
 
         Курсор — ``ERR_EVT`` из probe, от ``wait_done`` не зависит; события своих команд тоже возвращаются.
         ``missed`` = число пропущенных событий между опросами.
+
+        Pre: транспорт подключён (до probe проверка прошивки делается сама). Post: список из 0 или 1 события; курсор
+        сдвинут к прочитанному ``ERR_EVT``. Raises: ``RobotNotConnectedError``, ``WrongFirmware``.
         """
         self._ensure_probed()
         with self._err_lock:
@@ -462,6 +515,7 @@ class RobotClientV2:
             if delta == 0:
                 return []
             self._err_cursor = evt
+            self._err_gen += 1
         errno = int(block[1])
         return [ErrorEvent(evt, int(block[0]), errno, ERR_TEXT.get(errno, _UNKNOWN_ERR_TEXT), delta - 1)]
 
@@ -503,7 +557,7 @@ class RobotClientV2:
             echo = int(self._t.read_registers(REG["TLM_STOP_ACK"], 1)[0])
             if echo == value:
                 return StopResult.ACKED
-            if 1 <= ((echo >> 2) - ours) & _STOP_SEQ_MAX <= _STOP_HALF_CIRCLE:
+            if 1 <= ((echo >> 2) - ours) % _STOP_SEQ_MAX <= _STOP_HALF_CIRCLE:
                 return StopResult.SUPERSEDED
             if self._clock() >= deadline:
                 raise RobotTimeout("stop_echo")
