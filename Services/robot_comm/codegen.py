@@ -17,6 +17,7 @@ CLI: `python -m Services.robot_comm.codegen [--check]`.
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 import sys
 from pathlib import Path
@@ -75,8 +76,31 @@ def _render_scalar(value: object) -> str:
     if isinstance(value, float):
         return repr(value)
     if isinstance(value, str):
-        return repr(value)
+        return _py_string(value)
     raise TypeError(f"codegen: не умею рендерить литерал {value!r}")
+
+
+_PY_ESCAPE_OR_QUOTE = re.compile(r"\\.|['\"]", re.DOTALL)
+
+
+def _py_string(value: str) -> str:
+    """Строка в кавычках, как их ставит `ruff format` (quote-style double).
+
+    Правило ruff: одинарные, только если `"` в строке больше, чем `'`; иначе двойные,
+    а выбранная кавычка внутри экранируется. Иначе pre-commit (ruff-format) переписывает
+    сгенерированные модули, и `codegen --check` расходится с диском.
+    """
+    quote = "'" if value.count('"') > value.count("'") else '"'
+
+    def requote(match: re.Match[str]) -> str:
+        token = match.group(0)
+        char = token[-1] if token in ("\\'", '\\"') else token
+        if char not in ("'", '"'):
+            return token  # прочие escape-последовательности repr() — как есть
+        return "\\" + char if char == quote else char
+
+    body = repr(value)[1:-1]
+    return quote + _PY_ESCAPE_OR_QUOTE.sub(requote, body) + quote
 
 
 def _render(value: object, indent: int) -> str:
@@ -115,11 +139,20 @@ def _assign(name: str, value: object) -> str:
     return f"{name} = {_render(value, 0)}"
 
 
+def _is_def_or_class(section: str) -> bool:
+    return section.startswith(("def ", "class ", "@"))
+
+
 def _module_text(header: str, sections: list[str]) -> str:
     parts = [header]
+    previous = header
     for section in sections:
         parts.append("")
+        # Вокруг def/class верхнего уровня — две пустые строки, как ставит ruff format
+        if _is_def_or_class(section) or _is_def_or_class(previous):
+            parts.append("")
         parts.append(section)
+        previous = section
     parts.append("")
     return "\n".join(parts)
 
