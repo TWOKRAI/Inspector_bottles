@@ -506,6 +506,8 @@ def test_runner_no_exit_without_survivors_or_self(monkeypatch, runner_probe, pro
     ],
 )
 def test_runner_passes_stop_budget_from_config(monkeypatch, runner_probe, config, expected) -> None:
-    _run_child(monkeypatch, _CleanRunnerProc, config, patch_hard_exit=False)
+    calls, _ = _run_child(monkeypatch, _CleanRunnerProc, config)
+    # Выживших нет: _hard_exit подменён рекордером (настоящий убил бы pytest) и не вызван.
+    assert calls == [], calls
     assert runner_probe.seen_budgets, "attach_stop_budget не вызван раннером"
     assert runner_probe.seen_budgets[-1] == pytest.approx(expected)

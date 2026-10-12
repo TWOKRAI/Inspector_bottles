@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 
 from multiprocess_framework.modules.process_manager_module.core.stop_budget import stop_budget
 from multiprocess_framework.modules.process_manager_module.process.process_manager_process import (
@@ -43,6 +44,8 @@ class _Group:
 
     def join_until(self, deadline: float) -> bool:
         self._journal.append("group.join_until")
+        time.sleep(0.3)
+        self._journal.append("join_until.end")
         return True
 
     def kill(self) -> None:
@@ -94,10 +97,11 @@ def test_pm_summary_before_flush() -> None:
         done, _, error = call_bounded(pm.shutdown, 15.0)
         assert done, "shutdown() завис"
         assert error is None, repr(error)
-        assert "group.request_stop" in journal, journal
+        assert "join_until.end" in journal, journal
         assert "summary" in journal, journal
         assert "flush" in journal, journal
-        assert journal.index("group.request_stop") < journal.index("summary") < journal.index("flush"), journal
+        # Сводка пишется после выхода группы (join_until держал 0,3 с) и раньше flush.
+        assert journal.index("join_until.end") < journal.index("summary") < journal.index("flush"), journal
         args, kwargs = summaries[0]
         assert {"child": True} in list(args) + list(kwargs.values()), summaries
 
