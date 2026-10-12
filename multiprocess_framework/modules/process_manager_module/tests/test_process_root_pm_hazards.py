@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
 
 from ...app_module.orchestrator import GenericProcessManagerApp
 from ...process_module.core.process_module import ProcessModule
+from ..core.process_registry import _ChildrenGroupStop
 from ..core.restart_policy import RestartPolicy
 from ..core.stop_budget import stop_budget
 from ..monitor.process_monitor import ProcessMonitor
@@ -272,6 +274,162 @@ def test_exit_76_is_stopped_with_survivors_event_and_no_restart(exitcode, status
         assert value == event
     else:
         assert value == "crashed"
+
+
+# --------------------------------------------------------------------------- #
+# Ревью кода р.1 (1.2a): сбой сборки группы, гонка stop/shutdown, ошибка фазы 1, 76 после stopped
+# --------------------------------------------------------------------------- #
+
+
+class _GroupRegistry:
+    """Реестр с настоящей ``_ChildrenGroupStop``; ``_build_child_stop`` — подмена теста."""
+
+    os_processes = [type("P", (), {"name": "child"})()]
+
+    def __init__(self, build, journal: list[str]) -> None:
+        self._build = build
+        self._journal = journal
+
+    def _build_child_stop(self, names, mark_reader_gone):
+        return self._build()
+
+    def children_stop(self, *, mark_reader_gone: bool):
+        return _ChildrenGroupStop(self, mark_reader_gone)
+
+    def exit_report(self, name: str) -> dict:
+        return {"released": 0, "buffered_dropped": 0, "reported": False}
+
+
+class _OkChildGroup:
+    def __init__(self, journal: list[str]) -> None:
+        self._journal = journal
+
+    def request_stop(self) -> None:
+        self._journal.append("group.request_stop")
+
+    def join_until(self, deadline: float) -> bool:
+        self._journal.append("group.join_until")
+        return True
+
+    def kill(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def survivors(self) -> list[str]:
+        return []
+
+
+def _real_pm_with(registry):
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 1.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
+    pm._process_registry = registry
+    return pm
+
+
+def test_group_build_failure_on_runner_path_is_survivor_and_warning_summary() -> None:
+    """Сбой сборки группы на пути раннера (``stop()`` + ``close_root()``): ``children`` — выживший, сводка WARNING."""
+
+    def boom():
+        raise RuntimeError("boom in _build_child_stop")
+
+    journal: list[str] = []
+    pm = _real_pm_with(_GroupRegistry(boom, journal))
+    warnings: list[str] = []
+    real_warning = pm._log_warning
+    pm._log_warning = lambda msg, *a, **k: (warnings.append(str(msg)), real_warning(msg, *a, **k))
+    try:
+        done, _, error = _call_bounded(pm.stop)
+        assert done and error is None, repr(error)
+        done, report, error = _call_bounded(pm.close_root)
+        assert done and error is None, repr(error)
+    finally:
+        _call_bounded(pm.shutdown)
+    assert any(path.endswith("/children/processes") for path in report.survivors), report
+    assert any("stop summary" in line and "not reported/lost: ['child']" in line for line in warnings), warnings
+
+
+def test_join_during_foreign_build_waits_and_summary_follows_group_request_stop() -> None:
+    """``stop()`` строит группу 1 с; ``shutdown()`` из второго потока ждёт сборку: сигнал детям раньше сводки."""
+    journal: list[str] = []
+
+    def slow_build():
+        journal.append("build.start")
+        time.sleep(1.0)
+        journal.append("build.end")
+        return {}, _OkChildGroup(journal)
+
+    pm = _real_pm_with(_GroupRegistry(slow_build, journal))
+    real_publish = pm._publish_stop_summary
+    pm._publish_stop_summary = lambda result: (journal.append("summary"), real_publish(result))
+    thread_a = threading.Thread(target=pm.stop, daemon=True, name="hz_stop")
+    thread_a.start()
+    time.sleep(0.15)
+    done, result, error = _call_bounded(pm.shutdown)
+    thread_a.join(10.0)
+    assert done and error is None, repr(error)
+    assert journal.index("group.request_stop") < journal.index("summary"), journal
+    assert journal.count("build.start") == 1, journal
+
+
+def test_phase1_error_reaches_report_errors_on_runner_path() -> None:
+    """Исключение ``children_stop()`` в фазе 1 при ``stop()`` + ``close_root()`` попадает в ``errors`` отчёта корня."""
+    pm = _real_pm_with(_RaisingRegistry())
+    try:
+        done, _, error = _call_bounded(pm.stop)
+        assert done and error is None, repr(error)
+        done, report, error = _call_bounded(pm.close_root)
+        assert done and error is None, repr(error)
+    finally:
+        _call_bounded(pm.shutdown)
+    assert any(path.endswith("/children/processes") for path, _ in report.errors), report
+
+
+def test_exit_76_after_stopped_state_still_emits_survivors_once() -> None:
+    """Ребёнок записал ``STOPPED`` до смерти (гонка опроса): 76 всё равно даёт ``survivors``, и один раз."""
+    _, monitor = _monitor_with_store()
+    events: list[str] = []
+    monitor._emit_supervisor_event = lambda name, event, **kw: events.append(f"{name}:{event}")
+    proc = MagicMock()
+    proc.name = "cam"
+    proc.pid = 123
+    proc.exitcode = 76
+    monitor.previous_states["cam"] = {"status": "stopped"}
+
+    monitor._handle_dead_process(proc)
+    monitor._handle_dead_process(proc)
+
+    assert events == ["cam:survivors"], events
+
+
+@pytest.mark.parametrize(
+    ("config", "must_say"),
+    [
+        ({"stop_budget": [1, 2]}, "не словарь"),
+        ({"stop_budget": {"work_s": 0.6}}, "нет ключа infra_s"),
+        (
+            {
+                "stop_budget": {
+                    "work_s": 0.6,
+                    "infra_s": float("nan"),
+                    "pm_graceful_s": 1.0,
+                    "pm_total_s": 3.0,
+                    "outer_s": 4.5,
+                }
+            },
+            "не конечное число",
+        ),
+    ],
+)
+def test_resolve_stop_budget_warning_names_defect_not_value(config, must_say) -> None:
+    log = MagicMock()
+    _resolve_stop_budget(config, log)
+    assert log.warning.call_count == 1
+    text = log.warning.call_args.args[0]
+    assert must_say in text, text
+    assert "[1, 2]" not in text and "nan" not in text.lower() and "0.6" not in text, text
 
 
 # --------------------------------------------------------------------------- #

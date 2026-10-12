@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -220,6 +221,58 @@ def test_stuck_worker_is_named_in_survivors() -> None:
     assert "proc/hz_stuck/work/workers" in report.survivors
     assert len(process.worker_manager.timeouts) == 1
     assert 0.0 < process.worker_manager.timeouts[0] <= 0.7  # срок work 0,6 + дискрет monotonic Windows
+
+
+# --------------------------------------------------------------------------- #
+# Одноразовость процесса (ревью кода р.1, находка 2)
+# --------------------------------------------------------------------------- #
+
+
+def _live_extra_threads(before: set[str]) -> list[str]:
+    time.sleep(0.5)
+    return sorted(t.name for t in threading.enumerate() if t.name not in before and t.is_alive())
+
+
+def test_second_initialize_on_live_process_rebuilds_nothing() -> None:
+    """Повторный ``initialize()`` живого процесса: ``True``, тот же корень и те же менеджеры, ничего не гасится."""
+    before = {t.name for t in threading.enumerate()}
+    process = ProcessModule("hz_twice", config={})
+    try:
+        assert _bounded(process.initialize)[1] is True
+        root, router, worker_manager = process._root, process.router_manager, process.worker_manager
+        calls: list[str] = []
+        real_shutdown = router.shutdown
+        router.shutdown = lambda *a, **k: (calls.append("router"), real_shutdown(*a, **k))[1]
+
+        done, result, error = _bounded(process.initialize)
+
+        assert done and error is None, repr(error)
+        assert result is True
+        assert process._root is root and not root.closed
+        assert process.router_manager is router and process.worker_manager is worker_manager
+        assert calls == []
+    finally:
+        _bounded(process.shutdown)
+    assert _live_extra_threads(before) == []
+
+
+def test_initialize_after_shutdown_is_refused_without_new_root() -> None:
+    """``initialize()`` после ``shutdown()``: ``False``, одна строка в лог, корня и менеджеров заново нет."""
+    before = {t.name for t in threading.enumerate()}
+    process = ProcessModule("hz_reinit", config={})
+    errors: list[str] = []
+    assert _bounded(process.initialize)[1] is True
+    assert _bounded(process.shutdown)[1] is True
+    root, router = process._root, process.router_manager
+    process._log_error = lambda msg, *a, **k: errors.append(str(msg))
+
+    done, result, error = _bounded(process.initialize)
+
+    assert done and error is None, repr(error)
+    assert result is False
+    assert process._root is root and process.router_manager is router
+    assert len([line for line in errors if "одноразовый после shutdown" in line]) == 1, errors
+    assert _live_extra_threads(before) == []
 
 
 # --------------------------------------------------------------------------- #

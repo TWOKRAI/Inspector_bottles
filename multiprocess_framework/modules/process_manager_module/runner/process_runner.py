@@ -40,16 +40,21 @@ _hard_exit = os._exit
 _STOP_BUDGET_KEYS = ("work_s", "infra_s", "pm_graceful_s", "pm_total_s", "outer_s")
 
 
-def _valid_budget(raw: Any) -> bool:
+def _budget_defect(raw: Any) -> str | None:
+    """Чем негоден ``stop_budget`` (текст без значения); ``None`` — годен."""
     if not isinstance(raw, dict):
-        return False
+        return "не словарь"
     for key in _STOP_BUDGET_KEYS:
-        value = raw.get(key)
+        if key not in raw:
+            return f"нет ключа {key}"
+        value = raw[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return False
-        if not math.isfinite(value) or value < 0:
-            return False
-    return True
+            return f"{key}: не число"
+        if not math.isfinite(value):
+            return f"{key}: не конечное число"
+        if value < 0:
+            return f"{key}: отрицательное число"
+    return None
 
 
 def _resolve_stop_budget(process_config: Any, log: Any) -> dict[str, float]:
@@ -61,10 +66,11 @@ def _resolve_stop_budget(process_config: Any, log: Any) -> dict[str, float]:
     """
     cfg = process_config if isinstance(process_config, dict) else {}
     raw = cfg.get("stop_budget")
-    if raw is not None and _valid_budget(raw):
+    defect = _budget_defect(raw) if raw is not None else "значение None"
+    if defect is None:
         return {key: float(raw[key]) for key in _STOP_BUDGET_KEYS}
     if "stop_budget" in cfg:
-        log.warning(f"stop_budget в конфиге негоден ({raw!r}) — бюджет выведен из shutdown_timeout")
+        log.warning(f"stop_budget в конфиге негоден ({defect}) — бюджет выведен из shutdown_timeout")
     try:
         return stop_budget(cfg.get(SHUTDOWN_TIMEOUT_KEY))
     except Exception as exc:  # noqa: BLE001 — плохой graceful-бюджет не роняет старт

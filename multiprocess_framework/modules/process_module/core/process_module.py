@@ -231,6 +231,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Returns:
             bool: True если инициализация успешна
         """
+        # Task 1.2a (ревью р.1): процесс одноразовый. Корень открыт — повторный вызов ничего не
+        # пересобирает (вторая сборка закрыла бы НОВЫЕ менеджеры, а менеджеры первой утекли бы);
+        # корень закрыт — подъём после shutdown (или после провала подъёма) не поддерживается.
+        root = self._root
+        if root is not None:
+            if root.closed:
+                self._log_error(f"Процесс '{self.name}' одноразовый после shutdown: initialize() отклонён")
+                return False
+            return self.is_initialized
         try:
             # 0. Task 1.2a (ADR-PM-054): корень процесса — ПЕРВЫМ шагом. Записи
             #    регистрируются по ходу подъёма; провал подъёма закрывает корень.

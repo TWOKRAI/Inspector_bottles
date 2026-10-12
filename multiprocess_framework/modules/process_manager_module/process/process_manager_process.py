@@ -4323,6 +4323,7 @@ class _ChildrenStop:
         self._pm = pm
         self._group: Any = None
         self._start_failed = False
+        self._phase1_error: Exception | None = None
         self._lock = threading.Lock()
 
     def _start(self) -> Any:
@@ -4343,12 +4344,22 @@ class _ChildrenStop:
             return self._group
 
     def request_stop(self) -> None:
-        group = self._start()
-        if group is not None:
-            group.request_stop()
+        """Фаза 1. Исключение запоминается и один раз повторяется из ``join_until``: на пути раннера
+        (``stop()`` → ``cancel()``) область не пишет ошибки фазы 1 в отчёт, на ``join_until`` пишет."""
+        try:
+            group = self._start()
+            if group is not None:
+                group.request_stop()
+        except Exception as exc:
+            self._phase1_error = exc
+            raise
 
     def join_until(self, deadline: float) -> bool:
-        """Дети остановлены к сроку? Реестр упал в ``request_stop`` (группы нет) — ``False`` без исключения."""
+        """Дети остановлены к сроку? Ошибка фазы 1 — один раз повторяется здесь (попадёт в ``errors`` корня);
+        реестр упал (группы нет) — ``False`` без исключения."""
+        error, self._phase1_error = self._phase1_error, None
+        if error is not None:
+            raise error
         if self._group is None and not self._start_failed:
             self.request_stop()
         if self._group is None:
