@@ -26,17 +26,17 @@ Stability: lite
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from ...logger_module import get_std_logger
 from .stop_budget import KILL_CONFIRM_S, STOP_POLL_S, TERMINATE_GRACE_S
 
 __all__ = ["ChildProcessStop"]
 
-_log = logging.getLogger(__name__)
+_log = get_std_logger(__name__)
 
 type ConfirmedDead = Callable[[str, Any], None]
 

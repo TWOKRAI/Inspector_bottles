@@ -125,6 +125,12 @@ def _process_ready_to_stop() -> tuple:
     process.worker_manager = None
     process.shared_resources = None
     process.update_process_state = Mock()
+    # Task 1.2a (ADR-PM-054): гасит процесс корень. Харнесс открывает его и зовёт
+    # НАСТОЯЩИЕ регистрации ``planes``/``transport`` — те же, что ``initialize()``.
+    process._open_root()
+    segments = process.lifetime_segments
+    process._register_planes(segments["planes"])
+    process._register_transport(segments["transport"])
     return process, logger, managers, journal
 
 

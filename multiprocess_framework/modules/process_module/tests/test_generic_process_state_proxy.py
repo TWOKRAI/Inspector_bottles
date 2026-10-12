@@ -170,7 +170,9 @@ class TestInjectedProxyWins:
 
 
 class TestShutdownOrder:
-    def test_proxy_shutdown_runs_before_base_shutdown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_proxy_shutdown_runs_before_router_shutdown(self) -> None:
+        """Task 1.2a: ``state_proxy`` в ``work`` закрывается раньше роутера (``transport``) —
+        ``state.unsubscribe_all`` уходит, пока роутер жив."""
         proc, _ = _make_process("hz_stop")
         assert proc.initialize() is True
         order: list[str] = []
@@ -183,15 +185,16 @@ class TestShutdownOrder:
             original_proxy_shutdown()
 
         proxy.shutdown = _proxy_shutdown  # type: ignore[method-assign]
-        original_base = ProcessModule.shutdown
+        router = proc.router_manager
+        original_router_shutdown = router.shutdown
 
-        def _base_shutdown(self: ProcessModule) -> bool:
-            order.append("base")
-            return original_base(self)
+        def _router_shutdown(*args, **kwargs):
+            order.append("router")
+            return original_router_shutdown(*args, **kwargs)
 
-        monkeypatch.setattr(ProcessModule, "shutdown", _base_shutdown)
+        router.shutdown = _router_shutdown  # type: ignore[method-assign]
         proc.shutdown()
-        assert order[:2] == ["proxy", "base"], f"порядок останова: {order}"
+        assert order == ["proxy", "router"], f"порядок останова: {order}"
 
 
 class TestEdgeCases:

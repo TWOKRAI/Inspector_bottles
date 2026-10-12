@@ -314,7 +314,7 @@ ADR-PMM-032; тесты: `test_parent_death_acceptance.py` — тестер, 7, 
 - [ ] `--backend-live` (stop_summary 3 + system_shutdown 2 + exit_loss) — вручную перед Ф2 или в CI.
 - [ ] Флейк `children_exit_hook_in_system_stop_mode` (1/9) — починить или квантовать до «20 циклов» Ф2.
 
-**Долги со сроком «до старта Task 3.1»** (с 2026-10-03 — до закрытия Task 1.2 `lifecycle-owner-scope`, см. выше): указатель ADR-PM-045 → ADR-PMM-033 в `process_module/DECISIONS.md` (хук живёт
+**Долги со сроком «до старта Task 3.1»** (с 2026-10-03 — до закрытия Task 1.2a `lifecycle-owner-scope`; номер указателя — ADR-PM-054, ADR-PM-045 занят другим решением (бриф 1.2a, О4), см. выше): указатель ADR-PM-054 → ADR-PMM-033 в `process_module/DECISIONS.md` (хук живёт
 там, решение — в чужом модуле); формулировка ADR-PMM-033 п.4 — в сводку попадают все имена `os_processes`, включая
 остановленных ранее одиночно (замер CTO S4: `processor` после `process.stop` — `reported=true`).
 

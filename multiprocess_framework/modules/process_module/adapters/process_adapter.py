@@ -91,7 +91,9 @@ class ProcessAdapter(BaseAdapter):
         if not self.manager:
             return False
         try:
+            # Task 1.2a (О8): stop() — только сигнал (cancel корня); гасит shutdown().
             self.manager.stop()
+            self.manager.shutdown()
             return True
         except Exception as e:
             self._log("error", f"stop failed: {e}")

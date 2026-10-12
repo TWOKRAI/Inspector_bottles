@@ -26,6 +26,7 @@ from ..core.alert_rules import (
     should_fire,
 )
 from ..core.restart_policy import RestartPolicy
+from ..core.stop_budget import EXIT_SURVIVORS
 
 #: Причина пере-инициации рестарта watchdog'ом H3 (рестарт тихо не подтвердился).
 #: Каскад NEW-6b на этой причине НЕ повторяется — см. _try_auto_restart.
@@ -92,6 +93,7 @@ class ProcessMonitor:
         self.heartbeat_timeout = heartbeat_timeout
         self.restart_policy = restart_policy or RestartPolicy()
         self.previous_states: dict[str, dict[str, Any]] = {}
+        self._survivors_reported: set[tuple[str, int | None]] = set()
         # _monitoring — реальный run/pause gate цикла (loop его проверяет). stop()
         # ставит False → цикл паузится (НЕ убивает воркер), start() → True + resume.
         self._monitoring = False
@@ -902,11 +904,24 @@ class ProcessMonitor:
         self.process._log_warning(f"Process '{process_name}' жив, но health.status=failed — health-based рестарт (H4)")
         self._try_auto_restart(process_name, reason="health-failed")
 
+    def _report_survivors_once(self, proc) -> None:
+        """Событие ``survivors`` — один раз на смерть (ключ ``(имя, pid)``: рестарт даёт новый pid)."""
+        key = (proc.name, getattr(proc, "pid", None))
+        if key in self._survivors_reported:
+            return
+        self._survivors_reported.add(key)
+        self._emit_supervisor_event(proc.name, "survivors", reason=f"exitcode={EXIT_SURVIVORS}", level="warning")
+
     def _handle_dead_process(self, proc) -> None:
         """Обработка мёртвого OS-процесса: обновить статус, запустить авто-рестарт."""
         exitcode = proc.exitcode
         prev = self.previous_states.get(proc.name)
         prev_status = (prev or {}).get("status", "unknown")
+
+        # Task 1.2a: событие ``survivors`` не зависит от гонки опроса — ребёнок пишет
+        # ``STOPPED`` в PSR записью ``final_status`` ДО смерти, ранний выход ниже его бы съел.
+        if exitcode == EXIT_SURVIVORS:
+            self._report_survivors_once(proc)
 
         # Не обрабатываем повторно уже зафиксированные терминальные статусы
         if prev_status in ("stopped", "error", "crashed", "failed"):
@@ -921,7 +936,11 @@ class ProcessMonitor:
                 self.previous_states[proc.name] = snap.copy()
             return
 
-        new_status = "stopped" if exitcode == 0 else "crashed"
+        # Task 1.2a (ADR-PMM-036): код EXIT_SURVIVORS (76) — ребёнок сам закрыл корень,
+        # но в отчёте остались выжившие записи. Это штатный останов, не падение:
+        # статус ``stopped``, громкое событие ``survivors``, авто-рестарта нет.
+        survivors_exit = exitcode == EXIT_SURVIVORS
+        new_status = "stopped" if exitcode == 0 or survivors_exit else "crashed"
 
         if new_status == "crashed":
             # Ф4-добор: громкое supervisor-событие «упал» (видно даже когда

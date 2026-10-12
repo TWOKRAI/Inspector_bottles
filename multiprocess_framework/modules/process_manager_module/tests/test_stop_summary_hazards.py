@@ -14,11 +14,12 @@ project-rules.
 
 from __future__ import annotations
 
+import threading
 from multiprocessing import Event, RawArray
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from ...process_module.core.process_module import ProcessModule
 from ..core.process_registry import ProcessRegistry
+from ..core.stop_budget import stop_budget
 from ..process.process_manager_process import ProcessManagerProcess
 from ..runner.process_runner import run_process_function
 
@@ -133,195 +134,132 @@ def test_exit_report_unknown_name_never_raises() -> None:
     assert registry.exit_report("ghost") == {"released": 0, "buffered_dropped": 0, "reported": False}
 
 
-class _FakeRegistryForStopOnce:
-    """Фейк ``ProcessRegistry`` только для теста (e) — считает вызовы на границе
-    stop_all/exit_report, не подглядывает в имя вспомогательного метода PM."""
+def _call_bounded(fn, timeout_s: float = 15.0):
+    """``fn`` в daemon-потоке с дедлайном join: (завершился, результат, ошибка)."""
+    box: dict = {}
 
-    def __init__(self) -> None:
-        self.stop_all_calls = 0
-        self.exit_report_calls: list[str] = []
+    def run() -> None:
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — тест разбирает ошибку сам
+            box["error"] = exc
 
-    def stop_all(self, timeout: float = 5.0) -> dict[str, bool]:
-        self.stop_all_calls += 1
-        return {"child": True}
-
-    def exit_report(self, name: str) -> dict:
-        self.exit_report_calls.append(name)
-        return {"released": 0, "buffered_dropped": 0, "reported": True}
-
-
-def _make_minimal_pm() -> ProcessManagerProcess:
-    """Минимальный PM-стенд: реальные bound-методы ``ProcessManagerProcess``
-    (``_before_observability_teardown``/``_stop_children_once``/``shutdown``),
-    коллабораторы — фейки на границе, которую и проверяет тест."""
-    with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
-        pm = ProcessManagerProcess.__new__(ProcessManagerProcess)
-    pm._children_stopped = False
-    pm._process_monitor = MagicMock()
-    pm._process_registry = _FakeRegistryForStopOnce()
-    pm._console_manager = None
-    pm._log_info = MagicMock()
-    pm._log_warning = MagicMock()
-    pm._log_error = MagicMock()
-    pm.get_config = lambda key, default=None: {"shutdown_timeout": 1.0}.get(key, default)
-    return pm
+    th = threading.Thread(target=run, daemon=True, name="stop_summary_bounded")
+    th.start()
+    th.join(timeout_s)
+    return (not th.is_alive()), box.get("result"), box.get("error")
 
 
-def test_hook_then_second_shutdown_stops_children_exactly_once() -> None:
-    """(e) Хук ``ProcessModule.stop()`` + повторный ``shutdown()`` (раннер) -> ``stop_all``
-    и публикация сводки происходят РОВНО один раз за жизнь PM.
+class _Group:
+    """Группа детей на границе ``ProcessRegistry.children_stop`` — журнал вызовов."""
 
-    Воспроизводит TRAP брифа: PM стартует через тот же раннер, что и дети, поэтому
-    ``shutdown()`` зовётся дважды — из ``ProcessModule.stop()`` (через хук) и повторно из
-    ``finally`` ``run_process_function``. Без флага ``_children_stopped`` второй вызов
-    гонял бы ``stop_all`` по уже мёртвым детям и удвоил бы запись сводки в сторе.
-    ``ProcessModule.shutdown`` заглушен — граница этого теста PM-собственный код
-    (``_stop_children_once``/``_publish_stop_summary``), не полный teardown ProcessModule
-    (вне FILES/OUT OF SCOPE задачи).
-    """
-    pm = _make_minimal_pm()
-    with patch.object(ProcessModule, "shutdown", return_value=True):
-        pm._before_observability_teardown()  # то, что ProcessModule.stop() зовёт до _flush_observability
-        pm.shutdown()  # повторный вызов из runner'овского finally (тот же PM, тот же процесс)
+    def __init__(self, journal: list[str], fail_request: bool) -> None:
+        self._journal = journal
+        self._fail_request = fail_request
 
-    assert pm._process_registry.stop_all_calls == 1, "stop_all обязан выполниться РОВНО один раз за жизнь PM"
-    summary_log_calls = pm._log_warning.call_count + pm._log_info.call_count
-    assert summary_log_calls == 1, "сводка стопа обязана уйти РОВНО одним логом, не дважды"
-    assert pm._log_error.call_count == 0, "выживших детей нет -> дежурный лог о выживших не зовётся"
+    def request_stop(self) -> None:
+        self._journal.append("request_stop")
+        if self._fail_request:
+            raise RuntimeError("boom: request_stop детей упал (инъекция теста)")
 
+    def join_until(self, deadline: float) -> bool:
+        return True
 
-class _ObservabilityOrderProbe:
-    """(f) Минимальный объект с РЕАЛЬНЫМИ bound-методами ``ProcessModule.stop``/``_flush_observability``
-    (взяты с класса напрямую, без наследования) — доказывает порядок внутри самого ``stop()``:
-    хук ``_before_observability_teardown`` обязан отработать, пока ``_observability_store`` ещё не
-    снят ``_flush_observability()``. Наблюдатели/коллабораторы дренажа — None/пустые: сам дренаж не
-    под проверкой (process_module — не FILES этой задачи дальше хука), важен только ПОРЯДОК вызовов.
-    """
-
-    def __init__(self) -> None:
-        self.name = "ProcessManagerOrderProbe"
-        self.worker_manager = None
-        self._stop_requested = False
-        self._observability_hub = None
-        self._observability_drain = None
-        self._observability_store = MagicMock(name="store_tap_sentinel")
-        self._observability_forwarders = {}
-        self._observability_store_taps = []
-        self._observability_tail_intents = {}
-        self.stats_manager = None
-        self.observed_store_before_teardown: bool | str = "hook-not-called"
-        self.shutdown_called = False
-
-    def update_process_state(self, **_kwargs) -> None:
+    def kill(self) -> None:
         pass
 
-    def _log_info(self, *_a, **_kw) -> None:
+    def close(self) -> None:
         pass
 
-    def _before_observability_teardown(self) -> None:
-        # PM переопределяет этим же хуком (Task 1.6) — здесь мы ловим, ЧТО он видит.
-        self.observed_store_before_teardown = self._observability_store is not None
-
-    def shutdown(self) -> None:
-        self.shutdown_called = True
-
-    # Реальные, не переопределённые методы ProcessModule под проверкой.
-    _flush_observability = ProcessModule._flush_observability
-    stop = ProcessModule.stop
-
-
-def test_stop_calls_hook_before_store_teardown() -> None:
-    """(f) Внутри ``ProcessModule.stop()`` хук видит живой ``_observability_store`` —
-    это свойство, от которого зависят 3 живых REDS-теста (Task 1.6): не докажи его юнит-тестом,
-    и регрессия порядка (хук после ``_flush_observability()``) снова уронит сводку в никуда."""
-    probe = _ObservabilityOrderProbe()
-
-    probe.stop()
-
-    assert probe.observed_store_before_teardown is True, (
-        "хук _before_observability_teardown обязан видеть _observability_store ещё живым"
-    )
-    assert probe._observability_store is None, "после stop() _flush_observability обязан снять стор"
-    assert probe.shutdown_called is True, "stop() всё ещё обязан дойти до shutdown() в конце"
-
-
-class _RaisingThenOkRegistry:
-    """Фейк ``ProcessRegistry`` для теста (g): первый ``stop_all`` бросает, второй — успешен."""
-
-    def __init__(self) -> None:
-        self.stop_all_calls = 0
-
-    def stop_all(self, timeout: float = 5.0) -> dict[str, bool]:
-        self.stop_all_calls += 1
-        if self.stop_all_calls == 1:
-            raise RuntimeError("boom: stop_all упал (инъекция теста)")
+    def result(self) -> dict[str, bool]:
         return {"child": True}
+
+
+class _Registry:
+    def __init__(self, journal: list[str], *, fail_request: bool = False) -> None:
+        self._journal = journal
+        self._fail_request = fail_request
+
+    def children_stop(self, *, mark_reader_gone: bool) -> _Group:
+        self._journal.append("children_stop")
+        return _Group(self._journal, self._fail_request)
 
     def exit_report(self, name: str) -> dict:
         return {"released": 0, "buffered_dropped": 0, "reported": True}
 
 
-def _make_raising_pm() -> ProcessManagerProcess:
-    """PM-стенд для (g): реальные ``ProcessModule.stop``/``_flush_observability`` (унаследованы,
-    не переопределены) + реальные ``ProcessManagerProcess._before_observability_teardown``/
-    ``_stop_children_once``/``shutdown`` — тот же набор observability-атрибутов, что у
-    ``_ObservabilityOrderProbe`` (f), плюс регистр (e), который на этот раз бросает."""
-    with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
-        pm = ProcessManagerProcess.__new__(ProcessManagerProcess)
-    pm.name = "ProcessManagerRaiseProbe"
-    pm.worker_manager = None
-    pm._stop_requested = False
-    pm._observability_hub = None
-    pm._observability_drain = None
-    pm._observability_store = MagicMock(name="store_tap_sentinel")
-    pm._observability_forwarders = {}
-    pm._observability_store_taps = []
-    pm._observability_tail_intents = {}
-    pm.stats_manager = None
-    pm._children_stopped = False
-    pm._process_monitor = MagicMock()
-    pm._process_registry = _RaisingThenOkRegistry()
-    pm._console_manager = None
-    pm._log_info = MagicMock()
-    pm._log_warning = MagicMock()
-    pm._log_error = MagicMock()
-    pm.get_config = lambda key, default=None: {"shutdown_timeout": 1.0}.get(key, default)
-    pm.update_process_state = lambda **_kwargs: None
-    return pm
-
-
-def test_raising_stop_all_flushes_and_retries_on_shutdown() -> None:
-    """(g) ``stop_all`` бросает на ПЕРВОМ вызове (внутри хука, вызванного из реального
-    ``ProcessModule.stop()``) -> `stop()` не падает, финальный дренаж/unwire стора всё равно
-    происходит (ревью Task 1.6, it.1, major-находка: до правки исключение в хуке отменяло
-    и flush, и повторную остановку детей). Флаг ``_children_stopped`` не взводится до
-    успешного возврата ``stop_all`` — поэтому внутренний ``self.shutdown()`` в конце
-    ``stop()`` (тот же путь, что и раннер'овский повторный вызов из ``finally``) РЕТРАИТ
-    ``stop_all`` и на этот раз публикует сводку. Явный повторный ``pm.shutdown()`` после —
-    имитация раннера — обязан остаться no-op'ом: третьего ``stop_all`` и второй сводки быть
-    не должно.
-    """
-    pm = _make_raising_pm()
-    # Спай ПОВЕРХ реального метода (не подмена!) — считает публикации сводки отдельно от
-    # обычных lifecycle-логов ("Process 'X' stopping" и т.п.), которые тоже идут через
-    # _log_info и иначе занижали бы точность счётчика.
+def _real_pm(journal: list[str], *, fail_request: bool = False) -> ProcessManagerProcess:
+    """Настоящий PM с корнем (``initialize()``); реестр и слив подменены ПОСЛЕ подъёма —
+    корень читает их поздно (Task 1.2a)."""
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 1.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
     real_publish = pm._publish_stop_summary
-    pm._publish_stop_summary = MagicMock(wraps=real_publish)
 
-    with patch.object(ProcessModule, "shutdown", return_value=True):
-        pm.stop()  # реальный ProcessModule.stop(): хук падает внутри, изолирован try/except
+    def publish(result: dict[str, bool]) -> None:
+        journal.append("summary")
+        real_publish(result)
 
-        assert pm._observability_store is None, "stop() обязан снять store-tap несмотря на сбой в хуке"
-        assert pm._process_registry.stop_all_calls == 2, (
-            "первая попытка stop_all упала, внутренний self.shutdown() в конце stop() обязан повторить"
-        )
-        assert pm._children_stopped is True, "флаг взводится только после УСПЕШНОГО возврата stop_all"
-        assert pm._publish_stop_summary.call_count == 1, (
-            "сводка стопа обязана уйти РОВНО один раз — только после успешного stop_all"
-        )
-        assert pm._log_error.call_count == 1, "сбой хука обязан быть залогирован, а не проглочен молча"
+    pm._publish_stop_summary = publish
+    pm._flush_observability = lambda: journal.append("flush")
+    pm._process_registry = _Registry(journal, fail_request=fail_request)
+    return pm
 
-        pm.shutdown()  # повторный вызов из runner'овского finally (тот же PM, тот же процесс)
 
-    assert pm._process_registry.stop_all_calls == 2, "повторный shutdown() при уже взведённом флаге — no-op"
-    assert pm._publish_stop_summary.call_count == 1, "повторный shutdown() не имеет права удвоить сводку"
+def test_stop_then_two_shutdowns_stop_children_exactly_once() -> None:
+    """(e) Путь раннера: ``stop()`` (= ``cancel()`` корня), затем ``shutdown()`` дважды
+    (``close_root`` раннера + повтор) → дети и сводка РОВНО один раз за жизнь PM.
+
+    Task 1.2a: флаг ``_children_stopped`` удалён — единственность даёт корень
+    (повторный ``close()`` возвращает тот же отчёт и ничего не гасит)."""
+    journal: list[str] = []
+    pm = _real_pm(journal)
+    try:
+        done, _, error = _call_bounded(pm.stop)
+        assert done and error is None, error
+        first = _call_bounded(pm.shutdown)
+        second = _call_bounded(pm.shutdown)
+        assert first[0] and second[0], "shutdown() завис"
+        assert first[1] is True and second[1] is True, (first, second)
+    finally:
+        _call_bounded(pm.shutdown)
+    assert journal.count("children_stop") == 1, journal
+    assert journal.count("request_stop") == 1, journal
+    assert journal.count("summary") == 1, journal
+    assert journal.count("flush") == 1, journal
+
+
+def test_stop_alone_does_not_publish_summary_close_does_before_flush() -> None:
+    """(f) ``stop()`` только сигналит: детей гасит фаза 1 (``request_stop``), но сводки и
+    слива ещё нет — их пишет закрытие корня, сводка раньше слива (store-tap жив)."""
+    journal: list[str] = []
+    pm = _real_pm(journal)
+    try:
+        done, _, error = _call_bounded(pm.stop)
+        assert done and error is None, error
+        assert "summary" not in journal and "flush" not in journal, journal
+        done, _, error = _call_bounded(pm.shutdown)
+        assert done and error is None, error
+    finally:
+        _call_bounded(pm.shutdown)
+    assert journal.index("request_stop") < journal.index("summary") < journal.index("flush"), journal
+
+
+def test_raising_children_stop_still_flushes_and_publishes_once() -> None:
+    """(g) ``request_stop`` группы детей бросает → закрытие корня не срывается: сводка уходит
+    один раз, слив стора происходит, ``shutdown()`` возвращает ``False`` (ошибка в отчёте),
+    повтор — no-op (Task 1.2a: ретрая нет, единственность — у корня)."""
+    journal: list[str] = []
+    pm = _real_pm(journal, fail_request=True)
+    try:
+        done, first, error = _call_bounded(pm.shutdown)
+        assert done and error is None, error
+        assert first is False, "ошибка фазы 1 детей обязана попасть в отчёт корня"
+        done, second, error = _call_bounded(pm.shutdown)
+        assert done and error is None, error
+        assert second is False, "повтор возвращает итог первого закрытия"
+    finally:
+        _call_bounded(pm.shutdown)
+    assert journal.count("children_stop") == 1, journal
+    assert journal.count("summary") == 1, journal
+    assert journal.count("flush") == 1, journal

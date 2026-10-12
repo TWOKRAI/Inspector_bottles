@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     from ...state_store_module.interfaces import IStateProxy
 
-from ...base_manager import BaseManager, ObservableMixin
+from ..._fallback import emergency_log
+from ...base_manager import BaseManager, ObservableMixin, open_scope
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 from ..communication import ProcessCommunication
 
@@ -22,6 +23,7 @@ from ..interfaces import IProcessModule, ISharedResources
 
 # Импорт компонентов процесса
 from ..lifecycle import ProcessLifecycle
+from ..lifecycle.process_lifecycle import _WorkersStop
 from ..managers import ProcessManagers
 from ..state import ProcessState
 from ..threads import SystemThreads
@@ -100,6 +102,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     #: отвечать на ``_uninstall_process_hooks()`` штатным «нечего снимать», а не
     #: AttributeError. ``None`` — законное «хуки не ставили».
     _process_hooks: Any = None
+
+    #: Task 1.2a (О10, ADR-PM-054): бюджет корня процесса, если раннер словаря
+    #: ``stop_budget`` не приложил (процесс собран тестом или стендом). PM
+    #: переопределяет его полным словарём ``stop_budget(None)``.
+    DEFAULT_STOP_BUDGET: dict = {"work_s": 3.0, "infra_s": 1.0}
+
+    #: Корень процесса ``proc/<имя>`` и его три сегмента. Атрибуты КЛАССА со
+    #: значением-пустотой: процессу без ``initialize()`` закрывать нечего.
+    _root: Any = None
+    _root_segments: dict = {}
+    _stop_budget: dict | None = None
+    _stopped_planes: tuple = ()
 
     def __init__(
         self,
@@ -218,7 +232,26 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Returns:
             bool: True если инициализация успешна
         """
+        # Task 1.2a (ревью р.1): процесс одноразовый. Корень открыт — повторный вызов ничего не
+        # пересобирает (вторая сборка закрыла бы НОВЫЕ менеджеры, а менеджеры первой утекли бы);
+        # корень закрыт — подъём после shutdown (или после провала подъёма) не поддерживается.
+        root = self._root
+        if root is not None:
+            if root.closed:
+                # Логгер уже закрыт корнем — отказ говорит аварийный выход, не менеджер.
+                emergency_log(
+                    __name__,
+                    "error",
+                    "Процесс '%s': корень закрыт (shutdown или провал подъёма) — initialize() отклонён",
+                    self.name,
+                )
+                return False
+            return self.is_initialized
         try:
+            # 0. Task 1.2a (ADR-PM-054): корень процесса — ПЕРВЫМ шагом. Записи
+            #    регистрируются по ходу подъёма; провал подъёма закрывает корень.
+            self._open_root()
+
             # 1-2. Конфигурация и очереди
             self._init_configuration()
             self._init_queues()
@@ -236,6 +269,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             #    чтобы register_message_handler успел зарегистрироваться
             self._init_custom_managers()
             self._init_application_threads()
+
+            # 6a. Task 1.2a: записи наследника в ``work``, затем воркеры — последними
+            #     в регистрации, первыми в закрытии (LIFO).
+            work = self._root_segments.get("work")
+            if work is not None:
+                self._own_work(work)
+                work.own(_WorkersStop(self), name="workers", kind="workers")
 
             # 6b. P4.4.1 (B2): команды НЕ копируются в event_dispatcher — kind-router
             # в receive() диспатчит type=="command" напрямую в CommandManager.
@@ -268,6 +308,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             #     полуинициализированном процессе.
             self._init_state_proxy()
 
+            # 11. Task 1.2a: финальный слив наблюдаемости — последняя запись
+            #     ``transport``, первая в его закрытии (после барьера за ``work``).
+            transport = self._root_segments.get("transport")
+            if transport is not None:
+                transport.own(self._self_call("_flush_observability"), name="flush", kind="callable")
+
             self.is_initialized = True
             self._log_info(f"Process '{self.name}' initialized successfully")
             return True
@@ -281,29 +327,134 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # слоты интерпретатора остались бы занятыми объектом, чей адресат
             # доставки полуразобран, и следующий ``install`` в том же
             # интерпретаторе увидел бы их занятыми.
-            self._uninstall_process_hooks()
             self._log_error(f"Failed to initialize process '{self.name}': {e}")
             self._log_error(f"Traceback: {_tb.format_exc()}")
+            # Task 1.2a: провал подъёма закрывает корень сам — иначе он остался бы
+            # открытым (G3) и держал полуподнятые менеджеры.
+            try:
+                self.close_root()
+            except Exception as close_exc:  # noqa: BLE001 — уборка не маскирует провал подъёма
+                self._log_error(f"закрытие корня после провала подъёма: {close_exc}")
+            self._uninstall_process_hooks()
             return False
 
     def shutdown(self) -> bool:
+        """Завершение работы процесса — одно закрытие корня (Task 1.2a, ADR-PM-054).
+
+        Нет корня (``initialize()`` не звали) — ``True``: закрывать нечего.
+        Иначе ``True``, если в отчёте корня нет ``errors``. Повтор возвращает
+        итог первого закрытия и ничего не гасит повторно.
         """
-        Завершение работы процесса.
+        try:
+            report = self.close_root()
+        except Exception as e:  # noqa: BLE001 — провал останова не оставляет хуки стоять
+            self._uninstall_process_hooks()
+            self._log_error(f"Error during shutdown of process '{self.name}': {e}")
+            return False
+        if report is None:
+            return True
+        return not report.errors
 
-        Интегрирует функциональность ProcessCore:
-        - Shutdown плагинов (если есть orchestrator)
-        - Остановка всех потоков
-        - Очистка ресурсов
-        - Отключение менеджеров
+    # ========================================================================
+    # КОРЕНЬ ПРОЦЕССА (Task 1.2a, ADR-PM-054)
+    # ========================================================================
 
-        Returns:
-            bool: True если завершение успешно
+    def attach_stop_budget(self, budget: dict) -> None:
+        """Принять словарь ``stop_budget`` от раннера — ДО ``initialize()``. Хранится копия."""
+        self._stop_budget = dict(budget)
+
+    def _root_budget(self, budget: dict) -> tuple[float, float]:
+        """``(work, infra)`` корня из словаря бюджета. PM переопределяет (О6)."""
+        return float(budget["work_s"]), float(budget["infra_s"])
+
+    def _open_root(self) -> None:
+        """Корень ``proc/<имя>``: ``planes | transport | work`` с барьерами между ними."""
+        if self._root is not None:
+            return
+        budget = self._stop_budget if self._stop_budget is not None else self.DEFAULT_STOP_BUDGET
+        work_b, infra_b = self._root_budget(budget)
+        root = open_scope(
+            f"proc/{self.name}",
+            budget_s=work_b + infra_b,
+            kill_reserve_s=0.0,
+            reporter=self._root_report,
+        )
+        self._root = root
+        planes = root.child("planes", budget_s=infra_b)
+        root.barrier()
+        transport = root.child("transport", budget_s=infra_b)
+        root.barrier()
+        work = root.child("work", budget_s=work_b)
+        self._root_segments = {"planes": planes, "transport": transport, "work": work}
+
+    @property
+    def lifetime_segments(self) -> dict:
+        """Сегменты корня ``{"planes", "transport", "work"}``; пусто до ``initialize()``."""
+        return dict(self._root_segments)
+
+    def close_root(self):
+        """Закрыть корень процесса; ``None`` без корня. Повтор — тот же отчёт."""
+        root = self._root
+        if root is None:
+            return None
+        return root.close()
+
+    def _root_report(self, report) -> None:
+        """Reporter корня: делегат ``ProcessLifecycle.report`` (читается поздно — стенды без ``__init__``)."""
+        lifecycle = getattr(self, "_lifecycle", None)
+        if lifecycle is not None:
+            lifecycle.report(report)
+
+    def _stop_logger_entry(self) -> None:
+        """Запись ``planes/logger``: делегат ``ProcessLifecycle.stop_logger``."""
+        lifecycle = getattr(self, "_lifecycle", None)
+        if lifecycle is not None:
+            lifecycle.stop_logger()
+
+    def _own_work(self, work) -> None:
+        """Точка регистрации записей наследника в ``work`` (по умолчанию — ничего)."""
+
+    def _own_transport(self, transport) -> None:
+        """Точка регистрации записей наследника в ``transport`` (по умолчанию — ничего)."""
+
+    def _attr_call(self, attr: str, method: str, *, plane: str | None = None):
+        """Вызываемое, поздно связанное с атрибутом: ``getattr(self, attr)`` В МОМЕНТ закрытия.
+
+        ``None`` или объект без ``method`` пропускаются. ``plane`` — имя плоскости
+        для строки «observability planes stopped»: ставится, только если вызов был.
         """
-        # Plugin shutdown (если orchestrator был создан)
-        if self._orchestrator is not None:
-            self._orchestrator.shutdown()
 
-        return self._lifecycle.shutdown()
+        def call() -> None:
+            obj = getattr(self, attr, None)
+            if obj is None:
+                return
+            fn = getattr(obj, method, None)
+            if not callable(fn):
+                return
+            fn()
+            if plane is not None:
+                self._stopped_planes = (*self._stopped_planes, plane)
+
+        return call
+
+    def _self_call(self, method_name: str):
+        """Вызываемое ``getattr(self, method_name)()`` в момент закрытия (подмена на экземпляре видна)."""
+
+        def call() -> None:
+            getattr(self, method_name)()
+
+        return call
+
+    def _final_status(self) -> None:
+        """Запись ``planes/final_status``: STOPPED и итоговая строка — пока логгер жив."""
+        self.update_process_state(status=ProcessStatus.STOPPED.value)
+        self.is_initialized = False
+        self._log_info(f"Process '{self.name}' shut down successfully")
+
+    def _planes_report(self) -> None:
+        """Запись ``planes/planes_report``: названы ФАКТИЧЕСКИ погашенные плоскости."""
+        if self._stopped_planes:
+            self._log_info(f"Process '{self.name}' observability planes stopped: {', '.join(self._stopped_planes)}")
 
     # ========================================================================
     # ИНИЦИАЛИЗАЦИЯ КОМПОНЕНТОВ
@@ -350,12 +501,34 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.command_manager = bundle.command
         self.console_manager = bundle.console
         self.observation_manager = bundle.observation
+        planes = self._root_segments.get("planes")
+        if planes is not None:
+            self._register_planes(planes)
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
         self._apply_boot_observability_layers()
         self._wire_observability_hub()
         self._install_process_hooks()
+        # Task 1.2a: ``work`` — хуки, затем плагины (закрытие: плагины → хуки).
+        work = self._root_segments.get("work")
+        if work is not None:
+            work.own(self._self_call("_uninstall_process_hooks"), name="hooks", kind="callable")
+            work.own(self._attr_call("_orchestrator", "shutdown"), name="plugins", kind="callable")
+
+    def _register_planes(self, planes) -> None:
+        """Записи ``planes`` (Task 1.2a) в порядке регистрации; закрытие обратное:
+        observation → stats → error → planes_report → final_status → logger."""
+        planes.own(self._stop_logger_entry, name="logger", kind="callable")
+        planes.own(self._self_call("_final_status"), name="final_status", kind="callable")
+        planes.own(self._self_call("_planes_report"), name="planes_report", kind="callable")
+        planes.own(self._attr_call("error_manager", "shutdown", plane="error"), name="error", kind="callable")
+        planes.own(self._attr_call("stats_manager", "shutdown", plane="stats"), name="stats", kind="callable")
+        planes.own(
+            self._attr_call("observation_manager", "shutdown", plane="observation"),
+            name="observation",
+            kind="callable",
+        )
 
     def _install_process_hooks(self) -> None:
         """Ф1.1 (C3): поставить три процессных хука — ПОСЛЕ подъёма менеджеров.
@@ -614,8 +787,24 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 # `documents.factory` пустой).
                 self._observability_store, self._observability_store_taps = None, []
 
+    def _register_transport(self, transport) -> None:
+        """Записи ``transport`` (Task 1.2a): srm, router, command, console, затем наследник.
+
+        Закрытие обратное (G7: router раньше srm); ``flush`` регистрируется в конце подъёма.
+        """
+        transport.own(self._attr_call("shared_resources", "shutdown"), name="srm", kind="callable")
+        transport.own(self._attr_call("router_manager", "shutdown"), name="router", kind="callable")
+        transport.own(self._attr_call("command_manager", "shutdown"), name="command", kind="callable")
+        transport.own(self._attr_call("console_manager", "shutdown"), name="console", kind="callable")
+        self._own_transport(transport)
+
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
+        # Task 1.2a: ``transport`` — srm, router, command, console, затем записи
+        # наследника; закрытие обратное (G7: router раньше srm).
+        transport = self._root_segments.get("transport")
+        if transport is not None:
+            self._register_transport(transport)
         self.communication = ProcessCommunication(
             self.name,
             self.queues,
@@ -1170,43 +1359,18 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._announce_ready()
 
     def stop(self):
-        """Остановка процесса — статус STOPPING, остановка воркеров и shutdown."""
+        """Сигнал остановки = ``cancel()`` корня (Task 1.2a): статус STOPPING, ничего не ждёт.
+
+        Гасит процесс ``shutdown()`` (у раннера — ``close_root()`` в ``finally``).
+        """
         self.update_process_state(status=ProcessStatus.STOPPING.value)
 
         self._log_info(f"Process '{self.name}' stopping", module="lifecycle")
         self._stop_requested = True
 
-        if self.worker_manager:
-            self.worker_manager.stop_all_workers()
-
-        # Task 1.6 (ADR-PMM-033): хук-заглушка для наследника, которому нужно
-        # писать в стор ПОСЛЕ остановки своих воркеров, но ДО закрытия store-tap
-        # ниже (PM гасит детей и публикует сводку стопа здесь). Хук — точка
-        # расширения: исключение в переопределении наследника не имеет права
-        # отменить финальный слив/закрытие стора ниже — та же причина, по которой
-        # `_flush_observability()` сама глушит исключения (ревью Task 1.6, it.1).
-        try:
-            self._before_observability_teardown()
-        except Exception as e:  # noqa: BLE001 — хук не имеет права сорвать stop()
-            try:
-                self._log_error(f"_before_observability_teardown упал: {e}", module="lifecycle")
-            except Exception:  # noqa: BLE001 — сам лог тоже не имеет права сорвать stop()
-                pass
-
-        # Ф5.16 (c): финальный дренаж hub'а на graceful-teardown — воркеры уже
-        # остановлены, новых эмиссий нет. SIGKILL этот путь обходит (потому
-        # error/critical идут write-through, а не в буфер).
-        self._flush_observability()
-
-        self.shutdown()
-
-    def _before_observability_teardown(self) -> None:
-        """Task 1.6 (ADR-PMM-033): хук-заглушка, не-op по умолчанию.
-
-        Наследник переопределяет, когда ему нужно писать в стор наблюдаемости
-        ПОСЛЕ остановки своих воркеров, но ДО того, как ``_flush_observability()``
-        снимет store-tap ниже по ``stop()`` — иначе запись физически не долетит.
-        """
+        root = self._root
+        if root is not None:
+            root.cancel()
 
     def _flush_observability(self) -> None:
         """Ф5.16 (c): последний слив log/stats-буфера hub'а перед остановкой (в

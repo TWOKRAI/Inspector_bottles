@@ -25,6 +25,10 @@
 - [x] Этап 7: Unit-тесты написаны и проходят (8 файлов)
 - [x] Этап 8: README и interfaces.py готовы (ISystemLauncher, IProcessManagerProcess, IProcessRegistry)
 
+## Обновление 2026-10-12 (Task 1.2a плана `lifecycle-owner-scope`, ADR-PMM-036)
+
+- Корень PM: дети — область `work/children` (`_ChildrenStop`, `ProcessRegistry.children_stop`), сводка — `work/summary`, `backend_ctl` и консоль — `transport`; `PM.shutdown()` и `_stop_children_once` удалены, код выхода 76 монитор читает как `stopped` без рестарта. Живой стенд — за лидом.
+
 ## Обновление 2026-10-12 (Task 1.1 плана `lifecycle-owner-scope`, ADR-PMM-035)
 
 - `core/stop_budget.py` (одна формула бюджета стопа) и `core/child_process_stop.py` (`ChildProcessStop` — группа детей как `Stoppable`); `ProcessRegistry` останавливает детей через область `pm/stop`; ребёнок получает словарь `stop_budget` в конфиге. Живой стенд — за лидом.

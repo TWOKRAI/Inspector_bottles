@@ -6,6 +6,7 @@ Per-process stop_event: остановка одного процесса не т
 
 import math
 import os
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from multiprocessing import Event, Process, RawArray
@@ -428,6 +429,15 @@ class ProcessRegistry:
         )
         return result, stop
 
+    def children_stop(self, *, mark_reader_gone: bool) -> "_ChildrenGroupStop":
+        """Stoppable всех детей для области ``children`` корня PM (Task 1.2a, ADR-PMM-036).
+
+        Ленивый: группа строится в ``request_stop()`` (дети создаются и удаляются на
+        лету — смена топологии), не при вызове. ``result()`` — карта ``{имя: остановлен}``
+        после закрытия области (как ``_stop_many`` после ``scope.close()``).
+        """
+        return _ChildrenGroupStop(self, mark_reader_gone)
+
     def _stop_many(self, names: List[str], timeout: object, mark_reader_gone: bool) -> Dict[str, bool]:
         """Единственный путь стопа детей: группа ``ChildProcessStop`` во временной области.
 
@@ -489,3 +499,77 @@ class ProcessRegistry:
         elif self.logger:
             self.logger._log_info("All processes stopped (смерть подтверждена)")
         return results
+
+
+class _ChildrenGroupStop:
+    """Stoppable над шагом (а) и группой ``ChildProcessStop`` всех детей реестра (Task 1.2a).
+
+    Группа строится один раз, в ``request_stop()`` (или в ``join_until``, если фаза 1
+    не звалась): имена берутся из ``os_processes`` В ЭТОТ момент. Сборка и сигнал детям
+    идут под одним локом, ``_group`` виден только после успешной сборки; ``join_until``
+    из другого потока ждёт этот лок. Пустая группа — ``join_until`` ``True``,
+    ``kill``/``close`` ничего не делают. Сбой сборки — fail-closed: ``join_until`` ``False``,
+    ``result()`` ``False`` по всем именам ``os_processes`` (смерть не подтверждена).
+    """
+
+    def __init__(self, registry: "ProcessRegistry", mark_reader_gone: bool) -> None:
+        self._registry = registry
+        self._mark_reader_gone = mark_reader_gone
+        self._lock = threading.Lock()
+        self._requested = False
+        self._build_failed = False
+        self._failed_names: List[str] = []
+        self._done: Dict[str, bool] = {}
+        self._group: ChildProcessStop | None = None
+        self._names: List[str] = []
+
+    def request_stop(self) -> None:
+        with self._lock:
+            if self._requested or self._build_failed:
+                return
+            names: List[str] = []
+            try:
+                names = [p.name for p in self._registry.os_processes]
+                done, group = self._registry._build_child_stop(list(names), self._mark_reader_gone)
+            except Exception:
+                self._build_failed = True
+                self._failed_names = list(dict.fromkeys(names))
+                raise
+            self._done, self._group = done, group
+            self._names = [name for name in dict.fromkeys(names) if name not in done]
+            self._requested = True
+            if group is not None:
+                group.request_stop()
+
+    def join_until(self, deadline: float) -> bool:
+        self.request_stop()  # ждёт лок чужой сборки; после сбоя сборки — тихий возврат
+        with self._lock:
+            group, failed = self._group, self._build_failed
+        if failed:
+            return False
+        if group is None:
+            return True
+        return group.join_until(deadline)
+
+    def kill(self) -> None:
+        if self._group is not None:
+            self._group.kill()
+
+    def close(self) -> None:
+        if self._group is not None:
+            self._group.close()
+
+    def result(self) -> Dict[str, bool]:
+        """Карта шага (а) + для имён группы ``False``, если имя среди выживших.
+
+        Не опирается на ``close()``: область выжившему ``close()`` не зовёт.
+        """
+        if self._build_failed:
+            return {name: False for name in self._failed_names}
+        result = dict(self._done)
+        if self._group is None:
+            return result
+        survivors = set(self._group.survivors())
+        for name in self._names:
+            result[name] = name not in survivors
+        return result

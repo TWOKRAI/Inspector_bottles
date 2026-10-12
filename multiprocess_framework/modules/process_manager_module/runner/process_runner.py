@@ -4,7 +4,9 @@ Top-level entry для запуска процесса внутри OS-проц�
 Connection bundle: только picklable (queues, config, custom).
 """
 
+import math
 import os
+import sys
 import threading
 import time
 import traceback
@@ -14,6 +16,7 @@ from typing import Any, Dict, Optional, Union
 from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
 
 from ..._fallback import emergency_log
+from ..core.stop_budget import EXIT_SURVIVORS, SHUTDOWN_TIMEOUT_KEY, stop_budget
 from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
 from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
@@ -27,6 +30,52 @@ _PARENT_DEATH_GRACE_S = 1.5
 # Код выхода принудительной ветки: отличим от 0 (штатный стоп), 1 (исключение)
 # и -N (убит сигналом) — по нему видно, что ребёнка добил сторож, а не lifecycle.
 _PARENT_DEATH_EXIT_CODE = 75
+
+#: Task 1.2a (ADR-PMM-036): выход при выживших после закрытия корня. Модульное имя —
+#: тесты подменяют его (настоящий ``os._exit`` убил бы pytest).
+_hard_exit = os._exit
+
+#: Ключи словаря ``stop_budget`` (``core.stop_budget.stop_budget``), которые раннер
+#: обязан найти в ``process_config["stop_budget"]``, чтобы принять его как есть.
+_STOP_BUDGET_KEYS = ("work_s", "infra_s", "pm_graceful_s", "pm_total_s", "outer_s")
+
+
+def _budget_defect(raw: Any) -> str | None:
+    """Чем негоден ``stop_budget`` (текст без значения); ``None`` — годен."""
+    if not isinstance(raw, dict):
+        return "не словарь"
+    for key in _STOP_BUDGET_KEYS:
+        if key not in raw:
+            return f"нет ключа {key}"
+        value = raw[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"{key}: не число"
+        if not math.isfinite(value):
+            return f"{key}: не конечное число"
+        if value < 0:
+            return f"{key}: отрицательное число"
+    return None
+
+
+def _resolve_stop_budget(process_config: Any, log: Any) -> dict[str, float]:
+    """Бюджет остановки ребёнка из сырого ``process_config`` (Task 1.2a).
+
+    Годный ``stop_budget`` (dict с пятью конечными числами ≥ 0, не ``bool``) — как
+    есть; иначе — ``stop_budget(shutdown_timeout)``; негодный ключ — предупреждение.
+    Плохой ``shutdown_timeout`` — ``stop_budget(None)`` с предупреждением, без падения.
+    """
+    cfg = process_config if isinstance(process_config, dict) else {}
+    raw = cfg.get("stop_budget")
+    defect = _budget_defect(raw) if raw is not None else "значение None"
+    if defect is None:
+        return {key: float(raw[key]) for key in _STOP_BUDGET_KEYS}
+    if "stop_budget" in cfg:
+        log.warning(f"stop_budget в конфиге негоден ({defect}) — бюджет выведен из shutdown_timeout")
+    try:
+        return stop_budget(cfg.get(SHUTDOWN_TIMEOUT_KEY))
+    except Exception as exc:  # noqa: BLE001 — плохой graceful-бюджет не роняет старт
+        log.warning(f"stop_budget: shutdown_timeout негоден ({exc}) — бюджет по умолчанию")
+        return stop_budget(None)
 
 
 def _on_parent_death(
@@ -352,6 +401,11 @@ def run_process_function(
             config=process_config,
         )
 
+        # Task 1.2a: бюджет остановки — ДО initialize() (корень строится первым шагом).
+        attach_budget = getattr(process_instance, "attach_stop_budget", None)
+        if callable(attach_budget):
+            attach_budget(_resolve_stop_budget(process_config, log))
+
         # Task 5.4 (ADR-PMM-034): ДО initialize() — GenericProcess может строить
         # SourceProducer уже в initialize(), а не только в run().
         if system_ready_event is not None:
@@ -415,9 +469,13 @@ def run_process_function(
         _log_exception_via_error_manager(shared_resources, e, "process failed")
         _update_process_state(shared_resources, process_name, "error")
     finally:
+        root_report = None
         if process_instance is not None:
             try:
-                if hasattr(process_instance, "shutdown"):
+                # Task 1.2a: ровно одно закрытие корня процесса; не-ProcessModule — по-старому.
+                if hasattr(process_instance, "close_root"):
+                    root_report = process_instance.close_root()
+                elif hasattr(process_instance, "shutdown"):
                     process_instance.shutdown()
                 elif hasattr(process_instance, "stop"):
                     process_instance.stop()
@@ -468,3 +526,18 @@ def run_process_function(
                 exit_report[0] = 1
             except Exception:  # noqa: BLE001 — слот вторичен
                 pass
+        # Task 1.2a (ADR-PMM-036): выжившие корня — выход 76 ПОСЛЕ слота exit_report.
+        # Пометка ``(self)`` — закрытие со spawn-потока самой записи, не повод для выхода.
+        survivors = [s for s in getattr(root_report, "survivors", ()) if not s.endswith(" (self)")]
+        if survivors:
+            emergency_log(
+                __name__,
+                "error",
+                "%s: survivors after root close: %s — exit %d",
+                process_name,
+                survivors,
+                EXIT_SURVIVORS,
+            )
+            sys.stdout.flush()
+            sys.stderr.flush()
+            _hard_exit(EXIT_SURVIVORS)
