@@ -29,10 +29,53 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
 Упрощение симулятора: замедление стопа HARD (``P_DEC_STOP``) не моделируется —
 поза замирает на тике обработки.
 
-Отложено: ``CVT_JOB``/``SC_RUN`` (NAK ``E_INTERNAL``), ``HB_PC``/watchdog,
-мост ПЧ/лента, сценарии, TCP-сервер ``--protocol v2`` (T2.3); ``on_event``
-(T2.4). v1-симулятор (``sim_core.py``) не используется и не импортируется —
-новый протокол живёт в отдельном адресном пространстве.
+Отложено: ``CVT_JOB`` (NAK ``E_INTERNAL``), ``HB_PC``/watchdog, мост
+ПЧ/лента (T2.3, часть B); TCP-сервер ``--protocol v2``, ``on_event`` (T2.4).
+v1-симулятор (``sim_core.py``) не используется и не импортируется — новый
+протокол живёт в отдельном адресном пространстве.
+
+Реализовано в T2.3, часть A (protocol-spec §7, §3.4 ``TLM_SC_*``/``TLM_SPD_PCT``):
+
+- ``SC_RUN(count, sc_id, offset)``: ``count`` вне ``1..SC_CAP`` или
+  ``offset+count > SC_CAP`` -> NAK ``E_SC_COUNT``; затем ``E_NO_SERVO``; затем
+  ВЕСЬ срез проверяется до движения (KIND, ACTION, APARAM, точка в зоне, отрезок
+  LINE/LINE_PASS — первый от текущей позы, последняя запись не LINE_PASS, рука
+  §7.3, пределы суставов JOINT — тем же путём, что ``_check_motion``,
+  ``_check_target``); первая ошибка -> NAK ``E_SC_RECORD``, rval0 = индекс
+  внутри среза (0-based от ``offset``), rval1 = причина ``R_*``. NAK не
+  оставляет следов (поза, DO, ``TLM_SC_*`` не пишутся).
+- Исполнение: ``TLM_ACTIVITY=4``, ход каждой записи — те же
+  ``_start_move``/``_progress_move``, что у одиночного хода. Действие записи —
+  после прихода. ``TLM_SC_INDEX`` (1-based номер в срезе) пишется на тике
+  прихода в EXACT-точку (KIND != LINE_PASS), на LINE_PASS не меняется.
+- Гейт §7.2 п.4: внутри сценария mailbox и SOFT-стоп обслуживаются ТОЛЬКО на
+  EXACT-точке, на тике завершения записи (приход + действие; у ``DELAY_MS`` —
+  тик окончания паузы); следующий отрезок стартует в том же тике. HARD/HALT —
+  сразу, каждый тик. ⚑ Расхождение с §4.3 (решение ведущего, DECISIONS
+  ADR-RC-015): ОДИНОЧНЫЕ ходы PTP/HOME/JOG по-прежнему обслуживают mailbox
+  каждый тик (тесты T2.1/T2.2: ``live``-команды во время хода). Сторожевой
+  таймер и мост ПЧ (часть B) в сценарии обслуживаются каждый тик, не только
+  на EXACT.
+- ``DELAY_MS`` — миллисекунды ВРЕМЕНИ SIM: копится сумма ``dt_s`` из
+  ``tick``, стенные часы не читаются; на тике прихода пауза не завершается.
+  ``DELAY_MS=0`` — без паузы.
+- ``SPEED_PCT``/``ACCEL``/``ACCUR`` живут в состоянии сценария до его конца
+  (``ACCEL``/``ACCUR`` только хранятся — разгон и точность sim не моделирует);
+  на любом выходе действуют снова ``P_SPD_DEFAULT``/``P_ACC_L``/
+  ``P_ACCUR_DEFAULT`` (``_values`` сценарий не трогает). Стоп DO не трогает;
+  действие записи, до которой не дошли, не исполняется.
+- Итог успеха: ``TLM_SC_DONE_N=count``, ``TLM_SC_TOTAL``, ``TLM_SC_ID``, затем
+  ``DONE_SEQ`` последним (И5). Стоп/авария посреди -> событие ``E_ABORTED``
+  (``_abort``), ``TLM_SC_DONE_N`` = число завершённых записей. SOFT, ждавший
+  EXACT, на последней точке тоже даёт ``E_ABORTED``, не DONE — как у
+  одиночного хода T2.2.
+- Промежуточные точки (и LINE_PASS) sim проходит ТОЧНО (поза равна точке на
+  тике прихода) — свойство sim, не прошивки: настоящий контроллер сглаживает
+  LINE_PASS (допущение A5 тестера, DECISIONS ADR-RC-015).
+- ``TLM_SPD_PCT`` — текущий Override, %: на старте хода — ``spd_pct`` команды
+  (0 -> ``P_SPD_DEFAULT``; для ``JOG_STEP`` 0 -> ``P_SPD_JOG``), в сценарии —
+  ``SPEED_PCT`` сценария, в IDLE — ``P_SPD_DEFAULT``. ``JOG_CONT`` его не
+  меняет (скорость там в мм/с, не в %).
 
 Реализовано в T2.K: проверка зоны идёт через ``self.model`` (``RobotModel``,
 `kinematics.py`, по умолчанию ``ScaraModel``) — не напрямую через
@@ -139,7 +182,18 @@ import math
 # ponytail: CRC берётся из кодогена (тянет yaml); перенести в core/, если sim уедет туда, где yaml нет.
 from Services.robot_comm.codegen import crc16_modbus
 from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID, PARAMS, to_eng
-from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, KIND, OP, OP_SPEC, REASON, REG, REG_COUNT, STOP_LEVEL
+from Services.robot_comm.core.protocol_v2 import (
+    ACT,
+    CONSTANTS,
+    ERR,
+    KIND,
+    OP,
+    OP_SPEC,
+    REASON,
+    REG,
+    REG_COUNT,
+    STOP_LEVEL,
+)
 from Services.robot_comm.kinematics import RobotModel, ScaraModel
 from Services.robot_comm.programs.geometry import Workspace
 
@@ -152,6 +206,7 @@ NAK = 2
 TLM_ACTIVITY_IDLE = 0
 TLM_ACTIVITY_PTP = 1
 TLM_ACTIVITY_JOG = 2
+TLM_ACTIVITY_SCENARIO = 4
 TLM_ACTIVITY_FAULT = 5
 
 #: dt по умолчанию, когда tick() вызван без аргумента (contract §"Motion model").
@@ -162,9 +217,12 @@ TICK_INTERVAL_S = 0.01
 #: см. docstring модуля «одна правда TLM_RZ»).
 MAX_STEP_MM = 100 / 3
 
-# Опкоды, не реализованные ни в T2.1, ни в T2.2 (out of scope по контракту) -> NAK E_INTERNAL
+# Опкоды, ещё не реализованные (CVT_JOB — T2.3, часть B) -> NAK E_INTERNAL
 # после проверки opcode/argc/busy.
-_UNIMPLEMENTED_OPS = frozenset({"CVT_JOB", "SC_RUN"})
+_UNIMPLEMENTED_OPS = frozenset({"CVT_JOB"})
+
+# Коды действия записи сценария (§7.1); 7+ — резерв -> R_ACTION.
+_SC_ACTIONS = frozenset(ACT.values())
 
 # В FAULT (TLM_ACTIVITY=5) принимаются только эти опкоды — остальные NAK E_BUSY (contract §FAULT).
 _FAULT_WHITELIST = frozenset({"PING", "CLEAR_ERR", "PARAM_GET", "PARAM_SET", "SERVO"})
@@ -288,6 +346,8 @@ class RobotSimCoreV2:
         self.regs[REG["TLM_ACTIVITY"]] = TLM_ACTIVITY_IDLE
         # Рестарт посреди хода: команды больше нет, MOVING=1 остался бы навсегда (ревью T2.1).
         self.regs[REG["TLM_MOVING"]] = 0
+        # T2.3: Override в простое — P_SPD_DEFAULT (§3.4 TLM_SPD_PCT).
+        self.regs[REG["TLM_SPD_PCT"]] = self._values[PARAM_ID["P_SPD_DEFAULT"]]
         self.regs[REG["TLM_SERVO"]] = 1
         self.regs[REG["TLM_DO_MASK"]] = 0
         # T2.2: свежий дом — рука в дефолтной конфигурации (contract §"Motion model").
@@ -461,25 +521,41 @@ class RobotSimCoreV2:
         """
         if self.regs[REG["TLM_SERVO"]] == 0:
             return (NAK, ERR["E_NO_SERVO"], 0, []), None
-        ws = self._workspace()
-        reason = self.model.check_point(ws, target)
+        reason, j_end = self._check_target(
+            self._workspace(), target, line, self._read_pose_eng(), self.regs[REG["TLM_HAND"]]
+        )
         if reason != 0:
             return (NAK, ERR["E_RANGE"], 1, [reason]), None
-        j_end = None
+        return None, j_end
+
+    def _check_target(
+        self,
+        ws: Workspace,
+        target: tuple[float, float, float, float],
+        line: bool,
+        start: tuple[float, float, float, float],
+        hand: int,
+    ) -> tuple[int, tuple[float, ...] | None]:
+        """Проверка цели одного хода без побочных эффектов — общая для одиночного
+        хода (`_check_motion`) и записи сценария (`_sc_validate`, T2.3).
+
+        Порядок: точка в зоне -> (JOINT) предел суставов -> (LINE) рука `hand`
+        против `P_HAND` -> (LINE) отрезок `start -> target`. Возвращает
+        `(причина R_* или 0, j_end или None)`.
+        """
+        reason = self.model.check_point(ws, target)
+        if reason != 0:
+            return reason, None
         if not line:
             j_end = self.model.ik(target, self._values[PARAM_ID["P_HAND"]])
             if j_end is not None:
                 nak, j_end = self._resolve_joint_target(j_end)
                 if nak is not None:
-                    return nak, None
-        if line:
-            if self.regs[REG["TLM_HAND"]] != self._values[PARAM_ID["P_HAND"]]:
-                return (NAK, ERR["E_RANGE"], 1, [REASON["R_HAND"]]), None
-            cur = self._read_pose_eng()
-            reason = self.model.check_segment(ws, cur, target)
-            if reason != 0:
-                return (NAK, ERR["E_RANGE"], 1, [reason]), None
-        return None, j_end
+                    return nak[3][0], None
+            return 0, j_end
+        if hand != self._values[PARAM_ID["P_HAND"]]:
+            return REASON["R_HAND"], None
+        return self.model.check_segment(ws, start, target), None
 
     def _start_move(
         self,
@@ -490,6 +566,7 @@ class RobotSimCoreV2:
         joint: bool,
         activity: int,
         j_end: tuple[float, ...] | None = None,
+        spd_pct: int | None = None,
     ) -> None:
         """Завести активный ход. JOINT/HOME (T2.J2 §Q2/Q3): `j_start` — ТЕКУЩЕЕ
         состояние (``self._joints``), не пересчёт ``ik(start_pose)``; `j_end` уже
@@ -531,6 +608,9 @@ class RobotSimCoreV2:
                     "travelled": 0.0,
                 }
             )
+        if spd_pct is not None:
+            # T2.3: текущий Override, % (§3.4) — пишется на старте каждого хода.
+            self.regs[REG["TLM_SPD_PCT"]] = spd_pct
         self.regs[REG["TLM_ACTIVITY"]] = activity
         self.regs[REG["TLM_MOVING"]] = 1
 
@@ -539,15 +619,24 @@ class RobotSimCoreV2:
     # ------------------------------------------------------------------ #
 
     def tick(self, dt_s: float | None = None) -> None:
-        """Один тик: heartbeat -> плоскость STOP_REQ -> mailbox -> прогресс команды."""
+        """Один тик: heartbeat -> плоскость STOP_REQ -> mailbox -> прогресс команды.
+
+        Всё время ядра — сумма `dt_s` (T2.3): стенные часы не читаются.
+        Внутри сценария mailbox здесь НЕ опрашивается — только на EXACT-точке
+        (`_sc_record_done`, §7.2 п.4); одиночные ходы — каждый тик, как в T2.2.
+        """
         dt = TICK_INTERVAL_S if dt_s is None else dt_s
         if not (math.isfinite(dt) and dt > 0):
             dt = 0.0  # NaN/inf/отрицательный dt (скачок часов у вызывающего) — время не прошло (ревью T2.2)
         self._time_s += dt
         self.regs[REG["TLM_HB_ROBOT"]] = (self.regs[REG["TLM_HB_ROBOT"]] + 1) & 0xFFFF
         self._handle_stop()
-        self._handle_mailbox()
+        if not self._in_scenario():
+            self._handle_mailbox()
         self._progress(dt)
+
+    def _in_scenario(self) -> bool:
+        return self._active is not None and self._active.get("sc") is not None
 
     # --- плоскость STOP_REQ ---
 
@@ -564,9 +653,11 @@ class RobotSimCoreV2:
             self.regs[REG["TLM_SERVO"]] = 0
             self.vfd_stop_requests += 1
         if self._active is not None:
-            if level == STOP_LEVEL["SOFT"] and self._active["type"] == "move":
+            if level == STOP_LEVEL["SOFT"] and self._active["type"] in ("move", "sc_delay"):
                 # SOFT посреди хода — pending: ход продолжается до цели, STOP_ACK
                 # ещё не пишется (contract §"Stop plane"); JOG_CONT сюда не попадает.
+                # Сценарий (T2.3): pending до ближайшей EXACT-точки (§7.2 п.4),
+                # LINE_PASS его не обслуживает — `_sc_record_done`.
                 self._pending_soft = value
                 return
             self._pending_soft = None
@@ -580,6 +671,11 @@ class RobotSimCoreV2:
         события: команды, которую он ждал, больше нет (иначе он «съел» бы следующий ход).
         """
         pending, self._pending_soft = self._pending_soft, None
+        if self._in_scenario():
+            # T2.3: итог оборванного сценария — число ЗАВЕРШЁННЫХ записей (не count).
+            self.regs[REG["TLM_SC_DONE_N"]] = self._active["sc"]["i"]
+        # T2.3: на любом выходе Override возвращается к P_SPD_DEFAULT (§7.2 п.5).
+        self.regs[REG["TLM_SPD_PCT"]] = self._values[PARAM_ID["P_SPD_DEFAULT"]]
         self.regs[REG["TLM_ACTIVITY"]] = TLM_ACTIVITY_FAULT if fault else TLM_ACTIVITY_IDLE
         self.regs[REG["TLM_MOVING"]] = 0
         self.regs[REG["TLM_ERR_SEQ"]] = seq
@@ -595,6 +691,7 @@ class RobotSimCoreV2:
         T2.J2: `TLM_HAND` больше не выставляется здесь принудительно в `P_HAND` —
         он уже следует состоянию на каждой записи позы (`_set_pose_and_joints`,
         находка ревью T2.J №3, свойство 3 приёмки T2.J2)."""
+        self.regs[REG["TLM_SPD_PCT"]] = self._values[PARAM_ID["P_SPD_DEFAULT"]]  # T2.3: IDLE -> P_SPD_DEFAULT
         self.regs[REG["TLM_ACTIVITY"]] = TLM_ACTIVITY_IDLE
         self.regs[REG["TLM_MOVING"]] = 0
         self._active = None
@@ -616,6 +713,8 @@ class RobotSimCoreV2:
             return
         if self._active["type"] == "jog":
             self._progress_jog(dt)
+        elif self._active["type"] == "sc_delay":
+            self._progress_sc_delay(dt)
         else:
             self._progress_move(dt)
 
@@ -794,7 +893,9 @@ class RobotSimCoreV2:
         active["pos"] = new_pos
         self._set_pose_and_joints(new_pos, new_joints)
         if new_pos == target:
-            if self._pending_soft is not None:
+            if active.get("sc") is not None:
+                self._sc_arrived(active)  # T2.3: сценарий сам решает про SOFT/DONE/следующий отрезок
+            elif self._pending_soft is not None:
                 self._abort(ERR["E_ABORTED"], active["seq"])  # эхо отложенного SOFT пишет _abort
             else:
                 self._finish_done(active)
@@ -826,6 +927,131 @@ class RobotSimCoreV2:
         active["pos"] = pos
         pos_t = (pos[0], pos[1], pos[2], pos[3])
         self._set_pose_and_joints(pos_t, self._continuity_joints(pos_t))
+
+    # --- сценарий SC_RUN (T2.3, часть A; protocol-spec §7) ---
+
+    def _sc_validate(self, offset: int, count: int) -> tuple[list[dict] | None, tuple[int, int, int, list[int]] | None]:
+        """§7.2 п.1-2: прочитать записи `offset..offset+count-1` и проверить ВСЁ
+        до первого движения. Без побочных эффектов (NAK не оставляет следов).
+
+        Порядок внутри записи: KIND -> последняя не LINE_PASS -> ACTION -> APARAM
+        -> точка/пределы суставов/рука/отрезок (`_check_target`). Первая ошибка
+        -> NAK `E_SC_RECORD [индекс в срезе, R_*]`.
+        """
+        ws = self._workspace()
+        start = self._read_pose_eng()
+        hand = self.regs[REG["TLM_HAND"]]
+        p_hand = self._values[PARAM_ID["P_HAND"]]
+        acc_meta = PARAMS[PARAM_ID["P_ACC_L"]]
+        records: list[dict] = []
+        for i in range(count):
+            base = REG["SC_BUF"] + (offset + i) * CONSTANTS["SC_STRIDE"]
+            x, y, z, rz, op, aparam = self.regs[base : base + CONSTANTS["SC_STRIDE"]]
+            kind, action = op & 0xFF, op >> 8
+
+            def nak(reason: int, idx: int = i) -> tuple[None, tuple[int, int, int, list[int]]]:
+                return None, (NAK, ERR["E_SC_RECORD"], 2, [idx, reason])
+
+            if kind not in KIND.values():
+                return nak(REASON["R_KIND"])
+            if i == count - 1 and kind == KIND["LINE_PASS"]:
+                return nak(REASON["R_LAST_PASS"])
+            if action not in _SC_ACTIONS:
+                return nak(REASON["R_ACTION"])
+            if action in (ACT["DO_ON"], ACT["DO_OFF"]):
+                aparam_ok = 1 <= aparam <= 16
+            elif action == ACT["SPEED_PCT"]:
+                aparam_ok = 1 <= aparam <= 100
+            elif action == ACT["ACCEL"]:
+                aparam_ok = acc_meta["min"] <= aparam <= acc_meta["max"]
+            elif action == ACT["ACCUR"]:
+                aparam_ok = aparam in (0, 1)
+            else:
+                aparam_ok = True  # NONE — APARAM игнорируется; DELAY_MS — весь u16, мс
+            if not aparam_ok:
+                return nak(REASON["R_APARAM"])
+            target = tuple(self._decode(v, True) / 10.0 for v in (x, y, z, rz))
+            line = kind != KIND["JOINT"]
+            reason, j_end = self._check_target(ws, target, line, start, hand)
+            if reason != 0:
+                return nak(reason)
+            if not line and j_end is not None:
+                hand = p_hand  # JOINT ставит руку P_HAND (§7.3) — LINE после него допустим
+            records.append({"target": target, "kind": kind, "action": action, "aparam": aparam, "j_end": j_end})
+            start = target
+        return records, None
+
+    def _sc_start_record(self, seq: int, sc: dict) -> None:
+        """Завести ход текущей записи сценария — тем же `_start_move`, что и одиночный ход."""
+        rec = sc["records"][sc["i"]]
+        speed = self._values[PARAM_ID["P_SPD_L"]] * sc["spd_pct"] / 100.0
+        self._start_move(
+            seq,
+            rec["target"],
+            speed,
+            joint=rec["kind"] == KIND["JOINT"],
+            activity=TLM_ACTIVITY_SCENARIO,
+            j_end=rec["j_end"],
+            spd_pct=sc["spd_pct"],
+        )
+        self._active["sc"] = sc
+
+    def _sc_arrived(self, active: dict) -> None:
+        """Тик прихода в точку записи: индекс (только EXACT) -> действие записи.
+        `DELAY_MS > 0` переводит в паузу `sc_delay` — запись завершится на тике,
+        где сумма `dt_s` догонит паузу (`_progress_sc_delay`), не на этом."""
+        sc = active["sc"]
+        rec = sc["records"][sc["i"]]
+        if rec["kind"] != KIND["LINE_PASS"]:
+            self.regs[REG["TLM_SC_INDEX"]] = sc["i"] + 1
+        action, aparam = rec["action"], rec["aparam"]
+        if action == ACT["DO_ON"]:
+            self._set_do(aparam, 1)
+        elif action == ACT["DO_OFF"]:
+            self._set_do(aparam, 0)
+        elif action == ACT["SPEED_PCT"]:
+            sc["spd_pct"] = aparam
+        elif action == ACT["ACCEL"]:
+            sc["accel"] = aparam  # хранится, разгон sim не моделирует
+        elif action == ACT["ACCUR"]:
+            sc["accur"] = aparam  # хранится, точность sim не моделирует
+        elif action == ACT["DELAY_MS"] and aparam > 0:
+            self.regs[REG["TLM_MOVING"]] = 0
+            self._active = {
+                "type": "sc_delay",
+                "seq": active["seq"],
+                "sc": sc,
+                "delay_s": aparam / 1000.0,
+                "elapsed_s": 0.0,
+            }
+            return
+        self._sc_record_done(active["seq"], sc)
+
+    def _progress_sc_delay(self, dt: float) -> None:
+        """`DELAY_MS`: только сумма `dt_s` тиков после тика прихода (время sim)."""
+        active = self._active
+        active["elapsed_s"] += dt
+        if active["elapsed_s"] >= active["delay_s"] - 1e-9:
+            self._sc_record_done(active["seq"], active["sc"])
+
+    def _sc_record_done(self, seq: int, sc: dict) -> None:
+        """Запись завершена (приход + действие). На EXACT-точке (§7.2 п.4):
+        отложенный SOFT -> `E_ABORTED`; иначе опрос mailbox. Затем — DONE на
+        последней записи или старт следующего отрезка в этом же тике."""
+        exact = sc["records"][sc["i"]]["kind"] != KIND["LINE_PASS"]
+        sc["i"] += 1
+        if exact and self._pending_soft is not None:
+            self._abort(ERR["E_ABORTED"], seq)  # эхо отложенного SOFT пишет _abort
+            return
+        if sc["i"] == sc["count"]:
+            self.regs[REG["TLM_SC_ID"]] = sc["id"]
+            self.regs[REG["TLM_SC_TOTAL"]] = sc["count"]
+            self.regs[REG["TLM_SC_DONE_N"]] = sc["count"]
+            self._finish_done(self._active)  # DONE_SEQ последним (И5)
+            return
+        if exact:
+            self._handle_mailbox()
+        self._sc_start_record(seq, sc)
 
     # --- mailbox ---
 
@@ -904,11 +1130,15 @@ class RobotSimCoreV2:
         channel, value = args
         if not (1 <= channel <= 16) or value not in (0, 1):
             return NAK, ERR["E_RANGE"], 0, []
+        self._set_do(channel, value)
+        return ACK, 0, 0, []
+
+    def _set_do(self, channel: int, value: int) -> None:
+        """DO-канал 1..16 -> бит маски (общий для DO_SET и действий сценария)."""
         bit = 1 << (channel - 1)
         mask = self.regs[REG["TLM_DO_MASK"]]
         mask = (mask | bit) if value else (mask & ~bit)
         self.regs[REG["TLM_DO_MASK"]] = mask & 0xFFFF
-        return ACK, 0, 0, []
 
     def _op_param_get(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
         pid = args[0]
@@ -933,6 +1163,8 @@ class RobotSimCoreV2:
         self.regs[REG["PMIR_CRC"]] = self._mirror_crc()
         if pid == PARAM_ID["P_CONFIG_EPOCH"]:
             self.regs[REG["TLM_CFG_EPOCH"]] = value
+        if pid == PARAM_ID["P_SPD_DEFAULT"] and self.regs[REG["TLM_ACTIVITY"]] == TLM_ACTIVITY_IDLE:
+            self.regs[REG["TLM_SPD_PCT"]] = value  # T2.3: Override в простое следует P_SPD_DEFAULT
         if meta["apply"] == "reinit":
             self.regs[REG["TLM_CFG_PENDING"]] = 1
         return ACK, 0, 0, []
@@ -959,7 +1191,7 @@ class RobotSimCoreV2:
             return nak
         pct = spd_pct if spd_pct != 0 else self._values[PARAM_ID["P_SPD_DEFAULT"]]
         speed = self._values[PARAM_ID["P_SPD_L"]] * pct / 100.0
-        self._start_move(seq, target, speed, joint=not line, activity=TLM_ACTIVITY_PTP, j_end=j_end)
+        self._start_move(seq, target, speed, joint=not line, activity=TLM_ACTIVITY_PTP, j_end=j_end, spd_pct=pct)
         return ACK, 0, 0, []
 
     def _op_home(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
@@ -977,7 +1209,7 @@ class RobotSimCoreV2:
             return nak
         pct = spd_pct if spd_pct != 0 else self._values[PARAM_ID["P_SPD_DEFAULT"]]
         speed = self._values[PARAM_ID["P_SPD_L"]] * pct / 100.0
-        self._start_move(seq, target, speed, joint=True, activity=TLM_ACTIVITY_PTP, j_end=j_end)
+        self._start_move(seq, target, speed, joint=True, activity=TLM_ACTIVITY_PTP, j_end=j_end, spd_pct=pct)
         return ACK, 0, 0, []
 
     def _op_jog_step(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
@@ -999,7 +1231,34 @@ class RobotSimCoreV2:
             return nak
         pct = spd_pct if spd_pct != 0 else self._values[PARAM_ID["P_SPD_JOG"]]
         speed = self._values[PARAM_ID["P_SPD_L"]] * pct / 100.0
-        self._start_move(seq, target, speed, joint=False, activity=TLM_ACTIVITY_JOG)
+        self._start_move(seq, target, speed, joint=False, activity=TLM_ACTIVITY_JOG, spd_pct=pct)
+        return ACK, 0, 0, []
+
+    def _op_sc_run(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
+        """SC_RUN (§7.2): E_SC_COUNT -> E_NO_SERVO -> весь срез (`_sc_validate`) -> ход."""
+        count, sc_id, offset = args
+        cap = CONSTANTS["SC_CAP"]
+        if not (1 <= count <= cap) or offset + count > cap:
+            return NAK, ERR["E_SC_COUNT"], 0, []
+        if self.regs[REG["TLM_SERVO"]] == 0:
+            return NAK, ERR["E_NO_SERVO"], 0, []
+        records, nak = self._sc_validate(offset, count)
+        if nak is not None:
+            return nak
+        sc = {
+            "id": sc_id,
+            "count": count,
+            "records": records,
+            "i": 0,
+            "spd_pct": self._values[PARAM_ID["P_SPD_DEFAULT"]],
+            "accel": self._values[PARAM_ID["P_ACC_L"]],
+            "accur": self._values[PARAM_ID["P_ACCUR_DEFAULT"]],
+        }
+        self.regs[REG["TLM_SC_ID"]] = sc_id
+        self.regs[REG["TLM_SC_TOTAL"]] = count
+        self.regs[REG["TLM_SC_INDEX"]] = 0
+        self.regs[REG["TLM_SC_DONE_N"]] = 0
+        self._sc_start_record(seq, sc)
         return ACK, 0, 0, []
 
     def _op_jog_cont(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
