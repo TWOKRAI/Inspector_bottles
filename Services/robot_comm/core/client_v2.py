@@ -23,7 +23,17 @@ Stability: lite
 
 Pre (общее): первый пишущий вызов (``cmd``, ``stop``, ``sync_params``, ``kick_heartbeat``, ``jog_lease``) на клиенте
 без ``probe()`` выполняет ``probe()`` сам (``_ensure_probed``, только чтения): прошивка не v2 -> ``WrongFirmware`` без
-единой записи; транспорт не подключён -> ``RobotNotConnectedError``.
+единой записи; транспорт не подключён -> ``RobotNotConnectedError``. Исключение — ``stop()`` проверенного клиента:
+он пишет всегда и ``is_connected`` не проверяет (``ModbusDevice`` после одной случайной ошибки считает связь
+оборванной); если связи правда нет, транспорт бросит ошибку, и вызывающий узнает, что стоп не доставлен.
+
+Уровень стопа не понижается до эха: пока более сильный стоп не подтверждён эхом, новый пишется с уровнем
+``max(запрошенный, сильнейший неподтверждённый)``; ожидающий получает ``SUPERSEDED`` только от эха новее,
+чей уровень не ниже его собственного.
+
+О5 не теряется на путях с исключением: метка «в полёте» команды ``done_seq`` снимается только после разбора ответа
+и сверки поколения стопа (при NAK — после разбора); при любом исключении она остаётся, и следующий ``cmd()`` сверит
+поколение заново. ``probe()`` метку ``done_seq`` не снимает.
 
 Константы и адреса — только из ``protocol_v2`` и ``params_v2`` (сгенерированы).
 """
@@ -96,6 +106,16 @@ def _toff(name: str) -> int:
 def _next_seq(value: int) -> int:
     """Следующий seq по кругу 65535 -> 1 (0 не используется)."""
     return 1 if value >= _SEQ_MAX else value + 1
+
+
+def _seq_newer(echo_seq: int, ours: int) -> bool:
+    """``echo_seq`` строго новее ``ours`` на круге 1..16383 (окно в полкруга). Seq 0 вне круга (эхо с загрузки)."""
+    return echo_seq != 0 and 1 <= (echo_seq - ours) % _STOP_SEQ_MAX <= _STOP_HALF_CIRCLE
+
+
+def _echo_covers(echo: int, seq: int, level: int) -> bool:
+    """Эхо ``echo`` подтверждает стоп (``seq``, ``level``): тот же seq или новее, уровень эха не ниже."""
+    return (echo >> 2) == seq and (echo & 3) >= level or _seq_newer(echo >> 2, seq) and (echo & 3) >= level
 
 
 def _encode_word(value: object, what: str) -> int:
@@ -234,7 +254,8 @@ class RobotClientV2:
         self._state_lock = threading.Lock()  # листовой: только поля без ввода-вывода
         self._probe_lock = threading.Lock()
 
-        self._probed = False
+        self._probed = False  # прошивка v2 подтверждена, и последний probe не провалился
+        self._stale = False  # связь рвалась после probe: базы пульса, событий, стопа устарели
         self._inflight: _Inflight | None = None  # ответ на этот seq не дождались (только cmd()/probe())
         self._last_done: _DoneBase | None = None
         self._hb_value = 0
@@ -246,6 +267,8 @@ class RobotClientV2:
         self._err_gen = 0
         self._stop_seq = 0
         self._stop_generation = 0  # растёт ПОСЛЕ записи STOP_REQ, под _stop_lock
+        self._stop_base_gen = 0  # растёт при каждом изменении _stop_seq (запись стопа, probe)
+        self._stop_pending: tuple[int, int] | None = None  # (уровень, seq) сильнейшего неподтверждённого стопа
         self._last_halt_gen = 0
         self._wdg_raw: int | None = None
         self._jog_raw: int | None = None
@@ -257,8 +280,8 @@ class RobotClientV2:
     def probe(self) -> None:
         """Проверить прошивку и снять базу пульса, поводка, стопа и событий. Только чтения.
 
-        Pre: транспорт подключён. Post: успех -> «probed», метка «seq в полёте» снята;
-        любой исход начинается со сброса «probed».
+        Pre: транспорт подключён. Post: успех -> «probed», метка мгновенного опкода снята (метка ``done_seq``
+        остаётся для О5); любой исход начинается со сброса «probed».
         Raises: ``WrongFirmware`` (TLM_PROTO_VER = 0 или старший байт ≠ 0x02) — дальше ничего не читается.
         """
         with self._state_lock:
@@ -270,7 +293,7 @@ class RobotClientV2:
         with self._err_lock:
             err_gen = self._err_gen
         with self._stop_lock:
-            stop_gen = self._stop_generation
+            stop_gen = self._stop_base_gen
         block = self._t.read_registers(_RES_BASE, _BLOCK_COUNT)
         proto = int(block[_off("TLM_PROTO_VER")])
         if proto == 0 or (proto >> 8) != _PROTO_MAJOR:
@@ -280,20 +303,28 @@ class RobotClientV2:
         with self._hb_lock:
             if self._hb_gen == hb_gen:
                 self._hb_value = int(block[_off("HB_PC")])
+                self._hb_gen += 1
         with self._jog_lock:
             if self._jog_gen == jog_gen:
                 self._jog_value = int(block[_off("JOG_LEASE")])
+                self._jog_gen += 1
         with self._err_lock:
             if self._err_gen == err_gen:
                 self._err_cursor = int(block[_off("TLM_ERR_EVT")])
+                self._err_gen += 1
         with self._stop_lock:
-            if self._stop_generation == stop_gen:  # стоп, прошедший во время probe, уже сдвинул stop_seq дальше эха
+            if self._stop_base_gen == stop_gen:  # стоп, прошедший во время probe, уже сдвинул stop_seq дальше эха
                 self._stop_seq = int(block[_off("TLM_STOP_ACK")]) >> 2
+                self._stop_base_gen += 1
+                if block[_off("STOP_REQ")] == block[_off("TLM_STOP_ACK")]:
+                    self._stop_pending = None  # всё записанное подтверждено (или робот перезапущен)
         with self._state_lock:
             self._wdg_raw = wdg_raw
             self._jog_raw = jog_raw
-            self._inflight = None
+            if self._inflight is not None and not self._inflight.done_seq:
+                self._inflight = None  # метку done_seq снимает только cmd() после сверки О5
             self._probed = True
+            self._stale = False
 
     def _read_param_slot(self, name: str) -> int:
         return int(self._t.read_registers(CONSTANTS["PMIR_BASE"] + PARAM_ID[name], 1)[0])
@@ -302,12 +333,12 @@ class RobotClientV2:
         """Первый вызов любого метода до ``probe()``: проверка прошивки делается сама (только чтения)."""
         if not self._t.is_connected:
             with self._state_lock:
-                self._probed = False  # после разрыва базы устарели: следующий вызов проверит прошивку заново
+                self._stale = True  # после разрыва базы устарели: следующий вызов проверит прошивку заново
             raise RobotNotConnectedError("Транспорт робота не подключён")
-        if self._probed:
+        if self._probed and not self._stale:
             return
         with self._probe_lock:
-            if not self._probed:
+            if not (self._probed and not self._stale):
                 self.probe()
 
     @property
@@ -385,35 +416,48 @@ class RobotClientV2:
                 ]
             )
             self._wait_res(seq)
-            self._inflight = None
-            result = self._parse_res(self._t.read_registers(_RES_BASE, _RES_BLOCK_COUNT))
+            result = self._read_result(seq, generation, spec["result"] == "done_seq")
             if spec["result"] != "done_seq":
                 return result
-            self._abort_if_overtaken(seq, generation)
             with self._state_lock:
                 self._last_done = _DoneBase(seq, int(base[_off("TLM_ERR_EVT")]))
             return result
 
     def _settle_inflight(self) -> None:
-        """Досмотреть ответ на прежний seq «в полёте»; метка снимается в любом исходе.
+        """Досмотреть ответ на прежний seq «в полёте».
 
-        О5 и здесь: поздний ACK команды ``done_seq`` при сменившемся поколении стопа -> повтор стопа и ``RobotAborted``
-        (из этого же ``cmd()``, своя команда не пишется). Поздний NAK — команда не исполнялась, ничего не делаем.
+        Нет ответа за ``res_timeout_s`` -> метка снимается, ``RobotTimeout("response")``. Любое другое исключение метку
+        оставляет. О5 и здесь: поздний ACK команды ``done_seq`` при сменившемся поколении стопа -> повтор стопа и
+        ``RobotAborted`` (из этого же ``cmd()``, своя команда не пишется). Поздний NAK — команда не исполнялась.
         """
         mark = self._inflight
         if mark is None:
             return
         try:
             self._wait_res(mark.seq)
-        finally:
+        except RobotTimeout:
             self._inflight = None
-        if not mark.done_seq:
-            return
+            raise
         try:
-            self._parse_res(self._t.read_registers(_RES_BASE, _RES_BLOCK_COUNT))
+            self._read_result(mark.seq, mark.generation, mark.done_seq)
         except RobotNak:
             return
-        self._abort_if_overtaken(mark.seq, mark.generation)
+
+    def _read_result(self, seq: int, generation: int, done_seq: bool) -> CmdResult:
+        """Прочитать и разобрать RES-блок; для ``done_seq`` — сверить поколение стопа (О5).
+
+        Метка «в полёте» снимается ТОЛЬКО на успешном выходе: после NAK, после сверки без обгона и после успешного
+        повтора стопа (``RobotAborted``). Ошибка чтения или записи стопа оставляет метку — сверка повторится.
+        """
+        try:
+            result = self._parse_res(self._t.read_registers(_RES_BASE, _RES_BLOCK_COUNT))
+        except RobotNak:
+            self._inflight = None
+            raise
+        if done_seq:
+            self._abort_if_overtaken(seq, generation)
+        self._inflight = None
+        return result
 
     def _issue_seq(self, base: Sequence[int]) -> int:
         """Выдать seq: пропустить 0 и текущие ``RES_SEQ`` / ``DONE_SEQ`` / ``ERR_SEQ`` (повтор seq = прежний RES)."""
@@ -462,7 +506,8 @@ class RobotClientV2:
             if self._stop_generation == generation:
                 return
             level = STOP_LEVEL["HALT"] if self._last_halt_gen > generation else STOP_LEVEL["HARD"]
-            self._issue_stop_locked(level)
+            self._issue_stop_locked(level)  # ошибка записи уйдёт наружу, метка «в полёте» останется
+        self._inflight = None
         raise RobotAborted(seq, ERR["E_ABORTED"], ERR_TEXT[ERR["E_ABORTED"]])
 
     # ------------------------------------------------------------------ #
@@ -526,28 +571,47 @@ class RobotClientV2:
     def stop(self, level: int) -> StopResult:
         """Стоп с seq (protocol-spec §8). Замок держится только на «выдать stop_seq + одна запись FC6».
 
-        Pre: ``level`` ∈ {1 SOFT, 2 HARD, 3 HALT} (иначе ``ValueError`` без записи). Post: ``ACKED`` —
-        ``TLM_STOP_ACK`` равен нашему значению; ``SUPERSEDED`` — эхо уже новее. Raises: ``RobotTimeout("stop_echo")``.
-        ``_mailbox_lock`` не берёт: стоп проходит, пока ``cmd()`` ждёт ответ.
+        Pre: ``level`` ∈ {1 SOFT, 2 HARD, 3 HALT} (иначе ``ValueError`` без записи). Проверенный клиент пишет всегда
+        и ``is_connected`` не проверяет; непроверенный сначала проверяет прошивку (``WrongFirmware`` /
+        ``RobotNotConnectedError`` без записи). Post: записан уровень ``max(level, сильнейший неподтверждённый)``;
+        ``ACKED`` — ``TLM_STOP_ACK`` равен нашему значению; ``SUPERSEDED`` — эхо новее нашего с уровнем не ниже.
+        Raises: ``RobotTimeout("stop_echo")``, ошибка транспорта (стоп не доставлен). ``_mailbox_lock`` не берёт:
+        стоп проходит, пока ``cmd()`` ждёт ответ.
         """
         if not isinstance(level, int) or isinstance(level, bool) or level not in STOP_LEVEL.values():
             raise ValueError("level стопа вне 1..3")
-        self._ensure_probed()
+        if not self._probed:
+            self._ensure_probed()  # только непроверенный клиент: проверенный пишет стоп без оглядки на is_connected
         with self._stop_lock:
-            value = self._issue_stop_locked(level)
-        return self._wait_stop_echo(value, level)
+            value, written_level = self._issue_stop_locked(level)
+        return self._wait_stop_echo(value, written_level)
 
-    def _issue_stop_locked(self, level: int) -> int:
-        """Под ``_stop_lock``: следующий ``stop_seq`` + одна запись FC6. Поколение растёт ПОСЛЕ записи, в finally."""
+    def _issue_stop_locked(self, level: int) -> tuple[int, int]:
+        """Под ``_stop_lock``: следующий ``stop_seq`` + одна запись FC6. Поколение растёт ПОСЛЕ записи, в finally.
+
+        Уровень не понижается до эха: пишется ``max(level, сильнейший неподтверждённый)``.
+        Возвращает (значение, записанный уровень).
+        """
+        pending = self._stop_pending
+        written_level = level if pending is None else max(level, pending[0])
         self._stop_seq = self._stop_seq % _STOP_SEQ_MAX + 1
-        value = self._stop_seq * 4 + level
+        self._stop_base_gen += 1
+        value = self._stop_seq * 4 + written_level
+        self._stop_pending = (written_level, self._stop_seq)  # эхо этого seq подтвердит и все прежние
         try:
             self._t.transaction([("w", REG["STOP_REQ"], value)])
         finally:
             self._stop_generation += 1
-            if level == STOP_LEVEL["HALT"]:
+            if written_level == STOP_LEVEL["HALT"]:
                 self._last_halt_gen = self._stop_generation
-        return value
+        return value, written_level
+
+    def _note_echo(self, echo: int) -> None:
+        """Эхо покрывает неподтверждённый стоп (тот же seq или новее, уровень не ниже) -> «неподтверждённого» нет."""
+        with self._stop_lock:
+            pending = self._stop_pending
+            if pending is not None and _echo_covers(echo, pending[1], pending[0]):
+                self._stop_pending = None
 
     def _wait_stop_echo(self, value: int, level: int) -> StopResult:
         timeout = self._cfg.soft_echo_timeout_s if level == STOP_LEVEL["SOFT"] else self._cfg.stop_echo_timeout_s
@@ -555,9 +619,10 @@ class RobotClientV2:
         ours = value >> 2
         while True:
             echo = int(self._t.read_registers(REG["TLM_STOP_ACK"], 1)[0])
+            self._note_echo(echo)
             if echo == value:
                 return StopResult.ACKED
-            if 1 <= ((echo >> 2) - ours) % _STOP_SEQ_MAX <= _STOP_HALF_CIRCLE:
+            if _seq_newer(echo >> 2, ours) and (echo & 3) >= level:
                 return StopResult.SUPERSEDED
             if self._clock() >= deadline:
                 raise RobotTimeout("stop_echo")

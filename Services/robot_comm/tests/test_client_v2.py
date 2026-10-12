@@ -1054,3 +1054,284 @@ def test_stop_superseded_window_is_modulo_16383(ours_before: int, echo_seq: int,
         with pytest.raises(RobotTimeout):
             rig.client.stop(2)
     assert rig.stop_writes() == [16383 * 4 + 2]
+
+
+# ============================================================================================
+# Ревью 2: О5 на путях с исключением, probe не снимает метку done_seq, stop без is_connected, уровень не понижается
+# ============================================================================================
+
+TLM_Y = 0x1045
+
+
+def _ticks(rig: Rig, n: int = 3) -> None:
+    for _ in range(n):
+        rig.core.tick()
+
+
+def _fail_read_once(rig: Rig, address: int, count: int) -> dict:
+    """Одно чтение (address, count) падает ModbusIOError, когда armed['on'] взведён."""
+    armed = {"on": False}
+
+    def read_filter(a: int, c: int, out: list[int]) -> list[int]:
+        if armed["on"] and a == address and c == count:
+            armed["on"] = False
+            raise ModbusIOError("инъекция: сбой чтения")
+        return out
+
+    rig.transport.read_filter = read_filter
+    return armed
+
+
+def _assert_move_stopped_by_reissue(rig: Rig, expected_writes: list[int]) -> None:
+    assert rig.stop_writes() == expected_writes
+    _ticks(rig)
+    assert rig.core.regs[TLM_ACTIVITY] == 0
+    assert rig.core.regs[TLM_ERRNO_LAST] == E_ABORTED
+
+
+def test_o5_survives_res_read_failure_after_stop_in_window() -> None:
+    """B2: стоп в окне, чтение RES падает -> метка остаётся, следующий cmd() повторяет стоп и поднимает RobotAborted."""
+    rig = Rig()
+    rig.client.probe()
+    armed = _fail_read_once(rig, RES_SEQ, 12)
+    fired = []
+
+    def stop_in_window(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops) and not fired:
+            fired.append(1)
+            rig.client.stop(2)
+            armed["on"] = True
+
+    rig.transport.after_tx = stop_in_window
+    with pytest.raises(ModbusIOError):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.transport.after_tx = None
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PING", [])
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 2 * 4 + 2])
+
+
+def test_o5_survives_failed_reissue_write() -> None:
+    """B3: повторная запись стопа упала -> метка остаётся, следующий cmd() пишет стоп снова и поднимает RobotAborted."""
+    rig = Rig()
+    rig.client.probe()
+    fired = []
+
+    def stop_in_window(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops) and not fired:
+            fired.append(1)
+            rig.client.stop(2)
+
+    def fail_reissue(ops: list[tuple]) -> None:
+        if ops[0][1] == STOP_REQ and rig.stop_writes():
+            raise ModbusIOError("инъекция: сбой записи повторного стопа")
+
+    rig.transport.after_tx = stop_in_window
+    rig.transport.before_tx = fail_reissue
+    with pytest.raises(ModbusIOError):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.transport.after_tx = None
+    rig.transport.before_tx = None
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PING", [])
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 3 * 4 + 2])  # seq 2 ушёл в упавшую запись
+
+
+def test_o5_survives_res_read_failure_on_settle_path() -> None:
+    """B4: поздний ACK, чтение RES при досмотре падает -> метка остаётся, второй cmd() получает RobotAborted."""
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.ticking = True
+    rig.client.stop(2)
+    armed = _fail_read_once(rig, RES_SEQ, 12)
+    armed["on"] = True
+    with pytest.raises(ModbusIOError):
+        rig.client.cmd("PING", [])
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PING", [])
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 2 * 4 + 2])
+
+
+def test_probe_between_timeout_and_next_cmd_keeps_done_seq_mark() -> None:
+    """B1: timeout -> стоп -> probe -> PING: метка done_seq пережила probe, О5 сработал."""
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.ticking = True
+    rig.client.stop(2)
+    rig.client.probe()
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PING", [])
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 2 * 4 + 2])
+
+
+def test_probe_drops_inflight_mark_of_instant_opcode() -> None:
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PING", [])
+    rig.client.probe()
+    rig.ticking = True
+    assert rig.client.cmd("PING", []).seq == 101  # метки нет: пишет сразу, без досмотра seq 100
+
+
+def test_stop_writes_after_transient_transport_error_on_modbus_device() -> None:
+    """B5: одна случайная ошибка записи пульса -> ModbusDevice.is_connected False; stop(2) всё равно пишет STOP_REQ."""
+    core = RobotSimCoreV2()
+    log: list[tuple[int, object]] = []
+
+    class FakeSdk:
+        fail = False
+
+        def connect(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            pass
+
+        def read_holding(self, address: int, count: int) -> list[int]:
+            core.tick()
+            return core.read(address, count)
+
+        def write_register(self, address: int, value: int) -> None:
+            if self.fail:
+                self.fail = False
+                raise ModbusIOError("случайная ошибка")
+            log.append((address, value))
+            core.write(address, [value])
+
+        def write_registers(self, address: int, values: list[int]) -> None:
+            log.append((address, list(values)))
+            core.write(address, list(values))
+
+    sdk = FakeSdk()
+    device = ModbusDevice(ModbusConfig(host="127.0.0.1", port=1, unit_id=ROBOT_UNIT_ID), client=sdk)
+    assert device.connect()
+    client = RobotClientV2(device, ClientV2Config.from_dict({}))
+    client.probe()
+    sdk.fail = True
+    with pytest.raises(ModbusIOError):
+        client.kick_heartbeat()
+    assert device.is_connected is False  # предусловие: устройство считает связь оборванной
+    try:
+        client.stop(2)
+    except Exception as exc:  # noqa: BLE001 — эхо могло не прочитаться на «оборванном» устройстве; важна запись
+        assert not isinstance(exc, RobotNotConnectedError), "stop не должен упираться в is_connected"
+    assert [value for address, value in log if address == STOP_REQ] == [1 * 4 + 2]
+
+
+def test_stop_is_still_blocked_for_unprobed_client_on_dead_transport() -> None:
+    rig = Rig(connect=False)
+    with pytest.raises(RobotNotConnectedError):
+        rig.client.stop(2)
+    assert rig.transport.transactions == []
+
+
+def test_stop_after_failed_probe_is_blocked() -> None:
+    from Services.robot_comm.server.sim_core import RobotSimCore
+
+    rig = Rig()
+    rig.client.probe()
+    rig.transport.core = RobotSimCore()
+    with pytest.raises(WrongFirmware):
+        rig.client.probe()
+    rig.transport.disconnect()
+    rig.transport.connect()
+    with pytest.raises(WrongFirmware):
+        rig.client.stop(2)
+    assert rig.transport.transactions == []
+
+
+def test_hard_then_soft_before_robot_tick_writes_hard_twice_and_move_is_stopped() -> None:
+    """B6: HARD не подтверждён, SOFT из другого потока — пишется HARD; ход прерван, цели не достиг."""
+    rig = Rig(config={"stop_echo_timeout_s": 20.0, "soft_echo_timeout_s": 20.0})
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    _ticks(rig, 20)
+    go = threading.Event()  # робот «молчит» (часы и тики стоят), пока обе записи не лежат в регистре
+    base_sleep = rig.sleep
+    rig.client._sleep = lambda dt: base_sleep(dt) if go.is_set() else time.sleep(0.005)
+
+    def wait_writes(n: int) -> None:
+        deadline = time.monotonic() + _DEADLINE_S
+        while len(rig.stop_writes()) < n:
+            assert time.monotonic() < deadline, "запись стопа не появилась"
+            time.sleep(0.005)
+
+    hard, hard_done = in_thread(lambda: rig.client.stop(2), "stop-hard")
+    wait_writes(1)
+    soft, soft_done = in_thread(lambda: rig.client.stop(1), "stop-soft")
+    wait_writes(2)
+    go.set()
+    join(hard_done, "stop-hard")
+    join(soft_done, "stop-soft")
+    assert "exc" not in hard and "exc" not in soft, (hard.get("exc"), soft.get("exc"))
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2]  # второй стоп записан с уровнем HARD
+    assert soft["value"] is StopResult.ACKED
+    assert hard["value"] in (StopResult.ACKED, StopResult.SUPERSEDED)
+    _ticks(rig, 450)  # хода хватило бы с запасом до цели
+    assert rig.core.regs[TLM_ACTIVITY] == 0
+    assert rig.core.regs[TLM_ERRNO_LAST] == E_ABORTED
+    assert rig.core.regs[TLM_DONE_SEQ] != move.seq
+    y_raw = rig.core.regs[TLM_Y] - 0x10000 if rig.core.regs[TLM_Y] >= 0x8000 else rig.core.regs[TLM_Y]
+    assert y_raw < -1500  # цель по Y = -1500 (0.1 мм), ход остановлен до неё
+
+
+def test_soft_is_written_as_hard_until_hard_is_acknowledged_then_as_soft() -> None:
+    rig = Rig(ticking=False, config={"stop_echo_timeout_s": 0.3, "poll_interval_s": 0.1})
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(2)  # эха нет: HARD не подтверждён
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(1)
+    rig.ticking = True
+    assert rig.client.stop(1) is StopResult.ACKED  # пишется HARD, подтверждается
+    assert rig.client.stop(1) is StopResult.ACKED  # подтверждённого сильного больше нет
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2, 3 * 4 + 2, 4 * 4 + 1]
+
+
+def test_hard_waiter_ignores_newer_echo_with_lower_level() -> None:
+    rig = Rig(ticking=False, config={"stop_echo_timeout_s": 0.3, "poll_interval_s": 0.1})
+
+    def soft_echo_newer(ops: list[tuple]) -> None:
+        if ops[0][1] == STOP_REQ:
+            rig.core.regs[TLM_STOP_ACK] = 2 * 4 + 1  # эхо новее (seq 2), но SOFT
+
+    rig.transport.after_tx = soft_echo_newer
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(2)
+
+
+def test_hard_waiter_accepts_newer_echo_with_level_not_lower() -> None:
+    rig = Rig(ticking=False)
+
+    def halt_echo_newer(ops: list[tuple]) -> None:
+        if ops[0][1] == STOP_REQ:
+            rig.core.regs[TLM_STOP_ACK] = 2 * 4 + 3
+
+    rig.transport.after_tx = halt_echo_newer
+    assert rig.client.stop(2) is StopResult.SUPERSEDED
+
+
+def test_probe_racing_error_poll_does_not_repeat_event() -> None:
+    rig = Rig()
+    rig.client.probe()
+
+    def event_and_poll() -> None:
+        rig.core.regs[TLM_ERR_EVT] = 1  # событие пришло после чтения блока probe
+        assert rig.client.poll_errors() == []  # вложенный probe поставил курсор на 1
+
+    _once_on_block_read(rig, event_and_poll)
+    rig.client.probe()
+    assert rig.client.poll_errors() == []  # курсор не откатился на устаревшее 0
+
+
+def test_probe_racing_jog_lease_does_not_roll_back_jog_value() -> None:
+    rig = Rig()
+    rig.core.regs[JOG_LEASE] = 10
+    rig.client.probe()
+    _once_on_block_read(rig, rig.client.jog_lease)
+    rig.client.probe()
+    rig.client.jog_lease()
+    assert rig.transport.transactions == [[("w", JOG_LEASE, 11)], [("w", JOG_LEASE, 12)]]
