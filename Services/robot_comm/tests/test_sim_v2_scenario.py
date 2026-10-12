@@ -303,7 +303,7 @@ def test_progress_only_on_exact_points():
     assert res["status"] == ACK
     move_seq = res["seq"]
 
-    x_p1, x_p2, x_p3 = mm(p1[0]), mm(p2[0]), mm(p3[0])
+    x_p1, x_p3 = mm(p1[0]), mm(p3[0])
     reached_p1 = False
     pinged = False
     reached_p3 = False
@@ -318,7 +318,7 @@ def test_progress_only_on_exact_points():
             queue_cmd(core, 99, OP["PING"])
             pinged = True
 
-        if reached_p1 and not reached_p3:
+        if reached_p1 and not reached_p3 and x != x_p3:  # ревью стадии 0 r1: на тике прихода в p3 индекс уже 3
             assert core.read(REG["TLM_SC_INDEX"], 1)[0] == 1, (
                 "индекс не должен меняться, пока не пройдена следующая EXACT-точка"
             )
