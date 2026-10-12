@@ -294,3 +294,28 @@ delay_ms/1000.0)`), `await asyncio.sleep(delay)` (не `time.sleep` — держ
 восстановления связи ложно удваивался бы в журнале заданий (репро ревьюера:
 `delay_ms=1500` + запись + `fault.drop` через 0.3с + повтор -> было
 `{'jobs': 2, 'dups': 1}` вместо `{'jobs': 1, 'dups': 0}`).
+
+## Public API
+
+`SimRobotServer(host, port, unit_id, *, core=None, tick_interval=TICK_INTERVAL_S, on_write=None, external_threads=False)`
+
+- `core` — ядро v1 (`RobotSimCore`, по умолчанию) или v2 (`RobotSimCoreV2`). Блок регистров
+  слушателя — `len(core.regs)`: у v1 это `REG_SPACE_SIZE`, у v2 — `REG_SPACE_SIZE_V2` (0x3083,
+  иначе FC3 по PMIR 0x3080 отвечает `ILLEGAL_ADDRESS`).
+- `start()` / `stop()` — при `external_threads=False` (путь v1): потоки `sim-robot-motion` и
+  `sim-robot-server`, как раньше. `stop_listener()` / `start_listener()` — Task 5.4 (`fault.drop`).
+- `external_threads=True` (T2.4) — собственных потоков сервер не заводит, `start()` — no-op.
+  Потоки даёт хозяин (воркеры плагина `Plugins/sim/robot_host`):
+  - `tick_once(dt)` — один тик ядра на `dt` с, потолок `_MAX_TICK_DT_S` (0.1 с). `dt` хозяин
+    меряет по `perf_counter` (`monotonic` на Windows шагает 15.6 мс).
+  - `serve_until(stop_event, ready)` — блокирующий asyncio-слушатель на потоке вызывающего.
+    После bind взводит `ready`; сторожевая корутина опрашивает `stop_event` и стоп сервера
+    (`stop()`) и гасит pymodbus-сервер — к возврату порт отпущен. Сбой bind — исключение
+    наружу, `ready` не взведён. После `stop()` возвращается сразу, без подъёма.
+  - `stop()` — взводит стоп и ждёт возврата `serve_until` не дольше 2 с; не дождался —
+    `RuntimeError`.
+- Ядро v2 (тестовые хуки): `inject_vfd_link_fault()` — обрыв связи с ПЧ состоялся, сразу
+  async `E_VFD_LINK` (одно событие на обрыв, активность не обрывается);
+  `clear_vfd_link_fault()` — связь восстановлена, следующий обрыв даст новое событие.
+  Хост `Plugins/sim/robot_host` их пока не вызывает (`fault.*` на v2 отказывают). Протокол
+  моста — `Services/vfd_comm`, клиент ПЧ здесь не дублируется.

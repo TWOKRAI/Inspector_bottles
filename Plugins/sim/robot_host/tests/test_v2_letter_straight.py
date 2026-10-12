@@ -82,7 +82,7 @@ def test_letter_is_straight_after_placement() -> None:
                 mm10(_PICK_MM[0]),
                 mm10(_PICK_MM[1]),
                 0,
-                0,  # flags: pick_z/place_z игнорируются
+                2,  # flags бит1: укладка из place_* (иначе P_PLACE_*, place_rz игнорируется); правка лида
                 mm10(_PLACE_MM[0]),
                 mm10(_PLACE_MM[1]),
                 0,
