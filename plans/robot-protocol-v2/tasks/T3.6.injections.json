@@ -1,0 +1,78 @@
+[
+ {
+  "id": "inj-1",
+  "prop": "корень не грузит core.client при импорте пакета",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "import importlib\n",
+  "new": "import importlib\n\nfrom Services.robot_comm.core.client import RobotClient as _EagerClient  # noqa: F401\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[pymodbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[Services.modbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[Services.robot_comm.core.client]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[pymodbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.modbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client]"
+  ],
+  "observed": null,
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "core не грузит client_v2 при импорте пакета",
+  "file": "Services/robot_comm/core/__init__.py",
+  "old": "import importlib\n",
+  "new": "import importlib\n\nfrom Services.robot_comm.core.client_v2 import RobotClientV2 as _EagerV2  # noqa: F401\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client_v2]"
+  ],
+  "observed": null,
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "имя корня отдаёт тот же объект, что прямой импорт",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "\"RobotClient\": (\"Services.robot_comm.core.client\", \"RobotClient\"),",
+  "new": "\"RobotClient\": (\"Services.robot_comm.core.client_v2\", \"RobotClientV2\"),",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_root_names_are_direct_objects[RobotClient]"
+  ],
+  "observed": null,
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "неизвестное имя core — AttributeError",
+  "file": "Services/robot_comm/core/__init__.py",
+  "old": "        raise AttributeError(f\"module {__name__!r} has no attribute {name!r}\")\n",
+  "new": "        return None\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_unknown_name_raises_attribute_error[Services.robot_comm.core]"
+  ],
+  "observed": null,
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "каждое имя __all__ core доступно",
+  "file": "Services/robot_comm/core/__init__.py",
+  "old": "    \"DrawPoint\": (\"Services.robot_comm.core.datatypes\", \"DrawPoint\"),\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_names_are_direct_objects[DrawPoint]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_star_import_gives_all_names[core]"
+  ],
+  "observed": null,
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "ROBOT_AVAILABLE — флаг Services.modbus",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "\"ROBOT_AVAILABLE\": (\"Services.modbus\", \"MODBUS_AVAILABLE\"),",
+  "new": "\"ROBOT_AVAILABLE\": (\"builtins\", \"True\"),",
+  "forecast": [],
+  "observed": null,
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ }
+]
