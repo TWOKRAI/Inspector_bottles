@@ -1839,3 +1839,10 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 4. **[→ чек-лист Ф7]** **Точный сектор отрезка при зоне ±175°** (`tasks.md:173`, выборка 5 мм) — правка `programs/geometry.py`, не делалась (контракт T2.0 заморожен владельцем для T3.3).
 5. **[→ T3.6, после слияния T3.1]** **Импорт `Services.robot_comm.programs` тянет pymodbus** через `Services/robot_comm/__init__.py` и `core/__init__.py` (импорт `core.client`, было до T3.3); сами `programs/` провод не импортируют. Поправка лида: без pymodbus пакет НЕ падает (`ROBOT_AVAILABLE=False`, мягкая деградация) — цена в связности и времени. Замер: импорт ≈ 0.75–0.85 с, из них 0.66 с — `params_v2` → `multiprocess_framework` (ленивые `__init__` это не убирают; разделение `params_v2` — вне объёма T3.6).
 6. **Номер ADR-RC-018** может совпасть с ADR параллельной сессии T3.1 — решает владелец при слиянии.
+
+## Task 1.2b-1 lifecycle-owner-scope: что осталось открытым (2026-10-12)
+
+1. **Две дороги к одному писателю журнала** (`reports/1.2b-1.observability-paths.md`, вердикт CTO — `reports/1.2b-1.cto-storage.md` «Второе решение»). Слот-дорога (`ObservableMixin._log_error`, `ProcessModule._log_*`, голос `report_error`) при неподключённом или погашенном логгере возвращает `True` и теряет строку молча; вид (`get_std_logger` / `FallbackLogger`) — буфер или stderr. В живом процессе на `config={}` строки `console_manager` и `config_manager` теряются (writer +0). Это дрейф, ADR нет. Fix forward отдельной задачей рядом с Task 4.13 в `plans/observability-closure/phase-4-scale-and-form.md` (поправки CTO (1), (1c), (2), (3), (4)). **Слот в очереди решает владелец** — в `plans/queue/ORDER.md` (`14b610faf`) плана closure нет.
+2. **Плоскость ошибок — второй экземпляр `LoggerCore`** (ADR-BM-006) — против правила «один писатель» владельцу назвать прямо (CTO).
+3. **Брошенный без `shutdown()` `ProcessModule` не виден стражу G3** — его держат глобалы (`ProcessHooks`, `SystemThreads`, `ProcessLifecycle`, словарь модуля); при любом хранении области (CTO C4).
+4. **Порог уровня логгера запуском не проверен** — проба `r_paths.py` падает `TypeError: LoggerCore.is_enabled_for() missing 'level'`.
