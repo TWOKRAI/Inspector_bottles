@@ -3,7 +3,6 @@ BaseManager — абстрактный базовый класс для всех
 """
 
 import threading
-import weakref
 from typing import Dict, Any, Optional, List
 from abc import abstractmethod
 
@@ -19,8 +18,11 @@ _logger = FallbackLogger(__name__)
 class _ManagerLife:
     """Состояние шаблона ``shutdown()`` одного менеджера (Task 1.2b-1, ADR-BM-009).
 
-    Живёт вне ``__dict__`` менеджера (``_lives``): pickle и ``__getstate__``
-    подклассов его не видят, у копии после распаковки — своё, чистое.
+    Живёт в ``__dict__`` менеджера под ключом ``_bm_life`` (Р7 (в), вердикт CTO):
+    цикл менеджер <-> область — обычный мусор для gc, глобального якоря нет.
+    pickle (в том числе через чужие ``__getstate__`` — ``__dict__.copy()`` минус
+    свой список) кладёт вместо записи ``__reduce__`` -> новую пустую запись:
+    у копии после распаковки ``scope is None`` и свой, чистый останов.
     """
 
     __slots__ = ("scope", "lock", "state", "thread", "done", "result")
@@ -33,20 +35,19 @@ class _ManagerLife:
         self.done = threading.Event()
         self.result = False
 
+    def __reduce__(self):
+        # Ни лок, ни событие, ни область через pickle не идут: копия получает пустую запись.
+        return (type(self), ())
 
-# Менеджер -> его состояние жизни. Слабые ключи: запись уходит вместе с менеджером.
-# Запись и чтение — под ``_lives_lock`` (WeakKeyDictionary сам не потокобезопасен).
-_lives: "weakref.WeakKeyDictionary[BaseManager, _ManagerLife]" = weakref.WeakKeyDictionary()
-_lives_lock = threading.Lock()
+
+_LIFE_KEY = "_bm_life"
 
 
 def _life_of(manager: "BaseManager", *, create: bool) -> _ManagerLife | None:
-    with _lives_lock:
-        life = _lives.get(manager)
-        if life is None and create:
-            life = _ManagerLife()
-            _lives[manager] = life
-        return life
+    """Запись жизни менеджера; ``setdefault`` атомарен под GIL (работает и после ``cls.__new__``)."""
+    if create:
+        return manager.__dict__.setdefault(_LIFE_KEY, _ManagerLife())
+    return manager.__dict__.get(_LIFE_KEY)
 
 
 class BaseManager(IBaseManager):
@@ -195,24 +196,20 @@ class BaseManager(IBaseManager):
         """
         if scope is None:
             raise TypeError(f"attach_scope {self.manager_name}: нужна область, получено None")
-        with _lives_lock:
-            life = _lives.get(self)
-            if life is None:
-                life = _ManagerLife()
-                _lives[self] = life
+        life = _life_of(self, create=True)
+        assert life is not None
+        with life.lock:
             if life.scope is not None:
                 raise RuntimeError(f"attach_scope {self.manager_name}: область уже привязана ({life.scope.path})")
             life.scope = scope
 
     def _shutdown_log(self, message: str) -> None:
-        """Строка шаблона ``shutdown()``: ``_log_error``, если он есть и доставил, иначе вид модуля."""
-        log_error = getattr(self, "_log_error", None)
-        if callable(log_error):
-            try:
-                if log_error(message):
-                    return
-            except Exception:  # noqa: BLE001 - канал логгера сломан, ниже вид модуля
-                pass
+        """Строка шаблона ``shutdown()`` — только вид модуля (решение CTO 2026-10-12).
+
+        Слот-дорога ``_log_error`` теряет строку у миксина без логгера и после
+        ``LoggerManager.shutdown()`` и удваивает её у ``ProcessModule`` (карта путей 1.2b-1).
+        Вид сам идёт в ``LoggerManager``, если он поднят, иначе — stdlib.
+        """
         _logger.error("%s", message)
 
     # =========================================================================

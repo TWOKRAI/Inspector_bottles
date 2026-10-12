@@ -8,6 +8,7 @@ pickle по четырём путям ``__getstate__`` и пригодность
 
 from __future__ import annotations
 
+import gc
 import importlib
 import logging
 import pickle
@@ -18,8 +19,11 @@ import weakref
 
 import pytest
 
-from multiprocess_framework.modules.base_manager import ObservableMixin, open_scope
+from multiprocess_framework.modules.base_manager import ObservableMixin, open_scope, unclosed_roots
 from multiprocess_framework.modules.base_manager.core.base_manager import BaseManager
+from multiprocess_framework.modules.shared_resources_module.core.shared_resources_manager import (
+    SharedResourcesManager,
+)
 
 from .test_base_manager import ConcreteManager
 
@@ -211,19 +215,22 @@ def test_real_scope_second_call_waits_budget_plus_reserve(make_root, caplog) -> 
     def hook(_mgr) -> bool:
         entered.set()
         gate.wait(DEADLINE_S)
-        return False
+        return True
 
     mgr = HookManager("budget_wait_mgr", hook)
     mgr.attach_scope(make_root(budget_s=0.3, kill_reserve_s=0.2))
     try:
+        # Первый вызов держится до gate (до 15 с) и вернёт True: False второго — только от срока 0,5 с.
         a, box, (done, result, error, elapsed) = _second_call_while_first_blocked(mgr, gate, entered)
-        assert done and error is None, repr(error)
+        assert done, "второй вызов не вернулся: у настоящего Scope нет срока ожидания"
+        assert error is None, repr(error)
         assert result is False
-        assert 0.4 <= elapsed < 3.0, f"второй вызов ждал {elapsed:.3f} с, ожидалось 0,5 с"
+        assert 0.5 <= elapsed < 1.5, f"второй вызов ждал {elapsed:.3f} с, ожидалось 0,5 с"
+        assert a.is_alive(), "первый вызов должен ещё держаться на gate"
     finally:
         gate.set()
     a.join(DEADLINE_S)
-    assert box["first"] is False
+    assert box["first"] is True
     expected = "shutdown budget_wait_mgr: первый вызов не завершился за 0.5 с — второй вызов вернул False"
     assert any(expected in r.getMessage() for r in caplog.records), [r.getMessage() for r in caplog.records]
 
@@ -458,18 +465,229 @@ def test_framework_manager_list_is_32() -> None:
 
 
 @pytest.mark.parametrize("dotted", FRAMEWORK_MANAGER_CLASSES, ids=lambda d: d.rpartition(".")[2])
-def test_framework_manager_weakref_hash_scope_slot(dotted: str) -> None:
+def test_framework_manager_has_dict_and_independent_record(dotted: str) -> None:
     cls = _load(dotted)
     assert issubclass(cls, BaseManager)
-    # Без __init__: проверяется сам класс (weakref-слот, __hash__), не его конструктор.
+    # Без __init__: проверяется сам класс (есть __dict__ под запись жизни), не его конструктор.
     obj = cls.__new__(cls)
-    ref = weakref.ref(obj)
-    assert ref() is obj
-    hash(obj)
     twin = cls.__new__(cls)
+    assert isinstance(obj.__dict__, dict)
+    assert isinstance(twin.__dict__, dict)
     assert obj.scope is None
     assert twin.scope is None
-    fake = FakeScope(f"fake/{cls.__name__}")
-    obj.attach_scope(fake)
-    assert obj.scope is fake
+    fake_a = FakeScope(f"fake/{cls.__name__}/a")
+    fake_b = FakeScope(f"fake/{cls.__name__}/b")
+    obj.attach_scope(fake_a)
     assert twin.scope is None, "области двух экземпляров не должны совпадать"
+    twin.attach_scope(fake_b)
+    assert obj.scope is fake_a
+    assert twin.scope is fake_b
+
+
+# ---------------------------------------------------------------------------
+# CTO (хранение C): брошенный менеджер с областью собирается, G3 видит корень
+# ---------------------------------------------------------------------------
+
+
+class TickManager(BaseManager):
+    def initialize(self) -> bool:
+        return True
+
+    def tick(self) -> None:
+        pass
+
+
+def test_abandoned_manager_with_scope_is_collected_and_root_seen_abandoned() -> None:
+    root_path = f"t02{uuid.uuid4().hex[:10]}"
+    m = TickManager("gc_mgr")
+    root = open_scope(root_path, budget_s=1.0)
+    m.attach_scope(root)
+    root.own(m.tick, name="tick")
+    ref = weakref.ref(m)
+    del m, root
+    gc.collect()
+    assert ref() is None, "менеджер с областью держится глобальным якорем"
+    assert {"path": root_path, "state": "abandoned"} in unclosed_roots()
+
+
+# ---------------------------------------------------------------------------
+# CTO (хранение C): копия после pickle независима от оригинала
+# ---------------------------------------------------------------------------
+
+_ON_SHUTDOWN_CALLS: list = []
+
+
+class CountingMixinManager(BaseManager, ObservableMixin):
+    def __init__(self, name: str) -> None:
+        BaseManager.__init__(self, name)
+        ObservableMixin.__init__(self, managers={})
+
+    def initialize(self) -> bool:
+        return True
+
+    def _on_shutdown(self) -> bool:
+        _ON_SHUTDOWN_CALLS.append(id(self))
+        return True
+
+
+class CountingSRM(SharedResourcesManager):
+    """SRM со своим ``shutdown`` (мягкий режим): шаблон зовётся явно ``BaseManager.shutdown``."""
+
+    def _on_shutdown(self) -> bool:
+        _ON_SHUTDOWN_CALLS.append(id(self))
+        return True
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [lambda: CountingMixinManager("pickle_copy_mixin"), lambda: CountingSRM()],
+    ids=["ObservableMixin_heir", "SharedResourcesManager"],
+)
+def test_pickled_copy_has_independent_shutdown(factory, make_root) -> None:
+    _ON_SHUTDOWN_CALLS.clear()
+    original = factory()
+    original.attach_scope(make_root())
+    assert BaseManager.shutdown(original) is True
+
+    restored = pickle.loads(pickle.dumps(original))
+
+    assert restored.scope is None
+    done, result, error, elapsed = call_bounded(lambda: BaseManager.shutdown(restored), DEADLINE_S)
+    assert done and error is None, repr(error)
+    assert result is True
+    assert elapsed < 1.0, f"копия ждала {elapsed:.3f} с — состояние оригинала уехало в копию"
+    assert BaseManager.shutdown(original) is True
+    assert BaseManager.shutdown(restored) is True
+    assert len(_ON_SHUTDOWN_CALLS) == 2
+    assert _ON_SHUTDOWN_CALLS[0] != _ON_SHUTDOWN_CALLS[1]
+
+
+# ---------------------------------------------------------------------------
+# CTO (путь лога): строки шаблона — только вид
+# ---------------------------------------------------------------------------
+
+
+class RaisingMixinManager(BaseManager, ObservableMixin):
+    def __init__(self, name: str) -> None:
+        BaseManager.__init__(self, name)
+        ObservableMixin.__init__(self, managers={})
+
+    def initialize(self) -> bool:
+        return True
+
+    def _on_shutdown(self) -> bool:
+        raise RuntimeError("kaboom-mx")
+
+
+def test_mixin_without_logger_failure_line_exactly_once(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    mgr = RaisingMixinManager("mx_mgr")
+    done, result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done and error is None, repr(error)
+    assert result is False
+    expected = "shutdown mx_mgr: _on_shutdown упал: RuntimeError: kaboom-mx"
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum(expected in m for m in messages) == 1, messages
+
+
+def test_process_logger_counts_failure_line_once() -> None:
+    from multiprocess_framework.modules.base_manager.core import base_manager as bm_module
+    from multiprocess_framework.modules.process_module import ProcessModule
+
+    proc = ProcessModule("p", config={})
+    assert proc.initialize() is True
+    try:
+        lm = proc.logger_manager
+        bm_module._logger.error("прогрев вида")  # ранний буфер вида сливается здесь, не в замере
+        before = lm.get_stats()["messages_processed"]
+        mgr = HookManager("pm_fail_mgr", lambda _m: (_ for _ in ()).throw(RuntimeError("kaboom-pm")))
+        assert mgr.shutdown() is False
+        after = lm.get_stats()["messages_processed"]
+        assert after - before == 1
+    finally:
+        call_bounded(proc.shutdown, 20.0)
+
+
+# ---------------------------------------------------------------------------
+# Ревью р.1 п.6: решения исполнителя
+# ---------------------------------------------------------------------------
+
+
+class BadScope(FakeScope):
+    def close(self, budget_s=None, *, deadline=None):
+        self.close_calls += 1
+        raise ValueError("close-broke")
+
+
+def test_scope_close_raising_logs_and_still_calls_on_shutdown(caplog) -> None:
+    caplog.set_level(logging.DEBUG, logger=LOGGER_NAME)
+    counter = Counter()
+
+    def hook(_mgr) -> bool:
+        counter.inc()
+        return True
+
+    mgr = HookManager("a_mgr", hook)
+    bad = BadScope("bad/scope")
+    mgr.attach_scope(bad)
+    done, result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done and error is None, repr(error)
+    assert result is True
+    assert counter.n == 1
+    assert bad.close_calls == 1
+    expected = "shutdown a_mgr: scope.close упал: ValueError: close-broke"
+    assert any(expected in r.getMessage() for r in caplog.records), [r.getMessage() for r in caplog.records]
+
+
+def test_attach_scope_none_type_error() -> None:
+    mgr = HookManager("c_mgr")
+    with pytest.raises(TypeError, match="attach_scope c_mgr: нужна область, получено None"):
+        mgr.attach_scope(None)
+    assert mgr.scope is None
+
+
+# ---------------------------------------------------------------------------
+# Матрица inj-21: BaseException не оставляет ждущий второй вызов висеть
+# ---------------------------------------------------------------------------
+
+
+def test_waiting_second_call_returns_promptly_after_base_exception() -> None:
+    entered, gate = threading.Event(), threading.Event()
+    box: dict = {}
+
+    def hook(_mgr) -> bool:
+        entered.set()
+        gate.wait(DEADLINE_S)
+        raise KeyboardInterrupt("stop")
+
+    mgr = HookManager("kbi_wait_mgr", hook)
+
+    def first() -> None:
+        try:
+            box["first"] = mgr.shutdown()
+        except BaseException as exc:  # noqa: BLE001 - тест сам разбирает ошибку
+            box["first_error"] = exc
+
+    def second() -> None:
+        box["second"] = mgr.shutdown()
+        box["second_at"] = time.monotonic()
+
+    a = threading.Thread(target=first, daemon=True, name="first_call")
+    b = threading.Thread(target=second, daemon=True, name="second_call")
+    try:
+        a.start()
+        assert entered.wait(DEADLINE_S), "первый вызов не дошёл до _on_shutdown"
+        b.start()
+        time.sleep(0.3)
+        assert b.is_alive(), "второй вызов должен ждать первый"
+        released_at = time.monotonic()
+        gate.set()
+        a.join(DEADLINE_S)
+        b.join(DEADLINE_S)
+    finally:
+        gate.set()
+    assert not b.is_alive(), "второй вызов завис"
+    assert isinstance(box.get("first_error"), KeyboardInterrupt)
+    assert box["second"] is False
+    waited = box["second_at"] - released_at
+    assert waited < 1.0, f"второй вызов вернулся через {waited:.3f} с после BaseException, ожидалось сразу"
