@@ -478,6 +478,12 @@ EXACT-точках (KIND ≠ LINE_PASS), иначе контроллер тер�
   тике подхода, включая тик приёма: async `E_ZONE_TRIP`, `TLM_MISS_COUNT + 1`,
   DONE не пишется. NAK по аргументам и модели проверяется раньше кольца.
 - `index` события `on_job_done` — счёт принятых CVT_JOB с 1, не `seq`.
+- Дополнение (ревью T2.3 r1): в FAULT сторожевой таймер даёт событие
+  `E_WDG_TIMEOUT` (`ERR_EVT + 1`, `TLM_WDG_STATE = 2`), но `TLM_ACTIVITY`
+  остаётся 5 (FAULT): сторож не снимает аварию. `TLM_ERRNO_LAST`
+  переписывается на `E_WDG_TIMEOUT`. Расхождение с protocol-spec §9.4
+  («ACTIVITY → IDLE») сознательное. Тест —
+  `test_sim_v2_cvt_track.py::test_watchdog_in_fault_keeps_activity_fault`.
 
 **Последствия.**
 - Команда ленте в sim применяется посреди хода, у прошивки — после примитива

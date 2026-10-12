@@ -25,15 +25,17 @@ dead-man путь, строгие типы аргументов), ветка `fe
 
 | Ручки неисправностей `fault.*` (Task 5.4) | есть: `fault.drop`/`fault.delay_ms`/`fault.vfd_code`/`fault.clear`, `sim_robot.status.faults`; `SimRobotServer.stop_listener()`/`start_listener()` разводят слушателя и тикер (drop — обрыв связи, не перезагрузка); задержка биндера ПЕРВОЙ строкой (не после attach/on_write) — обрыв во время delay_ms не даёт ложный dup в журнале (фикс-раунд ревью); retry-цикл восстановления `fault.drop` при аномально медленном bind; 9/9 REDS `tests/test_acceptance_5_4_faults.py` зелёные (после `27a5aec8`); `tests/test_faults_hazards.py` — 18 прогонов: 6 авторских (shutdown посреди drop, drop сам уходит из faults, два drop подряд, shutdown сразу за clear x5, ложный dup при drop поверх delay_ms, vfd_code не пишет регистр без пульса), 4 лида из break-injection раунда 2 (`82834c12`: J3 готовность, J4 retry восстановления, J5 faults после shutdown, J6 границы аргументов — 6 параметров), 3 эскалации teamlead (нет осиротевшего слушателя после таймаута готовности; `RuntimeError` при порте, занятом чужим; остановка в окне `listen()` не оставляет открытый сокет). Слушатель — свой объект `ModbusTcpServer`, без `ServerStop`/`active_server` |
 
-| Протокол v2 (T2.4, 2026-10-12) | есть: ключ `protocol: v1\|v2` (по умолчанию v1, путь v1 не менялся), ядро `RobotSimCoreV2` под `SimRobotServer(external_threads=True)`, воркеры `sim_robot_ticker`/`sim_robot_listener` через `ctx.worker_manager` (`_start_v2_workers`), `sim_robot.status.protocol`, `fault.*` на v2 — отказ; приёмка тестера `tests/test_v2_*.py` (стенд-водитель `tests/v2_driver.py`): 13/14 зелёные, `test_v2_letter_straight` красный из-за `flags=0` в самом тесте (см. долг) |
+| Протокол v2 (T2.4, 2026-10-12) | есть: ключ `protocol: v1\|v2` (по умолчанию v1, путь v1 не менялся), ядро `RobotSimCoreV2` под `SimRobotServer(external_threads=True)`, воркеры `sim_robot_ticker`/`sim_robot_listener` через `ctx.worker_manager` (`_start_v2_workers`), `sim_robot.status.protocol`, `fault.*` на v2 — отказ; приёмка тестера `tests/test_v2_*.py` (стенд-водитель `tests/v2_driver.py`) зелёная; `tests/test_v2_real_worker_manager.py` — настоящий `WorkerManager`, 3 цикла start/shutdown на одном порту (соединение, рост `TLM_HB_ROBOT`, свободный порт), `t` события `scene.job_done` = `time.monotonic()`, отказ старта при мёртвом тикере; `_start_v2_workers` после запуска ждёт живого тикера (`is_worker_running`, до 5.0 с) |
 
 ## Долг / открытые вопросы
 
-- T2.4: `tests/test_v2_letter_straight.py` шлёт `CVT_JOB` с `flags=0`, а по
-  `plans/robot-protocol-v2/protocol-spec.md:148` укладка из аргументов (`place_rz`) — бит 1;
-  ядро берёт `P_PLACE_RZ`. Копия теста с `flags=2` зелёная. Правка теста — за тестером/лидом.
-- T2.4: воркеры v2 проверены на фейковом менеджере стенда (`ThreadWorkerManager`); под
-  настоящим `WorkerManager` (повторный `start_worker` на вернувшийся воркер) — живой стенд лида.
+- T2.4: набор `tests/test_v2_*.py` кроме `test_v2_real_worker_manager.py` идёт на фейковом менеджере
+  стенда (`ThreadWorkerManager`); настоящий `WorkerManager` покрыт одним тестом (3 цикла). Окно
+  «статус STOPPED, поток ещё жив» настоящего менеджера (микросекунды) тестом не воспроизведено;
+  на живом стенде — лид.
+- T2.4, известная дыра матрицы инъекций (inj-15): `_v2_tick_loop` с фиксированным `dt = TICK_INTERVAL_S`
+  вместо `perf_counter` ни один тест не ловит — проверка тайминг-зависима и флаковая, тестом
+  не закрыта сознательно.
 
 - Живой стенд владельца, 2026-09-24: 100 объектов, один drop 3 с в середине —
   `dup_jobs 0 / dups 0 / missed 68`; пять drop синхронно с заданием — `0 / 0 / 74`,

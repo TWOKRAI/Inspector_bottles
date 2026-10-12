@@ -118,6 +118,9 @@ _V2_LISTENER_WORKER = "sim_robot_listener"
 #: Сколько ``_start_v2_workers`` ждёт bind слушателя; столько же — ``SimRobotServer.start()`` v1.
 _V2_READY_TIMEOUT_S = 5.0
 
+#: Сколько ``_start_v2_workers`` ждёт, что тикер действительно жив (``is_worker_running``).
+_V2_TICKER_TIMEOUT_S = 5.0
+
 #: Сколько shutdown ждёт, пока воркеры v2 вернутся (порт отпускает ``server.stop()`` раньше).
 _V2_STOP_TIMEOUT_S = 3.0
 
@@ -451,6 +454,16 @@ class SimRobotHostPlugin(ProcessModulePlugin):
                 self._stop_v2_workers(ctx, server)
                 detail = repr(cause) if cause is not None else f"нет bind за {_V2_READY_TIMEOUT_S} с"
                 raise RuntimeError(f"sim_robot_host: слушатель v2 не поднялся на {self._host}:{self._port}: {detail}")
+        # Ревью r1 (nit): у настоящего менеджера есть окно «статус STOPPED, поток ещё жив» —
+        # start_worker в него вернёт True без нового потока: слушатель на месте, тикера нет.
+        # is_worker_running верен у обоих менеджеров: у настоящего — статус RUNNING, у фейка тестов —
+        # thread.is_alive(). Сбой — тем же путём, что сбой bind.
+        ticker_deadline = time.monotonic() + _V2_TICKER_TIMEOUT_S
+        while not workers.is_worker_running(_V2_TICKER_WORKER):
+            if time.monotonic() >= ticker_deadline:
+                self._stop_v2_workers(ctx, server)
+                raise RuntimeError(f"sim_robot_host: тикер v2 не запустился за {_V2_TICKER_TIMEOUT_S} с")
+            time.sleep(0.005)
 
     def _stop_v2_workers(self, ctx: PluginContext, server: Any) -> None:
         """Погасить запуск v2: стоп тика, ``server.stop()`` (ждёт, пока ``serve_until``

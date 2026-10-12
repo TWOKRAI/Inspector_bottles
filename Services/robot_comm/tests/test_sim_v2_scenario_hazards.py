@@ -244,3 +244,29 @@ def test_speed_pct_restored_after_hard_stop():
     assert reg(core, "TLM_SPD_PCT") == SPD_DEFAULT_PCT
     assert reg(core, "TLM_SC_DONE_N") == 1
     assert reg(core, "TLM_DO_MASK") == 1, "DO_OFF недостигнутой точки не исполняется, стоп DO не трогает"
+
+
+# --------------------------------------------------------------------------- #
+# Нормальный DONE сценария: регистр Override возвращается к P_SPD_DEFAULT
+# --------------------------------------------------------------------------- #
+
+
+def test_speed_pct_register_restored_after_normal_done():
+    """После штатного DONE сценария со ``SPEED_PCT`` = 50 регистр ``TLM_SPD_PCT`` в IDLE равен 80.
+
+    Вход: ``SPEED_PCT`` 50 на первой точке, две EXACT-точки, ``SC_RUN``, ход до IDLE. Вызов следующего
+    хода регистр не читает (берёт ``P_SPD_DEFAULT`` напрямую), поэтому слепое место — именно регистр.
+    Литерал 80 — ``P_SPD_DEFAULT`` по умолчанию (``params_v2.PARAMS[0]``, 'default': 80).
+
+    НЕ доказывает: возврат на пути обрыва (его держит ``test_speed_pct_restored_after_hard_stop``);
+    что Override обычного хода вне сценария возвращается так же — здесь только путь ``SC_RUN``."""
+    core = ready_core()
+    write_scenario(core, 0, [pt(400.0, action=ACT["SPEED_PCT"], aparam=50), pt(450.0)])
+    assert cmd(core, 2, OP["SC_RUN"], 2, 5, 0)["status"] == ACK
+
+    tick_until(core, lambda: reg(core, "TLM_X") == 4000)
+    assert reg(core, "TLM_SPD_PCT") == 50, "контроль: SPEED_PCT сценария действует до конца хода"
+
+    tick_until(core, lambda: reg(core, "TLM_ACTIVITY") == 0)
+    assert reg(core, "TLM_DONE_SEQ") == 2, "сценарий кончился штатно (DONE), а не обрывом"
+    assert reg(core, "TLM_SPD_PCT") == SPD_DEFAULT_PCT
