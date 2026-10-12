@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # web-search-routing.sh (Task 3.9) — PreToolUse, matcher "WebSearch|WebFetch": routes
 # web research away from a main session running on the top-tier model. Owner rule:
-# web search is done by Sonnet or Opus, never by the expensive top-tier model (Fable)
+# web search is done by Haiku, Sonnet or Opus, never by the expensive top-tier model (Fable)
 # — a prose reminder gets ignored, so this hook turns it into a mechanical gate; the
-# companion `web-researcher` agent (model: sonnet) is where delegated research lands.
+# companion `web-researcher` agent (model: haiku) is where delegated research lands.
 #
 # Same idiom as core/hooks/agent-context-ceiling.sh: read stdin once, a cheap `case`
 # pre-filter before Python starts, interpreter lookup via _lib/python-bin.sh, ini keys
@@ -68,7 +68,7 @@ import os
 
 DENY_REASON = (
     "web-search-routing: web search is not run on the main session here (owner rule: "
-    "search on Sonnet/Opus, the top tier is too expensive). Spawn the 'web-researcher' "
+    "search on Haiku/Sonnet/Opus, the top tier is too expensive). Spawn the 'web-researcher' "
     "agent with your question and the decision it feeds; it returns findings with "
     "source URLs. To allow direct search set 'web_search = allow' in "
     ".claude/modes/_stack.md (the ini block)."
@@ -136,7 +136,7 @@ def main():
         if agent_type.lower() in deny_agents:
             _deny(
                 f"web-search-routing: '{agent_type}' runs on the top model tier - "
-                "delegate web research to the 'web-researcher' agent (Sonnet)."
+                "delegate web research to the 'web-researcher' agent (Haiku 5.5)."
             )
         return
 

@@ -39,7 +39,7 @@ Always → `qex:search_code` for semantic reconnaissance before decomposition. S
 | Senior | `teamlead` (Opus) | normal | Planning, review, technical decisions, non-trivial logic |
 | Middle+ | `developer` (Sonnet) | extended | Complex implementation, multi-file changes |
 | Middle | `developer` (Sonnet) | normal | Standard implementation, typical patterns |
-| Junior | `docs-writer` (Haiku) | normal | Documentation, simple tests/fixes |
+| Junior | `junior` / `docs-writer` (Haiku) | normal | Mechanical code edits with the exact change written (`junior`); simple docs — docstrings, README, STATUS (`docs-writer`) |
 
 **Rule:** assign one level higher than the minimum necessary.
 

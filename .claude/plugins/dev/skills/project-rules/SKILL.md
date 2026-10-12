@@ -48,8 +48,16 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
 
 - Default output: a report, no commit, no push.
 - Spawning an agent: `model` explicitly as a tier alias (reviewer/teamlead `opus`, developer/tester
-  `sonnet`, cto `fable`), `run_in_background: false` for reviewer/tester, and its prompt says: do not
-  commit, do not push. Only for a sizeable independent track, never to verify your own work.
+  `sonnet`, cto `fable`, junior/docs-writer/Explore/web-researcher `haiku`), `run_in_background: false`
+  for reviewer/tester, and its prompt says: do not commit, do not push. Only for a sizeable independent
+  track, never to verify your own work.
+- **Haiku 5.5 for bounded work** (about 20x cheaper than Sonnet while the prompt stays under 100K; the
+  whole request costs 5x more above it): lookups, greps, inventories, log and transcript measurements,
+  a mechanical injection-matrix run from given predictions, stand number collection, validate/sync/ruff
+  runs, README/STATUS, edits from an exact diff. Never: design, review verdicts, blind tests,
+  concurrency, IPC. A haiku brief has numbered steps and exact anchors, stays under ~100K context, uses
+  effort >= medium, and its report pastes the command output. Any agent with the Agent tool may hand
+  such a sub-step to `junior`, `Explore` or `model: "haiku"`.
 - **Brief = form** (DESIGN / FILES / REDS): first edit within 5 tool calls, never re-derive DESIGN,
   a file outside FILES → stop and ask. Apply every instruction to every listed file; targeted edits,
   not whole-file rewrites. A pre-existing bug is a report line, not a change.

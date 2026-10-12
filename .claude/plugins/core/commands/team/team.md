@@ -16,7 +16,7 @@ Show the project's current agent roster (auto-discovery).
 
 | Category  | Agent | Model  | When to call (description)   |
 |-----------|-------|--------|------------------------------|
-| dev       | manager     | sonnet | Task decomposition, writing the spec |
+| dev       | manager     | opus   | Task decomposition, writing the spec |
 | dev       | developer   | sonnet | Implementation per spec |
 | dev       | reviewer    | opus   | PR code review |
 | dev       | tester      | sonnet | Tests from acceptance criteria |

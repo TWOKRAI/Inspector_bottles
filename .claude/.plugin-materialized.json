@@ -1,6 +1,7 @@
 {
   "version": 1,
   "paths": [
+    "agents/core/Explore.md",
     "agents/core/web-researcher.md",
     "agents/dev/ai-judge.md",
     "agents/dev/cto.md",

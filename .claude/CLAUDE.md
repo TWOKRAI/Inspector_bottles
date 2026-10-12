@@ -51,6 +51,7 @@ answer; follow it and only speak up when deviating.
 | 4. Live stand | me | numbers, not adjectives; `backend_ctl` over reading source. |
 | 5. Review | `reviewer`, **after every task** | synchronous (`run_in_background: false`), findings must carry input → observed output. |
 | 6. Live defect that is not obvious | `investigator` | instead of digging in the main context. |
+| 7. Mechanical runs and lookups | `haiku` agent (`junior` / `Explore` / `model: "haiku"`) | injection matrix from the lead's predictions, stand number collection, inventories; brief under ~100K context, effort ≥ medium, output pasted. |
 
 - Never run the tester twice on one mechanism: a second acceptance pass = my injection matrix plus `reviewer`.
 - Name the forbidden paths in the tester prompt too; carry its file back into the main tree afterwards.
@@ -61,7 +62,7 @@ Refinements and history: `docs/claude/LEAD_RULES.md` → «Task launch conventio
 ## The lead coordinates and controls — it does not execute (owner's decision, 2026-10-12, STRICT)
 
 The main session keeps its context for decisions, not for work. Everything that takes more than a few calls goes to an agent.
-- Pick the agent by the work: `haiku` (junior, docs-writer) for mechanical and lookup work; `sonnet` (developer, tester, debugger, tech-writer) for ordinary code, tests, docs; `opus` (teamlead, reviewer, investigator) for design, concurrency, verdicts. Never the lead's own context for a run, a matrix of runs, a long read or a long edit.
+- Pick the agent by the work: `haiku` (junior, docs-writer, Explore, web-researcher) for mechanical and lookup work; `sonnet` (developer, tester, debugger, tech-writer) for ordinary code, tests, docs; `opus` (teamlead, reviewer, investigator) for design, concurrency, verdicts. Never the lead's own context for a run, a matrix of runs, a long read or a long edit.
 - A small fix (a few lines, one file) — the lead may do it itself. Larger — hand it to an agent that already holds the context of the topic (re-summon by agentId with `SendMessage`); a new agent only when none fits or the held context would bias the work (tester, round-1 reviewer stay fresh).
 - What stays with the lead: the spec and acceptance, the predictions written BEFORE any injection run, reading the verdict against them, merge decisions, the owner's questions. The mechanical run of an injection matrix, a stand measurement or a bulk edit is delegated with the lead's predictions in the prompt; the agent reports observed-versus-predicted in a short table.
 - Read agent reports as summaries: the full output lives in the report file the agent writes; the lead opens a file only to check a claim that decides something.
@@ -78,7 +79,7 @@ nothing errors, the guarantee just stops holding.
 | A finished background agent **commits, pushes, and opens a draft PR** on its own — it no longer asks | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
 | Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
 
-Roles → models (all 15): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` / `memory-classifier` = Haiku.
+Roles → models (all 17): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` / `memory-classifier` / `Explore` / `web-researcher` = Haiku.
 Haiku 5.5 (owner, 2026-10-11): upgraded — use it for simple work whenever it fits: mechanical edits, lookups, greps, format checks, simple docs (`junior` / `docs-writer`, or `model: "haiku"` on an Agent call). Not for design, review verdicts, blind tests or concurrency.
 
 `/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
