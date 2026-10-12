@@ -590,6 +590,18 @@ def test_mixin_without_logger_failure_line_exactly_once(caplog) -> None:
     assert sum(expected in m for m in messages) == 1, messages
 
 
+class WiredRaisingManager(BaseManager, ObservableMixin):
+    def __init__(self, name: str, logger_manager) -> None:
+        BaseManager.__init__(self, name)
+        ObservableMixin.__init__(self, managers={"logger": logger_manager})
+
+    def initialize(self) -> bool:
+        return True
+
+    def _on_shutdown(self) -> bool:
+        raise RuntimeError("kaboom-pm")
+
+
 def test_process_logger_counts_failure_line_once() -> None:
     from multiprocess_framework.modules.base_manager.core import base_manager as bm_module
     from multiprocess_framework.modules.process_module import ProcessModule
@@ -600,7 +612,8 @@ def test_process_logger_counts_failure_line_once() -> None:
         lm = proc.logger_manager
         bm_module._logger.error("прогрев вида")  # ранний буфер вида сливается здесь, не в замере
         before = lm.get_stats()["messages_processed"]
-        mgr = HookManager("pm_fail_mgr", lambda _m: (_ for _ in ()).throw(RuntimeError("kaboom-pm")))
+        # Миксин, подключённый к логгеру процесса: слот-дорога _log_error дала бы вторую запись.
+        mgr = WiredRaisingManager("pm_fail_mgr", lm)
         assert mgr.shutdown() is False
         after = lm.get_stats()["messages_processed"]
         assert after - before == 1
