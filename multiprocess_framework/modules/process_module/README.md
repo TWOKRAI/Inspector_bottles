@@ -4,7 +4,7 @@
 
 Модуль `process_module` отвечает за **создание, инициализацию, управление и мониторинг процессов** в многопроцессном фреймворке. Это центральный компонент, который координирует работу конфигурации, коммуникации, менеджеров и воркеров (через `worker_module`).
 
-**Остановка:** `initialize()` открывает корень `proc/<имя>` (`planes | transport | work`), `stop()` только отменяет его, `shutdown()` закрывает один раз; наследник кладёт свои записи в `_own_work` / `_own_transport` (ADR-PM-054).
+**Остановка:** `initialize()` открывает корень `proc/<имя>` (`planes | transport | work`), `stop()` только отменяет его, `shutdown()` закрывает один раз; наследник кладёт свои записи в `_own_work` / `_own_transport` (ADR-PM-054). Менеджеры корня получают область `<attr>-scope` сегмента (`stats_manager` -> `proc/<имя>/planes/stats_manager-scope`), она закрывается раньше их `shutdown()` (ADR-BM-009).
 
 **Эталонные примеры конфигурации (plain dict):** [`docs/examples/process_config_canonical_examples.py`](docs/examples/process_config_canonical_examples.py). Поведение `ProcessConfigHandler` — в [`tests/test_process_config.py`](tests/test_process_config.py).
 

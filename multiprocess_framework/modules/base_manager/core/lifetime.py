@@ -923,3 +923,27 @@ def open_scope(
     finalizer.atexit = False
     root._finalizer = finalizer
     return root
+
+
+# =============================================================================
+# Взгляд менеджера на свою область (Task 1.2b-1, ADR-BM-009)
+# =============================================================================
+
+# Срок ожидания второго вызова ``BaseManager.shutdown()``, когда своего срока
+# у области нет: области нет вовсе или привязана не ``Scope`` (подделка ``IScope``).
+_DEFAULT_SECOND_CALL_WAIT_S = 5.0
+
+
+def _manager_scope_view(scope: IScope | None) -> tuple[bool, float]:
+    """``(in_subtree, wait_s)`` для шаблона ``BaseManager.shutdown()``.
+
+    ``in_subtree`` — текущий поток есть spawn-поток области или её поддерева
+    (правило то же, что у ``Scope._close``); ``wait_s`` — сколько второй вызов
+    ждёт первый. Для ``Scope`` — его ``budget_s + kill_reserve_s``; для чужой
+    реализации ``IScope`` и без области — ``(False, _DEFAULT_SECOND_CALL_WAIT_S)``:
+    у чужой реализации нет ни ``_is_subtree_thread``, ни обязательных сроков.
+    Внутренняя функция пакета: снаружи ``base_manager`` не импортируется.
+    """
+    if isinstance(scope, Scope):
+        return scope._is_subtree_thread(), scope.budget_s + scope.kill_reserve_s
+    return False, _DEFAULT_SECOND_CALL_WAIT_S
