@@ -108,6 +108,25 @@ _DEFAULT_JOG_FREQ_HZ = 10.0
 #: команды, а не читал их обратно из mailbox (ревью Task 2.3a, п.2).
 _VFD_CMD_FREQ_SCALE = 100.0
 
+#: T2.4: допустимые значения ключа ``protocol`` (по умолчанию ``v1``).
+_PROTOCOLS = ("v1", "v2")
+
+#: T2.4 (DESIGN п.3): имена воркеров v2 — тик ядра и слушатель Modbus TCP.
+_V2_TICKER_WORKER = "sim_robot_ticker"
+_V2_LISTENER_WORKER = "sim_robot_listener"
+
+#: Сколько ``_start_v2_workers`` ждёт bind слушателя; столько же — ``SimRobotServer.start()`` v1.
+_V2_READY_TIMEOUT_S = 5.0
+
+#: Сколько ``_start_v2_workers`` ждёт, что тикер действительно жив (``is_worker_running``).
+_V2_TICKER_TIMEOUT_S = 5.0
+
+#: Сколько shutdown ждёт, пока воркеры v2 вернутся (порт отпускает ``server.stop()`` раньше).
+_V2_STOP_TIMEOUT_S = 3.0
+
+#: Троттл отчёта об ошибке тика ядра v2 (тик — 100 раз в секунду).
+_V2_TICK_ERROR_THROTTLE_S = 30.0
+
 
 @register_plugin("sim_robot_host", category="io", description="Хост Modbus TCP-симулятора робота (SimRobotServer)")
 class SimRobotHostPlugin(ProcessModulePlugin):
@@ -172,6 +191,21 @@ class SimRobotHostPlugin(ProcessModulePlugin):
                 )
             else:
                 self._job_ticks = max(1, round(float(job_ms_cfg) / (TICK_INTERVAL_S * 1000.0)))
+
+        # T2.4 (DESIGN п.1): версия протокола карты. Разбор — здесь, отказ наблюдается
+        # в _start_server() той же дорогой, что job_ms; текст ошибки — без входного значения.
+        protocol_cfg = cfg.get("protocol", "v1")
+        self._protocol: str | None = protocol_cfg if protocol_cfg in _PROTOCOLS else None
+        self._protocol_error: ValueError | None = (
+            None if self._protocol is not None else ValueError("sim_robot_host: protocol: допустимо v1|v2")
+        )
+        # Воркеры v2 (_start_v2_workers): читают ТЕКУЩИЙ запуск из этих полей, не из
+        # замыкания — повторный start после shutdown поднимает те же имена воркеров.
+        self._v2_server: Any = None
+        self._v2_ready: threading.Event | None = None
+        self._v2_listener_exited: threading.Event | None = None
+        self._v2_tick_stop: threading.Event | None = None
+        self._v2_listen_error: BaseException | None = None
 
         self._server: Any = None
         self._lock = threading.Lock()
@@ -259,7 +293,11 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         остановленного процесса. Фикс-раунд ревью (R8): следом зануляем
         delay/vfd-код — и в полях плагина, и в живом ``server``/``core`` (пока
         сервер ещё жив) — ``sim_robot.status`` после останова обязан показывать
-        ``faults: []``, а не последнее боевое значение."""
+        ``faults: []``, а не последнее боевое значение.
+
+        T2.4: на ``protocol: v2`` fault-полей сервера/ядра не трогаем (``fault.*`` на v2
+        отказывают), сервер гасит :meth:`_stop_v2_workers` — слушатель отпускает порт,
+        воркеры возвращаются, повторный ``start`` поднимет их снова."""
         self._sync_writes_metric()
         self._shutdown_event.set()
         self._cancel_drop(timeout=1.0)
@@ -267,11 +305,14 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             self._delay_ms = 0
             self._vfd_fault_active = False
             self._vfd_fault_code = 0
-            if self._server is not None:
+            if self._server is not None and self._protocol != "v2":
                 self._server.delay_ms = 0
                 self._server.core.vfd_fault_code = 0
         if self._server is not None:
-            self._server.stop()
+            if self._protocol == "v2":
+                self._stop_v2_workers(ctx, self._server)
+            else:
+                self._server.stop()
             self._server = None
         self._state = "stopped"
         ctx.log_info(f"sim_robot_host: остановлен, writes_seen={self._writes_seen}")
@@ -292,6 +333,11 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             self._fail(ctx, self._job_ms_error)
             return
 
+        if self._protocol_error is not None:
+            # T2.4 DESIGN п.1: та же дорога, что job_ms; в тексте — только допустимые значения.
+            self._fail(ctx, self._protocol_error)
+            return
+
         try:
             self._probe_port_free()
         except OSError as exc:  # no-health: отказ старта уходит в self._fail (health/лог)
@@ -308,15 +354,32 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             from Services.modbus.sdk.errors import ModbusNotAvailableError
             from Services.robot_comm.server.sim_robot import SimRobotServer
 
-            core_kwargs: dict[str, Any] = {
-                "on_job_done": self._on_job_done,
-                "on_event": self._journal.on_event,
-            }
-            if self._job_ticks is not None:
-                core_kwargs["job_ticks"] = self._job_ticks
-            core = RobotSimCore(**core_kwargs)
-            server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
-            server.start()
+            if self._protocol == "v2":
+                # T2.4 DESIGN п.2–4: ядро v2, потоков сервер не заводит — тик и слушатель
+                # идут воркерами ctx.worker_manager (_start_v2_workers). job_ms у v2 нет:
+                # длительность задания задаёт модель хода ядра.
+                from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
+
+                core_v2 = RobotSimCoreV2(on_event=self._journal.on_event, on_job_done=self._on_job_done)
+                server = SimRobotServer(
+                    self._host,
+                    self._port,
+                    self._unit_id,
+                    core=core_v2,
+                    on_write=self._on_write,
+                    external_threads=True,
+                )
+                self._start_v2_workers(ctx, server)
+            else:
+                core_kwargs: dict[str, Any] = {
+                    "on_job_done": self._on_job_done,
+                    "on_event": self._journal.on_event,
+                }
+                if self._job_ticks is not None:
+                    core_kwargs["job_ticks"] = self._job_ticks
+                core = RobotSimCore(**core_kwargs)
+                server = SimRobotServer(self._host, self._port, self._unit_id, core=core, on_write=self._on_write)
+                server.start()
         except (ModbusNotAvailableError, ImportError, OSError, RuntimeError) as exc:  # noqa: BLE001 — деградация  # no-health: отказ старта уходит в self._fail (health/лог)
             # RuntimeError — Task 5.4: SimRobotServer.start_listener() может бросить её,
             # если слушатель аномально не поднялся за _LISTENER_READY_TIMEOUT_S (см. его
@@ -343,8 +406,13 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         fire-and-forget (неблокирующая постановка в очередь) и НИКОГДА не бросает:
         исключение из колбэка ядро не ловит, оно уронило бы тикер робота.
         Исключение или ``False`` (нет роутера/``send_async``) -> ``ctx.health.report_error``
-        с троттлом."""
+        с троттлом.
+
+        T2.4 DESIGN п.4: у ядра v2 ``t`` — время симуляции (монотонных часов в ядре нет);
+        сцена сравнивает его с ``time.monotonic()`` — подменяем перед пересылкой."""
         try:
+            if self._protocol == "v2":
+                event = {**event, "t": time.monotonic()}
             client = DeviceHubClient(self._ctx, target_process=self._scene_process)
             if not client.send_fire_and_forget("scene.job_done", event):
                 self._ctx.health.report_error(
@@ -354,6 +422,106 @@ class SimRobotHostPlugin(ProcessModulePlugin):
                 )
         except Exception as exc:  # noqa: BLE001 — колбэк тикера не должен бросать
             self._ctx.health.report_error(exc, context="sim_robot_host.job_done", throttle=_JOB_DONE_ERROR_THROTTLE_S)
+
+    # ------------------------------------------------------------------ #
+    # T2.4: воркеры v2 (тик ядра и слушатель) — только через ctx.worker_manager
+    # ------------------------------------------------------------------ #
+
+    def _start_v2_workers(self, ctx: PluginContext, server: Any) -> None:
+        """Единственное место, где v2 заводит воркеры (DESIGN п.3; под ``owner=`` Ж 1.3 —
+        правка только здесь).
+
+        Цели воркеров читают текущий запуск из ``self._v2_*`` — так повторный ``start``
+        после ``shutdown`` переиспользует те же имена: ``create_worker`` на занятое имя
+        возвращает ``False``, тогда ``start_worker``. Ждёт bind слушателя не дольше
+        ``_V2_READY_TIMEOUT_S``, затем живого тикера не дольше ``_V2_TICKER_TIMEOUT_S``:
+        сбой или таймаут — воркеры гасятся и ``RuntimeError``
+        (вызывающий уводит её в :meth:`_fail`). Без ожидания сбой bind дал бы воркер
+        в ``ERROR`` при ``state == "running"``."""
+        self._v2_server = server
+        self._v2_ready = threading.Event()
+        self._v2_listener_exited = threading.Event()
+        self._v2_tick_stop = threading.Event()
+        self._v2_listen_error = None
+        workers = ctx.worker_manager
+        cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
+        for name, target in ((_V2_TICKER_WORKER, self._v2_tick_loop), (_V2_LISTENER_WORKER, self._v2_listen)):
+            if workers.create_worker(name, target, cfg, auto_start=True) is False:
+                workers.start_worker(name)
+        deadline = time.monotonic() + _V2_READY_TIMEOUT_S
+        while not self._v2_ready.wait(0.005):
+            if self._v2_listener_exited.is_set() or time.monotonic() >= deadline:
+                cause = self._v2_listen_error
+                self._stop_v2_workers(ctx, server)
+                detail = repr(cause) if cause is not None else f"нет bind за {_V2_READY_TIMEOUT_S} с"
+                raise RuntimeError(f"sim_robot_host: слушатель v2 не поднялся на {self._host}:{self._port}: {detail}")
+        # Ревью r1 (nit): у настоящего менеджера есть окно «статус STOPPED, поток ещё жив» —
+        # start_worker в него вернёт True без нового потока: слушатель на месте, тикера нет.
+        # is_worker_running верен у обоих менеджеров: у настоящего — статус RUNNING, у фейка тестов —
+        # thread.is_alive(). Сбой — тем же путём, что сбой bind.
+        ticker_deadline = time.monotonic() + _V2_TICKER_TIMEOUT_S
+        while not workers.is_worker_running(_V2_TICKER_WORKER):
+            if time.monotonic() >= ticker_deadline:
+                self._stop_v2_workers(ctx, server)
+                raise RuntimeError(f"sim_robot_host: тикер v2 не запустился за {_V2_TICKER_TIMEOUT_S} с")
+            time.sleep(0.005)
+
+    def _stop_v2_workers(self, ctx: PluginContext, server: Any) -> None:
+        """Погасить запуск v2: стоп тика, ``server.stop()`` (ждёт, пока ``serve_until``
+        отпустит порт), затем дождаться возврата обоих воркеров — иначе повторный
+        ``start_worker`` застал бы прежний поток живым."""
+        if self._v2_tick_stop is not None:
+            self._v2_tick_stop.set()
+        try:
+            server.stop()
+        except RuntimeError as exc:
+            ctx.health.report_error(exc, context="sim_robot_host.stop", host=self._host, port=self._port)
+        deadline = time.monotonic() + _V2_STOP_TIMEOUT_S
+        for name in (_V2_TICKER_WORKER, _V2_LISTENER_WORKER):
+            while ctx.worker_manager.is_worker_running(name) and time.monotonic() < deadline:
+                time.sleep(0.005)
+            if ctx.worker_manager.is_worker_running(name):
+                ctx.health.report_error(
+                    RuntimeError(f"воркер {name} не вернулся за {_V2_STOP_TIMEOUT_S} с"),
+                    context="sim_robot_host.stop",
+                )
+
+    def _v2_tick_loop(self, stop_event: Any, pause_event: Any) -> None:
+        """Воркер ``sim_robot_ticker``: тик ядра v2 с шагом ``TICK_INTERVAL_S``, ``dt`` по
+        ``perf_counter`` (``monotonic`` на Windows шагает 15.6 мс; потолок — в
+        ``SimRobotServer.tick_once``). ``pause_event`` игнорируется: мир линии не
+        встаёт от паузы воркеров. Ошибка тика не убивает воркер — уходит в health."""
+        server = self._v2_server
+        tick_stop = self._v2_tick_stop
+        if server is None or tick_stop is None:
+            return
+        last = time.perf_counter()
+        while not (stop_event.is_set() or tick_stop.is_set()):
+            time.sleep(TICK_INTERVAL_S)
+            now = time.perf_counter()
+            dt, last = now - last, now
+            try:
+                server.tick_once(dt)
+            except Exception as exc:  # noqa: BLE001 — тик не должен убить воркер
+                self._ctx.health.report_error(exc, context="sim_robot_host.tick", throttle=_V2_TICK_ERROR_THROTTLE_S)
+
+    def _v2_listen(self, stop_event: Any, pause_event: Any) -> None:
+        """Воркер ``sim_robot_listener``: ``server.serve_until(stop_event, ready)``.
+
+        Сбой (bind или поздний) — в health и в ``self._v2_listen_error`` для
+        :meth:`_start_v2_workers`; ``_v2_listener_exited`` взводится всегда."""
+        server = self._v2_server
+        ready = self._v2_ready
+        exited = self._v2_listener_exited
+        if server is None or ready is None or exited is None:
+            return
+        try:
+            server.serve_until(stop_event, ready)
+        except Exception as exc:  # noqa: BLE001 — причина уходит в health и _start_v2_workers
+            self._v2_listen_error = exc
+            self._ctx.health.report_error(exc, context="sim_robot_host.listener", host=self._host, port=self._port)
+        finally:
+            exited.set()
 
     def _probe_port_free(self) -> None:
         """Синхронно проверить, что порт свободен, ДО обращения к pymodbus.
@@ -569,6 +737,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
             "unit_id": self._unit_id,
             "writes_seen": writes_seen,
             "state": self._state,
+            # T2.4: "v1" | "v2"; неверный ключ конфига — None (значение не эхом).
+            "protocol": self._protocol,
             "world": "unavailable" if self._ctx.state_proxy is None else "ok",
             "journal": self._journal.counters() if self._journal is not None else {},
             "faults": self._collect_faults(),
@@ -899,12 +1069,19 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         if thread is not None:
             thread.join(timeout=timeout)
 
+    @staticmethod
+    def _fault_refused_v2(command: str) -> dict:
+        """T2.4 DESIGN п.5: ``fault.*`` на v2 не перенесены — отказ без входного значения."""
+        return {"status": "error", "message": f"{command} не поддерживается для protocol v2"}
+
     def cmd_fault_drop(self, data: dict | None = None) -> dict:
         """``fault.drop{seconds}`` — оборвать TCP-слушателя на ``seconds`` (DESIGN
         п.1): связь рвётся, ядро/тикер/лента продолжают жить (это коммуникационный
         обрыв, не перезагрузка робота). Возвращается немедленно — работу уводит
         :meth:`_run_drop` в daemon-потоке. Второй ``fault.drop`` поверх ещё не
         завершённого первого -> ``busy``, первый не отменяется и не сбрасывается."""
+        if self._protocol == "v2":
+            return self._fault_refused_v2("fault.drop")
         with self._lock:
             server = self._server
         if server is None:
@@ -936,6 +1113,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         """``fault.delay_ms{ms}`` — задержать ОТВЕТ на КАЖДЫЙ Modbus-доступ на
         ``ms`` (DESIGN п.2): читает биндер сервера через ``asyncio.sleep``, не
         блокирует event loop — конкурентные клиенты не сериализуются."""
+        if self._protocol == "v2":
+            return self._fault_refused_v2("fault.delay_ms")
         with self._lock:
             server = self._server
         if server is None:
@@ -953,6 +1132,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         """``fault.vfd_code{code}`` — выставить код неисправности ПЧ (DESIGN п.3):
         применяется ядром (``RobotSimCore.vfd_fault_code``) в зеркало 0x1214 на
         СЛЕДУЮЩЕМ пульсе VFD_FLAG, не сразу по этому вызову."""
+        if self._protocol == "v2":
+            return self._fault_refused_v2("fault.vfd_code")
         with self._lock:
             server = self._server
         if server is None:
@@ -972,6 +1153,8 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         """``fault.clear`` — снять все активные faults: отменить+дождаться
         (bounded, <=1с) незавершённый ``fault.drop``, занулить ``delay_ms`` и
         код ПЧ ядра. Возвращает опустевший список faults (DESIGN п.4)."""
+        if self._protocol == "v2":
+            return self._fault_refused_v2("fault.clear")
         with self._lock:
             server = self._server
         if server is None:

@@ -25,10 +25,40 @@ TCP-сервер (симулятор робота линии) в процесс�
 | `scene_process` | `camera` | Task 3.5: процесс сцены, куда уходит событие «задание выполнено» |
 | `job_ms` | нет (`RobotSimCore` дефолт `job_ticks=2`) | Task 5.3b: длительность задания в мс — `job_ticks = max(1, round(job_ms / (TICK_INTERVAL_S*1000)))`, `TICK_INTERVAL_S` из `Services.robot_comm.server.sim_core`. Разбор — в `configure()`, отказ (не число > 0, `bool` не считается числом) наблюдается на попытке поднять сервер (`_start_server` → `_fail`, `state="error"`), процесс живёт |
 
+| `protocol` | `v1` | T2.4: карта регистров робота, `v1` или `v2`. Иное значение — отказ на старте той же дорогой, что `job_ms` (`_fail`, `state="error"`, процесс живёт); текст ошибки — «protocol: допустимо v1\|v2», без введённого значения |
+
+## Протокол v2 (T2.4)
+
+`protocol: v2` поднимает ядро `RobotSimCoreV2` (`Services/robot_comm/server/sim_core_v2.py`)
+под тем же `SimRobotServer` с `external_threads=True`. Собственных потоков сервер не
+заводит: тик и слушатель — воркеры `ctx.worker_manager`, заводятся одним методом
+`_start_v2_workers`:
+
+| Воркер | Что делает |
+|---|---|
+| `sim_robot_ticker` | `server.tick_once(dt)` каждые `TICK_INTERVAL_S` (0.01 с), `dt` по `perf_counter`; `pause_event` игнорирует — мир линии не встаёт от паузы воркеров |
+| `sim_robot_listener` | `server.serve_until(stop_event, ready)` — asyncio-слушатель Modbus TCP на потоке воркера; блок регистров `REG_SPACE_SIZE_V2` (0x3083) |
+
+- Старт ждёт bind слушателя не дольше 5 с, затем живого тикера не дольше 5 с (`_V2_TICKER_TIMEOUT_S`); сбой или таймаут → `_fail`, `state="error"` (причина «тикер v2 не запустился» — отдельная). Худший старт — около 10 с.
+- `shutdown()` гасит тик, ждёт, пока слушатель отпустит порт, и пока оба воркера вернутся.
+  Повторный `start` поднимает те же имена: `create_worker` на занятое имя даёт `False`,
+  тогда `start_worker`.
+- `belt.*` и `sim_robot.journal*` работают на v2 теми же ответами (ядро v2 даёт те же имена:
+  `belt`, `belt_mm_s`, `encoder`, `command_vfd`; mailbox ПЧ — тот же адрес 0x1200).
+- `fault.drop`/`fault.delay_ms`/`fault.vfd_code`/`fault.clear` на v2 отвечают
+  `{"status": "error", "message": "<команда> не поддерживается для protocol v2"}` —
+  перенос ручек на v2 вне T2.4.
+- `job_ms` на v2 не действует: длительность задания задаёт модель хода ядра.
+- `scene.job_done` на v2: `index` — счёт принятых `CVT_JOB` с 1; `t` ядра (время симуляции)
+  хост заменяет на `time.monotonic()` перед пересылкой.
+- Клиент ПЧ здесь не дублируется: протокол моста — `Services/vfd_comm`; цепочку
+  «ПК → робот → ПЧ» строит хаб (`transport: bridge`), sim о хабе не знает.
+
 ## Команда
 
-`sim_robot.status` → `{running, host, port, unit_id, writes_seen, state, world, journal}`,
-где `journal` — снимок `SimJournal.counters()` (`{}`, если сервер не поднят).
+`sim_robot.status` → `{running, host, port, unit_id, writes_seen, state, protocol, world, journal, faults}`,
+где `journal` — снимок `SimJournal.counters()` (`{}`, если сервер не поднят), `protocol` —
+`"v1"`/`"v2"` (`None` при неверном ключе конфига).
 
 ## Журнал заданий (line-sim Ф5.1)
 

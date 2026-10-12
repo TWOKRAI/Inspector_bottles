@@ -686,13 +686,17 @@ def test_ptp_move_completes_within_500_ticks_at_target_pose():
     assert core.read(REG["TLM_DONE_SEQ"], 1)[0] == move_res["seq"]
 
 
-def test_unimplemented_opcodes_are_internal_error():
-    # HOME/JOG_STEP/JOG_CONT реализованы в T2.2 (test_sim_v2_motion.py); здесь — только T2.3.
+def test_no_opcode_is_internal_error_after_t23():
+    # Ревью лида T2.3: прежний тест гнал CVT_JOB и SC_RUN с ОДНИМ seq — второй получал повтор ответа первого
+    # (идемпотентный mailbox) и не исполнялся (зелёный вхолостую). После T2.3 нереализованных опкодов нет:
+    # у каждого свой seq, и ни один не отвечает E_INTERNAL.
     core = fresh_core()
-    for name, argc in (("CVT_JOB", 10), ("SC_RUN", 3)):
-        res = cmd(core, 1, OP[name], *([0] * argc))
-        assert res["status"] == NAK, name
-        assert res["errno"] == ERR["E_INTERNAL"], name
+    res_sc = cmd(core, 1, OP["SC_RUN"], 0, 0, 0)  # count=0 вне 1..SC_CAP
+    assert res_sc["seq"] == 1
+    assert res_sc["status"] == NAK and res_sc["errno"] == ERR["E_SC_COUNT"]
+    res_cvt = cmd(core, 2, OP["CVT_JOB"], *([0] * 10))
+    assert res_cvt["seq"] == 2
+    assert res_cvt["errno"] != ERR["E_INTERNAL"]
 
 
 # --------------------------------------------------------------------------- #
