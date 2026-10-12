@@ -23,3 +23,70 @@ class RobotNotConnectedError(RobotCommError):
 
 class RobotJobError(RobotCommError):
     """Ошибка постановки/исполнения CVT-задания (координата вне лимита и т.п.)."""
+
+
+# --- протокол v2 (RobotClientV2). Тексты — без входных значений: значения лежат в полях. ---
+
+
+class WrongFirmware(RobotCommError):
+    """В 0x1040 нет протокола v2 (пустое пространство, прошивка v1 или иная версия).
+
+    Поле ``proto_ver`` — прочитанное ``TLM_PROTO_VER`` (0, если регистр пуст).
+    """
+
+    def __init__(self, proto_ver: int) -> None:
+        super().__init__("Прошивка робота не поддерживает протокол v2")
+        self.proto_ver = proto_ver
+
+
+class RobotNak(RobotCommError):
+    """Робот отклонил команду mailbox (``RES_STATUS`` = NAK).
+
+    ``errno`` — код ``ERR``; ``reason`` — код ``REASON`` (E_RANGE / E_SC_RECORD) или None;
+    ``text`` — текст для оператора; ``index`` — индекс точки сценария (E_SC_RECORD) или None;
+    ``rvals`` — первые ``RES_RVALC`` значений ответа.
+    """
+
+    def __init__(self, errno: int, reason: int | None, text: str, index: int | None, rvals: tuple[int, ...]) -> None:
+        super().__init__(text)
+        self.errno = errno
+        self.reason = reason
+        self.text = text
+        self.index = index
+        self.rvals = rvals
+
+
+class RobotCommandError(RobotCommError):
+    """Принятая роботом команда оборвана ошибкой (асинхронное событие ``ERR_*``).
+
+    ``errno`` — None, когда событие перекрыто другим и код не известен.
+    """
+
+    def __init__(self, seq: int, errno: int | None, text: str) -> None:
+        super().__init__(text)
+        self.seq = seq
+        self.errno = errno
+        self.text = text
+
+
+class RobotAborted(RobotCommandError):
+    """Команда прервана стопом (``E_ABORTED``) или принята роботом уже после стопа (О5)."""
+
+
+class RobotTimeout(RobotCommError):
+    """Робот не ответил за таймаут. ``stage`` ∈ {"response", "done", "stop_echo"}."""
+
+    def __init__(self, stage: str, seq: int | None = None) -> None:
+        super().__init__(f"Робот не ответил вовремя (этап {stage})")
+        self.stage = stage
+        self.seq = seq
+
+
+class RobotSyncError(RobotCommError):
+    """Зеркало параметров ``PMIR`` после записи не совпало с ожидаемым значением."""
+
+    def __init__(self, param_id: int, expected: int, actual: int) -> None:
+        super().__init__("Зеркало параметров робота не совпало с записанным")
+        self.param_id = param_id
+        self.expected = expected
+        self.actual = actual
