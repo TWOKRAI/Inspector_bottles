@@ -62,6 +62,7 @@ ticker-потока, ``drain`` — из потока GUI.
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 from collections import deque
@@ -87,6 +88,11 @@ from Services.robot_comm.core.registers import (
 
 #: Функциональные коды Modbus, означающие ЗАПИСЬ (для подписи строки журнала).
 _FC_NAMES = {5: "W1", 6: "W", 15: "W*", 16: "W*"}
+
+#: Строка события sim v2 с командой: ``[v2] CMD seq=<n> op=<ИМЯ>`` / ``[v2] DONE seq=<n> op=<ИМЯ>``.
+#: Прочие строки v2 (``ERR``, ``SC``, ``CVT``) тоже начинаются с ``[v2] ``, но
+#: сюда не попадают — для них тег пустой (см. :meth:`SimJournal.on_event`).
+_V2_LINE = re.compile(r"^\[v2\] (CMD|DONE) seq=\d+ op=(\S+)")
 
 
 @dataclass(frozen=True)
@@ -332,12 +338,31 @@ class SimJournal:
     # ------------------------------------------------------------------ #
 
     def on_event(self, message: str) -> None:
-        """Событие симулятора (зеркало ``print()`` прошивки) → правая колонка."""
+        """Событие симулятора (зеркало ``print()`` прошивки) → правая колонка.
+
+        Строки sim v2 (``RobotSimCoreV2.on_event``, формат — докстринг
+        ``sim_core_v2``) начинаются с ``[v2] ``: принятая ``CVT_JOB`` → тег
+        ``job`` и ``jobs_seen + 1``; ``DONE`` любой команды → тег ``done``,
+        ``jobs_done + 1`` только для ``CVT_JOB``; остальное — без тега. Строки
+        v1 разбираются как раньше.
+        """
         now = self._clock()
-        tag = "done" if "выполнено" in message else ""
+        v2 = _V2_LINE.match(message.strip())
         with self._lock:
-            if tag == "done":
-                self.jobs_done += 1
+            if v2 is not None:
+                kind, op = v2.group(1), v2.group(2)
+                tag = ""
+                if kind == "CMD" and op == "CVT_JOB":
+                    tag = "job"
+                    self.jobs_seen += 1
+                elif kind == "DONE":
+                    tag = "done"
+                    if op == "CVT_JOB":
+                        self.jobs_done += 1
+            else:
+                tag = "done" if "выполнено" in message else ""
+                if tag == "done":
+                    self.jobs_done += 1
             self._pending.append(JournalEntry(now, "out", message.strip(), tag))
 
     # ------------------------------------------------------------------ #
