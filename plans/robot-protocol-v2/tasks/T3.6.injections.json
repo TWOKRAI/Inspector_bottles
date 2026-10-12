@@ -100,7 +100,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_available_follows_modbus_without_pymodbus"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_available_follows_modbus_without_pymodbus"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
  },
  {
@@ -112,7 +114,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_lead.py::test_lazy_name_is_cached_in_module_dict[root]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_lazy_name_is_cached_in_module_dict[root]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
  },
  {
@@ -124,7 +128,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_lead.py::test_unknown_name_error_text_is_exact[root]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_unknown_name_error_text_is_exact[root]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
  },
  {
@@ -136,7 +142,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_lead.py::test_dir_lists_all_without_loading_client"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_dir_lists_all_without_loading_client"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
  },
  {
@@ -148,7 +156,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_comm_service_is_direct_object"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_comm_service_is_direct_object"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
  }
 ]
