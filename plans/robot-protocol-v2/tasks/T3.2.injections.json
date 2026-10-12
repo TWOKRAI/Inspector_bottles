@@ -1,0 +1,289 @@
+[
+ {
+  "id": "inj-1",
+  "prop": "граница куска — EXACT, не длина окна (plan_chunks режет ровно по half записей)",
+  "file": "Services/robot_comm/core/wire_v2.py",
+  "old": "last = next((j for j in range(end - 1, start - 1, -1) if kinds[j] != \"LINE_PASS\"), None)",
+  "new": "last = end - 1",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_200_points_run_in_chunks_with_exact_borders",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_stop_in_third_chunk_aborts_and_loads_nothing_more",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_golden_log_matches",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_yaml_address_corruption_breaks_golden",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_chunk_order_run_upload_done",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_offsets_alternate",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_line_pass_run_too_long_rejected_before_write",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_trailing_line_pass_cut_by_end_is_last_pass",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_live_server_run"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_chunk_order_run_upload_done",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_exception_from_on_progress_stops_robot",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_fc16_blocks_le_write_chunk",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_line_pass_run_too_long_rejected_before_write",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_live_server_run",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_offsets_alternate",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_second_run_chunks_raises",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_during_upload_no_more_blocks",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_trailing_line_pass_cut_by_end_is_last_pass",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_200_points_run_in_chunks_with_exact_borders",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_golden_log_matches",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_stop_in_third_chunk_aborts_and_loads_nothing_more",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_yaml_address_corruption_breaks_golden"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "смещения половин чередуются 0, 27 (обе половины — смещение 0)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "0 if k % 2 == 0 else half",
+  "new": "0",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_200_points_run_in_chunks_with_exact_borders",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_golden_log_matches",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_offsets_alternate"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_live_server_run",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_offsets_alternate",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_200_points_run_in_chunks_with_exact_borders",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_golden_log_matches"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "кусок k+1 грузится во время исполнения k (загрузка k+1 перенесена после wait_done(k))",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "                upload_cut = False\n                if k + 1 < len(chunks):\n                    upload_cut = marked() or not self._upload(records(k + 1), chunks[k + 1][2], by_generation)\n\n                def on_poll(tlm: Sequence[int], start: int = start) -> None:\n                    done = start + int(tlm[_toff(\"TLM_SC_INDEX\")])\n                    if done != progress[\"done\"]:\n                        progress[\"done\"] = done\n                        if on_progress is not None:\n                            on_progress(done, total)\n\n                self.wait_done(seq, on_poll=on_poll)\n",
+  "new": "                upload_cut = False\n\n                def on_poll(tlm: Sequence[int], start: int = start) -> None:\n                    done = start + int(tlm[_toff(\"TLM_SC_INDEX\")])\n                    if done != progress[\"done\"]:\n                        progress[\"done\"] = done\n                        if on_progress is not None:\n                            on_progress(done, total)\n\n                self.wait_done(seq, on_poll=on_poll)\n                if k + 1 < len(chunks):\n                    upload_cut = marked() or not self._upload(records(k + 1), chunks[k + 1][2], by_generation)\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_chunk_order_run_upload_done"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_chunk_order_run_upload_done"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "метка по поколению проверяется перед каждым блоком FC16 (abort в _upload всегда False)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "            if abort():\n",
+  "new": "            if False:\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_during_upload_no_more_blocks"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_during_upload_no_more_blocks"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "TLM_STOP_ACK проверяется перед загрузкой k+1 (проверка метки шага 6d(4) без чтения TLM, только поколение)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "upload_cut = marked() or not self._upload(",
+  "new": "upload_cut = by_generation() or not self._upload(",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "метка проверяется сразу после ACK SC_RUN (проверка шага 6d(3) удалена)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "                if marked():\n                    self._abort_after_ack(seq)\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "метка после ACK -> stop(HARD), затем RobotAborted (stop(HARD) в ветке 6d(3) удалён, RobotAborted остаётся)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "        try:\n            self.stop(STOP_LEVEL[\"HARD\"])\n        except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет RobotAborted\n",
+  "new": "        try:\n            pass\n        except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет RobotAborted\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "исключение после SC_RUN (кроме RobotAborted и NAK) -> stop(HARD) (вызов stop в обработчике 6f удалён)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "                try:\n                    self.stop(STOP_LEVEL[\"HARD\"])\n                except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет исходную\n",
+  "new": "                try:\n                    pass\n                except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет исходную\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_response_timeout_on_sc_run_writes_hard_stop",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_exception_from_on_progress_stops_robot"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_exception_from_on_progress_stops_robot",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_response_timeout_on_sc_run_writes_hard_stop"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "NAK на SC_RUN — без стопа (RobotNak не исключён из правила 6f)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "except (RobotAborted, RobotNak):",
+  "new": "except RobotAborted:",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_nak_on_sc_run_does_not_stop"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_nak_on_sc_run_does_not_stop"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "после округления — повторная проверка зоны (check_point/check_segment в encode_scenario пропущены)",
+  "file": "Services/robot_comm/core/wire_v2.py",
+  "old": "        reason = geometry.check_point(ws, x, y, z, rz)\n        if reason:\n            raise _fail(step, reason)\n        if prev is not None and record.kind != \"JOINT\":\n            reason = geometry.check_segment(ws, prev[0], prev[1], x, y)\n            if reason:\n                raise _fail(step, reason)\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_point_leaving_zone_after_rounding_rejected_on_pc"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_point_leaving_zone_after_rounding_rejected_on_pc"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "округление шагом round_step (quantize шагом провода 0.1 вместо round_step)",
+  "file": "Services/robot_comm/core/wire_v2.py",
+  "old": "_round_half_away(quantize(v, round_step) * scale)",
+  "new": "_round_half_away(quantize(v, 1 / scale) * scale)",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_roundtrip_within_half_round_step"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_roundtrip_within_half_round_step"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-12",
+  "prop": "round_step кратен шагу провода (условие кратности в валидаторе всегда истинно)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": " or abs(k - round(k)) > 1e-9",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_round_step_config_errors"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_round_step_config_errors"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "блок FC16 <= WRITE_CHUNK (размер блока WRITE_CHUNK + 6)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "chunk = CONSTANTS[\"WRITE_CHUNK\"]\n",
+  "new": "chunk = CONSTANTS[\"WRITE_CHUNK\"] + 6\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_fc16_blocks_le_write_chunk",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_golden_log_matches"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_fc16_blocks_le_write_chunk",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_golden_log_matches"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "адрес буфера читается из CONSTANTS в момент вызова (адрес SC_BASE берётся из значения, вычисленного при импорте)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "    def _upload(self, records: Sequence[Sequence[int]], offset: int, abort: Callable[[], bool]) -> bool:\n        \"\"\"``upload`` с проверкой ``abort()`` перед каждым блоком: ``True`` -> блок не пишется, возврат ``False``.\"\"\"\n        stride = CONSTANTS[\"SC_STRIDE\"]\n        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:\n            raise ValueError(\"offset: ожидается целое >= 0\")\n        if offset + len(records) > CONSTANTS[\"SC_CAP\"]:\n            raise ValueError(\"offset + число записей больше SC_CAP\")\n        flat: list[int] = []\n        for i, record in enumerate(records):\n            if len(record) != stride:\n                raise ValueError(f\"запись #{i}: число слов не равно SC_STRIDE\")\n            flat.extend(_encode_word(word, f\"запись #{i}, слово #{j}\") for j, word in enumerate(record))\n        self._ensure_probed()\n        base = CONSTANTS[\"SC_BASE\"] + offset * stride\n",
+  "new": "    def _upload(\n        self,\n        records: Sequence[Sequence[int]],\n        offset: int,\n        abort: Callable[[], bool],\n        _sc_base: int = CONSTANTS[\"SC_BASE\"],\n    ) -> bool:\n        \"\"\"``upload`` с проверкой ``abort()`` перед каждым блоком: ``True`` -> блок не пишется, возврат ``False``.\"\"\"\n        stride = CONSTANTS[\"SC_STRIDE\"]\n        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:\n            raise ValueError(\"offset: ожидается целое >= 0\")\n        if offset + len(records) > CONSTANTS[\"SC_CAP\"]:\n            raise ValueError(\"offset + число записей больше SC_CAP\")\n        flat: list[int] = []\n        for i, record in enumerate(records):\n            if len(record) != stride:\n                raise ValueError(f\"запись #{i}: число слов не равно SC_STRIDE\")\n            flat.extend(_encode_word(word, f\"запись #{i}, слово #{j}\") for j, word in enumerate(record))\n        self._ensure_probed()\n        base = _sc_base + offset * stride\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_yaml_address_corruption_breaks_golden"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_yaml_address_corruption_breaks_golden"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "upload пишет слова & 0xFFFF (маска в upload снята)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "_encode_word(word, f\"запись #{i}, слово #{j}\") for j, word in enumerate(record)",
+  "new": "_encode_word(word, f\"запись #{i}, слово #{j}\") and word for j, word in enumerate(record)",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_upload_masks_signed_words_to_u16"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_upload_masks_signed_words_to_u16"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "ряд LINE_PASS >= half отвергается (окно без EXACT режется по концу окна, без CompileError)",
+  "file": "Services/robot_comm/core/wire_v2.py",
+  "old": "if kinds[j] != \"LINE_PASS\"), None)",
+  "new": "if kinds[j] != \"LINE_PASS\"), end - 1 if end - start == half else None)",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_line_pass_run_too_long_rejected_before_write"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_line_pass_run_too_long_rejected_before_write"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "второй run_chunks при взведённом _sc_active -> RuntimeError (проверка флага удалена)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "            if self._sc_active:\n                raise RuntimeError(\"run_chunks уже идёт на этом клиенте\")\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_second_run_chunks_raises"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_second_run_chunks_raises"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-18",
+  "prop": "прогресс = start_k + TLM_SC_INDEX (start_k не прибавляется)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "done = start + int(tlm[_toff(\"TLM_SC_INDEX\")])",
+  "new": "done = int(tlm[_toff(\"TLM_SC_INDEX\")])",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_200_points_run_in_chunks_with_exact_borders",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_stop_in_third_chunk_aborts_and_loads_nothing_more"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_exception_from_on_progress_stops_robot",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_200_points_run_in_chunks_with_exact_borders",
+   "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_stop_in_third_chunk_aborts_and_loads_nothing_more"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ }
+]
