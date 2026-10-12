@@ -4,6 +4,7 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-10-12 (Task 1.2a плана `lifecycle-owner-scope`, ADR-PM-054):** корень процесса `planes | transport | work` с барьерами, `stop()` = `cancel()`, один `close_root()` в раннере, хук `_before_observability_teardown` удалён; выжившие → выход 76. Живой стенд и приёмка 1.2a — за лидом.
 - **2026-10-06 (T1 — сборкой владеет поток-исполнитель, ADR-PM-053):** в `lifecycle/gc_discipline.py`
   слот процесса `collect_on` / `collection_owner` / `paused_gc` / `suspend_collection_owner`, `GcCollectionOwner`,
   `GcOwnerStats` (Stability: lite). `GcDiscipline` — две правки: `collect_scheduled` уступает занятому слоту,
