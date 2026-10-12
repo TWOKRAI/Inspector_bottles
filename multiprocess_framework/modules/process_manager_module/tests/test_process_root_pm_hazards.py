@@ -374,6 +374,68 @@ def test_join_during_foreign_build_waits_and_summary_follows_group_request_stop(
     assert journal.count("build.start") == 1, journal
 
 
+class _ObservingGroup:
+    """Группа-выживший: ``join_until`` блокирует 0.3 с и возвращает ``False``; ``result()`` — то, что он увидел."""
+
+    def __init__(self, journal: list[str]) -> None:
+        self._journal = journal
+        self._stopped = True  # снимок до join_until наивно говорит «остановлен»
+
+    def request_stop(self) -> None:
+        self._journal.append("group.request_stop")
+
+    def join_until(self, deadline: float) -> bool:
+        self._journal.append("group.join_until.start")
+        time.sleep(0.3)
+        self._stopped = False
+        self._journal.append("group.join_until.end")
+        return False
+
+    def kill(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def result(self) -> dict[str, bool]:
+        # Выживший: join_until вернул False, область close() не зовёт — карту нельзя брать из close().
+        return {"cam": self._stopped}
+
+
+class _ObservingRegistry:
+    def __init__(self, journal: list[str]) -> None:
+        self._group = _ObservingGroup(journal)
+
+    def children_stop(self, *, mark_reader_gone: bool) -> _ObservingGroup:
+        return self._group
+
+    def exit_report(self, name: str) -> dict:
+        return {"released": 0, "buffered_dropped": 0, "reported": False}
+
+
+def test_summary_is_written_after_children_join_and_map_is_post_death() -> None:
+    """Сводка пишется ПОСЛЕ ожидания детей, а карта — итог после ``join_until`` (выживший), не снимок до него."""
+    journal: list[str] = []
+    pm = _real_pm_with(_ObservingRegistry(journal))
+    warnings: list[str] = []
+    summary_maps: list[dict] = []
+    real_warning, real_publish = pm._log_warning, pm._publish_stop_summary
+    pm._log_warning = lambda msg, *a, **k: (warnings.append(str(msg)), real_warning(msg, *a, **k))
+    pm._publish_stop_summary = lambda result: (
+        journal.append("summary"),
+        summary_maps.append(dict(result)),
+        real_publish(result),
+    )
+    try:
+        done, _, error = _call_bounded(pm.shutdown)
+        assert done and error is None, repr(error)
+    finally:
+        _call_bounded(pm.shutdown)
+    assert journal.index("group.join_until.end") < journal.index("summary"), journal
+    assert summary_maps == [{"cam": False}], summary_maps
+    assert any("stop summary" in line and "not reported/lost: ['cam']" in line for line in warnings), warnings
+
+
 def test_phase1_error_reaches_report_errors_on_runner_path() -> None:
     """Исключение ``children_stop()`` в фазе 1 при ``stop()`` + ``close_root()`` попадает в ``errors`` отчёта корня."""
     pm = _real_pm_with(_RaisingRegistry())

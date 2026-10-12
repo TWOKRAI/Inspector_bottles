@@ -283,12 +283,17 @@ def test_initialize_after_shutdown_is_refused_without_new_root() -> None:
 def test_static_no_teardown_hook() -> None:
     """Ноль ``_before_observability_teardown`` в коде фреймворка и прототипа (без tests, *.py)."""
     hits: list[str] = []
+    scanned = 0
     for top in ("multiprocess_framework", "multiprocess_prototype"):
         for path in (_REPO / top).rglob("*.py"):
-            if "tests" in path.parts or ".claude" in path.parts:
+            # Фильтр по пути ОТНОСИТЕЛЬНО корня репозитория: само дерево может лежать под
+            # ``.claude/worktrees/``, и абсолютный путь отсёк бы все файлы (пустая проверка).
+            if "tests" in path.relative_to(_REPO).parts:
                 continue
+            scanned += 1
             if "_before_observability_teardown" in path.read_text(encoding="utf-8", errors="replace"):
                 hits.append(str(path.relative_to(_REPO)))
+    assert scanned > 800, f"просмотрено {scanned} файлов: проверка пуста"
     assert hits == []
 
 
