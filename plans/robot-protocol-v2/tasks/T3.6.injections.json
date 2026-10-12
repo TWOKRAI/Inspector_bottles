@@ -13,7 +13,14 @@
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.modbus]",
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.modbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[pymodbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[Services.modbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[Services.robot_comm.core.client]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[pymodbus]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -25,7 +32,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client_v2]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client_v2]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -37,7 +46,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_root_names_are_direct_objects[RobotClient]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_root_names_are_direct_objects[RobotClient]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -49,7 +60,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_unknown_name_raises_attribute_error[Services.robot_comm.core]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_unknown_name_raises_attribute_error[Services.robot_comm.core]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -62,7 +75,10 @@
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_names_are_direct_objects[DrawPoint]",
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_star_import_gives_all_names[core]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_names_are_direct_objects[DrawPoint]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_star_import_gives_all_names[core]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -72,7 +88,7 @@
   "old": "\"ROBOT_AVAILABLE\": (\"Services.modbus\", \"MODBUS_AVAILABLE\"),",
   "new": "\"ROBOT_AVAILABLE\": (\"builtins\", \"True\"),",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  }
 ]
