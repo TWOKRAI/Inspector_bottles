@@ -4,7 +4,7 @@
 FW_BUILD = 0x7CC1
 -- ===== 10_generated.lua =====
 -- Таблицы REG/OP/ERR/PDEF/... подставляются из delta_v2.yaml (codegen.lua_block).
--- ===== BEGIN GENERATED (delta_v2.yaml 6f7b966e) =====
+-- ===== BEGIN GENERATED (delta_v2.yaml cf6affdc) =====
 
 REG = {
   CMD_FLAG = 0x1000,
@@ -642,6 +642,7 @@ C = {
   SC_CAP = 55,
   WRITE_CHUNK = 30,
   READ_MAX = 125,
+  WIRE_SCALE = 10,
   W_MIN = -32767,
   W_MAX = 32767,
   PMIR_MAGIC_VALUE = 0x5632,

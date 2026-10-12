@@ -56,6 +56,8 @@ logs/
 **/logs/
 *.log
 *.log.*
+# Эталоны golden робота — в git (T3.2): самоссылочные логи записей
+!Services/robot_comm/tests/golden/*.log
 # Артефакты живых прогонов: один каталог на все прогоны, подкаталог на прогон
 # (INSPECTOR_LOG_DIR=logs_live/<дата>_<задача>_<точка>). Конвенция и уборка —
 # в logs_live/README.md; сам README трекается, содержимое — нет.

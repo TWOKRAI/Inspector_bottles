@@ -188,6 +188,9 @@ sequenceDiagram
 | +4 | OP | u16 | `KIND + 256 · ACTION` |
 | +5 | APARAM | u16 | аргумент действия |
 
+Масштаб X/Y/Z/RZ: 1 единица провода = 1/`WIRE_SCALE` мм (°), `WIRE_SCALE = 10` (`delta_v2.yaml`, constants); шаг
+округления программы на ПК — настройка робота, кратная шагу провода (T3.2).
+
 KIND: 0 LINE (`MovL`, точный стоп) / 1 LINE_PASS (`MovL` + `PASS()`, сглаживание) / 2 JOINT (`MovP`). Код 3 — резерв под арочный ход `MArchP` (RL 1-33) для pick-and-place.
 
 Точки, которые пишет прошивка, задаются по X/Y/Z/**RZ** — имя пункта 4-й оси в `WritePoint`/`ReadPoint` именно `"RZ"` (RL 5-9..5-10; v1 пишет `"R"`). Перед ходом прошивка сверяет точку через `ReadPoint` ⚑.
