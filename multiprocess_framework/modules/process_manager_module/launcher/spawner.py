@@ -14,24 +14,10 @@ from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import SharedResourcesManager
-from ..core.process_registry import KILL_CONFIRM_S, TERMINATE_GRACE_S
+from ..core.stop_budget import DEFAULT_SHUTDOWN_TIMEOUT_S, SHUTDOWN_TIMEOUT_KEY, stop_budget
 from .process_tree_guard import ProcessTreeGuard
 
 _logger = FallbackLogger(__name__)
-
-# Запас на собственный teardown PM после ``stop_all`` (консоль, WorkerManager,
-# RouterManager, выход интерпретатора). Штатно — доли секунды (ADR-PMM-031).
-PM_TEARDOWN_MARGIN_S = 1.5
-
-
-def outer_stop_budget(graceful_s: float) -> float:
-    """Сколько spawner ждёт PM: внутренний бюджет PM (graceful + terminate + kill) + запас.
-
-    Строго больше внутренней эскалации ``ProcessRegistry._stop_many`` при том же
-    graceful — иначе spawner добивает PM посреди эскалации, и зависший ребёнок
-    остаётся без того, кто его убьёт (Task 1.4, ADR-PMM-031).
-    """
-    return float(graceful_s) + TERMINATE_GRACE_S + KILL_CONFIRM_S + PM_TEARDOWN_MARGIN_S
 
 
 PROCESS_MANAGER_CLASS_PATH = (
@@ -102,8 +88,8 @@ class ProcessSpawner:
             process_config.update(self._orchestrator_config)
         # Бюджет graceful PM = наш graceful, если оркестратору не задан свой явно
         # (ADR-PMM-031): внешний join выводится из того же числа, что и внутренний.
-        if process_config.get("shutdown_timeout") is None:
-            process_config["shutdown_timeout"] = self._stop_timeout
+        if process_config.get(SHUTDOWN_TIMEOUT_KEY) is None:
+            process_config[SHUTDOWN_TIMEOUT_KEY] = self._stop_timeout
         custom = {"process_config": process_config}
         # Передаём system_ready_event в ProcessManagerProcess через bundle (ADR-116).
         # multiprocessing.Event pickle-safe и безопасно пробрасывается через spawn.
@@ -160,22 +146,44 @@ class ProcessSpawner:
             _logger.warning("Received signal %s, shutting down...", signum)
         self.stop()
 
-    def _pm_graceful_budget(self) -> float:
-        """Graceful-бюджет, с которым PM останавливает детей (его ``shutdown_timeout``).
+    def _warn(self, message: str) -> None:
+        if self._logger:
+            self._logger.warning(message)
+        else:
+            _logger.warning(message)
 
-        Зеркалит чтение в PM: ``get_config("shutdown_timeout") or 5.0``.
+    def _stop_graceful_s(self, timeout: Optional[float]) -> float:
+        """Graceful-бюджет для ``stop()``; никогда не бросает (зовётся из обработчика сигнала).
+
+        Явный ``timeout`` > 0 и конечный — как есть. Иначе — graceful, с которым PM
+        останавливает детей: ``stop_budget(<явный shutdown_timeout оркестратора, иначе
+        stop_timeout>)["pm_graceful_s"]`` (Task 1.1, ADR-PMM-035). Явный ``timeout`` ≤ 0,
+        NaN или inf заменяется этим умолчанием с предупреждением: исключение до
+        ``system_stop_event.set()`` оставило бы систему живой.
         """
-        explicit = self._orchestrator_config.get("shutdown_timeout")
+        if timeout is not None:
+            try:
+                graceful = stop_budget(timeout)["pm_graceful_s"]
+                if timeout > 0:
+                    return graceful
+            except (TypeError, ValueError):
+                pass
+            self._warn(f"stop(timeout): значение типа {type(timeout).__name__} не годится как бюджет — взято умолчание")
+        explicit = self._orchestrator_config.get(SHUTDOWN_TIMEOUT_KEY)
         value = explicit if explicit is not None else self._stop_timeout
-        return float(value or 5.0)
+        try:
+            return stop_budget(value)["pm_graceful_s"]
+        except (TypeError, ValueError) as exc:
+            self._warn(f"stop: {exc} — взято {DEFAULT_SHUTDOWN_TIMEOUT_S}s")
+            return DEFAULT_SHUTDOWN_TIMEOUT_S
 
     def stop(self, timeout: Optional[float] = None) -> None:
-        # timeout — graceful-бюджет; join на PM выводится по той же формуле, что и
-        # для бюджета по умолчанию (ADR-PMM-031). Явный timeout меньше бюджета PM
-        # снова даёт внешнему join кончиться раньше внутренней эскалации — тогда
-        # зависшего ребёнка добивает guard (группа PM), а не PM.
-        graceful = timeout if timeout is not None else self._pm_graceful_budget()
-        effective_timeout = outer_stop_budget(graceful)
+        # timeout — graceful-бюджет; join на PM выводится из него той же формулой
+        # ``stop_budget``, что и бюджет PM (ADR-PMM-031, ADR-PMM-035). Явный timeout
+        # меньше бюджета PM снова даёт внешнему join кончиться раньше внутренней
+        # эскалации — тогда зависшего ребёнка добивает guard (группа PM), а не PM.
+        graceful = self._stop_graceful_s(timeout)
+        effective_timeout = stop_budget(graceful)["outer_s"]
 
         if self._logger:
             self._logger.info("Stopping system...")

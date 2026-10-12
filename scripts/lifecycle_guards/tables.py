@@ -4,6 +4,7 @@
 PUBLISHERS и ALLOWLIST скопировано один в один из
 ``plans/2026-10-03_lifecycle-owner-scope/tasks/0.5a.{publishers,allowlist}.tsv``
 (замер лида 2026-10-11 на 4381fe9d4); ничего не выведено и не добавлено.
+Правлено в 1.1: четыре записи стопа детей PM удалены, причины «FROZEN Ф1» переписаны.
 """
 
 from __future__ import annotations
@@ -346,69 +347,57 @@ ALLOWLIST: dict[tuple[str, str], AllowEntry] = {
     ("R3", "Services/robot_comm/server/sim_robot.py"): AllowEntry(1, "FROZEN Ф4 (ждёт потребителя)"),
     ("R3", "backend_ctl/recorder.py"): AllowEntry(1, "FROZEN Ф4 (ждёт потребителя)"),
     ("R3", "multiprocess_framework/modules/channel_routing_module/buffers/async_sender_buffer.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/config_module/tools/watcher.py"): AllowEntry(
-        2, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        2, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/console_module/core/console_manager.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/logger_module/core/logger_core.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
-    ),
-    ("R3", "multiprocess_framework/modules/process_manager_module/core/process_registry.py"): AllowEntry(
-        2, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/process_manager_module/launcher/spawner.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "остаётся после 1.1: цепочка стопа самого PM / цикл Ctrl+C / добой по PID — вне группы детей (О4)"
     ),
     ("R3", "multiprocess_framework/modules/process_manager_module/launcher/system_launcher.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "остаётся после 1.1: цепочка стопа самого PM / цикл Ctrl+C / добой по PID — вне группы детей (О4)"
     ),
     ("R3", "multiprocess_framework/modules/router_module/channels/queue_channel.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/router_module/channels/socket_channel.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/router_module/channels/socket_client.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R3", "multiprocess_framework/modules/statistics_module/core/aggregation_window.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R4", "Services/hikvision_camera/plugin/plugin.py"): AllowEntry(2, "FROZEN Ф4 (ждёт потребителя)"),
     ("R4", "backend_ctl/harness.py"): AllowEntry(3, "дерево процессов ОС (ProcessTreeGuard, П4 stop-ownership)"),
     ("R4", "multiprocess_framework/modules/console_module/platforms/unix.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R4", "multiprocess_framework/modules/console_module/platforms/windows.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
     ("R4", "multiprocess_framework/modules/frontend_module/application/thread_manager.py"): AllowEntry(
         1, "мегаплан GUI"
     ),
-    ("R4", "multiprocess_framework/modules/process_manager_module/core/process_registry.py"): AllowEntry(
-        4, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
-    ),
     ("R4", "multiprocess_framework/modules/process_manager_module/launcher/pid_registry.py"): AllowEntry(
-        1, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        1, "остаётся после 1.1: цепочка стопа самого PM / цикл Ctrl+C / добой по PID — вне группы детей (О4)"
     ),
     ("R4", "multiprocess_framework/modules/process_manager_module/launcher/process_tree_guard.py"): AllowEntry(
         3, "дерево процессов ОС (ProcessTreeGuard, П4 stop-ownership)"
     ),
     ("R4", "multiprocess_framework/modules/process_manager_module/launcher/spawner.py"): AllowEntry(
-        2, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
+        2, "остаётся после 1.1: цепочка стопа самого PM / цикл Ctrl+C / добой по PID — вне группы детей (О4)"
     ),
     ("R4", "multiprocess_prototype/frontend/widgets/tabs/services/neural/ml_train_section.py"): AllowEntry(
         1, "мегаплан GUI"
-    ),
-    ("R5", "multiprocess_framework/modules/process_manager_module/launcher/spawner.py"): AllowEntry(
-        3, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
-    ),
-    ("R5", "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py"): AllowEntry(
-        2, "FROZEN Ф1 (stop_budget, ждёт 1.1)"
     ),
     ("R6", "multiprocess_framework/modules/frontend_module/core/window_registry.py"): AllowEntry(1, "мегаплан GUI"),
     ("R6", "multiprocess_framework/modules/frontend_module/tabs/lazy_tab.py"): AllowEntry(1, "мегаплан GUI"),
