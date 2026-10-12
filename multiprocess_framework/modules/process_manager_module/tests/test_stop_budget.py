@@ -152,6 +152,48 @@ def test_stop_many_with_bad_timeout_does_not_raise() -> None:
     assert registry.stop_one("ghost", timeout="bad") is True  # type: ignore[arg-type]
 
 
+class _TermProc:
+    """Живой дублёр процесса: умирает от ``terminate()``; ``stop_event`` не слушает."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.pid = 1
+        self._alive = True
+        self.terminated = 0
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+    def terminate(self) -> None:
+        self.terminated += 1
+        self._alive = False
+
+    def kill(self) -> None:
+        self._alive = False
+
+
+@pytest.mark.parametrize("bad", [math.nan, None, "x", math.inf, True])
+def test_stop_many_bad_timeout_reaches_scope_without_raising(bad: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сторожит: вызов ``self._stop_timeout_s(timeout)`` в ``_stop_many`` — до ``open_scope`` доходит
+    приведённый срок. Сырой NaN/None/строка/inf в ``open_scope`` дал бы ``ValueError``/``TypeError``
+    посреди стопа. Имя живое: путь идёт через область, а не ранний возврат «призрака».
+    Умолчание реестра уменьшено патчем, чтобы не ждать 5 с; проверяется поведение, а не время."""
+    import time
+
+    from ..core import process_registry as reg_mod
+
+    monkeypatch.setattr(reg_mod, "DEFAULT_SHUTDOWN_TIMEOUT_S", 0.1)
+    logger = _RecLogger()
+    registry = ProcessRegistry(logger=logger)
+    proc = _TermProc("Q")
+    registry.add_process(proc)
+    t0 = time.monotonic()
+    assert registry.stop_many(["Q"], timeout=bad) == {"Q": True}
+    assert time.monotonic() - t0 < 3.0
+    assert proc.terminated == 1  # эскалация прошла: graceful-срок умолчания, затем terminate
+    assert any("взято умолчание" in w for w in logger.warnings)
+
+
 # ---------------------------------------------------------------------------
 # Спавнер: stop(timeout) из обработчика сигнала не бросает
 # ---------------------------------------------------------------------------

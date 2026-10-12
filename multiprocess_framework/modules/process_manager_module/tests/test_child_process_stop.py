@@ -117,6 +117,17 @@ def test_is_alive_failure_is_not_a_confirmed_death() -> None:
     assert marks == []
 
 
+def test_is_alive_failure_warns_once_per_name() -> None:
+    """Сторожит: набор ``_alive_error_logged`` — сбой ``is_alive()`` даёт одну строку на имя,
+    а не строку на каждый проход опроса (ревью р.1: 21 строка за 1 с, ~140 за стоп)."""
+    logger = _RecLogger()
+    cs = ChildProcessStop({"X": _Proc(alive_raises=True)}, {}, logger=logger, poll_s=0.05)
+    assert _bounded(lambda: cs.join_until(time.monotonic() + 1.0)) is False
+    assert cs.survivors() == ("X",)
+    cs.close()
+    assert sum("is_alive()" in line for line in logger.lines) == 1
+
+
 def test_request_stop_from_other_thread_during_join_marks_once() -> None:
     """Сторожит: лок вокруг ``_dead`` — ``request_stop``/``survivors`` из другого потока во время
     ``join_until`` не дают второй метки и не роняют ожидание."""

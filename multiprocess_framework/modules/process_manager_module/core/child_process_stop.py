@@ -71,6 +71,8 @@ class ChildProcessStop:
         # Имена с подтверждённой смертью; каждое получило ровно одну попытку метки.
         self._dead: set[str] = set()
         self._missing_event_logged: set[str] = set()
+        # Сбой is_alive() пишется одной строкой на имя, а не на каждом проходе опроса.
+        self._alive_error_logged: set[str] = set()
         # Точка отсчёта для текста «did not stop in <N>s»: request_stop(), а без него создание.
         self._stop_requested_at = time.monotonic()
         self._stop_requested = False
@@ -105,7 +107,11 @@ class ChildProcessStop:
         try:
             return bool(proc.is_alive())
         except Exception as exc:  # noqa: BLE001 — процесс, чьё состояние не прочесть, считаем живым
-            self._emit("warning", f"is_alive() для '{name}' упал: {exc}")
+            with self._lock:
+                first = name not in self._alive_error_logged
+                self._alive_error_logged.add(name)
+            if first:
+                self._emit("warning", f"is_alive() для '{name}' упал: {exc} — считается живым")
             return True
 
     def _confirm(self, name: str, proc: Any) -> None:
