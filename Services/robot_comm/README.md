@@ -178,7 +178,7 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
 |---|---|
 | `probe()` | только чтения: 0x1010..0x105F, `TLM_PROTO_VER` (0 или старший байт ≠ 0x02 -> `WrongFirmware`), слоты `PMIR` сторожа и поводка |
 | `cmd(op, args) -> CmdResult` | транзакция mailbox под `_mailbox_lock`; NAK -> `RobotNak(errno, reason, text, index, rvals)` |
-| `wait_done(seq)` | завершение последней команды `done_seq`; `RobotAborted` / `RobotCommandError` / `RobotTimeout("done")` |
+| `wait_done(seq, *, on_poll=None)` | завершение последней команды `done_seq`; `on_poll(tlm)` после каждого чтения блока TLM; `RobotAborted` / `RobotCommandError` / `RobotTimeout("done")` |
 | `poll_errors()` | асинхронные события `ERR_EVT` (`ErrorEvent`, `missed`) |
 | `stop(level) -> StopResult` | `STOP_REQ = stop_seq*4 + level`, ждёт эхо; `mailbox` не берёт |
 | `kick_heartbeat()` / `jog_lease()` | `HB_PC` / `JOG_LEASE` = прежнее + 1, одна запись FC6; периоды `heartbeat_period_s` / `jog_lease_period_s` |
@@ -228,10 +228,54 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
 - **Ошибки.** Тексты исключений без входных значений; значения — в полях (`errno`, `seq`, `stage`, ...).
 - Конфиг: `ClientV2Config.from_dict({...})`; `res_timeout_s` и `soft_echo_timeout_s` не меньше `longest_gap_s`.
 
+## Клиент v2: обёртки, буфер сценария и пинг-понг (`core/client_v2.py`, `core/wire_v2.py`, T3.2)
+
+- **Обёртки опкодов.** На каждый опкод `OP` — метод клиента, аргументы в порядке `OP_SPEC`; таблица
+  `RobotClientV2.WRAPPERS` («опкод -> имя метода», ключи == `set(OP)`): `ping() -> rvals`, `clear_err()`,
+  `ptp_move(x, y, z, rz, kind, spd_pct)`, `home(spd_pct)`, `jog_step(dx, dy, dz, drz, spd_pct)`,
+  `jog_cont(direction, speed)`, `cvt_job(ecap, pick_x, pick_y, pick_z, flags, place_x, place_y, place_z, place_rz)`
+  (`ecap` u32 делится на `dw_lo`/`dw_hi`), `sc_run(count, sc_id, offset)`, `servo(on)`, `do_set(channel, on)`,
+  `param_set(name, raw)`, `param_get(name) -> int`, `param_apply()`. Координаты обёрток — в мм и °, кодируются шагом
+  провода (×`WIRE_SCALE`, половина от нуля), не `round_step`; `kind` — имя из `KIND`, параметр — имя из `PARAM_ID`.
+  Обёртки — только `cmd()`: ждать завершения — вызывающему (`wait_done(result.seq)`).
+- **Кодировщик — `core/wire_v2.py`** (чистые функции): `quantize`, `encode_scenario(scenario, *, params, round_step)`
+  -> по 6 слов u16 на запись (§7.1), `decode_record`, `plan_chunks`. После округления зона проверяется заново
+  (`check_point` каждой записи, `check_segment` от предыдущей округлённой для не-JOINT): точка у границы может выйти
+  за зону — отказ `CompileError(шаг, 4/5)` на ПК, до записи в робота.
+- **Шаг округления `ClientV2Config.round_step`** (мм и °, по умолчанию 0.1 — шаг провода): кратен 0.1 и не меньше его
+  (0.1, 0.2, 0.5 — да; 0.05, 0.15 — `ValueError`, через `from_dict` — «некорректные поля: round_step»). Путь
+  GUI -> конфиг -> бэкенд — T5.1/T6.1.
+- **`upload(records, offset)`** — слова записей в `SC_BUF` блоками FC16 по <= `WRITE_CHUNK` (30) регистров, `& 0xFFFF`;
+  проверка до записи (`ValueError`). `_mailbox_lock` не берёт. Адреса и размеры — из `CONSTANTS` в момент вызова.
+- **`run_chunks(scenario, *, params, on_progress=None) -> RunReport`** — сценарий кусками по половинам буфера
+  (`SC_CAP // 2` = 27 записей, смещения 0, 27, 0, …; запись 54 не используется). Кодирование и нарезка — целиком до
+  первой записи. Кусок k: метка стопа -> `SC_RUN` -> метка после ACK (взведена -> `stop(HARD)` и `RobotAborted`) ->
+  загрузка куска k+1 в другую половину -> `wait_done`. `on_progress(done, total)` — по `TLM_SC_INDEX` (пишется только
+  на EXACT-точках) и `(total, total)` в конце. `RunReport.chunks` — `(start, count, offset)`. `RunReport` не
+  экспортируется из `core` — импорт из `Services.robot_comm.core.client_v2`.
+- **Граница куска — только EXACT-запись** (KIND ≠ LINE_PASS). Ряд из 27 и более LINE_PASS подряд не делится на куски:
+  `CompileError` до любой записи. Генераторам (T3.4): EXACT не реже чем через 26 записей.
+- **Метка стопа.** Снимок поколения стопа клиента и `TLM_STOP_ACK` в начале; метка — поколение сменилось или
+  `TLM_STOP_ACK` другой. **Стоп другого клиента виден только на чтениях TLM — до загрузки и после ACK SC_RUN**; внутри
+  загрузки сверяется только поколение (без чтений), поэтому за чужим стопом может уйти вся загрузка k+1 — SC_RUN после
+  неё не будет, кусок k оборвёт сам робот. **Стоп во время загрузки: один блок FC16 может уже быть в полёте**, дальше
+  ни блока, ни SC_RUN; итог — `RobotAborted`.
+- **Исключения.** `RobotAborted` и `RobotNak` на SC_RUN (команда не начата; HARD оборвал бы чужой ход при `E_BUSY`)
+  — наружу без стопа. Любое другое исключение после первого SC_RUN (`RobotTimeout("response"/"done")`,
+  `RobotCommandError`, ошибка транспорта, исключение `on_progress`) -> `stop(HARD)`, его ошибка — заметка к исходному,
+  затем исходное наружу (`cmd()` не повторяется).
+- **Pre: на время `run_chunks` никаких `done_seq`-`cmd()` на этом клиенте** — `wait_done` держит один слот последней
+  команды. Второй `run_chunks` на том же клиенте -> `RuntimeError` (флаг `_sc_active`; замок на весь прогон не держится).
+- **Пульс во время сценария — поток вызывающего** (драйвер T5.1): `run_chunks` не пульсирует, а кусок может идти
+  дольше `P_WDG_TIMEOUT_MS` (3000 мс) — вызывающий зовёт `kick_heartbeat()` из своего потока с периодом
+  `heartbeat_period_s`.
+
 ## Тесты
 
 ```bash
 pytest Services/robot_comm        # карта/клиент/runtime — fake; e2e — TCP sim
 pytest Services/robot_comm/tests/test_client_v2.py                # клиент v2: гонки, порядок, seq, О3, О5 (fake + один настоящий стек)
 pytest Services/robot_comm/tests/test_client_v2_acceptance.py     # приёмка против настоящего sim v2 (TCP)
+pytest Services/robot_comm/tests/test_client_v2_chunks.py         # T3.2: порядок пинг-понга, метка стопа, исключения
+pytest Services/robot_comm/tests/test_client_v2_chunks_acceptance.py  # T3.2: слепая приёмка, golden tests/golden/t32_run_chunks.log
 ```

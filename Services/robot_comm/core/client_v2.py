@@ -44,6 +44,7 @@ Pre (общее): первый пишущий вызов (``cmd``, ``stop``, ``s
 
 from __future__ import annotations
 
+import math
 import operator
 import random
 import threading
@@ -52,11 +53,23 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from Services.robot_comm.core import wire_v2
 from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID
-from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, ERR_TEXT, OP, OP_SPEC, REASON_TEXT, REG, STOP_LEVEL
+from Services.robot_comm.core.protocol_v2 import (
+    CONSTANTS,
+    ERR,
+    ERR_TEXT,
+    KIND,
+    OP,
+    OP_SPEC,
+    REASON_TEXT,
+    REG,
+    STOP_LEVEL,
+)
 from Services.robot_comm.errors import (
     RobotAborted,
     RobotCommandError,
@@ -68,11 +81,15 @@ from Services.robot_comm.errors import (
 )
 from Services.robot_comm.interfaces import DeviceTransport
 
+if TYPE_CHECKING:
+    from Services.robot_comm.programs.program import Scenario
+
 __all__ = [
     "ClientV2Config",
     "CmdResult",
     "ErrorEvent",
     "RobotClientV2",
+    "RunReport",
     "StopResult",
     "SyncReport",
 ]
@@ -150,6 +167,17 @@ class ClientV2Config(BaseModel):
     done_timeout_s: float = Field(default=30.0, gt=0)
     stop_echo_timeout_s: float = Field(default=1.0, gt=0)  # HARD / HALT
     soft_echo_timeout_s: float = Field(default=2.0, gt=0)
+    #: Шаг округления координат сценария, мм и °: кратен шагу провода ``1 / WIRE_SCALE`` и не меньше его.
+    round_step: float = 1 / CONSTANTS["WIRE_SCALE"]
+
+    @field_validator("round_step")
+    @classmethod
+    def _round_step_on_wire_grid(cls, v: float) -> float:
+        k = v * CONSTANTS["WIRE_SCALE"]
+        if not math.isfinite(k) or round(k) < 1 or abs(k - round(k)) > 1e-9:
+            # Текст без входного значения (правило проекта, см. from_dict).
+            raise ValueError("round_step: кратен шагу провода 0.1 и не меньше его")
+        return v
 
     @model_validator(mode="after")
     def _timeouts_cover_longest_gap(self) -> ClientV2Config:
@@ -207,6 +235,14 @@ class SyncReport:
 
 
 @dataclass(frozen=True, slots=True)
+class RunReport:
+    """Итог ``run_chunks``: ``chunks`` — ``(start, count, offset)`` каждого куска по порядку; ``total`` — записей."""
+
+    chunks: tuple[tuple[int, int, int], ...]
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
 class _Inflight:
     """Метка «seq в полёте»: seq, поколение стопа на шаге (2) и признак опкода ``done_seq`` (для О5)."""
 
@@ -234,6 +270,23 @@ class RobotClientV2:
         config:    ``ClientV2Config``.
         rng/clock/sleep: инъекция для детерминированных тестов.
     """
+
+    #: Обёртка на каждый опкод: опкод ``OP`` -> имя метода (ключи == ``set(OP)``).
+    WRAPPERS: dict[str, str] = {
+        "PING": "ping",
+        "CLEAR_ERR": "clear_err",
+        "PTP_MOVE": "ptp_move",
+        "HOME": "home",
+        "JOG_STEP": "jog_step",
+        "JOG_CONT": "jog_cont",
+        "CVT_JOB": "cvt_job",
+        "SC_RUN": "sc_run",
+        "SERVO": "servo",
+        "DO_SET": "do_set",
+        "PARAM_SET": "param_set",
+        "PARAM_GET": "param_get",
+        "PARAM_APPLY": "param_apply",
+    }
 
     def __init__(
         self,
@@ -279,6 +332,7 @@ class RobotClientV2:
         self._last_halt_gen = 0
         self._wdg_raw: int | None = None
         self._jog_raw: int | None = None
+        self._sc_active = False  # идёт run_chunks (под _state_lock): второй прогон на клиенте — RuntimeError
 
     # ------------------------------------------------------------------ #
     # probe
@@ -582,12 +636,13 @@ class RobotClientV2:
     # завершение команды и события
     # ------------------------------------------------------------------ #
 
-    def wait_done(self, seq: int) -> None:
+    def wait_done(self, seq: int, *, on_poll: Callable[[Sequence[int]], None] | None = None) -> None:
         """Ждать завершения последней команды ``done_seq`` этого клиента. ``_mailbox_lock`` не берёт.
 
         Pre: ``seq`` — seq последнего ``CmdResult`` опкода ``done_seq`` (иначе ``ValueError``). Post: возврат —
-        ``TLM_DONE_SEQ == seq``. Raises: ``RobotAborted`` / ``RobotCommandError`` (событие ``ERR_*`` нашей
-        команды или «событие обрыва перекрыто»), ``RobotTimeout("done")``.
+        ``TLM_DONE_SEQ == seq``. ``on_poll(tlm)`` — после каждого чтения блока TLM (32 слова от ``TLM_PROTO_VER``)
+        и до проверок; его исключение выходит наружу. Raises: ``RobotAborted`` / ``RobotCommandError`` (событие
+        ``ERR_*`` нашей команды или «событие обрыва перекрыто»), ``RobotTimeout("done")``.
         """
         with self._state_lock:
             base = self._last_done
@@ -596,6 +651,8 @@ class RobotClientV2:
         deadline = self._clock() + self._cfg.done_timeout_s
         while True:
             tlm = self._rd(_TLM_BASE, _TLM_COUNT)
+            if on_poll is not None:
+                on_poll(tlm)
             self._note_echo(int(tlm[_toff("TLM_STOP_ACK")]))
             if int(tlm[_toff("TLM_DONE_SEQ")]) == seq:
                 return
@@ -753,3 +810,267 @@ class RobotClientV2:
         for pid, expected in raw_by_id.items():
             if mirror[pid] != expected:
                 raise RobotSyncError(pid, expected, mirror[pid])
+
+    # ------------------------------------------------------------------ #
+    # обёртки опкодов (только cmd(); ожидание завершения — вызывающий, wait_done)
+    # ------------------------------------------------------------------ #
+
+    def ping(self) -> tuple[int, ...]:
+        """PING: значения ответа (``rvals``)."""
+        return self.cmd("PING", []).rvals
+
+    def clear_err(self) -> CmdResult:
+        """CLEAR_ERR."""
+        return self.cmd("CLEAR_ERR", [])
+
+    def ptp_move(self, x: float, y: float, z: float, rz: float, kind: str, spd_pct: int) -> CmdResult:
+        """PTP_MOVE: цель в мм и ° (шаг провода), ``kind`` — имя из ``KIND``. Ждать — ``wait_done(result.seq)``."""
+        return self.cmd("PTP_MOVE", [*_geom_words(x, y, z, rz), _kind_code(kind), spd_pct])
+
+    def home(self, spd_pct: int) -> CmdResult:
+        """HOME."""
+        return self.cmd("HOME", [spd_pct])
+
+    def jog_step(self, dx: float, dy: float, dz: float, drz: float, spd_pct: int) -> CmdResult:
+        """JOG_STEP: приращения в мм и ° (шаг провода)."""
+        return self.cmd("JOG_STEP", [*_geom_words(dx, dy, dz, drz), spd_pct])
+
+    def jog_cont(self, direction: int, speed: int) -> CmdResult:
+        """JOG_CONT (поводок — ``jog_lease``)."""
+        return self.cmd("JOG_CONT", [direction, speed])
+
+    def cvt_job(
+        self,
+        ecap: int,
+        pick_x: float,
+        pick_y: float,
+        pick_z: float,
+        flags: int,
+        place_x: float,
+        place_y: float,
+        place_z: float,
+        place_rz: float,
+    ) -> CmdResult:
+        """CVT_JOB: ``ecap`` (u32) делится на ``dw_lo`` / ``dw_hi``; координаты в мм и ° (шаг провода)."""
+        try:
+            ecap_value = operator.index(ecap)
+        except TypeError:
+            raise ValueError("ecap: ожидается целое") from None
+        if not 0 <= ecap_value <= 0xFFFFFFFF:
+            raise ValueError("ecap: вне диапазона 0..2^32-1")
+        pick = _geom_words(pick_x, pick_y, pick_z)
+        place = _geom_words(place_x, place_y, place_z, place_rz)
+        return self.cmd("CVT_JOB", [ecap_value & 0xFFFF, ecap_value >> 16, *pick, flags, *place])
+
+    def sc_run(self, count: int, sc_id: int, offset: int) -> CmdResult:
+        """SC_RUN: ``count`` записей буфера с ``offset``. Ждать — ``wait_done(result.seq)``."""
+        return self.cmd("SC_RUN", [count, sc_id, offset])
+
+    def servo(self, on: bool) -> CmdResult:
+        """SERVO."""
+        return self.cmd("SERVO", [1 if on else 0])
+
+    def do_set(self, channel: int, on: bool) -> CmdResult:
+        """DO_SET."""
+        return self.cmd("DO_SET", [channel, 1 if on else 0])
+
+    def param_set(self, name: str, raw: int) -> CmdResult:
+        """PARAM_SET по имени из ``PARAM_ID``; ``raw`` — сырое значение (params.md §11.1)."""
+        return self.cmd("PARAM_SET", [_param_id(name), raw])
+
+    def param_get(self, name: str) -> int:
+        """PARAM_GET по имени из ``PARAM_ID``: сырое значение (``rvals[0]``)."""
+        return self.cmd("PARAM_GET", [_param_id(name)]).rvals[0]
+
+    def param_apply(self) -> CmdResult:
+        """PARAM_APPLY."""
+        return self.cmd("PARAM_APPLY", [])
+
+    # ------------------------------------------------------------------ #
+    # буфер сценария и пинг-понг
+    # ------------------------------------------------------------------ #
+
+    @property
+    def stop_generation(self) -> int:
+        """Поколение стопа клиента: растёт после каждой записи ``STOP_REQ`` (своей или повтора О5). Только чтение."""
+        return self._stop_generation
+
+    def upload(self, records: Sequence[Sequence[int]], offset: int) -> None:
+        """Записать слова записей в ``SC_BUF`` с записи ``offset`` блоками FC16 по <= ``WRITE_CHUNK`` регистров.
+
+        Pre: каждая запись — ``SC_STRIDE`` целых в ``W_MIN``..65535; ``0 <= offset``, ``offset + len(records) <=
+        SC_CAP`` (иначе ``ValueError`` без записи). Пишет ``& 0xFFFF``, по порядку, путём записи ``cmd()`` (ошибка
+        транспорта помечает базы устаревшими и уходит наружу). ``_mailbox_lock`` не берёт. Константы буфера
+        читаются из ``CONSTANTS`` в момент вызова.
+        """
+        self._upload(records, offset, lambda: False)
+
+    def _upload(self, records: Sequence[Sequence[int]], offset: int, abort: Callable[[], bool]) -> bool:
+        """``upload`` с проверкой ``abort()`` перед каждым блоком: ``True`` -> блок не пишется, возврат ``False``."""
+        stride = CONSTANTS["SC_STRIDE"]
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset: ожидается целое >= 0")
+        if offset + len(records) > CONSTANTS["SC_CAP"]:
+            raise ValueError("offset + число записей больше SC_CAP")
+        flat: list[int] = []
+        for i, record in enumerate(records):
+            if len(record) != stride:
+                raise ValueError(f"запись #{i}: число слов не равно SC_STRIDE")
+            flat.extend(_encode_word(word, f"запись #{i}, слово #{j}") for j, word in enumerate(record))
+        self._ensure_probed()
+        base = CONSTANTS["SC_BASE"] + offset * stride
+        chunk = CONSTANTS["WRITE_CHUNK"]
+        for pos in range(0, len(flat), chunk):
+            if abort():
+                return False
+            self._wr([("wm", base + pos, flat[pos : pos + chunk])])
+        return True
+
+    def run_chunks(
+        self,
+        scenario: Scenario,
+        *,
+        params: Mapping[str, float],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> RunReport:
+        """Исполнить сценарий кусками пинг-понгом по половинам буфера (protocol-spec §7.4).
+
+        Кодирование (``wire_v2.encode_scenario`` с ``round_step`` конфига) и нарезка (``plan_chunks``, половина
+        ``SC_CAP // 2``) — целиком до первой записи. Кусок k: метка стопа -> ``SC_RUN`` -> метка после ACK ->
+        загрузка куска k+1 в другую половину -> ``wait_done``. ``on_progress(done, total)`` — при изменении числа
+        пройденных записей (``TLM_SC_INDEX``) и ``(total, total)`` после последнего DONE.
+
+        Метка стопа: поколение стопа клиента сменилось или ``TLM_STOP_ACK`` отличается от прочитанного в начале
+        (стоп другого клиента виден только на чтениях TLM — до загрузки и после ACK SC_RUN; внутри загрузки — только
+        поколение, один блок FC16 может уже быть в полёте).
+
+        Pre: на время ``run_chunks`` никаких ``done_seq``-``cmd()`` на этом клиенте (``wait_done`` держит один слот
+        последней команды); второй ``run_chunks`` на том же клиенте -> ``RuntimeError``. Пульс (``kick_heartbeat``)
+        — забота потока вызывающего. Post: все куски DONE -> ``RunReport``.
+        Raises: ``CompileError`` (до записи); ``RobotAborted`` (стоп; без своего стопа); ``RobotNak`` на SC_RUN
+        (команда не начата; без стопа); любое другое исключение после первого SC_RUN — сначала ``stop(HARD)``
+        (его ошибка — заметка к исходному), затем исходное.
+        """
+        words = wire_v2.encode_scenario(scenario, params=params, round_step=self._cfg.round_step)
+        half = CONSTANTS["SC_CAP"] // 2
+        spans = wire_v2.plan_chunks([r.kind for r in scenario.records], half, scenario.step_of)
+        if not spans:
+            raise ValueError("сценарий пуст")
+        chunks = tuple((start, count, 0 if k % 2 == 0 else half) for k, (start, count) in enumerate(spans))
+        with self._state_lock:
+            if self._sc_active:
+                raise RuntimeError("run_chunks уже идёт на этом клиенте")
+            self._sc_active = True
+        try:
+            self._run_chunks(words, chunks, on_progress)
+        finally:
+            with self._state_lock:
+                self._sc_active = False
+        return RunReport(chunks, len(words))
+
+    def _run_chunks(
+        self,
+        words: Sequence[Sequence[int]],
+        chunks: Sequence[tuple[int, int, int]],
+        on_progress: Callable[[int, int], None] | None,
+    ) -> None:
+        total = len(words)
+        self._ensure_probed()
+        g0 = self._stop_generation
+        ack0 = self._read_stop_ack()
+
+        def by_generation() -> bool:
+            return self._stop_generation != g0
+
+        def marked() -> bool:
+            """Метка стопа с одним чтением TLM_STOP_ACK."""
+            return by_generation() or self._read_stop_ack() != ack0
+
+        def records(k: int) -> Sequence[Sequence[int]]:
+            start, count, _ = chunks[k]
+            return words[start : start + count]
+
+        self._upload(records(0), chunks[0][2], by_generation)  # прерванная загрузка — метка на шаге (1)
+        progress = {"done": -1}
+        seq = 0
+        started = False
+        try:
+            for k, (start, count, offset) in enumerate(chunks):
+                if marked():
+                    raise RobotAborted(seq, ERR["E_ABORTED"], "стоп между кусками")
+                started = True
+                seq = self.sc_run(count, k + 1, offset).seq
+                if marked():
+                    self._abort_after_ack(seq)
+                upload_cut = False
+                if k + 1 < len(chunks):
+                    upload_cut = marked() or not self._upload(records(k + 1), chunks[k + 1][2], by_generation)
+
+                def on_poll(tlm: Sequence[int], start: int = start) -> None:
+                    done = start + int(tlm[_toff("TLM_SC_INDEX")])
+                    if done != progress["done"]:
+                        progress["done"] = done
+                        if on_progress is not None:
+                            on_progress(done, total)
+
+                self.wait_done(seq, on_poll=on_poll)
+                if upload_cut:
+                    raise RobotAborted(seq, ERR["E_ABORTED"], "стоп во время загрузки")
+            if progress["done"] != total and on_progress is not None:
+                on_progress(total, total)
+        except (RobotAborted, RobotNak):
+            # RobotAborted — стоп уже прошёл; RobotNak бывает только на SC_RUN: команда не начата, HARD оборвал бы
+            # чужой ход (E_BUSY).
+            raise
+        except BaseException as exc:
+            if started:
+                try:
+                    self.stop(STOP_LEVEL["HARD"])
+                except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет исходную
+                    exc.add_note(f"stop(HARD) после ошибки run_chunks не удался: {type(stop_exc).__name__}: {stop_exc}")
+            raise
+
+    def _read_stop_ack(self) -> int:
+        """Одно чтение ``TLM_STOP_ACK`` (эхо учитывается, как на любом чтении TLM)."""
+        ack = int(self._rd(REG["TLM_STOP_ACK"], 1)[0])
+        self._note_echo(ack)
+        return ack
+
+    def _abort_after_ack(self, seq: int) -> None:
+        """Метка стопа сразу после ACK SC_RUN: кусок уже принят — ``stop(HARD)``, затем ``RobotAborted``."""
+        aborted = RobotAborted(seq, ERR["E_ABORTED"], "стоп между кусками")
+        try:
+            self.stop(STOP_LEVEL["HARD"])
+        except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет RobotAborted
+            aborted.add_note(f"stop(HARD) после метки не удался: {type(stop_exc).__name__}: {stop_exc}")
+        raise aborted
+
+
+def _kind_code(kind: str) -> int:
+    code = KIND.get(kind)
+    if code is None:
+        raise ValueError(f"kind: неизвестный вид хода; допустимы: {', '.join(KIND)}")
+    return code
+
+
+def _param_id(name: str) -> int:
+    pid = PARAM_ID.get(name)
+    if pid is None:
+        raise ValueError("неизвестное имя параметра")
+    return pid
+
+
+def _geom_words(*values: float) -> list[int]:
+    """Координаты в мм и ° -> целые шага провода (×``WIRE_SCALE``, половина от нуля) в ``W_MIN..W_MAX``."""
+    scale = CONSTANTS["WIRE_SCALE"]
+    out: list[int] = []
+    for i, value in enumerate(values):
+        x = float(value) * scale
+        if not math.isfinite(x):
+            raise ValueError(f"координата #{i}: ожидается конечное число")
+        magnitude = int(math.floor(abs(x) + 0.5))
+        n = -magnitude if x < 0 else magnitude
+        if not CONSTANTS["W_MIN"] <= n <= CONSTANTS["W_MAX"]:
+            raise ValueError(f"координата #{i}: вне диапазона W_MIN..W_MAX")
+        out.append(n)
+    return out
