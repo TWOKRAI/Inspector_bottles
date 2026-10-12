@@ -485,20 +485,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.command_manager = bundle.command
         self.console_manager = bundle.console
         self.observation_manager = bundle.observation
-        # Task 1.2a: записи ``planes`` в порядке регистрации; закрытие обратное:
-        # observation → stats → error → planes_report → final_status → logger.
         planes = self._root_segments.get("planes")
         if planes is not None:
-            planes.own(self._stop_logger_entry, name="logger", kind="callable")
-            planes.own(self._self_call("_final_status"), name="final_status", kind="callable")
-            planes.own(self._self_call("_planes_report"), name="planes_report", kind="callable")
-            planes.own(self._attr_call("error_manager", "shutdown", plane="error"), name="error", kind="callable")
-            planes.own(self._attr_call("stats_manager", "shutdown", plane="stats"), name="stats", kind="callable")
-            planes.own(
-                self._attr_call("observation_manager", "shutdown", plane="observation"),
-                name="observation",
-                kind="callable",
-            )
+            self._register_planes(planes)
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
@@ -510,6 +499,20 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if work is not None:
             work.own(self._self_call("_uninstall_process_hooks"), name="hooks", kind="callable")
             work.own(self._attr_call("_orchestrator", "shutdown"), name="plugins", kind="callable")
+
+    def _register_planes(self, planes) -> None:
+        """Записи ``planes`` (Task 1.2a) в порядке регистрации; закрытие обратное:
+        observation → stats → error → planes_report → final_status → logger."""
+        planes.own(self._stop_logger_entry, name="logger", kind="callable")
+        planes.own(self._self_call("_final_status"), name="final_status", kind="callable")
+        planes.own(self._self_call("_planes_report"), name="planes_report", kind="callable")
+        planes.own(self._attr_call("error_manager", "shutdown", plane="error"), name="error", kind="callable")
+        planes.own(self._attr_call("stats_manager", "shutdown", plane="stats"), name="stats", kind="callable")
+        planes.own(
+            self._attr_call("observation_manager", "shutdown", plane="observation"),
+            name="observation",
+            kind="callable",
+        )
 
     def _install_process_hooks(self) -> None:
         """Ф1.1 (C3): поставить три процессных хука — ПОСЛЕ подъёма менеджеров.
@@ -768,17 +771,24 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 # `documents.factory` пустой).
                 self._observability_store, self._observability_store_taps = None, []
 
+    def _register_transport(self, transport) -> None:
+        """Записи ``transport`` (Task 1.2a): srm, router, command, console, затем наследник.
+
+        Закрытие обратное (G7: router раньше srm); ``flush`` регистрируется в конце подъёма.
+        """
+        transport.own(self._attr_call("shared_resources", "shutdown"), name="srm", kind="callable")
+        transport.own(self._attr_call("router_manager", "shutdown"), name="router", kind="callable")
+        transport.own(self._attr_call("command_manager", "shutdown"), name="command", kind="callable")
+        transport.own(self._attr_call("console_manager", "shutdown"), name="console", kind="callable")
+        self._own_transport(transport)
+
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
         # Task 1.2a: ``transport`` — srm, router, command, console, затем записи
         # наследника; закрытие обратное (G7: router раньше srm).
         transport = self._root_segments.get("transport")
         if transport is not None:
-            transport.own(self._attr_call("shared_resources", "shutdown"), name="srm", kind="callable")
-            transport.own(self._attr_call("router_manager", "shutdown"), name="router", kind="callable")
-            transport.own(self._attr_call("command_manager", "shutdown"), name="command", kind="callable")
-            transport.own(self._attr_call("console_manager", "shutdown"), name="console", kind="callable")
-            self._own_transport(transport)
+            self._register_transport(transport)
         self.communication = ProcessCommunication(
             self.name,
             self.queues,

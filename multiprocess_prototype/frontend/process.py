@@ -401,8 +401,13 @@ class GuiProcess(ProcessModule):
         global gui_app
         gui_app = _app_mod
 
-    def shutdown(self) -> bool:
-        """Graceful shutdown: сначала останавливаем воркеры, затем базовый shutdown."""
+    def _own_work(self, work) -> None:
+        """``work``: прокси GUI-состояния (Task 1.2a, ADR-PM-054) — закрывается раньше транспорта."""
+        super()._own_work(work)
+        work.own(self._self_call("_close_gui_state_proxy"), name="gui_state_proxy", kind="callable")
+
+    def _close_gui_state_proxy(self) -> None:
+        """Запись ``work/gui_state_proxy``: строка начала останова и ``proxy.shutdown`` (best-effort)."""
         self._log_info(
             f"GuiProcess '{self.name}': начало graceful shutdown",
             module="gui",
@@ -413,4 +418,3 @@ class GuiProcess(ProcessModule):
                 proxy.shutdown()
             except Exception:  # nosec B110 — shutdown best-effort
                 pass
-        return super().shutdown()

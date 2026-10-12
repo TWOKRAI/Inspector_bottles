@@ -26,6 +26,7 @@ from ..core.alert_rules import (
     should_fire,
 )
 from ..core.restart_policy import RestartPolicy
+from ..core.stop_budget import EXIT_SURVIVORS
 
 #: Причина пере-инициации рестарта watchdog'ом H3 (рестарт тихо не подтвердился).
 #: Каскад NEW-6b на этой причине НЕ повторяется — см. _try_auto_restart.
@@ -921,7 +922,14 @@ class ProcessMonitor:
                 self.previous_states[proc.name] = snap.copy()
             return
 
-        new_status = "stopped" if exitcode == 0 else "crashed"
+        # Task 1.2a (ADR-PMM-036): код EXIT_SURVIVORS (76) — ребёнок сам закрыл корень,
+        # но в отчёте остались выжившие записи. Это штатный останов, не падение:
+        # статус ``stopped``, громкое событие ``survivors``, авто-рестарта нет.
+        survivors_exit = exitcode == EXIT_SURVIVORS
+        new_status = "stopped" if exitcode == 0 or survivors_exit else "crashed"
+
+        if survivors_exit:
+            self._emit_supervisor_event(proc.name, "survivors", reason=f"exitcode={exitcode}", level="warning")
 
         if new_status == "crashed":
             # Ф4-добор: громкое supervisor-событие «упал» (видно даже когда

@@ -428,6 +428,15 @@ class ProcessRegistry:
         )
         return result, stop
 
+    def children_stop(self, *, mark_reader_gone: bool) -> "_ChildrenGroupStop":
+        """Stoppable всех детей для области ``children`` корня PM (Task 1.2a, ADR-PMM-036).
+
+        Ленивый: группа строится в ``request_stop()`` (дети создаются и удаляются на
+        лету — смена топологии), не при вызове. ``result()`` — карта ``{имя: остановлен}``
+        после закрытия области (как ``_stop_many`` после ``scope.close()``).
+        """
+        return _ChildrenGroupStop(self, mark_reader_gone)
+
     def _stop_many(self, names: List[str], timeout: object, mark_reader_gone: bool) -> Dict[str, bool]:
         """Единственный путь стопа детей: группа ``ChildProcessStop`` во временной области.
 
@@ -489,3 +498,63 @@ class ProcessRegistry:
         elif self.logger:
             self.logger._log_info("All processes stopped (смерть подтверждена)")
         return results
+
+
+class _ChildrenGroupStop:
+    """Stoppable над шагом (а) и группой ``ChildProcessStop`` всех детей реестра (Task 1.2a).
+
+    Группа строится один раз, в ``request_stop()`` (или в ``join_until``, если фаза 1
+    не звалась): имена берутся из ``os_processes`` В ЭТОТ момент. Пустая группа —
+    ``join_until`` ``True``, ``kill``/``close`` ничего не делают.
+    """
+
+    def __init__(self, registry: "ProcessRegistry", mark_reader_gone: bool) -> None:
+        self._registry = registry
+        self._mark_reader_gone = mark_reader_gone
+        self._built = False
+        self._done: Dict[str, bool] = {}
+        self._group: ChildProcessStop | None = None
+        self._names: List[str] = []
+
+    def _build(self) -> None:
+        if self._built:
+            return
+        self._built = True
+        names = [p.name for p in self._registry.os_processes]
+        self._done, self._group = self._registry._build_child_stop(list(names), self._mark_reader_gone)
+        self._names = [name for name in dict.fromkeys(names) if name not in self._done]
+
+    def request_stop(self) -> None:
+        if self._built:
+            return
+        self._build()
+        if self._group is not None:
+            self._group.request_stop()
+
+    def join_until(self, deadline: float) -> bool:
+        if not self._built:
+            self.request_stop()
+        if self._group is None:
+            return True
+        return self._group.join_until(deadline)
+
+    def kill(self) -> None:
+        if self._group is not None:
+            self._group.kill()
+
+    def close(self) -> None:
+        if self._group is not None:
+            self._group.close()
+
+    def result(self) -> Dict[str, bool]:
+        """Карта шага (а) + для имён группы ``False``, если имя среди выживших.
+
+        Не опирается на ``close()``: область выжившему ``close()`` не зовёт.
+        """
+        result = dict(self._done)
+        if self._group is None:
+            return result
+        survivors = set(self._group.survivors())
+        for name in self._names:
+            result[name] = name not in survivors
+        return result

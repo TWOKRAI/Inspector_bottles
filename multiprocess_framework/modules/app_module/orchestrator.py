@@ -82,21 +82,35 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         резолвимый child-side через ``orchestrator_class_path``.
         """
 
-    def shutdown(self) -> bool:
-        """Остановить watcher и state-plane (нет висящих потоков), затем shutdown ядра.
+    def _own_work(self, work) -> None:
+        """``work``: СНАЧАЛА дети PM (``super()``), ЗАТЕМ ``state_store``, ``recipe_watcher``,
+        ``observability_watcher``.
+
+        LIFO закрывает watcher'ы и SSM РАНЬШЕ детей и сводки — порядок прежнего
+        ``shutdown()`` (Task 1.2a, ADR-PMM-036). Сигнал детям уходит ещё раньше — в фазе 1
+        ``work`` (``request_stop`` всех записей сегмента до LIFO-фазы 2).
 
         ``StateStoreManager.shutdown()`` обещает финальный дренаж буфера коалесцирования
         и остановку daemon-flusher'а — но на прод-пути его никто не звал: оркестратор
-        создавал SSM и звал только ``initialize()``. Обещание в докстринге было мёртвым
-        кодом, а поток-flusher переживал остановку оркестратора. Симметрия
-        initialize/shutdown восстановлена здесь (найдено предмерж-ревью Ф6).
+        создавал SSM и звал только ``initialize()``. Симметрия initialize/shutdown
+        восстановлена здесь (найдено предмерж-ревью Ф6).
         """
-        if self._observability_watcher is not None:
+        super()._own_work(work)
+        work.own(self._self_call("_close_state_store"), name="state_store", kind="callable")
+        work.own(self._self_call("_close_recipe_watcher"), name="recipe_watcher", kind="callable")
+        work.own(self._self_call("_close_observability_watcher"), name="observability_watcher", kind="callable")
+
+    def _close_observability_watcher(self) -> None:
+        """Запись ``work/observability_watcher`` (best-effort, ошибка — строка лога)."""
+        if getattr(self, "_observability_watcher", None) is not None:
             try:
                 self._observability_watcher.stop()
             except Exception as exc:  # noqa: BLE001 — shutdown best-effort
                 self._log_error(f"[observability] watcher stop: {exc}")
             self._observability_watcher = None
+
+    def _close_recipe_watcher(self) -> None:
+        """Запись ``work/recipe_watcher`` (best-effort)."""
         recipe_watcher = getattr(self, "_observability_recipe_watcher", None)
         if recipe_watcher is not None:
             try:
@@ -104,13 +118,15 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             except Exception as exc:  # noqa: BLE001 — shutdown best-effort
                 self._log_error(f"[observability] L2-watcher stop: {exc}")
             self._observability_recipe_watcher = None
+
+    def _close_state_store(self) -> None:
+        """Запись ``work/state_store``: финальный дренаж SSM и остановка flusher'а (best-effort)."""
         store_manager = getattr(self, "_state_store_manager", None)
         if store_manager is not None and hasattr(store_manager, "shutdown"):
             try:
                 store_manager.shutdown()
             except Exception as exc:  # noqa: BLE001 — shutdown best-effort
                 self._log_error(f"[state_store] shutdown: {exc}")
-        return super().shutdown()
 
     # ------------------------------------------------------------------
     # Generic-возможности (config-gated, опциональны)
