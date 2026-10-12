@@ -29,6 +29,7 @@ from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
+from ..core.stop_budget import SHUTDOWN_TIMEOUT_KEY, stop_budget
 from ..core.process_status import ProcessStatusMonitor
 from ..monitor import ProcessMonitor
 from ..platforms import get_platform_adapter
@@ -155,6 +156,9 @@ class ProcessManagerProcess(ProcessModule):
             # Task 5.4 (ADR-PMM-034): то же событие, что PM взводит в _announce_ready,
             # уезжает детям на чтение — источники ждут его перед первым produce().
             system_ready_event=self._system_ready_event,
+            # Task 1.1 (ADR-PMM-035): окна стопа ребёнку — словарь чисел из того же
+            # shutdown_timeout, которым PM останавливает детей. Считается здесь один раз.
+            child_stop_budget=stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY)),
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)
@@ -3526,7 +3530,7 @@ class ProcessManagerProcess(ProcessModule):
         if getattr(self, "_children_stopped", False):
             return
         self._process_monitor.stop()
-        shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
+        shutdown_timeout = stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY))["pm_graceful_s"]
         # Ж-4 (RS-3): shutdown ОБЯЗАН подтвердить смерть ВСЕХ детей. stop_all теперь
         # возвращает карту {name: stopped} (confirmed-death путь). Выживших — громко.
         stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
@@ -3664,7 +3668,7 @@ class ProcessManagerProcess(ProcessModule):
                 return True
             stop_timeout = float(self.get_config("stop_process_timeout") or 5.0)
             return self._process_registry.stop_one(process_name, stop_timeout, mark_reader_gone=mark_reader_gone)
-        shutdown_timeout = float(self.get_config("shutdown_timeout") or 5.0)
+        shutdown_timeout = stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY))["pm_graceful_s"]
         self._process_registry.stop_all(timeout=shutdown_timeout, mark_reader_gone=mark_reader_gone)
         return True
 

@@ -215,11 +215,12 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (12)
+## dev-tooling (13)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
 - [feedback_claude_cli_backend_costs_a_full_session](feedback_claude_cli_backend_costs_a_full_session.md)
+- [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_import_guard_substring_vs_ast](feedback_import_guard_substring_vs_ast.md)
 - [feedback_option_denylist_misses_abbreviations_and_argfiles](feedback_option_denylist_misses_abbreviations_and_argfiles.md)
 - [feedback_pytest_import_order_hides_a_cycle](feedback_pytest_import_order_hides_a_cycle.md)
@@ -759,12 +760,13 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (15)
+## windows-env (16)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
 - [feedback_always_project_venv](feedback_always_project_venv.md)
 - [feedback_bash_tool_unbalanced_quote_breaks_command](feedback_bash_tool_unbalanced_quote_breaks_command.md)
+- [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)
 - [feedback_platform_noop_counts_the_opposite](feedback_platform_noop_counts_the_opposite.md)
 - [feedback_qex_full_rebuild_runbook](feedback_qex_full_rebuild_runbook.md)

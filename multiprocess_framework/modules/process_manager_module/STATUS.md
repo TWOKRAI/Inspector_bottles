@@ -25,6 +25,10 @@
 - [x] Этап 7: Unit-тесты написаны и проходят (8 файлов)
 - [x] Этап 8: README и interfaces.py готовы (ISystemLauncher, IProcessManagerProcess, IProcessRegistry)
 
+## Обновление 2026-10-12 (Task 1.1 плана `lifecycle-owner-scope`, ADR-PMM-035)
+
+- `core/stop_budget.py` (одна формула бюджета стопа) и `core/child_process_stop.py` (`ChildProcessStop` — группа детей как `Stoppable`); `ProcessRegistry` останавливает детей через область `pm/stop`; ребёнок получает словарь `stop_budget` в конфиге. Живой стенд — за лидом.
+
 ## Обновление 2026-09-25 (Task 1.6 плана `lifecycle-stop-ownership`, ADR-PMM-033)
 
 - Слот `_exit_reports`/`exit_report()` в `ProcessRegistry` + запись из `process_runner.py` — механизм подтверждён живым стендом; публикация `PM.shutdown()` → стор наблюдаемости — сделана: хук `ProcessModule._before_observability_teardown()` + `PM._stop_children_once()` останавливают детей и публикуют сводку ДО закрытия store-tap, см. ADR-PMM-033. Все 3 живых REDS (`backend_ctl/tests/test_stop_summary_live.py`) зелёные.

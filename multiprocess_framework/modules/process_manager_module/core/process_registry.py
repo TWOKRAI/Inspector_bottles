@@ -4,25 +4,22 @@ ProcessRegistry — реестр процессов ОС + lifecycle + созд�
 Per-process stop_event: остановка одного процесса не трогает остальные.
 """
 
+import math
 import os
-import time
 from typing import Any, Callable, Dict, List, Optional
 
 from multiprocessing import Event, Process, RawArray
 
 from .bundle_contract import build_bundle
+from .child_process_stop import ChildProcessStop
+from .stop_budget import DEFAULT_SHUTDOWN_TIMEOUT_S, KILL_RESERVE_S
 from ..runner import run_process_function
+from ...base_manager import open_scope
 from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
 
-
-# Шаг опроса смерти в stop_many (итерация 2 Task 1.2): задержка реакции, не бюджет.
-STOP_POLL_S = 0.05
-# Окна эскалации ``_stop_many`` после общего graceful-дедлайна (ADR-PMM-031).
-# Внутренний бюджет остановки PM = shutdown_timeout + TERMINATE_GRACE_S + KILL_CONFIRM_S;
-# spawner выводит из них свой внешний join — меняешь окно здесь, внешний бюджет
-# растёт вместе с ним, а не расходится молча.
-TERMINATE_GRACE_S = 1.0  # после terminate() стрэгглеров — ждать выхода
-KILL_CONFIRM_S = 1.0  # после kill() — ждать подтверждения смерти
+# Окна эскалации стопа детей (STOP_POLL_S, TERMINATE_GRACE_S, KILL_CONFIRM_S) и формула
+# бюджета живут в ``core/stop_budget.py`` (Task 1.1, ADR-PMM-035): реестр, спавнер и
+# ребёнок читают одни числа.
 
 
 class ProcessRegistry:
@@ -37,8 +34,15 @@ class ProcessRegistry:
         system_stop_event: Optional[Event] = None,
         routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = None,
         system_ready_event: Optional[Event] = None,
+        child_stop_budget: Optional[Dict[str, float]] = None,
     ) -> None:
         self.logger = logger
+        # Task 1.1 (ADR-PMM-035): словарь ``stop_budget(shutdown_timeout PM)`` — каждый ребёнок
+        # получает его копию в конфиге под ключом ``stop_budget`` (явный ключ процесса сильнее).
+        # Только числа: объекты стопа не пиклятся и в конфиг не едут.
+        self._child_stop_budget: Optional[Dict[str, float]] = (
+            dict(child_stop_budget) if child_stop_budget is not None else None
+        )
         self.queue_registry = queue_registry
         self.config_manager = config_manager
         self.shared_resources = shared_resources
@@ -160,6 +164,8 @@ class ProcessRegistry:
             process_config = dict(config or {})
             process_config["name"] = name
             process_config["class"] = class_path
+            if self._child_stop_budget is not None:
+                process_config.setdefault("stop_budget", dict(self._child_stop_budget))
 
             if self.config_manager:
                 try:
@@ -321,70 +327,28 @@ class ProcessRegistry:
                 if self.logger:
                     self.logger._log_error(f"Failed to start process {process.name}: {e}")
 
-    def stop_one(self, name: str, timeout: float = 5.0, *, mark_reader_gone: bool = True) -> bool:
+    def stop_one(
+        self, name: str, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S, *, mark_reader_gone: bool = True
+    ) -> bool:
         """Остановить один процесс с подтверждением смерти («ensure stopped»).
 
         Идемпотентная семантика: процесса нет в реестре или он не жив —
-        уже остановлен → ``True``. Иначе эскалация stop_event → join(timeout)
-        → terminate → kill; после kill финальный join. Результат — ФАКТ
-        смерти (``not is_alive()``), а не «сигнал подан»: cleanup/unlink SHM
-        безопасен только по подтверждённой остановке.
+        уже остановлен → ``True``. Иначе эскалация stop_event → graceful-срок
+        ``timeout`` → terminate → kill (Task 1.1: тот же путь, что ``stop_many``,
+        через ``ChildProcessStop`` и область ``pm/stop``). Результат — ФАКТ
+        смерти, а не «сигнал подан»: cleanup/unlink SHM безопасен только по
+        подтверждённой остановке.
 
         ``mark_reader_gone`` (ADR-PMM-030): при ``True`` подтверждённо мёртвому
         (результат ``True``) ребёнку взводится метка «читатель ушёл» на его очередях —
         писатели не зависнут на выходе. Выживший не маркируется. Рестарт передаёт
         ``False``: очереди переиспользуются новым воплощением.
         """
-        process = self.get_process_by_name(name)
-        stopped = self._stop_one(name, process, timeout)
-        if stopped and mark_reader_gone:
-            self._mark_confirmed_dead(name, process)
-        return stopped
+        return self._stop_many([name], timeout, mark_reader_gone)[name]
 
-    def _stop_one(self, name: str, process: Optional[Process], timeout: float) -> bool:
-        if process is None:
-            if self.logger:
-                self.logger._log_info(f"stop_one('{name}'): нет в реестре — считается остановленным")
-            return True
-        if not process.is_alive():
-            return True
-
-        if self.logger:
-            self.logger._log_info(f"Stopping process '{name}' (timeout={timeout}s)...")
-        ev = self._stop_events.get(name)
-        if ev is not None:
-            ev.set()
-            process.join(timeout=timeout)
-        elif self.logger:
-            self.logger._log_warning(f"stop_one('{name}'): нет stop_event — сразу terminate")
-
-        if process.is_alive():
-            if self.logger:
-                self.logger._log_warning(f"Process '{name}' did not stop in {timeout}s, terminating...")
-            try:
-                process.terminate()
-            except Exception as e:
-                if self.logger:
-                    self.logger._log_warning(f"Error terminating '{name}': {e}")
-            process.join(timeout=1.0)
-
-        if process.is_alive():
-            if self.logger:
-                self.logger._log_error(f"Force killing process '{name}'")
-            try:
-                process.kill()
-            except Exception as e:
-                if self.logger:
-                    self.logger._log_error(f"Error killing '{name}': {e}")
-            # Финальный join: подтвердить смерть ДО того, как caller начнёт cleanup
-            process.join(timeout=1.0)
-
-        alive = process.is_alive()
-        if alive and self.logger:
-            self.logger._log_error(f"Process '{name}' всё ещё жив после kill — остановка НЕ подтверждена")
-        return not alive
-
-    def stop_many(self, names: List[str], timeout: float = 5.0, *, mark_reader_gone: bool = True) -> Dict[str, bool]:
+    def stop_many(
+        self, names: List[str], timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S, *, mark_reader_gone: bool = True
+    ) -> Dict[str, bool]:
         """Остановить НЕСКОЛЬКО процессов ПАРАЛЛЕЛЬНО (один общий дедлайн).
 
         В отличие от ``stop_one`` в цикле (N×timeout ≈ 35с для 7 процессов),
@@ -395,13 +359,15 @@ class ProcessRegistry:
 
         Args:
             names: имена процессов для остановки.
-            timeout: общий дедлайн graceful-остановки (секунды).
+            timeout: общий дедлайн graceful-остановки (секунды). ≤ 0 — сразу эскалация;
+                NaN, ±inf, ``bool``, ``None`` и нечисловое — ``DEFAULT_SHUTDOWN_TIMEOUT_S``
+                с предупреждением в лог (новых исключений на пути стопа нет).
 
         Returns:
             Карта ``{name: stopped}`` — семантика «ensure stopped»:
             ``True`` — процесса нет в реестре / он не был жив (идемпотентно:
             «нечего останавливать» — успех) ИЛИ смерть ПОДТВЕРЖДЕНА
-            (graceful/terminate/kill + финальный join);
+            (graceful/terminate/kill);
             ``False`` — процесс всё ещё жив после полной эскалации
             (cleanup для него небезопасен).
 
@@ -410,97 +376,93 @@ class ProcessRegistry:
         """
         return self._stop_many(names, timeout, mark_reader_gone)
 
-    def _stop_many(self, names: List[str], timeout: float, mark_reader_gone: bool) -> Dict[str, bool]:
+    def _stop_timeout_s(self, timeout: object) -> float:
+        """Привести graceful-срок стопа: путь стопа не бросает (Task 1.1, DESIGN 7).
+
+        Конечное > 0 — как есть; ≤ 0 — ``0.0`` (сразу эскалация, как прежде с отрицательным);
+        NaN, ±inf, ``bool``, ``None`` и нечисловое — умолчание с предупреждением: ``inf`` не
+        превращается в немедленный terminate, который оборвал бы graceful-выход.
+        """
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout):
+            if self.logger:
+                self.logger._log_warning(
+                    f"stop: timeout типа {type(timeout).__name__} не конечное число секунд — "
+                    f"взято умолчание {DEFAULT_SHUTDOWN_TIMEOUT_S}s"
+                )
+            return DEFAULT_SHUTDOWN_TIMEOUT_S
+        return float(timeout) if timeout > 0 else 0.0
+
+    def _build_child_stop(
+        self, names: List[str], mark_reader_gone: bool
+    ) -> tuple[Dict[str, bool], ChildProcessStop | None]:
+        """Шаг (а) стопа и сборка группы живых (шов для Task 1.2: область ``children``).
+
+        Нет в реестре / уже мёртв → ``True`` и метка СРАЗУ (идемпотентность, паритет
+        ``PM.stop_process``: «призрак» в конфигах не валит switch). Живые — в одну группу
+        ``ChildProcessStop``; ``None`` — живых нет.
+        """
         result: Dict[str, bool] = {}
         procs: Dict[str, Process] = {}
-
-        def confirmed_dead(name: str, observed: Optional[Process]) -> None:
-            # Итерация 2 Task 1.2 (живой стенд): метка — В МОМЕНТ подтверждения смерти
-            # этого имени, а не после всей эскалации. Писатель, ждущий в хуке выхода метку
-            # уже мёртвого соседа, иначе доживал до terminate (5.7 с на стопе).
-            result[name] = True
-            if mark_reader_gone:
-                self._mark_confirmed_dead(name, observed)
-
-        # (a) Взвести все stop_event разом — дети гаснут параллельно.
-        #     Нет в реестре / уже мёртв → True: идемпотентность (паритет
-        #     PM.stop_process), иначе «призрак» в конфигах валил бы весь switch.
-        #     Такие имена маркируются СРАЗУ, до любого join.
         for name in names:
             process = self.get_process_by_name(name)
             if process is None:
                 if self.logger:
                     self.logger._log_info(f"stop_many: '{name}' нет в реестре — считается остановленным")
-                confirmed_dead(name, None)
+                result[name] = True
+                if mark_reader_gone:
+                    self._mark_confirmed_dead(name, None)
                 continue
             if not process.is_alive():
-                confirmed_dead(name, process)
+                result[name] = True
+                if mark_reader_gone:
+                    self._mark_confirmed_dead(name, process)
                 continue
-            ev = self._stop_events.get(name)
-            if ev is not None:
-                ev.set()
-            elif self.logger:
-                self.logger._log_warning(f"stop_many: у '{name}' нет stop_event — только terminate/kill")
             procs[name] = process
-
         if not procs:
+            return result, None
+        stop = ChildProcessStop(
+            procs,
+            self._stop_events,
+            on_confirmed_dead=self._mark_confirmed_dead if mark_reader_gone else None,
+            logger=self.logger,
+        )
+        return result, stop
+
+    def _stop_many(self, names: List[str], timeout: object, mark_reader_gone: bool) -> Dict[str, bool]:
+        """Единственный путь стопа детей: группа ``ChildProcessStop`` во временной области.
+
+        Порядок фаз (stop_event → graceful ``timeout`` → terminate → ``TERMINATE_GRACE_S`` →
+        kill → ``KILL_CONFIRM_S``) живёт один раз — в ``Scope``; метка ставится в момент
+        подтверждения смерти каждого имени (``on_confirmed_dead``), выжившие — без метки.
+        """
+        timeout_s = self._stop_timeout_s(timeout)
+        result, stop = self._build_child_stop(names, mark_reader_gone)
+        if stop is None:
             return result
 
+        group = [name for name in dict.fromkeys(names) if name not in result]
         if self.logger:
-            self.logger._log_info(f"Stopping {len(procs)} processes in parallel (timeout={timeout}s): {list(procs)}")
+            self.logger._log_info(f"Stopping {len(group)} processes in parallel (timeout={timeout_s}s): {list(group)}")
+        scope = open_scope("pm/stop", budget_s=timeout_s, kill_reserve_s=KILL_RESERVE_S)
+        try:
+            scope.own(stop, name="children", kind="process")
+        finally:
+            report = scope.close()
+        if self.logger:
+            for path, error in report.errors:
+                self.logger._log_error(f"stop_many: {path}: {error}")
 
-        pending: Dict[str, Process] = dict(procs)
-
-        def wait_until(deadline: float) -> None:
-            # Опрос вместо последовательного join: блокирующий join на одном процессе
-            # не замечает смерть соседа дальше по списку — а её метка может быть тем,
-            # что отпускает этот самый процесс.
-            while pending:
-                for name, process in list(pending.items()):
-                    if not process.is_alive():
-                        del pending[name]
-                        confirmed_dead(name, process)
-                remaining = deadline - time.monotonic()
-                if not pending or remaining <= 0:
-                    return
-                time.sleep(min(STOP_POLL_S, remaining))
-
-        # (b) Один общий дедлайн на graceful-выход всех
-        wait_until(time.monotonic() + timeout)
-
-        # (c) Terminate стрэгглеров (тоже разом), затем общий короткий срок
-        for process in list(pending.values()):
-            if self.logger:
-                self.logger._log_warning(f"Process '{process.name}' did not stop in {timeout}s, terminating...")
-            try:
-                process.terminate()
-            except Exception as e:
-                if self.logger:
-                    self.logger._log_warning(f"Error terminating '{process.name}': {e}")
-        if pending:
-            wait_until(time.monotonic() + TERMINATE_GRACE_S)
-
-        # (d) Kill оставшихся + финальный срок (подтверждение смерти)
-        for process in list(pending.values()):
-            if self.logger:
-                self.logger._log_error(f"Force killing process '{process.name}'")
-            try:
-                process.kill()
-            except Exception as e:
-                if self.logger:
-                    self.logger._log_error(f"Error killing '{process.name}': {e}")
-        if pending:
-            wait_until(time.monotonic() + KILL_CONFIRM_S)
-
-        # (e) Выжившие — по ФАКТУ, без метки: они всё ещё читают
-        for name in pending:
-            result[name] = False
+        survivors = stop.survivors()
+        for name in group:
+            result[name] = name not in survivors
+        for name in survivors:
             if self.logger:
                 self.logger._log_error(f"stop_many: '{name}' всё ещё жив после kill — остановка НЕ подтверждена")
-
         return result
 
-    def stop_all(self, timeout: float = 5.0, *, mark_reader_gone: bool = True) -> Dict[str, bool]:
+    def stop_all(
+        self, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S, *, mark_reader_gone: bool = True
+    ) -> Dict[str, bool]:
         """Остановить ВСЕ процессы с ПОДТВЕРЖДЕНИЕМ смерти (Ж-4, RS-3).
 
         Прежняя версия после ``kill`` НЕ делала финальный join и НЕ проверяла факт

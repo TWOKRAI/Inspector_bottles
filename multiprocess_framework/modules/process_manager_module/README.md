@@ -319,6 +319,7 @@ SystemLauncher
 | `stop_all(timeout=3.0)` | Все `_stop_events.set()`, join, terminate, kill. |
 | `stop_one(name, timeout)` | Только событие и join/terminate/kill для имени. |
 | `remove_process(name)` | Убрать из `os_processes` и `_stop_events`. |
+| `stop_many`/`stop_one`/`stop_all` (Task 1.1, ADR-PMM-035) | Один путь: группа `core/child_process_stop.ChildProcessStop` во временной области `pm/stop`; окна и формула бюджета — `core/stop_budget.py`; `child_stop_budget` → ключ `stop_budget` в конфиге ребёнка. |
 
 ---
 

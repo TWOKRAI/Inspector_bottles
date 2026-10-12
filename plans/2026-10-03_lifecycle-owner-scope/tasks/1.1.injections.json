@@ -1,0 +1,346 @@
+[
+ {
+  "id": "inj-1",
+  "prop": "kill() не блокирует: возвращается сразу после terminate()",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "                proc.terminate()",
+  "new": "                proc.terminate()\n                time.sleep(self._terminate_grace_s)",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_does_not_block"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_escalation_waits_terminate_grace",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_does_not_block",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_goes_at_deadline_minus_confirm_when_deadline_is_short",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_mark_is_slow",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_slow_mark_precedes_target"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "между terminate() и настоящим kill() есть окно terminate_grace_s",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "                proc.terminate()",
+  "new": "                proc.terminate()\n                proc.kill()",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_escalation_waits_terminate_grace"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_log_texts_caught_by_live_tests",
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_scope_windows_graceful_then_terminate_then_kill",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_escalation_waits_terminate_grace",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_does_not_block",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_goes_at_deadline_minus_confirm_when_deadline_is_short",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_mark_is_slow",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_slow_mark_precedes_target",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_repeat_kill_is_noop",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_survivor_is_not_marked"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "до kill() процессам не шлётся ни одного сигнала",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            alive = self._observe()",
+  "new": "            alive = self._observe()\n            if self._kill_started_at is None:\n                for _name, _proc in alive:\n                    _proc.terminate()",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_no_signal_before_kill"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_missing_stop_event_logged_and_escalation_still_kills",
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_scope_windows_graceful_then_terminate_then_kill",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_no_signal_before_kill"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "метка ставится в момент наблюдения смерти, а не только в close()",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "                self._confirm(name, proc)\n        return alive",
+  "new": "                with self._lock:\n                    self._dead.add(name)\n        if __import__(\"sys\")._getframe(1).f_code.co_name == \"close\":\n            for name, proc in list(self._processes.items()):\n                if name in self._dead and name not in self.__dict__.setdefault(\"_marked\", set()):\n                    self._marked.add(name)\n                    if self._on_confirmed_dead is not None:\n                        try:\n                            self._on_confirmed_dead(name, proc)\n                        except Exception:\n                            pass\n        return alive",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_mark_at_moment_of_death",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_late_death_after_deadline_is_marked"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_request_stop_from_other_thread_during_join_marks_once",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_exceptions_from_signals_and_mark_do_not_escape",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_join_until_true_when_all_dead_and_each_marked_once",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_mark_is_slow",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_slow_mark_precedes_target",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_late_death_after_deadline_is_marked",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_mark_at_moment_of_death",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_one_mark_per_name",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_past_deadline_all_dead_is_true",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_past_deadline_is_one_pass"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "close() не метит выживших (живых)",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            self._observe()",
+  "new": "            self._observe()\n            for name, proc in list(self._processes.items()):\n                if name not in self._dead and self._on_confirmed_dead is not None:\n                    self._on_confirmed_dead(name, proc)",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_survivor_is_not_marked"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_is_alive_failure_is_not_a_confirmed_death",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_close_never_marks_survivors_and_is_idempotent",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_survivor_is_not_marked"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "метка не более одной на имя за жизнь объекта",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            if name in self._dead:",
+  "new": "            if False:",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_one_mark_per_name"
+  ],
+  "observed": [],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "outer_s = pm_total_s + PM_TEARDOWN_MARGIN_S",
+  "file": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+  "old": "    outer_s = pm_total_s + PM_TEARDOWN_MARGIN_S",
+  "new": "    outer_s = pm_total_s",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_literals"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_int_argument_gives_floats",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_explicit_timeout_uses_default[-1.0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_explicit_timeout_uses_default[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_explicit_timeout_uses_default[True]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_explicit_timeout_uses_default[inf]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_explicit_timeout_uses_default[nan]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_explicit_timeout_uses_default[x]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_spawner_bad_orchestrator_shutdown_timeout_does_not_raise",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[0.0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[None]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_literals"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "pm_graceful_s: None/0 дают умолчание 5.0",
+  "file": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+  "old": "    return value or DEFAULT_SHUTDOWN_TIMEOUT_S",
+  "new": "    return value",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[None]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[0.0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_process_all_passes_default_for_none_and_zero[None]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_process_all_passes_default_for_none_and_zero[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_children_once_passes_default_for_none_and_zero[None]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_children_once_passes_default_for_none_and_zero[0]"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_children_once_passes_default_for_none_and_zero[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_process_all_passes_default_for_none_and_zero[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[0.0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_stop_budget_default_for_none_and_zero[0]"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "реестр кладёт stop_budget в конфиг ребёнка",
+  "file": "multiprocess_framework/modules/process_manager_module/core/process_registry.py",
+  "old": "                process_config.setdefault(\"stop_budget\", dict(self._child_stop_budget))",
+  "new": "                pass",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_child_config_gets_stop_budget",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_child_config_explicit_stop_budget_wins",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_child_config_explicit_stop_budget_wins"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_child_config_explicit_stop_budget_wins",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_registry_keeps_own_copy_of_budget",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_child_config_gets_stop_budget"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "явный ключ stop_budget в конфиге процесса сильнее бюджета реестра",
+  "file": "multiprocess_framework/modules/process_manager_module/core/process_registry.py",
+  "old": "                process_config.setdefault(\"stop_budget\", dict(self._child_stop_budget))",
+  "new": "                process_config[\"stop_budget\"] = dict(self._child_stop_budget)",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_child_config_explicit_stop_budget_wins",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_child_config_explicit_stop_budget_wins"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_child_config_explicit_stop_budget_wins",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_child_config_explicit_stop_budget_wins"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "survivors() строится по набору подтверждённых, а не по свежему is_alive()",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            return tuple(name for name in self._processes if name not in self._dead)",
+  "new": "            return tuple(name for name, proc in self._processes.items() if self._alive(name, proc))",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_late_death_after_deadline_is_marked"
+  ],
+  "observed": [],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-12",
+  "prop": "настоящий kill уходит не позже deadline - kill_confirm_s",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            return min(self._kill_started_at + self._terminate_grace_s, deadline - self._kill_confirm_s)",
+  "new": "            return self._kill_started_at + self._terminate_grace_s",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_goes_at_deadline_minus_confirm_when_deadline_is_short",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_mark_is_slow",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_slow_mark_precedes_target"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_goes_at_deadline_minus_confirm_when_deadline_is_short"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "выживший в результате реестра отдаётся как False (True ⇒ метка)",
+  "file": "multiprocess_framework/modules/process_manager_module/core/process_registry.py",
+  "old": "        result[name] = name not in survivors",
+  "new": "        result[name] = True",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py::test_survivor_is_not_marked_by_stop_one",
+   "multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py::test_stop_all_marks_straggler_but_not_survivor",
+   "multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_acceptance.py::TestStopWithFlagFalseDoesNotMark::test_stop_with_flag_false_does_not_mark"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py::test_stop_all_marks_straggler_but_not_survivor",
+   "multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py::test_survivor_is_not_marked_by_stop_one",
+   "multiprocess_framework/modules/process_manager_module/tests/test_process_registry.py::TestProcessRegistry::test_stop_many_reports_false_for_unkillable_process"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_no_orphans_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_process_registry.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "PM читает pm_graceful_s (а не pm_total_s) в _stop_children_once и stop_process(None)",
+  "file": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+  "old": "        self._process_monitor.stop()\r\n        shutdown_timeout = stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY))[\"pm_graceful_s\"]",
+  "new": "        self._process_monitor.stop()\r\n        shutdown_timeout = stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY))[\"pm_total_s\"]",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_process_all_passes_default_for_none_and_zero[None]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_process_all_passes_default_for_none_and_zero[0]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_children_once_passes_default_for_none_and_zero[None]",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_pm_stop_children_once_passes_default_for_none_and_zero[0]"
+  ],
+  "observed": null,
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_no_orphans_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_process_registry.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "allowlist G6: запись R5 для spawner.py (count 3) возвращена, а в spawner её нарушений нет",
+  "file": "scripts/lifecycle_guards/tables.py",
+  "old": "    (\"R3\", \"multiprocess_framework/modules/process_manager_module/launcher/spawner.py\"): AllowEntry(",
+  "new": "    (\"R5\", \"multiprocess_framework/modules/process_manager_module/launcher/spawner.py\"): AllowEntry(3, \"FROZEN Ф1 (stop_budget, ждёт 1.1)\"), (\"R3\", \"multiprocess_framework/modules/process_manager_module/launcher/spawner.py\"): AllowEntry(",
+  "forecast": [
+   "scripts/lifecycle_guards/tests/test_lifecycle_static.py::test_real_allowlist_table_shape",
+   "scripts/lifecycle_guards/tests/test_lifecycle_static.py::test_real_summary_line_literal"
+  ],
+  "observed": [
+   "scripts/lifecycle_guards/tests/test_lifecycle_static.py::test_real_allowlist_table_shape",
+   "scripts/lifecycle_guards/tests/test_lifecycle_static.py::test_real_summary_line_literal",
+   "scripts/lifecycle_guards/tests/test_lifecycle_static.py::test_real_tree_changed_allowlist_count_turns_g6_red",
+   "scripts/lifecycle_guards/tests/test_lifecycle_static.py::test_real_tree_passes_every_guard"
+  ],
+  "test": "scripts/lifecycle_guards/tests/test_lifecycle_static.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "исключение из on_confirmed_dead не вылетает из join_until",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "        try:\n            callback(name, proc)\n        except Exception as exc:  # noqa: BLE001 — метка вторична к факту смерти\n            self._emit(\"warning\", f\"метка подтверждённой смерти для '{name}' упала: {exc}\")",
+  "new": "        callback(name, proc)",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_exceptions_from_signals_and_mark_do_not_escape"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_exceptions_from_signals_and_mark_do_not_escape"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "повторный kill() — no-op",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            if self._kill_started_at is not None:",
+  "new": "            if False:",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_repeat_kill_is_noop"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_repeat_kill_is_noop"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-18",
+  "prop": "_stop_timeout_s: inf берёт умолчание, а не 0.0",
+  "file": "multiprocess_framework/modules/process_manager_module/core/process_registry.py",
+  "old": "        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout):",
+  "new": "        if isinstance(timeout, float) and math.isinf(timeout):\n            return 0.0\n        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout):",
+  "forecast": [],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py::test_registry_timeout_coercion[inf-5.0-True]"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_pm_marks_gone_reader_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_no_orphans_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_stop_summary_hazards.py multiprocess_framework/modules/process_manager_module/tests/test_process_registry.py"
+ },
+ {
+  "id": "inj-19",
+  "prop": "join_until опрашивает всю группу за проход, а не по одному процессу",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            alive = self._observe()",
+  "new": "            alive = []\n            for name, proc in self._pending():\n                while self._alive(name, proc) and time.monotonic() < deadline:\n                    time.sleep(self._poll_s)\n                if self._alive(name, proc):\n                    alive.append((name, proc))\n                else:\n                    self._confirm(name, proc)",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_mark_at_moment_of_death"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_log_texts_caught_by_live_tests",
+   "multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py::test_scope_windows_graceful_then_terminate_then_kill",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_escalation_waits_terminate_grace",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_exceptions_from_signals_and_mark_do_not_escape",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_goes_at_deadline_minus_confirm_when_deadline_is_short",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_mark_is_slow",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_kill_not_lost_when_slow_mark_precedes_target",
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_mark_at_moment_of_death"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ },
+ {
+  "id": "inj-20",
+  "prop": "request_stop шлёт set() только живым",
+  "file": "multiprocess_framework/modules/process_manager_module/core/child_process_stop.py",
+  "old": "            if not self._alive(name, proc):\n                continue\n            event = self._events.get(name)",
+  "new": "            event = self._events.get(name)",
+  "forecast": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_request_stop_sets_events_of_live_only_and_does_not_block"
+  ],
+  "observed": [
+   "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py::test_request_stop_sets_events_of_live_only_and_does_not_block"
+  ],
+  "test": "multiprocess_framework/modules/process_manager_module/tests/test_stop_budget_child_stop_acceptance.py multiprocess_framework/modules/process_manager_module/tests/test_stop_budget.py multiprocess_framework/modules/process_manager_module/tests/test_child_process_stop.py"
+ }
+]
