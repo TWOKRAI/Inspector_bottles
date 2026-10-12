@@ -13,7 +13,14 @@
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.modbus]",
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.modbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[pymodbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[Services.modbus]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[Services.robot_comm.core.client]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_programs_import_does_not_load[pymodbus]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -25,7 +32,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client_v2]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_leaf_import_does_not_load[Services.robot_comm.core.client_v2]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -37,7 +46,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_root_names_are_direct_objects[RobotClient]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_root_names_are_direct_objects[RobotClient]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -49,7 +60,9 @@
   "forecast": [
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_unknown_name_raises_attribute_error[Services.robot_comm.core]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_unknown_name_raises_attribute_error[Services.robot_comm.core]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -62,7 +75,10 @@
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_names_are_direct_objects[DrawPoint]",
    "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_star_import_gives_all_names[core]"
   ],
-  "observed": null,
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_core_names_are_direct_objects[DrawPoint]",
+   "Services/robot_comm/tests/test_lazy_init_acceptance.py::test_star_import_gives_all_names[core]"
+  ],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
  },
  {
@@ -72,7 +88,77 @@
   "old": "\"ROBOT_AVAILABLE\": (\"Services.modbus\", \"MODBUS_AVAILABLE\"),",
   "new": "\"ROBOT_AVAILABLE\": (\"builtins\", \"True\"),",
   "forecast": [],
-  "observed": null,
+  "observed": [],
   "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "ROBOT_AVAILABLE — флаг Services.modbus (повтор inj-6 с тестом без pymodbus, ревью р.1)",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "\"ROBOT_AVAILABLE\": (\"Services.modbus\", \"MODBUS_AVAILABLE\"),",
+  "new": "\"ROBOT_AVAILABLE\": (\"builtins\", \"True\"),",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_available_follows_modbus_without_pymodbus"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_available_follows_modbus_without_pymodbus"
+  ],
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "имя корня кэшируется в globals() после первого обращения",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "        globals()[name] = value\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_lazy_name_is_cached_in_module_dict[root]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_lazy_name_is_cached_in_module_dict[root]"
+  ],
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "текст AttributeError корня — стандартный текст модуля",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "raise AttributeError(f\"module {__name__!r} has no attribute {name!r}\")",
+  "new": "raise AttributeError(f\"bad text {name}\")",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_unknown_name_error_text_is_exact[root]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_unknown_name_error_text_is_exact[root]"
+  ],
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "__dir__ core перечисляет __all__ без загрузки клиента",
+  "file": "Services/robot_comm/core/__init__.py",
+  "old": "    def __dir__() -> list[str]:\n        return sorted(set(globals()) | set(__all__))\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_dir_lists_all_without_loading_client"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_dir_lists_all_without_loading_client"
+  ],
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "RobotCommService корня — класс из service.py",
+  "file": "Services/robot_comm/__init__.py",
+  "old": "\"RobotCommService\": (\"Services.robot_comm.service\", \"RobotCommService\"),",
+  "new": "\"RobotCommService\": (\"Services.robot_comm.core.client\", \"RobotClient\"),",
+  "forecast": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_comm_service_is_direct_object"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_lazy_init_lead.py::test_robot_comm_service_is_direct_object"
+  ],
+  "test": "Services/robot_comm/tests/test_lazy_init_acceptance.py Services/robot_comm/tests/test_lazy_init_lead.py"
  }
 ]

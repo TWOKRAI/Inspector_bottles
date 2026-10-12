@@ -17,7 +17,8 @@ Graceful degradation: пакет импортируется без pymodbus (ROB
 
 Импорт ленивый (PEP 562, T3.6): пакет и ``core`` не грузят клиента, ``Services.modbus``
 и pymodbus, пока не запрошено имя, которое из них приходит. ``import
-Services.robot_comm.programs`` поэтому лёгкий.
+Services.robot_comm.programs`` их не грузит; ``multiprocess_framework`` через ``params_v2``
+остаётся (вне T3.6).
 """
 
 from __future__ import annotations
@@ -70,15 +71,18 @@ _LAZY: dict[str, tuple[str, str]] = {
 }
 
 
-def __getattr__(name: str) -> Any:
-    """Загрузить имя при первом обращении и закэшировать в пространстве модуля."""
-    target = _LAZY.get(name)
-    if target is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(importlib.import_module(target[0]), target[1])
-    globals()[name] = value
-    return value
+# Под `not TYPE_CHECKING`: модульный __getattr__ иначе делает для pyright любое имя существующим (Any),
+# и опечатка в импорте перестаёт ловиться (ревью T3.6 р.1).
+if not TYPE_CHECKING:
 
+    def __getattr__(name: str) -> Any:
+        """Загрузить имя при первом обращении и закэшировать в пространстве модуля."""
+        target = _LAZY.get(name)
+        if target is None:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        value = getattr(importlib.import_module(target[0]), target[1])
+        globals()[name] = value
+        return value
 
-def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+    def __dir__() -> list[str]:
+        return sorted(set(globals()) | set(__all__))
