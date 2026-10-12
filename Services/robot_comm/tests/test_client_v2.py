@@ -1385,9 +1385,28 @@ def test_settle_timeout_drops_mark_when_firmware_took_slot_and_died_without_resp
     rig.core.regs[CMD_FLAG] = 0  # прошивка забрала слот и перезапустилась, не записав RES
     with pytest.raises(RobotTimeout):  # этот вызов снимает метку, но сам ничего не пишет
         rig.client.cmd("PING", [])
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2]  # fail-safe: перед снятием метки стоп повторён
     rig.ticking = True
     assert rig.client.cmd("PING", []).rvals[0] == 0x0200  # следующий пишет
     assert [c[1] for c in rig.cmds()] == [OP_PTP_MOVE, OP_PING]
+
+
+def test_slot_taken_but_response_later_than_timeout_move_is_stopped_by_failsafe_reissue() -> None:
+    """Флаг 0, RES позже тайм-аута: ход стартовал после него -> повтор стопа его обрывает."""
+    rig = _timeout_stop_timeout_rig()
+
+    def robot_answers_late(address: int, count: int, out: list[int]) -> list[int]:
+        if address == CMD_FLAG and count == 2:
+            rig.core.tick()  # стоп (эхо), затем mailbox принимает PTP: ход пошёл
+            return [0, out[1]]  # клиент видит флаг 0
+        return out
+
+    rig.transport.read_filter = robot_answers_late
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PING", [])
+    rig.transport.read_filter = None
+    assert rig.core.regs[TLM_ACTIVITY] == 1  # ход действительно стартовал позже тайм-аута
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 2 * 4 + 2])
 
 
 def test_settle_timeout_without_stop_still_drops_mark() -> None:

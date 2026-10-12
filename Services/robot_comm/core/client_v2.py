@@ -477,6 +477,9 @@ class RobotClientV2:
             self._wait_res(mark.seq)
         except RobotTimeout:
             if not self._keep_mark_after_timeout(mark):
+                if mark.done_seq:
+                    # Fail-safe: метку снимаем, но команда могла стартовать позже, чем мы ждали, — стоп повторяем.
+                    self._reissue_stop_if_overtaken(mark.generation)  # ошибка записи уйдёт наружу, метка останется
                 self._inflight = None
             raise
         try:
@@ -553,16 +556,25 @@ class RobotClientV2:
             text += ": " + REASON_TEXT[reason]
         raise RobotNak(errno, reason, text, index, rvals)
 
+    def _reissue_stop_if_overtaken(self, generation: int) -> bool:
+        """Если с поколения ``generation`` проходил стоп — одна запись стопа (HALT, если в окне был HALT, иначе HARD).
+
+        Под ``_stop_lock``, без ожидания эха. Возвращает True, если стоп записан.
+        """
+        with self._stop_lock:
+            if self._stop_generation == generation:
+                return False
+            level = STOP_LEVEL["HALT"] if self._last_halt_gen > generation else STOP_LEVEL["HARD"]
+            self._issue_stop_locked(level)
+        return True
+
     def _abort_if_overtaken(self, seq: int, generation: int) -> None:
         """О5: стоп прошёл между базой и ACK -> команду нельзя считать живой; повторить стоп и поднять RobotAborted.
 
         Сверка и повтор — под одним ``_stop_lock``: чужой стоп не вклинится между ними.
         """
-        with self._stop_lock:
-            if self._stop_generation == generation:
-                return
-            level = STOP_LEVEL["HALT"] if self._last_halt_gen > generation else STOP_LEVEL["HARD"]
-            self._issue_stop_locked(level)  # ошибка записи уйдёт наружу, метка «в полёте» останется
+        if not self._reissue_stop_if_overtaken(generation):
+            return
         self._inflight = None
         raise RobotAborted(seq, ERR["E_ABORTED"], ERR_TEXT[ERR["E_ABORTED"]])
 
