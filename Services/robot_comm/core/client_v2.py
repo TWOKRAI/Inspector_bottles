@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from Services.robot_comm.core import wire_v2
-from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID
+from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID, PARAMS
 from Services.robot_comm.core.protocol_v2 import (
     CONSTANTS,
     ERR,
@@ -879,8 +879,16 @@ class RobotClientV2:
         return self.cmd("PARAM_SET", [_param_id(name), raw])
 
     def param_get(self, name: str) -> int:
-        """PARAM_GET по имени из ``PARAM_ID``: сырое значение (``rvals[0]``)."""
-        return self.cmd("PARAM_GET", [_param_id(name)]).rvals[0]
+        """PARAM_GET по имени из ``PARAM_ID``: сырое значение (params.md §11.1 — u16 или s16).
+
+        Знаковый параметр (``PARAMS[id]["signed"]``) возвращается s16: слово ``>= 0x8000`` -> ``word - 0x10000``
+        (круг с ``param_set(name, -1500)`` даёт -1500). Беззнаковый — ``rvals[0]`` как есть.
+        """
+        pid = _param_id(name)
+        raw = int(self.cmd("PARAM_GET", [pid]).rvals[0])
+        if PARAMS[pid]["signed"] and raw >= 0x8000:
+            return raw - 0x10000
+        return raw
 
     def param_apply(self) -> CmdResult:
         """PARAM_APPLY."""
@@ -947,9 +955,11 @@ class RobotClientV2:
         Pre: на время ``run_chunks`` никаких ``done_seq``-``cmd()`` на этом клиенте (``wait_done`` держит один слот
         последней команды); второй ``run_chunks`` на том же клиенте -> ``RuntimeError``. Пульс (``kick_heartbeat``)
         — забота потока вызывающего. Post: все куски DONE -> ``RunReport``.
-        Raises: ``CompileError`` (до записи); ``RobotAborted`` (стоп; без своего стопа); ``RobotNak`` на SC_RUN
-        (команда не начата; без стопа); любое другое исключение после первого SC_RUN — сначала ``stop(HARD)``
-        (его ошибка — заметка к исходному), затем исходное.
+        Raises: ``CompileError`` (до записи); ``RobotAborted`` (стоп; к возврату робот остановлен: после метки
+        после ACK — ``wait_done`` этого SC_RUN, после О5 в ``sc_run`` — опрос TLM до обрыва команды);
+        ``RobotNak`` на SC_RUN (команда не начата; без стопа); любое другое исключение после первого SC_RUN —
+        сначала ``stop(HARD)`` (его ошибка — заметка к исходному), затем исходное. Недоставленный стоп после метки
+        уходит наружу своей ошибкой (транспорт, ``RobotTimeout("stop_echo")``), не ``RobotAborted``.
         """
         words = wire_v2.encode_scenario(scenario, params=params, round_step=self._cfg.round_step)
         half = CONSTANTS["SC_CAP"] // 2
@@ -999,7 +1009,12 @@ class RobotClientV2:
                 if marked():
                     raise RobotAborted(seq, ERR["E_ABORTED"], "стоп между кусками")
                 started = True
-                seq = self.sc_run(count, k + 1, offset).seq
+                try:
+                    seq = self.sc_run(count, k + 1, offset).seq
+                except RobotAborted as o5:
+                    # О5: клиент повторил стоп без ожидания эха — вернуть управление, когда робот остановился.
+                    self._wait_robot_stopped(o5.seq)
+                    raise
                 if marked():
                     self._abort_after_ack(seq)
                 upload_cut = False
@@ -1037,13 +1052,39 @@ class RobotClientV2:
         return ack
 
     def _abort_after_ack(self, seq: int) -> None:
-        """Метка стопа сразу после ACK SC_RUN: кусок уже принят — ``stop(HARD)``, затем ``RobotAborted``."""
-        aborted = RobotAborted(seq, ERR["E_ABORTED"], "стоп между кусками")
+        """Метка стопа сразу после ACK SC_RUN: кусок уже принят — ``stop(HARD)``, ждать конца куска, ``RobotAborted``.
+
+        Управление возвращается только после остановки робота: ``wait_done(seq)`` этого SC_RUN. ``RobotAborted`` из
+        него — наружу; DONE — всё равно ``RobotAborted``; ``RobotTimeout("done")`` — наружу как есть. Ошибка самого
+        стопа (транспорт, ``RobotTimeout("stop_echo")``) не прячется за ``RobotAborted``: уходит наружу с заметкой,
+        внешний обработчик повторяет ``stop(HARD)``.
+        """
         try:
             self.stop(STOP_LEVEL["HARD"])
-        except Exception as stop_exc:  # noqa: BLE001 — ошибка стопа не прячет RobotAborted
-            aborted.add_note(f"stop(HARD) после метки не удался: {type(stop_exc).__name__}: {stop_exc}")
-        raise aborted
+        except Exception as stop_exc:
+            stop_exc.add_note("метка стопа после ACK SC_RUN: кусок принят")
+            raise
+        self.wait_done(seq)  # RobotAborted — ожидаемый исход, уходит наружу как есть
+        raise RobotAborted(seq, ERR["E_ABORTED"], "стоп между кусками")
+
+    def _wait_robot_stopped(self, seq: int) -> None:
+        """О5 внутри SC_RUN: стоп записан, эхо не ждалось — ждать, пока робот оборвёт или закончит команду ``seq``.
+
+        Опрос блока TLM каждые ``poll_interval_s``: ``TLM_ERR_SEQ == seq`` с ``E_ABORTED`` или ``TLM_ACTIVITY`` в
+        простое / ошибке -> возврат. Нет за ``done_timeout_s`` -> ``RobotTimeout("done", seq)`` с заметкой.
+        """
+        deadline = self._clock() + self._cfg.done_timeout_s
+        while True:
+            tlm = self._rd(_TLM_BASE, _TLM_COUNT)
+            self._note_echo(int(tlm[_toff("TLM_STOP_ACK")]))
+            aborted = int(tlm[_toff("TLM_ERR_SEQ")]) == seq and int(tlm[_toff("TLM_ERRNO_LAST")]) == ERR["E_ABORTED"]
+            if aborted or int(tlm[_toff("TLM_ACTIVITY")]) in (_ACTIVITY_IDLE, _ACTIVITY_FAULT):
+                return
+            if self._clock() >= deadline:
+                timeout = RobotTimeout("done", seq)
+                timeout.add_note("О5 на SC_RUN: стоп записан, робот не остановился за done_timeout_s")
+                raise timeout
+            self._sleep(self._cfg.poll_interval_s)
 
 
 def _kind_code(kind: str) -> int:
@@ -1068,8 +1109,7 @@ def _geom_words(*values: float) -> list[int]:
         x = float(value) * scale
         if not math.isfinite(x):
             raise ValueError(f"координата #{i}: ожидается конечное число")
-        magnitude = int(math.floor(abs(x) + 0.5))
-        n = -magnitude if x < 0 else magnitude
+        n = wire_v2._round_half_away(x)  # одно правило округления с кодировщиком сценария
         if not CONSTANTS["W_MIN"] <= n <= CONSTANTS["W_MAX"]:
             raise ValueError(f"координата #{i}: вне диапазона W_MIN..W_MAX")
         out.append(n)

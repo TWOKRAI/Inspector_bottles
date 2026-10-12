@@ -235,7 +235,7 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   `ptp_move(x, y, z, rz, kind, spd_pct)`, `home(spd_pct)`, `jog_step(dx, dy, dz, drz, spd_pct)`,
   `jog_cont(direction, speed)`, `cvt_job(ecap, pick_x, pick_y, pick_z, flags, place_x, place_y, place_z, place_rz)`
   (`ecap` u32 делится на `dw_lo`/`dw_hi`), `sc_run(count, sc_id, offset)`, `servo(on)`, `do_set(channel, on)`,
-  `param_set(name, raw)`, `param_get(name) -> int`, `param_apply()`. Координаты обёрток — в мм и °, кодируются шагом
+  `param_set(name, raw)`, `param_get(name) -> int` (знаковый параметр — s16), `param_apply()`. Координаты обёрток — в мм и °, кодируются шагом
   провода (×`WIRE_SCALE`, половина от нуля), не `round_step`; `kind` — имя из `KIND`, параметр — имя из `PARAM_ID`.
   Обёртки — только `cmd()`: ждать завершения — вызывающему (`wait_done(result.seq)`).
 - **Кодировщик — `core/wire_v2.py`** (чистые функции): `quantize`, `encode_scenario(scenario, *, params, round_step)`
@@ -264,6 +264,11 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   — наружу без стопа. Любое другое исключение после первого SC_RUN (`RobotTimeout("response"/"done")`,
   `RobotCommandError`, ошибка транспорта, исключение `on_progress`) -> `stop(HARD)`, его ошибка — заметка к исходному,
   затем исходное наружу (`cmd()` не повторяется).
+- **`RobotAborted` из `run_chunks` = робот уже остановлен.** Метка после ACK: `stop(HARD)`, затем `wait_done` этого
+  SC_RUN (DONE — всё равно `RobotAborted`). О5 внутри `sc_run` (стоп повторён без ожидания эха): опрос TLM до
+  `TLM_ERR_SEQ == seq` с `E_ABORTED` или простоя/ошибки, не дольше `done_timeout_s`, иначе `RobotTimeout("done")`.
+  **Недоставленный стоп не прячется за `RobotAborted`:** если `stop(HARD)` после метки падает (транспорт,
+  `RobotTimeout("stop_echo")`), наружу уходит эта ошибка с заметкой «кусок принят» — робот, возможно, исполняет кусок.
 - **Pre: на время `run_chunks` никаких `done_seq`-`cmd()` на этом клиенте** — `wait_done` держит один слот последней
   команды. Второй `run_chunks` на том же клиенте -> `RuntimeError` (флаг `_sc_active`; замок на весь прогон не держится).
 - **Пульс во время сценария — поток вызывающего** (драйвер T5.1): `run_chunks` не пульсирует, а кусок может идти

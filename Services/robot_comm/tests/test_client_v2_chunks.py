@@ -35,6 +35,8 @@ RES_SEQ, STOP_REQ = 0x1010, 0x1021
 TLM_BASE, TLM_COUNT = 0x1040, 32
 DONE_OFF = 0x1051 - 0x1040  # TLM_DONE_SEQ в блоке TLM
 TLM_STOP_ACK = 0x105C
+TLM_ACTIVITY, TLM_ERR_SEQ = 0x1043, 0x1052  # TLM_ERRNO_LAST = 0x1053 читается вторым словом
+E_ABORTED = 13
 SC_BASE, SC_WORDS = 0x1400, 330  # SC_CAP 55 * SC_STRIDE 6
 OP_SC_RUN, OP_PTP_MOVE = 0x30, 0x10
 HARD = 2
@@ -247,6 +249,9 @@ def test_foreign_stop_before_next_sc_run_stops_after_ack() -> None:
     """Чужой HARD в STOP_REQ на самой записи SC_RUN куска 1: после ACK клиент пишет свой HARD и бросает RobotAborted.
 
     Проверка метки ДО SC_RUN чужой стоп не видит (он приходит вместе с командой) — ловит только проверка после ACK.
+    Управление возвращается только после остановки робота: в момент возврата робот в простое, событие обрыва
+    (ERR_SEQ = seq SC_RUN куска 1, ERRNO 13) уже выставлено. Время робота идёт только из ``sleep`` клиента, поэтому
+    состояние ядра после возврата заморожено — это снимок «в момент возврата».
     """
     rig = Rig()
     foreign = (500 << 2) | HARD
@@ -258,17 +263,80 @@ def test_foreign_stop_before_next_sc_run_stops_after_ack() -> None:
     rig.transport.before_tx = before_tx
     with pytest.raises(RobotAborted):
         bounded(lambda: rig.client.run_chunks(circle(60), params=PARAMS))
+    assert rig.core.read(TLM_ACTIVITY, 1) == [0], "run_chunks вернул управление, пока робот исполняет кусок"
     log = rig.transport.log
     runs = run_indices(log)
     assert len(runs) == 2, "кусок 2 запущен после чужого стопа"
+    assert rig.core.read(TLM_ERR_SEQ, 2) == [sc_run_of(log[runs[1]])[0], E_ABORTED]
     ours = stop_values(log[runs[1] :])
     assert ours, "после ACK SC_RUN клиент не записал стоп"
     assert all(v & 3 == HARD for v in ours)
     assert foreign not in ours
 
 
+def test_o5_abort_inside_sc_run_returns_after_robot_stopped() -> None:
+    """Свой stop(HARD) между записью SC_RUN куска 1 и его ACK -> О5 в cmd() -> RobotAborted после остановки робота.
+
+    Стоп в простое робот подтверждает эхом и затем принимает SC_RUN; клиент на ACK видит сменившееся поколение,
+    повторяет стоп без ожидания эха (О5) — run_chunks обязан дождаться обрыва команды. Снимок ядра в момент возврата.
+    """
+    rig = Rig()
+    state = {"done": False}
+
+    def after_tx(ops: list[tuple]) -> None:
+        if not state["done"] and is_cmd_tx(ops) and ops[0][2][1] == OP_SC_RUN and ops[0][2][4] == 2:
+            state["done"] = True
+            rig.client.stop(HARD)
+
+    rig.transport.after_tx = after_tx
+    with pytest.raises(RobotAborted) as info:
+        bounded(lambda: rig.client.run_chunks(circle(60), params=PARAMS))
+    log = rig.transport.log
+    runs = run_indices(log)
+    assert len(runs) == 2
+    seq1 = sc_run_of(log[runs[1]])[0]
+    assert info.value.seq == seq1
+    assert len(stop_values(log[runs[1] :])) == 2, "ожидались свой стоп и повтор стопа О5"
+    assert rig.core.read(TLM_ACTIVITY, 1) == [0], "run_chunks вернул управление, пока робот исполняет кусок"
+    assert rig.core.read(TLM_ERR_SEQ, 2) == [seq1, E_ABORTED]
+
+
+def test_failed_stop_after_ack_raises_transport_error() -> None:
+    """Чужой стоп на SC_RUN куска 1, а запись своего STOP_REQ падает ConnectionError -> наружу ConnectionError.
+
+    Недоставленный стоп не прячется за RobotAborted («стоп уже прошёл»): вызывающий узнаёт, что стоп не доставлен.
+    """
+    rig = Rig()
+    foreign = (500 << 2) | HARD
+
+    def before_tx(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops) and ops[0][2][1] == OP_SC_RUN and ops[0][2][4] == 2:
+            rig.core.write(STOP_REQ, [foreign])
+        if any(op[0] == "w" and op[1] == STOP_REQ for op in ops):
+            raise ConnectionError("link down")
+
+    rig.transport.before_tx = before_tx
+    with pytest.raises(ConnectionError) as info:
+        bounded(lambda: rig.client.run_chunks(circle(60), params=PARAMS))
+    assert not isinstance(info.value, RobotAborted)
+    assert any("кусок принят" in note for note in getattr(info.value, "__notes__", []))
+    assert len(run_indices(rig.transport.log)) == 2
+
+
+def test_param_get_signed_roundtrip() -> None:
+    """Знаковый параметр: param_set("P_WS_Z_MIN", -1500) -> param_get == -1500 (не 64036)."""
+    rig = Rig(servo=False)
+    rig.client.param_set("P_WS_Z_MIN", -1500)
+    assert rig.client.param_get("P_WS_Z_MIN") == -1500
+
+
 def test_stop_ack_change_before_upload() -> None:
-    """TLM_STOP_ACK меняется на чтении сразу после проверки (3) куска 0: ни одного блока куска 1, RobotAborted."""
+    """TLM_STOP_ACK меняется на чтении сразу после проверки (3) куска 0: ни одного блока куска 1, RobotAborted.
+
+    Тест привязан к порядку одиночных чтений TLM_STOP_ACK после SC_RUN: 1-е — проверка (3), 2-е — проверка (4) перед
+    загрузкой. Путь обрыва сверяется отдельно: стопа клиент не пишет (значит, не проверка (3)), текст — «во время
+    загрузки», и DONE куска 0 прочитан (значит, ждали текущий кусок, а не оборвали на (1) следующего).
+    """
     rig = Rig()
     state = {"armed": False, "seen": 0}
 
@@ -285,12 +353,16 @@ def test_stop_ack_change_before_upload() -> None:
 
     rig.transport.after_tx = after_tx
     rig.transport.read_filter = read_filter
-    with pytest.raises(RobotAborted):
+    with pytest.raises(RobotAborted) as info:
         bounded(lambda: rig.client.run_chunks(circle(60), params=PARAMS))
     log = rig.transport.log
     runs = run_indices(log)
     assert len(runs) == 1
     assert not [e for e in log[runs[0] :] if is_buf_tx(e)], "кусок 1 загружен после смены TLM_STOP_ACK"
+    assert stop_values(log[runs[0] :]) == [], "обрыв пришёл от проверки (3), а не перед загрузкой"
+    assert "загрузки" in str(info.value)
+    seq0 = sc_run_of(log[runs[0]])[0]
+    assert any(e[:3] == ("r", TLM_BASE, TLM_COUNT) and e[3][DONE_OFF] == seq0 for e in log[runs[0] :])
 
 
 def test_stop_during_upload_no_more_blocks() -> None:
