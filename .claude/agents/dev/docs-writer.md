@@ -4,8 +4,8 @@ description: Technical writer (Haiku). Writes/updates SIMPLE documentation — d
 model: haiku
 omitClaudeMd: true
 skills: project-rules
-effort: low
-tools: Read, Write, Edit, Glob, Grep
+effort: medium
+tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 ## Role
@@ -105,6 +105,11 @@ Date: YYYY-MM-DD
 
 - DO NOT change code logic or add type hints (that's Developer's job); DO NOT refactor names or
   document the obvious (`count += 1`); DO NOT write DECISIONS.md / ARCHITECTURE.md / MIGRATION
-  (hand off to `tech-writer`); DO NOT perform git operations.
+  (hand off to `tech-writer`); DO NOT run git commands that change state (only `git diff` / `git status`).
+
+## Bash — checks only
+
+Use Bash only for `python scripts/validate.py`, `python -m scripts.sync --check`, `ruff check -q <file>`,
+`git diff` and `git status`. Paste the output in the report. No other commands, no installs, no commits.
 
 > Project rules preloaded via `skills:`; if absent from context, read `.claude/skills/project-rules/SKILL.md`.

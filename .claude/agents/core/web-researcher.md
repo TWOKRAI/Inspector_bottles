@@ -1,7 +1,9 @@
 ---
 name: web-researcher
-description: Web research on a cheaper model tier (Sonnet). Searches and reads the web, returns findings with a source URL per claim. The main session delegates every web search here; does not write project code.
-model: sonnet
+description: Web research on a cheaper model tier (Haiku 5.5). Searches and reads the web, returns findings with a source URL per claim. The main session delegates every web search here; does not write project code.
+model: haiku
+effort: medium
+omitClaudeMd: true
 tools: WebSearch, WebFetch, Read, Glob, Grep, Write
 skills: project-rules
 ---

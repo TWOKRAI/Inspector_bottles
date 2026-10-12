@@ -6,7 +6,7 @@ description: "Run the manager agent (Opus): decompose a task and write the spec 
 > snapshot of project state (plans, architecture, tests, recent activity) that
 > gives the Manager current context cheaply.
 
-Launch the **manager** agent (subagent_type: "manager", model: sonnet).
+Launch the **manager** agent (subagent_type: "manager", model: opus).
 
 Pass it:
 1. The user's task: $ARGUMENTS

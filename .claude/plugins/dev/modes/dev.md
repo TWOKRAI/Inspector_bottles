@@ -32,7 +32,7 @@ The `/dev:pipeline` skill runs the full chain with failure-recovery via the debu
 | **manager** | Opus | `/dev:plan` | Decompose a phase into Task X.Y with complexity levels. Does NOT write code |
 | **developer** | Sonnet | `/dev:implement` | Standard Task implementation per spec (Middle/Middle+). Code + smoke-test + commit |
 | **teamlead** | Opus | Agent tool | Senior+: architecture, refactoring, integration. Escalation on 3rd review/debug iteration |
-| **junior** | Haiku | Agent tool / `/dev:team` | Mechanical, fully specified changes only (apply a given diff sketch, rename per list, fixture copy; under 20 lines). Stops on any decision. Does NOT commit |
+| **junior** | Haiku | Agent tool / `/dev:team` | Mechanical, fully specified changes only (apply a given diff sketch, rename per list, fixture copy; exact diff up to ~60 lines). Stops on any decision. Does NOT commit |
 | **tester** | Sonnet | `/dev:test` | Pytest against acceptance criteria from spec. Does NOT change logic |
 | **debugger** | Sonnet | `/dev:debug` | Reproduce → hypotheses → root cause. Fixes within scope or delivers a diagnosis |
 | **investigator** | Opus | Agent tool | Read-only diagnosis of cross-module problems. Does not write code, delivers a report |

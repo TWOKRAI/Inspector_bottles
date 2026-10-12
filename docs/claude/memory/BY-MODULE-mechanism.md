@@ -27,7 +27,7 @@
 - [feedback_zero_mentions_criterion_erases_the_reason](feedback_zero_mentions_criterion_erases_the_reason.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## agents (22)
+## agents (23)
 
 - [feedback_a_peer_session_shares_the_tree](feedback_a_peer_session_shares_the_tree.md)
 - [feedback_agent_commit_quality](feedback_agent_commit_quality.md)
@@ -46,6 +46,7 @@
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)
 - [feedback_protect_branch_blocks_worktree_subagents](feedback_protect_branch_blocks_worktree_subagents.md)
 - [feedback_read_tool_cannot_skip_forbidden_docstrings](feedback_read_tool_cannot_skip_forbidden_docstrings.md)
+- [feedback_root_ignore_whitelist_blinds_root_search](feedback_root_ignore_whitelist_blinds_root_search.md)
 - [feedback_subagent_live_test_monitor_hang](feedback_subagent_live_test_monitor_hang.md)
 - [feedback_subagents_share_the_leads_scratchpad](feedback_subagents_share_the_leads_scratchpad.md)
 - [feedback_worktree_stale_base](feedback_worktree_stale_base.md)
@@ -215,7 +216,7 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (13)
+## dev-tooling (14)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
@@ -225,6 +226,7 @@
 - [feedback_option_denylist_misses_abbreviations_and_argfiles](feedback_option_denylist_misses_abbreviations_and_argfiles.md)
 - [feedback_pytest_import_order_hides_a_cycle](feedback_pytest_import_order_hides_a_cycle.md)
 - [feedback_qex_full_rebuild_runbook](feedback_qex_full_rebuild_runbook.md)
+- [feedback_root_ignore_whitelist_blinds_root_search](feedback_root_ignore_whitelist_blinds_root_search.md)
 - [feedback_sentrux_depth_opaque](feedback_sentrux_depth_opaque.md)
 - [feedback_sentrux_freetier_3rule_limit](feedback_sentrux_freetier_3rule_limit.md)
 - [project_crossmodule_move_shim_cycle](project_crossmodule_move_shim_cycle.md)
