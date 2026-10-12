@@ -189,6 +189,48 @@ def test_survivor_child_gives_warning_summary_and_survivor_line() -> None:
     assert any("stop summary" in line and "not reported/lost: ['cam']" in line for line in warnings), warnings
 
 
+class _RaisingRegistry:
+    """Реестр, у которого ``children_stop`` падает (сбой в ``request_stop`` области детей)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def children_stop(self, *, mark_reader_gone: bool):
+        self.calls += 1
+        raise RuntimeError("boom-registry")
+
+    def exit_report(self, name: str) -> dict:
+        return {"released": 0, "buffered_dropped": 0, "reported": False}
+
+
+def test_registry_failure_in_request_stop_is_survivor_not_crash() -> None:
+    """Реестр упал в ``request_stop``: ``shutdown()`` возвращается, ``children`` — выживший/ошибка.
+
+    Одна попытка (``children_stop`` вызван 1 раз, не 3: request_stop, join_until, фаза 3), одна
+    строка в логе, исключение наружу не уходит.
+    """
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 1.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
+    errors: list[str] = []
+    real_error = pm._log_error
+    pm._log_error = lambda msg, *a, **k: (errors.append(str(msg)), real_error(msg, *a, **k))
+    registry = _RaisingRegistry()
+    pm._process_registry = registry
+    try:
+        done, result, error = _call_bounded(pm.shutdown)
+        assert done, "shutdown() завис"
+        assert error is None, repr(error)
+        assert result is False
+        report = pm.close_root()
+    finally:
+        _call_bounded(pm.shutdown)
+    assert registry.calls == 1
+    assert report.errors, report
+    assert any("children" in p for p in report.survivors), report
+    assert sum("не удалось начать остановку детей" in line for line in errors) == 1, errors
+
+
 # --------------------------------------------------------------------------- #
 # Монитор: код 76
 # --------------------------------------------------------------------------- #

@@ -3,17 +3,20 @@
 
 Проверяют:
 - initialize: успех, ошибка → error_module → shutdown
-- shutdown: порядок (monitor → registry → console → super)
+- shutdown: корень PM — монитор до сигнала детям, backend_ctl закрывается после детей
 - create_process, start_process, stop_process
 - get_process_status, get_all_processes_status
 - Регистрацию встроенных команд
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
+import socket
+import threading
 from multiprocessing import Event
+from unittest.mock import MagicMock, patch
 
 from ...process_module import ProcessModule
+from ..core.stop_budget import stop_budget
+from ..process.backend_ctl_endpoint import setup_backend_ctl_channel
 from ..process.process_manager_process import ProcessManagerProcess
 
 
@@ -67,147 +70,158 @@ class TestProcessManagerProcessInit:
                 assert hasattr(pmp, "_process_monitor")
 
 
+class _StopGroup:
+    """Группа детей: фиксирует порядок и сама пишет наблюдение в момент фазы 1 и ожидания."""
+
+    def __init__(self, journal: list, observe=None, fail: bool = False) -> None:
+        self._journal = journal
+        self._observe = observe
+        self._fail = fail
+
+    def request_stop(self) -> None:
+        self._journal.append("children.request_stop")
+        if self._observe is not None:
+            self._observe()
+        if self._fail:
+            raise RuntimeError("boom-children")
+
+    def join_until(self, deadline: float) -> bool:
+        self._journal.append("children.join_until")
+        if self._observe is not None:
+            self._observe()
+        return True
+
+    def kill(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def result(self) -> dict:
+        return {"child": True}
+
+
+class _StopRegistry:
+    def __init__(self, group: _StopGroup) -> None:
+        self._group = group
+
+    def children_stop(self, *, mark_reader_gone: bool) -> _StopGroup:
+        return self._group
+
+    def exit_report(self, name: str) -> dict:
+        return {"released": 0, "buffered_dropped": 0, "reported": True}
+
+
+class _JournalMonitor:
+    def __init__(self, journal: list) -> None:
+        self._journal = journal
+
+    def stop(self, wait: bool = True, timeout: float = 10.0) -> None:
+        self._journal.append("monitor.stop")
+
+
+def _bounded(fn, timeout_s: float = 15.0):
+    """``fn`` в daemon-потоке с дедлайном join: (завершился, результат, ошибка)."""
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — тест разбирает ошибку сам
+            box["error"] = exc
+
+    th = threading.Thread(target=run, daemon=True, name="pm_shutdown_order_bounded")
+    th.start()
+    th.join(timeout_s)
+    return (not th.is_alive()), box.get("result"), box.get("error")
+
+
+def _connectable(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _real_pm(registry, monitor=None) -> ProcessManagerProcess:
+    """Настоящий PM: бюджет 1.0, ``initialize()``; реестр и монитор подменены ПОСЛЕ (читаются при остановке)."""
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 1.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
+    pm._process_registry = registry
+    if monitor is not None:
+        pm._process_monitor = monitor
+    return pm
+
+
 class TestProcessManagerProcessShutdownOrder:
     def test_shutdown_order_monitor_then_registry(self) -> None:
-        """Порядок shutdown: monitor → registry → console → super."""
-        call_order = []
-
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
-            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
-            pmp.name = "ProcessManager"
-            pmp.shared_resources = None
-            pmp.config = {}
-            pmp.config_handler = None
-
-            mock_monitor = MagicMock()
-            mock_registry = MagicMock()
-            mock_console = MagicMock()
-
-            def on_monitor_stop():
-                call_order.append("monitor")
-
-            def on_registry_stop(*args, **kwargs):
-                call_order.append("registry")
-
-            mock_monitor.stop.side_effect = on_monitor_stop
-            mock_registry.stop_all.side_effect = on_registry_stop
-            mock_console.close_all = MagicMock(side_effect=lambda: call_order.append("console"))
-
-            pmp._process_monitor = mock_monitor
-            pmp._process_registry = mock_registry
-            pmp._console_manager = mock_console
-
-            mock_super_shutdown = MagicMock(return_value=True)
-            with patch.object(ProcessModule, "shutdown", mock_super_shutdown):
-                pmp.shutdown()
-
-        # Проверяем порядок: monitor до registry
-        assert "monitor" in call_order and "registry" in call_order
-        assert call_order.index("monitor") < call_order.index("registry")
-        mock_super_shutdown.assert_called_once()
+        """Монитор на паузе до первого сигнала остановки детям (корень PM, ADR-PMM-036)."""
+        journal: list = []
+        pm = _real_pm(_StopRegistry(_StopGroup(journal)), _JournalMonitor(journal))
+        try:
+            done, result, error = _bounded(pm.shutdown)
+        finally:
+            _bounded(pm.shutdown)
+        assert done and error is None, repr(error)
+        assert result is True
+        assert "monitor.stop" in journal and "children.request_stop" in journal, journal
+        assert journal.index("monitor.stop") < journal.index("children.request_stop"), journal
 
     def test_backend_ctl_socket_accepts_while_children_stop(self) -> None:
         """Сокет backend_ctl жив, пока PM останавливает детей, и закрыт после shutdown().
 
         Ответ на ``system.shutdown`` уходит через этот сокет, а на системном стопе PM видит
         событие за <=0.1 с; закрытие сокета первым шагом shutdown теряло ответ в ~1 из 10
-        живых прогонов (Task 1.1 lifecycle-stop-ownership). Наблюдаемое — TCP-connect на
-        настоящий порт, а не шпион на ``close()``.
+        живых прогонов (Task 1.1 lifecycle-stop-ownership). Теперь сокет — запись
+        ``transport/backend_ctl``, а дети — в ``work``: transport закрывается после work.
+        Наблюдаемое — TCP-connect на настоящий порт, а не шпион на ``close()``.
         """
-        import socket
-
-        from ..process.backend_ctl_endpoint import setup_backend_ctl_channel
-
-        class _Router:
-            def __init__(self) -> None:
-                self.channels: dict = {}
-
-            def register_channel(self, channel) -> bool:
-                self.channels[channel.name] = channel
-                return True
-
-            def unregister_channel(self, name) -> bool:
-                return self.channels.pop(name, None) is not None
-
-        def _connectable(port: int) -> bool:
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                    return True
-            except OSError:
-                return False
-
-        router = _Router()
-        channel = setup_backend_ctl_channel(router, env={}, config={"enabled": True, "port": 0})
+        seen: list = []
+        ports: list = []  # порт канала: шпион группы читает его после создания канала
+        journal: list = []
+        group = _StopGroup(journal, observe=lambda: seen.append(_connectable(ports[0])))
+        pm = _real_pm(_StopRegistry(group), _JournalMonitor(journal))
+        channel = setup_backend_ctl_channel(pm.router_manager, env={}, config={"enabled": True, "port": 0})
         assert channel is not None
+        pm._backend_ctl_channel = channel
         port = channel.port
-        seen_during_stop_all: list = []
-
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
-            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
-            pmp.name = "ProcessManager"
-            pmp.shared_resources = None
-            pmp.config = {}
-            pmp.config_handler = None
-            pmp._process_monitor = MagicMock()
-            pmp._process_registry = MagicMock()
-            pmp._process_registry.stop_all.side_effect = lambda *a, **kw: seen_during_stop_all.append(
-                _connectable(port)
-            )
-            pmp._console_manager = None
-            pmp._backend_ctl_channel = channel
-            pmp.router_manager = router
-            try:
-                with patch.object(ProcessModule, "shutdown", return_value=True):
-                    pmp.shutdown()
-            finally:
-                channel.close()
-
-        assert seen_during_stop_all == [True]
+        ports.append(port)
+        try:
+            done, _, error = _bounded(pm.shutdown)
+        finally:
+            _bounded(pm.shutdown)
+            channel.close()
+        assert done and error is None, repr(error)
+        assert seen == [True, True]  # request_stop и join_until детей: сокет принимает
         assert _connectable(port) is False
-        assert pmp._backend_ctl_channel is None
+        assert pm._backend_ctl_channel is None
 
     def test_backend_ctl_socket_closed_even_if_stop_all_raises(self) -> None:
-        """Исключение в stop_all не оставляет сокет backend_ctl открытым до выхода (ревью it.2)."""
-        import socket
+        """Группа детей упала в фазе 1 — сокет backend_ctl всё равно закрыт, ``shutdown()`` не бросает.
 
-        from ..process.backend_ctl_endpoint import setup_backend_ctl_channel
-
-        class _Router:
-            def register_channel(self, channel) -> bool:
-                return True
-
-            def unregister_channel(self, name) -> bool:
-                return True
-
-        channel = setup_backend_ctl_channel(_Router(), env={}, config={"enabled": True, "port": 0})
+        Было: исключение ``stop_all`` уходило из ``shutdown()``. Теперь ошибка записи области
+        ``work/children`` уходит в отчёт корня (``shutdown()`` → ``False``), а ``transport``
+        закрывается своим барьером независимо.
+        """
+        journal: list = []
+        pm = _real_pm(_StopRegistry(_StopGroup(journal, fail=True)), _JournalMonitor(journal))
+        channel = setup_backend_ctl_channel(pm.router_manager, env={}, config={"enabled": True, "port": 0})
         assert channel is not None
+        pm._backend_ctl_channel = channel
         port = channel.port
-
-        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
-            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
-            pmp.name = "ProcessManager"
-            pmp.shared_resources = None
-            pmp.config = {}
-            pmp.config_handler = None
-            pmp._process_monitor = MagicMock()
-            pmp._process_registry = MagicMock()
-            pmp._process_registry.stop_all.side_effect = RuntimeError("boom")
-            pmp._console_manager = None
-            pmp._backend_ctl_channel = channel
-            pmp.router_manager = _Router()
-            try:
-                with patch.object(ProcessModule, "shutdown", return_value=True):
-                    with pytest.raises(RuntimeError):
-                        pmp.shutdown()
-            finally:
-                channel_open = True
-                try:
-                    socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-                except OSError:
-                    channel_open = False
-                channel.close()
-
-        assert channel_open is False
+        try:
+            done, result, error = _bounded(pm.shutdown)
+            reachable_after = _connectable(port)
+        finally:
+            _bounded(pm.shutdown)
+            channel.close()
+        assert done and error is None, repr(error)
+        assert result is False
+        assert "children.request_stop" in journal, journal
+        assert reachable_after is False
+        assert pm._backend_ctl_channel is None
 
     def test_shutdown_without_console_does_not_raise(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):

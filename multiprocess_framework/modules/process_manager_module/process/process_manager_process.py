@@ -4322,17 +4322,24 @@ class _ChildrenStop:
     def __init__(self, pm: ProcessManagerProcess) -> None:
         self._pm = pm
         self._group: Any = None
+        self._start_failed = False
         self._lock = threading.Lock()
 
     def _start(self) -> Any:
         with self._lock:
-            if self._group is not None:
+            if self._group is not None or self._start_failed:
                 return None
             pm = self._pm
-            monitor = getattr(pm, "_process_monitor", None)
-            if monitor is not None:
-                monitor.stop(wait=True, timeout=float(pm._budget()["infra_s"]))
-            self._group = pm._process_registry.children_stop(mark_reader_gone=True)
+            try:
+                monitor = getattr(pm, "_process_monitor", None)
+                if monitor is not None:
+                    monitor.stop(wait=True, timeout=float(pm._budget()["infra_s"]))
+                self._group = pm._process_registry.children_stop(mark_reader_gone=True)
+            except Exception as exc:
+                # Одна попытка: повтор в join_until/фазе 3 не лечит и множит ошибки.
+                self._start_failed = True
+                pm._log_error(f"shutdown: не удалось начать остановку детей PM: {exc}")
+                raise
             return self._group
 
     def request_stop(self) -> None:
@@ -4341,8 +4348,11 @@ class _ChildrenStop:
             group.request_stop()
 
     def join_until(self, deadline: float) -> bool:
-        if self._group is None:
+        """Дети остановлены к сроку? Реестр упал в ``request_stop`` (группы нет) — ``False`` без исключения."""
+        if self._group is None and not self._start_failed:
             self.request_stop()
+        if self._group is None:
+            return False
         return self._group.join_until(deadline)
 
     def kill(self) -> None:
