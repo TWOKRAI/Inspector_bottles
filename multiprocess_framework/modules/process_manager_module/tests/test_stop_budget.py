@@ -82,17 +82,19 @@ def test_pm_stop_process_all_passes_default_for_none_and_zero(value: Any) -> Non
     pm._process_registry.stop_all.assert_called_once_with(timeout=5.0, mark_reader_gone=True)
 
 
-@pytest.mark.parametrize("value", [None, 0])
-def test_pm_stop_children_once_passes_default_for_none_and_zero(value: Any) -> None:
-    """Сторожит: то же чтение в ``_stop_children_once`` (путь shutdown)."""
-    pm = _bare_pm(value)
-    pm._process_monitor = MagicMock()
-    pm._process_registry.stop_all.return_value = {}
+def test_pm_children_scope_takes_graceful_from_attached_budget() -> None:
+    """Сторожит (Task 1.2a): срок области ``work/children`` корня PM = ``pm_graceful_s``
+    приложенного словаря, не повторное чтение конфига. Конфиг 5.0, словарь 1.0 → 1.0.
+    Случаи ``None``/``0`` — в hazard ``_resolve_stop_budget`` (``test_process_root_pm_hazards.py``)."""
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 5.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
     try:
-        pm._stop_children_once()
-    except Exception:  # noqa: BLE001 — хвост метода (сводка) на голом PM не важен
-        pass
-    assert pm._process_registry.stop_all.call_args.kwargs["timeout"] == 5.0
+        work = pm.lifetime_segments["work"]
+        children = work._names["children"].res
+        assert children.budget_s == 1.0
+    finally:
+        assert pm.shutdown() is True
 
 
 # ---------------------------------------------------------------------------

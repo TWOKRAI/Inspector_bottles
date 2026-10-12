@@ -276,22 +276,20 @@ class TestShutdownStopsStatePlane:
     а daemon-flusher переживал остановку оркестратора.
     """
 
-    def test_shutdown_calls_state_store_shutdown(self, monkeypatch) -> None:
-        orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
-        orch._setup_state_store()
-        assert orch._state_store_manager is not None
-        mgr = orch._state_store_manager
-        mgr.shutdown = MagicMock(return_value=True)
-        monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
-
+    def test_shutdown_calls_state_store_shutdown(self) -> None:
+        """Task 1.2a: ``state_store`` — запись ``work`` корня; корень собирает ``initialize()``,
+        закрывает ``shutdown()``. Без ``initialize()`` закрывать нечего (ADR-PM-054)."""
+        orch = GenericProcessManagerApp(config={"shutdown_timeout": 1.0, "initial_state": {"system": {"x": 1}}})
+        assert orch.initialize() is True
         try:
-            orch.shutdown()
-
+            mgr = orch._state_store_manager
+            assert mgr is not None
+            # Спай с side_effect = настоящий shutdown: вызов доказан, flusher остановлен.
+            mgr.shutdown = MagicMock(side_effect=mgr.shutdown)
+            assert orch.shutdown() is True
             mgr.shutdown.assert_called_once()
         finally:
-            # Спай доказал ВЫЗОВ, но настоящий flusher им не остановлен —
-            # гасим реализацией класса мимо инстансной подмены.
-            type(mgr).shutdown(mgr)
+            orch.shutdown()
 
     def test_shutdown_without_state_plane_is_noop(self, monkeypatch) -> None:
         """Процесс без state-plane (minimal_app) — shutdown не падает."""

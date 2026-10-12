@@ -387,6 +387,16 @@ ALLOWLIST: dict[tuple[str, str], AllowEntry] = {
     ("R4", "multiprocess_framework/modules/frontend_module/application/thread_manager.py"): AllowEntry(
         1, "мегаплан GUI"
     ),
+    ("R4", "multiprocess_framework/modules/process_manager_module/core/process_registry.py"): AllowEntry(
+        1,
+        "делегат Stoppable.kill() группы ChildProcessStop (Task 1.2a): сигнала процессу нет, "
+        "эскалация terminate→kill живёт только в child_process_stop.py",
+    ),
+    ("R4", "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py"): AllowEntry(
+        1,
+        "делегат Stoppable.kill() группы ChildProcessStop (Task 1.2a): сигнала процессу нет, "
+        "эскалация terminate→kill живёт только в child_process_stop.py",
+    ),
     ("R4", "multiprocess_framework/modules/process_manager_module/launcher/pid_registry.py"): AllowEntry(
         1, "остаётся после 1.1: цепочка стопа самого PM / цикл Ctrl+C / добой по PID — вне группы детей (О4)"
     ),

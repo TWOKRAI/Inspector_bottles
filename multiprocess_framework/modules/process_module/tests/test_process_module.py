@@ -42,9 +42,11 @@ class TestProcessModule:
 
         assert result is True
         assert process.is_initialized is True
+        process.shutdown()  # Task 1.2a: initialize() открыл корень — закрыть (G3)
 
     def test_shutdown(self):
-        """Тест завершения процесса."""
+        """Task 1.2a (ADR-PM-054): без ``initialize()`` корня нет — ``shutdown()`` даёт ``True``
+        и не гасит ничего; гашение менеджеров — у закрытия корня, его собирает ``initialize()``."""
         process = ProcessModule("test_process")
         process.is_initialized = True
         process._stop_requested = False
@@ -64,8 +66,11 @@ class TestProcessModule:
         result = process.shutdown()
 
         assert result is True
-        assert process.is_initialized is False
-        assert process._stop_requested is True
+        process.logger_manager.shutdown.assert_not_called()
+        process.command_manager.shutdown.assert_not_called()
+        process.router_manager.shutdown.assert_not_called()
+        process.worker_manager.stop_all_workers.assert_not_called()
+        process.update_process_state.assert_not_called()
 
     def test_run_stop(self):
         """Тест запуска и остановки процесса."""

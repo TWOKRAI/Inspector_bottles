@@ -1499,12 +1499,7 @@ boot ребёнка, `kill -9` PM под `BackendHarness`.
 3. **Чтение — `ProcessRegistry.exit_report(name) -> dict`.** Нет слота (имя не создавалось через
    `_create_process`) или `reported==0` → `{"released": 0, "buffered_dropped": 0, "reported": False}`.
    Никогда не бросает.
-4. **Публикация — ОДИН лог PM** (`ProcessManagerProcess._publish_stop_summary`, зовётся из `shutdown()`
-   между `stop_all` и `super().shutdown()`): собирает `exit_report(name)` по всем именам, которые ОСТАНОВИЛ
-   именно этот `stop_all`, и пишет ОДНУ запись `self._log_warning(msg, stop_summary=summary)` /
-   `self._log_info(...)` — WARNING, если у кого-то `released>0`/`buffered_dropped>0`/`reported=False`,
-   иначе INFO. `msg` начинается литерально с `"stop summary:"`. Обёрнуто целиком в `try/except` —
-   публикация не имеет права сорвать сам shutdown.
+4. **Публикация — ОДИН лог PM** (`ProcessManagerProcess._publish_stop_summary`; с Task 1.2 lifecycle-owner-scope — вызываемое в сегменте `work` корня PM, зарегистрированное ДО области `children`: закрытие идёт LIFO, поэтому сводка пишется после подтверждения смерти детей и до `_flush_observability` в сегменте `transport`, ADR-PM-054): собирает `exit_report(name)` по ВСЕМ именам `os_processes` на момент остановки — включая уже мёртвых и остановленных раньше одиночно (`_build_child_stop` метит их `True`; замер CTO S4: `processor` после `process.stop` — `reported=true`) — и пишет ОДНУ запись `self._log_warning(msg, stop_summary=summary)` / `self._log_info(...)` — WARNING, если у кого-то `released>0`/`buffered_dropped>0`/`reported=False`, иначе INFO. `msg` начинается литерально с `"stop summary:"`. Обёрнуто целиком в `try/except` — публикация не имеет права сорвать останов.
 
 ### Контракт записи в сторе — `extra["context"]["stop_summary"]`, НЕ `extra["stop_summary"]`
 
@@ -1520,6 +1515,8 @@ boot ребёнка, `kill -9` PM под `BackendHarness`.
 записи, чужой модуль, вне `FILES` этой задачи. `store_tap.py`/`record_display.py` НЕ трогались.
 
 ### Порядок жизненного цикла — хук `_before_observability_teardown` (2026-09-25, продолжение)
+
+> Заменено ADR-PM-054 / ADR-PMM-036 (Task 1.2): хука нет, порядок держит корень.
 
 Механизм слота (пункты 1-3 выше) был подтверждён живым стендом, но публикация (пункт 4) изначально не
 доезжала до `observability.db` — **не** из-за контракта записи (он поправлен выше), а из-за **порядка
@@ -1705,3 +1702,35 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
 - (в) Словарь `stop_budget` считается при создании PM: если `shutdown_timeout` меняется на лету, словарь
   ребёнка и чтение PM на стопе расходятся.
 - (г) Типизированный `GenericProcessConfig` молча отбрасывает ключ `stop_budget` (extra=None, атрибута нет); до раннера словарь доезжает в `custom.process_config`. Читатель 1.2 берёт сырой конфиг или заводит поле.
+
+## ADR-PMM-036: корень PM — `_ChildrenStop` в `work`, бюджет `pm_total_s + infra_s`, код 76 у монитора (Task 1.2a, 2026-10-12)
+
+### Решение
+
+- Корень PM (ADR-PM-054) — бюджет `pm_total_s + infra_s` (`_root_budget`), `DEFAULT_STOP_BUDGET =
+  stop_budget(None)`. `work` PM: `summary` (`_stop_summary`), затем область `children` (срок `pm_graceful_s`
+  из словаря, резерв `KILL_RESERVE_S`) с одним Stoppable `_ChildrenStop`. LIFO: дети → сводка; затем
+  `transport` (`console_close`, `backend_ctl` — после детей, ответ на `system.shutdown` уходит через сокет).
+- `_ChildrenStop.request_stop()`: СНАЧАЛА синхронная пауза монитора `ProcessMonitor.stop(wait=True,
+  timeout=infra_s)`, ЗАТЕМ реестр читается (поздно — смена топологии) и `ProcessRegistry.children_stop(
+  mark_reader_gone=True)` получает фазу 1. Группа строится в `request_stop`, не при регистрации.
+  `result()` — карта шага (а) + `False` для выживших; без опоры на `close()` выжившего.
+- Нарушение «`cancel()` не блокирует»: пауза монитора держит фазу 1 PM ≤ `infra_s` (1,0 при g = 5,0;
+  0,2 при g = 1,0). Без синхронной паузы итерация в полёте перезапустила бы ребёнка с уже взведённым
+  `stop_event`.
+- `EXIT_SURVIVORS = 76` (`core/stop_budget.py`): ребёнок закрыл корень, но в отчёте остались выжившие.
+  `ProcessMonitor._handle_dead_process`: 76 → статус `stopped`, supervisor-событие `survivors` уровня
+  `warning`, `_try_auto_restart` не зовётся.
+- `GenericProcessManagerApp._own_work`: СНАЧАЛА `super()._own_work(work)` (дети PM), ЗАТЕМ `state_store`,
+  `recipe_watcher`, `observability_watcher` — LIFO закрывает watcher'ы и SSM раньше конца детей и сводки,
+  как прежний `shutdown()`. Сигнал детям уходит раньше SSM: фаза 1 `work` взводит `request_stop` всех
+  записей сегмента до LIFO-фазы 2.
+- Известный предел: на пути `shutdown()` без `stop()` ошибка фазы 1 детей пишется в `errors` корня дважды (фаза 1 и повтор из `join_until`); на пути раннера (`stop()` + `close_root()`) — один раз. Снять дубль можно только правкой `base_manager` (`cancel()` зовёт фазу 1 без аккумулятора).
+
+### Отвергнуто
+
+- Барьер в `work` приложения после `super()._own_work(work)`: SSM и watcher'ы закрывались бы до сигнала
+  детям — порядок не тот, что сегодня на пути раннера.
+- Отдельная запись `monitor` в корне: пауза монитора обязана предшествовать первому `stop_event` — это
+  внутренний порядок одной записи, не порядок двух.
+- Флаг `_children_stopped` и хук `_before_observability_teardown`: единственность даёт корень.

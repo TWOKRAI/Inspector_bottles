@@ -4,6 +4,8 @@
 
 ProcessManagerProcess — оркестратор с композицией ProcessRegistry + ProcessPriority + ProcessStatusMonitor + ProcessMonitor. Dict at Boundary: SystemLauncher принимает только (name, proc_dict); конвертация в app через process(); нормализация через merge_with_defaults(DEFAULT_PROCESS_SCHEMA).
 
+**Корень PM (Task 1.2a, ADR-PMM-036):** дети PM — область `work/children` в корне процесса (монитор на паузе до сигнала детям, затем сводка), `backend_ctl` и консоль закрываются в `transport` после детей.
+
 **Новое в этапе 8:**
 - `interfaces.py` — публичные контракты `ISystemLauncher`, `IProcessManagerProcess`, `IProcessRegistry`
 - Graceful shutdown без `sys.exit()` в signal handler

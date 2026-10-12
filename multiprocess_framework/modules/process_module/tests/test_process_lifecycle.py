@@ -64,6 +64,7 @@ class TestProcessModuleLifecycle:
         result = process.initialize()
         assert result is True
         assert process.is_initialized is True
+        process.shutdown()  # Task 1.2a: initialize() открыл корень — закрыть (G3)
 
     def test_initialize_calls_all_steps(self):
         process = self._make_process_with_mocked_init()
@@ -75,11 +76,13 @@ class TestProcessModuleLifecycle:
         process._init_communication.assert_called_once()
         process._register_process_state.assert_called_once()
         process._init_system_threads.assert_called_once()
+        process.shutdown()  # Task 1.2a: initialize() открыл корень — закрыть (G3)
 
     def test_initialize_sets_ready_status(self):
         process = self._make_process_with_mocked_init()
         process.initialize()
         process.update_process_state.assert_called_with(status=ProcessStatus.READY.value)
+        process.shutdown()  # Task 1.2a: initialize() открыл корень — закрыть (G3)
 
     def test_initialize_returns_false_on_exception(self):
         process = self._make_process_with_mocked_init()
@@ -87,29 +90,42 @@ class TestProcessModuleLifecycle:
         result = process.initialize()
         assert result is False
 
-    def test_shutdown_returns_true(self):
+    def _initialized_with_planes(self):
+        """Task 1.2a: корень собирает ``initialize()`` (шаги замоканы); ``planes``
+        регистрируются настоящим ``_register_planes`` — сборка менеджеров замокана."""
         process = self._make_process_with_mocked_init()
-        process.is_initialized = True
-
         process._stop_system_threads = Mock()
-        process.worker_manager = Mock()
+        process.worker_manager = None  # запись ``workers``: менеджера нет — ждать некого
         process.logger_manager = Mock()
         process.command_manager = Mock()
         process.router_manager = Mock()
         process.update_process_state = Mock()
+        assert process.initialize() is True
+        process._register_planes(process.lifetime_segments["planes"])
+        return process
+
+    def test_shutdown_returns_true(self):
+        process = self._initialized_with_planes()
 
         result = process.shutdown()
         assert result is True
         assert process.is_initialized is False
 
     def test_shutdown_sets_stopped_status(self):
-        process = self._make_process_with_mocked_init()
-        process.is_initialized = True
-        process._stop_system_threads = Mock()
-        process.update_process_state = Mock()
+        process = self._initialized_with_planes()
 
         process.shutdown()
         process.update_process_state.assert_called_with(status=ProcessStatus.STOPPED.value)
+
+    def test_shutdown_without_initialize_closes_nothing(self):
+        """Task 1.2a (ADR-PM-054): без ``initialize()`` корня нет — ``True``, ничего не гасится."""
+        process = self._make_process_with_mocked_init()
+        process.logger_manager = Mock()
+        process.update_process_state = Mock()
+
+        assert process.shutdown() is True
+        process.logger_manager.shutdown.assert_not_called()
+        process.update_process_state.assert_not_called()
 
 
 class TestProcessModuleRunStop:

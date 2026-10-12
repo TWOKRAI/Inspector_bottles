@@ -114,12 +114,13 @@ class GenericProcess(ProcessModule):
         """Очередь DataReceiver -> PipelineExecutor (read-only; ``None`` до сборки data-плоскости)."""
         return getattr(self, "_chain_queue", None)
 
-    def shutdown(self) -> bool:
-        """Останов: ``proxy.shutdown()`` (шлёт state.unsubscribe_all) ПОКА роутер жив, затем база."""
-        state_proxy = getattr(self, "_state_proxy", None)
-        if state_proxy is not None:
-            state_proxy.shutdown()
-        return super().shutdown()
+    def _own_work(self, work) -> None:
+        """``work``: ``state_proxy`` (шлёт state.unsubscribe_all) — закрывается ПОКА роутер жив.
+
+        Task 1.2a (ADR-PM-054): роутер в ``transport``, он закрывается после ``work``.
+        """
+        super()._own_work(work)
+        work.own(self._attr_call("_state_proxy", "shutdown"), name="state_proxy", kind="callable")
 
     def _init_application_threads(self) -> None:
         """super() делает plugin boot, здесь только data pipeline."""
