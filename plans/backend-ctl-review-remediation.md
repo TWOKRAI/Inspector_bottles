@@ -256,6 +256,11 @@ max-line-length в обоих `_read_loop` (drop+log вместо безгран
 - Task 4.4: Эфемерный порт live-фикстуры [PENDING] — в `harness.py`/`conftest.py` привязки к `:0` нет
 - Task 4.5: Доки и границы [PENDING] — `STATUS.md` пишет «47 инструментов», `test_backend_ctl_endpoint.py` лежит в `process_manager_module/tests/`
 
+### Фаза 5 — один MCP на все бэкенды (пожелание владельца 2026-10-12 «один на всех»)
+
+- Task 5.1: Карточка обнаружения: бэкенд при старте пишет `{name, app, port, pid}`, при останове удаляет; инструмент `targets` [PENDING] (после 4.4) — сегодня MCP привязан к одному порту env `BACKEND_CTL_PORT` (`backend_ctl/endpoint_config.py`, `.mcp.json`), line_sim (8766) доступен только через `BackendDriver(port=8766)`; 2026-10-12
+- Task 5.2: Необязательный параметр `target` у каждого инструмента; по умолчанию — единственный живой бэкенд или прототип [PENDING] (после 5.1) — 2026-10-12
+
 ---
 
 ## Verification (гейт плана)
