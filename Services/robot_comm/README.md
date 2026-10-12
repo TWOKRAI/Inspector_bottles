@@ -150,8 +150,44 @@ python -m Services.robot_comm.gui.sim_view    # обычный запуск с �
 QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-after 2
 ```
 
+## Клиент v2 (`core/client_v2.py`, T3.1)
+
+`RobotClientV2(transport, ClientV2Config, *, rng, clock, sleep)` — клиент протокола Delta v2
+(`plans/robot-protocol-v2/protocol-spec.md`). Транспорт внедряется (`ModbusDevice` / `FakeRobotTransport`),
+собственных потоков нет: расписание пульса и поводка держит вызывающий (драйвер). Экспорт — из
+`Services.robot_comm.core`.
+
+| метод | что делает |
+|---|---|
+| `probe()` | только чтения: 0x1010..0x105F, `TLM_PROTO_VER` (0 или старший байт ≠ 0x02 -> `WrongFirmware`), слоты `PMIR` сторожа и поводка |
+| `cmd(op, args) -> CmdResult` | транзакция mailbox под `_mailbox_lock`; NAK -> `RobotNak(errno, reason, text, index, rvals)` |
+| `wait_done(seq)` | завершение последней команды `done_seq`; `RobotAborted` / `RobotCommandError` / `RobotTimeout("done")` |
+| `poll_errors()` | асинхронные события `ERR_EVT` (`ErrorEvent`, `missed`) |
+| `stop(level) -> StopResult` | `STOP_REQ = stop_seq*4 + level`, ждёт эхо; `mailbox` не берёт |
+| `kick_heartbeat()` / `jog_lease()` | `HB_PC` / `JOG_LEASE` = прежнее + 1, одна запись FC6; периоды `heartbeat_period_s` / `jog_lease_period_s` |
+| `sync_params(values, epoch)` | синхронизация по метке и отпечатку словаря (params.md §11.4 п.3), метка пишется последней |
+
+Правила:
+
+- **probe до записи.** Первый пишущий вызов (`cmd`, `stop`, `sync_params`, `kick_heartbeat`, `jog_lease`) на клиенте без
+  `probe()` выполняет `probe()` сам (только чтения; единое место — `_ensure_probed`). Прошивка не v2 -> `WrongFirmware`
+  без единой записи; транспорт не подключён -> `RobotNotConnectedError`. После переподключения транспорта вызывающий
+  обязан снова вызвать `probe()` (базы пульса, стопа и событий снимаются заново).
+- **Нет ответа.** После `RobotTimeout("response")` вызвать `stop()`. Следующий `cmd()` сначала досматривает ответ на
+  прежний seq (не дольше `res_timeout_s`); не дождался — `RobotTimeout("response")` без записи, потом пишет сразу.
+- **Стоп и команда `done_seq` (О5).** Если стоп прошёл между чтением базы и ACK команды `done_seq`, клиент повторяет
+  стоп (HALT, если в окне был HALT, иначе HARD) и поднимает `RobotAborted`. Мгновенные опкоды (`SERVO`, `DO_SET`,
+  `PARAM_*`) возвращают свой результат.
+- **Замки.** `_mailbox_lock` только в `cmd()`; `stop`, `wait_done`, `kick_heartbeat`, `jog_lease`, `poll_errors` его не
+  берут. Задержка стопа ограничена одной операцией транспорта (`ModbusDevice` держит `RLock` на операцию; при обрыве —
+  до `timeout_sec × (1 + retries)`).
+- **Ошибки.** Тексты исключений без входных значений; значения — в полях (`errno`, `seq`, `stage`, ...).
+- Конфиг: `ClientV2Config.from_dict({...})`; `res_timeout_s` и `soft_echo_timeout_s` не меньше `longest_gap_s`.
+
 ## Тесты
 
 ```bash
-pytest Services/robot_comm        # 40: карта/клиент/runtime — fake; e2e — TCP sim
+pytest Services/robot_comm        # карта/клиент/runtime — fake; e2e — TCP sim
+pytest Services/robot_comm/tests/test_client_v2.py                # клиент v2: гонки, порядок, seq, О3, О5 (fake + один настоящий стек)
+pytest Services/robot_comm/tests/test_client_v2_acceptance.py     # приёмка против настоящего sim v2 (TCP)
 ```

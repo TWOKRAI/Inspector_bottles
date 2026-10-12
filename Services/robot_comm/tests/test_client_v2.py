@@ -1,0 +1,857 @@
+"""Тесты автора ``RobotClientV2``: гонки, порядок записей, seq, О3, О5, probe-до-записи (T3.1).
+
+Стенд — ``FakeRobotTransport`` поверх настоящего ``RobotSimCoreV2`` (``ticks_per_read=0``): время робота
+идёт только из ``sleep`` клиента (он делает ``core.tick()``), часы клиента — ручные. Барьеры стоят на самой
+записи (хук ``after_tx`` / ``before_tx`` на ``transaction``), а не на входе в метод. Один тест
+(``test_real_stack_*``) собран из настоящих ``SimRobotServer`` + ``ModbusDevice``.
+Адреса и коды — литералами из protocol-spec; приёмку против sim v2 пишет tester (``test_client_v2_acceptance``).
+"""
+
+from __future__ import annotations
+
+import socket
+import threading
+import time
+
+import pytest
+
+from Services.modbus.core.config import ModbusConfig
+from Services.modbus.core.device import ModbusDevice
+from Services.modbus.sdk.errors import ModbusIOError
+from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2, StopResult
+from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
+from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+from Services.robot_comm.errors import (
+    RobotAborted,
+    RobotCommandError,
+    RobotNak,
+    RobotNotConnectedError,
+    RobotSyncError,
+    RobotTimeout,
+    WrongFirmware,
+)
+from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
+from Services.robot_comm.server.sim_robot import SimRobotServer
+from Services.robot_comm.testing.fake_transport import FakeRobotTransport
+
+# --- литералы протокола -------------------------------------------------------------------
+CMD_FLAG, CMD_SEQ = 0x1000, 0x1001
+RES_SEQ, HB_PC, STOP_REQ, JOG_LEASE = 0x1010, 0x1020, 0x1021, 0x1022
+TLM_ACTIVITY, TLM_SERVO = 0x1043, 0x1049
+TLM_DONE_SEQ, TLM_ERR_SEQ, TLM_ERRNO_LAST, TLM_ERR_EVT = 0x1051, 0x1052, 0x1053, 0x1054
+TLM_STOP_ACK, TLM_CFG_EPOCH = 0x105C, 0x105D
+PMIR_BASE, PMIR_DICT = 0x3000, 0x3082
+OP_PING, OP_PTP_MOVE, OP_SERVO, OP_PARAM_SET, OP_PARAM_APPLY = 0x01, 0x10, 0x41, 0x50, 0x52
+E_RANGE, E_ABORTED, E_MOTION_FAULT = 3, 13, 11
+P_WDG_ID, P_JOG_ID, P_EPOCH_ID = 96, 11, 98
+
+MOVE_LONG = [3000, -1500, -400, -1000, 0, 1]  # из дома 60 мм на 1 % — сотни тиков
+MOVE_SHORT = [3000, -2090, -400, -1000, 0, 100]
+
+_FORBIDDEN_PORTS = frozenset({5021, 8765, 8766, 8091, 8092})
+_DEADLINE_S = 10.0
+
+
+class FixedRng:
+    """Подставной ``random.Random``: ``randint`` всегда отдаёт заданное значение."""
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def randint(self, a: int, b: int) -> int:  # noqa: ARG002 — сигнатура random.Random
+        return self.value
+
+
+class HookTransport(FakeRobotTransport):
+    """Fake с журналом чтений/записей и хуками на запись (барьер на самой записи)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.log: list[tuple] = []  # ("r", addr, count) | ("tx", ops)
+        self.before_tx = None
+        self.after_tx = None
+        self.read_filter = None
+
+    def read_registers(self, address: int, count: int = 1) -> list[int]:
+        self.log.append(("r", address, count))
+        out = super().read_registers(address, count)
+        return self.read_filter(address, count, out) if self.read_filter else out
+
+    def transaction(self, ops: list[tuple]) -> bool:
+        self.log.append(("tx", list(ops)))
+        if self.before_tx:
+            self.before_tx(ops)
+        ok = super().transaction(ops)
+        if self.after_tx:
+            self.after_tx(ops)
+        return ok
+
+
+def is_cmd_tx(ops: list[tuple]) -> bool:
+    return len(ops) == 2 and ops[0][0] == "wm" and ops[0][1] == CMD_SEQ and ops[1] == ("w", CMD_FLAG, 1)
+
+
+class Rig:
+    def __init__(
+        self, *, ticking: bool = True, rng: int = 100, config: dict | None = None, connect: bool = True, core=None
+    ) -> None:
+        self.core = core if core is not None else RobotSimCoreV2()
+        self.transport = HookTransport(core=self.core, ticks_per_read=0)
+        if connect:
+            self.transport.connect()
+        self.now = 0.0
+        self.ticking = ticking
+        cfg = ClientV2Config.from_dict(config or {})
+        self.client = RobotClientV2(self.transport, cfg, rng=FixedRng(rng), clock=lambda: self.now, sleep=self.sleep)
+
+    def sleep(self, dt: float) -> None:
+        self.now += dt
+        if self.ticking:
+            self.core.tick()
+
+    def cmds(self) -> list[tuple[int, int, list[int]]]:
+        """Команды mailbox из журнала записей: (seq, opcode, args)."""
+        out = []
+        for ops in self.transport.transactions:
+            if is_cmd_tx(ops):
+                seq, opcode, argc, *args = ops[0][2]
+                assert argc == len(args)
+                out.append((seq, opcode, args))
+        return out
+
+    def stop_writes(self) -> list[int]:
+        return [op[2] for ops in self.transport.transactions for op in ops if op[1] == STOP_REQ]
+
+
+def in_thread(fn, name: str = "t"):
+    box: dict = {}
+    done = threading.Event()
+
+    def body() -> None:
+        try:
+            box["value"] = fn()
+        except Exception as exc:  # noqa: BLE001 — исключение уходит в тест
+            box["exc"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=body, name=name, daemon=True).start()
+    return box, done
+
+
+def join(done: threading.Event, what: str, deadline: float = _DEADLINE_S) -> None:
+    if not done.wait(deadline):
+        pytest.fail(f"зависание: {what}")
+
+
+def all_values() -> dict[str, int]:
+    return {name: int(PARAMS[pid]["default"]) for name, pid in PARAM_ID.items() if name != "P_CONFIG_EPOCH"}
+
+
+# ============================================================================================
+# Конфиг
+# ============================================================================================
+
+
+def test_config_defaults_are_literals() -> None:
+    cfg = ClientV2Config.from_dict({})
+    assert (cfg.poll_interval_s, cfg.longest_gap_s, cfg.res_timeout_s) == (0.02, 1.5, 2.0)
+    assert (cfg.done_timeout_s, cfg.stop_echo_timeout_s, cfg.soft_echo_timeout_s) == (30.0, 1.0, 2.0)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"res_timeout_s": 1.0},  # < longest_gap 1.5
+        {"soft_echo_timeout_s": 1.0},
+        {"poll_interval_s": 0},
+        {"unknown_field": 1},
+    ],
+)
+def test_config_rejects_bad_fields_without_echoing_values(bad: dict) -> None:
+    with pytest.raises(ValueError) as exc:
+        ClientV2Config.from_dict(bad)
+    for value in bad.values():
+        assert f"={value!r}" not in str(exc.value)
+
+
+# ============================================================================================
+# probe и «запись только после чтения версии»
+# ============================================================================================
+
+
+def test_unprobed_cmd_on_wrong_firmware_raises_with_zero_writes() -> None:
+    from Services.robot_comm.server.sim_core import RobotSimCore
+
+    rig = Rig(core=RobotSimCore())
+    with pytest.raises(WrongFirmware) as exc:
+        rig.client.cmd("PING", [])
+    assert exc.value.proto_ver == 0
+    assert rig.transport.transactions == []
+    assert [e for e in rig.transport.log if e[0] == "tx"] == []
+
+
+def test_unprobed_first_cmd_writes_only_after_version_read() -> None:
+    rig = Rig()
+    rig.client.cmd("PING", [])
+    assert rig.transport.log[0] == ("r", RES_SEQ, 80)  # версия читается до первой записи
+    first_tx = next(i for i, e in enumerate(rig.transport.log) if e[0] == "tx")
+    assert first_tx >= 3  # блок 0x1010..0x105F + два слота PMIR (watchdog, поводок) прочитаны раньше
+    assert rig.transport.log[1] == ("r", PMIR_BASE + P_WDG_ID, 1)
+    assert rig.transport.log[2] == ("r", PMIR_BASE + P_JOG_ID, 1)
+
+
+@pytest.mark.parametrize("proto_ver", [0x0100, 0x0300, 0x0000])
+def test_probe_wrong_major_reads_nothing_more(proto_ver: int) -> None:
+    rig = Rig()
+    rig.core.regs[0x1040] = proto_ver
+    with pytest.raises(WrongFirmware) as exc:
+        rig.client.probe()
+    assert exc.value.proto_ver == proto_ver
+    assert rig.transport.log == [("r", RES_SEQ, 80)]  # слоты PMIR не читались
+    assert rig.transport.transactions == []
+
+
+def test_probe_accepts_minor_version_bump() -> None:
+    rig = Rig()
+    rig.core.regs[0x1040] = 0x0207
+    rig.client.probe()
+
+
+def test_unconnected_transport_raises_not_connected_without_write() -> None:
+    rig = Rig(connect=False)
+    for call in (
+        lambda: rig.client.cmd("PING", []),
+        lambda: rig.client.stop(2),
+        rig.client.kick_heartbeat,
+        rig.client.jog_lease,
+        lambda: rig.client.sync_params(all_values(), 1),
+    ):
+        with pytest.raises(RobotNotConnectedError):
+            call()
+    assert rig.transport.log == [] and rig.transport.transactions == []
+
+
+def test_periods_come_from_probe_mirror_and_none_when_watchdog_off() -> None:
+    rig = Rig()
+    assert rig.client.heartbeat_period_s is None and rig.client.jog_lease_period_s is None
+    rig.client.probe()
+    assert rig.client.heartbeat_period_s == 0.75  # P_WDG_TIMEOUT_MS 3000 / 4000
+    assert rig.client.jog_lease_period_s == pytest.approx(0.1)  # P_JOG_LEASE_MS 300 / 3000
+    off = Rig()
+    off.core.regs[PMIR_BASE + P_WDG_ID] = 0
+    off.client.probe()
+    assert off.client.heartbeat_period_s is None
+
+
+# ============================================================================================
+# Пульс и поводок
+# ============================================================================================
+
+
+def test_heartbeat_first_write_changes_register_and_wraps_16_bit() -> None:
+    rig = Rig()
+    rig.core.regs[HB_PC] = 0xFFFF
+    rig.client.probe()
+    rig.client.kick_heartbeat()
+    rig.client.kick_heartbeat()
+    assert rig.transport.transactions == [[("w", HB_PC, 0)], [("w", HB_PC, 1)]]
+
+
+def test_jog_lease_increments_from_probe_base_in_its_own_register() -> None:
+    rig = Rig()
+    rig.core.regs[JOG_LEASE] = 7
+    rig.client.probe()
+    rig.client.jog_lease()
+    assert rig.transport.transactions == [[("w", JOG_LEASE, 8)]]
+
+
+# ============================================================================================
+# cmd: порядок записей, аргументы, seq
+# ============================================================================================
+
+
+def test_cmd_transaction_is_data_block_then_flag_in_one_call() -> None:
+    rig = Rig(rng=100)
+    rig.client.cmd("PTP_MOVE", [3000, -2090, -400, -1000, 0, 100])
+    assert rig.transport.transactions == [
+        [("wm", CMD_SEQ, [100, OP_PTP_MOVE, 6, 3000, 0xF7D6, 0xFE70, 0xFC18, 0, 100]), ("w", CMD_FLAG, 1)]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("op", "args"),
+    [
+        ("PING", [1]),
+        ("PTP_MOVE", [1, 2]),
+        ("NO_SUCH_OP", []),
+        ("SERVO", [-32768]),
+        ("SERVO", [65536]),
+        ("SERVO", [1.5]),
+    ],
+)
+def test_cmd_bad_arguments_raise_value_error_without_write(op: str, args: list) -> None:
+    rig = Rig()
+    with pytest.raises(ValueError) as exc:
+        rig.client.cmd(op, args)
+    assert "65536" not in str(exc.value) and "32768" not in str(exc.value)
+    assert rig.transport.transactions == []
+
+
+def test_seq_starts_at_rng_value_then_plus_one() -> None:
+    rig = Rig(rng=100)
+    first = rig.client.cmd("PING", [])
+    second = rig.client.cmd("PING", [])
+    assert (first.seq, second.seq) == (100, 101)
+
+
+def test_seq_skips_current_res_done_and_err_seq() -> None:
+    rig = Rig(rng=100)
+    rig.core.regs[RES_SEQ], rig.core.regs[TLM_DONE_SEQ], rig.core.regs[TLM_ERR_SEQ] = 100, 101, 102
+    assert rig.client.cmd("PING", []).seq == 103
+
+
+def test_seq_zero_is_never_issued_and_65535_wraps_to_1() -> None:
+    zero = Rig(rng=0)
+    assert zero.client.cmd("PING", []).seq == 1
+    wrap = Rig(rng=65535)
+    assert [wrap.client.cmd("PING", []).seq for _ in range(2)] == [65535, 1]
+
+
+# ============================================================================================
+# cmd: разбор NAK
+# ============================================================================================
+
+
+def test_nak_e_range_with_reason_carries_reason_text_and_rvals() -> None:
+    rig = Rig()
+    with pytest.raises(RobotNak) as exc:
+        rig.client.cmd("PTP_MOVE", [3000, -2100, -400, -1000, 5, 50])  # kind = 5 -> R_KIND
+    nak = exc.value
+    assert (nak.errno, nak.reason, nak.index, nak.rvals) == (E_RANGE, 1, None, (1,))
+    assert nak.text.endswith(": KIND")
+
+
+def test_nak_e_range_without_rvalc_ignores_stale_rval_from_previous_reply() -> None:
+    rig = Rig()
+    with pytest.raises(RobotNak):  # оставляет RVAL0 = 1 с RVALC = 1
+        rig.client.cmd("PTP_MOVE", [3000, -2100, -400, -1000, 5, 50])
+    with pytest.raises(RobotNak) as exc:  # теперь RVALC = 0, RVAL0 в регистре остался прежним
+        rig.client.cmd("PTP_MOVE", [3000, -2100, -400, -1000, 0, 101])
+    assert exc.value.reason is None and exc.value.rvals == ()
+    assert exc.value.text == "Значение или цель вне допустимого диапазона (rval0 — причина)"
+
+
+def test_nak_e_sc_record_gets_index_and_reason() -> None:
+    # E_SC_RECORD (8): rval0 = индекс записи, rval1 = причина; блок RES = [seq, NAK=2, errno, rvalc, rvals...]
+    with pytest.raises(RobotNak) as exc:
+        RobotClientV2._parse_res([9, 2, 8, 2, 4, 6, 0, 0, 0, 0, 0, 0])
+    nak = exc.value
+    assert (nak.errno, nak.index, nak.reason, nak.rvals) == (8, 4, 6, (4, 6))
+    assert nak.text.endswith(": последняя точка LINE_PASS")
+
+
+def test_nak_unknown_errno_gets_fallback_text() -> None:
+    with pytest.raises(RobotNak) as exc:
+        RobotClientV2._parse_res([9, 2, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    assert exc.value.text == "неизвестная ошибка"
+
+
+# ============================================================================================
+# cmd: ответ не пришёл — метка «в полёте»
+# ============================================================================================
+
+
+def test_response_timeout_then_next_cmd_settles_inflight_without_new_write() -> None:
+    rig = Rig(ticking=False)
+    with pytest.raises(RobotTimeout) as first:
+        rig.client.cmd("PING", [])
+    assert (first.value.stage, first.value.seq) == ("response", 100)
+    assert len(rig.cmds()) == 1
+    with pytest.raises(RobotTimeout) as second:  # робот всё ещё молчит: досмотр прежнего seq, записи нет
+        rig.client.cmd("PING", [])
+    assert (second.value.stage, second.value.seq) == ("response", 100)
+    assert len(rig.cmds()) == 1
+    rig.ticking = True
+    assert rig.client.cmd("PING", []).seq == 101  # метка снята: пишет сразу
+    assert [c[0] for c in rig.cmds()] == [100, 101]
+
+
+def test_late_response_to_inflight_seq_lets_next_cmd_proceed() -> None:
+    rig = Rig(ticking=False)
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PING", [])
+    rig.core.tick()  # робот наконец ответил на seq 100
+    rig.ticking = True
+    assert rig.client.cmd("PING", []).seq == 101
+
+
+# ============================================================================================
+# wait_done
+# ============================================================================================
+
+
+def test_wait_done_rejects_foreign_seq_and_instant_ops() -> None:
+    rig = Rig()
+    with pytest.raises(ValueError):
+        rig.client.wait_done(5)  # команд ещё не было
+    ping = rig.client.cmd("PING", [])
+    with pytest.raises(ValueError):
+        rig.client.wait_done(ping.seq)  # PING — не done_seq
+    move = rig.client.cmd("PTP_MOVE", MOVE_SHORT)
+    rig.client.cmd("PING", [])  # мгновенная команда не сбивает базу ожидания
+    with pytest.raises(ValueError):
+        rig.client.wait_done(move.seq + 50)
+    rig.client.wait_done(move.seq)
+    assert rig.core.regs[TLM_DONE_SEQ] == move.seq
+
+
+def test_wait_done_times_out_when_robot_never_finishes() -> None:
+    rig = Rig(config={"done_timeout_s": 3.0})
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.ticking = False
+    with pytest.raises(RobotTimeout) as exc:
+        rig.client.wait_done(move.seq)
+    assert (exc.value.stage, exc.value.seq) == ("done", move.seq)
+    assert 3.0 <= rig.now - 0 and rig.now < 30.0
+
+
+def test_wait_done_motion_fault_is_command_error_not_aborted() -> None:
+    rig = Rig()
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.core.inject_motion_fault()
+    with pytest.raises(RobotCommandError) as exc:
+        rig.client.wait_done(move.seq)
+    assert type(exc.value) is RobotCommandError
+    assert (exc.value.errno, exc.value.seq) == (E_MOTION_FAULT, move.seq)
+
+
+def test_wait_done_sees_fault_that_happened_between_cmd_write_and_cmd_return() -> None:
+    """База ``ERR_EVT`` снята ДО записи CMD: авария сразу после приёма команды не теряется."""
+    rig = Rig()
+
+    def fault_right_after_accept(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops):
+            rig.core.tick()  # робот принял команду и начал ход
+            rig.core.inject_motion_fault()
+
+    rig.transport.after_tx = fault_right_after_accept
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.transport.after_tx = None
+    with pytest.raises(RobotCommandError) as exc:
+        rig.client.wait_done(move.seq)
+    assert (exc.value.errno, exc.value.seq) == (E_MOTION_FAULT, move.seq)
+
+
+def test_wait_done_foreign_event_while_running_does_not_fail_the_wait() -> None:
+    """Чужое событие ERR_EVT между базой и записью CMD: команда идёт (ACTIVITY ≠ 0, 5) — ждём дальше."""
+    rig = Rig()
+
+    def foreign_event(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops):
+            rig.core.regs[TLM_ERR_SEQ] = 4242
+            rig.core.regs[TLM_ERRNO_LAST] = 12
+            rig.core.regs[TLM_ERR_EVT] = (rig.core.regs[TLM_ERR_EVT] + 1) & 0xFFFF
+
+    rig.transport.before_tx = foreign_event
+    move = rig.client.cmd("PTP_MOVE", MOVE_SHORT)
+    rig.client.wait_done(move.seq)  # без исключения
+
+
+def test_wait_done_masked_abort_event_is_reported_when_robot_is_idle() -> None:
+    """ERR_EVT изменился, ERR_SEQ не наш, DONE_SEQ не наш, ACTIVITY = 0 -> «событие обрыва перекрыто»."""
+    rig = Rig()
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.core._active = None  # команда исчезла без DONE (перекрыта): ACTIVITY -> 0
+    rig.core.regs[TLM_ACTIVITY] = 0
+    rig.core.regs[TLM_ERR_SEQ] = move.seq + 1000
+    rig.core.regs[TLM_ERR_EVT] = (rig.core.regs[TLM_ERR_EVT] + 1) & 0xFFFF
+    with pytest.raises(RobotCommandError) as exc:
+        rig.client.wait_done(move.seq)
+    assert exc.value.errno is None and exc.value.text == "событие обрыва перекрыто"
+
+
+def test_wait_done_ack_seq_change_alone_is_not_an_abort() -> None:
+    """Ловушка р.1: TLM_ACK_SEQ от чужого PARAM_GET не считается обрывом."""
+    rig = Rig()
+    move = rig.client.cmd("PTP_MOVE", MOVE_SHORT)
+    rig.client.cmd("PARAM_GET", [0])  # мгновенный чужой ACK поверх
+    rig.client.wait_done(move.seq)
+
+
+# ============================================================================================
+# poll_errors
+# ============================================================================================
+
+
+def test_poll_errors_reports_abort_once_with_text_and_cursor_from_probe() -> None:
+    rig = Rig()
+    rig.core.regs[TLM_ERR_EVT] = 5
+    rig.client.probe()
+    assert rig.client.poll_errors() == []
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.client.stop(2)
+    [event] = rig.client.poll_errors()
+    assert (event.evt, event.seq, event.errno, event.missed) == (6, move.seq, E_ABORTED, 0)
+    assert event.text == "Движение прервано стопом"
+    assert rig.client.poll_errors() == []
+
+
+def test_poll_errors_counts_missed_events_and_wraps_16_bit() -> None:
+    rig = Rig()
+    rig.core.regs[TLM_ERR_EVT] = 0xFFFF
+    rig.client.probe()
+    rig.core.regs[TLM_ERR_EVT] = 2  # 0xFFFF -> 2 = 3 события, два из них потеряны
+    [event] = rig.client.poll_errors()
+    assert (event.evt, event.missed) == (2, 2)
+
+
+# ============================================================================================
+# stop
+# ============================================================================================
+
+
+@pytest.mark.parametrize("level", [0, 4, -1, True, 2.0, None])
+def test_stop_bad_level_raises_without_write(level) -> None:
+    rig = Rig()
+    with pytest.raises(ValueError):
+        rig.client.stop(level)
+    assert rig.transport.transactions == []
+
+
+def test_stop_value_is_next_seq_after_ack_times_four_plus_level() -> None:
+    rig = Rig()
+    rig.core.regs[TLM_STOP_ACK] = 10 * 4 + 2
+    assert rig.client.stop(3) is StopResult.ACKED
+    assert rig.client.stop(1) is StopResult.ACKED
+    assert rig.stop_writes() == [11 * 4 + 3, 12 * 4 + 1]
+
+
+def test_stop_seq_wraps_16383_to_1() -> None:
+    rig = Rig()
+    rig.core.regs[TLM_STOP_ACK] = 16383 * 4 + 2
+    rig.client.stop(2)
+    assert rig.stop_writes() == [1 * 4 + 2]
+
+
+def test_stop_superseded_when_echo_is_already_newer() -> None:
+    rig = Rig(ticking=False)
+
+    def newer_stop_wins(ops: list[tuple]) -> None:
+        if ops == [("w", STOP_REQ, 1 * 4 + 2)]:
+            rig.core.regs[TLM_STOP_ACK] = 2 * 4 + 3  # чужой стоп с seq 2 уже отвечен
+
+    rig.transport.after_tx = newer_stop_wins
+    assert rig.client.stop(2) is StopResult.SUPERSEDED
+
+
+def test_stop_echo_older_than_ours_is_not_superseded() -> None:
+    rig = Rig(ticking=False, config={"stop_echo_timeout_s": 1.0, "poll_interval_s": 0.1})
+    rig.core.regs[TLM_STOP_ACK] = 5 * 4 + 2
+    with pytest.raises(RobotTimeout) as exc:
+        rig.client.stop(2)
+    assert exc.value.stage == "stop_echo"
+
+
+@pytest.mark.parametrize(("level", "timeout"), [(2, 1.0), (3, 1.0), (1, 3.0)])
+def test_stop_echo_timeout_depends_on_level(level: int, timeout: float) -> None:
+    rig = Rig(
+        ticking=False,
+        config={
+            "stop_echo_timeout_s": 1.0,
+            "soft_echo_timeout_s": 3.0,
+            "longest_gap_s": 0.5,
+            "poll_interval_s": 0.1,
+            "res_timeout_s": 0.5,
+        },
+    )
+    rig.client.probe()
+    start = rig.now
+    with pytest.raises(RobotTimeout) as exc:
+        rig.client.stop(level)
+    assert exc.value.stage == "stop_echo"
+    assert timeout <= rig.now - start < timeout + 0.25
+
+
+def test_stop_write_is_single_fc6_in_one_transaction() -> None:
+    rig = Rig()
+    rig.client.stop(2)
+    assert rig.transport.transactions == [[("w", STOP_REQ, 1 * 4 + 2)]]
+
+
+# ============================================================================================
+# О5: команда done_seq, обогнанная стопом
+# ============================================================================================
+
+
+def _stop_inside_cmd_window(rig: Rig, level: int, *, before_write: bool = False) -> None:
+    """Барьер на самой записи CMD: стоп ``level`` вклинивается ДО неё (после чтения базы) или сразу ПОСЛЕ
+    (до ACK). После HALT серво выключено, и робот отказал бы любой ход — тест включает его обратно."""
+    fired = []
+
+    def hook(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops) and not fired:
+            fired.append(1)
+            rig.client.stop(level)
+            rig.core.regs[TLM_SERVO] = 1
+
+    if before_write:
+        rig.transport.before_tx = hook
+    else:
+        rig.transport.after_tx = hook
+
+
+@pytest.mark.parametrize(
+    ("window_level", "reissued", "before_write"),
+    [(1, 2, False), (2, 2, False), (1, 2, True), (2, 2, True), (3, 3, True)],
+    ids=["soft-after", "hard-after", "soft-before", "hard-before", "halt-before"],
+)
+def test_done_seq_command_overtaken_by_stop_reissues_halt_if_halt_else_hard(
+    window_level: int, reissued: int, before_write: bool
+) -> None:
+    rig = Rig()
+    rig.client.probe()
+    _stop_inside_cmd_window(rig, window_level, before_write=before_write)
+    with pytest.raises(RobotAborted) as exc:
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    assert exc.value.errno == E_ABORTED
+    assert rig.stop_writes() == [1 * 4 + window_level, 2 * 4 + reissued]
+    rig.core.tick()  # робот видит повторный стоп и обрывает принятый после стопа ход
+    assert rig.core.regs[TLM_ACTIVITY] == 0
+    assert rig.core.regs[TLM_ERRNO_LAST] == E_ABORTED
+    assert rig.core.regs[TLM_SERVO] == (0 if reissued == 3 else 1)
+
+
+def test_instant_command_overtaken_by_stop_still_returns_its_result() -> None:
+    rig = Rig()
+    rig.client.probe()
+    _stop_inside_cmd_window(rig, 2)
+    result = rig.client.cmd("SERVO", [1])
+    assert result.rvals == ()
+    assert rig.stop_writes() == [1 * 4 + 2]  # повторного стопа нет
+
+
+def test_stop_completed_before_cmd_does_not_abort_it() -> None:
+    rig = Rig()
+    rig.client.stop(2)
+    result = rig.client.cmd("PTP_MOVE", MOVE_SHORT)
+    rig.client.wait_done(result.seq)
+    assert rig.stop_writes() == [1 * 4 + 2]
+
+
+def test_failed_stop_write_still_counts_as_generation() -> None:
+    """Запись могла дойти, хотя транспорт вернул ошибку: поколение растёт в finally."""
+    rig = Rig()
+    rig.client.probe()
+    fired = []
+
+    def hook(ops: list[tuple]) -> None:
+        if is_cmd_tx(ops) and not fired:
+            fired.append(1)
+            rig.transport.fail_next_op = True
+            with pytest.raises(ModbusIOError):
+                rig.client.stop(2)
+
+    rig.transport.after_tx = hook
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    assert rig.core.regs[STOP_REQ] == 2 * 4 + 2  # первый стоп (seq 1) не дошёл; повтор получил seq 2
+
+
+# ============================================================================================
+# Гонки: стоп и остальные методы не ждут mailbox
+# ============================================================================================
+
+
+def test_stop_and_side_channels_do_not_wait_for_a_blocked_cmd_but_second_cmd_does() -> None:
+    rig = Rig()
+    rig.client.probe()
+    in_wait = threading.Event()
+    release = threading.Event()
+    base_sleep = rig.sleep
+
+    def sleep(dt: float) -> None:
+        if threading.current_thread().name == "cmd-thread":
+            in_wait.set()
+            assert release.wait(_DEADLINE_S), "тест не отпустил поток cmd"
+            return
+        base_sleep(dt)
+
+    rig.client._sleep = sleep
+    rig.ticking = False  # робот ходит только по sleep других потоков
+    first, first_done = in_thread(lambda: rig.client.cmd("PING", []), "cmd-thread")
+    assert in_wait.wait(_DEADLINE_S), "cmd не дошёл до ожидания ответа"
+
+    rig.ticking = True
+    side = {
+        "stop": lambda: rig.client.stop(2),
+        "heartbeat": rig.client.kick_heartbeat,
+        "jog": rig.client.jog_lease,
+        "errors": rig.client.poll_errors,
+    }
+    for name, fn in side.items():
+        box, done = in_thread(fn, f"side-{name}")
+        join(done, f"{name} ждёт замок mailbox")
+        assert "exc" not in box, box.get("exc")
+    assert not first_done.is_set(), "первый cmd вернулся до отпускания — стенд не держал замок"
+
+    second, second_done = in_thread(lambda: rig.client.cmd("PING", []), "cmd2-thread")
+    assert not second_done.wait(0.3), "второй cmd не должен идти, пока первый держит mailbox"
+    release.set()
+    join(first_done, "первый cmd")
+    join(second_done, "второй cmd")
+    assert "exc" not in first and "exc" not in second, (first.get("exc"), second.get("exc"))
+    assert first["value"].seq != second["value"].seq
+
+
+# ============================================================================================
+# sync_params
+# ============================================================================================
+
+
+def _param_cmds(rig: Rig) -> list[tuple[int, int, list[int]]]:
+    return rig.cmds()
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda v: v.pop("P_SPD_JOG"),
+        lambda v: v.__setitem__("P_NO_SUCH", 1),
+        lambda v: v.__setitem__("P_CONFIG_EPOCH", 3),
+        lambda v: v.__setitem__("P_SPD_JOG", 70000),
+    ],
+    ids=["missing", "unknown", "epoch-key", "word-out-of-range"],
+)
+def test_sync_params_bad_values_raise_before_any_write(mutate) -> None:
+    rig = Rig()
+    values = all_values()
+    mutate(values)
+    with pytest.raises(ValueError):
+        rig.client.sync_params(values, 1)
+    assert rig.transport.transactions == []
+    assert rig.transport.log == []  # ни записей, ни даже чтений
+
+
+@pytest.mark.parametrize("epoch", [0, 65536, -1, True, 1.0])
+def test_sync_params_bad_epoch_raises_before_any_write(epoch) -> None:
+    rig = Rig()
+    with pytest.raises(ValueError):
+        rig.client.sync_params(all_values(), epoch)
+    assert rig.transport.transactions == []
+
+
+def test_sync_params_order_apply_before_epoch_and_epoch_once_last() -> None:
+    rig = Rig()
+    report = rig.client.sync_params(all_values(), 7)
+    ops = [(c[1], c[2]) for c in rig.cmds()]
+    expected_sets = len(PARAM_ID) - 1  # все, кроме метки
+    assert [o for o, _ in ops].count(OP_PARAM_SET) == expected_sets + 1
+    assert ops[-1] == (OP_PARAM_SET, [P_EPOCH_ID, 7])
+    assert [a for o, a in ops if o == OP_PARAM_SET and a[0] == P_EPOCH_ID] == [[P_EPOCH_ID, 7]]
+    # В словаре есть параметры apply=reinit (12 шт.) -> после их записи TLM_CFG_PENDING = 1 -> один PARAM_APPLY
+    assert [o for o, _ in ops].count(OP_PARAM_APPLY) == 1
+    assert ops[-2][0] == OP_PARAM_APPLY
+    assert (report.sent, report.applied, report.epoch) == (expected_sets, True, 7)
+    assert rig.core.regs[TLM_CFG_EPOCH] == 7
+
+
+def test_sync_params_mirror_mismatch_raises_and_does_not_write_epoch() -> None:
+    rig = Rig()
+
+    def corrupt(address: int, count: int, out: list[int]) -> list[int]:
+        if address == PMIR_BASE and count > 50:  # сверка PMIR
+            out = list(out)
+            out[5] ^= 1
+        return out
+
+    rig.transport.read_filter = corrupt
+    with pytest.raises(RobotSyncError) as exc:
+        rig.client.sync_params(all_values(), 3)
+    default = int(PARAMS[5]["default"]) & 0xFFFF
+    assert (exc.value.param_id, exc.value.expected, exc.value.actual) == (5, default, default ^ 1)
+    assert rig.core.regs[TLM_CFG_EPOCH] == 0
+    assert all(c[2][0] != P_EPOCH_ID for c in rig.cmds() if c[1] == OP_PARAM_SET)
+
+
+def test_sync_params_nak_propagates_and_does_not_write_epoch() -> None:
+    rig = Rig()
+    values = all_values()
+    values["P_SPD_DEFAULT"] = 0  # min = 1 -> E_RANGE
+    with pytest.raises(RobotNak) as exc:
+        rig.client.sync_params(values, 3)
+    assert exc.value.errno == E_RANGE
+    assert rig.core.regs[TLM_CFG_EPOCH] == 0
+    assert all(c[2][0] != P_EPOCH_ID for c in rig.cmds() if c[1] == OP_PARAM_SET)
+
+
+def test_sync_params_same_epoch_but_other_dictionary_resends_everything() -> None:
+    rig = Rig()
+    rig.client.sync_params(all_values(), 2)
+    rig.core.regs[PMIR_DICT] = 1  # отпечаток словаря не тот
+    before = len(rig.cmds())
+    report = rig.client.sync_params(all_values(), 2)
+    assert report.sent == len(PARAM_ID) - 1
+    assert len([c for c in rig.cmds()[before:] if c[1] == OP_PARAM_SET]) == len(PARAM_ID)
+
+
+def test_sync_params_same_epoch_and_dictionary_writes_nothing_and_reads_only_two_registers() -> None:
+    rig = Rig()
+    rig.client.sync_params(all_values(), 2)
+    rig.transport.log.clear()
+    report = rig.client.sync_params(all_values(), 2)
+    assert (report.sent, report.applied, report.epoch) == (0, False, 2)
+    assert rig.transport.log == [("r", TLM_CFG_EPOCH, 1), ("r", PMIR_DICT, 1)]
+
+
+def test_sync_params_updates_periods_from_pc_values() -> None:
+    rig = Rig()
+    values = all_values()
+    values["P_WDG_TIMEOUT_MS"] = 4000
+    values["P_JOG_LEASE_MS"] = 600
+    rig.client.sync_params(values, 1)
+    assert rig.client.heartbeat_period_s == 1.0
+    assert rig.client.jog_lease_period_s == pytest.approx(0.2)
+
+
+def test_sync_params_reads_stay_within_read_max() -> None:
+    rig = Rig()
+    rig.client.sync_params(all_values(), 1)
+    assert max(e[2] for e in rig.transport.log if e[0] == "r") <= 125
+
+
+# ============================================================================================
+# Настоящий стек (без дублёров)
+# ============================================================================================
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_real_stack_ping_stop_and_heartbeat_over_tcp() -> None:
+    port = _free_port()
+    assert port not in _FORBIDDEN_PORTS
+    server = SimRobotServer(host="127.0.0.1", port=port, unit_id=ROBOT_UNIT_ID, core=RobotSimCoreV2())
+    server.start()
+    device = ModbusDevice(ModbusConfig(host="127.0.0.1", port=port, unit_id=ROBOT_UNIT_ID))
+    try:
+        deadline = time.monotonic() + 5.0
+        while not device.connect():
+            assert time.monotonic() < deadline, "sim не принял соединение"
+            time.sleep(0.05)
+        client = RobotClientV2(device, ClientV2Config.from_dict({"poll_interval_s": 0.01}))
+        box, done = in_thread(
+            lambda: (client.cmd("PING", []), client.stop(1), client.kick_heartbeat(), client.poll_errors()), "real"
+        )
+        join(done, "реальный стек")
+        assert "exc" not in box, box.get("exc")
+        ping, stop_result, _, errors = box["value"]
+        assert list(ping.rvals)[0] == 0x0200
+        assert stop_result is StopResult.ACKED
+        assert errors == []
+    finally:
+        device.disconnect()
+        server.stop()
