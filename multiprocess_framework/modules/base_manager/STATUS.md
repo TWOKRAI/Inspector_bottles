@@ -10,6 +10,8 @@
 Три допуска остались тихими: слота нет / менеджер `None` / слот выключен. Успешный путь не
 подорожал. Подробности и контракт слота — в [`README.md`](README.md) и [`DECISIONS.md`](DECISIONS.md).
 
+**Шаблонный `shutdown()` (Task 1.2b-1, 2026-10-12, ADR-BM-009):** `shutdown()` конкретный — закрывает `scope`, один раз зовёт `_on_shutdown()`; `scope`/`attach_scope`; мягкий режим (свои `shutdown` подклассов пока работают). Тесты: `tests/test_base_manager_template_acceptance.py` (слепой тестер, 10) + `tests/test_base_manager_template_hazards.py` (автор, 45).
+
 **Реализация владения (Task 0.2, 2026-10-04):** `core/lifetime.py` — `Scope`/`Handle`, дверь `open_scope` и
 `unclosed_roots` в пакете. Тесты: `tests/test_lifetime_scope_acceptance.py` (слепой тестер, 235) +
 `tests/test_lifetime_scope.py` (автор, 11). `BaseManager.scope` — Task 1.2.
