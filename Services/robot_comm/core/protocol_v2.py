@@ -1,4 +1,4 @@
-# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (6f7b966e)
+# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (cf6affdc)
 # не править руками; python -m Services.robot_comm.codegen
 
 REG = {
@@ -394,6 +394,7 @@ CONSTANTS = {
     'SC_CAP': 55,
     'WRITE_CHUNK': 30,
     'READ_MAX': 125,
+    'WIRE_SCALE': 10,
     'W_MIN': -32767,
     'W_MAX': 32767,
     'PMIR_MAGIC_VALUE': 0x5632,

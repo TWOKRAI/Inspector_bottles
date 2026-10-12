@@ -521,6 +521,7 @@ constants:
   SC_CAP: 55
   WRITE_CHUNK: 30
   READ_MAX: 125
+  WIRE_SCALE: 10  # единиц провода на мм и на градус: X/Y/Z ×0.1 мм, RZ ×0.1° (§7.1); из GUI не меняется
   W_MIN: -32767
   W_MAX: 32767
   PMIR_MAGIC_VALUE: 0x5632
