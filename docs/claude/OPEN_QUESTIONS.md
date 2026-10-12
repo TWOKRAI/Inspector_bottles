@@ -1824,3 +1824,9 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 5. **`--root` стражей и таблицы репозитория:** корень без `multiprocess_framework/modules` получает пустые таблицы (эвристика; для гейта дыры нет, `validate.py` берёт свой BASE). Файлы, ни разу не добавленные в git, стражам не видны.
 6. **Слепота `atlas pack`/`atlas brief`** к коммитам Ф0 lifecycle: `Модули: — (у плана нет коммитов с модулями)`, хотя `41fc28c29` в предках; `atlas brief` принимает slug без префикса даты (`lifecycle-owner-scope#0.5`), форма из задачи с префиксом не работает; `atlas lint-brief` (1.9c) в main отсутствует.
 7. **Подпроцессы пробы идут с `LIFECYCLE_G3=off LIFECYCLE_G4=off`**, `PYTHONPATH` раннера не защищён тестом (дыры инъекций inj-10, inj-11 — `tasks/0.5b.injections.json`).
+
+## Task T2.3 + T2.4 robot-protocol-v2: что осталось открытым (2026-10-12, стадия 0)
+
+1. **Рецепт `hikvision_letter_robot` на v2 не закрывается этой задачей.** Клиента v2 нет (`RobotClientV2` — T3.1), драйвер `device_hub` v2 не знает, рецепт держит `protocol: delta_universal3` (`hikvision_letter_robot.yaml:58`). Приёмка «кадр → задание → DONE» идёт стенд-водителем в тестах (`protocol_v2`, Modbus TCP). Закроют T3.1–T3.2 и драйвер v2 в `device_hub`.
+2. **Стенд-водитель и sim берут адреса из одной таблицы `protocol_v2`** — ошибка общей таблицы стендом не видна. Честный приёмник — T3.1 и GATE-1 (железо).
+3. **`atlas lint-brief` не собирает REDS при `addopts = "-v …"`** (`pyproject.toml:294`): `-q` из команды сбора даёт дерево `<Function …>`, `_has` ищет `::имя` — 10 ложных `REDS_NOT_COLLECTED`. Править `scripts/atlas/lint_brief.py` (владелец Атласа).

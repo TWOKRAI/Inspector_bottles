@@ -29,7 +29,7 @@ from typing import Callable
 
 from Services.modbus.sdk.errors import ModbusNotAvailableError
 
-from Services.robot_comm.core.registers import REG_SPACE_SIZE, ROBOT_UNIT_ID
+from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.server.sim_core import TICK_INTERVAL_S, RobotSimCore
 
 try:  # pragma: no cover - наличие pymodbus зависит от окружения
@@ -99,6 +99,9 @@ _LISTENER_READY_TIMEOUT_S = 0.5
 #: Бюджет stop_listener(): дождаться публикации сервера (окно подъёма), погасить его
 #: и дождаться потока. Граница, а не ожидаемое время (обычно — миллисекунды).
 _LISTENER_STOP_TIMEOUT_S = 2.0
+#: T2.4: шаг опроса стопа сторожевой корутиной serve_until (и ожидания bind).
+#: Верхняя граница задержки shutdown -> порт отпущен; на фоне 2 с стоп-бюджета — мелочь.
+_STOP_POLL_S = 0.02
 
 
 async def _sleep_at_least(delay: float) -> None:
@@ -191,6 +194,14 @@ class SimRobotServer:
         tick_interval: Период Motion-цикла, сек.
         on_write:      Наблюдатель обмена ``(func_code, address, values|None)``;
                        ``None`` у values = чтение. Для монитора (см. sim_journal).
+        external_threads: T2.4. ``True`` — собственных потоков сервер не заводит:
+                       ``start()`` — no-op, тик и слушателя крутит хозяин (воркеры
+                       ``ctx.worker_manager`` плагина) через :meth:`tick_once` и
+                       :meth:`serve_until`. ``False`` — прежний путь v1 (два потока).
+
+    ``core`` — любое ядро с ``regs``/``read``/``write``/``attach``/``tick``
+    (``RobotSimCore`` v1 или ``RobotSimCoreV2``); блок регистров слушателя —
+    ``len(core.regs)``.
     """
 
     def __init__(
@@ -202,6 +213,7 @@ class SimRobotServer:
         core: RobotSimCore | None = None,
         tick_interval: float = TICK_INTERVAL_S,
         on_write: Callable[[int, int, list[int] | None], None] | None = None,
+        external_threads: bool = False,
     ) -> None:
         if not MODBUS_AVAILABLE:
             raise ModbusNotAvailableError("pymodbus не установлен — установите extra: pip install '.[modbus]'")
@@ -209,6 +221,11 @@ class SimRobotServer:
         self.core = core if core is not None else RobotSimCore()
         self._tick_interval = tick_interval
         self._on_write = on_write
+        self._external_threads = external_threads
+        #: T2.4: взведён, пока :meth:`serve_until` НЕ исполняется (порт отпущен) —
+        #: ``stop()`` в режиме ``external_threads`` ждёт его, а не поток.
+        self._serve_done = threading.Event()
+        self._serve_done.set()
         #: Task 5.4 (``fault.delay_ms``) — сек. задержки ответа на КАЖДЫЙ Modbus-доступ,
         #: читается ``_make_register_binder`` на каждый вызов (``lambda: self.delay_ms/1000``
         #: в :meth:`_serve`) — смена значения НЕ требует рестарта слушателя.
@@ -234,14 +251,27 @@ class SimRobotServer:
         Фикс-раунд ревью (K3) — ``ready_timeout=5.0`` (не дефолтные 0.5с
         ``start_listener()``): обычный подъём процесса не должен зависеть от
         того же тесного бюджета, что рассчитан на fault.drop-восстановление
-        (см. ``_LISTENER_READY_TIMEOUT_S``)."""
+        (см. ``_LISTENER_READY_TIMEOUT_S``).
+
+        T2.4: при ``external_threads=True`` — no-op: тик и слушателя заводит хозяин
+        (:meth:`tick_once`, :meth:`serve_until`)."""
+        if self._external_threads:
+            return
         self._ticker_thread = threading.Thread(target=self._ticker, name="sim-robot-motion", daemon=True)
         self._ticker_thread.start()
         self.start_listener(ready_timeout=5.0)
 
     def stop(self) -> None:
-        """Остановить ticker и слушателя (симметрично ``start()``)."""
+        """Остановить ticker и слушателя (симметрично ``start()``).
+
+        T2.4: при ``external_threads=True`` — взвести стоп (его опрашивает сторожевая
+        корутина :meth:`serve_until`) и дождаться, пока ``serve_until`` вернётся и
+        отпустит порт (не дольше ``_LISTENER_STOP_TIMEOUT_S``)."""
         self._stop.set()
+        if self._external_threads:
+            if not self._serve_done.wait(timeout=_LISTENER_STOP_TIMEOUT_S):
+                raise RuntimeError(f"sim_robot: слушатель {self.host}:{self.port} не остановился за стоп-таймаут")
+            return
         if self._ticker_thread is not None:
             self._ticker_thread.join(timeout=2.0)
         self.stop_listener()
@@ -331,19 +361,86 @@ class SimRobotServer:
 
     # ------------------------------------------------------------------ #
 
-    def _serve(self) -> None:
-        block = SimData(address=0, count=REG_SPACE_SIZE, values=0, datatype=DataType.REGISTERS)
-        device = SimDevice(
+    def _make_device(self):
+        """Устройство pymodbus над ядром. Блок — ``len(self.core.regs)`` (T2.4): у v1 это
+        ``REG_SPACE_SIZE``, у v2 — ``REG_SPACE_SIZE_V2`` (иначе FC3 по PMIR 0x3080 —
+        ``ILLEGAL_ADDRESS``)."""
+        block = SimData(address=0, count=len(self.core.regs), values=0, datatype=DataType.REGISTERS)
+        return SimDevice(
             id=self.unit_id,
             simdata=[block],
             action=_make_register_binder(
                 self.core, self._bound, self._on_write, delay_source=lambda: self.delay_ms / 1000.0
             ),
         )
+
+    def _serve(self) -> None:
+        device = self._make_device()
         try:
             asyncio.run(self._serve_async(device))
         except Exception as exc:  # noqa: BLE001 - причина уходит в RuntimeError start_listener()
             self._serve_error = exc
+
+    # ------------------------------------------------------------------ #
+    # T2.4: режим external_threads — потоки даёт хозяин (воркеры плагина)
+    # ------------------------------------------------------------------ #
+
+    def tick_once(self, dt: float) -> None:
+        """Один тик ядра на ``dt`` с (потолок ``_MAX_TICK_DT_S``: пауза процесса не
+        должна прыжком доехать ленту). Зовёт тикер хозяина — ``dt`` он меряет сам
+        (``perf_counter``, см. :meth:`_ticker`)."""
+        self.core.tick(min(dt, _MAX_TICK_DT_S))
+
+    def serve_until(self, stop_event, ready: threading.Event) -> None:
+        """Блокирующий слушатель Modbus TCP на ВЫЗЫВАЮЩЕМ потоке (воркер хозяина).
+
+        Своя asyncio-петля: сервер pymodbus + сторожевая корутина. После bind
+        (``transport`` выставлен) взводит ``ready``. Сторож опрашивает ``stop_event``
+        (стоп воркера) и собственный стоп сервера (:meth:`stop`) и гасит сервер —
+        порт отпущен к возврату. Сбой bind — исключение наружу, ``ready`` не взведён.
+        После :meth:`stop` — немедленный возврат без подъёма."""
+        self._serve_done.clear()
+        try:
+            if self._stop.is_set() or stop_event.is_set():
+                return
+            self._bound.clear()
+            asyncio.run(self._serve_until_async(self._make_device(), stop_event, ready))
+        finally:
+            self._serve_done.set()
+
+    async def _serve_until_async(self, device, stop_event, ready: threading.Event) -> None:
+        server = ModbusTcpServer(context=device, address=(self.host, self.port))
+        self._mb_server = server
+        serving = asyncio.ensure_future(server.serve_forever())
+
+        def stop_requested() -> bool:
+            return self._stop.is_set() or stop_event.is_set()
+
+        try:
+            while server.transport is None:
+                if serving.done():
+                    serving.result()  # сбой bind — исключение наружу
+                    raise RuntimeError(f"sim_robot: слушатель {self.host}:{self.port} вышел до bind")
+                if stop_requested():
+                    return
+                await asyncio.sleep(_STOP_POLL_S)
+            ready.set()
+            while not stop_requested() and not serving.done():
+                await asyncio.sleep(_STOP_POLL_S)
+        finally:
+            # Тот же порядок, что в _serve_async: shutdown, затем явное закрытие транспорта
+            # (shutdown во время listen() мог оставить поздний сокет).
+            await server.shutdown()
+            if server.transport is not None:
+                server.transport.close()
+                server.transport = None
+            if not serving.done():
+                serving.cancel()
+            try:
+                await serving
+            except asyncio.CancelledError:
+                pass
+            self._mb_server = None
 
     async def _serve_async(self, device) -> None:
         # Конструктор pymodbus требует работающий цикл (asyncio.get_running_loop()).
