@@ -34,6 +34,7 @@
   `ZScale`/`TimeTape` (`gui/z_view.py`); заменяется виджетами GUI-конструктора в Ф6
 
 - [x] `build_fw.py` — сборщик прошивки `robot/v2/src/NN_*.lua` -> `robot/v2/main_v2.lua` (T1.3, robot-protocol-v2)
+- [x] Программы робота (T3.3, robot-protocol-v2): `programs/program.py` — `Point`/`FrameDef`/`Move`/`Action`/`Program`, `compile_program` -> `Scenario` с картой «запись -> шаг» (ADR-RC-018); без клиента v2 сценарий ещё не грузится в робота
 
 ## Не сделано / дальше
 
