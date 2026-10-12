@@ -317,6 +317,15 @@ def test_review_example_counts_match_header() -> None:
     assert by_sev == [int(g) for g in total.groups()], f"степени: пункты {by_sev} против Итог {total.groups()}"
     assert by_cls == [int(g) for g in classes.groups()], f"классы: пункты {by_cls} против Классы {classes.groups()}"
 
+    # читатель 1.9f (ADR-ATL-004 §1): тот же пример проходит `review_form.parse`; литералы — числа примера шаблона
+    from scripts.atlas import review_form
+
+    review, errors = review_form.parse("\n".join(lines) + "\n")
+    assert errors == [], errors
+    assert review is not None
+    assert review.severities == (0, 2, 1, 1)
+    assert review.classes == (1, 1, 0, 1, 1, 0, 0)
+
 
 # --- ГАРД ---------------------------------------------------------------------------------------------------------
 
