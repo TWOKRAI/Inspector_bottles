@@ -370,15 +370,15 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - 2026-10-03_lifecycle-owner-scope — 7 из 13 · 54%
 - robot-protocol-v2 — 19 из 38 · 50%
 - line-sim-layer-editor — 8 из 10 · 80%
-- line-sim — 27 из 30 · 90%
+- line-sim — 27 из 32 · 84%
 - gui-constructor — 0 из 21 · 0%
 - 2026-09-22_gui-service — 10 из 21 · 48%
 - frontend-constructor — 15 из 33 · 45%
 - transport-single-policy — 19 из 24 · 79%
 - pipeline-node-timing — 1 из 4 · 25%
-- observability-closure — 33 из 47 · 70%
-- lifecycle-stop-ownership — 6 из 9 · 67% · без отметки 3
-- backend-ctl-review-remediation — 4 из 16 · 25%
+- observability-closure — 33 из 48 · 69%
+- lifecycle-stop-ownership — 6 из 10 · 60% · без отметки 3
+- backend-ctl-review-remediation — 4 из 18 · 22%
 - otel-export — 13 из 21 · 62%
 - framework-architecture-rework — 1 из 35 · 3%
 - dataset-annotation — 0 из 17 · 0%
@@ -393,11 +393,12 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - robot-place-pose — 2 из 3 · 67%
 - robot-calibration — 4 из 6 · 67%
 - camera-robot-calibration — 6 из 7 · 86%
-- device-tree-recipe — 4 из 6 · 67%
+- device-tree-recipe — 4 из 7 · 57%
 - word-layout — 2 из 4 · 50%
 - storage-stack-embedded-first — 0 из 11 · 0%
 - 2026-07-06_constructor-master — 107 из 113 · 95%
 - 2026-10-07_k0-framework-quality — 4 из 4 · 100%
 - 2026-10-07_tooling-py-modernization — 0 из 0
+- 2026-10-12_stand-recipe-switch — 0 из 7 · 0%
 в архиве: 119
 <!-- progress:end -->

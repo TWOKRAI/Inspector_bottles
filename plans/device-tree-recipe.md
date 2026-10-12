@@ -239,6 +239,7 @@ DeviceMasterDetail (открывается выбором «+ Добавить �
 - Task D1: Фаза D — страница «+ Добавить устройство» с пробным подключением [DONE 2026-06-12 — `378bdb69`] (после C1)
 - Task E1: Фаза E — чистка и документация [IN PROGRESS] (после D1) — README `devices_common` `32e3a0d5` и индикатор `disconnecting` `dfe9144c` в `main`; не сделаны: hikvision-секция master-detail, удаление `DeviceComboController` (`devices_common/combo.py` на месте), удаление файлового стора `devices.yaml`/`registry_path` (`Plugins/hub/device_hub/config.py` на месте), ADR-DH-007 (в `DECISIONS.md` нет), автопоиск камер
 - Task V1: Верификация — qt-mcp визуальный probe-прогон + чеклист железа [PENDING] (после E1) — коммита нет
+- Task B2: `device_sync_set` поднимает носителей раньше мостов (или мост ждёт носителя) — порядок горячей смены = порядок прямого запуска [PENDING] (после B1) — дефект R-10 (`plans/queue/defects.md`), найден 2026-10-12 на стенде: `Plugins/hub/device_hub/plugin.py:620-622` ставит новые устройства из множества, мост `vfd_belt` раньше `robot_main` → `Services/device_hub/manager.py:297`; нужен для приёмки `2026-10-12_stand-recipe-switch` Task 1.5
 
 ## Верификация (ОБЯЗАТЕЛЬНАЯ, через probe — провал прошлого раза учтён)
 
