@@ -437,6 +437,20 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         return call
 
+    def _attach_manager_scope(self, segment, attr: str) -> None:
+        """Дать менеджеру атрибута ``attr`` область ``<attr>-scope`` в ``segment`` (Task 1.2b-1).
+
+        Зовётся сразу после записи ``_attr_call(attr, "shutdown")``: дочерняя область
+        зарегистрирована позже записи, и LIFO сегмента закрывает её раньше ``shutdown()``
+        менеджера. Не ``BaseManager``, ``None`` или менеджер, у которого область уже есть
+        (общий SRM второго корня), — пропуск. Подмена после ``initialize()`` области
+        не получает.
+        """
+        manager = getattr(self, attr, None)
+        if not isinstance(manager, BaseManager) or manager.scope is not None:
+            return
+        manager.attach_scope(segment.child(f"{attr}-scope"))
+
     def _self_call(self, method_name: str):
         """Вызываемое ``getattr(self, method_name)()`` в момент закрытия (подмена на экземпляре видна)."""
 
@@ -523,12 +537,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         planes.own(self._self_call("_final_status"), name="final_status", kind="callable")
         planes.own(self._self_call("_planes_report"), name="planes_report", kind="callable")
         planes.own(self._attr_call("error_manager", "shutdown", plane="error"), name="error", kind="callable")
+        self._attach_manager_scope(planes, "error_manager")
         planes.own(self._attr_call("stats_manager", "shutdown", plane="stats"), name="stats", kind="callable")
+        self._attach_manager_scope(planes, "stats_manager")
         planes.own(
             self._attr_call("observation_manager", "shutdown", plane="observation"),
             name="observation",
             kind="callable",
         )
+        self._attach_manager_scope(planes, "observation_manager")
 
     def _install_process_hooks(self) -> None:
         """Ф1.1 (C3): поставить три процессных хука — ПОСЛЕ подъёма менеджеров.
@@ -793,9 +810,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Закрытие обратное (G7: router раньше srm); ``flush`` регистрируется в конце подъёма.
         """
         transport.own(self._attr_call("shared_resources", "shutdown"), name="srm", kind="callable")
+        self._attach_manager_scope(transport, "shared_resources")
         transport.own(self._attr_call("router_manager", "shutdown"), name="router", kind="callable")
+        self._attach_manager_scope(transport, "router_manager")
         transport.own(self._attr_call("command_manager", "shutdown"), name="command", kind="callable")
+        self._attach_manager_scope(transport, "command_manager")
         transport.own(self._attr_call("console_manager", "shutdown"), name="console", kind="callable")
+        self._attach_manager_scope(transport, "console_manager")
         self._own_transport(transport)
 
     def _init_communication(self):
