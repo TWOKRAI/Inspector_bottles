@@ -1013,7 +1013,9 @@ class RobotSimCoreV2:
         поза)."""
 
         def pose_at(travelled: float) -> tuple[tuple[float, ...], tuple[float, float, float, float] | None]:
-            frac = travelled / active["path_len"]
+            # Пустой ход (цель == текущая поза, path_len == 0): делить нечего, ход
+            # уже в конце (sim-zero-path); финал `_progress_move` снэпит в target.
+            frac = travelled / active["path_len"] if active["path_len"] > 0 else 1.0
             joints = tuple(j0 + frac * (j1 - j0) for j0, j1 in zip(active["j_start"], active["j_end"]))
             return joints, self.model.fk(joints)
 
