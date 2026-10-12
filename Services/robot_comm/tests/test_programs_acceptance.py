@@ -542,7 +542,8 @@ def test_last_record_never_pass(steps, bad_last):
     api = _api()
     objs, points = _materialize(api, steps)
     scenario = _run(api, objs, points)
-    assert scenario.records[-1].kind != "LINE_PASS"
+    # не `!= "LINE_PASS"`: то слепо к смене типа kind (ревью кода р.1, п.3)
+    assert scenario.records[-1].kind in ("LINE", "JOINT")
     last_move = max(k for k, s in enumerate(steps) if s[0] == "move")
     head = [list(s) for s in steps[: last_move + 1]]
     head[last_move][1] = "LINE_PASS"
