@@ -1641,3 +1641,66 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
 - Готовность ≠ темп: ленивая загрузка модели в первом `process()` даст вытеснения и после `ready` — preroll их не лечит.
 - Срок preroll — константа, ключа конфига нет (вне объёма). Повторный preroll при рестарте одного процесса — вне объёма:
   событие к тому времени уже взведено.
+
+## ADR-PMM-035: `stop_budget` и `ChildProcessStop` поверх эскалации PM (Task 1.1, 2026-10-12)
+
+**Статус:** принято — реализовано (Task 1.1 плана `lifecycle-owner-scope`); живой стенд — за лидом.
+**Дата:** 2026-10-12
+**Refs:** [plans/2026-10-03_lifecycle-owner-scope/plan.md](../../../plans/2026-10-03_lifecycle-owner-scope/plan.md) (Task 1.1), ADR-PMM-030 (метка ReaderGone), ADR-PMM-031 (внешний бюджет из внутреннего), ADR-BM-008 (область `Scope`)
+
+### Контекст
+
+Формула бюджета стопа жила двумя копиями: окна эскалации в `core/process_registry.py`, внешний бюджет
+в `launcher/spawner.py` (`outer_stop_budget`, `_pm_graceful_budget`). PM читал `get_config("shutdown_timeout") or 5.0`
+в двух местах. Ребёнок не знал своего бюджета. Эскалация `_stop_many` и `_stop_one` — две ручные цепочки
+с блокирующими `join(N)`, которые стражи G6 R3/R4 держали в allowlist как «FROZEN Ф1».
+
+### Решение
+
+1. **`core/stop_budget.py`** (только stdlib): константы окон (`STOP_POLL_S`, `TERMINATE_GRACE_S`, `KILL_CONFIRM_S`,
+   `PM_TEARDOWN_MARGIN_S` — значения прежние), `DEFAULT_SHUTDOWN_TIMEOUT_S = 5.0`, `INFRA_STOP_S = 1.0`,
+   `CHILD_STOP_FRACTION = 0.8`, `KILL_RESERVE_S`, `SHUTDOWN_TIMEOUT_KEY`. Функция `stop_budget(shutdown_timeout)`
+   даёт `work_s`, `infra_s`, `pm_graceful_s`, `pm_total_s`, `outer_s` (5.0 → 3.0 / 1.0 / 5.0 / 7.0 / 8.5).
+   `None` и `0` — умолчание; NaN, ±inf, отрицательное — `ValueError`; `bool` и нечисловое — `TypeError`
+   (иначе ошибка всплыла бы на открытии области, посреди стопа).
+2. **`core/child_process_stop.ChildProcessStop`** — один объект на ГРУППУ детей, соответствует `Stoppable`:
+   `request_stop()` (события живым), `join_until(deadline)` (опрос всей группы за проход, метка
+   `on_confirmed_dead` в момент наблюдения смерти, одна на имя), `kill()` (не блокирует: `terminate()` живым),
+   настоящий `kill()` — из `join_until` на первом проходе, где `now >= min(начало + terminate_grace_s,
+   deadline - kill_confirm_s)`; `survivors()` (по набору подтверждённых: не в выживших ⇒ метка была);
+   `close()` (проход наблюдения, выживших не метит).
+3. **`ProcessRegistry`:** `stop_one`/`stop_many`/`stop_all` — один путь `_stop_many`: шаг (а) и сборка группы
+   (`_build_child_stop`, шов для Task 1.2), затем временная область `open_scope("pm/stop", budget_s=timeout,
+   kill_reserve_s=KILL_RESERVE_S)` с записью `children`. Порядок фаз живёт один раз — в `Scope`. Окна прежние:
+   graceful `timeout`, затем `TERMINATE_GRACE_S`, затем `KILL_CONFIRM_S`. `timeout` приводится без исключений
+   (≤ 0 → 0.0; NaN, ±inf, `None`, `bool`, нечисловое → 5.0 с предупреждением).
+4. **Словарь ребёнку:** `ProcessRegistry(child_stop_budget=stop_budget(shutdown_timeout PM))` → ключ
+   `stop_budget` в конфиге каждого ребёнка (`setdefault`: явный ключ процесса сильнее; копия на ребёнка).
+5. **Читатели:** PM (`_stop_children_once`, `stop_process(None)`) и спавнер читают `stop_budget(...)`;
+   `outer_stop_budget` и `_pm_graceful_budget` удалены. `stop(timeout=X)` с `X ≤ 0`, NaN или inf берёт
+   умолчание с предупреждением и не бросает (обработчик сигнала). Следствие: `stop(timeout=0)` раньше давал
+   внешний бюджет 3,5 с, теперь 8,5 с — `X ≤ 0` как бюджет бессмыслен, умолчание держит внешний бюджет
+   не меньше внутреннего бюджета PM; `X` до PM не доходит, он меняет только `join` спавнера.
+6. При опоздании фазы 2 от 1,0 с окно terminate равно 0 (настоящий `kill()` уходит сразу за `terminate()`
+   по границе `deadline - kill_confirm_s`), окно подтверждения сохраняется — так и задумано (ревью р.2).
+7. **Контракт модулей:** `stop_budget.py` и `child_process_stop.py` — внутренние (`core/`), из `__init__.py`
+   и `interfaces.py` модуля не экспортируются; `Stability: lite`.
+8. Стражи: из allowlist удалены R3/R4 `process_registry.py`, R5 `spawner.py`, R5 `process_manager_process.py`
+   (71 → 67); причина «FROZEN Ф1» ни у одной записи не осталась.
+
+### Отвергнуто
+
+- **Запись области на процесс (О2).** Последовательное ожидание по записям не видит смерть соседа дальше
+  по списку — а её метка ReaderGone может быть тем, что отпускает ожидаемый процесс (итерация 2 Task 1.2).
+- **Блокирующий `kill()`.** Резерв kill умножался бы на число застрявших (зонд CTO: 0.80 с вместо 0.3 с).
+- **Обёртки совместимости для `outer_stop_budget`/`_pm_graceful_budget`.** Вторая копия формулы — то, что
+  убирает задача; живых вызывающих вне тестов нет.
+
+### Для 1.2
+
+- (а) `Services/otel_export/config.py:237-243` выводит дефолт flush 3000 мс из «бюджета останова 5 с» —
+  после 1.1 `work_s` = 3,0, flush займёт весь сегмент `work`.
+- (б) Запас до `terminate()` от PM равен `0,2 × pm_graceful_s` (0,2 с при 1,0; 1,0 с при 5,0): корень ребёнка
+  в 1.2 обязан уложить в него и свой резерв kill; числа 1.2 перепинит по замеру стенда.
+- (в) Словарь `stop_budget` считается при создании PM: если `shutdown_timeout` меняется на лету, словарь
+  ребёнка и чтение PM на стопе расходятся.

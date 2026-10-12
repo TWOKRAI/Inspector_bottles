@@ -6,7 +6,7 @@
 
 Механизм:
 * внешний join spawner'а выводится из графика внутренней эскалации PM
-  (``outer_stop_budget``), а PM получает тот же graceful-бюджет через конфиг;
+  (``stop_budget(...)["outer_s"]``, Task 1.1), а PM получает тот же graceful-бюджет через конфиг;
 * guard после сбора лидера бьёт группу по ``pgid == pm_pid`` и всегда добивает
   живых членов снимка.
 """
@@ -21,10 +21,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ..core.process_registry import KILL_CONFIRM_S, TERMINATE_GRACE_S
+from ..core.stop_budget import KILL_CONFIRM_S, PM_TEARDOWN_MARGIN_S, TERMINATE_GRACE_S, stop_budget
 from ..launcher import process_tree_guard as guard_mod
 from ..launcher.process_tree_guard import ProcessTreeGuard
-from ..launcher.spawner import PM_TEARDOWN_MARGIN_S, ProcessSpawner, outer_stop_budget
+from ..launcher.spawner import ProcessSpawner
 from ._no_orphans_helpers import kill_and_reap
 
 _SPAWNER = "multiprocess_framework.modules.process_manager_module.launcher.spawner"
@@ -38,22 +38,23 @@ _SPAWNER = "multiprocess_framework.modules.process_manager_module.launcher.spawn
 def test_outer_budget_literal_for_defaults():
     """Литерал, а не выражение из кода: 5.0 + 1.0 + 1.0 + 1.5 = 8.5.
 
-    Сторожит: ``outer_stop_budget`` и значения трёх констант. Смена любого окна
+    Сторожит: ``stop_budget(...)["outer_s"]`` и значения трёх констант. Смена любого окна
     обязана пройти через ревью этого числа.
     """
     assert (TERMINATE_GRACE_S, KILL_CONFIRM_S, PM_TEARDOWN_MARGIN_S) == (1.0, 1.0, 1.5)
-    assert outer_stop_budget(5.0) == 8.5
+    assert stop_budget(5.0)["outer_s"] == 8.5
 
 
 @pytest.mark.parametrize("graceful", [0.1, 1.0, 5.0, 10.0, 30.0])
 def test_outer_budget_strictly_exceeds_inner_escalation(graceful):
-    """Сторожит: слагаемое ``PM_TEARDOWN_MARGIN_S`` (> 0) в ``outer_stop_budget``.
+    """Сторожит: слагаемое ``PM_TEARDOWN_MARGIN_S`` (> 0) в ``outer_s`` (``stop_budget``).
 
     Внутренняя эскалация ``_stop_many`` = graceful + TERMINATE_GRACE_S + KILL_CONFIRM_S.
     """
     inner = graceful + TERMINATE_GRACE_S + KILL_CONFIRM_S
-    assert outer_stop_budget(graceful) > inner
-    assert outer_stop_budget(graceful) - inner >= 1.0
+    outer = stop_budget(graceful)["outer_s"]
+    assert outer > inner
+    assert outer - inner >= 1.0
 
 
 def _launch_capture_config(spawner: ProcessSpawner) -> dict:
@@ -85,7 +86,7 @@ def test_pm_receives_spawner_graceful_budget_by_default():
 
 def test_explicit_orchestrator_shutdown_timeout_wins_and_drives_join():
     """Сторожит: условие ``is None`` (явный бюджет оркестратора не перетирается)
-    и ``_pm_graceful_budget`` (внешний join считается от бюджета PM, не от stop_timeout).
+    и ``_stop_graceful_s`` (внешний join считается от бюджета PM, не от stop_timeout).
     """
     spawner = ProcessSpawner(stop_timeout=5.0, orchestrator_config={"shutdown_timeout": 9.0})
     cfg = _launch_capture_config(spawner)
@@ -101,7 +102,7 @@ def test_explicit_orchestrator_shutdown_timeout_wins_and_drives_join():
 
 
 def test_default_stop_join_is_outer_budget():
-    """Сторожит: ``effective_timeout = outer_stop_budget(graceful)`` в stop().
+    """Сторожит: ``effective_timeout = stop_budget(graceful)["outer_s"]`` в stop().
 
     До правки join был равен голому stop_timeout (5.0) — меньше внутренних 7.0.
     """
