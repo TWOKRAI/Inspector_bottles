@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import pickle
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -493,3 +494,36 @@ def test_frame_points_strict_coordinates(which, axis, bad):
     triple[axis] = bad
     with pytest.raises(ValidationError):
         FrameDef(name="f", **{**kw, which: tuple(triple)})
+
+
+# --- ревью р.2: переполнение, numpy, вырожденная копия СК ----------------------------------------------------
+@pytest.mark.parametrize("field", ["x", "y", "z", "rz"])
+def test_huge_int_coordinate_is_validation_error(field):
+    """10**400 не влезает во float: ошибка валидации, а не сырой OverflowError."""
+    point = {"name": "p", "x": 1.0, "y": 2.0, "z": 3.0, "rz": 4.0, "hand": 1, field: 10**400}
+    with pytest.raises(ValidationError):
+        Point.from_dict(point)
+    with pytest.raises(ValidationError):
+        Record.from_dict({**_rec().to_dict(), field: 10**400})
+
+
+@pytest.mark.parametrize("value", [np.float64(300.5), np.int64(300), np.float32(300.5)])
+def test_numpy_real_coordinates_accepted(value):
+    p = Point(name="p", x=value, y=0, z=-50, rz=0, hand=1)
+    r = _rec(x=value)
+    assert (p.x, type(p.x), r.x, type(r.x)) == (float(value), float, float(value), float)
+
+
+@pytest.mark.parametrize("bad", [np.bool_(True), np.float64("nan"), "1.0", None])
+def test_numpy_bool_and_nan_rejected(bad):
+    with pytest.raises(ValidationError):
+        Point(name="p", x=bad, y=0, z=-50, rz=0, hand=1)
+
+
+def test_degenerate_frame_copy_is_compile_error_at_its_step():
+    """Копия model_copy с вырожденными точками обходит валидацию — отказ компиляции на шаге её Move."""
+    broken = SQUARE.model_copy(update={"on_x": (300.0, 0.0, -50.0)})  # on_x == origin
+    pts = {**POINTS, "p": _pt("p", (0.0, 0.0, 0.0, 0.0), frame="f")}
+    err = _fail([Move(point="a", kind="JOINT"), Move(point="p", kind="JOINT")], pts, {"f": broken})
+    assert (err.step, err.reason) == (1, 0)
+    assert err.text == "шаг 1: вырожденная СК"

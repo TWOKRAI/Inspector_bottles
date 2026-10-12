@@ -14,6 +14,7 @@ Stability: lite
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self
 
@@ -45,10 +46,17 @@ __all__ = [
 
 
 def _strict_coord(v: Any) -> float:
-    """Координата на границе (YAML, `from_dict`): int или float, конечная; bool и строки не приводятся."""
-    if type(v) not in (int, float) or not math.isfinite(v):
+    """Координата на границе (YAML, `from_dict`): вещественное число (`numbers.Real`: int, float, numpy),
+    конечное; bool, строки и None не приводятся."""
+    if not isinstance(v, numbers.Real) or isinstance(v, bool):
         raise ValueError("координата — конечное число (int или float)")
-    return float(v)
+    try:
+        f = float(v)
+    except OverflowError:  # int длиннее float (10**400): сырой OverflowError — не ошибка валидации
+        raise ValueError("координата — конечное число (int или float)") from None
+    if not math.isfinite(f):
+        raise ValueError("координата — конечное число (int или float)")
+    return f
 
 
 type Coord = Annotated[float, BeforeValidator(_strict_coord)]
@@ -291,7 +299,10 @@ def compile_program(
                 frame = frames.get(point.frame)
                 if frame is None:
                     raise _fail(i, 0, "неизвестная СК")
-                x, y, z, rz = frame.to_base(point.x, point.y, point.z, point.rz)
+                try:
+                    x, y, z, rz = frame.to_base(point.x, point.y, point.z, point.rz)
+                except ValueError as exc:  # копия model_copy(update=...) обходит валидацию точек СК
+                    raise _fail(i, 0, "вырожденная СК") from exc
             if i == last_move and step.kind == "LINE_PASS":
                 raise _fail(i, REASON["R_LAST_PASS"])
             reason = geometry.check_point(ws, x, y, z, rz)
