@@ -20,6 +20,7 @@ from numbers import Real
 __all__ = [
     "CHILD_STOP_FRACTION",
     "DEFAULT_SHUTDOWN_TIMEOUT_S",
+    "EXIT_SURVIVORS",
     "INFRA_STOP_S",
     "KILL_CONFIRM_S",
     "KILL_RESERVE_S",
@@ -48,6 +49,11 @@ CHILD_STOP_FRACTION = 0.8
 KILL_RESERVE_S = TERMINATE_GRACE_S + KILL_CONFIRM_S
 # Ключ конфига PM/спавнера с graceful-бюджетом — единственное место строки в коде.
 SHUTDOWN_TIMEOUT_KEY = "shutdown_timeout"
+
+#: Код выхода ребёнка, у которого после закрытия корня остались выжившие записи
+#: (Task 1.2a, ADR-PMM-036). Занятые коды: 0 (штатно), 1 (исключение), -N (сигнал),
+#: 75 (сторож смерти родителя). Монитор читает 76 как `stopped` + событие `survivors`.
+EXIT_SURVIVORS = 76
 
 
 def _graceful_s(shutdown_timeout: object) -> float:

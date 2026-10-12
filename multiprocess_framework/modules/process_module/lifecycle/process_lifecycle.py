@@ -8,8 +8,9 @@ Helper-функции для инициализации и завершения 
 создают объекты и ВОЗВРАЩАЮТ результат. ProcessModule сам присваивает атрибуты.
 """
 
+import time
+
 from ..._fallback import emergency_log
-from ..types import ProcessStatus
 
 #: Имя stdlib-логгера аварийного выхода — ровно имя этого модуля, чтобы записи
 #: об отказе гашения искались там, где они и происходят.
@@ -32,6 +33,8 @@ class ProcessLifecycle:
             process: Ссылка на ProcessModule
         """
         self.process = process
+        #: Запись ``planes/logger`` отработала: reporter пишет только аварийным выходом.
+        self.logger_down = False
 
     def init_configuration(self) -> tuple:
         """Инициализация конфигурации процесса (return-based, ADR-PM-009).
@@ -114,135 +117,82 @@ class ProcessLifecycle:
     # event_dispatcher больше не нужны (дупликация реестра устранена). CommandManager —
     # единственный владелец командных ключей.
 
-    def shutdown(self) -> bool:
-        """
-        Завершение работы процесса.
+    # Task 1.2a (ADR-PM-054): прозаический ``shutdown()`` удалён — его шаги стали
+    # записями корня процесса (``ProcessModule._register_*``), порядок держит корень.
 
-        Returns:
-            bool: True если завершение успешно
+    def stop_logger(self) -> None:
+        """Запись ``planes/logger`` — последней: снять контекст, погасить логгер.
+
+        Отказ гашения пишется аварийным выходом (жаловаться через сам логгер нельзя).
+        После вызова reporter корня пишет только в аварийный выход.
+        """
+        process = self.process
+        logger = process.logger_manager
+        try:
+            if logger is not None and hasattr(logger, "clear_base_context"):
+                logger.clear_base_context()
+        except Exception as exc:  # noqa: BLE001 — снятие контекста не срывает гашение
+            emergency_log(_EMERGENCY_NAME, "warning", f"[{process.name}] снятие контекста логгера: {exc}")
+        try:
+            if logger is not None:
+                logger.shutdown()
+        except Exception as exc:  # noqa: BLE001 — отказ гашения обязан быть слышен
+            emergency_log(
+                _EMERGENCY_NAME,
+                "error",
+                f"[{process.name}] гашение логгера не удалось: {exc}; приёмники могли остаться незакрытыми",
+            )
+        finally:
+            self.logger_down = True
+
+    def report(self, report) -> None:
+        """Reporter корня процесса: строка только при ``not ok`` или доставках после закрытия.
+
+        Пока логгер жив — им, после записи ``logger`` — аварийным выходом. Не бросает.
         """
         try:
-            # 1. Устанавливаем флаг остановки
-            self.process._stop_requested = True
-
-            # 1b. Снять контекст логирования (парно к set_base_context на старте, Ф0.5)
-            logger = self.process.get_manager("logger")
-            if logger and hasattr(logger, "clear_base_context"):
-                logger.clear_base_context()
-
-            # 2. Останавливаем системные потоки
-            self.process._stop_system_threads()
-
-            # 3. Останавливаем воркеры
-            if self.process.worker_manager:
-                self.process.worker_manager.stop_all_workers()
-
-            # 3b. Завершаем SharedResourcesManager (unlink SharedMemory на macOS/Linux)
-            if self.process.shared_resources and hasattr(self.process.shared_resources, "shutdown"):
+            if report.ok and not report.emits_after_close:
+                return
+            text = (
+                f"[{self.process.name}] root close {report.path}: survivors={list(report.survivors)} "
+                f"killed={list(report.killed)} errors={list(report.errors)} "
+                f"emits_after_close={report.emits_after_close} complete={report.complete} "
+                f"elapsed={report.elapsed_s:.3f}s"
+            )
+            if not getattr(self, "logger_down", False):
                 try:
-                    self.process.shared_resources.shutdown()
-                except Exception as e:
-                    self.process._log_error(f"SRM shutdown error: {e}")
+                    self.process._log_warning(text, module="lifecycle")
+                    return
+                except Exception:  # noqa: BLE001 — живой логгер отказал: аварийный выход
+                    pass
+            emergency_log(_EMERGENCY_NAME, "warning", text)
+        except Exception:  # noqa: BLE001 — reporter не бросает (контракт Reporter)
+            pass
 
-            # 3c. Ф1.1 (C3): снимаем процессные хуки — ЗДЕСЬ, между остановом
-            # потоков и гашением плоскостей, и это выбор с ценой в обе стороны.
-            #
-            # Раньше (до останова потоков) — самое шумное окно останова
-            # (`_stop_system_threads`, `stop_all_workers`, уборка SHM) осталось
-            # бы без наблюдателя: исключение гибнущего воркера ушло бы в stderr,
-            # то есть ровно туда, откуда его вынимала эта задача. Именно это
-            # окно и ломается чаще всего (долг graceful-stop).
-            #
-            # Позже (после гашения логгера) — плоскостей уже нет, и каждое
-            # исключение теста/останова считалось бы `hook_delivery_failures` с
-            # аварийной записью в stdlib, которую в боевом процессе никто не
-            # настраивал: счётчик потери рос бы на ЗДОРОВОМ останове, обесценив
-            # собственный сигнал.
-            #
-            # Здесь у события есть и живой адресат (менеджеры ещё стоят), и
-            # честный запасной путь после снятия — прежний хук, печатающий в
-            # stderr.
-            self.process._uninstall_process_hooks()
 
-            # 4. Завершаем менеджеры. Порядок — часть контракта, а не привычка (B3).
-            #
-            # Логгер стоял здесь ТРЕТЬИМ, а после него шли command/router, смена
-            # статуса и запись «shut down successfully»: всё, что уборка говорит
-            # на INFO/WARNING, терялось ВСЕГДА (floor подстраховывает только
-            # ERROR/CRITICAL). Воспроизведено ревью 2026-08-09: unresolved=6,
-            # floor=1, предупреждение однократно — «дальше считаем молча».
-            #
-            # error/stats не гасились НИГДЕ (grep по репозиторию — пусто), то
-            # есть финальный сброс двух плоскостей из трёх оставался на совести
-            # ОС. Оба наследуют `shutdown` от CRM: flush() → buffer.stop()
-            # (финальный сброс окна агрегации) → _close_all_channels().
-            #
-            # stats гасится ДО логгера не по алфавиту: его канал `log_stats`
-            # пишет ЧЕРЕЗ логгер, и обратный порядок отправил бы финальный
-            # снапшот метрик в уже закрытый приёмник.
-            #
-            # Ф3, задача 3.1: плоскостей стало ЧЕТЫРЕ — `observation` поднимается
-            # в `_create_observation_manager` (`observation.initialize()`), и без
-            # строки ниже гасились бы по-прежнему две. Сегодня цена нулевая (у
-            # порта пустой буфер и пустой реестр каналов), но задача 3.2 понесёт
-            # в тот же реестр записи `kind=observation`, и несброшенный буфер
-            # стал бы молчаливой потерей ровно на останове — там, где потерю уже
-            # никто не увидит. Место — ДО логгера, по тому же доводу, что у
-            # stats: канал порта будет писать через него.
-            if self.process.console_manager:
-                self.process.console_manager.shutdown()
-            if self.process.command_manager:
-                self.process.command_manager.shutdown()
-            if self.process.router_manager:
-                self.process.router_manager.shutdown()
-            stopped_planes = []
-            if self.process.error_manager:
-                self.process.error_manager.shutdown()
-                stopped_planes.append("error")
-            if self.process.stats_manager:
-                self.process.stats_manager.shutdown()
-                stopped_planes.append("stats")
-            if self.process.observation_manager:
-                self.process.observation_manager.shutdown()
-                stopped_planes.append("observation")
-            # Названо ФАКТИЧЕСКОЕ, а не заявленное: список собирается из того,
-            # что действительно погашено. Без этой строки гашение младших
-            # плоскостей не наблюдаемо в журнале вовсе — собственная запись
-            # плоскости ошибок идёт по её же маршруту, а INFO по нему не ездит
-            # (пороги severity), то есть «погасили» и «не погасили» выглядели бы
-            # одинаково.
-            if stopped_planes:
-                self.process._log_info(
-                    f"Process '{self.process.name}' observability planes stopped: {', '.join(stopped_planes)}"
-                )
+class _WorkersStop:
+    """Stoppable воркеров процесса в сегменте ``work`` (Task 1.2a, О2).
 
-            # 5. Статус и итоговая запись — пока логгер ЖИВ.
-            self.process.update_process_state(status=ProcessStatus.STOPPED.value)
+    ``request_stop`` — ничего: у ``WorkerManager`` нет неблокирующего «стоп всем»
+    (это 1.3). ``join_until`` — ``stop_all_workers`` с остатком срока; остановлен,
+    только если ни у одного воркера поток не жив (``is_alive``, а не статус:
+    ``stop_all_workers`` пишет STOPPED безусловно). Менеджер читается поздно —
+    в момент закрытия.
+    """
 
-            self.process.is_initialized = False
-            self.process._log_info(f"Process '{self.process.name}' shut down successfully")
+    def __init__(self, process) -> None:
+        self._process = process
 
-            # 6. Логгер — последним. Его собственный отказ писать через него же
-            # нельзя (предмет претензии — он), поэтому named-исключение:
-            # аварийный выход в stdlib. Останов при этом состоялся — подменять
-            # успех останова отказом закрытия приёмника значило бы соврать в
-            # другую сторону.
-            if self.process.logger_manager:
-                try:
-                    self.process.logger_manager.shutdown()
-                except Exception as exc:  # noqa: BLE001 — отказ гашения обязан быть слышен
-                    emergency_log(
-                        _EMERGENCY_NAME,
-                        "error",
-                        f"[{self.process.name}] гашение логгера не удалось: {exc}; "
-                        "приёмники могли остаться незакрытыми",
-                    )
+    def request_stop(self) -> None:
+        return None
+
+    def join_until(self, deadline: float) -> bool:
+        manager = getattr(self._process, "worker_manager", None)
+        if manager is None:
             return True
-
-        except Exception as e:
-            # Ф1.1 (C3): провалившийся останов не имеет права оставить хуки
-            # стоять — слот интерпретатора переживает объект процесса. Вызов
-            # идемпотентен, поэтому дублирование со штатной точкой (3c) безвредно.
-            self.process._uninstall_process_hooks()
-            self.process._log_error(f"Error during shutdown of process '{self.process.name}': {e}")
-            return False
+        manager.stop_all_workers(timeout=max(0.0, deadline - time.monotonic()))
+        for name in list(manager.list_workers()):
+            status = manager.get_worker_status(name)
+            if status and status.get("is_alive"):
+                return False
+        return True
