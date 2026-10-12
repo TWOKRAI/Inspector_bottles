@@ -1379,6 +1379,17 @@ def test_settle_timeout_after_stop_drops_mark_when_slot_is_dead_after_robot_rese
     assert [c[1] for c in rig.cmds()] == [OP_PTP_MOVE, OP_PING]
 
 
+def test_settle_timeout_drops_mark_when_firmware_took_slot_and_died_without_response() -> None:
+    """Lockout: CMD_FLAG = 0, CMD_SEQ = наш seq, RES нет -> слот не исполнится никогда, метка снимается."""
+    rig = _timeout_stop_timeout_rig()
+    rig.core.regs[CMD_FLAG] = 0  # прошивка забрала слот и перезапустилась, не записав RES
+    with pytest.raises(RobotTimeout):  # этот вызов снимает метку, но сам ничего не пишет
+        rig.client.cmd("PING", [])
+    rig.ticking = True
+    assert rig.client.cmd("PING", []).rvals[0] == 0x0200  # следующий пишет
+    assert [c[1] for c in rig.cmds()] == [OP_PTP_MOVE, OP_PING]
+
+
 def test_settle_timeout_without_stop_still_drops_mark() -> None:
     rig = Rig(ticking=False)
     rig.client.probe()

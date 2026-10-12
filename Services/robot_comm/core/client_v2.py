@@ -496,7 +496,8 @@ class RobotClientV2:
             if self._stop_generation == mark.generation:
                 return False
         slot = self._rd(REG["CMD_FLAG"], 2)  # CMD_FLAG, CMD_SEQ
-        return int(slot[1]) == mark.seq
+        # Слот исполнится, только пока флаг взведён: флаг 0 без RES за res_timeout_s — прошивка взяла слот и умерла.
+        return int(slot[0]) == 1 and int(slot[1]) == mark.seq
 
     def _read_result(self, seq: int, generation: int, done_seq: bool) -> CmdResult:
         """Прочитать и разобрать RES-блок; для ``done_seq`` — сверить поколение стопа (О5).
