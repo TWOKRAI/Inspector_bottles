@@ -168,6 +168,57 @@ def test_scope_windows_graceful_then_terminate_then_kill() -> None:
     assert 0.3 - 0.1 <= p.kill_t[0] - p.terminate_t[0] <= 0.3 + 0.2
 
 
+class _DiesBetweenPolls(_Proc):
+    """Первые ``observers`` опросов ``is_alive()`` встречаются на барьере и все видят «мёртв»:
+    каждый наблюдатель взял имя из ``_pending()`` до того, как любой поставил метку."""
+
+    def __init__(self, observers: int) -> None:
+        super().__init__()
+        self._barrier = threading.Barrier(observers, timeout=5.0)
+        self._lock = threading.Lock()
+        self._left = observers
+
+    def is_alive(self) -> bool:
+        with self._lock:
+            gate = self._left > 0
+            self._left -= 1
+        if gate:
+            self._barrier.wait()
+        return False
+
+
+def test_concurrent_observers_mark_dead_name_once() -> None:
+    """Сторожит: проверку-и-постановку под замком в ``_confirm`` (``if name in self._dead``).
+
+    Два потока (``survivors()`` и ``close()``) одновременно видят смерть одного имени; без
+    сторожа метка ставится дважды — правило DESIGN 6 «одна метка на имя за жизнь объекта»."""
+    marks: list[str] = []
+    marks_lock = threading.Lock()
+
+    def mark(name: str, _proc: Any) -> None:
+        with marks_lock:
+            marks.append(name)
+
+    cs = ChildProcessStop({"D": _DiesBetweenPolls(observers=2)}, {}, on_confirmed_dead=mark)
+    box: dict[str, Any] = {}
+
+    def run() -> None:
+        t1 = threading.Thread(target=lambda: box.setdefault("s", cs.survivors()), daemon=True)
+        t2 = threading.Thread(target=cs.close, daemon=True)
+        t1.start()
+        t2.start()
+        t1.join(5.0)
+        t2.join(5.0)
+        box["hung"] = t1.is_alive() or t2.is_alive()
+
+    _bounded(run, 10.0)
+    assert box["hung"] is False
+    assert box["s"] == ()
+    assert marks == ["D"]
+    assert cs.survivors() == ()
+    assert marks == ["D"]
+
+
 def _sleep_forever() -> None:
     time.sleep(60)
 
