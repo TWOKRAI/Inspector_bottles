@@ -1,0 +1,475 @@
+[
+  {
+    "id": "inj-1",
+    "prop": "сверка Итог с пунктами снята",
+    "file": "scripts/atlas/review_form.py",
+    "old": "if actual != count:",
+    "new": "if actual != count and key == 1:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-2",
+    "prop": "сверка Классы с пунктами снята",
+    "file": "scripts/atlas/review_form.py",
+    "old": "if actual != count:",
+    "new": "if actual != count and key == 0:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-3",
+    "prop": "пункт с отступом `  - [` не ловится",
+    "file": "scripts/atlas/review_form.py",
+    "old": "elif line.lstrip().startswith(\"- [\"):",
+    "new": "elif line.startswith(\"- [\"):",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-4",
+    "prop": "пункт `- [major/fact]` без текста принимается",
+    "file": "scripts/atlas/review_form.py",
+    "old": "+ r\")\\] \\S\")",
+    "new": "+ r\")\\]\")",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-5",
+    "prop": "заголовок `## Замечания` не требуется",
+    "file": "scripts/atlas/review_form.py",
+    "old": "if _NOTES not in lines:",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-6",
+    "prop": "пустой раздел «Что я оставил» принят",
+    "file": "scripts/atlas/review_form.py",
+    "old": "elif _open_section_empty(lines):",
+    "new": "elif False:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-7",
+    "prop": "строка 1 не проверяется",
+    "file": "scripts/atlas/review_form.py",
+    "old": "if not _TITLE.match(lines[0] if lines else \"\"):",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-8",
+    "prop": "CRLF: split по \\n вместо splitlines (Windows)",
+    "file": "scripts/atlas/review_form.py",
+    "old": "lines = text.splitlines()",
+    "new": "lines = text.split(\"\\n\")",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_crlf_same_as_lf",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_real_reports_and_template",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-9",
+    "prop": "M2 берёт последний раунд",
+    "file": "scripts/atlas/metrics.py",
+    "old": "first = next((p for n, p in _reports(col) if n == 1), None)",
+    "new": "first = next((p for n, p in reversed(_reports(col))), None)",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-10",
+    "prop": "M2 считает только blocker",
+    "file": "scripts/atlas/metrics.py",
+    "old": "for severity in (\"blocker\", \"major\"):",
+    "new": "for severity in (\"blocker\",):",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-11",
+    "prop": "M2 из них считает и minor/nit",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if sev in (\"blocker\", \"major\") and klass in _CHEAP)",
+    "new": "if klass in _CHEAP)",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-12",
+    "prop": "M3 берёт первый раунд, не первый APPROVED",
+    "file": "scripts/atlas/metrics.py",
+    "old": "return str(approved[0]) if approved else",
+    "new": "return str(rounds[0][0]) if approved else",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-13",
+    "prop": "M3 сортирует раунды строкой (r10 перед r2)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "return sorted(found)",
+    "new": "return sorted(found, key=lambda item: item[1].name)",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-14",
+    "prop": "имя отчёта по префиксу id (1.1 читает 1.10)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "re.escape(col.task) + r\"\\.review-r(\\d+)\\.md\"",
+    "new": "re.escape(col.task) + r\".*review-r(\\d+)\\.md\"",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-15",
+    "prop": "review-code-r<N> попадает в стадию 0",
+    "file": "scripts/atlas/metrics.py",
+    "old": "re.escape(col.task) + r\"\\.review-r(\\d+)\\.md\"",
+    "new": "re.escape(col.task) + r\"\\.review-(?:code-)?r(\\d+)\\.md\"",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-16",
+    "prop": "M1 округляет банковски",
+    "file": "scripts/atlas/metrics.py",
+    "old": "return f\"{(200 * atlas + len(block)) // (2 * len(block))}% ({atlas}/{len(block)})\"",
+    "new": "return f\"{round(100 * atlas / len(block))}% ({atlas}/{len(block)})\"",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-17",
+    "prop": "M1 знаменатель — все непустые строки блока",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if ln.lstrip().startswith(\"- \")]",
+    "new": "if ln.strip()]",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-18",
+    "prop": "M1 читает бриф split по \\n (Windows CRLF)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "lines = _read(path).splitlines()",
+    "new": "lines = _read(path).split(\"\\n\")",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_m1_reads_brief_with_crlf_bytes"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-19",
+    "prop": "M4 считает все коммиты задачи, не после DONE",
+    "file": "scripts/atlas/metrics.py",
+    "old": "f\"{done}..HEAD\")",
+    "new": "\"HEAD\")",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-20",
+    "prop": "rev-list без --no-merges (страж избыточен)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "\"rev-list\", \"--no-merges\", f\"{done}..HEAD\"",
+    "new": "\"rev-list\", f\"{done}..HEAD\"",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-21",
+    "prop": "M4 id по префиксу (#1.1 читает #1.10)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if col.task in ids}",
+    "new": "if any(i.startswith(col.task) for i in ids)}",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-22",
+    "prop": "M4 не отделяет docs",
+    "file": "scripts/atlas/metrics.py",
+    "old": "m.group(1) != \"docs\"",
+    "new": "m.group(1) != \"never\"",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-23",
+    "prop": "голый хеш без правила цифра+буква",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if m.group(\"q\") or (re.search(r\"\\d\", m.group(\"b\")) and re.search(\"[a-f]\", m.group(\"b\")))",
+    "new": "if True",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-24",
+    "prop": "хеш в кавычках требует цифру и букву",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if m.group(\"q\") or (re.search(r\"\\d\", m.group(\"b\")) and re.search(\"[a-f]\", m.group(\"b\")))",
+    "new": "if re.search(r\"\\d\", m.group(\"q\") or m.group(\"b\")) and re.search(\"[a-f]\", m.group(\"q\") or m.group(\"b\"))",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_digit_only_backticked_hash_is_a_violation"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-25",
+    "prop": "берётся последний хеш группы DONE",
+    "file": "scripts/atlas/metrics.py",
+    "old": "for m in _HASH.finditer(group.group(0))",
+    "new": "for m in reversed(list(_HASH.finditer(group.group(0))))",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_two_hashes_in_done_group_first_wins"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-26",
+    "prop": "кэш отчётов снят (дедупликация держится на dict)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if path not in self._reports:",
+    "new": "if True:",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-27",
+    "prop": "dict нарушений не дедуплицирует (держит кэш отчётов)",
+    "file": "scripts/atlas/metrics.py",
+    "old": "self.violations[(path.relative_to(self.root).as_posix(), text)] = None",
+    "new": "self.violations[(path.relative_to(self.root).as_posix(), text + \" \" * len(self.violations))] = None",
+    "forecast": [],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-28",
+    "prop": "bare slug берёт файлы ролей и injections как задачи",
+    "file": "scripts/atlas/metrics.py",
+    "old": "ids = sorted((s for s in stems if re.fullmatch(views.TASK_ID_PATTERN, s)), key=views._natural)",
+    "new": "ids = sorted(stems, key=views._natural)",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-29",
+    "prop": "метка колонок --base снята",
+    "file": "scripts/atlas/metrics.py",
+    "old": "cols = [(c, \"база \") for spec in base for c in _columns(root, spec)]",
+    "new": "cols = [(c, \"\") for spec in base for c in _columns(root, spec)]",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-30",
+    "prop": "колонки --base после текущих",
+    "file": "scripts/atlas/metrics.py",
+    "old": "cols = [(c, \"база \") for spec in base for c in _columns(root, spec)]\n    cols += [(c, \"сейчас \" if base else \"\") for spec in specs for c in _columns(root, spec)]",
+    "new": "cols = [(c, \"сейчас \" if base else \"\") for spec in specs for c in _columns(root, spec)]\n    cols += [(c, \"база \") for spec in base for c in _columns(root, spec)]",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-31",
+    "prop": "нарушение формы даёт код 0",
+    "file": "scripts/atlas/metrics.py",
+    "old": "return (1 if any(\"?\" in column for column in cells) else 0), lines",
+    "new": "return 0, lines",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-32",
+    "prop": "два плана с одним slug не ошибка",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if len(found) != 1:",
+    "new": "if len(found) < 1:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-33",
+    "prop": "`--ref` у metrics принимается",
+    "file": "scripts/atlas/__main__.py",
+    "old": "(\"check\", \"log\", \"lint-result\", \"lint-brief\", \"metrics\")",
+    "new": "(\"check\", \"log\", \"lint-result\", \"lint-brief\")",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-34",
+    "prop": "без spec и без --base не ошибка",
+    "file": "scripts/atlas/__main__.py",
+    "old": "if args.command == \"metrics\" and not (args.specs or args.base):",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-35",
+    "prop": "M3 не знает о нарушениях формы",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if any(review is None for _, review in rounds):",
+    "new": "if False:",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-36",
+    "prop": "M2 нарушение формы даёт 0, не ?",
+    "file": "scripts/atlas/metrics.py",
+    "old": "return (\"?\", \"?\") if review is None else _m2(review)",
+    "new": "return (\"0\", \"0\") if review is None else _m2(review)",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-37",
+    "prop": "не-DONE строка даёт не «—»",
+    "file": "scripts/atlas/metrics.py",
+    "old": "if not group:\n            return \"—\"",
+    "new": "if not group:\n            return \"— (DONE без хеша)\"",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-38",
+    "prop": "M1 числитель — любая команда scripts.atlas, в том числе после uv run",
+    "file": "scripts/atlas/metrics.py",
+    "old": "m.group(\"cmd\").startswith(_ATLAS_CMD)",
+    "new": "\"scripts.atlas\" in m.group(\"cmd\")",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  },
+  {
+    "id": "inj-39",
+    "prop": "нарушение «хеш DONE» не записывается",
+    "file": "scripts/atlas/metrics.py",
+    "old": "self.violate(col.plan / \"plan.md\", f\"задача {col.task}: хеш DONE {token} не найден\")",
+    "new": "pass",
+    "forecast": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
+    "observed": null,
+    "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
+  }
+]
