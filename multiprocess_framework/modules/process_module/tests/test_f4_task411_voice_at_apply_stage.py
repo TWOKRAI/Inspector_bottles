@@ -573,6 +573,9 @@ class TestNoEmergencyLogInOperatorFacingPositions:
         # логгера (жаловаться через сам логгер нельзя, он предмет претензии) и
         # ``report`` — строка отчёта корня ПОСЛЕ записи ``planes/logger``: логгер погашен.
         "multiprocess_framework/modules/process_module/lifecycle/process_lifecycle.py": 3,
+        # +1 2026-10-12 (Task 1.2a, ревью кода р.2): отказ ``initialize()`` на закрытом корне —
+        # логгер процесса уже погашен корнем, говорить через него нельзя.
+        "multiprocess_framework/modules/process_module/core/process_module.py": 1,
         "multiprocess_framework/modules/logger_module/channels/log_channel.py": 1,
         "multiprocess_framework/modules/channel_routing_module/core/channel_routing_manager.py": 1,
     }

@@ -251,6 +251,8 @@ class ProcessManagerProcess(ProcessModule):
 
     def initialize(self) -> bool:
         """Инициализация: ProcessModule + создание процессов из config + запуск монитора."""
+        if getattr(self, "_root", None) is not None:
+            return super().initialize()  # защита ProcessModule: повтор не пересобирает и не запускает шаги PM
         try:
             # Регистрация ProcessManager для приёма команд (system.shutdown от GUI и др.)
             if self.shared_resources:

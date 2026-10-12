@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ast
+import logging
 import threading
 import time
 from pathlib import Path
@@ -20,6 +21,7 @@ import multiprocess_framework.modules.process_module.lifecycle.process_lifecycle
 
 from ...app_module.orchestrator import GenericProcessManagerApp
 from ...process_manager_module.process.process_manager_process import ProcessManagerProcess
+from ...process_manager_module.core.stop_budget import stop_budget
 from ..core.process_module import ProcessModule
 from ..generic.generic_process import GenericProcess
 
@@ -256,23 +258,44 @@ def test_second_initialize_on_live_process_rebuilds_nothing() -> None:
     assert _live_extra_threads(before) == []
 
 
-def test_initialize_after_shutdown_is_refused_without_new_root() -> None:
-    """``initialize()`` после ``shutdown()``: ``False``, одна строка в лог, корня и менеджеров заново нет."""
+def test_initialize_after_shutdown_is_refused_without_new_root(caplog) -> None:
+    """``initialize()`` после ``shutdown()``: ``False``, одна строка аварийного выхода, корня и менеджеров нет."""
     before = {t.name for t in threading.enumerate()}
     process = ProcessModule("hz_reinit", config={})
-    errors: list[str] = []
     assert _bounded(process.initialize)[1] is True
     assert _bounded(process.shutdown)[1] is True
     root, router = process._root, process.router_manager
-    process._log_error = lambda msg, *a, **k: errors.append(str(msg))
 
-    done, result, error = _bounded(process.initialize)
+    with caplog.at_level(logging.ERROR):
+        done, result, error = _bounded(process.initialize)
 
     assert done and error is None, repr(error)
     assert result is False
     assert process._root is root and process.router_manager is router
-    assert len([line for line in errors if "одноразовый после shutdown" in line]) == 1, errors
+    lines = [r.getMessage() for r in caplog.records if "корень закрыт (shutdown или провал подъёма)" in r.getMessage()]
+    assert len(lines) == 1, [r.getMessage() for r in caplog.records]
     assert _live_extra_threads(before) == []
+
+
+def test_second_initialize_of_pm_app_runs_no_pm_steps_again() -> None:
+    """Двойной ``initialize()`` приложения PM: тот же state store, ``monitor.start`` один раз, потока флашера нет."""
+    before = {t.name for t in threading.enumerate()}
+    app = GenericProcessManagerApp(config={"shutdown_timeout": 1.0, "initial_state": {"system": {"x": 1}}})
+    app.attach_stop_budget(stop_budget(1.0))
+    assert _bounded(app.initialize)[1] is True
+    store = app._state_store_manager
+    starts: list[int] = []
+    real_start = app._process_monitor.start
+    app._process_monitor.start = lambda *a, **k: (starts.append(1), real_start(*a, **k))[1]
+    try:
+        done, result, error = _bounded(app.initialize)
+        assert done and error is None, repr(error)
+        assert result is True
+        assert app._state_store_manager is store
+        assert starts == []
+    finally:
+        _bounded(app.shutdown)
+    assert "StateCoalesceFlusher" not in _live_extra_threads(before)
 
 
 # --------------------------------------------------------------------------- #

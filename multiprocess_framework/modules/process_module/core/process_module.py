@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     from ...state_store_module.interfaces import IStateProxy
 
+from ..._fallback import emergency_log
 from ...base_manager import BaseManager, ObservableMixin, open_scope
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 from ..communication import ProcessCommunication
@@ -237,7 +238,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         root = self._root
         if root is not None:
             if root.closed:
-                self._log_error(f"Процесс '{self.name}' одноразовый после shutdown: initialize() отклонён")
+                # Логгер уже закрыт корнем — отказ говорит аварийный выход, не менеджер.
+                emergency_log(
+                    __name__,
+                    "error",
+                    "Процесс '%s': корень закрыт (shutdown или провал подъёма) — initialize() отклонён",
+                    self.name,
+                )
                 return False
             return self.is_initialized
         try:

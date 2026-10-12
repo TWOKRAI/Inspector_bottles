@@ -68,6 +68,8 @@ class GenericProcessManagerApp(ProcessManagerProcess):
            конфигурируется на «холодной» системе, до фоновых потоков.
         3. :meth:`_start_observability_watcher` — фоновый hot-reload (config-gated).
         """
+        if getattr(self, "_root", None) is not None:
+            return super().initialize()  # защита ProcessModule: повтор не создаёт второй state store и watcher
         if not super().initialize():
             return False
         self._configure_runtime()
