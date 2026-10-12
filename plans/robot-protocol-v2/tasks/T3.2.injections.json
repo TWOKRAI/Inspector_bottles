@@ -285,5 +285,92 @@
    "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py::test_stop_in_third_chunk_aborts_and_loads_nothing_more"
   ],
   "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-19",
+  "prop": "после метки за ACK вызывающий получает управление, когда робот стоит (в _abort_after_ack убрано ожидание wait_done после stop(HARD))",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "        self.wait_done(seq)  # RobotAborted — ожидаемый исход, уходит наружу как есть\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-20",
+  "prop": "RobotAborted из О5 внутри sc_run — после остановки робота (вызов _wait_robot_stopped убран)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "                    self._wait_robot_stopped(o5.seq)\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_o5_abort_inside_sc_run_returns_after_robot_stopped"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_o5_abort_inside_sc_run_returns_after_robot_stopped"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-21",
+  "prop": "недоставленный стоп после метки — ошибка транспорта наружу (ошибка stop(HARD) в _abort_after_ack проглочена, наружу RobotAborted)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "            stop_exc.add_note(\"метка стопа после ACK SC_RUN: кусок принят\")\n            raise\n",
+  "new": "            raise RobotAborted(seq, ERR[\"E_ABORTED\"], \"стоп между кусками\")\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_failed_stop_after_ack_raises_transport_error"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_failed_stop_after_ack_raises_transport_error"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-22",
+  "prop": "param_get переводит знаковые параметры (перевод raw - 0x10000 убран)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "        if PARAMS[pid][\"signed\"] and raw >= 0x8000:\n            return raw - 0x10000\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_param_get_signed_roundtrip"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_param_get_signed_roundtrip"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-23",
+  "prop": "TLM_STOP_ACK читается перед загрузкой k+1 (повтор inj-5 против усиленного теста: перед загрузкой только поколение)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "upload_cut = marked() or not self._upload(",
+  "new": "upload_cut = by_generation() or not self._upload(",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
+ },
+ {
+  "id": "inj-24",
+  "prop": "метка проверяется сразу после ACK SC_RUN (повтор inj-6 против усиленного теста: проверка 6d(3) удалена)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "                if marked():\n                    self._abort_after_ack(seq)\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_failed_stop_after_ack_raises_transport_error",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_foreign_stop_before_next_sc_run_stops_after_ack",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_stop_ack_change_before_upload"
+  ],
+  "test": "Services/robot_comm/tests/test_client_v2_chunks_acceptance.py Services/robot_comm/tests/test_client_v2_chunks.py"
  }
 ]
