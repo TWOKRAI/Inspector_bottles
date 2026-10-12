@@ -11,6 +11,7 @@ Stability: lite
 from __future__ import annotations
 
 import math
+import pickle
 
 import pytest
 from pydantic import ValidationError
@@ -399,3 +400,96 @@ def test_compile_is_pure():
     first = compile_program(prog, POINTS, {}, PARAMS)
     second = compile_program(prog, POINTS, {}, PARAMS)
     assert first == second and len(first.records) == 2
+
+
+# --- ревью р.1: СК без кэша, строгая граница, from_base, pickle ------------------------------------------------
+SQUARE = FrameDef(name="f", origin=(300.0, 0.0, -50.0), on_x=(310.0, 0.0, -50.0), in_plane=(300.0, 10.0, -50.0))
+
+
+def test_frame_model_copy_with_new_points_compiles_with_new_frame():
+    """`model_copy(update=...)` не валидирует: СК не должна держать пересчёт от старых точек."""
+    moved = SQUARE.model_copy(
+        update={"origin": (400.0, 0.0, -50.0), "on_x": (410.0, 0.0, -50.0), "in_plane": (400.0, 10.0, -50.0)}
+    )
+    sc = _compile([Move(point="p", kind="JOINT")], {"p": _pt("p", (0.0, 0.0, 0.0, 0.0), frame="f")}, {"f": moved})
+    assert sc.records[0].x == pytest.approx(400.0, abs=1e-9)
+
+
+def test_frame_from_base_literals():
+    assert SQUARE.from_base(300.0, 0.0, -50.0, 0.0) == pytest.approx((0.0, 0.0, 0.0, 0.0), abs=1e-9)
+    assert SQUARE.from_base(*SQUARE.to_base(5.0, 7.0, 1.0, 30.0)) == pytest.approx((5.0, 7.0, 1.0, 30.0), abs=1e-9)
+
+
+@pytest.mark.parametrize("bad", [True, False, "1.0", "300", None])
+@pytest.mark.parametrize("field", ["x", "y", "z", "rz"])
+def test_coordinates_reject_bool_and_str(field, bad):
+    point_kw = {"name": "p", "x": 1.0, "y": 2.0, "z": 3.0, "rz": 4.0, "hand": 1, field: bad}
+    with pytest.raises(ValidationError):
+        Point(**point_kw)
+    with pytest.raises(ValidationError):
+        _rec(**{field: bad})
+
+
+def test_coordinates_accept_int_as_float():
+    """YAML пишет 300 как int — это валидная координата."""
+    p = Point(name="p", x=300, y=0, z=-50, rz=0, hand=1)
+    r = _rec(x=300, y=0, z=-50, rz=0)
+    assert (p.x, type(p.x), r.x, type(r.x)) == (300.0, float, 300.0, float)
+
+
+@pytest.mark.parametrize(
+    ("action", "aparam"),
+    [
+        ("NONE", 1),
+        ("NONE", -1),
+        ("DO_ON", 0),
+        ("DO_ON", 17),
+        ("DELAY_MS", -1),
+        ("DELAY_MS", 65536),
+        ("ACCEL", 99),
+        ("SPEED_PCT", 101),
+        ("ACCUR", 2),
+    ],
+)
+def test_record_aparam_range_by_action(action, aparam):
+    with pytest.raises(ValidationError):
+        _rec(action=action, aparam=aparam)
+
+
+@pytest.mark.parametrize(
+    ("action", "aparam"), [("NONE", 0), ("DO_ON", 16), ("DELAY_MS", 65535), ("ACCEL", 50000), ("ACCUR", 0)]
+)
+def test_record_aparam_boundaries_accepted(action, aparam):
+    assert _rec(action=action, aparam=aparam).aparam == aparam
+
+
+@pytest.mark.parametrize("bad", [-1, True, "0", 0.0])
+def test_scenario_step_of_strict_non_negative(bad):
+    with pytest.raises(ValidationError):
+        Scenario(records=(_rec(),), step_of=(bad,))
+    with pytest.raises(ValidationError):
+        Scenario.from_dict({"records": [_rec().to_dict()], "step_of": [bad]})
+
+
+def test_compile_error_pickle_roundtrip():
+    err = _fail([Move(point="r", kind="JOINT")], {"r": _pt("r", A, hand=0)})
+    back = pickle.loads(pickle.dumps(err))
+    assert (type(back), back.step, back.reason, back.text, str(back)) == (
+        CompileError,
+        0,
+        7,
+        err.text,
+        str(err),
+    )
+
+
+@pytest.mark.parametrize("bad", [True, "300", math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("which", ["origin", "on_x", "in_plane"])
+@pytest.mark.parametrize("axis", [0, 1, 2])
+def test_frame_points_strict_coordinates(which, axis, bad):
+    """Одно правило строгости на все координаты: точки СК тоже без bool, строк, NaN и inf."""
+    kw = {"origin": (300.0, 0.0, -50.0), "on_x": (310.0, 0.0, -50.0), "in_plane": (300.0, 10.0, -50.0)}
+    triple = list(kw[which])
+    triple[axis] = bad
+    with pytest.raises(ValidationError):
+        FrameDef(name="f", **{**kw, which: tuple(triple)})

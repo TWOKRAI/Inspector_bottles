@@ -13,10 +13,19 @@ Stability: lite
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, PrivateAttr, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
 from Services.robot_comm.core.protocol_v2 import ACT, KIND, REASON, REASON_TEXT
@@ -34,7 +43,16 @@ __all__ = [
     "compile_program",
 ]
 
-type Triple = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+
+def _strict_coord(v: Any) -> float:
+    """Координата на границе (YAML, `from_dict`): int или float, конечная; bool и строки не приводятся."""
+    if type(v) not in (int, float) or not math.isfinite(v):
+        raise ValueError("координата — конечное число (int или float)")
+    return float(v)
+
+
+type Coord = Annotated[float, BeforeValidator(_strict_coord)]
+type Triple = tuple[Coord, Coord, Coord]
 
 _ACC_META = PARAMS[PARAM_ID["P_ACC_L"]]
 
@@ -49,6 +67,20 @@ _ACT_RANGE: dict[str, tuple[int, int]] = {
     "ACCEL": (int(_ACC_META["min"]), int(_ACC_META["max"])),  # мм/с²
     "ACCUR": (0, 1),
 }
+
+
+def _check_aparam(act: str, value: int) -> None:
+    """Параметр действия по таблице `_ACT_RANGE`; `NONE` — только 0. Общая проверка `Action` и `Record`."""
+    if act == "NONE":
+        if value != 0:
+            raise ValueError("у записи без действия параметр должен быть 0")
+        return
+    bounds = _ACT_RANGE.get(act)
+    if bounds is None:
+        raise ValueError("нет диапазона параметра для этого действия (новый код ACT без строки таблицы)")
+    lo, hi = bounds
+    if not lo <= value <= hi:
+        raise ValueError(f"параметр действия вне диапазона {lo}..{hi}")
 
 
 class _Model(BaseModel):
@@ -70,10 +102,10 @@ class Point(_Model):
     """Обученная точка: мм и °; `frame=None` — база; `hand` — 0 правая / 1 левая (как `P_HAND`)."""
 
     name: Annotated[str, Field(min_length=1)]
-    x: FiniteFloat
-    y: FiniteFloat
-    z: FiniteFloat
-    rz: FiniteFloat
+    x: Coord
+    y: Coord
+    z: Coord
+    rz: Coord
     hand: Literal[0, 1]
     frame: str | None = None
 
@@ -93,19 +125,24 @@ class FrameDef(_Model):
     origin: Triple
     on_x: Triple
     in_plane: Triple
-    _frame: geometry.Frame = PrivateAttr()
 
-    def model_post_init(self, context: Any, /) -> None:
+    @model_validator(mode="after")
+    def _non_degenerate(self) -> Self:
         # ValueError геометрии (вырожденные точки) pydantic превращает в ошибку валидации.
-        self._frame = geometry.Frame.from_points(self.origin, self.on_x, self.in_plane)
+        self._geometry()
+        return self
+
+    def _geometry(self) -> geometry.Frame:
+        # Без кэша: `model_copy(update=...)` не валидирует, кэш остался бы от старых точек.
+        return geometry.Frame.from_points(self.origin, self.on_x, self.in_plane)
 
     def to_base(self, x: float, y: float, z: float, rz: float) -> tuple[float, float, float, float]:
         """Точка СК → база."""
-        return self._frame.to_base(x, y, z, rz)
+        return self._geometry().to_base(x, y, z, rz)
 
     def from_base(self, x: float, y: float, z: float, rz: float) -> tuple[float, float, float, float]:
         """Точка базы → СК (обратно `to_base`)."""
-        return self._frame.from_base(x, y, z, rz)
+        return self._geometry().from_base(x, y, z, rz)
 
 
 class Move(_Model):
@@ -139,12 +176,7 @@ class Action(_Model):
 
     @model_validator(mode="after")
     def _value_in_range(self) -> Self:
-        bounds = _ACT_RANGE.get(self.act)
-        if bounds is None:
-            raise ValueError("нет диапазона параметра для этого действия (новый код ACT без строки таблицы)")
-        lo, hi = bounds
-        if not lo <= self.value <= hi:
-            raise ValueError(f"параметр действия вне диапазона {lo}..{hi}")
+        _check_aparam(self.act, self.value)
         return self
 
 
@@ -169,10 +201,10 @@ class Program(_Model):
 class Record(_Model):
     """Запись сценария в базе: мм и °, вид хода и действие — имена-ключи `KIND`/`ACT`."""
 
-    x: FiniteFloat
-    y: FiniteFloat
-    z: FiniteFloat
-    rz: FiniteFloat
+    x: Coord
+    y: Coord
+    z: Coord
+    rz: Coord
     kind: str
     action: str
     aparam: StrictInt
@@ -191,12 +223,17 @@ class Record(_Model):
             raise ValueError(f"неизвестное действие; допустимы: {', '.join(ACT)}")
         return v
 
+    @model_validator(mode="after")
+    def _aparam_in_range(self) -> Self:
+        _check_aparam(self.action, self.aparam)
+        return self
+
 
 class Scenario(_Model):
     """Результат компиляции: записи и `step_of[i]` — индекс шага программы, породившего запись i."""
 
     records: tuple[Record, ...]
-    step_of: tuple[int, ...]
+    step_of: tuple[Annotated[StrictInt, Field(ge=0)], ...]
 
     @model_validator(mode="after")
     def _same_length(self) -> Self:
@@ -213,6 +250,10 @@ class CompileError(ValueError):
         self.step = step
         self.reason = reason
         self.text = text
+
+    def __reduce__(self) -> tuple[type[CompileError], tuple[int, int, str]]:
+        # Три аргумента конструктора при args=(text,): без этого pickle.loads падает с TypeError.
+        return (type(self), (self.step, self.reason, self.text))
 
 
 def _fail(step: int, reason: int, what: str = "") -> CompileError:
