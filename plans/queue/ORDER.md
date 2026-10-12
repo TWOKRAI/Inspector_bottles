@@ -367,8 +367,8 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 В блоке и на странице — только очередь: планы §4.1, §4.2 и те, которых нет в таблицах §4; закрытые §4.3 и `_archive/` скрыты и считаются в строке `в архиве`.
 
 <!-- progress:begin -->
-- 2026-10-03_lifecycle-owner-scope — 6 из 25 · 24%
-- robot-protocol-v2 — 15 из 36 · 42%
+- 2026-10-03_lifecycle-owner-scope — 7 из 13 · 54%
+- robot-protocol-v2 — 19 из 38 · 50%
 - line-sim-layer-editor — 8 из 10 · 80%
 - line-sim — 27 из 30 · 90%
 - gui-constructor — 0 из 21 · 0%
@@ -376,7 +376,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - frontend-constructor — 15 из 33 · 45%
 - transport-single-policy — 19 из 24 · 79%
 - pipeline-node-timing — 1 из 4 · 25%
-- observability-closure — 33 из 46 · 72%
+- observability-closure — 33 из 47 · 70%
 - lifecycle-stop-ownership — 6 из 9 · 67% · без отметки 3
 - backend-ctl-review-remediation — 4 из 16 · 25%
 - otel-export — 13 из 21 · 62%
@@ -388,7 +388,7 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 - qr-code-reader — 3 из 17 · 18%
 - 2026-10-02_plans-progress-dashboard — 25 из 34 · 74%
 - 2026-10-03_commit-mechanism — 9 из 11 · 82%
-- 2026-10-04_atlas — 25 из 37 · 68%
+- 2026-10-04_atlas — 28 из 34 · 82%
 - 2026-10-11_memory-rules-delivery — 1 из 2 · 50%
 - robot-place-pose — 2 из 3 · 67%
 - robot-calibration — 4 из 6 · 67%
