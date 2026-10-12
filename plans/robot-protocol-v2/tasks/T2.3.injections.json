@@ -1,0 +1,236 @@
+[
+ {
+  "id": "inj-1",
+  "prop": "SC_RUN пишет TLM_SC_DONE_N = count-1",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "self.regs[REG[\"TLM_SC_DONE_N\"]] = sc[\"count\"]\n",
+  "new": "self.regs[REG[\"TLM_SC_DONE_N\"]] = sc[\"count\"] - 1\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_done_seq_and_sc_done_n_after_last_record"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_done_seq_and_sc_done_n_after_last_record",
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_scenario_moves_with_do_delay_speed",
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_scenario_on_battle_defaults",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_sc_record_nak_leaves_no_trace[dead_zone]",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_sc_record_nak_leaves_no_trace[kind_at_offset]",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_sc_record_nak_leaves_no_trace[last_line_pass]",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_sc_record_nak_leaves_no_trace[out_of_zone]",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_sc_record_nak_leaves_no_trace[speed_pct_zero]"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-2",
+  "prop": "E_SC_RECORD отдаёт rval0 = глобальный индекс (offset+i), не индекс в срезе",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "idx: int = i)",
+  "new": "idx: int = offset + i)",
+  "forecast": [],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_sc_record_nak_leaves_no_trace[kind_at_offset]"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-3",
+  "prop": "TLM_SPD_PCT/SPEED_PCT не восстанавливается к P_SPD_DEFAULT на нормальном DONE",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "        self.regs[REG[\"TLM_SPD_PCT\"]] = self._values[PARAM_ID[\"P_SPD_DEFAULT\"]]  # T2.3: IDLE -> P_SPD_DEFAULT\n",
+  "new": "",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_scenario_moves_with_do_delay_speed"
+  ],
+  "observed": [],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-4",
+  "prop": "трекинг CVT: сдвиг pick по ленте с обратным знаком",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "return cvt[\"pick_x\"] + ux * trav, cvt[\"pick_y\"] + uy * trav",
+  "new": "return cvt[\"pick_x\"] - ux * trav, cvt[\"pick_y\"] - uy * trav",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_pick_carried_out_of_ring_trips_miss"
+  ],
+  "observed": [],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-5",
+  "prop": "CVT: index события on_job_done растёт и на отклонённом (NAK) CVT_JOB",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "        ecap_lo, ecap_hi, px, py, pz, flags, qx, qy, qz, qrz = args\n        if self.regs[REG[\"TLM_SERVO\"]] == 0:\n            return NAK, ERR[\"E_NO_SERVO\"], 0, []\n\n        def eng(raw: int) -> float:\n            return self._decode(raw, True) / 10.0\n\n        def param(name: str) -> float:\n            return to_eng(name, self._values[PARAM_ID[name]])\n\n        pick_z = eng(pz) if flags & 1 else param(\"P_PICK_Z\")\n        pick_rz = param(\"P_PICK_RZ\")  # у CVT_JOB нет pick_rz (§5)\n        if flags & 2:\n            place = (eng(qx), eng(qy), eng(qz), eng(qrz))\n        else:\n            place = (param(\"P_PLACE_X\"), param(\"P_PLACE_Y\"), param(\"P_PLACE_Z\"), param(\"P_PLACE_RZ\"))\n        ws = self._workspace()\n        reason, place_j_end = self._check_target(ws, place, False, place, self.regs[REG[\"TLM_HAND\"]])\n        if reason != 0:\n            return NAK, ERR[\"E_RANGE\"], 1, [reason]\n        if not (ws.z_min <= pick_z <= ws.z_max and ws.rz_min <= pick_rz <= ws.rz_max):\n            return NAK, ERR[\"E_RANGE\"], 1, [REASON[\"R_OUT_OF_ZONE\"]]\n        self._job_index += 1\n",
+  "new": "        ecap_lo, ecap_hi, px, py, pz, flags, qx, qy, qz, qrz = args\n        self._job_index += 1\n        if self.regs[REG[\"TLM_SERVO\"]] == 0:\n            return NAK, ERR[\"E_NO_SERVO\"], 0, []\n\n        def eng(raw: int) -> float:\n            return self._decode(raw, True) / 10.0\n\n        def param(name: str) -> float:\n            return to_eng(name, self._values[PARAM_ID[name]])\n\n        pick_z = eng(pz) if flags & 1 else param(\"P_PICK_Z\")\n        pick_rz = param(\"P_PICK_RZ\")  # у CVT_JOB нет pick_rz (§5)\n        if flags & 2:\n            place = (eng(qx), eng(qy), eng(qz), eng(qrz))\n        else:\n            place = (param(\"P_PLACE_X\"), param(\"P_PLACE_Y\"), param(\"P_PLACE_Z\"), param(\"P_PLACE_RZ\"))\n        ws = self._workspace()\n        reason, place_j_end = self._check_target(ws, place, False, place, self.regs[REG[\"TLM_HAND\"]])\n        if reason != 0:\n            return NAK, ERR[\"E_RANGE\"], 1, [reason]\n        if not (ws.z_min <= pick_z <= ws.z_max and ws.rz_min <= pick_rz <= ws.rz_max):\n            return NAK, ERR[\"E_RANGE\"], 1, [REASON[\"R_OUT_OF_ZONE\"]]\n",
+  "forecast": [],
+  "observed": [],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-6",
+  "prop": "сторож при срабатывании не останавливает ленту (нет _vfd_stop)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "            self._wdg_armed = False\n            self._vfd_stop()\n",
+  "new": "            self._wdg_armed = False\n",
+  "forecast": [],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_watchdog_trips_inside_scenario_between_exact_points"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-7",
+  "prop": "сторож в сценарии не проверяется на тиках хода (только вне сценария; EXACT-вариант — см. отчёт)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "        self._handle_wdg()\n        if not self._in_scenario():\n",
+  "new": "        if not self._in_scenario():\n            self._handle_wdg()\n        if not self._in_scenario():\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_watchdog_trips_inside_scenario_between_exact_points"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_watchdog_trips_inside_scenario_between_exact_points"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-8",
+  "prop": "mailbox в сценарии опрашивается каждый тик (гейт EXACT снят)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "        if not self._in_scenario():\n            self._handle_mailbox()\n",
+  "new": "        self._handle_mailbox()\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_progress_only_on_exact_points"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_scenario.py::test_progress_only_on_exact_points",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_delay_ms_counts_sum_of_dt"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-9",
+  "prop": "второй inject_vfd_link_fault без clear даёт второе событие E_VFD_LINK",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "        if self._vfd_link_down:\n            return\n        self._vfd_link_down = True\n",
+  "new": "        self._vfd_link_down = True\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_vfd_link_second_inject_gives_no_second_event"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_vfd_link_second_inject_gives_no_second_event"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-10",
+  "prop": "адрес VFD_FLAG в ядре сдвинут на +1 (0x1205 вместо 0x1204)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "from Services.vfd_comm.core.registers import REG_VFD_FLAG as VFD_REG_FLAG\n",
+  "new": "from Services.vfd_comm.core.registers import REG_VFD_FLAG as _REAL_VFD_REG_FLAG\n\nVFD_REG_FLAG = _REAL_VFD_REG_FLAG + 1\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_bridge_addresses_match_vfd_comm",
+   "Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py::test_cvt_job_on_moving_belt_done",
+   "Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py::test_halt_really_stops_belt"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_v2_cvt_track.py::test_bridge_addresses_match_vfd_comm",
+   "Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py::test_cvt_job_on_moving_belt_done",
+   "Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py::test_halt_really_stops_belt"
+  ],
+  "test": "Services/robot_comm/tests/test_sim_v2_scenario.py Services/robot_comm/tests/test_sim_v2_scenario_hazards.py Services/robot_comm/tests/test_sim_v2_cvt_wdg_vfd.py Services/robot_comm/tests/test_sim_v2_cvt_track.py Services/robot_comm/tests/test_sim_journal_v2.py Services/robot_comm/tests/test_sim_v2_core.py Services/robot_comm/tests/test_sim_v2_motion.py"
+ },
+ {
+  "id": "inj-11",
+  "prop": "плагин принимает любое значение protocol (валидации нет)",
+  "file": "Plugins/sim/robot_host/plugin.py",
+  "old": "protocol_cfg if protocol_cfg in _PROTOCOLS else None",
+  "new": "protocol_cfg",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_unknown_protocol_is_error_without_value"
+  ],
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_unknown_protocol_is_error_without_value"
+  ],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ },
+ {
+  "id": "inj-12",
+  "prop": "sim_robot.status отдаёт protocol всегда v2",
+  "file": "Plugins/sim/robot_host/plugin.py",
+  "old": "\"protocol\": self._protocol,",
+  "new": "\"protocol\": \"v2\",",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_default_protocol_is_v1"
+  ],
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_default_protocol_is_v1"
+  ],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ },
+ {
+  "id": "inj-13",
+  "prop": "shutdown v2 не останавливает слушателя (server.stop() убран из _stop_v2_workers)",
+  "file": "Plugins/sim/robot_host/plugin.py",
+  "old": "            server.stop()\n        except RuntimeError as exc:",
+  "new": "            pass\n        except RuntimeError as exc:",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_restart_after_shutdown_rebinds_port"
+  ],
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_restart_after_shutdown_rebinds_port"
+  ],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ },
+ {
+  "id": "inj-14",
+  "prop": "_on_job_done v2 не заменяет t на time.monotonic()",
+  "file": "Plugins/sim/robot_host/plugin.py",
+  "old": "{**event, \"t\": time.monotonic()}",
+  "new": "event",
+  "forecast": [],
+  "observed": [],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ },
+ {
+  "id": "inj-15",
+  "prop": "тик v2-хоста использует фиксированный dt=TICK_INTERVAL_S вместо perf_counter",
+  "file": "Plugins/sim/robot_host/plugin.py",
+  "old": "dt, last = now - last, now",
+  "new": "dt, last = TICK_INTERVAL_S, now",
+  "forecast": [],
+  "observed": [],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ },
+ {
+  "id": "inj-16",
+  "prop": "сообщение отказа fault.* на v2 содержит значение аргумента",
+  "file": "Plugins/sim/robot_host/plugin.py",
+  "old": "return {\"status\": \"error\", \"message\": f\"{command} не поддерживается для protocol v2\"}",
+  "new": "return {\"status\": \"error\", \"message\": f\"{command} не поддерживается для protocol v2 data={__import__('sys')._getframe(1).f_locals.get('data')!r}\"}",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_fault_commands_refused_on_v2[fault.drop-args0-7919]",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_fault_commands_refused_on_v2[fault.delay_ms-args1-7919]",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_fault_commands_refused_on_v2[fault.vfd_code-args2-7919]"
+  ],
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_fault_commands_refused_on_v2[fault.delay_ms-args1-7919]",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_fault_commands_refused_on_v2[fault.drop-args0-7919]",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_fault_commands_refused_on_v2[fault.vfd_code-args2-7919]"
+  ],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ },
+ {
+  "id": "inj-17",
+  "prop": "знак доворота в job['angle_deg'] инвертирован (продукт assembler.offer)",
+  "file": "Plugins/processing/word_layout/assembler.py",
+  "old": "geometry.correction_angle(angle_deg, angle_valid, zero_deg, sign)",
+  "new": "geometry.correction_angle(angle_deg, angle_valid, zero_deg, -sign)",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
+  ],
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
+  ],
+  "test": "Plugins/sim/robot_host/tests/test_v2_host.py Plugins/sim/robot_host/tests/test_v2_line_cycle.py Plugins/sim/robot_host/tests/test_v2_letter_straight.py Plugins/sim/robot_host/tests/test_v2_one_app_smoke.py"
+ }
+]
