@@ -47,7 +47,7 @@ answer; follow it and only speak up when deviating.
 | 0. Spec review | `reviewer`, **synchronous, once on the Task text** (DESIGN / FILES / REDS), via `MODE: plan` on one Task file (`reviewer.md`) | before the tester: the tester's acceptance lines must be final. Verdict `APPROVED` / `CHANGES REQUESTED` with a list. Not run for solo-trivial work. |
 | 1. Independent acceptance tests | `tester`, **once per mechanism, before the implementation** | synchronous, from acceptance criteria only. Runs in a **git worktree at the pre-implementation commit** — blindness is enforced by the tree, not by prose. Its tests are expected RED; they are the spec handed to stage 2. |
 | 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. I keep the spec, the acceptance and the measurements. |
-| 3. Break-injection | me, never delegated | against **both** test sets — the author's and the tester's. Predictions written before the run. |
+| 3. Break-injection | me for the predictions and the verdict; the mechanical run goes to an agent (owner 2026-10-12, section below) | against **both** test sets — the author's and the tester's. Predictions written before the run. |
 | 4. Live stand | me | numbers, not adjectives; `backend_ctl` over reading source. |
 | 5. Review | `reviewer`, **after every task** | synchronous (`run_in_background: false`), findings must carry input → observed output. |
 | 6. Live defect that is not obvious | `investigator` | instead of digging in the main context. |
@@ -57,6 +57,15 @@ answer; follow it and only speak up when deviating.
 - Solo (no subagent for stage 2) only for trivial work — 1–3 files, under ~80 lines, no new mechanism — and it must be said out loud. Stages 1, 3 and 5 have no solo variant.
 
 Refinements and history: `docs/claude/LEAD_RULES.md` → «Task launch convention».
+
+## The lead coordinates and controls — it does not execute (owner's decision, 2026-10-12, STRICT)
+
+The main session keeps its context for decisions, not for work. Everything that takes more than a few calls goes to an agent.
+- Pick the agent by the work: `haiku` (junior, docs-writer) for mechanical and lookup work; `sonnet` (developer, tester, debugger, tech-writer) for ordinary code, tests, docs; `opus` (teamlead, reviewer, investigator) for design, concurrency, verdicts. Never the lead's own context for a run, a matrix of runs, a long read or a long edit.
+- A small fix (a few lines, one file) — the lead may do it itself. Larger — hand it to an agent that already holds the context of the topic (re-summon by agentId with `SendMessage`); a new agent only when none fits or the held context would bias the work (tester, round-1 reviewer stay fresh).
+- What stays with the lead: the spec and acceptance, the predictions written BEFORE any injection run, reading the verdict against them, merge decisions, the owner's questions. The mechanical run of an injection matrix, a stand measurement or a bulk edit is delegated with the lead's predictions in the prompt; the agent reports observed-versus-predicted in a short table.
+- Read agent reports as summaries: the full output lives in the report file the agent writes; the lead opens a file only to check a claim that decides something.
+- Keep the agentId table in the handoff; at a boundary prefer `/clear` + handoff over a long main context (`.claude/skills/project-rules/session-boundaries.md`).
 
 ## Subagents are background by default (Claude Code 2.1.212+, STRICT)
 
