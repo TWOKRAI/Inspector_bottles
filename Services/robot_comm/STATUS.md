@@ -37,7 +37,15 @@
 - [x] Программы робота (T3.3, robot-protocol-v2): `programs/program.py` — `Point`/`FrameDef`/`Move`/`Action`/`Program`, `compile_program` -> `Scenario` с картой «запись -> шаг» (ADR-RC-018); без клиента v2 сценарий ещё не грузится в робота
 - [x] `RobotClientV2` (`core/client_v2.py`, T3.1, robot-protocol-v2): probe, mailbox-транзакция, `wait_done`, `poll_errors`, стоп с seq (О5),
   пульс/поводок, `sync_params` по метке; ошибки в `errors.py`; тесты автора `test_client_v2.py` + слепая приёмка `test_client_v2_acceptance.py`.
-  Не сделано: обёртки опкодов, пинг-понг, генераторы (T3.2, T3.4), драйвер v2 и расписание пульса (T3.2), e2e клиент↔sim (T3.5)
+  Не сделано: генераторы (T3.4), драйвер v2 и расписание пульса (T5.1), e2e клиент↔sim (T3.5)
+- [x] Обёртки опкодов и пинг-понг сценария (T3.2, robot-protocol-v2): `RobotClientV2.WRAPPERS` + метод на каждый опкод,
+  `core/wire_v2.py` (кодировщик с шагом `round_step` и повторной проверкой зоны после округления, нарезка на куски по
+  EXACT), `upload` блоками FC16, `run_chunks` с меткой стопа -> `RunReport`; тесты автора `test_client_v2_chunks.py` +
+  слепая приёмка `test_client_v2_chunks_acceptance.py` (golden `tests/golden/t32_run_chunks.log`).
+  Не сделано: пульс в `run_chunks` (поток вызывающего, T5.1), путь GUI -> `round_step` (T5.1/T6.1)
+- [x] Ленивые `__init__` корня и `core/` (T3.6, PEP 562): `import Services.robot_comm.programs` не грузит pymodbus,
+  `Services.modbus`, `core.client`; имена `__all__` прежние (приёмка `test_lazy_init_acceptance.py`). Остаётся
+  `multiprocess_framework` через `params_v2` (≈ 0,7 с) — вне объёма по слову владельца
 
 ## Не сделано / дальше
 
