@@ -81,6 +81,8 @@ def _columns(root: Path, spec: str) -> list[_Col]:
     slug, hashed, task = spec.partition("#")
     if not slug or (hashed and not re.fullmatch(views.TASK_ID_PATTERN, task)):
         raise AtlasError(f"atlas metrics: spec {spec!r}: нужен <slug> или <slug>#<id>")
+    if _DATE_PREFIX.match(slug):
+        raise AtlasError(f"atlas metrics: spec {spec!r}: нужен slug без даты (как в трейлере `Task:`)")
     plan = _plan_dir(root, slug)
     if not hashed:
         stems = [p.name.removesuffix(".md") for p in (plan / "tasks").glob("*.md")]
@@ -183,6 +185,9 @@ class _Reader:
             self.violate(col.plan / "plan.md", f"задача {col.task}: хеш DONE {token} не найден")
             return "?"
         done = proc.stdout.decode().strip()
+        if run_git(self.root, "merge-base", "--is-ancestor", done, "HEAD").returncode != 0:
+            self.violate(col.plan / "plan.md", f"задача {col.task}: хеш DONE {token} не предок HEAD")
+            return "?"
         if self._head is None:
             self._head = resolve(self.root, "HEAD")
         if col.slug not in self._commits:

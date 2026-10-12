@@ -204,3 +204,56 @@ def test_bullet_without_text_is_a_violation() -> None:
     review, errors = review_form.parse(report)
     assert review is None
     assert any("строка 7" in e for e in errors), errors
+
+
+def test_m1_block_without_bullets_is_dash(repo: GitRepo, cli: Cli) -> None:
+    _put(repo, "plans/p/plan.md", b"# plan\n")
+    brief = "# Task 1.1\nFACTS:\n<!-- atlas:facts abc1234 -->\nтолько проза\n<!-- /atlas:facts -->\n"
+    _put(repo, "plans/p/tasks/1.1.md", brief.encode("utf-8"))
+    code, out, err = cli(repo.path, "metrics", "p#1.1")
+    assert code == 0, (out, err)
+    assert _cell(out, "M1 доля фактов Атласа") == "—"
+
+
+def test_empty_open_section_before_next_heading_is_a_violation() -> None:
+    from scripts.atlas import review_form
+
+    text = _report("1.1", "APPROVED", 1, [("nit", "form")]).decode("utf-8")
+    text = text.replace("- Ничего сверх перечисленного.\n", "\n## Сверено и верно\n- пункт\n")
+    review, errors = review_form.parse(text)
+    assert review is None
+    assert any("пуст" in e for e in errors), errors
+
+
+def test_hex_inside_word_is_not_a_done_hash(repo: GitRepo, cli: Cli) -> None:
+    _put(repo, "plans/p/plan.md", "# plan\n\n- Task 1.1: x [DONE — merged as feature1a2b3c4d]\n".encode("utf-8"))
+    _put(repo, "plans/p/tasks/1.1.md", b"# Task 1.1\n")
+    code, out, err = cli(repo.path, "metrics", "p#1.1")
+    assert code == 0, (out, err)
+    assert _cell(out, "M4 коммитов после DONE") == "— (DONE без хеша)"
+
+
+def test_spec_with_date_prefix_is_usage_error(repo: GitRepo, cli: Cli) -> None:
+    _put(repo, "plans/2026-10-11_probe/plan.md", b"# plan\n")
+    _put(repo, "plans/2026-10-11_probe/tasks/1.1.md", b"# Task 1.1\n")
+    code, _, err = cli(repo.path, "metrics", "probe#1.1")
+    assert code == 0, err  # slug без даты принимается
+    code, _, err = cli(repo.path, "metrics", "2026-10-11_probe#1.1")
+    assert code == 2
+    assert "без даты" in err
+
+
+def test_done_hash_not_ancestor_of_head_is_a_violation(repo: GitRepo, cli: Cli) -> None:
+    _put(repo, "plans/p/tasks/1.1.md", b"# Task 1.1\n")
+    _commit(repo, "init", "chore: init")
+    repo.git("checkout", "-q", "-b", "side")
+    side = _commit(repo, "side", "feat: на ветке\n\nTask: p#1.1")
+    repo.git("checkout", "-q", "main")
+    _commit(repo, "m1", "fix: первый в main\n\nTask: p#1.1")
+    _commit(repo, "m2", "fix: второй в main\n\nTask: p#1.1")
+    plan = f"# plan\n\n- Task 1.1: x [DONE 2026-10-12 — `{side}`]\n"
+    _put(repo, "plans/p/plan.md", plan.encode("utf-8"))
+    code, out, _ = cli(repo.path, "metrics", "p#1.1")
+    assert code == 1, out
+    assert _cell(out, "M4 коммитов после DONE") == "?"
+    assert f"  plans/p/plan.md: задача 1.1: хеш DONE {side} не предок HEAD" in out.splitlines()
