@@ -41,6 +41,9 @@ __all__ = ["DUNDERS", "USAGE_UNKNOWN", "Code", "checkout", "code_of", "dotted", 
 CHECKOUT_DIR = Path("data/atlas/checkout")
 KEEP = 3
 _STALE_SECONDS = 3600
+# Паузы между повторами переноса выгрузки на PermissionError (сумма 1,55 с): на Windows свежий каталог ненадолго
+# держит чужой процесс (антивирус, индексатор) — первый `card` новой ревизии падал с WinError 5 (2026-10-12)
+_RENAME_PAUSES = (0.05, 0.1, 0.2, 0.4, 0.8)
 _CODES_MAX = 3
 _WIN_PATH_LIMIT = 259  # MAX_PATH без завершающего нуля
 _CODES: dict[tuple[str, str], Code] = {}
@@ -160,6 +163,24 @@ def _prune(cache: Path, current: str) -> None:
         _discard(entry)
 
 
+def _move_into_place(tmp: Path, final: Path) -> None:
+    """`os.rename(tmp, final)` с повтором по `_RENAME_PAUSES` на PermissionError.
+
+    Итоговый каталог появился (другой процесс успел раньше) — ошибка сразу наверх, без ожидания; прочие OSError
+    не повторяются. После последней паузы — одна попытка без перехвата: стойкая блокировка поднимает исходную ошибку.
+    """
+    for pause in _RENAME_PAUSES:
+        try:
+            os.rename(tmp, final)
+            return
+        except PermissionError:
+            if final.exists():
+                raise
+            print(f"atlas: rename {tmp.name} denied, retry in {pause}s", file=sys.stderr)
+            time.sleep(pause)
+    os.rename(tmp, final)
+
+
 def checkout(tree: Tree, rows: list[dict]) -> Path:
     """Выгрузка .py ревизии под верхние каталоги `paths` строк modules.yaml (только существующие в дереве).
 
@@ -192,7 +213,7 @@ def checkout(tree: Tree, rows: list[dict]) -> Path:
             if not _has_py(tmp):
                 raise AtlasError("atlas: empty checkout")
         try:
-            os.rename(tmp, final)
+            _move_into_place(tmp, final)
         except OSError:
             if not final.exists():
                 raise
