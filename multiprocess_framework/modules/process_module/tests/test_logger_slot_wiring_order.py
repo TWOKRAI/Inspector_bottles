@@ -63,7 +63,11 @@ def _run_initialize_recording_order() -> tuple[list[str], list[str]]:
     proc._log_info = lambda *_a, **_kw: None
     proc._log_error = lambda msg, *_a, **_kw: errors.append(str(msg))
 
-    assert proc.initialize() is True, f"initialize() не дошёл до конца: {errors}"
+    try:
+        assert proc.initialize() is True, f"initialize() не дошёл до конца: {errors}"
+    finally:
+        # Task 1.2a (ADR-PM-054): initialize() открыл корень процесса — закрыть (G3).
+        proc.shutdown()
     return order, errors
 
 

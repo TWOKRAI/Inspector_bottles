@@ -4128,3 +4128,29 @@ Free-threaded Python — пересмотреть.
 - *Отвергнуто.* «gen2 тиком никогда» — течёт (100 000 циклов в gen2 резидентны до `collect(2)`,
   замер CTO). Страж long_lived через `len(gc.get_objects(2))` — 35 мс на каждый тик. Заморозка в
   прод-тике — резидентность умерших объектов без границы, которая её снимет.
+
+### ADR-PM-054 — Корень процесса `planes | transport | work` с барьерами; хук `_before_observability_teardown` удалён (2026-10-12, lifecycle-owner-scope Task 1.2a)
+
+Корень процесса `planes | transport | work` с барьерами; хук `_before_observability_teardown` удалён; запись
+сводки стопа PM — ADR-PMM-033 (п.4 в редакции Task 1.2), место в корне PM — ADR-PMM-036.
+
+- *Решение.* `initialize()` первым шагом открывает корень `proc/<имя>` (`open_scope`, бюджет `work_s + infra_s`
+  из словаря `stop_budget`, который раннер прикладывает `attach_stop_budget` до `initialize()`; без словаря —
+  `DEFAULT_STOP_BUDGET = {"work_s": 3.0, "infra_s": 1.0}`). Три сегмента с барьерами: `planes` (logger,
+  final_status, planes_report, error, stats, observation), `transport` (srm, router, command, console, записи
+  наследника `_own_transport`, flush), `work` (hooks, plugins, записи наследника `_own_work`, workers).
+  Закрытие — LIFO внутри сегмента, сегменты — `work` → `transport` → `planes`. Регистрируются только поздно
+  связанные вызываемые (`_attr_call`, `_self_call`): горячая замена менеджера видна закрытию.
+  `stop()` = статус STOPPING + `cancel()` корня, ничего не ждёт. `shutdown()` = `close_root()`: без корня
+  `True` (закрывать нечего), иначе `not report.errors`; повтор — тот же отчёт. Провал `initialize()` закрывает
+  корень. Раннер зовёт `close_root()` ровно один раз в `finally`; выжившие в отчёте корня (кроме ` (self)`) →
+  `emergency_log` и выход `EXIT_SURVIVORS = 76`. Наследники (`GenericProcess`, `GenericProcessManagerApp`,
+  `GuiProcess`) переносят код `shutdown()` в `_own_work` и своё `shutdown()` не переопределяют.
+- *Отвергнуто.* Три корня (по одному на сегмент) — нет общего срока и одного отчёта. Корень в `__init__` —
+  процесс без `initialize()` держал бы открытый корень (страж G3). Хук как точка расширения — второй путь
+  останова рядом с корнем, флаг единственности `_children_stopped`. Регистрация связанным методом
+  (`self.router_manager.shutdown`) — горячая замена менеджера закрыла бы старый объект. `is_worker_running`
+  как признак остановки — `stop_all_workers` пишет STOPPED безусловно; признак — `is_alive` потока.
+- *Ограничение до 1.3.* Воркер, блокированный ресурсом плагина, на штатном стопе не встаёт к сроку `work`:
+  `workers` закрывается раньше `plugins`, запись `.../work/workers` попадает в `survivors`, ребёнок выходит
+  с 76, хотя до 1.2a выходил с 0 (daemon-поток). Снимает 1.3 (камера и воркер в одной области, G8).

@@ -458,7 +458,8 @@ class TestRunProcessFunction:
             assert not ready_event.is_set(), "ready_event НЕ должен выставляться при провале initialize()"
 
     def test_shutdown_called_in_finally(self) -> None:
-        """shutdown() вызывается в блоке finally."""
+        """Task 1.2a: у экземпляра с ``close_root`` в ``finally`` — ровно один ``close_root()``,
+        ``shutdown()`` не зовётся."""
         stop_event = Event()
         stop_event.set()
 
@@ -469,6 +470,34 @@ class TestRunProcessFunction:
         ) as mock_load:
             mock_class = MagicMock()
             mock_instance = MagicMock()
+            mock_instance.initialize.return_value = True
+            mock_instance.should_stop.return_value = True
+            mock_class.return_value = mock_instance
+            mock_load.return_value = mock_class
+
+            run_process_function(
+                "fake.module.FakeClass",
+                "TestProcess",
+                stop_event,
+                bundle,
+            )
+
+            mock_instance.close_root.assert_called_once()
+            mock_instance.shutdown.assert_not_called()
+
+    def test_shutdown_called_in_finally_without_close_root(self) -> None:
+        """Не-``ProcessModule`` (нет ``close_root``) — прежняя ветка: ``shutdown()`` в ``finally``."""
+        stop_event = Event()
+        stop_event.set()
+
+        bundle = {"queues": {}, "config": {}, "custom": {}}
+
+        with patch(
+            "multiprocess_framework.modules.process_manager_module.runner.process_runner._load_process_class"
+        ) as mock_load:
+            mock_class = MagicMock()
+            mock_instance = MagicMock()
+            del mock_instance.close_root
             mock_instance.initialize.return_value = True
             mock_instance.should_stop.return_value = True
             mock_class.return_value = mock_instance

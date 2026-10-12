@@ -560,12 +560,19 @@ class TestNoEmergencyLogInOperatorFacingPositions:
         # плоскость голоса гасить некому и ждать её нельзя; ``_watch_parent`` при
         # ``getppid() != parent_pid`` — первая строка ``run_process_function``, ДО
         # ``get_std_logger``: вида ещё нет. Обе — самоотчёт без плоскости голоса.
-        "multiprocess_framework/modules/process_manager_module/runner/process_runner.py": 4,
+        # +1 2026-10-12 (lifecycle-owner-scope Task 1.2a, ADR-PM-054): выход 76
+        # (``process_runner.py`` строка «survivors after root close … exit 76») — после
+        # ``close_root()`` и слота ``exit_report``, логгер процесса уже закрыт корнем,
+        # следом ``os._exit``: плоскости голоса нет.
+        "multiprocess_framework/modules/process_manager_module/runner/process_runner.py": 5,
         "multiprocess_framework/modules/process_manager_module/launcher/system_launcher.py": 4,
         "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py": 4,
         "multiprocess_framework/modules/logger_module/core/process_hooks.py": 3,
         "multiprocess_framework/modules/channel_routing_module/core/channel_registry.py": 2,
-        "multiprocess_framework/modules/process_module/lifecycle/process_lifecycle.py": 1,
+        # +2 2026-10-12 (Task 1.2a, ADR-PM-054): ``stop_logger`` — отказ снятия контекста
+        # логгера (жаловаться через сам логгер нельзя, он предмет претензии) и
+        # ``report`` — строка отчёта корня ПОСЛЕ записи ``planes/logger``: логгер погашен.
+        "multiprocess_framework/modules/process_module/lifecycle/process_lifecycle.py": 3,
         "multiprocess_framework/modules/logger_module/channels/log_channel.py": 1,
         "multiprocess_framework/modules/channel_routing_module/core/channel_routing_manager.py": 1,
     }

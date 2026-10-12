@@ -1,0 +1,271 @@
+"""Hazard-тесты автора: корень PM (lifecycle-owner-scope, Task 1.2a, ADR-PMM-036).
+
+Порядок (монитор раньше сигнала детям, watcher'ы и SSM раньше конца детей и сводки),
+сводка с выжившими, код выхода 76 у монитора, бюджеты корня. Числа — литералы.
+Вызовы, которые могут зависнуть, идут в daemon-потоке с дедлайном join.
+"""
+
+from __future__ import annotations
+
+import threading
+from unittest.mock import MagicMock
+
+import pytest
+
+from ...app_module.orchestrator import GenericProcessManagerApp
+from ...process_module.core.process_module import ProcessModule
+from ..core.restart_policy import RestartPolicy
+from ..core.stop_budget import stop_budget
+from ..monitor.process_monitor import ProcessMonitor
+from ..process.process_manager_process import ProcessManagerProcess, _ChildrenStop
+from ..runner.process_runner import _resolve_stop_budget
+
+
+def _call_bounded(fn, timeout_s: float = 15.0):
+    """``fn`` в daemon-потоке с дедлайном join: (завершился, результат, ошибка)."""
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — тест разбирает ошибку сам
+            box["error"] = exc
+
+    th = threading.Thread(target=run, daemon=True, name="pm_hazard_bounded")
+    th.start()
+    th.join(timeout_s)
+    return (not th.is_alive()), box.get("result"), box.get("error")
+
+
+class _Group:
+    def __init__(self, journal: list[str], result: dict[str, bool]) -> None:
+        self._journal = journal
+        self._result = result
+
+    def request_stop(self) -> None:
+        self._journal.append("stop_event.set")
+
+    def join_until(self, deadline: float) -> bool:
+        self._journal.append("children.join_until")
+        return True
+
+    def kill(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def result(self) -> dict[str, bool]:
+        return dict(self._result)
+
+
+class _Registry:
+    def __init__(self, journal: list[str], result: dict[str, bool], report: dict) -> None:
+        self._journal = journal
+        self._result = result
+        self._report = report
+
+    def children_stop(self, *, mark_reader_gone: bool) -> _Group:
+        return _Group(self._journal, self._result)
+
+    def exit_report(self, name: str) -> dict:
+        return dict(self._report)
+
+
+class _Monitor:
+    def __init__(self, journal: list[str]) -> None:
+        self._journal = journal
+        self.timeouts: list[float] = []
+
+    def stop(self, wait: bool = True, timeout: float = 10.0) -> None:
+        self._journal.append("monitor.stop")
+        self.timeouts.append(timeout)
+
+
+# --------------------------------------------------------------------------- #
+# Бюджет: читатель раннера и пины
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("value", [None, 0])
+def test_resolve_stop_budget_none_and_zero_give_default(value) -> None:
+    """``shutdown_timeout`` ``None``/``0`` → умолчание g = 5,0 (прежнее ``or 5.0``)."""
+    log = MagicMock()
+    budget = _resolve_stop_budget({"shutdown_timeout": value}, log)
+    assert budget == {"work_s": 3.0, "infra_s": 1.0, "pm_graceful_s": 5.0, "pm_total_s": 7.0, "outer_s": 8.5}
+
+
+def test_resolve_stop_budget_takes_valid_dict_and_warns_on_bad_one() -> None:
+    log = MagicMock()
+    given = {"work_s": 0.6, "infra_s": 0.2, "pm_graceful_s": 1.0, "pm_total_s": 3.0, "outer_s": 4.5}
+    assert _resolve_stop_budget({"stop_budget": given, "shutdown_timeout": 5.0}, log) == given
+    log.warning.assert_not_called()
+
+    bad = _resolve_stop_budget({"stop_budget": {"work_s": True}, "shutdown_timeout": 1.0}, log)
+    assert bad == pytest.approx(given)  # выведен из shutdown_timeout 1.0 (0.8 × 0.75 = 0.6 в плавающей точке)
+    assert log.warning.call_count == 1
+
+
+def test_default_stop_budget_pins() -> None:
+    assert ProcessModule.DEFAULT_STOP_BUDGET == {"work_s": 3.0, "infra_s": 1.0}
+    assert ProcessManagerProcess.DEFAULT_STOP_BUDGET == {
+        "work_s": 3.0,
+        "infra_s": 1.0,
+        "pm_graceful_s": 5.0,
+        "pm_total_s": 7.0,
+        "outer_s": 8.5,
+    }
+
+
+def test_pm_root_budget_is_pm_total_plus_infra() -> None:
+    """Корень PM при g = 1,0: ``pm_total_s`` 3,0 + ``infra_s`` 0,2 = 3,2; ``children`` — 1,0."""
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 5.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
+    try:
+        assert pm._root.budget_s == pytest.approx(3.2)
+        assert pm.lifetime_segments["work"].budget_s == pytest.approx(3.0)
+        assert pm.lifetime_segments["work"]._names["children"].res.budget_s == 1.0
+    finally:
+        _call_bounded(pm.shutdown)
+
+
+# --------------------------------------------------------------------------- #
+# Порядок: монитор раньше stop_event
+# --------------------------------------------------------------------------- #
+
+
+def test_monitor_paused_before_first_stop_event_with_infra_deadline() -> None:
+    journal: list[str] = []
+    pm = MagicMock()
+    pm._budget.return_value = stop_budget(1.0)
+    pm._process_monitor = _Monitor(journal)
+    pm._process_registry = _Registry(journal, {}, {})
+    stop = _ChildrenStop(pm)
+
+    stop.request_stop()
+    stop.request_stop()  # повтор — no-op
+
+    assert journal == ["monitor.stop", "stop_event.set"]
+    assert pm._process_monitor.timeouts == [0.2]
+
+
+def test_registry_is_read_at_request_stop_not_at_construction() -> None:
+    journal: list[str] = []
+    pm = MagicMock()
+    pm._budget.return_value = stop_budget(1.0)
+    pm._process_monitor = _Monitor(journal)
+    pm._process_registry = None
+    stop = _ChildrenStop(pm)
+    pm._process_registry = _Registry(journal, {"cam": True}, {})
+
+    stop.request_stop()
+    assert stop.result() == {"cam": True}
+
+
+# --------------------------------------------------------------------------- #
+# Сводка: выживший ребёнок
+# --------------------------------------------------------------------------- #
+
+
+def test_survivor_child_gives_warning_summary_and_survivor_line() -> None:
+    journal: list[str] = []
+    pm = ProcessManagerProcess(config={"shutdown_timeout": 1.0})
+    pm.attach_stop_budget(stop_budget(1.0))
+    assert pm.initialize() is True
+    warnings: list[str] = []
+    errors: list[str] = []
+    real_warning, real_error = pm._log_warning, pm._log_error
+    pm._log_warning = lambda msg, *a, **k: (warnings.append(str(msg)), real_warning(msg, *a, **k))
+    pm._log_error = lambda msg, *a, **k: (errors.append(str(msg)), real_error(msg, *a, **k))
+    pm._process_registry = _Registry(journal, {"cam": False}, {"released": 0, "buffered_dropped": 0, "reported": False})
+    try:
+        done, result, error = _call_bounded(pm.shutdown)
+        assert done and error is None, error
+        assert result is True
+    finally:
+        _call_bounded(pm.shutdown)
+    assert any("ВЫЖИЛИ" in line and "cam" in line for line in errors), errors
+    assert any("stop summary" in line and "not reported/lost: ['cam']" in line for line in warnings), warnings
+
+
+# --------------------------------------------------------------------------- #
+# Монитор: код 76
+# --------------------------------------------------------------------------- #
+
+
+def _monitor_with_store():
+    from ...state_store_module import StateStoreManager
+
+    ssm = StateStoreManager(initial_state={}, logger=None)
+    mock_pm = MagicMock()
+    mock_pm.name = "ProcessManager"
+    mock_pm._get_protected_names.return_value = set()
+    mock_pm.communication.send_message.return_value = True
+    mock_pm._state_store_manager = ssm
+    return ssm, ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, backoff_sec=0.0))
+
+
+@pytest.mark.parametrize(
+    ("exitcode", "status", "event", "restarts"), [(76, "stopped", "survivors", 0), (1, "crashed", None, 1)]
+)
+def test_exit_76_is_stopped_with_survivors_event_and_no_restart(exitcode, status, event, restarts) -> None:
+    """76 → ``stopped`` + событие ``survivors``, рестарта нет; пара — 1 → ``crashed`` и рестарт."""
+    ssm, monitor = _monitor_with_store()
+    restart_calls: list[str] = []
+    monitor._try_auto_restart = lambda name, reason: restart_calls.append(reason)
+    proc = MagicMock()
+    proc.name = "cam"
+    proc.is_alive.return_value = False
+    proc.pid = 123
+    proc.exitcode = exitcode
+    monitor.previous_states["cam"] = {"status": "running"}
+
+    monitor._handle_dead_process(proc)
+
+    assert monitor.previous_states["cam"]["status"] == status
+    assert len(restart_calls) == restarts
+    value = ssm.handle_state_get({"data": {"path": "processes.cam.supervisor.event"}}).get("value")
+    if event is not None:
+        assert value == event
+    else:
+        assert value == "crashed"
+
+
+# --------------------------------------------------------------------------- #
+# Порядок GenericProcessManagerApp
+# --------------------------------------------------------------------------- #
+
+
+def test_app_watchers_and_state_store_close_before_children_end_and_summary() -> None:
+    journal: list[str] = []
+    app = GenericProcessManagerApp(config={"shutdown_timeout": 1.0, "initial_state": {"system": {"x": 1}}})
+    app.attach_stop_budget(stop_budget(1.0))
+    assert app.initialize() is True
+    store = app._state_store_manager
+    real_store_shutdown = store.shutdown
+
+    def store_shutdown() -> None:
+        journal.append("state_store")
+        real_store_shutdown()
+
+    store.shutdown = store_shutdown
+    app._observability_recipe_watcher = MagicMock(stop=lambda: journal.append("recipe_watcher"))
+    app._observability_watcher = MagicMock(stop=lambda: journal.append("observability_watcher"))
+    real_publish = app._publish_stop_summary
+    app._publish_stop_summary = lambda result: (journal.append("summary"), real_publish(result))
+    app._process_registry = _Registry(journal, {"cam": True}, {"released": 0, "buffered_dropped": 0, "reported": True})
+    try:
+        done, result, error = _call_bounded(app.shutdown)
+        assert done and error is None, error
+        assert result is True
+    finally:
+        _call_bounded(app.shutdown)
+    assert journal == [
+        "stop_event.set",
+        "observability_watcher",
+        "recipe_watcher",
+        "state_store",
+        "children.join_until",
+        "summary",
+    ], journal
