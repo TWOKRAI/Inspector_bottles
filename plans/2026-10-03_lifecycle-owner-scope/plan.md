@@ -106,7 +106,7 @@ GUI-процесса (виден как `foreign_collections`, в `chain` = 1); 
 - Task 0.5: стражи G2–G6, G10 и база in-suite пробы abort [DONE 2026-10-11 — 0.5a, 0.5b, слияние 5d13d6bc3; G5 вынесен] (после 0.3, 0.4)
 - Task 1.1: stop_budget и ChildProcessStop поверх эскалации PM [DONE 2026-10-12 — 92972804f, слияние 47cf7c272] (после 0.5)
 - Task 1.2: разделена лидом 2026-10-12 на 1.2a и 1.2b по замеру брифа (1.2a ≈ 20 файлов; 1.2b ≈ 52 файла однотипной правки: 47 подклассов `BaseManager`, свой `shutdown()` у 33) — `tasks/1.2a.md`, `tasks/1.2b.inventory.md` [SUPERSEDED 2026-10-12 — разделена на 1.2a и 1.2b]
-- Task 1.2a: корень процесса planes | transport | work с барьерами, `stop()` = `cancel()`, один close в раннере, `os._exit` при выживших, G7, удаление хука `_before_observability_teardown`, долги stop-ownership, читатель `stop_budget` [PENDING] (после 1.1)
+- Task 1.2a: корень процесса planes | transport | work с барьерами, `stop()` = `cancel()`, один close в раннере, `os._exit` при выживших, G7, удаление хука `_before_observability_teardown`, долги stop-ownership, читатель `stop_budget` [DONE 2026-10-12 — a4fcae8b6, исправление 1.1 b8b961afc; слияние в main — коммит «merge: lifecycle-owner-scope 1.2a»; стенд 30+30: медиана 2,03 → 1,76 с, ханг 0/30 до и после; tasks/1.2a.result.md] (после 1.1)
 - Task 1.2b: `BaseManager.scope` + шаблонный `shutdown()` — кодмод подклассов по слоям [PENDING] (после 1.2a)
 - Task 1.3: WorkerManager и PluginContext на области, G8 [PENDING] (после 1.2b)
 - Task 1.4: наблюдаемость процесса как ручки сегмента planes, перенос полезного из 5.5d [PENDING] (после 1.2a)
