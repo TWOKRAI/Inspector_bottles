@@ -75,8 +75,21 @@ def _render_scalar(value: object) -> str:
     if isinstance(value, float):
         return repr(value)
     if isinstance(value, str):
-        return repr(value)
+        return _py_string(value)
     raise TypeError(f"codegen: не умею рендерить литерал {value!r}")
+
+
+def _py_string(value: str) -> str:
+    """Строка в кавычках, как их ставит `ruff format`: двойные, кроме строк с `"` внутри.
+
+    Иначе pre-commit (ruff-format) переписывает сгенерированные модули, и `codegen --check`
+    расходится с диском. Строка с обоими видами кавычек остаётся как у `repr()`.
+    """
+    text = repr(value)
+    if text.startswith("'") and '"' not in value:
+        # repr() берёт одинарные только при отсутствии `'` в строке — экранированных `\'` внутри нет
+        text = f'"{text[1:-1]}"'
+    return text
 
 
 def _render(value: object, indent: int) -> str:
@@ -115,11 +128,20 @@ def _assign(name: str, value: object) -> str:
     return f"{name} = {_render(value, 0)}"
 
 
+def _is_def_or_class(section: str) -> bool:
+    return section.startswith(("def ", "class ", "@"))
+
+
 def _module_text(header: str, sections: list[str]) -> str:
     parts = [header]
+    previous = header
     for section in sections:
         parts.append("")
+        # Вокруг def/class верхнего уровня — две пустые строки, как ставит ruff format
+        if _is_def_or_class(section) or _is_def_or_class(previous):
+            parts.append("")
         parts.append(section)
+        previous = section
     parts.append("")
     return "\n".join(parts)
 
