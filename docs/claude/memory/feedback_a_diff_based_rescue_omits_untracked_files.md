@@ -1,6 +1,6 @@
 ---
 name: a-diff-based-rescue-omits-untracked-files
-description: "Saving an abandoned worktree as a git diff patch silently omits every untracked file — rescue with a branch from its HEAD instead, and never say \"saved\" without counting the overlap with the target branch (патч diff теряет untracked-файлы; спасать веткой)"
+description: "git diff AND git grep silently skip untracked files: a diff-patch rescue loses them, and an acceptance grep for a forbidden import on a new file passes vacuously before git add. Saving an abandoned worktree as a git diff patch silently omits every untracked file — rescue with a branch from its HEAD instead, and never say \"saved\" without counting the overlap with the target branch (патч diff теряет untracked-файлы; спасать веткой)"
 mechanism: [git]
 metadata:
   type: feedback
@@ -37,3 +37,10 @@ worktree и доложил владельцу «патчи сохранены».
 Смежное: [[feedback_a_peer_session_shares_the_tree]],
 [[project_shared_tree_provenance_forensics]], [[feedback_plausible_is_not_verified]],
 [[feedback_worktree_stale_base]].
+
+**Та же слепота у `git grep` (T3.3, 2026-10-12).** Проверка приёмки «`git grep -nE <запрещённый импорт> -- <папка>` → exit 1»
+для НОВОГО файла до `git add` пустая: `git grep` ищет только по отслеживаемым файлам, rc=1 получается
+без чтения файла. Гонять `git grep --untracked -nE …` (опция ДО шаблона; после шаблона она читается
+как ревизия: `fatal: unable to resolve revision: --untracked`) или после `git add`, и доказать, что
+файл в выборке: `git grep --untracked -c <имя из файла> -- <папка>` → `program.py:3`. Триггер:
+строка ACCEPTANCE вида «grep → пусто» в брифе на новый файл.

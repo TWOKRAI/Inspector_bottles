@@ -34,6 +34,10 @@
   `ZScale`/`TimeTape` (`gui/z_view.py`); заменяется виджетами GUI-конструктора в Ф6
 
 - [x] `build_fw.py` — сборщик прошивки `robot/v2/src/NN_*.lua` -> `robot/v2/main_v2.lua` (T1.3, robot-protocol-v2)
+- [x] Программы робота (T3.3, robot-protocol-v2): `programs/program.py` — `Point`/`FrameDef`/`Move`/`Action`/`Program`, `compile_program` -> `Scenario` с картой «запись -> шаг» (ADR-RC-018); без клиента v2 сценарий ещё не грузится в робота
+- [x] `RobotClientV2` (`core/client_v2.py`, T3.1, robot-protocol-v2): probe, mailbox-транзакция, `wait_done`, `poll_errors`, стоп с seq (О5),
+  пульс/поводок, `sync_params` по метке; ошибки в `errors.py`; тесты автора `test_client_v2.py` + слепая приёмка `test_client_v2_acceptance.py`.
+  Не сделано: обёртки опкодов, пинг-понг, генераторы (T3.2, T3.4), драйвер v2 и расписание пульса (T3.2), e2e клиент↔sim (T3.5)
 
 ## Не сделано / дальше
 

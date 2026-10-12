@@ -72,6 +72,7 @@ dev = [
     "libcst>=1.8.6",
     "pydeps>=3.0.6",
     "griffe>=2.3",
+    "hypothesis>=6.100", # property-based тесты (robot_comm programs, T3.3)
 ]
 diagrams = [
     "pylint>=3.3",      # pyreverse для UML-диаграмм классов
