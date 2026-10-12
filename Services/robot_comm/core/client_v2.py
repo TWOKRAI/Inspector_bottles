@@ -27,6 +27,10 @@ Pre (общее): первый пишущий вызов (``cmd``, ``stop``, ``s
 он пишет всегда и ``is_connected`` не проверяет (``ModbusDevice`` после одной случайной ошибки считает связь
 оборванной); если связи правда нет, транспорт бросит ошибку, и вызывающий узнает, что стоп не доставлен.
 
+Переподключение: любое исключение транспорта в клиенте и смена ``get_status()['connected_since']`` помечают базы
+устаревшими, следующий вызов (кроме ``stop()``) сам делает ``probe()``. Драйвер обязан звать ``probe()`` после каждого
+``transport.connect()``.
+
 Уровень стопа не понижается до эха: пока более сильный стоп не подтверждён эхом, новый пишется с уровнем
 ``max(запрошенный, сильнейший неподтверждённый)``; ожидающий получает ``SUPERSEDED`` только от эха новее,
 чей уровень не ниже его собственного.
@@ -44,6 +48,7 @@ import operator
 import random
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -255,7 +260,8 @@ class RobotClientV2:
         self._probe_lock = threading.Lock()
 
         self._probed = False  # прошивка v2 подтверждена, и последний probe не провалился
-        self._stale = False  # связь рвалась после probe: базы пульса, событий, стопа устарели
+        self._stale = False  # связь рвалась или транспорт дал ошибку после probe: базы устарели
+        self._probed_link: object = None  # connected_since на момент probe
         self._inflight: _Inflight | None = None  # ответ на этот seq не дождались (только cmd()/probe())
         self._last_done: _DoneBase | None = None
         self._hb_value = 0
@@ -268,6 +274,7 @@ class RobotClientV2:
         self._stop_seq = 0
         self._stop_generation = 0  # растёт ПОСЛЕ записи STOP_REQ, под _stop_lock
         self._stop_base_gen = 0  # растёт при каждом изменении _stop_seq (запись стопа, probe)
+        self._echo_log: deque[int] = deque(maxlen=16)  # недавние различные значения TLM_STOP_ACK (кто бы ни читал)
         self._stop_pending: tuple[int, int] | None = None  # (уровень, seq) сильнейшего неподтверждённого стопа
         self._last_halt_gen = 0
         self._wdg_raw: int | None = None
@@ -286,6 +293,7 @@ class RobotClientV2:
         """
         with self._state_lock:
             self._probed = False  # неудачный probe не оставляет клиента «проверенным»
+        link = self._link_id()  # до чтения: переподключение во время probe сделает следующий вызов проверкой заново
         with self._hb_lock:
             hb_gen = self._hb_gen
         with self._jog_lock:
@@ -294,7 +302,7 @@ class RobotClientV2:
             err_gen = self._err_gen
         with self._stop_lock:
             stop_gen = self._stop_base_gen
-        block = self._t.read_registers(_RES_BASE, _BLOCK_COUNT)
+        block = self._rd(_RES_BASE, _BLOCK_COUNT)
         proto = int(block[_off("TLM_PROTO_VER")])
         if proto == 0 or (proto >> 8) != _PROTO_MAJOR:
             raise WrongFirmware(proto)
@@ -314,8 +322,13 @@ class RobotClientV2:
                 self._err_gen += 1
         with self._stop_lock:
             if self._stop_base_gen == stop_gen:  # стоп, прошедший во время probe, уже сдвинул stop_seq дальше эха
-                self._stop_seq = int(block[_off("TLM_STOP_ACK")]) >> 2
+                ack_seq = int(block[_off("TLM_STOP_ACK")]) >> 2
+                req_seq = int(block[_off("STOP_REQ")]) >> 2
+                # Следующий seq считаем от более нового из запроса и эха: записанный, но ещё не подтверждённый стоп
+                # (STOP_REQ впереди эха) нельзя повторить тем же значением — робот его проигнорирует.
+                self._stop_seq = req_seq if _seq_newer(req_seq, ack_seq) else ack_seq
                 self._stop_base_gen += 1
+                self._echo_log.clear()
                 if block[_off("STOP_REQ")] == block[_off("TLM_STOP_ACK")]:
                     self._stop_pending = None  # всё записанное подтверждено (или робот перезапущен)
         with self._state_lock:
@@ -325,9 +338,34 @@ class RobotClientV2:
                 self._inflight = None  # метку done_seq снимает только cmd() после сверки О5
             self._probed = True
             self._stale = False
+            self._probed_link = link
+
+    def _rd(self, address: int, count: int = 1) -> list[int]:
+        """Чтение через транспорт; любое исключение транспорта помечает базы устаревшими."""
+        try:
+            return self._t.read_registers(address, count)
+        except Exception:
+            self._mark_stale()
+            raise
+
+    def _wr(self, ops: list[tuple]) -> bool:
+        """Запись через транспорт; любое исключение транспорта помечает базы устаревшими."""
+        try:
+            return self._t.transaction(ops)
+        except Exception:
+            self._mark_stale()
+            raise
+
+    def _mark_stale(self) -> None:
+        with self._state_lock:
+            self._stale = True
+
+    def _link_id(self) -> object:
+        """Идентификатор соединения: ``connected_since`` из ``get_status()`` (меняется при каждом connect())."""
+        return self._t.get_status().get("connected_since")
 
     def _read_param_slot(self, name: str) -> int:
-        return int(self._t.read_registers(CONSTANTS["PMIR_BASE"] + PARAM_ID[name], 1)[0])
+        return int(self._rd(CONSTANTS["PMIR_BASE"] + PARAM_ID[name], 1)[0])
 
     def _ensure_probed(self) -> None:
         """Первый вызов любого метода до ``probe()``: проверка прошивки делается сама (только чтения)."""
@@ -335,10 +373,10 @@ class RobotClientV2:
             with self._state_lock:
                 self._stale = True  # после разрыва базы устарели: следующий вызов проверит прошивку заново
             raise RobotNotConnectedError("Транспорт робота не подключён")
-        if self._probed and not self._stale:
+        if self._probed and not self._stale and self._link_id() == self._probed_link:
             return
         with self._probe_lock:
-            if not (self._probed and not self._stale):
+            if not (self._probed and not self._stale and self._link_id() == self._probed_link):
                 self.probe()
 
     @property
@@ -367,7 +405,7 @@ class RobotClientV2:
         with self._hb_lock:
             self._hb_gen += 1
             self._hb_value = (self._hb_value + 1) & 0xFFFF  # значение «израсходовано» и при сбое записи
-            self._t.transaction([("w", REG["HB_PC"], self._hb_value)])
+            self._wr([("w", REG["HB_PC"], self._hb_value)])
 
     def jog_lease(self) -> None:
         """Записать ``JOG_LEASE`` = последнее значение + 1 (по кругу 16 бит). Одна запись FC6, mailbox не берёт.
@@ -379,7 +417,7 @@ class RobotClientV2:
         with self._jog_lock:
             self._jog_gen += 1
             self._jog_value = (self._jog_value + 1) & 0xFFFF
-            self._t.transaction([("w", REG["JOG_LEASE"], self._jog_value)])
+            self._wr([("w", REG["JOG_LEASE"], self._jog_value)])
 
     # ------------------------------------------------------------------ #
     # mailbox
@@ -405,11 +443,12 @@ class RobotClientV2:
             self._settle_inflight()
             with self._stop_lock:
                 generation = self._stop_generation
-            base = self._t.read_registers(_RES_BASE, _BLOCK_COUNT)
+            base = self._rd(_RES_BASE, _BLOCK_COUNT)
+            self._note_echo(int(base[_off("TLM_STOP_ACK")]))
             seq = self._issue_seq(base)
             # Метка — ДО записи: сбой транспорта на записи оставляет её, и следующий cmd() сначала досмотрит seq.
             self._inflight = _Inflight(seq, generation, spec["result"] == "done_seq")
-            self._t.transaction(
+            self._wr(
                 [
                     ("wm", REG["CMD_SEQ"], [seq, OP[op], len(words), *words]),
                     ("w", REG["CMD_FLAG"], 1),
@@ -426,8 +465,9 @@ class RobotClientV2:
     def _settle_inflight(self) -> None:
         """Досмотреть ответ на прежний seq «в полёте».
 
-        Нет ответа за ``res_timeout_s`` -> метка снимается, ``RobotTimeout("response")``. Любое другое исключение метку
-        оставляет. О5 и здесь: поздний ACK команды ``done_seq`` при сменившемся поколении стопа -> повтор стопа и
+        Нет ответа за ``res_timeout_s`` -> ``RobotTimeout("response")``; метка снимается, кроме ``done_seq`` при
+        прошедшем стопе и живом слоте CMD (``_keep_mark_after_timeout``). Любое другое исключение метку оставляет.
+        О5 и здесь: поздний ACK команды ``done_seq`` при сменившемся поколении стопа -> повтор стопа и
         ``RobotAborted`` (из этого же ``cmd()``, своя команда не пишется). Поздний NAK — команда не исполнялась.
         """
         mark = self._inflight
@@ -436,12 +476,27 @@ class RobotClientV2:
         try:
             self._wait_res(mark.seq)
         except RobotTimeout:
-            self._inflight = None
+            if not self._keep_mark_after_timeout(mark):
+                self._inflight = None
             raise
         try:
             self._read_result(mark.seq, mark.generation, mark.done_seq)
         except RobotNak:
             return
+
+    def _keep_mark_after_timeout(self, mark: _Inflight) -> bool:
+        """О5: робот молчит, а стоп уже прошёл -> метку ``done_seq`` держим, пока слот CMD жив.
+
+        Слот мёртв, если ``CMD_SEQ`` в нём не наш seq (регистры сброшены, робот перезапущен): команда не исполнится
+        никогда. Поколение не менялось -> прежнее поведение (метка снимается, следующий cmd() пишет сразу).
+        """
+        if not mark.done_seq:
+            return False
+        with self._stop_lock:
+            if self._stop_generation == mark.generation:
+                return False
+        slot = self._rd(REG["CMD_FLAG"], 2)  # CMD_FLAG, CMD_SEQ
+        return int(slot[1]) == mark.seq
 
     def _read_result(self, seq: int, generation: int, done_seq: bool) -> CmdResult:
         """Прочитать и разобрать RES-блок; для ``done_seq`` — сверить поколение стопа (О5).
@@ -450,7 +505,7 @@ class RobotClientV2:
         повтора стопа (``RobotAborted``). Ошибка чтения или записи стопа оставляет метку — сверка повторится.
         """
         try:
-            result = self._parse_res(self._t.read_registers(_RES_BASE, _RES_BLOCK_COUNT))
+            result = self._parse_res(self._rd(_RES_BASE, _RES_BLOCK_COUNT))
         except RobotNak:
             self._inflight = None
             raise
@@ -471,7 +526,7 @@ class RobotClientV2:
     def _wait_res(self, seq: int) -> None:
         deadline = self._clock() + self._cfg.res_timeout_s
         while True:
-            if int(self._t.read_registers(REG["RES_SEQ"], 1)[0]) == seq:
+            if int(self._rd(REG["RES_SEQ"], 1)[0]) == seq:
                 return
             if self._clock() >= deadline:
                 raise RobotTimeout("response", seq)
@@ -527,7 +582,8 @@ class RobotClientV2:
             raise ValueError("seq не принадлежит последней команде done_seq этого клиента")
         deadline = self._clock() + self._cfg.done_timeout_s
         while True:
-            tlm = self._t.read_registers(_TLM_BASE, _TLM_COUNT)
+            tlm = self._rd(_TLM_BASE, _TLM_COUNT)
+            self._note_echo(int(tlm[_toff("TLM_STOP_ACK")]))
             if int(tlm[_toff("TLM_DONE_SEQ")]) == seq:
                 return
             if int(tlm[_toff("TLM_ERR_EVT")]) != base.err_evt:
@@ -554,7 +610,7 @@ class RobotClientV2:
         """
         self._ensure_probed()
         with self._err_lock:
-            block = self._t.read_registers(REG["TLM_ERR_SEQ"], 3)  # ERR_SEQ, ERRNO_LAST, ERR_EVT
+            block = self._rd(REG["TLM_ERR_SEQ"], 3)  # ERR_SEQ, ERRNO_LAST, ERR_EVT
             evt = int(block[2])
             delta = (evt - self._err_cursor) & 0xFFFF
             if delta == 0:
@@ -599,7 +655,7 @@ class RobotClientV2:
         value = self._stop_seq * 4 + written_level
         self._stop_pending = (written_level, self._stop_seq)  # эхо этого seq подтвердит и все прежние
         try:
-            self._t.transaction([("w", REG["STOP_REQ"], value)])
+            self._wr([("w", REG["STOP_REQ"], value)])
         finally:
             self._stop_generation += 1
             if written_level == STOP_LEVEL["HALT"]:
@@ -607,8 +663,10 @@ class RobotClientV2:
         return value, written_level
 
     def _note_echo(self, echo: int) -> None:
-        """Эхо покрывает неподтверждённый стоп (тот же seq или новее, уровень не ниже) -> «неподтверждённого» нет."""
+        """Учесть прочитанное эхо: запомнить в журнале, снять «неподтверждённый» стоп, если эхо его покрывает."""
         with self._stop_lock:
+            if not self._echo_log or self._echo_log[-1] != echo:
+                self._echo_log.append(echo)
             pending = self._stop_pending
             if pending is not None and _echo_covers(echo, pending[1], pending[0]):
                 self._stop_pending = None
@@ -618,11 +676,12 @@ class RobotClientV2:
         deadline = self._clock() + timeout
         ours = value >> 2
         while True:
-            echo = int(self._t.read_registers(REG["TLM_STOP_ACK"], 1)[0])
-            self._note_echo(echo)
-            if echo == value:
+            self._note_echo(int(self._rd(REG["TLM_STOP_ACK"], 1)[0]))
+            with self._stop_lock:
+                seen = list(self._echo_log)  # эхо мог увидеть и другой читатель до того, как его перекрыли
+            if value in seen:
                 return StopResult.ACKED
-            if _seq_newer(echo >> 2, ours) and (echo & 3) >= level:
+            if any(_seq_newer(echo >> 2, ours) and (echo & 3) >= level for echo in seen):
                 return StopResult.SUPERSEDED
             if self._clock() >= deadline:
                 raise RobotTimeout("stop_echo")
@@ -653,15 +712,15 @@ class RobotClientV2:
             raise ValueError("epoch вне диапазона 1..65535")
         self._ensure_probed()
 
-        robot_epoch = int(self._t.read_registers(REG["TLM_CFG_EPOCH"], 1)[0])
-        robot_dict = int(self._t.read_registers(REG["PMIR_DICT"], 1)[0])
+        robot_epoch = int(self._rd(REG["TLM_CFG_EPOCH"], 1)[0])
+        robot_dict = int(self._rd(REG["PMIR_DICT"], 1)[0])
         if robot_epoch == epoch and robot_dict == DICT_FINGERPRINT:
             return SyncReport(0, False, epoch)
 
         for pid, raw in raw_by_id.items():
             self.cmd("PARAM_SET", [pid, raw])
         applied = False
-        if int(self._t.read_registers(REG["TLM_CFG_PENDING"], 1)[0]) == 1:
+        if int(self._rd(REG["TLM_CFG_PENDING"], 1)[0]) == 1:
             self.cmd("PARAM_APPLY", [])
             applied = True
         self._verify_mirror(raw_by_id)
@@ -677,7 +736,7 @@ class RobotClientV2:
         mirror: list[int] = []
         while len(mirror) < total:
             count = min(CONSTANTS["READ_MAX"], total - len(mirror))
-            mirror.extend(int(v) for v in self._t.read_registers(CONSTANTS["PMIR_BASE"] + len(mirror), count))
+            mirror.extend(int(v) for v in self._rd(CONSTANTS["PMIR_BASE"] + len(mirror), count))
         for pid, expected in raw_by_id.items():
             if mirror[pid] != expected:
                 raise RobotSyncError(pid, expected, mirror[pid])

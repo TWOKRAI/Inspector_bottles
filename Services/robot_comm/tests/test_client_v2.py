@@ -931,7 +931,7 @@ def test_transport_error_on_cmd_write_keeps_inflight_mark_so_next_cmd_settles_fi
 
     rig.transport.before_tx = boom
     with pytest.raises(ModbusIOError):
-        rig.client.cmd("PING", [])
+        rig.client.cmd("PTP_MOVE", MOVE_SHORT)
     with pytest.raises(RobotTimeout) as exc:  # робот молчит: досмотр seq 100, своей записи нет
         rig.client.cmd("PING", [])
     assert (exc.value.stage, exc.value.seq) == ("response", 100)
@@ -1134,7 +1134,7 @@ def test_o5_survives_failed_reissue_write() -> None:
     rig.transport.before_tx = None
     with pytest.raises(RobotAborted):
         rig.client.cmd("PING", [])
-    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 3 * 4 + 2])  # seq 2 ушёл в упавшую запись
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 2 * 4 + 2])  # после ошибки stale -> probe -> seq 2 не потерян
 
 
 def test_o5_survives_res_read_failure_on_settle_path() -> None:
@@ -1335,3 +1335,185 @@ def test_probe_racing_jog_lease_does_not_roll_back_jog_value() -> None:
     rig.client.probe()
     rig.client.jog_lease()
     assert rig.transport.transactions == [[("w", JOG_LEASE, 11)], [("w", JOG_LEASE, 12)]]
+
+
+# ============================================================================================
+# Ревью 3: молчащий слот после стопа, эхо везде, stale по исключению и по соединению, журнал эха
+# ============================================================================================
+
+CMD_SEQ_REG = 0x1001
+
+
+def _timeout_stop_timeout_rig() -> Rig:
+    """r3b: PTP без ответа -> стоп без эха -> PING без ответа (метка done_seq должна пережить этот досмотр)."""
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(2)  # записан, робот молчит
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PING", [])  # досмотр seq 100: тайм-аут, поколение стопа изменилось, слот жив
+    return rig
+
+
+def test_settle_timeout_after_stop_keeps_done_seq_mark_and_robot_late_ack_aborts_next_cmd() -> None:
+    rig = _timeout_stop_timeout_rig()
+    rig.core.tick()  # робот проснулся: стоп (эхо), затем mailbox принимает PTP уже после стопа
+    rig.ticking = True
+    with pytest.raises(RobotAborted):
+        rig.client.cmd("PING", [])
+    assert [c[1] for c in rig.cmds()] == [OP_PTP_MOVE]  # PING не записан
+    _assert_move_stopped_by_reissue(rig, [1 * 4 + 2, 2 * 4 + 2])
+
+
+def test_settle_timeout_after_stop_drops_mark_when_slot_is_dead_after_robot_reset() -> None:
+    rig = _timeout_stop_timeout_rig()
+    for address in (CMD_FLAG, CMD_SEQ_REG, TLM_STOP_ACK, STOP_REQ):  # робот перезагружен: регистры сброшены
+        rig.core.regs[address] = 0
+    rig.ticking = True
+    with pytest.raises(RobotTimeout):  # слот мёртв: метка снимается, но этот вызов всё равно ничего не пишет
+        rig.client.cmd("PING", [])
+    result = rig.client.cmd("PING", [])
+    assert result.rvals[0] == 0x0200
+    assert [c[1] for c in rig.cmds()] == [OP_PTP_MOVE, OP_PING]
+
+
+def test_settle_timeout_without_stop_still_drops_mark() -> None:
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PTP_MOVE", MOVE_SHORT)
+    with pytest.raises(RobotTimeout):
+        rig.client.cmd("PING", [])  # досмотр seq 100 без стопа: метка снята
+    with pytest.raises(RobotTimeout) as exc:
+        rig.client.cmd("PING", [])  # метки нет: записан новый seq 101 (с меткой дал бы снова seq 100 без записи)
+    assert exc.value.seq == 101
+
+
+def test_hard_echo_seen_by_cmd_base_read_clears_pending_so_next_soft_is_written_as_soft() -> None:
+    """C1: HALT без эха, робот ответил, эхо прочитано базой cmd() -> SOFT пишется как SOFT, а не как HALT."""
+    rig = Rig(ticking=False)
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(3)
+    rig.core.tick()  # эхо HALT появилось (серво выключено)
+    rig.ticking = True
+    rig.client.cmd("SERVO", [1])
+    rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    with pytest.raises(RobotTimeout):  # SOFT посреди хода отвечает эхом в конце примитива — здесь не успеваем
+        rig.client.stop(1)
+    assert rig.stop_writes() == [1 * 4 + 3, 2 * 4 + 1]
+
+
+def test_hard_echo_seen_by_wait_done_clears_pending() -> None:
+    rig = Rig()
+    rig.client.probe()
+    move = rig.client.cmd("PTP_MOVE", MOVE_LONG)
+    rig.ticking = False
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(2)  # записан, эха нет
+    rig.core.tick()  # эхо HARD, ход прерван
+    rig.ticking = True
+    with pytest.raises(RobotAborted):
+        rig.client.wait_done(move.seq)  # его чтение TLM видит эхо
+    assert rig.client.stop(1) is StopResult.ACKED
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 1]
+
+
+def test_transport_exception_marks_client_stale_so_silent_reconnect_to_other_firmware_is_caught() -> None:
+    from Services.robot_comm.server.sim_core import RobotSimCore
+
+    rig = Rig()
+    rig.client.probe()
+    armed = _fail_read_once(rig, TLM_ERR_SEQ, 3)
+    armed["on"] = True
+    with pytest.raises(ModbusIOError):
+        rig.client.poll_errors()
+    rig.transport.core = RobotSimCore()  # транспорт тихо переподключился к иной прошивке
+    with pytest.raises(WrongFirmware):
+        rig.client.kick_heartbeat()
+    assert rig.transport.transactions == []
+
+
+def test_silent_reconnect_on_modbus_device_is_caught_by_connection_id() -> None:
+    """C2: без единой ошибки на пути клиента: disconnect -> иная прошивка -> connect -> kick_heartbeat."""
+    from Services.robot_comm.server.sim_core import RobotSimCore
+
+    cores: list = [RobotSimCoreV2()]
+    log: list[tuple[int, object]] = []
+
+    class FakeSdk:
+        def connect(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            pass
+
+        def read_holding(self, address: int, count: int) -> list[int]:
+            cores[0].tick()
+            return cores[0].read(address, count)
+
+        def write_register(self, address: int, value: int) -> None:
+            log.append((address, value))
+            cores[0].write(address, [value])
+
+        def write_registers(self, address: int, values: list[int]) -> None:
+            log.append((address, list(values)))
+            cores[0].write(address, list(values))
+
+    ticks = iter(range(1, 1000))
+    device = ModbusDevice(
+        ModbusConfig(host="127.0.0.1", port=1, unit_id=ROBOT_UNIT_ID),
+        client=FakeSdk(),
+        clock=lambda: float(next(ticks)),
+    )
+    assert device.connect()
+    client = RobotClientV2(device, ClientV2Config.from_dict({}))
+    client.probe()
+    client.kick_heartbeat()
+    assert [v for a, v in log if a == HB_PC] == [1]
+    device.disconnect()
+    cores[0] = RobotSimCore()  # на том же адресе теперь прошивка v1
+    assert device.connect()
+    with pytest.raises(WrongFirmware):
+        client.kick_heartbeat()
+    assert [v for a, v in log if a == HB_PC] == [1]  # второй записи нет
+
+
+def test_stop_of_probed_client_still_writes_when_stale() -> None:
+    rig = Rig()
+    rig.client.probe()
+    armed = _fail_read_once(rig, TLM_ERR_SEQ, 3)
+    armed["on"] = True
+    with pytest.raises(ModbusIOError):
+        rig.client.poll_errors()  # клиент stale
+    assert rig.client.stop(2) is StopResult.ACKED
+    assert rig.stop_writes() == [1 * 4 + 2]
+
+
+def test_stale_reprobe_does_not_reuse_unacknowledged_stop_value() -> None:
+    """Повторный probe считает следующий stop_seq от более нового из STOP_REQ и эха: иначе робот проигнорирует стоп."""
+    rig = Rig(ticking=False, config={"stop_echo_timeout_s": 0.3, "poll_interval_s": 0.1})
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(2)  # записан 6, эха нет
+    rig.client.probe()
+    with pytest.raises(RobotTimeout):
+        rig.client.stop(2)
+    assert rig.stop_writes() == [1 * 4 + 2, 2 * 4 + 2]
+
+
+def test_waiter_completes_from_echo_log_when_other_reader_saw_its_echo_before_it_was_overwritten() -> None:
+    rig = Rig(ticking=False, config={"stop_echo_timeout_s": 0.3, "poll_interval_s": 0.1})
+    seen = []
+
+    def overwritten_echo(address: int, count: int, out: list[int]) -> list[int]:
+        if address == TLM_STOP_ACK and count == 1 and not seen:
+            seen.append(1)
+            rig.client._note_echo(1 * 4 + 2)  # другой читатель (cmd/wait_done) видел наше эхо...
+            return [2 * 4 + 1]  # ...а к нашему опросу его перекрыло более новое эхо ниже уровнем
+        return out
+
+    rig.transport.read_filter = overwritten_echo
+    assert rig.client.stop(2) is StopResult.ACKED
