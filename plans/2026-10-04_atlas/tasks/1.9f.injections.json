@@ -8,7 +8,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -20,7 +22,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -32,7 +36,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -42,7 +48,9 @@
     "old": "+ r\")\\] \\S\")",
     "new": "+ r\")\\]\")",
     "forecast": [],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_bullet_without_text_is_a_violation"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -54,7 +62,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -66,7 +76,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -78,7 +90,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_violations"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -96,7 +110,10 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code",
       "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_review_form_crlf_same_as_lf"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -109,7 +126,11 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -122,7 +143,11 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -135,7 +160,10 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums",
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m2_classes_and_sums"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -148,7 +176,11 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds",
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -160,7 +192,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -172,7 +206,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -184,7 +220,10 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -196,7 +235,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -208,7 +249,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -221,7 +264,9 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share",
       "scripts/atlas/tests/test_metrics_author_1_9f.py::test_m1_reads_brief_with_crlf_bytes"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_m1_reads_brief_with_crlf_bytes"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -233,7 +278,11 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_two_hashes_in_done_group_first_wins"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -243,7 +292,7 @@
     "old": "\"rev-list\", \"--no-merges\", f\"{done}..HEAD\"",
     "new": "\"rev-list\", f\"{done}..HEAD\"",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -255,7 +304,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -267,7 +318,10 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_dashed_id_in_report_name_and_trailer"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -279,7 +333,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -291,7 +347,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_author_1_9f.py::test_digit_only_backticked_hash_is_a_violation"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_digit_only_backticked_hash_is_a_violation"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -303,7 +361,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_author_1_9f.py::test_two_hashes_in_done_group_first_wins"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_two_hashes_in_done_group_first_wins"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -313,7 +373,7 @@
     "old": "if path not in self._reports:",
     "new": "if True:",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -323,7 +383,7 @@
     "old": "self.violations[(path.relative_to(self.root).as_posix(), text)] = None",
     "new": "self.violations[(path.relative_to(self.root).as_posix(), text + \" \" * len(self.violations))] = None",
     "forecast": [],
-    "observed": null,
+    "observed": [],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -336,7 +396,10 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns",
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_live_k0_literals",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -348,7 +411,10 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_same_spec_in_base_and_current_reports_violation_once"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -360,7 +426,10 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_same_spec_in_base_and_current_reports_violation_once"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -373,7 +442,13 @@
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code",
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_digit_only_backticked_hash_is_a_violation",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_same_spec_in_base_and_current_reports_violation_once"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -385,7 +460,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -397,7 +474,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_ref_before_metrics_is_usage_error"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -409,7 +488,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_plan_lookup_and_columns"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -421,7 +502,10 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m3_rounds",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -433,7 +517,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -445,7 +531,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -457,7 +545,9 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m1_share"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   },
   {
@@ -469,7 +559,11 @@
     "forecast": [
       "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done"
     ],
-    "observed": null,
+    "observed": [
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_m4_after_done",
+      "scripts/atlas/tests/test_metrics_1_9f.py::test_metrics_violations_exit_code",
+      "scripts/atlas/tests/test_metrics_author_1_9f.py::test_digit_only_backticked_hash_is_a_violation"
+    ],
     "test": "scripts/atlas/tests/test_metrics_1_9f.py scripts/atlas/tests/test_metrics_author_1_9f.py scripts/atlas/tests/test_formats_1_9d.py"
   }
 ]
