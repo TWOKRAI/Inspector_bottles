@@ -170,3 +170,37 @@ def test_m1_reads_brief_with_crlf_bytes(repo: GitRepo, cli: Cli) -> None:
     code, out, err = cli(repo.path, "metrics", "p#1.1")
     assert code == 0, (out, err)
     assert _cell(out, "M1 доля фактов Атласа") == "33% (1/3)"
+
+
+def test_ref_before_metrics_is_usage_error(repo: GitRepo, cli: Cli) -> None:
+    _put(repo, "plans/p/plan.md", b"# plan\n")
+    _put(repo, "plans/p/tasks/1.1.md", b"# Task 1.1\n")
+    _commit(repo, "init", "chore: init")
+    code, out, err = cli(repo.path, "metrics", "p#1.1")
+    assert code == 0, (out, err)  # тот же вызов без --ref валиден: код 2 ниже — только из-за --ref
+    code, _, err = cli(repo.path, "--ref", "HEAD", "metrics", "p#1.1")
+    assert code == 2
+    assert "нужна ровно одна форма" in err
+
+
+def test_bullet_without_text_is_a_violation() -> None:
+    from scripts.atlas import review_form
+
+    report = "\n".join(
+        [
+            "# 1.1 — ревью стадии 0, раунд 1",
+            "Вердикт: CHANGES REQUESTED",
+            "Итог: blocker 0, major 1, minor 0, nit 0",
+            "Классы: fact 1, dryrun 0, form 0, context 0, design 0, scope 0, process 0",
+            "",
+            "## Замечания",
+            "- [major/fact]",
+            "",
+            _OPEN_SECTION,
+            "- Ничего сверх перечисленного.",
+            "",
+        ]
+    )
+    review, errors = review_form.parse(report)
+    assert review is None
+    assert any("строка 7" in e for e in errors), errors
