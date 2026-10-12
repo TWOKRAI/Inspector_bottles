@@ -17,6 +17,7 @@ CLI: `python -m Services.robot_comm.codegen [--check]`.
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 import sys
 from pathlib import Path
@@ -79,17 +80,27 @@ def _render_scalar(value: object) -> str:
     raise TypeError(f"codegen: не умею рендерить литерал {value!r}")
 
 
-def _py_string(value: str) -> str:
-    """Строка в кавычках, как их ставит `ruff format`: двойные, кроме строк с `"` внутри.
+_PY_ESCAPE_OR_QUOTE = re.compile(r"\\.|['\"]", re.DOTALL)
 
-    Иначе pre-commit (ruff-format) переписывает сгенерированные модули, и `codegen --check`
-    расходится с диском. Строка с обоими видами кавычек остаётся как у `repr()`.
+
+def _py_string(value: str) -> str:
+    """Строка в кавычках, как их ставит `ruff format` (quote-style double).
+
+    Правило ruff: одинарные, только если `"` в строке больше, чем `'`; иначе двойные,
+    а выбранная кавычка внутри экранируется. Иначе pre-commit (ruff-format) переписывает
+    сгенерированные модули, и `codegen --check` расходится с диском.
     """
-    text = repr(value)
-    if text.startswith("'") and '"' not in value:
-        # repr() берёт одинарные только при отсутствии `'` в строке — экранированных `\'` внутри нет
-        text = f'"{text[1:-1]}"'
-    return text
+    quote = "'" if value.count('"') > value.count("'") else '"'
+
+    def requote(match: re.Match[str]) -> str:
+        token = match.group(0)
+        char = token[-1] if token in ("\\'", '\\"') else token
+        if char not in ("'", '"'):
+            return token  # прочие escape-последовательности repr() — как есть
+        return "\\" + char if char == quote else char
+
+    body = repr(value)[1:-1]
+    return quote + _PY_ESCAPE_OR_QUOTE.sub(requote, body) + quote
 
 
 def _render(value: object, indent: int) -> str:

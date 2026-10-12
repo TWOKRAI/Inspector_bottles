@@ -20,7 +20,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 def test_generated_modules_are_ruff_format_stable():
     from Services.robot_comm import codegen
 
-    for path, text in codegen.generate(_REPO_ROOT).items():
+    outputs = codegen.generate(_REPO_ROOT)
+    assert outputs  # пустой generate() не должен давать зелёный тест без проверки
+    for path, text in outputs.items():
         rel = path.relative_to(_REPO_ROOT).as_posix()
         proc = subprocess.run(
             [sys.executable, "-m", "ruff", "format", "--check", "--stdin-filename", rel, "-"],
@@ -41,6 +43,10 @@ def test_generated_modules_are_ruff_format_stable():
         ('say "hi"', "'say \"hi\"'"),
         ("", '""'),
         ("путь\\к", '"путь\\\\к"'),
+        # обе кавычки: одинарные только при перевесе `"` (замер ревью р.1 на ruff 0.15.14)
+        ("a'b\"c", '"a\'b\\"c"'),
+        ('it\'s "x"', "'it\\'s \"x\"'"),
+        ("'\"", '"\'\\""'),
     ],
 )
 def test_py_string_quotes_like_ruff(value, expected):
