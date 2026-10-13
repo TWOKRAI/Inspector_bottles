@@ -1,9 +1,17 @@
 ---
 name: shared-stand-and-tests-protocol
-description: Parallel sessions share one machine — stand.lock with measure/functional modes, measurements only from a detached stand worktree at an explicit SHA, A/B in one lock window, tests in own worktree never during a measure
+description: "Параллельные сессии на одной машине: замок стенда stand.lock с режимами measure/functional, замер только из отдельного дерева по SHA, A/B в одном окне, тесты не во время замера; при координаторе — machine.lock (shared machine, stand lock, coordinator)"
+mechanism: [agents, live-stand]
 metadata:
   type: feedback
 ---
+
+**2026-10-13 (owner): when a coordinator session runs, `machine.lock` and skill `coordinator` replace
+`stand.lock` and the message-by-message agreements below** — the stand is the `stand:` line, a `measure` is a
+`quiet` window. Exception: `scripts/stand_gate` in live mode still requires `stand.lock` with its own line — the holder of a
+`quiet`/`stand` window takes it too. This file stays the rule when no `machine.lock` exists. On 2026-10-13 no session remembered
+this protocol: a rule kept only in memory was not triggered, so the trigger now lives in `.claude/CLAUDE.md`
+and `project-rules` §8.
 
 Owner's standing rule (2026-09-30, "запомнить механизм, чтоб мне не писать каждый раз"): several Claude
 sessions work on this repo at once on ONE machine. Follow this without asking the owner; agree deviations

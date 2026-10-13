@@ -67,7 +67,7 @@ python -m scripts.capacity_bench [--profile quick|full] [--tests] [--baseline <s
 ## Протокол стенда (обязательно)
 
 Живой прогон поднимает всю систему и занимает порты/камеры/GPU, поэтому он идёт по протоколу общего стенда:
-`.claude/memory/feedback_shared_stand_and_tests_protocol.md` (замок стенда держит человек/лид, а не инструмент;
+`docs/claude/memory/feedback_shared_stand_and_tests_protocol.md` (замок стенда держит человек/лид, а не инструмент;
 в режиме measure соседних нагрузок быть не должно). `--dry-run` стенд не трогает и в протоколе не нуждается.
 
 ## Linux / ARM

@@ -1,9 +1,15 @@
 ---
 name: stand-lock-check-must-gate-the-command
-description: A subagent that "checks stand.lock" must gate the test command on it (`[ ! -e lock ] && pytest`), not just print it in the same command — otherwise it runs into a neighbour's measure
+description: "Проверка замка должна гейтить команду: агент печатал stand.lock и всё равно гнал pytest в чужой замер; форма `A && cmd || echo` прячет красный как «пропущено» — только scripts/machine_gate.sh, exit 75 = пропуск (guard, stand lock, machine.lock)"
+mechanism: [agents, live-stand]
 metadata:
   type: feedback
 ---
+
+**2026-10-13:** the form below is itself wrong — `A && cmd || echo skipped` prints «skipped» with exit 0
+when `cmd` ran and went red (reviewer reproduced: holder + `false` → «NO WINDOW — skipped», exit 0). Use
+`bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" heavy|light <session> <cmd...>`: the command's own exit code, 75 = skipped;
+with no `machine.lock` it gates on `stand.lock` measure.
 
 2026-09-30: the reviewer was told "before every pytest run check stand.lock". It did — `cat stand.lock; pytest …` in one
 command — and pytest ran anyway: the neighbour's `measure` lock had appeared seconds earlier, ~5.7 s of Qt tests landed

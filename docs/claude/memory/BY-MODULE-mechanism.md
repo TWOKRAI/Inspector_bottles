@@ -27,7 +27,7 @@
 - [feedback_zero_mentions_criterion_erases_the_reason](feedback_zero_mentions_criterion_erases_the_reason.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## agents (23)
+## agents (25)
 
 - [feedback_a_peer_session_shares_the_tree](feedback_a_peer_session_shares_the_tree.md)
 - [feedback_agent_commit_quality](feedback_agent_commit_quality.md)
@@ -47,6 +47,8 @@
 - [feedback_protect_branch_blocks_worktree_subagents](feedback_protect_branch_blocks_worktree_subagents.md)
 - [feedback_read_tool_cannot_skip_forbidden_docstrings](feedback_read_tool_cannot_skip_forbidden_docstrings.md)
 - [feedback_root_ignore_whitelist_blinds_root_search](feedback_root_ignore_whitelist_blinds_root_search.md)
+- [feedback_shared_stand_and_tests_protocol](feedback_shared_stand_and_tests_protocol.md)
+- [feedback_stand_lock_check_must_gate_the_command](feedback_stand_lock_check_must_gate_the_command.md)
 - [feedback_subagent_live_test_monitor_hang](feedback_subagent_live_test_monitor_hang.md)
 - [feedback_subagents_share_the_leads_scratchpad](feedback_subagents_share_the_leads_scratchpad.md)
 - [feedback_worktree_stale_base](feedback_worktree_stale_base.md)
@@ -452,7 +454,7 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (23)
+## live-stand (25)
 
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
@@ -463,6 +465,8 @@
 - [feedback_probe_liveness_is_not_render](feedback_probe_liveness_is_not_render.md)
 - [feedback_qt_mcp_flag_value_is_compared_verbatim](feedback_qt_mcp_flag_value_is_compared_verbatim.md)
 - [feedback_qt_mcp_smoke_verification](feedback_qt_mcp_smoke_verification.md)
+- [feedback_shared_stand_and_tests_protocol](feedback_shared_stand_and_tests_protocol.md)
+- [feedback_stand_lock_check_must_gate_the_command](feedback_stand_lock_check_must_gate_the_command.md)
 - [feedback_subagent_live_test_monitor_hang](feedback_subagent_live_test_monitor_hang.md)
 - [feedback_the_off_half_of_a_pair_can_be_done_by_a_timer](feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md)
 - [feedback_unblocking_signal_at_the_moment_of_fact](feedback_unblocking_signal_at_the_moment_of_fact.md)

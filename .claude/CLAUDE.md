@@ -85,6 +85,14 @@ Haiku 5.5 (owner, 2026-10-11): upgraded — use it for simple work whenever it f
 `/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
 the background** — for a verdict this project's rules will accept, drive `reviewer` directly instead.
 
+## Shared machine — one coordinator session gives out load windows (owner, 2026-10-13, STRICT)
+
+- A **separate** coordinator session (skill `coordinator`) gives out load windows; its name and the windows are in
+  `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock`. A lane session sends it its name first; signals and the start-prompt template — skill `coordinator` §4, §5.
+- Every test or stand command (yours and your agents') goes through `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" heavy|light <session> <cmd...>`;
+  heavy = full suite, matrix, e2e series, stand, qex indexing — only in your window; exit 75 = skipped by the gate.
+- No `machine.lock` → the gate falls back to `stand.lock`; `scripts/stand_gate` in live mode always takes `stand.lock` itself.
+
 ## ponytail — when the laziness ladder applies
 
 Run `Skill: ponytail` before new code, a new dependency or a speculative "make it generic" ask; skip it for mechanism work, debugging, behaviour-keeping refactors, docs, plans. Project rules always win over ponytail. On demand: `ponytail-review`, `ponytail-audit`, `ponytail-debt`. Boundary: `docs/claude/LEAD_RULES.md` → «ponytail».

@@ -104,6 +104,13 @@ Files: <paths>
 - In a worktree: no `uv sync`, `uv run` only with `--no-sync`; run the main `.venv` python with
   `PYTHONPATH=<worktree root>`; prove the import path from the same cwd as pytest.
 - `uv sync` elsewhere only with `--inexact`. No global `taskkill` — `TaskStop` or a PID.
+- Shared machine (skill `coordinator`): every test or stand command goes through the gate (main checkout's
+  script — worktrees cut earlier lack it): `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" heavy|light <session> <cmd...>`. `heavy` = full suite, injection matrix, e2e
+  series, stand, qex indexing — runs only in your session's window in `machine.lock`; `light` = one pytest
+  process on your files — runs except in someone's `quiet` window; no `machine.lock` → the old `stand.lock`
+  rule. Exit 75 = skipped by the gate, not a red run. `<session>` = the name your brief gives (no `[ref]`);
+  no name in the brief → ask the lead, do not guess. Skipped as a subagent → say «NO WINDOW» in your
+  report and finish it; never loop waiting — the lane session asks the coordinator for a window.
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
 - Add an import and its use in one Edit (ruff strips an unused import).
 - Memory search before your first edit (read-only roles: before the first finding; the main checkout's script: worktrees cut before the merge lack it):
@@ -162,4 +169,4 @@ no drive-by rewrites (a mass rewrite is its own task: 885 files, `plans/2026-10-
 | lessons index | `docs/claude/memory/MEMORY.md`: §1 lessons, §3 Windows env, §4 lesson format (a subagent never writes one: §8); owner: «## 2. Решения владельца (живые)»; all lessons: `search.py --list` |
 | MCP | `.claude/plugins/mcp-{qex,sentrux,backend-ctl}/README.md`; blast radius `scripts/graph_slice/README.md` |
 | live backend | `backend_ctl`; qt-mcp only for GUI; no psutil; GUI stand `INSPECTOR_GUI_UNATTENDED=1` |
-| skills | module-contract, systematic-debugging, verify-done, team-protocol |
+| skills | module-contract, systematic-debugging, verify-done, team-protocol, coordinator |

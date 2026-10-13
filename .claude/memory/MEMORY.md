@@ -50,7 +50,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Инъекции — только по закоммиченному коду](feedback_injection_scripts_on_committed_code.md) — checkout съел фикс; zsh не бьёт $VAR
 - [Широкий except в кадровом цикле прячет мёртвый механизм](feedback_broad_except_in_frame_loop_hides_dead_mechanism.md) — лента едет, объектов нет, тесты зелёные
 - [Харнесс страницы слеп к браузеру](feedback_node_page_harness_blind_to_browser_defaults.md) — B1: пробел жал кнопку в фокусе; в VS Code браузер — через @browser
-- [Стенд и тесты: протокол между сессиями](feedback_shared_stand_and_tests_protocol.md) — stand.lock measure/functional, замер по SHA, A/B
+- [Стенд и тесты: протокол между сессиями](../../docs/claude/memory/feedback_shared_stand_and_tests_protocol.md) — перенесён в канон 2026-10-13; при координаторе — `machine.lock` и skill `coordinator`
 - [Слияние: тип feat, не merge](feedback_merge_commit_needs_feat_type.md) — хук режет merge(...), -F - не читает stdin
 
 ### User
@@ -64,7 +64,7 @@ _(empty)_
 - [Бенч мощности — одна команда на любом железе](project_portable_capacity_bench.md) — Orin NX/Linux, паспорт машины, самопроверка часов
 - [GUI-конструктор: слои и эталоны](project_gui_constructor_layers_2026_09_26.md) — fw=конструктор, прототип тонкий, minimal_gui, 09-26
 - [Модели агентов](feedback_agent_models_sonnet_impl_opus_review.md) — реализация Sonnet 5.5, ревью Opus 5.5, `model` передавать явно
-- [Проверка замка стенда должна гейтить команду](feedback_stand_lock_check_must_gate_the_command.md) — `[ ! -e stand.lock ] && pytest`, не просто cat рядом
+- [Проверка замка стенда должна гейтить команду](../../docs/claude/memory/feedback_stand_lock_check_must_gate_the_command.md) — перенесён в канон; гейт окна — `project-rules` §8
 - [Универсальный генератор объектов](project_universal_object_generator.md) — слои+аугментация под любые продукты, не «генератор букв»; фон тоже слои; 10-01: один сервис layer_render + хороший редактор, второй путь сборки картинки = дефект
 - [Задача букв: буква и угол](project_letters_task_scope.md) — без дефектов, подпись всегда, робот ниже порога не берёт, геометрия буквы 0.486·D
 
