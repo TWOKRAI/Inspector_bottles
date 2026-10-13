@@ -271,7 +271,7 @@ glob-подписка на состояние. Друг на друга не с�
 - Task T3.3: Программы: точки, СК, шаги, compile [DONE 2026-10-12 — слияние `13fc80cdc`, итог `tasks/T3.3.result.md`] (после T1.1)
 - Task T3.4: Генераторы: рисование, возврат, смена инструмента [DONE 2026-10-13 — слияние `352f081e0`, итог `tasks/T3.4.result.md`] (после T3.3)
 - Task T3.5: e2e клиент ↔ sim [DONE 2026-10-13 — слияние `e5cf50c04`, итог `tasks/T3.5.result.md`] (после T3.2, T3.4)
-- Task T3.5b: хвост T3.1 — `v2_driver.py` стенда `robot_host` удалить, тесты T2.4 на клиент v2 [READY TO MERGE] (после T3.5) — ветка `test/robot-v2-t35b`, ревью кода APPROVED (2 круга), инъекции 10/11; итог `tasks/T3.5b.result.md` — решение владельца 2026-10-13 (В2 брифа T3.5); `tasks.md` → «### T3.5b»
+- Task T3.5b: хвост T3.1 — `v2_driver.py` стенда `robot_host` удалить, тесты T2.4 на клиент v2 [DONE] (после T3.5) — слияние `0c38542fc` 2026-10-13, ревью кода APPROVED (2 круга), инъекции 10/11; итог `tasks/T3.5b.result.md` — решение владельца 2026-10-13 (В2 брифа T3.5); `tasks.md` → «### T3.5b»
 - Task T3.6: Ленивые `__init__` пакета `robot_comm` и `core/` [DONE 2026-10-12 — слияние `ca48fc244`, итог `tasks/T3.6.result.md`] (после слияния T3.1)
 - Task T3.7: `robot_host` линии на протоколе v2 [PENDING] (после T3.5; при закрытии — удалить временный страж T3.5b `Plugins/sim/robot_host/tests/test_t35b_guard.py`) — 2026-10-12: `apps/line_sim/pipeline.yaml:51` — `protocol: v1`; пожелание владельца «всё на одном экране», `plans/queue/_proposals/2026-10-12_plans-sync.md`
 - Task T3.8: вид робота рисует робота линии из её состояния, а не своё ядро [PENDING] (после T3.7) — 2026-10-12: `Services/robot_comm/gui/sim_view.py:481-500` создаёт `RobotSimCoreV2` сам; потребитель — `line-sim` Task 6.4 (вид сверху на `pult_web`)
