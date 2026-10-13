@@ -280,6 +280,11 @@ def test_return_slot_offsets_in_slot_frame() -> None:
     assert rows[4][:3] == pytest.approx((385.2627944163, 72.3205080757, -75.0), abs=1e-6)
     with pytest.raises(GeneratorError):
         return_slot(slot, lift_mm=0)
+    # Нулевой сдвиг к ленте — ход нулевой длины (две записи в одной точке подряд).
+    with pytest.raises(GeneratorError) as info:
+        return_slot(SLOT, push_dx_mm=0.0, push_dy_mm=0.0)
+    assert str(info.value) == "сдвиг к ленте не может быть нулевым"
+    return_slot(SLOT, push_dx_mm=0.0, push_dy_mm=-50.0)  # сдвиг только по Y допустим
 
 
 def test_toolchange_missing_points_named() -> None:
@@ -293,6 +298,18 @@ def test_toolchange_missing_points_named() -> None:
     with pytest.raises(GeneratorError) as info:
         toolchange(0, 2, only_1)
     assert str(info.value) == "обучите точки: t2_exit, t2_over, t2_pick"
+
+    # Ключ библиотеки != имя точки: иначе пропуск повтора сравнил бы ключ с именем и дал ход нулевой длины.
+    upper = {k: p.model_copy(update={"name": k.upper()}) for k, p in LIB.items()}
+    with pytest.raises(GeneratorError) as info:
+        toolchange(1, 2, upper)
+    assert str(info.value) == (
+        "ключ библиотеки не совпадает с именем точки: t1_exit, t1_over, t1_pick, t2_exit, t2_over, t2_pick"
+    )
+    # Сначала «обучите точки», потом проверка ключей.
+    with pytest.raises(GeneratorError) as info:
+        toolchange(1, 2, {k: v for k, v in upper.items() if k != "t2_pick"})
+    assert str(info.value) == "обучите точки: t2_pick"
 
 
 def test_toolchange_rejects_same_and_unknown_tool() -> None:

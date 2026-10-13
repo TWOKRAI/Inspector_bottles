@@ -44,14 +44,16 @@ def return_slot(
     Все точки — в СК `slot.frame`, рука `slot.hand`, RZ `slot.rz`; подъём и сдвиг — в координатах этой
     СК. Умолчания из v1: `RET_LIFT_MM` 20, `RET_PUSH_MM` 100 по +X, `DO_GRIP` 1, `GRIP_S` 0.4 с.
 
-    Pre: `lift_mm > 0` — иначе `GeneratorError`; канал и задержка в диапазоне `Action` — иначе
-    `ValueError` валидации.
+    Pre: `lift_mm > 0`; сдвиг `(push_dx_mm, push_dy_mm)` не нулевой (иначе ход нулевой длины) — иначе
+    `GeneratorError`; канал и задержка в диапазоне `Action` — иначе `ValueError` валидации.
     Post: без `approach` первый ход — JOINT над слотом, с `approach` — JOINT в `approach`, и весь маршрут
     LINE; действия DO_ON/DO_OFF и DELAY_MS — только после EXACT-ходов; с `home` последний ход — JOINT в
     `home`. Зону и руку проверяет вызывающий через `compile_program`.
     """
     if not lift_mm > 0:
         raise GeneratorError("подъём над слотом должен быть больше 0")
+    if push_dx_mm == 0 and push_dy_mm == 0:
+        raise GeneratorError("сдвиг к ленте не может быть нулевым")
     b = _Builder(name)
     first = "JOINT"
     if approach is not None:
@@ -124,7 +126,9 @@ def toolchange(
 
     Pre: current == target — ошибка; вызывающий проверяет сам (в v1 — успех без движения).
     Номер не 0 и не ключ `tools` → `GeneratorError` «неизвестный номер инструмента»; нет точек маршрута
-    в `points` → одна `GeneratorError` «обучите точки: …» со всеми недостающими именами по алфавиту.
+    в `points` → одна `GeneratorError` «обучите точки: …» со всеми недостающими именами по алфавиту;
+    затем ключ маршрута в `points`, не равный `Point.name`, → одна `GeneratorError` «ключ библиотеки не
+    совпадает с именем точки: …» со всеми такими ключами по алфавиту.
     Post: первый ход — JOINT в первую точку маршрута (с `approach` — JOINT в `approach`, весь маршрут
     LINE); повторный ход в ту же точку подряд (стык «снять 1 → надеть 2») пропущен; с `home` последний
     ход — JOINT в `home`. Зону и руку проверяет вызывающий через `compile_program`.
@@ -138,6 +142,10 @@ def toolchange(
     missing = sorted({what for op, what, _ in route if op == "move" and what not in points})
     if missing:
         raise GeneratorError(f"обучите точки: {', '.join(missing)}")
+    # Пропуск повторного хода сравнивает имена точек: ключ библиотеки обязан совпадать с `Point.name`.
+    renamed = sorted({what for op, what, _ in route if op == "move" and points[what].name != what})
+    if renamed:
+        raise GeneratorError(f"ключ библиотеки не совпадает с именем точки: {', '.join(renamed)}")
 
     b = _Builder(name)
     kind = "JOINT"
