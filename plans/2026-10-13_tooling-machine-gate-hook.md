@@ -39,40 +39,51 @@
 - **Путь гейта в хуке — от файла хука**: `$(dirname "$0")/../../../../scripts/machine_gate.sh`, то есть то же
   дерево, откуда запущен хук. Замок — абсолютный путь (`MACHINE_LOCK_DIR`, по умолчанию
   `/d/PROJECT_INNOTECH/Inspector_vision`); от cwd решение не зависит.
+- **`timed` — только в гейте.** Признак `medium` «трогает чувствительное к времени» (список путей или `--timed`)
+  делает допуск `medium` как у `heavy`. `classify` и хук его не знают: второй копии правил нет.
+- **Блок хука печатает `<segment>` целиком, с префиксом `VAR=val`** (принятое исключение): сегмент должен быть
+  воспроизводим (`PYTHONPATH` меняет смысл), значения уже в транскрипте, секреты по правилам лежат в env, не в строке.
 - **Писать замок может только координатор:** `grant`/`close` первым аргументом берут имя координатора и
   сверяют его со строкой `coordinator:`. Проверка дешёвая и ловит полосу, которая пишет замок сама.
 
 ## Классификация и допуск (контракт для тестов; литералы, не из кода)
 
 Вынесены в [`2026-10-13_tooling-machine-gate-hook/classification.md`](2026-10-13_tooling-machine-gate-hook/classification.md)
-(бюджет 32 КБ): §2 таблица C1–C28, §3 правило pytest, §4 реклассификация, §5 допуск, §6 слот `medium`, §7 тесты гейта.
+(бюджет 32 КБ): §1–§3 правила и таблица C1–C31, §4 реклассификация, §5 `timed`, §6 допуск, §7 тесты гейта,
+§8 инъекции, §9 REDS и TRAPS Task 1.1.
 
 ## Порядок выполнения
 
 ### Фаза 1 — механизм
 
 ### Task 1.1 — хук PreToolUse и `classify` в гейте [PENDING]
-- **Level:** Middle+ (слот `medium`: `mkdir`-замок, живость PID, trap) · **Assignee:** `developer` (Sonnet); тесты пишет `tester` вслепую до кода
+- **Level:** Middle+ (три класса, `timed`, флаг, допуск) · **Assignee:** `developer` (Sonnet); тесты пишет `tester` вслепую до кода
 - **Module contract:** n/a (инструменты, не модуль фреймворка)
 - **Handoff:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Gate:** RED тестера → GREEN (гейт `light`, один файл); `bash -n` обоих `.sh`; `ruff check -q`; `git check-attr eol`
+  хука = `lf`; инъекции записаны с фактом; reviewer APPROVED по SHA.
 - **Goal:** пока `machine.lock` существует, Bash-команда с тестом или тяжёлой работой мимо `machine_gate.sh`
   блокируется с сообщением, где написана команда гейта; гейт знает три класса `light` < `medium` < `heavy`,
-  сам поднимает заниженную заявку (никогда не понижает) и пускает `medium` по таблице допуска.
-- **Files:**
+  сам поднимает заниженную заявку (никогда не понижает), пускает `medium` по таблице допуска, timed `medium` — как `heavy`.
+- **Files** (developer — 1–4, 6, 7; файл 5 пишет tester):
   1. `.claude/plugins/dev/hooks/machine-gate-guard.sh` — новый
-  2. `scripts/machine_gate.sh` — подкоманда `classify`, режим `medium`, слот, реклассификация вверх
-  3. `.claude/settings.json` — PreToolUse, matcher `Bash`, третьим после `protect-branch.sh`, `timeout: 10`,
+  2. `scripts/machine_gate.sh` — подкоманда `classify`, режим `medium`, флаг `--timed`, реклассификация вверх
+  3. `.claude/settings.json` — PreToolUse, matcher `Bash`, третьим, сразу после protect-branch.sh, `timeout: 10`,
      форма строки — как у соседей: `bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/machine-gate-guard.sh`
-  4. `pyproject.toml` — строка `"scripts/machine_gate_tests"` в `testpaths` с комментарием (иначе тесты молча
+  4. `pyproject.toml` — строка "scripts/machine_gate_tests" в `testpaths` с комментарием (иначе тесты молча
      не гоняются; страж `test_no_test_dir_is_invisible_to_every_runner`)
   5. `scripts/machine_gate_tests/test_machine_gate_hook.py` — пишет `tester`, developer не правит
-  Нужен ещё файл — стоп и вопрос лиду.
+  6. `.gitattributes` — строка `.claude/plugins/dev/hooks/machine-gate-guard.sh text eol=lf`
+  7. `scripts/machine_gate_timed.txt` — новый, 7 строк литералом (classification.md §5)
+  Нужен ещё файл — стоп и вопрос лиду. Слияние 1.1 = регистрация хука (файл 3) → слияние в `main` ждёт
+  слова владельца и предупреждения полос координатором.
 - **Steps (developer):**
   1. Красный прогон тестов тестера (команда ниже), список красных — в отчёт.
   2. `classify` в `machine_gate.sh`: функция `classify_cmd`, режем на сегменты через `sed -E`, правила —
      classification.md §1–§3. Ветка `classify` разбирается **до** проверки `$# -lt 3` (у неё один аргумент).
-  3. Режимы `heavy|medium|light` (usage и текст ошибки `kind` — с `medium`): после проверки `kind` вызвать
-     `classify_cmd "$*"`, поднять класс по §4; допуск `medium` и слот — §5, §6. Ветки `heavy` и `light` не меняются.
+  3. Режимы `[--timed] heavy|medium|light` (usage и ошибка `kind must be heavy, medium or light` — с `medium`):
+     снять `--timed`, проверить число аргументов, `classify_cmd "$*"`, поднять класс по §4; `timed` — §5; допуск — §6.
+     Ветки `heavy` и `light` не меняются. Файл 7 — 7 строк §5 в том же порядке.
   4. Хук: шапка-комментарий по-русски. Порядок: (а) `lock="${MACHINE_LOCK_DIR:-/d/PROJECT_INNOTECH/Inspector_vision}/machine.lock"`,
      нет файла → `exit 0`; (б) `INPUT=$(cat)`; `grep -qE 'pytest|run_framework_tests|run_sim_all|check_injections|mutation_gate|break_inject|reindex|qex_retry'`
      не нашёл → `exit 0`; (в) python — разрешение как в `.claude/plugins/dev/hooks/lint-brief.sh`
@@ -88,55 +99,36 @@
      ```
      Строка `hook:` отвечает на открытый вопрос: из какого дерева сработал хук у субагента в worktree.
   5. Регистрация в `settings.json` — **последней правкой**, после зелёных тестов хука.
-  6. `ruff check -q` на тестовом файле, `bash -n` на обоих скриптах; файлы `.sh` — LF (проверить
-     `git ls-files --eol`), иначе хук мёртв на Windows.
+  6. `ruff check -q` на тестовом файле, `bash -n` на обоих скриптах; LF хука — строкой в `.gitattributes` (файл 6),
+     проверка `git check-attr eol -- <хук>` → `eol: lf` (`git ls-files --eol` до `git add` пуст); иначе хук мёртв на Windows.
 
 #### Task 1.1 — тесты и приёмка
 
-- **REDS (тестер, `scripts/machine_gate_tests/test_machine_gate_hook.py`; таблицы — classification.md):**
-  1. `test_classify` (параметры C1–C18, C20–C28 по id строки; проверяет kind и reason)
-  2. `test_classify_none` (N1–N8, C19: пустой stdout, код 0)
-  3. `test_hook_allows` (параметры: `no_lock` + C9; `wrapped` — `bash "<gate>" heavy s1 pytest -q`; `non_test` — N1;
-     `bad_json` — stdin `not json`; везде замок с чужим окном, кроме `no_lock`) → код 0, stderr пуст
-  4. `test_hook_blocks` (параметры: `C10` → в stderr `BLOCKED by machine-gate-guard` и
-     `machine_gate.sh" heavy <session> python -m pytest multiprocess_framework/modules`; `C12` → `machine_gate.sh" light <session>`;
-     `C15` → `this command is medium (pytest_module_dir)` и `machine_gate.sh" medium <session> pytest Services/robot_comm/tests`) → код 2
-  5. `test_hook_blocks_unwrapped_segment_after_wrapped` — `bash "<gate>" light s1 pytest a/tests/test_x.py && pytest -q` → код 2
-  6. `test_hook_independent_of_cwd` — cwd = `tmp_path` вне git, `CLAUDE_PROJECT_DIR=tmp_path`, команда C9 → код 2
-  7. `test_gate_reclassifies_to_heavy` (R1–R3, classification.md §7)
-  8. `test_gate_medium` (G1–G15, §7)
-  9. `test_hook_registered_in_settings` — в `.claude/settings.json`, PreToolUse, matcher `Bash`, есть команда
-     с `machine-gate-guard.sh`
-  Стражи (зелёные и до правки): `test_gate_heavy_claim_not_downgraded` (окно `s1`, `heavy s1 python -c "import sys; sys.exit(3)"` → код 3);
-  `test_gate_light_file_runs_without_window` (замок без окна, без `quiet`; `light s1 python -m pytest -q <tmp>/test_ok.py` → код 0);
-  `test_gate_call_form_compat` (K1–K7, §7) — сессии полос уже зовут `heavy|light <session> <cmd>`: форма, коды и тексты 75 не меняются.
+- **REDS (тестер, `scripts/machine_gate_tests/test_machine_gate_hook.py`):** 10 функций, стражи `test_gate_light_file_runs_without_window`
+  и `test_gate_call_form_compat` (K1–K7) — classification.md §9 (вынесено по бюджету 32 КБ); таблицы — §2, §7.
 - **Acceptance criteria (литерально, всё на temp-замке через `MACHINE_LOCK_DIR=<tmp_path.as_posix()>`):**
   - замок с чужим окном (`window: other-s | heavy | x | until ~23:59`), хук на `pytest multiprocess_framework/modules`
     → код 2, stderr содержит `BLOCKED by machine-gate-guard` и `machine_gate.sh" heavy <session> pytest multiprocess_framework/modules`;
   - тот же замок, хук на `pytest Services/robot_comm/tests` → код 2, `machine_gate.sh" medium <session> pytest Services/robot_comm/tests`;
   - тот же замок, `bash ".../scripts/machine_gate.sh" heavy s1 pytest -q` → код 0, stderr пуст;
-  - замка нет → код 0, stderr пуст, на любой команде из таблицы;
-  - N1–N8 при живом замке → код 0;
+  - замка нет, команда C9 → код 0, stderr пуст (`test_hook_allows[no_lock]`); N1–N8 при живом замке → код 0;
   - `machine_gate.sh light s1 python -m pytest --version` без окна `s1` → код 75 и строка `reclassified light -> heavy (pytest_no_file_args)`;
-  - G1–G15, R1–R3 и K1–K7 (classification.md §7) — дословно по таблицам;
+  - G1–G12, T1–T14, R1–R4 и K1–K7 (classification.md §7) — дословно по таблицам;
   - живая проба P1 (раздел «Пайплайн», после слияния) — хук блокирует команду субагента в worktree,
     в отчёте — строка `hook:` и `CLAUDE_PROJECT_DIR`.
 - **Out of scope:** MCP-инструмент `mcp__qex__index_codebase` (не Bash; см. вопрос 3); обход через `bash -c "…"`,
   `eval`, переменные — хук не граница безопасности; правка `lint_settings.py` (`REQUIRED_HOOKS`); e2e-серии и
   `scripts/stand_gate` в живом режиме — у них нет устойчивого имени команды, их класс задаёт заявка агента;
-  вид окна `medium` (грамматика замка — Task 1.2); очередь на слот (занят → 75, повтор позже); правка skill и
+  вид окна `medium` (грамматика замка — Task 1.2); проверка RAM гейтом; флаг `--plain`; правка skill и
   project-rules (пайплайн, п. 7).
-- **TRAPS:** пути temp-замка передавать как `tmp_path.as_posix()`; bash на Windows — помощник `_git_bash()` из
-  `scripts/atlas/tests/test_lint_brief_1_9c.py:982` **скопировать** в тест, не импортировать; ни один тест не
-  трогает живой `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock` (всегда `MACHINE_LOCK_DIR`); тестер перечисляет
-  файлы, а не каталог, иначе его же прогон классифицируется `medium` или `heavy`; каждый temp-замок начинается строкой
-  `coordinator: c1 | since x` (иначе Task 1.2 сделает тесты красными); PID в слоте — только `$$` из Git Bash
-  (`os.getpid()`, `Popen.pid` — Windows-PID, `kill -0` их не видит, §6); реальные прогоны — через `PY` (`sys.executable`).
+- **TRAPS:** classification.md §9.
 
 ### Task 1.2 — `grant` / `close` / `status` и проверка формата замка [PENDING] (после 1.1: тот же `machine_gate.sh`)
 - **Level:** Middle · **Assignee:** `developer` (Sonnet); тесты — `tester` вслепую до кода
 - **Module contract:** n/a
 - **Handoff:** `tester`(RED) → `developer`(GREEN) → `reviewer`
+- **Gate:** RED тестера → GREEN (гейт `light`, один файл); `bash -n scripts/machine_gate.sh`; `ruff check -q`; `cmp` двух
+  SKILL.md; инъекции J записаны с фактом; reviewer APPROVED по SHA.
 - **Goal:** координатор меняет замок одной командой с проверкой формата; битый замок никогда не превращается
   в тихий пропуск 75; `status` даёт числа нагрузки без ручного замера.
 - **Files:**
@@ -213,8 +205,8 @@
    Итог — красный прогон с выводом; коммит делает лид.
 3. **Разработчик** (`developer`, sonnet) — FILES выше, первая правка в первых 5 вызовах, тесты тестера не правит
    (расхождение с планом → вопрос лиду). Сообщение коммита — в файл, коммитит лид.
-4. **Инъекции — предсказание до прогона** (лид; каждая — `light` прогон одного файла): таблица I1–I6 (хук,
-   `classify`), M1–M9 (класс `medium`), J1–J5 (Task 1.2) — classification.md §8 (вынесена по бюджету 32 КБ).
+4. **Инъекции — предсказание до прогона** (лид; каждая — `light` прогон одного файла): таблица I1–I7 (хук,
+   `classify`), M1–M17 (`medium`, `timed`), J1–J5 (Task 1.2) — classification.md §8 (вынесена по бюджету 32 КБ).
 
 5. **Ревьюер кода** (`reviewer`, opus) — по зафиксированному SHA (`git diff <base>..<sha>`), получает зелёный
    вывод pre-report gate и таблицу инъекций; смотрит семантику: ложные срабатывания на обычных командах,
@@ -226,9 +218,9 @@
    ответ на открытый вопрос ревью; записать в `docs/claude/OPEN_QUESTIONS.md` или в урок памяти.
 7. **Post-merge, лид** (не код Task 1.1; после слияния 1.1 в `main`): правка в исходнике плагина, затем побайтная
    копия и `cmp`. (а) skill `coordinator` §3 — строка `medium`: один каталог `*/tests`, ~2–5 мин, без окна; блок —
-   чужое `quiet`/`stand`, при чужом `heavy` — не больше одного (`MEDIUM SLOT BUSY`); строка `light` → «< ~2 мин».
-   (б) `project-rules` §8 — `heavy|medium|light` в команде гейта и одна фраза про `medium`. (в) `.claude/CLAUDE.md`
-   «Shared machine» — `heavy|medium|light`. Файлы: `.claude/plugins/dev/skills/{coordinator,project-rules}/SKILL.md`
+   чужое `quiet`/`stand`; timed (список `scripts/machine_gate_timed.txt` или `--timed`) — только в своём окне.
+   (б) `project-rules` §8 — `[--timed] heavy|medium|light` и одна фраза про `medium`/timed. (в) `.claude/CLAUDE.md`
+   «Shared machine» — то же. Файлы: `.claude/plugins/dev/skills/{coordinator,project-rules}/SKILL.md`
    → `.claude/skills/{coordinator,project-rules}/SKILL.md`. Регистрацию хука в `settings.json` в `main` — только по
    слову владельца и после предупреждения полос.
 
@@ -245,13 +237,13 @@
   поэтому негативные случаи N1–N8 в тестах обязательны.
 - **Worktree, вырезанный до слияния.** Если окажется, что у субагента в worktree `CLAUDE_PROJECT_DIR` указывает
   на сам worktree, в старых worktree файла хука нет. Тогда bash выдаст «No such file», это неблокирующая ошибка
-  хука, и команда пройдёт. Тест H7 (`test_hook_independent_of_cwd`) это не ловит — он лишь имитирует другой cwd.
+  хука, и команда пройдёт. REDS #6 (`test_hook_independent_of_cwd`) это не ловит — он лишь имитирует другой cwd.
   Настоящее доказательство — только проба P1.
 - **Эвристика по тексту команды.** `bash -c`, переменные, алиасы её обходят. Для координации этого достаточно,
   граница безопасности — не здесь.
 - **Форма ≠ длительность.** `medium` = один каталог `*/tests`, но `multiprocess_framework/modules/process_module/tests`
-  (252 файла) может идти > 5 мин; класс тогда поднимает сама сессия (`heavy`). Слот держится на `kill -0` по
-  MSYS-PID: гейт из WSL-bash или убитый без trap держатель с живым дочерним pytest — слот сочтут свободным.
+  (252 файла) может идти > 5 мин; класс тогда поднимает сама сессия (`heavy`). Не-timed `medium` без предела
+  числа: параллельность держит только RAM-допуск координатора.
 
 ## Смежное
 
@@ -284,4 +276,6 @@
    блокируется чужим окном `quiet` или `stand` (там замеры), при чужом `heavy` разрешён, но не больше одного `medium` за раз.
    Затрагивает `scripts/machine_gate.sh` (третий аргумент класса), skill `coordinator` §3 и project-rules §8 —
    правка в задачах этого плана, не отдельно.
+   **Уточнение владельца 2026-10-13 (через b4):** слот «один `medium` за раз» отменён; `medium` с путём из
+   `scripts/machine_gate_timed.txt` или с `--timed` (timed) допускается как `heavy` — classification.md §5, §6.
 3. **Нет сейчас:** отдельный matcher на `mcp__qex__index_codebase` не нужен.
