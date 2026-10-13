@@ -251,26 +251,18 @@ def test_draw_two_chunks():
         assert rig.read("TLM_DO_MASK") == [0]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "T3.9: состояние SPEED_PCT не переходит через границу куска "
-        "(SC_RUN без стартового состояния; protocol-spec §7.2 п.5, §7.4)"
-    ),
-)
 def test_draw_speed_survives_chunk_boundary():
     """Скорость переезда (запись 27: SPEED_PCT 100) переходит в кусок 2.
 
-    Сегодня ожидаемо красный: sim заводит кусок с P_SPD_DEFAULT 80. После T3.9
-    strict xfail упадёт, и метку снимает T3.9. НЕ доказывает: контроллер.
+    T3.9: `SC_RUN` куска 2 несёт состояние конца куска 1 (запись 27 — SPEED_PCT 100).
+    НЕ доказывает: контроллер.
     """
     with E2eRig() as rig:
         rig.run(_draw_li3(), FRAMES)
         rec2 = _recs(rig.core.events(), 2)
         spd = [r[4] for r in rec2 if r[2] in (1, 2)]
         if len(spd) != 2:
-            # Предусловие, не предмет xfail: Failed не покрыт raises=AssertionError.
+            # Предусловие.
             pytest.fail(f"в куске 2 нет записей i=1,2 (найдено {len(spd)}): {rec2!r}")
         assert spd == [100, 100]
 
