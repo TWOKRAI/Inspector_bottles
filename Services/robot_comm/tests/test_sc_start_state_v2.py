@@ -157,13 +157,17 @@ class _Stand:
         return _res(self.core)
 
     def servo_on(self) -> None:
-        status = self.send(OP["SERVO"], 1)[0]
+        self.set_servo(1)
+
+    def set_servo(self, on: int) -> None:
+        # sim стартует с включённым серво (T3.9, матрица I5): «выключено» надо выключить явно и проверить
+        status = self.send(OP["SERVO"], on)[0]
         assert status == ACK
         for _ in range(50):
-            if _reg(self.core, "TLM_SERVO") == 1:
+            if _reg(self.core, "TLM_SERVO") == on:
                 break
             self.core.tick(0.01)
-        assert _reg(self.core, "TLM_SERVO") == 1
+        assert _reg(self.core, "TLM_SERVO") == on
 
     def param_set(self, name: str, value: int) -> None:
         assert self.send(OP["PARAM_SET"], PARAM_ID[name], value)[0] == ACK, f"PARAM_SET {name}={value} не принят"
@@ -300,8 +304,7 @@ def test_sc_run_bad_args_nak_no_motion(servo, args, expected):
     корректного состояния.
     """
     stand = _Stand()
-    if servo:
-        stand.servo_on()
+    stand.set_servo(servo)
     stand.load_slot()
 
     def snapshot() -> tuple[list[int], int, int, int, int, int]:
