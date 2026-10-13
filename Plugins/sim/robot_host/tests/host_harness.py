@@ -209,19 +209,18 @@ def open_client(
     """Устройство и клиент v2 к порту хоста: соединение с повтором до ``timeout``, затем ``probe()``.
 
     Окно ответа клиента — 3.0 с (у клиента по умолчанию 2.0); окно DONE — по умолчанию клиента (30 с).
-    Не подключились — ``AssertionError``; ``probe()`` упал — исключение уходит наружу как есть,
-    устройство перед этим закрыто."""
+    Любой сбой (не подключились — ``AssertionError``, дедлайн, ошибка ``probe()``) — исключение уходит
+    наружу как есть, устройство перед этим закрыто."""
     device = ModbusDevice(ModbusConfig(host=HOST, port=port, unit_id=ROBOT_UNIT_ID))
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if run_with_deadline(device.connect, timeout=timeout, label="device.connect"):
-            break
-        time.sleep(0.05)
-    else:
-        close_client(device)
-        raise AssertionError(f"порт {port} не принял соединение за {timeout} с")
-    client = RobotClientV2(device, ClientV2Config.from_dict({"res_timeout_s": 3.0}), rng=rng)
     try:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if run_with_deadline(device.connect, timeout=timeout, label="device.connect"):
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"порт {port} не принял соединение за {timeout} с")
+        client = RobotClientV2(device, ClientV2Config.from_dict({"res_timeout_s": 3.0}), rng=rng)
         run_with_deadline(client.probe, timeout=5.0, label="client.probe")
     except BaseException:
         close_client(device)
