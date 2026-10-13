@@ -1,6 +1,6 @@
 # Task 6.5: ассеты стенда одной командой из закоммиченных фикстур, плитка 410x484
 
-- **Статус:** [PENDING] · **Level:** Middle · **Assignee:** developer <!-- lint-language: allow -->
+- **Статус:** [DONE 2026-10-13] · **Level:** Middle · **Assignee:** developer <!-- lint-language: allow -->
 
 TASK: 6.5 — модуль `build_stand_assets` собирает `data/line_sim` из фикстур, борта фото выравниваются медианой
 PLAN: plans/line-sim/plan.md (Task 6.5, строка ~631; статус в plan.md правит лид, не исполнитель)
