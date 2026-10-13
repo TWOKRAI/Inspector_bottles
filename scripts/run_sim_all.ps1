@@ -12,7 +12,8 @@
 #   -Recipe letter_robot_sim (по умолчанию) — сначала симуляторы, затем прототип сразу на сим-рецепте
 #     (обход: горячая замена «Сделать активным» на 2026-10-12 роняет камеру и устройства).
 #
-# Каждый процесс открывается в своём окне PowerShell — там же его лог.
+# Каждый процесс открывается в своём окне PowerShell — там же его лог; копия консоли окна —
+# data\logs\console\<окно>_<время>.log.
 # Остановка: закрыть окно прототипа, Ctrl+C в окне «line_sim», закрыть окно робота.
 #
 # Что важно знать:
@@ -50,10 +51,21 @@ function Wait-Port([int]$Port, [string]$What) {
     throw "За $TimeoutSec с не открылся порт $Port ($What) — смотрите окно процесса"
 }
 
+# Консоль каждого окна дублируется в файл data\logs\console\<окно>_<время>.log (UTF-8):
+# туда попадает то, что идёт мимо логгера — print, stderr нативных библиотек (ffmpeg, Qt),
+# traceback процесса, упавшего до старта логгера. Дочерние процессы наследуют тот же поток.
+$ConsoleDir = Join-Path $Logs "console"
+New-Item -ItemType Directory -Force $ConsoleDir | Out-Null
+$Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+
 function Start-Window([string]$Title, [string]$EnvLine, [string]$PyArgs) {
-    $cmd = "`$Host.UI.RawUI.WindowTitle = '$Title'; Set-Location '$Root'; $EnvLine; & '$Py' $PyArgs"
+    $ConsoleLog = Join-Path $ConsoleDir "${Title}_$Stamp.log"
+    $tee = "`$env:PYTHONUNBUFFERED='1'; `$env:PYTHONIOENCODING='utf-8'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; " +
+        "`$w = New-Object IO.StreamWriter('$ConsoleLog', `$true, (New-Object Text.UTF8Encoding `$false)); `$w.AutoFlush = `$true; " +
+        "& '$Py' $PyArgs 2>&1 | ForEach-Object { `$s = [string]`$_; Write-Host `$s; `$w.WriteLine(`$s) }; `$w.Close()"
+    $cmd = "`$Host.UI.RawUI.WindowTitle = '$Title'; Set-Location '$Root'; $EnvLine; $tee"
     Start-Process powershell -ArgumentList @("-NoExit", "-NoProfile", "-Command", $cmd) | Out-Null
-    Write-Host "запущено: $Title"
+    Write-Host "запущено: $Title (консоль: $ConsoleLog)"
 }
 
 # 0. Ассеты сима: data/ не в git, собираем из фикстур репозитория, если их нет
@@ -121,4 +133,4 @@ Write-Host ""
 if ($Waits) { Write-Host "Всё поднято. Старт: в окне прототипа вкладка «Рецепты» -> letter_robot_sim -> «Сделать активным»." }
 else { Write-Host "Всё поднято. Прототип работает на рецепте $Recipe." }
 Write-Host "Пульт линии: http://127.0.0.1:8092/   видео ленты: http://127.0.0.1:8091/"
-Write-Host "Логи: $Logs\prototype и $Logs\line_sim"
+Write-Host "Логи: $Logs\prototype и $Logs\line_sim; консоль окон: $ConsoleDir"
