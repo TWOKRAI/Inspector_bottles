@@ -118,7 +118,9 @@ class BaseManager(IBaseManager):
         Первый вызов: ставит «идёт» и запоминает поток, закрывает привязанную
         ``scope``, затем один раз зовёт ``_on_shutdown()``; результат
         ``bool(...)`` кэшируется. Исключение в ``_on_shutdown`` -> ``False``
-        и строка лога. Вызов из потока, который сейчас выполняет ``shutdown()``
+        и строка лога. ``BaseException`` из ``scope.close()`` (1.2b-ki): строка лога,
+        ``_on_shutdown()`` всё равно зовётся один раз, затем исключение уходит
+        наверх; кэш ``False``. Вызов из потока, который сейчас выполняет ``shutdown()``
         (реентрантный), и вызов из потока поддерева ``scope`` -> ``False`` сразу.
         Вызов из другого потока ждёт первый не дольше срока области
         (``budget_s + kill_reserve_s``; без ``Scope`` — 5,0 с) плюс
@@ -156,6 +158,13 @@ class BaseManager(IBaseManager):
             )
             return False
 
+        def run_on_shutdown() -> bool:
+            try:
+                return bool(self._on_shutdown())
+            except Exception as exc:
+                self._shutdown_log(f"shutdown {self.manager_name}: _on_shutdown упал: {type(exc).__name__}: {exc}")
+                return False
+
         result = False
         try:
             if scope is not None:
@@ -163,11 +172,16 @@ class BaseManager(IBaseManager):
                     scope.close()
                 except Exception as exc:
                     self._shutdown_log(f"shutdown {self.manager_name}: scope.close упал: {type(exc).__name__}: {exc}")
-            try:
-                result = bool(self._on_shutdown())
-            except Exception as exc:
-                result = False
-                self._shutdown_log(f"shutdown {self.manager_name}: _on_shutdown упал: {type(exc).__name__}: {exc}")
+                except BaseException as exc:
+                    # 1.2b-ki: прерывание закрытия не отменяет тело подкласса. Тело зовётся
+                    # внутри обработчика: его BaseException уходит наверх с __context__ = exc.
+                    # Результат тела не используется — кэш False (область могла не закрыться).
+                    self._shutdown_log(
+                        f"shutdown {self.manager_name}: scope.close прерван: {type(exc).__name__}: {exc}"
+                    )
+                    run_on_shutdown()
+                    raise
+            result = run_on_shutdown()
         finally:
             # BaseException (KeyboardInterrupt) уходит наверх, но ждущие не висят.
             with life.lock:
