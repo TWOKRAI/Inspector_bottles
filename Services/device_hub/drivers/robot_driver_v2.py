@@ -290,15 +290,22 @@ class RobotDriverV2(BaseDeviceDriver):
         return True
 
     def _run_on_connect(self, client: RobotClientV2) -> None:
-        """SERVO и DO_SET — instant: без wait_done, подтверждение — чтением TLM с дедлайном (Л2)."""
+        """SERVO и DO_SET — instant: без wait_done, подтверждение — чтением TLM с дедлайном (Л2).
+
+        Д5: действия идемпотентны — «обеспечить состояние». Сначала читается TLM; команда шлётся, только если
+        состояние не равно цели. Так переподключение во время jog прошивки, который ещё дожидается срока поводка,
+        не получает NAK ``E_BUSY`` на SERVO (``busy: deny``).
+        """
         if self._servo_on is not None:
-            client.servo(self._servo_on)
             want = 1 if self._servo_on else 0
-            self._await_tlm(lambda tlm: _w(tlm, "TLM_SERVO") == want, "TLM_SERVO")
+            if _w(self._read_tlm(), "TLM_SERVO") != want:
+                client.servo(self._servo_on)
+                self._await_tlm(lambda tlm: _w(tlm, "TLM_SERVO") == want, "TLM_SERVO")
         for ch, on in self._do_on_connect.items():
-            client.do_set(ch, on)
             bit = 1 << (ch - 1)
-            self._await_tlm(lambda tlm, b=bit, o=on: bool(_w(tlm, "TLM_DO_MASK") & b) == o, f"DO{ch}")
+            if bool(_w(self._read_tlm(), "TLM_DO_MASK") & bit) != on:
+                client.do_set(ch, on)
+                self._await_tlm(lambda tlm, b=bit, o=on: bool(_w(tlm, "TLM_DO_MASK") & b) == o, f"DO{ch}")
 
     def _await_tlm(self, pred: Callable[[list[int]], bool], what: str) -> None:
         deadline = self._clock() + _ON_CONNECT_DEADLINE_S
