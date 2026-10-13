@@ -72,8 +72,12 @@ when two are ready. Update `machine.lock` before sending the signal, not after.
 ## 5. Start prompt template — every prompt the coordinator writes
 
 Render it in Russian (the owner reads it); keep every block, write «none» rather than drop one.
+The first line is the tab label. The owner finds lanes by tab titles only — the session name
+(`inspector-bottles-xx`) is visible nowhere in the UI — and the auto-title drifts as the chat goes on
+(2026-10-13), so the owner pastes this label into VS Code «Rename Session Tab» by hand.
 
 ```
+ВКЛАДКА: Полоса <X> · <Task X.Y> <short title>
 ROLE: lead of lane <name>, plan <plans/…/plan.md>, Task <X.Y> «<title>» (after <deps>, status from git, not the header).
 READ FIRST: brief <tasks/X.Y.md> (if missing — manager writes it, project spec format «Task X.Y»),
   last result <tasks/…result.md>, handoff <docs/handoffs/…> if any.
@@ -81,7 +85,9 @@ GOAL: one sentence. ACCEPTANCE: literal criteria — test names, numbers, «xfai
 PIPELINE: as in .claude/CLAUDE.md «Task launch convention» (cite it, do not retell it); add only what is task-specific
   (solo-trivial stated aloud, which stages run in a window, «no commit to main, no push» for implementers).
 BOUNDARIES: files you own; neighbours' files (lane, session, paths) you must not touch; known cross-lane traps.
-LOAD: coordinator is <session> (name also in machine.lock). First message: your session name.
+LOAD: coordinator is <session> (name also in machine.lock). First message to it: your session name — the first
+  line of your own ListAgents, never a name from a handoff. First line of every reply to the owner:
+  the ВКЛАДКА label plus your session name — «Полоса <X> · <Task X.Y> · <session name>».
   Every test/stand command through the gate from project-rules §8 (absolute path); heavy only in your
   window — request it in advance: `ready for window: …`. Pass the session name to every agent brief.
 COMMITS: Conventional Commits + Why:/Layer:/Refs: trailers (.claude/COMMIT_GUIDE.md); stage explicit paths;
@@ -110,6 +116,10 @@ Red only on the branch → the branch's finding. Give the window as `quiet` for 
 - A check that nothing gates is not a gate, and `A && cmd || echo skipped` hides a red run as «skipped»
   with exit 0 — use `machine_gate.sh` (exit 75 = skipped).
 - The gate does not enforce «one heavy process at a time» inside the holder's session — say it in the prompt.
+- A restarted session signs with the old name from a handoff or a message (2026-10-13: twice in one evening,
+  `51` as `a4`, `5c` as `1c`); the gate then exits 75. Trust `from-name` of its message, not its signature.
+- The owner sees tab titles, not session names. In every report to the owner name a session by its lane and
+  tab title, the session name in brackets; keep the lane ↔ tab ↔ name table current after each restart.
 
 ## 8. Handoff
 
