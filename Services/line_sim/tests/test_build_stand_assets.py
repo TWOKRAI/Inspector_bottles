@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 import pytest
 
-from Services.dataset_gen.core.catalog import imread_unicode
+from Services.dataset_gen.core.catalog import imread_unicode, imwrite_unicode
 
 __all__: list[str] = []
 
@@ -262,6 +262,28 @@ def test_child_failure_exit1_error_line(
     monkeypatch.setattr(mfl, "main", raises)
     assert bsa.main(["--data-dir", str(tmp_path / "letters_exc")]) == 1
     assert "ошибка шага letters: " in capsys.readouterr().err
+
+
+def test_tile_child_nonzero_code_with_valid_file_fails(
+    bsa: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mst = importlib.import_module("Services.line_sim.tools.make_seamless_texture")
+
+    def writes_valid_tile_but_fails(argv: list[str] | None = None) -> int:
+        out = Path(argv[argv.index("--out") + 1])  # type: ignore[index, union-attr]
+        imwrite_unicode(out, np.zeros((484, 410, 4), dtype=np.uint8))  # читаемый тайл нужной формы
+        return 2
+
+    monkeypatch.setattr(mst, "main", writes_valid_tile_but_fails)
+    data = tmp_path / "data"
+
+    rc = bsa.main(["--data-dir", str(data)])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "ошибка шага tile" in captured.err
+    assert "built belt_tile.png" not in captured.out
+    assert not (data / "letters_ink").exists()
 
 
 def test_relative_data_dir_resolves_from_preset_repo_root(

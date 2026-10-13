@@ -18,7 +18,8 @@ Stability: lite
 Идемпотентность по группам: группа готова, только если ВСЕ её файлы существуют и читаются
 обратно через ``imread_unicode``; иначе пересобирается вся группа целиком (каталог букв
 перед этим удаляется: лишний файл в ``letters_ink/<буква>/`` стал бы образцом класса, LS-014).
-Собранное фото всегда тянет пересборку тайла. ``--force`` пересобирает все три группы.
+Собранное фото всегда тянет пересборку тайла (перед записью фото тайл удаляется).
+``--force`` пересобирает все три группы.
 
 Вывод: три строки ``built|skipped <имя> <размер>`` в stdout (порядок photo, tile, letters);
 провал шага — ``ошибка шага <photo|tile|letters|preflight>: <причина>`` в stderr и код 1.
@@ -189,12 +190,10 @@ def _run(data: Path, fixtures: Path, force: bool) -> None:
         "tile": lambda: _build_tile(data),
         "letters": lambda: _build_letters(fixtures, data),
     }
-    photo_built = False
     for step, files in groups.items():
-        rebuild = force or not _is_ready(files) or (step == "tile" and photo_built)
+        rebuild = force or not _is_ready(files)
         if rebuild:
             builders[step]()
-        photo_built = photo_built or (step == "photo" and rebuild)
         print(_status("built" if rebuild else "skipped", step, files), flush=True)
 
 
