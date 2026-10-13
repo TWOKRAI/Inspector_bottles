@@ -122,10 +122,11 @@ processes:
         # --scene-px-per-mm обязан совпадать с px_per_mm выше. Путь от корня репозитория.
         # Текущая плитка (2026-09-30, plans/line-sim-belt-look): фото data/line_sim/belt_photo_full.png
         # (598x484 — 12 кропов data/backgrounds/belt + борта с реального кадра, выровненные вдоль X),
-        # масштаб 1:1 (диск на реальном кадре 629x484 — 300 px). Сборка — 2 звена, 410x484:
-        #   python -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png \
-        #       --out data/line_sim/belt_tile.png --force-period
-        # Без --force-period фото цепи уходит в зеркало (неровный свет, см. README инструмента).
+        # масштаб 1:1 (диск на реальном кадре 629x484 — 300 px). Плитка 410x484 = 2 звена x 205 px.
+        # Борта фото выровнены медианой строки вдоль X (с усечением до uint8); без этого инструмент
+        # берёт 1 звено, 205x484. Единственная команда сборки фото, плитки и букв (data/ вне git;
+        # плитка собирается с --force-period, фото цепи без него уходит в зеркало — см. README инструмента):
+        #   python -m Services.line_sim.tools.build_stand_assets [--force]
         # Тайл belt_tile.png собирается с `--gap-alpha` (щели между звеньями — альфа), поэтому
         # под ним чёрный слой, а не серый фон плагина.
         background_layers:
