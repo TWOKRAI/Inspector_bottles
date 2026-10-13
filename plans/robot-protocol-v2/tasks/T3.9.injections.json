@@ -1,0 +1,265 @@
+[
+ {
+  "id": "I1",
+  "prop": "sim: accur без сдвига (код провода хранится как значение)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "\"accur\": accur - 1 if accur else",
+  "new": "\"accur\": accur if accur else",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "лишний b: SC_RUN(…,2) — accur 2 без сдвига; промах прогноза, защита сильнее"
+ },
+ {
+  "id": "I2",
+  "prop": "sim: spd_pct 0 -> 100 вместо P_SPD_DEFAULT",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "\"spd_pct\": spd_pct or self._values[PARAM_ID[\"P_SPD_DEFAULT\"]],",
+  "new": "\"spd_pct\": spd_pct or 100,",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_zeros_use_current_defaults",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[all-zero-defaults]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_e2e_rig_v2.py::test_trace_sc_lines_literal"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_e2e_rig_v2.py::test_trace_sc_lines_literal",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[all-zero-defaults]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_zeros_use_current_defaults",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_restart_keeps_mirror",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_speed_pct_restored_after_hard_stop"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "возможны лишние красные в test_sim_v2_scenario*.py (скорость по умолчанию в сценарии) — не прогнозирую поимённо; лишние: b и клиентский NAK (второй SC_RUN с нулями), draw_two_chunks, restart_keeps_mirror, speed_pct_restored_after_hard_stop — скорость по умолчанию видна шире прогноза"
+ },
+ {
+  "id": "I3",
+  "prop": "sim: accel 0 не заменяется на P_ACC_L",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "\"accel\": accel or self._values[PARAM_ID[\"P_ACC_L\"]],",
+  "new": "\"accel\": accel,",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_zeros_use_current_defaults",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[all-zero-defaults]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_e2e_rig_v2.py::test_trace_sc_lines_literal"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_e2e_rig_v2.py::test_trace_sc_lines_literal",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[all-zero-defaults]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_zeros_use_current_defaults"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "лишние: b и клиентский NAK — второй SC_RUN с нулями (acc=25000)"
+ },
+ {
+  "id": "I4",
+  "prop": "sim: проверки диапазона стартового состояния нет",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "if spd_pct > 100 or (accel != 0 and not acc_meta[\"min\"] <= accel <= acc_meta[\"max\"]) or accur > 2:",
+  "new": "if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accel-99]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accel-50001]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accur-3]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101-servo-off-range-before-servo]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accel-50001]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accel-99]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accur-3]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101-servo-off-range-before-servo]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101]"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": ""
+ },
+ {
+  "id": "I5",
+  "prop": "sim: проверка диапазона после E_NO_SERVO",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "        if spd_pct > 100 or (accel != 0 and not acc_meta[\"min\"] <= accel <= acc_meta[\"max\"]) or accur > 2:\r\n            return NAK, ERR[\"E_RANGE\"], 1, [REASON[\"R_APARAM\"]]\r\n        if self.regs[REG[\"TLM_SERVO\"]] == 0:\r\n            return NAK, ERR[\"E_NO_SERVO\"], 0, []\r\n",
+  "new": "        if self.regs[REG[\"TLM_SERVO\"]] == 0:\r\n            return NAK, ERR[\"E_NO_SERVO\"], 0, []\r\n        if spd_pct > 100 or (accel != 0 and not acc_meta[\"min\"] <= accel <= acc_meta[\"max\"]) or accur > 2:\r\n            return NAK, ERR[\"E_RANGE\"], 1, [REASON[\"R_APARAM\"]]\r\n",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101-servo-off-range-before-servo]"
+  ],
+  "observed": [],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "перестановка двух if-блоков; первый прогон: 0 красных (MISMATCH) — sim стартует с TLM_SERVO=1, случай servo-off шёл с серво; правка теста 7ecfa34d4; повтор ревьюера (monkeypatch) — 1 failed ровно по прогнозу"
+ },
+ {
+  "id": "I6",
+  "prop": "sim: нижняя граница accel строгая (100 отвергается)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "acc_meta[\"min\"] <= accel",
+  "new": "acc_meta[\"min\"] < accel",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": ""
+ },
+ {
+  "id": "I7",
+  "prop": "sim: верхняя граница accel строгая (50000 отвергается)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "accel <= acc_meta[\"max\"]",
+  "new": "accel < acc_meta[\"max\"]",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": ""
+ },
+ {
+  "id": "I8",
+  "prop": "sim: spd_pct 100 отвергается",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "if spd_pct > 100 or",
+  "new": "if spd_pct >= 100 or",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "лишние: e2e draw_speed и draw_two_chunks — реальный клиент шлёт spd_pct=100"
+ },
+ {
+  "id": "I9",
+  "prop": "клиент: состояние берётся с учётом записей самого куска k",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "for word in words[0 : chunks[k][0]]:",
+  "new": "for word in words[0 : chunks[k][0] + chunks[k][1]]:",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "«Л+И»: SPEED_PCT 100 на записи 27 = старт куска 2 — e2e draw_speed ждём зелёным"
+ },
+ {
+  "id": "I10",
+  "prop": "клиент: последняя запись перед куском не учитывается",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "for word in words[0 : chunks[k][0]]:",
+  "new": "for word in words[0 : chunks[k][0] - 1]:",
+  "forecast": [],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": "ПРОГНОЗ 0 красных: ни в одной фикстуре действие не стоит на последней записи куска k (STROKE100 — на 0, ACC30/Z — на 0..2, «Л+И» — на 27 = первая куска 2). 0 подтвердится -> пробел покрытия, тест автора; прогноз 0 неверен: запись 27 (счёт с 1) — последняя куска (0,27), e2e draw_speed её держит; пробела нет"
+ },
+ {
+  "id": "I11",
+  "prop": "клиент: accur без сдвига (+1 снят)",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "accur = aparam + 1",
+  "new": "accur = aparam",
+  "forecast": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": ""
+ },
+ {
+  "id": "I12",
+  "prop": "клиент: состояние в SC_RUN не передаётся",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "self.sc_run(count, k + 1, offset, *states[k])",
+  "new": "self.sc_run(count, k + 1, offset)",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": ""
+ },
+ {
+  "id": "I13",
+  "prop": "sim: след acc= печатает параметр P_ACC_L, а не состояние сценария",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "acc={sc['accel']}",
+  "new": "acc={self._values[PARAM_ID['P_ACC_L']]}",
+  "forecast": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record"
+  ],
+  "test": "6 файлов без -k (t39_matrix.py): база 85 passed, после — 85 passed; 2026-10-13 15:05–15:21",
+  "note": ""
+ }
+]

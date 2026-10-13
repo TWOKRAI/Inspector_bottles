@@ -1,0 +1,192 @@
+{
+ "base": {
+  "summary": "85 passed, 1 warning in 40.17s",
+  "failed": [],
+  "seconds": 44.5
+ },
+ "I1": {
+  "summary": "5 failed, 80 passed, 1 warning in 39.11s",
+  "failed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record"
+  ],
+  "seconds": 40.7,
+  "missed": [],
+  "extra": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record"
+  ],
+  "match": false
+ },
+ "I2": {
+  "summary": "12 failed, 73 passed, 1 warning in 37.29s",
+  "failed": [
+   "Services/robot_comm/tests/test_e2e_rig_v2.py::test_trace_sc_lines_literal",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[all-zero-defaults]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_zeros_use_current_defaults",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_restart_keeps_mirror",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_speed_pct_restored_after_hard_stop"
+  ],
+  "seconds": 38.9,
+  "missed": [],
+  "extra": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_restart_keeps_mirror",
+   "Services/robot_comm/tests/test_sim_v2_scenario_hazards.py::test_speed_pct_restored_after_hard_stop"
+  ],
+  "match": false
+ },
+ "I3": {
+  "summary": "9 failed, 76 passed, 1 warning in 39.50s",
+  "failed": [
+   "Services/robot_comm/tests/test_e2e_rig_v2.py::test_trace_sc_lines_literal",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[accur2-is-high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[all-zero-defaults]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_zeros_use_current_defaults"
+  ],
+  "seconds": 41.1,
+  "missed": [],
+  "extra": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record"
+  ],
+  "match": false
+ },
+ "I4": {
+  "summary": "6 failed, 79 passed, 1 warning in 37.79s",
+  "failed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_client_start_state_nak_no_motion",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accel-50001]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accel-99]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[accur-3]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101-servo-off-range-before-servo]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101]"
+  ],
+  "seconds": 39.4,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "I5": {
+  "error": "old встречается 0 раз"
+ },
+ "I6": {
+  "summary": "1 failed, 84 passed, 1 warning in 39.09s",
+  "failed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]"
+  ],
+  "seconds": 41.1,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "I7": {
+  "summary": "1 failed, 84 passed, 1 warning in 39.01s",
+  "failed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]"
+  ],
+  "seconds": 40.8,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "I8": {
+  "summary": "3 failed, 82 passed, 1 warning in 38.17s",
+  "failed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "seconds": 40.3,
+  "missed": [],
+  "extra": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "match": false
+ },
+ "I9": {
+  "summary": "2 failed, 83 passed, 1 warning in 39.18s",
+  "failed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary"
+  ],
+  "seconds": 40.8,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "I10": {
+  "summary": "1 failed, 84 passed, 1 warning in 39.22s",
+  "failed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary"
+  ],
+  "seconds": 41.1,
+  "missed": [],
+  "extra": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary"
+  ],
+  "match": false
+ },
+ "I11": {
+  "summary": "3 failed, 82 passed, 1 warning in 38.86s",
+  "failed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]"
+  ],
+  "seconds": 40.5,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "I12": {
+  "summary": "5 failed, 80 passed, 1 warning in 39.05s",
+  "failed": [
+   "Services/robot_comm/tests/test_client_v2_chunks.py::test_run_chunks_passes_end_state_of_previous_chunk",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_long_stroke_speed_survives_every_boundary",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary"
+  ],
+  "seconds": 40.9,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "I13": {
+  "summary": "5 failed, 80 passed, 1 warning in 39.08s",
+  "failed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_back_to_rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_accel_accur_cross_boundary[accur_high]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-high-accel-accur1-is-rough]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_accur_shift_and_bounds[bounds-low-accel-accur0-takes-default-1]",
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_start_state_applies_from_first_record"
+  ],
+  "seconds": 40.9,
+  "missed": [],
+  "extra": [],
+  "match": true
+ },
+ "after": {
+  "summary": "85 passed, 1 warning in 39.11s",
+  "failed": [],
+  "seconds": 41.2
+ }
+}
