@@ -356,7 +356,7 @@ class HelloProcess(ProcessModule):
             n += 1
             stop_event.wait(timeout=1.0)
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
 

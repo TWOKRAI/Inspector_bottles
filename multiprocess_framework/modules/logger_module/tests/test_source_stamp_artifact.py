@@ -76,7 +76,7 @@ class _Manager(BaseManager, ObservableMixin):
     def initialize(self) -> bool:
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
 

@@ -74,7 +74,7 @@ class SQLManager(BaseManager, ObservableMixin):
             self.report_error(e, context="sql_manager.initialize", module="sql_module")
             raise
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Освободить ресурсы пула."""
         if self._adapter:
             self._adapter.dispose()

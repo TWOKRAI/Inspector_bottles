@@ -44,7 +44,7 @@ class _Probe(BaseManager, ObservableMixin):
     def initialize(self) -> bool:  # noqa: D102 — абстрактные слоты базы, телу здесь нечего делать
         return True
 
-    def shutdown(self) -> bool:  # noqa: D102
+    def _on_shutdown(self) -> bool:  # noqa: D102
         return True
 
 

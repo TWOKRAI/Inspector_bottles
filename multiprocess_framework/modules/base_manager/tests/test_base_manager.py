@@ -16,6 +16,7 @@ from ..interfaces import IBaseManager
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class ConcreteManager(BaseManager):
     """Минимальная конкретная реализация BaseManager для тестов."""
 
@@ -23,7 +24,7 @@ class ConcreteManager(BaseManager):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         self.is_initialized = False
         return True
 
@@ -50,8 +51,8 @@ class MockAdapter:
 # TestBaseManager
 # ---------------------------------------------------------------------------
 
-class TestBaseManager:
 
+class TestBaseManager:
     def test_creation_defaults(self):
         m = ConcreteManager("test_manager")
         assert m.manager_name == "test_manager"

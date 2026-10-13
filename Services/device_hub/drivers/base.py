@@ -99,7 +99,7 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Остановка менеджера."""
         self.disconnect()
         self.is_initialized = False

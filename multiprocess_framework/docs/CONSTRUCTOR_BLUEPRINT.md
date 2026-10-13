@@ -423,8 +423,8 @@ class CameraProcess(ProcessModule):
         self._set_fps(args["value"])
         return {"status": "ok"}
 
-    def shutdown(self) -> bool:
-        return super().shutdown()
+    def _on_shutdown(self) -> bool:
+        return super()._on_shutdown()
 ```
 
 ### 5.4 Точка входа (схема ПК → BIOS → загрузка)

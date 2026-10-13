@@ -71,7 +71,7 @@ class _Manager(BaseManager, ObservableMixin):
     def initialize(self) -> bool:
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
 
@@ -90,7 +90,7 @@ class _MixinFirstManager(BaseManager, ObservableMixin):
     def initialize(self) -> bool:
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
 
@@ -216,7 +216,7 @@ def _manager_with_error_slot(name: str, slot: Any) -> ObservableMixin:
         def initialize(self) -> bool:
             return True
 
-        def shutdown(self) -> bool:
+        def _on_shutdown(self) -> bool:
             return True
 
     return _M()
@@ -281,7 +281,7 @@ def _proxied_manager_with_error_slot(name: str, slot: Any) -> ObservableMixin:
         def initialize(self) -> bool:
             return True
 
-        def shutdown(self) -> bool:
+        def _on_shutdown(self) -> bool:
             return True
 
     return _M()
@@ -397,7 +397,7 @@ class _StampCostProbe(BaseManager, ObservableMixin):
     def initialize(self) -> bool:
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
     def log_info_unstamped(self, message: str, **kwargs: Any) -> None:

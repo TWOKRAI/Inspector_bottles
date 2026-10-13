@@ -199,7 +199,7 @@ class AuthManager(BaseManager, ObservableMixin):
         if changed:
             self._storage.save_roles(roles)
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Завершение: очищаем сессию."""
         self._current_user = None
         self.is_initialized = False

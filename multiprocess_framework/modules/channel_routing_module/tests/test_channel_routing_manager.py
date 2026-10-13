@@ -58,8 +58,8 @@ class _ConcreteManager(ChannelRoutingManager):
     def initialize(self) -> bool:
         return super().initialize()
 
-    def shutdown(self) -> bool:
-        return super().shutdown()
+    def _on_shutdown(self) -> bool:
+        return super()._on_shutdown()
 
 
 def _manager(**kwargs) -> _ConcreteManager:
