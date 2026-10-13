@@ -1,7 +1,7 @@
 # lifecycle-owner-scope — один владелец для всего, что нужно закрыть
 
 - **Slug:** `lifecycle-owner-scope` · **Ветка:** `feat/lifecycle-owner-scope` (worktree `.claude/worktrees/lifecycle`) · **Дата:** 2026-10-03
-- **Статус:** ПЕРЕСТРОЕН 2026-10-05 — Ф0 0.1–0.4 DONE на ветке; дальше одна задача T1 (политика памяти GUI-процесса), остальное FROZEN или передано в мегаплан GUI. См. «Перестройка 2026-10-05» ниже.
+- **Статус:** ЗАКРЫТ 2026-10-13 на достигнутом (решение владельца): Ф0 (0.1–0.5), T1, Ф1 до 1.2b включительно DONE; 1.3–1.5, Ф2–Ф6 — FREEZE, не KILL (код, тесты и стражи остаются; причины и потребители — таблица «Заморожено»). Хвосты 1.2b Т-1…Т-4 — в очереди координатора. История: «Перестройка 2026-10-05».
 - **Слой:** framework (`base_manager`, `event_module`, `process_module`, `process_manager_module`, `worker_module`, `frontend_module`, `registers_module`, `router_module`, `state_store_module`, `channel_routing_module`, `config_module`, `actions_module`, `service_module`, `shared_resources_module`), Services, Plugins, прототип (frontend), `backend_ctl`
 - **Основание:** решение владельца 2026-10-03 («переделать так, чтобы подобных проблем не было»; «универсальный механизм у всех»; «каждый модуль отвечает за свой функционал, без дублирования, через интерфейсы, без костылей»). Триггер — аварийное завершение `run_framework_tests` ~1 из 4 (Task 5.5d плана `transport-single-policy`).
 - **Архитектура и доказательства:** [`DESIGN.md`](DESIGN.md). Диаграммы для чтения: [`docs/diagrams/lifecycle/lifecycle-system.html`](../../docs/diagrams/lifecycle/lifecycle-system.html).
@@ -44,8 +44,8 @@ abort» — abort закрывает политика памяти GUI-проц�
 | 0.1–0.3 `Scope`/`Handle`, `Subscribers`, канал `emits_after_close` | DONE, заморожены до потребителя | лечат ханг останова и утечки подписок, не abort; потребитель — Ф1 или мегаплан GUI |
 | 0.4 `qt_lifetime` | DONE, используется | правило «Qt-объект умирает на своём потоке» — вход мегаплана GUI |
 | 0.5 стражи | ВОЗОБНОВЛЕНА 2026-10-11 по слову владельца (очередь п.2): G2, G3, G4, G6, G10 и проба abort сделаны (0.5a, 0.5b); G5 вынесен — в мегаплан GUI | счётчик Qt-мусора на тест (храповик) — в мегаплан GUI; под T1 `SAVEALL`-колбэк делает мусор бессмертным (урок `feedback_gc_saveall_census_under_a_freezing_boundary_keeps_garbage_forever.md`) |
-| Ф1 останов процесса | ВОЗОБНОВЛЕНА 2026-10-12 по слову владельца (очередь Ж 1.1); 1.1, 1.2a сделаны, 1.2b-1, 1.2b-2, 1.2b-ki, 1.2b-3 сделаны; Ф2/Ф5 ждут решения владельца | отдельная проблема (5-с ханг); по приоритету владельца |
-| Ф2, Ф5 | ВОЗОБНОВЛЕНЫ 2026-10-12 по очереди владельца (`14b610faf`): Ф2 (2.1, 2.2) после 1.2b; Ф5 (5.1–5.3) — исключение из О-16 только ради гейта abort | прежняя запись: заменены мегапланом GUI; остальные требования GUI — по-прежнему в мегаплане: требования в мегаплан GUI: Qt-объекты создаются и умирают на главном потоке; MVP без сильных циклов view↔presenter; `QTimer` с родителем; без лямбд, держащих виджет, на `destroyed`; `QObject` не создаётся в `QRunnable`; храповик Qt-мусора на тест |
+| Ф1 останов процесса | DONE до 1.2b включительно (1.1, 1.2a, 1.2b-1, 1.2b-2, 1.2b-ki `427c3cba0`, 1.2b-3 `4bd81f468`); 1.3–1.5 — FREEZE (строка ниже) | 5-с ханг: 0/30 до и после 1.2a (`reports/1.2.stand.md`); хвосты 1.2b — в очереди координатора |
+| Ф2, Ф5 | FREEZE, не KILL — решение владельца 2026-10-13: требования уходят в [мегаплан GUI](../2026-09-22_gui-service/plan.md); abort закрыт T1 (`4c82e0167`, в main с 2026-10-07; 2026-10-13 — 3 полных прогона без abort), вердикт CTO 2026-10-05 «Ф5 закрывает abort» отвергнут, нынешний GUI будет заменён | требования 2.1, 2.2, 5.1–5.3 и гейт abort (in-suite проба 3×, G5 ноль по frontend) — вход мегаплана GUI; возврат — по потребителю |
 | 1.3, 1.4, 1.5, Ф3, Ф4, Ф6 | FREEZE — решение владельца 2026-10-12 (очередь `14b610faf`) | ханг 0/30 до и после 1.2a (`reports/1.2.stand.md`); возврат — по потребителю |
 
 **Требование к мегаплану GUI (сценарий «панель — отдельное устройство»):** одна архитектура, два развёртывания.
@@ -108,14 +108,20 @@ GUI-процесса (виден как `foreign_collections`, в `chain` = 1); 
 - Task 1.2: разделена лидом 2026-10-12 на 1.2a и 1.2b по замеру брифа (1.2a ≈ 20 файлов; 1.2b ≈ 52 файла однотипной правки: 47 подклассов `BaseManager`, свой `shutdown()` у 33) — `tasks/1.2a.md`, `tasks/1.2b.inventory.md` [SUPERSEDED 2026-10-12 — разделена на 1.2a и 1.2b]
 - Task 1.2a: корень процесса planes | transport | work с барьерами, `stop()` = `cancel()`, один close в раннере, `os._exit` при выживших, G7, удаление хука `_before_observability_teardown`, долги stop-ownership, читатель `stop_budget` [DONE 2026-10-12 — a4fcae8b6, исправление 1.1 b8b961afc; слияние в main — коммит «merge: lifecycle-owner-scope 1.2a»; стенд 30+30: медиана 2,03 → 1,76 с, ханг 0/30 до и после; tasks/1.2a.result.md] (после 1.1)
 - Task 1.2b: `BaseManager.scope` + шаблонный `shutdown()` — кодмод подклассов по слоям [DONE — 1.2b-1 DONE 2026-10-12 (`a0354d823`, `5e65823fa`; `tasks/1.2b-1.result.md`); 1.2b-2 DONE 2026-10-13 (`005df1350`; `tasks/1.2b-2.result.md`, `reports/1.2b-2.full-run.md`); 1.2b-ki DONE 2026-10-13 (`tasks/1.2b-ki.result.md`, `reports/1.2b-ki.injections-run.md`); 1.2b-3 DONE 2026-10-13 (`tasks/1.2b-3.result.md`, `reports/1.2b-3.injections-run.md`, `reports/1.2b-3.full-run.md`)] (после 1.2a)
+  - Хвосты 1.2b (2026-10-13; задачи без брифа, после решения владельца по Ф2/Ф5; подробности — `docs/claude/OPEN_QUESTIONS.md`, разделы 1.2b-ki и 1.2b-3):
+    - [ ] Т-1: повторная инициализация по решению владельца (ADR-BM-009 «Повторная инициализация») — сброс записи жизни в цикле `initialize()` → `shutdown()`, повторная привязка области, hazard-тест на гонку со ждущим; не тривиально.
+    - [ ] Т-2: G-28 по эффекту тела (`DeviceManager._save` и отключение драйверов, останов потока `AuditWriter`) — тесты.
+    - [ ] Т-3: Post `IBaseManager.shutdown` о `BaseException` (тело и `scope.close()`).
+    - [ ] Т-4: живой поток `Scope` после `KeyboardInterrupt` в записи не попадает в `survivors` (`lifetime.py`) — механизм, нужен бриф.
+    - [x] Т-5: документы — примеры `ProcessModule` с `super()._on_shutdown()`, заголовок ADR-BM-009 без «мягкий режим», счётчик STATUS (ветка `docs/lifecycle-1.2b-tails`).
 - Task 1.3: WorkerManager и PluginContext на области, G8 [DEFERRED 2026-10-12 — FREEZE, очередь владельца `14b610faf`] (после 1.2b)
 - Task 1.4: наблюдаемость процесса как ручки сегмента planes, перенос полезного из 5.5d [DEFERRED 2026-10-12 — FREEZE, очередь владельца `14b610faf`] (после 1.2a)
 - Task 1.5: стенд и приёмка Ф1 [DEFERRED 2026-10-12 — FREEZE, очередь владельца `14b610faf`] (после 1.3, 1.4)
-- Task 2.1: регистры GUI на Subscribers с owner [PENDING] (после 1.2b)
-- Task 2.2: презентеры и Python-owned QObject компонентов на attach_qt, G5 fail в components [PENDING] (после 2.1)
-- Task 5.1: вкладки, формы, окна, bindings, ThreadManager на области [PENDING] (после 2.2)
-- Task 5.2: корень GUI и рестарт UI, слушатели моста [PENDING] (после 5.1)
-- Task 5.3: гейт abort — in-suite проба 3 раза и G5 ноль по frontend [PENDING] (после 5.2)
+- Task 2.1: регистры GUI на Subscribers с owner [DEFERRED 2026-10-13 — FREEZE, решение владельца: требования в мегаплан GUI] (после 1.2b)
+- Task 2.2: презентеры и Python-owned QObject компонентов на attach_qt, G5 fail в components [DEFERRED 2026-10-13 — FREEZE, решение владельца: требования в мегаплан GUI] (после 2.1)
+- Task 5.1: вкладки, формы, окна, bindings, ThreadManager на области [DEFERRED 2026-10-13 — FREEZE, решение владельца: требования в мегаплан GUI] (после 2.2)
+- Task 5.2: корень GUI и рестарт UI, слушатели моста [DEFERRED 2026-10-13 — FREEZE, решение владельца: требования в мегаплан GUI] (после 5.1)
+- Task 5.3: гейт abort — in-suite проба 3 раза и G5 ноль по frontend [DEFERRED 2026-10-13 — FREEZE, решение владельца: требования в мегаплан GUI] (после 5.2)
 - Task 3.1: EventBus, ActionBus, события SRM на Subscribers [DEFERRED 2026-10-12 — FREEZE, очередь владельца `14b610faf`] (после 5.3)
 - Task 3.2: StateProxy и Config с owner [DEFERRED 2026-10-12 — FREEZE, очередь владельца `14b610faf`] (после 3.1)
 - Task 3.3: роутер — ручки обработчиков и push-слушателей [DEFERRED 2026-10-12 — FREEZE, очередь владельца `14b610faf`] (после 3.1)

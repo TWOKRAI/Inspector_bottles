@@ -43,7 +43,7 @@ class MyProcess(ProcessModule):
         """Завершение работы процесса."""
         self.log_info("Завершение MyProcess...")
         self.is_initialized = False
-        return True
+        return super()._on_shutdown()  # корень процесса закрывает ProcessModule
 
     def run(self):
         """Основной цикл процесса."""
@@ -379,7 +379,7 @@ class SimpleProcess(ProcessModule):
 
     def _on_shutdown(self) -> bool:
         self.log_info(f"Final counter: {self.counter}")
-        return True
+        return super()._on_shutdown()  # корень процесса закрывает ProcessModule
 
 # Запуск
 process = SimpleProcess("simple")

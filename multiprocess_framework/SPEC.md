@@ -357,7 +357,8 @@ class HelloProcess(ProcessModule):
             stop_event.wait(timeout=1.0)
 
     def _on_shutdown(self) -> bool:
-        return True
+        # Своё тело останова — здесь; корень процесса закрывает super()._on_shutdown().
+        return super()._on_shutdown()
 
 
 if __name__ == "__main__":

@@ -189,7 +189,8 @@ frontend-constructor, rework, backend-ctl-review-remediation, transport-single-p
 abort — здесь, в мегаплане GUI (`gui-service` + `gui-constructor` + `frontend-constructor`). **Первый пункт мегаплана —
 инвариант, который держится устройством кода:** `QObject` рождается и умирает только на главном потоке; между потоками —
 только данные (сигнал/очередь); время жизни — через scope-владельца без сильных циклов view↔presenter; храповик Qt-мусора
-на тест. `apps/gui_client` ставит `install_gui_memory_policy(app, log=…)` сразу после `QApplication`. Полный черновик
+на тест. `apps/gui_client` ставит `install_gui_memory_policy(app, log=…)` сразу после `QApplication`.
+Переданы 2026-10-13 (FREEZE в источнике, решение владельца): требования Ф2 и Ф5 трека `lifecycle-owner-scope` — регистры GUI на `Subscribers` с owner (2.1), презентеры и Python-owned `QObject` на `attach_qt` с G5 fail в components (2.2), вкладки, формы, окна, bindings, `ThreadManager` на областях (5.1), корень GUI и рестарт UI, слушатели моста (5.2), гейт abort — in-suite проба 3× и G5 ноль по frontend (5.3). Полный черновик
 требований и остаточные пути — в [`plan.md`](../2026-10-03_lifecycle-owner-scope/plan.md) трека, раздел «Решение
 владельца 2026-10-06».
 
