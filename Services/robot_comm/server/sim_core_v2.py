@@ -67,7 +67,8 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
     [v2] SC end id=<id> done_n=<n>         конец сценария (успех или обрыв)
     [v2] CVT grip seq=<seq> x=<мм> y=<мм>  захват в следимой точке
     [v2] CVT miss seq=<seq> x=<мм> y=<мм>  промах (перед строкой ERR E_ZONE_TRIP)
-    [v2] SC rec id=<id> i=<n> kind=<KIND> spd=<pct>      старт хода записи n (только при ``trace_sc=True``)
+    [v2] SC rec id=<id> i=<n> kind=<KIND> spd=<pct> acc=<accel> accur=<0|1>
+                                           старт хода записи n (только при ``trace_sc=True``)
     [v2] SC act id=<id> i=<n> act=<ACT> val=<aparam>     действие записи n исполнено (только при ``trace_sc=True``)
 
 Хук наблюдения (T3.5): ``RobotSimCoreV2(..., trace_sc=True)`` — ручка наблюдаемости,
@@ -78,8 +79,10 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
 
 Реализовано в T2.3, часть A (protocol-spec §7, §3.4 ``TLM_SC_*``/``TLM_SPD_PCT``):
 
-- ``SC_RUN(count, sc_id, offset)``: ``count`` вне ``1..SC_CAP`` или
-  ``offset+count > SC_CAP`` -> NAK ``E_SC_COUNT``; затем ``E_NO_SERVO``; затем
+- ``SC_RUN(count, sc_id, offset, spd_pct, accel, accur)``: ``count`` вне ``1..SC_CAP`` или
+  ``offset+count > SC_CAP`` -> NAK ``E_SC_COUNT``; затем стартовое состояние
+  (T3.9: ноль — умолчание параметра, ``accur`` кодом +1, вне диапазона -> NAK
+  ``E_RANGE`` [``R_APARAM``] без следов); затем ``E_NO_SERVO``; затем
   ВЕСЬ срез проверяется до движения (KIND, ACTION, APARAM, точка в зоне, отрезок
   LINE/LINE_PASS — первый от текущей позы, последняя запись не LINE_PASS, рука
   §7.3, пределы суставов JOINT — тем же путём, что ``_check_motion``,
@@ -101,7 +104,8 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
 - ``DELAY_MS`` — миллисекунды ВРЕМЕНИ SIM: копится сумма ``dt_s`` из
   ``tick``, стенные часы не читаются; на тике прихода пауза не завершается.
   ``DELAY_MS=0`` — без паузы.
-- ``SPEED_PCT``/``ACCEL``/``ACCUR`` живут в состоянии сценария до его конца
+- ``SPEED_PCT``/``ACCEL``/``ACCUR`` живут в состоянии сценария до его конца;
+  начальные значения — из аргументов ``SC_RUN`` (T3.9)
   (``ACCEL``/``ACCUR`` только хранятся — разгон и точность sim не моделирует);
   на любом выходе действуют снова ``P_SPD_DEFAULT``/``P_ACC_L``/
   ``P_ACCUR_DEFAULT`` (``_values`` сценарий не трогает). Стоп DO не трогает;
@@ -1346,7 +1350,10 @@ class RobotSimCoreV2:
         )
         self._active["sc"] = sc
         if self._trace_sc:
-            self._emit(f"[v2] SC rec id={sc['id']} i={sc['i'] + 1} kind={_KIND_NAME[rec['kind']]} spd={sc['spd_pct']}")
+            self._emit(
+                f"[v2] SC rec id={sc['id']} i={sc['i'] + 1} kind={_KIND_NAME[rec['kind']]} "
+                f"spd={sc['spd_pct']} acc={sc['accel']} accur={sc['accur']}"
+            )
 
     def _sc_trace_act(self, sc: dict, rec: dict) -> None:
         """T3.5: строка `SC act` — действие записи применено (только при `trace_sc`)."""
@@ -1646,11 +1653,14 @@ class RobotSimCoreV2:
         return ACK, 0, 0, []
 
     def _op_sc_run(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
-        """SC_RUN (§7.2): E_SC_COUNT -> E_NO_SERVO -> весь срез (`_sc_validate`) -> ход."""
-        count, sc_id, offset = args
+        """SC_RUN (§7.2): E_SC_COUNT -> стартовое состояние -> E_NO_SERVO -> весь срез (`_sc_validate`) -> ход."""
+        count, sc_id, offset, spd_pct, accel, accur = args
         cap = CONSTANTS["SC_CAP"]
         if not (1 <= count <= cap) or offset + count > cap:
             return NAK, ERR["E_SC_COUNT"], 0, []
+        acc_meta = PARAMS[PARAM_ID["P_ACC_L"]]
+        if spd_pct > 100 or (accel != 0 and not acc_meta["min"] <= accel <= acc_meta["max"]) or accur > 2:
+            return NAK, ERR["E_RANGE"], 1, [REASON["R_APARAM"]]
         if self.regs[REG["TLM_SERVO"]] == 0:
             return NAK, ERR["E_NO_SERVO"], 0, []
         records, nak = self._sc_validate(offset, count)
@@ -1661,9 +1671,10 @@ class RobotSimCoreV2:
             "count": count,
             "records": records,
             "i": 0,
-            "spd_pct": self._values[PARAM_ID["P_SPD_DEFAULT"]],
-            "accel": self._values[PARAM_ID["P_ACC_L"]],
-            "accur": self._values[PARAM_ID["P_ACCUR_DEFAULT"]],
+            "spd_pct": spd_pct or self._values[PARAM_ID["P_SPD_DEFAULT"]],
+            "accel": accel or self._values[PARAM_ID["P_ACC_L"]],
+            # на проводе accur сдвинут (0 не задано, 1 ROUGH, 2 HIGH); в sc хранится значение 0/1
+            "accur": accur - 1 if accur else self._values[PARAM_ID["P_ACCUR_DEFAULT"]],
         }
         self.regs[REG["TLM_SC_ID"]] = sc_id
         self.regs[REG["TLM_SC_TOTAL"]] = count

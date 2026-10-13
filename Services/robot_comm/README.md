@@ -280,7 +280,7 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   `RobotClientV2.WRAPPERS` («опкод -> имя метода», ключи == `set(OP)`): `ping() -> rvals`, `clear_err()`,
   `ptp_move(x, y, z, rz, kind, spd_pct)`, `home(spd_pct)`, `jog_step(dx, dy, dz, drz, spd_pct)`,
   `jog_cont(direction, speed)`, `cvt_job(ecap, pick_x, pick_y, pick_z, flags, place_x, place_y, place_z, place_rz)`
-  (`ecap` u32 делится на `dw_lo`/`dw_hi`), `sc_run(count, sc_id, offset)`, `servo(on)`, `do_set(channel, on)`,
+  (`ecap` u32 делится на `dw_lo`/`dw_hi`), `sc_run(count, sc_id, offset, spd_pct=0, accel=0, accur=0)` (стартовое состояние сценария кодами провода: 0 — не задано, `accur` 1 ROUGH / 2 HIGH; диапазон проверяет робот, NAK `E_RANGE`), `servo(on)`, `do_set(channel, on)`,
   `param_set(name, raw)`, `param_get(name) -> int` (знаковый параметр — s16), `param_apply()`. Координаты обёрток — в мм и °, кодируются шагом
   провода (×`WIRE_SCALE`, половина от нуля), не `round_step`; `kind` — имя из `KIND`, параметр — имя из `PARAM_ID`.
   Обёртки — только `cmd()`: ждать завершения — вызывающему (`wait_done(result.seq)`).
@@ -297,7 +297,8 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   (`SC_CAP // 2` = 27 записей, смещения 0, 27, 0, …; запись 54 не используется). Кодирование и нарезка — целиком до
   первой записи. Кусок k: метка стопа -> `SC_RUN` -> метка после ACK (взведена -> `stop(HARD)` и `RobotAborted`) ->
   загрузка куска k+1 в другую половину -> `wait_done`. `on_progress(done, total)` — по `TLM_SC_INDEX` (пишется только
-  на EXACT-точках) и `(total, total)` в конце. `RunReport.chunks` — `(start, count, offset)`. `RunReport` не
+  на EXACT-точках) и `(total, total)` в конце. `SC_RUN` куска k+1 несёт состояние конца куска k — последние
+  SPEED_PCT / ACCEL / ACCUR записей `0..end_k` (protocol-spec §7.4, T3.9). `RunReport.chunks` — `(start, count, offset)`. `RunReport` не
   экспортируется из `core` — импорт из `Services.robot_comm.core.client_v2`.
 - **Граница куска — только EXACT-запись** (KIND ≠ LINE_PASS). Ряд из 27 и более LINE_PASS подряд не делится на куски:
   `CompileError` до любой записи. Генераторам (T3.4): EXACT не реже чем через 26 записей.

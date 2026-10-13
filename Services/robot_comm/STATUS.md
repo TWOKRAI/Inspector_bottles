@@ -54,6 +54,10 @@
   свободном порту, `ModbusDevice` + `RobotClientV2`, `RecordingCore` со штампами времени sim, рестарт на том же порту,
   дедлайн на каждый блокирующий вызов), хук `trace_sc` в `RobotSimCoreV2` (`SC rec` / `SC act`, выключен по умолчанию),
   тесты автора `tests/test_e2e_rig_v2.py`. Приёмка e2e `test_sim_e2e_v2.py` — слепой тестер, не сделана
+- [x] Состояние сценария на границе куска (T3.9, robot-protocol-v2): `SC_RUN` argc 3 -> 6 (`spd_pct`, `accel`, `accur`),
+  sim применяет стартовое состояние до первого движения (NAK `E_RANGE [R_APARAM]` вне диапазона), `run_chunks`
+  передаёт в кусок k+1 состояние конца куска k, след `SC rec` несёт `acc=`/`accur=`. Не сделано: обработчик `SC_RUN` в
+  прошивке (Ф4); `PROTO_VER` не поднят (`changes-rev2.md`)
 
 ## Не сделано / дальше
 

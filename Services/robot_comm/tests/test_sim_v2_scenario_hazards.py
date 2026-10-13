@@ -88,7 +88,7 @@ def pt(x: float, kind: int = KIND["LINE"], action: int = ACT["NONE"], aparam: in
 def test_soft_stop_waits_for_exact_point():
     core = ready_core()
     write_scenario(core, 0, [pt(400.0), pt(450.0, KIND["LINE_PASS"]), pt(500.0), pt(540.0)])
-    res = cmd(core, 2, OP["SC_RUN"], 4, 5, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 4, 5, 0, 0, 0, 0)
     assert res["status"] == ACK
     done_before = reg(core, "TLM_DONE_SEQ")
 
@@ -126,7 +126,7 @@ def test_soft_stop_waits_for_exact_point():
 def test_delay_ms_counts_sum_of_dt():
     core = ready_core()
     write_scenario(core, 0, [pt(420.0, action=ACT["DELAY_MS"], aparam=1000)])
-    assert cmd(core, 2, OP["SC_RUN"], 1, 5, 0)["status"] == ACK
+    assert cmd(core, 2, OP["SC_RUN"], 1, 5, 0, 0, 0, 0)["status"] == ACK
 
     tick_until(core, lambda: reg(core, "TLM_X") == 4200)
     assert reg(core, "TLM_ACTIVITY") == ACTIVITY_SCENARIO, "на тике прихода пауза не завершается"
@@ -168,7 +168,7 @@ def test_sc_record_nak_leaves_no_trace(offset, records, expected_rvals):
     core = ready_core()
     # Предыстория: успешный сценарий, чтобы TLM_SC_*/DO/поза были ненулевыми.
     write_scenario(core, 40, [pt(420.0, action=ACT["DO_ON"], aparam=3)])
-    assert cmd(core, 2, OP["SC_RUN"], 1, 10, 40)["status"] == ACK
+    assert cmd(core, 2, OP["SC_RUN"], 1, 10, 40, 0, 0, 0)["status"] == ACK
     tick_until(core, lambda: reg(core, "TLM_ACTIVITY") == 0)
     snapshot_names = (
         "TLM_X",
@@ -186,7 +186,7 @@ def test_sc_record_nak_leaves_no_trace(offset, records, expected_rvals):
     assert (before["TLM_X"], before["TLM_DO_MASK"], before["TLM_SC_ID"], before["TLM_SC_DONE_N"]) == (4200, 4, 10, 1)
 
     write_scenario(core, offset, records)
-    res = cmd(core, 3, OP["SC_RUN"], len(records), 77, offset)
+    res = cmd(core, 3, OP["SC_RUN"], len(records), 77, offset, 0, 0, 0)
     assert res["status"] == NAK
     assert res["errno"] == ERR["E_SC_RECORD"]
     assert res["rvals"] == expected_rvals
@@ -204,12 +204,12 @@ def test_sc_record_nak_leaves_no_trace(offset, records, expected_rvals):
 def test_sc_run_repeat_seq_is_idempotent():
     core = ready_core()
     write_scenario(core, 0, [pt(420.0)])
-    assert cmd(core, 2, OP["SC_RUN"], 1, 10, 0)["status"] == ACK
+    assert cmd(core, 2, OP["SC_RUN"], 1, 10, 0, 0, 0, 0)["status"] == ACK
     tick_until(core, lambda: reg(core, "TLM_ACTIVITY") == 0)
     assert reg(core, "TLM_X") == 4200
 
     write_scenario(core, 0, [pt(500.0)])  # буфер сменился — повтор seq всё равно не исполняется
-    res = cmd(core, 2, OP["SC_RUN"], 1, 20, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 1, 20, 0, 0, 0, 0)
     assert res["status"] == ACK
     assert res["seq"] == 2
     for _ in range(50):
@@ -229,7 +229,7 @@ def test_speed_pct_restored_after_hard_stop():
     core = ready_core()
     write_scenario(core, 0, [pt(400.0, action=ACT["SPEED_PCT"], aparam=50), pt(550.0, action=ACT["DO_OFF"], aparam=1)])
     assert cmd(core, 2, OP["DO_SET"], 1, 1)["status"] == ACK
-    assert cmd(core, 3, OP["SC_RUN"], 2, 5, 0)["status"] == ACK
+    assert cmd(core, 3, OP["SC_RUN"], 2, 5, 0, 0, 0, 0)["status"] == ACK
     assert reg(core, "TLM_SPD_PCT") == SPD_DEFAULT_PCT, "первый отрезок — на P_SPD_DEFAULT"
 
     tick_until(core, lambda: reg(core, "TLM_X") == 4000)
@@ -262,7 +262,7 @@ def test_speed_pct_register_restored_after_normal_done():
     что Override обычного хода вне сценария возвращается так же — здесь только путь ``SC_RUN``."""
     core = ready_core()
     write_scenario(core, 0, [pt(400.0, action=ACT["SPEED_PCT"], aparam=50), pt(450.0)])
-    assert cmd(core, 2, OP["SC_RUN"], 2, 5, 0)["status"] == ACK
+    assert cmd(core, 2, OP["SC_RUN"], 2, 5, 0, 0, 0, 0)["status"] == ACK
 
     tick_until(core, lambda: reg(core, "TLM_X") == 4000)
     assert reg(core, "TLM_SPD_PCT") == 50, "контроль: SPEED_PCT сценария действует до конца хода"

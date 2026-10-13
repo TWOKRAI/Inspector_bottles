@@ -1,4 +1,4 @@
-# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (cf6affdc)
+# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (d3c801e4)
 # не править руками; python -m Services.robot_comm.codegen
 
 REG = {
@@ -220,7 +220,7 @@ OP_SPEC = {
         "result": "done_seq",
     },
     "SC_RUN": {
-        "argc": 3,
+        "argc": 6,
         "busy": "deny",
         "args": [
             {
@@ -233,6 +233,18 @@ OP_SPEC = {
             },
             {
                 "name": "offset",
+                "type": "u16",
+            },
+            {
+                "name": "spd_pct",
+                "type": "u16",
+            },
+            {
+                "name": "accel",
+                "type": "u16",
+            },
+            {
+                "name": "accur",
                 "type": "u16",
             },
         ],

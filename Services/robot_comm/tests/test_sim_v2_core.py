@@ -691,7 +691,7 @@ def test_no_opcode_is_internal_error_after_t23():
     # (идемпотентный mailbox) и не исполнялся (зелёный вхолостую). После T2.3 нереализованных опкодов нет:
     # у каждого свой seq, и ни один не отвечает E_INTERNAL.
     core = fresh_core()
-    res_sc = cmd(core, 1, OP["SC_RUN"], 0, 0, 0)  # count=0 вне 1..SC_CAP
+    res_sc = cmd(core, 1, OP["SC_RUN"], 0, 0, 0, 0, 0, 0)  # count=0 вне 1..SC_CAP
     assert res_sc["seq"] == 1
     assert res_sc["status"] == NAK and res_sc["errno"] == ERR["E_SC_COUNT"]
     res_cvt = cmd(core, 2, OP["CVT_JOB"], *([0] * 10))

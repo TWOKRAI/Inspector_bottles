@@ -24,10 +24,22 @@ from Services.robot_comm.core import wire_v2
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.errors import RobotAborted, RobotNak, RobotTimeout
-from Services.robot_comm.programs import CompileError, Record, Scenario
+from Services.robot_comm.programs import (
+    Action,
+    CompileError,
+    FrameDef,
+    Move,
+    Point,
+    Program,
+    Record,
+    Scenario,
+    compile_program,
+)
+from Services.robot_comm.programs.generators import draw
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 from Services.robot_comm.server.sim_robot import SimRobotServer
 from Services.robot_comm.testing.fake_transport import FakeRobotTransport
+from Services.robot_comm.tests.e2e_rig_v2 import WS_PARAMS
 
 # --- литералы протокола (protocol-spec §2, §3, §7) ------------------------------------------
 CMD_FLAG, CMD_SEQ = 0x1000, 0x1001
@@ -168,7 +180,7 @@ def is_cmd_tx(ops: list[tuple]) -> bool:
 
 
 def sc_run_of(entry: tuple) -> tuple[int, list[int]] | None:
-    """(seq, [count, sc_id, offset]) для записи журнала SC_RUN, иначе None."""
+    """(seq, [count, sc_id, offset, spd_pct, accel, accur]) для записи журнала SC_RUN, иначе None."""
     if entry[0] != "tx" or not is_cmd_tx(entry[1]):
         return None
     seq, opcode, _argc, *args = entry[1][0][2]
@@ -221,8 +233,8 @@ def test_offsets_alternate() -> None:
     report = bounded(lambda: rig.client.run_chunks(circle(60), params=PARAMS))
     log = rig.transport.log
     runs = [sc_run_of(e)[1] for e in log if sc_run_of(e) is not None]
-    assert [offset for _count, _sc_id, offset in runs] == [0, 27, 0]
-    assert [sc_id for _count, sc_id, _offset in runs] == [1, 2, 3]
+    assert [offset for _count, _sc_id, offset, *_ in runs] == [0, 27, 0]
+    assert [sc_id for _count, sc_id, _offset, *_ in runs] == [1, 2, 3]
     assert [c[2] for c in report.chunks] == [0, 27, 0]
     run_at = run_indices(log)
     first_block = [next(i for i in range(len(log)) if is_buf_tx(log[i]))]
@@ -238,6 +250,64 @@ def test_fc16_blocks_le_write_chunk() -> None:
     assert sizes
     assert max(sizes) <= WRITE_CHUNK
     assert WRITE_CHUNK in sizes
+
+
+# --- T3.9: стартовое состояние SC_RUN куска k+1 = состояние конца куска k -------------------
+
+_SHEET = FrameDef(name="sheet", origin=(300, -100, -100), on_x=(400, -100, -100), in_plane=(300, 0, -100))
+_STROKE100 = (tuple((0.5 * j, 20) for j in range(100)),)
+_ACC30_POINTS = {f"p{j}": Point(name=f"p{j}", x=300 + 5 * j, y=-100, z=-100, rz=0, hand=1) for j in range(30)}
+
+
+def _acc30(*, accur_zero_after_p2: bool) -> Scenario:
+    """30 записей: ACCEL 30000 после записи 1, ACCUR 1 после записи 2 (и ACCUR 0 после записи 3 у ``ACC30Z``)."""
+    steps: list[Move | Action] = [
+        Move(point="p0", kind="JOINT"),
+        Action(act="ACCEL", value=30000),
+        Move(point="p1", kind="LINE"),
+        Action(act="ACCUR", value=1),
+    ]
+    for j in range(2, 30):
+        steps.append(Move(point=f"p{j}", kind="LINE"))
+        if accur_zero_after_p2 and j == 2:
+            steps.append(Action(act="ACCUR", value=0))
+    program = Program(name="acc30z" if accur_zero_after_p2 else "acc30", steps=tuple(steps))
+    return compile_program(program, _ACC30_POINTS, {}, WS_PARAMS)
+
+
+def _stroke100() -> Scenario:
+    gp = draw(_STROKE100, frame="sheet", hand=1, rz=0.0, pen_down=0.0, pen_up=5.0)
+    return compile_program(gp.program, gp.points, {"sheet": _SHEET}, WS_PARAMS)
+
+
+def test_run_chunks_passes_end_state_of_previous_chunk() -> None:
+    """``SC_RUN`` куска k+1 несёт последние SPEED_PCT / ACCEL / ACCUR записей ``0..end_k``; кусок 1 — нули.
+
+    По журналу записей (``sc_run_of``): ``[count, sc_id, offset, spd_pct, accel, accur]``. Штрих 100 точек (SPEED_PCT
+    30 в записи 1, 100 в записи 100): куски 2-5 идут на 30, последний кусок свою 100 не передаёт никому.
+    ``ACC30`` — ACCEL 30000 и ACCUR 1 (HIGH, кодом 2). ``ACC30Z`` — после ACCUR 1 стоит ACCUR 0: ROUGH уходит
+    кодом 1, а не 0 «не задано» (ловушка совпавших констант: ``P_ACCUR_DEFAULT`` тоже 0). НЕ доказывает: влияние
+    ACCEL/ACCUR на движение (sim их только хранит), прошивку (обработчик ``SC_RUN`` — Ф4).
+    """
+    cases = [
+        (
+            _stroke100(),
+            [
+                [2, 1, 0, 0, 0, 0],
+                [27, 2, 27, 30, 0, 0],
+                [27, 3, 0, 30, 0, 0],
+                [27, 4, 27, 30, 0, 0],
+                [19, 5, 0, 30, 0, 0],
+            ],
+        ),
+        (_acc30(accur_zero_after_p2=False), [[27, 1, 0, 0, 0, 0], [3, 2, 27, 0, 30000, 2]]),
+        (_acc30(accur_zero_after_p2=True), [[27, 1, 0, 0, 0, 0], [3, 2, 27, 0, 30000, 1]]),
+    ]
+    for scenario, expected in cases:
+        rig = Rig()
+        bounded(lambda scenario=scenario, rig=rig: rig.client.run_chunks(scenario, params=WS_PARAMS), 120.0)
+        runs = [sc_run_of(e)[1] for e in rig.transport.log if sc_run_of(e) is not None]
+        assert runs == expected
 
 
 # ============================================================================================

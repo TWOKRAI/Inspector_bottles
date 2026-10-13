@@ -60,6 +60,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from Services.robot_comm.core import wire_v2
 from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID, PARAMS
 from Services.robot_comm.core.protocol_v2 import (
+    ACT,
     CONSTANTS,
     ERR,
     ERR_TEXT,
@@ -862,9 +863,14 @@ class RobotClientV2:
         place = _geom_words(place_x, place_y, place_z, place_rz)
         return self.cmd("CVT_JOB", [ecap_value & 0xFFFF, ecap_value >> 16, *pick, flags, *place])
 
-    def sc_run(self, count: int, sc_id: int, offset: int) -> CmdResult:
-        """SC_RUN: ``count`` записей буфера с ``offset``. Ждать — ``wait_done(result.seq)``."""
-        return self.cmd("SC_RUN", [count, sc_id, offset])
+    def sc_run(
+        self, count: int, sc_id: int, offset: int, spd_pct: int = 0, accel: int = 0, accur: int = 0
+    ) -> CmdResult:
+        """SC_RUN: ``count`` записей буфера с ``offset``. Ждать — ``wait_done(result.seq)``.
+
+        Стартовое состояние — коды провода как есть (0 не задано; ``accur``: 1 ROUGH, 2 HIGH); диапазон проверяет робот.
+        """
+        return self.cmd("SC_RUN", [count, sc_id, offset, spd_pct, accel, accur])
 
     def servo(self, on: bool) -> CmdResult:
         """SERVO."""
@@ -946,7 +952,8 @@ class RobotClientV2:
         Кодирование (``wire_v2.encode_scenario`` с ``round_step`` конфига) и нарезка (``plan_chunks``, половина
         ``SC_CAP // 2``) — целиком до первой записи. Кусок k: метка стопа -> ``SC_RUN`` -> метка после ACK ->
         загрузка куска k+1 в другую половину -> ``wait_done``. ``on_progress(done, total)`` — при изменении числа
-        пройденных записей (``TLM_SC_INDEX``) и ``(total, total)`` после последнего DONE.
+        пройденных записей (``TLM_SC_INDEX``) и ``(total, total)`` после последнего DONE. ``SC_RUN`` куска k+1 несёт
+        состояние конца куска k (protocol-spec §7.4).
 
         Метка стопа: поколение стопа клиента сменилось или ``TLM_STOP_ACK`` отличается от прочитанного в начале
         (стоп другого клиента виден только на чтениях TLM — до загрузки и после ACK SC_RUN; внутри загрузки — только
@@ -967,12 +974,13 @@ class RobotClientV2:
         if not spans:
             raise ValueError("сценарий пуст")
         chunks = tuple((start, count, 0 if k % 2 == 0 else half) for k, (start, count) in enumerate(spans))
+        states = _chunk_start_states(words, chunks)
         with self._state_lock:
             if self._sc_active:
                 raise RuntimeError("run_chunks уже идёт на этом клиенте")
             self._sc_active = True
         try:
-            self._run_chunks(words, chunks, on_progress)
+            self._run_chunks(words, chunks, states, on_progress)
         finally:
             with self._state_lock:
                 self._sc_active = False
@@ -982,6 +990,7 @@ class RobotClientV2:
         self,
         words: Sequence[Sequence[int]],
         chunks: Sequence[tuple[int, int, int]],
+        states: Sequence[tuple[int, int, int]],
         on_progress: Callable[[int, int], None] | None,
     ) -> None:
         total = len(words)
@@ -1010,7 +1019,7 @@ class RobotClientV2:
                     raise RobotAborted(seq, ERR["E_ABORTED"], "стоп между кусками")
                 started = True
                 try:
-                    seq = self.sc_run(count, k + 1, offset).seq
+                    seq = self.sc_run(count, k + 1, offset, *states[k]).seq
                 except RobotAborted as o5:
                     # О5: клиент повторил стоп без ожидания эха — вернуть управление, когда робот остановился.
                     self._wait_robot_stopped(o5.seq)
@@ -1092,6 +1101,30 @@ def _kind_code(kind: str) -> int:
     if code is None:
         raise ValueError(f"kind: неизвестный вид хода; допустимы: {', '.join(KIND)}")
     return code
+
+
+def _chunk_start_states(
+    words: Sequence[Sequence[int]], chunks: Sequence[tuple[int, int, int]]
+) -> tuple[tuple[int, int, int], ...]:
+    """Стартовое состояние каждого куска ``(spd_pct, accel, accur)`` — кодами провода (protocol-spec §7.4).
+
+    Кусок 0 — нули. Кусок k > 0 — последние SPEED_PCT / ACCEL / ACCUR из записей ``0..end_{k-1}``
+    (``accur`` — значение + 1, ноль на проводе — «не задано»); действие, которого не было, — 0.
+    """
+    states = []
+    for k in range(len(chunks)):
+        spd_pct = accel = accur = 0
+        if k > 0:
+            for word in words[0 : chunks[k][0]]:
+                action, aparam = word[4] >> 8, word[5]
+                if action == ACT["SPEED_PCT"]:
+                    spd_pct = aparam
+                elif action == ACT["ACCEL"]:
+                    accel = aparam
+                elif action == ACT["ACCUR"]:
+                    accur = aparam + 1
+        states.append((spd_pct, accel, accur))
+    return tuple(states)
 
 
 def _param_id(name: str) -> int:
