@@ -39,7 +39,7 @@ class MyProcess(ProcessModule):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Завершение работы процесса."""
         self.log_info("Завершение MyProcess...")
         self.is_initialized = False
@@ -377,7 +377,7 @@ class SimpleProcess(ProcessModule):
                 self.log_info(f"Counter: {self.counter}")
             time.sleep(0.1)
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         self.log_info(f"Final counter: {self.counter}")
         return True
 

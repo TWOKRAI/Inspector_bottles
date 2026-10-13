@@ -263,9 +263,9 @@ def _classes_with_own_shutdown() -> dict[str, list[str]]:
     return result
 
 
-@pytest.mark.parametrize(("scope_name", "expected"), [("framework", 0), ("repo", 6)])
+@pytest.mark.parametrize(("scope_name", "expected"), [("framework", 0), ("repo", 0)])
 def test_static_own_shutdown_count(scope_name: str, expected: int) -> None:
-    """G-9: производственных потомков BaseManager со своим ``shutdown`` — 0 во фреймворке, 6 по шести корням."""
+    """G-9: производственных потомков BaseManager со своим ``shutdown`` — 0 по шести корням (1.2b-3)."""
     found = _classes_with_own_shutdown()
     if scope_name == "framework":
         offenders = found["multiprocess_framework"]
@@ -537,9 +537,9 @@ class CountingProc(ProcessModule):
         _Probe.close_calls += 1
         return super().close_root()
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         _Probe.shutdown_calls += 1
-        return super().shutdown()
+        return super()._on_shutdown()
 
 
 class DuckProc:

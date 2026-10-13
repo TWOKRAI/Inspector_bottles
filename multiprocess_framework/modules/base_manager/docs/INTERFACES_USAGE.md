@@ -34,7 +34,7 @@ class MyManager(BaseManager):
     def initialize(self) -> bool:
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
 # Проверка соответствия интерфейсу
@@ -144,7 +144,7 @@ def test_manager_implements_interface():
 
     class TestManager(BaseManager):
         def initialize(self): return True
-        def shutdown(self): return True
+        def _on_shutdown(self): return True
 
     manager = TestManager("test")
     assert isinstance(manager, IBaseManager)

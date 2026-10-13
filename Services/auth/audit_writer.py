@@ -22,6 +22,7 @@ AuditWriter — асинхронный писатель аудит-лога.
     writer.log(AuditEntry.with_truncation(...))
     writer.stop()
 """
+
 from __future__ import annotations
 
 import json
@@ -84,7 +85,7 @@ class AuditWriter(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Завершение: останавливаем фоновый поток с flush."""
         self.stop()
         self.is_initialized = False
@@ -107,9 +108,7 @@ class AuditWriter(BaseManager, ObservableMixin):
         # Восстановить записи из JSONL перед стартом основного потока
         recovered = self.recover_fallback()
         if recovered > 0:
-            self._log_info(
-                f"auth.audit.recover_fallback: count={recovered}, path={self._fallback_path!r}"
-            )
+            self._log_info(f"auth.audit.recover_fallback: count={recovered}, path={self._fallback_path!r}")
 
         self._thread = threading.Thread(
             target=self._worker,
@@ -182,10 +181,7 @@ class AuditWriter(BaseManager, ObservableMixin):
                     entries.append(entry)
                 except Exception as exc:
                     # Пропустить повреждённую строку, не падать
-                    self._log_warning(
-                        f"auth.audit.recover_fallback.skip_line: "
-                        f"lineno={lineno}, reason={exc!r}"
-                    )
+                    self._log_warning(f"auth.audit.recover_fallback.skip_line: lineno={lineno}, reason={exc!r}")
 
         if not entries:
             # Файл пуст или все строки повреждены — архивируем и выходим
@@ -200,8 +196,7 @@ class AuditWriter(BaseManager, ObservableMixin):
                 inserted += 1
             except Exception as exc:
                 self._log_warning(
-                    f"auth.audit.recover_fallback.insert_failed: "
-                    f"entry_id={entry.entry_id!r}, reason={exc!r}"
+                    f"auth.audit.recover_fallback.insert_failed: entry_id={entry.entry_id!r}, reason={exc!r}"
                 )
 
         self._archive_fallback()
@@ -279,7 +274,4 @@ class AuditWriter(BaseManager, ObservableMixin):
             archive_path = f"{self._fallback_path}.migrated.{ts}"
             os.rename(self._fallback_path, archive_path)
         except Exception as exc:
-            print(
-                f"[AuditWriter] Не удалось архивировать fallback-файл "
-                f"{self._fallback_path!r}: {exc!r}"
-            )
+            print(f"[AuditWriter] Не удалось архивировать fallback-файл {self._fallback_path!r}: {exc!r}")

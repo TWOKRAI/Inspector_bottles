@@ -13,7 +13,7 @@
 | Класс / Метод | Описание |
 |---|---|
 | **`BaseManager`** | Абстрактный базовый класс |
-| `initialize()` / `shutdown()` | Жизненный цикл: `initialize` — в подклассе; `shutdown()` — шаблон (закрыть `scope`, один раз `_on_shutdown()`), подкласс определяет `_on_shutdown` (ADR-BM-009) |
+| `initialize()` / `shutdown()` | Жизненный цикл: `initialize` — в подклассе; `shutdown()` — шаблон (закрыть `scope`, один раз `_on_shutdown()`), подкласс определяет `_on_shutdown` (ADR-BM-009); свой `shutdown` в теле подкласса — `TypeError` при определении класса (`__init_subclass__`, Task 1.2b-3) |
 | `_ON_SHUTDOWN_WAIT_S` | Срок тела во втором вызове `shutdown()`: ожидание = член области + атрибут (класс 5,0 с; экземпляр может переопределить; Task 1.2b-2) |
 | `scope` / `attach_scope(scope)` | Область менеджера (только чтение, `None` до привязки); привязывает корень процесса, повтор -> `RuntimeError` |
 | `attach_adapter(adapter, name)` / `get_adapter(name)` | Управление адаптерами |
@@ -82,7 +82,7 @@ class RouterManager(BaseManager, ObservableMixin):
         self._log_info("RouterManager starting")  # используем логирование
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         return True
 
     def route(self, message: dict) -> bool:

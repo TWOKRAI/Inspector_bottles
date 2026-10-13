@@ -71,7 +71,7 @@ class MultiManager(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self):
+    def _on_shutdown(self):
         self.is_initialized = False
         return True
 

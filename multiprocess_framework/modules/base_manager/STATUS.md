@@ -12,6 +12,8 @@
 
 **`BaseException` в `scope.close()` (Task 1.2b-ki, 2026-10-13, ADR-BM-009):** строка `scope.close прерван`, `_on_shutdown()` всё равно зовётся один раз, затем исключение уходит наверх; кэш `False`. Тесты: `test_ki_*` в `tests/test_base_manager_template_hazards.py` (8).
 
+**Принуждение Р1 (а) (Task 1.2b-3, 2026-10-13, ADR-BM-009):** `BaseManager.__init_subclass__` бросает `TypeError`, если подкласс определяет свой `shutdown`; Services 5, прототип 1 и 19 тестовых подклассов переименованы в `_on_shutdown`. Тесты: `tests/test_shutdown_final_1_2b_3_acceptance.py` (слепой тестер, 13).
+
 **Кодмод и срок второго вызова (Task 1.2b-2, 2026-10-13, ADR-BM-009):** 23 класса фреймворка переименовали `shutdown` в `_on_shutdown`; `_ON_SHUTDOWN_WAIT_S` (класс 5,0; `LoggerCore`/`RouterManager` 7,0; `ProcessModule` — экземпляр из бюджета корня); срок второго вызова = член области + атрибут.
 
 **Шаблонный `shutdown()` (Task 1.2b-1, 2026-10-12, ADR-BM-009):** `shutdown()` конкретный — закрывает `scope`, один раз зовёт `_on_shutdown()`; `scope`/`attach_scope`; мягкий режим (свои `shutdown` подклассов пока работают). Тесты: `tests/test_base_manager_template_acceptance.py` (слепой тестер, 10) + `tests/test_base_manager_template_hazards.py` (автор, 53); хранение — запись `_bm_life` в `__dict__`, строки шаблона — только вид.

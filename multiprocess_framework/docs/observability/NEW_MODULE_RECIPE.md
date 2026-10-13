@@ -29,7 +29,7 @@ class MyManager(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:              # ОБЯЗАТЕЛЕН — abstractmethod
+    def _on_shutdown(self) -> bool:         # тело останова; shutdown() — шаблон базы, не переопределять
         self.is_initialized = False
         return True
 ```

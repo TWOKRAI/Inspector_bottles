@@ -85,6 +85,20 @@ class BaseManager(IBaseManager):
     # сроком join/wait в теле ставит не меньше; экземпляр может переопределить.
     _ON_SHUTDOWN_WAIT_S: float = 5.0
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """
+        Р1 (а), Task 1.2b-3: свой ``shutdown`` в теле подкласса — ``TypeError``
+        при определении класса; тело останова — ``_on_shutdown``. ``super()``
+        первым: в MRO ``ErrorManager`` есть ``Protocol`` — без
+        ``Protocol.__init_subclass__`` класс наследует ``_is_protocol=True``,
+        и ``isinstance`` становится структурным.
+        """
+        super().__init_subclass__(**kwargs)
+        if "shutdown" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__module__}.{cls.__qualname__}: shutdown() финальный (ADR-BM-009) — определите _on_shutdown()"
+            )
+
     def __init__(self, manager_name: str, process: Optional[Any] = None):
         """
         Args:
@@ -112,8 +126,8 @@ class BaseManager(IBaseManager):
     def shutdown(self) -> bool:
         """
         Шаблон останова (Task 1.2b-1, ADR-BM-009). Подклассы определяют
-        ``_on_shutdown``, а не ``shutdown`` (мягкий режим: свои ``shutdown``
-        у подклассов пока разрешены и шаблон обходят — до 1.2b-2/1.2b-3).
+        ``_on_shutdown``; свой ``shutdown`` в теле подкласса — ``TypeError``
+        (Р1 (а), 1.2b-3).
 
         Первый вызов: ставит «идёт» и запоминает поток, закрывает привязанную
         ``scope``, затем один раз зовёт ``_on_shutdown()``; результат
@@ -193,7 +207,7 @@ class BaseManager(IBaseManager):
     def _on_shutdown(self) -> bool:
         """
         Тело останова подкласса; зовётся шаблоном ``shutdown()`` один раз,
-        после закрытия ``scope``. По умолчанию ничего не делает (мягкий режим).
+        после закрытия ``scope``. По умолчанию ничего не делает.
 
         Returns:
             True если завершение успешно
