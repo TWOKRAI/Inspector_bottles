@@ -41,3 +41,4 @@
 - [Неподключённый драйвер = ровный ноль](feedback_unconnected_driver_reads_as_a_clean_zero.md) — подтверждающий ноль засчитывать только в паре с контролем, дающим ненулевое
 - [Инъекция воспроизводит МЕХАНИЗМ, не форму](feedback_injection_must_reproduce_the_mechanism_not_the_shape.md) — реплика дефекта по форме может не ломать ничего (PEP 570); ноль красных проверять руками
 - [Субагенты пишут в scratchpad лида](feedback_subagents_share_the_leads_scratchpad.md) — ревьюер 6.1 затёр `inject.py` лида тем же именем; каждому агенту — своя подпапка `scratchpad/<роль><задача>/`
+- [Скрипт матрицы: CRLF и классификатор](feedback_injection_script_crlf_and_classifier.md) — точная замена в worktree находит 0 без нормализации `\r\n`; запуск субагентом режет авто-классификатор — разрешение владельца у лида, сухой прогон до окна
