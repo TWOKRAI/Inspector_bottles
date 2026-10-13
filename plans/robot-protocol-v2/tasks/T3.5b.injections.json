@@ -1,0 +1,153 @@
+[
+ {
+  "id": "I1",
+  "prop": "неверный опкод на проводе",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "(\"wm\", REG[\"CMD_SEQ\"], [seq, OP[op], len(words), *words])",
+  "new": "(\"wm\", REG[\"CMD_SEQ\"], [seq, OP[op] ^ 1, len(words), *words])",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "observed": null,
+  "test": null,
+  "note": ""
+ },
+ {
+  "id": "I2",
+  "prop": "wait_done возвращается сразу",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "        while True:\n            tlm = self._rd(_TLM_BASE, _TLM_COUNT)\n            if on_poll is not None:",
+  "new": "        while True:\n            return\n            tlm = self._rd(_TLM_BASE, _TLM_COUNT)\n            if on_poll is not None:",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
+  ],
+  "observed": null,
+  "test": null,
+  "note": "line_cycle и scene_job_done_t после wait_done ждут событие до 5,0 с — выживают"
+ },
+ {
+  "id": "I3",
+  "prop": "неверный seq на проводе",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "(\"wm\", REG[\"CMD_SEQ\"], [seq, OP[op], len(words), *words])",
+  "new": "(\"wm\", REG[\"CMD_SEQ\"], [(seq + 1) & 0xFFFF, OP[op], len(words), *words])",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "observed": null,
+  "test": null,
+  "note": ""
+ },
+ {
+  "id": "I4",
+  "prop": "probe отвергает v2",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "if proto == 0 or (proto >> 8) != _PROTO_MAJOR:",
+  "new": "if proto == 0 or (proto >> 8) == _PROTO_MAJOR:",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_belt_commands_on_v2",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_restart_after_shutdown_rebinds_port",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_status_protocol_matches_wire",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_tcp_reads_pmir_block",
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_v2_host_restarts_cleanly_under_real_worker_manager"
+  ],
+  "observed": null,
+  "test": null,
+  "note": ""
+ },
+ {
+  "id": "I5",
+  "prop": "param_get без перевода в s16",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "        if PARAMS[pid][\"signed\"] and raw >= 0x8000:\n            return raw - 0x10000\n        return raw",
+  "new": "        return raw",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
+  ],
+  "observed": null,
+  "test": null,
+  "note": ""
+ },
+ {
+  "id": "I6",
+  "prop": "servo всегда OFF",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "return self.cmd(\"SERVO\", [1 if on else 0])",
+  "new": "return self.cmd(\"SERVO\", [0])",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "observed": null,
+  "test": null,
+  "note": ""
+ },
+ {
+  "id": "I7",
+  "prop": "слова ecap местами",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "[ecap_value & 0xFFFF, ecap_value >> 16, *pick, flags, *place]",
+  "new": "[ecap_value >> 16, ecap_value & 0xFFFF, *pick, flags, *place]",
+  "forecast": [],
+  "observed": null,
+  "test": null,
+  "note": "ecap = 0 в line_cycle (spawn_encoder 0) и, вероятно, в scene_job_done_t (лента стоит) — выживает ожидаемо"
+ },
+ {
+  "id": "I8",
+  "prop": "пульс ПК не пишется",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "            self._wr([(\"w\", REG[\"HB_PC\"], self._hb_value)])",
+  "new": "            pass",
+  "forecast": [],
+  "observed": null,
+  "test": null,
+  "note": "HB_PC не проверял ни один тест T2.4 — выживает ожидаемо"
+ },
+ {
+  "id": "I9",
+  "prop": "read_reg читает на слово меньше",
+  "file": "Plugins/sim/robot_host/tests/host_harness.py",
+  "old": "device.read_registers(REG[name], count)",
+  "new": "device.read_registers(REG[name], count - 1 if count > 1 else count)",
+  "forecast": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_belt_commands_on_v2",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_tcp_reads_pmir_block",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "observed": null,
+  "test": null,
+  "note": ""
+ },
+ {
+  "id": "I9b",
+  "prop": "read_reg — count одиночных FC3",
+  "file": "Plugins/sim/robot_host/tests/host_harness.py",
+  "old": "device.read_registers(REG[name], count)",
+  "new": "[device.read_registers(REG[name] + i, 1)[0] for i in range(count)]",
+  "forecast": [],
+  "observed": null,
+  "test": null,
+  "note": "«один FC3» держится глазом (вариант Б) — выживает ожидаемо"
+ },
+ {
+  "id": "I10",
+  "prop": "wait_done без пульса",
+  "file": "Plugins/sim/robot_host/tests/host_harness.py",
+  "old": "client.wait_done(seq, on_poll=lambda _tlm: client.kick_heartbeat())",
+  "new": "client.wait_done(seq, on_poll=None)",
+  "forecast": [],
+  "observed": null,
+  "test": null,
+  "note": "CVT_JOB < 1,4 с (durations) < 3,0 с сторожа — выживает ожидаемо"
+ }
+]
