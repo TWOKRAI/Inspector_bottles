@@ -12,6 +12,7 @@
 - [Тест, переживший свой слом](feedback_test_survived_its_own_break.md) — шов сквозь RLock · [ноль красных = лишний слой](feedback_injection_zero_may_mean_the_guards_were_not_collected.md)
 - [Суффиксное переименование слепо](feedback_suffix_rename_is_a_blind_injection.md) — `foo→foo_RENAMED` оставляет старое ПРЕФИКСОМ нового: 74 passed при предсказанных 5 failed. Брать несовпадающее имя; сторожа имён — по границе слова, не подстрокой
 - [Краснеет только от ПАРЫ изломов](feedback_test_reddens_only_under_a_paired_injection.md) — сторож композиции ≠ вакуум; несовпавшее предсказание = находка
+- [`bash` из Python — это WSL](feedback_bash_from_python_is_wsl_on_windows.md) — скрипт матрицы звал гейт через `subprocess(["bash", …])`: 13 прогонов с кодом 1 и без тестов, а «выжившие» дали MATCH на пустом списке; звать `C:/Program Files/Git/bin/bash.exe`, база — код 0 или стоп
 
 ## Вакуумные тесты и ассерты
 - [coverage держит settrace, не setprofile](feedback_coverage_holds_settrace_not_setprofile.md) — под `--cov` `gettrace()` занят CTracer, `getprofile()` пуст: счётчик на setprofile не конфликтует, а `assert gettrace() is None` даёт ложный красный; базу брать СНИМКОМ
