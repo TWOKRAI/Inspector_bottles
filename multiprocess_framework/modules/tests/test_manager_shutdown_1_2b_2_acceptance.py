@@ -426,8 +426,7 @@ def test_g24_class_attribute_stays_default_after_instance_budget() -> None:
         _close_process(proc)
 
 
-def test_g24_measured_second_call_wait_follows_budget(caplog) -> None:
-    caplog.set_level(logging.DEBUG)
+def test_g24_measured_second_call_wait_follows_budget(capfd) -> None:
     entered, gate = threading.Event(), threading.Event()
 
     class HeldProcess(ProcessModule):
@@ -452,8 +451,11 @@ def test_g24_measured_second_call_wait_follows_budget(caplog) -> None:
             first_thread.join(DEADLINE_S)
         proc.close_root()
     expected_part = "первый вызов не завершился за 5.5 с — второй вызов вернул False"
-    lines = _wait_lines(caplog)
-    assert sum(expected_part in m for m in lines) == 1, lines
+    # После initialize() живёт LoggerManager: строка шаблона идёт в его консольный канал (stderr),
+    # а не в stdlib, поэтому caplog слеп; читаем stderr через capfd.
+    captured = capfd.readouterr()
+    lines = [m for m in (captured.out + captured.err).splitlines() if WAIT_LINE in m]
+    assert sum(expected_part in m for m in lines) == 1 and len(lines) == 1, lines
     assert not [r for r in unclosed_roots() if r["path"].endswith("t02p") and r["state"] == "open"], unclosed_roots()
 
 
