@@ -99,6 +99,8 @@ def _all_generated() -> dict[str, GeneratedProgram]:
         out["draw" + suffix] = draw(LI, **PEN, **extra)
         out["return_slot" + suffix] = return_slot(SLOT, **extra)
         out["toolchange" + suffix] = toolchange(1, 2, LIB, **extra)
+        # 0→1 берёт 3 точки из 6 библиотеки — без него «только точки ходов» у toolchange не проверялось (инъекция I18)
+        out["toolchange_0_1" + suffix] = toolchange(0, 1, LIB, **extra)
     return out
 
 
