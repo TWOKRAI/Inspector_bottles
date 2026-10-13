@@ -628,7 +628,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
 - Task 6.4: Один экран симуляторов: вид робота сверху на `pult_web` из состояния линии рядом с видео ленты и ручками [PENDING] (после 6.2)
   — пожелание владельца 2026-10-12 «один на всех»; робот рисуется из состояния линии, не из своего ядра; ждёт робота v2 в линии
   (передано сессии робота: `robot_host` на протоколе v2, T3.5). Qt-версия — с полосой И (⛔ О-16)
-- Task 6.5: Ассеты стенда из закоммиченных фикстур и правда в комментарии `pipeline.yaml` о размере плитки [PENDING]
+- Task 6.5: Ассеты стенда из закоммиченных фикстур и правда в комментарии `pipeline.yaml` о размере плитки [IN PROGRESS 2026-10-13, ветка `feat/line-sim-stand-assets`, спека [`phase-6-task-6.5.md`](phase-6-task-6.5.md)]
   — 2026-10-12: ассеты в gitignored `data/line_sim` собираются из `Services/line_sim/tests/fixtures/belt_photo_full.png` и
   `real_disk_snapshot.png` (сейчас — скриптом стенда `scripts/run_sim_all.ps1`); комментарий `apps/line_sim/pipeline.yaml` пишет
   плитку 410x484 (2 звена), сборка даёт 205x484 — выяснить, что верно, и поправить одно из двух
