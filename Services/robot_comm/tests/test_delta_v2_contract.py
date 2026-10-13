@@ -174,7 +174,7 @@ _OPCODES_TABLE: list[tuple[str, int, int, str]] = [
     ("JOG_STEP", 0x12, 5, "deny"),
     ("JOG_CONT", 0x13, 2, "deny"),
     ("CVT_JOB", 0x20, 10, "deny"),
-    ("SC_RUN", 0x30, 3, "deny"),
+    ("SC_RUN", 0x30, 6, "deny"),
     ("SERVO", 0x41, 1, "deny"),
     ("DO_SET", 0x42, 2, "deny"),
     ("PARAM_SET", 0x50, 2, "by_class"),

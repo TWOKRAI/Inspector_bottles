@@ -30,10 +30,16 @@ T2.1+T2.2, `plans/robot-protocol-v2`): mailbox (`CMD_*`/`RES_*`, идемпот�
 v1 и v2 не связаны и не импортируют друг друга.
 
 **`trace_sc` (T3.5).** `RobotSimCoreV2(..., trace_sc=True)` — ручка наблюдаемости, выключена по умолчанию.
-Включённая добавляет две строки `on_event`: `[v2] SC rec id=<id> i=<n> kind=<KIND> spd=<pct>` (старт хода
-записи n) и `[v2] SC act id=<id> i=<n> act=<ACT> val=<aparam>` (действие записи исполнено). Выключенная — ноль
+Включённая добавляет две строки `on_event`: `[v2] SC rec id=<id> i=<n> kind=<KIND> spd=<pct> acc=<accel> accur=<0|1>` (старт хода
+записи n; `acc`/`accur` — состояние сценария на старте записи, `accur` — значение 0/1, не код провода) и `[v2] SC act id=<id> i=<n> act=<ACT> val=<aparam>` (действие записи исполнено). Выключенная — ноль
 строк и ноль работы: журнал без неё прежний. Регистры и порядок тика хук не меняет; `sim_journal` новые строки
 принимает как строки без тега. Потребитель — обвязка e2e `tests/e2e_rig_v2.py` (`RecordingCore`).
+
+**Стартовое состояние `SC_RUN` (T3.9).** `SC_RUN(count, sc_id, offset, spd_pct, accel, accur)` — шесть аргументов;
+состояние применяется до первой записи. 0 — «не задано»: `spd_pct` -> `P_SPD_DEFAULT`, `accel` -> `P_ACC_L`, `accur` ->
+`P_ACCUR_DEFAULT` (текущие значения параметров). `accur` на проводе сдвинут: 1 -> ROUGH (0), 2 -> HIGH (1). Вне
+диапазона (`spd_pct > 100`, `accel` вне `P_ACC_L`, `accur > 2`) — NAK `E_RANGE`, rval0 = `R_APARAM`, без следов;
+проверка идёт после `E_SC_COUNT`, до `E_NO_SERVO`. Состояние живёт в сценарии и умирает вместе с ним (§7.2 п.5).
 
 **Модель робота (T2.K).** Проверка зоны в `RobotSimCoreV2` идёт через
 `self.model` (`../kinematics.py`, `RobotModel`) — по умолчанию `ScaraModel()`,

@@ -119,7 +119,7 @@ def test_watchdog_trips_inside_scenario_between_exact_points():
         op = KIND["LINE"] + 256 * (ACT["SPEED_PCT"] if i == 0 else ACT["NONE"])
         core.write(addr, [mm(x), mm(-210.0), mm(-40.0), mm(-100.0), op, 1 if i == 0 else 0])
     core.write(REG["HB_PC"], [2])
-    assert cmd(core, 3, OP["SC_RUN"], 2, 1, 0) == ACK
+    assert cmd(core, 3, OP["SC_RUN"], 2, 1, 0, 0, 0, 0) == ACK
     for _ in range(30):  # 0.3 с без HB_PC > 0.2 с
         core.tick(TICK_S)
     assert reg(core, "TLM_WDG_STATE") == 2

@@ -44,16 +44,16 @@ pytestmark = pytest.mark.skipif(not ROBOT_AVAILABLE, reason="robot_comm недо
 
 SLOT = Point(name="slot", x=350, y=-150, z=-90, rz=10, hand=1)
 SC_LITERAL = [
-    "[v2] SC rec id=1 i=1 kind=JOINT spd=80",
-    "[v2] SC rec id=1 i=2 kind=LINE spd=80",
+    "[v2] SC rec id=1 i=1 kind=JOINT spd=80 acc=25000 accur=0",
+    "[v2] SC rec id=1 i=2 kind=LINE spd=80 acc=25000 accur=0",
     "[v2] SC act id=1 i=2 act=DO_ON val=1",
-    "[v2] SC rec id=1 i=3 kind=LINE spd=80",
+    "[v2] SC rec id=1 i=3 kind=LINE spd=80 acc=25000 accur=0",
     "[v2] SC act id=1 i=3 act=DELAY_MS val=400",
-    "[v2] SC rec id=1 i=4 kind=LINE spd=80",
-    "[v2] SC rec id=1 i=5 kind=LINE spd=80",
-    "[v2] SC rec id=1 i=6 kind=LINE spd=80",
+    "[v2] SC rec id=1 i=4 kind=LINE spd=80 acc=25000 accur=0",
+    "[v2] SC rec id=1 i=5 kind=LINE spd=80 acc=25000 accur=0",
+    "[v2] SC rec id=1 i=6 kind=LINE spd=80 acc=25000 accur=0",
     "[v2] SC act id=1 i=6 act=DO_OFF val=1",
-    "[v2] SC rec id=1 i=7 kind=LINE spd=80",
+    "[v2] SC rec id=1 i=7 kind=LINE spd=80 acc=25000 accur=0",
     "[v2] SC act id=1 i=7 act=DELAY_MS val=400",
 ]
 HOME_RAW = (3000, -2100, -400, -1000)  # HOME (300, -210, -40, -100) на проводе, x10
@@ -88,7 +88,7 @@ def _run_slot(core: RobotSimCoreV2) -> None:
     assert core.read(REG["TLM_SERVO"], 1)[0] == 1
     for index, record in enumerate(words):
         core.write(REG["SC_BUF"] + index * CONSTANTS["SC_STRIDE"], list(record))
-    _send(core, 2, OP["SC_RUN"], 7, 1, 0)  # count, sc_id, offset
+    _send(core, 2, OP["SC_RUN"], 7, 1, 0, 0, 0, 0)  # count, sc_id, offset, spd_pct, accel, accur
     for _ in range(2000):
         if core.read(REG["TLM_ACTIVITY"], 1)[0] == 0:
             return

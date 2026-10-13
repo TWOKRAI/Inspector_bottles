@@ -4,7 +4,7 @@
 FW_BUILD = 0x7CC1
 -- ===== 10_generated.lua =====
 -- Таблицы REG/OP/ERR/PDEF/... подставляются из delta_v2.yaml (codegen.lua_block).
--- ===== BEGIN GENERATED (delta_v2.yaml cf6affdc) =====
+-- ===== BEGIN GENERATED (delta_v2.yaml d3c801e4) =====
 
 REG = {
   CMD_FLAG = 0x1000,
@@ -95,7 +95,7 @@ OP = {
   },
   SC_RUN = {
     code = 0x30,
-    argc = 3,
+    argc = 6,
     busy = "deny",
   },
   SERVO = {

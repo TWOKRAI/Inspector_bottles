@@ -248,7 +248,7 @@ def _sc_runs(stand: _Stand) -> list[tuple[int, int, int]]:
     for op in _ops(stand):
         block = _cmd_block(stand.api, op)
         if block is not None and block[0] == stand.api.OP["SC_RUN"]:
-            count, sc_id, offset = block[1]
+            count, sc_id, offset = block[1][:3]
             runs.append((count, sc_id, offset))
     return runs
 

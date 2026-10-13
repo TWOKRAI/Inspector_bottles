@@ -1,0 +1,22 @@
+{
+ "base": {
+  "summary": "85 passed, 1 warning in 39.33s",
+  "failed": [],
+  "seconds": 40.9
+ },
+ "I5": {
+  "summary": "85 passed, 1 warning in 39.01s",
+  "failed": [],
+  "seconds": 40.5,
+  "missed": [
+   "Services/robot_comm/tests/test_sc_start_state_v2.py::test_sc_run_bad_args_nak_no_motion[spd-101-servo-off-range-before-servo]"
+  ],
+  "extra": [],
+  "match": false
+ },
+ "after": {
+  "summary": "85 passed, 1 warning in 39.18s",
+  "failed": [],
+  "seconds": 40.7
+ }
+}

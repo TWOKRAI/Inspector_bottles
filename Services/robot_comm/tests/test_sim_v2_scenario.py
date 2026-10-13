@@ -233,7 +233,7 @@ def test_scenario_moves_with_do_delay_speed():
     ]
     write_scenario(core, 0, records)
 
-    res = cmd(core, 2, OP["SC_RUN"], 3, 111, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 3, 111, 0, 0, 0, 0)
     assert res["status"] == ACK, f"SC_RUN должен приниматься: {res}"
     move_seq = res["seq"]
     assert core.read(REG["TLM_ACTIVITY"], 1)[0] == ACTIVITY_SCENARIO
@@ -299,7 +299,7 @@ def test_progress_only_on_exact_points():
     ]
     write_scenario(core, 0, records)
 
-    res = cmd(core, 2, OP["SC_RUN"], 3, 7, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 3, 7, 0, 0, 0, 0)
     assert res["status"] == ACK
     move_seq = res["seq"]
 
@@ -368,7 +368,7 @@ def test_bad_record_nak_index_reason_no_motion(kind, action, aparam, expected_re
     bad = (500.0, -210.0, -40.0, -100.0, kind, action, aparam)
     write_scenario(core, 0, [good, bad])
 
-    res = cmd(core, 2, OP["SC_RUN"], 2, 5, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 2, 5, 0, 0, 0, 0)
     assert res["status"] == NAK, label
     assert res["errno"] == ERR["E_SC_RECORD"], label
     assert res["rvalc"] == 2, label
@@ -397,7 +397,7 @@ def test_sc_count_zero_over_capacity_offset_overflow(count, offset, label):
     servo_on(core, 1)
     hx, hy, hz, hrz = home_target()
 
-    res = cmd(core, 2, OP["SC_RUN"], count, 1, offset)
+    res = cmd(core, 2, OP["SC_RUN"], count, 1, offset, 0, 0, 0)
     assert res["status"] == NAK, label
     assert res["errno"] == ERR["E_SC_COUNT"], label
     assert core.read(REG["TLM_ACTIVITY"], 1)[0] == 0, label
@@ -415,7 +415,7 @@ def test_ping_pong_two_offsets():
 
     buf_a = [(420.0, -210.0, -40.0, -100.0, KIND["LINE"], ACT["NONE"], 0)]
     write_scenario(core, 0, buf_a)
-    res_a = cmd(core, 2, OP["SC_RUN"], 1, 10, 0)
+    res_a = cmd(core, 2, OP["SC_RUN"], 1, 10, 0, 0, 0, 0)
     assert res_a["status"] == ACK
     run_until_activity_zero(core)
     assert core.read(REG["TLM_X"], 1)[0] == mm(420.0)
@@ -424,7 +424,7 @@ def test_ping_pong_two_offsets():
 
     buf_b = [(500.0, -210.0, -40.0, -100.0, KIND["LINE"], ACT["NONE"], 0)]
     write_scenario(core, 30, buf_b)
-    res_b = cmd(core, 3, OP["SC_RUN"], 1, 20, 30)
+    res_b = cmd(core, 3, OP["SC_RUN"], 1, 20, 30, 0, 0, 0)
     assert res_b["status"] == ACK, "второй SC_RUN с offset=30 должен приниматься независимо от буфера offset=0"
     run_until_activity_zero(core)
     assert core.read(REG["TLM_X"], 1)[0] == mm(500.0), (
@@ -454,7 +454,7 @@ def test_stop_mid_scenario_aborted_do_untouched():
     far = (550.0, -210.0, -40.0, -100.0, KIND["LINE"], ACT["DO_OFF"], 3)
     write_scenario(core, 0, [far])
 
-    res = cmd(core, 3, OP["SC_RUN"], 1, 9, 0)
+    res = cmd(core, 3, OP["SC_RUN"], 1, 9, 0, 0, 0, 0)
     assert res["status"] == ACK
     move_seq = res["seq"]
     done_before = core.read(REG["TLM_DONE_SEQ"], 1)[0]
@@ -494,7 +494,7 @@ def test_done_seq_and_sc_done_n_after_last_record():
     ]
     write_scenario(core, 0, records)
 
-    res = cmd(core, 2, OP["SC_RUN"], 2, 3, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 2, 3, 0, 0, 0, 0)
     assert res["status"] == ACK
     move_seq = res["seq"]
 
@@ -540,7 +540,7 @@ def test_scenario_on_battle_defaults():
     ]
     write_scenario(core, 0, records)
 
-    res = cmd(core, 2, OP["SC_RUN"], 4, 42, 0)
+    res = cmd(core, 2, OP["SC_RUN"], 4, 42, 0, 0, 0, 0)
     assert res["status"] == ACK, f"дефолтный e2e-сценарий должен приниматься: {res}"
     move_seq = res["seq"]
 
