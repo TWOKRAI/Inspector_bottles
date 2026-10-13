@@ -14,7 +14,7 @@ Handle задачи — Event-based (паттерн ``PendingTask`` из ``worke
 
 Стоп-механика — сентинелы: воркеры блокируются в ``get()`` (без poll — нет
 idle-пробуждений), останов кладёт по одному ``None``-сентинелу на воркер. Это даёт
-честный дренаж очереди при ``shutdown(wait=True)`` (сентинелы ложатся ПОСЛЕ хвоста
+честный дренаж очереди при ``shutdown()`` (сентинелы ложатся ПОСЛЕ хвоста
 задач) и гарантию, что зомби после join-таймаута доисполнит текущую задачу, возьмёт
 сентинел и умрёт, а не будет жить вечно на общей очереди. ``stop_event``
 WorkerManager остаётся backstop'ом (снимает зомби на верхе цикла), сентинел его
@@ -42,7 +42,7 @@ from ...worker_module import ExecutionMode, IWorkerManager, ThreadConfig, Worker
 
 # Сентинел остановки воркера: воркер, забравший ``None``, выходит из цикла.
 _STOP_SENTINEL = None
-# Шаг ожидания опустошения очереди при shutdown(wait=True).
+# Шаг ожидания опустошения очереди при shutdown().
 _DRAIN_POLL_SEC = 0.005
 
 
@@ -181,7 +181,7 @@ class WorkerPoolExecutor(BaseManager, ObservableMixin):
         цикла), затем ``remove_worker`` (stop_event backstop + join + снятие с
         учёта в реестре — иначе имя осталось бы занятым STOPPED-воркером).
 
-        ``drain=True`` (shutdown(wait=True)): ДОЖДАТЬСЯ опустошения очереди ДО
+        ``drain=True`` (shutdown()): ДОЖДАТЬСЯ опустошения очереди ДО
         ``remove_worker``. Из-за дисциплины ``get→run→get`` воркер доходит до
         своего сентинела только исполнив все реальные задачи перед ним, поэтому
         «очередь пуста» ⟺ «весь хвост доисполнен, все воркеры вышли по сентинелу».
@@ -225,7 +225,7 @@ class WorkerPoolExecutor(BaseManager, ObservableMixin):
             self._in_queue.put(task)
 
     def _drain_and_cancel(self) -> None:
-        """Отменить все задачи в очереди (shutdown(wait=False)). Под ``self._lock``."""
+        """Отменить все задачи в очереди (shutdown_nowait()). Под ``self._lock``."""
         while True:
             try:
                 task = self._in_queue.get_nowait()
@@ -256,8 +256,22 @@ class WorkerPoolExecutor(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self, wait: bool = True) -> bool:
-        """Остановить воркеры пула.
+    def _on_shutdown(self) -> bool:
+        """Тело шаблона ``shutdown()``: честный дренаж (Task 1.2b-2, Р2 (а)).
+
+        Сентинелы ложатся ПОСЛЕ хвоста задач, воркеры доисполняют очередь.
+        """
+        return self._shutdown_pool(wait=True)
+
+    def shutdown_nowait(self) -> bool:
+        """Отменить невзятые задачи и остановить воркеры, не дожидаясь хвоста.
+
+        Не шаблон: область не закрывает; последующий ``shutdown()`` вернёт ``True``.
+        """
+        return self._shutdown_pool(wait=False)
+
+    def _shutdown_pool(self, *, wait: bool) -> bool:
+        """Остановить воркеры пула один раз (флаг ``_shutdown`` под ``self._lock``).
 
         ``wait=True`` — честный дренаж: сентинелы ложатся ПОСЛЕ хвоста задач,
         воркеры доисполняют очередь. ``wait=False`` — отменить оставшиеся задачи

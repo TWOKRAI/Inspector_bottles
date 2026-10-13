@@ -123,6 +123,11 @@ def _result_is_success(result: Any) -> bool:
 class RouterManager(ChannelRoutingManager):
     """Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + event_dispatcher."""
 
+    # Срок тела _on_shutdown во втором вызове shutdown() (Task 1.2b-2, ADR-BM-009):
+    # AsyncSender.stop 1.0 (put) + 1.0 (join) + AsyncReceiver.stop 5.0.
+    # QueueChannel.stop_listening (join 1.0 на канал) не учтён — предел (6) ADR-BM-009.
+    _ON_SHUTDOWN_WAIT_S: float = 7.0
+
     def __init__(
         self,
         manager_name: str,
@@ -488,7 +493,7 @@ class RouterManager(ChannelRoutingManager):
             self._log_error(f"initialize failed: {e}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             self._sender.stop()
             self._receiver.stop()

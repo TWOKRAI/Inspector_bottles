@@ -58,7 +58,7 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             self._log_error(f"Failed to initialize WorkerManager '{self.manager_name}': {e}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             self.stop_all_workers()
             self.is_initialized = False

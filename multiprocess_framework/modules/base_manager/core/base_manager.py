@@ -80,6 +80,11 @@ class BaseManager(IBaseManager):
         is_initialized (bool):   Флаг инициализации
     """
 
+    # Срок тела ``_on_shutdown`` во втором вызове ``shutdown()``: срок ожидания =
+    # член области + это значение (Task 1.2b-2, ADR-BM-009). Класс со своим
+    # сроком join/wait в теле ставит не меньше; экземпляр может переопределить.
+    _ON_SHUTDOWN_WAIT_S: float = 5.0
+
     def __init__(self, manager_name: str, process: Optional[Any] = None):
         """
         Args:
@@ -116,14 +121,16 @@ class BaseManager(IBaseManager):
         и строка лога. Вызов из потока, который сейчас выполняет ``shutdown()``
         (реентрантный), и вызов из потока поддерева ``scope`` -> ``False`` сразу.
         Вызов из другого потока ждёт первый не дольше срока области
-        (``budget_s + kill_reserve_s``; без ``Scope`` — 5,0 с); на сроке —
-        ``False`` и строка лога. После завершения — кэшированный результат.
+        (``budget_s + kill_reserve_s``; без ``Scope`` — 5,0 с) плюс
+        ``_ON_SHUTDOWN_WAIT_S`` (класс — 5,0 с, экземпляр может переопределить);
+        на сроке — ``False`` и строка лога. После завершения — кэшированный результат.
 
         Returns:
             True если завершение успешно
         """
         scope = self.scope
-        in_subtree, wait_s = _manager_scope_view(scope)
+        in_subtree, scope_wait_s = _manager_scope_view(scope)
+        wait_s = scope_wait_s + self._ON_SHUTDOWN_WAIT_S
         if in_subtree:
             # Поток области сам себя не дождётся: close области ждёт его выхода.
             return False

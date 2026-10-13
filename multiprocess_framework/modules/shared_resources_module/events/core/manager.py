@@ -82,7 +82,7 @@ class EventManager(BaseManager, ObservableMixin, IEventManager, ManagerStatsMixi
             self._log_error(f"EventManager.initialize() failed: {e}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             self._subscribers.clear()
             self._event_queue = None

@@ -143,7 +143,7 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             self._log_error(f"SharedResourcesManager.initialize() failed: {e}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             self._event_manager.shutdown()
             self._queue_registry.shutdown()

@@ -131,7 +131,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         self._log_info("StateStoreManager инициализирован")
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Остановка. Отписывает все подписки.
 
         Returns:

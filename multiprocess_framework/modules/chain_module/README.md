@@ -6,6 +6,8 @@ DAG/Chain execution engine для многопроцессных PySide6-при�
 
 ---
 
+**Останов `WorkerPoolExecutor` (Task 1.2b-2):** `shutdown()` — шаблон `BaseManager`, честный дренаж хвоста; `shutdown_nowait()` — отменить невзятые задачи без шаблона (область не закрывает).
+
 ## Архитектура
 
 ### Исполнители

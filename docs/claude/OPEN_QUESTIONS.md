@@ -1853,3 +1853,8 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 2. **Плоскость ошибок — второй экземпляр `LoggerCore`** (ADR-BM-006) — против правила «один писатель» владельцу назвать прямо (CTO).
 3. **Брошенный без `shutdown()` `ProcessModule` не виден стражу G3** — его держат глобалы (`ProcessHooks`, `SystemThreads`, `ProcessLifecycle`, словарь модуля); при любом хранении области (CTO C4).
 4. **Порог уровня логгера запуском не проверен** — проба `r_paths.py` падает `TypeError: LoggerCore.is_enabled_for() missing 'level'`.
+
+## Task 1.2b-2 lifecycle-owner-scope: поддерево корня у `ProcessModule.shutdown()` (2026-10-13)
+
+- У `ProcessModule` нет `scope`, правило поддерева шаблона `BaseManager.shutdown()` его корня не видит. Поток поддерева корня, зовущий `proc.shutdown()` во время первого вызова, ждёт `5,0 + _ON_SHUTDOWN_WAIT_S` с вместо `False` сразу. Прод-путь раннера — `close_root()` напрямую (`process_runner.py`); прод-вызов `self.shutdown()` один — PM `_handle_critical_error`. Предел записан в ADR-BM-009; отдельной задачи нет (решение лида 2026-10-13).
+- `shutdown()` до `initialize()` вне раннера кэширует `True`; корень, открытый позже в `initialize()`, шаблон не закроет — его гасит только `close_root()`. Репро: `proc.shutdown()` → `proc.initialize()` → `proc.shutdown()` → корень открыт (G3). Раннер этот путь не проходит (`process_runner.py:477`). Предел (5) ADR-BM-009 (решение лида В-8 (а), 2026-10-13).

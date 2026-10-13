@@ -111,7 +111,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             self._log_error(f"MemoryManager.initialize() failed: {e}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             self._close_all_handles()
             self._local_meta.clear()

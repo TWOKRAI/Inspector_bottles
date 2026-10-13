@@ -14,6 +14,7 @@
 |---|---|
 | **`BaseManager`** | Абстрактный базовый класс |
 | `initialize()` / `shutdown()` | Жизненный цикл: `initialize` — в подклассе; `shutdown()` — шаблон (закрыть `scope`, один раз `_on_shutdown()`), подкласс определяет `_on_shutdown` (ADR-BM-009) |
+| `_ON_SHUTDOWN_WAIT_S` | Срок тела во втором вызове `shutdown()`: ожидание = член области + атрибут (класс 5,0 с; экземпляр может переопределить; Task 1.2b-2) |
 | `scope` / `attach_scope(scope)` | Область менеджера (только чтение, `None` до привязки); привязывает корень процесса, повтор -> `RuntimeError` |
 | `attach_adapter(adapter, name)` / `get_adapter(name)` | Управление адаптерами |
 | `has_adapter(name)` / `list_adapters()` / `detach_adapter(name)` | Проверка и диагностика |

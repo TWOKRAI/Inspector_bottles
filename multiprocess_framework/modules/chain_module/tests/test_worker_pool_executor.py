@@ -202,7 +202,7 @@ class TestStopMechanics:
 
         ex = WorkerPoolExecutor(max_workers=2, step_timeout=5.0)
         handles = [ex.submit(Return(0.05, i), None, None) for i in range(6)]  # 6 > 2N
-        ex.shutdown(wait=True)
+        ex.shutdown()
         for i, h in enumerate(handles):
             assert h._event.is_set(), f"handle {i} не завершён (хвост брошен)"
             assert h.result(timeout=0) == i

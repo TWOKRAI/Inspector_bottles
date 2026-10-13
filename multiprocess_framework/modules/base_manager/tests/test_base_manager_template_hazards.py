@@ -67,6 +67,8 @@ class Counter:
 class HookManager(BaseManager):
     """Тестовый подкласс: определяет ``_on_shutdown`` (не ``shutdown``)."""
 
+    _ON_SHUTDOWN_WAIT_S = 0.0  # Task 1.2b-2: тесты мерят только член области (Н-6)
+
     def __init__(self, name: str, hook=None) -> None:
         super().__init__(name)
         self._hook = hook

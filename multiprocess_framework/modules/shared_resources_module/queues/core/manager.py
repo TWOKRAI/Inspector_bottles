@@ -177,7 +177,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             _loss_logger.error("QueueRegistry.initialize() failed: %r", e)
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             self.is_initialized = False
             _loss_logger.info("QueueRegistry shutdown completed")

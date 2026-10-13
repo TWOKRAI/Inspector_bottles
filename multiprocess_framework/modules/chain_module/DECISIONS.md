@@ -252,12 +252,12 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
   воркер. `stop_event` WorkerManager остаётся backstop'ом на верхе цикла (снимает
   зомби после join-таймаута — доисполнил задачу, увидел stop_event, вышел без
   чужого сентинела).
-- **Edge-1 честный дренаж (ревью итер.2):** `shutdown(wait=True)` ДОЖИДАЕТСЯ
+- **Edge-1 честный дренаж (ревью итер.2):** `shutdown()` (до 1.2b-2 — `shutdown(wait=True)`) ДОЖИДАЕТСЯ
   опустошения очереди ДО `remove_worker` (`while not _in_queue.empty()`). Одних
   сентинелов «после хвоста» мало: `stop_worker` ставит `stop_event` немедленно
   (`worker_lifecycle.py`), воркер бросил бы хвост >N после текущей задачи. Из-за
   дисциплины `get→run→get` пустая очередь ⟺ весь хвост доисполнен. Ожидание
-  неограниченное — паритет `ThreadPoolExecutor.shutdown(wait=True)`. `wait=False` —
+  неограниченное — паритет `ThreadPoolExecutor.shutdown(wait=True)`. `shutdown_nowait()` (до 1.2b-2 — `wait=False`) —
   отменить оставшиеся задачи, затем сентинелы (без ожидания).
 - **Edge-2 reclaim осиротевших сентинелов (ревью итер.2):** `_stop_workers` в конце
   (после `remove_worker`, до `_start_workers`) вычищает недопотреблённые сентинелы

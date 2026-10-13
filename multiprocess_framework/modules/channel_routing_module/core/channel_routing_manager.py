@@ -483,7 +483,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         except Exception:  # noqa: BLE001 — диагностика не имеет права мешать завершению
             pass
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Корректное завершение: flush → stop buffer → close channels."""
         try:
             self._log_info(f"[{self.manager_name}] shutting down")

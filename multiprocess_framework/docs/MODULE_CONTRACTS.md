@@ -492,7 +492,7 @@
 **Цель:** База дочернего процесса. Сборка всех подсистем в один класс.
 
 **Контракт:**
-- `IProcessModule(Protocol)` — `initialize() -> bool`, `run() -> None`, `shutdown() -> bool`, `should_stop() -> bool`, `send_message(target, msg) -> bool`, `send(msg) -> dict`, `create_worker(name, fn, config, auto_start=False)`, свойства `router`, `command_manager`, `worker_manager`, `logger_manager`, `error_manager`, `stats_manager`, `console_adapter`, `msg`, `process_data`.
+- `IProcessModule(ABC)` — `attach_stop_budget(budget: dict) -> None` (до `initialize()`), `initialize() -> bool`, `run() -> None`, `shutdown() -> bool`, `close_root() -> CloseReport | None` (раннер гасит корень им; Р4, Task 1.2b-2), `should_stop() -> bool`, `send_message(target, msg) -> bool`, `send(msg) -> dict`, `create_worker(name, fn, config, auto_start=False)`, свойства `router`, `command_manager`, `worker_manager`, `logger_manager`, `error_manager`, `stats_manager`, `console_adapter`, `msg`, `process_data`.
 - `ISharedResources(Protocol)` — DI вместо жёсткой привязки к `SharedResourcesManager`.
 - `ProcessModule(BaseManager, ObservableMixin)` — фасад. Делегирует:
   - `ProcessLifecycle` — `initialize/shutdown`, `_init_configuration`, `_init_queues`.
