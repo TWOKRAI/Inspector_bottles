@@ -253,6 +253,7 @@ def test_draw_two_chunks():
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason=(
         "T3.9: состояние SPEED_PCT не переходит через границу куска "
         "(SC_RUN без стартового состояния; protocol-spec §7.2 п.5, §7.4)"
@@ -267,7 +268,11 @@ def test_draw_speed_survives_chunk_boundary():
     with E2eRig() as rig:
         rig.run(_draw_li3(), FRAMES)
         rec2 = _recs(rig.core.events(), 2)
-        assert [r[4] for r in rec2 if r[2] in (1, 2)] == [100, 100]
+        spd = [r[4] for r in rec2 if r[2] in (1, 2)]
+        if len(spd) != 2:
+            # Предусловие, не предмет xfail: Failed не покрыт raises=AssertionError.
+            pytest.fail(f"в куске 2 нет записей i=1,2 (найдено {len(spd)}): {rec2!r}")
+        assert spd == [100, 100]
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +633,7 @@ def test_zero_length_moves(case):
             rec = [r for r in _recs(events, 1) if r[2] == 3]
             assert len(rec) == 1 and rec[0][3] == "LINE_PASS"
         else:
-            _check_do(events, rig.core.ticks(), 1, _off_index(events), "DO_OFF", final)
+            _check_do(events, rig.core.ticks(), 1, 6, "DO_OFF", final)
 
 
 def test_zero_length_joint_to_current_pose():
@@ -651,10 +656,3 @@ def test_zero_length_joint_to_current_pose():
         first = _recs(events, 1, after=n0)[0]
         assert (first[2], first[3]) == (1, "JOINT")
         assert rig.pose_wire() == (400.0, -40.0, -80.0, 0.0)
-
-
-def _off_index(events: list) -> int:
-    """Номер записи, на которой исполнен DO_OFF (из строки события)."""
-    hits = [a for a in _acts(events, 1) if a[3] == "DO_OFF"]
-    assert len(hits) == 1
-    return hits[0][2]
