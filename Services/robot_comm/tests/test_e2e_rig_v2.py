@@ -26,6 +26,7 @@ from Services.robot_comm.programs import Point, compile_program
 from Services.robot_comm.programs.generators import return_slot
 from Services.robot_comm.server.belt import BeltDrive
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
+from Services.robot_comm.server.sim_robot import SimRobotServer
 from Services.robot_comm.tests import e2e_rig_v2
 from Services.robot_comm.tests.e2e_rig_v2 import (
     FORBIDDEN_PORTS,
@@ -283,6 +284,92 @@ def test_rig_restart_retries_until_port_free() -> None:
             release.cancel()
             squatter.close()
         bounded(rig.client.ping)
+
+
+# Тикер умирает от belt — это предмет теста, предупреждение pytest о потоке не нужно.
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_rig_restart_reports_dead_core() -> None:
+    """Ядро с упавшим тиком не перезапускается молча: причина тика не пропадает вместе со старым ядром."""
+    armed = threading.Event()
+    with pytest.raises(AssertionError, match="RuntimeError"):  # noqa: PT012 — проверяется restart внутри with
+        with E2eRig(core=RecordingCore(belt=_boom_belt(armed))) as rig:
+            armed.set()
+            deadline = time.monotonic() + 2.0
+            while not rig.core.tick_errors():
+                assert time.monotonic() < deadline, "тик не упал за 2 с"
+                time.sleep(0.01)
+            rig.restart()
+            pytest.fail("restart не предъявил исключение тика")
+
+
+# Тикер умирает от belt — это предмет теста, предупреждение pytest о потоке не нужно.
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_rig_exit_disconnect_failure_keeps_block_exception() -> None:
+    """``device.disconnect()`` бросает на выходе: исключение блока цело, заметки — про disconnect и про тик."""
+    armed = threading.Event()
+    with pytest.raises(ValueError, match="block") as info:  # noqa: PT012
+        with E2eRig(core=RecordingCore(belt=_boom_belt(armed))) as rig:
+            real_disconnect = rig.device.disconnect
+
+            def failing_disconnect() -> None:
+                real_disconnect()
+                raise OSError("disc boom")
+
+            rig.device.disconnect = failing_disconnect
+            armed.set()
+            deadline = time.monotonic() + 2.0
+            while not rig.core.tick_errors():
+                assert time.monotonic() < deadline, "тик не упал за 2 с"
+                time.sleep(0.01)
+            raise ValueError("block")
+    notes = "\n".join(info.value.__notes__)
+    assert "device.disconnect" in notes and "disc boom" in notes
+    assert "tick_errors: RuntimeError" in notes
+
+
+def _flaky_start_server(monkeypatch: pytest.MonkeyPatch) -> tuple[list[SimRobotServer], list[SimRobotServer]]:
+    """Подмена: ``start`` первого созданного после вызова сервера не укладывается в дедлайн (``TimeoutError``)."""
+    created: list[SimRobotServer] = []
+    stopped: list[SimRobotServer] = []
+
+    class Server(SimRobotServer):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+        def stop(self) -> None:
+            stopped.append(self)
+            super().stop()
+
+    real_bounded = e2e_rig_v2.bounded
+
+    def fake_bounded(fn, deadline_s: float = 20.0):
+        if created and getattr(fn, "__self__", None) is created[0] and fn.__name__ == "start":
+            raise TimeoutError("start timeout")
+        return real_bounded(fn, deadline_s)
+
+    monkeypatch.setattr(e2e_rig_v2, "SimRobotServer", Server)
+    monkeypatch.setattr(e2e_rig_v2, "bounded", fake_bounded)
+    return created, stopped
+
+
+def test_rig_enter_retries_after_start_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    created, stopped = _flaky_start_server(monkeypatch)
+    with E2eRig() as rig:
+        bounded(rig.client.ping)
+        assert len(created) >= 2
+        assert created[0] in stopped  # сервер неудачной попытки остановлен
+        assert rig.server is not created[0]
+
+
+def test_rig_restart_retries_after_start_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    with E2eRig() as rig:
+        created, stopped = _flaky_start_server(monkeypatch)
+        rig.restart()
+        bounded(rig.client.ping)
+        assert len(created) >= 2
+        assert created[0] in stopped
+        assert rig.server is not created[0]
 
 
 # Тикер умирает от belt — это предмет теста, предупреждение pytest о потоке не нужно.

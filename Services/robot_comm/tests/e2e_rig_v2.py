@@ -335,13 +335,13 @@ class E2eRig:
 
     def _start_server(self) -> None:
         """До 3 попыток: порт мог занять другой процесс между ``free_port`` и ``start``."""
-        last: RuntimeError | None = None
+        last: Exception | None = None
         for _ in range(3):
             self.port = free_port()
             server = SimRobotServer(_HOST, self.port, ROBOT_UNIT_ID, core=self.core)
             try:
                 bounded(server.start, 10.0)
-            except RuntimeError as exc:
+            except (RuntimeError, TimeoutError) as exc:  # TimeoutError — start не уложился в дедлайн bounded
                 bounded(server.stop, 5.0)  # start() при сбое оставляет тикер живым
                 last = exc
                 continue
@@ -368,15 +368,32 @@ class E2eRig:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool:
+        cleanup_errors: list[str] = []
+        failure: Exception | None = None
         try:
             self.device.disconnect()
-        finally:
+        except Exception as exc:  # noqa: BLE001 — не подменяет исключение блока и не прячет ошибки тика
+            cleanup_errors.append(f"cleanup: device.disconnect: {exc!r}")
+            failure = exc
+        try:
             bounded(self.server.stop, 5.0)
-        if self.core.tick_errors():
-            names = _tick_error_names(self.core)
-            if exc_value is None:
-                raise AssertionError(names)
-            exc_value.add_note(f"tick_errors: {names}")
+        except Exception as exc:  # noqa: BLE001
+            cleanup_errors.append(f"cleanup: server.stop: {exc!r}")
+            failure = failure or exc
+        tick_names = _tick_error_names(self.core) if self.core.tick_errors() else ""
+        if exc_value is not None:
+            for note in cleanup_errors:
+                exc_value.add_note(note)
+            if tick_names:
+                exc_value.add_note(f"tick_errors: {tick_names}")
+            return False
+        if tick_names:
+            error = AssertionError(tick_names)
+            for note in cleanup_errors:
+                error.add_note(note)
+            raise error
+        if failure is not None:
+            raise failure
         return False
 
     def _connect_device(self) -> None:
@@ -451,6 +468,8 @@ class E2eRig:
         ``ModbusDevice`` прежние: ``connect()`` и ``probe()`` заново (как у драйвера, T3.1). Порт Windows после
         ``stop()`` освобождается за ~0.3 с — подъём повторяется до 5 с.
         """
+        if self.core.tick_errors():  # мёртвый sim молча не перезапускаем: причина тика пропала бы со старым ядром
+            raise AssertionError(_tick_error_names(self.core))
         bounded(self.server.stop, 5.0)
         regs = list(self.core.regs) if keep_regs else None
         self.core = RecordingCore(regs=regs)
@@ -459,7 +478,7 @@ class E2eRig:
             server = SimRobotServer(_HOST, self.port, ROBOT_UNIT_ID, core=self.core)
             try:
                 bounded(server.start, 10.0)
-            except RuntimeError:
+            except (RuntimeError, TimeoutError):
                 bounded(server.stop, 5.0)
                 if time.monotonic() >= deadline:
                     raise
