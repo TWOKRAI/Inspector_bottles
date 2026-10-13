@@ -1,0 +1,341 @@
+[
+ {
+  "id": "I1",
+  "prop": "конец штриха EXACT",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "            if j == last or run == max_pass_run:",
+  "new": "            if run == max_pass_run:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves",
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass",
+   "Services/robot_comm/tests/test_generators.py::test_home_conflict_and_points_closed",
+   "Services/robot_comm/tests/test_generators.py::test_li_sample_20_steps_14_records",
+   "Services/robot_comm/tests/test_generators.py::test_pass_run_capped_and_chunks_plan",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_generated_programs_respect_compile_rules",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_no_pass_between_strokes",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_snapshot",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_long_stroke_and_circle_exact_every_26",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves",
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators.py::test_draw_rejects_bad_arguments",
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass",
+   "Services/robot_comm/tests/test_generators.py::test_home_conflict_and_points_closed",
+   "Services/robot_comm/tests/test_generators.py::test_li_sample_20_steps_14_records",
+   "Services/robot_comm/tests/test_generators.py::test_pass_run_capped_and_chunks_plan",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_generated_programs_respect_compile_rules",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_no_pass_between_strokes",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_snapshot",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_long_stroke_and_circle_exact_every_26",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed",
+  "note": "лишний красный A::draw_rejects_bad_arguments — положительный контроль draw(LI, lift_mm=0.0, max_pass_run=1) (строка 259) падает в build(); промах прогноза, не дефект"
+ },
+ {
+  "id": "I2",
+  "prop": "EXACT не реже max_pass_run",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "            if j == last or run == max_pass_run:",
+  "new": "            if j == last:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_pass_run_capped_and_chunks_plan",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_long_stroke_and_circle_exact_every_26",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_pass_run_capped_and_chunks_plan",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_long_stroke_and_circle_exact_every_26",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I3",
+  "prop": "отброс соседних равных точек штриха",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "        if not out or out[-1] != (x, y):",
+  "new": "        if True:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I4",
+  "prop": "пропуск переезда при равном XY",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "            if s[0] != end:",
+  "new": "            if True:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators.py::test_li_sample_20_steps_14_records",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_snapshot"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators.py::test_li_sample_20_steps_14_records",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_snapshot"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I5",
+  "prop": "финальный подъём",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "    p(end, pen_up + lift_mm, \"LINE\")  # финальный подъём одним ходом",
+  "new": "    pass",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators.py::test_li_sample_20_steps_14_records",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_no_pass_between_strokes",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_snapshot"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_edge_strokes",
+   "Services/robot_comm/tests/test_generators.py::test_li_sample_20_steps_14_records",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_no_pass_between_strokes",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_li_snapshot"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I6",
+  "prop": "инструмент 2 через «над 1» (TRANSIT)",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "TRANSIT_V1: Mapping[int, str] = MappingProxyType({2: \"t1_over\"})",
+  "new": "TRANSIT_V1: Mapping[int, str] = MappingProxyType({})",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_via_over_1_both_ways"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_via_over_1_both_ways"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I7",
+  "prop": "схлопывание повторного Move в маршруте",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "        if started and b.last_move_name() == what:",
+  "new": "        if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_via_over_1_both_ways"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_via_over_1_both_ways"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed",
+  "note": "лишний красный A::first_move_joint_last_move_not_pass — повтор t1_over есть и в 1→2 (снять 1 → транзит «над 1»), ловит len == 7 (строка 188); промах прогноза"
+ },
+ {
+  "id": "I8",
+  "prop": "home/approach не схлопываются (схлопывание с первого хода)",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "        if started and b.last_move_name() == what:",
+  "new": "        if b.last_move_name() == what:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I9",
+  "prop": "approach первым JOINT",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "    if approach is not None:\n        b.move_ref(approach, \"JOINT\")\n        kind = \"LINE\"",
+  "new": "    if False:\n        b.move_ref(approach, \"JOINT\")\n        kind = \"LINE\"",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_generated_programs_respect_compile_rules",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_via_over_1_both_ways"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_first_move_joint_last_move_not_pass",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_generated_programs_respect_compile_rules",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_via_over_1_both_ways"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I10",
+  "prop": "build(): первый шаг JOINT",
+  "file": "Services/robot_comm/programs/generators/_common.py",
+  "old": "        if not steps or not isinstance(steps[0], Move) or steps[0].kind != \"JOINT\":",
+  "new": "        if not steps:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I11",
+  "prop": "build(): действие после LINE_PASS",
+  "file": "Services/robot_comm/programs/generators/_common.py",
+  "old": "            elif last_move is not None and last_move.kind == \"LINE_PASS\":",
+  "new": "            elif False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I12",
+  "prop": "build(): последний Move не LINE_PASS",
+  "file": "Services/robot_comm/programs/generators/_common.py",
+  "old": "        if moves[-1].kind == \"LINE_PASS\":",
+  "new": "        if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_actions_only_after_exact_moves"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I13",
+  "prop": "«обучите точки» — все недостающие",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "        raise GeneratorError(f\"обучите точки: {', '.join(missing)}\")",
+  "new": "        raise GeneratorError(f\"обучите точки: {missing[0]}\")",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_toolchange_missing_points_named",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_missing_points_says_teach"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_toolchange_missing_points_named",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_missing_points_says_teach"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I14",
+  "prop": "текст неизвестного инструмента без числа",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "            raise GeneratorError(\"неизвестный номер инструмента\")",
+  "new": "            raise GeneratorError(f\"неизвестный номер инструмента {n}\")",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_toolchange_rejects_same_and_unknown_tool"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_toolchange_rejects_same_and_unknown_tool"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I15",
+  "prop": "current == target — отказ",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "    if current == target:\n        raise",
+  "new": "    if False:\n        raise",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_toolchange_rejects_same_and_unknown_tool",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_missing_points_says_teach"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_toolchange_rejects_same_and_unknown_tool",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_toolchange_missing_points_says_teach"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I16",
+  "prop": "return_slot: точки в СК слота",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "        b.move_new(x, y, z, slot.rz, hand=slot.hand, frame=slot.frame, kind=kind)",
+  "new": "        b.move_new(x, y, z, slot.rz, hand=slot.hand, frame=None, kind=kind)",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_return_slot_offsets_in_slot_frame",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_return_slot_literal"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_return_slot_offsets_in_slot_frame"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed",
+  "note": "T::return_slot_literal не красный — слот тестера в базе (frame=None), СК слота там не видна по построению; свойство держит A::return_slot_offsets_in_slot_frame"
+ },
+ {
+  "id": "I17",
+  "prop": "move_ref: конфликт имён точек",
+  "file": "Services/robot_comm/programs/generators/_common.py",
+  "old": "        if known is not None and known != point:",
+  "new": "        if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_home_conflict_and_points_closed"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_home_conflict_and_points_closed"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I18",
+  "prop": "points замкнуты (только точки шагов Move)",
+  "file": "Services/robot_comm/programs/generators/routes.py",
+  "old": "        b.move_ref(points[what], kind)",
+  "new": "        b.move_ref(points[what], kind)\n        for _p in points.values():\n            b._points.setdefault(_p.name, _p)",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_home_conflict_and_points_closed"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_home_conflict_and_points_closed"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed",
+  "note": "первый прогон: 0 красных — _all_generated брал только toolchange 1→2, а он использует все 6 точек LIB (свойство «только точки ходов» у toolchange было вакуумным); правка лида: добавлен toolchange 0→1 в _all_generated, повтор — красный, как в прогнозе"
+ },
+ {
+  "id": "I19",
+  "prop": "pen_up <= pen_down — отказ",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "    if pen_up <= pen_down:",
+  "new": "    if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_rejects_bad_arguments",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_draw_rejects_bad_arguments"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_draw_rejects_bad_arguments",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_draw_rejects_bad_arguments"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ },
+ {
+  "id": "I20",
+  "prop": "умолчание max_pass_run = 26",
+  "file": "Services/robot_comm/programs/generators/drawing.py",
+  "old": "    max_pass_run: int = 26,",
+  "new": "    max_pass_run: int = 27,",
+  "forecast": [
+   "Services/robot_comm/tests/test_generators.py::test_default_max_pass_run_is_half_buffer_minus_one",
+   "Services/robot_comm/tests/test_generators.py::test_pass_run_capped_and_chunks_plan",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_long_stroke_and_circle_exact_every_26",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_generators.py::test_default_max_pass_run_is_half_buffer_minus_one",
+   "Services/robot_comm/tests/test_generators.py::test_pass_run_capped_and_chunks_plan",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_long_stroke_and_circle_exact_every_26",
+   "Services/robot_comm/tests/test_generators_acceptance.py::test_random_strokes_properties"
+  ],
+  "test": "оба файла без -k: 21 собрано; база и после — 21 passed"
+ }
+]
