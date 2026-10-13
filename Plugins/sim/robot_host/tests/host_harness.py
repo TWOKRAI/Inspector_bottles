@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Стенд-водитель v2 для приёмки T2.4 (хост sim v2 на фреймворке).
+"""Обвязка хоста sim v2 для тестов ``robot_host`` (менеджер воркеров, плагин, клиент v2 по TCP).
 
-ponytail: временный до ``client_v2`` — синхронный ``ModbusSdkClient`` + рукописный
-mailbox-хендшейк (по образцу ``_write_cmd``/``_wait_res`` из
-``Services/robot_comm/tests/test_sim_v2_tcp.py`` @ 6cf91f824). Когда появится настоящий
-клиент v2, водитель удаляется, тесты переезжают на него.
+Purpose: поднять хост ``SimRobotHostPlugin`` на фреймворке и ходить к нему настоящим клиентом
+``RobotClientV2`` поверх ``ModbusDevice`` (Modbus TCP). Протокола руками здесь нет: команды и
+ожидание DONE — обёртки клиента, чтения регистров — по имени из ``REG``.
+
+Public API: ``HOST``, ``ThreadWorkerManager``, ``call``, ``close_client``, ``encoder``, ``free_port``,
+``make_host``, ``open_client``, ``read_reg``, ``run_with_deadline``, ``to_s16``, ``wait_done_hb``.
+
+Stability: lite (тестовый слой, публичного API продукта нет).
 
 Состав:
   * ``ThreadWorkerManager`` — менеджер воркеров, который ЗАПУСКАЕТ цель в потоке
@@ -16,13 +20,16 @@ mailbox-хендшейк (по образцу ``_write_cmd``/``_wait_res`` из
     ``remove_worker``.
   * ``make_host`` — плагин ``SimRobotHostPlugin`` + реальный ``PluginContext`` на фейковых
     сервисах с ``ThreadWorkerManager``.
-  * ``V2Driver`` — клиент по Modbus TCP: probe, ``cmd``, ``wait_done``, ``heartbeat``.
+  * ``open_client`` / ``close_client`` — устройство ``ModbusDevice`` и клиент ``RobotClientV2``
+    к порту хоста; ``read_reg`` / ``encoder`` — чтение телеметрии по имени ``REG``;
+    ``wait_done_hb`` — ожидание DONE с пульсом ПК в каждом опросе.
 
-Каждый блокирующий вызов — с дедлайном. Константы протокола — только из ``protocol_v2``.
+Каждый блокирующий вызов — с дедлайном.
 """
 
 from __future__ import annotations
 
+import random
 import socket
 import threading
 import time
@@ -31,18 +38,29 @@ from typing import Any, Callable
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from Plugins.sim.robot_host.plugin import SimRobotHostPlugin
-from Services.modbus.core.config import ModbusConfig, TransportType
-from Services.modbus.sdk.client import ModbusSdkClient
-from Services.robot_comm.core.protocol_v2 import CONSTANTS, OP, REG
+from Services.modbus.core.config import ModbusConfig
+from Services.modbus.core.device import ModbusDevice
+from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
+from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 
+__all__ = [
+    "HOST",
+    "ThreadWorkerManager",
+    "call",
+    "close_client",
+    "encoder",
+    "free_port",
+    "make_host",
+    "open_client",
+    "read_reg",
+    "run_with_deadline",
+    "to_s16",
+    "wait_done_hb",
+]
+
 HOST = "127.0.0.1"
-ACK = 1
-NAK = 2
 _FORBIDDEN_PORTS = {5021, 8765, 8766, 8091, 8092}  # живой стенд владельца — не трогать
-_RES_TIMEOUT_S = 3.0
-_DONE_TIMEOUT_S = 30.0
-_POLL_S = 0.02
 
 
 def free_port() -> int:
@@ -180,103 +198,61 @@ def call(plugin: SimRobotHostPlugin, name: str, data: dict | None = None) -> dic
     return getattr(plugin, plugin.commands[name])(data)
 
 
-def to_u16(value: int) -> int:
-    return value & 0xFFFF
-
-
 def to_s16(value: int) -> int:
     value &= 0xFFFF
     return value - 0x10000 if value >= 0x8000 else value
 
 
-def mm10(value_mm: float) -> int:
-    """Миллиметры/градусы -> слово провода (шаг 0.1, как ``_mm`` в старом TCP-тесте)."""
-    return round(value_mm * 10)
+def open_client(
+    port: int, *, timeout: float = 5.0, rng: random.Random | None = None
+) -> tuple[ModbusDevice, RobotClientV2]:
+    """Устройство и клиент v2 к порту хоста: соединение с повтором до ``timeout``, затем ``probe()``.
 
-
-class V2Driver:
-    """Синхронный водитель v2: probe, ``cmd(op, *args)``, ``wait_done``, ``heartbeat``."""
-
-    def __init__(self, port: int, host: str = HOST) -> None:
-        self._client = ModbusSdkClient(
-            ModbusConfig(transport=TransportType.TCP, host=host, port=port, unit_id=ROBOT_UNIT_ID)
-        )
-        self._seq = 0
-        self._hb = 0
-
-    def connect(self, timeout: float = 5.0) -> bool:
+    Окно ответа клиента — 3.0 с (у клиента по умолчанию 2.0); окно DONE — по умолчанию клиента (30 с).
+    Любой сбой (не подключились — ``AssertionError``, дедлайн, ошибка ``probe()``) — исключение уходит
+    наружу как есть, устройство перед этим закрыто."""
+    device = ModbusDevice(ModbusConfig(host=HOST, port=port, unit_id=ROBOT_UNIT_ID))
+    try:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if run_with_deadline(self._client.connect, timeout=timeout, label="driver.connect"):
-                return True
+            if run_with_deadline(device.connect, timeout=timeout, label="device.connect"):
+                break
             time.sleep(0.05)
-        return False
-
-    def close(self) -> None:
-        try:
-            self._client.close()
-        except Exception:  # noqa: BLE001 — закрытие в finally не должно маскировать причину падения
-            pass
-
-    def read(self, addr: int, count: int) -> list[int]:
-        """Один FC3."""
-        regs = run_with_deadline(lambda: self._client.read_holding(addr, count), timeout=5.0, label="driver.read")
-        assert regs is not None and len(regs) == count, f"FC3 {addr:#06x}x{count}: ответ {regs!r}"
-        return list(regs)
-
-    def probe(self) -> int:
-        """Проба до любых записей (§12): ``TLM_PROTO_VER``."""
-        return self.read(REG["TLM_PROTO_VER"], 1)[0]
-
-    def heartbeat(self) -> None:
-        self._hb = self._hb % 0xFFFF + 1
-        self._client.write_register(REG["HB_PC"], self._hb)
-
-    def _op(self, op: int | str) -> int:
-        return OP[op] if isinstance(op, str) else op
-
-    def cmd(self, op: int | str, *args: int, timeout: float = _RES_TIMEOUT_S) -> dict:
-        """Записать команду в mailbox (``CMD_FLAG`` последним) и дождаться ``RES_SEQ``."""
-        self._seq += 1
-        seq = self._seq
-        values = [to_u16(seq), self._op(op), len(args)] + [to_u16(a) for a in args]
-        self._client.write_registers(REG["CMD_SEQ"], values)
-        self._client.write_register(REG["CMD_FLAG"], 1)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self.read(REG["RES_SEQ"], 1)[0] == seq:
-                status, errno, rvalc = self.read(REG["RES_STATUS"], 3)
-                rvals = self.read(REG["RES_RVALS"], 8)[:rvalc]
-                return {"seq": seq, "status": status, "errno": errno, "rvalc": rvalc, "rvals": rvals}
-            time.sleep(_POLL_S)
-        raise AssertionError(f"RES_SEQ не стал {seq} за {timeout} с (op={op!r})")
-
-    def wait_done(self, seq: int, timeout: float = _DONE_TIMEOUT_S) -> None:
-        """Ждать ``TLM_DONE_SEQ == seq``; ``PC``-heartbeat — в каждом опросе. Ошибка — AssertionError."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            self.heartbeat()
-            if self.read(REG["TLM_DONE_SEQ"], 1)[0] == to_u16(seq):
-                return
-            if self.read(REG["TLM_ERR_SEQ"], 1)[0] == to_u16(seq):
-                errno = self.read(REG["TLM_ERRNO_LAST"], 1)[0]
-                raise AssertionError(f"команда seq={seq} кончилась ошибкой errno={errno}")
-            time.sleep(_POLL_S)
-        raise AssertionError(f"TLM_DONE_SEQ не стал {seq} за {timeout} с")
-
-    def tlm(self, name: str) -> int:
-        return self.read(REG[name], 1)[0]
-
-    def encoder(self) -> int:
-        """``TLM_ENC`` — два слова, младшее первым."""
-        lo, hi = self.read(REG["TLM_ENC"], 2)
-        return lo | (hi << 16)
-
-    def param_get(self, param_id: int) -> int:
-        """``PARAM_GET`` -> первое слово результата как s16."""
-        res = self.cmd("PARAM_GET", param_id)
-        assert res["status"] == ACK, f"PARAM_GET {param_id}: {res}"
-        return to_s16(res["rvals"][0])
+        else:
+            raise AssertionError(f"порт {port} не принял соединение за {timeout} с")
+        client = RobotClientV2(device, ClientV2Config.from_dict({"res_timeout_s": 3.0}), rng=rng)
+        run_with_deadline(client.probe, timeout=5.0, label="client.probe")
+    except BaseException:
+        close_client(device)
+        raise
+    return device, client
 
 
-assert CONSTANTS["PROTO_VER"] == 0x0200  # водитель и тесты говорят об одной версии
+def close_client(device: ModbusDevice) -> None:
+    """Закрыть устройство; ошибка закрытия не маскирует причину падения теста."""
+    try:
+        device.disconnect()
+    except Exception:  # noqa: BLE001 — закрытие в finally не должно маскировать причину падения
+        pass
+
+
+def read_reg(device: ModbusDevice, name: str, count: int = 1) -> list[int]:
+    """Чтение по имени ``REG``: ОДИН запрос на ``count`` слов (один FC3)."""
+    regs = run_with_deadline(lambda: device.read_registers(REG[name], count), timeout=5.0, label=f"read {name}")
+    assert len(regs) == count, f"FC3 {name}x{count}: ответ {regs!r}"
+    return list(regs)
+
+
+def encoder(device: ModbusDevice) -> int:
+    """Энкодер ленты из телеметрии — два слова, младшее первым."""
+    lo, hi = read_reg(device, "TLM_ENC", 2)
+    return lo | (hi << 16)
+
+
+def wait_done_hb(client: RobotClientV2, seq: int, timeout: float = 40.0) -> None:
+    """Ждать DONE команды ``seq``; пульс ПК — в каждом опросе. ``timeout`` — дедлайн зависания поверх окна клиента."""
+    run_with_deadline(
+        lambda: client.wait_done(seq, on_poll=lambda _tlm: client.kick_heartbeat()),
+        timeout=timeout,
+        label="wait_done",
+    )

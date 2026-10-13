@@ -3,7 +3,7 @@
 
 ``place_rz`` берётся из продукта: ``WordAssembler.offer(label, angle_deg, angle_valid, *, zero_deg,
 sign)`` отдаёт ``job["angle_deg"]`` — ОТНОСИТЕЛЬНЫЙ доворот. Абсолютный RZ укладки (сл. провода,
-0.1 град) = ``P_PICK_RZ`` (читается опкодом ``PARAM_GET``) + доворот. Правило «RZ робота до задания +
+0.1 град) = ``P_PICK_RZ`` (читается клиентом, ``param_get``) + доворот. Правило «RZ робота до задания +
 доворот» НЕ используется: после ``CVT_JOB`` инструмент остаётся в позе укладки, и на втором диске
 подряд ``TLM_RZ`` != ``P_PICK_RZ``.
 
@@ -17,17 +17,17 @@ from __future__ import annotations
 import pytest
 
 from Plugins.processing.word_layout.assembler import WordAssembler
-from Plugins.sim.robot_host.tests.v2_driver import (
-    ACK,
-    V2Driver,
+from Plugins.sim.robot_host.tests.host_harness import (
+    close_client,
     free_port,
     make_host,
-    mm10,
+    open_client,
+    read_reg,
     run_with_deadline,
     to_s16,
+    wait_done_hb,
 )
 from Services.robot_comm import ROBOT_AVAILABLE
-from Services.robot_comm.core.params_v2 import PARAM_ID
 
 pytestmark = [
     pytest.mark.skipif(not ROBOT_AVAILABLE, reason="pymodbus не установлен"),
@@ -58,14 +58,14 @@ def test_letter_is_straight_after_placement() -> None:
     ``angle_valid=False``; что ``TLM_RZ`` после ``DONE`` — поза именно укладки (принято по DESIGN)."""
     port = free_port()
     plugin, ctx, _services, workers = make_host(port, protocol="v2")
-    drv = V2Driver(port)
+    device = None
     try:
         run_with_deadline(lambda: plugin.start(ctx), timeout=10.0, label="start")
-        assert drv.connect(), "v2-хост не принял соединение"
-        assert drv.probe() == 0x0200, "хост не v2"
+        device, client = open_client(port)
+        assert read_reg(device, "TLM_PROTO_VER")[0] == 0x0200, "хост не v2"
 
-        p_pick_rz_deg = drv.param_get(PARAM_ID["P_PICK_RZ"]) / 10.0
-        assert drv.cmd("SERVO", 1)["status"] == ACK
+        p_pick_rz_deg = run_with_deadline(lambda: client.param_get("P_PICK_RZ"), timeout=5.0, label="param_get") / 10.0
+        run_with_deadline(lambda: client.servo(True), timeout=5.0, label="servo")
 
         assembler = WordAssembler.from_word("AAA", (0.0, 0.0), (100.0, 0.0))
         failures: list[str] = []
@@ -74,24 +74,25 @@ def test_letter_is_straight_after_placement() -> None:
             assert job is not None, f"диск {number}: матчер отказал (слотов 3, дисков 3)"
             place_rz_deg = p_pick_rz_deg + job["angle_deg"]
 
-            drv.heartbeat()
-            res = drv.cmd(
-                "CVT_JOB",
-                0,
-                0,
-                mm10(_PICK_MM[0]),
-                mm10(_PICK_MM[1]),
-                0,
-                2,  # flags бит1: укладка из place_* (иначе P_PLACE_*, place_rz игнорируется); правка лида
-                mm10(_PLACE_MM[0]),
-                mm10(_PLACE_MM[1]),
-                0,
-                mm10(place_rz_deg),
+            run_with_deadline(client.kick_heartbeat, timeout=5.0, label="hb")
+            res = run_with_deadline(
+                lambda: client.cvt_job(
+                    0,
+                    _PICK_MM[0],
+                    _PICK_MM[1],
+                    0.0,
+                    2,  # flags бит1: укладка из place_* (иначе P_PLACE_*, place_rz игнорируется); правка лида
+                    _PLACE_MM[0],
+                    _PLACE_MM[1],
+                    0.0,
+                    place_rz_deg,
+                ),
+                timeout=5.0,
+                label="cvt_job",
             )
-            assert res["status"] == ACK, f"диск {number}: CVT_JOB отклонён: {res}"
-            drv.wait_done(res["seq"])
+            wait_done_hb(client, res.seq)
 
-            rz_deg = to_s16(drv.tlm("TLM_RZ")) / 10.0
+            rz_deg = to_s16(read_reg(device, "TLM_RZ")[0]) / 10.0
             letter_deg = _wrap180(disc_deg + TOOL_SIGN * (rz_deg - p_pick_rz_deg))
             if abs(letter_deg) > _TOLERANCE_DEG:
                 failures.append(
@@ -100,7 +101,8 @@ def test_letter_is_straight_after_placement() -> None:
                 )
         assert not failures, "буква не ровная:\n" + "\n".join(failures)
     finally:
-        drv.close()
+        if device is not None:
+            close_client(device)
         try:
             run_with_deadline(lambda: plugin.shutdown(ctx), timeout=10.0, label="shutdown")
         finally:
