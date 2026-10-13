@@ -67,6 +67,14 @@ Cartesian для ``LINE``/``JOG_STEP``; ``JOINT``/``HOME`` — по сустав
     [v2] SC end id=<id> done_n=<n>         конец сценария (успех или обрыв)
     [v2] CVT grip seq=<seq> x=<мм> y=<мм>  захват в следимой точке
     [v2] CVT miss seq=<seq> x=<мм> y=<мм>  промах (перед строкой ERR E_ZONE_TRIP)
+    [v2] SC rec id=<id> i=<n> kind=<KIND> spd=<pct>      старт хода записи n (только при ``trace_sc=True``)
+    [v2] SC act id=<id> i=<n> act=<ACT> val=<aparam>     действие записи n исполнено (только при ``trace_sc=True``)
+
+Хук наблюдения (T3.5): ``RobotSimCoreV2(..., trace_sc=True)`` — ручка наблюдаемости,
+по умолчанию выключена (ноль строк и ноль работы: журнал без неё байт-в-байт прежний).
+``SC rec`` выдаётся после заведения хода записи, ``SC act`` — после применения
+действия (``DELAY_MS`` — на тике прихода, до паузы, и при ``aparam == 0``). Регистры,
+порядок тика и прочие строки хук не меняет; ``sim_journal`` новые строки принимает как строки без тега.
 
 Реализовано в T2.3, часть A (protocol-spec §7, §3.4 ``TLM_SC_*``/``TLM_SPD_PCT``):
 
@@ -288,6 +296,9 @@ _BELT_AXES = {0: (1.0, 0.0), 1: (0.0, 1.0), 2: (-1.0, 0.0), 3: (0.0, -1.0)}
 _BELT_FACTOR_SCALE = 1e-5
 
 _ERR_NAME = {code: name for name, code in ERR.items()}
+# T3.5: имена KIND/ACT для строк `SC rec`/`SC act` (только при `trace_sc=True`).
+_KIND_NAME = {code: name for name, code in KIND.items()}
+_ACT_NAME = {code: name for name, code in ACT.items()}
 
 # Коды действия записи сценария (§7.1); 7+ — резерв -> R_ACTION.
 _SC_ACTIONS = frozenset(ACT.values())
@@ -340,15 +351,19 @@ class RobotSimCoreV2:
         belt: BeltDrive | None = None,
         on_event: Callable[[str], None] | None = None,
         on_job_done: Callable[[dict], None] | None = None,
+        trace_sc: bool = False,
     ) -> None:
         """T2.3, часть B: `belt` — модель ленты (`None` -> скорость v1 `enc_rate=7`);
         `on_event(text)` — строка на событие (формат — докстринг модуля);
         `on_job_done(event)` — словарь v1 на DONE каждого CVT_JOB. Исключения
-        колбэков ядро не ловит (как v1) — защита на стороне хоста."""
+        колбэков ядро не ловит (как v1) — защита на стороне хоста.
+        T3.5: `trace_sc` — ручка наблюдаемости, по умолчанию выключена: строки
+        `SC rec`/`SC act` не выдаются и не строятся (ноль работы)."""
         self.regs: list[int] = [0] * REG_SPACE_SIZE_V2 if regs is None else regs
         self._belt = belt if belt is not None else BeltDrive.from_enc_rate(_DEFAULT_ENC_RATE, TICK_INTERVAL_S)
         self._on_event = on_event
         self._on_job_done = on_job_done
+        self._trace_sc = trace_sc
         self._encoder = 0
         #: Счёт ПРИНЯТЫХ CVT_JOB с 1 — `index` события `on_job_done` (не seq команды).
         self._job_index = 0
@@ -1330,6 +1345,12 @@ class RobotSimCoreV2:
             spd_pct=sc["spd_pct"],
         )
         self._active["sc"] = sc
+        if self._trace_sc:
+            self._emit(f"[v2] SC rec id={sc['id']} i={sc['i'] + 1} kind={_KIND_NAME[rec['kind']]} spd={sc['spd_pct']}")
+
+    def _sc_trace_act(self, sc: dict, rec: dict) -> None:
+        """T3.5: строка `SC act` — действие записи применено (только при `trace_sc`)."""
+        self._emit(f"[v2] SC act id={sc['id']} i={sc['i'] + 1} act={_ACT_NAME[rec['action']]} val={rec['aparam']}")
 
     def _sc_arrived(self, active: dict) -> None:
         """Тик прихода в точку записи: индекс (только EXACT) -> действие записи.
@@ -1350,7 +1371,9 @@ class RobotSimCoreV2:
             sc["accel"] = aparam  # хранится, разгон sim не моделирует
         elif action == ACT["ACCUR"]:
             sc["accur"] = aparam  # хранится, точность sim не моделирует
-        elif action == ACT["DELAY_MS"] and aparam > 0:
+        if self._trace_sc and action != ACT["NONE"]:
+            self._sc_trace_act(sc, rec)  # после применения; DELAY_MS — до ухода в паузу, и при aparam == 0
+        if action == ACT["DELAY_MS"] and aparam > 0:
             self.regs[REG["TLM_MOVING"]] = 0
             self._active = {
                 "type": "sc_delay",
