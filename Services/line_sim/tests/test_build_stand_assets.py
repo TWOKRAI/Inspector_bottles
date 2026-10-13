@@ -113,7 +113,7 @@ def test_letters_8_files_and_disk_300(built: dict[str, object]) -> None:
 
 
 def test_second_run_skips_and_keeps_bytes_and_mtime(
-    bsa: ModuleType, built: dict[str, object], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    bsa: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     data = tmp_path / "data"
     assert bsa.main(["--data-dir", str(data)]) == 0
@@ -335,3 +335,85 @@ def test_children_called_with_spec_arguments(bsa: ModuleType, monkeypatch: pytes
         for name in ("DejaVuSans", "DejaVuSansMono")
     ]  # fmt: skip
     assert calls["letters"] == expected
+
+
+def test_tile_child_systemexit_fails_step_tile(
+    bsa: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mst = importlib.import_module("Services.line_sim.tools.make_seamless_texture")
+
+    def exits(argv: list[str] | None = None) -> int:
+        raise SystemExit(2)  # argparse-ошибка дочернего CLI
+
+    monkeypatch.setattr(mst, "main", exits)
+    data = tmp_path / "data"
+
+    assert bsa.main(["--data-dir", str(data)]) == 1
+
+    assert capsys.readouterr().err.startswith("ошибка шага tile: ")
+    assert not (data / "letters_ink").exists()
+
+
+def test_missing_font_fails_preflight_without_writes(
+    bsa: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mpl = importlib.import_module("matplotlib")
+    monkeypatch.setattr(mpl, "get_data_path", lambda: str(tmp_path / "no_mpl"))
+    data = tmp_path / "data"
+
+    rc = bsa.main(["--data-dir", str(data)])
+
+    expected_font = Path(str(tmp_path / "no_mpl")) / "fonts" / "ttf" / "DejaVuSans.ttf"
+    assert rc == 1
+    assert capsys.readouterr().err.strip() == f"ошибка шага preflight: {expected_font} не найден"
+    assert not data.exists()
+
+
+def test_grayscale_photo_status_line_does_not_crash(
+    bsa: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    assert bsa.main(["--data-dir", str(data)]) == 0
+    imwrite_unicode(data / _PHOTO, np.zeros((484, 598), dtype=np.uint8))  # серый PNG на месте фото
+    capsys.readouterr()
+
+    assert bsa.main(["--data-dir", str(data)]) == 0
+
+    assert _status(capsys.readouterr().out) == [
+        "skipped belt_photo_full.png 598x484x1",
+        f"skipped {_LINE_TILE}",
+        f"skipped {_LINE_LETTERS}",
+    ]
+
+
+def test_data_dir_is_a_file_fails_preflight(
+    bsa: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    occupied = tmp_path / "occupied"
+    occupied.write_bytes(b"not a directory")
+
+    rc = bsa.main(["--data-dir", str(occupied)])
+
+    assert rc == 1
+    assert capsys.readouterr().err.startswith("ошибка шага preflight: каталог")
+    assert occupied.read_bytes() == b"not a directory"
+
+
+def test_extra_png_in_letters_dir_rebuilds_group(
+    bsa: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    assert bsa.main(["--data-dir", str(data)]) == 0
+    extra = data / "letters_ink" / "А" / "DejaVuSans_s2.png"  # читаемая копия под чужим именем
+    extra.write_bytes((data / "letters_ink" / "А" / "DejaVuSans_s3.png").read_bytes())
+    capsys.readouterr()
+
+    assert bsa.main(["--data-dir", str(data)]) == 0
+
+    assert _status(capsys.readouterr().out) == [
+        f"skipped {_LINE_PHOTO}",
+        f"skipped {_LINE_TILE}",
+        f"built {_LINE_LETTERS}",
+    ]
+    assert not extra.exists()
+    assert len(_letter_files(data)) == 8

@@ -16,7 +16,8 @@ Public API:
 Stability: lite
 
 Идемпотентность по группам: группа готова, только если ВСЕ её файлы существуют и читаются
-обратно через ``imread_unicode``; иначе пересобирается вся группа целиком (каталог букв
+обратно через ``imread_unicode`` (для ``letters`` ещё и набор ``*.png`` под ``letters_ink`` в точности
+равен ожидаемым 8 путям); иначе пересобирается вся группа целиком (каталог букв
 перед этим удаляется: лишний файл в ``letters_ink/<буква>/`` стал бы образцом класса, LS-014).
 Собранное фото всегда тянет пересборку тайла (перед записью фото тайл удаляется).
 ``--force`` пересобирает все три группы.
@@ -89,7 +90,8 @@ def _readable_shape(path: Path) -> tuple[int, ...] | None:
 
 
 def _size(shape: tuple[int, ...]) -> str:
-    height, width, channels = shape
+    height, width = shape[:2]
+    channels = shape[2] if len(shape) == 3 else 1  # серый PNG читается без оси каналов
     return f"{width}x{height}x{channels}"
 
 
@@ -107,6 +109,19 @@ def _group_files(data: Path) -> dict[str, list[Path]]:
 
 def _is_ready(files: list[Path]) -> bool:
     return all(_readable_shape(path) is not None for path in files)
+
+
+def _letters_dir_is_exact(data: Path, files: list[Path]) -> bool:
+    """В `letters_ink` ровно ожидаемые `*.png`: лишний файл стал бы образцом класса (LS-014)."""
+    root = data / _LETTERS_DIR
+    expected = set(files[:-1])  # последний файл группы — диск, он лежит рядом с каталогом
+    return set(root.rglob("*.png")) == expected
+
+
+def _group_is_ready(step: str, data: Path, files: list[Path]) -> bool:
+    if step == "letters" and not _letters_dir_is_exact(data, files):
+        return False
+    return _is_ready(files)
 
 
 def _preflight(fixtures: Path) -> None:
@@ -191,7 +206,7 @@ def _run(data: Path, fixtures: Path, force: bool) -> None:
         "letters": lambda: _build_letters(fixtures, data),
     }
     for step, files in groups.items():
-        rebuild = force or not _is_ready(files)
+        rebuild = force or not _group_is_ready(step, data, files)
         if rebuild:
             builders[step]()
         print(_status("built" if rebuild else "skipped", step, files), flush=True)
