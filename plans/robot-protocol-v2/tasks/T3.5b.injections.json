@@ -10,8 +10,12 @@
    "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
    "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 3 failed, 13 passed, 1 warning in 4.94s; 2026-10-13",
   "note": ""
  },
  {
@@ -23,8 +27,10 @@
   "forecast": [
    "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 1 failed, 15 passed, 1 warning in 5.73s; 2026-10-13",
   "note": "line_cycle и scene_job_done_t после wait_done ждут событие до 5,0 с — выживают"
  },
  {
@@ -38,8 +44,12 @@
    "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
    "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 3 failed, 13 passed, 1 warning in 14.28s; 2026-10-13",
   "note": ""
  },
  {
@@ -58,8 +68,17 @@
    "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time",
    "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_v2_host_restarts_cleanly_under_real_worker_manager"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_belt_commands_on_v2",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_restart_after_shutdown_rebinds_port",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_status_protocol_matches_wire",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_tcp_reads_pmir_block",
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_v2_host_restarts_cleanly_under_real_worker_manager"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 8 failed, 8 passed, 1 warning in 2.73s; 2026-10-13",
   "note": ""
  },
  {
@@ -71,8 +90,10 @@
   "forecast": [
    "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 1 failed, 15 passed, 1 warning in 5.65s; 2026-10-13",
   "note": ""
  },
  {
@@ -86,8 +107,12 @@
    "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
    "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_letter_straight.py::test_letter_is_straight_after_placement",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 3 failed, 13 passed, 1 warning in 5.00s; 2026-10-13",
   "note": ""
  },
  {
@@ -97,9 +122,12 @@
   "old": "[ecap_value & 0xFFFF, ecap_value >> 16, *pick, flags, *place]",
   "new": "[ecap_value >> 16, ecap_value & 0xFFFF, *pick, flags, *place]",
   "forecast": [],
-  "observed": null,
-  "test": null,
-  "note": "ecap = 0 в line_cycle (spawn_encoder 0) и, вероятно, в scene_job_done_t (лента стоит) — выживает ожидаемо"
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 2 failed, 14 passed, 1 warning in 6.18s; 2026-10-13",
+  "note": "РАСХОЖДЕНИЕ: прогноз «выживает (ecap = 0)» неверен — 2 лишних красных. Гипотеза по коду (не проверена прогоном): ecap ≠ 0 — line_cycle передаёт в сцену живой энкодер e_start (стр. 152–153), real_wm читает ecap с энкодера (стр. 164). Тесты держат порядок слов ecap сильнее прогноза."
  },
  {
   "id": "I8",
@@ -108,8 +136,8 @@
   "old": "            self._wr([(\"w\", REG[\"HB_PC\"], self._hb_value)])",
   "new": "            pass",
   "forecast": [],
-  "observed": null,
-  "test": null,
+  "observed": [],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 16 passed, 1 warning in 6.65s; 2026-10-13",
   "note": "HB_PC не проверял ни один тест T2.4 — выживает ожидаемо"
  },
  {
@@ -124,8 +152,13 @@
    "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
    "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
   ],
-  "observed": null,
-  "test": null,
+  "observed": [
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_belt_commands_on_v2",
+   "Plugins/sim/robot_host/tests/test_v2_host.py::test_tcp_reads_pmir_block",
+   "Plugins/sim/robot_host/tests/test_v2_line_cycle.py::test_frame_to_job_to_done_cycle",
+   "Plugins/sim/robot_host/tests/test_v2_real_worker_manager.py::test_scene_job_done_t_is_plugin_monotonic_not_sim_time"
+  ],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 4 failed, 12 passed, 1 warning in 4.14s; 2026-10-13",
   "note": ""
  },
  {
@@ -135,8 +168,8 @@
   "old": "device.read_registers(REG[name], count)",
   "new": "[device.read_registers(REG[name] + i, 1)[0] for i in range(count)]",
   "forecast": [],
-  "observed": null,
-  "test": null,
+  "observed": [],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 16 passed, 1 warning in 6.80s; 2026-10-13",
   "note": "«один FC3» держится глазом (вариант Б) — выживает ожидаемо"
  },
  {
@@ -146,8 +179,8 @@
   "old": "client.wait_done(seq, on_poll=lambda _tlm: client.kick_heartbeat())",
   "new": "client.wait_done(seq, on_poll=None)",
   "forecast": [],
-  "observed": null,
-  "test": null,
+  "observed": [],
+  "test": "4 файла test_v2_* без -k (t35b_matrix.py, гейт light): база 16 passed, после — 16 passed; 16 passed, 1 warning in 6.95s; 2026-10-13",
   "note": "CVT_JOB < 1,4 с (durations) < 3,0 с сторожа — выживает ожидаемо"
  }
 ]
