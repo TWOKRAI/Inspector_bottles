@@ -37,16 +37,17 @@
 | 8 | [layer-render](../layer-render/plan.md) | Task 6.2 | полоса С: генератор обучения из слоёв; 2.5, 6.1 DONE; литерал на выход `DatasetEngine` до 6.2 (условие CTO) |
 | 9 | [layer-render](../layer-render/plan.md) | Task 6.3 | полоса С: открывает letters-retrain Ф1 |
 | 10 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | полоса С: базовая линия сети на симе — нужно окно стенда |
-| 11 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
-| 12 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
-| 13 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, за Ж Ф1, вместе с L-7 |
-| 14 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
-| 15 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
-| 16 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
-| 17 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
-| 18 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. План ред. 2 без ревью; карта `docs/maps/recipe-switch.md`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
-| 19 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене; ⛔ после Ж 1.2b-3 |
-| 20 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
+| 11 | [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md) | Task 1.1 | паузный слот, инструмент (решение владельца 2026-10-13 «полезно и нужно»): хук PreToolUse блокирует тестовые и тяжёлые команды мимо `machine_gate.sh` → 1.2 `grant/close/status`. Не фреймворк; с полосами по файлам не пересекается (`scripts/machine_gate.sh`, хук, `.claude/settings.json`) |
+| 12 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
+| 13 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
+| 14 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, за Ж Ф1, вместе с L-7 |
+| 15 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
+| 16 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
+| 17 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
+| 18 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
+| 19 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. План ред. 2 без ревью; карта `docs/maps/recipe-switch.md`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
+| 20 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене; ⛔ после Ж 1.2b-3 |
+| 21 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
