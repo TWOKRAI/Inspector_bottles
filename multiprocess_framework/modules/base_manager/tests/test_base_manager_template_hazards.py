@@ -834,3 +834,74 @@ def test_ki_on_shutdown_base_exception_after_close_interrupt_wins() -> None:
     assert result is False
     assert elapsed < 1.0, f"повтор ждал {elapsed:.3f} с"
     assert counter.n == 1
+
+
+def test_ki_waiter_released_only_after_on_shutdown() -> None:
+    """Ревью р.1 п.1 (W-a): ждущий второй вызов на пути прерванного close отпускается только после конца тела."""
+    entered, gate = threading.Event(), threading.Event()
+    box: dict = {}
+
+    def held() -> bool:
+        entered.set()
+        gate.wait(DEADLINE_S)
+        box["body_end"] = time.monotonic()
+        return True
+
+    exc = KeyboardInterrupt("close-stop")
+    mgr, _scope, journal, counter = _ki_manager("ki7_mgr", exc, held)
+
+    def first() -> None:
+        try:
+            box["first"] = mgr.shutdown()
+        except BaseException as err:  # noqa: BLE001 - тест сам разбирает ошибку
+            box["first_error"] = err
+
+    def second() -> None:
+        box["second"] = mgr.shutdown()
+        box["second_at"] = time.monotonic()
+
+    a = threading.Thread(target=first, daemon=True, name="ki_first_call")
+    b = threading.Thread(target=second, daemon=True, name="ki_second_call")
+    try:
+        a.start()
+        assert entered.wait(DEADLINE_S), "первый вызов не дошёл до _on_shutdown"
+        b.start()
+        time.sleep(0.3)
+        assert b.is_alive() is True, "второй вызов вернулся, пока тело ещё работает"
+        released_at = time.monotonic()
+        gate.set()
+        a.join(DEADLINE_S)
+        b.join(DEADLINE_S)
+    finally:
+        gate.set()
+    assert not a.is_alive(), "первый вызов завис"
+    assert not b.is_alive(), "второй вызов завис"
+    assert box.get("first_error") is exc, repr(box.get("first_error"))
+    assert box["second"] is False
+    assert box["second_at"] >= box["body_end"], "второй вызов вернулся раньше конца тела"
+    waited = box["second_at"] - released_at
+    assert waited < 1.0, f"второй вызов вернулся через {waited:.3f} с после отпускания, ожидалось сразу"
+    assert journal == ["close", "on_shutdown"]
+    assert counter.n == 1
+
+
+def test_ki_reentrant_shutdown_from_on_shutdown_returns_false_at_once() -> None:
+    """Ревью р.1 п.1 (W-b): реентрантный shutdown() из тела после прерванного close -> False за < 1,0 с (срок 5,0 с)."""
+    box: dict = {}
+
+    def reentrant() -> bool:
+        t0 = time.monotonic()
+        box["inner"] = box["mgr"].shutdown()
+        box["inner_dt"] = time.monotonic() - t0
+        return True
+
+    exc = KeyboardInterrupt("close-stop")
+    mgr, _scope, journal, counter = _ki_manager("ki8_mgr", exc, reentrant)
+    box["mgr"] = mgr
+    done, _result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert error is exc, repr(error)
+    assert box["inner"] is False
+    assert box["inner_dt"] < 1.0, f"реентрантный вызов ждал {box['inner_dt']:.3f} с"
+    assert journal == ["close", "on_shutdown"]
+    assert counter.n == 1
