@@ -134,7 +134,10 @@ def test_worker_pool_shutdown_races_shutdown_nowait(round_no: int) -> None:
     def call(name: str, fn) -> None:
         start.wait(DEADLINE_S)
         try:
-            results[name] = fn()
+            ret = fn()
+            # Снимок В МОМЕНТ возврата: «True» обязан значить «воркеры уже вышли».
+            alive = [t.name for t in threading.enumerate() if ex._name_prefix in t.name and t.is_alive()]
+            results[name] = (ret, len(sink), alive)
         except BaseException as exc:  # noqa: BLE001
             results[name] = exc
 
@@ -145,9 +148,16 @@ def test_worker_pool_shutdown_races_shutdown_nowait(round_no: int) -> None:
     a.join(DEADLINE_S)
     b.join(DEADLINE_S)
     assert not a.is_alive() and not b.is_alive(), "останов пула завис"
-    assert results == {"shutdown": True, "nowait": True}, results
-    # Хвост: либо весь (дренаж первым), либо часть (отмена первой) — но не больше поданного.
-    assert len(sink) <= 10
+    assert set(results) == {"shutdown", "nowait"}, results
+    final = len(sink)
+    for name, value in results.items():
+        assert isinstance(value, tuple), f"{name}: {value!r}"
+        ret, n_at_return, alive_at_return = value
+        assert ret is True, f"{name}: {value!r}"
+        assert alive_at_return == [], f"{name} вернул True при живых воркерах: {value!r}"
+        assert n_at_return == final, f"{name}: хвост дописывался после возврата: {value!r}, итог {final}"
+    # Взятые задачи доисполнены, невзятые отменены: исполнен префикс очереди без дыр.
+    assert sorted(sink) == list(range(final)), sink
     assert ex.shutdown() is True
     assert ex.shutdown_nowait() is True
 
