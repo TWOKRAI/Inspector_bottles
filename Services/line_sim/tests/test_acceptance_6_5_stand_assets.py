@@ -39,7 +39,7 @@ __all__: list[str] = []
 
 _FIXTURE_PHOTO = Path(__file__).resolve().parent / "fixtures" / "belt_photo_full.png"
 
-# А К Р Х (кириллица), записаны кодами, чтобы кодировка исходника не влияла.
+# А К Р Х (кириллица); исходник в UTF-8.
 _LETTER_DIRS = ["А", "К", "Р", "Х"]
 _LETTER_FILES = ["DejaVuSans_s3.png", "DejaVuSansMono_s3.png"]
 
