@@ -1,0 +1,198 @@
+[
+ {
+  "id": "J1",
+  "prop": "sim: действие DO_ON не включает выход (no-op)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "self._set_do(aparam, 1)",
+  "new": "pass",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_return_slot_do_and_delay",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[hard]",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_moves[shift_under_quantum]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_return_slot_do_and_delay",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[hard]"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же",
+  "note": "shift_under_quantum проверяет только DO_OFF — при неработающем DO_ON бит и так 0; DO_ON держат return_slot и stop[hard]; промах прогноза"
+ },
+ {
+  "id": "J2",
+  "prop": "sim: DELAY_MS не выдерживается (пауза 0)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "\"delay_s\": aparam / 1000.0,",
+  "new": "\"delay_s\": 0.0,",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_return_slot_do_and_delay",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_toolchange_accur_accel_delay",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[hard]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_return_slot_do_and_delay",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_toolchange_accur_accel_delay",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_watchdog_silence_stops_belt"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же",
+  "note": "stop[hard] не зависит от паузы (стоп по событию DO_ON, DONE_N 2 при любой паузе); лишний красный watchdog — фаза C на toolchange с seat_delay 1000 мс успевает завершиться до сторожа (вывод по коду, assert не смотрели)"
+ },
+ {
+  "id": "J3",
+  "prop": "sim: SPEED_PCT игнорируется (скорость хода остаётся по умолчанию)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "sc[\"spd_pct\"] = aparam",
+  "new": "pass",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_moves[stroke_under_quantum]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же",
+  "note": "stroke_under_quantum не сверяет spd; скорость держит draw_two_chunks; промах прогноза"
+ },
+ {
+  "id": "J4",
+  "prop": "sim: сторожевой таймер никогда не срабатывает",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "if self._wdg_armed and self._time_s",
+  "new": "if False and self._wdg_armed and self._time_s",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_watchdog_silence_stops_belt"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_watchdog_silence_stops_belt"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J5",
+  "prop": "sim: поводок jog (JOG_LEASE) не останавливает ход",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "if self._time_s - active[\"lease_t\"] > threshold_s:",
+  "new": "if self._time_s - active[\"lease_t\"] > 1e12:",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_jog_lease"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_jog_lease"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J6",
+  "prop": "sim: стоп HARD обрабатывается как SOFT (доводит до EXACT)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "if level == STOP_LEVEL[\"SOFT\"] and self._active[\"type\"] in (\"move\", \"sc_delay\", \"cvt\"):",
+  "new": "if level in (STOP_LEVEL[\"SOFT\"], STOP_LEVEL[\"HARD\"]) and self._active[\"type\"] in (\"move\", \"sc_delay\", \"cvt\"):",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[hard]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[hard]"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J7",
+  "prop": "sim: стоп SOFT обрывает сразу, как HARD",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "if level == STOP_LEVEL[\"SOFT\"] and self._active[\"type\"] in (\"move\", \"sc_delay\", \"cvt\"):",
+  "new": "if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[soft]"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_stop_mid_scenario[soft]"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J8",
+  "prop": "sim: рестарт не восстанавливает зеркало параметров (PMIR) — параметры к умолчанию",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "            if valid:",
+  "new": "            if False:",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_restart_keeps_mirror"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_restart_keeps_mirror"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J9",
+  "prop": "sim: промах CVT не увеличивает TLM_MISS_COUNT",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "(self.regs[REG[\"TLM_MISS_COUNT\"]] + 1) & 0xFFFF",
+  "new": "(self.regs[REG[\"TLM_MISS_COUNT\"]] + 0) & 0xFFFF",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_cvt_job_tracks_and_places"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_cvt_job_tracks_and_places"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J10",
+  "prop": "sim: ход нулевой длины снова роняет тик (откат защиты T2.5)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "frac = travelled / active[\"path_len\"] if active[\"path_len\"] > 0 else 1.0",
+  "new": "frac = travelled / active[\"path_len\"]",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_moves[approach_eq_first]",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_moves[stroke_under_quantum]",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_moves[shift_under_quantum]"
+  ],
+  "observed": [],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же",
+  "note": "ни один из трёх случаев test_zero_length_moves не достигает защиты T2.5 (она только на JOINT нулевой длины, случаи идут LINE/LINE_PASS) — пробел покрытия: добавлен test_zero_length_joint_to_current_pose (1cb845528), повтор J10b красный"
+ },
+ {
+  "id": "J11",
+  "prop": "клиент run_chunks: второй кусок грузится/запускается с неверным offset",
+  "file": "Services/robot_comm/core/client_v2.py",
+  "old": "seq = self.sc_run(count, k + 1, offset).seq",
+  "new": "seq = self.sc_run(count, k + 1, 0).seq",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же"
+ },
+ {
+  "id": "J12",
+  "prop": "sim: SC_RUN не сбрасывает скорость (перенос состояния через кусок — поведение T3.9)",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "            \"spd_pct\": self._values[PARAM_ID[\"P_SPD_DEFAULT\"]],\n            \"accel\": self._values[PARAM_ID[\"P_ACC_L\"]],\n            \"accur\": self._values[PARAM_ID[\"P_ACCUR_DEFAULT\"]],\n        }\n        self.regs[REG[\"TLM_SC_ID\"]] = sc_id",
+  "new": "            \"spd_pct\": getattr(self, \"_prev_sc\", {}).get(\"spd_pct\", self._values[PARAM_ID[\"P_SPD_DEFAULT\"]]),\n            \"accel\": self._values[PARAM_ID[\"P_ACC_L\"]],\n            \"accur\": self._values[PARAM_ID[\"P_ACCUR_DEFAULT\"]],\n        }\n        self._prev_sc = sc\n        self.regs[REG[\"TLM_SC_ID\"]] = sc_id",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary",
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_two_chunks"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_draw_speed_survives_chunk_boundary"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 12 passed + 1 xfailed, после — то же",
+  "note": "draw_two_chunks сверяет скорость куска 2 только с i>=3; перенос скорости (i=1..2) ловит strict-xfail (XPASS) — по замыслу"
+ },
+ {
+  "id": "J10b",
+  "prop": "sim: ход нулевой длины снова роняет тик (откат защиты T2.5) — повтор на новом тесте JOINT в текущую позу",
+  "file": "Services/robot_comm/server/sim_core_v2.py",
+  "old": "frac = travelled / active[\"path_len\"] if active[\"path_len\"] > 0 else 1.0",
+  "new": "frac = travelled / active[\"path_len\"]",
+  "forecast": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_joint_to_current_pose"
+  ],
+  "observed": [
+   "Services/robot_comm/tests/test_sim_e2e_v2.py::test_zero_length_joint_to_current_pose"
+  ],
+  "test": "test_sim_e2e_v2.py без -k; база 13 passed + 1 xfailed"
+ }
+]
