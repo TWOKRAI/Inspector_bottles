@@ -44,8 +44,8 @@ def return_slot(
     Все точки — в СК `slot.frame`, рука `slot.hand`, RZ `slot.rz`; подъём и сдвиг — в координатах этой
     СК. Умолчания из v1: `RET_LIFT_MM` 20, `RET_PUSH_MM` 100 по +X, `DO_GRIP` 1, `GRIP_S` 0.4 с.
 
-    Pre: `lift_mm > 0`; сдвиг `(push_dx_mm, push_dy_mm)` не нулевой (иначе ход нулевой длины) — иначе
-    `GeneratorError`; канал и задержка в диапазоне `Action` — иначе `ValueError` валидации.
+    Pre: `lift_mm > 0`; сдвиг `(push_dx_mm, push_dy_mm)` не нулевой (нулевой дал бы ход нулевой длины) —
+    иначе `GeneratorError`; канал и задержка в диапазоне `Action` — иначе `ValueError` валидации.
     Post: без `approach` первый ход — JOINT над слотом, с `approach` — JOINT в `approach`, и весь маршрут
     LINE; действия DO_ON/DO_OFF и DELAY_MS — только после EXACT-ходов; с `home` последний ход — JOINT в
     `home`. Зону и руку проверяет вызывающий через `compile_program`.
