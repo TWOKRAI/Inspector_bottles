@@ -706,3 +706,131 @@ def test_waiting_second_call_returns_promptly_after_base_exception() -> None:
     assert box["second"] is False
     waited = box["second_at"] - released_at
     assert waited < 1.0, f"второй вызов вернулся через {waited:.3f} с после BaseException, ожидалось сразу"
+
+
+# ---------------------------------------------------------------------------
+# 1.2b-ki: BaseException в scope.close() не отменяет _on_shutdown()
+# ---------------------------------------------------------------------------
+
+
+class InterruptingScope(FakeScope):
+    """Подделка области: ``close()`` пишет «close» в журнал и бросает заданное исключение."""
+
+    def __init__(self, exc: BaseException, journal: list, path: str = "ki/scope") -> None:
+        super().__init__(path)
+        self._exc = exc
+        self._journal = journal
+
+    def close(self, budget_s=None, *, deadline=None):
+        self.close_calls += 1
+        self._journal.append("close")
+        raise self._exc
+
+
+def _ki_manager(name: str, exc: BaseException, hook_body=None):
+    """Менеджер с прерывающей областью; ``hook_body`` — что делает ``_on_shutdown`` после записи в журнал."""
+    journal: list = []
+    counter = Counter()
+
+    def hook(_mgr) -> bool:
+        counter.inc()
+        journal.append("on_shutdown")
+        return True if hook_body is None else hook_body()
+
+    mgr = HookManager(name, hook)
+    scope = InterruptingScope(exc, journal)
+    mgr.attach_scope(scope)
+    return mgr, scope, journal, counter
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+def test_ki_close_interrupt_still_calls_on_shutdown_once_after_close(exc_type) -> None:
+    """K-1: прерывание в close -> _on_shutdown вызван ровно один раз, после close."""
+    mgr, scope, journal, counter = _ki_manager("ki1_mgr", exc_type("close-stop"))
+    done, _result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert isinstance(error, exc_type), repr(error)
+    assert journal == ["close", "on_shutdown"]
+    assert counter.n == 1
+    assert scope.close_calls == 1
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+def test_ki_close_interrupt_same_object_propagates(exc_type) -> None:
+    """K-2: из shutdown() выходит тот же объект исключения, что бросил close."""
+    exc = exc_type("close-stop")
+    mgr, _scope, _journal, _counter = _ki_manager("ki2_mgr", exc)
+    done, result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert result is None
+    assert error is exc
+
+
+def test_ki_close_interrupt_caches_false_even_if_on_shutdown_true() -> None:
+    """K-3: кэш False при True от _on_shutdown; повтор — False сразу, тело не зовётся снова."""
+    mgr, _scope, _journal, counter = _ki_manager("ki3_mgr", KeyboardInterrupt("close-stop"))
+    done, _result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert isinstance(error, KeyboardInterrupt), repr(error)
+    assert counter.n == 1
+    done, result, error, elapsed = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done and error is None, repr(error)
+    assert result is False
+    assert elapsed < 1.0, f"повтор ждал {elapsed:.3f} с"
+    assert counter.n == 1
+
+
+def test_ki_close_interrupt_logged_exactly_once(caplog) -> None:
+    """K-4: строка «scope.close прерван» ровно одна."""
+    caplog.set_level(logging.DEBUG, logger=LOGGER_NAME)
+    mgr, _scope, _journal, _counter = _ki_manager("ki4_mgr", KeyboardInterrupt("close-stop"))
+    done, _result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert isinstance(error, KeyboardInterrupt), repr(error)
+    messages = [r.getMessage() for r in caplog.records]
+    expected = "shutdown ki4_mgr: scope.close прерван: KeyboardInterrupt: close-stop"
+    assert sum(expected in m for m in messages) == 1, messages
+    assert not any("scope.close упал" in m for m in messages), messages
+
+
+def test_ki_on_shutdown_error_after_close_interrupt_keeps_interrupt(caplog) -> None:
+    """K-5: RuntimeError в _on_shutdown на этом пути -> наверх KeyboardInterrupt, строка о RuntimeError есть."""
+    caplog.set_level(logging.DEBUG, logger=LOGGER_NAME)
+
+    def broken() -> bool:
+        raise RuntimeError("hook-broke")
+
+    exc = KeyboardInterrupt("close-stop")
+    mgr, _scope, journal, counter = _ki_manager("ki5_mgr", exc, broken)
+    done, _result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert error is exc, repr(error)
+    assert journal == ["close", "on_shutdown"]
+    assert counter.n == 1
+    messages = [r.getMessage() for r in caplog.records]
+    expected = "shutdown ki5_mgr: _on_shutdown упал: RuntimeError: hook-broke"
+    assert sum(expected in m for m in messages) == 1, messages
+    done, result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done and error is None, repr(error)
+    assert result is False
+
+
+def test_ki_on_shutdown_base_exception_after_close_interrupt_wins() -> None:
+    """Правило 4 DESIGN: BaseException самого _on_shutdown уходит наверх, __context__ — исходное; кэш False."""
+    hook_exc = SystemExit("hook-exit")
+
+    def exiting() -> bool:
+        raise hook_exc
+
+    close_exc = KeyboardInterrupt("close-stop")
+    mgr, _scope, journal, counter = _ki_manager("ki6_mgr", close_exc, exiting)
+    done, _result, error, _ = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done
+    assert error is hook_exc, repr(error)
+    assert error.__context__ is close_exc
+    assert journal == ["close", "on_shutdown"]
+    done, result, error, elapsed = call_bounded(mgr.shutdown, DEADLINE_S)
+    assert done and error is None, repr(error)
+    assert result is False
+    assert elapsed < 1.0, f"повтор ждал {elapsed:.3f} с"
+    assert counter.n == 1
