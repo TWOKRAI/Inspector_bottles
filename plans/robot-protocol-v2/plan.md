@@ -270,7 +270,7 @@ glob-подписка на состояние. Друг на друга не с�
 - Task T3.2: `client_v2`: обёртки, пинг-понг, golden-лог [DONE 2026-10-12 — слияние `ca48fc244`, итог `tasks/T3.2.result.md`] (после T3.1)
 - Task T3.3: Программы: точки, СК, шаги, compile [DONE 2026-10-12 — слияние `13fc80cdc`, итог `tasks/T3.3.result.md`] (после T1.1)
 - Task T3.4: Генераторы: рисование, возврат, смена инструмента [DONE 2026-10-13 — слияние `352f081e0`, итог `tasks/T3.4.result.md`] (после T3.3)
-- Task T3.5: e2e клиент ↔ sim [PENDING] (после T3.2, T3.4) — бриф `tasks/T3.5.md` + `tasks/T3.5.tester.md` (2026-10-13): developer — обвязка и хук `trace_sc`, затем tester — приёмка
+- Task T3.5: e2e клиент ↔ sim [DONE 2026-10-13 — слияние `e5cf50c04`, итог `tasks/T3.5.result.md`] (после T3.2, T3.4)
 - Task T3.5b: хвост T3.1 — `v2_driver.py` стенда `robot_host` удалить, тесты T2.4 на клиент v2 [PENDING] (после T3.5) — решение владельца 2026-10-13 (В2 брифа T3.5); `tasks.md` → «### T3.5b»
 - Task T3.6: Ленивые `__init__` пакета `robot_comm` и `core/` [DONE 2026-10-12 — слияние `ca48fc244`, итог `tasks/T3.6.result.md`] (после слияния T3.1)
 - Task T3.7: `robot_host` линии на протоколе v2 [PENDING] (после T3.5) — 2026-10-12: `apps/line_sim/pipeline.yaml:51` — `protocol: v1`; пожелание владельца «всё на одном экране», `plans/queue/_proposals/2026-10-12_plans-sync.md`

@@ -10,7 +10,7 @@
 Три допуска остались тихими: слота нет / менеджер `None` / слот выключен. Успешный путь не
 подорожал. Подробности и контракт слота — в [`README.md`](README.md) и [`DECISIONS.md`](DECISIONS.md).
 
-**`BaseException` в `scope.close()` (Task 1.2b-ki, 2026-10-13, ADR-BM-009):** строка `scope.close прерван`, `_on_shutdown()` всё равно зовётся один раз, затем исключение уходит наверх; кэш `False`. Тесты: `test_ki_*` в `tests/test_base_manager_template_hazards.py` (8).
+**`BaseException` в `scope.close()` (Task 1.2b-ki, 2026-10-13, ADR-BM-009):** строка `scope.close прерван`, `_on_shutdown()` всё равно зовётся один раз, затем исключение уходит наверх; кэш `False`. Тесты: `test_ki_*` в `tests/test_base_manager_template_hazards.py` (10).
 
 **Принуждение Р1 (а) (Task 1.2b-3, 2026-10-13, ADR-BM-009):** `BaseManager.__init_subclass__` бросает `TypeError`, если подкласс определяет свой `shutdown`; Services 5, прототип 1 и 19 тестовых подклассов переименованы в `_on_shutdown`. Тесты: `tests/test_shutdown_final_1_2b_3_acceptance.py` (слепой тестер, 13).
 
