@@ -130,7 +130,7 @@ class RegistersManager(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         self._global_observers.clear()
         self._field_observers.clear()
         self.is_initialized = False

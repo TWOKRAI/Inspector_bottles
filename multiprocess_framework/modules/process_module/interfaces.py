@@ -7,9 +7,12 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from .types import ProcessStatsDict
+
+if TYPE_CHECKING:
+    from ..base_manager.interfaces import CloseReport
 
 
 class IProcessModule(ABC):
@@ -19,16 +22,25 @@ class IProcessModule(ABC):
     Реализуется ProcessModule. Внешние модули (process_manager_module, adapters)
     должны зависеть только от этого интерфейса.
 
-    Жизненный цикл: initialize() -> run() -> stop() -> shutdown()
+    Жизненный цикл: initialize() -> run() -> stop() -> shutdown();
+    ``attach_stop_budget()`` до ``initialize()``; раннер гасит ``close_root()``.
     """
 
     # ---- Жизненный цикл ----
+
+    @abstractmethod
+    def attach_stop_budget(self, budget: dict) -> None:
+        """Принять словарь ``stop_budget`` до ``initialize()``."""
 
     @abstractmethod
     def initialize(self) -> bool: ...
 
     @abstractmethod
     def shutdown(self) -> bool: ...
+
+    @abstractmethod
+    def close_root(self) -> "CloseReport | None":
+        """Закрыть корень; ``None`` без корня; повтор — тот же отчёт."""
 
     @abstractmethod
     def run(self) -> None: ...

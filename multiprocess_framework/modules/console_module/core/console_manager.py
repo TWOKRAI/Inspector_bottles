@@ -8,6 +8,7 @@ ConsoleManager — менеджер терминальных окон проце
 
 ConsoleManager НЕ логирует, НЕ парсит команды, НЕ маршрутизирует.
 """
+
 import threading
 from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
 
@@ -89,7 +90,7 @@ class ConsoleManager(BaseManager, ObservableMixin, IConsoleManager):
             self._log_error(f"ConsoleManager init failed: {exc}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Остановить input loop, восстановить stdout, закрыть терминалы."""
         try:
             self.disable_input()
@@ -139,10 +140,7 @@ class ConsoleManager(BaseManager, ObservableMixin, IConsoleManager):
 
     def create_console(self, name: str, title: str = "") -> bool:
         if not self._platform.supports_multiple_windows():
-            self._log_warning(
-                f"Platform does not support multiple windows; "
-                f"cannot create console '{name}'"
-            )
+            self._log_warning(f"Platform does not support multiple windows; cannot create console '{name}'")
             return False
         with self._lock:
             if name in self._consoles:
@@ -222,6 +220,7 @@ class ConsoleManager(BaseManager, ObservableMixin, IConsoleManager):
                 return True
             from ..redirectors.console_redirector import ConsoleRedirector
             import sys
+
             self._redirector = ConsoleRedirector(self)
             sys.stdout = self._redirector  # type: ignore[assignment]
             sys.stderr = self._redirector  # type: ignore[assignment]
@@ -239,14 +238,16 @@ class ConsoleManager(BaseManager, ObservableMixin, IConsoleManager):
 
     def get_stats(self) -> Dict[str, Any]:
         base = super().get_stats()
-        base.update({
-            "enabled": self._config.enabled,
-            "interactive": self._config.interactive,
-            "visible": self._platform.is_visible(),
-            "consoles": list(self._consoles.keys()),
-            "redirect_active": self._redirector is not None,
-            "input_running": self._input_thread_running,
-        })
+        base.update(
+            {
+                "enabled": self._config.enabled,
+                "interactive": self._config.interactive,
+                "visible": self._platform.is_visible(),
+                "consoles": list(self._consoles.keys()),
+                "redirect_active": self._redirector is not None,
+                "input_running": self._input_thread_running,
+            }
+        )
         return base
 
     def get_debug_info(self) -> Dict[str, Any]:

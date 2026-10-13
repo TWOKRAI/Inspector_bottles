@@ -135,7 +135,7 @@ class PluginManager(BaseManager, ObservableMixin):
         self._log_info(f"PluginManager инициализирован, пути: {self._plugin_paths}")
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Корректное завершение работы менеджера.
 
         Returns:

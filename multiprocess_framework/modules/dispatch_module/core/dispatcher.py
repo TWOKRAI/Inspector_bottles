@@ -156,7 +156,7 @@ class Dispatcher(BaseManager, ObservableMixin):
             self.report_error(e, context="dispatcher.initialize", name=self.manager_name)
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """
         Завершение работы диспетчера.
 

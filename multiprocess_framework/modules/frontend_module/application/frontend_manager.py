@@ -6,6 +6,7 @@ FrontendManager — единая точка входа для frontend (BaseMana
 Интегрируется с config_module (подписка на изменения для hot-reload),
 logger_module, router_module.
 """
+
 from __future__ import annotations
 
 import sys
@@ -18,7 +19,6 @@ from multiprocess_framework.modules.registers_module import RegistersManager as 
 from multiprocess_framework.modules.frontend_module.application.thread_manager import ThreadManager
 from multiprocess_framework.modules.frontend_module.application.window_manager import WindowManager
 from multiprocess_framework.modules.frontend_module.core.registers_bridge import FrontendRegistersBridge
-
 
 
 class FrontendManager(BaseManager, ObservableMixin):
@@ -113,7 +113,7 @@ class FrontendManager(BaseManager, ObservableMixin):
             self._log_error(f"FrontendManager initialization failed: {exc}", module="frontend_module")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             if self._config_obj is not None and hasattr(self._config_obj, "unsubscribe"):
                 self._config_obj.unsubscribe(self._on_config_changed, "*")

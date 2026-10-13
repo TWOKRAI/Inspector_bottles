@@ -48,7 +48,7 @@ class LoggerManager(LoggerCore):
 
         reopen_early_buffer()
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Закрыться и снять себя с ``_instance`` (Ф6.8).
 
         Раньше синглтон переживал собственный ``shutdown()``: ``get_logger()``
@@ -58,12 +58,12 @@ class LoggerManager(LoggerCore):
         на вид, и его записи начали исчезать ровно в том прогоне, где до этого
         успел закрыться чужой менеджер.
 
-        Снятие идёт ПОСЛЕ ``super().shutdown()``: тот пишет прощальную запись
+        Снятие идёт ПОСЛЕ ``super()._on_shutdown()``: тот пишет прощальную запись
         через себя же, и с уже обнулённым указателем она потерялась бы.
         Проверка ``is self`` обязательна — если процесс успел поднять новый
         менеджер, закрытие старого не имеет права его отцепить.
         """
-        result = super().shutdown()
+        result = super()._on_shutdown()
         if LoggerManager._instance is self:
             LoggerManager._instance = None
             # Связки видов указывают на закрытый менеджер — объявляем

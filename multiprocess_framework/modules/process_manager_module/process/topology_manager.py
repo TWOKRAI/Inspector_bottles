@@ -112,7 +112,7 @@ class TopologyManager(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Завершение — сбросить состояние."""
         self._current_topology = None
         self.is_initialized = False

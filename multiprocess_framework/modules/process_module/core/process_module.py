@@ -338,7 +338,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._uninstall_process_hooks()
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Завершение работы процесса — одно закрытие корня (Task 1.2a, ADR-PM-054).
 
         Нет корня (``initialize()`` не звали) — ``True``: закрывать нечего.
@@ -373,6 +373,8 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             return
         budget = self._stop_budget if self._stop_budget is not None else self.DEFAULT_STOP_BUDGET
         work_b, infra_b = self._root_budget(budget)
+        # Срок второго вызова shutdown() идёт за бюджетом корня (Task 1.2b-2, В-7, ADR-BM-009).
+        self._ON_SHUTDOWN_WAIT_S = work_b + infra_b
         root = open_scope(
             f"proc/{self.name}",
             budget_s=work_b + infra_b,

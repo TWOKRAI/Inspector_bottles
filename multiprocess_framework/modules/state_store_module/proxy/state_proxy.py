@@ -1247,7 +1247,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     # Lifecycle
     # -------------------------------------------------------------------
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Отписать все активные подписки.
 
         Отправляет state.unsubscribe_all в StateStoreManager и

@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from ..runner.bundle_builder import _build_shared_resources_from_bundle
 from ...logger_module.adapters.std_facade import StdLoggerFacade
 from ..runner.class_loader import _load_process_class
+from ...process_module.interfaces import IProcessModule
 from ..runner.process_runner import (
     _run_lifecycle,
     _update_process_state,
@@ -469,7 +470,7 @@ class TestRunProcessFunction:
             "multiprocess_framework.modules.process_manager_module.runner.process_runner._load_process_class"
         ) as mock_load:
             mock_class = MagicMock()
-            mock_instance = MagicMock()
+            mock_instance = MagicMock(spec=IProcessModule)
             mock_instance.initialize.return_value = True
             mock_instance.should_stop.return_value = True
             mock_class.return_value = mock_instance

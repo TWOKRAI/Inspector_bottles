@@ -18,6 +18,7 @@ from multiprocess_framework.modules.shared_resources_module import SharedResourc
 from ..._fallback import emergency_log
 from ..core.stop_budget import EXIT_SURVIVORS, SHUTDOWN_TIMEOUT_KEY, stop_budget
 from ...logger_module.adapters.std_facade import StdLoggerFacade, get_std_logger
+from ...process_module.interfaces import IProcessModule
 from .class_loader import _load_process_class
 from .bundle_builder import _build_shared_resources_from_bundle
 
@@ -402,9 +403,8 @@ def run_process_function(
         )
 
         # Task 1.2a: бюджет остановки — ДО initialize() (корень строится первым шагом).
-        attach_budget = getattr(process_instance, "attach_stop_budget", None)
-        if callable(attach_budget):
-            attach_budget(_resolve_stop_budget(process_config, log))
+        if isinstance(process_instance, IProcessModule):
+            process_instance.attach_stop_budget(_resolve_stop_budget(process_config, log))
 
         # Task 5.4 (ADR-PMM-034): ДО initialize() — GenericProcess может строить
         # SourceProducer уже в initialize(), а не только в run().
@@ -472,8 +472,8 @@ def run_process_function(
         root_report = None
         if process_instance is not None:
             try:
-                # Task 1.2a: ровно одно закрытие корня процесса; не-ProcessModule — по-старому.
-                if hasattr(process_instance, "close_root"):
+                # Task 1.2a / 1.2b-2 (Р4): ``IProcessModule`` — корень; иначе (моки, чужие классы) — по-старому.
+                if isinstance(process_instance, IProcessModule):
                     root_report = process_instance.close_root()
                 elif hasattr(process_instance, "shutdown"):
                     process_instance.shutdown()

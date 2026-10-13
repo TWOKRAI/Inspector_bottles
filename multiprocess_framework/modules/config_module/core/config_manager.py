@@ -68,7 +68,7 @@ class ConfigManager(BaseManager, ObservableMixin, IConfigManager):
             self._log_error(f"ConfigManager initialization failed: {exc}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             if self._shared_resources:
                 self._save_all_to_store()

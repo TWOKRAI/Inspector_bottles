@@ -84,7 +84,7 @@ class WorkerPoolDispatcher(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """Отменить все pending задачи и завершить работу."""
         with self._lock:
             for task_id, pending in list(self._pending.items()):

@@ -137,7 +137,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self.report_error(e, context="command_manager.initialize", name=self.manager_name)
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         """
         Завершение работы командного менеджера.
 

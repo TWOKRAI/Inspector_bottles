@@ -280,6 +280,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
       - Context stack          — push_context / pop_context
     """
 
+    # Срок тела _on_shutdown во втором вызове shutdown() (Task 1.2b-2, ADR-BM-009):
+    # join свипера 5.0 с + один tap ≤ 2.0 с (batch_drain.DEFAULT_CLOSE_TIMEOUT_SEC).
+    _ON_SHUTDOWN_WAIT_S: float = 7.0
+
     def __init__(
         self,
         manager_name: str = "LoggerManager",
@@ -480,7 +484,7 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             self._fallback_log("ERROR", f"LoggerManager initialization failed: {e}")
             return False
 
-    def shutdown(self) -> bool:
+    def _on_shutdown(self) -> bool:
         try:
             # Свип останавливается ПЕРВЫМ: он ходит по тому же каталогу, куда
             # сейчас будут дописывать и который потом закроют. Обход, начатый

@@ -10,6 +10,8 @@
 Три допуска остались тихими: слота нет / менеджер `None` / слот выключен. Успешный путь не
 подорожал. Подробности и контракт слота — в [`README.md`](README.md) и [`DECISIONS.md`](DECISIONS.md).
 
+**Кодмод и срок второго вызова (Task 1.2b-2, 2026-10-13, ADR-BM-009):** 23 класса фреймворка переименовали `shutdown` в `_on_shutdown`; `_ON_SHUTDOWN_WAIT_S` (класс 5,0; `LoggerCore`/`RouterManager` 7,0; `ProcessModule` — экземпляр из бюджета корня); срок второго вызова = член области + атрибут.
+
 **Шаблонный `shutdown()` (Task 1.2b-1, 2026-10-12, ADR-BM-009):** `shutdown()` конкретный — закрывает `scope`, один раз зовёт `_on_shutdown()`; `scope`/`attach_scope`; мягкий режим (свои `shutdown` подклассов пока работают). Тесты: `tests/test_base_manager_template_acceptance.py` (слепой тестер, 10) + `tests/test_base_manager_template_hazards.py` (автор, 53); хранение — запись `_bm_life` в `__dict__`, строки шаблона — только вид.
 
 **Реализация владения (Task 0.2, 2026-10-04):** `core/lifetime.py` — `Scope`/`Handle`, дверь `open_scope` и

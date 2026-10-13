@@ -6,6 +6,8 @@
 
 **Остановка:** `initialize()` открывает корень `proc/<имя>` (`planes | transport | work`), `stop()` только отменяет его, `shutdown()` закрывает один раз; наследник кладёт свои записи в `_own_work` / `_own_transport` (ADR-PM-054). Менеджеры корня получают область `<attr>-scope` сегмента (`stats_manager` -> `proc/<имя>/planes/stats_manager-scope`), она закрывается раньше их `shutdown()` (ADR-BM-009).
 
+**Р4 (Task 1.2b-2):** `IProcessModule` объявляет `attach_stop_budget()` и `close_root()`; раннер выбирает путь корня по `isinstance(…, IProcessModule)`, а не по наличию `close_root`.
+
 **Эталонные примеры конфигурации (plain dict):** [`docs/examples/process_config_canonical_examples.py`](docs/examples/process_config_canonical_examples.py). Поведение `ProcessConfigHandler` — в [`tests/test_process_config.py`](tests/test_process_config.py).
 
 **Конфигурация в коде процесса:** после `initialize()` читайте параметры через **`IProcessModule.get_config` / `update_config`** или **`self.config_handler`** — это единая точка (фасад), без прямого разбора `bundle` или `SharedResourcesManager` в прикладной логике. Общая картина «schema→dict и ветки доставки»: [../../docs/CONFIG_GUIDE.md](../../docs/CONFIG_GUIDE.md).
