@@ -28,23 +28,25 @@
 | # | План | Задача | Заметка |
 |---|---|---|---|
 | 1 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T0.3 | без изменений: ⚑ шаг владельца (Virtual Robot DRAStudio + `pc_probe.py all`) — открывает T4.0, T4.6 без визита |
-| 2 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) | Task 1.2b | без изменений: Ж 1.2b-2 → 1.2b-3 → Ф2 → Ф5 (гейт abort — исключение О-16); аварийный гейт бьёт по слиянию всех полос |
-| 3 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.4 | вторая полоса кода: T3.4 → T3.5 e2e. **(нов.)** ⚑ шаг владельца: слить `fix/robot-codegen-quotes` (APPROVED, находка D) и `fix/robot-sim-zero-path` после ревью (T2.5, R-13) — без T2.5 любой ход в ту же точку роняет ядро sim (на e2e T3.5 не проверено) |
-| 4 | [layer-render](../layer-render/plan.md) | Task 6.2 | без изменений: паузный слот, генератор обучения из слоёв → 6.3 |
-| 5 | [layer-render](../layer-render/plan.md) | Task 6.3 | без изменений: открывает letters-retrain Ф1 |
-| 6 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | без изменений: паузный слот, базовая линия сети на симе |
-| 7 | [line-sim](../line-sim/plan.md) | Task 6.5 | **(нов.)** паузный слот, S: ассеты стенда из фикстур и правда о плитке 205x484 / 410x484 (G3) — стенд собирается на чистой машине без скрипта |
-| 8 | [line-sim](../line-sim/plan.md) | Task 6.4 | **(нов.)** ⛔ после робота T3.7, T3.8 (робот v2 в линии): один экран симуляторов на `pult_web` (E3). Дополнительное — пожелание «один на всех» |
-| 9 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | **(нов.)** один MCP на все бэкенды (E1) → 5.2. Дополнительное: сегодня обход — `BackendDriver(port=8766)`. Инструмент, не фреймворк; с Ж по файлам не пересекается |
-| 10 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | без изменений: паузный слот разрешённого остатка ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
-| 11 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | **(нов.)** L-8: супервизор воскрешает убитых Ctrl+C. За Ж Ф1 (меняет путь останова ребёнка); вместе с L-7 |
-| 12 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | без изменений: ⚑ слот не назначен; одна дорога к одному писателю журнала |
-| 13 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | **(нов.)** R-14: голос `announce_presentation_absent` в журнал — после 4.17 (тот же писатель); S |
-| 14 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
-| 15 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
-| 16 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13** — после основных планов (видимый результат первым; рецепты переключаются, R-8 обходится: не выделять текст в окнах стенда / старт с `-Recipe`). План ред. 2 (PM ведёт смену, 22 задачи) не проходил ревью; карта — `docs/maps/recipe-switch.md`. При возврате: 1.1b (проверка H1, 15 мин) → ревью плана → CTO по 4.1 |
-| 17 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13** — после основных планов (видимый результат первым; рецепты переключаются, R-8 обходится: не выделять текст в окнах стенда / старт с `-Recipe`). R-10 бьёт только по горячей смене; ⛔ после Ж 1.2b-3 |
-| 18 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13** — после основных планов (видимый результат первым; рецепты переключаются, R-8 обходится: не выделять текст в окнах стенда / старт с `-Recipe`). Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md`, правки при возврате |
+| 2 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.5 | **полоса Р, веха М1 «робот v2 рисует в линии на одном экране»** (2026-10-13): T3.5 e2e → T3.5b ∥ T3.9 → T3.7 → T3.8 → line-sim 6.4. T3.4 DONE (`352f081e0`); `fix/robot-codegen-quotes`, `fix/robot-sim-zero-path` слиты |
+| 3 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.7 | полоса Р: `robot_host` линии на v2 (`apps/line_sim/pipeline.yaml:51`) — после line-sim 6.5 (тот же файл) |
+| 4 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.8 | полоса Р: вид робота из состояния линии, не своё ядро |
+| 5 | [line-sim](../line-sim/plan.md) | Task 6.4 | **веха М1**: один экран симуляторов на `pult_web` (E3) — ⛔ после T3.7, T3.8 |
+| 6 | [line-sim](../line-sim/plan.md) | Task 6.5 | **полоса С, веха М2 «сеть переобучена на слоях сима»** (2026-10-13): ассеты стенда из фикстур, правда о плитке 205x484 / 410x484 (G3). S; раньше T3.7 — сообщить SHA слияния полосе Р |
+| 7 | [layer-render](../layer-render/plan.md) | Task 6.2 | полоса С: генератор обучения из слоёв; 2.5, 6.1 DONE; литерал на выход `DatasetEngine` до 6.2 (условие CTO) |
+| 8 | [layer-render](../layer-render/plan.md) | Task 6.3 | полоса С: открывает letters-retrain Ф1 |
+| 9 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | полоса С: базовая линия сети на симе — нужно окно стенда |
+| 10 | [2026-10-03_lifecycle-owner-scope](../2026-10-03_lifecycle-owner-scope/plan.md) | Task 1.2b | полоса Ж: 1.2b-2 (в работе) → 1.2b-3 — кодмод доводится до конца. ⚑ владелец: Ф2, Ф5 (5 задач) — не видимый результат; держит их только аварийный гейт тестов frontend. Есть бесплатный обход — в хвост, нет — Ж продолжает |
+| 11 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
+| 12 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
+| 13 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, за Ж Ф1, вместе с L-7 |
+| 14 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
+| 15 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
+| 16 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
+| 17 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
+| 18 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. План ред. 2 без ревью; карта `docs/maps/recipe-switch.md`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
+| 19 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене; ⛔ после Ж 1.2b-3 |
+| 20 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
