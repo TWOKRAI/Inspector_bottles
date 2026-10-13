@@ -417,3 +417,23 @@ def test_extra_png_in_letters_dir_rebuilds_group(
     ]
     assert not extra.exists()
     assert len(_letter_files(data)) == 8
+
+
+def test_extra_webp_in_letters_dir_rebuilds_group(
+    bsa: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    assert bsa.main(["--data-dir", str(data)]) == 0
+    junk = data / "letters_ink" / "А" / "junk.webp"  # другой суффикс спрайта каталога
+    junk.write_bytes(b"not an image")
+    capsys.readouterr()
+
+    assert bsa.main(["--data-dir", str(data)]) == 0
+
+    assert _status(capsys.readouterr().out) == [
+        f"skipped {_LINE_PHOTO}",
+        f"skipped {_LINE_TILE}",
+        f"built {_LINE_LETTERS}",
+    ]
+    assert not junk.exists()
+    assert len(_letter_files(data)) == 8

@@ -16,8 +16,8 @@ Public API:
 Stability: lite
 
 Идемпотентность по группам: группа готова, только если ВСЕ её файлы существуют и читаются
-обратно через ``imread_unicode`` (для ``letters`` ещё и набор ``*.png`` под ``letters_ink`` в точности
-равен ожидаемым 8 путям); иначе пересобирается вся группа целиком (каталог букв
+обратно через ``imread_unicode`` (для ``letters`` ещё и набор файлов спрайтов каталога под ``letters_ink``
+в точности равен ожидаемым 8 путям); иначе пересобирается вся группа целиком (каталог букв
 перед этим удаляется: лишний файл в ``letters_ink/<буква>/`` стал бы образцом класса, LS-014).
 Собранное фото всегда тянет пересборку тайла (перед записью фото тайл удаляется).
 ``--force`` пересобирает все три группы.
@@ -37,7 +37,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from Services.dataset_gen.core.catalog import imread_unicode, imwrite_unicode
+from Services.dataset_gen.core.catalog import SPRITE_SUFFIXES, imread_unicode, imwrite_unicode
 from Services.line_sim.core import preset
 from Services.line_sim.tools import make_font_letters, make_seamless_texture
 
@@ -112,10 +112,14 @@ def _is_ready(files: list[Path]) -> bool:
 
 
 def _letters_dir_is_exact(data: Path, files: list[Path]) -> bool:
-    """В `letters_ink` ровно ожидаемые `*.png`: лишний файл стал бы образцом класса (LS-014)."""
+    """В `letters_ink` ровно ожидаемые файлы спрайтов каталога (`SPRITE_SUFFIXES`).
+
+    Лишний файл стал бы образцом класса (LS-014).
+    """
     root = data / _LETTERS_DIR
     expected = set(files[:-1])  # последний файл группы — диск, он лежит рядом с каталогом
-    return set(root.rglob("*.png")) == expected
+    sprites = {p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SPRITE_SUFFIXES}
+    return sprites == expected
 
 
 def _group_is_ready(step: str, data: Path, files: list[Path]) -> bool:
