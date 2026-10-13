@@ -50,6 +50,10 @@
   `circle_stroke`/`square_stroke` (полилинии, О-4), `return_slot` (v1 RETURN), `toolchange` (v1 TOOLCHANGE, через «над 1»);
   выход `GeneratedProgram(program, points)` для `compile_program`; тесты автора `test_generators.py` + слепая приёмка
   `test_generators_acceptance.py`. Не сделано: паритет «RETURN/TOOLCHANGE кончаются домом» — драйвер T5.1
+- [x] Обвязка e2e и хук наблюдения (T3.5, часть developer, robot-protocol-v2): `tests/e2e_rig_v2.py` (sim в процессе на
+  свободном порту, `ModbusDevice` + `RobotClientV2`, `RecordingCore` со штампами времени sim, рестарт на том же порту,
+  дедлайн на каждый блокирующий вызов), хук `trace_sc` в `RobotSimCoreV2` (`SC rec` / `SC act`, выключен по умолчанию),
+  тесты автора `tests/test_e2e_rig_v2.py`. Приёмка e2e `test_sim_e2e_v2.py` — слепой тестер, не сделана
 
 ## Не сделано / дальше
 
