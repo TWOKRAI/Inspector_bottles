@@ -2,7 +2,7 @@
 """Хост sim v2 под НАСТОЯЩИМ ``WorkerManager`` (ревью кода T2.3 r1, major).
 
 Весь прежний набор v2-хоста (``test_v2_host.py`` и др.) идёт на фейке ``ThreadWorkerManager``
-из ``v2_driver.py``; project-rules §9 требует хотя бы один тест на настоящих объектах. Контракт
+из ``host_harness.py``; project-rules §9 требует хотя бы один тест на настоящих объектах. Контракт
 фейка расходится с настоящим менеджером в двух местах, от которых зависит ``_start_v2_workers``:
 ``is_worker_running`` (у фейка — ``thread.is_alive()``, у настоящего — статус реестра) и
 ``start_worker`` на живом потоке (фейк — ``False``, настоящий — ``True`` без нового потока).
@@ -28,16 +28,18 @@ from multiprocess_framework.modules.worker_module.core.worker_manager import Wor
 import Plugins.sim.robot_host.plugin as host_module
 from Plugins.hub.device_hub.client import DeviceHubClient
 from Plugins.sim.robot_host.plugin import SimRobotHostPlugin
-from Plugins.sim.robot_host.tests.v2_driver import (
-    ACK,
+from Plugins.sim.robot_host.tests.host_harness import (
     HOST,
-    V2Driver,
+    ThreadWorkerManager,
     call,
+    close_client,
+    encoder,
     free_port,
     make_host,
-    mm10,
-    ThreadWorkerManager,
+    open_client,
+    read_reg,
     run_with_deadline,
+    wait_done_hb,
 )
 from Services.robot_comm import ROBOT_AVAILABLE
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
@@ -102,22 +104,20 @@ def test_v2_host_restarts_cleanly_under_real_worker_manager():
             run_with_deadline(lambda: plugin.start(ctx), timeout=15.0, label=f"start#{cycle}")
             status = call(plugin, "sim_robot.status")
             assert status["state"] == "running", f"цикл {cycle}: состояние хоста {status['state']!r}, ждали 'running'"
-            driver = V2Driver(port)
             try:
-                try:
-                    connected = driver.connect(timeout=3.0)
-                except Exception as exc:  # noqa: BLE001 — привязать отказ соединения к номеру цикла
-                    pytest.fail(f"цикл {cycle}: соединение на порт хоста не принято: {exc!r}")
-                assert connected, f"цикл {cycle}: соединение на порт хоста не принято"
-                assert driver.probe() == _PROTO_V2_WIRE, f"цикл {cycle}: хост не v2"
-                hb_start = driver.tlm("TLM_HB_ROBOT")
+                device, client = open_client(port, timeout=3.0)
+            except Exception as exc:  # noqa: BLE001 — привязать отказ соединения к номеру цикла
+                pytest.fail(f"цикл {cycle}: соединение на порт хоста не принято: {exc!r}")
+            try:
+                assert read_reg(device, "TLM_PROTO_VER")[0] == _PROTO_V2_WIRE, f"цикл {cycle}: хост не v2"
+                hb_start = read_reg(device, "TLM_HB_ROBOT")[0]
                 grew = _wait_until(
-                    lambda: 0 < (driver.tlm("TLM_HB_ROBOT") - hb_start) & 0xFFFF < 0x8000,
+                    lambda: 0 < (read_reg(device, "TLM_HB_ROBOT")[0] - hb_start) & 0xFFFF < 0x8000,
                     _HB_GROWTH_DEADLINE_S,
                 )
                 assert grew, f"цикл {cycle}: TLM_HB_ROBOT не растёт за {_HB_GROWTH_DEADLINE_S} с — тикер не жив"
             finally:
-                driver.close()
+                close_client(device)
             run_with_deadline(lambda: plugin.shutdown(ctx), timeout=15.0, label=f"shutdown#{cycle}")
             assert _wait_until(lambda: _port_is_free(port), _PORT_FREE_DEADLINE_S), (
                 f"цикл {cycle}: порт {port} не свободен за {_PORT_FREE_DEADLINE_S} с после shutdown"
@@ -155,30 +155,31 @@ def test_scene_job_done_t_is_plugin_monotonic_not_sim_time(monkeypatch):
     monkeypatch.setattr(DeviceHubClient, "send_fire_and_forget", _fake_send)
     port = free_port()
     plugin, ctx, _services, workers = make_host(port, protocol="v2", scene_process="camera")
-    drv = V2Driver(port)
+    device = None
     try:
         t_before_start = time.monotonic()
         run_with_deadline(lambda: plugin.start(ctx), timeout=10.0, label="start")
-        assert drv.connect(), "v2-хост не принял соединение"
-        assert drv.probe() == _PROTO_V2_WIRE, "хост не v2 — тест бессмыслен"
-        ecap = drv.encoder()
-        assert drv.cmd("SERVO", 1)["status"] == ACK
-        drv.heartbeat()
-        job = drv.cmd(
-            "CVT_JOB",
-            ecap & 0xFFFF,
-            (ecap >> 16) & 0xFFFF,
-            mm10(_PICK_X_MM),
-            mm10(_PICK_Y_MM),
-            0,  # pick_z
-            0,  # flags
-            mm10(_PLACE_X_MM),
-            mm10(_PLACE_Y_MM),
-            0,  # place_z
-            mm10(_PLACE_RZ_DEG),
+        device, client = open_client(port)
+        assert read_reg(device, "TLM_PROTO_VER")[0] == _PROTO_V2_WIRE, "хост не v2 — тест бессмыслен"
+        ecap = encoder(device)
+        run_with_deadline(lambda: client.servo(True), timeout=5.0, label="servo")
+        run_with_deadline(client.kick_heartbeat, timeout=5.0, label="hb")
+        job = run_with_deadline(
+            lambda: client.cvt_job(
+                ecap,
+                _PICK_X_MM,
+                _PICK_Y_MM,
+                0.0,  # pick_z
+                0,  # flags
+                _PLACE_X_MM,
+                _PLACE_Y_MM,
+                0.0,  # place_z
+                _PLACE_RZ_DEG,
+            ),
+            timeout=5.0,
+            label="cvt_job",
         )
-        assert job["status"] == ACK, f"CVT_JOB отклонён: {job}"
-        drv.wait_done(job["seq"])
+        wait_done_hb(client, job.seq)
         assert _wait_until(lambda: bool(sent), 5.0), "scene.job_done не отправлен за 5.0 с"
         t_after = time.monotonic()
         assert len(sent) == 1, f"ожидалось одно scene.job_done, отправлено {sent!r}"
@@ -189,7 +190,8 @@ def test_scene_job_done_t_is_plugin_monotonic_not_sim_time(monkeypatch):
             f"t={event_t!r} меньше монотонных часов до старта {t_before_start!r}: время sim"
         )
     finally:
-        drv.close()
+        if device is not None:
+            close_client(device)
         try:
             run_with_deadline(lambda: plugin.shutdown(ctx), timeout=10.0, label="shutdown")
         finally:

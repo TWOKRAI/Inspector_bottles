@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 import uuid
 from pathlib import Path
@@ -29,13 +30,15 @@ import pytest
 
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from Plugins.hub.device_hub.client import DeviceHubClient
-from Plugins.sim.robot_host.tests.v2_driver import (
-    ACK,
-    V2Driver,
+from Plugins.sim.robot_host.tests.host_harness import (
+    close_client,
+    encoder,
     free_port,
     make_host,
-    mm10,
+    open_client,
+    read_reg,
     run_with_deadline,
+    wait_done_hb,
 )
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
@@ -52,9 +55,7 @@ _PLACE_X_MM, _PLACE_Y_MM, _PLACE_RZ_DEG = 400.0, 100.0, 45.0
 # Точка «путь 0» сцены в координатах робота: объект при ecap == spawn_encoder лежит ровно здесь
 # (300, -200) — pick, который ядро v2 принимает (те же тесты ядра).
 _GEOMETRY_CFG = {"origin_x_mm": 300.0, "origin_y_mm": -200.0}
-_SEQ_SERVO = 1
-_SEQ_JOB = 2  # CVT_JOB идёт вторым (после SERVO): seq (2) отличим от счётчика заданий (1)
-_JOB_INDEX = 1  # index события — счёт принятых CVT_JOB с 1 (как у v1), а не seq команды
+_JOB_INDEX = 1  # счёт принятых CVT_JOB с 1, а не seq команды (seq клиента случайный, seed 1013 — предусловие ниже)
 
 
 class _FakeStateProxy:
@@ -119,7 +120,8 @@ def test_frame_to_job_to_done_cycle(tmp_path, monkeypatch) -> None:
     """Кадр сцены -> объект -> ``SERVO 1``/``HB_PC``/``CVT_JOB`` по TCP v2-хосту -> ``DONE_SEQ`` ->
     ``scene.job_done`` с ``index == 1`` (первое принятое задание) -> сцена сопоставила его с объектом (``matched``).
 
-    ``index`` в событии — счёт принятых ``CVT_JOB`` с 1 (как у v1, ``sim_core.py``), а не ``seq`` команды (2):
+    ``index`` в событии — счёт принятых ``CVT_JOB`` с 1 (как у v1, ``sim_core.py``), а не ``seq`` команды
+    (seq клиента случайный, ``rng=random.Random(1013)``; предусловие ``job.seq != _JOB_INDEX``):
     так различимы две трактовки. Допущение A2 тестера («index == seq») — неверная модель, исправлено лидом.
     Pick — из паспорта объекта сцены (не литерал),
     ``ecap`` — энкодер объекта (``spawn_encoder``); place — литерал ядра с ``|J1| <= 100`` при
@@ -140,14 +142,14 @@ def test_frame_to_job_to_done_cycle(tmp_path, monkeypatch) -> None:
 
     port = free_port()
     plugin, ctx, _services, workers = make_host(port, protocol="v2", scene_process="camera")
-    drv = V2Driver(port)
+    device = None
     try:
         run_with_deadline(lambda: plugin.start(ctx), timeout=10.0, label="start")
-        assert drv.connect(), "v2-хост не принял соединение"
-        assert drv.probe() == 0x0200, "хост не v2 — цикл бессмыслен"
+        device, client = open_client(port, rng=random.Random(1013))
+        assert read_reg(device, "TLM_PROTO_VER")[0] == 0x0200, "хост не v2 — цикл бессмыслен"
 
         # --- кадр: энкодер хоста -> сцена, объект появился ---
-        e_start = drv.encoder()
+        e_start = encoder(device)
         _push_encoder(sp, e_start)
         assert scene.produce()[0]["frame"] is not None
         objects = scene._spawner.active_objects()
@@ -163,24 +165,27 @@ def test_frame_to_job_to_done_cycle(tmp_path, monkeypatch) -> None:
             lateral_px=passport.lateral_px,
             px_per_mm=1.0,
         )
-        servo = drv.cmd("SERVO", 1)
-        assert servo["seq"] == _SEQ_SERVO and servo["status"] == ACK, servo
-        drv.heartbeat()
-        job = drv.cmd(
-            "CVT_JOB",
-            ecap & 0xFFFF,
-            (ecap >> 16) & 0xFFFF,
-            mm10(pick_x),
-            mm10(pick_y),
-            0,  # pick_z: при flags=0 игнорируется
-            0,  # flags
-            mm10(_PLACE_X_MM),
-            mm10(_PLACE_Y_MM),
-            0,  # place_z: при flags=0 игнорируется
-            mm10(_PLACE_RZ_DEG),
+        run_with_deadline(lambda: client.servo(True), timeout=5.0, label="servo")
+        run_with_deadline(client.kick_heartbeat, timeout=5.0, label="hb")
+        job = run_with_deadline(
+            lambda: client.cvt_job(
+                ecap,
+                pick_x,
+                pick_y,
+                0.0,  # pick_z: при flags=0 игнорируется
+                0,  # flags
+                _PLACE_X_MM,
+                _PLACE_Y_MM,
+                0.0,  # place_z: при flags=0 игнорируется
+                _PLACE_RZ_DEG,
+            ),
+            timeout=5.0,
+            label="cvt_job",
         )
-        assert job["seq"] == _SEQ_JOB and job["status"] == ACK, f"CVT_JOB отклонён: {job}"
-        drv.wait_done(_SEQ_JOB)
+        assert job.seq != _JOB_INDEX, (
+            f"seq CVT_JOB {job.seq} совпал со счётчиком заданий {_JOB_INDEX}: тест не различает трактовки"
+        )
+        wait_done_hb(client, job.seq)
 
         # --- DONE -> scene.job_done ---
         deadline = time.monotonic() + 5.0
@@ -196,7 +201,8 @@ def test_frame_to_job_to_done_cycle(tmp_path, monkeypatch) -> None:
         assert [(r["index"], r["outcome"]) for r in status["recent"]] == [(_JOB_INDEX, "matched")], status["recent"]
         assert status["active"] == 0, "сопоставленный объект должен сняться со сцены"
     finally:
-        drv.close()
+        if device is not None:
+            close_client(device)
         try:
             run_with_deadline(lambda: plugin.shutdown(ctx), timeout=10.0, label="shutdown")
         finally:
