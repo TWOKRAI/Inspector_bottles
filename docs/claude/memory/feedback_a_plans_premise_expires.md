@@ -37,3 +37,5 @@ ADR мера тот случай, ради которого написана.
 ## Дополнение A6 (аудит 2026-10-04, из cross_tab_phase_g)
 
 Cross-tab Ф.G: ложная посылка при детализации ШЕСТЬ раз подряд (G.2 Protocol не несёт FieldInfo; G.4.2b display-узлы никогда не рисовались; G.4.3 IPC уже был; G.4.4 фантом `action_bus()`; G.5; G.6 — 3 из 4 посылок brief §5). Даже «design LOCKED» требует grep + investigator.
+
+Связано: [[feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree]] — посылка «ассет потерян» тоже гипотеза: копия gitignored `data/` может жить в соседнем worktree.
