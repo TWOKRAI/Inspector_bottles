@@ -71,6 +71,7 @@ def _shift(strokes: tuple, dx: int) -> tuple:
 LI3 = _LI + _shift(_LI, 60) + _shift(_LI, 120)
 
 SLOT = Point(name="slot", x=350, y=-150, z=-90, rz=10, hand=1)
+HOME = Point(name="home", x=300, y=-210, z=-40, rz=-100, hand=1)
 
 
 def _lib_point(name: str, x: float, y: float, z: float) -> Point:
@@ -628,6 +629,28 @@ def test_zero_length_moves(case):
             assert len(rec) == 1 and rec[0][3] == "LINE_PASS"
         else:
             _check_do(events, rig.core.ticks(), 1, _off_index(events), "DO_OFF", final)
+
+
+def test_zero_length_joint_to_current_pose():
+    """JOINT-ход в точку, где робот уже стоит, завершается штатно (фикс T2.5).
+
+    Сначала return_slot(SLOT, home=HOME) приводит робота в HOME; затем
+    toolchange(1, 2, LIB, approach=HOME) начинается с JOINT в HOME - JOINT
+    нулевой длины. Раньше это роняло ядро sim; выход из E2eRig проверяет, что
+    исключений тика нет. НЕ доказывает: поведение прошивки контроллера на JOINT
+    нулевой длины (Ф7).
+    """
+    with E2eRig() as rig:
+        rig.run(return_slot(SLOT, home=HOME))
+        assert rig.pose_wire() == (300.0, -210.0, -40.0, -100.0)
+
+        n0 = len(rig.core.events())
+        rig.run(toolchange(1, 2, LIB, approach=HOME))
+        events = rig.core.events()
+        assert rig.read("TLM_SC_DONE_N") == [9]
+        first = _recs(events, 1, after=n0)[0]
+        assert (first[2], first[3]) == (1, "JOINT")
+        assert rig.pose_wire() == (400.0, -40.0, -80.0, 0.0)
 
 
 def _off_index(events: list) -> int:
