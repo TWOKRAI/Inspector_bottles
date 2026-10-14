@@ -221,9 +221,10 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (15)
+## dev-tooling (16)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
+- [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
 - [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_claude_cli_backend_costs_a_full_session](feedback_claude_cli_backend_costs_a_full_session.md)
@@ -397,10 +398,11 @@
 - [project_orchestrator_stub_contract_s29](project_orchestrator_stub_contract_s29.md)
 - [project_root_gate_misses_framework_modules](project_root_gate_misses_framework_modules.md)
 
-## hooks (19)
+## hooks (20)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath](feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath.md)
+- [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)
 - [feedback_agent_hard_budget_is_off_by_default](feedback_agent_hard_budget_is_off_by_default.md)
 - [feedback_backend_ctl_layer_mixed](feedback_backend_ctl_layer_mixed.md)
 - [feedback_commit_takes_the_whole_index](feedback_commit_takes_the_whole_index.md)
@@ -775,10 +777,11 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (17)
+## windows-env (18)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
+- [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)
 - [feedback_always_project_venv](feedback_always_project_venv.md)
 - [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_bash_tool_unbalanced_quote_breaks_command](feedback_bash_tool_unbalanced_quote_breaks_command.md)
