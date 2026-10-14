@@ -6,7 +6,7 @@
 передача 6.2: `docs/handoffs/2026-10-14_task-6.2-lead.md` («Для 6.3») · потребитель: `plans/letters-retrain/plan.md` Фаза 1
 (стартует после слияния 6.3).
 
-- **Статус:** [PENDING] (после 6.2 — DONE) · **Level:** Middle (6.3.0 — Middle+) · **Assignee:** developer <!-- lint-language: allow -->
+- **Статус:** [DONE 2026-10-14] (итоги — строка Task 6.3 в plan.md) · **Level:** Middle (6.3.0 — Middle+) · **Assignee:** developer <!-- lint-language: allow -->
 - **Gate:** литерал 6.3.0 закоммичен до кода, инъекции лида по нему записаны; RED тестера → GREEN; инъекции лида
   «предсказано / наблюдено»; `reviewer` APPROVED по SHA с воспроизведением; рамка-grep — 0; `git diff <база>..<sha> -- Services/ml_train` пуст
 - **Сессия гейта:** `inspector-bottles-26` (лид полосы С). Координатор: `inspector-bottles-23`.
