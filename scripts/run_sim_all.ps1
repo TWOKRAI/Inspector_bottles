@@ -71,25 +71,8 @@ function Start-Window([string]$Title, [string]$EnvLine, [string]$PyArgs) {
 # 0. Ассеты сима: data/ не в git, собираем из фикстур репозитория, если их нет
 #    (рецепты — apps/line_sim/pipeline.yaml у background_layers и Services/line_sim/presets/README.md)
 Set-Location $Root
-$SimData = Join-Path $Root "data\line_sim"
-New-Item -ItemType Directory -Force $SimData | Out-Null
-if (-not (Test-Path (Join-Path $SimData "belt_tile.png"))) {
-    Write-Host "собираю тайл ленты data\line_sim\belt_tile.png"
-    Copy-Item "Services\line_sim\tests\fixtures\belt_photo_full.png" (Join-Path $SimData "belt_photo_full.png")
-    & $Py -m Services.line_sim.tools.make_seamless_texture data/line_sim/belt_photo_full.png --out data/line_sim/belt_tile.png --force-period --gap-alpha
-    if ($LASTEXITCODE) { throw "тайл ленты не собрался" }
-}
-if (-not (Test-Path (Join-Path $SimData "letters_ink"))) {
-    Write-Host "собираю каталог букв data\line_sim\letters_ink"
-    $Fonts = Join-Path (& $Py -c "import matplotlib; print(matplotlib.get_data_path())") "fonts\ttf"
-    foreach ($F in "DejaVuSans", "DejaVuSansMono") {
-        & $Py -m Services.line_sim.tools.make_font_letters --letters "АКРХ" --font (Join-Path $Fonts "$F.ttf") `
-            --stroke-px 3 --size-px 300 --letter-frac 0.4763 --ink-rgb 65,70,82 --grain-sigma 9 --edge-blur-px 1 --seed 1 `
-            --disk-from-photo Services/line_sim/tests/fixtures/real_disk_snapshot.png `
-            --out data/line_sim/letters_ink --disk-out data/line_sim/letters_ink_disk.png
-        if ($LASTEXITCODE) { throw "каталог букв не собрался ($F)" }
-    }
-}
+& $Py -m Services.line_sim.tools.build_stand_assets
+if ($LASTEXITCODE) { throw "ассеты сима не собрались" }
 
 # Прототип с окном GUI (backend_ctl на 8765); вход frontend/run.py — единственный с окном
 function Start-Prototype {
