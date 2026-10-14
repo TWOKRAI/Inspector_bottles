@@ -288,9 +288,9 @@ glob-подписка на состояние. Друг на друга не с�
 
 ### Ф5 — приложение без GUI
 
-- Task T5.1: `RobotDriverV2` [PENDING] (после T3.5, T3.9)
+- Task T5.1: `RobotDriverV2` [DONE 2026-10-14 — инъекции `tasks/T5.1.injections.md` (24/27 по прогнозу, выжившая U2-inj → Ф1 закрыта), reviewer APPROVED во 2-м круге, итог `tasks/T5.1.result.md`] (после T3.5, T3.9) — бриф `tasks/T5.1.md` (стадия 0: reviewer 2 круга, правки R2 вставлены лидом дословно)
 - Task T5.2: `RobotDataStore` [PENDING] (после T5.1)
-- Task T5.3: Команды хаба [PENDING] (после T5.2)
+- Task T5.3: Команды хаба [PENDING] (после T5.2) — в бриф: потоки RobotDriverV2 (поводок, исполнитель) берутся у scope плагина хаба через `spawn`, запись G6 R1 `robot_driver_v2.py` в `scripts/lifecycle_guards/tables.py` удаляется (решение владельца 2026-10-14); advisory ревью T5.1 V1..V3 — `docs/claude/OPEN_QUESTIONS.md` → «Task T5.1»
 - Task T5.4: Калибровка, бэкенд [PENDING] (после T5.3)
 - Task T5.5: Плагины [PENDING] (после T5.3)
 

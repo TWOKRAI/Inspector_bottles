@@ -27,7 +27,7 @@
 - [feedback_zero_mentions_criterion_erases_the_reason](feedback_zero_mentions_criterion_erases_the_reason.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## agents (25)
+## agents (26)
 
 - [feedback_a_peer_session_shares_the_tree](feedback_a_peer_session_shares_the_tree.md)
 - [feedback_agent_commit_quality](feedback_agent_commit_quality.md)
@@ -42,6 +42,7 @@
 - [feedback_explicit_model_per_agent_role](feedback_explicit_model_per_agent_role.md)
 - [feedback_formal_review_before_merge](feedback_formal_review_before_merge.md)
 - [feedback_freeform_brief_without_mode_header](feedback_freeform_brief_without_mode_header.md)
+- [feedback_injection_script_crlf_and_classifier](feedback_injection_script_crlf_and_classifier.md)
 - [feedback_isolated_subagent_worktree_pin](feedback_isolated_subagent_worktree_pin.md)
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)
 - [feedback_protect_branch_blocks_worktree_subagents](feedback_protect_branch_blocks_worktree_subagents.md)
@@ -87,12 +88,13 @@
 - [project_topology_event_ordering](project_topology_event_ordering.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
 
-## break-injection (38)
+## break-injection (40)
 
 - [feedback_a_guard_that_counts_at_least_once_is_blind](feedback_a_guard_that_counts_at_least_once_is_blind.md)
 - [feedback_a_test_that_pins_a_hole_is_green_both_ways](feedback_a_test_that_pins_a_hole_is_green_both_ways.md)
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
 - [feedback_base_outlives_the_layer](feedback_base_outlives_the_layer.md)
+- [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_blind_red_prove_bodies_with_scratch_reference](feedback_blind_red_prove_bodies_with_scratch_reference.md)
 - [feedback_coinciding_constants_hide_opposite_implementations](feedback_coinciding_constants_hide_opposite_implementations.md)
 - [feedback_inject_only_after_the_work_is_committed](feedback_inject_only_after_the_work_is_committed.md)
@@ -103,6 +105,7 @@
 - [feedback_injection_must_reproduce_the_mechanism_not_the_shape](feedback_injection_must_reproduce_the_mechanism_not_the_shape.md)
 - [feedback_injection_must_use_a_different_lens_than_the_test](feedback_injection_must_use_a_different_lens_than_the_test.md)
 - [feedback_injection_prediction_on_a_shared_corpus](feedback_injection_prediction_on_a_shared_corpus.md)
+- [feedback_injection_script_crlf_and_classifier](feedback_injection_script_crlf_and_classifier.md)
 - [feedback_injection_too_coarse_proves_nothing_specific](feedback_injection_too_coarse_proves_nothing_specific.md)
 - [feedback_injection_verdict_reading](feedback_injection_verdict_reading.md)
 - [feedback_injection_zero_may_mean_the_guards_were_not_collected](feedback_injection_zero_may_mean_the_guards_were_not_collected.md)
@@ -218,10 +221,11 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (14)
+## dev-tooling (15)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
+- [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_claude_cli_backend_costs_a_full_session](feedback_claude_cli_backend_costs_a_full_session.md)
 - [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_import_guard_substring_vs_ast](feedback_import_guard_substring_vs_ast.md)
@@ -256,7 +260,7 @@
 - [reference_commit_layer_whitelist_source](reference_commit_layer_whitelist_source.md)
 - [reference_tech_stack_2026](reference_tech_stack_2026.md)
 
-## error-handling (27)
+## error-handling (28)
 
 - [feedback_a_dedup_marker_is_an_assertion_about_someone_else](feedback_a_dedup_marker_is_an_assertion_about_someone_else.md)
 - [feedback_a_shared_throttle_swallows_the_record_not_the_line](feedback_a_shared_throttle_swallows_the_record_not_the_line.md)
@@ -266,6 +270,7 @@
 - [feedback_emergency_log_reaches_stderr_not_the_log_files](feedback_emergency_log_reaches_stderr_not_the_log_files.md)
 - [feedback_getattr_default_hides_a_phantom_attribute](feedback_getattr_default_hides_a_phantom_attribute.md)
 - [feedback_idempotence_flag_on_the_success_result](feedback_idempotence_flag_on_the_success_result.md)
+- [feedback_modbus_device_raw_oserror_keeps_connected](feedback_modbus_device_raw_oserror_keeps_connected.md)
 - [feedback_model_copy_does_not_validate](feedback_model_copy_does_not_validate.md)
 - [feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub](feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub.md)
 - [feedback_port_wire_is_not_a_process_route](feedback_port_wire_is_not_a_process_route.md)
@@ -327,9 +332,10 @@
 - [project_fencing_test_race](project_fencing_test_race.md)
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 
-## git (21)
+## git (22)
 
 - [feedback_a_diff_based_rescue_omits_untracked_files](feedback_a_diff_based_rescue_omits_untracked_files.md)
+- [feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree](feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree.md)
 - [feedback_a_peer_session_shares_the_tree](feedback_a_peer_session_shares_the_tree.md)
 - [feedback_agent_commit_quality](feedback_agent_commit_quality.md)
 - [feedback_backend_ctl_layer_mixed](feedback_backend_ctl_layer_mixed.md)
@@ -391,7 +397,7 @@
 - [project_orchestrator_stub_contract_s29](project_orchestrator_stub_contract_s29.md)
 - [project_root_gate_misses_framework_modules](project_root_gate_misses_framework_modules.md)
 
-## hooks (18)
+## hooks (19)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath](feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath.md)
@@ -403,6 +409,7 @@
 - [feedback_commit_validator_trailers](feedback_commit_validator_trailers.md)
 - [feedback_formal_review_before_merge](feedback_formal_review_before_merge.md)
 - [feedback_git_main_merge_hook_traps](feedback_git_main_merge_hook_traps.md)
+- [feedback_injection_script_crlf_and_classifier](feedback_injection_script_crlf_and_classifier.md)
 - [feedback_precommit_collision_recovery](feedback_precommit_collision_recovery.md)
 - [feedback_precommit_stash_collision](feedback_precommit_stash_collision.md)
 - [feedback_precommit_stash_collision_2plus_agents](feedback_precommit_stash_collision_2plus_agents.md)
@@ -432,7 +439,7 @@
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 
-## lifecycle (19)
+## lifecycle (20)
 
 - [feedback_born_wrong_then_fixed_looks_like_working](feedback_born_wrong_then_fixed_looks_like_working.md)
 - [feedback_cleanup_must_survive_abnormal_disconnect](feedback_cleanup_must_survive_abnormal_disconnect.md)
@@ -440,6 +447,7 @@
 - [feedback_env_knob_reads_its_own_write](feedback_env_knob_reads_its_own_write.md)
 - [feedback_false_alarm_traded_for_silent_loss](feedback_false_alarm_traded_for_silent_loss.md)
 - [feedback_idempotence_flag_on_the_success_result](feedback_idempotence_flag_on_the_success_result.md)
+- [feedback_modbus_device_raw_oserror_keeps_connected](feedback_modbus_device_raw_oserror_keeps_connected.md)
 - [feedback_ready_signal_meant_less_than_read](feedback_ready_signal_meant_less_than_read.md)
 - [feedback_reused_heartbeat_required_for_retraction_ticks](feedback_reused_heartbeat_required_for_retraction_ticks.md)
 - [feedback_second_consumer_reveals_the_defect](feedback_second_consumer_reveals_the_defect.md)
@@ -626,10 +634,11 @@
 - [project_overview_blind_to_loss](project_overview_blind_to_loss.md)
 - [project_task_4_11_ttl_sweep_voice_verdict_2026_09_08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md)
 
-## spec-scope (24)
+## spec-scope (25)
 
 - [feedback_a_cross_track_dependency_can_name_the_wrong_plane](feedback_a_cross_track_dependency_can_name_the_wrong_plane.md)
 - [feedback_a_fix_on_a_finding_must_not_outgrow_it](feedback_a_fix_on_a_finding_must_not_outgrow_it.md)
+- [feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree](feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree.md)
 - [feedback_a_new_plan_must_be_placed_among_its_neighbours](feedback_a_new_plan_must_be_placed_among_its_neighbours.md)
 - [feedback_a_plans_premise_expires](feedback_a_plans_premise_expires.md)
 - [feedback_an_avoidance_rule_can_be_a_false_safety_catch](feedback_an_avoidance_rule_can_be_a_false_safety_catch.md)
@@ -766,11 +775,12 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (16)
+## windows-env (17)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
 - [feedback_always_project_venv](feedback_always_project_venv.md)
+- [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_bash_tool_unbalanced_quote_breaks_command](feedback_bash_tool_unbalanced_quote_breaks_command.md)
 - [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)

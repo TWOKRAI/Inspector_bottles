@@ -109,7 +109,15 @@ class DeviceManager(BaseManager, ObservableMixin):
         from Services.device_hub.drivers.hikvision_driver import HikvisionDriver
         from Services.device_hub.drivers.generic_modbus_driver import GenericModbusDriver
 
-        self._factories["robot"] = lambda entry, proto: RobotDriver(entry, proto)
+        def _robot_factory(entry: DeviceEntry, proto: Any) -> Any:
+            # Робот протокола v2 — свой драйвер (T5.1); импорт ленивый: v1-хаб не тянет клиент v2.
+            if entry.protocol == "delta_v2":
+                from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+
+                return RobotDriverV2(entry, proto, publish=self._publish)
+            return RobotDriver(entry, proto)
+
+        self._factories["robot"] = _robot_factory
         self._factories["vfd"] = lambda entry, proto: VfdDriver(entry, proto, resolve_device=self._get_driver)
         self._factories["hikvision"] = lambda entry, proto: HikvisionDriver(entry, proto)
         self._factories["generic_modbus"] = lambda entry, proto: GenericModbusDriver(entry, proto)
