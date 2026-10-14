@@ -90,3 +90,23 @@
   вырезами — letters-retrain Ф1.
 - `importorskip("torch")` может тихо пропустить ACC 2 в окружении без torch — лид смотрит `-rs`.
 - Шаг 1 — `Level: Middle+` вопреки «Middle» владельца для 6.3: независимый оракул и подбор кейсов — не типовая работа.
+
+## Предсказания лида на коде `397843e98` (записаны до прогона, 2026-10-14)
+
+Файлы: А = `test_acceptance_6_3_export_cli.py` (13), Н = `test_hazards_6_3_export_cli.py` (10), Л = литерал 6.3.0 (20 — зелёный во всех строках).
+Правки — в `Services/dataset_gen/tools/export_sim_crops.py` (строки по `397843e98`), E8 — в пресете.
+
+| # | Инъекция | Предсказано красным | Предсказано зелёным |
+|---|---|---|---|
+| E1 | `--seed` игнорируется: `0` в `_load_generator`, `export_splits(seed=0)`, `default_rng(0)` | А `same_seed_same_bytes` (якорь seed 8), Н `h4` (якорь «другой seed — другая сетка») | остальные А, Н |
+| E2 | `out.mkdir(parents=True, exist_ok=True)` перед `_load_generator` | А `bad_config` ×4, А `module_entry_bad_config` | остальные А, Н1–Н6; Н7 — не предсказываю (проверяет ли `--out`) |
+| E3 | загрузка пресета: `except Exception as exc: print(exc, file=sys.stderr); return 1` вместо `_load_generator` | А `bad_config` ×4, А `module_entry_bad_config`, Н `h7` | остальные |
+| E4 | проверка непустого `--out` удалена (стр. 95–96) | Н `h1_nonempty…`, Н `h1_out_is_a_file…` | А все, Н `h1_empty…` |
+| E5 | `{"train": args.val, "val": args.train}` | А `layout_and_row_counts`, А `labels_columns…`, А `second_product…` | А `png_square` (14 всего), А `ml_train`, А `same_seed`, А `images_match` |
+| E6 | `export_splits(..., labels_format="json")` | А `layout…`, А `labels_columns…`, А `images_match…`, А `second_product…` | А `ml_train`, А `preview_grid` |
+| E7 | превью `rng=np.random.default_rng()` без seed | Н `h4` | Н `h3`, А все |
+| E8 | пресет: `tile: data/line_sim/belt_tile.png` | Н `h5` | А все |
+| E9 | ветка `ValidationError` → `f"{config}: {type(exc).__name__}: {exc}"` | А `bad_config[no_catalog]`, Н `h7` | А `bad_config[invalid_train]`, остальные |
+| E10 | stdout: `{frames}` вместо `{frames * generator.num_classes}` | — (выживет: stdout не в приёмке, известно) | все |
+| E11 | `_positive_int`: `value < 0` вместо `value < 1` | Н `h2_train_zero…` | остальные |
+| E12 | `n=4` вместо `_PREVIEW_COUNT` | А `preview_grid` (размер 512×600) | Н `h3`; Н `h4` — зелёный (равенство двух прогонов) |
