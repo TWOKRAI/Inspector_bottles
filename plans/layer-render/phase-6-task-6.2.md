@@ -251,3 +251,30 @@ Bash, запущенный из Python на Windows, стартует WSL, не 
 3. **Брак в обучающих сэмплах.** `train.defect_probability` по умолчанию `0.0`. Рекомендация: оставить — классификатор учит класс и угол.
 
 HANDOFF IN: m4 — `d0cdc9503` (строку в `goldens.md` добавляет лид); базовые числа TESTS — лид, `line_sim + Plugins/sim` после окна heavy.
+
+## Предсказания лида для матрицы инъекций (записаны до прогона, 2026-10-14 ~10:15)
+
+Наборы: B = слепой tester (layer_render 22 + dataset_gen 44), H = hazards автора, M4 = test_engine_golden_m4.py, G = прежние эталоны
+(test_hazards_1_3h_layout, A3 2.4b, A7 2.5, test_augment_equivalence).
+
+### Род 1 (цели брифа)
+| # | Инъекция | Предсказано красным | Предсказано зелёным |
+|---|---|---|---|
+| J1 | factory.render: при заданном class_index всё равно `rng.integers` | B: test_render_class_index (угол ≠ оракулу), test_identical_to_scene_crop_oracle_order (оба), angle/same-seed — нет | G, M4 |
+| J2 | sign без розыгрыша (всегда +1, без rng.random) | B: oracle_order (оба) | test_identical_to_scene_crop (lat 0) — зелёный |
+| J3 | W без `half += half % 2` | B: test_identical_to_scene_crop[obj_odd-small-*] (если W/2 оказывается нечётным), oracle_order | obj_even — зелёный |
+| J4 | центр объекта `int(round(W/2 + sign·lat))` | B: oracle_order (знак −, сторона 59) | identical (lat 0) — зелёный |
+| J5 | метка без layer_params (дельта augmented-слоя не учтена) | B: test_angle_label_47_and_iou[augmented] (52 → 47) | [static] — зелёный |
+| J6 | resolve_symmetries без meta.symmetry | test_metadata.py:110-135 (DatasetEngine), B: test_resolve_symmetries_priority_override_meta_detector | M4 (в конфиге meta нет — зелёный) |
+| J7 | to_dict пишет `train: None` | A: test_scene_preset_without_train_key_set_and_yaml_unchanged, test_scene_preset_train_section | — |
+| J8 | effects до объекта (render_scene с эффектами на фоне, объект потом) | B: oracle_order (оба), H фотометрии если есть | identical (augment нет) — зелёный |
+
+### Род 2 (придумал не автор критериев; исполнитель матрицы может добавить своих 2–4 и предсказать сам)
+| # | Инъекция | Предсказано красным |
+|---|---|---|
+| K1 | symmetry_map → {} | B: test_symmetry_overrides_map_and_label, test_protocol_and_shapes (если проверяет map) |
+| K2 | фабрика без override брака (preset как есть) | B: test_train_defect_probability_overrides_preset, test_errors_defect_and_frame_words |
+| K3 | loader возвращает None вместо исключения | H: unreadable tile |
+| K4 | W = side_max без запасов | B: oracle_order (вырез вылетает → RuntimeError), H окна |
+
+Любое расхождение «предсказано / наблюдено» = находка (в тест или в моё понимание).
