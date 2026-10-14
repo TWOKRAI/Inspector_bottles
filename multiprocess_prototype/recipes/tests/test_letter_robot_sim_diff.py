@@ -97,7 +97,15 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # Task 1.3, 2026-09-21): upsert рецепта при активации ПЕРЕЗАПИСЫВАЕТ transport в
     # data/devices.yaml (`DeviceManager.upsert`, merge поверх), так что копия боевого
     # адреса вела прототип на сим-рецепте к настоящему роботу 192.168.1.7:502.
-    robot_address_keys = (".devices[0].transport.host", ".devices[0].transport.port")
+    # Протокол и параметры сим-робота — третье и четвёртое следствие «сим вместо железа» (T3.7):
+    # сим линии работает по v2, боевой робот — по v1 до Ф4; кольцо забора сима шире умолчания.
+    # Значения закреплены литералами в test_sim_recipe_points_robot_at_sim_not_hardware.
+    robot_sim_keys = (
+        ".devices[0].transport.host",
+        ".devices[0].transport.port",
+        ".devices[0].protocol",
+        ".devices[0].params.robot_params",
+    )
     all_diffs = _diff_paths(base, sim)
     real_diffs = [
         d
@@ -105,7 +113,7 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
         if not d.startswith(allowed_prefix)
         and d not in identity_keys
         and d != wire_source_key
-        and d not in robot_address_keys
+        and d not in robot_sim_keys
     ]
 
     assert real_diffs == [], (
@@ -156,3 +164,10 @@ def test_sim_recipe_points_robot_at_sim_not_hardware() -> None:
     robot = next(d for d in sim["devices"] if d["id"] == "robot_main")
     assert robot["transport"]["host"] == "127.0.0.1"
     assert robot["transport"]["port"] == 5021
+    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон остаётся на v1 без robot_params
+    assert robot["protocol"] == "delta_v2"
+    assert robot["params"]["robot_params"] == {"P_ZONE_MAX": 6000}
+    base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
+    base_robot = next(d for d in base["devices"] if d["id"] == "robot_main")
+    assert base_robot["protocol"] == "delta_universal3"
+    assert "robot_params" not in (base_robot.get("params") or {})

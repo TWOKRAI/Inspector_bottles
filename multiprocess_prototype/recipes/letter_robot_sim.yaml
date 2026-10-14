@@ -71,7 +71,8 @@ devices:
   - id: robot_main
     name: Робот Delta
     kind: robot
-    protocol: delta_universal3
+    # T3.7: сим-робот линии на v2; боевой hikvision_letter_robot — delta_universal3 (железо v1 до Ф4)
+    protocol: delta_v2
     # Сим-робот apps/line_sim, а не боевой 192.168.1.7:502. Upsert рецепта при активации
     # перезаписывает transport в data/devices.yaml, поэтому адрес обязан жить здесь.
     transport:
@@ -83,6 +84,9 @@ devices:
       word_order: little
       feed_poll_s: 0.05
       telemetry_interval_s: 0.5
+      # T3.7: кольцо забора 600 мм = досягаемость модели (l1+l2) и P_WS_R_MAX; калибровка
+      # рецепта у линии триггера даёт r до 595.9 мм
+      robot_params: {P_ZONE_MAX: 6000}
   - id: vfd_belt
     name: ПЧ лента
     kind: vfd

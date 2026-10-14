@@ -419,3 +419,404 @@ def test_disconnect_during_program_aborts_and_joins_threads() -> None:
         _until(lambda: rig.core.ticks()[-1].moving == 0, 5.0, "робот встал")
         time.sleep(0.3)
         assert len(rec.at("rv2", "program")) == n_pub
+
+
+# ==================================================================================================
+# T3.7: задания enqueue_job / return_job (тесты автора, plans/robot-protocol-v2/tasks/T3.7.reds.md)
+# ==================================================================================================
+#
+# Без sim — поддельный клиент (граница драйвера: аргументы cvt_job, уровни stop, вызовы probe) и поддельный
+# транспорт с блоком TLM «робот свободен». На sim — два теста захвата против jog (I11a барьером, I11b краем зоны).
+
+_HARD = 2  # STOP_LEVEL HARD (protocol-spec §8)
+_E_BUSY = 4  # ERR E_BUSY (protocol-spec §6)
+_PICK = {"x_mm": 300.0, "y_mm": -250.0}
+_BAD_JOB = {"status": "error", "message": "неверные аргументы задания", "queue_len": 0}
+_BUSY_PROGRAM_LIT = {"status": "error", "message": "робот занят программой"}
+_CMD_CVT = re.compile(r"\[v2\] CMD seq=\d+ op=CVT_JOB")
+_DONE_CVT = re.compile(r"\[v2\] DONE seq=\d+ op=CVT_JOB")
+_DONE_JOG = re.compile(r"\[v2\] DONE seq=\d+ op=JOG_CONT")
+
+
+def _free_tlm() -> list[int]:
+    """Блок TLM (32 слова от TLM_PROTO_VER): серво включено, захват свободен, метка параметров 1, энкодер 0."""
+    from Services.robot_comm.core.protocol_v2 import REG
+
+    base = REG["TLM_PROTO_VER"]
+    words = [0] * 32
+    words[REG["TLM_SERVO"] - base] = 1
+    words[REG["TLM_CFG_EPOCH"] - base] = 1
+    return words
+
+
+class _FakeTransport:
+    def __init__(self) -> None:
+        self.is_connected = True
+        self.closed = 0
+        self.tlm = _free_tlm()
+
+    def connect(self) -> bool:
+        self.is_connected = True
+        return True
+
+    def disconnect(self) -> None:
+        self.closed += 1
+        self.is_connected = False
+
+    def read_registers(self, _address: int, _count: int) -> list[int]:
+        return list(self.tlm)
+
+
+class _FakeClient:
+    """Клиент v2 на границе драйвера: пишет вызовы, исход ``cvt_job`` / ``wait_done`` / ``run_chunks`` задаёт тест."""
+
+    heartbeat_period_s = None
+    jog_lease_period_s = None
+
+    def __init__(self) -> None:
+        self.cvt: list[tuple] = []
+        self.stops: list[int] = []
+        self.probes = 0
+        self.heartbeats = 0
+        self.cvt_raises: list[BaseException] = []  # по одному на вызов cvt_job, по порядку
+        self.wait: Callable[[Callable[[Any], None] | None], None] = lambda _poll: None
+        self.run: Callable[[], None] = lambda: None
+        self.stopped = threading.Event()
+
+    def probe(self) -> None:
+        self.probes += 1
+
+    def sync_params(self, _values: Any, _epoch: int) -> None:
+        pass
+
+    def kick_heartbeat(self) -> None:
+        self.heartbeats += 1
+
+    def poll_errors(self) -> list:
+        return []
+
+    def cvt_job(self, *args: Any) -> Any:
+        self.cvt.append(args)
+        if self.cvt_raises:
+            raise self.cvt_raises.pop(0)
+        return type("Res", (), {"seq": len(self.cvt)})()
+
+    def wait_done(self, _seq: int, *, on_poll: Callable[[Any], None] | None = None) -> None:
+        self.wait(on_poll)
+
+    def stop(self, level: int) -> None:
+        self.stops.append(level)
+        self.stopped.set()
+
+    def run_chunks(self, _scenario: Any, *, params: Any, on_progress: Any) -> None:
+        self.run()
+
+
+def _fake_driver(rec: _Rec, **params: Any) -> tuple[RobotDriverV2, _FakeClient, _FakeTransport]:
+    entry = DeviceEntry(
+        id="rv2",
+        name="rv2",
+        kind="robot",
+        protocol="delta_v2",
+        transport={"type": "tcp", "host": "127.0.0.1", "port": 1, "unit_id": ROBOT_UNIT_ID},
+        params=params,
+    )
+    transport = _FakeTransport()
+    drv = RobotDriverV2(entry, None, transport=transport, publish=rec)
+    client = _FakeClient()
+    drv._client = client  # шов: клиент v2 без sim (транспорт внедряется публично, клиент — нет)
+    assert drv.connect() is True
+    transport.closed = 0  # первый connect закрывает «подключённый» сокет до probe — счёт закрытий с нуля после него
+    drv.desired_connected = True
+    return drv, client, transport
+
+
+def _tick_in_thread(drv: RobotDriverV2, stop_event: Any = None) -> threading.Thread:
+    thread = threading.Thread(target=lambda: drv.tick(stop_event), name="t37-author-tick", daemon=True)
+    thread.start()
+    return thread
+
+
+def _blocking_wait(client: _FakeClient, entered: threading.Event) -> None:
+    """wait_done держится, пока не придёт стоп; затем — обрыв, как у робота на стопе (E_ABORTED)."""
+    from Services.robot_comm.errors import RobotAborted
+
+    def wait(on_poll: Callable[[Any], None] | None) -> None:
+        entered.set()
+        while not client.stopped.wait(0.02):
+            if on_poll is not None:
+                on_poll(_free_tlm())
+        raise RobotAborted(1, 13, "Прервано стопом")  # 13 — E_ABORTED (protocol-spec §6)
+
+    client.wait = wait
+
+
+def _count_ev(rig: E2eRig, rx: re.Pattern[str], start: int = 0) -> int:
+    return sum(1 for _, text in rig.core.events()[start:] if rx.search(text))
+
+
+def test_job_stop_event_during_wait_sends_hard_and_fails_job() -> None:
+    """stop_event хаба во время wait_done: пульс шёл, затем стоп HARD (не SOFT), задание неудачно, связь цела."""
+    rec = _Rec()
+    drv, client, transport = _fake_driver(rec)
+    stop_event = threading.Event()
+    polls = {"n": 0}
+
+    def wait(on_poll: Callable[[Any], None] | None) -> None:
+        assert on_poll is not None, "wait_done без on_poll: пульса во время задания нет"
+        while True:
+            polls["n"] += 1
+            if polls["n"] == 3:
+                stop_event.set()
+            on_poll(_free_tlm())
+            time.sleep(0.01)
+
+    client.wait = wait
+    assert drv.call("enqueue_job", _PICK)["status"] == "ok"
+    beats_before = client.heartbeats
+    bounded(lambda: drv.tick(stop_event), 5.0)
+    assert client.stops == [_HARD]
+    assert client.heartbeats - beats_before == 1 + 2  # пульс тика + два опроса до стопа
+    snap = drv.snapshot()
+    assert (snap["jobs_sent"], snap["jobs_done"], snap["jobs_failed"]) == (1, 0, 1)
+    assert transport.closed == 0 and drv.is_connected
+
+
+def test_disconnect_during_job_sends_hard() -> None:
+    """disconnect при задании в полёте: стоп HARD до закрытия транспорта; тик выходит, задание неудачно."""
+    rec = _Rec()
+    drv, client, transport = _fake_driver(rec)
+    entered = threading.Event()
+    _blocking_wait(client, entered)
+    assert drv.call("enqueue_job", _PICK)["status"] == "ok"
+    ticker = _tick_in_thread(drv)
+    assert entered.wait(5.0), "тик не дошёл до wait_done"
+    bounded(drv.disconnect, 5.0)
+    assert client.stops == [_HARD]
+    ticker.join(5.0)
+    assert not ticker.is_alive()
+    assert drv.snapshot()["jobs_failed"] == 1
+    assert transport.closed >= 1
+
+
+def test_connect_during_job_skips_probe_and_sync() -> None:
+    """connect() при задании в полёте (супервизор хаба) не делает probe/sync_params, а отвечает is_connected (R9)."""
+    rec = _Rec()
+    drv, client, _transport = _fake_driver(rec)
+    entered = threading.Event()
+    _blocking_wait(client, entered)
+    assert drv.call("enqueue_job", _PICK)["status"] == "ok"
+    ticker = _tick_in_thread(drv)
+    try:
+        assert entered.wait(5.0)
+        probes = client.probes
+        assert bounded(drv.connect, 5.0) is True
+        assert client.probes == probes, "connect посреди задания пошёл в probe"
+    finally:
+        client.stopped.set()
+        ticker.join(5.0)
+    # после задания путь connect снова идёт целиком
+    assert bounded(drv.connect, 5.0) is True
+    assert client.probes == probes + 1
+
+
+def test_nak_busy_returns_job_to_queue_head_without_failure() -> None:
+    """NAK E_BUSY на cvt_job: задание обратно в НАЧАЛО очереди, отказ не считается; следующий тик шлёт его же."""
+    from Services.robot_comm.errors import RobotNak
+
+    rec = _Rec()
+    drv, client, _transport = _fake_driver(rec)
+    client.cvt_raises = [RobotNak(_E_BUSY, None, "Робот занят", None, ())]
+    assert drv.call("enqueue_job", {"x_mm": 300.0, "y_mm": -250.0})["queue_len"] == 1
+    assert drv.call("enqueue_job", {"x_mm": 310.0, "y_mm": -250.0})["queue_len"] == 2
+    drv.tick(None)
+    snap = drv.snapshot()
+    assert (snap["queue_len"], snap["jobs_sent"], snap["jobs_failed"]) == (2, 0, 0)
+    drv.tick(None)
+    assert [args[1] for args in client.cvt] == [300.0, 300.0]
+    assert drv.snapshot()["jobs_done"] == 1
+
+
+def test_flags_bits_and_place_rz_on_wire() -> None:
+    """Бит0 — по z_mm (0 = умолчание P_PICK_Z), бит1 — по укладке; place_rz = P_PICK_RZ (-100°) + доворот."""
+    rec = _Rec()
+    drv, client, _transport = _fake_driver(rec)
+    drv.call("enqueue_job", {**_PICK, "e_capture": 7})
+    drv.call("enqueue_job", {**_PICK, "z_mm": -90.0, "e_capture": 7})
+    drv.call("enqueue_job", {**_PICK, "e_capture": 7, "place_x": 450.0, "place_y": -300.0, "place_rz": 30.0})
+    for _ in range(3):
+        drv.tick(None)
+    # (ecap, x, y, z, flags, px, py, pz, prz)
+    assert client.cvt[0] == (7, 300.0, -250.0, 0.0, 0, 0.0, 0.0, 0.0, 0.0)
+    assert client.cvt[1] == (7, 300.0, -250.0, -90.0, 1, 0.0, 0.0, 0.0, 0.0)
+    assert client.cvt[2] == (7, 300.0, -250.0, 0.0, 2, 450.0, -300.0, 0.0, -70.0)
+
+
+def test_job_queue_maxlen_evicts_oldest_and_telemetry_reports_len() -> None:
+    """job_queue_maxlen=2: третье задание вытесняет старейшее (паритет v1 H-1); get_telemetry.queue_len — длина."""
+    rec = _Rec()
+    drv, client, _transport = _fake_driver(rec, job_queue_maxlen=2)
+    for x in (300.0, 310.0, 320.0):
+        res = drv.call("enqueue_job", {"x_mm": x, "y_mm": -250.0})
+    assert res == {"status": "ok", "queue_len": 2}
+    assert drv.call("get_telemetry", {})["queue_len"] == 2
+    drv.tick(None)
+    assert client.cvt[0][1] == 310.0
+    assert drv.call("get_telemetry", {})["queue_len"] == 1
+
+
+def test_bad_job_args_constant_text_queue_untouched() -> None:
+    """Недопустимые аргументы: ответ без входного значения, очередь не тронута, связь цела (R8)."""
+    rec = _Rec()
+    drv, client, transport = _fake_driver(rec)
+    bad = [
+        {"x_mm": "abc", "y_mm": -250.0},
+        {"x_mm": float("nan"), "y_mm": -250.0},
+        {"x_mm": 3300.0, "y_mm": -250.0},
+        {"y_mm": -250.0},
+        {**_PICK, "e_capture": 1.5},
+        {**_PICK, "e_capture": "abc"},
+        {**_PICK, "place_x": 450.0, "place_y": -300.0, "place_rz": -3200.0},  # -100 - 3200 = -3300° вне провода
+    ]
+    for args in bad:
+        res = drv.call("enqueue_job", args)
+        assert res == _BAD_JOB, args
+        assert "abc" not in str(res) and "3300" not in str(res)
+    res = drv.call("return_job", {"x_mm": "abc", "y_mm": -150.0})
+    assert res == {"status": "error", "message": "неверные аргументы возврата", "return_queue_len": 0}
+    drv.tick(None)
+    assert client.cvt == []
+    assert transport.closed == 0 and drv.is_connected
+
+
+def test_value_error_from_cvt_job_fails_job_without_link_loss() -> None:
+    """ValueError из cvt_job (аргумент вне провода) — задание неудачно, связь НЕ рвётся (R8, I15)."""
+    rec = _Rec()
+    drv, client, transport = _fake_driver(rec)
+    client.cvt_raises = [ValueError("координата #0: вне диапазона W_MIN..W_MAX")]
+    assert drv.call("enqueue_job", _PICK)["status"] == "ok"
+    drv.tick(None)
+    assert drv.snapshot()["jobs_failed"] == 1
+    assert drv.is_connected is True
+    assert transport.closed == 0
+    assert rec.at("rv2", "last_error"), "ошибка задания не опубликована"
+
+
+def test_belt_factor_param_drives_pick_lead() -> None:
+    """pick_lead_mm пересчитывается через P_BELT_FACTOR (×1e-5 мм/имп), а не константу v1 0.144473 (R4, I13)."""
+    rec = _Rec()
+    # 10.0 мм при 0.1 мм/имп = 100 имп; константа v1 дала бы 69
+    drv, client, _transport = _fake_driver(rec, pick_lead_mm=10.0, robot_params={"P_BELT_FACTOR": 10000})
+    assert drv.call("enqueue_job", {**_PICK, "e_capture": 1000})["status"] == "ok"
+    drv.tick(None)
+    assert client.cvt[0][0] == 900
+
+
+def test_busy_reply_on_launch_requeues_return_at_head() -> None:
+    """Захват перехвачен между проверкой тика и запуском: возврат обратно в начало очереди, отказ не считается."""
+    rec = _Rec()
+    drv, _client, _transport = _fake_driver(rec)
+    assert drv.call("return_job", {"x_mm": 350.0, "y_mm": -150.0, "z_mm": -90.0})["return_queue_len"] == 1
+    real = drv.start_return
+    drv.start_return = lambda slot, **kw: dict(_BUSY_PROGRAM_LIT)  # шов: гонка «программа взяла захват раньше»
+    drv.tick(None)
+    snap = drv.snapshot()
+    assert (snap["return_queued"], snap["returns_failed"], snap["returns_done"]) == (1, 0, 0)
+    drv.start_return = real
+    drv.tick(None)
+    _until(lambda: drv.snapshot()["returns_done"] == 1, 5.0, "возврат исполнен после повтора")
+    assert drv.snapshot()["return_queued"] == 0
+
+
+def test_failed_return_program_counts_returns_failed() -> None:
+    """Программа возврата упала: returns_failed, не returns_done (I14)."""
+    rec = _Rec()
+    drv, client, _transport = _fake_driver(rec)
+
+    def boom() -> None:
+        raise RuntimeError("обрыв сценария")
+
+    client.run = boom
+    assert drv.call("return_job", {"x_mm": 350.0, "y_mm": -150.0, "z_mm": -90.0})["status"] == "ok"
+    drv.tick(None)
+    _until(lambda: drv.snapshot()["returns_failed"] == 1, 5.0, "отказ программы возврата посчитан")
+    assert drv.snapshot()["returns_done"] == 0
+    _until(lambda: rec.at("rv2", "program")[-1]["state"] == "failed", 5.0, "публикация failed")
+
+
+# --------------------------------------------------------------------------------------------------
+# На sim: захват против jog
+# --------------------------------------------------------------------------------------------------
+
+
+def test_tick_does_not_take_job_while_jog_is_starting() -> None:
+    """I11a: jog_hold задержан на записи JOG_CONT (барьер, не сон) — тик в это окно не берёт задание.
+
+    Без проверки ``_jog_starting`` тик взял бы задание (``queue_len`` 0) и встал бы на замке mailbox за
+    задержанным JOG_CONT — тест видит оба признака.
+    """
+    from Services.robot_comm.core.protocol_v2 import OP
+    from Services.robot_comm.core.protocol_v2 import REG as _REG
+
+    rec = _Rec()
+    entered, release = threading.Event(), threading.Event()
+    with E2eRig() as rig, _driver(rec, rig.port) as drv:
+        device = drv.transport
+        original = device.transaction
+
+        def transaction(ops: list[tuple]) -> bool:
+            for kind, address, value in ops:
+                if kind == "wm" and address == _REG["CMD_SEQ"] and len(value) > 1 and value[1] == OP["JOG_CONT"]:
+                    entered.set()
+                    release.wait(5.0)
+                    break
+            return original(ops)
+
+        device.transaction = transaction
+        assert _call(drv, "enqueue_job", _PICK)["queue_len"] == 1
+        holder = threading.Thread(target=lambda: drv.call("jog_hold", dict(_JOG)), name="t37-hold", daemon=True)
+        holder.start()
+        try:
+            assert entered.wait(5.0), "jog_hold не дошёл до записи JOG_CONT"
+            ticker = _tick_in_thread(drv)
+            ticker.join(2.0)
+            assert not ticker.is_alive(), "тик встал: задание взято при переходе jog"
+            assert drv.snapshot()["queue_len"] == 1
+            assert _count_ev(rig, _CMD_CVT) == 0
+        finally:
+            release.set()
+            holder.join(5.0)
+        assert _call(drv, "jog_release")["status"] == "ok"
+
+
+def test_job_waits_for_jog_at_zone_edge_while_robot_is_free() -> None:
+    """I11b: jog дошёл до края зоны (DONE JOG_CONT, робот свободен), удержание продолжается — задание ждёт."""
+    rec = _Rec()
+    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+        hold = threading.Event()
+        hold.set()
+
+        def confirm() -> None:
+            while hold.is_set():
+                try:
+                    drv.call("jog_hold", {"dir": 5, "spd": 50})
+                except Exception:  # noqa: BLE001 — подтверждения GUI не утверждают
+                    pass
+                time.sleep(0.05)
+
+        assert _call(drv, "jog_hold", {"dir": 5, "spd": 50})["status"] == "ok"
+        confirmer = threading.Thread(target=confirm, name="t37-edge-confirm", daemon=True)
+        confirmer.start()
+        try:
+            rig.wait_event(_DONE_JOG.pattern, timeout_s=15.0)  # край зоны: робот свободен, jog драйвера жив
+            mark = len(rig.core.events())
+            res = _call(drv, "enqueue_job", _PICK)
+            assert res == {"status": "ok", "queue_len": 1}
+            time.sleep(0.6)
+            assert _count_ev(rig, _CMD_CVT, mark) == 0, "задание ушло при удержании jog"
+            assert drv.snapshot()["queue_len"] == 1
+        finally:
+            hold.clear()
+            confirmer.join(2.0)
+        assert _call(drv, "jog_release")["status"] == "ok"
+        _until(lambda: _count_ev(rig, _DONE_CVT, mark) == 1, 15.0, "DONE op=CVT_JOB после jog_release")
