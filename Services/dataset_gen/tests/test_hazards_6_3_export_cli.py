@@ -79,13 +79,15 @@ def test_h1_empty_existing_out_accepted(tmp_path: Path) -> None:
 # H2 ------------------------------------------------------------------------------------------------------------------
 
 
-def test_h2_train_zero_is_argparse_error(tmp_path: Path) -> None:
-    """`--train 0` -> `SystemExit(2)` (argparse); `--out` не создан."""
+@pytest.mark.parametrize("flag", ["--train", "--val"])
+def test_h2_zero_frames_is_argparse_error(flag: str, tmp_path: Path) -> None:
+    """`--train 0` и `--val 0` -> `SystemExit(2)` (argparse); `--out` не создан."""
     config = _product_p(tmp_path / "prod")
     out = tmp_path / "out"
+    kwargs = {"train": "0"} if flag == "--train" else {"val": "0"}
 
     with pytest.raises(SystemExit) as info:
-        _main(_argv(config, out, train="0"))
+        _main(_argv(config, out, **kwargs))
 
     assert info.value.code == 2
     assert not out.exists()
@@ -107,7 +109,11 @@ def test_h2_negative_seed_is_argparse_error(tmp_path: Path) -> None:
 
 
 def test_h3_preview_does_not_change_export(tmp_path: Path) -> None:
-    """Тот же `--seed` с превью и без: каталоги `--out` побайтно равны (у превью свой поток rng)."""
+    """Тот же `--seed` с превью и без: каталоги `--out` побайтно равны.
+
+    Ни один мутант этот тест не краснит: свойство выполняется по построению (превью идёт после экспорта, у
+    экспорта свой rng от `(seed, имя сплита)`). Защита от «превью на общем rng» — H4.
+    """
     config = _product_p(tmp_path / "prod")
     plain = tmp_path / "plain"
     with_preview = tmp_path / "with_preview"

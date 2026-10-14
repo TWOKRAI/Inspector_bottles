@@ -14,9 +14,7 @@ Public API:
 
 Stability: lite
 
-Pre: `--out` — несуществующий или пустой каталог; `--train`, `--val` >= 1; `--seed` >= 0.
-Post: ошибка пресета или занятый `--out` -> `SystemExit` с текстом, файловая система не тронута;
-      успех -> код 0, по строке на сплит в stdout.
+Контракт `main` — в его докстринге.
 """
 
 from __future__ import annotations
@@ -72,22 +70,34 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _format_error(loc: str, msg: str) -> str:
+    """`<поле>: <сообщение>`; пустой путь поля (ошибка уровня модели) — только сообщение."""
+    return f"{loc}: {msg}" if loc else msg
+
+
 def _load_generator(config: str, seed: int) -> LayerSceneGenerator:
     """Генератор из пресета; любая ошибка пресета -> `SystemExit('<путь>: <тип>: <причина>')`."""
     try:
         return LayerSceneGenerator.from_yaml(config, seed=seed)
     except pydantic.ValidationError as exc:  # первым: подкласс ValueError
         # Без input_value: эхо входа в текст ошибки не идёт (правило 6.2).
-        reason = "; ".join(
-            f"{'.'.join(map(str, err['loc']))}: {err['msg']}"
-            for err in exc.errors(include_input=False, include_url=False)
-        )
+        errors = exc.errors(include_input=False, include_url=False)
+        reason = "; ".join(_format_error(".".join(map(str, err["loc"])), err["msg"]) for err in errors)
         raise SystemExit(f"{config}: {type(exc).__name__}: {reason}") from exc
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise SystemExit(f"{config}: {type(exc).__name__}: {exc}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Разобрать аргументы, загрузить пресет, записать `train`/`val` и (опционально) сетку-превью.
+
+    Pre: `--out` — несуществующий или пустой каталог; `--train`, `--val` >= 1; `--seed` >= 0.
+    Post: успех -> код 0, по строке на сплит в stdout.
+      Ошибка загрузки пресета -> `SystemExit('<путь>: <тип>: <причина>')`, в `--out` не записано ничего.
+      Занятый `--out` -> `SystemExit('export_sim_crops: --out ...: <путь>')`, до загрузки пресета.
+      Ошибка на кадре (например, сторона выреза больше 4000 px) -> исключение и частично записанный `--out`
+      (известное ограничение, plans/layer-render/phase-6-task-6.3.md, «Открыто»).
+    """
     args = _build_parser().parse_args(argv)
 
     # Порядок обязателен: проверка --out -> загрузка пресета -> запись. До успешной загрузки файлы не пишутся.
