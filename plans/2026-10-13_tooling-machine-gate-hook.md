@@ -144,46 +144,26 @@
   - `stand: <непустой текст>`;
   - любая другая строка — ошибка.
   Ошибка → stderr `machine_gate: malformed machine.lock:<N>: <строка>`, код **2**.
-  Пометка (Task 1.1): `medium` — класс команды, а не вид окна; грамматика замка и `kind` окна (`quiet|heavy|stand`) не меняются; режим гейта `medium` проверяет замок так же, как `heavy|light`.
+  `medium` — класс команды, не вид окна: `kind` окна только `quiet|heavy|stand`.
 - **Подкоманды:**
-  - `heavy|light <session> <cmd…>` — если замок есть, сначала `validate_lock` (битый → 2, команда не запускается).
+  - `[--timed] heavy|medium|light <session> <cmd…>` — если замок есть, сначала `validate_lock` (битый → 2, команда
+    не запускается, до проверки окна и `timed`). `classify` замок не читает и не меняется.
   - `grant <coordinator> <session> <kind> <minutes> <что…>` — замок обязан быть и пройти проверку;
     `<coordinator>` = имя в строке `coordinator:`; окна нет; `minutes` — целое 1..600; в `<что>` нет `|`.
     Пишет `window: <session> | <kind> | <что> | until ~HH:MM` (`date -d "+N minutes" +%H:%M`) сразу после строки
     `coordinator:`, удаляет строки `waiting: <session> | …`, остальные строки сохраняет в прежнем порядке.
     Запись атомарная: `machine.lock.tmp` в той же папке → `mv`. Любой отказ → код 2, файл байт в байт прежний.
-  - `close <coordinator> <session>` — удаляет строку `window:` этой сессии; окно чужое или его нет → код 2.
+  - `close <coordinator> <session>` — замок обязан пройти проверку; `<coordinator>` сверяется так же, как в `grant`;
+    удаляет строку `window:` этой сессии; окно чужое или его нет → код 2. Запись и отказ — как у `grant`.
   - `status` — печатает содержимое замка (или `machine.lock: none`), затем `ram_free_mb: <целое>` и
     `cpu_load_pct: <целое>`. Источник: один вызов `powershell -NoProfile -Command`:
     `Win32_OperatingSystem.FreePhysicalMemory` (КБ → МБ) и `Win32_Processor.LoadPercentage`, среднее пяти
     замеров через 1 с (skill §3 требует 5-секундную выборку). powershell нет → `n/a`. Код 0.
-- **Steps (developer):** красный прогон → `validate_lock` → вызов в `heavy|light` → `grant`/`close` →
-  `status` → указатель в обоих SKILL.md (`.claude/skills/coordinator/SKILL.md` §2, строка «Rewrite the whole file…»
-  дополняется: «or `machine_gate.sh grant|close` — validates the format; `status` prints the lock with free RAM and CPU»)
-  → `cmp` двух SKILL.md → `bash -n`.
-- **REDS (`scripts/machine_gate_tests/test_machine_gate_lock.py`):**
-  1. `test_grant_writes_window_and_drops_waiting` — замок `coordinator: c1 | since x` / `waiting: s2 | heavy | a | ~3 min` /
-     `waiting: s3 | heavy | b | ~80 min` / `stand: free`; `grant c1 s2 heavy 20 T3.9 tests` → код 0; строки ровно:
-     `coordinator: c1 | since x`, `window: s2 | heavy | T3.9 tests | until ~HH:MM` (regex `\d\d:\d\d`),
-     `waiting: s3 | heavy | b | ~80 min`, `stand: free`
-  2. `test_grant_refuses` (параметры: `second_window`, `non_coordinator` — `grant s9 …`, `bad_kind` — `fast`,
-     `bad_minutes` — `0`, `no_lock`) → код 2, файл неизменен (сравнение байтов)
-  3. `test_close_removes_own_window` → код 0, строки `window:` нет, прочее на месте
-  4. `test_close_refuses_foreign_window` → код 2, файл неизменен
-  5. `test_malformed_lock_exit_2` (замки: `window:s2 | heavy` без пробела; `windw: …`; две строки `window:`;
-     `window: s2 | fast | x | until ~1`; нет строки `coordinator:`; `window` с 3 полями; режимы `heavy s2 echo RAN`,
-     `light s2 echo RAN`, `grant c1 s2 heavy 5 x`) → код 2, stderr содержит `malformed machine.lock:`, `RAN` в stdout нет
-  6. `test_status_prints_lock_and_metrics` (с замком и без) → код 0, есть строки `ram_free_mb: \d+|n/a` и `cpu_load_pct: \d+|n/a`;
-     с замком — его строки на месте; без — `machine.lock: none`
-  Стражи: `test_live_sample_lock_is_valid` — дословный живой замок 2026-10-13:
-  ```
-  coordinator: inspector-bottles-84 | since 2026-10-13 12:00
-  waiting: inspector-bottles-3e | heavy | T3.9 post-merge Services/robot_comm/tests on main (after owner's word in its session) | ~3 min
-  waiting: inspector-bottles-a4 | heavy | qex full reindex — only after the .ignore cause is found, evening | ~80 min
-  stand: free
-  ```
-  `heavy inspector-bottles-3e echo RAN` → код 75 (проверка формата пройдена, окна нет);
-  `test_crlf_lock_is_valid` — тот же замок с `\r\n` → тоже 75, не 2.
+- **Steps (developer):** красный прогон → `validate_lock` → вызов во всех режимах `[--timed] heavy|medium|light` → `grant`/`close` →
+  `status` → указатель в SKILL.md: правка в `.claude/plugins/dev/skills/coordinator/SKILL.md` §2, строка «Rewrite the whole file…»
+  дополняется: «or `machine_gate.sh grant|close` — validates the format; `status` prints the lock with free RAM and CPU»;
+  затем побайтная копия в `.claude/skills/coordinator/SKILL.md` → `cmp` двух SKILL.md → `bash -n`.
+- **REDS и стражи:** [`task-1.2-reds.md`](2026-10-13_tooling-machine-gate-hook/task-1.2-reds.md) (вынесены по бюджету 32 КБ).
 - **Acceptance criteria:** все REDS зелёные, стражи зелёные; ручная проверка лидом на temp-замке:
   `MACHINE_LOCK_DIR=<tmp> bash scripts/machine_gate.sh status` печатает два числа; битый замок → `echo $?` = `2`.
 - **Out of scope:** подкоманда `wait`/постановка в очередь; вердикт допуска по порогам (координатор судит

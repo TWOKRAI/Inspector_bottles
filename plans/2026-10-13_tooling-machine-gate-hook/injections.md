@@ -39,6 +39,10 @@
 | J3 | `close` удаляет любое окно | `test_close_refuses_foreign_window` |
 | J4 | `grant` не удаляет `waiting:` своей сессии | `test_grant_writes_window_and_drops_waiting` |
 | J5 | `validate_lock` не отбрасывает `\r` | `test_crlf_lock_is_valid` |
+| J6 | `validate_lock` вызывается только для `heavy|light` (режим `medium` замок не проверяет) | `test_malformed_lock_exit_2` (режимы `medium`, `--timed medium`) |
+| J7 | `kind` окна принимает и `medium` (в `grant` и в `validate_lock`) | `test_grant_refuses[medium_kind]`, `test_malformed_lock_exit_2` (замок с `medium`) |
+| J8 | `close` не сверяет имя координатора | `test_close_refuses[non_coordinator]` |
+| J9 | запись не атомарная: файл открывается на запись до проверок (`: >machine.lock` в начале `grant`) | `test_grant_refuses` (все параметры: файл обрезан или создан) |
 
 Стражи `test_gate_call_form_compat` (K1–K7) и `test_gate_light_file_runs_without_window` зелёные при каждой
 инъекции, кроме M7 (K6). I1 включает `test_hook_allows[no_lock]`: без замка инвертированный хук идёт дальше и
