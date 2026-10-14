@@ -1,8 +1,8 @@
 ---
 name: feedback-bash-from-python-is-wsl-on-windows
 description: "subprocess.run(['bash', ...]) из Python на Windows запускает WSL-заглушку System32\\bash.exe, а не Git Bash — гейт машины и любой .sh из скрипта матрицы падают кодом 1 без прогона; звать C:/Program Files/Git/bin/bash.exe"
-module: tooling
-mechanism: [subprocess, machine-gate, injection-matrix]
+module: [scripts]
+mechanism: [windows-env, dev-tooling, break-injection]
 metadata:
   node_type: memory
   type: feedback

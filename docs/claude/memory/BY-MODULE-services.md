@@ -10,8 +10,9 @@
 
 - [project_gui_constructor_layers_2026_09_26](project_gui_constructor_layers_2026_09_26.md) — Решение владельца 2026-09-26 по GUI-конструктору — framework = конструктор (she…
 
-## services/device_hub (1)
+## services/device_hub (2)
 
+- [feedback_modbus_device_raw_oserror_keeps_connected](feedback_modbus_device_raw_oserror_keeps_connected.md) — ModbusDevice не помечает обрыв на сыром OSError сокета (WinError 10053 после ре…
 - [project_device_hub](project_device_hub.md) — device-hub — always-on процесс устройств, реестр, YAML-протоколы; статус и след…
 
 ## services/hikvision_camera (1)
@@ -23,13 +24,18 @@
 - [feedback_one_control_proves_sufficiency_not_exclusivity](feedback_one_control_proves_sufficiency_not_exclusivity.md) — Контроль, вернувший старое число сменой фактора A, доказывает «A достаточно», н…
 - [feedback_pytest_import_order_hides_a_cycle](feedback_pytest_import_order_hides_a_cycle.md) — Зелёный pytest не доказывает отсутствие цикла импорта: conftest'ы и соседние те…
 
-## services/line_sim (1)
+## services/line_sim (2)
 
+- [feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree](feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree.md) — «Потерянный» gitignored-ассет (data/) может жить в соседнем worktree — искать п…
 - [feedback_broad_except_in_frame_loop_hides_dead_mechanism](feedback_broad_except_in_frame_loop_hides_dead_mechanism.md) — Широкий except (broad except) в кадровом цикле превращает новый дефект в «стенд…
 
 ## services/ml_train (1)
 
 - [project_cuda_torch_setup](project_cuda_torch_setup.md) — Стенд RTX 3050 4GB; torch для ml_train должен быть cu124-колесом, не +cpu; uv s…
+
+## services/modbus (1)
+
+- [feedback_modbus_device_raw_oserror_keeps_connected](feedback_modbus_device_raw_oserror_keeps_connected.md) — ModbusDevice не помечает обрыв на сыром OSError сокета (WinError 10053 после ре…
 
 ## services/otel_export (5)
 
