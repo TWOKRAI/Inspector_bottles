@@ -54,10 +54,21 @@ stand: free | <session> measure|functional <SHA> <ports>
 | blind tester / e2e series with a simulator | 5–30 min | sim threads, Modbus TCP |
 | qex full index (ollama embeddings) | 80+ min | GPU 89 %, −1.3 GB RAM |
 | live stand `run_sim_all.ps1` | session-long | several processes |
+| medium (no window; waits only for a foreign `quiet` or `stand` window) | one module's `*/tests` directory, ~2–5 min | — |
 | light (no window needed) | one pytest process on own files, < ~2 min | — |
 
 Admission: no new heavy work while free RAM < ~1.5 GB or CPU > ~70 % (5-second sample of top processes).
 Measure before you open a window; quote the numbers in the signal.
+
+Classes (decided by `classify` in `scripts/machine_gate.sh`; a session may raise its claim, never lower it): **light** — own
+files, < ~2 min; **medium** — one module's `*/tests` directory, ~2–5 min; **heavy** — longer than ~5 min. `medium` is a
+command class, not a window kind. **timed** is independent of the class (paths in `scripts/machine_gate_timed.txt`:
+`Plugins/sim/`, `Services/robot_comm/`, `Services/line_sim/`, `Services/device_hub/`, `multiprocess_framework/`; a session may
+set it with `--timed` as the first gate argument, never unset it): a timed `medium` is admitted like `heavy` — only in
+its own window, and while that window is open foreign timed `medium` and `heavy` wait, `light` and non-timed `medium` run.
+Non-timed `medium` waits only for a foreign `quiet` or `stand` window. The gate does not measure RAM — the coordinator does
+(admission above). With `machine.lock` present the PreToolUse hook `machine-gate-guard.sh` blocks a test command that
+bypasses the gate and prints the command to run instead.
 
 ## 4. Signals — fixed words, so a session can find them in its inbox
 

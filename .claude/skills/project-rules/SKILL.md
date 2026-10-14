@@ -105,12 +105,16 @@ Files: <paths>
   `PYTHONPATH=<worktree root>`; prove the import path from the same cwd as pytest.
 - `uv sync` elsewhere only with `--inexact`. No global `taskkill` — `TaskStop` or a PID.
 - Shared machine (skill `coordinator`): every test or stand command goes through the gate (main checkout's
-  script — worktrees cut earlier lack it): `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" heavy|light <session> <cmd...>`. `heavy` = full suite, injection matrix, e2e
+  script — worktrees cut earlier lack it): `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" [--timed] heavy|medium|light <session> <cmd...>`. `heavy` = full suite, injection matrix, e2e
   series, stand, qex indexing — runs only in your session's window in `machine.lock`; `light` = one pytest
-  process on your files — runs except in someone's `quiet` window; no `machine.lock` → the old `stand.lock`
+  process on your files — runs except in someone's `quiet` window; `medium` = one module's `*/tests` directory (~2–5 min) —
+  runs without a window except in someone's `quiet`/`stand` window, and needs your own window like `heavy` when it touches a
+  timed path (`scripts/machine_gate_timed.txt`, or `--timed` first); the gate raises your claim to the command's class, never
+  lowers it; no `machine.lock` → the old `stand.lock`
   rule. Exit 75 = skipped by the gate, not a red run. `<session>` = the name your brief gives (no `[ref]`);
   no name in the brief → ask the lead, do not guess. Skipped as a subagent → say «NO WINDOW» in your
-  report and finish it; never loop waiting — the lane session asks the coordinator for a window.
+  report and finish it; never loop waiting — the lane session asks the coordinator for a window. While `machine.lock` exists
+  the hook `machine-gate-guard.sh` blocks a test command that bypasses the gate (its message shows the command to run).
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
 - Add an import and its use in one Edit (ruff strips an unused import).
 - Memory search before your first edit (read-only roles: before the first finding; the main checkout's script: worktrees cut before the merge lack it):

@@ -89,8 +89,10 @@ the background** — for a verdict this project's rules will accept, drive `revi
 
 - A **separate** coordinator session (skill `coordinator`) gives out load windows; its name and the windows are in
   `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock`. A lane session sends it its name first; signals and the start-prompt template — skill `coordinator` §4, §5.
-- Every test or stand command (yours and your agents') goes through `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" heavy|light <session> <cmd...>`;
-  heavy = full suite, matrix, e2e series, stand, qex indexing — only in your window; exit 75 = skipped by the gate.
+- Every test or stand command (yours and your agents') goes through `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" [--timed] heavy|medium|light <session> <cmd...>`;
+  heavy = full suite, matrix, e2e series, stand, qex indexing — only in your window; medium = one module's tests directory — no
+  window, except timed paths (`Plugins/sim`, `Services/{robot_comm,line_sim,device_hub}`, `multiprocess_framework`) which need your
+  window like heavy; exit 75 = skipped by the gate. While `machine.lock` exists a hook blocks test commands that bypass the gate.
 - No `machine.lock` → the gate falls back to `stand.lock`; `scripts/stand_gate` in live mode always takes `stand.lock` itself.
 
 ## ponytail — when the laziness ladder applies
