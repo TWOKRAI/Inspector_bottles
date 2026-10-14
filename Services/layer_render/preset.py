@@ -54,6 +54,11 @@ class ScenePreset(BaseModel):
     defect_probability: float = Field(default=0.0, ge=0.0, le=1.0)
     layers: list[LayerSpec] = Field(default_factory=list)
     base_dir: str | None = None
+    train: dict[str, Any] | None = None
+    """Секция обучения (Task 6.2): непрозрачный dict, `layer_render` его не проверяет — схема
+    `dataset_gen.TrainSection`, проверяет генератор обучения. `None` — ключ не пишется в `to_dict()`.
+    Пути `tile:` внутри `train` `to_yaml()` НЕ пересчитывает (при сохранении в другой каталог
+    относительные пути секции не переписываются)."""
 
     @field_validator("angle_range_deg")
     @classmethod
@@ -117,8 +122,12 @@ class ScenePreset(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Сериализация на границе (кортежи → списки); `base_dir` едет как обычное поле —
-        нужен другому процессу на той же машине и для `from_dict(p.to_dict()) == p`."""
-        return self.model_dump(mode="json")
+        нужен другому процессу на той же машине и для `from_dict(p.to_dict()) == p`.
+        `train is None` — ключа `train` нет: пресеты без секции обучения сериализуются как раньше."""
+        data = self.model_dump(mode="json")
+        if data.get("train") is None:
+            data.pop("train", None)
+        return data
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ScenePreset:

@@ -22,7 +22,7 @@ from Services.dataset_gen.core.compose import (
 from Services.dataset_gen.core.config import GeneratorConfig, SymmetryType
 from Services.dataset_gen.core.labels import SampleLabel
 from Services.dataset_gen.core.augment import apply_photometric
-from Services.dataset_gen.core.symmetry import combine_symmetries, detect_symmetry, encode_angle
+from Services.dataset_gen.core.symmetry import encode_angle, resolve_symmetries
 
 
 def _uniform_val(rng: np.random.Generator, pair: tuple[float, float]) -> float:
@@ -192,23 +192,6 @@ class DatasetEngine:
 
     def _resolve_symmetries(self) -> dict[int, SymmetryType]:
         """Симметрия класса. Приоритет: глобальный override из конфига →
-        meta.yaml класса (symmetry) → авто-детектор → "none" при выкл. детекторе."""
-        sym_cfg = self.config.symmetry
-        result: dict[int, SymmetryType] = {}
-        for entry in self._catalog.classes:
-            override = sym_cfg.overrides.get(entry.name)
-            if override is not None:
-                result[entry.index] = override
-                continue
-            if entry.meta.symmetry is not None:
-                result[entry.index] = entry.meta.symmetry
-                continue
-            if not sym_cfg.auto_detect:
-                result[entry.index] = "none"
-                continue
-            kinds = {
-                detect_symmetry(s, sym_cfg.threshold, sym_cfg.full_angles, sym_cfg.rel_threshold)
-                for s in self._catalog.sprites(entry.index)
-            }
-            result[entry.index] = combine_symmetries(kinds)
-        return result
+        meta.yaml класса (symmetry) → авто-детектор → "none" при выкл. детекторе.
+        Тело — `symmetry.resolve_symmetries` (Task 6.2, общее с `LayerSceneGenerator`)."""
+        return resolve_symmetries(self._catalog, self.config.symmetry)

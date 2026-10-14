@@ -11,3 +11,15 @@ layers:
   - name: letter
     mode: static
     sprite_source: class://
+# Секция обучения (layer-render Task 6.3): читают LayerSceneGenerator и
+# Services/dataset_gen/tools/export_sim_crops.py; сим секцию не читает, но ограда путей preset.commit
+# проверяет train.background_layers[*].tile (путь внутри корня репозитория или каталога пресета). Поля — presets/README.md.
+train:
+  label: {angle_layer: letter}
+  symmetry: {auto_detect: false, overrides: {Х: "180"}}
+  background_layers:
+    - solid: [0, 0, 0]
+    - tile: ../../../data/line_sim/belt_tile.png
+  lateral_offset_px: [10, 20]
+  crop: {size_mode: radius, radius_scale: 1.0, margin_px: 14, output_size: 128}
+  defect_probability: 0.0

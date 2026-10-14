@@ -172,6 +172,34 @@ python -m Services.dataset_gen.tools.cut_real_disks \
 (вход 124×124, фон — папка реальных фото сцены). Обучение MobileNetV3 Large:
 `python -m Services.ml_train train Services/ml_train/presets/ru_letters_real.yaml`.
 
+## CLI экспорта обучающих вырезов
+
+Строит каталоги `train` и `val` с обучающими вырезами из пресета слоёв (класс
+`LayerSceneGenerator`, секция `train` пресета). Запуск из корня репозитория:
+
+```bash
+python -m Services.dataset_gen.tools.export_sim_crops \
+    --config <пресет.yaml> --out <каталог> --train N --val M [--seed S] [--preview <сетка.png>]
+```
+
+- `--train N` и `--val M` — кадров на класс (целые ≥ 1); `--seed S` — целое ≥ 0, по умолчанию 0.
+- `--out` — несуществующий или пустой каталог.
+- `--preview` — PNG сетки-превью 4×4 (опционально).
+- Формат каталога = `export_splits`: `<каталог>/<сплит>/images/<индекс класса 000>/*.png` и
+  `<каталог>/<сплит>/labels.csv`, сплиты `train` и `val`.
+- `Services.ml_train` читает этот каталог при `data.source: exported` без правок.
+
+Ошибки:
+
+- Ошибка загрузки пресета: `<путь>: <тип>: <причина>`. В `--out` ничего не записывается.
+- Занятый `--out`: `export_sim_crops: --out должен быть пустым или несуществующим каталогом: <путь>`.
+  Проверка идёт до загрузки пресета.
+- Ошибка на кадре (например, сторона выреза больше 4000 px): исключение и частично записанный
+  `--out`. Известное ограничение, см. `plans/layer-render/phase-6-task-6.3.md`, «Открыто».
+
+Секция `train` пресета и порядок добавления нового продукта — в
+[Services/line_sim/presets/README.md](../line_sim/presets/README.md).
+
 ## Границы
 
 - НЕ обучает модель — только генерирует данные (обучающий сервис —
