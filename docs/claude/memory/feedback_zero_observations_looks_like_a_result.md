@@ -90,3 +90,14 @@ PM 2 и `routing_refresh_applied=0`; с фиксом — 2 = 2. Число, а �
 
 Родня: [[feedback-plausible-is-not-verified]], [[feedback-swallowed-failure-class]],
 [[feedback-single-marker-verdict-lies]], [[feedback-prove-test-red-without-fix]].
+
+## Пятое обличье (2026-10-14, T0.3 проба платформы): файл целиком пропущен — «зелёный»
+
+`robot/pc_platform_probe/test_dry_run.py` начинается с `pytest.importorskip("lupa")`; `lupa` не в
+зависимостях проекта. Прогон интерпретатором `.venv` дал `1 skipped`, exit 5 (ничего не собрано),
+ноль упавших — агент доложил это как результат. Настоящий прогон — только во временном окружении:
+`uv run --no-project --with lupa --with pymodbus==3.15.0 --with pytest python -m pytest robot/pc_platform_probe -q`
+(команда — в README пробы); там сухой прогон дал 2/53 красных.
+Правило: в отчёте о прогоне — `passed` числом и exit-код; `skipped` при `passed == 0` или exit 5 —
+это «не запускалось», а не «зелёное». Если файл пропускается по `importorskip`, отчёт называет
+причину пропуска (`-rs`), а не итог.
