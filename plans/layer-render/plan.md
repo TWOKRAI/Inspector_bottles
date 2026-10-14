@@ -111,7 +111,7 @@
 
 ### Ф6 — обучение (дорожка B, параллельно Ф3–Ф5) → [phase-6-train.md](phase-6-train.md)
 - Task 6.1: одна функция выреза для `center_crop`, `holdout_eval` и генератора (бывш. 2.1) [DONE 2026-10-02 — `f9ef5c45`; слепые 107 RED → GREEN, инъекции лида 16/16 (дыра `clamp` на касании края закрыта ревью), ревью ит.2 APPROVED; намеренно: выход всегда копия, `replicate` без пересечения → `ValueError`]
-- Task 6.2: `LayerSceneGenerator` в `dataset_gen` поверх `layer_render`, секция `train.*` пресета (бывш. 2.2) [PENDING] (после 2.5, 6.1)
+- Task 6.2: `LayerSceneGenerator` в `dataset_gen` поверх `layer_render`, секция `train.*` пресета (бывш. 2.2) [IN PROGRESS 2026-10-14 — спека [phase-6-task-6.2.md](phase-6-task-6.2.md), ветка `feat/layer-render-6.2-generator`; литерал m4 `d0cdc9503`] (после 2.5, 6.1)
 - Task 6.3: CLI экспорта + пресет первого продукта + смоук `ml_train` (бывш. 2.3) [PENDING] — **открывает letters-retrain Ф1**
 - Task 6.4: `holdout_eval` на формуле конвейера (бывш. 2.4, О-1) [DONE `e18d22d44` — волна 4; реализация 1d618b0b, ревью ит.2 7fc0e8ec APPROVED] (после 6.1)
 - Task 6.5: сведение `DatasetEngine` к пресету слоёв и удаление второго пути сборки картинки (решение владельца 2026-10-01: «свести к одному») [PENDING] (после 6.2)
