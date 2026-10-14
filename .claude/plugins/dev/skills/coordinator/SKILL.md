@@ -40,7 +40,7 @@ stand: free | <session> measure|functional <SHA> <ports>
   light work; **stand** — `run_sim_all.ps1` / backend stand, plus the `stand:` line.
 - `scripts/stand_gate` in live mode still requires `stand.lock` with its own line — the holder of a `quiet` or
   `stand` window takes `stand.lock` too; the `stand:` line here is the coordinator's record.
-- Rewrite the whole file on every change with the Write tool; never append from two sessions.
+- Rewrite the whole file on every change with the Write tool, or open and close a window with `machine_gate.sh grant|close <coordinator> …` (checks the format, writes atomically); never append from two sessions. `machine_gate.sh status` prints the lock with free RAM and CPU.
 - Holder gone from `ListAgents` while the coordinator lives → the coordinator closes the window and tells the queue.
 - Coordinator gone from `ListAgents` → any session may delete the file after telling the peers; if a `stand:`
   line names a session, first check that ports 8765/8766 are free. No file = the old stand protocol.
