@@ -10,9 +10,12 @@ Purpose:
 Public API:
     ``RobotDriverV2(entry, protocol=None, *, transport=None, publish=None, param_source=None, clock=None,
     sleep=None)``; ``connect() -> bool``, ``disconnect()``, ``is_connected``, ``tick(stop_event)``,
-    ``call(op, args)`` с операциями ``jog_hold`` {dir, spd}, ``jog_release``, ``get_telemetry``;
-    ``start_program(program, points, frames=None, *, name)``, ``start_return(slot, **kw)``,
-    ``start_toolchange(current, target, points, **kw)``; свойство ``transport`` (свой ``ModbusDevice``).
+    ``call(op, args)`` с операциями ``jog_hold`` {dir, spd}, ``jog_release``, ``get_telemetry``,
+    ``enqueue_job`` {x_mm, y_mm, z_mm?, e_capture?, place_x?, place_y?, place_z?, place_rz?} (T3.7: CVT_JOB;
+    ``place_rz`` — доворот к ``P_PICK_RZ``; ответ ``queue_len``), ``return_job`` {x_mm, y_mm, z_mm?} (T3.7:
+    программа ``return_slot``; ответ ``return_queue_len``); ``start_program(program, points, frames=None, *, name)``,
+    ``start_return(slot, **kw)``, ``start_toolchange(current, target, points, **kw)``; ``snapshot`` со счётчиками
+    ``jobs_*`` / ``returns_*``; свойство ``transport`` (свой ``ModbusDevice``).
     ``param_source`` — точка подключения T5.2: ``() -> (сырые значения {имя: int} без P_CONFIG_EPOCH, метка)``.
 
 Stability: lite
@@ -23,10 +26,17 @@ Stability: lite
 ``_jog_tx_lock`` — только для переходов jog: ``client.jog_cont`` в ``jog_hold`` и ``client.stop(SOFT)`` стопа jog.
 Тик, исполнитель и ``poll_errors`` его не берут. Путь ``connect`` и повторная синхронизация не идут, пока жив поток
 поводка или исполнителя.
+
+Задания (T3.7). Очереди заданий и возвратов дренирует тик: одно действие за тик, только при свободном захвате.
+Флаг ``_job_active`` — под ``_flags_lock``, ставится в одной секции с проверкой ``_busy`` / jog и взятием задания,
+ДО ``cvt_job``; при нём ``jog_hold`` и запуск программы отвечают «робот выполняет задание». Тик блокируется на
+``wait_done`` до исхода задания; пульс ``HB_PC`` в это время — ``on_poll``. ``connect`` при задании не идёт. Новых
+потоков нет: возврат идёт программой на потоке исполнителя.
 """
 
 from __future__ import annotations
 
+import math
 import threading
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -37,7 +47,7 @@ from Services.device_hub.drivers.base import BaseDeviceDriver, logger
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, REG, STOP_LEVEL
-from Services.robot_comm.errors import RobotAborted
+from Services.robot_comm.errors import RobotAborted, RobotCommandError, RobotNak, RobotTimeout
 from Services.robot_comm.programs import Point, compile_program
 from Services.robot_comm.programs.generators import return_slot, toolchange
 
@@ -78,7 +88,65 @@ TEXT_LEASE_LOST = "поводок jog прерван: нет связи с ро�
 TEXT_WDG_INTERVAL = "интервал тика больше четверти таймаута сторожа"
 _BUSY_PROGRAM = {"status": "error", "message": "робот занят программой"}
 _BUSY_JOG = {"status": "error", "message": "робот в режиме jog"}
+_BUSY_JOB = {"status": "error", "message": "робот выполняет задание"}
 _NOT_CONNECTED = {"status": "error", "message": "нет связи с роботом"}
+# Ответы «захват занят» исполнителя: возврат из очереди при таком ответе идёт обратно в её начало (DESIGN п.6)
+_BUSY_REPLIES = (_BUSY_PROGRAM, _BUSY_JOG, _BUSY_JOB)
+# Тексты отказа постановки — постоянные, без входного значения (R8)
+TEXT_BAD_JOB_ARGS = "неверные аргументы задания"
+TEXT_BAD_RETURN_ARGS = "неверные аргументы возврата"
+# Глубина очередей заданий и возвратов по умолчанию (паритет v1)
+_JOB_QUEUE_MAXLEN = 256
+# Предел координаты на проводе: |v| * WIRE_SCALE <= W_MAX (R8)
+_WIRE_MAX = CONSTANTS["W_MAX"]
+
+type _Place = tuple[float, float, float, float]
+type _Job = tuple[float, float, float, int, _Place | None]
+
+
+class _JobStopped(Exception):
+    """``stop_event`` хаба взведён, пока тик ждёт завершения задания (DESIGN п.5)."""
+
+
+class _BadArgs(Exception):
+    """Аргумент операции не прошёл проверку R8. Текст ответа — постоянный, задаёт вызывающий."""
+
+
+def _coord(args: Mapping[str, Any], key: str, default: float | None = None) -> float:
+    """Координата из аргументов: конечное число, ``|v| * WIRE_SCALE <= W_MAX``; нет ключа и нет умолчания — ошибка."""
+    raw = args.get(key)
+    if raw is None:
+        if default is None:
+            raise _BadArgs(key)
+        return default
+    if isinstance(raw, bool):
+        raise _BadArgs(key)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise _BadArgs(key) from None
+    _check_wire(value, key)
+    return value
+
+
+def _check_wire(value: float, what: str) -> None:
+    if not math.isfinite(value) or abs(value) * _WIRE_SCALE > _WIRE_MAX:
+        raise _BadArgs(what)
+
+
+def _whole(raw: Any, key: str) -> int:
+    """Целое без дробной части (``e_capture``); bool, строка не-числа, nan, 1.5 — ошибка."""
+    if isinstance(raw, bool):
+        raise _BadArgs(key)
+    if isinstance(raw, int):
+        return raw
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise _BadArgs(key) from None
+    if not math.isfinite(value) or not value.is_integer():
+        raise _BadArgs(key)
+    return int(value)
 
 
 def _s16(word: int) -> int:
@@ -187,10 +255,23 @@ class RobotDriverV2(BaseDeviceDriver):
         self._jog_tx_lock = threading.Lock()
         self._busy = False  # идёт программа
         self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
+        self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
         self._last_hold = 0.0  # время последнего jog_hold активного jog
         self._jog: _JogRun | None = None
         self._prog_thread: threading.Thread | None = None
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
+
+        # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
+        maxlen = int(params.get("job_queue_maxlen", _JOB_QUEUE_MAXLEN))
+        self._job_queue: deque[_Job] = deque(maxlen=maxlen)  # (x, y, z, e_signed, place)
+        self._return_queue: deque[tuple[float, float, float]] = deque(maxlen=maxlen)
+        self._pick_lead_mm = float(params.get("pick_lead_mm", 0.0))
+        self._job_active = False  # тик держит задание от захвата до исхода wait_done (R7), под _flags_lock
+        self.jobs_sent = 0
+        self.jobs_done = 0
+        self.jobs_failed = 0
+        self.returns_done = 0
+        self.returns_failed = 0
 
     # ------------------------------------------------------------------ #
     # Параметры и конфиг подключения
@@ -259,8 +340,14 @@ class RobotDriverV2(BaseDeviceDriver):
         return lease_alive or (prog is not None and prog.is_alive())
 
     def connect(self) -> bool:
-        """Транспорт -> probe -> sync_params -> действия при подключении (DESIGN п.3)."""
-        if self._activity_alive():
+        """Транспорт -> probe -> sync_params -> действия при подключении (DESIGN п.3).
+
+        Не идёт, пока жив поток поводка или исполнителя, и пока тик держит задание (T3.7 R9): иначе ``probe`` +
+        ``sync_params`` посреди хода дали бы NAK ``E_BUSY`` на ``PARAM_SET`` и ``_ready = False``.
+        """
+        with self._flags_lock:
+            job_active = self._job_active
+        if job_active or self._activity_alive():
             return self.is_connected
         was_ready = self._ready
         self._ready = False
@@ -321,7 +408,8 @@ class RobotDriverV2(BaseDeviceDriver):
             self._sleep(_ON_CONNECT_POLL_S)
 
     def disconnect(self) -> None:
-        """Активный jog -> стоп SOFT; программа -> стоп SOFT (прерывание); потоки — join с дедлайном."""
+        """Активный jog -> стоп SOFT; программа -> стоп SOFT (прерывание); задание -> стоп HARD (T3.7 п.10);
+        потоки — join с дедлайном."""
         with self._flags_lock:
             run = self._jog
             stop_jog = run is not None and run.active and not run.stop_requested
@@ -330,6 +418,15 @@ class RobotDriverV2(BaseDeviceDriver):
                 run.stop_requested = True
                 run.wake.set()
             prog = self._prog_thread
+            job_active = self._job_active
+        if job_active and self._client is not None:
+            # HARD обрывает ход CVT сразу; SOFT на CVT откладывается до точки захвата (R9). Тик, ждущий wait_done,
+            # получает RobotAborted или ошибку транспорта и считает задание неудачным.
+            try:
+                self._client.stop(STOP_LEVEL["HARD"])
+            except Exception as exc:
+                self._record_err()
+                logger.warning(f"робот {self.entry.id!r}: стоп задания при отключении не доставлен: {exc}")
         if stop_jog:
             self._join(run.thread, _LEASE_JOIN_S)
             try:
@@ -426,8 +523,117 @@ class RobotDriverV2(BaseDeviceDriver):
         except Exception as exc:
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: ошибки робота не прочитаны: {type(exc).__name__}: {exc}")
+        if tlm is not None:
+            self._dispatch(client, data["free"], stop_event)
         quality = "bad" if self._stats["tx_err"] > err_before else "good"
         return self.snapshot(data, quality=quality)
+
+    # --- задания и возвраты (T3.7) ---
+
+    def _dispatch(self, client: RobotClientV2, free: bool, stop_event: Any) -> None:
+        """Одно действие за тик (DESIGN п.4): возврат из очереди, иначе задание. Обе ветки требуют ``free``.
+
+        «Захват свободен» и взятие задания — одна секция ``_flags_lock``: ``_job_active`` ставится ДО ``cvt_job``,
+        поэтому ``jog_hold`` / ``start_program`` между проверкой и записью видят ``_BUSY_JOB`` (R7).
+        """
+        if not free:
+            return
+        job: _Job | None = None
+        item: tuple[float, float, float] | None = None
+        with self._flags_lock:
+            run = self._jog
+            if (
+                self._busy
+                or self._jog_starting
+                or self._jog_stopping
+                or (run is not None and run.active)
+                or self._job_active
+            ):
+                return
+            if self._return_queue:
+                item = self._return_queue.popleft()
+            elif self._job_queue:
+                job = self._job_queue.popleft()
+                self._job_active = True
+        if item is not None:
+            self._start_next_return(item)
+        elif job is not None:
+            self._run_next_job(client, job, stop_event)
+
+    def _run_next_job(self, client: RobotClientV2, job: _Job, stop_event: Any) -> None:
+        """CVT_JOB + ожидание завершения в потоке тика (R1); пульс — ``on_poll``. Исключения из тика не выходят."""
+        x, y, z, ecap, place = job
+
+        def on_poll(_tlm: Any) -> None:
+            if stop_event is not None and stop_event.is_set():
+                raise _JobStopped
+            client.kick_heartbeat()
+
+        try:
+            flags = (1 if z != 0.0 else 0) | (2 if place is not None else 0)
+            if place is not None:
+                px, py, pz, turn = place
+                prz = to_eng("P_PICK_RZ", self._values["P_PICK_RZ"]) + turn  # R3: v2 забирает под P_PICK_RZ
+            else:
+                px = py = pz = prz = 0.0
+            try:
+                res = client.cvt_job(ecap & 0xFFFFFFFF, x, y, z, flags, px, py, pz, prz)
+            except RobotNak as exc:
+                if exc.errno != ERR["E_BUSY"]:
+                    raise
+                with self._flags_lock:
+                    self._job_queue.appendleft(job)  # робот занят — повтор следующим тиком (паритет v1)
+                return
+            self.jobs_sent += 1
+            client.wait_done(res.seq, on_poll=on_poll)
+            self.jobs_done += 1
+            self._record_ok()
+        except (RobotTimeout, _JobStopped) as exc:
+            self.jobs_failed += 1
+            try:
+                client.stop(STOP_LEVEL["HARD"])  # R9: SOFT на CVT отложился бы до точки захвата
+            except Exception as stop_exc:
+                self._record_err()
+                logger.warning(f"робот {self.entry.id!r}: стоп задания не доставлен: {type(stop_exc).__name__}")
+            text = "останов хаба" if isinstance(exc, _JobStopped) else str(exc)
+            self._publish_error(f"задание прервано: {text}")
+        except (RobotNak, RobotCommandError) as exc:
+            self.jobs_failed += 1  # RobotAborted — подкласс RobotCommandError; задание теряется (паритет v1)
+            self._publish_error(exc.text)
+        except ValueError as exc:
+            self.jobs_failed += 1  # R8: аргумент вне провода — не обрыв связи
+            self._publish_error(f"задание не отправлено: {exc}")
+        except Exception as exc:
+            self.jobs_failed += 1
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: задание прервано сбоем связи: {type(exc).__name__}: {exc}")
+            self._link_lost()  # урок fd5c003e8: сырой OSError оставляет is_connected == True
+        finally:
+            with self._flags_lock:
+                self._job_active = False
+
+    def _start_next_return(self, item: tuple[float, float, float]) -> None:
+        """Возврат, взятый тиком из очереди, — программой ``return_slot`` на потоке исполнителя (R2, DESIGN п.6)."""
+        x, y, z = item
+        v = self._values
+        slot = Point(
+            name="return_slot",
+            x=x,
+            y=y,
+            z=z if z != 0.0 else to_eng("P_PLACE_Z", v["P_PLACE_Z"]),
+            rz=to_eng("P_PICK_RZ", v["P_PICK_RZ"]),
+            hand=int(v["P_HAND"]),
+        )
+        res = self.start_return(slot)
+        if res.get("status") == "ok":
+            return
+        if res in _BUSY_REPLIES:
+            with self._flags_lock:
+                self._return_queue.appendleft(item)  # захват перехвачен между секциями — повтор следующим тиком
+            return
+        with self._flags_lock:
+            self.returns_failed += 1
+        self._publish_error(str(res.get("message")))
 
     def _link_lost(self) -> None:
         """Ошибка ввода-вывода в тике: связь считается оборванной, следующий тик переподключается.
@@ -482,7 +688,55 @@ class RobotDriverV2(BaseDeviceDriver):
         if not self.is_connected:
             return dict(_NOT_CONNECTED)
         telemetry, free, encoder = _parse_tlm(self._read_tlm())
-        return {"status": "ok", "telemetry": telemetry, "free": free, "encoder": encoder, "queue_len": 0}
+        return {
+            "status": "ok",
+            "telemetry": telemetry,
+            "free": free,
+            "encoder": encoder,
+            "queue_len": len(self._job_queue),
+        }
+
+    # --- задания ---
+
+    def _op_enqueue_job(self, args: dict) -> dict:
+        """Задание CVT_JOB в очередь (R1, R3-R6, R8): ключи v1 {x_mm, y_mm, z_mm?, e_capture?, place_x?, place_y?,
+        place_z?, place_rz?}; ``place_rz`` — доворот к ``P_PICK_RZ``. Плохой ввод -> постоянный текст, очередь цела."""
+        try:
+            x, y = _coord(args, "x_mm"), _coord(args, "y_mm")
+            z = _coord(args, "z_mm", 0.0)  # R6: 0 — умолчание прошивки P_PICK_Z (бит0 = 0)
+            place: _Place | None = None
+            if args.get("place_x") is not None and args.get("place_y") is not None:
+                turn = _coord(args, "place_rz", 0.0)
+                _check_wire(to_eng("P_PICK_RZ", self._values["P_PICK_RZ"]) + turn, "place_rz")
+                place = (_coord(args, "place_x"), _coord(args, "place_y"), _coord(args, "place_z", 0.0), turn)
+            raw_ecap = args.get("e_capture")
+            ecap = None if raw_ecap is None else _whole(raw_ecap, "e_capture")
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_JOB_ARGS, "queue_len": len(self._job_queue)}
+        if not self.is_connected:
+            return {**_NOT_CONNECTED, "queue_len": len(self._job_queue)}
+        if ecap is None:
+            ecap = _parse_tlm(self._read_tlm())[2]  # R5: энкодер сейчас, в потоке команды (s32)
+        if self._pick_lead_mm != 0.0:
+            # R4: ход ленты на импульс — P_BELT_FACTOR × 1e-5 мм/имп (не константа v1)
+            ecap -= round(self._pick_lead_mm / (self._values["P_BELT_FACTOR"] * 1e-5))
+        with self._flags_lock:
+            self._job_queue.append((x, y, z, ecap, place))  # maxlen: старейшее вытесняется (паритет v1)
+            n = len(self._job_queue)
+        return {"status": "ok", "queue_len": n}
+
+    def _op_return_job(self, args: dict) -> dict:
+        """Возврат из слота {x_mm, y_mm, z_mm?} в очередь возвратов; исполнение — тиком (R2, DESIGN п.3)."""
+        try:
+            item = (_coord(args, "x_mm"), _coord(args, "y_mm"), _coord(args, "z_mm", 0.0))
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_RETURN_ARGS, "return_queue_len": len(self._return_queue)}
+        if not self.is_connected:
+            return {**_NOT_CONNECTED, "return_queue_len": len(self._return_queue)}
+        with self._flags_lock:
+            self._return_queue.append(item)
+            n = len(self._return_queue)
+        return {"status": "ok", "return_queue_len": n}
 
     # --- jog ---
 
@@ -492,6 +746,8 @@ class RobotDriverV2(BaseDeviceDriver):
         with self._flags_lock:
             if self._busy:
                 return dict(_BUSY_PROGRAM)
+            if self._job_active:
+                return dict(_BUSY_JOB)
             if self._holding_locked():
                 self._last_hold = self._clock()
                 return {"status": "ok"}
@@ -503,6 +759,8 @@ class RobotDriverV2(BaseDeviceDriver):
             with self._flags_lock:
                 if self._busy:
                     return dict(_BUSY_PROGRAM)
+                if self._job_active:
+                    return dict(_BUSY_JOB)
                 if self._holding_locked():
                     self._last_hold = self._clock()
                     return {"status": "ok"}
@@ -540,8 +798,15 @@ class RobotDriverV2(BaseDeviceDriver):
             run.released = True
             run.stop_requested = True
             run.wake.set()
-        self._join(run.thread, _LEASE_JOIN_S)  # вне _jog_tx_lock: поток поводка сам может ждать этот замок
-        self._stop_jog(run)
+            # T3.7 (ревью р.1): поток поводка выходит (active = False) раньше записи стопа — до её возврата тик
+            # не берёт задание, иначе SOFT этого jog оборвал бы CVT_JOB (E_ABORTED)
+            self._jog_stopping = True
+        try:
+            self._join(run.thread, _LEASE_JOIN_S)  # вне _jog_tx_lock: поток поводка сам может ждать этот замок
+            self._stop_jog(run)
+        finally:
+            with self._flags_lock:
+                self._jog_stopping = False
         return {"status": "ok"}
 
     def _stop_jog(self, run: _JogRun) -> None:
@@ -590,9 +855,16 @@ class RobotDriverV2(BaseDeviceDriver):
 
     def start_program(self, program: Any, points: Mapping[str, Point], frames: Any = None, *, name: str) -> dict:
         """Запустить программу в потоке исполнителя; один прогон за раз (DESIGN п.6)."""
+        return self._launch(program, points, frames, name=name, kind="program")
+
+    def _launch(self, program: Any, points: Mapping[str, Point], frames: Any, *, name: str, kind: str) -> dict:
+        """Захват (программа / задание / jog) -> компиляция -> поток исполнителя. ``kind`` уходит в счётчики
+        возвратов ``_program_loop`` (T3.7 DESIGN п.7)."""
         with self._flags_lock:
             if self._busy:
                 return dict(_BUSY_PROGRAM)
+            if self._job_active:
+                return dict(_BUSY_JOB)
             run = self._jog
             if self._jog_starting or (run is not None and run.active):
                 return dict(_BUSY_JOG)
@@ -604,7 +876,7 @@ class RobotDriverV2(BaseDeviceDriver):
             total = len(scenario.records)
             thread = threading.Thread(
                 target=self._program_loop,
-                args=(scenario, name, total),
+                args=(scenario, name, total, kind),
                 name=f"rv2-prog-{self.entry.id}",
                 daemon=True,
             )
@@ -623,7 +895,7 @@ class RobotDriverV2(BaseDeviceDriver):
             gp = return_slot(slot, home=self._home_point(), **kw)
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
-        return self.start_program(gp.program, gp.points, None, name=gp.program.name)
+        return self._launch(gp.program, gp.points, None, name=gp.program.name, kind="return")
 
     def start_toolchange(self, current: int, target: int, points: Mapping[str, Point], **kw: Any) -> dict:
         """Смена инструмента с домом в конце: ``toolchange(..., home=<дом из параметров>)``."""
@@ -633,7 +905,7 @@ class RobotDriverV2(BaseDeviceDriver):
             return {"status": "error", "message": str(exc)}
         return self.start_program(gp.program, gp.points, None, name=gp.program.name)
 
-    def _program_loop(self, scenario: Any, name: str, total: int) -> None:
+    def _program_loop(self, scenario: Any, name: str, total: int, kind: str = "program") -> None:
         path = f"devices.state.{self.entry.id}.program"
         state = {"name": name, "state": "running", "done": 0, "total": total, "error": None}
 
@@ -654,11 +926,38 @@ class RobotDriverV2(BaseDeviceDriver):
         finally:
             with self._flags_lock:
                 self._busy = False
+                if kind == "return":
+                    if state["state"] == "done":
+                        self.returns_done += 1
+                    else:
+                        self.returns_failed += 1
         self._pub(path, dict(state))
+
+    # ------------------------------------------------------------------ #
+    # Snapshot
+    # ------------------------------------------------------------------ #
+
+    def snapshot(self, data: dict | None = None, quality: str | None = None) -> dict:
+        """Snapshot со счётчиками заданий и возвратов (T3.7 п.11, по образцу v1); ключей ``mode`` / ``draw_*`` нет."""
+        base: dict[str, Any] = {
+            "queue_len": len(self._job_queue),
+            "jobs_sent": self.jobs_sent,
+            "jobs_done": self.jobs_done,
+            "jobs_failed": self.jobs_failed,
+            "returns_done": self.returns_done,
+            "returns_failed": self.returns_failed,
+            "return_queued": len(self._return_queue),
+            "pick_lead_mm": self._pick_lead_mm,
+        }
+        if data:
+            base.update(data)
+        return super().snapshot(base, quality)
 
 
 RobotDriverV2._OPS = {
     "jog_hold": RobotDriverV2._op_jog_hold,
     "jog_release": RobotDriverV2._op_jog_release,
     "get_telemetry": RobotDriverV2._op_get_telemetry,
+    "enqueue_job": RobotDriverV2._op_enqueue_job,
+    "return_job": RobotDriverV2._op_return_job,
 }
