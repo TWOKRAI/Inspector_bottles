@@ -107,8 +107,10 @@ C20, C21 — токена с `/` нет, значит путей нет; C22 —
   `multiprocess_framework/modules/recipe/tests` — timed; `a/tests` — нет.
 - `timed` = флаг `--timed` **или** совпадение по списку. Признак влияет **только** на итоговый класс `medium`
   (после §4); для `light` и `heavy` флаг и список молча без эффекта.
-- Список читается, только когда итоговый класс `medium`. Файла нет или он не читается → такой `medium` timed
-  (fail-closed) и stderr `machine_gate: timed list not found: <путь>`.
+- Список читается **всегда**, когда итоговый класс `medium` (до проверки окна, и при своём окне тоже); при
+  `light` и `heavy` не читается. Сравнение с учётом регистра. Файла нет или он не читается → такой `medium` timed
+  (fail-closed) и stderr `machine_gate: timed list not found: <путь>`. Путь печатается как есть: это конфигурация
+  оператора, не секрет (исключение из правила «текст ошибки не несёт вводимое значение»).
 
 ## 6. Допуск по классам
 
@@ -246,6 +248,7 @@ timed-пути запускается: timed влияет только на `med
 | M15 | гейт: `--timed` действует и на `light` (как timed `medium`) | `test_gate_medium[G12]` |
 | M16 | гейт: совпадение по списку действует и на `light` | `test_gate_medium[T12]` |
 | M17 | гейт: в токене не делается `\` → `/` | `test_gate_medium[T13]` |
+| M18 | гейт: `\r` в конце записи списка не отбрасывается (временный список тестов записан с `\r\n`) | `test_gate_medium` (T1–T4, T8, T9, T13, T14) |
 | J1 | `validate_lock` всегда успешен | `test_malformed_lock_exit_2` (все) |
 | J2 | `grant` не проверяет существующее окно | `test_grant_refuses[second_window]` |
 | J3 | `close` удаляет любое окно | `test_close_refuses_foreign_window` |
@@ -286,6 +289,8 @@ timed-пути запускается: timed влияет только на `med
   `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock` (всегда `MACHINE_LOCK_DIR`) и поставляемый список (строки G, T —
   всегда `MACHINE_GATE_TIMED_LIST`);
 - каждый temp-замок начинается строкой `coordinator: c1 | since x` (иначе Task 1.2 сделает тесты красными);
+- `machine.lock` и `stand.lock` писать с LF (`write_bytes` или `write_text(..., newline="\n")`); временный
+  список `timed.txt` (строки G, T) — с `\r\n` через `write_bytes`: гейт обязан снимать `\r` (инъекция M18);
 - bash — помощник `_git_bash()` из `scripts/atlas/tests/test_lint_brief_1_9c.py:982` **скопировать**, не
   импортировать; он возвращает лаунчер `<Git>/bin/bash.exe` (найден по родителям `git`), а не `System32\bash.exe` (WSL);
 - у каждого вызова гейта и хука — `subprocess.run(..., timeout=60)`; реальные прогоны — через `PY` (`sys.executable`);
