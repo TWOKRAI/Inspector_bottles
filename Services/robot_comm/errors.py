@@ -90,3 +90,44 @@ class RobotSyncError(RobotCommError):
         self.param_id = param_id
         self.expected = expected
         self.actual = actual
+
+
+# --- хранилище данных робота (RobotDataStore, T5.2). Тексты — без входных значений: значения лежат в полях. ---
+
+
+class RobotStoreError(RobotCommError):
+    """Базовая ошибка хранилища данных робота."""
+
+
+class RevisionConflict(RobotStoreError):
+    """Файл на диске изменён с момента чтения: ``base_rev`` не равна текущей ревизии.
+
+    ``current_rev`` — ревизия байтов на диске сейчас (None, если файла нет).
+    """
+
+    def __init__(self, current_rev: str | None) -> None:
+        super().__init__("Данные робота изменены с момента чтения")
+        self.current_rev = current_rev
+
+
+class InvalidStoreKey(RobotStoreError, ValueError):
+    """Недопустимый ключ хранилища: ``device_id``, имя программы или имя документа.
+
+    ``key`` — отвергнутое значение (любого типа).
+    """
+
+    def __init__(self, key: object) -> None:
+        super().__init__("Недопустимое имя данных робота")
+        self.key = key
+
+
+class StoreDocumentInvalid(RobotStoreError):
+    """Файл данных не разбирается как YAML-словарь (или тело записи не словарь/не сериализуется).
+
+    ``rev`` — ревизия байтов повреждённого файла (по ней можно сознательно перезаписать);
+    None — когда отвергнуто тело записи и файл не читался.
+    """
+
+    def __init__(self, rev: str | None) -> None:
+        super().__init__("Файл данных робота не YAML-словарь")
+        self.rev = rev
