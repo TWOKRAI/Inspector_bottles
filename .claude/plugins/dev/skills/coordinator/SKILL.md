@@ -36,8 +36,9 @@ stand: free | <session> measure|functional <SHA> <ports>
 - `<session>` is the session name as `ListAgents` prints it, **without** the `[ref]` suffix (the first line reads
   «This session is inspector-bottles-84 [cfb773] …», or «This process's main session is …» inside a subagent).
 - One `window:` line at most. Kinds: **quiet** — only the holder runs anything (A/B, flaky-test
-  discriminators, timing measurements); **heavy** — the holder runs one heavy process at a time, others may run
-  light work; **stand** — `run_sim_all.ps1` / backend stand, plus the `stand:` line.
+  discriminators, timing measurements); **heavy** — the holder runs one heavy process at a time, others run
+  `light` and non-timed `medium` (§3); **stand** — `run_sim_all.ps1` / backend stand, plus the `stand:` line;
+  others run `light` only.
 - `scripts/stand_gate` in live mode still requires `stand.lock` with its own line — the holder of a `quiet` or
   `stand` window takes `stand.lock` too; the `stand:` line here is the coordinator's record.
 - Rewrite the whole file on every change with the Write tool; never append from two sessions.
@@ -54,25 +55,30 @@ stand: free | <session> measure|functional <SHA> <ports>
 | blind tester / e2e series with a simulator | 5–30 min | sim threads, Modbus TCP |
 | qex full index (ollama embeddings) | 80+ min | GPU 89 %, −1.3 GB RAM |
 | live stand `run_sim_all.ps1` | session-long | several processes |
-| medium (no window; waits only for a foreign `quiet` or `stand` window) | one module's `*/tests` directory, ~2–5 min | — |
-| light (no window needed) | one pytest process on own files, < ~2 min | — |
 
 Admission: no new heavy work while free RAM < ~1.5 GB or CPU > ~70 % (5-second sample of top processes).
-Measure before you open a window; quote the numbers in the signal.
+Measure before you open a window; quote the numbers in the signal. The gate does not measure RAM — the coordinator does.
 
-Classes (decided by `classify` in `scripts/machine_gate.sh`; a session may raise its claim, never lower it): **light** — own
-files, < ~2 min; **medium** — one module's `*/tests` directory, ~2–5 min; **heavy** — longer than ~5 min. `medium` is a
-command class, not a window kind. **timed** is independent of the class (paths in `scripts/machine_gate_timed.txt`:
-`Plugins/sim/`, `Services/robot_comm/`, `Services/line_sim/`, `Services/device_hub/`, `multiprocess_framework/`; a session may
-set it with `--timed` as the first gate argument, never unset it): a timed `medium` is admitted like `heavy` — only in
-its own window, and while that window is open foreign timed `medium` and `heavy` wait, `light` and non-timed `medium` run.
-Non-timed `medium` waits only for a foreign `quiet` or `stand` window. The gate does not measure RAM — the coordinator does
-(admission above). With `machine.lock` present the PreToolUse hook `machine-gate-guard.sh` blocks a test command that
-bypasses the gate and prints the command to run instead.
+Command classes — decided by `classify` in `scripts/machine_gate.sh`; a session may raise its claim, never lower it.
+`medium` is a command class, not a window kind.
+
+| Class | Duration | Typical command | Without its own window |
+|---|---|---|---|
+| light | < ~2 min | one pytest process on own files | runs; waits only for a foreign `quiet` window |
+| medium | ~2–5 min | one module's tests directory: `pytest Services/<pkg>/tests` | runs; waits for a foreign `quiet` or `stand` window |
+| medium, timed | ~2–5 min | the same on a timed path, or `--timed` first | skipped (exit 75) — only in its own window, like heavy |
+| heavy | > ~5 min | the table above; a whole package `pytest Services/<pkg>`, several directories, `-n`, no path, `make gate` / `make test` | skipped (exit 75) — only in its own window |
+
+**timed** — the command touches a path listed in `scripts/machine_gate_timed.txt` (the list lives only there), or the
+session passes `--timed` as the first gate argument; it can be set, never unset, and changes only `medium`. A module's
+`tests` directory is `medium`; the package directory around it is `heavy`. The holder of any window runs every class.
+While `machine.lock` exists the PreToolUse hook `machine-gate-guard.sh` blocks a bare `pytest`, `make gate` or
+`run_sim_all` that bypasses the gate and prints the gated command to run instead.
 
 ## 4. Signals — fixed words, so a session can find them in its inbox
 
 - lane → coordinator: `ready for window: <what>, ~<N> min, <K> process(es), quiet|heavy|stand`
+  (a timed `medium` asks for a `heavy` window; `light` and non-timed `medium` ask for none)
 - coordinator → holder: `window <session> open (<HH:MM>), ~<N> min: <what>; close with numbers`
 - holder → coordinator: `window <session> closed (<HH:MM>): <numbers>`
 - coordinator → waiting lanes: the new order and an ETA, every time the order changes.
