@@ -261,8 +261,11 @@ class RobotDriverV2(BaseDeviceDriver):
         """Транспорт -> probe -> sync_params -> действия при подключении (DESIGN п.3)."""
         if self._activity_alive():
             return self.is_connected
+        was_ready = self._ready
         self._ready = False
         try:
+            if self._transport is not None and self._transport.is_connected and not was_ready:
+                self._transport.disconnect()  # сокет после сбоя мог остаться «подключённым» (см. _link_lost)
             if self._transport is None:
                 from Services.device_hub.transports import build_transport
 
@@ -390,14 +393,19 @@ class RobotDriverV2(BaseDeviceDriver):
             client.kick_heartbeat()  # каждый тик: сторож робота взводится только изменением HB_PC
         except Exception as exc:
             self._record_err()
-            logger.warning(f"робот {self.entry.id!r}: пульс HB_PC не записан: {exc}")
+            logger.warning(f"робот {self.entry.id!r}: пульс HB_PC не записан: {type(exc).__name__}: {exc}")
+            self._link_lost()
+            return self.snapshot(quality="bad")
         tlm: list[int] | None = None
         try:
             t0 = self._clock()
             tlm = self._read_tlm()
             self._record_ok((self._clock() - t0) * 1000)
-        except Exception:
+        except Exception as exc:
             self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: телеметрия не прочитана: {type(exc).__name__}: {exc}")
+            self._link_lost()
+            return self.snapshot(quality="bad")
         if tlm is not None:
             telemetry, free, encoder = _parse_tlm(tlm)
             data = {"telemetry": telemetry, "free": free, "encoder": encoder}
@@ -415,6 +423,22 @@ class RobotDriverV2(BaseDeviceDriver):
             self._record_err()
         quality = "bad" if self._stats["tx_err"] > err_before else "good"
         return self.snapshot(data, quality=quality)
+
+    def _link_lost(self) -> None:
+        """Ошибка ввода-вывода в тике: связь считается оборванной, следующий тик переподключается.
+
+        ``ModbusDevice`` помечает связь оборванной только на ``ModbusDriverError``; сырой ``OSError`` сокета
+        (WinError 10053 после рестарта контроллера) оставляет ``is_connected == True`` навсегда — без этого сброса
+        драйвер писал бы в мёртвый сокет каждый тик и не переподключался. Сокет закрывается, только пока нет живого
+        потока поводка или исполнителя: их запись сама упадёт на том же сокете, тик закроет его после их выхода.
+        """
+        self._ready = False
+        if self._activity_alive() or self._transport is None:
+            return
+        try:
+            self._transport.disconnect()
+        except Exception:
+            self._record_err()
 
     def _resync_maybe(self, client: RobotClientV2) -> None:
         """Метка робота не равна метке ПК -> sync_params снова (§11.4 п.4), не при программе или jog."""
