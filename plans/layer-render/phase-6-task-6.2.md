@@ -3,7 +3,7 @@
 Фаза: [phase-6-train.md](phase-6-train.md) · план: [plan.md](plan.md) (строка Task 6.2) · эталоны: [goldens.md](goldens.md) ·
 прежняя спека: [phase-2.md](phase-2.md) «Task 2.2 — SimCropGenerator» (написана до 2.4a/2.4b/2.5; расхождения сведены ниже)
 
-- **Статус:** [PENDING] (после 2.5, 6.1 — DONE; литерал m4 — `d0cdc9503`) · **Level:** Senior+ · **Assignee:** teamlead <!-- lint-language: allow -->
+- **Статус:** [DONE 2026-10-14] (после 2.5, 6.1 — DONE; литерал m4 — `d0cdc9503`) · **Level:** Senior+ · **Assignee:** teamlead <!-- lint-language: allow -->
 - **Gate:** RED тестера → GREEN; инъекции лида записаны; `reviewer` APPROVED по SHA; рамка-grep — 0
 
 TASK: 6.2 — генератор обучающих сэмплов `LayerSceneGenerator` в `dataset_gen` поверх `layer_render`; продуктовые данные — секция `train` пресета слоёв
@@ -187,7 +187,7 @@ cv2.IMREAD_UNCHANGED)` → `BGR2RGB`/`BGRA2RGBA`; нечитаемый файл 
    `Services/line_sim/tests/test_acceptance_lateral_offset.py:355`, `Plugins/sim/scene_source/tests/test_acceptance_lateral_offset_plugin.py:492-493`,
    `Services/layer_render/tests/test_acceptance_2_4b_factory_preview.py` (A3, `_A3` `:145`), `test_acceptance_2_5_render_scene.py` (A7),
    `Services/dataset_gen/tests/test_engine.py`, `test_symmetry.py`, `test_augment_equivalence.py`, **m4** — `Services/dataset_gen/tests/test_engine_golden_m4.py` (`d0cdc9503`).
-7. **Рамка и граница.** `rg -inE "letter|букв|disk|диск" Services/dataset_gen/core/layer_scene.py` — 0 (не `grep -i`: Git Bash не сворачивает
+7. **Рамка и граница.** `rg -in "letter|букв|disk|диск" Services/dataset_gen/core/layer_scene.py` — exit 1, 0 совпадений (не `rg -E`: в ripgrep это `--encoding`, exit 2; не `grep -i`: Git Bash не сворачивает
    регистр кириллицы); чистый `python -c "import Services.layer_render"` — нет `Services.dataset_gen*`/`Services.line_sim*` в `sys.modules`; `sentrux check .` — чисто.
 
 ## TESTS (через гейт; main `.venv`, `PYTHONPATH` = корень worktree; никакого `uv sync`)
@@ -236,13 +236,18 @@ Bash, запущенный из Python на Windows, стартует WSL, не 
 
 - `to_yaml` не пересчитывает пути `tile:` в `train`: сохранение пресета в другой каталог (редактор Ф5) ломает относительные пути — follow-up.
 - Геометрия `augment` молча игнорируется (докстринг `TrainSection.augment`); ошибку конфигурации пользователь не увидит.
-- `preset.commit` в `scene_source` пишет клиентский `train` без ограды: `confine_preset_paths` смотрит только `catalog_dir` и `layers` —
-  подозрение на путь за пределы корней через `tile:`, не доказано; проверить в 3.2 (`preset_store`).
+- ~~`preset.commit` пишет клиентский `train` без ограды~~ — закрыто ревью ит.1/ит.2: `confine_preset_paths` огораживает
+  `train.background_layers[*].tile` в форме `to_dict()` (`13582a69f`, `23f08eeab`). Новые ключи с путями в `train` — добавлять в `_train_tile_paths` вручную.
 - `train` — изменяемый `dict` внутри frozen `ScenePreset`; `tuple` внутри `train`, заданный из Python, ломает `from_dict(to_dict()) == p`.
 - `train` проверяет только генератор — сим и редактор ошибку в секции не увидят.
 - Эталона «там» через сам `SceneCompositor` нет (граница слоёв); опора — делегирование, доказанное 2.5 A8.
 - `angle_layer` — только слой `class://`; обобщение на любые слои — возможный вопрос владельцу позже.
 - Дефолты `TrainCrop` — литералы `CenterCropRegisters` без теста равенства (`dataset_gen` не импортирует `Plugins`).
+- Предел стороны выреза 4000 px проверяется на сэмпле, не в конструкторе: длинный экспорт 6.3 может упасть посреди прогона.
+- `background_layers_from_config` (`background.py:62`) пишет в ошибку `repr` плохого элемента (эхо ввода) — до 6.2, вне задачи.
+- `DatasetEngine` молча игнорирует override симметрии для неизвестного класса; генератор 6.2 отказывает — поведение расходится.
+- Байтового литерала на выход `LayerSceneGenerator` нет (seed-контракт держат оракулы-реплеи через `factory.render` и независимый оракул угла) — снять в 6.3.
+- Потокобезопасность генератора не обещана; тест двух потоков — smoke, не доказательство.
 
 ## Вопросы владельцу
 
