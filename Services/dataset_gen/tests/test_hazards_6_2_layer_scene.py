@@ -36,12 +36,21 @@ def _square(side: int, index: int) -> np.ndarray:
     return rgba
 
 
-def _build(root: Path, train: dict | None = None, *, names: tuple[str, ...] = ("a", "b", "c")) -> Path:
+def _build(
+    root: Path,
+    train: dict | None = None,
+    *,
+    names: tuple[str, ...] = ("a", "b", "c"),
+    angle_range: tuple[float, float] = (0.0, 360.0),
+    layers: list[dict] | None = None,
+) -> Path:
     """Каталог `root/cat/<имя>/0.png` и пресет-YAML рядом; пути относительные."""
     for index, name in enumerate(names):
         (root / "cat" / name).mkdir(parents=True)
         imwrite_unicode(root / "cat" / name / "0.png", cv2.cvtColor(_square(30, index), cv2.COLOR_RGBA2BGRA))
-    data: dict = {"catalog_dir": "cat", "angle_range_deg": [0.0, 360.0]}
+    data: dict = {"catalog_dir": "cat", "angle_range_deg": list(angle_range)}
+    if layers is not None:
+        data["layers"] = layers
     if train is not None:
         data["train"] = train
     path = root / "preset.yaml"
@@ -269,3 +278,76 @@ def test_parallel_threads_with_own_rng_match_sequential(tmp_path):
     assert not any(thread.is_alive() for thread in threads), "поток не завершился за 60 с"
     assert not errors, errors
     assert got == expected
+
+
+# --------------------------------------------------------------------------- #
+# Ревью 6.2, итерация 1: независимые оракулы и пределы                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_class_index_given_object_angle_is_first_uniform_of_rng(tmp_path):
+    """Заданный `class_index`: первый розыгрыш фабрики — угол (`integers` класса не тратится). Оракул — numpy."""
+    path = _build(tmp_path, {"label": {"angle_layer": None}, "crop": _CROP})
+    gen = LayerSceneGenerator.from_yaml(path)
+    _, label = gen.generate_sample(class_index=1, rng=np.random.default_rng(5))
+    assert label.angle_deg == float(np.random.default_rng(5).uniform(0.0, 360.0))
+
+
+def test_label_angle_exactly_360_wraps_to_zero(tmp_path):
+    """0.3 + (−0.1) + (−0.2) даёт −2.8e−17, а `% 360.0` от него — ровно 360.0; метка обязана быть в [0, 360)."""
+    layer = {
+        "name": "mark",
+        "mode": "augmented",
+        "sprite_source": "class://",
+        "angle_deg": -0.1,
+        "augment": {"angle_deg": [-0.2, -0.2]},
+    }
+    path = _build(tmp_path, {"crop": _CROP}, names=("a",), angle_range=(0.3, 0.3), layers=[layer])
+    _, label = LayerSceneGenerator.from_yaml(path).generate_sample(class_index=0, rng=np.random.default_rng(0))
+    assert 0.0 <= label.angle_deg < 360.0
+    assert label.angle_deg == 0.0
+
+
+@pytest.mark.parametrize(
+    ("bad", "secret"),
+    [
+        ({"lateral_offset_px": [5.0, 1.0]}, "5.0"),
+        ({"crop": {"side_px": 123456}}, "123456"),
+        ({"label": {"angle_layer": 987654}}, "987654"),
+    ],
+    ids=["lateral", "crop-side", "label-type"],
+)
+def test_validation_errors_do_not_echo_input(bad, secret):
+    """`hide_input_in_errors`: в тексте ошибки схемы нет `input_value` и самого входного значения."""
+    with pytest.raises(ValidationError) as info:
+        TrainSection.model_validate(bad)
+    text = str(info.value)
+    assert "input_value" not in text
+    assert secret not in text
+
+
+def test_radius_mode_side_cap_fails_before_allocation(tmp_path):
+    """`size_mode: radius` без потолка: radius_scale 1000 и margin_px 100000 дали бы окно ~230000² (158 ГБ)."""
+    crop = {"size_mode": "radius", "radius_scale": 1000.0, "margin_px": 100000, "output_size": 16}
+    gen = LayerSceneGenerator.from_yaml(_build(tmp_path, {"crop": crop}))
+    with pytest.raises(ValueError, match="train.crop"):
+        gen.generate_sample(class_index=0, rng=np.random.default_rng(0))
+
+
+def test_grayscale_tile_is_rejected_with_field_name(tmp_path):
+    """Серый тайл (ndim 2) — ValueError с `train.background_layers` (как в симе), а не cv2.error из глубины."""
+    imwrite_unicode(tmp_path / "gray.png", np.full((8, 20), 128, dtype=np.uint8))
+    path = _build(tmp_path, {"background_layers": [{"solid": [1, 2, 3]}, {"tile": "gray.png"}]})
+    with pytest.raises(ValueError, match="train.background_layers"):
+        LayerSceneGenerator.from_yaml(path)
+
+
+def test_symmetry_override_for_unknown_class_is_rejected(tmp_path):
+    """Override симметрии для класса не из каталога — ValueError со списком классов каталога, без эха ввода."""
+    path = _build(tmp_path, {"symmetry": {"overrides": {"zzz": "180"}, "auto_detect": False}})
+    with pytest.raises(ValueError) as info:
+        LayerSceneGenerator.from_yaml(path)
+    text = str(info.value)
+    assert "train.symmetry.overrides" in text
+    assert "['a', 'b', 'c']" in text
+    assert "zzz" not in text

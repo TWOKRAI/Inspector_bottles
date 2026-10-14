@@ -55,6 +55,13 @@ from Services.layer_render.preset import CLASS_SPRITE_SOURCE
 __all__ = ["LayerSceneGenerator", "TrainCrop", "TrainLabel", "TrainSection"]
 
 _AUTO = "auto"
+_MAX_SIDE_PX = 4000  # потолок стороны выреза — тот же, что `TrainCrop.side_px` (le=4000)
+
+
+def _wrap360(angle: float) -> float:
+    """Угол в `[0, 360)`: `x % 360.0` у малого отрицательного `x` даёт ровно `360.0` (округление float)."""
+    wrapped = angle % 360.0
+    return 0.0 if wrapped >= 360.0 else wrapped
 
 
 # --------------------------------------------------------------------------- #
@@ -69,7 +76,7 @@ class TrainCrop(BaseModel):
     `center_jitter_px` — `U(−j, j)` по каждой оси; `radius_jitter_frac` — радиус `× (1 + U(−f, f))`.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     size_mode: Literal["radius", "fixed"] = "fixed"
     side_px: int = Field(200, ge=2, le=4000)
@@ -84,7 +91,7 @@ class TrainLabel(BaseModel):
     """Источник угла метки: `"auto"` — слой `class://`, если он есть, иначе угол объекта; `None` — угол объекта;
     иначе — имя слоя `class://` пресета."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     angle_layer: str | None = _AUTO
 
@@ -97,7 +104,7 @@ class TrainSection(BaseModel):
     `rotation/shift/scale/contact_shadow` игнорируется); `defect_probability` перекрывает пресет.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     label: TrainLabel = TrainLabel()
     symmetry: SymmetryConfig = SymmetryConfig()
@@ -177,6 +184,10 @@ class LayerSceneGenerator:
         def load_image(path: str) -> np.ndarray:
             # Нечитаемый файл — исключение imread_unicode наружу, не None: None выкинул бы слой молча.
             image = imread_unicode(preset.resolve_path(path), cv2.IMREAD_UNCHANGED)
+            if image.ndim != 3:  # как сим (scene_source): серый тайл не принимается
+                raise ValueError(
+                    f"train.background_layers: tile должен быть цветным (H, W, 3|4), получено ndim={image.ndim}"
+                )
             code = cv2.COLOR_BGRA2RGBA if image.ndim == 3 and image.shape[2] == 4 else cv2.COLOR_BGR2RGB
             return cv2.cvtColor(image, code)
 
@@ -188,6 +199,11 @@ class LayerSceneGenerator:
         catalog = self._factory.catalog
         assert catalog is not None  # catalog_dir проверен выше
         self._catalog = catalog
+        unknown = set(train.symmetry.overrides) - set(catalog.class_names)
+        if unknown:
+            raise ValueError(
+                f"train.symmetry.overrides: нет такого класса в каталоге (классы каталога: {catalog.class_names})"
+            )
         self._symmetry: dict[int, SymmetryType] = resolve_symmetries(catalog, train.symmetry)
         self._rng = np.random.default_rng(seed)
 
@@ -266,6 +282,10 @@ class LayerSceneGenerator:
             return side_from_radius(radius * (1.0 + k), crop_cfg.radius_scale, crop_cfg.margin_px)
 
         side_max = side_for(frac)
+        if side_max > _MAX_SIDE_PX:  # до выделения окна W×W: radius_scale/margin_px без потолка
+            raise ValueError(
+                f"train.crop: сторона выреза больше {_MAX_SIDE_PX} px — уменьшите radius_scale или margin_px"
+            )
         half = math.ceil(side_max / 2) + math.ceil(lat_hi) + math.ceil(jitter) + 2
         half += half % 2
         w = 2 * half
@@ -315,6 +335,6 @@ class LayerSceneGenerator:
         """Угол метки: объект + слой метки (номинал + выбранный augment слоя), по модулю 360."""
         layer = self._label_layer
         if layer is None:
-            return object_angle % 360.0
+            return _wrap360(object_angle)
         drawn = layer_params.get(layer.name, {}).get("angle_deg", 0.0)
-        return (object_angle + layer.angle_deg + drawn) % 360.0
+        return _wrap360(object_angle + layer.angle_deg + drawn)

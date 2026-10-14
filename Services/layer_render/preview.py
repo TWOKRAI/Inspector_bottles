@@ -15,7 +15,8 @@
 - `render_layout(preset, seed)` — каждый слой пресета отдельной RGBA-картинкой в номинале
   (Task 1.3h-a): `{class_name, canvas_px, layers[{name, png_b64, center_px, size_px, origin_px}]}`.
 - `confine_preset_paths(preset, allowed_roots)` — каждый путь картинки (`catalog_dir`,
-  `sprite_source` кроме `class://`) после `resolve()` лежит в одном из корней, иначе
+  `sprite_source` кроме `class://`, `tile` из `train.background_layers`) после `resolve()`
+  лежит в одном из корней, иначе
   `ValueError(OUTSIDE_ROOTS_MESSAGE)` — ОДИН текст, не зависящий от существования файла.
   Файловую систему картинок не читает (только `Path.resolve()`).
 """
@@ -148,10 +149,16 @@ def render_layout(preset: ScenePreset, seed: int) -> dict:
 
 def confine_preset_paths(preset: ScenePreset, allowed_roots: Iterable[str | Path]) -> None:
     """Все пути картинок пресета — внутри `allowed_roots` (после `resolve()` с обеих сторон),
-    иначе `ValueError(OUTSIDE_ROOTS_MESSAGE)`; петля симлинков — тот же отказ."""
+    иначе `ValueError(OUTSIDE_ROOTS_MESSAGE)`; петля симлинков — тот же отказ.
+
+    Пути: `catalog_dir`, `layers[*].sprite_source` (кроме `class://`) и (Task 6.2) строки `tile` из
+    `train.background_layers` — их читает генератор обучения (схема 1.1: путь несёт только ключ `tile`).
+    Элементы `background_layers` не-словари и не-строковые `tile` пропускаются: их отвергает схема
+    `TrainSection`/`background_layers_from_config` до чтения файлов."""
     roots = [Path(root).resolve() for root in allowed_roots]
     values = [preset.catalog_dir] if preset.catalog_dir is not None else []
     values += [layer.sprite_source for layer in preset.layers if layer.sprite_source != CLASS_SPRITE_SOURCE]
+    values += _train_tile_paths(preset.train)
     for value in values:
         try:
             resolved = Path(preset.resolve_path(value)).resolve()
@@ -159,6 +166,16 @@ def confine_preset_paths(preset: ScenePreset, allowed_roots: Iterable[str | Path
             raise ValueError(OUTSIDE_ROOTS_MESSAGE) from None
         if not any(resolved.is_relative_to(root) for root in roots):
             raise ValueError(OUTSIDE_ROOTS_MESSAGE)
+
+
+def _train_tile_paths(train: object) -> list[str]:
+    """Строки `tile` из `train.background_layers` (секция непрозрачна для `layer_render` — читается осторожно)."""
+    if not isinstance(train, dict):
+        return []
+    items = train.get("background_layers")
+    if not isinstance(items, list):
+        return []
+    return [item["tile"] for item in items if isinstance(item, dict) and isinstance(item.get("tile"), str)]
 
 
 def _cached_factory(preset: ScenePreset) -> ObjectFactory:
