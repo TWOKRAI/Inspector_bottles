@@ -120,7 +120,7 @@ def _dump(body: object) -> bytes:
         raise StoreDocumentInvalid(None)
     try:
         return yaml.safe_dump(body, sort_keys=False, allow_unicode=True).encode("utf-8")
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, RecursionError) as exc:
         raise StoreDocumentInvalid(None) from exc
 
 
@@ -204,7 +204,7 @@ class RobotDataStore:
         rev = compute_rev(raw)
         try:
             body = yaml.safe_load(raw)
-        except (yaml.YAMLError, ValueError) as exc:
+        except Exception as exc:  # разбор в памяти, без ввода-вывода: PyYAML на мусоре бросает не только YAMLError
             raise StoreDocumentInvalid(rev) from exc
         if not isinstance(body, dict):
             raise StoreDocumentInvalid(rev)

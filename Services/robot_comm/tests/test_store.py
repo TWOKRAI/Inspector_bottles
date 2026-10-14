@@ -278,6 +278,14 @@ def test_relative_root_round_trip(tmp_path: Path, monkeypatch) -> None:
         (b": : :", "8b6a55b9c8a0694d26296a5af3555178ab178b6492112124c8139e23193227b6"),
         (b"- 1\n", "0b0d3d96d1b0b445467027cbb24e4f32df0ccca4ce1fda21fe57eb76dbaee808"),
         (b"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+        # PyYAML на мусоре бросает не только YAMLError: ValueError, KeyError, AttributeError, IndexError, RecursionError
+        (b"d: 2020-99-99\n", "764d2ff053a2f865505d5544c4bde6b3d083a01df24a16cbf3e31aaae8a5e9b4"),
+        (b"v: !!bool foo\n", "4ac6377cb125c8b33c3240fc921514ddf1b7c0cbe1fad71998088ad25dc6b258"),
+        (b"v: !!timestamp foo\n", "4a79dc9033953c8c3be28ed9d73e2b525d585b98addd07486c7e2e7e75239ac4"),
+        (b"v: !!int ''\n", "42cd3ed3ea52b828e1f930d4e86881d9d307ff3060dbc5532304af391678c0f2"),
+        pytest.param(
+            b"[" * 3000, "351e0404aa13cc3dcc2a7ae33dfd0a7a21fb605b6029d48217b150c04d855b6d", id="deep-flow-seq"
+        ),
     ],
 )
 def test_broken_file_gives_invalid_with_rev_and_can_be_overwritten(rds, root: Path, raw: bytes, rev: str) -> None:
@@ -322,6 +330,39 @@ def test_bad_body_does_not_touch_existing_file(rds, root: Path) -> None:
         _within(5.0, rds.write, "r1", "params", {"x": object()}, base_rev=r0)
     assert (root / "r1" / "params.yaml").read_bytes() == b"v: 1\n"
     assert [p.name for p in (root / "r1").iterdir()] == ["params.yaml"]
+
+
+def test_too_deeply_nested_body_rejected_without_disk(rds, tmp_path: Path) -> None:
+    body: dict = {}
+    cursor = body
+    for _ in range(600):
+        cursor["k"] = {}
+        cursor = cursor["k"]
+    with pytest.raises(errors.StoreDocumentInvalid) as ei:
+        _within(5.0, rds.write, "r1", "params", body, base_rev=None)
+    assert ei.value.rev is None
+    assert list(tmp_path.iterdir()) == []
+
+
+class _Boom(BaseException):
+    """Не ``Exception``: проверяет, что tmp убирается и при исключении мимо ``except Exception``."""
+
+
+def test_base_exception_in_replace_removes_tmp_and_keeps_bytes(rds, root: Path, monkeypatch) -> None:
+    r0 = rds.write("r1", "params", {"v": 1}, base_rev=None)
+    boom = _Boom("injected")
+
+    def fake(src: str, dst: str) -> None:
+        raise boom
+
+    monkeypatch.setattr(store, "_replace_file", fake)
+    with pytest.raises(_Boom) as ei:
+        _within(5.0, rds.write, "r1", "params", {"v": 2}, base_rev=r0)
+    assert ei.value is boom
+    assert [p.name for p in (root / "r1").iterdir() if p.name.endswith(".tmp")] == []
+    assert (root / "r1" / "params.yaml").read_bytes() == b"v: 1\n"
+    monkeypatch.undo()
+    assert _within(2.0, rds.read, "r1", "params").rev == r0  # замок отпущен
 
 
 # ---------------------------------------------------------------------------
