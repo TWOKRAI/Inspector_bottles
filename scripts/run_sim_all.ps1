@@ -20,7 +20,7 @@
 #  - окно GUI даёт только вход multiprocess_prototype/frontend/run.py; вход
 #    multiprocess_prototype/run.py — бэкенд без окна (урок памяти «GUI-стенд боевым входом»);
 #  - окно робота v2 — отдельный симулятор в своём процессе; робот линии (Modbus 5021),
-#    которым управляет прототип, пока на протоколе v1 и окна не имеет (связка v2 — T3.5);
+#    которым управляет прототип, на протоколе v2 (T3.7), но в этом окне не виден (T3.8);
 #  - запуск и выбор рецепта в GUI записывают рецепт в multiprocess_prototype/app.yaml —
 #    вернуть: git checkout -- multiprocess_prototype/app.yaml
 param(
