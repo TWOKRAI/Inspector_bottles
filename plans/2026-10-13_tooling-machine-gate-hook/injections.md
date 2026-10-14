@@ -1,4 +1,4 @@
-# Инъекции Task 1.1 — план [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md)
+# Инъекции Task 1.1 и 1.2 — план [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md)
 
 > Вынесено из classification.md §8 (бюджет 32 КБ на файл). Предсказания пишутся ДО прогона.
 
@@ -36,9 +36,22 @@
 | M18 | гейт: `\r` в конце записи списка не отбрасывается (временный список тестов записан с `\r\n`) | `test_gate_medium` (T1–T4, T8, T9, T13, T14) |
 | J1 | `validate_lock` всегда успешен | `test_malformed_lock_exit_2` (все) |
 | J2 | `grant` не проверяет существующее окно | `test_grant_refuses[second_window]` |
-| J3 | `close` удаляет любое окно | `test_close_refuses_foreign_window` |
+| J3 | `close` удаляет любое окно | `test_close_refuses[foreign_window]` |
 | J4 | `grant` не удаляет `waiting:` своей сессии | `test_grant_writes_window_and_drops_waiting` |
-| J5 | `validate_lock` не отбрасывает `\r` | `test_crlf_lock_is_valid` |
+| J5 | `validate_lock` и перезапись не снимают `\r` | валидатор на bash `read`: `test_live_sample_lock_is_valid[crlf]`, `test_grant_writes_window_and_drops_waiting[crlf]`; на awk — эквивалентный мутант на Git Bash (gawk 5.0.0 снимает `\r` сам: длина 25 против 26 с `BINMODE=3`) — записать как необнаруженную на Windows |
+| J6 | `validate_lock` вызывается только для `heavy|light` (режим `medium` замок не проверяет) | `test_malformed_lock_exit_2` (режимы `medium`, `--timed medium`) |
+| J7 | `kind` окна принимает и `medium` (в `grant` и в `validate_lock`) | `test_grant_refuses[medium_kind]`, `test_malformed_lock_exit_2` (замок с `medium`) |
+| J8 | `close` не сверяет имя координатора | `test_close_refuses[non_coordinator]` |
+| J9 | запись не атомарная: файл открывается на запись до проверок (`: >machine.lock` в начале `grant`) | `test_grant_refuses` (все параметры: файл обрезан или создан) |
+| J10 | `grant` не сверяет имя координатора | `test_grant_refuses` (non_coordinator, coordinator_prefix, coordinator_regex) |
+| J11 | имя координатора сравнивается регуляркой (`grep "^coordinator: $1 |"`) | `test_grant_refuses[coordinator_regex]` |
+| J12 | строки сессии ищутся по префиксу поля 1 (`window: s2*`, `waiting: s2*`) | `test_grant_writes_window_and_drops_waiting` (пропала `waiting: s22`), `test_close_refuses[foreign_window]` |
+| J13 | код `mv` не проверяется, tmp не удаляется | `test_grant_refuses[busy]` (только Windows) |
+| J14 | запись прямо в `machine.lock` после всех проверок (без tmp и `mv`) | `test_grant_writes_window_and_drops_waiting` и `test_close_removes_own_window` (`st_ino` не изменился) |
+| J15 | `set -C` убран | `test_grant_refuses[tmp_exists]` |
+| J16 | валидатор теряет последнюю строку без `\n` | `test_live_sample_lock_is_valid[no_final_newline]` — если валидатор на bash `read`; на awk — неприменимо |
+| J17 | `status` печатает замок через `cat` | `test_status_prints_lock_and_metrics[no_final_newline]` |
+| J18 | `status` не снимает `\r` с вывода powershell | `test_status_prints_lock_and_metrics` (все, регулярки с `$`), если два значения идут одной строкой через `read`; иначе эквивалентный |
 
 Стражи `test_gate_call_form_compat` (K1–K7) и `test_gate_light_file_runs_without_window` зелёные при каждой
 инъекции, кроме M7 (K6). I1 включает `test_hook_allows[no_lock]`: без замка инвертированный хук идёт дальше и
@@ -98,3 +111,33 @@ Q10 0/0, Q11 4/4, Q12 1/1, Q13 1/1, Q14 1/1, Q15 1/1 (первый запуск 
 предсказано: эквивалентный мутант (слой `strip_lead` дублирует пропуск слов в `classify_segment`). **Q10** — 0/0, как
 предсказано: удаление префильтра сегментов не ловится; тест скорости стережёт итоговую скорость, а не сам префильтр
 (основную стоимость убрала замена подоболочки на переменную `CLS`) — необнаруженная поломка записана, теста под неё нет.
+
+## Task 1.2: факт J1–J18 (2026-10-14, гейт на 80181606c)
+
+Предсказания — в драйвере `inject_j.py` лида, записаны ДО прогона; мутации — точная замена строк `scripts/machine_gate.sh`
+(count == 1), прогон `test_machine_gate_lock.py` + `test_machine_gate_lock_hazards.py` через внешний гейт `light`, откат байтов
+(после матрицы `git status` чист). База: **125 passed**. Пойманы **18 из 18**; ни одного «предсказано красным, а зелёное».
+
+| J | красных | вердикт |
+|---|---|---|
+| J1 | 70 | совпало |
+| J2 | 3 | совпало (`test_concurrent_grants_exactly_one_wins` зелёный — был в «вероятных») |
+| J3 | 2 | совпало |
+| J4 | 9 | красное сверх предсказания: +7 hazard (база R1 с `waiting: s2`, байты после `grant` сравниваются литералом) — поломка поймана |
+| J5 | 7 | красное сверх: +1 `test_close_keeps_other_sessions_waiting_and_blank_lines` (CRLF-замок, пустая строка `` → malformed) — поймана |
+| J6 | 20 | совпало: только вызовы `medium` и `--timed medium` |
+| J7 | 7 | совпало: `medium_kind` + 6 вызовов на замке с `window: … | medium` |
+| J8 | 1 | совпало |
+| J9 | 65 | совпало; `few_args` зелёный (usage до обрезания), как предсказано |
+| J10 | 3 | совпало |
+| J11 | 2 | совпало |
+| J12 | 10 | красное сверх: +7 hazard (те же, что у J4: снят и `waiting: s22`) — поймана |
+| J13 | 1 | совпало (`busy`, только Windows) |
+| J14 | 4 | совпало (`st_ino` и `busy`) |
+| J15 | 2 | совпало |
+| J16 | 1 | совпало: ловит только `status[no_final_newline]`; `live_sample[no_final_newline]` зелёный, как предсказано (теряется `stand: free`, замок остаётся годным) |
+| J17 | 2 | совпало |
+| J18 | 5 | совпало |
+
+Расхождения всех трёх MISMATCH — в сторону «поймано больше»: предсказание писалось по тестам тестера, hazard-тесты автора
+не читались; ошибка лида в полноте предсказания, не в тестах.

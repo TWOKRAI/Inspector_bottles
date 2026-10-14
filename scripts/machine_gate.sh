@@ -3,6 +3,9 @@
 #
 #   bash scripts/machine_gate.sh [--timed] heavy|medium|light <session> <команда...>
 #   bash scripts/machine_gate.sh classify <строка команды>
+#   bash scripts/machine_gate.sh grant <coordinator> <session> quiet|heavy|stand <minutes> <что...>
+#   bash scripts/machine_gate.sh close <coordinator> <session>
+#   bash scripts/machine_gate.sh status
 #
 # heavy  — полный прогон, матрица инъекций, серия e2e, стенд, индексация qex:
 #          только если строка `window:` в machine.lock — у этой сессии.
@@ -15,6 +18,11 @@
 # `measure` в stand.lock не запускать ничего.
 # classify — печатает `<kind>\t<reason>\t<сегмент>` по каждому тестовому сегменту строки
 # (plans/2026-10-13_tooling-machine-gate-hook/classification.md §1–§3); код выхода всегда 0.
+#
+# grant / close — открывают и закрывают окно в machine.lock (проверка формата, запись через tmp + mv);
+# status — печатает замок, свободную память и загрузку процессора
+# (plans/2026-10-13_tooling-machine-gate-hook/task-1.2.md). Битый machine.lock — код 2 во всех режимах:
+# команда не запускается (битый замок не превращается в тихий пропуск 75).
 #
 # Код выхода: код команды; 75 — пропущено гейтом (не путать с красным прогоном).
 set -u
@@ -287,12 +295,252 @@ rank() {
     case $1 in light) echo 1 ;; medium) echo 2 ;; heavy) echo 3 ;; *) echo 0 ;; esac
 }
 
+# --- machine.lock: чтение, проверка формата, grant / close / status (task-1.2.md) -----------------------------------
+
+# Строки замка без завершающего \r (последняя строка без \n — тоже строка) -> LOCK_LINES. Читает bash, а не awk:
+# gawk на Windows снимает \r сам, `read` — нет, поэтому \r снимается здесь явно.
+read_lock() {
+    LOCK_LINES=()
+    [ -f "$1" ] && [ -r "$1" ] || return 1
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%$'\r'}
+        LOCK_LINES+=("$line")
+    done 2>/dev/null <"$1"
+    return 0
+}
+
+# Имя = [A-Za-z0-9._-]+ (перечислено явно: диапазоны букв зависят от локали).
+is_name() {
+    [ -n "$1" ] && [[ $1 != *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]* ]]
+}
+
+is_window_kind() {
+    case $1 in quiet | heavy | stand) return 0 ;; esac
+    return 1
+}
+
+# Строка -> FIELDS (разделитель « | », без перекрытий слева направо).
+split_fields() {
+    local rest=$1
+    FIELDS=()
+    while [[ $rest == *' | '* ]]; do
+        FIELDS+=("${rest%%' | '*}")
+        rest=${rest#*' | '}
+    done
+    FIELDS+=("$rest")
+}
+
+# Грамматика замка (task-1.2.md). Читает файл в LOCK_LINES; 0 — годен (LOCK_COORD = имя координатора),
+# 2 — текст отказа в LOCK_ERR (одна строка, без перевода строки в конце).
+validate_lock() {
+    LOCK_ERR='' LOCK_COORD=''
+    if ! read_lock "$1"; then
+        LOCK_ERR='machine_gate: cannot read machine.lock'
+        return 2
+    fi
+    local line n=0 coords=0 windows=0 ok name
+    for line in "${LOCK_LINES[@]}"; do
+        n=$((n + 1))
+        [ -z "$line" ] && continue
+        ok=0
+        split_fields "$line"
+        case $line in
+            'coordinator: '*)
+                name=${FIELDS[0]#coordinator: }
+                if [ "${#FIELDS[@]}" = 2 ] && is_name "$name" && [[ ${FIELDS[1]} == 'since '* ]] && [ "$coords" = 0 ]; then
+                    ok=1
+                    coords=1
+                    LOCK_COORD=$name
+                fi
+                ;;
+            'window: '*)
+                name=${FIELDS[0]#window: }
+                if [ "${#FIELDS[@]}" = 4 ] && is_name "$name" && is_window_kind "${FIELDS[1]}" &&
+                    [[ ${FIELDS[3]} == 'until ~'* ]] && [ "$windows" = 0 ]; then
+                    ok=1
+                    windows=1
+                fi
+                ;;
+            'waiting: '*)
+                name=${FIELDS[0]#waiting: }
+                if [ "${#FIELDS[@]}" = 4 ] && is_name "$name" && is_window_kind "${FIELDS[1]}"; then ok=1; fi
+                ;;
+            'stand: '?*) ok=1 ;;
+        esac
+        if [ "$ok" = 0 ]; then
+            LOCK_ERR="machine_gate: malformed machine.lock:$n: $line"
+            return 2
+        fi
+    done
+    if [ "$coords" = 0 ]; then
+        LOCK_ERR='machine_gate: malformed machine.lock: no coordinator line'
+        return 2
+    fi
+    return 0
+}
+
+refuse() {
+    echo "machine_gate: $1" >&2
+    exit 2
+}
+
+# Проверки 3..9 списка отказов grant/close (task-1.2.md); перечитывает замок. 0 — можно писать, 2 — отказ напечатан.
+# Читает переменные cmd_edit: op, coordinator, session, wkind, minutes, what.
+edit_checks() {
+    local line f has_window=0 has_own=0 minutes_ok=0
+    if ! validate_lock "$machine_lock"; then
+        printf '%s\n' "$LOCK_ERR" >&2
+        return 2
+    fi
+    if [ "$LOCK_COORD" != "$coordinator" ]; then
+        echo "machine_gate: not the coordinator" >&2
+        return 2
+    fi
+    if ! is_name "$session"; then
+        echo "machine_gate: bad session name" >&2
+        return 2
+    fi
+    if [ "$op" = grant ]; then
+        if ! is_window_kind "$wkind"; then
+            echo "machine_gate: window kind must be quiet, heavy or stand" >&2
+            return 2
+        fi
+        case $minutes in
+            '' | *[!0-9]* | 0*) ;;
+            *) [ "${#minutes}" -le 3 ] && [ "$minutes" -le 600 ] && minutes_ok=1 ;;
+        esac
+        if [ "$minutes_ok" != 1 ]; then
+            echo "machine_gate: minutes must be 1..600" >&2
+            return 2
+        fi
+        case $what in
+            *'|'* | *$'\r'* | *$'\n'*)
+                echo "machine_gate: what must not contain | or line breaks" >&2
+                return 2
+                ;;
+        esac
+    fi
+    for line in "${LOCK_LINES[@]}"; do
+        f=${line%%' | '*}
+        case $f in 'window: '*) has_window=1 ;; esac
+        [ "$f" = "window: $session" ] && has_own=1
+    done
+    if [ "$op" = grant ] && [ "$has_window" = 1 ]; then
+        echo "machine_gate: a window is already open" >&2
+        return 2
+    fi
+    if [ "$op" = close ] && [ "$has_own" = 0 ]; then
+        echo "machine_gate: no window of this session" >&2
+        return 2
+    fi
+    return 0
+}
+
+# Новое содержимое замка на stdout: LF, у каждой строки снят \r, \n после последней.
+edit_write() {
+    local line f
+    for line in "${LOCK_LINES[@]}"; do
+        f=${line%%' | '*}
+        if [ "$op" = grant ]; then
+            [ "$f" = "waiting: $session" ] && continue
+        else
+            [ "$f" = "window: $session" ] && continue
+        fi
+        printf '%s\n' "$line" || return 1
+        if [ "$op" = grant ]; then
+            case $line in
+                'coordinator: '*)
+                    printf 'window: %s | %s | %s | until ~%s\n' "$session" "$wkind" "$what" "$until_hhmm" || return 1
+                    ;;
+            esac
+        fi
+    done
+    return 0
+}
+
+# grant | close: $1 = grant|close, дальше аргументы подкоманды.
+cmd_edit() {
+    local op=$1 coordinator session wkind='' minutes='' what='' until_hhmm='' tmp
+    if [ "$op" = grant ]; then
+        if [ $# -lt 6 ]; then
+            echo "usage: machine_gate.sh grant <coordinator> <session> quiet|heavy|stand <minutes> <what...>" >&2
+            exit 2
+        fi
+        coordinator=$2 session=$3 wkind=$4 minutes=$5
+        shift 5
+        what=$*
+    else
+        if [ $# -ne 3 ]; then
+            echo "usage: machine_gate.sh close <coordinator> <session>" >&2
+            exit 2
+        fi
+        coordinator=$2 session=$3
+    fi
+    [ -e "$machine_lock" ] || refuse "no machine.lock"
+    edit_checks || exit 2
+    if [ "$op" = grant ]; then until_hhmm=$(date -d "+$minutes minutes" +%H:%M); fi
+
+    # Взаимное исключение: machine.lock.tmp создаётся под set -C (O_EXCL); чужой tmp не трогаем.
+    tmp=$lock_dir/machine.lock.tmp
+    ( set -C; : >"$tmp" ) >/dev/null 2>&1 ||
+        refuse "machine.lock.tmp exists (another grant/close running, or a leftover)"
+    # Пока tmp не был захвачен, другой grant/close мог успеть заменить замок: проверить заново под защитой tmp.
+    if ! edit_checks; then
+        rm -f "$tmp"
+        exit 2
+    fi
+    if ! edit_write >"$tmp" 2>/dev/null || ! mv -f "$tmp" "$machine_lock" </dev/null >/dev/null 2>&1; then
+        rm -f "$tmp"
+        refuse "cannot replace machine.lock (busy), retry"
+    fi
+    exit 0
+}
+
+# status: замок + свободная память + загрузка процессора. Одна команда powershell; запрос LoadPercentage сам
+# меряет ~1 с, пять подряд — выборка на 5 с без Start-Sleep. Пустые ($null) замеры пропускаются.
+read -r -d '' PS_STATUS <<'PS'
+$ErrorActionPreference = 'Stop'; try { 'ram_free_mb: ' + [int][math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024) } catch { 'ram_free_mb: n/a' }; $s = @(); for ($i = 0; $i -lt 5; $i++) { try { $v = @((Get-CimInstance Win32_Processor).LoadPercentage | Where-Object { $_ -ne $null }); if ($v.Count -gt 0) { $s += ($v | Measure-Object -Average).Average } } catch { } }; if ($s.Count -gt 0) { 'cpu_load_pct: ' + [int][math]::Round(($s | Measure-Object -Average).Average) } else { 'cpu_load_pct: n/a' }
+PS
+
+cmd_status() {
+    local line out ram='n/a' cpu='n/a' v rc=0
+    if [ -e "$machine_lock" ]; then
+        validate_lock "$machine_lock" || rc=2
+        for line in "${LOCK_LINES[@]}"; do printf '%s\n' "$line"; done
+    else
+        echo "machine.lock: none"
+    fi
+    out=$(timeout 20 powershell -NoProfile -Command "$PS_STATUS" 2>/dev/null </dev/null | tr -d '\r')
+    while IFS= read -r line; do
+        v=${line#*: }
+        case $v in '' | *[!0-9]*) continue ;; esac
+        case $line in
+            'ram_free_mb: '*) ram=$v ;;
+            'cpu_load_pct: '*) cpu=$v ;;
+        esac
+    done <<<"$out"
+    echo "ram_free_mb: $ram"
+    echo "cpu_load_pct: $cpu"
+    if [ "$rc" != 0 ]; then printf '%s\n' "$LOCK_ERR" >&2; fi
+    exit "$rc"
+}
+
 set -f # токены команды режутся по пробелам без раскрытия шаблонов
 if [ "${1:-}" = classify ]; then
     shift
     classify_cmd "$*"
     exit 0
 fi
+
+lock_dir=${MACHINE_LOCK_DIR:-/d/PROJECT_INNOTECH/Inspector_vision}
+machine_lock=$lock_dir/machine.lock
+stand_lock=$lock_dir/stand.lock
+
+case ${1:-} in
+    grant | close) cmd_edit "$@" ;;
+    status) cmd_status ;;
+esac
 
 timed_flag=0
 if [ "${1:-}" = --timed ]; then
@@ -308,16 +556,18 @@ kind=$1
 session=$2
 shift 2
 
-lock_dir=${MACHINE_LOCK_DIR:-/d/PROJECT_INNOTECH/Inspector_vision}
-machine_lock=$lock_dir/machine.lock
-stand_lock=$lock_dir/stand.lock
-
 skip() {
     echo "$1 — skipped (machine_gate: $kind, $session)"
     exit 75
 }
 
 case $kind in heavy | medium | light) ;; *) echo "kind must be heavy, medium or light" >&2; exit 2 ;; esac
+
+# Битый machine.lock — отказ до классификации и запуска (код 2, одна строка в stderr, без reclassified).
+if [ -e "$machine_lock" ] && ! validate_lock "$machine_lock"; then
+    printf '%s\n' "$LOCK_ERR" >&2
+    exit 2
+fi
 
 # Реклассификация: только вверх, строка с наибольшим рангом (при равенстве — первая).
 claim=$kind
