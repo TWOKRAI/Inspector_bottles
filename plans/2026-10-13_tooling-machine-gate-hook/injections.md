@@ -1,4 +1,4 @@
-# Инъекции Task 1.1 — план [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md)
+# Инъекции Task 1.1 и 1.2 — план [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md)
 
 > Вынесено из classification.md §8 (бюджет 32 КБ на файл). Предсказания пишутся ДО прогона.
 

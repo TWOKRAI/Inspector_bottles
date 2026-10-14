@@ -1,7 +1,7 @@
 # Task 1.2 — `grant` / `close` / `status` и проверка формата замка — план [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md)
 
 Статус: [PENDING]. Ветка `feat/tooling-machine-gate-lock` (от `main` после 1.1). Ревью спеки: reviewer `a9c5a895d75a1c08c`,
-итерация 1 — CHANGES REQUESTED (14 пунктов), все приняты в этот текст.
+итерация 1 — CHANGES REQUESTED (14 пунктов), все приняты в этот текст; итерация 2 — **APPROVED** (a92680dd1), 6 мелких правок внесены.
 
 - **Level:** Middle · **Assignee:** `developer` (Sonnet); тесты — `tester` вслепую до кода
 - **Module contract:** n/a
@@ -25,7 +25,7 @@
   допустима; строка из пробелов и BOM в начале файла — ошибка своей строки.
 - Разделитель полей ` | ` (пробел, черта, пробел); `<name>` = `[A-Za-z0-9._-]+` (суффикс ` [ref]` — ошибка);
   `<kind>` ∈ {`quiet`,`heavy`,`stand`}. `medium` — класс команды, не вид окна.
-- Свободный текст (`<что>`, `<текст>`) — любые символы, кроме ` | `: скобки, запятые, `~`, `—`, апостроф, `/`, `:` допустимы.
+- Свободный текст (`<что>`, `<текст>`) — любые символы, кроме ` | `: скобки, запятые, `~`, `—`, апостроф, `/`, `:` допустимы; пустой текст тоже допустим (`grant … 20 ""` пишет поле 3 пустым).
   - `coordinator: <name> | since <текст>` — ровно 2 поля, ровно одна такая строка;
   - `window: <name> | <kind> | <что> | until ~<текст>` — 4 поля, не больше одной строки;
   - `waiting: <name> | <kind> | <что> | <текст>` — 4 поля, сколько угодно;
@@ -81,8 +81,13 @@
 
 красный прогон → `validate_lock` → вызов во всех режимах → `grant`/`close` → `status` → указатель в SKILL.md: в
 `.claude/plugins/dev/skills/coordinator/SKILL.md` §2 строку
-`- Rewrite the whole file on every change with the Write tool; never append from two sessions.` заменить целиком на
-`- Rewrite the whole file on every change with the Write tool, or open and close a window with `machine_gate.sh grant|close <coordinator> …` (checks the format, writes atomically); never append from two sessions. `machine_gate.sh status` prints the lock with free RAM and CPU.`
+```
+- Rewrite the whole file on every change with the Write tool; never append from two sessions.
+```
+заменить целиком на
+```
+- Rewrite the whole file on every change with the Write tool, or open and close a window with `machine_gate.sh grant|close <coordinator> …` (checks the format, writes atomically); never append from two sessions. `machine_gate.sh status` prints the lock with free RAM and CPU.
+```
 → побайтная копия в `.claude/skills/coordinator/SKILL.md` → `cmp` → `bash -n`.
 
 ## Acceptance criteria
@@ -128,7 +133,8 @@ stderr `machine_gate: malformed machine.lock:1: windw: x`, `RAN` нет, `2`.
 3. `test_close_removes_own_window`: замок `coordinator: c1 | since x` / `window: s2 | heavy | x | until ~23:59` / пустая строка /
    `waiting: s3 | heavy | b | ~80 min` / `stand: free`; `close c1 s2` → код 0, байты ровно
    `coordinator: c1 | since x\n\nwaiting: s3 | heavy | b | ~80 min\nstand: free\n`, `st_ino` изменился, tmp нет.
-4. `test_close_refuses`: `foreign_window` (окно у `s22`, `close c1 s2`) → `no window of this session`; `no_window` → то же;
+4. `test_close_refuses` — база: R1 + `window: <s> | heavy | x | until ~23:59` второй строкой (`<s>` = `s22` / `s2`); `no_window` — R1.
+   `foreign_window` (окно у `s22`, `close c1 s2`) → `no window of this session`; `no_window` → то же;
    `non_coordinator` (`close s9 s2` при окне `s2`) → `not the coordinator`; код 2, stderr ровно строка, байты прежние.
 5. `test_malformed_lock_exit_2` — декартово произведение 10 замков × 6 вызовов (60 случаев, ~0,1 с на вызов гейта).
    Замок = `coordinator: c1 | since x` + строка-дефект второй строкой (кроме `no_coordinator`):
@@ -175,3 +181,5 @@ stderr `machine_gate: malformed machine.lock:1: windw: x`, `RAN` нет, `2`.
 гейта — с `MACHINE_LOCK_DIR=tmp_path.as_posix()`; `no_lock` — пустой подкаталог (без env тест читает и может переписать живой
 замок); `busy` — `pytest.mark.skipif(sys.platform != "win32")` (на POSIX `rename` поверх открытого файла проходит);
 `status` — ~6 с на вызов (powershell); реализацию гейта не читать; тестер перечисляет файлы, не каталог.
+Разработчику: сообщения bash (noclobber `cannot overwrite existing file`) и `mv` — в `/dev/null`; в stderr только строка
+отказа (иначе «stderr ровно одна строка» в `tmp_exists` и `busy` красный).

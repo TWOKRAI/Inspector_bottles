@@ -3,7 +3,7 @@
 - **Slug:** tooling-machine-gate-hook
 - **Дата:** 2026-10-13
 - **Статус:** DRAFT
-- **Ветка:** `feat/tooling-machine-gate-hook`
+- **Ветка:** `feat/tooling-machine-gate-hook` (Task 1.1); Task 1.2 — `feat/tooling-machine-gate-lock`
 - **Plan review:** —
 - **Откуда:** коммит `9173bf1c4` (skill `coordinator`, `scripts/machine_gate.sh`, `project-rules` §8,
   `.claude/CLAUDE.md` «Shared machine»); оценка ревьюера, принятая владельцем («полезно и нужно»):
@@ -128,13 +128,13 @@
 
 ## Пайплайн (по `.claude/CLAUDE.md` «Task launch convention»; здесь — только специфика)
 
-Режим песочницы A: один писатель, ветка `feat/tooling-machine-gate-hook`, задачи строго по очереди (1.1 → 1.2).
+Режим песочницы A: один писатель, ветка `feat/tooling-machine-gate-hook`, задачи строго по очереди (1.1 → 1.2); Task 1.2 — ветка `feat/tooling-machine-gate-lock`.
 Все прогоны — через гейт `light <session>` с перечислением файлов, например:
 `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" light <session> python -m pytest -q --tb=short scripts/machine_gate_tests/test_machine_gate_hook.py`.
 Имя `<session>` лид даёт в каждом брифе.
 
 1. **Ревьюер плана** (`reviewer`, `MODE: plan`, opus) → владелец: approve и ответы на вопросы ниже.
-2. **Тестер вслепую до кода** (`tester`, sonnet) — по одной задаче. Читать можно: этот план, classification.md,
+2. **Тестер вслепую до кода** (`tester`, sonnet) — по одной задаче. Читать можно: этот план, classification.md, `2026-10-13_tooling-machine-gate-hook/task-1.2.md`,
    `scripts/atlas/tests/test_lint_brief_1_9c.py` (только `_git_bash`), skill `coordinator` §2.
    **Запрещено читать:** `scripts/machine_gate.sh`, `.claude/plugins/dev/hooks/machine-gate-guard.sh`,
    `git log -p`/`git show` по этим путям, рабочую копию разработчика. Ожидаемые значения — литералы из таблиц плана.
