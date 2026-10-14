@@ -56,7 +56,7 @@
 
 ### Фаза 1 — механизм
 
-### Task 1.1 — хук PreToolUse и `classify` в гейте [PENDING]
+### Task 1.1 — хук PreToolUse и `classify` в гейте [DONE 0bfd4bb76]
 - **Level:** Middle+ (три класса, `timed`, флаг, допуск) · **Assignee:** `developer` (Sonnet); тесты пишет `tester` вслепую до кода
 - **Module contract:** n/a (инструменты, не модуль фреймворка)
 - **Handoff:** `tester`(RED) → `developer`(GREEN) → `reviewer`
