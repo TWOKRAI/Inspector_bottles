@@ -19,7 +19,8 @@ import math
 import cv2
 import numpy as np
 
-from Services.dataset_gen.core.config import SymmetryType
+from Services.dataset_gen.core.config import SymmetryConfig, SymmetryType
+from Services.layer_render.catalog import SpriteCatalog
 
 _DEFAULT_FULL_ANGLES = (30.0, 45.0, 60.0, 90.0, 120.0, 135.0)
 
@@ -127,6 +128,37 @@ def combine_symmetries(kinds: set[SymmetryType]) -> SymmetryType:
     if "180" in kinds:
         return "180"
     return "full"
+
+
+def resolve_symmetries(catalog: SpriteCatalog, sym_cfg: SymmetryConfig) -> dict[int, SymmetryType]:
+    """Симметрия каждого класса каталога (Task 6.2: вынесено из `DatasetEngine._resolve_symmetries`).
+
+    Приоритет: глобальный override из конфига → meta.yaml класса (symmetry) → авто-детектор →
+    "none" при выкл. детекторе. Общая для `DatasetEngine` и `LayerSceneGenerator`.
+
+    Pre:
+      - catalog загружен
+    Post:
+      - ключи — все `entry.index` каталога; значения ∈ {"none", "180", "full"}
+    """
+    result: dict[int, SymmetryType] = {}
+    for entry in catalog.classes:
+        override = sym_cfg.overrides.get(entry.name)
+        if override is not None:
+            result[entry.index] = override
+            continue
+        if entry.meta.symmetry is not None:
+            result[entry.index] = entry.meta.symmetry
+            continue
+        if not sym_cfg.auto_detect:
+            result[entry.index] = "none"
+            continue
+        kinds = {
+            detect_symmetry(s, sym_cfg.threshold, sym_cfg.full_angles, sym_cfg.rel_threshold)
+            for s in catalog.sprites(entry.index)
+        }
+        result[entry.index] = combine_symmetries(kinds)
+    return result
 
 
 def encode_angle(angle_deg: float, symmetry: SymmetryType) -> tuple[float, float, bool]:
