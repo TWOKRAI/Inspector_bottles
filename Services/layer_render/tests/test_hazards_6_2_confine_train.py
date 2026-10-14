@@ -36,6 +36,20 @@ def test_absolute_tile_outside_roots_is_rejected(tmp_path):
     assert "secret" not in str(info.value)
 
 
+@pytest.mark.parametrize("shape", ["tuple", "path"])
+def test_non_json_shapes_in_train_do_not_bypass_confinement(tmp_path, shape):
+    # Ревью 6.2 ит.2, п. 1.1: кортеж/Path внутри train сериализуются to_dict в список/строку пути на диске.
+    root = tmp_path / "root"
+    outside = (tmp_path / "elsewhere" / "secret.png").resolve()
+    if shape == "tuple":
+        train = {"background_layers": ({"tile": str(outside)},)}
+    else:
+        train = {"background_layers": [{"tile": outside}]}
+    with pytest.raises(ValueError) as info:
+        confine_preset_paths(_preset(root, train), [root])
+    assert str(info.value) == OUTSIDE_ROOTS_MESSAGE
+
+
 def test_relative_tile_escaping_root_is_rejected(tmp_path):
     root = tmp_path / "a" / "b"
     with pytest.raises(ValueError) as info:
