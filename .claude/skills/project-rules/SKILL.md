@@ -114,8 +114,8 @@ Files: <paths>
   old `stand.lock` rule. Exit 75 = skipped by the gate, not a red run. `<session>` = the name your brief gives (no `[ref]`);
   no name in the brief → ask the lead, do not guess. Skipped as a subagent → say «NO WINDOW» in your
   report and finish it; never loop waiting — the lane session asks the coordinator for a window. While `machine.lock` exists
-  the hook `machine-gate-guard.sh` blocks a bare `pytest`, `make gate` or `run_sim_all` that bypasses the gate (its message
-  shows the gated command to run).
+  the hook `machine-gate-guard.sh` blocks any command `classify` marks (bare `pytest`, `make gate` / `make test`,
+  `run_framework_tests.py`, `run_sim_all`, …) that bypasses the gate (its message shows the gated command to run).
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
 - Add an import and its use in one Edit (ruff strips an unused import).
 - Memory search before your first edit (read-only roles: before the first finding; the main checkout's script: worktrees cut before the merge lack it):

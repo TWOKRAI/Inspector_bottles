@@ -64,16 +64,18 @@ Command classes — decided by `classify` in `scripts/machine_gate.sh`; a sessio
 
 | Class | Duration | Typical command | Without its own window |
 |---|---|---|---|
-| light | < ~2 min | one pytest process on own files | runs; waits only for a foreign `quiet` window |
-| medium | ~2–5 min | one module's tests directory: `pytest Services/<pkg>/tests` | runs; waits for a foreign `quiet` or `stand` window |
+| light | < ~2 min | one pytest process on own files | runs; skipped (exit 75) only in a foreign `quiet` window |
+| medium | ~2–5 min | one module's tests directory: `pytest Services/<pkg>/tests` | runs; skipped (exit 75) in a foreign `quiet` or `stand` window |
 | medium, timed | ~2–5 min | the same on a timed path, or `--timed` first | skipped (exit 75) — only in its own window, like heavy |
 | heavy | > ~5 min | the table above; a whole package `pytest Services/<pkg>`, several directories, `-n`, no path, `make gate` / `make test` | skipped (exit 75) — only in its own window |
 
 **timed** — the command touches a path listed in `scripts/machine_gate_timed.txt` (the list lives only there), or the
 session passes `--timed` as the first gate argument; it can be set, never unset, and changes only `medium`. A module's
-`tests` directory is `medium`; the package directory around it is `heavy`. The holder of any window runs every class.
-While `machine.lock` exists the PreToolUse hook `machine-gate-guard.sh` blocks a bare `pytest`, `make gate` or
-`run_sim_all` that bypasses the gate and prints the gated command to run instead.
+`tests` directory is `medium`; the package directory around it, a subdirectory of `tests` and a bare `pytest tests` are
+`heavy`. The holder of any window runs every class. A skipped command is not retried by the gate — the session asks
+for a window or runs it later. While `machine.lock` exists the PreToolUse hook `machine-gate-guard.sh` blocks any
+command `classify` marks (bare `pytest`, `make gate` / `make test`, `run_framework_tests.py`, `run_sim_all`, …) that
+bypasses the gate and prints the gated command to run instead.
 
 ## 4. Signals — fixed words, so a session can find them in its inbox
 
