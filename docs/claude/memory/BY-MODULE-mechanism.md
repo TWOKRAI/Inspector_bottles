@@ -221,7 +221,7 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (16)
+## dev-tooling (17)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
 - [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)
@@ -237,6 +237,7 @@
 - [feedback_sentrux_depth_opaque](feedback_sentrux_depth_opaque.md)
 - [feedback_sentrux_freetier_3rule_limit](feedback_sentrux_freetier_3rule_limit.md)
 - [project_crossmodule_move_shim_cycle](project_crossmodule_move_shim_cycle.md)
+- [project_git_bash_cr_rename_and_cim_quirks_on_windows](project_git_bash_cr_rename_and_cim_quirks_on_windows.md)
 - [project_graphify_mcp_setup](project_graphify_mcp_setup.md)
 - [project_qex_model](project_qex_model.md)
 
@@ -777,7 +778,7 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (18)
+## windows-env (19)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
@@ -795,5 +796,6 @@
 - [feedback_uv_sync_prunes_venv](feedback_uv_sync_prunes_venv.md)
 - [project_app_module_windows_test_debt](project_app_module_windows_test_debt.md)
 - [project_cuda_torch_setup](project_cuda_torch_setup.md)
+- [project_git_bash_cr_rename_and_cim_quirks_on_windows](project_git_bash_cr_rename_and_cim_quirks_on_windows.md)
 - [project_monotonic_resolution_windows](project_monotonic_resolution_windows.md)
 - [project_venv_locked_by_mcp](project_venv_locked_by_mcp.md)
