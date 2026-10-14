@@ -124,7 +124,7 @@ stderr `machine_gate: malformed machine.lock:1: windw: x`, `RAN` нет, `2`.
    `bad_session` `grant c1 "s2 [ab]" heavy 20 x` → `bad session name`;
    `bad_kind` `fast`, `medium_kind` `medium` → `window kind must be quiet, heavy or stand`;
    `bad_minutes` `0`, `601`, `abc` → `minutes must be 1..600`;
-   `pipe_in_what` `"a | b"`, `newline_in_what` `"a\nb"` → `what must not contain | or line breaks`;
+   `pipe_in_what` `"a | b"`, `newline_in_what` `"a\nb c"` (с пробелом: голый `"a\nb"` при запуске Windows → Git Bash делится на два аргумента) → `what must not contain | or line breaks`;
    `few_args` `grant c1 s2 heavy 20` → строка `usage: machine_gate.sh grant <coordinator> <session> quiet|heavy|stand <minutes> <what...>` целиком;
    `no_lock` (пустой каталог) → `no machine.lock`, файл так и не появился;
    `tmp_exists` (рядом `machine.lock.tmp` с байтами `x`) → `machine.lock.tmp exists (another grant/close running, or a leftover)`, tmp не изменён;
