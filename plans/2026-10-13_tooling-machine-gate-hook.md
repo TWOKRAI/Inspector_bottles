@@ -123,7 +123,7 @@
   project-rules (пайплайн, п. 7).
 - **TRAPS:** classification.md §9.
 
-### Task 1.2 — `grant` / `close` / `status` и проверка формата замка [PENDING]
+### Task 1.2 — `grant` / `close` / `status` и проверка формата замка [DONE 0a5919c8d]
 Спека целиком (грамматика, подкоманды, отказы, REDS, стражи, TRAPS) — [`task-1.2.md`](2026-10-13_tooling-machine-gate-hook/task-1.2.md); инъекции J1–J18 — [`injections.md`](2026-10-13_tooling-machine-gate-hook/injections.md). Ветка `feat/tooling-machine-gate-lock`.
 
 ## Пайплайн (по `.claude/CLAUDE.md` «Task launch convention»; здесь — только специфика)

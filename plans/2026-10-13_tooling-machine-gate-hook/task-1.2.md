@@ -1,7 +1,16 @@
 # Task 1.2 — `grant` / `close` / `status` и проверка формата замка — план [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md)
 
-Статус: [PENDING]. Ветка `feat/tooling-machine-gate-lock` (от `main` после 1.1). Ревью спеки: reviewer `a9c5a895d75a1c08c`,
+Статус: [DONE 0a5919c8d]. Ветка `feat/tooling-machine-gate-lock` (от `main` после 1.1). Ревью спеки: reviewer `a9c5a895d75a1c08c`,
 итерация 1 — CHANGES REQUESTED (14 пунктов), все приняты в этот текст; итерация 2 — **APPROVED** (a92680dd1), 6 мелких правок внесены.
+
+**Итог (2026-10-14).** Тесты тестера f0c2cc2d2 (92: до кода 87 красных / 5 зелёных) → реализация 80181606c → правки ревью
+0a5919c8d. Четыре файла гейта — 273 passed. Инъекции J1–J18 — 18 из 18 пойманы (injections.md). Ревью кода
+`a4d99c3ad160ff90c`: раунд 1 — CHANGES REQUESTED (нет теста порядка проверок; сбой записи давал пустой замок с rc 0),
+раунд 2 — **APPROVED** по 0a5919c8d. `status` на живом замке (только чтение) — rc 0, sha1 замка не изменился.
+Принятые отступления разработчика: повторная проверка под защитой tmp; отказ `machine_gate: cannot read machine.lock`;
+валидатор на bash, не awk. Открыто (решение владельца): нет `trap` на INT/TERM (оставленный tmp → отказ 10 до ручного
+удаления); нет теста на `timeout 20`; сбой `date -d` пишет пустое `until ~` с rc 0; код 2 битого замка совпадает с кодом 2
+pytest (вариант — 78); запись координатора Write-инструментом мимо мьютекса `set -C`.
 
 - **Level:** Middle · **Assignee:** `developer` (Sonnet); тесты — `tester` вслепую до кода
 - **Module contract:** n/a
