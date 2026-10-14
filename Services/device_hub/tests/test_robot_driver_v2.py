@@ -32,6 +32,7 @@ from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, bounded, pulse
 _JOG = {"dir": 1, "spd": 20}
 _CALL_DEADLINE_S = 15.0
 _CONNECT_DEADLINE_S = 60.0
+_GATE_S = 2.0  # дедлайн ворот стопа release в гонке jog_hold (U2)
 _CMD_JOG = re.compile(r"\[v2\] CMD seq=(\d+) op=JOG_CONT")
 TEXT_JOG_LOST = "поводок jog прерван: нет связи с роботом"
 
@@ -131,11 +132,17 @@ def test_parse_tlm_signed_pose_and_little_endian_encoder() -> None:
 
 
 def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
-    """``jog_release`` пишет стоп медленно (транспорт задерживает 0.3 с ДО записи); ``jog_hold`` в это окно.
+    """Стоп ``jog_release`` в полёте (задержан ДО записи); ``jog_hold`` в это окно. Новый jog обязан выжить.
 
-    Ждём: ``jog_hold`` вернул ``ok`` не раньше, чем стоп вернулся (ждал замок перехода), sim принял новый
-    ``JOG_CONT`` (строка CMD, NAK E_BUSY строки не даёт), робот снова движется. Без замка перехода новый
-    ``JOG_CONT`` ушёл бы к роботу, ещё исполняющему прежний jog, и получил бы NAK E_BUSY.
+    Порядок задан событиями, не сном. Шов — ТОЛЬКО стоп release: он ждёт ворота ``gate``, а ворота открывает
+    возврат нового ``JOG_CONT``. Остальные вызовы ``stop`` идут без задержки (прежний шов задерживал КАЖДЫЙ
+    ``stop`` одинаково, и запасной стоп ``jog_hold`` вставал в очередь за стопом release — тест не видел
+    снятия замка, находка Ф1). С замком перехода ``jog_hold`` ждёт замок, стоп release уходит по дедлайну ворот,
+    затем новый ``JOG_CONT``. Без замка ``jog_hold`` сам шлёт стоп (запасной путь), шлёт ``JOG_CONT``,
+    ворота открываются, и запоздалый стоп release приходит ПОСЛЕ нового ``JOG_CONT`` и обрывает новый jog.
+
+    Ждём в sim: новый ``JOG_CONT`` принят (строка CMD), для его seq нет строки ``ERR ... E_ABORTED``, робот
+    движется, пока удержание подтверждается. Плюс: ``jog_hold`` вернулся не раньше стопа release.
     """
     rec = _Rec()
     with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
@@ -146,17 +153,30 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
 
         client = drv._client
         real_stop = client.stop
+        real_jog_cont = client.jog_cont
         entered = threading.Event()
+        gate = threading.Event()
+        first = threading.Lock()
         stamps: dict[str, float] = {}
 
-        def slow_stop(level: int) -> Any:
+        def gated_stop(level: int) -> Any:
+            if not first.acquire(blocking=False):
+                return real_stop(level)  # не стоп release (запасной стоп jog_hold и др.) — без задержки
             entered.set()
-            time.sleep(0.3)  # стоп «в полёте»: замок перехода держит release
+            # Стоп release «в полёте». С замком перехода ворота не откроются (JOG_CONT ждёт этот стоп) —
+            # дедлайн отпускает стоп; исход от длины дедлайна не зависит. Без замка ворота открывает JOG_CONT.
+            gate.wait(_GATE_S)
             result = real_stop(level)
             stamps["stop_returned"] = time.monotonic()
             return result
 
-        client.stop = slow_stop  # type: ignore[method-assign]
+        def jog_cont_then_open(direction: int, speed: int) -> Any:
+            result = real_jog_cont(direction, speed)
+            gate.set()
+            return result
+
+        client.stop = gated_stop  # type: ignore[method-assign]
+        client.jog_cont = jog_cont_then_open  # type: ignore[method-assign]
         try:
             box: dict[str, Any] = {}
             releaser = threading.Thread(target=lambda: box.setdefault("rel", drv.call("jog_release", {})), daemon=True)
@@ -164,17 +184,21 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
             assert entered.wait(5.0), "стоп release не начался"
             hold = _call(drv, "jog_hold", _JOG)
             stamps["hold_returned"] = time.monotonic()
-            releaser.join(5.0)
+            releaser.join(_CALL_DEADLINE_S)
             assert not releaser.is_alive()
         finally:
             client.stop = real_stop  # type: ignore[method-assign]
+            client.jog_cont = real_jog_cont  # type: ignore[method-assign]
 
         assert box["rel"] == {"status": "ok"}
         assert hold["status"] == "ok", hold
-        assert stamps["hold_returned"] >= stamps["stop_returned"], "JOG_CONT ушёл раньше, чем вернулся стоп"
         assert len(_jog_cmds(rig)) == n_cmd + 1, "новый JOG_CONT не принят роботом"
+        new_seq = hold["seq"]
         _hold(drv, 0.4)
+        aborted = [text for _, text in rig.core.events() if f"[v2] ERR seq={new_seq} " in text]
+        assert aborted == [], f"новый jog оборван запоздалым стопом release: {aborted}"
         assert _moving(rig) == 1, "новый jog не двигает робот"
+        assert stamps["hold_returned"] >= stamps["stop_returned"], "JOG_CONT ушёл раньше, чем вернулся стоп"
         assert _call(drv, "jog_release")["status"] == "ok"
 
 
