@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from Services.layer_render.catalog import load_catalog
+from Services.layer_render.catalog import SpriteCatalog, load_catalog
 from Services.layer_render.effects import apply_occlusion
 from Services.layer_render.io import load_image_rgba
 from Services.layer_render.layers import LayerSpec, compose_layers, load_layer_sprite, transform_layer
@@ -108,15 +108,32 @@ class ObjectFactory:
         `scene.status`, чтобы отдавать ПРИМЕНЁННОЕ значение, а не заявку клиента."""
         return self._preset.defect_probability
 
-    def render(self, rng: np.random.Generator, *, force_defect: bool = False, label: str = "") -> RenderedObject:
+    @property
+    def catalog(self) -> SpriteCatalog | None:
+        """Каталог классов фабрики (тот же объект, не копия) или `None` у пресета без `catalog_dir`."""
+        return self._catalog
+
+    def render(
+        self,
+        rng: np.random.Generator,
+        *,
+        force_defect: bool = False,
+        label: str = "",
+        class_index: int | None = None,
+    ) -> RenderedObject:
         """Собрать объект: класс и угол — из `rng`, слои — база + пресет + дефект (последним).
 
         `force_defect=True` включает слой `"damaged"` без розыгрыша (форс оператора ленты — снаружи,
         здесь только параметр). `label` — имя объекта в текстах ошибок (`LayeredObject '<label>': ...`).
         Порядок расхода `rng`: `integers` (класс) -> `uniform` (угол) -> `get_sprite` -> `compose_layers`
         (`rng.spawn(len(layers))`); сборка блоба дефекта `rng` не тратит.
+
+        `class_index` (Task 6.2): `None` — класс разыгрывается, путь байт в байт прежний; задан —
+        `rng.integers` не зовётся, дальше тот же порядок.
+        Pre: при заданном `class_index` — каталог есть, `int` (не `bool`; `np.integer` — да),
+        `0 <= class_index < num_classes`; иначе `ValueError` до любого розыгрыша.
         """
-        class_name, angle_deg, bottom_layers = self._resolve_bottom_layers(rng)
+        class_name, angle_deg, bottom_layers = self._resolve_bottom_layers(rng, class_index)
 
         # ponytail: блоб дефекта строится из спрайта НИЖНЕГО слоя (bottom_layers[0]) как есть —
         # его собственные offset/scale/angle игнорируются (как и раньше для "base"); апгрейд —
@@ -141,13 +158,29 @@ class ObjectFactory:
             layer_params=composed.layer_params,
         )
 
-    def _resolve_bottom_layers(self, rng: np.random.Generator) -> tuple[str, float, list[LayerSpec]]:
+    def _check_class_index(self, class_index: object) -> int:
+        """Проверка `class_index` до любого розыгрыша; тексты ошибок без входного значения."""
+        if self._catalog is None:
+            raise ValueError("class_index: пресет без catalog_dir")
+        if isinstance(class_index, bool) or not isinstance(class_index, int | np.integer):
+            raise ValueError("class_index: ожидался int")
+        n = self.num_classes
+        if not 0 <= int(class_index) < n:
+            raise ValueError(f"class_index вне [0, num_classes={n})")
+        return int(class_index)
+
+    def _resolve_bottom_layers(
+        self, rng: np.random.Generator, class_index: int | None = None
+    ) -> tuple[str, float, list[LayerSpec]]:
         """Класс, угол объекта и слои пресета (без defect-слоя) — из `rng`.
 
         Порядок розыгрышей — часть контракта seed (LS-006): `integers` (класс) -> `uniform`
         (угол) -> `get_sprite`. Общий для `render()` и `nominal_layers()`, чтобы для одного seed
-        класс в ленте, плитке превью и раскладке слоёв совпадал.
+        класс в ленте, плитке превью и раскладке слоёв совпадал. Заданный `class_index` (Task 6.2)
+        убирает только `integers`; порядок остальных розыгрышей тот же.
         """
+        if class_index is not None:
+            class_index = self._check_class_index(class_index)
         if self._catalog is None:
             # Пресет без catalog_dir (только layers — гарантировано ScenePreset._catalog_or_layers,
             # там же отдельно запрещён слой class:// без catalog_dir, так что self._extra_layers
@@ -156,7 +189,8 @@ class ObjectFactory:
             angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
             bottom_layers = list(self._extra_layers)
         else:
-            class_index = int(rng.integers(self.num_classes))
+            if class_index is None:
+                class_index = int(rng.integers(self.num_classes))
             class_name = self._catalog.entry(class_index).name
             angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
             base_sprite = self._catalog.get_sprite(class_index, rng)

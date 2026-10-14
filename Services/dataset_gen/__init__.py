@@ -32,6 +32,7 @@ from Services.dataset_gen.core import (
     detect_symmetry,
     encode_angle,
 )
+from Services.dataset_gen.core.layer_scene import LayerSceneGenerator, TrainSection
 from Services.dataset_gen.export import export_dataset, export_splits
 from Services.dataset_gen.interfaces import SampleGenerator
 from Services.dataset_gen.preview import save_preview_grid
@@ -42,6 +43,8 @@ __all__ = [
     "ClassMeta",
     "DatasetEngine",
     "GeneratorConfig",
+    "LayerSceneGenerator",
+    "TrainSection",
     "SampleLabel",
     "SampleGenerator",
     "SymmetryType",
