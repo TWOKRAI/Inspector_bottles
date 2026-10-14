@@ -14,6 +14,19 @@
 
 Команда распознаётся **только в позиции команды**: в начале сегмента, после необязательных `VAR=val`,
 `timeout N`, `uv run [--опции]`, `<python> [-опции] -m`. Слово в аргументах (`grep pytest`) не в счёт.
+- **Кавычки.** `&&`, `||`, `;`, `|` внутри `'…'` и `"…"` сегмент не режут; внутри `"…"` обратная косая перед `"`
+  экранирует кавычку.
+- **Heredoc.** Строка с `<<` или `<<-` и словом-ограничителем (`WORD`, `'WORD'`, `"WORD"`) классифицируется как
+  обычно, а строки её тела — до строки, равной `WORD` (для `<<-` — после снятия ведущих табуляций), —
+  не классифицируются; строка после ограничителя снова классифицируется.
+- **Префиксы позиции команды (дополнение).** Кроме `VAR=val`, `timeout`, `uv run`: слова `env`, `time`, `xargs`,
+  `do`, `then`, `else`, `!`, `{`, `(`; у `timeout` пропускаются опции и значения опций `-k`, `-s`; у `uv run` —
+  опции и значения опций `--python`, `--with`, `--project`, `--directory`, `-p`; `<python>` пропускает `-X <знач>`
+  и `-W <знач>` перед `-m`; `powershell`, `powershell.exe`, `pwsh`, `pwsh.exe` ищут скрипт по ЛЮБОМУ токену сегмента.
+  В третьем поле вывода ведущие слова `do`, `then`, `else`, `!`, `{`, `(`, `time` из сегмента удаляются (совет хука
+  должен быть исполнимым командой гейта).
+- **`make`.** Первый неопционный аргумент ∈ `gate`, `test`, `test-fast`, `test-fw`, `test-ctl` → `heavy` `make_suite`;
+  прочие цели (`check`, `lint`, `help`, `test-ctl-offline`) — пусто.
 - `<python>` — токен с basename `python`, `python3`, `python.exe`, `python3.exe` или `py`.
 - Скрипты — по basename первого неопционного аргумента `<python>` или `powershell`: `run_framework_tests.py`,
   `run_sim_all.ps1`, `check_injections.py`, `mutation_gate.py`, `break_inject*.py` (префикс `break_inject`),
@@ -54,7 +67,35 @@
 | C29 | `pytest -c /d/wt/pyproject.toml a/tests/test_x.py` | light | `pytest_files` |
 | C30 | `pytest --ignore a/tests/slow Services/robot_comm/tests` | medium | `pytest_module_dir` |
 | C31 | `python backend_ctl/probes/break_inject_g4_other.py` | heavy | `injection_matrix` |
+| C32 | `powershell -ExecutionPolicy Bypass -File scripts\run_sim_all.ps1` | heavy | `run_sim_all` |
+| C33 | `pwsh -File scripts/run_sim_all.ps1` | heavy | `run_sim_all` |
+| C34 | `python -X faulthandler -m pytest Services/robot_comm/tests` | medium | `pytest_module_dir` |
+| C35 | `python -X utf8 -m pytest -q` | heavy | `pytest_no_file_args` |
+| C36 | `python -W ignore -m pytest a/tests/test_x.py` | light | `pytest_files` |
+| C37 | `env PYTHONUTF8=1 pytest -q` | heavy | `pytest_no_file_args` |
+| C38 | `time pytest a/tests/test_x.py` (3-е поле: `pytest a/tests/test_x.py`) | light | `pytest_files` |
+| C39 | `for f in a b; do pytest -q $f; done` (3-е поле: `pytest -q $f`; один ряд) | heavy | `pytest_no_file_args` |
+| C40 | `if true; then pytest -q; fi` (3-е поле: `pytest -q`; один ряд) | heavy | `pytest_no_file_args` |
+| C41 | `uv run --python 3.12 pytest -q` | heavy | `pytest_no_file_args` |
+| C42 | `timeout -k 5 300 pytest -q` | heavy | `pytest_no_file_args` |
+| C43 | `make gate` | heavy | `make_suite` |
+| C44 | `make test-fast` | heavy | `make_suite` |
+| C45 | `cat <<'EOF'⏎x⏎EOF⏎pytest -q` (один ряд, сегмент `pytest -q`) | heavy | `pytest_no_file_args` |
+| C46 | `pytest -q && echo "done; ok"` (один ряд, сегмент `pytest -q`) | heavy | `pytest_no_file_args` |
+| C47 | `echo "a \" b" ; pytest -q` (один ряд, сегмент `pytest -q`) | heavy | `pytest_no_file_args` |
+| C48 | `{ pytest -q; }` (3-е поле: `pytest -q`; один ряд) | heavy | `pytest_no_file_args` |
+| N9–N19 | `grep -n -E "cwd\|pytest\|subprocess" scripts/run_framework_tests.py`; `rg -n "conftest\|pytest\|unittest" scripts`; `git commit -m "fix: hook; pytest -q is blocked"`; `git log --grep="x; pytest -q"`; `echo 'a && pytest -q'`; `cat >> report.md <<'EOF'⏎pytest -q⏎EOF`; `git commit -F - <<EOF⏎python -m pytest a/tests⏎EOF`; `cat <<-EOF⏎⇥pytest -q⏎⇥EOF`; `make check`; `make test-ctl-offline`; `make help` | — (пустой вывод) | — |
 | N1–N8 | `grep -n pytest pyproject.toml`; `git log --grep=pytest --oneline`; `cat pytest.ini`; `rg run_framework_tests scripts`; `git show HEAD:scripts/run_sim_all.ps1`; `echo pytest`; `pip show pytest`; `ls` | — (пустой вывод) | — |
+
+Обозначения: `⏎` — перевод строки, `⇥` — табуляция (тесты пишут настоящие). N9–N19 — по порядку перечисления; id параметра — `N9`…`N19`. Строки C32–C48 и N9–N19 проверяют авторские тесты developer в отдельном файле
+`scripts/machine_gate_tests/test_machine_gate_classify_hazards.py` (слепой tester второй раз не запускается): `test_classify_hazards` (C32–C48, N9–N19), `test_hook_hazards_allow` (N9–N16 через хук при живом замке с чужим окном → код 0, stderr пуст), `test_hook_advice` (H1–H4 ниже), `test_classify_many_segments_is_fast` (1500 сегментов `echo x` и последний `pytest -q`: classify за ≤ 8 с, один ряд heavy).
+
+Совет хука (дополнение к шагу 4(д) плана): ведущие `VAR=val` сегмента ставятся ПЕРЕД `bash`; строка совета — `<VAR=val …> bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" <kind> <session> <остаток сегмента>`; `<kind>` и сегмент берутся из строки classify с НАИБОЛЬШИМ рангом (при равенстве — первой), как в §4.
+- H1 `cd D:/wt && PYTHONPATH=. python -m pytest a/tests/test_x.py` → код 2; stderr содержит `PYTHONPATH=. bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" light <session> python -m pytest a/tests/test_x.py` и не содержит `light <session> PYTHONPATH`;
+- H2 `pytest a/tests/test_x.py && pytest -q` → код 2; stderr содержит `machine_gate.sh" heavy <session> pytest -q`;
+- H3 `make gate` → код 2; stderr содержит `machine_gate.sh" heavy <session> make gate`;
+- H4 `powershell -ExecutionPolicy Bypass -File scripts\run_sim_all.ps1` → код 2; stderr содержит `(run_sim_all)`.
+Слова-кандидаты префильтра хука — прежние плюс `make`. До вызова `classify_segment` гейт пропускает сегменты, в которых нет ни одного слова-кандидата (иначе 1200 сегментов — 9 с при таймауте хука 10 с).
 
 Пояснения: C10 — каталог есть, но не `*/tests`; C16 — хвостовой `/`; C17 — каталог модуля и `.py` рядом, класс
 задаёт каталог; C18 — абсолютный путь, `kin` — значение `-k`; C19 — обёрнутый сегмент, заявку поднимает гейт;
@@ -217,58 +258,9 @@ timed-пути запускается: timed влияет только на `med
 
 `<T>/test_ok.py` = `def test_ok(): pass`.
 
-## 8. Инъекции — предсказание до прогона (раздел «Пайплайн», п. 4 плана)
+## 8. Инъекции — предсказание до прогона
 
-Лид записывает факт рядом с предсказанием; каждая инъекция — `light` прогон одного файла. Имена — тесты
-`test_machine_gate_hook.py` (I, M) и `test_machine_gate_lock.py` (J); в скобках — id параметров.
-
-| ID | Поломка | Предсказанные красные |
-|---|---|---|
-| I1 | хук: проверка замка инвертирована (`exit 0` при наличии замка) | `test_hook_blocks` (C10, C12, C15), `test_hook_blocks_unwrapped_segment_after_wrapped`, `test_hook_independent_of_cwd`, `test_hook_allows[no_lock]` |
-| I2 | `classify`: удалено правило `-n` | `test_classify` (C11, C25) |
-| I3 | `classify`: снята привязка к позиции команды | гарантированно `test_classify_none` (N1, N6, N7), `test_hook_allows` (N1, N6, N7); N2–N5 — зависят от реализации (подстрока против токена), не обещаются |
-| I4 | хук: «обёрнуто», если `machine_gate.sh` есть где угодно в строке (не по сегментам) | `test_hook_blocks_unwrapped_segment_after_wrapped` |
-| I5 | гейт: убрана вся реклассификация (класс = заявка) | `test_gate_claim` (R1–R3), `test_gate_medium` (G8, G9, T8) |
-| I6 | хук: убран `tr -d '\r'` | **может остаться зелёной**: в тестах хука нет многострочных команд, python CR не выдаёт; если зелёная — записать как необнаруженную, тест под неё не придумывать |
-| I7 | хук: вызов python без обработки ошибки (битый JSON → traceback, ненулевой код) | `test_hook_allows[bad_json]` |
-| M1 | `classify`: правило 5 даёт `heavy` вместо `medium` (reason прежний) | `test_classify` (C15–C18, C30), `test_hook_blocks[C15]`, `test_gate_medium` (G1–G11, T1–T8, T10, T11, T14): строка `reclassified … -> heavy` там, где stderr должен быть пуст |
-| M2 | `classify`: reason `pytest_module_dir` переименован в `pytest_module_tests` | `test_classify` (C15–C18, C30), `test_hook_blocks[C15]`, `test_gate_medium` (G8, G9, T8) |
-| M3 | `classify`: каталог модуля — любой каталог, чей последний сегмент (разбивка по `/`) равен `tests`, сегменты не считаются | `test_classify[C22]`; C28 остаётся зелёной (`/` нет — один сегмент `Services\robot_comm\tests`, не `tests`) |
-| M4 | `classify`: значения опций списка §3 не пропускаются | `test_classify` (C29, C30) |
-| M5 | гейт: не-timed `medium` не проверяет чужое `quiet` | `test_gate_medium` (G2, G8) |
-| M6 | гейт: чужое `stand` не блокирует не-timed `medium` | `test_gate_medium` (G3, G9) |
-| M7 | гейт: класс = вывод `classify`, если он не пуст (понижение разрешено) | `test_gate_medium` (T9, T13), `test_gate_call_form_compat[K6]` |
-| M8 | гейт: `timed` не вычисляется (список не читается, флаг снимается и забывается) | `test_gate_medium` (T1–T4, T8–T11, T13, T14, G10) |
-| M9 | гейт: `--timed` снимается, но не учитывается (список работает) | `test_gate_medium[G10]` |
-| M10 | гейт: `--timed` не разбирается (первый аргумент считается классом) | `test_gate_medium` (G10, G11, G12) — код 2 |
-| M11 | гейт: подстрока заменена точным равенством токена записи | `test_gate_medium` (T1–T4, T8, T9, T13, T14) |
-| M12 | гейт: timed `medium` под чужим `quiet` отвечает `QUIET WINDOW` | `test_gate_medium[T3]` |
-| M13 | гейт: список читается только рядом с гейтом, env `MACHINE_GATE_TIMED_LIST` не учитывается | `test_gate_medium` (T10, T11, T14) — T1–T9 зелёные: `Services/robot_comm/` есть и в поставляемом списке |
-| M14 | гейт: fail-closed убран (список недоступен → ничего не timed; строка stderr остаётся) | `test_gate_medium[T10]` |
-| M15 | гейт: `--timed` действует и на `light` (как timed `medium`) | `test_gate_medium[G12]` |
-| M16 | гейт: совпадение по списку действует и на `light` | `test_gate_medium[T12]` |
-| M17 | гейт: в токене не делается `\` → `/` | `test_gate_medium[T13]` |
-| M18 | гейт: `\r` в конце записи списка не отбрасывается (временный список тестов записан с `\r\n`) | `test_gate_medium` (T1–T4, T8, T9, T13, T14) |
-| J1 | `validate_lock` всегда успешен | `test_malformed_lock_exit_2` (все) |
-| J2 | `grant` не проверяет существующее окно | `test_grant_refuses[second_window]` |
-| J3 | `close` удаляет любое окно | `test_close_refuses_foreign_window` |
-| J4 | `grant` не удаляет `waiting:` своей сессии | `test_grant_writes_window_and_drops_waiting` |
-| J5 | `validate_lock` не отбрасывает `\r` | `test_crlf_lock_is_valid` |
-
-Стражи `test_gate_call_form_compat` (K1–K7) и `test_gate_light_file_runs_without_window` зелёные при каждой
-инъекции, кроме M7 (K6). I1 включает `test_hook_allows[no_lock]`: без замка инвертированный хук идёт дальше и
-блокирует C9.
-
-**Факт прогона инъекций 2026-10-14** (реализация `5f14906c2`; база — 102 passed; механический прогон — агент haiku,
-скрипт с зашитыми предсказаниями; каждая — один файл, `light`, откат `git checkout`; worktree после матрицы чист).
-Предсказано / наблюдено числом упавших: I1 6/7, I2 2/2, I3 6/6, I4 1/1, I5 6/6, I6 0/0, I7 1/1, M1 32/32, M2 9/9,
-M3 1/1, M4 2/2, M5 2/2, M6 2/2, M7 3/3, M8 11/11, M9 1/1, M10 3/3, M11 8/8, M12 1/1, M13 3/3, M14 1/1, M15 1/1,
-M16 1/1, M17 1/1, M18 8/8; добавочная I7b (только `except` сломан, `2>/dev/null` на месте) 0/0.
-Расхождения поимённо: **I1** — лишний красный `test_hook_allows[reach_C9]` (инвертированный хук не блокирует C9, а
-параметр `reach_C9` ждёт блока): предсказание было неполным, поломка поймана. **I6 остался зелёным** — как предсказано:
-в тестах хука нет многострочной команды с CR; необнаруженная поломка, тест под неё не придуман. **I7b зелёная**: хук
-проглатывает ошибку python дважды (`except` и `2>/dev/null` + `tr` в конце конвейера), поэтому красную даёт только
-поломка обоих слоёв (I7). I3: N2–N5 остались зелёными (подстрока против токена не срабатывает), красные ровно N1, N6, N7.
+Таблица, предсказания и факт прогона — в [injections.md](injections.md).
 
 ## 9. REDS, стражи и TRAPS Task 1.1 (тестер; `scripts/machine_gate_tests/test_machine_gate_hook.py`)
 
