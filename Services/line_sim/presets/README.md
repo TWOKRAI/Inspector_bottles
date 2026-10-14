@@ -123,3 +123,56 @@ done
 ## `letters_disk.yaml`
 
 Русские буквы на дисках — те же эталоны, что у `dataset_gen`; см. комментарии в самом файле.
+
+## Секция `train` — обучающие вырезы
+
+Ключ `train` пресета слоёв описывает, как из той же сцены получить обучающие вырезы. Его читают
+`LayerSceneGenerator` и CLI `Services/dataset_gen/tools/export_sim_crops.py`; сим секцию не читает.
+Схема — `TrainSection` (`Services/dataset_gen/core/layer_scene.py`); неизвестный ключ — ошибка загрузки.
+В `letters_layered.yaml` шесть ключей:
+
+- `label.angle_layer` — имя слоя `class://`, чей угол идёт в метку (`null` — угол самого объекта).
+- `symmetry` — симметрия классов: `auto_detect: false` отключает чтение `meta.yaml` каталога,
+  `overrides` задаёт симметрию по имени класса (`"180"` — в кавычках, иначе YAML даст число). Override
+  допустим только для класса каталога: лишнее имя — `ValueError` при создании генератора.
+- `background_layers` — фон под объектом (схема `solid` / `tile` как в пресете стенда). Путь `tile:` —
+  **от каталога пресета**, не от корня репозитория (в отличие от `apps/line_sim/pipeline.yaml`).
+- `lateral_offset_px: [lo, hi]` — смещение объекта по Y от центра окна, px; знак разыгрывается.
+- `crop` — вырез: `size_mode: radius` (сторона из радиуса объекта: `radius_scale`, `margin_px`) или
+  `fixed` (`side_px`); `output_size` — сторона выходного PNG.
+- `defect_probability` — вероятность дефект-слоя при экспорте; перекрывает значение пресета.
+
+`augment` не задан: кадр такой, как его рисует сим.
+
+Экспорт (из корня репозитория; `--out` — несуществующий или пустой каталог):
+
+```bash
+python -m Services.dataset_gen.tools.export_sim_crops \
+    --config Services/line_sim/presets/letters_layered.yaml \
+    --out data/dataset_gen/sim_crops --train 300 --val 50 --seed 0 \
+    --preview data/dataset_gen/sim_crops_grid.png
+```
+
+Результат — `train/` и `val/` (`images/<класс>/*.png`, `labels.csv`), формат `export_splits`. Обучение
+читает его без правок `ml_train`; фрагмент конфига:
+
+```yaml
+data: {source: exported, root: data/dataset_gen/sim_crops, image_size: [128, 128], augment: {enabled: false}}
+model: {angle_head: true}
+```
+
+Ошибка пресета или занятый `--out` — текст `<путь>: <тип ошибки>: <причина>` и код 1; на диск не пишется ничего.
+
+## Новый продукт: что скопировать и поменять
+
+Код не трогать: нужен только каталог классов и пресет. Скопировать `letters_layered.yaml` и заменить:
+
+1. `catalog_dir` — каталог классов нового продукта (подкаталог на класс, RGBA-эталоны внутри).
+2. `layers` — слои снизу вверх; слой с `sprite_source: class://` рисует эталон класса. Имя слоя `base`
+   с `catalog_dir` зарезервировано.
+3. `train.label.angle_layer` — имя слоя `class://`, чей угол обучается (`null` — угол объекта).
+4. `train.symmetry` — симметрия классов: `overrides` только для классов нового каталога.
+5. `train.crop` — `radius` (вырез по размеру объекта) или `fixed` (`side_px`) и `output_size`.
+6. `train.background_layers` — фон нового продукта; пути `tile:` от каталога пресета.
+
+Проверка: запустить экспорт с малым `--train 2 --val 1` и открыть `--preview`.
