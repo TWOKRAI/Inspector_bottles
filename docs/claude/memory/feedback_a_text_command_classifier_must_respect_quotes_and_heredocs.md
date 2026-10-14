@@ -1,8 +1,8 @@
 ---
 name: feedback-a-text-command-classifier-must-respect-quotes-and-heredocs
 description: "Хук, блокирующий команды по тексту (classify в machine_gate.sh), с наивной резкой по ; | && блокировал бы grep -E \"a|pytest\", commit -m \"x; pytest\" и heredoc с pytest у всех сессий — резать только вне кавычек и тел heredoc, а до включения блокирующего хука прогнать его по журналам недели; ложный блок важнее ложного пропуска"
-module: scripts
-mechanism: [hooks, machine-gate, windows-env]
+module: [scripts]
+mechanism: [hooks, windows-env, dev-tooling]
 metadata:
   node_type: memory
   type: feedback
