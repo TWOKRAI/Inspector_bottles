@@ -27,27 +27,28 @@
 <!-- owner-queue:begin -->
 | # | План | Задача | Заметка |
 |---|---|---|---|
-| 1 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T0.3 | без изменений: ⚑ шаг владельца (Virtual Robot DRAStudio + `pc_probe.py all`) — открывает T4.0, T4.6 без визита |
-| 2 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.9 | **полоса Р, веха М1 «робот v2 рисует в линии на одном экране»**: T3.9 (SC_RUN несёт скорость; ревью кода APPROVED 2026-10-13, слияние — словом владельца) → T3.5b → T3.7 → T3.8 → line-sim 6.4. T3.4 `352f081e0`, T3.5 `e5cf50c04` DONE |
-| 3 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.5b | полоса Р: `v2_driver.py` стенда `robot_host` → клиент v2 (тесты T2.4) — до T3.7 |
-| 4 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.7 | полоса Р: `robot_host` линии на v2 (`apps/line_sim/pipeline.yaml:51`) — после line-sim 6.5 (тот же файл) |
-| 5 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.8 | полоса Р: вид робота из состояния линии, не своё ядро |
-| 6 | [line-sim](../line-sim/plan.md) | Task 6.4 | **веха М1**: один экран симуляторов на `pult_web` (E3) — ⛔ после T3.7, T3.8 |
-| 7 | [line-sim](../line-sim/plan.md) | Task 6.5 | **полоса С, веха М2 «сеть переобучена на слоях сима»** (2026-10-13): ассеты стенда из фикстур, правда о плитке 205x484 / 410x484 (G3). S; раньше T3.7 — сообщить SHA слияния полосе Р |
-| 8 | [layer-render](../layer-render/plan.md) | Task 6.2 | полоса С: генератор обучения из слоёв; 2.5, 6.1 DONE; литерал на выход `DatasetEngine` до 6.2 (условие CTO) |
-| 9 | [layer-render](../layer-render/plan.md) | Task 6.3 | полоса С: открывает letters-retrain Ф1 |
-| 10 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | полоса С: базовая линия сети на симе — нужно окно стенда |
-| 11 | [2026-10-13_tooling-machine-gate-hook](../2026-10-13_tooling-machine-gate-hook.md) | Task 1.1 | паузный слот, инструмент (решение владельца 2026-10-13 «полезно и нужно»): хук PreToolUse блокирует тестовые и тяжёлые команды мимо `machine_gate.sh` → 1.2 `grant/close/status`. Не фреймворк; с полосами по файлам не пересекается (`scripts/machine_gate.sh`, хук, `.claude/settings.json`) |
-| 12 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
-| 13 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
-| 14 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, за Ж Ф1, вместе с L-7 |
-| 15 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
-| 16 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
-| 17 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
-| 18 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
-| 19 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. План ред. 2 без ревью; карта `docs/maps/recipe-switch.md`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
-| 20 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене; ⛔ после Ж 1.2b-3 |
-| 21 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
+| 1 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.8 | **полоса Р, веха М1 «всё на одном экране»** (решение владельца 2026-10-14): вид робота из состояния линии, поза в `sim.robot.state`; правит `apps/line_sim/pipeline.yaml` (ключи `robot_state`, `robot_state_hz`). T3.7 `dc209d6ec` DONE |
+| 2 | [line-sim](../line-sim/plan.md) | Task 6.4 | **веха М1**: один экран симуляторов на `pult_web` — после T3.8; `pult_web` и `pipeline.yaml` — по очереди через координатора |
+| 3 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.3 | **полоса Р2 «робот как настоящий»**: команды хаба `robot_*`, потоки драйвера в scope хаба (долг T5.1). Поза драйвера — под `devices/robot_*`, не `sim.*`. T5.2 `a7b7c3c56` DONE |
+| 4 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.4 | полоса Р2: калибровка, бэкенд — после T5.3 |
+| 5 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.5 | полоса Р2: плагины — после T5.3 |
+| 6 | [line-sim](../line-sim/plan.md) | Task 4.1 | полоса С: камера сима как настоящая — fps / размер / цвет-моно; правки `pipeline.yaml` — по очереди с T3.8 и 6.4 |
+| 7 | [line-sim](../line-sim/plan.md) | Task 4.2 | полоса С: ROI — конфиг и live-команды сима |
+| 8 | [line-sim](../line-sim/plan.md) | Task 4.3 | полоса С: фотометрия сцены (`dataset_gen.augment`) |
+| 9 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T0.3 | ⚑ шаг владельца (Virtual Robot DRAStudio + `pc_probe.py all`); передача `docs/handoffs/2026-10-14_t0.3-virtual-robot.md` (VRC с Lua 5.3.1 и Modbus TCP; сухой прогон 2/53 красных) — открывает T4.0, T4.6 |
+| 10 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
+| 11 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
+| 12 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, вместе с L-7 |
+| 13 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
+| 14 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
+| 15 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
+| 16 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
+| 17 | [layer-render](../layer-render/plan.md) | Task 3.1 | **отложено владельцем 2026-10-14** — реализм картинки: пресет v2 (фон, эффекты) → 3.2 → 4.1, 4.2 → 5.1, 5.2 (панели на `pult_web` — после line-sim 6.4) → 6.5 |
+| 18 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | **отложено владельцем 2026-10-14** — веха М2: замер сети на симе → Ф1 переобучение (лучше после layer-render 3.1: эффекты = аугментация); промпт 0.4 выдан координатором 2026-10-14 |
+| 19 | [gui-constructor](../gui-constructor/plan.md) | Task 1.0 | **отложено владельцем 2026-10-14** — Qt: И2–И3 открывают робот Ф6 (T6.0–T6.5) и Qt-редактор слоёв (1.2b, 1.3); до того управление — `pult_web` и `backend_ctl` |
+| 20 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
+| 21 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене |
+| 22 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
