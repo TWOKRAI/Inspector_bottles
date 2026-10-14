@@ -123,52 +123,8 @@
   project-rules (пайплайн, п. 7).
 - **TRAPS:** classification.md §9.
 
-### Task 1.2 — `grant` / `close` / `status` и проверка формата замка [PENDING] (после 1.1: тот же `machine_gate.sh`)
-- **Level:** Middle · **Assignee:** `developer` (Sonnet); тесты — `tester` вслепую до кода
-- **Module contract:** n/a
-- **Handoff:** `tester`(RED) → `developer`(GREEN) → `reviewer`
-- **Gate:** RED тестера → GREEN (гейт `light`, один файл); `bash -n scripts/machine_gate.sh`; `ruff check -q`; `cmp` двух
-  SKILL.md; инъекции J записаны с фактом; reviewer APPROVED по SHA.
-- **Goal:** координатор меняет замок одной командой с проверкой формата; битый замок никогда не превращается
-  в тихий пропуск 75; `status` даёт числа нагрузки без ручного замера.
-- **Files:**
-  1. `scripts/machine_gate.sh`
-  2. `scripts/machine_gate_tests/test_machine_gate_lock.py` — пишет `tester`
-  3. `.claude/skills/coordinator/SKILL.md` и 4. `.claude/plugins/dev/skills/coordinator/SKILL.md` — только
-     указатель на подкоманды в §2 (одна-две строки, оба файла байт в байт одинаковы)
-- **Грамматика замка (валидатор `validate_lock`):** `\r` в конце строки отбрасывается; пустые строки
-  допустимы; разделитель полей ` | `; `<name>` = `[A-Za-z0-9._-]+`; `<kind>` ∈ {`quiet`,`heavy`,`stand`}.
-  - `coordinator: <name> | since <текст>` — ровно 2 поля, ровно одна такая строка;
-  - `window: <name> | <kind> | <что> | until ~<текст>` — 4 поля, не больше одной строки;
-  - `waiting: <name> | <kind> | <что> | <текст>` — 4 поля, сколько угодно;
-  - `stand: <непустой текст>`;
-  - любая другая строка — ошибка.
-  Ошибка → stderr `machine_gate: malformed machine.lock:<N>: <строка>`, код **2**.
-  `medium` — класс команды, не вид окна: `kind` окна только `quiet|heavy|stand`.
-- **Подкоманды:**
-  - `[--timed] heavy|medium|light <session> <cmd…>` — если замок есть, сначала `validate_lock` (битый → 2, команда
-    не запускается, до проверки окна и `timed`). `classify` замок не читает и не меняется.
-  - `grant <coordinator> <session> <kind> <minutes> <что…>` — замок обязан быть и пройти проверку;
-    `<coordinator>` = имя в строке `coordinator:`; окна нет; `minutes` — целое 1..600; в `<что>` нет `|`.
-    Пишет `window: <session> | <kind> | <что> | until ~HH:MM` (`date -d "+N minutes" +%H:%M`) сразу после строки
-    `coordinator:`, удаляет строки `waiting: <session> | …`, остальные строки сохраняет в прежнем порядке.
-    Запись атомарная: `machine.lock.tmp` в той же папке → `mv`. Любой отказ → код 2, файл байт в байт прежний.
-  - `close <coordinator> <session>` — замок обязан пройти проверку; `<coordinator>` сверяется так же, как в `grant`;
-    удаляет строку `window:` этой сессии; окно чужое или его нет → код 2. Запись и отказ — как у `grant`.
-  - `status` — печатает содержимое замка (или `machine.lock: none`), затем `ram_free_mb: <целое>` и
-    `cpu_load_pct: <целое>`. Источник: один вызов `powershell -NoProfile -Command`:
-    `Win32_OperatingSystem.FreePhysicalMemory` (КБ → МБ) и `Win32_Processor.LoadPercentage`, среднее пяти
-    замеров через 1 с (skill §3 требует 5-секундную выборку). powershell нет → `n/a`. Код 0.
-- **Steps (developer):** красный прогон → `validate_lock` → вызов во всех режимах `[--timed] heavy|medium|light` → `grant`/`close` →
-  `status` → указатель в SKILL.md: правка в `.claude/plugins/dev/skills/coordinator/SKILL.md` §2, строка «Rewrite the whole file…»
-  дополняется: «or `machine_gate.sh grant|close` — validates the format; `status` prints the lock with free RAM and CPU»;
-  затем побайтная копия в `.claude/skills/coordinator/SKILL.md` → `cmp` двух SKILL.md → `bash -n`.
-- **REDS и стражи:** [`task-1.2-reds.md`](2026-10-13_tooling-machine-gate-hook/task-1.2-reds.md) (вынесены по бюджету 32 КБ).
-- **Acceptance criteria:** все REDS зелёные, стражи зелёные; ручная проверка лидом на temp-замке:
-  `MACHINE_LOCK_DIR=<tmp> bash scripts/machine_gate.sh status` печатает два числа; битый замок → `echo $?` = `2`.
-- **Out of scope:** подкоманда `wait`/постановка в очередь; вердикт допуска по порогам (координатор судит
-  по числам сам); правка текста skill `coordinator` сверх указателя; любой демон или служба; проверка, что
-  `grant` зовёт именно сессия-координатор (имя сверяется, личность — нет).
+### Task 1.2 — `grant` / `close` / `status` и проверка формата замка [PENDING]
+Спека целиком (грамматика, подкоманды, отказы, REDS, стражи, TRAPS) — [`task-1.2.md`](2026-10-13_tooling-machine-gate-hook/task-1.2.md); инъекции J1–J18 — [`injections.md`](2026-10-13_tooling-machine-gate-hook/injections.md). Ветка `feat/tooling-machine-gate-lock`.
 
 ## Пайплайн (по `.claude/CLAUDE.md` «Task launch convention»; здесь — только специфика)
 
@@ -186,7 +142,7 @@
 3. **Разработчик** (`developer`, sonnet) — FILES выше, первая правка в первых 5 вызовах, тесты тестера не правит
    (расхождение с планом → вопрос лиду). Сообщение коммита — в файл, коммитит лид.
 4. **Инъекции — предсказание до прогона** (лид; каждая — `light` прогон одного файла): таблица I1–I7 (хук,
-   `classify`), M1–M18 (`medium`, `timed`), J1–J5 (Task 1.2) — classification.md §8 (вынесена по бюджету 32 КБ).
+   `classify`), M1–M18 (`medium`, `timed`), J1–J18 (Task 1.2) — injections.md (вынесена по бюджету 32 КБ).
 
 5. **Ревьюер кода** (`reviewer`, opus) — по зафиксированному SHA (`git diff <base>..<sha>`), получает зелёный
    вывод pre-report gate и таблицу инъекций; смотрит семантику: ложные срабатывания на обычных командах,

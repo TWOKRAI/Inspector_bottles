@@ -36,13 +36,22 @@
 | M18 | гейт: `\r` в конце записи списка не отбрасывается (временный список тестов записан с `\r\n`) | `test_gate_medium` (T1–T4, T8, T9, T13, T14) |
 | J1 | `validate_lock` всегда успешен | `test_malformed_lock_exit_2` (все) |
 | J2 | `grant` не проверяет существующее окно | `test_grant_refuses[second_window]` |
-| J3 | `close` удаляет любое окно | `test_close_refuses_foreign_window` |
+| J3 | `close` удаляет любое окно | `test_close_refuses[foreign_window]` |
 | J4 | `grant` не удаляет `waiting:` своей сессии | `test_grant_writes_window_and_drops_waiting` |
-| J5 | `validate_lock` не отбрасывает `\r` | `test_crlf_lock_is_valid` |
+| J5 | `validate_lock` и перезапись не снимают `\r` | валидатор на bash `read`: `test_live_sample_lock_is_valid[crlf]`, `test_grant_writes_window_and_drops_waiting[crlf]`; на awk — эквивалентный мутант на Git Bash (gawk 5.0.0 снимает `\r` сам: длина 25 против 26 с `BINMODE=3`) — записать как необнаруженную на Windows |
 | J6 | `validate_lock` вызывается только для `heavy|light` (режим `medium` замок не проверяет) | `test_malformed_lock_exit_2` (режимы `medium`, `--timed medium`) |
 | J7 | `kind` окна принимает и `medium` (в `grant` и в `validate_lock`) | `test_grant_refuses[medium_kind]`, `test_malformed_lock_exit_2` (замок с `medium`) |
 | J8 | `close` не сверяет имя координатора | `test_close_refuses[non_coordinator]` |
 | J9 | запись не атомарная: файл открывается на запись до проверок (`: >machine.lock` в начале `grant`) | `test_grant_refuses` (все параметры: файл обрезан или создан) |
+| J10 | `grant` не сверяет имя координатора | `test_grant_refuses` (non_coordinator, coordinator_prefix, coordinator_regex) |
+| J11 | имя координатора сравнивается регуляркой (`grep "^coordinator: $1 |"`) | `test_grant_refuses[coordinator_regex]` |
+| J12 | строки сессии ищутся по префиксу поля 1 (`window: s2*`, `waiting: s2*`) | `test_grant_writes_window_and_drops_waiting` (пропала `waiting: s22`), `test_close_refuses[foreign_window]` |
+| J13 | код `mv` не проверяется, tmp не удаляется | `test_grant_refuses[busy]` (только Windows) |
+| J14 | запись прямо в `machine.lock` после всех проверок (без tmp и `mv`) | `test_grant_writes_window_and_drops_waiting` и `test_close_removes_own_window` (`st_ino` не изменился) |
+| J15 | `set -C` убран | `test_grant_refuses[tmp_exists]` |
+| J16 | валидатор теряет последнюю строку без `\n` | `test_live_sample_lock_is_valid[no_final_newline]` — если валидатор на bash `read`; на awk — неприменимо |
+| J17 | `status` печатает замок через `cat` | `test_status_prints_lock_and_metrics[no_final_newline]` |
+| J18 | `status` не снимает `\r` с вывода powershell | `test_status_prints_lock_and_metrics` (все, регулярки с `$`), если два значения идут одной строкой через `read`; иначе эквивалентный |
 
 Стражи `test_gate_call_form_compat` (K1–K7) и `test_gate_light_file_runs_without_window` зелёные при каждой
 инъекции, кроме M7 (K6). I1 включает `test_hook_allows[no_lock]`: без замка инвертированный хук идёт дальше и
