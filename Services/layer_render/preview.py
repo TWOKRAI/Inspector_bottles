@@ -158,7 +158,7 @@ def confine_preset_paths(preset: ScenePreset, allowed_roots: Iterable[str | Path
     roots = [Path(root).resolve() for root in allowed_roots]
     values = [preset.catalog_dir] if preset.catalog_dir is not None else []
     values += [layer.sprite_source for layer in preset.layers if layer.sprite_source != CLASS_SPRITE_SOURCE]
-    # Форма после to_dict — та, что ляжет на диск: кортеж и Path внутри train не обходят ограду.
+    # Форма после to_dict — та, что сохранит preset.commit: кортеж и Path внутри train не обходят ограду.
     values += _train_tile_paths(preset.to_dict().get("train"))
     for value in values:
         try:
