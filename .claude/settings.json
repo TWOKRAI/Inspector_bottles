@@ -261,6 +261,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/core/hooks/protect-branch.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}\"/.claude/plugins/dev/hooks/machine-gate-guard.sh",
+            "timeout": 10
           }
         ]
       },
