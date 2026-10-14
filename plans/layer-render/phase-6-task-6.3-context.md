@@ -110,3 +110,29 @@
 | E10 | stdout: `{frames}` вместо `{frames * generator.num_classes}` | — (выживет: stdout не в приёмке, известно) | все |
 | E11 | `_positive_int`: `value < 0` вместо `value < 1` | Н `h2_train_zero…` | остальные |
 | E12 | `n=4` вместо `_PREVIEW_COUNT` | А `preview_grid` (размер 512×600) | Н `h3`; Н `h4` — зелёный (равенство двух прогонов) |
+
+**Наблюдено** (2026-10-14, `397843e98`, worktree `-inj`, `junior`; база 43 passed = 13 + 10 + 20; откат после каждой строки, итог `git status` пуст):
+
+| # | Красных | Наблюдено | Против предсказания |
+|---|---|---|---|
+| E1 | 2 | А `same_seed_same_bytes`, Н `h4` | точно |
+| E2 | 6 | А `bad_config` ×4, А `module_entry_bad_config`, Н `h7` | больше: Н `h7` (не предсказывал) |
+| E3 | 6 | А `bad_config` ×4, А `module_entry_bad_config`, Н `h7` | точно |
+| E4 | 2 | Н `h1_nonempty…`, Н `h1_out_is_a_file…` | точно |
+| E5 | 3 | А `layout…`, А `labels_columns…`, А `second_product…` | точно |
+| E6 | 5 | А `layout…`, А `labels_columns…`, А `images_match…`, А `second_product…`, Н `h1_empty_existing_out_accepted` | больше: Н `h1_empty…` |
+| E7 | 1 | Н `h4` | точно |
+| E8 | 1 | Н `h5` | точно |
+| E9 | 2 | А `bad_config[no_catalog]`, Н `h7` | точно |
+| E10 | 0 | — | точно: выживший предсказан (stdout вне приёмки) — «Открыто» |
+| E11 | 1 | Н `h2_train_zero…` | точно |
+| E12 | 1 | А `preview_grid` | точно |
+
+Итог: 12/12 по предсказанному набору; точно 10, красных больше 2, меньше 0; выживший 1 (E10, предсказан).
+Литерал 6.3.0 зелёный во всех строках.
+
+**ACCEPTANCE 6 — прогон лида** (2026-10-14, `397843e98`, боевой `letters_layered.yaml`, `data/line_sim` junction из main-checkout):
+экспорт `--train 20 --val 5 --seed 0 --preview` — 6 с, exit 0; `train/labels.csv` 80 строк, `val` 20; смоук `ml_train`
+`source: exported` — батч `(16, 3, 128, 128)` float32, цели `class_index (16,)`, `angle (16, 2)`, `angle_valid (16,)`;
+`class_names ['А', 'К', 'Р', 'Х']`; `symmetry_map {А: none, К: none, Р: none, Х: 180}`; train 80 / val 20. Сетка 4×4
+глазами: диск целиком в кадре, буква читается, фон — текстура ленты с тёмными щелями, подписи углов согласуются с поворотом.
