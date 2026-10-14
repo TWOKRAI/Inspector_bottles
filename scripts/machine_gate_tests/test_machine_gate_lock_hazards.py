@@ -48,11 +48,14 @@ def lock_dir(tmp_path: Path) -> Path:
     return d
 
 
-def _run(bash: str, args: list[str], lock_dir: Path) -> subprocess.CompletedProcess[bytes]:
+def _run(
+    bash: str, args: list[str], lock_dir: Path, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[bytes]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env["PYTHONUTF8"] = "1"
     env["MACHINE_LOCK_DIR"] = lock_dir.as_posix()  # без этого гейт трогает живой замок
+    env.update(extra_env or {})
     return subprocess.run(
         [bash, GATE, *args],
         capture_output=True,
@@ -172,11 +175,16 @@ def test_concurrent_grants_exactly_one_wins(bash: str, lock_dir: Path) -> None:
         _assert_valid_lock(bash, lock_dir)
 
 
-# BASH_ENV читает каждый неинтерактивный bash: функция date с паузой между первой проверкой grant и захватом
-# machine.lock.tmp (окно гонки); файл-след задаёт тест через переменную DATE_MARK.
+# BASH_ENV читает каждый неинтерактивный bash: функция date ждёт файл-сигнал между первой проверкой grant и
+# захватом machine.lock.tmp (окно гонки; цикл ограничен 200 x 0,05 с). Файлы задаёт тест: DATE_MARK - след
+# вызова, DATE_GO - сигнал продолжать.
 SLOW_DATE_ENV = """date() {
+    local i
     echo called >> "$DATE_MARK"
-    sleep 3
+    for ((i = 0; i < 200; i++)); do
+        [ -e "$DATE_GO" ] && break
+        sleep 0.05
+    done
     command date "$@"
 }
 """
@@ -191,6 +199,7 @@ def test_grant_does_not_write_from_a_stale_read(bash: str, lock_dir: Path, tmp_p
     bash_env = tmp_path / "slow_date.sh"
     bash_env.write_bytes(SLOW_DATE_ENV.encode("utf-8"))
     mark = tmp_path / "date.called"
+    go = tmp_path / "date.go"
     lock = lock_dir / "machine.lock"
     lock.write_bytes(R1)
 
@@ -200,6 +209,7 @@ def test_grant_does_not_write_from_a_stale_read(bash: str, lock_dir: Path, tmp_p
     env["MACHINE_LOCK_DIR"] = lock_dir.as_posix()
     env["BASH_ENV"] = bash_env.as_posix()
     env["DATE_MARK"] = mark.as_posix()
+    env["DATE_GO"] = go.as_posix()
     slow = subprocess.Popen(
         [bash, GATE, "grant", "c1", "s3", "heavy", "20", "slow"],
         stdout=subprocess.PIPE,
@@ -215,6 +225,7 @@ def test_grant_does_not_write_from_a_stale_read(bash: str, lock_dir: Path, tmp_p
             waited += 0.1
         assert mark.exists(), "grant не вызвал date: тест не проверяет гонку"
         fast = _run(bash, ["grant", "c1", "s2", "heavy", "20", "fast"], lock_dir)  # A: с обычным date
+        go.write_bytes(b"go")  # A закончил: B может продолжить
         out, err = slow.communicate(timeout=CALL_TIMEOUT)
     finally:
         if slow.poll() is None:
@@ -229,6 +240,69 @@ def test_grant_does_not_write_from_a_stale_read(bash: str, lock_dir: Path, tmp_p
     assert len(window_lines) == 1 and window_lines[0].startswith("window: s2 | heavy | fast | until ~"), text
     assert "waiting: s3 |" in text, "waiting медленного grant снят, хотя окно ему не выдано"
     assert sorted(p.name for p in lock_dir.iterdir()) == ["machine.lock"]
+
+
+# BASH_ENV: printf, который падает на строке `coordinator:` замка (запись нового содержимого в tmp не удаётся).
+FAILING_PRINTF_ENV = """printf() {
+    case $2 in
+        'coordinator: '*) return 1 ;;
+    esac
+    builtin printf "$@"
+}
+"""
+
+
+WITH_WINDOW = _lines(R1_LINES[0], "window: s2 | heavy | x | until ~23:59", *R1_LINES[1:])
+
+
+@pytest.mark.parametrize(
+    ("argv", "before"),
+    [
+        pytest.param(["grant", "c1", "s2", "heavy", "20", "x"], R1, id="grant"),
+        pytest.param(["close", "c1", "s2"], WITH_WINDOW, id="close"),
+    ],
+)
+def test_failed_write_is_refused_and_leaves_lock_untouched(
+    bash: str, lock_dir: Path, tmp_path: Path, argv: list[str], before: bytes
+) -> None:
+    lock = lock_dir / "machine.lock"
+    lock.write_bytes(before)
+    bash_env = tmp_path / "failing_printf.sh"
+    bash_env.write_bytes(FAILING_PRINTF_ENV.encode("utf-8"))
+
+    res = _run(bash, argv, lock_dir, extra_env={"BASH_ENV": bash_env.as_posix()})
+
+    assert res.returncode == 2, (res.returncode, res.stdout, res.stderr)
+    assert res.stderr == b"machine_gate: cannot replace machine.lock (busy), retry\n", res.stderr
+    assert lock.read_bytes() == before, "сбой записи затёр или изменил замок"
+    assert sorted(p.name for p in lock_dir.iterdir()) == ["machine.lock"], "остался machine.lock.tmp"
+
+
+# --- битый замок: проверка до реклассификации и чтения списка timed ------------------------------------------------
+
+MALFORMED_PLAIN = b"coordinator: c1 | since x\nwindw: x\n"
+
+
+@pytest.mark.parametrize(
+    ("argv", "use_missing_timed_list"),
+    [
+        # classify поднял бы light до heavy (pytest_no_file_args): `reclassified` в stderr, если проверка позже
+        pytest.param(["light", "s2", "python", "-m", "pytest", "--version"], False, id="would_reclassify"),
+        # нет списка timed: `timed list not found` в stderr, если проверка позже
+        pytest.param(["medium", "s2", "echo", "RAN"], True, id="timed_list_missing"),
+    ],
+)
+def test_malformed_lock_is_refused_before_reclassify_and_timed_list(
+    bash: str, lock_dir: Path, tmp_path: Path, argv: list[str], use_missing_timed_list: bool
+) -> None:
+    (lock_dir / "machine.lock").write_bytes(MALFORMED_PLAIN)
+    extra = {"MACHINE_GATE_TIMED_LIST": (tmp_path / "none.txt").as_posix()} if use_missing_timed_list else None
+
+    res = _run(bash, argv, lock_dir, extra_env=extra)
+
+    assert res.returncode == 2, (res.returncode, res.stdout, res.stderr)
+    assert res.stderr == b"machine_gate: malformed machine.lock:2: windw: x\n", res.stderr
+    assert b"RAN" not in res.stdout and b"pytest" not in res.stdout, res.stdout
 
 
 # --- (b) status на замке с CRLF: ни одного \r в выводе ----------------------------------------------------------------

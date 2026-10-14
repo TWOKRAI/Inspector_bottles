@@ -447,13 +447,16 @@ edit_write() {
         else
             [ "$f" = "window: $session" ] && continue
         fi
-        printf '%s\n' "$line"
+        printf '%s\n' "$line" || return 1
         if [ "$op" = grant ]; then
             case $line in
-                'coordinator: '*) printf 'window: %s | %s | %s | until ~%s\n' "$session" "$wkind" "$what" "$until_hhmm" ;;
+                'coordinator: '*)
+                    printf 'window: %s | %s | %s | until ~%s\n' "$session" "$wkind" "$what" "$until_hhmm" || return 1
+                    ;;
             esac
         fi
     done
+    return 0
 }
 
 # grant | close: $1 = grant|close, дальше аргументы подкоманды.
@@ -487,7 +490,7 @@ cmd_edit() {
         rm -f "$tmp"
         exit 2
     fi
-    if ! edit_write >"$tmp" 2>/dev/null || ! mv "$tmp" "$machine_lock" >/dev/null 2>&1; then
+    if ! edit_write >"$tmp" 2>/dev/null || ! mv -f "$tmp" "$machine_lock" </dev/null >/dev/null 2>&1; then
         rm -f "$tmp"
         refuse "cannot replace machine.lock (busy), retry"
     fi
