@@ -255,6 +255,7 @@ class RobotDriverV2(BaseDeviceDriver):
         self._jog_tx_lock = threading.Lock()
         self._busy = False  # идёт программа
         self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
+        self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
         self._last_hold = 0.0  # время последнего jog_hold активного jog
         self._jog: _JogRun | None = None
         self._prog_thread: threading.Thread | None = None
@@ -541,7 +542,13 @@ class RobotDriverV2(BaseDeviceDriver):
         item: tuple[float, float, float] | None = None
         with self._flags_lock:
             run = self._jog
-            if self._busy or self._jog_starting or (run is not None and run.active) or self._job_active:
+            if (
+                self._busy
+                or self._jog_starting
+                or self._jog_stopping
+                or (run is not None and run.active)
+                or self._job_active
+            ):
                 return
             if self._return_queue:
                 item = self._return_queue.popleft()
@@ -791,8 +798,15 @@ class RobotDriverV2(BaseDeviceDriver):
             run.released = True
             run.stop_requested = True
             run.wake.set()
-        self._join(run.thread, _LEASE_JOIN_S)  # вне _jog_tx_lock: поток поводка сам может ждать этот замок
-        self._stop_jog(run)
+            # T3.7 (ревью р.1): поток поводка выходит (active = False) раньше записи стопа — до её возврата тик
+            # не берёт задание, иначе SOFT этого jog оборвал бы CVT_JOB (E_ABORTED)
+            self._jog_stopping = True
+        try:
+            self._join(run.thread, _LEASE_JOIN_S)  # вне _jog_tx_lock: поток поводка сам может ждать этот замок
+            self._stop_jog(run)
+        finally:
+            with self._flags_lock:
+                self._jog_stopping = False
         return {"status": "ok"}
 
     def _stop_jog(self, run: _JogRun) -> None:

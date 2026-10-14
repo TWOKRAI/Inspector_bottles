@@ -789,6 +789,51 @@ def test_tick_does_not_take_job_while_jog_is_starting() -> None:
         assert _call(drv, "jog_release")["status"] == "ok"
 
 
+def test_job_waits_for_jog_release_stop_in_flight() -> None:
+    """Ревью T3.7 р.1: окно jog_release между выходом потока поводка и возвратом стопа SOFT.
+
+    Стоп release задержан барьером (Event, не сон) дольше трёх тиков; jog у края зоны, робот свободен. Пока стоп
+    не вернулся, тик не берёт задание: иначе SOFT этого jog оборвал бы CVT_JOB (E_ABORTED, jobs_failed 1).
+    """
+    rec = _Rec()
+    entered, release = threading.Event(), threading.Event()
+    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = drv._client  # шов: стоп release — метод клиента драйвера
+        original_stop = client.stop
+
+        def stop(level: int) -> Any:
+            entered.set()
+            release.wait(5.0)
+            return original_stop(level)
+
+        hold_args = {"dir": 5, "spd": 50}
+        assert _call(drv, "jog_hold", hold_args)["status"] == "ok"
+        end = time.monotonic() + 15.0
+        while not _count_ev(rig, _DONE_JOG):  # подтверждения из этого потока: стоп release — единственный стоп
+            assert time.monotonic() < end, "jog не дошёл до края зоны за 15 с"
+            assert _call(drv, "jog_hold", hold_args)["status"] == "ok"
+            time.sleep(0.05)
+        assert _call(drv, "enqueue_job", _PICK) == {"status": "ok", "queue_len": 1}
+        assert _call(drv, "jog_hold", hold_args)["status"] == "ok"
+        client.stop = stop
+        mark = len(rig.core.events())
+        releaser = threading.Thread(target=lambda: drv.call("jog_release", {}), name="t37-release", daemon=True)
+        releaser.start()
+        try:
+            assert entered.wait(5.0), "jog_release не дошёл до стопа"
+            assert not release.wait(0.4)  # окно дольше трёх тиков pulse 0.1 с
+            assert _count_ev(rig, _CMD_CVT, mark) == 0, "задание ушло, пока стоп jog_release в полёте"
+            assert drv.snapshot()["queue_len"] == 1
+        finally:
+            release.set()
+            releaser.join(5.0)
+        client.stop = original_stop
+        assert not releaser.is_alive()
+        _until(lambda: drv.snapshot()["jobs_done"] + drv.snapshot()["jobs_failed"] >= 1, 15.0, "исход задания")
+        snap = drv.snapshot()
+        assert (snap["jobs_done"], snap["jobs_failed"]) == (1, 0)
+
+
 def test_job_waits_for_jog_at_zone_edge_while_robot_is_free() -> None:
     """I11b: jog дошёл до края зоны (DONE JOG_CONT, робот свободен), удержание продолжается — задание ждёт."""
     rec = _Rec()
