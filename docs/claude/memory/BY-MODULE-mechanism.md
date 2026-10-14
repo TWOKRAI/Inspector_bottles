@@ -88,7 +88,7 @@
 - [project_topology_event_ordering](project_topology_event_ordering.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
 
-## break-injection (40)
+## break-injection (41)
 
 - [feedback_a_guard_that_counts_at_least_once_is_blind](feedback_a_guard_that_counts_at_least_once_is_blind.md)
 - [feedback_a_test_that_pins_a_hole_is_green_both_ways](feedback_a_test_that_pins_a_hole_is_green_both_ways.md)
@@ -129,6 +129,7 @@
 - [feedback_two_green_gates_can_hide_a_red_pair](feedback_two_green_gates_can_hide_a_red_pair.md)
 - [feedback_two_patches_one_red_set_means_one_assert](feedback_two_patches_one_red_set_means_one_assert.md)
 - [feedback_unkillable_fix_needs_a_hand_set_state](feedback_unkillable_fix_needs_a_hand_set_state.md)
+- [feedback_yaml_safe_load_raises_more_than_yamlerror](feedback_yaml_safe_load_raises_more_than_yamlerror.md)
 - [project_metrics_freeze_s27](project_metrics_freeze_s27.md)
 
 ## concurrency (25)
@@ -665,7 +666,7 @@
 - [project_storage_stack_verdict](project_storage_stack_verdict.md)
 - [reference_tech_stack_2026](reference_tech_stack_2026.md)
 
-## test-assertions (57)
+## test-assertions (59)
 
 - [feedback_a_criterion_that_transforms_observes_the_library](feedback_a_criterion_that_transforms_observes_the_library.md)
 - [feedback_a_test_that_pins_a_hole_is_green_both_ways](feedback_a_test_that_pins_a_hole_is_green_both_ways.md)
@@ -721,6 +722,8 @@
 - [feedback_unkillable_fix_needs_a_hand_set_state](feedback_unkillable_fix_needs_a_hand_set_state.md)
 - [feedback_wildcard_resolver_empty_must_read_none](feedback_wildcard_resolver_empty_must_read_none.md)
 - [feedback_windowed_voice_is_a_process_wide_singleton](feedback_windowed_voice_is_a_process_wide_singleton.md)
+- [feedback_windows_device_names_pass_whitelist_and_resolve](feedback_windows_device_names_pass_whitelist_and_resolve.md)
+- [feedback_yaml_safe_load_raises_more_than_yamlerror](feedback_yaml_safe_load_raises_more_than_yamlerror.md)
 - [project_backend_ctl_missing_contract](project_backend_ctl_missing_contract.md)
 - [project_fencing_test_race](project_fencing_test_race.md)
 - [project_seqlock_contention_semantics](project_seqlock_contention_semantics.md)
@@ -778,7 +781,7 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (19)
+## windows-env (20)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
@@ -794,6 +797,7 @@
 - [feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows](feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows.md)
 - [feedback_tmp_dir_is_inside_a_git_repo_on_main](feedback_tmp_dir_is_inside_a_git_repo_on_main.md)
 - [feedback_uv_sync_prunes_venv](feedback_uv_sync_prunes_venv.md)
+- [feedback_windows_device_names_pass_whitelist_and_resolve](feedback_windows_device_names_pass_whitelist_and_resolve.md)
 - [project_app_module_windows_test_debt](project_app_module_windows_test_debt.md)
 - [project_cuda_torch_setup](project_cuda_torch_setup.md)
 - [project_git_bash_cr_rename_and_cim_quirks_on_windows](project_git_bash_cr_rename_and_cim_quirks_on_windows.md)
