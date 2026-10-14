@@ -53,14 +53,14 @@ class _Rec:
 
 
 @contextmanager
-def _driver(rec: _Rec, port: int) -> Iterator[RobotDriverV2]:
+def _driver(rec: _Rec, port: int, params: dict | None = None) -> Iterator[RobotDriverV2]:
     entry = DeviceEntry(
         id="rv2",
         name="rv2",
         kind="robot",
         protocol="delta_v2",
         transport={"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": ROBOT_UNIT_ID},
-        params={},
+        params=dict(params or {}),
     )
     drv = RobotDriverV2(entry, None, publish=rec)
     try:
@@ -200,6 +200,133 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
         assert _moving(rig) == 1, "новый jog не двигает робот"
         assert stamps["hold_returned"] >= stamps["stop_returned"], "JOG_CONT ушёл раньше, чем вернулся стоп"
         assert _call(drv, "jog_release")["status"] == "ok"
+
+
+def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
+    """Близнец U2 на пути истёкшего окна (Д3): стоп шлёт поток поводка, ``jog_hold`` застаёт его в полёте.
+
+    Подтверждения удержания прекращены — окно истекает, поток поводка шлёт стоп под замком перехода. Шов — ТОЛЬКО
+    стоп из потока поводка (имя потока ``rv2-lease-...``): он ждёт ворота, ворота открывает возврат нового
+    ``JOG_CONT``. С замком ``jog_hold`` ждёт замок, стоп уходит по дедлайну ворот, затем ``JOG_CONT``. Без замка
+    на стороне поводка ``jog_hold`` шлёт запасной стоп и ``JOG_CONT``, запоздалый стоп поводка обрывает новый jog,
+    а тик публикует чужую ошибку обрыва (seq нового jog не в списке своих стопов).
+
+    Ждём в sim: новый ``JOG_CONT`` принят, для его seq нет строки ``ERR``, робот движется; новых
+    ``last_error`` за гонку нет; ``jog_hold`` вернулся не раньше стопа поводка.
+    """
+    rec = _Rec()
+    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+        assert _call(drv, "jog_hold", _JOG)["status"] == "ok"
+        _hold(drv, 0.4)
+        assert _moving(rig) == 1
+        n_cmd = len(_jog_cmds(rig))
+        n_err = len(rec.at("rv2", "last_error"))
+
+        client = drv._client
+        real_stop = client.stop
+        real_jog_cont = client.jog_cont
+        entered = threading.Event()
+        gate = threading.Event()
+        first = threading.Lock()
+        stamps: dict[str, float] = {}
+
+        def gated_stop(level: int) -> Any:
+            if not threading.current_thread().name.startswith("rv2-lease-") or not first.acquire(blocking=False):
+                return real_stop(level)  # не стоп потока поводка — без задержки
+            entered.set()
+            gate.wait(_GATE_S)  # с замком ворота не откроются (JOG_CONT ждёт этот стоп) — отпускает дедлайн
+            result = real_stop(level)
+            stamps["stop_returned"] = time.monotonic()
+            return result
+
+        def jog_cont_then_open(direction: int, speed: int) -> Any:
+            result = real_jog_cont(direction, speed)
+            gate.set()
+            return result
+
+        client.stop = gated_stop  # type: ignore[method-assign]
+        client.jog_cont = jog_cont_then_open  # type: ignore[method-assign]
+        try:
+            # подтверждений нет: окно 0.2 с истекает, поток поводка сам шлёт стоп
+            assert entered.wait(5.0), "стоп истёкшего окна не начался"
+            hold = _call(drv, "jog_hold", _JOG)
+            stamps["hold_returned"] = time.monotonic()
+        finally:
+            client.stop = real_stop  # type: ignore[method-assign]
+            client.jog_cont = real_jog_cont  # type: ignore[method-assign]
+
+        assert hold["status"] == "ok", hold
+        assert len(_jog_cmds(rig)) == n_cmd + 1, "новый JOG_CONT не принят роботом"
+        new_seq = hold["seq"]
+        _hold(drv, 0.4)
+        aborted = [text for _, text in rig.core.events() if f"[v2] ERR seq={new_seq} " in text]
+        assert aborted == [], f"новый jog оборван запоздалым стопом окна: {aborted}"
+        assert rec.at("rv2", "last_error")[n_err:] == [], "чужая ошибка обрыва в last_error"
+        assert _moving(rig) == 1, "новый jog не двигает робот"
+        assert stamps["hold_returned"] >= stamps["stop_returned"], "JOG_CONT ушёл раньше, чем вернулся стоп окна"
+        assert _call(drv, "jog_release")["status"] == "ok"
+
+
+# --------------------------------------------------------------------------------------------------
+# Д4: start_program во время перехода jog
+# --------------------------------------------------------------------------------------------------
+
+
+def test_start_program_during_jog_hold_transition_returns_busy_jog() -> None:
+    """``start_program`` в окне ``jog_hold`` между проверкой флагов и записью ``self._jog`` (Д4).
+
+    Шов: обёртка ``client.jog_cont`` зовёт ``start_program`` ДО настоящего ``JOG_CONT`` — ``jog_hold`` уже прошёл
+    проверку ``_busy``, но свой jog ещё не записал. Ждём: ``start_program`` отказывает литералом «робот в режиме
+    jog», в sim нет строки ``SC start`` (программа не запущена), новый jog принят и двигает робот.
+    """
+    points = {
+        "a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1),
+        "b": Point(name="b", x=300, y=-210, z=-40, rz=-100, hand=1),
+    }
+    program = Program(name="race", steps=tuple(Move(point="a" if i % 2 == 0 else "b", kind="JOINT") for i in range(4)))
+    rec = _Rec()
+    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = drv._client
+        real_jog_cont = client.jog_cont
+        box: dict[str, Any] = {}
+
+        def jog_cont_with_program(direction: int, speed: int) -> Any:
+            box["prog"] = drv.start_program(program, points, None, name="race")
+            return real_jog_cont(direction, speed)
+
+        client.jog_cont = jog_cont_with_program  # type: ignore[method-assign]
+        try:
+            n_cmd = len(_jog_cmds(rig))
+            hold = _call(drv, "jog_hold", _JOG)
+        finally:
+            client.jog_cont = real_jog_cont  # type: ignore[method-assign]
+
+        assert box["prog"] == {"status": "error", "message": "робот в режиме jog"}
+        assert hold["status"] == "ok", hold
+        _hold(drv, 0.4)
+        assert [t for _, t in rig.core.events() if "[v2] SC start" in t] == [], "программа запущена во время jog"
+        assert len(_jog_cmds(rig)) == n_cmd + 1
+        assert _moving(rig) == 1
+        assert _call(drv, "jog_release")["status"] == "ok"
+
+
+# --------------------------------------------------------------------------------------------------
+# Предупреждение: интервал тика больше четверти таймаута сторожа
+# --------------------------------------------------------------------------------------------------
+
+
+def test_connect_warns_when_tick_interval_exceeds_quarter_watchdog() -> None:
+    """Сторож по умолчанию 3000 мс -> четверть 0.75 с. Тик 1.0 с -> предупреждение; тик 0.1 с -> его нет."""
+    text = "интервал тика больше четверти таймаута сторожа"
+    with E2eRig() as rig:
+        slow = _Rec()
+        with _driver(slow, rig.port, {"poll_interval_s": 1.0}):
+            pass
+        fast = _Rec()
+        with _driver(fast, rig.port, {"poll_interval_s": 0.1}):
+            pass
+    assert text in slow.at("rv2", "last_error")
+    assert text not in fast.at("rv2", "last_error")
 
 
 # --------------------------------------------------------------------------------------------------

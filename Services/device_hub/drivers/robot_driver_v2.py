@@ -186,6 +186,7 @@ class RobotDriverV2(BaseDeviceDriver):
         self._flags_lock = threading.Lock()
         self._jog_tx_lock = threading.Lock()
         self._busy = False  # идёт программа
+        self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
         self._last_hold = 0.0  # время последнего jog_hold активного jog
         self._jog: _JogRun | None = None
         self._prog_thread: threading.Thread | None = None
@@ -347,8 +348,11 @@ class RobotDriverV2(BaseDeviceDriver):
         if self._transport is not None:
             try:
                 self._transport.disconnect()
-            except Exception:
+            except Exception as exc:
                 self._record_err()  # сбой закрытия фиксируется, не глушится молча (как v1)
+                logger.warning(
+                    f"робот {self.entry.id!r}: транспорт при отключении не закрыт: {type(exc).__name__}: {exc}"
+                )
         self._last_quality = "bad"
 
     @staticmethod
@@ -419,8 +423,9 @@ class RobotDriverV2(BaseDeviceDriver):
                     continue  # свой стоп jog — ожидаемый обрыв (Д1)
                 text = ev.text if ev.missed <= 0 else f"{ev.text} (пропущено {ev.missed})"
                 self._publish_error(text)
-        except Exception:
+        except Exception as exc:
             self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: ошибки робота не прочитаны: {type(exc).__name__}: {exc}")
         quality = "bad" if self._stats["tx_err"] > err_before else "good"
         return self.snapshot(data, quality=quality)
 
@@ -437,8 +442,9 @@ class RobotDriverV2(BaseDeviceDriver):
             return
         try:
             self._transport.disconnect()
-        except Exception:
+        except Exception as exc:
             self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: сокет после обрыва не закрыт: {type(exc).__name__}: {exc}")
 
     def _resync_maybe(self, client: RobotClientV2) -> None:
         """Метка робота не равна метке ПК -> sync_params снова (§11.4 п.4), не при программе или jog."""
@@ -501,17 +507,23 @@ class RobotDriverV2(BaseDeviceDriver):
                     self._last_hold = self._clock()
                     return {"status": "ok"}
                 prev = self._jog
-            if prev is not None and prev.stop_requested and not prev.stop_sent:
-                self._stop_jog_locked(prev)  # release / окно ещё не дослали стоп — шлём его сами, один раз
-            result = client.jog_cont(direction, speed)
-            run = _JogRun(seq=result.seq)
-            run.thread = threading.Thread(
-                target=self._lease_loop, args=(run,), name=f"rv2-lease-{self.entry.id}", daemon=True
-            )
-            with self._flags_lock:
-                self._jog = run
-                self._last_hold = self._clock()
-            run.thread.start()
+                # Д4: от проверки _busy до записи self._jog start_program видит переход как jog (_BUSY_JOG)
+                self._jog_starting = True
+            try:
+                if prev is not None and prev.stop_requested and not prev.stop_sent:
+                    self._stop_jog_locked(prev)  # release / окно ещё не дослали стоп — шлём его сами, один раз
+                result = client.jog_cont(direction, speed)
+                run = _JogRun(seq=result.seq)
+                run.thread = threading.Thread(
+                    target=self._lease_loop, args=(run,), name=f"rv2-lease-{self.entry.id}", daemon=True
+                )
+                with self._flags_lock:
+                    self._jog = run
+                    self._last_hold = self._clock()
+                run.thread.start()
+            finally:
+                with self._flags_lock:
+                    self._jog_starting = False
         return {"status": "ok", "seq": result.seq}
 
     def _holding_locked(self) -> bool:
@@ -582,7 +594,7 @@ class RobotDriverV2(BaseDeviceDriver):
             if self._busy:
                 return dict(_BUSY_PROGRAM)
             run = self._jog
-            if run is not None and run.active:
+            if self._jog_starting or (run is not None and run.active):
                 return dict(_BUSY_JOG)
             if not self.is_connected:
                 return dict(_NOT_CONNECTED)
