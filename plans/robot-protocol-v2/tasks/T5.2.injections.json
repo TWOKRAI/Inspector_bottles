@@ -1,0 +1,250 @@
+[
+ {
+  "id": "I1",
+  "prop": "отказ чужой ревизии",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n",
+    "new": ""
+   }
+  ],
+  "forecast": "A1 A2 A3 A6 U2 U6 U12"
+ },
+ {
+  "id": "I2",
+  "prop": "сравнение и замена под одним замком: замка в write нет",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        with self._doc_lock(dev, rel):\n            raw = _read_bytes(path)\n            current_rev = None if raw is None else compute_rev(raw)\n",
+    "new": "        with __import__('contextlib').nullcontext():\n            raw = _read_bytes(path)\n            current_rev = None if raw is None else compute_rev(raw)\n"
+   }
+  ],
+  "forecast": "A2 U3 U6 (U5?)"
+ },
+ {
+  "id": "I3",
+  "prop": "замена вне замка",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        with self._doc_lock(dev, rel):\n            raw = _read_bytes(path)\n            current_rev = None if raw is None else compute_rev(raw)\n            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n            _atomic_write(path, data)\n        return compute_rev(data)\n",
+    "new": "        with self._doc_lock(dev, rel):\n            raw = _read_bytes(path)\n            current_rev = None if raw is None else compute_rev(raw)\n            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n        _atomic_write(path, data)\n        return compute_rev(data)\n"
+   }
+  ],
+  "forecast": "A2 U3 U6 (U5?)"
+ },
+ {
+  "id": "I4",
+  "prop": "None = создание",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n",
+    "new": "            if base_rev is not None and base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n"
+   }
+  ],
+  "forecast": "A3 U6 (U12?)"
+ },
+ {
+  "id": "I5",
+  "prop": "ревизия от байтов диска: кэш в экземпляре",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        with self._doc_lock(dev, rel):\n            raw = _read_bytes(path)\n            current_rev = None if raw is None else compute_rev(raw)\n            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n            _atomic_write(path, data)\n        return compute_rev(data)\n",
+    "new": "        with self._doc_lock(dev, rel):\n            raw = _read_bytes(path)\n            current_rev = self.__dict__.setdefault('_revs', {}).get((dev, rel), None if raw is None else compute_rev(raw))\n            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n            _atomic_write(path, data)\n        self.__dict__.setdefault('_revs', {})[(dev, rel)] = compute_rev(data)\n        return compute_rev(data)\n"
+   }
+  ],
+  "forecast": "A3"
+ },
+ {
+  "id": "I6",
+  "prop": "атомарность: запись прямо в цель",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "    path.parent.mkdir(parents=True, exist_ok=True)\n    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f\".{path.name}.\", suffix=\".tmp\")\n    try:\n        with os.fdopen(fd, \"wb\") as fh:\n            fh.write(data)\n            fh.flush()\n            os.fsync(fh.fileno())\n        _replace_with_retry(tmp, str(path))\n    except BaseException:\n        try:\n            os.unlink(tmp)\n        except OSError:\n            log.warning(\"robot_comm.store: не удалось удалить временный файл %s\", tmp, exc_info=True)\n        raise\n",
+    "new": "    path.parent.mkdir(parents=True, exist_ok=True)\n    path.write_bytes(data)\n"
+   }
+  ],
+  "forecast": "A2 A4 A5 A10 U1 U3 U4 U6 (U5?)"
+ },
+ {
+  "id": "I7",
+  "prop": "tmp рядом с целью",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "tempfile.mkstemp(dir=path.parent, prefix=",
+    "new": "tempfile.mkstemp(prefix="
+   }
+  ],
+  "forecast": "A5"
+ },
+ {
+  "id": "I8",
+  "prop": "tmp убран при сбое",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        try:\n            os.unlink(tmp)\n        except OSError:\n            log.warning(\"robot_comm.store: не удалось удалить временный файл %s\", tmp, exc_info=True)\n        raise\n",
+    "new": "        raise\n"
+   }
+  ],
+  "forecast": "A4 A10 (U1?)"
+ },
+ {
+  "id": "I9",
+  "prop": "замок отпускается при сбое",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        with self._doc_lock(dev, rel):\n            raw = _read_bytes(path)\n            current_rev = None if raw is None else compute_rev(raw)\n            if base_rev != current_rev:\n                raise RevisionConflict(current_rev)\n            _atomic_write(path, data)\n        return compute_rev(data)\n",
+    "new": "        lock = self._doc_lock(dev, rel)\n        lock.acquire()\n        raw = _read_bytes(path)\n        current_rev = None if raw is None else compute_rev(raw)\n        if base_rev != current_rev:\n            raise RevisionConflict(current_rev)\n        _atomic_write(path, data)\n        lock.release()\n        return compute_rev(data)\n"
+   }
+  ],
+  "forecast": "A3 A4 U1 U2"
+ },
+ {
+  "id": "I10",
+  "prop": "изоляция устройств: документы",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        return dev, rel, self._root / dev / rel\n",
+    "new": "        return dev, rel, self._root / rel\n"
+   }
+  ],
+  "forecast": "A1 A2 A3 A4 A5 A6 A10 U1 U8x3 U11 U15 (U4?)"
+ },
+ {
+  "id": "I10b",
+  "prop": "изоляция устройств: программы",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        return dev, rel, self._root / dev / \"programs\" / f\"{name}{_SUFFIX}\"\n",
+    "new": "        return dev, rel, self._root / \"programs\" / f\"{name}{_SUFFIX}\"\n"
+   }
+  ],
+  "forecast": "A1 A6 A8 A9 U6 U7 U9 U13"
+ },
+ {
+  "id": "I11",
+  "prop": "белый список device_id",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "if not isinstance(device_id, str) or not _DEVICE_RE.fullmatch(device_id) or _is_reserved(device_id):",
+    "new": "if not isinstance(device_id, str) or _is_reserved(device_id):"
+   }
+  ],
+  "forecast": "A7"
+ },
+ {
+  "id": "I12",
+  "prop": "обе линии имени программы",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "            or not _PROGRAM_RE.fullmatch(name)\n",
+    "new": ""
+   },
+   {
+    "old": "        if (expected_dir / f\"{name}{_SUFFIX}\").resolve().parent != expected_dir:\n            raise InvalidStoreKey(name)\n",
+    "new": ""
+   }
+  ],
+  "forecast": "A8 A9"
+ },
+ {
+  "id": "I13",
+  "prop": "list_programs — все файлы",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        for entry in directory.iterdir():\n            if not entry.name.endswith(_SUFFIX) or not entry.is_file():\n                continue\n            name = entry.name[: -len(_SUFFIX)]\n            try:\n                self._program_path(dev, name)\n            except InvalidStoreKey:\n                continue\n            names.append(name)\n",
+    "new": "        for entry in directory.iterdir():\n            names.append(entry.name[: -len(_SUFFIX)] if entry.name.endswith(_SUFFIX) else entry.name)\n"
+   }
+  ],
+  "forecast": "A9"
+ },
+ {
+  "id": "I14a",
+  "prop": "повтор PermissionError: без повтора",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "    for pause in _REPLACE_PAUSES:\n",
+    "new": "    for pause in ():\n"
+   }
+  ],
+  "forecast": "A10"
+ },
+ {
+  "id": "I14b",
+  "prop": "повтор: любой OSError",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        except PermissionError:\n",
+    "new": "        except OSError:\n"
+   }
+  ],
+  "forecast": "A10 (A4 зелёный)"
+ },
+ {
+  "id": "I15",
+  "prop": "зарезервированные имена",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "    return name.partition(\".\")[0].rstrip(\" \").lower() in _RESERVED\n",
+    "new": "    return False\n"
+   }
+  ],
+  "forecast": "A7 A8"
+ },
+ {
+  "id": "I16",
+  "prop": "что перечислено, то открывается",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        for entry in directory.iterdir():\n            if not entry.name.endswith(_SUFFIX) or not entry.is_file():\n                continue\n            name = entry.name[: -len(_SUFFIX)]\n            try:\n                self._program_path(dev, name)\n            except InvalidStoreKey:\n                continue\n            names.append(name)\n",
+    "new": "        for entry in directory.iterdir():\n            if not entry.name.endswith(_SUFFIX) or not entry.is_file():\n                continue\n            name = entry.name[: -len(_SUFFIX)]\n            names.append(name)\n"
+   }
+  ],
+  "forecast": "A9"
+ },
+ {
+  "id": "I17",
+  "prop": "ключ замка без casefold",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "        key = (device_id, rel.casefold())\n",
+    "new": "        key = (device_id, rel)\n"
+   }
+  ],
+  "forecast": "U6"
+ },
+ {
+  "id": "I18",
+  "prop": "fullmatch -> match",
+  "file": "Services/robot_comm/store.py",
+  "edits": [
+   {
+    "old": "_DEVICE_RE.fullmatch(device_id)",
+    "new": "_DEVICE_RE.match(device_id)"
+   },
+   {
+    "old": "_PROGRAM_RE.fullmatch(name)",
+    "new": "_PROGRAM_RE.match(name)"
+   }
+  ],
+  "forecast": "A7 A8 A9"
+ }
+]

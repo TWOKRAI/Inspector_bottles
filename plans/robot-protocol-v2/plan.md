@@ -289,8 +289,8 @@ glob-подписка на состояние. Друг на друга не с�
 ### Ф5 — приложение без GUI
 
 - Task T5.1: `RobotDriverV2` [DONE 2026-10-14 — инъекции `tasks/T5.1.injections.md` (24/27 по прогнозу, выжившая U2-inj → Ф1 закрыта), reviewer APPROVED во 2-м круге, итог `tasks/T5.1.result.md`] (после T3.5, T3.9) — бриф `tasks/T5.1.md` (стадия 0: reviewer 2 круга, правки R2 вставлены лидом дословно)
-- Task T5.2: `RobotDataStore` [PENDING] (после T5.1)
-- Task T5.3: Команды хаба [PENDING] (после T5.2) — в бриф: потоки RobotDriverV2 (поводок, исполнитель) берутся у scope плагина хаба через `spawn`, запись G6 R1 `robot_driver_v2.py` в `scripts/lifecycle_guards/tables.py` удаляется (решение владельца 2026-10-14); advisory ревью T5.1 V1..V3 — `docs/claude/OPEN_QUESTIONS.md` → «Task T5.1»
+- Task T5.2: `RobotDataStore` [DONE 2026-10-14 — лид inspector-bottles-89; бриф `tasks/T5.2.md` ред. 2 (стадия 0: reviewer 2 круга), слепая приёмка 10, тесты автора 27, инъекции `tasks/T5.2.injections.md` (20/20 пойманы, 19/20 по прогнозу, выживших нет), reviewer APPROVED во 2-м круге, итог `tasks/T5.2.result.md`; В1, В2 — решения владельца 2026-10-14] (после T5.1)
+- Task T5.3: Команды хаба [PENDING] (после T5.2) — в бриф: потоки RobotDriverV2 (поводок, исполнитель) берутся у scope плагина хаба через `spawn`, запись G6 R1 `robot_driver_v2.py` в `scripts/lifecycle_guards/tables.py` удаляется (решение владельца 2026-10-14); advisory ревью T5.1 V1..V3 — `docs/claude/OPEN_QUESTIONS.md` → «Task T5.1»; из T5.2 (решения лида 2026-10-14): `delete_program(device_id, name, *, base_rev)` в `Services/robot_comm/store.py` (ревизия под замком, как `recipe.delete`); один экземпляр `RobotDataStore` на процесс (замки живут в экземпляре); рост словаря `_locks` без предела (ревью T5.2 р.1 п.4: 5000 имён → +1,7 МиБ) — решить, когда имена пойдут из команд хаба (кандидат `WeakValueDictionary` под `_locks_guard`); формат `params.yaml` и адаптер к `param_source=` драйвера
 - Task T5.4: Калибровка, бэкенд [PENDING] (после T5.3)
 - Task T5.5: Плагины [PENDING] (после T5.3)
 

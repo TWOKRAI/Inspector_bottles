@@ -322,6 +322,55 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   дольше `P_WDG_TIMEOUT_MS` (3000 мс) — вызывающий зовёт `kick_heartbeat()` из своего потока с периодом
   `heartbeat_period_s`.
 
+## Хранилище данных робота (T5.2, `store.py`)
+
+`RobotDataStore(root)` — библиотека без процесса, IPC, команд хаба и GUI: документы робота на диске с
+оптимистичной ревизией (образец — `recipe.save`) и атомарной заменой файла. `root` — каталог `data/robot`
+целиком; конструктор только запоминает путь (env не читает, ничего не создаёт). Где `root` в бою — T5.3.
+Импорт: `from Services.robot_comm.store import RobotDataStore, StoredDoc, DOCS, compute_rev`
+(в `Services/robot_comm/__init__.py` не экспортируется).
+
+```
+<root>/<device_id>/params.yaml | points.yaml | frames.yaml | calibration.yaml
+<root>/<device_id>/programs/<имя>.yaml
+```
+
+| метод | что делает |
+|---|---|
+| `read(device_id, doc) -> StoredDoc(body, rev)` | `doc` ∈ `DOCS`; файла нет -> `StoredDoc(None, None)`; чтение каталогов не создаёт |
+| `write(device_id, doc, body, *, base_rev) -> str` | запись при совпавшей ревизии, возвращает новую ревизию |
+| `read_program(device_id, name)` / `write_program(device_id, name, body, *, base_rev)` | то же для `programs/<name>.yaml` |
+| `list_programs(device_id) -> list[str]` | отсортированные имена `*.yaml`, проходящие проверку имени; нет каталога -> `[]` |
+
+- **Ревизия** — `sha256(байты файла).hexdigest()` от ТЕКУЩИХ байтов на диске, кэша нет; клиент сравнивает её на
+  равенство. `base_rev` — keyword-only, без умолчания: `None` = создание (файла быть не должно), строка = «я читал
+  эту ревизию». Не совпало -> `RevisionConflict(current_rev)`, диск не тронут. Ручная правка файла мимо хранилища
+  меняет ревизию и тоже даёт конфликт.
+- **Документ** — YAML-словарь верхнего уровня. Тело не `dict` или не сериализуется -> `StoreDocumentInvalid(rev=None)`,
+  диск не тронут. Файл не разбирается или не словарь (в том числе пустой) -> `StoreDocumentInvalid(rev=<ревизия этих
+  байтов>)`: по ней вызывающий может сознательно перезаписать. Схем содержимого хранилище не знает.
+- **Ключи.** `device_id` — `[a-z0-9_]{1,64}`; имя программы — Unicode-буквы (в том числе кириллица), цифры, `_`,
+  внутри ещё `.`, `-`, пробел, длина ≤ 64; регистр не нормализуется, на Windows `Prog` и `prog` — один файл (второе
+  создание -> `RevisionConflict`). Зарезервированные имена Windows (`con`, `prn`, `aux`, `nul`, `com1..9`,
+  `lpt1..9`, в том числе с `¹²³`) отвергаются. Отказ — `InvalidStoreKey` (подкласс `ValueError`) до обращения к диску.
+- **Атомарная запись.** Временный файл `.<файл>.<случайное>.tmp` в том же каталоге -> `fsync` -> замена файла.
+  Любой сбой: старые байты на месте, временный файл удалён, исходное исключение наружу (`OSError` не
+  оборачивается). Застрявшие `.tmp` (обрыв процесса) хранилище не чистит и не показывает.
+- **Потоки.** Гарантия — ОДИН экземпляр на `root` в одном процессе, любое число потоков: замок на документ (ключ
+  `(device_id, путь.casefold())`), сравнение ревизии и замена под одним замком — из двух `write` с одной `base_rev`
+  успешен ровно один. Два экземпляра на один `root` и два процесса-писателя НЕ поддерживаются. Потоков хранилище
+  не создаёт.
+- **`read` может ждать до ~1.6 с.** `read`/`read_program` берут замок документа: на Windows замена файла падает
+  `PermissionError`, пока свой поток держит цель открытой на чтение. Пока запись повторяет замену при
+  `PermissionError` (паузы 0.05, 0.1, 0.2, 0.4, 0.8 с, сумма 1.55 с, затем последняя попытка без перехвата),
+  читатель того же документа ждёт. Замок не очередь (не FIFO): при нескольких писателях в очереди ожидание читателя
+  суммируется по их повторам. `list_programs` замка не берёт.
+- **Шов теста.** Модульная функция `store._replace_file(src, dst)`; хранилище зовёт её только по имени модуля при
+  каждой попытке — тест подменяет `monkeypatch.setattr(store, "_replace_file", fake)`. Раннюю привязку (поле
+  экземпляра, умолчание аргумента, `from os import replace`) делать нельзя: шов умрёт.
+- Ошибки — `Services/robot_comm/errors.py`: `RobotStoreError` -> `RevisionConflict`, `InvalidStoreKey`,
+  `StoreDocumentInvalid`; тексты без входных значений, значения — в полях.
+
 ## Тесты
 
 ```bash
@@ -330,4 +379,6 @@ pytest Services/robot_comm/tests/test_client_v2.py                # клиент
 pytest Services/robot_comm/tests/test_client_v2_acceptance.py     # приёмка против настоящего sim v2 (TCP)
 pytest Services/robot_comm/tests/test_client_v2_chunks.py         # T3.2: порядок пинг-понга, метка стопа, исключения
 pytest Services/robot_comm/tests/test_client_v2_chunks_acceptance.py  # T3.2: слепая приёмка, golden tests/golden/t32_run_chunks.log
+pytest Services/robot_comm/tests/test_store_acceptance.py         # T5.2: слепая приёмка хранилища (ревизия, шов замены, ключи)
+pytest Services/robot_comm/tests/test_store.py                    # T5.2: тесты автора (замки, читатель против записи, битые файлы)
 ```
