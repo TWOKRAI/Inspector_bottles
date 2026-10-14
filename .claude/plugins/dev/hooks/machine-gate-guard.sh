@@ -20,7 +20,7 @@ lock="${MACHINE_LOCK_DIR:-/d/PROJECT_INNOTECH/Inspector_vision}/machine.lock"
 [ -e "$lock" ] || exit 0
 
 INPUT=$(cat)
-printf '%s' "$INPUT" | grep -qE 'pytest|run_framework_tests|run_sim_all|check_injections|mutation_gate|break_inject|reindex|qex_retry' || exit 0
+printf '%s' "$INPUT" | grep -qE 'pytest|run_framework_tests|run_sim_all|check_injections|mutation_gate|break_inject|reindex|qex_retry|make' || exit 0
 
 # python-bin.sh делает `exit 1`, если интерпретатора нет: читаем его в подоболочке, чтобы пропустить, а не упасть.
 PYLIB="$HOOK_DIR/../../core/hooks/_lib/python-bin.sh"
@@ -46,12 +46,33 @@ gate="$HOOK_DIR/../../../../scripts/machine_gate.sh"
 out=$(bash "$gate" classify "$CMD" 2>/dev/null) || exit 0
 [ -n "$out" ] || exit 0
 
-IFS=$'\t' read -r kind reason segment <<<"${out%%$'\n'*}"
+# Совет строится по строке classify с НАИБОЛЬШИМ рангом (light < medium < heavy, при равенстве первая):
+# так же гейт поднимает заявку (classification.md §4).
+best=0
+kind=""
+reason=""
+segment=""
+while IFS=$'\t' read -r k r seg; do
+    case $k in light) rk=1 ;; medium) rk=2 ;; heavy) rk=3 ;; *) rk=0 ;; esac
+    if [ "$rk" -gt "$best" ]; then
+        best=$rk
+        kind=$k
+        reason=$r
+        segment=$seg
+    fi
+done <<<"$out"
 [ -n "$kind" ] || exit 0
+
+# Ведущие VAR=val сегмента ставятся ПЕРЕД bash: после слова <session> они стали бы командой, а не окружением.
+vars=""
+while [[ $segment =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+ ]]; do
+    vars+="${BASH_REMATCH[0]}"
+    segment=${segment:${#BASH_REMATCH[0]}}
+done
 
 {
     printf 'BLOCKED by machine-gate-guard: machine.lock exists and this command is %s (%s) but does not go through the gate.\n' "$kind" "$reason"
-    printf 'Run instead: bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" %s <session> %s\n' "$kind" "$segment"
+    printf 'Run instead: %sbash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" %s <session> %s\n' "$vars" "$kind" "$segment"
     printf '<session> = the name in your brief; no name -> ask the lead. Exit 75 = skipped by the gate (NO WINDOW), not a red run.\n'
     printf 'hook: %s\n' "$0"
 } >&2
