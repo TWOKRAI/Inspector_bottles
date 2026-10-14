@@ -24,6 +24,10 @@ coreutils 8.32, Windows 10 Pro 19045:
 4. `(Get-CimInstance Win32_Processor).LoadPercentage` costs ~1 s per query (5 back-to-back: 5.16 s) and
    returned `$null` once in 15 samples; 5 samples with `Start-Sleep 1` between them cost ~10 s per call
    (10.19 s, 9.92 s — two repeats, an observation, not a number), not 5. `Win32_OperatingSystem`: 80–160 ms.
+5. A `\r` or `\n` inside ONE argument does not survive Python `subprocess` -> Git Bash on Windows: CreateProcess
+   joins argv into one command line and MSYS re-splits it on whitespace including CR/LF (`bash -c 'echo $#' _ "a\nb" z`
+   prints 3). Hit twice on 2026-10-14 (blind tester `newline_in_what`, developer's hazard test for `\r`). To test a
+   line break inside an argument, call the script from a nested bash with `$'a\rb'`.
 
 **Why:** a spec saying "5 samples 1 s apart", "strip \r", "atomic mv" read right and was wrong on this
 machine in three places; tests built from it would stay green on the broken path.
