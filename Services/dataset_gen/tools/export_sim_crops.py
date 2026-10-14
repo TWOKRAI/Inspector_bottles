@@ -2,7 +2,7 @@
 
 Purpose:
     Строит каталог `train/val` обучающих вырезов из пресета слоёв (`LayerSceneGenerator`, секция `train`
-    пресета) и, по желанию, сетку-превью. Формат каталога — `export_splits` (`<сплит>/images/<класс>/*.png`
+    пресета) и, по желанию, сетку-превью. Формат каталога — `export_splits` (`<сплит>/images/<индекс класса 000>/*.png`
     и `<сплит>/labels.csv`); его читает `Services.ml_train` при `data.source: exported`.
 
 Public API:

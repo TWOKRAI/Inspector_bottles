@@ -185,7 +185,7 @@ python -m Services.dataset_gen.tools.export_sim_crops \
 - `--train N` и `--val M` — кадров на класс (целые ≥ 1); `--seed S` — целое ≥ 0, по умолчанию 0.
 - `--out` — несуществующий или пустой каталог.
 - `--preview` — PNG сетки-превью 4×4 (опционально).
-- Формат каталога = `export_splits`: `<каталог>/<сплит>/images/<класс>/*.png` и
+- Формат каталога = `export_splits`: `<каталог>/<сплит>/images/<индекс класса 000>/*.png` и
   `<каталог>/<сплит>/labels.csv`, сплиты `train` и `val`.
 - `Services.ml_train` читает этот каталог при `data.source: exported` без правок.
 

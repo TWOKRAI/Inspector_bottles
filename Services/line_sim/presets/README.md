@@ -156,7 +156,7 @@ python -m Services.dataset_gen.tools.export_sim_crops \
     --preview data/dataset_gen/sim_crops_grid.png
 ```
 
-Результат — `train/` и `val/` (`images/<класс>/*.png`, `labels.csv`), формат `export_splits`. Обучение
+Результат — `train/` и `val/` (`images/<индекс класса 000>/*.png`, `labels.csv`), формат `export_splits`. Обучение
 читает его без правок `ml_train`; фрагмент конфига:
 
 ```yaml
