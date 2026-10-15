@@ -233,9 +233,10 @@ def test_registered_as_source_with_ports():
     assert mod.CodeReaderSdkPlugin.name == "code_reader_sdk"
 
     ports = {p.name: p for p in mod.CodeReaderSdkPlugin.outputs}
-    assert set(ports) == {"code", "frame"}
+    assert set(ports) == {"code", "frame", "overlay"}
     assert ports["code"].optional is False  # обязательный
     assert ports["frame"].optional is True  # картинка не обязательна
+    assert ports["overlay"].optional is True  # draw-params для overlay_draw
     assert mod.CodeReaderSdkPlugin.inputs == []
 
     # Регистры: класс подключён и несёт объявленные поля с литеральными значениями по умолчанию.
@@ -354,6 +355,7 @@ def test_item_has_no_bytes_and_is_json_without_frame(make_plugin):
         "no_read_num",
         "pixel_format",
         "frame",
+        "overlay",  # лёгкий dict draw-params (json.dumps ниже его проверяет)
     }
     json.dumps({k: v for k, v in item.items() if k != "frame"})  # numpy-скаляры/bytes/enum уронят
 

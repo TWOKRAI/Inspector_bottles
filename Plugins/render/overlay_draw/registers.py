@@ -90,3 +90,12 @@ class OverlayDrawRegisters(SchemaBase):
             info="Рисовать подписи точек (label)",
         ),
     ] = True
+    label_scale: Annotated[
+        float,
+        FieldMeta(
+            "Label Scale",
+            info="Размер подписей точек (масштаб шрифта cv2.putText)",
+            min=0.2,
+            max=4.0,
+        ),
+    ] = 0.4

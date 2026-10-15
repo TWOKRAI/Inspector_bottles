@@ -59,7 +59,8 @@ code_reader/
 │   ├── qr_test_sheet.py      лист тестовых QR с точной геометрией
 │   └── mvcr_probe.py         зонд SDK: кадр + коды + углы (--selfcheck без железа)
 ├── docs/
-│   ├── SETUP.md         ★ все тонкости настройки, снятые с прибора
+│   ├── SETUP.md         ★ все тонкости настройки, снятые с прибора (SENSOTEC, V4.0.2.C)
+│   ├── SETUP_GEV_V4.0.2.R.md  ★ камера `GEV` V4.0.2.R: IP, ключ IDMVS, TCP `\n`, пошаговая инструкция
 │   └── GENICAM.md       прибор через обычный MVS SDK: управлять можно, кадра нет
 └── tests/
 ```
@@ -225,3 +226,14 @@ with ResultSink(on_result, port=5000) as sink:
 - [`plans/qr-code-reader.md`](../../plans/qr-code-reader.md) — план работ, карта регистров Modbus.
 - `knowledge/raw/books/id3000-series-um-en-v401/` — официальный мануал (соседний
   проект obsidian).
+
+
+## Надписи на кадре (overlay SDK-плагина)
+
+Плагин `code_reader_sdk` кладёт в item `overlay` для `overlay_draw`: рамки кодов с `group` `code_ok` / `code_bad`
+(цвета в нём нет — их задаёт `color_table` узла `overlay_draw` в рецепте) и подписи из регистра `labels`
+(любое число). Подпись: `{per: frame|code, template, anchor: frame|corner0, xy, dx, dy, group, scale}`.
+`template` — `str.format` с ключами `code`, `status`, `ok`, `no`, `bad`, `total`; `group` тоже шаблон
+(доп. ключ `state`: `ok` | `bad`). `per: code` — по подписи на каждый код (якорь `corner0` = первый угол + dx/dy);
+`per: frame` — одна на кадр в `xy`. Ошибка шаблона не роняет produce(): на кадре виден сам шаблон.
+cv2.putText не рисует не-ASCII. Позиции, текст и группы правятся в рецепте (`qr_reader_sdk_demo.yaml`).

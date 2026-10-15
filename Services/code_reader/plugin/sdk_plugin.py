@@ -53,6 +53,9 @@ _HISTORY_LIMIT = 20
 
 _STILL_HELD = "прибор ещё отпускается"
 
+# Счётчики ok / no_code / bad_code на момент кадра (с учётом reset_stats) — для строки статуса overlay.
+type _Counters = tuple[int, int, int]
+
 
 @register_plugin(
     "code_reader_sdk",
@@ -89,6 +92,13 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             optional=True,
             description="Картинка кадра uint8; нет, если JPEG не декодировался",
         ),
+        Port(
+            name="overlay",
+            dtype="dict",
+            shape="-",
+            optional=True,
+            description="Draw-params для overlay_draw: рамки кодов, подписи, строка статуса со счётчиками",
+        ),
     ]
 
     commands: dict[str, str] = {
@@ -110,7 +120,8 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         """Прочитать register и создать читатель (прибор берётся в start()/take_device)."""
         self._ctx = ctx
         self._reg: CodeReaderSdkRegisters = self._init_register(ctx)
-        self._queue: deque[tuple[int, float, SdkFrame]] = deque(maxlen=_QUEUE_LIMIT)
+        # (seq, ts, кадр, счётчики ok/no/bad на момент этого кадра — для строки статуса overlay).
+        self._queue: deque[tuple[int, float, SdkFrame, _Counters]] = deque(maxlen=_QUEUE_LIMIT)
         self._history: deque[dict] = deque(maxlen=_HISTORY_LIMIT)
         self._lock = threading.Lock()  # состояние плагина; читатель под ним НЕ зовём
         self._seq = 0
@@ -165,8 +176,8 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             batch = list(self._queue)
             self._queue.clear()
         items: list[dict] = []
-        for seq, ts, frame in batch:
-            item = self._build_item(seq, ts, frame)
+        for seq, ts, frame, counters in batch:
+            item = self._build_item(seq, ts, frame, counters)
             # ponytail: декод в produce() — до 8 JPEG за проход (~до 100 мс). Если линия
             # быстрее, перенести декод в поток захвата или ограничить число кадров на проход.
             try:
@@ -183,7 +194,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             self._publish_state()
         return items
 
-    def _build_item(self, seq: int, ts: float, frame: SdkFrame) -> dict:
+    def _build_item(self, seq: int, ts: float, frame: SdkFrame, counters: _Counters) -> dict:
         code = _first_readable(frame)
         return {
             "code": "" if code is None else code.text,
@@ -196,6 +207,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             "frame_num": frame.frame_num,
             "no_read_num": frame.no_read_num,
             "pixel_format": frame.pixel_format,
+            "overlay": _overlay(frame, counters, self._reg.labels),
         }
 
     def _on_frame(self, frame: SdkFrame) -> None:
@@ -206,10 +218,21 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         """
         now = time.time()
         code = _first_readable(frame)
+        # Читатель считает кадр ДО колбэка, поэтому его счётчики уже включают этот кадр. Снимок —
+        # здесь, а не в produce(): пачка из нескольких кадров иначе получила бы одни и те же числа.
+        # Читателя зовём вне self._lock (как в _snapshot).
+        stats = self._reader.stats()
         with self._lock:
+            base = self._baseline
+            # max(0, ...): reset_stats между снимком и замком даст базу новее снимка — не показываем минус.
+            counters: _Counters = (
+                max(0, stats["ok"] - base["ok"]),
+                max(0, stats["no_code"] - base["no_code"]),
+                max(0, stats["bad_code"] - base["bad_code"]),
+            )
             self._seq += 1
             overflow = len(self._queue) == _QUEUE_LIMIT
-            self._queue.append((self._seq, now, frame))
+            self._queue.append((self._seq, now, frame, counters))
             self._history.append(
                 {
                     "code": "" if code is None else code.text,
@@ -375,6 +398,83 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
     def get_status(self) -> dict[str, Any]:
         """Статус для внешнего опроса (та же форма, что у команды)."""
         return self.cmd_get_status({})
+
+
+def _overlay(frame: SdkFrame, counters: _Counters, labels: list[dict[str, Any]]) -> dict[str, Any]:
+    """Draw-params для `overlay_draw` (форма — README `Plugins/render/overlay_draw`).
+
+    Чистая функция: только dict/list/int/str, без bytes и numpy — проходит `json.dumps`.
+    Цветов здесь нет: фигуры несут `group`, цвет и размер по группе задаёт `color_table` узла `overlay_draw`
+    (в рецепте). На каждый код — замкнутая рамка из отрезков `corners[i] -> corners[(i+1) % n]` в группе
+    `code_ok` / `code_bad`. Подписи — из регистра `labels` (любое число), см. `_label_point`.
+    """
+    lines: list[dict[str, Any]] = []
+    codes = []
+    for code in frame.codes:
+        corners = [list(p) for p in code.corners]
+        if not corners:
+            continue
+        codes.append((code, corners))
+        group = "code_ok" if code.status is ReadStatus.OK else "code_bad"
+        if len(corners) > 1:
+            for i, p1 in enumerate(corners):
+                lines.append({"p1": p1, "p2": corners[(i + 1) % len(corners)], "group": group})
+
+    ok, no_code, bad_code = counters
+    base_vars = {
+        "status": frame.status.value,
+        "ok": ok,
+        "no": no_code,
+        "bad": bad_code,
+        "total": ok + no_code + bad_code,
+    }
+    first = _first_readable(frame)
+    frame_state = "ok" if frame.status is ReadStatus.OK else "bad"
+    points: list[dict[str, Any]] = []
+    for spec in labels:
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("per", "frame") == "code":
+            for code, corners in codes:
+                text = code.text if code.status is ReadStatus.OK else code.status.value
+                state = "ok" if code.status is ReadStatus.OK else "bad"
+                point = _label_point(spec, {**base_vars, "code": text, "state": state}, corners)
+                if point is not None:
+                    points.append(point)
+        else:
+            frame_vars = {**base_vars, "code": "" if first is None else first.text, "state": frame_state}
+            point = _label_point(spec, frame_vars, [])
+            if point is not None:
+                points.append(point)
+    return {"lines": lines, "points": points}
+
+
+def _format(template: Any, values: dict[str, Any]) -> str:
+    """str.format по шаблону из рецепта; опечатка в шаблоне видна на кадре как есть, а не роняет produce()."""
+    try:
+        return str(template).format(**values)
+    except (KeyError, IndexError, ValueError, AttributeError):
+        return str(template)
+
+
+def _label_point(spec: dict[str, Any], values: dict[str, Any], corners: list[list[int]]) -> dict[str, Any] | None:
+    """Одна подпись как точка overlay: `xy` = якорь + (dx, dy). Якорь `corner0` без углов — подписи нет."""
+    anchor = spec.get("anchor", "corner0" if spec.get("per") == "code" else "frame")
+    if anchor == "corner0":
+        if not corners:
+            return None
+        bx, by = corners[0]
+    else:
+        bx, by = spec.get("xy", (0, 0))
+    point: dict[str, Any] = {
+        "xy": [int(round(bx + spec.get("dx", 0))), int(round(by + spec.get("dy", 0)))],
+        "label": _format(spec.get("template", ""), values),
+    }
+    if spec.get("group"):
+        point["group"] = _format(spec["group"], values)
+    if "scale" in spec:
+        point["scale"] = float(spec["scale"])
+    return point
 
 
 def _first_readable(frame: SdkFrame):

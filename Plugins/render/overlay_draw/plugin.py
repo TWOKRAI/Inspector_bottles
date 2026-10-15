@@ -6,6 +6,8 @@ JoinInspectorManager по seq_id+data_type — см. Этап 1). Здесь —
 полосы, точки и подписи. Цвет резолвится по таблице (per-shape → group → type → дефолт).
 
 Stateless (слияние сделал Join) → thread_safe=True. Кадр не мутируется (рисуем на копии).
+Плагин универсален: принимает gray или BGR кадр, ничего не знает о том, кто рисует
+(линии/точки/подписи по overlay-dict).
 """
 
 from __future__ import annotations
@@ -33,8 +35,8 @@ class OverlayDrawPlugin(ProcessModulePlugin):
     thread_safe = True
 
     inputs = [
-        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Исходный кадр"),
-        Port(name="overlay", dtype="dict", shape="-", description="Draw-params (vlines/lines/points)"),
+        Port(name="frame", dtype="image/*", shape="", description="Исходный кадр: gray (H, W) или BGR (H, W, 3)"),
+        Port(name="overlay", dtype="dict", shape="-", optional=True, description="Draw-params (vlines/lines/points)"),
     ]
     outputs = [
         # Перезаписываем "frame" (конвенция framework: SHM→дисплей кеется на "frame",
@@ -67,7 +69,7 @@ class OverlayDrawPlugin(ProcessModulePlugin):
                     style = dict(row)
                     break
         # 2) per-shape явные значения перебивают таблицу
-        for k in ("color", "thickness", "radius"):
+        for k in ("color", "thickness", "radius", "scale"):
             if k in shape:
                 style[k] = shape[k]
         # 3) дефолты
@@ -77,6 +79,8 @@ class OverlayDrawPlugin(ProcessModulePlugin):
             "color": tuple(int(c) for c in color),
             "thickness": int(style.get("thickness", r.default_thickness)),
             "radius": int(style.get("radius", r.default_point_radius)),
+            # Масштаб текста подписи (cv2.putText): per-shape → строка таблицы → label_scale регистра.
+            "scale": float(style.get("scale", r.label_scale)),
         }
 
     def _draw_dashed(self, canvas, p1, p2, color, thickness) -> None:
@@ -107,6 +111,10 @@ class OverlayDrawPlugin(ProcessModulePlugin):
             return None
         overlay = item.get("overlay") or {}
         canvas = frame.copy()
+        if canvas.ndim == 3 and canvas.shape[2] == 1:
+            canvas = canvas[..., 0]
+        if canvas.ndim == 2:
+            canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
         h, w = frame.shape[:2]
 
         # vlines: семантика линии → центральная линия + 2 пунктирные границы полосы.
@@ -147,9 +155,9 @@ class OverlayDrawPlugin(ProcessModulePlugin):
                     str(label),
                     (xy[0] + 6, xy[1] - 6),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.4,
+                    st["scale"],
                     st["color"],
-                    1,
+                    max(1, round(st["scale"] * 2.5)),
                     cv2.LINE_AA,
                 )
 

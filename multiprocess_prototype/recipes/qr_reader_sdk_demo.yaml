@@ -46,7 +46,7 @@ blueprint:
       # 20 Гц: produce() не ждёт кадра (захват в своём потоке), только сливает очередь.
       source_target_fps: 20
       chain_targets:
-        - gui
+        - draw
       plugins:
         - plugin_class: Services.code_reader.plugin.sdk_plugin.CodeReaderSdkPlugin
           plugin_name: code_reader_sdk
@@ -56,6 +56,43 @@ blueprint:
           reader_id: id3013-sdk
           auto_start: true
           timeout_ms: 500
+          # Позиции, текст и группы надписей — менять здесь. per: frame — одна на кадр (xy в пикселях кадра),
+          # per: code — по одной на каждый код (anchor corner0 = первый угол + dx/dy). template — str.format,
+          # ключи code/status/ok/no/bad/total; в group доступен ещё state (ok|bad). Цвет и размер по group
+          # задаёт color_table узла draw. cv2.putText не рисует не-ASCII.
+          labels:
+            - per: frame
+              template: "{status} | ok {ok} / no {no} / bad {bad}"
+              anchor: frame
+              xy: [10, 70]
+              group: status_{state}
+            - per: code
+              template: "{code}"
+              anchor: corner0
+              dx: 0
+              dy: 0
+              group: code_text_{state}
+
+    # Рисовальщик: кадр (gray) + overlay из того же item -> кадр BGR с рамкой кода и текстом.
+    # overlay_draw универсален: рисует любой overlay (линии/точки/подписи) на gray или BGR.
+    - process_name: draw
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          plugin_name: overlay_draw
+          category: rendering
+          default_thickness: 3
+          # Стиль по group (BGR). Кадр 1280x1024: подписи крупные (scale 1.8; умолчание 0.4 для таких кадров мелко).
+          color_table:
+            - {group: code_ok, color: [0, 200, 0], thickness: 3}
+            - {group: code_bad, color: [0, 0, 255], thickness: 3}
+            - {group: status_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: status_bad, color: [0, 0, 255], scale: 1.8}
+            - {group: code_text_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: code_text_bad, color: [0, 0, 255], scale: 1.8}
 
     - process_name: reader_tcp
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
@@ -71,14 +108,22 @@ blueprint:
           port: 5000
           reader_id: id3013-tcp
           auto_start: true
-          # Формат снят с нашего экземпляра (прошивка V4.0.2.C), см. docs/SETUP.md.
-          terminator: ";"
+          # Прошивка V4.0.2.R (S/N 00DB2156580): `;` после кода не приходит, приходит `\n`
+          # (Newline Character Enable на приборе), текст NoRead на приборе — `NoRead`.
+          # Прошивка V4.0.2.C слала `;`, см. docs/SETUP.md.
+          terminator: "\n"
           prefix: ""
           no_code_text: NoRead
           bad_code_text: ""
 
-  wires: []
-  displays: []
+  wires:
+    - source: reader_sdk.code_reader_sdk.frame
+      target: draw.overlay_draw.frame
+
+  # Кадр с рамкой и текстом кода (BGR, после draw) — на дисплей main. План code-reader-gui, Task 1.2.
+  displays:
+    - node_id: draw.overlay_draw.frame
+      display_id: main
 
   metadata:
     gui_positions:
@@ -88,6 +133,25 @@ blueprint:
       reader_tcp.code_reader:
         - 40.0
         - 200.0
+      draw.overlay_draw:
+        - 360.0
+        - 40.0
     locked_nodes: []
 
-displays: []
+# Определение дисплея (поля как у hikvision_inspect.yaml; кадр считывателя 1280x1024, серый, 1 канал).
+# Кадр после draw — BGR. (Серый источник напрямую требовал бы format: GRAY — см. presenter.on_frame.)
+displays:
+  - id: main
+    name: Считыватель ID3013
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

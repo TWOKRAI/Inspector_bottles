@@ -49,6 +49,29 @@ class CodeReaderSdkRegisters(SchemaBase):
         ),
     ] = 500
 
+    # --- Надписи на кадре (overlay для overlay_draw) ---
+    labels: Annotated[
+        list[dict],
+        FieldMeta(
+            "Надписи на кадре",
+            info=(
+                "Список подписей: {per: frame|code, template, anchor: frame|corner0, xy, dx, dy, group, scale}. "
+                "template — str.format с ключами code, status, ok, no, bad, total; group тоже шаблон "
+                "(доп. ключ state: ok|bad). Цвет и размер задаёт color_table узла overlay_draw по group. "
+                "cv2.putText не рисует не-ASCII."
+            ),
+        ),
+    ] = [
+        {
+            "per": "frame",
+            "template": "{status} | ok {ok} / no {no} / bad {bad}",
+            "anchor": "frame",
+            "xy": [10, 70],
+            "group": "status_{state}",
+        },
+        {"per": "code", "template": "{code}", "anchor": "corner0", "dx": 0, "dy": 0, "group": "code_text_{state}"},
+    ]
+
     # --- Телеметрия (readonly — GUI смотрит, не правит) ---
     device_state: Annotated[
         str,
