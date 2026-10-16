@@ -242,6 +242,12 @@
 - [project_graphify_mcp_setup](project_graphify_mcp_setup.md)
 - [project_qex_model](project_qex_model.md)
 
+## display (3)
+
+- [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
+- [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
+- [feedback_qpixmap_and_qimage_smooth_scale_differ](feedback_qpixmap_and_qimage_smooth_scale_differ.md)
+
 ## docs (18)
 
 - [feedback_a_decision_orphans_what_encoded_the_previous_one](feedback_a_decision_orphans_what_encoded_the_previous_one.md)
@@ -466,12 +472,15 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (25)
+## live-stand (30)
 
+- [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
+- [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
 - [feedback_backend_ctl_for_agents](feedback_backend_ctl_for_agents.md)
+- [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
 - [feedback_live_harness_tests](feedback_live_harness_tests.md)
 - [feedback_probe_liveness_is_not_render](feedback_probe_liveness_is_not_render.md)
@@ -484,6 +493,7 @@
 - [feedback_unblocking_signal_at_the_moment_of_fact](feedback_unblocking_signal_at_the_moment_of_fact.md)
 - [project_backend_ctl_fake_fidelity_gap](project_backend_ctl_fake_fidelity_gap.md)
 - [project_backend_ctl_socket_bypasses_mw](project_backend_ctl_socket_bypasses_mw.md)
+- [project_code_reader_focus_calibration_streams_frames](project_code_reader_focus_calibration_streams_frames.md)
 - [project_concurrent_backends_trap](project_concurrent_backends_trap.md)
 - [project_gui_stand_production_entry_only](project_gui_stand_production_entry_only.md)
 - [project_hardware_recipes_no_headless_boot](project_hardware_recipes_no_headless_boot.md)
@@ -492,6 +502,7 @@
 - [project_overview_blind_to_loss](project_overview_blind_to_loss.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
+- [reference_idmvs_gev_reader_needs_encryption_key](reference_idmvs_gev_reader_needs_encryption_key.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
 ## measurement (36)
@@ -532,6 +543,11 @@
 - [project_store_retention_bounds_rows_not_bytes](project_store_retention_bounds_rows_not_bytes.md)
 - [project_strokes_points_perf](project_strokes_points_perf.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
+
+## observability (2)
+
+- [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
+- [project_code_reader_focus_calibration_streams_frames](project_code_reader_focus_calibration_streams_frames.md)
 
 ## owner-decision (18)
 
@@ -613,6 +629,10 @@
 - [feedback_widget_qt_patterns](feedback_widget_qt_patterns.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
+## recipe-validation (1)
+
+- [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
+
 ## review-verdicts (22)
 
 - [feedback_a_control_reproduces_the_defect_it_was_built_to_catch](feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md)
@@ -637,6 +657,10 @@
 - [project_f3_cut_verdict_2026_09_07](project_f3_cut_verdict_2026_09_07.md)
 - [project_overview_blind_to_loss](project_overview_blind_to_loss.md)
 - [project_task_4_11_ttl_sweep_voice_verdict_2026_09_08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md)
+
+## sdk (1)
+
+- [reference_idmvs_gev_reader_needs_encryption_key](reference_idmvs_gev_reader_needs_encryption_key.md)
 
 ## spec-scope (25)
 
@@ -780,6 +804,10 @@
 - [project_root_gate_misses_framework_modules](project_root_gate_misses_framework_modules.md)
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
+
+## test-reference (1)
+
+- [feedback_qpixmap_and_qimage_smooth_scale_differ](feedback_qpixmap_and_qimage_smooth_scale_differ.md)
 
 ## windows-env (20)
 

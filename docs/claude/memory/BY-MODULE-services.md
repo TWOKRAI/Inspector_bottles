@@ -2,9 +2,10 @@
 
 Сгенерировано: `python scripts/memory/search.py --by-module --write`; не править вручную. Хаб: [BY-MODULE.md](BY-MODULE.md)
 
-## services/code_reader (1)
+## services/code_reader (2)
 
 - [feedback_ctypes_setattr_unknown_field_is_silent](feedback_ctypes_setattr_unknown_field_is_silent.md) — setattr on a ctypes Structure with a wrong field name silently creates a Python…
+- [project_code_reader_focus_calibration_streams_frames](project_code_reader_focus_calibration_streams_frames.md) — Считыватель ID3013 даёт кадр только на скан/триггер; кнопка калибровки фокуса д…
 
 ## services/control_panel (1)
 
