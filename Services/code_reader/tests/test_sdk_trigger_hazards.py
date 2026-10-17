@@ -421,15 +421,45 @@ def test_none_original_is_not_written_and_not_restored(make_reader):
     assert api.values[101] == {M: 0, S: 0, P: 300}
 
 
-def _capture_info(monkeypatch):
-    """Подменить логгер читателя записывающей заглушкой: тест не зависит от уровней и каналов логирования проекта."""
+class _FakeClock:
+    """Часы читателя: каждый вызов прибора добавляет ``step`` секунд — длительности точные, без sleep."""
+
+    def __init__(self, step: float) -> None:
+        self.step = step
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class _ClockedApi(FakeNodeApi):
+    """Фейк прибора, у которого каждый вызов «длится» ``clock.step`` (сдвигает часы), а не спит."""
+
+    def __init__(self, clock: _FakeClock, **kw):
+        super().__init__(**kw)
+        self.clock = clock
+
+    def _enter(self, h, method: str, name: str = "", *args) -> None:
+        self.clock.now += self.clock.step
+        super()._enter(h, method, name, *args)
+
+
+def _capture_info(monkeypatch, clock: _FakeClock):
+    """Подменить логгер и часы читателя; вернуть список ``(ident потока, текст)``.
+
+    Подмена — на уровне модуля, поэтому в список попадают записи и ЧУЖИХ потоков захвата (хвосты прошлых
+    тестов при полном прогоне): тест обязан фильтровать по идентификатору своего потока. Это и была причина
+    редкого падения: чужое ``stop_grabbing мс=0`` находилось ``re.search`` раньше своего.
+    """
+    from types import SimpleNamespace
+
     from Services.code_reader.core import sdk_reader
 
-    records: list[str] = []
+    records: list[tuple[int, str]] = []
 
     class _Rec:
         def _add(self, msg, *args, **_kw) -> None:
-            records.append(msg % args if args else msg)
+            records.append((threading.get_ident(), msg % args if args else msg))
 
         info = warning = error = debug = _add
 
@@ -437,40 +467,46 @@ def _capture_info(monkeypatch):
             self._add(msg, *args)
 
     monkeypatch.setattr(sdk_reader, "_log", _Rec())
-    return records, lambda: None
+    monkeypatch.setattr(sdk_reader, "time", SimpleNamespace(monotonic=clock.monotonic))
+    return records
 
 
 def test_release_logs_durations_for_stop_grabbing_and_each_restore(make_reader, monkeypatch):
-    """Замеры для опыта на приборе: stop_grabbing, каждая запись возврата и вход в возврат попадают в INFO-лог."""
-    import re
+    """Замеры для опыта на приборе: stop_grabbing, каждая запись возврата и вход в возврат попадают в INFO-лог.
 
-    records, detach = _capture_info(monkeypatch)
-    try:
-        api = FakeNodeApi(delay_s=0.02)
-        r = make_reader(api, trigger=FULL, timeout_ms=20)
-        assert _bounded(r.reader.start, 10.0) is True
-        _bounded(r.reader.stop, 10.0)
-        assert wait_until(lambda: not r.reader.stats()["device_held"], 3.0)
-    finally:
-        detach()
-    text = "\n".join(records)
-    sg = re.search(r"stop_grabbing мс=(\d+)", text)
-    assert sg and int(sg.group(1)) >= 15, text
-    for node in (P, S, M):
-        m = re.search(rf"возврат {node} мс=(\d+)", text)
-        assert m and int(m.group(1)) >= 15, (node, text)
-    entry = re.search(r"от stop\(\) до начала мс=(\d+)", text)
-    assert entry and int(entry.group(1)) >= 15, text  # stop_grabbing 20 мс лежит между stop() и началом возврата
+    Часы фиктивные: каждый вызов прибора = 250 мс (степень двойки: float без ошибки округления).
+    Записи фильтруются по потоку захвата своего читателя.
+    """
+    clock = _FakeClock(0.25)
+    records = _capture_info(monkeypatch, clock)
+    api = _ClockedApi(clock)
+    r = make_reader(api, trigger=FULL, timeout_ms=20)
+    assert _bounded(r.reader.start, 10.0) is True
+    capture_ident = r.reader._thread.ident
+    _bounded(r.reader.stop, 10.0)
+    assert wait_until(lambda: not r.reader.stats()["device_held"], 3.0)
+    own = [text for ident, text in records if ident == capture_ident]
+    # stop_grabbing -> «от stop» -> возврат P, S, M: порядок и точные длительности
+    assert [t for t in own if "мс=" in t] == [
+        "code_reader SDK: stop_grabbing мс=250",
+        "code_reader SDK: возврат режима, от stop() до начала мс=250",
+        f"code_reader SDK: возврат {P} мс=250 (ok)",
+        f"code_reader SDK: возврат {S} мс=250 (ok)",
+        f"code_reader SDK: возврат {M} мс=250 (ok)",
+    ]
 
 
 def test_start_failure_path_logs_restore_durations(make_reader, monkeypatch):
-    records, detach = _capture_info(monkeypatch)
-    try:
-        api = FakeNodeApi(delay_s=0.02, fail={("start_grabbing", ""): SdkError(0x80020001, "sg")})
-        r = make_reader(api, trigger=FULL, timeout_ms=20)
-        assert _bounded(r.reader.start, 10.0) is False
-    finally:
-        detach()
-    text = "\n".join(records)
-    for node in (P, S, M):
-        assert f"возврат {node} мс=" in text, text
+    clock = _FakeClock(0.25)
+    records = _capture_info(monkeypatch, clock)
+    api = _ClockedApi(clock, fail={("start_grabbing", ""): SdkError(0x80020001, "sg")})
+    r = make_reader(api, trigger=FULL, timeout_ms=20)
+    idents: list[int] = []
+
+    def run() -> bool:
+        idents.append(threading.get_ident())
+        return r.reader.start()
+
+    assert _bounded(run, 10.0) is False
+    own = [text for ident, text in records if ident == idents[0] and "мс=" in text]
+    assert own == [f"code_reader SDK: возврат {node} мс=250 (ok)" for node in (P, S, M)]

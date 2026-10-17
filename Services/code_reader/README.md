@@ -242,5 +242,9 @@ with ResultSink(on_result, port=5000) as sink:
 (любое число). Подпись: `{per: frame|code, template, anchor: frame|corner0, xy, dx, dy, group, scale}`.
 `template` — `str.format` с ключами `code`, `status`, `ok`, `no`, `bad`, `total`; `group` тоже шаблон
 (доп. ключ `state`: `ok` | `bad`). `per: code` — по подписи на каждый код (якорь `corner0` = первый угол + dx/dy);
-`per: frame` — одна на кадр в `xy`. Ошибка шаблона не роняет produce(): на кадре виден сам шаблон.
+`per: frame` — одна на кадр в `xy`. Ошибка шаблона не роняет produce(): на кадре виден сам шаблон. Плохая подпись (`dx`/`dy`/`xy` строкой, не число,
+`nan`/`inf`, координата вне `-2**30 <= v < 2**30`, `scale` не число или больше 50 (на 1280x1024 `putText` при 50 занимает ~32 мс, при 1000 — 12 с), `per`/`anchor` вне перечисления) пропускается, остальные подписи и
+кадры идут; раньше `dx`/`dy`/`xy` строкой роняли produce(). О таких подписях `configure` один раз пишет в `last_error`
+(`labels[1]: dx TypeError; …`) и в лог; это сообщение лежит ниже настоящей ошибки захвата: пока есть она, в `last_error`
+видна она.
 cv2.putText не рисует не-ASCII. Позиции, текст и группы правятся в рецепте (`qr_reader_sdk_demo.yaml`).

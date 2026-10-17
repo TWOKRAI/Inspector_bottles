@@ -130,6 +130,12 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         # Единственный источник причины сбоя: все ошибки читателя (и отказ start()) приходят
         # в `_on_error`; сюда же — отказ декода и «ещё отпускается». Читателя не опрашиваем.
         self._last_error = ""
+        # Плохие подписи `labels` (проверка один раз, здесь): отдельное поле, чтобы take_device и reset_stats
+        # его не стирали; в `last_error` попадает, пока нет настоящей ошибки захвата.
+        self._labels_error = _check_labels(self._reg.labels)
+        if self._labels_error:
+            ctx.log_error(f"CodeReaderSdkPlugin[{self._reg.reader_id}]: плохие подписи labels: {self._labels_error}")
+        self._overlay_error_logged = False  # ERROR про отказ overlay пишем один раз на плагин
         # `device_held`, ушедший в дерево в последний раз: produce() публикует при смене.
         self._published_held = False
         # Сериализует «снимок → merge → отметка» между потоками захвата, источника и команд:
@@ -214,8 +220,24 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             "frame_num": frame.frame_num,
             "no_read_num": frame.no_read_num,
             "pixel_format": frame.pixel_format,
-            "overlay": _overlay(frame, counters, self._reg.labels),
+            "overlay": self._safe_overlay(frame, counters),
         }
+
+    def _safe_overlay(self, frame: SdkFrame, counters: _Counters) -> dict[str, Any]:
+        """``_overlay`` без права уронить ``produce()``: очередь уже слита, падение потеряло бы всю пачку кадров.
+
+        Отказ -> пустой overlay и ОДИН ERROR на плагин (не на кадр).
+        """
+        try:
+            return _overlay(frame, counters, self._reg.labels)
+        except Exception as exc:  # noqa: BLE001 — кадр с кодом важнее подписей
+            if not self._overlay_error_logged:
+                self._overlay_error_logged = True
+                self._ctx.log_error(
+                    f"CodeReaderSdkPlugin[{self._reg.reader_id}]: overlay не построен ({type(exc).__name__}); "
+                    "кадры идут без подписей и рамок, повторы не пишутся"
+                )
+            return {"lines": [], "points": []}
 
     def _on_frame(self, frame: SdkFrame) -> None:
         """Колбэк читателя. Вызывается в потоке захвата, не в source.
@@ -296,6 +318,8 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             # «ещё отпускается» — производное от device_held: поток вышел -> сообщение снято.
             if last_error == _STILL_HELD and not device_held:
                 last_error = ""
+            if not last_error:
+                last_error = self._labels_error
             # register — зеркало для GUI, читают отсюда только при показе.
             reg.device_state = stats["state"]
             reg.total_reads = stats["ok"] - base["ok"]
@@ -461,31 +485,125 @@ def _overlay(frame: SdkFrame, counters: _Counters, labels: list[dict[str, Any]])
 
 
 def _format(template: Any, values: dict[str, Any]) -> str:
-    """str.format по шаблону из рецепта; опечатка в шаблоне видна на кадре как есть, а не роняет produce()."""
+    """str.format по шаблону из рецепта; опечатка в шаблоне видна на кадре как есть, а не роняет produce().
+
+    ``TypeError`` — например ``{ok[0]}`` (индекс у числа); ``OverflowError`` — ``{ok:c}`` при ``ok >= 1114112``.
+    Ловится любое ``Exception``: подпись обязана остаться, ``produce()`` не падает.
+    """
     try:
         return str(template).format(**values)
-    except (KeyError, IndexError, ValueError, AttributeError):
+    except Exception:  # noqa: BLE001 — шаблон из рецепта, любой отказ format = показать шаблон как есть
         return str(template)
 
 
-def _label_point(spec: dict[str, Any], values: dict[str, Any], corners: list[list[int]]) -> dict[str, Any] | None:
-    """Одна подпись как точка overlay: `xy` = якорь + (dx, dy). Якорь `corner0` без углов — подписи нет."""
+_PER_VALUES = ("frame", "code")
+_ANCHOR_VALUES = ("frame", "corner0")
+
+
+class _BadLabelField(ValueError):
+    """Поле подписи, на котором строгий расчёт упал: ``field`` и имя типа исключения (без значения из рецепта)."""
+
+    def __init__(self, field: str, exc_name: str) -> None:
+        super().__init__(f"{field} {exc_name}")
+        self.field = field
+        self.exc_name = exc_name
+
+
+# Предел координаты: cv2.putText кладёт текст в xy+6 и падает на int32
+# (замер: (2**31-1, 0) -> error, (2**30-10, 0) рисуется).
+_COORD_LIMIT = 2**30
+# Потолок scale: время putText растёт квадратично (замер, кадр 1280x1024: 50 -> 32 мс, 100 -> 119 мс,
+# 1000 -> 12,6 с), а толщина round(scale*2.5) на 1e9 выходит за int32.
+_SCALE_MAX = 50.0
+
+
+def _in_coord_range(value: float) -> bool:
+    # Без math.isfinite: на целом >= 2**1024 он бросает OverflowError; для nan/inf сравнение само даёт False.
+    return -_COORD_LIMIT <= value < _COORD_LIMIT
+
+
+def _number(value: Any, field: str) -> float:
+    """Конечное число в пределах int32 (не bool, не строка) или ``_BadLabelField``."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _BadLabelField(field, "TypeError")
+    if not _in_coord_range(value):
+        raise _BadLabelField(field, "ValueError")
+    return value
+
+
+def _label_point_strict(
+    spec: dict[str, Any], values: dict[str, Any], corners: list[list[int]]
+) -> dict[str, Any] | None:
+    """Одна подпись как точка overlay: ``xy`` = якорь + (dx, dy). Якорь ``corner0`` без углов — подписи нет.
+
+    Строгая: плохое поле (нечисловые ``dx``/``dy``/``scale``, ``xy`` не пара чисел) даёт ``_BadLabelField``.
+    Единственный путь расчёта: ``_label_point`` (для кадров) и ``_check_labels`` (один раз в configure) зовут её.
+    """
+    if spec.get("per", "frame") not in _PER_VALUES:
+        raise _BadLabelField("per", "ValueError")
     anchor = spec.get("anchor", "corner0" if spec.get("per") == "code" else "frame")
+    if anchor not in _ANCHOR_VALUES:
+        raise _BadLabelField("anchor", "ValueError")
     if anchor == "corner0":
         if not corners:
             return None
         bx, by = corners[0]
     else:
-        bx, by = spec.get("xy", (0, 0))
-    point: dict[str, Any] = {
-        "xy": [int(round(bx + spec.get("dx", 0))), int(round(by + spec.get("dy", 0)))],
-        "label": _format(spec.get("template", ""), values),
-    }
+        try:
+            bx, by = spec.get("xy", (0, 0))
+        except (TypeError, ValueError) as exc:
+            raise _BadLabelField("xy", type(exc).__name__) from None
+        bx, by = _number(bx, "xy"), _number(by, "xy")
+    dx, dy = _number(spec.get("dx", 0), "dx"), _number(spec.get("dy", 0), "dy")
+    xy = [int(round(bx + dx)), int(round(by + dy))]  # слагаемые уже конечные и в int32
+    if not all(_in_coord_range(v) for v in xy):
+        raise _BadLabelField("xy", "ValueError")  # сумма вышла за int32
+    point: dict[str, Any] = {"xy": xy, "label": _format(spec.get("template", ""), values)}
     if spec.get("group"):
         point["group"] = _format(spec["group"], values)
     if "scale" in spec:
-        point["scale"] = float(spec["scale"])
+        raw_scale = spec["scale"]
+        if isinstance(raw_scale, bool):
+            raise _BadLabelField("scale", "TypeError")
+        try:
+            scale = float(raw_scale)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise _BadLabelField("scale", type(exc).__name__) from None
+        if not -_SCALE_MAX <= scale <= _SCALE_MAX:  # nan / inf (в т.ч. из строки "nan") тоже не проходят
+            raise _BadLabelField("scale", "ValueError")
+        point["scale"] = scale
     return point
+
+
+def _label_point(spec: dict[str, Any], values: dict[str, Any], corners: list[list[int]]) -> dict[str, Any] | None:
+    """Подпись для кадра; плохая подпись пропускается (``None``), остальные подписи и кадры идут.
+
+    Без лога на каждый кадр: о плохих подписях оператору сказал ``_check_labels`` в ``configure``.
+    """
+    try:
+        return _label_point_strict(spec, values, corners)
+    except (TypeError, ValueError):
+        return None
+
+
+def _check_labels(labels: Any) -> str:
+    """Сухой прогон строгого расчёта по каждой подписи: ``labels[1]: dx TypeError; labels[2]: scale ValueError``.
+
+    Пусто — всё в порядке. Значения из рецепта в текст не попадают, только индекс, поле и имя типа исключения.
+    """
+    problems: list[str] = []
+    for index, spec in enumerate(labels if isinstance(labels, list) else []):
+        if not isinstance(spec, dict):
+            problems.append(f"labels[{index}]: не dict ({type(spec).__name__})")
+            continue
+        dummy_corners = [[0, 0]] if spec.get("per", "frame") == "code" else []
+        try:
+            _label_point_strict(spec, {}, dummy_corners)
+        except _BadLabelField as exc:
+            problems.append(f"labels[{index}]: {exc.field} {exc.exc_name}")
+        except (TypeError, ValueError) as exc:  # непредвиденное поле: хотя бы имя типа
+            problems.append(f"labels[{index}]: {type(exc).__name__}")
+    return "; ".join(problems)
 
 
 def _first_readable(frame: SdkFrame):
