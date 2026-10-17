@@ -19,7 +19,7 @@
 #   - выключить VPN (WireGuard): он прячет приборы от EnumDevices (0 устройств);
 #   - SDK ищется: env MVCR_SDK_DIR -> каталог плагина установленного IDMVS.
 #
-# Запуск: python multiprocess_prototype/run.py qr_reader_sdk_dual_demo
+# Запуск с окном: python multiprocess_prototype/frontend/run.py <имя рецепта> (run.py без frontend/ — без окна)
 #
 # Команды каждого reader: take_device / release_device / get_status / reset_stats.
 # Автопереподключения нет: после error прибор возвращает take_device.
@@ -175,7 +175,7 @@ blueprint:
     locked_nodes: []
 
 # Определения дисплеев (поля как в qr_reader_sdk_demo; кадр 1280x1024, после draw — BGR).
-# Второе окно правее первого; если экран уже — сдвинуть position.x или уменьшить scale.
+# Дисплеи main и second встроены в главное окно frontend.
 displays:
   - id: main
     name: Считыватель 1
