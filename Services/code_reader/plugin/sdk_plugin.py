@@ -139,12 +139,19 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         self._publish_lock = threading.Lock()
         # Счётчики читателя не сбрасываются — reset_stats запоминает точку отсчёта.
         self._baseline = {"frames": 0, "ok": 0, "no_code": 0, "bad_code": 0, "errors": 0}
-        self._reader: SdkCodeReader = type(self).reader_factory(
-            self._on_frame,
-            self._on_error,
-            device_ip=self._reg.device_ip or None,
-            timeout_ms=self._reg.timeout_ms,
-        )
+        reader_kwargs: dict[str, Any] = {
+            "device_ip": self._reg.device_ip or None,
+            "timeout_ms": self._reg.timeout_ms,
+        }
+        # Режим съёмки: только непустые поля; нет ни одного — читатель создаётся без `trigger`.
+        trigger = {
+            key: value
+            for key in ("trigger_mode", "trigger_source", "trigger_period_ms")
+            if (value := getattr(self._reg, key))
+        }
+        if trigger:
+            reader_kwargs["trigger"] = trigger
+        self._reader: SdkCodeReader = type(self).reader_factory(self._on_frame, self._on_error, **reader_kwargs)
         ctx.log_info(
             f"CodeReaderSdkPlugin[{self._reg.reader_id}]: configured "
             f"(прибор {self._reg.device_ip or 'первый найденный'}, таймаут {self._reg.timeout_ms} мс)"
@@ -297,6 +304,9 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             reg.frames = stats["frames"] - base["frames"]
             reg.errors = stats["errors"] - base["errors"] + self._decode_errors
             reg.last_error = last_error
+            # `.get`: подставные читатели старых тестов отдают stats() без ключа.
+            param_errors = "; ".join(f"{node}: {text}" for node, text in (stats.get("param_errors") or {}).items())
+            reg.param_errors = param_errors
             return {
                 "device_state": reg.device_state,
                 "device": stats["device"],
@@ -311,6 +321,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                 "errors": reg.errors,
                 "dropped": reg.dropped,
                 "last_error": last_error,
+                "param_errors": param_errors,
                 "pending": len(self._queue),
                 "history": list(self._history),
             }

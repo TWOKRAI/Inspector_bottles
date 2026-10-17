@@ -7,6 +7,9 @@
 выход не закроют прибор дважды, а ``close`` не пойдёт под идущим ``get_frame``
 (на Windows закрытие не будит блокирующий вызов, а буфер кадра освобождается).
 Отказ на ``start_grabbing`` закрывает handle в ``start()`` — поток там ещё не создан.
+Режим съёмки (``trigger=``) пишется в прибор между ``open`` и ``start_grabbing`` (при идущем
+захвате узлы закрыты ``0x80020106``), а возвращается в том же ``_release`` — между
+``stop_grabbing`` и ``close``; отказ узла не роняет ``start()`` и живёт в ``param_errors``.
 ``stop()`` лишь поднимает событие и ждёт поток ``timeout + timeout_ms``: дедлайн
 держится на собственном таймауте ``get_frame``.
 
@@ -17,7 +20,8 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +38,15 @@ MAX_CONSECUTIVE_ERRORS = 3
 _LATE_STOP = "поток захвата не завершился за дедлайн stop(); прибор закроется, когда вернётся get_frame"
 _BUSY_HINT = "прибор занят другим клиентом — закройте IDMVS (или другое приложение, открывшее прибор) и повторите"
 
+# Режим съёмки: ключ рецепта -> (узел GenICam, тип, родительский узел). Порядок — порядок записи:
+# источник и период недоступны (0x80020106), пока не записан родитель.
+_TRIGGER_NODES: dict[str, tuple[str, str, str | None]] = {
+    "trigger_mode": ("TriggerMode", "enum", None),
+    "trigger_source": ("TriggerSource", "enum", "TriggerMode"),
+    "trigger_period_ms": ("TriggerSelfTriggerPeriod", "int", "TriggerSource"),
+}
+_SKIPPED = "пропущен: родитель не записан"
+
 
 def _exc_text(exc: BaseException) -> str:
     """Текст исключения вместе с ``__notes__``: ``str(exc)`` заметки не включает
@@ -47,6 +60,10 @@ class _Session:
 
     handle: Any
     stop: threading.Event = field(default_factory=threading.Event)
+    # Записанные при старте узлы режима съёмки: (узел, тип, исходное значение) в порядке записи.
+    restore: list[tuple[str, str, int]] = field(default_factory=list)
+    # time.monotonic() события stop() — для замера «от stop до начала возврата»; None, если поток остановился сам.
+    stop_at: float | None = None
 
 
 class SdkCodeReader:
@@ -67,6 +84,7 @@ class SdkCodeReader:
         device_ip: str | None = None,
         timeout_ms: int = 500,
         api: Any = None,
+        trigger: Mapping[str, Any] | None = None,
     ) -> None:
         if api is None:
             from Services.code_reader.sdk.api import MvCodeReaderApi
@@ -77,6 +95,7 @@ class SdkCodeReader:
         self._on_error = on_error
         self._device_ip = device_ip
         self._timeout_ms = int(timeout_ms)
+        self._trigger = self._parse_trigger(trigger)
 
         self._life = threading.Lock()  # сериализует start()/stop(); SDK-вызовы открытия идут под ним
         self._lock = threading.Lock()  # короткий: состояние и счётчики
@@ -87,6 +106,23 @@ class SdkCodeReader:
         self._device: dict[str, str] | None = None
         self._last_error: str | None = None
         self._counts = {"frames": 0, "ok": 0, "no_code": 0, "bad_code": 0, "errors": 0}
+        # Узел режима съёмки -> почему не записан. Не ошибка сессии: в `errors`/`last_error` не попадает.
+        self._param_errors: dict[str, str] = {}
+
+    @staticmethod
+    def _parse_trigger(trigger: Mapping[str, Any] | None) -> list[tuple[str, str, Any, str | None]]:
+        """Заданные поля режима -> [(узел, тип, значение, родитель)] в порядке записи. ``""``/``0`` = не трогать."""
+        trigger = trigger or {}
+        unknown = sorted(set(trigger) - set(_TRIGGER_NODES))
+        if unknown:
+            raise ValueError(f"неизвестные ключи trigger: {unknown}; допустимы {list(_TRIGGER_NODES)}")
+        plan = []
+        for key, (node, kind, parent) in _TRIGGER_NODES.items():
+            value = trigger.get(key)
+            if value is None or value == "" or value == 0:
+                continue
+            plan.append((node, kind, value, parent))
+        return plan
 
     # ------------------------------------------------------------------ публичное
 
@@ -115,6 +151,7 @@ class SdkCodeReader:
             session, thread = self._session, self._thread
             self._session = None
             if session is not None:
+                session.stop_at = time.monotonic()
                 session.stop.set()
             with self._lock:
                 self._state = "stopped"
@@ -141,6 +178,7 @@ class SdkCodeReader:
                 "last_error": self._last_error,
                 "device": None if self._device is None else dict(self._device),
                 "device_held": thread is not None and thread.is_alive(),
+                "param_errors": dict(self._param_errors),
             }
 
     # ------------------------------------------------------------------ открытие
@@ -154,6 +192,9 @@ class SdkCodeReader:
             # иначе start() из on_error на финальном сбое перетёр бы "error" и его причину.
             messages.append("предыдущий поток захвата ещё не завершился, повторите start() позже")
             return False
+
+        with self._lock:
+            self._param_errors = {}
 
         try:
             entries = self._api.enum_devices()
@@ -172,17 +213,27 @@ class SdkCodeReader:
             messages.append(self._fail_open(entry, exc))
             return False
 
+        # Режим съёмки пишется строго до start_grabbing: при идущем захвате узлы закрыты (0x80020106).
+        # Любой выход из блока (отказ start_grabbing, непредвиденное исключение) возвращает записанное
+        # и закрывает handle; stop_grabbing там не зовётся — захват не начинался.
+        restore: list[tuple[str, str, int]] = []
         try:
+            self._apply_trigger(handle, entry.ip, restore)
             self._api.start_grabbing(handle)
-        except Exception as exc:
+        except BaseException as exc:
             try:
-                self._api.close(handle)
-            except Exception as close_exc:
-                messages.append(self._note_error(f"close после отказа StartGrabbing: {_exc_text(close_exc)}"))
+                self._restore_trigger(handle, restore, messages)
+            finally:  # close при ЛЮБОМ выходе из возврата (в т.ч. KeyboardInterrupt): handle не утекает
+                try:
+                    self._api.close(handle)
+                except Exception as close_exc:
+                    messages.append(self._note_error(f"close после отказа StartGrabbing: {_exc_text(close_exc)}"))
+            if not isinstance(exc, Exception):
+                raise
             messages.append(self._fail_open(entry, exc))
             return False
 
-        session = _Session(handle)
+        session = _Session(handle, restore=restore)
         with self._lock:
             self._device = {"ip": entry.ip, "model": entry.model, "serial": entry.serial}
             self._state = "running"
@@ -190,6 +241,68 @@ class SdkCodeReader:
         self._thread = threading.Thread(target=self._run, args=(session,), name="code-reader-sdk", daemon=True)
         self._thread.start()
         return True
+
+    def _apply_trigger(self, handle: Any, ip: str, restore: list[tuple[str, str, int]]) -> None:
+        """Записать режим съёмки: на узел — прочитать исходное, записать, запомнить для возврата.
+
+        ``restore`` наполняется на месте, чтобы при любом выходе вызывающий вернул то, что успело записаться.
+        Отказ узла (любое исключение) — в ``param_errors`` и WARNING; ``errors``/``last_error``/``on_error`` не трогаем.
+        """
+        in_recipe = {node for node, _, _, _ in self._trigger}
+        written: set[str] = set()
+        for node, kind, value, parent in self._trigger:
+            if parent in in_recipe and parent not in written:
+                self._node_failed(node, _SKIPPED)
+                continue
+            try:
+                if kind == "enum":
+                    read, write = self._api.get_enum, self._api.set_enum_str
+                else:
+                    read, write = self._api.get_int, self._api.set_int
+                original = read(handle, node)["cur"]
+                if original is None:
+                    raise ValueError("исходное значение узла не прочиталось")
+                # До записи: если возврат откажет, оператор вернёт прибор руками по этой строке.
+                _log.info("code_reader SDK [%s]: %s: %s -> %s", ip, node, original, value)
+                write(handle, node, value)
+            except Exception as exc:
+                # Не-SdkError: только имя типа, в str(exc) может быть значение из рецепта.
+                text = f"0x{exc.code:08X}: {exc.where}" if isinstance(exc, SdkError) else type(exc).__name__
+                self._node_failed(node, text)
+                continue
+            restore.append((node, kind, original))
+            written.add(node)
+
+    def _node_failed(self, node: str, text: str) -> None:
+        with self._lock:
+            self._param_errors[node] = text
+        _log.warning("code_reader SDK: режим съёмки, узел %s не записан: %s", node, text)
+
+    def _restore_trigger(self, handle: Any, restore: list[tuple[str, str, int]], failures: list[str]) -> None:
+        """Вернуть записанные узлы в обратном порядке, каждый в своём ``try``.
+
+        Тексты отказов (уже учтённых ``_note_error``) дописываются в ``failures`` на месте — их эмитит вызывающий
+        ПОСЛЕ ``close``. ``BaseException`` одного узла не мешает остальным: пробуются все, затем он пробрасывается.
+        Длительность каждой записи — в INFO-лог (``возврат <узел> мс=``): опыт на приборе по причине отказов возврата.
+        """
+        fatal: BaseException | None = None
+        for node, kind, original in reversed(restore):
+            started = time.monotonic()
+            _log.info("code_reader SDK: возврат %s -> %s", node, original)
+            outcome = "ok"
+            try:
+                (self._api.set_enum if kind == "enum" else self._api.set_int)(handle, node, original)
+            except Exception as exc:
+                outcome = "отказ"
+                # Значение в тексте: после отказа оператор вернёт его руками.
+                failures.append(self._note_error(f"возврат {node} -> {original}: {_exc_text(exc)}"))
+            except BaseException as exc:
+                outcome = "прервано"
+                fatal = fatal or exc
+            finally:
+                _log.info("code_reader SDK: возврат %s мс=%d (%s)", node, (time.monotonic() - started) * 1000, outcome)
+        if fatal is not None:
+            raise fatal
 
     def _fail_open(self, entry: Any, exc: Exception) -> str:
         if isinstance(exc, SdkError) and exc.code == E_ACCESS_DENIED:
@@ -262,12 +375,31 @@ class SdkCodeReader:
         return None
 
     def _release(self, session: _Session) -> None:
-        """``stop_grabbing`` + ``close``. Зовётся только из ``finally`` потока захвата — раз на открытие."""
-        for name in ("stop_grabbing", "close"):
+        """``stop_grabbing``, возврат режима съёмки, ``close``. Зовётся только из ``finally`` потока захвата.
+
+        Возврат пробуется всегда (и после упавшего ``stop_grabbing``) и строго до ``close``; ``close`` — всегда.
+        Колбэк ``on_error`` (``_emit``) зовётся ПОСЛЕ ``close``: зависший или упавший колбэк не держит прибор.
+        """
+        messages: list[str] = []
+        try:
+            started = time.monotonic()
             try:
-                getattr(self._api, name)(session.handle)
+                self._api.stop_grabbing(session.handle)
             except Exception as exc:
-                self._emit(self._note_error(f"{name}: {_exc_text(exc)}"))
+                messages.append(self._note_error(f"stop_grabbing: {_exc_text(exc)}"))
+            finally:
+                _log.info("code_reader SDK: stop_grabbing мс=%d", (time.monotonic() - started) * 1000)
+            if session.restore:
+                since = "н/д" if session.stop_at is None else f"{(time.monotonic() - session.stop_at) * 1000:.0f}"
+                _log.info("code_reader SDK: возврат режима, от stop() до начала мс=%s", since)
+            self._restore_trigger(session.handle, session.restore, messages)
+        finally:
+            try:
+                self._api.close(session.handle)
+            except Exception as exc:
+                messages.append(self._note_error(f"close: {_exc_text(exc)}"))
+            for message in messages:
+                self._emit(message)
 
     # ------------------------------------------------------------------ учёт
 
