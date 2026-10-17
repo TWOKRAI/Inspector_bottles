@@ -1,0 +1,226 @@
+# Рецепт qr_reader_sdk_dual_selftrigger — как qr_reader_sdk_dual_demo, но с записью режима съёмки в приборы:
+# внутренний таймер 40 мс (около 25 кадров/с) вместо аппаратного триггера. Запускать ВРУЧНУЮ, не из app.yaml:
+# убитый процесс (закрытие приложения) режим не вернёт, камера останется в самотриггере до следующего старта
+# или сброса питания. Основной рецепт qr_reader_sdk_dual_demo режим в приборы не пишет.
+#
+# ДВА считывателя ID3013 одновременно через MvCodeReader SDK.
+#
+# Две независимые цепочки, как в qr_reader_sdk_demo, но на двух приборах:
+#   reader_1 (прибор 1) -> draw_1 -> дисплей main
+#   reader_2 (прибор 2) -> draw_2 -> дисплей second
+# Каждый reader берёт СВОЙ прибор эксклюзивно по device_ip, у каждого своё кольцо SHM.
+# Состояние — processes.reader_1.state.code_reader_sdk и processes.reader_2.state.code_reader_sdk.
+#
+# ВАЖНО: device_ip у приборов должны быть РАЗНЫЕ и совпадать с реальными (ниже стоят
+# 192.168.1.10 и 192.168.1.11 — поправить под свои). Пустой device_ip = «первый найденный»:
+# при двух пустых обе ноды возьмут один прибор, вторая получит busy. IP приборов
+# меняются в IDMVS (закрыть его перед запуском), оба прибора — в одной подсети с ПК.
+#
+# Ноды reader_tcp здесь нет: порт 5000 один, а TCP-канал нужен был только для сравнения
+# с SDK (см. qr_reader_sdk_demo). Нужен TCP второй камеры — другой порт и отдельная нода.
+#
+# Перед запуском:
+#   - закрыть IDMVS: он держит приборы эксклюзивно, ноды получат busy;
+#   - выключить VPN (WireGuard): он прячет приборы от EnumDevices (0 устройств);
+#   - SDK ищется: env MVCR_SDK_DIR -> каталог плагина установленного IDMVS.
+#
+# Запуск: python multiprocess_prototype/run.py qr_reader_sdk_dual_selftrigger
+#
+# Команды каждого reader: take_device / release_device / get_status / reset_stats.
+# Автопереподключения нет: после error прибор возвращает take_device.
+# Режим съёмки: trigger_mode/trigger_source/trigger_period_ms (On / SelfTrigger / 40 мс, около 25 кадров/с)
+# плагин пишет в прибор при старте; отказ узла виден в param_errors и не мешает захвату.
+# ВОЗВРАТ прежнего режима при остановке реализован и проверен только на фейке: на стенде 2026-10-16 все 6
+# записей возврата отказали 0x80020206 (NETER), причина не установлена, нужен опыт на камерах. После остановки
+# камера может остаться в самотриггере до сброса питания (убитый процесс режим не вернёт в любом случае);
+# исходные значения пишутся в INFO-лог при старте.
+
+name: qr_reader_sdk_dual_selftrigger
+version: 1
+description: "Два считывателя кодов ID3013: SDK (кадр + коды) каждого на своём дисплее"
+
+blueprint:
+  name: qr_reader_sdk_dual_selftrigger
+  description: "reader_1 + reader_2 (code_reader_sdk, разные device_ip) -> draw_1 / draw_2 -> дисплеи main / second"
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+
+    # --- Считыватель 1 ---
+    - process_name: reader_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      # 20 Гц: produce() не ждёт кадра (захват в своём потоке), только сливает очередь.
+      source_target_fps: 20
+      chain_targets:
+        - draw_1
+      plugins:
+        - plugin_class: Services.code_reader.plugin.sdk_plugin.CodeReaderSdkPlugin
+          plugin_name: code_reader_sdk
+          category: source
+          # IP прибора 1 — НЕ пустой и не равен IP прибора 2.
+          device_ip: "192.168.1.10"
+          reader_id: id3013-sdk-1
+          auto_start: true
+          timeout_ms: 500
+          # Режим съёмки пишется в прибор при старте и возвращается при остановке:
+          # внутренний таймер 40 мс (около 25 кадров/с) вместо аппаратного триггера.
+          trigger_mode: "On"
+          trigger_source: "SelfTrigger"
+          trigger_period_ms: 40
+          # Надписи — как в qr_reader_sdk_demo; префикс cam1 отличает кадр на дисплее.
+          labels:
+            - per: frame
+              template: "cam1 {status} | ok {ok} / no {no} / bad {bad}"
+              anchor: frame
+              xy: [10, 70]
+              group: status_{state}
+            - per: code
+              template: "{code}"
+              anchor: corner0
+              dx: 0
+              dy: 0
+              group: code_text_{state}
+
+    # Рисовальщик камеры 1: кадр (gray) + overlay из того же item -> кадр BGR с рамкой и текстом.
+    - process_name: draw_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          plugin_name: overlay_draw
+          category: rendering
+          default_thickness: 3
+          # Стиль по group (BGR). Кадр 1280x1024: подписи крупные (scale 1.8).
+          color_table:
+            - {group: code_ok, color: [0, 200, 0], thickness: 3}
+            - {group: code_bad, color: [0, 0, 255], thickness: 3}
+            - {group: status_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: status_bad, color: [0, 0, 255], scale: 1.8}
+            - {group: code_text_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: code_text_bad, color: [0, 0, 255], scale: 1.8}
+
+    # --- Считыватель 2 ---
+    - process_name: reader_2
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      source_target_fps: 20
+      chain_targets:
+        - draw_2
+      plugins:
+        - plugin_class: Services.code_reader.plugin.sdk_plugin.CodeReaderSdkPlugin
+          plugin_name: code_reader_sdk
+          category: source
+          # IP прибора 2 — НЕ пустой и не равен IP прибора 1.
+          device_ip: "192.168.1.11"
+          reader_id: id3013-sdk-2
+          auto_start: true
+          timeout_ms: 500
+          # Режим съёмки пишется в прибор при старте и возвращается при остановке:
+          # внутренний таймер 40 мс (около 25 кадров/с) вместо аппаратного триггера.
+          trigger_mode: "On"
+          trigger_source: "SelfTrigger"
+          trigger_period_ms: 40
+          labels:
+            - per: frame
+              template: "cam2 {status} | ok {ok} / no {no} / bad {bad}"
+              anchor: frame
+              xy: [10, 70]
+              group: status_{state}
+            - per: code
+              template: "{code}"
+              anchor: corner0
+              dx: 0
+              dy: 0
+              group: code_text_{state}
+
+    - process_name: draw_2
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          plugin_name: overlay_draw
+          category: rendering
+          default_thickness: 3
+          color_table:
+            - {group: code_ok, color: [0, 200, 0], thickness: 3}
+            - {group: code_bad, color: [0, 0, 255], thickness: 3}
+            - {group: status_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: status_bad, color: [0, 0, 255], scale: 1.8}
+            - {group: code_text_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: code_text_bad, color: [0, 0, 255], scale: 1.8}
+
+  wires:
+    - source: reader_1.code_reader_sdk.frame
+      target: draw_1.overlay_draw.frame
+    - source: reader_2.code_reader_sdk.frame
+      target: draw_2.overlay_draw.frame
+
+  # Кадр с рамкой и текстом кода (BGR, после draw) каждой камеры — на свой дисплей.
+  displays:
+    - node_id: draw_1.overlay_draw.frame
+      display_id: main
+    - node_id: draw_2.overlay_draw.frame
+      display_id: second
+
+  metadata:
+    gui_positions:
+      reader_1.code_reader_sdk:
+        - 40.0
+        - 40.0
+      draw_1.overlay_draw:
+        - 360.0
+        - 40.0
+      reader_2.code_reader_sdk:
+        - 40.0
+        - 200.0
+      draw_2.overlay_draw:
+        - 360.0
+        - 200.0
+    locked_nodes: []
+
+# Определения дисплеев (поля как в qr_reader_sdk_demo; кадр 1280x1024, после draw — BGR).
+# Второе окно правее первого; если экран уже — сдвинуть position.x или уменьшить scale.
+displays:
+  - id: main
+    name: Считыватель 1
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: second
+    name: Считыватель 2
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1290
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
