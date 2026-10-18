@@ -206,7 +206,7 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
     """Близнец U2 на пути истёкшего окна (Д3): стоп шлёт поток поводка, ``jog_hold`` застаёт его в полёте.
 
     Подтверждения удержания прекращены — окно истекает, поток поводка шлёт стоп под замком перехода. Шов — ТОЛЬКО
-    стоп из потока поводка (имя потока ``rv2-lease-...``): он ждёт ворота, ворота открывает возврат нового
+    стоп из потока поводка (имя потока содержит ``rv2-lease-``): он ждёт ворота, ворота открывает возврат нового
     ``JOG_CONT``. С замком ``jog_hold`` ждёт замок, стоп уходит по дедлайну ворот, затем ``JOG_CONT``. Без замка
     на стороне поводка ``jog_hold`` шлёт запасной стоп и ``JOG_CONT``, запоздалый стоп поводка обрывает новый jog,
     а тик публикует чужую ошибку обрыва (seq нового jog не в списке своих стопов).
@@ -231,7 +231,7 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
         stamps: dict[str, float] = {}
 
         def gated_stop(level: int) -> Any:
-            if not threading.current_thread().name.startswith("rv2-lease-") or not first.acquire(blocking=False):
+            if "rv2-lease-" not in threading.current_thread().name or not first.acquire(blocking=False):
                 return real_stop(level)  # не стоп потока поводка — без задержки
             entered.set()
             gate.wait(_GATE_S)  # с замком ворота не откроются (JOG_CONT ждёт этот стоп) — отпускает дедлайн
@@ -409,7 +409,7 @@ def test_disconnect_during_program_aborts_and_joins_threads() -> None:
                     "программа идёт",
                 )
             bounded(drv.disconnect, _CALL_DEADLINE_S)
-            alive = [t.name for t in threading.enumerate() if t.name.startswith("rv2-prog-") and t.is_alive()]
+            alive = [t.name for t in threading.enumerate() if "rv2-prog-" in t.name and t.is_alive()]
             assert alive == [], "поток исполнителя жив после disconnect"
             final = rec.at("rv2", "program")[-1]
             assert final["state"] == "aborted", final
