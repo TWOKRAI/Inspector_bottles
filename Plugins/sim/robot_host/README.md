@@ -25,6 +25,7 @@ TCP-сервер (симулятор робота линии) в процесс�
 | `scene_process` | `camera` | Task 3.5: процесс сцены, куда уходит событие «задание выполнено» |
 | `job_ms` | нет (`RobotSimCore` дефолт `job_ticks=2`) | Task 5.3b: длительность задания в мс — `job_ticks = max(1, round(job_ms / (TICK_INTERVAL_S*1000)))`, `TICK_INTERVAL_S` из `Services.robot_comm.server.sim_core`. Разбор — в `configure()`, отказ (не число > 0, `bool` не считается числом) наблюдается на попытке поднять сервер (`_start_server` → `_fail`, `state="error"`), процесс живёт |
 
+| `robot_state_hz` | `0` (выкл.) | T3.8: частота публикации `sim.robot.state`, Гц; допустимо `0 <= hz <= 1000 / publish_ms` (при `publish_ms` 50 — до 20), число, не `bool`. Неверное значение — один отказ в health («robot_state_hz: допустимо 0..<макс>», без введённого значения), публикация выключена, сервер и энкодер работают. Только `protocol: v2`; на v1 один `log_info`, публикации нет |
 | `protocol` | `v1` | T2.4: карта регистров робота, `v1` или `v2`. Иное значение — отказ на старте той же дорогой, что `job_ms` (`_fail`, `state="error"`, процесс живёт); текст ошибки — «protocol: допустимо v1\|v2», без введённого значения |
 
 ## Протокол v2 (T2.4)
@@ -211,6 +212,39 @@ mailbox не трогается.
 (`RobotSimCore.belt_mm_s` → `BeltDrive.mm_s`). Уровни публикуются и без
 `ctx.state_proxy` — тогда пропускается только запись в мир. Потребитель — `Plugins/sim/scene_source`
 (Task 2.2), см. [`apps/line_sim/README.md`](../../../apps/line_sim/README.md#общий-мир-task-22).
+
+## Состояние робота (T3.8)
+
+С `protocol: v2` и `robot_state_hz > 0` тот же воркер-луп `sim_robot_world_publisher` кладёт
+снимок ядра в дерево `StateStore` по пути **`sim.robot.state`** — примерно `robot_state_hz`
+раз в секунду (период по `time.monotonic`; он округляется до ближайшего кратного
+`publish_ms`: 20 Гц при 50 мс — каждый цикл, 4 Гц — каждый 5-й; 15 Гц при 50 мс дают 20 Гц, то есть частота может быть и выше заданной). Ключ `robot_state_hz` и границы — в таблице «Конфиг».
+Пишется один путь, целиком словарём (`state_proxy.set`); `robot_host` пишет только `sim.*`,
+`devices.*` — никогда (поза драйвера в хабе, T5.3, — другая поза, имена не смешивать).
+`protocol: v1` снимок не публикует.
+
+Схема снимка (только JSON-типы):
+
+| Ключ | Тип | Смысл |
+|---|---|---|
+| `pose` | `{x_mm, y_mm, z_mm, rz_deg}` | поза TCP из блока `tlm` (s16 / 10) |
+| `moving` | `bool` | `TLM_MOVING != 0` |
+| `hand` | `int` | `TLM_HAND` (0 — правая, иначе левая) |
+| `joints` | `list[float]` \| `null` | суставы ядра; `null` — поза недостижима для модели |
+| `target` | `list[float]` \| `null` | цель текущего хода `[x, y, z, rz]`; `null` — хода нет |
+| `model` | `str` | имя класса модели ядра (`ScaraModel`) |
+| `regs` | `{res, tlm, pmir}` | блоки регистров: RES 12 слов от 0x1010, TLM 32 от 0x1040, PMIR 128 от 0x3000 — каждый одним срезом |
+| `t` | `float` | `time.monotonic()` хоста в момент снимка |
+
+`tlm` — один срез, но тик ядра пишет `TLM_X..TLM_RZ` по одному, поэтому `joints` и `tlm`
+могут относиться к соседним тикам (принято).
+
+Потребители: окно `python -m Services.robot_comm.gui.sim_view --line HOST:PORT`
+(`--mode push` — подписка на `sim.robot.state.**`; `--mode poll --poll-ms N` — разовое
+`state.get_subtree` раз в N мс; вид только читает и сам ядра не строит), пульт 6.4 —
+подписка `sim.robot.**` своим `ctx.state_proxy`. Каждый снимок — пакет изменений общего
+дерева: у подписчиков узких путей (`scene_source`, вид) он может давать лишний ресинк;
+цена не измерена (стенд T3.8, метрика `state_proxy.resync_started`).
 
 ## Деградация без `pymodbus`
 

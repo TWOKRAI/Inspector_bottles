@@ -34,6 +34,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QVBoxLayou
 
 from Services.robot_comm.core.protocol_v2 import ERR, ERR_TEXT, KIND, OP, REASON_TEXT, REG, STOP_LEVEL
 from Services.robot_comm.gui._common import _REFRESH_MS, _decode_reg
+from Services.robot_comm.gui.line_source import LineLink, LineRobotState
 from Services.robot_comm.gui.z_view import TimeTape, ZScale
 from Services.robot_comm.server.sim_core_v2 import (
     RobotSimCoreV2,
@@ -432,50 +433,154 @@ class DemoDriver:
         core.write(REG["CMD_FLAG"], [1])  # последним (TRAPS, тот же порядок что и у mailbox-хелперов тестов)
 
 
-def build_window(core: RobotSimCoreV2) -> QWidget:
+def build_window(core: RobotSimCoreV2 | LineRobotState, *, writable: bool = True) -> QWidget:
     """Собрать отладочное окно над ``core``: кнопки, ``SimView`` + ``ZScale`` в ряд,
     ``TimeTape`` снизу. Отдельно от ``main()`` — чтобы состав окна проверялся
-    тестом без event loop (сторож инъекции I11, T2.W)."""
-    driver = DemoDriver(core)
+    тестом без event loop (сторож инъекции I11, T2.W).
+
+    ``writable=False`` (T3.8, режим ``--line``): без ``DemoDriver`` и без кнопок, сигнал
+    ``clicked`` ни с чем не связан — окно только показывает состояние ``core``."""
     view = SimView(core)
-    view.clicked.connect(driver.goto)
     zscale = ZScale(core)
     zscale.setFixedWidth(110)
     tape = TimeTape(core)
     tape.setFixedHeight(150)
 
     window = QWidget()
-    window.setWindowTitle("Симулятор робота v2 — вид сверху")
-
-    btn_home = QPushButton("Домой")
-    btn_home.clicked.connect(driver.home)
-
-    btn_servo = QPushButton("Серво")
-    # Без локальной копии состояния (ревью T2.V, находка 4): NAK по busy
-    # (робот в ходе) не должен рассинхронизировать кнопку с TLM_SERVO —
-    # следующее нажатие читает регистр заново и просто инвертирует его.
-    btn_servo.clicked.connect(lambda: driver.servo(core.read(REG["TLM_SERVO"], 1)[0] == 0))
-
-    btn_stop = QPushButton("Стоп")
-    btn_stop.clicked.connect(driver.stop)
-
-    toolbar = QHBoxLayout()
-    toolbar.addWidget(btn_home)
-    toolbar.addWidget(btn_servo)
-    toolbar.addWidget(btn_stop)
-    toolbar.addStretch(1)
-
     sim_row = QHBoxLayout()
     sim_row.addWidget(view, 1)
     sim_row.addWidget(zscale)
-
     layout = QVBoxLayout(window)
-    layout.addLayout(toolbar)
+
+    if writable:
+        window.setWindowTitle("Симулятор робота v2 — вид сверху")
+        driver = DemoDriver(core)
+        view.clicked.connect(driver.goto)
+
+        btn_home = QPushButton("Домой")
+        btn_home.clicked.connect(driver.home)
+
+        btn_servo = QPushButton("Серво")
+        # Без локальной копии состояния (ревью T2.V, находка 4): NAK по busy
+        # (робот в ходе) не должен рассинхронизировать кнопку с TLM_SERVO —
+        # следующее нажатие читает регистр заново и просто инвертирует его.
+        btn_servo.clicked.connect(lambda: driver.servo(core.read(REG["TLM_SERVO"], 1)[0] == 0))
+
+        btn_stop = QPushButton("Стоп")
+        btn_stop.clicked.connect(driver.stop)
+
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(btn_home)
+        toolbar.addWidget(btn_servo)
+        toolbar.addWidget(btn_stop)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+        window._driver = driver  # водитель живёт, пока живёт окно
+    else:
+        window.setWindowTitle("Робот линии v2 — вид сверху (только чтение)")
+
     layout.addLayout(sim_row)
     layout.addWidget(tape)
     window.resize(820, 860)
-    window._driver = driver  # водитель живёт, пока живёт окно
     return window
+
+
+#: период таймера связи окна линии, мс
+_LINE_TICK_MS = 100
+#: данные линии старше этого считаются устаревшими, с
+_LINE_STALE_S = 1.0
+#: период строки ``[line-view]``, с
+_LINE_LOG_PERIOD_S = 0.2
+
+
+def attach_line(window: QWidget, link: LineLink, *, clock=time.monotonic) -> QTimer:
+    """Привязать к окну связь с линией (T3.8): таймер 100 мс зовёт ``link.tick()``,
+    дописывает в заголовок состояние связи и раз в 0.2 с печатает строку ``[line-view]``.
+
+    Заголовок: базовый + « — связь с линией потеряна» при ``link.lost``, иначе
+    + « — нет данных линии N.N с» при возрасте снимка > 1.0 с (без ``N.N``, если снимка
+    не было) + « — <текст ошибки>» при ``link.last_error``. Таймер — дочерний объект
+    окна, умирает вместе с ним. Строка для сверки со стендом: время стены, ``t`` снимка,
+    отставание ``time.monotonic() - t`` и поза из чтения источника (как у видов).
+    """
+    base_title = window.windowTitle()
+    source = link.source
+    last_log: list[float | None] = [None]
+
+    def _title() -> str:
+        title = base_title
+        if link.lost:
+            title += " — связь с линией потеряна"
+        else:
+            age = source.age_s()
+            if age is None:
+                title += " — нет данных линии"
+            elif age > _LINE_STALE_S:
+                title += f" — нет данных линии {age:.1f} с"
+        if link.last_error:
+            title += f" — {link.last_error}"
+        return title
+
+    def _log_line() -> None:
+        t_state = source.state_t()
+        if t_state is None:
+            return
+        x, y, z, rz = (_decode_reg(source.read(REG[name], 1)[0]) for name in ("TLM_X", "TLM_Y", "TLM_Z", "TLM_RZ"))
+        moving = 1 if source.read(REG["TLM_MOVING"], 1)[0] else 0
+        print(
+            f"[line-view] wall={time.time():.3f} t_state={t_state:.3f} lag={time.monotonic() - t_state:.3f} "
+            f"x={x:.1f} y={y:.1f} z={z:.1f} rz={rz:.1f} moving={moving} link={'lost' if link.lost else 'ok'}",
+            flush=True,
+        )
+
+    def _on_timer() -> None:
+        link.tick()
+        title = _title()
+        if window.windowTitle() != title:
+            window.setWindowTitle(title)
+        now = clock()
+        if last_log[0] is None or now - last_log[0] >= _LINE_LOG_PERIOD_S:
+            last_log[0] = now
+            _log_line()
+
+    timer = QTimer(window)
+    timer.timeout.connect(_on_timer)
+    timer.start(_LINE_TICK_MS)
+    return timer
+
+
+def _parse_endpoint(parser: argparse.ArgumentParser, text: str) -> tuple[str, int]:
+    """``HOST:PORT`` -> ``(host, port)``; неверная форма — ``parser.error`` (код 2)."""
+    host, sep, port_text = text.rpartition(":")
+    if not sep or not host or not port_text.isdecimal() or not 0 < int(port_text) < 65536:
+        parser.error("--line: нужен HOST:PORT, порт 1..65535")
+    return host, int(port_text)
+
+
+def _run_line_window(host: str, port: int, args: argparse.Namespace) -> None:
+    """Режим ``--line`` (T3.8): окно только для чтения над состоянием робота ЛИНИИ.
+
+    Ни ядра ``RobotSimCoreV2``, ни писателя, ни своих потоков: ``LineLink`` читает
+    ``sim.robot.state`` по сокету, таймер окна (``attach_line``) ведёт связь. Линия не
+    отвечает — текст в stderr и код 2 до открытия окна. Не возвращается: ``sys.exit``.
+    """
+    link = LineLink(host, port, mode=args.mode, poll_ms=args.poll_ms, retry_ms=args.retry_ms)
+    try:
+        link.open()
+    except OSError as exc:
+        print(f"нет связи с линией {host}:{port}: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    app = QApplication(sys.argv)
+    app.aboutToQuit.connect(link.close)
+    window = build_window(link.source, writable=False)
+    attach_line(window, link)
+
+    if args.quit_after is not None:
+        QTimer.singleShot(round(args.quit_after * 1000), app.quit)
+
+    window.show()
+    sys.exit(app.exec())
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -489,10 +594,33 @@ def main(argv: list[str] | None = None) -> None:
     ``--quit-after SECONDS`` — смоук-режим: окно закрывается само через
     заданное время (``QTimer.singleShot`` -> ``app.quit()``), без человека за
     экраном. Команда для проверки без дисплея — в README.
+
+    ``--line [HOST:PORT]`` (T3.8) — окно только для чтения над роботом ЛИНИИ: состояние из
+    ``sim.robot.state`` по сокету (``--mode push|poll``, ``--poll-ms``, ``--retry-ms``),
+    без своего ядра и писателя; линия не отвечает — код 2. См. ``line_source.py``.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quit-after", type=float, default=None, metavar="SECONDS")
+    parser.add_argument(
+        "--line",
+        nargs="?",
+        const="127.0.0.1:8766",
+        default=None,
+        metavar="HOST:PORT",
+        help="показать робота ЛИНИИ из sim.robot.state (только чтение, без своего ядра); по умолчанию 127.0.0.1:8766",
+    )
+    parser.add_argument("--mode", choices=("push", "poll"), default="push", help="только с --line: подписка или опрос")
+    parser.add_argument("--poll-ms", type=int, default=100, help="только с --line --mode poll: период опроса, мс")
+    parser.add_argument("--retry-ms", type=int, default=1000, help="только с --line: пауза между попытками связи, мс")
     args = parser.parse_args(argv)
+
+    if args.line is not None:
+        host, port = _parse_endpoint(parser, args.line)
+        if args.poll_ms <= 0:
+            parser.error("--poll-ms: нужно число > 0")
+        if args.retry_ms <= 0:
+            parser.error("--retry-ms: нужно число > 0")
+        _run_line_window(host, port, args)
 
     app = QApplication(sys.argv)
     core = RobotSimCoreV2()

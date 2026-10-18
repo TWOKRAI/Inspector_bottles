@@ -48,6 +48,7 @@
 - [Новейшие модели; Haiku 5.5 на простом](feedback_always_latest_models.md) — алиасы тиров; механику — haiku-агенту
 - [Стек 2026](reference_tech_stack_2026.md) — сверять при правках стека и зависимостей
 - [Push, кредит, инструменты](project_owner_push_and_tools_decisions.md) — push/PR разрешены после договорённости с сессиями; serena/graphify — сделать полезными
+- [Робот как дисплей](project_robot_view_as_display_service.md) — сцена из рецепта, кроп, плавающие дисплеи; сначала бэкенд
 
 ## 3. Окружение (Windows)
 - [venv держит MCP](project_venv_locked_by_mcp.md) — закрыть VS Code перед переустановкой пакетов
