@@ -622,7 +622,7 @@ def test_log_rejects_string_knobs_in_constructor_and_set() -> None:
     assert (state["enabled"], state["periodic"]) == (True, False)
 
 
-@pytest.mark.parametrize("bad", [True, "x", 5, {"enabled": "false"}, {"periodic": 1}])
+@pytest.mark.parametrize("bad", ["x", 5, {"enabled": "false"}, {"periodic": 1}])
 def test_driver_with_bad_exchange_log_params_is_created_with_defaults_and_warns(bad: Any) -> None:
     handler = _Collector()
     logger = logging.getLogger("mpf.Services.device_hub.drivers.base")
@@ -652,3 +652,67 @@ def test_call_started_before_disable_writes_nothing_after_it() -> None:
         _join(reader)
     state = _bounded(log.get)
     assert (state["lines"], state["counters"], state["last_seq"]) == ([], {}, 0)
+
+
+@pytest.mark.parametrize(("value", "enabled"), [(False, False), (True, True)])
+def test_driver_bool_exchange_log_params_is_a_shorthand_without_warning(value: bool, enabled: bool) -> None:
+    """``exchange_log: false`` — журнал выключен, ``true`` — умолчания; предупреждения нет."""
+    handler = _Collector()
+    logger = logging.getLogger("mpf.Services.device_hub.drivers.base")
+    logger.addHandler(handler)
+    try:
+        drv = _driver(exchange_log=value)
+    finally:
+        logger.removeHandler(handler)
+    state = _bounded(lambda: drv.call("exchange_log_get", {}))
+    assert (state["enabled"], state["periodic"]) == (enabled, False)
+    assert [r for r in handler.records if exchange_log.TEXT_BAD_CONFIG in r.getMessage()] == []
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_get_rejects_limit_below_one(limit: int) -> None:
+    with pytest.raises(ValueError):
+        ExchangeLog("lim").get(limit=limit)
+
+
+class _GatedLock:
+    """Замок журнала, у которого ПЕРВЫЙ вход ждёт событие ДО захвата настоящего замка."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+        self._guard = threading.Lock()
+        self._first = True
+        self.entered = threading.Event()
+        self.gate = threading.Event()
+
+    def __enter__(self) -> Any:
+        with self._guard:
+            first, self._first = self._first, False
+        if first:
+            self.entered.set()
+            assert self.gate.wait(_DEADLINE_S), "замок не освобождён за дедлайн"
+        return self._real.__enter__()
+
+    def __exit__(self, *exc: Any) -> Any:
+        return self._real.__exit__(*exc)
+
+
+def test_time_is_monotonic_by_seq_when_one_call_waits_for_the_log_lock() -> None:
+    """Поток A дошёл до замка журнала и ждёт; B проходит вызов целиком. ``t`` берётся под замком -> растёт с ``seq``.
+
+    Не зависит от числа чтений часов и от места форматтера: ловит любое ``t``, прочитанное вне замка раньше.
+    """
+    log = ExchangeLog("gated", periodic=True)
+    gated = _GatedLock(log._lock)
+    log._lock = gated  # type: ignore[assignment]
+    tr = ExchangeLogTransport(_Fake(), log)
+    a = _run(lambda: tr.transaction([("w", _CMD_SEQ, 1)]))
+    try:
+        assert gated.entered.wait(_DEADLINE_S), "поток A не дошёл до замка журнала"
+        _bounded(lambda: tr.transaction([("w", _CMD_SEQ, 2)]))
+    finally:
+        gated.gate.set()
+        _join(a)
+    lines = _bounded(log.get)["lines"]
+    assert [ln["text"] for ln in lines] == ["W CMD_SEQ = 2", "W CMD_SEQ = 1"]
+    assert lines[0]["t"] < lines[1]["t"], [(ln["seq"], ln["t"]) for ln in lines]

@@ -282,6 +282,8 @@ class RobotDriverV2(BaseDeviceDriver):
 
         # Журнал обмена (T5.6): живёт столько же, сколько драйвер; ручки — entry.params["exchange_log"]
         log_cfg = params.get("exchange_log")
+        if isinstance(log_cfg, bool):  # сокращение: false — журнал выключен, true — умолчания
+            log_cfg = {"enabled": log_cfg}
         try:
             if log_cfg is not None and not isinstance(log_cfg, Mapping):
                 raise ValueError(TEXT_BAD_CONFIG)

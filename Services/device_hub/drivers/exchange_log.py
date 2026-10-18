@@ -18,8 +18,9 @@ Public API:
     ``get`` / ``set`` возвращают ``{"enabled", "periodic", "lines", "last_seq", "dropped", "counters",
     "log_errors"}`` (у ``set`` ключа ``lines`` нет). Строка — ``{"seq", "t", "side", "text", "tag", "n", "ms"}``.
 
-    ``get``: Pre — ``since_seq >= 0``, ``limit >= 0``. Post — строки с ``seq >= since_seq`` по возрастанию, не больше
-    ``limit``; ``last_seq`` — ``seq`` последней отданной строки (без строк — последний выданный ``seq``);
+    ``get``: Pre — ``since_seq >= 0``, ``limit >= 1`` (иначе ``ValueError``).
+    Post — строки с ``seq >= since_seq`` по возрастанию, не больше ``limit``;
+    ``last_seq`` — ``seq`` последней отданной строки (без строк — последний выданный ``seq``);
     ``dropped`` — сколько строк с ``seq >= since_seq`` уже вытеснено из кольца. Читатель заменяет строку по
     ``seq``: у последней строки склейка может поднять ``n``.
     ``set``: Pre — ручка ``None`` не меняется. Post — возвращено новое состояние; ``clear=True`` очищает кольцо
@@ -43,7 +44,13 @@ from typing import Any
 from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.robot_comm.core.protocol_v2 import ERR_TEXT, OP, REG, REG_COUNT
 
-__all__ = ["ExchangeLog", "ExchangeLogTransport"]
+__all__ = [
+    "TEXT_BAD_CONFIG",
+    "TEXT_BAD_GET_ARGS",
+    "TEXT_BAD_KNOBS",
+    "ExchangeLog",
+    "ExchangeLogTransport",
+]
 
 # Постоянные тексты отказов (R8: без входных значений); их отдают операции драйвера
 TEXT_BAD_KNOBS = "журнал обмена: ручки enabled, periodic и clear принимают только true или false"
@@ -226,7 +233,13 @@ class ExchangeLog:
     # --- публичный API ---
 
     def get(self, since_seq: int = 0, limit: int = 200) -> dict[str, Any]:
-        """Строки с ``seq >= since_seq`` по возрастанию (не больше ``limit``) и состояние журнала."""
+        """Строки с ``seq >= since_seq`` по возрастанию (не больше ``limit``) и состояние журнала.
+
+        Raises:
+            ValueError: ``limit < 1``.
+        """
+        if limit < 1:
+            raise ValueError(TEXT_BAD_GET_ARGS)
         with self._lock:
             lines: list[dict[str, Any]] = []
             for line in self._ring:
