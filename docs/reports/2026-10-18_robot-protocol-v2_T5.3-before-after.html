@@ -1,4 +1,4 @@
-<title>Робот v2: потоки и данные</title>
+<title>Робот v2: круг 2</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -89,6 +89,9 @@ a { color: var(--accent); }
 .chip.warn::before { background: var(--warn); }
 .chip.ok::before { background: var(--ok); }
 .chip.off::before { background: transparent; border: 2px solid var(--muted); }
+.chip.fail::before { background: var(--fail); }
+.chip.plan::before { background: var(--accent); }
+.chip.base::before { background: var(--muted); }
 
 /* before / after pair */
 .pair { margin-top: 32px; padding-top: 4px; }
@@ -97,6 +100,10 @@ a { color: var(--accent); }
 .ba > div { min-width: 0; padding-left: 14px; border-left: 3px solid var(--line); }
 .ba .was { border-left-color: var(--fail); }
 .ba .now { border-left-color: var(--ok); }
+.ba .base { border-left-color: var(--muted); }
+.ba .plan { border-left-color: var(--accent); }
+.ba.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.ba.three p { font-size: 0.92rem; }
 .ba p, .ba ul { max-width: none; }
 
 /* diagrams and tables */
@@ -117,6 +124,7 @@ td { min-width: 0; }
 .tag.ok { color: var(--ok); border-color: var(--ok); }
 .tag.fail { color: var(--fail); border-color: var(--fail); }
 .tag.warn { color: var(--warn); border-color: var(--warn); }
+.tag.plan { color: var(--accent); border-color: var(--accent); }
 
 /* pipeline */
 .flow { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; padding: 0; margin: 16px 0 22px; max-width: none; counter-reset: step; }
@@ -157,10 +165,34 @@ svg.chart .grid { stroke: var(--line); stroke-width: 1; }
 svg.chart .axis { stroke: var(--muted); stroke-width: 1.5; }
 svg.chart .bar-bad { fill: var(--fail); }
 svg.chart .bar-ok { fill: var(--ok); }
+svg.chart.wide { min-width: 720px; }
+svg.chart text { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+svg.chart text.on-bar { fill: var(--bg); stroke: none; }
+svg.chart text.b { font-weight: 600; }
+svg.chart .t-plan { fill: var(--accent); }
+svg.chart .t-win { fill: var(--warn); }
+svg.chart .t-pm { fill: var(--fail); }
+svg.chart .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+svg.chart .box-acc { stroke: var(--accent); stroke-width: 2; }
+svg.chart .box-ok { stroke: var(--ok); stroke-width: 2; }
+svg.chart .box-bad { stroke: var(--fail); stroke-width: 2; stroke-dasharray: 5 3; }
+svg.chart .arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+svg.chart .arrow.dash { stroke-dasharray: 4 3; }
+svg.chart .mk { fill: var(--muted); }
+svg.chart .tick { stroke: var(--fg); stroke-width: 2.5; }
+svg.chart .mark-win { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg.chart .mark-pm { stroke: var(--fail); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg.chart .mark-dl { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg.chart .bar-plan { fill: color-mix(in srgb, var(--accent) 22%, var(--surface)); stroke: var(--accent); stroke-width: 1; }
+svg.chart .bar-plan-soft { fill: color-mix(in srgb, var(--accent) 8%, var(--surface)); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }
+svg.chart .bar-plan-dash { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 6 3; }
 
+@media (max-width: 1000px) {
+  .ba.three { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 760px) {
   h1 { font-size: 1.55rem; }
-  .ba, .two, .opts { grid-template-columns: minmax(0, 1fr); }
+  .ba, .ba.three, .two, .opts { grid-template-columns: minmax(0, 1fr); }
 }
 </style>
 
@@ -168,17 +200,289 @@ svg.chart .bar-ok { fill: var(--ok); }
 
 <header>
   <h1>Робот v2: потоки и данные</h1>
-  <p class="lede">T5.3 плана robot-protocol-v2, полоса R2. Потоки драйвера робота v2 переезжают в область плагина хаба. Остановка процесса укладывается в окно 3.0 с. Хранилище данных робота получает удаление программ и ограниченный рост замков.</p>
-  <p class="meta">Ветка <span class="mono">feat/robot-v2-t53</span>, база <span class="mono">main cc2281490</span>. Состояние на 2026-10-18. Код в T5.3b лежит в отдельном worktree <span class="mono">robot-v2-t53b</span>.</p>
+  <p class="lede">T5.3 плана robot-protocol-v2, полоса R2. Страница показывает три состояния: базу, ветку сейчас и архитектуру после круга 2. Круг 2 — правка по ревью Opus и вердикту CTO. Код круга 2 не написан: всё, что здесь названо «после», это принятое решение, а не результат.</p>
+  <p class="meta">Ветка <span class="mono">feat/robot-v2-t53</span>. Три точки отсчёта: база <span class="mono">cc2281490</span>, код в ветке <span class="mono">f76f7be99</span>, документ решения круга 2 <span class="mono">b34e5f4cd</span>. Состояние на 2026-10-18.</p>
   <ul class="chips" aria-label="Статус подзадач">
-    <li class="chip warn"><b>T5.3a</b> код есть, проверка идёт</li>
-    <li class="chip warn"><b>T5.3b</b> код есть, не прогнан</li>
+    <li class="chip warn"><b>T5.3a</b> код в ветке, ревью: CHANGES REQUESTED</li>
+    <li class="chip ok"><b>T5.3b</b> влит в ветку <span class="mono">0e88f4e01</span>, ревью без блокеров</li>
+    <li class="chip plan"><b>круг 2</b> решение принято, кода нет</li>
     <li class="chip off"><b>T5.3c</b> не начата</li>
     <li class="chip off"><b>T5.3d</b> не начата</li>
-    <li class="chip off"><b>main</b> не слито</li>
+    <li class="chip fail"><b>main</b> слияние закрыто до круга 2 (CTO: BLOCK)</li>
   </ul>
   <p class="meta" style="margin-top:12px">a: потоки и остановка драйвера (M1). b: хранилище данных (M3). c: 21 команда хаба (M2-а). d: операции движения и параметров (M2-б).</p>
+  <ul class="chips" aria-label="Условные обозначения">
+    <li class="chip base"><b>база</b> cc2281490, до T5.3</li>
+    <li class="chip warn"><b>сейчас</b> ветка, f76f7be99</li>
+    <li class="chip plan"><b>после круга 2</b> план, не реализовано</li>
+  </ul>
+  <p class="meta" style="margin-top:12px">Числа трёх видов. <span class="tag ok">замер</span> рядом указано, кто мерил. <span class="tag warn">оценка</span> посчитано или прочитано в коде. <span class="tag plan">ЦЕЛЬ</span> к чему идёт круг 2, не измерено.</p>
 </header>
+
+<section id="short">
+  <h2>Коротко</h2>
+  <ul>
+    <li><b>Что не так в ветке.</b> Остановка процесса укладывается в окно 3.0 с только при исправной связи: 2,55 с для одного робота. Если робот не подтверждает стоп, стоп уходит три раза, и остановка длится 6,00 с на одного робота. Два молчащих робота дают 12,00 с. У потоков робота три пути владения, а не один.</li>
+    <li><b>Что будет после круга 2.</b> Все потоки у области плагина. Каждому роботу пишется ровно один стоп, всем роботам параллельно, до одного общего срока. Если связь мертва, робота остановит его собственный сторож. Подтверждение стопа (эхо) только сообщает о проблеме и остановку не держит.</li>
+    <li><b>Что обещает круг 2</b> (формулировка для ADR и брифа): ПК пишет стоп каждому досягаемому роботу до срока; недосягаемого останавливает его сторож, если он не 0; остановка роботов и закрытие области укладываются в срок. Ожидание тик-воркеров (<code>remove_worker</code>, до 5,0 с на поток) в срок не входит. Это сказано явно.</li>
+    <li><b>Что дальше.</b> Слияние в main закрыто до круга 2. Порядок: код и тесты-сторожа, матрицы инъекций, ревью, стенд через PM, перебазирование, повторный гейт CTO.</li>
+  </ul>
+</section>
+
+<section id="arch">
+  <h2>Кто чем владеет после круга 2</h2>
+  <p>План, не код. Каждая стрелка и каждая рамка взяты из документа решения <span class="mono">plans/robot-protocol-v2/tasks/T5.3.round2-decision.md</span>, раздел 2.</p>
+  <div class="scroll">
+    <h4>Схема: владельцы потоков, стопа и срока (план)</h4>
+    <svg class="chart wide" viewBox="0 0 900 520" role="img" aria-labelledby="own-title own-desc">
+      <title id="own-title">Кто чем владеет после круга 2</title>
+      <desc id="own-desc">Область плагина владеет всеми потоками. Плагин владеет одним сроком. Менеджер рассылает стоп параллельно. Драйвер владеет защёлкой стопа. Сторож робота страхует мёртвую связь.</desc>
+      <defs>
+        <marker id="own-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+
+      <!-- ряд 1: плагин и область -->
+      <rect class="box box-acc" x="10" y="10" width="420" height="104" rx="6"/>
+      <text x="22" y="32" class="b">Плагин DeviceHubPlugin</text>
+      <text x="22" y="54">владеет ОДНИМ абсолютным сроком:</text>
+      <text x="22" y="72">deadline = now + 3,0 − 0,5 с</text>
+      <text x="22" y="92" class="t-muted">фазы: 1 запись стопа → 2 потоки →</text>
+      <text x="22" y="108" class="t-muted">scope.close(deadline) → 4 без записи</text>
+
+      <rect class="box box-acc" x="470" y="10" width="420" height="104" rx="6"/>
+      <text x="482" y="32" class="b">Область плагина device_hub</text>
+      <text x="482" y="54">владеет ВСЕМИ потоками робота</text>
+      <text x="482" y="72">spawn обязателен для драйвера</text>
+      <text x="482" y="92" class="t-muted">нет своего корня драйвера, нет финализатора</text>
+      <text x="482" y="108" class="t-muted">потоки: lease-k, prog-k, stop-&lt;id&gt;-k</text>
+      <line class="arrow" x1="430" y1="62" x2="468" y2="62" marker-end="url(#own-ar)"/>
+
+      <!-- ряд 2: менеджер и драйверы -->
+      <rect class="box" x="10" y="170" width="420" height="96" rx="6"/>
+      <text x="22" y="192" class="b">DeviceManager</text>
+      <text x="22" y="214">рассылает стоп всем роботам ПАРАЛЛЕЛЬНО</text>
+      <text x="22" y="232">потоки из spawn, ожидание по общему сроку</text>
+      <text x="22" y="252" class="t-muted">молчащий r1 не задерживает стоп r2</text>
+      <line class="arrow" x1="220" y1="114" x2="220" y2="168" marker-end="url(#own-ar)"/>
+      <text x="228" y="146" class="t-muted" style="font-size:10px">срок и команда «стоп»</text>
+
+      <rect class="box" x="470" y="170" width="205" height="96" rx="6"/>
+      <text x="482" y="192" class="b">драйвер r1</text>
+      <text x="482" y="212" style="font-size:11px">владеет защёлкой стопа:</text>
+      <text x="482" y="228" style="font-size:11px">записанный уровень +</text>
+      <text x="482" y="244" style="font-size:11px">«последняя запись упала»</text>
+      <text x="482" y="260" class="t-muted" style="font-size:11px">Thread сам не создаёт</text>
+      <rect class="box" x="685" y="170" width="205" height="96" rx="6"/>
+      <text x="697" y="192" class="b">драйвер r2</text>
+      <text x="697" y="212" style="font-size:11px">тот же закон на каждого</text>
+      <text x="697" y="228" style="font-size:11px">повтор: один раз и только</text>
+      <text x="697" y="244" style="font-size:11px">после упавшей записи,</text>
+      <text x="697" y="260" class="t-muted" style="font-size:11px">пока не вышел срок</text>
+      <line class="arrow" x1="430" y1="218" x2="468" y2="218" marker-end="url(#own-ar)"/>
+      <line class="arrow dash" x1="680" y1="114" x2="680" y2="168" marker-end="url(#own-ar)"/>
+      <text x="688" y="146" class="t-muted" style="font-size:10px">spawn потоков</text>
+
+      <!-- ряд 3: клиент и правила -->
+      <rect class="box" x="470" y="320" width="420" height="84" rx="6"/>
+      <text x="482" y="342" class="b">клиент robot_comm</text>
+      <text x="482" y="362">issue_stop(level) → value: только запись</text>
+      <text x="482" y="380">await_stop_echo(value, level, *, deadline)</text>
+      <text x="482" y="396" class="t-muted">stop() = оба, для оператора без изменений</text>
+      <line class="arrow" x1="572" y1="266" x2="572" y2="318" marker-end="url(#own-ar)"/>
+      <line class="arrow" x1="787" y1="266" x2="787" y2="318" marker-end="url(#own-ar)"/>
+
+      <rect class="box" x="10" y="320" width="205" height="84" rx="6"/>
+      <text x="22" y="342" class="b">эхо стопа</text>
+      <text x="22" y="362" style="font-size:11px">только диагностика:</text>
+      <text x="22" y="378" style="font-size:11px">нет эха → last_error и</text>
+      <text x="22" y="394" style="font-size:11px">health. Остановку не держит</text>
+      <rect class="box" x="225" y="320" width="205" height="84" rx="6"/>
+      <text x="237" y="342" class="b">robot_stop оператора</text>
+      <text x="237" y="362" style="font-size:11px">идёт всегда. Защёлка</text>
+      <text x="237" y="378" style="font-size:11px">драйвера его не касается</text>
+
+      <!-- ряд 4: робот -->
+      <rect class="box box-ok" x="10" y="450" width="880" height="62" rx="6"/>
+      <text x="22" y="472" class="b">Робот (контроллер)</text>
+      <text x="22" y="490">сторож P_WDG_TIMEOUT_MS останавливает робота, если связь мертва. Хаб не принимает конфиг delta_v2 со сторожем 0.</text>
+      <text x="22" y="506" class="t-muted">Если зависла программа прошивки, не сработают ни стоп, ни сторож. Это гипотеза, на железе не проверено.</text>
+      <line class="arrow" x1="680" y1="404" x2="680" y2="448" marker-end="url(#own-ar)"/>
+      <text x="688" y="432" class="t-muted" style="font-size:10px">запись FC6, один раз</text>
+    </svg>
+    <p class="cap">Рамка с синей линией — владелец потока или срока. Зелёная — железо. Пунктир — создание потоков. Вне схемы и вне срока: <code>remove_worker</code> ждёт тик-воркер до 5,0 с; правка идёт в план lifecycle-stop-ownership. Замок транспорта <code>ModbusDevice</code> при застрявшей записи — отдельная задача в <code>Services/modbus</code>.</p>
+  </div>
+</section>
+
+<section id="timeline">
+  <h2>Остановка процесса по времени</h2>
+  <p>Сверху то, что есть в ветке сейчас, измеренное. Ниже то, к чему идёт круг 2. Измерения сделали ревьюер Opus и CTO. Круг 2 ничего пока не измерял: его числа — ЦЕЛЬ.</p>
+  <div class="scroll">
+    <h4>Сейчас, замер: сколько длится plugin.shutdown, с</h4>
+    <svg class="chart wide" viewBox="0 0 900 270" role="img" aria-labelledby="tl-title tl-desc">
+      <title id="tl-title">Замеренное время остановки процесса в ветке</title>
+      <desc id="tl-desc">Один робот, эхо молчит: 6,00 с. Два робота, r1 молчит: 6,03 с. Оба молчат: 12,00 с. Связь исправна, выживший поток: 2,55 с. Вертикали: окно 3,0 с и graceful PM 5,0 с.</desc>
+      <!-- шкала x: 190 + 58*с, 0..12 с -->
+      <line class="grid" x1="190" y1="20" x2="190" y2="214"/>
+      <line class="grid" x1="306" y1="20" x2="306" y2="214"/>
+      <line class="grid" x1="422" y1="20" x2="422" y2="214"/>
+      <line class="grid" x1="538" y1="20" x2="538" y2="214"/>
+      <line class="grid" x1="654" y1="20" x2="654" y2="214"/>
+      <line class="grid" x1="770" y1="20" x2="770" y2="214"/>
+      <line class="grid" x1="886" y1="20" x2="886" y2="214"/>
+      <line class="mark-win" x1="364" y1="14" x2="364" y2="214"/>
+      <text x="364" y="10" text-anchor="middle" class="t-win" style="font-size:11px">окно 3,0 с</text>
+      <line class="mark-pm" x1="480" y1="14" x2="480" y2="214"/>
+      <text x="480" y="10" text-anchor="middle" class="t-pm" style="font-size:11px">PM graceful 5,0 с</text>
+
+      <text x="10" y="44" style="font-size:11px">1 робот в jog,</text>
+      <text x="10" y="58" class="t-muted" style="font-size:11px">эхо молчит</text>
+      <rect class="bar-bad" x="190" y="32" width="348" height="26"/>
+      <text x="546" y="50">6,00 с</text>
+      <line class="tick" x1="190" y1="28" x2="190" y2="62"/>
+      <line class="tick" x1="306" y1="28" x2="306" y2="62"/>
+      <line class="tick" x1="422" y1="28" x2="422" y2="62"/>
+      <text x="610" y="50" class="t-muted" style="font-size:11px">стопы в 0,0 / 2,0 / 4,0 с (ревью)</text>
+
+      <text x="10" y="94" style="font-size:11px">2 робота,</text>
+      <text x="10" y="108" class="t-muted" style="font-size:11px">молчит r1</text>
+      <rect class="bar-bad" x="190" y="82" width="350" height="26"/>
+      <line class="tick" x1="306" y1="78" x2="306" y2="112"/>
+      <text x="546" y="100">6,03 с</text>
+      <text x="610" y="100" class="t-muted" style="font-size:11px">первый стоп r2 только в 2,0 с (CTO)</text>
+
+      <text x="10" y="144" style="font-size:11px">2 робота,</text>
+      <text x="10" y="158" class="t-muted" style="font-size:11px">молчат оба</text>
+      <rect class="bar-bad" x="190" y="132" width="696" height="26"/>
+      <text x="700" y="150" class="on-bar">12,00 с (CTO)</text>
+
+      <text x="10" y="194" style="font-size:11px">связь исправна,</text>
+      <text x="10" y="208" class="t-muted" style="font-size:11px">выживший поток</text>
+      <rect class="bar-ok" x="190" y="182" width="148" height="26"/>
+      <text x="346" y="200">2,55 с</text>
+      <text x="410" y="200" class="t-muted" style="font-size:11px">1 робот, 3 прогона 2,55–2,56 с (ревью)</text>
+
+      <line class="axis" x1="190" y1="214" x2="886" y2="214"/>
+      <text x="190" y="232" text-anchor="middle" class="t-muted">0</text>
+      <text x="306" y="232" text-anchor="middle" class="t-muted">2</text>
+      <text x="422" y="232" text-anchor="middle" class="t-muted">4</text>
+      <text x="538" y="232" text-anchor="middle" class="t-muted">6</text>
+      <text x="654" y="232" text-anchor="middle" class="t-muted">8</text>
+      <text x="770" y="232" text-anchor="middle" class="t-muted">10</text>
+      <text x="886" y="232" text-anchor="middle" class="t-muted">12</text>
+      <text x="538" y="256" text-anchor="middle" class="t-muted">секунды от начала plugin.shutdown</text>
+    </svg>
+    <p class="cap">Короткие вертикальные чёрточки на столбцах 1 и 2 — моменты записи стопа. Молчащее эхо в пробах — подмена <code>client.stop</code>, не симулятор: хост симулятора на v2 отказывает <code>fault.*</code> (долг Л2). Случай «два робота» взят из сводки CTO; ревьюер пробу CTO не запускал.</p>
+  </div>
+
+  <div class="scroll">
+    <h4>После круга 2, ЦЕЛЬ: фазы остановки, не измерено</h4>
+    <svg class="chart wide" viewBox="0 0 900 230" role="img" aria-labelledby="tg-title tg-desc">
+      <title id="tg-title">Цель круга 2: фазы остановки в пределах 3,0 с</title>
+      <desc id="tg-desc">Фаза 1 запись стопа всем параллельно. Фаза 2 потоки. Затем scope.close по сроку. Срок 2,5 с. Фаза 4 без записи в запасе до 3,0 с.</desc>
+      <defs>
+        <marker id="tg-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <!-- 0..3,0 с -> x 40..860, 273 px/с; срок 2,5 с -> x 722 -->
+      <rect class="bar-plan-dash" x="40" y="30" width="682" height="64" rx="4"/>
+      <text x="48" y="24" class="t-plan" style="font-size:11px">в сроке: один абсолютный deadline = now + 3,0 − 0,5 = 2,5 с</text>
+
+      <rect class="bar-plan" x="46" y="40" width="190" height="44" rx="4"/>
+      <text x="54" y="58" class="b" style="font-size:11px">1. запись стопа</text>
+      <text x="54" y="74" style="font-size:10px">всем роботам параллельно</text>
+
+      <rect class="bar-plan" x="244" y="40" width="170" height="44" rx="4"/>
+      <text x="252" y="58" class="b" style="font-size:11px">2. потоки</text>
+      <text x="252" y="74" style="font-size:10px">ожидание потоков</text>
+
+      <rect class="bar-plan" x="422" y="40" width="294" height="44" rx="4"/>
+      <text x="430" y="58" class="b" style="font-size:11px">3. scope.close(deadline)</text>
+      <text x="430" y="74" style="font-size:10px">lease, prog, stop-потоки</text>
+
+      <rect class="bar-plan-soft" x="728" y="40" width="132" height="44" rx="4"/>
+      <text x="736" y="58" class="b" style="font-size:11px">4. без записи</text>
+      <text x="736" y="74" style="font-size:10px">эхо, сокеты, save</text>
+
+      <line class="mark-win" x1="860" y1="100" x2="860" y2="136"/>
+      <line class="mark-dl" x1="722" y1="100" x2="722" y2="136"/>
+      <text x="722" y="152" text-anchor="middle" class="t-plan" style="font-size:11px">срок 2,5 с</text>
+      <text x="860" y="152" text-anchor="end" class="t-win" style="font-size:11px">окно 3,0 с</text>
+      <text x="40" y="152" class="t-muted" style="font-size:11px">0</text>
+
+      <text x="40" y="184" style="font-size:11px">Запись стопа: ровно 1 на робота. Повтор только после упавшей записи, один раз.</text>
+      <text x="40" y="202" class="t-muted" style="font-size:11px">Блоки схематичны. Известны только 2,5 с (срок) и 3,0 с (окно). Длины фаз не заданы и не измерены.</text>
+      <text x="40" y="220" class="t-muted" style="font-size:11px">Фаза 4 идёт в запасе 0,5 с после срока: так читается «now + 3,0 − 0,5 с». В документе решения не расписано.</text>
+    </svg>
+    <p class="cap">Что должны показать тесты-сторожа круга 2: 1 робот молчит — ровно 1 запись стопа и ≤ 3,0 с; 2 робота, r1 молчит — запись r2 не позже 0,1 с после r1.</p>
+  </div>
+
+  <div class="scroll">
+    <h4>Кто замерил что</h4>
+    <table>
+      <thead><tr><th>сценарий</th><th class="num">число</th><th>вид</th><th>кто, чем</th></tr></thead>
+      <tbody>
+        <tr><td>1 робот в jog, эхо стопа молчит</td><td class="num">6,00 с</td><td><span class="tag ok">замер</span></td><td>ревью Opus, <code>probe_deadecho.py</code> (плагин и симулятор, эхо подменено). Стопы в 0,0 / 2,0 / 4,0 с</td></tr>
+        <tr><td>2 робота, молчит r1</td><td class="num">6,03 с</td><td><span class="tag ok">замер</span></td><td>CTO (Fable), <code>probe_two_robots.py</code>. Первый стоп r2 в 2,0 с</td></tr>
+        <tr><td>2 робота, молчат оба</td><td class="num">12,00 с</td><td><span class="tag ok">замер</span></td><td>CTO. PM добивает процесс через 5,0 с</td></tr>
+        <tr><td>связь исправна, выживший исполнитель, 1 робот</td><td class="num">2,55–2,56 с</td><td><span class="tag ok">замер</span></td><td>ревью Opus, <code>probe_survivor_window.py</code>, 3 прогона. Два робота ревью не мерило</td></tr>
+        <tr><td>одна запись стопа на робота, ≤ 3,0 с</td><td class="num">—</td><td><span class="tag plan">ЦЕЛЬ</span></td><td>не измерено. Проверят тесты-сторожа и стенд</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="problems">
+  <h2>Шесть проблем: причина, решение, почему</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>№</th><th>проблема и замер</th><th>причина</th><th>решение</th><th>почему так</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>П1</td>
+          <td>У потоков робота три владельца: область плагина, свой корень драйвера <code>rv2-&lt;id&gt;</code>, финализатор GC. Замера нет, это чтение кода.</td>
+          <td>Автономный режим драйвера родился в этой ветке (48215a023). Продукт всегда передаёт <code>spawn</code> (<code>manager.py:143</code>, <code>plugin.py:191</code>). Режим нужен только тестам.</td>
+          <td><code>spawn</code> обязателен, без умолчания, только для <code>delta_v2</code>. Удалить <code>_spawn_own</code>, <code>_own_scope</code>, <code>_own_finalizer</code>, <code>_close_own_scope</code>, ветку в <code>disconnect</code>. Фабрика без <code>spawn</code> бросает <code>RuntimeError</code>.</td>
+          <td>Один владелец потоков — решение владельца 2026-10-03 и принцип «меньше слоёв». В main режима не было, FREEZE его не защищает. Драйвер можно запустить отдельно: открыть область и передать её <code>spawn</code>.</td>
+        </tr>
+        <tr>
+          <td>П2</td>
+          <td>Гонка <code>start_program</code> и <code>disconnect</code> в автономном режиме снова открывает корень. После <code>disconnect()</code> корень <code>rv2-rv2 (open)</code>, ответ <code>ok</code>. Воспроизвели ревью и CTO.</td>
+          <td><code>_spawn_own</code> не смотрит <code>_stopping</code> (<code>robot_driver_v2.py:570-582</code>).</td>
+          <td>Уходит вместе с режимом из П1.</td>
+          <td>Сторож лечил бы путь, которого не должно быть. В режиме плагина такой гонки нет: поток уходит в область и выходит с <code>aborted</code> (проба CTO).</td>
+        </tr>
+        <tr>
+          <td>П3</td>
+          <td>Финализатор прячет забытый <code>disconnect</code> от стража G3. С финализатором G3 = 0, без него G3 = 2 (<code>rv2-rv2 (abandoned)</code> ×2). Воспроизвело ревью.</td>
+          <td>Финализатор закрывает корень в <code>gc.collect()</code> самого стража. Утечка не исчезла, исчез детектор.</td>
+          <td>Финализатор удалён. В двух тестах T5.1 добавлен <code>disconnect</code>. Фикстура <code>driver_scope</code> закрывает область и проверяет <code>survivors == []</code>.</td>
+          <td>Страж — детектор, не уборщик. Решение владельца: вариант Б.</td>
+        </tr>
+        <tr>
+          <td>П4</td>
+          <td>При молчащем эхе стоп уходит повторно, каждый повтор ждёт эхо 2 с. 1 робот в jog: 6,00 с, стопы в 0,0 / 2,0 / 4,0 с. Воспроизвели ревью и CTO.</td>
+          <td>Флаг <code>stop_sent</code> ставится после эха, не после записи (<code>robot_driver_v2.py:981-983</code>). Поэтому <code>manager.py:106</code> и <code>disconnect</code> (<code>:475</code>) пишут стоп снова.</td>
+          <td>Защёлка в драйвере помнит сильнейший <em>записанный</em> уровень и «последняя запись упала». Клиент делится на <code>issue_stop</code> и <code>await_stop_echo</code>. Повтор: один раз и только после упавшей записи.</td>
+          <td>Ответ Modbus FC6 значит «регистр принят». Второй раз он не доставляет «сильнее» и съедает срок. После <em>упавшей</em> записи повтор полезен, его оставляем.</td>
+        </tr>
+        <tr>
+          <td>П5</td>
+          <td>Стоп роботам идёт по очереди: молчащий робот задерживает соседа. 2 робота, молчит r1: r2 получает стоп через 2,0 с. Оба молчат: 12,00 с. Воспроизвёл CTO.</td>
+          <td>Фаза 1 (<code>manager.py:95-102</code>) зовёт блокирующий <code>client.stop</code> по роботам в цикле.</td>
+          <td>Менеджер шлёт стоп всем параллельно потоками <code>device_hub/stop-&lt;id&gt;-&lt;k&gt;</code> и ждёт общий срок. Плагин задаёт один срок на все фазы.</td>
+          <td>Сбой одного не должен валить соседей. На полуоткрытой связи запись блокируется до <code>timeout_sec</code> = 1,0 с; по очереди это N секунд.</td>
+        </tr>
+        <tr>
+          <td>П6</td>
+          <td><code>robot_data.py</code>: <code>overrides</code> не проверяются, если файл есть; <code>save_params</code> пишет неполную карту. <code>P_NOPE</code> проходит; в файле один ключ. Воспроизвело ревью.</td>
+          <td>Проверка <code>overrides</code> стоит только на ветке «файла нет» (<code>robot_data.py:120-137</code>). Запись не требует всех имён параметров.</td>
+          <td><code>overrides</code> проверять всегда. Полная карта в <code>save_params</code>. <code>except</code> сузить до <code>(ValidationError, ValueError, TypeError)</code>.</td>
+          <td>Опечатка в рецепте скрыта, пока жив файл, и «выстрелит» после его удаления. Неполный файл молча берёт умолчания: «файл — источник истины» нарушен.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="cap">Замеры сделали ревью Opus и CTO (Fable). В колонке «причина» для П6 расшифровка по ревью, часть D: документ решения причину П6 не называет.</p>
+  </div>
+</section>
 
 <section id="where">
   <h2>Где живут роботы</h2>
@@ -211,7 +515,7 @@ flowchart LR
     <div class="now">
       <h4>Своё у каждого робота</h4>
       <ul>
-        <li><b>Соединение.</b> Обрыв связи с r1 не трогает r2.</li>
+        <li><b>Соединение.</b> В работе обрыв связи с r1 не трогает r2. При остановке трогает: в ветке стопы идут по роботам по очереди (<code>manager.py:87-102</code>), и молчащий r1 задерживает стоп r2 на 2,0 с (замер CTO). Круг 2 рассылает стоп параллельно.</li>
         <li><b>Потоки.</b> Программа на r1 идёт в своём исполнителе и не мешает jog на r2.</li>
         <li><b>Тик.</b> Каждый робот опрашивается и переподключается отдельно.</li>
       </ul>
@@ -232,9 +536,9 @@ flowchart LR
       <thead><tr><th>общее</th><th>чем грозит</th><th>что сделано</th></tr></thead>
       <tbody>
         <tr><td>Один поток команд: команды выполняются по одной (Ф8)</td><td>Медленная команда для r1 задерживает команду для r2, в том числе <code>robot_stop</code></td><td>Правило О9: каждая <code>robot_*</code> отвечает ≤ 1.0 с, <code>robot_stop</code> ≤ 1.5 с; программа уходит в свой поток. Делается в T5.3d.</td></tr>
-        <tr><td>Одно окно остановки 3.0 с на процесс</td><td>Если останавливать роботов по очереди, окно кончится раньше, чем стоп дойдёт до второго</td><td>Стоп всем роботам сразу, затем одно общее ожидание (пара b ниже)</td></tr>
+        <tr><td>Одно окно остановки 3.0 с на процесс</td><td>Если останавливать роботов по очереди, окно кончится раньше, чем стоп дойдёт до второго</td><td>В ветке стоп идёт по очереди, поэтому окно может кончиться раньше, чем стоп дойдёт до второго: два молчащих робота дают 12,00 с. После круга 2: параллельная рассылка и один срок (пара b ниже).</td></tr>
         <tr><td>Одна область потоков <code>device_hub</code></td><td>Одинаковые имена потоков у двух роботов дают второму ложный отказ</td><td>В имя потока входит id робота (пара c ниже)</td></tr>
-        <tr><td>Сам процесс <code>devices</code></td><td>Если процесс упадёт или зависнет, пропадут сразу все роботы и камеры</td><td><span class="tag warn">не решалось</span> так устроено до T5.3</td></tr>
+        <tr><td>Сам процесс <code>devices</code></td><td>Если процесс упадёт или зависнет, пропадут сразу все роботы и камеры</td><td><span class="tag warn">не решалось</span> так устроено до T5.3; круг 2 это не меняет</td></tr>
       </tbody>
     </table>
   </div>
@@ -249,13 +553,13 @@ flowchart LR
     <table>
       <thead><tr><th>что</th><th class="num">потоков</th><th>когда живёт</th></tr></thead>
       <tbody>
-        <tr><td>тик устройства <code>dev_&lt;id&gt;</code></td><td class="num">1 на устройство</td><td>пока устройство подключено; раз в <code>poll_interval_s</code> (по умолчанию 0.5 с) читает телеметрию</td></tr>
+        <tr><td>тик устройства <code>dev_&lt;id&gt;</code></td><td class="num">1 на устройство</td><td>пока истинно <code>desired_connected</code>, в том числе при оборванной связи (тик переподключает); раз в <code>poll_interval_s</code> (по умолчанию 0.5 с) читает телеметрию</td></tr>
         <tr><td>поводок робота</td><td class="num">1 на робота</td><td>только пока держат jog</td></tr>
         <tr><td>исполнитель программы</td><td class="num">1 на робота</td><td>только пока идёт программа</td></tr>
         <tr><td><code>message_processor</code>, <code>device_supervisor</code></td><td class="num">2 на процесс</td><td>всегда</td></tr>
       </tbody>
     </table>
-    <p class="cap">Постоянно: 2 + N потоков на N устройств. Ещё до двух на робота только во время движения.</p>
+    <p class="cap">Потоки хаба: 2 + N на N устройств, ещё до двух на робота только во время движения. Потоки самого фреймворка в процессе здесь не посчитаны, общее число потоков процесса никто не мерил. После круга 2 при остановке добавляются короткие потоки <code>stop-&lt;id&gt;-&lt;k&gt;</code> (по одному на робота).</p>
   </div>
   <p><b>Ожидание сети процесс держит хорошо.</b> Почти всё время потоки ждут ответа по сети. Пока поток ждёт, Python отпускает общий замок интерпретатора (GIL), поэтому потоки ждут параллельно. Десяток роботов с тиком раз в 0.5 с даёт десятки коротких запросов Modbus в секунду. Это оценка: замеров с большим числом устройств нет.</p>
   <div class="scroll">
@@ -266,7 +570,7 @@ flowchart LR
         <tr><td>Один поток команд</td><td>Команды всем устройствам идут по одной. При пределе О9 в 1.0 с десять одновременных команд дают последней до 10 с ожидания. Тики и программы это не тормозит, задерживаются ответы на команды.</td><td><span class="tag warn">оценка</span></td></tr>
         <tr><td>Камеры</td><td>Кадры через <code>devices</code> не идут: их захватывает отдельный процесс камеры (<code>camera_0</code>, <code>Plugins/sources/camera_service</code>). Тик драйвера <code>hikvision</code> в хабе читает только «открыта ли камера» и серийный номер (<code>hikvision_driver.py:98-103</code>). Лишнее у хаба одно: он сам умеет открыть камеру и сменить её параметры (<code>hik_open</code>, <code>hik_set_params</code>), это второй открыватель той же камеры. План камер убирает его: хаб становится реестром и зеркалом владельца (Р8, Task 4.6a–c).</td><td><span class="tag ok">проверено чтением</span></td></tr>
         <tr><td>Один процесс</td><td>Зависание или падение процесса забирает все устройства сразу.</td><td><span class="tag fail">так устроено</span></td></tr>
-        <tr><td>Окно остановки 3.0 с</td><td>Стоп всем сразу масштабируется. При оборванной связи каждый робот добавляет до 1–4 с ожидания эха, роботы ждутся по очереди.</td><td><span class="tag warn">оценка</span></td></tr>
+        <tr><td>Окно остановки 3.0 с</td><td>В ветке стопы идут по очереди, и при молчащем эхе каждый робот добавляет своё: 6,00 с на одного робота в jog, 12,00 с на двух молчащих (замеры ревью и CTO). Параллельная рассылка и один срок — в круге 2.</td><td><span class="tag ok">замер</span> <span class="tag plan">ЦЕЛЬ ≤ 3,0 с</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -278,26 +582,35 @@ flowchart LR
 
 <section id="was-now">
   <h2>Как было, как стало</h2>
+  <p>В каждой паре три колонки: база (серая), ветка сейчас (жёлтая или красная — что не так), план после круга 2 (синяя). Пары c и d меняются мало.</p>
 
   <!-- ====================== a: потоки ====================== -->
   <article class="pair">
     <h3>a. Кому принадлежат потоки драйвера</h3>
-    <div class="ba">
-      <div class="was">
-        <h4>Было</h4>
+    <div class="ba three">
+      <div class="base">
+        <h4>База (cc2281490)</h4>
         <p>Драйвер сам делает два <code>threading.Thread</code>: поводок <code>rv2-lease-&lt;id&gt;</code> и исполнитель программы <code>rv2-prog-&lt;id&gt;</code>. Это <code>robot_driver_v2.py:775</code> и <code>:877</code>. Потоки не принадлежат никакой области.</p>
-        <p>Страж G6 R1 терпит файл строкой allowlist: <code>("R1", "Services/device_hub/drivers/robot_driver_v2.py")</code>, <code>count=2</code>.</p>
+        <p>Страж G6 R1 терпит файл строкой allowlist: <code>("R1", "Services/device_hub/drivers/robot_driver_v2.py")</code>, <code>count=2</code>. Путей владения один: драйвер, вне фреймворка.</p>
       </div>
-      <div class="now">
-        <h4>Стало</h4>
-        <p>Плагин в <code>configure()</code> открывает корень <code>open_scope("device_hub", budget_s=2.5)</code> и отдаёт <code>scope.spawn</code> в <code>DeviceManager(spawn=...)</code>. Драйвер зовёт <code>self._spawn(target, name=...)</code>. Потоки называются <code>device_hub/&lt;id&gt;-lease-&lt;k&gt;</code> и <code>device_hub/&lt;id&gt;-prog-&lt;k&gt;</code>.</p>
-        <p>Строка G6 удалена. В файле 0 вызовов <code>Thread(</code> (проверено <code>git grep</code>). Драйвер без <code>spawn</code> (тесты, автономный запуск) открывает свой корень <code>rv2-&lt;id&gt;</code> и закрывает его в <code>disconnect()</code>.</p>
-        <p>Если <code>configure()</code> упал после <code>open_scope</code>, корень закрывается там же. Следующий <code>shutdown()</code> ничего не делает: фреймворк зовёт его и после упавшего <code>configure()</code>.</p>
+      <div class="was">
+        <h4>Сейчас в ветке (f76f7be99)</h4>
+        <p>Плагин открывает корень <code>device_hub</code> (<code>open_scope</code>, <code>budget_s=2.5</code>) и отдаёт <code>scope.spawn</code> в <code>DeviceManager(spawn=...)</code>. Драйвер зовёт <code>self._spawn(target, name=...)</code>. Потоки: <code>device_hub/&lt;id&gt;-lease-&lt;k&gt;</code> и <code>device_hub/&lt;id&gt;-prog-&lt;k&gt;</code>. Строка G6 удалена, в файле 0 вызовов <code>Thread(</code> (<code>git grep</code>).</p>
+        <p><b>Но путей владения три, не один:</b> область плагина; свой корень <code>rv2-&lt;id&gt;</code> драйвера без <code>spawn</code> (<code>_spawn_own</code>, <code>robot_driver_v2.py:570</code>); финализатор GC (<code>:579</code>). Вызывающих без <code>spawn</code> в продукте нет, такой драйвер строят только тесты.</p>
+        <p>Если <code>configure()</code> упал после <code>open_scope</code>, корень закрывается там же. Если же <code>shutdown</code> прерван до <code>scope.close</code>, корень течёт (ревью B4); круг 2 добавляет <code>try/finally: scope.close</code>.</p>
+        <p>Две дыры. Гонка <code>start_program</code> с <code>disconnect</code> в автономном режиме снова открывает корень: после <code>disconnect()</code> стоит <code>rv2-rv2 (open)</code>, ответ <code>ok</code>. Финализатор закрывает корень внутри самого стража, поэтому G3 = 0; без финализатора G3 = 2.</p>
+      </div>
+      <div class="plan">
+        <h4>После круга 2 (план)</h4>
+        <p>Путь один: область плагина. <code>spawn</code> обязателен и keyword-only для <code>delta_v2</code>. Удалены <code>_spawn_own</code>, <code>_own_scope</code>, <code>_own_finalizer</code>, <code>_close_own_scope</code> и ветка в <code>disconnect</code>. Драйвер не открывает корень и не создаёт <code>Thread</code>.</p>
+        <p><code>_robot_factory</code> без <code>spawn</code> бросает <code>RuntimeError</code> при создании. Только для <code>delta_v2</code>: драйверы v1 не трогаем.</p>
+        <p>Отдельно запустить драйвер можно: открыть область и передать её <code>spawn</code>. Тесты получают фикстуру <code>driver_scope</code>, которая закрывает область и проверяет <code>survivors == []</code>. Автономный режим в main не был, поэтому FREEZE его не защищает.</p>
+        <p>Незакрытый корень снова видит G3: финализатора, который его прятал, нет.</p>
       </div>
     </div>
     <div class="two">
       <div class="scroll">
-        <h4>Было: потоки вне области</h4>
+        <h4>База: потоки вне области</h4>
         <pre class="mermaid">
 flowchart LR
   P["процесс devices"] --> D1["RobotDriverV2 r1"]
@@ -310,45 +623,75 @@ flowchart LR
         <p class="cap">Корня нет. G6 R1 пропускает файл по строке allowlist, count=2.</p>
       </div>
       <div class="scroll">
-        <h4>Стало: потоки в корне device_hub</h4>
-        <pre class="mermaid">
-flowchart LR
-  P["процесс devices"] --> H["DeviceHubPlugin"]
-  H --> M["DeviceManager spawn=scope.spawn"]
-  M --> D["RobotDriverV2 r1, r2"]
-  H --> R["корень device_hub budget_s=2.5"]
-  D -- "self._spawn(target, name=...)" --> R
-  R --> L1["device_hub/r1-lease-k"]
-  R --> G1["device_hub/r1-prog-k"]
-  R --> L2["device_hub/r2-lease-k"]
-  R --> G2["device_hub/r2-prog-k"]
-        </pre>
-        <p class="cap">k берётся из одного счётчика модуля (см. пару c). Незакрытый корень видит G3.</p>
+        <h4>Сейчас и после: пути владения потоком</h4>
+        <svg class="chart" style="min-width:420px" viewBox="0 0 440 330" role="img" aria-labelledby="pa-title pa-desc">
+          <title id="pa-title">Пути владения потоками драйвера</title>
+          <desc id="pa-desc">Сейчас три пути: область плагина, свой корень драйвера, финализатор GC. После круга 2 остаётся один путь: область плагина.</desc>
+          <defs>
+            <marker id="pa-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+          </defs>
+          <text x="10" y="18" class="b" style="font-size:12px">Сейчас в ветке: 3 пути</text>
+          <rect class="box" x="10" y="28" width="130" height="44" rx="5"/>
+          <text x="18" y="46" style="font-size:11px">драйвер</text>
+          <text x="18" y="62" class="t-muted" style="font-size:10px">с spawn / без spawn</text>
+          <rect class="box box-ok" x="200" y="28" width="230" height="40" rx="5"/>
+          <text x="208" y="46" style="font-size:11px">1. область плагина</text>
+          <text x="208" y="60" class="t-muted" style="font-size:10px">device_hub/…</text>
+          <rect class="box box-bad" x="200" y="76" width="230" height="40" rx="5"/>
+          <text x="208" y="94" style="font-size:11px">2. свой корень rv2-&lt;id&gt;</text>
+          <text x="208" y="108" class="t-muted" style="font-size:10px">только тесты, _spawn_own</text>
+          <rect class="box box-bad" x="200" y="124" width="230" height="40" rx="5"/>
+          <text x="208" y="142" style="font-size:11px">3. финализатор GC</text>
+          <text x="208" y="156" class="t-muted" style="font-size:10px">прячет забытый disconnect от G3</text>
+          <line class="arrow" x1="140" y1="42" x2="198" y2="46" marker-end="url(#pa-ar)"/>
+          <line class="arrow" x1="140" y1="50" x2="198" y2="94" marker-end="url(#pa-ar)"/>
+          <line class="arrow" x1="140" y1="58" x2="198" y2="142" marker-end="url(#pa-ar)"/>
+
+          <line class="grid" x1="10" y1="184" x2="430" y2="184"/>
+          <text x="10" y="208" class="t-plan b" style="font-size:12px">После круга 2: 1 путь</text>
+          <rect class="box" x="10" y="218" width="130" height="44" rx="5"/>
+          <text x="18" y="236" style="font-size:11px">драйвер</text>
+          <text x="18" y="252" class="t-muted" style="font-size:10px">spawn обязателен</text>
+          <rect class="box box-acc" x="200" y="218" width="230" height="52" rx="5"/>
+          <text x="208" y="238" style="font-size:11px">область плагина device_hub</text>
+          <text x="208" y="254" class="t-muted" style="font-size:10px">lease, prog, stop-&lt;id&gt;-k</text>
+          <line class="arrow" x1="140" y1="240" x2="198" y2="242" marker-end="url(#pa-ar)"/>
+          <text x="10" y="306" class="t-muted" style="font-size:10px">Корня драйвера и финализатора нет.</text>
+        </svg>
+        <p class="cap">Красная рамка — путь, который удаляет круг 2. Незакрытый корень в области плагина видит G3 через <code>unclosed_roots()</code>.</p>
       </div>
     </div>
-    <p class="src">Источник: T5.3.md (Ф1, Ф3, О1, О8), T5.3a.md (DESIGN 1, 2, 8, 10, 11), <span class="mono">git diff cc2281490..HEAD</span> по <span class="mono">robot_driver_v2.py</span>, <span class="mono">plugin.py</span>, <span class="mono">tables.py</span>.</p>
+    <p class="src">Источник: T5.3.md (Ф1, Ф3, О1, О8), T5.3a.md (DESIGN 1, 2, 8, 10, 11), ревью Opus часть A и B2, B3, решение круга 2 (П1–П3, раздел 4). <span class="mono">git diff cc2281490..f76f7be99</span> по <span class="mono">robot_driver_v2.py</span>, <span class="mono">plugin.py</span>, <span class="mono">tables.py</span>.</p>
   </article>
 
   <!-- ====================== b: остановка ====================== -->
   <article class="pair">
     <h3>b. Остановка процесса и окно 3.0 с</h3>
-    <div class="ba">
-      <div class="was">
-        <h4>Было</h4>
+    <div class="ba three">
+      <div class="base">
+        <h4>База (cc2281490)</h4>
         <p><code>plugin.shutdown</code> сначала снимает воркеры (<code>remove_worker</code> ждёт поток до 5.0 с). Потом <code>manager.shutdown()</code> вызывает <code>disconnect</code> у роботов по очереди. Внутри: стоп задания HARD, ожидание поводка до <code>_LEASE_JOIN_S = 1.0</code>, стоп программы SOFT, ожидание до <code>_PROGRAM_JOIN_S = 5.0</code>.</p>
         <p>По константам это до 6.0 с на одного робота, не измерено. Окно плагина в процессе: сегмент <code>work</code> = 3.0 с. Первый стоп роботу уходит только после снятия воркеров. Если окно выбрано, процесс гасят принудительно, и стоп может не дойти до робота.</p>
         <p><code>_on_shutdown</code> глотал исключение <code>disconnect</code> (<code>except Exception: pass</code>).</p>
       </div>
-      <div class="now">
-        <h4>Стало</h4>
-        <p>Три фазы. <b>Фаза 1:</b> <code>request_stop_all()</code> шлёт стоп всем роботам сразу, до любого ожидания. Программа и задание получают HARD, jog получает SOFT. <b>Фаза 2:</b> воркеры сняты (<code>tick_loop</code> ждёт через <code>stop_evt.wait</code>), затем одно <code>scope.close(budget_s=2.5)</code> на все потоки всех роботов. <b>Фаза 3:</b> <code>manager.shutdown()</code>: <code>disconnect</code>, сокеты, сохранение реестра.</p>
-        <p>Защёлки: <code>_shutting_down</code> в плагине и <code>_shutdown</code> в драйвере. Supervisor-воркер живёт всё время <code>plugin.shutdown</code> (<code>_WorkersStop.request_stop</code> ничего не делает), поэтому без защёлки он снова создал бы воркеры и переподключил роботов.</p>
-        <p>Уровень стопа программы при остановке процесса теперь HARD, не SOFT (решение владельца О10). SOFT посреди хода ждёт цели, а ожидание эха SOFT идёт до 2.0 с.</p>
+      <div class="was">
+        <h4>Сейчас в ветке (f76f7be99)</h4>
+        <p>Фаза 1: <code>request_stop_all()</code> идёт по роботам <b>по очереди</b> (<code>manager.py:87-102</code>) и ждёт эхо каждого. Программа и задание получают HARD (решение владельца О10), jog получает SOFT. Фаза 2: воркеры сняты, одно <code>scope.close(budget_s=2.5)</code>. Фаза 3: <code>manager.shutdown()</code>.</p>
+        <p>Фаза 3 <b>снова пишет стоп</b>: <code>_on_shutdown</code> зовёт <code>request_stop_all</code> (<code>manager.py:106</code>), <code>disconnect</code> зовёт <code>_request_stop(SOFT)</code> (<code>robot_driver_v2.py:475</code>). Причина: <code>stop_sent</code> ставится после эха, не после записи (<code>:981-983</code>).</p>
+        <p><b>Исправная связь:</b> повторная запись не нужна, замер 2,55 с для одного робота с выжившим потоком. <b>Молчащее эхо:</b> три стопа и 6,00 с на робота в jog. <b>Два робота:</b> молчащий r1 задерживает стоп r2 на 2,0 с; оба молчат — 12,00 с.</p>
+        <p>Защёлки <code>_shutting_down</code> (плагин) и <code>_shutdown</code> (драйвер) не дают supervisor-воркеру снова создать воркеры во время остановки.</p>
+      </div>
+      <div class="plan">
+        <h4>После круга 2 (план)</h4>
+        <p>Один абсолютный срок <code>now + 3,0 − 0,5</code> с, его держит плагин. <b>Фаза 1:</b> менеджер пишет стоп всем роботам параллельно потоками <code>stop-&lt;id&gt;-&lt;k&gt;</code>, только запись, без ожидания эха. <b>Потоки</b>, затем <b>фаза 3:</b> <code>scope.close(deadline)</code>. <b>Фаза 4:</b> без записи стопа; одна проверка эха, закрытие сокетов, сохранение.</p>
+        <p>Повторная запись есть один раз и только после упавшей записи. Второй <code>request_stop_all</code> после <code>scope.close</code> не пишет и не падает на <code>ScopeClosedError</code>. Потоки с одним именем не сталкиваются: номер <code>k</code> общий для модуля.</p>
+        <p>Нет эха от робота: <code>last_error</code> и health «стоп не подтверждён роботом». Остановку процесса это не держит. Недосягаемого робота останавливает его сторож <code>P_WDG_TIMEOUT_MS</code>.</p>
+        <p>Не входит в срок: <code>remove_worker</code> ждёт тик-воркер до 5,0 с.</p>
       </div>
     </div>
     <div class="two">
       <div class="scroll">
-        <h4>Было: роботы по очереди, окно 3.0 с не помещает</h4>
+        <h4>База: роботы по очереди, окно 3.0 с не помещает</h4>
         <pre class="mermaid">
 sequenceDiagram
   participant PL as plugin.shutdown
@@ -366,41 +709,32 @@ sequenceDiagram
         <p class="cap">Первый стоп роботу после remove_worker. Сроки по константам, не измерены.</p>
       </div>
       <div class="scroll">
-        <h4>Стало: стоп всем сразу, одно ожидание</h4>
-        <pre class="mermaid">
-sequenceDiagram
-  participant PL as plugin.shutdown
-  participant DM as DeviceManager
-  participant R1 as r1 программа
-  participant R2 as r2 jog
-  participant SC as корень device_hub
-  Note over PL,SC: окно work = 3.0 с
-  PL->>PL: _shutting_down = True
-  PL->>DM: request_stop_all, фаза 1
-  DM->>R1: client.stop HARD
-  DM->>R2: client.stop SOFT
-  PL->>PL: remove_worker, tick_loop выходит по stop_evt
-  PL->>SC: scope.close budget_s=2.5, фаза 2
-  SC-->>PL: потоки вышли или стали выжившими
-  PL->>DM: shutdown, disconnect и _save, фаза 3
-        </pre>
-        <p class="cap">Выживший поток уходит в reporter корня и далее в health.report_error с context device_hub.scope.</p>
+        <h4>Сейчас, 2 робота, молчит r1: ход событий (замер CTO)</h4>
+        <ol>
+          <li><b>0,0 с.</b> Фаза 1. Стоп записан r1, менеджер ждёт эхо до 2,0 с.</li>
+          <li><b>2,0 с.</b> Только теперь первый стоп уходит r2. Молчащий сосед задержал его.</li>
+          <li><b>Фаза 2.</b> Воркеры сняты, <code>scope.close</code>.</li>
+          <li><b>Фаза 3.</b> <code>manager.py:106</code> и <code>disconnect</code> пишут стоп снова.</li>
+          <li><b>6,03 с.</b> <code>plugin.shutdown</code> вернулся. PM ждёт процесс 5,0 с, потом добивает.</li>
+        </ol>
+        <p class="cap">Замер CTO: только 2,0 с и 6,03 с. Пункт 4 — по чтению <code>manager.py</code> и замеру одного робота (ревью, три стопа за 6,00 с). Номера пунктов не равны фазам плана круга 2.</p>
       </div>
     </div>
     <div class="scroll">
-      <h4>Сроки plugin.shutdown, два робота, связь исправна (оценка teamlead, не измерено)</h4>
+      <h4>Сроки plugin.shutdown: сейчас и цель</h4>
       <table>
-        <thead><tr><th>фаза</th><th>чего ждёт</th><th class="num">норма, с</th><th>предел</th></tr></thead>
+        <thead><tr><th>фаза</th><th>чего ждёт</th><th class="num">сейчас, связь исправна</th><th>сейчас, эхо молчит</th><th>ЦЕЛЬ после круга 2</th></tr></thead>
         <tbody>
-          <tr><td>1. стоп</td><td>эхо HARD и SOFT, роботы по очереди</td><td class="num">≤ 0.1 на робота</td><td>мёртвая связь: HARD 1.0 с, jog SOFT 2.0 с плюс ожидание ACK <code>JOG_CONT</code> до 2.0 с, всего до 4.0 с на робота</td></tr>
-          <tr><td>2. воркеры</td><td>выход tick-воркера</td><td class="num">≤ 0.05 на робота</td><td>тик внутри переподключения</td></tr>
-          <tr><td>2. корень</td><td>выход поводков и исполнителей</td><td class="num">≤ 0.2</td><td>2.5 с, затем поток становится выжившим</td></tr>
-          <tr><td>3. закрытие</td><td>сокеты, запись реестра</td><td class="num">≤ 0.1</td><td></td></tr>
-          <tr><td><b>сумма</b></td><td></td><td class="num"><b>≈ 0.5</b></td><td>с выжившим потоком ≈ 0.2 + 0.1 + 2.5 + 0.1 = 2.9 с, запас до 3.0 с равен 0.1 с</td></tr>
+          <tr><td>1. стоп</td><td>запись стопа (сейчас ещё и эхо)</td><td class="num">≤ 0.1 с на робота, <span class="tag warn">оценка</span></td><td>jog: SOFT 2.0 с плюс ожидание ACK <code>JOG_CONT</code> до 2.0 с; HARD 1.0 с. Роботы по очереди</td><td>одна запись на робота, всем параллельно, до срока 2,5 с</td></tr>
+          <tr><td>2. воркеры</td><td>выход tick-воркера</td><td class="num">≤ 0.05 с на робота, <span class="tag warn">оценка</span></td><td>тик внутри переподключения; <code>remove_worker</code> до 5.0 с на воркер</td><td>то же; в срок не входит</td></tr>
+          <tr><td>2. корень</td><td>выход поводков и исполнителей</td><td class="num">≤ 0.2 с, <span class="tag warn">оценка</span></td><td>2.5 с, затем поток становится выжившим</td><td><code>scope.close(deadline)</code> до общего срока</td></tr>
+          <tr><td>3. закрытие</td><td>сокеты, запись реестра</td><td class="num">≤ 0.1 с, <span class="tag warn">оценка</span></td><td>два лишних стопа: ещё до 2 × срок эха (jog SOFT: 4.0 с)</td><td>фаза 4 без записи: одна проверка эха, сокеты, сохранение</td></tr>
+          <tr><td><b>сумма</b></td><td></td><td class="num"><b>2,55 с</b>, <span class="tag ok">замер</span> ревью, 1 робот</td><td><b>6,00 с</b> на 1 робота, <span class="tag ok">замер</span> ревью; 12,00 с на 2 молчащих, <span class="tag ok">замер</span> CTO</td><td><b>≤ 3,0 с</b>, <span class="tag plan">ЦЕЛЬ</span></td></tr>
         </tbody>
       </table>
+      <p class="cap">Оценка teamlead «с выжившим потоком ≈ 2.9 с, запас 0.1 с» относилась к двум роботам. Её никто не замерял. Замер для одного робота с выжившим потоком — 2,55–2,56 с.</p>
     </div>
-    <p class="src">Источник: T5.3.md (Ф9, О8, О10, риски), T5.3a.md (К1, К2), <span class="mono">git show cc2281490:Services/device_hub/drivers/robot_driver_v2.py</span> строки 410-460, <span class="mono">git diff cc2281490..HEAD</span> по <span class="mono">manager.py</span> и <span class="mono">plugin.py</span>.</p>
+    <p class="src">Источник: T5.3.md (Ф9, О8, О10, риски), T5.3a.md (К1, К2), ревью Opus часть B1 и раунды 1b и 1c, решение круга 2 (П4, П5, раздел 2), <span class="mono">git show cc2281490:Services/device_hub/drivers/robot_driver_v2.py</span> строки 410-460, <span class="mono">git diff cc2281490..f76f7be99</span> по <span class="mono">manager.py</span> и <span class="mono">plugin.py</span>.</p>
   </article>
 
   <!-- ====================== c: имена ====================== -->
@@ -413,9 +747,10 @@ sequenceDiagram
         <p>Стадия 0 поймала это как BLOCKER (находка 1). Рабочий код базы до T5.3 давал имена <code>rv2-lease-&lt;id&gt;</code> и <code>rv2-prog-&lt;id&gt;</code>: они различались по роботу, но потоки жили вне области.</p>
       </div>
       <div class="now">
-        <h4>Стало</h4>
+        <h4>Сейчас в ветке; после круга 2 без изменений</h4>
         <p>Имена <code>{entry.id}-lease-{k}</code> и <code>{entry.id}-prog-{k}</code>. <code>k</code> берётся из одного счётчика модуля <code>_THREAD_SEQ = itertools.count(1)</code> под <code>_THREAD_SEQ_LOCK</code>. Имя уникально в процессе, в том числе при пересоздании устройства с тем же id.</p>
         <p><code>ValueError</code> от <code>spawn</code> получает свой текст «имя потока драйвера занято» и <code>logger.error</code>. Он не маскируется под «область закрыта».</p>
+        <p>Круг 2 добавляет потоки рассылки стопа <code>stop-&lt;id&gt;-&lt;k&gt;</code> с тем же счётчиком. Это нужно, потому что выживший писатель прошлого вызова с таким же именем дал бы <code>ValueError</code> (ревью, В3).</p>
       </div>
     </div>
     <div class="two">
@@ -450,14 +785,15 @@ flowchart LR
     <h3>d. Замки документов в хранилище</h3>
     <div class="ba">
       <div class="was">
-        <h4>Было</h4>
+        <h4>Было (база)</h4>
         <p><code>RobotDataStore._locks</code> обычный <code>dict</code>. На каждый новый ключ <code>(device_id, имя файла)</code> создаётся замок и остаётся навсегда. Читать можно сколько угодно разных имён, словарь только растёт.</p>
         <p>Удалить программу хранилище не умело.</p>
       </div>
       <div class="now">
-        <h4>Стало</h4>
+        <h4>Сейчас в ветке (T5.3b влит, 0e88f4e01)</h4>
         <p><code>_locks</code> это <code>weakref.WeakValueDictionary</code>. Замок живёт, пока операция держит его в <code>with self._doc_lock(...)</code>. Без операций словарь пуст.</p>
         <p>Поиск и вставка идут в одной секции <code>_locks_guard</code>, поэтому у ключа не бывает двух живых замков. Замок создаёт модульный шов <code>_new_lock</code>, его подменяет тест гонки. Добавлен <code>delete_program(device_id, name, *, base_rev)</code>: берёт тот же замок, при чужой или устаревшей ревизии бросает <code>RevisionConflict</code> и не трогает файл.</p>
+        <p><b>Две правки в круге 2</b> (ревью, часть D; П6): в <code>robot_data.py</code> <code>overrides</code> не проверяются, если файл есть (<code>P_NOPE</code> проходит), а <code>save_params</code> пишет неполную карту (в файле один ключ). После круга 2: <code>overrides</code> проверяются всегда, карта полная, а <code>except</code> сужен до <code>(ValidationError, ValueError, TypeError)</code>. Граница хранилища и замки остаются как есть. Ревью замки признало верными: 0 записей без операций, 69 passed.</p>
       </div>
     </div>
     <div class="scroll">
@@ -496,20 +832,30 @@ flowchart LR
       </svg>
       <p class="cap">Измерено: 5000 вызовов <code>read_program("r1", f"p{i}")</code> на настоящем <code>RobotDataStore</code>, <code>tracemalloc</code> по кадрам <code>store.py</code> и <code>weakref.py</code> (замер teamlead и красный прогон). Прирост «всего» у обоих вариантов включает ещё около 406 КиБ из <code>pathlib</code>, к замкам он не относится, поэтому предел в тесте стоит на кадры файлов: &lt; 64 КиБ.</p>
     </div>
-    <p class="src">Источник: T5.3b.md (DESIGN 1, 2, Б1-Б3, Б6), <span class="mono">git diff 621eaae61..HEAD -- Services/robot_comm/store.py</span> в worktree <span class="mono">robot-v2-t53b</span>.</p>
+    <p class="src">Источник: T5.3b.md (DESIGN 1, 2, Б1-Б3, Б6), ревью Opus часть D, решение круга 2 (П6), <span class="mono">git diff 621eaae61..0e88f4e01 -- Services/robot_comm/store.py</span>.</p>
   </article>
 </section>
 
 <section id="why">
   <h2>Почему так лучше</h2>
+  <h3>Уже лучше базы, в ветке сейчас</h3>
   <ul>
-    <li><b>Стоп доходит до робота раньше принудительного завершения.</b> <code>request_stop_all()</code> идёт первым, до <code>remove_worker</code>, который ждёт до 5.0 с. Раньше первый стоп роботу стоял после этого ожидания. Остальное время окна занимает одно общее ожидание вместо цепочки по роботам.</li>
-    <li><b>HARD укладывается в окно.</b> Программе при остановке идёт HARD: эхо ждётся до 1.0 с (<code>stop_echo_timeout_s</code>), а SOFT посреди хода ждал бы цели и эха до 2.0 с (<code>soft_echo_timeout_s</code>). Ход обрывается сразу.</li>
-    <li><b>У потоков один владелец.</b> Все потоки драйвера лежат под путём <code>device_hub/...</code>. Незакрытый корень ловит G3 через <code>unclosed_roots()</code>, строки allowlist в G6 больше нет, и новый <code>Thread(</code> в файле станет нарушением.</li>
-    <li><b>Зависший поток виден.</b> Если поток не вышел за срок, reporter корня вызывает <code>health.report_error(context="device_hub.scope")</code>, драйвер публикует <code>last_error = "поток драйвера не вышел за срок"</code> и увеличивает <code>tx_err</code>. Раньше потока в области не было, сообщать было не о чем.</li>
-    <li><b>Нет ложных отказов при двух роботах.</b> Имя потока включает <code>entry.id</code> и номер из одного счётчика модуля. Второй робот не упирается в имя первого.</li>
-    <li><b>Память ограничена.</b> Замок живёт ровно одну операцию. Рост <code>_locks</code> от числа прочитанных документов исчез: 5000 записей стали 0. Двух замков на документ не бывает, потому что поиск и вставка стоят в одной секции <code>_locks_guard</code>.</li>
-    <li><b>После остановки ничего не поднимается.</b> Защёлки <code>_shutting_down</code> и <code>_shutdown</code> не дают supervisor-воркеру пересоздать воркеры и переподключить робота, пока плагин останавливается.</li>
+    <li><b>Потоки видны фреймворку.</b> В продукте у них один владелец: область <code>device_hub</code>. Строки allowlist в G6 больше нет, новый <code>Thread(</code> в файле станет нарушением. Оговорка: в коде путей владения три (см. пару a), круг 2 оставляет один.</li>
+    <li><b>Остановка при исправной связи.</b> Одно ожидание вместо цепочки по роботам. Замер ревью: 2,55–2,56 с для одного робота против окна 3,0 с.</li>
+    <li><b>Зависший поток виден.</b> Если поток не вышел за срок, reporter корня вызывает <code>health.report_error(context="device_hub.scope")</code>. Драйвер публикует <code>last_error = "поток драйвера не вышел за срок"</code> и увеличивает <code>tx_err</code>.</li>
+    <li><b>Нет ложных отказов при двух роботах.</b> Имя потока включает <code>entry.id</code> и номер из одного счётчика модуля.</li>
+    <li><b>Память ограничена.</b> Замок живёт одну операцию. Рост <code>_locks</code> от числа прочитанных документов исчез: 5000 записей стали 0. Двух замков на документ не бывает.</li>
+    <li><b>После остановки ничего не поднимается.</b> Защёлки <code>_shutting_down</code> и <code>_shutdown</code> не дают supervisor-воркеру пересоздать воркеры и переподключить робота.</li>
+    <li><b>Окна гонок закрыты.</b> Запуск программы против jog и остановки, итог <code>.program</code> до <code>_busy</code>, граница <code>store.py</code> / <code>robot_data.py</code> (ревью Opus, часть A).</li>
+  </ul>
+  <p><b>Что в этом списке было преувеличено.</b> Фраза «стоп доходит до робота раньше принудительного завершения» верна для первого робота: его стоп пишется в 0,0 с. Для следующих при молчащем эхе предыдущего запись сдвигается на 2–4 с на каждого, а два молчащих робота дают 12 с против 5,0 с graceful у PM.</p>
+
+  <h3>Станет лучше после круга 2 (план)</h3>
+  <ul>
+    <li><b>Один путь владения потоками.</b> Нет скрытого пути, нет финализатора, нет гонки П2. G3 снова видит забытое закрытие.</li>
+    <li><b>Одна запись стопа на робота.</b> Остановка при молчащем эхе не растёт от повторов: вместо 6,00 с цель ≤ 3,0 с.</li>
+    <li><b>Робот не ждёт соседа.</b> Молчащий r1 не задерживает стоп r2: запись r2 не позже 0,1 с после r1 (тест-сторож).</li>
+    <li><b>Честная гарантия.</b> Хаб пишет стоп досягаемому роботу, недосягаемого останавливает его сторож. Что не покрыто, названо явно.</li>
   </ul>
 </section>
 
@@ -520,27 +866,31 @@ flowchart LR
     <li class="done"><strong>Решения владельца</strong>О8 (уложиться в 3.0 с), О9, О9-а, О9-б (сроки команд), О10 (HARD при остановке).<span class="st">сделано</span></li>
     <li class="done"><strong>Решение о конкурентности</strong>Teamlead Opus: К1-К8 для a, Б1-Б8 для b, пробы на Python 3.12.12.<span class="st">сделано</span></li>
     <li class="done"><strong>Слепой тестер до кода</strong>T5.3a: 8 тестов, 8 красных. T5.3b: 9 тестов, 9 красных.<span class="st">сделано</span></li>
-    <li class="done"><strong>Разработчик</strong>T5.3a: коммиты 48215a023 и 21e361222. T5.3b: коммит 6284815cd.<span class="st">код есть</span></li>
-    <li class="part"><strong>Прогон в окне нагрузки</strong>T5.3a: один прогон после первого кода. Исправления после него не прогнаны. T5.3b: только мини-раннер разработчика.<span class="st">частично</span></li>
-    <li class="todo"><strong>Матрицы инъекций</strong>Haiku по прогнозам лида: ломаем код и ждём красного там, где предсказано.<span class="st">не сделано</span></li>
-    <li class="todo"><strong>Ревью кода Opus</strong>Сначала a и b, перед слиянием вся ветка.<span class="st">не сделано</span></li>
+    <li class="done"><strong>Разработчик</strong>T5.3a: коммиты 48215a023 и 21e361222. T5.3b: коммит 6284815cd, влит в ветку merge-коммитом 0e88f4e01.<span class="st">код есть</span></li>
+    <li class="part"><strong>Прогон тестов</strong>Прогнаны light-прогонами ревьюера, не в окне: тесты <code>robot_data</code> 69 passed (9 тестера и 60 автора), S11, S9 и REDS 8 зелёные. Полные папки тестов не прогнаны.<span class="st">частично</span></li>
+    <li class="done"><strong>Ревью Opus и гейт CTO</strong>Ревью a и b: CHANGES REQUESTED, итерация 1 из 2. CTO (Fable): BLOCK. Решение круга 2 принято.<span class="st">сделано, нужны правки</span></li>
+    <li class="todo"><strong>Круг 2: код</strong>Потоки, стоп, срок, прочие правки, ADR-DH-009, бриф T5.3a.<span class="st">план</span></li>
+    <li class="todo"><strong>Матрицы инъекций</strong>a-I1..28, b-I1..11 и строки на новые гарантии. Прогноз пишется до прогона.<span class="st">не сделано</span></li>
+    <li class="todo"><strong>Ревью круга 2, стенд через PM, повторный гейт CTO</strong>Ревью с мутационной проверкой; стенд: остановка через PM ≤ 3,0 с по логу, стоп записан один раз.<span class="st">не сделано</span></li>
   </ol>
 
   <div class="scroll">
     <h4>Измеренные числа</h4>
     <table>
-      <thead><tr><th>что</th><th class="num">база до кода</th><th class="num">после первого кода T5.3a (48215a023)</th></tr></thead>
+      <thead><tr><th>что</th><th class="num">база до кода</th><th class="num">после первого кода T5.3a (48215a023)</th><th class="num">ветка сейчас (f76f7be99), прогоны ревью</th></tr></thead>
       <tbody>
-        <tr><td><code>Services/device_hub/tests</code></td><td class="num">228 passed</td><td class="num">251 passed, 1 failed из 252</td></tr>
-        <tr><td>G3, незакрытых корней</td><td class="num">0</td><td class="num">2</td></tr>
-        <tr><td><code>Plugins/hub/device_hub/tests</code></td><td class="num">99 passed, G3 0</td><td class="num">99 passed, G3 0</td></tr>
-        <tr><td><code>sentrux check .</code></td><td class="num">41 правило, все проходят</td><td class="num">нет замера</td></tr>
-        <tr><td>слепые тесты T5.3a</td><td class="num">8 из 8 красные</td><td class="num">8 из 8 зелёные</td></tr>
-        <tr><td>слепые тесты T5.3b</td><td class="num">9 из 9 красные</td><td class="num">pytest не запускался</td></tr>
-        <tr><td>рост замков, 5000 чтений (кадры store.py и weakref.py)</td><td class="num">1295.3 КиБ, 5000 записей</td><td class="num">0.2 КиБ, 0 записей</td></tr>
+        <tr><td><code>Services/device_hub/tests</code></td><td class="num">228 passed</td><td class="num">251 passed, 1 failed из 252</td><td class="num">полная папка не прогнана</td></tr>
+        <tr><td>G3, незакрытых корней</td><td class="num">0</td><td class="num">2</td><td class="num">0 за счёт финализатора; без него 2</td></tr>
+        <tr><td><code>Plugins/hub/device_hub/tests</code></td><td class="num">99 passed, G3 0</td><td class="num">99 passed, G3 0</td><td class="num">не прогнано</td></tr>
+        <tr><td><code>sentrux check .</code></td><td class="num">41 правило, все проходят</td><td class="num">нет замера</td><td class="num">exit 0, 41 правило, Quality 6936 (база 6939)</td></tr>
+        <tr><td>слепые тесты T5.3a</td><td class="num">8 из 8 красные</td><td class="num">8 из 8 зелёные</td><td class="num">S11 зелёный (1,75 с), REDS 8 зелёный (3,38 с), оба с <code>-k</code></td></tr>
+        <tr><td>слепые тесты T5.3b</td><td class="num">9 из 9 красные</td><td class="num">pytest не запускался</td><td class="num">9 из 9 зелёные; <code>robot_data</code> всего 69 passed</td></tr>
+        <tr><td>рост замков, 5000 чтений (кадры store.py и weakref.py)</td><td class="num">1295.3 КиБ, 5000 записей</td><td class="num">0.2 КиБ, 0 записей</td><td class="num">без изменений</td></tr>
+        <tr><td>остановка, 1 робот в jog, связь исправна, выживший поток</td><td class="num">не измерено</td><td class="num">не измерено</td><td class="num">2,55–2,56 с</td></tr>
+        <tr><td>остановка, 1 робот в jog, эхо молчит</td><td class="num">не измерено; по чтению около 2,0 + 1,0 с</td><td class="num">не измерено</td><td class="num">6,00 с</td></tr>
       </tbody>
     </table>
-    <p class="cap">Строка «рост замков»: левая колонка это <code>dict</code> (замер teamlead и красный прогон), правая это <code>WeakValueDictionary</code> (замер teamlead). Строки про 251 из 252 и G3 2 относятся к прогону лида после 48215a023. Расчёт 228 + 8 + 16 = 252: 8 слепых тестов приёмки и 16 сторожей автора.</p>
+    <p class="cap">Строка «рост замков»: левая колонка это <code>dict</code> (замер teamlead и красный прогон), следующая это <code>WeakValueDictionary</code> (замер teamlead). Строки про 251 из 252 и G3 2 относятся к прогону лида после 48215a023. Расчёт 228 + 8 + 16 = 252: 8 слепых тестов приёмки и 16 сторожей автора. Колонка «ветка сейчас» — light-прогоны ревьюера вне окна нагрузки, устойчивость под нагрузкой не проверена.</p>
   </div>
 
   <div class="scroll">
@@ -558,44 +908,99 @@ flowchart LR
   </div>
 </section>
 
-<section id="open">
-  <h2>Что не так и что открыто</h2>
-  <ul class="open">
-    <li><b>Исправления после окна не прогнаны.</b> Коммит 21e361222 чинит сторож S11 (программа из двух ног, чтобы ход шёл в момент стопа) и G3 (<code>weakref.finalize</code> закрывает корень автономного драйвера при сборке). Прогона после него нет. Упавший тест из 252 — S11 <code>test_s11_phase1_hard_stops_long_single_move_within_window</code>: «не дождались за 5.0 с: ход идёт» (прогон лида). Разработчик замерил причину: программа из одной ноги в симуляторе заканчивается за 0.03 с.</li>
-    <li><b>Код T5.3b проверен только мини-раннером разработчика.</b> Коммит 6284815cd (<code>store.py</code>, <code>robot_data.py</code>) pytest не прогонял. Условие координатора: тесты T5.2 (37 passed на main) остаются зелёными без правок. Pytest-прогона этого условия нет.</li>
-    <li><b>Не сделаны:</b> матрицы инъекций для a и b, Opus-ревью a и b, Opus-ревью всей ветки.</li>
-    <li><b>T5.3c (21 команда) и T5.3d (операции движения и параметров) не начаты.</b> Пока в GUI и в <code>backend_ctl</code> ничего нового не видно: ни каталога <code>robot_*</code> с описаниями, ни данных робота из файлов.</li>
-    <li><b>Ничего не слито в main.</b> Код T5.3b лежит в отдельном worktree.</li>
-    <li class="risk"><b>Мёртвая связь: окно 3.0 с не гарантировано.</b> Фаза 1 ждёт эха: до 1.0 с на робота с программой или заданием, до 4.0 с на робота в jog (эхо SOFT 2.0 с плюс ожидание ACK <code>JOG_CONT</code> 2.0 с). Это вне приёмки О8, которая требует двух роботов в движении при исправной связи.</li>
-    <li class="risk"><b>Запас по времени 0.1 с.</b> Оценка с выжившим потоком ≈ 2.9 с против окна 3.0 с. Это оценка teamlead, не измерение; проверяют тест окна (REDS 8) и стенд.</li>
-    <li class="risk"><b>Срок команд 1.0 с (О9) тоже только при исправной связи.</b> При мёртвой связи <code>robot_jog_release</code> ждёт до 1.0 с поводка плюс до 2.0 с эха SOFT, <code>robot_jog_hold</code> ждёт ACK до 2.0 с. Срок не гарантирован (О9-б).</li>
-    <li class="note"><b>Микроокно в <code>_program_loop</code> сужено, не закрыто.</b> Стоп между проверкой <code>_stopping</code> и взятием поколения стопа клиентом повторяется в <code>on_progress</code>. Остаётся ход от ACK первого <code>SC_RUN</code> до первого опроса, оценка ≤ 0.1 с, не измерено.</li>
-    <li class="note"><b>Подключение, уже идущее по проводу в момент фазы 1,</b> доходит до конца, но не делает драйвер готовым (<code>_ready</code> не ставится).</li>
-    <li class="note"><b>Поведение на реальном роботе изменилось.</b> При остановке процесса программа получает HARD вместо SOFT. Решение владельца О10; владелец может его пересмотреть.</li>
-    <li class="note"><b>Правка теста T5.1 уже внесена:</b> коммит 8267aedcb меняет поиск имени потока на подстроку, потому что формат имени сменился. Бриф запрещал править тесты T5.1; правку принял лид по эскалации разработчика: меняется только поиск имени, поведение тестов прежнее.</li>
-    <li class="note"><b>Файл <code>docs/contracts/CAPABILITIES.*</code> разойдётся с кодом</b> между T5.3c и перегенерацией лидом, живой тест будет красным до неё.</li>
+<section id="decisions">
+  <h2>Решения владельца 2026-10-18</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>вопрос</th><th>ответ</th><th>что это значит</th></tr></thead>
+      <tbody>
+        <tr><td><code>spawn</code> обязателен, слепые тесты меняются</td><td><span class="tag ok">да</span></td><td>REDS 5 T5.3a, фикстуры T5.1 и T3.7 переходят на тестовую область с проверкой <code>survivors == []</code>. Правка слепых тестов прежних задач разрешена.</td></tr>
+        <tr><td><code>remove_worker</code> вне срока</td><td>сузить гарантию</td><td>Правка <code>WorkerManager</code> — задача плана lifecycle-stop-ownership, с ADR и замером после T4.0. В круге 2 её нет.</td></tr>
+        <tr><td><code>P_WDG_TIMEOUT_MS = 0</code></td><td>отказ в продукте</td><td>Конфиг <code>delta_v2</code> с нулевым сторожем даёт ошибку проверки. Правило идёт в бриф T5.3c.</td></tr>
+        <tr><td>замок <code>ModbusDevice</code> при застрявшей записи</td><td>отдельная задача</td><td>В <code>Services/modbus</code>, после T4.0.</td></tr>
+      </tbody>
+    </table>
+    <p class="cap">Раньше, после круга 1, владелец выбрал вариант Б по G3: <code>disconnect</code> в двух тестах T5.1 и удаление финализатора. Круг 2 идёт дальше: убирает весь автономный режим, потому что та же утечка есть и в коде (ревью B2), а не только в тестах.</p>
+  </div>
+
+  <h3 style="margin-top:28px">Чем решение отличается от исходных позиций</h3>
+  <ul>
+    <li>Ревьюер предлагал закрыть П2 двумя строками и вынести обязательный <code>spawn</code> в ADR после T5.3c/d. CTO: сторож чинит путь, которого не должно быть. В раунде 1c ревьюер согласился.</li>
+    <li>Лид предлагал «никогда не повторять стоп». CTO мягче: повтор после упавшей записи остаётся.</li>
   </ul>
 </section>
 
-<section id="owner">
-  <h2>Вопрос владельцу</h2>
-  <div class="q">
-    <p><b>Как закрывать корень автономного драйвера в двух тестах T5.1, которые не вызывают <code>disconnect</code>?</b></p>
-    <p>Драйвер без внешней области открывает ленивый корень <code>rv2-&lt;id&gt;</code>. Два теста T5.1 создают такой драйвер и уходят, не вызвав <code>disconnect</code>. Корень остаётся открытым, и G3 считает это нарушением (он показывал 2 корня).</p>
-    <div class="opts">
-      <div>
-        <p><b>А. Финализатор в драйвере.</b></p>
-        <p>Сейчас в коде (21e361222): <code>weakref.finalize</code> закрывает корень при сборке драйвера, около 19 строк в <code>robot_driver_v2.py</code>. Тесты не меняются. Закрытие зависит от сборки мусора.</p>
-      </div>
-      <div class="pick">
-        <p><b>Б. Дописать <code>disconnect</code> в два теста T5.1.</b> Рекомендует лид.</p>
-        <p>Финализатор из драйвера убирается. Это правка двух существующих тестов T5.1, а общий бриф запрещает их править без вашего решения.</p>
-      </div>
-    </div>
-    <p class="rec"><b>Почему лид выбирает Б:</b> G3 существует, чтобы ловить забытое закрытие. Финализатор закрывает корень молча и в момент, который выбирает сборщик мусора, поэтому забытый <code>disconnect</code> в рабочем коде тоже станет невидимым. Пропуск здесь в двух тестах, и чинить его честнее в них.</p>
+<section id="notin">
+  <h2>Что не входит в круг 2</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>что</th><th>почему не сейчас</th><th>где решится</th></tr></thead>
+      <tbody>
+        <tr><td><code>remove_worker</code> ждёт тик-воркер до 5,0 с, тик внутри <code>connect()</code></td><td>Гарантия сужена: в срок это ожидание не входит.</td><td>план lifecycle-stop-ownership: ADR и замер после T4.0</td></tr>
+        <tr><td>Замок <code>ModbusDevice</code>: поток, застрявший в записи, держит замок, и закрытие сокета встаёт</td><td>Правка в другом сервисе. Найдено чтением, не воспроизведено.</td><td>отдельная задача в <code>Services/modbus</code> после T4.0</td></tr>
+        <tr><td>Правило «сторож 0 — отказ конфига»</td><td>Решено принять, но правило пишется в бриф.</td><td>бриф T5.3c</td></tr>
+        <tr><td>Второй корень <code>device_hub</code> против ребёнка <code>work</code></td><td>Нужно ADR.</td><td>follow-up с ADR; плана в документе решения нет</td></tr>
+        <tr><td><code>request_stop</code> в <code>BaseDeviceDriver</code>, форма фабрики <code>services</code></td><td>Общее для камер и роботов.</td><td>план камер <span class="mono">2026-10-18_camera-device-service</span>, задача 4.6a</td></tr>
+        <tr><td>Процесс на робота</td><td>Сначала замер: 2, 5 и 10 симуляторов, один молчит.</td><td>после T5.3; вопрос записан в <span class="mono">docs/claude/OPEN_QUESTIONS.md</span></td></tr>
+        <tr><td>Уровни стопа <code>SOFT|HARD|HALT</code> в T5.3c:49 против О10</td><td>Расхождение двух решений.</td><td>T5.3c</td></tr>
+      </tbody>
+    </table>
+    <p class="cap">Точки врезок журнала T5.6 (полоса Р) круг 2 не меняет: конец <code>__init__</code> и <code>self._transport</code>, строка после <code>build_transport</code> в <code>connect()</code>, литерал <code>_OPS</code>, таблица <code>commands</code> плагина. <code>issue_stop</code> идёт через тот же транспорт, журнал её увидит.</p>
   </div>
+
+  <h3 style="margin-top:28px">Ворота слияния в main</h3>
+  <ol>
+    <li>Коммиты круга 2, ADR, бриф, эта страница, статус плана.</li>
+    <li>Новые тесты-сторожа и матрицы инъекций a-I1..28, b-I1..11; прогноз записан до прогона.</li>
+    <li>В окне: тесты <code>Services/device_hub</code>, <code>Plugins/hub/device_hub</code>, <code>Services/robot_comm</code> зелёные; G3 = 0 без финализатора; G4 = 0; <code>sentrux check .</code> exit 0; ruff; pyright.</li>
+    <li>Ревью круга 2 с мутационной проверкой — APPROVED.</li>
+    <li>Стенд через PM / <code>backend_ctl</code>: сим в jog, остановка ≤ 3,0 с по логу, стоп записан один раз; убить <code>devices</code> при движении робота — в симуляторе <code>E_WDG_TIMEOUT</code>.</li>
+    <li>Перебазирование на main, повторный гейт CTO. Срок 2026-10-19 12:00 вторичен: не успеваем — полоса Р сливается первой.</li>
+  </ol>
 </section>
 
-<p class="meta" style="margin-top:40px">Источники: <span class="mono">plans/robot-protocol-v2/tasks/T5.3.md, T5.3a.md, T5.3b.md, T5.3.stage0.md, T5.3.stage0-lead.md</span>; <span class="mono">git diff cc2281490..HEAD</span> в worktree <span class="mono">robot-v2-t53</span>; <span class="mono">git diff 621eaae61..HEAD</span> в worktree <span class="mono">robot-v2-t53b</span>.</p>
+<section id="open">
+  <h2>Что осталось ненадёжным</h2>
+  <p>Это раздел 6 документа решения простыми словами, потом открытое по самой странице и по ветке.</p>
+  <h3>Смысл раздела 6 решения</h3>
+  <ul class="open">
+    <li class="risk"><b>Новый дизайн не реализован.</b> Все числа «после» — ЦЕЛЬ. На двух роботах они не замерены, и пока код круга 2 не прошёл тесты-сторожа и стенд, это обоснованное решение, а не доказанный результат.</li>
+    <li class="risk"><b>Полуоткрытая связь не воспроизведена.</b> Нужен настоящий Delta (T4.0). Границы 1,0 с на запись и «N секунд по очереди» выведены из <code>timeout_sec</code>, а не замерены. Что параллельная рассылка помогает именно там, не доказано.</li>
+    <li class="risk"><b>«Молчащее эхо» в пробах — подмена <code>client.stop</code>, не симулятор.</b> Хост симулятора на v2 отказывает <code>fault.*</code> (долг Л2), поэтому на стенде случай собрать нельзя. Стенд проверит исправную связь и сторож, а «стоп записан один раз при молчащем роботе» проверят только тесты с подменой клиента.</li>
+    <li><b>Замечания В1–В3 найдены чтением, не воспроизведены.</b> В1: <code>_jog_tx_lock</code> без срока в потоке рассылки. В2: застрявший писатель держит замок транспорта. В3: второй <code>request_stop_all</code> после <code>scope.close</code> и столкновение имён потоков. Для каждого в круг 2 заложен тест-сторож.</li>
+    <li class="risk"><b>Сторож робота на железе не проверен</b> (<code>firmware-architecture.md:183</code>). Если зависла программа прошивки, а Modbus-слой ещё отвечает, не сработают ни стоп, ни сторож. Это гипотеза о риске, как устроен контроллер Delta, неизвестно. Закрывает такой случай только аппаратный аварийный стоп.</li>
+    <li class="note"><b>Follow-up с ADR остаются открытыми:</b> <code>remove_worker</code>, замок <code>ModbusDevice</code>, второй корень, <code>request_stop</code> в базовом драйвере, процесс на робота, уровни стопа в T5.3c (таблица выше).</li>
+  </ul>
+
+  <h3>Открытое по этой странице</h3>
+  <ul class="open">
+    <li><b>Я ничего не измерял.</b> Все замеры взяты из ревью Opus и сводки CTO. Числа 6,03 с и 12,00 с — из сводки CTO; ревьюер пробу не запускал, я тоже. Число потоков процесса <code>devices</code> (2 + N у хаба плюс потоки фреймворка) никто не мерил.</li>
+    <li><b>Диаграммы не открывал в браузере.</b> В файле нет скрипта mermaid; отрисовку блоков <code>pre.mermaid</code> обеспечивает среда, где страницу откроют. Новые схемы сделаны inline SVG, их вид на телефоне и в тёмной теме не проверялся глазами.</li>
+    <li><b>Фаза 4 в запасе 0,5 с</b> — моё прочтение «срок = now + 3,0 − 0,5 с». В документе решения не расписано, считается ли фаза 4 внутри срока.</li>
+    <li><b>Правило «сторож 0 — отказ» разнесено.</b> По решению оно идёт в бриф T5.3c, но в списке новых тестов круга 2 стоит «сторож 0 → отказ конфига». Где это кодируют, в круге 2 или в T5.3c, из документов не видно.</li>
+    <li><b>Причина П6</b> взята из ревью (часть D), документ решения её не называет.</li>
+    <li class="risk"><b>Мёртвая связь: окно 3.0 с в ветке не гарантировано.</b> 6,00 с на робота в jog. Вне приёмки О8, которая требует двух роботов в движении при исправной связи.</li>
+    <li class="risk"><b>Срок команд 1.0 с (О9) тоже только при исправной связи.</b> При мёртвой связи <code>robot_jog_release</code> ждёт до 1.0 с поводка плюс до 2.0 с эха SOFT, <code>robot_jog_hold</code> ждёт ACK до 2.0 с. Срок не гарантирован (О9-б).</li>
+    <li><b>Окно 3,0 с в живом процессе не подтверждено.</b> Тесты зовут <code>plugin.shutdown</code> напрямую; цепочку PM, сегмент <code>work</code>, плагины никто не проверил. Стенд — ворота слияния.</li>
+    <li><b>Полные папки тестов не прогнаны</b> после правок: <code>Services/device_hub/tests</code>, <code>Plugins/hub/device_hub/tests</code>, <code>Services/robot_comm/tests</code> (в том числе 37 тестов T5.2 без правок). Матрицы инъекций не сделаны.</li>
+    <li class="note"><b>T5.3c (21 команда) и T5.3d (операции движения и параметров) не начаты.</b> В GUI и в <code>backend_ctl</code> пока ничего нового не видно.</li>
+    <li class="note"><b>Микроокно в <code>_program_loop</code> сужено, не закрыто.</b> Остаётся ход от ACK первого <code>SC_RUN</code> до первого опроса, оценка ≤ 0.1 с, не измерено.</li>
+    <li class="note"><b>Подключение, уже идущее по проводу в момент фазы 1,</b> доходит до конца, но не делает драйвер готовым (<code>_ready</code> не ставится).</li>
+    <li class="note"><b>Поведение на реальном роботе изменилось.</b> При остановке процесса программа получает HARD вместо SOFT. Решение владельца О10.</li>
+    <li class="note"><b>Правки тестов T5.1.</b> Коммит 8267aedcb поменял поиск имени потока на подстроку по эскалации разработчика. В круге 2 фикстуры T5.1 и T3.7 правятся снова, с согласия владельца.</li>
+    <li class="note"><b>Файл <code>docs/contracts/CAPABILITIES.*</code> разойдётся с кодом</b> между T5.3c и перегенерацией лидом, живой тест будет красным до неё.</li>
+    <li class="note"><b>Закрытые пункты T5.1 и T3.7</b> (V1, итог <code>.program</code>, окно <code>_launch</code>, A2) закрыты по чтению и по сторожам S1–S3; отдельных проб на них не было.</li>
+  </ul>
+</section>
+
+<p class="meta" style="margin-top:40px">Источники: <span class="mono">plans/robot-protocol-v2/tasks/T5.3.round2-decision.md</span> (решение круга 2, основной); <span class="mono">docs/reviews/2026-10-18_T5.3ab-opus-review.md</span> (ревью, раунды 1, 1b, 1c); <span class="mono">plans/robot-protocol-v2/tasks/T5.3.md, T5.3a.md, T5.3b.md, T5.3.stage0.md, T5.3.stage0-lead.md</span>; <span class="mono">git diff cc2281490..f76f7be99</span> в worktree <span class="mono">robot-v2-t53</span>.</p>
 
 </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+  (function () {
+    var root = document.documentElement.getAttribute("data-theme");
+    var dark = root === "dark" || (root !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    if (window.mermaid) { mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "default", securityLevel: "strict" }); }
+  })();
+</script>
