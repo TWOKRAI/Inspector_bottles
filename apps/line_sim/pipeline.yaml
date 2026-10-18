@@ -66,6 +66,8 @@ processes:
         # Task 5.3b (контракт §4.3): длительность задания робота — job_ticks =
         # round(job_ms / (TICK_INTERVAL_S*1000)) = round(1000/10) = 100. На v2 не действует.
         job_ms: 1000
+        # T3.8: состояние робота в `sim.robot.state` — вид `--line`, пульт 6.4; 0 — выкл., максимум 1000/publish_ms
+        robot_state_hz: 20
 
   - process_name: camera
     process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess

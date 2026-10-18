@@ -67,6 +67,7 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 from Plugins.hub.device_hub.client import DeviceHubClient
+from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.server.sim_core import TICK_INTERVAL_S, VFD_CMD_ADDR, RobotSimCore
 from Services.robot_comm.server.sim_journal import SimJournal
 
@@ -199,6 +200,28 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._protocol_error: ValueError | None = (
             None if self._protocol is not None else ValueError("sim_robot_host: protocol: допустимо v1|v2")
         )
+        # T3.8 (DESIGN п.1): частота публикации снимка робота ``sim.robot.state``.
+        # 0 / нет ключа — выкл.; неверное значение — один отказ в health, публикация
+        # выключена, сервер и энкодер работают. Текст ошибки — без входного значения.
+        self._clock = time.monotonic  # шов теста: подмена часов
+        self._robot_state_last: float | None = None
+        self._robot_state_hz: float = 0.0
+        hz_cfg = cfg.get("robot_state_hz", 0)
+        max_hz = 1000.0 / self._publish_ms if self._publish_ms > 0 else 0.0
+        if (
+            not isinstance(hz_cfg, (int, float))
+            or isinstance(hz_cfg, bool)
+            or not math.isfinite(hz_cfg)
+            or not 0 <= hz_cfg <= max_hz
+        ):
+            ctx.health.report_error(
+                ValueError(f"sim_robot_host: robot_state_hz: допустимо 0..{max_hz:g}"),
+                context="sim_robot_host.configure",
+            )
+        else:
+            self._robot_state_hz = float(hz_cfg)
+            if self._robot_state_hz > 0 and self._protocol == "v1":
+                ctx.log_info("sim_robot_host: robot_state_hz: только для protocol v2 — на v1 публикации нет")
         # Воркеры v2 (_start_v2_workers): читают ТЕКУЩИЙ запуск из этих полей, не из
         # замыкания — повторный start после shutdown поднимает те же имена воркеров.
         self._v2_server: Any = None
@@ -682,6 +705,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
 
         if self._ctx.state_proxy is not None:
             self._ctx.state_proxy.set("sim.belt.encoder", {"value": encoder, "mm_s": mm_s, "t": time.monotonic()})
+            self._publish_robot_state(core)
 
         with self._lock:
             writes_seen = self._writes_seen
@@ -689,6 +713,60 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         self._ctx.publish_metric("belt_mm_s", mm_s)
         self._ctx.publish_metric("writes_seen", writes_seen)
         self._publish_journal_once()
+
+    def _publish_robot_state(self, core: Any) -> None:
+        """T3.8: снимок робота в ``sim.robot.state`` с частотой ``robot_state_hz`` (только v2).
+
+        Вход вида ``--line`` и пульта 6.4; ``robot_host`` пишет только ``sim.*``.
+
+        Период считается по ``self._clock`` (шов теста); допуск ``1e-9`` не даёт
+        потерять тик из-за округления суммы шагов."""
+        hz = self._robot_state_hz
+        if hz <= 0 or self._protocol != "v2":
+            return
+        now = self._clock()
+        last = self._robot_state_last
+        if last is not None and now - last < 1.0 / hz - 1e-9:
+            return
+        self._ctx.state_proxy.set("sim.robot.state", self._robot_state_snapshot(core))
+        self._robot_state_last = now
+
+    def _robot_state_snapshot(self, core: Any) -> dict[str, Any]:
+        """Снимок ядра v2 для вида линии: поза, суставы, цель и три блока регистров.
+
+        Каждый блок — одним срезом ``core.read`` (RES 12 слов, TLM 32, PMIR 128); поза
+        берётся из того же среза ``tlm`` (s16 / 10). Тик пишет ``TLM_X..TLM_RZ`` по
+        одному, поэтому ``joints`` и ``tlm`` могут относиться к соседним тикам — принято.
+        Только JSON-типы: снимок уходит в общий мир как есть."""
+        res = core.read(REG["RES_SEQ"], 12)
+        tlm = core.read(REG["TLM_PROTO_VER"], 32)
+        pmir = core.read(REG["PMIR"], 128)
+
+        def tlm_word(name: str) -> int:
+            return tlm[REG[name] - REG["TLM_PROTO_VER"]]
+
+        def pose_mm(name: str) -> float:
+            raw = tlm_word(name)
+            return (raw - 65536 if raw >= 0x8000 else raw) / 10.0
+
+        joints = core.joints()
+        active = core._active  # ponytail: публичного геттера цели хода нет (так же читает SimView)
+        target = [float(v) for v in active["target"]] if active and "target" in active else None
+        return {
+            "pose": {
+                "x_mm": pose_mm("TLM_X"),
+                "y_mm": pose_mm("TLM_Y"),
+                "z_mm": pose_mm("TLM_Z"),
+                "rz_deg": pose_mm("TLM_RZ"),
+            },
+            "moving": tlm_word("TLM_MOVING") != 0,
+            "hand": tlm_word("TLM_HAND"),
+            "joints": None if joints is None else [float(v) for v in joints],
+            "target": target,
+            "model": type(core.model).__name__,
+            "regs": {"res": res, "tlm": tlm, "pmir": pmir},
+            "t": self._clock(),
+        }
 
     def _publish_journal_once(self) -> None:
         """Уровни журнала + перенос новых строк в ``_journal_recent`` (Контракт §2).
