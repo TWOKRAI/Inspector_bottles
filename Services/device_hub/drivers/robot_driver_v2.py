@@ -44,6 +44,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from Services.device_hub.drivers.base import BaseDeviceDriver, logger
+from Services.device_hub.drivers.exchange_log import (
+    TEXT_BAD_CONFIG,
+    TEXT_BAD_GET_ARGS,
+    TEXT_BAD_KNOBS,
+    ExchangeLog,
+    ExchangeLogTransport,
+)
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, REG, STOP_LEVEL
@@ -273,6 +280,23 @@ class RobotDriverV2(BaseDeviceDriver):
         self.returns_done = 0
         self.returns_failed = 0
 
+        # Журнал обмена (T5.6): живёт столько же, сколько драйвер; ручки — entry.params["exchange_log"]
+        log_cfg = params.get("exchange_log")
+        if isinstance(log_cfg, bool):  # сокращение: false — журнал выключен, true — умолчания
+            log_cfg = {"enabled": log_cfg}
+        try:
+            if log_cfg is not None and not isinstance(log_cfg, Mapping):
+                raise ValueError(TEXT_BAD_CONFIG)
+            log_cfg = log_cfg or {}
+            self._exchange_log = ExchangeLog(
+                entry.id, enabled=log_cfg.get("enabled", True), periodic=log_cfg.get("periodic", False)
+            )
+        except ValueError:  # плохой конфиг журнала не мешает создать драйвер: умолчания и предупреждение
+            logger.warning(f"робот {entry.id!r}: {TEXT_BAD_CONFIG}")
+            self._exchange_log = ExchangeLog(entry.id)
+        if self._transport is not None:  # внедрённый транспорт (тесты); иначе обёртка — в connect()
+            self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
+
     # ------------------------------------------------------------------ #
     # Параметры и конфиг подключения
     # ------------------------------------------------------------------ #
@@ -358,6 +382,7 @@ class RobotDriverV2(BaseDeviceDriver):
                 from Services.device_hub.transports import build_transport
 
                 self._transport = build_transport(self.entry, lambda _id: None)
+                self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
             if self._client is None:
                 self._client = RobotClientV2(self._transport, self._cfg)
             client = self._client
@@ -961,3 +986,36 @@ RobotDriverV2._OPS = {
     "enqueue_job": RobotDriverV2._op_enqueue_job,
     "return_job": RobotDriverV2._op_return_job,
 }
+
+
+# --- Журнал обмена (T5.6): две операции отдельным блоком, литерал _OPS выше не тронут ---
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _op_exchange_log_get(drv: RobotDriverV2, args: dict) -> dict:
+    """Строки журнала обмена {since_seq=0, limit=200} и состояние; работает и без связи с роботом.
+
+    Плохой аргумент — постоянный текст отказа (R8), счётчик ошибок обмена не растёт.
+    """
+    since_seq, limit = args.get("since_seq", 0), args.get("limit", 200)
+    if not (_is_int(since_seq) and _is_int(limit)) or since_seq < 0 or limit < 1:
+        return {"status": "error", "message": TEXT_BAD_GET_ARGS}
+    return {"status": "ok", **drv._exchange_log.get(since_seq=since_seq, limit=limit)}
+
+
+def _op_exchange_log_set(drv: RobotDriverV2, args: dict) -> dict:
+    """Ручки журнала {enabled?, periodic?, clear?} без переподключения; ответ — состояние без строк."""
+    knobs = {key: args.get(key) for key in ("enabled", "periodic", "clear")}
+    if any(v is not None and not isinstance(v, bool) for v in knobs.values()):
+        return {"status": "error", "message": TEXT_BAD_KNOBS}
+    return {"status": "ok", **drv._exchange_log.set(**knobs)}
+
+
+_EXCHANGE_OPS = {
+    "exchange_log_get": _op_exchange_log_get,
+    "exchange_log_set": _op_exchange_log_set,
+}
+RobotDriverV2._OPS.update(_EXCHANGE_OPS)

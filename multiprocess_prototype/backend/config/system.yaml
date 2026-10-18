@@ -100,6 +100,13 @@ observability:
       type: file
       name_max_len: 20
       file_path: busy.log
+    # Журнал обмена драйвера робота v2 (T5.6): одна строка на новую запись журнала,
+    # `#<seq> <side> <text>`. Писателя нового нет — тот же logger_module; файл переключается
+    # на ходу через backend_ctl logger_sink_disable / logger_sink_enable.
+    robot_exchange_file:
+      type: file
+      name_max_len: 20
+      file_path: robot_exchange.log
 
   # --- Ярлыки источников (Ф2.5) ------------------------------------------------
   # Модель `logging.group.*` Spring Boot: имя набора префиксов. Правило пишется
@@ -127,6 +134,11 @@ observability:
     # оператора, а в конфиге его не было — поэтому и переписывался покомпонентно.
     служебное:
       channels: [busy_file]
+    # Журнал обмена драйвера робота (T5.6): замещение — строки журнала идут ТОЛЬКО в свой файл,
+    # в system.log их нет (до 100 строк/с при periodic=true).
+    Services.device_hub.drivers.exchange_log:
+      level: INFO
+      channels: [robot_exchange_file]
   # --- Ретеншен (Ф6.9). Раньше обе политики оставались нулями фреймворка, и
   # чистка была выключена по умолчанию: 471 МБ в logs/ и ноль удалений на
   # живом прогоне 2026-08-03. Включать её ДО миграции 116 файлов — сознательно:
