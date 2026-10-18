@@ -56,7 +56,7 @@ for _name, _addr in REG.items():
     else:
         _ADDR_NAME.setdefault(_addr, _name)
 
-#: Код операции -> имя. Первое имя выигрывает: в карте ``E_VFD_LINK`` повторяет код ``PTP_MOVE`` (16).
+#: Код операции -> имя (коды в ``OP`` уникальны; ``E_VFD_LINK = 16`` — код ошибки из ``ERR``, не операция).
 _OP_NAME: dict[int, str] = {}
 for _name, _code in OP.items():
     _OP_NAME.setdefault(_code, _name)
