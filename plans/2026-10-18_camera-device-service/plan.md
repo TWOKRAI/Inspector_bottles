@@ -3,7 +3,7 @@
 - **Slug:** camera-device-service
 - **Дата:** 2026-10-18
 - **Статус:** DRAFT
-- **Plan review:** CHANGES 1 (`docs/reviews/2026-10-18_camera-plan-review.md`; правки раунда 3 внесены, ждёт раунд 2 ревью)
+- **Plan review:** CHANGES 2 (`docs/reviews/2026-10-18_camera-plan-review.md`, раунд 2 — 4 блокера W1a, только текст 0.2/0.3/0.4; 3-я итерация — `cto`)
 - **Ветка:** `feat/camera-device-service` — создаёт лидер ДО `docs(plans):` коммита плана.
 
 ## Что где живёт
