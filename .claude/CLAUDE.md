@@ -44,15 +44,16 @@ answer; follow it and only speak up when deviating.
 
 | Stage | Who | Notes |
 |---|---|---|
-| 0. Spec review | `reviewer`, **synchronous, once on the Task text** (DESIGN / FILES / REDS), via `MODE: plan` on one Task file (`reviewer.md`) | before the tester: the tester's acceptance lines must be final. Verdict `APPROVED` / `CHANGES REQUESTED` with a list. Not run for solo-trivial work. |
+| 0. Spec review | `reviewer`, **synchronous, once on the Task text** (DESIGN / FILES / REDS), via `MODE: plan` on one Task file (`reviewer.md`) | before the tester: the tester's acceptance lines must be final. Verdict `APPROVED` / `CHANGES REQUESTED` with a list. Not run for solo-trivial work. Model by class (below). |
 | 1. Independent acceptance tests | `tester`, **once per mechanism, before the implementation** | synchronous, from acceptance criteria only. Runs in a **git worktree at the pre-implementation commit** — blindness is enforced by the tree, not by prose. Its tests are expected RED; they are the spec handed to stage 2. |
-| 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. I keep the spec, the acceptance and the measurements. |
+| 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. Sonnet implements any task with a precise DESIGN, threaded ones included once stage 0 ran on Opus; `teamlead` keeps design-level concurrency decisions. I keep the spec, the acceptance and the measurements. |
 | 3. Break-injection | me for the predictions and the verdict; the mechanical run goes to an agent (owner 2026-10-12, section below) | against **both** test sets — the author's and the tester's. Predictions written before the run. |
 | 4. Live stand | me | numbers, not adjectives; `backend_ctl` over reading source. |
-| 5. Review | `reviewer`, **after every task** | synchronous (`run_in_background: false`), findings must carry input → observed output. |
-| 6. Live defect that is not obvious | `investigator` | instead of digging in the main context. |
+| 5. Review | `reviewer`, **after every task with code** — no exceptions | synchronous (`run_in_background: false`), findings must carry input → observed output. Model by class (below). A plan may batch it into one review per wave on the combined diff, if nothing merges before that review. |
+| 6. Live defect that is not obvious | `investigator` | instead of digging in the main context; first a Haiku inventory of the run's logs (every directory, every process incarnation, first/last line, time gaps). |
 | 7. Mechanical runs and lookups | `haiku` agent (`junior` / `Explore` / `model: "haiku"`) | injection matrix from the lead's predictions, stand number collection, inventories; brief under ~100K context, effort ≥ medium, output pasted. |
 
+- **Model by class (owner, 2026-10-18), stages 0 and 5:** Opus — Senior+ tasks and anything with threads, IPC, process or device lifecycle, verdicts on live defects, plan reviews, and the branch review before merge (that is the phase review). Otherwise `reviewer` with `model: "sonnet"` — bounded changes: widget, recipe, config, pure function, docs. Repeat rounds go to the same agent via `SendMessage` (a fresh agent costs ~56k context; 25–29 % of one measured session). Evidence: `docs/reviews/2026-10-17_codereader-multicamera-opus-review.md` → «Оценка Sonnet» — the only real defect came from an unreviewed commit; Sonnet-reviewed commits added none; Opus at stage 0 would have saved a ~189k rework round.
 - Never run the tester twice on one mechanism: a second acceptance pass = my injection matrix plus `reviewer`.
 - Name the forbidden paths in the tester prompt too; carry its file back into the main tree afterwards.
 - Solo (no subagent for stage 2) only for trivial work — 1–3 files, under ~80 lines, no new mechanism — and it must be said out loud. Stages 1, 3 and 5 have no solo variant.
@@ -79,7 +80,7 @@ nothing errors, the guarantee just stops holding.
 | A finished background agent **commits, pushes, and opens a draft PR** on its own — it no longer asks | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
 | Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
 
-Roles → models (all 17): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` / `memory-classifier` / `Explore` / `web-researcher` = Haiku.
+Roles → models (all 17): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus (`reviewer` runs on `model: "sonnet"` by class — «Task launch convention»); `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` / `memory-classifier` / `Explore` / `web-researcher` = Haiku.
 Haiku 5.5 (owner, 2026-10-11): upgraded — use it for simple work whenever it fits: mechanical edits, lookups, greps, format checks, simple docs (`junior` / `docs-writer`, or `model: "haiku"` on an Agent call). Not for design, review verdicts, blind tests or concurrency.
 
 `/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
