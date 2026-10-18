@@ -1,6 +1,6 @@
 ---
 name: project-monotonic-resolution-windows
-description: "time.monotonic на Windows — GetTickCount64() с шагом 15.625 мс; любое сравнение РАЗНОСТИ показаний ниже ~100 мс недостоверно / clock resolution, throttle interval"
+description: "time.monotonic на Windows — GetTickCount64() с шагом 15.625 мс; любое сравнение РАЗНОСТИ показаний ниже ~100 мс недостоверно / clock resolution, throttle interval, publish rate halved"
 mechanism: [windows-env, measurement]
 metadata:
   type: project
@@ -30,3 +30,9 @@ metadata:
 ## Дополнение A12 (аудит 2026-10-04, из telemetry_self_publish)
 
 `cycle_metrics.effective_hz = 1/cycle_duration` на `time.monotonic()` давал FPS=0 у consumer-воркеров; фикс `b6ce2bb8` — интервал между `record()` на `perf_counter`.
+
+## Дополнение T3.8 (ревью кода 2026-10-18, robot_host `robot_state_hz`)
+
+Ловушка вернулась через бриф: DESIGN задал `now - last >= 1/hz - 1e-9` на `time.monotonic`. При `robot_state_hz = 1000/publish_ms` (20 Гц при 50 мс) настоящий плагин дал 10.0 снимков/с при энкодере 19.7/с. Тест на фейковых часах с точным шагом 0.05 и порог «≥ 5 записей за 1 с» этого не видят.
+Решение лида: допуск в полцикла `now - last >= 1/hz - publish_ms/2000` — лечит и квант 1/64 с, и дрожание `sleep`; период округляется до ближайшего кратного `publish_ms`. Сторож — фейковые часы, квантованные шагом 1/64 с, с дрожанием ±1.2 мс: старая формула 57/100 и 40/50, новая 100/50/20 (`Plugins/sim/robot_host/tests/test_robot_state_rate.py`). Поле времени для межпроцессного `lag` остаётся на `monotonic`.
+**Триггер:** бриф или DESIGN с периодом ниже ~100 мс — сверить с этим уроком до стадии 0.
