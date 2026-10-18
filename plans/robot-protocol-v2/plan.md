@@ -1,5 +1,7 @@
 # План: протокол робота v2 — единый mailbox, программы точек, параметры с ПК, пакет GUI
 
+> **2026-10-18, связь с [`camera-device-service`](../2026-10-18_camera-device-service/plan.md):** T5.3 и Task 4.6b/4.6c того плана правят одни файлы хаба (`Plugins/hub/device_hub/plugin.py` — таблица `commands`; `Services/device_hub/manager.py:_register_defaults`): один писатель за раз; форма фабрики `factory(entry, proto, *, services)` — Task 4.6a.
+
 - **Slug:** `robot-protocol-v2` · **Ветка:** `feat/robot-protocol-v2` (пересоздана от `main` 2026-09-27)
 - **Редакция:** 2 (2026-09-27). Редакция 1 (2026-07-19) утверждена, но не исполнялась (сделан только T-00).
   Ред. 2 пересобрана под решения владельца 09-23…09-27, мануал RL и новую архитектуру GUI — см. «Что изменилось».

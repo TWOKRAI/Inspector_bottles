@@ -23,10 +23,14 @@ from .structures import (
     BCR_INFO_EX2,
     DEVICE_INFO,
     DEVICE_INFO_LIST,
+    ENUMVALUE,
+    FLOATVALUE,
     GIGE_DEVICE,
     IMAGE_OUT_INFO_EX2,
+    INTVALUE_EX,
     MAX_BCR_COUNT_EX,
     MAX_DEVICE_NUM,
+    MAX_XML_SYMBOLIC_NUM,
 )
 
 _PREFIX = "MV_CODEREADER_"
@@ -88,6 +92,52 @@ class MvCodeReaderApi:
         rc = self._call(name, *args)
         if rc != MV_OK:
             raise SdkError(rc, _PREFIX + name)
+
+    def _node(self, name: str, h: Any, key: str, *args: Any) -> None:
+        """Вызов get/set узла GenICam: ключ — голый ``bytes`` (``str`` ушёл бы в DLL как UTF-16).
+
+        Не-ASCII ключ → ``UnicodeEncodeError`` до обращения к DLL. Ошибка несёт ключ в ``where``.
+        """
+        raw_key = key.encode("ascii")
+        rc = self._call(name, _handle(h), raw_key, *args)
+        if rc != MV_OK:
+            raise SdkError(rc, f"{_PREFIX}{name}[{key}]")
+
+    def get_int(self, h: Any, key: str) -> dict[str, int]:
+        value = INTVALUE_EX()
+        self._node("GetIntValue", h, key, C.byref(value))
+        return {"cur": value.nCurValue, "min": value.nMin, "max": value.nMax, "inc": value.nInc}
+
+    def get_float(self, h: Any, key: str) -> dict[str, float]:
+        value = FLOATVALUE()
+        self._node("GetFloatValue", h, key, C.byref(value))
+        return {"cur": value.fCurValue, "min": value.fMin, "max": value.fMax}
+
+    def get_enum(self, h: Any, key: str) -> dict[str, Any]:
+        value = ENUMVALUE()
+        self._node("GetEnumValue", h, key, C.byref(value))
+        count = min(value.nSupportedNum, MAX_XML_SYMBOLIC_NUM)
+        return {"cur": value.nCurValue, "supported": list(value.nSupportValue[:count])}
+
+    def get_bool(self, h: Any, key: str) -> bool:
+        value = C.c_bool()
+        self._node("GetBoolValue", h, key, C.byref(value))
+        return bool(value.value)
+
+    def set_int(self, h: Any, key: str, value: int) -> None:
+        self._node("SetIntValue", h, key, C.c_int64(value))
+
+    def set_float(self, h: Any, key: str, value: float) -> None:
+        self._node("SetFloatValue", h, key, C.c_float(value))
+
+    def set_enum(self, h: Any, key: str, value: int) -> None:
+        self._node("SetEnumValue", h, key, C.c_uint(value))
+
+    def set_enum_str(self, h: Any, key: str, value: str) -> None:
+        self._node("SetEnumValueByString", h, key, value.encode("ascii"))
+
+    def set_bool(self, h: Any, key: str, value: bool) -> None:
+        self._node("SetBoolValue", h, key, C.c_bool(value))
 
     def enum_devices(self) -> list[DeviceEntry]:
         lst = DEVICE_INFO_LIST()

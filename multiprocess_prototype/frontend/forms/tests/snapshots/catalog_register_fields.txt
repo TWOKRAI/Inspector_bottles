@@ -82,9 +82,13 @@ code_reader_sdk.last_code
 code_reader_sdk.last_error
 code_reader_sdk.last_status
 code_reader_sdk.no_reads
+code_reader_sdk.param_errors
 code_reader_sdk.reader_id
 code_reader_sdk.timeout_ms
 code_reader_sdk.total_reads
+code_reader_sdk.trigger_mode
+code_reader_sdk.trigger_period_ms
+code_reader_sdk.trigger_source
 color_convert.mode
 color_mask.h_max
 color_mask.h_min

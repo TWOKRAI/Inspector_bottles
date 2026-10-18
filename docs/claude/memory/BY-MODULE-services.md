@@ -2,9 +2,12 @@
 
 Сгенерировано: `python scripts/memory/search.py --by-module --write`; не править вручную. Хаб: [BY-MODULE.md](BY-MODULE.md)
 
-## services/code_reader (1)
+## services/code_reader (4)
 
 - [feedback_ctypes_setattr_unknown_field_is_silent](feedback_ctypes_setattr_unknown_field_is_silent.md) — setattr on a ctypes Structure with a wrong field name silently creates a Python…
+- [project_code_reader_focus_calibration_streams_frames](project_code_reader_focus_calibration_streams_frames.md) — Считыватель ID3013 даёт кадр только на скан/триггер; кнопка калибровки фокуса д…
+- [project_code_reader_mode_restore_is_not_a_guarantee](project_code_reader_mode_restore_is_not_a_guarantee.md) — ID3013: режим съёмки, записанный в камеру, нельзя надёжно вернуть при выходе — …
+- [project_code_reader_selftrigger_period_sets_the_fps](project_code_reader_selftrigger_period_sets_the_fps.md) — ID3013: 3 кадра/с в свободном режиме = период собственного триггера 300 мс; Tri…
 
 ## services/control_panel (1)
 

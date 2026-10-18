@@ -8,13 +8,15 @@
 from __future__ import annotations
 
 from .api import DeviceEntry, MvCodeReaderApi, RawFrame
-from .errors import E_ACCESS_DENIED, E_NODATA, MV_OK, SdkError, SdkNotFoundError
+from .errors import E_ACCESS_DENIED, E_GC_ACCESS, E_GC_RANGE, E_NODATA, MV_OK, SdkError, SdkNotFoundError
 from .loader import IDMVS_PLUGIN_DIR, find_sdk_dir, load_library
 from .structures import BAR_TYPE_NOREAD, GIGE_DEVICE, PIXEL_JPEG, PIXEL_MONO8
 
 __all__ = [
     "BAR_TYPE_NOREAD",
     "E_ACCESS_DENIED",
+    "E_GC_ACCESS",
+    "E_GC_RANGE",
     "E_NODATA",
     "GIGE_DEVICE",
     "IDMVS_PLUGIN_DIR",

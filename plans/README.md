@@ -153,6 +153,7 @@ python3 scripts/plans_ledger.py close <plan>      # archive-on-done (git mv + с
 | [word-layout](word-layout.md) | feat/word-layout | — | 0/0 | DRAFT | 2026-09-20 |
 | [gui-service](2026-09-22_gui-service/plan.md) | feat/gui-service | — | 0/0 | APPROVED ред. 2 | 2026-09-22 |
 | [memory-rules-delivery](2026-10-11_memory-rules-delivery/plan.md) | docs/memory-rules-delivery | phase 0 | 0/9 | DRAFT | 2026-10-11 |
+| [camera-device-service](2026-10-18_camera-device-service/plan.md) | feat/camera-device-service | — | 0/42 | DRAFT | 2026-10-18 |
 
 ## Архив
 

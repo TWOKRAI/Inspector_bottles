@@ -49,6 +49,19 @@
 | 20 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
 | 21 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене |
 | 22 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
+| 23 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.2 | W1 пилот режима волн, P0 первым: живой путь `hikvision` к приезду MVS (~2026-10-20), веха М1; без зависимостей |
+| 24 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.3 | W1 пилот режима волн, P0, параллельно 0.2 (другие файлы); нужна DLL MVS на машине; открывает 0.4 и 4.1 |
+| 25 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.1 | W1 пилот режима волн, P0; ADR-CAM + базовая линия `sentrux check .`; открывает 1.1 и 1.5 |
+| 26 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.5 | W1 пилот режима волн, P0 путь; ядро: `interface.py`, фейк, контрактный тест; стадия 0 (Sonnet) фиксирует и схему JSON для 0.4 |
+| 27 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.4 | W1 пилот режима волн, P0; зонд MVS `--fake`; нужен к 0.5 |
+| 28 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.1 | W1 пилот режима волн, P0 боковой ряд; `FieldMeta.apply/enabled_if`; `--timed medium` — своё окно; параллельно 1.5 |
+| 29 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.5 | P0 ⚑ MVS: в день, когда камера в сети, — взять раньше остальных строк (М1), даже если W4 не начата |
+| 30 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.6 | W2 «ядро» (1.6, 1.8, 2.1, 2.2): входная задача волны; приёмка восстановлена (ревью B1); граница волны — handoff + `/clear` |
+| 31 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 2.3a | W3 (2.3a, 2.3b, 2.4, 4.1, 3.1, 3.2): входная задача волны после W2 |
+| 32 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 4.2a | W4 «MVS вернулись» (4.2a, 4.2b, 4.3, 4.4, 6.1, 0.5, 6.3): К4' одним коммитом; веха М2/М3 |
+| 33 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 6.2 | W5 P0-хвост ID3013 (3.3, 6.2, 6.4): ⚑ когда `192.168.1.10`/`.11` в сети; поставить раньше, если вернутся раньше |
+| 34 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 4.6a | W6 P1 хаб-зеркало (4.6a, 4.6b, 5.1, 4.6c, 4.6d): после М2; один писатель хаба с T5.3 `robot-protocol-v2` |
+| 35 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 5.2 | W7 P1 (5.2, 5.3, 1.3, 1.4, 1.2, 1.7); затем W8 (6.5, 6.6), W9 P2 (3.4, 4.5, 5.4); позицию определяет владелец |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас

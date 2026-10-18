@@ -49,6 +49,37 @@ class CodeReaderSdkRegisters(SchemaBase):
         ),
     ] = 500
 
+    # --- Режим съёмки (пишется в прибор при захвате, возвращается при остановке) ---
+    trigger_mode: Annotated[
+        str,
+        FieldMeta(
+            "Режим триггера",
+            info="Пусто = не трогать; иначе имя узла TriggerMode: Off | On. Пишется в прибор при захвате",
+        ),
+    ] = ""
+
+    trigger_source: Annotated[
+        str,
+        FieldMeta(
+            "Источник триггера",
+            info="Пусто = не трогать; иначе имя узла TriggerSource: Line0 | SelfTrigger. Пишется в прибор при захвате",
+        ),
+    ] = ""
+
+    trigger_period_ms: Annotated[
+        int,
+        FieldMeta(
+            "Период самотриггера, мс",
+            info=(
+                "0 = не трогать. Пишется в прибор при захвате; допустимый диапазон (от 32 мс) судит прибор: "
+                "отказ виден в «Ошибки параметров»"
+            ),
+            # Без min=32: дефолт 0 ниже минимума, и register не построился бы.
+            min=0,
+            max=180000,
+        ),
+    ] = 0
+
     # --- Надписи на кадре (overlay для overlay_draw) ---
     labels: Annotated[
         list[dict],
@@ -121,4 +152,13 @@ class CodeReaderSdkRegisters(SchemaBase):
     last_error: Annotated[
         str,
         FieldMeta("Последняя ошибка", readonly=True),
+    ] = ""
+
+    param_errors: Annotated[
+        str,
+        FieldMeta(
+            "Ошибки параметров",
+            info="Узлы режима съёмки, которые не записались: «узел: текст; …». Пусто = всё записано",
+            readonly=True,
+        ),
     ] = ""

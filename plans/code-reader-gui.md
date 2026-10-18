@@ -1,6 +1,8 @@
 # План: считыватель ID3000 в GUI прототипа — показ в дисплее рецепта + настройки (slug `code-reader-gui`)
 
-- **Slug:** `code-reader-gui` · **Ветка:** `feat/code-reader-gui` · **Дата:** 2026-10-15 · **Статус:** DRAFT
+> **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** Task 2.2b заменена; Task 2.3 ждёт Task 2.3/3.2, Task 3.1 (настройки) — Task 6.4 того плана.
+
+- **Slug:** `code-reader-gui` · **Ветка:** `feat/code-reader-gui` · **Дата:** 2026-10-15 · **Статус:** IN PROGRESS — 2.1, 2.2a сделаны; 2.2b заменена планом [`2026-10-18_camera-device-service`](2026-10-18_camera-device-service/plan.md) (2026-10-18)
 - **Родители:** [`qr-code-reader.md`](qr-code-reader.md) (заменяет его Ф3: Task 3.1–3.4),
   [`code-reader-sdk.md`](code-reader-sdk.md) (строит на Ф6: `sdk/`, `core/sdk_*`, плагин `code_reader_sdk`).
 - **Решение владельца 2026-10-15:** первая итерация = (1) кадр + код (обводка по углам, текст, статус
@@ -76,24 +78,26 @@ Acceptance criteria / Out of scope): [Фаза 1](code-reader-gui/phase-1.md) ·
 ### Фаза 1 — показ
 - Task 1.1: ⚑ Базовый прогон `qr_reader_sdk_demo` на новой камере [PENDING]
   - **Module contract:** n/a
-- Task 1.2: **[VERTICAL SLICE]** Кадр с обводкой и текстом в дисплее рецепта [PENDING] (после 1.1)
+- Task 1.2: **[VERTICAL SLICE]** Кадр с обводкой и текстом в дисплее рецепта [IN PROGRESS — код `7e1640c97`, стенд 2026-10-15; нет ревью Opus и break-injection (`code-reader-gui/phase-4.md`, «Осталось по Task 1.2»)] (после 1.1)
   - **Module contract:** public-api-change (`overlay_draw`: тип входного порта, поле register'а; `code_reader_sdk`: ключ item)
 
 ### Фаза 2 — настройки
-- Task 2.1: Get/set узлов GenICam в `sdk/` [PENDING] (параллельно с 1.2 — файлы не пересекаются)
+- Task 2.1: Get/set узлов GenICam в `sdk/` [DONE 2026-10-16 — `e708e14f6`, спека и итоги стенда `a4921a03d`] (параллельно с 1.2 — файлы не пересекаются)
   - **Module contract:** public-api-change (`sdk.api.MvCodeReaderApi`)
-- Task 2.2: Параметры в сессии и плагине: register → прибор → дерево [PENDING] (после 2.1, 1.2)
-  - **Module contract:** public-api-change (`SdkCodeReader(params=…)`, `stats()["params"]`, поля register'а)
-- Task 2.3: Секция «Считыватель кодов» во вкладке Services [PENDING — только по слову владельца, см. ESCALATION]
+- Task 2.2a: Режим съёмки из рецепта пишется в прибор при старте [DONE 2026-10-17 — `383242ac9`, заготовка, на железе не проверена] (после 2.1)
+  - **Module contract:** public-api-change (`SdkCodeReader(trigger=…)`, `stats()["param_errors"]`, поля register'а)
+- Task 2.2b: Живая правка параметров из GUI, `params` в дереве [SUPERSEDED — заменена планом [`2026-10-18_camera-device-service`](2026-10-18_camera-device-service/plan.md), Task 2.4 и 3.2]
+  - **Module contract:** —
+- Task 2.3: Секция «Считыватель кодов» во вкладке Services [PENDING — только по слову владельца, см. ESCALATION] (после Task 2.3 и 3.2 плана `2026-10-18_camera-device-service`: форма из register'а ядра)
   - **Module contract:** impl-only
 
 ### Фаза 3 — стенд и приёмка
-- Task 3.1: ⚑ Живой стенд: показ + настройки на новой камере [PENDING] (после 1.2, 2.2)
+- Task 3.1: ⚑ Живой стенд: показ + настройки на новой камере [PENDING] (после 1.2; настройки — после Task 6.4 плана `2026-10-18_camera-device-service`)
   - **Module contract:** n/a
 - Task 3.2: Документы сервиса + ревью фазы + приёмка `cto` [PENDING] (после 3.1)
   - **Module contract:** n/a
 
-**Критический путь:** 1.1 → 1.2 → 2.2 → 3.1 → 3.2 (2.1 идёт параллельно 1.2).
+**Критический путь:** 1.1 → 1.2 → 3.1 → 3.2; настройки (бывшая 2.2b) — в плане `2026-10-18_camera-device-service` (связь двусторонняя: его `matrix.md`, «Связи»).
 
 ## Общие правила для всех задач
 

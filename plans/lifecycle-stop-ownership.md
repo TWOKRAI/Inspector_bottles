@@ -1,5 +1,7 @@
 # lifecycle-stop-ownership — остановкой и сиротами владеет PM (L-5 + долги приёмки L-2)
 
+> **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** Task 1.7 (T14) того плана — выход приложения (`shutdown()` детей до `kill_tree`, `process_manager_module/launcher/spawner.py:180-230`) и `INSPECTOR_LOG_DIR` после full-replace; файлы `process_manager_module` общие — один писатель, стадия 0 Task 1.7 сверяется с Ф1 этого плана.
+
 - **Slug:** `lifecycle-stop-ownership` · **Ветка:** `fix/lifecycle-stop-ownership` (создать при старте Ф1) · **Дата:** 2026-09-24
 - **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 DONE 2026-09-26. **Ф1 принята CTO 2026-09-26 — ACCEPT WITH CONDITIONS** ([отчёт](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)); Ф2 ждёт условий ниже и Ф1 плана [`lifecycle-owner-scope`](2026-10-03_lifecycle-owner-scope/plan.md) (L-6 по тексту выполнено — транспорт 4.1 в `main`). **2026-10-03:** внутрипроцессная половина Task 3.1 и хук `_before_observability_teardown` переданы `lifecycle-owner-scope` (П3), Task 3.1 сужена до межпроцессного quiesce → ack — см. «Соседи» и Task 3.1
 - **Полоса:** B (фреймворк). **Срок-якорь:** Ф1 закрыть **до gui-service Task 1.3a** (у Пульта появится кнопка

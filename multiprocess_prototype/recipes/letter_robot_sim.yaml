@@ -71,10 +71,7 @@ devices:
   - id: robot_main
     name: Робот Delta
     kind: robot
-    # T3.7: сим-робот линии на v2; боевой hikvision_letter_robot — delta_universal3 (железо v1 до Ф4)
     protocol: delta_v2
-    # Сим-робот apps/line_sim, а не боевой 192.168.1.7:502. Upsert рецепта при активации
-    # перезаписывает transport в data/devices.yaml, поэтому адрес обязан жить здесь.
     transport:
       type: tcp
       host: 127.0.0.1
@@ -84,9 +81,8 @@ devices:
       word_order: little
       feed_poll_s: 0.05
       telemetry_interval_s: 0.5
-      # T3.7: кольцо забора 600 мм = досягаемость модели (l1+l2) и P_WS_R_MAX; калибровка
-      # рецепта у линии триггера даёт r до 595.9 мм
-      robot_params: {P_ZONE_MAX: 6000}
+      robot_params:
+        P_ZONE_MAX: 6000
   - id: vfd_belt
     name: ПЧ лента
     kind: vfd
@@ -100,8 +96,6 @@ devices:
       poll_interval_s: 0.5
       stale_polls_limit: 6
 blueprint:
-  name: default
-  description: ''
   processes:
     - process_name: gui
       plugins: []
@@ -113,7 +107,9 @@ blueprint:
       description:
       protected: true
       category:
+      restart_policy: {}
       metadata: {}
+      extras: {}
     - process_name: devices
       plugins:
         - plugin_name: device_hub
@@ -129,7 +125,9 @@ blueprint:
       description:
       protected: true
       category:
+      restart_policy: {}
       metadata: {}
+      extras: {}
     - process_name: camera_0
       plugins:
         - plugin_name: camera_service
@@ -139,9 +137,6 @@ blueprint:
             camera_type: stream
             stream_url: http://127.0.0.1:8091/
             auto_start: true
-            # Task 5.3b: разрешение кадра рецепта (HikvisionCameraPlugin боевого
-            # варианта) — сим-сток должен отдавать те же 1440x1080, иначе ROI
-            # рецепта (x=246 y=297 w=800 h=481) не помещается в кадр после ресайза.
             resolution_width: 1440
             resolution_height: 1080
       workers: []
@@ -152,13 +147,14 @@ blueprint:
         - vision
       description:
       protected: false
-      # Ф3.8/GATE G1 (владелец: ДА): авто-рестарт hikvision-source/hub. Обрыв
-      # RTSP/краш плагина камеры → монитор пересоздаёт процесс (окно 3/60с),
-      # кадры возобновляются. gui/devices — protected (skip), их не трогаем.
-      restart_policy: {enabled: true, max_retries: 3, window_sec: 60}
       category:
+      restart_policy:
+        enabled: true
+        max_retries: 3
+        window_sec: 60
       metadata:
         source_target_fps: 25
+      extras: {}
     - process_name: vision
       plugins:
         - plugin_name: color_convert
@@ -220,7 +216,9 @@ blueprint:
       description: свап→ROI→маска→морфо→круги (линейно, без межпроцессных SHM-перегонов)
       protected: false
       category:
+      restart_policy: {}
       metadata: {}
+      extras: {}
     - process_name: line
       plugins:
         - plugin_name: line_filter
@@ -243,7 +241,9 @@ blueprint:
       description:
       protected: false
       category:
+      restart_policy: {}
       metadata: {}
+      extras: {}
     - process_name: recog
       plugins:
         - plugin_name: center_crop
@@ -298,6 +298,7 @@ blueprint:
       description: crop(по триггеру линии) → калибровка px→мм (+энкодер) → нейронка буква+угол
       protected: false
       category:
+      restart_policy: {}
       metadata:
         inspector:
           mode: join
@@ -306,6 +307,7 @@ blueprint:
             - overlay
           primary: frame
           timeout_sec: 0.25
+      extras: {}
     - process_name: layout
       plugins:
         - plugin_name: word_layout
@@ -348,7 +350,9 @@ blueprint:
       description: раскладка слова (pick+place+доворот) → форвард роботу (robot_enqueue_job)
       protected: false
       category:
+      restart_policy: {}
       metadata: {}
+      extras: {}
     - process_name: draw
       plugins:
         - plugin_name: circle_draw
@@ -374,6 +378,7 @@ blueprint:
       description:
       protected: false
       category:
+      restart_policy: {}
       metadata:
         inspector:
           mode: join
@@ -382,6 +387,7 @@ blueprint:
             - overlay
           primary: frame
           timeout_sec: 0.25
+      extras: {}
     - process_name: maskview
       plugins:
         - plugin_name: mask_to_frame
@@ -398,7 +404,9 @@ blueprint:
       description:
       protected: false
       category:
+      restart_policy: {}
       metadata: {}
+      extras: {}
     - process_name: phone
       plugins:
         - plugin_name: phone_camera
@@ -422,41 +430,65 @@ blueprint:
       description:
       protected: false
       category:
+      restart_policy: {}
       metadata:
         source_target_fps: 10
+      extras: {}
   wires:
     - source: camera_0.camera_service.frame
       target: vision.color_convert.frame
+      src_dtype:
+      tgt_dtype:
       description: камера → вход vision (далее ROI→маска→морфо→круги линейно внутри процесса)
     - source: vision.circle_detector.frame
       target: recog.center_crop.frame
+      src_dtype:
+      tgt_dtype:
       description: кадр+детекции → crop (детекции едут в item, для radius-матчинга)
     - source: vision.circle_detector.detections
       target: line.line_filter.detections
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: vision.circle_detector.frame
       target: draw.circle_draw.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: vision.circle_detector.detections
       target: draw.circle_draw.detections
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: vision.circle_detector.mask
       target: maskview.mask_to_frame.mask
+      src_dtype:
+      tgt_dtype:
       description: маска белого → отдельный дисплей для тюнинга
     - source: line.line_filter.overlay
       target: recog.center_crop.trigger_in
+      src_dtype:
+      tgt_dtype:
       description: триггер «диск пересёк линию» → один crop события
     - source: line.line_filter.overlay
       target: draw.overlay_draw.overlay
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: recog.ml_inference.predictions
       target: layout.word_layout.predictions
+      src_dtype:
+      tgt_dtype:
       description: буква+угол (+pick_xy/e_capture в item) → раскладка слова → робот
     - source: phone.phone_camera.signal_2
       target: layout.word_layout.word
+      src_dtype:
+      tgt_dtype:
       description: целевое слово с пульта телефона → раскладка (word_source=signal_2, латчится)
     - source: phone.phone_camera.signal_1
       target: layout.word_layout.return_trigger
+      src_dtype:
+      tgt_dtype:
       description: сигнал «вернуть всё на ленту» (кнопка телефона) → возврат выложенных букв + сброс
   displays:
     - node_id: draw.overlay_draw.frame
@@ -530,6 +562,8 @@ blueprint:
         - 600.0
         - 410.0
     locked_nodes: []
+    name: default
+    description: ''
 displays:
   - id: main
     name: Кадр + круги + линия
@@ -598,3 +632,4 @@ displays:
 created_at: ''
 active_services: []
 display_bindings: []
+gui_positions: {}

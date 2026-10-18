@@ -1,4 +1,5 @@
 """DisplaySlot — один слот отображения кадра в ImagePanel."""
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
@@ -20,6 +21,10 @@ class DisplaySlot(QWidget):
         # Подпись слота (опционально)
         self._label_text = label
 
+        # Исходный (не уменьшенный) кадр: ресайз масштабирует из него,
+        # а не из уже уменьшенной копии в QLabel — иначе качество деградирует
+        self._source_pixmap: QPixmap | None = None
+
         # QLabel — область отображения кадра
         placeholder = label if label else "Нет сигнала"
         self._label = QLabel(placeholder)
@@ -38,7 +43,19 @@ class DisplaySlot(QWidget):
 
     def update_pixmap(self, pixmap: QPixmap) -> None:
         """Установить pixmap с масштабированием, сохраняя пропорции."""
-        scaled = pixmap.scaled(
+        if pixmap.isNull():
+            # Пустой кадр — не «оставить прежний на экране без привязки к исходнику», а «нет сигнала».
+            self.clear()
+            return
+        self._source_pixmap = pixmap
+        self._show_scaled()
+
+    def _show_scaled(self) -> None:
+        """Показать исходный pixmap, масштабированный под текущий размер QLabel."""
+        source = self._source_pixmap
+        if source is None or source.isNull():
+            return
+        scaled = source.scaled(
             self._label.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
@@ -47,6 +64,7 @@ class DisplaySlot(QWidget):
 
     def set_placeholder(self, text: str) -> None:
         """Показать текст-placeholder вместо изображения."""
+        self._source_pixmap = None
         self._label.clear()
         self._label.setText(text)
 
@@ -56,13 +74,6 @@ class DisplaySlot(QWidget):
         self.set_placeholder(placeholder)
 
     def resizeEvent(self, event) -> None:
-        """При изменении размера — перемасштабировать текущий pixmap."""
+        """При изменении размера — перемасштабировать исходный pixmap."""
         super().resizeEvent(event)
-        pixmap = self._label.pixmap()
-        if pixmap and not pixmap.isNull():
-            scaled = pixmap.scaled(
-                self._label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._label.setPixmap(scaled)
+        self._show_scaled()

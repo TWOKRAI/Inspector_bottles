@@ -25,6 +25,7 @@ INFO_MAX_BUFFER_SIZE = 64
 MAX_DEVICE_NUM = 256
 MAX_BCR_CODE_LEN_EX = 4096
 MAX_BCR_COUNT_EX = 300
+MAX_XML_SYMBOLIC_NUM = 64
 
 
 class GIGE_DEVICE_INFO(C.Structure):
@@ -106,6 +107,40 @@ class DEVICE_INFO_LIST(C.Structure):
     _fields_ = [
         ("nDeviceNum", C.c_uint),
         ("pDeviceInfo", C.POINTER(DEVICE_INFO) * MAX_DEVICE_NUM),
+    ]
+
+
+class ENUMVALUE(C.Structure):
+    """MV_CODEREADER_ENUMVALUE — 280 байт (``MvCodeReaderParams.h``:382–388)."""
+
+    _fields_ = [
+        ("nCurValue", C.c_uint),
+        ("nSupportedNum", C.c_uint),
+        ("nSupportValue", C.c_uint * MAX_XML_SYMBOLIC_NUM),
+        ("nReserved", C.c_uint * 4),
+    ]
+
+
+class INTVALUE_EX(C.Structure):
+    """MV_CODEREADER_INTVALUE_EX — 96 байт (401–408). Не ``INTVALUE`` (391–398): ``GetIntValue`` принимает ``_EX``."""
+
+    _fields_ = [
+        ("nCurValue", C.c_int64),
+        ("nMax", C.c_int64),
+        ("nMin", C.c_int64),
+        ("nInc", C.c_int64),
+        ("nReserved", C.c_uint * 16),
+    ]
+
+
+class FLOATVALUE(C.Structure):
+    """MV_CODEREADER_FLOATVALUE — 28 байт (411–417). Порядок полей: cur, max, min."""
+
+    _fields_ = [
+        ("fCurValue", C.c_float),
+        ("fMax", C.c_float),
+        ("fMin", C.c_float),
+        ("nReserved", C.c_uint * 4),
     ]
 
 
