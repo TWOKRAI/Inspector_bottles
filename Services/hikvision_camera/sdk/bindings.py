@@ -561,17 +561,25 @@ class MvCamera:
         """Зарегистрировать колбэк исключений устройства (MvCameraControl.h:1362).
 
         Args:
-            cbException: объект ``EXCEPTION_CALLBACK`` (``None`` -- снять колбэк).
+            cbException: объект ``EXCEPTION_CALLBACK``; ``None`` -- снять колбэк
+                (в DLL уходит NULL-указатель ``EXCEPTION_CALLBACK()``).
             pUser: пользовательский указатель (``c_void_p`` или ``None``).
 
         Ссылка на колбэк хранится в ``self._exception_cb``: иначе GC освободит
-        ctypes-thunk, и SDK вызовет его -- падение процесса.
+        ctypes-thunk, и SDK вызовет его -- падение процесса. Прежняя ссылка живёт,
+        пока вызов не вернул 0: при ошибке SDK по-прежнему держит прежний колбэк.
+        Новый колбэк на время вызова удерживается локальной переменной (он может
+        сработать до возврата).
         """
         dll = _require_dll()
         dll.MV_CC_RegisterExceptionCallBack.argtypes = (c_void_p, EXCEPTION_CALLBACK, c_void_p)
         dll.MV_CC_RegisterExceptionCallBack.restype = c_uint
-        self._exception_cb = cbException  # до вызова: колбэк может сработать сразу
-        return dll.MV_CC_RegisterExceptionCallBack(self.handle, cbException, pUser)
+        # from_param не принимает None: снятие колбэка -- это NULL-указатель на функцию
+        callback = EXCEPTION_CALLBACK() if cbException is None else cbException
+        rc = dll.MV_CC_RegisterExceptionCallBack(self.handle, callback, pUser)
+        if rc == 0:
+            self._exception_cb = cbException
+        return rc
 
     def MV_CC_GetOptimalPacketSize(self) -> int:
         """Получить оптимальный размер сетевого пакета (только GigE).

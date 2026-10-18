@@ -213,17 +213,93 @@ def test_register_exception_callback_keeps_reference_and_passes_it(dll):
     assert args[0] is cam.handle
     assert args[1] is cb
     assert args[2] is None
-    # GC-ловушка: пока жив MvCamera, колбэк жив
-    assert cam._exception_cb is cb
 
 
-def test_register_exception_callback_replaces_kept_reference(dll):
-    cam = MvCamera()
-    first = EXCEPTION_CALLBACK(lambda m, u: None)
-    second = EXCEPTION_CALLBACK(lambda m, u: None)
-    cam.MV_CC_RegisterExceptionCallBack(first)
-    cam.MV_CC_RegisterExceptionCallBack(second)
-    assert cam._exception_cb is second
+def test_register_exception_callback_replaces_kept_reference():
+    with patch.object(bindings, "_MvCamCtrldll", FakeDll(ret=0)):
+        cam = MvCamera()
+        first = EXCEPTION_CALLBACK(lambda m, u: None)
+        second = EXCEPTION_CALLBACK(lambda m, u: None)
+        assert cam.MV_CC_RegisterExceptionCallBack(first) == 0
+        assert cam._exception_cb is first  # GC-ловушка: пока жив MvCamera и rc == 0, колбэк жив
+        assert cam.MV_CC_RegisterExceptionCallBack(second) == 0
+        assert cam._exception_cb is second
+
+
+# --- RegisterExceptionCallBack на НАСТОЯЩЕМ ctypes-объекте (from_param работает) ---
+# Ревью W1a р.1, п.3: register(cb); register(None) -> ArgumentError, а ссылка уже стёрта.
+_RegisterProto = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(
+    c_uint, ctypes.c_void_p, EXCEPTION_CALLBACK, ctypes.c_void_p
+)
+
+
+class RealCtypesDll:
+    """Фейковая DLL, у которой RegisterExceptionCallBack -- настоящий ctypes-указатель на функцию."""
+
+    def __init__(self, on_call) -> None:
+        self.calls: list[EXCEPTION_CALLBACK] = []
+
+        def impl(handle, cb, user):
+            self.calls.append(cb)
+            return on_call(cb)
+
+        self.MV_CC_RegisterExceptionCallBack = _RegisterProto(impl)  # держим thunk
+
+
+def test_register_none_passes_null_callback_without_argument_error():
+    fake = RealCtypesDll(lambda cb: 0)
+    with patch.object(bindings, "_MvCamCtrldll", fake):
+        cam = MvCamera()
+        first = EXCEPTION_CALLBACK(lambda m, u: None)
+        assert cam.MV_CC_RegisterExceptionCallBack(first) == 0
+        assert cam.MV_CC_RegisterExceptionCallBack(None) == 0  # раньше: ctypes.ArgumentError
+    # ctypes отдаёт в Python-реализацию новый объект-обёртку: сравниваем адреса
+    assert ctypes.cast(fake.calls[0], ctypes.c_void_p).value == ctypes.cast(first, ctypes.c_void_p).value
+    assert ctypes.cast(fake.calls[1], ctypes.c_void_p).value is None  # NULL-указатель на функцию
+    assert cam._exception_cb is None  # SDK колбэк больше не держит
+
+
+def test_old_callback_held_until_call_returned():
+    cam_box = []
+    held_during_call = []
+
+    def on_call(cb):
+        held_during_call.append(cam_box[0]._exception_cb)
+        return 0
+
+    fake = RealCtypesDll(on_call)
+    with patch.object(bindings, "_MvCamCtrldll", fake):
+        cam = MvCamera()
+        cam_box.append(cam)
+        first = EXCEPTION_CALLBACK(lambda m, u: None)
+        second = EXCEPTION_CALLBACK(lambda m, u: None)
+        cam.MV_CC_RegisterExceptionCallBack(first)
+        cam.MV_CC_RegisterExceptionCallBack(second)
+        cam.MV_CC_RegisterExceptionCallBack(None)
+    assert held_during_call == [None, first, second]  # внутри вызова держится прежний
+    assert cam._exception_cb is None
+
+
+@pytest.mark.parametrize("second_arg", ["new_callback", "none"])
+def test_old_callback_kept_when_register_fails(second_arg):
+    results = iter([0, 0x80000106])
+    fake = RealCtypesDll(lambda cb: next(results))
+    with patch.object(bindings, "_MvCamCtrldll", fake):
+        cam = MvCamera()
+        first = EXCEPTION_CALLBACK(lambda m, u: None)
+        assert cam.MV_CC_RegisterExceptionCallBack(first) == 0
+        second = EXCEPTION_CALLBACK(lambda m, u: None) if second_arg == "new_callback" else None
+        rc = cam.MV_CC_RegisterExceptionCallBack(second)
+    assert rc == 0x80000106
+    assert cam._exception_cb is first  # SDK по-прежнему держит first
+
+
+def test_first_registration_failure_holds_nothing():
+    fake = RealCtypesDll(lambda cb: 0x80000106)
+    with patch.object(bindings, "_MvCamCtrldll", fake):
+        cam = MvCamera()
+        cam.MV_CC_RegisterExceptionCallBack(EXCEPTION_CALLBACK(lambda m, u: None))
+    assert cam._exception_cb is None
 
 
 # --- структуры и константы (заголовок CameraParams.h) ---------------------------
