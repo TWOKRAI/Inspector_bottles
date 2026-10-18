@@ -1,5 +1,7 @@
 # План: Калибровка камера↔робот (Часть 2) — px → реальные мм робота
 
+> **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** рецепт `camera_robot_calibration.yaml` переводится на `hikvision` ядра — Task 4.3 (`device_select`/`device_serial`, `frame_rate` вместо `camera_index`/`fps`); вкладка камеры — Task 4.4.
+
 > **2026-09-27, связь с [`robot-protocol-v2`](robot-protocol-v2/plan.md) ред. 2:** калибровка читает `robot_get_telemetry` — драйвер v2 обязан отдавать тот же набор полей (T5.1 плана v2). Часть 2 на железе — после Ф7 v2; калибровка камеры войдёт в виджет `robot.calibration` (Ф6).
 
 > Slug: `camera-robot-calibration`. Ветка: `feat/camera-robot-calibration`.

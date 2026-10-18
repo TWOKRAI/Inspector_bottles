@@ -1,5 +1,7 @@
 # План: Сбор датасета (детекция круга + crop) и hand-eye калибровка камера↔робот
 
+> **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** рецепт `dataset_circle_capture.yaml` переводится на `hikvision` ядра — Task 4.3 (`device_select`/`device_serial`, `frame_rate` вместо `camera_index`/`fps`); вкладка камеры — Task 4.4.
+
 > Slug при реализации: `dataset-circle-capture` (Часть 1) и `camera-robot-calibration` (Часть 2).
 > Это два независимых модуля в одном файле. **Часть 1 не зависит от Части 2** — датасет можно собирать в пикселях сразу, калибровка обогащает систему позже (px→мм робота для будущего пикинга и точного размера crop в мм).
 > Dual-save после approve: `plans/dataset-circle-capture.md` и `plans/camera-robot-calibration.md`.

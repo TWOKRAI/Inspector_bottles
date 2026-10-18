@@ -1,5 +1,7 @@
 # План: MvCodeReader SDK в `Services/code_reader` — кадр + коды + качество
 
+> **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** продолжение: `code_reader_sdk` переезжает на ядро `Services/camera_device` (Task 3.1–3.4 того плана); этот план — история.
+
 **Родитель:** [`qr-code-reader.md`](qr-code-reader.md), трек B (Ф6 — новая фаза, вынесена в
 отдельный файл: родительский план 88 КБ). Ветка `feat/qr-code-reader`.
 **Решение владельца 2026-09-29:** SDK — слоями внутри `Services/code_reader/` (вариант «а»), не

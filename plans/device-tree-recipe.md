@@ -1,5 +1,7 @@
 # План: device-tree-recipe — колонка устройств в сервисах (master-detail) + рецепт как источник истины
 
+> **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** хаб камерой не владеет — реестр + зеркало владельца (`CameraMirrorDriver`, kind `camera`), Task 4.6a–4.6c; hikvision-секцию master-detail Фазы E делать после Task 4.6b на командах `camera_*`.
+
 > **2026-09-27, связь с [`robot-protocol-v2`](robot-protocol-v2/plan.md) ред. 2:** данные робота v2 (параметры, точки, СК, программы) живут в `data/robot/<device_id>/` (`RobotDataStore`, T5.2), а не в `devices.yaml`, — от решения О-7 об этом файле не зависят. Реестр устройств остаётся источником `protocol` (выбор драйвера v1/v2).
 
 **Slug:** `device-tree-recipe` • **Ветка:** `feat/robot-vfd-services` (продолжение device-hub)
