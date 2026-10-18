@@ -47,6 +47,7 @@ from __future__ import annotations
 import itertools
 import math
 import threading
+import weakref
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -144,6 +145,14 @@ def _next_thread_k() -> int:
     """Следующий номер потока; замок — чтобы гарантия не зависела от атомарности ``next()`` в сборке CPython."""
     with _THREAD_SEQ_LOCK:
         return next(_THREAD_SEQ)
+
+
+def _close_own_scope(scope: IScope) -> None:
+    """Страховка автономного драйвера: корень, оставшийся открытым после сборки драйвера, закрывается."""
+    try:
+        scope.close()
+    except Exception as exc:
+        logger.warning(f"корень {scope.path!r} при сборке драйвера не закрыт: {type(exc).__name__}: {exc}")
 
 
 def _coord(args: Mapping[str, Any], key: str, default: float | None = None) -> float:
@@ -303,6 +312,7 @@ class RobotDriverV2(BaseDeviceDriver):
         self._shutdown = False
         self._stop_level = 0  # сильнейший уровень стопа программы с последнего connect()
         self._own_scope: IScope | None = None  # корень автономного драйвера (spawn is None)
+        self._own_finalizer: weakref.finalize | None = None  # закрывает корень, если драйвер собран без disconnect
         self._spawn: Callable[..., IHandle] = spawn if spawn is not None else self._spawn_own
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
 
@@ -506,6 +516,9 @@ class RobotDriverV2(BaseDeviceDriver):
         self._last_quality = "bad"
         with self._flags_lock:
             scope, self._own_scope = self._own_scope, None
+            finalizer, self._own_finalizer = self._own_finalizer, None
+        if finalizer is not None:
+            finalizer.detach()
         if scope is not None:  # автономный драйвер: корень закрывается вместе с отключением
             report = scope.close()
             if report.survivors:
@@ -583,7 +596,13 @@ class RobotDriverV2(BaseDeviceDriver):
         """``spawn`` автономного драйвера: свой корень открывается при первом потоке, закрывается в ``disconnect``."""
         with self._flags_lock:
             if self._own_scope is None or self._own_scope.closed:
+                if self._own_finalizer is not None:
+                    self._own_finalizer.detach()
                 self._own_scope = open_scope(f"rv2-{self.entry.id}", budget_s=_PROGRAM_JOIN_S + _LEASE_JOIN_S)
+                # Потоки области держат драйвер (target ссылается на self): собран он может быть только без потоков,
+                # поэтому закрытие при сборке мгновенное. Колбэк не ссылается на self.
+                self._own_finalizer = weakref.finalize(self, _close_own_scope, self._own_scope)
+                self._own_finalizer.atexit = False
             scope = self._own_scope
         return scope.spawn(target, name=name)  # корень закрыт disconnect между выдачей и spawn -> ScopeClosedError
 

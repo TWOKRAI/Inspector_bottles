@@ -526,9 +526,14 @@ def test_s10_manager_shutdown_logs_disconnect_failure_and_continues(caplog: pyte
 # --------------------------------------------------------------------------------------------------
 
 
-def test_s11_phase1_hard_stops_long_single_move_within_window(tmp_path: Path) -> None:
-    program = Program(name="slow", steps=(Move(point="b", kind="JOINT"),))
-    points = {"b": Point(name="b", x=300, y=-210, z=-40, rz=-100, hand=1)}
+def test_s11_phase1_hard_stops_long_move_within_window(tmp_path: Path) -> None:
+    # Одиночная запись сценария sim исполняет мгновенно (done за 0.03 с, замер автора); при P_SPD_J=4 каждая нога
+    # из двух ~3.1 с (замер на E2eRig): SOFT посреди ноги ждал бы её конца и вышел бы за окно 3.0 с
+    program = Program(name="slow", steps=(Move(point="a", kind="JOINT"), Move(point="b", kind="JOINT")))
+    points = {
+        "a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1),
+        "b": Point(name="b", x=300, y=-210, z=-40, rz=-100, hand=1),
+    }
     plugin = ctx = None
     try:
         with E2eRig() as rig:
