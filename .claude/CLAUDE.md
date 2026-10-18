@@ -116,7 +116,7 @@ Roles, hooks, git, engine limits: `docs/claude/LEAD_RULES.md` → «Team mode».
 - Address = agentId, never the name; keep an `agentId` table in the handoff.
 - Developer: one per track; review fixes go to the author before its handoff; set the handoff threshold (~150k) after the review nits close.
 - Re-summon for review fixes and round 2 (≤ 10 calls); a whole next subtask on the same agent is provisional.
-- Reviewer round 2: re-summon the round-1 reviewer by agentId.
+- Reviewer round 2: re-summon the round-1 reviewer by agentId. Exception (owner, 2026-10-18): any agent of any role and model whose spend has grown large (soft mark ~400–500k tokens; 200–400k is normal for an Opus reviewer) — the lead decides alone, no coordinator signal: a fresh agent briefed with the previous report file and the diff since, or a narrower scope.
 - Tester and round-1 reviewer stay fresh relative to the code.
 - No standing "expert" agent: write `docs/maps/<subsystem>.md`. Anyone re-summoned after a spec change gets the spec SHA and an order to re-read the section.
 - The live stand stays mandatory before merge.
