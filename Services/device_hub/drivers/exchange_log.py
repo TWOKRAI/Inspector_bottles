@@ -45,6 +45,11 @@ from Services.robot_comm.core.protocol_v2 import ERR_TEXT, OP, REG, REG_COUNT
 
 __all__ = ["ExchangeLog", "ExchangeLogTransport"]
 
+# Постоянные тексты отказов (R8: без входных значений); их отдают операции драйвера
+TEXT_BAD_KNOBS = "журнал обмена: ручки enabled, periodic и clear принимают только true или false"
+TEXT_BAD_GET_ARGS = "exchange_log_get: since_seq и limit — целые числа, since_seq >= 0, limit >= 1"
+TEXT_BAD_CONFIG = "журнал обмена: params.exchange_log — таблица enabled/periodic (bool), взяты умолчания"
+
 # --- Карта адресов и операций ------------------------------------------------------------------------------
 
 #: Адрес -> имя. Блок из ``REG_COUNT`` раскрыт по словам: ``CMD_ARGS[0]`` .. ``CMD_ARGS[11]``.
@@ -202,9 +207,11 @@ class ExchangeLog:
         enabled: bool = True,
         periodic: bool = False,
     ) -> None:
+        if not isinstance(enabled, bool) or not isinstance(periodic, bool):
+            raise ValueError(TEXT_BAD_KNOBS)
         self._clock = clock
-        self._enabled = bool(enabled)
-        self._periodic = bool(periodic)
+        self._enabled = enabled
+        self._periodic = periodic
         self._lock = threading.Lock()
         self._ring: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._seq = 0  # последний выданный seq
@@ -235,7 +242,13 @@ class ExchangeLog:
     def set(
         self, enabled: bool | None = None, periodic: bool | None = None, clear: bool | None = None
     ) -> dict[str, Any]:
-        """Применить ручки (``None`` — не менять) и вернуть состояние без ``lines``."""
+        """Применить ручки (``None`` — не менять) и вернуть состояние без ``lines``.
+
+        Raises:
+            ValueError: ручка не ``bool`` и не ``None`` (строка ``"false"`` не приводится); ничего не изменено.
+        """
+        if any(v is not None and not isinstance(v, bool) for v in (enabled, periodic, clear)):
+            raise ValueError(TEXT_BAD_KNOBS)
         with self._lock:
             tail_msg = None
             if clear:
@@ -246,9 +259,9 @@ class ExchangeLog:
             if enabled is not None:
                 if self._enabled and not enabled:
                     tail_msg = tail_msg or self._close_tail_locked()
-                self._enabled = bool(enabled)
+                self._enabled = enabled
             if periodic is not None:
-                self._periodic = bool(periodic)
+                self._periodic = periodic
             state = self._state_locked(0)
         self._emit([tail_msg] if tail_msg else [])
         return state
@@ -296,6 +309,8 @@ class ExchangeLog:
                 self._note_failure(exc)
             msgs: list[str] = []
             with self._lock:
+                if not self._enabled:  # вызов начался до set(enabled=False): не пишем и не считаем
+                    return
                 if op is not None:
                     self._count_locked(op, ms, failed)
                 if entries:

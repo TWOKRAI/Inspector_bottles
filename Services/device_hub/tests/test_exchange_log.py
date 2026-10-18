@@ -502,3 +502,153 @@ def test_driver_wraps_injected_transport_so_its_calls_reach_the_journal() -> Non
         ("link", "connect ok"),
         ("", "R TLM_PROTO_VER..+32"),
     ]
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью р.1: t по seq без счёта чтений часов; kind-ошибка; разбор аргументов и ручек; вызов в полёте
+# --------------------------------------------------------------------------------------------------
+
+
+def test_time_is_monotonic_by_seq_when_one_call_is_held_in_the_formatter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Поток A застрял в форматтере (вне замка), поток B проходит вызов целиком: ``t`` растёт вместе с ``seq``.
+
+    Не считает чтения часов: ловит ``t`` из чтения конца вызова (вне замка), которое убывает по ``seq``.
+    """
+    entered, gate = threading.Event(), threading.Event()
+    real = exchange_log._tx_entries
+    calls: list[int] = []
+
+    def held(ops: Any, failed: bool, exc: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:  # первый вызов — поток A
+            entered.set()
+            assert gate.wait(_DEADLINE_S), "форматтер не дождался освобождения"
+        return real(ops, failed, exc)
+
+    monkeypatch.setattr(exchange_log, "_tx_entries", held)
+    log = ExchangeLog("held", periodic=True)
+    tr = ExchangeLogTransport(_Fake(), log)
+    a = _run(lambda: tr.transaction([("w", _CMD_SEQ, 1)]))
+    try:
+        assert entered.wait(_DEADLINE_S), "поток A не дошёл до форматтера"
+        _bounded(lambda: tr.transaction([("w", _CMD_SEQ, 2)]))
+    finally:
+        gate.set()
+        _join(a)
+    lines = _bounded(log.get)["lines"]
+    assert [ln["text"] for ln in lines] == ["W CMD_SEQ = 2", "W CMD_SEQ = 1"]
+    assert lines[0]["t"] < lines[1]["t"], [(ln["seq"], ln["t"]) for ln in lines]
+
+
+@pytest.mark.parametrize("command", ["cmd_robot_exchange_log_get", "cmd_robot_exchange_log_set"])
+def test_plugin_non_robot_device_gives_kind_error_text(tmp_path: Any, command: str) -> None:
+    """Устройство не-робот -> ошибка именно по kind (текст «ожидается 'robot'»), а не «драйвер не создан»."""
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+    from Plugins.hub.device_hub.tests.conftest import make_ctx
+
+    registry_file = tmp_path / "devices.yaml"
+    ctx = make_ctx({"registry_path": str(registry_file)}, tmp_registry=registry_file)
+    plugin = DeviceHubPlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    try:
+        res = plugin.cmd_device_upsert(
+            {"id": "vfd_1", "name": "V1", "kind": "vfd", "transport": {"type": "bridge", "bridge": "rv2"}}
+        )
+        assert res["status"] == "ok", res
+        out = _bounded(lambda: getattr(plugin, command)({"device_id": "vfd_1"}))
+        assert out["status"] == "error"
+        assert "ожидается 'robot'" in out["message"], out
+    finally:
+        _bounded(lambda: plugin.shutdown(ctx))
+
+
+def _driver(**params: Any) -> Any:
+    from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+    from Services.device_hub.registry.entry import DeviceEntry
+    from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+
+    entry = DeviceEntry(
+        id="rv2",
+        name="rv2",
+        kind="robot",
+        protocol="delta_v2",
+        transport={"type": "tcp", "host": "127.0.0.1", "port": 1, "unit_id": ROBOT_UNIT_ID},
+        params=params,
+    )
+    return RobotDriverV2(entry, None, transport=_Fake())
+
+
+@pytest.mark.parametrize(
+    "args",
+    [{"since_seq": "abc"}, {"since_seq": -1}, {"since_seq": True}, {"limit": 0}, {"limit": 1.5}, {"limit": None}],
+)
+def test_op_get_bad_args_give_constant_error_and_no_tx_err(args: dict) -> None:
+    drv = _driver()
+    before = drv.stats["tx_err"]
+    out = _bounded(lambda: drv.call("exchange_log_get", dict(args)))
+    assert out == {"status": "error", "message": exchange_log.TEXT_BAD_GET_ARGS}
+    assert drv.stats["tx_err"] == before
+
+
+@pytest.mark.parametrize("args", [{"enabled": "false"}, {"periodic": 1}, {"clear": "false"}, {"enabled": 0}])
+def test_op_set_non_bool_knobs_give_constant_error_and_change_nothing(args: dict) -> None:
+    drv = _driver(exchange_log={"periodic": True})
+    _bounded(lambda: drv.transport.connect())  # одна строка в кольце
+    before = _bounded(lambda: drv.call("exchange_log_get", {}))
+    before_tx_err = drv.stats["tx_err"]
+    out = _bounded(lambda: drv.call("exchange_log_set", dict(args)))
+    assert out == {"status": "error", "message": exchange_log.TEXT_BAD_KNOBS}
+    after = _bounded(lambda: drv.call("exchange_log_get", {}))
+    assert (after["enabled"], after["periodic"], after["lines"]) == (
+        before["enabled"],
+        before["periodic"],
+        before["lines"],
+    )
+    assert len(after["lines"]) == 1
+    assert drv.stats["tx_err"] == before_tx_err
+
+
+def test_log_rejects_string_knobs_in_constructor_and_set() -> None:
+    with pytest.raises(ValueError):
+        ExchangeLog("k", enabled="false")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        ExchangeLog("k", periodic=1)  # type: ignore[arg-type]
+    log = ExchangeLog("k")
+    for knob in ("enabled", "periodic", "clear"):
+        with pytest.raises(ValueError):
+            log.set(**{knob: "false"})  # type: ignore[arg-type]
+    state = log.get()
+    assert (state["enabled"], state["periodic"]) == (True, False)
+
+
+@pytest.mark.parametrize("bad", [True, "x", 5, {"enabled": "false"}, {"periodic": 1}])
+def test_driver_with_bad_exchange_log_params_is_created_with_defaults_and_warns(bad: Any) -> None:
+    handler = _Collector()
+    logger = logging.getLogger("mpf.Services.device_hub.drivers.base")
+    logger.addHandler(handler)
+    try:
+        drv = _driver(exchange_log=bad)
+    finally:
+        logger.removeHandler(handler)
+    state = _bounded(lambda: drv.call("exchange_log_get", {}))
+    assert (state["enabled"], state["periodic"]) == (True, False)
+    warnings = [r.getMessage() for r in handler.records if r.levelno == logging.WARNING]
+    assert any(exchange_log.TEXT_BAD_CONFIG in m for m in warnings), warnings
+
+
+def test_call_started_before_disable_writes_nothing_after_it() -> None:
+    """Чтение заблокировано в фейке, ``set(enabled=False)``, чтение вернулось: ни строки, ни счётчика."""
+    fake = _Fake()
+    fake.read_gate = threading.Event()
+    log = ExchangeLog("inflight", periodic=True)
+    tr = ExchangeLogTransport(fake, log)
+    reader = _run(lambda: tr.read_registers(_TLM, 32))
+    try:
+        assert fake.read_entered.wait(_DEADLINE_S), "чтение не дошло до фейка"
+        assert _bounded(lambda: log.set(enabled=False))["enabled"] is False
+    finally:
+        fake.read_gate.set()
+        _join(reader)
+    state = _bounded(log.get)
+    assert (state["lines"], state["counters"], state["last_seq"]) == ([], {}, 0)
