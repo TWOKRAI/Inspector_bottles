@@ -2,8 +2,8 @@
 
 - **Slug:** camera-device-service
 - **Дата:** 2026-10-18
-- **Статус:** DRAFT
-- **Plan review:** CHANGES 2 (`docs/reviews/2026-10-18_camera-plan-review.md`, раунд 2 — 4 блокера W1a, только текст 0.2/0.3/0.4; 3-я итерация — `cto`)
+- **Статус:** ACTIVE (одобрен 2026-10-18 после вердикта `cto` по W1a; в работе W1a = 0.2 ∥ 0.3, затем 0.4)
+- **Plan review:** CHANGES 1 -> CHANGES 2 -> **APPROVED** (`cto`, 3-я итерация, W1a, SHA `01f9d3229`; `docs/reviews/2026-10-18_camera-plan-review.md` → «Раунд 3»)
 - **Ветка:** `feat/camera-device-service` — создаёт лидер ДО `docs(plans):` коммита плана.
 
 ## Что где живёт

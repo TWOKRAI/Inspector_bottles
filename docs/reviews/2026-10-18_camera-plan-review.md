@@ -461,3 +461,11 @@ EXIT=0
 - Принять W1a-1…W1a-4 и пп. 5–12; по W1a-4 — рекомендованный вариант (`fps` как запасной ключ `frame_rate`, `ExposureAuto`/`GainAuto` = Off перед записью).
 - Правки текста 0.2/0.3/0.4 вносит лидер (держатель spec); правка — в новой сессии полосы К (граница контекста ~100k).
 - Цикл ревью плана исчерпал 2 итерации: вердикт по исправленным 0.2/0.3/0.4 — 3-я итерация, `cto` (Fable), узкий объём, фиксированный SHA (`wave-protocol.md`, «Эскалация»).
+
+## Раунд 3 (2026-10-18) — `cto`, 3-я итерация, только W1a
+
+- **Вердикт:** **APPROVED** для W1a (тексты 0.2/0.3/0.4 на SHA `01f9d3229`). `cto` (Fable), 124k токенов, 24 вызова.
+- **Воспроизведение** (через `machine_gate.sh light|medium inspector-bottles-53`): `sizeof MVCC_ENUMENTRY = 84`, `sizeof MVCC_INTVALUE_EX = 96` (поля из `tasks/0.3.md` шаг 3, сверены с `CameraParams.h:952-959`, `:974-983`); экспорты DLL — нет только `MV_CC_Initialize`/`MV_CC_Finalize`, SDK `0x4020003`; `pytest Services/hikvision_camera/tests -q` -> `111 passed`; `git grep -i exposure|gain|frame_rate` по 4 рецептам `hikvision` -> пусто.
+- W1a-1…W1a-4 и пп. 5–12 закрыты (`tasks/0.2.md:17-23`, `:33-36`; `tasks/0.3.md:17-19`, `:30-33`; `tasks/0.4.md:9`, `:19-21`, `:27`, `:32-35`; `recording-schema.md`; `tasks/1.5.md:20`).
+- **Не блокеры, переданы исполнителям брифом:** опись — `getattr(_MvCamCtrldll, name, None)` (`_load_sdk_library` пути не возвращает, `bindings.py:42-60`); колбэк исключений `WINFUNCTYPE(None, c_uint, c_void_p)` (`MvCameraControl.h:1362`); закрывающая скобка `MVCC_INTVALUE_EX` — `:983`; выбор камеры `--serial|--ip` через `MV_CC_EnumDevices`; порядок `StopGrabbing` -> возврат, код выхода H5 при совпавшем возврате — 0; `param_errors` и в ветке `{"status": "error"}` ответа `get_parameters`; тест 0.3 на имена полей структур (`feedback_ctypes_setattr_unknown_field_is_silent`).
+- **Не проверено:** поведение прибора (`0x80000106` на `Width` при захвате, `ExposureTime` при `ExposureAuto ≠ Off`) — 0.5.
