@@ -16,6 +16,7 @@
 | Решения Р1–Р14, слои, ADR | [`decisions.md`](decisions.md) |
 | Точки коммита, порядок с T5.3, дефекты хаба, риски, открытое | [`design.md`](design.md) |
 | Сводная таблица задач, советы 1–15, связи с соседями | [`matrix.md`](matrix.md) |
+| Схема записи дерева узлов (зонд 0.4, фейк 1.5) | [`recording-schema.md`](recording-schema.md) |
 | Изменения после approve | [`amendments.md`](amendments.md) |
 
 ## Контекст
