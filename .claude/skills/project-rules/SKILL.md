@@ -58,6 +58,14 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
   concurrency, IPC. A haiku brief has numbered steps and exact anchors, stays under ~100K context, uses
   effort >= medium, and its report pastes the command output. Any agent with the Agent tool may hand
   such a sub-step to `junior`, `Explore` or `model: "haiku"`.
+- **Opus and Fable reason; helpers fetch** (owner, 2026-10-18). An Opus/Fable agent (reviewer, cto,
+  investigator, teamlead) **must** hand routine to a helper when it would take > ~5 tool calls or bulky
+  output: a log inventory of the run before any live-defect verdict (every directory, every incarnation),
+  callers/occurrences across the tree, test and matrix runs → Haiku; a repro script draft or routine code
+  → Sonnet. A one-off grep or reading 2–3 files stays with you (a helper start costs ~50k context); try
+  Grep / qex / sentrux before a helper. The helper's output is a map, not evidence: you read the decisive
+  lines and run the reproduction yourself before a verdict. Helpers run `run_in_background: false`, stay
+  inside your FILES and boundaries, never commit; a reviewer's helper never fixes code.
 - **Brief = form** (DESIGN / FILES / REDS): first edit within 5 tool calls, never re-derive DESIGN,
   a file outside FILES → stop and ask. Apply every instruction to every listed file; targeted edits,
   not whole-file rewrites. A pre-existing bug is a report line, not a change.
