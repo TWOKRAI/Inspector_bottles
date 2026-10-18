@@ -10,7 +10,10 @@
   --experiment h1|h2|h5      H1: запись TriggerMode после StopGrabbing (--delay 0 и 1.0);
                              H2: запись TriggerMode до StartGrabbing, --mode same|split (потоки);
                              H5: запись Width во время захвата (ожидается 0x80000106), затем чтение.
-  --restore <orig.json>      только возврат узлов из файла --orig (после оборванного опыта).
+  --restore <orig.json> --write   только возврат узлов из файла --orig (после оборванного опыта); отказ, если файл не
+                             --orig (states != ["idle"]), узлы вне набора опытов или device.serial чужой.
+
+--orig не перезаписывается: файл уже есть -> отказ (код 1), сначала --restore, затем удалить файл.
 
 Строки опыта (stdout) -- это и есть данные:
   node=<имя> rc=0x........ read=<значение> ms=<мс записи> thread=<поток>
@@ -63,7 +66,7 @@ from Services.hikvision_camera.sdk.structures import (
 )
 
 SCHEMA_VERSION = 1
-THREAD_JOIN_S = 60.0  # потолок ожидания потока опыта H2
+JOIN_MARGIN_S = 30.0  # запас к join потока опыта H2: потолок фазы B = seconds + delay + запас
 
 CURATED_NODES = (
     "TriggerMode", "TriggerSource", "ExposureTime", "ExposureAuto", "Gain", "GainAuto",
@@ -99,6 +102,9 @@ _TYPE_BY_IFT = {
 }
 # AM_Undefined / AM_CycleDetect -- внутренние значения SDK; в схеме их нет, пишем NI (узел недоступен для зонда)
 _ACCESS_BY_AM = {AM_NI: "NI", AM_NA: "NA", AM_WO: "WO", AM_RO: "RO", AM_RW: "RW"}
+
+
+ORIG_EXISTS = "файл --orig уже есть — сначала --restore, затем удалить"
 
 
 class ProbeError(RuntimeError):
@@ -585,10 +591,12 @@ def build_recording(
     }
 
 
-def save_json(path: str, doc: dict) -> None:
+def save_json(path: str, doc: dict, *, exclusive: bool = False) -> None:
+    """Записать JSON; ``exclusive`` -- открыть с "x": существующий файл не затирается (FileExistsError)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with p.open("x" if exclusive else "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
 
 
 def load_recording(path: str) -> dict:
@@ -599,6 +607,19 @@ def load_recording(path: str) -> dict:
     if not isinstance(doc.get("nodes"), dict):
         raise ValueError("нет ключа nodes")
     return doc
+
+
+def check_restore_file(doc: dict, entry: DeviceEntry) -> None:
+    """--restore пишет в камеру: принимает только файл --orig этой камеры (иначе ValueError, ни одной записи)."""
+    if doc.get("states") != ["idle"]:
+        raise ValueError('файл не --orig: states должен быть ["idle"] (файл --dump сюда не годится)')
+    allowed = {node for node, _ in EXPERIMENTS.values()}
+    foreign = sorted(set(doc["nodes"]) - allowed)
+    if foreign or not doc["nodes"]:
+        raise ValueError(f"узлы файла вне набора опытов {sorted(allowed)}: {foreign or 'узлов нет'}")
+    serial = (doc.get("device") or {}).get("serial")
+    if serial != entry.serial:
+        raise ValueError(f"device.serial файла не совпадает с серийником выбранной камеры ({entry.serial})")
 
 
 # ----------------------------------------------------------------------------- камера
@@ -635,8 +656,12 @@ def close_camera(cam: Any) -> None:
     _step("destroy_handle", cam.MV_CC_DestroyHandle)
 
 
-def _run_in_thread(name: str, fn: Any) -> None:
-    """Единственный поток зонда (опыт H2): выполнить fn в потоке name, присоединить, пробросить ошибку."""
+def _run_in_thread(name: str, fn: Any, ceiling: float, cancel: threading.Event) -> None:
+    """Единственный поток зонда (опыт H2): выполнить fn в потоке name, присоединить, пробросить ошибку.
+
+    Не уложился в ``ceiling`` -> ``cancel`` (фазы проверяют его перед каждым вызовом SDK), ещё один join
+    на ``JOIN_MARGIN_S``, затем ProbeError; возврат после этого делает вызывающий (``Session.finish``).
+    """
     errors: list[BaseException] = []
 
     def target() -> None:
@@ -647,9 +672,12 @@ def _run_in_thread(name: str, fn: Any) -> None:
 
     worker = threading.Thread(target=target, name=name, daemon=True)
     worker.start()
-    worker.join(THREAD_JOIN_S)
+    worker.join(ceiling)
     if worker.is_alive():
-        raise ProbeError(f"поток {name} не завершился за {THREAD_JOIN_S:g} с")
+        cancel.set()
+        worker.join(JOIN_MARGIN_S)
+        state = "жив и после отмены" if worker.is_alive() else "остановлен по отмене"
+        raise ProbeError(f"поток {name} не завершился за {ceiling:g} с ({state})")
     if errors:
         raise errors[0]
 
@@ -681,6 +709,7 @@ def run_dump(backend: Any, entry: DeviceEntry, args: argparse.Namespace) -> int:
 
 
 def run_restore(backend: Any, entry: DeviceEntry, recording: dict) -> int:
+    check_restore_file(recording, entry)  # до открытия камеры: отказ без единой записи
     cam = open_camera(backend, entry)
     try:
         return restore_nodes(cam, recording, list(recording["nodes"]))
@@ -700,10 +729,18 @@ class Session:
         self.written: list[str] = []
         self.finished = False
         self.code = 0
+        self.cancel = threading.Event()  # взводится при таймауте потока: фазы не зовут SDK дальше
+        self._lock = threading.Lock()  # finish() из двух потоков идёт строго по очереди
+
+    def _live(self) -> None:
+        if self.cancel.is_set():
+            raise ProbeError("опыт отменён по таймауту потока")
 
     def phase_a(self) -> None:
         print(f"[phase_a thread={_tname()}]", flush=True)
+        self._live()
         self.cam = open_camera(self.backend, self.entry)
+        self._live()
         idle = snapshot(self.cam, [self.node])
         n = idle[self.node]
         print(f"orig node={self.node} value={_show(n['value'])} access={n['access']} rc={_hex(n['rc'])}", flush=True)
@@ -711,10 +748,15 @@ class Session:
         if self.a.write:
             if n["type"] not in ("int", "enum") or n["value"] is None:
                 raise ProbeError(f"узел {self.node} не читается или не того типа: без исходного значения не пишу")
-            save_json(self.a.orig, self.recording)  # ДО первой записи
+            self._live()
+            try:
+                save_json(self.a.orig, self.recording, exclusive=True)  # ДО первой записи, чужой файл не затираем
+            except FileExistsError as exc:
+                raise ProbeError(ORIG_EXISTS) from exc
             print(f"orig saved; вручную (IDMVS): {self.node}={_show(n['value'])}", flush=True)
         if self.stage == "pre_start":
             self.write_experiment()
+        self._live()
         rc = self.cam.MV_CC_StartGrabbing()
         if rc != 0:
             raise ProbeError(f"MV_CC_StartGrabbing rc={_hex(rc)}")
@@ -726,11 +768,13 @@ class Session:
             time.sleep(self.a.seconds)
         if self.stage == "during_grab":
             self.write_experiment()
+        self._live()
         self.stop()
         if self.a.delay:
             time.sleep(self.a.delay)
         if self.stage == "post_stop":
             self.write_experiment()
+        self._live()
         self.finish()
 
     def stop(self) -> None:
@@ -739,6 +783,7 @@ class Session:
             _step("stop_grabbing", self.cam.MV_CC_StopGrabbing)
 
     def write_experiment(self) -> None:
+        self._live()
         name = self.node
         if not self.a.write:
             print(f"skip write node={name} (нет --write)", flush=True)
@@ -754,15 +799,18 @@ class Session:
         print(f"node={name} rc={_hex(rc)} read={_show(back)} ms={ms:.2f} thread={_tname()}", flush=True)
 
     def finish(self) -> int:
-        """Стоп (если идёт захват) -> возврат -> закрыть. Идемпотентно; безопасно вызывать из любого потока."""
-        if self.finished or self.cam is None:
+        """Стоп (если идёт захват) -> возврат -> закрыть. Идемпотентно; из любого потока, по очереди (lock)."""
+        with self._lock:
+            if self.finished or self.cam is None:
+                return self.code
+            self.finished = True
+            try:
+                self.stop()
+                if self.written:
+                    self.code = restore_nodes(self.cam, self.recording, self.written)
+            finally:
+                close_camera(self.cam)  # и при KeyboardInterrupt в возврате
             return self.code
-        self.finished = True
-        self.stop()
-        if self.written:
-            self.code = restore_nodes(self.cam, self.recording, self.written)
-        close_camera(self.cam)
-        return self.code
 
 
 def run_experiment(backend: Any, entry: DeviceEntry, args: argparse.Namespace) -> int:
@@ -770,8 +818,9 @@ def run_experiment(backend: Any, entry: DeviceEntry, args: argparse.Namespace) -
     failure: BaseException | None = None
     try:
         if args.mode == "split":
-            _run_in_thread("A-open", session.phase_a)
-            _run_in_thread("B-capture", session.phase_b)
+            ceiling_b = args.seconds + args.delay + JOIN_MARGIN_S
+            _run_in_thread("A-open", session.phase_a, JOIN_MARGIN_S, session.cancel)
+            _run_in_thread("B-capture", session.phase_b, ceiling_b, session.cancel)
         else:
             session.phase_a()
             session.phase_b()
@@ -827,10 +876,16 @@ def build_parser() -> argparse.ArgumentParser:
 def _validate(a: argparse.Namespace) -> str | None:
     if a.dump and not a.out:
         return "--dump требует --out"
-    if a.write and not (a.experiment and a.orig):
+    if a.restore and not a.write:
+        return "--restore пишет в камеру: нужен --write"
+    if a.restore and a.orig:
+        return "--orig только для --experiment (--restore читает файл, не пишет его)"
+    if a.write and not a.restore and not (a.experiment and a.orig):
         return "--write требует --experiment и --orig (исходные сохраняются до первой записи)"
     if a.orig and not a.write:
         return "--orig имеет смысл только с --write"
+    if a.orig and Path(a.orig).exists():
+        return ORIG_EXISTS
     if a.mode == "split" and a.experiment != "h2":
         return "--mode split только для --experiment h2"
     return None

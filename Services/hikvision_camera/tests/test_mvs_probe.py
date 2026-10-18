@@ -213,7 +213,7 @@ def test_режим_restore_возвращает_из_файла(tmp_path, capsy
     assert run(argv, stuck, capsys)[0] == 2
     # камера осталась в On; новый запуск только возврата тем же файлом
     cam = mvs_probe.FakeMvCamera(values={"TriggerMode": "On"})
-    rc, lines, cam = run(["--restore", str(orig)], cam, capsys)
+    rc, lines, cam = run(["--restore", str(orig), "--write"], cam, capsys)
     assert rc == 0
     assert cam.value("TriggerMode") == "Off"
     assert any(ln.startswith("restore node=TriggerMode rc=0x00000000 read=Off") for ln in lines)
@@ -223,7 +223,7 @@ def test_режим_restore_возвращает_из_файла(tmp_path, capsy
 def test_restore_неизвестная_версия_схемы_текст_без_значения(tmp_path, capsys):
     bad = tmp_path / "o.json"
     bad.write_text(json.dumps({"schema_version": 77, "nodes": {}}), encoding="utf-8")
-    rc, lines, cam = run(["--restore", str(bad)], capsys=capsys)
+    rc, lines, cam = run(["--restore", str(bad), "--write"], capsys=capsys)
     assert rc == 1
     text = "\n".join(lines)
     assert "schema_version" in text
@@ -391,3 +391,182 @@ def test_настоящий_MvCamera_читает_через_зонд_на_фе�
     assert seen == ["MV_XML_GetNodeInterfaceType", "MV_XML_GetNodeAccessMode", "MV_CC_GetIntValueEx"]
     assert (node["type"], node["access"], node["value"]) == ("int", "RW", 2448)
     assert (node["min"], node["max"], node["inc"]) == (64, 4096, 8)
+
+
+# --------------------------------------------------------------------------- правки ревью р.1
+
+H1_WRITE = ["--experiment", "h1", "--write", "--delay", "0", "--seconds", "0"]
+
+
+def sets(cam) -> list[str]:
+    return [n for n in names(cam) if n.startswith("MV_CC_Set")]
+
+
+def test_orig_уже_есть_отказ_и_файл_цел(tmp_path, capsys):  # п.1
+    orig = tmp_path / "o.json"
+    orig.write_text("sentinel", encoding="utf-8")
+    rc, lines, cam = run([*H1_WRITE, "--orig", str(orig)], capsys=capsys)
+    assert rc == 1
+    assert "файл --orig уже есть — сначала --restore, затем удалить" in "\n".join(lines)
+    assert orig.read_text(encoding="utf-8") == "sentinel"
+    assert sets(cam) == []
+    assert "MV_CC_OpenDevice" not in names(cam)
+
+
+def test_повтор_после_расхождения_не_затирает_исходное(tmp_path, capsys):  # п.1, повтор находки ревью
+    orig = tmp_path / "o.json"
+    stuck = mvs_probe.FakeMvCamera(swallow=(("TriggerMode", 0),))
+    assert run([*H1_WRITE, "--orig", str(orig)], stuck, capsys)[0] == 2  # камера осталась в On, orig = Off
+    rc, _, cam = run([*H1_WRITE, "--orig", str(orig)], stuck, capsys)
+    assert rc == 1
+    assert read_json(orig)["nodes"]["TriggerMode"]["idle"]["value"] == "Off"
+
+
+def test_orig_пишется_эксклюзивно(tmp_path):  # п.1, гонка между проверкой и записью
+    path = tmp_path / "o.json"
+    mvs_probe.save_json(str(path), {"a": 1}, exclusive=True)
+    with pytest.raises(FileExistsError):
+        mvs_probe.save_json(str(path), {"a": 2}, exclusive=True)
+    assert read_json(path) == {"a": 1}
+
+
+def _orig_file(tmp_path, capsys, **cam_kw) -> Path:
+    orig = tmp_path / "o.json"
+    assert run([*H1_WRITE, "--orig", str(orig)], mvs_probe.FakeMvCamera(**cam_kw), capsys)[0] == 0
+    return orig
+
+
+def test_restore_без_write_отказ_и_нет_Set(tmp_path, capsys):  # п.2
+    orig = _orig_file(tmp_path, capsys)
+    cam = mvs_probe.FakeMvCamera(values={"TriggerMode": "On"})
+    rc, _, cam = run(["--restore", str(orig)], cam, capsys)
+    assert rc == 1
+    assert sets(cam) == []
+    assert cam.value("TriggerMode") == "On"
+
+
+def test_restore_файла_dump_отказ_и_нет_Set(tmp_path, capsys):  # п.2
+    dump = tmp_path / "d.json"
+    run(["--dump", "--out", str(dump)], capsys=capsys)
+    rc, lines, cam = run(["--restore", str(dump), "--write"], capsys=capsys)
+    assert rc == 1
+    assert "states" in "\n".join(lines)
+    assert sets(cam) == []
+
+
+def test_restore_узлы_вне_набора_опытов_отказ(tmp_path, capsys):  # п.2
+    orig = _orig_file(tmp_path, capsys)
+    doc = read_json(orig)
+    dump = tmp_path / "d.json"
+    run(["--dump", "--out", str(dump)], capsys=capsys)
+    doc["nodes"]["ExposureTime"] = read_json(dump)["nodes"]["ExposureTime"]
+    orig.write_text(json.dumps(doc), encoding="utf-8")
+    rc, lines, cam = run(["--restore", str(orig), "--write"], capsys=capsys)
+    assert rc == 1
+    assert "ExposureTime" in "\n".join(lines)
+    assert sets(cam) == []
+
+
+def test_restore_чужой_серийник_отказ_и_нет_Set(tmp_path, capsys):  # п.2
+    orig = _orig_file(tmp_path, capsys, serial="OTHER0002")
+    assert read_json(orig)["device"]["serial"] == "OTHER0002"
+    cam = mvs_probe.FakeMvCamera(values={"TriggerMode": "On"})  # серийник FAKE0001
+    rc, lines, cam = run(["--restore", str(orig), "--write"], cam, capsys)
+    assert rc == 1
+    assert "serial" in "\n".join(lines)
+    assert sets(cam) == []
+    assert cam.value("TriggerMode") == "On"
+
+
+def test_restore_вместе_с_orig_отказ(tmp_path, capsys):  # п.2, --orig только для опытов
+    orig = _orig_file(tmp_path, capsys)
+    rc, _, cam = run(["--restore", str(orig), "--write", "--orig", str(tmp_path / "x.json")], capsys=capsys)
+    assert rc == 1
+    assert sets(cam) == []
+
+
+def _session(cam, tmp_path, *extra):
+    backend = mvs_probe.FakeBackend(cam)
+    argv = ["--experiment", "h1", "--write", "--orig", str(tmp_path / "o.json"), "--fake", "--seconds", "0", *extra]
+    sess = mvs_probe.Session(backend, backend.enum_devices()[0], mvs_probe.build_parser().parse_args(argv))
+    sess.phase_a()
+    sess.stop()
+    sess.write_experiment()
+    return sess
+
+
+class SlowRestoreCam(mvs_probe.FakeMvCamera):
+    """Вторая запись enum (возврат) медленная; entered взводится при её входе."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.enum_sets = 0
+        self.entered = threading.Event()
+
+    def MV_CC_SetEnumValue(self, strKey, nValue):
+        self.enum_sets += 1
+        if self.enum_sets == 2:
+            self.entered.set()
+            threading.Event().wait(0.3)
+        return super().MV_CC_SetEnumValue(strKey, nValue)
+
+
+def test_finish_второй_вызов_ждёт_первый_и_видит_код(tmp_path):  # п.4: lock в finish()
+    cam = SlowRestoreCam(swallow=(("TriggerMode", 0),))
+    sess = _session(cam, tmp_path)
+    first: list[int] = []
+    worker = threading.Thread(target=lambda: first.append(sess.finish()))
+    worker.start()
+    assert cam.entered.wait(2)
+    assert sess.finish() == 2  # без lock второй вызов вернул бы 0 при ещё идущем возврате
+    worker.join(2)
+    assert first == [2]
+    assert names(cam).count("MV_CC_CloseDevice") == 1
+
+
+class InterruptRestoreCam(mvs_probe.FakeMvCamera):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.enum_sets = 0
+
+    def MV_CC_SetEnumValue(self, strKey, nValue):
+        self.enum_sets += 1
+        if self.enum_sets == 2:
+            raise KeyboardInterrupt
+        return super().MV_CC_SetEnumValue(strKey, nValue)
+
+
+def test_finish_закрывает_камеру_при_KeyboardInterrupt_в_возврате(tmp_path):  # п.7
+    cam = InterruptRestoreCam()
+    sess = _session(cam, tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        sess.finish()
+    assert names(cam)[-2:] == ["MV_CC_CloseDevice", "MV_CC_DestroyHandle"]
+
+
+def test_split_потолок_join_считается_от_seconds_и_delay(tmp_path, capsys, monkeypatch):  # п.4
+    monkeypatch.setattr(mvs_probe, "THREAD_JOIN_S", 0.3, raising=False)  # старый фиксированный потолок
+    monkeypatch.setattr(mvs_probe, "JOIN_MARGIN_S", 1.0, raising=False)  # новый запас
+    argv = ["--experiment", "h2", "--mode", "split", "--write", "--orig", str(tmp_path / "o.json")]
+    rc, lines, cam = run([*argv, "--seconds", "0.5", "--delay", "0.2"], capsys=capsys)
+    assert rc == 0, lines
+    assert cam.value("TriggerMode") == "Off"
+
+
+class HangStopCam(mvs_probe.FakeMvCamera):
+    def MV_CC_StopGrabbing(self):
+        threading.Event().wait(0.6)
+        return super().MV_CC_StopGrabbing()
+
+
+def test_split_таймаут_отмена_и_возврат_в_главном_потоке(tmp_path, capsys, monkeypatch):  # п.4
+    monkeypatch.setattr(mvs_probe, "JOIN_MARGIN_S", 0.4, raising=False)
+    argv = ["--experiment", "h2", "--mode", "split", "--write", "--orig", str(tmp_path / "o.json")]
+    rc, lines, cam = run([*argv, "--seconds", "0", "--delay", "0"], HangStopCam(), capsys)
+    assert rc == 1
+    assert "ОШИБКА опыта" in "\n".join(lines)
+    restore = [ln for ln in lines if ln.startswith("restore node=TriggerMode ")]
+    assert len(restore) == 1 and restore[0].endswith("thread=MainThread")  # поток B по отмене своего finish не делал
+    assert cam.value("TriggerMode") == "Off"
+    assert names(cam).count("MV_CC_StopGrabbing") == 1
+    assert not {t.name for t in threading.enumerate()} & {"A-open", "B-capture"}
