@@ -11,6 +11,8 @@ from __future__ import annotations
 from ctypes import POINTER, c_ubyte, cast
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from Services.hikvision_camera.core.camera import CameraState, HikvisionCamera
 
 _MONO8 = 17301505
@@ -269,3 +271,31 @@ def test_get_parameters_ошибка_тоже_несёт_param_errors():
         answer = plugin.cmd_get_parameters({})
     assert answer["status"] == "error"
     assert answer["param_errors"] == {"TriggerMode": "0x80000106"}
+
+
+# ---------------------------------------------------------------------------
+# Правка ревью р.1 (находка 9): нечисловое значение рецепта не роняет запуск
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", ["exposure_time", "gain", "frame_rate", "fps"])
+def test_нечисловой_рецепт_даёт_error_без_исключения(key):
+    # configure() с пустым конфигом: валидацию register'а (она тоже отвергла бы
+    # "abc" для exposure_time/gain/frame_rate) обходим — проверяем именно запись
+    # рецепта, которая читает ctx.config на старте захвата.
+    from Services.hikvision_camera.plugin.plugin import HikvisionCameraPlugin
+
+    fake = FakeMv()
+    ctx = MagicMock()
+    ctx.config = {}
+    ctx.registers = None
+    plugin = HikvisionCameraPlugin()
+    plugin.configure(ctx)
+    ctx.config = {key: "abc"}
+    p1, p2, p3, p4 = _open_patches(fake)
+    with p1, p2, p3, p4:
+        result = plugin.cmd_start_capture({})
+    assert result["status"] == "error"
+    assert key in result["error"]
+    assert ("StartGrabbing",) not in fake.log
+    assert [e for e in fake.log if e[0] == "SetFloatValue"] == []
