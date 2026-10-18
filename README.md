@@ -99,3 +99,6 @@ make run PIPELINE=inspection_basic
    валидирует git-hook.
 
 Полный свод правил и карта путей — в [`CLAUDE.md`](CLAUDE.md).
+
+
+powershell -ExecutionPolicy Bypass -File scripts\run_sim_all.ps1
