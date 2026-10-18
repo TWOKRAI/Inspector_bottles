@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from Services.device_hub.drivers.base import BaseDeviceDriver, logger
+from Services.device_hub.drivers.exchange_log import ExchangeLog, ExchangeLogTransport
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, REG, STOP_LEVEL
@@ -273,6 +274,14 @@ class RobotDriverV2(BaseDeviceDriver):
         self.returns_done = 0
         self.returns_failed = 0
 
+        # Журнал обмена (T5.6): живёт столько же, сколько драйвер; ручки — entry.params["exchange_log"]
+        log_cfg = params.get("exchange_log") or {}
+        self._exchange_log = ExchangeLog(
+            entry.id, enabled=bool(log_cfg.get("enabled", True)), periodic=bool(log_cfg.get("periodic", False))
+        )
+        if self._transport is not None:  # внедрённый транспорт (тесты); иначе обёртка — в connect()
+            self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
+
     # ------------------------------------------------------------------ #
     # Параметры и конфиг подключения
     # ------------------------------------------------------------------ #
@@ -358,6 +367,7 @@ class RobotDriverV2(BaseDeviceDriver):
                 from Services.device_hub.transports import build_transport
 
                 self._transport = build_transport(self.entry, lambda _id: None)
+                self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
             if self._client is None:
                 self._client = RobotClientV2(self._transport, self._cfg)
             client = self._client
@@ -961,3 +971,25 @@ RobotDriverV2._OPS = {
     "enqueue_job": RobotDriverV2._op_enqueue_job,
     "return_job": RobotDriverV2._op_return_job,
 }
+
+
+# --- Журнал обмена (T5.6): две операции отдельным блоком, литерал _OPS выше не тронут ---
+
+
+def _op_exchange_log_get(drv: RobotDriverV2, args: dict) -> dict:
+    """Строки журнала обмена {since_seq=0, limit=200} и состояние; работает и без связи с роботом."""
+    state = drv._exchange_log.get(since_seq=int(args.get("since_seq", 0)), limit=int(args.get("limit", 200)))
+    return {"status": "ok", **state}
+
+
+def _op_exchange_log_set(drv: RobotDriverV2, args: dict) -> dict:
+    """Ручки журнала {enabled?, periodic?, clear?} без переподключения; ответ — состояние без строк."""
+    state = drv._exchange_log.set(enabled=args.get("enabled"), periodic=args.get("periodic"), clear=args.get("clear"))
+    return {"status": "ok", **state}
+
+
+_EXCHANGE_OPS = {
+    "exchange_log_get": _op_exchange_log_get,
+    "exchange_log_set": _op_exchange_log_set,
+}
+RobotDriverV2._OPS.update(_EXCHANGE_OPS)

@@ -115,6 +115,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "robot_clear_queue": "cmd_robot_clear_queue",
         "robot_set_encoder_offset": "cmd_robot_set_encoder_offset",
         "robot_toolchange": "cmd_robot_toolchange",
+        "robot_exchange_log_get": "cmd_robot_exchange_log_get",
+        "robot_exchange_log_set": "cmd_robot_exchange_log_set",
         # Рисование (8)
         "robot_draw_polyline": "cmd_robot_draw_polyline",
         "robot_draw_circle": "cmd_robot_draw_circle",
@@ -486,6 +488,26 @@ class DeviceHubPlugin(ProcessModulePlugin):
             # (иначе все ошибки device-команд в консоли = «failed: None»).
             return {"status": "error", "message": str(exc), "error": str(exc)}
 
+    def _driver_call(self, data: dict, expected_kind: str, op: str) -> dict:
+        """Как ``_kind_call``, но в обход ``manager.call``: операция журнала нужна и при неподключённом роботе."""
+        dev_id = data.get("device_id", "")
+        if not dev_id:
+            return {"status": "error", "message": "device_id обязателен"}
+        try:
+            entry = self._manager.get(dev_id)
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
+            return {"status": "error", "message": str(exc)}
+        if entry.kind != expected_kind:
+            return {
+                "status": "error",
+                "message": f"Устройство {dev_id!r} имеет kind={entry.kind!r}, ожидается {expected_kind!r}",
+            }
+        driver = self._manager.get_driver(dev_id)
+        if driver is None:
+            return {"status": "error", "message": "журнала нет: драйвер не создан"}
+        args = {k: v for k, v in data.items() if k != "device_id"}
+        return self._safe_call(driver.call, op, args)
+
     def _kind_call(self, data: dict, expected_kind: str, op: str) -> dict:
         """Команда для конкретного kind: валидация kind + dispatch."""
         dev_id = data.get("device_id", "")
@@ -777,6 +799,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
     def cmd_robot_toolchange(self, data: dict) -> dict:
         """Смена инструмента: {device_id, target: 0|1|2, timeout?}."""
         return self._kind_call(data, "robot", "toolchange")
+
+    def cmd_robot_exchange_log_get(self, data: dict) -> dict:
+        """Журнал обмена драйвера: {device_id, since_seq?, limit?}. Работает и при разрыве связи (T5.6)."""
+        return self._driver_call(data, "robot", "exchange_log_get")
+
+    def cmd_robot_exchange_log_set(self, data: dict) -> dict:
+        """Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6)."""
+        return self._driver_call(data, "robot", "exchange_log_set")
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Рисование (8)
