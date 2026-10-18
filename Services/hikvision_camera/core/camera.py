@@ -73,6 +73,9 @@ class HikvisionCamera:
         self._state = CameraState.CLOSED
         self._camera_index: int = 0
         self._buf_lock = threading.Lock()
+        # Отказы SDK при записи узлов: {имя узла: "0x%08X"}. Сбрасывается в начале
+        # каждого неидемпотентного open(); видны в get_parameters плагина.
+        self.param_errors: dict[str, str] = {}
 
     # ── Properties ──────────────────────────────────────────────────────
 
@@ -112,6 +115,9 @@ class HikvisionCamera:
         # Идемпотентность: уже открыта
         if self._state in (CameraState.OPEN, CameraState.GRABBING):
             return True
+
+        # Старые коды отказов не переживают close() -> open()
+        self.param_errors = {}
 
         try:
             # Перечисление устройств
@@ -163,11 +169,13 @@ class HikvisionCamera:
                 if st_dev.nTLayerType == MV_GIGE_DEVICE:
                     n_pkt = self._camera.MV_CC_GetOptimalPacketSize()
                     if int(n_pkt) > 0:
-                        self._camera.MV_CC_SetIntValue("GevSCPSPacketSize", n_pkt)
+                        self.set_node("Int", "GevSCPSPacketSize", n_pkt)
 
-                # Базовые настройки: без триггера, с контролем fps
-                self._camera.MV_CC_SetEnumValue("TriggerMode", MV_TRIGGER_MODE_OFF)
-                self._camera.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
+                # Базовые настройки: без триггера, с контролем fps.
+                # Отказ узла не закрывает камеру (прибор открыт), но виден:
+                # param_errors + on_error.
+                self.set_node("Enum", "TriggerMode", MV_TRIGGER_MODE_OFF)
+                self.set_node("Bool", "AcquisitionFrameRateEnable", True)
             except Exception:
                 # A-3 (bug-hunt 2026-07-20): устройство УЖЕ открыто эксклюзивно
                 # (OpenDevice выше отработал успешно) — провал на этих шагах
@@ -199,6 +207,28 @@ class HikvisionCamera:
         except Exception as exc:
             self._on_error(f"Непредвиденная ошибка при открытии камеры: {exc}")
             return False
+
+    def set_node(self, kind: str, node: str, value: object) -> bool:
+        """Записать узел SDK (`MV_CC_Set<kind>Value`) и проверить код ответа.
+
+        kind: "Enum" | "Bool" | "Int" | "Float". Код != 0 -> запись
+        param_errors[node] = "0x%08X" и сообщение `node=<узел> rc=0x…` в on_error.
+        Исключения SDK не глушатся — уходят вызывающему.
+
+        Returns
+        -------
+        bool
+            True если SDK ответил кодом 0.
+        """
+        if self._camera is None:
+            raise RuntimeError("Камера не открыта")
+        rc = getattr(self._camera, f"MV_CC_Set{kind}Value")(node, value)
+        if rc != 0:
+            code = f"0x{int(rc) & 0xFFFFFFFF:08X}"
+            self.param_errors[node] = code
+            self._on_error(f"node={node} rc={code}")
+            return False
+        return True
 
     def close(self) -> None:
         """Закрыть камеру. Любое состояние → CLOSED.
@@ -317,9 +347,22 @@ class HikvisionCamera:
                 with self._buf_lock:
                     raw = np.ctypeslib.as_array(st_out.pBufAddr, shape=(frame_len,)).copy()
 
-                # Reshaping: 1D → 2D (Bayer/Grayscale)
+                # Reshaping: форма по числу каналов формата пикселя.
+                # В frame_len бывает дополнение в хвосте — срез до h*w*channels.
                 if raw.ndim == 1:
-                    raw = raw.reshape(height, width)
+                    pixels = height * width
+                    channels = frame_len // pixels if pixels > 0 else 0
+                    if channels not in (1, 3, 4):
+                        self._on_error(
+                            f"Неподдерживаемая раскладка кадра: pixel_type=0x{int(pixel_type):08X} "
+                            f"frame_len={frame_len} w={width} h={height}"
+                        )
+                        return None, 0
+                    raw = raw[: pixels * channels]
+                    if channels == 1:
+                        raw = raw.reshape(height, width)
+                    else:
+                        raw = raw.reshape(height, width, channels)
 
                 return raw, pixel_type
             finally:
