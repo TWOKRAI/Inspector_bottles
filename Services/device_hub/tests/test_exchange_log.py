@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -367,3 +368,66 @@ def test_time_is_monotonic_by_seq_when_clock_read_yields() -> None:
     lines = _bounded(log.get)["lines"]
     assert [ln["seq"] for ln in lines] == [1, 2]
     assert lines[0]["t"] < lines[1]["t"], [(ln["seq"], ln["t"]) for ln in lines]
+
+
+# --------------------------------------------------------------------------------------------------
+# seq из двух потоков: без дублей и пропусков, строки целы, порядок кольца = порядок seq
+# --------------------------------------------------------------------------------------------------
+
+
+class _HandshakeRing(deque):
+    """Кольцо, у которого первый ``append`` ждёт второй поток между выдачей ``seq`` и добавлением строки.
+
+    Корректный код держит замок журнала от выдачи ``seq`` до ``append``: второй поток не дойдёт, лидер уйдёт по
+    таймауту. Без замка второй поток успеет выдать следующий ``seq`` и добавить свою строку первым — порядок кольца
+    разойдётся с порядком ``seq`` (читатель по ``last_seq`` пропустит или прочтёт дважды).
+    """
+
+    def __init__(self, maxlen: int) -> None:
+        super().__init__(maxlen=maxlen)
+        self._guard = threading.Lock()
+        self._leader: int | None = None
+        self.follower_arrived = threading.Event()
+
+    def append(self, item: Any) -> None:
+        me = threading.get_ident()
+        with self._guard:
+            if self._leader is None:
+                self._leader = me
+        if self._leader == me:
+            self.follower_arrived.wait(0.3)
+            threading.Event().wait(0.05)
+        else:
+            self.follower_arrived.set()
+        super().append(item)
+
+
+def test_two_threads_give_contiguous_seq_intact_lines_and_exact_counters() -> None:
+    per_thread = 20
+    log = ExchangeLog("seq2", periodic=True)
+    log._ring = _HandshakeRing(maxlen=2000)  # type: ignore[assignment]
+    tr = ExchangeLogTransport(_Fake(), log)
+    start = threading.Barrier(2)
+    texts = {f"W CMD_SEQ = {base + i}" for base in (100, 200) for i in range(per_thread)}  # все разные: склейки нет
+
+    def writer(base: int) -> None:
+        start.wait(_DEADLINE_S)
+        for i in range(per_thread):
+            tr.transaction([("w", _CMD_SEQ, base + i)])
+
+    threads = [threading.Thread(target=writer, args=(b,), daemon=True) for b in (100, 200)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        _join(t)
+
+    state = _bounded(lambda: log.get(limit=1000))
+    lines = state["lines"]
+    total = 2 * per_thread
+    assert [ln["seq"] for ln in lines] == list(range(1, total + 1))  # подряд, без дублей и пропусков, в порядке кольца
+    assert all(set(ln) == {"seq", "t", "side", "text", "tag", "n", "ms"} for ln in lines)
+    assert all((ln["side"], ln["tag"], ln["n"]) == ("in", "", 1) for ln in lines)
+    assert {ln["text"] for ln in lines} == texts
+    assert len({ln["text"] for ln in lines}) == total
+    assert state["last_seq"] == total
+    assert state["counters"]["write CMD_SEQ"]["count"] == total
