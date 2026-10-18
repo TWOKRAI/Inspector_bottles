@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from multiprocess_framework.modules.base_manager import open_scope
+from multiprocess_framework.modules.base_manager.interfaces import CloseReport, IScope
 from multiprocess_framework.modules.error_module.interfaces import SubsystemStartFailed
 from multiprocess_framework.modules.process_module.plugins import (
     ExecutionMode,
@@ -41,6 +43,15 @@ from .registers import DeviceHubRegisters
 
 # Корень проекта — для резолва относительных путей
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+# Бюджет корня области потоков хаба, с (О8): окно ``work`` процесса 3.0 с минус запас 0.5 с
+_SCOPE_BUDGET_S = 2.5
+# Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
+TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
+
+
+class ScopeThreadSurvived(RuntimeError):
+    """Поток области ``device_hub`` пережил срок закрытия (путь — в ``survivors`` инцидента)."""
 
 
 def _resolve_registry_path(raw_path: str) -> Path:
@@ -79,6 +90,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
     outputs = []
 
     register_class = DeviceHubRegisters
+
+    # Корень области потоков хаба (T5.3a): None до configure, после упавшего configure и после shutdown
+    _scope: IScope | None = None
+    # Защёлка остановки: supervisor не создаёт воркеры и не разбирает очередь connect (К1, р.2 п.7)
+    _shutting_down = False
 
     # ------------------------------------------------------------------ #
     # Таблица команд (Р7): имя_команды -> имя_метода
@@ -156,38 +172,51 @@ class DeviceHubPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def configure(self, ctx: PluginContext) -> None:
-        """IDLE -> READY: создать DeviceManager, загрузить реестр, публикация."""
+        """IDLE -> READY: открыть корень области потоков, создать DeviceManager, загрузить реестр, публикация.
+
+        Упал код после ``open_scope`` — корень закрывается здесь же (фреймворк всё равно зовёт ``shutdown()``,
+        он при ``self._scope is None`` ничего не делает).
+        """
         self._ctx = ctx
-        self._reg: DeviceHubRegisters = self._init_register(ctx)
+        # Выжившие, о которых reporter уже сообщил в health (по пути): отчёты корня и ``handle.close`` повторяются
+        self._scope_seen: set[str] = set()
+        self._scope_seen_lock = threading.Lock()
+        scope = open_scope("device_hub", budget_s=_SCOPE_BUDGET_S, reporter=self._on_scope_report)
+        try:
+            self._reg: DeviceHubRegisters = self._init_register(ctx)
 
-        # Резолв пути к реестру (У6)
-        resolved = _resolve_registry_path(self._reg.registry_path)
-        resolved.parent.mkdir(parents=True, exist_ok=True)
+            # Резолв пути к реестру (У6)
+            resolved = _resolve_registry_path(self._reg.registry_path)
+            resolved.parent.mkdir(parents=True, exist_ok=True)
 
-        store = RegistryStore(resolved)
-        self._manager = DeviceManager(store=store, publish_cb=self._publish_state)
-        self._manager.initialize()
+            store = RegistryStore(resolved)
+            self._manager = DeviceManager(store=store, publish_cb=self._publish_state, spawn=scope.spawn)
+            self._manager.initialize()
 
-        # Очередь async connect/disconnect (Б2)
-        self._conn_queue: queue.Queue[tuple[str, str]] = queue.Queue()
-        # Воркеры per-device: {device_id: worker_name}
-        self._device_workers: dict[str, str] = {}
-        # Lock для device_workers И desired_connected
-        # (модифицируется из supervisor и командного потока)
-        self._workers_lock = threading.Lock()
+            # Очередь async connect/disconnect (Б2)
+            self._conn_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+            # Воркеры per-device: {device_id: worker_name}
+            self._device_workers: dict[str, str] = {}
+            # Lock для device_workers И desired_connected
+            # (модифицируется из supervisor и командного потока)
+            self._workers_lock = threading.Lock()
 
-        # НР-1/НР-2 ревью Fable: desired-state соединения.
-        # Runtime-состояние сессии (НЕ persist в devices.yaml).
-        # True = пользователь/рецепт хотят устройство подключённым;
-        # False = пользователь явно отключил.
-        # Без desired=True supervisor НЕ создаёт воркер и драйвер НЕ реконнектит.
-        self._desired_connected: dict[str, bool] = {}
+            # НР-1/НР-2 ревью Fable: desired-state соединения.
+            # Runtime-состояние сессии (НЕ persist в devices.yaml).
+            # True = пользователь/рецепт хотят устройство подключённым;
+            # False = пользователь явно отключил.
+            # Без desired=True supervisor НЕ создаёт воркер и драйвер НЕ реконнектит.
+            self._desired_connected: dict[str, bool] = {}
 
-        # Публикация начального реестра
-        self._publish_full_registry()
-        self._update_counters()
+            # Публикация начального реестра
+            self._publish_full_registry()
+            self._update_counters()
 
-        ctx.log_info(f"DeviceHubPlugin: configured (registry={resolved})")
+            ctx.log_info(f"DeviceHubPlugin: configured (registry={resolved})")
+            self._scope = scope
+        except BaseException:
+            scope.close()
+            raise
 
     def start(self, ctx: PluginContext) -> None:
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
@@ -226,7 +255,21 @@ class DeviceHubPlugin(ProcessModulePlugin):
         ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
 
     def shutdown(self, ctx: PluginContext) -> None:
-        """* -> STOPPED: отключить всех, сохранить реестр."""
+        """* -> STOPPED: двухфазная остановка (К1, О8), отключить всех, сохранить реестр.
+
+        Порядок: стоп-запрос всем драйверам без ожидания -> воркеры -> одно закрытие корня области -> закрытие
+        драйверов. Повторный вызов и вызов после упавшего ``configure`` — без действия (К7).
+        """
+        scope = self._scope
+        if scope is None:
+            return
+        self._scope = None
+        with self._workers_lock:
+            self._shutting_down = True
+
+        # Фаза 1: стоп робота уходит до любых ожиданий
+        self._manager.request_stop_all()
+
         # Остановить и удалить per-device воркеры (remove_worker освобождает имена)
         with self._workers_lock:
             for dev_id, wname in list(self._device_workers.items()):
@@ -239,9 +282,36 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     pass
             self._device_workers.clear()
 
-        # Disconnect всех + сохранить
+        # Фаза 2: единственное ожидание потоков драйверов. Выжившие и ошибки уходят в health через reporter корня
+        scope.close(budget_s=_SCOPE_BUDGET_S)
+
+        # Фаза 3: disconnect каждого (потоков уже нет) + сохранить реестр
         self._manager.shutdown()
         ctx.log_info("DeviceHubPlugin: shutdown")
+
+    def _on_scope_report(self, report: CloseReport) -> None:
+        """Reporter корня ``device_hub``: выжившие и ошибки закрытия -> ``log_warning`` и ``health.report_error``.
+
+        Зовётся на каждое закрытие: ``scope.close()`` и ``IHandle.close`` записи (в том числе из ``disconnect``
+        драйвера, потоки supervisor и команд). Один путь выжившего сообщается один раз (``_scope_seen``).
+        Не бросает.
+        """
+        try:
+            with self._scope_seen_lock:
+                new = [p for p in report.survivors if p not in self._scope_seen]
+                self._scope_seen.update(new)
+            errors = list(report.errors)
+            if not new and not errors:
+                return
+            self._ctx.log_warning(f"device_hub.scope: выжившие {new}, ошибки {errors}")
+            self._ctx.health.report_error(
+                ScopeThreadSurvived(TEXT_SCOPE_SURVIVED),
+                context="device_hub.scope",
+                survivors=new,
+                errors=[f"{path}: {text}" for path, text in errors],
+            )
+        except Exception as exc:  # reporter не бросает (ADR-BM-007)
+            self._ctx.log_error(f"device_hub.scope: reporter упал: {type(exc).__name__}: {exc}")
 
     # ------------------------------------------------------------------ #
     # SUPERVISOR WORKER (Б2)
@@ -254,6 +324,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 time.sleep(0.1)
                 continue
             time.sleep(self._reg.supervisor_interval_s)
+            if self._shutting_down:
+                continue  # shutdown идёт: воркеры не пересоздаём, очередь connect не разбираем (К1)
 
             # 1. Разобрать очередь connect/disconnect
             self._process_conn_queue()
@@ -264,6 +336,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
     def _process_conn_queue(self) -> None:
         """Обработать все ожидающие connect/disconnect запросы."""
         while True:
+            if self._shutting_down:
+                return  # запрос остаётся в очереди
             try:
                 op, dev_id = self._conn_queue.get_nowait()
             except queue.Empty:  # no-health: control-flow — очередь разобрана
@@ -316,6 +390,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         ТОЛЬКО при True; при False — лог, retry на следующей итерации.
         """
         with self._workers_lock:
+            if self._shutting_down:
+                return
             # Остановить воркеры для desired=False (факт > desired)
             for dev_id in list(self._device_workers):
                 if not self._desired_connected.get(dev_id, False):
@@ -384,7 +460,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 if self._ctx:
                                     self._ctx.health.report_error(exc, context=f"device_hub.tick.{did}", throttle=30.0)
                                 self._publish_state(f"devices.state.{did}.last_error", str(exc))
-                            time.sleep(interval)
+                            stop_evt.wait(interval)
 
                     return tick_loop
 

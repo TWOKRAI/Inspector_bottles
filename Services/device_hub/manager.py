@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from Services.device_hub.errors import (
     DeviceHubError,
@@ -25,6 +26,8 @@ from Services.device_hub.errors import (
 )
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
+
+logger = get_std_logger(__name__)
 
 
 class DeviceManager(BaseManager, ObservableMixin):
@@ -35,17 +38,22 @@ class DeviceManager(BaseManager, ObservableMixin):
                     in-memory (источник истины — рецепт, план device-tree-recipe
                     Фаза B; полное удаление файлового стора — Фаза E + ADR-DH-007).
         publish_cb: Callback публикации ``(path, data_dict) -> None``.
+        spawn:      ``(target, *, name) -> IHandle`` — ``IScope.spawn`` области плагина (T5.3a); получает драйвер
+                    робота v2, чтобы его потоки жили в этой области. ``None`` — драйвер открывает свой корень.
     """
 
     def __init__(
         self,
         store: RegistryStore | None,
         publish_cb: Callable[[str, dict], None] | None = None,
+        *,
+        spawn: Callable[..., Any] | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
+        self._spawn = spawn
 
         # Реестр: id -> DeviceEntry
         self._entries: dict[str, DeviceEntry] = {}
@@ -76,15 +84,33 @@ class DeviceManager(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
+    def request_stop_all(self) -> None:
+        """Фаза 1 остановки (T5.3a К1): стоп-запрос всем драйверам, у которых он есть, без ожидания потоков.
+
+        Драйверы v1 и прочих kind метода ``request_stop`` не имеют — не трогаются. Исключение одного драйвера
+        логируется и не мешает следующему.
+        """
+        with self._registry_lock:
+            drivers = list(self._drivers.items())
+        for dev_id, driver in drivers:
+            request = getattr(driver, "request_stop", None)
+            if not callable(request):
+                continue
+            try:
+                request()
+            except Exception:
+                logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
+
     def _on_shutdown(self) -> bool:
-        """Отключить все устройства и сохранить реестр."""
+        """Стоп-запрос всем, затем отключить все устройства и сохранить реестр."""
+        self.request_stop_all()  # стоп робота уходит до любых ожиданий потоков
         with self._registry_lock:
             driver_ids = list(self._drivers)
         for dev_id in driver_ids:
             try:
                 self.disconnect(dev_id)
             except Exception:
-                pass
+                logger.exception(f"device_hub: disconnect {dev_id!r} при остановке не прошёл")
         self._save()
         self.is_initialized = False
         return True
@@ -114,7 +140,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             if entry.protocol == "delta_v2":
                 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 
-                return RobotDriverV2(entry, proto, publish=self._publish)
+                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
             return RobotDriver(entry, proto)
 
         self._factories["robot"] = _robot_factory
