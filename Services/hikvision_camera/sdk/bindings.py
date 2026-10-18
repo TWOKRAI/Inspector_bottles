@@ -14,6 +14,7 @@ import sys
 from ctypes import (
     byref,
     c_bool,
+    c_char_p,
     c_float,
     c_uint,
     c_uint32,
@@ -25,10 +26,29 @@ from .structures import (
     MV_CC_DEVICE_INFO,
     MV_CC_DEVICE_INFO_LIST,
     MV_FRAME_OUT,
+    MVCC_ENUMENTRY,
+    MVCC_ENUMVALUE,
     MVCC_FLOATVALUE,
+    MVCC_INTVALUE,
+    MVCC_INTVALUE_EX,
+    MVCC_STRINGVALUE,
 )
 
 logger = get_std_logger(__name__)
+
+# Прототип колбэка исключений: MvCameraControl.h:1362 --
+# void(__stdcall* cbException)(unsigned int nMsgType, void* pUser).
+# WINFUNCTYPE есть только на Windows; на Linux SDK вызывает cdecl.
+EXCEPTION_CALLBACK = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(None, c_uint, c_void_p)
+"""Тип колбэка для ``MvCamera.MV_CC_RegisterExceptionCallBack``."""
+
+
+def _as_pointer_arg(obj):
+    """Указатель на выходной параметр: ``byref(obj)``; готовый ``byref`` проходит как есть."""
+    if isinstance(obj, type(byref(c_uint()))):
+        return obj
+    return byref(obj)
+
 
 # ---------------------------------------------------------------------------
 # Загрузка DLL (graceful degradation)
@@ -121,6 +141,8 @@ class MvCamera:
     def __init__(self) -> None:
         self._handle = c_void_p()  # handle текущего устройства
         self.handle = pointer(self._handle)
+        # Ссылка на CFUNCTYPE-колбэк: без неё GC освободит thunk, SDK вызовет мусор.
+        self._exception_cb = None
 
     # === Статические методы ================================================
 
@@ -375,6 +397,189 @@ class MvCamera:
             strKey.encode("ascii"),
             byref(stFloatValue),
         )
+
+    # === Получение параметров: целые, enum, bool, string ===================
+
+    def MV_CC_GetIntValue(
+        self,
+        strKey: str,
+        stIntValue: MVCC_INTVALUE,
+    ) -> int:
+        """Получить Int-параметр камеры (32-битная структура).
+
+        Функция экспортируется DLL, но её прототипа нет в MvCameraControl.h
+        (SDK 0x04020003); раскладка -- по существующей ``MVCC_INTVALUE``.
+        Для значений выше 32 бит -- ``MV_CC_GetIntValueEx``.
+        """
+        dll = _require_dll()
+        dll.MV_CC_GetIntValue.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_CC_GetIntValue.restype = c_uint
+        return dll.MV_CC_GetIntValue(
+            self.handle,
+            strKey.encode("ascii"),
+            _as_pointer_arg(stIntValue),
+        )
+
+    def MV_CC_GetIntValueEx(
+        self,
+        strKey: str,
+        stIntValue: MVCC_INTVALUE_EX,
+    ) -> int:
+        """Получить Int-параметр камеры (int64-структура, MvCameraControl.h:812)."""
+        dll = _require_dll()
+        dll.MV_CC_GetIntValueEx.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_CC_GetIntValueEx.restype = c_uint
+        return dll.MV_CC_GetIntValueEx(
+            self.handle,
+            strKey.encode("ascii"),
+            _as_pointer_arg(stIntValue),
+        )
+
+    def MV_CC_GetEnumValue(
+        self,
+        strKey: str,
+        stEnumValue: MVCC_ENUMVALUE,
+    ) -> int:
+        """Получить Enum-параметр камеры (MvCameraControl.h:854)."""
+        dll = _require_dll()
+        dll.MV_CC_GetEnumValue.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_CC_GetEnumValue.restype = c_uint
+        return dll.MV_CC_GetEnumValue(
+            self.handle,
+            strKey.encode("ascii"),
+            _as_pointer_arg(stEnumValue),
+        )
+
+    def MV_CC_GetBoolValue(self, strKey: str, pbValue) -> int:
+        """Получить Boolean-параметр камеры (MvCameraControl.h:985).
+
+        Args:
+            pbValue: ``c_bool()`` для заполнения (или готовый ``byref(c_bool())``)."""
+        dll = _require_dll()
+        dll.MV_CC_GetBoolValue.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_CC_GetBoolValue.restype = c_uint
+        return dll.MV_CC_GetBoolValue(
+            self.handle,
+            strKey.encode("ascii"),
+            _as_pointer_arg(pbValue),
+        )
+
+    def MV_CC_GetStringValue(
+        self,
+        strKey: str,
+        stStringValue: MVCC_STRINGVALUE,
+    ) -> int:
+        """Получить String-параметр камеры (MvCameraControl.h:1029)."""
+        dll = _require_dll()
+        dll.MV_CC_GetStringValue.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_CC_GetStringValue.restype = c_uint
+        return dll.MV_CC_GetStringValue(
+            self.handle,
+            strKey.encode("ascii"),
+            _as_pointer_arg(stStringValue),
+        )
+
+    def MV_CC_GetEnumEntrySymbolic(
+        self,
+        strKey: str,
+        stEnumEntry: MVCC_ENUMENTRY,
+    ) -> int:
+        """Получить символьное имя значения enum-узла (MvCameraControl.h:897).
+
+        ``stEnumEntry.nValue`` -- вход, ``stEnumEntry.chSymbolic`` -- выход.
+        """
+        dll = _require_dll()
+        dll.MV_CC_GetEnumEntrySymbolic.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_CC_GetEnumEntrySymbolic.restype = c_uint
+        return dll.MV_CC_GetEnumEntrySymbolic(
+            self.handle,
+            strKey.encode("ascii"),
+            _as_pointer_arg(stEnumEntry),
+        )
+
+    # === Установка параметров (строка / команда) ===========================
+
+    def MV_CC_SetEnumValueByString(self, strKey: str, strValue: str) -> int:
+        """Установить Enum-параметр по символьному значению (MvCameraControl.h:919).
+
+        Args:
+            strKey: имя параметра (например ``"TriggerSource"``).
+            strValue: символьное значение (например ``"Line0"``).
+        """
+        dll = _require_dll()
+        dll.MV_CC_SetEnumValueByString.argtypes = (c_void_p, c_char_p, c_char_p)
+        dll.MV_CC_SetEnumValueByString.restype = c_uint
+        return dll.MV_CC_SetEnumValueByString(
+            self.handle,
+            strKey.encode("ascii"),
+            strValue.encode("ascii"),
+        )
+
+    def MV_CC_SetCommandValue(self, strKey: str) -> int:
+        """Выполнить команду-узел (например ``"TriggerSoftware"``, MvCameraControl.h:1071)."""
+        dll = _require_dll()
+        dll.MV_CC_SetCommandValue.argtypes = (c_void_p, c_char_p)
+        dll.MV_CC_SetCommandValue.restype = c_uint
+        return dll.MV_CC_SetCommandValue(
+            self.handle,
+            strKey.encode("ascii"),
+        )
+
+    # === Узлы XML ===========================================================
+
+    def MV_XML_GetNodeAccessMode(self, strName: str, penAccessMode) -> int:
+        """Режим доступа к узлу (MvCameraControl.h:1170).
+
+        Args:
+            penAccessMode: ``c_int()`` (или готовый ``byref``); значения -- ``AM_*`` из structures."""
+        dll = _require_dll()
+        dll.MV_XML_GetNodeAccessMode.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_XML_GetNodeAccessMode.restype = c_uint
+        return dll.MV_XML_GetNodeAccessMode(
+            self.handle,
+            strName.encode("ascii"),
+            _as_pointer_arg(penAccessMode),
+        )
+
+    def MV_XML_GetNodeInterfaceType(self, strName: str, penInterfaceType) -> int:
+        """Тип интерфейса узла (MvCameraControl.h:1189).
+
+        Args:
+            penInterfaceType: ``c_int()`` (или готовый ``byref``); значения -- ``IFT_*`` из structures."""
+        dll = _require_dll()
+        dll.MV_XML_GetNodeInterfaceType.argtypes = (c_void_p, c_char_p, c_void_p)
+        dll.MV_XML_GetNodeInterfaceType.restype = c_uint
+        return dll.MV_XML_GetNodeInterfaceType(
+            self.handle,
+            strName.encode("ascii"),
+            _as_pointer_arg(penInterfaceType),
+        )
+
+    # === Колбэк исключений ==================================================
+
+    def MV_CC_RegisterExceptionCallBack(self, cbException, pUser=None) -> int:
+        """Зарегистрировать колбэк исключений устройства (MvCameraControl.h:1362).
+
+        Args:
+            cbException: объект ``EXCEPTION_CALLBACK``; ``None`` -- снять колбэк
+                (в DLL уходит NULL-указатель ``EXCEPTION_CALLBACK()``).
+            pUser: пользовательский указатель (``c_void_p`` или ``None``).
+
+        Ссылка на колбэк хранится в ``self._exception_cb``: иначе GC освободит
+        ctypes-thunk, и SDK вызовет его -- падение процесса. Прежняя ссылка живёт,
+        пока вызов не вернул 0: при ошибке SDK по-прежнему держит прежний колбэк.
+        Новый колбэк на время вызова удерживается локальной переменной (он может
+        сработать до возврата).
+        """
+        dll = _require_dll()
+        dll.MV_CC_RegisterExceptionCallBack.argtypes = (c_void_p, EXCEPTION_CALLBACK, c_void_p)
+        dll.MV_CC_RegisterExceptionCallBack.restype = c_uint
+        # from_param не принимает None: снятие колбэка -- это NULL-указатель на функцию
+        callback = EXCEPTION_CALLBACK() if cbException is None else cbException
+        rc = dll.MV_CC_RegisterExceptionCallBack(self.handle, callback, pUser)
+        if rc == 0:
+            self._exception_cb = cbException
+        return rc
 
     def MV_CC_GetOptimalPacketSize(self) -> int:
         """Получить оптимальный размер сетевого пакета (только GigE).

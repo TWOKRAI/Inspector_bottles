@@ -333,3 +333,139 @@ EXIT=0
 - Оценки запусков и календарь (М2 «1-1,5 недели») — из оценок самого плана (`plan.md:62-63`) и моего допущения ~30 мин на запуск; скорость не мерил.
 - Что требует «Task launch convention» `.claude/CLAUDE.md` про стадию 0 — не читал; Q3 может противоречить конвенции.
 - Агентов Haiku не запускал: 39 файлов прочитаны целиком, пути проверены скриптом (`files_check.py` в scratchpad сессии, вывод — раздел P1).
+
+
+## Раунд 2 (2026-10-18)
+
+- **Ревьюер:** `reviewer` (opus), новый агент. Стенограммы раунда 1 нет, поэтому сверка идёт по тексту отчёта раунда 1. Режим: только чтение, MODE: plan. Расход: 211k токенов, 47 вызовов.
+- **Дерево:** `.claude/worktrees/camera-w1a`, ветка `feat/camera-device-service`, SHA `89fe54a54`.
+- **Объём:** вопрос 1 — все B/A/R. Вопросы 2–4 — только полоса W1a: 0.2 ∥ 0.3, затем 0.4. Тексты задач сверены с кодом.
+- **memory hits:** `feedback_a_probe_must_enumerate_before_it_asks.md` (учтён в схеме: узел без чтения пишется с `rc` и `access`).
+- **Запуск** (единственный: проверка экспортов DLL, без камеры):
+  ```
+  bash scripts/machine_gate.sh light inspector-bottles-53 .venv/Scripts/python.exe -I <scratchpad>/dll_exports.py
+  MV_CC_Initialize no / MV_CC_Finalize no / MV_CC_GetIntValue yes / MV_CC_GetIntValueEx yes / MV_CC_GetEnumValue yes /
+  MV_CC_GetBoolValue yes / MV_CC_SetEnumValueByString yes / MV_CC_SetCommandValue yes / MV_CC_RegisterExceptionCallBack yes /
+  MV_CC_GetEnumEntrySymbolic yes / MV_CC_GetStringValue yes / MV_XML_GetNodeAccessMode yes / MV_XML_GetNodeInterfaceType yes
+  sdk_version 0x4020003
+  EXIT=0
+  ```
+
+### Вердикт W1a
+
+**CHANGES REQUESTED** (итерация 2 из 2). Четыре блокера, все — правка текста `tasks/0.2.md`, `0.3.md`, `0.4.md` (~15 строк), код не трогается. Блокеры новые (сверка текста с кодом и DLL). Правки раунда 1 внесены полностью.
+
+### 1. Внесены ли правки раунда 1
+
+| Пункт | Итог | Доказательство |
+|---|---|---|
+| B1 | внесено | `tasks/1.6.md:25-30`; `tasks/2.2.md:25-32` |
+| B2 | внесено | `decisions.md:15`, `tasks/1.5.md:17`, `tasks/2.2.md:17`, `:30` |
+| B3 | внесено | `decisions.md:10`, `tasks/2.3a.md:20-21`, `:38`, `tasks/3.3.md:28`, `tasks/4.3.md:20`, `:28`, `tasks/6.4.md:17` |
+| B4 | внесено | `tasks/4.6d.md:9`, `tasks/4.2a.md:9`, `tasks/6.5.md:9`, `tasks/6.1.md:9`; `plan.md:102`, `:106`, `:120`, `:131` |
+| B5 | внесено | `tasks/6.3.md` без `hik_*`; `tasks/4.6d.md:33`, `:35` |
+| B6 | внесено | `tasks/4.3.md:27` |
+| B7 | внесено | `tasks/4.6d.md:26` |
+| B8 | внесено | `plan.md:59-137`, `amendments.md:21-23`; деление W1a/W1b — строка для amendments |
+| A1–A6, A15 | внесено | через B1, B5, B7, B6 |
+| A7 | частично, не W1a | `tasks/0.1.md:6`: условный `multiprocess_framework/DECISIONS.md` |
+| A8 (0.4) | внесено | `tasks/0.4.md:6`; новый пропуск — п. 10 |
+| A9–A14, A16, A17 | внесено | `tasks/6.5.md:19-21`, `2.1.md:20`, `1.5.md:20`, `3.3.md:6/:20/:37`, `4.3.md:34`, `design.md:55`, `wave-protocol.md:64` |
+| ребро «1.5 стадия 0 -> 0.4» | **устарело** | 1.5 в части B — блокер W1a-1 |
+| R-a … R-g, P4(б)(1) | внесено | `2.3a.md:9`, `decisions.md:20`, `4.4.md:9`, `6.1.md:9`, `4.6d.md:35`, `6.4.md:9`, `4.3.md:20`/`:28`, `2.1.md:34` |
+
+### 2. Блокеры W1a
+
+**W1a-1 [spec] 0.4 — схема JSON ждёт стадию 0 задачи из части B.** `tasks/0.4.md:9`, `:17`; `tasks/1.5.md:20`. Исправление: схему из раздела 3 — в DESIGN 0.4, зависимость от 1.5 снять; стадия 0 1.5 её принимает.
+
+**W1a-2 [spec] 0.4 нужны привязки, которых 0.3 не делает** (`bindings.py` вне FILES 0.4).
+- `DeviceSerialNumber`, `DeviceModelName` — строковые: нужен `MV_CC_GetStringValue` (структура `MVCC_STRINGVALUE` есть, `structures.py:230`).
+- `access` — `MV_XML_GetNodeAccessMode`, `type` — `MV_XML_GetNodeInterfaceType`. DLL их экспортирует.
+- Нет структур `MVCC_INTVALUE_EX`, `MVCC_ENUMENTRY` (`structures.py:196-237`).
+- Исправление (0.3): 13 имён; раскладки по `C:/Program Files (x86)/MVS/Development/Includes/CameraParams.h:952-959` (`MVCC_ENUMENTRY`: `nValue: c_uint`, `chSymbolic: c_char*64`, `nReserved: c_uint*4`) и `:974-982` (`MVCC_INTVALUE_EX`: 4 × `int64`, `nReserved: c_uint*16`); ACCEPTANCE `ctypes.sizeof(MVCC_ENUMENTRY) == 84`, `ctypes.sizeof(MVCC_INTVALUE_EX) == 96`; значения `MV_XML_AccessMode`/`MV_XML_InterfaceType` — в `structures.py`. Ошибку раскладки фейк-DLL не поймает, на настоящей DLL — порча памяти.
+
+**W1a-3 [spec] 0.4 — нет возврата исходных**, а 0.5 на нём строится (`tasks/0.5.md:17`, `:30`). Прецеденты: `mvcr_probe.py:258-279` (`_restore`, `RESTORE MISMATCH`), `thread_split_probe.py:86`, `:124`. У опытов H1/H2/H5 нет строк ACCEPTANCE. Исправление: возврат в обратном порядке + чтение + строка `restore node= rc= read=`; режим `--restore <orig.json>`; ACCEPTANCE `--fake --write --orig o.json --experiment h1 --delay 0` -> `node=TriggerMode rc=0x00000000 read=… ms=…`, затем `restore node=TriggerMode`, итог равен `o.json`; H5 — запись `Width` во время захвата, ожидается `0x80000106` (`MvErrorDefine.h:55`; на приборе не проверено).
+
+**W1a-4 [spec] 0.2, F10: на живом пути не записывается ничего.** Все 4 рецепта `hikvision` задают только `fps: 25` (`hikvision_inspect.yaml:71`, `hikvision_letter_robot.yaml:121`, `camera_robot_calibration.yaml:108`, `dataset_circle_capture.yaml:84`). Веха М1 (`plan.md:33`) на 0.5 не показывается. `ExposureTime` пишется без `ExposureAuto=Off` (сравни `core/parameters.py:113-118`). Рекомендация: `frame_rate` — из `frame_rate`, иначе из `fps`; перед `ExposureTime` — `SetEnumValue("ExposureAuto", 0)`, перед `Gain` — `SetEnumValue("GainAuto", 0)`; ACCEPTANCE `ctx.config = {"fps": 25}` -> `SetFloatValue("AcquisitionFrameRate", 25.0)` раньше `StartGrabbing`.
+
+### Не блокеры по вопросу 2
+
+- Ссылки на строки верны: `camera.py:318-322`, `:161-170`, `plugin.py:213-228`, `bindings.py:356-377`, `structures.py:207`, `:219`, `converter.py:63-68`.
+- Сигнатура `open()` в 0.2 не меняется. `Services/device_hub/drivers/hikvision_driver.py:77` передаёт `open(self._serial)` (строку) -> `TypeError` -> `camera.py:199-201` -> `False` — старый дефект класса F1, закрывает 4.6b; в 0.2 не трогать.
+- Проверяемость на фейке: 0.2 — шаблон `test_camera.py:262-288`; 0.3 — патч `bindings._MvCamCtrldll` (`bindings.py:93`, `:98-106`).
+
+5. [0.2] «иное -> `(None, 0)`» противоречит «ветки `converter.py:63-68` достижимы»: RGBA8 не дойдёт до `:63-64`. Исправление: `channels in (3, 4)`.
+6. [0.2] Канал WARNING не назван: в `camera.py` нет логгера, только `on_status`/`on_error` (`:64-70`). Исправление: `self._on_error("node=… rc=0x…")`, в тесте — фейковый `on_error`.
+7. [0.2] `param_errors = {}` в `__init__` и сброс при каждом неидемпотентном `open`.
+8. [0.2] Перед `reshape` — срез `raw[: h*w*c]` (дополнение в `frame_len`).
+9. [0.3] `tasks/0.3.result.md` вне FILES; шаг 3 не нужен: `MV_CC_Initialize`/`Finalize` в DLL 0x04020003 нет.
+10. [0.4] В FILES — `Services/hikvision_camera/tools/__init__.py`.
+11. [0.4] `FakeMvCamera` живёт в `mvs_probe.py`, тест берёт его оттуда (не импорт из `tests/`).
+12. [0.3] Образец ставит `argtype` — опечатка (`bindings.py:289`, `:371`); инъекция «забыть `restype`» не покраснеет, если тест не проверяет `restype is c_uint`.
+
+### 3. Схема снимка (ответ на вопрос 3)
+
+Схему можно зафиксировать в 0.4 сегодня; 1.5 её примет (`ParamInfo(min, max, inc, entries, access)`, `tasks/1.5.md:17`).
+
+```json
+{
+  "schema_version": 1,
+  "vendor": "mvs",
+  "sdk_version": "0x04020003",
+  "device": {"model": "<DeviceModelName>", "serial": "<DeviceSerialNumber>"},
+  "states": ["idle", "grabbing"],
+  "nodes": {
+    "ExposureTime": {
+      "type": "float", "min": 15.0, "max": 9999500.0, "inc": null, "entries": null,
+      "idle":     {"value": 10000.0, "access": "RW", "rc": "0x00000000"},
+      "grabbing": {"value": 10000.0, "access": "RW", "rc": "0x00000000"}
+    },
+    "TriggerMode": {
+      "type": "enum", "min": null, "max": null, "inc": null,
+      "entries": ["Off", "On"], "entry_values": [0, 1],
+      "idle":     {"value": "Off", "access": "RW", "rc": "0x00000000"},
+      "grabbing": {"value": "Off", "access": "RW", "rc": "0x00000000"}
+    }
+  }
+}
+```
+
+- `type` ∈ `int|float|enum|bool|string|command` — по `MV_XML_GetNodeInterfaceType`; `access` ∈ `NI|NA|WO|RO|RW` — по `MV_XML_GetNodeAccessMode`, без `AM_`.
+- `min`/`max`/`inc`: int — из `MVCC_INTVALUE_EX`; float — `inc: null`; остальные — `null`; берутся в `idle`.
+- `entries` — символьные имена (`MV_CC_GetEnumEntrySymbolic` по `nSupportValue`); `entry_values` — параллельный список чисел; имя не получено -> `entries: null`.
+- `value`: enum — имя, bool — `true`/`false`; ошибка чтения -> `value: null` и код в `rc`; узла нет -> `access: "NI"`.
+- `StartGrabbing` не прошёл -> `states: ["idle"]`, ключей `grabbing` нет.
+- `--orig` — та же схема, `states: ["idle"]`, только записываемые узлы; `--restore` читает его тем же загрузчиком.
+- Загрузчик 1.5 на неизвестный `schema_version` -> `ValueError` с именем ключа.
+
+### 4. Зависимость 0.3 -> 0.4
+
+Записана верно (`tasks/0.4.md:9`, `plan.md:84`), файлы не пересекаются. 0.3 не даёт три функции, две структуры и значения перечислений (W1a-2). Для 0.4 предпочтителен `GetIntValueEx`: `MV_CC_GetIntValue` устаревший (`MvObsoleteInterfaces.h:502`).
+
+### Для amendments, часть B
+
+- `tasks/1.5.md:20`: «схему фиксирует эта стадия 0» -> «принимает схему 0.4 (`schema_version: 1`)».
+- `plan.md:79-85`, `wave-protocol.md:64`: деление W1a/W1b.
+- 4.1: `DeviceSdk.acquire` без `MV_CC_Initialize` (нет в SDK 0x04020003); запасная ветка P4(а)(2) не нужна.
+- 0.5: при варианте «`fps` не ключ» — рецепт с `exposure_time`/`gain` в FILES 0.5.
+- A7: условный `multiprocess_framework/DECISIONS.md` в `tasks/0.1.md:6`.
+
+### Открыто / ненадёжно (ревьюер)
+
+- `ExposureTime` закрыт при `ExposureAuto ≠ Off`, `Width` при захвате -> `0x80000106` — из SFNC и `parameters.py:113-118`, на приборе не проверено.
+- 84 и 96 байт посчитаны по заголовку вручную, `ctypes.sizeof` не запускался.
+- `sentrux check .` и тесты не запускались (план — не код). FILES 0.1 глубоко не читался. qex не проверялся.
+
+### Решение лидера по раунду 2 (2026-10-18)
+
+- Принять W1a-1…W1a-4 и пп. 5–12; по W1a-4 — рекомендованный вариант (`fps` как запасной ключ `frame_rate`, `ExposureAuto`/`GainAuto` = Off перед записью).
+- Правки текста 0.2/0.3/0.4 вносит лидер (держатель spec); правка — в новой сессии полосы К (граница контекста ~100k).
+- Цикл ревью плана исчерпал 2 итерации: вердикт по исправленным 0.2/0.3/0.4 — 3-я итерация, `cto` (Fable), узкий объём, фиксированный SHA (`wave-protocol.md`, «Эскалация»).
+
+## Раунд 3 (2026-10-18) — `cto`, 3-я итерация, только W1a
+
+- **Вердикт:** **APPROVED** для W1a (тексты 0.2/0.3/0.4 на SHA `01f9d3229`). `cto` (Fable), 124k токенов, 24 вызова.
+- **Воспроизведение** (через `machine_gate.sh light|medium inspector-bottles-53`): `sizeof MVCC_ENUMENTRY = 84`, `sizeof MVCC_INTVALUE_EX = 96` (поля из `tasks/0.3.md` шаг 3, сверены с `CameraParams.h:952-959`, `:974-983`); экспорты DLL — нет только `MV_CC_Initialize`/`MV_CC_Finalize`, SDK `0x4020003`; `pytest Services/hikvision_camera/tests -q` -> `111 passed`; `git grep -i exposure|gain|frame_rate` по 4 рецептам `hikvision` -> пусто.
+- W1a-1…W1a-4 и пп. 5–12 закрыты (`tasks/0.2.md:17-23`, `:33-36`; `tasks/0.3.md:17-19`, `:30-33`; `tasks/0.4.md:9`, `:19-21`, `:27`, `:32-35`; `recording-schema.md`; `tasks/1.5.md:20`).
+- **Не блокеры, переданы исполнителям брифом:** опись — `getattr(_MvCamCtrldll, name, None)` (`_load_sdk_library` пути не возвращает, `bindings.py:42-60`); колбэк исключений `WINFUNCTYPE(None, c_uint, c_void_p)` (`MvCameraControl.h:1362`); закрывающая скобка `MVCC_INTVALUE_EX` — `:983`; выбор камеры `--serial|--ip` через `MV_CC_EnumDevices`; порядок `StopGrabbing` -> возврат, код выхода H5 при совпавшем возврате — 0; `param_errors` и в ветке `{"status": "error"}` ответа `get_parameters`; тест 0.3 на имена полей структур (`feedback_ctypes_setattr_unknown_field_is_silent`).
+- **Не проверено:** поведение прибора (`0x80000106` на `Width` при захвате, `ExposureTime` при `ExposureAuto ≠ Off`) — 0.5.

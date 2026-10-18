@@ -2,8 +2,8 @@
 
 - **Slug:** camera-device-service
 - **Дата:** 2026-10-18
-- **Статус:** DRAFT
-- **Plan review:** CHANGES 1 (`docs/reviews/2026-10-18_camera-plan-review.md`; правки раунда 3 внесены, ждёт раунд 2 ревью)
+- **Статус:** ACTIVE (одобрен 2026-10-18 после вердикта `cto` по W1a; в работе W1a = 0.2 ∥ 0.3, затем 0.4)
+- **Plan review:** CHANGES 1 -> CHANGES 2 -> **APPROVED** (`cto`, 3-я итерация, W1a, SHA `01f9d3229`; `docs/reviews/2026-10-18_camera-plan-review.md` → «Раунд 3»)
 - **Ветка:** `feat/camera-device-service` — создаёт лидер ДО `docs(plans):` коммита плана.
 
 ## Что где живёт
@@ -16,6 +16,7 @@
 | Решения Р1–Р14, слои, ADR | [`decisions.md`](decisions.md) |
 | Точки коммита, порядок с T5.3, дефекты хаба, риски, открытое | [`design.md`](design.md) |
 | Сводная таблица задач, советы 1–15, связи с соседями | [`matrix.md`](matrix.md) |
+| Схема записи дерева узлов (зонд 0.4, фейк 1.5) | [`recording-schema.md`](recording-schema.md) |
 | Изменения после approve | [`amendments.md`](amendments.md) |
 
 ## Контекст
@@ -78,10 +79,10 @@ Haiku, Opus — 9 ревью волн + 4 сразу + раунды 2 через
 
 ### W1 — пилот, без камер (до возврата MVS ~2026-10-20)
 - Task 0.1: P0 · ADR-CAM-001…004 + `sentrux check .` [PENDING]
-- Task 0.2: P0 · (T12) живой путь `hikvision`: F4, F10, F3 [PENDING]
-- Task 0.3: P0 · (T9a) привязки MVS + опись экспортов DLL [PENDING]
+- Task 0.2: P0 · (T12) живой путь `hikvision`: F4, F10, F3 [DONE]
+- Task 0.3: P0 · (T9a) привязки MVS + опись экспортов DLL [DONE]
 - Task 1.5: P0 · ядро: `interface.py`, README, честный фейк, контрактный тест порта [PENDING] (после 0.1)
-- Task 0.4: P0 · зонд MVS: дерево узлов в JSON, опыты H1/H2/H5 [PENDING] (после 0.3; схема — стадия 0 1.5)
+- Task 0.4: P0 · зонд MVS: дерево узлов в JSON, опыты H1/H2/H5 [DONE] (после 0.3; схема — `recording-schema.md`)
 - Task 1.1: P0 · `FieldMeta.apply` и `enabled_if` [PENDING] (после 0.1)
 
 ### W2 — ядро
