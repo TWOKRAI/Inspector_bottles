@@ -84,6 +84,8 @@ bypasses the gate and prints the gated command to run instead.
 - coordinator → holder: `window <session> open (<HH:MM>), ~<N> min: <what>; close with numbers`
 - holder → coordinator: `window <session> closed (<HH:MM>): <numbers>`
 - coordinator → waiting lanes: the new order and an ETA, every time the order changes.
+- lane → coordinator: `ОТЧЁТ: … — <path> · решение нужно: да|нет` per finished task (template §5 REPORT); the
+  coordinator reads the file and folds it into the day table of `docs/sessions/<YYYY-MM-DD>.md` (lane, task, result, models, tokens, open) and plans from it.
 A window can be split: a short lane slots in while a long lane pauses (2026-10-13: robot 10 min between
 lane Zh's radius and its matrix). The lane on the owner's priority («visible result first») goes first
 when two are ready. Update `machine.lock` before sending the signal, not after.
@@ -114,6 +116,19 @@ COMMITS: Conventional Commits + Why:/Layer:/Refs: trailers (.claude/COMMIT_GUIDE
 LIMITS: 2 iterations per loop, escalate on the 3rd one level up; owner decisions you need → list them, do not guess.
 REPORT: Russian; numbers, not adjectives; a non-empty «what I left open / unreliable»; agentId table;
   at the end of the task — handoff and a new session (/clear), not /compact.
+  Per finished task (not per step) — a report file `docs/reports/<YYYY-MM-DD>_<plan-slug>_<task>.md`, committed
+  with the task; to the coordinator only one line: `ОТЧЁТ: Полоса <X> · Task <Y> · <session> — <absolute path>
+  · решение нужно: да|нет` (owner, 2026-10-18). The file: ≤ ~15 lines, plain words first, no filler; the handoff
+  links it instead of retelling:
+    ОТЧЁТ: Полоса <X> · Task <Y> · <session>
+    Суть: what the task was — 1–2 sentences a non-programmer understands.
+    Итог: what works or changed now; commits, branch, merged or not.
+    Проверка: tests N passed / stand numbers.
+    Проблемы → решение: 1–3 lines.
+    Агенты: role · model · tokens (from each Agent result), total; lead context ~Nk (UI estimate, say so).
+    Открыто: what is left or unreliable.
+    Дальше: next step; what the owner or the coordinator must decide.
+    Подробно: handoff / review / result files, if any.
 LESSONS: the traps the previous session of this lane hit (from its result or messages).
 ```
 

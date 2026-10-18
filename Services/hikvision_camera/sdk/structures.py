@@ -235,3 +235,56 @@ class MVCC_STRINGVALUE(Structure):
         ("nMaxLength", int64_t),  # Максимальная длина
         ("nReserved", c_uint * 2),  # Зарезервировано
     ]
+
+
+class MVCC_ENUMENTRY(Structure):
+    """Элемент enum-узла: значение и его символьное имя (CameraParams.h:952-959).
+
+    ``nValue`` -- вход (какое значение расшифровать), ``chSymbolic`` -- выход.
+    """
+
+    _fields_ = [
+        ("nValue", c_uint),  # [IN] Значение enum-узла
+        ("chSymbolic", c_char * 64),  # [OUT] Символьное имя (MV_MAX_SYMBOLIC_LEN = 64)
+        ("nReserved", c_uint * 4),  # Зарезервировано
+    ]
+
+
+class MVCC_INTVALUE_EX(Structure):
+    """Int64-значение параметра камеры (CameraParams.h:974-983)."""
+
+    _fields_ = [
+        ("nCurValue", int64_t),  # Текущее значение
+        ("nMax", int64_t),  # Максимум
+        ("nMin", int64_t),  # Минимум
+        ("nInc", int64_t),  # Шаг
+        ("nReserved", c_uint * 16),  # Зарезервировано
+    ]
+
+
+# ---------------------------------------------------------------------------
+# enum MV_XML_AccessMode -- режим доступа к узлу (CameraParams.h:925-934)
+# ---------------------------------------------------------------------------
+AM_NI: int = 0  # Not implemented (:927)
+AM_NA: int = 1  # Not available (:928)
+AM_WO: int = 2  # Write only (:929)
+AM_RO: int = 3  # Read only (:930)
+AM_RW: int = 4  # Read and write (:931)
+AM_Undefined: int = 5  # Object is not yet initialized (:932)
+AM_CycleDetect: int = 6  # Внутреннее, детект циклов AccessMode (:933)
+
+# ---------------------------------------------------------------------------
+# enum MV_XML_InterfaceType -- тип интерфейса узла (CameraParams.h:908-922)
+# ---------------------------------------------------------------------------
+IFT_IValue: int = 0  # :910
+IFT_IBase: int = 1  # :911
+IFT_IInteger: int = 2  # :912
+IFT_IBoolean: int = 3  # :913
+IFT_ICommand: int = 4  # :914
+IFT_IFloat: int = 5  # :915
+IFT_IString: int = 6  # :916
+IFT_IRegister: int = 7  # :917
+IFT_ICategory: int = 8  # :918
+IFT_IEnumeration: int = 9  # :919
+IFT_IEnumEntry: int = 10  # :920
+IFT_IPort: int = 11  # :921

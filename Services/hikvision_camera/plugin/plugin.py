@@ -221,11 +221,48 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
                 return {"status": "error", "error": "Камера не инициализирована"}
             if not self._camera.open(self._camera_index):
                 return {"status": "error", "error": "Не удалось открыть камеру"}
+            recipe_error = self._apply_recipe_to_camera()
+            if recipe_error:
+                self._ctx.log_error(f"HikvisionCameraPlugin[{self._camera_id}]: {recipe_error}")
+                return {"status": "error", "error": recipe_error}
             if not self._camera.start_grabbing():
                 return {"status": "error", "error": "Не удалось запустить захват"}
         self._is_capturing = True
         self._ctx.log_info(f"HikvisionCameraPlugin[{self._camera_id}]: захват запущен")
         return {"status": "ok"}
+
+    def _apply_recipe_to_camera(self) -> str | None:
+        """Записать в камеру значения рецепта (вызывать под _camera_lock, после open).
+
+        Пишутся только ключи, которые рецепт задал явно (есть в ctx.config).
+        Отказ узла виден через camera.param_errors и on_error; захват не прерывается.
+        Все значения приводятся к float ДО первой записи: нечисловое значение не
+        оставляет камеру наполовину настроенной.
+
+        Returns:
+            None если всё записано; иначе текст ошибки с именем ключа рецепта.
+        """
+        cfg = self._ctx.config
+        cam = self._camera
+        # Рецепты hikvision задают частоту ключом fps (frame_rate — имя register'а)
+        rate_key = "frame_rate" if "frame_rate" in cfg else "fps"
+        values: dict[str, float] = {}
+        for key in ("exposure_time", "gain", rate_key):
+            if key not in cfg or (key == rate_key and cfg[key] is None):
+                continue
+            try:
+                values[key] = float(cfg[key])
+            except (TypeError, ValueError):
+                return f"Нечисловое значение рецепта: {key}"
+        if "exposure_time" in values:
+            cam.set_node("Enum", "ExposureAuto", 0)
+            cam.set_node("Float", "ExposureTime", values["exposure_time"])
+        if "gain" in values:
+            cam.set_node("Enum", "GainAuto", 0)
+            cam.set_node("Float", "Gain", values["gain"])
+        if rate_key in values:
+            cam.set_node("Float", "AcquisitionFrameRate", values[rate_key])
+        return None
 
     def _do_stop_capture(self) -> dict[str, Any]:
         """Остановить захват (камера остаётся открытой).
@@ -308,11 +345,20 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
         with self._camera_lock:
             if not self._camera or not hasattr(self._camera, "_camera") or self._camera._camera is None:
-                return {"status": "error", "error": "Камера не открыта"}
+                return {
+                    "status": "error",
+                    "error": "Камера не открыта",
+                    "param_errors": dict(self._camera.param_errors) if self._camera else {},
+                }
             params = get_parameters(self._camera._camera)
+            param_errors = dict(self._camera.param_errors)
 
         if params is None:
-            return {"status": "error", "error": "Не удалось получить параметры"}
+            return {
+                "status": "error",
+                "error": "Не удалось получить параметры",
+                "param_errors": param_errors,
+            }
 
         return {
             "status": "ok",
@@ -321,6 +367,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
                 "exposure_time": params.exposure_time,
                 "gain": params.gain,
             },
+            "param_errors": param_errors,
         }
 
     def cmd_set_parameters(self, data: dict) -> dict:
