@@ -431,3 +431,74 @@ def test_two_threads_give_contiguous_seq_intact_lines_and_exact_counters() -> No
     assert len({ln["text"] for ln in lines}) == total
     assert state["last_seq"] == total
     assert state["counters"]["write CMD_SEQ"]["count"] == total
+
+
+# --------------------------------------------------------------------------------------------------
+# Врезки: команда плагина по имени через настоящий путь регистрации; обёртка внедрённого транспорта драйвера
+# --------------------------------------------------------------------------------------------------
+
+
+def test_plugin_command_resolves_by_name_through_command_manager(tmp_path: Any) -> None:
+    """Команда ``robot_exchange_log_get`` найдена по имени в таблице ``commands`` (регистрация, как в процессе хаба)."""
+    from multiprocess_framework.modules.process_module.plugins.testing import MockCommandManager
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+    from Plugins.hub.device_hub.tests.conftest import make_ctx
+    from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+    from Services.robot_comm.tests.e2e_rig_v2 import free_port
+
+    registry_file = tmp_path / "devices.yaml"
+    ctx = make_ctx({"registry_path": str(registry_file)}, tmp_registry=registry_file)
+    ctx.command_manager = MockCommandManager()
+    plugin = DeviceHubPlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    try:
+        plugin._auto_register_commands(ctx)  # то же, что делает фреймворк после configure
+        handlers = ctx.command_manager.commands
+        assert "robot_exchange_log_get" in handlers
+        assert "robot_exchange_log_set" in handlers
+        port = free_port()  # слушателя нет: драйвер создаётся, связи нет
+        res = plugin.cmd_device_upsert(
+            {
+                "id": "rv2",
+                "name": "rv2",
+                "kind": "robot",
+                "protocol": "delta_v2",
+                "transport": {"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": ROBOT_UNIT_ID},
+            }
+        )
+        assert res["status"] == "ok", res
+        assert plugin.cmd_device_connect({"device_id": "rv2"})["status"] == "ok"
+        _bounded(plugin._process_conn_queue)
+        got = _bounded(lambda: handlers["robot_exchange_log_get"]({"device_id": "rv2"}))
+        assert got["status"] == "ok", got
+        assert "lines" in got
+        done = _bounded(lambda: handlers["robot_exchange_log_set"]({"device_id": "rv2", "periodic": True}))
+        assert done["status"] == "ok" and done["periodic"] is True, done
+    finally:
+        _bounded(lambda: plugin.shutdown(ctx))
+
+
+def test_driver_wraps_injected_transport_so_its_calls_reach_the_journal() -> None:
+    """Транспорт, внедрённый в ``RobotDriverV2(transport=...)``, обёрнут: его ``connect`` виден в журнале драйвера."""
+    from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+    from Services.device_hub.registry.entry import DeviceEntry
+    from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+
+    entry = DeviceEntry(
+        id="rv2",
+        name="rv2",
+        kind="robot",
+        protocol="delta_v2",
+        transport={"type": "tcp", "host": "127.0.0.1", "port": 1, "unit_id": ROBOT_UNIT_ID},
+        params={"exchange_log": {"periodic": True}},
+    )
+    drv = RobotDriverV2(entry, None, transport=_Fake())
+    assert _bounded(drv.transport.connect) is True
+    _bounded(lambda: drv.transport.read_registers(_TLM, 32))
+    got = _bounded(lambda: drv.call("exchange_log_get", {}))
+    assert got["status"] == "ok"
+    assert [(ln["tag"], ln["text"]) for ln in got["lines"]] == [
+        ("link", "connect ok"),
+        ("", "R TLM_PROTO_VER..+32"),
+    ]
