@@ -37,3 +37,25 @@
 ### Открыто (ревьюер)
 
 Ничего на приборе; фейк уровня C доказывает только слой ctypes. Реальная DLL с NULL-хендлом не вызывалась. Ctrl+C в split не воспроизводился. `sentrux check .` не запускался. Инъекции по 0.2/0.3 не повторялись.
+
+## Раунд 2 — APPROVED (итерация 2 из 2)
+
+- **SHA:** `5c33101d0`, дифф правок `54e906a62..5c33101d0` (`08dee5d9b` — 0.4, пп. 1, 2, 4, 7; `11634a669` — 0.2, п. 9; `5c33101d0` — 0.3, п. 3). Тот же ревьюер, всего 209k токенов.
+- **Прогоны** (`light`): три файла тестов -> `122 passed`; `ruff` -> 0; скрипты `r2.py`, `r2_plugin.py`, `cfake.py`.
+
+| № | Вход -> наблюдение |
+|---|---|
+| 1 | `o.json` = `{"keep": 1}`, повтор `h1 --write --orig o.json` -> `exit 1 file {"keep": 1} sets 0 opened False` |
+| 2 | файл `--dump` -> `exit 1 sets 0 opened False`; без `--write` -> `exit 1 sets 0`; чужой серийник -> `exit 1 sets 0`; свой `--orig` -> `exit 0`, один `SetEnumValue(TriggerMode, 0)` |
+| 3 | настоящий ctypes: `register(cb)` rc 0, `register(None)` rc `0x80000106`, `register(None)` rc 0 -> исключений нет, в DLL дважды NULL; после ошибки старая ссылка держится, после rc 0 — `None` |
+| 4 | в масштабе `JOIN_MARGIN_S = 0.3`: `--seconds 0.4 --delay 0.4` -> `exit 0`, возврат в `B-capture`; зависший `StopGrabbing` -> `exit 1`, возврат в `MainThread`, после возврата новых вызовов SDK нет |
+| 7 | `KeyboardInterrupt` в возврате -> последние вызовы `MV_CC_CloseDevice`, `MV_CC_DestroyHandle` |
+| 9 | `{"exposure_time": "abc"}` -> `{'status': 'error', 'error': 'Нечисловое значение рецепта: exposure_time'}`, `StartGrabbing` нет; `{"exposure_time": 5000, "fps": 25}` -> `ExposureAuto 0`, `ExposureTime 5000.0`, `AcquisitionFrameRate 25.0`, `StartGrabbing` |
+
+Регрессии раунда 1 нет: `--dump` -> `sets 0`; h1, h5, h2 split на `cfake.py` — exit 0, возврат на месте.
+
+### Замечания (minor, не блокируют; лидер — в открытое, код после APPROVED не правится)
+
+- a. На `KeyboardInterrupt` в `run_experiment` не взводится `session.cancel` — рабочий поток split может звать SDK после закрытия (подозрение, не воспроизведено). Правка — одна строка `session.cancel.set()` перед `finish()`. До правки: Ctrl+C в `split` не нажимать (чек-лист 0.5).
+- b. Вызов SDK, висящий дольше потолка, гоняется с закрытием handle — присуще SDK; сообщение `(жив и после отмены)`.
+- c. `plugin.py:250-252`: `exposure_time: None` -> `error`, а `frame_rate: None` пропускается — одно правило (4.2a).

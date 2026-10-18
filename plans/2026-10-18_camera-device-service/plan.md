@@ -79,10 +79,10 @@ Haiku, Opus — 9 ревью волн + 4 сразу + раунды 2 через
 
 ### W1 — пилот, без камер (до возврата MVS ~2026-10-20)
 - Task 0.1: P0 · ADR-CAM-001…004 + `sentrux check .` [PENDING]
-- Task 0.2: P0 · (T12) живой путь `hikvision`: F4, F10, F3 [PENDING]
-- Task 0.3: P0 · (T9a) привязки MVS + опись экспортов DLL [PENDING]
+- Task 0.2: P0 · (T12) живой путь `hikvision`: F4, F10, F3 [DONE]
+- Task 0.3: P0 · (T9a) привязки MVS + опись экспортов DLL [DONE]
 - Task 1.5: P0 · ядро: `interface.py`, README, честный фейк, контрактный тест порта [PENDING] (после 0.1)
-- Task 0.4: P0 · зонд MVS: дерево узлов в JSON, опыты H1/H2/H5 [PENDING] (после 0.3; схема — стадия 0 1.5)
+- Task 0.4: P0 · зонд MVS: дерево узлов в JSON, опыты H1/H2/H5 [DONE] (после 0.3; схема — `recording-schema.md`)
 - Task 1.1: P0 · `FieldMeta.apply` и `enabled_if` [PENDING] (после 0.1)
 
 ### W2 — ядро
