@@ -27,41 +27,43 @@
 <!-- owner-queue:begin -->
 | # | План | Задача | Заметка |
 |---|---|---|---|
-| 1 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.8 | **полоса Р, веха М1 «всё на одном экране»** (решение владельца 2026-10-14): вид робота из состояния линии, поза в `sim.robot.state`; правит `apps/line_sim/pipeline.yaml` (ключи `robot_state`, `robot_state_hz`). T3.7 `dc209d6ec` DONE |
-| 2 | [line-sim](../line-sim/plan.md) | Task 6.4 | **веха М1**: один экран симуляторов на `pult_web` — после T3.8; `pult_web` и `pipeline.yaml` — по очереди через координатора |
-| 3 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.3 | **полоса Р2 «робот как настоящий»**: команды хаба `robot_*`, потоки драйвера в scope хаба (долг T5.1). Поза драйвера — под `devices/robot_*`, не `sim.*`. T5.2 `a7b7c3c56` DONE |
-| 4 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.4 | полоса Р2: калибровка, бэкенд — после T5.3 |
-| 5 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.5 | полоса Р2: плагины — после T5.3 |
-| 6 | [line-sim](../line-sim/plan.md) | Task 4.1 | полоса С: камера сима как настоящая — fps / размер / цвет-моно; правки `pipeline.yaml` — по очереди с T3.8 и 6.4 |
-| 7 | [line-sim](../line-sim/plan.md) | Task 4.2 | полоса С: ROI — конфиг и live-команды сима |
-| 8 | [line-sim](../line-sim/plan.md) | Task 4.3 | полоса С: фотометрия сцены (`dataset_gen.augment`) |
-| 9 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T0.3 | ⚑ шаг владельца (Virtual Robot DRAStudio + `pc_probe.py all`); передача `docs/handoffs/2026-10-14_t0.3-virtual-robot.md` (VRC с Lua 5.3.1 и Modbus TCP; сухой прогон 2/53 красных) — открывает T4.0, T4.6 |
-| 10 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
-| 11 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
-| 12 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, вместе с L-7 |
-| 13 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
-| 14 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
-| 15 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
-| 16 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
-| 17 | [layer-render](../layer-render/plan.md) | Task 3.1 | **отложено владельцем 2026-10-14** — реализм картинки: пресет v2 (фон, эффекты) → 3.2 → 4.1, 4.2 → 5.1, 5.2 (панели на `pult_web` — после line-sim 6.4) → 6.5 |
-| 18 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | **отложено владельцем 2026-10-14** — веха М2: замер сети на симе → Ф1 переобучение (лучше после layer-render 3.1: эффекты = аугментация); промпт 0.4 выдан координатором 2026-10-14 |
-| 19 | [gui-constructor](../gui-constructor/plan.md) | Task 1.0 | **отложено владельцем 2026-10-14** — Qt: И2–И3 открывают робот Ф6 (T6.0–T6.5) и Qt-редактор слоёв (1.2b, 1.3); до того управление — `pult_web` и `backend_ctl` |
-| 20 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
-| 21 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене |
-| 22 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
-| 23 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.2 | W1 пилот режима волн, P0 первым: живой путь `hikvision` к приезду MVS (~2026-10-20), веха М1; без зависимостей |
-| 24 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.3 | W1 пилот режима волн, P0, параллельно 0.2 (другие файлы); нужна DLL MVS на машине; открывает 0.4 и 4.1 |
-| 25 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.1 | W1 пилот режима волн, P0; ADR-CAM + базовая линия `sentrux check .`; открывает 1.1 и 1.5 |
-| 26 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.5 | W1 пилот режима волн, P0 путь; ядро: `interface.py`, фейк, контрактный тест; стадия 0 (Sonnet) фиксирует и схему JSON для 0.4 |
-| 27 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.4 | W1 пилот режима волн, P0; зонд MVS `--fake`; нужен к 0.5 |
-| 28 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.1 | W1 пилот режима волн, P0 боковой ряд; `FieldMeta.apply/enabled_if`; `--timed medium` — своё окно; параллельно 1.5 |
-| 29 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.5 | P0 ⚑ MVS: в день, когда камера в сети, — взять раньше остальных строк (М1), даже если W4 не начата |
-| 30 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.6 | W2 «ядро» (1.6, 1.8, 2.1, 2.2): входная задача волны; приёмка восстановлена (ревью B1); граница волны — handoff + `/clear` |
-| 31 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 2.3a | W3 (2.3a, 2.3b, 2.4, 4.1, 3.1, 3.2): входная задача волны после W2 |
-| 32 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 4.2a | W4 «MVS вернулись» (4.2a, 4.2b, 4.3, 4.4, 6.1, 0.5, 6.3): К4' одним коммитом; веха М2/М3 |
-| 33 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 6.2 | W5 P0-хвост ID3013 (3.3, 6.2, 6.4): ⚑ когда `192.168.1.10`/`.11` в сети; поставить раньше, если вернутся раньше |
-| 34 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 4.6a | W6 P1 хаб-зеркало (4.6a, 4.6b, 5.1, 4.6c, 4.6d): после М2; один писатель хаба с T5.3 `robot-protocol-v2` |
-| 35 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 5.2 | W7 P1 (5.2, 5.3, 1.3, 1.4, 1.2, 1.7); затем W8 (6.5, 6.6), W9 P2 (3.4, 4.5, 5.4); позицию определяет владелец |
+| 1 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T3.8 | **сегодня, без железа — полоса Р, веха М1 «всё на одном экране»** (очередь 2026-10-18): бриф `feat/robot-v2-t38` от 10-14, ветка отстала от `main` на 21 коммит — перебазировать, worktree пересоздать, посылки брифа воспроизвести; правит `apps/line_sim/pipeline.yaml` (ключи `robot_state`, `robot_state_hz`) |
+| 2 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.2 | **сегодня, без железа — полоса К «камеры к приезду»** (W1a: 0.2, 0.3, 0.4): старый путь `hikvision` F4/F10/F3, ядро не нужно; на старте полосы — ревью плана р.2 (один Opus), блокер только по 0.2–0.4 останавливает полосу |
+| 3 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.3 | сегодня, полоса К, параллельно 0.2 (другие файлы): DLL MVS на машине есть (`C:\Program Files (x86)\Common Files\MVS\Runtime\Win64_x64\MvCameraControl.dll`, проверено 2026-10-18) |
+| 4 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.4 | сегодня, полоса К, после 0.3: зонд MVS `--fake`; без него завтрашняя 0.5 не пишет дерево узлов |
+| 5 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.3 | **сегодня, без железа — полоса Р2 «робот как настоящий»**: бриф ред. 1 `feat/robot-v2-t53` (отстала на 22) — сначала внести 12 пунктов стадии 0 (CHANGES REQUESTED), потом T5.3a..d; файлы T3.8 под запретом брифа; поза драйвера — под `devices/robot_*`, не `sim.*` |
+| 6 | [line-sim](../line-sim/plan.md) | Task 6.4 | веха М1: один экран симуляторов на `pult_web` — после T3.8; `pult_web` и `pipeline.yaml` — по очереди через координатора |
+| 7 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.5 | ⚑ **завтра (2026-10-19), MVS в сети** — взять раньше всех строк ниже: стенд MVS на старом пути (М1), после 0.2 и 0.4 |
+| 8 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 6.2 | ⚑ **завтра, ID3013 в сети** — опыты H1–H6 (без зависимостей); поднята из W5 ради дня с железом |
+| 9 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T0.3 | ⚑ **шаг владельца, завтра — робот рядом**: `pc_probe.py all` на настоящем контроллере (GATE-1); сегодня по желанию — Virtual Robot DRAStudio, передача `docs/handoffs/2026-10-14_t0.3-virtual-robot.md`; открывает T4.0, T4.6 |
+| 10 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.4 | полоса Р2: калибровка, бэкенд — после T5.3 |
+| 11 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T5.5 | полоса Р2: плагины — после T5.3 |
+| 12 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | Task T4.0 | полоса Р2, реальный робот: стенд сухого прогона — после T0.3; дальше T4.1 → T4.5, T4.6 |
+| 13 | [line-sim](../line-sim/plan.md) | Task 4.1 | полоса С: камера сима как настоящая — fps / размер / цвет-моно; правки `pipeline.yaml` — по очереди с T3.8 и 6.4 |
+| 14 | [line-sim](../line-sim/plan.md) | Task 4.2 | полоса С: ROI — конфиг и live-команды сима |
+| 15 | [line-sim](../line-sim/plan.md) | Task 4.3 | полоса С: фотометрия сцены (`dataset_gen.augment`) |
+| 16 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 0.1 | **камеры, часть B (P0, после блока робота)**: W1b (0.1, 1.5, 1.1) — пилот режима волн; если камера стенда робота — MVS, поднять перед T4.0 (вопрос владельцу открыт) |
+| 17 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.5 | W1b: ядро — `interface.py`, фейк, контрактный тест; после 0.1 |
+| 18 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.1 | W1b: `FieldMeta.apply/enabled_if`; `--timed medium` — своё окно; параллельно 1.5 |
+| 19 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 1.6 | W2 «ядро» (1.6, 1.8, 2.1, 2.2); граница волны — handoff + `/clear` |
+| 20 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 2.3a | W3 (2.3a, 2.3b, 2.4, 4.1, 3.1, 3.2) — после W2 |
+| 21 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 4.2a | W4 (4.2a, 4.2b, 4.3, 4.4, 6.1, 6.3): К4' одним коммитом; веха М2/М3 |
+| 22 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 3.3 | W5 P0-хвост ID3013 (3.3, 6.4; 6.2 поднята в строку 8) |
+| 23 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | хвост, обход есть: `BackendDriver(port=8766)`. Один MCP на все бэкенды (E1) → 5.2 |
+| 24 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | хвост: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4) |
+| 25 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | Task 1.7 | хвост, обход есть: закрывать окна стенда, без Ctrl+C. L-8, вместе с L-7 |
+| 26 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | хвост: одна дорога к одному писателю журнала |
+| 27 | [observability-closure](../observability-closure/plan.md) | Task 4.18 | хвост: R-14 — после 4.17 (тот же писатель); S |
+| 28 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | без изменений: FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
+| 29 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task K1.1 | без изменений: не раньше 2026-11-10 |
+| 30 | [layer-render](../layer-render/plan.md) | Task 3.1 | **отложено владельцем 2026-10-14** — реализм картинки: пресет v2 (фон, эффекты) → 3.2 → 4.1, 4.2 → 5.1, 5.2 (панели на `pult_web` — после line-sim 6.4) → 6.5 |
+| 31 | [letters-retrain](../letters-retrain/plan.md) | Task 0.4 | **отложено владельцем 2026-10-14** — веха М2: замер сети на симе → Ф1 переобучение (лучше после layer-render 3.1: эффекты = аугментация); промпт 0.4 выдан координатором 2026-10-14 |
+| 32 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 4.6a | **камеры, часть C (P1)**: W6 хаб-зеркало (4.6a, 4.6b, 5.1, 4.6c, 4.6d) — после T5.3 (один писатель хаба) |
+| 33 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | Task 5.2 | W7 P1 (5.2, 5.3, 1.3, 1.4, 1.2, 1.7); 4.4 и 1.2 — рядом с переработкой GUI; затем W8 (6.5, 6.6), W9 P2 (3.4, 4.5, 5.4) |
+| 34 | [gui-constructor](../gui-constructor/plan.md) | Task 1.0 | **GUI в конце (владелец 2026-10-18)** — Qt: И2–И3 открывают робот Ф6 (T6.0–T6.5) и Qt-редактор слоёв (1.2b, 1.3); до того управление — `pult_web` и `backend_ctl` |
+| 35 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | **отложено владельцем 2026-10-13**, обход R-8: не выделять текст в окнах стенда / старт с `-Recipe`. При возврате: 1.1b (H1, 15 мин) → ревью плана → CTO по 4.1 |
+| 36 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | **отложено владельцем 2026-10-13**: R-10 бьёт только по горячей смене |
+| 37 | [observability-closure](../observability-closure/plan.md) | Task 6.1 | **отложено владельцем 2026-10-13**: Ф6 «ничего мимо журнала» (6.1–6.14); ревью плана r1 — CHANGES REQUESTED, `reports/ph6.review-plan-r1.md` |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
