@@ -211,7 +211,7 @@ class SimRobotHostPlugin(ProcessModulePlugin):
         if (
             not isinstance(hz_cfg, (int, float))
             or isinstance(hz_cfg, bool)
-            or not math.isfinite(hz_cfg)
+            # nan / inf / 10**400 не проходят сравнение; math.isfinite на огромном int бросает OverflowError
             or not 0 <= hz_cfg <= max_hz
         ):
             ctx.health.report_error(
@@ -719,14 +719,18 @@ class SimRobotHostPlugin(ProcessModulePlugin):
 
         Вход вида ``--line`` и пульта 6.4; ``robot_host`` пишет только ``sim.*``.
 
-        Период считается по ``self._clock`` (шов теста); допуск ``1e-9`` не даёт
-        потерять тик из-за округления суммы шагов."""
+        Период считается по ``self._clock`` (шов теста). Допуск — пол-цикла публикации:
+        ``time.monotonic`` на Windows ходит шагом 1/64 с (GetTickCount64), к нему добавляется
+        дрожание ``sleep`` воркера, поэтому «прошло ровно 1/hz» наступает на цикл позже и
+        частота падает вдвое (20 Гц при 50 мс давали 10). С допуском ``publish_ms / 2``
+        период округляется до ближайшего кратного ``publish_ms`` (память
+        project_monotonic_resolution_windows, ADR-SS-021)."""
         hz = self._robot_state_hz
         if hz <= 0 or self._protocol != "v2":
             return
         now = self._clock()
         last = self._robot_state_last
-        if last is not None and now - last < 1.0 / hz - 1e-9:
+        if last is not None and now - last < 1.0 / hz - self._publish_ms / 2000.0:
             return
         self._ctx.state_proxy.set("sim.robot.state", self._robot_state_snapshot(core))
         self._robot_state_last = now

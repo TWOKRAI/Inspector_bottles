@@ -310,3 +310,11 @@ def test_open_propagates_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     client.fail_connect = True
     with pytest.raises(OSError):
         link.open()
+
+
+def test_open_connection_lost_during_initial_read_raises_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    link, client = _link(monkeypatch, "poll", [0.0])
+    client.fail_read = True  # обрыв на начальном чтении снимка
+    with pytest.raises(ConnectionError):
+        link.open()
+    assert client.close_calls == 1, "клиент после обрыва при открытии обязан быть закрыт ровно один раз"
