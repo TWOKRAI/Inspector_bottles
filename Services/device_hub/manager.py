@@ -32,7 +32,7 @@ from Services.device_hub.errors import (
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
 from Services.device_hub.robot_data_ops import OPS as ROBOT_DATA_OPS
-from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, BadArgs, RobotOpError
+from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR, BadArgs, RobotOpError
 from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, RobotDataInvalid, StoreDocumentInvalid
 from Services.robot_comm.robot_data import make_param_source
 
@@ -486,7 +486,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         роботом не нужна. Операции — ``robot_data_ops.OPS``; запись требует ключ ``base_rev``.
         Post: успех -> ``{"status": "ok", ...}``. Ошибка -> ``{"status": "error", "message": <постоянный текст без
         входных значений>}``; ``RevisionConflict`` добавляет ``current_rev``; плохие аргументы — ``TEXT_BAD_ARGS``.
-        ``OSError`` хранилища не перехватывается (отвечает ``_safe_call`` плагина).
+        ``OSError`` хранилища -> постоянный ``TEXT_STORE_ERROR``; полный текст ошибки (путь, имя) — в лог.
         """
         try:
             entry = self.get(dev_id)
@@ -520,6 +520,9 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": str(exc)}
         except (BadArgs, ValidationError):
             return {"status": "error", "message": TEXT_BAD_ARGS}
+        except OSError as exc:  # путь диска и имя из команды в ответ не уходят
+            logger.warning(f"device_hub: robot_data {dev_id!r} {op!r}: ошибка хранилища: {type(exc).__name__}: {exc}")
+            return {"status": "error", "message": TEXT_STORE_ERROR}
         return {"status": "ok", **result}
 
     # ------------------------------------------------------------------ #

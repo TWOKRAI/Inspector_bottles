@@ -296,3 +296,16 @@ def test_param_get_all_bad_override_or_epoch_refused_and_args_cannot_inject(tmp_
     injected = plain.robot_data("r1", "param_get_all", {"overrides": {"P_SPD_DEFAULT": 11}, "epoch_default": 9})
     assert injected["params"]["P_SPD_DEFAULT"] == {"raw": 80, "value": 80.0}
     assert injected["epoch"] == 1
+
+
+def test_store_oserror_answers_constant_text_and_logs_full_error(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """F6 (ревью р.1): ``OSError`` диска -> постоянный текст; путь и имя из команды — только в лог."""
+    manager = _manager(tmp_path)
+    (tmp_path / "robot" / "r1" / "programs" / "secretname.yaml").mkdir(parents=True)  # файл программы — каталог
+    with caplog.at_level("WARNING"):
+        answer = manager.robot_data("r1", "program_get", {"name": "secretname"})
+    assert answer == {"status": "error", "message": "ошибка хранилища данных робота"}
+    assert "secretname" not in answer["message"]
+    assert any("secretname" in record.getMessage() for record in caplog.records)  # полный текст — в логе

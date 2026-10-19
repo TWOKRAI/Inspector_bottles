@@ -53,8 +53,10 @@ Stability: lite
 прогон). Простой подключённый робот (ничего не исполняется) получает один SOFT (решение владельца 2026-10-19:
 выключаемый робот получает стоп и в покое; при остановке процесса стоп получают все подключённые, при
 ``disconnect()`` одного робота — только он). ``disconnect()`` после ``request_stop`` стоп не пишет: одна проверка эха
-(нет эха — ``last_error`` «стоп не подтверждён роботом»), ожидание потоков, закрытие транспорта. Обычный
-``disconnect()`` (без остановки плагина) — стоп с ожиданием эха, как раньше; защёлку ``_shutdown`` он не ставит.
+(нет эха — ``last_error`` «стоп не подтверждён роботом»; нет времени на чтение, срок меньше бюджета записи, —
+«эхо не читалось (нет окна)»), ожидание потоков, закрытие транспорта. Обычный ``disconnect()`` (без остановки
+плагина): задание (HARD), jog и программа — стоп с ожиданием эха; простой подключённый робот — только запись SOFT,
+без чтения эха и без ``last_error`` (T5.3c c3); защёлку ``_shutdown`` он не ставит.
 Потоки поводка и исполнителя живут в области (``spawn``): имя ``<entry.id>-lease-<k>`` / ``<entry.id>-prog-<k>``,
 ``k`` — счётчик модуля.
 """
@@ -80,7 +82,7 @@ from Services.device_hub.drivers.exchange_log import (
     ExchangeLog,
     ExchangeLogTransport,
 )
-from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS
+from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng, to_raw
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, REG, STOP_LEVEL
@@ -160,11 +162,11 @@ TEXT_SYNCING = "идёт синхронизация параметров"
 TEXT_NO_PROGRAM = "программа не найдена"
 TEXT_EPOCH_NOT_WRITTEN = "параметр не применён: метка не записана"
 TEXT_PARAM_DIVERGED = "параметр робота расходится с файлом"
+# Запись значения параметра не получила ответа (не NAK): исход у робота неизвестен, значение возвращается из файла
+TEXT_PARAM_NO_REPLY = "параметр не применён: робот не ответил"
 # Ожидание эха стопа оператора: от входа в обработчик до t0 + 0,8 с (0,2 с запаса из бюджета О9 в 1,0 с)
 _OPERATOR_ECHO_BUDGET_S = 0.8
 _STOP_NAMES = {level: name for name, level in STOP_LEVEL.items()}
-# Ошибки хранилища данных робота: операции драйвера отвечают их постоянным текстом, как ``DeviceManager.robot_data``
-_STORE_ERRORS = (RevisionConflict, InvalidStoreKey, RobotDataInvalid, StoreDocumentInvalid)
 # Срок стопа процесса, если request_stop() позван без срока (отдельный драйвер, не плагин), с
 _PROCESS_STOP_DEFAULT_S = 2.5
 _BUSY_PROGRAM = {"status": "error", "message": "робот занят программой"}
@@ -214,10 +216,17 @@ def _coord(args: Mapping[str, Any], key: str, default: float | None = None) -> f
         raise _BadArgs(key)
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # 10**400 -> OverflowError
         raise _BadArgs(key) from None
     _check_wire(value, key)
     return value
+
+
+def _strict_coord(args: Mapping[str, Any], key: str, default: float | None = None) -> float:
+    """``_coord`` без числа-строкой (``"10"`` — ``_BadArgs``): то же правило, что у ``param_set`` и ``robot_params``."""
+    if isinstance(args.get(key), str):
+        raise _BadArgs(key)
+    return _coord(args, key, default)
 
 
 def _check_wire(value: float, what: str) -> None:
@@ -275,15 +284,31 @@ def _base_rev_arg(args: Mapping[str, Any]) -> str | None:
 def _number_arg(args: Mapping[str, Any], key: str) -> float:
     """Конечное число (bool не число, как ``_coord``); границы — у вызывающего."""
     raw = args.get(key)
-    if type(raw) not in (int, float) or not math.isfinite(raw):
+    if type(raw) not in (int, float):
+        raise _BadArgs(key)
+    try:
+        finite = math.isfinite(raw)
+    except OverflowError:  # int > 1.8e308: в float не переводится
+        finite = False
+    if not finite:
         raise _BadArgs(key)
     return raw
+
+
+class _StoreIOError(Exception):
+    """``OSError`` хранилища (диск): полный текст — в логе, в ответ уходит ``TEXT_STORE_ERROR``."""
+
+
+# Ошибки хранилища данных робота: операции драйвера отвечают их постоянным текстом, как ``DeviceManager.robot_data``
+_STORE_ERRORS = (RevisionConflict, InvalidStoreKey, RobotDataInvalid, StoreDocumentInvalid, _StoreIOError)
 
 
 def _store_refusal(exc: Exception) -> dict:
     """Ответ на ошибку хранилища: постоянный текст; конфликт ревизии несёт ``current_rev`` (как ``robot_data``)."""
     if isinstance(exc, RevisionConflict):
         return {"status": "error", "message": str(exc), "current_rev": exc.current_rev}
+    if isinstance(exc, _StoreIOError):
+        return {"status": "error", "message": TEXT_STORE_ERROR}
     return {"status": "error", "message": str(exc)}
 
 
@@ -651,8 +676,9 @@ class RobotDriverV2(BaseDeviceDriver):
         простой — нет. Защёлка: уровень не ниже уже записан и последняя запись не упала
         — записи нет; упавшая запись повторяется ровно один раз, пока не вышел срок. ``_jog_tx_lock`` берётся с
         таймаутом остатка срока; не взят — стоп пишется без замка (В1). Затем проверка эха этой записи (H7): чтения
-        начинаются, только пока чтение с повторами транспорта успевает до срока; нет эха или нет времени — «стоп не
-        подтверждён роботом» (``last_error``, свойство ``stop_unconfirmed`` для health плагина).
+        начинаются, только пока чтение с повторами транспорта успевает до срока; окно было, эха нет, или запись не
+        прошла — «стоп не подтверждён роботом»; окна нет (срок меньше бюджета записи) — «эхо не читалось (нет окна)»
+        (``last_error``, свойство ``stop_unconfirmed`` для health плагина).
         Не бросает. Повторный вызов безопасен. После него ``connect()`` возвращает False, ``jog_hold`` и запуск
         программы отвечают ``TEXT_STOPPING``.
         """
@@ -1649,8 +1675,8 @@ class RobotDriverV2(BaseDeviceDriver):
         """JOG_STEP {dx, dy, dz=0, drz=0, spd 1..100}: ``done_seq``-команда — отказ при программе / jog / задании /
         синхронизации; ответ после ACK, без ожидания DONE."""
         try:
-            dx, dy = _coord(args, "dx"), _coord(args, "dy")
-            dz, drz = _coord(args, "dz", 0.0), _coord(args, "drz", 0.0)
+            dx, dy = _strict_coord(args, "dx"), _strict_coord(args, "dy")
+            dz, drz = _strict_coord(args, "dz", 0.0), _strict_coord(args, "drz", 0.0)
             speed = _int_in(args, "spd", 1, 100)
         except _BadArgs:
             return {"status": "error", "message": TEXT_BAD_ARGS}
@@ -1661,6 +1687,14 @@ class RobotDriverV2(BaseDeviceDriver):
             return dict(_NOT_CONNECTED)
         result = self._client.jog_step(dx, dy, dz, drz, speed)
         return {"status": "ok", "seq": result.seq}
+
+    def _store_call[T](self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Вызов хранилища: ``OSError`` (диск) -> лог с полным текстом и ``_StoreIOError`` (ответ — константа)."""
+        try:
+            return fn(*args, **kwargs)
+        except OSError as exc:
+            logger.warning(f"робот {self.entry.id!r}: ошибка хранилища данных: {type(exc).__name__}: {exc}")
+            raise _StoreIOError from None
 
     def _op_point_capture(self, args: dict) -> dict:
         """Поза из TLM -> ``Point(frame=None)`` -> вставка в ``points.yaml``; ответ после записи файла (О9-а)."""
@@ -1684,9 +1718,9 @@ class RobotDriverV2(BaseDeviceDriver):
             frame=None,
         )
         try:
-            points, _rev = load_points(store, self.entry.id)
+            points, _rev = self._store_call(load_points, store, self.entry.id)
             points[name] = point
-            rev = save_points(store, self.entry.id, points, base_rev=base_rev)
+            rev = self._store_call(save_points, store, self.entry.id, points, base_rev=base_rev)
         except _STORE_ERRORS as exc:
             return _store_refusal(exc)
         return {"status": "ok", "point": point.to_dict(), "rev": rev}
@@ -1701,11 +1735,11 @@ class RobotDriverV2(BaseDeviceDriver):
         if store is None:
             return {"status": "error", "message": TEXT_NO_STORE}
         try:
-            program, _rev = load_program(store, self.entry.id, name)
+            program, _rev = self._store_call(load_program, store, self.entry.id, name)
             if program is None:
                 return {"status": "error", "message": TEXT_NO_PROGRAM}
-            points, _points_rev = load_points(store, self.entry.id)
-            frames, _frames_rev = load_frames(store, self.entry.id)
+            points, _points_rev = self._store_call(load_points, store, self.entry.id)
+            frames, _frames_rev = self._store_call(load_frames, store, self.entry.id)
         except _STORE_ERRORS as exc:
             return _store_refusal(exc)
         return self.start_program(program, points, frames, name=name)
@@ -1727,18 +1761,19 @@ class RobotDriverV2(BaseDeviceDriver):
         if not self._param_lock.acquire(blocking=False):
             return {"status": "error", "message": TEXT_SYNCING}
         with self._flags_lock:
-            syncing = self._syncing
-        if syncing:
+            stopping, syncing = self._stopping, self._syncing
+        if stopping or syncing:
             self._param_lock.release()
-            return {"status": "error", "message": TEXT_SYNCING}
+            return {"status": "error", "message": TEXT_STOPPING if stopping else TEXT_SYNCING}
         return None
 
     def _op_param_set(self, args: dict) -> dict:
         """PARAM_SET {name, value, base_rev}: границы -> робот -> метка -> файл -> ``self._values`` / ``self._epoch``.
 
-        Порядок (§11.4 «файл — правда»): значение в робота ДО файла; сбой метки после ACK значения — откат значения
-        роботу, ответ-ошибка, файл и ``self._epoch`` не тронуты; сбой записи файла — ``self._epoch`` прежний, следующий
-        тик видит расхождение меток и возвращает роботу значения файла."""
+        Порядок (§11.4 «файл — правда»): значение в робота ДО файла; сбой записи значения без NAK (таймаут, обрыв) или
+        сбой метки после ACK значения — откат значения роботу, ответ-ошибка, файл и ``self._epoch`` не тронуты; сбой
+        записи файла — ``self._epoch`` прежний, следующий тик видит расхождение меток и возвращает роботу значения
+        файла."""
         try:
             name, base_rev = _name_arg(args, "name"), _base_rev_arg(args)
             value = _number_arg(args, "value")
@@ -1749,7 +1784,10 @@ class RobotDriverV2(BaseDeviceDriver):
             return {"status": "error", "message": TEXT_NO_STORE}
         if name not in PARAM_ID or name == "P_CONFIG_EPOCH":
             return {"status": "error", "message": TEXT_UNKNOWN_PARAM}
-        raw = to_raw(name, value)
+        try:
+            raw = to_raw(name, value)
+        except OverflowError:  # 1.7e308 * scale -> inf
+            return {"status": "error", "message": TEXT_BAD_ARGS}
         low, high = param_bounds(name)  # имя проверено выше: PARAM_ID без P_CONFIG_EPOCH
         if not low <= raw <= high:
             return {"status": "error", "message": TEXT_BAD_RANGE}
@@ -1769,32 +1807,33 @@ class RobotDriverV2(BaseDeviceDriver):
         """Тело ``param_set`` под ``_param_lock``."""
         with self._flags_lock:
             old_values, old_epoch = dict(self._values), self._epoch
-        current_rev = load_params(store, self.entry.id).rev
+        current_rev = self._store_call(load_params, store, self.entry.id).rev
         if current_rev != base_rev:
             raise RevisionConflict(current_rev)  # робот не тронут
         client = self._client
         old_raw = old_values[name]
-        client.param_set(name, raw)  # NAK робота -> RobotNak наружу: файл не тронут
+        try:
+            client.param_set(name, raw)
+        except RobotNak:
+            raise  # робот ответил отказом: значение не принято, файл не тронут
+        except Exception as exc:
+            # Исход записи неизвестен (таймаут, обрыв: робот мог применить, ответ потерян) — как сбой метки: значение
+            # файла возвращается роботу, метка и файл не тронуты
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: запись параметра без ответа: {type(exc).__name__}: {exc}")
+            self._roll_back_param(client, name, old_raw, TEXT_PARAM_NO_REPLY)
+            return {"status": "error", "message": TEXT_PARAM_NO_REPLY}
         new_epoch = old_epoch % 65535 + 1
         try:
             client.param_set("P_CONFIG_EPOCH", new_epoch)
         except Exception as exc:
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: метка параметров не записана: {type(exc).__name__}: {exc}")
-            try:
-                client.param_set(name, old_raw)  # одна попытка вернуть значение файла
-            except Exception as back_exc:
-                self._record_err()
-                logger.warning(
-                    f"робот {self.entry.id!r}: откат параметра не прошёл: {type(back_exc).__name__}: {back_exc}"
-                )
-                self._publish_error(TEXT_PARAM_DIVERGED)
-            else:
-                self._publish_error(TEXT_EPOCH_NOT_WRITTEN)
+            self._roll_back_param(client, name, old_raw, TEXT_EPOCH_NOT_WRITTEN)
             return {"status": "error", "message": TEXT_EPOCH_NOT_WRITTEN}
         new_values = {**old_values, name: raw}
         # Запись файла упала -> исключение наружу, self._epoch прежний: тик увидит расхождение меток (§11.4 п.4)
-        rev = save_params(store, self.entry.id, new_values, new_epoch, base_rev=base_rev)
+        rev = self._store_call(save_params, store, self.entry.id, new_values, new_epoch, base_rev=base_rev)
         with self._flags_lock:
             self._values, self._epoch = new_values, new_epoch
         self._pub(
@@ -1813,6 +1852,18 @@ class RobotDriverV2(BaseDeviceDriver):
             "epoch": new_epoch,
             "rev": rev,
         }
+
+    def _roll_back_param(self, client: RobotClientV2, name: str, old_raw: int, failed_text: str) -> None:
+        """Одна попытка вернуть роботу значение файла; итог — в ``last_error``: ``failed_text`` (откат прошёл) или
+        ``TEXT_PARAM_DIVERGED`` (не прошёл: робот и файл расходятся)."""
+        try:
+            client.param_set(name, old_raw)
+        except Exception as exc:
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: откат параметра не прошёл: {type(exc).__name__}: {exc}")
+            self._publish_error(TEXT_PARAM_DIVERGED)
+        else:
+            self._publish_error(failed_text)
 
     def _op_param_apply(self, _args: dict) -> dict:
         """PARAM_APPLY: параметры класса ``reinit`` вступают в силу; под ``_param_lock`` (не при синхронизации)."""

@@ -37,10 +37,12 @@ from Services.robot_comm.robot_data import (
 )
 from Services.robot_comm.store import RobotDataStore
 
-__all__ = ["OPS", "TEXT_BAD_ARGS", "BadArgs", "RobotOpError"]
+__all__ = ["OPS", "TEXT_BAD_ARGS", "TEXT_STORE_ERROR", "BadArgs", "RobotOpError"]
 
 #: Один текст на оба слоя (хаб и драйвер, T5.3d): плохие аргументы команды данных робота. Входные значения не попадают.
 TEXT_BAD_ARGS = "неверные аргументы команды робота"
+#: Сбой диска хранилища (``OSError``): ответ постоянный, полный текст ошибки (путь, имя) — только в лог.
+TEXT_STORE_ERROR = "ошибка хранилища данных робота"
 TEXT_NO_POINT = "точка не найдена"
 TEXT_FRAME_DEGENERATE = "точки СК вырождены"
 TEXT_FRAME_IN_BASE = "точка СК должна быть в базе"

@@ -39,6 +39,10 @@ DEV = "rob_v2"
 TEXT_SYNCING = "идёт синхронизация параметров"
 TEXT_EPOCH_NOT_WRITTEN = "параметр не применён: метка не записана"
 TEXT_DIVERGED = "параметр робота расходится с файлом"
+TEXT_NO_REPLY = "параметр не применён: робот не ответил"
+TEXT_BAD_ARGS = "неверные аргументы команды робота"
+TEXT_STOPPING = "драйвер робота останавливается"
+TEXT_STORE_ERROR = "ошибка хранилища данных робота"
 _SPD = "P_SPD_DEFAULT"
 _SPD_DEFAULT_RAW = 80  # умолчание словаря: драйвер без param_source стартует с ним
 
@@ -334,3 +338,124 @@ def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypa
         assert answer and answer[0]["status"] == "ok", answer
         assert len([1 for op, _ in seen if op == "PARAM_SET"]) == 2  # значение и метка, полной синхронизации нет
         assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью р.1 (F1, F3, F4, F6, F7)
+# --------------------------------------------------------------------------------------------------
+
+
+def _write_then_raise(drv: Any, pid: int, value: int | None = None) -> list[tuple[str, Any]]:
+    """Шов «записать и бросить»: первый ``PARAM_SET`` параметра ``pid`` (со значением ``value``, если задано) настоящий,
+    но ответ «потерян» (``RobotTimeout``): робот применил, драйвер не знает."""
+    client = drv._client
+    real = client.cmd
+    seen: list[tuple[str, Any]] = []
+    fired = [False]
+
+    def cmd(op: str, args: Any) -> Any:
+        seen.append((op, list(args)))
+        hit = op == "PARAM_SET" and args[0] == pid and (value is None or args[1] == value)
+        if hit and not fired[0]:
+            fired[0] = True
+            real(op, args)
+            raise RobotTimeout("res")
+        return real(op, args)
+
+    client.cmd = cmd
+    return seen
+
+
+def test_value_write_lost_ack_rolls_value_back(tmp_path: Path) -> None:
+    """F1: запись значения записалась, ответ потерян (не NAK) -> роботу возвращено значение файла, ``last_error``."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        epoch_before = drv._epoch
+        spd_id = PARAM_ID[_SPD]
+        seen = _write_then_raise(drv, spd_id, 55)
+
+        answer = hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})
+        drv.tick(None)  # тик не расходится с файлом
+
+        assert answer == {"status": "error", "message": TEXT_NO_REPLY}
+        assert hub.robot_spd() == _SPD_DEFAULT_RAW  # робот держит значение файла, а не 55
+        assert drv._epoch == epoch_before
+        assert hub.rig.read("TLM_CFG_EPOCH") == [epoch_before]  # метка не двигалась
+        assert load_params(hub.store, DEV).rev is None  # файл не тронут
+        assert [a for op, a in seen if op == "PARAM_SET"] == [[spd_id, 55], [spd_id, _SPD_DEFAULT_RAW]]
+        assert hub.errors[-1] == TEXT_NO_REPLY
+
+
+def test_value_write_lost_ack_and_rollback_failure_reports_divergence(tmp_path: Path) -> None:
+    with _hub(tmp_path) as hub:
+        spd_id = PARAM_ID[_SPD]
+        _write_then_raise(hub.drv, spd_id, 55)
+        real = hub.drv._client.cmd
+
+        def cmd(op: str, args: Any) -> Any:
+            if op == "PARAM_SET" and args[0] == spd_id and args[1] == _SPD_DEFAULT_RAW:
+                raise RobotTimeout("res")  # откат тоже не дошёл
+            return real(op, args)
+
+        hub.drv._client.cmd = cmd
+        answer = hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})
+        assert answer == {"status": "error", "message": TEXT_NO_REPLY}
+        assert hub.errors[-1] == TEXT_DIVERGED
+
+
+@pytest.mark.parametrize(
+    ("op", "args"),
+    [
+        ("jog_step", {"dx": 10**400, "dy": 0, "spd": 50}),
+        ("jog_step", {"dx": float("inf"), "dy": 0, "spd": 50}),
+        ("jog_step", {"dx": float("nan"), "dy": 0, "spd": 50}),
+        ("param_set", {"name": _SPD, "value": 10**400, "base_rev": None}),
+        ("param_set", {"name": "P_OVERLAP", "value": 1.7e308, "base_rev": None}),
+        ("param_set", {"name": _SPD, "value": float("inf"), "base_rev": None}),
+        ("param_set", {"name": _SPD, "value": float("nan"), "base_rev": None}),
+    ],
+)
+def test_overflow_and_nonfinite_args_refused_before_robot(tmp_path: Path, op: str, args: dict) -> None:
+    """F3: ``OverflowError`` и не-числа -> ``TEXT_BAD_ARGS`` (не английский текст Python), робот не тронут."""
+    with _hub(tmp_path) as hub:
+        seen = _fail_cmd(hub.drv, lambda *_: False)
+        assert hub.call(op, args) == {"status": "error", "message": TEXT_BAD_ARGS}
+        assert [o for o, _ in seen if o in ("JOG_STEP", "PARAM_SET")] == []
+
+
+@pytest.mark.parametrize("key", ["dx", "dy", "dz", "drz"])
+def test_jog_step_numbers_as_strings_refused(tmp_path: Path, key: str) -> None:
+    """F4: число строкой — ``TEXT_BAD_ARGS``, робот не поехал (то же правило, что у ``param_set``)."""
+    with _hub(tmp_path) as hub:
+        seen = _fail_cmd(hub.drv, lambda *_: False)
+        args = {"dx": 1, "dy": 0, "spd": 50, key: "10"}
+        assert hub.call("jog_step", args) == {"status": "error", "message": TEXT_BAD_ARGS}
+        assert [o for o, _ in seen if o == "JOG_STEP"] == []
+
+
+@pytest.mark.parametrize("target", ["programs/secretname.yaml", "points.yaml"])
+def test_store_oserror_in_driver_ops_answers_constant_text(tmp_path: Path, target: str) -> None:
+    """F6: ``OSError`` диска в операциях драйвера -> постоянный текст, имя и путь в ответ не уходят."""
+    with _hub(tmp_path) as hub:
+        (tmp_path / "robot" / DEV / target).mkdir(parents=True)  # файл данных — каталог
+        if target == "points.yaml":
+            answer = hub.call("point_capture", {"name": "secretname", "base_rev": None})
+        else:
+            answer = hub.call("program_run", {"name": "secretname"})
+        assert answer == {"status": "error", "message": TEXT_STORE_ERROR}
+        assert "secretname" not in answer["message"]
+
+
+def test_param_ops_refused_while_stopping(tmp_path: Path) -> None:
+    """F7: ``param_set`` / ``param_apply`` при ``_stopping`` -> ``TEXT_STOPPING``, робот не тронут, замок отпущен."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        seen = _fail_cmd(drv, lambda *_: False)
+        with drv._flags_lock:
+            drv._stopping = True
+        refusal = {"status": "error", "message": TEXT_STOPPING}
+        assert hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None}) == refusal
+        assert hub.call("param_apply", {}) == refusal
+        assert [o for o, _ in seen if o in ("PARAM_SET", "PARAM_APPLY")] == []
+        assert drv._param_lock.acquire(blocking=False)
+        drv._param_lock.release()
