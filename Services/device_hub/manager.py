@@ -12,11 +12,14 @@ publish_cb — инъекция конструктора: ``(path, dict) -> None
 
 from __future__ import annotations
 
+import itertools
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
 from multiprocess_framework.modules.logger_module import get_std_logger
 
 from Services.device_hub.errors import (
@@ -29,6 +32,17 @@ from Services.device_hub.registry.store import RegistryStore
 
 logger = get_std_logger(__name__)
 
+# Срок рассылки стопа, если request_stop_all() позван без срока (не из плагина), с
+_STOP_ALL_DEFAULT_S = 2.5
+# Номер потока рассылки стопа: имя ``stop-<id>-<k>`` уникально в области
+_STOP_SEQ = itertools.count(1)
+_STOP_SEQ_LOCK = threading.Lock()
+
+
+def _next_stop_k() -> int:
+    with _STOP_SEQ_LOCK:
+        return next(_STOP_SEQ)
+
 
 class DeviceManager(BaseManager, ObservableMixin):
     """Менеджер устройств: CRUD + lifecycle + dispatch.
@@ -39,7 +53,8 @@ class DeviceManager(BaseManager, ObservableMixin):
                     Фаза B; полное удаление файлового стора — Фаза E + ADR-DH-007).
         publish_cb: Callback публикации ``(path, data_dict) -> None``.
         spawn:      ``(target, *, name) -> IHandle`` — ``IScope.spawn`` области плагина (T5.3a); получает драйвер
-                    робота v2, чтобы его потоки жили в этой области. ``None`` — драйвер открывает свой корень.
+                    робота v2 (его потоки живут в этой области) и рассылка стопа ``request_stop_all``. ``None`` —
+                    робот ``delta_v2`` не создаётся (``RuntimeError`` фабрики), драйверы v1 работают как прежде.
     """
 
     def __init__(
@@ -84,22 +99,50 @@ class DeviceManager(BaseManager, ObservableMixin):
         self.is_initialized = True
         return True
 
-    def request_stop_all(self) -> None:
-        """Фаза 1 остановки (T5.3a К1): стоп-запрос всем драйверам, у которых он есть, без ожидания потоков.
+    def request_stop_all(self, deadline: float | None = None) -> None:
+        """Фаза 1 остановки (T5.3a К1, T5.3 круг 2): стоп-запрос всем драйверам с ``request_stop`` ПАРАЛЛЕЛЬНО.
 
-        Драйверы v1 и прочих kind метода ``request_stop`` не имеют — не трогаются. Исключение одного драйвера
-        логируется и не мешает следующему.
+        ``deadline`` — абсолютный срок по ``time.monotonic()`` (None — сейчас + ``_STOP_ALL_DEFAULT_S``); он же уходит
+        каждому драйверу. Каждый драйвер — свой поток из ``spawn`` (``stop-<id>-<k>``): молчащий робот не задерживает
+        стоп соседа. Ожидание потоков — до общего срока; не вышедший поток виден в отчёте закрытия его записи.
+        Драйверы v1 и прочих kind метода ``request_stop`` не имеют — не трогаются. Не бросает: область закрыта
+        (второй вызов после ``scope.close``) — лог и возврат; исключение одного драйвера логируется.
+        Без ``spawn`` (менеджер без области: роботов ``delta_v2`` нет) — вызовы по очереди в этом потоке.
         """
+        if deadline is None:
+            deadline = time.monotonic() + _STOP_ALL_DEFAULT_S
         with self._registry_lock:
             drivers = list(self._drivers.items())
-        for dev_id, driver in drivers:
-            request = getattr(driver, "request_stop", None)
-            if not callable(request):
-                continue
+        targets = [(dev_id, req) for dev_id, drv in drivers if callable(req := getattr(drv, "request_stop", None))]
+        if self._spawn is None:
+            for dev_id, request in targets:
+                self._stop_one(dev_id, request, deadline)
+            return
+        handles = []
+        for dev_id, request in targets:
+            name = f"stop-{dev_id}-{_next_stop_k()}"
             try:
-                request()
+                handles.append(self._spawn(lambda _ev, d=dev_id, r=request: self._stop_one(d, r, deadline), name=name))
+            except ScopeClosedError:
+                logger.info(f"device_hub: область потоков закрыта — стоп-запрос {dev_id!r} и следующих пропущен")
+                break
             except Exception:
-                logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
+                logger.exception(f"device_hub: поток стоп-запроса {name!r} не запущен")
+        for handle in handles:
+            try:
+                report = handle.close(max(0.0, deadline - time.monotonic()))
+            except Exception:
+                logger.exception("device_hub: запись потока стоп-запроса не закрыта")
+                continue
+            if report.survivors:
+                logger.warning(f"device_hub: поток стоп-запроса не вышел к сроку: {list(report.survivors)}")
+
+    @staticmethod
+    def _stop_one(dev_id: str, request: Callable[..., None], deadline: float) -> None:
+        try:
+            request(deadline)
+        except Exception:
+            logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
 
     def _on_shutdown(self) -> bool:
         """Стоп-запрос всем, затем отключить все устройства и сохранить реестр."""
@@ -140,6 +183,8 @@ class DeviceManager(BaseManager, ObservableMixin):
             if entry.protocol == "delta_v2":
                 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 
+                if self._spawn is None:  # T5.3 круг 2: потоки робота v2 — только в области плагина
+                    raise RuntimeError(f"робот {entry.id!r} (delta_v2): менеджер без spawn не создаёт драйвер v2")
                 return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
             return RobotDriver(entry, proto)
 

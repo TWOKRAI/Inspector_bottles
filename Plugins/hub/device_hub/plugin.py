@@ -46,6 +46,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 # Бюджет корня области потоков хаба, с (О8): окно ``work`` процесса 3.0 с минус запас 0.5 с
 _SCOPE_BUDGET_S = 2.5
+# Срок остановки плагина (T5.3 круг 2): бюджет 3,0 с минус запас 0,5 с на фазу 4 и отчёт
+_SHUTDOWN_BUDGET_S = 3.0
+_SHUTDOWN_MARGIN_S = 0.5
 # Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
 TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
 
@@ -255,37 +258,42 @@ class DeviceHubPlugin(ProcessModulePlugin):
         ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
 
     def shutdown(self, ctx: PluginContext) -> None:
-        """* -> STOPPED: двухфазная остановка (К1, О8), отключить всех, сохранить реестр.
+        """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
 
-        Порядок: стоп-запрос всем драйверам без ожидания -> воркеры -> одно закрытие корня области -> закрытие
-        драйверов. Повторный вызов и вызов после упавшего ``configure`` — без действия (К7).
+        Срок — абсолютный: ``monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S`` в начале. Фаза 1: стоп всем роботам
+        параллельно (``request_stop_all(deadline)``) -> удаление воркеров -> ``scope.close`` с остатком срока (всегда,
+        ``finally``) -> фаза 4 без записи стопа: одна проверка эха на робота, закрытие сокетов, сохранение реестра.
+        ``remove_worker`` фреймворка (до 5,0 с на поток) в срок НЕ входит: его время съедает остаток бюджета закрытия.
+        Повторный вызов и вызов после упавшего ``configure`` — без действия (К7).
         """
         scope = self._scope
         if scope is None:
             return
         self._scope = None
-        with self._workers_lock:
-            self._shutting_down = True
+        deadline = time.monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S
+        try:
+            with self._workers_lock:
+                self._shutting_down = True
 
-        # Фаза 1: стоп робота уходит до любых ожиданий
-        self._manager.request_stop_all()
+            # Фаза 1: стоп роботам уходит до любых ожиданий, параллельно, до срока
+            self._manager.request_stop_all(deadline)
 
-        # Остановить и удалить per-device воркеры (remove_worker освобождает имена)
-        with self._workers_lock:
-            for dev_id, wname in list(self._device_workers.items()):
-                try:
-                    if ctx.worker_manager is not None:
-                        remove_fn = getattr(ctx.worker_manager, "remove_worker", None)
-                        if remove_fn:
-                            remove_fn(wname)
-                except Exception:  # no-health: defensive teardown воркеров на shutdown
-                    pass
-            self._device_workers.clear()
+            # Остановить и удалить per-device воркеры (remove_worker освобождает имена; вне срока)
+            with self._workers_lock:
+                for dev_id, wname in list(self._device_workers.items()):
+                    try:
+                        if ctx.worker_manager is not None:
+                            remove_fn = getattr(ctx.worker_manager, "remove_worker", None)
+                            if remove_fn:
+                                remove_fn(wname)
+                    except Exception as exc:  # no-health: teardown воркеров на shutdown — лог, следующий воркер
+                        ctx.log_warning(f"DeviceHubPlugin: воркер {wname!r} ({dev_id}) не удалён: {exc!r}")
+                self._device_workers.clear()
+        finally:
+            # Единственное ожидание потоков драйверов, остаток срока. Выжившие — в health через reporter корня
+            scope.close(budget_s=max(0.0, deadline - time.monotonic()))
 
-        # Фаза 2: единственное ожидание потоков драйверов. Выжившие и ошибки уходят в health через reporter корня
-        scope.close(budget_s=_SCOPE_BUDGET_S)
-
-        # Фаза 3: disconnect каждого (потоков уже нет) + сохранить реестр
+        # Фаза 4: disconnect каждого без записи стопа (потоков уже нет) + сохранить реестр
         self._manager.shutdown()
         ctx.log_info("DeviceHubPlugin: shutdown")
 
