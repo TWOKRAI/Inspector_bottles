@@ -690,6 +690,9 @@ def test_s16_stop_between_stopping_check_and_run_chunks_still_aborts() -> None:
 
         def run_chunks(*a: Any, **k: Any) -> Any:
             drv.request_stop()  # из потока исполнителя, после проверки _stopping в _program_loop
+            # Стоп обработан простым роботом ДО g0 прогона (эхо пришло): иначе робот оборвал бы сам SC_RUN, и тест
+            # не зависел бы от повтора стопа в on_progress (диагноз a-I28)
+            _until(lambda: rig.read("TLM_STOP_ACK")[0] != 0, 1.0, "эхо стопа до запуска прогона")
             return real(*a, **k)
 
         client.run_chunks = run_chunks  # type: ignore[method-assign]

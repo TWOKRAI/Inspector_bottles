@@ -66,6 +66,7 @@ class _Journal:
         self.hold_stop_s = 0.0
         self.hold_next_cmd_s = 0.0
         self.hold_ack_read_s = 0.0  # ответ на чтение, захватывающее TLM_STOP_ACK, держится (полуоткрытая связь)
+        self.hold_ack_read_from = 0.0  # perf_counter, с которого держатся чтения (0 — сразу)
         self.cmd_reply_at = 0.0
 
     def count(self, since: float = 0.0) -> int:
@@ -104,7 +105,8 @@ class _Server(SimRobotServer):
 
         async def action(fc, start, addr, count, registers, values):  # noqa: ANN001, ANN202
             result = await inner(fc, start, addr, count, registers, values)
-            if int(fc) in (3, 4) and j.hold_ack_read_s and addr <= _ACK < addr + int(count):
+            late = time.perf_counter() >= j.hold_ack_read_from
+            if int(fc) in (3, 4) and j.hold_ack_read_s and late and addr <= _ACK < addr + int(count):
                 await asyncio.sleep(j.hold_ack_read_s)
                 return result
             if int(fc) not in (6, 16) or values is None:
@@ -543,17 +545,35 @@ def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None
                 ev.wait(0.02)
 
         t = threading.Thread(target=ticker, daemon=True)
+        client = drv._client
+        real_kick = client.kick_heartbeat
+        gate, parked = threading.Event(), threading.Event()
+        gate.set()
+
+        def kick() -> Any:
+            # Шов-рандеву: пульс зовётся из on_poll задания ПОСЛЕ проверки события тика. Пока ворота закрыты, тик
+            # стоит здесь и не видит обрыва задания роботом; следующий on_poll после открытия видит событие ->
+            # ветка _JobStopped входится детерминированно
+            if not gate.is_set() and drv._job_active:
+                parked.set()
+                gate.wait(5.0)
+            return real_kick()
+
+        client.kick_heartbeat = kick  # type: ignore[method-assign]
         try:
             assert drv.call("enqueue_job", {"x_mm": 400.0, "y_mm": 100.0})["status"] == "ok"
             t.start()
             _until(lambda: drv._job_active and _moving(rig) == 1, 10.0, "задание не поехало")
             time.sleep(0.2)
+            gate.clear()
+            assert parked.wait(5.0), "тик не встал на пульсе задания"
             if echo == "silent":
                 rig.core.go_silent()
             t0 = time.perf_counter()
             bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
             set_at = time.perf_counter()
             ev.set()
+            gate.set()
             t.join(5.0)
             exited = time.perf_counter() - set_at
             time.sleep(_SETTLE_S)
@@ -562,6 +582,7 @@ def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None
             assert exited <= 0.5, exited
         finally:
             ev.set()
+            gate.set()
             _quiet(drv.disconnect)
 
 
@@ -644,3 +665,34 @@ def test_echo_check_bounded_when_peer_read_is_held(tmp_path: Path) -> None:
         r1.journal.hold_ack_read_s = r2.journal.hold_ack_read_s = 0.0
         assert elapsed <= 2.5, elapsed
         assert (r1.journal.count(t0), r2.journal.count(t0)) == (1, 1)
+
+
+def test_echo_reads_stop_at_budget_boundary_no_stop_thread_survives(tmp_path: Path) -> None:
+    """H7 граница: эхо молчит, чтения эха с 0.7 с висят 3 с. Чтение не начинается позже ``срок - бюджет`` (0.5 с),
+    поэтому после возврата shutdown живых потоков ``device_hub/stop-*`` нет."""
+    with _Rig() as rig:
+        registry = tmp_path / "devices.yaml"
+        recipe = [
+            {"id": "r1", "name": "r1", "kind": "robot", "protocol": "delta_v2", "transport": _transport(rig.port)}
+        ]
+        ctx = make_ctx({"registry_path": str(registry), "recipe_devices": recipe}, tmp_registry=registry)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+        plugin.start(ctx)
+        assert plugin.cmd_device_connect({"device_id": "r1"})["status"] == "ok"
+        bounded(plugin._process_conn_queue, _CONNECT_S)
+        drv = plugin._manager.get_driver("r1")
+        _jog_moving(drv, rig)
+        with _holding(drv):
+            rig.core.go_silent()
+            t0 = time.perf_counter()
+            rig.journal.hold_ack_read_from = t0 + 0.7
+            rig.journal.hold_ack_read_s = 3.0
+            bounded(lambda: plugin.shutdown(ctx), 10.0)
+            elapsed = time.perf_counter() - t0
+            alive = [t.name for t in threading.enumerate() if t.name.startswith("device_hub/stop-") and t.is_alive()]
+        rig.journal.hold_ack_read_s = 0.0
+        assert alive == []
+        # Поздно начатое чтение держит замок транспорта: закрытие сокета в фазе 4 ждёт его, остановка выходит за срок
+        assert elapsed <= 2.5, elapsed
+        assert rig.journal.count(t0) == 1
