@@ -16,12 +16,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from Services.device_hub.manager import DeviceManager
 from Services.robot_comm.store import RobotDataStore
 
 TEXT_DATA_INVALID = "Данные робота не прошли проверку"
 TEXT_NOT_YAML = "Файл данных робота не YAML-словарь"
 TEXT_BAD_KEY = "Недопустимое имя данных робота"
+TEXT_STORE_ERROR = "ошибка хранилища данных робота"
 TEXT_WDG = "Сторож робота нельзя выключить: P_WDG_TIMEOUT_MS = 0"
 
 
@@ -74,3 +77,14 @@ def test_params_file_not_a_mapping_refused(tmp_path: Path) -> None:
 def test_invalid_store_key_refused(tmp_path: Path) -> None:
     manager, published = _manager(tmp_path, "r" * 65)
     _refused(manager, published, "r" * 65, TEXT_BAD_KEY)
+
+
+def test_params_file_oserror_refused_with_constant_text(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """G3: ``OSError`` диска при создании драйвера -> постоянный текст в ``last_error``, путь — только в лог."""
+    manager, published = _manager(tmp_path, "r1")
+    (tmp_path / "robot" / "r1" / "params.yaml").mkdir(parents=True)  # файл параметров — каталог
+    with caplog.at_level("WARNING"):
+        _refused(manager, published, "r1", TEXT_STORE_ERROR)
+    texts = [str(data) for path, data in published if path.endswith(".last_error")]
+    assert all("params.yaml" not in text for text in texts)
+    assert any("params.yaml" in record.getMessage() for record in caplog.records)  # полный текст — в логе

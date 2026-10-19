@@ -433,6 +433,7 @@ class RobotDriverV2(BaseDeviceDriver):
         self._param_lock = threading.Lock()
         self._store = store  # единственный RobotDataStore процесса (фабрика); None — автономный драйвер
         self._syncing = False  # идёт синхронизация параметров (ставит и снимает d2), под _flags_lock
+        self._connect_deferred = False  # connect() отложен: _param_lock занят — не ошибка, тик повторит без порога
         self._busy = False  # идёт программа
         self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
         self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
@@ -572,6 +573,7 @@ class RobotDriverV2(BaseDeviceDriver):
             self._stop_unconfirmed = False
         was_ready = self._ready
         self._ready = False
+        self._connect_deferred = False
         try:
             if self._transport is not None and self._transport.is_connected and not was_ready:
                 self._transport.disconnect()  # сокет после сбоя мог остаться «подключённым» (см. _link_lost)
@@ -590,6 +592,11 @@ class RobotDriverV2(BaseDeviceDriver):
                 self._ready = was_ready  # посреди подключения появилась активность: синхронизации нет, всё как было
                 return self.is_connected
             self._run_on_connect(client)
+        except _StoreIOError:  # диск хранилища: полный текст уже в логе, в last_error — константа без пути
+            self._record_err()
+            self._last_quality = "bad"
+            self._publish_error(TEXT_STORE_ERROR)
+            return False
         except Exception as exc:
             self._record_err()
             self._last_quality = "bad"
@@ -945,6 +952,8 @@ class RobotDriverV2(BaseDeviceDriver):
             return False
         if self._activity_alive():
             return False
+        if self._param_lock.locked():
+            return False  # идёт param_set / param_apply: подключение ждёт, попыткой и неудачей не считается
         now = self._clock()
         if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
             return False
@@ -953,6 +962,9 @@ class RobotDriverV2(BaseDeviceDriver):
         if self.connect():
             self.reset_reconnect()
             return True
+        if self._connect_deferred:  # замок взяли между проверкой и синхронизацией: следующий тик, без порога
+            self._last_reconnect = -_RECONNECT_THROTTLE_SEC
+            return False
         self._note_reconnect_failed()
         return False
 
@@ -1024,6 +1036,7 @@ class RobotDriverV2(BaseDeviceDriver):
             run = self._jog
             if (
                 self._stopping
+                or self._syncing  # тик прошёл _ensure_connected до начала синхронизации другим потоком
                 or self._busy
                 or self._jog_starting
                 or self._jog_stopping
@@ -1145,12 +1158,15 @@ class RobotDriverV2(BaseDeviceDriver):
     def _begin_sync_locked(self) -> bool:
         """Под ``_flags_lock``: одна секция «активности нет» + ``_syncing = True`` (T5.3d2 DESIGN 2).
 
-        Активность — программа, jog (в том числе стартующий и останавливающийся), задание тика. Занято -> False,
-        флаг не ставится. Снимает флаг вызывающий в ``finally`` (под ``_flags_lock``).
+        Активность — программа, jog (в том числе стартующий и останавливающийся), задание тика; остановка
+        (``_stopping`` / ``_shutdown``) — после стопа параметры роботу не пишутся. Занято -> False, флаг не ставится.
+        Снимает флаг вызывающий в ``finally`` (под ``_flags_lock``).
         """
         run = self._jog
         if (
-            self._busy
+            self._stopping
+            or self._shutdown
+            or self._busy
             or self._prog_alive
             or self._jog_starting
             or self._jog_stopping
@@ -1168,19 +1184,33 @@ class RobotDriverV2(BaseDeviceDriver):
     def _sync_on_connect(self, client: RobotClientV2) -> bool:
         """``connect()``: ``_load_params()`` + ``sync_params`` под ``_param_lock`` и флагом ``_syncing``.
 
-        False — активность появилась после ранней проверки ``connect``: синхронизации не было. Порядок замков:
-        ``_param_lock`` -> ``_flags_lock``; ``_param_lock`` отпускается последним.
+        False — синхронизации не было: активность появилась после ранней проверки ``connect`` или ``_param_lock`` занят
+        (``param_set``; тогда ``_connect_deferred`` — не ошибка, тик повторит). Замок берётся не блокируя: тик не
+        стоит на нём. Порядок замков: ``_param_lock`` -> ``_flags_lock``; ``_param_lock`` отпускается последним.
         """
-        with self._param_lock:
+        if not self._param_lock.acquire(blocking=False):
+            self._connect_deferred = True
+            return False
+        try:
             with self._flags_lock:
                 if not self._begin_sync_locked():
                     return False
             try:
-                self._values, self._epoch = self._load_params()
+                self._values, self._epoch = self._load_params_io()
                 client.sync_params(self._values, self._epoch)
             finally:
                 self._end_sync()
+        finally:
+            self._param_lock.release()
         return True
+
+    def _load_params_io(self) -> tuple[dict[str, int], int]:
+        """``_load_params`` с диском: ``OSError`` хранилища -> лог с полным текстом и ``_StoreIOError``."""
+        try:
+            return self._load_params()
+        except OSError as exc:
+            logger.warning(f"робот {self.entry.id!r}: ошибка хранилища данных: {type(exc).__name__}: {exc}")
+            raise _StoreIOError from None
 
     def _resync_maybe(self, client: RobotClientV2) -> None:
         """Метка робота не равна метке ПК -> sync_params снова (§11.4 п.4), только когда робот свободен.
@@ -1211,8 +1241,11 @@ class RobotDriverV2(BaseDeviceDriver):
                 return
             self._last_resync = now
             try:
-                self._values, self._epoch = self._load_params()
+                self._values, self._epoch = self._load_params_io()
                 client.sync_params(self._values, self._epoch)
+            except _StoreIOError:
+                self._record_err()
+                self._publish_error(TEXT_STORE_ERROR)
             except Exception as exc:
                 self._record_err()
                 self._publish_error(f"синхронизация параметров не удалась: {type(exc).__name__}: {exc}")

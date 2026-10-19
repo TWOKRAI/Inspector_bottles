@@ -459,3 +459,134 @@ def test_param_ops_refused_while_stopping(tmp_path: Path) -> None:
         assert [o for o, _ in seen if o in ("PARAM_SET", "PARAM_APPLY")] == []
         assert drv._param_lock.acquire(blocking=False)
         drv._param_lock.release()
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью р.2 (G1-G4)
+# --------------------------------------------------------------------------------------------------
+
+
+def _join(fn: Callable[[], Any], deadline_s: float) -> tuple[bool, Any]:
+    """``fn`` в daemon-потоке с дедлайном: ``(вернулся, результат)``."""
+    box: list[Any] = []
+    thread = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    thread.start()
+    thread.join(deadline_s)
+    return (not thread.is_alive()), (box[0] if box else None)
+
+
+def _drop_link(hub: _Hub) -> None:
+    """Состояние «связи нет, подключение желаемо»: следующий тик идёт в ``connect``; метки расходятся."""
+    hub.drv._ready = False
+    hub.drv.desired_connected = True
+    hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+
+
+def test_tick_does_not_block_on_param_lock_while_reconnecting(tmp_path: Path) -> None:
+    """G1: ``_param_lock`` занят (``param_set`` / ``param_apply``) — тик возвращается ≤ 0,1 с, попытка не считается;
+    после отпускания следующий тик подключает и синхронизирует."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        seen = _fail_cmd(drv, lambda *_: False)
+        _drop_link(hub)
+        attempts, reconnects = drv._reconnect_attempts, drv.stats["reconnects"]
+        assert drv._param_lock.acquire(blocking=False)
+        try:
+            t0 = time.monotonic()
+            returned, _ = _join(lambda: drv.tick(None), 0.1)
+            elapsed = time.monotonic() - t0
+        finally:
+            drv._param_lock.release()
+        assert returned, "тик ждёт _param_lock"
+        assert elapsed <= 0.1, elapsed
+        assert drv._reconnect_attempts == attempts and drv.stats["reconnects"] == reconnects
+        assert hub.errors == []
+        assert [o for o, _ in seen if o == "PARAM_SET"] == []
+
+        returned, _ = _join(lambda: drv.tick(None), 20.0)  # замок свободен: подключение без порога в 2 с
+        assert returned and drv.is_connected
+        assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
+        assert [o for o, _ in seen if o == "PARAM_SET"] != []
+
+
+def test_connect_defers_when_param_lock_taken_after_probe(tmp_path: Path) -> None:
+    """G1: замок взят уже после ранней проверки (между ``probe`` и синхронизацией) — ``connect`` не блокируется и
+    не публикует ошибку; ``_ensure_connected`` не считает неудачу и повторяет на следующем тике без порога."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        _drop_link(hub)
+        attempts = drv._reconnect_attempts
+        real_probe = drv._client.probe
+
+        def probe() -> Any:
+            result = real_probe()
+            assert drv._param_lock.acquire(blocking=False)  # param_set успел взять замок
+            return result
+
+        drv._client.probe = probe
+        try:
+            returned, _ = _join(lambda: drv.tick(None), 3.0)
+            assert returned, "connect ждёт _param_lock"
+            assert not drv.is_connected
+            assert hub.errors == []
+            assert drv._reconnect_attempts == attempts  # неудачей подключения не считается
+        finally:
+            drv._client.probe = real_probe
+            drv._param_lock.release()
+        returned, _ = _join(lambda: drv.tick(None), 20.0)  # без порога в 2 с
+        assert returned and drv.is_connected
+        assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
+
+
+def test_no_resync_after_shutdown_stop(tmp_path: Path) -> None:
+    """G2: после ``request_stop`` (выключение) тики не синхронизируют параметры, даже при расходящихся метках."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        seen = _fail_cmd(drv, lambda *_: False)
+        hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+        drv.request_stop(time.monotonic() + 2.5)
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end:
+            drv.tick(None)
+            time.sleep(0.1)
+        assert [o for o, _ in seen if o == "PARAM_SET"] == []
+
+
+def test_params_file_oserror_in_resync_and_connect_is_constant_text(tmp_path: Path) -> None:
+    """G3: ``OSError`` чтения ``params.yaml`` (файл — каталог) при пересинхронизации и подключении -> постоянный текст
+    в ``last_error``, путь диска ни в одном опубликованном тексте."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        (tmp_path / "robot" / DEV / "params.yaml").mkdir(parents=True)
+        hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+        drv._resync_maybe(drv._client)
+        assert hub.errors[-1] == TEXT_STORE_ERROR
+        drv._ready = False
+        assert drv.connect() is False
+        assert hub.errors[-1] == TEXT_STORE_ERROR
+        assert all("params.yaml" not in str(text) for text in hub.errors)
+        assert drv._syncing is False
+        assert drv._param_lock.acquire(blocking=False)
+        drv._param_lock.release()
+
+
+def test_dispatch_does_not_start_job_while_syncing(tmp_path: Path) -> None:
+    """G4: тик прошёл ``_ensure_connected`` до того, как другой поток начал синхронизацию (``connect`` вручную):
+    ``_dispatch`` не берёт задание посреди ``sync_params`` (CVT_JOB рядом с ``PARAM_SET`` -> NAK ``E_BUSY``)."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        assert hub.call("enqueue_job", {"x_mm": 300, "y_mm": -150})["status"] == "ok"
+        entered, release, seen = _block_first_param_set(drv)
+        hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+        worker = threading.Thread(target=drv.connect, daemon=True)  # ручное «Подключить» при живом соединении
+        worker.start()
+        try:
+            assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
+            assert drv._syncing is True
+            drv._dispatch(drv._client, True, None)  # хвост тика, начатого до connect
+            assert [o for o, _ in seen if o == "CVT_JOB"] == []
+            assert len(drv._job_queue) == 1  # задание осталось в очереди
+        finally:
+            release.set()
+            worker.join(30.0)
+        assert not worker.is_alive()

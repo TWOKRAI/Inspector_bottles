@@ -408,7 +408,13 @@ class DeviceManager(BaseManager, ObservableMixin):
         entry = self.get(dev_id)
         try:
             driver = self._get_or_create_driver(entry)
-        except (RobotDataInvalid, StoreDocumentInvalid, InvalidStoreKey) as exc:
+        except (RobotDataInvalid, StoreDocumentInvalid, InvalidStoreKey, OSError) as exc:
+            if isinstance(exc, OSError):
+                if entry.protocol != "delta_v2":
+                    raise  # диск хранилища данных робота — только у робота v2
+                # путь диска и имя файла — в лог, в last_error — константа
+                logger.warning(f"device_hub: connect {dev_id!r}: ошибка хранилища: {type(exc).__name__}: {exc}")
+                exc = RobotOpError(TEXT_STORE_ERROR)
             # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
             # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
             self._publish(f"devices.state.{dev_id}.last_error", str(exc))
