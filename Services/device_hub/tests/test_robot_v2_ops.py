@@ -509,33 +509,45 @@ def test_tick_does_not_block_on_param_lock_while_reconnecting(tmp_path: Path) ->
         assert [o for o, _ in seen if o == "PARAM_SET"] != []
 
 
-def test_connect_defers_when_param_lock_taken_after_probe(tmp_path: Path) -> None:
-    """G1: замок взят уже после ранней проверки (между ``probe`` и синхронизацией) — ``connect`` не блокируется и
-    не публикует ошибку; ``_ensure_connected`` не считает неудачу и повторяет на следующем тике без порога."""
+def test_reconnect_holds_param_lock_one_connect_one_probe(tmp_path: Path) -> None:
+    """G1 (замок — действие): подключение тиком держит ``_param_lock`` от порога до конца; другой поток (``param_set``)
+    сразу после ``probe`` замок не берёт; на одно подключение — ровно один ``connect`` транспорта и один ``probe``,
+    ``reconnects`` +1, счётчик попыток и ``last_error`` не тронуты."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
         _drop_link(hub)
-        attempts = drv._reconnect_attempts
-        real_probe = drv._client.probe
+        attempts, reconnects = drv._reconnect_attempts, drv.stats["reconnects"]
+        transport, client = drv._transport, drv._client
+        real_connect, real_probe = transport.connect, client.probe
+        counts = {"connect": 0, "probe": 0}
+        taken: list[bool] = []
+
+        def connect() -> Any:
+            counts["connect"] += 1
+            return real_connect()
 
         def probe() -> Any:
+            counts["probe"] += 1
             result = real_probe()
-            assert drv._param_lock.acquire(blocking=False)  # param_set успел взять замок
+            other = threading.Thread(target=lambda: taken.append(drv._param_lock.acquire(blocking=False)), daemon=True)
+            other.start()  # param_set сразу после probe
+            other.join(2.0)
             return result
 
-        drv._client.probe = probe
+        transport.connect, client.probe = connect, probe
         try:
-            returned, _ = _join(lambda: drv.tick(None), 3.0)
-            assert returned, "connect ждёт _param_lock"
-            assert not drv.is_connected
-            assert hub.errors == []
-            assert drv._reconnect_attempts == attempts  # неудачей подключения не считается
+            returned, _ = _join(lambda: drv.tick(None), 20.0)
         finally:
-            drv._client.probe = real_probe
-            drv._param_lock.release()
-        returned, _ = _join(lambda: drv.tick(None), 20.0)  # без порога в 2 с
+            transport.connect, client.probe = real_connect, real_probe
         assert returned and drv.is_connected
+        assert taken == [False]  # замок у подключения: чужой захват без блокировки не прошёл
+        assert counts == {"connect": 1, "probe": 1}
+        assert drv.stats["reconnects"] == reconnects + 1
+        assert drv._reconnect_attempts == attempts
+        assert hub.errors == []
         assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
+        assert drv._param_lock.acquire(blocking=False)  # замок отпущен
+        drv._param_lock.release()
 
 
 def test_no_resync_after_shutdown_stop(tmp_path: Path) -> None:

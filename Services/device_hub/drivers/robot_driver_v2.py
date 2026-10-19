@@ -433,7 +433,6 @@ class RobotDriverV2(BaseDeviceDriver):
         self._param_lock = threading.Lock()
         self._store = store  # единственный RobotDataStore процесса (фабрика); None — автономный драйвер
         self._syncing = False  # идёт синхронизация параметров (ставит и снимает d2), под _flags_lock
-        self._connect_deferred = False  # connect() отложен: _param_lock занят — не ошибка, тик повторит без порога
         self._busy = False  # идёт программа
         self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
         self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
@@ -554,7 +553,13 @@ class RobotDriverV2(BaseDeviceDriver):
             return (run is not None and run.active) or self._prog_alive
 
     def connect(self) -> bool:
-        """Транспорт -> probe -> sync_params -> действия при подключении (DESIGN п.3).
+        """Ручное подключение: ``_connect_locked`` под ``_param_lock`` (ждёт идущий ``param_set`` — его ввод-вывод
+        ограничен; тик замок берёт не блокируя и не ждёт)."""
+        with self._param_lock:
+            return self._connect_locked()
+
+    def _connect_locked(self) -> bool:
+        """Транспорт -> probe -> sync_params -> действия при подключении (DESIGN п.3); под ``_param_lock``.
 
         Не идёт, пока жив поток поводка или исполнителя, и пока тик держит задание (T3.7 R9): иначе ``probe`` +
         ``sync_params`` посреди хода дали бы NAK ``E_BUSY`` на ``PARAM_SET`` и ``_ready = False``.
@@ -573,7 +578,6 @@ class RobotDriverV2(BaseDeviceDriver):
             self._stop_unconfirmed = False
         was_ready = self._ready
         self._ready = False
-        self._connect_deferred = False
         try:
             if self._transport is not None and self._transport.is_connected and not was_ready:
                 self._transport.disconnect()  # сокет после сбоя мог остаться «подключённым» (см. _link_lost)
@@ -952,21 +956,22 @@ class RobotDriverV2(BaseDeviceDriver):
             return False
         if self._activity_alive():
             return False
-        if self._param_lock.locked():
-            return False  # идёт param_set / param_apply: подключение ждёт, попыткой и неудачей не считается
-        now = self._clock()
-        if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
+        # Замок — действие: идёт param_set / param_apply -> тихий выход до порога, счётчика и транспорта (следующий тик)
+        if not self._param_lock.acquire(blocking=False):
             return False
-        self._last_reconnect = now
-        self._record_reconnect()
-        if self.connect():
-            self.reset_reconnect()
-            return True
-        if self._connect_deferred:  # замок взяли между проверкой и синхронизацией: следующий тик, без порога
-            self._last_reconnect = -_RECONNECT_THROTTLE_SEC
+        try:
+            now = self._clock()
+            if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
+                return False
+            self._last_reconnect = now
+            self._record_reconnect()
+            if self._connect_locked():
+                self.reset_reconnect()
+                return True
+            self._note_reconnect_failed()
             return False
-        self._note_reconnect_failed()
-        return False
+        finally:
+            self._param_lock.release()
 
     # ------------------------------------------------------------------ #
     # Тик
@@ -1182,26 +1187,19 @@ class RobotDriverV2(BaseDeviceDriver):
             self._syncing = False
 
     def _sync_on_connect(self, client: RobotClientV2) -> bool:
-        """``connect()``: ``_load_params()`` + ``sync_params`` под ``_param_lock`` и флагом ``_syncing``.
+        """``_connect_locked``: ``_load_params()`` + ``sync_params`` под флагом ``_syncing``; ``_param_lock`` уже держит
+        вызывающий (``connect`` / ``_ensure_connected``). Порядок замков: ``_param_lock`` -> ``_flags_lock``.
 
-        False — синхронизации не было: активность появилась после ранней проверки ``connect`` или ``_param_lock`` занят
-        (``param_set``; тогда ``_connect_deferred`` — не ошибка, тик повторит). Замок берётся не блокируя: тик не
-        стоит на нём. Порядок замков: ``_param_lock`` -> ``_flags_lock``; ``_param_lock`` отпускается последним.
+        False — синхронизации не было: активность появилась после ранней проверки ``connect``.
         """
-        if not self._param_lock.acquire(blocking=False):
-            self._connect_deferred = True
-            return False
+        with self._flags_lock:
+            if not self._begin_sync_locked():
+                return False
         try:
-            with self._flags_lock:
-                if not self._begin_sync_locked():
-                    return False
-            try:
-                self._values, self._epoch = self._load_params_io()
-                client.sync_params(self._values, self._epoch)
-            finally:
-                self._end_sync()
+            self._values, self._epoch = self._load_params_io()
+            client.sync_params(self._values, self._epoch)
         finally:
-            self._param_lock.release()
+            self._end_sync()
         return True
 
     def _load_params_io(self) -> tuple[dict[str, int], int]:
