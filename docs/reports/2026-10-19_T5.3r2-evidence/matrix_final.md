@@ -1,0 +1,29 @@
+# T5.3 круг 2 — матрица инъекций на финальном SHA 8e20f67f0 (прогон junior)
+
+Ряды, наборы и команды: `run_row.sh <row> <set>`; патчи — `patches_final.py` (копии записей с проверенными якорями), `patches.py` (подключён `PF`). Логи: `<row>-final.log`, диффы: `<row>-final.diff`. Сеть/gate: `machine_gate.sh heavy inspector-bottles-59`.
+Наборы: HA = `test_t53r2_stop_acceptance.py` + `test_t53r2_stop_hazards.py`; SC = `test_robot_v2_scope.py` + `test_robot_v2_scope_acceptance.py`; SCAH = SC + HA.
+«collected» = passed + failed из итоговой строки pytest (набор файлов, не весь `Services/*/tests`).
+
+| row | change | set | collected | failed names | predicted | match |
+|---|---|---|---|---|---|---|
+| BASE-HA | без инъекции | HA | 51 | — (51 passed) | зелёный | yes |
+| BASE-SC | без инъекции | SC | 24 | — (24 passed) | зелёный | yes |
+| n1 | `if False:` в защёлке и `elif False:` | HA | 51 | test_second_process_stop_while_motion_alive_writes_once | lead: этот тест; plan: one_silent, T:A1, T:A3, T:A4 | partial (plan-список не покраснел) |
+| n3 | `attempt > 2` → `attempt > 1` (повтора нет) | HA | 51 | test_a6_first_write_fails_exactly_one_retry; test_failed_write_retried_exactly_once | failed_write_retried; T:A6 | yes |
+| n4 (якорь записи) | повтор без счётчика, до срока `time.monotonic() > deadline` | HA | 51 | test_a2b_peer_reply_held_shutdown_within_budget; test_a2b_peer_reply_held_write_counts_one_retry_for_r1_one_for_r2; test_failed_write_retried_exactly_once; test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop | failed_write_retried; T:A6 | partial (T:A6 зелёный; a2b и jog_cont — не в прогнозе) |
+| n4b | счётчик `attempt > 2` → `attempt > 3` (как в записке лида) | HA | 51 | test_failed_write_retried_exactly_once | failed_write_retried (> 2 → > 3) | yes (T:A6 зелёный — plan ожидал красный) |
+| n5 | фаза 1 последовательно (`if True:`, якорь с `\n`) | HA | 51 | test_a2_second_robot_stop_is_not_held_behind_first; test_a2b_second_robot_write_arrives_within_gap_of_first_arrival; test_silent_r1_does_not_delay_r2; test_spawn_failure_still_writes_one_stop_per_moving_robot[closed]; test_spawn_failure_still_writes_one_stop_per_moving_robot[generic] | silent_r1; T:A2b; T:A2a ЗЕЛЁНЫЙ | partial (A2a покраснел — прогноз «зелёный» не сошёлся; spawn_failure не в прогнозе) |
+| n7 | `scope.close(budget_s=2.5)` | SCAH | 75 | test_s9_survivor_visible | test_s9_survivor_visible | yes |
+| n13 | abort: `_stop_and_wait` → `_stop_latched` | HA | 51 | test_operator_robot_stop_writes_after_latch; test_abort_rejects_bad_level_with_constant_text | test_operator_robot_stop_writes_after_latch | partial (лишний: test_abort_rejects_bad_level_with_constant_text) |
+| n15 | `for dev_id, request in []:` (fail-closed отказ spawn выключен) | HA | 51 | test_spawn_failure_still_writes_one_stop_per_moving_robot[closed]; [generic] | test_spawn_failure_still_writes_one_stop_per_moving_robot | yes |
+| n15b | `inline.append(...)` → `break` | HA | 51 | test_spawn_failure_still_writes_one_stop_per_moving_robot[closed]; [generic] | тот же тест (если покрывает закрытую область) | yes |
+| n17 | `if stopping:` (H-B) → `if False:` | HA | 51 | test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop | test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop | yes |
+| n21 | abort-через-защёлку → `_write_stop` мимо защёлки | HA | 51 | test_job_in_motion_process_stop_one_write_tick_exits_fast[confirms]; [silent] | test_job_in_motion_process_stop_one_write_tick_exits_fast | yes |
+| a-I15 | `request_stop_all(deadline)` → `pass` в plugin.shutdown | SCAH | 75 | 20 падений: test_s9_survivor_visible; test_s11_phase1_hard_stops_long_move_within_window; test_plugin_shutdown_two_robots_within_window; test_a1_one_robot_never_confirms_shutdown_within_budget[a1_jog]; [a1_program]; test_a1_one_robot_never_confirms_exactly_one_stop_write[a1_jog]; test_a2_peer_unconfirmed_shutdown_within_budget; test_a2_peer_unconfirmed_exactly_one_write_per_robot; test_a2_second_robot_stop_is_not_held_behind_first; test_a2b_peer_reply_held_shutdown_within_budget; test_a2b_peer_reply_held_write_counts_one_retry_for_r1_one_for_r2; test_a2b_second_robot_write_arrives_within_gap_of_first_arrival; test_a3_both_unconfirmed_shutdown_within_budget; test_a3_both_unconfirmed_exactly_one_write_per_robot; test_a4_both_confirm_shutdown_within_budget; test_a4_both_confirm_exactly_one_write_per_robot; test_one_silent_robot_one_stop_write_within_deadline; test_echo_check_bounded_when_peer_read_is_held; test_echo_reads_stop_at_budget_boundary_no_stop_thread_survives; test_plugin_shutdown_scope_closed_spawn_is_quiet_and_writes_one_stop | test_plugin_shutdown_two_robots_within_window; T:A1, T:A2a/b, T:A3, T:A4; H: one_silent | yes (прогнозные красные есть; лишних 13 — в «открытом») |
+| n28 | повтор `on_progress`: убрано `stop_generation == run_stop_base` (`if False:`) | HA | 51 | test_program_stop_after_g0_then_progress_does_not_repeat_stop | test_program_stop_after_g0_then_progress_does_not_repeat_stop | yes |
+| a-I28pp | повтор `on_progress` не срабатывает (`level = 0`) | SC | 24 | test_s16_stop_between_stopping_check_and_run_chunks_still_aborts | S16 | yes |
+
+Примечания:
+- Якорь n5 в `manager.py`: файл на диске то CRLF (`w/crlf`, `i/lf`, после первой ревертации без `git show`), то LF (после `git show HEAD:` ревертация пишет LF-блоб). Первая попытка n5 упала на `ANCHOR COUNT 0`; якорь сделан с ведущим `\n`, работает для обоих окончаний. Прогон n5 идёт на LF-файле. Состояние дерева после каждого ряда: `git status --porcelain` пуст.
+- Запись записки лида «n4: счётчик > 2 → > 3» и запись `patches_n.py` («n4: без счётчика, до срока») различаются. Прогнаны оба: `n4-final` (запись) и `n4b-final` (записка).
+- Прогон шёл одним разом на ряд, без повторов. Флипов по времени не наблюдалось; при этом a2b / pymodbus «No response» в логах n4 и a-I15 — это таймингоподобные тесты, их красноту не перепроверяли.
