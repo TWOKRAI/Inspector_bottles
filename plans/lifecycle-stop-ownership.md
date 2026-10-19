@@ -350,36 +350,47 @@ Ctrl+C получает вся консольная группа, ребёнок
 - Из этого потока PM ждёт выхода ребёнка до `stop_process_timeout` (5 с):
   `_cmd_process_stop` (:628) → `stop_process` → `stop_one` (:3671); `restart_process` (:3693, команда `process.restart` и
   супервизор — `monitor/process_monitor.py:1479`); остановка при переключении топологии и её откат —
-  `stop_many` (:1847, :4227). Что из этого исполняется на `message_processor` — проверить на стадии 0 (для `process.stop`
-  и рестарта супервизора — по коду да, для switch — не проверено).
+  `stop_many` (:1847, :4227); `recipe.activate` (`recipe/service.py:356` → `apply_topology`). Все — на `message_processor`
+  (стадия 0, чтением); рестарт супервизора опасен только для живого ребёнка (мёртвый возвращается сразу, :3668). Все пути
+  сходятся в `ProcessRegistry._build_child_stop` → `ChildProcessStop.join_until` (`time.sleep(pause)`, `child_process_stop.py:221`).
 - Ребёнок на выходе в `release_feeders_at_exit` (`shared_resources_module/queues/core/reader_gone.py:139-174`) ждёт без
   срока, пока feeder каждой НЕмаркированной очереди сольёт буфер в pipe (ADR-SRM-016: так защищён медленный живой читатель).
   На одиночном стопе `system_stop=False`, очереди PM метки «читатель ушёл» не имеют и иметь не должны (PM жив).
 - Pipe mp.Queue на Windows ~8 КБ. Проба на настоящем хуке: хвост 1,6 / 4,8 КБ — выход; 9,6 / 19 / 38 КБ — висит, пока
   читатель не вычерпает, после — exit 0. Стенд T5.3 круг 2: 2 робота — 4 зависания из 5 (ответ PM 5,05 с,
   `not reported/lost: ['devices']`), 1 робот — 0 из 4.
-- Отложенного ответа на команду в `command_module`/`router_manager` нет (поиск `deferred`/`reply_later` — пусто).
-  Прецедент «ждать вне `message_processor`» — `_run_when_child_ready` (:1505, FIFO действий на ребёнка).
+- Отложенный ответ во фреймворке есть (`manages_own_reply` + `reply_to_request` с любого потока, `router_manager.py:1343`,
+  PM :3322-3328); прецедент «ждать вне `message_processor`» — `_run_when_child_ready` (:1496, FIFO действий на ребёнка).
 
-**Направления (выбор — на стадии 0 по коду и пробе, не угадывать):**
-- **(а) Ждать, вычерпывая.** `stop_*` из `message_processor` ждёт выхода ребёнка и в том же цикле читает
-  system/state/observability. Вопросы стадии 0: реентерабельность (вычерпанная команда исполнится ВНУТРИ ожидания:
-  вложенный `process.stop`/`restart` того же ребёнка, `system.shutdown`, switch); читать с диспетчеризацией или в буфер с
-  отдачей после ожидания (порядок сообщений); где живёт помощник — PM или `process_module` (одно решение для всех
-  процессов, framework-first); потолок вычерпывания `POLL_DRAIN_CEILING`.
-- **(б) Ждать вне `message_processor`.** Ожидание — в отдельном потоке, ответ команды — после подтверждения смерти.
-  Вопросы стадии 0: отложенный ответ — новый механизм в command/router (цена, слои); ответ «запрос принят» сразу меняет
-  контракт `process.stop` для backend_ctl (`process_restart_verified`), GUI и рестарта — без решения владельца нельзя;
-  порядок команд одному ребёнку (`stop` → `start` подряд); `restart_process` и switch, которые ждут смерти внутри себя.
-- **Критерии выбора:** одно решение на все синхронные пути ожидания из списка «Факт»; П1 соседа не ломается
-  (`ChildProcessStop`, метка ReaderGone, эскалация `_stop_many` — ADR-PMM-030/035); меньше слоёв; контракт ответа команд
-  не меняется молча.
+**Решение стадии 0 (Opus, 2026-10-19, [отчёт](../docs/reviews/2026-10-19_lifecycle-1.8-stage0.md)) — (в): ожидание
+вычерпывает свои каналы в буфер, без диспетчеризации.** Пока `join_until` ждёт ребёнка, поток переносит сообщения из pipe
+своих каналов (фильтр текущего `receive`: system/state/observability) в FIFO-буфер роутера; разбор и диспетчеризация —
+в следующем `receive()`, после возврата обработчика. Ответ команд синхронный, после подтверждённой смерти — как сегодня;
+внутри ожидания не исполняется ни одна команда; порядок сохраняется; одна точка закрывает все пути «Факта».
+Отвергнуто: (а) с диспетчеризацией — реентерабельность (`topology.apply` внутри `restart_process` между stop и
+`create_and_register`); (б) ожидание в другом потоке — теряется неявная сериализация команд PM (`process_monitor.py:1480`);
+отпуск feeder по таймауту; метка «ушёл» на очередях PM.
 
-**Files (граница DESIGN — уточняет стадия 0):** `multiprocess_framework/modules/process_manager_module/**`
-(`process/process_manager_process.py`, `core/process_registry.py`, `core/child_process_stop.py`), при необходимости
-`process_module/threads/system_threads.py` и `shared_resources_module/queues/core/reader_gone.py` — только в границах
-DESIGN; тесты — `process_manager_module/tests/`; ADR — локальный в `process_manager_module/DECISIONS.md`
-(рабочий номер ADR-PMM-037) + `python -m scripts.sync`.
+**DESIGN (кратко; полный — отчёт стадии 0, §4):**
+- D1 `router_module/core/router_manager.py`: `receive()` запоминает свой фильтр каналов в `_recv_local`; публичный
+  `pump_inbound() -> int` — при `depth == 0` возвращает 0, иначе `poll(0.0)` каналов фильтра в `_inbound_stash`
+  (FIFO на канал, потолок `POLL_DRAIN_CEILING`, WARNING один раз за эпизод, не бросает); `_poll_all_channels` отдаёт
+  буфер канала раньше pipe; пустой буфер — ноль затрат.
+- D2 `core/child_process_stop.py`: kwarg `idle` (по умолчанию `time.sleep`), `join_until` зовёт `idle(pause)`; сбой idle —
+  один WARNING и `time.sleep`.
+- D3 `core/process_registry.py`: `stop_wait_idle`, `_build_child_stop` передаёт его в `ChildProcessStop`.
+- D4 `process_manager_process.py`: `_stop_wait_idle(pause_s)` = `pump_inbound()` + сон остатка; ставится в реестр после
+  его создания. Обработчики, `stop_process`, `restart_process`, топология — без правок.
+- ADR-PMM-037 «Ожидание стопа вычерпывает свои каналы» + ADR в `router_module/DECISIONS.md` (контракт `pump_inbound`) +
+  `python -m scripts.sync`.
+
+**Module contract:** `RouterManager.pump_inbound()`, `ChildProcessStop(idle=)`, `ProcessRegistry.stop_wait_idle`;
+ответы команд PM не меняются (синхронные, после подтверждённой смерти).
+
+**Files:** `multiprocess_framework/modules/router_module/{core/router_manager.py, README.md, DECISIONS.md, tests/}`,
+`multiprocess_framework/modules/process_manager_module/{core/child_process_stop.py, core/process_registry.py,
+process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать: `process_module/threads/system_threads.py`,
+`shared_resources_module/queues/core/reader_gone.py`.
 
 **Steps:**
 1. Замер до фикса (стенд, своё окно): дамп стеков devices и PM через ~2,5 с после `process.stop`
@@ -390,13 +401,15 @@ DESIGN; тесты — `process_manager_module/tests/`; ADR — локальны
 4. Реализация по DESIGN; инъекции (прогнозы — до прогона); стенд; ревью (Opus).
 
 **Acceptance (числа ДО — прогноз, ПОСЛЕ — факт):**
-- [ ] Проба из расследования (ребёнок с хвостом 9,6 / 19 / 38 КБ, живой, но занятый читатель — путь PM): до фикса висит;
-  после — ребёнок выходит с exitcode 0 без terminate. Хвост 1,6 / 4,8 КБ — выход, как раньше.
-- [ ] Тест-сторож на механизм (вызов в daemon-потоке, дедлайн join): `process.stop` ребёнка с хвостом > 8 КБ в каналы PM
-  отвечает раньше бюджета PM (5 с), ребёнок в `exit_report` — «reported», не «lost». То же для `restart_process` (и для
-  switch, если стадия 0 подтвердит путь через `message_processor`).
-- [ ] Стенд: 2 робота (сим) через PM / backend_ctl, ≥ 5 остановок — 0 зависаний (было 4 из 5, ответ PM 5,05 с);
-  1 робот — без регресса (ответ PM 0,81–0,95 с).
+- [ ] Проба из расследования (ребёнок с хвостом 9,6 / 19 / 38 КБ, живой, но занятый читатель — путь PM): до фикса жив
+  через 3,0 с; после — выходит с exitcode 0 без terminate. Хвост 1,6 / 4,8 КБ — выход, как раньше.
+- [ ] Тест-сторож на механизм (вызов в daemon-потоке, дедлайн join 12 с; REDS R1–R11 отчёта стадии 0): стоп ребёнка с
+  хвостом 120×321 Б в канал PM отвечает за ≤ 3,0 с (до фикса ≥ 5,0 с), exitcode 0 (до фикса -15), флаг отчёта ребёнка 1
+  (`exit_report` «reported», не «lost»), все 120 сообщений приходят по порядку, очередь PM не помечена «ушёл».
+  Для `restart_process` — exitcode 0 у старого экземпляра (слот `exit_report` снимает `remove_process`, :3695).
+- [ ] Стенд: 2 робота (сим) через PM / backend_ctl, ≥ 5 остановок — 0 зависаний, ответ ≤ 2,0 с, нет `not reported/lost`
+  (было 4 из 5, ответ PM 5,05 с); 1 робот — без регресса (ответ PM 0,81–0,95 с); по одному `process_restart_verified` и
+  `recipe.activate` — ответ < 5,0 с.
 - [ ] Тесты Task 1.2 (метка ReaderGone) и Task 1.3 зелёные (П1 соседнего плана); framework suite в своём окне — 0 новых
   красных против базы.
 - [ ] Инъекции: вернуть синхронное ожидание → сторож красный; сломать вычерпывание / отдельный поток → красный. Прогноз
@@ -406,6 +419,9 @@ DESIGN; тесты — `process_manager_module/tests/`; ADR — локальны
 - Отпускать feeder ребёнка по таймауту (`cancel_join_thread` по сроку) — отвергнуто владельцем
   (`docs/claude/memory/project_graceful_stop_debt.md`: обрезает сообщение живому медленному читателю).
 - «Уменьшить шум хаба на останове» — отодвигает порог, не чинит. Решение — одно для всех процессов, не только devices.
+- Системный стоп (`system.shutdown`): message_processor PM закрывается раньше детей (LIFO корня), pump там не работает —
+  возможна та же блокировка (вывод стадии 0 чтением, не воспроизведён). Сначала замер на стенде (шаг 1); воспроизведётся —
+  отдельная задача, к CTO с числами.
 - Не трогать: `Services/device_hub/**`, `Plugins/hub/**` (T5.3c/d — следующая работа полосы Р2),
   `Services/hikvision_camera/**`, `Services/code_reader/**` (полоса К), `robot/pc_platform_probe/**` (полоса Р).
 - Соседи: `lifecycle-owner-scope` П1 — тесты не ломать, DESIGN сверить; `2026-10-18_camera-device-service` Task 1.7 —
