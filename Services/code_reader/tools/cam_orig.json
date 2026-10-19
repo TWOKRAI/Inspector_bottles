@@ -1,8 +1,12 @@
 {
   "192.168.1.10": {
-    "TriggerMode": 0,
+    "TriggerMode": 1,
     "TriggerSource": 0,
-    "TriggerSelfTriggerPeriod": 300
+    "TriggerSelfTriggerPeriod": 300,
+    "RunningMode": {
+      "value": 0,
+      "type": "enum"
+    }
   },
   "192.168.1.11": {
     "TriggerMode": 1,
