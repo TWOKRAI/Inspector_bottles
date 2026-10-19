@@ -64,7 +64,7 @@ _HELD_REPLY_S = 3.0  # A2b: ответ r1 на запись STOP_REQ держи�
 _RETRY_MIN_GAP_S = 0.9  # A2b: повтор записи только после таймаута прежней, не сразу
 _ONE_WRITE = 1
 _TWO_WRITES = 2
-_NO_WRITES = 0
+_SOFT_LEVEL = 1  # младшие 2 бита значения STOP_REQ (значение = stop_seq * 4 + уровень): SOFT = 1
 
 _JOG = {"dir": 1, "spd": 20}
 _HOLD_PERIOD_S = 0.05
@@ -213,6 +213,7 @@ class Observed:
     moving_after: dict[str, int] = field(default_factory=dict)
     writes: dict[str, list[float]] = field(default_factory=dict)  # штампы ПОСЛЕ старта shutdown
     pre_writes: dict[str, int] = field(default_factory=dict)  # записей ДО старта (диагностика)
+    stop_req_last: dict[str, int] = field(default_factory=dict)  # регистр STOP_REQ на роботе после shutdown (A5)
     leaked_threads: list[str] = field(default_factory=list)
     leaked_roots: list[str] = field(default_factory=list)
 
@@ -362,6 +363,8 @@ def _run_scenario(name: str, tmp_path: Path) -> Observed:
 
             for dev_id in specs:
                 obs.writes[dev_id] = [t - t_start for t in rigs[dev_id].journal.since(t_start)]
+            for dev_id in specs:
+                obs.stop_req_last[dev_id] = int(rigs[dev_id].core.regs[_STOP_REQ_ADDR])
             for dev_id in specs:
                 core = rigs[dev_id].core
                 _until(lambda c=core: _moving(c) == 0, _STOPPED_DEADLINE_S)
@@ -537,14 +540,17 @@ def test_a4_both_confirm_robots_end_not_moving(scenario) -> None:
 
 
 # --------------------------------------------------------------------------------------------------
-# A5: подключённый простаивающий робот — записей STOP_REQ нет
+# A5: подключённый простаивающий робот при остановке процесса — одна запись STOP_REQ уровня SOFT
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a5_idle_robot_gets_no_stop_write(scenario) -> None:
+def test_a5_idle_robot_gets_one_soft_stop_write(scenario) -> None:
+    # решение владельца 2026-10-19: выключаемый робот получает стоп и в покое
     obs = scenario("a5")
     _assert_moving_reached(obs, SCENARIOS["a5"])  # подключён (проверено сборкой сценария) и не движется
-    assert len(obs.writes["r1"]) == _NO_WRITES, f"a5: простаивающему роботу пришли записи STOP_REQ: {_fmt(obs)}"
+    assert len(obs.writes["r1"]) == _ONE_WRITE, f"a5: записей STOP_REQ у простаивающего r1 не 1: {_fmt(obs)}"
+    last = obs.stop_req_last["r1"]
+    assert last & 3 == _SOFT_LEVEL, f"a5: уровень записи STOP_REQ не SOFT (1): регистр={last}; {_fmt(obs)}"
 
 
 # --------------------------------------------------------------------------------------------------

@@ -49,6 +49,7 @@ _SETTLE_S = 0.3
 _STOP_REQ = REG["STOP_REQ"]
 _ACK = REG["TLM_STOP_ACK"]
 _CMD_FLAG = REG["CMD_FLAG"]
+_SOFT_LEVEL = 1  # младшие 2 бита значения STOP_REQ (значение = stop_seq * 4 + уровень)
 TEXT_STOPPING = "драйвер робота останавливается"
 TEXT_UNCONFIRMED = "стоп не подтверждён роботом"
 TEXT_NO_SPAWN = "RobotDriverV2 без spawn не запускает потоки"
@@ -405,7 +406,7 @@ def test_second_request_stop_all_after_scope_close_does_not_raise() -> None:
         bounded(lambda: mgr.request_stop_all(time.monotonic() + 2.5), 10.0)  # исключение — красный
         bounded(mgr.request_stop_all, 10.0)
         _quiet(mgr.shutdown)
-        assert rig.journal.count(t0) == 0  # робот простаивает: записи нет
+        assert rig.journal.count(t0) == 1  # решение владельца 2026-10-19: простой робот получает один SOFT; второго нет
 
 
 @pytest.mark.parametrize("failure", ["closed", "generic"])
@@ -855,5 +856,89 @@ def test_stop_during_program_start_at_most_two_writes() -> None:
             writes = rig.journal.count(t0)
             assert 1 <= writes <= 2, rig.journal.stamps()
             _until(lambda: _moving(rig) == 0, 2.0, "робот не остановился")
+        finally:
+            _quiet(drv.disconnect)
+
+
+# --------------------------------------------------------------------------------------------------
+# Решение владельца 2026-10-19: выключаемый подключённый робот получает стоп и в покое (SOFT)
+# --------------------------------------------------------------------------------------------------
+
+
+def _stop_req_level(rig: _Rig) -> int:
+    """Уровень последней записи STOP_REQ на стороне робота (значение регистра & 3)."""
+    return int(rig.core.regs[_STOP_REQ]) & 3
+
+
+def test_plugin_shutdown_two_idle_robots_one_soft_write_each(tmp_path: Path) -> None:
+    with _Rig() as r1, _Rig() as r2:
+        registry = tmp_path / "devices.yaml"
+        recipe = [
+            {"id": dev_id, "name": dev_id, "kind": "robot", "protocol": "delta_v2", "transport": _transport(rig.port)}
+            for dev_id, rig in (("r1", r1), ("r2", r2))
+        ]
+        ctx = make_ctx({"registry_path": str(registry), "recipe_devices": recipe}, tmp_registry=registry)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+        plugin.start(ctx)
+        for dev_id in ("r1", "r2"):
+            assert plugin.cmd_device_connect({"device_id": dev_id})["status"] == "ok"
+        bounded(plugin._process_conn_queue, _CONNECT_S)
+        assert sorted(plugin._manager.connected_ids()) == ["r1", "r2"]
+        assert (_moving(r1), _moving(r2)) == (0, 0)  # оба простаивают: пустой зелени нет
+        t0 = time.perf_counter()
+        bounded(lambda: plugin.shutdown(ctx), 10.0)
+        elapsed = time.perf_counter() - t0
+        time.sleep(_SETTLE_S)
+        assert elapsed <= 2.5, elapsed
+        assert (r1.journal.count(t0), r2.journal.count(t0)) == (1, 1), (r1.journal.stamps(), r2.journal.stamps())
+        assert (_stop_req_level(r1), _stop_req_level(r2)) == (_SOFT_LEVEL, _SOFT_LEVEL)
+
+
+def test_individual_disconnect_stops_only_that_idle_robot() -> None:
+    rec = _Rec()
+    with _Rig() as r1, _Rig() as r2, _scope() as scope:
+        mgr, _drv = _manager(rec, scope.spawn, {"r1": r1, "r2": r2})
+        try:
+            assert (_moving(r1), _moving(r2)) == (0, 0)
+            t0 = time.perf_counter()
+            bounded(lambda: mgr.disconnect("r1"), _CALL_S)
+            time.sleep(_SETTLE_S)
+            assert r1.journal.count(t0) == 1, r1.journal.stamps()
+            assert _stop_req_level(r1) == _SOFT_LEVEL
+            assert r2.journal.count(t0) == 0, r2.journal.stamps()  # подключённый сосед не тронут
+            assert mgr.connected_ids() == ["r2"]
+        finally:
+            _quiet(mgr.shutdown)
+
+
+def test_idle_robot_disconnect_after_process_stop_no_second_write() -> None:
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        assert _moving(rig) == 0
+        t0 = time.perf_counter()
+        bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+        assert rig.journal.count(t0) == 1, rig.journal.stamps()
+        assert _stop_req_level(rig) == _SOFT_LEVEL
+        bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)  # повтор фазы 1
+        bounded(drv.disconnect, _CALL_S)  # фаза 4
+        time.sleep(_SETTLE_S)
+        assert rig.journal.count(t0) == 1, rig.journal.stamps()
+
+
+def test_idle_robot_process_stop_after_operator_stop_no_second_write() -> None:
+    """Защёлка для простого робота: стоп оператора этого поколения уже лёг, стоп процесса второй записи не даёт."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            assert _moving(rig) == 0
+            t0 = time.perf_counter()
+            assert bounded(lambda: drv.call("abort", {"mode": 1}), _CALL_S) == {"status": "ok", "mode": 1}
+            assert rig.journal.count(t0) == 1, rig.journal.stamps()
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+            time.sleep(_SETTLE_S)
+            assert rig.journal.count(t0) == 1, rig.journal.stamps()
         finally:
             _quiet(drv.disconnect)

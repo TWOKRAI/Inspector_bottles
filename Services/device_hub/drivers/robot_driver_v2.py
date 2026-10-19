@@ -45,12 +45,14 @@ Stability: lite
 попыток на поколение). Защёлка сбрасывается ПОСЛЕ записи движения (JOG_CONT) и при захвате программы / задания
 (поколение прогона), а также в ``connect()``; jog без записанного стопа пишется мимо неё. Исключение из «одна
 запись»: JOG_CONT, вернувшийся после стопа процесса (замок перехода не взят), получает свой стоп (H-B).
-Повтор стопа исполнителя в ``on_progress`` (микроокно
-К1) идёт мимо защёлки: он привязан к прогону (один раз на прогон). Простой робот (ничего не исполняется) стопа не
-получает. ``disconnect()`` после ``request_stop`` стоп не пишет: одна проверка эха (нет эха — ``last_error``
-«стоп не подтверждён роботом»), ожидание потоков, закрытие транспорта. Обычный ``disconnect()`` (без остановки
-плагина) — стоп с ожиданием эха, как раньше; защёлку ``_shutdown`` он не ставит. Потоки поводка и исполнителя живут
-в области (``spawn``): имя ``<entry.id>-lease-<k>`` / ``<entry.id>-prog-<k>``, ``k`` — счётчик модуля.
+Повтор стопа исполнителя в ``on_progress`` (микроокно К1) идёт мимо защёлки: он привязан к прогону (один раз на
+прогон). Простой подключённый робот (ничего не исполняется) получает один SOFT (решение владельца 2026-10-19:
+выключаемый робот получает стоп и в покое; при остановке процесса стоп получают все подключённые, при
+``disconnect()`` одного робота — только он). ``disconnect()`` после ``request_stop`` стоп не пишет: одна проверка эха
+(нет эха — ``last_error`` «стоп не подтверждён роботом»), ожидание потоков, закрытие транспорта. Обычный
+``disconnect()`` (без остановки плагина) — стоп с ожиданием эха, как раньше; защёлку ``_shutdown`` он не ставит.
+Потоки поводка и исполнителя живут в области (``spawn``): имя ``<entry.id>-lease-<k>`` / ``<entry.id>-prog-<k>``,
+``k`` — счётчик модуля.
 """
 
 from __future__ import annotations
@@ -512,7 +514,9 @@ class RobotDriverV2(BaseDeviceDriver):
             self._sleep(_ON_CONNECT_POLL_S)
 
     def disconnect(self) -> None:
-        """Стоп (задание HARD, jog SOFT, программа SOFT), ожидание потоков через ``IHandle.close``, закрытие транспорта.
+        """Стоп (задание HARD, jog SOFT, программа SOFT, простой подключённый робот SOFT), ожидание потоков, закрытие.
+
+        Потоки ждёт ``IHandle.close``, затем закрывается транспорт.
 
         Защёлку ``_shutdown`` не ставит: после обычного отключения ручной ``connect()`` снова работает (К1).
         После ``request_stop()`` (фаза 4 остановки плагина) стоп не пишется и эхо не читается (проверено в фазе 1).
@@ -542,8 +546,9 @@ class RobotDriverV2(BaseDeviceDriver):
         """Фаза 1 остановки плагина (К1): защёлка ``_shutdown`` и одна запись стопа без эха, потоков и закрытия.
 
         ``deadline`` — абсолютный срок по ``time.monotonic()`` (None — сейчас + ``_PROCESS_STOP_DEFAULT_S``). Уровень —
-        сильнейший нужный: задание и программа HARD (SOFT посреди хода ждал бы цели), jog SOFT. Простой робот (нет
-        задания, программы и jog) стопа не получает. Защёлка: уровень не ниже уже записан и последняя запись не упала
+        сильнейший нужный: задание и программа HARD (SOFT посреди хода ждал бы цели), jog SOFT. Простой подключённый
+        робот (нет задания, программы и jog) тоже получает один SOFT (решение владельца 2026-10-19); не подключённый
+        простой — нет. Защёлка: уровень не ниже уже записан и последняя запись не упала
         — записи нет; упавшая запись повторяется ровно один раз, пока не вышел срок. ``_jog_tx_lock`` берётся с
         таймаутом остатка срока; не взят — стоп пишется без замка (В1). Затем проверка эха этой записи (H7): чтения
         начинаются, только пока чтение с повторами транспорта успевает до срока; нет эха или нет времени — «стоп не
@@ -591,7 +596,14 @@ class RobotDriverV2(BaseDeviceDriver):
                 run.wake.set()
             jog_in_flight = self._jog_starting  # JOG_CONT в полёте (замок не взят): стоп нужен и ему
             hard = self._prog_alive or self._job_active
-            level = STOP_LEVEL["HARD"] if hard else (STOP_LEVEL["SOFT"] if stop_jog or jog_in_flight else 0)
+            if hard:
+                level = STOP_LEVEL["HARD"]
+            elif stop_jog or jog_in_flight:
+                level = STOP_LEVEL["SOFT"]
+            elif self.is_connected:
+                level = STOP_LEVEL["SOFT"]  # решение владельца 2026-10-19: выключаемый робот получает стоп и в покое
+            else:
+                level = 0  # простой и не подключён: писать некуда
             # Jog без записанного стопа (stop_sent False) или JOG_CONT в полёте пишется всегда, мимо защёлки (H-A)
             latch_applies = not (stop_jog or jog_in_flight)
             attempts = self._latch_attempts
@@ -601,7 +613,7 @@ class RobotDriverV2(BaseDeviceDriver):
             elif not (attempts == 1 and self._latch_failed):
                 level = 0  # стоп процесса уже записан или повтор уже был: в поколении не больше двух попыток
         if not level or self._client is None:
-            return  # простой робот, стоп уже записан или нет клиента: записи нет
+            return  # простой неподключённый робот, стоп уже записан или нет клиента: записи нет
         jog_run = run if stop_jog else None
         while True:
             with self._flags_lock:
@@ -741,6 +753,19 @@ class RobotDriverV2(BaseDeviceDriver):
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп программы не доставлен: {type(exc).__name__}: {exc}")
+        if not (job_active or stop_jog or prog_alive) and self.is_connected:
+            # Решение владельца 2026-10-19: отключаемый подключённый робот получает стоп и в покое (SOFT);
+            # защёлка гасит вторую запись в том же поколении (jog со стопом, предыдущий request_stop)
+            with self._flags_lock:
+                covered = self._latch_level >= STOP_LEVEL["SOFT"] and not self._latch_failed
+            if not covered:
+                try:
+                    self._stop_and_wait(STOP_LEVEL["SOFT"])
+                except Exception as exc:
+                    self._record_err()
+                    logger.warning(
+                        f"робот {self.entry.id!r}: стоп простого робота не доставлен: {type(exc).__name__}: {exc}"
+                    )
 
     def _close_thread(self, handle: IHandle, budget_s: float) -> None:
         """Дождаться выхода потока через его запись. Выживший виден: ``tx_err`` +1, ``last_error``; не бросает.
