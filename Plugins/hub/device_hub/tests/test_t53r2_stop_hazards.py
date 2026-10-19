@@ -927,8 +927,9 @@ def test_idle_robot_disconnect_after_process_stop_no_second_write() -> None:
         assert rig.journal.count(t0) == 1, rig.journal.stamps()
 
 
-def test_idle_robot_process_stop_after_operator_stop_no_second_write() -> None:
-    """Защёлка для простого робота: стоп оператора этого поколения уже лёг, стоп процесса второй записи не даёт."""
+def test_idle_robot_shutdown_after_operator_stop_still_writes() -> None:
+    """Один стоп на каждое выключение: стоп оператора этого поколения выключение не покрывает (2 записи), повторный
+    вызов в том же выключении (второй request_stop, disconnect) третьей не даёт."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
         drv = _driver(rig, rec, scope.spawn)
@@ -939,6 +940,35 @@ def test_idle_robot_process_stop_after_operator_stop_no_second_write() -> None:
             assert rig.journal.count(t0) == 1, rig.journal.stamps()
             bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
             time.sleep(_SETTLE_S)
-            assert rig.journal.count(t0) == 1, rig.journal.stamps()
+            assert rig.journal.count(t0) == 2, rig.journal.stamps()
+            assert _stop_req_level(rig) == _SOFT_LEVEL
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+            bounded(drv.disconnect, _CALL_S)
+            time.sleep(_SETTLE_S)
+            assert rig.journal.count(t0) == 2, rig.journal.stamps()
         finally:
             _quiet(drv.disconnect)
+
+
+def test_shutdown_after_jog_release_long_ago_writes_one_stop(tmp_path: Path) -> None:
+    with _Rig() as rig:
+        registry = tmp_path / "devices.yaml"
+        recipe = [
+            {"id": "r1", "name": "r1", "kind": "robot", "protocol": "delta_v2", "transport": _transport(rig.port)}
+        ]
+        ctx = make_ctx({"registry_path": str(registry), "recipe_devices": recipe}, tmp_registry=registry)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+        plugin.start(ctx)
+        assert plugin.cmd_device_connect({"device_id": "r1"})["status"] == "ok"
+        bounded(plugin._process_conn_queue, _CONNECT_S)
+        drv = plugin._manager.get_driver("r1")
+        _jog_moving(drv, rig)
+        t0 = time.perf_counter()
+        assert bounded(lambda: drv.call("jog_release", {}), _CALL_S)["status"] == "ok"
+        _until(lambda: _moving(rig) == 0, 2.0, "робот не остановился после отпускания jog")
+        assert rig.journal.count(t0) == 1, rig.journal.stamps()  # стоп отпускания записан
+        time.sleep(1.0)
+        bounded(lambda: plugin.shutdown(ctx), 10.0)
+        time.sleep(_SETTLE_S)
+        assert rig.journal.count(t0) == 2, rig.journal.stamps()  # ровно одна запись выключения сверх отпускания

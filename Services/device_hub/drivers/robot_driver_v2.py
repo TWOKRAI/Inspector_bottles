@@ -43,7 +43,8 @@ Stability: lite
 (на робота) помнит сильнейший записанный уровень и «последняя запись упала»: стоп процесса не пишется, если уровень не
 ниже уже записан; упавшая запись повторяется ровно один раз и только если успевает до срока (не больше двух
 попыток на поколение). Защёлка сбрасывается ПОСЛЕ записи движения (JOG_CONT) и при захвате программы / задания
-(поколение прогона), а также в ``connect()``; jog без записанного стопа пишется мимо неё. Исключение из «одна
+(поколение прогона), в ``connect()`` и первым запросом выключения (``request_stop`` / ``disconnect``: один стоп на
+выключение, прежние стопы его не покрывают); jog без записанного стопа пишется мимо неё. Исключение из «одна
 запись»: JOG_CONT, вернувшийся после стопа процесса (замок перехода не взят), получает свой стоп (H-B).
 Повтор стопа исполнителя в ``on_progress`` (микроокно К1) идёт мимо защёлки: он привязан к прогону (один раз на
 прогон). Простой подключённый робот (ничего не исполняется) получает один SOFT (решение владельца 2026-10-19:
@@ -523,6 +524,10 @@ class RobotDriverV2(BaseDeviceDriver):
         """
         with self._flags_lock:
             shutdown = self._shutdown
+            if not shutdown:
+                # Одно выключение — один стоп: отключение робота открывает новое поколение защёлки, прежние стопы
+                # (оператор, отпускание jog) его не покрывают
+                self._latch_reset_locked()
         if not shutdown:  # после request_stop стоп не пишется: эхо проверено в фазе 1 (H7)
             self._request_stop(program_level=STOP_LEVEL["SOFT"])
         with self._flags_lock:
@@ -559,6 +564,10 @@ class RobotDriverV2(BaseDeviceDriver):
         if deadline is None:
             deadline = time.monotonic() + _PROCESS_STOP_DEFAULT_S
         with self._flags_lock:
+            if not self._shutdown:
+                # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
+                # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
+                self._latch_reset_locked()
             self._shutdown = True
         locked = self._jog_tx_lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
         try:
@@ -755,17 +764,27 @@ class RobotDriverV2(BaseDeviceDriver):
                 logger.warning(f"робот {self.entry.id!r}: стоп программы не доставлен: {type(exc).__name__}: {exc}")
         if not (job_active or stop_jog or prog_alive) and self.is_connected:
             # Решение владельца 2026-10-19: отключаемый подключённый робот получает стоп и в покое (SOFT);
-            # защёлка гасит вторую запись в том же поколении (jog со стопом, предыдущий request_stop)
+            # защёлка гасит вторую запись в том же выключении (jog со стопом этого вызова)
             with self._flags_lock:
                 covered = self._latch_level >= STOP_LEVEL["SOFT"] and not self._latch_failed
             if not covered:
                 try:
-                    self._stop_and_wait(STOP_LEVEL["SOFT"])
+                    value = self._write_stop(STOP_LEVEL["SOFT"])
                 except Exception as exc:
                     self._record_err()
                     logger.warning(
-                        f"робот {self.entry.id!r}: стоп простого робота не доставлен: {type(exc).__name__}: {exc}"
+                        f"робот {self.entry.id!r}: стоп простого робота не записан: {type(exc).__name__}: {exc}"
                     )
+                else:
+                    try:
+                        self._client.await_stop_echo(
+                            value, value & 3, deadline=time.monotonic() + self._cfg.soft_echo_timeout_s
+                        )
+                    except Exception as exc:
+                        self._record_err()
+                        logger.warning(
+                            f"робот {self.entry.id!r}: стоп записан, эхо не подтверждено: {type(exc).__name__}: {exc}"
+                        )
 
     def _close_thread(self, handle: IHandle, budget_s: float) -> None:
         """Дождаться выхода потока через его запись. Выживший виден: ``tx_err`` +1, ``last_error``; не бросает.
