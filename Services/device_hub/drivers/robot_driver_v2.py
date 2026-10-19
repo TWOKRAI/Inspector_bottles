@@ -22,6 +22,9 @@ Public API:
     корней не открывает и ``Thread`` не создаёт (T5.3 круг 2): без ``spawn`` операции с потоком (``jog_hold``, запуск
     программы / возврата / смены инструмента) бросают ``RuntimeError``; без потоков драйвер работает как прежде.
     ``call("abort", {mode})`` — стоп оператора: пишется всегда, защёлка стопа процесса его не блокирует.
+    T5.3d d1: ``store=`` (``RobotDataStore``) и операции ``stop`` {level}, ``servo``, ``do_set``, ``jog_step``,
+    ``point_capture``, ``param_set``, ``param_apply``, ``program_run``, ``program_abort``; плохие аргументы —
+    ``TEXT_BAD_ARGS``; ``param_set`` / ``param_apply`` берут ``_param_lock`` не блокируя.
 
 Stability: lite
 
@@ -77,12 +80,24 @@ from Services.device_hub.drivers.exchange_log import (
     ExchangeLog,
     ExchangeLogTransport,
 )
+from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
-from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng
+from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng, to_raw
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, REG, STOP_LEVEL
-from Services.robot_comm.errors import RobotAborted, RobotCommandError, RobotNak, RobotTimeout
+from Services.robot_comm.errors import (
+    InvalidStoreKey,
+    RevisionConflict,
+    RobotAborted,
+    RobotCommandError,
+    RobotDataInvalid,
+    RobotNak,
+    RobotTimeout,
+    StoreDocumentInvalid,
+)
 from Services.robot_comm.programs import Point, compile_program
 from Services.robot_comm.programs.generators import return_slot, toolchange
+from Services.robot_comm.robot_data import load_frames, load_params, load_points, load_program, save_params, save_points
+from Services.robot_comm.store import RobotDataStore
 
 __all__ = ["RobotDriverV2"]
 
@@ -127,6 +142,20 @@ TEXT_WDG_INTERVAL = "интервал тика больше четверти т�
 TEXT_NO_SPAWN = "RobotDriverV2 без spawn не запускает потоки"
 TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
 TEXT_BAD_STOP_LEVEL = "неверный уровень стопа"
+# Операции T5.3d d1: постоянные тексты отказов (без входных значений)
+TEXT_NO_STORE = "хранилище данных робота не задано"
+TEXT_BAD_DO = "канал DO вне 1..16"
+TEXT_BAD_RANGE = "значение вне диапазона"
+TEXT_UNKNOWN_PARAM = "неизвестный параметр"
+TEXT_SYNCING = "идёт синхронизация параметров"
+TEXT_NO_PROGRAM = "программа не найдена"
+TEXT_EPOCH_NOT_WRITTEN = "параметр не применён: метка не записана"
+TEXT_PARAM_DIVERGED = "параметр робота расходится с файлом"
+# Ожидание эха стопа оператора: от входа в обработчик до t0 + 0,8 с (0,2 с запаса из бюджета О9 в 1,0 с)
+_OPERATOR_ECHO_BUDGET_S = 0.8
+_STOP_NAMES = {level: name for name, level in STOP_LEVEL.items()}
+# Ошибки хранилища данных робота: операции драйвера отвечают их постоянным текстом, как ``DeviceManager.robot_data``
+_STORE_ERRORS = (RevisionConflict, InvalidStoreKey, RobotDataInvalid, StoreDocumentInvalid)
 # Срок стопа процесса, если request_stop() позван без срока (отдельный драйвер, не плагин), с
 _PROCESS_STOP_DEFAULT_S = 2.5
 _BUSY_PROGRAM = {"status": "error", "message": "робот занят программой"}
@@ -202,6 +231,63 @@ def _whole(raw: Any, key: str) -> int:
     return int(value)
 
 
+def _int_in(args: Mapping[str, Any], key: str, low: int, high: int) -> int:
+    """Целое ``low..high`` (bool не годится, строка и дробное — тоже); иначе ``_BadArgs``."""
+    raw = args.get(key)
+    if type(raw) is not int or not low <= raw <= high:
+        raise _BadArgs(key)
+    return raw
+
+
+def _bool_arg(args: Mapping[str, Any], key: str) -> bool:
+    raw = args.get(key)
+    if type(raw) is not bool:
+        raise _BadArgs(key)
+    return raw
+
+
+def _name_arg(args: Mapping[str, Any], key: str) -> str:
+    raw = args.get(key)
+    if type(raw) is not str or not raw:
+        raise _BadArgs(key)
+    return raw
+
+
+def _base_rev_arg(args: Mapping[str, Any]) -> str | None:
+    """Ключ ``base_rev`` обязателен (О6): нет ключа или не ``str | None`` — ``_BadArgs``."""
+    if "base_rev" not in args:
+        raise _BadArgs("base_rev")
+    raw = args["base_rev"]
+    if raw is not None and type(raw) is not str:
+        raise _BadArgs("base_rev")
+    return raw
+
+
+def _number_arg(args: Mapping[str, Any], key: str) -> float:
+    """Конечное число (bool не число, как ``_coord``); границы — у вызывающего."""
+    raw = args.get(key)
+    if type(raw) not in (int, float) or not math.isfinite(raw):
+        raise _BadArgs(key)
+    return raw
+
+
+def _local_param_bounds(name: str) -> tuple[int, int]:
+    """Границы сырого значения по таблице словаря; сторож 0 не принимается (продуктовое правило T5.3c DESIGN 8).
+
+    УДАЛИТЬ вместе с переключением строки LEAD-SWITCH в ``_op_param_set`` на ``robot_data.param_bounds`` (c2).
+    """
+    meta = PARAMS[PARAM_ID[name]]
+    low = max(int(meta["min"]), 1) if name == "P_WDG_TIMEOUT_MS" else int(meta["min"])
+    return low, int(meta["max"])
+
+
+def _store_refusal(exc: Exception) -> dict:
+    """Ответ на ошибку хранилища: постоянный текст; конфликт ревизии несёт ``current_rev`` (как ``robot_data``)."""
+    if isinstance(exc, RevisionConflict):
+        return {"status": "error", "message": str(exc), "current_rev": exc.current_rev}
+    return {"status": "error", "message": str(exc)}
+
+
 def _s16(word: int) -> int:
     return word - 0x10000 if word >= 0x8000 else word
 
@@ -270,6 +356,8 @@ class RobotDriverV2(BaseDeviceDriver):
         clock/sleep:  Инъекция времени.
         spawn:        ``(target, *, name) -> IHandle`` — потоки поводка и исполнителя берутся у области плагина
                       (T5.3a). None — драйвер без потоков: ``jog_hold`` и запуск программы бросают ``RuntimeError``.
+        store:        ``RobotDataStore`` данных робота (T5.3d): точки, программы, параметры для ``point_capture``,
+                      ``program_run``, ``param_set``; None — эти операции отвечают «хранилище данных робота не задано».
 
     Raises:
         ValueError: некорректные поля конфига клиента, ``robot_params`` или ``on_connect``.
@@ -290,6 +378,7 @@ class RobotDriverV2(BaseDeviceDriver):
         clock: Any = None,
         sleep: Any = None,
         spawn: Callable[..., IHandle] | None = None,
+        store: RobotDataStore | None = None,
     ) -> None:
         super().__init__(entry, protocol, clock=clock, sleep=sleep)
         params: Mapping[str, Any] = getattr(entry, "params", None) or {}
@@ -315,6 +404,11 @@ class RobotDriverV2(BaseDeviceDriver):
         # Флаги — только поля экземпляра, под _flags_lock
         self._flags_lock = threading.Lock()
         self._jog_tx_lock = threading.Lock()
+        # Третий замок (T5.3d): только вокруг param_set / param_apply (и синхронизации, d2); берётся не блокируя.
+        # Порядок: _param_lock -> _flags_lock; вместе с _jog_tx_lock не держится
+        self._param_lock = threading.Lock()
+        self._store = store  # единственный RobotDataStore процесса (фабрика); None — автономный драйвер
+        self._syncing = False  # идёт синхронизация параметров (ставит и снимает d2), под _flags_lock
         self._busy = False  # идёт программа
         self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
         self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
@@ -1111,19 +1205,33 @@ class RobotDriverV2(BaseDeviceDriver):
     # --- jog ---
 
     def _op_abort(self, args: dict) -> dict:
-        """Стоп оператора {mode: 1|2|3 или "SOFT"|"HARD"|"HALT"}: пишется всегда (защёлка стопа процесса не блокирует,
-        запись в неё учитывается), затем ждёт эха по таймауту клиента."""
-        raw = args.get("mode", STOP_LEVEL["SOFT"])
-        if isinstance(raw, str) and raw.upper() in STOP_LEVEL:
-            mode = STOP_LEVEL[raw.upper()]
-        elif isinstance(raw, int) and not isinstance(raw, bool) and raw in STOP_LEVEL.values():
-            mode = raw
+        """Стоп оператора {mode: 1|2|3 или "SOFT"|"HARD"|"HALT"}: тело — ``_operator_stop``; ответ прежней формы."""
+        result = self._operator_stop(args.get("mode", STOP_LEVEL["SOFT"]))
+        if result["status"] != "ok":
+            return result
+        return {"status": "ok", "mode": result["level"]}
+
+    def _operator_stop(self, raw_level: Any) -> dict:
+        """Общее тело ``stop`` и ``abort`` (T5.3d DESIGN 3): запись ``STOP_REQ`` через ``_write_stop`` (мимо защёлки
+        стопа процесса, но с её учётом), затем опрос эха до ``t0 + 0,8 с``. Замков драйвера не берёт, ``_stopping`` не
+        ставит. Итог: ``{"status": "ok", "level": <int>, "echo": bool}``; нет эха к сроку — ``echo: False`` без ошибки
+        (отложенный SOFT до цели хода — норма протокола). Плохой уровень — ``TEXT_BAD_STOP_LEVEL``, робот не тронут."""
+        t0 = time.monotonic()
+        if isinstance(raw_level, str) and raw_level.upper() in STOP_LEVEL:
+            level = STOP_LEVEL[raw_level.upper()]
+        elif isinstance(raw_level, int) and not isinstance(raw_level, bool) and raw_level in STOP_LEVEL.values():
+            level = raw_level
         else:
             return {"status": "error", "message": TEXT_BAD_STOP_LEVEL}
-        if self._client is None:
+        client = self._client
+        if client is None:
             return dict(_NOT_CONNECTED)
-        self._stop_and_wait(mode)
-        return {"status": "ok", "mode": mode}
+        value = self._write_stop(level)  # ошибка записи — наружу: стоп не доставлен
+        try:
+            client.await_stop_echo(value, value & 3, deadline=t0 + _OPERATOR_ECHO_BUDGET_S)
+        except RobotTimeout:
+            return {"status": "ok", "level": level, "echo": False}
+        return {"status": "ok", "level": level, "echo": True}
 
     def _spawn_fn(self) -> Callable[..., IHandle]:
         """``spawn`` драйвера; None — ``RuntimeError`` (драйвер сам потоков не создаёт, T5.3 круг 2)."""
@@ -1137,7 +1245,10 @@ class RobotDriverV2(BaseDeviceDriver):
         Без ``spawn`` — ``RuntimeError`` до любой записи.
         """
         spawn = self._spawn_fn()
-        direction, speed = int(args["dir"]), int(args["spd"])
+        try:
+            direction, speed = _int_in(args, "dir", 1, 8), _int_in(args, "spd", 1, 100)
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
         with self._flags_lock:
             if self._stopping:
                 return {"status": "error", "message": TEXT_STOPPING}
@@ -1403,6 +1514,246 @@ class RobotDriverV2(BaseDeviceDriver):
                             self.returns_failed += 1
 
     # ------------------------------------------------------------------ #
+    # Операции движения и параметров (T5.3d, часть d1)
+    # ------------------------------------------------------------------ #
+
+    def _motion_refusal(self, *, syncing: bool = False) -> dict | None:
+        """Отказ занятости для движения и записи параметров: останов, программа, задание, jog (и синхронизация)."""
+        with self._flags_lock:
+            if self._stopping:
+                return {"status": "error", "message": TEXT_STOPPING}
+            if self._busy:
+                return dict(_BUSY_PROGRAM)
+            if self._job_active:
+                return dict(_BUSY_JOB)
+            run = self._jog
+            if self._jog_starting or self._jog_stopping or (run is not None and run.active):
+                return dict(_BUSY_JOG)
+            if syncing and self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}
+        return None
+
+    def _op_stop(self, args: dict) -> dict:
+        """Стоп оператора {level}: занятость не проверяет; ответ ``{"status", "level": <ИМЯ>, "echo": bool}``."""
+        result = self._operator_stop(args.get("level", STOP_LEVEL["SOFT"]))
+        if result["status"] != "ok":
+            return result
+        return {"status": "ok", "level": _STOP_NAMES[result["level"]], "echo": result["echo"]}
+
+    def _op_servo(self, args: dict) -> dict:
+        try:
+            on = _bool_arg(args, "on")
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        refusal = self._motion_refusal()
+        if refusal is not None:
+            return refusal
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        self._client.servo(on)
+        return {"status": "ok"}
+
+    def _op_do_set(self, args: dict) -> dict:
+        try:
+            on = _bool_arg(args, "on")
+            ch = args.get("ch")
+            if type(ch) is not int:
+                raise _BadArgs("ch")
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        if ch not in _DO_CHANNELS:
+            return {"status": "error", "message": TEXT_BAD_DO}
+        refusal = self._motion_refusal()
+        if refusal is not None:
+            return refusal
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        self._client.do_set(ch, on)
+        return {"status": "ok"}
+
+    def _op_jog_step(self, args: dict) -> dict:
+        """JOG_STEP {dx, dy, dz=0, drz=0, spd 1..100}: ``done_seq``-команда — отказ при программе / jog / задании /
+        синхронизации; ответ после ACK, без ожидания DONE."""
+        try:
+            dx, dy = _coord(args, "dx"), _coord(args, "dy")
+            dz, drz = _coord(args, "dz", 0.0), _coord(args, "drz", 0.0)
+            speed = _int_in(args, "spd", 1, 100)
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        refusal = self._motion_refusal(syncing=True)
+        if refusal is not None:
+            return refusal
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        result = self._client.jog_step(dx, dy, dz, drz, speed)
+        return {"status": "ok", "seq": result.seq}
+
+    def _op_point_capture(self, args: dict) -> dict:
+        """Поза из TLM -> ``Point(frame=None)`` -> вставка в ``points.yaml``; ответ после записи файла (О9-а)."""
+        try:
+            name, base_rev = _name_arg(args, "name"), _base_rev_arg(args)
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        store = self._store
+        if store is None:
+            return {"status": "error", "message": TEXT_NO_STORE}
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        telemetry, _free, _encoder = _parse_tlm(self._read_tlm())
+        point = Point(
+            name=name,
+            x=telemetry["x_mm"],
+            y=telemetry["y_mm"],
+            z=telemetry["z_mm"],
+            rz=telemetry["rz_deg"],
+            hand=telemetry["hand"],
+            frame=None,
+        )
+        try:
+            points, _rev = load_points(store, self.entry.id)
+            points[name] = point
+            rev = save_points(store, self.entry.id, points, base_rev=base_rev)
+        except _STORE_ERRORS as exc:
+            return _store_refusal(exc)
+        return {"status": "ok", "point": point.to_dict(), "rev": rev}
+
+    def _op_program_run(self, args: dict) -> dict:
+        """Программа, точки и СК из хранилища -> ``start_program``; ответ сразу, ход — в потоке исполнителя."""
+        try:
+            name = _name_arg(args, "name")
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        store = self._store
+        if store is None:
+            return {"status": "error", "message": TEXT_NO_STORE}
+        try:
+            program, _rev = load_program(store, self.entry.id, name)
+            if program is None:
+                return {"status": "error", "message": TEXT_NO_PROGRAM}
+            points, _points_rev = load_points(store, self.entry.id)
+            frames, _frames_rev = load_frames(store, self.entry.id)
+        except _STORE_ERRORS as exc:
+            return _store_refusal(exc)
+        return self.start_program(program, points, frames, name=name)
+
+    def _op_program_abort(self, _args: dict) -> dict:
+        """Программа идёт -> ТОЛЬКО запись SOFT (``_write_stop``), без эха: подтверждение — итог ``.program``
+        ``aborted``. Программы нет -> ``stopped: False``, ``STOP_REQ`` не пишется. ``_stopping`` не ставится."""
+        with self._flags_lock:
+            running = self._busy
+        if not running:
+            return {"status": "ok", "stopped": False}
+        self._write_stop(STOP_LEVEL["SOFT"])
+        return {"status": "ok", "stopped": True}
+
+    def _param_gate(self) -> dict | None:
+        """Взять ``_param_lock`` без блокировки. Отказ (замок занят или ``_syncing``) — ответ; успех — None, замок
+        взят, вызывающий отпускает его в ``finally``. Блокирующий захват стоял бы всю синхронизацию на командном
+        потоке."""
+        if not self._param_lock.acquire(blocking=False):
+            return {"status": "error", "message": TEXT_SYNCING}
+        with self._flags_lock:
+            syncing = self._syncing
+        if syncing:
+            self._param_lock.release()
+            return {"status": "error", "message": TEXT_SYNCING}
+        return None
+
+    def _op_param_set(self, args: dict) -> dict:
+        """PARAM_SET {name, value, base_rev}: границы -> робот -> метка -> файл -> ``self._values`` / ``self._epoch``.
+
+        Порядок (§11.4 «файл — правда»): значение в робота ДО файла; сбой метки после ACK значения — откат значения
+        роботу, ответ-ошибка, файл и ``self._epoch`` не тронуты; сбой записи файла — ``self._epoch`` прежний, следующий
+        тик видит расхождение меток и возвращает роботу значения файла."""
+        try:
+            name, base_rev = _name_arg(args, "name"), _base_rev_arg(args)
+            value = _number_arg(args, "value")
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        store = self._store
+        if store is None:
+            return {"status": "error", "message": TEXT_NO_STORE}
+        if name not in PARAM_ID or name == "P_CONFIG_EPOCH":
+            return {"status": "error", "message": TEXT_UNKNOWN_PARAM}
+        raw = to_raw(name, value)
+        low, high = _local_param_bounds(name)  # LEAD-SWITCH: -> param_bounds(name) из robot_data (T5.3c c2)
+        if not low <= raw <= high:
+            return {"status": "error", "message": TEXT_BAD_RANGE}
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        refusal = self._param_gate()
+        if refusal is not None:
+            return refusal
+        try:
+            return self._param_set_locked(store, name, raw, base_rev)
+        except _STORE_ERRORS as exc:
+            return _store_refusal(exc)
+        finally:
+            self._param_lock.release()
+
+    def _param_set_locked(self, store: RobotDataStore, name: str, raw: int, base_rev: str | None) -> dict:
+        """Тело ``param_set`` под ``_param_lock``."""
+        with self._flags_lock:
+            old_values, old_epoch = dict(self._values), self._epoch
+        current_rev = load_params(store, self.entry.id).rev
+        if current_rev != base_rev:
+            raise RevisionConflict(current_rev)  # робот не тронут
+        client = self._client
+        old_raw = old_values[name]
+        client.param_set(name, raw)  # NAK робота -> RobotNak наружу: файл не тронут
+        new_epoch = old_epoch % 65535 + 1
+        try:
+            client.param_set("P_CONFIG_EPOCH", new_epoch)
+        except Exception as exc:
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: метка параметров не записана: {type(exc).__name__}: {exc}")
+            try:
+                client.param_set(name, old_raw)  # одна попытка вернуть значение файла
+            except Exception as back_exc:
+                self._record_err()
+                logger.warning(
+                    f"робот {self.entry.id!r}: откат параметра не прошёл: {type(back_exc).__name__}: {back_exc}"
+                )
+                self._publish_error(TEXT_PARAM_DIVERGED)
+            else:
+                self._publish_error(TEXT_EPOCH_NOT_WRITTEN)
+            return {"status": "error", "message": TEXT_EPOCH_NOT_WRITTEN}
+        new_values = {**old_values, name: raw}
+        # Запись файла упала -> исключение наружу, self._epoch прежний: тик увидит расхождение меток (§11.4 п.4)
+        rev = save_params(store, self.entry.id, new_values, new_epoch, base_rev=base_rev)
+        with self._flags_lock:
+            self._values, self._epoch = new_values, new_epoch
+        self._pub(
+            f"devices.state.{self.entry.id}.params",
+            {
+                "epoch": new_epoch,
+                "rev": rev,
+                "values": {key: {"raw": r, "value": float(to_eng(key, r))} for key, r in new_values.items()},
+            },
+        )
+        return {
+            "status": "ok",
+            "name": name,
+            "raw": raw,
+            "value": float(to_eng(name, raw)),
+            "epoch": new_epoch,
+            "rev": rev,
+        }
+
+    def _op_param_apply(self, _args: dict) -> dict:
+        """PARAM_APPLY: параметры класса ``reinit`` вступают в силу; под ``_param_lock`` (не при синхронизации)."""
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        refusal = self._param_gate()
+        if refusal is not None:
+            return refusal
+        try:
+            self._client.param_apply()
+        finally:
+            self._param_lock.release()
+        return {"status": "ok"}
+
+    # ------------------------------------------------------------------ #
     # Snapshot
     # ------------------------------------------------------------------ #
 
@@ -1464,3 +1815,20 @@ _EXCHANGE_OPS = {
     "exchange_log_set": _op_exchange_log_set,
 }
 RobotDriverV2._OPS.update(_EXCHANGE_OPS)
+
+
+# --- Операции движения и параметров (T5.3d d1): отдельным блоком, литерал _OPS и _EXCHANGE_OPS (T5.6) не тронуты ---
+
+RobotDriverV2._OPS.update(
+    {
+        "stop": RobotDriverV2._op_stop,
+        "servo": RobotDriverV2._op_servo,
+        "do_set": RobotDriverV2._op_do_set,
+        "jog_step": RobotDriverV2._op_jog_step,
+        "point_capture": RobotDriverV2._op_point_capture,
+        "param_set": RobotDriverV2._op_param_set,
+        "param_apply": RobotDriverV2._op_param_apply,
+        "program_run": RobotDriverV2._op_program_run,
+        "program_abort": RobotDriverV2._op_program_abort,
+    }
+)

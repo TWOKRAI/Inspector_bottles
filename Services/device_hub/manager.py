@@ -207,7 +207,7 @@ class DeviceManager(BaseManager, ObservableMixin):
 
                 if self._spawn is None:  # T5.3 круг 2: потоки робота v2 — только в области плагина
                     raise RuntimeError(f"робот {entry.id!r} (delta_v2): менеджер без spawn не создаёт драйвер v2")
-                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
+                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn, store=self._robot_store)
             return RobotDriver(entry, proto)
 
         self._factories["robot"] = _robot_factory
