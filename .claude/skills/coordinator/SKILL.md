@@ -154,6 +154,12 @@ Red only on the branch → the branch's finding. Give the window as `quiet` for 
   `51` as `a4`, `5c` as `1c`); the gate then exits 75. Trust `from-name` of its message, not its signature.
 - The owner sees tab titles, not session names. In every report to the owner name a session by its lane and
   tab title, the session name in brackets; keep the lane ↔ tab ↔ name table current after each restart.
+- A lane may switch the shared main checkout to its own branch (2026-10-19: `checkout: moving from main to
+  fix/…` in the reflog) — the coordinator's next `git add` there rides in the lane's commit. Before every commit
+  in the main checkout run `git branch --show-current` (must be `main`); a lane works in its own worktree, and
+  every start prompt says so.
+- A session's own permission rules can block `git checkout -- <file>` even after the owner said yes; do not
+  route around it with another tool — give the owner the exact command to run.
 
 ## 8. Handoff
 
