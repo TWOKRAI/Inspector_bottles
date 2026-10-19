@@ -126,21 +126,22 @@ class _StopWatcher:
         self._since = 0
         self.values: list[int] = []
 
-    def _get(self, since_seq: int) -> dict:
+    def _get(self, since_seq: int, *, complete: bool) -> dict:
         answer = bounded(
             lambda: self._drv.call("exchange_log_get", {"since_seq": since_seq, "limit": _LOG_LIMIT}), _CALL_DEADLINE_S
         )
         assert answer["status"] == "ok", answer
         # Ответ полный: строк меньше limit — limit ничего не отрезал (иначе «HALT не писался» прошёл бы зря).
-        assert len(answer["lines"]) < _LOG_LIMIT, len(answer["lines"])
+        if complete:  # только чтение конца блока: у входа кольцо может быть заполнено целиком (2000), это не усечение
+            assert len(answer["lines"]) < _LOG_LIMIT, len(answer["lines"])
         return answer
 
     def __enter__(self) -> _StopWatcher:
-        self._since = self._get(0)["last_seq"] + 1  # строки блока: seq выше последнего до входа
+        self._since = self._get(0, complete=False)["last_seq"] + 1  # строки блока: seq выше последнего до входа
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        state = self._get(self._since)
+        state = self._get(self._since, complete=True)
         assert state["dropped"] == 0, state["dropped"]  # кольцо журнала не потеряло строк блока
         for line in state["lines"]:
             match = self._LINE.match(line["text"])
