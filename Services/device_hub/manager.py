@@ -34,6 +34,7 @@ from Services.device_hub.registry.store import RegistryStore
 from Services.device_hub.robot_data_ops import OPS as ROBOT_DATA_OPS
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, BadArgs, RobotOpError
 from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, RobotDataInvalid, StoreDocumentInvalid
+from Services.robot_comm.robot_data import make_param_source
 
 if TYPE_CHECKING:
     from Services.robot_comm.store import RobotDataStore
@@ -207,7 +208,17 @@ class DeviceManager(BaseManager, ObservableMixin):
 
                 if self._spawn is None:  # T5.3 круг 2: потоки робота v2 — только в области плагина
                     raise RuntimeError(f"робот {entry.id!r} (delta_v2): менеджер без spawn не создаёт драйвер v2")
-                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
+                if self._robot_store is None:
+                    return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
+                # Параметры робота при подключении — из params.yaml (T5.3c c2); плохие данные бросают RobotDataInvalid
+                # и др. из фабрики, их перехватывает ``connect``
+                param_source = make_param_source(
+                    self._robot_store,
+                    entry.id,
+                    overrides=entry.params.get("robot_params"),
+                    epoch_default=int(entry.params.get("config_epoch", 1)),
+                )
+                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn, param_source=param_source)
             return RobotDriver(entry, proto)
 
         self._factories["robot"] = _robot_factory
@@ -388,7 +399,14 @@ class DeviceManager(BaseManager, ObservableMixin):
             DeviceHubError: Носитель bridge не подключён.
         """
         entry = self.get(dev_id)
-        driver = self._get_or_create_driver(entry)
+        try:
+            driver = self._get_or_create_driver(entry)
+        except (RobotDataInvalid, StoreDocumentInvalid, InvalidStoreKey) as exc:
+            # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
+            # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
+            self._publish(f"devices.state.{dev_id}.last_error", str(exc))
+            self._publish(f"devices.state.{dev_id}.conn", {"conn": "error"})
+            return False
 
         # Bridge: проверить connected-носителя
         if entry.transport.get("type") == "bridge":

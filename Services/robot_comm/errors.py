@@ -144,3 +144,16 @@ class RobotDataInvalid(RobotStoreError):
     def __init__(self, rev: str | None) -> None:
         super().__init__("Данные робота не прошли проверку")
         self.rev = rev
+
+
+class RobotWatchdogDisabled(RobotDataInvalid):
+    """Параметр ``P_WDG_TIMEOUT_MS = 0`` (сторож выключен) отвергнут как продуктовое правило (T5.3c, DESIGN 8).
+
+    Сторож — единственная защита от недосягаемого робота: при 0 клиент не знает периода пульса. Таблица протокола
+    0 допускает, поэтому правило стоит в ``robot_data`` (один раз для файла, ``overrides`` и записи). Текст постоянный,
+    без входных значений; ``rev`` — как у ``RobotDataInvalid``.
+    """
+
+    def __init__(self, rev: str | None) -> None:
+        RobotStoreError.__init__(self, "Сторож робота нельзя выключить: P_WDG_TIMEOUT_MS = 0")
+        self.rev = rev
