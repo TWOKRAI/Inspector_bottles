@@ -29,7 +29,6 @@ Test seam:
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 import re
 import tempfile
@@ -42,11 +41,12 @@ from typing import Any
 
 import yaml
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, StoreDocumentInvalid
 
 __all__ = ["DOCS", "RobotDataStore", "StoredDoc", "compute_rev"]
 
-log = logging.getLogger(__name__)
+log = get_std_logger(__name__)
 
 DOCS = ("params", "points", "frames", "calibration")
 
@@ -139,6 +139,28 @@ def _atomic_write(path: Path, data: bytes) -> None:
         raise
 
 
+# Префикс расширенного пути Windows и его UNC-форма (см. ``_resolved``)
+_EXT_PREFIX = "\\\\?\\"
+_EXT_UNC_PREFIX = "\\\\?\\UNC\\"
+
+
+def _resolved(path: Path) -> Path:
+    """``path.resolve()`` без префикса расширенного пути Windows.
+
+    Post: пока каталог создаётся другим потоком, ``os.path.realpath`` Windows изредка отдаёт тот же путь с префиксом
+    расширенного пути (``_getfinalpathname`` на ещё не созданном пути отказывает, префикс не снимается) — сравнение
+    с путём без префикса давало ложный ``InvalidStoreKey`` на допустимом ключе (T5.3c c2). Префикс снимается у обеих
+    сторон сравнения; строгость проверки (выход из каталога по ссылке или ``..``) не меняется.
+    """
+    resolved = path.resolve()
+    text = str(resolved)
+    if text.startswith(_EXT_UNC_PREFIX):
+        return Path("\\\\" + text[len(_EXT_UNC_PREFIX) :])
+    if text.startswith(_EXT_PREFIX):
+        return Path(text[len(_EXT_PREFIX) :])
+    return resolved
+
+
 def _is_reserved(name: str) -> bool:
     return name.partition(".")[0].rstrip(" ").lower() in _RESERVED
 
@@ -200,8 +222,8 @@ class RobotDataStore:
     def _check_device(self, device_id: object) -> str:
         if not isinstance(device_id, str) or not _DEVICE_RE.fullmatch(device_id) or _is_reserved(device_id):
             raise InvalidStoreKey(device_id)
-        root = self._root.resolve()
-        if (root / device_id).resolve().parent != root:
+        root = _resolved(self._root)
+        if _resolved(root / device_id).parent != root:
             raise InvalidStoreKey(device_id)
         return device_id
 
@@ -223,8 +245,8 @@ class RobotDataStore:
             or _is_reserved(name)
         ):
             raise InvalidStoreKey(name)
-        expected_dir = self._root.resolve() / dev / "programs"
-        if (expected_dir / f"{name}{_SUFFIX}").resolve().parent != expected_dir:
+        expected_dir = _resolved(self._root) / dev / "programs"
+        if _resolved(expected_dir / f"{name}{_SUFFIX}").parent != expected_dir:
             raise InvalidStoreKey(name)
         rel = f"programs/{name}{_SUFFIX}"
         return dev, rel, self._root / dev / "programs" / f"{name}{_SUFFIX}"
