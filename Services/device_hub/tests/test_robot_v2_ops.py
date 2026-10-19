@@ -16,6 +16,7 @@ Stability: lite
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,6 +28,7 @@ from multiprocess_framework.modules.base_manager import open_scope
 
 from Services.device_hub.manager import DeviceManager
 from Services.robot_comm.core.params_v2 import PARAM_ID
+from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.errors import RobotTimeout
 from Services.robot_comm.robot_data import load_params
@@ -210,3 +212,125 @@ def test_param_ops_refused_while_syncing_and_robot_untouched(tmp_path: Path, how
             else:
                 with drv._flags_lock:
                     drv._syncing = False
+
+
+# --------------------------------------------------------------------------------------------------
+# d2: синхронизация параметров, _syncing, _param_lock
+# --------------------------------------------------------------------------------------------------
+
+
+def _block_first_param_set(drv: Any) -> tuple[threading.Event, threading.Event, list[tuple[str, Any]]]:
+    """Шов в транспорте клиента: первый ``PARAM_SET`` ждёт ``release`` ДО исходного ``cmd``; журнал вызовов."""
+    client = drv._client
+    real = client.cmd
+    entered, release = threading.Event(), threading.Event()
+    seen: list[tuple[str, Any]] = []
+
+    def cmd(op: str, args: Any) -> Any:
+        seen.append((op, list(args)))
+        if op == "PARAM_SET" and not entered.is_set():
+            entered.set()
+            assert release.wait(5.0), "release не поставлен"
+        return real(op, args)
+
+    client.cmd = cmd
+    return entered, release, seen
+
+
+def _break_epoch(hub: _Hub) -> None:
+    """Метка робота расходится с меткой ПК при живом соединении."""
+    hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+
+
+def test_param_set_during_sync_answers_fast_and_robot_untouched(tmp_path: Path) -> None:
+    """d-I9: ``param_set`` во время ``sync_params`` (поток синхронизации стоит на ``PARAM_SET``) отвечает ≤ 0,5 с."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        entered, release, seen = _block_first_param_set(drv)
+        _break_epoch(hub)
+        worker = threading.Thread(target=lambda: drv._resync_maybe(drv._client), daemon=True)
+        worker.start()
+        try:
+            assert entered.wait(3.0), "синхронизация не дошла до PARAM_SET"
+            writes = len([1 for op, _ in seen if op == "PARAM_SET"])
+            t0 = time.monotonic()
+            answer = hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})
+            elapsed = time.monotonic() - t0
+            assert answer == {"status": "error", "message": TEXT_SYNCING}
+            assert elapsed <= 0.5, elapsed
+            assert len([1 for op, _ in seen if op == "PARAM_SET"]) == writes  # робот не тронут
+        finally:
+            release.set()
+            worker.join(10.0)
+        assert not worker.is_alive()
+        assert drv._syncing is False  # флаг снят в finally
+        assert drv._param_lock.acquire(blocking=False)  # замок отпущен последним
+        drv._param_lock.release()
+
+
+@pytest.mark.parametrize("flag", ["_busy", "_job_active", "_jog_starting", "_jog_stopping", "_prog_alive"])
+def test_syncing_is_set_atomically_with_activity_check(tmp_path: Path, flag: str) -> None:
+    """d-I20: при активности синхронизации нет, ``_syncing`` и ``_last_resync`` не ставятся; без неё — ставится."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        seen = _fail_cmd(drv, lambda *_: False)
+        _break_epoch(hub)
+        with drv._flags_lock:
+            setattr(drv, flag, True)
+        try:
+            drv._resync_maybe(drv._client)
+            assert [op for op, _ in seen if op == "PARAM_SET"] == []
+            assert drv._syncing is False
+            assert drv._last_resync == 0.0  # отказ по активности задержки в 2 с не создаёт
+        finally:
+            with drv._flags_lock:
+                setattr(drv, flag, False)
+        drv._resync_maybe(drv._client)  # активности нет: сразу, без паузы
+        assert [op for op, _ in seen if op == "PARAM_SET"] != []
+        assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
+        assert drv._syncing is False
+
+
+def test_resync_rereads_epoch_under_lock(tmp_path: Path) -> None:
+    """d-I10: метка тика устарела (``param_set`` уже записал её) — под замком читается заново, sync не идёт."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        seen = _fail_cmd(drv, lambda *_: False)
+        assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]  # метки равны; тик «видел» расхождение раньше
+        drv._resync_maybe(drv._client)
+        assert [op for op, _ in seen if op == "PARAM_SET"] == []
+        assert drv._last_resync == 0.0
+
+
+def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тик видит расхождение меток между ACK метки и записью ``self._epoch``: полной пересинхронизации нет."""
+    import Services.device_hub.drivers.robot_driver_v2 as module
+
+    real_save = module.save_params
+    entered, release = threading.Event(), threading.Event()
+
+    def save(*args: Any, **kwargs: Any) -> str:
+        entered.set()
+        assert release.wait(5.0), "release не поставлен"
+        return real_save(*args, **kwargs)
+
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        monkeypatch.setattr(module, "save_params", save)
+        seen = _fail_cmd(drv, lambda *_: False)
+        answer: list[dict] = []
+        worker = threading.Thread(
+            target=lambda: answer.append(hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})),
+            daemon=True,
+        )
+        worker.start()
+        try:
+            assert entered.wait(5.0), "param_set не дошёл до записи файла"
+            assert hub.rig.read("TLM_CFG_EPOCH") != [drv._epoch]  # робот уже с новой меткой, драйвер ещё со старой
+            drv._resync_maybe(drv._client)  # тик в этом окне
+        finally:
+            release.set()
+            worker.join(10.0)
+        assert answer and answer[0]["status"] == "ok", answer
+        assert len([1 for op, _ in seen if op == "PARAM_SET"]) == 2  # значение и метка, полной синхронизации нет
+        assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
