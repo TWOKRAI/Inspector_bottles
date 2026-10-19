@@ -18,7 +18,7 @@ Stability: lite
     * Запись NAK в событиях sim следа не оставляет (строка ``op=`` пишется только на ACK): «ни одной новой
       ``op=PARAM_SET``» ловит ЛИШНЮЮ УСПЕШНУЮ запись; отказ с текстом ловит ответ.
     * ``run_chunks`` сам пишет HARD, когда видит стоп оператора: счёт ``STOP_REQ`` по значению после конца
-      программы невозможен — стоп считается наблюдателем значений ``STOP_REQ`` по уровню записи (``_StopWatcher``).
+      программы невозможен — записи стопа считаются по журналу обмена драйвера (``_StopWatcher``), по уровню.
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ import yaml
 from multiprocess_framework.modules.base_manager import open_scope
 
 from Services.device_hub.manager import DeviceManager
-from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.programs import Move, Point, Program
 from Services.robot_comm.robot_data import save_points, save_program
@@ -111,36 +110,41 @@ class Rec:
 
 
 class _StopWatcher:
-    """Фоновый опрос ``STOP_REQ`` ядра sim (1 мс): ``values`` — подряд идущие РАЗНЫЕ значения, первое — исходное.
+    """Записи ``STOP_REQ`` за время блока — по журналу обмена драйвера, в точке записи (без опроса регистра).
 
-    Каждая запись стопа меняет значение (``stop_seq * 4 + уровень``), поэтому по списку видно записи и их уровни,
-    включая те, что ``run_chunks`` дописывает сам (HARD).
+    Журнал (T5.6) стоит между драйвером и транспортом: в нём каждая запись ``STOP_REQ`` драйвера и клиента
+    (в том числе HARD, который ``run_chunks`` дописывает сам) — строка ``W STOP_REQ = <значение>``, повтор
+    одного значения склеен полем ``n``. Опрос регистра раз в 1 мс промахивался мимо SOFT, когда HARD ложился
+    через < 1 мс (ревью, 2 промаха из 12).
     """
 
-    def __init__(self, rig: E2eRig) -> None:
-        self._regs = rig.core.regs
-        self.values: list[int] = [self._regs[REG["STOP_REQ"]]]
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._body, name="stop-watcher", daemon=True)
+    _LINE = re.compile(r"^W STOP_REQ = (\d+)$")
 
-    def _body(self) -> None:
-        while not self._stop.is_set():
-            value = self._regs[REG["STOP_REQ"]]
-            if value != self.values[-1]:
-                self.values.append(value)
-            time.sleep(0.001)
+    def __init__(self, drv: Any) -> None:
+        self._drv = drv
+        self._since = 0
+        self.values: list[int] = []
+
+    def _get(self, **args: int) -> dict:
+        answer = bounded(lambda: self._drv.call("exchange_log_get", dict(args)), _CALL_DEADLINE_S)
+        assert answer["status"] == "ok", answer
+        return answer
 
     def __enter__(self) -> _StopWatcher:
-        self._thread.start()
+        self._since = self._get(limit=2000)["last_seq"] + 1  # строки блока: seq выше последнего до входа
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        self._stop.set()
-        self._thread.join(2.0)
+        state = self._get(since_seq=self._since, limit=2000)
+        assert state["dropped"] == 0, state["dropped"]  # кольцо журнала не потеряло строк блока
+        for line in state["lines"]:
+            match = self._LINE.match(line["text"])
+            if match:
+                self.values.extend([int(match.group(1))] * line["n"])
 
     def levels(self) -> list[int]:
-        """Уровни (``& 3``) записей после исходного значения, по порядку."""
-        return [value & 3 for value in self.values[1:]]
+        """Уровни (``& 3``) записей ``STOP_REQ`` блока, по порядку."""
+        return [value & 3 for value in self.values]
 
 
 @dataclass
@@ -256,7 +260,7 @@ def test_stop_levels(tmp_path: Path) -> None:
         program, points = _legs_program("long", 10)  # ~2.7 с
         assert hub.start_program(program, points)["status"] == "ok"
         hub.wait_moving()
-        with _StopWatcher(hub.rig) as watcher:
+        with _StopWatcher(hub.drv) as watcher:
             answer = hub.call("stop", {"level": "SOFT"})  # стоп оператора не проверяет занятость (программа идёт)
             final = hub.wait_program("aborted")
         assert answer["status"] == "ok", answer
@@ -481,7 +485,7 @@ def test_program_run_progress_and_abort(tmp_path: Path) -> None:
         hub.wait_moving()
         assert hub.call("program_run", {"name": "two"}) == BUSY_PROGRAM  # второй запуск во время первого
 
-        with _StopWatcher(hub.rig) as watcher:
+        with _StopWatcher(hub.drv) as watcher:
             answer = hub.call("program_abort", {})  # только запись SOFT, без эха
             final = hub.wait_program("aborted", 40, since=since)
         assert answer == {"status": "ok", "stopped": True}
