@@ -59,6 +59,7 @@ class ChildProcessStop:
         terminate_grace_s: float = TERMINATE_GRACE_S,
         kill_confirm_s: float = KILL_CONFIRM_S,
         poll_s: float = STOP_POLL_S,
+        idle: Callable[[float], None] | None = None,
     ) -> None:
         self._processes: dict[str, Any] = dict(processes)
         self._events: dict[str, Any] = {name: stop_events.get(name) for name in self._processes}
@@ -67,6 +68,12 @@ class ChildProcessStop:
         self._terminate_grace_s = float(terminate_grace_s)
         self._kill_confirm_s = float(kill_confirm_s)
         self._poll_s = float(poll_s)
+        # Чем ждать между проходами ``join_until`` (Task 1.8, ADR-PMM-037). None — ``time.sleep``;
+        # PM подставляет «вычерпать свои каналы и доспать остаток», чтобы хвост очереди PM не
+        # держал выходящего ребёнка (L-9). Имя ``time.sleep`` берётся в момент вызова.
+        self._idle = idle
+        # Сбой idle пишется одной строкой на объект, а не на каждом проходе опроса.
+        self._idle_error_logged = False
         self._lock = threading.Lock()
         # Имена с подтверждённой смертью; каждое получило ровно одну попытку метки.
         self._dead: set[str] = set()
@@ -218,7 +225,25 @@ class ChildProcessStop:
             pause = min(self._poll_s, deadline - now)
             if kill_at is not None:
                 pause = min(pause, kill_at - now)
-            time.sleep(max(0.0, pause))
+            self._wait(max(0.0, pause))
+
+    def _wait(self, pause: float) -> None:
+        """Пауза между проходами: ``idle(pause)`` или ``time.sleep``; сбой idle не прерывает стоп.
+
+        idle бросил — один WARNING на объект, остаток паузы спится обычным ``time.sleep``
+        (без сна ожидание превратилось бы в горячий цикл).
+        """
+        idle = self._idle
+        if idle is None:
+            time.sleep(pause)
+            return
+        try:
+            idle(pause)
+        except Exception as exc:  # noqa: BLE001 — стоп не бросает, ожидание продолжается сном
+            if not self._idle_error_logged:
+                self._idle_error_logged = True
+                self._emit("warning", f"ChildProcessStop: idle() упал: {exc}; ожидание обычным сном")
+            time.sleep(pause)
 
     def survivors(self) -> tuple[str, ...]:
         """Один проход наблюдения, затем имена без подтверждённой смерти — в порядке ``processes``."""

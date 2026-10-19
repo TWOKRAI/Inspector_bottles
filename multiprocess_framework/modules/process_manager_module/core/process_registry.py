@@ -44,6 +44,10 @@ class ProcessRegistry:
         self._child_stop_budget: Optional[Dict[str, float]] = (
             dict(child_stop_budget) if child_stop_budget is not None else None
         )
+        # Task 1.8 (L-9, ADR-PMM-037): чем ждать между проходами опроса остановки детей.
+        # None — ``time.sleep``; PM ставит сюда «вычерпать свои каналы и доспать остаток», чтобы
+        # выходящий ребёнок не ждал без срока, пока PM прочитает хвост его очереди.
+        self.stop_wait_idle: Optional[Callable[[float], None]] = None
         self.queue_registry = queue_registry
         self.config_manager = config_manager
         self.shared_resources = shared_resources
@@ -426,6 +430,7 @@ class ProcessRegistry:
             self._stop_events,
             on_confirmed_dead=self._mark_confirmed_dead if mark_reader_gone else None,
             logger=self.logger,
+            idle=self.stop_wait_idle,
         )
         return result, stop
 
