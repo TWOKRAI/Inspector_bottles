@@ -83,7 +83,7 @@ from Services.device_hub.drivers.exchange_log import (
     ExchangeLogTransport,
 )
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR
-from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2
+from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2, SyncCancelled
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng, to_raw
 from Services.robot_comm.core.protocol_v2 import CONSTANTS, ERR, REG, STOP_LEVEL
 from Services.robot_comm.errors import (
@@ -960,12 +960,18 @@ class RobotDriverV2(BaseDeviceDriver):
         if not self._param_lock.acquire(blocking=False):
             return False
         try:
+            if self.is_connected:  # ручной connect() успел между проверкой выше и захватом замка
+                return True
             now = self._clock()
             if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
                 return False
             self._last_reconnect = now
             self._record_reconnect()
-            if self._connect_locked():
+            connected = self._connect_locked()
+            if not self.desired_connected:
+                self._close_after_disconnect()  # «Отключить» пришло во время подключения: сокет не оставляем
+                return False
+            if connected:
                 self.reset_reconnect()
                 return True
             self._note_reconnect_failed()
@@ -1186,6 +1192,23 @@ class RobotDriverV2(BaseDeviceDriver):
         with self._flags_lock:
             self._syncing = False
 
+    def _close_after_disconnect(self) -> None:
+        """``disconnect()`` отработал, пока тик открывал транспорт: закрыть его и снять готовность. Не бросает."""
+        self._ready = False
+        transport = self._transport
+        if transport is None:
+            return
+        try:
+            transport.disconnect()
+        except Exception as exc:
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: сокет после отключения не закрыт: {type(exc).__name__}: {exc}")
+
+    def _sync_cancelled(self) -> bool:
+        """Отмена синхронизации: остановка (``_stopping`` / ``_shutdown``) — после стопа параметры не пишутся."""
+        with self._flags_lock:
+            return self._stopping or self._shutdown
+
     def _sync_on_connect(self, client: RobotClientV2) -> bool:
         """``_connect_locked``: ``_load_params()`` + ``sync_params`` под флагом ``_syncing``; ``_param_lock`` уже держит
         вызывающий (``connect`` / ``_ensure_connected``). Порядок замков: ``_param_lock`` -> ``_flags_lock``.
@@ -1195,9 +1218,13 @@ class RobotDriverV2(BaseDeviceDriver):
         with self._flags_lock:
             if not self._begin_sync_locked():
                 return False
+        old = self._values, self._epoch
         try:
             self._values, self._epoch = self._load_params_io()
-            client.sync_params(self._values, self._epoch)
+            client.sync_params(self._values, self._epoch, cancelled=self._sync_cancelled)
+        except SyncCancelled:  # остановка посреди синхронизации: не синхронизировано, метка прежняя, не ошибка
+            self._values, self._epoch = old
+            return False
         finally:
             self._end_sync()
         return True
@@ -1238,9 +1265,12 @@ class RobotDriverV2(BaseDeviceDriver):
             if not started:
                 return
             self._last_resync = now
+            old = self._values, self._epoch
             try:
                 self._values, self._epoch = self._load_params_io()
-                client.sync_params(self._values, self._epoch)
+                client.sync_params(self._values, self._epoch, cancelled=self._sync_cancelled)
+            except SyncCancelled:  # остановка посреди синхронизации: метка прежняя, не ошибка
+                self._values, self._epoch = old
             except _StoreIOError:
                 self._record_err()
                 self._publish_error(TEXT_STORE_ERROR)

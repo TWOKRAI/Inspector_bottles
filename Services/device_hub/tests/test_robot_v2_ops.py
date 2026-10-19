@@ -602,3 +602,122 @@ def test_dispatch_does_not_start_job_while_syncing(tmp_path: Path) -> None:
             release.set()
             worker.join(30.0)
         assert not worker.is_alive()
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью р.4 (H1-H4)
+# --------------------------------------------------------------------------------------------------
+
+
+def test_tick_rechecks_connected_after_taking_param_lock(tmp_path: Path) -> None:
+    """H1: ручной ``connect()`` завершился между проверкой ``is_connected`` и захватом замка тиком — второго
+    подключения (``probe``) нет."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        _drop_link(hub)
+        drv._last_reconnect = -100.0  # порог не мешает
+        client = drv._client
+        real_probe, real_alive = client.probe, drv._activity_alive
+        probes = [0]
+        fired = [False]
+
+        def probe() -> Any:
+            probes[0] += 1
+            return real_probe()
+
+        def alive() -> bool:
+            if not fired[0]:
+                fired[0] = True
+                assert drv.connect() is True  # ручное «Подключить» успело раньше захвата замка тиком
+            return real_alive()
+
+        client.probe, drv._activity_alive = probe, alive
+        try:
+            returned, _ = _join(lambda: drv.tick(None), 20.0)
+        finally:
+            client.probe, drv._activity_alive = real_probe, real_alive
+        assert returned and drv.is_connected
+        assert probes[0] == 1  # подключение одно
+
+
+def test_shutdown_stop_cancels_running_sync_at_next_parameter(tmp_path: Path) -> None:
+    """H2: ``request_stop`` во время синхронизации — следующий ``PARAM_SET`` не пишется (было 57 записей и
+    ``PARAM_APPLY`` после стопа); ``_syncing`` снят, замок свободен, метка драйвера и ошибки не тронуты."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        epoch_before = drv._epoch
+        entered, release, seen = _block_first_param_set(drv)
+        hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+        worker = threading.Thread(target=lambda: drv._resync_maybe(drv._client), daemon=True)
+        worker.start()
+        try:
+            assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
+            drv.request_stop(time.monotonic() + 2.5)  # стоп выключения посреди синхронизации
+        finally:
+            release.set()
+            worker.join(30.0)
+        assert not worker.is_alive()
+        writes = [op for op, _ in seen if op in ("PARAM_SET", "PARAM_APPLY")]
+        assert len(writes) <= 2, len(writes)  # первый (шов) и не больше одного следующего
+        assert drv._syncing is False
+        assert drv._epoch == epoch_before
+        assert [e for e in hub.errors if "синхронизация" in str(e)] == []  # отмена — не ошибка
+        assert drv._param_lock.acquire(blocking=False)
+        drv._param_lock.release()
+
+
+def test_disconnect_during_tick_transport_connect_leaves_transport_closed(tmp_path: Path) -> None:
+    """H3: «Отключить» (``desired_connected = False`` + ``disconnect``) во время ``transport.connect`` тика —
+    после тика транспорт закрыт, драйвер не готов, попытка неудачей не считается."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        _drop_link(hub)
+        drv._last_reconnect = -100.0
+        attempts = drv._reconnect_attempts
+        transport = drv._transport
+        real_connect = transport.connect
+
+        def connect() -> Any:
+            drv.desired_connected = False
+
+            def stop() -> None:
+                drv.disconnect()
+
+            other = threading.Thread(target=stop, daemon=True)
+            other.start()
+            other.join(10.0)  # disconnect полностью отработал, затем транспорт открывается
+            return real_connect()
+
+        transport.connect = connect
+        try:
+            returned, _ = _join(lambda: drv.tick(None), 30.0)
+        finally:
+            transport.connect = real_connect
+        assert returned
+        assert not transport.is_connected  # сокет после «Отключить» закрыт
+        assert not drv.is_connected
+        assert drv._reconnect_attempts == attempts
+
+
+def test_syncing_cleared_when_connect_sync_fails(tmp_path: Path) -> None:
+    """H4 (d-I20): сбой синхронизации при подключении снимает ``_syncing``; следующий ``jog_hold`` отказом
+    «идёт синхронизация параметров» не отвечает, после успешного подключения — ``ok``."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        client = drv._client
+        real_sync = client.sync_params
+
+        def broken(*_a: Any, **_kw: Any) -> Any:
+            raise RuntimeError("сбой синхронизации")
+
+        client.sync_params = broken
+        drv._ready = False
+        try:
+            assert drv.connect() is False
+        finally:
+            client.sync_params = real_sync
+        assert drv._syncing is False
+        assert drv.call("jog_hold", {"dir": 1, "spd": 20}).get("message") != TEXT_SYNCING
+        assert drv.connect() is True
+        assert drv.call("jog_hold", {"dir": 1, "spd": 20})["status"] == "ok"
+        assert drv.call("jog_release", {})["status"] == "ok"
