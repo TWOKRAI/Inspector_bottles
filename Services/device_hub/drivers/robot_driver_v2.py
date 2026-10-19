@@ -561,8 +561,9 @@ class RobotDriverV2(BaseDeviceDriver):
             if not self._transport.is_connected and not self._transport.connect():
                 raise ConnectionError("транспорт не подключился")
             client.probe()
-            self._values, self._epoch = self._load_params()
-            client.sync_params(self._values, self._epoch)
+            if not self._sync_on_connect(client):
+                self._ready = was_ready  # посреди подключения появилась активность: синхронизации нет, всё как было
+                return self.is_connected
             self._run_on_connect(client)
         except Exception as exc:
             self._record_err()
@@ -1115,20 +1116,84 @@ class RobotDriverV2(BaseDeviceDriver):
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: сокет после обрыва не закрыт: {type(exc).__name__}: {exc}")
 
+    def _begin_sync_locked(self) -> bool:
+        """Под ``_flags_lock``: одна секция «активности нет» + ``_syncing = True`` (T5.3d2 DESIGN 2).
+
+        Активность — программа, jog (в том числе стартующий и останавливающийся), задание тика. Занято -> False,
+        флаг не ставится. Снимает флаг вызывающий в ``finally`` (под ``_flags_lock``).
+        """
+        run = self._jog
+        if (
+            self._busy
+            or self._prog_alive
+            or self._jog_starting
+            or self._jog_stopping
+            or (run is not None and run.active)
+            or self._job_active
+        ):
+            return False
+        self._syncing = True
+        return True
+
+    def _end_sync(self) -> None:
+        with self._flags_lock:
+            self._syncing = False
+
+    def _sync_on_connect(self, client: RobotClientV2) -> bool:
+        """``connect()``: ``_load_params()`` + ``sync_params`` под ``_param_lock`` и флагом ``_syncing``.
+
+        False — активность появилась после ранней проверки ``connect``: синхронизации не было. Порядок замков:
+        ``_param_lock`` -> ``_flags_lock``; ``_param_lock`` отпускается последним.
+        """
+        with self._param_lock:
+            with self._flags_lock:
+                if not self._begin_sync_locked():
+                    return False
+            try:
+                self._values, self._epoch = self._load_params()
+                client.sync_params(self._values, self._epoch)
+            finally:
+                self._end_sync()
+        return True
+
     def _resync_maybe(self, client: RobotClientV2) -> None:
-        """Метка робота не равна метке ПК -> sync_params снова (§11.4 п.4), не при программе или jog."""
-        if self._activity_alive():
+        """Метка робота не равна метке ПК -> sync_params снова (§11.4 п.4), только когда робот свободен.
+
+        ``_param_lock`` берётся не блокируя (идёт ``param_set`` / ``param_apply`` — тик не стоит на замке, пульс
+        сторожа не пропадает; метку обновит сам ``param_set``). Под замком метка и ``TLM_ACTIVITY`` читаются заново:
+        ``param_set`` мог записать метку между чтением тика и захватом замка (равны — выхода без sync достаточно),
+        а ``jog_step`` отвечает после ACK без флага — при ``TLM_ACTIVITY != 0`` ``PARAM_SET`` получил бы ``E_BUSY``.
+        ``_last_resync`` ставится только после того, как проверка активности прошла.
+        """
+        if not self._param_lock.acquire(blocking=False):
             return
-        now = self._clock()
-        if now - self._last_resync < _RECONNECT_THROTTLE_SEC and self._last_resync:
-            return
-        self._last_resync = now
         try:
-            self._values, self._epoch = self._load_params()
-            client.sync_params(self._values, self._epoch)
-        except Exception as exc:
-            self._record_err()
-            self._publish_error(f"синхронизация параметров не удалась: {type(exc).__name__}: {exc}")
+            try:
+                tlm = self._read_tlm()
+            except Exception as exc:  # связь разберёт тик по своему чтению
+                self._record_err()
+                logger.warning(f"робот {self.entry.id!r}: метка не перечитана: {type(exc).__name__}: {exc}")
+                return
+            if _w(tlm, "TLM_CFG_EPOCH") == self._epoch or _w(tlm, "TLM_ACTIVITY") != 0:
+                return
+            now = self._clock()
+            if now - self._last_resync < _RECONNECT_THROTTLE_SEC and self._last_resync:
+                return
+            with self._flags_lock:
+                started = self._begin_sync_locked()
+            if not started:
+                return
+            self._last_resync = now
+            try:
+                self._values, self._epoch = self._load_params()
+                client.sync_params(self._values, self._epoch)
+            except Exception as exc:
+                self._record_err()
+                self._publish_error(f"синхронизация параметров не удалась: {type(exc).__name__}: {exc}")
+            finally:
+                self._end_sync()
+        finally:
+            self._param_lock.release()
 
     def _publish_error(self, text: str) -> None:
         self._pub(f"devices.state.{self.entry.id}.last_error", text)
@@ -1262,6 +1327,8 @@ class RobotDriverV2(BaseDeviceDriver):
             if self._holding_locked():
                 self._last_hold = self._clock()
                 return {"status": "ok"}
+            if self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}
         if not self.is_connected:
             return dict(_NOT_CONNECTED)
         client = self._client
@@ -1277,6 +1344,8 @@ class RobotDriverV2(BaseDeviceDriver):
                 if self._holding_locked():
                     self._last_hold = self._clock()
                     return {"status": "ok"}
+                if self._syncing:
+                    return {"status": "error", "message": TEXT_SYNCING}
                 prev = self._jog
                 # Д4: от проверки _busy до записи self._jog start_program видит переход как jog (_BUSY_JOG)
                 self._jog_starting = True
@@ -1421,6 +1490,8 @@ class RobotDriverV2(BaseDeviceDriver):
             run = self._jog
             if self._jog_starting or self._jog_stopping or (run is not None and run.active):
                 return dict(_BUSY_JOG)  # окно T3.7: поводок вышел, стоп jog_release ещё не вернулся
+            if self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}
             if not self.is_connected:
                 return dict(_NOT_CONNECTED)
             self._busy = True
