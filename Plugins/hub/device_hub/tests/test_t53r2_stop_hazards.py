@@ -427,6 +427,13 @@ def test_spawn_failure_still_writes_one_stop_per_moving_robot(failure: str, monk
         mgr, drv = _manager(rec, spawn, {"r1": r1, "r2": r2})
         try:
             _program_running(drv["r1"], r1)
+            # Программа идёт на роботе: пройдена первая нога, команда запуска принята. Стоп сразу после старта получил
+            # бы вторую запись от О5 клиента (ADR-DH-009), её отдельно фиксирует test_stop_during_program_start_...
+            _until(
+                lambda: any(isinstance(p, dict) and p.get("done", 0) >= 1 for p in rec.at("devices.state.r1.program")),
+                5.0,
+                "программа не прошла первую ногу",
+            )
             _jog_moving(drv["r2"], r2)
             t0 = time.perf_counter()
             with _holding(drv["r2"]):
@@ -827,3 +834,26 @@ def test_plugin_shutdown_scope_closed_spawn_is_quiet_and_writes_one_stop(
         assert rig.journal.count(t0) == 1, rig.journal.stamps()
     noisy = [r for r in spy.records if "не запущен" in r[1] and r[0] != "debug"]
     assert noisy == [], noisy
+
+
+def test_stop_during_program_start_at_most_two_writes() -> None:
+    """Документирует О5 клиента (ADR-DH-009): стоп сразу после старта программы — одна запись, а если робот принял
+    команду запуска уже после стопа, вторая (свой стоп команде). Больше двух не бывает; робот в итоге стоит."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            points = {
+                "a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1),
+                "b": Point(name="b", x=300, y=-210, z=-40, rz=-100, hand=1),
+            }
+            program = Program(name="p", steps=tuple(Move(point="ab"[i % 2], kind="JOINT") for i in range(20)))
+            t0 = time.perf_counter()
+            assert bounded(lambda: drv.start_program(program, points, None, name="p"), _CALL_S)["status"] == "ok"
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+            time.sleep(_SETTLE_S)
+            writes = rig.journal.count(t0)
+            assert 1 <= writes <= 2, rig.journal.stamps()
+            _until(lambda: _moving(rig) == 0, 2.0, "робот не остановился")
+        finally:
+            _quiet(drv.disconnect)
