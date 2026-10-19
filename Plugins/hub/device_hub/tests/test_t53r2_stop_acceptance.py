@@ -61,6 +61,7 @@ from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, RecordingCore, bounded
 _SHUTDOWN_BUDGET_S = 2.5  # A1-A4, A6
 _PEER_GAP_S = 0.1  # A2: запись r2 не позже, чем через 0.1 с после записи r1
 _HELD_REPLY_S = 3.0  # A2b: ответ r1 на запись STOP_REQ держится 3 с (бриф лида: >= 1.5 с)
+_RETRY_MIN_GAP_S = 0.9  # A2b: повтор записи только после таймаута прежней, не сразу
 _ONE_WRITE = 1
 _TWO_WRITES = 2
 _NO_WRITES = 0
@@ -468,11 +469,20 @@ def test_a2b_peer_reply_held_shutdown_within_budget(scenario) -> None:
     assert obs.elapsed_s <= _SHUTDOWN_BUDGET_S, f"a2b: shutdown не уложился в 2.5 с: {_fmt(obs)}"
 
 
-def test_a2b_peer_reply_held_exactly_one_write_per_robot(scenario) -> None:
+def test_a2b_peer_reply_held_write_counts_one_retry_for_r1_one_for_r2(scenario) -> None:
+    # Ответ r1 держится 3 с: запись клиента истекает по таймауту = неудачная запись, дизайн даёт ровно один повтор.
     obs = scenario("a2b")
     _assert_moving_reached(obs, SCENARIOS["a2b"])
     counts = {dev_id: len(stamps) for dev_id, stamps in obs.writes.items()}
-    assert counts == {"r1": _ONE_WRITE, "r2": _ONE_WRITE}, f"a2b: записей STOP_REQ на робота: {counts}; {_fmt(obs)}"
+    assert counts == {"r1": _TWO_WRITES, "r2": _ONE_WRITE}, f"a2b: записей STOP_REQ на робота: {counts}; {_fmt(obs)}"
+
+
+def test_a2b_peer_reply_held_retry_only_after_timed_out_write(scenario) -> None:
+    obs = scenario("a2b")
+    _assert_moving_reached(obs, SCENARIOS["a2b"])
+    assert len(obs.writes["r1"]) >= _TWO_WRITES, f"a2b: у r1 нет повтора записи STOP_REQ: {_fmt(obs)}"
+    spacing = obs.writes["r1"][1] - obs.writes["r1"][0]
+    assert spacing >= _RETRY_MIN_GAP_S, f"a2b: повтор r1 пришёл через {spacing:.3f} с (< 0.9): {_fmt(obs)}"
 
 
 def test_a2b_second_robot_write_arrives_within_gap_of_first_arrival(scenario) -> None:
