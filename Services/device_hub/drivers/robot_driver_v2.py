@@ -149,6 +149,7 @@ TEXT_THREAD_SURVIVED = "поток драйвера не вышел за сро�
 TEXT_WDG_INTERVAL = "интервал тика больше четверти таймаута сторожа"
 TEXT_NO_SPAWN = "RobotDriverV2 без spawn не запускает потоки"
 TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
+TEXT_NO_ECHO_WINDOW = "эхо не читалось (нет окна)"
 TEXT_BAD_STOP_LEVEL = "неверный уровень стопа"
 # Операции T5.3d d1: постоянные тексты отказов (без входных значений)
 TEXT_NO_STORE = "хранилище данных робота не задано"
@@ -426,6 +427,7 @@ class RobotDriverV2(BaseDeviceDriver):
         self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
         self._echo_checked: int | None = None  # значение, эхо которого уже проверено
         self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
+        self._stop_unconfirmed_text: str | None = None  # текст для health; ставится под замком вместе с флагом
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
 
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
@@ -684,6 +686,12 @@ class RobotDriverV2(BaseDeviceDriver):
         with self._flags_lock:
             return self._stop_unconfirmed
 
+    @property
+    def stop_unconfirmed_text(self) -> str | None:
+        """Текст причины для health: ``TEXT_STOP_UNCONFIRMED`` или ``TEXT_NO_ECHO_WINDOW``; ``None`` — не помечен."""
+        with self._flags_lock:
+            return self._stop_unconfirmed_text
+
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
         with self._flags_lock:
@@ -780,8 +788,9 @@ class RobotDriverV2(BaseDeviceDriver):
         """Эхо записи стопа процесса этого поколения, без записи, один раз на значение (H7).
 
         Чтения идут до ``deadline - _write_budget_s()``: чтение, начатое позже, могло бы пережить срок на мёртвой
-        связи. Нет эха, нет времени или запись стопа не прошла — ``last_error`` «стоп не подтверждён роботом» и
-        ``stop_unconfirmed``. Простой робот (записи не было) не проверяется. Не бросает.
+        связи. Исходы без подтверждения (``stop_unconfirmed`` и ``last_error``): запись прошла, окно было, эха нет —
+        ``TEXT_STOP_UNCONFIRMED``; запись прошла, окна нет — ``TEXT_NO_ECHO_WINDOW``; запись не прошла —
+        ``TEXT_STOP_UNCONFIRMED``. Простой робот (записи не было) не проверяется. Не бросает.
         """
         with self._flags_lock:
             value = self._latch_value
@@ -794,7 +803,8 @@ class RobotDriverV2(BaseDeviceDriver):
         client = self._client
         read_until = deadline - self._write_budget_s()
         confirmed = False
-        if value is not None and client is not None and time.monotonic() < read_until:
+        has_window = value is not None and client is not None and time.monotonic() < read_until
+        if has_window:
             try:
                 client.await_stop_echo(value, value & 3, deadline=read_until)
                 confirmed = True
@@ -802,11 +812,15 @@ class RobotDriverV2(BaseDeviceDriver):
                 logger.warning(f"робот {self.entry.id!r}: эхо стопа не получено: {type(exc).__name__}: {exc}")
         if confirmed:
             return
+        # запись прошла, а читать эхо было некогда (срок минус бюджет записи) — это не «эхо не пришло»
+        no_window = value is not None and client is not None and not has_window
+        text = TEXT_NO_ECHO_WINDOW if no_window else TEXT_STOP_UNCONFIRMED
         with self._flags_lock:
             self._stop_unconfirmed = True
+            self._stop_unconfirmed_text = text
         self._record_err()
-        logger.warning(f"робот {self.entry.id!r}: {TEXT_STOP_UNCONFIRMED}")
-        self._publish_error(TEXT_STOP_UNCONFIRMED)
+        logger.warning(f"робот {self.entry.id!r}: {text}")
+        self._publish_error(text)
 
     def _stop_latched(self, level: int) -> None:
         """Запись стопа без эха через защёлку: такой уровень уже записан в этом поколении — записи нет (H1)."""
@@ -856,27 +870,18 @@ class RobotDriverV2(BaseDeviceDriver):
                 logger.warning(f"робот {self.entry.id!r}: стоп программы не доставлен: {type(exc).__name__}: {exc}")
         if not (job_active or stop_jog or prog_alive) and self.is_connected:
             # Решение владельца 2026-10-19: отключаемый подключённый робот получает стоп и в покое (SOFT);
-            # защёлка гасит вторую запись в том же выключении (jog со стопом этого вызова)
+            # защёлка гасит вторую запись в том же выключении (jog со стопом этого вызова). Только запись SOFT:
+            # эхо простого робота не читается (supervisor не ждёт soft_echo_timeout_s), last_error нет (T5.3c c3)
             with self._flags_lock:
                 covered = self._latch_level >= STOP_LEVEL["SOFT"] and not self._latch_failed
             if not covered:
                 try:
-                    value = self._write_stop(STOP_LEVEL["SOFT"])
+                    self._write_stop(STOP_LEVEL["SOFT"])
                 except Exception as exc:
                     self._record_err()
                     logger.warning(
                         f"робот {self.entry.id!r}: стоп простого робота не записан: {type(exc).__name__}: {exc}"
                     )
-                else:
-                    try:
-                        self._client.await_stop_echo(
-                            value, value & 3, deadline=time.monotonic() + self._cfg.soft_echo_timeout_s
-                        )
-                    except Exception as exc:
-                        self._record_err()
-                        logger.warning(
-                            f"робот {self.entry.id!r}: стоп записан, эхо не подтверждено: {type(exc).__name__}: {exc}"
-                        )
 
     def _close_thread(self, handle: IHandle, budget_s: float) -> None:
         """Дождаться выхода потока через его запись. Выживший виден: ``tx_err`` +1, ``last_error``; не бросает.

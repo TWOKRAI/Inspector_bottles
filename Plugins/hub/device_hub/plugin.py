@@ -368,9 +368,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
             if driver is None or not getattr(driver, "stop_unconfirmed", False):
                 continue
             try:
-                ctx.health.report_error(
-                    RuntimeError(TEXT_STOP_UNCONFIRMED), context="device_hub.stop_echo", device_id=entry.id
-                )
+                # текст причины — свойство драйвера (T5.3c c3): «нет окна» отличается от «эхо не пришло»
+                text = getattr(driver, "stop_unconfirmed_text", None) or TEXT_STOP_UNCONFIRMED
+                ctx.health.report_error(RuntimeError(text), context="device_hub.stop_echo", device_id=entry.id)
             except Exception as exc:  # no-health: сам health упал — лог, остановка идёт дальше
                 ctx.log_warning(f"DeviceHubPlugin: health для {entry.id!r} не принят: {exc!r}")
 
