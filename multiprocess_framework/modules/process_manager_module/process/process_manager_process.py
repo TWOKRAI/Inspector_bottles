@@ -160,6 +160,9 @@ class ProcessManagerProcess(ProcessModule):
             # shutdown_timeout, которым PM останавливает детей. Считается здесь один раз.
             child_stop_budget=stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY)),
         )
+        # Task 1.8 (L-9, ADR-PMM-037): ожидание стопа ребёнка вычерпывает каналы PM в буфер роутера.
+        self._process_registry.stop_wait_idle = self._stop_wait_idle
+        self._stop_wait_pump_error_logged = False
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)
 
@@ -3653,6 +3656,27 @@ class ProcessManagerProcess(ProcessModule):
                 self._mark_instance_started(process.name)
             self._publish_process_identity(process.name)
         return True
+
+    def _stop_wait_idle(self, pause_s: float) -> None:
+        """Пауза между проходами ожидания стопа ребёнка (Task 1.8, L-9, ADR-PMM-037).
+
+        Выходящий ребёнок ждёт без срока, пока хвост его очереди кто-то прочитает; единственный
+        читатель каналов PM — этот же поток, занятый ожиданием. Пока ждём, переносим входящее
+        в буфер роутера (``pump_inbound``): без разбора и диспетчеризации — команды исполнит
+        следующий ``receive()`` после возврата обработчика. Остаток паузы досыпаем. Не бросает.
+        """
+        end = time.monotonic() + pause_s
+        router = self.router_manager
+        if router is not None:
+            try:
+                router.pump_inbound()
+            except Exception as exc:  # noqa: BLE001 — ожидание стопа не должно падать из-за вычерпывания
+                if not self._stop_wait_pump_error_logged:
+                    self._stop_wait_pump_error_logged = True
+                    self._log_error(f"stop wait: pump_inbound не удался: {exc}")
+        rest = end - time.monotonic()
+        if rest > 0:
+            time.sleep(rest)
 
     def stop_process(self, process_name: str | None = None, *, mark_reader_gone: bool = True) -> bool:
         """

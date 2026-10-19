@@ -10,6 +10,7 @@ import os
 import threading
 import time
 import uuid
+from collections import deque
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...channel_routing_module import ChannelRoutingManager
@@ -21,6 +22,7 @@ from ...message_module import (
     process_of,
     split_address,
 )
+from ..channels.queue_channel import QueueChannel
 from ..interfaces import IMessageChannel
 from ..routing import UnknownMessageTypeError, channel_name, resolve_channel_kind
 
@@ -40,6 +42,11 @@ if TYPE_CHECKING:
 #: тянуть зависимость на раскладку очередей ради одной строки. Сверку имён держит
 #: контрактный тест (``test_observability_queue_split``).
 QUEUE_OBSERVABILITY = "observability"
+
+#: Потолок буфера ``pump_inbound`` на канал (ADR-RTR-014) — тот же, что у одного дренажа
+#: ``QueueChannel.poll``: штатный дренаж в потолок не упирается, а недобранное достанется
+#: следующему такту. Значение берётся у канала, а не дублируется.
+POLL_DRAIN_CEILING = QueueChannel.POLL_DRAIN_CEILING
 
 
 class RouterSendError(Exception):
@@ -311,6 +318,18 @@ class RouterManager(ChannelRoutingManager):
         #    ответа бессмысленно: разбирать его некому.
         self._recv_local = threading.local()
         self._pump_seen = threading.Event()
+
+        # Task 1.8 (L-9, ADR-RTR-014): буфер входящих, перенесённых из pipe каналов
+        # ``pump_inbound()`` пока обработчик внутри receive() долго ждёт (стоп ребёнка).
+        # FIFO на имя канала; следующий receive() отдаёт буфер раньше pipe того же канала.
+        # Пустой словарь — ноль затрат на горячем приёмном пути (guard `if self._inbound_stash`).
+        # Лок: pump и receive зовутся из потоков роутера (приёмный, воркер по data), а
+        # словарь у них общий.
+        self._inbound_stash: Dict[str, deque] = {}
+        self._stash_lock = threading.Lock()
+        # Каналы, о полном буфере которых уже записан WARNING в текущем эпизоде
+        # (эпизод кончается, когда буфер канала снова ниже потолка).
+        self._stash_full_warned: set = set()
 
         # Ф6.7: троттлинг записей об ошибках отправки — по причине, а не общий.
         # Отдельное окно на причину: шторм «нет маршрута» не имеет права
@@ -1403,6 +1422,12 @@ class RouterManager(ChannelRoutingManager):
         # есть», без него request() ждать нечего.
         local = self._recv_local
         depth = getattr(local, "depth", 0)
+        # Фильтр каналов ЭТОГО receive — для pump_inbound(): обработчик внутри receive
+        # вычерпывает ровно те каналы, которые этот поток и читает (иначе pump украл бы
+        # сообщения у соседнего приёмника, например воркера на data). Вложенный receive
+        # возвращает внешний фильтр в finally вместе с depth.
+        prev_filter = getattr(local, "filter", None)
+        local.filter = (input_channels_only, channel_types)
         local.depth = depth + 1
         if depth == 0:
             if not self._pump_seen.is_set():
@@ -1476,6 +1501,7 @@ class RouterManager(ChannelRoutingManager):
             return result
         finally:
             local.depth = depth
+            local.filter = prev_filter
 
     def _route_to_worker(self, processed: Dict[str, Any]) -> bool:
         """P2.2 (Гибрид, control-plane): доставить билет worker-handler'у по адресу.
@@ -1520,21 +1546,22 @@ class RouterManager(ChannelRoutingManager):
             return False
         return True
 
-    def _poll_all_channels(
+    def _selected_channels(
         self,
-        timeout: float = 0.0,
         input_channels_only: bool = True,
         channel_types: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Опросить каналы.
+    ) -> List[tuple]:
+        """Каналы, которые видит receive() с данным фильтром: пары ``(имя, канал)``.
+
         input_channels_only: только process.name_* (входные очереди).
         channel_types: если задан, только каналы с суффиксом _system, _data и т.д.
+        Канал без ``poll`` не входит. Один выбор на ``_poll_all_channels`` и ``pump_inbound``.
         """
         snapshot = self._channel_registry.snapshot()
-        messages: List[Dict[str, Any]] = []
         process_name = getattr(self.process, "name", None) if self.process else None
         prefix = f"{process_name}_" if (input_channels_only and process_name) else None
 
+        selected: List[tuple] = []
         for ch_name, ch in snapshot.items():
             if prefix and not ch_name.startswith(prefix):
                 continue
@@ -1550,6 +1577,30 @@ class RouterManager(ChannelRoutingManager):
                     continue
             if not hasattr(ch, "poll"):
                 continue
+            selected.append((ch_name, ch))
+        return selected
+
+    def _poll_all_channels(
+        self,
+        timeout: float = 0.0,
+        input_channels_only: bool = True,
+        channel_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Опросить каналы.
+        input_channels_only: только process.name_* (входные очереди).
+        channel_types: если задан, только каналы с суффиксом _system, _data и т.д.
+
+        Канал с непустым буфером ``pump_inbound`` отдаёт буфер (не больше потолка) и в этом
+        такте не опрашивается: содержимое pipe новее буфера, порядок FIFO важнее.
+        """
+        messages: List[Dict[str, Any]] = []
+
+        for ch_name, ch in self._selected_channels(input_channels_only, channel_types):
+            if self._inbound_stash:
+                stashed = self._take_stashed(ch_name)
+                if stashed:
+                    messages.extend(stashed)
+                    continue
             try:
                 for msg in ch.poll(timeout):
                     if isinstance(msg, dict):
@@ -1558,6 +1609,75 @@ class RouterManager(ChannelRoutingManager):
             except Exception as e:
                 self._log_error(f"poll error on '{ch_name}': {e}")
         return messages
+
+    def _take_stashed(self, ch_name: str) -> List[Dict[str, Any]]:
+        """Забрать из буфера канала не больше потолка (FIFO); пусто — ``[]``."""
+        with self._stash_lock:
+            stash = self._inbound_stash.get(ch_name)
+            if not stash:
+                return []
+            count = min(len(stash), POLL_DRAIN_CEILING)
+            taken = [stash.popleft() for _ in range(count)]
+            if not stash:
+                del self._inbound_stash[ch_name]
+            return taken
+
+    def pump_inbound(self) -> int:
+        """Перенести сообщения из pipe каналов текущего receive() в буфер роутера (ADR-RTR-014).
+
+        Зовётся из обработчика, исполняемого ВНУТРИ ``receive()`` и долго ждущего (стоп
+        ребёнка): пока поток ждёт, ребёнок на выходе ждёт, пока хвост его очереди кто-то
+        прочитает (L-9). Только переносит — разбор, middleware и диспетчеризация остаются
+        следующему ``receive()`` после возврата обработчика, поэтому внутри ожидания не
+        исполняется ни одна команда.
+
+        pre: поток внутри ``receive()`` (``depth > 0``); иначе возвращает 0 и ничего не
+             читает — иначе гонка с настоящим приёмником канала.
+        post: FIFO внутри канала сохранён; канал, чей буфер уже >= ``POLL_DRAIN_CEILING``,
+              пропускается (один WARNING за эпизод, без содержимого), поэтому в буфере не
+              больше ``2 * POLL_DRAIN_CEILING - 1`` на канал. Не бросает: сбой — в лог.
+
+        Returns:
+            Число перенесённых сообщений.
+        """
+        local = self._recv_local
+        if getattr(local, "depth", 0) <= 0:
+            return 0
+        pump_filter = getattr(local, "filter", None)
+        if pump_filter is None:
+            return 0
+        moved = 0
+        try:
+            for ch_name, ch in self._selected_channels(*pump_filter):
+                try:
+                    with self._stash_lock:
+                        stash = self._inbound_stash.get(ch_name)
+                        stashed = len(stash) if stash else 0
+                    if stashed >= POLL_DRAIN_CEILING:
+                        self._warn_stash_full(ch_name, stashed)
+                        continue
+                    self._stash_full_warned.discard(ch_name)
+                    batch = list(ch.poll(0.0))
+                    if not batch:
+                        continue
+                    for msg in batch:
+                        if isinstance(msg, dict):
+                            msg["_source_channel"] = ch_name
+                    with self._stash_lock:
+                        self._inbound_stash.setdefault(ch_name, deque()).extend(batch)
+                    moved += len(batch)
+                except Exception as e:
+                    self._log_error(f"pump_inbound error on '{ch_name}': {e}")
+        except Exception as e:
+            self._log_error(f"pump_inbound error: {e}")
+        return moved
+
+    def _warn_stash_full(self, ch_name: str, stashed: int) -> None:
+        """Один WARNING за эпизод: буфер канала полон, вычерпывание приостановлено."""
+        if ch_name in self._stash_full_warned:
+            return
+        self._stash_full_warned.add(ch_name)
+        self._log_warning(f"канал {ch_name}: буфер полон ({stashed}), вычерпывание приостановлено")
 
     # ================================================================
     # ASYNC RECEIVE
