@@ -259,7 +259,7 @@ def test_s2_launch_during_jog_release_stop_in_flight_is_busy_jog() -> None:
         assert drv.call("jog_hold", _JOG)["status"] == "ok"
         time.sleep(0.1)
         client = drv._client
-        real_stop = client.stop
+        real_stop = client.issue_stop
         entered, gate = threading.Event(), threading.Event()
 
         def stop(level: int) -> Any:
@@ -267,7 +267,7 @@ def test_s2_launch_during_jog_release_stop_in_flight_is_busy_jog() -> None:
             gate.wait(2.0)
             return real_stop(level)
 
-        client.stop = stop  # type: ignore[method-assign]
+        client.issue_stop = stop  # type: ignore[method-assign]
         rel = threading.Thread(target=lambda: drv.call("jog_release", {}), daemon=True)
         rel.start()
         try:
@@ -276,7 +276,7 @@ def test_s2_launch_during_jog_release_stop_in_flight_is_busy_jog() -> None:
         finally:
             gate.set()
             rel.join(5.0)
-            client.stop = real_stop  # type: ignore[method-assign]
+            client.issue_stop = real_stop  # type: ignore[method-assign]
         assert not rel.is_alive()
 
 

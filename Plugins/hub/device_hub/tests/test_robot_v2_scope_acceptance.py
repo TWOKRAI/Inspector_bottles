@@ -407,39 +407,36 @@ def test_plugin_shutdown_leaves_no_driver_threads(tmp_path: Path) -> None:
 
 
 def test_spawnless_driver_keeps_working() -> None:
+    """REDS 5 (T5.3 круг 2, решение владельца): робот ``delta_v2`` без ``spawn`` не создаётся фабрикой
+    (``RuntimeError``); драйвер, собранный без ``spawn``, на jog и запуск программы отвечает ``RuntimeError`` /
+    отказом без записи ``JOG_CONT`` и без нового корня."""
     rec = Rec()
-    own_root = "rv2-r1"
-    roots_before = len(_roots(own_root))
-    rv2_before = _thread_names("rv2-")
     with E2eRig() as rig:
+        mgr = DeviceManager(store=None, publish_cb=rec)
+        _upsert(mgr, "r1", rig.port)
+        with pytest.raises(RuntimeError):
+            mgr.connect("r1")
+
+        roots_before = len(unclosed_roots())
         entry = DeviceEntry(
             id="r1", name="r1", kind="robot", protocol="delta_v2", transport=_transport(rig.port), params={}
         )
         drv = RobotDriverV2(entry, None, publish=rec)
         try:
             assert bounded(drv.connect, _CONNECT_DEADLINE_S) is True
-            drv.desired_connected = True
             core = rig.core
-
-            assert bounded(lambda: drv.call("jog_hold", dict(_JOG)), _CALL_DEADLINE_S)["status"] == "ok"
-            _confirm(lambda: drv.call("jog_hold", dict(_JOG)), 0.4)
-            assert _moving(core) == 1
-            # ДОПОЛНЕНИЕ ТЕСТЕРА (DESIGN 2): «потоков rv2- нет» пусто и до реализации (там потоки носят имя
-            # 'rv2-lease-r1' и корня нет); положительный контроль — собственный корень драйвера открыт на время jog.
-            assert any(n.startswith("rv2-r1/r1-lease-") for n in _thread_names("rv2-r1/")), (
-                "поток поводка не в 'rv2-r1'"
-            )
-            assert len(_roots(own_root)) == roots_before + 1, "собственный корень 'rv2-r1' не открыт"
-
-            assert bounded(lambda: drv.call("jog_release", {}), _CALL_DEADLINE_S)["status"] == "ok"
-            _wait_stopped(core)
+            reply = bounded(lambda: drv.call("jog_hold", dict(_JOG)), _CALL_DEADLINE_S)
+            assert reply == {"status": "error", "message": "RobotDriverV2 без spawn не запускает потоки"}
+            assert _jog_cmd_seqs(core) == []
+            program, points = _legs_program("p_nospawn", 2)
+            with pytest.raises(RuntimeError, match="без spawn"):
+                drv.start_program(program, points, name="p_nospawn")
+            assert len(unclosed_roots()) == roots_before
         finally:
             try:
                 bounded(drv.disconnect, _CALL_DEADLINE_S)
             except Exception:  # noqa: BLE001 — уборка не должна подменять исключение теста
                 pass
-        _until(lambda: _new_threads("rv2-", rv2_before) == [], 2.0, "после disconnect() потоков 'rv2-' нет")
-        assert len(_roots(own_root)) == roots_before
 
 
 # --------------------------------------------------------------------------------------------------
