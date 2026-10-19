@@ -1319,6 +1319,9 @@ class RobotDriverV2(BaseDeviceDriver):
                 level = self._stop_level if (self._stopping and not resent[0]) else 0
                 if level:
                     resent[0] = True
+            client = self._client
+            if level and client.stop_generation != client.run_stop_base:
+                level = 0  # стоп записан после g0: прогон видит его сам, повтор дал бы вторую запись
             if level:
                 try:
                     self._write_stop(level)

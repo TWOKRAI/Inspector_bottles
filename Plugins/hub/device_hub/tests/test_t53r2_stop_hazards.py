@@ -696,3 +696,32 @@ def test_echo_reads_stop_at_budget_boundary_no_stop_thread_survives(tmp_path: Pa
         # Поздно начатое чтение держит замок транспорта: закрытие сокета в фазе 4 ждёт его, остановка выходит за срок
         assert elapsed <= 2.5, elapsed
         assert rig.journal.count(t0) == 1
+
+
+def test_program_stop_after_g0_then_progress_does_not_repeat_stop() -> None:
+    """Стоп процесса записан ПОСЛЕ g0 прогона, затем опрос с прогрессом: повтор on_progress (микроокно К1) не
+    нужен — прогон видит стоп сам. Ровно одна запись STOP_REQ (рандеву в wait_done: стоп, затем on_poll)."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        client = drv._client
+        real_wait = client.wait_done
+        marks: dict[str, float] = {}
+
+        def wait_done(seq: int, *, on_poll: Any = None) -> Any:
+            if on_poll is not None and "t0" not in marks:
+                marks["t0"] = time.perf_counter()
+                drv.request_stop(time.monotonic() + 2.5)  # после sc_run, т.е. после g0 прогона
+                on_poll(list(client._rd(REG["TLM_PROTO_VER"], 32)))  # первый опрос: прогресс меняется всегда
+            return real_wait(seq, on_poll=on_poll)
+
+        client.wait_done = wait_done  # type: ignore[method-assign]
+        try:
+            _program_running(drv, rig)
+            _until(lambda: "t0" in marks, 5.0, "рандеву не случилось")
+            _until(lambda: _moving(rig) == 0, 2.0, "робот не остановился")
+            time.sleep(_SETTLE_S)
+            assert rig.journal.count(marks["t0"]) == 1, [x - marks["t0"] for x in rig.journal.stamps()]
+        finally:
+            client.wait_done = real_wait  # type: ignore[method-assign]
+            _quiet(drv.disconnect)

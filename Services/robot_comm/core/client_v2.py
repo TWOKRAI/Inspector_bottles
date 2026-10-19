@@ -328,6 +328,7 @@ class RobotClientV2:
         self._stop_seq = 0
         self._stop_generation = 0  # растёт ПОСЛЕ записи STOP_REQ, под _stop_lock
         self._stop_base_gen = 0  # растёт при каждом изменении _stop_seq (запись стопа, probe)
+        self._run_stop_base: int | None = None  # поколение стопа на старте последнего run_chunks (g0)
         self._echo_log: deque[int] = deque(maxlen=16)  # недавние различные значения TLM_STOP_ACK (кто бы ни читал)
         self._stop_pending: tuple[int, int] | None = None  # (уровень, seq) сильнейшего неподтверждённого стопа
         self._last_halt_gen = 0
@@ -925,6 +926,14 @@ class RobotClientV2:
     # ------------------------------------------------------------------ #
 
     @property
+    def run_stop_base(self) -> int | None:
+        """Поколение стопа, взятое последним ``run_chunks`` на старте (g0); None — прогона не было. Только чтение.
+
+        ``stop_generation != run_stop_base`` во время прогона — стоп записан после g0, прогон видит его сам.
+        """
+        return self._run_stop_base
+
+    @property
     def stop_generation(self) -> int:
         """Поколение стопа клиента: растёт после каждой записи ``STOP_REQ`` (своей или повтора О5). Только чтение."""
         return self._stop_generation
@@ -1016,6 +1025,7 @@ class RobotClientV2:
         total = len(words)
         self._ensure_probed()
         g0 = self._stop_generation
+        self._run_stop_base = g0
         ack0 = self._read_stop_ack()
 
         def by_generation() -> bool:
