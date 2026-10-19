@@ -38,6 +38,11 @@ from ...shared_resources_module.queues.core.reader_gone import ReaderGoneQueue, 
 DEADLINE_S = 12.0
 SPAWN_READY_S = 40.0  # импорты ребёнка при spawn; до этого срока часы стопа не запущены
 PM_BUDGET_S = 5.0  # graceful-срок стопа одного ребёнка (stop_process_timeout)
+# Стенд 2026-10-19 16:43-16:52: ребёнок (devices) входит в хук выхода через 0,58...0,74 с ПОСЛЕ стопа
+# (сначала гасятся плагины), а непрочитанное в PM.system растёт ~6 КБ за 0,25 с (≈ 24-32 КБ/с от всех писателей).
+# За эту задержку pipe заполняется, и хвост даже в 12 сообщений (3838 Б < 8 КБ) в него уже не влезает.
+STAND_HOOK_DELAY_S = 0.7
+STAND_NEIGHBOUR = (1, 0.01)  # (сообщений за такт, пауза такта): 1 × ~321 Б каждые ~10 мс ≈ 32 КБ/с, без пачек
 TAIL_MESSAGE_PAD = 258  # pickle одного сообщения хвоста = 321 байт (замер: len(pickle.dumps(msg)))
 
 
@@ -46,17 +51,34 @@ TAIL_MESSAGE_PAD = 258  # pickle одного сообщения хвоста = 
 # --------------------------------------------------------------------------- #
 
 
-def _child_tail_then_exit(queue: Any, stop_event: Any, ready: Any, flag: Any, count: int) -> None:
+def _child_tail_then_exit(queue: Any, stop_event: Any, ready: Any, flag: Any, count: int, delay_s: float = 0.0) -> None:
     """Ждёт stop_event, пишет ``count`` сообщений по 321 Б в канал PM, зовёт хук выхода, ставит флаг.
 
     Флаг — аналог слота ``exit_report``: его ставит ребёнок ПОСЛЕ хука, значит 0 после выхода — «хук не дошёл».
+    ``delay_s`` — пауза между стопом и записью хвоста (на стенде — остановка плагинов до хука выхода).
     """
     ready.set()
     stop_event.wait()
+    time.sleep(delay_s)
     for i in range(count):
         queue.put({"type": "command", "command": "probe.tail", "i": i, "pad": "x" * TAIL_MESSAGE_PAD})
     release_feeders_at_exit([], [queue], system_stop=False)
     flag.value = 1
+
+
+def _child_neighbour_writer(queue: Any, ready: Any, quit_event: Any, burst: int, period_s: float) -> None:
+    """Сосед: НЕ останавливается PM, пока живёт, пишет в тот же канал PM сообщениями по ~321 Б.
+
+    Так на стенде делают остальные процессы: pipe общий, и пока читатель PM занят ожиданием, его заполняют они.
+    Темп задан парой ``(burst, period_s)``; ``STAND_NEIGHBOUR`` — как на стенде.
+    """
+    ready.set()
+    n = 0
+    while not quit_event.is_set():
+        for _ in range(burst):
+            queue.put({"type": "command", "command": "probe.noise", "n": n, "pad": "x" * TAIL_MESSAGE_PAD})
+            n += 1
+        time.sleep(period_s)
 
 
 # --------------------------------------------------------------------------- #
@@ -92,8 +114,14 @@ def _build_child_stop(proc: Any, stop_event: Any, router: Any, state: dict[str, 
     return stop
 
 
-def _measure_single_stop(count: int) -> dict[str, Any]:
-    """Один стоп ребёнка с хвостом ``count`` сообщений; возвращает измерения (без ассертов)."""
+def _measure_single_stop(
+    count: int, neighbour_rate: tuple[int, float] | None = None, tail_delay_s: float = 0.0
+) -> dict[str, Any]:
+    """Один стоп ребёнка с хвостом ``count`` сообщений; возвращает измерения (без ассертов).
+
+    ``neighbour_rate`` ``(burst, period_s)`` — второй живой spawn-процесс пишет в тот же канал PM всё время стопа
+    (R10b); ``tail_delay_s`` — через сколько после стопа остановленный ребёнок пишет хвост.
+    """
     from ...router_module.channels.queue_channel import QueueChannel
     from ...router_module.core.router_manager import RouterManager
 
@@ -101,7 +129,19 @@ def _measure_single_stop(count: int) -> dict[str, Any]:
     queue = ReaderGoneQueue(ctx=ctx)
     stop_event, ready, flag = ctx.Event(), ctx.Event(), ctx.Value("i", 0)
     proc = ctx.Process(
-        target=_child_tail_then_exit, args=(queue, stop_event, ready, flag, count), name="tail-child", daemon=True
+        target=_child_tail_then_exit,
+        args=(queue, stop_event, ready, flag, count, tail_delay_s),
+        name="tail-child",
+        daemon=True,
+    )
+
+    neighbour_quit = ctx.Event()
+    neighbour_ready = ctx.Event()
+    neighbour = ctx.Process(
+        target=_child_neighbour_writer,
+        args=(queue, neighbour_ready, neighbour_quit, *(neighbour_rate or (0, 0.01))),
+        name="noisy-neighbour",
+        daemon=True,
     )
 
     router = RouterManager(manager_name="PM", process=SimpleNamespace(name="PM"))
@@ -126,6 +166,7 @@ def _measure_single_stop(count: int) -> dict[str, Any]:
 
     router.register_message_handler("probe.stop", _on_stop)
     router.register_message_handler("probe.tail", lambda _m: None)
+    router.register_message_handler("probe.noise", lambda _m: None)
 
     def _pm_loop() -> None:
         quiet_until: float | None = None
@@ -141,6 +182,9 @@ def _measure_single_stop(count: int) -> dict[str, Any]:
 
     measured: dict[str, Any] = {"count": count, "state": state}
     try:
+        if neighbour_rate is not None:
+            neighbour.start()
+            assert neighbour_ready.wait(SPAWN_READY_S), "сосед не стартовал — стенд неисправен"
         proc.start()
         assert ready.wait(SPAWN_READY_S), f"ребёнок не стартовал за {SPAWN_READY_S} с — стенд неисправен"
 
@@ -159,20 +203,23 @@ def _measure_single_stop(count: int) -> dict[str, Any]:
         measured["reader_gone"] = queue.is_reader_gone()
         return measured
     finally:
-        if proc.is_alive():
-            proc.kill()
-        proc.join(5.0)
+        neighbour_quit.set()
+        for child in (proc, neighbour):
+            if child.pid is None:
+                continue
+            child.join(3.0)  # сосед может застрять на выходе в feeder (pipe никто не читает) — тогда kill
+            if child.is_alive():
+                child.kill()
+            child.join(5.0)
         queue.cancel_join_thread()
         queue.close()
         router.shutdown()
 
 
-@pytest.mark.parametrize("count", [120, 15], ids=["K=120_tail_over_pipe", "K=15_control_fits_pipe"])
-def test_r10_single_stop_with_tail_replies_fast_and_child_exits_by_itself(count: int) -> None:
-    m = _measure_single_stop(count)
+def _assert_stop_effect(m: dict[str, Any], count: int, label: str) -> None:
     print(  # видно при красном и с ``-s``: цифры до/после фикса берутся отсюда
-        f"R10 K={count}: reply_s={m['reply_s']} exitcode={m['exitcode']} flag={m['flag']} "
-        f"tail={len(m['tail'])} reader_gone={m['reader_gone']} loop_hung={m['loop_hung']} "
+        f"{label}: reply_s={m['reply_s']} exitcode={m['exitcode']} flag={m['flag']} "
+        f"tail={len(m['tail'])}/{count} reader_gone={m['reader_gone']} loop_hung={m['loop_hung']} "
         f"idle_supported={m['state'].get('idle_supported')} errors={m['state']['errors']}"
     )
 
@@ -186,6 +233,27 @@ def test_r10_single_stop_with_tail_replies_fast_and_child_exits_by_itself(count:
         f"хвост пришёл не целиком или не по порядку: {len(m['tail'])} из {count}, начало {m['tail'][:5]}"
     )
     assert m["reader_gone"] is False, "очередь PM помечена «читатель ушёл», а PM жив"
+
+
+@pytest.mark.parametrize("count", [120, 15], ids=["K=120_tail_over_pipe", "K=15_control_fits_pipe"])
+def test_r10_single_stop_with_tail_replies_fast_and_child_exits_by_itself(count: int) -> None:
+    _assert_stop_effect(_measure_single_stop(count), count, f"R10 K={count}")
+
+
+@pytest.mark.parametrize(
+    ("label", "neighbour_rate", "tail_delay_s"),
+    [
+        ("R10b", STAND_NEIGHBOUR, STAND_HOOK_DELAY_S),
+        ("R10b-ctl", None, STAND_HOOK_DELAY_S),
+    ],
+    ids=["R10b_stand_like", "R10b-ctl_no_neighbour"],
+)
+def test_r10b_shared_pipe_small_tail_still_exits_while_neighbour_keeps_writing(
+    label: str, neighbour_rate: tuple[int, float] | None, tail_delay_s: float
+) -> None:
+    """Стенд: хвост остановленного ребёнка 12 сообщений / 3838 Б (меньше pipe 8 КБ), но pipe общий — пока PM ждёт,
+    его заполняют живые соседи. Контроль без соседа (та же задержка 0,7 с): 3,8 КБ влезает, проходит до и после."""
+    _assert_stop_effect(_measure_single_stop(12, neighbour_rate, tail_delay_s), 12, label)
 
 
 # --------------------------------------------------------------------------- #
