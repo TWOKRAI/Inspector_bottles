@@ -123,6 +123,7 @@ TEXT_THREAD_SURVIVED = "поток драйвера не вышел за сро�
 TEXT_WDG_INTERVAL = "интервал тика больше четверти таймаута сторожа"
 TEXT_NO_SPAWN = "RobotDriverV2 без spawn не запускает потоки"
 TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
+TEXT_BAD_STOP_LEVEL = "неверный уровень стопа"
 # Срок стопа процесса, если request_stop() позван без срока (отдельный драйвер, не плагин), с
 _PROCESS_STOP_DEFAULT_S = 2.5
 _BUSY_PROGRAM = {"status": "error", "message": "робот занят программой"}
@@ -232,7 +233,9 @@ def _parse_tlm(tlm: list[int]) -> tuple[dict[str, Any], bool, int]:
 
 @dataclass
 class _JogRun:
-    """Один запуск JOG_CONT этого драйвера. Поля меняются только под ``_flags_lock``.
+    """Один запуск JOG_CONT этого драйвера. Замки полей: ``active``, ``released``, ``stop_requested`` — под
+    ``_flags_lock``; ``handle`` пишет ``jog_hold`` под ``_jog_tx_lock`` (без ``_flags_lock``, читатели берут снимок);
+    ``stop_sent`` — под ``_flags_lock`` сразу после записи стопа.
 
     ``active`` — поток поводка ещё не вышел; ``handle`` — запись потока в области (None, пока ``spawn`` не вернулся);
     ``released`` — поводок больше не пишется, поток выходит без своего стопа (стоп шлёт тот, кто поставил флаг:
@@ -326,6 +329,8 @@ class RobotDriverV2(BaseDeviceDriver):
         self._latch_failed = False  # последняя запись STOP_REQ упала
         self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
         self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
+        self._echo_checked: int | None = None  # значение, эхо которого уже проверено
+        self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
 
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
@@ -442,6 +447,7 @@ class RobotDriverV2(BaseDeviceDriver):
             self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
             self._stop_level = 0
             self._latch_reset_locked()
+            self._stop_unconfirmed = False
         was_ready = self._ready
         self._ready = False
         try:
@@ -509,13 +515,11 @@ class RobotDriverV2(BaseDeviceDriver):
         """Стоп (задание HARD, jog SOFT, программа SOFT), ожидание потоков через ``IHandle.close``, закрытие транспорта.
 
         Защёлку ``_shutdown`` не ставит: после обычного отключения ручной ``connect()`` снова работает (К1).
-        После ``request_stop()`` (фаза 4 остановки плагина) стоп не пишется: одна проверка эха последней записи.
+        После ``request_stop()`` (фаза 4 остановки плагина) стоп не пишется и эхо не читается (проверено в фазе 1).
         """
         with self._flags_lock:
             shutdown = self._shutdown
-        if shutdown:
-            self._check_stop_echo()
-        else:
+        if not shutdown:  # после request_stop стоп не пишется: эхо проверено в фазе 1 (H7)
             self._request_stop(program_level=STOP_LEVEL["SOFT"])
         with self._flags_lock:
             run, prog = self._jog, self._prog_handle
@@ -541,7 +545,9 @@ class RobotDriverV2(BaseDeviceDriver):
         сильнейший нужный: задание и программа HARD (SOFT посреди хода ждал бы цели), jog SOFT. Простой робот (нет
         задания, программы и jog) стопа не получает. Защёлка: уровень не ниже уже записан и последняя запись не упала
         — записи нет; упавшая запись повторяется ровно один раз, пока не вышел срок. ``_jog_tx_lock`` берётся с
-        таймаутом остатка срока; не взят — стоп пишется без замка (В1). Эхо не ждётся (проверка — в ``disconnect``).
+        таймаутом остатка срока; не взят — стоп пишется без замка (В1). Затем проверка эха этой записи (H7): чтения
+        начинаются, только пока чтение с повторами транспорта успевает до срока; нет эха или нет времени — «стоп не
+        подтверждён роботом» (``last_error``, свойство ``stop_unconfirmed`` для health плагина).
         Не бросает. Повторный вызов безопасен. После него ``connect()`` возвращает False, ``jog_hold`` и запуск
         программы отвечают ``TEXT_STOPPING``.
         """
@@ -560,6 +566,17 @@ class RobotDriverV2(BaseDeviceDriver):
         finally:
             if locked:
                 self._jog_tx_lock.release()
+        try:
+            self._check_stop_echo(deadline)
+        except Exception as exc:
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: проверка эха прервана: {type(exc).__name__}: {exc}")
+
+    @property
+    def stop_unconfirmed(self) -> bool:
+        """Стоп процесса этого робота не подтверждён (нет эха или запись не прошла); для health плагина."""
+        with self._flags_lock:
+            return self._stop_unconfirmed
 
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
@@ -644,20 +661,46 @@ class RobotDriverV2(BaseDeviceDriver):
         self._latch_level = 0
         self._latch_failed = False
         self._latch_attempts = 0
+        self._latch_value = None  # H6: эхо проверяется только для записи этого поколения
 
-    def _check_stop_echo(self) -> None:
-        """Фаза 4: одно чтение эха последней записи стопа, без записи. Нет эха — ``last_error``; не бросает."""
+    def _check_stop_echo(self, deadline: float) -> None:
+        """Эхо записи стопа процесса этого поколения, без записи, один раз на значение (H7).
+
+        Чтения идут до ``deadline - _write_budget_s()``: чтение, начатое позже, могло бы пережить срок на мёртвой
+        связи. Нет эха, нет времени или запись стопа не прошла — ``last_error`` «стоп не подтверждён роботом» и
+        ``stop_unconfirmed``. Простой робот (записи не было) не проверяется. Не бросает.
+        """
         with self._flags_lock:
             value = self._latch_value
+            attempted = self._latch_attempts > 0
+            if value is not None and value == self._echo_checked:
+                return
+            if value is None and (not attempted or self._stop_unconfirmed):
+                return
+            self._echo_checked = value
         client = self._client
-        if value is None or client is None:
+        read_until = deadline - self._write_budget_s()
+        confirmed = False
+        if value is not None and client is not None and time.monotonic() < read_until:
+            try:
+                client.await_stop_echo(value, value & 3, deadline=read_until)
+                confirmed = True
+            except Exception as exc:
+                logger.warning(f"робот {self.entry.id!r}: эхо стопа не получено: {type(exc).__name__}: {exc}")
+        if confirmed:
             return
-        try:
-            client.await_stop_echo(value, value & 3, deadline=time.monotonic())
-        except Exception as exc:
-            self._record_err()
-            logger.warning(f"робот {self.entry.id!r}: {TEXT_STOP_UNCONFIRMED}: {type(exc).__name__}: {exc}")
-            self._publish_error(TEXT_STOP_UNCONFIRMED)
+        with self._flags_lock:
+            self._stop_unconfirmed = True
+        self._record_err()
+        logger.warning(f"робот {self.entry.id!r}: {TEXT_STOP_UNCONFIRMED}")
+        self._publish_error(TEXT_STOP_UNCONFIRMED)
+
+    def _stop_latched(self, level: int) -> None:
+        """Запись стопа без эха через защёлку: такой уровень уже записан в этом поколении — записи нет (H1)."""
+        with self._flags_lock:
+            if self._latch_level >= level and not self._latch_failed:
+                return
+        self._write_stop(level)
 
     def _request_stop(self, program_level: int) -> None:
         """Стоп обычного ``disconnect``: флаг ``_stopping``, пометка jog, стопы с ожиданием эха без замков (К1)."""
@@ -862,7 +905,12 @@ class RobotDriverV2(BaseDeviceDriver):
         except (RobotTimeout, _JobStopped) as exc:
             self.jobs_failed += 1
             try:
-                client.stop(STOP_LEVEL["HARD"])  # R9: SOFT на CVT отложился бы до точки захвата
+                # R9: HARD (SOFT на CVT отложился бы до точки захвата). Останов хаба — через защёлку без эха (H1):
+                # стоп процесса уже записал HARD этому заданию; таймаут задания — стоп с эхом, как раньше
+                if isinstance(exc, _JobStopped):
+                    self._stop_latched(STOP_LEVEL["HARD"])
+                else:
+                    self._stop_and_wait(STOP_LEVEL["HARD"])
             except Exception as stop_exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп задания не доставлен: {type(stop_exc).__name__}")
@@ -895,7 +943,10 @@ class RobotDriverV2(BaseDeviceDriver):
             rz=to_eng("P_PICK_RZ", v["P_PICK_RZ"]),
             hand=int(v["P_HAND"]),
         )
-        res = self.start_return(slot)
+        try:
+            res = self.start_return(slot)
+        except Exception as exc:  # H2: возврат не теряется молча — отказ считается и виден
+            res = {"status": "error", "message": str(exc)}
         if res.get("status") == "ok":
             return
         if res in _BUSY_REPLIES:
@@ -997,7 +1048,11 @@ class RobotDriverV2(BaseDeviceDriver):
         return {"status": "ok", "queue_len": n}
 
     def _op_return_job(self, args: dict) -> dict:
-        """Возврат из слота {x_mm, y_mm, z_mm?} в очередь возвратов; исполнение — тиком (R2, DESIGN п.3)."""
+        """Возврат из слота {x_mm, y_mm, z_mm?} в очередь возвратов; исполнение — тиком (R2, DESIGN п.3).
+
+        Без ``spawn`` — ``RuntimeError`` до очереди: возврат идёт программой на потоке исполнителя (H2).
+        """
+        self._spawn_fn()
         try:
             item = (_coord(args, "x_mm"), _coord(args, "y_mm"), _coord(args, "z_mm", 0.0))
         except _BadArgs:
@@ -1012,9 +1067,15 @@ class RobotDriverV2(BaseDeviceDriver):
     # --- jog ---
 
     def _op_abort(self, args: dict) -> dict:
-        """Стоп оператора {mode: 1 SOFT | 2 HARD | 3 HALT}: пишется всегда (защёлка стопа процесса его не блокирует,
+        """Стоп оператора {mode: 1|2|3 или "SOFT"|"HARD"|"HALT"}: пишется всегда (защёлка стопа процесса не блокирует,
         запись в неё учитывается), затем ждёт эха по таймауту клиента."""
-        mode = int(args.get("mode", STOP_LEVEL["SOFT"]))
+        raw = args.get("mode", STOP_LEVEL["SOFT"])
+        if isinstance(raw, str) and raw.upper() in STOP_LEVEL:
+            mode = STOP_LEVEL[raw.upper()]
+        elif isinstance(raw, int) and not isinstance(raw, bool) and raw in STOP_LEVEL.values():
+            mode = raw
+        else:
+            return {"status": "error", "message": TEXT_BAD_STOP_LEVEL}
         if self._client is None:
             return dict(_NOT_CONNECTED)
         self._stop_and_wait(mode)

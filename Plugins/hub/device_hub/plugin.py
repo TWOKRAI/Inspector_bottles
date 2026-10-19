@@ -51,6 +51,7 @@ _SHUTDOWN_BUDGET_S = 3.0
 _SHUTDOWN_MARGIN_S = 0.5
 # Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
 TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
+TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
 
 
 class ScopeThreadSurvived(RuntimeError):
@@ -277,6 +278,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
             # Фаза 1: стоп роботам уходит до любых ожиданий, параллельно, до срока
             self._manager.request_stop_all(deadline)
+            self._report_unconfirmed_stops(ctx)
 
             # Остановить и удалить per-device воркеры (remove_worker освобождает имена; вне срока)
             with self._workers_lock:
@@ -296,6 +298,19 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Фаза 4: disconnect каждого без записи стопа (потоков уже нет) + сохранить реестр
         self._manager.shutdown()
         ctx.log_info("DeviceHubPlugin: shutdown")
+
+    def _report_unconfirmed_stops(self, ctx: PluginContext) -> None:
+        """Роботы, чей стоп процесса не подтверждён (нет эха / запись не прошла), — в health (решение §2, H3)."""
+        for entry in self._manager.snapshot_registry():
+            driver = self._manager.get_driver(entry.id)
+            if driver is None or not getattr(driver, "stop_unconfirmed", False):
+                continue
+            try:
+                ctx.health.report_error(
+                    RuntimeError(TEXT_STOP_UNCONFIRMED), context="device_hub.stop_echo", device_id=entry.id
+                )
+            except Exception as exc:  # no-health: сам health упал — лог, остановка идёт дальше
+                ctx.log_warning(f"DeviceHubPlugin: health для {entry.id!r} не принят: {exc!r}")
 
     def _on_scope_report(self, report: CloseReport) -> None:
         """Reporter корня ``device_hub``: выжившие и ошибки закрытия -> ``log_warning`` и ``health.report_error``.
