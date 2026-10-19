@@ -499,9 +499,19 @@ class DeviceManager(BaseManager, ObservableMixin):
         fn = ROBOT_DATA_OPS.get(op)
         if fn is None:
             return {"status": "error", "message": "неизвестная операция данных робота"}
+        epoch_default = 1
+        if op == "param_get_all":
+            try:
+                epoch_default = int(entry.params.get("config_epoch", 1))
+            except (TypeError, ValueError):  # config_epoch записи реестра - не число: ошибка конфига, текст постоянный
+                return {"status": "error", "message": str(RobotDataInvalid(None))}
         try:
             if not isinstance(args, dict):
                 raise BadArgs
+            if op == "param_get_all":
+                # Ответ = то, что применит драйвер (то же правило, что у фабрики робота и ``make_param_source``);
+                # ключи кладёт менеджер, значения из аргументов команды затираются
+                args = {**args, "overrides": entry.params.get("robot_params"), "epoch_default": epoch_default}
             result = fn(self._robot_store, dev_id, args)
         except RevisionConflict as exc:
             return {"status": "error", "message": str(exc), "current_rev": exc.current_rev}

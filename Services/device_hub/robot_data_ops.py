@@ -92,7 +92,12 @@ def _base_rev(args: dict[str, Any]) -> str | None:
 
 
 def _param_get_all(store: RobotDataStore, device_id: str, args: dict[str, Any]) -> dict[str, Any]:
-    doc = load_params(store, device_id)
+    """Параметры так, как их применит драйвер (``make_param_source``); ``overrides``, ``epoch_default`` кладёт менеджер.
+
+    Файла нет -> умолчания поверх них ``overrides``, метка ``epoch_default``; файл есть -> значения и метка файла,
+    ``overrides`` проверяются, но не применяются.
+    """
+    doc = load_params(store, device_id, overrides=args.get("overrides"), epoch_default=args.get("epoch_default", 1))
     params = {name: {"raw": raw, "value": float(to_eng(name, raw))} for name, raw in doc.values.items()}
     return {"params": params, "epoch": doc.epoch, "rev": doc.rev}
 

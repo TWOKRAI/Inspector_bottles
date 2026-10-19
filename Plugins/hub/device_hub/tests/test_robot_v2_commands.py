@@ -249,3 +249,50 @@ def test_descriptions_refused_by_catalogue_only_warn(tmp_path: Path, monkeypatch
         assert len(warned) == 1 and "robot_stop" in warned[0]
     finally:
         bounded(lambda: plugin.shutdown(ctx), 10.0)
+
+
+# --------------------------------------------------------------------------------------------------
+# param_get_all отвечает то, что применит драйвер (make_param_source): robot_params и config_epoch записи
+# --------------------------------------------------------------------------------------------------
+
+
+def _manager_with_params(tmp_path: Path, params: dict) -> DeviceManager:
+    manager = DeviceManager(store=None, robot_store=RobotDataStore(tmp_path / "robot"))
+    manager.initialize()
+    manager.upsert({**_entry("r1", "delta_v2"), "params": params})
+    return manager
+
+
+def test_param_get_all_applies_robot_params_and_config_epoch_without_file(tmp_path: Path) -> None:
+    manager = _manager_with_params(tmp_path, {"robot_params": {"P_SPD_DEFAULT": 55}, "config_epoch": 7})
+    result = manager.robot_data("r1", "param_get_all", {})
+    assert result["status"] == "ok"
+    assert result["params"]["P_SPD_DEFAULT"] == {"raw": 55, "value": 55.0}
+    assert result["epoch"] == 7
+    assert result["rev"] is None
+
+
+def test_param_get_all_file_wins_over_robot_params(tmp_path: Path) -> None:
+    manager = _manager_with_params(tmp_path, {"robot_params": {"P_SPD_DEFAULT": 30}, "config_epoch": 7})
+    rev = RobotDataStore(tmp_path / "robot").write(
+        "r1", "params", {"version": 1, "epoch": 3, "values": {"P_SPD_DEFAULT": 40}}, base_rev=None
+    )
+    result = manager.robot_data("r1", "param_get_all", {})
+    assert result["params"]["P_SPD_DEFAULT"] == {"raw": 40, "value": 40.0}  # override при файле не применяется
+    assert result["epoch"] == 3  # метка файла, не config_epoch записи
+    assert result["rev"] == rev
+
+
+def test_param_get_all_bad_override_or_epoch_refused_and_args_cannot_inject(tmp_path: Path) -> None:
+    bad_override = _manager_with_params(tmp_path / "a", {"robot_params": {"P_NOPE": 1}})
+    assert bad_override.robot_data("r1", "param_get_all", {}) == {"status": "error", "message": TEXT_DATA_INVALID}
+
+    bad_epoch = _manager_with_params(tmp_path / "b", {"config_epoch": _SECRET})
+    refused = bad_epoch.robot_data("r1", "param_get_all", {})
+    assert refused == {"status": "error", "message": TEXT_DATA_INVALID}
+    assert _SECRET not in str(refused)
+
+    plain = _manager_with_params(tmp_path / "c", {})
+    injected = plain.robot_data("r1", "param_get_all", {"overrides": {"P_SPD_DEFAULT": 11}, "epoch_default": 9})
+    assert injected["params"]["P_SPD_DEFAULT"] == {"raw": 80, "value": 80.0}
+    assert injected["epoch"] == 1
