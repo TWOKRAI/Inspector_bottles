@@ -705,13 +705,35 @@ class RobotClientV2:
         Raises: ``RobotTimeout("stop_echo")``, ошибка транспорта (стоп не доставлен). ``_mailbox_lock`` не берёт:
         стоп проходит, пока ``cmd()`` ждёт ответ.
         """
+        value = self.issue_stop(level)
+        written_level = value & 3
+        soft = written_level == STOP_LEVEL["SOFT"]
+        timeout = self._cfg.soft_echo_timeout_s if soft else self._cfg.stop_echo_timeout_s
+        return self.await_stop_echo(value, written_level, deadline=self._clock() + timeout)
+
+    def issue_stop(self, level: int) -> int:
+        """Только запись стопа (T5.3 круг 2): ``stop_seq`` + одна запись FC6 ``STOP_REQ``, без ожидания эха.
+
+        Pre/Raises — как у ``stop`` до записи: ``ValueError`` вне 1..3, непроверенный клиент проверяет прошивку;
+        ошибка транспорта — наружу (стоп не доставлен). Post: возвращает записанное значение
+        ``stop_seq * 4 + уровень``; записанный уровень = ``значение & 3`` (не ниже сильнейшего неподтверждённого).
+        """
         if not isinstance(level, int) or isinstance(level, bool) or level not in STOP_LEVEL.values():
             raise ValueError("level стопа вне 1..3")
         if not self._probed:
             self._ensure_probed()  # только непроверенный клиент: проверенный пишет стоп без оглядки на is_connected
         with self._stop_lock:
-            value, written_level = self._issue_stop_locked(level)
-        return self._wait_stop_echo(value, written_level)
+            value, _written_level = self._issue_stop_locked(level)
+        return value
+
+    def await_stop_echo(self, value: int, level: int, *, deadline: float) -> StopResult:
+        """Только ожидание эха стопа ``value`` до абсолютного срока ``deadline`` (часы клиента, монотонные).
+
+        Записей нет. ``ACKED`` — эхо равно ``value``; ``SUPERSEDED`` — эхо новее с уровнем не ниже ``level``.
+        Хотя бы одно чтение эха делается и при уже прошедшем сроке. Raises: ``RobotTimeout("stop_echo")`` после
+        срока, ошибка транспорта чтения.
+        """
+        return self._wait_stop_echo(value, max(level, value & 3), deadline)
 
     def _issue_stop_locked(self, level: int) -> tuple[int, int]:
         """Под ``_stop_lock``: следующий ``stop_seq`` + одна запись FC6. Поколение растёт ПОСЛЕ записи, в finally.
@@ -742,9 +764,7 @@ class RobotClientV2:
             if pending is not None and _echo_covers(echo, pending[1], pending[0]):
                 self._stop_pending = None
 
-    def _wait_stop_echo(self, value: int, level: int) -> StopResult:
-        timeout = self._cfg.soft_echo_timeout_s if level == STOP_LEVEL["SOFT"] else self._cfg.stop_echo_timeout_s
-        deadline = self._clock() + timeout
+    def _wait_stop_echo(self, value: int, level: int, deadline: float) -> StopResult:
         ours = value >> 2
         while True:
             self._note_echo(int(self._rd(REG["TLM_STOP_ACK"], 1)[0]))
