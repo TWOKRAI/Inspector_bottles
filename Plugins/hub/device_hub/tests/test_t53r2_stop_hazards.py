@@ -3,9 +3,9 @@
 Purpose:
     Гонки и порядок стопа процесса (защёлка драйвера, параллельная рассылка менеджера, срок плагина). Записи
     ``STOP_REQ`` считаются НА СТОРОНЕ РОБОТА: action-хук pymodbus-сервера стенда видит каждый запрос записи до
-    применения. Двойник робота умеет: не подтверждать стоп (``TLM_STOP_ACK`` заморожен), отклонить первую запись
-    ``STOP_REQ`` (``DEVICE_FAILURE``), держать ответ на запись ``STOP_REQ`` или команды (запись применяется сразу,
-    ответ клиенту задерживается).
+    применения. Двойник робота умеет: не подтверждать стоп (``TLM_STOP_ACK`` заморожен), отклонить ближайшие записи
+    ``STOP_REQ`` (``DEVICE_FAILURE``, счётчик ``fail_stops``), держать ответ на запись ``STOP_REQ`` или команды
+    (запись применяется сразу, ответ клиенту задерживается).
 
 Public API:
     Только тесты ``test_*``.
@@ -62,7 +62,7 @@ class _Journal:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.stops: list[float] = []
-        self.fail_next_stop = False
+        self.fail_stops = 0  # сколько ближайших записей STOP_REQ робот отклонит (DEVICE_FAILURE, быстро)
         self.hold_stop_s = 0.0
         self.hold_next_cmd_s = 0.0
         self.hold_ack_read_s = 0.0  # ответ на чтение, захватывающее TLM_STOP_ACK, держится (полуоткрытая связь)
@@ -116,8 +116,8 @@ class _Server(SimRobotServer):
             with j.lock:
                 if _STOP_REQ in span:
                     j.stops.append(time.perf_counter())
-                    if j.fail_next_stop:
-                        j.fail_next_stop = False
+                    if j.fail_stops > 0:
+                        j.fail_stops -= 1
                         return ExcCodes.DEVICE_FAILURE
                     hold = j.hold_stop_s
                 elif _CMD_FLAG in span and j.hold_next_cmd_s:
@@ -311,18 +311,20 @@ def test_silent_r1_does_not_delay_r2() -> None:
 
 
 def test_failed_write_retried_exactly_once() -> None:
+    """Робот быстро отклоняет первые две записи стопа: драйвер пишет ровно дважды (повтор один), третьей попытки нет.
+    Срок 2.5 с вмещает и третью (запись 0.0 + бюджет 2.0 с <= 2.5 с), поэтому останавливает её только счётчик
+    попыток поколения, а не срок."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
         drv = _driver(rig, rec, scope.spawn)
         try:
             _jog_moving(drv, rig)
             with _holding(drv):
-                rig.journal.fail_next_stop = True
+                rig.journal.fail_stops = 2
                 t0 = time.perf_counter()
                 bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
                 time.sleep(_SETTLE_S)
             assert rig.journal.count(t0) == 2, rig.journal.stamps()
-            _until(lambda: _moving(rig) == 0, 1.0, "робот не остановился")
         finally:
             _quiet(drv.disconnect)
 
@@ -341,16 +343,18 @@ def test_missing_echo_sets_last_error() -> None:
 
 
 def test_operator_robot_stop_writes_after_latch() -> None:
+    """Стоп оператора того же уровня, что защёлка процесса (SOFT после SOFT), пишется: защёлка гасит только повторы
+    самого стопа процесса. Уровень выше защёлки (HARD после SOFT) проходит и через защёлку — им её не проверить."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
         drv = _driver(rig, rec, scope.spawn)
         try:
             _jog_moving(drv, rig)
             t0 = time.perf_counter()
-            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)  # jog -> SOFT
             assert rig.journal.count(t0) == 1
-            assert bounded(lambda: drv.call("abort", {"mode": 2}), _CALL_S) == {"status": "ok", "mode": 2}
-            assert rig.journal.count(t0) == 2
+            assert bounded(lambda: drv.call("abort", {"mode": 1}), _CALL_S) == {"status": "ok", "mode": 1}
+            assert rig.journal.count(t0) == 2, rig.journal.stamps()
         finally:
             _quiet(drv.disconnect)
 
@@ -474,7 +478,7 @@ def test_rehold_after_failed_release_stop_then_process_stop_writes() -> None:
         drv = _driver(rig, rec, scope.spawn)
         try:
             _jog_moving(drv, rig)
-            rig.journal.fail_next_stop = True  # стоп release отклонён роботом: stop_sent остаётся False
+            rig.journal.fail_stops = 1  # стоп release отклонён роботом: stop_sent остаётся False
             assert bounded(lambda: drv.call("jog_release", {}), _CALL_S)["status"] == "error"
             if not drv.is_connected:  # отказ записи транспорт считает обрывом: связь поднимается заново
                 assert bounded(drv.connect, _CONNECT_S) is True
@@ -724,4 +728,40 @@ def test_program_stop_after_g0_then_progress_does_not_repeat_stop() -> None:
             assert rig.journal.count(marks["t0"]) == 1, [x - marks["t0"] for x in rig.journal.stamps()]
         finally:
             client.wait_done = real_wait  # type: ignore[method-assign]
+            _quiet(drv.disconnect)
+
+
+def test_second_process_stop_while_motion_alive_writes_once() -> None:
+    """Защёлка стопа процесса: исполнитель программы жив (``_prog_alive``) и во втором вызове, но запись уже есть —
+    второй ``request_stop`` с тем же сроком записи не даёт. Шов: ``run_chunks`` держит поток исполнителя после
+    возврата (как застрявший ``wait_done``), поэтому уровень HARD из живого состояния второй раз ВЫЧИСЛЯЕТСЯ, и
+    остановить запись может только защёлка (срок 2.5 с вмещает вторую попытку)."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        client = drv._client
+        real_run_chunks = client.run_chunks
+        gate = threading.Event()
+
+        def held_run_chunks(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return real_run_chunks(*args, **kwargs)
+            finally:
+                gate.wait(8.0)  # исполнитель не выходит, пока тест не откроет ворота
+
+        client.run_chunks = held_run_chunks  # type: ignore[method-assign]
+        try:
+            _program_running(drv, rig)
+            time.sleep(0.3)  # команды запуска приняты роботом: О5 клиента (повторный стоп) не вмешивается
+            deadline = time.monotonic() + 2.5
+            t0 = time.perf_counter()
+            bounded(lambda: drv.request_stop(deadline), 10.0)
+            _until(lambda: _moving(rig) == 0, 2.0, "робот не остановился")
+            assert drv._prog_alive, "шов не держит исполнитель: проверка защёлки не имеет смысла"
+            bounded(lambda: drv.request_stop(deadline), 10.0)
+            time.sleep(_SETTLE_S)
+            assert rig.journal.count(t0) == 1, [x - t0 for x in rig.journal.stamps() if x >= t0]
+        finally:
+            gate.set()
+            client.run_chunks = real_run_chunks  # type: ignore[method-assign]
             _quiet(drv.disconnect)

@@ -33,6 +33,7 @@ from multiprocess_framework.modules.base_manager import open_scope
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
 from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 from Plugins.hub.device_hub.tests.conftest import make_ctx
+from Plugins.hub.device_hub.tests.test_t53r2_stop_hazards import _Rig as _HoldRig
 from Services.device_hub.drivers import robot_driver_v2
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 from Services.device_hub.manager import DeviceManager
@@ -51,6 +52,10 @@ _TEXT_NAME_BUSY = "имя потока драйвера занято"
 _TEXT_SURVIVED = "поток драйвера не вышел за срок"
 _BUSY_JOG = {"status": "error", "message": "робот в режиме jog"}
 _SCOPE_CONTEXT = "device_hub.scope"
+# Предел shutdown в S9-плагине при фазе 1 +0.5 с. Замер (light, 3 прогона на сторону): эталон 2.500-2.516 с (весь срок
+# 2.5 с), инъекция «scope.close с фиксированным бюджетом 2.5 с» 3.000-3.016 с. Литерал 2.75 с = эталон + ~0.23 с запаса
+# на нагрузку и на 0.25 с ниже инъекции; прежние 3.5 с пропускали инъекцию
+_S9_LIMIT_S = 2.75
 
 
 # --------------------------------------------------------------------------------------------------
@@ -468,17 +473,20 @@ def _s9_part_plugin(tmp_path: Path) -> None:
     done_evt = threading.Event()
     plugin = ctx = None
     try:
-        with E2eRig() as rig:
+        with _HoldRig() as rig:
             plugin, ctx = _plugin_with_robots(tmp_path, {"r1": rig.port})
             drv = plugin._manager.get_driver("r1")
             drv._client.run_chunks = _fake_run_chunks(done_evt)
             assert _start(drv, 4, "p9")["status"] == "ok"
             _until(lambda: drv._prog_alive, 5.0, "исполнитель запущен")
+            # Фаза 1 дольше на 0.5 с: робот держит ответ на запись стопа (не патч драйвера). Тогда scope.close с
+            # остатком срока (2.5 - 0.5 = 2.0 с) и с фиксированным бюджетом 2.5 с различаются на те же 0.5 с
+            rig.journal.hold_stop_s = 0.5
             started = time.monotonic()
             bounded(lambda: plugin.shutdown(ctx), 10.0)
             elapsed = time.monotonic() - started
-            # 2.5 с корня + повторные HARD и SOFT фазы 3; предел О8 (3.0 с) действует только при survivors == []
-            assert elapsed <= 3.5, f"plugin.shutdown() занял {elapsed:.2f} с"
+            # Предел О8 (3.0 с) действует только при survivors == []; здесь предел _S9_LIMIT_S (см. константу)
+            assert elapsed <= _S9_LIMIT_S, f"plugin.shutdown() занял {elapsed:.2f} с"
             reports = _scope_reports(ctx)
             assert len(reports) == 1, [c.kwargs for c in ctx.health.report_error.call_args_list]
             survivors = reports[0].kwargs["survivors"]
