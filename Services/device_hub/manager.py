@@ -13,7 +13,6 @@ publish_cb — инъекция конструктора: ``(path, dict) -> None
 from __future__ import annotations
 
 import itertools
-import logging
 import threading
 import time
 from collections.abc import Callable
@@ -70,6 +69,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
         self._spawn = spawn
+        self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
 
         # Реестр: id -> DeviceEntry
         self._entries: dict[str, DeviceEntry] = {}
@@ -112,9 +112,13 @@ class DeviceManager(BaseManager, ObservableMixin):
         драйвера. Исключение одного драйвера логируется.
         Без ``spawn`` (менеджер без области: роботов ``delta_v2`` нет) — вызовы по очереди в этом потоке.
         """
-        if deadline is None:
-            deadline = time.monotonic() + _STOP_ALL_DEFAULT_S
         with self._registry_lock:
+            if deadline is None:  # повторный вызов без срока (фаза 4 через _on_shutdown) — срок первого вызова
+                deadline = (
+                    self._stop_deadline if self._stop_deadline is not None else time.monotonic() + _STOP_ALL_DEFAULT_S
+                )
+            if self._stop_deadline is None:
+                self._stop_deadline = deadline
             drivers = list(self._drivers.items())
         targets = [(dev_id, req) for dev_id, drv in drivers if callable(req := getattr(drv, "request_stop", None))]
         if self._spawn is None:
@@ -130,11 +134,8 @@ class DeviceManager(BaseManager, ObservableMixin):
             except Exception as exc:  # ScopeClosedError (второй вызов после scope.close) и любой отказ spawn
                 inline.append((dev_id, request))
                 if len(inline) == 1:
-                    closed = isinstance(exc, ScopeClosedError)
-                    logger.log(
-                        logging.INFO if closed else logging.WARNING,
-                        f"device_hub: поток стоп-запроса не запущен ({type(exc).__name__}) — стоп идёт в этом потоке",
-                    )
+                    text = f"device_hub: поток стоп-запроса не запущен ({type(exc).__name__}) — стоп идёт в этом потоке"
+                    (logger.info if isinstance(exc, ScopeClosedError) else logger.warning)(text)
         for dev_id, request in inline:  # fail-closed: отказ spawn не лишает робота стопа (защёлка — в драйвере)
             self._stop_one(dev_id, request, deadline)
         for handle in handles:

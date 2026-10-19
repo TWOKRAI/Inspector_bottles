@@ -322,6 +322,7 @@ class RobotDriverV2(BaseDeviceDriver):
         self._latch_level = 0  # сильнейший записанный уровень STOP_REQ в этом поколении
         self._latch_failed = False  # последняя запись STOP_REQ упала
         self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
+        self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
 
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
@@ -573,12 +574,23 @@ class RobotDriverV2(BaseDeviceDriver):
             level = STOP_LEVEL["HARD"] if hard else (STOP_LEVEL["SOFT"] if stop_jog or jog_in_flight else 0)
             # Jog без записанного стопа (stop_sent False) или JOG_CONT в полёте пишется всегда, мимо защёлки (H-A)
             latch_applies = not (stop_jog or jog_in_flight)
-            if level and latch_applies and self._latch_level >= level and not self._latch_failed:
-                level = 0  # такой стоп уже записан в этом поколении
+            attempts = self._latch_attempts
+            if attempts == 0:
+                if level and latch_applies and self._latch_level >= level and not self._latch_failed:
+                    level = 0  # такой стоп уже записан в этом поколении
+            elif not (attempts == 1 and self._latch_failed):
+                level = 0  # стоп процесса уже записан или повтор уже был: в поколении не больше двух попыток
         if not level or self._client is None:
-            return  # простой робот или нет клиента: записи нет
+            return  # простой робот, стоп уже записан или нет клиента: записи нет
         jog_run = run if stop_jog else None
-        for attempt in (1, 2):
+        while True:
+            with self._flags_lock:
+                attempt = self._latch_attempts + 1
+                # Повтор — только после упавшей записи и только если запись успеет до срока (таймаут транспорта
+                # с его повторами): поздний повтор не доставит стоп раньше срока, а поток стопа пережил бы его
+                if attempt > 2 or (attempt == 2 and time.monotonic() + self._write_budget_s() > deadline):
+                    return
+                self._latch_attempts = attempt
             try:
                 self._write_stop(level, jog_run)
                 return
@@ -587,8 +599,11 @@ class RobotDriverV2(BaseDeviceDriver):
                 logger.warning(
                     f"робот {self.entry.id!r}: стоп процесса не записан ({attempt}): {type(exc).__name__}: {exc}"
                 )
-            if time.monotonic() >= deadline:
-                return
+
+    def _write_budget_s(self) -> float:
+        """Худшее время одной записи: ``timeout_sec * (retries + 1)`` транспорта (умолчания build_transport)."""
+        transport = getattr(self.entry, "transport", None) or {}
+        return float(transport.get("timeout_sec", 1.0)) * (int(transport.get("retries", 1)) + 1)
 
     def _write_stop(self, level: int, run: _JogRun | None = None) -> int:
         """Одна запись ``STOP_REQ`` (``client.issue_stop``) без эха; итог — в защёлку. Ошибка записи — наружу.
@@ -625,6 +640,7 @@ class RobotDriverV2(BaseDeviceDriver):
         """Под ``_flags_lock``: новое поколение (захват действия, ``connect``) — прежние стопы его не покрывают."""
         self._latch_level = 0
         self._latch_failed = False
+        self._latch_attempts = 0
 
     def _check_stop_echo(self) -> None:
         """Фаза 4: одно чтение эха последней записи стопа, без записи. Нет эха — ``last_error``; не бросает."""
