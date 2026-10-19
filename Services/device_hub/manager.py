@@ -218,7 +218,14 @@ class DeviceManager(BaseManager, ObservableMixin):
                     overrides=entry.params.get("robot_params"),
                     epoch_default=int(entry.params.get("config_epoch", 1)),
                 )
-                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn, param_source=param_source)
+                return RobotDriverV2(
+                    entry,
+                    proto,
+                    publish=self._publish,
+                    spawn=self._spawn,
+                    param_source=param_source,
+                    store=self._robot_store,
+                )
             return RobotDriver(entry, proto)
 
         self._factories["robot"] = _robot_factory
