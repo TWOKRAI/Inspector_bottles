@@ -571,7 +571,9 @@ class RobotDriverV2(BaseDeviceDriver):
             jog_in_flight = self._jog_starting  # JOG_CONT в полёте (замок не взят): стоп нужен и ему
             hard = self._prog_alive or self._job_active
             level = STOP_LEVEL["HARD"] if hard else (STOP_LEVEL["SOFT"] if stop_jog or jog_in_flight else 0)
-            if level and self._latch_level >= level and not self._latch_failed:
+            # Jog без записанного стопа (stop_sent False) или JOG_CONT в полёте пишется всегда, мимо защёлки (H-A)
+            latch_applies = not (stop_jog or jog_in_flight)
+            if level and latch_applies and self._latch_level >= level and not self._latch_failed:
                 level = 0  # такой стоп уже записан в этом поколении
         if not level or self._client is None:
             return  # простой робот или нет клиента: записи нет
@@ -1040,7 +1042,6 @@ class RobotDriverV2(BaseDeviceDriver):
                 prev = self._jog
                 # Д4: от проверки _busy до записи self._jog start_program видит переход как jog (_BUSY_JOG)
                 self._jog_starting = True
-                self._latch_reset_locked()
             try:
                 if prev is not None and prev.stop_requested and not prev.stop_sent:
                     self._stop_jog_locked(prev)  # release / окно ещё не дослали стоп — шлём его сами, один раз
@@ -1050,6 +1051,26 @@ class RobotDriverV2(BaseDeviceDriver):
                 with self._flags_lock:
                     self._jog = run
                     self._last_hold = self._clock()
+                    # H-A: запись движения — новое поколение защёлки ПОСЛЕ неё (стоп prev выше её не покрывает)
+                    self._latch_reset_locked()
+                    stopping = self._stopping
+                if stopping:
+                    # H-B: стоп процесса не взял замок перехода и записан, пока JOG_CONT был в полёте, — он мог лечь
+                    # раньше движения. Стоп этого seq пишется здесь, мимо защёлки; поводок не запускается.
+                    # Единственное исключение из «одна запись стопа процесса на робота»: в этой гонке их две.
+                    with self._flags_lock:
+                        run.released = True
+                        run.stop_requested = True
+                        run.active = False
+                    try:
+                        self._write_stop(STOP_LEVEL["SOFT"], run)
+                    except Exception as exc:
+                        self._record_err()
+                        logger.warning(
+                            f"робот {self.entry.id!r}: стоп jog после остановки не доставлен: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                    return {"status": "error", "message": TEXT_STOPPING}
                 thread_name = f"{self.entry.id}-lease-{_next_thread_k()}"
                 try:
                     run.handle = spawn(lambda ev: self._lease_loop(run, ev), name=thread_name)
