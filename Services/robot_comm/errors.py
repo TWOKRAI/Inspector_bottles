@@ -131,3 +131,16 @@ class StoreDocumentInvalid(RobotStoreError):
     def __init__(self, rev: str | None) -> None:
         super().__init__("Файл данных робота не YAML-словарь")
         self.rev = rev
+
+
+class RobotDataInvalid(RobotStoreError):
+    """Содержимое документа робота не прошло проверку формата (``robot_data``, T5.3b).
+
+    ``rev`` — ревизия байтов файла, который не прошёл проверку (по ней можно сознательно перезаписать);
+    None — когда отвергнут вход вызывающего (``overrides``, тело на запись) и файл не читался.
+    Текст постоянный, без входных значений.
+    """
+
+    def __init__(self, rev: str | None) -> None:
+        super().__init__("Данные робота не прошли проверку")
+        self.rev = rev

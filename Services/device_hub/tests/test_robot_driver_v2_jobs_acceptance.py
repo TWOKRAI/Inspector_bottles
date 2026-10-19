@@ -32,6 +32,10 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
+import pytest
+
+from multiprocess_framework.modules.base_manager import open_scope
+
 
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.robot_comm.core.protocol_v2 import OP, REG
@@ -106,11 +110,32 @@ def _entry(dev_id: str, port: int, **params: Any) -> DeviceEntry:
     )
 
 
+_SCOPE_BUDGET_S = 6.0
+
+
+# Область потоков теста (T5.3 круг 2: драйвер без spawn потоков не запускает). Открывается на каждый тест,
+# закрывается в teardown; выживших быть не должно.
+_SCOPE: Any = None
+
+
+@pytest.fixture(autouse=True)
+def driver_scope() -> Iterator[Any]:
+    global _SCOPE
+    scope = open_scope("rv2test", budget_s=_SCOPE_BUDGET_S)
+    _SCOPE = scope
+    try:
+        yield scope
+    finally:
+        _SCOPE = None
+        report = scope.close()
+        assert list(report.survivors) == [], f"выжившие потоки области теста: {list(report.survivors)}"
+
+
 def _make(rec: Rec, dev_id: str, port: int, **params: Any) -> Any:
     """``RobotDriverV2`` без подключения. Модуль импортируется здесь (не на уровне файла)."""
     from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 
-    return RobotDriverV2(_entry(dev_id, port, **params), None, publish=rec)
+    return RobotDriverV2(_entry(dev_id, port, **params), None, publish=rec, spawn=_SCOPE.spawn)
 
 
 def _tick_fn(drv: Any) -> Callable[[], object]:

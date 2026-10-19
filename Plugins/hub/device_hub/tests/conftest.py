@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -70,6 +71,34 @@ def make_ctx(
     ctx.log_info = MagicMock()
     ctx.log_error = MagicMock()
     return ctx
+
+
+@pytest.fixture(autouse=True)
+def _close_plugin_scope(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """После теста — ``plugin.shutdown(ctx)`` каждого плагина, у которого тест звал ``configure``.
+
+    ``configure`` открывает корень области потоков ``device_hub`` (T5.3a); без ``shutdown`` каждый тест оставил бы
+    незакрытый корень (G3). Повторный ``shutdown`` (тест уже звал его сам) — без действия.
+    """
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+
+    configured: list[tuple[DeviceHubPlugin, Any]] = []
+    real_configure = DeviceHubPlugin.configure
+
+    def configure(self: DeviceHubPlugin, ctx: Any) -> None:
+        configured.append((self, ctx))
+        real_configure(self, ctx)
+
+    monkeypatch.setattr(DeviceHubPlugin, "configure", configure)
+    yield
+    errors: list[Exception] = []
+    for plugin, ctx in reversed(configured):
+        try:
+            plugin.shutdown(ctx)
+        except Exception as exc:  # все плагины получают shutdown; первая ошибка падает после цикла
+            errors.append(exc)
+    if errors:
+        raise errors[0]
 
 
 @pytest.fixture
