@@ -46,7 +46,7 @@
 | accent_hi   | `#58a6ff` (было `#4a95ff`) |
 | accent_lo   | `#1e5ecb` |
 | accent_deep | `#123c8c` |
-| brand_color | `#3f97ff` (было `#0a64d6` — темноват для неона) |
+| brand_color | `#3300ff` (цвет логотипа INNOTECH; было `#3f97ff`) |
 
 ### Статусы (чуть «светящиеся»)
 danger `#ff4d6b` · success `#2fe39c` · warn `#ffab3d`
@@ -73,9 +73,10 @@ Exo 2 — современный техно-гротеск с полной ки�
 ```css
 QLabel#BrandLabel {
     color: @brand_color;
-    font-family: "Square721 BdEx BT", "Bank Gothic(RUS BY LYAJKA)";
+    font-family: "Square721 BdEx BT [Rus by me]", "Square721 BdEx BT";
     font-size: @font_brand;
-    font-weight: 900;
+    font-weight: bold;
+    background: transparent;
 }
 ```
 
