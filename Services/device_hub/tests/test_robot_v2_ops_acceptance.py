@@ -65,6 +65,7 @@ _CALL_DEADLINE_S = 15.0
 _CONNECT_DEADLINE_S = 60.0  # connect включает sync_params (десятки PARAM_SET)
 _SCOPE_BUDGET_S = 6.0
 _STOP_SEQ_MOD = 0x3FFF
+_LOG_LIMIT = 2000  # limit exchange_log_get = размер кольца журнала
 
 
 # --------------------------------------------------------------------------------------------------
@@ -125,17 +126,21 @@ class _StopWatcher:
         self._since = 0
         self.values: list[int] = []
 
-    def _get(self, **args: int) -> dict:
-        answer = bounded(lambda: self._drv.call("exchange_log_get", dict(args)), _CALL_DEADLINE_S)
+    def _get(self, since_seq: int) -> dict:
+        answer = bounded(
+            lambda: self._drv.call("exchange_log_get", {"since_seq": since_seq, "limit": _LOG_LIMIT}), _CALL_DEADLINE_S
+        )
         assert answer["status"] == "ok", answer
+        # Ответ полный: строк меньше limit — limit ничего не отрезал (иначе «HALT не писался» прошёл бы зря).
+        assert len(answer["lines"]) < _LOG_LIMIT, len(answer["lines"])
         return answer
 
     def __enter__(self) -> _StopWatcher:
-        self._since = self._get(limit=2000)["last_seq"] + 1  # строки блока: seq выше последнего до входа
+        self._since = self._get(0)["last_seq"] + 1  # строки блока: seq выше последнего до входа
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        state = self._get(since_seq=self._since, limit=2000)
+        state = self._get(self._since)
         assert state["dropped"] == 0, state["dropped"]  # кольцо журнала не потеряло строк блока
         for line in state["lines"]:
             match = self._LINE.match(line["text"])
