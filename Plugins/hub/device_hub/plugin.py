@@ -38,6 +38,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 from Services.device_hub import DeviceHubError
 from Services.device_hub.manager import DeviceManager
 from Services.device_hub.registry.store import RegistryStore
+from Services.robot_comm.store import RobotDataStore
 
 from .registers import DeviceHubRegisters
 
@@ -52,6 +53,32 @@ _SHUTDOWN_MARGIN_S = 0.5
 # Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
 TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
 TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
+
+# Описания 21 команды робота v2 для каталога (T5.3c): пишет ``start()`` — команды регистрируются после ``configure``.
+# Запись — ключи аргументов; ``base_rev`` обязателен у записи (``null`` — файла ещё нет).
+_ROBOT_V2_DESCRIPTIONS: dict[str, str] = {
+    "robot_param_get_all": "Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev",
+    "robot_point_list": "Робот v2: список точек {device_id} -> points, rev",
+    "robot_point_save": "Робот v2: сохранить точку {device_id, point{name, x, y, z, rz, hand, frame?}, base_rev}",
+    "robot_point_delete": "Робот v2: удалить точку {device_id, name, base_rev}",
+    "robot_frame_list": "Робот v2: список систем координат {device_id} -> frames, rev",
+    "robot_frame_teach": "Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev}",
+    "robot_program_list": "Робот v2: имена программ {device_id} -> programs",
+    "robot_program_get": "Робот v2: прочитать программу {device_id, name} -> program, rev",
+    "robot_program_save": "Робот v2: сохранить программу {device_id, program{name, steps}, base_rev}",
+    "robot_program_delete": "Робот v2: удалить программу {device_id, name, base_rev}",
+    "robot_param_set": "Робот v2: записать параметр {device_id, name, value, base_rev}",
+    "robot_param_apply": "Робот v2: применить параметры класса reinit {device_id}",
+    "robot_stop": "Робот v2: стоп {device_id, level: SOFT|HARD|HALT}",
+    "robot_servo": "Робот v2: серво {device_id, on: bool}",
+    "robot_do_set": "Робот v2: дискретный выход {device_id, ch: 1..16, on: bool}",
+    "robot_jog_step": "Робот v2: шаг jog {device_id, dx, dy, dz?, drz?, spd: 1..100}",
+    "robot_jog_hold": "Робот v2: удержание jog {device_id, dir: 1..8, spd: 1..100}",
+    "robot_jog_release": "Робот v2: отпустить jog {device_id}",
+    "robot_point_capture": "Робот v2: запомнить текущую позу как точку {device_id, name, base_rev}",
+    "robot_program_run": "Робот v2: запустить программу {device_id, name}",
+    "robot_program_abort": "Робот v2: прервать программу {device_id}",
+}
 
 
 class ScopeThreadSurvived(RuntimeError):
@@ -137,6 +164,28 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "robot_toolchange": "cmd_robot_toolchange",
         "robot_exchange_log_get": "cmd_robot_exchange_log_get",
         "robot_exchange_log_set": "cmd_robot_exchange_log_set",
+        # Робот v2 (21, T5.3c): 10 офлайн-команд данных + 11 команд движения
+        "robot_param_get_all": "cmd_robot_param_get_all",
+        "robot_point_list": "cmd_robot_point_list",
+        "robot_point_save": "cmd_robot_point_save",
+        "robot_point_delete": "cmd_robot_point_delete",
+        "robot_frame_list": "cmd_robot_frame_list",
+        "robot_frame_teach": "cmd_robot_frame_teach",
+        "robot_program_list": "cmd_robot_program_list",
+        "robot_program_get": "cmd_robot_program_get",
+        "robot_program_save": "cmd_robot_program_save",
+        "robot_program_delete": "cmd_robot_program_delete",
+        "robot_param_set": "cmd_robot_param_set",
+        "robot_param_apply": "cmd_robot_param_apply",
+        "robot_stop": "cmd_robot_stop",
+        "robot_servo": "cmd_robot_servo",
+        "robot_do_set": "cmd_robot_do_set",
+        "robot_jog_step": "cmd_robot_jog_step",
+        "robot_jog_hold": "cmd_robot_jog_hold",
+        "robot_jog_release": "cmd_robot_jog_release",
+        "robot_point_capture": "cmd_robot_point_capture",
+        "robot_program_run": "cmd_robot_program_run",
+        "robot_program_abort": "cmd_robot_program_abort",
         # Рисование (8)
         "robot_draw_polyline": "cmd_robot_draw_polyline",
         "robot_draw_circle": "cmd_robot_draw_circle",
@@ -194,7 +243,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
             resolved.parent.mkdir(parents=True, exist_ok=True)
 
             store = RegistryStore(resolved)
-            self._manager = DeviceManager(store=store, publish_cb=self._publish_state, spawn=scope.spawn)
+            # Одно хранилище данных робота на процесс: каталог data/robot рядом с devices.yaml (T5.3c)
+            self._robot_store = RobotDataStore(resolved.parent / "robot")
+            self._manager = DeviceManager(
+                store=store, publish_cb=self._publish_state, spawn=scope.spawn, robot_store=self._robot_store
+            )
             self._manager.initialize()
 
             # Очередь async connect/disconnect (Б2)
@@ -224,6 +277,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     def start(self, ctx: PluginContext) -> None:
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
+        self._apply_robot_v2_descriptions(ctx)
+
         # Upsert устройств из конфига рецепта (опционально).
         # н6: читаем recipe_origin из конфига плагина, чтобы slug не терялся
         # (origin="recipe" не позволяет отличить один рецепт от другого).
@@ -257,6 +312,13 @@ class DeviceHubPlugin(ProcessModulePlugin):
             auto_start=True,
         )
         ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
+
+    def _apply_robot_v2_descriptions(self, ctx: PluginContext) -> None:
+        """Описания 21 команды робота v2 в каталоге: команды регистрируются после ``configure``, поэтому здесь."""
+        for name, text in _ROBOT_V2_DESCRIPTIONS.items():
+            update = getattr(ctx.command_manager, "update_command_metadata", None)
+            if update is None or not update(name, {"description": text}):
+                ctx.log_warning(f"DeviceHubPlugin: описание команды {name!r} не записано в каталог")
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
@@ -625,6 +687,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
         args = {k: v for k, v in data.items() if k != "device_id"}
         return self._safe_call(self._manager.call, dev_id, op, args)
 
+    def _robot_data(self, data: dict, op: str) -> dict:
+        """Офлайн-данные робота v2: ``DeviceManager.robot_data`` (мимо ``call``, связь не нужна)."""
+        dev_id = data.get("device_id", "")
+        if not dev_id:
+            return {"status": "error", "message": "device_id обязателен"}
+        args = {k: v for k, v in data.items() if k != "device_id"}
+        return self._safe_call(self._manager.robot_data, dev_id, op, args)
+
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Реестр
     # ------------------------------------------------------------------ #
@@ -906,6 +976,94 @@ class DeviceHubPlugin(ProcessModulePlugin):
     def cmd_robot_exchange_log_set(self, data: dict) -> dict:
         """Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6)."""
         return self._driver_call(data, "robot", "exchange_log_set")
+
+    # ------------------------------------------------------------------ #
+    # КОМАНДЫ — Робот v2: данные офлайн (10) и движение (11), T5.3c
+    # ------------------------------------------------------------------ #
+
+    def cmd_robot_param_get_all(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``param_get_all`` (T5.3c)."""
+        return self._robot_data(data, "param_get_all")
+
+    def cmd_robot_point_list(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``point_list`` (T5.3c)."""
+        return self._robot_data(data, "point_list")
+
+    def cmd_robot_point_save(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``point_save`` (T5.3c)."""
+        return self._robot_data(data, "point_save")
+
+    def cmd_robot_point_delete(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``point_delete`` (T5.3c)."""
+        return self._robot_data(data, "point_delete")
+
+    def cmd_robot_frame_list(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``frame_list`` (T5.3c)."""
+        return self._robot_data(data, "frame_list")
+
+    def cmd_robot_frame_teach(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``frame_teach`` (T5.3c)."""
+        return self._robot_data(data, "frame_teach")
+
+    def cmd_robot_program_list(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``program_list`` (T5.3c)."""
+        return self._robot_data(data, "program_list")
+
+    def cmd_robot_program_get(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``program_get`` (T5.3c)."""
+        return self._robot_data(data, "program_get")
+
+    def cmd_robot_program_save(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``program_save`` (T5.3c)."""
+        return self._robot_data(data, "program_save")
+
+    def cmd_robot_program_delete(self, data: dict) -> dict:
+        """Данные робота v2 офлайн, ``program_delete`` (T5.3c)."""
+        return self._robot_data(data, "program_delete")
+
+    def cmd_robot_param_set(self, data: dict) -> dict:
+        """Робот v2, ``param_set`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "param_set")
+
+    def cmd_robot_param_apply(self, data: dict) -> dict:
+        """Робот v2, ``param_apply`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "param_apply")
+
+    def cmd_robot_stop(self, data: dict) -> dict:
+        """Робот v2, ``stop`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "stop")
+
+    def cmd_robot_servo(self, data: dict) -> dict:
+        """Робот v2, ``servo`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "servo")
+
+    def cmd_robot_do_set(self, data: dict) -> dict:
+        """Робот v2, ``do_set`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "do_set")
+
+    def cmd_robot_jog_step(self, data: dict) -> dict:
+        """Робот v2, ``jog_step`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "jog_step")
+
+    def cmd_robot_jog_hold(self, data: dict) -> dict:
+        """Робот v2, ``jog_hold`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "jog_hold")
+
+    def cmd_robot_jog_release(self, data: dict) -> dict:
+        """Робот v2, ``jog_release`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "jog_release")
+
+    def cmd_robot_point_capture(self, data: dict) -> dict:
+        """Робот v2, ``point_capture`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "point_capture")
+
+    def cmd_robot_program_run(self, data: dict) -> dict:
+        """Робот v2, ``program_run`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "program_run")
+
+    def cmd_robot_program_abort(self, data: dict) -> dict:
+        """Робот v2, ``program_abort`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
+        return self._kind_call(data, "robot", "program_abort")
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Рисование (8)

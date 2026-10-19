@@ -16,7 +16,9 @@ import itertools
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
@@ -29,6 +31,12 @@ from Services.device_hub.errors import (
 )
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
+from Services.device_hub.robot_data_ops import OPS as ROBOT_DATA_OPS
+from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, BadArgs, RobotOpError
+from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, RobotDataInvalid, StoreDocumentInvalid
+
+if TYPE_CHECKING:
+    from Services.robot_comm.store import RobotDataStore
 
 logger = get_std_logger(__name__)
 
@@ -55,6 +63,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         spawn:      ``(target, *, name) -> IHandle`` — ``IScope.spawn`` области плагина (T5.3a); получает драйвер
                     робота v2 (его потоки живут в этой области) и рассылка стопа ``request_stop_all``. ``None`` —
                     робот ``delta_v2`` не создаётся (``RuntimeError`` фабрики), драйверы v1 работают как прежде.
+        robot_store: Единственное на процесс ``RobotDataStore`` данных робота v2 (T5.3c): им пользуется ``robot_data``;
+                    ``None`` — ``robot_data`` отвечает отказом «хранилище данных робота не задано».
     """
 
     def __init__(
@@ -63,12 +73,14 @@ class DeviceManager(BaseManager, ObservableMixin):
         publish_cb: Callable[[str, dict], None] | None = None,
         *,
         spawn: Callable[..., Any] | None = None,
+        robot_store: RobotDataStore | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
         self._spawn = spawn
+        self._robot_store = robot_store
         self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
 
         # Реестр: id -> DeviceEntry
@@ -442,6 +454,39 @@ class DeviceManager(BaseManager, ObservableMixin):
 
         return driver.call(op, args)
 
+    def robot_data(self, dev_id: str, op: str, args: dict | None = None) -> dict:
+        """Офлайн-данные робота v2 (путь О4 мимо ``call``): параметры, точки, СК, программы (T5.3c).
+
+        Pre: устройство в реестре, ``kind == "robot"`` и ``protocol == "delta_v2"``, хранилище задано; связь с
+        роботом не нужна. Операции — ``robot_data_ops.OPS``; запись требует ключ ``base_rev``.
+        Post: успех -> ``{"status": "ok", ...}``. Ошибка -> ``{"status": "error", "message": <постоянный текст без
+        входных значений>}``; ``RevisionConflict`` добавляет ``current_rev``; плохие аргументы — ``TEXT_BAD_ARGS``.
+        ``OSError`` хранилища не перехватывается (отвечает ``_safe_call`` плагина).
+        """
+        try:
+            entry = self.get(dev_id)
+        except DeviceNotFoundError as exc:
+            return {"status": "error", "message": str(exc)}
+        if entry.kind != "robot" or entry.protocol != "delta_v2":
+            return {"status": "error", "message": "данные робота — только для протокола delta_v2"}
+        if self._robot_store is None:
+            return {"status": "error", "message": "хранилище данных робота не задано"}
+        fn = ROBOT_DATA_OPS.get(op)
+        if fn is None:
+            return {"status": "error", "message": "неизвестная операция данных робота"}
+        try:
+            if not isinstance(args, dict):
+                raise BadArgs
+            result = fn(self._robot_store, dev_id, args)
+        except RevisionConflict as exc:
+            return {"status": "error", "message": str(exc), "current_rev": exc.current_rev}
+        except (InvalidStoreKey, RobotDataInvalid, StoreDocumentInvalid, RobotOpError) as exc:
+            # no-health: ошибка данных оператора уходит в ответ команды, тексты постоянные
+            return {"status": "error", "message": str(exc)}
+        except (BadArgs, ValidationError):
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        return {"status": "ok", **result}
+
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers
     # ------------------------------------------------------------------ #
@@ -519,6 +564,9 @@ class DeviceManager(BaseManager, ObservableMixin):
             dev_id: ID устройства.
             values: {name: value, ...}
         """
+        # Д2 (T5.3c): регистры робота v2 пишут только команды robot_*; отказ не зависит от связи (до проверки драйвера)
+        if self.get(dev_id).protocol == "delta_v2":
+            return {"status": "error", "message": "запись регистров робота v2 — только командами robot_*"}
         driver = self._get_connected_driver(dev_id)
         if driver.protocol is None:
             return {"status": "error", "message": f"Устройство {dev_id!r} без протокола"}
