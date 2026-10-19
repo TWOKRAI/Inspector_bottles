@@ -65,6 +65,7 @@ class _Journal:
         self.fail_next_stop = False
         self.hold_stop_s = 0.0
         self.hold_next_cmd_s = 0.0
+        self.hold_ack_read_s = 0.0  # ответ на чтение, захватывающее TLM_STOP_ACK, держится (полуоткрытая связь)
         self.cmd_reply_at = 0.0
 
     def count(self, since: float = 0.0) -> int:
@@ -103,6 +104,9 @@ class _Server(SimRobotServer):
 
         async def action(fc, start, addr, count, registers, values):  # noqa: ANN001, ANN202
             result = await inner(fc, start, addr, count, registers, values)
+            if int(fc) in (3, 4) and j.hold_ack_read_s and addr <= _ACK < addr + int(count):
+                await asyncio.sleep(j.hold_ack_read_s)
+                return result
             if int(fc) not in (6, 16) or values is None:
                 return result
             span = range(addr, addr + max(int(count), len(values)))
@@ -278,6 +282,9 @@ def test_one_silent_robot_one_stop_write_within_deadline(tmp_path: Path) -> None
         assert elapsed <= 2.5, elapsed
         assert rig.journal.count(t0) == 1, rig.journal.stamps()
         _until(lambda: _moving(rig) == 0, 1.0, "робот не остановился")
+        # H3: нет эха -> health «стоп не подтверждён роботом» (решение §2)
+        calls = [c for c in ctx.health.report_error.call_args_list if c.kwargs.get("context") == "device_hub.stop_echo"]
+        assert [(str(c.args[0]), c.kwargs.get("device_id")) for c in calls] == [(TEXT_UNCONFIRMED, "r1")]
 
 
 def test_silent_r1_does_not_delay_r2() -> None:
@@ -515,3 +522,125 @@ def test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop() -> None:
             _until(lambda: _moving(rig) == 0, 1.5, "робот не остановился")
         finally:
             _quiet(drv.disconnect)
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью круга 2 (H1, H2, H4, H6, H7)
+# --------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("echo", ["confirms", "silent"])
+def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None:
+    """H1: задание CVT в ходе, стоп процесса, затем событие тика (как remove_worker) — одна запись, тик выходит."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        ev = threading.Event()
+
+        def ticker() -> None:
+            while not ev.is_set():
+                drv.tick(ev)
+                ev.wait(0.02)
+
+        t = threading.Thread(target=ticker, daemon=True)
+        try:
+            assert drv.call("enqueue_job", {"x_mm": 400.0, "y_mm": 100.0})["status"] == "ok"
+            t.start()
+            _until(lambda: drv._job_active and _moving(rig) == 1, 10.0, "задание не поехало")
+            time.sleep(0.2)
+            if echo == "silent":
+                rig.core.go_silent()
+            t0 = time.perf_counter()
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+            set_at = time.perf_counter()
+            ev.set()
+            t.join(5.0)
+            exited = time.perf_counter() - set_at
+            time.sleep(_SETTLE_S)
+            assert not t.is_alive()
+            assert rig.journal.count(t0) == 1, [x - t0 for x in rig.journal.stamps() if x >= t0]
+            assert exited <= 0.5, exited
+        finally:
+            ev.set()
+            _quiet(drv.disconnect)
+
+
+def test_driver_without_spawn_refuses_return_job_and_tick_keeps_it_visible() -> None:
+    """H2: без spawn возврат отказан до очереди; возврат, попавший в очередь, тик не теряет молча."""
+    rec = _Rec()
+    with _Rig() as rig:
+        drv = _driver(rig, rec, None)
+        try:
+            reply = drv.call("return_job", {"x_mm": 400.0, "y_mm": 100.0})
+            assert reply == {"status": "error", "message": TEXT_NO_SPAWN}
+            assert drv.snapshot()["return_queued"] == 0
+            drv._return_queue.append((400.0, 100.0, 0.0))  # шов: возврат уже в очереди (путь до отказа)
+            drv.tick(None)  # исключение — красный
+            assert (drv.snapshot()["return_queued"], drv.snapshot()["returns_failed"]) == (0, 1)
+            assert rec.at("devices.state.r1.last_error")[-1] == TEXT_NO_SPAWN
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_abort_rejects_bad_level_with_constant_text() -> None:
+    """H4: уровень стопа оператора — только 1..3 или SOFT/HARD/HALT; bool и строки-мусор отказаны без записи."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            t0 = time.perf_counter()
+            for bad in ("abc", True, 99, 2.0, None):
+                assert drv.call("abort", {"mode": bad}) == {"status": "error", "message": "неверный уровень стопа"}
+            assert rig.journal.count(t0) == 0
+            assert bounded(lambda: drv.call("abort", {"mode": "HARD"}), _CALL_S) == {"status": "ok", "mode": 2}
+            assert rig.journal.count(t0) == 1
+            assert bounded(lambda: drv.call("abort", {}), _CALL_S) == {"status": "ok", "mode": 1}  # умолчание SOFT
+            assert rig.journal.count(t0) == 2
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_echo_check_ignores_stop_of_previous_session() -> None:
+    """H6: стоп оператора прошлой сессии, робот перезапущен (эхо 0), простой робот — не «не подтверждён»."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            assert bounded(lambda: drv.call("abort", {"mode": 1}), _CALL_S)["status"] == "ok"
+            rig.restart(keep_regs=False)
+            end = time.monotonic() + 20.0
+            while not bounded(drv.connect, _CONNECT_S):
+                assert time.monotonic() < end, "connect после рестарта робота"
+                time.sleep(0.3)
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+        finally:
+            _quiet(drv.disconnect)
+        assert TEXT_UNCONFIRMED not in rec.at("devices.state.r1.last_error")
+
+
+def test_echo_check_bounded_when_peer_read_is_held(tmp_path: Path) -> None:
+    """H7: у обоих роботов чтение эха висит (полуоткрытая связь) — проверки эха не идут по очереди, <= 2.5 с."""
+    with _Rig() as r1, _Rig() as r2:
+        registry = tmp_path / "devices.yaml"
+        recipe = [
+            {"id": d, "name": d, "kind": "robot", "protocol": "delta_v2", "transport": _transport(r.port)}
+            for d, r in (("r1", r1), ("r2", r2))
+        ]
+        ctx = make_ctx({"registry_path": str(registry), "recipe_devices": recipe}, tmp_registry=registry)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+        plugin.start(ctx)
+        for d in ("r1", "r2"):
+            assert plugin.cmd_device_connect({"device_id": d})["status"] == "ok"
+        bounded(plugin._process_conn_queue, _CONNECT_S)
+        d1, d2 = plugin._manager.get_driver("r1"), plugin._manager.get_driver("r2")
+        _jog_moving(d1, r1)
+        _jog_moving(d2, r2)
+        with _holding(d1), _holding(d2):
+            r1.journal.hold_ack_read_s = r2.journal.hold_ack_read_s = 3.0
+            t0 = time.perf_counter()
+            bounded(lambda: plugin.shutdown(ctx), 10.0)
+            elapsed = time.perf_counter() - t0
+        r1.journal.hold_ack_read_s = r2.journal.hold_ack_read_s = 0.0
+        assert elapsed <= 2.5, elapsed
+        assert (r1.journal.count(t0), r2.journal.count(t0)) == (1, 1)
