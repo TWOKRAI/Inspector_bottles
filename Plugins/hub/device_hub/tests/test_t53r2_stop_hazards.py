@@ -32,6 +32,7 @@ from pymodbus.constants import ExcCodes
 from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots
 from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 from Plugins.hub.device_hub.tests.conftest import make_ctx
+from Services.device_hub import manager as device_manager
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 from Services.device_hub.manager import DeviceManager
 from Services.device_hub.registry.entry import DeviceEntry
@@ -408,8 +409,10 @@ def test_second_request_stop_all_after_scope_close_does_not_raise() -> None:
 
 
 @pytest.mark.parametrize("failure", ["closed", "generic"])
-def test_spawn_failure_still_writes_one_stop_per_moving_robot(failure: str) -> None:
+def test_spawn_failure_still_writes_one_stop_per_moving_robot(failure: str, monkeypatch: pytest.MonkeyPatch) -> None:
     rec = _Rec()
+    spy = _LogSpy()
+    monkeypatch.setattr(device_manager, "logger", spy)
     closed = open_scope("t53r2closed", budget_s=1.0)
     closed.close()
     with _Rig() as r1, _Rig() as r2, _scope() as scope:
@@ -430,6 +433,9 @@ def test_spawn_failure_still_writes_one_stop_per_moving_robot(failure: str) -> N
                 bounded(lambda: mgr.request_stop_all(time.monotonic() + 2.5), 10.0)
                 time.sleep(_SETTLE_S)
             assert (r1.journal.count(t0), r2.journal.count(t0)) == (1, 1)
+            # одна строка про отказ spawn на весь вызов (два робота): закрытая область — DEBUG, прочий отказ — WARNING
+            lines = [lvl for lvl, text in spy.records if "не запущен" in text]
+            assert lines == [{"closed": "debug", "generic": "warning"}[failure]], spy.records
         finally:
             _quiet(mgr.shutdown)
 
@@ -765,3 +771,59 @@ def test_second_process_stop_while_motion_alive_writes_once() -> None:
             gate.set()
             client.run_chunks = real_run_chunks  # type: ignore[method-assign]
             _quiet(drv.disconnect)
+
+
+class _LogSpy:
+    """Подмена логгера менеджера: ``(уровень, текст)`` каждой записи (фасад пишет в LoggerManager или фолбэк)."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def _add(self, level: str, msg: str, *_a: Any, **_k: Any) -> bool:
+        self.records.append((level, str(msg)))
+        return True
+
+    def debug(self, msg: str, *a: Any, **k: Any) -> bool:
+        return self._add("debug", msg)
+
+    def info(self, msg: str, *a: Any, **k: Any) -> bool:
+        return self._add("info", msg)
+
+    def warning(self, msg: str, *a: Any, **k: Any) -> bool:
+        return self._add("warning", msg)
+
+    def error(self, msg: str, *a: Any, **k: Any) -> bool:
+        return self._add("error", msg)
+
+    def exception(self, msg: str, *a: Any, **k: Any) -> bool:
+        return self._add("error", msg)
+
+
+def test_plugin_shutdown_scope_closed_spawn_is_quiet_and_writes_one_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Фаза 4 (``_on_shutdown`` -> ``request_stop_all``) идёт после ``scope.close``: ``spawn`` отвечает
+    ``ScopeClosedError``, стоп идёт синхронно (защёлка ничего не пишет). Это штатный путь, не отказ: записи выше
+    DEBUG про «поток стоп-запроса не запущен» быть не должно, запись на робота ровно одна."""
+    spy = _LogSpy()
+    monkeypatch.setattr(device_manager, "logger", spy)
+    with _Rig() as rig:
+        registry = tmp_path / "devices.yaml"
+        recipe = [
+            {"id": "r1", "name": "r1", "kind": "robot", "protocol": "delta_v2", "transport": _transport(rig.port)}
+        ]
+        ctx = make_ctx({"registry_path": str(registry), "recipe_devices": recipe}, tmp_registry=registry)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+        plugin.start(ctx)
+        assert plugin.cmd_device_connect({"device_id": "r1"})["status"] == "ok"
+        bounded(plugin._process_conn_queue, _CONNECT_S)
+        drv = plugin._manager.get_driver("r1")
+        _jog_moving(drv, rig)
+        with _holding(drv):
+            t0 = time.perf_counter()
+            bounded(lambda: plugin.shutdown(ctx), 10.0)
+        time.sleep(_SETTLE_S)
+        assert rig.journal.count(t0) == 1, rig.journal.stamps()
+    noisy = [r for r in spy.records if "не запущен" in r[1] and r[0] != "debug"]
+    assert noisy == [], noisy

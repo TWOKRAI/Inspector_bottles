@@ -135,7 +135,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 inline.append((dev_id, request))
                 if len(inline) == 1:
                     text = f"device_hub: поток стоп-запроса не запущен ({type(exc).__name__}) — стоп идёт в этом потоке"
-                    (logger.info if isinstance(exc, ScopeClosedError) else logger.warning)(text)
+                    (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
         for dev_id, request in inline:  # fail-closed: отказ spawn не лишает робота стопа (защёлка — в драйвере)
             self._stop_one(dev_id, request, deadline)
         for handle in handles:
