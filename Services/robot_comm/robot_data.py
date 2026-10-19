@@ -28,6 +28,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
+
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
 from Services.robot_comm.errors import RobotDataInvalid
 from Services.robot_comm.programs.program import FrameDef, Point, Program
@@ -119,16 +121,17 @@ def load_params(
     (``entry.params["robot_params"]``), ``epoch_default`` — метка, когда файла нет.
     Post: файла нет -> умолчания ``PARAMS[id]["default"]`` всех имён без ``P_CONFIG_EPOCH``, поверх них ``overrides``,
     метка ``epoch_default``, ``rev=None``. Файл есть -> умолчания, поверх них ``values`` файла, метка файла,
-    ``rev`` файла; ``overrides`` при файле НЕ применяются и не проверяются (источник истины — файл). Диск не меняется.
+    ``rev`` файла; ``overrides`` при файле проверяются, но НЕ применяются (источник истины — файл). Диск не меняется.
     Raises: ``InvalidStoreKey``; ``StoreDocumentInvalid(rev)`` — файл не YAML-словарь; ``RobotDataInvalid(rev)`` —
     ``version != 1``, лишние или недостающие ключи, неизвестное имя, сырое вне ``min..max``, метка вне ``1..65535``;
-    ``RobotDataInvalid(None)`` — файла нет и неизвестное имя или недопустимое значение в ``overrides``, либо
-    недопустимая ``epoch_default``.
+    ``RobotDataInvalid(None)`` — неизвестное имя или недопустимое значение в ``overrides`` (файл есть или нет),
+    либо недопустимая ``epoch_default`` (файла нет).
     """
     stored = store.read(device_id, "params")
     values = {name: int(PARAMS[PARAM_ID[name]]["default"]) for name in _VALUE_NAMES}
+    checked_overrides = _check_values(overrides or {}, None)  # ошибка вызывающего, а не файла: проверка всегда
     if stored.body is None:
-        values.update(_check_values(overrides or {}, None))
+        values.update(checked_overrides)
         return ParamsDoc(values, _check_epoch(epoch_default, None), None)
     rev = stored.rev
     _check_header(stored.body, {"epoch", "values"}, rev)
@@ -147,12 +150,17 @@ def save_params(
 ) -> str:
     """Записать параметры робота целиком (полная карта ``values``, метка ``epoch``).
 
-    Pre: ``values`` и ``epoch`` проходят те же проверки, что при чтении; ``base_rev`` — как у ``RobotDataStore.write``.
+    Pre: ``values`` — полная карта, все имена без ``P_CONFIG_EPOCH`` (``_VALUE_NAMES``); ``values`` и ``epoch``
+    проходят те же проверки, что при чтении; ``base_rev`` — как у ``RobotDataStore.write``.
     Post: успех -> новая ревизия файла. Отказ -> диск не тронут.
-    Raises: ``RobotDataInvalid(None)`` — недопустимое имя, значение или метка (до обращения к диску);
+    Raises: ``RobotDataInvalid(None)`` — недопустимое, недостающее или лишнее имя, недопустимое значение или метка
+    (до обращения к диску);
     ``InvalidStoreKey``; ``RevisionConflict(current_rev)``.
     """
-    body = {"version": _VERSION, "epoch": _check_epoch(epoch, None), "values": _check_values(values, None)}
+    checked = _check_values(values, None)
+    if set(checked) != set(_VALUE_NAMES):  # неполная карта затёрла бы остальные параметры умолчаниями при чтении
+        raise RobotDataInvalid(None)
+    body = {"version": _VERSION, "epoch": _check_epoch(epoch, None), "values": checked}
     return store.write(device_id, "params", body, base_rev=base_rev)
 
 
@@ -197,7 +205,7 @@ def _load_collection[T: (Point, FrameDef)](
     for item in items:
         try:
             obj = model.from_dict(item)
-        except Exception as exc:  # данные из файла: pydantic и геометрия не должны ронять загрузку не доменной ошибкой
+        except (ValidationError, ValueError, TypeError) as exc:  # данные из файла: pydantic и геометрия -> доменная
             raise RobotDataInvalid(rev) from exc
         if obj.name in loaded:
             raise RobotDataInvalid(rev)
@@ -265,7 +273,7 @@ def load_program(store: RobotDataStore, device_id: str, name: str) -> tuple[Prog
     rev = stored.rev
     try:
         program = Program.from_dict(stored.body)
-    except Exception as exc:  # данные из файла: см. _load_collection
+    except (ValidationError, ValueError, TypeError) as exc:  # данные из файла: см. _load_collection
         raise RobotDataInvalid(rev) from exc
     if program.name != name:
         raise RobotDataInvalid(rev)

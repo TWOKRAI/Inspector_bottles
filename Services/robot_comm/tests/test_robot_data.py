@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from Services.robot_comm import errors, robot_data
+from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
 from Services.robot_comm.programs.program import FrameDef, Move, Point, Program
 
 _INVALID_TEXT = "Данные робота не прошли проверку"
@@ -51,6 +52,13 @@ def _call(fn, *a, **kw):
 
 def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def _full_values(**changed: int) -> dict[str, int]:
+    """Полная карта параметров (умолчания таблицы) с точечными заменами — вход для ``save_params``."""
+    values = {n: int(PARAMS[PARAM_ID[n]]["default"]) for n in robot_data._VALUE_NAMES}
+    values.update(changed)
+    return values
 
 
 @pytest.fixture
@@ -224,11 +232,19 @@ def test_params_overrides_and_epoch_default_validated(store, overrides, epoch_de
     assert ei.value.rev is None
 
 
-def test_params_overrides_ignored_when_file_exists(store) -> None:
-    _call(robot_data.save_params, store, "r1", {"P_SPD_DEFAULT": 55}, 2, base_rev=None)
-    doc = _call(robot_data.load_params, store, "r1", overrides={"P_NOPE": 1})  # файл — источник истины
+def test_overrides_not_applied_when_file_exists(store) -> None:
+    _call(robot_data.save_params, store, "r1", _full_values(P_SPD_DEFAULT=55), 2, base_rev=None)
+    doc = _call(robot_data.load_params, store, "r1", overrides={"P_SPD_DEFAULT": 70})  # файл — источник истины
     assert doc.values["P_SPD_DEFAULT"] == 55
     assert doc.epoch == 2
+
+
+@pytest.mark.parametrize("overrides", [{"P_NOPE": 1}, {"P_SPD_DEFAULT": 500}, {"P_SPD_DEFAULT": True}])
+def test_overrides_checked_when_file_exists(store, overrides) -> None:
+    _call(robot_data.save_params, store, "r1", _full_values(P_SPD_DEFAULT=55), 2, base_rev=None)
+    with pytest.raises(errors.RobotDataInvalid) as ei:
+        _call(robot_data.load_params, store, "r1", overrides=overrides)
+    assert ei.value.rev is None  # ошибка вызывающего, не файла
 
 
 def test_params_partial_file_fills_defaults(store, root: Path) -> None:
@@ -277,17 +293,38 @@ def test_params_not_a_mapping_file_raises_store_error(store, root: Path) -> None
 
 def test_save_params_invalid_refused_before_disk(store, root: Path) -> None:
     for values, epoch in (
-        ({"P_NOPE": 1}, 1),
-        ({"P_SPD_DEFAULT": 0}, 1),
-        ({"P_SPD_DEFAULT": 101}, 1),
-        ({"P_CONFIG_EPOCH": 3}, 1),
-        ({"P_SPD_DEFAULT": 50}, 0),
-        ({"P_SPD_DEFAULT": 50}, 65536),
+        (_full_values(P_NOPE=1), 1),
+        (_full_values(P_SPD_DEFAULT=0), 1),
+        (_full_values(P_SPD_DEFAULT=101), 1),
+        (_full_values(P_CONFIG_EPOCH=3), 1),
+        (_full_values(P_SPD_DEFAULT=50), 0),
+        (_full_values(P_SPD_DEFAULT=50), 65536),
     ):
         with pytest.raises(errors.RobotDataInvalid) as ei:
             _call(robot_data.save_params, store, "r1", values, epoch, base_rev=None)
         assert ei.value.rev is None, (values, epoch)
     assert not root.exists()
+
+
+def test_save_params_rejects_partial_map(store, root: Path) -> None:
+    with pytest.raises(errors.RobotDataInvalid) as ei:
+        _call(robot_data.save_params, store, "r1", {"P_SPD_DEFAULT": 50}, 1, base_rev=None)
+    assert ei.value.rev is None
+    assert not root.exists()  # диск не тронут
+    one_missing = _full_values()
+    del one_missing["P_SPD_JOG"]
+    with pytest.raises(errors.RobotDataInvalid):
+        _call(robot_data.save_params, store, "r1", one_missing, 1, base_rev=None)
+    assert not root.exists()
+
+
+def test_save_params_full_map_round_trip(store) -> None:
+    rev = _call(robot_data.save_params, store, "r1", _full_values(P_SPD_JOG=20), 3, base_rev=None)
+    doc = _call(robot_data.load_params, store, "r1")
+    assert doc.rev == rev
+    assert doc.epoch == 3
+    assert doc.values["P_SPD_JOG"] == 20
+    assert doc.values == _full_values(P_SPD_JOG=20)
 
 
 def test_param_source_propagates_invalid_file(store, root: Path) -> None:
@@ -405,6 +442,29 @@ def test_save_program_name_is_file_name_and_bad_name_refused(store, root: Path) 
     assert _call(robot_data.load_program, store, "r1", "Программа 1") == (prog, rev)
     with pytest.raises(errors.InvalidStoreKey):
         _call(robot_data.save_program, store, "r1", Program(name="a/b", steps=()), base_rev=None)
+
+
+def test_load_collection_lets_unexpected_error_through(store, monkeypatch) -> None:
+    _put(store, "points", {"version": 1, "points": [_PA.to_dict()]})
+
+    def boom(cls, d):
+        raise KeyError("не доменная ошибка")  # не ValidationError / ValueError / TypeError
+
+    monkeypatch.setattr(Point, "from_dict", classmethod(boom))
+    with pytest.raises(KeyError):
+        _call(robot_data.load_points, store, "r1")
+
+
+def test_load_program_lets_unexpected_error_through(store, monkeypatch) -> None:
+    prog = Program(name="p1", steps=(Move(point="a", kind="JOINT"),))
+    _call(robot_data.save_program, store, "r1", prog, base_rev=None)
+
+    def boom(cls, d):
+        raise KeyError("не доменная ошибка")
+
+    monkeypatch.setattr(Program, "from_dict", classmethod(boom))
+    with pytest.raises(KeyError):
+        _call(robot_data.load_program, store, "r1", "p1")
 
 
 def test_robot_data_delete_program_passthrough(store) -> None:
