@@ -1,0 +1,517 @@
+"""Тесты-сторожа автора T5.3 круг 2: остановка роботов под одним сроком и один владелец потоков.
+
+Purpose:
+    Гонки и порядок стопа процесса (защёлка драйвера, параллельная рассылка менеджера, срок плагина). Записи
+    ``STOP_REQ`` считаются НА СТОРОНЕ РОБОТА: action-хук pymodbus-сервера стенда видит каждый запрос записи до
+    применения. Двойник робота умеет: не подтверждать стоп (``TLM_STOP_ACK`` заморожен), отклонить первую запись
+    ``STOP_REQ`` (``DEVICE_FAILURE``), держать ответ на запись ``STOP_REQ`` или команды (запись применяется сразу,
+    ответ клиенту задерживается).
+
+Public API:
+    Только тесты ``test_*``.
+
+Stability: lite
+
+Правила файла: ожидаемые значения — литералы; блокирующий вызов — в daemon-потоке с дедлайном (``bounded``);
+область потоков теста закрывается в конце теста, выживших нет.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pymodbus.constants import ExcCodes
+
+from multiprocess_framework.modules.base_manager import open_scope, unclosed_roots
+from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+from Plugins.hub.device_hub.tests.conftest import make_ctx
+from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+from Services.device_hub.manager import DeviceManager
+from Services.device_hub.registry.entry import DeviceEntry
+from Services.robot_comm.core.protocol_v2 import REG
+from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+from Services.robot_comm.programs import Move, Point, Program
+from Services.robot_comm.server.sim_robot import SimRobotServer
+from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, RecordingCore, bounded
+
+_JOG = {"dir": 1, "spd": 20}
+_CALL_S = 15.0
+_CONNECT_S = 60.0
+_SETTLE_S = 0.3
+_STOP_REQ = REG["STOP_REQ"]
+_ACK = REG["TLM_STOP_ACK"]
+_CMD_FLAG = REG["CMD_FLAG"]
+TEXT_STOPPING = "драйвер робота останавливается"
+TEXT_UNCONFIRMED = "стоп не подтверждён роботом"
+TEXT_NO_SPAWN = "RobotDriverV2 без spawn не запускает потоки"
+
+
+# --------------------------------------------------------------------------------------------------
+# Двойник робота
+# --------------------------------------------------------------------------------------------------
+
+
+class _Journal:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.stops: list[float] = []
+        self.fail_next_stop = False
+        self.hold_stop_s = 0.0
+        self.hold_next_cmd_s = 0.0
+        self.cmd_reply_at = 0.0
+
+    def count(self, since: float = 0.0) -> int:
+        with self.lock:
+            return len([t for t in self.stops if t >= since])
+
+    def stamps(self) -> list[float]:
+        with self.lock:
+            return list(self.stops)
+
+
+class _Core(RecordingCore):
+    def __init__(self) -> None:
+        self.silent = False
+        self._frozen = 0
+        super().__init__()
+
+    def go_silent(self) -> None:
+        self._frozen = self.regs[_ACK]
+        self.silent = True
+
+    def tick(self, dt_s: float | None = None) -> None:
+        super().tick(dt_s)
+        if self.silent:
+            self.regs[_ACK] = self._frozen
+
+
+class _Server(SimRobotServer):
+    def __init__(self, *args: Any, journal: _Journal, **kwargs: Any) -> None:
+        self._journal = journal
+        super().__init__(*args, **kwargs)
+
+    def _make_device(self):  # noqa: ANN202
+        device = super()._make_device()
+        inner, j = device.action, self._journal
+
+        async def action(fc, start, addr, count, registers, values):  # noqa: ANN001, ANN202
+            result = await inner(fc, start, addr, count, registers, values)
+            if int(fc) not in (6, 16) or values is None:
+                return result
+            span = range(addr, addr + max(int(count), len(values)))
+            hold = 0.0
+            with j.lock:
+                if _STOP_REQ in span:
+                    j.stops.append(time.perf_counter())
+                    if j.fail_next_stop:
+                        j.fail_next_stop = False
+                        return ExcCodes.DEVICE_FAILURE
+                    hold = j.hold_stop_s
+                elif _CMD_FLAG in span and j.hold_next_cmd_s:
+                    hold, j.hold_next_cmd_s = j.hold_next_cmd_s, 0.0
+            if hold:
+                registers[addr - start : addr - start + len(values)] = values
+                await asyncio.sleep(hold)
+                if _CMD_FLAG in span:
+                    j.cmd_reply_at = time.perf_counter()
+            return result
+
+        device.action = action
+        return device
+
+
+class _Rig(E2eRig):
+    def __init__(self) -> None:
+        self.journal = _Journal()
+        super().__init__(core=_Core())
+
+    def _start_server(self) -> None:
+        from Services.robot_comm.tests.e2e_rig_v2 import _HOST, free_port  # noqa: PLC0415
+
+        self.port = free_port()
+        self.server = _Server(_HOST, self.port, ROBOT_UNIT_ID, core=self.core, journal=self.journal)
+        bounded(self.server.start, 10.0)
+
+
+# --------------------------------------------------------------------------------------------------
+# Помощники
+# --------------------------------------------------------------------------------------------------
+
+
+class _Rec:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.items: list[tuple[str, Any]] = []
+
+    def __call__(self, path: str, payload: Any) -> None:
+        with self.lock:
+            self.items.append((path, payload))
+
+    def at(self, path: str) -> list[Any]:
+        with self.lock:
+            return [p for k, p in self.items if k == path]
+
+
+@contextmanager
+def _scope() -> Iterator[Any]:
+    scope = open_scope("t53r2", budget_s=6.0)
+    try:
+        yield scope
+    finally:
+        report = scope.close()
+        assert list(report.survivors) == [], report.survivors
+
+
+def _transport(port: int) -> dict:
+    return {"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": ROBOT_UNIT_ID}
+
+
+def _driver(rig: _Rig, rec: _Rec, spawn: Any, dev_id: str = "r1") -> RobotDriverV2:
+    entry = DeviceEntry(id=dev_id, name=dev_id, kind="robot", protocol="delta_v2", transport=_transport(rig.port))
+    drv = RobotDriverV2(entry, None, publish=rec, spawn=spawn)
+    assert bounded(drv.connect, _CONNECT_S) is True
+    drv.desired_connected = True
+    return drv
+
+
+def _manager(rec: _Rec, spawn: Any, rigs: dict[str, _Rig]) -> tuple[DeviceManager, dict[str, Any]]:
+    mgr = DeviceManager(store=None, publish_cb=rec, spawn=spawn)
+    drivers = {}
+    for dev_id, rig in rigs.items():
+        mgr.upsert(
+            {"id": dev_id, "name": dev_id, "kind": "robot", "protocol": "delta_v2", "transport": _transport(rig.port)}
+        )
+        assert bounded(lambda d=dev_id: mgr.connect(d), _CONNECT_S) is True
+        drivers[dev_id] = mgr.get_driver(dev_id)
+        drivers[dev_id].desired_connected = True
+    return mgr, drivers
+
+
+def _moving(rig: _Rig) -> int:
+    ticks = rig.core.ticks()
+    return ticks[-1].moving if ticks else -1
+
+
+def _until(pred: Callable[[], object], deadline_s: float, what: str) -> None:
+    end = time.monotonic() + deadline_s
+    while not pred():
+        assert time.monotonic() < end, what
+        time.sleep(0.01)
+
+
+@contextmanager
+def _holding(drv: Any) -> Iterator[None]:
+    """Оператор держит jog: подтверждения каждые 0.05 с до выхода из блока."""
+    stop = threading.Event()
+
+    def body() -> None:
+        while not stop.is_set():
+            try:
+                drv.call("jog_hold", dict(_JOG))
+            except Exception:  # noqa: BLE001 — подтверждения во время остановки
+                pass
+            stop.wait(0.05)
+
+    t = threading.Thread(target=body, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(5.0)
+
+
+def _jog_moving(drv: Any, rig: _Rig) -> None:
+    assert bounded(lambda: drv.call("jog_hold", dict(_JOG)), _CALL_S)["status"] == "ok"
+    _until(lambda: _moving(rig) == 1, 5.0, "jog не поехал")
+
+
+def _program_running(drv: Any, rig: _Rig, legs: int = 20) -> None:
+    points = {
+        "a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1),
+        "b": Point(name="b", x=300, y=-210, z=-40, rz=-100, hand=1),
+    }
+    program = Program(name="p", steps=tuple(Move(point="ab"[i % 2], kind="JOINT") for i in range(legs)))
+    assert bounded(lambda: drv.start_program(program, points, None, name="p"), _CALL_S)["status"] == "ok"
+    _until(lambda: _moving(rig) == 1, 5.0, "программа не поехала")
+
+
+def _quiet(fn: Callable[[], object]) -> None:
+    try:
+        bounded(fn, _CALL_S)
+    except Exception:  # noqa: BLE001 — уборка не подменяет исключение теста
+        pass
+
+
+# --------------------------------------------------------------------------------------------------
+# REDS
+# --------------------------------------------------------------------------------------------------
+
+
+def test_one_silent_robot_one_stop_write_within_deadline(tmp_path: Path) -> None:
+    with _Rig() as rig:
+        registry = tmp_path / "devices.yaml"
+        recipe = [
+            {"id": "r1", "name": "r1", "kind": "robot", "protocol": "delta_v2", "transport": _transport(rig.port)}
+        ]
+        ctx = make_ctx({"registry_path": str(registry), "recipe_devices": recipe}, tmp_registry=registry)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+        plugin.start(ctx)
+        assert plugin.cmd_device_connect({"device_id": "r1"})["status"] == "ok"
+        bounded(plugin._process_conn_queue, _CONNECT_S)
+        drv = plugin._manager.get_driver("r1")
+        _jog_moving(drv, rig)
+        with _holding(drv):
+            rig.core.go_silent()
+            t0 = time.perf_counter()
+            bounded(lambda: plugin.shutdown(ctx), 10.0)
+            elapsed = time.perf_counter() - t0
+        time.sleep(_SETTLE_S)
+        assert elapsed <= 2.5, elapsed
+        assert rig.journal.count(t0) == 1, rig.journal.stamps()
+        _until(lambda: _moving(rig) == 0, 1.0, "робот не остановился")
+
+
+def test_silent_r1_does_not_delay_r2() -> None:
+    rec = _Rec()
+    with _Rig() as r1, _Rig() as r2, _scope() as scope:
+        mgr, drv = _manager(rec, scope.spawn, {"r1": r1, "r2": r2})
+        try:
+            _program_running(drv["r1"], r1)
+            _jog_moving(drv["r2"], r2)
+            r1.core.go_silent()
+            r1.journal.hold_stop_s = 1.5  # ответ r1 на запись стопа держится дольше таймаута транспорта
+            t0 = time.perf_counter()
+            with _holding(drv["r2"]):
+                bounded(lambda: mgr.request_stop_all(time.monotonic() + 2.5), 10.0)
+            first_r1 = [t for t in r1.journal.stamps() if t >= t0][0]
+            first_r2 = [t for t in r2.journal.stamps() if t >= t0][0]
+            assert abs(first_r2 - first_r1) <= 0.1, (first_r1 - t0, first_r2 - t0)
+            assert r2.journal.count(t0) == 1
+        finally:
+            r1.journal.hold_stop_s = 0.0
+            _quiet(mgr.shutdown)
+
+
+def test_failed_write_retried_exactly_once() -> None:
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            _jog_moving(drv, rig)
+            with _holding(drv):
+                rig.journal.fail_next_stop = True
+                t0 = time.perf_counter()
+                bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+                time.sleep(_SETTLE_S)
+            assert rig.journal.count(t0) == 2, rig.journal.stamps()
+            _until(lambda: _moving(rig) == 0, 1.0, "робот не остановился")
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_missing_echo_sets_last_error() -> None:
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            _jog_moving(drv, rig)
+            rig.core.go_silent()
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+        finally:
+            _quiet(drv.disconnect)
+        assert TEXT_UNCONFIRMED in rec.at("devices.state.r1.last_error")
+
+
+def test_operator_robot_stop_writes_after_latch() -> None:
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            _jog_moving(drv, rig)
+            t0 = time.perf_counter()
+            bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+            assert rig.journal.count(t0) == 1
+            assert bounded(lambda: drv.call("abort", {"mode": 2}), _CALL_S) == {"status": "ok", "mode": 2}
+            assert rig.journal.count(t0) == 2
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_start_program_racing_phase1_leaves_no_survivors_or_roots() -> None:
+    rec = _Rec()
+    roots_before = sorted(r["path"] for r in unclosed_roots())
+    with _Rig() as rig:
+        scope = open_scope("t53r2race", budget_s=6.0)
+        mgr, drv = _manager(rec, scope.spawn, {"r1": rig})
+        points = {"a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1)}
+        program = Program(name="p", steps=(Move(point="a", kind="JOINT"),))
+        replies: list[dict] = []
+        go = threading.Event()
+
+        def launcher() -> None:
+            go.set()
+            end = time.monotonic() + 1.0
+            while time.monotonic() < end:
+                try:
+                    replies.append(drv["r1"].start_program(program, points, None, name="p"))
+                except Exception as exc:  # noqa: BLE001 — ответ гонки
+                    replies.append({"status": "exc", "message": repr(exc)})
+
+        t = threading.Thread(target=launcher, daemon=True)
+        t.start()
+        assert go.wait(5.0)
+        time.sleep(0.05)
+        bounded(lambda: mgr.request_stop_all(time.monotonic() + 2.5), 10.0)
+        t.join(5.0)
+        assert not t.is_alive()
+        report = scope.close(budget_s=max(0.0, 2.5))
+        _quiet(mgr.shutdown)
+        assert list(report.survivors) == [], report.survivors
+        assert replies and replies[-1]["message"] == TEXT_STOPPING, replies[-3:]
+    assert sorted(r["path"] for r in unclosed_roots()) == roots_before
+    assert [t.name for t in threading.enumerate() if t.name.startswith(("rv2-", "t53r2race/"))] == []
+
+
+def test_second_request_stop_all_after_scope_close_does_not_raise() -> None:
+    rec = _Rec()
+    with _Rig() as rig:
+        scope = open_scope("t53r2second", budget_s=6.0)
+        mgr, _drv = _manager(rec, scope.spawn, {"r1": rig})
+        scope.close()
+        t0 = time.perf_counter()
+        bounded(lambda: mgr.request_stop_all(time.monotonic() + 2.5), 10.0)  # исключение — красный
+        bounded(mgr.request_stop_all, 10.0)
+        _quiet(mgr.shutdown)
+        assert rig.journal.count(t0) == 0  # робот простаивает: записи нет
+
+
+@pytest.mark.parametrize("failure", ["closed", "generic"])
+def test_spawn_failure_still_writes_one_stop_per_moving_robot(failure: str) -> None:
+    rec = _Rec()
+    closed = open_scope("t53r2closed", budget_s=1.0)
+    closed.close()
+    with _Rig() as r1, _Rig() as r2, _scope() as scope:
+
+        def spawn(target: Any, *, name: str) -> Any:
+            if name.startswith("stop-"):
+                if failure == "closed":
+                    return closed.spawn(target, name=name)  # ScopeClosedError
+                raise RuntimeError("spawn отказал")
+            return scope.spawn(target, name=name)
+
+        mgr, drv = _manager(rec, spawn, {"r1": r1, "r2": r2})
+        try:
+            _program_running(drv["r1"], r1)
+            _jog_moving(drv["r2"], r2)
+            t0 = time.perf_counter()
+            with _holding(drv["r2"]):
+                bounded(lambda: mgr.request_stop_all(time.monotonic() + 2.5), 10.0)
+                time.sleep(_SETTLE_S)
+            assert (r1.journal.count(t0), r2.journal.count(t0)) == (1, 1)
+        finally:
+            _quiet(mgr.shutdown)
+
+
+def test_jog_lock_held_stop_written_without_lock() -> None:
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            _jog_moving(drv, rig)
+            t0 = time.perf_counter()
+            assert drv._jog_tx_lock.acquire(timeout=5.0)  # шов: переход jog «завис» с замком
+            try:
+                bounded(lambda: drv.request_stop(time.monotonic() + 0.3), 5.0)
+                assert rig.journal.count(t0) == 1  # записано, пока замок ещё держится
+            finally:
+                drv._jog_tx_lock.release()
+            _until(lambda: _moving(rig) == 0, 1.0, "робот не остановился")
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_driver_without_spawn_refuses_threaded_ops() -> None:
+    rec = _Rec()
+    with _Rig() as rig:
+        drv = _driver(rig, rec, None)
+        try:
+            n_events = len(rig.core.events())
+            assert bounded(lambda: drv.call("jog_hold", dict(_JOG)), _CALL_S) == {
+                "status": "error",
+                "message": TEXT_NO_SPAWN,
+            }
+            points = {"a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1)}
+            with pytest.raises(RuntimeError, match="без spawn"):
+                drv.start_program(Program(name="p", steps=(Move(point="a", kind="JOINT"),)), points, name="p")
+            assert not any("JOG_CONT" in text for _, text in rig.core.events()[n_events:])
+            assert _moving(rig) == 0
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_rehold_after_failed_release_stop_then_process_stop_writes() -> None:
+    """H-A: стоп prev, записанный в jog_hold до JOG_CONT, не закрывает защёлку для нового jog."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            _jog_moving(drv, rig)
+            rig.journal.fail_next_stop = True  # стоп release отклонён роботом: stop_sent остаётся False
+            assert bounded(lambda: drv.call("jog_release", {}), _CALL_S)["status"] == "error"
+            if not drv.is_connected:  # отказ записи транспорт считает обрывом: связь поднимается заново
+                assert bounded(drv.connect, _CONNECT_S) is True
+            reply = bounded(lambda: drv.call("jog_hold", dict(_JOG)), _CALL_S)  # путь стопа prev
+            assert reply["status"] == "ok", reply
+            _until(lambda: _moving(rig) == 1, 5.0, "новый jog не поехал")
+            with _holding(drv):
+                mark = time.perf_counter()
+                bounded(lambda: drv.request_stop(time.monotonic() + 2.5), 10.0)
+                time.sleep(_SETTLE_S)
+            assert rig.journal.count(mark) == 1, rig.journal.stamps()
+            _until(lambda: _moving(rig) == 0, 1.0, "новый jog не остановлен")
+        finally:
+            _quiet(drv.disconnect)
+
+
+def test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop() -> None:
+    """H-B: стоп процесса не взял замок перехода и лёг на робота РАНЬШЕ JOG_CONT (JOG_CONT в полёте) — jog_hold
+    после возврата JOG_CONT пишет стоп этого jog сам и поводок не запускает."""
+    rec = _Rec()
+    with _Rig() as rig, _scope() as scope:
+        drv = _driver(rig, rec, scope.spawn)
+        try:
+            client = drv._client
+            real_jog_cont = client.jog_cont
+            jog_cont_returned: list[float] = []
+
+            def slow_jog_cont(direction: int, speed: int) -> Any:
+                time.sleep(0.6)  # шов: JOG_CONT уходит на провод ПОСЛЕ стопа процесса
+                result = real_jog_cont(direction, speed)
+                jog_cont_returned.append(time.perf_counter())
+                return result
+
+            client.jog_cont = slow_jog_cont  # type: ignore[method-assign]
+            box: dict[str, Any] = {}
+            t = threading.Thread(target=lambda: box.setdefault("r", drv.call("jog_hold", dict(_JOG))), daemon=True)
+            t0 = time.perf_counter()
+            t.start()
+            _until(lambda: drv._jog_starting, 5.0, "jog_hold не начался")
+            bounded(lambda: drv.request_stop(time.monotonic() + 0.2), 5.0)
+            t.join(5.0)
+            assert not t.is_alive()
+            assert box["r"] == {"status": "error", "message": TEXT_STOPPING}
+            stamps = [s for s in rig.journal.stamps() if s >= t0]
+            assert len(stamps) == 2, [s - t0 for s in stamps]
+            assert stamps[-1] >= jog_cont_returned[0]
+            _until(lambda: _moving(rig) == 0, 1.5, "робот не остановился")
+        finally:
+            _quiet(drv.disconnect)

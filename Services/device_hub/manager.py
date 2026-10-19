@@ -126,7 +126,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 self._stop_one(dev_id, request, deadline)
             return
         handles = []
-        inline: list[tuple[str, Callable[..., None]]] = []  # spawn отказал: стоп этим роботам — в этом потоке
+        inline: list[tuple[str, Callable[..., object]]] = []  # spawn отказал: стоп этим роботам — в этом потоке
         for dev_id, request in targets:
             name = f"stop-{dev_id}-{_next_stop_k()}"
             try:
@@ -148,7 +148,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 logger.warning(f"device_hub: поток стоп-запроса не вышел к сроку: {list(report.survivors)}")
 
     @staticmethod
-    def _stop_one(dev_id: str, request: Callable[..., None], deadline: float) -> None:
+    def _stop_one(dev_id: str, request: Callable[..., object], deadline: float) -> None:
         try:
             request(deadline)
         except Exception:
