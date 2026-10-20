@@ -2,7 +2,8 @@
 
 Purpose:
     После T5.3f состояние драйвера живёт в ``RobotState`` (``drv.state``). Сторож по AST держит три границы.
-    (а) Тесты драйвера робота v2 (``Services/device_hub/tests``, ``Plugins/hub/device_hub/tests``): имена бывших
+    (а) Тесты (все файлы ``Services/device_hub/tests`` и ``Plugins/hub/device_hub/tests`` кроме тестов других
+    драйверов): имена бывших
     полей состояния (``_syncing``, ``_jog``, ``_prog_alive``, ...) и любой приватный атрибут через ``.state`` —
     ноль обращений; прочие приватные имена драйвера (швы) — ровно литералы ``_SEAMS``. ``getattr`` / ``setattr`` /
     ``hasattr`` / ``delattr`` со строковым литералом считаются, ``self.`` и ``cls.`` — нет (свои классы теста).
@@ -27,9 +28,20 @@ _ROOT = Path(__file__).resolve().parents[3]
 _PKG = _ROOT / "Services" / "device_hub" / "drivers" / "robot_driver_v2"
 _TEST_DIRS = (_ROOT / "Services" / "device_hub" / "tests", _ROOT / "Plugins" / "hub" / "device_hub" / "tests")
 _OUTSIDE_DIRS = ("Services", "Plugins", "multiprocess_prototype")
-_MARKERS = ("RobotDriverV2", "robot_driver_v2")
-# Файлы драйвера v2 без маркеров в тексте (берут драйвер через помощники другого теста)
-_EXTRA_V2_TESTS = ("test_t53f_m6_guard.py",)
+_BASE = _ROOT / "Services" / "device_hub" / "drivers" / "base.py"
+# Тесты ДРУГИХ драйверов и менеджера: свои ``_client`` / ``_job_queue`` / ``_pick_lead_mm`` — вне сторожа.
+# Всё остальное в двух каталогах сканируется (драйвер v2 приходит и через DeviceManager / стенд, не только по импорту).
+_OTHER_DRIVER_TESTS = (
+    "test_robot_driver.py",
+    "test_vfd_driver.py",
+    "test_encoder_offset.py",
+    "test_reconnect_exhausted_notice.py",
+    "test_hikvision_driver.py",
+    "test_generic_modbus.py",
+    "test_manager_template_1_2b_3.py",
+)
+# Достижимость: сколько файлов сканируется (все ``*.py`` двух каталогов минус сам сторож и исключения)
+_SCANNED_FILES = 40
 
 # Бывшие поля состояния драйвера (до T5.3f) и поля RobotState: через объект драйвера — 0 обращений
 _STATE_FIELDS = frozenset(
@@ -63,15 +75,16 @@ _STATE_FIELDS = frozenset(
     }
 )
 
-# Швы тестов: приватное имя драйвера -> число обращений (AST, файлы драйвера v2). Снятие — задача SPI хаба.
+# Швы тестов: приватное имя драйвера (пакет + база) -> число обращений (AST). Снятие — задача SPI хаба.
 _SEAMS = {
-    "_client": 35,
+    "_client": 37,
     "_param_lock": 20,
     "_epoch": 16,
     "_resync_maybe": 7,
     "_jog_tx_lock": 5,
     "_last_reconnect": 5,
     "_ready": 3,
+    "_reconnect_attempts": 6,
     "_transport": 3,
     "_activity_alive": 3,
     "_values": 2,
@@ -103,9 +116,9 @@ def _is_property(node: ast.FunctionDef) -> bool:
 
 
 def _driver_private_names() -> frozenset[str]:
-    """Приватные имена драйвера: ``self._x`` и ``def _x`` во всех модулях пакета, кроме ``state.py``."""
+    """Приватные имена драйвера: ``self._x`` и ``def _x`` в модулях пакета (кроме ``state.py``) и в ``base.py``."""
     names: set[str] = set()
-    for path in _PKG.glob("*.py"):
+    for path in [*_PKG.glob("*.py"), _BASE]:
         if path.name == "state.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -120,14 +133,11 @@ def _is_private(name: str) -> bool:
     return name.startswith("_") and not name.startswith("__")
 
 
-def _v2_test_files() -> list[Path]:
+def _scanned_test_files() -> list[Path]:
     out: list[Path] = []
     for directory in _TEST_DIRS:
         for path in sorted(directory.glob("*.py")):
-            if path.name == Path(__file__).name:
-                continue
-            text = path.read_text(encoding="utf-8")
-            if path.name in _EXTRA_V2_TESTS or any(m in text for m in _MARKERS):
+            if path.name != Path(__file__).name and path.name not in _OTHER_DRIVER_TESTS:
                 out.append(path)
     return out
 
@@ -159,8 +169,8 @@ def _private_accesses(path: Path) -> list[tuple[str, int, bool]]:
 
 def test_tests_do_not_touch_driver_state_fields() -> None:
     """(а) Поля состояния и приватные атрибуты ``.state`` в тестах драйвера v2 — 0 обращений."""
-    files = _v2_test_files()
-    assert files, "файлы драйвера v2 не найдены: сторож слеп"
+    files = _scanned_test_files()
+    assert len(files) == _SCANNED_FILES, [p.name for p in files]
     offenders = [
         f"{path.name}:{line} {name}"
         for path in files
@@ -173,8 +183,9 @@ def test_tests_do_not_touch_driver_state_fields() -> None:
 def test_seam_whitelist_is_literal() -> None:
     """(а) Прочие приватные имена драйвера в тестах — ровно литералы ``_SEAMS`` (и никаких новых имён)."""
     driver_names = _driver_private_names() - _STATE_FIELDS
+    assert len(_scanned_test_files()) == _SCANNED_FILES
     seen: dict[str, int] = {}
-    for path in _v2_test_files():
+    for path in _scanned_test_files():
         for name, _line, via_state in _private_accesses(path):
             if name in driver_names and not via_state:
                 seen[name] = seen.get(name, 0) + 1
