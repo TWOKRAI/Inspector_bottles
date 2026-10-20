@@ -36,6 +36,10 @@
 4. «Домой» робота — команда устройству ДО `process.stop` (полоса Р2, T5.3e; координатор передал).
 5. План GUI-закрытия — да. Роли-потоки по видам почты отвергнуты замером CTO (GIL: p99 10 → 31 → 190 мс).
 
+## CTO р.2 (D1a принят с условиями)
+
+- [`cto_round2_commandmanager.md`](../reports/2026-10-20_L-9-residual-evidence/cto_round2_commandmanager.md): `handle_command(reply=)` + `DEFERRED`, D2 переписать под D1a, ядро — обобщение `_run_when_child_ready`, потоки через `WorkerManager`, `shutdown` = `Stoppable`. Дубль №2 — `ServiceHost._cmd_start` (полоса Services, после 1.9).
+
 ## Ждёт ответа владельца
 
 - 8 вопросов плана GUI-закрытия (`plans/2026-10-20_gui-graceful-close/plan.md`, «Вопросы»); рекомендации лида —
