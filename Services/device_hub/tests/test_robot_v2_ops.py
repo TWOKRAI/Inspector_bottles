@@ -295,15 +295,60 @@ def test_syncing_is_set_atomically_with_activity_check(tmp_path: Path, flag: str
         assert drv._syncing is False
 
 
+class _RaceLock:
+    """Обёртка ``_param_lock``: ПЕРЕД первым захватом выполняет ``before_first_acquire`` (хвост ``param_set``).
+
+    Шов стоит там, где устаревшее значение читается и потребляется: чтение метки до замка видит метку до хвоста,
+    чтение под замком — после него.
+    """
+
+    def __init__(self, real: Any, before_first_acquire: Callable[[], None]) -> None:
+        self._real = real
+        self._before = before_first_acquire
+        self.fired = False
+
+    def acquire(self, blocking: bool = True) -> bool:
+        if not self.fired:
+            self.fired = True
+            self._before()
+        return self._real.acquire(blocking)
+
+    def release(self) -> None:
+        self._real.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.release()
+
+
 def test_resync_rereads_epoch_under_lock(tmp_path: Path) -> None:
-    """d-I10: метка тика устарела (``param_set`` уже записал её) — под замком читается заново, sync не идёт."""
+    """d-I10: тик видел расхождение меток и решил пересинхронизировать; до захвата ``_param_lock`` параллельный
+    ``param_set`` дописывает хвост (метка робота записана, ``self._epoch`` равен ей) — под замком метка читается
+    заново и сравнивается с актуальной ``self._epoch``: ни одного ``PARAM_SET``, ``_last_resync`` не ставится."""
+    new_epoch = 4242  # метка после «param_set»: и у робота, и у драйвера
     with _hub(tmp_path) as hub:
         drv = hub.drv
         seen = _fail_cmd(drv, lambda *_: False)
-        assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]  # метки равны; тик «видел» расхождение раньше
-        drv._resync_maybe(drv._client)
-        assert [op for op, _ in seen if op == "PARAM_SET"] == []
+        _break_epoch(hub)
+        assert hub.rig.read("TLM_CFG_EPOCH") == [0] and drv._epoch != 0  # тик видит расхождение: метка робота 0
+
+        def param_set_tail() -> None:
+            drv._epoch = new_epoch
+            hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = new_epoch
+
+        race_lock = _RaceLock(drv._param_lock, param_set_tail)
+        drv._param_lock = race_lock
+        try:
+            bounded(lambda: drv._resync_maybe(drv._client), 15.0)
+        finally:
+            drv._param_lock = race_lock._real
+        assert race_lock.fired, "шов не сработал: _resync_maybe не брал замок"
+        assert [op for op, _ in seen if op in ("PARAM_SET", "PARAM_APPLY")] == []
         assert drv._last_resync == 0.0
+        assert drv._syncing is False
+        assert hub.rig.read("TLM_CFG_EPOCH") == [new_epoch]
 
 
 def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
