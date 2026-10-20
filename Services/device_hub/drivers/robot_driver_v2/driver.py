@@ -136,13 +136,13 @@ from Services.device_hub.drivers.robot_driver_v2.texts import (
     _STOP_NAMES,
     _TLM_BASE,
     _TLM_COUNT,
-    _WIRE_SCALE,
     _next_thread_k,
 )
+from Services.device_hub.drivers.robot_driver_v2.tlm import _parse_tlm, _w
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR
 from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2, SyncCancelled
 from Services.robot_comm.core.params_v2 import PARAMS, PARAM_ID, to_eng, to_raw
-from Services.robot_comm.core.protocol_v2 import ERR, REG, STOP_LEVEL
+from Services.robot_comm.core.protocol_v2 import ERR, STOP_LEVEL
 from Services.robot_comm.errors import RevisionConflict, RobotAborted, RobotCommandError, RobotNak, RobotTimeout
 from Services.robot_comm.programs import Point, compile_program
 from Services.robot_comm.programs.generators import return_slot, toolchange
@@ -162,38 +162,6 @@ __all__ = ["RobotDriverV2"]
 
 class _JobStopped(Exception):
     """``stop_event`` хаба взведён, пока тик ждёт завершения задания (DESIGN п.5)."""
-
-
-def _s16(word: int) -> int:
-    return word - 0x10000 if word >= 0x8000 else word
-
-
-def _w(tlm: list[int], name: str) -> int:
-    """Слово регистра ``name`` из блока TLM, прочитанного от ``TLM_PROTO_VER``."""
-    return int(tlm[REG[name] - _TLM_BASE])
-
-
-def _parse_tlm(tlm: list[int]) -> tuple[dict[str, Any], bool, int]:
-    """Блок TLM -> (телеметрия с именами v1, free, encoder). DESIGN п.5."""
-    telemetry = {
-        "x_mm": _s16(_w(tlm, "TLM_X")) / _WIRE_SCALE,
-        "y_mm": _s16(_w(tlm, "TLM_Y")) / _WIRE_SCALE,
-        "z_mm": _s16(_w(tlm, "TLM_Z")) / _WIRE_SCALE,
-        "rz_deg": _s16(_w(tlm, "TLM_RZ")) / _WIRE_SCALE,
-        "moving": _w(tlm, "TLM_MOVING") == 1,
-        "spd_pct": _w(tlm, "TLM_SPD_PCT"),
-        "belt_mm_s": _s16(_w(tlm, "TLM_BELT_MMS")),
-        "heartbeat": _w(tlm, "TLM_HB_ROBOT"),
-        "servo": _w(tlm, "TLM_SERVO") == 1,
-        "hand": _w(tlm, "TLM_HAND"),
-        "miss_count": _w(tlm, "TLM_MISS_COUNT"),
-    }
-    free = _w(tlm, "TLM_ACTIVITY") == 0
-    # TLM_ENC — два слова, младшее первым (порядок слов транспорта не используется), s32
-    offset = REG["TLM_ENC"] - _TLM_BASE
-    raw = (int(tlm[offset]) & 0xFFFF) | ((int(tlm[offset + 1]) & 0xFFFF) << 16)
-    encoder = raw - 0x1_0000_0000 if raw >= 0x8000_0000 else raw
-    return telemetry, free, encoder
 
 
 class RobotDriverV2(BaseDeviceDriver):

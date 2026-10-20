@@ -13,9 +13,7 @@ Stability: lite
 """
 
 from Services.device_hub.drivers.robot_driver_v2.state import JogView, RobotState, RobotStateView, _JogRun
-from Services.device_hub.drivers.robot_driver_v2.driver import (
-    RobotDriverV2,
-    _parse_tlm,
-)
+from Services.device_hub.drivers.robot_driver_v2.tlm import _parse_tlm
+from Services.device_hub.drivers.robot_driver_v2.driver import RobotDriverV2
 
 __all__ = ["JogView", "RobotDriverV2", "RobotState", "RobotStateView", "_JogRun", "_parse_tlm"]
