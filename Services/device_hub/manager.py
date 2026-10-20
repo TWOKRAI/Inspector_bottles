@@ -18,8 +18,6 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
-
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
 from multiprocess_framework.modules.logger_module import get_std_logger
@@ -31,13 +29,10 @@ from Services.device_hub.errors import (
 )
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
-from Services.device_hub.robot_data_ops import OPS as ROBOT_DATA_OPS
-from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR, BadArgs, RobotOpError
-from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, RobotDataInvalid, StoreDocumentInvalid
-from Services.robot_comm.robot_data import make_param_source
+from Services.device_hub.robot_data_ops import STORE_ERRORS, param_source_for, run_op, store_error_for_operator
 
 if TYPE_CHECKING:
-    from Services.robot_comm.store import RobotDataStore
+    from Services.device_hub.robot_data_ops import RobotDataStore
 
 logger = get_std_logger(__name__)
 
@@ -212,12 +207,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                     return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
                 # Параметры робота при подключении — из params.yaml (T5.3c c2); плохие данные бросают RobotDataInvalid
                 # и др. из фабрики, их перехватывает ``connect``
-                param_source = make_param_source(
-                    self._robot_store,
-                    entry.id,
-                    overrides=entry.params.get("robot_params"),
-                    epoch_default=int(entry.params.get("config_epoch", 1)),
-                )
+                param_source = param_source_for(self._robot_store, entry.id, entry.params)
                 return RobotDriverV2(
                     entry,
                     proto,
@@ -408,13 +398,13 @@ class DeviceManager(BaseManager, ObservableMixin):
         entry = self.get(dev_id)
         try:
             driver = self._get_or_create_driver(entry)
-        except (RobotDataInvalid, StoreDocumentInvalid, InvalidStoreKey, OSError) as exc:
-            if isinstance(exc, OSError):
-                if entry.protocol != "delta_v2":
-                    raise  # диск хранилища данных робота — только у робота v2
-                # путь диска и имя файла — в лог, в last_error — константа
-                logger.warning(f"device_hub: connect {dev_id!r}: ошибка хранилища: {type(exc).__name__}: {exc}")
-                exc = RobotOpError(TEXT_STORE_ERROR)
+        except STORE_ERRORS as exc:
+            # OSError не у робота v2 -> None: пробрасываем; у робота v2 путь диска и имя файла — в лог, в last_error —
+            # константа (robot_data_ops.store_error_for_operator)
+            translated = store_error_for_operator(exc, dev_id, entry.protocol, log=logger)
+            if translated is None:
+                raise
+            exc = translated
             # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
             # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
             self._publish(f"devices.state.{dev_id}.last_error", str(exc))
@@ -502,34 +492,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": "данные робота — только для протокола delta_v2"}
         if self._robot_store is None:
             return {"status": "error", "message": "хранилище данных робота не задано"}
-        fn = ROBOT_DATA_OPS.get(op)
-        if fn is None:
-            return {"status": "error", "message": "неизвестная операция данных робота"}
-        epoch_default = 1
-        if op == "param_get_all":
-            try:
-                epoch_default = int(entry.params.get("config_epoch", 1))
-            except (TypeError, ValueError):  # config_epoch записи реестра - не число: ошибка конфига, текст постоянный
-                return {"status": "error", "message": str(RobotDataInvalid(None))}
-        try:
-            if not isinstance(args, dict):
-                raise BadArgs
-            if op == "param_get_all":
-                # Ответ = то, что применит драйвер (то же правило, что у фабрики робота и ``make_param_source``);
-                # ключи кладёт менеджер, значения из аргументов команды затираются
-                args = {**args, "overrides": entry.params.get("robot_params"), "epoch_default": epoch_default}
-            result = fn(self._robot_store, dev_id, args)
-        except RevisionConflict as exc:
-            return {"status": "error", "message": str(exc), "current_rev": exc.current_rev}
-        except (InvalidStoreKey, RobotDataInvalid, StoreDocumentInvalid, RobotOpError) as exc:
-            # no-health: ошибка данных оператора уходит в ответ команды, тексты постоянные
-            return {"status": "error", "message": str(exc)}
-        except (BadArgs, ValidationError):
-            return {"status": "error", "message": TEXT_BAD_ARGS}
-        except OSError as exc:  # путь диска и имя из команды в ответ не уходят
-            logger.warning(f"device_hub: robot_data {dev_id!r} {op!r}: ошибка хранилища: {type(exc).__name__}: {exc}")
-            return {"status": "error", "message": TEXT_STORE_ERROR}
-        return {"status": "ok", **result}
+        return run_op(self._robot_store, dev_id, op, args, entry.params, log=logger)
 
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers

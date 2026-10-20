@@ -8,8 +8,13 @@ Purpose:
     (ответ — ``TEXT_BAD_ARGS``). Ошибки хранилища и формата (``RevisionConflict``, ``InvalidStoreKey``,
     ``RobotDataInvalid``, ``StoreDocumentInvalid``) пробрасываются: их превращает в ответ ``DeviceManager.robot_data``.
 
+    Знание о роботе для ``DeviceManager`` сосредоточено здесь: ``run_op`` (тело ``DeviceManager.robot_data`` — поиск
+    операции и перевод ошибок в ответ), ``param_source_for`` (источник параметров при подключении) и
+    ``store_error_for_operator`` (перевод ошибок хранилища при подключении в текст для ``last_error``).
+
 Public API:
-    ``OPS``, ``TEXT_BAD_ARGS``, ``BadArgs``, ``RobotOpError``.
+    ``OPS``, ``TEXT_BAD_ARGS``, ``TEXT_STORE_ERROR``, ``STORE_ERRORS``, ``BadArgs``, ``RobotOpError``, ``run_op``,
+    ``param_source_for``, ``store_error_for_operator``, ``RobotDataStore``.
 
 Stability: lite (контракт держат тесты ``test_robot_v2_commands*``).
 
@@ -18,12 +23,13 @@ Stability: lite (контракт держат тесты ``test_robot_v2_comman
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from pydantic import ValidationError
 
 from Services.robot_comm.core.params_v2 import to_eng
+from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, RobotDataInvalid, StoreDocumentInvalid
 from Services.robot_comm.programs.program import FrameDef, Point, Program
 from Services.robot_comm.robot_data import (
     delete_program,
@@ -31,13 +37,25 @@ from Services.robot_comm.robot_data import (
     load_params,
     load_points,
     load_program,
+    make_param_source,
     save_frames,
     save_points,
     save_program,
 )
 from Services.robot_comm.store import RobotDataStore
 
-__all__ = ["OPS", "TEXT_BAD_ARGS", "TEXT_STORE_ERROR", "BadArgs", "RobotOpError"]
+__all__ = [
+    "OPS",
+    "STORE_ERRORS",
+    "TEXT_BAD_ARGS",
+    "TEXT_STORE_ERROR",
+    "BadArgs",
+    "RobotDataStore",
+    "RobotOpError",
+    "param_source_for",
+    "run_op",
+    "store_error_for_operator",
+]
 
 #: Один текст на оба слоя (хаб и драйвер, T5.3d): плохие аргументы команды данных робота. Входные значения не попадают.
 TEXT_BAD_ARGS = "неверные аргументы команды робота"
@@ -211,3 +229,71 @@ OPS: dict[str, OpFn] = {
     "program_save": _program_save,
     "program_delete": _program_delete,
 }
+
+#: Ошибки хранилища и конфига оператора при подключении робота (``DeviceManager.connect`` перехватывает их кортежем).
+STORE_ERRORS = (RobotDataInvalid, StoreDocumentInvalid, InvalidStoreKey, OSError)
+
+
+def param_source_for(store: RobotDataStore, device_id: str, params: Mapping[str, Any]) -> Callable[[], Any]:
+    """Источник параметров робота при подключении (T5.3c c2) из ``entry.params``: ``robot_params``, ``config_epoch``.
+
+    Raises: ``ValueError`` / ``TypeError`` при нечисловой ``config_epoch`` (как прежде — из фабрики драйвера).
+    """
+    return make_param_source(
+        store,
+        device_id,
+        overrides=params.get("robot_params"),
+        epoch_default=int(params.get("config_epoch", 1)),
+    )
+
+
+def store_error_for_operator(exc: Exception, dev_id: str, protocol: str, *, log: Any) -> Exception | None:
+    """Ошибка хранилища при подключении -> исключение с постоянным текстом для ``last_error``; ``None`` — не наша.
+
+    ``OSError`` не у робота v2 -> ``None`` (вызывающий пробрасывает исключение). ``OSError`` робота v2: путь диска и имя
+    файла — только в лог (``log.warning``), наружу — ``RobotOpError(TEXT_STORE_ERROR)``. Остальные ошибки данных и
+    конфига оператора (битый ``params.yaml``, плохой ``robot_params``, недопустимый id) возвращаются как есть.
+    """
+    if isinstance(exc, OSError):
+        if protocol != "delta_v2":
+            return None  # диск хранилища данных робота — только у робота v2
+        log.warning(f"device_hub: connect {dev_id!r}: ошибка хранилища: {type(exc).__name__}: {exc}")
+        return RobotOpError(TEXT_STORE_ERROR)
+    return exc
+
+
+def run_op(store: RobotDataStore, dev_id: str, op: str, args: Any, params: Mapping[str, Any], *, log: Any) -> dict:
+    """Выполнить офлайн-операцию данных робота и превратить итог в ответ (тело ``DeviceManager.robot_data``).
+
+    ``params`` — ``entry.params`` устройства (``robot_params``, ``config_epoch``). Ответ: ``{"status": "ok", ...}`` или
+    ``{"status": "error", "message": <постоянный текст>}`` (``RevisionConflict`` добавляет ``current_rev``; плохие
+    аргументы — ``TEXT_BAD_ARGS``; ``OSError`` — ``TEXT_STORE_ERROR``, полный текст — в ``log.warning``).
+    """
+    fn = OPS.get(op)
+    if fn is None:
+        return {"status": "error", "message": "неизвестная операция данных робота"}
+    epoch_default = 1
+    if op == "param_get_all":
+        try:
+            epoch_default = int(params.get("config_epoch", 1))
+        except (TypeError, ValueError):  # config_epoch записи реестра - не число: ошибка конфига, текст постоянный
+            return {"status": "error", "message": str(RobotDataInvalid(None))}
+    try:
+        if not isinstance(args, dict):
+            raise BadArgs
+        if op == "param_get_all":
+            # Ответ = то, что применит драйвер (то же правило, что у фабрики робота и ``make_param_source``);
+            # ключи кладёт менеджер, значения из аргументов команды затираются
+            args = {**args, "overrides": params.get("robot_params"), "epoch_default": epoch_default}
+        result = fn(store, dev_id, args)
+    except RevisionConflict as exc:
+        return {"status": "error", "message": str(exc), "current_rev": exc.current_rev}
+    except (InvalidStoreKey, RobotDataInvalid, StoreDocumentInvalid, RobotOpError) as exc:
+        # no-health: ошибка данных оператора уходит в ответ команды, тексты постоянные
+        return {"status": "error", "message": str(exc)}
+    except (BadArgs, ValidationError):
+        return {"status": "error", "message": TEXT_BAD_ARGS}
+    except OSError as exc:  # путь диска и имя из команды в ответ не уходят
+        log.warning(f"device_hub: robot_data {dev_id!r} {op!r}: ошибка хранилища: {type(exc).__name__}: {exc}")
+        return {"status": "error", "message": TEXT_STORE_ERROR}
+    return {"status": "ok", **result}
