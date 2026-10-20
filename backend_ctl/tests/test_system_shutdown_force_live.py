@@ -105,28 +105,71 @@ def _lines_with(text: str, needle: str) -> list[str]:
     return [line for line in text.splitlines() if needle in line]
 
 
+def _mark(ok: bool | None) -> str:
+    """✓ / ✗ / - (проверка к строке не относится)."""
+    return "-" if ok is None else ("✓" if ok else "✗")
+
+
+def _print_table(title: str, rows: list[dict], columns: list[str], summary: list[str]) -> None:
+    """Компактная таблица прогонов в stdout (видна и у зелёного теста под ``-rA`` / ``-s``)."""
+    print(f"\n[{title}]", flush=True)
+    print("run mode     elapsed_s exit  " + " ".join(columns), flush=True)
+    for row in rows:
+        checks = " ".join(f"{_mark(row['checks'].get(c)):^{len(c)}}" for c in columns)
+        print(f"{row['index']:>3} {row['mode']:<8} {row['elapsed']:>9.3f} {row['exitcode']!s:<5} {checks}", flush=True)
+    for line in summary:
+        print(line, flush=True)
+
+
+def _fail_if_any(failures: list[str]) -> None:
+    """Один отказ в конце со ВСЕМ списком: первый красный не прячет остальные."""
+    assert not failures, f"{len(failures)} проверок не прошли:\n" + "\n".join(failures)
+
+
 @pytest.mark.harness_smoke
 def test_force_with_hung_child_tree_gone_fast(capfd, tmp_path) -> None:
     recipe = _make_hung_recipe(tmp_path)
     command = {"cmd": "system.shutdown", "mode": "force", "deadline_s": 1.0}
     runs = [_shutdown_run(capfd, tmp_path, index=i, recipe=recipe, command=command) for i in range(5)]
-    elapsed = [round(r["elapsed"], 3) for r in runs]
+    terminate_re = _TERMINATING_RE_TEMPLATE.format(name=_HUNG_NAME)
 
+    failures: list[str] = []
+    rows: list[dict] = []
     for r in runs:
-        assert r["reply"].get("success") is True, f"run {r['index']}: ответ на system.shutdown: {r['reply']!r}"
-    slow = [(r["index"], round(r["elapsed"], 3)) for r in runs if r["elapsed"] >= 4.0]
-    assert not slow, f"выход PM >= 4.0 с (индекс, с): {slow}; все прогоны: {elapsed}"
-    assert statistics.median(r["elapsed"] for r in runs) <= 2.5, f"медиана > 2.5 с; прогоны: {elapsed}"
-
-    for r in runs:
-        text = r["text"]
-        assert r["exitcode"] == 0, f"run {r['index']}: код выхода PM {r['exitcode']} (ждали 0); прогоны: {elapsed}"
+        i, text = r["index"], r["text"]
         survivors = _lines_with(text, "ВЫЖИЛИ") + _lines_with(text, "survivors after root close")
-        assert not survivors, f"run {r['index']}: выжившие после force: {survivors[:3]}"
-        assert re.search(_TERMINATING_RE_TEMPLATE.format(name=_HUNG_NAME), text), (
-            f"run {r['index']}: нет строки terminate у зависшего '{_HUNG_NAME}'"
-        )
-        assert "force: срок стопа детей 1.0 с" in text, f"run {r['index']}: нет INFO про срок стопа детей"
+        checks = {
+            "reply": r["reply"].get("success") is True,
+            "<4.0s": r["elapsed"] < 4.0,
+            "exit0": r["exitcode"] == 0,
+            "no_surv": not survivors,
+            "term_re": re.search(terminate_re, text) is not None,
+            "info": "force: срок стопа детей 1.0 с" in text,
+        }
+        rows.append({"index": i, "mode": "force", "elapsed": r["elapsed"], "exitcode": r["exitcode"], "checks": checks})
+        if not checks["reply"]:
+            failures.append(f"run {i}: ответ на system.shutdown: {r['reply']!r}")
+        if not checks["<4.0s"]:
+            failures.append(f"run {i}: выход PM {r['elapsed']:.3f} с >= 4.0 с")
+        if not checks["exit0"]:
+            failures.append(f"run {i}: код выхода PM {r['exitcode']} (ждали 0)")
+        if not checks["no_surv"]:
+            failures.append(f"run {i}: выжившие после force: {survivors[:3]}")
+        if not checks["term_re"]:
+            failures.append(f"run {i}: нет строки terminate у зависшего '{_HUNG_NAME}' ({terminate_re})")
+        if not checks["info"]:
+            failures.append(f"run {i}: нет INFO 'force: срок стопа детей 1.0 с'")
+
+    median = statistics.median(r["elapsed"] for r in runs)
+    if not median <= 2.5:
+        failures.append(f"медиана {median:.3f} с > 2.5 с")
+    _print_table(
+        "L6 force + hung child",
+        rows,
+        ["reply", "<4.0s", "exit0", "no_surv", "term_re", "info"],
+        [f"median elapsed = {median:.3f} s (limit 2.5) {_mark(median <= 2.5)}"],
+    )
+    _fail_if_any(failures)
 
 
 @pytest.mark.harness_smoke
@@ -141,15 +184,23 @@ def test_driver_system_shutdown_live_smoke(tmp_path) -> None:
         assert pm_process is not None, "нет ссылки на PM-процесс до команды"
 
         res = drv.system_shutdown(mode="force")
-
-        assert res["accepted"] is True, res
-        assert res["pm_gone"] is True, res
-        assert res["mode"] == "force", res
-        assert res["outcomes"] is None, res
         pm_process.join(timeout=_PM_EXIT_WAIT_S)
-        assert pm_process.exitcode is not None, f"PM не вышел за {_PM_EXIT_WAIT_S} с после закрытия сокета"
+        exitcode = pm_process.exitcode
     finally:
         harness.stop()
+
+    checks = {
+        "accepted is True": res["accepted"] is True,
+        "pm_gone is True": res["pm_gone"] is True,
+        "mode == force": res["mode"] == "force",
+        "outcomes is None": res["outcomes"] is None,
+        f"pm exited <= {_PM_EXIT_WAIT_S} s": exitcode is not None,
+    }
+    print(f"\n[L-smoke] res={res!r} pm_exitcode={exitcode!r}", flush=True)
+    for name, ok in checks.items():
+        print(f"  {_mark(ok)} {name}", flush=True)
+    failed = [f"{name}: res={res!r}, pm_exitcode={exitcode!r}" for name, ok in checks.items() if not ok]
+    _fail_if_any(failed)
 
 
 @pytest.mark.harness_smoke
@@ -163,15 +214,42 @@ def test_force_on_healthy_system_not_slower_than_graceful(capfd, tmp_path) -> No
         graceful.append(_shutdown_run(capfd, tmp_path, index=2 * pair, recipe=_RECIPE, command=graceful_cmd))
         force.append(_shutdown_run(capfd, tmp_path, index=2 * pair + 1, recipe=_RECIPE, command=force_cmd))
 
-    g_times = [round(r["elapsed"], 3) for r in graceful]
-    f_times = [round(r["elapsed"], 3) for r in force]
-    g_median = statistics.median(g_times)
-    f_median = statistics.median(f_times)
+    failures: list[str] = []
+    rows: list[dict] = []
+    for mode, group in (("graceful", graceful), ("force", force)):
+        for r in group:
+            forced_stops = _lines_with(r["text"], "did not stop in")
+            checks: dict[str, bool | None] = {
+                "<2.5s": (r["elapsed"] < 2.5) if mode == "force" else None,
+                "no_term": not forced_stops,
+            }
+            rows.append(
+                {
+                    "index": r["index"],
+                    "mode": mode,
+                    "elapsed": r["elapsed"],
+                    "exitcode": r["exitcode"],
+                    "checks": checks,
+                }
+            )
+            if checks["<2.5s"] is False:
+                failures.append(f"run {r['index']} (force): {r['elapsed']:.3f} с >= 2.5 с")
+            if not checks["no_term"]:
+                failures.append(f"run {r['index']} ({mode}): здоровый стоп дошёл до terminate: {forced_stops[:3]}")
+    rows.sort(key=lambda row: row["index"])
 
-    slow = [(r["index"], round(r["elapsed"], 3)) for r in force if r["elapsed"] >= 2.5]
-    assert not slow, f"force >= 2.5 с (индекс, с): {slow}; force={f_times}; graceful={g_times}"
-    assert f_median <= g_median + 0.3, (
-        f"медиана force {f_median:.3f} с > медианы graceful {g_median:.3f} с + 0.3; force={f_times}; graceful={g_times}"
+    g_median = statistics.median(r["elapsed"] for r in graceful)
+    f_median = statistics.median(r["elapsed"] for r in force)
+    median_ok = f_median <= g_median + 0.3
+    if not median_ok:
+        failures.append(f"медиана force {f_median:.3f} с > медианы graceful {g_median:.3f} с + 0.3")
+    _print_table(
+        "L7 guard force vs graceful",
+        rows,
+        ["<2.5s", "no_term"],
+        [
+            f"median graceful = {g_median:.3f} s, median force = {f_median:.3f} s "
+            f"(rule: force <= graceful + 0.3) {_mark(median_ok)}"
+        ],
     )
-    forced_stops = [(r["index"], line) for r in graceful + force for line in _lines_with(r["text"], "did not stop in")]
-    assert not forced_stops, f"здоровый стоп дошёл до terminate: {forced_stops[:3]}"
+    _fail_if_any(failures)
