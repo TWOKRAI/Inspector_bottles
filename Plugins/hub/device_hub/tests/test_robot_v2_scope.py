@@ -478,7 +478,7 @@ def _s9_part_plugin(tmp_path: Path) -> None:
             drv = plugin._manager.get_driver("r1")
             drv._client.run_chunks = _fake_run_chunks(done_evt)
             assert _start(drv, 4, "p9")["status"] == "ok"
-            _until(lambda: drv._prog_alive, 5.0, "исполнитель запущен")
+            _until(lambda: drv.state.view().program_active, 5.0, "исполнитель запущен")
             # Фаза 1 дольше на 0.5 с: робот держит ответ на запись стопа (не патч драйвера). Тогда scope.close с
             # остатком срока (2.5 - 0.5 = 2.0 с) и с фиксированным бюджетом 2.5 с различаются на те же 0.5 с
             rig.journal.hold_stop_s = 0.5
@@ -649,7 +649,7 @@ def test_s14_survivor_of_plain_disconnect_reaches_health(tmp_path: Path, monkeyp
             drv = plugin._manager.get_driver("r1")
             drv._client.run_chunks = _fake_run_chunks(done_evt)
             assert _start(drv, 4, "p14")["status"] == "ok"
-            _until(lambda: drv._prog_alive, 5.0, "исполнитель запущен")
+            _until(lambda: drv.state.view().program_active, 5.0, "исполнитель запущен")
             bounded(lambda: plugin._manager.disconnect("r1"), _CALL_DEADLINE_S)
             reports = _scope_reports(ctx)
             assert len(reports) == 1, [c.kwargs for c in ctx.health.report_error.call_args_list]

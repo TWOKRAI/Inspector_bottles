@@ -123,7 +123,7 @@ def _until(pred: Callable[[], object], deadline_s: float, what: str) -> None:
 
 
 def _lease_done(drv: RobotDriverV2) -> bool:
-    run = drv._jog
+    run = drv.state.view().jog
     return run is not None and not run.active
 
 
@@ -170,11 +170,11 @@ def test_process_stop_before_lease_write_means_no_lease_line(scope: Any, caplog:
         drv._jog_tx_lock.acquire()
         held = True
         try:
-            if drv._jog is not None and drv._jog.stop_sent:
+            if (jog := drv.state.view().jog) is not None and jog.stop_sent:
                 pytest.fail("ТЕСТ ИНВАЛИДЕН: поводок записал стоп до шва")
             clock.advance(_PAST_WINDOW_S)  # окно истекает только теперь, когда замок у теста
             _until(
-                lambda: drv._jog is not None and drv._jog.stop_requested is True,
+                lambda: (jog := drv.state.view().jog) is not None and jog.stop_requested is True,
                 2.0,
                 "поток поводка не принял решение о стопе",
             )
@@ -224,7 +224,7 @@ def test_latch_race_lease_write_covers_shutdown_stop_with_one_line(
             clock.advance(_PAST_WINDOW_S)  # молчание дольше окна: поток поводка идёт на запись стопа
             assert entered.wait(_DEADLINE_S), "поток поводка не дошёл до записи стопа"
             stopper.start()
-            _until(lambda: drv._shutdown is True, 2.0, "request_stop не сбросил защёлку")
+            _until(lambda: drv.state.view().shutdown is True, 2.0, "request_stop не сбросил защёлку")
             go.set()
             stopper.join(_CALL_S)
             assert not stopper.is_alive(), "request_stop не вернулся"

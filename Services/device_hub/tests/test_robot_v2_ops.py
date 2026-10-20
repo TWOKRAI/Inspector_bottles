@@ -194,8 +194,7 @@ def test_param_ops_refused_while_syncing_and_robot_untouched(tmp_path: Path, how
         if how == "lock_held":
             assert drv._param_lock.acquire(blocking=False)
         else:
-            with drv._flags_lock:
-                drv._syncing = True
+            drv.state.begin_sync()
         try:
             done = threading.Event()
 
@@ -214,8 +213,7 @@ def test_param_ops_refused_while_syncing_and_robot_untouched(tmp_path: Path, how
             if how == "lock_held":
                 drv._param_lock.release()
             else:
-                with drv._flags_lock:
-                    drv._syncing = False
+                drv.state.end_sync()
 
 
 # --------------------------------------------------------------------------------------------------
@@ -267,9 +265,34 @@ def test_param_set_during_sync_answers_fast_and_robot_untouched(tmp_path: Path) 
             release.set()
             worker.join(10.0)
         assert not worker.is_alive()
-        assert drv._syncing is False  # флаг снят в finally
+        assert drv.state.view().syncing is False  # флаг снят в finally
         assert drv._param_lock.acquire(blocking=False)  # замок отпущен последним
         drv._param_lock.release()
+
+
+def _jog_stopping_on(st: Any) -> None:
+    """Только ``jog_stopping``: jog отпущен, поток поводка вышел (``active`` False), стоп ещё не вернулся."""
+    from Services.device_hub.drivers.robot_driver_v2 import _JogRun
+
+    run = _JogRun(seq=1)
+    st.jog_started(run)
+    st.jog_release_begin()
+    st.lease_exit(run)
+
+
+def _job_active_on(st: Any) -> None:
+    st.enqueue_job((0.0, 0.0, 0.0, 0, None))
+    st.take_next_action()
+
+
+# Активность переходами состояния (T5.3f): id прежние; _busy и _prog_alive — одно поле program_active (Q5)
+_ACTIVITY: dict[str, tuple[Callable[[Any], Any], Callable[[Any], Any]]] = {
+    "_busy": (lambda st: st.admit_launch(lambda: True), lambda st: st.launch_failed()),
+    "_job_active": (_job_active_on, lambda st: st.job_finished()),
+    "_jog_starting": (lambda st: st.jog_hold_admit(), lambda st: st.jog_start_done()),
+    "_jog_stopping": (_jog_stopping_on, lambda st: st.jog_release_done()),
+    "_prog_alive": (lambda st: st.admit_launch(lambda: True), lambda st: st.launch_failed()),
+}
 
 
 @pytest.mark.parametrize("flag", ["_busy", "_job_active", "_jog_starting", "_jog_stopping", "_prog_alive"])
@@ -279,20 +302,18 @@ def test_syncing_is_set_atomically_with_activity_check(tmp_path: Path, flag: str
         drv = hub.drv
         seen = _fail_cmd(drv, lambda *_: False)
         _break_epoch(hub)
-        with drv._flags_lock:
-            setattr(drv, flag, True)
+        _ACTIVITY[flag][0](drv.state)
         try:
             drv._resync_maybe(drv._client)
             assert [op for op, _ in seen if op == "PARAM_SET"] == []
-            assert drv._syncing is False
+            assert drv.state.view().syncing is False
             assert drv._last_resync == 0.0  # отказ по активности задержки в 2 с не создаёт
         finally:
-            with drv._flags_lock:
-                setattr(drv, flag, False)
+            _ACTIVITY[flag][1](drv.state)
         drv._resync_maybe(drv._client)  # активности нет: сразу, без паузы
         assert [op for op, _ in seen if op == "PARAM_SET"] != []
         assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
-        assert drv._syncing is False
+        assert drv.state.view().syncing is False
 
 
 class _RaceLock:
@@ -347,7 +368,7 @@ def test_resync_rereads_epoch_under_lock(tmp_path: Path) -> None:
         assert race_lock.fired, "шов не сработал: _resync_maybe не брал замок"
         assert [op for op, _ in seen if op in ("PARAM_SET", "PARAM_APPLY")] == []
         assert drv._last_resync == 0.0
-        assert drv._syncing is False
+        assert drv.state.view().syncing is False
         assert hub.rig.read("TLM_CFG_EPOCH") == [new_epoch]
 
 
@@ -496,8 +517,7 @@ def test_param_ops_refused_while_stopping(tmp_path: Path) -> None:
     with _hub(tmp_path) as hub:
         drv = hub.drv
         seen = _fail_cmd(drv, lambda *_: False)
-        with drv._flags_lock:
-            drv._stopping = True
+        drv.state.process_stop_plan(lambda: False)
         refusal = {"status": "error", "message": TEXT_STOPPING}
         assert hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None}) == refusal
         assert hub.call("param_apply", {}) == refusal
@@ -622,7 +642,7 @@ def test_params_file_oserror_in_resync_and_connect_is_constant_text(tmp_path: Pa
         assert drv.connect() is False
         assert hub.errors[-1] == TEXT_STORE_ERROR
         assert all("params.yaml" not in str(text) for text in hub.errors)
-        assert drv._syncing is False
+        assert drv.state.view().syncing is False
         assert drv._param_lock.acquire(blocking=False)
         drv._param_lock.release()
 
@@ -639,10 +659,10 @@ def test_dispatch_does_not_start_job_while_syncing(tmp_path: Path) -> None:
         worker.start()
         try:
             assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
-            assert drv._syncing is True
+            assert drv.state.view().syncing is True
             drv._dispatch(drv._client, True, None)  # хвост тика, начатого до connect
             assert [o for o, _ in seen if o == "CVT_JOB"] == []
-            assert len(drv._job_queue) == 1  # задание осталось в очереди
+            assert len(drv.state.view().job_queue) == 1  # задание осталось в очереди
         finally:
             release.set()
             worker.join(30.0)
@@ -704,7 +724,7 @@ def test_shutdown_stop_cancels_running_sync_at_next_parameter(tmp_path: Path) ->
         assert not worker.is_alive()
         writes = [op for op, _ in seen if op in ("PARAM_SET", "PARAM_APPLY")]
         assert len(writes) <= 2, len(writes)  # первый (шов) и не больше одного следующего
-        assert drv._syncing is False
+        assert drv.state.view().syncing is False
         assert drv._epoch == epoch_before
         assert [e for e in hub.errors if "синхронизация" in str(e)] == []  # отмена — не ошибка
         assert drv._param_lock.acquire(blocking=False)
@@ -761,7 +781,7 @@ def test_syncing_cleared_when_connect_sync_fails(tmp_path: Path) -> None:
             assert drv.connect() is False
         finally:
             client.sync_params = real_sync
-        assert drv._syncing is False
+        assert drv.state.view().syncing is False
         assert drv.call("jog_hold", {"dir": 1, "spd": 20}).get("message") != TEXT_SYNCING
         assert drv.connect() is True
         assert drv.call("jog_hold", {"dir": 1, "spd": 20})["status"] == "ok"
@@ -827,7 +847,7 @@ def test_connect_path_sync_is_cancelled_by_stop(tmp_path: Path) -> None:
         writes = [op for op, _ in seen if op in ("PARAM_SET", "PARAM_APPLY")]
         assert writes == ["PARAM_SET"], writes  # только запись «в полёте»
         assert hub.rig.read("TLM_CFG_EPOCH") == [0]
-        assert drv._syncing is False
+        assert drv.state.view().syncing is False
 
 
 def test_user_disconnect_during_sync_is_not_an_error(tmp_path: Path) -> None:

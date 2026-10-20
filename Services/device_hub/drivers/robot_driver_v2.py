@@ -28,15 +28,16 @@ Public API:
 
 Stability: lite
 
-Потоки (DESIGN п.9). Замок драйвера ``_flags_lock`` — только на флаги (``_busy``, ``_last_hold``, состояние jog,
-множество своих стопов), вокруг вызовов клиента не держится: ``ModbusDevice`` сериализует RLock-ом, а
+Потоки (DESIGN п.9). Состояние драйвера — ``RobotState`` (T5.3f): поля и переходы под одним листовым замком
+состояния (программа, ``_last_hold``, состояние jog, множество своих стопов, защёлка, очереди); вокруг вызовов клиента
+он не держится: ``ModbusDevice`` сериализует RLock-ом, а
 ``stop`` / ``kick_heartbeat`` / ``jog_lease`` / ``poll_errors`` нарочно минуют замок mailbox клиента. Второй замок
 ``_jog_tx_lock`` — только для переходов jog: ``client.jog_cont`` в ``jog_hold`` и ``client.stop(SOFT)`` стопа jog.
 Тик, исполнитель и ``poll_errors`` его не берут. Путь ``connect`` и повторная синхронизация не идут, пока жив поток
 поводка или исполнителя.
 
 Задания (T3.7). Очереди заданий и возвратов дренирует тик: одно действие за тик, только при свободном захвате.
-Флаг ``_job_active`` — под ``_flags_lock``, ставится в одной секции с проверкой ``_busy`` / jog и взятием задания,
+Флаг ``job_active`` — в ``RobotState``, ставится одним переходом с проверкой программы / jog и взятием задания,
 ДО ``cvt_job``; при нём ``jog_hold`` и запуск программы отвечают «робот выполняет задание». Тик блокируется на
 ``wait_done`` до исхода задания; пульс ``HB_PC`` в это время — ``on_poll``. ``connect`` при задании не идёт. Новых
 потоков нет: возврат идёт программой на потоке исполнителя.
@@ -346,9 +347,9 @@ def _parse_tlm(tlm: list[int]) -> tuple[dict[str, Any], bool, int]:
 
 @dataclass
 class _JogRun:
-    """Один запуск JOG_CONT этого драйвера. Замки полей: ``active``, ``released``, ``stop_requested`` — под
-    ``_flags_lock``; ``handle`` пишет ``jog_hold`` под ``_jog_tx_lock`` (без ``_flags_lock``, читатели берут снимок);
-    ``stop_sent`` — под ``_flags_lock`` сразу после записи стопа.
+    """Один запуск JOG_CONT этого драйвера. Замки полей: ``active``, ``released``, ``stop_requested`` — под замком
+    ``RobotState`` (только его переходы); ``handle`` пишет ``jog_hold`` под ``_jog_tx_lock`` (без замка состояния,
+    читатели берут снимок); ``stop_sent`` — переходом ``stop_written`` сразу после записи стопа.
 
     ``active`` — поток поводка ещё не вышел; ``handle`` — запись потока в области (None, пока ``spawn`` не вернулся);
     ``released`` — поводок больше не пишется, поток выходит без своего стопа (стоп шлёт тот, кто поставил флаг:
@@ -365,6 +366,595 @@ class _JogRun:
     released: bool = False
     stop_requested: bool = False
     stop_sent: bool = False
+
+
+@dataclass(frozen=True)
+class JogView:
+    """Снимок ``_JogRun`` в ``RobotStateView``: ``has_handle`` — запись потока поводка уже есть."""
+
+    seq: int
+    active: bool
+    released: bool
+    stop_requested: bool
+    stop_sent: bool
+    has_handle: bool
+
+
+@dataclass(frozen=True)
+class RobotStateView:
+    """Замороженный снимок ``RobotState``, снят под его замком (``view()``). Внутреннее, не SPI хаба.
+
+    ``has_prog_handle`` — вместо записи потока исполнителя; очереди и ``own_stops`` — кортежи.
+    """
+
+    program_active: bool
+    has_prog_handle: bool
+    job_active: bool
+    jog: JogView | None
+    jog_starting: bool
+    jog_stopping: bool
+    last_hold: float
+    syncing: bool
+    stopping: bool
+    shutdown: bool
+    stop_level: int
+    latch_level: int
+    latch_failed: bool
+    latch_value: int | None
+    latch_attempts: int
+    echo_checked: int | None
+    stop_unconfirmed: bool
+    stop_unconfirmed_text: str | None
+    own_stops: tuple[int, ...]
+    job_queue: tuple[_Job, ...]
+    return_queue: tuple[tuple[float, float, float], ...]
+    returns_done: int
+    returns_failed: int
+
+
+class RobotState:
+    """Состояние драйвера робота v2 (T5.3f f1): 23 поля и 4 поля текущего ``_JogRun`` под одним замком ``_lock``.
+
+    Внутреннее, не SPI хаба: переходы зовёт только ``RobotDriverV2``; снаружи — ``view()``.
+
+    Каждый переход — одна секция замка состояния на месте прежней секции замка флагов драйвера (правило 1:1):
+    порядок проверок прежний, ввода-вывода под замком нет, замок листовой (под ним другие замки не берутся).
+    Переход возвращает решение — драйвер действует вне замка. Под замком — только то, что было под ним раньше:
+    ``run.wake.set()``, ``ev.is_set()``, часы ``clock``, ``time.monotonic()`` и ``budget()``
+    (``next_stop_attempt``, только попытка 2), ``connected()`` (``process_stop_plan``, ``admit_launch``) —
+    вызываемые, зовутся в той же ветке, что и раньше.
+
+    Вне состояния: ``_ready`` драйвера (без замка), ``_values`` / ``_epoch`` (владелец ``_param_lock``),
+    ``run.handle`` (под ``_jog_tx_lock``), счётчики ``jobs_*``.
+    """
+
+    def __init__(self, *, clock: Callable[[], float], queue_maxlen: int) -> None:
+        self._lock = threading.Lock()
+        self._clock = clock
+        self._program_active = False  # исполнитель занят от захвата до конца _program_loop (бывшие _busy, _prog_alive)
+        self._prog_handle: IHandle | None = None  # запись потока исполнителя в области
+        self._job_active = False  # тик держит задание от захвата до исхода wait_done (R7)
+        self._jog: _JogRun | None = None
+        self._jog_starting = False  # jog_hold между проверкой флагов и записью jog (Д4)
+        self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
+        self._last_hold = 0.0  # время последнего jog_hold активного jog
+        self._syncing = False  # идёт синхронизация параметров (d2)
+        # Остановка (T5.3a К1): _stopping снимает connect(); _shutdown не снимается никогда
+        self._stopping = False
+        self._shutdown = False
+        self._stop_level = 0  # сильнейший уровень стопа программы с последнего connect()
+        # Защёлка стопа (T5.3 круг 2): сбрасывается при захвате нового действия и в connect()
+        self._latch_level = 0  # сильнейший записанный уровень STOP_REQ в этом поколении
+        self._latch_failed = False  # последняя запись STOP_REQ упала
+        self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
+        self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
+        self._echo_checked: int | None = None  # значение, эхо которого уже проверено
+        self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
+        self._stop_unconfirmed_text: str | None = None  # текст для health; ставится вместе с флагом
+        self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
+        # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
+        self._job_queue: deque[_Job] = deque(maxlen=queue_maxlen)  # (x, y, z, e_signed, place)
+        self._return_queue: deque[tuple[float, float, float]] = deque(maxlen=queue_maxlen)
+        self._returns_done = 0
+        self._returns_failed = 0
+
+    # --- без замка: чтения, которые и раньше шли без него ---
+
+    @property
+    def returns_done(self) -> int:
+        return self._returns_done
+
+    @property
+    def returns_failed(self) -> int:
+        return self._returns_failed
+
+    def job_queue_len(self) -> int:
+        return len(self._job_queue)
+
+    def return_queue_len(self) -> int:
+        return len(self._return_queue)
+
+    # --- помощники; зовутся только под self._lock ---
+
+    def _latch_reset_locked(self) -> None:
+        """Новое поколение (захват действия, ``connect``) — прежние стопы его не покрывают."""
+        self._latch_level = 0
+        self._latch_failed = False
+        self._latch_attempts = 0
+        self._latch_value = None  # H6: эхо проверяется только для записи этого поколения
+
+    def _holding_locked(self) -> bool:
+        """Свой jog жив и его стоп не запрошен."""
+        run = self._jog
+        return run is not None and run.active and not run.stop_requested
+
+    # --- снимок ---
+
+    def view(self) -> RobotStateView:
+        """Замороженный снимок всех полей, снят одной секцией."""
+        with self._lock:
+            run = self._jog
+            jog = None
+            if run is not None:
+                jog = JogView(
+                    seq=run.seq,
+                    active=run.active,
+                    released=run.released,
+                    stop_requested=run.stop_requested,
+                    stop_sent=run.stop_sent,
+                    has_handle=run.handle is not None,
+                )
+            return RobotStateView(
+                program_active=self._program_active,
+                has_prog_handle=self._prog_handle is not None,
+                job_active=self._job_active,
+                jog=jog,
+                jog_starting=self._jog_starting,
+                jog_stopping=self._jog_stopping,
+                last_hold=self._last_hold,
+                syncing=self._syncing,
+                stopping=self._stopping,
+                shutdown=self._shutdown,
+                stop_level=self._stop_level,
+                latch_level=self._latch_level,
+                latch_failed=self._latch_failed,
+                latch_value=self._latch_value,
+                latch_attempts=self._latch_attempts,
+                echo_checked=self._echo_checked,
+                stop_unconfirmed=self._stop_unconfirmed,
+                stop_unconfirmed_text=self._stop_unconfirmed_text,
+                own_stops=tuple(self._own_stops),
+                job_queue=tuple(self._job_queue),
+                return_queue=tuple(self._return_queue),
+                returns_done=self._returns_done,
+                returns_failed=self._returns_failed,
+            )
+
+    # --- соединение ---
+
+    def activity_alive(self) -> bool:
+        """Жив поток поводка (``run.active``) или исполнитель (``program_active``)."""
+        with self._lock:
+            run = self._jog
+            return (run is not None and run.active) or self._program_active
+
+    def connect_check(self) -> tuple[bool, bool]:
+        """``connect``: (выключение, задание тика)."""
+        with self._lock:
+            shutdown = self._shutdown
+            job_active = self._job_active
+            return shutdown, job_active
+
+    def connect_reset(self) -> None:
+        """``connect``: снять останов, уровень 0, сброс защёлки, снять «стоп не подтверждён» (текст остаётся)."""
+        with self._lock:
+            self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
+            self._stop_level = 0
+            self._latch_reset_locked()
+            self._stop_unconfirmed = False
+
+    def is_shutdown(self) -> bool:
+        with self._lock:
+            return self._shutdown
+
+    def disconnect_begin(self) -> bool:
+        """``disconnect``: выключение; не выключение — новое поколение защёлки."""
+        with self._lock:
+            shutdown = self._shutdown
+            if not shutdown:
+                # Одно выключение — один стоп: отключение робота открывает новое поколение защёлки, прежние стопы
+                # (оператор, отпускание jog) его не покрывают
+                self._latch_reset_locked()
+            return shutdown
+
+    def threads_to_close(self) -> tuple[_JogRun | None, IHandle | None]:
+        """``disconnect``: (jog, запись потока исполнителя)."""
+        with self._lock:
+            return self._jog, self._prog_handle
+
+    # --- стоп процесса и защёлка (ADR-DH-009: меняются только секции) ---
+
+    def request_stop_begin(self) -> None:
+        """``request_stop``: защёлка выключения; первый вызов открывает новое поколение защёлки."""
+        with self._lock:
+            if not self._shutdown:
+                # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
+                # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
+                self._latch_reset_locked()
+            self._shutdown = True
+
+    def stop_unconfirmed(self) -> bool:
+        with self._lock:
+            return self._stop_unconfirmed
+
+    def stop_unconfirmed_text(self) -> str | None:
+        with self._lock:
+            return self._stop_unconfirmed_text
+
+    def process_stop_plan(self, connected: Callable[[], bool]) -> tuple[int, _JogRun | None, bool]:
+        """``_process_stop``: пометки останова и jog, уровень записи (0 — записи нет). -> (уровень, jog, стоп jog)."""
+        with self._lock:
+            self._stopping = True
+            self._stop_level = max(self._stop_level, STOP_LEVEL["HARD"])
+            run = self._jog
+            stop_jog = run is not None and not run.stop_sent and (run.active or run.stop_requested)
+            if run is not None and stop_jog:
+                run.released = True  # поток поводка выходит без своего стопа: стоп пишет этот путь
+                run.stop_requested = True
+                run.wake.set()
+            jog_in_flight = self._jog_starting  # JOG_CONT в полёте (замок не взят): стоп нужен и ему
+            hard = self._program_active or self._job_active
+            if hard:
+                level = STOP_LEVEL["HARD"]
+            elif stop_jog or jog_in_flight:
+                level = STOP_LEVEL["SOFT"]
+            elif connected():
+                level = STOP_LEVEL["SOFT"]  # решение владельца 2026-10-19: выключаемый робот получает стоп и в покое
+            else:
+                level = 0  # простой и не подключён: писать некуда
+            # Jog без записанного стопа (stop_sent False) или JOG_CONT в полёте пишется всегда, мимо защёлки (H-A)
+            latch_applies = not (stop_jog or jog_in_flight)
+            attempts = self._latch_attempts
+            if attempts == 0:
+                if level and latch_applies and self._latch_level >= level and not self._latch_failed:
+                    level = 0  # такой стоп уже записан в этом поколении
+            elif not (attempts == 1 and self._latch_failed):
+                level = 0  # стоп процесса уже записан или повтор уже был: в поколении не больше двух попыток
+            return level, run, stop_jog
+
+    def next_stop_attempt(self, deadline: float, budget: Callable[[], float]) -> int | None:
+        """Номер следующей попытки записи стопа процесса или None (больше двух или повтор не успевает до срока)."""
+        with self._lock:
+            attempt = self._latch_attempts + 1
+            # Повтор — только после упавшей записи и только если запись успеет до срока (таймаут транспорта
+            # с его повторами): поздний повтор не доставит стоп раньше срока, а поток стопа пережил бы его
+            if attempt > 2 or (attempt == 2 and time.monotonic() + budget() > deadline):
+                return None
+            self._latch_attempts = attempt
+            return attempt
+
+    def note_own_stop(self, seq: int) -> None:
+        """seq jog — в множество своих стопов ДО записи (Д1)."""
+        with self._lock:
+            if seq not in self._own_stops:
+                self._own_stops.append(seq)
+
+    def stop_write_failed(self) -> None:
+        with self._lock:
+            self._latch_failed = True
+
+    def stop_written(self, value: int, run: _JogRun | None) -> None:
+        """Запись ``STOP_REQ`` прошла: защёлка и ``stop_sent`` jog (флаг отражает запись, не эхо)."""
+        with self._lock:
+            self._latch_level = max(self._latch_level, value & 3)
+            self._latch_failed = False
+            self._latch_value = value
+            if run is not None:
+                run.stop_sent = True
+
+    def echo_check_plan(self) -> tuple[bool, int | None]:
+        """``_check_stop_echo``: (проверять ли эхо, значение записи); проверяемое значение помечается."""
+        with self._lock:
+            value = self._latch_value
+            attempted = self._latch_attempts > 0
+            if value is not None and value == self._echo_checked:
+                return False, value
+            if value is None and (not attempted or self._stop_unconfirmed):
+                return False, value
+            self._echo_checked = value
+            return True, value
+
+    def mark_unconfirmed(self, text: str) -> None:
+        with self._lock:
+            self._stop_unconfirmed = True
+            self._stop_unconfirmed_text = text
+
+    def latch_covers(self, level: int) -> bool:
+        """Такой уровень уже записан в этом поколении и последняя запись не упала."""
+        with self._lock:
+            return self._latch_level >= level and not self._latch_failed
+
+    def disconnect_stop_plan(self, program_level: int) -> tuple[_JogRun | None, bool, bool, bool]:
+        """``_request_stop`` (под ``_jog_tx_lock``): останов, пометка jog. -> (jog, стоп jog, программа, задание)."""
+        with self._lock:
+            self._stopping = True
+            self._stop_level = max(self._stop_level, program_level)
+            run = self._jog
+            stop_jog = run is not None and not run.stop_sent
+            if stop_jog:
+                run.released = True
+                run.stop_requested = True
+                run.wake.set()
+            prog_alive = self._program_active
+            job_active = self._job_active
+            return run, stop_jog, prog_alive, job_active
+
+    def is_own_stop(self, aborted: bool, seq: int) -> bool:
+        """Ошибка робота — обрыв своего jog (Д1)."""
+        with self._lock:
+            return aborted and seq in self._own_stops
+
+    # --- задания и возвраты (тик) ---
+
+    def take_next_action(self) -> tuple[tuple[float, float, float] | None, _Job | None]:
+        """Одно действие за тик: (возврат, None) / (None, задание: ``job_active``, сброс защёлки) / (None, None)."""
+        with self._lock:
+            run = self._jog
+            if (
+                self._stopping
+                or self._syncing  # тик прошёл _ensure_connected до начала синхронизации другим потоком
+                or self._program_active
+                or self._jog_starting
+                or self._jog_stopping
+                or (run is not None and run.active)
+                or self._job_active
+            ):
+                return None, None
+            if self._return_queue:
+                return self._return_queue.popleft(), None
+            if self._job_queue:
+                job = self._job_queue.popleft()
+                self._job_active = True
+                self._latch_reset_locked()
+                return None, job
+            return None, None
+
+    def requeue_job(self, job: _Job) -> None:
+        with self._lock:
+            self._job_queue.appendleft(job)  # робот занят — повтор следующим тиком (паритет v1)
+
+    def job_finished(self) -> None:
+        with self._lock:
+            self._job_active = False
+
+    def requeue_return(self, item: tuple[float, float, float]) -> None:
+        with self._lock:
+            self._return_queue.appendleft(item)  # захват перехвачен между секциями — повтор следующим тиком
+
+    def return_failed(self) -> None:
+        with self._lock:
+            self._returns_failed += 1
+
+    def enqueue_job(self, job: _Job) -> int:
+        with self._lock:
+            self._job_queue.append(job)  # maxlen: старейшее вытесняется (паритет v1)
+            return len(self._job_queue)
+
+    def enqueue_return(self, item: tuple[float, float, float]) -> int:
+        with self._lock:
+            self._return_queue.append(item)
+            return len(self._return_queue)
+
+    # --- синхронизация параметров ---
+
+    def begin_sync(self) -> bool:
+        """«Активности нет» + ``syncing`` одной секцией (T5.3d2 DESIGN 2); занято — False, флаг не ставится.
+
+        Активность — программа, jog (в том числе стартующий и останавливающийся), задание тика; остановка — после
+        стопа параметры роботу не пишутся. Снимает флаг вызывающий (``end_sync``) в ``finally``.
+        """
+        with self._lock:
+            run = self._jog
+            if (
+                self._stopping
+                or self._shutdown
+                or self._program_active
+                or self._jog_starting
+                or self._jog_stopping
+                or (run is not None and run.active)
+                or self._job_active
+            ):
+                return False
+            self._syncing = True
+            return True
+
+    def end_sync(self) -> None:
+        with self._lock:
+            self._syncing = False
+
+    def sync_cancelled(self) -> bool:
+        """Остановка — после стопа параметры не пишутся."""
+        with self._lock:
+            return self._stopping or self._shutdown
+
+    # --- jog ---
+
+    def jog_hold_check(self) -> dict | str | None:
+        """``jog_hold`` до ``_jog_tx_lock``: отказ / ``"hold"`` (продление: ``last_hold``) / None (дальше)."""
+        with self._lock:
+            if self._stopping:
+                return {"status": "error", "message": TEXT_STOPPING}
+            if self._program_active:
+                return dict(_BUSY_PROGRAM)
+            if self._job_active:
+                return dict(_BUSY_JOB)
+            if self._holding_locked():
+                self._last_hold = self._clock()
+                return "hold"
+            if self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}
+            return None
+
+    def jog_hold_admit(self) -> tuple[dict | str | None, _JogRun | None]:
+        """``jog_hold`` под ``_jog_tx_lock``: те же проверки; допуск — ``jog_starting`` и прежний jog."""
+        with self._lock:
+            if self._stopping:
+                return {"status": "error", "message": TEXT_STOPPING}, None
+            if self._program_active:
+                return dict(_BUSY_PROGRAM), None
+            if self._job_active:
+                return dict(_BUSY_JOB), None
+            if self._holding_locked():
+                self._last_hold = self._clock()
+                return "hold", None
+            if self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}, None
+            prev = self._jog
+            # Д4: от проверки программы до записи jog start_program видит переход как jog (_BUSY_JOG)
+            self._jog_starting = True
+            return None, prev
+
+    def jog_started(self, run: _JogRun) -> bool:
+        """JOG_CONT подтверждён: jog, ``last_hold``, новое поколение защёлки (H-A). -> останов уже идёт (H-B)."""
+        with self._lock:
+            self._jog = run
+            self._last_hold = self._clock()
+            # H-A: запись движения — новое поколение защёлки ПОСЛЕ неё (стоп prev выше её не покрывает)
+            self._latch_reset_locked()
+            stopping = self._stopping
+            return stopping
+
+    def jog_aborted_by_stop(self, run: _JogRun) -> None:
+        """H-B: стоп процесса лёг, пока JOG_CONT был в полёте, — поводок не запускается."""
+        with self._lock:
+            run.released = True
+            run.stop_requested = True
+            run.active = False
+
+    def jog_spawn_failed(self, run: _JogRun, prev: _JogRun | None) -> None:
+        with self._lock:
+            run.active = False
+            self._jog = prev
+
+    def jog_start_done(self) -> None:
+        with self._lock:
+            self._jog_starting = False
+
+    def jog_release_begin(self) -> _JogRun | None:
+        """``jog_release``: свой держащийся jog -> пометки и ``jog_stopping``; нет -> None."""
+        with self._lock:
+            run = self._jog
+            if run is None or not run.active or run.stop_requested:
+                return None
+            run.released = True
+            run.stop_requested = True
+            run.wake.set()
+            # T3.7 (ревью р.1): поток поводка выходит (active = False) раньше записи стопа — до её возврата тик
+            # не берёт задание, иначе SOFT этого jog оборвал бы CVT_JOB (E_ABORTED)
+            self._jog_stopping = True
+            return run
+
+    def jog_release_done(self) -> None:
+        with self._lock:
+            self._jog_stopping = False
+
+    def lease_check(self, run: _JogRun, ev: threading.Event) -> tuple[str, str | None, bool | None]:
+        """Шаг поводка: ``("released", None, None)`` / ``("stop", причина, после начала остановки)`` /
+        ``("lease", None, None)``. Окно истекло или область закрывается -> ``stop_requested``."""
+        with self._lock:
+            if run.released:
+                return "released", None, None  # стоп шлёт release
+            stop = ev.is_set() or self._clock() - self._last_hold > _HOLD_WINDOW_S
+            if stop:
+                run.stop_requested = True
+                # причина для лога (D-L1): приоритет ``ev`` — порядок прежнего ``or``
+                reason = "область закрывается" if ev.is_set() else "окно удержания истекло"
+                late = self._stopping
+                return "stop", reason, late
+            return "lease", None, None
+
+    def lease_exit(self, run: _JogRun) -> None:
+        with self._lock:
+            run.active = False
+
+    # --- программы ---
+
+    def admit_launch(self, connected: Callable[[], bool]) -> dict | None:
+        """Захват исполнителя: отказ или None (``program_active``, сброс защёлки)."""
+        with self._lock:
+            if self._stopping:
+                return {"status": "error", "message": TEXT_STOPPING}
+            if self._program_active:
+                return dict(_BUSY_PROGRAM)
+            if self._job_active:
+                return dict(_BUSY_JOB)
+            run = self._jog
+            if self._jog_starting or self._jog_stopping or (run is not None and run.active):
+                return dict(_BUSY_JOG)  # окно T3.7: поводок вышел, стоп jog_release ещё не вернулся
+            if self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}
+            if not connected():
+                return dict(_NOT_CONNECTED)
+            self._program_active = True
+            self._latch_reset_locked()
+            return None
+
+    def launch_failed(self) -> None:
+        with self._lock:
+            self._program_active = False
+
+    def program_started(self, handle: IHandle) -> None:
+        with self._lock:
+            self._prog_handle = handle
+
+    def stop_resend_level(self, already_resent: bool) -> int:
+        """Микроокно К1: уровень повтора стопа в ``on_progress`` (0 — повтора нет)."""
+        with self._lock:
+            return self._stop_level if (self._stopping and not already_resent) else 0
+
+    def is_stopping(self) -> bool:
+        with self._lock:
+            return self._stopping
+
+    def program_finished(self, kind: str, done: bool) -> None:
+        """Исполнитель вышел: снять ``program_active``; возврат — счётчик исхода."""
+        with self._lock:
+            self._program_active = False
+            if kind == "return":
+                if done:
+                    self._returns_done += 1
+                else:
+                    self._returns_failed += 1
+
+    # --- операции движения и параметров ---
+
+    def motion_refusal(self, syncing: bool = False) -> dict | None:
+        """Отказ занятости: останов, программа, задание, jog (и синхронизация при ``syncing``)."""
+        with self._lock:
+            if self._stopping:
+                return {"status": "error", "message": TEXT_STOPPING}
+            if self._program_active:
+                return dict(_BUSY_PROGRAM)
+            if self._job_active:
+                return dict(_BUSY_JOB)
+            run = self._jog
+            if self._jog_starting or self._jog_stopping or (run is not None and run.active):
+                return dict(_BUSY_JOG)
+            if syncing and self._syncing:
+                return {"status": "error", "message": TEXT_SYNCING}
+            return None
+
+    def program_running(self) -> bool:
+        with self._lock:
+            return self._program_active
+
+    def param_refusal(self) -> str | None:
+        """``param_set`` / ``param_apply`` после ``_param_lock``: текст отказа (останов, синхронизация) или None."""
+        with self._lock:
+            stopping, syncing = self._stopping, self._syncing
+        if stopping or syncing:
+            return TEXT_STOPPING if stopping else TEXT_SYNCING
+        return None
 
 
 class RobotDriverV2(BaseDeviceDriver):
@@ -425,47 +1015,22 @@ class RobotDriverV2(BaseDeviceDriver):
         self._last_reconnect = 0.0
         self._last_resync = 0.0
 
-        # Флаги — только поля экземпляра, под _flags_lock
-        self._flags_lock = threading.Lock()
+        # Замок перехода jog: client.jog_cont и стоп jog; с замком состояния — только снаружи (он листовой)
         self._jog_tx_lock = threading.Lock()
         # Третий замок (T5.3d): только вокруг param_set / param_apply (и синхронизации, d2); берётся не блокируя.
-        # Порядок: _param_lock -> _flags_lock; вместе с _jog_tx_lock не держится
+        # Порядок: _param_lock -> замок состояния; вместе с _jog_tx_lock не держится
         self._param_lock = threading.Lock()
         self._store = store  # единственный RobotDataStore процесса (фабрика); None — автономный драйвер
-        self._syncing = False  # идёт синхронизация параметров (ставит и снимает d2), под _flags_lock
-        self._busy = False  # идёт программа
-        self._jog_starting = False  # jog_hold между проверкой флагов и записью self._jog (Д4)
-        self._jog_stopping = False  # jog_release от снятия поводка до возврата стопа: тик не берёт задание (T3.7)
-        self._last_hold = 0.0  # время последнего jog_hold активного jog
-        self._jog: _JogRun | None = None
-        self._prog_handle: IHandle | None = None  # запись потока исполнителя в области
-        self._prog_alive = False  # исполнитель занят от захвата до конца _program_loop, под _flags_lock
-        # Остановка (T5.3a К1), всё под _flags_lock: _stopping снимает connect(); _shutdown не снимается никогда
-        self._stopping = False
-        self._shutdown = False
-        self._stop_level = 0  # сильнейший уровень стопа программы с последнего connect()
         self._spawn: Callable[..., IHandle] | None = spawn
-        # Защёлка стопа (T5.3 круг 2), под _flags_lock: сбрасывается при захвате нового действия и в connect()
-        self._latch_level = 0  # сильнейший записанный уровень STOP_REQ в этом поколении
-        self._latch_failed = False  # последняя запись STOP_REQ упала
-        self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
-        self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
-        self._echo_checked: int | None = None  # значение, эхо которого уже проверено
-        self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
-        self._stop_unconfirmed_text: str | None = None  # текст для health; ставится под замком вместе с флагом
-        self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
 
+        # Состояние (T5.3f): флаги, jog, защёлка стопа, очереди заданий и возвратов — поля RobotState под его замком
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
         maxlen = int(params.get("job_queue_maxlen", _JOB_QUEUE_MAXLEN))
-        self._job_queue: deque[_Job] = deque(maxlen=maxlen)  # (x, y, z, e_signed, place)
-        self._return_queue: deque[tuple[float, float, float]] = deque(maxlen=maxlen)
+        self._state = RobotState(clock=self._clock, queue_maxlen=maxlen)
         self._pick_lead_mm = float(params.get("pick_lead_mm", 0.0))
-        self._job_active = False  # тик держит задание от захвата до исхода wait_done (R7), под _flags_lock
         self.jobs_sent = 0
         self.jobs_done = 0
         self.jobs_failed = 0
-        self.returns_done = 0
-        self.returns_failed = 0
 
         # Журнал обмена (T5.6): живёт столько же, сколько драйвер; ручки — entry.params["exchange_log"]
         log_cfg = params.get("exchange_log")
@@ -543,14 +1108,27 @@ class RobotDriverV2(BaseDeviceDriver):
         transport = self._transport
         return self._ready and transport is not None and bool(transport.is_connected)
 
+    @property
+    def state(self) -> RobotState:
+        """Состояние драйвера (только чтение; внутреннее, не SPI хаба): снимок — ``state.view()``."""
+        return self._state
+
+    @property
+    def returns_done(self) -> int:
+        """Возвраты, исполненные до конца; чтение без замка (как ``snapshot``)."""
+        return self._state.returns_done
+
+    @property
+    def returns_failed(self) -> int:
+        """Возвраты с отказом или неудачей программы; чтение без замка (как ``snapshot``)."""
+        return self._state.returns_failed
+
     def _activity_alive(self) -> bool:
         """Жив поток поводка или исполнителя: путь connect и повторная синхронизация не идут (п.9).
 
-        Живость — флаги (``run.active`` снимает поток поводка, ``_prog_alive`` — исполнитель), не объекты потоков.
+        Живость — флаги (``run.active`` снимает поток поводка, ``program_active`` — исполнитель), не объекты потоков.
         """
-        with self._flags_lock:
-            run = self._jog
-            return (run is not None and run.active) or self._prog_alive
+        return self._state.activity_alive()
 
     def connect(self) -> bool:
         """Ручное подключение: ``_connect_locked`` под ``_param_lock`` (ждёт идущий ``param_set`` — его ввод-вывод
@@ -564,18 +1142,12 @@ class RobotDriverV2(BaseDeviceDriver):
         Не идёт, пока жив поток поводка или исполнителя, и пока тик держит задание (T3.7 R9): иначе ``probe`` +
         ``sync_params`` посреди хода дали бы NAK ``E_BUSY`` на ``PARAM_SET`` и ``_ready = False``.
         """
-        with self._flags_lock:
-            shutdown = self._shutdown
-            job_active = self._job_active
+        shutdown, job_active = self._state.connect_check()
         if shutdown:
             return False  # защёлка request_stop(): после остановки плагина драйвер не подключается (К1)
         if job_active or self._activity_alive():
             return self.is_connected
-        with self._flags_lock:
-            self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
-            self._stop_level = 0
-            self._latch_reset_locked()
-            self._stop_unconfirmed = False
+        self._state.connect_reset()  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
         was_ready = self._ready
         self._ready = False
         try:
@@ -616,8 +1188,7 @@ class RobotDriverV2(BaseDeviceDriver):
         period = client.heartbeat_period_s
         if period is not None and self._hub_poll_s > period:
             self._publish_error(TEXT_WDG_INTERVAL)
-        with self._flags_lock:
-            shutdown = self._shutdown
+        shutdown = self._state.is_shutdown()
         if shutdown:
             return False  # подключение, начатое до request_stop(), не делает драйвер готовым
         self._ready = True
@@ -659,16 +1230,10 @@ class RobotDriverV2(BaseDeviceDriver):
         Защёлку ``_shutdown`` не ставит: после обычного отключения ручной ``connect()`` снова работает (К1).
         После ``request_stop()`` (фаза 4 остановки плагина) стоп не пишется и эхо не читается (проверено в фазе 1).
         """
-        with self._flags_lock:
-            shutdown = self._shutdown
-            if not shutdown:
-                # Одно выключение — один стоп: отключение робота открывает новое поколение защёлки, прежние стопы
-                # (оператор, отпускание jog) его не покрывают
-                self._latch_reset_locked()
+        shutdown = self._state.disconnect_begin()  # не выключение — новое поколение защёлки
         if not shutdown:  # после request_stop стоп не пишется: эхо проверено в фазе 1 (H7)
             self._request_stop(program_level=STOP_LEVEL["SOFT"])
-        with self._flags_lock:
-            run, prog = self._jog, self._prog_handle
+        run, prog = self._state.threads_to_close()
         if run is not None and run.handle is not None:
             self._close_thread(run.handle, _LEASE_JOIN_S)
         if prog is not None:
@@ -701,12 +1266,7 @@ class RobotDriverV2(BaseDeviceDriver):
         """
         if deadline is None:
             deadline = time.monotonic() + _PROCESS_STOP_DEFAULT_S
-        with self._flags_lock:
-            if not self._shutdown:
-                # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
-                # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
-                self._latch_reset_locked()
-            self._shutdown = True
+        self._state.request_stop_begin()  # защёлка выключения; первый вызов — новое поколение защёлки
         locked = self._jog_tx_lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
         try:
             if not locked:
@@ -727,55 +1287,25 @@ class RobotDriverV2(BaseDeviceDriver):
     @property
     def stop_unconfirmed(self) -> bool:
         """Стоп процесса этого робота не подтверждён (нет эха или запись не прошла); для health плагина."""
-        with self._flags_lock:
-            return self._stop_unconfirmed
+        return self._state.stop_unconfirmed()
 
     @property
     def stop_unconfirmed_text(self) -> str | None:
         """Текст причины для health: ``TEXT_STOP_UNCONFIRMED`` или ``TEXT_NO_ECHO_WINDOW``; ``None`` — не помечен."""
-        with self._flags_lock:
-            return self._stop_unconfirmed_text
+        return self._state.stop_unconfirmed_text()
 
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
-        with self._flags_lock:
-            self._stopping = True
-            self._stop_level = max(self._stop_level, STOP_LEVEL["HARD"])
-            run = self._jog
-            stop_jog = run is not None and not run.stop_sent and (run.active or run.stop_requested)
-            if run is not None and stop_jog:
-                run.released = True  # поток поводка выходит без своего стопа: стоп пишет этот путь
-                run.stop_requested = True
-                run.wake.set()
-            jog_in_flight = self._jog_starting  # JOG_CONT в полёте (замок не взят): стоп нужен и ему
-            hard = self._prog_alive or self._job_active
-            if hard:
-                level = STOP_LEVEL["HARD"]
-            elif stop_jog or jog_in_flight:
-                level = STOP_LEVEL["SOFT"]
-            elif self.is_connected:
-                level = STOP_LEVEL["SOFT"]  # решение владельца 2026-10-19: выключаемый робот получает стоп и в покое
-            else:
-                level = 0  # простой и не подключён: писать некуда
-            # Jog без записанного стопа (stop_sent False) или JOG_CONT в полёте пишется всегда, мимо защёлки (H-A)
-            latch_applies = not (stop_jog or jog_in_flight)
-            attempts = self._latch_attempts
-            if attempts == 0:
-                if level and latch_applies and self._latch_level >= level and not self._latch_failed:
-                    level = 0  # такой стоп уже записан в этом поколении
-            elif not (attempts == 1 and self._latch_failed):
-                level = 0  # стоп процесса уже записан или повтор уже был: в поколении не больше двух попыток
+        # is_connected зовётся под замком состояния, в той же ветке, что и раньше (простой робот)
+        level, run, stop_jog = self._state.process_stop_plan(lambda: self.is_connected)
         if not level or self._client is None:
             return  # простой неподключённый робот, стоп уже записан или нет клиента: записи нет
         jog_run = run if stop_jog else None
         while True:
-            with self._flags_lock:
-                attempt = self._latch_attempts + 1
-                # Повтор — только после упавшей записи и только если запись успеет до срока (таймаут транспорта
-                # с его повторами): поздний повтор не доставит стоп раньше срока, а поток стопа пережил бы его
-                if attempt > 2 or (attempt == 2 and time.monotonic() + self._write_budget_s() > deadline):
-                    return
-                self._latch_attempts = attempt
+            # Повтор — только после упавшей записи и только если запись успеет до срока (не больше двух попыток)
+            attempt = self._state.next_stop_attempt(deadline, self._write_budget_s)
+            if attempt is None:
+                return
             try:
                 self._write_stop(level, jog_run)
                 return
@@ -797,21 +1327,13 @@ class RobotDriverV2(BaseDeviceDriver):
         сразу ПОСЛЕ удачной записи (флаг отражает запись, не эхо).
         """
         if run is not None:
-            with self._flags_lock:
-                if run.seq not in self._own_stops:
-                    self._own_stops.append(run.seq)
+            self._state.note_own_stop(run.seq)
         try:
             value = self._client.issue_stop(level)
         except Exception:
-            with self._flags_lock:
-                self._latch_failed = True
+            self._state.stop_write_failed()
             raise
-        with self._flags_lock:
-            self._latch_level = max(self._latch_level, value & 3)
-            self._latch_failed = False
-            self._latch_value = value
-            if run is not None:
-                run.stop_sent = True
+        self._state.stop_written(value, run)
         return value
 
     def _stop_and_wait(self, level: int, run: _JogRun | None = None) -> None:
@@ -821,13 +1343,6 @@ class RobotDriverV2(BaseDeviceDriver):
         timeout = self._cfg.soft_echo_timeout_s if written == STOP_LEVEL["SOFT"] else self._cfg.stop_echo_timeout_s
         self._client.await_stop_echo(value, written, deadline=time.monotonic() + timeout)
 
-    def _latch_reset_locked(self) -> None:
-        """Под ``_flags_lock``: новое поколение (захват действия, ``connect``) — прежние стопы его не покрывают."""
-        self._latch_level = 0
-        self._latch_failed = False
-        self._latch_attempts = 0
-        self._latch_value = None  # H6: эхо проверяется только для записи этого поколения
-
     def _check_stop_echo(self, deadline: float) -> None:
         """Эхо записи стопа процесса этого поколения, без записи, один раз на значение (H7).
 
@@ -836,14 +1351,9 @@ class RobotDriverV2(BaseDeviceDriver):
         ``TEXT_STOP_UNCONFIRMED``; запись прошла, окна нет — ``TEXT_NO_ECHO_WINDOW``; запись не прошла —
         ``TEXT_STOP_UNCONFIRMED``. Простой робот (записи не было) не проверяется. Не бросает.
         """
-        with self._flags_lock:
-            value = self._latch_value
-            attempted = self._latch_attempts > 0
-            if value is not None and value == self._echo_checked:
-                return
-            if value is None and (not attempted or self._stop_unconfirmed):
-                return
-            self._echo_checked = value
+        check, value = self._state.echo_check_plan()  # проверяемое значение помечается в том же переходе
+        if not check:
+            return
         client = self._client
         read_until = deadline - self._write_budget_s()
         confirmed = False
@@ -859,35 +1369,22 @@ class RobotDriverV2(BaseDeviceDriver):
         # запись прошла, а читать эхо было некогда (срок минус бюджет записи) — это не «эхо не пришло»
         no_window = value is not None and client is not None and not has_window
         text = TEXT_NO_ECHO_WINDOW if no_window else TEXT_STOP_UNCONFIRMED
-        with self._flags_lock:
-            self._stop_unconfirmed = True
-            self._stop_unconfirmed_text = text
+        self._state.mark_unconfirmed(text)
         self._record_err()
         logger.warning(f"робот {self.entry.id!r}: {text}")
         self._publish_error(text)
 
     def _stop_latched(self, level: int) -> None:
         """Запись стопа без эха через защёлку: такой уровень уже записан в этом поколении — записи нет (H1)."""
-        with self._flags_lock:
-            if self._latch_level >= level and not self._latch_failed:
-                return
+        if self._state.latch_covers(level):
+            return
         self._write_stop(level)
 
     def _request_stop(self, program_level: int) -> None:
         """Стоп обычного ``disconnect``: флаг ``_stopping``, пометка jog, стопы с ожиданием эха без замков (К1)."""
-        # V1: JOG_CONT в полёте дописывает self._jog под _jog_tx_lock — читаем его под тем же замком
+        # V1: JOG_CONT в полёте дописывает jog под _jog_tx_lock — читаем его под тем же замком
         with self._jog_tx_lock:
-            with self._flags_lock:
-                self._stopping = True
-                self._stop_level = max(self._stop_level, program_level)
-                run = self._jog
-                stop_jog = run is not None and not run.stop_sent
-                if stop_jog:
-                    run.released = True
-                    run.stop_requested = True
-                    run.wake.set()
-                prog_alive = self._prog_alive
-                job_active = self._job_active
+            run, stop_jog, prog_alive, job_active = self._state.disconnect_stop_plan(program_level)
         # _stop_jog снова берёт _jog_tx_lock (не реентерабельный) — замки отпущены
         client = self._client
         if client is None:
@@ -916,8 +1413,7 @@ class RobotDriverV2(BaseDeviceDriver):
             # Решение владельца 2026-10-19: отключаемый подключённый робот получает стоп и в покое (SOFT);
             # защёлка гасит вторую запись в том же выключении (jog со стопом этого вызова). Только запись SOFT:
             # эхо простого робота не читается (supervisor не ждёт soft_echo_timeout_s), last_error нет (T5.3c c3)
-            with self._flags_lock:
-                covered = self._latch_level >= STOP_LEVEL["SOFT"] and not self._latch_failed
+            covered = self._state.latch_covers(STOP_LEVEL["SOFT"])
             if not covered:
                 try:
                     self._write_stop(STOP_LEVEL["SOFT"])
@@ -1023,8 +1519,7 @@ class RobotDriverV2(BaseDeviceDriver):
                 self._resync_maybe(client)
         try:
             for ev in client.poll_errors():
-                with self._flags_lock:
-                    own = ev.errno == ERR["E_ABORTED"] and ev.seq in self._own_stops
+                own = self._state.is_own_stop(ev.errno == ERR["E_ABORTED"], ev.seq)
                 if own:
                     continue  # свой стоп jog — ожидаемый обрыв (Д1)
                 text = ev.text if ev.missed <= 0 else f"{ev.text} (пропущено {ev.missed})"
@@ -1042,31 +1537,12 @@ class RobotDriverV2(BaseDeviceDriver):
     def _dispatch(self, client: RobotClientV2, free: bool, stop_event: Any) -> None:
         """Одно действие за тик (DESIGN п.4): возврат из очереди, иначе задание. Обе ветки требуют ``free``.
 
-        «Захват свободен» и взятие задания — одна секция ``_flags_lock``: ``_job_active`` ставится ДО ``cvt_job``,
-        поэтому ``jog_hold`` / ``start_program`` между проверкой и записью видят ``_BUSY_JOB`` (R7).
+        «Захват свободен» и взятие задания — один переход ``take_next_action``: ``job_active`` ставится ДО
+        ``cvt_job``, поэтому ``jog_hold`` / ``start_program`` между проверкой и записью видят ``_BUSY_JOB`` (R7).
         """
         if not free:
             return
-        job: _Job | None = None
-        item: tuple[float, float, float] | None = None
-        with self._flags_lock:
-            run = self._jog
-            if (
-                self._stopping
-                or self._syncing  # тик прошёл _ensure_connected до начала синхронизации другим потоком
-                or self._busy
-                or self._jog_starting
-                or self._jog_stopping
-                or (run is not None and run.active)
-                or self._job_active
-            ):
-                return
-            if self._return_queue:
-                item = self._return_queue.popleft()
-            elif self._job_queue:
-                job = self._job_queue.popleft()
-                self._job_active = True
-                self._latch_reset_locked()
+        item, job = self._state.take_next_action()
         if item is not None:
             self._start_next_return(item)
         elif job is not None:
@@ -1093,8 +1569,7 @@ class RobotDriverV2(BaseDeviceDriver):
             except RobotNak as exc:
                 if exc.errno != ERR["E_BUSY"]:
                     raise
-                with self._flags_lock:
-                    self._job_queue.appendleft(job)  # робот занят — повтор следующим тиком (паритет v1)
+                self._state.requeue_job(job)  # робот занят — повтор следующим тиком (паритет v1)
                 return
             self.jobs_sent += 1
             client.wait_done(res.seq, on_poll=on_poll)
@@ -1126,8 +1601,7 @@ class RobotDriverV2(BaseDeviceDriver):
             logger.warning(f"робот {self.entry.id!r}: задание прервано сбоем связи: {type(exc).__name__}: {exc}")
             self._link_lost()  # урок fd5c003e8: сырой OSError оставляет is_connected == True
         finally:
-            with self._flags_lock:
-                self._job_active = False
+            self._state.job_finished()
 
     def _start_next_return(self, item: tuple[float, float, float]) -> None:
         """Возврат, взятый тиком из очереди, — программой ``return_slot`` на потоке исполнителя (R2, DESIGN п.6)."""
@@ -1148,11 +1622,9 @@ class RobotDriverV2(BaseDeviceDriver):
         if res.get("status") == "ok":
             return
         if res in _BUSY_REPLIES:
-            with self._flags_lock:
-                self._return_queue.appendleft(item)  # захват перехвачен между секциями — повтор следующим тиком
+            self._state.requeue_return(item)  # захват перехвачен между секциями — повтор следующим тиком
             return
-        with self._flags_lock:
-            self.returns_failed += 1
+        self._state.return_failed()
         self._publish_error(str(res.get("message")))
 
     def _link_lost(self) -> None:
@@ -1172,31 +1644,8 @@ class RobotDriverV2(BaseDeviceDriver):
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: сокет после обрыва не закрыт: {type(exc).__name__}: {exc}")
 
-    def _begin_sync_locked(self) -> bool:
-        """Под ``_flags_lock``: одна секция «активности нет» + ``_syncing = True`` (T5.3d2 DESIGN 2).
-
-        Активность — программа, jog (в том числе стартующий и останавливающийся), задание тика; остановка
-        (``_stopping`` / ``_shutdown``) — после стопа параметры роботу не пишутся. Занято -> False, флаг не ставится.
-        Снимает флаг вызывающий в ``finally`` (под ``_flags_lock``).
-        """
-        run = self._jog
-        if (
-            self._stopping
-            or self._shutdown
-            or self._busy
-            or self._prog_alive
-            or self._jog_starting
-            or self._jog_stopping
-            or (run is not None and run.active)
-            or self._job_active
-        ):
-            return False
-        self._syncing = True
-        return True
-
     def _end_sync(self) -> None:
-        with self._flags_lock:
-            self._syncing = False
+        self._state.end_sync()
 
     def _close_after_disconnect(self) -> None:
         """``disconnect()`` отработал, пока тик открывал транспорт: закрыть его и снять готовность. Не бросает."""
@@ -1211,19 +1660,17 @@ class RobotDriverV2(BaseDeviceDriver):
             logger.warning(f"робот {self.entry.id!r}: сокет после отключения не закрыт: {type(exc).__name__}: {exc}")
 
     def _sync_cancelled(self) -> bool:
-        """Отмена синхронизации: остановка (``_stopping`` / ``_shutdown``) — после стопа параметры не пишутся."""
-        with self._flags_lock:
-            return self._stopping or self._shutdown
+        """Отмена синхронизации: остановка (``stopping`` / ``shutdown``) — после стопа параметры не пишутся."""
+        return self._state.sync_cancelled()
 
     def _sync_on_connect(self, client: RobotClientV2) -> bool:
-        """``_connect_locked``: ``_load_params()`` + ``sync_params`` под флагом ``_syncing``; ``_param_lock`` уже держит
-        вызывающий (``connect`` / ``_ensure_connected``). Порядок замков: ``_param_lock`` -> ``_flags_lock``.
+        """``_connect_locked``: ``_load_params()`` + ``sync_params`` под флагом ``syncing``; ``_param_lock`` уже держит
+        вызывающий (``connect`` / ``_ensure_connected``). Порядок замков: ``_param_lock`` -> замок состояния.
 
         False — синхронизации не было: активность появилась после ранней проверки ``connect``.
         """
-        with self._flags_lock:
-            if not self._begin_sync_locked():
-                return False
+        if not self._state.begin_sync():
+            return False
         old = self._values, self._epoch
         try:
             self._values, self._epoch = self._load_params_io()
@@ -1266,8 +1713,7 @@ class RobotDriverV2(BaseDeviceDriver):
             now = self._clock()
             if now - self._last_resync < _RECONNECT_THROTTLE_SEC and self._last_resync:
                 return
-            with self._flags_lock:
-                started = self._begin_sync_locked()
+            started = self._state.begin_sync()
             if not started:
                 return
             self._last_resync = now
@@ -1314,7 +1760,7 @@ class RobotDriverV2(BaseDeviceDriver):
             "telemetry": telemetry,
             "free": free,
             "encoder": encoder,
-            "queue_len": len(self._job_queue),
+            "queue_len": self._state.job_queue_len(),
         }
 
     # --- задания ---
@@ -1333,17 +1779,15 @@ class RobotDriverV2(BaseDeviceDriver):
             raw_ecap = args.get("e_capture")
             ecap = None if raw_ecap is None else _whole(raw_ecap, "e_capture")
         except _BadArgs:
-            return {"status": "error", "message": TEXT_BAD_JOB_ARGS, "queue_len": len(self._job_queue)}
+            return {"status": "error", "message": TEXT_BAD_JOB_ARGS, "queue_len": self._state.job_queue_len()}
         if not self.is_connected:
-            return {**_NOT_CONNECTED, "queue_len": len(self._job_queue)}
+            return {**_NOT_CONNECTED, "queue_len": self._state.job_queue_len()}
         if ecap is None:
             ecap = _parse_tlm(self._read_tlm())[2]  # R5: энкодер сейчас, в потоке команды (s32)
         if self._pick_lead_mm != 0.0:
             # R4: ход ленты на импульс — P_BELT_FACTOR × 1e-5 мм/имп (не константа v1)
             ecap -= round(self._pick_lead_mm / (self._values["P_BELT_FACTOR"] * 1e-5))
-        with self._flags_lock:
-            self._job_queue.append((x, y, z, ecap, place))  # maxlen: старейшее вытесняется (паритет v1)
-            n = len(self._job_queue)
+        n = self._state.enqueue_job((x, y, z, ecap, place))  # maxlen: старейшее вытесняется (паритет v1)
         return {"status": "ok", "queue_len": n}
 
     def _op_return_job(self, args: dict) -> dict:
@@ -1355,12 +1799,14 @@ class RobotDriverV2(BaseDeviceDriver):
         try:
             item = (_coord(args, "x_mm"), _coord(args, "y_mm"), _coord(args, "z_mm", 0.0))
         except _BadArgs:
-            return {"status": "error", "message": TEXT_BAD_RETURN_ARGS, "return_queue_len": len(self._return_queue)}
+            return {
+                "status": "error",
+                "message": TEXT_BAD_RETURN_ARGS,
+                "return_queue_len": self._state.return_queue_len(),
+            }
         if not self.is_connected:
-            return {**_NOT_CONNECTED, "return_queue_len": len(self._return_queue)}
-        with self._flags_lock:
-            self._return_queue.append(item)
-            n = len(self._return_queue)
+            return {**_NOT_CONNECTED, "return_queue_len": self._state.return_queue_len()}
+        n = self._state.enqueue_return(item)
         return {"status": "ok", "return_queue_len": n}
 
     # --- jog ---
@@ -1410,58 +1856,35 @@ class RobotDriverV2(BaseDeviceDriver):
             direction, speed = _int_in(args, "dir", 1, 8), _int_in(args, "spd", 1, 100)
         except _BadArgs:
             return {"status": "error", "message": TEXT_BAD_ARGS}
-        with self._flags_lock:
-            if self._stopping:
-                return {"status": "error", "message": TEXT_STOPPING}
-            if self._busy:
-                return dict(_BUSY_PROGRAM)
-            if self._job_active:
-                return dict(_BUSY_JOB)
-            if self._holding_locked():
-                self._last_hold = self._clock()
-                return {"status": "ok"}
-            if self._syncing:
-                return {"status": "error", "message": TEXT_SYNCING}
+        decision = self._state.jog_hold_check()  # свой jog держится -> продление (last_hold) без JOG_CONT
+        if decision == "hold":
+            return {"status": "ok"}
+        if decision is not None:
+            return decision
         if not self.is_connected:
             return dict(_NOT_CONNECTED)
         client = self._client
         # Переход jog: стоп в полёте держит этот замок — новый JOG_CONT уйдёт после возврата stop() (п.9)
         with self._jog_tx_lock:
-            with self._flags_lock:
-                if self._stopping:
-                    return {"status": "error", "message": TEXT_STOPPING}
-                if self._busy:
-                    return dict(_BUSY_PROGRAM)
-                if self._job_active:
-                    return dict(_BUSY_JOB)
-                if self._holding_locked():
-                    self._last_hold = self._clock()
-                    return {"status": "ok"}
-                if self._syncing:
-                    return {"status": "error", "message": TEXT_SYNCING}
-                prev = self._jog
-                # Д4: от проверки _busy до записи self._jog start_program видит переход как jog (_BUSY_JOG)
-                self._jog_starting = True
+            # Д4: допуск ставит jog_starting — до записи jog start_program видит переход как jog (_BUSY_JOG)
+            decision, prev = self._state.jog_hold_admit()
+            if decision == "hold":
+                return {"status": "ok"}
+            if decision is not None:
+                return decision
             try:
                 if prev is not None and prev.stop_requested and not prev.stop_sent:
                     self._stop_jog_locked(prev)  # release / окно ещё не дослали стоп — шлём его сами, один раз
                 result = client.jog_cont(direction, speed)
                 run = _JogRun(seq=result.seq)
                 # _last_hold — ДО spawn: spawn запускает поток при вызове, поток читает _last_hold (К3)
-                with self._flags_lock:
-                    self._jog = run
-                    self._last_hold = self._clock()
-                    # H-A: запись движения — новое поколение защёлки ПОСЛЕ неё (стоп prev выше её не покрывает)
-                    self._latch_reset_locked()
-                    stopping = self._stopping
+                # H-A: запись движения — новое поколение защёлки ПОСЛЕ неё (стоп prev выше её не покрывает)
+                stopping = self._state.jog_started(run)
                 if stopping:
                     # H-B: стоп процесса не взял замок перехода и записан, пока JOG_CONT был в полёте, — он мог лечь
                     # раньше движения. Стоп этого seq пишется здесь, мимо защёлки; поводок не запускается.
                     # Единственное исключение из «одна запись стопа процесса на робота»: в этой гонке их две.
-                    with self._flags_lock:
-                        run.released = True
-                        run.stop_requested = True
-                        run.active = False
+                    self._state.jog_aborted_by_stop(run)
                     try:
                         self._write_stop(STOP_LEVEL["SOFT"], run)
                     except Exception as exc:
@@ -1485,32 +1908,18 @@ class RobotDriverV2(BaseDeviceDriver):
                             f"робот {self.entry.id!r}: стоп jog после отказа spawn не доставлен: "
                             f"{type(stop_exc).__name__}: {stop_exc}"
                         )
-                    with self._flags_lock:
-                        run.active = False
-                        self._jog = prev
+                    self._state.jog_spawn_failed(run, prev)
                     return self._spawn_failed(thread_name, exc)
             finally:
-                with self._flags_lock:
-                    self._jog_starting = False
+                self._state.jog_start_done()
         return {"status": "ok", "seq": result.seq}
-
-    def _holding_locked(self) -> bool:
-        """Под ``_flags_lock``: свой jog жив и его стоп не запрошен."""
-        run = self._jog
-        return run is not None and run.active and not run.stop_requested
 
     def _op_jog_release(self, _args: dict) -> dict:
         """Перестать писать поводок и явно остановить свой jog (Л4); нет своего jog -> ok без записи стопа."""
-        with self._flags_lock:
-            run = self._jog
-            if run is None or not run.active or run.stop_requested:
-                return {"status": "ok"}
-            run.released = True
-            run.stop_requested = True
-            run.wake.set()
-            # T3.7 (ревью р.1): поток поводка выходит (active = False) раньше записи стопа — до её возврата тик
-            # не берёт задание, иначе SOFT этого jog оборвал бы CVT_JOB (E_ABORTED)
-            self._jog_stopping = True
+        # T3.7 (ревью р.1): jog_stopping ставится вместе с пометками — до возврата стопа тик не берёт задание
+        run = self._state.jog_release_begin()
+        if run is None:
+            return {"status": "ok"}
         try:
             # handle is None: spawn ещё не вернулся — без close; _stop_jog ждёт _jog_tx_lock, который jog_hold держит
             # до возврата spawn, поток поводка видит run.released и выходит сам (К4). close — вне _jog_tx_lock:
@@ -1520,8 +1929,7 @@ class RobotDriverV2(BaseDeviceDriver):
                 self._close_thread(handle, _LEASE_JOIN_S)
             self._stop_jog(run)
         finally:
-            with self._flags_lock:
-                self._jog_stopping = False
+            self._state.jog_release_done()
         return {"status": "ok"}
 
     def _stop_jog(self, run: _JogRun) -> None:
@@ -1544,16 +1952,11 @@ class RobotDriverV2(BaseDeviceDriver):
         period = client.jog_lease_period_s or _LEASE_PERIOD_FALLBACK_S
         try:
             while True:
-                with self._flags_lock:
-                    if run.released:
-                        return  # стоп шлёт release
-                    stop = ev.is_set() or self._clock() - self._last_hold > _HOLD_WINDOW_S
-                    if stop:
-                        run.stop_requested = True
-                        # причина для лога (D-L1): приоритет ``ev`` — порядок прежнего ``or``
-                        reason = "область закрывается" if ev.is_set() else "окно удержания истекло"
-                        late = self._stopping
-                if stop:
+                # окно удержания / ev -> stop_requested; причина для лога (D-L1) и «после начала остановки»
+                decision, reason, late = self._state.lease_check(run, ev)
+                if decision == "released":
+                    return  # стоп шлёт release
+                if decision == "stop":
                     # то же, что ``_stop_jog`` (Д3): замок и условие прежние, но «писал ли поток» известно для лога
                     with self._jog_tx_lock:
                         wrote = not run.stop_sent
@@ -1571,8 +1974,7 @@ class RobotDriverV2(BaseDeviceDriver):
             logger.warning(f"робот {self.entry.id!r}: поводок jog прерван: {type(exc).__name__}: {exc}")
             self._publish_error(TEXT_LEASE_LOST)
         finally:
-            with self._flags_lock:
-                run.active = False
+            self._state.lease_exit(run)
 
     # --- программы ---
 
@@ -1584,41 +1986,23 @@ class RobotDriverV2(BaseDeviceDriver):
         """Захват (программа / задание / jog) -> компиляция -> поток исполнителя. ``kind`` уходит в счётчики
         возвратов ``_program_loop`` (T3.7 DESIGN п.7). Без ``spawn`` — ``RuntimeError`` до захвата."""
         spawn = self._spawn_fn()
-        with self._flags_lock:
-            if self._stopping:
-                return {"status": "error", "message": TEXT_STOPPING}
-            if self._busy:
-                return dict(_BUSY_PROGRAM)
-            if self._job_active:
-                return dict(_BUSY_JOB)
-            run = self._jog
-            if self._jog_starting or self._jog_stopping or (run is not None and run.active):
-                return dict(_BUSY_JOG)  # окно T3.7: поводок вышел, стоп jog_release ещё не вернулся
-            if self._syncing:
-                return {"status": "error", "message": TEXT_SYNCING}
-            if not self.is_connected:
-                return dict(_NOT_CONNECTED)
-            self._busy = True
-            self._prog_alive = True
-            self._latch_reset_locked()
+        # is_connected зовётся под замком состояния последней проверкой, как раньше
+        refusal = self._state.admit_launch(lambda: self.is_connected)
+        if refusal is not None:
+            return refusal
         try:
             scenario = compile_program(program, points, frames or {}, self._ws_params())
             total = len(scenario.records)
         except Exception as exc:
-            with self._flags_lock:
-                self._busy = False
-                self._prog_alive = False
+            self._state.launch_failed()
             return {"status": "error", "message": str(exc)}
         thread_name = f"{self.entry.id}-prog-{_next_thread_k()}"
         try:
             handle = spawn(lambda ev: self._program_loop(scenario, name, total, kind), name=thread_name)
         except Exception as exc:
-            with self._flags_lock:
-                self._busy = False
-                self._prog_alive = False
+            self._state.launch_failed()
             return self._spawn_failed(thread_name, exc)
-        with self._flags_lock:
-            self._prog_handle = handle
+        self._state.program_started(handle)
         return {"status": "ok", "name": name, "total": total}
 
     def start_return(self, slot: Point, **kw: Any) -> dict:
@@ -1645,13 +2029,12 @@ class RobotDriverV2(BaseDeviceDriver):
         def on_progress(done: int, all_records: int) -> None:
             state["done"], state["total"] = done, all_records
             self._pub(path, dict(state))
-            # Микроокно (К1): стоп, записанный между проверкой _stopping и взятием поколения в run_chunks, прогон
+            # Микроокно (К1): стоп, записанный между проверкой stopping и взятием поколения в run_chunks, прогон
             # не видит — повторяем его при первом же опросе. Повтор привязан к прогону и идёт мимо защёлки стопа
             # процесса (та запись удачна, но могла лечь до g0 прогона); только запись, без эха
-            with self._flags_lock:
-                level = self._stop_level if (self._stopping and not resent[0]) else 0
-                if level:
-                    resent[0] = True
+            level = self._state.stop_resend_level(resent[0])
+            if level:
+                resent[0] = True  # локальная переменная потока исполнителя
             client = self._client
             if level and client.stop_generation != client.run_stop_base:
                 level = 0  # стоп записан после g0: прогон видит его сам, повтор дал бы вторую запись
@@ -1664,8 +2047,7 @@ class RobotDriverV2(BaseDeviceDriver):
 
         try:
             self._pub(path, dict(state))
-            with self._flags_lock:
-                stopping = self._stopping
+            stopping = self._state.is_stopping()
             if stopping:
                 state["state"] = "aborted"  # стоп пришёл до первого хода: run_chunks не зовём
             else:
@@ -1679,17 +2061,10 @@ class RobotDriverV2(BaseDeviceDriver):
             logger.warning(f"робот {self.entry.id!r}: программа {name!r}: {state['error']}")
         finally:
             try:
-                # Итог публикуется ДО снятия _busy: robot_program_run может прийти сразу после (DESIGN 7)
+                # Итог публикуется ДО снятия program_active: robot_program_run может прийти сразу после (DESIGN 7)
                 self._pub(path, dict(state))
             finally:
-                with self._flags_lock:
-                    self._busy = False
-                    self._prog_alive = False
-                    if kind == "return":
-                        if state["state"] == "done":
-                            self.returns_done += 1
-                        else:
-                            self.returns_failed += 1
+                self._state.program_finished(kind, state["state"] == "done")
 
     # ------------------------------------------------------------------ #
     # Операции движения и параметров (T5.3d, часть d1)
@@ -1697,19 +2072,7 @@ class RobotDriverV2(BaseDeviceDriver):
 
     def _motion_refusal(self, *, syncing: bool = False) -> dict | None:
         """Отказ занятости для движения и записи параметров: останов, программа, задание, jog (и синхронизация)."""
-        with self._flags_lock:
-            if self._stopping:
-                return {"status": "error", "message": TEXT_STOPPING}
-            if self._busy:
-                return dict(_BUSY_PROGRAM)
-            if self._job_active:
-                return dict(_BUSY_JOB)
-            run = self._jog
-            if self._jog_starting or self._jog_stopping or (run is not None and run.active):
-                return dict(_BUSY_JOG)
-            if syncing and self._syncing:
-                return {"status": "error", "message": TEXT_SYNCING}
-        return None
+        return self._state.motion_refusal(syncing)
 
     def _op_stop(self, args: dict) -> dict:
         """Стоп оператора {level}: занятость не проверяет; ответ ``{"status", "level": <ИМЯ>, "echo": bool}``."""
@@ -1825,24 +2188,22 @@ class RobotDriverV2(BaseDeviceDriver):
     def _op_program_abort(self, _args: dict) -> dict:
         """Программа идёт -> ТОЛЬКО запись SOFT (``_write_stop``), без эха: подтверждение — итог ``.program``
         ``aborted``. Программы нет -> ``stopped: False``, ``STOP_REQ`` не пишется. ``_stopping`` не ставится."""
-        with self._flags_lock:
-            running = self._busy
+        running = self._state.program_running()
         if not running:
             return {"status": "ok", "stopped": False}
         self._write_stop(STOP_LEVEL["SOFT"])
         return {"status": "ok", "stopped": True}
 
     def _param_gate(self) -> dict | None:
-        """Взять ``_param_lock`` без блокировки. Отказ (замок занят или ``_syncing``) — ответ; успех — None, замок
-        взят, вызывающий отпускает его в ``finally``. Блокирующий захват стоял бы всю синхронизацию на командном
-        потоке."""
+        """Взять ``_param_lock`` без блокировки. Отказ (замок занят, останов или ``syncing``) — ответ; успех — None,
+        замок взят, вызывающий отпускает его в ``finally``. Блокирующий захват стоял бы всю синхронизацию на
+        командном потоке."""
         if not self._param_lock.acquire(blocking=False):
             return {"status": "error", "message": TEXT_SYNCING}
-        with self._flags_lock:
-            stopping, syncing = self._stopping, self._syncing
-        if stopping or syncing:
+        refusal = self._state.param_refusal()
+        if refusal is not None:
             self._param_lock.release()
-            return {"status": "error", "message": TEXT_STOPPING if stopping else TEXT_SYNCING}
+            return {"status": "error", "message": refusal}
         return None
 
     def _op_param_set(self, args: dict) -> dict:
@@ -1883,8 +2244,7 @@ class RobotDriverV2(BaseDeviceDriver):
 
     def _param_set_locked(self, store: RobotDataStore, name: str, raw: int, base_rev: str | None) -> dict:
         """Тело ``param_set`` под ``_param_lock``."""
-        with self._flags_lock:
-            old_values, old_epoch = dict(self._values), self._epoch
+        old_values, old_epoch = dict(self._values), self._epoch  # владелец — _param_lock (T5.3f Q6)
         current_rev = self._store_call(load_params, store, self.entry.id).rev
         if current_rev != base_rev:
             raise RevisionConflict(current_rev)  # робот не тронут
@@ -1912,8 +2272,7 @@ class RobotDriverV2(BaseDeviceDriver):
         new_values = {**old_values, name: raw}
         # Запись файла упала -> исключение наружу, self._epoch прежний: тик увидит расхождение меток (§11.4 п.4)
         rev = self._store_call(save_params, store, self.entry.id, new_values, new_epoch, base_rev=base_rev)
-        with self._flags_lock:
-            self._values, self._epoch = new_values, new_epoch
+        self._values, self._epoch = new_values, new_epoch  # владелец — _param_lock (T5.3f Q6)
         self._pub(
             f"devices.state.{self.entry.id}.params",
             {
@@ -1963,13 +2322,13 @@ class RobotDriverV2(BaseDeviceDriver):
     def snapshot(self, data: dict | None = None, quality: str | None = None) -> dict:
         """Snapshot со счётчиками заданий и возвратов (T3.7 п.11, по образцу v1); ключей ``mode`` / ``draw_*`` нет."""
         base: dict[str, Any] = {
-            "queue_len": len(self._job_queue),
+            "queue_len": self._state.job_queue_len(),
             "jobs_sent": self.jobs_sent,
             "jobs_done": self.jobs_done,
             "jobs_failed": self.jobs_failed,
             "returns_done": self.returns_done,
             "returns_failed": self.returns_failed,
-            "return_queued": len(self._return_queue),
+            "return_queued": self._state.return_queue_len(),
             "pick_lead_mm": self._pick_lead_mm,
         }
         if data:
