@@ -18,7 +18,7 @@
 | VfdDriver | done | test_vfd_driver.py |
 | HikvisionDriver | done (lazy SDK) | test_device_hub_plugin (enum/release) |
 | GenericModbusDriver | done | test_generic_modbus.py |
-| RobotDriverV2 (пакет `drivers/robot_driver_v2/`) | done (T5.3f; на стенде не проверен) | test_robot_driver_v2.py, test_robot_v2_state_acceptance.py, test_no_private_driver_state.py |
+| RobotDriverV2 (пакет `drivers/robot_driver_v2/`) | done (T5.3f; стенд `harness_smoke` 3 passed ×3, 2026-10-20) | test_robot_driver_v2.py, test_robot_v2_state_acceptance.py, test_no_private_driver_state.py |
 | DeviceHubPlugin | done | test_device_hub_plugin.py |
 | DeviceHubClient | done | test_client.py |
 
@@ -40,5 +40,5 @@
 (27 полей, 49 секций одного замка); тестовые обращения к полям состояния 31 -> 0, швы — белый список 112 (сторож
 `test_no_private_driver_state.py`). Поведение не менялось — по наборам, матрице инъекций и стенду `harness_smoke` 3×3. Детали и коммиты — `plans/robot-protocol-v2/tasks/T5.3f.result.md`.
 
-**Открыто:** окна W1 и W4 (`request_stop` посреди `connect`) — задача T5.3g; живой стенд T5.3f ещё не пройден;
+**Открыто:** окна W1 и W4 (`request_stop` посреди `connect`) — задача T5.3g;
 SPI хаба (снятие швов) — следующая задача.
