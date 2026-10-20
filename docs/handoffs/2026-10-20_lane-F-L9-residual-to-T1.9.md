@@ -41,8 +41,20 @@
 - 8 вопросов плана GUI-закрытия (`plans/2026-10-20_gui-graceful-close/plan.md`, «Вопросы»); рекомендации лида —
   в чате 2026-10-20: 1 «Только отключиться», 2 черновик, 3 да для v1, 4 не молча — спросить, 5 да ~60 с,
   6 `%LOCALAPPDATA%\Inspector\recovery\`, 7 срок из окна стопа процесса, 8 да с предупреждением.
-- Координатор: расширение полосы Ф на `CommandManager.handle_command` (запрошено; уже выданы `keyed_executor.py`,
-  `_dispatch_command`, `register_command` + метаданные).
+
+## Граница файлов полосы Ф (координатор inspector-bottles-fb, 2026-10-20, дословно по его записи)
+
+- `multiprocess_framework/modules/process_manager_module/**`, `multiprocess_framework/modules/process_module/**`;
+- `router_module` — ADR-RTR-014 и `pump_inbound`; в `router_module/core/router_manager.py` — только `_dispatch_command`
+  (передача reply-колбэка);
+- `command_module` — `register_command` и метаданные регистрации, `CommandManager.handle_command`;
+- `multiprocess_framework/modules/worker_module/keyed_executor.py` (новый) с тестами.
+- Развилку «сам / исполнителю» делает CommandManager по ключу из регистрации (`key_from`), отправители не меняются.
+- Чужие, не трогать: `Services/device_hub/**`, `Plugins/hub/device_hub/**`, `Services/robot_comm/**`,
+  `plans/robot-protocol-v2/**` (полоса Р2); `plans/queue/ORDER.md`, строки `defects.md` (координатор).
+- Ловушка: camera-device-service Task 1.7 тоже правит `process_manager_module/launcher/spawner.py`; Р2 позже («SPI хаба»,
+  OpSpec) заденет регистрацию команд — один писатель, при смене сигнатуры/умолчаний `register_command` предупредить
+  координатора до слияния.
 
 ## Дальше (следующая сессия)
 
