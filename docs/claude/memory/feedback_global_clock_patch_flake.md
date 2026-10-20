@@ -1,7 +1,7 @@
 ---
 name: feedback-global-clock-patch-flake
-description: "Глобальный patch(time.monotonic) с конечным side_effect = флейк (flaky) от чужих потоков; часы (clock) делать зависимостью объекта"
-module: [state_store_module]
+description: "Глобальный patch(time.monotonic) с конечным side_effect = флейк (flaky) от чужих потоков; часы (clock) делать зависимостью объекта; шов, что гоняется с окном драйвера по реальным часам, — тест времени, даже если ждёт событие"
+module: [state_store_module, device_hub]
 mechanism: [flaky-tests, test-infra]
 metadata:
   node_type: memory
@@ -31,3 +31,10 @@ clock=time.monotonic)`, внутри единственная точка чте�
 Связано: [[feedback_check_red_on_main_first]] (сперва проверить красноту на main — здесь main
 дал зелёный с первого раза и чуть не увёл в «это не флейк, это моя правка»),
 [[feedback_plausible_is_not_verified]], [[feedback_single_marker_verdict_lies]].
+
+**Второй случай, 2026-10-20 (T5.3c/d, ревью Opus р.7).** Сторожа `test_robot_v2_lease_log.py` должны были взять замок
+или послать release раньше, чем истечёт окно удержания jog (`_HOLD_WINDOW_S = 0.2`) по реальным часам драйвера.
+Сторож (а) ждал событие `stop_requested`, но успех решала гонка потока теста с окном. Вход: `time.sleep(0.3)` после
+`jog_hold` → 2 failed на верном коде, с тем же текстом, что у инъекций L-I2/L-I5, — ложно указывает на продукт.
+Правка: `RobotDriverV2(clock=_ManualClock().now)`, окно сдвигается `advance()` только после шага теста → 4 passed и с
+задержкой. **Триггер:** шов должен «успеть раньше» короткого окна объекта — окно держать часами объекта.
