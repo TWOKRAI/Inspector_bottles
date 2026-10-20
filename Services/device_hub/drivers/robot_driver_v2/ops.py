@@ -45,7 +45,7 @@ from Services.robot_comm.programs import Point
 from Services.robot_comm.robot_data import load_points, save_points
 
 if TYPE_CHECKING:
-    from Services.device_hub.drivers.robot_driver_v2.driver import RobotDriverV2
+    from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 
 __all__ = ["OPS", "OpsMixin", "_EXCHANGE_OPS", "_op_exchange_log_get", "_op_exchange_log_set"]
 

@@ -8,7 +8,8 @@ Purpose:
     класс по ``entry.protocol == "delta_v2"``; драйвер v1 (``robot_driver.py``) не меняется.
 
 Public API:
-    ``RobotDriverV2(entry, protocol=None, *, transport=None, publish=None, param_source=None, clock=None,
+    Ядро ``_RobotDriverCore`` (в ``__init__`` пакета собирается с миксинами в ``RobotDriverV2``):
+    ``_RobotDriverCore(entry, protocol=None, *, transport=None, publish=None, param_source=None, clock=None,
     sleep=None, spawn=None)``; ``connect() -> bool``, ``disconnect()``, ``request_stop()``, ``is_connected``,
     ``tick(stop_event)``,
     ``call(op, args)`` с операциями ``jog_hold`` {dir, spd}, ``jog_release``, ``get_telemetry``,
@@ -59,7 +60,7 @@ Stability: lite
 плагина): задание (HARD), jog и программа — стоп с ожиданием эха; простой подключённый робот — только запись SOFT,
 без чтения эха и без ``last_error`` (T5.3c c3); защёлку ``_shutdown`` он не ставит.
 Потоки поводка и исполнителя живут в области (``spawn``): имя ``<entry.id>-lease-<k>`` / ``<entry.id>-prog-<k>``,
-``k`` — счётчик модуля.
+``k`` — счётчик модуля ``texts.py``.
 """
 
 from __future__ import annotations
