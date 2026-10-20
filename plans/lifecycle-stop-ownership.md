@@ -50,7 +50,7 @@
 |---|---|---|---|---|
 | [`lifecycle-owner-scope`](2026-10-03_lifecycle-owner-scope/plan.md) (Ф0 начата 2026-10-03, первый приоритет очереди) | один владелец ресурсов **внутри** процесса: подписки, потоки, окна; корень процесса с сегментами `planes \| transport \| work` ([DESIGN §2.2–2.3](2026-10-03_lifecycle-owner-scope/DESIGN.md)) | — | **П1:** эскалация `_stop_many` и метка ReaderGone становятся адаптером `ChildProcessStop` — семантика и ADR остаются здесь (ADR-SRM-016, ADR-PMM-031), код живёт в одном месте, тесты Task 1.2 обязаны остаться зелёными. **П2:** формула бюджета (`outer_stop_budget`, `_pm_graceful_budget`) — в один `stop_budget.py`, продолжение ADR-PMM-031 на уровень ребёнка. **П3:** внутрипроцессная половина Task 3.1 (именованные фазы `stop()`) и удаление хука `_before_observability_teardown` — их Task 1.2 | у нас остаются: межпроцессный quiesce → ack (сужённая Task 3.1), Ф2-перемер, `ProcessTreeGuard` и досъём дерева в `harness.py` (**П4**), D1/L-7. Ф2 — после их Ф1 (меняет времена стопа) |
 | [`lifecycle-graceful-stop`](lifecycle-graceful-stop.md) (DONE) | ReaderGoneQueue, хук выхода, ADR-SRM-015/016, долги 1–6 | долги 4–6 и L-5 (1)–(3) | ADR-SRM-016 дополняется, не переписывается | закрыт — сюда только ссылки |
-| [`transport-single-policy`](transport-single-policy.md) (не начат) | двери транспорта кадров, loan/reclaim, `frame_shm_middleware` | — | **L-6 (кадры и маски 0.3–1.2 МБ через pipe) — туда, не сюда**: это корень окна зависания, но домен — транспорт кадров | этот план не трогает `frame_shm_middleware`, `loan_ledger`, `router_manager` |
+| [`transport-single-policy`](transport-single-policy/plan.md) (не начат) | двери транспорта кадров, loan/reclaim, `frame_shm_middleware` | — | **L-6 (кадры и маски 0.3–1.2 МБ через pipe) — туда, не сюда**: это корень окна зависания, но домен — транспорт кадров | этот план не трогает `frame_shm_middleware`, `loan_ledger`, `router_manager` |
 | [`2026-09-22_gui-service`](2026-09-22_gui-service/plan.md) (APPROVED ред. 2) | Task 1.3a — серверный `SocketChannel`; кнопка «стоп» Пульта | — | чистый путь `system.shutdown` к старту 1.3a | срок-якорь Ф1 |
 | [`observability-closure`](observability-closure/plan.md) (в работе, сессия A) | 4.3b и дальше правят `process_manager_process.py` (форвардеры, хаб); 4.8 — «останов стенда через terminate» | — | закрываем «terminate на `system.shutdown`» | **общий файл `process_manager_process.py`**: правка Ф1 — одна функция `_cmd_system_shutdown` + вызов метки в `stop_many`; мержить маленькими коммитами, перед мержем — `git log main..` соседа |
 | [`otel-export`](otel-export.md) (сессия B) | числа останова `otel flush` | — | после Ф1 путь через команду тоже чистый | их числа через команду сдвинутся — предупредить в handoff |
@@ -450,10 +450,15 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 ### Файлы полосы Ф для Task 1.9–1.11 (2026-10-20)
 
 - **Владеет полоса Ф (один писатель — исполнитель текущей задачи):** `multiprocess_framework/modules/process_manager_module/**`,
-  `multiprocess_framework/modules/process_module/**`; в `router_module` — только текст ADR-RTR-014, `STATUS.md` и
-  докстринг `pump_inbound` (заморозка), код роутера не трогать.
-- **Вне полосы, по одной строке, через координатора:** `multiprocess_prototype/orchestrator.py` (Task 1.9: пометка
-  `recipe.activate` как команды жизненного цикла).
+  `multiprocess_framework/modules/process_module/**`; в `router_module` — текст ADR-RTR-014, `STATUS.md`, докстринг
+  `pump_inbound` (заморозка) и **только** `RouterManager._dispatch_command`.
+- **Расширение полосы координатором 2026-10-20 (Task 1.9, вариант А):** `worker_module/keyed_executor.py` (новый) +
+  `worker_module/{README.md, interfaces.py, DECISIONS.md, tests/}`; `router_module/core/router_manager.py` — только
+  `_dispatch_command`; `command_module` — только `register_command` и метаданные/запись команды. Сигнатура
+  `register_command` только расширяется (необязательный аргумент, умолчания прежние); смена умолчания — предупреждение
+  координатору до слияния (сосед: полоса Р2, «SPI хаба» OpSpec, перебазируется на наш `main`).
+- **Вне полосы, по одной правке, через координатора:** `multiprocess_prototype/orchestrator.py` (Task 1.9: регистрация
+  `recipe.activate` с исполнителем жизненного цикла).
 - **Ловушка:** `2026-10-18_camera-device-service` Task 1.7 тоже правит `process_manager_module/launcher/spawner.py`
   (Task 1.11 — тоже). Один писатель: перед стартом 1.11 координатор сверяет, начата ли их 1.7; если да — 1.11 ждёт её
   слияния или берёт `spawner.py` после неё. То же для `process_manager_process.py` и плана `gui-graceful-close`.
@@ -469,14 +474,14 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 ### Task 1.9 — стоп вне `message_processor`: одна FIFO жизненного цикла PM, отложенный ответ (конечное состояние L-9)
 
 **Статус:** DRAFT 2026-10-20 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
-**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла — одна FIFO вне `message_processor`, ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа.
-**Зависит от:** нет (первая); потребитель — [`gui-graceful-close`](gui-graceful-close.md); О5 — ждёт вердикта CTO
+**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла — общий `worker_module/keyed_executor.py` (`key=None`, строго по порядку) вне `message_processor`, развилка в `_dispatch_command`, ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа.
+**Зависит от:** нет (первая); потребитель — [`gui-graceful-close`](gui-graceful-close.md); первый потребитель общего примитива (О5, CTO 2026-10-20)
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9.md`](lifecycle-stop-ownership/tasks/T1.9.md)
 
 ### Task 1.10 — честный итог стопа: `outcome` рядом с `success`
 
 **Статус:** DRAFT 2026-10-20 · **Level:** Middle+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `developer` (Sonnet), эскалация — `teamlead`; инъекции — Haiku; ревью — `reviewer` (Opus)
-**Goal:** ответ `process.stop`/`process.restart` и `supervision.status` несут `outcome` = exited | terminated | killed | survived; `success` по-прежнему «смерть подтверждена».
+**Goal:** ответ `process.stop`/`process.restart` и `supervision.status` несут `outcome` = exited | terminated | killed | survived | handed_over; `success` по-прежнему «смерть подтверждена».
 **Зависит от:** Task 1.9; О1
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.10.md`](lifecycle-stop-ownership/tasks/T1.10.md)
 
@@ -489,25 +494,21 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 
 ### Открытые решения Task 1.9–1.11 (владельцу / CTO, не догадки менеджера)
 
-- **О1 (CTO).** `outcome` стопа, прерванного системным стопом (1.9 D4, ребёнок ещё жив, его добьёт `_ChildrenStop`):
-  (а) `"survived"` + `error: "system_stopping"` — набор из четырёх значений CTO сохраняется, но «survived» здесь значит
-  «не дождались», а не «пережил kill»; (б) пятое значение `"handed_over"`. Менеджер склоняется к (а) — решение CTO.
-- **О2 (CTO).** Присвоение `stop_wait_idle` в PM после 1.9 (D5): менеджер оставил его как страховку (ноль затрат на
-  потоке FIFO). Если «FREEZE» в вердикте значит «вызывающего нет» — присвоение снимается, и (в) живёт только в тестах.
-- **О3 (владелец).** `register_lifecycle_command` — публичный метод PM, через который приложение помечает свои команды
-  жизненного цикла (`recipe.activate` прототипа). Альтернатива без правки прототипа — список имён в конфиге PM. Менеджер
-  выбрал метод (принцип 1: механизм во фреймворке, приложение только помечает); правка `orchestrator.py` — вне полосы Ф.
-- **О4 (CTO).** `targets="all"` у `topology.apply`/`wire.*`/`recipe.activate`: relay и fan-out на время смены топологии
-  ждут её конца — как сегодня, без регресса, но и без выигрыша. Сужать до diff — отдельный замер.
-- **О5 (CTO, вопрос владельца 2026-10-20 «отдел вместо одного телефона»).** 1.9 — PM-локальный исполнитель или первый
-  потребитель общего примитива фреймворка (приёмный поток всегда свободен; обработчики — в исполнителях с порядком по
-  ключу, пул или asyncio): **ждёт вердикта CTO.** До вердикта 1.9 пишется против протокола `OrderedExecutor` (D1);
-  при вердикте «общий примитив» меняется реализация и место файла, классы D2, двери, I1–I4 и REDS — нет. Стадия 0 1.9
-  не начинается, пока лид не сверит вердикт (если он пришёл) с D1.
+Вердикт CTO 2026-10-20 по «отделу вместо одного телефона» и О1–О5 — ACCEPT WITH CONDITIONS; решения внесены в T1.9/T1.10.
+
+- **О1 — решено CTO:** пятое значение `outcome = "handed_over"` для стопа, прерванного системным стопом (ребёнка
+  добивает `_ChildrenStop`); `survived` значит только «пережил kill» — не смешивать.
+- **О2 — решено CTO:** присвоение `stop_wait_idle` остаётся страховкой (цена ноль: `depth == 0` → 0); ADR-PMM-037 —
+  «страховка, не основной путь».
+- **О3 (владелец, открыто).** Как приложение помечает свои команды жизненного цикла (`recipe.activate` прототипа). Совет
+  CTO — метаданные регистрации (`executor=`, `targets=`), так и записано в T1.9 D2; альтернатива — список имён в конфиге PM.
+- **О4 — решено CTO:** `targets="all"` остаётся; сужение до diff потом станет вычислением ключа исполнителя.
+- **О5 — решено CTO:** 1.9 — первый потребитель общего примитива `worker_module/keyed_executor.py` (T1.9 D1). Роли-потоки
+  по видам почты отвергнуты замером (T1.9 «Почему так»).
 
 ## Ф2 — перемерить после L-6 и решить судьбу ReaderGoneQueue
 
-Зависит от L-6 = Фаза 4 [`transport-single-policy`](transport-single-policy.md) (Task 4.0 разведка → 4.1 claim check). Когда сообщения в data-очередях станут ~1 КБ: 20 циклов стопа по всем путям,
+Зависит от L-6 = Фаза 4 [`transport-single-policy`](transport-single-policy/plan.md) (Task 4.0 разведка → 4.1 claim check). Когда сообщения в data-очередях станут ~1 КБ: 20 циклов стопа по всем путям,
 число срабатываний отпуска и `buffered_dropped`. Если отпуск не срабатывает ни разу — ReaderGoneQueue остаётся
 страховкой (ADR фиксирует это числом), если срабатывает — искать, какой ещё крупный груз едет через pipe.
 **Не делать до L-6** (выполнено по тексту: транспорт 4.1 claim check в `main`) **и до Ф1
