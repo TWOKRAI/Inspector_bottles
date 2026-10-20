@@ -73,13 +73,7 @@ from multiprocess_framework.modules.base_manager.interfaces import IHandle, Scop
 from Services.device_hub.drivers.base import BaseDeviceDriver, logger
 from Services.device_hub.drivers.exchange_log import TEXT_BAD_CONFIG, ExchangeLog, ExchangeLogTransport
 from Services.device_hub.drivers.robot_driver_v2.args import _StoreIOError
-from Services.device_hub.drivers.robot_driver_v2.jobs import JobMixin
-from Services.device_hub.drivers.robot_driver_v2.jog import JogMixin
-from Services.device_hub.drivers.robot_driver_v2.ops import OPS, OpsMixin
-from Services.device_hub.drivers.robot_driver_v2.params import ParamMixin
-from Services.device_hub.drivers.robot_driver_v2.programs import ProgramMixin
 from Services.device_hub.drivers.robot_driver_v2.state import RobotState
-from Services.device_hub.drivers.robot_driver_v2.stop import StopMixin
 from Services.device_hub.drivers.robot_driver_v2.texts import (
     TEXT_NO_SPAWN,
     TEXT_SCOPE_CLOSED,
@@ -107,10 +101,10 @@ from Services.robot_comm.core.protocol_v2 import ERR, STOP_LEVEL
 from Services.robot_comm.programs import Point
 from Services.robot_comm.store import RobotDataStore
 
-__all__ = ["RobotDriverV2"]
+__all__ = ["_RobotDriverCore"]
 
 
-class RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, OpsMixin, BaseDeviceDriver):
+class _RobotDriverCore(BaseDeviceDriver):
     """Драйвер робота Delta v2 (DESIGN п.1-10 брифа T5.1).
 
     Args:
@@ -132,7 +126,7 @@ class RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, Ops
 
     kind = "robot"
 
-    _OPS: dict[str, Callable[[RobotDriverV2, dict], dict]]  # заполняется после класса
+    _OPS: dict[str, Callable[[_RobotDriverCore, dict], dict]]  # заполняется после класса
 
     def __init__(
         self,
@@ -594,6 +588,3 @@ class RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, Ops
         if data:
             base.update(data)
         return super().snapshot(base, quality)
-
-
-RobotDriverV2._OPS = OPS
