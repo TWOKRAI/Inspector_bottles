@@ -128,7 +128,7 @@ def test_factory_passes_the_one_store(tmp_path: Path) -> None:
 
 def test_save_params_failure_after_ack_keeps_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Файл не записался после ACK значения и метки: ``self._epoch`` и ``self._values`` прежние (§11.4 п.4)."""
-    import Services.device_hub.drivers.robot_driver_v2 as module
+    import Services.device_hub.drivers.robot_driver_v2.driver as module
 
     def broken_save(*_a: Any, **_kw: Any) -> str:
         raise OSError("disk full")
@@ -375,7 +375,7 @@ def test_resync_rereads_epoch_under_lock(tmp_path: Path) -> None:
 
 def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Тик видит расхождение меток между ACK метки и записью ``self._epoch``: полной пересинхронизации нет."""
-    import Services.device_hub.drivers.robot_driver_v2 as module
+    import Services.device_hub.drivers.robot_driver_v2.driver as module
 
     real_save = module.save_params
     entered, release = threading.Event(), threading.Event()

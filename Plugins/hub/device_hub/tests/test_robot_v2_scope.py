@@ -452,7 +452,7 @@ def test_s9_survivor_visible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def _s9_part_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(robot_driver_v2, "_PROGRAM_JOIN_S", 0.3)
+    monkeypatch.setattr(robot_driver_v2.driver, "_PROGRAM_JOIN_S", 0.3)
     done_evt = threading.Event()
     with _bench() as (drv, _rig, rec, _scope):
         try:
@@ -640,7 +640,7 @@ def test_s13_tick_loop_wakes_on_stop_event(tmp_path: Path) -> None:
 
 
 def test_s14_survivor_of_plain_disconnect_reaches_health(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(robot_driver_v2, "_PROGRAM_JOIN_S", 0.3)
+    monkeypatch.setattr(robot_driver_v2.driver, "_PROGRAM_JOIN_S", 0.3)
     done_evt = threading.Event()
     plugin = ctx = None
     try:
