@@ -12,12 +12,9 @@ Public API:
 Stability: lite
 """
 
+from Services.device_hub.drivers.robot_driver_v2.state import JogView, RobotState, RobotStateView, _JogRun
 from Services.device_hub.drivers.robot_driver_v2.driver import (
-    JogView,
     RobotDriverV2,
-    RobotState,
-    RobotStateView,
-    _JogRun,
     _parse_tlm,
 )
 
