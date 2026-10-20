@@ -1823,10 +1823,13 @@ K=120 без вычерпывания — жив через 3 с (ожидани
 
 - `_cmd_system_shutdown` принимает `mode` (`graceful` по умолчанию | `force`) и `deadline_s` (только `force`, 0.1..5.0 с
   включительно, по умолчанию 1.0). Ошибка — `{"error": "mode: graceful|force"}` / `{"error": "deadline_s: 0.1..5.0"}`
-  (в том числе `bool`, не число, NaN/inf); ни одно событие при ошибке не взводится. `graceful` — байт в байт прежний путь.
+  (в том числе `bool`, не число, NaN/inf, целое вне диапазона вроде `10**400`); ни одно событие при ошибке не
+  взводится. Без `mode` — прежний путь и прежний ответ; неизвестный `mode` (включая `None` и другой регистр) теперь
+  ошибка.
 - `force`: СНАЧАЛА `_ChildrenStop.set_force_deadline(time.monotonic() + deadline_s)`, затем те же события; INFO
-  `force: срок стопа детей <d> с`; ответ сразу, с `mode` и `deadline_s`. Нет `_children_stop` (команда до `work`) —
-  WARNING и graceful, в ответе `"mode": "graceful"`.
+  `force: срок стопа детей <d> с`; ответ сразу, с `mode` и `deadline_s`. Повторный `force` срок не сдвигает: ответ
+  несёт ДЕЙСТВУЮЩИЙ (первый) `deadline_s` и `"already_set": true`, INFO `force: срок уже стоит (<d> с), повтор не
+  меняет`. Нет `_children_stop` (команда до `work`) — WARNING и graceful, в ответе `"mode": "graceful"`.
 - `_ChildrenStop` хранит срок (`_force_at`, первый вызов выигрывает) и флаг `_killed`. `join_until(deadline)` отдаёт
   группе `min(deadline, _force_at)`, пока `kill()` не звали, — в том числе группе, созданной позже команды. `kill()`
   ставит `_killed` ДО делегирования: фаза 3 области (`base_manager/core/lifetime.py`, `_phase3`) зовёт тот же
@@ -1850,7 +1853,8 @@ K=120 без вычерпывания — жив через 3 с (ожидани
 - (б) Исходов по процессам нет до LSO 1.10 и Task 1.1/1.2: драйвер отдаёт `outcomes: None`; итог — строки PM
   `Process '<name>' did not stop in <N>s, terminating...` и сводка `_stop_summary`.
 - (в) `force`, пришедший, когда фаза 2 детей уже идёт и `join_until` уже вызван с прежним сроком, срок не сокращает
-  (PM в стопе глух — отчёт остатка L-9). Предел до Task 1.1.
+  (PM в стопе глух — отчёт остатка L-9). `force`, пришедший во время фазы 1 детей, ждёт в потоке команд PM до
+  `infra_s` (`request_stop` синхронно ставит монитор на паузу под тем же `_lock`). Предел до Task 1.1.
 - (г) `kill` — не раньше конца join воркеров PM: фаза 2 корня идёт LIFO (`process_module/core/process_module.py`,
   порядок регистрации в `work`). Цену мерит L6 (`backend_ctl/tests/test_system_shutdown_force_live.py`).
 - (д) `force` с `deadline_s` меньше обычного стопа (0,7–1,8 с) обрывает и здоровых детей посреди их стопа. Срок самих

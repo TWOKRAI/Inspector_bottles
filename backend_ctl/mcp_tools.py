@@ -305,11 +305,12 @@ def _process_restart_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.process_restart_verified(args["process"], **kw, **_kw_timeout(args))
 
 
-def _system_shutdown(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+def _system_shutdown(drv: BackendDriver, args: dict[str, Any]) -> Any:
     # Только mode/deadline_s: wait/wait_timeout — дефолты драйвера (ждать закрытия сокета до 20 с).
-    kw: Dict[str, Any] = {"mode": str(args.get("mode", "graceful"))}
+    # deadline_s — как есть, без float(): диапазон и тип проверяет PM и отвечает названной ошибкой.
+    kw: dict[str, Any] = {"mode": str(args.get("mode", "graceful"))}
     if args.get("deadline_s") is not None:
-        kw["deadline_s"] = float(args["deadline_s"])
+        kw["deadline_s"] = args["deadline_s"]
     return _jsonable(drv.system_shutdown(**kw))
 
 
@@ -855,7 +856,8 @@ TOOLS: List[ToolSpec] = [
         "mode='graceful' — обычный стоп; mode='force' — срок стопа детей deadline_s (0.1..5.0 с, "
         "дефолт 1.0) от команды, не уложившихся PM добивает terminate/kill. Ответ: "
         "{accepted (None — ответ timeout, команда могла дойти), mode, elapsed_s, pm_gone, outcomes=null}. "
-        "pm_gone=true — сокет закрыт; процесс PM в этот момент может быть ещё жив. "
+        "pm_gone=true — сокет закрыт (в том числе раньше ответа: тогда accepted=None); "
+        "процесс PM в этот момент может быть ещё жив. "
         "Разрушающий: после вызова бэкенда нет.",
         _obj(
             {

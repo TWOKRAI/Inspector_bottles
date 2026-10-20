@@ -53,6 +53,7 @@ from multiprocess_framework.modules.channel_routing_module.observability.observa
 )
 
 from .endpoint_config import resolve_endpoint
+from .mcp_errors import BackendUnavailable
 
 # Форма ответа + типизированные результаты интроспекции вынесены в protocol.py (C.1).
 # Реэкспорт здесь сохраняет обратную совместимость: `from backend_ctl.driver import
@@ -682,7 +683,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         deadline_s: float = 1.0,
         wait: bool = True,
         wait_timeout: float = 20.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Остановить систему командой ``system.shutdown`` (ADR-PMM-038, Task 0.2 gui-graceful-close).
 
         ``mode="force"`` — PM обрезает срок стопа детей до ``deadline_s`` от команды (0.1..5.0 с),
@@ -691,21 +692,33 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         При ``wait`` — опрос ``connection_lost`` каждые 100 мс до ``True`` или ``wait_timeout``.
         ``accepted is False`` (PM ответил ошибкой — стоп не начат) — возврат сразу, без ожидания:
-        ``pm_gone=False``, ``elapsed_s`` — время до ответа.
+        ``pm_gone=False``, ``elapsed_s`` — время до ответа. Сокет закрылся раньше ответа
+        (``BackendUnavailable`` из запроса) — PM ушёл: ``accepted=None``, ``pm_gone=True``, без ожидания.
 
         Возврат ``{"accepted", "mode", "elapsed_s", "pm_gone", "outcomes"}``:
           * ``accepted`` — ``True``/``False`` по ``success`` ответа; ``None``, если ответ — timeout
-            (команда могла дойти; закрытия сокета ждём всё равно);
+            (команда могла дойти; закрытия сокета ждём всё равно) или ответа нет, потому что сокет
+            закрылся раньше;
           * ``pm_gone`` — PM закрыл сокет backend_ctl. Сам процесс PM в этот момент может быть ещё
             жив: транспорт закрывается раньше остальных частей PM;
           * ``elapsed_s`` — от отправки команды до конца ожидания;
           * ``outcomes`` — пока ``None`` (исходы по процессам — Task 1.4).
         """
-        command: Dict[str, Any] = {"cmd": "system.shutdown", "mode": mode}
+        command: dict[str, Any] = {"cmd": "system.shutdown", "mode": mode}
         if mode == "force":
             command["deadline_s"] = deadline_s
         started = time.monotonic()
-        reply = self.system_command(command, timeout=6.0)
+        try:
+            reply = self.system_command(command, timeout=6.0)
+        except BackendUnavailable:
+            # PM закрыл сокет раньше, чем ответил: команда дошла и стоп идёт — это и есть «PM ушёл».
+            return {
+                "accepted": None,
+                "mode": mode,
+                "elapsed_s": round(time.monotonic() - started, 3),
+                "pm_gone": True,
+                "outcomes": None,
+            }
         if isinstance(reply, dict) and reply.get("error") == "timeout":
             accepted: bool | None = None
         else:

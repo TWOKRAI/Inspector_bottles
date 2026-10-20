@@ -88,6 +88,8 @@ class ProcessManagerProcess(ProcessModule):
 
     #: Stoppable детей PM (``_ChildrenStop``); ``None`` до регистрации в ``work``.
     _children_stop: Any = None
+    #: Срок первого принятого ``system.shutdown mode=force``, с (ADR-PMM-038): повтор отвечает им.
+    _force_deadline_s: float | None = None
 
     def __init__(
         self,
@@ -689,11 +691,13 @@ class ProcessManagerProcess(ProcessModule):
         reply: dict = {"success": True, "message": "Shutdown initiated"}
         if mode == "force":
             deadline_s = args.get("deadline_s", 1.0)
+            # Диапазон ДО isfinite: сравнение int с float точное, а math.isfinite(10**400)
+            # бросил бы OverflowError. NaN и inf диапазон не проходят и так.
             if (
                 isinstance(deadline_s, bool)
                 or not isinstance(deadline_s, (int, float))
-                or not math.isfinite(deadline_s)
                 or not 0.1 <= deadline_s <= 5.0
+                or not math.isfinite(deadline_s)
             ):
                 return {"error": "deadline_s: 0.1..5.0"}
             deadline_s = float(deadline_s)
@@ -701,11 +705,16 @@ class ProcessManagerProcess(ProcessModule):
             if children_stop is None:
                 self._log_warning("force: стоп детей не зарегистрирован — выполняю graceful")
                 reply["mode"] = "graceful"
-            else:
-                # СНАЧАЛА срок, потом события: иначе область успеет начать стоп без срока.
-                children_stop.set_force_deadline(time.monotonic() + deadline_s)
+            # СНАЧАЛА срок, потом события: иначе область успеет начать стоп без срока.
+            elif children_stop.set_force_deadline(time.monotonic() + deadline_s):
+                self._force_deadline_s = deadline_s
                 self._log_info(f"force: срок стопа детей {deadline_s} с")
                 reply.update(mode="force", deadline_s=deadline_s)
+            else:
+                # Первый force выигрывает: ответ несёт ДЕЙСТВУЮЩИЙ срок, а не запрошенный.
+                effective = self._force_deadline_s if self._force_deadline_s is not None else deadline_s
+                self._log_info(f"force: срок уже стоит ({effective} с), повтор не меняет")
+                reply.update(mode="force", deadline_s=effective, already_set=True)
         self._log_info("System shutdown requested via command")
         if self._system_stop_event is not None:
             self._system_stop_event.set()

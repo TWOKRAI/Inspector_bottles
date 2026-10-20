@@ -71,7 +71,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 |-------|-----------|
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command(command)` | system-команда в ProcessManager (`process.command`-обёртка) |
-| `system_shutdown(mode="graceful", deadline_s=1.0, wait=True, wait_timeout=20.0)` | `system.shutdown` (срок запроса 6 с) + ожидание закрытия сокета (опрос `connection_lost` раз в 100 мс). `mode="force"` — срок стопа детей `deadline_s` (ADR-PMM-038). Возврат `{accepted (None — ответ timeout), mode, elapsed_s, pm_gone, outcomes=None}`; `pm_gone` — PM закрыл сокет, процесс PM может быть ещё жив |
+| `system_shutdown(mode="graceful", deadline_s=1.0, wait=True, wait_timeout=20.0)` | `system.shutdown` (срок запроса 6 с) + ожидание закрытия сокета (опрос `connection_lost` раз в 100 мс). `mode="force"` — срок стопа детей `deadline_s` (ADR-PMM-038). Возврат `{accepted (None — ответ timeout или сокет закрыт раньше ответа), mode, elapsed_s, pm_gone, outcomes=None}`; `pm_gone` — PM закрыл сокет (`BackendUnavailable` до ответа → `pm_gone=True` сразу), процесс PM может быть ещё жив; `accepted=False` (PM отверг аргументы) — возврат без ожидания |
 | `introspect_handlers(process)` | ключи `message_dispatcher` + команды `CommandManager` |
 | `introspect_registers(process)` | имена регистров + поля (пусто = нет worker-side приёмника) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
