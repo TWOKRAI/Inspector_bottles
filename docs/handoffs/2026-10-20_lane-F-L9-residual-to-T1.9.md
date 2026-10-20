@@ -10,7 +10,10 @@
   - `0da37ff28`, `856bb2e0c` — отчёт L-9 остатка + вердикт CTO:
     [`docs/reports/2026-10-20_lifecycle-stop-ownership_L-9-residual.md`](../reports/2026-10-20_lifecycle-stop-ownership_L-9-residual.md)
     (подробно — `_details.md`, доказательства — `2026-10-20_L-9-residual-evidence/`);
-  - `e58944fc3`, `4b123bac3` — Task 1.9–1.11 в `plans/lifecycle-stop-ownership/tasks/T1.9.md`, `T1.10.md`, `T1.11.md`.
+  - `e58944fc3`, `4b123bac3` — Task 1.9–1.11 в `plans/lifecycle-stop-ownership/tasks/`; 2026-10-20 (раунд 3) Task 1.9
+    разделена на [`T1.9a.md`](../../plans/lifecycle-stop-ownership/tasks/T1.9a.md) (примитив и развилка) и
+    [`T1.9b.md`](../../plans/lifecycle-stop-ownership/tasks/T1.9b.md) (PM), плюс `T1.10.md`, `T1.11.md`; карта инструментов —
+    [`docs/maps/keyed-executor-tools.md`](../maps/keyed-executor-tools.md).
 - Ветка `docs/gui-graceful-close-plan` (worktree `.claude/worktrees/gui-close-plan`), `dd624fa62` — план
   `plans/2026-10-20_gui-graceful-close/` (9 задач, Ф1 после слияния 1.9). Не влита.
 - Слияние обеих веток в `main` — по «да» владельца (координатор спрашивает). Строки ORDER.md / defects.md L-9 обновил
@@ -29,9 +32,9 @@
 ## Решения владельца 2026-10-20 (не пересматривать)
 
 1. Конечное состояние — (б) «отдел»: приёмный поток не ждёт никогда; ждущие команды — в `KeyedExecutor`
-   (`worker_module/keyed_executor.py`, общий примитив), PM — первый потребитель (Task 1.9).
+   (`worker_module/keyed_executor.py`, общий примитив), PM — первый потребитель (Task 1.9b; примитив — Task 1.9a).
 2. Ключ извлекает CommandManager из сообщения по регистрации (`key_from`), развилка «сам / исполнителю» — в
-   CommandManager (T1.9 D1a, сильнее D2). PM в 1.9 — последовательно; параллель по ключам — потом, по замеру.
+   CommandManager (T1.9a D3; вариант с роутером отвергнут). PM в 1.9b — последовательно; параллель по ключам — потом, по замеру.
 3. Task 1.10 (`outcome` exited/terminated/killed/survived/handed_over), Task 1.11 (окно стопа на ребёнка) — да.
 4. «Домой» робота — команда устройству ДО `process.stop` (полоса Р2, T5.3e; координатор передал).
 5. План GUI-закрытия — да. Роли-потоки по видам почты отвергнуты замером CTO (GIL: p99 10 → 31 → 190 мс).
@@ -62,10 +65,10 @@
 
 ## Дальше (следующая сессия)
 
-1. Стадия 0 — `reviewer` Opus, `MODE: plan`, на `T1.9.md`, синхронно; условия координатора: контракт по навыку
-   `module-contract` (README/interfaces `worker_module`, ADR + `python -m scripts.sync`), R12 обратная совместимость.
-   Стадия 0 сверяет D2 с решением D1a и решает деление 1.9a (исполнитель, роутер, регистрация) / 1.9b (PM, прототип):
-   `T1.9.md` 39,7 КБ при бюджете 32, DESIGN 16,8 КБ.
+1. Стадия 0 — `reviewer` Opus, `MODE: plan`, синхронно, сначала на [`T1.9a.md`](../../plans/lifecycle-stop-ownership/tasks/T1.9a.md)
+   (примитив и развилка), после слияния 1.9a — на [`T1.9b.md`](../../plans/lifecycle-stop-ownership/tasks/T1.9b.md) (PM);
+   условия координатора: контракт по навыку `module-contract` (README/interfaces `worker_module`, ADR +
+   `python -m scripts.sync`), R10 1.9a — обратная совместимость. Деление 1.9 → 1.9a/1.9b сделано 2026-10-20 (раунд 3).
 2. Слепой тестер — worktree на коммите открытия задачи, окно у координатора заранее.
 3. teamlead — реализация; инъекции — Haiku по прогнозам лида; ревью Opus; стенд S1–S5.
 
