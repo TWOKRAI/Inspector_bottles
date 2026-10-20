@@ -70,6 +70,13 @@
 
 ## Дальше (следующая сессия)
 
+**Порядок координатора 2026-10-20 (inspector-bottles-42, прежний fb):** сначала **Task 0.2 gui-graceful-close** — force
+`system.shutdown` с коротким сроком + backend_ctl/MCP ([`tasks/0.2.md`](../../plans/2026-10-20_gui-graceful-close/tasks/0.2.md),
+оценка: 4 файла ~90–120 строк + тесты, от LSO 1.9 не зависит; «сейчас главное» — владелец) → LSO 1.9a → 1.9b → 1.10 → 1.11.
+`_cmd_system_shutdown` в `process_manager_process.py` первой пишет 0.2, 1.9b перебазируется на неё. В стадию 0 брифа 0.2
+(Opus): до 1.9b force может ждать до 5 с, если PM занят одиночным `process.stop`; `outcomes: null` до 1.10;
+`threading.Timer` в PM — сверить с G6 и владением потоками (lifecycle-owner-scope).
+
 1. Стадия 0 — `reviewer` Opus, `MODE: plan`, синхронно, сначала на [`T1.9a.md`](../../plans/lifecycle-stop-ownership/tasks/T1.9a.md)
    (примитив и развилка), после слияния 1.9a — на [`T1.9b.md`](../../plans/lifecycle-stop-ownership/tasks/T1.9b.md) (PM);
    условия координатора: контракт по навыку `module-contract` (README/interfaces `worker_module`, ADR +
