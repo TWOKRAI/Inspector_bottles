@@ -2000,3 +2000,8 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 - Контракт `request_stop(deadline)` поднять в `BaseDeviceDriver` — сейчас он есть только у `RobotDriverV2`; второй вид устройства (камера) иначе повторит обход.
 - `DeviceManager._stop_deadline` (`manager.py:72`, `:118-121`) после первой остановки не сбрасывается. Сейчас безопасно: менеджер создаётся заново на каждый `configure`. Переиспользование менеджера сломает срок второй остановки.
 - `RobotDriverV2._write_budget_s` (`robot_driver_v2.py:644`) дублирует умолчания `timeout_sec`/`retries` из `transports.py` — один источник.
+
+## T5.3f robot-protocol-v2: сторож H-A потерял красный M6 до T5.3f (2026-10-20)
+
+- M6 (без сброса защёлки после `JOG_CONT` И без обхода защёлки для jog) на main `a5485097a` выживает: `Plugins/hub/device_hub/tests/test_t53r2_stop_hazards.py` — 29 passed; в ревью `docs/reviews/2026-10-19_T5.3ab-round2-opus-review.md:143` (код T5.3a/b) `test_rehold_after_failed_release_stop_then_process_stop_writes` был красным. Потеря — между T5.3a/b и T5.3c/d, причина не найдена. Решение лида: детерминированный сторож M6 пишется в T5.3f (шаг f1.5) — `plans/robot-protocol-v2/tasks/T5.3f.injections.md`.
+- `test_program_stop_after_g0_then_progress_does_not_repeat_stop` красный под H2b только в полном прогоне (изолированно 0/10 на базе и 0/10 под H2b): тест зависит от порядка/соседей. Сторож H2b — `test_robot_v2_ops.py::test_connect_path_sync_is_cancelled_by_stop`; зависимость от соседей не разобрана.
