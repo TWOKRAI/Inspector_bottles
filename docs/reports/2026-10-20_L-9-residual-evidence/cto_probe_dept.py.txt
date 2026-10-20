@@ -1,0 +1,172 @@
+"""CTO probe: one-telephone cost vs keyed serial executor, GIL effect, cross-channel order.
+Real RouterManager + QueueChannel (queue.Queue), message_processor-like loop (receive every 10 ms).
+"""
+import statistics, sys, threading, time
+from collections import deque
+from queue import Queue
+from types import SimpleNamespace
+
+from multiprocess_framework.modules.router_module.channels.queue_channel import QueueChannel
+from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
+
+
+class KeyedSerialExecutor:
+    """Prototype only: one worker thread per active key, FIFO per key, parallel across keys."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._queues = {}
+        self._running = set()
+
+    def submit(self, key, fn):
+        with self._lock:
+            self._queues.setdefault(key, deque()).append(fn)
+            start = key not in self._running
+            if start:
+                self._running.add(key)
+        if start:
+            threading.Thread(target=self._drain, args=(key,), name=f"exec-{key}", daemon=True).start()
+
+    def _drain(self, key):
+        while True:
+            with self._lock:
+                q = self._queues.get(key)
+                if not q:
+                    self._running.discard(key)
+                    self._queues.pop(key, None)
+                    return
+                fn = q.popleft()
+            try:
+                fn()
+            except Exception as e:  # noqa
+                print("exec error", e)
+
+
+def make_rig():
+    q_sys, q_state = Queue(), Queue()
+    r = RouterManager(manager_name="PM", process=SimpleNamespace(name="PM"))
+    r.register_channel(QueueChannel("PM_system", q_sys))
+    r.register_channel(QueueChannel("PM_state", q_state))
+    stop = threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            r.receive(timeout=0.0, channel_types=["system", "state"])
+            time.sleep(0.01)
+
+    t = threading.Thread(target=loop, name="message_processor", daemon=True)
+    return r, q_sys, q_state, stop, t
+
+
+def cmd(name, **extra):
+    d = {"type": "command", "command": name, "sender": "probe", "targets": ["PM"], "data": {}}
+    d.update(extra)
+    return d
+
+
+def pct(xs, p):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))]
+
+
+def run_latency(mode, slow_s=1.0):
+    r, q_sys, q_state, stop, t = make_rig()
+    ex = KeyedSerialExecutor()
+    pings = []
+    done = threading.Event()
+
+    def slow_work():
+        time.sleep(slow_s)  # stands for: wait on another process (child exit)
+        done.set()
+
+    def on_slow(m):
+        if mode == "inline":
+            slow_work()
+        else:
+            ex.submit("child-a", slow_work)
+
+    r.register_message_handler("probe.slow", on_slow)
+    r.register_message_handler("probe.ping", lambda m: pings.append(time.perf_counter() - m["t0"]))
+    t.start()
+    time.sleep(0.05)
+    q_sys.put(cmd("probe.slow"))
+    time.sleep(0.1)
+    q_sys.put(cmd("probe.ping", t0=time.perf_counter()))
+    done.wait(slow_s + 1.0)
+    time.sleep(0.05)
+    stop.set(); t.join(1.0)
+    return pings[0] if pings else None
+
+
+def run_order():
+    ex = KeyedSerialExecutor()
+    log = []
+    lock = threading.Lock()
+    t0 = time.perf_counter()
+
+    def op(key, i):
+        def f():
+            time.sleep(0.05)
+            with lock:
+                log.append((key, i, round(time.perf_counter() - t0, 3)))
+        return f
+
+    for i in range(3):
+        ex.submit("a", op("a", i))
+        ex.submit("b", op("b", i))
+    time.sleep(0.4)
+    a = [i for k, i, _ in log if k == "a"]
+    b = [i for k, i, _ in log if k == "b"]
+    wall = max(ts for _, _, ts in log)
+    return a, b, wall
+
+
+def run_gil(n_cpu_threads, n_pings=60, period=0.02):
+    r, q_sys, q_state, stop, t = make_rig()
+    ex = KeyedSerialExecutor()
+    pings = []
+
+    def cpu():
+        end = time.perf_counter() + 1.6
+        x = 0
+        while time.perf_counter() < end:
+            for _ in range(20000):
+                x += 1
+    r.register_message_handler("probe.ping", lambda m: pings.append(time.perf_counter() - m["t0"]))
+    t.start()
+    time.sleep(0.05)
+    for i in range(n_cpu_threads):
+        ex.submit(f"cpu{i}", cpu)
+    time.sleep(0.05)
+    for _ in range(n_pings):
+        q_sys.put(cmd("probe.ping", t0=time.perf_counter()))
+        time.sleep(period)
+    time.sleep(0.3)
+    stop.set(); t.join(2.0)
+    return pings
+
+
+def run_cross_channel():
+    r, q_sys, q_state, stop, t = make_rig()
+    seen = []
+    r.register_message_handler("probe.order", lambda m: seen.append(m["seq"]))
+    q_state.put(cmd("probe.order", seq=1))   # sent FIRST, state channel
+    q_sys.put(cmd("probe.order", seq=2))     # sent SECOND, system channel
+    r.receive(timeout=0.0, channel_types=["system", "state"])
+    return seen
+
+
+if __name__ == "__main__":
+    print("python", sys.version.split()[0], "switchinterval", sys.getswitchinterval())
+    l_in = run_latency("inline")
+    l_ex = run_latency("executor")
+    print(f"M1 ping pickup while slow handler (1.0 s) runs: inline={l_in:.3f}s  keyed-executor={l_ex*1000:.1f}ms")
+    a, b, wall = run_order()
+    print(f"M2 keyed order: key a={a} key b={b} wall={wall:.3f}s (serial would be 0.300s)")
+    idle = run_gil(0)
+    one = run_gil(1)
+    two = run_gil(2)
+    for name, xs in (("idle", idle), ("1 cpu thread", one), ("2 cpu threads", two)):
+        ms = [x * 1000 for x in xs]
+        print(f"M3 GIL ping pickup [{name}] n={len(ms)} p50={pct(ms,50):.1f}ms p99={pct(ms,99):.1f}ms max={max(ms):.1f}ms")
+    print("M4 cross-channel order (state seq=1 sent first, system seq=2 second) -> receive order:", run_cross_channel())

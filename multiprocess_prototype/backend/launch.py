@@ -55,11 +55,14 @@ def _env_log_dir_override(env: "dict | Any") -> "str | None":
 
 #: Снято ОДИН раз при импорте, а не читается живьём на каждом build().
 #: Причина: ``build()`` сам пишет резолвнутый АБСОЛЮТНЫЙ путь в
-#: ``INSPECTOR_LOG_DIR`` (setdefault — для hot-swap и детей), и живое чтение env
+#: ``INSPECTOR_LOG_DIR`` (для hot-swap, детей и PM), и живое чтение env
 #: на втором build() того же процесса принимало бы СВОЮ ЖЕ запись за волю
 #: оператора. Поймано характеризацией сборки: снапшот менялся от того, какой
 #: build в процессе был первым. env фиксируется на старте процесса — снимок при
-#: импорте и есть то, что задал оператор.
+#: импорте и есть то, что задал оператор. Есть снимок — env хозяин, build() его
+#: не перезаписывает; нет снимка — build() ПРИСВАИВАЕТ свой каталог (Task 0.2
+#: gui-graceful-close: при setdefault второй прогон харнесса с другим log_dir
+#: писал логи PM в каталог первого).
 _ENV_LOG_DIR_OVERRIDE: "str | None" = _env_log_dir_override(os.environ)
 
 
@@ -666,7 +669,14 @@ class SystemBuilder:
         # через INSPECTOR_LOG_DIR (process_launch_config._resolve_log_dir) → пишут
         # в ту же папку, а не в ./logs (fallback). Обратного влияния на build() нет:
         # env-переопределение снято при импорте (см. _ENV_LOG_DIR_OVERRIDE).
-        os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
+        # Каталог задан явно (system.log_dir: yaml или харнесс), а env оператора при
+        # импорте не было — ПРИСВОИТЬ: PM и лаунчер читают env, и setdefault оставлял
+        # бы каталог первого build() процесса. Env оператора есть — он хозяин, setdefault.
+        resolved_log_dir = str(Path(log_dir).resolve())
+        if _ENV_LOG_DIR_OVERRIDE is None and sys_config.system.log_dir:
+            os.environ["INSPECTOR_LOG_DIR"] = resolved_log_dir
+        else:
+            os.environ.setdefault("INSPECTOR_LOG_DIR", resolved_log_dir)
 
         # Слой L1 — секция observability из system.yaml, СЫРАЯ. Раскладку делает
         # assembler per-process, поверх слоя L2 рецепта (Task 5.12).
