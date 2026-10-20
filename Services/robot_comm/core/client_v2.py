@@ -74,6 +74,7 @@ from Services.robot_comm.core.protocol_v2 import (
 from Services.robot_comm.errors import (
     RobotAborted,
     RobotCommandError,
+    RobotCommError,
     RobotNak,
     RobotNotConnectedError,
     RobotSyncError,
@@ -92,6 +93,7 @@ __all__ = [
     "RobotClientV2",
     "RunReport",
     "StopResult",
+    "SyncCancelled",
     "SyncReport",
 ]
 
@@ -223,6 +225,10 @@ class StopResult(Enum):
 
     ACKED = "acked"  # TLM_STOP_ACK == наше значение
     SUPERSEDED = "superseded"  # эхо уже новее нашего стопа (его перекрыл другой)
+
+
+class SyncCancelled(RobotCommError):
+    """``sync_params`` прерван предикатом ``cancelled`` перед очередной записью: метка не записана."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -783,14 +789,18 @@ class RobotClientV2:
     # синхронизация параметров
     # ------------------------------------------------------------------ #
 
-    def sync_params(self, values: Mapping[str, int], epoch: int) -> SyncReport:
+    def sync_params(
+        self, values: Mapping[str, int], epoch: int, *, cancelled: Callable[[], bool] | None = None
+    ) -> SyncReport:
         """Синхронизация по метке (params.md §11.4 п.3). Значения сырые (§11.1).
 
         Pre: ``values`` содержит все имена ``PARAM_ID`` кроме ``P_CONFIG_EPOCH`` (лишнего и неизвестного нет);
         ``epoch`` в 1..65535 (иначе ``ValueError`` без записи). Post: метка и отпечаток словаря совпали ->
         ни одной записи, ``SyncReport(0, False, epoch)``; иначе все ``PARAM_SET``, ``PARAM_APPLY`` при
         ``TLM_CFG_PENDING == 1``, сверка ``PMIR`` и ``PARAM_SET P_CONFIG_EPOCH`` ПОСЛЕДНЕЙ записью.
-        Raises: ``RobotNak`` (метка не пишется), ``RobotSyncError`` (метка не пишется).
+        ``cancelled`` — необязательный предикат, проверяется перед каждой записью (``PARAM_SET``, ``PARAM_APPLY``,
+        метка); истина -> ``SyncCancelled`` без дальнейших записей (метка не записана). Без него поведение прежнее.
+        Raises: ``RobotNak`` (метка не пишется), ``RobotSyncError`` (метка не пишется), ``SyncCancelled``.
         """
         expected_names = set(PARAM_ID) - {"P_CONFIG_EPOCH"}
         if set(values) != expected_names:
@@ -809,13 +819,20 @@ class RobotClientV2:
         if robot_epoch == epoch and robot_dict == DICT_FINGERPRINT:
             return SyncReport(0, False, epoch)
 
+        def check_cancelled() -> None:
+            if cancelled is not None and cancelled():
+                raise SyncCancelled
+
         for pid, raw in raw_by_id.items():
+            check_cancelled()
             self.cmd("PARAM_SET", [pid, raw])
         applied = False
         if int(self._rd(REG["TLM_CFG_PENDING"], 1)[0]) == 1:
+            check_cancelled()
             self.cmd("PARAM_APPLY", [])
             applied = True
         self._verify_mirror(raw_by_id)
+        check_cancelled()
         self.cmd("PARAM_SET", [PARAM_ID["P_CONFIG_EPOCH"], epoch])
         with self._state_lock:
             self._wdg_raw = raw_by_id[PARAM_ID["P_WDG_TIMEOUT_MS"]]

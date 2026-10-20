@@ -16,7 +16,7 @@ import itertools
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
@@ -29,6 +29,10 @@ from Services.device_hub.errors import (
 )
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
+from Services.device_hub.robot_data_ops import STORE_ERRORS, param_source_for, run_op, store_error_for_operator
+
+if TYPE_CHECKING:
+    from Services.device_hub.robot_data_ops import RobotDataStore
 
 logger = get_std_logger(__name__)
 
@@ -55,6 +59,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         spawn:      ``(target, *, name) -> IHandle`` — ``IScope.spawn`` области плагина (T5.3a); получает драйвер
                     робота v2 (его потоки живут в этой области) и рассылка стопа ``request_stop_all``. ``None`` —
                     робот ``delta_v2`` не создаётся (``RuntimeError`` фабрики), драйверы v1 работают как прежде.
+        robot_store: Единственное на процесс ``RobotDataStore`` данных робота v2 (T5.3c): им пользуется ``robot_data``;
+                    ``None`` — ``robot_data`` отвечает отказом «хранилище данных робота не задано».
     """
 
     def __init__(
@@ -63,12 +69,14 @@ class DeviceManager(BaseManager, ObservableMixin):
         publish_cb: Callable[[str, dict], None] | None = None,
         *,
         spawn: Callable[..., Any] | None = None,
+        robot_store: RobotDataStore | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
         self._spawn = spawn
+        self._robot_store = robot_store
         self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
 
         # Реестр: id -> DeviceEntry
@@ -195,7 +203,19 @@ class DeviceManager(BaseManager, ObservableMixin):
 
                 if self._spawn is None:  # T5.3 круг 2: потоки робота v2 — только в области плагина
                     raise RuntimeError(f"робот {entry.id!r} (delta_v2): менеджер без spawn не создаёт драйвер v2")
-                return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
+                if self._robot_store is None:
+                    return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
+                # Параметры робота при подключении — из params.yaml (T5.3c c2); плохие данные бросают RobotDataInvalid
+                # и др. из фабрики, их перехватывает ``connect``
+                param_source = param_source_for(self._robot_store, entry.id, entry.params)
+                return RobotDriverV2(
+                    entry,
+                    proto,
+                    publish=self._publish,
+                    spawn=self._spawn,
+                    param_source=param_source,
+                    store=self._robot_store,
+                )
             return RobotDriver(entry, proto)
 
         self._factories["robot"] = _robot_factory
@@ -376,7 +396,20 @@ class DeviceManager(BaseManager, ObservableMixin):
             DeviceHubError: Носитель bridge не подключён.
         """
         entry = self.get(dev_id)
-        driver = self._get_or_create_driver(entry)
+        try:
+            driver = self._get_or_create_driver(entry)
+        except STORE_ERRORS as exc:
+            # OSError не у робота v2 -> None: пробрасываем; у робота v2 путь диска и имя файла — в лог, в last_error —
+            # константа (robot_data_ops.store_error_for_operator)
+            translated = store_error_for_operator(exc, dev_id, entry.protocol, log=logger)
+            if translated is None:
+                raise
+            exc = translated
+            # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
+            # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
+            self._publish(f"devices.state.{dev_id}.last_error", str(exc))
+            self._publish(f"devices.state.{dev_id}.conn", {"conn": "error"})
+            return False
 
         # Bridge: проверить connected-носителя
         if entry.transport.get("type") == "bridge":
@@ -441,6 +474,25 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": msg, "error": msg}
 
         return driver.call(op, args)
+
+    def robot_data(self, dev_id: str, op: str, args: dict | None = None) -> dict:
+        """Офлайн-данные робота v2 (путь О4 мимо ``call``): параметры, точки, СК, программы (T5.3c).
+
+        Pre: устройство в реестре, ``kind == "robot"`` и ``protocol == "delta_v2"``, хранилище задано; связь с
+        роботом не нужна. Операции — ``robot_data_ops.OPS``; запись требует ключ ``base_rev``.
+        Post: успех -> ``{"status": "ok", ...}``. Ошибка -> ``{"status": "error", "message": <постоянный текст без
+        входных значений>}``; ``RevisionConflict`` добавляет ``current_rev``; плохие аргументы — ``TEXT_BAD_ARGS``.
+        ``OSError`` хранилища -> постоянный ``TEXT_STORE_ERROR``; полный текст ошибки (путь, имя) — в лог.
+        """
+        try:
+            entry = self.get(dev_id)
+        except DeviceNotFoundError as exc:
+            return {"status": "error", "message": str(exc)}
+        if entry.kind != "robot" or entry.protocol != "delta_v2":
+            return {"status": "error", "message": "данные робота — только для протокола delta_v2"}
+        if self._robot_store is None:
+            return {"status": "error", "message": "хранилище данных робота не задано"}
+        return run_op(self._robot_store, dev_id, op, args, entry.params, log=logger)
 
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers
@@ -519,6 +571,9 @@ class DeviceManager(BaseManager, ObservableMixin):
             dev_id: ID устройства.
             values: {name: value, ...}
         """
+        # Д2 (T5.3c): регистры робота v2 пишут только команды robot_*; отказ не зависит от связи (до проверки драйвера)
+        if self.get(dev_id).protocol == "delta_v2":
+            return {"status": "error", "message": "запись регистров робота v2 — только командами robot_*"}
         driver = self._get_connected_driver(dev_id)
         if driver.protocol is None:
             return {"status": "error", "message": f"Устройство {dev_id!r} без протокола"}

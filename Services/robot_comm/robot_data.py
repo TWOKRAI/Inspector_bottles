@@ -8,9 +8,9 @@ Purpose:
     Потоков, процессов, команд хаба и GUI здесь нет; конкурентность — замки хранилища (один замок на документ).
 
 Public API:
-    ``ParamsDoc(values, epoch, rev)``, ``load_params``, ``save_params``, ``make_param_source`` (для ``param_source=``
-    драйвера v2), ``load_points``, ``save_points``, ``load_frames``, ``save_frames``, ``load_program``,
-    ``save_program``, ``delete_program``.
+    ``ParamsDoc(values, epoch, rev)``, ``param_bounds``, ``load_params``, ``save_params``, ``make_param_source``
+    (для ``param_source=`` драйвера v2), ``load_points``, ``save_points``, ``load_frames``, ``save_frames``,
+    ``load_program``, ``save_program``, ``delete_program``.
 
 Stability: lite (новый модуль без Protocol-интерфейса; контракт держат ``Pre:``/``Post:`` функций и тесты).
 
@@ -31,7 +31,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
-from Services.robot_comm.errors import RobotDataInvalid
+from Services.robot_comm.errors import RobotDataInvalid, RobotWatchdogDisabled
 from Services.robot_comm.programs.program import FrameDef, Point, Program
 from Services.robot_comm.store import RobotDataStore
 
@@ -43,6 +43,7 @@ __all__ = [
     "load_points",
     "load_program",
     "make_param_source",
+    "param_bounds",
     "save_frames",
     "save_params",
     "save_points",
@@ -88,16 +89,40 @@ def _check_epoch(epoch: object, rev: str | None) -> int:
     return epoch  # type: ignore[return-value]
 
 
+#: Параметр сторожа: 0 в таблице протокола значит «выключен», в продукте это отказ (DESIGN 8, T5.3c).
+_WDG_NAME = "P_WDG_TIMEOUT_MS"
+_WDG_MIN = 1
+
+
+def param_bounds(name: str) -> tuple[int, int]:
+    """Границы сырого значения параметра ``name``: ``(min, max)`` таблицы протокола; для сторожа минимум 1.
+
+    Pre: ``name`` — имя из ``_VALUE_NAMES`` (``P_CONFIG_EPOCH`` не входит: метка ПК лежит в ``epoch``).
+    Post: чистая функция, диск не трогает; её границы совпадают с проверкой ``load_params`` / ``save_params``.
+    Raises: ``RobotDataInvalid(None)`` — неизвестное имя или ``P_CONFIG_EPOCH`` (именно ``RobotDataInvalid``).
+    """
+    if not isinstance(name, str) or name not in _VALUE_NAMES:
+        raise RobotDataInvalid(None)
+    meta = PARAMS[PARAM_ID[name]]
+    low = _WDG_MIN if name == _WDG_NAME else meta["min"]
+    return int(low), int(meta["max"])
+
+
 def _check_values(values: object, rev: str | None) -> dict[str, int]:
-    """Имена ∈ ``_VALUE_NAMES``, сырые — целые в ``min..max`` таблицы; иначе ``RobotDataInvalid(rev)``."""
+    """Имена ∈ ``_VALUE_NAMES``, сырые — целые в ``param_bounds``; иначе ``RobotDataInvalid(rev)``.
+
+    ``P_WDG_TIMEOUT_MS = 0`` — ``RobotWatchdogDisabled(rev)`` (подкласс); правило стоит до проверки границ.
+    """
     if not isinstance(values, Mapping):
         raise RobotDataInvalid(rev)
     checked: dict[str, int] = {}
     for name, raw in values.items():
         if name not in _VALUE_NAMES or not _is_int(raw):
             raise RobotDataInvalid(rev)
-        meta = PARAMS[PARAM_ID[name]]
-        if not meta["min"] <= raw <= meta["max"]:
+        if name == _WDG_NAME and raw == 0:
+            raise RobotWatchdogDisabled(rev)
+        low, high = param_bounds(name)
+        if not low <= raw <= high:
             raise RobotDataInvalid(rev)
         checked[name] = raw
     return checked

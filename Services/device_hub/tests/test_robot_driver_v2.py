@@ -509,7 +509,7 @@ class _FakeClient:
     def probe(self) -> None:
         self.probes += 1
 
-    def sync_params(self, _values: Any, _epoch: int) -> None:
+    def sync_params(self, _values: Any, _epoch: int, *, cancelled: Any = None) -> None:
         pass
 
     def kick_heartbeat(self) -> None:
