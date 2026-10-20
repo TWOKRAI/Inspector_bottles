@@ -676,6 +676,56 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         msg = build_system_command_message(command, sender=self._sender, reply_to=self._reply_to)
         return self.request(msg, timeout=timeout)
 
+    def system_shutdown(
+        self,
+        mode: str = "graceful",
+        deadline_s: float = 1.0,
+        wait: bool = True,
+        wait_timeout: float = 20.0,
+    ) -> Dict[str, Any]:
+        """Остановить систему командой ``system.shutdown`` (ADR-PMM-038, Task 0.2 gui-graceful-close).
+
+        ``mode="force"`` — PM обрезает срок стопа детей до ``deadline_s`` от команды (0.1..5.0 с),
+        не уложившихся добивает фаза 3 области стопа; ``graceful`` — обычный стоп, ``deadline_s``
+        не передаётся. Срок запроса 6.0 с: команда может ждать в очереди PM до 5 с (предел (а)).
+
+        При ``wait`` — опрос ``connection_lost`` каждые 100 мс до ``True`` или ``wait_timeout``.
+        ``accepted is False`` (PM ответил ошибкой — стоп не начат) — возврат сразу, без ожидания:
+        ``pm_gone=False``, ``elapsed_s`` — время до ответа.
+
+        Возврат ``{"accepted", "mode", "elapsed_s", "pm_gone", "outcomes"}``:
+          * ``accepted`` — ``True``/``False`` по ``success`` ответа; ``None``, если ответ — timeout
+            (команда могла дойти; закрытия сокета ждём всё равно);
+          * ``pm_gone`` — PM закрыл сокет backend_ctl. Сам процесс PM в этот момент может быть ещё
+            жив: транспорт закрывается раньше остальных частей PM;
+          * ``elapsed_s`` — от отправки команды до конца ожидания;
+          * ``outcomes`` — пока ``None`` (исходы по процессам — Task 1.4).
+        """
+        command: Dict[str, Any] = {"cmd": "system.shutdown", "mode": mode}
+        if mode == "force":
+            command["deadline_s"] = deadline_s
+        started = time.monotonic()
+        reply = self.system_command(command, timeout=6.0)
+        if isinstance(reply, dict) and reply.get("error") == "timeout":
+            accepted: bool | None = None
+        else:
+            accepted = isinstance(reply, dict) and bool(reply.get("success"))
+        # PM отверг команду (ошибка аргументов) — стоп не начат, сокет не закроется: не ждём.
+        pm_gone = False if accepted is False else bool(self.connection_lost)
+        if wait and not pm_gone and accepted is not False:
+            wait_until = time.monotonic() + float(wait_timeout)
+            while not pm_gone and time.monotonic() < wait_until:
+                time.sleep(min(0.1, max(0.0, wait_until - time.monotonic())))
+                pm_gone = bool(self.connection_lost)
+        reply_mode = reply.get("mode", mode) if isinstance(reply, dict) else mode
+        return {
+            "accepted": accepted,
+            "mode": reply_mode,
+            "elapsed_s": round(time.monotonic() - started, 3),
+            "pm_gone": pm_gone,
+            "outcomes": None,
+        }
+
     # ---- Интроспекция (P1 команды) ----
 
     def introspect_handlers(self, process: str, **kw: Any) -> Dict[str, Any]:
