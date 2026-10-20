@@ -593,6 +593,8 @@ class RobotDriverV2(BaseDeviceDriver):
                 raise ConnectionError("транспорт не подключился")
             client.probe()
             if not self._sync_on_connect(client):
+                if self._sync_cancelled():
+                    return False  # стоп посреди подключения: драйвер не готов, метка не доверена
                 self._ready = was_ready  # посреди подключения появилась активность: синхронизации нет, всё как было
                 return self.is_connected
             self._run_on_connect(client)
@@ -602,6 +604,10 @@ class RobotDriverV2(BaseDeviceDriver):
             self._publish_error(TEXT_STORE_ERROR)
             return False
         except Exception as exc:
+            if self._sync_cancelled():  # «Отключить» / стоп посреди подключения — не ошибка обмена
+                logger.info(f"робот {self.entry.id!r}: подключение прервано остановкой: {type(exc).__name__}: {exc}")
+                self._last_quality = "bad"
+                return False
             self._record_err()
             self._last_quality = "bad"
             logger.warning(f"робот {self.entry.id!r}: подключение не удалось: {type(exc).__name__}: {exc}")

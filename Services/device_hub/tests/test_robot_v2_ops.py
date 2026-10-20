@@ -721,3 +721,90 @@ def test_syncing_cleared_when_connect_sync_fails(tmp_path: Path) -> None:
         assert drv.connect() is True
         assert drv.call("jog_hold", {"dir": 1, "spd": 20})["status"] == "ok"
         assert drv.call("jog_release", {})["status"] == "ok"
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью р.5 (K1-K3)
+# --------------------------------------------------------------------------------------------------
+
+
+def _stop_inside_first_param_set(hub: _Hub, run: Callable[[], Any]) -> tuple[Any, list[tuple[str, Any]]]:
+    """``run`` в потоке; на первом ``PARAM_SET`` синхронизации (шов) — ``request_stop``; затем ``run`` дорабатывает."""
+    drv = hub.drv
+    entered, release, seen = _block_first_param_set(drv)
+    box: list[Any] = []
+    worker = threading.Thread(target=lambda: box.append(run()), daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
+        drv.request_stop(time.monotonic() + 2.5)
+    finally:
+        release.set()
+        worker.join(30.0)
+    assert not worker.is_alive()
+    return (box[0] if box else None), seen
+
+
+def test_cancelled_manual_connect_on_ready_robot_leaves_driver_not_ready(tmp_path: Path) -> None:
+    """K1 (Q5): ручной ``connect()`` на подключённом роботе, стоп на первом ``PARAM_SET`` -> ``False``,
+    драйвер не готов (параметры не синхронизированы)."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        assert drv.is_connected
+        hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+        result, _ = _stop_inside_first_param_set(hub, drv.connect)
+        assert result is False
+        assert not drv.is_connected
+
+
+def test_cancelled_tick_reconnect_with_ready_flag_is_not_good(tmp_path: Path) -> None:
+    """K1 (Q4): тик переподключает при ``_ready`` True и закрытом транспорте, стоп на первом ``PARAM_SET`` ->
+    снимок не ``good``, драйвер не подключён."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        drv.desired_connected = True
+        drv._last_reconnect = -100.0
+        drv._transport.disconnect()  # _ready остаётся True
+        hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
+        snapshot, _ = _stop_inside_first_param_set(hub, lambda: drv.tick(None))
+        assert snapshot is not None and snapshot.get("quality") != "good"
+        assert not drv.is_connected
+
+
+def test_connect_path_sync_is_cancelled_by_stop(tmp_path: Path) -> None:
+    """K2 (Q1): переподключение тиком, ``request_stop`` на первом ``PARAM_SET`` -> дальше ни ``PARAM_SET``, ни
+    ``PARAM_APPLY``; метка робота не записана; ``_syncing`` снят. Краснеет без ``cancelled=`` в ``_sync_on_connect``."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        _drop_link(hub)
+        drv._last_reconnect = -100.0
+        _, seen = _stop_inside_first_param_set(hub, lambda: drv.tick(None))
+        writes = [op for op, _ in seen if op in ("PARAM_SET", "PARAM_APPLY")]
+        assert writes == ["PARAM_SET"], writes  # только запись «в полёте»
+        assert hub.rig.read("TLM_CFG_EPOCH") == [0]
+        assert drv._syncing is False
+
+
+def test_user_disconnect_during_sync_is_not_an_error(tmp_path: Path) -> None:
+    """K3: «Отключить» посреди синхронизации (транспорт закрыт под ``PARAM_SET``) — не ошибка: ни ``last_error``
+    «RobotNotConnectedError», ни роста счётчика ошибок обмена."""
+    with _hub(tmp_path) as hub:
+        drv = hub.drv
+        _drop_link(hub)
+        drv._last_reconnect = -100.0
+        entered, release, _ = _block_first_param_set(drv)
+        tx_err = drv.stats["tx_err"]
+        worker = threading.Thread(target=lambda: drv.tick(None), daemon=True)
+        worker.start()
+        try:
+            assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
+            drv.desired_connected = False
+            stopper = threading.Thread(target=drv.disconnect, daemon=True)
+            stopper.start()
+            stopper.join(10.0)
+        finally:
+            release.set()
+            worker.join(30.0)
+        assert not worker.is_alive()
+        assert [e for e in hub.errors if "RobotNotConnectedError" in str(e) or "подключение к роботу" in str(e)] == []
+        assert drv.stats["tx_err"] == tx_err
