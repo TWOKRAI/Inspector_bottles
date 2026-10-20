@@ -1550,8 +1550,19 @@ class RobotDriverV2(BaseDeviceDriver):
                     stop = ev.is_set() or self._clock() - self._last_hold > _HOLD_WINDOW_S
                     if stop:
                         run.stop_requested = True
+                        # причина для лога (D-L1): приоритет ``ev`` — порядок прежнего ``or``
+                        reason = "область закрывается" if ev.is_set() else "окно удержания истекло"
+                        late = self._stopping
                 if stop:
-                    self._stop_jog(run)  # Д3
+                    # то же, что ``_stop_jog`` (Д3): замок и условие прежние, но «писал ли поток» известно для лога
+                    with self._jog_tx_lock:
+                        wrote = not run.stop_sent
+                        if wrote:
+                            self._stop_jog_locked(run)
+                    if wrote:
+                        # вне обоих замков; нет строки при release, уже записанном стопе и исключении (warning ниже)
+                        suffix = " после начала остановки" if late else ""
+                        logger.info(f"робот {self.entry.id!r}: jog остановлен поводком{suffix}: {reason}")
                     return
                 client.jog_lease()
                 run.wake.wait(period)
