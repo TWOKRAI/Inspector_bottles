@@ -846,9 +846,14 @@ def test_latch_not_reset_by_disconnect_after_shutdown() -> None:
 
 
 def test_disconnect_begin_marks_stop() -> None:
-    """Оракул, ``disconnect``: останов и уровень не ниже SOFT (1); до выключения ответ False."""
+    """Оракул, ``disconnect`` = ``disconnect_begin`` + ``disconnect_stop_plan``: останов и уровень не ниже SOFT (1).
+
+    Поправка лида 2026-10-20 (строка 19 оракула описывала весь ``disconnect`` одним переходом; останов ставит
+    ``disconnect_stop_plan`` — секция ``_request_stop`` базы :880, ``disconnect_begin`` только сбрасывает защёлку).
+    """
     st = _new()
     assert st.disconnect_begin() is False
+    st.disconnect_stop_plan(1)
     v = st.view()
     assert v.stopping is True
     assert v.stop_level >= 1
