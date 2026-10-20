@@ -1808,3 +1808,58 @@ K=120 без вычерпывания — жив через 3 с (ожидани
 **Refs:** `plans/lifecycle-stop-ownership.md` (Task 1.8), `docs/reviews/2026-10-19_L-9_pm-stop-exit-hang.md`,
 `tests/test_child_stop_idle_acceptance.py`, `tests/test_pm_stop_drains_own_queue_acceptance.py`,
 `tests/test_stop_wait_idle_hazards.py`.
+
+## ADR-PMM-038: `system.shutdown mode=force` — срок стопа детей от команды, kill фазой 3 области, без таймера (Task 0.2 gui-graceful-close, 2026-10-20)
+
+**Статус:** accepted (стадия 0 — два раунда ревью Opus, решения лида; план `plans/2026-10-20_gui-graceful-close/plan.md`, Task 0.2).
+
+### Контекст
+
+`system.shutdown` взводит общий `system_stop_event` (Task 1.1 `lifecycle-stop-ownership`). Здоровая система гаснет за
+0,70–1,92 с, но зависший ребёнок получает `terminate` только через `work_s` 5,0 с от фазы 1, `kill` — ещё через 1,0 с,
+подтверждение — +1,0 с (`core/stop_budget.py`, ADR-PMM-035). Агенту и GUI нужен быстрый стоп без ручного убийства процессов.
+
+### Решение
+
+- `_cmd_system_shutdown` принимает `mode` (`graceful` по умолчанию | `force`) и `deadline_s` (только `force`, 0.1..5.0 с
+  включительно, по умолчанию 1.0). Ошибка — `{"error": "mode: graceful|force"}` / `{"error": "deadline_s: 0.1..5.0"}`
+  (в том числе `bool`, не число, NaN/inf, целое вне диапазона вроде `10**400`); ни одно событие при ошибке не
+  взводится. Без `mode` — прежний путь и прежний ответ; неизвестный `mode` (включая `None` и другой регистр) теперь
+  ошибка.
+- `force`: СНАЧАЛА `_ChildrenStop.set_force_deadline(time.monotonic() + deadline_s)`, затем те же события; INFO
+  `force: срок стопа детей <d> с`; ответ сразу, с `mode` и `deadline_s`. Повторный `force` срок не сдвигает: ответ
+  несёт ДЕЙСТВУЮЩИЙ (первый) `deadline_s` и `"already_set": true`, INFO `force: срок уже стоит (<d> с), повтор не
+  меняет`. Нет `_children_stop` (команда до `work`) — WARNING и graceful, в ответе `"mode": "graceful"`.
+- `_ChildrenStop` хранит срок (`_force_at`, первый вызов выигрывает) и флаг `_killed`. `join_until(deadline)` отдаёт
+  группе `min(deadline, _force_at)`, пока `kill()` не звали, — в том числе группе, созданной позже команды. `kill()`
+  ставит `_killed` ДО делегирования: фаза 3 области (`base_manager/core/lifetime.py`, `_phase3`) зовёт тот же
+  `join_until`, и там срок обрезаться не должен — иначе `kill` без окна `terminate` и ложные «ВЫЖИЛИ» (код 76).
+- Добивание — штатная фаза 3 области: `kill()` → `terminate` → `kill` по бюджету `ChildProcessStop`. Нового потока,
+  таймера и вызова `.kill()`/`.terminate()` в PM нет — правило R4 (`scripts/lifecycle_guards/tables.py`) не растёт.
+- `backend_ctl`: `BackendDriver.system_shutdown(mode, deadline_s, wait, wait_timeout)` (срок запроса 6,0 с, ожидание
+  закрытия сокета через `connection_lost`) и MCP-инструмент `system_shutdown` класса `escalated`.
+
+### Отвергнуто
+
+- **`threading.Timer`, зовущий `cs.kill()` по сроку**: новое нарушение R4 сверх лимита файла PM (лимит поднимает только
+  владелец), гонка опоздавшего таймера с фазой 3, лишний поток вне области.
+- **Обрезка срока и в фазе 3** (без флага `_killed`): фаза 3 получала уже прошедший срок — `kill` без окна `terminate`.
+- **Сокращение собственного срока детей** (`work_s`): это протокол стопа ребёнка (Task 3.1), не команда PM.
+
+### Пределы
+
+- (а) До LSO 1.9b команда ждёт в очереди до 5 с, если `message_processor` PM занят одиночным `process.stop`; поэтому
+  срок запроса драйвера 6,0 с. L-тесты этот случай не проверяют.
+- (б) Исходов по процессам нет до LSO 1.10 и Task 1.1/1.2: драйвер отдаёт `outcomes: None`; итог — строки PM
+  `Process '<name>' did not stop in <N>s, terminating...` и сводка `_stop_summary`.
+- (в) `force`, пришедший, когда фаза 2 детей уже идёт и `join_until` уже вызван с прежним сроком, срок не сокращает
+  (PM в стопе глух — отчёт остатка L-9). `force`, пришедший во время фазы 1 детей, ждёт в потоке команд PM до
+  `infra_s` (`request_stop` синхронно ставит монитор на паузу под тем же `_lock`). Предел до Task 1.1.
+- (г) `kill` — не раньше конца join воркеров PM: фаза 2 корня идёт LIFO (`process_module/core/process_module.py`,
+  порядок регистрации в `work`). Цену мерит L6 (`backend_ctl/tests/test_system_shutdown_force_live.py`).
+- (д) `force` с `deadline_s` меньше обычного стопа (0,7–1,8 с) обрывает и здоровых детей посреди их стопа. Срок самих
+  детей (`work_s` от 5,0 с, `stop_budget.py`) `force` не меняет.
+
+**Reversible:** yes (без `mode` команда идёт прежним путём; снять `set_force_deadline` — `force` станет graceful).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/0.2.md`, `tests/test_system_shutdown_force.py`,
+`backend_ctl/tests/test_system_shutdown_driver.py`, `backend_ctl/tests/test_system_shutdown_force_live.py`.

@@ -522,7 +522,7 @@ config = {
 | `process.stop` | `process_name` | Остановить именованный процесс |
 | `process.restart` | `process_name` | Перезапустить процесс |
 | `process.status` | `process_name` | Статус именованного процесса |
-| `system.shutdown` | — | Завершить систему (stop_event.set()) |
+| `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}`. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
 | `system.stats` | — | Статистика: monitor + processes |
 
 Все команды помечены тегом `"system"`.

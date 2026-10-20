@@ -9,6 +9,7 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import math
 import os
 import threading
 import time
@@ -87,6 +88,8 @@ class ProcessManagerProcess(ProcessModule):
 
     #: Stoppable детей PM (``_ChildrenStop``); ``None`` до регистрации в ``work``.
     _children_stop: Any = None
+    #: Срок первого принятого ``system.shutdown mode=force``, с (ADR-PMM-038): повтор отвечает им.
+    _force_deadline_s: float | None = None
 
     def __init__(
         self,
@@ -666,19 +669,57 @@ class ProcessManagerProcess(ProcessModule):
     def _cmd_system_shutdown(self, data=None, **kwargs) -> dict:
         """Запустить завершение системы.
 
-        Параметр data принимается но не используется — команда не требует аргументов.
+        Аргументы (ADR-PMM-038, Task 0.2 gui-graceful-close):
+          * ``mode`` — ``graceful`` (по умолчанию) | ``force``;
+          * ``deadline_s`` — только для ``force``: срок стопа детей от момента команды,
+            0.1..5.0 с включительно, по умолчанию 1.0. Для ``graceful`` не читается.
+        Ошибка аргументов → ``{"error": ...}``, ни одно событие не взводится.
 
         Команда == системный стоп (Task 1.1 lifecycle-stop-ownership): взводит ОБЩИЙ
         ``system_stop_event`` — тот же путь, что закрытие окна GUI и ``harness.stop()``.
         Дети гаснут параллельно, их хук выхода идёт с ``system_stop=True`` и ставит метки
         «читатель ушёл» (ADR-SRM-016). Без этого PM останавливал детей по одному, и
         хук на выходе ждал feeder'ы очередей до terminate спавнера (5.8 с).
+
+        ``force`` не добавляет ни потока, ни нового kill: он только обрезает срок, который
+        ``_ChildrenStop.join_until`` отдаёт группе; добивание остаётся за фазой 3 области.
         """
+        args = _merge_cmd_args(data, kwargs)
+        mode = args.get("mode", "graceful")
+        if mode not in ("graceful", "force"):
+            return {"error": "mode: graceful|force"}
+        reply: dict = {"success": True, "message": "Shutdown initiated"}
+        if mode == "force":
+            deadline_s = args.get("deadline_s", 1.0)
+            # Диапазон ДО isfinite: сравнение int с float точное, а math.isfinite(10**400)
+            # бросил бы OverflowError. NaN и inf диапазон не проходят и так.
+            if (
+                isinstance(deadline_s, bool)
+                or not isinstance(deadline_s, (int, float))
+                or not 0.1 <= deadline_s <= 5.0
+                or not math.isfinite(deadline_s)
+            ):
+                return {"error": "deadline_s: 0.1..5.0"}
+            deadline_s = float(deadline_s)
+            children_stop = getattr(self, "_children_stop", None)
+            if children_stop is None:
+                self._log_warning("force: стоп детей не зарегистрирован — выполняю graceful")
+                reply["mode"] = "graceful"
+            # СНАЧАЛА срок, потом события: иначе область успеет начать стоп без срока.
+            elif children_stop.set_force_deadline(time.monotonic() + deadline_s):
+                self._force_deadline_s = deadline_s
+                self._log_info(f"force: срок стопа детей {deadline_s} с")
+                reply.update(mode="force", deadline_s=deadline_s)
+            else:
+                # Первый force выигрывает: ответ несёт ДЕЙСТВУЮЩИЙ срок, а не запрошенный.
+                effective = self._force_deadline_s if self._force_deadline_s is not None else deadline_s
+                self._log_info(f"force: срок уже стоит ({effective} с), повтор не меняет")
+                reply.update(mode="force", deadline_s=effective, already_set=True)
         self._log_info("System shutdown requested via command")
         if self._system_stop_event is not None:
             self._system_stop_event.set()
         self.stop_event.set()
-        return {"success": True, "message": "Shutdown initiated"}
+        return reply
 
     def _cmd_system_stats(self, data=None, **kwargs) -> dict:
         """Статистика системы.
@@ -4343,7 +4384,17 @@ class _ChildrenStop:
     Это осознанное исключение из «фаза 1 не блокирует» — ``cancel()`` PM ждёт ≤ ``infra_s``.
     Затем реестр читается ЗДЕСЬ, поздно (тесты и смена топологии подменяют его), и группе
     отдаётся фаза 1. Повтор — no-op.
+
+    ``set_force_deadline(at)`` (``system.shutdown mode=force``, ADR-PMM-038) обрезает срок, который
+    ``join_until`` отдаёт группе, до ``at`` — пока не было ``kill()``: фаза 3 области зовёт тот же
+    ``join_until`` после ``kill()``, и там срок обрезаться не должен. Своего потока и своего kill нет.
     """
+
+    #: Срок ``force`` (``time.monotonic()``); ``None`` — срок не ставился. Уровень класса — чтобы
+    #: атрибут был у любого экземпляра, в том числе собранного в тестах через ``__new__``.
+    _force_at: float | None = None
+    #: ``kill()`` уже звали — срок ``force`` больше не применяется.
+    _killed: bool = False
 
     def __init__(self, pm: ProcessManagerProcess) -> None:
         self._pm = pm
@@ -4380,9 +4431,19 @@ class _ChildrenStop:
             self._phase1_error = exc
             raise
 
+    def set_force_deadline(self, at: float) -> bool:
+        """Поставить срок ``force`` (абсолютный, ``time.monotonic()``). Первый вызов выигрывает:
+        повтор срок не сдвигает и возвращает ``False``."""
+        with self._lock:
+            if self._force_at is not None:
+                return False
+            self._force_at = at
+            return True
+
     def join_until(self, deadline: float) -> bool:
         """Дети остановлены к сроку? Ошибка фазы 1 — один раз повторяется здесь (попадёт в ``errors`` корня);
-        реестр упал (группы нет) — ``False`` без исключения."""
+        реестр упал (группы нет) — ``False`` без исключения. Срок ``force`` (если стоит и ``kill()``
+        ещё не звали) обрезает ``deadline`` — в том числе для группы, созданной здесь же."""
         error, self._phase1_error = self._phase1_error, None
         if error is not None:
             raise error
@@ -4390,9 +4451,14 @@ class _ChildrenStop:
             self.request_stop()
         if self._group is None:
             return False
+        force_at = self._force_at
+        if force_at is not None and not self._killed:
+            deadline = min(deadline, force_at)
         return self._group.join_until(deadline)
 
     def kill(self) -> None:
+        # Флаг ДО делегирования: join_until фазы 3 после kill() получает срок как есть.
+        self._killed = True
         if self._group is not None:
             self._group.kill()
 
