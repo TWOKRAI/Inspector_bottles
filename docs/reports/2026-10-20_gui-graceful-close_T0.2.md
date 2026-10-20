@@ -60,10 +60,11 @@
   `force` в фазе 2 срок не сокращает; kill после join воркеров PM; короткий срок обрывает и здоровых детей.
 - Гейт слияния (4b8da041c, против базы main): framework suite — 2 failed, 11912 passed, 44 skipped, 1 xfailed (1048,7 с).
   Оба красных не от ветки: `test_std_logger_guard::test_no_bare_stdlib_logger_outside_whitelist` красный и на main
-  `99405f964` (хит `Services/robot_comm/gui/line_source.py:45`, зона Р2, передан координатору);
-  `test_watcher::test_reload_on_atomic_replace` при одиночном повторе зелёный на ветке и на main (тайминг под нагрузкой).
+  `99405f964` (хит `Services/robot_comm/gui/line_source.py:45`) — это C-11, открыт за полосой Р (T3.8);
+  `test_watcher::test_reload_on_atomic_replace` — ветке не приписан: ветка не трогает `config_module`
+  (`git diff main...HEAD` — 0 файлов там); флейк не доказан — один повтор, а не ×10 в quiet (coordinator §6).
   `validate.py` — 3 FAIL = C-13; `multiprocess_prototype/backend/tests` — 2 failed: `phone_sketch` (C-15),
-  `hikvision_letter_robot` (дрейф снимка от Р2). Новых красных от ветки — 0.
+  `hikvision_letter_robot` (C-16). Новых красных от ветки — 0.
 - Worktree `gui-close-0.2-tester`, `gui-close-0.2-review` — удалить после слияния; `l9-control` — из прошлой сессии.
 
 ## Агенты
