@@ -47,7 +47,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -61,7 +64,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -90,6 +93,11 @@ request-response (dict). События (push без request_id) читаютс�
 | `router.relay` | Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам) | system |
 | `routing.probe` | Диагностика: отправить inner-билет соседу (peer→peer доставка после switch) | system |
 | `routing.refresh` | Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1) | system |
+| `service.list` | Хост сервисов (ADR-SVC-004): service.list | system |
+| `service.restart` | Хост сервисов (ADR-SVC-004): service.restart | system |
+| `service.start` | Хост сервисов (ADR-SVC-004): service.start | system |
+| `service.status` | Хост сервисов (ADR-SVC-004): service.status | system |
+| `service.stop` | Хост сервисов (ADR-SVC-004): service.stop | system |
 | `state.delete` | Удалить узел/поддерево по пути | state_store |
 | `state.get` | Прочитать значение из дерева | state_store |
 | `state.get_subtree` | Прочитать поддерево | state_store |
@@ -102,7 +110,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `supervision.status` | Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts. Маркер замены инстанса = pid+instance_restarts (считает и ручные, и авто-рестарты supervision — они идут той же process.restart). incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора | system |
 | `system.shutdown` | Завершить систему | system |
 | `system.stats` | Статистика системы | system |
-| `telemetry.broadcast` | Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), throttle → центральный троттл оркестратора; cap-детекция на обоих путях. Publish-дельта персистится у PM (глобальная + per-process, ADR-PMM-028) и доигрывается пересозданным детям | system |
+| `telemetry.broadcast` | Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), throttle → центральный троттл оркестратора; cap-детекция на обоих путях | system |
 | `telemetry.reconfigure` | Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle) | system |
 | `topology.apply` | Применить топологию процессов | system |
 | `topology.diff` | Вычислить diff топологии (dry-run) | system |
@@ -132,7 +140,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `freeze_capture` |  |  |
 | `get_metric` |  | stats |
@@ -147,7 +158,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -194,6 +205,7 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
 | `device_connect` |  |  |
 | `device_describe` |  |  |
@@ -206,6 +218,8 @@ request-response (dict). События (push без request_id) читаютс�
 | `device_upsert` |  |  |
 | `device_upsert_many` |  |  |
 | `device_write` |  |  |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -225,7 +239,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -242,6 +256,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `reset_metrics` |  | stats |
 | `robot_abort` |  |  |
 | `robot_clear_queue` |  |  |
+| `robot_do_set` | Робот v2: дискретный выход {device_id, ch: 1..16, on: bool} |  |
 | `robot_draw_abort` |  |  |
 | `robot_draw_circle` |  |  |
 | `robot_draw_polyline` |  |  |
@@ -254,18 +269,40 @@ request-response (dict). События (push без request_id) читаютс�
 | `robot_draw_set_travel` |  |  |
 | `robot_draw_square` |  |  |
 | `robot_enqueue_job` |  |  |
+| `robot_exchange_log_get` |  |  |
+| `robot_exchange_log_set` |  |  |
+| `robot_frame_list` | Робот v2: список систем координат {device_id} -> frames, rev |  |
+| `robot_frame_teach` | Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev} |  |
 | `robot_get_robot_config` |  |  |
 | `robot_get_telemetry` |  |  |
 | `robot_jog` |  |  |
 | `robot_jog_abort` |  |  |
+| `robot_jog_hold` | Робот v2: удержание jog {device_id, dir: 1..8, spd: 1..100} |  |
+| `robot_jog_release` | Робот v2: отпустить jog {device_id} |  |
+| `robot_jog_step` | Робот v2: шаг jog {device_id, dx, dy, dz?, drz?, spd: 1..100} |  |
+| `robot_param_apply` | Робот v2: применить параметры класса reinit {device_id} |  |
+| `robot_param_get_all` | Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev |  |
+| `robot_param_set` | Робот v2: записать параметр {device_id, name, value, base_rev} |  |
+| `robot_point_capture` | Робот v2: запомнить текущую позу как точку {device_id, name, base_rev} |  |
+| `robot_point_delete` | Робот v2: удалить точку {device_id, name, base_rev} |  |
+| `robot_point_list` | Робот v2: список точек {device_id} -> points, rev |  |
+| `robot_point_save` | Робот v2: сохранить точку {device_id, point{name, x, y, z, rz, hand, frame?}, base_rev} |  |
+| `robot_program_abort` | Робот v2: прервать программу {device_id} |  |
+| `robot_program_delete` | Робот v2: удалить программу {device_id, name, base_rev} |  |
+| `robot_program_get` | Робот v2: прочитать программу {device_id, name} -> program, rev |  |
+| `robot_program_list` | Робот v2: имена программ {device_id} -> programs |  |
+| `robot_program_run` | Робот v2: запустить программу {device_id, name} |  |
+| `robot_program_save` | Робот v2: сохранить программу {device_id, program{name, steps}, base_rev} |  |
 | `robot_read_echo` |  |  |
 | `robot_return_job` |  |  |
 | `robot_send_test_job` |  |  |
+| `robot_servo` | Робот v2: серво {device_id, on: bool} |  |
 | `robot_set_encoder_offset` |  |  |
 | `robot_set_manual_mode` |  |  |
 | `robot_set_mode` |  |  |
 | `robot_set_robot_config` |  |  |
 | `robot_set_servo` |  |  |
+| `robot_stop` | Робот v2: стоп {device_id, level: SOFT|HARD|HALT} |  |
 | `robot_toolchange` |  |  |
 | `router.relay` | Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам) | system |
 | `routing.probe` | Диагностика: отправить inner-билет соседу (peer→peer доставка после switch) | system |
@@ -305,7 +342,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -319,7 +359,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -356,7 +396,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -370,7 +413,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -418,7 +461,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -432,7 +478,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -474,7 +520,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -488,7 +537,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -530,7 +579,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -544,7 +596,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -586,7 +638,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -600,7 +655,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
@@ -642,7 +697,10 @@ request-response (dict). События (push без request_id) читаютс�
 
 | Команда | Описание | Теги |
 |---|---|---|
+| `catalog.plugins` | Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода | system |
 | `config.reload` | Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету | system |
+| `diag.thread_raise` | Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook | diagnostics, system |
+| `diag.warn` | Диагностика: позвать warnings.warn — проверка warnings.showwarning | diagnostics, system |
 | `flush_stats` |  | stats |
 | `get_metric` |  | stats |
 | `get_metrics` |  | stats |
@@ -656,7 +714,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `introspect.queues` | Глубины очередей процесса (backpressure) | system |
 | `introspect.registers` | Регистры процесса (имена + поля) из RegistersManager | system |
 | `introspect.router_stats` | Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение) | system |
-| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы) | system |
+| `introspect.status` | Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без cv2) | system |
 | `introspect.telemetry` | Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval) | system |
 | `log.tail.subscribe` | Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push) | system |
 | `log.tail.unsubscribe` | Снять подписку на tail логов процесса | system |
