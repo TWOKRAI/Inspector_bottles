@@ -6,7 +6,8 @@ Purpose:
     ДО работы с диском; запись требует ключ ``base_rev`` (О6; значение ``None`` — «файла ещё нет»).
     Ошибки домена — ``RobotOpError`` с постоянным текстом без входных значений; плохие аргументы — ``BadArgs``
     (ответ — ``TEXT_BAD_ARGS``). Ошибки хранилища и формата (``RevisionConflict``, ``InvalidStoreKey``,
-    ``RobotDataInvalid``, ``StoreDocumentInvalid``) пробрасываются: их превращает в ответ ``DeviceManager.robot_data``.
+    ``RobotDataInvalid``, ``StoreDocumentInvalid``) пробрасываются из операций: их превращает в ответ ``run_op``
+    (его зовёт ``DeviceManager.robot_data``).
 
     Знание о роботе для ``DeviceManager`` сосредоточено здесь: ``run_op`` (тело ``DeviceManager.robot_data`` — поиск
     операции и перевод ошибок в ответ), ``param_source_for`` (источник параметров при подключении) и
@@ -14,7 +15,7 @@ Purpose:
 
 Public API:
     ``OPS``, ``TEXT_BAD_ARGS``, ``TEXT_STORE_ERROR``, ``STORE_ERRORS``, ``BadArgs``, ``RobotOpError``, ``run_op``,
-    ``param_source_for``, ``store_error_for_operator``, ``RobotDataStore``.
+    ``param_source_for``, ``store_error_for_operator``, ``RobotDataStore``, ``WarnLog``.
 
 Stability: lite (контракт держат тесты ``test_robot_v2_commands*``).
 
@@ -24,7 +25,7 @@ Stability: lite (контракт держат тесты ``test_robot_v2_comman
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import ValidationError
 
@@ -52,6 +53,7 @@ __all__ = [
     "BadArgs",
     "RobotDataStore",
     "RobotOpError",
+    "WarnLog",
     "param_source_for",
     "run_op",
     "store_error_for_operator",
@@ -64,6 +66,12 @@ TEXT_STORE_ERROR = "ошибка хранилища данных робота"
 TEXT_NO_POINT = "точка не найдена"
 TEXT_FRAME_DEGENERATE = "точки СК вырождены"
 TEXT_FRAME_IN_BASE = "точка СК должна быть в базе"
+
+
+class WarnLog(Protocol):
+    """Приёмник предупреждений для функций ниже (``logging.Logger`` и логгер фасада подходят): только ``warning``."""
+
+    def warning(self, msg: str, /) -> object: ...
 
 
 class BadArgs(Exception):
@@ -237,6 +245,10 @@ STORE_ERRORS = (RobotDataInvalid, StoreDocumentInvalid, InvalidStoreKey, OSError
 def param_source_for(store: RobotDataStore, device_id: str, params: Mapping[str, Any]) -> Callable[[], Any]:
     """Источник параметров робота при подключении (T5.3c c2) из ``entry.params``: ``robot_params``, ``config_epoch``.
 
+    Pre: ``store`` — хранилище данных робота; ``params`` — ``entry.params`` (``robot_params`` — словарь или нет ключа,
+    ``config_epoch`` — целое или приводится к нему).
+    Post: возвращает ``make_param_source(...)``: источник читает файл параметров при каждом вызове; сам файл здесь не
+    читается.
     Raises: ``ValueError`` / ``TypeError`` при нечисловой ``config_epoch`` (как прежде — из фабрики драйвера).
     """
     return make_param_source(
@@ -247,12 +259,15 @@ def param_source_for(store: RobotDataStore, device_id: str, params: Mapping[str,
     )
 
 
-def store_error_for_operator(exc: Exception, dev_id: str, protocol: str, *, log: Any) -> Exception | None:
+def store_error_for_operator(exc: Exception, dev_id: str, protocol: str, *, log: WarnLog) -> Exception | None:
     """Ошибка хранилища при подключении -> исключение с постоянным текстом для ``last_error``; ``None`` — не наша.
 
-    ``OSError`` не у робота v2 -> ``None`` (вызывающий пробрасывает исключение). ``OSError`` робота v2: путь диска и имя
-    файла — только в лог (``log.warning``), наружу — ``RobotOpError(TEXT_STORE_ERROR)``. Остальные ошибки данных и
-    конфига оператора (битый ``params.yaml``, плохой ``robot_params``, недопустимый id) возвращаются как есть.
+    Pre: ``exc`` — перехваченное из ``STORE_ERRORS``; ``protocol`` — протокол записи устройства.
+    Post: ``OSError`` не у робота v2 -> ``None`` (вызывающий пробрасывает исключение; лога нет). ``OSError`` робота
+    v2: путь диска и имя файла — только в лог (``log.warning``, одна строка), наружу —
+    ``RobotOpError(TEXT_STORE_ERROR)``.
+    Остальные ошибки данных и конфига оператора (битый ``params.yaml``, плохой ``robot_params``, недопустимый id)
+    возвращаются как есть.
     """
     if isinstance(exc, OSError):
         if protocol != "delta_v2":
@@ -262,12 +277,15 @@ def store_error_for_operator(exc: Exception, dev_id: str, protocol: str, *, log:
     return exc
 
 
-def run_op(store: RobotDataStore, dev_id: str, op: str, args: Any, params: Mapping[str, Any], *, log: Any) -> dict:
+def run_op(store: RobotDataStore, dev_id: str, op: str, args: Any, params: Mapping[str, Any], *, log: WarnLog) -> dict:
     """Выполнить офлайн-операцию данных робота и превратить итог в ответ (тело ``DeviceManager.robot_data``).
 
-    ``params`` — ``entry.params`` устройства (``robot_params``, ``config_epoch``). Ответ: ``{"status": "ok", ...}`` или
-    ``{"status": "error", "message": <постоянный текст>}`` (``RevisionConflict`` добавляет ``current_rev``; плохие
-    аргументы — ``TEXT_BAD_ARGS``; ``OSError`` — ``TEXT_STORE_ERROR``, полный текст — в ``log.warning``).
+    Pre: ``store`` задан; устройство — робот ``delta_v2`` (проверяет вызывающий); ``params`` — ``entry.params``
+    (``robot_params``, ``config_epoch``); ``args`` — что угодно (не словарь -> ``TEXT_BAD_ARGS``).
+    Post: не бросает ожидаемых ошибок хранилища и аргументов. Ответ: ``{"status": "ok", ...}`` или
+    ``{"status": "error", "message": <постоянный текст без входных значений>}`` (``RevisionConflict`` добавляет
+    ``current_rev``; плохие аргументы — ``TEXT_BAD_ARGS``; ``OSError`` — ``TEXT_STORE_ERROR``, полный текст — в
+    ``log.warning``, одна строка).
     """
     fn = OPS.get(op)
     if fn is None:

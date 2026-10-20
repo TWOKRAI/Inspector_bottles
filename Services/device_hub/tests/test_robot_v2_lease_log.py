@@ -6,6 +6,8 @@ Purpose:
     успел раньше (шов (а)), и когда запись поводка легла после сброса защёлки первым ``request_stop`` и покрыла
     стоп выключения (шов (б)). Записи ``STOP_REQ`` считаются на стороне робота: seq в старших битах регистра sim.
     Лог читается через ``caplog`` с запасного stdlib-логгера фасада (``mpf.Services.device_hub.drivers.base``).
+    Окно удержания (0,2 с) меряют управляемые часы драйвера (``_ManualClock``, объект-зависимость ``clock=``, не
+    глобальная подмена): тест сам решает, когда окно истекло, и не зависит от планировщика потоков.
     Блокирующие швы держатся в daemon-потоках с дедлайном ``join``; тест всегда отпускает шов в ``finally``.
 
 Public API:
@@ -56,9 +58,33 @@ def scope() -> Iterator[Any]:
         assert list(report.survivors) == [], f"выжившие потоки области теста: {list(report.survivors)}"
 
 
+class _ManualClock:
+    """Часы драйвера под управлением теста: стоят, пока не позван ``advance``; безопасны между потоками.
+
+    Начало отсчёта произвольное (1000,0): драйвер читает только разности. ``connect`` не зависит от хода часов:
+    ожидание телеметрии выходит по предикату сразу (стенд уже включил серво), ``bounded`` держит дедлайн.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._t = 1000.0
+
+    def now(self) -> float:
+        with self._lock:
+            return self._t
+
+    def advance(self, dt_s: float) -> None:
+        with self._lock:
+            self._t += dt_s
+
+
+#: Сдвиг часов, после которого окно удержания (0,2 с) точно истекло.
+_PAST_WINDOW_S = 0.3
+
+
 @contextmanager
-def _driver(scope: Any) -> Iterator[tuple[RobotDriverV2, E2eRig]]:
-    """Подключённый драйвер v2 над ``E2eRig`` (тик драйвера не идёт: только операции поводка)."""
+def _driver(scope: Any) -> Iterator[tuple[RobotDriverV2, E2eRig, _ManualClock]]:
+    """Подключённый драйвер v2 над ``E2eRig`` и его управляемые часы (тик драйвера не идёт: только поводок)."""
     with E2eRig() as rig:
         entry = DeviceEntry(
             id="r1",
@@ -67,11 +93,12 @@ def _driver(scope: Any) -> Iterator[tuple[RobotDriverV2, E2eRig]]:
             protocol="delta_v2",
             transport={"type": "tcp", "host": "127.0.0.1", "port": rig.port, "unit_id": ROBOT_UNIT_ID},
         )
-        drv = RobotDriverV2(entry, None, publish=lambda _path, _payload: None, spawn=scope.spawn)
+        clock = _ManualClock()
+        drv = RobotDriverV2(entry, None, publish=lambda _path, _payload: None, spawn=scope.spawn, clock=clock.now)
         assert bounded(drv.connect, _CONNECT_S) is True
         drv.desired_connected = True
         try:
-            yield drv, rig
+            yield drv, rig, clock
         finally:
             try:
                 bounded(drv.disconnect, _CALL_S)
@@ -110,9 +137,10 @@ def _hold(drv: RobotDriverV2) -> None:
 
 def test_window_expiry_logs_one_line_and_writes_one_soft_stop(scope: Any, caplog: pytest.LogCaptureFixture) -> None:
     """Один ``jog_hold`` и молчание дольше окна: ровно одна строка «окно удержания истекло», один стоп SOFT."""
-    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig):
+    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig, clock):
         before = _stop_value(rig) >> 2
         _hold(drv)
+        clock.advance(_PAST_WINDOW_S)  # молчание дольше окна
         _until(lambda: _lease_done(drv), _DEADLINE_S, "поток поводка не вышел после окна удержания")
         assert _lease_lines(caplog) == [_LINE_EXPIRED]
         assert _writes_since(rig, before) == 1
@@ -121,12 +149,12 @@ def test_window_expiry_logs_one_line_and_writes_one_soft_stop(scope: Any, caplog
 
 def test_release_before_expiry_writes_stop_without_lease_line(scope: Any, caplog: pytest.LogCaptureFixture) -> None:
     """``jog_release`` до истечения окна: стоп пишет release (одна запись), строки поводка нет."""
-    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig):
+    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig, clock):
         before = _stop_value(rig) >> 2
         _hold(drv)
+        time.sleep(_PAST_WINDOW_S)  # настенное время дольше окна, но часы драйвера стоят: окно не истекает
         assert bounded(lambda: drv.call("jog_release", {}), _CALL_S)["status"] == "ok"
         _until(lambda: _lease_done(drv), _DEADLINE_S, "поток поводка не вышел после release")
-        time.sleep(0.4)  # дольше окна: поздняя строка поводка (L-I2) успела бы появиться
         assert _lease_lines(caplog) == []
         assert _writes_since(rig, before) == 1
 
@@ -136,12 +164,15 @@ def test_process_stop_before_lease_write_means_no_lease_line(scope: Any, caplog:
 
     Поток поводка после замка видит ``stop_sent`` и не пишет (``wrote`` False): записей ``STOP_REQ`` +1, строки нет.
     """
-    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig):
+    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig, clock):
         before = _stop_value(rig) >> 2
         _hold(drv)
         drv._jog_tx_lock.acquire()
         held = True
         try:
+            if drv._jog is not None and drv._jog.stop_sent:
+                pytest.fail("ТЕСТ ИНВАЛИДЕН: поводок записал стоп до шва")
+            clock.advance(_PAST_WINDOW_S)  # окно истекает только теперь, когда замок у теста
             _until(
                 lambda: drv._jog is not None and drv._jog.stop_requested is True,
                 2.0,
@@ -172,7 +203,7 @@ def test_latch_race_lease_write_covers_shutdown_stop_with_one_line(
     claim = threading.Lock()
     claimed: list[bool] = []
 
-    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig):
+    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig, clock):
         client = drv._client
         real = client.issue_stop
 
@@ -190,6 +221,7 @@ def test_latch_race_lease_write_covers_shutdown_stop_with_one_line(
         try:
             before = _stop_value(rig) >> 2
             _hold(drv)
+            clock.advance(_PAST_WINDOW_S)  # молчание дольше окна: поток поводка идёт на запись стопа
             assert entered.wait(_DEADLINE_S), "поток поводка не дошёл до записи стопа"
             stopper.start()
             _until(lambda: drv._shutdown is True, 2.0, "request_stop не сбросил защёлку")
