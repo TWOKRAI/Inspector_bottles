@@ -853,10 +853,13 @@ def test_disconnect_begin_marks_stop() -> None:
     """
     st = _new()
     assert st.disconnect_begin() is False
+    v = st.view()
+    assert v.stopping is False
+    assert v.stop_level == 0
     st.disconnect_stop_plan(1)
     v = st.view()
     assert v.stopping is True
-    assert v.stop_level >= 1
+    assert v.stop_level == 1
 
 
 def test_process_stop_attempts_capped_at_two() -> None:

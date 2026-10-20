@@ -194,7 +194,7 @@ def test_param_ops_refused_while_syncing_and_robot_untouched(tmp_path: Path, how
         if how == "lock_held":
             assert drv._param_lock.acquire(blocking=False)
         else:
-            drv.state.begin_sync()
+            assert drv.state.begin_sync() is True
         try:
             done = threading.Event()
 
@@ -302,7 +302,8 @@ def test_syncing_is_set_atomically_with_activity_check(tmp_path: Path, flag: str
         drv = hub.drv
         seen = _fail_cmd(drv, lambda *_: False)
         _break_epoch(hub)
-        _ACTIVITY[flag][0](drv.state)
+        admitted = _ACTIVITY[flag][0](drv.state)
+        assert admitted in (None, (None, None))  # переход допущен, отказа нет
         try:
             drv._resync_maybe(drv._client)
             assert [op for op, _ in seen if op == "PARAM_SET"] == []
@@ -517,7 +518,7 @@ def test_param_ops_refused_while_stopping(tmp_path: Path) -> None:
     with _hub(tmp_path) as hub:
         drv = hub.drv
         seen = _fail_cmd(drv, lambda *_: False)
-        drv.state.process_stop_plan(lambda: False)
+        drv.state.disconnect_stop_plan(0)
         refusal = {"status": "error", "message": TEXT_STOPPING}
         assert hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None}) == refusal
         assert hub.call("param_apply", {}) == refusal
