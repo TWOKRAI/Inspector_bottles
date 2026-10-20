@@ -605,7 +605,7 @@ class RobotDriverV2(BaseDeviceDriver):
             return False
         except Exception as exc:
             if self._sync_cancelled():  # «Отключить» / стоп посреди подключения — не ошибка обмена
-                logger.info(f"робот {self.entry.id!r}: подключение прервано остановкой: {type(exc).__name__}: {exc}")
+                logger.warning(f"робот {self.entry.id!r}: подключение прервано остановкой: {type(exc).__name__}: {exc}")
                 self._last_quality = "bad"
                 return False
             self._record_err()
