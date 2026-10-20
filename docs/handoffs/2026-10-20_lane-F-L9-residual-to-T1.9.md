@@ -56,6 +56,11 @@
   (передача reply-колбэка);
 - `command_module` — `register_command` и метаданные регистрации, `CommandManager.handle_command`;
 - `multiprocess_framework/modules/worker_module/keyed_executor.py` (новый) с тестами.
+- Расширение под `module-contract` (координатор, 2026-10-20): `worker_module/{interfaces.py, README.md, DECISIONS.md}`;
+  `command_module/{__init__.py, README.md, DECISIONS.md}`; `router_module/DECISIONS.md`; подделки `CommandManager` в тестах
+  `router_module` — только новый аргумент `reply`. Логику роутера сверх `_dispatch_command` не трогать.
+- Очередь: строка 14 `ORDER.md` — 1.9a → 1.9b → 1.10 → 1.11 → `ServiceHost._cmd_start` → GUI-закрытие Ф1 (одной строкой:
+  id с буквой после точки `plans_progress` не опознаёт). Полоса Ф на паузе до новой сессии.
 - Развилку «сам / исполнителю» делает CommandManager по ключу из регистрации (`key_from`), отправители не меняются.
 - Чужие, не трогать: `Services/device_hub/**`, `Plugins/hub/device_hub/**`, `Services/robot_comm/**`,
   `plans/robot-protocol-v2/**` (полоса Р2); `plans/queue/ORDER.md`, строки `defects.md` (координатор).
