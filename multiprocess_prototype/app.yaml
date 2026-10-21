@@ -40,7 +40,7 @@ base:
 # backend/topology/ остаются для прочих pipeline.
 # Активен color_inspect (камера → HSV-маска → контуры/площадь → рисование линии на
 # дисплей + универсальный Modbus-пакет). Переключить на другой рецепт — во вкладке
-# Recipes или сменой этой строки (region_pipeline / modbus_demo / color_inspect).
+# Recipes или сменой этой строки (region_pipeline / color_inspect).
 pipeline: recipes/qr_reader_sdk_dual_demo.yaml
 
 # Каталог GUI-редактируемых рецептов (источник запускаемых топологий)

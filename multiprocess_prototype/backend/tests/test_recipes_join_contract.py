@@ -7,8 +7,8 @@
 Сборка — тот же вход, что в ``test_build_characterization.py``:
 ``SystemBuilder.from_manifest(app, recipe).build()`` -> ``launcher._processes``.
 
-Исключены по имени: ``modbus_demo`` и ``robot_demo`` — на main не собираются (SystemExit 1),
-это не C-16.
+Исключён по имени: ``robot_demo`` — на main не собирается (SystemExit 1, C-18, полоса Р2),
+это не C-16. ``modbus_demo`` удалён (C-18, владелец 2026-10-21; замена — ``color_inspect``).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RECIPES_DIR = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
 
 # На main не собираются (SystemExit 1) — не относятся к C-16.
-NOT_BUILDABLE_ON_MAIN = {"modbus_demo", "robot_demo"}
+NOT_BUILDABLE_ON_MAIN = {"robot_demo"}
 
 ALL_RECIPES = sorted(p.stem for p in RECIPES_DIR.glob("*.yaml"))
 BUILDABLE_RECIPES = [r for r in ALL_RECIPES if r not in NOT_BUILDABLE_ON_MAIN]
