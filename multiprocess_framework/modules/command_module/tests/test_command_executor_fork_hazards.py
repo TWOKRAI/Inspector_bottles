@@ -289,18 +289,24 @@ def test_h6_receive_latency_unaffected_while_executor_busy(make_executor, wired)
     assert cm.register_command("heavy.cmd", heavy, executor=ex, key_from="process_name") is True
     w = wired(cm)
 
-    def measure(n: int, prefix: str) -> list[float]:
+    def measure(n: int, prefix: str, heavy_every: int = 0) -> list[float]:
         lat: list[float] = []
 
         def loop() -> None:
             for i in range(n):
                 entered.clear()
                 t_put = time.perf_counter()
+                if heavy_every and i % heavy_every == 0:
+                    # Тяжёлая команда с исполнителем — в той же очереди ПЕРЕД простой:
+                    # приёмный поток снимает её трубку первой и не должен её ждать.
+                    w.put("heavy.cmd", f"{prefix}-heavy-{i}", {"process_name": f"p{i % 2 + 1}"})
                 w.put("plain.cmd", f"{prefix}-{i}", {})
-                w.router.receive(timeout=0.0, channel_types=["system"])
+                deadline = time.monotonic() + 3.0
+                while not entered and time.monotonic() < deadline:
+                    w.router.receive(timeout=0.0, channel_types=["system"])
                 lat.append(entered[0] - t_put if entered else float("inf"))
 
-        run_bounded(loop, timeout=20.0)
+        run_bounded(loop, timeout=30.0)
         return lat
 
     baseline = _p99(measure(200, "base"))
@@ -308,7 +314,7 @@ def test_h6_receive_latency_unaffected_while_executor_busy(make_executor, wired)
     for i, pn in enumerate(("p1", "p2", "p1", "p2")):
         w.put("heavy.cmd", f"heavy-{i}", {"process_name": pn})
         w.receive_once()
-    loaded = _p99(measure(200, "load"))
+    loaded = _p99(measure(200, "load", heavy_every=25))
     assert loaded <= 0.020 or loaded <= baseline + 0.010, (
         f"p99 снятия трубки под нагрузкой {loaded * 1000:.1f} мс (без нагрузки {baseline * 1000:.1f} мс)"
     )

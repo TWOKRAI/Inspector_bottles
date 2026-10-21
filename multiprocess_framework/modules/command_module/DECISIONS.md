@@ -58,3 +58,43 @@ CRM добавляет channel lifecycle (register/unregister/close), буфер
 **RouterManager.message_dispatcher — встроенный аналог CommandManager.** В него `ProcessLifecycle._register_commands_with_router()` мостит все зарегистрированные команды. Но message_dispatcher — generic (роутит по command/type), а CommandManager добавляет семантику (register_command, handle_command, get_commands, tags, metadata, timing stats).
 
 **Последствия:** CommandManager остаётся отдельным синхронным модулем без собственного буфера. Интеграция с RouterManager через мост `_register_commands_with_router()` — осознанная. Async-расширение CommandManager не планируется.
+
+## ADR-CMD-006: развилка «исполнить на месте / отдать исполнителю» по регистрации команды (Task 1.9a)
+
+**Статус:** accepted (2026-10-21, Task 1.9a плана `lifecycle-stop-ownership`; решение владельца 2026-10-20 — D1a).
+Уточняет ADR-CMD-005: своих потоков у `CommandManager` по-прежнему нет — исполнитель передаётся снаружи.
+
+**Контекст.** Только `CommandManager` знает регистрацию команды, поэтому развилку делает он, а не роутер (CTO р.2).
+Граница «сам / отдать» — свойство обработчика (ждёт другой процесс или нет), не вид почты.
+
+**Решение.**
+- `register_command(..., executor=None, key_from=None, targets=None)` — только новые необязательные kwarg, прежние
+  аргументы и умолчания не меняются. Отказ (`False` + WARNING, команда не зарегистрирована): `executor` не ровно с
+  одним из `key_from` / `targets="all"`; `targets` вне `{None, "all"}`; `key_from` / `targets` без `executor`;
+  `executor` при `metadata.manages_own_reply` (no-op `reply` проглотил бы отказы `system_stopping` / `executor_busy`).
+- Реестр исполнителей `_executors` — вне `metadata` (`get_handler_info` отдаёт `metadata` по ссылке). В `metadata`
+  (копия словаря вызывающего) — только строки `executor` (имя), `key_from`, `targets`.
+- Ключ извлекает приёмник: `targets="all"` → `None`; `key_from` → `frozenset({data[key_from]})`. Значение не непустая
+  `str` → возврат `{"success": False, "error": "key_missing", "command": <имя>}` + WARNING без значения поля;
+  обработчик и `reply` не вызываются, и с `reply`, и без (решение лида); роутер отвечает на это как на любой
+  синхронный результат.
+- `handle_command(message, *, reply=None)` (и `ICommandManager`): команда с исполнителем и `reply` → `action` =
+  `dispatcher.dispatch` в обёртке (исключение → `{"status": "error", "reason": ...}`, как у роутера); весь блок после
+  диспетчеризации (лог, метрики, длительность) — после исполнения, на потоке исполнителя; `execution.attempts` — при
+  подаче; возврат — сентинел `DEFERRED` (экспорт `command_module`). Без `reply` (консоль, тесты, вложенные вызовы) →
+  исполнение на месте + один WARNING на имя «исполнено вне очереди ключа»; без `reply` `DEFERRED` не возвращается
+  никогда.
+- `overwrite_command` снимает исполнителя — команда снова синхронная. `update_command_metadata`, стёршая строку
+  `executor`, ведёт к исполнению на месте + WARNING: роутер не передаёт `reply` (ADR-RTR-015), `DEFERRED` не утекает.
+
+**Отвергнуто.** Развилка в роутере (решение владельца 2026-10-20). Объект исполнителя в `metadata` (утёк бы в карточки
+и по ссылке). `DEFERRED` без `reply` (инициатор не получил бы ответа). Молчаливый `key=None` при пропавшем поле
+(команда встала бы за всеми операциями).
+
+**Следствия.** Строка сигнатуры `handle_command` в `command_manager.py` и `interfaces.py` изменилась (добавлен
+keyword-only `reply`) — подделки CM и `BaseCommandManager` не тронуты: роутер зовёт их по-старому. Вывод `executor` /
+`key_from` / `targets` в `introspect.capabilities` — не в 1.9a.
+
+**Reversible:** yes (убрать kwarg и реестр; ни одна команда в 1.9a не помечена).
+**Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9a.md` (D3), ADR-WRK-005, ADR-RTR-015,
+`tests/test_command_executor_fork_acceptance.py`, `tests/test_command_executor_fork_hazards.py`.
