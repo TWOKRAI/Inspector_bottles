@@ -7,9 +7,59 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from .types import WorkerStatus, WorkerType
+
+
+@runtime_checkable
+class OrderedExecutor(Protocol):
+    """Исполнитель с порядком по ключу (Task 1.9a, ADR-WRK-005). Реализация — ``keyed_executor.KeyedExecutor``.
+
+    Клиенты (``CommandManager``, ProcessManager) знают только этот протокол. Закрытие —
+    по ``Stoppable`` (``request_stop`` / ``join_until``) плюс ``shutdown(deadline)``.
+
+    Порядок: операции с пересекающимися ключами — строго в порядке подачи; с непересекающимися —
+    параллельно. ``key=None`` — «все ключи»: пересекается со всеми, в том числе с ещё не встречавшимися.
+    """
+
+    def submit(
+        self,
+        action: Callable[[], Any],
+        key: frozenset[str] | None,
+        reply: Callable[[Any], None],
+        *,
+        inline_if_idle: bool = False,
+    ) -> bool:
+        """Подать операцию; никогда не блокирует.
+
+        Pre: исполнитель не закрыт и потребитель не снимает очередь (``should_reject``); иначе
+            ``reply({"success": False, "error": "system_stopping"})`` сразу на вызывающем потоке, ``False``.
+        Post: ``reply`` зовётся ровно один раз: результат ``action``; исключение ``action`` →
+            ``{"success": False, "error": "<тип>: <текст>"}``; отказ → ``system_stopping`` /
+            ``executor_busy`` (очередь на потолке). Исключение в ``reply`` логируется, не пробрасывается.
+
+        Returns:
+            ``True`` — поставлено в очередь; ``False`` — ``reply`` уже вызван на вызывающем потоке
+            (исполнено на месте или отказ).
+
+        ``inline_if_idle=True``: ключ свободен (не пересекается ни с исполняемыми, ни с ждущими) →
+        ``action`` и ``reply`` на вызывающем потоке, ``False``. Повторный вход из ``action`` этого
+        исполнителя с ключом ⊆ ключа текущей операции — на месте, как часть родителя.
+        """
+        ...
+
+    def request_stop(self) -> None:
+        """Закрыть приём и снять очередь (каждой снятой — ``system_stopping``). Идемпотентен, не блокирует."""
+        ...
+
+    def join_until(self, deadline: float) -> bool:
+        """Ждать текущие операции и выход рабочих до ``deadline`` (``time.monotonic()``); ``False`` на сроке."""
+        ...
+
+    def shutdown(self, deadline: float) -> bool:
+        """``request_stop(); return join_until(deadline)``."""
+        ...
 
 
 class IWorkerRegistry(ABC):
@@ -316,4 +366,5 @@ __all__ = [
     "IWorkerRegistry",
     "IWorkerLifecycle",
     "IWorkerManager",
+    "OrderedExecutor",
 ]

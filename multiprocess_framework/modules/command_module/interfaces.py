@@ -92,12 +92,16 @@ class ICommandManager(IBaseManager, ABC):
         pass
 
     @abstractmethod
-    def handle_command(self, message: Dict) -> Any:
+    def handle_command(self, message: Dict, *, reply: Callable[[Any], None] | None = None) -> Any:
         """
         Обработка командного сообщения.
 
         Args:
             message: Сообщение для обработки
+            reply: Task 1.9a (ADR-CMD-006) — приёмник результата для команды, зарегистрированной
+                с исполнителем: тогда возврат — ``DEFERRED``, результат уйдёт через ``reply`` ровно
+                один раз. Для команды без исполнителя не используется. Без ``reply`` результат
+                возвращается всегда (``DEFERRED`` — никогда).
 
         Returns:
             Результат выполнения команды или сообщение об ошибке

@@ -11,10 +11,34 @@ import time
 if TYPE_CHECKING:
     from multiprocessing import Process
 
+    from ...worker_module.interfaces import OrderedExecutor
+
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...base_manager import BaseManager, ObservableMixin
 
 from ..interfaces import LOG_SOURCE, ICommandManager
+
+
+class _Deferred:
+    """Тип сентинела ``DEFERRED`` (Task 1.9a, ADR-CMD-006). Один экземпляр на процесс."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "DEFERRED"
+
+    def __reduce__(self) -> str:
+        # Копия/pickle возвращают тот же объект: проверка ``result is DEFERRED`` не ломается.
+        return "DEFERRED"
+
+
+#: Возврат ``handle_command(..., reply=r)`` для команды с исполнителем: ответ уйдёт через ``r``
+#: ровно один раз (позже, с потока исполнителя, или уже ушёл на вызывающем). Без ``reply`` не
+#: возвращается никогда — вызывающий без ``reply`` получает результат обработчика.
+DEFERRED = _Deferred()
+
+#: Допустимые значения ``targets`` в ``register_command``.
+_TARGETS_ALLOWED = (None, "all")
 
 
 class CommandManager(BaseManager, ObservableMixin, ICommandManager):
@@ -105,6 +129,15 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         # один механизм переключения, не два (ADR-PM-018/ADR-CRM-006).
         self._log_success_enabled = bool(cfg.get("log_success", False))
 
+        # Task 1.9a (ADR-CMD-006): реестр исполнителей команд — ВНЕ metadata
+        # (get_handler_info отдаёт metadata по ссылке; объект исполнителя не должен
+        # утекать в карточки и через границу процессов). Имя команды →
+        # (исполнитель, key_from, targets). В metadata — только строки.
+        self._executors: dict[str, tuple[OrderedExecutor, str | None, str | None]] = {}
+        # Имена команд, о внеочередном исполнении которых (вызов без reply) уже
+        # сказан WARNING: один на имя за жизнь менеджера.
+        self._out_of_queue_warned: set[str] = set()
+
         # НЕ вызываем initialize() здесь - это делается явно после создания
 
     # ========================================================================
@@ -172,6 +205,9 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         efficiency: int = 0,
         tags: List[str] = None,
         strategy: Optional[DispatchStrategy] = None,
+        executor: "OrderedExecutor | None" = None,
+        key_from: str | None = None,
+        targets: str | None = None,
         **kwargs,
     ) -> bool:
         """
@@ -185,10 +221,19 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             efficiency (int): Уровень эффективности (для FALLBACK_MATCH)
             tags (List[str]): Список тегов для группировки
             strategy (DispatchStrategy): Стратегия для регистрации (опционально)
+            executor: Task 1.9a — исполнитель с порядком по ключу (``OrderedExecutor``).
+                ``None`` (умолчание) — команда синхронная, как всегда. С исполнителем команда,
+                пришедшая с ``reply``, исполняется на потоке исполнителя (ADR-CMD-006).
+            key_from: имя поля ``data``, из которого берётся ключ: ``frozenset({data[key_from]})``.
+            targets: ``"all"`` — ключ ``None`` («все ключи»). С ``executor`` задаётся ровно
+                один из ``key_from`` / ``targets``.
             **kwargs: Дополнительные аргументы для регистрации обработчика
 
         Returns:
-            bool: Успешность регистрации
+            bool: Успешность регистрации. ``False`` + WARNING без регистрации, если: ``executor``
+            задан не ровно с одним из ``key_from`` / ``targets="all"``; ``targets`` вне
+            ``{None, "all"}``; ``key_from`` / ``targets`` без ``executor``; ``executor`` при
+            ``metadata["manages_own_reply"]`` (отказы исполнителя ушли бы в no-op ``reply``).
 
         Example:
             def greet_handler(data):
@@ -198,6 +243,24 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         """
         self._log_debug(f"Registering command: {command_name}", module=LOG_SOURCE)
         self._record_metric("command_manager.command.registration.attempts", tags={"command": command_name})
+
+        refusal = self._executor_refusal(executor, key_from, targets, metadata)
+        if refusal is not None:
+            self._log_warning(
+                f"Command '{command_name}' не зарегистрирована: {refusal}",
+                module=LOG_SOURCE,
+            )
+            self._record_metric("command_manager.command.registration.failed", tags={"command": command_name})
+            return False
+        if executor is not None:
+            # Только строки: metadata отдаётся наружу по ссылке (get_handler_info,
+            # introspect). Словарь вызывающего не мутируем — копия.
+            metadata = dict(metadata or {})
+            metadata["executor"] = str(getattr(executor, "name", None) or type(executor).__name__)
+            if key_from is not None:
+                metadata["key_from"] = key_from
+            if targets is not None:
+                metadata["targets"] = targets
 
         result = self.dispatcher.register_handler(
             key=command_name,
@@ -210,6 +273,8 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         )
 
         if result:
+            if executor is not None:
+                self._executors[command_name] = (executor, key_from, targets)
             self._log_debug(lambda: f"Command '{command_name}' registered successfully", module=LOG_SOURCE)
             self._record_metric("command_manager.command.registration.success", tags={"command": command_name})
         else:
@@ -217,6 +282,30 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.command.registration.failed", tags={"command": command_name})
 
         return result
+
+    @staticmethod
+    def _executor_refusal(
+        executor: "OrderedExecutor | None",
+        key_from: str | None,
+        targets: str | None,
+        metadata: Dict[str, Any] | None,
+    ) -> str | None:
+        """Причина отказа регистрации по аргументам Task 1.9a или ``None``, если сочетание допустимо."""
+        if targets not in _TARGETS_ALLOWED:
+            return f"targets={targets!r} вне {{None, 'all'}}"
+        if executor is None:
+            if key_from is not None or targets is not None:
+                return "key_from/targets без executor"
+            return None
+        if not callable(getattr(executor, "submit", None)):
+            return "executor без метода submit (ожидается OrderedExecutor)"
+        if (key_from is None) == (targets is None):
+            return "executor требует ровно одно из key_from / targets='all'"
+        if key_from is not None and not (isinstance(key_from, str) and key_from):
+            return "key_from должен быть непустой строкой"
+        if (metadata or {}).get("manages_own_reply"):
+            return "executor несовместим с metadata.manages_own_reply (отказы исполнителя ушли бы в no-op reply)"
+        return None
 
     def log_registration_summary(self) -> None:
         """
@@ -259,16 +348,27 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             module=LOG_SOURCE,
         )
 
-    def handle_command(self, message: Dict) -> Any:
+    def handle_command(self, message: Dict, *, reply: Callable[[Any], None] | None = None) -> Any:
         """
         Обработка командного сообщения.
 
         Args:
             message (Dict): Сообщение для обработки. Ожидается поле 'command' с именем команды.
+            reply: Task 1.9a — приёмник результата для команды с исполнителем (ADR-CMD-006).
+                Команда без исполнителя исполняется синхронно, ``reply`` не используется.
 
         Returns:
             Any: Результат выполнения команды или ``{"status": "error", "reason": "..."}``
             (ошибки обрабатываются внутри ``Dispatcher.dispatch()``).
+
+            Команда с исполнителем:
+            - ключ не извлечён (``data[key_from]`` нет / не непустая ``str``) → возврат
+              ``{"success": False, "error": "key_missing", "command": <имя>}`` + WARNING, обработчик не
+              вызван, ``reply`` не вызван (и с ``reply``, и без);
+            - с ``reply`` → операция отдана исполнителю, возврат ``DEFERRED``; ``reply`` получит
+              результат ровно один раз (или отказ исполнителя ``system_stopping`` / ``executor_busy``);
+            - без ``reply`` → исполнение на месте + один WARNING на имя «исполнено вне очереди ключа»;
+              без ``reply`` ``DEFERRED`` не возвращается никогда.
 
         Example:
             message = {
@@ -290,9 +390,56 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         self._log_debug(f"Handling command: {command_name}", module=LOG_SOURCE, command=command_name)
         self._record_metric("command_manager.command.execution.attempts", tags={"command": command_name})
 
-        result = self.dispatcher.dispatch(message, key_field="command", data_field="data")
+        binding = self._executors.get(command_name) if self._executors else None
+        if binding is not None:
+            executor, key_from, _targets = binding
+            if key_from is None:
+                key = None  # targets="all": «все ключи»
+            else:
+                data = message.get("data")
+                value = data.get(key_from) if isinstance(data, dict) else None
+                if not (isinstance(value, str) and value):
+                    # Значение поля в текст не попадает (может быть чем угодно).
+                    self._log_warning(
+                        f"Command '{command_name}': поле ключа '{key_from}' отсутствует или не непустая строка — "
+                        f"отказ key_missing, обработчик не вызван",
+                        module=LOG_SOURCE,
+                    )
+                    self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
+                    return {"success": False, "error": "key_missing", "command": command_name}
+                key = frozenset({value})
 
-        duration = time.perf_counter() - start_time
+            if reply is not None:
+
+                def action() -> Any:
+                    # Блок после диспетчеризации (лог, метрики, длительность) — ПОСЛЕ
+                    # исполнения, на потоке исполнителя: метрика меряет исполнение, не подачу.
+                    t0 = time.perf_counter()
+                    try:
+                        res = self.dispatcher.dispatch(message, key_field="command", data_field="data")
+                    except Exception as exc:  # noqa: BLE001 — тот же конверт, что у роутера
+                        res = {"status": "error", "reason": str(exc)}
+                    self._finish_command(command_name, res, time.perf_counter() - t0)
+                    return res
+
+                action.__name__ = command_name
+                executor.submit(action, key, reply)
+                return DEFERRED
+
+            if command_name not in self._out_of_queue_warned:
+                self._out_of_queue_warned.add(command_name)
+                self._log_warning(
+                    f"Command '{command_name}' вызвана без reply — исполнено вне очереди ключа "
+                    f"(на вызывающем потоке, мимо исполнителя); следующий такой вызов — без WARNING",
+                    module=LOG_SOURCE,
+                )
+
+        result = self.dispatcher.dispatch(message, key_field="command", data_field="data")
+        self._finish_command(command_name, result, time.perf_counter() - start_time)
+        return result
+
+    def _finish_command(self, command_name: str, result: Any, duration: float) -> None:
+        """Блок после диспетчеризации: лог ошибки/успеха, метрики, длительность исполнения."""
         if isinstance(result, dict) and result.get("status") == "error":
             self._log_warning(
                 f"Command '{command_name}' failed: {result.get('reason') or result.get('error')}",
@@ -314,7 +461,6 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
 
         self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
-        return result
 
     def set_log_success_enabled(self, enabled: bool) -> None:
         """Включить/выключить лог рутинного успеха команд (observability control plane).
@@ -434,8 +580,10 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
 
         Returns:
             True если перезаписано, False в случае ошибки
+
+        Task 1.9a (ADR-CMD-006): перезапись снимает запись исполнителя — команда снова синхронная.
         """
-        return self.dispatcher.overwrite_handler(
+        result = self.dispatcher.overwrite_handler(
             key=command_name,
             handler=handler,
             expects_full_message=expects_full_message,
@@ -443,3 +591,6 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             efficiency=efficiency,
             tags=tags,
         )
+        if result:
+            self._executors.pop(command_name, None)
+        return result
